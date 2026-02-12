@@ -31,6 +31,8 @@ interface VibesBlameViewProps {
 	projectPath: string | undefined;
 	/** Optional pre-selected file path (e.g. from file explorer context menu). */
 	initialFilePath?: string;
+	/** Whether the vibescheck binary is available. When false, shows a targeted message. */
+	binaryAvailable?: boolean | null;
 }
 
 // ============================================================================
@@ -121,6 +123,7 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 	theme,
 	projectPath,
 	initialFilePath,
+	binaryAvailable,
 }) => {
 	const [filePath, setFilePath] = useState(initialFilePath ?? '');
 	const [fileSearch, setFileSearch] = useState(initialFilePath ?? '');
@@ -364,8 +367,24 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 
 			{/* Content area */}
 			<div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin">
+				{/* Binary unavailable notice */}
+				{binaryAvailable === false && (
+					<div
+						className="flex flex-col items-center justify-center gap-3 py-12 px-4 text-center"
+						data-testid="binary-unavailable-notice"
+					>
+						<AlertTriangle className="w-6 h-6 opacity-60" style={{ color: '#eab308' }} />
+						<span className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
+							Blame view requires vibescheck CLI
+						</span>
+						<span className="text-xs max-w-xs" style={{ color: theme.colors.textDim }}>
+							Install vibescheck to view per-line AI attribution.
+						</span>
+					</div>
+				)}
+
 				{/* No file selected */}
-				{!filePath && !isLoading && (
+				{binaryAvailable !== false && !filePath && !isLoading && (
 					<EmptyState
 						theme={theme}
 						icon={<FileCode className="w-6 h-6 opacity-40" />}

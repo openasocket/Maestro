@@ -174,9 +174,7 @@ describe('VibesDashboard', () => {
 		expect(screen.getByText('Initialize')).toBeTruthy();
 	});
 
-	it('shows vibescheck binary not found warning when binary is missing', async () => {
-		mockFindBinary.mockResolvedValue({ path: null, version: null });
-
+	it('disables Build and Report buttons when binary unavailable', () => {
 		render(
 			<VibesDashboard
 				theme={testTheme}
@@ -184,19 +182,20 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData()}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
+				binaryAvailable={false}
 			/>,
 		);
 
-		await waitFor(() => {
-			expect(screen.getByText('vibescheck binary not found')).toBeTruthy();
-		});
+		const buildBtn = screen.getByText('Build Database').closest('button')!;
+		const reportBtn = screen.getByText('Generate Report').closest('button')!;
+		const refreshBtn = screen.getByText('Refresh').closest('button')!;
 
-		expect(screen.getByText(/cargo install vibescheck/)).toBeTruthy();
+		expect(buildBtn.disabled).toBe(true);
+		expect(reportBtn.disabled).toBe(true);
+		expect(refreshBtn.disabled).toBeFalsy();
 	});
 
-	it('does not show binary warning when binary is found', async () => {
-		mockFindBinary.mockResolvedValue({ path: '/usr/local/bin/vibescheck', version: 'vibescheck 0.3.2' });
-
+	it('keeps buttons enabled when binary is available', () => {
 		render(
 			<VibesDashboard
 				theme={testTheme}
@@ -204,13 +203,15 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData()}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
+				binaryAvailable={true}
 			/>,
 		);
 
-		await waitFor(() => {
-			// Binary found, so no warning should appear
-			expect(screen.queryByText('vibescheck binary not found')).toBeNull();
-		});
+		const buildBtn = screen.getByText('Build Database').closest('button')!;
+		const reportBtn = screen.getByText('Generate Report').closest('button')!;
+
+		expect(buildBtn.disabled).toBeFalsy();
+		expect(reportBtn.disabled).toBeFalsy();
 	});
 
 	it('shows error banner when vibesData has an error', () => {

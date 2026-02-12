@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
 	FileText,
 	FolderOpen,
@@ -11,7 +11,6 @@ import {
 	CheckCircle2,
 	Shield,
 	Loader2,
-	AlertTriangle,
 	Info,
 } from 'lucide-react';
 import type { Theme } from '../../types';
@@ -26,6 +25,7 @@ interface VibesDashboardProps {
 	vibesEnabled: boolean;
 	vibesAssuranceLevel: VibesAssuranceLevel;
 	vibesAutoInit?: boolean;
+	binaryAvailable?: boolean | null;
 }
 
 /** Color mapping for assurance level badges. */
@@ -48,30 +48,12 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 	vibesEnabled,
 	vibesAssuranceLevel,
 	vibesAutoInit,
+	binaryAvailable,
 }) => {
 	const { isInitialized, stats, isLoading, error, refresh, initialize } = vibesData;
 	const [initProjectName, setInitProjectName] = useState('');
 	const [isInitializing, setIsInitializing] = useState(false);
 	const [actionStatus, setActionStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-	const [binaryStatus, setBinaryStatus] = useState<'checking' | 'found' | 'not-found'>('checking');
-
-	// Check vibescheck binary availability on mount
-	useEffect(() => {
-		let cancelled = false;
-		(async () => {
-			try {
-				const result = await window.maestro.vibes.findBinary();
-				if (!cancelled) {
-					setBinaryStatus(result.path ? 'found' : 'not-found');
-				}
-			} catch {
-				if (!cancelled) {
-					setBinaryStatus('not-found');
-				}
-			}
-		})();
-		return () => { cancelled = true; };
-	}, []);
 
 	// ========================================================================
 	// Quick Actions
@@ -261,28 +243,6 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 				</span>
 			</div>
 
-			{/* Binary Not Found Warning */}
-			{binaryStatus === 'not-found' && (
-				<div
-					className="flex flex-col gap-1.5 px-3 py-2.5 rounded text-xs"
-					style={{
-						backgroundColor: 'rgba(234, 179, 8, 0.1)',
-						border: '1px solid rgba(234, 179, 8, 0.3)',
-					}}
-				>
-					<div className="flex items-center gap-2">
-						<AlertTriangle className="w-3.5 h-3.5 shrink-0" style={{ color: '#eab308' }} />
-						<span className="font-medium" style={{ color: '#eab308' }}>
-							vibescheck binary not found
-						</span>
-					</div>
-					<span style={{ color: theme.colors.textDim }}>
-						Some features (blame, reports, build) require the vibescheck CLI.
-						Install with <code className="font-mono px-1 py-0.5 rounded" style={{ backgroundColor: theme.colors.bgActivity }}>cargo install vibescheck</code> or configure the path in Settings.
-					</span>
-				</div>
-			)}
-
 			{/* Error Banner */}
 			{error && (
 				<div
@@ -349,12 +309,16 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 						icon={<Database className="w-3.5 h-3.5" />}
 						label="Build Database"
 						onClick={handleBuildDatabase}
+						disabled={binaryAvailable === false}
+						title={binaryAvailable === false ? 'Requires vibescheck' : undefined}
 					/>
 					<ActionButton
 						theme={theme}
 						icon={<FileBarChart className="w-3.5 h-3.5" />}
 						label="Generate Report"
 						onClick={handleGenerateReport}
+						disabled={binaryAvailable === false}
+						title={binaryAvailable === false ? 'Requires vibescheck' : undefined}
 					/>
 					<ActionButton
 						theme={theme}
@@ -424,16 +388,22 @@ interface ActionButtonProps {
 	icon: React.ReactNode;
 	label: string;
 	onClick: () => void;
+	disabled?: boolean;
+	title?: string;
 }
 
-const ActionButton: React.FC<ActionButtonProps> = ({ theme, icon, label, onClick }) => (
+const ActionButton: React.FC<ActionButtonProps> = ({ theme, icon, label, onClick, disabled, title }) => (
 	<button
-		onClick={onClick}
+		onClick={disabled ? undefined : onClick}
+		disabled={disabled}
+		title={title}
 		className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs transition-colors hover:opacity-80"
 		style={{
 			backgroundColor: theme.colors.bgActivity,
 			border: `1px solid ${theme.colors.border}`,
 			color: theme.colors.textMain,
+			opacity: disabled ? 0.5 : 1,
+			cursor: disabled ? 'not-allowed' : 'pointer',
 		}}
 	>
 		{icon}

@@ -20,6 +20,8 @@ type ReportFormat = 'markdown' | 'html' | 'json';
 interface VibesReportViewProps {
 	theme: Theme;
 	projectPath: string | undefined;
+	/** Whether the vibescheck binary is available. When false, shows a targeted message. */
+	binaryAvailable?: boolean | null;
 }
 
 // ============================================================================
@@ -51,6 +53,7 @@ const FORMAT_OPTIONS: { value: ReportFormat; label: string; extension: string }[
 export const VibesReportView: React.FC<VibesReportViewProps> = ({
 	theme,
 	projectPath,
+	binaryAvailable,
 }) => {
 	const [format, setFormat] = useState<ReportFormat>('markdown');
 	const [reportContent, setReportContent] = useState<string | null>(null);

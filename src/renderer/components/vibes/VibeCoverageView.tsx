@@ -10,6 +10,10 @@ import {
 	Database,
 	Loader2,
 	FolderOpen,
+	ChevronRight,
+	ChevronDown,
+	FolderTree,
+	Files,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 
@@ -40,10 +44,24 @@ interface NormalizedCoverageFile {
 interface VibeCoverageViewProps {
 	theme: Theme;
 	projectPath: string | undefined;
+	/** Whether the vibescheck binary is available. When false, shows a targeted message. */
+	binaryAvailable?: boolean | null;
 }
 
 type FilterMode = 'all' | 'covered' | 'uncovered';
 type SortMode = 'status' | 'path' | 'annotations';
+type ViewMode = 'files' | 'directories';
+
+/** Directory-level grouping for the tree view. */
+interface DirectoryGroup {
+	dirPath: string;
+	files: NormalizedCoverageFile[];
+	covered: number;
+	partial: number;
+	uncovered: number;
+	totalAnnotations: number;
+	coveragePercent: number;
+}
 
 // ============================================================================
 // Constants
@@ -96,6 +114,92 @@ function normalizeCoverageData(raw: string | undefined): NormalizedCoverageFile[
 	}
 }
 
+/** Group files by parent directory (first 2 path segments). */
+function groupByDirectory(files: NormalizedCoverageFile[]): DirectoryGroup[] {
+	const groups = new Map<string, NormalizedCoverageFile[]>();
+
+	for (const file of files) {
+		const parts = file.filePath.split('/');
+		const dirPath = parts.length > 2 ? parts.slice(0, 2).join('/') : parts[0] ?? '.';
+		const existing = groups.get(dirPath);
+		if (existing) {
+			existing.push(file);
+		} else {
+			groups.set(dirPath, [file]);
+		}
+	}
+
+	return [...groups.entries()]
+		.map(([dirPath, dirFiles]) => {
+			const covered = dirFiles.filter((f) => f.status === 'full').length;
+			const partial = dirFiles.filter((f) => f.status === 'partial').length;
+			const uncovered = dirFiles.filter((f) => f.status === 'uncovered').length;
+			const total = dirFiles.length;
+			return {
+				dirPath,
+				files: dirFiles,
+				covered,
+				partial,
+				uncovered,
+				totalAnnotations: dirFiles.reduce((sum, f) => sum + f.annotationCount, 0),
+				coveragePercent: total > 0 ? Math.round(((covered + partial * 0.5) / total) * 100) : 0,
+			};
+		})
+		.sort((a, b) => b.coveragePercent - a.coveragePercent);
+}
+
+/** File extension stats for the distribution chart. */
+interface ExtensionStats {
+	ext: string;
+	covered: number;
+	partial: number;
+	uncovered: number;
+	total: number;
+}
+
+/** Group files by extension for the file-type distribution chart. */
+function groupByExtension(files: NormalizedCoverageFile[]): ExtensionStats[] {
+	const groups = new Map<string, { covered: number; partial: number; uncovered: number }>();
+
+	for (const file of files) {
+		const lastDot = file.filePath.lastIndexOf('.');
+		const ext = lastDot >= 0 ? file.filePath.substring(lastDot) : 'other';
+		const existing = groups.get(ext) ?? { covered: 0, partial: 0, uncovered: 0 };
+		if (file.status === 'full') existing.covered++;
+		else if (file.status === 'partial') existing.partial++;
+		else existing.uncovered++;
+		groups.set(ext, existing);
+	}
+
+	const stats = [...groups.entries()]
+		.map(([ext, counts]) => ({
+			ext,
+			...counts,
+			total: counts.covered + counts.partial + counts.uncovered,
+		}))
+		.sort((a, b) => b.total - a.total);
+
+	// Limit to top 8 extensions; collapse rest into "Other"
+	if (stats.length > 8) {
+		const top = stats.slice(0, 8);
+		const rest = stats.slice(8);
+		const other = rest.reduce(
+			(acc, s) => ({
+				ext: 'Other',
+				covered: acc.covered + s.covered,
+				partial: acc.partial + s.partial,
+				uncovered: acc.uncovered + s.uncovered,
+				total: acc.total + s.total,
+			}),
+			{ ext: 'Other', covered: 0, partial: 0, uncovered: 0, total: 0 },
+		);
+		top.push(other);
+		return top;
+	}
+
+	return stats;
+}
+
 /** Calculate coverage summary statistics. */
 function calculateSummary(files: NormalizedCoverageFile[]) {
 	const total = files.length;
@@ -125,6 +229,7 @@ function calculateSummary(files: NormalizedCoverageFile[]) {
 export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 	theme,
 	projectPath,
+	binaryAvailable,
 }) => {
 	const [files, setFiles] = useState<NormalizedCoverageFile[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
@@ -133,6 +238,8 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 	const [isBuilding, setIsBuilding] = useState(false);
 	const [filter, setFilter] = useState<FilterMode>('all');
 	const [sort, setSort] = useState<SortMode>('status');
+	const [viewMode, setViewMode] = useState<ViewMode>('files');
+	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
 
 	// ========================================================================
 	// Fetch coverage data
@@ -200,6 +307,17 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 	// ========================================================================
 
 	const summary = useMemo(() => calculateSummary(files), [files]);
+	const directoryGroups = useMemo(() => groupByDirectory(files), [files]);
+	const extensionStats = useMemo(() => groupByExtension(files), [files]);
+
+	const toggleDirectory = useCallback((dirPath: string) => {
+		setExpandedDirs((prev) => {
+			const next = new Set(prev);
+			if (next.has(dirPath)) next.delete(dirPath);
+			else next.add(dirPath);
+			return next;
+		});
+	}, []);
 
 	// ========================================================================
 	// Filtered + sorted file list
@@ -241,56 +359,100 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 				className="sticky top-0 z-10 flex flex-col gap-3 px-3 py-3"
 				style={{ backgroundColor: theme.colors.bgSidebar }}
 			>
-				{/* Coverage summary bar */}
+				{/* Coverage donut chart + summary stats */}
 				{!isLoading && !error && !needsBuild && files.length > 0 && (
-					<div className="flex flex-col gap-2">
-						<div className="flex items-center justify-between">
-							<div className="flex items-center gap-2">
-								<BarChart3 className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-								<span className="text-[11px] font-semibold" style={{ color: theme.colors.textDim }}>
-									Coverage
-								</span>
+					<div className="flex flex-col gap-3">
+						<div className="flex items-start gap-4">
+							{/* Donut chart */}
+							<CoverageDonut
+								covered={summary.covered}
+								partial={summary.partial}
+								uncovered={summary.uncovered}
+								percentage={summary.percentage}
+							/>
+
+							{/* Stats list */}
+							<div className="flex flex-col gap-1.5 pt-1">
+								<div className="flex items-center gap-2">
+									<BarChart3 className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+									<span className="text-[11px] font-semibold" style={{ color: theme.colors.textDim }}>
+										Coverage
+									</span>
+								</div>
+								<div className="flex flex-col gap-1 text-[10px]" style={{ color: theme.colors.textDim }}>
+									<span>{summary.total} total files</span>
+									<span style={{ color: STATUS_CONFIG.full.color }}>{summary.covered} covered</span>
+									<span style={{ color: STATUS_CONFIG.partial.color }}>{summary.partial} partial</span>
+									<span>{summary.uncovered} uncovered</span>
+									<span>{summary.totalAnnotations} annotations</span>
+								</div>
 							</div>
-							<span className="text-sm font-bold tabular-nums" style={{ color: theme.colors.textMain }}>
-								{summary.percentage}%
+						</div>
+
+						{/* Legend */}
+						<div className="flex items-center gap-4 text-[10px]" data-testid="coverage-legend">
+							<span className="flex items-center gap-1">
+								<span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: STATUS_CONFIG.full.color }} />
+								AI Code ({summary.covered})
+							</span>
+							<span className="flex items-center gap-1">
+								<span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: STATUS_CONFIG.partial.color }} />
+								Partial ({summary.partial})
+							</span>
+							<span className="flex items-center gap-1">
+								<span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: '#6b7280' }} />
+								Unknown ({summary.uncovered})
 							</span>
 						</div>
 
-						{/* Progress bar */}
-						<div
-							className="w-full h-2 rounded-full overflow-hidden"
-							style={{ backgroundColor: theme.colors.bgActivity }}
-						>
-							{/* Full coverage portion (green) */}
-							<div
-								className="h-full float-left"
-								style={{
-									width: summary.total > 0 ? `${(summary.covered / summary.total) * 100}%` : '0%',
-									backgroundColor: STATUS_CONFIG.full.color,
-								}}
-							/>
-							{/* Partial coverage portion (yellow) */}
-							<div
-								className="h-full float-left"
-								style={{
-									width: summary.total > 0 ? `${(summary.partial / summary.total) * 100}%` : '0%',
-									backgroundColor: STATUS_CONFIG.partial.color,
-								}}
-							/>
-						</div>
-
-						{/* Summary stats */}
-						<div className="flex items-center gap-3 text-[10px]" style={{ color: theme.colors.textDim }}>
-							<span>{summary.total} files</span>
-							<span style={{ color: STATUS_CONFIG.full.color }}>{summary.covered} covered</span>
-							<span style={{ color: STATUS_CONFIG.partial.color }}>{summary.partial} partial</span>
-							<span>{summary.uncovered} uncovered</span>
-							<span className="ml-auto">{summary.totalAnnotations} annotations</span>
-						</div>
+						{/* File-type distribution bars */}
+						{extensionStats.length > 0 && (
+							<div className="flex flex-col gap-1" data-testid="extension-distribution">
+								<span className="text-[10px] font-semibold" style={{ color: theme.colors.textDim }}>
+									By File Type
+								</span>
+								{extensionStats.map((ext) => (
+									<div key={ext.ext} className="flex items-center gap-2 text-[10px]">
+										<span className="w-10 shrink-0 font-mono text-right" style={{ color: theme.colors.textDim }}>
+											{ext.ext}
+										</span>
+										<div className="flex-1 flex h-3 rounded overflow-hidden" style={{ backgroundColor: theme.colors.bgActivity }}>
+											{ext.covered > 0 && (
+												<div
+													style={{
+														width: `${(ext.covered / ext.total) * 100}%`,
+														backgroundColor: STATUS_CONFIG.full.color,
+													}}
+												/>
+											)}
+											{ext.partial > 0 && (
+												<div
+													style={{
+														width: `${(ext.partial / ext.total) * 100}%`,
+														backgroundColor: STATUS_CONFIG.partial.color,
+													}}
+												/>
+											)}
+											{ext.uncovered > 0 && (
+												<div
+													style={{
+														width: `${(ext.uncovered / ext.total) * 100}%`,
+														backgroundColor: '#6b7280',
+													}}
+												/>
+											)}
+										</div>
+										<span className="w-6 shrink-0 text-right tabular-nums" style={{ color: theme.colors.textDim }}>
+											{ext.total}
+										</span>
+									</div>
+								))}
+							</div>
+						)}
 					</div>
 				)}
 
-				{/* Filter + sort controls */}
+				{/* Filter + sort + view controls */}
 				{!isLoading && !error && !needsBuild && files.length > 0 && (
 					<div className="flex items-center gap-3">
 						{/* Filter */}
@@ -311,6 +473,34 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 									</button>
 								))}
 							</div>
+						</div>
+
+						{/* View mode toggle */}
+						<div className="flex items-center gap-0.5">
+							<button
+								onClick={() => setViewMode('files')}
+								className="px-2 py-0.5 rounded text-[10px] font-medium transition-colors flex items-center gap-1"
+								style={{
+									backgroundColor: viewMode === 'files' ? theme.colors.accentDim : 'transparent',
+									color: viewMode === 'files' ? theme.colors.accent : theme.colors.textDim,
+								}}
+								data-testid="view-files-btn"
+							>
+								<Files className="w-3 h-3" />
+								Files
+							</button>
+							<button
+								onClick={() => setViewMode('directories')}
+								className="px-2 py-0.5 rounded text-[10px] font-medium transition-colors flex items-center gap-1"
+								style={{
+									backgroundColor: viewMode === 'directories' ? theme.colors.accentDim : 'transparent',
+									color: viewMode === 'directories' ? theme.colors.accent : theme.colors.textDim,
+								}}
+								data-testid="view-dirs-btn"
+							>
+								<FolderTree className="w-3 h-3" />
+								Directories
+							</button>
 						</div>
 
 						{/* Sort */}
@@ -417,8 +607,8 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 					</div>
 				)}
 
-				{/* File list */}
-				{!isLoading && !error && !needsBuild && displayedFiles.length > 0 && (
+				{/* File list (flat view) */}
+				{!isLoading && !error && !needsBuild && displayedFiles.length > 0 && viewMode === 'files' && (
 					<div className="flex flex-col">
 						{displayedFiles.map((file) => (
 							<CoverageFileRow
@@ -426,6 +616,51 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 								theme={theme}
 								file={file}
 							/>
+						))}
+					</div>
+				)}
+
+				{/* Directory view */}
+				{!isLoading && !error && !needsBuild && files.length > 0 && viewMode === 'directories' && (
+					<div className="flex flex-col" data-testid="directory-view">
+						{directoryGroups.map((dir) => (
+							<div key={dir.dirPath}>
+								<button
+									onClick={() => toggleDirectory(dir.dirPath)}
+									className="flex items-center gap-2 w-full px-3 py-2 border-b text-xs hover:opacity-80 transition-opacity"
+									style={{ borderColor: theme.colors.border }}
+									data-testid={`dir-row-${dir.dirPath}`}
+								>
+									{expandedDirs.has(dir.dirPath) ? (
+										<ChevronDown className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
+									) : (
+										<ChevronRight className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
+									)}
+									<span className="font-semibold" style={{ color: theme.colors.textMain }}>
+										{dir.dirPath}/
+									</span>
+									{/* Mini progress bar */}
+									<div className="flex-1 flex h-1.5 rounded overflow-hidden mx-2" style={{ backgroundColor: theme.colors.bgActivity }}>
+										{dir.covered > 0 && (
+											<div style={{ width: `${(dir.covered / dir.files.length) * 100}%`, backgroundColor: STATUS_CONFIG.full.color }} />
+										)}
+										{dir.partial > 0 && (
+											<div style={{ width: `${(dir.partial / dir.files.length) * 100}%`, backgroundColor: STATUS_CONFIG.partial.color }} />
+										)}
+									</div>
+									<span className="text-[10px] tabular-nums shrink-0" style={{ color: theme.colors.textDim }}>
+										{dir.coveragePercent}%
+									</span>
+									<span className="text-[10px] shrink-0 px-1.5 py-0.5 rounded" style={{ backgroundColor: theme.colors.bgActivity, color: theme.colors.textDim }}>
+										{dir.files.length} files
+									</span>
+								</button>
+								{expandedDirs.has(dir.dirPath) && dir.files.map((file) => (
+									<div key={file.filePath} className="pl-6">
+										<CoverageFileRow theme={theme} file={file} />
+									</div>
+								))}
+							</div>
 						))}
 					</div>
 				)}
@@ -468,6 +703,73 @@ interface CoverageFileRowProps {
 	theme: Theme;
 	file: NormalizedCoverageFile;
 }
+
+/** SVG donut chart showing AI vs Partial vs Unknown code distribution. */
+const CoverageDonut: React.FC<{
+	covered: number;
+	partial: number;
+	uncovered: number;
+	percentage: number;
+}> = ({ covered, partial, uncovered, percentage }) => {
+	const total = covered + partial + uncovered;
+	const radius = 50;
+	const circumference = 2 * Math.PI * radius;
+
+	// Calculate dash segments
+	const coveredLen = total > 0 ? (covered / total) * circumference : 0;
+	const partialLen = total > 0 ? (partial / total) * circumference : 0;
+	const uncoveredLen = total > 0 ? (uncovered / total) * circumference : circumference;
+
+	return (
+		<div className="relative shrink-0" style={{ width: 120, height: 120 }} data-testid="coverage-donut">
+			<svg viewBox="0 0 120 120" width="120" height="120">
+				{/* Background circle */}
+				<circle cx="60" cy="60" r={radius} fill="none" stroke="#374151" strokeWidth="12" />
+				{/* Covered segment (green) */}
+				{coveredLen > 0 && (
+					<circle
+						cx="60" cy="60" r={radius}
+						fill="none"
+						stroke={STATUS_CONFIG.full.color}
+						strokeWidth="12"
+						strokeDasharray={`${coveredLen} ${circumference - coveredLen}`}
+						strokeDashoffset={circumference * 0.25}
+						data-testid="donut-covered"
+					/>
+				)}
+				{/* Partial segment (yellow) */}
+				{partialLen > 0 && (
+					<circle
+						cx="60" cy="60" r={radius}
+						fill="none"
+						stroke={STATUS_CONFIG.partial.color}
+						strokeWidth="12"
+						strokeDasharray={`${partialLen} ${circumference - partialLen}`}
+						strokeDashoffset={circumference * 0.25 - coveredLen}
+						data-testid="donut-partial"
+					/>
+				)}
+				{/* Uncovered segment (gray) — only if there's no other data */}
+				{total > 0 && uncoveredLen > 0 && (covered > 0 || partial > 0) && (
+					<circle
+						cx="60" cy="60" r={radius}
+						fill="none"
+						stroke="#6b7280"
+						strokeWidth="12"
+						strokeDasharray={`${uncoveredLen} ${circumference - uncoveredLen}`}
+						strokeDashoffset={circumference * 0.25 - coveredLen - partialLen}
+						data-testid="donut-uncovered"
+					/>
+				)}
+			</svg>
+			{/* Center label */}
+			<div className="absolute inset-0 flex flex-col items-center justify-center">
+				<span className="text-lg font-bold" data-testid="donut-percentage">{percentage}%</span>
+				<span className="text-[9px] opacity-60">AI Coverage</span>
+			</div>
+		</div>
+	);
+};
 
 const CoverageFileRow: React.FC<CoverageFileRowProps> = ({ theme, file }) => {
 	const statusInfo = STATUS_CONFIG[file.status] ?? STATUS_CONFIG.uncovered;
