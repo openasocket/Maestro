@@ -16,6 +16,10 @@ vi.mock('lucide-react', () => ({
 	Loader2: () => <span data-testid="icon-loader">Loader2</span>,
 	Settings: () => <span data-testid="icon-settings">Settings</span>,
 	FolderOpen: () => <span data-testid="icon-folderopen">FolderOpen</span>,
+	ChevronRight: () => <span data-testid="icon-chevron-right">ChevronRight</span>,
+	ChevronDown: () => <span data-testid="icon-chevron-down">ChevronDown</span>,
+	FolderTree: () => <span data-testid="icon-foldertree">FolderTree</span>,
+	Files: () => <span data-testid="icon-files">Files</span>,
 }));
 
 const mockTheme: Theme = {
@@ -159,7 +163,7 @@ describe('VibeCoverageView', () => {
 		);
 
 		await waitFor(() => {
-			expect(screen.getByText('4 files')).toBeTruthy();
+			expect(screen.getByText('4 total files')).toBeTruthy();
 		});
 
 		expect(screen.getByText('2 covered')).toBeTruthy();
@@ -494,5 +498,123 @@ describe('VibeCoverageView', () => {
 		);
 
 		expect(mockGetCoverage).not.toHaveBeenCalled();
+	});
+
+	// ========================================================================
+	// Donut chart
+	// ========================================================================
+
+	it('renders donut chart with correct segment proportions', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('coverage-donut')).toBeTruthy();
+		});
+
+		// With 2 covered, 1 partial, 1 uncovered: all three segments should render
+		expect(screen.getByTestId('donut-covered')).toBeTruthy();
+		expect(screen.getByTestId('donut-partial')).toBeTruthy();
+		expect(screen.getByTestId('donut-uncovered')).toBeTruthy();
+
+		// Verify the covered segment has a stroke-dasharray proportional to 2/4 = 50%
+		const coveredCircle = screen.getByTestId('donut-covered');
+		const dashArray = coveredCircle.getAttribute('stroke-dasharray');
+		expect(dashArray).toBeTruthy();
+		// The covered segment length should be ~50% of circumference (2*PI*50 ≈ 314.16)
+		const coveredLen = parseFloat(dashArray!.split(' ')[0]);
+		expect(coveredLen).toBeCloseTo(314.159 * 0.5, 0);
+	});
+
+	it('shows percentage label in donut center', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('donut-percentage')).toBeTruthy();
+		});
+
+		// 2 full + 0.5 * 1 partial = 2.5 / 4 = 62.5% → 63%
+		expect(screen.getByTestId('donut-percentage').textContent).toBe('63%');
+		expect(screen.getByText('AI Coverage')).toBeTruthy();
+	});
+
+	it('renders legend with correct counts', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('coverage-legend')).toBeTruthy();
+		});
+
+		const legend = screen.getByTestId('coverage-legend');
+		expect(legend.textContent).toContain('AI Code (2)');
+		expect(legend.textContent).toContain('Partial (1)');
+		expect(legend.textContent).toContain('Unknown (1)');
+	});
+
+	it('handles 0% coverage (all gray)', async () => {
+		mockGetCoverage.mockResolvedValue({
+			success: true,
+			data: JSON.stringify([
+				{ file_path: 'src/a.ts', coverage_status: 'uncovered', annotation_count: 0 },
+				{ file_path: 'src/b.ts', coverage_status: 'uncovered', annotation_count: 0 },
+			]),
+		});
+
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('coverage-donut')).toBeTruthy();
+		});
+
+		// 0% coverage: no covered or partial segments
+		expect(screen.getByTestId('donut-percentage').textContent).toBe('0%');
+		expect(screen.queryByTestId('donut-covered')).toBeNull();
+		expect(screen.queryByTestId('donut-partial')).toBeNull();
+	});
+
+	it('handles 100% coverage (all green)', async () => {
+		mockGetCoverage.mockResolvedValue({
+			success: true,
+			data: JSON.stringify([
+				{ file_path: 'src/a.ts', coverage_status: 'full', annotation_count: 5 },
+				{ file_path: 'src/b.ts', coverage_status: 'full', annotation_count: 3 },
+			]),
+		});
+
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('coverage-donut')).toBeTruthy();
+		});
+
+		// 100% coverage: only covered segment, no partial or uncovered
+		expect(screen.getByTestId('donut-percentage').textContent).toBe('100%');
+		expect(screen.getByTestId('donut-covered')).toBeTruthy();
+		expect(screen.queryByTestId('donut-partial')).toBeNull();
+		expect(screen.queryByTestId('donut-uncovered')).toBeNull();
 	});
 });
