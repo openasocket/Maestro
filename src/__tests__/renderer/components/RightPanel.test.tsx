@@ -19,9 +19,30 @@ vi.mock('../../../renderer/components/AutoRun', () => ({
 	AutoRun: vi.fn((props) => <div data-testid="auto-run">AutoRun</div>),
 }));
 
+vi.mock('../../../renderer/components/vibes/VibesPanel', () => ({
+	VibesPanel: vi.fn(() => <div data-testid="vibes-panel">VibesPanel</div>),
+}));
+
+vi.mock('../../../renderer/components/AutoRunExpandedModal', () => ({
+	AutoRunExpandedModal: vi.fn(() => null),
+}));
+
 vi.mock('../../../renderer/utils/shortcutFormatter', () => ({
 	formatShortcutKeys: vi.fn((keys) => keys.join('+')),
 	isMacOS: vi.fn(() => false),
+}));
+
+// Mock hooks to control vibesEnabled and vibesLive state
+let mockVibesEnabled = false;
+let mockVibesLiveUpdates = new Map<string, { sessionId: string; annotationCount: number; lastAnnotation: { type: string; timestamp: string } }>();
+
+vi.mock('../../../renderer/hooks', () => ({
+	useSettings: () => ({ vibesEnabled: mockVibesEnabled }),
+	useVibesLive: () => ({
+		updates: mockVibesLiveUpdates,
+		getCount: (sessionId: string) => mockVibesLiveUpdates.get(sessionId)?.annotationCount ?? 0,
+		getLastAnnotation: (sessionId: string) => mockVibesLiveUpdates.get(sessionId)?.lastAnnotation ?? null,
+	}),
 }));
 
 // Mock lucide-react
@@ -31,6 +52,11 @@ vi.mock('lucide-react', () => ({
 	Loader2: ({ className }: { className?: string }) => (
 		<span data-testid="loader" className={className}>
 			Loading
+		</span>
+	),
+	GitBranch: ({ className }: { className?: string }) => (
+		<span data-testid="git-branch" className={className}>
+			GitBranch
 		</span>
 	),
 }));
@@ -145,6 +171,9 @@ describe('RightPanel', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.useFakeTimers();
+		// Reset vibes mock state
+		mockVibesEnabled = false;
+		mockVibesLiveUpdates = new Map();
 		// Mock requestAnimationFrame
 		vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
 			cb(0);
@@ -289,6 +318,86 @@ describe('RightPanel', () => {
 			expect(screen.queryByTestId('file-explorer-panel')).not.toBeInTheDocument();
 			expect(screen.queryByTestId('history-panel')).not.toBeInTheDocument();
 			expect(screen.getByTestId('auto-run')).toBeInTheDocument();
+		});
+
+		it('should show VibesPanel when vibes tab is active', () => {
+			mockVibesEnabled = true;
+			const props = createDefaultProps({ activeRightTab: 'vibes' });
+			render(<RightPanel {...props} />);
+
+			expect(screen.getByTestId('vibes-panel')).toBeInTheDocument();
+		});
+	});
+
+	describe('VIBES annotation count badge', () => {
+		it('shows annotation count badge on VIBES tab when annotations exist', () => {
+			mockVibesEnabled = true;
+			mockVibesLiveUpdates = new Map([
+				['session-1', { sessionId: 'session-1', annotationCount: 5, lastAnnotation: { type: 'line', timestamp: '2026-01-01T00:00:00Z' } }],
+			]);
+			const props = createDefaultProps();
+			render(<RightPanel {...props} />);
+
+			const badge = screen.getByTestId('vibes-annotation-badge');
+			expect(badge).toBeInTheDocument();
+			expect(badge.textContent).toBe('5');
+		});
+
+		it('hides badge when count is 0', () => {
+			mockVibesEnabled = true;
+			mockVibesLiveUpdates = new Map();
+			const props = createDefaultProps();
+			render(<RightPanel {...props} />);
+
+			expect(screen.queryByTestId('vibes-annotation-badge')).not.toBeInTheDocument();
+		});
+
+		it('hides badge when vibes is disabled', () => {
+			mockVibesEnabled = false;
+			mockVibesLiveUpdates = new Map();
+			const props = createDefaultProps();
+			render(<RightPanel {...props} />);
+
+			expect(screen.queryByTestId('vibes-annotation-badge')).not.toBeInTheDocument();
+		});
+
+		it('displays 99+ when count exceeds 99', () => {
+			mockVibesEnabled = true;
+			mockVibesLiveUpdates = new Map([
+				['session-1', { sessionId: 'session-1', annotationCount: 150, lastAnnotation: { type: 'line', timestamp: '2026-01-01T00:00:00Z' } }],
+			]);
+			const props = createDefaultProps();
+			render(<RightPanel {...props} />);
+
+			const badge = screen.getByTestId('vibes-annotation-badge');
+			expect(badge.textContent).toBe('99+');
+		});
+
+		it('aggregates counts across multiple sessions', () => {
+			mockVibesEnabled = true;
+			mockVibesLiveUpdates = new Map([
+				['session-1', { sessionId: 'session-1', annotationCount: 3, lastAnnotation: { type: 'line', timestamp: '2026-01-01T00:00:00Z' } }],
+				['session-2', { sessionId: 'session-2', annotationCount: 7, lastAnnotation: { type: 'function', timestamp: '2026-01-01T00:00:00Z' } }],
+			]);
+			const props = createDefaultProps();
+			render(<RightPanel {...props} />);
+
+			const badge = screen.getByTestId('vibes-annotation-badge');
+			expect(badge.textContent).toBe('10');
+		});
+
+		it('badge has green background from theme success color', () => {
+			mockVibesEnabled = true;
+			mockVibesLiveUpdates = new Map([
+				['session-1', { sessionId: 'session-1', annotationCount: 1, lastAnnotation: { type: 'line', timestamp: '2026-01-01T00:00:00Z' } }],
+			]);
+			const props = createDefaultProps();
+			render(<RightPanel {...props} />);
+
+			const badge = screen.getByTestId('vibes-annotation-badge');
+			// Browser normalizes #50fa7b to rgb(80, 250, 123)
+			expect(badge.style.backgroundColor).toBe('rgb(80, 250, 123)');
+			expect(badge.style.color).toBe('rgb(255, 255, 255)');
 		});
 	});
 
