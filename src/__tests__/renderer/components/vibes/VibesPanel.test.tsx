@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { VibesPanel } from '../../../../renderer/components/vibes/VibesPanel';
 
 // ============================================================================
@@ -541,5 +541,80 @@ describe('VibesPanel', () => {
 
 		expect(screen.getByTestId('binary-version-badge')).toBeTruthy();
 		expect(mockFindBinary).toHaveBeenCalledTimes(2);
+	});
+
+	// ========================================================================
+	// Last updated timestamp
+	// ========================================================================
+
+	it('shows last updated timestamp after data loads', async () => {
+		// Simulate loading transition: isLoading starts true then goes false
+		mockVibesData.isLoading = true;
+		const { rerender } = render(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		// Transition to not loading — triggers lastRefreshed update
+		mockVibesData.isLoading = false;
+		rerender(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('last-updated-label')).toBeTruthy();
+		});
+
+		const label = screen.getByTestId('last-updated-label');
+		expect(label.textContent).toMatch(/just now|1s ago|2s ago/);
+	});
+
+	it('updates relative time display as time progresses', () => {
+		vi.useFakeTimers({ shouldAdvanceTime: false });
+		const now = 1_700_000_000_000;
+		vi.setSystemTime(now);
+
+		// Simulate loading transition to trigger lastRefreshed
+		mockVibesData.isLoading = true;
+		const { rerender } = render(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		mockVibesData.isLoading = false;
+		rerender(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		// Run pending effects to set lastRefreshed and start the interval
+		act(() => {
+			vi.advanceTimersByTime(0);
+		});
+
+		// Initially should show "just now" (delta < 5s)
+		expect(screen.getByTestId('last-updated-label').textContent).toBe('just now');
+
+		// Advance 10 seconds — setSystemTime controls Date.now() for the delta calc
+		// advanceTimersByTime fires the setInterval callback
+		act(() => {
+			vi.setSystemTime(now + 10_000);
+			vi.advanceTimersByTime(1_000);
+		});
+		// Delta is 10s, so should show "10s ago"
+		expect(screen.getByTestId('last-updated-label').textContent).toMatch(/^\d+s ago$/);
+
+		// Advance to 2 minutes
+		act(() => {
+			vi.setSystemTime(now + 120_000);
+			vi.advanceTimersByTime(1_000);
+		});
+		expect(screen.getByTestId('last-updated-label').textContent).toBe('2m ago');
+
+		// Advance to 1 hour
+		act(() => {
+			vi.setSystemTime(now + 3_600_000);
+			vi.advanceTimersByTime(1_000);
+		});
+		expect(screen.getByTestId('last-updated-label').textContent).toBe('1h ago');
+
+		vi.useRealTimers();
+	});
+
+	it('does not show last updated label before data has loaded', () => {
+		mockVibesData.isLoading = false;
+		render(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		// No loading transition has happened, so no timestamp should be shown
+		expect(screen.queryByTestId('last-updated-label')).toBeNull();
 	});
 });

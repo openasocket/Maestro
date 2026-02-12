@@ -36,6 +36,15 @@ import {
 	vibesBackfillCommit,
 } from '../../vibes/vibes-bridge';
 import type { VibesAssuranceLevel } from '../../../shared/vibes-types';
+import {
+	computeStatsFromAnnotations,
+	extractSessionsFromAnnotations,
+	extractModelsFromManifest,
+	computeBlameFromAnnotations,
+	computeCoverageFromAnnotations,
+	readAnnotations,
+	readVibesManifest,
+} from '../../vibes/vibes-io';
 
 const LOG_CONTEXT = '[VIBES]';
 
@@ -92,29 +101,41 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 		},
 	);
 
-	// Get project statistics
+	// Get project statistics (falls back to direct file reading when binary unavailable)
 	ipcMain.handle('vibes:getStats', async (_event, projectPath: string, file?: string) => {
 		try {
 			const customPath = getCustomBinaryPath(settingsStore);
-			return await vibesStats(projectPath, file, customPath);
+			const binaryPath = await findVibesCheckBinary(customPath);
+			if (binaryPath) {
+				return await vibesStats(projectPath, file, customPath);
+			}
+			// Fallback: compute from raw .ai-audit/ files
+			const stats = await computeStatsFromAnnotations(projectPath);
+			return { success: true, data: JSON.stringify(stats) };
 		} catch (error) {
 			logger.error('getStats error', LOG_CONTEXT, { error: String(error) });
 			return { success: false, error: String(error) };
 		}
 	});
 
-	// Get per-line provenance data
+	// Get per-line provenance data (falls back to direct annotation parsing)
 	ipcMain.handle('vibes:getBlame', async (_event, projectPath: string, file: string) => {
 		try {
 			const customPath = getCustomBinaryPath(settingsStore);
-			return await vibesBlame(projectPath, file, customPath);
+			const binaryPath = await findVibesCheckBinary(customPath);
+			if (binaryPath) {
+				return await vibesBlame(projectPath, file, customPath);
+			}
+			// Fallback: compute blame from raw annotations
+			const blame = await computeBlameFromAnnotations(projectPath, file);
+			return { success: true, data: JSON.stringify(blame) };
 		} catch (error) {
 			logger.error('getBlame error', LOG_CONTEXT, { error: String(error) });
 			return { success: false, error: String(error) };
 		}
 	});
 
-	// Get annotation log with filters
+	// Get annotation log with filters (falls back to direct file reading)
 	ipcMain.handle(
 		'vibes:getLog',
 		async (
@@ -130,7 +151,22 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 		) => {
 			try {
 				const customPath = getCustomBinaryPath(settingsStore);
-				return await vibesLog(projectPath, options, customPath);
+				const binaryPath = await findVibesCheckBinary(customPath);
+				if (binaryPath) {
+					return await vibesLog(projectPath, options, customPath);
+				}
+				// Fallback: read annotations directly and apply filters
+				let annotations = await readAnnotations(projectPath);
+				if (options?.file) {
+					annotations = annotations.filter((a) => 'file_path' in a && a.file_path === options.file);
+				}
+				if (options?.session) {
+					annotations = annotations.filter((a) => 'session_id' in a && a.session_id === options.session);
+				}
+				if (options?.limit && options.limit > 0) {
+					annotations = annotations.slice(-options.limit);
+				}
+				return { success: true, data: JSON.stringify(annotations) };
 			} catch (error) {
 				logger.error('getLog error', LOG_CONTEXT, { error: String(error) });
 				return { success: false, error: String(error) };
@@ -138,11 +174,17 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 		},
 	);
 
-	// Get VIBES coverage statistics
+	// Get VIBES coverage statistics (falls back to direct annotation parsing)
 	ipcMain.handle('vibes:getCoverage', async (_event, projectPath: string) => {
 		try {
 			const customPath = getCustomBinaryPath(settingsStore);
-			return await vibesCoverage(projectPath, true, customPath);
+			const binaryPath = await findVibesCheckBinary(customPath);
+			if (binaryPath) {
+				return await vibesCoverage(projectPath, true, customPath);
+			}
+			// Fallback: compute coverage from raw annotations
+			const coverage = await computeCoverageFromAnnotations(projectPath);
+			return { success: true, data: JSON.stringify(coverage) };
 		} catch (error) {
 			logger.error('getCoverage error', LOG_CONTEXT, { error: String(error) });
 			return { success: false, error: String(error) };
@@ -163,22 +205,34 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 		},
 	);
 
-	// List all sessions
+	// List all sessions (falls back to direct annotation parsing)
 	ipcMain.handle('vibes:getSessions', async (_event, projectPath: string) => {
 		try {
 			const customPath = getCustomBinaryPath(settingsStore);
-			return await vibesSessions(projectPath, customPath);
+			const binaryPath = await findVibesCheckBinary(customPath);
+			if (binaryPath) {
+				return await vibesSessions(projectPath, customPath);
+			}
+			// Fallback: extract sessions from raw annotations
+			const sessions = await extractSessionsFromAnnotations(projectPath);
+			return { success: true, data: JSON.stringify(sessions) };
 		} catch (error) {
 			logger.error('getSessions error', LOG_CONTEXT, { error: String(error) });
 			return { success: false, error: String(error) };
 		}
 	});
 
-	// List all models used
+	// List all models used (falls back to direct manifest reading)
 	ipcMain.handle('vibes:getModels', async (_event, projectPath: string) => {
 		try {
 			const customPath = getCustomBinaryPath(settingsStore);
-			return await vibesModels(projectPath, customPath);
+			const binaryPath = await findVibesCheckBinary(customPath);
+			if (binaryPath) {
+				return await vibesModels(projectPath, customPath);
+			}
+			// Fallback: extract models from raw manifest
+			const models = await extractModelsFromManifest(projectPath);
+			return { success: true, data: JSON.stringify(models) };
 		} catch (error) {
 			logger.error('getModels error', LOG_CONTEXT, { error: String(error) });
 			return { success: false, error: String(error) };
@@ -214,6 +268,17 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 	// Clear the binary path cache (called when settings change)
 	ipcMain.handle('vibes:clearBinaryCache', async () => {
 		clearBinaryPathCache();
+	});
+
+	// Get the manifest (resolved provenance entries keyed by content hash)
+	ipcMain.handle('vibes:getManifest', async (_event, projectPath: string) => {
+		try {
+			const manifest = await readVibesManifest(projectPath);
+			return { success: true, data: JSON.stringify(manifest) };
+		} catch (error) {
+			logger.error('getManifest error', LOG_CONTEXT, { error: String(error) });
+			return { success: false, error: String(error) };
+		}
 	});
 
 	// Backfill commit_hash on annotations missing it

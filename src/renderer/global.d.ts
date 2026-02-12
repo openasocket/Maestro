@@ -2665,6 +2665,11 @@ interface MaestroAPI {
 			data?: string;
 			error?: string;
 		}>;
+		getManifest: (projectPath: string) => Promise<{
+			success: boolean;
+			data?: string;
+			error?: string;
+		}>;
 		build: (projectPath: string) => Promise<{
 			success: boolean;
 			error?: string;

@@ -18,7 +18,9 @@ import type {
 	VibesAnnotation,
 	VibesAction,
 	VibesAssuranceLevel,
+	VibesManifest,
 } from '../../../shared/vibes-types';
+import { VibesAnnotationDetail } from './VibesAnnotationDetail';
 
 // ============================================================================
 // Filter Types
@@ -48,6 +50,7 @@ interface VibesAnnotationLogProps {
 	theme: Theme;
 	annotations: VibesAnnotation[];
 	isLoading: boolean;
+	projectPath?: string;
 }
 
 // ============================================================================
@@ -188,6 +191,7 @@ export const VibesAnnotationLog: React.FC<VibesAnnotationLogProps> = ({
 	theme,
 	annotations,
 	isLoading,
+	projectPath,
 }) => {
 	const [filters, setFilters] = useState<AnnotationFilters>({
 		agent: 'all',
@@ -196,6 +200,30 @@ export const VibesAnnotationLog: React.FC<VibesAnnotationLogProps> = ({
 		fileSearch: '',
 	});
 	const [expandedId, setExpandedId] = useState<string | null>(null);
+	const [detailId, setDetailId] = useState<string | null>(null);
+	const [manifest, setManifest] = useState<VibesManifest | null>(null);
+	const [isLoadingManifest, setIsLoadingManifest] = useState(false);
+
+	const handleViewDetails = useCallback(async (id: string) => {
+		if (detailId === id) {
+			setDetailId(null);
+			return;
+		}
+		setDetailId(id);
+		if (!manifest && projectPath) {
+			setIsLoadingManifest(true);
+			try {
+				const result = await window.maestro.vibes.getManifest(projectPath);
+				if (result.success && result.data) {
+					setManifest(JSON.parse(result.data));
+				}
+			} catch {
+				// Manifest unavailable — detail panel shows hashes only
+			} finally {
+				setIsLoadingManifest(false);
+			}
+		}
+	}, [detailId, manifest, projectPath]);
 
 	// Filter out malformed annotations and track parse errors
 	const { validAnnotations, parseErrorCount } = useMemo(() => {
@@ -396,6 +424,10 @@ export const VibesAnnotationLog: React.FC<VibesAnnotationLogProps> = ({
 									annotation={annotation}
 									isExpanded={isExpanded}
 									onToggle={() => toggleExpanded(key)}
+									showDetail={detailId === key}
+									onViewDetails={() => handleViewDetails(key)}
+									manifest={manifest}
+									isLoadingManifest={isLoadingManifest}
 								/>
 							);
 						})}
@@ -514,6 +546,10 @@ interface AnnotationRowProps {
 	annotation: Exclude<VibesAnnotation, { type: 'session' }>;
 	isExpanded: boolean;
 	onToggle: () => void;
+	showDetail?: boolean;
+	onViewDetails?: () => void;
+	manifest?: VibesManifest | null;
+	isLoadingManifest?: boolean;
 }
 
 const AnnotationRow: React.FC<AnnotationRowProps> = ({
@@ -521,6 +557,10 @@ const AnnotationRow: React.FC<AnnotationRowProps> = ({
 	annotation,
 	isExpanded,
 	onToggle,
+	showDetail,
+	onViewDetails,
+	manifest,
+	isLoadingManifest,
 }) => {
 	const actionColor = ACTION_COLORS[annotation.action];
 	const assuranceColor = ASSURANCE_COLORS[annotation.assurance_level];
@@ -582,8 +622,31 @@ const AnnotationRow: React.FC<AnnotationRowProps> = ({
 			</button>
 
 			{/* Expanded detail panel */}
-			{isExpanded && (
-				<AnnotationDetail theme={theme} annotation={annotation} />
+			{isExpanded && !showDetail && (
+				<>
+					<AnnotationDetail theme={theme} annotation={annotation} />
+					{onViewDetails && (
+						<div className="px-4 py-1.5" style={{ backgroundColor: theme.colors.bgActivity }}>
+							<button
+								onClick={onViewDetails}
+								className="text-[10px] font-medium transition-opacity hover:opacity-80"
+								style={{ color: theme.colors.accent }}
+								data-testid="view-details-btn"
+							>
+								View Full Details
+							</button>
+						</div>
+					)}
+				</>
+			)}
+			{isExpanded && showDetail && (
+				<VibesAnnotationDetail
+					theme={theme}
+					annotation={annotation}
+					manifest={manifest ?? null}
+					isLoadingManifest={isLoadingManifest ?? false}
+					onClose={() => onViewDetails?.()}
+				/>
 			)}
 		</div>
 	);

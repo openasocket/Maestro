@@ -1,9 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
 	Cpu,
 	Award,
 	BarChart3,
 	Clock,
+	Search,
+	ArrowUpDown,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { VibesModelInfo } from '../../hooks';
@@ -45,11 +47,17 @@ function formatToolName(toolName?: string): string {
  * - Summary stats: total models, primary model, coverage by model
  * - Data sourced from the useVibesData hook's `models` array
  */
+type SortField = 'count' | 'name' | 'percentage';
+
 export const VibesModelAttribution: React.FC<VibesModelAttributionProps> = ({
 	theme,
 	models,
 	isLoading,
 }) => {
+	const [searchQuery, setSearchQuery] = useState('');
+	const [sortBy, setSortBy] = useState<SortField>('count');
+	const [showAll, setShowAll] = useState(false);
+
 	const sortedModels = useMemo(
 		() => [...models].sort((a, b) => b.annotationCount - a.annotationCount),
 		[models],
@@ -65,9 +73,27 @@ export const VibesModelAttribution: React.FC<VibesModelAttributionProps> = ({
 		[sortedModels],
 	);
 
+	// Filtered and re-sorted models for the list
+	const displayModels = useMemo(() => {
+		let filtered = [...models];
+		if (searchQuery) {
+			const q = searchQuery.toLowerCase();
+			filtered = filtered.filter(
+				(m) => m.modelName.toLowerCase().includes(q) || (m.toolName ?? '').toLowerCase().includes(q),
+			);
+		}
+		filtered.sort((a, b) => {
+			if (sortBy === 'name') return a.modelName.localeCompare(b.modelName);
+			if (sortBy === 'percentage') return b.percentage - a.percentage;
+			return b.annotationCount - a.annotationCount;
+		});
+		if (!showAll && filtered.length > 5) return filtered.slice(0, 5);
+		return filtered;
+	}, [models, searchQuery, sortBy, showAll]);
+
 	const maxPercentage = useMemo(
-		() => (sortedModels.length > 0 ? Math.max(...sortedModels.map((m) => m.percentage)) : 0),
-		[sortedModels],
+		() => (displayModels.length > 0 ? Math.max(...displayModels.map((m) => m.percentage)) : 0),
+		[displayModels],
 	);
 
 	// ========================================================================
@@ -162,22 +188,62 @@ export const VibesModelAttribution: React.FC<VibesModelAttributionProps> = ({
 				)}
 			</div>
 
-			{/* Model List Header */}
-			<div className="flex items-center gap-1.5 px-1">
-				<span
-					className="text-[10px] font-semibold uppercase tracking-wider"
-					style={{ color: theme.colors.textDim }}
-				>
-					Model Contributions
-				</span>
-				<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
-					({sortedModels.length})
-				</span>
+			{/* Model List Header + Search/Sort */}
+			<div className="flex flex-col gap-2">
+				<div className="flex items-center gap-1.5 px-1">
+					<span
+						className="text-[10px] font-semibold uppercase tracking-wider"
+						style={{ color: theme.colors.textDim }}
+					>
+						Model Contributions
+					</span>
+					<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
+						({models.length})
+					</span>
+				</div>
+
+				{/* Search and sort controls */}
+				{models.length > 1 && (
+					<div className="flex items-center gap-1.5" data-testid="model-search-bar">
+						<div
+							className="flex items-center gap-1.5 flex-1 px-2 py-1 rounded text-xs"
+							style={{
+								backgroundColor: theme.colors.bgActivity,
+								border: `1px solid ${theme.colors.border}`,
+							}}
+						>
+							<Search className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
+							<input
+								type="text"
+								value={searchQuery}
+								onChange={(e) => setSearchQuery(e.target.value)}
+								placeholder="Filter models..."
+								className="flex-1 bg-transparent text-xs outline-none"
+								style={{ color: theme.colors.textMain }}
+								data-testid="model-search-input"
+							/>
+						</div>
+						<button
+							onClick={() => setSortBy((prev) => (prev === 'count' ? 'name' : prev === 'name' ? 'percentage' : 'count'))}
+							className="flex items-center gap-1 px-2 py-1 rounded text-[10px] shrink-0 transition-opacity hover:opacity-80"
+							style={{
+								backgroundColor: theme.colors.bgActivity,
+								border: `1px solid ${theme.colors.border}`,
+								color: theme.colors.textDim,
+							}}
+							title={`Sort by: ${sortBy}`}
+							data-testid="model-sort-toggle"
+						>
+							<ArrowUpDown className="w-3 h-3" />
+							{sortBy === 'count' ? '#' : sortBy === 'name' ? 'A-Z' : '%'}
+						</button>
+					</div>
+				)}
 			</div>
 
 			{/* Model List */}
 			<div className="flex flex-col gap-1">
-				{sortedModels.map((model, idx) => (
+				{displayModels.map((model, idx) => (
 					<ModelRow
 						key={`${model.modelName}-${model.toolName ?? ''}-${idx}`}
 						theme={theme}
@@ -185,7 +251,24 @@ export const VibesModelAttribution: React.FC<VibesModelAttributionProps> = ({
 						maxPercentage={maxPercentage}
 					/>
 				))}
+				{displayModels.length === 0 && searchQuery && (
+					<span className="text-[11px] px-3 py-2" style={{ color: theme.colors.textDim }}>
+						No models match &quot;{searchQuery}&quot;
+					</span>
+				)}
 			</div>
+
+			{/* Show all / Show top 5 toggle */}
+			{models.length > 5 && (
+				<button
+					onClick={() => setShowAll((prev) => !prev)}
+					className="text-[10px] font-medium px-1 transition-opacity hover:opacity-80"
+					style={{ color: theme.colors.accent }}
+					data-testid="model-show-toggle"
+				>
+					{showAll ? 'Show top 5' : `Show all (${models.length})`}
+				</button>
+			)}
 		</div>
 	);
 };

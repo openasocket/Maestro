@@ -17,7 +17,7 @@ import type { DocumentTaskCount } from './AutoRunDocumentSelector';
 import { AutoRunExpandedModal } from './AutoRunExpandedModal';
 import { VibesPanel } from './vibes/VibesPanel';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
-import { useSettings } from '../hooks';
+import { useSettings, useVibesLive } from '../hooks';
 
 export interface RightPanelHandle {
 	refreshHistoryPanel: () => void;
@@ -209,6 +209,14 @@ export const RightPanel = memo(
 
 		// VIBES blame view state — tracks file path to pre-select in blame view
 		const { vibesEnabled } = useSettings();
+		const vibesLive = useVibesLive(vibesEnabled);
+		const vibesAnnotationCount = React.useMemo(() => {
+			let total = 0;
+			for (const update of vibesLive.updates.values()) {
+				total += update.annotationCount;
+			}
+			return total;
+		}, [vibesLive.updates]);
 		const [blameFilePath, setBlameFilePath] = useState<string | undefined>(undefined);
 
 		const handleViewAIBlame = useCallback(
@@ -446,7 +454,7 @@ export const RightPanel = memo(
 						<button
 							key={tab}
 							onClick={() => setActiveRightTab(tab as RightPanelTab)}
-							className="flex-1 text-xs font-bold border-b-2 transition-colors"
+							className="relative flex-1 text-xs font-bold border-b-2 transition-colors"
 							style={{
 								borderColor: activeRightTab === tab ? theme.colors.accent : 'transparent',
 								color: activeRightTab === tab ? theme.colors.textMain : theme.colors.textDim,
@@ -454,6 +462,15 @@ export const RightPanel = memo(
 							data-tour={`${tab}-tab`}
 						>
 							{tab === 'autorun' ? 'Auto Run' : tab === 'vibes' ? 'VIBES' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+							{tab === 'vibes' && vibesAnnotationCount > 0 && (
+								<span
+									className="absolute top-1.5 ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold leading-none"
+									style={{ backgroundColor: theme.colors.success, color: '#fff' }}
+									data-testid="vibes-annotation-badge"
+								>
+									{vibesAnnotationCount > 99 ? '99+' : vibesAnnotationCount}
+								</span>
+							)}
 						</button>
 					))}
 

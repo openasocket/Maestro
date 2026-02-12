@@ -89,6 +89,9 @@ export type {
 	UseVibesDataReturn,
 } from './useVibesData';
 
+export { useVibesLive } from './useVibesLive';
+export type { VibesAnnotationUpdate, UseVibesLiveReturn } from './useVibesLive';
+
 export { useVibesSessionIndicators } from './useVibesSessionIndicators';
 export type {
 	VibesIndicatorData,

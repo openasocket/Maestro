@@ -104,6 +104,9 @@ export function createVibesApi() {
 		getModels: (projectPath: string): Promise<VibesCommandResult> =>
 			ipcRenderer.invoke('vibes:getModels', projectPath),
 
+		getManifest: (projectPath: string): Promise<VibesCommandResult> =>
+			ipcRenderer.invoke('vibes:getManifest', projectPath),
+
 		build: (projectPath: string): Promise<{ success: boolean; error?: string }> =>
 			ipcRenderer.invoke('vibes:build', projectPath),
 

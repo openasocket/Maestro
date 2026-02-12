@@ -49,8 +49,8 @@ describe('vibes preload API', () => {
 			expect(api).toHaveProperty('onAnnotationUpdate');
 		});
 
-		it('should have exactly 13 methods', () => {
-			expect(Object.keys(api)).toHaveLength(13);
+		it('should have exactly 14 methods', () => {
+			expect(Object.keys(api)).toHaveLength(14);
 		});
 	});
 

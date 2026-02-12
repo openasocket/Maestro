@@ -6,6 +6,9 @@ community-data/
 .mcp.json
 specs/
 
+# VIBES audit data (generated, not source)
+.ai-audit/
+
 # Tests
 coverage/
 do-wishlist.sh

@@ -67,6 +67,8 @@ export function useVibesLive(enabled: boolean = true): UseVibesLiveReturn {
 			return;
 		}
 
+		if (!window.maestro?.vibes?.onAnnotationUpdate) return;
+
 		const cleanup = window.maestro.vibes.onAnnotationUpdate((payload) => {
 			if (!mountedRef.current) return;
 

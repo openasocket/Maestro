@@ -29,6 +29,11 @@ import {
 	initVibesDirectly,
 	writeReasoningBlob,
 	backfillCommitHash,
+	computeStatsFromAnnotations,
+	extractSessionsFromAnnotations,
+	extractModelsFromManifest,
+	computeBlameFromAnnotations,
+	computeCoverageFromAnnotations,
 } from '../../../main/vibes/vibes-io';
 
 import type {
@@ -1179,6 +1184,299 @@ describe('vibes-io', () => {
 			const blobPath = path.join(tmpDir, '.ai-audit', 'blobs', `${hash}.blob`);
 			const content = await readFile(blobPath, 'utf8');
 			expect(content).toBe('binary blob content');
+		});
+	});
+
+	// ========================================================================
+	// computeStatsFromAnnotations
+	// ========================================================================
+	describe('computeStatsFromAnnotations', () => {
+		it('should return correct counts from annotations and manifest', async () => {
+			// Set up a project with config, manifest, and annotations
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'high' });
+			await writeVibesManifest(tmpDir, {
+				standard: 'VIBES',
+				version: '1.0',
+				entries: {
+					envhash1: { ...SAMPLE_ENVIRONMENT_ENTRY },
+					envhash2: { ...SAMPLE_ENVIRONMENT_ENTRY, model_name: 'gpt-4' },
+				},
+			});
+
+			// Write some annotations
+			const lineA: VibesLineAnnotation = {
+				...SAMPLE_LINE_ANNOTATION,
+				file_path: 'src/a.ts',
+				session_id: 'sess-1',
+				environment_hash: 'envhash1',
+			};
+			const lineB: VibesLineAnnotation = {
+				...SAMPLE_LINE_ANNOTATION,
+				file_path: 'src/b.ts',
+				session_id: 'sess-1',
+				environment_hash: 'envhash2',
+			};
+			const sessionStart: VibesSessionRecord = {
+				type: 'session', event: 'start', session_id: 'sess-1',
+				timestamp: '2026-02-10T12:00:00Z', assurance_level: 'high',
+			};
+			await appendAnnotationImmediate(tmpDir, sessionStart);
+			await appendAnnotationImmediate(tmpDir, lineA);
+			await appendAnnotationImmediate(tmpDir, lineB);
+
+			const stats = await computeStatsFromAnnotations(tmpDir);
+			expect(stats.totalAnnotations).toBe(2); // 2 line annotations
+			expect(stats.filesCovered).toBe(2); // 2 unique files
+			expect(stats.activeSessions).toBe(1); // 1 started, 0 ended
+			expect(stats.contributingModels).toBe(2); // claude-4, gpt-4
+			expect(stats.assuranceLevel).toBe('high');
+		});
+
+		it('should return empty results for empty .ai-audit', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'empty', assuranceLevel: 'low' });
+			const stats = await computeStatsFromAnnotations(tmpDir);
+			expect(stats.totalAnnotations).toBe(0);
+			expect(stats.filesCovered).toBe(0);
+			expect(stats.activeSessions).toBe(0);
+			expect(stats.contributingModels).toBe(0);
+		});
+
+		it('should count sessions as inactive when ended', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
+			const start: VibesSessionRecord = {
+				type: 'session', event: 'start', session_id: 'sess-x',
+				timestamp: '2026-02-10T12:00:00Z',
+			};
+			const end: VibesSessionRecord = {
+				type: 'session', event: 'end', session_id: 'sess-x',
+				timestamp: '2026-02-10T13:00:00Z',
+			};
+			await appendAnnotationImmediate(tmpDir, start);
+			await appendAnnotationImmediate(tmpDir, end);
+
+			const stats = await computeStatsFromAnnotations(tmpDir);
+			expect(stats.activeSessions).toBe(0);
+		});
+	});
+
+	// ========================================================================
+	// extractSessionsFromAnnotations
+	// ========================================================================
+	describe('extractSessionsFromAnnotations', () => {
+		it('should return session records with annotation counts', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
+			const start: VibesSessionRecord = {
+				type: 'session', event: 'start', session_id: 'sess-1',
+				timestamp: '2026-02-10T12:00:00Z', description: 'claude-code',
+			};
+			const line: VibesLineAnnotation = {
+				...SAMPLE_LINE_ANNOTATION, session_id: 'sess-1',
+			};
+			const end: VibesSessionRecord = {
+				type: 'session', event: 'end', session_id: 'sess-1',
+				timestamp: '2026-02-10T13:00:00Z',
+			};
+			await appendAnnotationImmediate(tmpDir, start);
+			await appendAnnotationImmediate(tmpDir, line);
+			await appendAnnotationImmediate(tmpDir, end);
+
+			const sessions = await extractSessionsFromAnnotations(tmpDir);
+			expect(sessions).toHaveLength(2); // start + end
+			expect(sessions[0].sessionId).toBe('sess-1');
+			expect(sessions[0].event).toBe('start');
+			expect(sessions[0].agentType).toBe('claude-code');
+			expect(sessions[0].annotationCount).toBe(1);
+			expect(sessions[1].event).toBe('end');
+		});
+
+		it('should return empty for empty .ai-audit', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'empty', assuranceLevel: 'low' });
+			const sessions = await extractSessionsFromAnnotations(tmpDir);
+			expect(sessions).toHaveLength(0);
+		});
+	});
+
+	// ========================================================================
+	// extractModelsFromManifest
+	// ========================================================================
+	describe('extractModelsFromManifest', () => {
+		it('should return model info with annotation counts and percentages', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'high' });
+			await writeVibesManifest(tmpDir, {
+				standard: 'VIBES',
+				version: '1.0',
+				entries: {
+					envhash1: { ...SAMPLE_ENVIRONMENT_ENTRY, model_name: 'claude-4', tool_name: 'claude-code' },
+					envhash2: { ...SAMPLE_ENVIRONMENT_ENTRY, model_name: 'gpt-4', tool_name: 'copilot' },
+				},
+			});
+
+			// 3 annotations: 2 for claude-4, 1 for gpt-4
+			await appendAnnotationImmediate(tmpDir, { ...SAMPLE_LINE_ANNOTATION, environment_hash: 'envhash1' });
+			await appendAnnotationImmediate(tmpDir, { ...SAMPLE_LINE_ANNOTATION, environment_hash: 'envhash1', line_start: 11, line_end: 20 });
+			await appendAnnotationImmediate(tmpDir, { ...SAMPLE_LINE_ANNOTATION, environment_hash: 'envhash2', line_start: 21, line_end: 30 });
+
+			const models = await extractModelsFromManifest(tmpDir);
+			expect(models).toHaveLength(2);
+
+			const claude = models.find((m) => m.modelName === 'claude-4');
+			expect(claude).toBeDefined();
+			expect(claude!.annotationCount).toBe(2);
+			expect(claude!.percentage).toBe(67); // 2/3 ≈ 67%
+			expect(claude!.toolName).toBe('claude-code');
+
+			const gpt = models.find((m) => m.modelName === 'gpt-4');
+			expect(gpt).toBeDefined();
+			expect(gpt!.annotationCount).toBe(1);
+			expect(gpt!.percentage).toBe(33); // 1/3 ≈ 33%
+		});
+
+		it('should return empty for empty .ai-audit', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'empty', assuranceLevel: 'low' });
+			const models = await extractModelsFromManifest(tmpDir);
+			expect(models).toHaveLength(0);
+		});
+	});
+
+	// ========================================================================
+	// computeBlameFromAnnotations
+	// ========================================================================
+	describe('computeBlameFromAnnotations', () => {
+		it('should return blame for specific file', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'high' });
+			await writeVibesManifest(tmpDir, {
+				standard: 'VIBES',
+				version: '1.0',
+				entries: {
+					envhash1: { ...SAMPLE_ENVIRONMENT_ENTRY, model_name: 'claude-4', tool_name: 'claude-code' },
+				},
+			});
+
+			await appendAnnotationImmediate(tmpDir, {
+				...SAMPLE_LINE_ANNOTATION,
+				file_path: 'src/target.ts',
+				environment_hash: 'envhash1',
+				line_start: 10,
+				line_end: 20,
+				session_id: 'sess-1',
+			});
+			await appendAnnotationImmediate(tmpDir, {
+				...SAMPLE_LINE_ANNOTATION,
+				file_path: 'src/target.ts',
+				environment_hash: 'envhash1',
+				line_start: 1,
+				line_end: 5,
+				session_id: 'sess-1',
+			});
+			// Different file — should not be included
+			await appendAnnotationImmediate(tmpDir, {
+				...SAMPLE_LINE_ANNOTATION,
+				file_path: 'src/other.ts',
+				environment_hash: 'envhash1',
+			});
+
+			const blame = await computeBlameFromAnnotations(tmpDir, 'src/target.ts');
+			expect(blame).toHaveLength(2);
+			// Should be sorted by lineStart ascending
+			expect(blame[0].lineStart).toBe(1);
+			expect(blame[1].lineStart).toBe(10);
+			expect(blame[0].modelName).toBe('claude-4');
+			expect(blame[0].toolName).toBe('claude-code');
+			expect(blame[0].sessionId).toBe('sess-1');
+		});
+
+		it('should resolve model info from manifest', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
+			await writeVibesManifest(tmpDir, {
+				standard: 'VIBES',
+				version: '1.0',
+				entries: {
+					envhash1: { ...SAMPLE_ENVIRONMENT_ENTRY, model_name: 'gpt-4o', model_version: '2026-01', tool_name: 'copilot' },
+				},
+			});
+			await appendAnnotationImmediate(tmpDir, {
+				...SAMPLE_LINE_ANNOTATION,
+				file_path: 'src/test.ts',
+				environment_hash: 'envhash1',
+			});
+
+			const blame = await computeBlameFromAnnotations(tmpDir, 'src/test.ts');
+			expect(blame).toHaveLength(1);
+			expect(blame[0].modelName).toBe('gpt-4o');
+			expect(blame[0].modelVersion).toBe('2026-01');
+			expect(blame[0].toolName).toBe('copilot');
+		});
+
+		it('should return empty for file with no annotations', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'low' });
+			const blame = await computeBlameFromAnnotations(tmpDir, 'src/nonexistent.ts');
+			expect(blame).toHaveLength(0);
+		});
+	});
+
+	// ========================================================================
+	// computeCoverageFromAnnotations
+	// ========================================================================
+	describe('computeCoverageFromAnnotations', () => {
+		it('should classify files by annotation count', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
+
+			// 8 annotations for one file (covered), 2 for another (partial)
+			for (let i = 0; i < 8; i++) {
+				await appendAnnotationImmediate(tmpDir, {
+					...SAMPLE_LINE_ANNOTATION,
+					file_path: 'src/heavy.ts',
+					line_start: i * 10 + 1,
+					line_end: i * 10 + 10,
+				});
+			}
+			for (let i = 0; i < 2; i++) {
+				await appendAnnotationImmediate(tmpDir, {
+					...SAMPLE_LINE_ANNOTATION,
+					file_path: 'src/light.ts',
+					line_start: i * 10 + 1,
+					line_end: i * 10 + 10,
+				});
+			}
+
+			const coverage = await computeCoverageFromAnnotations(tmpDir);
+			const heavy = coverage.find((c) => c.filePath === 'src/heavy.ts');
+			const light = coverage.find((c) => c.filePath === 'src/light.ts');
+			expect(heavy).toBeDefined();
+			expect(heavy!.status).toBe('covered');
+			expect(heavy!.annotationCount).toBe(8);
+			expect(light).toBeDefined();
+			expect(light!.status).toBe('partial');
+			expect(light!.annotationCount).toBe(2);
+		});
+
+		it('should return empty for empty .ai-audit', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'empty', assuranceLevel: 'low' });
+			const coverage = await computeCoverageFromAnnotations(tmpDir);
+			expect(coverage).toHaveLength(0);
+		});
+
+		it('should sort by status then path', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
+			// 6 annotations for b.ts (covered), 1 for a.ts (partial)
+			for (let i = 0; i < 6; i++) {
+				await appendAnnotationImmediate(tmpDir, {
+					...SAMPLE_LINE_ANNOTATION,
+					file_path: 'src/b.ts',
+					line_start: i * 10 + 1,
+					line_end: i * 10 + 10,
+				});
+			}
+			await appendAnnotationImmediate(tmpDir, {
+				...SAMPLE_LINE_ANNOTATION,
+				file_path: 'src/a.ts',
+			});
+
+			const coverage = await computeCoverageFromAnnotations(tmpDir);
+			expect(coverage[0].filePath).toBe('src/b.ts');
+			expect(coverage[0].status).toBe('covered');
+			expect(coverage[1].filePath).toBe('src/a.ts');
+			expect(coverage[1].status).toBe('partial');
 		});
 	});
 });

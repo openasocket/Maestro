@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
 	FileText,
 	FolderOpen,
@@ -12,10 +12,11 @@ import {
 	Shield,
 	Loader2,
 	Info,
+	Download,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { UseVibesDataReturn } from '../../hooks';
-import type { VibesAssuranceLevel } from '../../../shared/vibes-types';
+import type { VibesAssuranceLevel, VibesAnnotation, VibesAction } from '../../../shared/vibes-types';
 import { VibesLiveMonitor } from './VibesLiveMonitor';
 
 interface VibesDashboardProps {
@@ -34,6 +35,79 @@ const ASSURANCE_COLORS: Record<VibesAssuranceLevel, { bg: string; text: string; 
 	medium: { bg: 'rgba(59, 130, 246, 0.15)', text: '#3b82f6', label: 'Medium' },
 	high: { bg: 'rgba(34, 197, 94, 0.15)', text: '#22c55e', label: 'High' },
 };
+
+/** Colors for annotation action types. */
+const ACTION_COLORS: Record<VibesAction, string> = {
+	create: '#22c55e',
+	modify: '#3b82f6',
+	delete: '#ef4444',
+	review: '#eab308',
+};
+
+/** Colors for model donut segments. */
+const MODEL_PALETTE = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+
+/** Colors for assurance level distribution. */
+const ASSURANCE_BAR_COLORS: Record<VibesAssuranceLevel, string> = {
+	low: '#93c5fd',
+	medium: '#3b82f6',
+	high: '#6366f1',
+};
+
+/** Group annotations into time buckets for the activity timeline. */
+function buildTimeline(annotations: VibesAnnotation[]): {
+	buckets: { label: string; counts: Record<VibesAction, number>; total: number }[];
+	maxCount: number;
+} {
+	const lineAnnotations = annotations.filter(
+		(a): a is Extract<VibesAnnotation, { action: VibesAction }> =>
+			a.type === 'line' || a.type === 'function',
+	);
+
+	if (lineAnnotations.length === 0) return { buckets: [], maxCount: 0 };
+
+	const timestamps = lineAnnotations.map((a) => new Date(a.timestamp).getTime()).sort((a, b) => a - b);
+	const span = timestamps[timestamps.length - 1] - timestamps[0];
+
+	let bucketSize: number;
+	let formatLabel: (d: Date) => string;
+
+	if (span < 3600_000) {
+		// < 1 hour: bucket by minute
+		bucketSize = 60_000;
+		formatLabel = (d) => `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+	} else if (span < 86400_000) {
+		// < 1 day: bucket by hour
+		bucketSize = 3600_000;
+		formatLabel = (d) => `${d.getHours()}:00`;
+	} else {
+		// > 1 day: bucket by day
+		bucketSize = 86400_000;
+		formatLabel = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+	}
+
+	const bucketMap = new Map<number, Record<VibesAction, number>>();
+	const bucketLabels = new Map<number, string>();
+
+	for (const a of lineAnnotations) {
+		const t = new Date(a.timestamp).getTime();
+		const key = Math.floor(t / bucketSize) * bucketSize;
+		const existing = bucketMap.get(key) ?? { create: 0, modify: 0, delete: 0, review: 0 };
+		existing[a.action]++;
+		bucketMap.set(key, existing);
+		if (!bucketLabels.has(key)) bucketLabels.set(key, formatLabel(new Date(key)));
+	}
+
+	const sorted = [...bucketMap.entries()].sort((a, b) => a[0] - b[0]);
+	let maxCount = 0;
+	const buckets = sorted.map(([key, counts]) => {
+		const total = counts.create + counts.modify + counts.delete + counts.review;
+		if (total > maxCount) maxCount = total;
+		return { label: bucketLabels.get(key) ?? '', counts, total };
+	});
+
+	return { buckets, maxCount };
+}
 
 /**
  * VIBES Dashboard — main overview shown when the VIBES tab is opened.
@@ -54,6 +128,24 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 	const [initProjectName, setInitProjectName] = useState('');
 	const [isInitializing, setIsInitializing] = useState(false);
 	const [actionStatus, setActionStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+	// ========================================================================
+	// Computed visualizations
+	// ========================================================================
+
+	const timeline = useMemo(() => buildTimeline(vibesData.annotations), [vibesData.annotations]);
+
+	const assuranceDist = useMemo(() => {
+		const dist = { low: 0, medium: 0, high: 0 };
+		for (const a of vibesData.annotations) {
+			if (a.type === 'line' || a.type === 'function') {
+				dist[a.assurance_level]++;
+			}
+		}
+		return dist;
+	}, [vibesData.annotations]);
+
+	const assuranceTotal = assuranceDist.low + assuranceDist.medium + assuranceDist.high;
 
 	// ========================================================================
 	// Quick Actions
@@ -114,6 +206,69 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 			setIsInitializing(false);
 		}
 	}, [initProjectName, initialize]);
+
+	// Export dropdown state
+	const [showExportMenu, setShowExportMenu] = useState(false);
+
+	const handleExport = useCallback(async (type: 'annotations' | 'manifest' | 'summary') => {
+		if (!projectPath) return;
+		setShowExportMenu(false);
+		setActionStatus(null);
+		try {
+			let content: string;
+			let defaultName: string;
+			let ext: string;
+
+			if (type === 'annotations') {
+				const result = await window.maestro.vibes.getLog(projectPath, { json: true });
+				content = result.data ?? '[]';
+				defaultName = 'annotations.jsonl';
+				ext = 'jsonl';
+			} else if (type === 'manifest') {
+				const result = await window.maestro.vibes.getManifest(projectPath);
+				content = result.data ?? '{}';
+				defaultName = 'manifest.json';
+				ext = 'json';
+			} else {
+				// Generate markdown summary
+				const lines = [
+					'# VIBES Summary',
+					'',
+					`- **Annotations:** ${stats?.totalAnnotations ?? 0}`,
+					`- **Files Covered:** ${stats?.filesCovered ?? 0} / ${stats?.totalTrackedFiles ?? 0}`,
+					`- **Coverage:** ${stats?.coveragePercent ?? 0}%`,
+					`- **Active Sessions:** ${stats?.activeSessions ?? 0}`,
+					`- **Contributing Models:** ${stats?.contributingModels ?? 0}`,
+					`- **Assurance Level:** ${vibesAssuranceLevel}`,
+					'',
+					'## Models',
+					...vibesData.models.map(m => `- ${m.modelName} (${m.percentage.toFixed(1)}%)`),
+				];
+				content = lines.join('\n');
+				defaultName = 'vibes-summary.md';
+				ext = 'md';
+			}
+
+			const savePath = await window.maestro.dialog.saveFile({
+				title: `Export VIBES ${type}`,
+				defaultPath: defaultName,
+				filters: [
+					{ name: `${ext.toUpperCase()} files`, extensions: [ext] },
+					{ name: 'All files', extensions: ['*'] },
+				],
+			});
+
+			if (savePath) {
+				await window.maestro.fs.writeFile(savePath, content);
+				setActionStatus({ type: 'success', message: `Exported ${type} successfully` });
+			}
+		} catch (err) {
+			setActionStatus({
+				type: 'error',
+				message: err instanceof Error ? err.message : `Export ${type} failed`,
+			});
+		}
+	}, [projectPath, stats, vibesAssuranceLevel, vibesData.models]);
 
 	// ========================================================================
 	// Status Banner — disabled / not initialized / error states
@@ -298,6 +453,165 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 				/>
 			</div>
 
+			{/* Activity Timeline */}
+			{!isLoading && isInitialized && (
+				<div className="flex flex-col gap-1.5" data-testid="activity-timeline">
+					<span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: theme.colors.textDim }}>
+						Activity Timeline
+					</span>
+					{timeline.buckets.length > 0 ? (
+						<div className="flex items-end gap-px" style={{ height: 100 }}>
+							{timeline.buckets.map((bucket, i) => (
+								<div
+									key={i}
+									className="flex-1 flex flex-col justify-end"
+									style={{ height: '100%' }}
+									title={`${bucket.label}: ${bucket.total} annotations`}
+								>
+									{(['create', 'modify', 'review', 'delete'] as VibesAction[]).map((action) =>
+										bucket.counts[action] > 0 ? (
+											<div
+												key={action}
+												data-testid={`bar-${action}`}
+												style={{
+													height: `${(bucket.counts[action] / timeline.maxCount) * 100}%`,
+													backgroundColor: ACTION_COLORS[action],
+													minHeight: 2,
+												}}
+											/>
+										) : null,
+									)}
+								</div>
+							))}
+						</div>
+					) : (
+						<span className="text-[10px] py-4 text-center" style={{ color: theme.colors.textDim }}>
+							No activity yet
+						</span>
+					)}
+					{timeline.buckets.length > 0 && (
+						<div className="flex justify-between text-[9px]" style={{ color: theme.colors.textDim }}>
+							<span>{timeline.buckets[0]?.label}</span>
+							<span>{timeline.buckets[timeline.buckets.length - 1]?.label}</span>
+						</div>
+					)}
+					{/* Action legend */}
+					{timeline.buckets.length > 0 && (
+						<div className="flex items-center gap-3 text-[9px]" data-testid="timeline-legend">
+							{Object.entries(ACTION_COLORS).map(([action, color]) => (
+								<span key={action} className="flex items-center gap-1">
+									<span className="inline-block w-2 h-2 rounded-sm" style={{ backgroundColor: color }} />
+									{action}
+								</span>
+							))}
+						</div>
+					)}
+				</div>
+			)}
+
+			{/* Model Contribution Donut */}
+			{!isLoading && isInitialized && vibesData.models.length > 0 && (
+				<div className="flex flex-col gap-1.5" data-testid="model-donut-section">
+					<span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: theme.colors.textDim }}>
+						Model Contributions
+					</span>
+					<div className="flex items-center gap-3">
+						<div className="relative shrink-0" style={{ width: 64, height: 64 }} data-testid="model-donut">
+							<svg viewBox="0 0 36 36" width="64" height="64">
+								<circle cx="18" cy="18" r="14" fill="none" stroke={theme.colors.bgActivity} strokeWidth="4" />
+								{(() => {
+									let offset = 25; // start at 12 o'clock (25% offset on a 100-unit circle)
+									return vibesData.models.map((model, i) => {
+										const pct = model.percentage;
+										const dashLen = pct * 0.8796; // circumference = 2*PI*14 ≈ 87.96
+										const el = (
+											<circle
+												key={model.modelName}
+												cx="18" cy="18" r="14"
+												fill="none"
+												stroke={MODEL_PALETTE[i % MODEL_PALETTE.length]}
+												strokeWidth="4"
+												strokeDasharray={`${dashLen} ${87.96 - dashLen}`}
+												strokeDashoffset={-offset * 0.8796}
+												data-testid={`model-segment-${i}`}
+											/>
+										);
+										offset += pct;
+										return el;
+									});
+								})()}
+							</svg>
+							<div className="absolute inset-0 flex items-center justify-center">
+								<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+									{vibesData.models.length}
+								</span>
+							</div>
+						</div>
+						<div className="flex flex-col gap-0.5 text-[10px]" data-testid="model-legend">
+							{vibesData.models.map((model, i) => (
+								<span key={model.modelName} className="flex items-center gap-1.5">
+									<span
+										className="inline-block w-2 h-2 rounded-full shrink-0"
+										style={{ backgroundColor: MODEL_PALETTE[i % MODEL_PALETTE.length] }}
+									/>
+									<span style={{ color: theme.colors.textMain }}>{model.modelName}</span>
+									<span style={{ color: theme.colors.textDim }}>{model.percentage}%</span>
+								</span>
+							))}
+						</div>
+					</div>
+				</div>
+			)}
+
+			{/* Assurance Level Distribution */}
+			{!isLoading && isInitialized && assuranceTotal > 0 && (
+				<div className="flex flex-col gap-1.5" data-testid="assurance-distribution">
+					<span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: theme.colors.textDim }}>
+						Assurance Distribution
+					</span>
+					<div className="flex h-3 rounded overflow-hidden" style={{ backgroundColor: theme.colors.bgActivity }}>
+						{assuranceDist.low > 0 && (
+							<div
+								data-testid="assurance-bar-low"
+								style={{ width: `${(assuranceDist.low / assuranceTotal) * 100}%`, backgroundColor: ASSURANCE_BAR_COLORS.low }}
+							/>
+						)}
+						{assuranceDist.medium > 0 && (
+							<div
+								data-testid="assurance-bar-medium"
+								style={{ width: `${(assuranceDist.medium / assuranceTotal) * 100}%`, backgroundColor: ASSURANCE_BAR_COLORS.medium }}
+							/>
+						)}
+						{assuranceDist.high > 0 && (
+							<div
+								data-testid="assurance-bar-high"
+								style={{ width: `${(assuranceDist.high / assuranceTotal) * 100}%`, backgroundColor: ASSURANCE_BAR_COLORS.high }}
+							/>
+						)}
+					</div>
+					<div className="flex items-center gap-3 text-[10px]" data-testid="assurance-legend">
+						{assuranceDist.low > 0 && (
+							<span className="flex items-center gap-1">
+								<span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: ASSURANCE_BAR_COLORS.low }} />
+								Low: {assuranceDist.low}
+							</span>
+						)}
+						{assuranceDist.medium > 0 && (
+							<span className="flex items-center gap-1">
+								<span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: ASSURANCE_BAR_COLORS.medium }} />
+								Medium: {assuranceDist.medium}
+							</span>
+						)}
+						{assuranceDist.high > 0 && (
+							<span className="flex items-center gap-1">
+								<span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: ASSURANCE_BAR_COLORS.high }} />
+								High: {assuranceDist.high}
+							</span>
+						)}
+					</div>
+				</div>
+			)}
+
 			{/* Quick Actions */}
 			<div className="flex flex-col gap-1.5">
 				<span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: theme.colors.textDim }}>
@@ -326,6 +640,46 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 						label="Refresh"
 						onClick={refresh}
 					/>
+					<div className="relative">
+						<ActionButton
+							theme={theme}
+							icon={<Download className="w-3.5 h-3.5" />}
+							label="Export"
+							onClick={() => setShowExportMenu((prev) => !prev)}
+						/>
+						{showExportMenu && (
+							<div
+								className="absolute top-full left-0 mt-1 z-20 rounded shadow-lg text-xs min-w-[160px]"
+								style={{
+									backgroundColor: theme.colors.bgSidebar,
+									border: `1px solid ${theme.colors.border}`,
+								}}
+								data-testid="export-dropdown"
+							>
+								<button
+									onClick={() => handleExport('annotations')}
+									className="block w-full text-left px-3 py-1.5 transition-opacity hover:opacity-80"
+									style={{ color: theme.colors.textMain }}
+								>
+									Annotations (JSONL)
+								</button>
+								<button
+									onClick={() => handleExport('manifest')}
+									className="block w-full text-left px-3 py-1.5 transition-opacity hover:opacity-80"
+									style={{ color: theme.colors.textMain }}
+								>
+									Manifest (JSON)
+								</button>
+								<button
+									onClick={() => handleExport('summary')}
+									className="block w-full text-left px-3 py-1.5 transition-opacity hover:opacity-80"
+									style={{ color: theme.colors.textMain }}
+								>
+									Summary (Markdown)
+								</button>
+							</div>
+						)}
+					</div>
 				</div>
 			</div>
 

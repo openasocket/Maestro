@@ -9,7 +9,7 @@
 // - Per-project file locking to prevent concurrent write corruption
 // - Graceful error handling (log + never crash the agent session)
 
-import { mkdir, readFile, writeFile, appendFile, access, constants, open, rename } from 'fs/promises';
+import { mkdir, readFile, writeFile, appendFile, access, constants, open, rename, readdir, stat } from 'fs/promises';
 import * as path from 'path';
 
 import type {
@@ -18,6 +18,8 @@ import type {
 	VibesManifest,
 	VibesManifestEntry,
 	VibesAnnotation,
+	VibesEnvironmentEntry,
+	VibesLineAnnotation,
 } from '../../shared/vibes-types';
 
 // ============================================================================
@@ -704,6 +706,336 @@ export async function backfillCommitHash(
 	});
 
 	return updatedCount;
+}
+
+// ============================================================================
+// Direct Data Reading (Fallback when vibescheck binary is unavailable)
+// ============================================================================
+
+/**
+ * Compute project stats directly from annotations and manifest on disk.
+ * Used as fallback when the vibescheck CLI binary is not installed.
+ */
+export async function computeStatsFromAnnotations(projectPath: string): Promise<{
+	totalAnnotations: number;
+	filesCovered: number;
+	totalTrackedFiles: number;
+	coveragePercent: number;
+	activeSessions: number;
+	contributingModels: number;
+	assuranceLevel: string;
+}> {
+	const annotations = await readAnnotations(projectPath);
+	const config = await readVibesConfig(projectPath);
+	const manifest = await readVibesManifest(projectPath);
+
+	// Count line/function annotations
+	const lineAnnotations = annotations.filter(
+		(a) => a.type === 'line' || a.type === 'function',
+	);
+
+	// Unique file paths from line annotations
+	const coveredFiles = new Set<string>();
+	for (const a of lineAnnotations) {
+		if ('file_path' in a) {
+			coveredFiles.add(a.file_path);
+		}
+	}
+
+	// Active sessions: sessions with 'start' event but no corresponding 'end'
+	const sessionStarts = new Set<string>();
+	const sessionEnds = new Set<string>();
+	for (const a of annotations) {
+		if (a.type === 'session') {
+			if (a.event === 'start') sessionStarts.add(a.session_id);
+			if (a.event === 'end') sessionEnds.add(a.session_id);
+		}
+	}
+	const activeSessions = [...sessionStarts].filter((id) => !sessionEnds.has(id)).length;
+
+	// Contributing models from manifest environment entries
+	const modelNames = new Set<string>();
+	for (const entry of Object.values(manifest.entries)) {
+		if (entry.type === 'environment') {
+			modelNames.add((entry as VibesEnvironmentEntry).model_name);
+		}
+	}
+
+	const filesCovered = coveredFiles.size;
+	// Approximate totalTrackedFiles as filesCovered if we can't scan
+	const totalTrackedFiles = filesCovered || 1;
+
+	return {
+		totalAnnotations: lineAnnotations.length,
+		filesCovered,
+		totalTrackedFiles,
+		coveragePercent: totalTrackedFiles > 0 ? Math.round((filesCovered / totalTrackedFiles) * 100) : 0,
+		activeSessions,
+		contributingModels: modelNames.size,
+		assuranceLevel: config?.assurance_level ?? 'low',
+	};
+}
+
+/**
+ * Extract session records from annotations.
+ * Used as fallback when the vibescheck CLI binary is not installed.
+ */
+export async function extractSessionsFromAnnotations(projectPath: string): Promise<Array<{
+	sessionId: string;
+	event: string;
+	timestamp: string;
+	agentType?: string;
+	annotationCount: number;
+}>> {
+	const annotations = await readAnnotations(projectPath);
+
+	// Count annotations per session
+	const sessionCounts = new Map<string, number>();
+	for (const a of annotations) {
+		if (a.type === 'line' || a.type === 'function') {
+			const sid = 'session_id' in a ? a.session_id : undefined;
+			if (sid) {
+				sessionCounts.set(sid, (sessionCounts.get(sid) ?? 0) + 1);
+			}
+		}
+	}
+
+	// Build session records from session annotations
+	const sessions: Array<{
+		sessionId: string;
+		event: string;
+		timestamp: string;
+		agentType?: string;
+		annotationCount: number;
+	}> = [];
+
+	for (const a of annotations) {
+		if (a.type === 'session') {
+			sessions.push({
+				sessionId: a.session_id,
+				event: a.event,
+				timestamp: a.timestamp,
+				agentType: a.description,
+				annotationCount: sessionCounts.get(a.session_id) ?? 0,
+			});
+		}
+	}
+
+	return sessions;
+}
+
+/**
+ * Extract model information from the manifest.
+ * Used as fallback when the vibescheck CLI binary is not installed.
+ */
+export async function extractModelsFromManifest(projectPath: string): Promise<Array<{
+	modelName: string;
+	modelVersion: string;
+	toolName: string;
+	annotationCount: number;
+	percentage: number;
+}>> {
+	const manifest = await readVibesManifest(projectPath);
+	const annotations = await readAnnotations(projectPath);
+
+	// Count annotations per environment hash
+	const hashCounts = new Map<string, number>();
+	for (const a of annotations) {
+		if ((a.type === 'line' || a.type === 'function') && 'environment_hash' in a) {
+			const hash = a.environment_hash;
+			hashCounts.set(hash, (hashCounts.get(hash) ?? 0) + 1);
+		}
+	}
+
+	// Group by model name (multiple env hashes can map to same model)
+	const modelMap = new Map<string, {
+		modelName: string;
+		modelVersion: string;
+		toolName: string;
+		count: number;
+	}>();
+
+	for (const [hash, entry] of Object.entries(manifest.entries)) {
+		if (entry.type === 'environment') {
+			const env = entry as VibesEnvironmentEntry;
+			const existing = modelMap.get(env.model_name);
+			const count = hashCounts.get(hash) ?? 0;
+			if (existing) {
+				existing.count += count;
+			} else {
+				modelMap.set(env.model_name, {
+					modelName: env.model_name,
+					modelVersion: env.model_version,
+					toolName: env.tool_name,
+					count,
+				});
+			}
+		}
+	}
+
+	const totalAnnotations = [...modelMap.values()].reduce((sum, m) => sum + m.count, 0);
+
+	return [...modelMap.values()].map((m) => ({
+		modelName: m.modelName,
+		modelVersion: m.modelVersion,
+		toolName: m.toolName,
+		annotationCount: m.count,
+		percentage: totalAnnotations > 0 ? Math.round((m.count / totalAnnotations) * 100) : 0,
+	}));
+}
+
+/**
+ * Compute blame data for a specific file from annotations.
+ * Used as fallback when the vibescheck CLI binary is not installed.
+ */
+export async function computeBlameFromAnnotations(
+	projectPath: string,
+	filePath: string,
+): Promise<Array<{
+	lineStart: number;
+	lineEnd: number;
+	action: string;
+	modelName: string;
+	modelVersion: string;
+	toolName: string;
+	timestamp: string;
+	sessionId?: string;
+}>> {
+	const annotations = await readAnnotations(projectPath);
+	const manifest = await readVibesManifest(projectPath);
+
+	// Filter for line annotations matching the file
+	const fileAnnotations = annotations.filter(
+		(a): a is VibesLineAnnotation =>
+			a.type === 'line' && a.file_path === filePath,
+	);
+
+	// Resolve environment info and build blame entries
+	const blame = fileAnnotations.map((a) => {
+		const envEntry = manifest.entries[a.environment_hash];
+		const env = envEntry?.type === 'environment' ? envEntry as VibesEnvironmentEntry : undefined;
+
+		return {
+			lineStart: a.line_start,
+			lineEnd: a.line_end,
+			action: a.action,
+			modelName: env?.model_name ?? 'unknown',
+			modelVersion: env?.model_version ?? 'unknown',
+			toolName: env?.tool_name ?? 'unknown',
+			timestamp: a.timestamp,
+			sessionId: a.session_id,
+		};
+	});
+
+	// Sort by line_start ascending
+	blame.sort((a, b) => a.lineStart - b.lineStart);
+
+	return blame;
+}
+
+/**
+ * Compute file coverage from annotations.
+ * Used as fallback when the vibescheck CLI binary is not installed.
+ */
+export async function computeCoverageFromAnnotations(
+	projectPath: string,
+): Promise<Array<{
+	filePath: string;
+	status: 'covered' | 'partial' | 'uncovered';
+	annotationCount: number;
+}>> {
+	const annotations = await readAnnotations(projectPath);
+	const config = await readVibesConfig(projectPath);
+
+	// Group line annotations by file path
+	const fileCounts = new Map<string, number>();
+	for (const a of annotations) {
+		if (a.type === 'line' && 'file_path' in a) {
+			fileCounts.set(a.file_path, (fileCounts.get(a.file_path) ?? 0) + 1);
+		}
+	}
+
+	const results: Array<{
+		filePath: string;
+		status: 'covered' | 'partial' | 'uncovered';
+		annotationCount: number;
+	}> = [];
+
+	// Annotated files
+	for (const [fp, count] of fileCounts) {
+		results.push({
+			filePath: fp,
+			status: count > 5 ? 'covered' : 'partial',
+			annotationCount: count,
+		});
+	}
+
+	// Try to find uncovered files from tracked extensions
+	if (config?.tracked_extensions && config.tracked_extensions.length > 0) {
+		const trackedFiles = await scanTrackedFiles(projectPath, config.tracked_extensions, config.exclude_patterns ?? []);
+		for (const fp of trackedFiles) {
+			if (!fileCounts.has(fp)) {
+				results.push({ filePath: fp, status: 'uncovered', annotationCount: 0 });
+			}
+		}
+	}
+
+	// Sort: covered first, then partial, then uncovered, then by path
+	const statusOrder = { covered: 0, partial: 1, uncovered: 2 };
+	results.sort((a, b) => statusOrder[a.status] - statusOrder[b.status] || a.filePath.localeCompare(b.filePath));
+
+	return results;
+}
+
+/**
+ * Scan the project for files matching tracked extensions.
+ * Returns relative file paths. Respects exclude patterns.
+ */
+async function scanTrackedFiles(
+	projectPath: string,
+	trackedExtensions: string[],
+	excludePatterns: string[],
+): Promise<string[]> {
+	const results: string[] = [];
+	const extSet = new Set(trackedExtensions);
+
+	// Simple exclude check: match directory components against glob-like patterns
+	const excludeDirs = excludePatterns
+		.map((p) => p.replace(/\*\*/g, '').replace(/\*/g, '').replace(/\//g, ''))
+		.filter((d) => d.length > 0);
+
+	async function walk(dir: string, relPrefix: string): Promise<void> {
+		let entries;
+		try {
+			entries = await readdir(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+
+		for (const entry of entries) {
+			const name = entry.name;
+
+			// Skip hidden directories and common excludes
+			if (name.startsWith('.') || excludeDirs.includes(name)) {
+				continue;
+			}
+
+			const fullPath = path.join(dir, name);
+			const relPath = relPrefix ? `${relPrefix}/${name}` : name;
+
+			if (entry.isDirectory()) {
+				await walk(fullPath, relPath);
+			} else if (entry.isFile()) {
+				const ext = path.extname(name);
+				if (extSet.has(ext)) {
+					results.push(relPath);
+				}
+			}
+		}
+	}
+
+	await walk(projectPath, '');
+	return results;
 }
 
 // ============================================================================

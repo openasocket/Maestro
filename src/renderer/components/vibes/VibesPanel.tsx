@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Shield, Settings, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import type { Theme } from '../../types';
 import { useSettings, useVibesData } from '../../hooks';
@@ -115,6 +115,34 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 		);
 	}, []);
 
+	// Last-refreshed timestamp tracking
+	const [lastRefreshed, setLastRefreshed] = useState<number | null>(null);
+	const [relativeTime, setRelativeTime] = useState<string>('');
+
+	// Update lastRefreshed when data finishes loading
+	const prevLoadingRef = useRef(vibesData.isLoading);
+	useEffect(() => {
+		if (prevLoadingRef.current && !vibesData.isLoading) {
+			setLastRefreshed(Date.now());
+		}
+		prevLoadingRef.current = vibesData.isLoading;
+	}, [vibesData.isLoading]);
+
+	// Update relative time display every second
+	useEffect(() => {
+		if (!lastRefreshed) return;
+		const update = () => {
+			const delta = Math.floor((Date.now() - lastRefreshed) / 1000);
+			if (delta < 5) setRelativeTime('just now');
+			else if (delta < 60) setRelativeTime(`${delta}s ago`);
+			else if (delta < 3600) setRelativeTime(`${Math.floor(delta / 60)}m ago`);
+			else setRelativeTime(`${Math.floor(delta / 3600)}h ago`);
+		};
+		update();
+		const id = setInterval(update, 1000);
+		return () => clearInterval(id);
+	}, [lastRefreshed]);
+
 	const handleRefresh = useCallback(() => {
 		vibesData.refresh();
 	}, [vibesData]);
@@ -200,6 +228,15 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 					>
 						<CheckCircle2 className="w-3 h-3" />
 						v{binaryVersion}
+					</span>
+				)}
+				{relativeTime && (
+					<span
+						className="shrink-0 text-[10px] px-1"
+						style={{ color: theme.colors.textDim }}
+						data-testid="last-updated-label"
+					>
+						{relativeTime}
 					</span>
 				)}
 				<button
@@ -309,6 +346,7 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 						theme={theme}
 						annotations={vibesData.annotations}
 						isLoading={vibesData.isLoading}
+						projectPath={projectPath}
 					/>
 				)}
 
