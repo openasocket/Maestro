@@ -57,6 +57,7 @@ describe('process-manager.ts', () => {
 					cacheCreationInputTokens: 100,
 					totalCostUsd: 0.05,
 					contextWindow: 200000,
+					modelName: 'claude-3-sonnet',
 				});
 			});
 
@@ -90,6 +91,7 @@ describe('process-manager.ts', () => {
 					cacheCreationInputTokens: 100,
 					totalCostUsd: 0.1,
 					contextWindow: 200000, // Should use the highest context window
+					modelName: 'claude-3-sonnet', // Primary model (most output tokens)
 				});
 			});
 
@@ -136,6 +138,7 @@ describe('process-manager.ts', () => {
 					cacheCreationInputTokens: 0,
 					totalCostUsd: 0,
 					contextWindow: 200000, // Default value
+					modelName: 'model-1', // Primary model (most output tokens)
 				});
 			});
 

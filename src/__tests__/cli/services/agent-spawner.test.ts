@@ -813,6 +813,7 @@ Some text with [x] in it that's not a checkbox
 				cacheCreationInputTokens: 10,
 				totalCostUsd: 0.05,
 				contextWindow: 200000,
+				modelName: 'claude-3',
 			});
 		});
 
