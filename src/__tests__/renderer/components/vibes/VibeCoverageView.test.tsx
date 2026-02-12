@@ -617,4 +617,224 @@ describe('VibeCoverageView', () => {
 		expect(screen.queryByTestId('donut-partial')).toBeNull();
 		expect(screen.queryByTestId('donut-uncovered')).toBeNull();
 	});
+
+	// ========================================================================
+	// Directory view
+	// ========================================================================
+
+	it('renders directory view when toggle is active', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('src/main.ts')).toBeTruthy();
+		});
+
+		// Default view is "files" — directory-view container should not exist
+		expect(screen.queryByTestId('directory-view')).toBeNull();
+
+		// Click Directories toggle
+		fireEvent.click(screen.getByTestId('view-dirs-btn'));
+
+		// Directory view container should now appear
+		expect(screen.getByTestId('directory-view')).toBeTruthy();
+	});
+
+	it('groups files by parent directory', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('src/main.ts')).toBeTruthy();
+		});
+
+		// Switch to directory view
+		fireEvent.click(screen.getByTestId('view-dirs-btn'));
+
+		// mockCoverageData has:
+		//   src/main.ts       → dir "src"
+		//   src/utils/helpers.ts → dir "src/utils"
+		//   src/config.ts     → dir "src"
+		//   src/index.ts      → dir "src"
+		// So we expect two directory groups: "src" (3 files) and "src/utils" (1 file)
+		expect(screen.getByTestId('dir-row-src')).toBeTruthy();
+		expect(screen.getByTestId('dir-row-src/utils')).toBeTruthy();
+
+		// Verify file count badges
+		expect(screen.getByText('3 files')).toBeTruthy();
+		expect(screen.getByText('1 files')).toBeTruthy();
+	});
+
+	it('shows directory-level coverage percentage', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('src/main.ts')).toBeTruthy();
+		});
+
+		// Switch to directory view
+		fireEvent.click(screen.getByTestId('view-dirs-btn'));
+
+		// "src" dir: 2 full + 0 partial + 1 uncovered = (2 + 0) / 3 = 67%
+		// "src/utils" dir: 0 full + 1 partial + 0 uncovered = (0 + 0.5) / 1 = 50%
+		// These percentages should be visible
+		expect(screen.getByText('67%')).toBeTruthy();
+		expect(screen.getByText('50%')).toBeTruthy();
+	});
+
+	it('expands directory to show child files', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('src/main.ts')).toBeTruthy();
+		});
+
+		// Switch to directory view
+		fireEvent.click(screen.getByTestId('view-dirs-btn'));
+
+		// Files should not be visible yet (directories are collapsed by default)
+		expect(screen.queryByText('src/main.ts')).toBeNull();
+		expect(screen.queryByText('src/config.ts')).toBeNull();
+
+		// Click the "src" directory row to expand
+		fireEvent.click(screen.getByTestId('dir-row-src'));
+
+		// Child files should now be visible
+		expect(screen.getByText('src/main.ts')).toBeTruthy();
+		expect(screen.getByText('src/config.ts')).toBeTruthy();
+		expect(screen.getByText('src/index.ts')).toBeTruthy();
+
+		// Files from other directory should NOT be visible
+		expect(screen.queryByText('src/utils/helpers.ts')).toBeNull();
+	});
+
+	it('collapses directory on click', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('src/main.ts')).toBeTruthy();
+		});
+
+		// Switch to directory view
+		fireEvent.click(screen.getByTestId('view-dirs-btn'));
+
+		// Expand the "src" directory
+		fireEvent.click(screen.getByTestId('dir-row-src'));
+		expect(screen.getByText('src/main.ts')).toBeTruthy();
+
+		// Click again to collapse
+		fireEvent.click(screen.getByTestId('dir-row-src'));
+
+		// Child files should be hidden again
+		expect(screen.queryByText('src/main.ts')).toBeNull();
+		expect(screen.queryByText('src/config.ts')).toBeNull();
+	});
+
+	// ========================================================================
+	// File-type distribution
+	// ========================================================================
+
+	it('renders extension distribution section', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('extension-distribution')).toBeTruthy();
+		});
+
+		expect(screen.getByText('By File Type')).toBeTruthy();
+	});
+
+	it('shows extension labels with file counts', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('extension-distribution')).toBeTruthy();
+		});
+
+		// All 4 files in mockCoverageData are .ts
+		expect(screen.getByText('.ts')).toBeTruthy();
+		const distSection = screen.getByTestId('extension-distribution');
+		expect(distSection.textContent).toContain('4');
+	});
+
+	it('shows multiple extensions when files have different types', async () => {
+		mockGetCoverage.mockResolvedValue({
+			success: true,
+			data: JSON.stringify([
+				{ file_path: 'src/app.tsx', coverage_status: 'full', annotation_count: 10 },
+				{ file_path: 'src/style.css', coverage_status: 'uncovered', annotation_count: 0 },
+				{ file_path: 'src/main.ts', coverage_status: 'full', annotation_count: 5 },
+				{ file_path: 'src/utils.ts', coverage_status: 'partial', annotation_count: 2 },
+			]),
+		});
+
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('extension-distribution')).toBeTruthy();
+		});
+
+		// Should show .ts (2 files, sorted first by count), .tsx (1), .css (1)
+		expect(screen.getByText('.ts')).toBeTruthy();
+		expect(screen.getByText('.tsx')).toBeTruthy();
+		expect(screen.getByText('.css')).toBeTruthy();
+	});
+
+	it('does not render extension distribution when no files', async () => {
+		mockGetCoverage.mockResolvedValue({
+			success: true,
+			data: JSON.stringify([]),
+		});
+
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('No tracked files')).toBeTruthy();
+		});
+
+		expect(screen.queryByTestId('extension-distribution')).toBeNull();
+	});
 });
