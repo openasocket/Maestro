@@ -18,7 +18,7 @@ import {
 	VIBES_SETTINGS_DEFAULTS,
 	getVibesSettingWithDefault,
 } from '../../shared/vibes-settings';
-import type { VibesAssuranceLevel } from '../../shared/vibes-types';
+import type { VibesAnnotation, VibesAssuranceLevel } from '../../shared/vibes-types';
 import type { ProcessConfig, ToolExecution, UsageStats } from '../process-manager/types';
 
 // ============================================================================
@@ -94,7 +94,7 @@ export class VibesCoordinator {
 	/** Projects where auto-init has already been attempted (avoid repeated attempts). */
 	private autoInitAttempted: Set<string> = new Set();
 
-	/** Whether the vibescheck binary missing warning has been logged this session. */
+	/** Whether the vibecheck binary missing warning has been logged this session. */
 	private vibesBinaryMissingLogged = false;
 
 	/** Sessions whose environment entry has already been updated with real model info. */
@@ -298,7 +298,7 @@ export class VibesCoordinator {
 				modelVersion: 'unknown',
 			});
 
-			const state = await this.sessionManager.startSession(
+			await this.sessionManager.startSession(
 				sessionId,
 				projectPath,
 				agentType,
@@ -401,7 +401,7 @@ export class VibesCoordinator {
 		let targetSessionId = sessionId;
 		if (!targetSessionId) {
 			const sessionManager = this.getSessionManager();
-			for (const [sessId, agentType] of this.sessionAgentTypes) {
+			for (const [sessId] of this.sessionAgentTypes) {
 				const state = sessionManager.getSession(sessId);
 				if (state && state.isActive && state.projectPath === projectPath) {
 					targetSessionId = state.vibesSessionId;
@@ -527,7 +527,7 @@ export class VibesCoordinator {
 	}
 
 	/**
-	 * Log a vibescheck binary not-found warning once per session.
+	 * Log a vibecheck binary not-found warning once per session.
 	 * Returns true if this is the first call (warning was logged).
 	 */
 	notifyVibesBinaryMissing(): boolean {
@@ -536,7 +536,7 @@ export class VibesCoordinator {
 		}
 		this.vibesBinaryMissingLogged = true;
 		logger.warn(
-			'[VibesCoordinator] vibescheck binary not found — CLI-dependent features disabled',
+			'[VibesCoordinator] vibecheck binary not found — CLI-dependent features disabled',
 			'VibesCoordinator',
 		);
 		return true;
@@ -805,7 +805,7 @@ export class VibesCoordinator {
 
 	/**
 	 * Auto-initialize a project's .ai-audit/ directory.
-	 * Attempts to use the vibescheck binary first; falls back to direct
+	 * Attempts to use the vibecheck binary first; falls back to direct
 	 * directory creation via vibes-io if the binary is not available.
 	 * Uses the project directory name as the project name.
 	 * Never throws — logs warnings on failure.
@@ -821,7 +821,7 @@ export class VibesCoordinator {
 			{ projectPath, projectName, assuranceLevel },
 		);
 
-		// Try vibescheck binary first
+		// Try vibecheck binary first
 		const binaryPath = await findVibesCheckBinary(customBinaryPath || undefined, projectPath);
 		if (binaryPath) {
 			try {
@@ -832,7 +832,7 @@ export class VibesCoordinator {
 
 				if (result.success) {
 					logger.info(
-						'[VibesCoordinator] Auto-init succeeded via vibescheck binary',
+						'[VibesCoordinator] Auto-init succeeded via vibecheck binary',
 						'VibesCoordinator',
 						{ projectPath },
 					);
@@ -840,13 +840,13 @@ export class VibesCoordinator {
 				}
 
 				logger.warn(
-					'[VibesCoordinator] vibescheck init failed, falling back to direct init',
+					'[VibesCoordinator] vibecheck init failed, falling back to direct init',
 					'VibesCoordinator',
 					{ projectPath, error: result.error },
 				);
 			} catch (err) {
 				logger.warn(
-					'[VibesCoordinator] vibescheck init threw, falling back to direct init',
+					'[VibesCoordinator] vibecheck init threw, falling back to direct init',
 					'VibesCoordinator',
 					{ projectPath, error: String(err) },
 				);

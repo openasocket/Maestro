@@ -1,5 +1,5 @@
 // VIBES File I/O — Reads and writes .ai-audit/ directory files directly from Maestro.
-// This is the "fast path" for annotation writing that bypasses the vibescheck binary,
+// This is the "fast path" for annotation writing that bypasses the vibecheck binary,
 // allowing Maestro to write annotations in real-time during agent sessions.
 //
 // Features:
@@ -9,7 +9,7 @@
 // - Per-project file locking to prevent concurrent write corruption
 // - Graceful error handling (log + never crash the agent session)
 
-import { mkdir, readFile, writeFile, appendFile, access, constants, open, rename, readdir, stat } from 'fs/promises';
+import { mkdir, readFile, writeFile, appendFile, access, constants, open, rename, readdir } from 'fs/promises';
 import * as path from 'path';
 
 import type {
@@ -551,13 +551,13 @@ export async function flushAll(): Promise<void> {
 }
 
 // ============================================================================
-// Direct Initialization (Fallback when vibescheck binary is unavailable)
+// Direct Initialization (Fallback when vibecheck binary is unavailable)
 // ============================================================================
 
 /**
- * Initialize the VIBES directory structure directly without the vibescheck binary.
+ * Initialize the VIBES directory structure directly without the vibecheck binary.
  * Creates `.ai-audit/`, `.ai-audit/blobs/`, `config.json`, `manifest.json`,
- * and an empty `annotations.jsonl`. Used as a fallback when the vibescheck
+ * and an empty `annotations.jsonl`. Used as a fallback when the vibecheck
  * CLI is not installed.
  *
  * Returns `{ success: true }` on success, `{ success: false, error }` on failure.
@@ -709,12 +709,12 @@ export async function backfillCommitHash(
 }
 
 // ============================================================================
-// Direct Data Reading (Fallback when vibescheck binary is unavailable)
+// Direct Data Reading (Fallback when vibecheck binary is unavailable)
 // ============================================================================
 
 /**
  * Compute project stats directly from annotations and manifest on disk.
- * Used as fallback when the vibescheck CLI binary is not installed.
+ * Used as fallback when the vibecheck CLI binary is not installed.
  */
 export async function computeStatsFromAnnotations(projectPath: string): Promise<{
 	totalAnnotations: number;
@@ -778,7 +778,7 @@ export async function computeStatsFromAnnotations(projectPath: string): Promise<
 
 /**
  * Extract session records from annotations.
- * Used as fallback when the vibescheck CLI binary is not installed.
+ * Used as fallback when the vibecheck CLI binary is not installed.
  */
 export async function extractSessionsFromAnnotations(projectPath: string): Promise<Array<{
 	sessionId: string;
@@ -826,7 +826,7 @@ export async function extractSessionsFromAnnotations(projectPath: string): Promi
 
 /**
  * Extract model information from the manifest.
- * Used as fallback when the vibescheck CLI binary is not installed.
+ * Used as fallback when the vibecheck CLI binary is not installed.
  */
 export async function extractModelsFromManifest(projectPath: string): Promise<Array<{
 	modelName: string;
@@ -886,7 +886,7 @@ export async function extractModelsFromManifest(projectPath: string): Promise<Ar
 
 /**
  * Compute blame data for a specific file from annotations.
- * Used as fallback when the vibescheck CLI binary is not installed.
+ * Used as fallback when the vibecheck CLI binary is not installed.
  */
 export async function computeBlameFromAnnotations(
 	projectPath: string,
@@ -935,7 +935,7 @@ export async function computeBlameFromAnnotations(
 
 /**
  * Compute file coverage from annotations.
- * Used as fallback when the vibescheck CLI binary is not installed.
+ * Used as fallback when the vibecheck CLI binary is not installed.
  */
 export async function computeCoverageFromAnnotations(
 	projectPath: string,
