@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Shield, Settings, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Settings, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import DiscoBallIcon from '../icons/DiscoBallIcon';
 import type { Theme } from '../../types';
 import { useSettings, useVibesData } from '../../hooks';
 import { VibesDashboard } from './VibesDashboard';
@@ -166,7 +167,7 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 	if (!vibesEnabled) {
 		return (
 			<div className="h-full flex flex-col items-center justify-center gap-3 text-center px-4">
-				<Shield className="w-8 h-8 opacity-40" style={{ color: theme.colors.textDim }} />
+				<DiscoBallIcon className="w-8 h-8 opacity-40" style={{ color: theme.colors.textDim }} />
 				<span
 					className="text-sm font-medium"
 					style={{ color: theme.colors.textMain }}

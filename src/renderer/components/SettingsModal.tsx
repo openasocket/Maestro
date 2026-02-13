@@ -27,13 +27,13 @@ import {
 	FlaskConical,
 	Database,
 	Server,
-	Fingerprint,
 	Battery,
 	Monitor,
 	PartyPopper,
 	Tag,
 	User,
 } from 'lucide-react';
+import DiscoBallIcon from './icons/DiscoBallIcon';
 import { useSettings } from '../hooks';
 import type {
 	Theme,
@@ -991,7 +991,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 						tabIndex={-1}
 						title="VIBES Metadata"
 					>
-						<Fingerprint className="w-4 h-4" />
+						<DiscoBallIcon className="w-4 h-4" />
 						{activeTab === 'vibes' && <span>VIBES</span>}
 					</button>
 					<div className="flex-1 flex justify-end items-center pr-4">

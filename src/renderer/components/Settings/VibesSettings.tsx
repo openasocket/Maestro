@@ -16,7 +16,6 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
-	Shield,
 	Plus,
 	X,
 	Check,
@@ -33,6 +32,7 @@ import {
 	AlertCircle,
 	Loader2,
 } from 'lucide-react';
+import DiscoBallIcon from '../icons/DiscoBallIcon';
 import type { Theme } from '../../types';
 import type { VibesAssuranceLevel } from '../../../shared/vibes-types';
 import { VIBES_SETTINGS_DEFAULTS } from '../../../shared/vibes-settings';
@@ -251,7 +251,7 @@ export function VibesSettings({
 					className="p-2 rounded-lg flex-shrink-0"
 					style={{ backgroundColor: theme.colors.accent + '20' }}
 				>
-					<Shield className="w-5 h-5" style={{ color: theme.colors.accent }} />
+					<DiscoBallIcon className="w-5 h-5" style={{ color: theme.colors.accent }} />
 				</div>
 				<div className="flex-1 min-w-0">
 					<p className="text-[10px] uppercase font-bold opacity-50 mb-1">VIBES Metadata</p>
