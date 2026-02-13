@@ -52,6 +52,7 @@ import {
 	registerSymphonyHandlers,
 	registerTabNamingHandlers,
 	registerAgentErrorHandlers,
+	registerVibesHandlers,
 	setupLoggerEventForwarding,
 	cleanupAllGroomingSessions,
 	getActiveGroomingSessionCount,
@@ -647,6 +648,11 @@ function setupIpcHandlers() {
 		getProcessManager: () => processManager,
 		getAgentDetector: () => agentDetector,
 		agentConfigsStore,
+		settingsStore: store,
+	});
+
+	// Register VIBES handlers for AI audit metadata integration
+	registerVibesHandlers({
 		settingsStore: store,
 	});
 }
