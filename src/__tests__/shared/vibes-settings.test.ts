@@ -132,8 +132,8 @@ describe('shared/vibes-settings', () => {
 		});
 
 		it('should return provided string over default for binary path', () => {
-			const result = getVibesSettingWithDefault('vibesCheckBinaryPath', '/usr/local/bin/vibescheck');
-			expect(result).toBe('/usr/local/bin/vibescheck');
+			const result = getVibesSettingWithDefault('vibesCheckBinaryPath', '/usr/local/bin/vibecheck');
+			expect(result).toBe('/usr/local/bin/vibecheck');
 		});
 
 		it('should return provided per-agent config over default', () => {
@@ -156,7 +156,7 @@ describe('shared/vibes-settings', () => {
 				vibesPerAgentConfig: { 'claude-code': { enabled: true } },
 				vibesMaestroOrchestrationEnabled: false,
 				vibesAutoInit: false,
-				vibesCheckBinaryPath: '/usr/bin/vibescheck',
+				vibesCheckBinaryPath: '/usr/bin/vibecheck',
 				vibesCompressReasoningThreshold: 8192,
 				vibesExternalBlobThreshold: 65536,
 			};

@@ -19,19 +19,14 @@ interface VibesInstallGuideProps {
 
 const INSTALL_OPTIONS = [
 	{
-		label: 'Cargo (Rust)',
-		command: 'cargo install vibescheck',
-		description: 'Preferred method — requires Rust toolchain',
+		label: 'Install from source (Rust)',
+		command: 'git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo install --path .',
+		description: 'Preferred method — requires Rust toolchain (1.91.0+)',
 	},
 	{
-		label: 'npm',
-		command: 'npm install -g vibescheck',
-		description: 'If published to npm',
-	},
-	{
-		label: 'Manual',
-		command: null,
-		description: 'Download from GitHub releases and place in PATH',
+		label: 'Build manually',
+		command: 'git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo build --release',
+		description: 'Binary at target/release/vibecheck — copy to a directory in PATH (e.g. /usr/local/bin/)',
 	},
 ];
 
@@ -40,7 +35,7 @@ const INSTALL_OPTIONS = [
 // ============================================================================
 
 /**
- * Installation guide for the vibescheck CLI binary.
+ * Installation guide for the vibecheck CLI binary.
  * Shows installation methods with copy-to-clipboard buttons.
  */
 export const VibesInstallGuide: React.FC<VibesInstallGuideProps> = ({
@@ -83,7 +78,7 @@ export const VibesInstallGuide: React.FC<VibesInstallGuideProps> = ({
 					className="text-xs font-semibold"
 					style={{ color: theme.colors.textMain }}
 				>
-					Install vibescheck
+					Install vibecheck
 				</span>
 				<button
 					onClick={onClose}

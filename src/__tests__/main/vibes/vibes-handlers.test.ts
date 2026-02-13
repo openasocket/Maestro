@@ -116,9 +116,9 @@ describe('vibes-handlers', () => {
 			get: vi.fn().mockReturnValue(''),
 		};
 
-		// By default, simulate that vibescheck binary IS available
+		// By default, simulate that vibecheck binary IS available
 		// so existing tests that expect bridge calls still pass.
-		mockFindBinary.mockResolvedValue('/usr/local/bin/vibescheck');
+		mockFindBinary.mockResolvedValue('/usr/local/bin/vibecheck');
 
 		registerVibesHandlers({ settingsStore: mockSettingsStore as any });
 	});
@@ -184,12 +184,12 @@ describe('vibes-handlers', () => {
 		};
 
 		it('should call vibesInit with config and custom binary path', async () => {
-			mockSettingsStore.get.mockReturnValue('/custom/vibescheck');
+			mockSettingsStore.get.mockReturnValue('/custom/vibecheck');
 			mockVibesInit.mockResolvedValue({ success: true });
 
 			const result = await handlers['vibes:init']({}, '/project', config);
 
-			expect(mockVibesInit).toHaveBeenCalledWith('/project', config, '/custom/vibescheck');
+			expect(mockVibesInit).toHaveBeenCalledWith('/project', config, '/custom/vibecheck');
 			expect(result).toEqual({ success: true });
 		});
 
@@ -453,23 +453,23 @@ describe('vibes-handlers', () => {
 
 	describe('vibes:findBinary', () => {
 		it('should return path and version when binary is found', async () => {
-			mockFindBinary.mockResolvedValue('/usr/local/bin/vibescheck');
-			mockGetVersion.mockResolvedValue('vibescheck 0.3.2');
+			mockFindBinary.mockResolvedValue('/usr/local/bin/vibecheck');
+			mockGetVersion.mockResolvedValue('vibecheck 0.3.2');
 
-			const result = await handlers['vibes:findBinary']({}, '/custom/vibescheck');
+			const result = await handlers['vibes:findBinary']({}, '/custom/vibecheck');
 
-			expect(mockFindBinary).toHaveBeenCalledWith('/custom/vibescheck');
-			expect(mockGetVersion).toHaveBeenCalledWith('/usr/local/bin/vibescheck');
-			expect(result).toEqual({ path: '/usr/local/bin/vibescheck', version: 'vibescheck 0.3.2' });
+			expect(mockFindBinary).toHaveBeenCalledWith('/custom/vibecheck');
+			expect(mockGetVersion).toHaveBeenCalledWith('/usr/local/bin/vibecheck');
+			expect(result).toEqual({ path: '/usr/local/bin/vibecheck', version: 'vibecheck 0.3.2' });
 		});
 
 		it('should return path with null version when --version fails', async () => {
-			mockFindBinary.mockResolvedValue('/usr/local/bin/vibescheck');
+			mockFindBinary.mockResolvedValue('/usr/local/bin/vibecheck');
 			mockGetVersion.mockResolvedValue(null);
 
 			const result = await handlers['vibes:findBinary']({});
 
-			expect(result).toEqual({ path: '/usr/local/bin/vibescheck', version: null });
+			expect(result).toEqual({ path: '/usr/local/bin/vibecheck', version: null });
 		});
 
 		it('should return null path and version when binary not found', async () => {
@@ -525,25 +525,25 @@ describe('vibes-handlers', () => {
 		});
 
 		it('should use custom binary path from settings', async () => {
-			mockSettingsStore.get.mockReturnValue('/custom/vibescheck');
+			mockSettingsStore.get.mockReturnValue('/custom/vibecheck');
 			mockVibesBackfillCommit.mockResolvedValue({ success: true, updatedCount: 1 });
 
 			await handlers['vibes:backfillCommit']({}, '/project', 'abc123', 'sess-1');
 
-			expect(mockVibesBackfillCommit).toHaveBeenCalledWith('/project', 'abc123', 'sess-1', '/custom/vibescheck');
+			expect(mockVibesBackfillCommit).toHaveBeenCalledWith('/project', 'abc123', 'sess-1', '/custom/vibecheck');
 		});
 	});
 
 	describe('custom binary path from settings', () => {
 		it('should use custom binary path from settings store', async () => {
-			mockSettingsStore.get.mockReturnValue('/opt/vibescheck');
-			mockFindBinary.mockResolvedValue('/opt/vibescheck');
+			mockSettingsStore.get.mockReturnValue('/opt/vibecheck');
+			mockFindBinary.mockResolvedValue('/opt/vibecheck');
 			mockVibesStats.mockResolvedValue({ success: true, data: '{}' });
 
 			await handlers['vibes:getStats']({}, '/project');
 
-			expect(mockFindBinary).toHaveBeenCalledWith('/opt/vibescheck');
-			expect(mockVibesStats).toHaveBeenCalledWith('/project', undefined, '/opt/vibescheck');
+			expect(mockFindBinary).toHaveBeenCalledWith('/opt/vibecheck');
+			expect(mockVibesStats).toHaveBeenCalledWith('/project', undefined, '/opt/vibecheck');
 		});
 
 		it('should pass undefined when settings store returns empty string', async () => {
@@ -556,8 +556,8 @@ describe('vibes-handlers', () => {
 			expect(mockVibesStats).toHaveBeenCalledWith('/project', undefined, undefined);
 		});
 
-		it('should prefer vibescheck when binary is available', async () => {
-			mockFindBinary.mockResolvedValue('/usr/local/bin/vibescheck');
+		it('should prefer vibecheck when binary is available', async () => {
+			mockFindBinary.mockResolvedValue('/usr/local/bin/vibecheck');
 			mockVibesStats.mockResolvedValue({ success: true, data: '{}' });
 
 			await handlers['vibes:getStats']({}, '/project');

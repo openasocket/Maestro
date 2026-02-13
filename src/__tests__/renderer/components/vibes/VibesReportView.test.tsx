@@ -348,7 +348,7 @@ describe('VibesReportView', () => {
 		});
 	});
 
-	it('shows binary not found error when vibescheck is missing', async () => {
+	it('shows binary not found error when vibecheck is missing', async () => {
 		mockGetReport.mockRejectedValue(new Error('binary not found'));
 
 		render(
@@ -361,7 +361,7 @@ describe('VibesReportView', () => {
 		fireEvent.click(screen.getByText('Generate Report'));
 
 		await waitFor(() => {
-			expect(screen.getByText(/vibescheck binary not found/)).toBeTruthy();
+			expect(screen.getByText(/vibecheck binary not found/)).toBeTruthy();
 		});
 	});
 

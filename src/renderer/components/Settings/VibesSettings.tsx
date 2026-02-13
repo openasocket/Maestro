@@ -745,7 +745,7 @@ export function VibesSettings({
 										className="text-xs opacity-60 mt-0.5"
 										style={{ color: theme.colors.textDim }}
 									>
-										Automatically run <code className="font-mono">vibescheck init</code> when
+										Automatically run <code className="font-mono">vibecheck init</code> when
 										opening projects without an .ai-audit/ directory.
 									</p>
 								</div>
@@ -787,10 +787,10 @@ export function VibesSettings({
 						<div className="flex-1 min-w-0">
 							<p className="text-[10px] uppercase font-bold opacity-50 mb-1">Binary</p>
 							<p className="font-semibold mb-1" style={{ color: theme.colors.textMain }}>
-								VibesCheck Binary Path
+								VibeCheck Binary Path
 							</p>
 							<p className="text-xs opacity-60 mb-3" style={{ color: theme.colors.textDim }}>
-								Path to the <code className="font-mono">vibescheck</code> binary. Leave
+								Path to the <code className="font-mono">vibecheck</code> binary. Leave
 								empty to auto-detect from $PATH.
 							</p>
 							<div className="flex items-center gap-2">
@@ -825,7 +825,7 @@ export function VibesSettings({
 								{binaryDetectStatus === 'checking' && (
 									<div className="flex items-center gap-2 text-xs" data-testid="binary-status-checking">
 										<Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: theme.colors.textDim }} />
-										<span style={{ color: theme.colors.textDim }}>Detecting vibescheck binary...</span>
+										<span style={{ color: theme.colors.textDim }}>Detecting vibecheck binary...</span>
 									</div>
 								)}
 								{binaryDetectStatus === 'found' && (
@@ -833,7 +833,7 @@ export function VibesSettings({
 										<div className="flex items-center gap-2 text-xs">
 											<CheckCircle2 className="w-3.5 h-3.5" style={{ color: theme.colors.success }} />
 											<span style={{ color: theme.colors.success }}>
-												vibescheck found
+												vibecheck found
 												{binaryVersion && (
 													<span className="font-mono ml-1">({binaryVersion})</span>
 												)}
@@ -853,7 +853,7 @@ export function VibesSettings({
 									<div className="flex flex-col gap-1.5" data-testid="binary-status-not-found">
 										<div className="flex items-center gap-2 text-xs">
 											<AlertCircle className="w-3.5 h-3.5" style={{ color: theme.colors.error }} />
-											<span style={{ color: theme.colors.error }}>vibescheck not found</span>
+											<span style={{ color: theme.colors.error }}>vibecheck not found</span>
 										</div>
 										<div
 											className="text-xs ml-5 p-2 rounded"
@@ -862,15 +862,15 @@ export function VibesSettings({
 												color: theme.colors.textDim,
 											}}
 										>
-											<p className="mb-1">Install vibescheck using one of these methods:</p>
+											<p className="mb-1">Install vibecheck from source:</p>
 											<p className="font-mono text-[11px]" style={{ color: theme.colors.textMain }}>
-												cargo install vibescheck
+												git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo install --path .
 											</p>
 											<p
 												className="text-[10px] mt-1"
 												style={{ color: theme.colors.textDim }}
 											>
-												Or set a manual path override above.
+												Requires Rust 1.91.0+. Or set a manual path override above.
 											</p>
 										</div>
 									</div>

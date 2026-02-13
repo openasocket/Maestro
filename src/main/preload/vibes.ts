@@ -7,7 +7,7 @@
  * - Getting stats, blame, log, coverage, and report data
  * - Listing sessions and models
  * - Building audit manifests
- * - Finding the vibescheck binary
+ * - Finding the vibecheck binary
  */
 
 import { ipcRenderer } from 'electron';
@@ -32,7 +32,7 @@ export interface VibesBinaryInfo {
 }
 
 /**
- * Configuration for vibescheck init.
+ * Configuration for vibecheck init.
  */
 export interface VibesInitConfig {
 	projectName: string;
@@ -41,7 +41,7 @@ export interface VibesInitConfig {
 }
 
 /**
- * Options for vibescheck log filtering.
+ * Options for vibecheck log filtering.
  */
 export interface VibesLogOptions {
 	file?: string;

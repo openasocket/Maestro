@@ -20,7 +20,7 @@ type ReportFormat = 'markdown' | 'html' | 'json';
 interface VibesReportViewProps {
 	theme: Theme;
 	projectPath: string | undefined;
-	/** Whether the vibescheck binary is available. When false, shows a targeted message. */
+	/** Whether the vibecheck binary is available. When false, shows a targeted message. */
 	binaryAvailable?: boolean | null;
 }
 
@@ -106,7 +106,7 @@ export const VibesReportView: React.FC<VibesReportViewProps> = ({
 					errMsg.toLowerCase().includes('timed out') ||
 					errMsg.toLowerCase().includes('etimedout')
 				) {
-					setError('Report generation timed out. This project may be too large. Try generating a JSON report for faster results, or run vibescheck from the command line.');
+					setError('Report generation timed out. This project may be too large. Try generating a JSON report for faster results, or run vibecheck from the command line.');
 				} else {
 					setError(errMsg);
 				}
@@ -117,13 +117,13 @@ export const VibesReportView: React.FC<VibesReportViewProps> = ({
 				errMsg.toLowerCase().includes('binary') ||
 				errMsg.toLowerCase().includes('not found')
 			) {
-				setError('vibescheck binary not found. Please install vibescheck or configure its path in Settings.');
+				setError('vibecheck binary not found. Please install vibecheck or configure its path in Settings.');
 			} else if (
 				errMsg.toLowerCase().includes('timeout') ||
 				errMsg.toLowerCase().includes('timed out') ||
 				errMsg.toLowerCase().includes('etimedout')
 			) {
-				setError('Report generation timed out. This project may be too large. Try generating a JSON report for faster results, or run vibescheck from the command line.');
+				setError('Report generation timed out. This project may be too large. Try generating a JSON report for faster results, or run vibecheck from the command line.');
 			} else {
 				setError(errMsg);
 			}

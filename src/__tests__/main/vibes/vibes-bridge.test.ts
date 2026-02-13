@@ -1,7 +1,7 @@
 /**
  * Tests for src/main/vibes/vibes-bridge.ts
  * Validates the VibesCheck CLI bridge module: binary detection,
- * project status checks, and all vibescheck command wrappers.
+ * project status checks, and all vibecheck command wrappers.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -103,15 +103,15 @@ describe('vibes-bridge', () => {
 		it('should return custom path when it exists and is executable', async () => {
 			mockAccess.mockResolvedValueOnce(undefined);
 			const { findVibesCheckBinary } = await import('../../../main/vibes/vibes-bridge');
-			const result = await findVibesCheckBinary('/usr/local/bin/vibescheck');
-			expect(result).toBe('/usr/local/bin/vibescheck');
-			expect(mockAccess).toHaveBeenCalledWith('/usr/local/bin/vibescheck', constants.X_OK);
+			const result = await findVibesCheckBinary('/usr/local/bin/vibecheck');
+			expect(result).toBe('/usr/local/bin/vibecheck');
+			expect(mockAccess).toHaveBeenCalledWith('/usr/local/bin/vibecheck', constants.X_OK);
 		});
 
 		it('should return null when custom path is not executable', async () => {
 			mockAccess.mockRejectedValueOnce(new Error('EACCES'));
 			const { findVibesCheckBinary } = await import('../../../main/vibes/vibes-bridge');
-			const result = await findVibesCheckBinary('/nonexistent/vibescheck');
+			const result = await findVibesCheckBinary('/nonexistent/vibecheck');
 			expect(result).toBeNull();
 		});
 
@@ -121,14 +121,14 @@ describe('vibes-bridge', () => {
 
 			// Reject all common paths (~/.cargo/bin, /usr/local/bin), then $PATH first dir,
 			// then succeed on $PATH second dir
-			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // ~/.cargo/bin/vibescheck
-			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // /usr/local/bin/vibescheck
-			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // /usr/bin/vibescheck
-			mockAccess.mockResolvedValueOnce(undefined);           // /opt/bin/vibescheck
+			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // ~/.cargo/bin/vibecheck
+			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // /usr/local/bin/vibecheck
+			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // /usr/bin/vibecheck
+			mockAccess.mockResolvedValueOnce(undefined);           // /opt/bin/vibecheck
 
 			const { findVibesCheckBinary } = await import('../../../main/vibes/vibes-bridge');
 			const result = await findVibesCheckBinary();
-			expect(result).toBe('/opt/bin/vibescheck');
+			expect(result).toBe('/opt/bin/vibecheck');
 
 			process.env.PATH = originalPath;
 		});
@@ -138,11 +138,11 @@ describe('vibes-bridge', () => {
 			process.env.PATH = '/usr/bin';
 
 			// First common path succeeds
-			mockAccess.mockResolvedValueOnce(undefined); // ~/.cargo/bin/vibescheck
+			mockAccess.mockResolvedValueOnce(undefined); // ~/.cargo/bin/vibecheck
 
 			const { findVibesCheckBinary } = await import('../../../main/vibes/vibes-bridge');
 			const result = await findVibesCheckBinary();
-			expect(result).toMatch(/\.cargo\/bin\/vibescheck$/);
+			expect(result).toMatch(/\.cargo\/bin\/vibecheck$/);
 
 			process.env.PATH = originalPath;
 		});
@@ -158,7 +158,7 @@ describe('vibes-bridge', () => {
 
 			const { findVibesCheckBinary } = await import('../../../main/vibes/vibes-bridge');
 			const result = await findVibesCheckBinary(undefined, '/my/project');
-			expect(result).toBe('/my/project/node_modules/.bin/vibescheck');
+			expect(result).toBe('/my/project/node_modules/.bin/vibecheck');
 
 			process.env.PATH = originalPath;
 		});
@@ -200,12 +200,12 @@ describe('vibes-bridge', () => {
 
 			const mod = await import('../../../main/vibes/vibes-bridge');
 			const result1 = await mod.findVibesCheckBinary();
-			expect(result1).toBe('/usr/bin/vibescheck');
+			expect(result1).toBe('/usr/bin/vibecheck');
 
 			// Clear all mocks — second call should still return cached value
 			mockAccess.mockClear();
 			const result2 = await mod.findVibesCheckBinary();
-			expect(result2).toBe('/usr/bin/vibescheck');
+			expect(result2).toBe('/usr/bin/vibecheck');
 			// access should NOT have been called again
 			expect(mockAccess).not.toHaveBeenCalled();
 
@@ -238,18 +238,18 @@ describe('vibes-bridge', () => {
 	// ========================================================================
 	describe('getVibesCheckVersion', () => {
 		it('should return version string on success', async () => {
-			mockExecSuccess('vibescheck 0.3.2');
+			mockExecSuccess('vibecheck 0.3.2');
 
 			const { getVibesCheckVersion } = await import('../../../main/vibes/vibes-bridge');
-			const result = await getVibesCheckVersion('/usr/local/bin/vibescheck');
-			expect(result).toBe('vibescheck 0.3.2');
+			const result = await getVibesCheckVersion('/usr/local/bin/vibecheck');
+			expect(result).toBe('vibecheck 0.3.2');
 		});
 
 		it('should return null when command fails', async () => {
 			mockExecFailure('not recognized', 1);
 
 			const { getVibesCheckVersion } = await import('../../../main/vibes/vibes-bridge');
-			const result = await getVibesCheckVersion('/usr/local/bin/vibescheck');
+			const result = await getVibesCheckVersion('/usr/local/bin/vibecheck');
 			expect(result).toBeNull();
 		});
 
@@ -257,16 +257,16 @@ describe('vibes-bridge', () => {
 			mockExecSuccess('');
 
 			const { getVibesCheckVersion } = await import('../../../main/vibes/vibes-bridge');
-			const result = await getVibesCheckVersion('/usr/local/bin/vibescheck');
+			const result = await getVibesCheckVersion('/usr/local/bin/vibecheck');
 			expect(result).toBeNull();
 		});
 
 		it('should trim whitespace from version output', async () => {
-			mockExecSuccess('  vibescheck 0.3.2  \n');
+			mockExecSuccess('  vibecheck 0.3.2  \n');
 
 			const { getVibesCheckVersion } = await import('../../../main/vibes/vibes-bridge');
-			const result = await getVibesCheckVersion('/usr/local/bin/vibescheck');
-			expect(result).toBe('vibescheck 0.3.2');
+			const result = await getVibesCheckVersion('/usr/local/bin/vibecheck');
+			expect(result).toBe('vibecheck 0.3.2');
 		});
 	});
 
@@ -293,7 +293,7 @@ describe('vibes-bridge', () => {
 	// vibesInit
 	// ========================================================================
 	describe('vibesInit', () => {
-		it('should run vibescheck init with required args', async () => {
+		it('should run vibecheck init with required args', async () => {
 			mockAccess.mockResolvedValueOnce(undefined);
 			mockExecSuccess('Initialized .ai-audit/');
 
@@ -301,7 +301,7 @@ describe('vibes-bridge', () => {
 			const result = await vibesInit(
 				'/my/project',
 				{ projectName: 'test-proj', assuranceLevel: 'medium' },
-				'/usr/local/bin/vibescheck',
+				'/usr/local/bin/vibecheck',
 			);
 
 			expect(result).toEqual({ success: true });
@@ -326,7 +326,7 @@ describe('vibes-bridge', () => {
 					assuranceLevel: 'high',
 					extensions: ['.ts', '.py'],
 				},
-				'/usr/local/bin/vibescheck',
+				'/usr/local/bin/vibecheck',
 			);
 
 			expect(mockExecFile).toHaveBeenCalled();
@@ -343,7 +343,7 @@ describe('vibes-bridge', () => {
 			const result = await vibesInit(
 				'/my/project',
 				{ projectName: 'test-proj', assuranceLevel: 'low' },
-				'/usr/local/bin/vibescheck',
+				'/usr/local/bin/vibecheck',
 			);
 
 			expect(result.success).toBe(false);
@@ -359,7 +359,7 @@ describe('vibes-bridge', () => {
 					projectName: 'test-proj',
 					assuranceLevel: 'low',
 				}),
-			).rejects.toThrow('vibescheck binary not found');
+			).rejects.toThrow('vibecheck binary not found');
 		});
 	});
 
@@ -367,12 +367,12 @@ describe('vibes-bridge', () => {
 	// vibesBuild
 	// ========================================================================
 	describe('vibesBuild', () => {
-		it('should run vibescheck build successfully', async () => {
+		it('should run vibecheck build successfully', async () => {
 			mockAccess.mockResolvedValueOnce(undefined);
 			mockExecSuccess('Build complete');
 
 			const { vibesBuild } = await import('../../../main/vibes/vibes-bridge');
-			const result = await vibesBuild('/my/project', '/usr/local/bin/vibescheck');
+			const result = await vibesBuild('/my/project', '/usr/local/bin/vibecheck');
 			expect(result).toEqual({ success: true });
 		});
 
@@ -381,7 +381,7 @@ describe('vibes-bridge', () => {
 			mockExecFailure('No annotations found', 1);
 
 			const { vibesBuild } = await import('../../../main/vibes/vibes-bridge');
-			const result = await vibesBuild('/my/project', '/usr/local/bin/vibescheck');
+			const result = await vibesBuild('/my/project', '/usr/local/bin/vibecheck');
 			expect(result.success).toBe(false);
 			expect(result.error).toContain('No annotations found');
 		});
@@ -391,12 +391,12 @@ describe('vibes-bridge', () => {
 	// vibesStats
 	// ========================================================================
 	describe('vibesStats', () => {
-		it('should run vibescheck stats successfully', async () => {
+		it('should run vibecheck stats successfully', async () => {
 			mockAccess.mockResolvedValueOnce(undefined);
 			mockExecSuccess('{"total_annotations": 42}');
 
 			const { vibesStats } = await import('../../../main/vibes/vibes-bridge');
-			const result = await vibesStats('/my/project', undefined, '/usr/local/bin/vibescheck');
+			const result = await vibesStats('/my/project', undefined, '/usr/local/bin/vibecheck');
 			expect(result.success).toBe(true);
 			expect(result.data).toBe('{"total_annotations": 42}');
 		});
@@ -406,7 +406,7 @@ describe('vibes-bridge', () => {
 			mockExecSuccess('{"file_annotations": 5}');
 
 			const { vibesStats } = await import('../../../main/vibes/vibes-bridge');
-			await vibesStats('/my/project', 'src/index.ts', '/usr/local/bin/vibescheck');
+			await vibesStats('/my/project', 'src/index.ts', '/usr/local/bin/vibecheck');
 
 			const execArgs = mockExecFile.mock.calls[0][1] as string[];
 			expect(execArgs).toContain('stats');
@@ -418,7 +418,7 @@ describe('vibes-bridge', () => {
 			mockExecFailure('Not initialized', 1);
 
 			const { vibesStats } = await import('../../../main/vibes/vibes-bridge');
-			const result = await vibesStats('/my/project', undefined, '/usr/local/bin/vibescheck');
+			const result = await vibesStats('/my/project', undefined, '/usr/local/bin/vibecheck');
 			expect(result.success).toBe(false);
 		});
 	});
@@ -427,12 +427,12 @@ describe('vibes-bridge', () => {
 	// vibesBlame
 	// ========================================================================
 	describe('vibesBlame', () => {
-		it('should run vibescheck blame --json <file>', async () => {
+		it('should run vibecheck blame --json <file>', async () => {
 			mockAccess.mockResolvedValueOnce(undefined);
 			mockExecSuccess('[{"line":1,"action":"create"}]');
 
 			const { vibesBlame } = await import('../../../main/vibes/vibes-bridge');
-			const result = await vibesBlame('/my/project', 'src/app.ts', '/usr/local/bin/vibescheck');
+			const result = await vibesBlame('/my/project', 'src/app.ts', '/usr/local/bin/vibecheck');
 			expect(result.success).toBe(true);
 			expect(result.data).toBe('[{"line":1,"action":"create"}]');
 
@@ -445,12 +445,12 @@ describe('vibes-bridge', () => {
 	// vibesLog
 	// ========================================================================
 	describe('vibesLog', () => {
-		it('should run vibescheck log with no options', async () => {
+		it('should run vibecheck log with no options', async () => {
 			mockAccess.mockResolvedValueOnce(undefined);
 			mockExecSuccess('Log output');
 
 			const { vibesLog } = await import('../../../main/vibes/vibes-bridge');
-			const result = await vibesLog('/my/project', undefined, '/usr/local/bin/vibescheck');
+			const result = await vibesLog('/my/project', undefined, '/usr/local/bin/vibecheck');
 			expect(result.success).toBe(true);
 			expect(result.data).toBe('Log output');
 		});
@@ -469,7 +469,7 @@ describe('vibes-bridge', () => {
 					limit: 10,
 					json: true,
 				},
-				'/usr/local/bin/vibescheck',
+				'/usr/local/bin/vibecheck',
 			);
 
 			const execArgs = mockExecFile.mock.calls[0][1] as string[];
@@ -489,12 +489,12 @@ describe('vibes-bridge', () => {
 	// vibesCoverage
 	// ========================================================================
 	describe('vibesCoverage', () => {
-		it('should run vibescheck coverage', async () => {
+		it('should run vibecheck coverage', async () => {
 			mockAccess.mockResolvedValueOnce(undefined);
 			mockExecSuccess('Coverage: 85%');
 
 			const { vibesCoverage } = await import('../../../main/vibes/vibes-bridge');
-			const result = await vibesCoverage('/my/project', false, '/usr/local/bin/vibescheck');
+			const result = await vibesCoverage('/my/project', false, '/usr/local/bin/vibecheck');
 			expect(result.success).toBe(true);
 			expect(result.data).toBe('Coverage: 85%');
 		});
@@ -504,7 +504,7 @@ describe('vibes-bridge', () => {
 			mockExecSuccess('{"coverage": 0.85}');
 
 			const { vibesCoverage } = await import('../../../main/vibes/vibes-bridge');
-			await vibesCoverage('/my/project', true, '/usr/local/bin/vibescheck');
+			await vibesCoverage('/my/project', true, '/usr/local/bin/vibecheck');
 
 			const execArgs = mockExecFile.mock.calls[0][1] as string[];
 			expect(execArgs).toContain('--json');
@@ -515,12 +515,12 @@ describe('vibes-bridge', () => {
 	// vibesReport
 	// ========================================================================
 	describe('vibesReport', () => {
-		it('should run vibescheck report with default format', async () => {
+		it('should run vibecheck report with default format', async () => {
 			mockAccess.mockResolvedValueOnce(undefined);
 			mockExecSuccess('# VIBES Report');
 
 			const { vibesReport } = await import('../../../main/vibes/vibes-bridge');
-			const result = await vibesReport('/my/project', undefined, '/usr/local/bin/vibescheck');
+			const result = await vibesReport('/my/project', undefined, '/usr/local/bin/vibecheck');
 			expect(result.success).toBe(true);
 			expect(result.data).toBe('# VIBES Report');
 		});
@@ -530,7 +530,7 @@ describe('vibes-bridge', () => {
 			mockExecSuccess('{}');
 
 			const { vibesReport } = await import('../../../main/vibes/vibes-bridge');
-			await vibesReport('/my/project', 'json', '/usr/local/bin/vibescheck');
+			await vibesReport('/my/project', 'json', '/usr/local/bin/vibecheck');
 
 			const execArgs = mockExecFile.mock.calls[0][1] as string[];
 			expect(execArgs).toContain('--format');
@@ -542,7 +542,7 @@ describe('vibes-bridge', () => {
 			mockExecSuccess('<html>report</html>');
 
 			const { vibesReport } = await import('../../../main/vibes/vibes-bridge');
-			await vibesReport('/my/project', 'html', '/usr/local/bin/vibescheck');
+			await vibesReport('/my/project', 'html', '/usr/local/bin/vibecheck');
 
 			const execArgs = mockExecFile.mock.calls[0][1] as string[];
 			expect(execArgs).toContain('--format');
@@ -554,12 +554,12 @@ describe('vibes-bridge', () => {
 	// vibesSessions
 	// ========================================================================
 	describe('vibesSessions', () => {
-		it('should run vibescheck sessions --json', async () => {
+		it('should run vibecheck sessions --json', async () => {
 			mockAccess.mockResolvedValueOnce(undefined);
 			mockExecSuccess('[{"session_id":"abc"}]');
 
 			const { vibesSessions } = await import('../../../main/vibes/vibes-bridge');
-			const result = await vibesSessions('/my/project', '/usr/local/bin/vibescheck');
+			const result = await vibesSessions('/my/project', '/usr/local/bin/vibecheck');
 			expect(result.success).toBe(true);
 			expect(result.data).toBe('[{"session_id":"abc"}]');
 
@@ -572,12 +572,12 @@ describe('vibes-bridge', () => {
 	// vibesModels
 	// ========================================================================
 	describe('vibesModels', () => {
-		it('should run vibescheck models --json', async () => {
+		it('should run vibecheck models --json', async () => {
 			mockAccess.mockResolvedValueOnce(undefined);
 			mockExecSuccess('[{"model":"claude-4"}]');
 
 			const { vibesModels } = await import('../../../main/vibes/vibes-bridge');
-			const result = await vibesModels('/my/project', '/usr/local/bin/vibescheck');
+			const result = await vibesModels('/my/project', '/usr/local/bin/vibecheck');
 			expect(result.success).toBe(true);
 			expect(result.data).toBe('[{"model":"claude-4"}]');
 
@@ -594,14 +594,14 @@ describe('vibes-bridge', () => {
 			mockAccess.mockRejectedValue(new Error('ENOENT'));
 
 			const mod = await import('../../../main/vibes/vibes-bridge');
-			await expect(mod.vibesBuild('/my/project')).rejects.toThrow('vibescheck binary not found');
-			await expect(mod.vibesStats('/my/project')).rejects.toThrow('vibescheck binary not found');
-			await expect(mod.vibesBlame('/my/project', 'file.ts')).rejects.toThrow('vibescheck binary not found');
-			await expect(mod.vibesLog('/my/project')).rejects.toThrow('vibescheck binary not found');
-			await expect(mod.vibesCoverage('/my/project')).rejects.toThrow('vibescheck binary not found');
-			await expect(mod.vibesReport('/my/project')).rejects.toThrow('vibescheck binary not found');
-			await expect(mod.vibesSessions('/my/project')).rejects.toThrow('vibescheck binary not found');
-			await expect(mod.vibesModels('/my/project')).rejects.toThrow('vibescheck binary not found');
+			await expect(mod.vibesBuild('/my/project')).rejects.toThrow('vibecheck binary not found');
+			await expect(mod.vibesStats('/my/project')).rejects.toThrow('vibecheck binary not found');
+			await expect(mod.vibesBlame('/my/project', 'file.ts')).rejects.toThrow('vibecheck binary not found');
+			await expect(mod.vibesLog('/my/project')).rejects.toThrow('vibecheck binary not found');
+			await expect(mod.vibesCoverage('/my/project')).rejects.toThrow('vibecheck binary not found');
+			await expect(mod.vibesReport('/my/project')).rejects.toThrow('vibecheck binary not found');
+			await expect(mod.vibesSessions('/my/project')).rejects.toThrow('vibecheck binary not found');
+			await expect(mod.vibesModels('/my/project')).rejects.toThrow('vibecheck binary not found');
 		});
 	});
 });

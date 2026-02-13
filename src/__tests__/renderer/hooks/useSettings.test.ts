@@ -1851,7 +1851,7 @@ describe('useSettings', () => {
 					vibesPerAgentConfig: { 'claude-code': { enabled: false } },
 					vibesMaestroOrchestrationEnabled: false,
 					vibesAutoInit: false,
-					vibesCheckBinaryPath: '/usr/local/bin/vibescheck',
+					vibesCheckBinaryPath: '/usr/local/bin/vibecheck',
 					vibesCompressReasoningThreshold: 5000,
 					vibesExternalBlobThreshold: 50000,
 				});
@@ -1866,7 +1866,7 @@ describe('useSettings', () => {
 				expect(result.current.vibesPerAgentConfig).toEqual({ 'claude-code': { enabled: false } });
 				expect(result.current.vibesMaestroOrchestrationEnabled).toBe(false);
 				expect(result.current.vibesAutoInit).toBe(false);
-				expect(result.current.vibesCheckBinaryPath).toBe('/usr/local/bin/vibescheck');
+				expect(result.current.vibesCheckBinaryPath).toBe('/usr/local/bin/vibecheck');
 				expect(result.current.vibesCompressReasoningThreshold).toBe(5000);
 				expect(result.current.vibesExternalBlobThreshold).toBe(50000);
 			});
@@ -1988,11 +1988,11 @@ describe('useSettings', () => {
 				await waitForSettingsLoaded(result);
 
 				act(() => {
-					result.current.setVibesCheckBinaryPath('/opt/bin/vibescheck');
+					result.current.setVibesCheckBinaryPath('/opt/bin/vibecheck');
 				});
 
-				expect(result.current.vibesCheckBinaryPath).toBe('/opt/bin/vibescheck');
-				expect(window.maestro.settings.set).toHaveBeenCalledWith('vibesCheckBinaryPath', '/opt/bin/vibescheck');
+				expect(result.current.vibesCheckBinaryPath).toBe('/opt/bin/vibecheck');
+				expect(window.maestro.settings.set).toHaveBeenCalledWith('vibesCheckBinaryPath', '/opt/bin/vibecheck');
 			});
 
 			it('should update vibesCompressReasoningThreshold and persist to settings', async () => {

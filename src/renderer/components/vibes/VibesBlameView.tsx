@@ -13,7 +13,7 @@ import type { Theme } from '../../types';
 // Types
 // ============================================================================
 
-/** A single blame entry from `vibescheck blame --json`. */
+/** A single blame entry from `vibecheck blame --json`. */
 interface BlameEntry {
 	line_start: number;
 	line_end: number;
@@ -31,7 +31,7 @@ interface VibesBlameViewProps {
 	projectPath: string | undefined;
 	/** Optional pre-selected file path (e.g. from file explorer context menu). */
 	initialFilePath?: string;
-	/** Whether the vibescheck binary is available. When false, shows a targeted message. */
+	/** Whether the vibecheck binary is available. When false, shows a targeted message. */
 	binaryAvailable?: boolean | null;
 }
 
@@ -91,7 +91,7 @@ function formatToolName(toolName?: string): string {
 	return toolName;
 }
 
-/** Parse the JSON output from `vibescheck blame --json`. */
+/** Parse the JSON output from `vibecheck blame --json`. */
 function parseBlameData(raw: string | undefined): BlameEntry[] {
 	if (!raw) return [];
 	try {
@@ -375,10 +375,10 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 					>
 						<AlertTriangle className="w-6 h-6 opacity-60" style={{ color: '#eab308' }} />
 						<span className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-							Blame view requires vibescheck CLI
+							Blame view requires vibecheck CLI
 						</span>
 						<span className="text-xs max-w-xs" style={{ color: theme.colors.textDim }}>
-							Install vibescheck to view per-line AI attribution.
+							Install vibecheck to view per-line AI attribution.
 						</span>
 					</div>
 				)}

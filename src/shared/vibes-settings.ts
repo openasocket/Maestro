@@ -27,10 +27,10 @@ export interface VibesSettingsConfig {
 	/** Capture Maestro's own orchestration data (session management, batch runs). */
 	vibesMaestroOrchestrationEnabled: boolean;
 
-	/** Automatically run `vibescheck init` on new projects. */
+	/** Automatically run `vibecheck init` on new projects. */
 	vibesAutoInit: boolean;
 
-	/** Path to the vibescheck binary. Empty string means auto-detect from $PATH. */
+	/** Path to the vibecheck binary. Empty string means auto-detect from $PATH. */
 	vibesCheckBinaryPath: string;
 
 	/** Byte threshold above which reasoning text is compressed. */

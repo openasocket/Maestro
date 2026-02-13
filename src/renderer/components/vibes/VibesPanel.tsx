@@ -66,7 +66,7 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 	const { vibesEnabled, vibesAssuranceLevel, vibesAutoInit } = useSettings();
 	const vibesData = useVibesData(projectPath, vibesEnabled);
 
-	// Check vibescheck binary availability on mount
+	// Check vibecheck binary availability on mount
 	useEffect(() => {
 		if (!vibesEnabled) return;
 		let cancelled = false;
@@ -265,10 +265,10 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 					<div className="flex items-center gap-2">
 						<AlertTriangle className="w-3.5 h-3.5 shrink-0" style={{ color: '#eab308' }} />
 						<span className="font-medium" style={{ color: '#eab308' }}>
-							vibescheck not found
+							vibecheck not found
 						</span>
 						<span style={{ color: theme.colors.textDim }}>
-							— Blame, Coverage, Reports, and Build require vibescheck.
+							— Blame, Coverage, Reports, and Build require vibecheck.
 						</span>
 						<div className="flex-1" />
 						<button
@@ -294,25 +294,31 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 							data-testid="install-guide-panel"
 						>
 							<span className="text-[10px] font-semibold" style={{ color: theme.colors.textMain }}>
-								Install vibescheck
+								Install vibecheck
 							</span>
 							<div className="flex flex-col gap-1.5 text-[10px]" style={{ color: theme.colors.textDim }}>
-								<div className="flex items-center gap-2">
-									<span className="font-medium w-12 shrink-0">Cargo:</span>
-									<code className="font-mono px-1.5 py-0.5 rounded flex-1" style={{ backgroundColor: theme.colors.bgMain }}>
-										cargo install vibescheck
+								<div className="flex flex-col gap-1">
+									<span className="font-medium">From source (requires Rust):</span>
+									<code className="font-mono px-1.5 py-0.5 rounded" style={{ backgroundColor: theme.colors.bgMain }}>
+										git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo install --path .
 									</code>
 								</div>
-								<div className="flex items-center gap-2">
-									<span className="font-medium w-12 shrink-0">npm:</span>
-									<code className="font-mono px-1.5 py-0.5 rounded flex-1" style={{ backgroundColor: theme.colors.bgMain }}>
-										npm install -g vibescheck
+								<div className="flex flex-col gap-1">
+									<span className="font-medium">Or build manually:</span>
+									<code className="font-mono px-1.5 py-0.5 rounded" style={{ backgroundColor: theme.colors.bgMain }}>
+										git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo build --release
 									</code>
+									<span>Then copy <code className="font-mono">target/release/vibecheck</code> to a directory in your PATH (e.g. <code className="font-mono">/usr/local/bin/</code>)</span>
 								</div>
-								<div className="flex items-center gap-2">
-									<span className="font-medium w-12 shrink-0">Manual:</span>
-									<span>Download from GitHub releases, place in PATH</span>
-								</div>
+								<a
+									href="https://github.com/openasocket/VibeCheck"
+									target="_blank"
+									rel="noopener noreferrer"
+									className="underline"
+									style={{ color: theme.colors.accent }}
+								>
+									View README on GitHub
+								</a>
 							</div>
 							<button
 								onClick={handleCheckBinary}

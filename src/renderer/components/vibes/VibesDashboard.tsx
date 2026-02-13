@@ -624,7 +624,7 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 						label="Build Database"
 						onClick={handleBuildDatabase}
 						disabled={binaryAvailable === false}
-						title={binaryAvailable === false ? 'Requires vibescheck' : undefined}
+						title={binaryAvailable === false ? 'Requires vibecheck' : undefined}
 					/>
 					<ActionButton
 						theme={theme}
@@ -632,7 +632,7 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 						label="Generate Report"
 						onClick={handleGenerateReport}
 						disabled={binaryAvailable === false}
-						title={binaryAvailable === false ? 'Requires vibescheck' : undefined}
+						title={binaryAvailable === false ? 'Requires vibecheck' : undefined}
 					/>
 					<ActionButton
 						theme={theme}

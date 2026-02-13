@@ -21,7 +21,7 @@ import type { Theme } from '../../types';
 // Types
 // ============================================================================
 
-/** A single file entry from `vibescheck coverage --json`. */
+/** A single file entry from `vibecheck coverage --json`. */
 interface CoverageFileEntry {
 	file_path?: string;
 	file?: string;
@@ -44,7 +44,7 @@ interface NormalizedCoverageFile {
 interface VibeCoverageViewProps {
 	theme: Theme;
 	projectPath: string | undefined;
-	/** Whether the vibescheck binary is available. When false, shows a targeted message. */
+	/** Whether the vibecheck binary is available. When false, shows a targeted message. */
 	binaryAvailable?: boolean | null;
 }
 

@@ -6,7 +6,7 @@
  * interval when VIBES is enabled and the panel is active.
  *
  * Data is fetched from `window.maestro.vibes.*` preload APIs which invoke
- * the vibescheck CLI under the hood.
+ * the vibecheck CLI under the hood.
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -17,7 +17,7 @@ import type { VibesAssuranceLevel, VibesAnnotation } from '../../shared/vibes-ty
 // Helper Types — parsed CLI output shapes
 // ============================================================================
 
-/** Parsed coverage/stats data from `vibescheck stats --json`. */
+/** Parsed coverage/stats data from `vibecheck stats --json`. */
 export interface VibesStatsData {
 	totalAnnotations: number;
 	filesCovered: number;

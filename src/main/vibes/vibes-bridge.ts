@@ -1,5 +1,5 @@
-// VibesCheck CLI Bridge — Main-process module that interfaces with the `vibescheck` binary.
-// Provides functions to detect, invoke, and parse output from vibescheck commands.
+// VibesCheck CLI Bridge — Main-process module that interfaces with the `vibecheck` binary.
+// Provides functions to detect, invoke, and parse output from vibecheck commands.
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -16,16 +16,16 @@ const execFileAsync = promisify(execFile);
 // Constants
 // ============================================================================
 
-/** Timeout for vibescheck commands (30 seconds). */
+/** Timeout for vibecheck commands (30 seconds). */
 const VIBES_EXEC_TIMEOUT_MS = 30_000;
 
-/** Maximum buffer size for vibescheck output (5MB). */
+/** Maximum buffer size for vibecheck output (5MB). */
 const VIBES_MAX_BUFFER = 5 * 1024 * 1024;
 
-/** Name of the vibescheck binary. */
-const VIBES_BINARY_NAME = 'vibescheck';
+/** Name of the vibecheck binary. */
+const VIBES_BINARY_NAME = 'vibecheck';
 
-/** Common installation paths to search for the vibescheck binary. */
+/** Common installation paths to search for the vibecheck binary. */
 const COMMON_BINARY_PATHS = [
 	path.join(os.homedir(), '.cargo', 'bin', VIBES_BINARY_NAME),
 	path.join('/usr', 'local', 'bin', VIBES_BINARY_NAME),
@@ -57,7 +57,7 @@ interface ExecVibesCheckResult {
 }
 
 /**
- * Execute the vibescheck binary with the given arguments.
+ * Execute the vibecheck binary with the given arguments.
  * Uses child_process.execFile with a 30-second timeout.
  * Never throws — returns an ExecVibesCheckResult with exit code.
  */
@@ -88,7 +88,7 @@ async function execVibesCheck(
 // ============================================================================
 
 /**
- * Find the vibescheck binary. Checks custom path first, then common
+ * Find the vibecheck binary. Checks custom path first, then common
  * installation paths (~/.cargo/bin, /usr/local/bin), the project's
  * node_modules/.bin/, and $PATH. Caches the result after first
  * successful detection; call `clearBinaryPathCache()` on settings change.
@@ -161,8 +161,8 @@ export async function findVibesCheckBinary(
 // ============================================================================
 
 /**
- * Get the version string of the vibescheck binary.
- * Runs `vibescheck --version` and returns the trimmed stdout, or null on failure.
+ * Get the version string of the vibecheck binary.
+ * Runs `vibecheck --version` and returns the trimmed stdout, or null on failure.
  */
 export async function getVibesCheckVersion(binaryPath: string): Promise<string | null> {
 	try {
@@ -210,7 +210,7 @@ async function resolveBinary(customBinaryPath?: string): Promise<string> {
 	const binaryPath = await findVibesCheckBinary(customBinaryPath);
 	if (!binaryPath) {
 		throw new Error(
-			'vibescheck binary not found. Install it or set the path in Settings > VIBES.',
+			'vibecheck binary not found. Install it or set the path in Settings > VIBES.',
 		);
 	}
 	return binaryPath;
@@ -222,7 +222,7 @@ async function resolveBinary(customBinaryPath?: string): Promise<string> {
 
 /**
  * Initialize a VIBES audit directory in a project.
- * Runs `vibescheck init` with the specified configuration.
+ * Runs `vibecheck init` with the specified configuration.
  */
 export async function vibesInit(
 	projectPath: string,
@@ -252,7 +252,7 @@ export async function vibesInit(
 }
 
 /**
- * Run `vibescheck build` to rebuild the audit manifest from annotations.
+ * Run `vibecheck build` to rebuild the audit manifest from annotations.
  */
 export async function vibesBuild(
 	projectPath: string,
@@ -267,7 +267,7 @@ export async function vibesBuild(
 }
 
 /**
- * Run `vibescheck stats` to get project statistics.
+ * Run `vibecheck stats` to get project statistics.
  * Optionally scoped to a specific file.
  */
 export async function vibesStats(
@@ -289,7 +289,7 @@ export async function vibesStats(
 }
 
 /**
- * Run `vibescheck blame --json <file>` to get per-line provenance data.
+ * Run `vibecheck blame --json <file>` to get per-line provenance data.
  */
 export async function vibesBlame(
 	projectPath: string,
@@ -305,7 +305,7 @@ export async function vibesBlame(
 }
 
 /**
- * Run `vibescheck log` with optional filters.
+ * Run `vibecheck log` with optional filters.
  */
 export async function vibesLog(
 	projectPath: string,
@@ -345,7 +345,7 @@ export async function vibesLog(
 }
 
 /**
- * Run `vibescheck coverage` to get VIBES coverage statistics.
+ * Run `vibecheck coverage` to get VIBES coverage statistics.
  */
 export async function vibesCoverage(
 	projectPath: string,
@@ -366,7 +366,7 @@ export async function vibesCoverage(
 }
 
 /**
- * Run `vibescheck report` to generate a VIBES report.
+ * Run `vibecheck report` to generate a VIBES report.
  */
 export async function vibesReport(
 	projectPath: string,
@@ -387,7 +387,7 @@ export async function vibesReport(
 }
 
 /**
- * Run `vibescheck sessions --json` to list all sessions.
+ * Run `vibecheck sessions --json` to list all sessions.
  */
 export async function vibesSessions(
 	projectPath: string,
@@ -402,7 +402,7 @@ export async function vibesSessions(
 }
 
 /**
- * Run `vibescheck models --json` to list all models used.
+ * Run `vibecheck models --json` to list all models used.
  */
 export async function vibesModels(
 	projectPath: string,
@@ -419,7 +419,7 @@ export async function vibesModels(
 /**
  * Backfill `commit_hash` on annotations that are missing it.
  *
- * Attempts to run `vibescheck backfill-commit --hash <commit> [--session <sessionId>]`
+ * Attempts to run `vibecheck backfill-commit --hash <commit> [--session <sessionId>]`
  * if the binary is available and supports the command. Falls back to the direct
  * `backfillCommitHash()` implementation from vibes-io when the binary is not
  * found or the command is unsupported.
@@ -432,7 +432,7 @@ export async function vibesBackfillCommit(
 	sessionId?: string,
 	customBinaryPath?: string,
 ): Promise<{ success: boolean; updatedCount: number; error?: string }> {
-	// Try vibescheck binary first
+	// Try vibecheck binary first
 	const binaryPath = await findVibesCheckBinary(customBinaryPath);
 	if (binaryPath) {
 		const args = ['backfill-commit', '--hash', commitHash];

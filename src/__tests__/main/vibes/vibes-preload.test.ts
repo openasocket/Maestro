@@ -196,21 +196,21 @@ describe('vibes preload API', () => {
 
 	describe('findBinary', () => {
 		it('should invoke vibes:findBinary with custom path', async () => {
-			mockInvoke.mockResolvedValue({ path: '/usr/local/bin/vibescheck', version: 'vibescheck 0.3.2' });
+			mockInvoke.mockResolvedValue({ path: '/usr/local/bin/vibecheck', version: 'vibecheck 0.3.2' });
 
-			const result = await api.findBinary('/custom/vibescheck');
+			const result = await api.findBinary('/custom/vibecheck');
 
-			expect(mockInvoke).toHaveBeenCalledWith('vibes:findBinary', '/custom/vibescheck');
-			expect(result).toEqual({ path: '/usr/local/bin/vibescheck', version: 'vibescheck 0.3.2' });
+			expect(mockInvoke).toHaveBeenCalledWith('vibes:findBinary', '/custom/vibecheck');
+			expect(result).toEqual({ path: '/usr/local/bin/vibecheck', version: 'vibecheck 0.3.2' });
 		});
 
 		it('should work without custom path', async () => {
-			mockInvoke.mockResolvedValue({ path: '/usr/bin/vibescheck', version: null });
+			mockInvoke.mockResolvedValue({ path: '/usr/bin/vibecheck', version: null });
 
 			const result = await api.findBinary();
 
 			expect(mockInvoke).toHaveBeenCalledWith('vibes:findBinary', undefined);
-			expect(result).toEqual({ path: '/usr/bin/vibescheck', version: null });
+			expect(result).toEqual({ path: '/usr/bin/vibecheck', version: null });
 		});
 
 		it('should return null path and version when not found', async () => {

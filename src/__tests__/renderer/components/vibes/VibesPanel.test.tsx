@@ -112,7 +112,7 @@ describe('VibesPanel', () => {
 	beforeEach(() => {
 		mockVibesEnabled = true;
 		vi.clearAllMocks();
-		mockFindBinary.mockResolvedValue({ path: '/usr/local/bin/vibescheck', version: '0.3.2' });
+		mockFindBinary.mockResolvedValue({ path: '/usr/local/bin/vibecheck', version: '0.3.2' });
 		(window as any).maestro = {
 			vibes: {
 				findBinary: mockFindBinary,
@@ -419,7 +419,7 @@ describe('VibesPanel', () => {
 	// Binary status banner
 	// ========================================================================
 
-	it('shows binary not-found banner when vibescheck unavailable', async () => {
+	it('shows binary not-found banner when vibecheck unavailable', async () => {
 		mockFindBinary.mockResolvedValue({ path: null, version: null });
 
 		render(<VibesPanel theme={mockTheme} projectPath="/project" />);
@@ -428,14 +428,14 @@ describe('VibesPanel', () => {
 			expect(screen.getByTestId('binary-not-found-banner')).toBeTruthy();
 		});
 
-		expect(screen.getByText('vibescheck not found')).toBeTruthy();
-		expect(screen.getByText(/Blame, Coverage, Reports, and Build require vibescheck/)).toBeTruthy();
+		expect(screen.getByText('vibecheck not found')).toBeTruthy();
+		expect(screen.getByText(/Blame, Coverage, Reports, and Build require vibecheck/)).toBeTruthy();
 		expect(screen.getByTestId('install-guide-btn')).toBeTruthy();
 		expect(screen.getByText('Set Custom Path')).toBeTruthy();
 	});
 
-	it('shows version when vibescheck available', async () => {
-		mockFindBinary.mockResolvedValue({ path: '/usr/local/bin/vibescheck', version: '0.3.2' });
+	it('shows version when vibecheck available', async () => {
+		mockFindBinary.mockResolvedValue({ path: '/usr/local/bin/vibecheck', version: '0.3.2' });
 
 		render(<VibesPanel theme={mockTheme} projectPath="/project" />);
 
@@ -494,8 +494,8 @@ describe('VibesPanel', () => {
 
 		// Install guide should now be visible
 		expect(screen.getByTestId('install-guide-panel')).toBeTruthy();
-		expect(screen.getByText(/cargo install vibescheck/)).toBeTruthy();
-		expect(screen.getByText(/npm install -g vibescheck/)).toBeTruthy();
+		expect(screen.getByText(/cargo install --path \./)).toBeTruthy();
+		expect(screen.getByText(/cargo build --release/)).toBeTruthy();
 	});
 
 	it('hides install guide on close', async () => {
@@ -519,7 +519,7 @@ describe('VibesPanel', () => {
 	it('Check Again button triggers binary re-check', async () => {
 		mockFindBinary
 			.mockResolvedValueOnce({ path: null, version: null })
-			.mockResolvedValueOnce({ path: '/usr/local/bin/vibescheck', version: '0.3.2' });
+			.mockResolvedValueOnce({ path: '/usr/local/bin/vibecheck', version: '0.3.2' });
 
 		render(<VibesPanel theme={mockTheme} projectPath="/project" />);
 

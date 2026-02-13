@@ -374,7 +374,7 @@ describe('Settings/VibesSettings', () => {
 		it('should render binary path section', () => {
 			const props = createDefaultProps({ vibesEnabled: true });
 			render(<VibesSettings {...props} />);
-			expect(screen.getByText('VibesCheck Binary Path')).toBeTruthy();
+			expect(screen.getByText('VibeCheck Binary Path')).toBeTruthy();
 		});
 
 		it('should show "Auto" indicator when path is empty', () => {
@@ -386,7 +386,7 @@ describe('Settings/VibesSettings', () => {
 		it('should not show "Auto" indicator when path is set', () => {
 			const props = createDefaultProps({
 				vibesEnabled: true,
-				vibesCheckBinaryPath: '/usr/local/bin/vibescheck',
+				vibesCheckBinaryPath: '/usr/local/bin/vibecheck',
 			});
 			render(<VibesSettings {...props} />);
 			expect(screen.queryByText('Auto')).toBeNull();
@@ -396,8 +396,8 @@ describe('Settings/VibesSettings', () => {
 			const props = createDefaultProps({ vibesEnabled: true });
 			render(<VibesSettings {...props} />);
 			const input = screen.getByPlaceholderText('Auto-detect from $PATH');
-			fireEvent.change(input, { target: { value: '/usr/local/bin/vibescheck' } });
-			expect(props.setVibesCheckBinaryPath).toHaveBeenCalledWith('/usr/local/bin/vibescheck');
+			fireEvent.change(input, { target: { value: '/usr/local/bin/vibecheck' } });
+			expect(props.setVibesCheckBinaryPath).toHaveBeenCalledWith('/usr/local/bin/vibecheck');
 		});
 	});
 

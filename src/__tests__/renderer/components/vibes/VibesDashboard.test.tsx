@@ -3,7 +3,7 @@
  *
  * Validates error handling, loading states, and status banners:
  * - "Initializing..." state during first data load
- * - "vibescheck binary not found" warning with installation guidance
+ * - "vibecheck binary not found" warning with installation guidance
  * - VIBES disabled state
  * - Not-initialized state with project name input
  * - Error banner display
@@ -105,7 +105,7 @@ const mockWriteFile = vi.fn();
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	mockFindBinary.mockResolvedValue({ path: '/usr/local/bin/vibescheck', version: 'vibescheck 0.3.2' });
+	mockFindBinary.mockResolvedValue({ path: '/usr/local/bin/vibecheck', version: 'vibecheck 0.3.2' });
 	mockGetManifest.mockResolvedValue({ success: true, data: '{}' });
 	mockGetLog.mockResolvedValue({ success: true, data: '[]' });
 	mockSaveFile.mockResolvedValue(null);

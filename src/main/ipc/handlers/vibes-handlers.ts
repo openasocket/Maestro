@@ -12,7 +12,7 @@
  * - getReport: Generate a VIBES report
  * - getSessions: List all sessions
  * - getModels: List all models used
- * - findBinary: Find the vibescheck binary and return path + version
+ * - findBinary: Find the vibecheck binary and return path + version
  * - clearBinaryCache: Clear cached binary path (on settings change)
  */
 
@@ -250,7 +250,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 		}
 	});
 
-	// Find the vibescheck binary — returns { path, version } or { path: null, version: null }
+	// Find the vibecheck binary — returns { path, version } or { path: null, version: null }
 	ipcMain.handle('vibes:findBinary', async (_event, customPath?: string) => {
 		try {
 			const binaryPath = await findVibesCheckBinary(customPath);
