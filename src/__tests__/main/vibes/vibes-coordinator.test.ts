@@ -724,7 +724,7 @@ describe('vibes-coordinator', () => {
 			const updatedEnv = envEntries.find((e) => e.model_name === 'o4-mini');
 			expect(updatedEnv).toBeDefined();
 			expect(updatedEnv!.tool_name).toBe('Codex');
-			expect(updatedEnv!.model_version).toBe('o4-mini');
+			expect(updatedEnv!.model_version).toBe('o4-mini'); // no date suffix, falls back to model name
 		});
 
 		it('should not update environment when usage has no model name', async () => {

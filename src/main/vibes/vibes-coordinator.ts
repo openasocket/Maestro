@@ -691,11 +691,12 @@ export class VibesCoordinator {
 		agentType: string,
 		modelName: string,
 	): Promise<void> {
+		const modelVersion = this.extractModelVersion(modelName);
 		const { entry, hash } = createEnvironmentEntry({
 			toolName: this.getToolName(agentType),
 			toolVersion: 'unknown',
 			modelName,
-			modelVersion: modelName,
+			modelVersion,
 		});
 		await this.sessionManager.recordManifestEntry(sessionId, hash, entry);
 		this.sessionManager.updateEnvironmentHash(sessionId, hash);
@@ -703,8 +704,27 @@ export class VibesCoordinator {
 		logger.info(
 			'[VibesCoordinator] Updated environment entry with model info',
 			'VibesCoordinator',
-			{ sessionId, modelName },
+			{ sessionId, modelName, modelVersion },
 		);
+	}
+
+	/**
+	 * Extract a version string from a model identifier.
+	 * Handles common patterns:
+	 * - Date suffix: "claude-sonnet-4-5-20250929" → "20250929"
+	 * - Dated tag: "gpt-4o-2025-01-13" → "2025-01-13"
+	 * - Falls back to the full model name if no version pattern is found.
+	 */
+	private extractModelVersion(modelName: string): string {
+		// Match trailing YYYYMMDD date (e.g. "claude-sonnet-4-5-20250929")
+		const compactDate = modelName.match(/(\d{8})$/);
+		if (compactDate) return compactDate[1];
+
+		// Match trailing YYYY-MM-DD date (e.g. "gpt-4o-2025-01-13")
+		const isoDate = modelName.match(/(\d{4}-\d{2}-\d{2})$/);
+		if (isoDate) return isoDate[1];
+
+		return modelName;
 	}
 
 	// ========================================================================

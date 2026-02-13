@@ -18,6 +18,7 @@
 
 import { ipcMain } from 'electron';
 import type Store from 'electron-store';
+import type { MaestroSettings } from './persistence';
 import { logger } from '../../utils/logger';
 import {
 	findVibesCheckBinary,
@@ -52,7 +53,7 @@ const LOG_CONTEXT = '[VIBES]';
  * Dependencies required for VIBES handler registration.
  */
 export interface VibesHandlerDependencies {
-	settingsStore: Store<{ [key: string]: unknown }>;
+	settingsStore: Store<MaestroSettings>;
 }
 
 /**

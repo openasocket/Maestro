@@ -99,14 +99,16 @@ const ASSURANCE_COLORS: Record<VibesAssuranceLevel, { bg: string; text: string }
 /** Check if an annotation has minimum required fields to be renderable. */
 function isValidAnnotation(annotation: VibesAnnotation): boolean {
 	if (!annotation || typeof annotation !== 'object') return false;
-	if (!annotation.type || !annotation.timestamp) return false;
+	if (!annotation.type) return false;
 	if (annotation.type === 'session') {
 		return typeof annotation.session_id === 'string' && typeof annotation.event === 'string';
 	}
 	if (annotation.type === 'line' || annotation.type === 'function') {
-		return typeof annotation.file_path === 'string' && typeof annotation.action === 'string';
+		// Only require file_path — action can default to 'modify' in rendering
+		return typeof annotation.file_path === 'string';
 	}
-	return false;
+	// Accept unknown annotation types if they have a timestamp
+	return !!(annotation as Record<string, unknown>).timestamp;
 }
 
 /** Format a timestamp as relative time (e.g., "2 min ago"). */
@@ -562,8 +564,9 @@ const AnnotationRow: React.FC<AnnotationRowProps> = ({
 	manifest,
 	isLoadingManifest,
 }) => {
-	const actionColor = ACTION_COLORS[annotation.action];
-	const assuranceColor = ASSURANCE_COLORS[annotation.assurance_level];
+	const action = annotation.action ?? 'modify';
+	const actionColor = ACTION_COLORS[action] ?? ACTION_COLORS.modify;
+	const assuranceColor = ASSURANCE_COLORS[annotation.assurance_level] ?? ASSURANCE_COLORS.medium;
 
 	return (
 		<div
@@ -610,7 +613,7 @@ const AnnotationRow: React.FC<AnnotationRowProps> = ({
 					className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0"
 					style={{ backgroundColor: actionColor.bg, color: actionColor.text }}
 				>
-					{annotation.action}
+					{action}
 				</span>
 
 				{/* Assurance level indicator */}

@@ -717,13 +717,13 @@ export async function backfillCommitHash(
  * Used as fallback when the vibecheck CLI binary is not installed.
  */
 export async function computeStatsFromAnnotations(projectPath: string): Promise<{
-	totalAnnotations: number;
-	filesCovered: number;
-	totalTrackedFiles: number;
-	coveragePercent: number;
-	activeSessions: number;
-	contributingModels: number;
-	assuranceLevel: string;
+	total_annotations: number;
+	files_covered: number;
+	total_tracked_files: number;
+	coverage_percent: number;
+	active_sessions: number;
+	contributing_models: number;
+	assurance_level: string;
 }> {
 	const annotations = await readAnnotations(projectPath);
 	const config = await readVibesConfig(projectPath);
@@ -766,13 +766,13 @@ export async function computeStatsFromAnnotations(projectPath: string): Promise<
 	const totalTrackedFiles = filesCovered || 1;
 
 	return {
-		totalAnnotations: lineAnnotations.length,
-		filesCovered,
-		totalTrackedFiles,
-		coveragePercent: totalTrackedFiles > 0 ? Math.round((filesCovered / totalTrackedFiles) * 100) : 0,
-		activeSessions,
-		contributingModels: modelNames.size,
-		assuranceLevel: config?.assurance_level ?? 'low',
+		total_annotations: lineAnnotations.length,
+		files_covered: filesCovered,
+		total_tracked_files: totalTrackedFiles,
+		coverage_percent: totalTrackedFiles > 0 ? Math.round((filesCovered / totalTrackedFiles) * 100) : 0,
+		active_sessions: activeSessions,
+		contributing_models: modelNames.size,
+		assurance_level: config?.assurance_level ?? 'low',
 	};
 }
 
@@ -781,11 +781,11 @@ export async function computeStatsFromAnnotations(projectPath: string): Promise<
  * Used as fallback when the vibecheck CLI binary is not installed.
  */
 export async function extractSessionsFromAnnotations(projectPath: string): Promise<Array<{
-	sessionId: string;
+	session_id: string;
 	event: string;
 	timestamp: string;
-	agentType?: string;
-	annotationCount: number;
+	agent_type?: string;
+	annotation_count: number;
 }>> {
 	const annotations = await readAnnotations(projectPath);
 
@@ -802,21 +802,21 @@ export async function extractSessionsFromAnnotations(projectPath: string): Promi
 
 	// Build session records from session annotations
 	const sessions: Array<{
-		sessionId: string;
+		session_id: string;
 		event: string;
 		timestamp: string;
-		agentType?: string;
-		annotationCount: number;
+		agent_type?: string;
+		annotation_count: number;
 	}> = [];
 
 	for (const a of annotations) {
 		if (a.type === 'session') {
 			sessions.push({
-				sessionId: a.session_id,
+				session_id: a.session_id,
 				event: a.event,
 				timestamp: a.timestamp,
-				agentType: a.description,
-				annotationCount: sessionCounts.get(a.session_id) ?? 0,
+				agent_type: a.description,
+				annotation_count: sessionCounts.get(a.session_id) ?? 0,
 			});
 		}
 	}
@@ -829,10 +829,10 @@ export async function extractSessionsFromAnnotations(projectPath: string): Promi
  * Used as fallback when the vibecheck CLI binary is not installed.
  */
 export async function extractModelsFromManifest(projectPath: string): Promise<Array<{
-	modelName: string;
-	modelVersion: string;
-	toolName: string;
-	annotationCount: number;
+	model_name: string;
+	model_version: string;
+	tool_name: string;
+	annotation_count: number;
 	percentage: number;
 }>> {
 	const manifest = await readVibesManifest(projectPath);
@@ -849,9 +849,9 @@ export async function extractModelsFromManifest(projectPath: string): Promise<Ar
 
 	// Group by model name (multiple env hashes can map to same model)
 	const modelMap = new Map<string, {
-		modelName: string;
-		modelVersion: string;
-		toolName: string;
+		model_name: string;
+		model_version: string;
+		tool_name: string;
 		count: number;
 	}>();
 
@@ -864,9 +864,9 @@ export async function extractModelsFromManifest(projectPath: string): Promise<Ar
 				existing.count += count;
 			} else {
 				modelMap.set(env.model_name, {
-					modelName: env.model_name,
-					modelVersion: env.model_version,
-					toolName: env.tool_name,
+					model_name: env.model_name,
+					model_version: env.model_version,
+					tool_name: env.tool_name,
 					count,
 				});
 			}
@@ -876,10 +876,10 @@ export async function extractModelsFromManifest(projectPath: string): Promise<Ar
 	const totalAnnotations = [...modelMap.values()].reduce((sum, m) => sum + m.count, 0);
 
 	return [...modelMap.values()].map((m) => ({
-		modelName: m.modelName,
-		modelVersion: m.modelVersion,
-		toolName: m.toolName,
-		annotationCount: m.count,
+		model_name: m.model_name,
+		model_version: m.model_version,
+		tool_name: m.tool_name,
+		annotation_count: m.count,
 		percentage: totalAnnotations > 0 ? Math.round((m.count / totalAnnotations) * 100) : 0,
 	}));
 }
@@ -892,14 +892,14 @@ export async function computeBlameFromAnnotations(
 	projectPath: string,
 	filePath: string,
 ): Promise<Array<{
-	lineStart: number;
-	lineEnd: number;
+	line_start: number;
+	line_end: number;
 	action: string;
-	modelName: string;
-	modelVersion: string;
-	toolName: string;
+	model_name: string;
+	model_version: string;
+	tool_name: string;
 	timestamp: string;
-	sessionId?: string;
+	session_id?: string;
 }>> {
 	const annotations = await readAnnotations(projectPath);
 	const manifest = await readVibesManifest(projectPath);
@@ -916,19 +916,19 @@ export async function computeBlameFromAnnotations(
 		const env = envEntry?.type === 'environment' ? envEntry as VibesEnvironmentEntry : undefined;
 
 		return {
-			lineStart: a.line_start,
-			lineEnd: a.line_end,
+			line_start: a.line_start,
+			line_end: a.line_end,
 			action: a.action,
-			modelName: env?.model_name ?? 'unknown',
-			modelVersion: env?.model_version ?? 'unknown',
-			toolName: env?.tool_name ?? 'unknown',
+			model_name: env?.model_name ?? 'unknown',
+			model_version: env?.model_version ?? 'unknown',
+			tool_name: env?.tool_name ?? 'unknown',
 			timestamp: a.timestamp,
-			sessionId: a.session_id,
+			session_id: a.session_id,
 		};
 	});
 
 	// Sort by line_start ascending
-	blame.sort((a, b) => a.lineStart - b.lineStart);
+	blame.sort((a, b) => a.line_start - b.line_start);
 
 	return blame;
 }
@@ -940,9 +940,9 @@ export async function computeBlameFromAnnotations(
 export async function computeCoverageFromAnnotations(
 	projectPath: string,
 ): Promise<Array<{
-	filePath: string;
-	status: 'covered' | 'partial' | 'uncovered';
-	annotationCount: number;
+	file_path: string;
+	coverage_status: 'full' | 'partial' | 'uncovered';
+	annotation_count: number;
 }>> {
 	const annotations = await readAnnotations(projectPath);
 	const config = await readVibesConfig(projectPath);
@@ -956,17 +956,17 @@ export async function computeCoverageFromAnnotations(
 	}
 
 	const results: Array<{
-		filePath: string;
-		status: 'covered' | 'partial' | 'uncovered';
-		annotationCount: number;
+		file_path: string;
+		coverage_status: 'full' | 'partial' | 'uncovered';
+		annotation_count: number;
 	}> = [];
 
 	// Annotated files
 	for (const [fp, count] of fileCounts) {
 		results.push({
-			filePath: fp,
-			status: count > 5 ? 'covered' : 'partial',
-			annotationCount: count,
+			file_path: fp,
+			coverage_status: count > 5 ? 'full' : 'partial',
+			annotation_count: count,
 		});
 	}
 
@@ -975,14 +975,14 @@ export async function computeCoverageFromAnnotations(
 		const trackedFiles = await scanTrackedFiles(projectPath, config.tracked_extensions, config.exclude_patterns ?? []);
 		for (const fp of trackedFiles) {
 			if (!fileCounts.has(fp)) {
-				results.push({ filePath: fp, status: 'uncovered', annotationCount: 0 });
+				results.push({ file_path: fp, coverage_status: 'uncovered', annotation_count: 0 });
 			}
 		}
 	}
 
-	// Sort: covered first, then partial, then uncovered, then by path
-	const statusOrder = { covered: 0, partial: 1, uncovered: 2 };
-	results.sort((a, b) => statusOrder[a.status] - statusOrder[b.status] || a.filePath.localeCompare(b.filePath));
+	// Sort: full first, then partial, then uncovered, then by path
+	const statusOrder = { full: 0, partial: 1, uncovered: 2 };
+	results.sort((a, b) => statusOrder[a.coverage_status] - statusOrder[b.coverage_status] || a.file_path.localeCompare(b.file_path));
 
 	return results;
 }

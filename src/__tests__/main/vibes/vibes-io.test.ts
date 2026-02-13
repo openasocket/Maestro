@@ -1225,20 +1225,20 @@ describe('vibes-io', () => {
 			await appendAnnotationImmediate(tmpDir, lineB);
 
 			const stats = await computeStatsFromAnnotations(tmpDir);
-			expect(stats.totalAnnotations).toBe(2); // 2 line annotations
-			expect(stats.filesCovered).toBe(2); // 2 unique files
-			expect(stats.activeSessions).toBe(1); // 1 started, 0 ended
-			expect(stats.contributingModels).toBe(2); // claude-4, gpt-4
-			expect(stats.assuranceLevel).toBe('high');
+			expect(stats.total_annotations).toBe(2); // 2 line annotations
+			expect(stats.files_covered).toBe(2); // 2 unique files
+			expect(stats.active_sessions).toBe(1); // 1 started, 0 ended
+			expect(stats.contributing_models).toBe(2); // claude-4, gpt-4
+			expect(stats.assurance_level).toBe('high');
 		});
 
 		it('should return empty results for empty .ai-audit', async () => {
 			await initVibesDirectly(tmpDir, { projectName: 'empty', assuranceLevel: 'low' });
 			const stats = await computeStatsFromAnnotations(tmpDir);
-			expect(stats.totalAnnotations).toBe(0);
-			expect(stats.filesCovered).toBe(0);
-			expect(stats.activeSessions).toBe(0);
-			expect(stats.contributingModels).toBe(0);
+			expect(stats.total_annotations).toBe(0);
+			expect(stats.files_covered).toBe(0);
+			expect(stats.active_sessions).toBe(0);
+			expect(stats.contributing_models).toBe(0);
 		});
 
 		it('should count sessions as inactive when ended', async () => {
@@ -1255,7 +1255,7 @@ describe('vibes-io', () => {
 			await appendAnnotationImmediate(tmpDir, end);
 
 			const stats = await computeStatsFromAnnotations(tmpDir);
-			expect(stats.activeSessions).toBe(0);
+			expect(stats.active_sessions).toBe(0);
 		});
 	});
 
@@ -1282,10 +1282,10 @@ describe('vibes-io', () => {
 
 			const sessions = await extractSessionsFromAnnotations(tmpDir);
 			expect(sessions).toHaveLength(2); // start + end
-			expect(sessions[0].sessionId).toBe('sess-1');
+			expect(sessions[0].session_id).toBe('sess-1');
 			expect(sessions[0].event).toBe('start');
-			expect(sessions[0].agentType).toBe('claude-code');
-			expect(sessions[0].annotationCount).toBe(1);
+			expect(sessions[0].agent_type).toBe('claude-code');
+			expect(sessions[0].annotation_count).toBe(1);
 			expect(sessions[1].event).toBe('end');
 		});
 
@@ -1319,15 +1319,15 @@ describe('vibes-io', () => {
 			const models = await extractModelsFromManifest(tmpDir);
 			expect(models).toHaveLength(2);
 
-			const claude = models.find((m) => m.modelName === 'claude-4');
+			const claude = models.find((m) => m.model_name === 'claude-4');
 			expect(claude).toBeDefined();
-			expect(claude!.annotationCount).toBe(2);
+			expect(claude!.annotation_count).toBe(2);
 			expect(claude!.percentage).toBe(67); // 2/3 ≈ 67%
-			expect(claude!.toolName).toBe('claude-code');
+			expect(claude!.tool_name).toBe('claude-code');
 
-			const gpt = models.find((m) => m.modelName === 'gpt-4');
+			const gpt = models.find((m) => m.model_name === 'gpt-4');
 			expect(gpt).toBeDefined();
-			expect(gpt!.annotationCount).toBe(1);
+			expect(gpt!.annotation_count).toBe(1);
 			expect(gpt!.percentage).toBe(33); // 1/3 ≈ 33%
 		});
 
@@ -1377,12 +1377,12 @@ describe('vibes-io', () => {
 
 			const blame = await computeBlameFromAnnotations(tmpDir, 'src/target.ts');
 			expect(blame).toHaveLength(2);
-			// Should be sorted by lineStart ascending
-			expect(blame[0].lineStart).toBe(1);
-			expect(blame[1].lineStart).toBe(10);
-			expect(blame[0].modelName).toBe('claude-4');
-			expect(blame[0].toolName).toBe('claude-code');
-			expect(blame[0].sessionId).toBe('sess-1');
+			// Should be sorted by line_start ascending
+			expect(blame[0].line_start).toBe(1);
+			expect(blame[1].line_start).toBe(10);
+			expect(blame[0].model_name).toBe('claude-4');
+			expect(blame[0].tool_name).toBe('claude-code');
+			expect(blame[0].session_id).toBe('sess-1');
 		});
 
 		it('should resolve model info from manifest', async () => {
@@ -1402,9 +1402,9 @@ describe('vibes-io', () => {
 
 			const blame = await computeBlameFromAnnotations(tmpDir, 'src/test.ts');
 			expect(blame).toHaveLength(1);
-			expect(blame[0].modelName).toBe('gpt-4o');
-			expect(blame[0].modelVersion).toBe('2026-01');
-			expect(blame[0].toolName).toBe('copilot');
+			expect(blame[0].model_name).toBe('gpt-4o');
+			expect(blame[0].model_version).toBe('2026-01');
+			expect(blame[0].tool_name).toBe('copilot');
 		});
 
 		it('should return empty for file with no annotations', async () => {
@@ -1440,14 +1440,14 @@ describe('vibes-io', () => {
 			}
 
 			const coverage = await computeCoverageFromAnnotations(tmpDir);
-			const heavy = coverage.find((c) => c.filePath === 'src/heavy.ts');
-			const light = coverage.find((c) => c.filePath === 'src/light.ts');
+			const heavy = coverage.find((c) => c.file_path === 'src/heavy.ts');
+			const light = coverage.find((c) => c.file_path === 'src/light.ts');
 			expect(heavy).toBeDefined();
-			expect(heavy!.status).toBe('covered');
-			expect(heavy!.annotationCount).toBe(8);
+			expect(heavy!.coverage_status).toBe('full');
+			expect(heavy!.annotation_count).toBe(8);
 			expect(light).toBeDefined();
-			expect(light!.status).toBe('partial');
-			expect(light!.annotationCount).toBe(2);
+			expect(light!.coverage_status).toBe('partial');
+			expect(light!.annotation_count).toBe(2);
 		});
 
 		it('should return empty for empty .ai-audit', async () => {
@@ -1473,10 +1473,10 @@ describe('vibes-io', () => {
 			});
 
 			const coverage = await computeCoverageFromAnnotations(tmpDir);
-			expect(coverage[0].filePath).toBe('src/b.ts');
-			expect(coverage[0].status).toBe('covered');
-			expect(coverage[1].filePath).toBe('src/a.ts');
-			expect(coverage[1].status).toBe('partial');
+			expect(coverage[0].file_path).toBe('src/b.ts');
+			expect(coverage[0].coverage_status).toBe('full');
+			expect(coverage[1].file_path).toBe('src/a.ts');
+			expect(coverage[1].coverage_status).toBe('partial');
 		});
 	});
 });

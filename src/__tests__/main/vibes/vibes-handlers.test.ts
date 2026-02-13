@@ -241,13 +241,13 @@ describe('vibes-handlers', () => {
 		it('should fall back to direct reading when binary not found', async () => {
 			mockFindBinary.mockResolvedValue(null);
 			mockComputeStats.mockResolvedValue({
-				totalAnnotations: 10,
-				filesCovered: 3,
-				totalTrackedFiles: 3,
-				coveragePercent: 100,
-				activeSessions: 1,
-				contributingModels: 2,
-				assuranceLevel: 'high',
+				total_annotations: 10,
+				files_covered: 3,
+				total_tracked_files: 3,
+				coverage_percent: 100,
+				active_sessions: 1,
+				contributing_models: 2,
+				assurance_level: 'high',
 			});
 
 			const result = await handlers['vibes:getStats']({}, '/project');
@@ -256,7 +256,7 @@ describe('vibes-handlers', () => {
 			expect(mockComputeStats).toHaveBeenCalledWith('/project');
 			expect(result).toEqual({
 				success: true,
-				data: expect.stringContaining('"totalAnnotations":10'),
+				data: expect.stringContaining('"total_annotations":10'),
 			});
 		});
 	});
@@ -282,7 +282,7 @@ describe('vibes-handlers', () => {
 		it('should fall back to direct blame computation when binary not found', async () => {
 			mockFindBinary.mockResolvedValue(null);
 			mockComputeBlame.mockResolvedValue([
-				{ lineStart: 1, lineEnd: 10, action: 'create', modelName: 'claude-4', modelVersion: 'opus', toolName: 'claude-code', timestamp: '2026-02-10T12:00:00Z' },
+				{ line_start: 1, line_end: 10, action: 'create', model_name: 'claude-4', model_version: 'opus', tool_name: 'claude-code', timestamp: '2026-02-10T12:00:00Z' },
 			]);
 
 			const result = await handlers['vibes:getBlame']({}, '/project', 'src/index.ts');
@@ -291,7 +291,7 @@ describe('vibes-handlers', () => {
 			expect(mockComputeBlame).toHaveBeenCalledWith('/project', 'src/index.ts');
 			expect(result).toEqual({
 				success: true,
-				data: expect.stringContaining('"lineStart":1'),
+				data: expect.stringContaining('"line_start":1'),
 			});
 		});
 	});
@@ -345,7 +345,7 @@ describe('vibes-handlers', () => {
 		it('should fall back to direct coverage computation when binary not found', async () => {
 			mockFindBinary.mockResolvedValue(null);
 			mockComputeCoverage.mockResolvedValue([
-				{ filePath: 'src/a.ts', status: 'covered', annotationCount: 10 },
+				{ file_path: 'src/a.ts', coverage_status: 'full', annotation_count: 10 },
 			]);
 
 			const result = await handlers['vibes:getCoverage']({}, '/project');
@@ -354,7 +354,7 @@ describe('vibes-handlers', () => {
 			expect(mockComputeCoverage).toHaveBeenCalledWith('/project');
 			expect(result).toEqual({
 				success: true,
-				data: expect.stringContaining('"status":"covered"'),
+				data: expect.stringContaining('"coverage_status":"full"'),
 			});
 		});
 	});
@@ -391,7 +391,7 @@ describe('vibes-handlers', () => {
 		it('should fall back to direct session extraction when binary not found', async () => {
 			mockFindBinary.mockResolvedValue(null);
 			mockExtractSessions.mockResolvedValue([
-				{ sessionId: 'sess-1', event: 'start', timestamp: '2026-02-10T12:00:00Z', annotationCount: 5 },
+				{ session_id: 'sess-1', event: 'start', timestamp: '2026-02-10T12:00:00Z', annotation_count: 5 },
 			]);
 
 			const result = await handlers['vibes:getSessions']({}, '/project');
@@ -400,7 +400,7 @@ describe('vibes-handlers', () => {
 			expect(mockExtractSessions).toHaveBeenCalledWith('/project');
 			expect(result).toEqual({
 				success: true,
-				data: expect.stringContaining('"sessionId":"sess-1"'),
+				data: expect.stringContaining('"session_id":"sess-1"'),
 			});
 		});
 	});
@@ -418,7 +418,7 @@ describe('vibes-handlers', () => {
 		it('should fall back to direct model extraction when binary not found', async () => {
 			mockFindBinary.mockResolvedValue(null);
 			mockExtractModels.mockResolvedValue([
-				{ modelName: 'claude-4', modelVersion: 'opus', toolName: 'claude-code', annotationCount: 10, percentage: 100 },
+				{ model_name: 'claude-4', model_version: 'opus', tool_name: 'claude-code', annotation_count: 10, percentage: 100 },
 			]);
 
 			const result = await handlers['vibes:getModels']({}, '/project');
@@ -427,7 +427,7 @@ describe('vibes-handlers', () => {
 			expect(mockExtractModels).toHaveBeenCalledWith('/project');
 			expect(result).toEqual({
 				success: true,
-				data: expect.stringContaining('"modelName":"claude-4"'),
+				data: expect.stringContaining('"model_name":"claude-4"'),
 			});
 		});
 	});
