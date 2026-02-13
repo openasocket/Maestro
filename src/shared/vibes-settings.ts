@@ -49,8 +49,29 @@ export const VIBES_SETTINGS_DEFAULTS: VibesSettingsConfig = {
 	vibesEnabled: false,
 	vibesAssuranceLevel: 'medium',
 	vibesTrackedExtensions: [
-		'.ts', '.tsx', '.js', '.jsx', '.py', '.rs',
-		'.go', '.java', '.c', '.cpp', '.rb', '.swift', '.kt',
+		// JavaScript & TypeScript
+		'.js', '.jsx', '.mjs', '.cjs',
+		'.ts', '.tsx', '.mts', '.cts',
+		// Frontend frameworks
+		'.vue', '.svelte', '.astro',
+		// Web fundamentals
+		'.html', '.css', '.scss', '.sass', '.less',
+		// Systems programming
+		'.rs', '.go', '.c', '.cpp', '.h', '.hpp', '.zig',
+		// JVM ecosystem
+		'.java', '.kt', '.scala',
+		// .NET
+		'.cs',
+		// Mobile
+		'.swift', '.dart', '.m',
+		// Scripting & dynamic
+		'.py', '.rb', '.php', '.lua', '.sh',
+		// Elixir / Erlang
+		'.ex', '.exs',
+		// Data & query
+		'.sql', '.graphql', '.proto',
+		// Config as code
+		'.tf', '.yaml', '.yml', '.toml',
 	],
 	vibesExcludePatterns: [
 		'**/node_modules/**',
@@ -60,6 +81,22 @@ export const VIBES_SETTINGS_DEFAULTS: VibesSettingsConfig = {
 		'**/target/**',
 		'**/.git/**',
 		'**/build/**',
+		'**/out/**',
+		'**/__pycache__/**',
+		'**/.next/**',
+		'**/.nuxt/**',
+		'**/.svelte-kit/**',
+		'**/coverage/**',
+		'**/.dart_tool/**',
+		'**/Pods/**',
+		'**/.build/**',
+		'**/obj/**',
+		'**/.gradle/**',
+		'**/.terraform/**',
+		'**/deps/**',
+		'**/_build/**',
+		'**/zig-out/**',
+		'**/zig-cache/**',
 	],
 	vibesPerAgentConfig: {
 		'claude-code': { enabled: true },

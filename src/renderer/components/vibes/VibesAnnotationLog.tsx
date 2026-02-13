@@ -130,17 +130,37 @@ function formatRelativeTime(timestamp: string): string {
 	return new Date(timestamp).toLocaleDateString();
 }
 
-/** Check if an annotation's environment hash loosely matches an agent filter. */
+/**
+ * Infer the agent category from a model name or tool name string.
+ * Uses heuristic matching on known model/tool naming conventions.
+ */
+function inferAgent(name: string | undefined): AgentFilter | null {
+	if (!name) return null;
+	const lower = name.toLowerCase();
+	if (lower.includes('claude') || lower.includes('anthropic')) return 'claude-code';
+	if (lower.includes('codex') || lower.includes('openai') || lower.includes('gpt')) return 'codex';
+	if (lower.includes('maestro')) return 'maestro';
+	return null;
+}
+
+/** Check if an annotation matches the selected agent filter. */
 function matchesAgentFilter(annotation: VibesAnnotation, agent: AgentFilter): boolean {
 	if (agent === 'all') return true;
-	// Session records don't have environment hashes — always show them
-	if (annotation.type === 'session') return true;
-	// Heuristic: environment_hash is an opaque hash, but if tool_name is embedded
-	// in the annotation data we use it. Since the annotation itself doesn't carry
-	// tool_name, we rely on the environment hash prefix convention (future).
-	// For now, pass all annotations when agent filter is set — the filter is a UI hint
-	// until manifest-enriched data is available.
-	return true;
+	// Session records with a description may contain agent info
+	if (annotation.type === 'session') {
+		if (annotation.description) {
+			const inferred = inferAgent(annotation.description);
+			return inferred === null || inferred === agent;
+		}
+		return true;
+	}
+	// CLI-enriched annotations carry model_name; use it for filtering
+	const extra = annotation as unknown as Record<string, unknown>;
+	const modelName = extra.model_name as string | undefined;
+	const toolName = extra.tool_name as string | undefined;
+	const inferred = inferAgent(toolName) ?? inferAgent(modelName);
+	// If we can't determine the agent, show the annotation (don't hide data)
+	return inferred === null || inferred === agent;
 }
 
 /** Check if an annotation matches the current filters. */

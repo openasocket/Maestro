@@ -103,14 +103,10 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 	);
 
 	// Get project statistics (falls back to direct file reading when binary unavailable)
-	ipcMain.handle('vibes:getStats', async (_event, projectPath: string, file?: string) => {
+	// NOTE: `vibecheck stats` does not support `--json` — its output is human-readable
+	// text. We always use the direct computation fallback for reliable JSON output.
+	ipcMain.handle('vibes:getStats', async (_event, projectPath: string, _file?: string) => {
 		try {
-			const customPath = getCustomBinaryPath(settingsStore);
-			const binaryPath = await findVibesCheckBinary(customPath);
-			if (binaryPath) {
-				return await vibesStats(projectPath, file, customPath);
-			}
-			// Fallback: compute from raw .ai-audit/ files
 			const stats = await computeStatsFromAnnotations(projectPath);
 			return { success: true, data: JSON.stringify(stats) };
 		} catch (error) {

@@ -762,8 +762,23 @@ export async function computeStatsFromAnnotations(projectPath: string): Promise<
 	}
 
 	const filesCovered = coveredFiles.size;
-	// Approximate totalTrackedFiles as filesCovered if we can't scan
-	const totalTrackedFiles = filesCovered || 1;
+
+	// Scan tracked files for accurate total count when config is available
+	let totalTrackedFiles = filesCovered || 1;
+	if (config?.tracked_extensions && config.tracked_extensions.length > 0) {
+		try {
+			const trackedFiles = await scanTrackedFiles(
+				projectPath,
+				config.tracked_extensions,
+				config.exclude_patterns ?? [],
+			);
+			if (trackedFiles.length > 0) {
+				totalTrackedFiles = trackedFiles.length;
+			}
+		} catch {
+			// Scan failed — keep approximate count
+		}
+	}
 
 	return {
 		total_annotations: lineAnnotations.length,

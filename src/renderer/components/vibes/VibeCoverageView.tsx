@@ -94,6 +94,48 @@ function normalizeCoverageData(raw: string | undefined): NormalizedCoverageFile[
 	if (!raw) return [];
 	try {
 		const data = JSON.parse(raw);
+
+		// vibecheck CLI format: { uncovered_files: string[], partial_files: [{file_path, ...}], ... }
+		if (data.uncovered_files || data.partial_files) {
+			const results: NormalizedCoverageFile[] = [];
+
+			// Partial files — have annotations but not full coverage
+			if (Array.isArray(data.partial_files)) {
+				for (const pf of data.partial_files) {
+					results.push({
+						filePath: pf.file_path ?? pf.path ?? 'unknown',
+						status: 'partial',
+						annotationCount: pf.annotated_lines ?? pf.annotation_count ?? 1,
+					});
+				}
+			}
+
+			// Uncovered files — no annotations at all
+			if (Array.isArray(data.uncovered_files)) {
+				for (const fp of data.uncovered_files) {
+					results.push({
+						filePath: typeof fp === 'string' ? fp : (fp.file_path ?? fp.path ?? 'unknown'),
+						status: 'uncovered',
+						annotationCount: 0,
+					});
+				}
+			}
+
+			// Covered files — if present (some vibecheck versions may include them)
+			if (Array.isArray(data.covered_files)) {
+				for (const cf of data.covered_files) {
+					results.push({
+						filePath: typeof cf === 'string' ? cf : (cf.file_path ?? cf.path ?? 'unknown'),
+						status: 'full',
+						annotationCount: cf.annotation_count ?? cf.annotated_lines ?? 1,
+					});
+				}
+			}
+
+			return results;
+		}
+
+		// Fallback array format (from computeCoverageFromAnnotations or generic arrays)
 		let entries: CoverageFileEntry[] = [];
 
 		if (Array.isArray(data)) {

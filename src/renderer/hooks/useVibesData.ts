@@ -102,15 +102,64 @@ function parseStats(raw: string | undefined): VibesStatsData | null {
 	}
 }
 
+/**
+ * Normalize a single annotation entry from the vibecheck CLI output format
+ * to the internal VibesAnnotation format.
+ *
+ * CLI format differences:
+ * - `kind` instead of `type`
+ * - `session_event` instead of `event` (for session entries)
+ * - `line_range: "1-5"` (string) instead of `line_start`/`line_end` (numbers)
+ */
+function normalizeAnnotation(entry: Record<string, unknown>): Record<string, unknown> {
+	// Already in internal format — has `type` field
+	if (entry.type) return entry;
+
+	// CLI format — normalize `kind` → `type`
+	if (entry.kind) {
+		const normalized: Record<string, unknown> = { ...entry, type: entry.kind };
+		delete normalized.kind;
+
+		// session_event → event
+		if (entry.session_event !== undefined) {
+			normalized.event = entry.session_event;
+			delete normalized.session_event;
+		}
+
+		// line_range "1-5" → line_start / line_end
+		if (typeof entry.line_range === 'string' && entry.line_range.includes('-')) {
+			const [start, end] = entry.line_range.split('-').map(Number);
+			if (!isNaN(start)) normalized.line_start = start;
+			if (!isNaN(end)) normalized.line_end = end;
+			delete normalized.line_range;
+		}
+
+		// CLI uses null for missing assurance_level on session entries — default it
+		if (normalized.assurance_level === null && normalized.type === 'session') {
+			delete normalized.assurance_level;
+		}
+
+		return normalized;
+	}
+
+	return entry;
+}
+
 function parseAnnotations(raw: string | undefined): VibesAnnotation[] {
 	if (!raw) return [];
 	try {
 		const data = JSON.parse(raw);
-		if (Array.isArray(data)) return data.slice(0, ANNOTATION_LIMIT);
-		if (data.annotations && Array.isArray(data.annotations)) {
-			return data.annotations.slice(0, ANNOTATION_LIMIT);
+		let list: unknown[];
+		if (Array.isArray(data)) {
+			list = data;
+		} else if (data.annotations && Array.isArray(data.annotations)) {
+			list = data.annotations;
+		} else {
+			return [];
 		}
-		return [];
+		return list
+			.slice(0, ANNOTATION_LIMIT)
+			.map((entry) => normalizeAnnotation(entry as Record<string, unknown>)) as unknown as VibesAnnotation[];
 	} catch {
 		return [];
 	}
@@ -123,11 +172,11 @@ function parseSessions(raw: string | undefined): VibesSessionInfo[] {
 		const list = Array.isArray(data) ? data : data.sessions ?? [];
 		return list.map((s: Record<string, unknown>) => ({
 			sessionId: (s.session_id ?? s.sessionId ?? '') as string,
-			startTime: (s.start_time ?? s.startTime ?? s.timestamp ?? '') as string,
-			endTime: (s.end_time ?? s.endTime ?? undefined) as string | undefined,
+			startTime: (s.start ?? s.start_time ?? s.startTime ?? s.timestamp ?? '') as string,
+			endTime: (s.end ?? s.end_time ?? s.endTime ?? undefined) as string | undefined,
 			annotationCount: (s.annotation_count ?? s.annotationCount ?? 0) as number,
 			toolName: (s.tool_name ?? s.toolName ?? undefined) as string | undefined,
-			modelName: (s.model_name ?? s.modelName ?? undefined) as string | undefined,
+			modelName: (s.environment ?? s.model_name ?? s.modelName ?? undefined) as string | undefined,
 		}));
 	} catch {
 		return [];
@@ -139,13 +188,23 @@ function parseModels(raw: string | undefined): VibesModelInfo[] {
 	try {
 		const data = JSON.parse(raw);
 		const list = Array.isArray(data) ? data : data.models ?? [];
-		return list.map((m: Record<string, unknown>) => ({
+		const models = list.map((m: Record<string, unknown>) => ({
 			modelName: (m.model_name ?? m.modelName ?? 'Unknown') as string,
 			modelVersion: (m.model_version ?? m.modelVersion ?? undefined) as string | undefined,
 			toolName: (m.tool_name ?? m.toolName ?? undefined) as string | undefined,
 			annotationCount: (m.annotation_count ?? m.annotationCount ?? 0) as number,
 			percentage: (m.percentage ?? 0) as number,
 		}));
+		// Compute percentages if not provided by the backend (vibecheck CLI omits them)
+		const totalAnnotations = models.reduce((sum: number, m: VibesModelInfo) => sum + m.annotationCount, 0);
+		if (totalAnnotations > 0) {
+			for (const m of models) {
+				if (m.percentage === 0 && m.annotationCount > 0) {
+					m.percentage = Math.round((m.annotationCount / totalAnnotations) * 1000) / 10;
+				}
+			}
+		}
+		return models;
 	} catch {
 		return [];
 	}
