@@ -75,13 +75,23 @@ function extractFilePath(input: unknown): string | null {
 }
 
 /**
- * Normalize a file path to handle relative vs absolute paths.
- * If the path is absolute, returns it as-is.
- * If relative, returns it as-is (annotations store paths relative to project root).
+ * Normalize a file path and make it relative to the project root.
+ * VIBES standard requires all file_path values to be project-relative.
+ * If the path is absolute and starts with projectPath, the prefix is stripped.
+ * If already relative, it is returned as-is after normalization.
  */
-function normalizePath(filePath: string): string {
-	// Normalize separators and resolve . / .. segments
-	return path.normalize(filePath);
+function normalizePath(filePath: string, projectPath?: string): string {
+	const normalized = path.normalize(filePath);
+	if (projectPath && path.isAbsolute(normalized)) {
+		const normalizedProject = path.normalize(projectPath);
+		if (normalized.startsWith(normalizedProject + path.sep)) {
+			return normalized.slice(normalizedProject.length + 1);
+		}
+		if (normalized.startsWith(normalizedProject)) {
+			return normalized.slice(normalizedProject.length) || normalized;
+		}
+	}
+	return normalized;
 }
 
 /**
@@ -314,8 +324,8 @@ export class ClaudeCodeInstrumenter {
 			if (action) {
 				const filePath = extractFilePath(toolInput);
 				if (filePath && session.environmentHash) {
-					// Normalize the file path
-					const normalizedPath = normalizePath(filePath);
+					// Normalize the file path and make it relative to project root
+					const normalizedPath = normalizePath(filePath, session.projectPath);
 
 					// Skip files matching exclude patterns
 					if (matchesExcludePattern(normalizedPath, this.excludePatterns)) {
