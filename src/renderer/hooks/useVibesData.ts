@@ -84,10 +84,11 @@ const ANNOTATION_LIMIT = 100;
 // Parsing helpers
 // ============================================================================
 
-function parseStats(raw: string | undefined): VibesStatsData | null {
+/** @internal Exported for testing. */
+export function parseStats(raw: string | object | undefined): VibesStatsData | null {
 	if (!raw) return null;
 	try {
-		const data = JSON.parse(raw);
+		const data = typeof raw === 'object' ? raw : JSON.parse(raw);
 		return {
 			totalAnnotations: data.total_annotations ?? data.totalAnnotations ?? 0,
 			filesCovered: data.files_covered ?? data.filesCovered ?? 0,
@@ -97,7 +98,8 @@ function parseStats(raw: string | undefined): VibesStatsData | null {
 			contributingModels: data.contributing_models ?? data.contributingModels ?? 0,
 			assuranceLevel: data.assurance_level ?? data.assuranceLevel ?? null,
 		};
-	} catch {
+	} catch (e) {
+		console.warn('useVibesData: parseStats failed', e, raw);
 		return null;
 	}
 }
