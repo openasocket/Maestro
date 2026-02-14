@@ -131,7 +131,7 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 						<>
 							<DataRow theme={theme} label="Type" value={cmd.command_type} />
 							<DataRow theme={theme} label="Text" value={cmd.command_text} mono />
-							{cmd.command_exit_code !== undefined && (
+							{cmd.command_exit_code != null && (
 								<DataRow theme={theme} label="Exit Code" value={String(cmd.command_exit_code)} />
 							)}
 						</>

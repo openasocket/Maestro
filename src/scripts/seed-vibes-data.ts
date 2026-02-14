@@ -133,6 +133,8 @@ const commands: VibesCommandEntry[] = [
 		command_text: 'Write(src/renderer/components/vibes/VibesPanel.tsx)',
 		command_type: 'file_write',
 		command_exit_code: 0,
+		command_output_summary: null,
+		working_directory: null,
 		created_at: '2026-02-10T09:10:00Z',
 	},
 	{
@@ -141,6 +143,7 @@ const commands: VibesCommandEntry[] = [
 		command_type: 'shell',
 		command_exit_code: 0,
 		command_output_summary: 'Test Files  24 passed (24)\n      Tests  682 passed (682)',
+		working_directory: null,
 		created_at: '2026-02-10T10:30:00Z',
 	},
 	{
@@ -148,6 +151,8 @@ const commands: VibesCommandEntry[] = [
 		command_text: 'Edit(src/main/vibes/vibes-hash.ts, line 15-25)',
 		command_type: 'file_write',
 		command_exit_code: 0,
+		command_output_summary: null,
+		working_directory: null,
 		created_at: '2026-02-10T11:35:00Z',
 	},
 ];

@@ -284,6 +284,8 @@ describe('vibes-io', () => {
 						command_text: 'npm test',
 						command_type: 'shell',
 						command_exit_code: 0,
+						command_output_summary: null,
+						working_directory: null,
 						created_at: '2026-02-10T12:01:00Z',
 					} as VibesCommandEntry,
 				},
@@ -683,6 +685,9 @@ describe('vibes-io', () => {
 				type: 'command',
 				command_text: 'npm test',
 				command_type: 'shell',
+				command_exit_code: null,
+				command_output_summary: null,
+				working_directory: null,
 				created_at: '2026-02-10T12:01:00Z',
 			};
 
@@ -722,6 +727,9 @@ describe('vibes-io', () => {
 				type: 'command',
 				command_text: 'git commit',
 				command_type: 'shell',
+				command_exit_code: null,
+				command_output_summary: null,
+				working_directory: null,
 				created_at: '2026-02-10T12:03:00Z',
 			};
 			await addManifestEntry(tmpDir, newHash, commandEntry);
@@ -1671,6 +1679,9 @@ describe('vibes-io', () => {
 				type: 'command',
 				command_text: 'different command',
 				command_type: 'shell',
+				command_exit_code: null,
+				command_output_summary: null,
+				working_directory: null,
 				created_at: '2026-02-10T13:00:00Z',
 			};
 			await addManifestEntryImmediate(tmpDir, hash, differentEntry);

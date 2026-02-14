@@ -85,9 +85,9 @@ export interface VibesCommandEntry {
 	type: 'command';
 	command_text: string;
 	command_type: VibesCommandType;
-	command_exit_code?: number;
-	command_output_summary?: string;
-	working_directory?: string;
+	command_exit_code: number | null;
+	command_output_summary: string | null;
+	working_directory: string | null;
 	created_at: string;
 }
 

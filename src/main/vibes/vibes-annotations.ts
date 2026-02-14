@@ -65,26 +65,19 @@ export function createEnvironmentEntry(params: {
 export function createCommandEntry(params: {
 	commandText: string;
 	commandType: VibesCommandType;
-	exitCode?: number;
-	outputSummary?: string;
-	workingDirectory?: string;
+	exitCode?: number | null;
+	outputSummary?: string | null;
+	workingDirectory?: string | null;
 }): { entry: VibesCommandEntry; hash: string } {
 	const entry: VibesCommandEntry = {
 		type: 'command',
 		command_text: params.commandText,
 		command_type: params.commandType,
+		command_exit_code: params.exitCode ?? null,
+		command_output_summary: params.outputSummary ?? null,
+		working_directory: params.workingDirectory ?? null,
 		created_at: new Date().toISOString(),
 	};
-
-	if (params.exitCode !== undefined) {
-		entry.command_exit_code = params.exitCode;
-	}
-	if (params.outputSummary !== undefined) {
-		entry.command_output_summary = params.outputSummary;
-	}
-	if (params.workingDirectory !== undefined) {
-		entry.working_directory = params.workingDirectory;
-	}
 
 	const hash = computeVibesHash(entry as unknown as Record<string, unknown>);
 	return { entry, hash };

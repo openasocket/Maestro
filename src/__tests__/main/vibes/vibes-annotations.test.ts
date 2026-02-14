@@ -141,9 +141,9 @@ describe('vibes-annotations', () => {
 			expect(entry.command_text).toBe('npm test');
 			expect(entry.command_type).toBe('shell');
 			expect(entry.created_at).toBe(FIXED_ISO);
-			expect(entry.command_exit_code).toBeUndefined();
-			expect(entry.command_output_summary).toBeUndefined();
-			expect(entry.working_directory).toBeUndefined();
+			expect(entry.command_exit_code).toBeNull();
+			expect(entry.command_output_summary).toBeNull();
+			expect(entry.working_directory).toBeNull();
 			expect(hash).toMatch(/^[0-9a-f]{64}$/);
 		});
 

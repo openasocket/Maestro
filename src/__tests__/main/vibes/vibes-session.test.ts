@@ -365,6 +365,9 @@ describe('vibes-session', () => {
 				type: 'command',
 				command_text: 'npm test',
 				command_type: 'shell',
+				command_exit_code: null,
+				command_output_summary: null,
+				working_directory: null,
 				created_at: FIXED_ISO,
 			};
 
@@ -408,6 +411,9 @@ describe('vibes-session', () => {
 				type: 'command',
 				command_text: 'npm test',
 				command_type: 'shell',
+				command_exit_code: null,
+				command_output_summary: null,
+				working_directory: null,
 				created_at: FIXED_ISO,
 			};
 
