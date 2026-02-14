@@ -40,8 +40,8 @@ describe('shared/vibes-settings', () => {
 			expect(exts).toContain('.kt');
 		});
 
-		it('should have 13 tracked extensions', () => {
-			expect(VIBES_SETTINGS_DEFAULTS.vibesTrackedExtensions).toHaveLength(13);
+		it('should have 44 tracked extensions', () => {
+			expect(VIBES_SETTINGS_DEFAULTS.vibesTrackedExtensions).toHaveLength(44);
 		});
 
 		it('should have exclude patterns for common dependency/build directories', () => {
@@ -55,8 +55,8 @@ describe('shared/vibes-settings', () => {
 			expect(patterns).toContain('**/build/**');
 		});
 
-		it('should have 7 exclude patterns', () => {
-			expect(VIBES_SETTINGS_DEFAULTS.vibesExcludePatterns).toHaveLength(7);
+		it('should have 23 exclude patterns', () => {
+			expect(VIBES_SETTINGS_DEFAULTS.vibesExcludePatterns).toHaveLength(23);
 		});
 
 		it('should have per-agent config for claude-code and codex', () => {

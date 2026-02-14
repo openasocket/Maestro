@@ -224,34 +224,7 @@ describe('vibes-handlers', () => {
 	});
 
 	describe('vibes:getStats', () => {
-		it('should call vibesStats when binary is available', async () => {
-			mockVibesStats.mockResolvedValue({ success: true, data: '{}' });
-
-			const result = await handlers['vibes:getStats']({}, '/project');
-
-			expect(mockFindBinary).toHaveBeenCalled();
-			expect(mockVibesStats).toHaveBeenCalledWith('/project', undefined, undefined);
-			expect(result).toEqual({ success: true, data: '{}' });
-		});
-
-		it('should pass optional file argument', async () => {
-			mockVibesStats.mockResolvedValue({ success: true, data: '{}' });
-
-			await handlers['vibes:getStats']({}, '/project', 'src/index.ts');
-
-			expect(mockVibesStats).toHaveBeenCalledWith('/project', 'src/index.ts', undefined);
-		});
-
-		it('should return error on failure', async () => {
-			mockVibesStats.mockRejectedValue(new Error('stats failed'));
-
-			const result = await handlers['vibes:getStats']({}, '/project');
-
-			expect(result).toEqual({ success: false, error: 'Error: stats failed' });
-		});
-
-		it('should fall back to direct reading when binary not found', async () => {
-			mockFindBinary.mockResolvedValue(null);
+		it('should compute stats from annotations directly', async () => {
 			mockComputeStats.mockResolvedValue({
 				total_annotations: 10,
 				files_covered: 3,
@@ -264,12 +237,19 @@ describe('vibes-handlers', () => {
 
 			const result = await handlers['vibes:getStats']({}, '/project');
 
-			expect(mockVibesStats).not.toHaveBeenCalled();
 			expect(mockComputeStats).toHaveBeenCalledWith('/project');
 			expect(result).toEqual({
 				success: true,
 				data: expect.stringContaining('"total_annotations":10'),
 			});
+		});
+
+		it('should return error on failure', async () => {
+			mockComputeStats.mockRejectedValue(new Error('stats failed'));
+
+			const result = await handlers['vibes:getStats']({}, '/project');
+
+			expect(result).toEqual({ success: false, error: 'Error: stats failed' });
 		});
 	});
 
@@ -656,35 +636,35 @@ describe('vibes-handlers', () => {
 	});
 
 	describe('custom binary path from settings', () => {
-		it('should use custom binary path from settings store', async () => {
+		it('should use custom binary path from settings store for blame', async () => {
 			mockSettingsStore.get.mockReturnValue('/opt/vibecheck');
 			mockFindBinary.mockResolvedValue('/opt/vibecheck');
-			mockVibesStats.mockResolvedValue({ success: true, data: '{}' });
+			mockVibesBlame.mockResolvedValue({ success: true, data: '[]' });
 
-			await handlers['vibes:getStats']({}, '/project');
+			await handlers['vibes:getBlame']({}, '/project', 'src/index.ts');
 
 			expect(mockFindBinary).toHaveBeenCalledWith('/opt/vibecheck');
-			expect(mockVibesStats).toHaveBeenCalledWith('/project', undefined, '/opt/vibecheck');
+			expect(mockVibesBlame).toHaveBeenCalledWith('/project', 'src/index.ts', '/opt/vibecheck');
 		});
 
-		it('should pass undefined when settings store returns empty string', async () => {
+		it('should pass undefined when settings store returns empty string for blame', async () => {
 			mockSettingsStore.get.mockReturnValue('');
-			mockVibesStats.mockResolvedValue({ success: true, data: '{}' });
+			mockFindBinary.mockResolvedValue(null);
+			mockComputeBlame.mockResolvedValue([]);
 
-			await handlers['vibes:getStats']({}, '/project');
+			await handlers['vibes:getBlame']({}, '/project', 'src/index.ts');
 
 			expect(mockFindBinary).toHaveBeenCalledWith(undefined);
-			expect(mockVibesStats).toHaveBeenCalledWith('/project', undefined, undefined);
 		});
 
-		it('should prefer vibecheck when binary is available', async () => {
+		it('should prefer vibecheck when binary is available for blame', async () => {
 			mockFindBinary.mockResolvedValue('/usr/local/bin/vibecheck');
-			mockVibesStats.mockResolvedValue({ success: true, data: '{}' });
+			mockVibesBlame.mockResolvedValue({ success: true, data: '[]' });
 
-			await handlers['vibes:getStats']({}, '/project');
+			await handlers['vibes:getBlame']({}, '/project', 'src/index.ts');
 
-			expect(mockVibesStats).toHaveBeenCalled();
-			expect(mockComputeStats).not.toHaveBeenCalled();
+			expect(mockVibesBlame).toHaveBeenCalled();
+			expect(mockComputeBlame).not.toHaveBeenCalled();
 		});
 	});
 });

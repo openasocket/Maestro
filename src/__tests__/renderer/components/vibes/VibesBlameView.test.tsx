@@ -11,6 +11,11 @@ vi.mock('lucide-react', () => ({
 	AlertTriangle: () => <span data-testid="icon-alert">AlertTriangle</span>,
 	Database: () => <span data-testid="icon-database">Database</span>,
 	Cpu: () => <span data-testid="icon-cpu">Cpu</span>,
+	Folder: () => <span data-testid="icon-folder">Folder</span>,
+	FolderOpen: () => <span data-testid="icon-folderopen">FolderOpen</span>,
+	ChevronRight: () => <span data-testid="icon-chevronright">ChevronRight</span>,
+	ChevronDown: () => <span data-testid="icon-chevrondown">ChevronDown</span>,
+	ArrowLeft: () => <span data-testid="icon-arrowleft">ArrowLeft</span>,
 }));
 
 const mockTheme: Theme = {
@@ -102,8 +107,8 @@ describe('VibesBlameView', () => {
 				projectPath="/test/project"
 			/>,
 		);
-		expect(screen.getByText('Select a file to view AI blame')).toBeTruthy();
-		expect(screen.getByText(/Choose a file from the search above/)).toBeTruthy();
+		expect(screen.getByText('No tracked files')).toBeTruthy();
+		expect(screen.getByText(/No files with AI annotations found/)).toBeTruthy();
 	});
 
 	it('renders file search input', () => {
@@ -113,7 +118,7 @@ describe('VibesBlameView', () => {
 				projectPath="/test/project"
 			/>,
 		);
-		expect(screen.getByPlaceholderText('Type to filter files...')).toBeTruthy();
+		expect(screen.getByPlaceholderText('Search files...')).toBeTruthy();
 	});
 
 	it('renders loading state when fetching blame data', async () => {
@@ -328,7 +333,7 @@ describe('VibesBlameView', () => {
 		});
 	});
 
-	it('shows file dropdown on focus', async () => {
+	it('shows file tree after coverage loads', async () => {
 		render(
 			<VibesBlameView
 				theme={mockTheme}
@@ -336,18 +341,16 @@ describe('VibesBlameView', () => {
 			/>,
 		);
 
-		// Wait for coverage files to load
+		// Wait for coverage files to load — tree should show file names
 		await waitFor(() => {
 			expect(mockGetCoverage).toHaveBeenCalled();
 		});
 
-		const input = screen.getByPlaceholderText('Type to filter files...');
-		fireEvent.focus(input);
-
 		await waitFor(() => {
-			expect(screen.getByText('src/main.ts')).toBeTruthy();
-			expect(screen.getByText('src/utils/helpers.ts')).toBeTruthy();
-			expect(screen.getByText('src/components/App.tsx')).toBeTruthy();
+			// Tree renders file names (not full paths) under directory nodes
+			expect(screen.getByText('main.ts')).toBeTruthy();
+			expect(screen.getByText('helpers.ts')).toBeTruthy();
+			expect(screen.getByText('App.tsx')).toBeTruthy();
 		});
 	});
 
@@ -363,17 +366,13 @@ describe('VibesBlameView', () => {
 			expect(mockGetCoverage).toHaveBeenCalled();
 		});
 
-		const input = screen.getByPlaceholderText('Type to filter files...');
-		fireEvent.focus(input);
+		const input = screen.getByPlaceholderText('Search files...');
 		fireEvent.change(input, { target: { value: 'utils' } });
 
+		// Dropdown shows full paths matching the search
 		await waitFor(() => {
 			expect(screen.getByText('src/utils/helpers.ts')).toBeTruthy();
 		});
-
-		// Other files should not be visible
-		expect(screen.queryByText('src/main.ts')).toBeNull();
-		expect(screen.queryByText('src/components/App.tsx')).toBeNull();
 	});
 
 	it('renders single-line range correctly', async () => {

@@ -157,11 +157,11 @@ describe('Settings/VibesSettings', () => {
 			const props = createDefaultProps({ vibesEnabled: true });
 			render(<VibesSettings {...props} />);
 			const input = screen.getByPlaceholderText('e.g. .vue, .svelte');
-			fireEvent.change(input, { target: { value: '.vue' } });
+			fireEvent.change(input, { target: { value: '.nim' } });
 			const addButtons = screen.getAllByText('Add');
 			fireEvent.click(addButtons[0]);
 			expect(props.setVibesTrackedExtensions).toHaveBeenCalledWith(
-				expect.arrayContaining(['.vue'])
+				expect.arrayContaining(['.nim'])
 			);
 		});
 
@@ -169,11 +169,11 @@ describe('Settings/VibesSettings', () => {
 			const props = createDefaultProps({ vibesEnabled: true });
 			render(<VibesSettings {...props} />);
 			const input = screen.getByPlaceholderText('e.g. .vue, .svelte');
-			fireEvent.change(input, { target: { value: 'vue' } });
+			fireEvent.change(input, { target: { value: 'nim' } });
 			const addButtons = screen.getAllByText('Add');
 			fireEvent.click(addButtons[0]);
 			expect(props.setVibesTrackedExtensions).toHaveBeenCalledWith(
-				expect.arrayContaining(['.vue'])
+				expect.arrayContaining(['.nim'])
 			);
 		});
 
@@ -209,10 +209,10 @@ describe('Settings/VibesSettings', () => {
 			const props = createDefaultProps({ vibesEnabled: true });
 			render(<VibesSettings {...props} />);
 			const input = screen.getByPlaceholderText('e.g. .vue, .svelte');
-			fireEvent.change(input, { target: { value: '.vue' } });
+			fireEvent.change(input, { target: { value: '.nim' } });
 			fireEvent.keyPress(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 			expect(props.setVibesTrackedExtensions).toHaveBeenCalledWith(
-				expect.arrayContaining(['.vue'])
+				expect.arrayContaining(['.nim'])
 			);
 		});
 
