@@ -124,7 +124,7 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 	vibesAutoInit,
 	binaryAvailable,
 }) => {
-	const { isInitialized, stats, isLoading, error, refresh, initialize } = vibesData;
+	const { isInitialized, stats, sessions, models, isLoading, error, refresh, initialize } = vibesData;
 	const [initProjectName, setInitProjectName] = useState('');
 	const [isInitializing, setIsInitializing] = useState(false);
 	const [actionStatus, setActionStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -441,14 +441,14 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 					theme={theme}
 					icon={<Activity className="w-4 h-4" />}
 					label="Sessions"
-					value={stats?.activeSessions ?? 0}
+					value={stats?.activeSessions || sessions.length || 0}
 					isLoading={isLoading}
 				/>
 				<StatsCard
 					theme={theme}
 					icon={<Cpu className="w-4 h-4" />}
 					label="Models"
-					value={stats?.contributingModels ?? 0}
+					value={stats?.contributingModels || models.length || 0}
 					isLoading={isLoading}
 				/>
 			</div>

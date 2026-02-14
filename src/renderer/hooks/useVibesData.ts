@@ -189,10 +189,11 @@ export function parseSessions(raw: string | object | undefined): VibesSessionInf
 	}
 }
 
-function parseModels(raw: string | undefined): VibesModelInfo[] {
+/** @internal Exported for testing. */
+export function parseModels(raw: string | object | undefined): VibesModelInfo[] {
 	if (!raw) return [];
 	try {
-		const data = JSON.parse(raw);
+		const data = typeof raw === 'object' ? raw : JSON.parse(raw);
 		const list = Array.isArray(data) ? data : data.models ?? [];
 		const models = list.map((m: Record<string, unknown>) => ({
 			modelName: (m.model_name ?? m.modelName ?? 'Unknown') as string,
@@ -211,7 +212,8 @@ function parseModels(raw: string | undefined): VibesModelInfo[] {
 			}
 		}
 		return models;
-	} catch {
+	} catch (e) {
+		console.warn('useVibesData: parseModels failed', e, raw);
 		return [];
 	}
 }

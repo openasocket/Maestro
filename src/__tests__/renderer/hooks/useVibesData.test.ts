@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { parseStats, parseSessions } from '../../../renderer/hooks/useVibesData';
+import { parseStats, parseSessions, parseModels } from '../../../renderer/hooks/useVibesData';
 
 describe('parseStats', () => {
 	beforeEach(() => {
@@ -286,6 +286,131 @@ describe('parseSessions', () => {
 		expect(result).toEqual([]);
 		expect(warnSpy).toHaveBeenCalledWith(
 			'useVibesData: parseSessions failed',
+			expect.any(SyntaxError),
+			'not valid json',
+		);
+	});
+});
+
+describe('parseModels', () => {
+	beforeEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it('returns empty array for undefined input', () => {
+		expect(parseModels(undefined)).toEqual([]);
+	});
+
+	it('returns empty array for empty string', () => {
+		expect(parseModels('')).toEqual([]);
+	});
+
+	it('parses snake_case fields from a direct JSON array', () => {
+		const raw = JSON.stringify([
+			{
+				model_name: 'claude-3.5-sonnet',
+				model_version: '20250101',
+				tool_name: 'claude-code',
+				annotation_count: 15,
+				percentage: 75,
+			},
+		]);
+		const result = parseModels(raw);
+		expect(result).toEqual([
+			{
+				modelName: 'claude-3.5-sonnet',
+				modelVersion: '20250101',
+				toolName: 'claude-code',
+				annotationCount: 15,
+				percentage: 75,
+			},
+		]);
+	});
+
+	it('parses camelCase fields', () => {
+		const raw = JSON.stringify([
+			{
+				modelName: 'gpt-4',
+				modelVersion: 'v1',
+				toolName: 'codex',
+				annotationCount: 10,
+				percentage: 50,
+			},
+		]);
+		const result = parseModels(raw);
+		expect(result[0].modelName).toBe('gpt-4');
+		expect(result[0].toolName).toBe('codex');
+	});
+
+	it('handles wrapped { models: [...] } format', () => {
+		const raw = JSON.stringify({
+			models: [
+				{ model_name: 'llama-3', annotation_count: 5 },
+			],
+		});
+		const result = parseModels(raw);
+		expect(result).toHaveLength(1);
+		expect(result[0].modelName).toBe('llama-3');
+	});
+
+	it('handles pre-parsed object array (skips JSON.parse)', () => {
+		const raw = [
+			{
+				model_name: 'claude-opus',
+				model_version: '4.0',
+				tool_name: 'claude-code',
+				annotation_count: 20,
+				percentage: 100,
+			},
+		];
+		const result = parseModels(raw);
+		expect(result).toHaveLength(1);
+		expect(result[0].modelName).toBe('claude-opus');
+		expect(result[0].percentage).toBe(100);
+	});
+
+	it('computes percentages when not provided by backend', () => {
+		const raw = JSON.stringify([
+			{ model_name: 'model-a', annotation_count: 3 },
+			{ model_name: 'model-b', annotation_count: 7 },
+		]);
+		const result = parseModels(raw);
+		expect(result[0].percentage).toBe(30);
+		expect(result[1].percentage).toBe(70);
+	});
+
+	it('does not overwrite existing non-zero percentages', () => {
+		const raw = JSON.stringify([
+			{ model_name: 'model-a', annotation_count: 5, percentage: 42 },
+		]);
+		const result = parseModels(raw);
+		expect(result[0].percentage).toBe(42);
+	});
+
+	it('defaults missing fields correctly', () => {
+		const raw = JSON.stringify([{}]);
+		const result = parseModels(raw);
+		expect(result[0]).toEqual({
+			modelName: 'Unknown',
+			modelVersion: undefined,
+			toolName: undefined,
+			annotationCount: 0,
+			percentage: 0,
+		});
+	});
+
+	it('returns empty array for empty data array', () => {
+		const raw = JSON.stringify([]);
+		const result = parseModels(raw);
+		expect(result).toEqual([]);
+	});
+
+	it('warns on invalid JSON and returns empty array', () => {
+		const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const result = parseModels('not valid json');
+		expect(result).toEqual([]);
+		expect(warnSpy).toHaveBeenCalledWith(
+			'useVibesData: parseModels failed',
 			expect.any(SyntaxError),
 			'not valid json',
 		);
