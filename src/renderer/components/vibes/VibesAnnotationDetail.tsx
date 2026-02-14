@@ -98,32 +98,32 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 			<Section theme={theme} icon={<Terminal className="w-3 h-3" />} label="Environment">
 				{env ? (
 					<>
-						<Row theme={theme} label="Tool" value={`${env.tool_name} ${env.tool_version}`} />
-						<Row theme={theme} label="Model" value={`${env.model_name} ${env.model_version}`} />
+						<DataRow theme={theme} label="Tool" value={`${env.tool_name} ${env.tool_version}`} />
+						<DataRow theme={theme} label="Model" value={`${env.model_name} ${env.model_version}`} />
 						<HashRow theme={theme} label="Hash" value={annotation.environment_hash} onCopy={handleCopy} copiedField={copiedField} />
 					</>
 				) : (
 					<HashRow theme={theme} label="Hash" value={annotation.environment_hash} onCopy={handleCopy} copiedField={copiedField} />
 				)}
 				{annotation.session_id && (
-					<Row theme={theme} label="Session" value={annotation.session_id.slice(0, 12)} mono />
+					<DataRow theme={theme} label="Session" value={annotation.session_id.slice(0, 12)} mono />
 				)}
 				{annotation.commit_hash && (
-					<Row theme={theme} label="Commit" value={annotation.commit_hash.slice(0, 8)} mono />
+					<DataRow theme={theme} label="Commit" value={annotation.commit_hash.slice(0, 8)} mono />
 				)}
-				<Row theme={theme} label="Assurance" value={annotation.assurance_level} />
-				<Row theme={theme} label="Timestamp" value={new Date(annotation.timestamp).toLocaleString()} />
+				<DataRow theme={theme} label="Assurance" value={annotation.assurance_level} />
+				<DataRow theme={theme} label="Timestamp" value={new Date(annotation.timestamp).toLocaleString()} />
 			</Section>
 
 			{/* Resolved Command */}
 			{annotation.command_hash && (
-				<Section theme={theme} icon={<Terminal className="w-3 h-3" />} label="Command">
+				<Section theme={theme} icon={<Terminal className="w-3 h-3" />} label="Command" copyText={cmd?.command_text}>
 					{cmd ? (
 						<>
-							<Row theme={theme} label="Type" value={cmd.command_type} />
-							<Row theme={theme} label="Text" value={cmd.command_text} mono />
+							<DataRow theme={theme} label="Type" value={cmd.command_type} />
+							<DataRow theme={theme} label="Text" value={cmd.command_text} mono />
 							{cmd.command_exit_code !== undefined && (
-								<Row theme={theme} label="Exit Code" value={String(cmd.command_exit_code)} />
+								<DataRow theme={theme} label="Exit Code" value={String(cmd.command_exit_code)} />
 							)}
 						</>
 					) : (
@@ -134,13 +134,13 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 
 			{/* Resolved Prompt */}
 			{annotation.prompt_hash && (
-				<Section theme={theme} icon={<MessageSquare className="w-3 h-3" />} label="Prompt">
+				<Section theme={theme} icon={<MessageSquare className="w-3 h-3" />} label="Prompt" copyText={prompt?.prompt_text}>
 					{prompt ? (
 						<>
-							{prompt.prompt_type && <Row theme={theme} label="Type" value={prompt.prompt_type} />}
-							<Row theme={theme} label="Text" value={prompt.prompt_text} mono />
+							{prompt.prompt_type && <DataRow theme={theme} label="Type" value={prompt.prompt_type} />}
+							<DataRow theme={theme} label="Text" value={prompt.prompt_text} mono />
 							{prompt.prompt_context_files && prompt.prompt_context_files.length > 0 && (
-								<Row theme={theme} label="Context" value={prompt.prompt_context_files.join(', ')} />
+								<DataRow theme={theme} label="Context" value={prompt.prompt_context_files.join(', ')} />
 							)}
 						</>
 					) : (
@@ -151,17 +151,17 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 
 			{/* Resolved Reasoning */}
 			{annotation.reasoning_hash && (
-				<Section theme={theme} icon={<Brain className="w-3 h-3" />} label="Reasoning">
+				<Section theme={theme} icon={<Brain className="w-3 h-3" />} label="Reasoning" copyText={reasoning?.reasoning_text}>
 					{reasoning ? (
 						<>
 							{reasoning.compressed && (
-								<Row theme={theme} label="Status" value="Compressed" />
+								<DataRow theme={theme} label="Status" value="Compressed" />
 							)}
 							{reasoning.reasoning_text && (
-								<Row theme={theme} label="Text" value={reasoning.reasoning_text.slice(0, 300) + (reasoning.reasoning_text.length > 300 ? '...' : '')} mono />
+								<DataRow theme={theme} label="Text" value={reasoning.reasoning_text} mono />
 							)}
 							{reasoning.reasoning_token_count !== undefined && (
-								<Row theme={theme} label="Tokens" value={String(reasoning.reasoning_token_count)} />
+								<DataRow theme={theme} label="Tokens" value={String(reasoning.reasoning_token_count)} />
 							)}
 						</>
 					) : (
@@ -173,19 +173,19 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 			{/* Annotation type-specific */}
 			{annotation.type === 'line' && (
 				<Section theme={theme} icon={<FileCode className="w-3 h-3" />} label="Line Range">
-					<Row theme={theme} label="File" value={annotation.file_path} mono />
-					<Row theme={theme} label="Lines" value={`${annotation.line_start} – ${annotation.line_end}`} />
-					<Row theme={theme} label="Action" value={annotation.action} />
+					<DataRow theme={theme} label="File" value={annotation.file_path} mono />
+					<DataRow theme={theme} label="Lines" value={`${annotation.line_start} – ${annotation.line_end}`} />
+					<DataRow theme={theme} label="Action" value={annotation.action} />
 				</Section>
 			)}
 			{annotation.type === 'function' && (
 				<Section theme={theme} icon={<FileCode className="w-3 h-3" />} label="Function">
-					<Row theme={theme} label="File" value={annotation.file_path} mono />
-					<Row theme={theme} label="Name" value={annotation.function_name} mono />
+					<DataRow theme={theme} label="File" value={annotation.file_path} mono />
+					<DataRow theme={theme} label="Name" value={annotation.function_name} mono />
 					{annotation.function_signature && (
-						<Row theme={theme} label="Signature" value={annotation.function_signature} mono />
+						<DataRow theme={theme} label="Signature" value={annotation.function_signature} mono />
 					)}
-					<Row theme={theme} label="Action" value={annotation.action} />
+					<DataRow theme={theme} label="Action" value={annotation.action} />
 				</Section>
 			)}
 		</div>
@@ -200,36 +200,105 @@ const Section: React.FC<{
 	theme: Theme;
 	icon: React.ReactNode;
 	label: string;
+	copyText?: string;
 	children: React.ReactNode;
-}> = ({ theme, icon, label, children }) => (
-	<div className="flex flex-col gap-1">
-		<div className="flex items-center gap-1.5">
-			<span style={{ color: theme.colors.textDim }}>{icon}</span>
-			<span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: theme.colors.textDim }}>
-				{label}
-			</span>
-		</div>
-		<div className="flex flex-col gap-0.5 pl-5">{children}</div>
-	</div>
-);
+}> = ({ theme, icon, label, copyText, children }) => {
+	const [copied, setCopied] = useState(false);
 
-const Row: React.FC<{
+	const handleCopySection = useCallback(async () => {
+		if (!copyText) return;
+		try {
+			await navigator.clipboard.writeText(copyText);
+			setCopied(true);
+			setTimeout(() => setCopied(false), 1500);
+		} catch {
+			// Silent fail
+		}
+	}, [copyText]);
+
+	return (
+		<div className="flex flex-col gap-1">
+			<div className="flex items-center gap-1.5">
+				<span style={{ color: theme.colors.textDim }}>{icon}</span>
+				<span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: theme.colors.textDim }}>
+					{label}
+				</span>
+				{copyText && (
+					<button
+						onClick={handleCopySection}
+						className="shrink-0 p-0.5 rounded transition-opacity hover:opacity-80"
+						style={{ color: copied ? theme.colors.success : theme.colors.textDim }}
+					>
+						{copied ? (
+							<CheckCircle2 className="w-3 h-3" />
+						) : (
+							<Copy className="w-3 h-3" />
+						)}
+					</button>
+				)}
+			</div>
+			<div className="flex flex-col gap-0.5 pl-5">{children}</div>
+		</div>
+	);
+};
+
+const TRUNCATE_LIMIT = 200;
+const SCROLL_THRESHOLD = 50_000;
+
+const DataRow: React.FC<{
 	theme: Theme;
 	label: string;
-	value: string;
+	value: string | undefined;
 	mono?: boolean;
-}> = ({ theme, label, value, mono }) => (
-	<div className="flex items-baseline gap-2 text-[11px]">
-		<span className="shrink-0 w-20" style={{ color: theme.colors.textDim }}>{label}:</span>
-		<span
-			className={`break-all ${mono ? 'font-mono' : ''}`}
-			style={{ color: theme.colors.textMain }}
-			title={value}
-		>
-			{value}
-		</span>
-	</div>
-);
+}> = ({ theme, label, value, mono }) => {
+	const [expanded, setExpanded] = useState(false);
+
+	if (!value) return null;
+
+	const isLong = value.length > TRUNCATE_LIMIT;
+	const sizeKB = (value.length / 1024).toFixed(1);
+	const displayText = isLong && !expanded
+		? value.slice(0, TRUNCATE_LIMIT) + '...'
+		: value;
+	const needsScroll = expanded && value.length > SCROLL_THRESHOLD;
+
+	return (
+		<div className="flex items-baseline gap-2 text-[11px]">
+			<span className="shrink-0 w-20" style={{ color: theme.colors.textDim }}>{label}:</span>
+			<div className="min-w-0 flex-1">
+				{needsScroll ? (
+					<div
+						className={`whitespace-pre-wrap break-all ${mono ? 'font-mono' : ''}`}
+						style={{
+							color: theme.colors.textMain,
+							maxHeight: 300,
+							overflowY: 'auto',
+						}}
+					>
+						{displayText}
+					</div>
+				) : (
+					<span
+						className={`whitespace-pre-wrap break-all ${mono ? 'font-mono' : ''}`}
+						style={{ color: theme.colors.textMain }}
+						title={isLong ? undefined : value}
+					>
+						{displayText}
+					</span>
+				)}
+				{isLong && (
+					<button
+						onClick={() => setExpanded(!expanded)}
+						className="text-[10px] ml-1 transition-opacity hover:opacity-80"
+						style={{ color: theme.colors.accent }}
+					>
+						{expanded ? 'Show less' : `Show all (${sizeKB} KB)`}
+					</button>
+				)}
+			</div>
+		</div>
+	);
+};
 
 const HashRow: React.FC<{
 	theme: Theme;
