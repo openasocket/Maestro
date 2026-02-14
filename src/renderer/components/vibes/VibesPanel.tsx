@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { Settings, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import DiscoBallIcon from '../icons/DiscoBallIcon';
 import type { Theme } from '../../types';
+import type { VibesAssuranceLevel } from '../../../shared/vibes-types';
 import { useSettings, useVibesData, useVibesLive } from '../../hooks';
 import { VibesDashboard } from './VibesDashboard';
 import { VibesAnnotationLog } from './VibesAnnotationLog';
@@ -166,6 +167,20 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 	const handleRefresh = useCallback(() => {
 		vibesData.refresh();
 	}, [vibesData]);
+
+	const handleAssuranceLevelChange = useCallback(async (level: VibesAssuranceLevel) => {
+		if (!projectPath) return;
+		try {
+			const result = await window.maestro.vibes.updateConfig(projectPath, { assurance_level: level });
+			if (result.success) {
+				vibesData.refresh();
+			} else {
+				console.warn('Failed to update assurance level:', result.error);
+			}
+		} catch (err) {
+			console.warn('Failed to update assurance level:', err);
+		}
+	}, [projectPath, vibesData]);
 
 	// Keyboard shortcut: Ctrl+Shift+R (or Cmd+Shift+R on macOS)
 	useEffect(() => {
@@ -364,6 +379,7 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 						vibesAssuranceLevel={vibesAssuranceLevel}
 						vibesAutoInit={vibesAutoInit}
 						binaryAvailable={binaryAvailable}
+						onAssuranceLevelChange={handleAssuranceLevelChange}
 					/>
 				)}
 

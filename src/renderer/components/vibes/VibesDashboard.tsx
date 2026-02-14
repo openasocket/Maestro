@@ -27,6 +27,7 @@ interface VibesDashboardProps {
 	vibesAssuranceLevel: VibesAssuranceLevel;
 	vibesAutoInit?: boolean;
 	binaryAvailable?: boolean | null;
+	onAssuranceLevelChange?: (level: VibesAssuranceLevel) => void;
 }
 
 /** Color mapping for assurance level badges. */
@@ -123,6 +124,7 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 	vibesAssuranceLevel,
 	vibesAutoInit,
 	binaryAvailable,
+	onAssuranceLevelChange,
 }) => {
 	const { isInitialized, stats, sessions, models, isLoading, error, refresh, initialize } = vibesData;
 	const [initProjectName, setInitProjectName] = useState('');
@@ -384,15 +386,27 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 					VIBES is active
 				</span>
 				<span style={{ color: theme.colors.textDim }}>—</span>
-				<span
-					className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase"
-					style={{
-						backgroundColor: assurance.bg,
-						color: assurance.text,
-					}}
-				>
-					{assurance.label}
-				</span>
+				<div className="flex items-center gap-0.5 ml-1">
+					{(['low', 'medium', 'high'] as VibesAssuranceLevel[]).map((level) => {
+						const colors = ASSURANCE_COLORS[level];
+						const isActive = effectiveLevel === level;
+						return (
+							<button
+								key={level}
+								onClick={() => onAssuranceLevelChange?.(level)}
+								className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase transition-colors"
+								style={{
+									backgroundColor: isActive ? colors.bg : 'transparent',
+									color: isActive ? colors.text : theme.colors.textDim,
+									opacity: isActive ? 1 : 0.6,
+								}}
+								title={`Set assurance level to ${colors.label}`}
+							>
+								{colors.label}
+							</button>
+						);
+					})}
+				</div>
 				<span className="text-[10px] ml-auto" style={{ color: theme.colors.textDim }}>
 					assurance level
 				</span>
