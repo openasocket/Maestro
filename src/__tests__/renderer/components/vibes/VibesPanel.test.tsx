@@ -21,12 +21,19 @@ const mockVibesData = {
 let mockVibesEnabled = true;
 const mockVibesAssuranceLevel = 'medium';
 
+const mockVibesLiveData = {
+	updates: new Map(),
+	getCount: vi.fn().mockReturnValue(0),
+	getLastAnnotation: vi.fn().mockReturnValue(null),
+};
+
 vi.mock('../../../../renderer/hooks', () => ({
 	useSettings: () => ({
 		vibesEnabled: mockVibesEnabled,
 		vibesAssuranceLevel: mockVibesAssuranceLevel,
 	}),
 	useVibesData: () => mockVibesData,
+	useVibesLive: () => mockVibesLiveData,
 }));
 
 // Mock child components to test rendering without complex dependencies
@@ -112,6 +119,7 @@ describe('VibesPanel', () => {
 	beforeEach(() => {
 		mockVibesEnabled = true;
 		vi.clearAllMocks();
+		mockVibesLiveData.updates = new Map();
 		mockFindBinary.mockResolvedValue({ path: '/usr/local/bin/vibecheck', version: '0.3.2' });
 		(window as any).maestro = {
 			vibes: {
@@ -616,5 +624,112 @@ describe('VibesPanel', () => {
 
 		// No loading transition has happened, so no timestamp should be shown
 		expect(screen.queryByTestId('last-updated-label')).toBeNull();
+	});
+
+	// ========================================================================
+	// Live annotation reactivity
+	// ========================================================================
+
+	it('triggers debounced refresh when live annotation count changes', () => {
+		vi.useFakeTimers({ shouldAdvanceTime: false });
+
+		// Start with no live updates
+		mockVibesLiveData.updates = new Map();
+		const { rerender } = render(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		// Simulate a live annotation update
+		mockVibesLiveData.updates = new Map([
+			['session-1', { sessionId: 'session-1', annotationCount: 5, lastAnnotation: { type: 'code_authorship', timestamp: '2026-02-13T00:00:00Z' } }],
+		]);
+		rerender(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		// Refresh should not be called immediately
+		expect(mockVibesData.refresh).not.toHaveBeenCalled();
+
+		// Advance past the 2-second debounce
+		act(() => {
+			vi.advanceTimersByTime(2000);
+		});
+
+		expect(mockVibesData.refresh).toHaveBeenCalledTimes(1);
+
+		vi.useRealTimers();
+	});
+
+	it('does not trigger refresh when live annotation count is 0', () => {
+		vi.useFakeTimers({ shouldAdvanceTime: false });
+
+		mockVibesLiveData.updates = new Map();
+		render(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		// Advance well past debounce
+		act(() => {
+			vi.advanceTimersByTime(5000);
+		});
+
+		expect(mockVibesData.refresh).not.toHaveBeenCalled();
+
+		vi.useRealTimers();
+	});
+
+	it('debounces multiple rapid live annotation updates', () => {
+		vi.useFakeTimers({ shouldAdvanceTime: false });
+
+		mockVibesLiveData.updates = new Map();
+		const { rerender } = render(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		// First update
+		mockVibesLiveData.updates = new Map([
+			['session-1', { sessionId: 'session-1', annotationCount: 1, lastAnnotation: { type: 'code_authorship', timestamp: '2026-02-13T00:00:00Z' } }],
+		]);
+		rerender(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		// Advance 1 second (not enough for debounce)
+		act(() => {
+			vi.advanceTimersByTime(1000);
+		});
+
+		// Second update before debounce fires — resets timer
+		mockVibesLiveData.updates = new Map([
+			['session-1', { sessionId: 'session-1', annotationCount: 3, lastAnnotation: { type: 'code_authorship', timestamp: '2026-02-13T00:00:01Z' } }],
+		]);
+		rerender(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		// Advance 1 more second — still not enough from the second update
+		act(() => {
+			vi.advanceTimersByTime(1000);
+		});
+		expect(mockVibesData.refresh).not.toHaveBeenCalled();
+
+		// Advance the remaining 1 second to complete the debounce from the second update
+		act(() => {
+			vi.advanceTimersByTime(1000);
+		});
+		expect(mockVibesData.refresh).toHaveBeenCalledTimes(1);
+
+		vi.useRealTimers();
+	});
+
+	it('accumulates annotation counts from multiple sessions', () => {
+		vi.useFakeTimers({ shouldAdvanceTime: false });
+
+		mockVibesLiveData.updates = new Map();
+		const { rerender } = render(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		// Two sessions with annotations
+		mockVibesLiveData.updates = new Map([
+			['session-1', { sessionId: 'session-1', annotationCount: 3, lastAnnotation: { type: 'code_authorship', timestamp: '2026-02-13T00:00:00Z' } }],
+			['session-2', { sessionId: 'session-2', annotationCount: 7, lastAnnotation: { type: 'code_authorship', timestamp: '2026-02-13T00:00:01Z' } }],
+		]);
+		rerender(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		// Should trigger refresh after debounce (total count = 10, which is > 0)
+		act(() => {
+			vi.advanceTimersByTime(2000);
+		});
+
+		expect(mockVibesData.refresh).toHaveBeenCalledTimes(1);
+
+		vi.useRealTimers();
 	});
 });

@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Settings, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import DiscoBallIcon from '../icons/DiscoBallIcon';
 import type { Theme } from '../../types';
-import { useSettings, useVibesData } from '../../hooks';
+import { useSettings, useVibesData, useVibesLive } from '../../hooks';
 import { VibesDashboard } from './VibesDashboard';
 import { VibesAnnotationLog } from './VibesAnnotationLog';
 import { VibesModelAttribution } from './VibesModelAttribution';
@@ -66,6 +66,25 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 	const [showInstallGuide, setShowInstallGuide] = useState(false);
 	const { vibesEnabled, vibesAssuranceLevel, vibesAutoInit } = useSettings();
 	const vibesData = useVibesData(projectPath, vibesEnabled);
+
+	// Subscribe to real-time annotation updates
+	const liveData = useVibesLive(vibesEnabled);
+
+	// Derive total annotation count from live updates to detect new annotations
+	const liveAnnotationCount = useMemo(() => {
+		let total = 0;
+		for (const update of liveData.updates.values()) {
+			total += update.annotationCount;
+		}
+		return total;
+	}, [liveData.updates]);
+
+	// Trigger a debounced refresh when live annotation count changes
+	useEffect(() => {
+		if (liveAnnotationCount === 0) return;
+		const timer = setTimeout(() => vibesData.refresh(), 2000);
+		return () => clearTimeout(timer);
+	}, [liveAnnotationCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	// Check vibecheck binary availability on mount
 	useEffect(() => {
