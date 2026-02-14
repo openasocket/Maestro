@@ -4,7 +4,7 @@
 
 import { generateUUID } from '../../shared/uuid';
 import { createSessionRecord } from './vibes-annotations';
-import { appendAnnotation, appendAnnotationImmediate, addManifestEntry, flushAll } from './vibes-io';
+import { appendAnnotation, appendAnnotationImmediate, addManifestEntry, addManifestEntryImmediate, flushAll } from './vibes-io';
 import type {
 	VibesAssuranceLevel,
 	VibesAnnotation,
@@ -152,6 +152,15 @@ export class VibesSessionManager {
 	}
 
 	/**
+	 * Return all active session IDs.
+	 */
+	getActiveSessions(): string[] {
+		return [...this.sessions.entries()]
+			.filter(([_, state]) => state.isActive)
+			.map(([id]) => id);
+	}
+
+	/**
 	 * Check whether a session is currently active.
 	 */
 	isSessionActive(sessionId: string): boolean {
@@ -192,6 +201,22 @@ export class VibesSessionManager {
 		}
 
 		await addManifestEntry(state.projectPath, hash, entry);
+	}
+
+	/**
+	 * Record a manifest entry immediately (bypasses debounce).
+	 * Use for critical entries that must exist before annotations reference them.
+	 */
+	async recordManifestEntryImmediate(
+		sessionId: string,
+		hash: string,
+		entry: VibesManifestEntry,
+	): Promise<void> {
+		const state = this.sessions.get(sessionId);
+		if (!state || !state.isActive) {
+			return;
+		}
+		await addManifestEntryImmediate(state.projectPath, hash, entry);
 	}
 
 	/**

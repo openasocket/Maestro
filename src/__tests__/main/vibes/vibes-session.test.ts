@@ -472,6 +472,101 @@ describe('vibes-session', () => {
 	});
 
 	// ========================================================================
+	// getActiveSessions
+	// ========================================================================
+	describe('getActiveSessions', () => {
+		it('should return empty array when no sessions exist', () => {
+			expect(manager.getActiveSessions()).toEqual([]);
+		});
+
+		it('should return active session IDs', async () => {
+			await manager.startSession('sess-1', tmpDir, 'claude-code', 'medium');
+			await manager.startSession('sess-2', tmpDir, 'codex', 'low');
+
+			const active = manager.getActiveSessions();
+			expect(active).toHaveLength(2);
+			expect(active).toContain('sess-1');
+			expect(active).toContain('sess-2');
+		});
+
+		it('should not include ended sessions', async () => {
+			await manager.startSession('sess-1', tmpDir, 'claude-code', 'medium');
+			await manager.startSession('sess-2', tmpDir, 'codex', 'low');
+			await manager.endSession('sess-1');
+
+			const active = manager.getActiveSessions();
+			expect(active).toEqual(['sess-2']);
+		});
+
+		it('should return empty array when all sessions are ended', async () => {
+			await manager.startSession('sess-1', tmpDir, 'claude-code', 'medium');
+			await manager.endSession('sess-1');
+
+			expect(manager.getActiveSessions()).toEqual([]);
+		});
+	});
+
+	// ========================================================================
+	// recordManifestEntryImmediate
+	// ========================================================================
+	describe('recordManifestEntryImmediate', () => {
+		it('should write manifest entry immediately to disk', async () => {
+			await manager.startSession('sess-1', tmpDir, 'claude-code', 'medium');
+
+			const envEntry: VibesEnvironmentEntry = {
+				type: 'environment',
+				tool_name: 'Claude Code',
+				tool_version: '1.0',
+				model_name: 'claude-4',
+				model_version: 'opus',
+				created_at: FIXED_ISO,
+			};
+			const hash = 'e'.repeat(64);
+
+			await manager.recordManifestEntryImmediate('sess-1', hash, envEntry);
+
+			// Should be on disk immediately — no flushAll needed
+			const manifest = await readVibesManifest(tmpDir);
+			expect(manifest.entries[hash]).toEqual(envEntry);
+		});
+
+		it('should be a no-op for inactive sessions', async () => {
+			await manager.startSession('sess-1', tmpDir, 'claude-code', 'medium');
+			await manager.endSession('sess-1');
+
+			const envEntry: VibesEnvironmentEntry = {
+				type: 'environment',
+				tool_name: 'Test',
+				tool_version: '1.0',
+				model_name: 'test',
+				model_version: '1.0',
+				created_at: FIXED_ISO,
+			};
+
+			await manager.recordManifestEntryImmediate('sess-1', 'h'.repeat(64), envEntry);
+
+			const manifest = await readVibesManifest(tmpDir);
+			expect(Object.keys(manifest.entries)).toHaveLength(0);
+		});
+
+		it('should be a no-op for unknown session IDs', async () => {
+			const envEntry: VibesEnvironmentEntry = {
+				type: 'environment',
+				tool_name: 'Test',
+				tool_version: '1.0',
+				model_name: 'test',
+				model_version: '1.0',
+				created_at: FIXED_ISO,
+			};
+
+			await manager.recordManifestEntryImmediate('nonexistent', 'h'.repeat(64), envEntry);
+
+			const manifest = await readVibesManifest(tmpDir);
+			expect(Object.keys(manifest.entries)).toHaveLength(0);
+		});
+	});
+
+	// ========================================================================
 	// getSessionStats
 	// ========================================================================
 	describe('getSessionStats', () => {

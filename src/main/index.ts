@@ -412,6 +412,7 @@ const quitHandler = createQuitHandler({
 	cleanupAllGroomingSessions,
 	closeStatsDB,
 	stopCliWatcher: () => cliWatcher.stop(),
+	getVibesCoordinator: () => vibesCoordinator,
 });
 quitHandler.setup();
 

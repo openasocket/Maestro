@@ -521,6 +521,32 @@ export async function addManifestEntry(
 }
 
 // ============================================================================
+// Manifest Entry Management (Immediate — for critical entries)
+// ============================================================================
+
+/**
+ * Write a manifest entry immediately (bypasses debounce).
+ * Use for critical entries like environment that must exist before
+ * any annotations reference them.
+ */
+export async function addManifestEntryImmediate(
+	projectPath: string,
+	hash: string,
+	entry: VibesManifestEntry,
+): Promise<void> {
+	try {
+		await ensureAuditDir(projectPath);
+		const manifest = await readVibesManifest(projectPath);
+		if (!(hash in manifest.entries)) {
+			manifest.entries[hash] = entry;
+			await writeVibesManifest(projectPath, manifest);
+		}
+	} catch (err) {
+		logWarn('Failed to write immediate manifest entry', err);
+	}
+}
+
+// ============================================================================
 // Flush All (Session End / Shutdown)
 // ============================================================================
 
@@ -529,27 +555,28 @@ export async function addManifestEntry(
  * Called on session end and app shutdown to ensure no data is lost.
  */
 export async function flushAll(): Promise<void> {
-	const flushPromises: Promise<void>[] = [];
-
-	// Flush all annotation buffers
-	for (const projectPath of annotationBuffers.keys()) {
-		flushPromises.push(
-			flushAnnotationBuffer(projectPath).catch((err) => {
-				logWarn(`flushAll: annotation flush failed for ${projectPath}`, err);
-			}),
-		);
-	}
-
-	// Flush all manifest debounces
+	// Flush manifests FIRST — ensures all referenced hashes exist on disk
+	// before the annotations that reference them are written.
+	const manifestPromises: Promise<void>[] = [];
 	for (const projectPath of manifestDebounces.keys()) {
-		flushPromises.push(
+		manifestPromises.push(
 			flushManifestDebounce(projectPath).catch((err) => {
 				logWarn(`flushAll: manifest flush failed for ${projectPath}`, err);
 			}),
 		);
 	}
+	await Promise.all(manifestPromises);
 
-	await Promise.all(flushPromises);
+	// Then flush annotation buffers
+	const annotationPromises: Promise<void>[] = [];
+	for (const projectPath of annotationBuffers.keys()) {
+		annotationPromises.push(
+			flushAnnotationBuffer(projectPath).catch((err) => {
+				logWarn(`flushAll: annotation flush failed for ${projectPath}`, err);
+			}),
+		);
+	}
+	await Promise.all(annotationPromises);
 }
 
 // ============================================================================

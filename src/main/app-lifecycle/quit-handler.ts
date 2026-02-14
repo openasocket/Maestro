@@ -9,6 +9,7 @@ import type { ProcessManager } from '../process-manager';
 import type { WebServer } from '../web-server';
 import { tunnelManager as tunnelManagerInstance } from '../tunnel-manager';
 import type { HistoryManager } from '../history-manager';
+import type { VibesCoordinator } from '../vibes/vibes-coordinator';
 import { isWebContentsAvailable } from '../utils/safe-send';
 
 /** Dependencies for quit handler */
@@ -31,6 +32,8 @@ export interface QuitHandlerDependencies {
 	closeStatsDB: () => void;
 	/** Function to stop CLI watcher (optional, may not be started yet) */
 	stopCliWatcher?: () => void;
+	/** Function to get the VIBES coordinator (optional, may not be initialized) */
+	getVibesCoordinator?: () => VibesCoordinator | null;
 }
 
 /** Quit handler state */
@@ -75,6 +78,7 @@ export function createQuitHandler(deps: QuitHandlerDependencies): QuitHandler {
 		cleanupAllGroomingSessions,
 		closeStatsDB,
 		stopCliWatcher,
+		getVibesCoordinator,
 	} = deps;
 
 	const state: QuitHandlerState = {
@@ -165,6 +169,15 @@ export function createQuitHandler(deps: QuitHandlerDependencies): QuitHandler {
 			// Fire and forget - don't await
 			cleanupAllGroomingSessions(processManager).catch((err) => {
 				logger.error(`Error cleaning up grooming sessions: ${err}`, 'Shutdown');
+			});
+		}
+
+		// Flush VIBES data (end active sessions + flush pending writes)
+		const vibesCoordinator = getVibesCoordinator?.();
+		if (vibesCoordinator) {
+			logger.info('Flushing VIBES data', 'Shutdown');
+			vibesCoordinator.shutdown().catch((err) => {
+				logger.error(`Error flushing VIBES data: ${err}`, 'Shutdown');
 			});
 		}
 

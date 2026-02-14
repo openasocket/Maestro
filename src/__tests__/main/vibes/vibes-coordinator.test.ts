@@ -338,6 +338,26 @@ describe('vibes-coordinator', () => {
 			expect(state!.environmentHash).toBe(envHashes[0]);
 		});
 
+		it('should write environment manifest entry immediately (not debounced)', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			const config = createProcessConfig({
+				sessionId: 'sess-imm',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+
+			await coordinator.handleProcessSpawn('sess-imm', config);
+
+			// Environment entry should be on disk immediately — no flushAll needed
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const envEntries = entries.filter((e) => e.type === 'environment') as VibesEnvironmentEntry[];
+			expect(envEntries).toHaveLength(1);
+			expect(envEntries[0].tool_name).toBe('Claude Code');
+		});
+
 		it('should set Codex tool name for codex agents', async () => {
 			const store = createMockSettingsStore();
 			const coordinator = new VibesCoordinator({ settingsStore: store });
@@ -410,6 +430,85 @@ describe('vibes-coordinator', () => {
 				(a) => (a as VibesSessionRecord).event === 'end',
 			);
 			expect(endRecords).toHaveLength(1);
+		});
+	});
+
+	// ========================================================================
+	// shutdown
+	// ========================================================================
+	describe('shutdown', () => {
+		it('should end all active sessions and flush pending writes', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			// Start two sessions
+			const config1 = createProcessConfig({
+				sessionId: 'sess-1',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			const tmpDir2 = await (await import('fs/promises')).mkdtemp(
+				(await import('path')).join((await import('os')).tmpdir(), 'vibes-shutdown-test-'),
+			);
+			await ensureAuditDir(tmpDir2);
+
+			const config2 = createProcessConfig({
+				sessionId: 'sess-2',
+				toolType: 'codex',
+				projectPath: tmpDir2,
+			});
+
+			await coordinator.handleProcessSpawn('sess-1', config1);
+			await coordinator.handleProcessSpawn('sess-2', config2);
+
+			// Both sessions should be active
+			const sessionManager = coordinator.getSessionManager();
+			expect(sessionManager.getActiveSessions()).toHaveLength(2);
+
+			// Shutdown
+			await coordinator.shutdown();
+
+			// All sessions should be ended
+			expect(sessionManager.getActiveSessions()).toHaveLength(0);
+
+			// Verify end annotations were written
+			const annotations1 = await readAnnotations(tmpDir);
+			const endRecords1 = annotations1.filter(
+				(a) => (a as VibesSessionRecord).event === 'end',
+			);
+			expect(endRecords1).toHaveLength(1);
+
+			const annotations2 = await readAnnotations(tmpDir2);
+			const endRecords2 = annotations2.filter(
+				(a) => (a as VibesSessionRecord).event === 'end',
+			);
+			expect(endRecords2).toHaveLength(1);
+
+			await (await import('fs/promises')).rm(tmpDir2, { recursive: true, force: true });
+		});
+
+		it('should be a no-op when no active sessions exist', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			// Should not throw
+			await expect(coordinator.shutdown()).resolves.not.toThrow();
+		});
+
+		it('should handle errors gracefully during shutdown', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			// Start a session to a path that will fail on end
+			const config = createProcessConfig({
+				sessionId: 'sess-1',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			await coordinator.handleProcessSpawn('sess-1', config);
+
+			// Should not throw even if individual session end fails
+			await expect(coordinator.shutdown()).resolves.not.toThrow();
 		});
 	});
 

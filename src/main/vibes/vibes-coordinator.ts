@@ -13,7 +13,7 @@ import { CodexInstrumenter } from './instrumenters/codex-instrumenter';
 import { MaestroInstrumenter } from './instrumenters/maestro-instrumenter';
 import { createEnvironmentEntry } from './vibes-annotations';
 import { isVibesInitialized, vibesInit, findVibesCheckBinary } from './vibes-bridge';
-import { initVibesDirectly, backfillCommitHash } from './vibes-io';
+import { initVibesDirectly, backfillCommitHash, flushAll } from './vibes-io';
 import {
 	VIBES_SETTINGS_DEFAULTS,
 	getVibesSettingWithDefault,
@@ -308,8 +308,9 @@ export class VibesCoordinator {
 
 			this.sessionAgentTypes.set(sessionId, agentType);
 
-			// Record the environment manifest entry (session already has the hash)
-			await this.sessionManager.recordManifestEntry(sessionId, envHash, envEntry);
+			// Record the environment manifest entry immediately (session already has the hash).
+			// Environment is the most critical entry — every annotation references it.
+			await this.sessionManager.recordManifestEntryImmediate(sessionId, envHash, envEntry);
 
 			logger.info(
 				'[VibesCoordinator] VIBES session started',
@@ -372,6 +373,34 @@ export class VibesCoordinator {
 				{ sessionId, error: String(err) },
 			);
 		}
+	}
+
+	// ========================================================================
+	// Shutdown
+	// ========================================================================
+
+	/**
+	 * Graceful shutdown — end all active sessions and flush all pending writes.
+	 * Must be called on app quit/before-quit to prevent manifest entry loss.
+	 */
+	async shutdown(): Promise<void> {
+		const activeSessions = this.sessionManager.getActiveSessions();
+		for (const sessionId of activeSessions) {
+			try {
+				const agentType = this.sessionAgentTypes.get(sessionId);
+				if (agentType) {
+					const instrumenter = this.getInstrumenter(agentType);
+					if (instrumenter) {
+						await instrumenter.flush(sessionId);
+					}
+				}
+				await this.sessionManager.endSession(sessionId);
+			} catch (err) {
+				logger.warn(`[VibesCoordinator] shutdown: failed to end session ${sessionId}`, 'VibesCoordinator', { error: String(err) });
+			}
+		}
+		// Final safety flush for any remaining debounced writes
+		await flushAll();
 	}
 
 	// ========================================================================

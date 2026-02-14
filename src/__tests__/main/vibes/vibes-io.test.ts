@@ -22,6 +22,7 @@ import {
 	appendAnnotations,
 	readAnnotations,
 	addManifestEntry,
+	addManifestEntryImmediate,
 	flushAll,
 	getBufferedAnnotationCount,
 	getPendingManifestEntryCount,
@@ -1639,6 +1640,76 @@ describe('vibes-io', () => {
 			expect(coverage[0].coverage_status).toBe('full');
 			expect(coverage[1].file_path).toBe('src/a.ts');
 			expect(coverage[1].coverage_status).toBe('partial');
+		});
+	});
+
+	// ========================================================================
+	// addManifestEntryImmediate
+	// ========================================================================
+	describe('addManifestEntryImmediate', () => {
+		it('should write entry to manifest immediately without debounce', async () => {
+			const hash = 'imm-hash-012345678901234567890123456789012345678901234567890';
+			await addManifestEntryImmediate(tmpDir, hash, SAMPLE_ENVIRONMENT_ENTRY);
+
+			// Entry should be on disk immediately — no flushAll needed
+			const manifest = await readVibesManifest(tmpDir);
+			expect(manifest.entries[hash]).toEqual(SAMPLE_ENVIRONMENT_ENTRY);
+		});
+
+		it('should not overwrite an existing entry with the same hash', async () => {
+			const hash = 'imm-hash-012345678901234567890123456789012345678901234567890';
+
+			// Write the first entry
+			await addManifestEntryImmediate(tmpDir, hash, SAMPLE_ENVIRONMENT_ENTRY);
+
+			const differentEntry: VibesCommandEntry = {
+				type: 'command',
+				command_text: 'different command',
+				command_type: 'shell',
+				created_at: '2026-02-10T13:00:00Z',
+			};
+			await addManifestEntryImmediate(tmpDir, hash, differentEntry);
+
+			const manifest = await readVibesManifest(tmpDir);
+			expect(manifest.entries[hash]).toEqual(SAMPLE_ENVIRONMENT_ENTRY);
+		});
+
+		it('should not affect the debounce buffer', async () => {
+			const hash = 'imm-hash-012345678901234567890123456789012345678901234567890';
+			await addManifestEntryImmediate(tmpDir, hash, SAMPLE_ENVIRONMENT_ENTRY);
+
+			// Pending manifest count should be 0 (not debounced)
+			expect(getPendingManifestEntryCount(tmpDir)).toBe(0);
+		});
+
+		it('should not throw for invalid paths', async () => {
+			await expect(
+				addManifestEntryImmediate('/nonexistent/path', 'hash', SAMPLE_ENVIRONMENT_ENTRY),
+			).resolves.toBeUndefined();
+		});
+	});
+
+	// ========================================================================
+	// flushAll ordering (manifests before annotations)
+	// ========================================================================
+	describe('flushAll ordering', () => {
+		it('should flush manifests before annotations', async () => {
+			// Add both a manifest entry and an annotation
+			const hash = 'order-hash-012345678901234567890123456789012345678901234567890';
+			await addManifestEntry(tmpDir, hash, SAMPLE_ENVIRONMENT_ENTRY);
+			await appendAnnotation(tmpDir, {
+				...SAMPLE_LINE_ANNOTATION,
+				environment_hash: hash,
+			});
+
+			// After flushAll, both should be on disk
+			await flushAll();
+
+			const manifest = await readVibesManifest(tmpDir);
+			expect(manifest.entries[hash]).toEqual(SAMPLE_ENVIRONMENT_ENTRY);
+
+			const annotations = await readAnnotations(tmpDir);
+			expect(annotations).toHaveLength(1);
 		});
 	});
 
