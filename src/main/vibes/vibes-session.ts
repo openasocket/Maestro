@@ -4,7 +4,7 @@
 
 import { generateUUID } from '../../shared/uuid';
 import { createSessionRecord } from './vibes-annotations';
-import { appendAnnotation, appendAnnotationImmediate, addManifestEntry, addManifestEntryImmediate, flushAll } from './vibes-io';
+import { appendAnnotation, appendAnnotationImmediate, addManifestEntry, addManifestEntryImmediate, updateManifestEntry, flushAll } from './vibes-io';
 import type {
 	VibesAssuranceLevel,
 	VibesAnnotation,
@@ -220,6 +220,22 @@ export class VibesSessionManager {
 	}
 
 	/**
+	 * Update an existing manifest entry in-place (same hash key, new data).
+	 * Used to replace placeholder model data with real values once available.
+	 */
+	async updateExistingManifestEntry(
+		sessionId: string,
+		hash: string,
+		entry: VibesManifestEntry,
+	): Promise<void> {
+		const state = this.sessions.get(sessionId);
+		if (!state || !state.isActive) {
+			return;
+		}
+		await updateManifestEntry(state.projectPath, hash, entry);
+	}
+
+	/**
 	 * Update the environment hash for an active session.
 	 * Used when real model info arrives via usage events to replace the
 	 * placeholder environment entry created at session start.
@@ -230,6 +246,17 @@ export class VibesSessionManager {
 			return;
 		}
 		state.environmentHash = newHash;
+	}
+
+	/**
+	 * Get the current environment hash for an active session.
+	 */
+	getEnvironmentHash(sessionId: string): string | null {
+		const state = this.sessions.get(sessionId);
+		if (!state || !state.isActive) {
+			return null;
+		}
+		return state.environmentHash;
 	}
 
 	/**

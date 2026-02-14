@@ -126,6 +126,8 @@ const annotationBuffers: Map<string, ProjectBuffer> = new Map();
 interface ManifestDebounce {
 	pendingEntries: Map<string, VibesManifestEntry>;
 	timer: ReturnType<typeof setTimeout> | null;
+	/** Hashes that should overwrite existing entries on next flush (in-place updates). */
+	overwriteHashes?: Set<string>;
 }
 
 /** Global map of project path → manifest debounce state. */
@@ -211,9 +213,13 @@ async function flushManifestDebounce(projectPath: string): Promise<void> {
 			return;
 		}
 
-		// Drain pending entries
+		// Drain pending entries and overwrite set
 		const entries = new Map(state.pendingEntries);
+		const overwriteHashes = state.overwriteHashes ? new Set(state.overwriteHashes) : new Set<string>();
 		state.pendingEntries.clear();
+		if (state.overwriteHashes) {
+			state.overwriteHashes.clear();
+		}
 		if (state.timer !== null) {
 			clearTimeout(state.timer);
 			state.timer = null;
@@ -232,7 +238,11 @@ async function flushManifestDebounce(projectPath: string): Promise<void> {
 
 			let changed = false;
 			for (const [hash, entry] of entries) {
-				if (!(hash in manifest.entries)) {
+				if (overwriteHashes.has(hash)) {
+					// In-place update: replace existing entry data (same hash key)
+					manifest.entries[hash] = entry;
+					changed = true;
+				} else if (!(hash in manifest.entries)) {
 					manifest.entries[hash] = entry;
 					changed = true;
 				}
@@ -543,6 +553,50 @@ export async function addManifestEntryImmediate(
 		}
 	} catch (err) {
 		logWarn('Failed to write immediate manifest entry', err);
+	}
+}
+
+/**
+ * Update an existing manifest entry in-place (same hash key, new data).
+ * Used to replace placeholder data (e.g. model_name: 'unknown') with real
+ * values once they become available, without changing the hash that
+ * annotations already reference.
+ *
+ * Uses the debounced write path so updates are batched and flushed
+ * together with other pending manifest entries.
+ */
+export async function updateManifestEntry(
+	projectPath: string,
+	hash: string,
+	entry: VibesManifestEntry,
+): Promise<void> {
+	try {
+		let state = manifestDebounces.get(projectPath);
+		if (!state) {
+			state = { pendingEntries: new Map(), timer: null };
+			manifestDebounces.set(projectPath, state);
+		}
+
+		// Mark this entry for update (replaces any existing pending entry)
+		state.pendingEntries.set(hash, entry);
+		// Also mark it for overwrite (not just insert) on next flush
+		if (!state.overwriteHashes) {
+			state.overwriteHashes = new Set();
+		}
+		state.overwriteHashes.add(hash);
+
+		// Reset debounce timer
+		if (state.timer !== null) {
+			clearTimeout(state.timer);
+		}
+		state.timer = setTimeout(() => {
+			state!.timer = null;
+			flushManifestDebounce(projectPath).catch((err) => {
+				logWarn('Manifest debounce flush failed (update)', err);
+			});
+		}, MANIFEST_DEBOUNCE_MS);
+	} catch (err) {
+		logWarn('Failed to schedule manifest entry update', err);
 	}
 }
 

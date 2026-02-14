@@ -729,19 +729,17 @@ describe('vibes-coordinator', () => {
 				modelName: 'claude-sonnet-4-5-20250929',
 			});
 
-			// Allow the async environment update to complete
+			// Allow the async environment update to complete and flush all writes
 			await vi.advanceTimersByTimeAsync(10);
 			await flushAll();
 
 			manifest = await readVibesManifest(tmpDir);
 			entries = Object.values(manifest.entries);
 			envEntries = entries.filter((e) => e.type === 'environment') as VibesEnvironmentEntry[];
-			// Should now have two environment entries: original 'unknown' + updated with model name
-			expect(envEntries).toHaveLength(2);
-			const updatedEnv = envEntries.find((e) => e.model_name !== 'unknown');
-			expect(updatedEnv).toBeDefined();
-			expect(updatedEnv!.model_name).toBe('claude-sonnet-4-5-20250929');
-			expect(updatedEnv!.tool_name).toBe('Claude Code');
+			// In-place update: still 1 entry, but now with real model name
+			expect(envEntries).toHaveLength(1);
+			expect(envEntries[0].model_name).toBe('claude-sonnet-4-5-20250929');
+			expect(envEntries[0].tool_name).toBe('Claude Code');
 		});
 
 		it('should only update environment hash once per session', async () => {
@@ -785,11 +783,9 @@ describe('vibes-coordinator', () => {
 			const manifest = await readVibesManifest(tmpDir);
 			const entries = Object.values(manifest.entries);
 			const envEntries = entries.filter((e) => e.type === 'environment') as VibesEnvironmentEntry[];
-			// Should have 2 entries: original placeholder + one update (not two)
-			expect(envEntries).toHaveLength(2);
-			const updatedEnvs = envEntries.filter((e) => e.model_name !== 'unknown');
-			expect(updatedEnvs).toHaveLength(1);
-			expect(updatedEnvs[0].model_name).toBe('claude-sonnet-4-5-20250929');
+			// In-place update: still 1 entry, updated with first model name only
+			expect(envEntries).toHaveLength(1);
+			expect(envEntries[0].model_name).toBe('claude-sonnet-4-5-20250929');
 		});
 
 		it('should record updated environment entry in manifest', async () => {

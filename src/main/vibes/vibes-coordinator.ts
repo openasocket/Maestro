@@ -18,7 +18,7 @@ import {
 	VIBES_SETTINGS_DEFAULTS,
 	getVibesSettingWithDefault,
 } from '../../shared/vibes-settings';
-import type { VibesAnnotation, VibesAssuranceLevel } from '../../shared/vibes-types';
+import type { VibesAnnotation, VibesAssuranceLevel, VibesEnvironmentEntry } from '../../shared/vibes-types';
 import type { ProcessConfig, ToolExecution, UsageStats } from '../process-manager/types';
 
 // ============================================================================
@@ -712,28 +712,44 @@ export class VibesCoordinator {
 	}
 
 	/**
-	 * Create an updated environment entry with real model info and update
-	 * the session's environment hash.
+	 * Update the existing environment entry in-place with real model info.
+	 * Keeps the same manifest hash key so all annotations (past and future)
+	 * reference the updated data instead of the placeholder 'unknown' values.
 	 */
 	private async updateEnvironmentWithModelInfo(
 		sessionId: string,
 		agentType: string,
 		modelName: string,
 	): Promise<void> {
+		const existingHash = this.sessionManager.getEnvironmentHash(sessionId);
+		if (!existingHash) {
+			logger.warn(
+				'[VibesCoordinator] Cannot update environment — no environment hash on session',
+				'VibesCoordinator',
+				{ sessionId },
+			);
+			return;
+		}
+
 		const modelVersion = this.extractModelVersion(modelName);
-		const { entry, hash } = createEnvironmentEntry({
-			toolName: this.getToolName(agentType),
-			toolVersion: 'unknown',
-			modelName,
-			modelVersion,
-		});
-		await this.sessionManager.recordManifestEntry(sessionId, hash, entry);
-		this.sessionManager.updateEnvironmentHash(sessionId, hash);
+		const entry: VibesEnvironmentEntry = {
+			type: 'environment',
+			tool_name: this.getToolName(agentType),
+			tool_version: 'unknown',
+			model_name: modelName,
+			model_version: modelVersion,
+			model_parameters: null,
+			tool_extensions: null,
+			created_at: new Date().toISOString(),
+		};
+
+		// Update the existing entry in-place (same hash key, new data)
+		await this.sessionManager.updateExistingManifestEntry(sessionId, existingHash, entry);
 
 		logger.info(
 			'[VibesCoordinator] Updated environment entry with model info',
 			'VibesCoordinator',
-			{ sessionId, modelName, modelVersion },
+			{ sessionId, modelName, modelVersion, hash: existingHash },
 		);
 	}
 
