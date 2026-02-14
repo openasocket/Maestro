@@ -987,4 +987,173 @@ describe('VibeCoverageView', () => {
 		expect(screen.getByText('4 files')).toBeTruthy();
 		expect(screen.getByText('200 / 500 lines covered')).toBeTruthy();
 	});
+
+	// ========================================================================
+	// KLOC (Thousands of Lines) view
+	// ========================================================================
+
+	it('renders KLOC toggle button', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('view-kloc-btn')).toBeTruthy();
+		});
+
+		expect(screen.getByText('KLOC')).toBeTruthy();
+	});
+
+	it('shows KLOC view when KLOC toggle is clicked', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('src/main.ts')).toBeTruthy();
+		});
+
+		// Click KLOC toggle
+		fireEvent.click(screen.getByTestId('view-kloc-btn'));
+
+		// KLOC view should now be visible
+		await waitFor(() => {
+			expect(screen.getByTestId('kloc-view')).toBeTruthy();
+		});
+
+		expect(screen.getByText('KLOC Coverage')).toBeTruthy();
+	});
+
+	it('displays KLOC summary with annotated/total in K', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('src/main.ts')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('view-kloc-btn'));
+
+		await waitFor(() => {
+			expect(screen.getByTestId('kloc-view')).toBeTruthy();
+		});
+
+		// mockLocData: totalLines=500, annotatedLines=200
+		// totalKloc = Math.round(500/100)/10 = 0.5
+		// annotatedKloc = Math.round(200/100)/10 = 0.2
+		expect(screen.getByText(/0\.2K of 0\.5K lines covered/)).toBeTruthy();
+	});
+
+	it('shows directory-level KLOC breakdown', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('src/main.ts')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('view-kloc-btn'));
+
+		await waitFor(() => {
+			expect(screen.getByTestId('kloc-view')).toBeTruthy();
+		});
+
+		// buildKlocSummary groups by first 2 path segments when length > 1
+		// mockLocData files group into:
+		//   "src/main.ts" dir (1 file), "src/config.ts" dir (1 file),
+		//   "src/utils" dir (1 file), "src/index.ts" dir (1 file)
+		// Should show directory groups
+		const klocView = screen.getByTestId('kloc-view');
+		expect(klocView.textContent).toContain('src/main.ts/');
+		expect(klocView.textContent).toContain('src/utils/');
+		expect(klocView.textContent).toContain('1 files');
+	});
+
+	it('hides donut/stats/legend for KLOC view', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('src/main.ts')).toBeTruthy();
+		});
+
+		// In files view, legend should be visible
+		expect(screen.getByTestId('coverage-legend')).toBeTruthy();
+
+		// Switch to KLOC
+		fireEvent.click(screen.getByTestId('view-kloc-btn'));
+
+		await waitFor(() => {
+			expect(screen.getByTestId('kloc-view')).toBeTruthy();
+		});
+
+		// Legend and extension distribution should be hidden
+		expect(screen.queryByTestId('coverage-legend')).toBeNull();
+		expect(screen.queryByTestId('extension-distribution')).toBeNull();
+	});
+
+	it('shows KLOC footer with line counts', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('src/main.ts')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('view-kloc-btn'));
+
+		await waitFor(() => {
+			expect(screen.getByTestId('kloc-view')).toBeTruthy();
+		});
+
+		// Footer should show line counts (same as LOC footer)
+		expect(screen.getByText('4 files')).toBeTruthy();
+		expect(screen.getByText('200 / 500 lines covered')).toBeTruthy();
+	});
+
+	it('shows KLOC no-data state when locData is absent', async () => {
+		mockGetLocCoverage.mockResolvedValue({
+			success: false,
+			error: 'no data',
+		});
+
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('src/main.ts')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('view-kloc-btn'));
+
+		await waitFor(() => {
+			expect(screen.getByText('No KLOC coverage data available.')).toBeTruthy();
+		});
+	});
 });

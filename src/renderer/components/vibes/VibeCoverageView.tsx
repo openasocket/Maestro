@@ -51,7 +51,7 @@ interface VibeCoverageViewProps {
 
 type FilterMode = 'all' | 'covered' | 'uncovered';
 type SortMode = 'status' | 'path' | 'annotations';
-type ViewMode = 'files' | 'directories' | 'lines';
+type ViewMode = 'files' | 'directories' | 'lines' | 'kloc';
 
 /** Directory-level grouping for the tree view. */
 interface DirectoryGroup {
@@ -255,6 +255,55 @@ function calculateSummary(files: NormalizedCoverageFile[]) {
 	return { total, covered, partial, uncovered, percentage, totalAnnotations };
 }
 
+/** Aggregate LOC data by directory into KLOC (thousands of lines) summaries. */
+interface KlocDirectoryGroup {
+	dirPath: string;
+	totalKloc: number;
+	annotatedKloc: number;
+	coveragePercent: number;
+	fileCount: number;
+}
+
+function buildKlocSummary(
+	locFiles: Array<{ file_path: string; total_lines: number; annotated_lines: number }>,
+): { groups: KlocDirectoryGroup[]; totalKloc: number; annotatedKloc: number; coveragePercent: number } {
+	const dirMap = new Map<string, { total: number; annotated: number; files: number }>();
+
+	for (const file of locFiles) {
+		const parts = file.file_path.split('/');
+		const dirPath = parts.length > 1 ? parts.slice(0, 2).join('/') : parts[0] ?? '.';
+		const existing = dirMap.get(dirPath) ?? { total: 0, annotated: 0, files: 0 };
+		existing.total += file.total_lines;
+		existing.annotated += file.annotated_lines;
+		existing.files++;
+		dirMap.set(dirPath, existing);
+	}
+
+	let totalLines = 0;
+	let annotatedLines = 0;
+
+	const groups: KlocDirectoryGroup[] = [...dirMap.entries()]
+		.map(([dirPath, data]) => {
+			totalLines += data.total;
+			annotatedLines += data.annotated;
+			return {
+				dirPath,
+				totalKloc: Math.round(data.total / 100) / 10,
+				annotatedKloc: Math.round(data.annotated / 100) / 10,
+				coveragePercent: data.total > 0 ? Math.round((data.annotated / data.total) * 100) : 0,
+				fileCount: data.files,
+			};
+		})
+		.sort((a, b) => b.totalKloc - a.totalKloc);
+
+	return {
+		groups,
+		totalKloc: Math.round(totalLines / 100) / 10,
+		annotatedKloc: Math.round(annotatedLines / 100) / 10,
+		coveragePercent: totalLines > 0 ? Math.round((annotatedLines / totalLines) * 100) : 0,
+	};
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -376,6 +425,10 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 	const summary = useMemo(() => calculateSummary(files), [files]);
 	const directoryGroups = useMemo(() => groupByDirectory(files), [files]);
 	const extensionStats = useMemo(() => groupByExtension(files), [files]);
+	const klocSummary = useMemo(
+		() => (locData ? buildKlocSummary(locData.files) : null),
+		[locData],
+	);
 
 	const toggleDirectory = useCallback((dirPath: string) => {
 		setExpandedDirs((prev) => {
@@ -427,7 +480,7 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 				style={{ backgroundColor: theme.colors.bgSidebar }}
 			>
 				{/* Coverage donut chart + summary stats (hidden in LOC view which has its own) */}
-				{!isLoading && !error && !needsBuild && files.length > 0 && viewMode !== 'lines' && (
+				{!isLoading && !error && !needsBuild && files.length > 0 && viewMode !== 'lines' && viewMode !== 'kloc' && (
 					<div className="flex flex-col gap-3">
 						<div className="flex items-start gap-4">
 							{/* Donut chart */}
@@ -579,6 +632,18 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 							>
 								<Code className="w-3 h-3" />
 								Lines
+							</button>
+							<button
+								onClick={() => setViewMode('kloc')}
+								className="px-2 py-0.5 rounded text-[10px] font-medium transition-colors flex items-center gap-1"
+								style={{
+									backgroundColor: viewMode === 'kloc' ? theme.colors.accentDim : 'transparent',
+									color: viewMode === 'kloc' ? theme.colors.accent : theme.colors.textDim,
+								}}
+								data-testid="view-kloc-btn"
+							>
+								<BarChart3 className="w-3 h-3" />
+								KLOC
 							</button>
 						</div>
 
@@ -822,6 +887,100 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 					</div>
 				)}
 
+				{/* KLOC (Thousands of Lines) view */}
+				{!isLoading && !error && !needsBuild && viewMode === 'kloc' && klocSummary && (
+					<div className="flex flex-col" data-testid="kloc-view">
+						{/* KLOC summary header */}
+						<div className="flex items-start gap-4 px-3 py-3">
+							<CoverageDonut
+								covered={locData?.annotatedLines ?? 0}
+								partial={0}
+								uncovered={(locData?.totalLines ?? 0) - (locData?.annotatedLines ?? 0)}
+								percentage={klocSummary.coveragePercent}
+							/>
+							<div className="flex flex-col gap-1.5 pt-1">
+								<div className="flex items-center gap-2">
+									<BarChart3 className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+									<span className="text-[11px] font-semibold" style={{ color: theme.colors.textDim }}>
+										KLOC Coverage
+									</span>
+								</div>
+								<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
+									{klocSummary.annotatedKloc}K of {klocSummary.totalKloc}K lines covered ({klocSummary.coveragePercent}%)
+								</div>
+							</div>
+						</div>
+
+						{/* Directory-level KLOC breakdown with bar chart */}
+						<div className="flex flex-col">
+							{klocSummary.groups.map((group) => {
+								const barColor = group.coveragePercent > 80
+									? STATUS_CONFIG.full.color
+									: group.coveragePercent >= 20
+										? STATUS_CONFIG.partial.color
+										: '#6b7280';
+								return (
+									<div
+										key={group.dirPath}
+										className="flex items-center gap-2 px-3 py-2 border-b text-xs"
+										style={{ borderColor: theme.colors.border }}
+									>
+										<FolderOpen className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+										<span
+											className="min-w-0 truncate font-mono text-[11px]"
+											style={{ color: theme.colors.textMain, flex: '0 1 auto', maxWidth: '40%' }}
+											title={group.dirPath}
+										>
+											{group.dirPath}/
+										</span>
+										{/* Coverage bar */}
+										<div
+											className="flex-1 flex h-3 rounded overflow-hidden"
+											style={{ backgroundColor: theme.colors.bgActivity }}
+										>
+											{group.coveragePercent > 0 && (
+												<div
+													style={{
+														width: `${group.coveragePercent}%`,
+														backgroundColor: barColor,
+													}}
+												/>
+											)}
+										</div>
+										<span
+											className="shrink-0 tabular-nums text-[10px]"
+											style={{ color: theme.colors.textDim }}
+										>
+											{group.annotatedKloc}K / {group.totalKloc}K
+										</span>
+										<span
+											className="px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 min-w-[3ch] text-right"
+											style={{ backgroundColor: `${barColor}20`, color: barColor }}
+										>
+											{group.coveragePercent}%
+										</span>
+										<span
+											className="text-[9px] shrink-0 px-1 py-0.5 rounded"
+											style={{ backgroundColor: theme.colors.bgActivity, color: theme.colors.textDim }}
+										>
+											{group.fileCount} files
+										</span>
+									</div>
+								);
+							})}
+						</div>
+					</div>
+				)}
+
+				{/* KLOC view — no data */}
+				{!isLoading && !error && !needsBuild && viewMode === 'kloc' && !klocSummary && (
+					<div className="flex flex-col items-center justify-center gap-2 py-8 px-4 text-center">
+						<span className="text-xs" style={{ color: theme.colors.textDim }}>
+							No KLOC coverage data available.
+						</span>
+					</div>
+				)}
+
 				{/* No results for current filter */}
 				{!isLoading && !error && !needsBuild && files.length > 0 && displayedFiles.length === 0 && (
 					<div className="flex flex-col items-center justify-center gap-2 py-8 px-4 text-center">
@@ -833,7 +992,7 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 			</div>
 
 			{/* Footer */}
-			{!isLoading && (files.length > 0 || (viewMode === 'lines' && locData)) && (
+			{!isLoading && (files.length > 0 || ((viewMode === 'lines' || viewMode === 'kloc') && locData)) && (
 				<div
 					className="flex items-center justify-between px-3 py-1.5 text-[10px] border-t"
 					style={{
@@ -842,7 +1001,7 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 						backgroundColor: theme.colors.bgSidebar,
 					}}
 				>
-					{viewMode === 'lines' && locData ? (
+					{(viewMode === 'lines' || viewMode === 'kloc') && locData ? (
 						<>
 							<span>
 								{locData.files.length} files
