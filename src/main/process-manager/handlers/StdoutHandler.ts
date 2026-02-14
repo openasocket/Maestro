@@ -409,6 +409,7 @@ export class StdoutHandler {
 			costUsd?: number;
 			contextWindow?: number;
 			reasoningTokens?: number;
+			modelName?: string;
 		}
 	): UsageStats {
 		return {
@@ -421,6 +422,7 @@ export class StdoutHandler {
 			// This ensures we use the actual model's context limit, not a stale config value
 			contextWindow: usage.contextWindow || managedProcess.contextWindow || 200000,
 			reasoningTokens: usage.reasoningTokens,
+			modelName: usage.modelName,
 		};
 	}
 }

@@ -106,6 +106,8 @@ export interface ParsedEvent {
 		 * These are already included in outputTokens but tracked separately for UI display.
 		 */
 		reasoningTokens?: number;
+		/** Model name extracted from modelUsage keys. Used by VIBES for environment entries. */
+		modelName?: string;
 	};
 
 	/**

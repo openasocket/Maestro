@@ -280,6 +280,7 @@ export class ClaudeOutputParser implements AgentOutputParser {
 			cacheCreationTokens: aggregated.cacheCreationInputTokens,
 			contextWindow: aggregated.contextWindow,
 			costUsd: aggregated.totalCostUsd,
+			modelName: aggregated.modelName,
 		};
 	}
 
