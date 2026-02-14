@@ -999,7 +999,7 @@ export async function computeBlameFromAnnotations(
 	model_version: string;
 	tool_name: string;
 	timestamp: string;
-	session_id?: string;
+	session_id: string | null;
 }>> {
 	const annotations = await readAnnotations(projectPath);
 	const manifest = await readVibesManifest(projectPath);

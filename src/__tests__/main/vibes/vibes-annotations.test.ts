@@ -454,11 +454,11 @@ describe('vibes-annotations', () => {
 			expect(annotation.action).toBe('create');
 			expect(annotation.timestamp).toBe(FIXED_ISO);
 			expect(annotation.assurance_level).toBe('medium');
-			expect(annotation.command_hash).toBeUndefined();
-			expect(annotation.prompt_hash).toBeUndefined();
-			expect(annotation.reasoning_hash).toBeUndefined();
-			expect(annotation.session_id).toBeUndefined();
-			expect(annotation.commit_hash).toBeUndefined();
+			expect(annotation.command_hash).toBeNull();
+			expect(annotation.prompt_hash).toBeNull();
+			expect(annotation.reasoning_hash).toBeNull();
+			expect(annotation.session_id).toBeNull();
+			expect(annotation.commit_hash).toBeNull();
 		});
 
 		it('should include all optional hash references', () => {
@@ -511,6 +511,29 @@ describe('vibes-annotations', () => {
 				});
 				expect(annotation.action).toBe(action);
 			}
+		});
+
+		it('should always include all 13 fields in serialized JSON', () => {
+			const annotation = createLineAnnotation({
+				filePath: 'src/app.ts',
+				lineStart: 1,
+				lineEnd: 5,
+				environmentHash: 'e'.repeat(64),
+				action: 'modify',
+				assuranceLevel: 'low',
+			});
+
+			const json = JSON.parse(JSON.stringify(annotation));
+			const expectedKeys = [
+				'type', 'file_path', 'line_start', 'line_end',
+				'environment_hash', 'command_hash', 'prompt_hash',
+				'reasoning_hash', 'action', 'timestamp', 'commit_hash',
+				'session_id', 'assurance_level',
+			];
+			for (const key of expectedKeys) {
+				expect(json).toHaveProperty(key);
+			}
+			expect(Object.keys(json)).toHaveLength(13);
 		});
 
 		it('should support all assurance levels', () => {

@@ -284,10 +284,11 @@ async function main() {
 			action: def.action,
 			environment_hash: envHashes[def.envIndex],
 			command_hash: cmdHashes[def.cmdIndex],
-			prompt_hash: def.assurance_level !== 'low' ? promptHashes[def.promptIndex] : undefined,
-			reasoning_hash: def.reasoningIndex >= 0 && def.assurance_level === 'high' ? reasoningHashes[def.reasoningIndex] : undefined,
+			prompt_hash: def.assurance_level !== 'low' ? promptHashes[def.promptIndex] : null,
+			reasoning_hash: def.reasoningIndex >= 0 && def.assurance_level === 'high' ? reasoningHashes[def.reasoningIndex] : null,
 			assurance_level: def.assurance_level,
 			timestamp: def.timestamp,
+			commit_hash: null,
 			session_id: sessions[def.sessionIndex].id,
 		};
 		await appendAnnotationImmediate(PROJECT_PATH, annotation);

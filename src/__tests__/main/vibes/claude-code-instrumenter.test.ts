@@ -725,7 +725,7 @@ describe('claude-code-instrumenter', () => {
 				(a) => a.type === 'line',
 			) as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
-			expect(lineAnnotations[0].prompt_hash).toBeUndefined();
+			expect(lineAnnotations[0].prompt_hash).toBeNull();
 		});
 
 		it('clears prompt hash on session cleanup', async () => {
@@ -756,7 +756,7 @@ describe('claude-code-instrumenter', () => {
 				(a) => a.type === 'line' && (a as VibesLineAnnotation).file_path === 'src/after-cleanup.ts',
 			) as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
-			expect(lineAnnotations[0].prompt_hash).toBeUndefined();
+			expect(lineAnnotations[0].prompt_hash).toBeNull();
 		});
 	});
 
@@ -811,7 +811,7 @@ describe('claude-code-instrumenter', () => {
 				(a) => a.type === 'line',
 			) as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
-			expect(lineAnnotations[0].reasoning_hash).toBeUndefined();
+			expect(lineAnnotations[0].reasoning_hash).toBeNull();
 		});
 
 		it('does not include reasoning_hash at low assurance', async () => {
@@ -834,7 +834,7 @@ describe('claude-code-instrumenter', () => {
 				(a) => a.type === 'line',
 			) as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
-			expect(lineAnnotations[0].reasoning_hash).toBeUndefined();
+			expect(lineAnnotations[0].reasoning_hash).toBeNull();
 		});
 
 		it('updates reasoning_hash after each flush', async () => {

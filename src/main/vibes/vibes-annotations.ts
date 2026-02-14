@@ -212,42 +212,29 @@ export function createLineAnnotation(params: {
 	lineStart: number;
 	lineEnd: number;
 	environmentHash: string;
-	commandHash?: string;
-	promptHash?: string;
-	reasoningHash?: string;
+	commandHash?: string | null;
+	promptHash?: string | null;
+	reasoningHash?: string | null;
 	action: VibesAction;
-	sessionId?: string;
-	commitHash?: string;
+	sessionId?: string | null;
+	commitHash?: string | null;
 	assuranceLevel: VibesAssuranceLevel;
 }): VibesLineAnnotation {
-	const annotation: VibesLineAnnotation = {
+	return {
 		type: 'line',
 		file_path: params.filePath,
 		line_start: params.lineStart,
 		line_end: params.lineEnd,
 		environment_hash: params.environmentHash,
+		command_hash: params.commandHash ?? null,
+		prompt_hash: params.promptHash ?? null,
+		reasoning_hash: params.reasoningHash ?? null,
 		action: params.action,
 		timestamp: new Date().toISOString(),
+		commit_hash: params.commitHash ?? null,
+		session_id: params.sessionId ?? null,
 		assurance_level: params.assuranceLevel,
 	};
-
-	if (params.commandHash !== undefined) {
-		annotation.command_hash = params.commandHash;
-	}
-	if (params.promptHash !== undefined) {
-		annotation.prompt_hash = params.promptHash;
-	}
-	if (params.reasoningHash !== undefined) {
-		annotation.reasoning_hash = params.reasoningHash;
-	}
-	if (params.sessionId !== undefined) {
-		annotation.session_id = params.sessionId;
-	}
-	if (params.commitHash !== undefined) {
-		annotation.commit_hash = params.commitHash;
-	}
-
-	return annotation;
 }
 
 // ============================================================================

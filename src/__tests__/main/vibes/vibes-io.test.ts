@@ -73,8 +73,13 @@ const SAMPLE_LINE_ANNOTATION: VibesLineAnnotation = {
 	line_start: 1,
 	line_end: 10,
 	environment_hash: 'abc123def456789012345678901234567890123456789012345678901234',
+	command_hash: null,
+	prompt_hash: null,
+	reasoning_hash: null,
 	action: 'create',
 	timestamp: '2026-02-10T12:00:00Z',
+	commit_hash: null,
+	session_id: null,
 	assurance_level: 'medium',
 };
 
@@ -1094,7 +1099,7 @@ describe('vibes-io', () => {
 			expect(count).toBe(1);
 			const annotations = await readAnnotations(tmpDir);
 			expect((annotations[0] as VibesLineAnnotation).commit_hash).toBe('abc123commit');
-			expect((annotations[1] as VibesLineAnnotation).commit_hash).toBeUndefined();
+			expect((annotations[1] as VibesLineAnnotation).commit_hash).toBeNull();
 		});
 
 		it('returns count of updated annotations', async () => {

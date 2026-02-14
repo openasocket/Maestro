@@ -238,8 +238,13 @@ describe('vibes-session', () => {
 				line_start: 1,
 				line_end: 10,
 				environment_hash: 'e'.repeat(64),
+				command_hash: null,
+				prompt_hash: null,
+				reasoning_hash: null,
 				action: 'create',
 				timestamp: FIXED_ISO,
+				commit_hash: null,
+				session_id: null,
 				assurance_level: 'medium',
 			};
 
@@ -260,8 +265,13 @@ describe('vibes-session', () => {
 				line_start: 5,
 				line_end: 15,
 				environment_hash: 'e'.repeat(64),
+				command_hash: null,
+				prompt_hash: null,
+				reasoning_hash: null,
 				action: 'modify',
 				timestamp: FIXED_ISO,
+				commit_hash: null,
+				session_id: null,
 				assurance_level: 'medium',
 			};
 
@@ -282,8 +292,13 @@ describe('vibes-session', () => {
 				line_start: 1,
 				line_end: 1,
 				environment_hash: 'e'.repeat(64),
+				command_hash: null,
+				prompt_hash: null,
+				reasoning_hash: null,
 				action: 'create',
 				timestamp: FIXED_ISO,
+				commit_hash: null,
+				session_id: null,
 				assurance_level: 'medium',
 			};
 
@@ -301,8 +316,13 @@ describe('vibes-session', () => {
 				line_start: 1,
 				line_end: 1,
 				environment_hash: 'e'.repeat(64),
+				command_hash: null,
+				prompt_hash: null,
+				reasoning_hash: null,
 				action: 'create',
 				timestamp: FIXED_ISO,
+				commit_hash: null,
+				session_id: null,
 				assurance_level: 'medium',
 			};
 
@@ -597,8 +617,13 @@ describe('vibes-session', () => {
 				line_start: 1,
 				line_end: 10,
 				environment_hash: 'e'.repeat(64),
+				command_hash: null,
+				prompt_hash: null,
+				reasoning_hash: null,
 				action: 'create',
 				timestamp: FIXED_ISO,
+				commit_hash: null,
+				session_id: null,
 				assurance_level: 'medium',
 			};
 
@@ -672,8 +697,13 @@ describe('vibes-session', () => {
 				line_start: 1,
 				line_end: 10,
 				environment_hash: 'e'.repeat(64),
+				command_hash: null,
+				prompt_hash: null,
+				reasoning_hash: null,
 				action: 'create',
 				timestamp: FIXED_ISO,
+				commit_hash: null,
+				session_id: null,
 				assurance_level: 'medium',
 			};
 
@@ -696,8 +726,13 @@ describe('vibes-session', () => {
 				line_start: 1,
 				line_end: 10,
 				environment_hash: 'e'.repeat(64),
+				command_hash: null,
+				prompt_hash: null,
+				reasoning_hash: null,
 				action: 'create',
 				timestamp: FIXED_ISO,
+				commit_hash: null,
+				session_id: null,
 				assurance_level: 'medium',
 			};
 
@@ -768,8 +803,13 @@ describe('vibes-session', () => {
 				line_start: 1,
 				line_end: 10,
 				environment_hash: 'e'.repeat(64),
+				command_hash: null,
+				prompt_hash: null,
+				reasoning_hash: null,
 				action: 'create',
 				timestamp: FIXED_ISO,
+				commit_hash: null,
+				session_id: null,
 				assurance_level: 'medium',
 			};
 
@@ -822,8 +862,12 @@ describe('vibes-session', () => {
 				line_start: 1,
 				line_end: 25,
 				environment_hash: envHash,
+				command_hash: null,
+				prompt_hash: null,
+				reasoning_hash: null,
 				action: 'create',
 				timestamp: FIXED_ISO,
+				commit_hash: null,
 				session_id: state.vibesSessionId,
 				assurance_level: 'medium',
 			};
@@ -879,8 +923,13 @@ describe('vibes-session', () => {
 					line_start: 1,
 					line_end: 5,
 					environment_hash: 'e'.repeat(64),
+					command_hash: null,
+					prompt_hash: null,
+					reasoning_hash: null,
 					action: 'create',
 					timestamp: FIXED_ISO,
+					commit_hash: null,
+					session_id: null,
 					assurance_level: 'high',
 				};
 				const annotation2: VibesLineAnnotation = {
@@ -889,8 +938,13 @@ describe('vibes-session', () => {
 					line_start: 10,
 					line_end: 20,
 					environment_hash: 'f'.repeat(64),
+					command_hash: null,
+					prompt_hash: null,
+					reasoning_hash: null,
 					action: 'modify',
 					timestamp: FIXED_ISO,
+					commit_hash: null,
+					session_id: null,
 					assurance_level: 'low',
 				};
 

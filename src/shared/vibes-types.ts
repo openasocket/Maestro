@@ -124,13 +124,13 @@ export interface VibesLineAnnotation {
 	line_start: number;
 	line_end: number;
 	environment_hash: string;
-	command_hash?: string;
-	prompt_hash?: string;
-	reasoning_hash?: string;
+	command_hash: string | null;
+	prompt_hash: string | null;
+	reasoning_hash: string | null;
 	action: VibesAction;
 	timestamp: string;
-	commit_hash?: string;
-	session_id?: string;
+	commit_hash: string | null;
+	session_id: string | null;
 	assurance_level: VibesAssuranceLevel;
 }
 

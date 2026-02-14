@@ -364,7 +364,7 @@ describe('vibes-provenance-chain', () => {
 			expect(line.environment_hash).toBe('e'.repeat(64));
 			expect(line.command_hash).toBeDefined();
 			expect(line.prompt_hash).toBeDefined();
-			expect(line.reasoning_hash).toBeUndefined();
+			expect(line.reasoning_hash).toBeNull();
 			expect(line.assurance_level).toBe('medium');
 		});
 
@@ -398,8 +398,8 @@ describe('vibes-provenance-chain', () => {
 			const line = lineAnnotations[0];
 			expect(line.environment_hash).toBe('e'.repeat(64));
 			expect(line.command_hash).toBeDefined();
-			expect(line.prompt_hash).toBeUndefined();
-			expect(line.reasoning_hash).toBeUndefined();
+			expect(line.prompt_hash).toBeNull();
+			expect(line.reasoning_hash).toBeNull();
 			expect(line.assurance_level).toBe('low');
 		});
 	});
@@ -489,7 +489,7 @@ describe('vibes-provenance-chain', () => {
 			) as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].prompt_hash).toBeDefined();
-			expect(lineAnnotations[0].reasoning_hash).toBeUndefined();
+			expect(lineAnnotations[0].reasoning_hash).toBeNull();
 		});
 
 		it('should produce minimal provenance chain at low assurance', async () => {
@@ -509,8 +509,8 @@ describe('vibes-provenance-chain', () => {
 				(a) => a.type === 'line',
 			) as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
-			expect(lineAnnotations[0].prompt_hash).toBeUndefined();
-			expect(lineAnnotations[0].reasoning_hash).toBeUndefined();
+			expect(lineAnnotations[0].prompt_hash).toBeNull();
+			expect(lineAnnotations[0].reasoning_hash).toBeNull();
 		});
 	});
 
