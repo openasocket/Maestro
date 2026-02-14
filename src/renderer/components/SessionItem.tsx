@@ -264,7 +264,7 @@ export const SessionItem = memo(function SessionItem({
 					))}
 
 				{/* VIBES Indicator — shows assurance level dot + annotation count */}
-				{vibesEnabled && vibesActive && (
+				{vibesEnabled && vibesActive && vibesAssuranceLevel && (
 					<div
 						className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold"
 						style={{

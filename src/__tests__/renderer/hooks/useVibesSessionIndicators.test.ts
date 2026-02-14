@@ -108,10 +108,10 @@ describe('useVibesSessionIndicators', () => {
 			});
 
 			const indicatorA = result.current.indicators.get('/project/a');
-			expect(indicatorA).toEqual({ isInitialized: true, annotationCount: 42 });
+			expect(indicatorA).toEqual({ isInitialized: true, annotationCount: 42, assuranceLevel: null });
 
 			const indicatorB = result.current.indicators.get('/project/b');
-			expect(indicatorB).toEqual({ isInitialized: true, annotationCount: 42 });
+			expect(indicatorB).toEqual({ isInitialized: true, annotationCount: 42, assuranceLevel: null });
 		});
 
 		it('should deduplicate sessions with the same project path', async () => {
@@ -168,7 +168,7 @@ describe('useVibesSessionIndicators', () => {
 			});
 
 			const indicator = result.current.indicators.get('/project/a');
-			expect(indicator).toEqual({ isInitialized: false, annotationCount: 0 });
+			expect(indicator).toEqual({ isInitialized: false, annotationCount: 0, assuranceLevel: null });
 		});
 
 		it('should handle IPC errors gracefully', async () => {
@@ -184,7 +184,7 @@ describe('useVibesSessionIndicators', () => {
 			});
 
 			const indicator = result.current.indicators.get('/project/a');
-			expect(indicator).toEqual({ isInitialized: false, annotationCount: 0 });
+			expect(indicator).toEqual({ isInitialized: false, annotationCount: 0, assuranceLevel: null });
 		});
 
 		it('should parse both camelCase and snake_case annotation counts', async () => {

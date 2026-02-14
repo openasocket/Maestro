@@ -1588,7 +1588,7 @@ function SessionListInner(props: SessionListProps) {
 					isInBatch={activeBatchSessionIds.includes(session.id)}
 					jumpNumber={getSessionJumpNumber(session.id)}
 					vibesEnabled={vibesEnabled}
-					vibesAssuranceLevel={vibesAssuranceLevel}
+					vibesAssuranceLevel={vibesIndicators.get(session.projectRoot || session.cwd)?.assuranceLevel ?? vibesAssuranceLevel}
 					vibesAnnotationCount={vibesIndicators.get(session.projectRoot || session.cwd)?.annotationCount}
 					vibesActive={vibesIndicators.get(session.projectRoot || session.cwd)?.isInitialized ?? false}
 					onSelect={selectHandlers.get(session.id)!}
@@ -1654,7 +1654,7 @@ function SessionListInner(props: SessionListProps) {
 										isInBatch={activeBatchSessionIds.includes(child.id)}
 										jumpNumber={getSessionJumpNumber(child.id)}
 										vibesEnabled={vibesEnabled}
-										vibesAssuranceLevel={vibesAssuranceLevel}
+										vibesAssuranceLevel={vibesIndicators.get(child.projectRoot || child.cwd)?.assuranceLevel ?? vibesAssuranceLevel}
 										vibesAnnotationCount={vibesIndicators.get(child.projectRoot || child.cwd)?.annotationCount}
 										vibesActive={vibesIndicators.get(child.projectRoot || child.cwd)?.isInitialized ?? false}
 										onSelect={selectHandlers.get(child.id)!}

@@ -27,7 +27,6 @@ import {
 	isVibesInitialized,
 	vibesInit,
 	vibesBuild,
-	vibesStats,
 	vibesBlame,
 	vibesLog,
 	vibesCoverage,

@@ -152,6 +152,7 @@ import type {
 	RightPanelTab,
 	LogEntry,
 	Session,
+	Group,
 	AITab,
 	FilePreviewTab,
 	UnifiedTabRef,

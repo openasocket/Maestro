@@ -11,6 +11,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { Session } from '../types';
+import type { VibesAssuranceLevel } from '../../shared/vibes-types';
 import type { VibesAnnotationUpdate } from './useVibesLive';
 
 // ============================================================================
@@ -23,6 +24,8 @@ export interface VibesIndicatorData {
 	isInitialized: boolean;
 	/** Total annotation count for the project. */
 	annotationCount: number;
+	/** Per-project assurance level from stats, or null if not yet determined. */
+	assuranceLevel: VibesAssuranceLevel | null;
 }
 
 /** Return value of the useVibesSessionIndicators hook. */
@@ -85,11 +88,14 @@ export function useVibesSessionIndicators(
 						]);
 
 						let annotationCount = 0;
+						let assuranceLevel: VibesAssuranceLevel | null = null;
 						if (statsResult.success && statsResult.data) {
 							try {
 								const data = JSON.parse(statsResult.data);
 								annotationCount =
 									data.total_annotations ?? data.totalAnnotations ?? 0;
+								assuranceLevel =
+									data.assurance_level ?? data.assuranceLevel ?? null;
 							} catch {
 								// Ignore parse errors
 							}
@@ -99,12 +105,15 @@ export function useVibesSessionIndicators(
 							projectPath,
 							isInitialized: initialized,
 							annotationCount,
+							assuranceLevel,
 						};
-					} catch {
+					} catch (e) {
+						console.warn('useVibesSessionIndicators: failed to check', projectPath, e);
 						return {
 							projectPath,
 							isInitialized: false,
 							annotationCount: 0,
+							assuranceLevel: null as VibesAssuranceLevel | null,
 						};
 					}
 				}),
@@ -117,6 +126,7 @@ export function useVibesSessionIndicators(
 				newMap.set(result.projectPath, {
 					isInitialized: result.isInitialized,
 					annotationCount: result.annotationCount,
+					assuranceLevel: result.assuranceLevel,
 				});
 			}
 			setIndicators(newMap);
