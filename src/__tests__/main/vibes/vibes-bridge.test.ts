@@ -119,9 +119,10 @@ describe('vibes-bridge', () => {
 			const originalPath = process.env.PATH;
 			process.env.PATH = '/usr/bin:/opt/bin';
 
-			// Reject all common paths (~/.cargo/bin, /usr/local/bin), then $PATH first dir,
+			// Reject all common paths (~/.cargo/bin, ~/.local/bin, /usr/local/bin), then $PATH first dir,
 			// then succeed on $PATH second dir
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // ~/.cargo/bin/vibecheck
+			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // ~/.local/bin/vibecheck
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // /usr/local/bin/vibecheck
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // /usr/bin/vibecheck
 			mockAccess.mockResolvedValueOnce(undefined);           // /opt/bin/vibecheck
@@ -153,6 +154,7 @@ describe('vibes-bridge', () => {
 
 			// Reject common paths, succeed on node_modules
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // ~/.cargo/bin
+			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // ~/.local/bin
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // /usr/local/bin
 			mockAccess.mockResolvedValueOnce(undefined);            // node_modules/.bin
 
@@ -195,6 +197,7 @@ describe('vibes-bridge', () => {
 
 			// Reject common paths, succeed on $PATH
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // ~/.cargo/bin
+			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // ~/.local/bin
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // /usr/local/bin
 			mockAccess.mockResolvedValueOnce(undefined);            // /usr/bin
 

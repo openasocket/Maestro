@@ -28,6 +28,7 @@ const VIBES_BINARY_NAME = 'vibecheck';
 /** Common installation paths to search for the vibecheck binary. */
 const COMMON_BINARY_PATHS = [
 	path.join(os.homedir(), '.cargo', 'bin', VIBES_BINARY_NAME),
+	path.join(os.homedir(), '.local', 'bin', VIBES_BINARY_NAME),
 	path.join('/usr', 'local', 'bin', VIBES_BINARY_NAME),
 ];
 
@@ -38,12 +39,19 @@ const COMMON_BINARY_PATHS = [
 /** Cached binary path result (null means "searched but not found"). */
 let cachedBinaryPath: string | null | undefined;
 
+/** Timestamp of the last negative cache (not-found) result. */
+let negativeCacheTimestamp = 0;
+
+/** How long a negative (not-found) cache result stays valid (30 seconds). */
+const NEGATIVE_CACHE_TTL_MS = 30_000;
+
 /**
  * Clear the cached binary path. Should be called when settings change
  * (e.g. custom binary path updated).
  */
 export function clearBinaryPathCache(): void {
 	cachedBinaryPath = undefined;
+	negativeCacheTimestamp = 0;
 }
 
 // ============================================================================
@@ -110,9 +118,19 @@ export async function findVibesCheckBinary(
 		}
 	}
 
-	// Return cached result if available
+	// Return cached result if available (positive cache never expires,
+	// negative cache expires after NEGATIVE_CACHE_TTL_MS so the binary
+	// can be found if installed after app startup)
 	if (cachedBinaryPath !== undefined) {
-		return cachedBinaryPath;
+		if (cachedBinaryPath !== null) {
+			return cachedBinaryPath; // Positive cache — binary found
+		}
+		// Negative cache — check TTL
+		if (Date.now() - negativeCacheTimestamp < NEGATIVE_CACHE_TTL_MS) {
+			return null;
+		}
+		// Negative cache expired — re-search
+		cachedBinaryPath = undefined;
 	}
 
 	// Build the list of candidate paths to search
@@ -151,8 +169,10 @@ export async function findVibesCheckBinary(
 		}
 	}
 
-	// Cache the negative result so we don't keep searching
+	// Cache the negative result with a TTL so we don't keep searching,
+	// but will re-check after NEGATIVE_CACHE_TTL_MS in case the binary is installed later
 	cachedBinaryPath = null;
+	negativeCacheTimestamp = Date.now();
 	return null;
 }
 
