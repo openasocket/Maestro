@@ -128,8 +128,8 @@ describe('vibes-handlers', () => {
 	});
 
 	describe('handler registration', () => {
-		it('should register all 14 VIBES IPC handlers', () => {
-			expect(mockIpcMainHandle).toHaveBeenCalledTimes(14);
+		it('should register all 15 VIBES IPC handlers', () => {
+			expect(mockIpcMainHandle).toHaveBeenCalledTimes(15);
 		});
 
 		it('should register handlers with correct channel names', () => {
@@ -140,6 +140,7 @@ describe('vibes-handlers', () => {
 				'vibes:getBlame',
 				'vibes:getLog',
 				'vibes:getCoverage',
+				'vibes:getLocCoverage',
 				'vibes:getReport',
 				'vibes:getSessions',
 				'vibes:getModels',

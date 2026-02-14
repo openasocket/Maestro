@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, rm, readFile, access, constants, writeFile as fsWriteFile } from 'fs/promises';
+import { mkdtemp, rm, readFile, access, constants, writeFile as fsWriteFile, mkdir } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -34,6 +34,7 @@ import {
 	extractModelsFromManifest,
 	computeBlameFromAnnotations,
 	computeCoverageFromAnnotations,
+	computeLocCoverageFromAnnotations,
 } from '../../../main/vibes/vibes-io';
 
 import type {
@@ -1456,7 +1457,7 @@ describe('vibes-io', () => {
 			expect(coverage).toHaveLength(0);
 		});
 
-		it('should sort by status then path', async () => {
+		it('should sort by status then path (coverage)', async () => {
 			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
 			// 6 annotations for b.ts (covered), 1 for a.ts (partial)
 			for (let i = 0; i < 6; i++) {
@@ -1477,6 +1478,91 @@ describe('vibes-io', () => {
 			expect(coverage[0].coverage_status).toBe('full');
 			expect(coverage[1].file_path).toBe('src/a.ts');
 			expect(coverage[1].coverage_status).toBe('partial');
+		});
+	});
+
+	// ========================================================================
+	// computeLocCoverageFromAnnotations
+	// ========================================================================
+	describe('computeLocCoverageFromAnnotations', () => {
+		it('should compute LOC coverage from annotations', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
+
+			// Create a tracked source file
+			const srcDir = path.join(tmpDir, 'src');
+			await mkdir(srcDir, { recursive: true });
+			await fsWriteFile(path.join(srcDir, 'index.ts'), 'line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n');
+
+			// Add annotations covering lines 1-5
+			await appendAnnotationImmediate(tmpDir, {
+				...SAMPLE_LINE_ANNOTATION,
+				file_path: 'src/index.ts',
+				line_start: 1,
+				line_end: 5,
+			});
+
+			const result = await computeLocCoverageFromAnnotations(tmpDir);
+			const fileResult = result.files.find((f) => f.file_path === 'src/index.ts');
+			expect(fileResult).toBeDefined();
+			// 11 lines (10 lines of text + trailing newline)
+			expect(fileResult!.total_lines).toBe(11);
+			expect(fileResult!.annotated_lines).toBe(5);
+			expect(result.annotatedLines).toBeGreaterThanOrEqual(5);
+			expect(result.totalLines).toBeGreaterThanOrEqual(11);
+		});
+
+		it('should return empty results for empty project', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'empty', assuranceLevel: 'low' });
+			const result = await computeLocCoverageFromAnnotations(tmpDir);
+			expect(result.totalLines).toBe(0);
+			expect(result.annotatedLines).toBe(0);
+			expect(result.coveragePercent).toBe(0);
+			expect(result.files).toHaveLength(0);
+		});
+
+		it('should deduplicate overlapping line ranges', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
+
+			const srcDir = path.join(tmpDir, 'src');
+			await mkdir(srcDir, { recursive: true });
+			await fsWriteFile(path.join(srcDir, 'index.ts'), 'line1\nline2\nline3\nline4\nline5\n');
+
+			// Two overlapping annotations: 1-3 and 2-5
+			await appendAnnotationImmediate(tmpDir, {
+				...SAMPLE_LINE_ANNOTATION,
+				file_path: 'src/index.ts',
+				line_start: 1,
+				line_end: 3,
+			});
+			await appendAnnotationImmediate(tmpDir, {
+				...SAMPLE_LINE_ANNOTATION,
+				file_path: 'src/index.ts',
+				line_start: 2,
+				line_end: 5,
+			});
+
+			const result = await computeLocCoverageFromAnnotations(tmpDir);
+			const fileResult = result.files.find((f) => f.file_path === 'src/index.ts');
+			expect(fileResult).toBeDefined();
+			// Lines 1,2,3,4,5 = 5 unique lines (despite overlapping ranges)
+			expect(fileResult!.annotated_lines).toBe(5);
+		});
+
+		it('should skip files that cannot be read', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
+
+			// Annotate a file that doesn't exist on disk
+			await appendAnnotationImmediate(tmpDir, {
+				...SAMPLE_LINE_ANNOTATION,
+				file_path: 'src/deleted.ts',
+				line_start: 1,
+				line_end: 10,
+			});
+
+			// Should not throw — just skips the missing file
+			const result = await computeLocCoverageFromAnnotations(tmpDir);
+			const deleted = result.files.find((f) => f.file_path === 'src/deleted.ts');
+			expect(deleted).toBeUndefined();
 		});
 	});
 });

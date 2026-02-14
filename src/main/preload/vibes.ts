@@ -92,6 +92,9 @@ export function createVibesApi() {
 		getCoverage: (projectPath: string): Promise<VibesCommandResult> =>
 			ipcRenderer.invoke('vibes:getCoverage', projectPath),
 
+		getLocCoverage: (projectPath: string): Promise<VibesCommandResult> =>
+			ipcRenderer.invoke('vibes:getLocCoverage', projectPath),
+
 		getReport: (
 			projectPath: string,
 			format?: 'markdown' | 'html' | 'json',

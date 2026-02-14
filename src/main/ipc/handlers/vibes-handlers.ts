@@ -43,6 +43,7 @@ import {
 	extractModelsFromManifest,
 	computeBlameFromAnnotations,
 	computeCoverageFromAnnotations,
+	computeLocCoverageFromAnnotations,
 	readAnnotations,
 	readVibesManifest,
 } from '../../vibes/vibes-io';
@@ -184,6 +185,17 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 			return { success: true, data: JSON.stringify(coverage) };
 		} catch (error) {
 			logger.error('getCoverage error', LOG_CONTEXT, { error: String(error) });
+			return { success: false, error: String(error) };
+		}
+	});
+
+	// Get VIBES LOC-based coverage statistics (line-level, not file-level)
+	ipcMain.handle('vibes:getLocCoverage', async (_event, projectPath: string) => {
+		try {
+			const locCoverage = await computeLocCoverageFromAnnotations(projectPath);
+			return { success: true, data: JSON.stringify(locCoverage) };
+		} catch (error) {
+			logger.error('getLocCoverage error', LOG_CONTEXT, { error: String(error) });
 			return { success: false, error: String(error) };
 		}
 	});

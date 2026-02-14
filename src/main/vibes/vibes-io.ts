@@ -1003,6 +1003,97 @@ export async function computeCoverageFromAnnotations(
 }
 
 /**
+ * Compute Lines of Code (LOC) coverage from annotations.
+ * Counts unique annotated lines vs total lines across all tracked files.
+ */
+export async function computeLocCoverageFromAnnotations(
+	projectPath: string,
+): Promise<{
+	totalLines: number;
+	annotatedLines: number;
+	coveragePercent: number;
+	files: Array<{
+		file_path: string;
+		total_lines: number;
+		annotated_lines: number;
+		coverage_percent: number;
+	}>;
+}> {
+	const annotations = await readAnnotations(projectPath);
+	const config = await readVibesConfig(projectPath);
+
+	// Collect annotated line ranges per file
+	const fileAnnotatedLines = new Map<string, Set<number>>();
+	for (const a of annotations) {
+		if (a.type === 'line' && 'file_path' in a && 'line_start' in a && 'line_end' in a) {
+			let lineSet = fileAnnotatedLines.get(a.file_path);
+			if (!lineSet) {
+				lineSet = new Set<number>();
+				fileAnnotatedLines.set(a.file_path, lineSet);
+			}
+			for (let i = a.line_start; i <= a.line_end; i++) {
+				lineSet.add(i);
+			}
+		}
+	}
+
+	// Determine tracked files
+	let trackedFiles: string[] = [];
+	if (config?.tracked_extensions && config.tracked_extensions.length > 0) {
+		trackedFiles = await scanTrackedFiles(projectPath, config.tracked_extensions, config.exclude_patterns ?? []);
+	}
+
+	// Include any annotated files not already in tracked list
+	for (const fp of fileAnnotatedLines.keys()) {
+		if (!trackedFiles.includes(fp)) {
+			trackedFiles.push(fp);
+		}
+	}
+
+	let totalLines = 0;
+	let annotatedLines = 0;
+	const files: Array<{
+		file_path: string;
+		total_lines: number;
+		annotated_lines: number;
+		coverage_percent: number;
+	}> = [];
+
+	for (const filePath of trackedFiles) {
+		let fileTotal = 0;
+		try {
+			const content = await readFile(path.join(projectPath, filePath), 'utf-8');
+			fileTotal = content.split('\n').length;
+		} catch {
+			// Skip files that can't be read (deleted, binary, permissions)
+			logWarn(`computeLocCoverage: could not read file ${filePath}, skipping`);
+			continue;
+		}
+
+		const fileAnnotated = fileAnnotatedLines.get(filePath)?.size ?? 0;
+		totalLines += fileTotal;
+		annotatedLines += fileAnnotated;
+
+		files.push({
+			file_path: filePath,
+			total_lines: fileTotal,
+			annotated_lines: fileAnnotated,
+			coverage_percent: fileTotal > 0 ? Math.round((fileAnnotated / fileTotal) * 100) : 0,
+		});
+	}
+
+	// Sort by coverage percent descending, then by path
+	files.sort((a, b) => b.coverage_percent - a.coverage_percent || a.file_path.localeCompare(b.file_path));
+
+	return {
+		totalLines,
+		annotatedLines,
+		coveragePercent: totalLines > 0 ? Math.round((annotatedLines / totalLines) * 100) : 0,
+		files,
+	};
+}
+
+/**
  * Scan the project for files matching tracked extensions.
  * Returns relative file paths. Respects exclude patterns.
  */

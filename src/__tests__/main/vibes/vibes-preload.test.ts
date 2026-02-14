@@ -40,6 +40,7 @@ describe('vibes preload API', () => {
 			expect(api).toHaveProperty('getBlame');
 			expect(api).toHaveProperty('getLog');
 			expect(api).toHaveProperty('getCoverage');
+			expect(api).toHaveProperty('getLocCoverage');
 			expect(api).toHaveProperty('getReport');
 			expect(api).toHaveProperty('getSessions');
 			expect(api).toHaveProperty('getModels');
@@ -49,8 +50,8 @@ describe('vibes preload API', () => {
 			expect(api).toHaveProperty('onAnnotationUpdate');
 		});
 
-		it('should have exactly 14 methods', () => {
-			expect(Object.keys(api)).toHaveLength(14);
+		it('should have exactly 15 methods', () => {
+			expect(Object.keys(api)).toHaveLength(15);
 		});
 	});
 

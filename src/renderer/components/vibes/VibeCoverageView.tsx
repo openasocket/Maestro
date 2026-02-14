@@ -14,6 +14,7 @@ import {
 	ChevronDown,
 	FolderTree,
 	Files,
+	Code,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 
@@ -50,7 +51,7 @@ interface VibeCoverageViewProps {
 
 type FilterMode = 'all' | 'covered' | 'uncovered';
 type SortMode = 'status' | 'path' | 'annotations';
-type ViewMode = 'files' | 'directories';
+type ViewMode = 'files' | 'directories' | 'lines';
 
 /** Directory-level grouping for the tree view. */
 interface DirectoryGroup {
@@ -282,6 +283,17 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 	const [sort, setSort] = useState<SortMode>('status');
 	const [viewMode, setViewMode] = useState<ViewMode>('files');
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+	const [locData, setLocData] = useState<{
+		totalLines: number;
+		annotatedLines: number;
+		coveragePercent: number;
+		files: Array<{
+			file_path: string;
+			total_lines: number;
+			annotated_lines: number;
+			coverage_percent: number;
+		}>;
+	} | null>(null);
 
 	// ========================================================================
 	// Fetch coverage data
@@ -318,9 +330,22 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 		}
 	}, [projectPath]);
 
+	const fetchLocCoverage = useCallback(async () => {
+		if (!projectPath) return;
+		try {
+			const result = await window.maestro.vibes.getLocCoverage(projectPath);
+			if (result.success && result.data) {
+				setLocData(JSON.parse(result.data));
+			}
+		} catch {
+			// LOC data is supplementary; don't show errors for it
+		}
+	}, [projectPath]);
+
 	useEffect(() => {
 		fetchCoverage();
-	}, [fetchCoverage]);
+		fetchLocCoverage();
+	}, [fetchCoverage, fetchLocCoverage]);
 
 	// ========================================================================
 	// Build Now handler
@@ -401,8 +426,8 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 				className="sticky top-0 z-10 flex flex-col gap-3 px-3 py-3"
 				style={{ backgroundColor: theme.colors.bgSidebar }}
 			>
-				{/* Coverage donut chart + summary stats */}
-				{!isLoading && !error && !needsBuild && files.length > 0 && (
+				{/* Coverage donut chart + summary stats (hidden in LOC view which has its own) */}
+				{!isLoading && !error && !needsBuild && files.length > 0 && viewMode !== 'lines' && (
 					<div className="flex flex-col gap-3">
 						<div className="flex items-start gap-4">
 							{/* Donut chart */}
@@ -542,6 +567,18 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 							>
 								<FolderTree className="w-3 h-3" />
 								Directories
+							</button>
+							<button
+								onClick={() => setViewMode('lines')}
+								className="px-2 py-0.5 rounded text-[10px] font-medium transition-colors flex items-center gap-1"
+								style={{
+									backgroundColor: viewMode === 'lines' ? theme.colors.accentDim : 'transparent',
+									color: viewMode === 'lines' ? theme.colors.accent : theme.colors.textDim,
+								}}
+								data-testid="view-lines-btn"
+							>
+								<Code className="w-3 h-3" />
+								Lines
 							</button>
 						</div>
 
@@ -707,6 +744,84 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 					</div>
 				)}
 
+				{/* LOC (Lines of Code) view */}
+				{!isLoading && !error && !needsBuild && viewMode === 'lines' && locData && (
+					<div className="flex flex-col" data-testid="loc-view">
+						{/* LOC summary header */}
+						<div className="flex items-start gap-4 px-3 py-3">
+							<CoverageDonut
+								covered={locData.annotatedLines}
+								partial={0}
+								uncovered={locData.totalLines - locData.annotatedLines}
+								percentage={locData.coveragePercent}
+							/>
+							<div className="flex flex-col gap-1.5 pt-1">
+								<div className="flex items-center gap-2">
+									<Code className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+									<span className="text-[11px] font-semibold" style={{ color: theme.colors.textDim }}>
+										LOC Coverage
+									</span>
+								</div>
+								<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
+									{locData.annotatedLines.toLocaleString()} of {locData.totalLines.toLocaleString()} lines covered ({locData.coveragePercent}%)
+								</div>
+							</div>
+						</div>
+
+						{/* Per-file breakdown */}
+						{locData.files.map((file) => {
+							const rowColor = file.coverage_percent > 80
+								? STATUS_CONFIG.full.color
+								: file.coverage_percent >= 20
+									? STATUS_CONFIG.partial.color
+									: '#6b7280';
+							return (
+								<div
+									key={file.file_path}
+									className="flex items-center gap-2 px-3 py-2 border-b text-xs"
+									style={{ borderColor: theme.colors.border }}
+								>
+									<div
+										className="w-2 h-2 rounded-full shrink-0"
+										style={{ backgroundColor: rowColor }}
+									/>
+									<span
+										className="flex-1 min-w-0 truncate font-mono text-[11px]"
+										style={{ color: theme.colors.textMain }}
+										title={file.file_path}
+									>
+										{file.file_path}
+									</span>
+									<span
+										className="shrink-0 tabular-nums text-[10px]"
+										style={{ color: theme.colors.textDim }}
+									>
+										{file.annotated_lines}/{file.total_lines}
+									</span>
+									<span
+										className="px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 min-w-[3ch] text-right"
+										style={{
+											backgroundColor: `${rowColor}20`,
+											color: rowColor,
+										}}
+									>
+										{file.coverage_percent}%
+									</span>
+								</div>
+							);
+						})}
+					</div>
+				)}
+
+				{/* LOC view — no data */}
+				{!isLoading && !error && !needsBuild && viewMode === 'lines' && !locData && (
+					<div className="flex flex-col items-center justify-center gap-2 py-8 px-4 text-center">
+						<span className="text-xs" style={{ color: theme.colors.textDim }}>
+							No LOC coverage data available.
+						</span>
+					</div>
+				)}
+
 				{/* No results for current filter */}
 				{!isLoading && !error && !needsBuild && files.length > 0 && displayedFiles.length === 0 && (
 					<div className="flex flex-col items-center justify-center gap-2 py-8 px-4 text-center">
@@ -718,7 +833,7 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 			</div>
 
 			{/* Footer */}
-			{!isLoading && files.length > 0 && (
+			{!isLoading && (files.length > 0 || (viewMode === 'lines' && locData)) && (
 				<div
 					className="flex items-center justify-between px-3 py-1.5 text-[10px] border-t"
 					style={{
@@ -727,10 +842,21 @@ export const VibeCoverageView: React.FC<VibeCoverageViewProps> = ({
 						backgroundColor: theme.colors.bgSidebar,
 					}}
 				>
-					<span>
-						{displayedFiles.length} of {files.length} files
-					</span>
-					<span>{summary.totalAnnotations} total annotations</span>
+					{viewMode === 'lines' && locData ? (
+						<>
+							<span>
+								{locData.files.length} files
+							</span>
+							<span>{locData.annotatedLines.toLocaleString()} / {locData.totalLines.toLocaleString()} lines covered</span>
+						</>
+					) : (
+						<>
+							<span>
+								{displayedFiles.length} of {files.length} files
+							</span>
+							<span>{summary.totalAnnotations} total annotations</span>
+						</>
+					)}
 				</div>
 			)}
 		</div>

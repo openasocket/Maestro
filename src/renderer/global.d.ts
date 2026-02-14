@@ -2647,6 +2647,11 @@ interface MaestroAPI {
 			data?: string;
 			error?: string;
 		}>;
+		getLocCoverage: (projectPath: string) => Promise<{
+			success: boolean;
+			data?: string;
+			error?: string;
+		}>;
 		getReport: (
 			projectPath: string,
 			format?: 'markdown' | 'html' | 'json'

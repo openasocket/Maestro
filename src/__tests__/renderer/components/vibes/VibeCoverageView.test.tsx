@@ -20,6 +20,7 @@ vi.mock('lucide-react', () => ({
 	ChevronDown: () => <span data-testid="icon-chevron-down">ChevronDown</span>,
 	FolderTree: () => <span data-testid="icon-foldertree">FolderTree</span>,
 	Files: () => <span data-testid="icon-files">Files</span>,
+	Code: () => <span data-testid="icon-code">Code</span>,
 }));
 
 const mockTheme: Theme = {
@@ -66,8 +67,21 @@ const mockCoverageData = [
 	},
 ];
 
+const mockLocData = {
+	totalLines: 500,
+	annotatedLines: 200,
+	coveragePercent: 40,
+	files: [
+		{ file_path: 'src/main.ts', total_lines: 150, annotated_lines: 120, coverage_percent: 80 },
+		{ file_path: 'src/utils/helpers.ts', total_lines: 100, annotated_lines: 50, coverage_percent: 50 },
+		{ file_path: 'src/config.ts', total_lines: 200, annotated_lines: 30, coverage_percent: 15 },
+		{ file_path: 'src/index.ts', total_lines: 50, annotated_lines: 0, coverage_percent: 0 },
+	],
+};
+
 // Setup window.maestro mock
 const mockGetCoverage = vi.fn();
+const mockGetLocCoverage = vi.fn();
 const mockBuild = vi.fn();
 
 beforeEach(() => {
@@ -78,11 +92,17 @@ beforeEach(() => {
 		data: JSON.stringify(mockCoverageData),
 	});
 
+	mockGetLocCoverage.mockResolvedValue({
+		success: true,
+		data: JSON.stringify(mockLocData),
+	});
+
 	mockBuild.mockResolvedValue({ success: true });
 
 	(window as any).maestro = {
 		vibes: {
 			getCoverage: mockGetCoverage,
+			getLocCoverage: mockGetLocCoverage,
 			build: mockBuild,
 		},
 	};
@@ -836,5 +856,135 @@ describe('VibeCoverageView', () => {
 		});
 
 		expect(screen.queryByTestId('extension-distribution')).toBeNull();
+	});
+
+	// ========================================================================
+	// LOC (Lines of Code) view
+	// ========================================================================
+
+	it('renders Lines toggle button', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('view-lines-btn')).toBeTruthy();
+		});
+
+		expect(screen.getByText('Lines')).toBeTruthy();
+	});
+
+	it('fetches LOC coverage data on mount', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(mockGetLocCoverage).toHaveBeenCalledWith('/test/project');
+		});
+	});
+
+	it('shows LOC view when Lines toggle is clicked', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('src/main.ts')).toBeTruthy();
+		});
+
+		// Click Lines toggle
+		fireEvent.click(screen.getByTestId('view-lines-btn'));
+
+		// LOC view should now be visible
+		await waitFor(() => {
+			expect(screen.getByTestId('loc-view')).toBeTruthy();
+		});
+
+		// Should show LOC coverage percentage
+		expect(screen.getByText('LOC Coverage')).toBeTruthy();
+	});
+
+	it('displays LOC summary with annotated/total lines', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('src/main.ts')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('view-lines-btn'));
+
+		await waitFor(() => {
+			expect(screen.getByTestId('loc-view')).toBeTruthy();
+		});
+
+		expect(screen.getByText(/200 of 500 lines covered/)).toBeTruthy();
+	});
+
+	it('shows per-file LOC breakdown with percentages', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('src/main.ts')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('view-lines-btn'));
+
+		await waitFor(() => {
+			expect(screen.getByTestId('loc-view')).toBeTruthy();
+		});
+
+		// Should show per-file line counts
+		expect(screen.getByText('120/150')).toBeTruthy();
+		expect(screen.getByText('50/100')).toBeTruthy();
+		expect(screen.getByText('30/200')).toBeTruthy();
+		expect(screen.getByText('0/50')).toBeTruthy();
+
+		// Should show percentages
+		expect(screen.getByText('80%')).toBeTruthy();
+		expect(screen.getByText('50%')).toBeTruthy();
+		expect(screen.getByText('15%')).toBeTruthy();
+		expect(screen.getByText('0%')).toBeTruthy();
+	});
+
+	it('shows LOC footer with line counts', async () => {
+		render(
+			<VibeCoverageView
+				theme={mockTheme}
+				projectPath="/test/project"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText('src/main.ts')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('view-lines-btn'));
+
+		await waitFor(() => {
+			expect(screen.getByTestId('loc-view')).toBeTruthy();
+		});
+
+		expect(screen.getByText('4 files')).toBeTruthy();
+		expect(screen.getByText('200 / 500 lines covered')).toBeTruthy();
 	});
 });
