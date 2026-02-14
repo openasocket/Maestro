@@ -167,20 +167,24 @@ function parseAnnotations(raw: string | undefined): VibesAnnotation[] {
 	}
 }
 
-function parseSessions(raw: string | undefined): VibesSessionInfo[] {
+/** @internal Exported for testing. */
+export function parseSessions(raw: string | object | undefined): VibesSessionInfo[] {
 	if (!raw) return [];
 	try {
-		const data = JSON.parse(raw);
+		const data = typeof raw === 'object' ? raw : JSON.parse(raw);
 		const list = Array.isArray(data) ? data : data.sessions ?? [];
-		return list.map((s: Record<string, unknown>) => ({
+		// Filter out 'end' events so each session only appears once
+		const filtered = list.filter((s: Record<string, unknown>) => s.event !== 'end');
+		return filtered.map((s: Record<string, unknown>) => ({
 			sessionId: (s.session_id ?? s.sessionId ?? '') as string,
 			startTime: (s.start ?? s.start_time ?? s.startTime ?? s.timestamp ?? '') as string,
 			endTime: (s.end ?? s.end_time ?? s.endTime ?? undefined) as string | undefined,
 			annotationCount: (s.annotation_count ?? s.annotationCount ?? 0) as number,
-			toolName: (s.tool_name ?? s.toolName ?? undefined) as string | undefined,
+			toolName: (s.tool_name ?? s.toolName ?? s.agent_type ?? undefined) as string | undefined,
 			modelName: (s.environment ?? s.model_name ?? s.modelName ?? undefined) as string | undefined,
-		}));
-	} catch {
+		})).filter((s: VibesSessionInfo) => s.sessionId);
+	} catch (e) {
+		console.warn('useVibesData: parseSessions failed', e, raw);
 		return [];
 	}
 }
