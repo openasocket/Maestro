@@ -30,6 +30,7 @@ const {
 	mockReadAnnotations,
 	mockReadVibesConfig,
 	mockWriteVibesConfig,
+	mockRehashManifest,
 } = vi.hoisted(() => ({
 	mockFindBinary: vi.fn(),
 	mockGetVersion: vi.fn(),
@@ -54,6 +55,7 @@ const {
 	mockReadAnnotations: vi.fn(),
 	mockReadVibesConfig: vi.fn(),
 	mockWriteVibesConfig: vi.fn(),
+	mockRehashManifest: vi.fn(),
 }));
 
 // Mock electron
@@ -91,6 +93,7 @@ vi.mock('../../../main/vibes/vibes-io', () => ({
 	readAnnotations: mockReadAnnotations,
 	readVibesConfig: mockReadVibesConfig,
 	writeVibesConfig: mockWriteVibesConfig,
+	rehashManifest: mockRehashManifest,
 }));
 
 // Mock logger
@@ -134,8 +137,8 @@ describe('vibes-handlers', () => {
 	});
 
 	describe('handler registration', () => {
-		it('should register all 16 VIBES IPC handlers', () => {
-			expect(mockIpcMainHandle).toHaveBeenCalledTimes(16);
+		it('should register all 17 VIBES IPC handlers', () => {
+			expect(mockIpcMainHandle).toHaveBeenCalledTimes(17);
 		});
 
 		it('should register handlers with correct channel names', () => {
@@ -151,6 +154,7 @@ describe('vibes-handlers', () => {
 				'vibes:getSessions',
 				'vibes:getModels',
 				'vibes:build',
+				'vibes:rehash',
 				'vibes:updateConfig',
 				'vibes:findBinary',
 				'vibes:clearBinaryCache',
@@ -456,6 +460,39 @@ describe('vibes-handlers', () => {
 			const result = await handlers['vibes:build']({}, '/project');
 
 			expect(result).toEqual({ success: false, error: 'Error: build failed' });
+		});
+	});
+
+	describe('vibes:rehash', () => {
+		it('should call rehashManifest and return success with data', async () => {
+			mockRehashManifest.mockResolvedValue({ rehashedEntries: 3, updatedAnnotations: 5 });
+
+			const result = await handlers['vibes:rehash']({}, '/project');
+
+			expect(mockRehashManifest).toHaveBeenCalledWith('/project');
+			expect(result).toEqual({
+				success: true,
+				data: JSON.stringify({ rehashedEntries: 3, updatedAnnotations: 5 }),
+			});
+		});
+
+		it('should return success with zero counts when nothing to rehash', async () => {
+			mockRehashManifest.mockResolvedValue({ rehashedEntries: 0, updatedAnnotations: 0 });
+
+			const result = await handlers['vibes:rehash']({}, '/project');
+
+			expect(result).toEqual({
+				success: true,
+				data: JSON.stringify({ rehashedEntries: 0, updatedAnnotations: 0 }),
+			});
+		});
+
+		it('should return error on failure', async () => {
+			mockRehashManifest.mockRejectedValue(new Error('rehash failed'));
+
+			const result = await handlers['vibes:rehash']({}, '/project');
+
+			expect(result).toEqual({ success: false, error: 'Error: rehash failed' });
 		});
 	});
 

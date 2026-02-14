@@ -1,7 +1,7 @@
 /**
  * Tests for src/main/vibes/vibes-hash.ts
  * Validates the VIBES v1.0 hash specification: SHA-256 content-addressed
- * hashing with sorted keys, created_at removal, and short hash display.
+ * hashing with sorted keys, created_at and type removal, and short hash display.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -35,9 +35,18 @@ describe('vibes-hash', () => {
 			expect(hashWithDate).toBe(hashWithDifferentDate);
 		});
 
+		it('should exclude type from the hash', () => {
+			const contextA = { type: 'environment', tool_name: 'maestro' };
+			const contextB = { type: 'command', tool_name: 'maestro' };
+			const contextC = { tool_name: 'maestro' };
+
+			// All three should produce the same hash since type is stripped
+			expect(computeVibesHash(contextA)).toBe(computeVibesHash(contextB));
+			expect(computeVibesHash(contextA)).toBe(computeVibesHash(contextC));
+		});
+
 		it('should produce the same hash regardless of key order', () => {
 			const contextA = {
-				type: 'environment',
 				tool_name: 'maestro',
 				tool_version: '1.0',
 				model_name: 'claude',
@@ -45,7 +54,6 @@ describe('vibes-hash', () => {
 			const contextB = {
 				model_name: 'claude',
 				tool_version: '1.0',
-				type: 'environment',
 				tool_name: 'maestro',
 			};
 
@@ -75,9 +83,10 @@ describe('vibes-hash', () => {
 
 		it('should produce a valid SHA-256 for a known input', () => {
 			// Manually compute expected hash for verification
+			// type is stripped, so only model_name remains
 			const context = { model_name: 'claude', type: 'environment' };
-			// Sorted keys: model_name, type → {"model_name":"claude","type":"environment"}
-			const serialized = '{"model_name":"claude","type":"environment"}';
+			// Sorted keys after stripping type: model_name → {"model_name":"claude"}
+			const serialized = '{"model_name":"claude"}';
 			const expected = createHash('sha256').update(serialized, 'utf8').digest('hex');
 
 			expect(computeVibesHash(context)).toBe(expected);
@@ -85,8 +94,8 @@ describe('vibes-hash', () => {
 
 		it('should match a known test vector from the VIBES spec', () => {
 			// Known test vector: the canonical JSON string for this environment entry
-			// Sorted keys: model_name, tool_name, tool_version, type
-			// → {"model_name":"claude-opus-4-5","tool_name":"Claude Code","tool_version":"1.0","type":"environment"}
+			// type is stripped, so sorted keys: model_name, tool_name, tool_version
+			// → {"model_name":"claude-opus-4-5","tool_name":"Claude Code","tool_version":"1.0"}
 			const context = {
 				model_name: 'claude-opus-4-5',
 				tool_name: 'Claude Code',
@@ -95,7 +104,7 @@ describe('vibes-hash', () => {
 			};
 
 			const hash = computeVibesHash(context);
-			expect(hash).toBe('a8b293149a7c71409a38f036ebeeea25942bb92531fb8d74bbf3e48098c537ed');
+			expect(hash).toBe('fd6c6120e1351b14a11c12ea0ade548de30bc38e86587ef56ed51b6c26bea99c');
 		});
 
 		it('should handle nested objects', () => {

@@ -12,6 +12,8 @@
 import { mkdir, readFile, writeFile, appendFile, access, constants, open, rename, readdir } from 'fs/promises';
 import * as path from 'path';
 
+import { computeVibesHash } from './vibes-hash';
+
 import type {
 	VibesAssuranceLevel,
 	VibesConfig,
@@ -548,6 +550,62 @@ export async function flushAll(): Promise<void> {
 	}
 
 	await Promise.all(flushPromises);
+}
+
+// ============================================================================
+// Manifest Re-Hash Migration
+// ============================================================================
+
+/**
+ * Re-hash all manifest entries and update annotation references.
+ * Required after fixing computeVibesHash to strip the `type` field.
+ * Idempotent — entries already matching the new hash are skipped.
+ */
+export async function rehashManifest(projectPath: string): Promise<{ rehashedEntries: number; updatedAnnotations: number }> {
+	const manifest = await readVibesManifest(projectPath);
+	const hashMap = new Map<string, string>(); // oldHash → newHash
+	const newEntries: Record<string, VibesManifestEntry> = {};
+	let rehashedEntries = 0;
+
+	for (const [oldHash, entry] of Object.entries(manifest.entries)) {
+		const newHash = computeVibesHash(entry as unknown as Record<string, unknown>);
+		if (oldHash !== newHash) {
+			hashMap.set(oldHash, newHash);
+			rehashedEntries++;
+		}
+		newEntries[newHash] = entry;
+	}
+
+	// Write updated manifest
+	manifest.entries = newEntries;
+	await writeVibesManifest(projectPath, manifest);
+
+	// Update annotation hash references
+	let updatedAnnotations = 0;
+	if (hashMap.size > 0) {
+		const annotations = await readAnnotations(projectPath);
+		const updated = annotations.map((a) => {
+			let changed = false;
+			const record = { ...a } as Record<string, unknown>;
+			for (const field of ['environment_hash', 'command_hash', 'prompt_hash', 'reasoning_hash']) {
+				const oldVal = record[field] as string | undefined;
+				if (oldVal && hashMap.has(oldVal)) {
+					record[field] = hashMap.get(oldVal);
+					changed = true;
+				}
+			}
+			if (changed) updatedAnnotations++;
+			return record;
+		});
+
+		// Rewrite annotations.jsonl
+		const auditDir = path.join(projectPath, '.ai-audit');
+		const annotationsPath = path.join(auditDir, 'annotations.jsonl');
+		const content = updated.map((a) => JSON.stringify(a)).join('\n') + '\n';
+		await writeFile(annotationsPath, content, 'utf-8');
+	}
+
+	return { rehashedEntries, updatedAnnotations };
 }
 
 // ============================================================================

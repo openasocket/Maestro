@@ -29,6 +29,7 @@ import {
 	initVibesDirectly,
 	writeReasoningBlob,
 	backfillCommitHash,
+	rehashManifest,
 	computeStatsFromAnnotations,
 	extractSessionsFromAnnotations,
 	extractModelsFromManifest,
@@ -36,6 +37,8 @@ import {
 	computeCoverageFromAnnotations,
 	computeLocCoverageFromAnnotations,
 } from '../../../main/vibes/vibes-io';
+
+import { computeVibesHash } from '../../../main/vibes/vibes-hash';
 
 import type {
 	VibesConfig,
@@ -1142,6 +1145,164 @@ describe('vibes-io', () => {
 
 			const count = await backfillCommitHash(tmpDir, 'new-hash');
 			expect(count).toBe(0);
+		});
+	});
+
+	// ========================================================================
+	// rehashManifest
+	// ========================================================================
+	describe('rehashManifest', () => {
+		it('should re-key manifest entries using the updated hash algorithm', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
+
+			// Write a manifest with entries keyed by an old (wrong) hash
+			const envEntry: VibesEnvironmentEntry = {
+				type: 'environment',
+				tool_name: 'Claude Code',
+				tool_version: '1.0',
+				model_name: 'claude-opus-4-5',
+				model_version: 'opus',
+				created_at: '2026-02-10T12:00:00Z',
+			};
+			const oldHash = 'old-hash-that-does-not-match-new-algorithm';
+			await writeVibesManifest(tmpDir, {
+				standard: 'VIBES',
+				version: '1.0',
+				entries: { [oldHash]: envEntry },
+			});
+
+			const result = await rehashManifest(tmpDir);
+
+			expect(result.rehashedEntries).toBe(1);
+			const manifest = await readVibesManifest(tmpDir);
+			// Old hash should be gone
+			expect(manifest.entries[oldHash]).toBeUndefined();
+			// New hash should be the correct computeVibesHash result
+			const correctHash = computeVibesHash(envEntry as unknown as Record<string, unknown>);
+			expect(manifest.entries[correctHash]).toEqual(envEntry);
+		});
+
+		it('should update annotation hash references', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
+
+			const envEntry: VibesEnvironmentEntry = {
+				type: 'environment',
+				tool_name: 'Maestro',
+				tool_version: '2.0',
+				model_name: 'claude-4',
+				model_version: 'opus',
+				created_at: '2026-02-10T12:00:00Z',
+			};
+			const oldHash = 'stale-env-hash-0123456789abcdef0123456789abcdef01234567';
+			await writeVibesManifest(tmpDir, {
+				standard: 'VIBES',
+				version: '1.0',
+				entries: { [oldHash]: envEntry },
+			});
+
+			// Write annotations referencing the old hash
+			const annotation: VibesLineAnnotation = {
+				...SAMPLE_LINE_ANNOTATION,
+				environment_hash: oldHash,
+			};
+			await appendAnnotationImmediate(tmpDir, annotation);
+
+			const result = await rehashManifest(tmpDir);
+
+			expect(result.rehashedEntries).toBe(1);
+			expect(result.updatedAnnotations).toBe(1);
+
+			const annotations = await readAnnotations(tmpDir);
+			const newHash = computeVibesHash(envEntry as unknown as Record<string, unknown>);
+			expect((annotations[0] as VibesLineAnnotation).environment_hash).toBe(newHash);
+		});
+
+		it('should be idempotent — entries already matching are skipped', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
+
+			const envEntry: VibesEnvironmentEntry = {
+				type: 'environment',
+				tool_name: 'Claude Code',
+				tool_version: '1.0',
+				model_name: 'claude-opus-4-5',
+				model_version: 'opus',
+				created_at: '2026-02-10T12:00:00Z',
+			};
+			const correctHash = computeVibesHash(envEntry as unknown as Record<string, unknown>);
+			await writeVibesManifest(tmpDir, {
+				standard: 'VIBES',
+				version: '1.0',
+				entries: { [correctHash]: envEntry },
+			});
+
+			const result = await rehashManifest(tmpDir);
+
+			expect(result.rehashedEntries).toBe(0);
+			expect(result.updatedAnnotations).toBe(0);
+		});
+
+		it('should handle empty manifest gracefully', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'low' });
+
+			const result = await rehashManifest(tmpDir);
+
+			expect(result.rehashedEntries).toBe(0);
+			expect(result.updatedAnnotations).toBe(0);
+		});
+
+		it('should handle multiple entries and multiple annotations', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'high' });
+
+			const envEntry1: VibesEnvironmentEntry = {
+				type: 'environment',
+				tool_name: 'Claude Code',
+				tool_version: '1.0',
+				model_name: 'claude-4',
+				model_version: 'opus',
+				created_at: '2026-02-10T12:00:00Z',
+			};
+			const envEntry2: VibesEnvironmentEntry = {
+				type: 'environment',
+				tool_name: 'Copilot',
+				tool_version: '2.0',
+				model_name: 'gpt-4o',
+				model_version: '2026-01',
+				created_at: '2026-02-10T12:01:00Z',
+			};
+			const oldHash1 = 'old-hash-env1-does-not-match';
+			const oldHash2 = 'old-hash-env2-does-not-match';
+			await writeVibesManifest(tmpDir, {
+				standard: 'VIBES',
+				version: '1.0',
+				entries: {
+					[oldHash1]: envEntry1,
+					[oldHash2]: envEntry2,
+				},
+			});
+
+			// 2 annotations referencing different old hashes
+			await appendAnnotationImmediate(tmpDir, {
+				...SAMPLE_LINE_ANNOTATION,
+				environment_hash: oldHash1,
+			});
+			await appendAnnotationImmediate(tmpDir, {
+				...SAMPLE_LINE_ANNOTATION,
+				file_path: 'src/other.ts',
+				line_start: 20,
+				line_end: 30,
+				environment_hash: oldHash2,
+			});
+
+			const result = await rehashManifest(tmpDir);
+
+			expect(result.rehashedEntries).toBe(2);
+			expect(result.updatedAnnotations).toBe(2);
+
+			const manifest = await readVibesManifest(tmpDir);
+			const newHash1 = computeVibesHash(envEntry1 as unknown as Record<string, unknown>);
+			const newHash2 = computeVibesHash(envEntry2 as unknown as Record<string, unknown>);
+			expect(manifest.entries[newHash1]).toEqual(envEntry1);
+			expect(manifest.entries[newHash2]).toEqual(envEntry2);
 		});
 	});
 

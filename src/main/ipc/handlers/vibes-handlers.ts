@@ -47,6 +47,7 @@ import {
 	readVibesManifest,
 	readVibesConfig,
 	writeVibesConfig,
+	rehashManifest,
 } from '../../vibes/vibes-io';
 
 const LOG_CONTEXT = '[VIBES]';
@@ -256,6 +257,17 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 			return await vibesBuild(projectPath, customPath);
 		} catch (error) {
 			logger.error('build error', LOG_CONTEXT, { error: String(error) });
+			return { success: false, error: String(error) };
+		}
+	});
+
+	// Re-hash all manifest entries and update annotation references
+	ipcMain.handle('vibes:rehash', async (_event, projectPath: string) => {
+		try {
+			const result = await rehashManifest(projectPath);
+			return { success: true, data: JSON.stringify(result) };
+		} catch (error) {
+			logger.error('rehash error', LOG_CONTEXT, { error: String(error) });
 			return { success: false, error: String(error) };
 		}
 	});
