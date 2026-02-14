@@ -21,6 +21,7 @@ import type {
 	VibesManifest,
 } from '../../../shared/vibes-types';
 import { VibesAnnotationDetail } from './VibesAnnotationDetail';
+import { ErrorBoundary } from '../ErrorBoundary';
 
 // ============================================================================
 // Filter Types
@@ -237,7 +238,11 @@ export const VibesAnnotationLog: React.FC<VibesAnnotationLogProps> = ({
 			try {
 				const result = await window.maestro.vibes.getManifest(projectPath);
 				if (result.success && result.data) {
-					setManifest(JSON.parse(result.data));
+					try {
+						setManifest(JSON.parse(result.data));
+					} catch (parseErr) {
+						console.warn('Failed to parse manifest JSON:', parseErr);
+					}
 				}
 			} catch {
 				// Manifest unavailable — detail panel shows hashes only
@@ -663,13 +668,15 @@ const AnnotationRow: React.FC<AnnotationRowProps> = ({
 				</>
 			)}
 			{isExpanded && showDetail && (
-				<VibesAnnotationDetail
-					theme={theme}
-					annotation={annotation}
-					manifest={manifest ?? null}
-					isLoadingManifest={isLoadingManifest ?? false}
-					onClose={() => onViewDetails?.()}
-				/>
+				<ErrorBoundary fallbackComponent={<div className="px-4 py-3 text-xs" style={{ color: theme.colors.error ?? '#ef4444' }}>Failed to load annotation details. Try collapsing and re-expanding.</div>}>
+					<VibesAnnotationDetail
+						theme={theme}
+						annotation={annotation}
+						manifest={manifest ?? null}
+						isLoadingManifest={isLoadingManifest ?? false}
+						onClose={() => onViewDetails?.()}
+					/>
+				</ErrorBoundary>
 			)}
 		</div>
 	);
