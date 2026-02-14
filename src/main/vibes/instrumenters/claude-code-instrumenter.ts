@@ -6,6 +6,7 @@
 // to ensure instrumentation failures never crash the agent session.
 
 import * as crypto from 'crypto';
+import { readFile } from 'fs/promises';
 import * as path from 'path';
 import type { VibesSessionManager } from '../vibes-session';
 import {
@@ -141,25 +142,115 @@ function simpleGlobMatch(filePath: string, pattern: string): boolean {
 
 /**
  * Extract line range from a tool's input object.
- * Edit tools may include line information (offset/limit or old_string for context).
+ * Handles Write (full file content), Edit (old_string position + new_string size),
+ * MultiEdit (union of edit ranges), Read (offset/limit), and NotebookEdit (cell_number).
+ *
+ * For Edit/MultiEdit, reads the pre-edit file to find the position of old_string.
+ * Falls back to line counting without position if file read fails.
  */
-function extractLineRange(input: unknown): { lineStart: number; lineEnd: number } | null {
+async function extractLineRange(
+	input: unknown,
+	filePath?: string,
+	projectPath?: string,
+): Promise<{ lineStart: number; lineEnd: number } | null> {
 	if (!input || typeof input !== 'object') {
 		return null;
 	}
 	const obj = input as Record<string, unknown>;
 
-	// Read tool may have offset and limit
+	// Write tool: content contains the full new file
+	if (typeof obj.content === 'string') {
+		const lineCount = obj.content.split('\n').length;
+		return { lineStart: 1, lineEnd: Math.max(1, lineCount) };
+	}
+
+	// Edit tool: old_string/new_string
+	if (typeof obj.old_string === 'string' && typeof obj.new_string === 'string') {
+		const newLineCount = obj.new_string.split('\n').length;
+		// Try to find old_string position in the pre-edit file
+		const position = await findStringPosition(obj.old_string, filePath, projectPath);
+		if (position !== null) {
+			return { lineStart: position, lineEnd: position + newLineCount - 1 };
+		}
+		// Fallback: we know the size but not the position
+		return { lineStart: 1, lineEnd: Math.max(1, newLineCount) };
+	}
+
+	// MultiEdit tool: edits array
+	if (Array.isArray(obj.edits)) {
+		let fileContent: string | null = null;
+		if (filePath && projectPath) {
+			try {
+				const fullPath = path.isAbsolute(filePath) ? filePath : path.join(projectPath, filePath);
+				fileContent = await readFile(fullPath, 'utf-8');
+			} catch {
+				// File read failed — fall back to line counting
+			}
+		}
+
+		let minLine = Infinity;
+		let maxLine = 0;
+		for (const edit of obj.edits) {
+			if (!edit || typeof edit !== 'object') continue;
+			const e = edit as Record<string, unknown>;
+			if (typeof e.old_string !== 'string' || typeof e.new_string !== 'string') continue;
+
+			const newLineCount = e.new_string.split('\n').length;
+			if (fileContent) {
+				const idx = fileContent.indexOf(e.old_string);
+				if (idx >= 0) {
+					const lineNum = fileContent.substring(0, idx).split('\n').length;
+					minLine = Math.min(minLine, lineNum);
+					maxLine = Math.max(maxLine, lineNum + newLineCount - 1);
+					continue;
+				}
+			}
+			// Fallback for this edit
+			minLine = Math.min(minLine, 1);
+			maxLine = Math.max(maxLine, newLineCount);
+		}
+
+		if (maxLine > 0) {
+			return { lineStart: minLine === Infinity ? 1 : minLine, lineEnd: maxLine };
+		}
+		return null;
+	}
+
+	// Read tool: offset and limit
 	if (typeof obj.offset === 'number' && typeof obj.limit === 'number') {
 		return { lineStart: obj.offset, lineEnd: obj.offset + obj.limit - 1 };
 	}
 
-	// NotebookEdit may have cell_number
+	// NotebookEdit: cell_number + new_source line count
 	if (typeof obj.cell_number === 'number') {
-		return { lineStart: obj.cell_number, lineEnd: obj.cell_number };
+		const sourceLines = typeof obj.new_source === 'string' ? obj.new_source.split('\n').length : 1;
+		return { lineStart: obj.cell_number, lineEnd: obj.cell_number + sourceLines - 1 };
 	}
 
 	return null;
+}
+
+/**
+ * Find the 1-based line number of a string in a file.
+ * Returns null if the file can't be read or the string isn't found.
+ */
+async function findStringPosition(
+	searchString: string,
+	filePath?: string,
+	projectPath?: string,
+): Promise<number | null> {
+	if (!filePath) return null;
+	try {
+		const fullPath = (projectPath && !path.isAbsolute(filePath))
+			? path.join(projectPath, filePath)
+			: filePath;
+		const content = await readFile(fullPath, 'utf-8');
+		const idx = content.indexOf(searchString);
+		if (idx < 0) return null;
+		return content.substring(0, idx).split('\n').length;
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -332,7 +423,7 @@ export class ClaudeCodeInstrumenter {
 						return;
 					}
 
-					const lineRange = extractLineRange(toolInput);
+					const lineRange = await extractLineRange(toolInput, filePath, session.projectPath);
 					const promptHash = this.assuranceLevel !== 'low' ? this.lastPromptHashes.get(sessionId) : undefined;
 					const reasoningHash = this.assuranceLevel === 'high' ? this.lastReasoningHashes.get(sessionId) : undefined;
 					const annotation = createLineAnnotation({

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdtemp, rm, writeFile, mkdir } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -438,6 +438,212 @@ describe('claude-code-instrumenter', () => {
 			// cell_number used as line range
 			expect(lineAnnotations[0].line_start).toBe(3);
 			expect(lineAnnotations[0].line_end).toBe(3);
+		});
+	});
+
+	// ========================================================================
+	// Line Range Extraction (VIBES-FIX-10)
+	// ========================================================================
+	describe('line range extraction', () => {
+		it('should extract line range from Write tool content', async () => {
+			await setupSession('sess-1');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			const content = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join('\n');
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/new-file.ts', content } },
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const lineAnnotations = annotations.filter(
+				(a) => a.type === 'line',
+			) as VibesLineAnnotation[];
+			expect(lineAnnotations).toHaveLength(1);
+			expect(lineAnnotations[0].line_start).toBe(1);
+			expect(lineAnnotations[0].line_end).toBe(50);
+		});
+
+		it('should extract line range from Edit tool with old_string position', async () => {
+			await setupSession('sess-1');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			// Create a real file at tmpDir so the instrumenter can read it
+			const srcDir = path.join(tmpDir, 'src');
+			await mkdir(srcDir, { recursive: true });
+			const fileContent = [
+				'import foo from "bar";',
+				'',
+				'function hello() {',
+				'  console.log("hello");',
+				'}',
+				'',
+				'function goodbye() {',
+				'  console.log("goodbye");',
+				'}',
+			].join('\n');
+			await writeFile(path.join(srcDir, 'edit-target.ts'), fileContent);
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Edit',
+				state: {
+					status: 'running',
+					input: {
+						file_path: 'src/edit-target.ts',
+						old_string: 'function goodbye() {\n  console.log("goodbye");\n}',
+						new_string: 'function goodbye() {\n  console.log("farewell");\n  return true;\n}',
+					},
+				},
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const lineAnnotations = annotations.filter(
+				(a) => a.type === 'line',
+			) as VibesLineAnnotation[];
+			expect(lineAnnotations).toHaveLength(1);
+			// old_string starts at line 7, new_string has 4 lines
+			expect(lineAnnotations[0].line_start).toBe(7);
+			expect(lineAnnotations[0].line_end).toBe(10);
+		});
+
+		it('should fall back to line counting for Edit when file cannot be read', async () => {
+			await setupSession('sess-1');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Edit',
+				state: {
+					status: 'running',
+					input: {
+						file_path: 'src/nonexistent.ts',
+						old_string: 'old code',
+						new_string: 'line1\nline2\nline3',
+					},
+				},
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const lineAnnotations = annotations.filter(
+				(a) => a.type === 'line',
+			) as VibesLineAnnotation[];
+			expect(lineAnnotations).toHaveLength(1);
+			// Fallback: lineStart=1, lineEnd=3 (3 lines in new_string)
+			expect(lineAnnotations[0].line_start).toBe(1);
+			expect(lineAnnotations[0].line_end).toBe(3);
+		});
+
+		it('should extract union line range from MultiEdit tool', async () => {
+			await setupSession('sess-1');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			// Create a file with known content
+			const srcDir = path.join(tmpDir, 'src');
+			await mkdir(srcDir, { recursive: true });
+			const fileContent = [
+				'const a = 1;',     // line 1
+				'const b = 2;',     // line 2
+				'const c = 3;',     // line 3
+				'',                  // line 4
+				'function foo() {', // line 5
+				'  return a;',      // line 6
+				'}',                 // line 7
+				'',                  // line 8
+				'function bar() {', // line 9
+				'  return b;',      // line 10
+				'}',                 // line 11
+			].join('\n');
+			await writeFile(path.join(srcDir, 'multi-edit.ts'), fileContent);
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'MultiEdit',
+				state: {
+					status: 'running',
+					input: {
+						file_path: 'src/multi-edit.ts',
+						edits: [
+							{ old_string: 'const a = 1;', new_string: 'const a = 10;' },
+							{ old_string: 'function bar() {\n  return b;\n}', new_string: 'function bar() {\n  return b + c;\n}' },
+						],
+					},
+				},
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const lineAnnotations = annotations.filter(
+				(a) => a.type === 'line',
+			) as VibesLineAnnotation[];
+			expect(lineAnnotations).toHaveLength(1);
+			// First edit at line 1 (1 line), second at line 9 (3 lines → 9+3-1=11)
+			expect(lineAnnotations[0].line_start).toBe(1);
+			expect(lineAnnotations[0].line_end).toBe(11);
+		});
+
+		it('should handle NotebookEdit with new_source line count', async () => {
+			await setupSession('sess-1');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'NotebookEdit',
+				state: {
+					status: 'running',
+					input: {
+						notebook_path: 'analysis.ipynb',
+						cell_number: 5,
+						new_source: 'import pandas as pd\nimport numpy as np\n\ndf = pd.read_csv("data.csv")',
+					},
+				},
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const lineAnnotations = annotations.filter(
+				(a) => a.type === 'line',
+			) as VibesLineAnnotation[];
+			expect(lineAnnotations).toHaveLength(1);
+			// cell_number=5, new_source has 4 lines → lineEnd = 5 + 4 - 1 = 8
+			expect(lineAnnotations[0].line_start).toBe(5);
+			expect(lineAnnotations[0].line_end).toBe(8);
+		});
+
+		it('should handle Write tool with single-line content', async () => {
+			await setupSession('sess-1');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/one-liner.ts', content: 'export default 42;' } },
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const lineAnnotations = annotations.filter(
+				(a) => a.type === 'line',
+			) as VibesLineAnnotation[];
+			expect(lineAnnotations).toHaveLength(1);
+			expect(lineAnnotations[0].line_start).toBe(1);
+			expect(lineAnnotations[0].line_end).toBe(1);
 		});
 	});
 
