@@ -48,8 +48,8 @@ describe('vibes-annotations', () => {
 			expect(entry.model_name).toBe('claude-4');
 			expect(entry.model_version).toBe('opus');
 			expect(entry.created_at).toBe(FIXED_ISO);
-			expect(entry.model_parameters).toBeUndefined();
-			expect(entry.tool_extensions).toBeUndefined();
+			expect(entry.model_parameters).toBeNull();
+			expect(entry.tool_extensions).toBeNull();
 		});
 
 		it('should include optional modelParameters when provided', () => {
@@ -124,6 +124,25 @@ describe('vibes-annotations', () => {
 			});
 
 			expect(hash1).not.toBe(hash2);
+		});
+
+		it('should always include all 8 fields in serialized JSON', () => {
+			const { entry } = createEnvironmentEntry({
+				toolName: 'Claude Code',
+				toolVersion: '1.0',
+				modelName: 'claude-4',
+				modelVersion: 'opus',
+			});
+
+			const json = JSON.parse(JSON.stringify(entry));
+			const expectedKeys = [
+				'type', 'tool_name', 'tool_version', 'model_name',
+				'model_version', 'model_parameters', 'tool_extensions', 'created_at',
+			];
+			for (const key of expectedKeys) {
+				expect(json).toHaveProperty(key);
+			}
+			expect(Object.keys(json)).toHaveLength(8);
 		});
 	});
 
@@ -228,8 +247,8 @@ describe('vibes-annotations', () => {
 			expect(entry.type).toBe('prompt');
 			expect(entry.prompt_text).toBe('Fix the authentication bug in login.ts');
 			expect(entry.created_at).toBe(FIXED_ISO);
-			expect(entry.prompt_type).toBeUndefined();
-			expect(entry.prompt_context_files).toBeUndefined();
+			expect(entry.prompt_type).toBeNull();
+			expect(entry.prompt_context_files).toBeNull();
 			expect(hash).toMatch(/^[0-9a-f]{64}$/);
 		});
 
@@ -260,6 +279,21 @@ describe('vibes-annotations', () => {
 
 			expect(hash1).toBe(hash2);
 		});
+
+		it('should always include all 5 fields in serialized JSON', () => {
+			const { entry } = createPromptEntry({
+				promptText: 'Test prompt',
+			});
+
+			const json = JSON.parse(JSON.stringify(entry));
+			const expectedKeys = [
+				'type', 'prompt_text', 'prompt_type', 'prompt_context_files', 'created_at',
+			];
+			for (const key of expectedKeys) {
+				expect(json).toHaveProperty(key);
+			}
+			expect(Object.keys(json)).toHaveLength(5);
+		});
 	});
 
 	// ========================================================================
@@ -274,8 +308,8 @@ describe('vibes-annotations', () => {
 			expect(entry.type).toBe('reasoning');
 			expect(entry.reasoning_text).toBe('The function needs a null check because...');
 			expect(entry.created_at).toBe(FIXED_ISO);
-			expect(entry.reasoning_token_count).toBeUndefined();
-			expect(entry.reasoning_model).toBeUndefined();
+			expect(entry.reasoning_token_count).toBeNull();
+			expect(entry.reasoning_model).toBeNull();
 			expect(hash).toMatch(/^[0-9a-f]{64}$/);
 		});
 
@@ -309,8 +343,8 @@ describe('vibes-annotations', () => {
 			const { entry } = createReasoningEntry({ reasoningText: shortText });
 
 			expect(entry.reasoning_text).toBe(shortText);
-			expect(entry.reasoning_text_compressed).toBeUndefined();
-			expect(entry.compressed).toBeUndefined();
+			expect(entry.reasoning_text_compressed).toBeNull();
+			expect(entry.compressed).toBeNull();
 		});
 
 		it('compresses reasoning_text when above compress threshold', () => {
@@ -331,11 +365,11 @@ describe('vibes-annotations', () => {
 			expect(entry.compressed).toBe(true);
 		});
 
-		it('omits raw reasoning_text when compressed', () => {
+		it('sets reasoning_text to null when compressed', () => {
 			const largeText = 'C'.repeat(11000);
 			const { entry } = createReasoningEntry({ reasoningText: largeText });
 
-			expect(entry.reasoning_text).toBeUndefined();
+			expect(entry.reasoning_text).toBeNull();
 		});
 
 		it('compressed text can be decompressed back to original via gunzipSync + base64 decode', () => {
@@ -360,7 +394,7 @@ describe('vibes-annotations', () => {
 				compressThresholdBytes: 1000,
 			});
 			expect(belowEntry.reasoning_text).toBe(text);
-			expect(belowEntry.compressed).toBeUndefined();
+			expect(belowEntry.compressed).toBeNull();
 
 			// Above custom threshold of 100 — should compress
 			const { entry: aboveEntry } = createReasoningEntry({
@@ -368,7 +402,38 @@ describe('vibes-annotations', () => {
 				compressThresholdBytes: 100,
 			});
 			expect(aboveEntry.compressed).toBe(true);
-			expect(aboveEntry.reasoning_text).toBeUndefined();
+			expect(aboveEntry.reasoning_text).toBeNull();
+		});
+
+		it('should always include all 9 fields in serialized JSON (uncompressed)', () => {
+			const { entry } = createReasoningEntry({
+				reasoningText: 'Test reasoning',
+			});
+
+			const json = JSON.parse(JSON.stringify(entry));
+			const expectedKeys = [
+				'type', 'reasoning_text', 'reasoning_text_compressed', 'compressed',
+				'external', 'blob_path', 'reasoning_token_count', 'reasoning_model', 'created_at',
+			];
+			for (const key of expectedKeys) {
+				expect(json).toHaveProperty(key);
+			}
+			expect(Object.keys(json)).toHaveLength(9);
+		});
+
+		it('should always include all 9 fields in serialized JSON (compressed)', () => {
+			const largeText = 'F'.repeat(11000);
+			const { entry } = createReasoningEntry({ reasoningText: largeText });
+
+			const json = JSON.parse(JSON.stringify(entry));
+			const expectedKeys = [
+				'type', 'reasoning_text', 'reasoning_text_compressed', 'compressed',
+				'external', 'blob_path', 'reasoning_token_count', 'reasoning_model', 'created_at',
+			];
+			for (const key of expectedKeys) {
+				expect(json).toHaveProperty(key);
+			}
+			expect(Object.keys(json)).toHaveLength(9);
 		});
 	});
 
@@ -396,14 +461,14 @@ describe('vibes-annotations', () => {
 			expect(entry.external).toBe(true);
 		});
 
-		it('should omit reasoning_text for external entries', () => {
+		it('should set reasoning_text fields to null for external entries', () => {
 			const { entry } = createExternalReasoningEntry({
 				blobPath: 'blobs/ghi789.blob',
 			});
 
-			expect(entry.reasoning_text).toBeUndefined();
-			expect(entry.reasoning_text_compressed).toBeUndefined();
-			expect(entry.compressed).toBeUndefined();
+			expect(entry.reasoning_text).toBeNull();
+			expect(entry.reasoning_text_compressed).toBeNull();
+			expect(entry.compressed).toBeNull();
 		});
 
 		it('should include optional tokenCount', () => {
@@ -429,6 +494,22 @@ describe('vibes-annotations', () => {
 			const { hash: hash2 } = createExternalReasoningEntry({ blobPath: 'blobs/b.blob' });
 
 			expect(hash1).not.toBe(hash2);
+		});
+
+		it('should always include all 9 fields in serialized JSON', () => {
+			const { entry } = createExternalReasoningEntry({
+				blobPath: 'blobs/schema-test.blob',
+			});
+
+			const json = JSON.parse(JSON.stringify(entry));
+			const expectedKeys = [
+				'type', 'reasoning_text', 'reasoning_text_compressed', 'compressed',
+				'external', 'blob_path', 'reasoning_token_count', 'reasoning_model', 'created_at',
+			];
+			for (const key of expectedKeys) {
+				expect(json).toHaveProperty(key);
+			}
+			expect(Object.keys(json)).toHaveLength(9);
 		});
 	});
 

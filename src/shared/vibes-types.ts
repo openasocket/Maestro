@@ -75,8 +75,8 @@ export interface VibesEnvironmentEntry {
 	tool_version: string;
 	model_name: string;
 	model_version: string;
-	model_parameters?: Record<string, unknown>;
-	tool_extensions?: string[];
+	model_parameters: Record<string, unknown> | null;
+	tool_extensions: string[] | null;
 	created_at: string;
 }
 
@@ -95,21 +95,21 @@ export interface VibesCommandEntry {
 export interface VibesPromptEntry {
 	type: 'prompt';
 	prompt_text: string;
-	prompt_type?: VibesPromptType;
-	prompt_context_files?: string[];
+	prompt_type: VibesPromptType | null;
+	prompt_context_files: string[] | null;
 	created_at: string;
 }
 
 /** Records reasoning / chain-of-thought output from the model. */
 export interface VibesReasoningEntry {
 	type: 'reasoning';
-	reasoning_text?: string;
-	reasoning_text_compressed?: string;
-	compressed?: boolean;
-	external?: boolean;
-	blob_path?: string;
-	reasoning_token_count?: number;
-	reasoning_model?: string;
+	reasoning_text: string | null;
+	reasoning_text_compressed: string | null;
+	compressed: boolean | null;
+	external: boolean | null;
+	blob_path: string | null;
+	reasoning_token_count: number | null;
+	reasoning_model: string | null;
 	created_at: string;
 }
 

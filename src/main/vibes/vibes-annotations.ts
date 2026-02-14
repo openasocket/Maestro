@@ -40,15 +40,10 @@ export function createEnvironmentEntry(params: {
 		tool_version: params.toolVersion,
 		model_name: params.modelName,
 		model_version: params.modelVersion,
+		model_parameters: params.modelParameters ?? null,
+		tool_extensions: params.toolExtensions ?? null,
 		created_at: new Date().toISOString(),
 	};
-
-	if (params.modelParameters !== undefined) {
-		entry.model_parameters = params.modelParameters;
-	}
-	if (params.toolExtensions !== undefined) {
-		entry.tool_extensions = params.toolExtensions;
-	}
 
 	const hash = computeVibesHash(entry as unknown as Record<string, unknown>);
 	return { entry, hash };
@@ -100,15 +95,10 @@ export function createPromptEntry(params: {
 	const entry: VibesPromptEntry = {
 		type: 'prompt',
 		prompt_text: params.promptText,
+		prompt_type: params.promptType ?? null,
+		prompt_context_files: params.contextFiles ?? null,
 		created_at: new Date().toISOString(),
 	};
-
-	if (params.promptType !== undefined) {
-		entry.prompt_type = params.promptType;
-	}
-	if (params.contextFiles !== undefined) {
-		entry.prompt_context_files = params.contextFiles;
-	}
 
 	const hash = computeVibesHash(entry as unknown as Record<string, unknown>);
 	return { entry, hash };
@@ -137,25 +127,29 @@ export function createReasoningEntry(params: {
 	const compressThreshold = params.compressThresholdBytes ?? 10240;
 	const textBytes = Buffer.byteLength(params.reasoningText, 'utf8');
 
-	const entry: VibesReasoningEntry = {
-		type: 'reasoning',
-		created_at: new Date().toISOString(),
-	};
+	let reasoningText: string | null = null;
+	let reasoningTextCompressed: string | null = null;
+	let compressedFlag: boolean | null = null;
 
 	if (textBytes > compressThreshold) {
-		const compressed = gzipSync(Buffer.from(params.reasoningText, 'utf8'));
-		entry.reasoning_text_compressed = compressed.toString('base64');
-		entry.compressed = true;
+		const compressedBuf = gzipSync(Buffer.from(params.reasoningText, 'utf8'));
+		reasoningTextCompressed = compressedBuf.toString('base64');
+		compressedFlag = true;
 	} else {
-		entry.reasoning_text = params.reasoningText;
+		reasoningText = params.reasoningText;
 	}
 
-	if (params.tokenCount !== undefined) {
-		entry.reasoning_token_count = params.tokenCount;
-	}
-	if (params.model !== undefined) {
-		entry.reasoning_model = params.model;
-	}
+	const entry: VibesReasoningEntry = {
+		type: 'reasoning',
+		reasoning_text: reasoningText,
+		reasoning_text_compressed: reasoningTextCompressed,
+		compressed: compressedFlag,
+		external: null,
+		blob_path: null,
+		reasoning_token_count: params.tokenCount ?? null,
+		reasoning_model: params.model ?? null,
+		created_at: new Date().toISOString(),
+	};
 
 	const hash = computeVibesHash(entry as unknown as Record<string, unknown>);
 	return { entry, hash };
@@ -176,17 +170,15 @@ export function createExternalReasoningEntry(params: {
 }): { entry: VibesReasoningEntry; hash: string } {
 	const entry: VibesReasoningEntry = {
 		type: 'reasoning',
+		reasoning_text: null,
+		reasoning_text_compressed: null,
+		compressed: null,
 		external: true,
 		blob_path: params.blobPath,
+		reasoning_token_count: params.tokenCount ?? null,
+		reasoning_model: params.model ?? null,
 		created_at: new Date().toISOString(),
 	};
-
-	if (params.tokenCount !== undefined) {
-		entry.reasoning_token_count = params.tokenCount;
-	}
-	if (params.model !== undefined) {
-		entry.reasoning_model = params.model;
-	}
 
 	const hash = computeVibesHash(entry as unknown as Record<string, unknown>);
 	return { entry, hash };

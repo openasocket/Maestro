@@ -160,7 +160,7 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 
 			{/* Resolved Reasoning */}
 			{annotation.reasoning_hash && (
-				<Section theme={theme} icon={<Brain className="w-3 h-3" />} label="Reasoning" copyText={reasoning?.reasoning_text}>
+				<Section theme={theme} icon={<Brain className="w-3 h-3" />} label="Reasoning" copyText={reasoning?.reasoning_text ?? undefined}>
 					{reasoning ? (
 						<>
 							{reasoning.compressed && (
@@ -169,7 +169,7 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 							{reasoning.reasoning_text && (
 								<DataRow theme={theme} label="Text" value={reasoning.reasoning_text} mono />
 							)}
-							{reasoning.reasoning_token_count !== undefined && (
+							{reasoning.reasoning_token_count !== null && (
 								<DataRow theme={theme} label="Tokens" value={String(reasoning.reasoning_token_count)} />
 							)}
 						</>

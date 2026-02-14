@@ -127,10 +127,10 @@ describe('vibes-reasoning-storage', () => {
 			const entry = reasoningEntries[0];
 
 			expect(entry.reasoning_text).toBe(text);
-			expect(entry.reasoning_text_compressed).toBeUndefined();
-			expect(entry.compressed).toBeUndefined();
-			expect(entry.external).toBeUndefined();
-			expect(entry.blob_path).toBeUndefined();
+			expect(entry.reasoning_text_compressed).toBeNull();
+			expect(entry.compressed).toBeNull();
+			expect(entry.external).toBeNull();
+			expect(entry.blob_path).toBeNull();
 		});
 
 		it('should not create any blob files for small reasoning', async () => {
@@ -163,11 +163,11 @@ describe('vibes-reasoning-storage', () => {
 			expect(reasoningEntries).toHaveLength(1);
 			const entry = reasoningEntries[0];
 
-			expect(entry.reasoning_text).toBeUndefined();
+			expect(entry.reasoning_text).toBeNull();
 			expect(entry.reasoning_text_compressed).toBeDefined();
 			expect(entry.compressed).toBe(true);
-			expect(entry.external).toBeUndefined();
-			expect(entry.blob_path).toBeUndefined();
+			expect(entry.external).toBeNull();
+			expect(entry.blob_path).toBeNull();
 		});
 
 		it('should recover original text by base64-decoding and gunzipping', async () => {
@@ -214,9 +214,9 @@ describe('vibes-reasoning-storage', () => {
 			expect(entry.external).toBe(true);
 			expect(entry.blob_path).toBeDefined();
 			expect(entry.blob_path).toMatch(/^blobs\/[a-f0-9]+\.blob$/);
-			expect(entry.reasoning_text).toBeUndefined();
-			expect(entry.reasoning_text_compressed).toBeUndefined();
-			expect(entry.compressed).toBeUndefined();
+			expect(entry.reasoning_text).toBeNull();
+			expect(entry.reasoning_text_compressed).toBeNull();
+			expect(entry.compressed).toBeNull();
 		});
 
 		it('should write the blob file to .ai-audit/blobs/', async () => {
@@ -231,13 +231,13 @@ describe('vibes-reasoning-storage', () => {
 			expect(blobContent).toBe(text);
 		});
 
-		it('should NOT set reasoning_text or reasoning_text_compressed on the manifest entry', async () => {
+		it('should set reasoning_text and reasoning_text_compressed to null on the manifest entry', async () => {
 			const text = 'X'.repeat(LARGE_TEXT_SIZE);
 			const { reasoningEntries } = await runReasoningPipeline(text);
 
 			const entry = reasoningEntries[0];
-			expect(entry.reasoning_text).toBeUndefined();
-			expect(entry.reasoning_text_compressed).toBeUndefined();
+			expect(entry.reasoning_text).toBeNull();
+			expect(entry.reasoning_text_compressed).toBeNull();
 		});
 	});
 
