@@ -366,6 +366,96 @@ describe('VibesDashboard', () => {
 	});
 
 	// ========================================================================
+	// Timeline Range Toggle
+	// ========================================================================
+
+	it('renders timeline range toggle buttons with 30d active by default', () => {
+		const now = Date.now();
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData({
+					annotations: [
+						{ type: 'line', file_path: 'a.ts', line_start: 1, line_end: 5, environment_hash: 'h1', action: 'create', timestamp: new Date(now).toISOString(), assurance_level: 'medium' },
+					],
+				})}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>,
+		);
+
+		// All four range buttons should be present
+		expect(screen.getByText('30d')).toBeTruthy();
+		expect(screen.getByText('14d')).toBeTruthy();
+		expect(screen.getByText('7d')).toBeTruthy();
+		expect(screen.getByText('1d')).toBeTruthy();
+
+		// 30d should be the active (full opacity) button by default
+		const btn30 = screen.getByText('30d');
+		expect(btn30.style.opacity).toBe('1');
+	});
+
+	it('switches timeline range when toggle button is clicked', () => {
+		const now = Date.now();
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData({
+					annotations: [
+						{ type: 'line', file_path: 'a.ts', line_start: 1, line_end: 5, environment_hash: 'h1', action: 'create', timestamp: new Date(now).toISOString(), assurance_level: 'medium' },
+					],
+				})}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>,
+		);
+
+		const btn7d = screen.getByText('7d');
+		fireEvent.click(btn7d);
+
+		// After clicking 7d, it should become active
+		expect(btn7d.style.opacity).toBe('1');
+		// And 30d should become inactive
+		expect(screen.getByText('30d').style.opacity).toBe('0.6');
+	});
+
+	it('filters out old annotations when switching to a shorter range', () => {
+		const now = Date.now();
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData({
+					annotations: [
+						// Recent annotation (within 1d)
+						{ type: 'line', file_path: 'recent.ts', line_start: 1, line_end: 5, environment_hash: 'h1', action: 'create', timestamp: new Date(now - 3600_000).toISOString(), assurance_level: 'medium' },
+						// Old annotation (20 days ago — within 30d but outside 7d and 1d)
+						{ type: 'line', file_path: 'old.ts', line_start: 1, line_end: 3, environment_hash: 'h1', action: 'modify', timestamp: new Date(now - 20 * 86400_000).toISOString(), assurance_level: 'medium' },
+					],
+				})}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>,
+		);
+
+		// Default 30d: both annotations should produce bar segments
+		const createBars30d = screen.getAllByTestId('bar-create');
+		const modifyBars30d = screen.getAllByTestId('bar-modify');
+		expect(createBars30d.length).toBe(1);
+		expect(modifyBars30d.length).toBe(1);
+
+		// Switch to 1d — old annotation should be filtered out
+		fireEvent.click(screen.getByText('1d'));
+
+		// Only the recent "create" annotation should remain
+		const createBars1d = screen.getAllByTestId('bar-create');
+		expect(createBars1d.length).toBe(1);
+		expect(screen.queryAllByTestId('bar-modify').length).toBe(0);
+	});
+
+	// ========================================================================
 	// Model Contribution Donut
 	// ========================================================================
 
@@ -544,5 +634,82 @@ describe('VibesDashboard', () => {
 		await waitFor(() => {
 			expect(mockSaveFile).toHaveBeenCalled();
 		});
+	});
+
+	// ========================================================================
+	// Assurance Level Switcher
+	// ========================================================================
+
+	it('renders assurance level toggle with all three levels', () => {
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData()}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>,
+		);
+
+		// All three level buttons should be present in the status banner
+		expect(screen.getByTitle('Set assurance level to Low')).toBeTruthy();
+		expect(screen.getByTitle('Set assurance level to Medium')).toBeTruthy();
+		expect(screen.getByTitle('Set assurance level to High')).toBeTruthy();
+	});
+
+	it('highlights the active assurance level', () => {
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData()}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>,
+		);
+
+		const mediumBtn = screen.getByTitle('Set assurance level to Medium');
+		const lowBtn = screen.getByTitle('Set assurance level to Low');
+
+		// Active button should have full opacity, inactive should be dimmed
+		expect(mediumBtn.style.opacity).toBe('1');
+		expect(lowBtn.style.opacity).toBe('0.6');
+	});
+
+	it('calls onAssuranceLevelChange when a level button is clicked', () => {
+		const handleChange = vi.fn();
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData()}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+				onAssuranceLevelChange={handleChange}
+			/>,
+		);
+
+		fireEvent.click(screen.getByTitle('Set assurance level to High'));
+		expect(handleChange).toHaveBeenCalledWith('high');
+
+		fireEvent.click(screen.getByTitle('Set assurance level to Low'));
+		expect(handleChange).toHaveBeenCalledWith('low');
+	});
+
+	it('does not crash when onAssuranceLevelChange is not provided', () => {
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData()}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>,
+		);
+
+		// Should not throw when clicking without handler
+		expect(() => {
+			fireEvent.click(screen.getByTitle('Set assurance level to High'));
+		}).not.toThrow();
 	});
 });

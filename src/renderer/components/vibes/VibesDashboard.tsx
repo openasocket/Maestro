@@ -55,34 +55,48 @@ const ASSURANCE_BAR_COLORS: Record<VibesAssuranceLevel, string> = {
 	high: '#6366f1',
 };
 
+/** Available time range options for the activity timeline. */
+const TIMELINE_RANGES = [
+	{ days: 30, label: '30d' },
+	{ days: 14, label: '14d' },
+	{ days: 7, label: '7d' },
+	{ days: 1, label: '1d' },
+] as const;
+
+type TimelineRangeDays = (typeof TIMELINE_RANGES)[number]['days'];
+
 /** Group annotations into time buckets for the activity timeline. */
-function buildTimeline(annotations: VibesAnnotation[]): {
+function buildTimeline(
+	annotations: VibesAnnotation[],
+	rangeDays: TimelineRangeDays,
+): {
 	buckets: { label: string; counts: Record<VibesAction, number>; total: number }[];
 	maxCount: number;
 } {
+	const now = Date.now();
+	const cutoff = now - rangeDays * 86400_000;
+
 	const lineAnnotations = annotations.filter(
 		(a): a is Extract<VibesAnnotation, { action: VibesAction }> =>
-			a.type === 'line' || a.type === 'function',
+			(a.type === 'line' || a.type === 'function') &&
+			new Date(a.timestamp).getTime() >= cutoff,
 	);
 
 	if (lineAnnotations.length === 0) return { buckets: [], maxCount: 0 };
 
-	const timestamps = lineAnnotations.map((a) => new Date(a.timestamp).getTime()).sort((a, b) => a - b);
-	const span = timestamps[timestamps.length - 1] - timestamps[0];
-
 	let bucketSize: number;
 	let formatLabel: (d: Date) => string;
 
-	if (span < 3600_000) {
-		// < 1 hour: bucket by minute
-		bucketSize = 60_000;
-		formatLabel = (d) => `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
-	} else if (span < 86400_000) {
-		// < 1 day: bucket by hour
+	if (rangeDays === 1) {
+		// 1-day view: always bucket by hour (24 buckets max)
 		bucketSize = 3600_000;
 		formatLabel = (d) => `${d.getHours()}:00`;
+	} else if (rangeDays <= 7) {
+		// 7-day view: bucket by 6-hour blocks for more resolution
+		bucketSize = 6 * 3600_000;
+		formatLabel = (d) => `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:00`;
 	} else {
-		// > 1 day: bucket by day
+		// 14d / 30d: bucket by day
 		bucketSize = 86400_000;
 		formatLabel = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
 	}
@@ -130,12 +144,13 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 	const [initProjectName, setInitProjectName] = useState('');
 	const [isInitializing, setIsInitializing] = useState(false);
 	const [actionStatus, setActionStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+	const [timelineRange, setTimelineRange] = useState<TimelineRangeDays>(30);
 
 	// ========================================================================
 	// Computed visualizations
 	// ========================================================================
 
-	const timeline = useMemo(() => buildTimeline(vibesData.annotations), [vibesData.annotations]);
+	const timeline = useMemo(() => buildTimeline(vibesData.annotations, timelineRange), [vibesData.annotations, timelineRange]);
 
 	const assuranceDist = useMemo(() => {
 		const dist = { low: 0, medium: 0, high: 0 };
@@ -470,9 +485,27 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 			{/* Activity Timeline */}
 			{!isLoading && isInitialized && (
 				<div className="flex flex-col gap-1.5" data-testid="activity-timeline">
-					<span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: theme.colors.textDim }}>
-						Activity Timeline
-					</span>
+					<div className="flex items-center justify-between">
+						<span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: theme.colors.textDim }}>
+							Activity Timeline
+						</span>
+						<div className="flex items-center gap-0.5">
+							{TIMELINE_RANGES.map((range) => (
+								<button
+									key={range.days}
+									onClick={() => setTimelineRange(range.days)}
+									className="px-1.5 py-0.5 rounded text-[9px] font-medium transition-colors"
+									style={{
+										backgroundColor: timelineRange === range.days ? theme.colors.accent + '22' : 'transparent',
+										color: timelineRange === range.days ? theme.colors.accent : theme.colors.textDim,
+										opacity: timelineRange === range.days ? 1 : 0.6,
+									}}
+								>
+									{range.label}
+								</button>
+							))}
+						</div>
+					</div>
 					{timeline.buckets.length > 0 ? (
 						<div className="flex items-end gap-px" style={{ height: 100 }}>
 							{timeline.buckets.map((bucket, i) => (

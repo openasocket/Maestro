@@ -57,7 +57,7 @@ export interface UseVibesDataReturn {
 	isInitialized: boolean;
 	/** Parsed coverage statistics, null until loaded. */
 	stats: VibesStatsData | null;
-	/** Recent annotations (limited to last 100). */
+	/** Recent annotations (limited to last 500). */
 	annotations: VibesAnnotation[];
 	/** Session list for this project. */
 	sessions: VibesSessionInfo[];
@@ -78,7 +78,7 @@ export interface UseVibesDataReturn {
 // ============================================================================
 
 const REFRESH_INTERVAL_MS = 10_000;
-const ANNOTATION_LIMIT = 100;
+const ANNOTATION_LIMIT = 500;
 
 // ============================================================================
 // Parsing helpers
