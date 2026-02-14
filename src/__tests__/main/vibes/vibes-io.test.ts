@@ -99,7 +99,9 @@ const SAMPLE_SESSION_RECORD: VibesSessionRecord = {
 	event: 'start',
 	session_id: 'session-001',
 	timestamp: '2026-02-10T12:00:00Z',
+	environment_hash: null,
 	assurance_level: 'medium',
+	description: null,
 };
 
 const SAMPLE_ENVIRONMENT_ENTRY: VibesEnvironmentEntry = {
@@ -1394,7 +1396,8 @@ describe('vibes-io', () => {
 			};
 			const sessionStart: VibesSessionRecord = {
 				type: 'session', event: 'start', session_id: 'sess-1',
-				timestamp: '2026-02-10T12:00:00Z', assurance_level: 'high',
+				timestamp: '2026-02-10T12:00:00Z', environment_hash: null,
+				assurance_level: 'high', description: null,
 			};
 			await appendAnnotationImmediate(tmpDir, sessionStart);
 			await appendAnnotationImmediate(tmpDir, lineA);
@@ -1421,11 +1424,13 @@ describe('vibes-io', () => {
 			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
 			const start: VibesSessionRecord = {
 				type: 'session', event: 'start', session_id: 'sess-x',
-				timestamp: '2026-02-10T12:00:00Z',
+				timestamp: '2026-02-10T12:00:00Z', environment_hash: null,
+				assurance_level: null, description: null,
 			};
 			const end: VibesSessionRecord = {
 				type: 'session', event: 'end', session_id: 'sess-x',
-				timestamp: '2026-02-10T13:00:00Z',
+				timestamp: '2026-02-10T13:00:00Z', environment_hash: null,
+				assurance_level: null, description: null,
 			};
 			await appendAnnotationImmediate(tmpDir, start);
 			await appendAnnotationImmediate(tmpDir, end);
@@ -1443,14 +1448,16 @@ describe('vibes-io', () => {
 			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
 			const start: VibesSessionRecord = {
 				type: 'session', event: 'start', session_id: 'sess-1',
-				timestamp: '2026-02-10T12:00:00Z', description: 'claude-code',
+				timestamp: '2026-02-10T12:00:00Z', environment_hash: null,
+				assurance_level: null, description: 'claude-code',
 			};
 			const line: VibesLineAnnotation = {
 				...SAMPLE_LINE_ANNOTATION, session_id: 'sess-1',
 			};
 			const end: VibesSessionRecord = {
 				type: 'session', event: 'end', session_id: 'sess-1',
-				timestamp: '2026-02-10T13:00:00Z',
+				timestamp: '2026-02-10T13:00:00Z', environment_hash: null,
+				assurance_level: null, description: null,
 			};
 			await appendAnnotationImmediate(tmpDir, start);
 			await appendAnnotationImmediate(tmpDir, line);

@@ -72,6 +72,7 @@ const mockSessionStart: VibesAnnotation = {
 	event: 'start',
 	session_id: 'session-001',
 	timestamp: new Date(Date.now() - 7_200_000).toISOString(), // 2h ago
+	environment_hash: null,
 	description: 'Auto Run started',
 	assurance_level: 'medium',
 };
@@ -81,6 +82,9 @@ const mockSessionEnd: VibesAnnotation = {
 	event: 'end',
 	session_id: 'session-001',
 	timestamp: new Date(Date.now() - 60_000).toISOString(), // 1 min ago
+	environment_hash: null,
+	assurance_level: null,
+	description: null,
 };
 
 const mockDeleteAnnotation: VibesAnnotation = {

@@ -111,12 +111,12 @@ describe('vibes-session', () => {
 			expect(record.environment_hash).toBe(envHash);
 		});
 
-		it('should omit environment_hash from session start annotation when not provided', async () => {
+		it('should set environment_hash to null in session start annotation when not provided', async () => {
 			await manager.startSession('sess-no-env', tmpDir, 'claude-code', 'medium');
 
 			const annotations = await readAnnotations(tmpDir);
 			const record = annotations[0] as VibesSessionRecord;
-			expect(record.environment_hash).toBeUndefined();
+			expect(record.environment_hash).toBeNull();
 		});
 	});
 

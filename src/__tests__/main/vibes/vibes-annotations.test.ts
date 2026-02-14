@@ -644,9 +644,9 @@ describe('vibes-annotations', () => {
 			expect(record.event).toBe('start');
 			expect(record.session_id).toBe('session-abc-123');
 			expect(record.timestamp).toBe(FIXED_ISO);
-			expect(record.environment_hash).toBeUndefined();
-			expect(record.assurance_level).toBeUndefined();
-			expect(record.description).toBeUndefined();
+			expect(record.environment_hash).toBeNull();
+			expect(record.assurance_level).toBeNull();
+			expect(record.description).toBeNull();
 		});
 
 		it('should create a valid session end record', () => {
@@ -700,6 +700,23 @@ describe('vibes-annotations', () => {
 			expect(record.environment_hash).toBe('e'.repeat(64));
 			expect(record.assurance_level).toBe('medium');
 			expect(record.description).toBe('Full session record');
+		});
+
+		it('should always include all 7 fields in serialized JSON', () => {
+			const record = createSessionRecord({
+				event: 'start',
+				sessionId: 'session-schema',
+			});
+
+			const json = JSON.parse(JSON.stringify(record));
+			const expectedKeys = [
+				'type', 'event', 'session_id', 'timestamp',
+				'environment_hash', 'assurance_level', 'description',
+			];
+			for (const key of expectedKeys) {
+				expect(json).toHaveProperty(key);
+			}
+			expect(Object.keys(json)).toHaveLength(7);
 		});
 	});
 

@@ -293,26 +293,17 @@ export function createFunctionAnnotation(params: {
 export function createSessionRecord(params: {
 	event: 'start' | 'end';
 	sessionId: string;
-	environmentHash?: string;
-	assuranceLevel?: VibesAssuranceLevel;
-	description?: string;
+	environmentHash?: string | null;
+	assuranceLevel?: VibesAssuranceLevel | null;
+	description?: string | null;
 }): VibesSessionRecord {
-	const record: VibesSessionRecord = {
+	return {
 		type: 'session',
 		event: params.event,
 		session_id: params.sessionId,
 		timestamp: new Date().toISOString(),
+		environment_hash: params.environmentHash ?? null,
+		assurance_level: params.assuranceLevel ?? null,
+		description: params.description ?? null,
 	};
-
-	if (params.environmentHash !== undefined) {
-		record.environment_hash = params.environmentHash;
-	}
-	if (params.assuranceLevel !== undefined) {
-		record.assurance_level = params.assuranceLevel;
-	}
-	if (params.description !== undefined) {
-		record.description = params.description;
-	}
-
-	return record;
 }

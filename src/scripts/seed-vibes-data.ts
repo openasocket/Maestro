@@ -309,6 +309,8 @@ async function main() {
 			session_id: sessions[i].id,
 			timestamp: i === 0 ? '2026-02-10T12:00:00Z' : '2026-02-11T09:00:00Z',
 			environment_hash: envHashes[i],
+			assurance_level: 'high',
+			description: `${sessions[i].description} ended`,
 		};
 		await appendAnnotationImmediate(PROJECT_PATH, endRecord);
 	}

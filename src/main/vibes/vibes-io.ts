@@ -915,7 +915,7 @@ export async function extractSessionsFromAnnotations(projectPath: string): Promi
 				session_id: a.session_id,
 				event: a.event,
 				timestamp: a.timestamp,
-				agent_type: a.description,
+				agent_type: a.description ?? undefined,
 				annotation_count: sessionCounts.get(a.session_id) ?? 0,
 			});
 		}

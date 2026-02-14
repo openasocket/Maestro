@@ -129,7 +129,7 @@ export class VibesSessionManager {
 		const endRecord = createSessionRecord({
 			event: 'end',
 			sessionId: state.vibesSessionId,
-			environmentHash: state.environmentHash ?? undefined,
+			environmentHash: state.environmentHash,
 			assuranceLevel: state.assuranceLevel,
 			description: `${state.agentType} agent session ended`,
 		});

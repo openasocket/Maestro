@@ -157,9 +157,9 @@ export interface VibesSessionRecord {
 	event: 'start' | 'end';
 	session_id: string;
 	timestamp: string;
-	environment_hash?: string;
-	assurance_level?: VibesAssuranceLevel;
-	description?: string;
+	environment_hash: string | null;
+	assurance_level: VibesAssuranceLevel | null;
+	description: string | null;
 }
 
 /** Union of all annotation types written to .ai-audit/annotations.jsonl. */
