@@ -49,8 +49,10 @@ const mockLineAnnotation: VibesAnnotation = {
 	environment_hash: 'env-abc123',
 	command_hash: 'cmd-def456',
 	prompt_hash: 'prm-ghi789',
+	reasoning_hash: null,
 	action: 'create',
 	timestamp: new Date(Date.now() - 120_000).toISOString(), // 2 min ago
+	commit_hash: null,
 	session_id: 'session-001',
 	assurance_level: 'medium',
 };
@@ -93,8 +95,13 @@ const mockDeleteAnnotation: VibesAnnotation = {
 	line_start: 1,
 	line_end: 50,
 	environment_hash: 'env-del000',
+	command_hash: null,
+	prompt_hash: null,
+	reasoning_hash: null,
 	action: 'delete',
 	timestamp: new Date(Date.now() - 300_000).toISOString(), // 5 min ago
+	commit_hash: null,
+	session_id: null,
 	assurance_level: 'low',
 };
 
@@ -448,7 +455,7 @@ describe('VibesAnnotationLog', () => {
 		expect(screen.getByText(/1 skipped/)).toBeTruthy();
 	});
 
-	it('rejects line annotations missing environment_hash', () => {
+	it('accepts line annotations missing environment_hash (CLI summary format)', () => {
 		const missingHash = {
 			type: 'line',
 			file_path: 'src/foo.ts',
@@ -457,7 +464,7 @@ describe('VibesAnnotationLog', () => {
 			action: 'create',
 			timestamp: new Date().toISOString(),
 			assurance_level: 'medium',
-			// no environment_hash
+			// no environment_hash — this is normal for vibecheck CLI JSON output
 		} as unknown as VibesAnnotation;
 
 		render(
@@ -468,7 +475,10 @@ describe('VibesAnnotationLog', () => {
 			/>,
 		);
 
-		expect(screen.getByText(/1 annotation skipped due to malformed data/)).toBeTruthy();
+		// Should render the annotation, not skip it
+		expect(screen.queryByText(/skipped due to malformed data/)).toBeNull();
+		expect(screen.getByText(/src\/foo\.ts/)).toBeTruthy();
+		expect(screen.getByText('1 of 1 annotations')).toBeTruthy();
 	});
 
 	it('rejects line annotations missing timestamp', () => {

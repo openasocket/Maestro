@@ -53,16 +53,19 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 		}
 	}, []);
 
-	// Guard: bail out if critical annotation fields are missing at runtime
-	if (!annotation.environment_hash || !annotation.timestamp) {
+	// Guard: bail out if timestamp is missing (minimum required field)
+	if (!annotation.timestamp) {
 		return (
 			<div className="px-4 py-3 text-xs" style={{ color: theme.colors.textDim }}>
-				Annotation data is incomplete — missing required fields.
+				Annotation data is incomplete — missing timestamp.
 			</div>
 		);
 	}
 
-	const env = manifest?.entries[annotation.environment_hash] as VibesEnvironmentEntry | undefined;
+	// environment_hash may be absent when data comes from vibecheck CLI JSON output
+	const env = annotation.environment_hash
+		? (manifest?.entries[annotation.environment_hash] as VibesEnvironmentEntry | undefined)
+		: undefined;
 	const cmd = annotation.command_hash
 		? (manifest?.entries[annotation.command_hash] as VibesCommandEntry | undefined)
 		: undefined;
@@ -109,10 +112,14 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 					<>
 						<DataRow theme={theme} label="Tool" value={env.tool_name ? `${env.tool_name} ${env.tool_version ?? ''}`.trim() : undefined} />
 						<DataRow theme={theme} label="Model" value={env.model_name ? `${env.model_name} ${env.model_version ?? ''}`.trim() : undefined} />
-						<HashRow theme={theme} label="Hash" value={annotation.environment_hash} onCopy={handleCopy} copiedField={copiedField} />
+						{annotation.environment_hash && (
+							<HashRow theme={theme} label="Hash" value={annotation.environment_hash} onCopy={handleCopy} copiedField={copiedField} />
+						)}
 					</>
-				) : (
+				) : annotation.environment_hash ? (
 					<HashRow theme={theme} label="Hash" value={annotation.environment_hash} onCopy={handleCopy} copiedField={copiedField} />
+				) : (
+					<DataRow theme={theme} label="Status" value="Not available (CLI summary view)" />
 				)}
 				{annotation.session_id && (
 					<DataRow theme={theme} label="Session" value={annotation.session_id.slice(0, 12)} mono />

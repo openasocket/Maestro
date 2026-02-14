@@ -44,8 +44,10 @@ const validAnnotation: Exclude<VibesAnnotation, { type: 'session' }> = {
 	environment_hash: 'abc123def456ghi789jkl012',
 	command_hash: 'cmd-def456',
 	prompt_hash: 'prm-ghi789',
+	reasoning_hash: null,
 	action: 'create',
 	timestamp: new Date().toISOString(),
+	commit_hash: null,
 	session_id: 'session-001',
 	assurance_level: 'medium',
 };
@@ -66,8 +68,8 @@ describe('VibesAnnotationDetail', () => {
 		expect(screen.getByText('Provenance Details')).toBeTruthy();
 	});
 
-	it('renders incomplete data message when environment_hash is missing', () => {
-		const incomplete = {
+	it('renders detail panel with CLI summary message when environment_hash is missing', () => {
+		const cliAnnotation = {
 			...validAnnotation,
 			environment_hash: undefined,
 		} as unknown as Exclude<VibesAnnotation, { type: 'session' }>;
@@ -75,15 +77,17 @@ describe('VibesAnnotationDetail', () => {
 		render(
 			<VibesAnnotationDetail
 				theme={mockTheme}
-				annotation={incomplete}
+				annotation={cliAnnotation}
 				manifest={null}
 				isLoadingManifest={false}
 				onClose={vi.fn()}
 			/>,
 		);
 
-		expect(screen.getByText(/Annotation data is incomplete/)).toBeTruthy();
-		expect(screen.queryByTestId('annotation-detail-panel')).toBeNull();
+		// Should render the detail panel (not bail out)
+		expect(screen.getByTestId('annotation-detail-panel')).toBeTruthy();
+		// Should show CLI summary status instead of environment data
+		expect(screen.getByText('Not available (CLI summary view)')).toBeTruthy();
 	});
 
 	it('renders incomplete data message when timestamp is missing', () => {

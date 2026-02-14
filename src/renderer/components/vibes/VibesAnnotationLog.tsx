@@ -105,9 +105,10 @@ function isValidAnnotation(annotation: VibesAnnotation): boolean {
 		return typeof annotation.session_id === 'string' && typeof annotation.event === 'string';
 	}
 	if (annotation.type === 'line' || annotation.type === 'function') {
-		// Validate all fields that VibesAnnotationDetail and AnnotationRow access directly
+		// Validate fields that AnnotationRow accesses directly.
+		// Note: environment_hash is NOT required here because the vibecheck CLI
+		// JSON output omits it — it's only present in raw annotations.jsonl data.
 		if (typeof annotation.file_path !== 'string') return false;
-		if (typeof annotation.environment_hash !== 'string') return false;
 		if (typeof annotation.timestamp !== 'string') return false;
 		if (typeof annotation.assurance_level !== 'string') return false;
 		return true;
