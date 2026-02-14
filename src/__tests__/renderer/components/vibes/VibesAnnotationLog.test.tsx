@@ -444,6 +444,75 @@ describe('VibesAnnotationLog', () => {
 		expect(screen.getByText(/1 skipped/)).toBeTruthy();
 	});
 
+	it('rejects line annotations missing environment_hash', () => {
+		const missingHash = {
+			type: 'line',
+			file_path: 'src/foo.ts',
+			line_start: 1,
+			line_end: 5,
+			action: 'create',
+			timestamp: new Date().toISOString(),
+			assurance_level: 'medium',
+			// no environment_hash
+		} as unknown as VibesAnnotation;
+
+		render(
+			<VibesAnnotationLog
+				theme={mockTheme}
+				annotations={[missingHash]}
+				isLoading={false}
+			/>,
+		);
+
+		expect(screen.getByText(/1 annotation skipped due to malformed data/)).toBeTruthy();
+	});
+
+	it('rejects line annotations missing timestamp', () => {
+		const missingTimestamp = {
+			type: 'line',
+			file_path: 'src/foo.ts',
+			line_start: 1,
+			line_end: 5,
+			action: 'create',
+			environment_hash: 'env-abc',
+			assurance_level: 'medium',
+			// no timestamp
+		} as unknown as VibesAnnotation;
+
+		render(
+			<VibesAnnotationLog
+				theme={mockTheme}
+				annotations={[missingTimestamp]}
+				isLoading={false}
+			/>,
+		);
+
+		expect(screen.getByText(/1 annotation skipped due to malformed data/)).toBeTruthy();
+	});
+
+	it('rejects line annotations missing assurance_level', () => {
+		const missingAssurance = {
+			type: 'line',
+			file_path: 'src/foo.ts',
+			line_start: 1,
+			line_end: 5,
+			action: 'create',
+			environment_hash: 'env-abc',
+			timestamp: new Date().toISOString(),
+			// no assurance_level
+		} as unknown as VibesAnnotation;
+
+		render(
+			<VibesAnnotationLog
+				theme={mockTheme}
+				annotations={[missingAssurance]}
+				isLoading={false}
+			/>,
+		);
+
+		expect(screen.getByText(/1 annotation skipped due to malformed data/)).toBeTruthy();
+	});
+
 	// ========================================================================
 	// Skeleton loading state
 	// ========================================================================

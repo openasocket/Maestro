@@ -105,8 +105,12 @@ function isValidAnnotation(annotation: VibesAnnotation): boolean {
 		return typeof annotation.session_id === 'string' && typeof annotation.event === 'string';
 	}
 	if (annotation.type === 'line' || annotation.type === 'function') {
-		// Only require file_path — action can default to 'modify' in rendering
-		return typeof annotation.file_path === 'string';
+		// Validate all fields that VibesAnnotationDetail and AnnotationRow access directly
+		if (typeof annotation.file_path !== 'string') return false;
+		if (typeof annotation.environment_hash !== 'string') return false;
+		if (typeof annotation.timestamp !== 'string') return false;
+		if (typeof annotation.assurance_level !== 'string') return false;
+		return true;
 	}
 	// Accept unknown annotation types if they have a timestamp
 	return !!(annotation as Record<string, unknown>).timestamp;
@@ -668,7 +672,21 @@ const AnnotationRow: React.FC<AnnotationRowProps> = ({
 				</>
 			)}
 			{isExpanded && showDetail && (
-				<ErrorBoundary fallbackComponent={<div className="px-4 py-3 text-xs" style={{ color: theme.colors.error ?? '#ef4444' }}>Failed to load annotation details. Try collapsing and re-expanding.</div>}>
+				<ErrorBoundary
+					key={`detail-${showDetail}`}
+					fallbackComponent={
+						<div className="px-4 py-3 text-xs" style={{ color: theme.colors.error ?? '#ef4444' }}>
+							Failed to load annotation details. This annotation may have incomplete data.
+							<button
+								onClick={() => onViewDetails?.()}
+								className="ml-2 underline"
+								style={{ color: theme.colors.accent }}
+							>
+								Close
+							</button>
+						</div>
+					}
+				>
 					<VibesAnnotationDetail
 						theme={theme}
 						annotation={annotation}

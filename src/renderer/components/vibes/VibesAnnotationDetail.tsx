@@ -53,6 +53,15 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 		}
 	}, []);
 
+	// Guard: bail out if critical annotation fields are missing at runtime
+	if (!annotation.environment_hash || !annotation.timestamp) {
+		return (
+			<div className="px-4 py-3 text-xs" style={{ color: theme.colors.textDim }}>
+				Annotation data is incomplete — missing required fields.
+			</div>
+		);
+	}
+
 	const env = manifest?.entries[annotation.environment_hash] as VibesEnvironmentEntry | undefined;
 	const cmd = annotation.command_hash
 		? (manifest?.entries[annotation.command_hash] as VibesCommandEntry | undefined)
@@ -98,8 +107,8 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 			<Section theme={theme} icon={<Terminal className="w-3 h-3" />} label="Environment">
 				{env ? (
 					<>
-						<DataRow theme={theme} label="Tool" value={`${env.tool_name} ${env.tool_version}`} />
-						<DataRow theme={theme} label="Model" value={`${env.model_name} ${env.model_version}`} />
+						<DataRow theme={theme} label="Tool" value={env.tool_name ? `${env.tool_name} ${env.tool_version ?? ''}`.trim() : undefined} />
+						<DataRow theme={theme} label="Model" value={env.model_name ? `${env.model_name} ${env.model_version ?? ''}`.trim() : undefined} />
 						<HashRow theme={theme} label="Hash" value={annotation.environment_hash} onCopy={handleCopy} copiedField={copiedField} />
 					</>
 				) : (
@@ -306,22 +315,25 @@ const HashRow: React.FC<{
 	value: string;
 	onCopy: (text: string, field: string) => void;
 	copiedField: string | null;
-}> = ({ theme, label, value, onCopy, copiedField }) => (
-	<div className="flex items-center gap-2 text-[11px]">
-		<span className="shrink-0 w-20" style={{ color: theme.colors.textDim }}>{label}:</span>
-		<span className="font-mono truncate" style={{ color: theme.colors.textMain }} title={value}>
-			{value.slice(0, 16)}...
-		</span>
-		<button
-			onClick={() => onCopy(value, `${label}-${value}`)}
-			className="shrink-0 p-0.5 rounded transition-opacity hover:opacity-80"
-			style={{ color: copiedField === `${label}-${value}` ? theme.colors.success : theme.colors.textDim }}
-		>
-			{copiedField === `${label}-${value}` ? (
-				<CheckCircle2 className="w-3 h-3" />
-			) : (
-				<Copy className="w-3 h-3" />
-			)}
-		</button>
-	</div>
-);
+}> = ({ theme, label, value, onCopy, copiedField }) => {
+	if (!value) return null;
+	return (
+		<div className="flex items-center gap-2 text-[11px]">
+			<span className="shrink-0 w-20" style={{ color: theme.colors.textDim }}>{label}:</span>
+			<span className="font-mono truncate" style={{ color: theme.colors.textMain }} title={value}>
+				{value.slice(0, 16)}...
+			</span>
+			<button
+				onClick={() => onCopy(value, `${label}-${value}`)}
+				className="shrink-0 p-0.5 rounded transition-opacity hover:opacity-80"
+				style={{ color: copiedField === `${label}-${value}` ? theme.colors.success : theme.colors.textDim }}
+			>
+				{copiedField === `${label}-${value}` ? (
+					<CheckCircle2 className="w-3 h-3" />
+				) : (
+					<Copy className="w-3 h-3" />
+				)}
+			</button>
+		</div>
+	);
+};
