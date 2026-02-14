@@ -28,6 +28,8 @@ const {
 	mockComputeBlame,
 	mockComputeCoverage,
 	mockReadAnnotations,
+	mockReadVibesConfig,
+	mockWriteVibesConfig,
 } = vi.hoisted(() => ({
 	mockFindBinary: vi.fn(),
 	mockGetVersion: vi.fn(),
@@ -50,6 +52,8 @@ const {
 	mockComputeBlame: vi.fn(),
 	mockComputeCoverage: vi.fn(),
 	mockReadAnnotations: vi.fn(),
+	mockReadVibesConfig: vi.fn(),
+	mockWriteVibesConfig: vi.fn(),
 }));
 
 // Mock electron
@@ -85,6 +89,8 @@ vi.mock('../../../main/vibes/vibes-io', () => ({
 	computeBlameFromAnnotations: mockComputeBlame,
 	computeCoverageFromAnnotations: mockComputeCoverage,
 	readAnnotations: mockReadAnnotations,
+	readVibesConfig: mockReadVibesConfig,
+	writeVibesConfig: mockWriteVibesConfig,
 }));
 
 // Mock logger
@@ -128,8 +134,8 @@ describe('vibes-handlers', () => {
 	});
 
 	describe('handler registration', () => {
-		it('should register all 15 VIBES IPC handlers', () => {
-			expect(mockIpcMainHandle).toHaveBeenCalledTimes(15);
+		it('should register all 16 VIBES IPC handlers', () => {
+			expect(mockIpcMainHandle).toHaveBeenCalledTimes(16);
 		});
 
 		it('should register handlers with correct channel names', () => {
@@ -145,6 +151,7 @@ describe('vibes-handlers', () => {
 				'vibes:getSessions',
 				'vibes:getModels',
 				'vibes:build',
+				'vibes:updateConfig',
 				'vibes:findBinary',
 				'vibes:clearBinaryCache',
 				'vibes:getManifest',
@@ -449,6 +456,82 @@ describe('vibes-handlers', () => {
 			const result = await handlers['vibes:build']({}, '/project');
 
 			expect(result).toEqual({ success: false, error: 'Error: build failed' });
+		});
+	});
+
+	describe('vibes:updateConfig', () => {
+		const existingConfig = {
+			standard: 'VIBES' as const,
+			standard_version: '1.0' as const,
+			assurance_level: 'medium' as const,
+			project_name: 'test-project',
+			tracked_extensions: ['.ts', '.js'],
+			exclude_patterns: ['node_modules'],
+			compress_reasoning_threshold_bytes: 1024,
+			external_blob_threshold_bytes: 4096,
+		};
+
+		it('should merge updates into existing config and write it', async () => {
+			mockReadVibesConfig.mockResolvedValue({ ...existingConfig });
+			mockWriteVibesConfig.mockResolvedValue(undefined);
+
+			const result = await handlers['vibes:updateConfig'](
+				{},
+				'/project',
+				{ assurance_level: 'high' },
+			);
+
+			expect(mockReadVibesConfig).toHaveBeenCalledWith('/project');
+			expect(mockWriteVibesConfig).toHaveBeenCalledWith('/project', {
+				...existingConfig,
+				assurance_level: 'high',
+			});
+			expect(result).toEqual({ success: true });
+		});
+
+		it('should return error when no config exists', async () => {
+			mockReadVibesConfig.mockResolvedValue(null);
+
+			const result = await handlers['vibes:updateConfig'](
+				{},
+				'/project',
+				{ assurance_level: 'high' },
+			);
+
+			expect(result).toEqual({
+				success: false,
+				error: 'No VIBES config found. Initialize VIBES first.',
+			});
+			expect(mockWriteVibesConfig).not.toHaveBeenCalled();
+		});
+
+		it('should return error on exception', async () => {
+			mockReadVibesConfig.mockRejectedValue(new Error('disk error'));
+
+			const result = await handlers['vibes:updateConfig'](
+				{},
+				'/project',
+				{ assurance_level: 'high' },
+			);
+
+			expect(result).toEqual({ success: false, error: 'Error: disk error' });
+		});
+
+		it('should support updating tracked_extensions', async () => {
+			mockReadVibesConfig.mockResolvedValue({ ...existingConfig });
+			mockWriteVibesConfig.mockResolvedValue(undefined);
+
+			const result = await handlers['vibes:updateConfig'](
+				{},
+				'/project',
+				{ tracked_extensions: ['.ts', '.tsx', '.js', '.jsx'] },
+			);
+
+			expect(mockWriteVibesConfig).toHaveBeenCalledWith('/project', {
+				...existingConfig,
+				tracked_extensions: ['.ts', '.tsx', '.js', '.jsx'],
+			});
+			expect(result).toEqual({ success: true });
 		});
 	});
 

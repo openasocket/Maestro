@@ -2618,6 +2618,10 @@ interface MaestroAPI {
 				extensions?: string[];
 			}
 		) => Promise<{ success: boolean; error?: string }>;
+		updateConfig: (
+			projectPath: string,
+			updates: Record<string, unknown>,
+		) => Promise<{ success: boolean; error?: string }>;
 		getStats: (projectPath: string, file?: string) => Promise<{
 			success: boolean;
 			data?: string;

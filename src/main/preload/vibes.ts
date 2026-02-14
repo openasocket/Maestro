@@ -80,6 +80,12 @@ export function createVibesApi() {
 		): Promise<{ success: boolean; error?: string }> =>
 			ipcRenderer.invoke('vibes:init', projectPath, config),
 
+		updateConfig: (
+			projectPath: string,
+			updates: Record<string, unknown>,
+		): Promise<{ success: boolean; error?: string }> =>
+			ipcRenderer.invoke('vibes:updateConfig', projectPath, updates),
+
 		getStats: (projectPath: string, file?: string): Promise<VibesCommandResult> =>
 			ipcRenderer.invoke('vibes:getStats', projectPath, file),
 

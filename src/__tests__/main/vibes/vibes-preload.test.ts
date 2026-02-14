@@ -36,6 +36,7 @@ describe('vibes preload API', () => {
 		it('should return an object with all expected methods', () => {
 			expect(api).toHaveProperty('isInitialized');
 			expect(api).toHaveProperty('init');
+			expect(api).toHaveProperty('updateConfig');
 			expect(api).toHaveProperty('getStats');
 			expect(api).toHaveProperty('getBlame');
 			expect(api).toHaveProperty('getLog');
@@ -50,8 +51,8 @@ describe('vibes preload API', () => {
 			expect(api).toHaveProperty('onAnnotationUpdate');
 		});
 
-		it('should have exactly 15 methods', () => {
-			expect(Object.keys(api)).toHaveLength(15);
+		it('should have exactly 16 methods', () => {
+			expect(Object.keys(api)).toHaveLength(16);
 		});
 	});
 
@@ -79,6 +80,32 @@ describe('vibes preload API', () => {
 
 			expect(mockInvoke).toHaveBeenCalledWith('vibes:init', '/project', config);
 			expect(result).toEqual({ success: true });
+		});
+	});
+
+	describe('updateConfig', () => {
+		it('should invoke vibes:updateConfig with project path and updates', async () => {
+			const updates = { assurance_level: 'high' };
+			mockInvoke.mockResolvedValue({ success: true });
+
+			const result = await api.updateConfig('/project', updates);
+
+			expect(mockInvoke).toHaveBeenCalledWith('vibes:updateConfig', '/project', updates);
+			expect(result).toEqual({ success: true });
+		});
+
+		it('should return error when config not found', async () => {
+			mockInvoke.mockResolvedValue({
+				success: false,
+				error: 'No VIBES config found. Initialize VIBES first.',
+			});
+
+			const result = await api.updateConfig('/project', { assurance_level: 'high' });
+
+			expect(result).toEqual({
+				success: false,
+				error: 'No VIBES config found. Initialize VIBES first.',
+			});
 		});
 	});
 

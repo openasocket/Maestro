@@ -45,6 +45,8 @@ import {
 	computeLocCoverageFromAnnotations,
 	readAnnotations,
 	readVibesManifest,
+	readVibesConfig,
+	writeVibesConfig,
 } from '../../vibes/vibes-io';
 
 const LOG_CONTEXT = '[VIBES]';
@@ -257,6 +259,33 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 			return { success: false, error: String(error) };
 		}
 	});
+
+	// Update per-project VIBES config fields (e.g. assurance_level)
+	ipcMain.handle(
+		'vibes:updateConfig',
+		async (
+			_event,
+			projectPath: string,
+			updates: Partial<{
+				assurance_level: VibesAssuranceLevel;
+				tracked_extensions: string[];
+				exclude_patterns: string[];
+			}>,
+		) => {
+			try {
+				const config = await readVibesConfig(projectPath);
+				if (!config) {
+					return { success: false, error: 'No VIBES config found. Initialize VIBES first.' };
+				}
+				const updated = { ...config, ...updates };
+				await writeVibesConfig(projectPath, updated);
+				return { success: true };
+			} catch (error) {
+				logger.error('updateConfig error', LOG_CONTEXT, { error: String(error) });
+				return { success: false, error: String(error) };
+			}
+		},
+	);
 
 	// Find the vibecheck binary — returns { path, version } or { path: null, version: null }
 	ipcMain.handle('vibes:findBinary', async (_event, customPath?: string) => {
