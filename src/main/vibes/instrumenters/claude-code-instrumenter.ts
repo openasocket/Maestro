@@ -407,6 +407,10 @@ export class ClaudeCodeInstrumenter {
 			const { entry: cmdEntry, hash: cmdHash } = createCommandEntry({
 				commandText,
 				commandType,
+				workingDirectory: session.projectPath ?? null,
+				outputSummary: this.buildOutputSummary(event.toolName, toolInput, session.projectPath),
+				// exitCode: not available from stream-json parser — only CCV hooks
+				// receive tool_response.exit_code. Leave null.
 			});
 			await this.sessionManager.recordManifestEntry(sessionId, cmdHash, cmdEntry);
 
@@ -659,6 +663,42 @@ export class ClaudeCodeInstrumenter {
 			return `${toolName}: ${filePath}`;
 		}
 		return toolName;
+	}
+
+	/**
+	 * Build a human-readable output summary for a command entry.
+	 * Matches CCV's output summary patterns:
+	 * - Edit: "Replaced {N} chars in {file}"
+	 * - MultiEdit: "Applied {N} edits to {file}"
+	 * - Write: "Wrote {N} lines to {file}"
+	 * - Bash: null (stdout not available from stream-json)
+	 * - Read: null
+	 */
+	private buildOutputSummary(toolName: string, input: unknown, projectPath?: string): string | null {
+		if (!input || typeof input !== 'object') return null;
+		const obj = input as Record<string, unknown>;
+
+		if (toolName === 'Edit' || toolName === 'MultiEdit') {
+			const filePath = extractFilePath(input);
+			if (typeof obj.old_string === 'string' && filePath) {
+				return `Replaced ${obj.old_string.length} chars in ${normalizePath(filePath, projectPath)}`;
+			}
+			if (Array.isArray(obj.edits) && filePath) {
+				return `Applied ${obj.edits.length} edits to ${normalizePath(filePath, projectPath)}`;
+			}
+		}
+
+		if (toolName === 'Write') {
+			const filePath = extractFilePath(input);
+			if (typeof obj.content === 'string' && filePath) {
+				const lineCount = obj.content.split('\n').length;
+				return `Wrote ${lineCount} lines to ${normalizePath(filePath, projectPath)}`;
+			}
+		}
+
+		// Bash: stdout/stderr not available from stream-json toolUseBlocks
+		// CCV captures this from hook_input but Maestro only sees tool input, not output
+		return null;
 	}
 
 	/**

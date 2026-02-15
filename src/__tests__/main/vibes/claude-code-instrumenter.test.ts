@@ -1609,6 +1609,232 @@ describe('claude-code-instrumenter', () => {
 	});
 
 	// ========================================================================
+	// Data Capture: working_directory and command_output_summary (VIBES-DETAIL-01)
+	// ========================================================================
+	describe('data capture: working_directory and command_output_summary', () => {
+		it('should populate working_directory from session.projectPath', async () => {
+			await setupSession('sess-1');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/main.ts' } },
+				timestamp: Date.now(),
+			});
+
+			await flushAll();
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const cmdEntries = entries.filter((e) => e.type === 'command') as VibesCommandEntry[];
+			expect(cmdEntries).toHaveLength(1);
+			expect(cmdEntries[0].working_directory).toBe(tmpDir);
+		});
+
+		it('should populate working_directory for Bash tool as well', async () => {
+			await setupSession('sess-1');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Bash',
+				state: { status: 'running', input: { command: 'echo hello' } },
+				timestamp: Date.now(),
+			});
+
+			await flushAll();
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const cmdEntries = entries.filter((e) => e.type === 'command') as VibesCommandEntry[];
+			expect(cmdEntries).toHaveLength(1);
+			expect(cmdEntries[0].working_directory).toBe(tmpDir);
+		});
+
+		it('should generate output summary for Edit tool with old_string', async () => {
+			await setupSession('sess-1');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Edit',
+				state: {
+					status: 'running',
+					input: {
+						file_path: 'src/utils.ts',
+						old_string: 'const x = 1;',
+						new_string: 'const x = 42;',
+					},
+				},
+				timestamp: Date.now(),
+			});
+
+			await flushAll();
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const cmdEntries = entries.filter((e) => e.type === 'command') as VibesCommandEntry[];
+			expect(cmdEntries).toHaveLength(1);
+			expect(cmdEntries[0].command_output_summary).toBe('Replaced 12 chars in src/utils.ts');
+		});
+
+		it('should generate output summary for MultiEdit tool with edits array', async () => {
+			await setupSession('sess-1');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'MultiEdit',
+				state: {
+					status: 'running',
+					input: {
+						file_path: 'src/multi.ts',
+						edits: [
+							{ old_string: 'a', new_string: 'b' },
+							{ old_string: 'c', new_string: 'd' },
+							{ old_string: 'e', new_string: 'f' },
+						],
+					},
+				},
+				timestamp: Date.now(),
+			});
+
+			await flushAll();
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const cmdEntries = entries.filter((e) => e.type === 'command') as VibesCommandEntry[];
+			expect(cmdEntries).toHaveLength(1);
+			expect(cmdEntries[0].command_output_summary).toBe('Applied 3 edits to src/multi.ts');
+		});
+
+		it('should generate output summary for Write tool with content', async () => {
+			await setupSession('sess-1');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			const content = 'line 1\nline 2\nline 3\nline 4\nline 5';
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: {
+					status: 'running',
+					input: {
+						file_path: 'src/new-file.ts',
+						content,
+					},
+				},
+				timestamp: Date.now(),
+			});
+
+			await flushAll();
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const cmdEntries = entries.filter((e) => e.type === 'command') as VibesCommandEntry[];
+			expect(cmdEntries).toHaveLength(1);
+			expect(cmdEntries[0].command_output_summary).toBe('Wrote 5 lines to src/new-file.ts');
+		});
+
+		it('should return null output summary for Bash tool (stream-json limitation)', async () => {
+			await setupSession('sess-1');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Bash',
+				state: { status: 'running', input: { command: 'npm test' } },
+				timestamp: Date.now(),
+			});
+
+			await flushAll();
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const cmdEntries = entries.filter((e) => e.type === 'command') as VibesCommandEntry[];
+			expect(cmdEntries).toHaveLength(1);
+			expect(cmdEntries[0].command_output_summary).toBeNull();
+		});
+
+		it('should return null output summary for Read tool', async () => {
+			await setupSession('sess-1');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Read',
+				state: { status: 'running', input: { file_path: 'package.json' } },
+				timestamp: Date.now(),
+			});
+
+			await flushAll();
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const cmdEntries = entries.filter((e) => e.type === 'command') as VibesCommandEntry[];
+			expect(cmdEntries).toHaveLength(1);
+			expect(cmdEntries[0].command_output_summary).toBeNull();
+		});
+
+		it('should always have null command_exit_code (stream-json limitation)', async () => {
+			await setupSession('sess-1');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Bash',
+				state: { status: 'running', input: { command: 'echo hello' } },
+				timestamp: Date.now(),
+			});
+
+			await flushAll();
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const cmdEntries = entries.filter((e) => e.type === 'command') as VibesCommandEntry[];
+			expect(cmdEntries).toHaveLength(1);
+			expect(cmdEntries[0].command_exit_code).toBeNull();
+		});
+
+		it('should normalize absolute file paths in output summary relative to projectPath', async () => {
+			await setupSession('sess-1');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Edit',
+				state: {
+					status: 'running',
+					input: {
+						file_path: path.join(tmpDir, 'src/utils.ts'),
+						old_string: 'hello world',
+						new_string: 'goodbye world',
+					},
+				},
+				timestamp: Date.now(),
+			});
+
+			await flushAll();
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const cmdEntries = entries.filter((e) => e.type === 'command') as VibesCommandEntry[];
+			expect(cmdEntries).toHaveLength(1);
+			// Should be relative: "Replaced 11 chars in src/utils.ts"
+			expect(cmdEntries[0].command_output_summary).toBe('Replaced 11 chars in src/utils.ts');
+		});
+	});
+
+	// ========================================================================
 	// Path Normalization
 	// ========================================================================
 	describe('path normalization', () => {
