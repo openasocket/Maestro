@@ -683,9 +683,522 @@ function MaestroConsoleInner() {
 		[setActiveSessionId, setSessions]
 	);
 
+<<<<<<< HEAD
 	// Startup effects (splash, GitHub CLI, Windows warning, gist URLs, beta updates,
 	// update check, leaderboard sync, SpecKit/OpenSpec loading, SSH configs, stats DB check,
 	// notification settings sync, playground debug) — provided by useAppInitialization hook
+=======
+	const handleProcessMonitorNavigateToGroupChat = useCallback(
+		(groupChatId: string) => {
+			// Restore state for this group chat when navigating from ProcessMonitor
+			setActiveGroupChatId(groupChatId);
+			setGroupChatState(groupChatStates.get(groupChatId) ?? 'idle');
+			setParticipantStates(allGroupChatParticipantStates.get(groupChatId) ?? new Map());
+			setProcessMonitorOpen(false);
+		},
+		[
+			setActiveGroupChatId,
+			setGroupChatState,
+			groupChatStates,
+			setParticipantStates,
+			allGroupChatParticipantStates,
+		]
+	);
+
+	// LogViewer shortcut handler
+	const handleLogViewerShortcutUsed = useCallback(
+		(shortcutId: string) => {
+			const result = recordShortcutUsage(shortcutId);
+			if (result.newLevel !== null) {
+				onKeyboardMasteryLevelUp(result.newLevel);
+			}
+		},
+		[recordShortcutUsage, onKeyboardMasteryLevelUp]
+	);
+
+	// Sync toast duration setting to ToastContext
+	useEffect(() => {
+		setToastDefaultDuration(toastDuration);
+	}, [toastDuration, setToastDefaultDuration]);
+
+	// Sync audio feedback settings to ToastContext for TTS on toast notifications
+	useEffect(() => {
+		setAudioFeedback(audioFeedbackEnabled, audioFeedbackCommand);
+	}, [audioFeedbackEnabled, audioFeedbackCommand, setAudioFeedback]);
+
+	// Sync OS notifications setting to ToastContext
+	useEffect(() => {
+		setOsNotifications(osNotificationsEnabled);
+	}, [osNotificationsEnabled, setOsNotifications]);
+
+	// Expose playground() function for developer console
+	useEffect(() => {
+		(window as unknown as { playground: () => void }).playground = () => {
+			setPlaygroundOpen(true);
+		};
+		return () => {
+			delete (window as unknown as { playground?: () => void }).playground;
+		};
+	}, []);
+
+	// Restore a persisted session by respawning its process
+	/**
+	 * Fetch git info (isRepo, branches, tags) for a session in the background.
+	 * This is called after initial session restore to avoid blocking app startup
+	 * on SSH timeouts for remote sessions.
+	 */
+	const fetchGitInfoInBackground = useCallback(
+		async (sessionId: string, cwd: string, sshRemoteId: string | undefined) => {
+			try {
+				// Check if the working directory is a Git repository (via SSH for remote sessions)
+				const isGitRepo = await gitService.isRepo(cwd, sshRemoteId);
+
+				// Fetch git branches and tags if it's a git repo
+				let gitBranches: string[] | undefined;
+				let gitTags: string[] | undefined;
+				let gitRefsCacheTime: number | undefined;
+				if (isGitRepo) {
+					[gitBranches, gitTags] = await Promise.all([
+						gitService.getBranches(cwd, sshRemoteId),
+						gitService.getTags(cwd, sshRemoteId),
+					]);
+					gitRefsCacheTime = Date.now();
+				}
+
+				// Update the session with git info and mark SSH as connected
+				setSessions((prev) =>
+					prev.map((s) =>
+						s.id === sessionId
+							? {
+									...s,
+									isGitRepo,
+									gitBranches,
+									gitTags,
+									gitRefsCacheTime,
+									sshConnectionFailed: false,
+								}
+							: s
+					)
+				);
+			} catch (error) {
+				console.warn(
+					`[fetchGitInfoInBackground] Failed to fetch git info for session ${sessionId}:`,
+					error
+				);
+				// Mark SSH connection as failed so UI can show error state
+				setSessions((prev) =>
+					prev.map((s) => (s.id === sessionId ? { ...s, sshConnectionFailed: true } : s))
+				);
+			}
+		},
+		[]
+	);
+
+	const restoreSession = async (session: Session): Promise<Session> => {
+		try {
+			// Migration: ensure projectRoot is set (for sessions created before this field was added)
+			if (!session.projectRoot) {
+				session = { ...session, projectRoot: session.cwd };
+			}
+
+			// Sessions must have aiTabs - if missing, this is a data corruption issue
+			// Create a default tab to prevent crashes when code calls .find() on aiTabs
+			if (!session.aiTabs || session.aiTabs.length === 0) {
+				console.error(
+					'[restoreSession] Session has no aiTabs - data corruption, creating default tab:',
+					session.id
+				);
+				const defaultTabId = generateId();
+				return {
+					...session,
+					aiPid: -1,
+					terminalPid: 0,
+					state: 'error' as SessionState,
+					isLive: false,
+					liveUrl: undefined,
+					aiTabs: [
+						{
+							id: defaultTabId,
+							agentSessionId: null,
+							name: null,
+							state: 'idle' as const,
+							logs: [
+								{
+									id: generateId(),
+									timestamp: Date.now(),
+									source: 'system' as const,
+									text: '⚠️ Session data was corrupted and has been recovered with a new tab.',
+								},
+							],
+							starred: false,
+							inputValue: '',
+							stagedImages: [],
+							createdAt: Date.now(),
+						},
+					],
+					activeTabId: defaultTabId,
+					filePreviewTabs: [],
+					activeFileTabId: null,
+					unifiedTabOrder: [{ type: 'ai' as const, id: defaultTabId }],
+					unifiedClosedTabHistory: [],
+				};
+			}
+
+			// Detect and fix inputMode/toolType mismatch
+			// The AI agent should never use 'terminal' as toolType
+			let correctedSession = { ...session };
+			let aiAgentType = correctedSession.toolType;
+
+			// If toolType is 'terminal', migrate to claude-code
+			// This fixes legacy sessions that were incorrectly saved with toolType='terminal'
+			if (aiAgentType === 'terminal') {
+				console.warn(`[restoreSession] Session has toolType='terminal', migrating to claude-code`);
+				aiAgentType = 'claude-code' as ToolType;
+				correctedSession = {
+					...correctedSession,
+					toolType: 'claude-code' as ToolType,
+				};
+
+				// Add warning to the active tab's logs
+				const warningLog: LogEntry = {
+					id: generateId(),
+					timestamp: Date.now(),
+					source: 'system',
+					text: '⚠️ Session migrated to use Claude Code agent.',
+				};
+				const activeTabIndex = correctedSession.aiTabs.findIndex(
+					(tab) => tab.id === correctedSession.activeTabId
+				);
+				if (activeTabIndex >= 0) {
+					correctedSession.aiTabs = correctedSession.aiTabs.map((tab, i) =>
+						i === activeTabIndex ? { ...tab, logs: [...tab.logs, warningLog] } : tab
+					);
+				}
+			}
+
+			// Get agent definitions for both processes
+			const agent = await window.maestro.agents.get(aiAgentType);
+			if (!agent) {
+				console.error(`Agent not found for toolType: ${correctedSession.toolType}`);
+				return {
+					...correctedSession,
+					aiPid: -1,
+					terminalPid: 0,
+					state: 'error' as SessionState,
+					isLive: false,
+					liveUrl: undefined,
+				};
+			}
+
+			// Don't eagerly spawn AI processes on session restore:
+			// - Batch mode agents (Claude Code, OpenCode, Codex) spawn per message in useInputProcessing
+			// - Terminal uses runCommand (fresh shells per command)
+			// This prevents 20+ idle processes when app starts with many saved sessions
+			// aiPid stays at 0 until user sends their first message
+			const aiSpawnResult = { pid: 0, success: true };
+			const aiSuccess = true;
+
+			if (aiSuccess) {
+				// Get SSH remote ID for remote git operations
+				// Note: sshRemoteId is only set after AI agent spawns. For terminal-only SSH sessions,
+				// we must fall back to sessionSshRemoteConfig.remoteId. See CLAUDE.md "SSH Remote Sessions".
+				const sshRemoteId =
+					correctedSession.sshRemoteId ||
+					correctedSession.sessionSshRemoteConfig?.remoteId ||
+					undefined;
+
+				// For SSH remote sessions, defer git operations to background to avoid blocking
+				// app startup on SSH connection timeouts (which can be 10+ seconds per session)
+				const isRemoteSession = !!sshRemoteId;
+
+				// For local sessions, check git status synchronously (fast, sub-100ms)
+				// For remote sessions, use persisted value or default to false, then update in background
+				let isGitRepo = correctedSession.isGitRepo ?? false;
+				let gitBranches = correctedSession.gitBranches;
+				let gitTags = correctedSession.gitTags;
+				let gitRefsCacheTime = correctedSession.gitRefsCacheTime;
+
+				if (!isRemoteSession) {
+					// Local session - check git status synchronously (fast)
+					isGitRepo = await gitService.isRepo(correctedSession.cwd, undefined);
+					if (isGitRepo) {
+						[gitBranches, gitTags] = await Promise.all([
+							gitService.getBranches(correctedSession.cwd, undefined),
+							gitService.getTags(correctedSession.cwd, undefined),
+						]);
+						gitRefsCacheTime = Date.now();
+					}
+				}
+				// For remote sessions, we'll fetch git info in background after session restore
+
+				// Reset all tab states to idle - processes don't survive app restart
+				const resetAiTabs = correctedSession.aiTabs.map((tab) => ({
+					...tab,
+					state: 'idle' as const,
+					thinkingStartTime: undefined,
+				}));
+
+				// Session restored - no superfluous messages added to AI Terminal or Command Terminal
+				return {
+					...correctedSession,
+					aiPid: aiSpawnResult.pid,
+					terminalPid: 0, // Terminal uses runCommand (fresh shells per command)
+					state: 'idle' as SessionState,
+					// Reset runtime-only busy state - processes don't survive app restart
+					busySource: undefined,
+					thinkingStartTime: undefined,
+					currentCycleTokens: undefined,
+					currentCycleBytes: undefined,
+					statusMessage: undefined,
+					isGitRepo, // Update Git status (or use persisted value for remote)
+					gitBranches,
+					gitTags,
+					gitRefsCacheTime,
+					isLive: false, // Always start offline on app restart
+					liveUrl: undefined, // Clear any stale URL
+					aiLogs: [], // Deprecated - logs are now in aiTabs
+					aiTabs: resetAiTabs, // Reset tab states
+					shellLogs: correctedSession.shellLogs, // Preserve existing Command Terminal logs
+					executionQueue: correctedSession.executionQueue || [], // Ensure backwards compatibility
+					activeTimeMs: correctedSession.activeTimeMs || 0, // Ensure backwards compatibility
+					// Clear runtime-only error state - no agent is running yet so there can't be an error
+					agentError: undefined,
+					agentErrorPaused: false,
+					closedTabHistory: [], // Runtime-only, reset on load
+					// File preview tabs - initialize from persisted data or empty
+					filePreviewTabs: correctedSession.filePreviewTabs || [],
+					activeFileTabId: correctedSession.activeFileTabId ?? null,
+					unifiedTabOrder:
+						correctedSession.unifiedTabOrder ||
+						resetAiTabs.map((tab) => ({ type: 'ai' as const, id: tab.id })),
+				};
+			} else {
+				// Process spawn failed
+				console.error(`Failed to restore session ${session.id}`);
+				return {
+					...session,
+					aiPid: -1,
+					terminalPid: 0,
+					state: 'error' as SessionState,
+					isLive: false,
+					liveUrl: undefined,
+				};
+			}
+		} catch (error) {
+			console.error(`Error restoring session ${session.id}:`, error);
+			return {
+				...session,
+				aiPid: -1,
+				terminalPid: 0,
+				state: 'error' as SessionState,
+				isLive: false,
+				liveUrl: undefined,
+			};
+		}
+	};
+
+	// Load sessions and groups from electron-store on mount
+	// Use a ref to prevent duplicate execution in React Strict Mode
+	const sessionLoadStarted = useRef(false);
+	useEffect(() => {
+		console.log('[App] Session load useEffect triggered');
+		// Guard against duplicate execution in React Strict Mode
+		if (sessionLoadStarted.current) {
+			console.log('[App] Session load already started, skipping');
+			return;
+		}
+		sessionLoadStarted.current = true;
+		console.log('[App] Starting loadSessionsAndGroups');
+
+		const loadSessionsAndGroups = async () => {
+			try {
+				console.log('[App] About to call sessions.getAll()');
+				const savedSessions = await window.maestro.sessions.getAll();
+				console.log('[App] Got sessions:', savedSessions?.length ?? 0);
+				const savedGroups = await window.maestro.groups.getAll();
+
+				// Handle sessions
+				if (savedSessions && savedSessions.length > 0) {
+					const restoredSessions = await Promise.all(savedSessions.map((s) => restoreSession(s)));
+					setSessions(restoredSessions);
+					// Set active session to first session if current activeSessionId is invalid
+					if (
+						restoredSessions.length > 0 &&
+						!restoredSessions.find((s) => s.id === activeSessionId)
+					) {
+						setActiveSessionId(restoredSessions[0].id);
+					}
+
+					// Reconcile account assignments after session restore (ACCT-MUX-13)
+					// This validates accounts still exist and updates customEnvVars accordingly
+					try {
+						const activeIds = restoredSessions.map(s => s.id);
+						const reconciliation = await window.maestro.accounts.reconcileSessions(activeIds);
+						if (reconciliation.success && reconciliation.corrections.length > 0) {
+							setSessions(prev => prev.map(session => {
+								const correction = reconciliation.corrections.find(c => c.sessionId === session.id);
+								if (!correction) return session;
+
+								if (correction.status === 'removed') {
+									// Account was removed — clear session's account fields and CLAUDE_CONFIG_DIR
+									const cleanedEnvVars = { ...session.customEnvVars };
+									delete cleanedEnvVars.CLAUDE_CONFIG_DIR;
+									return {
+										...session,
+										accountId: undefined,
+										accountName: undefined,
+										customEnvVars: Object.keys(cleanedEnvVars).length > 0 ? cleanedEnvVars : undefined,
+									};
+								} else if (correction.configDir && session.accountId) {
+									// Account exists — ensure CLAUDE_CONFIG_DIR is current
+									return {
+										...session,
+										accountId: correction.accountId ?? undefined,
+										accountName: correction.accountName ?? undefined,
+										customEnvVars: {
+											...session.customEnvVars,
+											CLAUDE_CONFIG_DIR: correction.configDir,
+										},
+									};
+								}
+								return session;
+							}));
+						}
+					} catch (reconcileError) {
+						console.error('[App] Account reconciliation failed:', reconcileError);
+					}
+
+					// For remote (SSH) sessions, fetch git info in background to avoid blocking
+					// startup on SSH connection timeouts. This runs after UI is shown.
+					for (const session of restoredSessions) {
+						const sshRemoteId = session.sshRemoteId || session.sessionSshRemoteConfig?.remoteId;
+						if (sshRemoteId) {
+							// Fire and forget - don't await, let it update sessions when done
+							fetchGitInfoInBackground(session.id, session.cwd, sshRemoteId);
+						}
+					}
+				} else {
+					setSessions([]);
+				}
+
+				// Handle groups
+				if (savedGroups && savedGroups.length > 0) {
+					setGroups(savedGroups);
+				} else {
+					setGroups([]);
+				}
+
+				// Load group chats
+				try {
+					const savedGroupChats = await window.maestro.groupChat.list();
+					setGroupChats(savedGroupChats || []);
+				} catch (gcError) {
+					console.error('Failed to load group chats:', gcError);
+					setGroupChats([]);
+				}
+			} catch (e) {
+				console.error('Failed to load sessions/groups:', e);
+				setSessions([]);
+				setGroups([]);
+			} finally {
+				// Mark initial load as complete to enable persistence
+				initialLoadComplete.current = true;
+
+				// Mark sessions as loaded for splash screen coordination
+				setSessionsLoaded(true);
+
+				// When no sessions exist, we show EmptyStateView which lets users
+				// choose between "New Agent" or "Wizard" - no auto-opening wizard
+			}
+		};
+		loadSessionsAndGroups();
+	}, []);
+
+	// Hide splash screen only when both settings and sessions have fully loaded
+	// This prevents theme flash on initial render
+	useEffect(() => {
+		console.log(
+			'[App] Splash check - settingsLoaded:',
+			settingsLoaded,
+			'sessionsLoaded:',
+			sessionsLoaded
+		);
+		if (settingsLoaded && sessionsLoaded) {
+			console.log('[App] Both loaded, hiding splash');
+			if (typeof window.__hideSplash === 'function') {
+				window.__hideSplash();
+			}
+		}
+	}, [settingsLoaded, sessionsLoaded]);
+
+	// Check GitHub CLI availability for gist publishing
+	useEffect(() => {
+		window.maestro.git
+			.checkGhCli()
+			.then((status) => {
+				setGhCliAvailable(status.installed && status.authenticated);
+			})
+			.catch(() => {
+				setGhCliAvailable(false);
+			});
+	}, []);
+
+	// Track if Windows warning has been shown this session to prevent re-showing
+	const windowsWarningShownRef = useRef(false);
+
+	// Show Windows warning modal on startup for Windows users (if not suppressed)
+	// Also expose a debug function to trigger the modal from console for testing
+	useEffect(() => {
+		// Expose debug function regardless of platform (for testing)
+		exposeWindowsWarningModalDebug(setWindowsWarningModalOpen);
+
+		// Only check platform when settings have loaded (so we know suppress preference)
+		if (!settingsLoaded) return;
+
+		// Skip if user has suppressed the warning
+		if (suppressWindowsWarning) return;
+
+		// Skip if already shown this session (prevents re-showing when suppressWindowsWarning
+		// is set to false by the close handler without checking "don't show again")
+		if (windowsWarningShownRef.current) return;
+
+		// Check if running on Windows using the power API (has platform info)
+		window.maestro.power
+			.getStatus()
+			.then((status) => {
+				if (status.platform === 'win32') {
+					windowsWarningShownRef.current = true;
+					setWindowsWarningModalOpen(true);
+				}
+			})
+			.catch((error) => {
+				console.error('[App] Failed to detect platform for Windows warning:', error);
+			});
+	}, [settingsLoaded, suppressWindowsWarning, setWindowsWarningModalOpen]);
+
+	// Load file gist URLs from settings on startup
+	useEffect(() => {
+		window.maestro.settings
+			.get('fileGistUrls')
+			.then((savedUrls) => {
+				if (savedUrls && typeof savedUrls === 'object') {
+					useTabStore.getState().setFileGistUrls(savedUrls as Record<string, GistInfo>);
+				}
+			})
+			.catch(() => {
+				// Ignore errors loading gist URLs
+			});
+	}, []);
+
+	// Helper to save a gist URL for a file path
+	const saveFileGistUrl = useCallback((filePath: string, gistInfo: GistInfo) => {
+		const { fileGistUrls: current } = useTabStore.getState();
+		const updated = { ...current, [filePath]: gistInfo };
+		useTabStore.getState().setFileGistUrls(updated);
+		// Persist to settings
+		window.maestro.settings.set('fileGistUrls', updated);
+	}, []);
+>>>>>>> 1143390c (MAESTRO: feat: add session/assignment persistence and restart recovery for account multiplexing)
 
 	// Expose debug helpers to window for console access
 	// No dependency array - always keep functions fresh
@@ -758,6 +1271,199 @@ function MaestroConsoleInner() {
 		};
 	}, []);
 
+<<<<<<< HEAD
+=======
+	// Subscribe to account limit warning/reached events for toast notifications
+	useEffect(() => {
+		const unsubWarning = window.maestro.accounts.onLimitWarning((data) => {
+			addToastRef.current({
+				type: 'warning',
+				title: 'Account Limit Warning',
+				message: `Account ${data.accountName} is at ${Math.round(data.usagePercent)}% of its token limit`,
+				duration: 10_000,
+			});
+		});
+
+		const unsubReached = window.maestro.accounts.onLimitReached((data) => {
+			addToastRef.current({
+				type: 'error',
+				title: 'Account Limit Reached',
+				message: `Account ${data.accountName} has reached its token limit (${Math.round(data.usagePercent)}%)`,
+				duration: 0, // Do NOT auto-dismiss
+			});
+		});
+
+		return () => {
+			unsubWarning();
+			unsubReached();
+		};
+	}, []);
+
+	// Subscribe to account assignment events (update session state when main process assigns an account)
+	useEffect(() => {
+		const unsubAssigned = window.maestro.accounts.onAssigned((data) => {
+			setSessions((prev) =>
+				prev.map(s => {
+					if (!data.sessionId.startsWith(s.id)) return s;
+					return { ...s, accountId: data.accountId, accountName: data.accountName };
+				})
+			);
+		});
+		return () => unsubAssigned();
+	}, []);
+
+	// Subscribe to account switch events (respawn agent with new account after switch)
+	useEffect(() => {
+		const unsubRespawn = window.maestro.accounts.onSwitchRespawn(async (data) => {
+			const { sessionId: switchSessionId, toAccountId, toAccountName, configDir, lastPrompt, reason } = data;
+
+			// Find the session that needs respawning (match by base session ID)
+			const session = sessionsRef.current.find(s => switchSessionId.startsWith(s.id));
+			if (!session) {
+				console.error('[AccountSwitch] Session not found for respawn:', switchSessionId);
+				return;
+			}
+
+			// Update session with new account info and CLAUDE_CONFIG_DIR
+			setSessions((prev) =>
+				prev.map(s => {
+					if (s.id !== session.id) return s;
+					return {
+						...s,
+						accountId: toAccountId,
+						accountName: toAccountName,
+						customEnvVars: {
+							...s.customEnvVars,
+							CLAUDE_CONFIG_DIR: configDir,
+						},
+					};
+				})
+			);
+
+			try {
+				// Get agent config for respawn
+				const agent = await window.maestro.agents.get(session.toolType);
+				if (!agent) {
+					console.error('[AccountSwitch] Agent not found for respawn:', session.toolType);
+					return;
+				}
+
+				// Get the active tab's agent session ID for --resume
+				const tab = getActiveTab(session);
+				const tabAgentSessionId = tab?.agentSessionId;
+				const commandToUse = agent.path ?? agent.command;
+				const agentArgs = agent.args ?? [];
+
+				// Determine the target session ID (with tab suffix)
+				const targetSessionId = `${session.id}-ai-${tab?.id || 'default'}`;
+
+				// Spawn with --resume and updated env vars
+				await window.maestro.process.spawn({
+					sessionId: targetSessionId,
+					toolType: session.toolType,
+					cwd: session.cwd,
+					command: commandToUse,
+					args: agentArgs,
+					agentSessionId: tabAgentSessionId ?? undefined,
+					sessionCustomPath: session.customPath,
+					sessionCustomArgs: session.customArgs,
+					sessionCustomEnvVars: {
+						...session.customEnvVars,
+						CLAUDE_CONFIG_DIR: configDir,
+					},
+					sessionCustomModel: session.customModel,
+					sessionCustomContextWindow: session.customContextWindow,
+					accountId: toAccountId,
+					sessionSshRemoteConfig: session.sessionSshRemoteConfig,
+				});
+
+				// Re-send the last prompt after a delay to allow the agent to initialize
+				if (lastPrompt) {
+					setTimeout(() => {
+						window.maestro.process.write(targetSessionId, lastPrompt);
+					}, 2000);
+				}
+
+				addToastRef.current({
+					type: 'info',
+					title: 'Account Switched',
+					message: `Switched to account ${toAccountName} (${reason})`,
+					duration: 5_000,
+				});
+			} catch (error) {
+				console.error('[AccountSwitch] Failed to respawn agent:', error);
+				addToastRef.current({
+					type: 'error',
+					title: 'Account Switch Failed',
+					message: `Failed to respawn agent after account switch: ${String(error)}`,
+					duration: 0,
+				});
+			}
+		});
+
+		const unsubSwitchFailed = window.maestro.accounts.onSwitchFailed((data) => {
+			addToastRef.current({
+				type: 'error',
+				title: 'Account Switch Failed',
+				message: `Failed to switch account: ${data.error || 'Unknown error'}`,
+				duration: 0,
+			});
+		});
+
+		const unsubSwitchExecute = window.maestro.accounts.onSwitchExecute(async (data) => {
+			// Auto-switch mode: execute the switch immediately
+			const { sessionId: switchSessionId, fromAccountId, toAccountId, reason } = data as any;
+			try {
+				await window.maestro.accounts.executeSwitch({
+					sessionId: switchSessionId,
+					fromAccountId,
+					toAccountId,
+					reason: reason ?? 'throttled',
+					automatic: true,
+				});
+			} catch (error) {
+				console.error('[AccountSwitch] Auto-switch execution failed:', error);
+			}
+		});
+
+		return () => {
+			unsubRespawn();
+			unsubSwitchFailed();
+			unsubSwitchExecute();
+		};
+	}, []);
+
+	// Subscribe to account switch prompt events (user confirmation needed)
+	useEffect(() => {
+		const unsubSwitchPrompt = window.maestro.accounts.onSwitchPrompt((data: any) => {
+			setSwitchPromptData({
+				sessionId: data.sessionId,
+				fromAccountId: data.fromAccountId,
+				fromAccountName: data.fromAccountName ?? data.fromAccountId,
+				toAccountId: data.toAccountId,
+				toAccountName: data.toAccountName ?? data.toAccountId,
+				reason: data.reason ?? 'throttled',
+				tokensAtThrottle: data.tokensAtThrottle,
+				usagePercent: data.usagePercent,
+			});
+		});
+
+		const unsubSwitchCompleted = window.maestro.accounts.onSwitchCompleted((data: any) => {
+			addToastRef.current({
+				type: 'success',
+				title: 'Account Switched',
+				message: `Switched from ${data.fromAccountName ?? data.fromAccountId} to ${data.toAccountName ?? data.toAccountId}`,
+				duration: 5_000,
+			});
+		});
+
+		return () => {
+			unsubSwitchPrompt();
+			unsubSwitchCompleted();
+		};
+	}, []);
+
+>>>>>>> 1143390c (MAESTRO: feat: add session/assignment persistence and restart recovery for account multiplexing)
 	// Keyboard navigation state
 	// Note: selectedSidebarIndex/setSelectedSidebarIndex are destructured from useUIStore() above
 	// Note: activeTab is memoized later at line ~3795 - use that for all tab operations
