@@ -100,6 +100,9 @@ export class VibesCoordinator {
 	/** Sessions whose environment entry has already been updated with real model info. */
 	private environmentUpdatedSessions: Set<string> = new Set();
 
+	/** Cached tool_extensions per session, for preserving across environment updates. */
+	private sessionToolExtensions: Map<string, string[]> = new Map();
+
 	/** Optional safeSend function for emitting IPC events to the renderer. */
 	private safeSend: SafeSendFn | null = null;
 
@@ -291,11 +294,21 @@ export class VibesCoordinator {
 			// Create environment entry first so the hash is available for the
 			// session start annotation (VIBES spec: session start must include
 			// environment_hash — fixes DIVERGENCE 3).
+			//
+			// Include permission_mode in tool_extensions to align with CCV HOOK-ALIGN-02.
+			// Maestro detects permission mode from the spawned process args.
+			const toolExtensions: string[] = [];
+			const permissionMode = this.detectPermissionMode(config);
+			if (permissionMode) {
+				toolExtensions.push(`permission_mode:${permissionMode}`);
+			}
+
 			const { entry: envEntry, hash: envHash } = createEnvironmentEntry({
 				toolName: this.getToolName(agentType),
 				toolVersion: 'unknown',
 				modelName: 'unknown',
 				modelVersion: 'unknown',
+				toolExtensions: toolExtensions.length > 0 ? toolExtensions : undefined,
 			});
 
 			await this.sessionManager.startSession(
@@ -307,6 +320,9 @@ export class VibesCoordinator {
 			);
 
 			this.sessionAgentTypes.set(sessionId, agentType);
+			if (toolExtensions.length > 0) {
+				this.sessionToolExtensions.set(sessionId, toolExtensions);
+			}
 
 			// Record the environment manifest entry immediately (session already has the hash).
 			// Environment is the most critical entry — every annotation references it.
@@ -360,6 +376,7 @@ export class VibesCoordinator {
 			await this.sessionManager.endSession(sessionId);
 			this.sessionAgentTypes.delete(sessionId);
 			this.environmentUpdatedSessions.delete(sessionId);
+			this.sessionToolExtensions.delete(sessionId);
 
 			logger.info(
 				'[VibesCoordinator] VIBES session ended',
@@ -732,6 +749,7 @@ export class VibesCoordinator {
 		}
 
 		const modelVersion = this.extractModelVersion(modelName);
+		const cachedExtensions = this.sessionToolExtensions.get(sessionId);
 		const entry: VibesEnvironmentEntry = {
 			type: 'environment',
 			tool_name: this.getToolName(agentType),
@@ -739,7 +757,7 @@ export class VibesCoordinator {
 			model_name: modelName,
 			model_version: modelVersion,
 			model_parameters: null,
-			tool_extensions: null,
+			tool_extensions: cachedExtensions && cachedExtensions.length > 0 ? cachedExtensions : null,
 			created_at: new Date().toISOString(),
 		};
 
@@ -791,6 +809,27 @@ export class VibesCoordinator {
 			default:
 				return null;
 		}
+	}
+
+	/**
+	 * Detect the permission mode from the spawned process args.
+	 * Claude Code uses `--dangerously-skip-permissions` (bypassPermissions) or
+	 * `--permission-mode <mode>`. Codex uses `--dangerously-bypass-approvals-and-sandbox`.
+	 * Returns null if no recognizable permission mode is found.
+	 */
+	private detectPermissionMode(config: ProcessConfig): string | null {
+		const args = config.args ?? [];
+		if (args.includes('--dangerously-skip-permissions')) {
+			return 'bypassPermissions';
+		}
+		if (args.includes('--dangerously-bypass-approvals-and-sandbox')) {
+			return 'bypassPermissions';
+		}
+		const modeIdx = args.indexOf('--permission-mode');
+		if (modeIdx >= 0 && modeIdx + 1 < args.length) {
+			return args[modeIdx + 1];
+		}
+		return null;
 	}
 
 	/**

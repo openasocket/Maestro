@@ -1001,6 +1001,198 @@ describe('vibes-coordinator', () => {
 	});
 
 	// ========================================================================
+	// Permission Mode in Environment Entry
+	// ========================================================================
+	describe('permission_mode in tool_extensions', () => {
+		it('should include permission_mode:bypassPermissions when --dangerously-skip-permissions is in args', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			const config = createProcessConfig({
+				sessionId: 'sess-perm-1',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+				args: ['--print', '--output-format', 'stream-json', '--dangerously-skip-permissions'],
+			});
+
+			await coordinator.handleProcessSpawn('sess-perm-1', config);
+
+			await flushAll();
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const envEntries = entries.filter((e) => e.type === 'environment') as VibesEnvironmentEntry[];
+			expect(envEntries).toHaveLength(1);
+			expect(envEntries[0].tool_extensions).toEqual(['permission_mode:bypassPermissions']);
+		});
+
+		it('should include permission_mode from --permission-mode arg', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			const config = createProcessConfig({
+				sessionId: 'sess-perm-2',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+				args: ['--print', '--permission-mode', 'plan'],
+			});
+
+			await coordinator.handleProcessSpawn('sess-perm-2', config);
+
+			await flushAll();
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const envEntries = entries.filter((e) => e.type === 'environment') as VibesEnvironmentEntry[];
+			expect(envEntries).toHaveLength(1);
+			expect(envEntries[0].tool_extensions).toEqual(['permission_mode:plan']);
+		});
+
+		it('should have null tool_extensions when no permission mode args present', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			const config = createProcessConfig({
+				sessionId: 'sess-perm-3',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+				args: ['--print'],
+			});
+
+			await coordinator.handleProcessSpawn('sess-perm-3', config);
+
+			await flushAll();
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const envEntries = entries.filter((e) => e.type === 'environment') as VibesEnvironmentEntry[];
+			expect(envEntries).toHaveLength(1);
+			expect(envEntries[0].tool_extensions).toBeNull();
+		});
+
+		it('should preserve tool_extensions when environment is updated with model info', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			const config = createProcessConfig({
+				sessionId: 'sess-perm-4',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+				args: ['--print', '--dangerously-skip-permissions'],
+			});
+
+			await coordinator.handleProcessSpawn('sess-perm-4', config);
+
+			// Send usage event with model name to trigger environment update
+			coordinator.handleUsage('sess-perm-4', {
+				inputTokens: 100,
+				outputTokens: 50,
+				cacheReadInputTokens: 0,
+				cacheCreationInputTokens: 0,
+				totalCostUsd: 0.01,
+				contextWindow: 200000,
+				modelName: 'claude-sonnet-4-5-20250929',
+			});
+
+			await vi.advanceTimersByTimeAsync(10);
+			await flushAll();
+
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const envEntries = entries.filter((e) => e.type === 'environment') as VibesEnvironmentEntry[];
+			expect(envEntries).toHaveLength(1);
+			expect(envEntries[0].model_name).toBe('claude-sonnet-4-5-20250929');
+			expect(envEntries[0].tool_extensions).toEqual(['permission_mode:bypassPermissions']);
+		});
+
+		it('should detect bypassPermissions for Codex --dangerously-bypass-approvals-and-sandbox', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			const config = createProcessConfig({
+				sessionId: 'sess-perm-5',
+				toolType: 'codex',
+				projectPath: tmpDir,
+				args: ['exec', '--dangerously-bypass-approvals-and-sandbox'],
+			});
+
+			await coordinator.handleProcessSpawn('sess-perm-5', config);
+
+			await flushAll();
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const envEntries = entries.filter((e) => e.type === 'environment') as VibesEnvironmentEntry[];
+			expect(envEntries).toHaveLength(1);
+			expect(envEntries[0].tool_extensions).toEqual(['permission_mode:bypassPermissions']);
+		});
+	});
+
+	// ========================================================================
+	// Subagent Lifecycle Annotations
+	// ========================================================================
+	describe('subagent lifecycle annotations', () => {
+		it('should create a session annotation when Task tool is executed', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			const config = createProcessConfig({
+				sessionId: 'sess-sub-1',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			await coordinator.handleProcessSpawn('sess-sub-1', config);
+
+			await coordinator.handleToolExecution('sess-sub-1', {
+				toolName: 'Task',
+				state: {
+					status: 'running',
+					input: {
+						subagent_type: 'Explore',
+						description: 'Search codebase',
+						prompt: 'Find all files matching pattern',
+					},
+				},
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const subagentAnnotations = annotations.filter(
+				(a) => (a as VibesSessionRecord).type === 'session'
+					&& (a as VibesSessionRecord).description?.startsWith('subagent:'),
+			) as VibesSessionRecord[];
+			expect(subagentAnnotations).toHaveLength(1);
+			expect(subagentAnnotations[0].event).toBe('start');
+			expect(subagentAnnotations[0].description).toBe('subagent:Explore:Search codebase');
+		});
+
+		it('should record subagent type as unknown when not provided', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			const config = createProcessConfig({
+				sessionId: 'sess-sub-2',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			await coordinator.handleProcessSpawn('sess-sub-2', config);
+
+			await coordinator.handleToolExecution('sess-sub-2', {
+				toolName: 'Task',
+				state: {
+					status: 'running',
+					input: { prompt: 'Do something' },
+				},
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const subagentAnnotations = annotations.filter(
+				(a) => (a as VibesSessionRecord).type === 'session'
+					&& (a as VibesSessionRecord).description?.startsWith('subagent:'),
+			) as VibesSessionRecord[];
+			expect(subagentAnnotations).toHaveLength(1);
+			expect(subagentAnnotations[0].description).toBe('subagent:unknown');
+		});
+	});
+
+	// ========================================================================
 	// Error Handling: try-catch wrappers
 	// ========================================================================
 	describe('error handling', () => {

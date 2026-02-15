@@ -15,6 +15,7 @@ import {
 	createReasoningEntry,
 	createExternalReasoningEntry,
 	createPromptEntry,
+	createSessionRecord,
 } from '../vibes-annotations';
 import { writeReasoningBlob } from '../vibes-io';
 import type { ParsedEvent } from '../../parsers/agent-output-parser';
@@ -308,6 +309,18 @@ function logWarn(message: string, data?: Record<string, unknown>): void {
  * - Result events (final responses, flushes buffered reasoning)
  * - Prompt events (captures prompts at Medium+ assurance)
  *
+ * Known limitations vs CCV hooks:
+ * - Tool failures: Claude Code's stream-json format does not emit distinct tool
+ *   failure events. CCV hooks receive PostToolUseFailure directly from the Claude
+ *   Code hook API with exit_code, error message, and is_interrupt flag. Maestro
+ *   cannot reliably detect tool failures from the output stream alone. To capture
+ *   failures, Claude Code would need to add failure events to stream-json, or
+ *   Maestro would need to use Claude Code hooks directly (a different integration
+ *   approach than output stream parsing).
+ * - Subagent stop: Stream-json does not emit SubagentStop events. CCV hooks
+ *   receive SubagentStop with agent_transcript_path from the hook API. Maestro
+ *   can only record subagent start (Task tool_use) but not completion.
+ *
  * Error handling: All public methods are wrapped in try-catch. Errors are
  * logged at warn level and never propagate to the caller.
  */
@@ -413,6 +426,31 @@ export class ClaudeCodeInstrumenter {
 				// receive tool_response.exit_code. Leave null.
 			});
 			await this.sessionManager.recordManifestEntry(sessionId, cmdHash, cmdEntry);
+
+			// Task tool = subagent delegation — create session boundary annotation.
+			// Follows CCV HOOK-ALIGN-04 pattern: description="subagent:{type}:{desc}".
+			// NOTE: Subagent stop events are not available from stream-json output.
+			// CCV hooks receive SubagentStop with agent_transcript_path from the
+			// Claude Code hook API. Maestro can only record subagent start (Task
+			// tool_use) but not completion.
+			if (event.toolName === 'Task') {
+				const taskObj = toolInput as Record<string, unknown> | null;
+				const agentType = (taskObj && typeof taskObj.subagent_type === 'string')
+					? taskObj.subagent_type
+					: (taskObj && typeof taskObj.type === 'string') ? taskObj.type : 'unknown';
+				const description = (taskObj && typeof taskObj.description === 'string')
+					? taskObj.description
+					: undefined;
+
+				const subagentAnnotation = createSessionRecord({
+					event: 'start',
+					sessionId: session.vibesSessionId,
+					environmentHash: session.environmentHash,
+					assuranceLevel: session.assuranceLevel,
+					description: `subagent:${agentType}${description ? `:${description}` : ''}`,
+				});
+				await this.sessionManager.recordAnnotation(sessionId, subagentAnnotation);
+			}
 
 			// For file-modifying tools, also create a line annotation
 			const action = TOOL_ACTION_MAP[event.toolName];
