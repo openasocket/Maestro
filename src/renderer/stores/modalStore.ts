@@ -229,7 +229,9 @@ export type ModalId =
 	| 'directorNotes'
 	// Maestro Cue
 	| 'cueModal'
-	| 'cueYamlEditor';
+	| 'cueYamlEditor'
+	// Virtuosos (Account Management)
+	| 'virtuosos';
 
 /**
  * Type mapping from ModalId to its data type.
@@ -779,6 +781,10 @@ export function getModalActions() {
 			openModal('cueYamlEditor', { sessionId, projectRoot }),
 		closeCueYamlEditor: () => closeModal('cueYamlEditor'),
 
+		// Virtuosos Modal
+		setVirtuososOpen: (open: boolean) =>
+			open ? openModal('virtuosos') : closeModal('virtuosos'),
+
 		// Lightbox refs replacement - use updateModalData instead
 		setLightboxIsGroupChat: (isGroupChat: boolean) => updateModalData('lightbox', { isGroupChat }),
 		setLightboxAllowDelete: (allowDelete: boolean) => updateModalData('lightbox', { allowDelete }),
@@ -871,6 +877,7 @@ export function useModalActions() {
 	const cueModalOpen = useModalStore(selectModalOpen('cueModal'));
 	const cueYamlEditorOpen = useModalStore(selectModalOpen('cueYamlEditor'));
 	const cueYamlEditorData = useModalStore(selectModalData('cueYamlEditor'));
+	const virtuososOpen = useModalStore(selectModalOpen('virtuosos'));
 
 	// Get stable actions
 	const actions = getModalActions();
@@ -1046,6 +1053,9 @@ export function useModalActions() {
 		cueYamlEditorOpen,
 		cueYamlEditorSessionId: cueYamlEditorData?.sessionId ?? null,
 		cueYamlEditorProjectRoot: cueYamlEditorData?.projectRoot ?? null,
+
+		// Virtuosos Modal
+		virtuososOpen,
 
 		// Lightbox ref replacements (now stored as data)
 		lightboxIsGroupChat: lightboxData?.isGroupChat ?? false,

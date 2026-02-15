@@ -221,6 +221,9 @@ export const MODAL_PRIORITIES = {
 	/** SSH Remote configuration modal (above settings) */
 	SSH_REMOTE: 458,
 
+	/** Virtuosos (account management) modal */
+	VIRTUOSOS: 455,
+
 	/** Settings modal */
 	SETTINGS: 450,
 

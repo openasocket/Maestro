@@ -39,6 +39,7 @@ import { WizardInputPanel } from './InlineWizard';
 import { useAgentCapabilities, useScrollIntoView } from '../hooks';
 import { getProviderDisplayName } from '../utils/sessionValidation';
 import { AccountSelector } from './AccountSelector';
+import { getModalActions } from '../stores/modalStore';
 
 interface SlashCommand {
 	command: string;
@@ -1025,6 +1026,7 @@ export const InputArea = React.memo(function InputArea(props: InputAreaProps) {
 										theme={theme}
 										sessionId={session.id}
 										currentAccountId={session.accountId}
+										currentAccountName={session.accountName}
 										onSwitchAccount={async (toAccountId) => {
 											const currentAccountId = session.accountId;
 											if (currentAccountId && currentAccountId !== toAccountId) {
@@ -1039,6 +1041,7 @@ export const InputArea = React.memo(function InputArea(props: InputAreaProps) {
 												await window.maestro.accounts.assign(session.id, toAccountId);
 											}
 										}}
+										onManageAccounts={() => getModalActions().setVirtuososOpen(true)}
 										compact
 									/>
 								)}

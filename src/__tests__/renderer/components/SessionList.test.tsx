@@ -72,6 +72,7 @@ vi.mock('lucide-react', () => ({
 	Zap: ({ title, style }: { title?: string; style?: Record<string, string> }) => (
 		<span data-testid="icon-zap" title={title} style={style} />
 	),
+	Users: () => <span data-testid="icon-users" />,
 }));
 
 // Mock gitService

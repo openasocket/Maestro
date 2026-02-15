@@ -330,3 +330,24 @@ export async function validateRemoteAccountDir(
 		return { exists: false, hasAuth: false, symlinksValid: false, error: String(error) };
 	}
 }
+
+/**
+ * Sync credentials (.credentials.json) from the base ~/.claude directory
+ * to an account-specific config directory.
+ * Stub — real implementation arrives in a later rebase commit.
+ */
+export async function syncCredentialsFromBase(configDir: string): Promise<{
+	success: boolean;
+	error?: string;
+}> {
+	const baseDir = path.join(os.homedir(), '.claude');
+	const srcPath = path.join(baseDir, '.credentials.json');
+	const destPath = path.join(configDir, '.credentials.json');
+
+	try {
+		await fs.copyFile(srcPath, destPath);
+		return { success: true };
+	} catch (error) {
+		return { success: false, error: String(error) };
+	}
+}
