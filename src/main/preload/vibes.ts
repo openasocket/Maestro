@@ -125,6 +125,13 @@ export function createVibesApi() {
 		clearBinaryCache: (): Promise<void> =>
 			ipcRenderer.invoke('vibes:clearBinaryCache'),
 
+		decompressReasoning: (params: {
+			compressed?: string | null;
+			blobPath?: string | null;
+			projectPath?: string | null;
+		}): Promise<{ text: string | null; error: string | null }> =>
+			ipcRenderer.invoke('vibes:decompress-reasoning', params),
+
 		/**
 		 * Subscribe to live annotation update events from the main process.
 		 * Emitted whenever the VibesCoordinator records an annotation.

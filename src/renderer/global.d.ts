@@ -2685,6 +2685,11 @@ interface MaestroAPI {
 		}>;
 		findBinary: (customPath?: string) => Promise<{ path: string | null; version: string | null }>;
 		clearBinaryCache: () => Promise<void>;
+		decompressReasoning: (params: {
+			compressed?: string | null;
+			blobPath?: string | null;
+			projectPath?: string | null;
+		}) => Promise<{ text: string | null; error: string | null }>;
 		onAnnotationUpdate: (
 			callback: (payload: {
 				sessionId: string;

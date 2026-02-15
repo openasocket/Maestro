@@ -137,8 +137,8 @@ describe('vibes-handlers', () => {
 	});
 
 	describe('handler registration', () => {
-		it('should register all 17 VIBES IPC handlers', () => {
-			expect(mockIpcMainHandle).toHaveBeenCalledTimes(17);
+		it('should register all 18 VIBES IPC handlers', () => {
+			expect(mockIpcMainHandle).toHaveBeenCalledTimes(18);
 		});
 
 		it('should register handlers with correct channel names', () => {
@@ -160,6 +160,7 @@ describe('vibes-handlers', () => {
 				'vibes:clearBinaryCache',
 				'vibes:getManifest',
 				'vibes:backfillCommit',
+				'vibes:decompress-reasoning',
 			];
 			for (const channel of expectedChannels) {
 				expect(handlers[channel]).toBeDefined();

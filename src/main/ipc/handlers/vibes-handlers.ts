@@ -17,6 +17,9 @@
  */
 
 import { ipcMain } from 'electron';
+import { gunzipSync } from 'zlib';
+import { readFile } from 'fs/promises';
+import * as path from 'path';
 import type Store from 'electron-store';
 import type { MaestroSettings } from './persistence';
 import { logger } from '../../utils/logger';
@@ -348,4 +351,32 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 			}
 		},
 	);
+
+	// Decompress compressed reasoning text or read external blob files
+	ipcMain.handle('vibes:decompress-reasoning', async (_event, params: {
+		compressed?: string | null;
+		blobPath?: string | null;
+		projectPath?: string | null;
+	}) => {
+		try {
+			// Handle compressed inline text (gzip + base64)
+			if (params.compressed) {
+				const buf = Buffer.from(params.compressed, 'base64');
+				const decompressed = gunzipSync(buf);
+				return { text: decompressed.toString('utf-8'), error: null };
+			}
+
+			// Handle external blob file
+			if (params.blobPath && params.projectPath) {
+				const fullPath = path.join(params.projectPath, '.ai-audit', params.blobPath);
+				const content = await readFile(fullPath, 'utf-8');
+				return { text: content, error: null };
+			}
+
+			return { text: null, error: 'No compressed data or blob path provided' };
+		} catch (error) {
+			logger.error('decompress-reasoning error', LOG_CONTEXT, { error: String(error) });
+			return { text: null, error: String(error) };
+		}
+	});
 }

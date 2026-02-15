@@ -48,11 +48,12 @@ describe('vibes preload API', () => {
 			expect(api).toHaveProperty('build');
 			expect(api).toHaveProperty('findBinary');
 			expect(api).toHaveProperty('clearBinaryCache');
+			expect(api).toHaveProperty('decompressReasoning');
 			expect(api).toHaveProperty('onAnnotationUpdate');
 		});
 
-		it('should have exactly 16 methods', () => {
-			expect(Object.keys(api)).toHaveLength(16);
+		it('should have exactly 17 methods', () => {
+			expect(Object.keys(api)).toHaveLength(17);
 		});
 	});
 

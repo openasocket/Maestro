@@ -42,6 +42,9 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 	onClose,
 }) => {
 	const [copiedField, setCopiedField] = useState<string | null>(null);
+	const [decompressedReasoning, setDecompressedReasoning] = useState<string | null>(null);
+	const [isDecompressing, setIsDecompressing] = useState(false);
+	const [decompressError, setDecompressError] = useState<string | null>(null);
 
 	const handleCopy = useCallback(async (text: string, field: string) => {
 		try {
@@ -75,6 +78,28 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 	const reasoning = annotation.reasoning_hash
 		? (manifest?.entries[annotation.reasoning_hash] as VibesReasoningEntry | undefined)
 		: undefined;
+
+	const handleDecompressReasoning = async () => {
+		if (!reasoning) return;
+		setIsDecompressing(true);
+		setDecompressError(null);
+		try {
+			const result = await window.maestro.vibes.decompressReasoning({
+				compressed: reasoning.reasoning_text_compressed,
+				blobPath: reasoning.blob_path,
+				projectPath: null,
+			});
+			if (result.text) {
+				setDecompressedReasoning(result.text);
+			} else {
+				setDecompressError(result.error || 'Unknown error');
+			}
+		} catch (err) {
+			setDecompressError(String(err));
+		} finally {
+			setIsDecompressing(false);
+		}
+	};
 
 	return (
 		<div
@@ -112,6 +137,28 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 					<>
 						<DataRow theme={theme} label="Tool" value={env.tool_name ? `${env.tool_name} ${env.tool_version ?? ''}`.trim() : undefined} />
 						<DataRow theme={theme} label="Model" value={env.model_name ? `${env.model_name} ${env.model_version ?? ''}`.trim() : undefined} />
+						{env.model_parameters && Object.keys(env.model_parameters).length > 0 && (
+							<DataRow
+								theme={theme}
+								label="Parameters"
+								value={JSON.stringify(env.model_parameters, null, 2)}
+								mono
+							/>
+						)}
+						{env.tool_extensions && (
+							<DataRow
+								theme={theme}
+								label="Extensions"
+								value={
+									Array.isArray(env.tool_extensions)
+										? env.tool_extensions.join(', ')
+										: typeof env.tool_extensions === 'object'
+											? JSON.stringify(env.tool_extensions, null, 2)
+											: String(env.tool_extensions)
+								}
+								mono
+							/>
+						)}
 						{annotation.environment_hash && (
 							<HashRow theme={theme} label="Hash" value={annotation.environment_hash} onCopy={handleCopy} copiedField={copiedField} />
 						)}
@@ -141,6 +188,13 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 							{cmd.command_exit_code != null && (
 								<DataRow theme={theme} label="Exit Code" value={String(cmd.command_exit_code)} />
 							)}
+							{cmd.working_directory && (
+								<DataRow theme={theme} label="CWD" value={cmd.working_directory} mono />
+							)}
+							{cmd.command_output_summary && (
+								<DataRow theme={theme} label="Output" value={cmd.command_output_summary} mono />
+							)}
+							<HashRow theme={theme} label="Hash" value={annotation.command_hash!} onCopy={handleCopy} copiedField={copiedField} />
 						</>
 					) : (
 						<HashRow theme={theme} label="Hash" value={annotation.command_hash} onCopy={handleCopy} copiedField={copiedField} />
@@ -158,6 +212,7 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 							{prompt.prompt_context_files && prompt.prompt_context_files.length > 0 && (
 								<DataRow theme={theme} label="Context" value={prompt.prompt_context_files.join(', ')} />
 							)}
+							<HashRow theme={theme} label="Hash" value={annotation.prompt_hash!} onCopy={handleCopy} copiedField={copiedField} />
 						</>
 					) : (
 						<HashRow theme={theme} label="Hash" value={annotation.prompt_hash} onCopy={handleCopy} copiedField={copiedField} />
@@ -167,18 +222,64 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 
 			{/* Resolved Reasoning */}
 			{annotation.reasoning_hash && (
-				<Section theme={theme} icon={<Brain className="w-3 h-3" />} label="Reasoning" copyText={reasoning?.reasoning_text ?? undefined}>
+				<Section theme={theme} icon={<Brain className="w-3 h-3" />} label="Reasoning"
+					copyText={reasoning?.reasoning_text ?? decompressedReasoning ?? undefined}>
 					{reasoning ? (
 						<>
-							{reasoning.compressed && (
-								<DataRow theme={theme} label="Status" value="Compressed" />
+							{/* Storage indicators */}
+							{reasoning.compressed && !reasoning.external && (
+								<DataRow theme={theme} label="Storage" value="Compressed (gzip + base64)" />
 							)}
+							{reasoning.external && (
+								<DataRow theme={theme} label="Storage" value={`External blob: ${reasoning.blob_path || 'unknown'}`} />
+							)}
+
+							{/* Inline reasoning text (uncompressed, < 10KB) */}
 							{reasoning.reasoning_text && (
 								<DataRow theme={theme} label="Text" value={reasoning.reasoning_text} mono />
 							)}
-							{reasoning.reasoning_token_count !== null && (
+
+							{/* Compressed or external — show decompress button */}
+							{!reasoning.reasoning_text && (reasoning.reasoning_text_compressed || reasoning.blob_path) && (
+								<>
+									{decompressedReasoning ? (
+										<DataRow theme={theme} label="Text" value={decompressedReasoning} mono />
+									) : isDecompressing ? (
+										<div className="flex items-center gap-2 text-[11px]" style={{ color: theme.colors.textDim }}>
+											<Loader2 className="w-3 h-3 animate-spin" />
+											Decompressing...
+										</div>
+									) : (
+										<button
+											onClick={handleDecompressReasoning}
+											className="text-[10px] px-2 py-1 rounded transition-opacity hover:opacity-80"
+											style={{
+												color: theme.colors.accent,
+												backgroundColor: theme.colors.accentDim,
+											}}
+										>
+											Load reasoning text
+											{reasoning.reasoning_text_compressed
+												? ` (~${(reasoning.reasoning_text_compressed.length * 0.75 / 1024).toFixed(1)} KB compressed)`
+												: reasoning.blob_path ? ' (external file)' : ''}
+										</button>
+									)}
+									{decompressError && (
+										<div className="text-[10px]" style={{ color: theme.colors.error }}>
+											Error: {decompressError}
+										</div>
+									)}
+								</>
+							)}
+
+							{/* Reasoning metadata */}
+							{reasoning.reasoning_model && (
+								<DataRow theme={theme} label="Model" value={reasoning.reasoning_model} />
+							)}
+							{reasoning.reasoning_token_count != null && (
 								<DataRow theme={theme} label="Tokens" value={String(reasoning.reasoning_token_count)} />
 							)}
+							<HashRow theme={theme} label="Hash" value={annotation.reasoning_hash!} onCopy={handleCopy} copiedField={copiedField} />
 						</>
 					) : (
 						<HashRow theme={theme} label="Hash" value={annotation.reasoning_hash} onCopy={handleCopy} copiedField={copiedField} />
@@ -204,6 +305,16 @@ export const VibesAnnotationDetail: React.FC<VibesAnnotationDetailProps> = ({
 					<DataRow theme={theme} label="Action" value={annotation.action} />
 				</Section>
 			)}
+
+			{/* Raw JSON toggle */}
+			<RawJsonSection
+				theme={theme}
+				annotation={annotation}
+				env={env}
+				cmd={cmd}
+				prompt={prompt}
+				reasoning={reasoning}
+			/>
 		</div>
 	);
 };
@@ -341,6 +452,60 @@ const HashRow: React.FC<{
 					<Copy className="w-3 h-3" />
 				)}
 			</button>
+		</div>
+	);
+};
+
+const RawJsonSection: React.FC<{
+	theme: Theme;
+	annotation: Exclude<VibesAnnotation, { type: 'session' }>;
+	env?: VibesEnvironmentEntry;
+	cmd?: VibesCommandEntry;
+	prompt?: VibesPromptEntry;
+	reasoning?: VibesReasoningEntry;
+}> = ({ theme, annotation, env, cmd, prompt, reasoning }) => {
+	const [showRaw, setShowRaw] = useState(false);
+
+	const rawData = {
+		annotation,
+		resolved: {
+			...(env && { environment: env }),
+			...(cmd && { command: cmd }),
+			...(prompt && { prompt }),
+			...(reasoning && {
+				reasoning: {
+					...reasoning,
+					// Don't include full compressed text in raw view — too large
+					reasoning_text_compressed: reasoning.reasoning_text_compressed
+						? `[${reasoning.reasoning_text_compressed.length} chars, base64]`
+						: null,
+				},
+			}),
+		},
+	};
+
+	return (
+		<div className="flex flex-col gap-1 pt-2 border-t" style={{ borderColor: theme.colors.border }}>
+			<button
+				onClick={() => setShowRaw(!showRaw)}
+				className="text-[10px] self-start px-2 py-0.5 rounded transition-opacity hover:opacity-80"
+				style={{ color: theme.colors.textDim }}
+			>
+				{showRaw ? 'Hide' : 'Show'} raw JSON
+			</button>
+			{showRaw && (
+				<pre
+					className="text-[10px] font-mono whitespace-pre-wrap break-all p-2 rounded"
+					style={{
+						color: theme.colors.textMain,
+						backgroundColor: theme.colors.bgMain,
+						maxHeight: 400,
+						overflowY: 'auto',
+					}}
+				>
+					{JSON.stringify(rawData, null, 2)}
+				</pre>
+			)}
 		</div>
 	);
 };
