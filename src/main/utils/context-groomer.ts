@@ -219,7 +219,6 @@ export async function groomContext(
 		sessionCustomEnvVars,
 	});
 	const resolvedArgs = configResolution.args;
-	const resolvedEnvVars = configResolution.effectiveCustomEnvVars;
 	const resolvedCommand = sessionCustomPath || agent.command;
 
 	// Create a promise that collects the response
@@ -365,14 +364,7 @@ export async function groomContext(
 			noPromptSeparator: agent.noPromptSeparator,
 			// Pass SSH config for remote execution support
 			sessionSshRemoteConfig,
-<<<<<<< HEAD
-			// Pass resolved env vars (merged from agent defaults + agent config + session overrides)
-			customEnvVars: resolvedEnvVars,
-=======
-			sessionCustomPath,
-			sessionCustomArgs,
-			sessionCustomEnvVars: effectiveEnvVars,
->>>>>>> 8c6bc003 (MAESTRO: feat: integrate account multiplexing into all agent spawn paths)
+			customEnvVars: effectiveEnvVars,
 		});
 
 		if (!spawnResult || spawnResult.pid <= 0) {

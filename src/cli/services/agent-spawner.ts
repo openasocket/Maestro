@@ -231,13 +231,19 @@ async function spawnClaudeAgent(
 	cwd: string,
 	prompt: string,
 	agentSessionId?: string,
-	readOnlyMode?: boolean
+	readOnlyMode?: boolean,
+	configDir?: string
 ): Promise<AgentResult> {
 	return new Promise((resolve) => {
 		// Note: CLI agent spawner doesn't have access to settingsStore with global shell env vars.
 		// For CLI, we rely on the environment that Maestro itself is running in.
 		// Global shell env vars are primarily used by the desktop app's process manager.
 		const env = buildExpandedEnv();
+
+		// Inject account config dir if provided (account multiplexing)
+		if (configDir) {
+			env.CLAUDE_CONFIG_DIR = configDir;
+		}
 
 		// Build args: base args + session handling + read-only + prompt
 		const args = [...CLAUDE_ARGS];
@@ -514,6 +520,8 @@ export interface SpawnAgentOptions {
 	agentSessionId?: string;
 	/** Run in read-only/plan mode (uses centralized agent definitions for provider-specific flags) */
 	readOnlyMode?: boolean;
+	/** Account config directory for account multiplexing */
+	configDir?: string;
 }
 
 /**
@@ -527,13 +535,14 @@ export async function spawnAgent(
 	options?: SpawnAgentOptions
 ): Promise<AgentResult> {
 	const readOnly = options?.readOnlyMode;
+	const configDir = options?.configDir;
 
 	if (toolType === 'codex') {
 		return spawnCodexAgent(cwd, prompt, agentSessionId, readOnly);
 	}
 
 	if (toolType === 'claude-code') {
-		return spawnClaudeAgent(cwd, prompt, agentSessionId, readOnly);
+		return spawnClaudeAgent(cwd, prompt, agentSessionId, readOnly, configDir);
 	}
 
 	return {

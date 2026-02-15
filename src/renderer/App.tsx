@@ -683,63 +683,9 @@ function MaestroConsoleInner() {
 		[setActiveSessionId, setSessions]
 	);
 
-<<<<<<< HEAD
 	// Startup effects (splash, GitHub CLI, Windows warning, gist URLs, beta updates,
 	// update check, leaderboard sync, SpecKit/OpenSpec loading, SSH configs, stats DB check,
 	// notification settings sync, playground debug) — provided by useAppInitialization hook
-=======
-	const handleProcessMonitorNavigateToGroupChat = useCallback(
-		(groupChatId: string) => {
-			// Restore state for this group chat when navigating from ProcessMonitor
-			setActiveGroupChatId(groupChatId);
-			setGroupChatState(groupChatStates.get(groupChatId) ?? 'idle');
-			setParticipantStates(allGroupChatParticipantStates.get(groupChatId) ?? new Map());
-			setProcessMonitorOpen(false);
-		},
-		[
-			setActiveGroupChatId,
-			setGroupChatState,
-			groupChatStates,
-			setParticipantStates,
-			allGroupChatParticipantStates,
-		]
-	);
-
-	// LogViewer shortcut handler
-	const handleLogViewerShortcutUsed = useCallback(
-		(shortcutId: string) => {
-			const result = recordShortcutUsage(shortcutId);
-			if (result.newLevel !== null) {
-				onKeyboardMasteryLevelUp(result.newLevel);
-			}
-		},
-		[recordShortcutUsage, onKeyboardMasteryLevelUp]
-	);
-
-	// Sync toast duration setting to ToastContext
-	useEffect(() => {
-		setToastDefaultDuration(toastDuration);
-	}, [toastDuration, setToastDefaultDuration]);
-
-	// Sync audio feedback settings to ToastContext for TTS on toast notifications
-	useEffect(() => {
-		setAudioFeedback(audioFeedbackEnabled, audioFeedbackCommand);
-	}, [audioFeedbackEnabled, audioFeedbackCommand, setAudioFeedback]);
-
-	// Sync OS notifications setting to ToastContext
-	useEffect(() => {
-		setOsNotifications(osNotificationsEnabled);
-	}, [osNotificationsEnabled, setOsNotifications]);
-
-	// Expose playground() function for developer console
-	useEffect(() => {
-		(window as unknown as { playground: () => void }).playground = () => {
-			setPlaygroundOpen(true);
-		};
-		return () => {
-			delete (window as unknown as { playground?: () => void }).playground;
-		};
-	}, []);
 
 	// Restore a persisted session by respawning its process
 	/**
@@ -1114,101 +1060,6 @@ function MaestroConsoleInner() {
 		loadSessionsAndGroups();
 	}, []);
 
-	// Hide splash screen only when both settings and sessions have fully loaded
-	// This prevents theme flash on initial render
-	useEffect(() => {
-		console.log(
-			'[App] Splash check - settingsLoaded:',
-			settingsLoaded,
-			'sessionsLoaded:',
-			sessionsLoaded
-		);
-		if (settingsLoaded && sessionsLoaded) {
-			console.log('[App] Both loaded, hiding splash');
-			if (typeof window.__hideSplash === 'function') {
-				window.__hideSplash();
-			}
-		}
-	}, [settingsLoaded, sessionsLoaded]);
-
-	// Check GitHub CLI availability for gist publishing
-	useEffect(() => {
-		window.maestro.git
-			.checkGhCli()
-			.then((status) => {
-				setGhCliAvailable(status.installed && status.authenticated);
-			})
-			.catch(() => {
-				setGhCliAvailable(false);
-			});
-	}, []);
-
-	// Track if Windows warning has been shown this session to prevent re-showing
-	const windowsWarningShownRef = useRef(false);
-
-	// Show Windows warning modal on startup for Windows users (if not suppressed)
-	// Also expose a debug function to trigger the modal from console for testing
-	useEffect(() => {
-		// Expose debug function regardless of platform (for testing)
-		exposeWindowsWarningModalDebug(setWindowsWarningModalOpen);
-
-		// Only check platform when settings have loaded (so we know suppress preference)
-		if (!settingsLoaded) return;
-
-		// Skip if user has suppressed the warning
-		if (suppressWindowsWarning) return;
-
-		// Skip if already shown this session (prevents re-showing when suppressWindowsWarning
-		// is set to false by the close handler without checking "don't show again")
-		if (windowsWarningShownRef.current) return;
-
-		// Check if running on Windows using the power API (has platform info)
-		window.maestro.power
-			.getStatus()
-			.then((status) => {
-				if (status.platform === 'win32') {
-					windowsWarningShownRef.current = true;
-					setWindowsWarningModalOpen(true);
-				}
-			})
-			.catch((error) => {
-				console.error('[App] Failed to detect platform for Windows warning:', error);
-			});
-	}, [settingsLoaded, suppressWindowsWarning, setWindowsWarningModalOpen]);
-
-	// Load file gist URLs from settings on startup
-	useEffect(() => {
-		window.maestro.settings
-			.get('fileGistUrls')
-			.then((savedUrls) => {
-				if (savedUrls && typeof savedUrls === 'object') {
-					useTabStore.getState().setFileGistUrls(savedUrls as Record<string, GistInfo>);
-				}
-			})
-			.catch(() => {
-				// Ignore errors loading gist URLs
-			});
-	}, []);
-
-	// Helper to save a gist URL for a file path
-	const saveFileGistUrl = useCallback((filePath: string, gistInfo: GistInfo) => {
-		const { fileGistUrls: current } = useTabStore.getState();
-		const updated = { ...current, [filePath]: gistInfo };
-		useTabStore.getState().setFileGistUrls(updated);
-		// Persist to settings
-		window.maestro.settings.set('fileGistUrls', updated);
-	}, []);
->>>>>>> 1143390c (MAESTRO: feat: add session/assignment persistence and restart recovery for account multiplexing)
-
-	// Expose debug helpers to window for console access
-	// No dependency array - always keep functions fresh
-	(window as any).__maestroDebug = {
-		openDebugWizard: () => setDebugWizardModalOpen(true),
-		openCommandK: () => setQuickActionOpen(true),
-		openWizard: () => openWizardModal(),
-		openSettings: () => setSettingsModalOpen(true),
-	};
-
 	// Note: Standing ovation and keyboard mastery startup checks are now in useModalHandlers
 
 	// IPC process event listeners are now in useAgentListeners hook (called after useAgentSessionManagement)
@@ -1271,8 +1122,6 @@ function MaestroConsoleInner() {
 		};
 	}, []);
 
-<<<<<<< HEAD
-=======
 	// Subscribe to account limit warning/reached events for toast notifications
 	useEffect(() => {
 		const unsubWarning = window.maestro.accounts.onLimitWarning((data) => {
@@ -1463,7 +1312,6 @@ function MaestroConsoleInner() {
 		};
 	}, []);
 
->>>>>>> 1143390c (MAESTRO: feat: add session/assignment persistence and restart recovery for account multiplexing)
 	// Keyboard navigation state
 	// Note: selectedSidebarIndex/setSelectedSidebarIndex are destructured from useUIStore() above
 	// Note: activeTab is memoized later at line ~3795 - use that for all tab operations
