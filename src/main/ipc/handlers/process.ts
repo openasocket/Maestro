@@ -25,6 +25,10 @@ import { buildExpandedEnv } from '../../../shared/pathUtils';
 import type { SshRemoteConfig } from '../../../shared/types';
 import { powerManager } from '../../power-manager';
 import { MaestroSettings } from './persistence';
+import { getExperienceStore } from '../../grpo/experience-store';
+import { injectExperiences } from '../../grpo/prompt-injector';
+import { GRPO_CONFIG_DEFAULTS } from '../../../shared/grpo-types';
+import type { GRPOConfig } from '../../../shared/grpo-types';
 
 const LOG_CONTEXT = '[ProcessManager]';
 
@@ -153,9 +157,38 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 							}
 						: null,
 				});
+				// ========================================================================
+				// GRPO Experience Injection: prepend learned insights to the prompt
+				// Must happen BEFORE buildAgentArgs so the injected prompt is included
+				// ========================================================================
+				let effectivePrompt = config.prompt;
+				if (effectivePrompt && config.cwd && config.toolType !== 'terminal') {
+					try {
+						const grpoStored = settingsStore.get('grpoConfig') as Partial<GRPOConfig> | undefined;
+						const grpoConfig: GRPOConfig = { ...GRPO_CONFIG_DEFAULTS, ...grpoStored };
+						if (grpoConfig.enabled) {
+							const experienceStore = getExperienceStore();
+							const { injectedPrompt, injectedIds, tokenCount } = await injectExperiences(
+								effectivePrompt,
+								config.cwd,
+								config.toolType,
+								experienceStore,
+								grpoConfig,
+							);
+							effectivePrompt = injectedPrompt;
+							if (injectedIds.length > 0) {
+								logger.debug(`[GRPO] Injected ${injectedIds.length} experiences (${tokenCount} tokens) for ${config.toolType}`, LOG_CONTEXT);
+							}
+						}
+					} catch (err) {
+						// GRPO injection failure should not block spawning
+						logger.warn(`[GRPO] Experience injection failed, proceeding without: ${err}`, LOG_CONTEXT);
+					}
+				}
+
 				let finalArgs = buildAgentArgs(agent, {
 					baseArgs: config.args,
-					prompt: config.prompt,
+					prompt: effectivePrompt,
 					cwd: config.cwd,
 					readOnlyMode: config.readOnlyMode,
 					modelId: config.modelId,

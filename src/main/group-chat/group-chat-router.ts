@@ -50,6 +50,7 @@ import {
 
 // Import emitters from IPC handlers (will be populated after handlers are registered)
 import { groupChatEmitters } from '../ipc/handlers/groupChat';
+import { tryInjectExperiences } from '../grpo/prompt-injector';
 
 const LOG_CONTEXT = '[GroupChatRouter]';
 
@@ -439,7 +440,7 @@ export async function routeUserMessage(
 				.map((m) => `[${m.from}]: ${m.content}`)
 				.join('\n');
 
-			const fullPrompt = `${getModeratorSystemPrompt()}
+			let fullPrompt = `${getModeratorSystemPrompt()}
 
 ## Current Participants:
 ${participantContext}${availableSessionsContext}
@@ -449,6 +450,9 @@ ${historyContext}
 
 ## User Request${readOnly ? ' (READ-ONLY MODE - do not make changes)' : ''}:
 ${message}`;
+
+			// GRPO experience injection for moderator
+			fullPrompt = await tryInjectExperiences(fullPrompt, chat.logPath, chat.moderatorAgentId);
 
 			// Get the base args from the agent configuration
 			const args = [...agent.args];
@@ -1169,7 +1173,7 @@ logger.error(`Agent '${chat.moderatorAgentId}' is not available for synthesis`, 
 					.join('\n')
 			: '(No agents currently in this group chat)';
 
-	const synthesisPrompt = `${getModeratorSystemPrompt()}
+	let synthesisPrompt = `${getModeratorSystemPrompt()}
 
 ${getModeratorSynthesisPrompt()}
 
@@ -1183,6 +1187,9 @@ ${historyContext}
 Review the agent responses above. Either:
 1. Synthesize into a final answer for the user (NO @mentions) if the question is fully answered
 2. @mention specific agents for follow-up if you need more information`;
+
+	// GRPO experience injection for moderator synthesis
+	synthesisPrompt = await tryInjectExperiences(synthesisPrompt, chat.logPath, chat.moderatorAgentId);
 
 	const agentConfigValues = getAgentConfigCallback?.(chat.moderatorAgentId) || {};
 	const baseArgs = buildAgentArgs(agent, {

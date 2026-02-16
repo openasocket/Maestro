@@ -100,6 +100,7 @@ import {
 } from './group-chat/output-buffer';
 // Phase 2 refactoring - dependency injection
 import { createSafeSend, isWebContentsAvailable } from './utils/safe-send';
+import { setGRPOSettingsStore } from './grpo/prompt-injector';
 import { createWebServerFactory } from './web-server/web-server-factory';
 // Phase 4 refactoring - app lifecycle
 import {
@@ -598,6 +599,9 @@ function setupIpcHandlers() {
 	// This is used by both group-chat-router.ts and group-chat-agent.ts via the shared config module
 	const getCustomShellPathFn = () => store.get('customShellPath', '') as string | undefined;
 	setGetCustomShellPathCallback(getCustomShellPathFn);
+
+	// Set up GRPO settings store for experience injection in group chat and other contexts
+	setGRPOSettingsStore(() => store);
 
 	// Setup logger event forwarding to renderer
 	setupLoggerEventForwarding(() => mainWindow);

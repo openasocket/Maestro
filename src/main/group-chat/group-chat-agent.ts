@@ -29,6 +29,7 @@ import { groupChatParticipantPrompt } from '../../prompts';
 import { wrapSpawnWithSsh } from '../utils/ssh-spawn-wrapper';
 import type { SshRemoteSettingsStore } from '../utils/ssh-remote-resolver';
 import { getWindowsSpawnConfig } from './group-chat-config';
+import { tryInjectExperiences } from '../grpo/prompt-injector';
 
 /**
  * In-memory store for active participant sessions.
@@ -150,7 +151,12 @@ export async function addParticipant(
 		args = [...agentConfig.args];
 	}
 
-	const prompt = getParticipantSystemPrompt(name, chat.name, chat.logPath);
+	let prompt = getParticipantSystemPrompt(name, chat.name, chat.logPath);
+
+	// GRPO experience injection: prepend learned insights to participant prompt
+	// Uses module-level settings store set via setGRPOSettingsStore() at init
+	prompt = await tryInjectExperiences(prompt, cwd, agentId);
+
 	// Note: Don't pass modelId to buildAgentArgs - it will be handled by applyAgentConfigOverrides
 	// via sessionCustomModel to avoid duplicate --model args
 	const baseArgs = buildAgentArgs(agentConfig, {
