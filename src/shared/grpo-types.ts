@@ -167,6 +167,10 @@ export interface GRPOConfig {
 	pruneAfterEpochs: number;
 	/** Whether to use global library as fallback for new projects */
 	useGlobalFallback: boolean;
+	/** Number of consecutive low-improvement epochs before early stop — default 3 */
+	earlyStoppingEpochs: number;
+	/** Whether early stopping is enabled — default true */
+	earlyStoppingEnabled: boolean;
 }
 
 /** Default GRPO configuration */
@@ -192,6 +196,8 @@ export const GRPO_CONFIG_DEFAULTS: GRPOConfig = {
 	introspectionAgent: 'claude-code',
 	pruneAfterEpochs: 5,
 	useGlobalFallback: true,
+	earlyStoppingEpochs: 3,
+	earlyStoppingEnabled: true,
 };
 
 /** Stats snapshot for dashboard display */
@@ -214,6 +220,39 @@ export interface GRPOStats {
 	totalOperations: { add: number; modify: number; delete: number };
 	/** Token cost estimate for GRPO overhead (introspection + rollouts) */
 	totalGRPOTokens: number;
+}
+
+// ─── Training Loop Types ─────────────────────────────────────────────
+
+/** Statistics for a single training epoch */
+export interface EpochStats {
+	epoch: number;
+	rolloutGroupsProcessed: number;
+	meanReward: number;
+	/** Reward improvement relative to previous epoch (fractional, e.g. 0.05 = 5%) */
+	rewardImprovement: number;
+	experienceOperations: { add: number; modify: number; delete: number };
+	librarySize: number;
+	durationMs: number;
+	tokenCost: number;
+}
+
+/** Final result of a complete training loop run */
+export interface TrainingResult {
+	epochs: EpochStats[];
+	finalLibrarySize: number;
+	totalRollouts: number;
+	totalTokenCost: number;
+	/** Reward improvement from first epoch to last (fractional) */
+	rewardImprovement: number;
+	durationMs: number;
+}
+
+/** A single task for the training loop to process */
+export interface TrainingTask {
+	prompt: string;
+	/** Optional: expected outcome for ground-truth comparison */
+	expectedOutcome?: string;
 }
 
 /** Agent-specific reward weight overrides */
