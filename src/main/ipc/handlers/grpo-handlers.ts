@@ -164,6 +164,8 @@ export function registerGRPOHandlers(deps: GRPOHandlerDependencies): void {
 				rewardTrend: 0,
 				totalOperations: { add: addCount, modify: modifyCount, delete: deleteCount },
 				totalGRPOTokens: 0,
+				epochs: [],
+				recentRolloutGroups: [],
 			};
 
 			return { success: true, data: stats };

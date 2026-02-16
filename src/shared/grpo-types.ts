@@ -200,6 +200,27 @@ export const GRPO_CONFIG_DEFAULTS: GRPOConfig = {
 	earlyStoppingEnabled: true,
 };
 
+/** Summary of a rollout group for dashboard display */
+export interface RolloutGroupSummary {
+	id: RolloutGroupId;
+	/** Truncated task prompt */
+	taskPrompt: string;
+	groupSize: number;
+	meanReward: number;
+	rewardStdDev: number;
+	epoch: number;
+	createdAt: number;
+	/** Per-rollout summary rows */
+	rollouts: {
+		index: number;
+		agentType: string;
+		aggregateReward: number;
+		rewardSignals: RewardSignalType[];
+	}[];
+	/** Operation counts: add/modify/delete from semantic advantage */
+	operations: { add: number; modify: number; delete: number };
+}
+
 /** Stats snapshot for dashboard display */
 export interface GRPOStats {
 	/** Total rollout groups processed */
@@ -220,6 +241,10 @@ export interface GRPOStats {
 	totalOperations: { add: number; modify: number; delete: number };
 	/** Token cost estimate for GRPO overhead (introspection + rollouts) */
 	totalGRPOTokens: number;
+	/** Per-epoch stats for reward trends chart */
+	epochs: EpochStats[];
+	/** Recent rollout group summaries for comparison table */
+	recentRolloutGroups: RolloutGroupSummary[];
 }
 
 // ─── Training Loop Types ─────────────────────────────────────────────
