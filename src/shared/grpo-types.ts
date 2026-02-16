@@ -280,6 +280,69 @@ export interface TrainingTask {
 	expectedOutcome?: string;
 }
 
+// ─── Symphony Collector Types ────────────────────────────────────────────────
+
+/** A collected reward signal from a single Auto Run task execution */
+export interface CollectedSignal {
+	taskContent: string;
+	/** SHA-256 first 12 chars of normalized task content — for matching identical tasks across runs */
+	taskContentHash: string;
+	rewards: RewardSignal[];
+	aggregateReward: number;
+	agentType: string;
+	sessionId: string;
+	durationMs: number;
+	collectedAt: number;
+	documentPath: string;
+	projectPath: string;
+}
+
+/** Aggregated result for a single document in a batch run */
+export interface BatchCollectionResult {
+	documentPath: string;
+	signals: CollectedSignal[];
+	overallSuccess: boolean;
+}
+
+/** Summary generated after a batch run completes */
+export interface CollectionSummary {
+	documentsProcessed: number;
+	signalsCollected: number;
+	meanTaskReward: number;
+	/** How many unique tasks now have 2+ executions (potential rollout groups) */
+	matchedPairCount: number;
+	/** Suggested: enough data for training? */
+	trainingRecommended: boolean;
+}
+
+/** Training readiness assessment */
+export interface TrainingReadiness {
+	/** Total unique tasks with 2+ recorded executions */
+	matchedTaskCount: number;
+	/** Minimum rollout group size available */
+	minGroupSize: number;
+	/** Whether enough data exists for a meaningful training run */
+	ready: boolean;
+	/** Suggested tasks to use as training data */
+	suggestedTasks: { prompt: string; executionCount: number }[];
+}
+
+/** Signal index entry — tracks per-task execution counts and latest rewards */
+export interface SignalIndexEntry {
+	taskContentHash: string;
+	normalizedContent: string;
+	executionCount: number;
+	latestReward: number;
+	firstSeen: number;
+	lastSeen: number;
+}
+
+/** Signal index file format */
+export interface SignalIndex {
+	version: number;
+	entries: Record<string, SignalIndexEntry>;
+}
+
 /** Agent-specific reward weight overrides */
 export const AGENT_REWARD_OVERRIDES: Partial<Record<string, Partial<Record<RewardSignalType, number>>>> = {
 	'claude-code': {

@@ -35,6 +35,18 @@ export function createGrpoApi() {
 			ipcRenderer.invoke('grpo:exportLibrary', projectPath),
 		importLibrary: (projectPath: string, json: string): Promise<{ success: boolean; data?: number; error?: string }> =>
 			ipcRenderer.invoke('grpo:importLibrary', projectPath, json),
+		// Symphony Collector (Auto Run signal collection)
+		onAutoRunTaskComplete: (
+			taskContent: string, projectPath: string, agentType: string, sessionId: string,
+			exitCode: number, output: string, durationMs: number, documentPath: string,
+		): Promise<{ success: boolean; data?: any; error?: string }> =>
+			ipcRenderer.invoke('grpo:onAutoRunTaskComplete', taskContent, projectPath, agentType, sessionId, exitCode, output, durationMs, documentPath),
+		onAutoRunBatchComplete: (projectPath: string, batchResults: any[]): Promise<{ success: boolean; data?: any; error?: string }> =>
+			ipcRenderer.invoke('grpo:onAutoRunBatchComplete', projectPath, batchResults),
+		getTrainingReadiness: (projectPath: string): Promise<{ success: boolean; data?: any; error?: string }> =>
+			ipcRenderer.invoke('grpo:getTrainingReadiness', projectPath),
+		formNaturalRolloutGroups: (projectPath: string): Promise<{ success: boolean; data?: any[]; error?: string }> =>
+			ipcRenderer.invoke('grpo:formNaturalRolloutGroups', projectPath),
 	};
 }
 

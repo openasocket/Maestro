@@ -9,6 +9,7 @@
 import { ipcMain } from 'electron';
 import { withIpcErrorLogging, CreateHandlerOptions } from '../../utils/ipcHandler';
 import { ExperienceStore } from '../../grpo/experience-store';
+import { SymphonyCollector } from '../../grpo/symphony-collector';
 import {
 	collectAllRewards,
 	detectProjectCommands,
@@ -18,6 +19,7 @@ import type {
 	ExperienceScope,
 	GRPOConfig,
 	GRPOStats,
+	BatchCollectionResult,
 } from '../../../shared/grpo-types';
 import { GRPO_CONFIG_DEFAULTS } from '../../../shared/grpo-types';
 
@@ -30,6 +32,7 @@ const handlerOpts = (operation: string): Pick<CreateHandlerOptions, 'context' | 
 
 export interface GRPOHandlerDependencies {
 	experienceStore: ExperienceStore;
+	symphonyCollector?: SymphonyCollector;
 	settingsStore: { get: (key: string) => unknown; set: (key: string, value: unknown) => void };
 }
 
@@ -216,5 +219,93 @@ export function registerGRPOHandlers(deps: GRPOHandlerDependencies): void {
 			}
 			return { success: true, data: count };
 		})
+	);
+
+	// ─── Symphony Collector (Auto Run Signal Collection) ─────────────────
+
+	// Collect reward signals from a completed Auto Run task
+	ipcMain.handle(
+		'grpo:onAutoRunTaskComplete',
+		withIpcErrorLogging(
+			handlerOpts('onAutoRunTaskComplete'),
+			async (
+				taskContent: string,
+				projectPath: string,
+				agentType: string,
+				sessionId: string,
+				exitCode: number,
+				output: string,
+				durationMs: number,
+				documentPath: string,
+			) => {
+				const config = readConfig(settingsStore);
+				if (!config.enabled) {
+					return { success: true, data: null };
+				}
+				if (!deps.symphonyCollector) {
+					return { success: false, error: 'Symphony collector not initialized' };
+				}
+				deps.symphonyCollector.setConfig(config);
+				const signal = await deps.symphonyCollector.onTaskComplete(
+					taskContent, projectPath, agentType, sessionId,
+					exitCode, output, durationMs, documentPath,
+				);
+				return { success: true, data: signal };
+			}
+		)
+	);
+
+	// Collect summary after an entire Auto Run batch completes
+	ipcMain.handle(
+		'grpo:onAutoRunBatchComplete',
+		withIpcErrorLogging(
+			handlerOpts('onAutoRunBatchComplete'),
+			async (projectPath: string, batchResults: BatchCollectionResult[]) => {
+				const config = readConfig(settingsStore);
+				if (!config.enabled) {
+					return { success: true, data: null };
+				}
+				if (!deps.symphonyCollector) {
+					return { success: false, error: 'Symphony collector not initialized' };
+				}
+				deps.symphonyCollector.setConfig(config);
+				const summary = await deps.symphonyCollector.onBatchComplete(projectPath, batchResults);
+				return { success: true, data: summary };
+			}
+		)
+	);
+
+	// Check training readiness
+	ipcMain.handle(
+		'grpo:getTrainingReadiness',
+		withIpcErrorLogging(
+			handlerOpts('getTrainingReadiness'),
+			async (projectPath: string) => {
+				const config = readConfig(settingsStore);
+				if (!deps.symphonyCollector) {
+					return { success: false, error: 'Symphony collector not initialized' };
+				}
+				deps.symphonyCollector.setConfig(config);
+				const readiness = await deps.symphonyCollector.getTrainingReadiness(projectPath);
+				return { success: true, data: readiness };
+			}
+		)
+	);
+
+	// Form natural rollout groups from accumulated signals
+	ipcMain.handle(
+		'grpo:formNaturalRolloutGroups',
+		withIpcErrorLogging(
+			handlerOpts('formNaturalRolloutGroups'),
+			async (projectPath: string) => {
+				const config = readConfig(settingsStore);
+				if (!deps.symphonyCollector) {
+					return { success: false, error: 'Symphony collector not initialized' };
+				}
+				deps.symphonyCollector.setConfig(config);
+				const groups = await deps.symphonyCollector.formNaturalRolloutGroups(projectPath);
+				return { success: true, data: groups };
+			}
+		)
 	);
 }
