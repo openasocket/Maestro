@@ -115,6 +115,9 @@ const mockGrpoApi = {
 	pruneLibrary: vi.fn(),
 	exportLibrary: vi.fn(),
 	importLibrary: vi.fn(),
+	getModelStatus: vi.fn(),
+	clearModelCache: vi.fn(),
+	onModelDownloadProgress: vi.fn(),
 };
 
 // Setup window.maestro mock
@@ -143,6 +146,9 @@ beforeEach(() => {
 		data: JSON.stringify(mockEntries),
 	});
 	mockGrpoApi.importLibrary.mockResolvedValue({ success: true, data: 3 });
+	mockGrpoApi.getModelStatus.mockResolvedValue({ success: true, data: 'not-available' });
+	mockGrpoApi.clearModelCache.mockResolvedValue({ success: true });
+	mockGrpoApi.onModelDownloadProgress.mockReturnValue(() => {});
 
 	// @ts-ignore - mock window.maestro
 	window.maestro = {

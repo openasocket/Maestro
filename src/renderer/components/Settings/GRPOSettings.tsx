@@ -159,6 +159,33 @@ export const GRPOSettings = memo(function GRPOSettings({ theme }: GRPOSettingsPr
 				</button>
 			</div>
 
+			{/* Download Progress Bar (shown below toggle when model is downloading) */}
+			{config.enabled && downloadProgress != null && (
+				<div style={{ paddingLeft: 4 }}>
+					<div style={{
+						fontSize: 11,
+						color: theme.colors.textDim,
+						marginBottom: 4,
+					}}>
+						Downloading embedding model... {downloadProgress}%
+					</div>
+					<div style={{
+						height: 4,
+						borderRadius: 2,
+						backgroundColor: theme.colors.border,
+						overflow: 'hidden',
+					}}>
+						<div style={{
+							height: '100%',
+							width: `${downloadProgress}%`,
+							backgroundColor: theme.colors.accent,
+							borderRadius: 2,
+							transition: 'width 0.3s ease',
+						}} />
+					</div>
+				</div>
+			)}
+
 			{/* Configuration Section */}
 			<div
 				className="p-4 rounded-lg border"

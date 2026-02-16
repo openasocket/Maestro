@@ -6,15 +6,16 @@
  * interface, withIpcErrorLogging wrapper, consistent { success, data, error } responses.
  */
 
-import { ipcMain } from 'electron';
+import { ipcMain, BrowserWindow } from 'electron';
 import { withIpcErrorLogging, CreateHandlerOptions } from '../../utils/ipcHandler';
+import { logger } from '../../utils/logger';
 import { ExperienceStore } from '../../grpo/experience-store';
-import { SymphonyCollector } from '../../grpo/symphony-collector';
+import { SymphonyCollector, initializeSymphonyCollector, getSymphonyCollector } from '../../grpo/symphony-collector';
 import {
 	collectAllRewards,
 	detectProjectCommands,
 } from '../../grpo/reward-collector';
-import { getModelStatus, getCacheDir } from '../../grpo/embedding-service';
+import { getModelStatus, getCacheDir, preloadModel, setDownloadProgressCallback, dispose as disposeEmbedding } from '../../grpo/embedding-service';
 import type { EmbeddingModelStatus } from '../../grpo/embedding-service';
 import type {
 	ExperienceEntry,
@@ -60,13 +61,69 @@ export function registerGRPOHandlers(deps: GRPOHandlerDependencies): void {
 		})
 	);
 
-	// Update GRPO config (partial merge)
+	// Update GRPO config (partial merge) — detects toggle transitions and triggers initialization/disposal
 	ipcMain.handle(
 		'grpo:setConfig',
 		withIpcErrorLogging(handlerOpts('setConfig'), async (config: Partial<GRPOConfig>) => {
-			const current = readConfig(settingsStore);
-			const merged = { ...current, ...config };
+			const previous = readConfig(settingsStore);
+			const merged = { ...previous, ...config };
 			settingsStore.set(GRPO_CONFIG_KEY, merged);
+
+			const wasEnabled = previous.enabled;
+			const isEnabled = merged.enabled;
+			const modelChanged = previous.embeddingModel !== merged.embeddingModel;
+
+			// GRPO just toggled ON (or embedding model changed while enabled) — initialize subsystems
+			if (isEnabled && (!wasEnabled || modelChanged)) {
+				// Initialize SymphonyCollector (idempotent via singleton)
+				initializeSymphonyCollector(merged).catch(err => {
+					logger.warn(`[GRPO] Failed to initialize symphony collector on toggle: ${err}`, LOG_CONTEXT);
+				});
+
+				// Update symphonyCollector reference in handler deps
+				// (it was undefined when registered at startup because GRPO was disabled)
+				deps.symphonyCollector = getSymphonyCollector(merged);
+
+				// Wire download progress forwarding to renderer
+				setDownloadProgressCallback((info) => {
+					try {
+						const win = BrowserWindow.getAllWindows()[0];
+						if (win && !win.isDestroyed()) {
+							win.webContents.send('grpo:model-download-progress', info);
+						}
+					} catch { /* ignore if no window */ }
+				});
+
+				// Start model download/preload (fire-and-forget)
+				const modelId = merged.embeddingModel ?? 'multilingual';
+				preloadModel(modelId).then(() => {
+					logger.info(`[GRPO] Embedding model '${modelId}' ready`, LOG_CONTEXT);
+					setDownloadProgressCallback(null);
+					// Notify renderer that download is complete
+					try {
+						const win = BrowserWindow.getAllWindows()[0];
+						if (win && !win.isDestroyed()) {
+							win.webContents.send('grpo:model-download-progress', { progress: 100, done: true });
+						}
+					} catch { /* ignore */ }
+				}).catch(err => {
+					logger.warn(`[GRPO] Failed to preload embedding model on toggle: ${err}`, LOG_CONTEXT);
+					setDownloadProgressCallback(null);
+				});
+			}
+
+			// GRPO just toggled OFF — dispose embedding model to free resources
+			if (!isEnabled && wasEnabled) {
+				disposeEmbedding().catch(err => {
+					logger.warn(`[GRPO] Failed to dispose embedding on toggle off: ${err}`, LOG_CONTEXT);
+				});
+			}
+
+			// Update collector config if it exists
+			if (deps.symphonyCollector) {
+				deps.symphonyCollector.setConfig(merged);
+			}
+
 			return { success: true };
 		})
 	);
