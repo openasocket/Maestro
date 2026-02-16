@@ -16,7 +16,6 @@ import type { GroomingProcessManager } from '../utils/context-groomer';
 import type { AgentDetector } from '../agents';
 import type {
 	RolloutGroup,
-	RolloutOutput,
 	SemanticAdvantage,
 	ExperienceUpdateOperation,
 	ExperienceEntry,

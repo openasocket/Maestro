@@ -2635,6 +2635,22 @@ interface MaestroAPI {
 		}) => Promise<string | null>;
 	};
 
+	// GRPO API (Training-Free GRPO experience library)
+	grpo: {
+		getConfig: () => Promise<{ success: boolean; data?: any; error?: string }>;
+		setConfig: (config: Record<string, unknown>) => Promise<{ success: boolean; error?: string }>;
+		getLibrary: (projectPath: string, scope?: string) => Promise<{ success: boolean; data?: any[]; error?: string }>;
+		addExperience: (projectPath: string, entry: Record<string, unknown>) => Promise<{ success: boolean; data?: any; error?: string }>;
+		modifyExperience: (projectPath: string, id: string, updates: Record<string, unknown>) => Promise<{ success: boolean; data?: any; error?: string }>;
+		deleteExperience: (projectPath: string, id: string) => Promise<{ success: boolean; error?: string }>;
+		getHistory: (projectPath: string, limit?: number) => Promise<{ success: boolean; data?: any[]; error?: string }>;
+		collectRewards: (projectPath: string, exitCode: number, agentOutput: string) => Promise<{ success: boolean; data?: any[]; error?: string }>;
+		getStats: (projectPath: string) => Promise<{ success: boolean; data?: any; error?: string }>;
+		pruneLibrary: (projectPath: string) => Promise<{ success: boolean; data?: string[]; error?: string }>;
+		exportLibrary: (projectPath: string) => Promise<{ success: boolean; data?: string; error?: string }>;
+		importLibrary: (projectPath: string, json: string) => Promise<{ success: boolean; data?: number; error?: string }>;
+	};
+
 	// Director's Notes API (unified history + synopsis generation)
 	directorNotes: {
 		getUnifiedHistory: (options: {

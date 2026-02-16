@@ -15,7 +15,6 @@
  */
 
 import * as fs from 'fs/promises';
-import * as fsSync from 'fs';
 import * as path from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { app } from 'electron';

@@ -52,6 +52,8 @@ import { registerSymphonyHandlers, SymphonyHandlerDependencies } from './symphon
 import { registerAgentErrorHandlers } from './agent-error';
 import { registerTabNamingHandlers, TabNamingHandlerDependencies } from './tabNaming';
 import { registerDirectorNotesHandlers, DirectorNotesHandlerDependencies } from './director-notes';
+import { registerGRPOHandlers, GRPOHandlerDependencies } from './grpo-handlers';
+import { getExperienceStore } from '../../grpo/experience-store';
 import { AgentDetector } from '../../agents';
 import { ProcessManager } from '../../process-manager';
 import { WebServer } from '../../web-server';
@@ -95,6 +97,8 @@ export { registerTabNamingHandlers };
 export type { TabNamingHandlerDependencies };
 export { registerDirectorNotesHandlers };
 export type { DirectorNotesHandlerDependencies };
+export { registerGRPOHandlers };
+export type { GRPOHandlerDependencies };
 export type { AgentsHandlerDependencies };
 export type { ProcessHandlerDependencies };
 export type { PersistenceHandlerDependencies };
@@ -277,6 +281,11 @@ export function registerAllHandlers(deps: HandlerDependencies): void {
 	registerDirectorNotesHandlers({
 		getProcessManager: deps.getProcessManager,
 		getAgentDetector: deps.getAgentDetector,
+	});
+	// Register GRPO handlers for experience library management
+	registerGRPOHandlers({
+		experienceStore: getExperienceStore(),
+		settingsStore: deps.settingsStore,
 	});
 	// Setup logger event forwarding to renderer
 	setupLoggerEventForwarding(deps.getMainWindow);
