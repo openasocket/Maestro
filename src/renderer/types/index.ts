@@ -705,6 +705,13 @@ export interface Session {
 
 	// Symphony contribution metadata (only set for Symphony sessions)
 	symphonyMetadata?: SymphonySessionMetadata;
+
+	/** Experience library version active when this session was spawned */
+	experienceVersion?: number;
+	/** Rollout group ID if this session is part of a GRPO rollout */
+	rolloutGroupId?: string;
+	/** Rollout index within the group (0-based) */
+	rolloutIndex?: number;
 }
 
 export interface AgentConfigOption {
