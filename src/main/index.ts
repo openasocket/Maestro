@@ -102,6 +102,11 @@ import {
 import { createSafeSend, isWebContentsAvailable } from './utils/safe-send';
 import { setGRPOSettingsStore } from './grpo/prompt-injector';
 import { preloadModel as preloadEmbeddingModel, setDownloadProgressCallback } from './grpo/embedding-service';
+import { registerGRPOHandlers } from './ipc/handlers/grpo-handlers';
+import { initializeSymphonyCollector, getSymphonyCollector } from './grpo/symphony-collector';
+import { getExperienceStore } from './grpo/experience-store';
+import { GRPO_CONFIG_DEFAULTS } from '../shared/grpo-types';
+import type { GRPOConfig } from '../shared/grpo-types';
 import { createWebServerFactory } from './web-server/web-server-factory';
 // Phase 4 refactoring - app lifecycle
 import {
@@ -626,6 +631,22 @@ function setupIpcHandlers() {
 			setDownloadProgressCallback(null);
 		});
 	}
+
+	// Initialize SymphonyCollector if GRPO is enabled
+	const grpoStored = store.get('grpoConfig') as Partial<GRPOConfig> | undefined;
+	const grpoMergedConfig: GRPOConfig = { ...GRPO_CONFIG_DEFAULTS, ...grpoStored };
+	if (grpoMergedConfig.enabled) {
+		initializeSymphonyCollector(grpoMergedConfig).catch(err => {
+			logger.warn(`[GRPO] Failed to initialize symphony collector: ${err}`);
+		});
+	}
+
+	// Register GRPO IPC handlers — MUST be called here since registerAllHandlers() is never invoked
+	registerGRPOHandlers({
+		experienceStore: getExperienceStore(),
+		symphonyCollector: grpoMergedConfig.enabled ? getSymphonyCollector(grpoMergedConfig) : undefined,
+		settingsStore: store,
+	});
 
 	// Setup logger event forwarding to renderer
 	setupLoggerEventForwarding(() => mainWindow);
