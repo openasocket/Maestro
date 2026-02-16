@@ -14,8 +14,26 @@
  * retrieval because production libraries outgrow the token budget.
  */
 
-import { pipeline, type FeatureExtractionPipeline } from '@huggingface/transformers';
+import { pipeline, type FeatureExtractionPipeline, type ProgressCallback } from '@huggingface/transformers';
 import { logger } from '../utils/logger';
+
+/** Custom error thrown when the embedding model is not available (download failed, offline, etc.) */
+export class EmbeddingModelNotAvailableError extends Error {
+	constructor(message: string, public readonly cause?: unknown) {
+		super(message);
+		this.name = 'EmbeddingModelNotAvailableError';
+	}
+}
+
+/** Model status for UI display */
+export type EmbeddingModelStatus = 'loaded' | 'downloading' | 'not-available' | 'disabled';
+
+/** Download progress info sent to renderer */
+export interface ModelDownloadProgress {
+	progress: number;
+	file?: string;
+	done?: boolean;
+}
 
 export type EmbeddingModelId = 'multilingual' | 'english';
 
@@ -37,6 +55,31 @@ export const VECTOR_DIM = 384; // Both models produce 384-dim vectors
 let instance: FeatureExtractionPipeline | null = null;
 let loadingPromise: Promise<FeatureExtractionPipeline> | null = null;
 let activeModelId: EmbeddingModelId | null = null;
+let modelLoadFailed = false;
+
+/** Optional callback for download progress (set by the caller) */
+let onDownloadProgress: ((info: ModelDownloadProgress) => void) | null = null;
+
+/**
+ * Set a callback for model download progress events.
+ * Used by the main process to surface download progress to the renderer.
+ */
+export function setDownloadProgressCallback(
+	cb: ((info: ModelDownloadProgress) => void) | null
+): void {
+	onDownloadProgress = cb;
+}
+
+/**
+ * Get the current model status for UI display.
+ */
+export function getModelStatus(semanticRetrievalEnabled: boolean): EmbeddingModelStatus {
+	if (!semanticRetrievalEnabled) return 'disabled';
+	if (instance) return 'loaded';
+	if (loadingPromise) return 'downloading';
+	if (modelLoadFailed) return 'not-available';
+	return 'not-available'; // not yet loaded
+}
 
 /**
  * Get or initialize the embedding pipeline (lazy singleton).
@@ -62,20 +105,31 @@ async function getEmbedder(modelId: EmbeddingModelId = 'multilingual'): Promise<
 	const model = MODEL_REGISTRY[modelId];
 	logger.debug(`Loading embedding model: ${model.hfId}`, LOG_CONTEXT);
 
+	modelLoadFailed = false;
 	loadingPromise = pipeline('feature-extraction', model.hfId, {
 		dtype: 'q8',       // Use int8 ONNX variant
 		revision: 'main',
+		progress_callback: ((info: any) => {
+			if (onDownloadProgress && info.status === 'download' && info.progress != null) {
+				onDownloadProgress({ progress: info.progress, file: info.file });
+			}
+		}) as ProgressCallback,
 	})
 		.then((pipe) => {
 			instance = pipe;
 			activeModelId = modelId;
 			loadingPromise = null;
+			modelLoadFailed = false;
 			logger.debug(`Embedding model loaded: ${modelId}`, LOG_CONTEXT);
 			return pipe;
 		})
 		.catch((err) => {
 			loadingPromise = null;
-			throw err;
+			modelLoadFailed = true;
+			throw new EmbeddingModelNotAvailableError(
+				`Failed to load embedding model '${modelId}': ${err}`,
+				err
+			);
 		});
 
 	return loadingPromise;
@@ -145,4 +199,16 @@ export async function dispose(): Promise<void> {
 		loadingPromise = null;
 		activeModelId = null;
 	}
+	modelLoadFailed = false;
+}
+
+/**
+ * Get the HuggingFace model cache directory path.
+ * Returns the default cache location (~/.cache/huggingface/).
+ */
+export function getCacheDir(): string {
+	// @huggingface/transformers uses env.cacheDir, which defaults to ~/.cache/huggingface/
+	// We return the standard location for cleanup purposes
+	const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+	return require('path').join(homeDir, '.cache', 'huggingface');
 }

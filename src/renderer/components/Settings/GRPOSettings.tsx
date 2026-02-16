@@ -6,10 +6,12 @@
  * All values read from / written to window.maestro.grpo.getConfig() / setConfig().
  */
 
-import React, { useState, useEffect, useCallback, memo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import type { Theme } from '../../types';
 import type { GRPOConfig, RewardSignalType, GRPOEmbeddingModel } from '../../../shared/grpo-types';
 import { GRPO_CONFIG_DEFAULTS } from '../../../shared/grpo-types';
+
+type ModelStatus = 'loaded' | 'downloading' | 'not-available' | 'disabled' | 'unknown';
 
 interface GRPOSettingsProps {
 	theme: Theme;
@@ -39,18 +41,36 @@ const EMBEDDING_MODELS: { value: GRPOEmbeddingModel; label: string }[] = [
 	{ value: 'english', label: 'English only (faster, smaller)' },
 ];
 
+const MODEL_STATUS_DISPLAY: Record<ModelStatus, { label: string; color: string }> = {
+	loaded: { label: 'Model loaded', color: '#4ade80' },
+	downloading: { label: 'Model downloading...', color: '#fbbf24' },
+	'not-available': { label: 'Model not available — download failed. Semantic retrieval disabled until model is available.', color: '#f87171' },
+	disabled: { label: 'Semantic retrieval disabled', color: '#9ca3af' },
+	unknown: { label: 'Checking status...', color: '#9ca3af' },
+};
+
 export const GRPOSettings = memo(function GRPOSettings({ theme }: GRPOSettingsProps) {
 	const [config, setConfig] = useState<GRPOConfig>(GRPO_CONFIG_DEFAULTS);
 	const [loading, setLoading] = useState(true);
+	const [modelStatus, setModelStatus] = useState<ModelStatus>('unknown');
+	const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+	const [clearingCache, setClearingCache] = useState(false);
+	const cleanupRef = useRef<(() => void) | null>(null);
 
-	// Fetch config on mount
+	// Fetch config and model status on mount
 	useEffect(() => {
 		let cancelled = false;
 		setLoading(true);
-		window.maestro.grpo.getConfig().then((result) => {
+		Promise.all([
+			window.maestro.grpo.getConfig(),
+			window.maestro.grpo.getModelStatus(),
+		]).then(([configResult, statusResult]) => {
 			if (cancelled) return;
-			if (result.success && result.data) {
-				setConfig({ ...GRPO_CONFIG_DEFAULTS, ...result.data });
+			if (configResult.success && configResult.data) {
+				setConfig({ ...GRPO_CONFIG_DEFAULTS, ...configResult.data });
+			}
+			if (statusResult.success && statusResult.data) {
+				setModelStatus(statusResult.data as ModelStatus);
 			}
 			setLoading(false);
 		}).catch(() => {
@@ -59,12 +79,39 @@ export const GRPOSettings = memo(function GRPOSettings({ theme }: GRPOSettingsPr
 		return () => { cancelled = true; };
 	}, []);
 
+	// Listen for model download progress events
+	useEffect(() => {
+		const cleanup = window.maestro.grpo.onModelDownloadProgress((info) => {
+			if (info.done) {
+				setModelStatus('loaded');
+				setDownloadProgress(null);
+			} else if (info.progress != null) {
+				setModelStatus('downloading');
+				setDownloadProgress(Math.round(info.progress));
+			}
+		});
+		cleanupRef.current = cleanup;
+		return () => { cleanup(); };
+	}, []);
+
 	const updateConfig = useCallback((updates: Partial<GRPOConfig>) => {
 		setConfig((prev) => {
 			const next = { ...prev, ...updates };
 			window.maestro.grpo.setConfig(next as unknown as Record<string, unknown>);
 			return next;
 		});
+	}, []);
+
+	const handleClearCache = useCallback(async () => {
+		setClearingCache(true);
+		try {
+			await window.maestro.grpo.clearModelCache();
+			setModelStatus('not-available');
+		} catch {
+			// ignore
+		} finally {
+			setClearingCache(false);
+		}
 	}, []);
 
 	const updateRewardWeight = useCallback((type: RewardSignalType, weight: number) => {
@@ -368,6 +415,34 @@ export const GRPOSettings = memo(function GRPOSettings({ theme }: GRPOSettingsPr
 								{config.semanticSimilarityFloor.toFixed(2)}
 							</span>
 						</div>
+					</div>
+
+					{/* Model Status Indicator */}
+					<div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: theme.colors.border }}>
+						<div className="flex items-center gap-2">
+							<div
+								className="w-2 h-2 rounded-full"
+								style={{ backgroundColor: MODEL_STATUS_DISPLAY[modelStatus].color }}
+							/>
+							<span className="text-xs" style={{ color: theme.colors.textDim }}>
+								{modelStatus === 'downloading' && downloadProgress != null
+									? `Downloading embedding model... ${downloadProgress}%`
+									: MODEL_STATUS_DISPLAY[modelStatus].label
+								}
+							</span>
+						</div>
+						<button
+							onClick={handleClearCache}
+							disabled={clearingCache}
+							className="text-xs px-2 py-0.5 rounded border"
+							style={{
+								borderColor: theme.colors.border,
+								color: theme.colors.textDim,
+								opacity: clearingCache ? 0.5 : 1,
+							}}
+						>
+							{clearingCache ? 'Clearing...' : 'Clear model cache'}
+						</button>
 					</div>
 				</div>
 			</div>

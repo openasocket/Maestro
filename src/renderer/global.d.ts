@@ -2649,6 +2649,9 @@ interface MaestroAPI {
 		pruneLibrary: (projectPath: string) => Promise<{ success: boolean; data?: string[]; error?: string }>;
 		exportLibrary: (projectPath: string) => Promise<{ success: boolean; data?: string; error?: string }>;
 		importLibrary: (projectPath: string, json: string) => Promise<{ success: boolean; data?: number; error?: string }>;
+		getModelStatus: () => Promise<{ success: boolean; data?: string; error?: string }>;
+		clearModelCache: () => Promise<{ success: boolean; error?: string }>;
+		onModelDownloadProgress: (callback: (info: { progress: number; file?: string; done?: boolean }) => void) => () => void;
 	};
 
 	// Director's Notes API (unified history + synopsis generation)

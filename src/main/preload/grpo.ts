@@ -47,6 +47,17 @@ export function createGrpoApi() {
 			ipcRenderer.invoke('grpo:getTrainingReadiness', projectPath),
 		formNaturalRolloutGroups: (projectPath: string): Promise<{ success: boolean; data?: any[]; error?: string }> =>
 			ipcRenderer.invoke('grpo:formNaturalRolloutGroups', projectPath),
+		// Embedding model status and cache management
+		getModelStatus: (): Promise<{ success: boolean; data?: string; error?: string }> =>
+			ipcRenderer.invoke('grpo:getModelStatus'),
+		clearModelCache: (): Promise<{ success: boolean; error?: string }> =>
+			ipcRenderer.invoke('grpo:clearModelCache'),
+		// Download progress event listener (for first-run model download)
+		onModelDownloadProgress: (callback: (info: { progress: number; file?: string; done?: boolean }) => void): (() => void) => {
+			const handler = (_event: any, info: any) => callback(info);
+			ipcRenderer.on('grpo:model-download-progress', handler);
+			return () => { ipcRenderer.removeListener('grpo:model-download-progress', handler); };
+		},
 	};
 }
 

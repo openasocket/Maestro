@@ -83,6 +83,10 @@ import {
 	preloadModel,
 	dispose,
 	VECTOR_DIM,
+	EmbeddingModelNotAvailableError,
+	getModelStatus,
+	setDownloadProgressCallback,
+	getCacheDir,
 } from '../../../main/grpo/embedding-service';
 
 beforeEach(async () => {
@@ -310,5 +314,75 @@ describe('dispose', () => {
 		await dispose();
 		await dispose(); // should not throw
 		expect(getActiveModelId()).toBeNull();
+	});
+});
+
+describe('EmbeddingModelNotAvailableError', () => {
+	it('should be thrown when pipeline fails', async () => {
+		// Override the mock to simulate a failure
+		const { pipeline: mockPipeline } = await import('@huggingface/transformers');
+		(mockPipeline as any).mockRejectedValueOnce(new Error('Network error: model download failed'));
+
+		try {
+			await encode('test');
+			expect.unreachable('Should have thrown');
+		} catch (err) {
+			expect(err).toBeInstanceOf(EmbeddingModelNotAvailableError);
+			expect((err as Error).message).toMatch(/Failed to load embedding model/);
+		}
+	});
+
+	it('should include the original error as cause', async () => {
+		const originalError = new Error('ECONNREFUSED');
+		const err = new EmbeddingModelNotAvailableError('Model not available', originalError);
+		expect(err.cause).toBe(originalError);
+		expect(err.name).toBe('EmbeddingModelNotAvailableError');
+	});
+});
+
+describe('getModelStatus', () => {
+	it('should return "disabled" when semantic retrieval is disabled', () => {
+		expect(getModelStatus(false)).toBe('disabled');
+	});
+
+	it('should return "not-available" before model is loaded', () => {
+		expect(getModelStatus(true)).toBe('not-available');
+	});
+
+	it('should return "loaded" after model is loaded', async () => {
+		await encode('test');
+		expect(getModelStatus(true)).toBe('loaded');
+	});
+
+	it('should return "not-available" after dispose', async () => {
+		await encode('test');
+		expect(getModelStatus(true)).toBe('loaded');
+		await dispose();
+		expect(getModelStatus(true)).toBe('not-available');
+	});
+});
+
+describe('setDownloadProgressCallback', () => {
+	it('should accept null to clear callback', () => {
+		setDownloadProgressCallback(null);
+		// Should not throw
+	});
+
+	it('should accept a callback function', () => {
+		const cb = vi.fn();
+		setDownloadProgressCallback(cb);
+		setDownloadProgressCallback(null); // cleanup
+	});
+});
+
+describe('getCacheDir', () => {
+	it('should return a path ending with .cache/huggingface', () => {
+		const dir = getCacheDir();
+		expect(dir).toMatch(/\.cache[/\\]huggingface$/);
+	});
+
+	it('should return a non-empty string', () => {
+		const dir = getCacheDir();
+		expect(dir.length).toBeGreaterThan(0);
 	});
 });

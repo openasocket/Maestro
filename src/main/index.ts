@@ -101,7 +101,7 @@ import {
 // Phase 2 refactoring - dependency injection
 import { createSafeSend, isWebContentsAvailable } from './utils/safe-send';
 import { setGRPOSettingsStore } from './grpo/prompt-injector';
-import { preloadModel as preloadEmbeddingModel } from './grpo/embedding-service';
+import { preloadModel as preloadEmbeddingModel, setDownloadProgressCallback } from './grpo/embedding-service';
 import { createWebServerFactory } from './web-server/web-server-factory';
 // Phase 4 refactoring - app lifecycle
 import {
@@ -606,10 +606,24 @@ function setupIpcHandlers() {
 
 	// Preload embedding model for semantic retrieval if GRPO is enabled (fire-and-forget)
 	const grpoConfig = store.get('grpoConfig') as Record<string, unknown> | undefined;
-	if (grpoConfig?.enabled) {
+	if (grpoConfig?.enabled && grpoConfig?.semanticRetrievalEnabled !== false) {
 		const embeddingModel = (grpoConfig.embeddingModel as string) ?? 'multilingual';
-		preloadEmbeddingModel(embeddingModel as 'multilingual' | 'english').catch(err => {
+
+		// Wire download progress to renderer for first-run model download
+		setDownloadProgressCallback((info) => {
+			if (isWebContentsAvailable(mainWindow)) {
+				mainWindow!.webContents.send('grpo:model-download-progress', info);
+			}
+		});
+
+		preloadEmbeddingModel(embeddingModel as 'multilingual' | 'english').then(() => {
+			setDownloadProgressCallback(null);
+			if (isWebContentsAvailable(mainWindow)) {
+				mainWindow!.webContents.send('grpo:model-download-progress', { progress: 100, done: true });
+			}
+		}).catch(err => {
 			logger.warn(`[GRPO] Failed to preload embedding model: ${err}`);
+			setDownloadProgressCallback(null);
 		});
 	}
 

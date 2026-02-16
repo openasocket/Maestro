@@ -14,6 +14,8 @@ import {
 	collectAllRewards,
 	detectProjectCommands,
 } from '../../grpo/reward-collector';
+import { getModelStatus, getCacheDir } from '../../grpo/embedding-service';
+import type { EmbeddingModelStatus } from '../../grpo/embedding-service';
 import type {
 	ExperienceEntry,
 	ExperienceScope,
@@ -307,5 +309,32 @@ export function registerGRPOHandlers(deps: GRPOHandlerDependencies): void {
 				return { success: true, data: groups };
 			}
 		)
+	);
+
+	// ─── Embedding Model Status & Cache ───────────────────────────────────
+
+	// Get embedding model status for settings panel display
+	ipcMain.handle(
+		'grpo:getModelStatus',
+		withIpcErrorLogging(handlerOpts('getModelStatus'), async () => {
+			const config = readConfig(settingsStore);
+			const status: EmbeddingModelStatus = getModelStatus(config.semanticRetrievalEnabled);
+			return { success: true, data: status };
+		})
+	);
+
+	// Clear the HuggingFace model cache
+	ipcMain.handle(
+		'grpo:clearModelCache',
+		withIpcErrorLogging(handlerOpts('clearModelCache'), async () => {
+			const fs = await import('fs/promises');
+			const cacheDir = getCacheDir();
+			try {
+				await fs.rm(cacheDir, { recursive: true, force: true });
+				return { success: true };
+			} catch (err) {
+				return { success: false, error: `Failed to clear cache: ${err}` };
+			}
+		})
 	);
 }

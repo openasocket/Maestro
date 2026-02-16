@@ -154,8 +154,8 @@ export async function injectExperiences(
 		try {
 			queryVec = await encode(queryText, config.embeddingModel ?? 'multilingual');
 		} catch (err) {
-			// Fallback to priority-only if embedding fails
-			logger.warn(`Semantic encoding failed, falling back to priority-only: ${err}`, LOG_CONTEXT);
+			// Fallback to priority-only if embedding fails (offline, download failed, etc.)
+			logger.warn(`Embedding model not available — falling back to priority-only selection: ${err}`, LOG_CONTEXT);
 			scored = agentFiltered.map(e => ({
 				entry: e,
 				combined: computePriorityScore(e, now),
