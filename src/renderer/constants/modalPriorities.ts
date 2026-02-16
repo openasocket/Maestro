@@ -203,6 +203,9 @@ export const MODAL_PRIORITIES = {
 	/** System log viewer overlay */
 	LOG_VIEWER: 500,
 
+	/** Experience edit modal (above settings, within GRPO panel) */
+	EXPERIENCE_EDIT: 465,
+
 	/** SSH Remote configuration modal (above settings) */
 	SSH_REMOTE: 460,
 

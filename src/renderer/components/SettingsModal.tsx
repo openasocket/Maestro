@@ -61,6 +61,8 @@ import { SshRemotesSection } from './Settings/SshRemotesSection';
 import { SshRemoteIgnoreSection } from './Settings/SshRemoteIgnoreSection';
 import { AgentConfigPanel } from './shared/AgentConfigPanel';
 import { AGENT_TILES } from './Wizard/screens/AgentSelectionScreen';
+import { GRPOSettings } from './Settings/GRPOSettings';
+import { ExperienceLibraryPanel } from './Settings/ExperienceLibraryPanel';
 
 // Feature flags - set to true to enable dormant features
 const FEATURE_FLAGS = {
@@ -286,7 +288,8 @@ interface SettingsModalProps {
 		| 'theme'
 		| 'notifications'
 		| 'aicommands'
-		| 'ssh';
+		| 'ssh'
+		| 'grpo';
 	hasNoAgents?: boolean;
 	onThemeImportError?: (message: string) => void;
 	onThemeImportSuccess?: (message: string) => void;
@@ -334,7 +337,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 	} = useSettings();
 
 	const [activeTab, setActiveTab] = useState<
-		'general' | 'display' | 'llm' | 'shortcuts' | 'theme' | 'notifications' | 'aicommands' | 'ssh' | 'director-notes'
+		'general' | 'display' | 'llm' | 'shortcuts' | 'theme' | 'notifications' | 'aicommands' | 'ssh' | 'director-notes' | 'grpo'
 	>('general');
 	const [systemFonts, setSystemFonts] = useState<string[]>([]);
 	const [customFonts, setCustomFonts] = useState<string[]>([]);
@@ -372,6 +375,9 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 		deletedAutoRunTasks: number;
 		error?: string;
 	} | null>(null);
+
+	// GRPO project path state
+	const [grpoProjectPath, setGrpoProjectPath] = useState<string | null>(null);
 
 	// Director's Notes agent configuration state
 	const [dnDetectedAgents, setDnDetectedAgents] = useState<AgentConfig[]>([]);
@@ -446,6 +452,16 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 			setStatsClearResult(null);
 		}
 	}, [isOpen, initialTab]);
+
+	// Load GRPO project path when GRPO tab is active
+	useEffect(() => {
+		if (!isOpen || activeTab !== 'grpo') return;
+		window.maestro.sync.getCurrentStoragePath().then((path) => {
+			setGrpoProjectPath(path);
+		}).catch(() => {
+			setGrpoProjectPath(null);
+		});
+	}, [isOpen, activeTab]);
 
 	// Detect agents when Director's Notes tab is active
 	useEffect(() => {
@@ -555,9 +571,10 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 				| 'aicommands'
 				| 'ssh'
 				| 'director-notes'
+				| 'grpo'
 			> = FEATURE_FLAGS.LLM_SETTINGS
-				? ['general', 'display', 'llm', 'shortcuts', 'theme', 'notifications', 'aicommands', 'ssh', 'director-notes']
-				: ['general', 'display', 'shortcuts', 'theme', 'notifications', 'aicommands', 'ssh', 'director-notes'];
+				? ['general', 'display', 'llm', 'shortcuts', 'theme', 'notifications', 'aicommands', 'ssh', 'director-notes', 'grpo']
+				: ['general', 'display', 'shortcuts', 'theme', 'notifications', 'aicommands', 'ssh', 'director-notes', 'grpo'];
 			const currentIndex = tabs.indexOf(activeTab);
 
 			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === '[') {
@@ -1036,6 +1053,16 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					>
 						<Clapperboard className="w-4 h-4" />
 						{activeTab === 'director-notes' && <span>Director's Notes</span>}
+					</button>
+					<button
+						onClick={() => setActiveTab('grpo')}
+						className={`px-4 py-4 text-sm font-bold border-b-2 ${activeTab === 'grpo' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
+						style={{ color: activeTab === 'grpo' ? theme.colors.textMain : theme.colors.textDim }}
+						tabIndex={-1}
+						title="GRPO"
+					>
+						<Brain className="w-4 h-4" />
+						{activeTab === 'grpo' && <span>GRPO</span>}
 					</button>
 					<div className="flex-1 flex justify-end items-center pr-4">
 						<button onClick={onClose} tabIndex={-1}>
@@ -3028,6 +3055,18 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 						</div>
 						);
 					})()}
+
+					{activeTab === 'grpo' && (
+						<div className="space-y-8">
+							<GRPOSettings theme={theme} />
+							<div
+								className="border-t pt-6"
+								style={{ borderColor: theme.colors.border }}
+							>
+								<ExperienceLibraryPanel theme={theme} projectPath={grpoProjectPath} />
+							</div>
+						</div>
+					)}
 				</div>
 			</div>
 		</div>

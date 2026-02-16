@@ -1,0 +1,338 @@
+/**
+ * GRPO Settings Panel
+ *
+ * Main settings panel for Training-Free GRPO configuration.
+ * Includes master toggle, configuration inputs, and reward weight sliders.
+ * All values read from / written to window.maestro.grpo.getConfig() / setConfig().
+ */
+
+import React, { useState, useEffect, useCallback, memo } from 'react';
+import type { Theme } from '../../types';
+import type { GRPOConfig, RewardSignalType } from '../../../shared/grpo-types';
+import { GRPO_CONFIG_DEFAULTS } from '../../../shared/grpo-types';
+
+interface GRPOSettingsProps {
+	theme: Theme;
+}
+
+const REWARD_SIGNAL_LABELS: Record<RewardSignalType, string> = {
+	'test-pass': 'Test Pass',
+	'test-fail': 'Test Fail',
+	'build-success': 'Build Success',
+	'build-fail': 'Build Fail',
+	'lint-clean': 'Lint Clean',
+	'lint-errors': 'Lint Errors',
+	'git-diff-quality': 'Git Diff Quality',
+	'task-complete': 'Task Complete',
+	'task-timeout': 'Task Timeout',
+	'process-exit-code': 'Process Exit Code',
+};
+
+const INTROSPECTION_MODELS = [
+	{ value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
+	{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
+	{ value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+];
+
+export const GRPOSettings = memo(function GRPOSettings({ theme }: GRPOSettingsProps) {
+	const [config, setConfig] = useState<GRPOConfig>(GRPO_CONFIG_DEFAULTS);
+	const [loading, setLoading] = useState(true);
+
+	// Fetch config on mount
+	useEffect(() => {
+		let cancelled = false;
+		setLoading(true);
+		window.maestro.grpo.getConfig().then((result) => {
+			if (cancelled) return;
+			if (result.success && result.data) {
+				setConfig({ ...GRPO_CONFIG_DEFAULTS, ...result.data });
+			}
+			setLoading(false);
+		}).catch(() => {
+			if (!cancelled) setLoading(false);
+		});
+		return () => { cancelled = true; };
+	}, []);
+
+	const updateConfig = useCallback((updates: Partial<GRPOConfig>) => {
+		setConfig((prev) => {
+			const next = { ...prev, ...updates };
+			window.maestro.grpo.setConfig(next as unknown as Record<string, unknown>);
+			return next;
+		});
+	}, []);
+
+	const updateRewardWeight = useCallback((type: RewardSignalType, weight: number) => {
+		setConfig((prev) => {
+			const next = {
+				...prev,
+				rewardWeights: { ...prev.rewardWeights, [type]: weight },
+			};
+			window.maestro.grpo.setConfig(next as unknown as Record<string, unknown>);
+			return next;
+		});
+	}, []);
+
+	if (loading) {
+		return (
+			<div className="text-sm opacity-50 p-4">Loading GRPO configuration...</div>
+		);
+	}
+
+	return (
+		<div className="space-y-6">
+			{/* Header with Toggle */}
+			<div className="flex items-center justify-between">
+				<div>
+					<h3 className="text-sm font-bold" style={{ color: theme.colors.textMain }}>
+						Training-Free GRPO
+					</h3>
+					<p className="text-xs mt-1" style={{ color: theme.colors.textDim }}>
+						Learn from agent interactions to improve future performance. No model fine-tuning required.
+					</p>
+				</div>
+				<button
+					onClick={() => updateConfig({ enabled: !config.enabled })}
+					className="relative w-10 h-5 rounded-full transition-colors"
+					style={{
+						backgroundColor: config.enabled ? theme.colors.accent : theme.colors.border,
+					}}
+				>
+					<div
+						className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform"
+						style={{
+							transform: config.enabled ? 'translateX(22px)' : 'translateX(2px)',
+						}}
+					/>
+				</button>
+			</div>
+
+			{/* Configuration Section */}
+			<div
+				className="p-4 rounded-lg border"
+				style={{
+					backgroundColor: theme.colors.bgActivity,
+					borderColor: theme.colors.border,
+					opacity: config.enabled ? 1 : 0.5,
+					pointerEvents: config.enabled ? 'auto' : 'none',
+				}}
+			>
+				<h4 className="text-xs font-bold uppercase mb-3" style={{ color: theme.colors.textDim }}>
+					Configuration
+				</h4>
+				<div className="space-y-3">
+					{/* Rollout Group Size */}
+					<div className="flex items-center justify-between">
+						<label className="text-xs" style={{ color: theme.colors.textMain }}>
+							Rollout Group Size
+						</label>
+						<input
+							type="number"
+							min={1}
+							max={10}
+							value={config.rolloutGroupSize}
+							onChange={(e) => updateConfig({ rolloutGroupSize: Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)) })}
+							className="w-16 p-1 text-xs text-center rounded border bg-transparent outline-none"
+							style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
+						/>
+					</div>
+
+					{/* Max Library Size */}
+					<div className="flex items-center justify-between">
+						<label className="text-xs" style={{ color: theme.colors.textMain }}>
+							Max Library Size
+						</label>
+						<div className="flex items-center gap-1">
+							<input
+								type="number"
+								min={10}
+								max={200}
+								value={config.maxLibrarySize}
+								onChange={(e) => updateConfig({ maxLibrarySize: Math.max(10, Math.min(200, parseInt(e.target.value, 10) || 10)) })}
+								className="w-16 p-1 text-xs text-center rounded border bg-transparent outline-none"
+								style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
+							/>
+							<span className="text-xs" style={{ color: theme.colors.textDim }}>entries</span>
+						</div>
+					</div>
+
+					{/* Max Injection Tokens */}
+					<div className="flex items-center justify-between">
+						<label className="text-xs" style={{ color: theme.colors.textMain }}>
+							Max Injection Tokens
+						</label>
+						<input
+							type="number"
+							min={500}
+							max={5000}
+							step={100}
+							value={config.maxInjectionTokens}
+							onChange={(e) => updateConfig({ maxInjectionTokens: Math.max(500, Math.min(5000, parseInt(e.target.value, 10) || 500)) })}
+							className="w-20 p-1 text-xs text-center rounded border bg-transparent outline-none"
+							style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
+						/>
+					</div>
+
+					{/* Variance Threshold */}
+					<div className="flex items-center justify-between">
+						<label className="text-xs" style={{ color: theme.colors.textMain }}>
+							Variance Threshold
+						</label>
+						<div className="flex items-center gap-2">
+							<input
+								type="range"
+								min={0}
+								max={100}
+								value={Math.round(config.varianceThreshold * 100)}
+								onChange={(e) => updateConfig({ varianceThreshold: parseInt(e.target.value, 10) / 100 })}
+								className="w-24"
+							/>
+							<span className="text-xs w-8 text-right" style={{ color: theme.colors.textDim }}>
+								{config.varianceThreshold.toFixed(2)}
+							</span>
+						</div>
+					</div>
+
+					{/* Introspection Model */}
+					<div className="flex items-center justify-between">
+						<label className="text-xs" style={{ color: theme.colors.textMain }}>
+							Introspection Model
+						</label>
+						<select
+							value={config.introspectionModel}
+							onChange={(e) => updateConfig({ introspectionModel: e.target.value })}
+							className="p-1 text-xs rounded border bg-transparent outline-none"
+							style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
+						>
+							{INTROSPECTION_MODELS.map((m) => (
+								<option key={m.value} value={m.value}>{m.label}</option>
+							))}
+						</select>
+					</div>
+
+					{/* Prune After Epochs */}
+					<div className="flex items-center justify-between">
+						<label className="text-xs" style={{ color: theme.colors.textMain }}>
+							Prune After Epochs
+						</label>
+						<input
+							type="number"
+							min={1}
+							max={50}
+							value={config.pruneAfterEpochs}
+							onChange={(e) => updateConfig({ pruneAfterEpochs: Math.max(1, Math.min(50, parseInt(e.target.value, 10) || 1)) })}
+							className="w-16 p-1 text-xs text-center rounded border bg-transparent outline-none"
+							style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
+						/>
+					</div>
+
+					{/* Early Stop Epochs */}
+					<div className="flex items-center justify-between">
+						<label className="text-xs" style={{ color: theme.colors.textMain }}>
+							Early Stop Epochs
+						</label>
+						<input
+							type="number"
+							min={1}
+							max={20}
+							value={config.earlyStoppingEpochs}
+							onChange={(e) => updateConfig({ earlyStoppingEpochs: Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 1)) })}
+							className="w-16 p-1 text-xs text-center rounded border bg-transparent outline-none"
+							style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
+							disabled={!config.earlyStoppingEnabled}
+						/>
+					</div>
+
+					{/* Early Stopping Enabled */}
+					<div className="flex items-center justify-between">
+						<label className="text-xs" style={{ color: theme.colors.textMain }}>
+							Early Stopping
+						</label>
+						<button
+							onClick={() => updateConfig({ earlyStoppingEnabled: !config.earlyStoppingEnabled })}
+							className="relative w-8 h-4 rounded-full transition-colors"
+							style={{
+								backgroundColor: config.earlyStoppingEnabled ? theme.colors.accent : theme.colors.border,
+							}}
+						>
+							<div
+								className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform"
+								style={{
+									transform: config.earlyStoppingEnabled ? 'translateX(17px)' : 'translateX(2px)',
+								}}
+							/>
+						</button>
+					</div>
+
+					{/* Global Fallback */}
+					<div className="flex items-center justify-between">
+						<label className="text-xs" style={{ color: theme.colors.textMain }}>
+							Global Fallback
+						</label>
+						<button
+							onClick={() => updateConfig({ useGlobalFallback: !config.useGlobalFallback })}
+							className="relative w-8 h-4 rounded-full transition-colors"
+							style={{
+								backgroundColor: config.useGlobalFallback ? theme.colors.accent : theme.colors.border,
+							}}
+						>
+							<div
+								className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform"
+								style={{
+									transform: config.useGlobalFallback ? 'translateX(17px)' : 'translateX(2px)',
+								}}
+							/>
+						</button>
+					</div>
+				</div>
+			</div>
+
+			{/* Reward Weights Section */}
+			<div
+				className="p-4 rounded-lg border"
+				style={{
+					backgroundColor: theme.colors.bgActivity,
+					borderColor: theme.colors.border,
+					opacity: config.enabled ? 1 : 0.5,
+					pointerEvents: config.enabled ? 'auto' : 'none',
+				}}
+			>
+				<h4 className="text-xs font-bold uppercase mb-3" style={{ color: theme.colors.textDim }}>
+					Reward Weights
+				</h4>
+				<div className="space-y-2">
+					{(Object.keys(REWARD_SIGNAL_LABELS) as RewardSignalType[]).map((type) => {
+						const weight = config.rewardWeights[type] ?? 0;
+						return (
+							<div key={type} className="flex items-center gap-2">
+								<span className="text-xs w-28 truncate" style={{ color: theme.colors.textMain }}>
+									{REWARD_SIGNAL_LABELS[type]}
+								</span>
+								<div className="flex-1 h-2 rounded-full overflow-hidden" style={{ backgroundColor: theme.colors.border }}>
+									<div
+										className="h-full rounded-full transition-all"
+										style={{
+											width: `${weight * 100}%`,
+											backgroundColor: weight > 0.5 ? theme.colors.accent : theme.colors.textDim,
+										}}
+									/>
+								</div>
+								<input
+									type="range"
+									min={0}
+									max={100}
+									value={Math.round(weight * 100)}
+									onChange={(e) => updateRewardWeight(type, parseInt(e.target.value, 10) / 100)}
+									className="w-20"
+								/>
+								<span className="text-xs w-8 text-right font-mono" style={{ color: theme.colors.textDim }}>
+									{weight.toFixed(1)}
+								</span>
+							</div>
+						);
+					})}
+				</div>
+			</div>
+		</div>
+	);
+});

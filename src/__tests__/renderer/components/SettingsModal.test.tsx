@@ -444,14 +444,14 @@ describe('SettingsModal', () => {
 		});
 
 		it('should wrap around when navigating past last tab', async () => {
-			render(<SettingsModal {...createDefaultProps({ initialTab: 'director-notes' })} />);
+			render(<SettingsModal {...createDefaultProps({ initialTab: 'grpo' })} />);
 
 			await act(async () => {
 				await vi.advanceTimersByTimeAsync(50);
 			});
 
-			// Start on Director's Notes tab (last tab)
-			expect(screen.getByText("Director's Notes", { selector: 'h3' })).toBeInTheDocument();
+			// Start on GRPO tab (last tab)
+			expect(screen.getByText('Training-Free GRPO')).toBeInTheDocument();
 
 			// Press Cmd+Shift+] to wrap to general
 			fireEvent.keyDown(window, { key: ']', metaKey: true, shiftKey: true });
@@ -474,14 +474,14 @@ describe('SettingsModal', () => {
 			// Start on general tab (first tab)
 			expect(screen.getByText('Default Terminal Shell')).toBeInTheDocument();
 
-			// Press Cmd+Shift+[ to wrap to Director's Notes (last tab)
+			// Press Cmd+Shift+[ to wrap to GRPO (last tab)
 			fireEvent.keyDown(window, { key: '[', metaKey: true, shiftKey: true });
 
 			await act(async () => {
 				await vi.advanceTimersByTimeAsync(100);
 			});
 
-			expect(screen.getByText("Director's Notes", { selector: 'h3' })).toBeInTheDocument();
+			expect(screen.getByText('Training-Free GRPO')).toBeInTheDocument();
 		});
 	});
 
