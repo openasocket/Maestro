@@ -15,6 +15,7 @@ import type {
 	GRPOConfig,
 } from '../../shared/grpo-types';
 import { GRPO_CONFIG_DEFAULTS } from '../../shared/grpo-types';
+import { encode, cosineSimilarity } from './embedding-service';
 
 const LOG_CONTEXT = '[PromptInjector]';
 
@@ -31,6 +32,12 @@ export function setGRPOSettingsStore(getter: () => { get: (key: string) => unkno
 
 /** Approximate token overhead for the <project-experiences> wrapper and preamble */
 const WRAPPER_OVERHEAD_TOKENS = 200;
+
+/** Semantic retrieval constants */
+const DEFAULT_SIMILARITY_FLOOR = 0.15; // minimum cosine similarity to consider an entry relevant
+const SEMANTIC_WEIGHT = 0.5;           // weight for semantic score in final ranking
+const PRIORITY_WEIGHT = 0.5;           // weight for evidence/use/recency priority score
+const MAX_PROMPT_CHARS_FOR_ENCODING = 2000; // truncate long prompts before embedding
 
 /** Normalization caps for priority scoring */
 const MAX_EVIDENCE = 20;
@@ -93,6 +100,11 @@ ${lines.join('\n\n')}
  * into the agent's prompt. This is the "policy conditioned on experiential
  * knowledge π(a|q, E)" from the paper.
  *
+ * Three-level selection pipeline:
+ *   Level 1: Agent-type hard filter (unchanged from GRPO-06)
+ *   Level 2: Semantic relevance scoring (GRPO-13) — optional, configurable
+ *   Level 3: Combined ranking (semantic * 0.5 + priority * 0.5)
+ *
  * @param prompt - The original prompt to inject experiences into
  * @param projectPath - The project path for looking up the experience library
  * @param agentType - The agent type for filtering relevant experiences
@@ -118,31 +130,104 @@ export async function injectExperiences(
 		return { injectedPrompt: prompt, injectedIds: [], tokenCount: 0 };
 	}
 
-	// Filter: only entries where agentType matches or is 'all'
-	const filtered = library.filter(
+	// Level 1: Agent-type hard filter
+	const agentFiltered = library.filter(
 		e => e.agentType === agentType || e.agentType === 'all'
 	);
-	if (filtered.length === 0) {
+	if (agentFiltered.length === 0) {
 		return { injectedPrompt: prompt, injectedIds: [], tokenCount: 0 };
 	}
 
-	// Prioritize: sort by normalized priority score descending
 	const now = Date.now();
-	const scored = filtered.map(e => ({
-		entry: e,
-		score: computePriorityScore(e, now),
-	}));
-	scored.sort((a, b) => b.score - a.score);
+	const useSemanticRetrieval = config.semanticRetrievalEnabled !== false;
+	const similarityFloor = config.semanticSimilarityFloor ?? DEFAULT_SIMILARITY_FLOOR;
 
-	// Select: take entries until token budget is exhausted
+	let scored: { entry: ExperienceEntry; combined: number }[];
+
+	if (useSemanticRetrieval) {
+		// Level 2: Semantic relevance scoring
+		const queryText = prompt.length > MAX_PROMPT_CHARS_FOR_ENCODING
+			? prompt.slice(0, MAX_PROMPT_CHARS_FOR_ENCODING)
+			: prompt;
+
+		let queryVec: Float32Array;
+		try {
+			queryVec = await encode(queryText, config.embeddingModel ?? 'multilingual');
+		} catch (err) {
+			// Fallback to priority-only if embedding fails
+			logger.warn(`Semantic encoding failed, falling back to priority-only: ${err}`, LOG_CONTEXT);
+			scored = agentFiltered.map(e => ({
+				entry: e,
+				combined: computePriorityScore(e, now),
+			}));
+			scored.sort((a, b) => b.combined - a.combined);
+			return selectAndInject(scored, config, prompt, projectPath, experienceStore);
+		}
+
+		scored = agentFiltered
+			.filter(e => e.embedding) // skip entries without embeddings
+			.map(e => {
+				const entryVec = new Float32Array(e.embedding!);
+				const semantic = cosineSimilarity(queryVec, entryVec);
+				const priority = computePriorityScore(e, now);
+				return {
+					entry: e,
+					semantic,
+					priority,
+					combined: semantic * SEMANTIC_WEIGHT + priority * PRIORITY_WEIGHT,
+				};
+			})
+			.filter(s => s.semantic >= similarityFloor)
+			.sort((a, b) => b.combined - a.combined);
+
+		// If semantic filtering removed everything, include entries without embeddings
+		// using priority-only (graceful degradation for pre-migration entries)
+		if (scored.length === 0) {
+			const noEmbedding = agentFiltered.filter(e => !e.embedding);
+			if (noEmbedding.length > 0) {
+				scored = noEmbedding.map(e => ({
+					entry: e,
+					combined: computePriorityScore(e, now),
+				}));
+				scored.sort((a, b) => b.combined - a.combined);
+			}
+		}
+	} else {
+		// Semantic retrieval disabled — fall back to priority-only (GRPO-06 behavior)
+		scored = agentFiltered.map(e => ({
+			entry: e,
+			combined: computePriorityScore(e, now),
+		}));
+		scored.sort((a, b) => b.combined - a.combined);
+	}
+
+	return selectAndInject(scored, config, prompt, projectPath, experienceStore);
+}
+
+/**
+ * Shared token-budget selection and injection logic.
+ * Takes a pre-sorted scored array and fills the token budget top-down.
+ */
+function selectAndInject(
+	scored: { entry: ExperienceEntry; combined: number }[],
+	config: GRPOConfig,
+	prompt: string,
+	projectPath: string,
+	experienceStore: ExperienceStore,
+): { injectedPrompt: string; injectedIds: ExperienceId[]; tokenCount: number } {
+	if (scored.length === 0) {
+		return { injectedPrompt: prompt, injectedIds: [], tokenCount: 0 };
+	}
+
+	// Fill token budget
 	const tokenBudget = config.maxInjectionTokens - WRAPPER_OVERHEAD_TOKENS;
 	const selected: ExperienceEntry[] = [];
 	let totalTokens = 0;
 
-	for (const { entry } of scored) {
-		if (totalTokens + entry.tokenEstimate > tokenBudget) break;
-		selected.push(entry);
-		totalTokens += entry.tokenEstimate;
+	for (const s of scored) {
+		if (totalTokens + s.entry.tokenEstimate > tokenBudget) continue;
+		selected.push(s.entry);
+		totalTokens += s.entry.tokenEstimate;
 	}
 
 	if (selected.length === 0) {
@@ -159,7 +244,7 @@ export async function injectExperiences(
 	});
 
 	logger.debug(
-		`Injected ${injectedIds.length} experiences (${totalTokens + WRAPPER_OVERHEAD_TOKENS} tokens) for ${agentType}`,
+		`Injected ${injectedIds.length} experiences (${totalTokens + WRAPPER_OVERHEAD_TOKENS} tokens)`,
 		LOG_CONTEXT
 	);
 

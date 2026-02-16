@@ -8,7 +8,7 @@
 
 import React, { useState, useEffect, useCallback, memo } from 'react';
 import type { Theme } from '../../types';
-import type { GRPOConfig, RewardSignalType } from '../../../shared/grpo-types';
+import type { GRPOConfig, RewardSignalType, GRPOEmbeddingModel } from '../../../shared/grpo-types';
 import { GRPO_CONFIG_DEFAULTS } from '../../../shared/grpo-types';
 
 interface GRPOSettingsProps {
@@ -32,6 +32,11 @@ const INTROSPECTION_MODELS = [
 	{ value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
 	{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
 	{ value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+];
+
+const EMBEDDING_MODELS: { value: GRPOEmbeddingModel; label: string }[] = [
+	{ value: 'multilingual', label: 'Multilingual (50+ languages, recommended)' },
+	{ value: 'english', label: 'English only (faster, smaller)' },
 ];
 
 export const GRPOSettings = memo(function GRPOSettings({ theme }: GRPOSettingsProps) {
@@ -283,6 +288,86 @@ export const GRPOSettings = memo(function GRPOSettings({ theme }: GRPOSettingsPr
 								}}
 							/>
 						</button>
+					</div>
+				</div>
+			</div>
+
+			{/* Semantic Retrieval Section */}
+			<div
+				className="p-4 rounded-lg border"
+				style={{
+					backgroundColor: theme.colors.bgActivity,
+					borderColor: theme.colors.border,
+					opacity: config.enabled ? 1 : 0.5,
+					pointerEvents: config.enabled ? 'auto' : 'none',
+				}}
+			>
+				<h4 className="text-xs font-bold uppercase mb-3" style={{ color: theme.colors.textDim }}>
+					Semantic Retrieval
+				</h4>
+				<div className="space-y-3">
+					{/* Semantic Retrieval Enabled */}
+					<div className="flex items-center justify-between">
+						<label className="text-xs" style={{ color: theme.colors.textMain }}>
+							Semantic Retrieval
+						</label>
+						<button
+							onClick={() => updateConfig({ semanticRetrievalEnabled: !config.semanticRetrievalEnabled })}
+							className="relative w-8 h-4 rounded-full transition-colors"
+							style={{
+								backgroundColor: config.semanticRetrievalEnabled ? theme.colors.accent : theme.colors.border,
+							}}
+						>
+							<div
+								className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform"
+								style={{
+									transform: config.semanticRetrievalEnabled ? 'translateX(17px)' : 'translateX(2px)',
+								}}
+							/>
+						</button>
+					</div>
+
+					{/* Embedding Model */}
+					<div className="flex items-center justify-between">
+						<label className="text-xs" style={{ color: theme.colors.textMain }}>
+							Embedding Model
+						</label>
+						<select
+							value={config.embeddingModel}
+							onChange={(e) => updateConfig({ embeddingModel: e.target.value as GRPOEmbeddingModel })}
+							className="p-1 text-xs rounded border bg-transparent outline-none"
+							style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
+							disabled={!config.semanticRetrievalEnabled}
+						>
+							{EMBEDDING_MODELS.map((m) => (
+								<option key={m.value} value={m.value}>{m.label}</option>
+							))}
+						</select>
+					</div>
+					<p className="text-xs" style={{ color: theme.colors.textDim, opacity: 0.7 }}>
+						Changing the model will recompute all cached embeddings on next use. Both models produce the same 384-dim vectors — no data is lost.
+					</p>
+
+					{/* Similarity Floor */}
+					<div className="flex items-center justify-between">
+						<label className="text-xs" style={{ color: theme.colors.textMain }}>
+							Similarity Floor
+						</label>
+						<div className="flex items-center gap-2">
+							<input
+								type="range"
+								min={0}
+								max={50}
+								step={5}
+								value={Math.round(config.semanticSimilarityFloor * 100)}
+								onChange={(e) => updateConfig({ semanticSimilarityFloor: parseInt(e.target.value, 10) / 100 })}
+								className="w-24"
+								disabled={!config.semanticRetrievalEnabled}
+							/>
+							<span className="text-xs w-8 text-right" style={{ color: theme.colors.textDim }}>
+								{config.semanticSimilarityFloor.toFixed(2)}
+							</span>
+						</div>
 					</div>
 				</div>
 			</div>

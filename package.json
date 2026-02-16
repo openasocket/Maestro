@@ -38,7 +38,7 @@
     "start": "electron .",
     "clean": "rm -rf dist release node_modules/.vite",
     "prepare": "echo 'No prepare script'",
-    "postinstall": "electron-rebuild -f -w node-pty,better-sqlite3",
+    "postinstall": "electron-rebuild -f -w node-pty,better-sqlite3,onnxruntime-node",
     "lint": "tsc -p tsconfig.lint.json && tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.cli.json --noEmit",
     "lint:eslint": "eslint src/",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
@@ -74,7 +74,8 @@
     ],
     "asarUnpack": [
       "node_modules/node-pty/**/*",
-      "node_modules/better-sqlite3/**/*"
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/onnxruntime-node/**/*"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
@@ -219,6 +220,7 @@
     "@fastify/rate-limit": "^9.1.0",
     "@fastify/static": "^7.0.4",
     "@fastify/websocket": "^9.0.0",
+    "@huggingface/transformers": "^3.8.1",
     "@sentry/electron": "^7.5.0",
     "@tanstack/react-virtual": "^3.13.13",
     "@types/d3-force": "^3.0.10",

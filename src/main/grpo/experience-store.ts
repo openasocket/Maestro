@@ -27,6 +27,7 @@ import type {
 	ExperienceUpdateOperation,
 	RolloutGroupId,
 } from '../../shared/grpo-types';
+import { encode, encodeBatch, type EmbeddingModelId } from './embedding-service';
 
 const LOG_CONTEXT = '[ExperienceStore]';
 
@@ -202,6 +203,48 @@ export class ExperienceStore {
 		return Math.ceil(content.length / 4);
 	}
 
+	// ─── Embedding Helpers ──────────────────────────────────────────────
+
+	/**
+	 * Compute and attach embedding to a single entry.
+	 * Errors are caught and logged — embedding failure should not block entry creation.
+	 */
+	private async computeEntryEmbedding(entry: ExperienceEntry, modelId: EmbeddingModelId): Promise<void> {
+		try {
+			const embedding = await encode(entry.content, modelId);
+			entry.embedding = Array.from(embedding);
+			entry.embeddingModel = modelId;
+		} catch (err) {
+			logger.warn(`Failed to compute embedding for ${entry.id}: ${err}`, LOG_CONTEXT);
+		}
+	}
+
+	/**
+	 * Ensure all entries have embeddings computed by the specified model.
+	 * Recomputes embeddings for entries that are missing them or were computed
+	 * by a different model (model-switch scenario).
+	 *
+	 * Returns true if any entries were updated (caller should persist).
+	 */
+	async ensureEmbeddings(entries: ExperienceEntry[], modelId: EmbeddingModelId): Promise<boolean> {
+		const stale = entries.filter(e => !e.embedding || e.embeddingModel !== modelId);
+		if (stale.length === 0) return false;
+
+		try {
+			const texts = stale.map(e => e.content);
+			const vectors = await encodeBatch(texts, modelId);
+			stale.forEach((entry, i) => {
+				entry.embedding = Array.from(vectors[i]);
+				entry.embeddingModel = modelId;
+			});
+			logger.debug(`Computed embeddings for ${stale.length} entries (model: ${modelId})`, LOG_CONTEXT);
+		} catch (err) {
+			logger.warn(`Failed to batch-compute embeddings: ${err}`, LOG_CONTEXT);
+			return false;
+		}
+		return true;
+	}
+
 	// ─── Public API ────────────────────────────────────────────────────
 
 	/**
@@ -231,10 +274,12 @@ export class ExperienceStore {
 
 	/**
 	 * Creates a new experience entry with generated ID, timestamps, and token estimate.
+	 * If embeddingModel is provided, computes and caches the embedding vector.
 	 */
 	async addExperience(
 		projectPath: string,
-		entry: Omit<ExperienceEntry, 'id' | 'createdAt' | 'updatedAt' | 'useCount' | 'tokenEstimate'>
+		entry: Omit<ExperienceEntry, 'id' | 'createdAt' | 'updatedAt' | 'useCount' | 'tokenEstimate'>,
+		embeddingModel?: EmbeddingModelId
 	): Promise<ExperienceEntry> {
 		return this.serializedWrite(projectPath, async () => {
 			const hash = await this.ensureProjectDir(projectPath);
@@ -249,6 +294,10 @@ export class ExperienceStore {
 				useCount: 0,
 				tokenEstimate: this.estimateTokens(entry.content),
 			};
+
+			if (embeddingModel) {
+				await this.computeEntryEmbedding(newEntry, embeddingModel);
+			}
 
 			entries.push(newEntry);
 			await this.writeLibrary(hash, entries);
@@ -266,11 +315,13 @@ export class ExperienceStore {
 
 	/**
 	 * Updates an existing entry, bumps updatedAt, recalculates tokenEstimate.
+	 * If embeddingModel is provided and content changed, recomputes the embedding.
 	 */
 	async modifyExperience(
 		projectPath: string,
 		id: ExperienceId,
-		updates: Partial<Pick<ExperienceEntry, 'content' | 'category'>>
+		updates: Partial<Pick<ExperienceEntry, 'content' | 'category'>>,
+		embeddingModel?: EmbeddingModelId
 	): Promise<ExperienceEntry> {
 		return this.serializedWrite(projectPath, async () => {
 			const hash = await this.ensureProjectDir(projectPath);
@@ -292,6 +343,11 @@ export class ExperienceStore {
 				entries[idx].category = updates.category;
 			}
 			entries[idx].updatedAt = now;
+
+			// Recompute embedding if content changed and model is specified
+			if (embeddingModel && updates.content !== undefined) {
+				await this.computeEntryEmbedding(entries[idx], embeddingModel);
+			}
 
 			await this.writeLibrary(hash, entries);
 			await this.appendHistory(hash, {
@@ -336,12 +392,14 @@ export class ExperienceStore {
 	/**
 	 * Batch-applies add/modify/delete operations from a semantic advantage.
 	 * Each operation is logged to history with the rollout group ID.
+	 * If embeddingModel is provided, computes embeddings for new/modified entries.
 	 */
 	async applyOperations(
 		projectPath: string,
 		operations: ExperienceUpdateOperation[],
 		rolloutGroupId: RolloutGroupId,
-		epoch?: number
+		epoch?: number,
+		embeddingModel?: EmbeddingModelId
 	): Promise<void> {
 		return this.serializedWrite(projectPath, async () => {
 			const hash = await this.ensureProjectDir(projectPath);
@@ -365,6 +423,9 @@ export class ExperienceStore {
 							lastRolloutGroupId: rolloutGroupId,
 							tokenEstimate: this.estimateTokens(op.content),
 						};
+						if (embeddingModel) {
+							await this.computeEntryEmbedding(newEntry, embeddingModel);
+						}
 						entries.push(newEntry);
 						await this.appendHistory(hash, {
 							timestamp: now,
@@ -394,6 +455,9 @@ export class ExperienceStore {
 						entries[idx].updatedAt = now;
 						entries[idx].evidenceCount += 1;
 						entries[idx].lastRolloutGroupId = rolloutGroupId;
+						if (embeddingModel && op.content !== undefined) {
+							await this.computeEntryEmbedding(entries[idx], embeddingModel);
+						}
 						await this.appendHistory(hash, {
 							timestamp: now,
 							operation: 'modify',

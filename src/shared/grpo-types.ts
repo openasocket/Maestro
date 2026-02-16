@@ -40,6 +40,10 @@ export interface ExperienceEntry {
 	lastRolloutGroupId: RolloutGroupId | null;
 	/** Estimated token count for prompt injection budgeting */
 	tokenEstimate: number;
+	/** Pre-computed 384-dim embedding vector for semantic retrieval (optional — computed lazily) */
+	embedding?: number[];
+	/** Which embedding model produced this vector ('multilingual' | 'english') — used to detect model switches */
+	embeddingModel?: string;
 }
 
 /** Reward signal types from verifiable outcomes */
@@ -145,6 +149,9 @@ export interface ExperienceUpdateOperation {
 	reasoning: string;
 }
 
+/** Embedding model choices for semantic retrieval */
+export type GRPOEmbeddingModel = 'multilingual' | 'english';
+
 /** Configuration for the GRPO training loop */
 export interface GRPOConfig {
 	/** Whether the GRPO system is enabled */
@@ -171,6 +178,12 @@ export interface GRPOConfig {
 	earlyStoppingEpochs: number;
 	/** Whether early stopping is enabled — default true */
 	earlyStoppingEnabled: boolean;
+	/** Whether to use semantic embedding retrieval for experience selection (default: true) */
+	semanticRetrievalEnabled: boolean;
+	/** Minimum cosine similarity threshold for experience relevance (default: 0.15) */
+	semanticSimilarityFloor: number;
+	/** Embedding model for semantic retrieval — 'multilingual' (50+ langs, default) or 'english' (faster, EN only) */
+	embeddingModel: GRPOEmbeddingModel;
 }
 
 /** Default GRPO configuration */
@@ -198,6 +211,9 @@ export const GRPO_CONFIG_DEFAULTS: GRPOConfig = {
 	useGlobalFallback: true,
 	earlyStoppingEpochs: 3,
 	earlyStoppingEnabled: true,
+	semanticRetrievalEnabled: true,
+	semanticSimilarityFloor: 0.15,
+	embeddingModel: 'multilingual',
 };
 
 /** Summary of a rollout group for dashboard display */
