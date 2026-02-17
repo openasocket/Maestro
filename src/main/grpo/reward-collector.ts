@@ -952,6 +952,108 @@ export async function captureComplexityBaseline(
 	return parseAverageComplexity(combineOutput(result), commands.projectType);
 }
 
+/**
+ * Collects security scan reward signal.
+ * Runs project-appropriate security audit (npm audit, cargo audit, bandit, govulncheck).
+ * Returns null if no security scan command detected.
+ *
+ * Scoring:
+ * - No findings: 1.0
+ * - With baseline (delta-based): max(0, 1 - newFindings / max(1, baseline))
+ * - Without baseline: max(0, 1 - findings / 10)
+ *   (10+ findings = 0.0)
+ */
+export async function collectSecurityReward(
+	projectPath: string,
+	commands: ProjectCommands,
+	baselineFindings?: number,
+): Promise<RewardSignal | null> {
+	if (!commands.securityScanCommand) return null;
+
+	const result = await safeRunCommand(commands.securityScanCommand, projectPath);
+	if (result.exitCode === -1) {
+		return timeoutSignal('security-scan', 'Security scan timed out');
+	}
+
+	const rawOutput = combineOutput(result);
+	const currentFindings = parseSecurityFindingCount(rawOutput, commands.projectType);
+
+	if (currentFindings === 0 && result.exitCode === 0) {
+		return makeSignal('security-scan', 1.0, 'No security issues found', rawOutput);
+	}
+
+	let score: number;
+	let description: string;
+
+	if (baselineFindings !== undefined) {
+		const newFindings = Math.max(0, currentFindings - baselineFindings);
+		score = Math.max(0, 1 - newFindings / Math.max(1, baselineFindings));
+		description = `${currentFindings} security findings (baseline: ${baselineFindings}, new: ${newFindings})`;
+	} else {
+		score = Math.max(0, 1 - currentFindings / 10);
+		description = `${currentFindings} security findings`;
+	}
+
+	return makeSignal('security-scan', score, description, rawOutput);
+}
+
+/**
+ * Parses security finding count from audit tool output.
+ * Supports: npm audit --json, cargo audit --json, bandit -f json, govulncheck.
+ */
+function parseSecurityFindingCount(output: string, _projectType: string): number {
+	// Try JSON format first
+	try {
+		const parsed = JSON.parse(output);
+
+		// npm audit JSON: { "metadata": { "vulnerabilities": { "total": N } } }
+		// or: { "vulnerabilities": { ... } } where keys are package names
+		if (parsed.metadata?.vulnerabilities?.total !== undefined) {
+			return parsed.metadata.vulnerabilities.total;
+		}
+		if (parsed.vulnerabilities && typeof parsed.vulnerabilities === 'object') {
+			return Object.keys(parsed.vulnerabilities).length;
+		}
+
+		// cargo audit JSON: { "vulnerabilities": { "found": N } }
+		if (parsed.vulnerabilities?.found !== undefined) {
+			return parsed.vulnerabilities.found;
+		}
+
+		// bandit JSON: { "results": [...] }
+		if (Array.isArray(parsed.results)) {
+			return parsed.results.length;
+		}
+	} catch { /* not JSON */ }
+
+	// npm/cargo audit text: "X vulnerabilities"
+	const vulnMatch = output.match(/(\d+)\s+vulnerabilit/i);
+	if (vulnMatch) return parseInt(vulnMatch[1], 10);
+
+	// govulncheck: count "Vulnerability #" lines
+	const govulnMatches = output.match(/Vulnerability #/g);
+	if (govulnMatches) return govulnMatches.length;
+
+	// Fallback: count lines containing "vulnerability" or "CVE-"
+	return output.split('\n').filter(l =>
+		/vulnerab|CVE-\d{4}/i.test(l)
+	).length;
+}
+
+/**
+ * Captures baseline security finding count before a rollout starts.
+ */
+export async function captureSecurityBaseline(
+	projectPath: string,
+	commands: ProjectCommands,
+): Promise<number | null> {
+	if (!commands.securityScanCommand) return null;
+	const result = await safeRunCommand(commands.securityScanCommand, projectPath);
+	if (result.exitCode === -1) return null;
+	if (result.exitCode === 0) return 0;
+	return parseSecurityFindingCount(combineOutput(result), commands.projectType);
+}
+
 // ─── Aggregate Reward Calculation ────────────────────────────────────────────
 
 /**
