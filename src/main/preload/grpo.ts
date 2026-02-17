@@ -68,6 +68,22 @@ export function createGrpoApi() {
 			ipcRenderer.on('grpo:trainingStatus', handler);
 			return () => { ipcRenderer.removeListener('grpo:trainingStatus', handler); };
 		},
+		// Human feedback (GRPO-16)
+		submitFeedback: (
+			sessionId: string,
+			agentType: string,
+			projectPath: string,
+			responseText: string,
+			promptText: string,
+			approved: boolean,
+			realm?: string,
+		): Promise<{ success: boolean; data?: string; error?: string }> =>
+			ipcRenderer.invoke('grpo:submitFeedback', sessionId, agentType, projectPath, responseText, promptText, approved, realm ?? 'manual'),
+		getFeedback: (
+			sessionId: string,
+			responseHashes: string[],
+		): Promise<{ success: boolean; data?: Record<string, { approved: boolean }>; error?: string }> =>
+			ipcRenderer.invoke('grpo:getFeedback', sessionId, responseHashes),
 	};
 }
 

@@ -2665,6 +2665,20 @@ interface MaestroAPI {
 		startTraining: (projectPath: string) => Promise<{ success: boolean; error?: string }>;
 		getTrainingStatus: () => Promise<{ success: boolean; data?: { inProgress: boolean; projects: string[] }; error?: string }>;
 		onTrainingStatus: (callback: (status: { projectPath: string; status: string; groupCount?: number; experiencesAdded?: number; error?: string }) => void) => () => void;
+		// Human feedback (GRPO-16)
+		submitFeedback: (
+			sessionId: string,
+			agentType: string,
+			projectPath: string,
+			responseText: string,
+			promptText: string,
+			approved: boolean,
+			realm?: string,
+		) => Promise<{ success: boolean; data?: string; error?: string }>;
+		getFeedback: (
+			sessionId: string,
+			responseHashes: string[],
+		) => Promise<{ success: boolean; data?: Record<string, { approved: boolean }>; error?: string }>;
 	};
 
 	// Director's Notes API (unified history + synopsis generation)
