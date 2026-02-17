@@ -101,7 +101,8 @@ import {
 // Phase 2 refactoring - dependency injection
 import { createSafeSend, isWebContentsAvailable } from './utils/safe-send';
 import { setGRPOSettingsStore } from './grpo/prompt-injector';
-import { preloadModel as preloadEmbeddingModel, setDownloadProgressCallback, isModelCached } from './grpo/embedding-service';
+import { preloadModel as preloadEmbeddingModel, setDownloadProgressCallback, isModelCached, dispose as disposeGRPOEmbedding } from './grpo/embedding-service';
+import { isTrainingInProgress as isGRPOTrainingInProgress } from './grpo/auto-trainer';
 import { registerGRPOHandlers } from './ipc/handlers/grpo-handlers';
 import { initializeSymphonyCollector, getSymphonyCollector } from './grpo/symphony-collector';
 import { getExperienceStore } from './grpo/experience-store';
@@ -403,6 +404,8 @@ const quitHandler = createQuitHandler({
 	cleanupAllGroomingSessions,
 	closeStatsDB,
 	stopCliWatcher: () => cliWatcher.stop(),
+	disposeGRPOEmbedding,
+	isGRPOTrainingInProgress,
 });
 quitHandler.setup();
 

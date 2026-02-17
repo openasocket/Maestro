@@ -31,6 +31,10 @@ export interface QuitHandlerDependencies {
 	closeStatsDB: () => void;
 	/** Function to stop CLI watcher (optional, may not be started yet) */
 	stopCliWatcher?: () => void;
+	/** Dispose GRPO embedding model ONNX session */
+	disposeGRPOEmbedding?: () => Promise<void>;
+	/** Check if GRPO training is in progress */
+	isGRPOTrainingInProgress?: () => boolean;
 }
 
 /** Quit handler state */
@@ -75,6 +79,8 @@ export function createQuitHandler(deps: QuitHandlerDependencies): QuitHandler {
 		cleanupAllGroomingSessions,
 		closeStatsDB,
 		stopCliWatcher,
+		disposeGRPOEmbedding,
+		isGRPOTrainingInProgress,
 	} = deps;
 
 	const state: QuitHandlerState = {
@@ -166,6 +172,18 @@ export function createQuitHandler(deps: QuitHandlerDependencies): QuitHandler {
 			cleanupAllGroomingSessions(processManager).catch((err) => {
 				logger.error(`Error cleaning up grooming sessions: ${err}`, 'Shutdown');
 			});
+		}
+
+		// Dispose GRPO embedding model (release ONNX session)
+		if (disposeGRPOEmbedding) {
+			logger.info('Disposing GRPO embedding model', 'Shutdown');
+			disposeGRPOEmbedding().catch((err) => {
+				logger.error(`Error disposing GRPO embedding: ${err}`, 'Shutdown');
+			});
+		}
+		// Warn if training was interrupted
+		if (isGRPOTrainingInProgress?.()) {
+			logger.warn('GRPO training was in progress during shutdown — signals are safe but training results may be lost', 'Shutdown');
 		}
 
 		// Clean up all running processes
