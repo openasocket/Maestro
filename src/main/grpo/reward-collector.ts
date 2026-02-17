@@ -1316,6 +1316,155 @@ export async function captureApiSchemaBaseline(
 	}
 }
 
+/**
+ * Collects documentation coverage reward signal.
+ * Checks changed files for public symbols that lack documentation.
+ * Uses git diff to identify changed files, then parses them for undocumented exports.
+ * Returns null if git is not available.
+ *
+ * Scoring:
+ * - All new symbols documented: 1.0
+ * - Some documented: documented / total
+ * - None documented (with new symbols): 0.0
+ * - No new public symbols: 0.5 (neutral)
+ */
+export async function collectDocumentationReward(
+	projectPath: string,
+	commands: ProjectCommands,
+): Promise<RewardSignal | null> {
+	// Get list of changed files
+	const diffResult = await safeRunCommand('git diff --name-only HEAD~1', projectPath);
+	if (diffResult.exitCode !== 0) return null;
+
+	const changedFiles = diffResult.stdout.split('\n')
+		.map(f => f.trim())
+		.filter(f => f && isSourceFile(f, commands.projectType));
+
+	if (changedFiles.length === 0) return null;
+
+	let totalNewSymbols = 0;
+	let documentedNewSymbols = 0;
+
+	for (const file of changedFiles.slice(0, 10)) { // Limit to 10 files for performance
+		try {
+			const filePath = path.join(projectPath, file);
+			const content = await fs.readFile(filePath, 'utf-8');
+			const stats = analyzeDocumentation(content, commands.projectType);
+			totalNewSymbols += stats.totalPublic;
+			documentedNewSymbols += stats.documented;
+		} catch {
+			// File may have been deleted in the diff
+		}
+	}
+
+	if (totalNewSymbols === 0) {
+		return makeSignal('documentation-coverage', 0.5, 'No new public symbols to document');
+	}
+
+	const score = documentedNewSymbols / totalNewSymbols;
+	return makeSignal(
+		'documentation-coverage',
+		score,
+		`${documentedNewSymbols}/${totalNewSymbols} public symbols documented`,
+	);
+}
+
+function isSourceFile(filename: string, projectType: string): boolean {
+	switch (projectType) {
+		case 'node': return /\.(ts|tsx|js|jsx)$/.test(filename) && !filename.includes('.test.') && !filename.includes('.spec.');
+		case 'python': return filename.endsWith('.py') && !filename.includes('test_') && !filename.includes('_test.');
+		case 'rust': return filename.endsWith('.rs') && !filename.includes('test');
+		case 'go': return filename.endsWith('.go') && !filename.includes('_test.');
+		default: return false;
+	}
+}
+
+/**
+ * Analyzes documentation coverage in a source file.
+ * Counts public symbols and checks if they have preceding doc comments.
+ */
+function analyzeDocumentation(
+	content: string,
+	projectType: string,
+): { totalPublic: number; documented: number } {
+	const lines = content.split('\n');
+	let totalPublic = 0;
+	let documented = 0;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		const isPublicSymbol = detectPublicSymbol(line, projectType);
+
+		if (isPublicSymbol) {
+			totalPublic++;
+			// Check preceding lines for doc comments
+			if (hasDocComment(lines, i, projectType)) {
+				documented++;
+			}
+		}
+	}
+
+	return { totalPublic, documented };
+}
+
+function detectPublicSymbol(line: string, projectType: string): boolean {
+	const trimmed = line.trim();
+	switch (projectType) {
+		case 'node':
+			return /^export\s+(function|class|const|interface|type|enum)\s/.test(trimmed);
+		case 'python':
+			return /^(def|class)\s+[^_]/.test(trimmed); // public = no leading underscore
+		case 'rust':
+			return /^pub\s+(fn|struct|enum|trait|type|const)\s/.test(trimmed);
+		case 'go':
+			return /^func\s+[A-Z]/.test(trimmed) || /^type\s+[A-Z]/.test(trimmed); // exported = capitalized
+		default:
+			return false;
+	}
+}
+
+function hasDocComment(lines: string[], symbolIndex: number, projectType: string): boolean {
+	if (symbolIndex === 0) return false;
+
+	switch (projectType) {
+		case 'node': {
+			// JSDoc: /** ... */ or // comment on preceding line(s)
+			for (let j = symbolIndex - 1; j >= Math.max(0, symbolIndex - 5); j--) {
+				const prev = lines[j].trim();
+				if (prev.endsWith('*/') || prev.startsWith('/**') || prev.startsWith('//')) return true;
+				if (prev === '') continue;
+				break;
+			}
+			return false;
+		}
+		case 'python': {
+			// Python: docstring on the NEXT line (inside the function/class)
+			if (symbolIndex + 1 < lines.length) {
+				const next = lines[symbolIndex + 1].trim();
+				if (next.startsWith('"""') || next.startsWith("'''")) return true;
+			}
+			return false;
+		}
+		case 'rust': {
+			// Rust: /// or //! on preceding lines
+			for (let j = symbolIndex - 1; j >= Math.max(0, symbolIndex - 5); j--) {
+				const prev = lines[j].trim();
+				if (prev.startsWith('///') || prev.startsWith('//!')) return true;
+				if (prev === '') continue;
+				break;
+			}
+			return false;
+		}
+		case 'go': {
+			// Go: // FuncName on preceding line
+			const prev = lines[symbolIndex - 1]?.trim() ?? '';
+			return prev.startsWith('//');
+		}
+		default:
+			return false;
+	}
+}
+
 // ─── Aggregate Reward Calculation ────────────────────────────────────────────
 
 /**
