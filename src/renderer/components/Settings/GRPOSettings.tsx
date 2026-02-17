@@ -6,7 +6,7 @@
  * All values read from / written to window.maestro.grpo.getConfig() / setConfig().
  */
 
-import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
+import { useState, useEffect, useCallback, useRef, memo } from 'react';
 import type { Theme } from '../../types';
 import type { GRPOConfig, RewardSignalType, GRPOEmbeddingModel } from '../../../shared/grpo-types';
 import { GRPO_CONFIG_DEFAULTS } from '../../../shared/grpo-types';

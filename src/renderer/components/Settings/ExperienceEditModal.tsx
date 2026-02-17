@@ -5,7 +5,7 @@
  * Registers with the layer stack for proper Escape handling.
  */
 
-import React, { useState, useCallback, memo } from 'react';
+import { useState, useCallback, memo } from 'react';
 import type { Theme } from '../../types';
 import type { ExperienceEntry, ExperienceId } from '../../../shared/grpo-types';
 import { useModalLayer } from '../../hooks/ui/useModalLayer';

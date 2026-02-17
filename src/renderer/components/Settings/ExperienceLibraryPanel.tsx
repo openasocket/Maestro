@@ -5,7 +5,7 @@
  * add/edit/delete, and import/export functionality.
  */
 
-import React, { useState, useMemo, useCallback, memo } from 'react';
+import { useState, useMemo, useCallback, memo } from 'react';
 import { Search, ChevronDown, ChevronRight, Plus, Download, Upload, Trash2, Pencil, X, Scissors } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { ExperienceEntry, ExperienceId } from '../../../shared/grpo-types';
