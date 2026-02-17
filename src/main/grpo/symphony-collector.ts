@@ -447,6 +447,11 @@ export class SymphonyCollector {
 			if (rewardStdDev <= this.config.varianceThreshold) {
 				// Fallback: check individual signal variance
 				if (!this.config.multiSignalVariance || !hasMultiSignalVariance(recentSignals, this.config.varianceThreshold)) {
+					logger.debug(
+						`Skipped task "${hash.slice(0, 8)}": aggregate stdDev ${rewardStdDev.toFixed(3)} ≤ ${this.config.varianceThreshold}` +
+						(this.config.multiSignalVariance ? ', no multi-signal variance either' : ''),
+						LOG_CONTEXT,
+					);
 					continue;
 				}
 			}

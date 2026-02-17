@@ -150,7 +150,13 @@ export async function maybeAutoTrain(
 
 			for (const group of groups) {
 				// Skip groups with insufficient variance
-				if (group.rewardStdDev < config.varianceThreshold) continue;
+				if (group.rewardStdDev < config.varianceThreshold) {
+					logger.debug(
+						`Skipped group: stdDev ${group.rewardStdDev.toFixed(3)} < threshold ${config.varianceThreshold}`,
+						LOG_CONTEXT,
+					);
+					continue;
+				}
 
 				// Find best and worst outputs in the group
 				const best = group.outputs.reduce((a, b) => a.aggregateReward > b.aggregateReward ? a : b);
@@ -169,6 +175,11 @@ export async function maybeAutoTrain(
 						lastRolloutGroupId: group.id,
 					});
 					addedCount++;
+				} else {
+					logger.debug(
+						`Skipped group: reward gap ${(best.aggregateReward - worst.aggregateReward).toFixed(3)} ≤ threshold ${config.varianceThreshold}`,
+						LOG_CONTEXT,
+					);
 				}
 			}
 
