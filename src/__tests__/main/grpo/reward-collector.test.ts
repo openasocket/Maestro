@@ -204,6 +204,77 @@ describe('computeAggregateReward', () => {
 		];
 		expect(computeAggregateReward(signals, defaultWeights)).toBe(0.5);
 	});
+
+	// ─── Human Feedback Decay Tests (GRPO-16 Task 7) ────────────────────────
+
+	it('includes human-feedback in weighted mean at full weight when fresh', () => {
+		const now = Date.now();
+		const signals: RewardSignal[] = [
+			{ type: 'test-pass', score: 1.0, description: 'ok', collectedAt: now },
+			{ type: 'human-feedback', score: 1.0, description: 'thumbs up', collectedAt: now },
+		];
+		// test-pass weight=1.0, human-feedback weight=0.3
+		// (1.0*1.0 + 1.0*0.3) / (1.0 + 0.3) = 1.3 / 1.3 = 1.0
+		const result = computeAggregateReward(signals, defaultWeights, 7 * 24 * 60 * 60 * 1000);
+		expect(result).toBeCloseTo(1.0, 4);
+	});
+
+	it('applies temporal decay to human-feedback at half-life', () => {
+		const decayMs = 7 * 24 * 60 * 60 * 1000; // 7 days
+		const halfLife = decayMs / 2; // 3.5 days
+		const now = Date.now();
+		const signals: RewardSignal[] = [
+			{ type: 'human-feedback', score: 1.0, description: 'thumbs up', collectedAt: now - halfLife },
+		];
+		// weight = 0.3 * max(0, 1 - 0.5) = 0.3 * 0.5 = 0.15
+		// result = (1.0 * 0.15) / 0.15 = 1.0 (single signal, score doesn't change)
+		// But the effective weight IS halved — test with a mixed signal set
+		const mixedSignals: RewardSignal[] = [
+			{ type: 'test-pass', score: 0.0, description: 'fail', collectedAt: now },      // weight 1.0
+			{ type: 'human-feedback', score: 1.0, description: 'thumbs up', collectedAt: now - halfLife }, // effective weight 0.15
+		];
+		// (0.0*1.0 + 1.0*0.15) / (1.0 + 0.15) = 0.15 / 1.15
+		const result = computeAggregateReward(mixedSignals, defaultWeights, decayMs);
+		expect(result).toBeCloseTo(0.15 / 1.15, 4);
+	});
+
+	it('fully decays human-feedback at or beyond decayMs', () => {
+		const decayMs = 7 * 24 * 60 * 60 * 1000; // 7 days
+		const now = Date.now();
+		const signals: RewardSignal[] = [
+			{ type: 'test-pass', score: 0.0, description: 'fail', collectedAt: now },
+			{ type: 'human-feedback', score: 1.0, description: 'thumbs up', collectedAt: now - decayMs },
+		];
+		// human-feedback effective weight = 0.3 * max(0, 1 - 1) = 0.0
+		// Only test-pass contributes: (0.0*1.0) / (1.0) = 0.0
+		const result = computeAggregateReward(signals, defaultWeights, decayMs);
+		expect(result).toBeCloseTo(0.0, 4);
+	});
+
+	it('does not decay non-human-feedback signals', () => {
+		const decayMs = 7 * 24 * 60 * 60 * 1000;
+		const now = Date.now();
+		const oldTime = now - decayMs; // 7 days old
+		const signals: RewardSignal[] = [
+			{ type: 'test-pass', score: 1.0, description: 'ok', collectedAt: oldTime },
+		];
+		// test-pass should NOT be decayed regardless of age
+		const result = computeAggregateReward(signals, defaultWeights, decayMs);
+		expect(result).toBe(1.0);
+	});
+
+	it('handles missing decayMs (no decay applied to human feedback)', () => {
+		const now = Date.now();
+		const oldTime = now - 30 * 24 * 60 * 60 * 1000; // 30 days old
+		const signals: RewardSignal[] = [
+			{ type: 'test-pass', score: 0.0, description: 'fail', collectedAt: now },
+			{ type: 'human-feedback', score: 1.0, description: 'thumbs up', collectedAt: oldTime },
+		];
+		// No decay applied — human-feedback gets full weight 0.3
+		// (0.0*1.0 + 1.0*0.3) / (1.0 + 0.3) = 0.3 / 1.3
+		const result = computeAggregateReward(signals, defaultWeights);
+		expect(result).toBeCloseTo(0.3 / 1.3, 4);
+	});
 });
 
 // ─── detectProjectCommands ───────────────────────────────────────────────────

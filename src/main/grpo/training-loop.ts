@@ -66,7 +66,7 @@ export interface RewardCollectorLike {
 	detectProjectCommands: (projectPath: string) => Promise<unknown>;
 	captureAllBaselines: (projectPath: string, commands: unknown, config: unknown) => Promise<unknown>;
 	collectAllRewards: (...args: unknown[]) => Promise<unknown[]>;
-	computeAggregateReward: (signals: unknown[], weights: Record<string, number>) => number;
+	computeAggregateReward: (signals: unknown[], weights: Record<string, number>, humanFeedbackDecayMs?: number) => number;
 }
 
 /** Minimal interface for the semantic advantage generator dependency */

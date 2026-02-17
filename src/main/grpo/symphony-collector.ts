@@ -198,7 +198,7 @@ export class SymphonyCollector {
 				this.config,
 				commands,
 			);
-			const aggregateReward = computeAggregateReward(rewards, this.config.rewardWeights);
+			const aggregateReward = computeAggregateReward(rewards, this.config.rewardWeights, this.config.humanFeedbackDecayMs);
 
 			const taskContentHash = computeTaskContentHash(taskContent);
 			const now = Date.now();

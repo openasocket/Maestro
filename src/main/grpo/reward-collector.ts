@@ -1862,20 +1862,34 @@ export async function captureAllBaselines(
  * Computes the weighted mean reward for a rollout output.
  * Uses the weights from GRPOConfig.rewardWeights.
  *
+ * Human feedback signals receive temporal decay: their effective weight
+ * is multiplied by a decay factor based on age relative to decayMs.
+ * Decay formula: effectiveWeight = weight * max(0, 1 - age / decayMs)
+ *
  * Formula: sum(signal.score * weights[signal.type]) / sum(weights[signal.type])
  * Returns 0.5 (neutral) if no signals present.
  */
 export function computeAggregateReward(
 	signals: RewardSignal[],
 	weights: Record<RewardSignalType, number>,
+	humanFeedbackDecayMs?: number,
 ): number {
 	if (signals.length === 0) return 0.5;
 
+	const now = Date.now();
 	let weightedSum = 0;
 	let totalWeight = 0;
 
 	for (const signal of signals) {
-		const weight = weights[signal.type] ?? 0;
+		let weight = weights[signal.type] ?? 0;
+
+		// Apply temporal decay to human feedback signals
+		if (signal.type === 'human-feedback' && humanFeedbackDecayMs && humanFeedbackDecayMs > 0) {
+			const ageMs = now - (signal.collectedAt ?? now);
+			const decayFactor = Math.max(0, 1 - ageMs / humanFeedbackDecayMs);
+			weight *= decayFactor;
+		}
+
 		weightedSum += signal.score * weight;
 		totalWeight += weight;
 	}

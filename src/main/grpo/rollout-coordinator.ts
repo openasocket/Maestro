@@ -358,7 +358,7 @@ export async function executeRolloutGroup(
 				rewards = await rewardCollector.collectAllRewards(
 					rewardPath, raw.exitCode, raw.output, config, commands, baselines,
 				);
-				aggregateReward = rewardCollector.computeAggregateReward(rewards, config.rewardWeights);
+				aggregateReward = rewardCollector.computeAggregateReward(rewards, config.rewardWeights, config.humanFeedbackDecayMs);
 			}
 
 			rolloutOutputs.push({
