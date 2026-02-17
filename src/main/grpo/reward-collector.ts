@@ -646,6 +646,10 @@ export async function collectAllRewards(
 		asyncCollectors.push(collectBundleSizeReward(projectPath, commands, baselines?.bundleSizeBytes));
 	}
 
+	// Note: 'human-feedback' is NOT collected here — it's submitted manually via
+	// the grpo:submitFeedback IPC handler and recorded by SymphonyCollector.recordManualSignal().
+	// It participates in computeAggregateReward() via the standard weighted mean.
+
 	const asyncResults = await Promise.all(asyncCollectors);
 	for (const result of asyncResults) {
 		if (result !== null) {

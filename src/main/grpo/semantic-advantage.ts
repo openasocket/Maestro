@@ -114,6 +114,20 @@ export function buildIntrospectionPrompt(
 			}
 		}
 
+		// Highlight human feedback signals with extra context for the introspection LLM
+		const humanSignals = output.rewards.filter(r => r.type === 'human-feedback');
+		if (humanSignals.length > 0) {
+			for (const hs of humanSignals) {
+				try {
+					const parsed = JSON.parse(hs.rawOutput ?? '{}');
+					parts.push(`Human feedback: ${hs.score === 1.0 ? 'APPROVED' : 'DISAPPROVED'}`);
+					if (parsed.promptPreview) {
+						parts.push(`  User asked: "${parsed.promptPreview}"`);
+					}
+				} catch { /* ignore */ }
+			}
+		}
+
 		parts.push('');
 		parts.push('Output:');
 		parts.push('```');
