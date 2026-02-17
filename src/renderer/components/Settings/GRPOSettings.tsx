@@ -28,6 +28,16 @@ const REWARD_SIGNAL_LABELS: Record<RewardSignalType, string> = {
 	'task-complete': 'Task Complete',
 	'task-timeout': 'Task Timeout',
 	'process-exit-code': 'Process Exit Code',
+	// New signals (GRPO-15)
+	'test-coverage-delta': 'Test Coverage Delta',
+	'type-safety': 'Type Safety',
+	'complexity-delta': 'Complexity Delta',
+	'security-scan': 'Security Scan',
+	'dependency-hygiene': 'Dependency Hygiene',
+	'api-contract': 'API Contract',
+	'documentation-coverage': 'Documentation Coverage',
+	'runtime-performance': 'Runtime Performance',
+	'bundle-size-delta': 'Bundle Size Delta',
 };
 
 const INTROSPECTION_MODELS = [

@@ -51,6 +51,7 @@ export interface ExperienceEntry {
 
 /** Reward signal types from verifiable outcomes */
 export type RewardSignalType =
+	// Existing signals
 	| 'test-pass'
 	| 'test-fail'
 	| 'build-success'
@@ -60,7 +61,17 @@ export type RewardSignalType =
 	| 'git-diff-quality'
 	| 'task-complete'
 	| 'task-timeout'
-	| 'process-exit-code';
+	| 'process-exit-code'
+	// New signals (GRPO-15)
+	| 'test-coverage-delta'
+	| 'type-safety'
+	| 'complexity-delta'
+	| 'security-scan'
+	| 'dependency-hygiene'
+	| 'api-contract'
+	| 'documentation-coverage'
+	| 'runtime-performance'
+	| 'bundle-size-delta';
 
 /** A single verifiable reward signal */
 export interface RewardSignal {
@@ -206,6 +217,16 @@ export const GRPO_CONFIG_DEFAULTS: GRPOConfig = {
 		'task-complete': 1.0,
 		'task-timeout': 0.0,
 		'process-exit-code': 0.5,
+		// New signals (GRPO-15)
+		'test-coverage-delta': 0.9,
+		'type-safety': 0.8,
+		'complexity-delta': 0.6,
+		'security-scan': 0.8,
+		'dependency-hygiene': 0.5,
+		'api-contract': 0.7,
+		'documentation-coverage': 0.4,
+		'runtime-performance': 0.5,
+		'bundle-size-delta': 0.4,
 	},
 	varianceThreshold: 0.1,
 	introspectionModel: 'claude-sonnet-4-5-20250929',

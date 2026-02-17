@@ -50,6 +50,18 @@ import { GRPO_CONFIG_DEFAULTS } from '../../../shared/grpo-types';
 
 let tmpDir: string;
 
+/** Default new GRPO-15 fields for ProjectCommands test objects */
+const GRPO15_DEFAULTS = {
+	coverageCommand: null,
+	typeCheckCommand: null,
+	complexityCommand: null,
+	securityScanCommand: null,
+	benchmarkCommand: null,
+	bundleBuildCommand: null,
+	manifestPath: null,
+	apiSchemaPath: null,
+} as const;
+
 /** Helper to configure mockExec to simulate a command result */
 function mockExecResult(opts: { stdout?: string; stderr?: string; exitCode?: number; killed?: boolean }) {
 	mockExec.mockImplementation((_cmd: string, _opts: any, callback: Function) => {
@@ -302,6 +314,7 @@ describe('collectAllRewards', () => {
 		buildCommand: null,
 		lintCommand: null,
 		projectType: 'unknown',
+		...GRPO15_DEFAULTS,
 	};
 
 	it('skips collectors with weight 0', async () => {
@@ -386,6 +399,7 @@ describe('timeout handling', () => {
 			buildCommand: null,
 			lintCommand: null,
 			projectType: 'node',
+			...GRPO15_DEFAULTS,
 		};
 
 		const signal = await collectTestReward(tmpDir, commands);
@@ -420,6 +434,7 @@ describe('lint delta scoring', () => {
 			buildCommand: null,
 			lintCommand: 'npm run lint',
 			projectType: 'node',
+			...GRPO15_DEFAULTS,
 		};
 
 		// Baseline of 10 errors — 15 current means 5 new errors
@@ -440,6 +455,7 @@ describe('lint delta scoring', () => {
 			buildCommand: null,
 			lintCommand: 'npm run lint',
 			projectType: 'node',
+			...GRPO15_DEFAULTS,
 		};
 
 		// Baseline of 10, current is 5 → newErrors = max(0, 5-10) = 0
@@ -455,6 +471,7 @@ describe('lint delta scoring', () => {
 			buildCommand: null,
 			lintCommand: 'npm run lint',
 			projectType: 'node',
+			...GRPO15_DEFAULTS,
 		};
 
 		const signal = await collectLintReward(tmpDir, commands);
@@ -473,6 +490,7 @@ describe('captureLintBaseline', () => {
 			buildCommand: null,
 			lintCommand: null,
 			projectType: 'unknown',
+			...GRPO15_DEFAULTS,
 		};
 		expect(await captureLintBaseline(tmpDir, commands)).toBeNull();
 	});
@@ -485,6 +503,7 @@ describe('captureLintBaseline', () => {
 			buildCommand: null,
 			lintCommand: 'npm run lint',
 			projectType: 'node',
+			...GRPO15_DEFAULTS,
 		};
 
 		expect(await captureLintBaseline(tmpDir, commands)).toBe(0);
@@ -498,6 +517,7 @@ describe('captureLintBaseline', () => {
 			buildCommand: null,
 			lintCommand: 'npm run lint',
 			projectType: 'node',
+			...GRPO15_DEFAULTS,
 		};
 
 		expect(await captureLintBaseline(tmpDir, commands)).toBe(12);
@@ -546,6 +566,7 @@ describe('collectTestReward', () => {
 			buildCommand: null,
 			lintCommand: null,
 			projectType: 'unknown',
+			...GRPO15_DEFAULTS,
 		};
 		expect(await collectTestReward(tmpDir, commands)).toBeNull();
 	});
@@ -558,6 +579,7 @@ describe('collectTestReward', () => {
 			buildCommand: null,
 			lintCommand: null,
 			projectType: 'node',
+			...GRPO15_DEFAULTS,
 		};
 
 		const signal = await collectTestReward(tmpDir, commands);
@@ -573,6 +595,7 @@ describe('collectTestReward', () => {
 			buildCommand: null,
 			lintCommand: null,
 			projectType: 'node',
+			...GRPO15_DEFAULTS,
 		};
 
 		const signal = await collectTestReward(tmpDir, commands);
@@ -591,6 +614,7 @@ describe('collectBuildReward', () => {
 			buildCommand: null,
 			lintCommand: null,
 			projectType: 'unknown',
+			...GRPO15_DEFAULTS,
 		};
 		expect(await collectBuildReward(tmpDir, commands)).toBeNull();
 	});
@@ -603,6 +627,7 @@ describe('collectBuildReward', () => {
 			buildCommand: 'npm run build',
 			lintCommand: null,
 			projectType: 'node',
+			...GRPO15_DEFAULTS,
 		};
 
 		const signal = await collectBuildReward(tmpDir, commands);
@@ -618,6 +643,7 @@ describe('collectBuildReward', () => {
 			buildCommand: 'npm run build',
 			lintCommand: null,
 			projectType: 'node',
+			...GRPO15_DEFAULTS,
 		};
 
 		const signal = await collectBuildReward(tmpDir, commands);

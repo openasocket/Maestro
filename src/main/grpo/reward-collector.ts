@@ -29,6 +29,17 @@ export interface ProjectCommands {
 	buildCommand: string | null;
 	lintCommand: string | null;
 	projectType: 'node' | 'python' | 'rust' | 'go' | 'unknown';
+	// New (GRPO-15)
+	coverageCommand: string | null;
+	typeCheckCommand: string | null;
+	complexityCommand: string | null;
+	securityScanCommand: string | null;
+	benchmarkCommand: string | null;
+	bundleBuildCommand: string | null;
+	/** Path to the package manifest file (package.json, Cargo.toml, etc.) */
+	manifestPath: string | null;
+	/** Path to API schema file (openapi.json/yaml, schema.graphql) */
+	apiSchemaPath: string | null;
 }
 
 /**
@@ -57,6 +68,14 @@ export async function detectProjectCommands(projectPath: string): Promise<Projec
 			buildCommand: 'cargo check',
 			lintCommand: 'cargo clippy -- -D warnings',
 			projectType: 'rust',
+			coverageCommand: null,
+			typeCheckCommand: 'cargo check',
+			complexityCommand: null,
+			securityScanCommand: 'cargo audit --json',
+			benchmarkCommand: null,
+			bundleBuildCommand: null,
+			manifestPath: path.join(projectPath, 'Cargo.toml'),
+			apiSchemaPath: null,
 		};
 	}
 
@@ -65,7 +84,20 @@ export async function detectProjectCommands(projectPath: string): Promise<Projec
 		return detectGoCommands(projectPath);
 	}
 
-	return { testCommand: null, buildCommand: null, lintCommand: null, projectType: 'unknown' };
+	return {
+		testCommand: null,
+		buildCommand: null,
+		lintCommand: null,
+		projectType: 'unknown',
+		coverageCommand: null,
+		typeCheckCommand: null,
+		complexityCommand: null,
+		securityScanCommand: null,
+		benchmarkCommand: null,
+		bundleBuildCommand: null,
+		manifestPath: null,
+		apiSchemaPath: null,
+	};
 }
 
 async function detectNodeCommands(projectPath: string): Promise<ProjectCommands> {
@@ -74,6 +106,14 @@ async function detectNodeCommands(projectPath: string): Promise<ProjectCommands>
 		buildCommand: null,
 		lintCommand: null,
 		projectType: 'node',
+		coverageCommand: null,
+		typeCheckCommand: null,
+		complexityCommand: null,
+		securityScanCommand: null,
+		benchmarkCommand: null,
+		bundleBuildCommand: null,
+		manifestPath: null,
+		apiSchemaPath: null,
 	};
 
 	let scripts: Record<string, string> = {};
@@ -106,6 +146,45 @@ async function detectNodeCommands(projectPath: string): Promise<ProjectCommands>
 		commands.lintCommand = 'npx eslint .';
 	}
 
+	// Coverage command (vitest has built-in coverage)
+	if (commands.testCommand?.includes('vitest')) {
+		commands.coverageCommand = 'npx vitest run --coverage --reporter=json';
+	} else if (scripts['test:coverage']) {
+		commands.coverageCommand = 'npm run test:coverage';
+	}
+
+	// Type check command (separate from build — strict mode)
+	if (await fileExists(path.join(projectPath, 'tsconfig.json'))) {
+		commands.typeCheckCommand = 'npx tsc --noEmit';
+	}
+
+	// Complexity (cr — code-complexity package)
+	commands.complexityCommand = 'npx cr --format json';
+
+	// Security scan
+	commands.securityScanCommand = 'npm audit --json';
+
+	// Benchmark
+	if (scripts.bench || scripts.benchmark) {
+		commands.benchmarkCommand = scripts.bench ? 'npm run bench' : 'npm run benchmark';
+	}
+
+	// Bundle build (only if there's a build command)
+	if (scripts.build) {
+		commands.bundleBuildCommand = 'npm run build';
+	}
+
+	// Manifest path
+	commands.manifestPath = path.join(projectPath, 'package.json');
+
+	// API schema detection
+	for (const schemaFile of ['openapi.json', 'openapi.yaml', 'openapi.yml', 'swagger.json', 'schema.graphql']) {
+		if (await fileExists(path.join(projectPath, schemaFile))) {
+			commands.apiSchemaPath = path.join(projectPath, schemaFile);
+			break;
+		}
+	}
+
 	return commands;
 }
 
@@ -115,6 +194,14 @@ async function detectPythonCommands(projectPath: string): Promise<ProjectCommand
 		buildCommand: null,
 		lintCommand: null,
 		projectType: 'python',
+		coverageCommand: null,
+		typeCheckCommand: null,
+		complexityCommand: null,
+		securityScanCommand: null,
+		benchmarkCommand: null,
+		bundleBuildCommand: null,
+		manifestPath: null,
+		apiSchemaPath: null,
 	};
 
 	// Test detection
@@ -142,6 +229,38 @@ async function detectPythonCommands(projectPath: string): Promise<ProjectCommand
 		commands.buildCommand = 'mypy .';
 	}
 
+	// Coverage
+	if (hasPytest) {
+		commands.coverageCommand = 'python -m pytest --cov --cov-report=json -q';
+	}
+
+	// Type check
+	if (hasMypy) {
+		commands.typeCheckCommand = 'mypy . --no-error-summary';
+	}
+
+	// Complexity
+	commands.complexityCommand = 'radon cc . -s -j';
+
+	// Security scan
+	const hasBandit = await fileContains(path.join(projectPath, 'pyproject.toml'), 'bandit')
+		|| await fileExists(path.join(projectPath, '.bandit'));
+	if (hasBandit) {
+		commands.securityScanCommand = 'bandit -r . -f json';
+	}
+
+	// Manifest path
+	if (await fileExists(path.join(projectPath, 'pyproject.toml'))) {
+		commands.manifestPath = path.join(projectPath, 'pyproject.toml');
+	} else if (await fileExists(path.join(projectPath, 'requirements.txt'))) {
+		commands.manifestPath = path.join(projectPath, 'requirements.txt');
+	}
+
+	// Benchmark
+	if (await fileContains(path.join(projectPath, 'pyproject.toml'), 'pytest-benchmark')) {
+		commands.benchmarkCommand = 'python -m pytest --benchmark-only --benchmark-json=benchmark.json';
+	}
+
 	return commands;
 }
 
@@ -151,6 +270,14 @@ async function detectGoCommands(projectPath: string): Promise<ProjectCommands> {
 		buildCommand: 'go build ./...',
 		lintCommand: null,
 		projectType: 'go',
+		coverageCommand: 'go test ./... -coverprofile=coverage.out -covermode=atomic',
+		typeCheckCommand: 'go vet ./...',
+		complexityCommand: null,
+		securityScanCommand: null,
+		benchmarkCommand: null,
+		bundleBuildCommand: null,
+		manifestPath: path.join(projectPath, 'go.mod'),
+		apiSchemaPath: null,
 	};
 
 	// Check if golangci-lint is available
@@ -160,6 +287,12 @@ async function detectGoCommands(projectPath: string): Promise<ProjectCommands> {
 	} catch {
 		// Not installed — skip
 	}
+
+	// Check for govulncheck
+	try {
+		await runVerificationCommand('govulncheck --version', projectPath, 5_000);
+		commands.securityScanCommand = 'govulncheck ./...';
+	} catch { /* not installed */ }
 
 	return commands;
 }
