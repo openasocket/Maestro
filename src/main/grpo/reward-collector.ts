@@ -1465,6 +1465,123 @@ function hasDocComment(lines: string[], symbolIndex: number, projectType: string
 	}
 }
 
+/**
+ * Collects runtime performance reward signal using project benchmarks.
+ * Returns null if no benchmark command detected.
+ *
+ * Scoring (delta-based):
+ * - Performance improved: score = min(1.0, 0.5 + improvement * 2)
+ * - No change: 0.5
+ * - Performance regressed: max(0.0, 0.5 - regression * 2)
+ *   (25%+ regression = 0.0)
+ *
+ * "Regression" here means the ratio of slowdown: (current - baseline) / baseline
+ */
+export async function collectPerformanceReward(
+	projectPath: string,
+	commands: ProjectCommands,
+	baselineDurationMs?: number,
+): Promise<RewardSignal | null> {
+	if (!commands.benchmarkCommand) return null;
+
+	const startTime = Date.now();
+	const result = await safeRunCommand(commands.benchmarkCommand, projectPath);
+	const wallClockMs = Date.now() - startTime;
+
+	if (result.exitCode === -1) {
+		return timeoutSignal('runtime-performance', 'Benchmark timed out');
+	}
+
+	if (result.exitCode !== 0) {
+		return makeSignal('runtime-performance', 0.0, 'Benchmark failed', combineOutput(result));
+	}
+
+	const rawOutput = combineOutput(result);
+
+	// Try to parse structured benchmark results
+	const parsedDuration = parseBenchmarkDuration(rawOutput, commands.projectType);
+	const effectiveDuration = parsedDuration ?? wallClockMs;
+
+	if (baselineDurationMs === undefined || baselineDurationMs === null) {
+		return makeSignal(
+			'runtime-performance',
+			0.5,
+			`Benchmark completed in ${effectiveDuration}ms (no baseline)`,
+			rawOutput,
+		);
+	}
+
+	// Calculate regression ratio
+	const regressionRatio = (effectiveDuration - baselineDurationMs) / Math.max(1, baselineDurationMs);
+
+	let score: number;
+	if (regressionRatio <= 0) {
+		// Improvement
+		score = Math.min(1.0, 0.5 + Math.abs(regressionRatio) * 2);
+	} else {
+		// Regression
+		score = Math.max(0.0, 0.5 - regressionRatio * 2);
+	}
+
+	const changeStr = regressionRatio > 0
+		? `+${(regressionRatio * 100).toFixed(1)}% slower`
+		: `${(Math.abs(regressionRatio) * 100).toFixed(1)}% faster`;
+
+	return makeSignal(
+		'runtime-performance',
+		score,
+		`Benchmark: ${effectiveDuration}ms (baseline: ${baselineDurationMs}ms, ${changeStr})`,
+		rawOutput,
+	);
+}
+
+/**
+ * Parses total benchmark duration from tool output.
+ * Returns duration in milliseconds, or null if unparseable.
+ */
+function parseBenchmarkDuration(output: string, _projectType: string): number | null {
+	// vitest bench: "Total time: 1234ms"
+	const vitestMatch = output.match(/Total time:\s*([\d.]+)\s*ms/i);
+	if (vitestMatch) return parseFloat(vitestMatch[1]);
+
+	// pytest-benchmark: mean from JSON output
+	try {
+		const parsed = JSON.parse(output);
+		if (parsed.benchmarks && Array.isArray(parsed.benchmarks)) {
+			const totalMs = parsed.benchmarks.reduce(
+				(sum: number, b: { stats?: { mean?: number } }) => sum + (b.stats?.mean ?? 0) * 1000, 0
+			);
+			if (totalMs > 0) return totalMs;
+		}
+	} catch { /* not JSON */ }
+
+	// General: look for time patterns
+	const timeMatch = output.match(/(?:time|elapsed|duration|took)\s*[:=]?\s*([\d.]+)\s*(ms|s|sec)/i);
+	if (timeMatch) {
+		const value = parseFloat(timeMatch[1]);
+		const unit = timeMatch[2].toLowerCase();
+		return unit === 'ms' ? value : value * 1000;
+	}
+
+	return null;
+}
+
+/**
+ * Captures baseline benchmark duration before a rollout starts.
+ * Returns duration in milliseconds, or null if unavailable.
+ */
+export async function capturePerformanceBaseline(
+	projectPath: string,
+	commands: ProjectCommands,
+): Promise<number | null> {
+	if (!commands.benchmarkCommand) return null;
+	const startTime = Date.now();
+	const result = await safeRunCommand(commands.benchmarkCommand, projectPath);
+	const wallClockMs = Date.now() - startTime;
+	if (result.exitCode !== 0) return null;
+	return parseBenchmarkDuration(combineOutput(result), commands.projectType) ?? wallClockMs;
+}
+
 // ─── Aggregate Reward Calculation ────────────────────────────────────────────
 
 /**
