@@ -1582,6 +1582,144 @@ export async function capturePerformanceBaseline(
 	return parseBenchmarkDuration(combineOutput(result), commands.projectType) ?? wallClockMs;
 }
 
+/**
+ * Collects bundle size delta reward signal.
+ * Runs the project's build and measures the total output size.
+ * Returns null for non-frontend projects or if no build command.
+ *
+ * Scoring:
+ * - Size decreased: score = min(1.0, 0.5 + decrease / 100KB)
+ * - Size unchanged (±1KB): 0.5
+ * - Size increased: max(0.0, 0.5 - increase / 100KB)
+ *   (50KB+ increase = 0.0)
+ */
+export async function collectBundleSizeReward(
+	projectPath: string,
+	commands: ProjectCommands,
+	baselineSizeBytes?: number,
+): Promise<RewardSignal | null> {
+	// Only for Node.js frontend projects
+	if (commands.projectType !== 'node') return null;
+	if (!commands.bundleBuildCommand) return null;
+
+	// Run build
+	const result = await safeRunCommand(commands.bundleBuildCommand, projectPath);
+	if (result.exitCode === -1) {
+		return timeoutSignal('bundle-size-delta', 'Bundle build timed out');
+	}
+	if (result.exitCode !== 0) {
+		return null; // Build failed — handled by build-success signal
+	}
+
+	// Measure output directory size
+	const currentSize = await measureBundleSize(projectPath);
+	if (currentSize === null) return null;
+
+	if (baselineSizeBytes === undefined || baselineSizeBytes === null) {
+		const sizeKB = (currentSize / 1024).toFixed(1);
+		return makeSignal(
+			'bundle-size-delta',
+			0.5,
+			`Bundle size: ${sizeKB}KB (no baseline)`,
+		);
+	}
+
+	const deltaBytes = currentSize - baselineSizeBytes;
+	const deltaKB = deltaBytes / 1024;
+
+	// ±1KB tolerance
+	if (Math.abs(deltaKB) < 1) {
+		return makeSignal('bundle-size-delta', 0.5, 'Bundle size unchanged');
+	}
+
+	let score: number;
+	if (deltaKB < 0) {
+		// Size decreased
+		score = Math.min(1.0, 0.5 + Math.abs(deltaKB) / 100);
+	} else {
+		// Size increased
+		score = Math.max(0.0, 0.5 - deltaKB / 100);
+	}
+
+	const changeStr = deltaKB > 0 ? `+${deltaKB.toFixed(1)}KB` : `${deltaKB.toFixed(1)}KB`;
+	return makeSignal(
+		'bundle-size-delta',
+		score,
+		`Bundle: ${(currentSize / 1024).toFixed(1)}KB (baseline: ${(baselineSizeBytes / 1024).toFixed(1)}KB, ${changeStr})`,
+	);
+}
+
+/**
+ * Measures total size of build output directory.
+ * Checks common output dirs: dist/, build/, .next/, out/.
+ */
+async function measureBundleSize(projectPath: string): Promise<number | null> {
+	const outputDirs = ['dist', 'build', '.next', 'out'];
+
+	for (const dir of outputDirs) {
+		const dirPath = path.join(projectPath, dir);
+		try {
+			const stat = await fs.stat(dirPath);
+			if (stat.isDirectory()) {
+				return await getDirectorySize(dirPath);
+			}
+		} catch {
+			// Dir doesn't exist — try next
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Recursively calculates total file size in a directory (bytes).
+ * Capped at 1000 files to avoid slow scans.
+ */
+async function getDirectorySize(dirPath: string): Promise<number> {
+	let totalSize = 0;
+	let fileCount = 0;
+	const maxFiles = 1000;
+
+	async function walk(dir: string): Promise<void> {
+		if (fileCount >= maxFiles) return;
+		const entries = await fs.readdir(dir, { withFileTypes: true });
+		for (const entry of entries) {
+			if (fileCount >= maxFiles) return;
+			const fullPath = path.join(dir, entry.name);
+			if (entry.isDirectory()) {
+				// Skip node_modules, .git inside build output
+				if (entry.name === 'node_modules' || entry.name === '.git') continue;
+				await walk(fullPath);
+			} else if (entry.isFile()) {
+				const fileStat = await fs.stat(fullPath);
+				totalSize += fileStat.size;
+				fileCount++;
+			}
+		}
+	}
+
+	await walk(dirPath);
+	return totalSize;
+}
+
+/**
+ * Captures baseline bundle size before a rollout starts.
+ * Returns size in bytes, or null if unavailable.
+ */
+export async function captureBundleSizeBaseline(
+	projectPath: string,
+	commands: ProjectCommands,
+): Promise<number | null> {
+	if (commands.projectType !== 'node') return null;
+	if (!commands.bundleBuildCommand) return null;
+
+	// Run build to ensure output is fresh
+	const result = await safeRunCommand(commands.bundleBuildCommand, projectPath);
+	if (result.exitCode !== 0) return null;
+
+	return measureBundleSize(projectPath);
+}
+
 // ─── Aggregate Reward Calculation ────────────────────────────────────────────
 
 /**
