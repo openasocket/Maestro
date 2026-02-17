@@ -11,6 +11,8 @@ import {
 	RotateCcw,
 	AlertCircle,
 	Save,
+	ThumbsUp,
+	ThumbsDown,
 } from 'lucide-react';
 import type { Session, Theme, LogEntry, FocusArea } from '../types';
 import type { FileNode } from '../types/fileTree';
@@ -91,6 +93,13 @@ interface LogItemProps {
 	onShowErrorDetails?: () => void;
 	// Save to file callback (AI mode only, non-user messages)
 	onSaveToFile?: (text: string) => void;
+	// GRPO human feedback (GRPO-16)
+	/** Whether GRPO human feedback buttons should be shown */
+	grpoFeedbackEnabled?: boolean;
+	/** Callback when user gives thumbs up/down on an AI response */
+	onSubmitFeedback?: (logId: string, responseText: string, approved: boolean) => void;
+	/** Map of logId → feedback state (for rendering the active thumbs state) */
+	feedbackState?: Record<string, { approved: boolean }>;
 }
 
 const LogItemComponent = memo(
@@ -129,6 +138,9 @@ const LogItemComponent = memo(
 		onFileClick,
 		onShowErrorDetails,
 		onSaveToFile,
+		grpoFeedbackEnabled,
+		onSubmitFeedback,
+		feedbackState,
 	}: LogItemProps) => {
 		// Ref for the log item container - used for scroll-into-view on expand
 		const logItemRef = useRef<HTMLDivElement>(null);
@@ -814,6 +826,37 @@ const LogItemComponent = memo(
 								<Save className="w-3.5 h-3.5" />
 							</button>
 						)}
+						{/* GRPO Human Feedback Buttons — only for AI responses when enabled */}
+						{log.source !== 'user' && isAIMode && grpoFeedbackEnabled && onSubmitFeedback && (
+							<>
+								<button
+									onClick={() => onSubmitFeedback(log.id, log.text, true)}
+									className="p-1.5 rounded opacity-0 group-hover:opacity-50 hover:!opacity-100 transition-opacity"
+									style={{
+										color: feedbackState?.[log.id]?.approved === true
+											? theme.colors.success
+											: theme.colors.textDim,
+										opacity: feedbackState?.[log.id]?.approved === true ? 0.8 : undefined,
+									}}
+									title="Good response (thumbs up)"
+								>
+									<ThumbsUp className="w-3.5 h-3.5" />
+								</button>
+								<button
+									onClick={() => onSubmitFeedback(log.id, log.text, false)}
+									className="p-1.5 rounded opacity-0 group-hover:opacity-50 hover:!opacity-100 transition-opacity"
+									style={{
+										color: feedbackState?.[log.id]?.approved === false
+											? theme.colors.error
+											: theme.colors.textDim,
+										opacity: feedbackState?.[log.id]?.approved === false ? 0.8 : undefined,
+									}}
+									title="Poor response (thumbs down)"
+								>
+									<ThumbsDown className="w-3.5 h-3.5" />
+								</button>
+							</>
+						)}
 						{/* Delete button for user messages (both AI and terminal modes) */}
 						{log.source === 'user' &&
 							onDeleteLog &&
@@ -898,7 +941,9 @@ const LogItemComponent = memo(
 			prevProps.theme === nextProps.theme &&
 			prevProps.maxOutputLines === nextProps.maxOutputLines &&
 			prevProps.markdownEditMode === nextProps.markdownEditMode &&
-			prevProps.fontFamily === nextProps.fontFamily
+			prevProps.fontFamily === nextProps.fontFamily &&
+			prevProps.grpoFeedbackEnabled === nextProps.grpoFeedbackEnabled &&
+			prevProps.feedbackState === nextProps.feedbackState
 		);
 	}
 );
@@ -984,6 +1029,10 @@ interface TerminalOutputProps {
 		content: string;
 		sshRemoteId?: string;
 	}) => void; // Callback to open saved file in a tab
+	// GRPO human feedback (GRPO-16)
+	grpoFeedbackEnabled?: boolean;
+	onSubmitFeedback?: (logId: string, responseText: string, approved: boolean) => void;
+	feedbackState?: Record<string, { approved: boolean }>;
 }
 
 // PERFORMANCE: Wrap in React.memo to prevent re-renders when parent re-renders
@@ -1021,6 +1070,9 @@ export const TerminalOutput = memo(
 			onShowErrorDetails,
 			onFileSaved,
 			onOpenInTab,
+			grpoFeedbackEnabled,
+			onSubmitFeedback,
+			feedbackState,
 		} = props;
 
 		// Use the forwarded ref if provided, otherwise create a local one
@@ -1637,6 +1689,9 @@ export const TerminalOutput = memo(
 							onFileClick={onFileClick}
 							onShowErrorDetails={onShowErrorDetails}
 							onSaveToFile={handleSaveToFile}
+							grpoFeedbackEnabled={grpoFeedbackEnabled}
+							onSubmitFeedback={onSubmitFeedback}
+							feedbackState={feedbackState}
 						/>
 					))}
 

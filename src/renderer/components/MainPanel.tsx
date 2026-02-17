@@ -880,6 +880,50 @@ export const MainPanel = React.memo(
 			}
 		};
 
+		// GRPO Human Feedback state (GRPO-16)
+		const [grpoFeedbackEnabled, setGrpoFeedbackEnabled] = useState(false);
+		const [feedbackState, setFeedbackState] = useState<Record<string, { approved: boolean }>>({});
+
+		// Load GRPO feedback enabled state from config
+		useEffect(() => {
+			window.maestro.grpo.getConfig().then(result => {
+				if (result.success && result.data) {
+					setGrpoFeedbackEnabled(result.data.enabled && result.data.humanFeedbackEnabled);
+				}
+			}).catch(() => {});
+		}, []);
+
+		// GRPO feedback submission handler
+		const handleSubmitFeedback = useCallback(async (logId: string, responseText: string, approved: boolean) => {
+			if (!activeSession) return;
+			setFeedbackState(prev => ({ ...prev, [logId]: { approved } }));
+
+			// Find the preceding user message for context
+			const activeLogs = activeTab?.logs ?? [];
+			let lastUserPrompt = '';
+			// Search backward through the collapsed view for the last user message before this response
+			for (let i = activeLogs.length - 1; i >= 0; i--) {
+				if (activeLogs[i].source === 'user') {
+					lastUserPrompt = activeLogs[i].text;
+					break;
+				}
+			}
+
+			try {
+				await window.maestro.grpo.submitFeedback(
+					activeSession.id,
+					activeSession.toolType,
+					activeSession.fullPath,
+					responseText,
+					lastUserPrompt,
+					approved,
+					'manual',
+				);
+			} catch (err) {
+				console.warn('[GRPO] Failed to submit feedback:', err);
+			}
+		}, [activeSession?.id, activeSession?.toolType, activeSession?.fullPath, activeTab?.logs]);
+
 		// Show log viewer
 		if (logViewerOpen) {
 			return (
@@ -1801,6 +1845,9 @@ export const MainPanel = React.memo(
 													: undefined
 											}
 											onOpenInTab={props.onOpenSavedFileInTab}
+											grpoFeedbackEnabled={grpoFeedbackEnabled}
+											onSubmitFeedback={handleSubmitFeedback}
+											feedbackState={feedbackState}
 										/>
 									)}
 								</div>
