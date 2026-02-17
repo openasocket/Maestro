@@ -101,7 +101,7 @@ import {
 // Phase 2 refactoring - dependency injection
 import { createSafeSend, isWebContentsAvailable } from './utils/safe-send';
 import { setGRPOSettingsStore } from './grpo/prompt-injector';
-import { preloadModel as preloadEmbeddingModel, setDownloadProgressCallback } from './grpo/embedding-service';
+import { preloadModel as preloadEmbeddingModel, setDownloadProgressCallback, isModelCached } from './grpo/embedding-service';
 import { registerGRPOHandlers } from './ipc/handlers/grpo-handlers';
 import { initializeSymphonyCollector, getSymphonyCollector } from './grpo/symphony-collector';
 import { getExperienceStore } from './grpo/experience-store';
@@ -613,13 +613,19 @@ function setupIpcHandlers() {
 	const grpoConfig = store.get('grpoConfig') as Record<string, unknown> | undefined;
 	if (grpoConfig?.enabled && grpoConfig?.semanticRetrievalEnabled !== false) {
 		const embeddingModel = (grpoConfig.embeddingModel as string) ?? 'multilingual';
+		const modelAlreadyCached = isModelCached(embeddingModel as 'multilingual' | 'english');
 
-		// Wire download progress to renderer for first-run model download
-		setDownloadProgressCallback((info) => {
-			if (isWebContentsAvailable(mainWindow)) {
-				mainWindow!.webContents.send('grpo:model-download-progress', info);
-			}
-		});
+		if (modelAlreadyCached) {
+			logger.info(`[GRPO] Embedding model '${embeddingModel}' found in cache, loading`);
+		} else {
+			logger.info(`[GRPO] Embedding model '${embeddingModel}' not cached, downloading`);
+			// Only wire download progress to renderer if actually downloading
+			setDownloadProgressCallback((info) => {
+				if (isWebContentsAvailable(mainWindow)) {
+					mainWindow!.webContents.send('grpo:model-download-progress', info);
+				}
+			});
+		}
 
 		preloadEmbeddingModel(embeddingModel as 'multilingual' | 'english').then(() => {
 			setDownloadProgressCallback(null);
@@ -731,6 +737,10 @@ function setupProcessListeners() {
 				calculateContextTokens,
 			},
 			getStatsDB,
+			getGRPOConfig: () => {
+				const stored = store.get('grpoConfig') as Partial<GRPOConfig> | undefined;
+				return { ...GRPO_CONFIG_DEFAULTS, ...stored };
+			},
 			debugLog,
 			patterns: {
 				REGEX_MODERATOR_SESSION,

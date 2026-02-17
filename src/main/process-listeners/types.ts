@@ -11,6 +11,7 @@ import type { StatsDB } from '../stats';
 import type { GroupChat, GroupChatParticipant } from '../group-chat/group-chat-storage';
 import type { GroupChatMessage, GroupChatState } from '../../shared/group-chat-types';
 import type { ParticipantState } from '../ipc/handlers/groupChat';
+import type { GRPOConfig } from '../../shared/grpo-types';
 
 // ==========================================================================
 // Constants
@@ -143,6 +144,8 @@ export interface ProcessListenerDependencies {
 	};
 	/** Stats database getter */
 	getStatsDB: () => StatsDB;
+	/** GRPO config getter — returns merged config with defaults */
+	getGRPOConfig: () => GRPOConfig;
 	/** Debug log function */
 	debugLog: (prefix: string, message: string, ...args: unknown[]) => void;
 	/** Regex patterns */
