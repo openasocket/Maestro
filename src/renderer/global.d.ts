@@ -2649,6 +2649,15 @@ interface MaestroAPI {
 		pruneLibrary: (projectPath: string) => Promise<{ success: boolean; data?: string[]; error?: string }>;
 		exportLibrary: (projectPath: string) => Promise<{ success: boolean; data?: string; error?: string }>;
 		importLibrary: (projectPath: string, json: string) => Promise<{ success: boolean; data?: number; error?: string }>;
+		// Symphony Collector (Auto Run signal collection)
+		onAutoRunTaskComplete: (
+			taskContent: string, projectPath: string, agentType: string, sessionId: string,
+			exitCode: number, output: string, durationMs: number, documentPath: string,
+		) => Promise<{ success: boolean; data?: any; error?: string }>;
+		onAutoRunBatchComplete: (projectPath: string, batchResults: any[]) => Promise<{ success: boolean; data?: any; error?: string }>;
+		getTrainingReadiness: (projectPath: string) => Promise<{ success: boolean; data?: any; error?: string }>;
+		formNaturalRolloutGroups: (projectPath: string) => Promise<{ success: boolean; data?: any[]; error?: string }>;
+		// Embedding model status and cache management
 		getModelStatus: () => Promise<{ success: boolean; data?: string; error?: string }>;
 		clearModelCache: () => Promise<{ success: boolean; error?: string }>;
 		onModelDownloadProgress: (callback: (info: { progress: number; file?: string; done?: boolean }) => void) => () => void;

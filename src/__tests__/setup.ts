@@ -526,6 +526,13 @@ const mockMaestro = {
 		pruneLibrary: vi.fn().mockResolvedValue({ success: true, data: [] }),
 		exportLibrary: vi.fn().mockResolvedValue({ success: true, data: '[]' }),
 		importLibrary: vi.fn().mockResolvedValue({ success: true, data: 0 }),
+		onAutoRunTaskComplete: vi.fn().mockResolvedValue({ success: true }),
+		onAutoRunBatchComplete: vi.fn().mockResolvedValue({ success: true }),
+		getTrainingReadiness: vi.fn().mockResolvedValue({ success: true, data: { ready: false } }),
+		formNaturalRolloutGroups: vi.fn().mockResolvedValue({ success: true, data: [] }),
+		getModelStatus: vi.fn().mockResolvedValue({ success: true, data: 'not-loaded' }),
+		clearModelCache: vi.fn().mockResolvedValue({ success: true }),
+		onModelDownloadProgress: vi.fn().mockReturnValue(() => {}),
 	},
 	app: {
 		onQuitConfirmationRequest: vi.fn().mockReturnValue(() => {}),

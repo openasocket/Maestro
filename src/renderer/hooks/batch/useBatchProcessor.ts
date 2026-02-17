@@ -1075,6 +1075,20 @@ export function useBatchProcessor({
 								}
 							}
 
+							// Collect GRPO reward signal (fire-and-forget, never fails the batch)
+							if (tasksCompletedThisRun > 0) {
+								window.maestro.grpo.onAutoRunTaskComplete(
+									shortSummary || '',
+									effectiveCwd,
+									session.toolType,
+									agentSessionId || sessionId,
+									success ? 0 : 1,
+									fullSynopsis || '',
+									elapsedTimeMs,
+									effectiveFilename,
+								).catch(err => console.warn('[BatchProcessor] GRPO signal collection failed:', err));
+							}
+
 							// Track token usage for loop summary and cumulative totals
 							if (usageStats) {
 								loopTotalInputTokens += usageStats.inputTokens || 0;
@@ -1638,6 +1652,10 @@ export function useBatchProcessor({
 			});
 			// Broadcast state change to web clients
 			broadcastAutoRunState(sessionId, null);
+
+			// Notify GRPO of batch completion — triggers training readiness check
+			window.maestro.grpo.onAutoRunBatchComplete(effectiveCwd, [])
+				.catch(err => console.warn('[BatchProcessor] GRPO batch complete failed:', err));
 
 			// Call completion callback if provided (only if still mounted to avoid warnings)
 			if (isMountedRef.current && onComplete) {
