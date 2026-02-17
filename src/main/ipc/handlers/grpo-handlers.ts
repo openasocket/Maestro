@@ -16,6 +16,7 @@ import {
 	detectProjectCommands,
 } from '../../grpo/reward-collector';
 import { getModelStatus, getCacheDir, preloadModel, setDownloadProgressCallback, dispose as disposeEmbedding, isModelCached } from '../../grpo/embedding-service';
+import { maybeAutoTrain } from '../../grpo/auto-trainer';
 import type { EmbeddingModelStatus } from '../../grpo/embedding-service';
 import type {
 	ExperienceEntry,
@@ -338,6 +339,22 @@ export function registerGRPOHandlers(deps: GRPOHandlerDependencies): void {
 				}
 				deps.symphonyCollector.setConfig(config);
 				const summary = await deps.symphonyCollector.onBatchComplete(projectPath, batchResults);
+
+				// Trigger auto-training if enough signals have accumulated
+				if (summary.trainingRecommended) {
+					const safeSend = (channel: string, ...args: unknown[]) => {
+						try {
+							const win = BrowserWindow.getAllWindows()[0];
+							if (win && !win.isDestroyed()) {
+								win.webContents.send(channel, ...args);
+							}
+						} catch { /* ignore if no window */ }
+					};
+					maybeAutoTrain(projectPath, config, safeSend).catch(err => {
+						logger.warn(`[GRPO] Auto-training trigger failed: ${err}`, LOG_CONTEXT);
+					});
+				}
+
 				return { success: true, data: summary };
 			}
 		)
