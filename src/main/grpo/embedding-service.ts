@@ -57,6 +57,28 @@ let loadingPromise: Promise<FeatureExtractionPipeline> | null = null;
 let activeModelId: EmbeddingModelId | null = null;
 let modelLoadFailed = false;
 
+/**
+ * Inference serialization queue.
+ * ONNX runtime is not thread-safe for concurrent inference on the same session.
+ * All encode/encodeBatch calls are serialized through this promise chain to prevent
+ * race conditions and reduce event-loop stacking of ~30-60ms blocking calls.
+ *
+ * Pattern from experience-store.ts:124-132 (serializedWrite).
+ */
+let inferenceQueue: Promise<void> = Promise.resolve();
+
+/**
+ * Serialize an inference operation through the global queue.
+ * Ensures only one ONNX inference runs at a time. The queue swallows errors
+ * for continuity — callers still receive their individual rejections.
+ */
+function serializedInference<T>(fn: () => Promise<T>): Promise<T> {
+	let result: T;
+	const next = inferenceQueue.then(async () => { result = await fn(); });
+	inferenceQueue = next.then(() => {}, () => {});
+	return next.then(() => result!);
+}
+
 /** Optional callback for download progress (set by the caller) */
 let onDownloadProgress: ((info: ModelDownloadProgress) => void) | null = null;
 
@@ -140,9 +162,11 @@ async function getEmbedder(modelId: EmbeddingModelId = 'multilingual'): Promise<
  * Latency: ~30-60 ms multilingual, ~12-25 ms English-only (CPU, int8 quantized).
  */
 export async function encode(text: string, modelId: EmbeddingModelId = 'multilingual'): Promise<Float32Array> {
-	const embedder = await getEmbedder(modelId);
-	const result = await embedder(text, { pooling: 'mean', normalize: true });
-	return new Float32Array(result.data as Float32Array);
+	return serializedInference(async () => {
+		const embedder = await getEmbedder(modelId);
+		const result = await embedder(text, { pooling: 'mean', normalize: true });
+		return new Float32Array(result.data as Float32Array);
+	});
 }
 
 /**
@@ -151,11 +175,13 @@ export async function encode(text: string, modelId: EmbeddingModelId = 'multilin
  */
 export async function encodeBatch(texts: string[], modelId: EmbeddingModelId = 'multilingual'): Promise<Float32Array[]> {
 	if (texts.length === 0) return [];
-	const embedder = await getEmbedder(modelId);
-	const results = await embedder(texts, { pooling: 'mean', normalize: true });
-	// Split the flat result into individual vectors
-	const data = results.data as Float32Array;
-	return texts.map((_, i) => new Float32Array(data.slice(i * VECTOR_DIM, (i + 1) * VECTOR_DIM)));
+	return serializedInference(async () => {
+		const embedder = await getEmbedder(modelId);
+		const results = await embedder(texts, { pooling: 'mean', normalize: true });
+		// Split the flat result into individual vectors
+		const data = results.data as Float32Array;
+		return texts.map((_, i) => new Float32Array(data.slice(i * VECTOR_DIM, (i + 1) * VECTOR_DIM)));
+	});
 }
 
 /**
@@ -200,6 +226,7 @@ export async function dispose(): Promise<void> {
 		activeModelId = null;
 	}
 	modelLoadFailed = false;
+	inferenceQueue = Promise.resolve();
 }
 
 /**

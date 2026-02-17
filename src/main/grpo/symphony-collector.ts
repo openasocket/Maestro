@@ -24,6 +24,8 @@ import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
 import {
 	collectAllRewards,
+	collectExitCodeReward,
+	collectTaskCompleteReward,
 	computeAggregateReward,
 	detectProjectCommands,
 } from './reward-collector';
@@ -220,15 +222,30 @@ export class SymphonyCollector {
 			// Ensure project directory exists
 			await fs.mkdir(this.getProjectDir(projectPath), { recursive: true });
 
-			// Collect reward signals
-			const commands = await detectProjectCommands(projectPath);
-			const rewards = await collectAllRewards(
-				projectPath,
-				exitCode,
-				output,
-				this.config,
-				commands,
-			);
+			// Collect reward signals.
+			// For 'process' realm, skip heavy shell commands (test/build/lint/git-diff)
+			// since exit code is always 0 and output is always empty — only collect
+			// the two synchronous signals (exit-code + task-complete).
+			let rewards: RewardSignal[];
+			if (realm === 'process') {
+				rewards = [];
+				const weights = this.config.rewardWeights;
+				if (weights['process-exit-code'] > 0) {
+					rewards.push(collectExitCodeReward(exitCode));
+				}
+				if (weights['task-complete'] > 0) {
+					rewards.push(collectTaskCompleteReward(output, exitCode));
+				}
+			} else {
+				const commands = await detectProjectCommands(projectPath);
+				rewards = await collectAllRewards(
+					projectPath,
+					exitCode,
+					output,
+					this.config,
+					commands,
+				);
+			}
 			const aggregateReward = computeAggregateReward(rewards, this.config.rewardWeights, this.config.humanFeedbackDecayMs);
 
 			const taskContentHash = computeTaskContentHash(taskContent);
