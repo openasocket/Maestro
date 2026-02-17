@@ -38,6 +38,7 @@ const REWARD_SIGNAL_LABELS: Record<RewardSignalType, string> = {
 	'documentation-coverage': 'Documentation Coverage',
 	'runtime-performance': 'Runtime Performance',
 	'bundle-size-delta': 'Bundle Size Delta',
+	'human-feedback': 'Human Feedback',
 };
 
 const INTROSPECTION_MODELS = [

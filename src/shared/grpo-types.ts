@@ -71,7 +71,9 @@ export type RewardSignalType =
 	| 'api-contract'
 	| 'documentation-coverage'
 	| 'runtime-performance'
-	| 'bundle-size-delta';
+	| 'bundle-size-delta'
+	// Human feedback (GRPO-16)
+	| 'human-feedback';
 
 /** A single verifiable reward signal */
 export interface RewardSignal {
@@ -84,6 +86,30 @@ export interface RewardSignal {
 	rawOutput?: string;
 	/** Timestamp of signal collection (ms) */
 	collectedAt: number;
+}
+
+/** A single human feedback entry (thumbs up/down on an agent response) */
+export interface HumanFeedback {
+	/** Unique ID for this feedback entry */
+	id: string;
+	/** The session ID where feedback was given */
+	sessionId: string;
+	/** The agent type that produced the response */
+	agentType: string;
+	/** Project path at time of feedback */
+	projectPath: string;
+	/** Whether the user approved (true = thumbs up, false = thumbs down) */
+	approved: boolean;
+	/** SHA-256 hash of the agent response text (first 12 chars, for matching to signals) */
+	responseHash: string;
+	/** Truncated agent response text (first 500 chars, for introspection context) */
+	responsePreview: string;
+	/** Truncated user prompt that led to this response (first 200 chars) */
+	promptPreview: string;
+	/** Timestamp of feedback (ms) */
+	createdAt: number;
+	/** Signal realm this feedback belongs to */
+	realm: SignalRealm;
 }
 
 /** A single rollout output (one agent's attempt at a task) */
@@ -198,6 +224,10 @@ export interface GRPOConfig {
 	semanticSimilarityFloor: number;
 	/** Embedding model for semantic retrieval — 'multilingual' (50+ langs, default) or 'english' (faster, EN only) */
 	embeddingModel: GRPOEmbeddingModel;
+	/** Whether human feedback thumbs-up/down collection is enabled (default: false) */
+	humanFeedbackEnabled: boolean;
+	/** Maximum age for human feedback signals before decay to zero (ms, default: 7 days) */
+	humanFeedbackDecayMs: number;
 }
 
 /** Default GRPO configuration */
@@ -227,6 +257,7 @@ export const GRPO_CONFIG_DEFAULTS: GRPOConfig = {
 		'documentation-coverage': 0.4,
 		'runtime-performance': 0.5,
 		'bundle-size-delta': 0.4,
+		'human-feedback': 0.3,
 	},
 	varianceThreshold: 0.1,
 	introspectionModel: 'claude-sonnet-4-5-20250929',
@@ -238,6 +269,8 @@ export const GRPO_CONFIG_DEFAULTS: GRPOConfig = {
 	semanticRetrievalEnabled: true,
 	semanticSimilarityFloor: 0.15,
 	embeddingModel: 'multilingual',
+	humanFeedbackEnabled: false,
+	humanFeedbackDecayMs: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
 
 /** Summary of a rollout group for dashboard display */
