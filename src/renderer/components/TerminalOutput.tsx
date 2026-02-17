@@ -774,7 +774,11 @@ const LogItemComponent = memo(
 								onClick={onToggleMarkdownEditMode}
 								className="p-1.5 rounded opacity-0 group-hover:opacity-50 hover:!opacity-100"
 								style={{ color: markdownEditMode ? theme.colors.accent : theme.colors.textDim }}
-								title={markdownEditMode ? `Show formatted (${formatShortcutKeys(['Meta', 'e'])})` : `Show plain text (${formatShortcutKeys(['Meta', 'e'])})`}
+								title={
+									markdownEditMode
+										? `Show formatted (${formatShortcutKeys(['Meta', 'e'])})`
+										: `Show plain text (${formatShortcutKeys(['Meta', 'e'])})`
+								}
 							>
 								{markdownEditMode ? <Eye className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
 							</button>
@@ -974,7 +978,12 @@ interface TerminalOutputProps {
 	onFileClick?: (path: string) => void; // Callback when a file link is clicked
 	onShowErrorDetails?: () => void; // Callback to show the error modal (for error log entries)
 	onFileSaved?: () => void; // Callback when markdown content is saved to file (e.g., to refresh file list)
-	onOpenInTab?: (file: { path: string; name: string; content: string; sshRemoteId?: string }) => void; // Callback to open saved file in a tab
+	onOpenInTab?: (file: {
+		path: string;
+		name: string;
+		content: string;
+		sshRemoteId?: string;
+	}) => void; // Callback to open saved file in a tab
 }
 
 // PERFORMANCE: Wrap in React.memo to prevent re-renders when parent re-renders
@@ -1719,12 +1728,11 @@ export const TerminalOutput = memo(
 						onClose={() => setSaveModalContent(null)}
 						defaultFolder={cwd || session.cwd || ''}
 						isRemoteSession={
-							session.sessionSshRemoteConfig?.enabled &&
-							!!session.sessionSshRemoteConfig?.remoteId
+							session.sessionSshRemoteConfig?.enabled && !!session.sessionSshRemoteConfig?.remoteId
 						}
 						sshRemoteId={
 							session.sessionSshRemoteConfig?.enabled
-								? session.sessionSshRemoteConfig?.remoteId ?? undefined
+								? (session.sessionSshRemoteConfig?.remoteId ?? undefined)
 								: undefined
 						}
 						onFileSaved={onFileSaved}

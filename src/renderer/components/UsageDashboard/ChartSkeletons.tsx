@@ -347,7 +347,7 @@ export function DashboardSkeleton({
 	summaryCardsCols = 5,
 	autoRunStatsCols = 6,
 }: SkeletonProps & {
-	viewMode?: 'overview' | 'agents' | 'activity' | 'autorun';
+	viewMode?: 'overview' | 'agents' | 'activity' | 'autorun' | 'grpo';
 	chartGridCols?: number;
 	summaryCardsCols?: number;
 	autoRunStatsCols?: number;

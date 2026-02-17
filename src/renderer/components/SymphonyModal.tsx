@@ -198,7 +198,10 @@ function RepositoryTileSkeleton({ theme }: { theme: Theme }) {
 // Helpers
 // ============================================================================
 
-const compactNumber = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
+const compactNumber = new Intl.NumberFormat('en', {
+	notation: 'compact',
+	maximumFractionDigits: 1,
+});
 
 // ============================================================================
 // Repository Tile
@@ -351,7 +354,10 @@ function IssueCard({
 					{isClaimed && (
 						<span
 							className="px-1.5 py-0.5 rounded text-xs flex items-center gap-1"
-							style={{ backgroundColor: `${STATUS_COLORS.running}20`, color: STATUS_COLORS.running }}
+							style={{
+								backgroundColor: `${STATUS_COLORS.running}20`,
+								color: STATUS_COLORS.running,
+							}}
 						>
 							<GitPullRequest className="w-3 h-3" />
 							Claimed
@@ -795,7 +801,8 @@ function RepositoryDetailView({
 										}}
 									>
 										<Lock className="w-3 h-3 shrink-0" />
-										This issue is blocked by a dependency. The maintainer will remove the blocking label when prerequisites are met.
+										This issue is blocked by a dependency. The maintainer will remove the blocking
+										label when prerequisites are met.
 									</div>
 								)}
 							</div>
@@ -891,7 +898,10 @@ function RepositoryDetailView({
 							<div className="text-center">
 								{!isLoadingIssues && issues.length === 0 ? (
 									<>
-										<CheckCircle className="w-12 h-12 mx-auto mb-3" style={{ color: theme.colors.textDim }} />
+										<CheckCircle
+											className="w-12 h-12 mx-auto mb-3"
+											style={{ color: theme.colors.textDim }}
+										/>
 										<p className="text-sm" style={{ color: theme.colors.textMain }}>
 											No outstanding work for this project
 										</p>
@@ -901,7 +911,10 @@ function RepositoryDetailView({
 									</>
 								) : (
 									<>
-										<Music className="w-12 h-12 mx-auto mb-3" style={{ color: theme.colors.textDim }} />
+										<Music
+											className="w-12 h-12 mx-auto mb-3"
+											style={{ color: theme.colors.textDim }}
+										/>
 										<p style={{ color: theme.colors.textDim }}>Select an issue to see details</p>
 									</>
 								)}
@@ -1533,25 +1546,22 @@ export function SymphonyModal({
 	);
 
 	// Sync individual contribution status with GitHub
-	const handleSyncContribution = useCallback(
-		async (contributionId: string) => {
-			setSyncingContributionId(contributionId);
-			try {
-				const result = await window.maestro.symphony.syncContribution(contributionId);
-				if (result.message) {
-					setPrStatusMessage(result.message);
-					setTimeout(() => setPrStatusMessage(null), 5000);
-				}
-			} catch (err) {
-				console.error('Failed to sync contribution:', err);
-				setPrStatusMessage('Sync failed');
+	const handleSyncContribution = useCallback(async (contributionId: string) => {
+		setSyncingContributionId(contributionId);
+		try {
+			const result = await window.maestro.symphony.syncContribution(contributionId);
+			if (result.message) {
+				setPrStatusMessage(result.message);
 				setTimeout(() => setPrStatusMessage(null), 5000);
-			} finally {
-				setSyncingContributionId(null);
 			}
-		},
-		[]
-	);
+		} catch (err) {
+			console.error('Failed to sync contribution:', err);
+			setPrStatusMessage('Sync failed');
+			setTimeout(() => setPrStatusMessage(null), 5000);
+		} finally {
+			setSyncingContributionId(null);
+		}
+	}, []);
 
 	// Check PR statuses (merged/closed) and update history
 	const handleCheckPRStatuses = useCallback(async () => {
@@ -2087,21 +2097,15 @@ export function SymphonyModal({
 										) : (
 											<div className="grid grid-cols-2 gap-4">
 												{activeContributions.map((contribution) => {
-													const session = sessions.find(
-														(s) => s.id === contribution.sessionId
-													);
+													const session = sessions.find((s) => s.id === contribution.sessionId);
 													return (
 														<ActiveContributionCard
 															key={contribution.id}
 															contribution={contribution}
 															theme={theme}
 															onFinalize={() => handleFinalize(contribution.id)}
-															onSync={() =>
-																handleSyncContribution(contribution.id)
-															}
-															isSyncing={
-																syncingContributionId === contribution.id
-															}
+															onSync={() => handleSyncContribution(contribution.id)}
+															isSyncing={syncingContributionId === contribution.id}
 															sessionName={session?.name ?? null}
 															onNavigateToSession={() => {
 																if (session) {
@@ -2333,10 +2337,7 @@ export function SymphonyModal({
 			{/* Pre-flight Check Dialog */}
 			{showBuildWarning &&
 				createPortal(
-					<div
-						className="fixed inset-0 flex items-center justify-center"
-						style={{ zIndex: 10001 }}
-					>
+					<div className="fixed inset-0 flex items-center justify-center" style={{ zIndex: 10001 }}>
 						<div
 							className="absolute inset-0"
 							style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
@@ -2355,10 +2356,7 @@ export function SymphonyModal({
 										className="w-5 h-5 animate-spin"
 										style={{ color: theme.colors.textDim }}
 									/>
-									<span
-										className="text-sm"
-										style={{ color: theme.colors.textDim }}
-									>
+									<span className="text-sm" style={{ color: theme.colors.textDim }}>
 										Checking prerequisites…
 									</span>
 								</div>
@@ -2380,13 +2378,18 @@ export function SymphonyModal({
 												className="text-sm leading-relaxed"
 												style={{ color: theme.colors.textDim }}
 											>
-												Symphony requires the GitHub CLI (<code
+												Symphony requires the GitHub CLI (
+												<code
 													className="px-1 py-0.5 rounded text-xs"
 													style={{
 														backgroundColor: `${theme.colors.border}80`,
 														color: theme.colors.textMain,
 													}}
-												>gh</code>) to create draft PRs and manage contributions. It is not currently installed on your system.
+												>
+													gh
+												</code>
+												) to create draft PRs and manage contributions. It is not currently
+												installed on your system.
 											</p>
 											<p
 												className="text-sm leading-relaxed mt-2"
@@ -2397,9 +2400,7 @@ export function SymphonyModal({
 													href="#"
 													onClick={(e) => {
 														e.preventDefault();
-														window.maestro.shell.openExternal(
-															'https://cli.github.com/'
-														);
+														window.maestro.shell.openExternal('https://cli.github.com/');
 													}}
 													className="underline"
 													style={{ color: theme.colors.accent }}
@@ -2413,7 +2414,9 @@ export function SymphonyModal({
 														backgroundColor: `${theme.colors.border}80`,
 														color: theme.colors.textMain,
 													}}
-												>gh auth login</code>{' '}
+												>
+													gh auth login
+												</code>{' '}
 												to authenticate.
 											</p>
 										</div>
@@ -2449,13 +2452,18 @@ export function SymphonyModal({
 												className="text-sm leading-relaxed"
 												style={{ color: theme.colors.textDim }}
 											>
-												The GitHub CLI (<code
+												The GitHub CLI (
+												<code
 													className="px-1 py-0.5 rounded text-xs"
 													style={{
 														backgroundColor: `${theme.colors.border}80`,
 														color: theme.colors.textMain,
 													}}
-												>gh</code>) is installed but not authenticated. Symphony needs GitHub access to create draft PRs and manage contributions.
+												>
+													gh
+												</code>
+												) is installed but not authenticated. Symphony needs GitHub access to create
+												draft PRs and manage contributions.
 											</p>
 											<p
 												className="text-sm leading-relaxed mt-2"
@@ -2468,7 +2476,9 @@ export function SymphonyModal({
 														backgroundColor: `${theme.colors.border}80`,
 														color: theme.colors.textMain,
 													}}
-												>gh auth login</code>{' '}
+												>
+													gh auth login
+												</code>{' '}
 												in your terminal to authenticate.
 											</p>
 										</div>
@@ -2493,10 +2503,7 @@ export function SymphonyModal({
 											className="w-5 h-5 shrink-0 mt-0.5"
 											style={{ color: STATUS_COLORS.running }}
 										/>
-										<span
-											className="text-sm"
-											style={{ color: STATUS_COLORS.running }}
-										>
+										<span className="text-sm" style={{ color: STATUS_COLORS.running }}>
 											GitHub CLI authenticated
 										</span>
 									</div>
@@ -2516,13 +2523,18 @@ export function SymphonyModal({
 												className="text-sm leading-relaxed"
 												style={{ color: theme.colors.textDim }}
 											>
-												Symphony will clone this repository and run Auto Run documents that may compile code, run tests, and make changes. Before proceeding, make sure you have the project's build tools and dependencies installed on your machine (e.g., Node.js, Python, Rust toolchain, etc.).
+												Symphony will clone this repository and run Auto Run documents that may
+												compile code, run tests, and make changes. Before proceeding, make sure you
+												have the project's build tools and dependencies installed on your machine
+												(e.g., Node.js, Python, Rust toolchain, etc.).
 											</p>
 											<p
 												className="text-sm leading-relaxed mt-2"
 												style={{ color: theme.colors.textDim }}
 											>
-												Consider cloning the project first and verifying you can build it successfully. Without the right toolchain, the contribution is likely to fail.
+												Consider cloning the project first and verifying you can build it
+												successfully. Without the right toolchain, the contribution is likely to
+												fail.
 											</p>
 										</div>
 									</div>

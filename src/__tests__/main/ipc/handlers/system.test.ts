@@ -530,7 +530,9 @@ describe('system IPC handlers', () => {
 			);
 
 			const handler = handlers.get('shell:openExternal');
-			await expect(handler!({} as any, 'https://example.com')).rejects.toThrow('Unexpected Electron internal failure');
+			await expect(handler!({} as any, 'https://example.com')).rejects.toThrow(
+				'Unexpected Electron internal failure'
+			);
 		});
 	});
 
@@ -556,7 +558,9 @@ describe('system IPC handlers', () => {
 
 			const handler = handlers.get('shell:showItemInFolder');
 
-			await expect(handler!({} as any, '/non/existent/path')).rejects.toThrow('Path does not exist');
+			await expect(handler!({} as any, '/non/existent/path')).rejects.toThrow(
+				'Path does not exist'
+			);
 		});
 	});
 

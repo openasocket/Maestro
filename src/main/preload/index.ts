@@ -50,6 +50,7 @@ import { createSymphonyApi } from './symphony';
 import { createTabNamingApi } from './tabNaming';
 import { createDirectorNotesApi } from './directorNotes';
 import { createGrpoApi } from './grpo';
+import { createWakatimeApi } from './wakatime';
 
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
@@ -188,6 +189,9 @@ contextBridge.exposeInMainWorld('maestro', {
 
 	// GRPO API (Training-Free GRPO experience library)
 	grpo: createGrpoApi(),
+
+	// WakaTime API (CLI check, API key validation)
+	wakatime: createWakatimeApi(),
 });
 
 // Re-export factory functions for external consumers (e.g., tests)
@@ -261,6 +265,8 @@ export {
 	createDirectorNotesApi,
 	// GRPO
 	createGrpoApi,
+	// WakaTime
+	createWakatimeApi,
 };
 
 // Re-export types for TypeScript consumers
@@ -469,3 +475,7 @@ export type {
 	// From grpo
 	GrpoApi,
 } from './grpo';
+export type {
+	// From wakatime
+	WakatimeApi,
+} from './wakatime';

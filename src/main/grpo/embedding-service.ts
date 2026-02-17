@@ -203,6 +203,24 @@ export async function dispose(): Promise<void> {
 }
 
 /**
+ * Check if the embedding model files are already cached on disk.
+ * Used to decide whether to wire up download progress callbacks
+ * (skip the progress UI if files are already local).
+ */
+export function isModelCached(modelId: EmbeddingModelId = 'multilingual'): boolean {
+	const path = require('path');
+	const fs = require('fs');
+	const model = MODEL_REGISTRY[modelId];
+	// HuggingFace hub caches models as: ~/.cache/huggingface/hub/models--{org}--{name}/
+	const hubDir = path.join(getCacheDir(), 'hub', `models--${model.hfId.replace('/', '--')}`);
+	try {
+		return fs.existsSync(hubDir) && fs.readdirSync(hubDir).length > 0;
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Get the HuggingFace model cache directory path.
  * Returns the default cache location (~/.cache/huggingface/).
  */

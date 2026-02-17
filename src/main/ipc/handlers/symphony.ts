@@ -975,11 +975,7 @@ export function registerSymphonyHandlers({
 		if (slugs.length === 0) return registry;
 
 		// Use cached star counts if valid
-		if (
-			!forceRefresh &&
-			cache?.stars &&
-			isCacheValid(cache.stars.fetchedAt, STARS_CACHE_TTL_MS)
-		) {
+		if (!forceRefresh && cache?.stars && isCacheValid(cache.stars.fetchedAt, STARS_CACHE_TTL_MS)) {
 			return {
 				...registry,
 				repositories: registry.repositories.map((r) => ({
@@ -2526,9 +2522,7 @@ This PR will be updated automatically when the Auto Run completes.`;
 							draftPrUrl = prResult.prUrl;
 
 							// Update metadata with PR info
-							const metaContent = JSON.parse(
-								await fs.readFile(metadataPath, 'utf-8')
-							);
+							const metaContent = JSON.parse(await fs.readFile(metadataPath, 'utf-8'));
 							metaContent.prCreated = true;
 							metaContent.draftPrNumber = draftPrNumber;
 							metaContent.draftPrUrl = draftPrUrl;
@@ -2838,7 +2832,9 @@ This PR will be updated automatically when the Auto Run completes.`;
 
 				// Validate required fields
 				if (!repoSlug || !repoName || !issueNumber || !prNumber || !prUrl) {
-					return { error: 'Missing required fields: repoSlug, repoName, issueNumber, prNumber, prUrl' };
+					return {
+						error: 'Missing required fields: repoSlug, repoName, issueNumber, prNumber, prUrl',
+					};
 				}
 
 				const state = await readState(app);
@@ -2848,7 +2844,9 @@ This PR will be updated automatically when the Auto Run completes.`;
 					(c) => c.repoSlug === repoSlug && c.prNumber === prNumber
 				);
 				if (existingContribution) {
-					return { error: `PR #${prNumber} is already credited (contribution: ${existingContribution.id})` };
+					return {
+						error: `PR #${prNumber} is already credited (contribution: ${existingContribution.id})`,
+					};
 				}
 
 				const now = new Date().toISOString();

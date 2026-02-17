@@ -1766,9 +1766,7 @@ describe('TerminalOutput', () => {
 		});
 
 		it('renders thinking logs as plain text in terminal mode', () => {
-			const logs: LogEntry[] = [
-				createLogEntry({ text: '**bold** thinking', source: 'thinking' }),
-			];
+			const logs: LogEntry[] = [createLogEntry({ text: '**bold** thinking', source: 'thinking' })];
 
 			const session = createDefaultSession({
 				inputMode: 'terminal',

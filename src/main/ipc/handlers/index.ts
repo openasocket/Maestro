@@ -54,6 +54,7 @@ import { registerTabNamingHandlers, TabNamingHandlerDependencies } from './tabNa
 import { registerDirectorNotesHandlers, DirectorNotesHandlerDependencies } from './director-notes';
 import { registerGRPOHandlers, GRPOHandlerDependencies } from './grpo-handlers';
 import { getExperienceStore } from '../../grpo/experience-store';
+import { registerWakatimeHandlers } from './wakatime';
 import { AgentDetector } from '../../agents';
 import { ProcessManager } from '../../process-manager';
 import { WebServer } from '../../web-server';
@@ -99,6 +100,7 @@ export { registerDirectorNotesHandlers };
 export type { DirectorNotesHandlerDependencies };
 export { registerGRPOHandlers };
 export type { GRPOHandlerDependencies };
+export { registerWakatimeHandlers };
 export type { AgentsHandlerDependencies };
 export type { ProcessHandlerDependencies };
 export type { PersistenceHandlerDependencies };

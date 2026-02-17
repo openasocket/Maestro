@@ -1258,11 +1258,11 @@ export function useBatchProcessor({
 								}
 
 								// 'resume' — re-read document to get accurate task count before continuing
-								const { taskCount, checkedCount, content: freshContent } = await readDocAndCountTasks(
-									folderPath,
-									effectiveFilename,
-									sshRemoteId
-								);
+								const {
+									taskCount,
+									checkedCount,
+									content: freshContent,
+								} = await readDocAndCountTasks(folderPath, effectiveFilename, sshRemoteId);
 								remainingTasks = taskCount;
 								docCheckedCount = checkedCount;
 								docContent = freshContent;
