@@ -38,20 +38,24 @@ vi.mock('../../../main/utils/sentry', () => ({
 const mockGetTrainingReadiness = vi.fn();
 const mockFormNaturalRolloutGroups = vi.fn();
 const mockOnTaskComplete = vi.fn();
+const mockGetSignalsForTask = vi.fn();
 
 vi.mock('../../../main/grpo/symphony-collector', () => ({
 	getSymphonyCollector: vi.fn(() => ({
 		getTrainingReadiness: mockGetTrainingReadiness,
 		formNaturalRolloutGroups: mockFormNaturalRolloutGroups,
 		onTaskComplete: mockOnTaskComplete,
+		getSignalsForTask: mockGetSignalsForTask,
 	})),
 }));
 
 const mockAddExperience = vi.fn();
+const mockGetLibrary = vi.fn();
 
 vi.mock('../../../main/grpo/experience-store', () => ({
 	getExperienceStore: vi.fn(() => ({
 		addExperience: mockAddExperience,
+		getLibrary: mockGetLibrary,
 	})),
 }));
 
@@ -127,7 +131,9 @@ beforeEach(() => {
 	resetAutoTrainer();
 	mockGetTrainingReadiness.mockResolvedValue({ ready: false, matchedTaskCount: 0, minGroupSize: 3, suggestedTasks: [] });
 	mockFormNaturalRolloutGroups.mockResolvedValue([]);
+	mockGetSignalsForTask.mockResolvedValue([]);
 	mockAddExperience.mockResolvedValue({ id: 'exp-001' });
+	mockGetLibrary.mockResolvedValue([]);
 });
 
 describe('AutoTrainer', () => {

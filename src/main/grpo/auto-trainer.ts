@@ -57,6 +57,75 @@ export async function maybeAutoTrain(
 			`(need ${config.minReadyTasks ?? 1}), min group size: ${readiness.minGroupSize}`,
 			LOG_CONTEXT,
 		);
+
+		// First-experience mode: bootstrap observations from low-variance data
+		// when the experience library is empty
+		if (config.firstExperienceMode) {
+			const experienceStore = getExperienceStore();
+			const library = await experienceStore.getLibrary(projectPath);
+
+			// Only bootstrap when the library is empty — once we have entries, wait for proper variance
+			if (library.length === 0 && readiness.suggestedTasks.length > 0) {
+				logger.info(`First-experience mode: bootstrapping from ${readiness.suggestedTasks.length} tasks`, LOG_CONTEXT);
+
+				lastTrainingAttempt.set(projectPath, Date.now());
+				trainingInProgress.add(projectPath);
+
+				safeSend?.('grpo:trainingStatus', { projectPath, status: 'running', groupCount: 0 });
+
+				void (async () => {
+					try {
+						let addedCount = 0;
+
+						// Create observation entries from the best-performing tasks
+						for (const task of readiness.suggestedTasks.slice(0, 3)) {
+							const signals = await collector.getSignalsForTask(projectPath, task.prompt);
+							if (signals.length === 0) continue;
+
+							// Find the best-scoring execution
+							const best = signals.reduce((a, b) => a.aggregateReward > b.aggregateReward ? a : b);
+
+							// Only create observations from reasonably successful tasks (reward > 0.7)
+							if (best.aggregateReward < 0.7) continue;
+
+							const signalSummary = best.rewards
+								.map(r => `${r.type}: ${r.score.toFixed(1)}`)
+								.join(', ');
+
+							await experienceStore.addExperience(projectPath, {
+								content: `Observation from "${task.prompt.slice(0, 80)}": ` +
+									`execution scored ${best.aggregateReward.toFixed(2)} ` +
+									`(${signalSummary}). ` +
+									`Agent type: ${best.agentType}. ` +
+									`This is a baseline observation — will be refined as more data arrives.`,
+								category: 'patterns',
+								scope: 'project',
+								agentType: best.agentType,
+								evidenceCount: signals.length,
+								lastRolloutGroupId: null,
+							});
+							addedCount++;
+						}
+
+						logger.info(`First-experience bootstrap complete: ${addedCount} observations added`, LOG_CONTEXT);
+						safeSend?.('grpo:trainingStatus', {
+							projectPath,
+							status: 'complete',
+							experiencesAdded: addedCount,
+						});
+					} catch (err) {
+						logger.warn(`First-experience bootstrap failed: ${err}`, LOG_CONTEXT);
+						captureException(err, { operation: 'autoTrain:firstExperience', projectPath });
+						safeSend?.('grpo:trainingStatus', { projectPath, status: 'error', error: String(err) });
+					} finally {
+						trainingInProgress.delete(projectPath);
+					}
+				})();
+
+				return; // Exit early — we've handled this case
+			}
+		}
+
 		return;
 	}
 

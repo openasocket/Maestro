@@ -435,6 +435,17 @@ export class SymphonyCollector {
 		return groups;
 	}
 
+	// ─── Task Signal Retrieval ───────────────────────────────────────────
+
+	/**
+	 * Retrieves all collected signals for a specific task (by normalized content).
+	 */
+	async getSignalsForTask(projectPath: string, taskContent: string): Promise<CollectedSignal[]> {
+		const hash = computeTaskContentHash(taskContent);
+		const allSignals = await this.readAllSignals(projectPath);
+		return allSignals.filter(s => s.taskContentHash === hash);
+	}
+
 	// ─── Human Feedback (GRPO-16) ───────────────────────────────────────
 
 	/**
