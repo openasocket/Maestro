@@ -63,6 +63,37 @@ export function computeTaskContentHash(content: string): string {
 }
 
 /**
+ * Computes variance across individual signal types, not just aggregate.
+ * Returns true if ANY signal type has stdDev > threshold across executions.
+ */
+export function hasMultiSignalVariance(
+	signals: CollectedSignal[],
+	threshold: number,
+): boolean {
+	// Group all scores by signal type
+	const byType = new Map<string, number[]>();
+
+	for (const signal of signals) {
+		for (const reward of signal.rewards) {
+			const scores = byType.get(reward.type) ?? [];
+			scores.push(reward.score);
+			byType.set(reward.type, scores);
+		}
+	}
+
+	// Check if any signal type has sufficient variance
+	for (const [, scores] of byType) {
+		if (scores.length < 2) continue;
+		const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+		const variance = scores.reduce((sum, s) => sum + (s - mean) ** 2, 0) / scores.length;
+		const stdDev = Math.sqrt(variance);
+		if (stdDev > threshold) return true;
+	}
+
+	return false;
+}
+
+/**
  * Produce a stable, filesystem-safe hash of a project path.
  * Returns the first 12 chars of the SHA-256 hex digest.
  */
@@ -336,6 +367,8 @@ export class SymphonyCollector {
 				);
 				if (stdDev > this.config.varianceThreshold) {
 					matchedWithVariance++;
+				} else if (this.config.multiSignalVariance && hasMultiSignalVariance(signals, this.config.varianceThreshold)) {
+					matchedWithVariance++;
 				}
 			}
 		}
@@ -411,7 +444,12 @@ export class SymphonyCollector {
 				: 0;
 
 			// Skip low-variance groups (same filter as active rollouts)
-			if (rewardStdDev <= this.config.varianceThreshold) continue;
+			if (rewardStdDev <= this.config.varianceThreshold) {
+				// Fallback: check individual signal variance
+				if (!this.config.multiSignalVariance || !hasMultiSignalVariance(recentSignals, this.config.varianceThreshold)) {
+					continue;
+				}
+			}
 
 			groups.push({
 				id: randomUUID(),
