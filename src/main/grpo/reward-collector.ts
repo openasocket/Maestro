@@ -1174,6 +1174,148 @@ export async function captureDependencyBaseline(
 	}
 }
 
+/**
+ * Collects API contract reward signal.
+ * Compares API schema files (OpenAPI, GraphQL) before and after for breaking changes.
+ * Returns null if no API schema file detected.
+ *
+ * Scoring:
+ * - No schema changes: 1.0
+ * - Additive-only changes (new endpoints/fields): 0.8
+ * - Modified existing (but non-breaking): 0.6
+ * - Breaking changes (removed endpoints/fields, changed types): 0.0
+ */
+export async function collectApiContractReward(
+	_projectPath: string,
+	commands: ProjectCommands,
+	baselineSchema?: string,
+): Promise<RewardSignal | null> {
+	if (!commands.apiSchemaPath) return null;
+
+	let currentSchema: string;
+	try {
+		currentSchema = await fs.readFile(commands.apiSchemaPath, 'utf-8');
+	} catch {
+		return null; // Schema file doesn't exist (anymore)
+	}
+
+	if (!baselineSchema) {
+		// No baseline — schema exists, neutral score
+		return makeSignal('api-contract', 0.5, 'API schema present (no baseline for comparison)');
+	}
+
+	if (currentSchema === baselineSchema) {
+		return makeSignal('api-contract', 1.0, 'API schema unchanged');
+	}
+
+	// Analyze the diff for breaking vs non-breaking changes
+	const analysis = analyzeSchemaChanges(baselineSchema, currentSchema, commands.apiSchemaPath);
+
+	return makeSignal('api-contract', analysis.score, analysis.description);
+}
+
+/**
+ * Analyzes schema changes between baseline and current for breaking changes.
+ * Uses a heuristic approach — not a full OpenAPI diff, but catches the common cases.
+ */
+function analyzeSchemaChanges(
+	baseline: string,
+	current: string,
+	schemaPath: string,
+): { score: number; description: string } {
+	const isJson = schemaPath.endsWith('.json');
+	const isGraphQL = schemaPath.endsWith('.graphql') || schemaPath.endsWith('.gql');
+
+	if (isJson) {
+		try {
+			const baseObj = JSON.parse(baseline);
+			const currObj = JSON.parse(current);
+
+			// OpenAPI: compare paths (endpoints)
+			const basePaths = Object.keys(baseObj.paths ?? {});
+			const currPaths = Object.keys(currObj.paths ?? {});
+
+			const removedPaths = basePaths.filter(p => !currPaths.includes(p));
+			const addedPaths = currPaths.filter(p => !basePaths.includes(p));
+
+			if (removedPaths.length > 0) {
+				return {
+					score: 0.0,
+					description: `Breaking: ${removedPaths.length} endpoints removed (${removedPaths.slice(0, 3).join(', ')})`,
+				};
+			}
+
+			if (addedPaths.length > 0 && removedPaths.length === 0) {
+				return {
+					score: 0.8,
+					description: `Additive: ${addedPaths.length} new endpoints added`,
+				};
+			}
+
+			// Check for schema/model changes
+			const baseSchemas = Object.keys(baseObj.components?.schemas ?? {});
+			const currSchemas = Object.keys(currObj.components?.schemas ?? {});
+			const removedSchemas = baseSchemas.filter(s => !currSchemas.includes(s));
+
+			if (removedSchemas.length > 0) {
+				return {
+					score: 0.0,
+					description: `Breaking: ${removedSchemas.length} schemas removed`,
+				};
+			}
+
+			return { score: 0.6, description: 'Schema modified (non-breaking)' };
+		} catch {
+			return { score: 0.5, description: 'Schema changed (could not parse for analysis)' };
+		}
+	}
+
+	if (isGraphQL) {
+		// Simple heuristic: check for removed type/field definitions
+		const baseTypes = (baseline.match(/type\s+\w+/g) ?? []).map(t => t.replace('type ', ''));
+		const currTypes = (current.match(/type\s+\w+/g) ?? []).map(t => t.replace('type ', ''));
+		const removedTypes = baseTypes.filter(t => !currTypes.includes(t));
+
+		if (removedTypes.length > 0) {
+			return {
+				score: 0.0,
+				description: `Breaking: ${removedTypes.length} GraphQL types removed (${removedTypes.slice(0, 3).join(', ')})`,
+			};
+		}
+
+		const addedTypes = currTypes.filter(t => !baseTypes.includes(t));
+		if (addedTypes.length > 0) {
+			return { score: 0.8, description: `Additive: ${addedTypes.length} new GraphQL types` };
+		}
+
+		return { score: 0.6, description: 'GraphQL schema modified' };
+	}
+
+	// YAML or unknown — fall back to line diff heuristic
+	const baseLines = baseline.split('\n').length;
+	const currLines = current.split('\n').length;
+	if (currLines < baseLines * 0.9) {
+		return { score: 0.2, description: 'Schema significantly reduced (potential breaking changes)' };
+	}
+
+	return { score: 0.6, description: 'Schema modified' };
+}
+
+/**
+ * Captures baseline API schema content before a rollout starts.
+ */
+export async function captureApiSchemaBaseline(
+	_projectPath: string,
+	commands: ProjectCommands,
+): Promise<string | null> {
+	if (!commands.apiSchemaPath) return null;
+	try {
+		return await fs.readFile(commands.apiSchemaPath, 'utf-8');
+	} catch {
+		return null;
+	}
+}
+
 // ─── Aggregate Reward Calculation ────────────────────────────────────────────
 
 /**
