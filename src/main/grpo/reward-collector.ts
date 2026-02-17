@@ -63,7 +63,7 @@ export async function detectProjectCommands(projectPath: string): Promise<Projec
 
 	// Rust
 	if (await fileExists(path.join(projectPath, 'Cargo.toml'))) {
-		return {
+		const rustCommands: ProjectCommands = {
 			testCommand: 'cargo test',
 			buildCommand: 'cargo check',
 			lintCommand: 'cargo clippy -- -D warnings',
@@ -71,12 +71,19 @@ export async function detectProjectCommands(projectPath: string): Promise<Projec
 			coverageCommand: null,
 			typeCheckCommand: 'cargo check',
 			complexityCommand: null,
-			securityScanCommand: 'cargo audit --json',
+			securityScanCommand: null,
 			benchmarkCommand: null,
 			bundleBuildCommand: null,
 			manifestPath: path.join(projectPath, 'Cargo.toml'),
 			apiSchemaPath: null,
 		};
+
+		// Check for cargo-audit
+		if (await isToolAvailable('cargo audit --version', projectPath)) {
+			rustCommands.securityScanCommand = 'cargo audit --json';
+		}
+
+		return rustCommands;
 	}
 
 	// Go
@@ -158,8 +165,11 @@ async function detectNodeCommands(projectPath: string): Promise<ProjectCommands>
 		commands.typeCheckCommand = 'npx tsc --noEmit';
 	}
 
-	// Complexity (cr — code-complexity package)
-	commands.complexityCommand = 'npx cr --format json';
+	// Complexity — use ESLint's built-in complexity rule (no extra install needed)
+	// Only set if ESLint is available in the project
+	if (scripts.lint || await hasEslintConfig(projectPath)) {
+		commands.complexityCommand = 'npx eslint --no-eslintrc --rule \'{"complexity": ["warn", 1]}\' --format json --ext .js,.ts,.tsx,.jsx .';
+	}
 
 	// Security scan
 	commands.securityScanCommand = 'npm audit --json';
@@ -239,13 +249,15 @@ async function detectPythonCommands(projectPath: string): Promise<ProjectCommand
 		commands.typeCheckCommand = 'mypy . --no-error-summary';
 	}
 
-	// Complexity
-	commands.complexityCommand = 'radon cc . -s -j';
+	// Complexity — only if radon is installed
+	if (await isToolAvailable('radon --version', projectPath)) {
+		commands.complexityCommand = 'radon cc . -s -j';
+	}
 
-	// Security scan
-	const hasBandit = await fileContains(path.join(projectPath, 'pyproject.toml'), 'bandit')
+	// Security scan — check config AND availability
+	const hasBanditConfig = await fileContains(path.join(projectPath, 'pyproject.toml'), 'bandit')
 		|| await fileExists(path.join(projectPath, '.bandit'));
-	if (hasBandit) {
+	if (hasBanditConfig && await isToolAvailable('bandit --version', projectPath)) {
 		commands.securityScanCommand = 'bandit -r . -f json';
 	}
 
@@ -281,20 +293,36 @@ async function detectGoCommands(projectPath: string): Promise<ProjectCommands> {
 	};
 
 	// Check if golangci-lint is available
-	try {
-		await runVerificationCommand('golangci-lint --version', projectPath, 5_000);
+	if (await isToolAvailable('golangci-lint --version', projectPath)) {
 		commands.lintCommand = 'golangci-lint run';
-	} catch {
-		// Not installed — skip
 	}
 
 	// Check for govulncheck
-	try {
-		await runVerificationCommand('govulncheck --version', projectPath, 5_000);
+	if (await isToolAvailable('govulncheck --version', projectPath)) {
 		commands.securityScanCommand = 'govulncheck ./...';
-	} catch { /* not installed */ }
+	}
+
+	// Check for gocyclo
+	if (await isToolAvailable('gocyclo --help', projectPath)) {
+		commands.complexityCommand = 'gocyclo -avg .';
+	}
 
 	return commands;
+}
+
+/**
+ * Checks if an external tool is available by running a verification command.
+ * Returns true if the command exits with code 0, false otherwise.
+ * Since exec() runs through a shell, missing commands return exit code 127
+ * rather than throwing ENOENT — so we check the exit code, not catch errors.
+ */
+async function isToolAvailable(command: string, projectPath: string): Promise<boolean> {
+	try {
+		const result = await runVerificationCommand(command, projectPath, 5_000);
+		return result.exitCode === 0;
+	} catch {
+		return false;
+	}
 }
 
 // ─── Verification Process Spawning ───────────────────────────────────────────
@@ -931,14 +959,38 @@ export async function collectComplexityReward(
 
 /**
  * Parses average cyclomatic complexity from tool output.
- * Supports: cr (code-complexity), radon (Python), custom fallback.
+ * Supports: ESLint JSON (Node.js), gocyclo (Go), radon (Python), custom fallback.
  */
-function parseAverageComplexity(output: string, _projectType: string): number | null {
-	// Try JSON format (radon -j, cr --format json)
+export function parseAverageComplexity(output: string, _projectType: string): number | null {
+	// ESLint --format json with complexity rule
 	try {
 		const parsed = JSON.parse(output);
-		if (typeof parsed === 'object') {
-			// radon JSON: { "file.py": [{ "complexity": 5 }, ...], ... }
+		if (Array.isArray(parsed)) {
+			const complexities: number[] = [];
+			for (const file of parsed) {
+				if (Array.isArray(file.messages)) {
+					for (const msg of file.messages) {
+						if (msg.ruleId === 'complexity') {
+							const match = msg.message?.match(/complexity of (\d+)/);
+							if (match) complexities.push(parseInt(match[1], 10));
+						}
+					}
+				}
+			}
+			if (complexities.length > 0) {
+				return complexities.reduce((a: number, b: number) => a + b, 0) / complexities.length;
+			}
+		}
+	} catch { /* not ESLint JSON */ }
+
+	// gocyclo -avg: "Average: 3.0"
+	const gocycloMatch = output.match(/Average:\s*([\d.]+)/);
+	if (gocycloMatch) return parseFloat(gocycloMatch[1]);
+
+	// radon JSON: { "file.py": [{ "complexity": 5 }, ...], ... }
+	try {
+		const parsed = JSON.parse(output);
+		if (typeof parsed === 'object' && !Array.isArray(parsed)) {
 			const allComplexities: number[] = [];
 			for (const file of Object.values(parsed)) {
 				if (Array.isArray(file)) {
