@@ -40,6 +40,7 @@ export function setupGRPOListener(
 					'', // no output captured at this level
 					queryData.duration,
 					'', // no document path for process-level signals
+					'process',
 				);
 				logger.debug(`[GRPO] Collected process signal for ${queryData.sessionId}`, '[GRPOListener]');
 			} catch (err) {

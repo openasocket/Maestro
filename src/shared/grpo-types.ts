@@ -17,6 +17,9 @@ export type ExperienceOperation = 'add' | 'modify' | 'delete';
 /** Scope for experience entries — project-local or global */
 export type ExperienceScope = 'project' | 'global';
 
+/** Signal realm — the source context that produced this signal */
+export type SignalRealm = 'autorun' | 'manual' | 'groupchat' | 'process';
+
 /** A single experience entry in the library — natural language insight */
 export interface ExperienceEntry {
 	id: ExperienceId;
@@ -311,6 +314,8 @@ export interface CollectedSignal {
 	collectedAt: number;
 	documentPath: string;
 	projectPath: string;
+	/** The source realm that produced this signal */
+	realm: SignalRealm;
 }
 
 /** Aggregated result for a single document in a batch run */

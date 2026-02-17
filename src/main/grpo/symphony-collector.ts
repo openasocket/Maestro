@@ -37,6 +37,7 @@ import type {
 	GRPOConfig,
 	RolloutGroup,
 	RolloutOutput,
+	SignalRealm,
 } from '../../shared/grpo-types';
 import { GRPO_CONFIG_DEFAULTS } from '../../shared/grpo-types';
 
@@ -181,6 +182,7 @@ export class SymphonyCollector {
 		output: string,
 		durationMs: number,
 		documentPath: string,
+		realm: SignalRealm = 'autorun',
 	): Promise<CollectedSignal> {
 		return this.serializedWrite(projectPath, async () => {
 			// Ensure project directory exists
@@ -211,6 +213,7 @@ export class SymphonyCollector {
 				collectedAt: now,
 				documentPath,
 				projectPath,
+				realm,
 			};
 
 			// Append signal to JSONL

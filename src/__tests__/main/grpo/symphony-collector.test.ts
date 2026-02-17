@@ -403,6 +403,64 @@ describe('SymphonyCollector', () => {
 		});
 	});
 
+	describe('realm tagging', () => {
+		it('should default to autorun realm when not specified', async () => {
+			const signal = await collector.onTaskComplete(
+				'Add a button', PROJECT_PATH, AGENT_TYPE, SESSION_ID,
+				0, 'Done', 5000, DOC_PATH,
+			);
+			expect(signal.realm).toBe('autorun');
+		});
+
+		it('should set explicit realm when specified', async () => {
+			const processSignal = await collector.onTaskComplete(
+				'Process task', PROJECT_PATH, AGENT_TYPE, SESSION_ID,
+				0, 'Done', 5000, DOC_PATH,
+				'process',
+			);
+			expect(processSignal.realm).toBe('process');
+
+			const manualSignal = await collector.onTaskComplete(
+				'Manual task', PROJECT_PATH, AGENT_TYPE, 'sess-002',
+				0, 'Done', 5000, DOC_PATH,
+				'manual',
+			);
+			expect(manualSignal.realm).toBe('manual');
+
+			const groupchatSignal = await collector.onTaskComplete(
+				'Groupchat task', PROJECT_PATH, AGENT_TYPE, 'sess-003',
+				0, 'Done', 5000, DOC_PATH,
+				'groupchat',
+			);
+			expect(groupchatSignal.realm).toBe('groupchat');
+		});
+
+		it('should persist realm in JSONL storage', async () => {
+			await collector.onTaskComplete(
+				'Task 1', PROJECT_PATH, AGENT_TYPE, 'sess-001',
+				0, 'Done', 5000, DOC_PATH,
+				'autorun',
+			);
+			await collector.onTaskComplete(
+				'Task 2', PROJECT_PATH, AGENT_TYPE, 'sess-002',
+				0, 'Done', 5000, DOC_PATH,
+				'process',
+			);
+
+			// Read the JSONL directly and verify realm is persisted
+			const jsonlFiles = await findFiles(tmpDir, 'signals.jsonl');
+			expect(jsonlFiles.length).toBe(1);
+			const data = await fs.readFile(jsonlFiles[0], 'utf-8');
+			const lines = data.trim().split('\n');
+			expect(lines.length).toBe(2);
+
+			const signal1 = JSON.parse(lines[0]);
+			const signal2 = JSON.parse(lines[1]);
+			expect(signal1.realm).toBe('autorun');
+			expect(signal2.realm).toBe('process');
+		});
+	});
+
 	describe('signal index integrity', () => {
 		it('should update index correctly after each collection', async () => {
 			const tasks = ['Task A', 'Task B', 'Task A', 'Task C', 'Task A'];

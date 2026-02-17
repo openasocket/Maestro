@@ -15,7 +15,7 @@ import {
 	collectAllRewards,
 	detectProjectCommands,
 } from '../../grpo/reward-collector';
-import { getModelStatus, getCacheDir, preloadModel, setDownloadProgressCallback, dispose as disposeEmbedding } from '../../grpo/embedding-service';
+import { getModelStatus, getCacheDir, preloadModel, setDownloadProgressCallback, dispose as disposeEmbedding, isModelCached } from '../../grpo/embedding-service';
 import type { EmbeddingModelStatus } from '../../grpo/embedding-service';
 import type {
 	ExperienceEntry,
@@ -84,22 +84,30 @@ export function registerGRPOHandlers(deps: GRPOHandlerDependencies): void {
 				// (it was undefined when registered at startup because GRPO was disabled)
 				deps.symphonyCollector = getSymphonyCollector(merged);
 
-				// Wire download progress forwarding to renderer
-				setDownloadProgressCallback((info) => {
-					try {
-						const win = BrowserWindow.getAllWindows()[0];
-						if (win && !win.isDestroyed()) {
-							win.webContents.send('grpo:model-download-progress', info);
-						}
-					} catch { /* ignore if no window */ }
-				});
-
-				// Start model download/preload (fire-and-forget)
+				// Check if the model is already cached and valid before downloading
 				const modelId = merged.embeddingModel ?? 'multilingual';
+				const cached = isModelCached(modelId);
+
+				if (cached) {
+					logger.info(`[GRPO] Embedding model '${modelId}' already cached, loading from disk`, LOG_CONTEXT);
+				} else {
+					logger.info(`[GRPO] Embedding model '${modelId}' not cached or invalid, downloading`, LOG_CONTEXT);
+					// Only wire download progress if we're actually downloading
+					setDownloadProgressCallback((info) => {
+						try {
+							const win = BrowserWindow.getAllWindows()[0];
+							if (win && !win.isDestroyed()) {
+								win.webContents.send('grpo:model-download-progress', info);
+							}
+						} catch { /* ignore if no window */ }
+					});
+				}
+
+				// Load from cache or download+load (fire-and-forget)
 				preloadModel(modelId).then(() => {
 					logger.info(`[GRPO] Embedding model '${modelId}' ready`, LOG_CONTEXT);
 					setDownloadProgressCallback(null);
-					// Notify renderer that download is complete
+					// Notify renderer that load is complete
 					try {
 						const win = BrowserWindow.getAllWindows()[0];
 						if (win && !win.isDestroyed()) {
@@ -308,6 +316,7 @@ export function registerGRPOHandlers(deps: GRPOHandlerDependencies): void {
 				const signal = await deps.symphonyCollector.onTaskComplete(
 					taskContent, projectPath, agentType, sessionId,
 					exitCode, output, durationMs, documentPath,
+					'autorun',
 				);
 				return { success: true, data: signal };
 			}
