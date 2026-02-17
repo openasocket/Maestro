@@ -620,6 +620,119 @@ export async function collectAllRewards(
 	return signals;
 }
 
+// ─── GRPO-15 Extended Collectors ─────────────────────────────────────────────
+
+/**
+ * Collects test coverage delta reward signal.
+ * Measures coverage change by running coverage before and after (or just after if no baseline).
+ * Returns null if no coverage command detected.
+ *
+ * Scoring:
+ * - Coverage increased: score = min(1.0, 0.5 + delta * 5)  (e.g., +10% → 1.0)
+ * - Coverage unchanged: score = 0.5 (neutral)
+ * - Coverage decreased: score = max(0.0, 0.5 + delta * 5)  (e.g., -10% → 0.0)
+ */
+export async function collectCoverageReward(
+	projectPath: string,
+	commands: ProjectCommands,
+	baselineCoverage?: number,
+): Promise<RewardSignal | null> {
+	if (!commands.coverageCommand) return null;
+
+	const result = await safeRunCommand(commands.coverageCommand, projectPath);
+	if (result.exitCode === -1) {
+		return timeoutSignal('test-coverage-delta', 'Coverage command timed out');
+	}
+
+	const rawOutput = combineOutput(result);
+	const currentCoverage = parseCoveragePercentage(rawOutput, commands.projectType);
+
+	if (currentCoverage === null) {
+		logger.debug('Could not parse coverage output', LOG_CONTEXT);
+		return null;
+	}
+
+	if (baselineCoverage === undefined || baselineCoverage === null) {
+		// No baseline — score based on absolute coverage
+		// 80%+ is great, 50% is neutral, <20% is poor
+		const score = Math.min(1.0, Math.max(0.0, currentCoverage / 100));
+		return makeSignal(
+			'test-coverage-delta',
+			score,
+			`Coverage: ${currentCoverage.toFixed(1)}% (no baseline)`,
+			rawOutput,
+		);
+	}
+
+	const delta = currentCoverage - baselineCoverage;
+	// Scale: +10% = 1.0, 0% = 0.5, -10% = 0.0
+	const score = Math.min(1.0, Math.max(0.0, 0.5 + delta * 5 / 100));
+
+	return makeSignal(
+		'test-coverage-delta',
+		score,
+		`Coverage: ${currentCoverage.toFixed(1)}% (baseline: ${baselineCoverage.toFixed(1)}%, delta: ${delta > 0 ? '+' : ''}${delta.toFixed(1)}%)`,
+		rawOutput,
+	);
+}
+
+/**
+ * Parses coverage percentage from various tool outputs.
+ * Supports: vitest/istanbul JSON, pytest-cov, cargo-tarpaulin, go cover.
+ */
+function parseCoveragePercentage(output: string, _projectType: string): number | null {
+	// Try JSON format first (vitest/istanbul, pytest-cov --json)
+	try {
+		const jsonMatch = output.match(/\{[\s\S]*"total"[\s\S]*\}/);
+		if (jsonMatch) {
+			const parsed = JSON.parse(jsonMatch[0]);
+			// Istanbul format: { total: { lines: { pct: 85.5 } } }
+			if (parsed.total?.lines?.pct !== undefined) {
+				return parsed.total.lines.pct;
+			}
+			// pytest-cov JSON: { totals: { percent_covered: 85.5 } }
+			if (parsed.totals?.percent_covered !== undefined) {
+				return parsed.totals.percent_covered;
+			}
+		}
+	} catch { /* not JSON */ }
+
+	// Vitest/Jest text: "All files  |   85.5 |  ..."
+	const istanbulMatch = output.match(/All files\s*\|\s*([\d.]+)/);
+	if (istanbulMatch) return parseFloat(istanbulMatch[1]);
+
+	// pytest-cov text: "TOTAL    1234   567    54%"
+	const pytestMatch = output.match(/TOTAL\s+\d+\s+\d+\s+([\d.]+)%/);
+	if (pytestMatch) return parseFloat(pytestMatch[1]);
+
+	// Go cover: "total:  (statements)  85.5%"
+	const goMatch = output.match(/total:\s+\(statements\)\s+([\d.]+)%/);
+	if (goMatch) return parseFloat(goMatch[1]);
+
+	// cargo-tarpaulin: "85.50% coverage, 171/200 lines covered"
+	const tarpMatch = output.match(/([\d.]+)%\s+coverage/);
+	if (tarpMatch) return parseFloat(tarpMatch[1]);
+
+	return null;
+}
+
+/**
+ * Captures baseline coverage percentage before a rollout starts.
+ * Returns the percentage (0-100), or null if unavailable.
+ */
+export async function captureCoverageBaseline(
+	projectPath: string,
+	commands: ProjectCommands,
+): Promise<number | null> {
+	if (!commands.coverageCommand) return null;
+
+	const result = await safeRunCommand(commands.coverageCommand, projectPath);
+	if (result.exitCode === -1) return null; // timeout
+
+	const output = combineOutput(result);
+	return parseCoveragePercentage(output, commands.projectType);
+}
+
 // ─── Aggregate Reward Calculation ────────────────────────────────────────────
 
 /**

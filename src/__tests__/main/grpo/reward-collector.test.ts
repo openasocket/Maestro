@@ -42,6 +42,8 @@ import {
 	collectLintReward,
 	collectGitDiffReward,
 	captureLintBaseline,
+	collectCoverageReward,
+	captureCoverageBaseline,
 	runVerificationCommand,
 	type ProjectCommands,
 } from '../../../main/grpo/reward-collector';
@@ -649,5 +651,165 @@ describe('collectBuildReward', () => {
 		const signal = await collectBuildReward(tmpDir, commands);
 		expect(signal!.type).toBe('build-fail');
 		expect(signal!.score).toBe(0.0);
+	});
+});
+
+// ─── collectCoverageReward (GRPO-15 Task 2) ─────────────────────────────────
+
+describe('collectCoverageReward', () => {
+	const coverageCommands: ProjectCommands = {
+		testCommand: 'npm test',
+		buildCommand: null,
+		lintCommand: null,
+		projectType: 'node',
+		...GRPO15_DEFAULTS,
+		coverageCommand: 'npx vitest run --coverage --reporter=json',
+	};
+
+	it('returns null when no coverage command', async () => {
+		const commands: ProjectCommands = {
+			testCommand: null,
+			buildCommand: null,
+			lintCommand: null,
+			projectType: 'unknown',
+			...GRPO15_DEFAULTS,
+		};
+		expect(await collectCoverageReward(tmpDir, commands)).toBeNull();
+	});
+
+	it('parses vitest/istanbul JSON coverage output correctly', async () => {
+		const jsonOutput = JSON.stringify({
+			total: { lines: { pct: 85.5 }, statements: { pct: 82.0 }, branches: { pct: 70.0 }, functions: { pct: 90.0 } },
+		});
+		mockExecResult({ stdout: jsonOutput, exitCode: 0 });
+
+		const signal = await collectCoverageReward(tmpDir, coverageCommands, 80.0);
+		expect(signal).not.toBeNull();
+		expect(signal!.type).toBe('test-coverage-delta');
+		// delta = 85.5 - 80.0 = 5.5, score = 0.5 + 5.5 * 5 / 100 = 0.5 + 0.275 = 0.775
+		expect(signal!.score).toBeCloseTo(0.775, 3);
+		expect(signal!.description).toContain('85.5%');
+		expect(signal!.description).toContain('baseline: 80.0%');
+	});
+
+	it('parses pytest-cov text output correctly', async () => {
+		const pytestOutput = [
+			'Name              Stmts   Miss   Cover',
+			'---------------------------------------',
+			'module.py            50     15     70%',
+			'TOTAL               200     60     70%',
+		].join('\n');
+		mockExecResult({ stdout: pytestOutput, exitCode: 0 });
+
+		const signal = await collectCoverageReward(tmpDir, { ...coverageCommands, projectType: 'python' });
+		expect(signal).not.toBeNull();
+		expect(signal!.description).toContain('70.0%');
+	});
+
+	it('scores 1.0 when coverage increased by +10%', async () => {
+		const jsonOutput = JSON.stringify({
+			total: { lines: { pct: 90.0 } },
+		});
+		mockExecResult({ stdout: jsonOutput, exitCode: 0 });
+
+		const signal = await collectCoverageReward(tmpDir, coverageCommands, 80.0);
+		// delta = +10, score = 0.5 + 10*5/100 = 0.5 + 0.5 = 1.0
+		expect(signal!.score).toBe(1.0);
+	});
+
+	it('scores 0.5 when coverage unchanged', async () => {
+		const jsonOutput = JSON.stringify({
+			total: { lines: { pct: 80.0 } },
+		});
+		mockExecResult({ stdout: jsonOutput, exitCode: 0 });
+
+		const signal = await collectCoverageReward(tmpDir, coverageCommands, 80.0);
+		expect(signal!.score).toBe(0.5);
+	});
+
+	it('scores 0.0 when coverage decreased by -10%', async () => {
+		const jsonOutput = JSON.stringify({
+			total: { lines: { pct: 70.0 } },
+		});
+		mockExecResult({ stdout: jsonOutput, exitCode: 0 });
+
+		const signal = await collectCoverageReward(tmpDir, coverageCommands, 80.0);
+		// delta = -10, score = 0.5 + (-10)*5/100 = 0.5 - 0.5 = 0.0
+		expect(signal!.score).toBe(0.0);
+	});
+
+	it('returns neutral absolute score when no baseline', async () => {
+		const jsonOutput = JSON.stringify({
+			total: { lines: { pct: 75.0 } },
+		});
+		mockExecResult({ stdout: jsonOutput, exitCode: 0 });
+
+		const signal = await collectCoverageReward(tmpDir, coverageCommands);
+		// No baseline: score = 75/100 = 0.75
+		expect(signal!.score).toBe(0.75);
+		expect(signal!.description).toContain('no baseline');
+	});
+
+	it('returns timeout signal when command times out', async () => {
+		mockExecResult({ killed: true, exitCode: 1 });
+
+		const signal = await collectCoverageReward(tmpDir, coverageCommands);
+		expect(signal!.score).toBe(0.5);
+		expect(signal!.description).toContain('timed out');
+	});
+
+	it('returns null when coverage output cannot be parsed', async () => {
+		mockExecResult({ stdout: 'some random output with no coverage data', exitCode: 0 });
+
+		const signal = await collectCoverageReward(tmpDir, coverageCommands);
+		expect(signal).toBeNull();
+	});
+});
+
+// ─── captureCoverageBaseline (GRPO-15 Task 2) ───────────────────────────────
+
+describe('captureCoverageBaseline', () => {
+	it('returns null when no coverage command', async () => {
+		const commands: ProjectCommands = {
+			testCommand: null,
+			buildCommand: null,
+			lintCommand: null,
+			projectType: 'unknown',
+			...GRPO15_DEFAULTS,
+		};
+		expect(await captureCoverageBaseline(tmpDir, commands)).toBeNull();
+	});
+
+	it('returns parsed coverage percentage', async () => {
+		const jsonOutput = JSON.stringify({
+			total: { lines: { pct: 85.5 } },
+		});
+		mockExecResult({ stdout: jsonOutput, exitCode: 0 });
+
+		const commands: ProjectCommands = {
+			testCommand: 'npm test',
+			buildCommand: null,
+			lintCommand: null,
+			projectType: 'node',
+			...GRPO15_DEFAULTS,
+			coverageCommand: 'npx vitest run --coverage --reporter=json',
+		};
+
+		expect(await captureCoverageBaseline(tmpDir, commands)).toBe(85.5);
+	});
+
+	it('returns null on timeout', async () => {
+		mockExecResult({ killed: true, exitCode: 1 });
+
+		const commands: ProjectCommands = {
+			testCommand: 'npm test',
+			buildCommand: null,
+			lintCommand: null,
+			projectType: 'node',
+			...GRPO15_DEFAULTS,
+			coverageCommand: 'npx vitest run --coverage --reporter=json',
+		};
+
+		expect(await captureCoverageBaseline(tmpDir, commands)).toBeNull();
 	});
 });
