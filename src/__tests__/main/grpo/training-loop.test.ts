@@ -198,7 +198,7 @@ function makeMockDependencies(overrides: Partial<GRPODependencies> = {}): GRPODe
 
 	const rewardCollector: RewardCollectorLike = overrides.rewardCollector ?? {
 		detectProjectCommands: vi.fn().mockResolvedValue({ testCommand: 'npm test', buildCommand: null, lintCommand: null, projectType: 'node' }),
-		captureLintBaseline: vi.fn().mockResolvedValue(null),
+		captureAllBaselines: vi.fn().mockResolvedValue({}),
 		collectAllRewards: vi.fn().mockResolvedValue([]),
 		computeAggregateReward: vi.fn().mockReturnValue(0.5),
 	};

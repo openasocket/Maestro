@@ -24,8 +24,7 @@ import {
 	collectAllRewards,
 	computeAggregateReward,
 	detectProjectCommands,
-	captureLintBaseline,
-	type ProjectCommands,
+	captureAllBaselines,
 } from './reward-collector';
 import type { GroomingProcessManager } from '../utils/context-groomer';
 import type { AgentDetector } from '../agents';
@@ -246,10 +245,10 @@ export async function executeRolloutGroup(
 	config: GRPOConfig,
 	epoch: number,
 	processManager: GroomingProcessManager,
-	experienceStore: { getLibrary: (projectPath: string) => Promise<{ length: number }[]> },
+	experienceStore: { getLibrary: (projectPath: string) => Promise<unknown[]> },
 	rewardCollector: {
 		detectProjectCommands: typeof detectProjectCommands;
-		captureLintBaseline: typeof captureLintBaseline;
+		captureAllBaselines: typeof captureAllBaselines;
 		collectAllRewards: typeof collectAllRewards;
 		computeAggregateReward: typeof computeAggregateReward;
 	},
@@ -264,9 +263,9 @@ export async function executeRolloutGroup(
 		epoch,
 	});
 
-	// 1. Detect project commands and capture lint baseline
+	// 1. Detect project commands and capture all baselines
 	const commands = await rewardCollector.detectProjectCommands(projectPath);
-	const baselineLintErrors = await rewardCollector.captureLintBaseline(projectPath, commands);
+	const baselines = await rewardCollector.captureAllBaselines(projectPath, commands, config);
 
 	// 2. Get experience library version (for tracking)
 	const library = await experienceStore.getLibrary(projectPath);
@@ -357,7 +356,7 @@ export async function executeRolloutGroup(
 				aggregateReward = 0;
 			} else {
 				rewards = await rewardCollector.collectAllRewards(
-					rewardPath, raw.exitCode, raw.output, config, commands, baselineLintErrors ?? undefined,
+					rewardPath, raw.exitCode, raw.output, config, commands, baselines,
 				);
 				aggregateReward = rewardCollector.computeAggregateReward(rewards, config.rewardWeights);
 			}

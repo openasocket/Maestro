@@ -148,7 +148,7 @@ function createMockRewardCollector() {
 			lintCommand: 'npm run lint',
 			projectType: 'node' as const,
 		})),
-		captureLintBaseline: vi.fn(async () => 0),
+		captureAllBaselines: vi.fn(async () => ({})),
 		collectAllRewards: vi.fn(async () => [
 			makeRewardSignal('test-pass', 1.0, 'Tests pass'),
 			makeRewardSignal('build-success', 1.0, 'Build ok'),

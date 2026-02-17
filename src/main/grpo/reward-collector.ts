@@ -576,7 +576,7 @@ export async function collectAllRewards(
 	agentOutput: string,
 	config: GRPOConfig,
 	commands: ProjectCommands,
-	baselineLintErrors?: number,
+	baselines?: RewardBaselines,
 ): Promise<RewardSignal[]> {
 	const signals: RewardSignal[] = [];
 	const weights = config.rewardWeights;
@@ -602,11 +602,48 @@ export async function collectAllRewards(
 	}
 
 	if (weights['lint-clean'] > 0 || weights['lint-errors'] > 0) {
-		asyncCollectors.push(collectLintReward(projectPath, commands, baselineLintErrors));
+		asyncCollectors.push(collectLintReward(projectPath, commands, baselines?.lintErrors));
 	}
 
 	if (weights['git-diff-quality'] > 0) {
 		asyncCollectors.push(collectGitDiffReward(projectPath));
+	}
+
+	// New GRPO-15 collectors
+	if (weights['test-coverage-delta'] > 0) {
+		asyncCollectors.push(collectCoverageReward(projectPath, commands, baselines?.coverage));
+	}
+
+	if (weights['type-safety'] > 0) {
+		asyncCollectors.push(collectTypeSafetyReward(projectPath, commands, baselines?.typeErrors));
+	}
+
+	if (weights['complexity-delta'] > 0) {
+		asyncCollectors.push(collectComplexityReward(projectPath, commands, baselines?.complexity));
+	}
+
+	if (weights['security-scan'] > 0) {
+		asyncCollectors.push(collectSecurityReward(projectPath, commands, baselines?.securityFindings));
+	}
+
+	if (weights['dependency-hygiene'] > 0) {
+		asyncCollectors.push(collectDependencyReward(projectPath, commands, baselines?.dependencies));
+	}
+
+	if (weights['api-contract'] > 0) {
+		asyncCollectors.push(collectApiContractReward(projectPath, commands, baselines?.apiSchema));
+	}
+
+	if (weights['documentation-coverage'] > 0) {
+		asyncCollectors.push(collectDocumentationReward(projectPath, commands));
+	}
+
+	if (weights['runtime-performance'] > 0) {
+		asyncCollectors.push(collectPerformanceReward(projectPath, commands, baselines?.benchmarkDurationMs));
+	}
+
+	if (weights['bundle-size-delta'] > 0) {
+		asyncCollectors.push(collectBundleSizeReward(projectPath, commands, baselines?.bundleSizeBytes));
 	}
 
 	const asyncResults = await Promise.all(asyncCollectors);
@@ -1718,6 +1755,101 @@ export async function captureBundleSizeBaseline(
 	if (result.exitCode !== 0) return null;
 
 	return measureBundleSize(projectPath);
+}
+
+// ─── Baselines ───────────────────────────────────────────────────────────────
+
+export interface RewardBaselines {
+	lintErrors?: number;
+	coverage?: number;
+	typeErrors?: number;
+	complexity?: number;
+	securityFindings?: number;
+	dependencies?: string[];
+	apiSchema?: string;
+	benchmarkDurationMs?: number;
+	bundleSizeBytes?: number;
+}
+
+/**
+ * Captures all baseline measurements before a rollout starts.
+ * Run this BEFORE the agent modifies the project.
+ */
+export async function captureAllBaselines(
+	projectPath: string,
+	commands: ProjectCommands,
+	config: GRPOConfig,
+): Promise<RewardBaselines> {
+	const weights = config.rewardWeights;
+	const baselines: RewardBaselines = {};
+
+	const captures: Promise<void>[] = [];
+
+	if (weights['lint-clean'] > 0 || weights['lint-errors'] > 0) {
+		captures.push(
+			captureLintBaseline(projectPath, commands)
+				.then(v => { if (v !== null) baselines.lintErrors = v; })
+		);
+	}
+
+	if (weights['test-coverage-delta'] > 0) {
+		captures.push(
+			captureCoverageBaseline(projectPath, commands)
+				.then(v => { if (v !== null) baselines.coverage = v; })
+		);
+	}
+
+	if (weights['type-safety'] > 0) {
+		captures.push(
+			captureTypeCheckBaseline(projectPath, commands)
+				.then(v => { if (v !== null) baselines.typeErrors = v; })
+		);
+	}
+
+	if (weights['complexity-delta'] > 0) {
+		captures.push(
+			captureComplexityBaseline(projectPath, commands)
+				.then(v => { if (v !== null) baselines.complexity = v; })
+		);
+	}
+
+	if (weights['security-scan'] > 0) {
+		captures.push(
+			captureSecurityBaseline(projectPath, commands)
+				.then(v => { if (v !== null) baselines.securityFindings = v; })
+		);
+	}
+
+	if (weights['dependency-hygiene'] > 0) {
+		captures.push(
+			captureDependencyBaseline(projectPath, commands)
+				.then(v => { if (v !== null) baselines.dependencies = v; })
+		);
+	}
+
+	if (weights['api-contract'] > 0) {
+		captures.push(
+			captureApiSchemaBaseline(projectPath, commands)
+				.then(v => { if (v !== null) baselines.apiSchema = v; })
+		);
+	}
+
+	if (weights['runtime-performance'] > 0) {
+		captures.push(
+			capturePerformanceBaseline(projectPath, commands)
+				.then(v => { if (v !== null) baselines.benchmarkDurationMs = v; })
+		);
+	}
+
+	if (weights['bundle-size-delta'] > 0) {
+		captures.push(
+			captureBundleSizeBaseline(projectPath, commands)
+				.then(v => { if (v !== null) baselines.bundleSizeBytes = v; })
+		);
+	}
+
+	await Promise.all(captures);
+	return baselines;
 }
 
 // ─── Aggregate Reward Calculation ────────────────────────────────────────────

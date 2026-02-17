@@ -12,7 +12,7 @@
 
 import { logger } from '../utils/logger';
 import { acquireTrainingLock, releaseTrainingLock } from './training-lock';
-import { saveTrainingState, loadTrainingState, clearTrainingState, type TrainingState } from './training-state';
+import { saveTrainingState, loadTrainingState, clearTrainingState } from './training-state';
 import type { ExperienceStore } from './experience-store';
 import type {
 	GRPOConfig,
@@ -64,7 +64,7 @@ export interface ProcessManagerLike {
 /** Minimal interface for the reward collector dependency */
 export interface RewardCollectorLike {
 	detectProjectCommands: (projectPath: string) => Promise<unknown>;
-	captureLintBaseline: (projectPath: string, commands: unknown) => Promise<number | null>;
+	captureAllBaselines: (projectPath: string, commands: unknown, config: unknown) => Promise<unknown>;
 	collectAllRewards: (...args: unknown[]) => Promise<unknown[]>;
 	computeAggregateReward: (signals: unknown[], weights: Record<string, number>) => number;
 }
@@ -89,7 +89,7 @@ export interface RolloutCoordinatorLike {
 		config: GRPOConfig,
 		epoch: number,
 		processManager: ProcessManagerLike,
-		experienceStore: { getLibrary: (projectPath: string) => Promise<{ length: number }[]> },
+		experienceStore: { getLibrary: (projectPath: string) => Promise<unknown[]> },
 		rewardCollector: RewardCollectorLike,
 		agentDetector: AgentDetectorLike,
 	) => Promise<RolloutGroup>;
