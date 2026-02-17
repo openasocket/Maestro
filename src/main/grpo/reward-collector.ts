@@ -1054,6 +1054,126 @@ export async function captureSecurityBaseline(
 	return parseSecurityFindingCount(combineOutput(result), commands.projectType);
 }
 
+/**
+ * Collects dependency hygiene reward signal.
+ * Compares the package manifest before and after to detect new dependency additions.
+ * Returns null if no manifest path detected.
+ *
+ * Scoring:
+ * - No new deps: 1.0
+ * - 1 new dep: 0.75
+ * - 2 new deps: 0.5
+ * - 3 new deps: 0.25
+ * - 4+ new deps: 0.0
+ */
+export async function collectDependencyReward(
+	_projectPath: string,
+	commands: ProjectCommands,
+	baselineDeps?: string[],
+): Promise<RewardSignal | null> {
+	if (!commands.manifestPath) return null;
+
+	let currentDeps: string[];
+	try {
+		currentDeps = await extractDependencyNames(commands.manifestPath, commands.projectType);
+	} catch {
+		return null;
+	}
+
+	if (!baselineDeps) {
+		// No baseline — can't compute delta. Return neutral.
+		return makeSignal(
+			'dependency-hygiene',
+			0.5,
+			`${currentDeps.length} total dependencies (no baseline)`,
+		);
+	}
+
+	const baselineSet = new Set(baselineDeps);
+	const newDeps = currentDeps.filter(d => !baselineSet.has(d));
+	const removedDeps = baselineDeps.filter(d => !currentDeps.includes(d));
+
+	const newCount = newDeps.length;
+	const score = Math.max(0, 1 - newCount * 0.25);
+
+	const parts: string[] = [];
+	if (newCount > 0) parts.push(`+${newCount} new: ${newDeps.slice(0, 5).join(', ')}`);
+	if (removedDeps.length > 0) parts.push(`-${removedDeps.length} removed`);
+	if (parts.length === 0) parts.push('No dependency changes');
+
+	return makeSignal('dependency-hygiene', score, parts.join('; '));
+}
+
+/**
+ * Extracts dependency names from a package manifest file.
+ * Supports: package.json, Cargo.toml, requirements.txt, pyproject.toml, go.mod.
+ */
+async function extractDependencyNames(manifestPath: string, projectType: string): Promise<string[]> {
+	const content = await fs.readFile(manifestPath, 'utf-8');
+
+	switch (projectType) {
+		case 'node': {
+			const pkg = JSON.parse(content);
+			return [
+				...Object.keys(pkg.dependencies ?? {}),
+				...Object.keys(pkg.devDependencies ?? {}),
+			];
+		}
+		case 'python': {
+			if (manifestPath.endsWith('requirements.txt')) {
+				// requirements.txt: one package per line, strip version specifiers
+				return content.split('\n')
+					.map(l => l.trim())
+					.filter(l => l && !l.startsWith('#'))
+					.map(l => l.split(/[=<>!~\[]/)[0].trim());
+			}
+			// pyproject.toml: extract from [project.dependencies] or [tool.poetry.dependencies]
+			const depMatches = content.match(/dependencies\s*=\s*\[([\s\S]*?)\]/);
+			if (depMatches) {
+				return depMatches[1].match(/"([^"]+)"/g)?.map(m => m.replace(/"/g, '').split(/[=<>!~]/)[0].trim()) ?? [];
+			}
+			return [];
+		}
+		case 'rust': {
+			// Cargo.toml: [dependencies] section, extract key names
+			const depSection = content.match(/\[dependencies\]([\s\S]*?)(?=\[|$)/);
+			if (depSection) {
+				return depSection[1].split('\n')
+					.map(l => l.split('=')[0].trim())
+					.filter(l => l && !l.startsWith('#'));
+			}
+			return [];
+		}
+		case 'go': {
+			// go.mod: "require" block, extract module paths
+			const requireBlock = content.match(/require\s*\(([\s\S]*?)\)/);
+			if (requireBlock) {
+				return requireBlock[1].split('\n')
+					.map(l => l.trim().split(/\s/)[0])
+					.filter(l => l && !l.startsWith('//'));
+			}
+			return [];
+		}
+		default:
+			return [];
+	}
+}
+
+/**
+ * Captures baseline dependency list before a rollout starts.
+ */
+export async function captureDependencyBaseline(
+	_projectPath: string,
+	commands: ProjectCommands,
+): Promise<string[] | null> {
+	if (!commands.manifestPath) return null;
+	try {
+		return await extractDependencyNames(commands.manifestPath, commands.projectType);
+	} catch {
+		return null;
+	}
+}
+
 // ─── Aggregate Reward Calculation ────────────────────────────────────────────
 
 /**
