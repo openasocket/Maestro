@@ -222,11 +222,12 @@ describe('UsageDashboardModal', () => {
 			await waitFor(() => {
 				// Use getAllByRole('tab') to find tabs - there may be multiple elements with text 'Agents'
 				const tabs = screen.getAllByRole('tab');
-				expect(tabs).toHaveLength(4);
+				expect(tabs).toHaveLength(5);
 				expect(tabs[0]).toHaveTextContent('Overview');
 				expect(tabs[1]).toHaveTextContent('Agents');
 				expect(tabs[2]).toHaveTextContent('Activity');
 				expect(tabs[3]).toHaveTextContent('Auto Run');
+				expect(tabs[4]).toHaveTextContent('GRPO');
 			});
 		});
 
@@ -1547,7 +1548,7 @@ describe('UsageDashboardModal', () => {
 
 			await waitFor(() => {
 				const tabs = screen.getAllByRole('tab');
-				expect(tabs).toHaveLength(4);
+				expect(tabs).toHaveLength(5);
 
 				// First tab (Overview) should be selected
 				expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
@@ -1558,6 +1559,7 @@ describe('UsageDashboardModal', () => {
 				expect(tabs[1]).toHaveAttribute('aria-selected', 'false');
 				expect(tabs[2]).toHaveAttribute('aria-selected', 'false');
 				expect(tabs[3]).toHaveAttribute('aria-selected', 'false');
+				expect(tabs[4]).toHaveAttribute('aria-selected', 'false');
 			});
 		});
 
@@ -1616,12 +1618,12 @@ describe('UsageDashboardModal', () => {
 
 			const tablist = screen.getByTestId('view-mode-tabs');
 
-			// Press ArrowLeft while on first tab - should wrap to last tab (Auto Run)
+			// Press ArrowLeft while on first tab - should wrap to last tab (GRPO)
 			fireEvent.keyDown(tablist, { key: 'ArrowLeft' });
 
 			await waitFor(() => {
 				const tabs = screen.getAllByRole('tab');
-				expect(tabs[3]).toHaveAttribute('aria-selected', 'true'); // Auto Run tab
+				expect(tabs[4]).toHaveAttribute('aria-selected', 'true'); // GRPO tab (last)
 				expect(tabs[0]).toHaveAttribute('aria-selected', 'false');
 			});
 		});
@@ -1635,11 +1637,11 @@ describe('UsageDashboardModal', () => {
 
 			const tablist = screen.getByTestId('view-mode-tabs');
 
-			// Navigate to last tab (Auto Run)
+			// Navigate to last tab (GRPO)
 			fireEvent.keyDown(tablist, { key: 'ArrowLeft' }); // Wraps to last
 
 			await waitFor(() => {
-				expect(screen.getAllByRole('tab')[3]).toHaveAttribute('aria-selected', 'true');
+				expect(screen.getAllByRole('tab')[4]).toHaveAttribute('aria-selected', 'true');
 			});
 
 			// Press ArrowRight - should wrap to first tab (Overview)
@@ -1648,7 +1650,7 @@ describe('UsageDashboardModal', () => {
 			await waitFor(() => {
 				const tabs = screen.getAllByRole('tab');
 				expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
-				expect(tabs[3]).toHaveAttribute('aria-selected', 'false');
+				expect(tabs[4]).toHaveAttribute('aria-selected', 'false');
 			});
 		});
 

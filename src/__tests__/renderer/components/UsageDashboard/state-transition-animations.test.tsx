@@ -135,6 +135,12 @@ beforeEach(() => {
 		stats: mockStats,
 		dialog: mockDialog,
 		fs: mockFs,
+		grpo: {
+			getStats: vi.fn().mockResolvedValue({ success: true, data: {} }),
+			onTrainingStatus: vi.fn().mockReturnValue(() => {}),
+			startTraining: vi.fn().mockResolvedValue({ success: true }),
+			getTrainingStatus: vi.fn().mockResolvedValue({ success: true, data: { inProgress: false, projects: [] } }),
+		},
 	};
 
 	// Reset mocks with default data
