@@ -37,6 +37,7 @@ import type {
 	GRPOConfig,
 	RolloutGroup,
 	RolloutOutput,
+	RewardSignal,
 	SignalRealm,
 } from '../../shared/grpo-types';
 import { GRPO_CONFIG_DEFAULTS } from '../../shared/grpo-types';
@@ -424,6 +425,117 @@ export class SymphonyCollector {
 		);
 
 		return groups;
+	}
+
+	// ─── Human Feedback (GRPO-16) ───────────────────────────────────────
+
+	/**
+	 * Records a manual reward signal (e.g., human feedback) that isn't tied to a task completion.
+	 * Writes directly to the signal store without running automated reward collectors.
+	 */
+	async recordManualSignal(
+		taskContent: string,
+		projectPath: string,
+		agentType: string,
+		sessionId: string,
+		rewards: RewardSignal[],
+		aggregateReward: number,
+		realm: SignalRealm,
+	): Promise<void> {
+		return this.serializedWrite(projectPath, async () => {
+			await fs.mkdir(this.getProjectDir(projectPath), { recursive: true });
+
+			const taskContentHash = computeTaskContentHash(taskContent);
+			const signal: CollectedSignal = {
+				taskContent,
+				taskContentHash,
+				rewards,
+				aggregateReward,
+				agentType,
+				sessionId,
+				durationMs: 0,
+				collectedAt: Date.now(),
+				documentPath: '',
+				projectPath,
+				realm,
+			};
+
+			await this.appendSignal(projectPath, signal);
+
+			// Update index
+			const index = await this.readIndex(projectPath);
+			const existing = index.entries[taskContentHash];
+			if (existing) {
+				existing.executionCount += 1;
+				existing.latestReward = aggregateReward;
+				existing.lastSeen = signal.collectedAt;
+			} else {
+				index.entries[taskContentHash] = {
+					taskContentHash,
+					normalizedContent: normalizeTaskContent(taskContent),
+					executionCount: 1,
+					latestReward: aggregateReward,
+					firstSeen: signal.collectedAt,
+					lastSeen: signal.collectedAt,
+				};
+			}
+			await this.writeIndex(projectPath, index);
+		});
+	}
+
+	/**
+	 * Retrieves human feedback signals for a set of response hashes within a session.
+	 * Returns a map of responseHash → { approved: boolean }.
+	 */
+	async getFeedbackForHashes(
+		sessionId: string,
+		responseHashes: string[],
+	): Promise<Record<string, { approved: boolean }>> {
+		const result: Record<string, { approved: boolean }> = {};
+		if (responseHashes.length === 0) return result;
+
+		// Scan all project directories for signals matching this session
+		const hashSet = new Set(responseHashes);
+		let projectDirs: string[];
+		try {
+			const entries = await fs.readdir(this.baseDir, { withFileTypes: true });
+			projectDirs = entries
+				.filter(e => e.isDirectory())
+				.map(e => path.join(this.baseDir, e.name));
+		} catch {
+			return result;
+		}
+
+		for (const dir of projectDirs) {
+			const signalsPath = path.join(dir, 'signals.jsonl');
+			let data: string;
+			try {
+				data = await fs.readFile(signalsPath, 'utf-8');
+			} catch {
+				continue;
+			}
+
+			const lines = data.trim().split('\n').filter(l => l.length > 0);
+			// Scan from end (most recent first) for performance
+			for (let i = lines.length - 1; i >= Math.max(0, lines.length - 1000); i--) {
+				try {
+					const signal = JSON.parse(lines[i]) as CollectedSignal;
+					if (signal.sessionId !== sessionId) continue;
+					for (const reward of signal.rewards) {
+						if (reward.type !== 'human-feedback') continue;
+						const parsed = JSON.parse(reward.rawOutput ?? '{}');
+						if (hashSet.has(parsed.responseHash)) {
+							result[parsed.responseHash] = { approved: signal.aggregateReward === 1.0 };
+							hashSet.delete(parsed.responseHash);
+						}
+					}
+				} catch { /* ignore parse errors */ }
+				if (hashSet.size === 0) break;
+			}
+			if (hashSet.size === 0) break;
+		}
+
+		return result;
 	}
 
 	/** Get the base directory (for testing/debugging) */

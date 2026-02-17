@@ -18,12 +18,16 @@ import {
 import { getModelStatus, getCacheDir, preloadModel, setDownloadProgressCallback, dispose as disposeEmbedding, isModelCached } from '../../grpo/embedding-service';
 import { maybeAutoTrain, isTrainingInProgress, getTrainingProjects } from '../../grpo/auto-trainer';
 import type { EmbeddingModelStatus } from '../../grpo/embedding-service';
+import crypto from 'crypto';
 import type {
 	ExperienceEntry,
 	ExperienceScope,
 	GRPOConfig,
 	GRPOStats,
 	BatchCollectionResult,
+	HumanFeedback,
+	RewardSignal,
+	SignalRealm,
 } from '../../../shared/grpo-types';
 import { GRPO_CONFIG_DEFAULTS } from '../../../shared/grpo-types';
 
@@ -455,6 +459,97 @@ export function registerGRPOHandlers(deps: GRPOHandlerDependencies): void {
 					projects: getTrainingProjects(),
 				},
 			};
+		})
+	);
+
+	// ─── Human Feedback (GRPO-16) ────────────────────────────────────────
+
+	// Submit human feedback (thumbs up/down)
+	ipcMain.handle(
+		'grpo:submitFeedback',
+		withIpcErrorLogging(handlerOpts('submitFeedback'), async (
+			sessionId: string,
+			agentType: string,
+			projectPath: string,
+			responseText: string,
+			promptText: string,
+			approved: boolean,
+			realm: string,
+		) => {
+			const config = readConfig(settingsStore);
+			if (!config.enabled || !config.humanFeedbackEnabled) {
+				return { success: false, error: 'Human feedback collection is not enabled' };
+			}
+
+			const feedback: HumanFeedback = {
+				id: crypto.randomUUID(),
+				sessionId,
+				agentType,
+				projectPath,
+				approved,
+				responseHash: crypto.createHash('sha256').update(responseText).digest('hex').slice(0, 12),
+				responsePreview: responseText.slice(0, 500),
+				promptPreview: promptText.slice(0, 200),
+				createdAt: Date.now(),
+				realm: (realm as SignalRealm) || 'manual',
+			};
+
+			// Store as a reward signal via SymphonyCollector
+			if (deps.symphonyCollector) {
+				const rewardSignal: RewardSignal = {
+					type: 'human-feedback',
+					score: approved ? 1.0 : 0.0,
+					description: approved ? 'User approved (thumbs up)' : 'User disapproved (thumbs down)',
+					rawOutput: JSON.stringify({
+						promptPreview: feedback.promptPreview,
+						responsePreview: feedback.responsePreview,
+						responseHash: feedback.responseHash,
+					}),
+					collectedAt: feedback.createdAt,
+				};
+
+				await deps.symphonyCollector.recordManualSignal(
+					feedback.promptPreview,
+					projectPath,
+					agentType,
+					sessionId,
+					[rewardSignal],
+					approved ? 1.0 : 0.0,
+					feedback.realm,
+				);
+			}
+
+			logger.info(
+				`[GRPO] Human feedback recorded: ${approved ? 'thumbs-up' : 'thumbs-down'} for ${agentType} in ${sessionId}`,
+				LOG_CONTEXT,
+			);
+
+			return { success: true, data: feedback.id };
+		})
+	);
+
+	// Query feedback for a session (for displaying thumbs state in UI)
+	ipcMain.handle(
+		'grpo:getFeedback',
+		withIpcErrorLogging(handlerOpts('getFeedback'), async (
+			sessionId: string,
+			responseHashes: string[],
+		) => {
+			const config = readConfig(settingsStore);
+			if (!config.enabled || !config.humanFeedbackEnabled) {
+				return { success: true, data: {} };
+			}
+
+			if (!deps.symphonyCollector) {
+				return { success: true, data: {} };
+			}
+
+			const feedbackMap = await deps.symphonyCollector.getFeedbackForHashes(
+				sessionId,
+				responseHashes,
+			);
+
+			return { success: true, data: feedbackMap };
 		})
 	);
 }
