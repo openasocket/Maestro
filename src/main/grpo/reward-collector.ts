@@ -826,6 +826,132 @@ export async function captureTypeCheckBaseline(
 	return parseTypeErrorCount(combineOutput(result), commands.projectType);
 }
 
+/**
+ * Collects complexity delta reward signal.
+ * Measures cyclomatic complexity of changed files before vs. after.
+ * Returns null if no complexity tool detected.
+ *
+ * Scoring:
+ * - Complexity decreased: score = min(1.0, 0.5 + decrease * 0.05)
+ * - Complexity unchanged: score = 0.5 (neutral)
+ * - Complexity increased: score = max(0.0, 0.5 - increase * 0.025)
+ *   (increase of 20+ = 0.0)
+ */
+export async function collectComplexityReward(
+	projectPath: string,
+	commands: ProjectCommands,
+	baselineComplexity?: number,
+): Promise<RewardSignal | null> {
+	if (!commands.complexityCommand) return null;
+
+	const result = await safeRunCommand(commands.complexityCommand, projectPath);
+	if (result.exitCode === -1) {
+		return timeoutSignal('complexity-delta', 'Complexity check timed out');
+	}
+
+	const rawOutput = combineOutput(result);
+	const currentComplexity = parseAverageComplexity(rawOutput, commands.projectType);
+
+	if (currentComplexity === null) {
+		logger.debug('Could not parse complexity output', LOG_CONTEXT);
+		return null;
+	}
+
+	if (baselineComplexity === undefined || baselineComplexity === null) {
+		// No baseline — score based on absolute average complexity
+		// avg ≤5 is clean, ≤10 is acceptable, >15 is high
+		const score = Math.min(1.0, Math.max(0.0, 1 - (currentComplexity - 5) / 15));
+		return makeSignal(
+			'complexity-delta',
+			score,
+			`Average complexity: ${currentComplexity.toFixed(1)} (no baseline)`,
+			rawOutput,
+		);
+	}
+
+	const delta = currentComplexity - baselineComplexity;
+
+	let score: number;
+	if (delta <= 0) {
+		// Complexity decreased — reward
+		score = Math.min(1.0, 0.5 + Math.abs(delta) * 0.05);
+	} else {
+		// Complexity increased — penalize
+		score = Math.max(0.0, 0.5 - delta * 0.025);
+	}
+
+	return makeSignal(
+		'complexity-delta',
+		score,
+		`Average complexity: ${currentComplexity.toFixed(1)} (baseline: ${baselineComplexity.toFixed(1)}, delta: ${delta > 0 ? '+' : ''}${delta.toFixed(1)})`,
+		rawOutput,
+	);
+}
+
+/**
+ * Parses average cyclomatic complexity from tool output.
+ * Supports: cr (code-complexity), radon (Python), custom fallback.
+ */
+function parseAverageComplexity(output: string, _projectType: string): number | null {
+	// Try JSON format (radon -j, cr --format json)
+	try {
+		const parsed = JSON.parse(output);
+		if (typeof parsed === 'object') {
+			// radon JSON: { "file.py": [{ "complexity": 5 }, ...], ... }
+			const allComplexities: number[] = [];
+			for (const file of Object.values(parsed)) {
+				if (Array.isArray(file)) {
+					for (const func of file as { complexity?: number }[]) {
+						if (typeof func.complexity === 'number') {
+							allComplexities.push(func.complexity);
+						}
+					}
+				}
+			}
+			if (allComplexities.length > 0) {
+				return allComplexities.reduce((a, b) => a + b, 0) / allComplexities.length;
+			}
+		}
+	} catch { /* not JSON */ }
+
+	// radon text: "    F 12:0 function_name - B (6)"
+	const radonMatches = output.match(/\b([A-F])\s*\((\d+)\)/g);
+	if (radonMatches && radonMatches.length > 0) {
+		const scores = radonMatches.map(m => {
+			const numMatch = m.match(/\((\d+)\)/);
+			return numMatch ? parseInt(numMatch[1], 10) : 0;
+		});
+		return scores.reduce((a, b) => a + b, 0) / scores.length;
+	}
+
+	// Fallback: count functions with high complexity indicators
+	const highComplexityIndicators = (output.match(/complexity[:\s]+(\d+)/gi) ?? [])
+		.map(m => {
+			const numMatch = m.match(/(\d+)/);
+			return numMatch ? parseInt(numMatch[1], 10) : 0;
+		})
+		.filter(n => n > 0);
+
+	if (highComplexityIndicators.length > 0) {
+		return highComplexityIndicators.reduce((a, b) => a + b, 0) / highComplexityIndicators.length;
+	}
+
+	return null;
+}
+
+/**
+ * Captures baseline average complexity before a rollout starts.
+ */
+export async function captureComplexityBaseline(
+	projectPath: string,
+	commands: ProjectCommands,
+): Promise<number | null> {
+	if (!commands.complexityCommand) return null;
+	const result = await safeRunCommand(commands.complexityCommand, projectPath);
+	if (result.exitCode === -1) return null;
+	return parseAverageComplexity(combineOutput(result), commands.projectType);
+}
+
 // ─── Aggregate Reward Calculation ────────────────────────────────────────────
 
 /**
