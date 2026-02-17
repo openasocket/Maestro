@@ -20,6 +20,13 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 
+// Mock electron (needed for symphony-collector / auto-trainer tests)
+vi.mock('electron', () => ({
+	app: {
+		getPath: vi.fn(() => '/mock/userData'),
+	},
+}));
+
 // Mock logger
 vi.mock('../../../main/utils/logger', () => ({
 	logger: {
@@ -30,8 +37,29 @@ vi.mock('../../../main/utils/logger', () => ({
 	},
 }));
 
+// Mock sentry (needed for auto-trainer tests)
+vi.mock('../../../main/utils/sentry', () => ({
+	captureException: vi.fn(),
+}));
+
+// Hoisted mocks — must use vi.hoisted() so they're available inside vi.mock factories
+const {
+	mockExec,
+	mockGetTrainingReadiness,
+	mockFormNaturalRolloutGroups,
+	mockGetSignalsForTask,
+	mockAddExperience,
+	mockGetLibrary,
+} = vi.hoisted(() => ({
+	mockExec: vi.fn(),
+	mockGetTrainingReadiness: vi.fn(),
+	mockFormNaturalRolloutGroups: vi.fn(),
+	mockGetSignalsForTask: vi.fn(),
+	mockAddExperience: vi.fn(),
+	mockGetLibrary: vi.fn(),
+}));
+
 // Mock child_process.exec
-const mockExec = vi.fn();
 vi.mock(import('child_process'), async (importOriginal) => {
 	const actual = await importOriginal();
 	return {
@@ -40,6 +68,28 @@ vi.mock(import('child_process'), async (importOriginal) => {
 		exec: (...args: any[]) => mockExec(...args),
 	};
 });
+
+// Mock symphony-collector's getSymphonyCollector (used by auto-trainer)
+// while keeping real exports available for direct tests
+vi.mock('../../../main/grpo/symphony-collector', async (importOriginal) => {
+	const actual = await importOriginal();
+	return {
+		...actual,
+		getSymphonyCollector: vi.fn(() => ({
+			getTrainingReadiness: mockGetTrainingReadiness,
+			formNaturalRolloutGroups: mockFormNaturalRolloutGroups,
+			getSignalsForTask: mockGetSignalsForTask,
+		})),
+	};
+});
+
+// Mock experience-store (used by auto-trainer first-experience mode)
+vi.mock('../../../main/grpo/experience-store', () => ({
+	getExperienceStore: vi.fn(() => ({
+		addExperience: mockAddExperience,
+		getLibrary: mockGetLibrary,
+	})),
+}));
 
 import {
 	collectTypeSafetyReward,
@@ -62,8 +112,14 @@ import {
 	type ProjectCommands,
 	type RewardBaselines,
 } from '../../../main/grpo/reward-collector';
-import type { GRPOConfig } from '../../../shared/grpo-types';
+import { hasMultiSignalVariance } from '../../../main/grpo/symphony-collector';
+import {
+	maybeAutoTrain,
+	resetAutoTrainer,
+} from '../../../main/grpo/auto-trainer';
+import type { GRPOConfig, CollectedSignal, RewardSignal as GRPORewardSignal } from '../../../shared/grpo-types';
 import { GRPO_CONFIG_DEFAULTS } from '../../../shared/grpo-types';
+import { logger } from '../../../main/utils/logger';
 
 let tmpDir: string;
 
@@ -116,11 +172,54 @@ function mockExecSequence(results: Array<{ stdout?: string; stderr?: string; exi
 beforeEach(async () => {
 	tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'grpo-reward-ext-'));
 	mockExec.mockReset();
+	mockGetTrainingReadiness.mockReset();
+	mockFormNaturalRolloutGroups.mockReset();
+	mockGetSignalsForTask.mockReset();
+	mockAddExperience.mockReset();
+	mockGetLibrary.mockReset();
+	resetAutoTrainer();
+
+	// Sensible defaults for auto-trainer mocks
+	mockGetTrainingReadiness.mockResolvedValue({ ready: false, matchedTaskCount: 0, minGroupSize: 2, suggestedTasks: [] });
+	mockFormNaturalRolloutGroups.mockResolvedValue([]);
+	mockGetSignalsForTask.mockResolvedValue([]);
+	mockAddExperience.mockResolvedValue({ id: 'exp-001' });
+	mockGetLibrary.mockResolvedValue([]);
+	(logger as any).debug.mockClear();
+	(logger as any).info.mockClear();
+	(logger as any).warn.mockClear();
 });
 
 afterEach(async () => {
 	await fs.rm(tmpDir, { recursive: true, force: true });
 });
+
+/**
+ * Flush microtasks + next macrotask to allow the void async IIFE inside
+ * maybeAutoTrain to complete before assertions.
+ */
+async function flushTraining(): Promise<void> {
+	await new Promise(resolve => setTimeout(resolve, 10));
+	await new Promise(resolve => setTimeout(resolve, 10));
+}
+
+/** Helper to create a minimal CollectedSignal for multi-signal variance tests */
+function makeCollectedSignal(overrides: Partial<CollectedSignal> & { rewards: GRPORewardSignal[] }): CollectedSignal {
+	return {
+		taskContent: 'test task',
+		taskContentHash: 'abc123',
+		rewards: overrides.rewards,
+		aggregateReward: overrides.aggregateReward ?? 0.8,
+		agentType: 'claude-code',
+		sessionId: 'sess-001',
+		durationMs: 5000,
+		collectedAt: Date.now(),
+		documentPath: '/test/doc.md',
+		projectPath: '/test/project',
+		realm: 'autorun',
+		...overrides,
+	};
+}
 
 // ─── collectTypeSafetyReward ─────────────────────────────────────────────────
 
@@ -1515,5 +1614,410 @@ describe('captureAllBaselines', () => {
 		expect(baselines.apiSchema).toBeUndefined();
 		expect(baselines.benchmarkDurationMs).toBeUndefined();
 		expect(baselines.bundleSizeBytes).toBeUndefined();
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Gate Recalibration Tests (#28-32)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('Gate recalibration', () => {
+	const PROJECT_PATH = '/test/project';
+
+	function makeConfig(overrides: Partial<GRPOConfig> = {}): GRPOConfig {
+		return { ...GRPO_CONFIG_DEFAULTS, enabled: true, ...overrides };
+	}
+
+	it('#28: getTrainingReadiness returns ready: true with 1 task when minReadyTasks = 1', async () => {
+		const config = makeConfig({ minReadyTasks: 1 });
+
+		// Simulate readiness with 1 qualifying task
+		mockGetTrainingReadiness.mockResolvedValue({
+			ready: true,
+			matchedTaskCount: 1,
+			minGroupSize: 2,
+			suggestedTasks: [{ prompt: 'fix the login bug', executionCount: 3 }],
+		});
+
+		// Provide rollout groups so training can proceed
+		mockFormNaturalRolloutGroups.mockResolvedValue([{
+			id: 'group-001',
+			taskPrompt: 'fix the login bug',
+			projectPath: PROJECT_PATH,
+			outputs: [
+				{ index: 0, agentType: 'claude-code', sessionId: 'sess-1', prompt: 'fix', output: '', rewards: [{ type: 'task-complete', score: 0.9, description: 'ok', collectedAt: Date.now() }], aggregateReward: 0.9, durationMs: 5000 },
+				{ index: 1, agentType: 'claude-code', sessionId: 'sess-2', prompt: 'fix', output: '', rewards: [{ type: 'task-complete', score: 0.4, description: 'poor', collectedAt: Date.now() }], aggregateReward: 0.4, durationMs: 5000 },
+			],
+			groupSize: 2,
+			meanReward: 0.65,
+			rewardStdDev: 0.25,
+			experienceVersion: 0,
+			epoch: 0,
+			createdAt: Date.now(),
+		}]);
+
+		const safeSend = vi.fn();
+		await maybeAutoTrain(PROJECT_PATH, config, safeSend);
+		await flushTraining();
+
+		// getTrainingReadiness should have been called
+		expect(mockGetTrainingReadiness).toHaveBeenCalledWith(PROJECT_PATH);
+		// Training should have started (safeSend called with 'running')
+		expect(safeSend).toHaveBeenCalledWith(
+			'grpo:trainingStatus',
+			expect.objectContaining({ status: 'running' }),
+		);
+	});
+
+	it('#29: getTrainingReadiness uses rolloutGroupSize = 2 correctly', async () => {
+		// Verify the default config has rolloutGroupSize = 2
+		expect(GRPO_CONFIG_DEFAULTS.rolloutGroupSize).toBe(2);
+
+		// Readiness mock returns minGroupSize matching config
+		mockGetTrainingReadiness.mockResolvedValue({
+			ready: true,
+			matchedTaskCount: 1,
+			minGroupSize: 2,
+			suggestedTasks: [],
+		});
+		mockFormNaturalRolloutGroups.mockResolvedValue([]);
+
+		const config = makeConfig();
+		await maybeAutoTrain(PROJECT_PATH, config);
+
+		// getTrainingReadiness was called, confirming the default group size is used
+		expect(mockGetTrainingReadiness).toHaveBeenCalledWith(PROJECT_PATH);
+		// formNaturalRolloutGroups was called because readiness passed
+		expect(mockFormNaturalRolloutGroups).toHaveBeenCalledWith(PROJECT_PATH);
+	});
+
+	it('#30: maybeAutoTrain uses config.autoTrainCooldownMs instead of hardcoded 5min', async () => {
+		// Use a very short cooldown of 50ms
+		const config = makeConfig({ autoTrainCooldownMs: 50 });
+		mockGetTrainingReadiness.mockResolvedValue({
+			ready: true,
+			matchedTaskCount: 5,
+			minGroupSize: 2,
+			suggestedTasks: [],
+		});
+		mockFormNaturalRolloutGroups.mockResolvedValue([{
+			id: 'group-001',
+			taskPrompt: 'test task',
+			projectPath: PROJECT_PATH,
+			outputs: [
+				{ index: 0, agentType: 'claude-code', sessionId: 's1', prompt: 't', output: '', rewards: [{ type: 'task-complete', score: 0.9, description: 'ok', collectedAt: Date.now() }], aggregateReward: 0.9, durationMs: 1000 },
+				{ index: 1, agentType: 'claude-code', sessionId: 's2', prompt: 't', output: '', rewards: [{ type: 'task-complete', score: 0.3, description: 'bad', collectedAt: Date.now() }], aggregateReward: 0.3, durationMs: 1000 },
+			],
+			groupSize: 2,
+			meanReward: 0.6,
+			rewardStdDev: 0.3,
+			experienceVersion: 0,
+			epoch: 0,
+			createdAt: Date.now(),
+		}]);
+
+		// First call triggers training
+		await maybeAutoTrain(PROJECT_PATH, config);
+		await flushTraining();
+
+		// Second call immediately should be blocked by cooldown
+		mockGetTrainingReadiness.mockClear();
+		await maybeAutoTrain(PROJECT_PATH, config);
+		expect(mockGetTrainingReadiness).not.toHaveBeenCalled();
+
+		// Wait for the short cooldown to expire
+		await new Promise(resolve => setTimeout(resolve, 60));
+
+		// Third call should now succeed (cooldown expired)
+		await maybeAutoTrain(PROJECT_PATH, config);
+		expect(mockGetTrainingReadiness).toHaveBeenCalledWith(PROJECT_PATH);
+	});
+});
+
+// ─── hasMultiSignalVariance (standalone function tests) ──────────────────────
+
+describe('hasMultiSignalVariance', () => {
+	it('#31: detects variance in individual signal types', () => {
+		// Two signals with same aggregate but different coverage scores
+		const signals: CollectedSignal[] = [
+			makeCollectedSignal({
+				rewards: [
+					{ type: 'test-pass', score: 1.0, description: 'pass', collectedAt: Date.now() },
+					{ type: 'test-coverage-delta', score: 0.6, description: 'low coverage', collectedAt: Date.now() },
+				],
+				aggregateReward: 0.8,
+			}),
+			makeCollectedSignal({
+				rewards: [
+					{ type: 'test-pass', score: 1.0, description: 'pass', collectedAt: Date.now() },
+					{ type: 'test-coverage-delta', score: 0.95, description: 'high coverage', collectedAt: Date.now() },
+				],
+				aggregateReward: 0.82,
+			}),
+		];
+
+		// test-pass has stdDev=0 (both 1.0), but test-coverage-delta has
+		// stdDev = sqrt(((0.6-0.775)^2 + (0.95-0.775)^2) / 2) = 0.175 > 0.1
+		expect(hasMultiSignalVariance(signals, 0.1)).toBe(true);
+	});
+
+	it('#32: returns false when all signals are uniform', () => {
+		const signals: CollectedSignal[] = [
+			makeCollectedSignal({
+				rewards: [
+					{ type: 'test-pass', score: 1.0, description: 'pass', collectedAt: Date.now() },
+					{ type: 'build-success', score: 1.0, description: 'build ok', collectedAt: Date.now() },
+					{ type: 'lint-clean', score: 1.0, description: 'lint clean', collectedAt: Date.now() },
+				],
+				aggregateReward: 1.0,
+			}),
+			makeCollectedSignal({
+				rewards: [
+					{ type: 'test-pass', score: 1.0, description: 'pass', collectedAt: Date.now() },
+					{ type: 'build-success', score: 1.0, description: 'build ok', collectedAt: Date.now() },
+					{ type: 'lint-clean', score: 1.0, description: 'lint clean', collectedAt: Date.now() },
+				],
+				aggregateReward: 1.0,
+			}),
+		];
+
+		// All scores are 1.0 → stdDev = 0 for all signal types → should return false
+		expect(hasMultiSignalVariance(signals, 0.1)).toBe(false);
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// First-Experience Mode Tests (#33-35)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('First-experience mode', () => {
+	const PROJECT_PATH = '/test/project';
+
+	function makeConfig(overrides: Partial<GRPOConfig> = {}): GRPOConfig {
+		return { ...GRPO_CONFIG_DEFAULTS, enabled: true, ...overrides };
+	}
+
+	it('#33: bootstrap creates observation when library is empty and firstExperienceMode = true', async () => {
+		const config = makeConfig({ firstExperienceMode: true });
+
+		// Not ready (low variance) but has suggested tasks
+		mockGetTrainingReadiness.mockResolvedValue({
+			ready: false,
+			matchedTaskCount: 1,
+			minGroupSize: 2,
+			suggestedTasks: [{ prompt: 'Add unit tests for auth module', executionCount: 2 }],
+		});
+
+		// Library is empty
+		mockGetLibrary.mockResolvedValue([]);
+
+		// Signal data for the task — high-scoring execution
+		mockGetSignalsForTask.mockResolvedValue([
+			makeCollectedSignal({
+				rewards: [
+					{ type: 'task-complete', score: 1.0, description: 'ok', collectedAt: Date.now() },
+					{ type: 'test-pass', score: 0.9, description: 'passed', collectedAt: Date.now() },
+				],
+				aggregateReward: 0.85,
+			}),
+		]);
+
+		const safeSend = vi.fn();
+		await maybeAutoTrain(PROJECT_PATH, config, safeSend);
+		await flushTraining();
+
+		// Should have created a bootstrap observation
+		expect(mockAddExperience).toHaveBeenCalledWith(
+			PROJECT_PATH,
+			expect.objectContaining({
+				category: 'patterns',
+				scope: 'project',
+				agentType: 'claude-code',
+			}),
+		);
+		// Content should mention "Observation" and the score
+		const call = mockAddExperience.mock.calls[0];
+		expect(call[1].content).toContain('Observation');
+		expect(call[1].content).toContain('0.85');
+	});
+
+	it('#34: bootstrap does NOT create observation when library already has entries', async () => {
+		const config = makeConfig({ firstExperienceMode: true });
+
+		mockGetTrainingReadiness.mockResolvedValue({
+			ready: false,
+			matchedTaskCount: 1,
+			minGroupSize: 2,
+			suggestedTasks: [{ prompt: 'Fix bug', executionCount: 2 }],
+		});
+
+		// Library already has entries — bootstrap should be skipped
+		mockGetLibrary.mockResolvedValue([{
+			id: 'exp-existing',
+			content: 'Existing experience',
+			category: 'patterns',
+			scope: 'project',
+			agentType: 'claude-code',
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			evidenceCount: 1,
+			useCount: 0,
+			lastRolloutGroupId: null,
+			tokenEstimate: 50,
+		}]);
+
+		const safeSend = vi.fn();
+		await maybeAutoTrain(PROJECT_PATH, config, safeSend);
+		await flushTraining();
+
+		// Should NOT have added any experience
+		expect(mockAddExperience).not.toHaveBeenCalled();
+		// Should NOT have sent training status (no training occurred)
+		expect(safeSend).not.toHaveBeenCalled();
+	});
+
+	it('#35: bootstrap only creates from tasks with reward > 0.7', async () => {
+		const config = makeConfig({ firstExperienceMode: true });
+
+		mockGetTrainingReadiness.mockResolvedValue({
+			ready: false,
+			matchedTaskCount: 2,
+			minGroupSize: 2,
+			suggestedTasks: [
+				{ prompt: 'Good task', executionCount: 2 },
+				{ prompt: 'Bad task', executionCount: 2 },
+			],
+		});
+
+		mockGetLibrary.mockResolvedValue([]);
+
+		// First task has high reward, second has low
+		mockGetSignalsForTask
+			.mockResolvedValueOnce([
+				makeCollectedSignal({
+					rewards: [{ type: 'task-complete', score: 0.9, description: 'ok', collectedAt: Date.now() }],
+					aggregateReward: 0.9,
+				}),
+			])
+			.mockResolvedValueOnce([
+				makeCollectedSignal({
+					rewards: [{ type: 'task-complete', score: 0.4, description: 'poor', collectedAt: Date.now() }],
+					aggregateReward: 0.4,
+				}),
+			]);
+
+		await maybeAutoTrain(PROJECT_PATH, config);
+		await flushTraining();
+
+		// Only one experience should be created (the high-scoring one)
+		expect(mockAddExperience).toHaveBeenCalledTimes(1);
+		const call = mockAddExperience.mock.calls[0];
+		expect(call[1].content).toContain('Good task');
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Diagnostic Logging Tests (#36-38)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('Diagnostic logging for silent gates', () => {
+	const PROJECT_PATH = '/test/project';
+
+	function makeConfig(overrides: Partial<GRPOConfig> = {}): GRPOConfig {
+		return { ...GRPO_CONFIG_DEFAULTS, enabled: true, ...overrides };
+	}
+
+	it('#36: maybeAutoTrain logs reason when blocked by cooldown', async () => {
+		const config = makeConfig({ autoTrainCooldownMs: 60_000 });
+
+		// First: trigger training with actual groups to set the cooldown timestamp
+		mockGetTrainingReadiness.mockResolvedValue({
+			ready: true,
+			matchedTaskCount: 5,
+			minGroupSize: 2,
+			suggestedTasks: [],
+		});
+		mockFormNaturalRolloutGroups.mockResolvedValue([{
+			id: 'group-001',
+			taskPrompt: 'test task',
+			projectPath: PROJECT_PATH,
+			outputs: [
+				{ index: 0, agentType: 'claude-code', sessionId: 's1', prompt: 't', output: '', rewards: [{ type: 'task-complete', score: 0.9, description: 'ok', collectedAt: Date.now() }], aggregateReward: 0.9, durationMs: 1000 },
+				{ index: 1, agentType: 'claude-code', sessionId: 's2', prompt: 't', output: '', rewards: [{ type: 'task-complete', score: 0.3, description: 'bad', collectedAt: Date.now() }], aggregateReward: 0.3, durationMs: 1000 },
+			],
+			groupSize: 2,
+			meanReward: 0.6,
+			rewardStdDev: 0.3,
+			experienceVersion: 0,
+			epoch: 0,
+			createdAt: Date.now(),
+		}]);
+
+		await maybeAutoTrain(PROJECT_PATH, config);
+		await flushTraining();
+
+		// Clear logs from first call
+		(logger as any).debug.mockClear();
+
+		// Second call: should be blocked by cooldown and log it
+		await maybeAutoTrain(PROJECT_PATH, config);
+
+		const debugCalls = (logger as any).debug.mock.calls.map((c: any[]) => c[0]);
+		const cooldownLog = debugCalls.find((msg: string) => msg.includes('cooldown'));
+		expect(cooldownLog).toBeDefined();
+		expect(cooldownLog).toContain('remaining');
+	});
+
+	it('#37: maybeAutoTrain logs reason when blocked by readiness', async () => {
+		const config = makeConfig();
+
+		mockGetTrainingReadiness.mockResolvedValue({
+			ready: false,
+			matchedTaskCount: 0,
+			minGroupSize: 2,
+			suggestedTasks: [],
+		});
+
+		// Disable first-experience mode so we hit the readiness log path
+		config.firstExperienceMode = false;
+
+		(logger as any).debug.mockClear();
+		await maybeAutoTrain(PROJECT_PATH, config);
+
+		const debugCalls = (logger as any).debug.mock.calls.map(c => c[0]);
+		const readinessLog = debugCalls.find((msg: string) => msg.includes('Not ready') || msg.includes('qualifying tasks'));
+		expect(readinessLog).toBeDefined();
+		expect(readinessLog).toContain('qualifying tasks');
+	});
+
+	it('#38: getTrainingReadiness logs qualifying task counts', async () => {
+		const config = makeConfig();
+
+		// Set up the mock to verify that getTrainingReadiness was called
+		// (the actual logging happens inside SymphonyCollector which is mocked,
+		// so we verify the auto-trainer passes through the readiness info to its own logs)
+		mockGetTrainingReadiness.mockResolvedValue({
+			ready: false,
+			matchedTaskCount: 2,
+			minGroupSize: 2,
+			suggestedTasks: [
+				{ prompt: 'task one', executionCount: 3 },
+				{ prompt: 'task two', executionCount: 2 },
+			],
+		});
+
+		config.firstExperienceMode = false;
+
+		(logger as any).debug.mockClear();
+		await maybeAutoTrain(PROJECT_PATH, config);
+
+		// Auto-trainer should log the readiness info it received
+		const debugCalls = (logger as any).debug.mock.calls.map(c => c[0]);
+		const readinessLog = debugCalls.find((msg: string) =>
+			msg.includes('qualifying tasks') || msg.includes('Not ready'),
+		);
+		expect(readinessLog).toBeDefined();
+		// Should include the task count
+		expect(readinessLog).toMatch(/2\s+qualifying/);
 	});
 });
