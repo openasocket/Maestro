@@ -485,6 +485,92 @@ export const GRPOSettings = memo(function GRPOSettings({ theme }: GRPOSettingsPr
 				</div>
 			</div>
 
+			{/* Human Feedback Section */}
+			<div
+				className="p-4 rounded-lg border"
+				style={{
+					backgroundColor: theme.colors.bgActivity,
+					borderColor: theme.colors.border,
+					opacity: config.enabled ? 1 : 0.5,
+					pointerEvents: config.enabled ? 'auto' : 'none',
+				}}
+			>
+				<h4 className="text-xs font-bold uppercase mb-3" style={{ color: theme.colors.textDim }}>
+					Human Feedback
+				</h4>
+				<div className="space-y-3">
+					{/* Human Feedback Enabled Toggle */}
+					<div className="flex items-center justify-between">
+						<label className="text-xs" style={{ color: theme.colors.textMain }}>
+							Collect Feedback
+						</label>
+						<button
+							onClick={() => updateConfig({ humanFeedbackEnabled: !config.humanFeedbackEnabled })}
+							className="relative w-8 h-4 rounded-full transition-colors"
+							style={{
+								backgroundColor: config.humanFeedbackEnabled ? theme.colors.accent : theme.colors.border,
+							}}
+						>
+							<div
+								className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform"
+								style={{
+									transform: config.humanFeedbackEnabled ? 'translateX(17px)' : 'translateX(2px)',
+								}}
+							/>
+						</button>
+					</div>
+
+					{/* Description */}
+					<p className="text-xs" style={{ color: theme.colors.textDim, opacity: 0.7 }}>
+						Show thumbs up/down buttons on agent responses. Your feedback becomes a reward signal that influences what the experience library learns.
+					</p>
+
+					{/* Caveat Warning — always visible when enabled */}
+					{config.humanFeedbackEnabled && (
+						<div
+							className="p-3 rounded-lg border text-xs"
+							style={{
+								backgroundColor: `${theme.colors.warning}10`,
+								borderColor: `${theme.colors.warning}40`,
+								color: theme.colors.textMain,
+							}}
+						>
+							<div className="font-medium mb-1" style={{ color: theme.colors.warning }}>
+								Bias Warning
+							</div>
+							<p style={{ color: theme.colors.textDim, lineHeight: 1.5 }}>
+								Human feedback captures intent alignment and code quality preferences that automated signals miss.
+								However, over-reliance on subjective feedback can bias agents toward &quot;impressive-looking&quot; code
+								over correct code. The signal is capped at 0.3 weight and decays over 7 days to mitigate this.
+								Leave this disabled if you prefer fully automated, deterministic reward signals.
+							</p>
+						</div>
+					)}
+
+					{/* Feedback Decay — configurable when enabled */}
+					{config.humanFeedbackEnabled && (
+						<div className="flex items-center justify-between">
+							<label className="text-xs" style={{ color: theme.colors.textMain }}>
+								Feedback Decay
+							</label>
+							<div className="flex items-center gap-2">
+								<select
+									value={config.humanFeedbackDecayMs}
+									onChange={(e) => updateConfig({ humanFeedbackDecayMs: parseInt(e.target.value, 10) })}
+									className="p-1 text-xs rounded border bg-transparent outline-none"
+									style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
+								>
+									<option value={3 * 24 * 60 * 60 * 1000}>3 days</option>
+									<option value={7 * 24 * 60 * 60 * 1000}>7 days (default)</option>
+									<option value={14 * 24 * 60 * 60 * 1000}>14 days</option>
+									<option value={30 * 24 * 60 * 60 * 1000}>30 days</option>
+								</select>
+							</div>
+						</div>
+					)}
+				</div>
+			</div>
+
 			{/* Reward Weights Section */}
 			<div
 				className="p-4 rounded-lg border"
@@ -499,7 +585,13 @@ export const GRPOSettings = memo(function GRPOSettings({ theme }: GRPOSettingsPr
 					Reward Weights
 				</h4>
 				<div className="space-y-2">
-					{(Object.keys(REWARD_SIGNAL_LABELS) as RewardSignalType[]).map((type) => {
+					{(Object.keys(REWARD_SIGNAL_LABELS) as RewardSignalType[])
+						.filter((type) => {
+							// Hide human-feedback weight when the feature is disabled
+							if (type === 'human-feedback' && !config.humanFeedbackEnabled) return false;
+							return true;
+						})
+						.map((type) => {
 						const weight = config.rewardWeights[type] ?? 0;
 						return (
 							<div key={type} className="flex items-center gap-2">
