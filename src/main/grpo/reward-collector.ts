@@ -733,6 +733,99 @@ export async function captureCoverageBaseline(
 	return parseCoveragePercentage(output, commands.projectType);
 }
 
+/**
+ * Collects type safety reward signal using strict type checking.
+ * Separate from build signal — build may pass while type errors exist (non-strict mode).
+ * Returns null if no type check command detected.
+ *
+ * Scoring (delta-based, same pattern as lint):
+ * - Zero errors: 1.0
+ * - With baseline: max(0, 1 - newErrors / max(1, baseline))
+ * - Without baseline: max(0, 1 - errors / 30)
+ */
+export async function collectTypeSafetyReward(
+	projectPath: string,
+	commands: ProjectCommands,
+	baselineErrors?: number,
+): Promise<RewardSignal | null> {
+	if (!commands.typeCheckCommand) return null;
+
+	// Skip if type check is the same as build (avoid double-counting)
+	if (commands.typeCheckCommand === commands.buildCommand) return null;
+
+	const result = await safeRunCommand(commands.typeCheckCommand, projectPath);
+	if (result.exitCode === -1) {
+		return timeoutSignal('type-safety', 'Type check timed out');
+	}
+
+	const rawOutput = combineOutput(result);
+
+	if (result.exitCode === 0) {
+		return makeSignal('type-safety', 1.0, 'Type check clean', rawOutput);
+	}
+
+	const currentErrors = parseTypeErrorCount(rawOutput, commands.projectType);
+
+	let score: number;
+	let description: string;
+
+	if (baselineErrors !== undefined) {
+		const newErrors = Math.max(0, currentErrors - baselineErrors);
+		score = Math.max(0, 1 - newErrors / Math.max(1, baselineErrors));
+		description = `${currentErrors} type errors (baseline: ${baselineErrors}, new: ${newErrors})`;
+	} else {
+		score = Math.max(0, 1 - currentErrors / 30);
+		description = `${currentErrors} type errors`;
+	}
+
+	return makeSignal('type-safety', score, description, rawOutput);
+}
+
+/**
+ * Parses type error count from type checker output.
+ * Supports: tsc, mypy, go vet, cargo check (errors already covered by build).
+ */
+function parseTypeErrorCount(output: string, projectType: string): number {
+	switch (projectType) {
+		case 'node': {
+			// tsc: "Found X errors." or "Found X errors in Y files."
+			const tscMatch = output.match(/Found (\d+) errors?/);
+			if (tscMatch) return parseInt(tscMatch[1], 10);
+			// Count "error TS" occurrences
+			return (output.match(/error TS\d+/g) ?? []).length;
+		}
+		case 'python': {
+			// mypy: "Found X errors in Y files" or count lines with ": error:"
+			const mypyMatch = output.match(/Found (\d+) errors?/);
+			if (mypyMatch) return parseInt(mypyMatch[1], 10);
+			return output.split('\n').filter(l => /:\s*error:/i.test(l)).length;
+		}
+		case 'go': {
+			// go vet: count lines with "vet:" or error lines
+			return output.split('\n').filter(l => l.includes('vet:') || /^\S+\.go:\d+/.test(l)).length;
+		}
+		default:
+			return output.split('\n').filter(l => /\berror\b/i.test(l)).length;
+	}
+}
+
+/**
+ * Captures baseline type error count.
+ */
+export async function captureTypeCheckBaseline(
+	projectPath: string,
+	commands: ProjectCommands,
+): Promise<number | null> {
+	if (!commands.typeCheckCommand) return null;
+	if (commands.typeCheckCommand === commands.buildCommand) return null;
+
+	const result = await safeRunCommand(commands.typeCheckCommand, projectPath);
+	if (result.exitCode === 0) return 0;
+	if (result.exitCode === -1) return null;
+
+	return parseTypeErrorCount(combineOutput(result), commands.projectType);
+}
+
 // ─── Aggregate Reward Calculation ────────────────────────────────────────────
 
 /**
