@@ -4,12 +4,13 @@
  *
  * Rules:
  * - Training only triggers when GRPO is enabled
- * - 5-minute cooldown per project after last training attempt
+ * - Configurable cooldown per project (default: 2 minutes)
  * - Only one training run per project at a time
  * - getTrainingReadiness() must return ready: true
- *   (3+ unique tasks with 2+ executions, sufficient reward variance)
+ *   (minReadyTasks unique tasks with rolloutGroupSize executions, sufficient reward variance)
  * - Training is fully non-blocking (runs in async IIFE)
  * - All errors caught — never crashes the app
+ * - All gate failures logged at debug level for diagnostics
  */
 
 import { getSymphonyCollector } from './symphony-collector';
@@ -19,7 +20,6 @@ import { logger } from '../utils/logger';
 import type { GRPOConfig } from '../../shared/grpo-types';
 
 const LOG_CONTEXT = '[AutoTrainer]';
-const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 const lastTrainingAttempt = new Map<string, number>();
 const trainingInProgress = new Set<string>();
 
@@ -28,23 +28,44 @@ export async function maybeAutoTrain(
 	config: GRPOConfig,
 	safeSend?: (channel: string, ...args: unknown[]) => void,
 ): Promise<void> {
-	if (!config.enabled) return;
+	if (!config.enabled) {
+		logger.debug('Skipped: GRPO not enabled', LOG_CONTEXT);
+		return;
+	}
 
-	// Cooldown check
+	// Cooldown check (configurable, default 2 minutes)
+	const cooldownMs = config.autoTrainCooldownMs ?? 2 * 60 * 1000;
 	const lastAttempt = lastTrainingAttempt.get(projectPath) ?? 0;
-	if (Date.now() - lastAttempt < COOLDOWN_MS) return;
+	if (Date.now() - lastAttempt < cooldownMs) {
+		const remainingMs = cooldownMs - (Date.now() - lastAttempt);
+		logger.debug(`Skipped: cooldown active (${Math.ceil(remainingMs / 1000)}s remaining)`, LOG_CONTEXT);
+		return;
+	}
 
 	// Already training this project?
-	if (trainingInProgress.has(projectPath)) return;
+	if (trainingInProgress.has(projectPath)) {
+		logger.debug('Skipped: training already in progress for this project', LOG_CONTEXT);
+		return;
+	}
 
 	// Check readiness via SymphonyCollector
 	const collector = getSymphonyCollector(config);
 	const readiness = await collector.getTrainingReadiness(projectPath);
-	if (!readiness.ready) return;
+	if (!readiness.ready) {
+		logger.debug(
+			`Not ready: ${readiness.matchedTaskCount} qualifying tasks ` +
+			`(need ${config.minReadyTasks ?? 1}), min group size: ${readiness.minGroupSize}`,
+			LOG_CONTEXT,
+		);
+		return;
+	}
 
 	// Form natural rollout groups from accumulated signals
 	const groups = await collector.formNaturalRolloutGroups(projectPath);
-	if (groups.length === 0) return;
+	if (groups.length === 0) {
+		logger.debug('No rollout groups formed (insufficient variance in recent signals)', LOG_CONTEXT);
+		return;
+	}
 
 	lastTrainingAttempt.set(projectPath, Date.now());
 	trainingInProgress.add(projectPath);

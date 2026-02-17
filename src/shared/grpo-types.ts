@@ -228,12 +228,20 @@ export interface GRPOConfig {
 	humanFeedbackEnabled: boolean;
 	/** Maximum age for human feedback signals before decay to zero (ms, default: 7 days) */
 	humanFeedbackDecayMs: number;
+	/** Minimum unique tasks with sufficient variance before training is considered ready (default: 1) */
+	minReadyTasks: number;
+	/** Cooldown period between auto-training attempts per project in ms (default: 2 minutes) */
+	autoTrainCooldownMs: number;
+	/** Whether to produce simplified experiences from low-variance data on first encounters (default: true) */
+	firstExperienceMode: boolean;
+	/** Whether to use individual signal variance instead of aggregate-only variance (default: true) */
+	multiSignalVariance: boolean;
 }
 
 /** Default GRPO configuration */
 export const GRPO_CONFIG_DEFAULTS: GRPOConfig = {
 	enabled: false,
-	rolloutGroupSize: 3,
+	rolloutGroupSize: 2,
 	maxLibrarySize: 50,
 	maxInjectionTokens: 2500,
 	rewardWeights: {
@@ -271,6 +279,10 @@ export const GRPO_CONFIG_DEFAULTS: GRPOConfig = {
 	embeddingModel: 'multilingual',
 	humanFeedbackEnabled: false,
 	humanFeedbackDecayMs: 7 * 24 * 60 * 60 * 1000, // 7 days
+	minReadyTasks: 1,
+	autoTrainCooldownMs: 2 * 60 * 1000, // 2 minutes
+	firstExperienceMode: true,
+	multiSignalVariance: true,
 };
 
 /** Summary of a rollout group for dashboard display */

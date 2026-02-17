@@ -344,10 +344,18 @@ export class SymphonyCollector {
 			.sort((a, b) => b.executionCount - a.executionCount)
 			.map(e => ({ prompt: e.normalizedContent, executionCount: e.executionCount }));
 
+		logger.debug(
+			`Training readiness: ` +
+			`${matchedEntries.length} tasks with ${minGroupSize}+ executions, ` +
+			`${matchedWithVariance} with sufficient variance, ` +
+			`need ${this.config.minReadyTasks ?? 1} ready tasks → ${matchedWithVariance >= (this.config.minReadyTasks ?? 1) ? 'READY' : 'NOT READY'}`,
+			LOG_CONTEXT,
+		);
+
 		return {
 			matchedTaskCount: matchedWithVariance,
 			minGroupSize,
-			ready: matchedWithVariance >= 3,
+			ready: matchedWithVariance >= (this.config.minReadyTasks ?? 1),
 			suggestedTasks,
 		};
 	}
