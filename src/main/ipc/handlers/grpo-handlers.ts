@@ -16,7 +16,7 @@ import {
 	detectProjectCommands,
 } from '../../grpo/reward-collector';
 import { getModelStatus, getCacheDir, preloadModel, setDownloadProgressCallback, dispose as disposeEmbedding, isModelCached } from '../../grpo/embedding-service';
-import { maybeAutoTrain } from '../../grpo/auto-trainer';
+import { maybeAutoTrain, isTrainingInProgress, getTrainingProjects } from '../../grpo/auto-trainer';
 import type { EmbeddingModelStatus } from '../../grpo/embedding-service';
 import type {
 	ExperienceEntry,
@@ -418,6 +418,43 @@ export function registerGRPOHandlers(deps: GRPOHandlerDependencies): void {
 			} catch (err) {
 				return { success: false, error: `Failed to clear cache: ${err}` };
 			}
+		})
+	);
+
+	// ─── Training Status ─────────────────────────────────────────────────
+
+	// Manual training trigger (power users, bypasses cooldown)
+	ipcMain.handle(
+		'grpo:startTraining',
+		withIpcErrorLogging(handlerOpts('startTraining'), async (projectPath: string) => {
+			const config = readConfig(settingsStore);
+			if (!config.enabled) {
+				return { success: false, error: 'GRPO is not enabled' };
+			}
+			const safeSend = (channel: string, ...args: unknown[]) => {
+				try {
+					const win = BrowserWindow.getAllWindows()[0];
+					if (win && !win.isDestroyed()) {
+						win.webContents.send(channel, ...args);
+					}
+				} catch { /* ignore if no window */ }
+			};
+			await maybeAutoTrain(projectPath, config, safeSend);
+			return { success: true };
+		})
+	);
+
+	// Training status query
+	ipcMain.handle(
+		'grpo:getTrainingStatus',
+		withIpcErrorLogging(handlerOpts('getTrainingStatus'), async () => {
+			return {
+				success: true,
+				data: {
+					inProgress: isTrainingInProgress(),
+					projects: getTrainingProjects(),
+				},
+			};
 		})
 	);
 }

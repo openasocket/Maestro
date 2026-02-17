@@ -31,6 +31,8 @@ interface GRPOSummaryCardsProps {
 	config?: GRPOConfig | null;
 	/** Number of columns for responsive layout (default: 4) */
 	columns?: number;
+	/** Training status from auto-trainer events */
+	trainingStatus?: 'idle' | 'running' | 'complete' | 'error';
 }
 
 /**
@@ -109,7 +111,7 @@ function formatRewardTrend(trend: number): string {
 	return `${arrow} ${percent}%`;
 }
 
-export function GRPOSummaryCards({ data, theme, config, columns = 4 }: GRPOSummaryCardsProps) {
+export function GRPOSummaryCards({ data, theme, config, columns = 4, trainingStatus = 'idle' }: GRPOSummaryCardsProps) {
 	const metrics = useMemo(() => {
 		const maxLib = config?.maxLibrarySize ?? 50;
 		const libSubtitle = `/ ${maxLib} max`;
@@ -149,26 +151,44 @@ export function GRPOSummaryCards({ data, theme, config, columns = 4 }: GRPOSumma
 	}, [data, config]);
 
 	return (
-		<div
-			className="grid gap-4"
-			style={{
-				gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-			}}
-			data-testid="grpo-summary-cards"
-			role="region"
-			aria-label="GRPO summary metrics"
-		>
-			{metrics.map((metric, index) => (
-				<MetricCard
-					key={metric.label}
-					icon={metric.icon}
-					label={metric.label}
-					value={metric.value}
-					subtitle={metric.subtitle}
-					theme={theme}
-					animationIndex={index}
-				/>
-			))}
+		<div>
+			<div
+				className="grid gap-4"
+				style={{
+					gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+				}}
+				data-testid="grpo-summary-cards"
+				role="region"
+				aria-label="GRPO summary metrics"
+			>
+				{metrics.map((metric, index) => (
+					<MetricCard
+						key={metric.label}
+						icon={metric.icon}
+						label={metric.label}
+						value={metric.value}
+						subtitle={metric.subtitle}
+						theme={theme}
+						animationIndex={index}
+					/>
+				))}
+			</div>
+			{trainingStatus === 'running' && (
+				<div
+					className="flex items-center gap-2 mt-3 px-1"
+					style={{ color: theme.colors.accent }}
+					data-testid="grpo-training-indicator"
+				>
+					<div
+						className="w-2 h-2 rounded-full"
+						style={{
+							backgroundColor: theme.colors.accent,
+							animation: 'pulse 1.5s ease-in-out infinite',
+						}}
+					/>
+					<span className="text-xs font-medium">Learning...</span>
+				</div>
+			)}
 		</div>
 	);
 }

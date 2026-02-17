@@ -32,11 +32,16 @@ import { LongestAutoRunsTable } from './LongestAutoRunsTable';
 import { EmptyState } from './EmptyState';
 import { DashboardSkeleton } from './ChartSkeletons';
 import { ChartErrorBoundary } from './ChartErrorBoundary';
+import { GRPOSummaryCards } from './GRPOSummaryCards';
+import { RewardTrendsChart } from './RewardTrendsChart';
+import { RolloutComparisonTable } from './RolloutComparisonTable';
+import { ExperienceGrowthChart } from './ExperienceGrowthChart';
 import type { Theme, Session } from '../../types';
 import { useLayerStack } from '../../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
 import { getRendererPerfMetrics } from '../../utils/logger';
 import { PERFORMANCE_THRESHOLDS } from '../../../shared/performance-metrics';
+import { useGRPOStats } from '../../hooks/grpo/useGRPOStats';
 
 // Section IDs for keyboard navigation
 const OVERVIEW_SECTIONS = [
@@ -51,12 +56,14 @@ const OVERVIEW_SECTIONS = [
 const AGENTS_SECTIONS = ['session-stats', 'agent-efficiency', 'agent-comparison', 'agent-usage'] as const;
 const ACTIVITY_SECTIONS = ['activity-heatmap', 'weekday-comparison', 'duration-trends'] as const;
 const AUTORUN_SECTIONS = ['autorun-stats', 'tasks-by-hour', 'longest-autoruns'] as const;
+const GRPO_SECTIONS = ['grpo-summary', 'reward-trends', 'rollout-comparison', 'experience-growth'] as const;
 
 type SectionId =
 	| (typeof OVERVIEW_SECTIONS)[number]
 	| (typeof AGENTS_SECTIONS)[number]
 	| (typeof ACTIVITY_SECTIONS)[number]
-	| (typeof AUTORUN_SECTIONS)[number];
+	| (typeof AUTORUN_SECTIONS)[number]
+	| (typeof GRPO_SECTIONS)[number];
 
 // Performance metrics instance for dashboard
 const perfMetrics = getRendererPerfMetrics('UsageDashboard');
@@ -86,7 +93,7 @@ interface StatsAggregation {
 }
 
 // View mode options for the dashboard
-type ViewMode = 'overview' | 'agents' | 'activity' | 'autorun';
+type ViewMode = 'overview' | 'agents' | 'activity' | 'autorun' | 'grpo';
 
 interface UsageDashboardModalProps {
 	isOpen: boolean;
@@ -133,6 +140,7 @@ const VIEW_MODE_TABS: { value: ViewMode; label: string }[] = [
 	{ value: 'agents', label: 'Agents' },
 	{ value: 'activity', label: 'Activity' },
 	{ value: 'autorun', label: 'Auto Run' },
+	{ value: 'grpo', label: 'GRPO' },
 ];
 
 export function UsageDashboardModal({
@@ -153,6 +161,15 @@ export function UsageDashboardModal({
 	const [showNewDataIndicator, setShowNewDataIndicator] = useState(false);
 	const [databaseSize, setDatabaseSize] = useState<number | null>(null);
 	const [focusedSection, setFocusedSection] = useState<SectionId | null>(null);
+
+	// GRPO stats — derive project path from first session's cwd
+	const grpoProjectPath = useMemo(() => {
+		const firstWithCwd = sessions.find(s => s.cwd);
+		return firstWithCwd?.cwd ?? null;
+	}, [sessions]);
+	const { stats: grpoStats, loading: grpoLoading, trainingStatus } = useGRPOStats(
+		isOpen && viewMode === 'grpo' ? grpoProjectPath : null
+	);
 
 	const containerRef = useRef<HTMLDivElement>(null);
 	const contentRef = useRef<HTMLDivElement>(null);
@@ -342,6 +359,8 @@ export function UsageDashboardModal({
 				return ACTIVITY_SECTIONS;
 			case 'autorun':
 				return AUTORUN_SECTIONS;
+			case 'grpo':
+				return GRPO_SECTIONS;
 			default:
 				return OVERVIEW_SECTIONS;
 		}
@@ -364,6 +383,10 @@ export function UsageDashboardModal({
 			'autorun-stats': 'Auto Run Statistics',
 			'tasks-by-hour': 'Tasks by Time of Day Chart',
 			'longest-autoruns': 'Top 25 Longest Auto Runs',
+			'grpo-summary': 'GRPO Summary Cards',
+			'reward-trends': 'Reward Trends Chart',
+			'rollout-comparison': 'Rollout Comparison Table',
+			'experience-growth': 'Experience Library Growth Chart',
 		};
 		return labels[sectionId] || sectionId;
 	}, []);
@@ -1098,6 +1121,125 @@ export function UsageDashboardModal({
 											/>
 										</ChartErrorBoundary>
 									</div>
+								</>
+							)}
+
+							{viewMode === 'grpo' && (
+								<>
+									{grpoLoading ? (
+										<DashboardSkeleton theme={theme} />
+									) : !grpoStats ? (
+										<EmptyState
+											theme={theme}
+											title="No GRPO Data"
+											message="No GRPO training data available. Run a training loop to see reward trends and experience library growth."
+										/>
+									) : (
+										<>
+											{/* GRPO Summary Cards */}
+											<div
+												ref={setSectionRef('grpo-summary')}
+												tabIndex={0}
+												role="region"
+												aria-label={getSectionLabel('grpo-summary')}
+												onKeyDown={(e) => handleSectionKeyDown(e, 'grpo-summary')}
+												className="outline-none rounded-lg transition-shadow dashboard-section-enter"
+												style={{
+													boxShadow:
+														focusedSection === 'grpo-summary'
+															? `0 0 0 2px ${theme.colors.accent}`
+															: 'none',
+													animationDelay: '0ms',
+												}}
+												data-testid="section-grpo-summary"
+											>
+												<ChartErrorBoundary theme={theme} chartName="GRPO Summary">
+													<GRPOSummaryCards
+														data={grpoStats}
+														theme={theme}
+														trainingStatus={trainingStatus}
+													/>
+												</ChartErrorBoundary>
+											</div>
+
+											{/* Reward Trends Chart */}
+											<div
+												ref={setSectionRef('reward-trends')}
+												tabIndex={0}
+												role="region"
+												aria-label={getSectionLabel('reward-trends')}
+												onKeyDown={(e) => handleSectionKeyDown(e, 'reward-trends')}
+												className="outline-none rounded-lg transition-shadow dashboard-section-enter"
+												style={{
+													boxShadow:
+														focusedSection === 'reward-trends'
+															? `0 0 0 2px ${theme.colors.accent}`
+															: 'none',
+													animationDelay: '50ms',
+												}}
+												data-testid="section-reward-trends"
+											>
+												<ChartErrorBoundary theme={theme} chartName="Reward Trends">
+													<RewardTrendsChart
+														epochs={grpoStats.epochs}
+														theme={theme}
+														colorBlindMode={colorBlindMode}
+													/>
+												</ChartErrorBoundary>
+											</div>
+
+											{/* Rollout Comparison Table */}
+											<div
+												ref={setSectionRef('rollout-comparison')}
+												tabIndex={0}
+												role="region"
+												aria-label={getSectionLabel('rollout-comparison')}
+												onKeyDown={(e) => handleSectionKeyDown(e, 'rollout-comparison')}
+												className="outline-none rounded-lg transition-shadow dashboard-section-enter"
+												style={{
+													boxShadow:
+														focusedSection === 'rollout-comparison'
+															? `0 0 0 2px ${theme.colors.accent}`
+															: 'none',
+													animationDelay: '100ms',
+												}}
+												data-testid="section-rollout-comparison"
+											>
+												<ChartErrorBoundary theme={theme} chartName="Rollout Comparison">
+													<RolloutComparisonTable
+														rolloutGroups={grpoStats.recentRolloutGroups}
+														theme={theme}
+													/>
+												</ChartErrorBoundary>
+											</div>
+
+											{/* Experience Library Growth Chart */}
+											<div
+												ref={setSectionRef('experience-growth')}
+												tabIndex={0}
+												role="region"
+												aria-label={getSectionLabel('experience-growth')}
+												onKeyDown={(e) => handleSectionKeyDown(e, 'experience-growth')}
+												className="outline-none rounded-lg transition-shadow dashboard-section-enter"
+												style={{
+													boxShadow:
+														focusedSection === 'experience-growth'
+															? `0 0 0 2px ${theme.colors.accent}`
+															: 'none',
+													animationDelay: '150ms',
+												}}
+												data-testid="section-experience-growth"
+											>
+												<ChartErrorBoundary theme={theme} chartName="Experience Growth">
+													<ExperienceGrowthChart
+														epochs={grpoStats.epochs}
+														theme={theme}
+														colorBlindMode={colorBlindMode}
+													/>
+												</ChartErrorBoundary>
+											</div>
+										</>
+									)}
 								</>
 							)}
 

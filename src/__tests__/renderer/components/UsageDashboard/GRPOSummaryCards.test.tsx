@@ -184,4 +184,33 @@ describe('GRPOSummaryCards', () => {
 			expect(groups[0]).toHaveAttribute('aria-label', 'Library Size: 12');
 		});
 	});
+
+	describe('Training Status', () => {
+		it('shows "Learning..." indicator when trainingStatus is running', () => {
+			render(
+				<GRPOSummaryCards data={makeStats()} theme={darkTheme} trainingStatus="running" />
+			);
+			expect(screen.getByTestId('grpo-training-indicator')).toBeInTheDocument();
+			expect(screen.getByText('Learning...')).toBeInTheDocument();
+		});
+
+		it('does not show training indicator when status is idle', () => {
+			render(
+				<GRPOSummaryCards data={makeStats()} theme={darkTheme} trainingStatus="idle" />
+			);
+			expect(screen.queryByTestId('grpo-training-indicator')).not.toBeInTheDocument();
+		});
+
+		it('does not show training indicator when status is not provided', () => {
+			render(<GRPOSummaryCards data={makeStats()} theme={darkTheme} />);
+			expect(screen.queryByTestId('grpo-training-indicator')).not.toBeInTheDocument();
+		});
+
+		it('does not show training indicator when status is complete', () => {
+			render(
+				<GRPOSummaryCards data={makeStats()} theme={darkTheme} trainingStatus="complete" />
+			);
+			expect(screen.queryByTestId('grpo-training-indicator')).not.toBeInTheDocument();
+		});
+	});
 });

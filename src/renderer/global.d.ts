@@ -2661,6 +2661,10 @@ interface MaestroAPI {
 		getModelStatus: () => Promise<{ success: boolean; data?: string; error?: string }>;
 		clearModelCache: () => Promise<{ success: boolean; error?: string }>;
 		onModelDownloadProgress: (callback: (info: { progress: number; file?: string; done?: boolean }) => void) => () => void;
+		// Training status
+		startTraining: (projectPath: string) => Promise<{ success: boolean; error?: string }>;
+		getTrainingStatus: () => Promise<{ success: boolean; data?: { inProgress: boolean; projects: string[] }; error?: string }>;
+		onTrainingStatus: (callback: (status: { projectPath: string; status: string; groupCount?: number; experiencesAdded?: number; error?: string }) => void) => () => void;
 	};
 
 	// Director's Notes API (unified history + synopsis generation)

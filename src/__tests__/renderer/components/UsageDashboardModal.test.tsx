@@ -94,6 +94,12 @@ const mockMaestro = {
 	fs: {
 		writeFile: mockWriteFile,
 	},
+	grpo: {
+		getStats: vi.fn().mockResolvedValue({ success: true, data: {} }),
+		onTrainingStatus: vi.fn().mockReturnValue(() => {}),
+		startTraining: vi.fn().mockResolvedValue({ success: true }),
+		getTrainingStatus: vi.fn().mockResolvedValue({ success: true, data: { inProgress: false, projects: [] } }),
+	},
 };
 
 // Set up window.maestro mock

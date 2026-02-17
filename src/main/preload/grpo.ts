@@ -58,6 +58,16 @@ export function createGrpoApi() {
 			ipcRenderer.on('grpo:model-download-progress', handler);
 			return () => { ipcRenderer.removeListener('grpo:model-download-progress', handler); };
 		},
+		// Training status
+		startTraining: (projectPath: string): Promise<{ success: boolean; error?: string }> =>
+			ipcRenderer.invoke('grpo:startTraining', projectPath),
+		getTrainingStatus: (): Promise<{ success: boolean; data?: { inProgress: boolean; projects: string[] }; error?: string }> =>
+			ipcRenderer.invoke('grpo:getTrainingStatus'),
+		onTrainingStatus: (callback: (status: { projectPath: string; status: string; groupCount?: number; experiencesAdded?: number; error?: string }) => void): (() => void) => {
+			const handler = (_event: any, status: any) => callback(status);
+			ipcRenderer.on('grpo:trainingStatus', handler);
+			return () => { ipcRenderer.removeListener('grpo:trainingStatus', handler); };
+		},
 	};
 }
 

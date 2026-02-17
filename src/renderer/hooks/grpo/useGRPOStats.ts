@@ -15,6 +15,9 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { GRPOStats } from '../../../shared/grpo-types';
 
+/** Training status as reported by the auto-trainer */
+export type TrainingStatus = 'idle' | 'running' | 'complete' | 'error';
+
 export interface UseGRPOStatsReturn {
 	/** GRPO stats data, null if not yet loaded */
 	stats: GRPOStats | null;
@@ -24,6 +27,8 @@ export interface UseGRPOStatsReturn {
 	error: string | null;
 	/** Manually trigger a data refresh */
 	refresh: () => void;
+	/** Current training status from auto-trainer events */
+	trainingStatus: TrainingStatus;
 }
 
 /** Polling interval during active training (ms) */
@@ -39,6 +44,7 @@ export function useGRPOStats(projectPath: string | null): UseGRPOStatsReturn {
 	const [stats, setStats] = useState<GRPOStats | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [trainingStatus, setTrainingStatus] = useState<TrainingStatus>('idle');
 
 	const mountedRef = useRef(true);
 
@@ -99,13 +105,36 @@ export function useGRPOStats(projectPath: string | null): UseGRPOStatsReturn {
 		};
 	}, [stats?.currentEpoch, fetchStats]);
 
+	// Listen for training status events from auto-trainer
+	useEffect(() => {
+		const cleanup = window.maestro.grpo.onTrainingStatus((status) => {
+			if (!mountedRef.current) return;
+			const s = status.status as TrainingStatus;
+			setTrainingStatus(s);
+
+			// Auto-reset to idle after 3 seconds when training completes
+			if (s === 'complete' || s === 'error') {
+				// Refresh stats after training completes (new experiences may have been added)
+				fetchStats();
+				const timer = setTimeout(() => {
+					if (mountedRef.current) {
+						setTrainingStatus('idle');
+					}
+				}, 3000);
+				return () => clearTimeout(timer);
+			}
+		});
+		return cleanup;
+	}, [fetchStats]);
+
 	return useMemo(
 		() => ({
 			stats,
 			loading,
 			error,
 			refresh,
+			trainingStatus,
 		}),
-		[stats, loading, error, refresh]
+		[stats, loading, error, refresh, trainingStatus]
 	);
 }
