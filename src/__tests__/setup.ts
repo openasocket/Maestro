@@ -548,6 +548,8 @@ const mockMaestro = {
 		startTraining: vi.fn().mockResolvedValue({ success: true }),
 		getTrainingStatus: vi.fn().mockResolvedValue({ success: true, data: { inProgress: false, projects: [] } }),
 		onTrainingStatus: vi.fn().mockReturnValue(() => {}),
+		submitFeedback: vi.fn().mockResolvedValue({ success: true, data: 'feedback-id' }),
+		getFeedback: vi.fn().mockResolvedValue({ success: true, data: {} }),
 	},
 	app: {
 		onQuitConfirmationRequest: vi.fn().mockReturnValue(() => {}),
