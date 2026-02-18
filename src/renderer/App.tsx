@@ -1741,7 +1741,8 @@ function MaestroConsoleInner() {
 							createdAt: Date.now(),
 							state: 'idle',
 							saveToHistory: defaultSaveToHistory,
-							showThinking: defaultShowThinking,
+							// Codex: default thinking to 'on' since reasoning is the main visibility into agent activity
+							showThinking: parentSession.toolType === 'codex' ? 'on' : defaultShowThinking,
 						};
 
 						// Fetch git info (via SSH for remote sessions)
@@ -2566,9 +2567,11 @@ function MaestroConsoleInner() {
 
 	const handleStartNewSessionAfterError = useCallback(
 		(sessionId: string) => {
+			const session = sessionsRef.current.find((s) => s.id === sessionId);
 			useAgentStore.getState().startNewSessionAfterError(sessionId, {
 				saveToHistory: defaultSaveToHistory,
-				showThinking: defaultShowThinking,
+				// Codex: default thinking to 'on' since reasoning is the main visibility into agent activity
+				showThinking: session?.toolType === 'codex' ? 'on' : defaultShowThinking,
 			});
 			setAgentErrorModalSessionId(null);
 			setTimeout(() => inputRef.current?.focus(), 0);
@@ -3660,7 +3663,8 @@ You are taking over this conversation. Based on the context above, provide a bri
 				if (s.id !== currentSession.id) return s;
 				const result = createTab(s, {
 					saveToHistory: defaultSaveToHistory,
-					showThinking: defaultShowThinking,
+					// Codex: default thinking to 'on' since reasoning is the main visibility into agent activity
+					showThinking: s.toolType === 'codex' ? 'on' : defaultShowThinking,
 				});
 				if (!result) return s;
 				return result.session;
@@ -4024,7 +4028,8 @@ You are taking over this conversation. Based on the context above, provide a bri
 				if (s.id !== activeSessionIdRef.current) return s;
 				const result = createTab(s, {
 					saveToHistory: defaultSaveToHistory,
-					showThinking: defaultShowThinking,
+					// Codex: default thinking to 'on' since reasoning is the main visibility into agent activity
+					showThinking: s.toolType === 'codex' ? 'on' : defaultShowThinking,
 				});
 				if (!result) return s;
 				return result.session;
@@ -6349,7 +6354,8 @@ You are taking over this conversation. Based on the context above, provide a bri
 				createdAt: Date.now(),
 				state: 'idle',
 				saveToHistory: defaultSaveToHistory,
-				showThinking: defaultShowThinking,
+				// Codex: default thinking to 'on' since reasoning is the main visibility into agent activity
+				showThinking: parentSession.toolType === 'codex' ? 'on' : defaultShowThinking,
 			};
 
 			// Get SSH remote ID for remote git operations
@@ -6537,7 +6543,8 @@ You are taking over this conversation. Based on the context above, provide a bri
 								createdAt: Date.now(),
 								state: 'idle',
 								saveToHistory: defaultSaveToHistory,
-								showThinking: defaultShowThinking,
+								// Codex: default thinking to 'on' since reasoning is the main visibility into agent activity
+								showThinking: session.toolType === 'codex' ? 'on' : defaultShowThinking,
 							};
 
 							// Fetch git info (with SSH support)
@@ -7937,7 +7944,8 @@ You are taking over this conversation. Based on the context above, provide a bri
 				createdAt: Date.now(),
 				state: 'idle',
 				saveToHistory: defaultSaveToHistory,
-				showThinking: defaultShowThinking,
+				// Codex: default thinking to 'on' since reasoning is the main visibility into agent activity
+				showThinking: agentId === 'codex' ? 'on' : defaultShowThinking,
 			};
 
 			const newSession: Session = {
