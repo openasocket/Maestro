@@ -12,6 +12,7 @@ import type { StatsDB } from '../stats';
 import type { AccountRegistry } from '../accounts/account-registry';
 import type { AccountThrottleHandler } from '../accounts/account-throttle-handler';
 import type { AccountAuthRecovery } from '../accounts/account-auth-recovery';
+import type { ProviderErrorTracker } from '../providers/provider-error-tracker';
 import type { GroupChat, GroupChatParticipant } from '../group-chat/group-chat-storage';
 import type { GroupChatMessage, GroupChatState } from '../../shared/group-chat-types';
 import type { ParticipantState } from '../ipc/handlers/groupChat';
@@ -152,7 +153,9 @@ export interface ProcessListenerDependencies {
 	/** Account throttle handler getter (optional — only needed for account multiplexing) */
 	getThrottleHandler?: () => AccountThrottleHandler | null;
 	/** Account auth recovery getter (optional — only needed for account multiplexing) */
-	getAuthRecovery?: () => import('../accounts/account-auth-recovery').AccountAuthRecovery | null;
+	getAuthRecovery?: () => AccountAuthRecovery | null;
+	/** Provider error tracker (optional — only needed for Virtuosos provider failover) */
+	getProviderErrorTracker?: () => ProviderErrorTracker | null;
 	/** Debug log function */
 	debugLog: (prefix: string, message: string, ...args: unknown[]) => void;
 	/** Regex patterns */

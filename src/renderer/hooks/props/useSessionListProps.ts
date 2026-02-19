@@ -28,47 +28,50 @@ export interface UseSessionListPropsDeps {
 	// Ref
 	sidebarContainerRef: React.RefObject<HTMLDivElement>;
 
-	// Group Chat state
-	groupChats: GroupChat[];
-	activeGroupChatId: string | null;
-	groupChatsExpanded: boolean;
-	groupChatState: GroupChatState | undefined;
-	participantStates: Map<string, 'idle' | 'working'> | undefined;
-	groupChatStates: Map<string, GroupChatState> | undefined;
-	allGroupChatParticipantStates: Map<string, Map<string, 'idle' | 'working'>> | undefined;
+	// Group Chat state (read from stores directly, optional here)
+	groupChats?: GroupChat[];
+	activeGroupChatId?: string | null;
+	groupChatsExpanded?: boolean;
+	groupChatState?: GroupChatState | undefined;
+	participantStates?: Map<string, 'idle' | 'working'> | undefined;
+	groupChatStates?: Map<string, GroupChatState> | undefined;
+	allGroupChatParticipantStates?: Map<string, Map<string, 'idle' | 'working'>> | undefined;
 
-	// Folder states
-	bookmarksCollapsed: boolean;
-	ungroupedCollapsed: boolean;
-	autoRunStats: unknown;
+	// Auto mode (read from stores directly, optional here)
+	activeBatchSessionIds?: string[];
 
-	// Setters (should be stable callbacks)
-	setWebInterfaceUseCustomPort: (value: boolean) => void;
-	setWebInterfaceCustomPort: (value: number) => void;
-	setBookmarksCollapsed: (collapsed: boolean) => void;
-	setUngroupedCollapsed: (collapsed: boolean) => void;
-	setActiveFocus: (focus: FocusArea) => void;
-	setActiveSessionId: (id: string) => void;
-	setLeftSidebarOpen: (open: boolean) => void;
-	setLeftSidebarWidth: (width: number) => void;
-	setShortcutsHelpOpen: (open: boolean) => void;
-	setSettingsModalOpen: (open: boolean) => void;
-	setSettingsTab: (tab: SettingsTab) => void;
-	setAboutModalOpen: (open: boolean) => void;
-	setUpdateCheckModalOpen: (open: boolean) => void;
-	setLogViewerOpen: (open: boolean) => void;
-	setProcessMonitorOpen: (open: boolean) => void;
-	setUsageDashboardOpen: (open: boolean) => void;
-	setSymphonyModalOpen: (open: boolean) => void;
-	setDirectorNotesOpen: (open: boolean) => void;
-	setGroups: React.Dispatch<React.SetStateAction<Group[]>>;
-	setSessions: React.Dispatch<React.SetStateAction<Session[]>>;
-	setRenameInstanceModalOpen: (open: boolean) => void;
-	setRenameInstanceValue: (value: string) => void;
-	setRenameInstanceSessionId: (id: string) => void;
-	setDuplicatingSessionId: (id: string | null) => void;
-	setGroupChatsExpanded: (expanded: boolean) => void;
-	setQuickActionOpen: (open: boolean) => void;
+	// Folder states (read from stores directly, optional here)
+	bookmarksCollapsed?: boolean;
+	ungroupedCollapsed?: boolean;
+	autoRunStats?: unknown;
+
+	// Setters (read from stores directly, optional here)
+	setWebInterfaceUseCustomPort?: (value: boolean) => void;
+	setWebInterfaceCustomPort?: (value: number) => void;
+	setBookmarksCollapsed?: (collapsed: boolean) => void;
+	setUngroupedCollapsed?: (collapsed: boolean) => void;
+	setActiveFocus?: (focus: FocusArea) => void;
+	setActiveSessionId?: (id: string) => void;
+	setLeftSidebarOpen?: (open: boolean) => void;
+	setLeftSidebarWidth?: (width: number) => void;
+	setShortcutsHelpOpen?: (open: boolean) => void;
+	setSettingsModalOpen?: (open: boolean) => void;
+	setSettingsTab?: (tab: SettingsTab) => void;
+	setAboutModalOpen?: (open: boolean) => void;
+	setUpdateCheckModalOpen?: (open: boolean) => void;
+	setLogViewerOpen?: (open: boolean) => void;
+	setProcessMonitorOpen?: (open: boolean) => void;
+	setUsageDashboardOpen?: (open: boolean) => void;
+	setSymphonyModalOpen?: (open: boolean) => void;
+	setDirectorNotesOpen?: (open: boolean) => void;
+	setGroups?: React.Dispatch<React.SetStateAction<Group[]>>;
+	setSessions?: React.Dispatch<React.SetStateAction<Session[]>>;
+	setRenameInstanceModalOpen?: (open: boolean) => void;
+	setRenameInstanceValue?: (value: string) => void;
+	setRenameInstanceSessionId?: (id: string) => void;
+	setDuplicatingSessionId?: (id: string | null) => void;
+	setGroupChatsExpanded?: (expanded: boolean) => void;
+	setQuickActionOpen?: (open: boolean) => void;
 	setVirtuososOpen?: (open: boolean) => void;
 
 	// Domain handlers
@@ -187,10 +190,6 @@ export function useSessionListProps(deps: UseSessionListPropsDeps) {
 
 			// Auto mode
 			activeBatchSessionIds: deps.activeBatchSessionIds,
-
-			// Session jump shortcuts
-			showSessionJumpNumbers: deps.showSessionJumpNumbers,
-			visibleSessions: deps.visibleSessions,
 
 			// Achievement system
 			autoRunStats: deps.autoRunStats,

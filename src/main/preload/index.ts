@@ -50,6 +50,7 @@ import { createSymphonyApi } from './symphony';
 import { createTabNamingApi } from './tabNaming';
 import { createDirectorNotesApi } from './directorNotes';
 import { createCueApi } from './cue';
+import { createProvidersApi } from './providers';
 import { createWakatimeApi } from './wakatime';
 import { createAccountsApi } from './accounts';
 
@@ -194,6 +195,9 @@ contextBridge.exposeInMainWorld('maestro', {
 	// Cue API (event-driven automation)
 	cue: createCueApi(),
 
+	// Provider Error Tracking API (error stats, failover suggestions)
+	providers: createProvidersApi(),
+
 	// WakaTime API (CLI check, API key validation)
 	wakatime: createWakatimeApi(),
 
@@ -272,6 +276,8 @@ export {
 	createDirectorNotesApi,
 	// Cue
 	createCueApi,
+	// Providers
+	createProvidersApi,
 	// WakaTime
 	createWakatimeApi,
 	// Accounts
@@ -500,3 +506,7 @@ export type {
 	AccountUsageUpdate,
 	AccountLimitEvent,
 } from './accounts';
+export type {
+	// From providers
+	ProvidersApi,
+} from './providers';
