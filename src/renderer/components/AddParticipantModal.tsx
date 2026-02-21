@@ -30,7 +30,7 @@ interface AddParticipantModalProps {
 export function AddParticipantModal({
 	theme,
 	isOpen,
-	groupChatId,
+	groupChatId: _groupChatId,
 	sessions,
 	participants,
 	onClose,

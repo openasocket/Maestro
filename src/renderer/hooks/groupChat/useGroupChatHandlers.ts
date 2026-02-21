@@ -676,7 +676,7 @@ export function useGroupChatHandlers(): GroupChatHandlersReturn {
 	// =======================================================================
 
 	const handleAddExistingParticipant = useCallback(
-		async (sessionId: string, name: string, agentId: string, cwd: string) => {
+		async (_sessionId: string, name: string, agentId: string, cwd: string) => {
 			const { activeGroupChatId } = useGroupChatStore.getState();
 			const id = activeGroupChatId;
 			if (!id) return;

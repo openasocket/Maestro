@@ -316,7 +316,7 @@ function MaestroConsoleInner() {
 		showDeleteGroupChatModal,
 		showRenameGroupChatModal,
 		showEditGroupChatModal,
-		showGroupChatInfo,
+		showGroupChatInfo: _showGroupChatInfo,
 		showAddGroupChatParticipantModal,
 		// Git Diff Viewer
 		gitDiffPreview,
@@ -3174,7 +3174,6 @@ function MaestroConsoleInner() {
 									groupChat={groupChats.find((c) => c.id === activeGroupChatId)!}
 									messages={groupChatMessages}
 									state={groupChatState}
-									groups={groups}
 									totalCost={(() => {
 										const chat = groupChats.find((c) => c.id === activeGroupChatId);
 										const participantsCost = (chat?.participants || []).reduce(
