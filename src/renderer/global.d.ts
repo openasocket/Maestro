@@ -1779,6 +1779,17 @@ interface MaestroAPI {
 			sessionId: string;
 			addedAt: number;
 		}>;
+		addFreshParticipant: (
+			id: string,
+			agentId: string,
+			name: string,
+			cwd?: string
+		) => Promise<{
+			name: string;
+			agentId: string;
+			sessionId: string;
+			addedAt: number;
+		}>;
 		sendToParticipant: (
 			id: string,
 			name: string,
