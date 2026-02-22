@@ -1,0 +1,906 @@
+/**
+ * MemoryStore — hierarchical file-backed memory library.
+ *
+ * Storage layout:
+ *   <configDir>/memories/registry.json          (roles, personas, skill areas)
+ *   <configDir>/memories/config.json             (MemoryConfig)
+ *   <configDir>/memories/history.jsonl            (audit trail for hierarchy changes)
+ *   <configDir>/memories/skills/<skillAreaId>/library.json    (memories in a skill area)
+ *   <configDir>/memories/skills/<skillAreaId>/history.jsonl
+ *   <configDir>/memories/project/<projectHash>/library.json   (project-scoped memories)
+ *   <configDir>/memories/project/<projectHash>/history.jsonl
+ *   <configDir>/memories/global/library.json      (global memories)
+ *   <configDir>/memories/global/history.jsonl
+ *
+ * The registry.json contains all Role[], Persona[], SkillArea[] objects.
+ * Memory entries are stored in separate library files per skill/project/global scope.
+ */
+
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as crypto from 'crypto';
+import { app } from 'electron';
+import Store from 'electron-store';
+import type {
+	Role,
+	RoleId,
+	Persona,
+	PersonaId,
+	SkillArea,
+	SkillAreaId,
+	MemoryEntry,
+	MemoryId,
+	MemoryType,
+	MemoryScope,
+	MemorySource,
+	MemoryConfig,
+	MemoryHistoryEntry,
+	ExperienceContext,
+} from '../../shared/memory-types';
+import { MEMORY_CONFIG_DEFAULTS, SEED_ROLES } from '../../shared/memory-types';
+
+// ─── File Interfaces ──────────────────────────────────────────────────────────
+
+interface RegistryFile {
+	version: number;
+	roles: Role[];
+	personas: Persona[];
+	skillAreas: SkillArea[];
+}
+
+interface LibraryFile {
+	version: number;
+	entries: MemoryEntry[];
+}
+
+// ─── Bootstrap Store ──────────────────────────────────────────────────────────
+
+interface BootstrapSettings {
+	customSyncPath?: string;
+}
+
+const bootstrapStore = new Store<BootstrapSettings>({
+	name: 'maestro-bootstrap',
+	defaults: {},
+});
+
+function getConfigDir(): string {
+	const customPath = bootstrapStore.get('customSyncPath');
+	return customPath || app.getPath('userData');
+}
+
+// ─── MemoryStore ──────────────────────────────────────────────────────────────
+
+export class MemoryStore {
+	private readonly memoriesDir: string;
+	private readonly writeQueues = new Map<string, Promise<void>>();
+
+	constructor() {
+		this.memoriesDir = path.join(getConfigDir(), 'memories');
+	}
+
+	// ─── Path Helpers ───────────────────────────────────────────────────────
+
+	/** Returns the directory path for a given memory scope. */
+	getMemoryPath(scope: MemoryScope, skillAreaId?: SkillAreaId, projectPath?: string): string {
+		switch (scope) {
+			case 'skill': {
+				if (!skillAreaId) throw new Error('skillAreaId required for skill scope');
+				return path.join(this.memoriesDir, 'skills', skillAreaId);
+			}
+			case 'project': {
+				if (!projectPath) throw new Error('projectPath required for project scope');
+				const hash = crypto.createHash('sha256').update(projectPath).digest('hex').slice(0, 16);
+				return path.join(this.memoriesDir, 'project', hash);
+			}
+			case 'global':
+				return path.join(this.memoriesDir, 'global');
+			default:
+				throw new Error(`Unknown scope: ${scope}`);
+		}
+	}
+
+	private getRegistryPath(): string {
+		return path.join(this.memoriesDir, 'registry.json');
+	}
+
+	private getConfigPath(): string {
+		return path.join(this.memoriesDir, 'config.json');
+	}
+
+	// ─── Write Serialization ────────────────────────────────────────────────
+
+	/**
+	 * Serialize writes to a given file path so concurrent callers don't race.
+	 * Returns the callback's result.
+	 */
+	private serializeWrite<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
+		const prev = this.writeQueues.get(filePath) ?? Promise.resolve();
+		const next = prev.then(fn, fn);
+		const settled = next.then(
+			() => {},
+			() => {}
+		);
+		this.writeQueues.set(filePath, settled);
+		settled.then(() => {
+			if (this.writeQueues.get(filePath) === settled) {
+				this.writeQueues.delete(filePath);
+			}
+		});
+		return next;
+	}
+
+	// ─── Atomic File I/O ────────────────────────────────────────────────────
+
+	/**
+	 * Atomically write JSON to a file (write tmp → rename).
+	 * rename() is atomic on POSIX and effectively atomic on NTFS.
+	 */
+	private async atomicWriteJson(filePath: string, data: unknown): Promise<void> {
+		await fs.mkdir(path.dirname(filePath), { recursive: true });
+		const tmp = filePath + '.tmp';
+		await fs.writeFile(tmp, JSON.stringify(data, null, 2), 'utf-8');
+		await fs.rename(tmp, filePath);
+	}
+
+	// ─── Registry Read/Write ────────────────────────────────────────────────
+
+	private readonly EMPTY_REGISTRY: RegistryFile = {
+		version: 1,
+		roles: [],
+		personas: [],
+		skillAreas: [],
+	};
+
+	async readRegistry(): Promise<RegistryFile> {
+		try {
+			const content = await fs.readFile(this.getRegistryPath(), 'utf-8');
+			if (!content.trim()) return { ...this.EMPTY_REGISTRY };
+			return JSON.parse(content) as RegistryFile;
+		} catch (error: unknown) {
+			if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+				return { ...this.EMPTY_REGISTRY };
+			}
+			if (error instanceof SyntaxError) {
+				return { ...this.EMPTY_REGISTRY };
+			}
+			throw error;
+		}
+	}
+
+	async writeRegistry(registry: RegistryFile): Promise<void> {
+		return this.serializeWrite(this.getRegistryPath(), () =>
+			this.atomicWriteJson(this.getRegistryPath(), registry)
+		);
+	}
+
+	// ─── Library Read/Write ─────────────────────────────────────────────────
+
+	private readonly EMPTY_LIBRARY: LibraryFile = {
+		version: 1,
+		entries: [],
+	};
+
+	async readLibrary(dirPath: string): Promise<LibraryFile> {
+		const filePath = path.join(dirPath, 'library.json');
+		try {
+			const content = await fs.readFile(filePath, 'utf-8');
+			if (!content.trim()) return { ...this.EMPTY_LIBRARY };
+			return JSON.parse(content) as LibraryFile;
+		} catch (error: unknown) {
+			if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+				return { ...this.EMPTY_LIBRARY };
+			}
+			if (error instanceof SyntaxError) {
+				return { ...this.EMPTY_LIBRARY };
+			}
+			throw error;
+		}
+	}
+
+	async writeLibrary(dirPath: string, lib: LibraryFile): Promise<void> {
+		const filePath = path.join(dirPath, 'library.json');
+		return this.serializeWrite(filePath, () => this.atomicWriteJson(filePath, lib));
+	}
+
+	// ─── History (JSONL Append) ─────────────────────────────────────────────
+
+	async appendHistory(dirPath: string, entry: MemoryHistoryEntry): Promise<void> {
+		const filePath = path.join(dirPath, 'history.jsonl');
+		await fs.mkdir(dirPath, { recursive: true });
+		const line = JSON.stringify(entry) + '\n';
+		await fs.appendFile(filePath, line, 'utf-8');
+	}
+
+	// ─── Role CRUD ──────────────────────────────────────────────────────────
+
+	async createRole(name: string, description: string): Promise<Role> {
+		const registry = await this.readRegistry();
+		const now = Date.now();
+		const role: Role = {
+			id: crypto.randomUUID(),
+			name,
+			description,
+			personaIds: [],
+			createdAt: now,
+			updatedAt: now,
+		};
+		registry.roles.push(role);
+		await this.writeRegistry(registry);
+		await this.appendHistory(this.memoriesDir, {
+			timestamp: now,
+			operation: 'create-role',
+			entityType: 'role',
+			entityId: role.id,
+			content: name,
+		});
+		return role;
+	}
+
+	async updateRole(
+		id: RoleId,
+		updates: { name?: string; description?: string }
+	): Promise<Role | null> {
+		const registry = await this.readRegistry();
+		const idx = registry.roles.findIndex((r) => r.id === id);
+		if (idx === -1) return null;
+
+		const now = Date.now();
+		const oldRole = registry.roles[idx];
+		registry.roles[idx] = { ...oldRole, ...updates, updatedAt: now };
+		await this.writeRegistry(registry);
+		await this.appendHistory(this.memoriesDir, {
+			timestamp: now,
+			operation: 'update-role',
+			entityType: 'role',
+			entityId: id,
+			oldContent: oldRole.name,
+			newContent: updates.name ?? oldRole.name,
+		});
+		return registry.roles[idx];
+	}
+
+	async deleteRole(id: RoleId): Promise<boolean> {
+		const registry = await this.readRegistry();
+		const idx = registry.roles.findIndex((r) => r.id === id);
+		if (idx === -1) return false;
+
+		const role = registry.roles[idx];
+		const now = Date.now();
+
+		// Cascade: deactivate all child personas
+		for (const personaId of role.personaIds) {
+			const pIdx = registry.personas.findIndex((p) => p.id === personaId);
+			if (pIdx !== -1) {
+				registry.personas[pIdx] = { ...registry.personas[pIdx], active: false, updatedAt: now };
+			}
+		}
+
+		registry.roles.splice(idx, 1);
+		await this.writeRegistry(registry);
+		await this.appendHistory(this.memoriesDir, {
+			timestamp: now,
+			operation: 'delete-role',
+			entityType: 'role',
+			entityId: id,
+			content: role.name,
+		});
+		return true;
+	}
+
+	async listRoles(): Promise<Role[]> {
+		const registry = await this.readRegistry();
+		return registry.roles;
+	}
+
+	async getRole(id: RoleId): Promise<Role | null> {
+		const registry = await this.readRegistry();
+		return registry.roles.find((r) => r.id === id) ?? null;
+	}
+
+	// ─── Persona CRUD ───────────────────────────────────────────────────────
+
+	async createPersona(
+		roleId: RoleId,
+		name: string,
+		description: string,
+		assignedAgents?: string[],
+		assignedProjects?: string[]
+	): Promise<Persona> {
+		const registry = await this.readRegistry();
+		const roleIdx = registry.roles.findIndex((r) => r.id === roleId);
+		if (roleIdx === -1) throw new Error(`Role not found: ${roleId}`);
+
+		const now = Date.now();
+		const persona: Persona = {
+			id: crypto.randomUUID(),
+			roleId,
+			name,
+			description,
+			embedding: null,
+			skillAreaIds: [],
+			assignedAgents: assignedAgents ?? [],
+			assignedProjects: assignedProjects ?? [],
+			active: true,
+			createdAt: now,
+			updatedAt: now,
+		};
+
+		registry.personas.push(persona);
+		registry.roles[roleIdx] = {
+			...registry.roles[roleIdx],
+			personaIds: [...registry.roles[roleIdx].personaIds, persona.id],
+			updatedAt: now,
+		};
+
+		await this.writeRegistry(registry);
+		await this.appendHistory(this.memoriesDir, {
+			timestamp: now,
+			operation: 'create-persona',
+			entityType: 'persona',
+			entityId: persona.id,
+			content: name,
+		});
+		return persona;
+	}
+
+	async updatePersona(
+		id: PersonaId,
+		updates: {
+			name?: string;
+			description?: string;
+			assignedAgents?: string[];
+			assignedProjects?: string[];
+			active?: boolean;
+		}
+	): Promise<Persona | null> {
+		const registry = await this.readRegistry();
+		const idx = registry.personas.findIndex((p) => p.id === id);
+		if (idx === -1) return null;
+
+		const now = Date.now();
+		const oldPersona = registry.personas[idx];
+		const updated = { ...oldPersona, ...updates, updatedAt: now };
+
+		// Null out embedding if description changed
+		if (updates.description !== undefined && updates.description !== oldPersona.description) {
+			updated.embedding = null;
+		}
+
+		registry.personas[idx] = updated;
+		await this.writeRegistry(registry);
+		await this.appendHistory(this.memoriesDir, {
+			timestamp: now,
+			operation: 'update-persona',
+			entityType: 'persona',
+			entityId: id,
+			oldContent: oldPersona.name,
+			newContent: updates.name ?? oldPersona.name,
+		});
+		return updated;
+	}
+
+	async deletePersona(id: PersonaId): Promise<boolean> {
+		const registry = await this.readRegistry();
+		const idx = registry.personas.findIndex((p) => p.id === id);
+		if (idx === -1) return false;
+
+		const persona = registry.personas[idx];
+		const now = Date.now();
+
+		// Cascade: deactivate child skill areas
+		for (const skillId of persona.skillAreaIds) {
+			const sIdx = registry.skillAreas.findIndex((s) => s.id === skillId);
+			if (sIdx !== -1) {
+				registry.skillAreas[sIdx] = {
+					...registry.skillAreas[sIdx],
+					active: false,
+					updatedAt: now,
+				};
+			}
+		}
+
+		// Remove persona from parent role's personaIds
+		const roleIdx = registry.roles.findIndex((r) => r.id === persona.roleId);
+		if (roleIdx !== -1) {
+			registry.roles[roleIdx] = {
+				...registry.roles[roleIdx],
+				personaIds: registry.roles[roleIdx].personaIds.filter((pid) => pid !== id),
+				updatedAt: now,
+			};
+		}
+
+		registry.personas.splice(idx, 1);
+		await this.writeRegistry(registry);
+		await this.appendHistory(this.memoriesDir, {
+			timestamp: now,
+			operation: 'delete-persona',
+			entityType: 'persona',
+			entityId: id,
+			content: persona.name,
+		});
+		return true;
+	}
+
+	async listPersonas(roleId?: RoleId): Promise<Persona[]> {
+		const registry = await this.readRegistry();
+		if (roleId) {
+			return registry.personas.filter((p) => p.roleId === roleId);
+		}
+		return registry.personas;
+	}
+
+	async getPersona(id: PersonaId): Promise<Persona | null> {
+		const registry = await this.readRegistry();
+		return registry.personas.find((p) => p.id === id) ?? null;
+	}
+
+	// ─── Skill Area CRUD ────────────────────────────────────────────────────
+
+	async createSkillArea(
+		personaId: PersonaId,
+		name: string,
+		description: string
+	): Promise<SkillArea> {
+		const registry = await this.readRegistry();
+		const personaIdx = registry.personas.findIndex((p) => p.id === personaId);
+		if (personaIdx === -1) throw new Error(`Persona not found: ${personaId}`);
+
+		const now = Date.now();
+		const skillArea: SkillArea = {
+			id: crypto.randomUUID(),
+			personaId,
+			name,
+			description,
+			embedding: null,
+			active: true,
+			createdAt: now,
+			updatedAt: now,
+		};
+
+		registry.skillAreas.push(skillArea);
+		registry.personas[personaIdx] = {
+			...registry.personas[personaIdx],
+			skillAreaIds: [...registry.personas[personaIdx].skillAreaIds, skillArea.id],
+			updatedAt: now,
+		};
+
+		await this.writeRegistry(registry);
+		await this.appendHistory(this.memoriesDir, {
+			timestamp: now,
+			operation: 'create-skill',
+			entityType: 'skill',
+			entityId: skillArea.id,
+			content: name,
+		});
+		return skillArea;
+	}
+
+	async updateSkillArea(
+		id: SkillAreaId,
+		updates: { name?: string; description?: string; active?: boolean }
+	): Promise<SkillArea | null> {
+		const registry = await this.readRegistry();
+		const idx = registry.skillAreas.findIndex((s) => s.id === id);
+		if (idx === -1) return null;
+
+		const now = Date.now();
+		const oldSkill = registry.skillAreas[idx];
+		const updated = { ...oldSkill, ...updates, updatedAt: now };
+
+		// Null out embedding if description changed
+		if (updates.description !== undefined && updates.description !== oldSkill.description) {
+			updated.embedding = null;
+		}
+
+		registry.skillAreas[idx] = updated;
+		await this.writeRegistry(registry);
+		await this.appendHistory(this.memoriesDir, {
+			timestamp: now,
+			operation: 'update-skill',
+			entityType: 'skill',
+			entityId: id,
+			oldContent: oldSkill.name,
+			newContent: updates.name ?? oldSkill.name,
+		});
+		return updated;
+	}
+
+	async deleteSkillArea(id: SkillAreaId): Promise<boolean> {
+		const registry = await this.readRegistry();
+		const idx = registry.skillAreas.findIndex((s) => s.id === id);
+		if (idx === -1) return false;
+
+		const skillArea = registry.skillAreas[idx];
+		const now = Date.now();
+
+		// Deactivate all memories in this skill area's library
+		const dirPath = this.getMemoryPath('skill', id);
+		try {
+			const lib = await this.readLibrary(dirPath);
+			const updated: LibraryFile = {
+				...lib,
+				entries: lib.entries.map((e) => ({ ...e, active: false, updatedAt: now })),
+			};
+			await this.writeLibrary(dirPath, updated);
+		} catch {
+			// Library may not exist yet — that's fine
+		}
+
+		// Remove skill area from parent persona's skillAreaIds
+		const personaIdx = registry.personas.findIndex((p) => p.id === skillArea.personaId);
+		if (personaIdx !== -1) {
+			registry.personas[personaIdx] = {
+				...registry.personas[personaIdx],
+				skillAreaIds: registry.personas[personaIdx].skillAreaIds.filter((sid) => sid !== id),
+				updatedAt: now,
+			};
+		}
+
+		registry.skillAreas.splice(idx, 1);
+		await this.writeRegistry(registry);
+		await this.appendHistory(this.memoriesDir, {
+			timestamp: now,
+			operation: 'delete-skill',
+			entityType: 'skill',
+			entityId: id,
+			content: skillArea.name,
+		});
+		return true;
+	}
+
+	async listSkillAreas(personaId?: PersonaId): Promise<SkillArea[]> {
+		const registry = await this.readRegistry();
+		if (personaId) {
+			return registry.skillAreas.filter((s) => s.personaId === personaId);
+		}
+		return registry.skillAreas;
+	}
+
+	async getSkillArea(id: SkillAreaId): Promise<SkillArea | null> {
+		const registry = await this.readRegistry();
+		return registry.skillAreas.find((s) => s.id === id) ?? null;
+	}
+
+	// ─── Memory CRUD ────────────────────────────────────────────────────────
+
+	async addMemory(
+		entry: {
+			content: string;
+			type?: MemoryType;
+			scope: MemoryScope;
+			skillAreaId?: SkillAreaId;
+			personaId?: PersonaId;
+			roleId?: RoleId;
+			tags?: string[];
+			source?: MemorySource;
+			confidence?: number;
+			pinned?: boolean;
+			experienceContext?: ExperienceContext;
+		},
+		projectPath?: string
+	): Promise<MemoryEntry> {
+		// Validate skill scope references
+		if (entry.scope === 'skill') {
+			if (!entry.skillAreaId) throw new Error('skillAreaId required for skill scope');
+			const registry = await this.readRegistry();
+			const skill = registry.skillAreas.find((s) => s.id === entry.skillAreaId);
+			if (!skill) throw new Error(`Skill area not found: ${entry.skillAreaId}`);
+		}
+
+		const dirPath = this.getMemoryPath(entry.scope, entry.skillAreaId, projectPath);
+		const lib = await this.readLibrary(dirPath);
+		const now = Date.now();
+
+		const memory: MemoryEntry = {
+			id: crypto.randomUUID(),
+			content: entry.content,
+			type: entry.type ?? 'rule',
+			scope: entry.scope,
+			experienceContext: entry.experienceContext,
+			skillAreaId: entry.skillAreaId,
+			personaId: entry.personaId,
+			roleId: entry.roleId,
+			tags: entry.tags ?? [],
+			source: entry.source ?? 'user',
+			confidence: entry.confidence ?? 1.0,
+			pinned: entry.pinned ?? false,
+			active: true,
+			embedding: null,
+			effectivenessScore: 0.5,
+			useCount: 0,
+			tokenEstimate: Math.ceil(entry.content.length / 4),
+			lastUsedAt: 0,
+			createdAt: now,
+			updatedAt: now,
+		};
+
+		lib.entries.push(memory);
+		await this.writeLibrary(dirPath, lib);
+		await this.appendHistory(dirPath, {
+			timestamp: now,
+			operation: 'add',
+			entityType: 'memory',
+			entityId: memory.id,
+			content: entry.content.slice(0, 200),
+			source: entry.source ?? 'user',
+		});
+		return memory;
+	}
+
+	async updateMemory(
+		id: MemoryId,
+		updates: Partial<
+			Pick<
+				MemoryEntry,
+				'content' | 'type' | 'tags' | 'confidence' | 'pinned' | 'active' | 'experienceContext'
+			>
+		>,
+		scope: MemoryScope,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string
+	): Promise<MemoryEntry | null> {
+		const dirPath = this.getMemoryPath(scope, skillAreaId, projectPath);
+		const lib = await this.readLibrary(dirPath);
+		const idx = lib.entries.findIndex((e) => e.id === id);
+		if (idx === -1) return null;
+
+		const now = Date.now();
+		const oldEntry = lib.entries[idx];
+		const updated = { ...oldEntry, ...updates, updatedAt: now };
+
+		// Null out embedding if content changed
+		if (updates.content !== undefined && updates.content !== oldEntry.content) {
+			updated.embedding = null;
+			updated.tokenEstimate = Math.ceil(updates.content.length / 4);
+		}
+
+		lib.entries[idx] = updated;
+		await this.writeLibrary(dirPath, lib);
+		await this.appendHistory(dirPath, {
+			timestamp: now,
+			operation: 'update',
+			entityType: 'memory',
+			entityId: id,
+			oldContent: oldEntry.content.slice(0, 200),
+			newContent: (updates.content ?? oldEntry.content).slice(0, 200),
+		});
+		return updated;
+	}
+
+	async deleteMemory(
+		id: MemoryId,
+		scope: MemoryScope,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string
+	): Promise<boolean> {
+		const dirPath = this.getMemoryPath(scope, skillAreaId, projectPath);
+		const lib = await this.readLibrary(dirPath);
+		const idx = lib.entries.findIndex((e) => e.id === id);
+		if (idx === -1) return false;
+
+		const entry = lib.entries[idx];
+		const now = Date.now();
+		lib.entries.splice(idx, 1);
+		await this.writeLibrary(dirPath, lib);
+		await this.appendHistory(dirPath, {
+			timestamp: now,
+			operation: 'delete',
+			entityType: 'memory',
+			entityId: id,
+			content: entry.content.slice(0, 200),
+		});
+		return true;
+	}
+
+	async getMemory(
+		id: MemoryId,
+		scope: MemoryScope,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string
+	): Promise<MemoryEntry | null> {
+		const dirPath = this.getMemoryPath(scope, skillAreaId, projectPath);
+		const lib = await this.readLibrary(dirPath);
+		return lib.entries.find((e) => e.id === id) ?? null;
+	}
+
+	async listMemories(
+		scope: MemoryScope,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string,
+		includeInactive?: boolean
+	): Promise<MemoryEntry[]> {
+		const dirPath = this.getMemoryPath(scope, skillAreaId, projectPath);
+		const lib = await this.readLibrary(dirPath);
+		if (includeInactive) return lib.entries;
+		return lib.entries.filter((e) => e.active);
+	}
+
+	// ─── Config Management ──────────────────────────────────────────────────
+
+	async getConfig(): Promise<MemoryConfig> {
+		try {
+			const content = await fs.readFile(this.getConfigPath(), 'utf-8');
+			if (!content.trim()) return { ...MEMORY_CONFIG_DEFAULTS };
+			return { ...MEMORY_CONFIG_DEFAULTS, ...JSON.parse(content) };
+		} catch (error: unknown) {
+			if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+				return { ...MEMORY_CONFIG_DEFAULTS };
+			}
+			if (error instanceof SyntaxError) {
+				return { ...MEMORY_CONFIG_DEFAULTS };
+			}
+			throw error;
+		}
+	}
+
+	async setConfig(config: Partial<MemoryConfig>): Promise<MemoryConfig> {
+		const current = await this.getConfig();
+		const merged = { ...current, ...config };
+		await this.atomicWriteJson(this.getConfigPath(), merged);
+		return merged;
+	}
+
+	// ─── Embedding Helpers ──────────────────────────────────────────────────
+
+	/**
+	 * Lazily compute embedding for a single memory entry if missing.
+	 * Returns the entry (potentially updated with embedding).
+	 */
+	async ensureEmbedding(
+		entry: MemoryEntry,
+		scope: MemoryScope,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string
+	): Promise<MemoryEntry> {
+		if (entry.embedding !== null) return entry;
+
+		try {
+			const { encode } = await import('../grpo/embedding-service');
+			const embedding = await encode(entry.content);
+
+			// Write embedding directly without triggering content-change logic
+			const dirPath = this.getMemoryPath(scope, skillAreaId, projectPath);
+			const lib = await this.readLibrary(dirPath);
+			const idx = lib.entries.findIndex((e) => e.id === entry.id);
+			if (idx !== -1) {
+				lib.entries[idx].embedding = embedding;
+				await this.writeLibrary(dirPath, lib);
+				return lib.entries[idx];
+			}
+			return entry;
+		} catch {
+			// EmbeddingModelNotAvailableError or other — degrade gracefully
+			return entry;
+		}
+	}
+
+	/**
+	 * Compute embeddings for all entries in a scope that have null embeddings.
+	 */
+	async ensureAllEmbeddings(
+		scope: MemoryScope,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string
+	): Promise<number> {
+		const dirPath = this.getMemoryPath(scope, skillAreaId, projectPath);
+		const lib = await this.readLibrary(dirPath);
+		const missing = lib.entries.filter((e) => e.embedding === null && e.active);
+		if (missing.length === 0) return 0;
+
+		try {
+			const { encodeBatch } = await import('../grpo/embedding-service');
+			const texts = missing.map((e) => e.content);
+			const embeddings = await encodeBatch(texts);
+
+			for (let i = 0; i < missing.length; i++) {
+				const idx = lib.entries.findIndex((e) => e.id === missing[i].id);
+				if (idx !== -1) {
+					lib.entries[idx].embedding = embeddings[i];
+				}
+			}
+
+			await this.writeLibrary(dirPath, lib);
+			return missing.length;
+		} catch {
+			// EmbeddingModelNotAvailableError — degrade gracefully
+			return 0;
+		}
+	}
+
+	/**
+	 * Compute embeddings for personas and skill areas that have null embeddings.
+	 */
+	async ensureHierarchyEmbeddings(): Promise<number> {
+		const registry = await this.readRegistry();
+
+		// Collect all descriptions that need embeddings
+		const textsToEmbed: string[] = [];
+		const targets: Array<{ type: 'persona' | 'skill'; index: number }> = [];
+
+		for (let i = 0; i < registry.personas.length; i++) {
+			if (registry.personas[i].embedding === null && registry.personas[i].active) {
+				textsToEmbed.push(registry.personas[i].description);
+				targets.push({ type: 'persona', index: i });
+			}
+		}
+
+		for (let i = 0; i < registry.skillAreas.length; i++) {
+			if (registry.skillAreas[i].embedding === null && registry.skillAreas[i].active) {
+				textsToEmbed.push(registry.skillAreas[i].description);
+				targets.push({ type: 'skill', index: i });
+			}
+		}
+
+		if (textsToEmbed.length === 0) return 0;
+
+		try {
+			const { encodeBatch } = await import('../grpo/embedding-service');
+			const embeddings = await encodeBatch(textsToEmbed);
+
+			for (let i = 0; i < targets.length; i++) {
+				const target = targets[i];
+				if (target.type === 'persona') {
+					registry.personas[target.index].embedding = embeddings[i];
+				} else {
+					registry.skillAreas[target.index].embedding = embeddings[i];
+				}
+			}
+
+			await this.writeRegistry(registry);
+			return textsToEmbed.length;
+		} catch {
+			// EmbeddingModelNotAvailableError — degrade gracefully
+			return 0;
+		}
+	}
+
+	// ─── Seed Data ──────────────────────────────────────────────────────────
+
+	/**
+	 * Seed the hierarchy with default roles/personas/skills if registry is empty.
+	 * Only runs if no roles exist yet.
+	 */
+	async seedFromDefaults(): Promise<{ roles: number; personas: number; skills: number }> {
+		const registry = await this.readRegistry();
+		if (registry.roles.length > 0) {
+			return { roles: 0, personas: 0, skills: 0 };
+		}
+
+		let roleCount = 0;
+		let personaCount = 0;
+		let skillCount = 0;
+
+		for (const seedRole of SEED_ROLES) {
+			const role = await this.createRole(seedRole.name, seedRole.description);
+			roleCount++;
+
+			for (const seedPersona of seedRole.personas) {
+				const persona = await this.createPersona(
+					role.id,
+					seedPersona.name,
+					seedPersona.description
+				);
+				personaCount++;
+
+				for (const skillName of seedPersona.skills) {
+					await this.createSkillArea(persona.id, skillName, `${skillName} expertise`);
+					skillCount++;
+				}
+			}
+		}
+
+		return { roles: roleCount, personas: personaCount, skills: skillCount };
+	}
+}
+
+// ─── Singleton ──────────────────────────────────────────────────────────────
+
+let instance: MemoryStore | null = null;
+
+export function getMemoryStore(): MemoryStore {
+	if (!instance) {
+		instance = new MemoryStore();
+	}
+	return instance;
+}
