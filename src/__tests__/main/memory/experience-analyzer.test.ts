@@ -11,7 +11,7 @@
  * - Singleton pattern
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock electron (required by memory-store)
 vi.mock('electron', () => ({
@@ -136,6 +136,8 @@ vi.mock('../../../main/utils/logger', () => ({
 import {
 	ExperienceAnalyzer,
 	getExperienceAnalyzer,
+	initializeExperienceAnalyzer,
+	resetExperienceAnalyzer,
 	type ExperienceAnalyzerInput,
 	type ExtractedExperience,
 } from '../../../main/memory/experience-analyzer';
@@ -968,6 +970,10 @@ describe('ExperienceAnalyzer', () => {
 	// ─── Singleton ───────────────────────────────────────────────────────
 
 	describe('singleton', () => {
+		afterEach(() => {
+			resetExperienceAnalyzer();
+		});
+
 		it('returns same instance across calls', () => {
 			const a = getExperienceAnalyzer();
 			const b = getExperienceAnalyzer();
@@ -977,6 +983,25 @@ describe('ExperienceAnalyzer', () => {
 		it('returns an ExperienceAnalyzer instance', () => {
 			const instance = getExperienceAnalyzer();
 			expect(instance).toBeInstanceOf(ExperienceAnalyzer);
+		});
+
+		it('reset creates a fresh instance on next call', () => {
+			const first = getExperienceAnalyzer();
+			resetExperienceAnalyzer();
+			const second = getExperienceAnalyzer();
+			expect(first).not.toBe(second);
+		});
+
+		it('initializeExperienceAnalyzer returns the singleton', async () => {
+			const instance = await initializeExperienceAnalyzer();
+			expect(instance).toBeInstanceOf(ExperienceAnalyzer);
+			expect(instance).toBe(getExperienceAnalyzer());
+		});
+
+		it('initializeExperienceAnalyzer returns same instance on repeated calls', async () => {
+			const a = await initializeExperienceAnalyzer();
+			const b = await initializeExperienceAnalyzer();
+			expect(a).toBe(b);
 		});
 	});
 

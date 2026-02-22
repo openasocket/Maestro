@@ -12,7 +12,7 @@
  * - Proposed hash tracking (no double proposals)
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock electron (required by memory-store)
 vi.mock('electron', () => ({
@@ -97,7 +97,12 @@ vi.mock('../../../main/grpo/embedding-service', () => ({
 	VECTOR_DIM: 384,
 }));
 
-import { MemoryCollector } from '../../../main/memory/memory-collector';
+import {
+	MemoryCollector,
+	getMemoryCollector,
+	initializeMemoryCollector,
+	resetMemoryCollector,
+} from '../../../main/memory/memory-collector';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -474,6 +479,44 @@ describe('MemoryCollector', () => {
 			// so addMemory should still work. Let's test with a more targeted failure.
 			// Since our mock fs always works, let's just verify no exception is thrown.
 			expect(proposed).toBeGreaterThanOrEqual(0);
+		});
+	});
+
+	// ─── Singleton ──────────────────────────────────────────────────────
+
+	describe('singleton', () => {
+		afterEach(() => {
+			resetMemoryCollector();
+		});
+
+		it('returns same instance across calls', () => {
+			const a = getMemoryCollector();
+			const b = getMemoryCollector();
+			expect(a).toBe(b);
+		});
+
+		it('returns a MemoryCollector instance', () => {
+			const instance = getMemoryCollector();
+			expect(instance).toBeInstanceOf(MemoryCollector);
+		});
+
+		it('reset creates a fresh instance on next call', () => {
+			const first = getMemoryCollector();
+			resetMemoryCollector();
+			const second = getMemoryCollector();
+			expect(first).not.toBe(second);
+		});
+
+		it('initializeMemoryCollector returns the singleton', async () => {
+			const instance = await initializeMemoryCollector();
+			expect(instance).toBeInstanceOf(MemoryCollector);
+			expect(instance).toBe(getMemoryCollector());
+		});
+
+		it('initializeMemoryCollector returns same instance on repeated calls', async () => {
+			const a = await initializeMemoryCollector();
+			const b = await initializeMemoryCollector();
+			expect(a).toBe(b);
 		});
 	});
 });

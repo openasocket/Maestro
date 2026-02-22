@@ -222,9 +222,33 @@ export class MemoryCollector {
 
 let _instance: MemoryCollector | null = null;
 
+/**
+ * Get the singleton MemoryCollector instance.
+ * Creates on first use (lazy initialization). Non-blocking.
+ */
 export function getMemoryCollector(): MemoryCollector {
 	if (!_instance) {
 		_instance = new MemoryCollector();
 	}
 	return _instance;
+}
+
+/**
+ * Initialize the singleton MemoryCollector.
+ * Tolerates initialization failures — logs and returns null.
+ */
+export async function initializeMemoryCollector(): Promise<MemoryCollector | null> {
+	try {
+		return getMemoryCollector();
+	} catch {
+		// Construction failed — degrade silently
+		return null;
+	}
+}
+
+/**
+ * Reset the singleton (for testing).
+ */
+export function resetMemoryCollector(): void {
+	_instance = null;
 }

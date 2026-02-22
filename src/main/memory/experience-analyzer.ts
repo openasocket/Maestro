@@ -539,9 +539,33 @@ export class ExperienceAnalyzer {
 
 let _instance: ExperienceAnalyzer | null = null;
 
+/**
+ * Get the singleton ExperienceAnalyzer instance.
+ * Creates on first use (lazy initialization). Non-blocking.
+ */
 export function getExperienceAnalyzer(): ExperienceAnalyzer {
 	if (!_instance) {
 		_instance = new ExperienceAnalyzer();
 	}
 	return _instance;
+}
+
+/**
+ * Initialize the singleton ExperienceAnalyzer.
+ * Tolerates initialization failures — logs and returns null.
+ */
+export async function initializeExperienceAnalyzer(): Promise<ExperienceAnalyzer | null> {
+	try {
+		return getExperienceAnalyzer();
+	} catch {
+		// Construction failed — degrade silently
+		return null;
+	}
+}
+
+/**
+ * Reset the singleton (for testing).
+ */
+export function resetExperienceAnalyzer(): void {
+	_instance = null;
 }
