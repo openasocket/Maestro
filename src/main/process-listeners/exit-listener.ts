@@ -435,6 +435,37 @@ export function setupExitListener(
 				// Fire-and-forget — degrade gracefully
 			});
 
+		// Experience extraction (EXP-12): analyze completed session for novel learnings
+		// Fire-and-forget — never blocks session cleanup. The analyzer handles:
+		// - Minimum history threshold (3+ entries)
+		// - Rate limiting (max 1 per 5 min per project)
+		// - enableExperienceExtraction config check
+		void (async () => {
+			try {
+				// Look up session to get project path and agent type
+				const { getSessionsStore } = await import('../stores');
+				const sessions = getSessionsStore().get('sessions', []);
+				const baseId = sessionId.replace(/-ai-.+$|-terminal$|-batch-\d+$|-synopsis-\d+$/, '');
+				const session = sessions.find((s: { id: string }) => s.id === baseId);
+				if (!session?.projectRoot || !session?.toolType) return;
+
+				// Check if memory system is enabled
+				const { getMemoryStore } = await import('../memory/memory-store');
+				const config = await getMemoryStore().getConfig();
+				if (!config.enabled) return;
+
+				// Trigger analysis — the analyzer handles all remaining checks internally
+				const { getExperienceAnalyzer } = await import('../memory/experience-analyzer');
+				getExperienceAnalyzer()
+					.analyzeCompletedSession(sessionId, session.projectRoot, session.toolType)
+					.catch((err) =>
+						logger.debug(`[Memory] Experience analysis failed: ${err}`, 'ProcessListener')
+					);
+			} catch {
+				// Degrade gracefully — experience analysis is non-critical
+			}
+		})();
+
 		// Broadcast exit to web clients
 		const webServer = getWebServer();
 		if (webServer) {

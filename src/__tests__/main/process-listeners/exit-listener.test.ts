@@ -417,4 +417,142 @@ describe('Exit Listener', () => {
 			});
 		});
 	});
+
+	describe('Experience Extraction (EXP-12)', () => {
+		const mockAnalyzeCompletedSession = vi.fn().mockResolvedValue(2);
+		const mockGetConfig = vi.fn().mockResolvedValue({ enabled: true });
+
+		beforeEach(() => {
+			mockAnalyzeCompletedSession.mockClear();
+			mockGetConfig.mockClear().mockResolvedValue({ enabled: true });
+
+			// Mock the dynamic imports used by experience extraction
+			vi.doMock('../../../main/stores', () => ({
+				getSessionsStore: () => ({
+					get: () => [
+						{
+							id: 'regular-session-123',
+							toolType: 'claude-code',
+							projectRoot: '/test/project',
+							name: 'Test',
+							cwd: '/test/project',
+						},
+					],
+				}),
+			}));
+
+			vi.doMock('../../../main/memory/memory-store', () => ({
+				getMemoryStore: () => ({
+					getConfig: mockGetConfig,
+				}),
+			}));
+
+			vi.doMock('../../../main/memory/experience-analyzer', () => ({
+				getExperienceAnalyzer: () => ({
+					analyzeCompletedSession: mockAnalyzeCompletedSession,
+				}),
+			}));
+		});
+
+		afterEach(() => {
+			vi.doUnmock('../../../main/stores');
+			vi.doUnmock('../../../main/memory/memory-store');
+			vi.doUnmock('../../../main/memory/experience-analyzer');
+		});
+
+		it('should trigger experience analysis for regular session exits', async () => {
+			setupListener();
+			const handler = eventHandlers.get('exit');
+
+			handler?.('regular-session-123', 0);
+
+			await vi.waitFor(() => {
+				expect(mockAnalyzeCompletedSession).toHaveBeenCalledWith(
+					'regular-session-123',
+					'/test/project',
+					'claude-code'
+				);
+			});
+		});
+
+		it('should extract base session ID from AI tab session format', async () => {
+			setupListener();
+			const handler = eventHandlers.get('exit');
+
+			handler?.('regular-session-123-ai-tab1', 0);
+
+			await vi.waitFor(() => {
+				expect(mockAnalyzeCompletedSession).toHaveBeenCalledWith(
+					'regular-session-123-ai-tab1',
+					'/test/project',
+					'claude-code'
+				);
+			});
+		});
+
+		it('should skip when session not found in store', async () => {
+			vi.doMock('../../../main/stores', () => ({
+				getSessionsStore: () => ({
+					get: () => [],
+				}),
+			}));
+
+			setupListener();
+			const handler = eventHandlers.get('exit');
+
+			handler?.('unknown-session', 0);
+
+			// Wait for async operations
+			await new Promise((resolve) => setTimeout(resolve, 50));
+
+			expect(mockAnalyzeCompletedSession).not.toHaveBeenCalled();
+		});
+
+		it('should skip when memory system is disabled', async () => {
+			mockGetConfig.mockResolvedValue({ enabled: false });
+
+			setupListener();
+			const handler = eventHandlers.get('exit');
+
+			handler?.('regular-session-123', 0);
+
+			// Wait for async operations
+			await new Promise((resolve) => setTimeout(resolve, 50));
+
+			expect(mockAnalyzeCompletedSession).not.toHaveBeenCalled();
+		});
+
+		it('should not block session exit when analysis fails', async () => {
+			vi.doMock('../../../main/stores', () => ({
+				getSessionsStore: () => {
+					throw new Error('Store unavailable');
+				},
+			}));
+
+			setupListener();
+			const handler = eventHandlers.get('exit');
+
+			// Should not throw
+			handler?.('regular-session-123', 0);
+
+			// Wait for async operations to settle
+			await new Promise((resolve) => setTimeout(resolve, 50));
+
+			// The safeSend should still have been called (exit event forwarded)
+			expect(mockDeps.safeSend).toHaveBeenCalledWith('process:exit', 'regular-session-123', 0);
+		});
+
+		it('should not trigger for group chat sessions', async () => {
+			mockDeps.outputBuffer.getGroupChatBufferedOutput = vi.fn().mockReturnValue(undefined);
+			setupListener();
+			const handler = eventHandlers.get('exit');
+
+			// Group chat sessions return early before reaching the experience analysis code
+			handler?.('group-chat-test-chat-123-moderator-1234567890', 0);
+
+			await new Promise((resolve) => setTimeout(resolve, 50));
+
+			expect(mockAnalyzeCompletedSession).not.toHaveBeenCalled();
+		});
+	});
 });
