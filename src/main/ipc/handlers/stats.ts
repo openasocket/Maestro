@@ -168,6 +168,47 @@ export function registerStatsHandlers(deps: StatsHandlerDependencies): void {
 				success: task.success,
 			});
 			broadcastStatsUpdate(getMainWindow);
+
+			// Memory collection (EXP-12 Strategy 1): feed Auto Run task completions
+			// into the memory collector for pattern detection.
+			// Fire-and-forget — never blocks the stats recording response.
+			if (task.taskContent) {
+				void (async () => {
+					try {
+						// Look up session to get project path
+						const { getSessionsStore } = await import('../../stores');
+						const sessions = getSessionsStore().get('sessions', []);
+						const baseId = task.sessionId.replace(
+							/-ai-.+$|-terminal$|-batch-\d+$|-synopsis-\d+$/,
+							''
+						);
+						const session = sessions.find((s: { id: string }) => s.id === baseId);
+						if (!session?.projectRoot) return;
+
+						// Check if memory system is enabled
+						const { getMemoryStore } = await import('../../memory/memory-store');
+						const config = await getMemoryStore().getConfig();
+						if (!config.enabled) return;
+
+						const { getMemoryCollector } = await import('../../memory/memory-collector');
+						const collector = getMemoryCollector();
+						collector.onAutoRunTaskComplete(
+							task.taskContent!,
+							session.projectRoot,
+							task.agentType,
+							task.success ? 0 : 1,
+							task.taskContent!,
+							task.duration
+						);
+
+						// Run pattern detection after recording
+						await collector.detectPatterns(session.projectRoot, task.agentType);
+					} catch (err) {
+						logger.debug(`[Memory] Auto-collection failed: ${err}`, LOG_CONTEXT);
+					}
+				})();
+			}
+
 			return id;
 		})
 	);
