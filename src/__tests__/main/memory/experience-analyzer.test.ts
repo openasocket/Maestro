@@ -403,8 +403,8 @@ describe('ExperienceAnalyzer', () => {
 	// ─── Rate Limiting ───────────────────────────────────────────────────
 
 	describe('rate limiting', () => {
-		it('is not on cooldown initially', () => {
-			expect(analyzer.isOnCooldown('/project')).toBe(false);
+		it('is not on cooldown initially', async () => {
+			expect(await analyzer.isOnCooldown('/project')).toBe(false);
 		});
 
 		it('reports cooldown after analysis', async () => {
@@ -420,7 +420,7 @@ describe('ExperienceAnalyzer', () => {
 
 			await analyzer.analyzeCompletedSession('sess-1', '/project', 'claude-code');
 
-			expect(analyzer.isOnCooldown('/project')).toBe(true);
+			expect(await analyzer.isOnCooldown('/project')).toBe(true);
 		});
 
 		it('separate projects have independent cooldowns', async () => {
@@ -433,8 +433,8 @@ describe('ExperienceAnalyzer', () => {
 
 			await analyzer.analyzeCompletedSession('sess-1', '/project-a', 'claude-code');
 
-			expect(analyzer.isOnCooldown('/project-a')).toBe(true);
-			expect(analyzer.isOnCooldown('/project-b')).toBe(false);
+			expect(await analyzer.isOnCooldown('/project-a')).toBe(true);
+			expect(await analyzer.isOnCooldown('/project-b')).toBe(false);
 		});
 	});
 
@@ -1297,7 +1297,7 @@ describe('ExperienceAnalyzer', () => {
 			expect(result).toBe(0);
 		});
 
-		it('filters out experiences with noveltyScore below 0.4', async () => {
+		it('filters out experiences with noveltyScore below default 0.4', async () => {
 			mockGetEntries.mockReturnValue([
 				{ id: '1', summary: 'step 1', type: 'prompt' },
 				{ id: '2', summary: 'step 2', type: 'prompt' },
@@ -1337,6 +1337,126 @@ describe('ExperienceAnalyzer', () => {
 
 			// Only 2 experiences should pass (0.8 and 0.4 >= 0.4 threshold)
 			expect(result).toBe(2);
+		});
+	});
+
+	// ─── Config Controls ────────────────────────────────────────────────
+
+	describe('config controls', () => {
+		const configPath = '/mock/userData/memories/config.json';
+
+		afterEach(() => {
+			fsState.delete(configPath);
+		});
+
+		it('returns 0 when enableExperienceExtraction is false', async () => {
+			fsState.set(configPath, JSON.stringify({ enableExperienceExtraction: false }));
+			mockGetEntries.mockReturnValue([
+				{ id: '1', summary: 'step 1', type: 'prompt' },
+				{ id: '2', summary: 'step 2', type: 'prompt' },
+				{ id: '3', summary: 'step 3', type: 'prompt' },
+				{ id: '4', summary: 'step 4', type: 'prompt' },
+			]);
+
+			const result = await analyzer.analyzeCompletedSession(
+				'sess-cfg-1',
+				'/project-cfg',
+				'claude-code'
+			);
+			expect(result).toBe(0);
+			// LLM (claude) should never be called — only git calls are allowed
+			const claudeCalls = mockExecFile.mock.calls.filter((call: unknown[]) => call[0] === 'claude');
+			expect(claudeCalls).toHaveLength(0);
+		});
+
+		it('respects custom minHistoryEntriesForAnalysis', async () => {
+			fsState.set(configPath, JSON.stringify({ minHistoryEntriesForAnalysis: 5 }));
+			// 4 entries — below the custom threshold of 5
+			mockGetEntries.mockReturnValue([
+				{ id: '1', summary: 'step 1', type: 'prompt' },
+				{ id: '2', summary: 'step 2', type: 'prompt' },
+				{ id: '3', summary: 'step 3', type: 'prompt' },
+				{ id: '4', summary: 'step 4', type: 'prompt' },
+			]);
+
+			const result = await analyzer.analyzeCompletedSession(
+				'sess-cfg-2',
+				'/project-cfg-2',
+				'claude-code'
+			);
+			expect(result).toBe(0);
+		});
+
+		it('respects custom minNoveltyScore', async () => {
+			fsState.set(configPath, JSON.stringify({ minNoveltyScore: 0.7 }));
+			mockGetEntries.mockReturnValue([
+				{ id: '1', summary: 'step 1', type: 'prompt' },
+				{ id: '2', summary: 'step 2', type: 'prompt' },
+				{ id: '3', summary: 'step 3', type: 'prompt' },
+			]);
+
+			const resultLine = JSON.stringify({
+				type: 'result',
+				result: JSON.stringify([
+					{
+						content: 'High novelty',
+						situation: 'Good',
+						learning: 'Yes',
+						tags: [],
+						noveltyScore: 0.8,
+					},
+					{
+						content: 'Below custom threshold',
+						situation: 'Meh',
+						learning: 'Maybe',
+						tags: [],
+						noveltyScore: 0.5,
+					},
+				]),
+			});
+			mockExecFile.mockResolvedValue({ stdout: resultLine, stderr: '' });
+
+			const result = await analyzer.analyzeCompletedSession(
+				'sess-cfg-3',
+				'/project-cfg-3',
+				'claude-code'
+			);
+			// Only 0.8 passes the custom 0.7 threshold
+			expect(result).toBe(1);
+		});
+
+		it('respects custom analysisCooldownMs via isOnCooldown', async () => {
+			// Set a very long cooldown
+			fsState.set(configPath, JSON.stringify({ analysisCooldownMs: 999999999 }));
+			mockGetEntries.mockReturnValue([
+				{ id: '1', summary: 'step 1', type: 'prompt' },
+				{ id: '2', summary: 'step 2', type: 'prompt' },
+				{ id: '3', summary: 'step 3', type: 'prompt' },
+			]);
+			mockExecFile.mockRejectedValue(new Error('not available'));
+
+			await analyzer.analyzeCompletedSession('sess-cfg-4', '/project-cfg-4', 'claude-code');
+
+			// Should still be on cooldown due to the long cooldown setting
+			expect(await analyzer.isOnCooldown('/project-cfg-4')).toBe(true);
+		});
+
+		it('defaults are used when config file is missing', async () => {
+			// No config file set — defaults should apply
+			mockGetEntries.mockReturnValue([
+				{ id: '1', summary: 'step 1', type: 'prompt' },
+				{ id: '2', summary: 'step 2', type: 'prompt' },
+				{ id: '3', summary: 'step 3', type: 'prompt' },
+			]);
+			mockExecFile.mockRejectedValue(new Error('not available'));
+
+			// Should proceed with default minHistoryEntriesForAnalysis=3 (not error)
+			const result = await analyzer.analyzeCompletedSession(
+				'sess-cfg-5',
+				'/project-cfg-5',
+				'claude-code'
+			);
+			expect(result).toBe(0); // 0 because LLM fails, but it still ran (didn't bail early)
 		});
 	});
 });

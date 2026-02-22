@@ -12,6 +12,7 @@
  * - Graceful degradation: tolerates missing data sources (no git, no VIBES, etc.)
  */
 
+import type { MemoryConfig } from '../../shared/memory-types';
 import { experienceExtractionPrompt } from '../../prompts';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
@@ -78,7 +79,7 @@ export class ExperienceAnalyzer {
 		agentType: string
 	): Promise<number> {
 		// Check rate limit
-		if (this.isOnCooldown(projectPath)) {
+		if (await this.isOnCooldown(projectPath)) {
 			return 0;
 		}
 
@@ -116,20 +117,20 @@ export class ExperienceAnalyzer {
 	/**
 	 * Check if a project is on cooldown (rate limiting).
 	 */
-	isOnCooldown(projectPath: string): boolean {
+	async isOnCooldown(projectPath: string): Promise<boolean> {
 		const lastTime = this.lastAnalysisTime.get(projectPath);
 		if (!lastTime) return false;
-		return Date.now() - lastTime < this.getCooldownMs();
+		const cooldownMs = await this.getCooldownMs();
+		return Date.now() - lastTime < cooldownMs;
 	}
 
 	/**
 	 * Get the cooldown period in milliseconds.
-	 * Can be overridden by config (analysisCooldownMs).
-	 * Default: 300000 (5 minutes).
+	 * Uses analysisCooldownMs from MemoryConfig — default 300000 (5 minutes).
 	 */
-	private getCooldownMs(): number {
-		// Will be configurable via MemoryConfig in Task 11
-		return 300000;
+	private async getCooldownMs(): Promise<number> {
+		const config = await this.getMemoryConfig();
+		return config.analysisCooldownMs ?? 300000;
 	}
 
 	/**
@@ -503,32 +504,14 @@ export class ExperienceAnalyzer {
 	}
 
 	/**
-	 * Get the current memory config (with defaults for new fields).
+	 * Get the current memory config.
+	 * Experience extraction fields are now typed in MemoryConfig with defaults.
 	 */
-	private async getMemoryConfig(): Promise<{
-		enableExperienceExtraction?: boolean;
-		minHistoryEntriesForAnalysis?: number;
-		minNoveltyScore?: number;
-		analysisCooldownMs?: number;
-	}> {
+	private async getMemoryConfig(): Promise<Partial<MemoryConfig>> {
 		try {
 			const { getMemoryStore } = await import('./memory-store');
 			const store = getMemoryStore();
-			// Config file may contain experience-analyzer-specific keys beyond the typed MemoryConfig
-			const raw = (await store.getConfig()) as unknown as Record<string, unknown>;
-			return {
-				enableExperienceExtraction:
-					typeof raw.enableExperienceExtraction === 'boolean'
-						? raw.enableExperienceExtraction
-						: undefined,
-				minHistoryEntriesForAnalysis:
-					typeof raw.minHistoryEntriesForAnalysis === 'number'
-						? raw.minHistoryEntriesForAnalysis
-						: undefined,
-				minNoveltyScore: typeof raw.minNoveltyScore === 'number' ? raw.minNoveltyScore : undefined,
-				analysisCooldownMs:
-					typeof raw.analysisCooldownMs === 'number' ? raw.analysisCooldownMs : undefined,
-			};
+			return await store.getConfig();
 		} catch {
 			return {};
 		}
