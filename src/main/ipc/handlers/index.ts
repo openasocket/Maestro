@@ -52,7 +52,9 @@ import { registerSymphonyHandlers, SymphonyHandlerDependencies } from './symphon
 import { registerAgentErrorHandlers } from './agent-error';
 import { registerTabNamingHandlers, TabNamingHandlerDependencies } from './tabNaming';
 import { registerDirectorNotesHandlers, DirectorNotesHandlerDependencies } from './director-notes';
+import { registerMemoryHandlers, MemoryHandlerDependencies } from './memory-handlers';
 import { registerWakatimeHandlers } from './wakatime';
+import { getMemoryStore } from '../../memory/memory-store';
 import { AgentDetector } from '../../agents';
 import { ProcessManager } from '../../process-manager';
 import { WebServer } from '../../web-server';
@@ -96,6 +98,8 @@ export { registerTabNamingHandlers };
 export type { TabNamingHandlerDependencies };
 export { registerDirectorNotesHandlers };
 export type { DirectorNotesHandlerDependencies };
+export { registerMemoryHandlers };
+export type { MemoryHandlerDependencies };
 export { registerWakatimeHandlers };
 export type { AgentsHandlerDependencies };
 export type { ProcessHandlerDependencies };
@@ -279,6 +283,11 @@ export function registerAllHandlers(deps: HandlerDependencies): void {
 	registerDirectorNotesHandlers({
 		getProcessManager: deps.getProcessManager,
 		getAgentDetector: deps.getAgentDetector,
+	});
+	// Register memory handlers (Agent Experiences system)
+	registerMemoryHandlers({
+		memoryStore: getMemoryStore(),
+		settingsStore: deps.settingsStore,
 	});
 	// Setup logger event forwarding to renderer
 	setupLoggerEventForwarding(deps.getMainWindow);
