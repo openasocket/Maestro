@@ -203,6 +203,12 @@ export const MODAL_PRIORITIES = {
 	/** System log viewer overlay */
 	LOG_VIEWER: 500,
 
+	/** Memory edit modal (above settings, add/edit memory entries) */
+	MEMORY_EDIT: 470,
+
+	/** Hierarchy edit modal (above settings, add/edit roles/personas/skills) */
+	HIERARCHY_EDIT: 465,
+
 	/** SSH Remote configuration modal (above settings) */
 	SSH_REMOTE: 460,
 
