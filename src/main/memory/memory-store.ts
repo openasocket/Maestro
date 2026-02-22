@@ -36,8 +36,10 @@ import type {
 	MemoryConfig,
 	MemoryHistoryEntry,
 	ExperienceContext,
+	MemorySearchResult,
 } from '../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS, SEED_ROLES } from '../../shared/memory-types';
+import { cosineSimilarity } from '../grpo/embedding-service';
 
 // ─── File Interfaces ──────────────────────────────────────────────────────────
 
@@ -852,6 +854,212 @@ export class MemoryStore {
 		} catch {
 			// EmbeddingModelNotAvailableError — degrade gracefully
 			return 0;
+		}
+	}
+
+	// ─── Semantic Search ─────────────────────────────────────────────────────
+
+	/**
+	 * Compute a combined ranking score for a memory search result.
+	 *
+	 * combinedScore = similarity * 0.6 + effectivenessScore * 0.2 + recencyScore * 0.2
+	 * recency = max(0, 1 - (now - updatedAt) / (decayHalfLifeDays * 86400000))
+	 */
+	private computeCombinedScore(
+		similarity: number,
+		entry: MemoryEntry,
+		decayHalfLifeDays: number
+	): number {
+		const now = Date.now();
+		const recencyScore = Math.max(0, 1 - (now - entry.updatedAt) / (decayHalfLifeDays * 86400000));
+		return similarity * 0.6 + entry.effectivenessScore * 0.2 + recencyScore * 0.2;
+	}
+
+	/**
+	 * Search a flat scope (project or global) for memories matching the query.
+	 * These scopes live outside the hierarchy and are searched independently.
+	 */
+	async searchFlatScope(
+		queryEmbedding: number[],
+		scope: 'project' | 'global',
+		config: MemoryConfig,
+		projectPath?: string,
+		limit: number = 20
+	): Promise<MemorySearchResult[]> {
+		const dirPath = this.getMemoryPath(scope, undefined, projectPath);
+		const lib = await this.readLibrary(dirPath);
+
+		const results: MemorySearchResult[] = [];
+		for (const entry of lib.entries) {
+			if (!entry.active || !entry.embedding) continue;
+
+			const similarity = cosineSimilarity(queryEmbedding, entry.embedding);
+			if (similarity < config.similarityThreshold) continue;
+
+			results.push({
+				entry,
+				similarity,
+				combinedScore: this.computeCombinedScore(similarity, entry, config.decayHalfLifeDays),
+			});
+		}
+
+		results.sort((a, b) => b.combinedScore - a.combinedScore);
+		return results.slice(0, limit);
+	}
+
+	/**
+	 * Cascading semantic search through the hierarchy.
+	 *
+	 * 1. Embed the query
+	 * 2. Find personas matching the query (cosine > personaMatchThreshold)
+	 *    - Filter by assignedAgents (if agentType provided)
+	 *    - Filter by assignedProjects (if projectPath provided)
+	 * 3. Within matched personas, find skill areas matching (cosine > skillMatchThreshold)
+	 * 4. Within matched skill areas, search memories (cosine > similarityThreshold)
+	 * 5. Also search project-scoped and global memories in parallel
+	 * 6. Merge all results, rank by combinedScore, return top N
+	 */
+	async cascadingSearch(
+		query: string,
+		config: MemoryConfig,
+		agentType: string,
+		projectPath?: string,
+		limit: number = 30
+	): Promise<MemorySearchResult[]> {
+		const { encode } = await import('../grpo/embedding-service');
+		const queryEmbedding = await encode(query.slice(0, 2000));
+
+		const registry = await this.readRegistry();
+		const hierarchyResults: MemorySearchResult[] = [];
+
+		// ── Level 1: Persona matching ────────────────────────────────────
+		const matchedPersonas: Array<{ persona: (typeof registry.personas)[0]; personaName: string }> =
+			[];
+
+		for (const persona of registry.personas) {
+			if (!persona.active) continue;
+
+			// Agent filter: empty assignedAgents = matches all agents
+			if (persona.assignedAgents.length > 0 && !persona.assignedAgents.includes(agentType)) {
+				continue;
+			}
+
+			// Project filter: empty assignedProjects = matches all projects
+			if (
+				projectPath &&
+				persona.assignedProjects.length > 0 &&
+				!persona.assignedProjects.includes(projectPath)
+			) {
+				continue;
+			}
+
+			// Embedding filter: if persona has embedding, check threshold; if not, include it
+			if (persona.embedding) {
+				const sim = cosineSimilarity(queryEmbedding, persona.embedding);
+				if (sim < config.personaMatchThreshold) continue;
+			}
+
+			matchedPersonas.push({ persona, personaName: persona.name });
+		}
+
+		// ── Level 2: Skill area matching ─────────────────────────────────
+		const matchedSkills: Array<{
+			skill: (typeof registry.skillAreas)[0];
+			personaName: string;
+			skillAreaName: string;
+		}> = [];
+
+		for (const { persona, personaName } of matchedPersonas) {
+			for (const skillId of persona.skillAreaIds) {
+				const skill = registry.skillAreas.find((s) => s.id === skillId);
+				if (!skill || !skill.active) continue;
+
+				// Embedding filter: if skill has embedding, check threshold; if not, include it
+				if (skill.embedding) {
+					const sim = cosineSimilarity(queryEmbedding, skill.embedding);
+					if (sim < config.skillMatchThreshold) continue;
+				}
+
+				matchedSkills.push({ skill, personaName, skillAreaName: skill.name });
+			}
+		}
+
+		// ── Level 3: Memory search within matched skill areas ────────────
+		for (const { skill, personaName, skillAreaName } of matchedSkills) {
+			const dirPath = this.getMemoryPath('skill', skill.id);
+			const lib = await this.readLibrary(dirPath);
+
+			for (const entry of lib.entries) {
+				if (!entry.active || !entry.embedding) continue;
+
+				const similarity = cosineSimilarity(queryEmbedding, entry.embedding);
+				if (similarity < config.similarityThreshold) continue;
+
+				hierarchyResults.push({
+					entry,
+					similarity,
+					combinedScore: this.computeCombinedScore(similarity, entry, config.decayHalfLifeDays),
+					personaName,
+					skillAreaName,
+				});
+			}
+		}
+
+		// ── Parallel flat-scope search ───────────────────────────────────
+		const flatSearches: Promise<MemorySearchResult[]>[] = [
+			this.searchFlatScope(queryEmbedding, 'global', config),
+		];
+		if (projectPath) {
+			flatSearches.push(this.searchFlatScope(queryEmbedding, 'project', config, projectPath));
+		}
+
+		const flatResults = (await Promise.all(flatSearches)).flat();
+
+		// ── Merge, de-duplicate, rank ────────────────────────────────────
+		const allResults = [...hierarchyResults, ...flatResults];
+		const seen = new Set<string>();
+		const deduped: MemorySearchResult[] = [];
+		for (const r of allResults) {
+			if (seen.has(r.entry.id)) continue;
+			seen.add(r.entry.id);
+			deduped.push(r);
+		}
+
+		deduped.sort((a, b) => b.combinedScore - a.combinedScore);
+		return deduped.slice(0, limit);
+	}
+
+	// ─── Injection Recording ─────────────────────────────────────────────────
+
+	/**
+	 * Record that memories were injected into an agent prompt.
+	 * Increments useCount and updates lastUsedAt in batch.
+	 * No history entry (high-frequency operation).
+	 */
+	async recordInjection(
+		injectedIds: MemoryId[],
+		scope: MemoryScope,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string
+	): Promise<void> {
+		if (injectedIds.length === 0) return;
+
+		const dirPath = this.getMemoryPath(scope, skillAreaId, projectPath);
+		const lib = await this.readLibrary(dirPath);
+		const now = Date.now();
+		const idSet = new Set(injectedIds);
+
+		let modified = false;
+		for (const entry of lib.entries) {
+			if (idSet.has(entry.id)) {
+				entry.useCount += 1;
+				entry.lastUsedAt = now;
+				modified = true;
+			}
+		}
+
+		if (modified) {
+			await this.writeLibrary(dirPath, lib);
 		}
 	}
 

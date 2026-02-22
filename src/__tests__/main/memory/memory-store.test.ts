@@ -72,10 +72,28 @@ vi.mock('fs/promises', () => ({
 	}),
 }));
 
-// Mock the embedding service
+// Mock the embedding service — real cosineSimilarity, controllable encode/encodeBatch
+function realCosineSimilarity(a: number[], b: number[]): number {
+	let dot = 0;
+	let normA = 0;
+	let normB = 0;
+	for (let i = 0; i < a.length; i++) {
+		dot += a[i] * b[i];
+		normA += a[i] * a[i];
+		normB += b[i] * b[i];
+	}
+	const denom = Math.sqrt(normA) * Math.sqrt(normB);
+	return denom === 0 ? 0 : dot / denom;
+}
+
+const mockEncode = vi.fn(async () => new Array(384).fill(0));
+const mockEncodeBatch = vi.fn(async (texts: string[]) => texts.map(() => new Array(384).fill(0)));
+
 vi.mock('../../../main/grpo/embedding-service', () => ({
-	encode: vi.fn(async () => new Array(384).fill(0)),
-	encodeBatch: vi.fn(async (texts: string[]) => texts.map(() => new Array(384).fill(0))),
+	encode: (...args: unknown[]) => mockEncode(...args),
+	encodeBatch: (...args: unknown[]) => mockEncodeBatch(...args),
+	cosineSimilarity: realCosineSimilarity,
+	VECTOR_DIM: 384,
 }));
 
 import { MemoryStore, getMemoryStore } from '../../../main/memory/memory-store';
@@ -686,6 +704,405 @@ describe('MemoryStore', () => {
 			if (deactivatedSkill) {
 				expect(deactivatedSkill.active).toBe(false);
 			}
+		});
+	});
+
+	// ─── Cascading Search ────────────────────────────────────────────────
+
+	describe('Cascading Search', () => {
+		// Helper: create a unit vector with a dominant component at `idx`
+		// These produce predictable cosine similarities when compared.
+		function makeEmbedding(idx: number, dim = 384): number[] {
+			const v = new Array(dim).fill(0);
+			v[idx] = 1;
+			return v;
+		}
+
+		// Two vectors with the same dominant component → cosine ~ 1.0
+		// Two vectors with different dominant components → cosine ~ 0.0
+
+		/**
+		 * Set up a full hierarchy with embeddings baked into the registry and library files.
+		 *
+		 * Creates:
+		 * - Role "Dev"
+		 *   - Persona "Rust Dev" (embedding at idx=0, assignedAgents=['claude-code'])
+		 *   - Persona "Python Dev" (embedding at idx=1, assignedAgents=['codex'])
+		 *     - Skill "API Design" (embedding at idx=2)
+		 *       - Memory "use FastAPI" (embedding at idx=2, high similarity to skill)
+		 *       - Memory "use pydantic" (embedding at idx=3, low similarity to query)
+		 *   - Persona "Unembedded Persona" (no embedding — should always pass persona filter)
+		 *     - Skill "General" (no embedding)
+		 *       - Memory "general tip" (embedding at idx=0)
+		 */
+		async function setupHierarchy() {
+			// Create role + personas + skills via CRUD (generates IDs, wires registry)
+			const role = await store.createRole('Dev', 'Software development');
+
+			const rustPersona = await store.createPersona(role.id, 'Rust Dev', 'Rust systems', [
+				'claude-code',
+			]);
+			const pyPersona = await store.createPersona(role.id, 'Python Dev', 'Python backend', [
+				'codex',
+			]);
+			const unembeddedPersona = await store.createPersona(
+				role.id,
+				'Unembedded Persona',
+				'General dev'
+			);
+
+			const apiSkill = await store.createSkillArea(pyPersona.id, 'API Design', 'REST/GraphQL APIs');
+			const generalSkill = await store.createSkillArea(
+				unembeddedPersona.id,
+				'General',
+				'General tips'
+			);
+
+			// Inject embeddings directly into registry
+			const reg = await store.readRegistry();
+			for (const p of reg.personas) {
+				if (p.id === rustPersona.id) p.embedding = makeEmbedding(0);
+				if (p.id === pyPersona.id) p.embedding = makeEmbedding(1);
+				// unembeddedPersona stays null
+			}
+			for (const s of reg.skillAreas) {
+				if (s.id === apiSkill.id) s.embedding = makeEmbedding(2);
+				// generalSkill stays null
+			}
+			await store.writeRegistry(reg);
+
+			// Add memories with embeddings baked in
+			const mem1 = await store.addMemory({
+				content: 'Use FastAPI for REST endpoints',
+				scope: 'skill',
+				skillAreaId: apiSkill.id,
+			});
+			const mem2 = await store.addMemory({
+				content: 'Use pydantic for validation',
+				scope: 'skill',
+				skillAreaId: apiSkill.id,
+			});
+			const memGeneral = await store.addMemory({
+				content: 'General development tip',
+				scope: 'skill',
+				skillAreaId: generalSkill.id,
+			});
+
+			// Set memory embeddings directly
+			const apiDir = store.getMemoryPath('skill', apiSkill.id);
+			const apiLib = await store.readLibrary(apiDir);
+			for (const e of apiLib.entries) {
+				if (e.id === mem1.id) e.embedding = makeEmbedding(2); // matches query
+				if (e.id === mem2.id) e.embedding = makeEmbedding(3); // does NOT match query
+			}
+			await store.writeLibrary(apiDir, apiLib);
+
+			const genDir = store.getMemoryPath('skill', generalSkill.id);
+			const genLib = await store.readLibrary(genDir);
+			for (const e of genLib.entries) {
+				if (e.id === memGeneral.id) e.embedding = makeEmbedding(0); // matches query
+			}
+			await store.writeLibrary(genDir, genLib);
+
+			// Add a global memory
+			const globalMem = await store.addMemory({
+				content: 'Global rule: use tabs',
+				scope: 'global',
+			});
+			const globalDir = store.getMemoryPath('global');
+			const globalLib = await store.readLibrary(globalDir);
+			for (const e of globalLib.entries) {
+				if (e.id === globalMem.id) e.embedding = makeEmbedding(2); // matches query
+			}
+			await store.writeLibrary(globalDir, globalLib);
+
+			// Add a project memory
+			const projMem = await store.addMemory(
+				{ content: 'Project uses DuckDB', scope: 'project' },
+				'/home/test/project'
+			);
+			const projDir = store.getMemoryPath('project', undefined, '/home/test/project');
+			const projLib = await store.readLibrary(projDir);
+			for (const e of projLib.entries) {
+				if (e.id === projMem.id) e.embedding = makeEmbedding(2); // matches query
+			}
+			await store.writeLibrary(projDir, projLib);
+
+			return {
+				role,
+				rustPersona,
+				pyPersona,
+				unembeddedPersona,
+				apiSkill,
+				generalSkill,
+				mem1,
+				mem2,
+				memGeneral,
+				globalMem,
+				projMem,
+			};
+		}
+
+		it('searchFlatScope returns matching memories from global scope', async () => {
+			await setupHierarchy();
+			const config = await store.getConfig();
+			const queryEmb = makeEmbedding(2); // matches global memory
+
+			const results = await store.searchFlatScope(queryEmb, 'global', config);
+			expect(results).toHaveLength(1);
+			expect(results[0].entry.content).toBe('Global rule: use tabs');
+			expect(results[0].similarity).toBeCloseTo(1.0, 5);
+			expect(results[0].combinedScore).toBeGreaterThan(0);
+		});
+
+		it('searchFlatScope returns matching memories from project scope', async () => {
+			await setupHierarchy();
+			const config = await store.getConfig();
+			const queryEmb = makeEmbedding(2);
+
+			const results = await store.searchFlatScope(
+				queryEmb,
+				'project',
+				config,
+				'/home/test/project'
+			);
+			expect(results).toHaveLength(1);
+			expect(results[0].entry.content).toBe('Project uses DuckDB');
+		});
+
+		it('searchFlatScope filters out low-similarity entries', async () => {
+			await setupHierarchy();
+			const config = await store.getConfig();
+			const queryEmb = makeEmbedding(99); // orthogonal to all stored embeddings
+
+			const results = await store.searchFlatScope(queryEmb, 'global', config);
+			expect(results).toHaveLength(0);
+		});
+
+		it('cascadingSearch excludes personas not matching agentType', async () => {
+			const { mem1, memGeneral } = await setupHierarchy();
+
+			// Use agentType='codex': matches pyPersona (assignedAgents=['codex']),
+			// does NOT match rustPersona (assignedAgents=['claude-code']).
+			// Unembedded persona has no agent filter → matches all agents.
+			// Query needs components at idx=1 (pyPersona embedding) and idx=2 (skill/mem).
+			const mixedEmb = new Array(384).fill(0);
+			mixedEmb[1] = 0.7; // match pyPersona
+			mixedEmb[2] = 0.9; // match apiSkill + mem1
+			mockEncode.mockResolvedValueOnce(mixedEmb);
+
+			const config = await store.getConfig();
+			const results = await store.cascadingSearch(
+				'How do I build APIs?',
+				config,
+				'codex',
+				'/home/test/project'
+			);
+
+			// Should include mem1 (from pyPersona → apiSkill, via hierarchy)
+			// Should NOT include rustPersona's memories (agentType mismatch)
+			const ids = results.map((r) => r.entry.id);
+			expect(ids).toContain(mem1.id);
+
+			// memGeneral is under unembedded persona with embedding[0] — cosine with
+			// our query (0 at idx=0) is 0, so it won't pass memory threshold
+		});
+
+		it('cascadingSearch narrows through hierarchy: irrelevant personas excluded', async () => {
+			const { mem1, mem2 } = await setupHierarchy();
+
+			// Query at idx=2: matches Python Dev persona (embedding idx=1)? No — cosine = 0.
+			// BUT Python Dev persona embedding is idx=1, query is idx=2, cosine ~ 0 < 0.4 threshold.
+			// However, unembedded persona passes through.
+			// Let's use agentType that matches pyPersona, and query that matches pyPersona.
+			// We need queryEmbedding to have cosine >= 0.4 with persona embedding(idx=1).
+
+			// Use a mixed embedding: dominant at idx=1 (to match persona) and idx=2 (to match skill/memory)
+			const mixedEmb = new Array(384).fill(0);
+			mixedEmb[1] = 0.7; // matches persona (cosine = 0.7 > 0.4)
+			mixedEmb[2] = 0.7; // matches skill and memory
+			mockEncode.mockResolvedValueOnce(mixedEmb);
+
+			const config = await store.getConfig();
+			const results = await store.cascadingSearch('Build a Python API', config, 'codex');
+
+			// mem1 has embedding at idx=2, similarity with mixed = 0.7/norm ≈ 0.707
+			// mem2 has embedding at idx=3, similarity ≈ 0 → filtered out
+			const ids = results.map((r) => r.entry.id);
+			expect(ids).toContain(mem1.id);
+			expect(ids).not.toContain(mem2.id);
+		});
+
+		it('cascadingSearch includes unembedded personas and skills', async () => {
+			const { memGeneral } = await setupHierarchy();
+
+			// Query embedding at idx=0 matches the general memory (embedding at idx=0)
+			mockEncode.mockResolvedValueOnce(makeEmbedding(0));
+
+			const config = await store.getConfig();
+			const results = await store.cascadingSearch(
+				'General dev question',
+				config,
+				'claude-code' // Unembedded persona has no agent filter → matches all
+			);
+
+			// Unembedded persona has no embedding → passes persona filter
+			// General skill has no embedding → passes skill filter
+			// memGeneral has embedding[0] → cosine = 1.0 with query → passes memory filter
+			const ids = results.map((r) => r.entry.id);
+			expect(ids).toContain(memGeneral.id);
+		});
+
+		it('cascadingSearch includes global and project memories alongside hierarchy', async () => {
+			const { globalMem, projMem, mem1 } = await setupHierarchy();
+
+			// Query at idx=2 matches global, project, and mem1
+			const mixedEmb = new Array(384).fill(0);
+			mixedEmb[1] = 0.5;
+			mixedEmb[2] = 0.9;
+			mockEncode.mockResolvedValueOnce(mixedEmb);
+
+			const config = await store.getConfig();
+			const results = await store.cascadingSearch(
+				'API endpoints',
+				config,
+				'codex',
+				'/home/test/project'
+			);
+
+			const ids = results.map((r) => r.entry.id);
+			expect(ids).toContain(globalMem.id);
+			expect(ids).toContain(projMem.id);
+		});
+
+		it('cascadingSearch de-duplicates by entry id', async () => {
+			// A memory could theoretically appear from both hierarchy and flat scope
+			// (if it were copied). The de-dupe logic prevents this.
+			await setupHierarchy();
+			mockEncode.mockResolvedValueOnce(makeEmbedding(2));
+
+			const config = await store.getConfig();
+			const results = await store.cascadingSearch(
+				'API test',
+				config,
+				'codex',
+				'/home/test/project'
+			);
+
+			// Check no duplicate IDs
+			const ids = results.map((r) => r.entry.id);
+			const uniqueIds = [...new Set(ids)];
+			expect(ids).toEqual(uniqueIds);
+		});
+
+		it('cascadingSearch attaches personaName and skillAreaName from hierarchy', async () => {
+			const { mem1 } = await setupHierarchy();
+
+			const mixedEmb = new Array(384).fill(0);
+			mixedEmb[1] = 0.7;
+			mixedEmb[2] = 0.9;
+			mockEncode.mockResolvedValueOnce(mixedEmb);
+
+			const config = await store.getConfig();
+			const results = await store.cascadingSearch('API design', config, 'codex');
+
+			const mem1Result = results.find((r) => r.entry.id === mem1.id);
+			expect(mem1Result).toBeDefined();
+			expect(mem1Result!.personaName).toBe('Python Dev');
+			expect(mem1Result!.skillAreaName).toBe('API Design');
+		});
+
+		it('cascadingSearch respects limit parameter', async () => {
+			await setupHierarchy();
+
+			// Use an embedding that matches everything with idx=0 component
+			const broadEmb = new Array(384).fill(0);
+			broadEmb[0] = 0.5;
+			broadEmb[2] = 0.5;
+			mockEncode.mockResolvedValueOnce(broadEmb);
+
+			const config = await store.getConfig();
+			const results = await store.cascadingSearch(
+				'broad query',
+				config,
+				'codex',
+				'/home/test/project',
+				1 // limit to 1 result
+			);
+
+			expect(results.length).toBeLessThanOrEqual(1);
+		});
+	});
+
+	// ─── Record Injection ────────────────────────────────────────────────
+
+	describe('recordInjection', () => {
+		it('increments useCount and updates lastUsedAt for injected memories', async () => {
+			const mem = await store.addMemory({ content: 'Test rule', scope: 'global' });
+			expect(mem.useCount).toBe(0);
+			expect(mem.lastUsedAt).toBe(0);
+
+			await store.recordInjection([mem.id], 'global');
+
+			const updated = await store.getMemory(mem.id, 'global');
+			expect(updated!.useCount).toBe(1);
+			expect(updated!.lastUsedAt).toBeGreaterThan(0);
+		});
+
+		it('increments useCount multiple times', async () => {
+			const mem = await store.addMemory({ content: 'Test rule', scope: 'global' });
+
+			await store.recordInjection([mem.id], 'global');
+			await store.recordInjection([mem.id], 'global');
+			await store.recordInjection([mem.id], 'global');
+
+			const updated = await store.getMemory(mem.id, 'global');
+			expect(updated!.useCount).toBe(3);
+		});
+
+		it('handles multiple ids in a single call', async () => {
+			const mem1 = await store.addMemory({ content: 'Rule A', scope: 'global' });
+			const mem2 = await store.addMemory({ content: 'Rule B', scope: 'global' });
+
+			await store.recordInjection([mem1.id, mem2.id], 'global');
+
+			const u1 = await store.getMemory(mem1.id, 'global');
+			const u2 = await store.getMemory(mem2.id, 'global');
+			expect(u1!.useCount).toBe(1);
+			expect(u2!.useCount).toBe(1);
+		});
+
+		it('no-ops for empty id list', async () => {
+			// Should not throw
+			await store.recordInjection([], 'global');
+		});
+
+		it('ignores ids not found in the library', async () => {
+			const mem = await store.addMemory({ content: 'Exists', scope: 'global' });
+
+			// One valid, one invalid — should not throw, valid one should be updated
+			await store.recordInjection([mem.id, 'nonexistent-id'], 'global');
+
+			const updated = await store.getMemory(mem.id, 'global');
+			expect(updated!.useCount).toBe(1);
+		});
+
+		it('works with skill scope', async () => {
+			const role = await store.createRole('R', 'desc');
+			const persona = await store.createPersona(role.id, 'P', 'desc');
+			const skill = await store.createSkillArea(persona.id, 'S', 'desc');
+
+			const mem = await store.addMemory({
+				content: 'Skill memory',
+				scope: 'skill',
+				skillAreaId: skill.id,
+			});
+
+			await store.recordInjection([mem.id], 'skill', skill.id);
+
+			const updated = await store.getMemory(mem.id, 'skill', skill.id);
+			expect(updated!.useCount).toBe(1);
+			expect(updated!.lastUsedAt).toBeGreaterThan(0);
 		});
 	});
 });
