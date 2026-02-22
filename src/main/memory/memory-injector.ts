@@ -272,3 +272,35 @@ export async function tryInjectMemories(
 		};
 	}
 }
+
+// ─── Session Injection Tracking ─────────────────────────────────────────────
+
+/**
+ * Module-level map of sessionId → injected memory IDs.
+ * Used by effectiveness tracking (EXP-11) to correlate
+ * session outcomes with which memories were injected.
+ */
+const _sessionInjections = new Map<string, MemoryId[]>();
+
+/**
+ * Record which memory IDs were injected for a given session.
+ * Called from process.ts after successful injection.
+ */
+export function recordSessionInjection(sessionId: string, memoryIds: MemoryId[]): void {
+	_sessionInjections.set(sessionId, memoryIds);
+}
+
+/**
+ * Retrieve the memory IDs that were injected for a session.
+ * Returns undefined if no injection was recorded.
+ */
+export function getSessionInjection(sessionId: string): MemoryId[] | undefined {
+	return _sessionInjections.get(sessionId);
+}
+
+/**
+ * Clear the injection record for a session (e.g., after session ends).
+ */
+export function clearSessionInjection(sessionId: string): void {
+	_sessionInjections.delete(sessionId);
+}

@@ -56,6 +56,9 @@ import {
 	setMemorySettingsStore,
 	injectMemories,
 	tryInjectMemories,
+	recordSessionInjection,
+	getSessionInjection,
+	clearSessionInjection,
 } from '../../../main/memory/memory-injector';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -508,6 +511,32 @@ describe('MemoryInjector', () => {
 
 			await injectMemories('my prompt', '/project', 'claude-code');
 			expect(mockRecordInjection).not.toHaveBeenCalled();
+		});
+	});
+
+	// ─── Session Injection Tracking ─────────────────────────────────────
+
+	describe('session injection tracking', () => {
+		it('records and retrieves injected IDs for a session', () => {
+			const ids = ['mem-1', 'mem-2', 'mem-3'];
+			recordSessionInjection('session-abc', ids);
+			expect(getSessionInjection('session-abc')).toEqual(ids);
+		});
+
+		it('returns undefined for unknown session', () => {
+			expect(getSessionInjection('session-unknown')).toBeUndefined();
+		});
+
+		it('clears injection record for a session', () => {
+			recordSessionInjection('session-xyz', ['mem-1']);
+			clearSessionInjection('session-xyz');
+			expect(getSessionInjection('session-xyz')).toBeUndefined();
+		});
+
+		it('overwrites previous record on re-injection', () => {
+			recordSessionInjection('session-abc', ['mem-1']);
+			recordSessionInjection('session-abc', ['mem-4', 'mem-5']);
+			expect(getSessionInjection('session-abc')).toEqual(['mem-4', 'mem-5']);
 		});
 	});
 });

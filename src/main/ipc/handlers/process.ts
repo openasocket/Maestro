@@ -153,9 +153,44 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 							}
 						: null,
 				});
+
+				// Effective prompt: starts as config.prompt, may be modified by memory injection
+				let effectivePrompt = config.prompt;
+
+				// ========================================================================
+				// Memory Injection: prepend relevant knowledge from the hierarchy
+				// Cascading search: prompt → persona → skill → memory
+				// Must happen BEFORE buildAgentArgs so injected content is included in args
+				// ========================================================================
+				if (effectivePrompt && config.cwd && config.toolType !== 'terminal') {
+					try {
+						const { tryInjectMemories } = await import('../../memory/memory-injector');
+						const result = await tryInjectMemories(effectivePrompt, config.cwd, config.toolType);
+						effectivePrompt = result.injectedPrompt;
+						if (result.injectedIds.length > 0) {
+							const personaSummary = result.personaContributions
+								.map((p) => `${p.personaName}(${p.count})`)
+								.join(', ');
+							logger.debug(
+								`[Memory] Injected ${result.injectedIds.length} memories (${result.tokenCount} tokens) for ${config.toolType} — personas: ${personaSummary}, project=${result.flatScopeCounts.project}, global=${result.flatScopeCounts.global}`,
+								LOG_CONTEXT
+							);
+
+							// Store injected IDs for effectiveness tracking (EXP-11)
+							const { recordSessionInjection } = await import('../../memory/memory-injector');
+							recordSessionInjection(config.sessionId, result.injectedIds);
+						}
+					} catch (err) {
+						logger.warn(
+							`[Memory] Memory injection failed, proceeding without: ${err}`,
+							LOG_CONTEXT
+						);
+					}
+				}
+
 				let finalArgs = buildAgentArgs(agent, {
 					baseArgs: config.args,
-					prompt: config.prompt,
+					prompt: effectivePrompt,
 					cwd: config.cwd,
 					readOnlyMode: config.readOnlyMode,
 					modelId: config.modelId,
@@ -377,11 +412,11 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 						//   (e.g., -i /tmp/image.png for Codex, -f /tmp/image.png for OpenCode).
 						const hasImages = config.images && config.images.length > 0;
 						let sshArgs = finalArgs;
-						let stdinInput: string | undefined = config.prompt;
+						let stdinInput: string | undefined = effectivePrompt;
 
-						if (hasImages && config.prompt && agent?.capabilities?.supportsStreamJsonInput) {
+						if (hasImages && effectivePrompt && agent?.capabilities?.supportsStreamJsonInput) {
 							// Stream-json agent (Claude Code): embed images in the stdin message
-							stdinInput = buildStreamJsonMessage(config.prompt, config.images!) + '\n';
+							stdinInput = buildStreamJsonMessage(effectivePrompt, config.images!) + '\n';
 							if (!sshArgs.includes('--input-format')) {
 								sshArgs = [...sshArgs, '--input-format', 'stream-json'];
 							}
@@ -468,7 +503,7 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 					requiresPty: sshRemoteUsed ? false : agent?.requiresPty,
 					// For SSH, prompt is included in the stdin script, not passed separately
 					// For local execution, pass prompt as normal
-					prompt: sshRemoteUsed ? undefined : config.prompt,
+					prompt: sshRemoteUsed ? undefined : effectivePrompt,
 					shell: shellToUse,
 					runInShell: useShell,
 					shellArgs: shellArgsStr, // Shell-specific CLI args (for terminal sessions)

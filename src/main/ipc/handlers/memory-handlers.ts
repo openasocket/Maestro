@@ -11,6 +11,7 @@ import { ipcMain } from 'electron';
 import { logger } from '../../utils/logger';
 import { createIpcDataHandler, CreateHandlerOptions } from '../../utils/ipcHandler';
 import type { MemoryStore } from '../../memory/memory-store';
+import { setMemorySettingsStore } from '../../memory/memory-injector';
 import type {
 	MemoryScope,
 	SkillAreaId,
@@ -43,6 +44,21 @@ export interface MemoryHandlerDependencies {
 export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 	const { memoryStore } = deps;
 
+	// ─── Initialize Memory Injector Settings ─────────────────────────────
+	// Cache the file-based config for synchronous access in the injector.
+	// Loaded once at startup; updated whenever the user changes config via IPC.
+	let cachedConfig: Partial<MemoryConfig> | undefined;
+	memoryStore
+		.getConfig()
+		.then((config) => {
+			cachedConfig = config;
+			logger.debug('Memory injector settings initialized', LOG_CONTEXT);
+		})
+		.catch((err) => {
+			logger.warn(`Failed to load initial memory config: ${err}`, LOG_CONTEXT);
+		});
+	setMemorySettingsStore(() => cachedConfig);
+
 	// ─── Config ───────────────────────────────────────────────────────────
 
 	ipcMain.handle(
@@ -55,7 +71,10 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 	ipcMain.handle(
 		'memory:setConfig',
 		createIpcDataHandler(handlerOpts('setConfig'), async (config: Partial<MemoryConfig>) => {
-			return memoryStore.setConfig(config);
+			const result = await memoryStore.setConfig(config);
+			// Update the cached config for the memory injector
+			cachedConfig = result;
+			return result;
 		})
 	);
 
