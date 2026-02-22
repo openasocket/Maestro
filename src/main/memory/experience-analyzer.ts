@@ -244,9 +244,16 @@ export class ExperienceAnalyzer {
 
 	/**
 	 * Run LLM analysis on gathered session data to extract experiences.
-	 * Spawns a batch-mode agent process.
 	 *
-	 * Stub: will be fully implemented in Task 6.
+	 * Spawns Claude Code in batch mode (`--print --output-format stream-json`)
+	 * with the compiled prompt. Parses the JSONL output to extract the result
+	 * text, then parses the JSON experiences array.
+	 *
+	 * Graceful failure: if the agent fails, times out, or returns unparseable
+	 * output, logs and returns empty — never blocks session cleanup.
+	 *
+	 * Token budget: history truncation (20 entries × 500 chars) plus diff
+	 * truncation (4000 chars) keep the prompt under ~8000 tokens.
 	 */
 	async analyzeSession(input: ExperienceAnalyzerInput): Promise<ExtractedExperience[]> {
 		// Compile prompt from template
@@ -260,15 +267,66 @@ export class ExperienceAnalyzer {
 
 			const result = await execFileAsync(
 				'claude',
-				['--print', '--output-format', 'text', '-p', prompt],
-				{ timeout: 120000 }
+				['--print', '--output-format', 'stream-json', '-p', prompt],
+				{ timeout: 120000, maxBuffer: 1024 * 1024 }
 			);
 
-			return this.parseExperiences(result.stdout ?? '');
-		} catch {
-			// LLM analysis failed — degrade silently
+			const rawOutput = result.stdout ?? '';
+
+			// Extract text from stream-json JSONL output
+			const text = this.extractResultText(rawOutput);
+
+			return this.parseExperiences(text);
+		} catch (err) {
+			// LLM analysis failed — degrade silently, log for diagnostics
+			this.logDebug(`LLM analysis failed: ${err}`);
 			return [];
 		}
+	}
+
+	/**
+	 * Extract the result text from Claude Code stream-json JSONL output.
+	 *
+	 * Claude Code's stream-json format emits one JSON object per line:
+	 * - `{ type: 'result', result: '...' }` — final complete response (preferred)
+	 * - `{ type: 'assistant', message: { content: [...] } }` — streaming text blocks (fallback)
+	 *
+	 * Returns the result text, or concatenated assistant text blocks, or raw output as last resort.
+	 */
+	extractResultText(rawOutput: string): string {
+		const lines = rawOutput.split('\n');
+		const textParts: string[] = [];
+
+		for (const line of lines) {
+			if (!line.trim()) continue;
+			try {
+				const event = JSON.parse(line);
+
+				// Result event contains the complete final response
+				if (event.type === 'result' && typeof event.result === 'string') {
+					return event.result;
+				}
+
+				// Assistant message with text content (streaming fallback)
+				if (event.type === 'assistant' && event.message?.content) {
+					const content = event.message.content;
+					if (typeof content === 'string') {
+						textParts.push(content);
+					} else if (Array.isArray(content)) {
+						for (const block of content) {
+							if (block.type === 'text' && typeof block.text === 'string') {
+								textParts.push(block.text);
+							}
+						}
+					}
+				}
+			} catch {
+				// Not valid JSON — skip
+			}
+		}
+
+		// Prefer joined text parts over raw output
+		return textParts.length > 0 ? textParts.join('\n') : rawOutput;
 	}
 
 	/**
@@ -432,6 +490,16 @@ export class ExperienceAnalyzer {
 		}
 
 		return stored;
+	}
+
+	/**
+	 * Log a debug message via the main process logger.
+	 * Fire-and-forget — silently ignores if logger is unavailable.
+	 */
+	private logDebug(message: string): void {
+		import('../utils/logger')
+			.then(({ logger }) => logger.debug(`[Memory] ${message}`, 'ExperienceAnalyzer'))
+			.catch(() => {});
 	}
 
 	/**

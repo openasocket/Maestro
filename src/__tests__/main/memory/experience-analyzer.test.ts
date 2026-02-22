@@ -123,6 +123,16 @@ vi.mock('../../../main/stats', () => ({
 	}),
 }));
 
+// Mock logger (used by logDebug in analyzeSession error path)
+vi.mock('../../../main/utils/logger', () => ({
+	logger: {
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+	},
+}));
+
 import {
 	ExperienceAnalyzer,
 	getExperienceAnalyzer,
@@ -749,6 +759,258 @@ describe('ExperienceAnalyzer', () => {
 		});
 	});
 
+	// ─── Stream-JSON Parsing ────────────────────────────────────────────
+
+	describe('extractResultText', () => {
+		it('extracts text from result event', () => {
+			const jsonl = [
+				JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc' }),
+				JSON.stringify({
+					type: 'assistant',
+					message: { role: 'assistant', content: [{ type: 'text', text: 'partial' }] },
+				}),
+				JSON.stringify({
+					type: 'result',
+					result: '[{"content":"final answer"}]',
+					session_id: 'abc',
+				}),
+			].join('\n');
+
+			const text = analyzer.extractResultText(jsonl);
+			expect(text).toBe('[{"content":"final answer"}]');
+		});
+
+		it('falls back to assistant text blocks when no result event', () => {
+			const jsonl = [
+				JSON.stringify({
+					type: 'assistant',
+					message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
+				}),
+				JSON.stringify({
+					type: 'assistant',
+					message: { role: 'assistant', content: [{ type: 'text', text: ' world' }] },
+				}),
+			].join('\n');
+
+			const text = analyzer.extractResultText(jsonl);
+			expect(text).toBe('hello\n world');
+		});
+
+		it('handles string content in assistant messages', () => {
+			const jsonl = JSON.stringify({
+				type: 'assistant',
+				message: { role: 'assistant', content: 'direct string content' },
+			});
+
+			const text = analyzer.extractResultText(jsonl);
+			expect(text).toBe('direct string content');
+		});
+
+		it('returns raw output when no parseable events', () => {
+			const text = analyzer.extractResultText('not json at all');
+			expect(text).toBe('not json at all');
+		});
+
+		it('returns raw output for empty input', () => {
+			const text = analyzer.extractResultText('');
+			expect(text).toBe('');
+		});
+
+		it('skips non-text content blocks', () => {
+			const jsonl = JSON.stringify({
+				type: 'assistant',
+				message: {
+					role: 'assistant',
+					content: [
+						{ type: 'thinking', thinking: 'internal reasoning' },
+						{ type: 'text', text: 'visible output' },
+						{ type: 'tool_use', name: 'some_tool' },
+					],
+				},
+			});
+
+			const text = analyzer.extractResultText(jsonl);
+			expect(text).toBe('visible output');
+		});
+
+		it('prefers result event over earlier assistant text', () => {
+			const jsonl = [
+				JSON.stringify({
+					type: 'assistant',
+					message: { role: 'assistant', content: 'streaming chunk' },
+				}),
+				JSON.stringify({ type: 'result', result: 'final result' }),
+			].join('\n');
+
+			const text = analyzer.extractResultText(jsonl);
+			expect(text).toBe('final result');
+		});
+
+		it('ignores malformed JSON lines mixed with valid ones', () => {
+			const jsonl = ['{broken json', JSON.stringify({ type: 'result', result: '[]' })].join('\n');
+
+			const text = analyzer.extractResultText(jsonl);
+			expect(text).toBe('[]');
+		});
+	});
+
+	// ─── analyzeSession (LLM call) ──────────────────────────────────────
+
+	describe('analyzeSession', () => {
+		it('spawns claude with --print --output-format stream-json', async () => {
+			const resultLine = JSON.stringify({
+				type: 'result',
+				result: JSON.stringify([
+					{
+						content: 'Use --skip-git-repo-check for monorepos',
+						situation: 'Codex stalled on monorepo',
+						learning: 'Monorepo flag needed',
+						tags: ['codex'],
+						noveltyScore: 0.8,
+					},
+				]),
+			});
+			mockExecFile.mockResolvedValue({ stdout: resultLine, stderr: '' });
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/project',
+				historyEntries: [{ summary: 'Fixed monorepo issue' }],
+			};
+
+			const experiences = await analyzer.analyzeSession(input);
+
+			// Verify execFile was called with stream-json format
+			expect(mockExecFile).toHaveBeenCalledWith(
+				'claude',
+				expect.arrayContaining([
+					'--print',
+					'--output-format',
+					'stream-json',
+					'-p',
+					expect.any(String),
+				]),
+				expect.objectContaining({ timeout: 120000, maxBuffer: 1024 * 1024 })
+			);
+			expect(experiences).toHaveLength(1);
+			expect(experiences[0].content).toBe('Use --skip-git-repo-check for monorepos');
+		});
+
+		it('returns empty array when LLM call fails', async () => {
+			mockExecFile.mockRejectedValue(new Error('Command not found: claude'));
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/project',
+				historyEntries: [{ summary: 'test' }],
+			};
+
+			const experiences = await analyzer.analyzeSession(input);
+			expect(experiences).toEqual([]);
+		});
+
+		it('returns empty array when LLM returns empty result', async () => {
+			const resultLine = JSON.stringify({ type: 'result', result: '[]' });
+			mockExecFile.mockResolvedValue({ stdout: resultLine, stderr: '' });
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/project',
+				historyEntries: [{ summary: 'routine task' }],
+			};
+
+			const experiences = await analyzer.analyzeSession(input);
+			expect(experiences).toEqual([]);
+		});
+
+		it('returns empty array when prompt compilation returns empty', async () => {
+			// Create analyzer with a mock that returns empty prompt
+			const testAnalyzer = new ExperienceAnalyzer();
+			vi.spyOn(testAnalyzer, 'compilePrompt').mockReturnValue('');
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/project',
+				historyEntries: [{ summary: 'test' }],
+			};
+
+			const experiences = await testAnalyzer.analyzeSession(input);
+			expect(experiences).toEqual([]);
+			expect(mockExecFile).not.toHaveBeenCalled();
+		});
+
+		it('handles stream-json with multiple assistant chunks before result', async () => {
+			const jsonl = [
+				JSON.stringify({
+					type: 'assistant',
+					message: {
+						role: 'assistant',
+						content: [{ type: 'text', text: 'Analyzing...' }],
+					},
+				}),
+				JSON.stringify({
+					type: 'result',
+					result: JSON.stringify([
+						{
+							content: 'Learning from multi-chunk response',
+							situation: 'Multi-chunk test',
+							learning: 'Parsing works',
+							tags: [],
+							noveltyScore: 0.6,
+						},
+					]),
+				}),
+			].join('\n');
+			mockExecFile.mockResolvedValue({ stdout: jsonl, stderr: '' });
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/project',
+				historyEntries: [{ summary: 'test' }],
+			};
+
+			const experiences = await analyzer.analyzeSession(input);
+			expect(experiences).toHaveLength(1);
+			expect(experiences[0].content).toBe('Learning from multi-chunk response');
+		});
+
+		it('parses experiences from non-result JSONL (fallback path)', async () => {
+			// Simulate output without a result event — only assistant text
+			const jsonl = JSON.stringify({
+				type: 'assistant',
+				message: {
+					role: 'assistant',
+					content: JSON.stringify([
+						{
+							content: 'Fallback learning',
+							situation: 'No result event',
+							learning: 'Fallback parsing',
+							tags: [],
+							noveltyScore: 0.5,
+						},
+					]),
+				},
+			});
+			mockExecFile.mockResolvedValue({ stdout: jsonl, stderr: '' });
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/project',
+				historyEntries: [{ summary: 'test' }],
+			};
+
+			const experiences = await analyzer.analyzeSession(input);
+			expect(experiences).toHaveLength(1);
+			expect(experiences[0].content).toBe('Fallback learning');
+		});
+	});
+
 	// ─── analyzeCompletedSession ─────────────────────────────────────────
 
 	describe('analyzeCompletedSession', () => {
@@ -787,6 +1049,48 @@ describe('ExperienceAnalyzer', () => {
 			// Should not throw
 			const result = await analyzer.analyzeCompletedSession('sess-1', '/project', 'claude-code');
 			expect(result).toBe(0);
+		});
+
+		it('filters out experiences with noveltyScore below 0.4', async () => {
+			mockGetEntries.mockReturnValue([
+				{ id: '1', summary: 'step 1', type: 'prompt' },
+				{ id: '2', summary: 'step 2', type: 'prompt' },
+				{ id: '3', summary: 'step 3', type: 'prompt' },
+			]);
+
+			// LLM returns mix of high and low novelty experiences
+			const resultLine = JSON.stringify({
+				type: 'result',
+				result: JSON.stringify([
+					{
+						content: 'High novelty learning',
+						situation: 'Interesting situation',
+						learning: 'Novel insight',
+						tags: [],
+						noveltyScore: 0.8,
+					},
+					{
+						content: 'Low novelty obvious thing',
+						situation: 'Boring situation',
+						learning: 'Obvious insight',
+						tags: [],
+						noveltyScore: 0.2,
+					},
+					{
+						content: 'Borderline novelty at threshold',
+						situation: 'Edge case',
+						learning: 'Threshold insight',
+						tags: [],
+						noveltyScore: 0.4,
+					},
+				]),
+			});
+			mockExecFile.mockResolvedValue({ stdout: resultLine, stderr: '' });
+
+			const result = await analyzer.analyzeCompletedSession('sess-1', '/project', 'claude-code');
+
+			// Only 2 experiences should pass (0.8 and 0.4 >= 0.4 threshold)
+			expect(result).toBe(2);
 		});
 	});
 });
