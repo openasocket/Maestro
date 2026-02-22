@@ -449,10 +449,16 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		'memory:consolidate',
 		createIpcDataHandler(
 			handlerOpts('consolidate'),
-			async (_scope: MemoryScope, _skillAreaId?: SkillAreaId, _projectPath?: string) => {
-				// Placeholder for EXP-10
-				logger.info('Consolidation placeholder invoked', LOG_CONTEXT);
-				return { consolidated: 0, message: 'Consolidation not yet implemented (EXP-10)' };
+			async (scope: MemoryScope, skillAreaId?: SkillAreaId, projectPath?: string) => {
+				const config = await memoryStore.getConfig();
+				const mergeCount = await memoryStore.consolidateMemories(
+					scope,
+					config,
+					skillAreaId,
+					projectPath
+				);
+				logger.info(`Consolidated ${mergeCount} memory groups in scope=${scope}`, LOG_CONTEXT);
+				return { consolidated: mergeCount };
 			}
 		)
 	);

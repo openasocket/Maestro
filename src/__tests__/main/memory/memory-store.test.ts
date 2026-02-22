@@ -1105,4 +1105,315 @@ describe('MemoryStore', () => {
 			expect(updated!.lastUsedAt).toBeGreaterThan(0);
 		});
 	});
+
+	// ─── Memory Consolidation ────────────────────────────────────────────
+
+	describe('consolidateMemories', () => {
+		// Helper: create a unit vector with a dominant component at `idx`
+		function makeEmbedding(idx: number, dim = 384): number[] {
+			const v = new Array(dim).fill(0);
+			v[idx] = 1;
+			return v;
+		}
+
+		// Helper: create a blended embedding (close to idx but with a small perturbation)
+		function makeNearEmbedding(idx: number, dim = 384): number[] {
+			const v = new Array(dim).fill(0);
+			v[idx] = 0.99;
+			v[(idx + 1) % dim] = 0.01; // tiny perturbation
+			return v;
+		}
+
+		it('merges 3 near-identical memories into 1 group', async () => {
+			// Add 3 memories with nearly identical embeddings to global scope
+			const mem1 = await store.addMemory({
+				content: 'Always use tabs for indentation',
+				scope: 'global',
+				tags: ['style'],
+				confidence: 0.9,
+			});
+			const mem2 = await store.addMemory({
+				content: 'Use tabs not spaces for indentation',
+				scope: 'global',
+				tags: ['formatting'],
+				confidence: 0.7,
+			});
+			const mem3 = await store.addMemory({
+				content: 'Indentation should use tabs',
+				scope: 'global',
+				tags: ['code-style'],
+				confidence: 0.5,
+			});
+
+			// Set near-identical embeddings directly
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			for (const e of lib.entries) {
+				if (e.id === mem1.id) e.embedding = makeEmbedding(0);
+				if (e.id === mem2.id) e.embedding = makeNearEmbedding(0);
+				if (e.id === mem3.id) e.embedding = makeNearEmbedding(0);
+			}
+			await store.writeLibrary(dirPath, lib);
+
+			const config = await store.getConfig();
+			const merges = await store.consolidateMemories('global', config);
+
+			expect(merges).toBe(1); // One cluster formed
+
+			// Check: mem1 (highest confidence) should remain active
+			const active = await store.listMemories('global');
+			expect(active).toHaveLength(1);
+			expect(active[0].id).toBe(mem1.id);
+
+			// Absorbed entries should be inactive
+			const all = await store.listMemories('global', undefined, undefined, true);
+			const inactive = all.filter((e) => !e.active);
+			expect(inactive).toHaveLength(2);
+
+			// Tags should be unioned
+			expect(active[0].tags).toContain('style');
+			expect(active[0].tags).toContain('formatting');
+			expect(active[0].tags).toContain('code-style');
+		});
+
+		it('does not merge memories of different types', async () => {
+			const mem1 = await store.addMemory({
+				content: 'Always use Result for errors',
+				type: 'rule',
+				scope: 'global',
+				confidence: 0.9,
+			});
+			const mem2 = await store.addMemory({
+				content: 'Result type is better for errors',
+				type: 'experience',
+				scope: 'global',
+				confidence: 0.7,
+			});
+
+			// Give them identical embeddings
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			for (const e of lib.entries) {
+				e.embedding = makeEmbedding(5);
+			}
+			await store.writeLibrary(dirPath, lib);
+
+			const config = await store.getConfig();
+			const merges = await store.consolidateMemories('global', config);
+
+			// Should NOT merge because they have different types
+			expect(merges).toBe(0);
+			const active = await store.listMemories('global');
+			expect(active).toHaveLength(2);
+		});
+
+		it('does not merge memories with low similarity', async () => {
+			const mem1 = await store.addMemory({
+				content: 'Use tabs for indentation',
+				scope: 'global',
+			});
+			const mem2 = await store.addMemory({
+				content: 'Always write tests',
+				scope: 'global',
+			});
+
+			// Give them orthogonal embeddings
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			for (const e of lib.entries) {
+				if (e.id === mem1.id) e.embedding = makeEmbedding(0);
+				if (e.id === mem2.id) e.embedding = makeEmbedding(1);
+			}
+			await store.writeLibrary(dirPath, lib);
+
+			const config = await store.getConfig();
+			const merges = await store.consolidateMemories('global', config);
+
+			expect(merges).toBe(0);
+			const active = await store.listMemories('global');
+			expect(active).toHaveLength(2);
+		});
+
+		it('computes weighted-average confidence and sums useCounts', async () => {
+			const mem1 = await store.addMemory({
+				content: 'High confidence rule',
+				scope: 'global',
+				confidence: 0.9,
+			});
+			const mem2 = await store.addMemory({
+				content: 'Lower confidence rule',
+				scope: 'global',
+				confidence: 0.3,
+			});
+
+			// Set useCounts and embeddings directly
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			for (const e of lib.entries) {
+				if (e.id === mem1.id) {
+					e.embedding = makeEmbedding(0);
+					e.useCount = 5;
+					e.effectivenessScore = 0.8;
+				}
+				if (e.id === mem2.id) {
+					e.embedding = makeNearEmbedding(0);
+					e.useCount = 3;
+					e.effectivenessScore = 0.6;
+				}
+			}
+			await store.writeLibrary(dirPath, lib);
+
+			const config = await store.getConfig();
+			await store.consolidateMemories('global', config);
+
+			const active = await store.listMemories('global');
+			expect(active).toHaveLength(1);
+
+			// Weighted average: (0.9 * 5 + 0.3 * 3) / (5 + 3) = (4.5 + 0.9) / 8 = 0.675
+			expect(active[0].confidence).toBeCloseTo(0.675, 2);
+			// Sum useCounts
+			expect(active[0].useCount).toBe(8);
+			// Max effectiveness
+			expect(active[0].effectivenessScore).toBe(0.8);
+		});
+
+		it('records consolidation history entries', async () => {
+			const mem1 = await store.addMemory({
+				content: 'Rule A',
+				scope: 'global',
+				confidence: 0.9,
+			});
+			const mem2 = await store.addMemory({
+				content: 'Rule A variant',
+				scope: 'global',
+				confidence: 0.5,
+			});
+
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			for (const e of lib.entries) {
+				e.embedding = makeEmbedding(0);
+			}
+			await store.writeLibrary(dirPath, lib);
+
+			const config = await store.getConfig();
+			await store.consolidateMemories('global', config);
+
+			// Check history.jsonl for consolidation entries
+			const historyContent = fsState.get(dirPath + '/history.jsonl');
+			expect(historyContent).toBeDefined();
+			const lines = historyContent!.trim().split('\n');
+			const consolidateEntries = lines
+				.map((l) => JSON.parse(l))
+				.filter((e: { operation: string }) => e.operation === 'consolidate');
+			expect(consolidateEntries.length).toBeGreaterThanOrEqual(1);
+			expect(consolidateEntries[0].entityId).toBe(mem1.id);
+			expect(consolidateEntries[0].source).toBe('consolidation');
+		});
+
+		it('returns 0 when fewer than 2 entries have embeddings', async () => {
+			await store.addMemory({
+				content: 'Solo memory',
+				scope: 'global',
+			});
+
+			// No embeddings set — and encoding will fail
+			mockEncodeBatch.mockRejectedValueOnce(new Error('No model'));
+
+			const config = await store.getConfig();
+			const merges = await store.consolidateMemories('global', config);
+			expect(merges).toBe(0);
+		});
+
+		it('works with skill scope', async () => {
+			const role = await store.createRole('R', 'desc');
+			const persona = await store.createPersona(role.id, 'P', 'desc');
+			const skill = await store.createSkillArea(persona.id, 'S', 'desc');
+
+			const mem1 = await store.addMemory({
+				content: 'Skill rule 1',
+				scope: 'skill',
+				skillAreaId: skill.id,
+				confidence: 0.9,
+			});
+			const mem2 = await store.addMemory({
+				content: 'Skill rule 1 variant',
+				scope: 'skill',
+				skillAreaId: skill.id,
+				confidence: 0.5,
+			});
+
+			const dirPath = store.getMemoryPath('skill', skill.id);
+			const lib = await store.readLibrary(dirPath);
+			for (const e of lib.entries) {
+				e.embedding = makeEmbedding(0);
+			}
+			await store.writeLibrary(dirPath, lib);
+
+			const config = await store.getConfig();
+			const merges = await store.consolidateMemories('skill', config, skill.id);
+			expect(merges).toBe(1);
+
+			const active = await store.listMemories('skill', skill.id);
+			expect(active).toHaveLength(1);
+			expect(active[0].id).toBe(mem1.id);
+		});
+	});
+
+	// ─── Auto-Consolidation Trigger ──────────────────────────────────────
+
+	describe('Auto-consolidation trigger', () => {
+		it('fires consolidation when active count hits multiple of 10', async () => {
+			// Spy on consolidateMemories
+			const consolSpy = vi.spyOn(store, 'consolidateMemories').mockResolvedValue(0);
+
+			// Set up config to enable auto-consolidation
+			await store.setConfig({ enableAutoConsolidation: true });
+
+			// Add 9 memories (won't trigger yet)
+			for (let i = 1; i <= 9; i++) {
+				await store.addMemory({
+					content: `Memory ${i}`,
+					scope: 'global',
+				});
+			}
+			expect(consolSpy).not.toHaveBeenCalled();
+
+			// 10th memory triggers consolidation
+			await store.addMemory({
+				content: 'Memory 10',
+				scope: 'global',
+			});
+
+			// Give fire-and-forget promise a tick to resolve
+			await new Promise((r) => setTimeout(r, 10));
+			expect(consolSpy).toHaveBeenCalledTimes(1);
+			expect(consolSpy).toHaveBeenCalledWith(
+				'global',
+				expect.objectContaining({ enableAutoConsolidation: true }),
+				undefined,
+				undefined
+			);
+
+			consolSpy.mockRestore();
+		});
+
+		it('does not fire consolidation when auto-consolidation is disabled', async () => {
+			const consolSpy = vi.spyOn(store, 'consolidateMemories').mockResolvedValue(0);
+
+			await store.setConfig({ enableAutoConsolidation: false });
+
+			for (let i = 1; i <= 10; i++) {
+				await store.addMemory({
+					content: `Memory ${i}`,
+					scope: 'global',
+				});
+			}
+
+			await new Promise((r) => setTimeout(r, 10));
+			expect(consolSpy).not.toHaveBeenCalled();
+
+			consolSpy.mockRestore();
+		});
+	});
 });

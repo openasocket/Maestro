@@ -627,6 +627,18 @@ export class MemoryStore {
 			content: entry.content.slice(0, 200),
 			source: entry.source ?? 'user',
 		});
+
+		// Auto-consolidation: fire-and-forget when active count is divisible by 10
+		const activeCount = lib.entries.filter((e) => e.active).length;
+		if (activeCount > 0 && activeCount % 10 === 0) {
+			const config = await this.getConfig();
+			if (config.enableAutoConsolidation) {
+				this.consolidateMemories(entry.scope, config, entry.skillAreaId, projectPath).catch(() => {
+					// Fire-and-forget — log nothing, degrade gracefully
+				});
+			}
+		}
+
 		return memory;
 	}
 
@@ -1061,6 +1073,176 @@ export class MemoryStore {
 		if (modified) {
 			await this.writeLibrary(dirPath, lib);
 		}
+	}
+
+	// ─── Memory Consolidation ───────────────────────────────────────────────
+
+	/**
+	 * Consolidate semantically similar memories within a single scope.
+	 *
+	 * Algorithm (greedy clustering):
+	 * 1. Load active entries with embeddings, group by type
+	 * 2. Sort each group by confidence descending (cluster centers)
+	 * 3. For each unconsumed entry, find unconsumed entries of the same type
+	 *    with cosine similarity > config.consolidationThreshold
+	 * 4. Merge: keep higher-confidence content, union tags, weighted-average
+	 *    confidence, max effectiveness, sum useCounts
+	 * 5. Mark absorbed entries as inactive, null out embedding if content changed
+	 * 6. Write library once, append history entries
+	 *
+	 * @returns Number of merges performed
+	 */
+	async consolidateMemories(
+		scope: MemoryScope,
+		config: MemoryConfig,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string
+	): Promise<number> {
+		const dirPath = this.getMemoryPath(scope, skillAreaId, projectPath);
+		const lib = await this.readLibrary(dirPath);
+
+		// Ensure all active entries have embeddings
+		const activeEntries = lib.entries.filter((e) => e.active);
+		const missingEmbeddings = activeEntries.filter((e) => e.embedding === null);
+		if (missingEmbeddings.length > 0) {
+			try {
+				const { encodeBatch } = await import('../grpo/embedding-service');
+				const texts = missingEmbeddings.map((e) => e.content);
+				const embeddings = await encodeBatch(texts);
+				for (let i = 0; i < missingEmbeddings.length; i++) {
+					const idx = lib.entries.findIndex((e) => e.id === missingEmbeddings[i].id);
+					if (idx !== -1) {
+						lib.entries[idx].embedding = embeddings[i];
+					}
+				}
+			} catch {
+				// Embedding service unavailable — can't consolidate without embeddings
+				return 0;
+			}
+		}
+
+		// Collect active entries that now have embeddings, grouped by type
+		const embeddedEntries = lib.entries.filter((e) => e.active && e.embedding !== null);
+		if (embeddedEntries.length < 2) return 0;
+
+		const byType = new Map<string, MemoryEntry[]>();
+		for (const entry of embeddedEntries) {
+			const group = byType.get(entry.type) ?? [];
+			group.push(entry);
+			byType.set(entry.type, group);
+		}
+
+		const consumed = new Set<MemoryId>();
+		const historyEntries: MemoryHistoryEntry[] = [];
+		let mergeCount = 0;
+		const now = Date.now();
+
+		for (const [, entries] of byType) {
+			// Sort by confidence descending — highest confidence becomes cluster center
+			entries.sort((a, b) => b.confidence - a.confidence);
+
+			for (let i = 0; i < entries.length; i++) {
+				const center = entries[i];
+				if (consumed.has(center.id)) continue;
+
+				// Find all similar entries of the same type
+				const cluster: MemoryEntry[] = [];
+				for (let j = i + 1; j < entries.length; j++) {
+					const candidate = entries[j];
+					if (consumed.has(candidate.id)) continue;
+
+					const sim = cosineSimilarity(center.embedding!, candidate.embedding!);
+					if (sim >= config.consolidationThreshold) {
+						cluster.push(candidate);
+					}
+				}
+
+				if (cluster.length === 0) continue;
+
+				// Merge cluster into center
+				const centerIdx = lib.entries.findIndex((e) => e.id === center.id);
+				if (centerIdx === -1) continue;
+
+				// Union tags
+				const allTags = new Set(center.tags);
+				for (const member of cluster) {
+					for (const tag of member.tags) allTags.add(tag);
+				}
+
+				// Weighted-average confidence by useCount
+				let totalWeight = Math.max(center.useCount, 1);
+				let weightedSum = center.confidence * totalWeight;
+				for (const member of cluster) {
+					const w = Math.max(member.useCount, 1);
+					weightedSum += member.confidence * w;
+					totalWeight += w;
+				}
+				const avgConfidence = weightedSum / totalWeight;
+
+				// Max effectiveness
+				let maxEffectiveness = center.effectivenessScore;
+				for (const member of cluster) {
+					if (member.effectivenessScore > maxEffectiveness) {
+						maxEffectiveness = member.effectivenessScore;
+					}
+				}
+
+				// Sum useCounts
+				let totalUseCount = center.useCount;
+				for (const member of cluster) {
+					totalUseCount += member.useCount;
+				}
+
+				// Update center entry
+				lib.entries[centerIdx] = {
+					...lib.entries[centerIdx],
+					tags: [...allTags],
+					confidence: avgConfidence,
+					effectivenessScore: maxEffectiveness,
+					useCount: totalUseCount,
+					updatedAt: now,
+					// Content stays from center (highest confidence), no embedding change needed
+				};
+
+				// Mark absorbed entries as inactive
+				const absorbedIds: string[] = [];
+				for (const member of cluster) {
+					consumed.add(member.id);
+					const memberIdx = lib.entries.findIndex((e) => e.id === member.id);
+					if (memberIdx !== -1) {
+						lib.entries[memberIdx] = {
+							...lib.entries[memberIdx],
+							active: false,
+							updatedAt: now,
+						};
+					}
+					absorbedIds.push(member.id);
+				}
+
+				consumed.add(center.id); // Mark center as consumed so it's not re-clustered
+
+				historyEntries.push({
+					timestamp: now,
+					operation: 'consolidate',
+					entityType: 'memory',
+					entityId: center.id,
+					content: `Merged ${cluster.length} entries into ${center.id}`,
+					reason: `Absorbed: ${absorbedIds.join(', ')}`,
+					source: 'consolidation',
+				});
+
+				mergeCount++;
+			}
+		}
+
+		if (mergeCount > 0) {
+			await this.writeLibrary(dirPath, lib);
+			for (const entry of historyEntries) {
+				await this.appendHistory(dirPath, entry);
+			}
+		}
+
+		return mergeCount;
 	}
 
 	// ─── Seed Data ──────────────────────────────────────────────────────────
