@@ -742,6 +742,227 @@ describe('ExperienceAnalyzer', () => {
 			const stored = await analyzer.storeExperiences(experiences, input);
 			expect(stored).toBe(0);
 		});
+
+		it('places experience in skill scope when cascading search finds matching skill area', async () => {
+			// Set up embedding mock — query vector [1, 0, 0, ...0]
+			const queryVector = new Array(384).fill(0);
+			queryVector[0] = 1.0;
+			mockEncode.mockResolvedValue(queryVector);
+
+			// Set up registry with persona and skill area (no embeddings → always match)
+			const registryPath = '/mock/userData/memories/registry.json';
+			fsState.set(
+				registryPath,
+				JSON.stringify({
+					version: 1,
+					roles: [],
+					personas: [
+						{
+							id: 'persona-1',
+							roleId: 'role-1',
+							name: 'Test Persona',
+							description: 'Test persona',
+							embedding: null,
+							skillAreaIds: ['skill-1'],
+							assignedAgents: [],
+							assignedProjects: [],
+							active: true,
+							createdAt: 1000,
+							updatedAt: 1000,
+						},
+					],
+					skillAreas: [
+						{
+							id: 'skill-1',
+							personaId: 'persona-1',
+							name: 'Test Skill',
+							description: 'Test skill area',
+							embedding: null,
+							active: true,
+							createdAt: 1000,
+							updatedAt: 1000,
+						},
+					],
+				})
+			);
+
+			// Existing memory in skill area with cosine ~0.75 (above threshold but below dedup)
+			const existingVector = new Array(384).fill(0);
+			existingVector[0] = 0.75;
+			existingVector[1] = Math.sqrt(1 - 0.75 * 0.75); // Normalize to unit length
+
+			const skillLibPath = '/mock/userData/memories/skills/skill-1/library.json';
+			fsState.set(
+				skillLibPath,
+				JSON.stringify({
+					version: 1,
+					entries: [
+						{
+							id: 'existing-skill-memory',
+							content: 'Related skill memory',
+							type: 'rule',
+							scope: 'skill',
+							skillAreaId: 'skill-1',
+							tags: [],
+							source: 'user',
+							confidence: 1.0,
+							pinned: false,
+							active: true,
+							embedding: existingVector,
+							effectivenessScore: 0.5,
+							useCount: 0,
+							tokenEstimate: 10,
+							lastUsedAt: 0,
+							createdAt: 1000,
+							updatedAt: 1000,
+						},
+					],
+				})
+			);
+
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'New skill-related learning',
+					situation: 'Working on related task',
+					learning: 'New insight for skill area',
+					tags: ['skill-test'],
+					noveltyScore: 0.7,
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-skill',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(1);
+
+			// Verify the memory was stored in the skill area library
+			const updatedLib = JSON.parse(fsState.get(skillLibPath)!);
+			const newEntry = updatedLib.entries.find(
+				(e: { content: string }) => e.content === 'New skill-related learning'
+			);
+			expect(newEntry).toBeDefined();
+			expect(newEntry.scope).toBe('skill');
+			expect(newEntry.skillAreaId).toBe('skill-1');
+			expect(newEntry.type).toBe('experience');
+			expect(newEntry.source).toBe('session-analysis');
+		});
+
+		it('truncates diffSummary to 500 chars in experienceContext', async () => {
+			const longDiff = 'x'.repeat(1000);
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'Learning with long diff',
+					situation: 'Test situation',
+					learning: 'Test learning',
+					tags: [],
+					noveltyScore: 0.7,
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-diff',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+				gitDiff: longDiff,
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(1);
+
+			// Find the stored memory and check diffSummary length
+			let diffSummary: string | undefined;
+			for (const [filePath, content] of fsState) {
+				if (filePath.endsWith('library.json')) {
+					const lib = JSON.parse(content);
+					const entry = (lib.entries ?? []).find(
+						(e: { content: string }) => e.content === 'Learning with long diff'
+					);
+					if (entry?.experienceContext?.diffSummary) {
+						diffSummary = entry.experienceContext.diffSummary;
+					}
+				}
+			}
+			expect(diffSummary).toBeDefined();
+			expect(diffSummary!.length).toBe(500);
+		});
+
+		it('populates complete experienceContext with all session metadata', async () => {
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'Metadata test learning',
+					situation: 'Full metadata situation',
+					learning: 'Full metadata learning',
+					tags: ['meta'],
+					noveltyScore: 0.9,
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-meta',
+				agentType: 'codex',
+				projectPath: '/meta/project',
+				historyEntries: [],
+				gitDiff: 'diff --git a/foo.ts',
+				sessionCostUsd: 0.123,
+				sessionDurationMs: 45000,
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(1);
+
+			// Find and verify experienceContext
+			let ctx: Record<string, unknown> | undefined;
+			for (const [filePath, content] of fsState) {
+				if (filePath.endsWith('library.json')) {
+					const lib = JSON.parse(content);
+					const entry = (lib.entries ?? []).find(
+						(e: { content: string }) => e.content === 'Metadata test learning'
+					);
+					if (entry?.experienceContext) {
+						ctx = entry.experienceContext;
+					}
+				}
+			}
+			expect(ctx).toBeDefined();
+			expect(ctx!.situation).toBe('Full metadata situation');
+			expect(ctx!.learning).toBe('Full metadata learning');
+			expect(ctx!.sourceSessionId).toBe('sess-meta');
+			expect(ctx!.sourceProjectPath).toBe('/meta/project');
+			expect(ctx!.sourceAgentType).toBe('codex');
+			expect(ctx!.diffSummary).toBe('diff --git a/foo.ts');
+			expect(ctx!.sessionCostUsd).toBe(0.123);
+			expect(ctx!.sessionDurationMs).toBe(45000);
+		});
+
+		it('degrades gracefully when embedding service is unavailable for dedup', async () => {
+			// mockEncode defaults to throwing — embedding unavailable
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'Should still store without dedup',
+					situation: 'No embeddings available',
+					learning: 'Graceful degradation works',
+					tags: [],
+					noveltyScore: 0.6,
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-no-embed',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			// Should store despite no embedding service (skips dedup)
+			expect(stored).toBe(1);
+		});
 	});
 
 	// ─── Singleton ───────────────────────────────────────────────────────
