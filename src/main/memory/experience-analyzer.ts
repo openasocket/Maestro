@@ -214,10 +214,10 @@ export class ExperienceAnalyzer {
 					try {
 						const a = JSON.parse(line);
 						return {
-							filePath: a.filePath ?? '',
-							action: a.action ?? '',
-							lineRange: a.lineRange,
-						};
+							filePath: String(a.filePath ?? ''),
+							action: String(a.action ?? ''),
+							...(a.lineRange != null ? { lineRange: String(a.lineRange) } : {}),
+						} as { filePath: string; action: string; lineRange?: string };
 					} catch {
 						return null;
 					}
@@ -446,7 +446,21 @@ export class ExperienceAnalyzer {
 		try {
 			const { getMemoryStore } = await import('./memory-store');
 			const store = getMemoryStore();
-			return await store.getConfig();
+			// Config file may contain experience-analyzer-specific keys beyond the typed MemoryConfig
+			const raw = (await store.getConfig()) as unknown as Record<string, unknown>;
+			return {
+				enableExperienceExtraction:
+					typeof raw.enableExperienceExtraction === 'boolean'
+						? raw.enableExperienceExtraction
+						: undefined,
+				minHistoryEntriesForAnalysis:
+					typeof raw.minHistoryEntriesForAnalysis === 'number'
+						? raw.minHistoryEntriesForAnalysis
+						: undefined,
+				minNoveltyScore: typeof raw.minNoveltyScore === 'number' ? raw.minNoveltyScore : undefined,
+				analysisCooldownMs:
+					typeof raw.analysisCooldownMs === 'number' ? raw.analysisCooldownMs : undefined,
+			};
 		} catch {
 			return {};
 		}
