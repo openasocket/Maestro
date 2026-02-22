@@ -243,6 +243,42 @@ describe('ExperienceAnalyzer', () => {
 			expect(prompt).toContain('unknown'); // duration and cost
 			expect(prompt).toContain('N/A'); // git diff, VIBES
 		});
+
+		it('uses the experience-extraction prompt template (no leftover placeholders)', () => {
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-3',
+				agentType: 'claude-code',
+				projectPath: '/home/user/project',
+				historyEntries: [{ summary: 'Step 1' }],
+				sessionDurationMs: 10000,
+				sessionCostUsd: 0.01,
+			};
+
+			const prompt = analyzer.compilePrompt(input);
+
+			// No template variables should remain
+			expect(prompt).not.toMatch(/\{\{[A-Z_]+\}\}/);
+		});
+
+		it('template contains structural sections from the .md file', () => {
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-4',
+				agentType: 'claude-code',
+				projectPath: '/test',
+				historyEntries: [],
+			};
+
+			const prompt = analyzer.compilePrompt(input);
+
+			// Validate key structural sections from the template
+			expect(prompt).toContain('## Session Context');
+			expect(prompt).toContain('## Session History');
+			expect(prompt).toContain('## Code Changes (Git Diff)');
+			expect(prompt).toContain('## VIBES Audit Trail');
+			expect(prompt).toContain('## Instructions');
+			expect(prompt).toContain('experience extraction agent');
+			expect(prompt).toContain('noveltyScore');
+		});
 	});
 
 	// ─── Output Parsing ──────────────────────────────────────────────────

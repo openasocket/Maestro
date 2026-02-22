@@ -48,4 +48,7 @@ export {
 
 	// Director's Notes
 	directorNotesPrompt,
+
+	// Experience extraction
+	experienceExtractionPrompt,
 } from '../generated/prompts';

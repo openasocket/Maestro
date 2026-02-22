@@ -12,6 +12,8 @@
  * - Graceful degradation: tolerates missing data sources (no git, no VIBES, etc.)
  */
 
+import { experienceExtractionPrompt } from '../../prompts';
+
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
 export interface ExperienceAnalyzerInput {
@@ -270,9 +272,10 @@ export class ExperienceAnalyzer {
 	}
 
 	/**
-	 * Compile the analysis prompt from template and input data.
+	 * Compile the analysis prompt from the experience-extraction template.
 	 *
-	 * Stub: will be fully implemented in Task 5/6 with the prompt template.
+	 * Loads the prompt from src/prompts/experience-extraction.md (compiled to
+	 * a TypeScript constant at build time) and substitutes template variables.
 	 */
 	compilePrompt(input: ExperienceAnalyzerInput): string {
 		const historyText = input.historyEntries
@@ -301,48 +304,14 @@ export class ExperienceAnalyzer {
 		const vibesSection =
 			vibesText !== 'N/A' || annotationsText ? `${vibesText}\n${annotationsText}` : 'N/A';
 
-		return [
-			'You are an experience extraction agent. Analyze the following coding session data and extract discrete, novel learnings that would be valuable to remember for future similar work.',
-			'',
-			'## Session Context',
-			`- Agent: ${input.agentType}`,
-			`- Project: ${input.projectPath}`,
-			`- Duration: ${durationStr}`,
-			`- Cost: ${costStr}`,
-			'',
-			'## Session History',
-			historyText || 'N/A',
-			'',
-			'## Code Changes (Git Diff)',
-			input.gitDiff || 'N/A',
-			'',
-			'## VIBES Audit Trail',
-			vibesSection,
-			'',
-			'## Instructions',
-			'',
-			'Extract 0-5 discrete experiences from this session. Each experience should be:',
-			'1. **Novel** — not obvious common knowledge.',
-			'2. **Actionable** — something that changes future behavior.',
-			'3. **Specific** — grounded in what actually happened, not generic advice.',
-			'',
-			'If the session was routine with no novel learnings, return an empty array.',
-			'',
-			'Respond with ONLY a JSON array:',
-			'```json',
-			'[',
-			'  {',
-			'    "content": "Short memory-style statement of the learning",',
-			'    "situation": "What happened that led to this learning",',
-			'    "learning": "The discrete insight or teaching",',
-			'    "tags": ["tag1", "tag2"],',
-			'    "noveltyScore": 0.0-1.0',
-			'  }',
-			']',
-			'```',
-			'',
-			'Return `[]` if nothing novel was learned.',
-		].join('\n');
+		return experienceExtractionPrompt
+			.replace('{{AGENT_TYPE}}', input.agentType)
+			.replace('{{PROJECT_PATH}}', input.projectPath)
+			.replace('{{DURATION}}', durationStr)
+			.replace('{{COST}}', costStr)
+			.replace('{{HISTORY_ENTRIES}}', historyText || 'N/A')
+			.replace('{{GIT_DIFF}}', input.gitDiff || 'N/A')
+			.replace('{{VIBES_DATA}}', vibesSection);
 	}
 
 	/**
