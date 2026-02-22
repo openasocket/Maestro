@@ -115,6 +115,14 @@ vi.mock('../../../main/history-manager', () => ({
 	}),
 }));
 
+// Mock Stats DB
+const mockGetQueryEvents = vi.fn(() => []);
+vi.mock('../../../main/stats', () => ({
+	getStatsDB: () => ({
+		getQueryEvents: mockGetQueryEvents,
+	}),
+}));
+
 import {
 	ExperienceAnalyzer,
 	getExperienceAnalyzer,
@@ -134,9 +142,11 @@ describe('ExperienceAnalyzer', () => {
 		mockEncodeBatch.mockReset();
 		mockExecFile.mockReset();
 		mockGetEntries.mockReset();
+		mockGetQueryEvents.mockReset();
 		mockEncode.mockRejectedValue(new Error('Embedding model is not available'));
 		mockEncodeBatch.mockRejectedValue(new Error('Embedding model is not available'));
 		mockGetEntries.mockReturnValue([]);
+		mockGetQueryEvents.mockReturnValue([]);
 	});
 
 	// ─── Interface Contracts ─────────────────────────────────────────────
@@ -449,6 +459,9 @@ describe('ExperienceAnalyzer', () => {
 				throw new Error('History unavailable');
 			});
 			mockExecFile.mockRejectedValue(new Error('not a git repo'));
+			mockGetQueryEvents.mockImplementation(() => {
+				throw new Error('Stats DB unavailable');
+			});
 
 			const input = await analyzer.gatherSessionData('sess-1', '/project', 'claude-code');
 
@@ -457,6 +470,72 @@ describe('ExperienceAnalyzer', () => {
 			expect(input.gitDiff).toBeUndefined();
 			expect(input.vibesManifest).toBeUndefined();
 			expect(input.vibesAnnotations).toBeUndefined();
+			expect(input.sessionDurationMs).toBeUndefined();
+		});
+
+		it('populates sessionDurationMs from stats DB query events', async () => {
+			mockExecFile.mockRejectedValue(new Error('not a git repo'));
+			mockGetQueryEvents.mockReturnValue([
+				{
+					id: 'q1',
+					sessionId: 'sess-1',
+					duration: 5000,
+					agentType: 'claude-code',
+					source: 'user',
+					startTime: 1000,
+				},
+				{
+					id: 'q2',
+					sessionId: 'sess-1',
+					duration: 3000,
+					agentType: 'claude-code',
+					source: 'user',
+					startTime: 6000,
+				},
+				{
+					id: 'q3',
+					sessionId: 'sess-1',
+					duration: 2000,
+					agentType: 'claude-code',
+					source: 'auto',
+					startTime: 9000,
+				},
+			]);
+
+			const input = await analyzer.gatherSessionData('sess-1', '/project', 'claude-code');
+
+			expect(input.sessionDurationMs).toBe(10000); // 5000 + 3000 + 2000
+		});
+
+		it('queries stats DB with correct sessionId filter', async () => {
+			mockExecFile.mockRejectedValue(new Error('not a git repo'));
+			mockGetQueryEvents.mockReturnValue([]);
+
+			await analyzer.gatherSessionData('my-session-123', '/project', 'claude-code');
+
+			expect(mockGetQueryEvents).toHaveBeenCalledWith('all', { sessionId: 'my-session-123' });
+		});
+
+		it('does not set sessionDurationMs when stats DB returns empty events', async () => {
+			mockExecFile.mockRejectedValue(new Error('not a git repo'));
+			mockGetQueryEvents.mockReturnValue([]);
+
+			const input = await analyzer.gatherSessionData('sess-1', '/project', 'claude-code');
+
+			expect(input.sessionDurationMs).toBeUndefined();
+		});
+
+		it('degrades gracefully when stats DB throws', async () => {
+			mockExecFile.mockRejectedValue(new Error('not a git repo'));
+			mockGetQueryEvents.mockImplementation(() => {
+				throw new Error('Database not initialized');
+			});
+
+			const input = await analyzer.gatherSessionData('sess-1', '/project', 'claude-code');
+
+			// Should not throw, sessionDurationMs remains undefined
+			expect(input.sessionId).toBe('sess-1');
+			expect(input.sessionDurationMs).toBeUndefined();
 		});
 	});
 

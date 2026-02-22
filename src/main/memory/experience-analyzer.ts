@@ -225,6 +225,18 @@ export class ExperienceAnalyzer {
 			// VIBES not available — proceed without
 		}
 
+		// Stats: query stats.db for session query events to get total duration
+		try {
+			const { getStatsDB } = await import('../stats');
+			const statsDb = getStatsDB();
+			const queryEvents = statsDb.getQueryEvents('all', { sessionId });
+			if (queryEvents.length > 0) {
+				input.sessionDurationMs = queryEvents.reduce((sum, q) => sum + q.duration, 0);
+			}
+		} catch {
+			// Stats DB unavailable — proceed without duration
+		}
+
 		return input;
 	}
 
