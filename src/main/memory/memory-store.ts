@@ -147,24 +147,21 @@ export class MemoryStore {
 
 	// ─── Registry Read/Write ────────────────────────────────────────────────
 
-	private readonly EMPTY_REGISTRY: RegistryFile = {
-		version: 1,
-		roles: [],
-		personas: [],
-		skillAreas: [],
-	};
+	private emptyRegistry(): RegistryFile {
+		return { version: 1, roles: [], personas: [], skillAreas: [] };
+	}
 
 	async readRegistry(): Promise<RegistryFile> {
 		try {
 			const content = await fs.readFile(this.getRegistryPath(), 'utf-8');
-			if (!content.trim()) return { ...this.EMPTY_REGISTRY };
+			if (!content.trim()) return this.emptyRegistry();
 			return JSON.parse(content) as RegistryFile;
 		} catch (error: unknown) {
 			if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-				return { ...this.EMPTY_REGISTRY };
+				return this.emptyRegistry();
 			}
 			if (error instanceof SyntaxError) {
-				return { ...this.EMPTY_REGISTRY };
+				return this.emptyRegistry();
 			}
 			throw error;
 		}
@@ -178,23 +175,22 @@ export class MemoryStore {
 
 	// ─── Library Read/Write ─────────────────────────────────────────────────
 
-	private readonly EMPTY_LIBRARY: LibraryFile = {
-		version: 1,
-		entries: [],
-	};
+	private emptyLibrary(): LibraryFile {
+		return { version: 1, entries: [] };
+	}
 
 	async readLibrary(dirPath: string): Promise<LibraryFile> {
 		const filePath = path.join(dirPath, 'library.json');
 		try {
 			const content = await fs.readFile(filePath, 'utf-8');
-			if (!content.trim()) return { ...this.EMPTY_LIBRARY };
+			if (!content.trim()) return this.emptyLibrary();
 			return JSON.parse(content) as LibraryFile;
 		} catch (error: unknown) {
 			if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-				return { ...this.EMPTY_LIBRARY };
+				return this.emptyLibrary();
 			}
 			if (error instanceof SyntaxError) {
-				return { ...this.EMPTY_LIBRARY };
+				return this.emptyLibrary();
 			}
 			throw error;
 		}
