@@ -1416,4 +1416,193 @@ describe('MemoryStore', () => {
 			consolSpy.mockRestore();
 		});
 	});
+
+	// ─── Effectiveness Tracking ─────────────────────────────────────────
+
+	describe('updateEffectiveness', () => {
+		it('increases effectiveness on positive outcome', async () => {
+			const mem = await store.addMemory({
+				content: 'Test effectiveness increase',
+				scope: 'global',
+			});
+			// Default effectivenessScore is 0.5
+			expect(mem.effectivenessScore).toBe(0.5);
+
+			await store.updateEffectiveness([mem.id], 1.0, 'global');
+
+			const updated = await store.getMemory(mem.id, 'global');
+			// 0.3 * 1.0 + 0.7 * 0.5 = 0.65
+			expect(updated!.effectivenessScore).toBeCloseTo(0.65, 5);
+		});
+
+		it('decreases effectiveness on negative outcome', async () => {
+			const mem = await store.addMemory({
+				content: 'Test effectiveness decrease',
+				scope: 'global',
+			});
+
+			await store.updateEffectiveness([mem.id], 0.0, 'global');
+
+			const updated = await store.getMemory(mem.id, 'global');
+			// 0.3 * 0.0 + 0.7 * 0.5 = 0.35
+			expect(updated!.effectivenessScore).toBeCloseTo(0.35, 5);
+		});
+
+		it('clamps effectiveness to [0, 1]', async () => {
+			const mem = await store.addMemory({
+				content: 'Test clamp',
+				scope: 'global',
+			});
+
+			// Push effectiveness up several times
+			for (let i = 0; i < 20; i++) {
+				await store.updateEffectiveness([mem.id], 1.0, 'global');
+			}
+
+			const updated = await store.getMemory(mem.id, 'global');
+			expect(updated!.effectivenessScore).toBeLessThanOrEqual(1.0);
+			expect(updated!.effectivenessScore).toBeGreaterThanOrEqual(0.0);
+		});
+
+		it('handles multiple IDs in batch', async () => {
+			const mem1 = await store.addMemory({ content: 'Batch 1', scope: 'global' });
+			const mem2 = await store.addMemory({ content: 'Batch 2', scope: 'global' });
+
+			await store.updateEffectiveness([mem1.id, mem2.id], 1.0, 'global');
+
+			const u1 = await store.getMemory(mem1.id, 'global');
+			const u2 = await store.getMemory(mem2.id, 'global');
+			expect(u1!.effectivenessScore).toBeCloseTo(0.65, 5);
+			expect(u2!.effectivenessScore).toBeCloseTo(0.65, 5);
+		});
+
+		it('ignores non-existent IDs without error', async () => {
+			await store.addMemory({ content: 'Existing', scope: 'global' });
+			// Should not throw
+			await store.updateEffectiveness(['non-existent-id'], 1.0, 'global');
+		});
+
+		it('is a no-op for empty ID list', async () => {
+			await store.updateEffectiveness([], 1.0, 'global');
+			// No error, nothing to check
+		});
+
+		it('works with skill scope', async () => {
+			const role = await store.createRole('R', 'D');
+			const persona = await store.createPersona(role.id, 'P', 'D');
+			const skill = await store.createSkillArea(persona.id, 'S', 'D');
+
+			const mem = await store.addMemory({
+				content: 'Skill memory',
+				scope: 'skill',
+				skillAreaId: skill.id,
+			});
+
+			await store.updateEffectiveness([mem.id], 1.0, 'skill', skill.id);
+
+			const updated = await store.getMemory(mem.id, 'skill', skill.id);
+			expect(updated!.effectivenessScore).toBeCloseTo(0.65, 5);
+		});
+	});
+
+	// ─── Confidence Decay ───────────────────────────────────────────────
+
+	describe('applyConfidenceDecay', () => {
+		it('decays confidence based on half-life', async () => {
+			const mem = await store.addMemory({
+				content: 'Old memory',
+				scope: 'global',
+				confidence: 1.0,
+			});
+
+			// Manually set lastUsedAt to 60 days ago
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			const entry = lib.entries.find((e) => e.id === mem.id)!;
+			entry.lastUsedAt = Date.now() - 60 * 86400000; // 60 days ago
+			await store.writeLibrary(dirPath, lib);
+
+			const deactivated = await store.applyConfidenceDecay('global', 30);
+
+			const updated = await store.getMemory(mem.id, 'global');
+			// 60 days with 30-day half-life: confidence *= 2^(-60/30) = 2^(-2) = 0.25
+			expect(updated!.confidence).toBeCloseTo(0.25, 2);
+			expect(deactivated).toBe(0); // 0.25 > 0.05
+		});
+
+		it('auto-deactivates entries with very low confidence', async () => {
+			const mem = await store.addMemory({
+				content: 'Very old memory',
+				scope: 'global',
+				confidence: 0.1,
+			});
+
+			// Set lastUsedAt to 120 days ago with 30-day half-life
+			// 0.1 * 2^(-120/30) = 0.1 * 2^(-4) = 0.1 * 0.0625 = 0.00625 < 0.05
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			const entry = lib.entries.find((e) => e.id === mem.id)!;
+			entry.lastUsedAt = Date.now() - 120 * 86400000;
+			await store.writeLibrary(dirPath, lib);
+
+			const deactivated = await store.applyConfidenceDecay('global', 30);
+
+			expect(deactivated).toBe(1);
+			const updated = await store.getMemory(mem.id, 'global');
+			expect(updated!.active).toBe(false);
+		});
+
+		it('skips pinned entries', async () => {
+			const mem = await store.addMemory({
+				content: 'Pinned memory',
+				scope: 'global',
+				confidence: 1.0,
+				pinned: true,
+			});
+
+			// Set old lastUsedAt
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			const entry = lib.entries.find((e) => e.id === mem.id)!;
+			entry.lastUsedAt = Date.now() - 365 * 86400000;
+			await store.writeLibrary(dirPath, lib);
+
+			await store.applyConfidenceDecay('global', 30);
+
+			const updated = await store.getMemory(mem.id, 'global');
+			// Pinned — confidence should remain 1.0
+			expect(updated!.confidence).toBe(1.0);
+			expect(updated!.active).toBe(true);
+		});
+
+		it('skips inactive entries', async () => {
+			const mem = await store.addMemory({
+				content: 'Inactive memory',
+				scope: 'global',
+				confidence: 1.0,
+			});
+
+			// Deactivate it
+			await store.updateMemory(mem.id, { active: false }, 'global');
+
+			const deactivated = await store.applyConfidenceDecay('global', 30);
+			expect(deactivated).toBe(0);
+		});
+
+		it('uses createdAt when lastUsedAt is 0', async () => {
+			const mem = await store.addMemory({
+				content: 'Never used memory',
+				scope: 'global',
+				confidence: 1.0,
+			});
+
+			// lastUsedAt defaults to 0; createdAt is recent (now)
+			// So decay should be minimal
+			await store.applyConfidenceDecay('global', 30);
+
+			const updated = await store.getMemory(mem.id, 'global');
+			// Created just now — decay should be negligible
+			expect(updated!.confidence).toBeGreaterThan(0.99);
+		});
+	});
 });

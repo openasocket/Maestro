@@ -244,6 +244,14 @@ export interface MemorySearchResult {
 	skillAreaName?: string;
 }
 
+/** Scope grouping for injected memories — used by effectiveness tracking. */
+export interface InjectionScopeGroup {
+	scope: MemoryScope;
+	skillAreaId?: SkillAreaId;
+	projectPath?: string;
+	ids: MemoryId[];
+}
+
 export interface MemoryInjectionResult {
 	injectedPrompt: string;
 	injectedIds: MemoryId[];
@@ -252,6 +260,8 @@ export interface MemoryInjectionResult {
 	personaContributions: { personaId: PersonaId; personaName: string; count: number }[];
 	/** How many project/global memories were injected */
 	flatScopeCounts: { project: number; global: number };
+	/** Scope groupings for effectiveness tracking (EXP-11) */
+	scopeGroups: InjectionScopeGroup[];
 }
 
 // ─── Seed Data ─────────────────────────────────────────────────────────────

@@ -176,9 +176,9 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 								LOG_CONTEXT
 							);
 
-							// Store injected IDs for effectiveness tracking (EXP-11)
+							// Store injected IDs + scope groups for effectiveness tracking (EXP-11)
 							const { recordSessionInjection } = await import('../../memory/memory-injector');
-							recordSessionInjection(config.sessionId, result.injectedIds);
+							recordSessionInjection(config.sessionId, result.injectedIds, result.scopeGroups);
 						}
 					} catch (err) {
 						logger.warn(

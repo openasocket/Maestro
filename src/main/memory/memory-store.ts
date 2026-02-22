@@ -1075,6 +1075,95 @@ export class MemoryStore {
 		}
 	}
 
+	// ─── Effectiveness Tracking ─────────────────────────────────────────────
+
+	/**
+	 * Update effectiveness scores for injected memories using EMA.
+	 *
+	 * Formula: new_score = 0.3 * outcomeScore + 0.7 * old_score
+	 * Clamped to [0, 1]. Batch write.
+	 *
+	 * @param injectedIds - Memory IDs that were injected into the agent prompt
+	 * @param outcomeScore - Outcome signal (0.0 = bad, 1.0 = good)
+	 * @param scope - Which scope the memories belong to
+	 * @param skillAreaId - Required for skill scope
+	 * @param projectPath - Required for project scope
+	 */
+	async updateEffectiveness(
+		injectedIds: MemoryId[],
+		outcomeScore: number,
+		scope: MemoryScope,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string
+	): Promise<void> {
+		if (injectedIds.length === 0) return;
+
+		const dirPath = this.getMemoryPath(scope, skillAreaId, projectPath);
+		const lib = await this.readLibrary(dirPath);
+		const idSet = new Set(injectedIds);
+
+		let modified = false;
+		for (const entry of lib.entries) {
+			if (idSet.has(entry.id)) {
+				entry.effectivenessScore = Math.min(
+					1,
+					Math.max(0, 0.3 * outcomeScore + 0.7 * entry.effectivenessScore)
+				);
+				modified = true;
+			}
+		}
+
+		if (modified) {
+			await this.writeLibrary(dirPath, lib);
+		}
+	}
+
+	/**
+	 * Apply confidence decay to non-pinned memories using half-life formula.
+	 *
+	 * Formula: confidence *= 2^(-daysSinceLastUsed / halfLifeDays)
+	 * Auto-deactivates entries where confidence drops below 0.05.
+	 *
+	 * @returns Number of entries that were auto-deactivated
+	 */
+	async applyConfidenceDecay(
+		scope: MemoryScope,
+		halfLifeDays: number,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string
+	): Promise<number> {
+		const dirPath = this.getMemoryPath(scope, skillAreaId, projectPath);
+		const lib = await this.readLibrary(dirPath);
+		const now = Date.now();
+		const msPerDay = 86400000;
+
+		let deactivatedCount = 0;
+		let modified = false;
+
+		for (const entry of lib.entries) {
+			if (!entry.active || entry.pinned) continue;
+
+			const lastUsed = entry.lastUsedAt > 0 ? entry.lastUsedAt : entry.createdAt;
+			const daysSinceLastUsed = (now - lastUsed) / msPerDay;
+			const decayFactor = Math.pow(2, -daysSinceLastUsed / halfLifeDays);
+			entry.confidence = entry.confidence * decayFactor;
+
+			if (entry.confidence < 0.05) {
+				entry.active = false;
+				entry.updatedAt = now;
+				deactivatedCount++;
+			}
+
+			modified = true;
+		}
+
+		if (modified) {
+			await this.writeLibrary(dirPath, lib);
+		}
+
+		return deactivatedCount;
+	}
+
 	// ─── Memory Consolidation ───────────────────────────────────────────────
 
 	/**

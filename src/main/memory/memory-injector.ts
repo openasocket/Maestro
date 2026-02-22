@@ -11,6 +11,8 @@ import type {
 	MemoryInjectionResult,
 	MemorySearchResult,
 	MemoryId,
+	MemoryScope,
+	SkillAreaId,
 } from '../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../shared/memory-types';
 import { getMemoryStore } from './memory-store';
@@ -126,6 +128,7 @@ export async function injectMemories(
 			tokenCount: 0,
 			personaContributions: [],
 			flatScopeCounts: { project: 0, global: 0 },
+			scopeGroups: [],
 		};
 	}
 
@@ -154,6 +157,7 @@ export async function injectMemories(
 			tokenCount: 0,
 			personaContributions: [],
 			flatScopeCounts: { project: 0, global: 0 },
+			scopeGroups: [],
 		};
 	}
 
@@ -190,6 +194,14 @@ export async function injectMemories(
 	const injectedIds = selected.map((r) => r.entry.id);
 	const byScope = groupInjectedByScope(selected);
 
+	// Build scope groups with projectPath for effectiveness tracking
+	const scopeGroups = byScope.map(({ scope, skillAreaId, ids }) => ({
+		scope,
+		skillAreaId,
+		projectPath: scope === 'project' ? projectPath : undefined,
+		ids,
+	}));
+
 	for (const { scope, skillAreaId, ids } of byScope) {
 		await store.recordInjection(
 			ids,
@@ -209,6 +221,7 @@ export async function injectMemories(
 		tokenCount,
 		personaContributions,
 		flatScopeCounts: { project: projectCount, global: globalCount },
+		scopeGroups,
 	};
 }
 
@@ -269,6 +282,7 @@ export async function tryInjectMemories(
 			tokenCount: 0,
 			personaContributions: [],
 			flatScopeCounts: { project: 0, global: 0 },
+			scopeGroups: [],
 		};
 	}
 }
@@ -276,18 +290,45 @@ export async function tryInjectMemories(
 // ─── Session Injection Tracking ─────────────────────────────────────────────
 
 /**
- * Module-level map of sessionId → injected memory IDs.
+ * Scope metadata for a group of injected memories.
+ * Used by effectiveness tracking to call updateEffectiveness per scope.
+ */
+export interface InjectionScopeRecord {
+	scope: MemoryScope;
+	skillAreaId?: SkillAreaId;
+	projectPath?: string;
+	ids: MemoryId[];
+}
+
+/**
+ * Full injection record for a session.
+ */
+export interface InjectionRecord {
+	ids: MemoryId[];
+	scopeGroups: InjectionScopeRecord[];
+}
+
+/**
+ * Module-level map of sessionId → injection record.
  * Used by effectiveness tracking (EXP-11) to correlate
  * session outcomes with which memories were injected.
  */
-const _sessionInjections = new Map<string, MemoryId[]>();
+const _sessionInjections = new Map<string, InjectionRecord>();
 
 /**
- * Record which memory IDs were injected for a given session.
+ * Record which memory IDs were injected for a given session,
+ * along with scope grouping for per-scope effectiveness updates.
  * Called from process.ts after successful injection.
  */
-export function recordSessionInjection(sessionId: string, memoryIds: MemoryId[]): void {
-	_sessionInjections.set(sessionId, memoryIds);
+export function recordSessionInjection(
+	sessionId: string,
+	memoryIds: MemoryId[],
+	scopeGroups?: InjectionScopeRecord[]
+): void {
+	_sessionInjections.set(sessionId, {
+		ids: memoryIds,
+		scopeGroups: scopeGroups ?? [],
+	});
 }
 
 /**
@@ -295,6 +336,15 @@ export function recordSessionInjection(sessionId: string, memoryIds: MemoryId[])
  * Returns undefined if no injection was recorded.
  */
 export function getSessionInjection(sessionId: string): MemoryId[] | undefined {
+	const record = _sessionInjections.get(sessionId);
+	return record?.ids;
+}
+
+/**
+ * Retrieve the full injection record for a session (IDs + scope groups).
+ * Returns undefined if no injection was recorded.
+ */
+export function getInjectionRecord(sessionId: string): InjectionRecord | undefined {
 	return _sessionInjections.get(sessionId);
 }
 
