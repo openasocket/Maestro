@@ -476,6 +476,11 @@ export function setupExitListener(
 			}
 		})();
 
+		// Clean up live context queue for this session (EXP-LIVE-01)
+		import('../memory/live-context-queue')
+			.then(({ getLiveContextQueue }) => getLiveContextQueue().clearSession(sessionId))
+			.catch(() => {});
+
 		// Broadcast exit to web clients
 		const webServer = getWebServer();
 		if (webServer) {

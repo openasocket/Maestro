@@ -385,6 +385,45 @@ describe('ExperienceAnalyzer', () => {
 			}
 		});
 
+		it('MemoryConfig live injection fields have correct defaults', async () => {
+			const { MEMORY_CONFIG_DEFAULTS } = await import('../../../shared/memory-types');
+			expect(MEMORY_CONFIG_DEFAULTS.enableLiveInjection).toBe(false);
+			expect(MEMORY_CONFIG_DEFAULTS.liveInjectionTokenBudget).toBe(750);
+			expect(MEMORY_CONFIG_DEFAULTS.liveInjectionSessionCap).toBe(2000);
+			expect(MEMORY_CONFIG_DEFAULTS.liveInjectionMaxCount).toBe(3);
+			expect(MEMORY_CONFIG_DEFAULTS.enableCrossAgentBroadcast).toBe(false);
+			expect(MEMORY_CONFIG_DEFAULTS.liveSearchCooldownSeconds).toBe(60);
+		});
+
+		it('MemoryConfig supports live injection overrides', async () => {
+			const { MEMORY_CONFIG_DEFAULTS } = await import('../../../shared/memory-types');
+			const config: import('../../../shared/memory-types').MemoryConfig = {
+				...MEMORY_CONFIG_DEFAULTS,
+				enableLiveInjection: true,
+				liveInjectionTokenBudget: 1000,
+				liveInjectionSessionCap: 3000,
+				liveInjectionMaxCount: 5,
+				enableCrossAgentBroadcast: true,
+				liveSearchCooldownSeconds: 30,
+			};
+			expect(config.enableLiveInjection).toBe(true);
+			expect(config.liveInjectionTokenBudget).toBe(1000);
+			expect(config.liveInjectionSessionCap).toBe(3000);
+			expect(config.liveInjectionMaxCount).toBe(5);
+			expect(config.enableCrossAgentBroadcast).toBe(true);
+			expect(config.liveSearchCooldownSeconds).toBe(30);
+		});
+
+		it('PendingContextSource type accepts all valid values', async () => {
+			const sources: import('../../../shared/memory-types').PendingContextSource[] = [
+				'cross-agent',
+				'new-experience',
+				'skill-update',
+				'monitoring',
+			];
+			expect(sources).toHaveLength(4);
+		});
+
 		it('MemoryEntry supports archived field', () => {
 			const entry: import('../../../shared/memory-types').MemoryEntry = {
 				id: 'test-id',

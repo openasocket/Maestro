@@ -659,6 +659,14 @@ export function recordSessionInjection(
 		ids: memoryIds,
 		scopeGroups: scopeGroups ?? [],
 	});
+
+	// Register spawn-time IDs with live context queue for dedup (EXP-LIVE-01).
+	// Prevents re-injecting the same memories mid-session.
+	import('./live-context-queue')
+		.then(({ getLiveContextQueue }) => {
+			getLiveContextQueue().markDelivered(sessionId, memoryIds);
+		})
+		.catch(() => {});
 }
 
 /**

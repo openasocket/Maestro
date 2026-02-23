@@ -572,11 +572,39 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 		'process:write',
 		withIpcErrorLogging(handlerOpts('write'), async (sessionId: string, data: string) => {
 			const processManager = requireProcessManager(getProcessManager);
+
+			// ── Mid-session context injection (EXP-LIVE-01) ──
+			// Check for pending context updates and prepend to user's message.
+			// hasContent() is O(1) Map lookup — negligible overhead on every write.
+			let effectiveData = data;
+			try {
+				const { getLiveContextQueue } = await import('../../memory/live-context-queue');
+				const queue = getLiveContextQueue();
+				if (queue.hasContent(sessionId)) {
+					// Skip SSH sessions — stdin is closed after initial script
+					const proc = processManager.get(sessionId);
+					if (proc && !proc.sshRemoteId) {
+						const contextBlock = queue.drain(sessionId);
+						if (contextBlock) {
+							effectiveData = contextBlock + '\n\n' + data;
+							logger.debug('[Memory] Prepended live context to write', LOG_CONTEXT, {
+								sessionId,
+								contextLength: contextBlock.length,
+							});
+						}
+					}
+				}
+				// Notify monitor of user write for periodic trigger (EXP-LIVE-02)
+				queue.notifyWrite(sessionId);
+			} catch {
+				// Never block user writes — degrade silently
+			}
+
 			logger.debug(`Writing to process: ${sessionId}`, LOG_CONTEXT, {
 				sessionId,
-				dataLength: data.length,
+				dataLength: effectiveData.length,
 			});
-			return processManager.write(sessionId, data);
+			return processManager.write(sessionId, effectiveData);
 		})
 	);
 

@@ -215,6 +215,14 @@ export interface MemoryConfig {
 	enableHybridSearch: boolean;
 	/** Enable mid-session live memory injection via monitor triggers — default false */
 	enableLiveInjection: boolean;
+	/** Maximum tokens for a single mid-session injection — default 750 */
+	liveInjectionTokenBudget: number;
+	/** Maximum total mid-session injection tokens per session — default 2000 */
+	liveInjectionSessionCap: number;
+	/** Maximum mid-session injections per session — default 3 */
+	liveInjectionMaxCount: number;
+	/** Enable cross-agent broadcasting — default false */
+	enableCrossAgentBroadcast: boolean;
 	/** Minimum seconds between live memory searches per session — default 60 */
 	liveSearchCooldownSeconds: number;
 }
@@ -238,8 +246,17 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	injectionStrategy: 'balanced',
 	enableHybridSearch: true,
 	enableLiveInjection: false,
+	liveInjectionTokenBudget: 750,
+	liveInjectionSessionCap: 2000,
+	liveInjectionMaxCount: 3,
+	enableCrossAgentBroadcast: false,
 	liveSearchCooldownSeconds: 60,
 };
+
+// ─── Live Injection ───────────────────────────────────────────────────────
+
+/** Source of a pending context update for mid-session injection */
+export type PendingContextSource = 'cross-agent' | 'new-experience' | 'skill-update' | 'monitoring';
 
 // ─── Hierarchy Suggestions ─────────────────────────────────────────────────
 
