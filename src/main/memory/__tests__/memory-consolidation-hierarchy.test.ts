@@ -78,12 +78,14 @@ function realCosineSimilarity(a: number[], b: number[]): number {
 	return denom === 0 ? 0 : dot / denom;
 }
 
-const mockEncode = vi.fn(async () => new Array(384).fill(0));
-const mockEncodeBatch = vi.fn(async (texts: string[]) => texts.map(() => new Array(384).fill(0)));
+const mockEncode = vi.fn(async (..._args: any[]) => new Array(384).fill(0));
+const mockEncodeBatch = vi.fn(async (..._args: any[]) =>
+	new Array(384).fill(0).map(() => new Array(384).fill(0))
+);
 
 vi.mock('../../../main/grpo/embedding-service', () => ({
-	encode: (...args: unknown[]) => mockEncode(...args),
-	encodeBatch: (...args: unknown[]) => mockEncodeBatch(...args),
+	encode: (...args: any[]) => mockEncode(...args),
+	encodeBatch: (...args: any[]) => mockEncodeBatch(...args),
 	cosineSimilarity: realCosineSimilarity,
 	VECTOR_DIM: 384,
 }));
@@ -278,7 +280,7 @@ describe('Memory Integration — Consolidation Within Hierarchy Boundaries', () 
 				skillAreaId: skillA.id,
 				confidence: 0.95,
 			});
-			const memA2 = await store.addMemory({
+			await store.addMemory({
 				content: 'Error handling should use Result<T, E> types',
 				scope: 'skill',
 				skillAreaId: skillA.id,
@@ -345,14 +347,14 @@ describe('Memory Integration — Consolidation Within Hierarchy Boundaries', () 
 				tags: ['postgres', 'indexing'],
 				confidence: 0.9,
 			});
-			const memA2 = await store.addMemory({
+			await store.addMemory({
 				content: 'Always create indexes on foreign key columns',
 				scope: 'skill',
 				skillAreaId: skillA.id,
 				tags: ['performance'],
 				confidence: 0.6,
 			});
-			const memA3 = await store.addMemory({
+			await store.addMemory({
 				content: 'Foreign key columns need indexes for join performance',
 				scope: 'skill',
 				skillAreaId: skillA.id,
@@ -368,7 +370,7 @@ describe('Memory Integration — Consolidation Within Hierarchy Boundaries', () 
 				tags: ['ttl', 'cache'],
 				confidence: 0.85,
 			});
-			const memB2 = await store.addMemory({
+			await store.addMemory({
 				content: 'Cache entries must have TTL to avoid stale data',
 				scope: 'skill',
 				skillAreaId: skillB.id,
@@ -438,7 +440,7 @@ describe('Memory Integration — Consolidation Within Hierarchy Boundaries', () 
 				skillAreaId: skillA.id,
 				confidence: 0.9,
 			});
-			const memA2 = await store.addMemory({
+			await store.addMemory({
 				content: 'TypeScript strict mode ensures type safety',
 				scope: 'skill',
 				skillAreaId: skillA.id,
@@ -451,7 +453,7 @@ describe('Memory Integration — Consolidation Within Hierarchy Boundaries', () 
 				skillAreaId: skillB.id,
 				confidence: 0.9,
 			});
-			const memB2 = await store.addMemory({
+			await store.addMemory({
 				content: 'Strict TypeScript mode for type safety',
 				scope: 'skill',
 				skillAreaId: skillB.id,
@@ -459,10 +461,7 @@ describe('Memory Integration — Consolidation Within Hierarchy Boundaries', () 
 			});
 
 			// Identical embeddings across all
-			for (const [skillId, mems] of [
-				[skillA.id, [memA1, memA2]],
-				[skillB.id, [memB1, memB2]],
-			] as const) {
+			for (const [skillId] of [[skillA.id], [skillB.id]] as const) {
 				const dir = store.getMemoryPath('skill', skillId);
 				const lib = await store.readLibrary(dir);
 				for (const e of lib.entries) {
@@ -504,13 +503,13 @@ describe('Memory Integration — Consolidation Within Hierarchy Boundaries', () 
 			const skill = await store.createSkillArea(persona.id, 'Coding', 'desc');
 
 			// Similar skill memories
-			const skillMem1 = await store.addMemory({
+			await store.addMemory({
 				content: 'Always handle errors explicitly',
 				scope: 'skill',
 				skillAreaId: skill.id,
 				confidence: 0.9,
 			});
-			const skillMem2 = await store.addMemory({
+			await store.addMemory({
 				content: 'Handle errors explicitly in all functions',
 				scope: 'skill',
 				skillAreaId: skill.id,
@@ -523,7 +522,7 @@ describe('Memory Integration — Consolidation Within Hierarchy Boundaries', () 
 				scope: 'global',
 				confidence: 0.9,
 			});
-			const globalMem2 = await store.addMemory({
+			await store.addMemory({
 				content: 'All public functions need tests',
 				scope: 'global',
 				confidence: 0.5,

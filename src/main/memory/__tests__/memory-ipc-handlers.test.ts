@@ -79,8 +79,10 @@ vi.mock('fs/promises', () => ({
 	}),
 }));
 
-const mockEncode = vi.fn(async () => new Array(384).fill(0));
-const mockEncodeBatch = vi.fn(async (texts: string[]) => texts.map(() => new Array(384).fill(0)));
+const mockEncode = vi.fn(async (..._args: any[]) => new Array(384).fill(0));
+const mockEncodeBatch = vi.fn(async (..._args: any[]) =>
+	new Array(384).fill(0).map(() => new Array(384).fill(0))
+);
 
 function realCosineSimilarity(a: number[], b: number[]): number {
 	let dot = 0;

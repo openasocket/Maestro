@@ -79,8 +79,10 @@ function realCosineSimilarity(a: number[], b: number[]): number {
 	return denom === 0 ? 0 : dot / denom;
 }
 
-const mockEncode = vi.fn(async () => new Array(384).fill(0));
-const mockEncodeBatch = vi.fn(async (texts: string[]) => texts.map(() => new Array(384).fill(0)));
+const mockEncode = vi.fn(async (..._args: any[]) => new Array(384).fill(0));
+const mockEncodeBatch = vi.fn(async (..._args: any[]) =>
+	new Array(384).fill(0).map(() => new Array(384).fill(0))
+);
 
 vi.mock('../../../main/grpo/embedding-service', () => ({
 	encode: (...args: unknown[]) => mockEncode(...args),
@@ -90,7 +92,7 @@ vi.mock('../../../main/grpo/embedding-service', () => ({
 }));
 
 import { MemoryStore } from '../../memory/memory-store';
-import { injectMemories, setMemorySettingsStore } from '../../memory/memory-injector';
+import { setMemorySettingsStore } from '../../memory/memory-injector';
 import type { MemoryConfig } from '../../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../../shared/memory-types';
 
@@ -387,7 +389,7 @@ describe('Memory Integration — End-to-End Pipeline', () => {
 			const skill = await store.createSkillArea(persona.id, 'Skill', 'desc');
 
 			// Two memories with same similarity but different effectiveness
-			const mem1 = await store.addMemory({
+			await store.addMemory({
 				content: 'Memory A',
 				scope: 'skill',
 				skillAreaId: skill.id,

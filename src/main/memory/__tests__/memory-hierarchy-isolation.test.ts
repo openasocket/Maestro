@@ -76,12 +76,14 @@ function realCosineSimilarity(a: number[], b: number[]): number {
 	return denom === 0 ? 0 : dot / denom;
 }
 
-const mockEncode = vi.fn(async () => new Array(384).fill(0));
-const mockEncodeBatch = vi.fn(async (texts: string[]) => texts.map(() => new Array(384).fill(0)));
+const mockEncode = vi.fn(async (..._args: any[]) => new Array(384).fill(0));
+const mockEncodeBatch = vi.fn(async (..._args: any[]) =>
+	new Array(384).fill(0).map(() => new Array(384).fill(0))
+);
 
 vi.mock('../../../main/grpo/embedding-service', () => ({
-	encode: (...args: unknown[]) => mockEncode(...args),
-	encodeBatch: (...args: unknown[]) => mockEncodeBatch(...args),
+	encode: (...args: any[]) => mockEncode(...args),
+	encodeBatch: (...args: any[]) => mockEncodeBatch(...args),
 	cosineSimilarity: realCosineSimilarity,
 	VECTOR_DIM: 384,
 }));

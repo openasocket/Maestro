@@ -75,8 +75,10 @@ function realCosineSimilarity(a: number[], b: number[]): number {
 	return denom === 0 ? 0 : dot / denom;
 }
 
-const mockEncode = vi.fn(async () => new Array(384).fill(0));
-const mockEncodeBatch = vi.fn(async (texts: string[]) => texts.map(() => new Array(384).fill(0)));
+const mockEncode = vi.fn(async (..._args: any[]) => new Array(384).fill(0));
+const mockEncodeBatch = vi.fn(async (..._args: any[]) =>
+	new Array(384).fill(0).map(() => new Array(384).fill(0))
+);
 
 vi.mock('../../../main/grpo/embedding-service', () => ({
 	encode: (...args: unknown[]) => mockEncode(...args),
@@ -641,7 +643,7 @@ describe('MemoryStore — Hierarchy, CRUD, Isolation, Atomics, History, Seed', (
 		});
 
 		it('roles have all required fields', async () => {
-			const role = await store.createRole('Complete', 'Has everything');
+			await store.createRole('Complete', 'Has everything');
 			const reg = await store.readRegistry();
 			const r = reg.roles[0];
 

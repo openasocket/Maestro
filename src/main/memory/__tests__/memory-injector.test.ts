@@ -8,23 +8,17 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { MemorySearchResult, MemoryConfig, MemoryEntry } from '../../../shared/memory-types';
-import { MEMORY_CONFIG_DEFAULTS } from '../../../shared/memory-types';
+import type { MemorySearchResult, MemoryEntry } from '../../../shared/memory-types';
 
 // ─── Mock store ──────────────────────────────────────────────────────────────
 
-const mockCascadingSearch = vi.fn<
-	[string, MemoryConfig, string, string?, number?],
-	Promise<MemorySearchResult[]>
->();
-const mockRecordInjection = vi.fn<[string[], string, string?, string?], Promise<void>>();
+const mockCascadingSearch = vi.fn<(...args: any[]) => Promise<MemorySearchResult[]>>();
+const mockRecordInjection = vi.fn<(...args: any[]) => Promise<void>>();
 
 vi.mock('../../memory/memory-store', () => ({
 	getMemoryStore: () => ({
-		cascadingSearch: (...args: unknown[]) =>
-			mockCascadingSearch(...(args as Parameters<typeof mockCascadingSearch>)),
-		recordInjection: (...args: unknown[]) =>
-			mockRecordInjection(...(args as Parameters<typeof mockRecordInjection>)),
+		cascadingSearch: (...args: any[]) => mockCascadingSearch(...args),
+		recordInjection: (...args: any[]) => mockRecordInjection(...args),
 	}),
 }));
 
@@ -60,6 +54,7 @@ function makeEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
 		useCount: 0,
 		lastUsedAt: 0,
 		active: true,
+		archived: false,
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
 		...overrides,
@@ -68,7 +63,7 @@ function makeEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
 
 /** Create a fake MemorySearchResult. */
 function makeResult(
-	overrides: Partial<MemorySearchResult> & { entry?: Partial<MemoryEntry> } = {}
+	overrides: Omit<Partial<MemorySearchResult>, 'entry'> & { entry?: Partial<MemoryEntry> } = {}
 ): MemorySearchResult {
 	const entry = makeEntry(overrides.entry ?? {});
 	return {

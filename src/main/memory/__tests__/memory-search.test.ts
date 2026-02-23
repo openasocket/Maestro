@@ -76,8 +76,10 @@ function realCosineSimilarity(a: number[], b: number[]): number {
 	return denom === 0 ? 0 : dot / denom;
 }
 
-const mockEncode = vi.fn(async () => new Array(384).fill(0));
-const mockEncodeBatch = vi.fn(async (texts: string[]) => texts.map(() => new Array(384).fill(0)));
+const mockEncode = vi.fn(async (..._args: any[]) => new Array(384).fill(0));
+const mockEncodeBatch = vi.fn(async (..._args: any[]) =>
+	new Array(384).fill(0).map(() => new Array(384).fill(0))
+);
 
 vi.mock('../../../main/grpo/embedding-service', () => ({
 	encode: (...args: unknown[]) => mockEncode(...args),
@@ -87,7 +89,7 @@ vi.mock('../../../main/grpo/embedding-service', () => ({
 }));
 
 import { MemoryStore } from '../../memory/memory-store';
-import type { MemoryConfig, MemoryEntry } from '../../../shared/memory-types';
+import type { MemoryConfig } from '../../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../../shared/memory-types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -261,7 +263,7 @@ describe('MemoryStore — Cascading Search, Filtering, Scoring, Injection Record
 			const role = await store.createRole('Dev', 'Dev');
 			const persona = await store.createPersona(role.id, 'Universal', 'desc', []); // empty = all
 			const skill = await store.createSkillArea(persona.id, 'Skill', 'desc');
-			const mem = await store.addMemory({
+			await store.addMemory({
 				content: 'Universal memory',
 				scope: 'skill',
 				skillAreaId: skill.id,
@@ -617,7 +619,7 @@ describe('MemoryStore — Cascading Search, Filtering, Scoring, Injection Record
 			const persona = await store.createPersona(role.id, 'Persona', 'desc');
 			const skill = await store.createSkillArea(persona.id, 'Skill', 'desc');
 
-			const mem = await store.addMemory({
+			await store.addMemory({
 				content: 'Score test memory',
 				scope: 'skill',
 				skillAreaId: skill.id,
@@ -660,7 +662,7 @@ describe('MemoryStore — Cascading Search, Filtering, Scoring, Injection Record
 				scope: 'skill',
 				skillAreaId: skill.id,
 			});
-			const oldMem = await store.addMemory({
+			await store.addMemory({
 				content: 'Old memory',
 				scope: 'skill',
 				skillAreaId: skill.id,
@@ -785,7 +787,7 @@ describe('MemoryStore — Cascading Search, Filtering, Scoring, Injection Record
 			const role = await store.createRole('Dev', 'Dev');
 			const persona = await store.createPersona(role.id, 'Active', 'desc');
 			const skill = await store.createSkillArea(persona.id, 'Skill', 'desc');
-			const mem = await store.addMemory({
+			await store.addMemory({
 				content: 'Should be invisible',
 				scope: 'skill',
 				skillAreaId: skill.id,
