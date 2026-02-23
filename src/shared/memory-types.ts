@@ -311,6 +311,31 @@ export interface MemoryStats {
 	totalInjections: number;
 	averageEffectiveness: number;
 	pendingEmbeddings: number;
+	/** Effectiveness tier distribution */
+	effectivenessDistribution: {
+		/** effectivenessScore >= 0.7 */
+		high: number;
+		/** effectivenessScore 0.3-0.7 */
+		medium: number;
+		/** effectivenessScore > 0 and < 0.3 */
+		low: number;
+		/** effectivenessScore === 0 (never evaluated) */
+		unscored: number;
+	};
+	/** Number of injections in the last 7 days */
+	recentInjections: number;
+	/** Number of experiences qualifying for promotion */
+	promotionCandidates: number;
+	/** Number of archived (recoverable) memories */
+	archivedCount: number;
+	/** Category breakdown from category: tags */
+	byCategory: Record<string, number>;
+	/** Memories that have never been injected (useCount === 0) */
+	neverInjectedCount: number;
+	/** Average token cost per injection */
+	avgTokensPerInjection: number;
+	/** Total inter-memory links */
+	totalLinks: number;
 }
 
 export interface MemoryHistoryEntry {

@@ -325,6 +325,13 @@ export function createMemoryApi() {
 			projectPath?: string
 		): Promise<IpcResponse<MemoryEntry[]>> =>
 			ipcRenderer.invoke('memory:getLinked', id, scope, skillAreaId, projectPath),
+
+		// ─── Analytics ────────────────────────────────────────────────────
+		getAnalytics: (): Promise<IpcResponse<MemoryStats>> =>
+			ipcRenderer.invoke('memory:getAnalytics'),
+
+		getRecentInjections: (limit?: number): Promise<IpcResponse<unknown[]>> =>
+			ipcRenderer.invoke('memory:getRecentInjections', limit),
 	};
 }
 

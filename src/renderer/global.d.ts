@@ -2889,6 +2889,13 @@ interface MaestroAPI {
 			| { success: true; data: import('../shared/memory-types').MemoryStats }
 			| { success: false; error: string }
 		>;
+		getAnalytics: () => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryStats }
+			| { success: false; error: string }
+		>;
+		getRecentInjections: (
+			limit?: number
+		) => Promise<{ success: true; data: unknown[] } | { success: false; error: string }>;
 		export: (
 			scope: import('../shared/memory-types').MemoryScope,
 			skillAreaId?: string,

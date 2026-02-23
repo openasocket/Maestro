@@ -13,6 +13,7 @@ import type {
 	MemoryId,
 	MemoryScope,
 	SkillAreaId,
+	InjectionScopeGroup,
 } from '../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../shared/memory-types';
 import { getMemoryStore } from './memory-store';
@@ -111,6 +112,17 @@ function formatMemoryLine(result: MemorySearchResult): string {
 }
 
 /**
+ * Build an XML comment explaining why a memory was injected.
+ * Helps power users understand injection reasoning in debug mode.
+ */
+function formatMatchComment(result: MemorySearchResult): string {
+	const matchReason = result.personaName
+		? `matched persona="${result.personaName}" skill="${result.skillAreaName ?? 'n/a'}" score=${result.combinedScore.toFixed(2)}`
+		: `matched scope="${result.entry.scope}" score=${result.combinedScore.toFixed(2)}`;
+	return `<!-- ${matchReason} -->`;
+}
+
+/**
  * Determine the grouping key and priority for a search result.
  */
 function getGroupKey(result: MemorySearchResult): { key: string; priority: number } {
@@ -132,8 +144,10 @@ function getGroupKey(result: MemorySearchResult): { key: string; priority: numbe
 
 /**
  * Format selected memories into the XML injection block.
+ * When includeComments is true, adds XML comments before each memory
+ * explaining why it was injected (omitted in lean mode to save tokens).
  */
-function formatXmlBlock(selected: MemorySearchResult[]): string {
+function formatXmlBlock(selected: MemorySearchResult[], includeComments: boolean): string {
 	// Group by key
 	const groupMap = new Map<string, GroupedMemories>();
 
@@ -143,6 +157,9 @@ function formatXmlBlock(selected: MemorySearchResult[]): string {
 		if (!group) {
 			group = { key, priority, lines: [], tokenCost: 0 };
 			groupMap.set(key, group);
+		}
+		if (includeComments) {
+			group.lines.push(formatMatchComment(result));
 		}
 		group.lines.push(formatMemoryLine(result));
 		group.tokenCost += result.entry.tokenEstimate;
@@ -428,7 +445,9 @@ export async function injectMemories(
 	}
 
 	// Format XML
-	const xmlBlock = formatXmlBlock(finalSelected);
+	// Include injection transparency comments (omit in lean mode to save tokens)
+	const includeComments = config.injectionStrategy !== 'lean';
+	const xmlBlock = formatXmlBlock(finalSelected, includeComments);
 
 	// Track persona contributions
 	const personaMap = new Map<string, { personaName: string; count: number }>();
@@ -484,6 +503,15 @@ export async function injectMemories(
 	// Prepend XML to prompt
 	const injectedPrompt = `${xmlBlock}\n\n${prompt}`;
 	const tokenCount = totalTokens + WRAPPER_OVERHEAD_TOKENS;
+
+	// Record injection event for analytics ring buffer
+	pushInjectionEvent({
+		sessionId: '', // Populated later via recordSessionInjection
+		memoryIds: injectedIds,
+		tokenCount,
+		timestamp: Date.now(),
+		scopeGroups,
+	});
 
 	return {
 		injectedPrompt,
@@ -555,6 +583,38 @@ export async function tryInjectMemories(
 			scopeGroups: [],
 		};
 	}
+}
+
+// ─── Injection Event Ring Buffer ─────────────────────────────────────────────
+
+export interface InjectionEvent {
+	sessionId: string;
+	memoryIds: MemoryId[];
+	tokenCount: number;
+	timestamp: number;
+	scopeGroups: InjectionScopeGroup[];
+}
+
+const recentInjections: InjectionEvent[] = [];
+const MAX_INJECTION_HISTORY = 50;
+
+/**
+ * Push an injection event to the ring buffer.
+ * Automatically evicts oldest entries when exceeding MAX_INJECTION_HISTORY.
+ */
+function pushInjectionEvent(event: InjectionEvent): void {
+	recentInjections.push(event);
+	if (recentInjections.length > MAX_INJECTION_HISTORY) {
+		recentInjections.shift();
+	}
+}
+
+/**
+ * Return the last N injection events (newest first).
+ */
+export function getRecentInjectionEvents(limit?: number): InjectionEvent[] {
+	const n = limit ?? MAX_INJECTION_HISTORY;
+	return recentInjections.slice(-n).reverse();
 }
 
 // ─── Session Injection Tracking ─────────────────────────────────────────────

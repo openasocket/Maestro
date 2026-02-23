@@ -339,78 +339,8 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 	ipcMain.handle(
 		'memory:getStats',
 		createIpcDataHandler(handlerOpts('getStats'), async (): Promise<MemoryStats> => {
-			const roles = await memoryStore.listRoles();
-			const personas = await memoryStore.listPersonas();
-			const skillAreas = await memoryStore.listSkillAreas();
-
-			const byScope: Record<MemoryScope, number> = { skill: 0, project: 0, global: 0 };
-			const bySource: Record<MemorySource, number> = {
-				user: 0,
-				grpo: 0,
-				'auto-run': 0,
-				'session-analysis': 0,
-				consolidation: 0,
-				import: 0,
-			};
-			const byType: Record<MemoryType, number> = { rule: 0, experience: 0 };
-			let totalMemories = 0;
-			let totalInjections = 0;
-			let effectivenessSum = 0;
-			let effectivenessCount = 0;
-			let pendingEmbeddings = 0;
-
-			// Collect memories from all skill areas
-			for (const skill of skillAreas) {
-				const memories = await memoryStore.listMemories('skill', skill.id, undefined, true);
-				for (const m of memories) {
-					totalMemories++;
-					byScope.skill++;
-					bySource[m.source]++;
-					byType[m.type]++;
-					totalInjections += m.useCount;
-					if (m.effectivenessScore > 0) {
-						effectivenessSum += m.effectivenessScore;
-						effectivenessCount++;
-					}
-					if (!m.embedding) pendingEmbeddings++;
-				}
-			}
-
-			// Collect global memories
-			const globalMemories = await memoryStore.listMemories('global', undefined, undefined, true);
-			for (const m of globalMemories) {
-				totalMemories++;
-				byScope.global++;
-				bySource[m.source]++;
-				byType[m.type]++;
-				totalInjections += m.useCount;
-				if (m.effectivenessScore > 0) {
-					effectivenessSum += m.effectivenessScore;
-					effectivenessCount++;
-				}
-				if (!m.embedding) pendingEmbeddings++;
-			}
-
-			// Check persona/skill embeddings
-			for (const p of personas) {
-				if (!p.embedding) pendingEmbeddings++;
-			}
-			for (const s of skillAreas) {
-				if (!s.embedding) pendingEmbeddings++;
-			}
-
-			return {
-				totalRoles: roles.length,
-				totalPersonas: personas.length,
-				totalSkillAreas: skillAreas.length,
-				totalMemories,
-				byScope,
-				bySource,
-				byType,
-				totalInjections,
-				averageEffectiveness: effectivenessCount > 0 ? effectivenessSum / effectivenessCount : 0,
-				pendingEmbeddings,
-			};
+			// Delegate to getAnalytics which computes the full MemoryStats including analytics fields
+			return memoryStore.getAnalytics();
 		})
 	);
 
@@ -633,5 +563,24 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 				return memoryStore.getLinkedMemories(id, scope, skillAreaId, projectPath);
 			}
 		)
+	);
+
+	// ─── Analytics ────────────────────────────────────────────────────────
+
+	ipcMain.handle(
+		'memory:getAnalytics',
+		createIpcDataHandler(handlerOpts('getAnalytics'), async () => {
+			return memoryStore.getAnalytics();
+		})
+	);
+
+	// ─── Recent Injections ───────────────────────────────────────────────
+
+	ipcMain.handle(
+		'memory:getRecentInjections',
+		createIpcDataHandler(handlerOpts('getRecentInjections'), async (limit?: number) => {
+			const { getRecentInjectionEvents } = await import('../../memory/memory-injector');
+			return getRecentInjectionEvents(limit);
+		})
 	);
 }

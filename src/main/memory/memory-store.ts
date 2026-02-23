@@ -41,6 +41,7 @@ import type {
 	PersonaSuggestion,
 	PersonaRelevance,
 	PromotionCandidate,
+	MemoryStats,
 } from '../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS, SEED_ROLES } from '../../shared/memory-types';
 import { cosineSimilarity } from '../grpo/embedding-service';
@@ -172,6 +173,7 @@ export class MemoryStore {
 	}
 
 	async writeRegistry(registry: RegistryFile): Promise<void> {
+		this.invalidateAnalyticsCache();
 		return this.serializeWrite(this.getRegistryPath(), () =>
 			this.atomicWriteJson(this.getRegistryPath(), registry)
 		);
@@ -201,6 +203,7 @@ export class MemoryStore {
 	}
 
 	async writeLibrary(dirPath: string, lib: LibraryFile): Promise<void> {
+		this.invalidateAnalyticsCache();
 		const filePath = path.join(dirPath, 'library.json');
 		return this.serializeWrite(filePath, () => this.atomicWriteJson(filePath, lib));
 	}
@@ -2949,6 +2952,211 @@ export class MemoryStore {
 		}
 
 		return { roles: roleCount, personas: personaCount, skills: skillCount };
+	}
+
+	// ─── Analytics ──────────────────────────────────────────────────────────
+
+	private _analyticsCache: { data: MemoryStats; timestamp: number } | null = null;
+
+	/** Invalidate the analytics cache (called after writes). */
+	invalidateAnalyticsCache(): void {
+		this._analyticsCache = null;
+	}
+
+	/**
+	 * Compute extended analytics for the memory system.
+	 * Includes effectiveness distribution, promotion candidates, archive stats,
+	 * category breakdown, and injection patterns.
+	 *
+	 * Results are cached for 30 seconds to avoid repeated computation on
+	 * rapid Settings UI re-renders.
+	 */
+	async getAnalytics(): Promise<MemoryStats> {
+		const now = Date.now();
+		if (this._analyticsCache && now - this._analyticsCache.timestamp < 30000) {
+			return this._analyticsCache.data;
+		}
+
+		const registry = await this.readRegistry();
+		const roles = registry.roles;
+		const personas = registry.personas;
+		const skillAreas = registry.skillAreas;
+
+		// Gather ALL memories across all scopes (including archived)
+		const allMemories: MemoryEntry[] = [];
+
+		// Skill-scoped memories
+		for (const skill of skillAreas) {
+			try {
+				const dirPath = this.getMemoryPath('skill', skill.id);
+				const lib = await this.readLibrary(dirPath);
+				allMemories.push(...lib.entries);
+			} catch {
+				// Library may not exist yet
+			}
+		}
+
+		// Global memories
+		try {
+			const globalDir = this.getMemoryPath('global');
+			const lib = await this.readLibrary(globalDir);
+			allMemories.push(...lib.entries);
+		} catch {
+			// Library may not exist yet
+		}
+
+		// Project-scoped memories (scan project directory for hashed subdirs)
+		try {
+			const projectsDir = path.join(this.memoriesDir, 'project');
+			const entries = await fs.readdir(projectsDir).catch(() => [] as string[]);
+			for (const dirName of entries) {
+				try {
+					const projectDir = path.join(projectsDir, dirName);
+					const lib = await this.readLibrary(projectDir);
+					allMemories.push(...lib.entries);
+				} catch {
+					// Skip
+				}
+			}
+		} catch {
+			// No projects dir
+		}
+
+		// Base stats
+		const byScope: Record<MemoryScope, number> = { skill: 0, project: 0, global: 0 };
+		const bySource: Record<MemorySource, number> = {
+			user: 0,
+			grpo: 0,
+			'auto-run': 0,
+			'session-analysis': 0,
+			consolidation: 0,
+			import: 0,
+		};
+		const byType: Record<MemoryType, number> = { rule: 0, experience: 0 };
+		let totalInjections = 0;
+		let effectivenessSum = 0;
+		let effectivenessCount = 0;
+		let pendingEmbeddings = 0;
+
+		// Analytics fields
+		const effectivenessDistribution = { high: 0, medium: 0, low: 0, unscored: 0 };
+		const sevenDaysAgo = now - 7 * 86400000;
+		let recentInjections = 0;
+		let archivedCount = 0;
+		const byCategory: Record<string, number> = {};
+		let neverInjectedCount = 0;
+		let recentTokenSum = 0;
+		let recentTokenCount = 0;
+		const linkPairs = new Set<string>();
+
+		for (const m of allMemories) {
+			// Base stats (only count active, non-archived for totals — mirror getStats behavior)
+			if (m.active) {
+				byScope[m.scope]++;
+				bySource[m.source]++;
+				byType[m.type]++;
+				totalInjections += m.useCount;
+				if (m.effectivenessScore > 0) {
+					effectivenessSum += m.effectivenessScore;
+					effectivenessCount++;
+				}
+				if (!m.embedding) pendingEmbeddings++;
+			}
+
+			// Archived count (active but archived)
+			if (m.archived) {
+				archivedCount++;
+			}
+
+			// Effectiveness distribution (all active memories, including archived)
+			if (m.active) {
+				if (m.effectivenessScore >= 0.7) {
+					effectivenessDistribution.high++;
+				} else if (m.effectivenessScore >= 0.3) {
+					effectivenessDistribution.medium++;
+				} else if (m.effectivenessScore > 0) {
+					effectivenessDistribution.low++;
+				} else {
+					effectivenessDistribution.unscored++;
+				}
+			}
+
+			// Recent injections (last 7 days)
+			if (m.lastUsedAt > sevenDaysAgo && m.useCount > 0) {
+				recentInjections++;
+			}
+
+			// Category breakdown from category:* tags
+			for (const tag of m.tags) {
+				if (tag.startsWith('category:')) {
+					const cat = tag.slice('category:'.length);
+					byCategory[cat] = (byCategory[cat] ?? 0) + 1;
+				}
+			}
+
+			// Never injected
+			if (m.active && !m.archived && m.useCount === 0) {
+				neverInjectedCount++;
+			}
+
+			// Token cost for recently injected
+			if (m.lastUsedAt > sevenDaysAgo && m.useCount > 0) {
+				recentTokenSum += m.tokenEstimate;
+				recentTokenCount++;
+			}
+
+			// Links — count unique pairs
+			if (m.relatedMemoryIds) {
+				for (const relId of m.relatedMemoryIds) {
+					const pair = m.id < relId ? `${m.id}:${relId}` : `${relId}:${m.id}`;
+					linkPairs.add(pair);
+				}
+			}
+		}
+
+		// Persona/skill embedding pending count
+		for (const p of personas) {
+			if (!p.embedding) pendingEmbeddings++;
+		}
+		for (const s of skillAreas) {
+			if (!s.embedding) pendingEmbeddings++;
+		}
+
+		// Promotion candidates count
+		let promotionCandidatesCount = 0;
+		try {
+			const candidates = await this.getPromotionCandidates();
+			promotionCandidatesCount = candidates.length;
+		} catch {
+			// Skip on error
+		}
+
+		const totalActiveMemories = byScope.skill + byScope.project + byScope.global;
+
+		const stats: MemoryStats = {
+			totalRoles: roles.length,
+			totalPersonas: personas.length,
+			totalSkillAreas: skillAreas.length,
+			totalMemories: totalActiveMemories,
+			byScope,
+			bySource,
+			byType,
+			totalInjections,
+			averageEffectiveness: effectivenessCount > 0 ? effectivenessSum / effectivenessCount : 0,
+			pendingEmbeddings,
+			effectivenessDistribution,
+			recentInjections,
+			promotionCandidates: promotionCandidatesCount,
+			archivedCount,
+			byCategory,
+			neverInjectedCount,
+			avgTokensPerInjection:
+				recentTokenCount > 0 ? Math.round(recentTokenSum / recentTokenCount) : 0,
+			totalLinks: linkPairs.size,
+		};
+
+		this._analyticsCache = { data: stats, timestamp: now };
+		return stats;
 	}
 }
 

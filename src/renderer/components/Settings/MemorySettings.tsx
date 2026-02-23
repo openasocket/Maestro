@@ -19,6 +19,9 @@ import {
 	Check,
 	Edit3,
 	Pin,
+	Activity,
+	Archive,
+	Link2,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
@@ -159,7 +162,7 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 			try {
 				const [configRes, statsRes, rolesRes] = await Promise.all([
 					window.maestro.memory.getConfig(),
-					window.maestro.memory.getStats(),
+					window.maestro.memory.getAnalytics(),
 					window.maestro.memory.role.list(),
 				]);
 				if (!mounted) return;
@@ -211,7 +214,7 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 			}
 			setHasRoles(true);
 			// Refresh stats
-			const statsRes = await window.maestro.memory.getStats();
+			const statsRes = await window.maestro.memory.getAnalytics();
 			if (statsRes.success) setStats(statsRes.data);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : 'Failed to seed defaults');
@@ -280,7 +283,7 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 			// Dismiss the suggestion
 			setDismissedSuggestions((prev) => new Set([...prev, key]));
 			// Refresh stats
-			const statsRes = await window.maestro.memory.getStats();
+			const statsRes = await window.maestro.memory.getAnalytics();
 			if (statsRes.success) setStats(statsRes.data);
 			setHasRoles(true);
 		} catch (err) {
@@ -308,7 +311,7 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 			// (project memories stay as-is; this creates linked skill copies)
 			setDismissedSuggestions((prev) => new Set([...prev, key]));
 			// Refresh stats
-			const statsRes = await window.maestro.memory.getStats();
+			const statsRes = await window.maestro.memory.getAnalytics();
 			if (statsRes.success) setStats(statsRes.data);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : 'Failed to create skill area');
@@ -368,7 +371,7 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 				setEditingPromotionId(null);
 				await loadPromotionCandidates();
 				// Refresh stats
-				const statsRes = await window.maestro.memory.getStats();
+				const statsRes = await window.maestro.memory.getAnalytics();
 				if (statsRes.success) setStats(statsRes.data);
 			} catch (err) {
 				setError(err instanceof Error ? err.message : 'Failed to promote experience');
@@ -698,36 +701,13 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 						/>
 					)}
 
-					{/* Stats Display */}
+					{/* Memory Health */}
 					{stats && (
-						<div
-							className="rounded-lg border p-4 space-y-2"
-							style={{ borderColor: theme.colors.border }}
-						>
-							<div className="flex items-center gap-2 mb-2">
-								<Database className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
-								<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-									Statistics
-								</div>
-							</div>
-
-							<div className="grid grid-cols-3 gap-2">
-								<StatCell label="Roles" value={stats.totalRoles} theme={theme} />
-								<StatCell label="Personas" value={stats.totalPersonas} theme={theme} />
-								<StatCell label="Skill Areas" value={stats.totalSkillAreas} theme={theme} />
-								<StatCell label="Memories" value={stats.totalMemories} theme={theme} />
-								<StatCell label="Injections" value={stats.totalInjections} theme={theme} />
-								<StatCell
-									label="Avg Effectiveness"
-									value={
-										stats.averageEffectiveness > 0
-											? `${(stats.averageEffectiveness * 100).toFixed(0)}%`
-											: '—'
-									}
-									theme={theme}
-								/>
-							</div>
-						</div>
+						<MemoryHealthPanel
+							stats={stats}
+							theme={theme}
+							promotionCandidatesCount={promotionCandidates.length}
+						/>
 					)}
 
 					{/* Hierarchy Suggestions */}
@@ -771,6 +751,150 @@ function StatCell({
 			</div>
 			<div className="text-xs" style={{ color: theme.colors.textDim }}>
 				{label}
+			</div>
+		</div>
+	);
+}
+
+/**
+ * Memory Health panel — effectiveness distribution, injection stats, categories.
+ */
+function MemoryHealthPanel({
+	stats,
+	theme,
+	promotionCandidatesCount,
+}: {
+	stats: MemoryStats;
+	theme: Theme;
+	promotionCandidatesCount: number;
+}) {
+	const dist = stats.effectivenessDistribution;
+	const total = dist.high + dist.medium + dist.low + dist.unscored;
+	const highPct = total > 0 ? (dist.high / total) * 100 : 0;
+	const medPct = total > 0 ? (dist.medium / total) * 100 : 0;
+	const lowPct = total > 0 ? (dist.low / total) * 100 : 0;
+	const unscoredPct = total > 0 ? (dist.unscored / total) * 100 : 0;
+
+	const categoryEntries = Object.entries(stats.byCategory).sort(([, a], [, b]) => b - a);
+
+	return (
+		<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
+			<div className="flex items-center gap-2">
+				<Activity className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
+				<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+					Memory Health
+				</div>
+			</div>
+
+			{/* Effectiveness Distribution Bar */}
+			{total > 0 && (
+				<div className="space-y-1">
+					<div className="text-xs" style={{ color: theme.colors.textDim }}>
+						Effectiveness Distribution
+					</div>
+					<div
+						className="flex h-3 rounded-full overflow-hidden"
+						style={{ backgroundColor: `${theme.colors.border}40` }}
+					>
+						{highPct > 0 && (
+							<div
+								style={{ width: `${highPct}%`, backgroundColor: '#22c55e' }}
+								title={`High: ${dist.high}`}
+							/>
+						)}
+						{medPct > 0 && (
+							<div
+								style={{ width: `${medPct}%`, backgroundColor: '#eab308' }}
+								title={`Medium: ${dist.medium}`}
+							/>
+						)}
+						{lowPct > 0 && (
+							<div
+								style={{ width: `${lowPct}%`, backgroundColor: '#ef4444' }}
+								title={`Low: ${dist.low}`}
+							/>
+						)}
+						{unscoredPct > 0 && (
+							<div
+								style={{ width: `${unscoredPct}%`, backgroundColor: '#6b7280' }}
+								title={`Unscored: ${dist.unscored}`}
+							/>
+						)}
+					</div>
+					<div className="text-xs" style={{ color: theme.colors.textDim }}>
+						High: {dist.high} | Medium: {dist.medium} | Low: {dist.low} | Unscored: {dist.unscored}
+					</div>
+				</div>
+			)}
+
+			{/* Warning items */}
+			<div className="space-y-1">
+				{stats.neverInjectedCount > 0 && (
+					<div className="flex items-center gap-1.5 text-xs" style={{ color: '#eab308' }}>
+						<AlertTriangle className="w-3 h-3" />
+						{stats.neverInjectedCount} memories never injected
+					</div>
+				)}
+				{(promotionCandidatesCount > 0 || stats.promotionCandidates > 0) && (
+					<div className="flex items-center gap-1.5 text-xs" style={{ color: theme.colors.accent }}>
+						<ArrowUpCircle className="w-3 h-3" />
+						{promotionCandidatesCount || stats.promotionCandidates} experiences ready for promotion
+					</div>
+				)}
+				{stats.archivedCount > 0 && (
+					<div
+						className="flex items-center gap-1.5 text-xs"
+						style={{ color: theme.colors.textDim }}
+					>
+						<Archive className="w-3 h-3" />
+						{stats.archivedCount} archived memories
+					</div>
+				)}
+			</div>
+
+			{/* Recent Activity */}
+			<div className="space-y-1">
+				<div className="text-xs" style={{ color: theme.colors.textDim }}>
+					Recent Activity (7 days)
+				</div>
+				<div className="text-xs" style={{ color: theme.colors.textMain }}>
+					{stats.recentInjections} injections
+					{stats.avgTokensPerInjection > 0 && (
+						<> | avg {stats.avgTokensPerInjection.toLocaleString()} tokens/injection</>
+					)}
+				</div>
+				{stats.totalLinks > 0 && (
+					<div className="flex items-center gap-1 text-xs" style={{ color: theme.colors.textDim }}>
+						<Link2 className="w-3 h-3" />
+						{stats.totalLinks} inter-memory links
+					</div>
+				)}
+			</div>
+
+			{/* Categories */}
+			{categoryEntries.length > 0 && (
+				<div className="space-y-1">
+					<div className="text-xs" style={{ color: theme.colors.textDim }}>
+						Categories
+					</div>
+					<div className="text-xs" style={{ color: theme.colors.textMain }}>
+						{categoryEntries.map(([cat, count], i) => (
+							<span key={cat}>
+								{i > 0 && ' | '}
+								{cat}: {count}
+							</span>
+						))}
+					</div>
+				</div>
+			)}
+
+			{/* Footer: hierarchy counts */}
+			<div
+				className="pt-2 border-t text-xs"
+				style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
+			>
+				Roles: {stats.totalRoles} | Personas: {stats.totalPersonas} | Skills:{' '}
+				{stats.totalSkillAreas} | Total: {stats.totalMemories}
 			</div>
 		</div>
 	);

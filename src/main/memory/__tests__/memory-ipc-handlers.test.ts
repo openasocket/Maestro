@@ -223,6 +223,8 @@ describe('Memory IPC Handler Round-Trips', () => {
 				'memory:link',
 				'memory:unlink',
 				'memory:getLinked',
+				'memory:getAnalytics',
+				'memory:getRecentInjections',
 			];
 
 			for (const channel of expectedChannels) {
