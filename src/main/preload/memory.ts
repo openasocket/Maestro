@@ -25,6 +25,8 @@ import type {
 	ExperienceContext,
 	HierarchySuggestionResult,
 	PromotionCandidate,
+	JobQueueStatus,
+	TokenUsage,
 } from '../../shared/memory-types';
 
 /**
@@ -332,6 +334,21 @@ export function createMemoryApi() {
 
 		getRecentInjections: (limit?: number): Promise<IpcResponse<unknown[]>> =>
 			ipcRenderer.invoke('memory:getRecentInjections', limit),
+
+		// ─── Job Queue Status & Token Tracking ────────────────────────────
+		getJobQueueStatus: (): Promise<IpcResponse<JobQueueStatus>> =>
+			ipcRenderer.invoke('memory:getJobQueueStatus'),
+
+		getTokenUsage: (): Promise<IpcResponse<TokenUsage>> =>
+			ipcRenderer.invoke('memory:getTokenUsage'),
+
+		onJobQueueUpdate: (callback: (status: JobQueueStatus) => void) => {
+			const handler = (_event: unknown, status: JobQueueStatus) => callback(status);
+			ipcRenderer.on('memory:jobQueueUpdate', handler);
+			return () => {
+				ipcRenderer.removeListener('memory:jobQueueUpdate', handler);
+			};
+		},
 	};
 }
 

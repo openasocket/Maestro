@@ -602,4 +602,22 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 			return getRecentInjectionEvents(limit);
 		})
 	);
+
+	// ─── Job Queue Status & Token Tracking ───────────────────────────────
+
+	ipcMain.handle(
+		'memory:getJobQueueStatus',
+		createIpcDataHandler(handlerOpts('getJobQueueStatus'), async () => {
+			const { getMemoryJobQueue } = await import('../../memory/memory-job-queue');
+			return getMemoryJobQueue().getStatus();
+		})
+	);
+
+	ipcMain.handle(
+		'memory:getTokenUsage',
+		createIpcDataHandler(handlerOpts('getTokenUsage'), async () => {
+			const { getMemoryJobQueue } = await import('../../memory/memory-job-queue');
+			return getMemoryJobQueue().getTokenUsage();
+		})
+	);
 }

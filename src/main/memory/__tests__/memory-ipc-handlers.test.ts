@@ -225,6 +225,8 @@ describe('Memory IPC Handler Round-Trips', () => {
 				'memory:getLinked',
 				'memory:getAnalytics',
 				'memory:getRecentInjections',
+				'memory:getJobQueueStatus',
+				'memory:getTokenUsage',
 			];
 
 			for (const channel of expectedChannels) {

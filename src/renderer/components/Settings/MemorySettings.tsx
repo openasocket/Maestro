@@ -22,6 +22,9 @@ import {
 	Activity,
 	Archive,
 	Link2,
+	ChevronDown,
+	ChevronUp,
+	Zap,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
@@ -32,6 +35,8 @@ import type {
 	HierarchySuggestionResult,
 	PromotionCandidate,
 	MemoryScope,
+	JobQueueStatus,
+	TokenUsage,
 } from '../../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../../shared/memory-types';
 
@@ -154,6 +159,37 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 	const [, setPromotionLoading] = useState(false);
 	const [editingPromotionId, setEditingPromotionId] = useState<string | null>(null);
 	const [editingRuleText, setEditingRuleText] = useState('');
+	const [queueStatus, setQueueStatus] = useState<JobQueueStatus | null>(null);
+	const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
+	const [queueExpanded, setQueueExpanded] = useState(false);
+
+	// Subscribe to queue status updates
+	useEffect(() => {
+		if (!config.enabled) return;
+
+		const handler = (status: JobQueueStatus) => setQueueStatus(status);
+		const cleanup = (window.maestro.memory as any).onJobQueueUpdate(handler);
+
+		// Fetch initial status + token usage
+		(window.maestro.memory as any).getJobQueueStatus?.().then((res: any) => {
+			if (res?.success) setQueueStatus(res.data);
+		});
+		(window.maestro.memory as any).getTokenUsage?.().then((res: any) => {
+			if (res?.success) setTokenUsage(res.data);
+		});
+
+		// Periodically refresh token usage (every 30s)
+		const interval = setInterval(() => {
+			(window.maestro.memory as any).getTokenUsage?.().then((res: any) => {
+				if (res?.success) setTokenUsage(res.data);
+			});
+		}, 30000);
+
+		return () => {
+			cleanup?.();
+			clearInterval(interval);
+		};
+	}, [config.enabled]);
 
 	// Load config and stats on mount
 	useEffect(() => {
@@ -494,6 +530,119 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 				</div>
 			)}
 
+			{/* Queue Status Indicator — shown when queue has items */}
+			{config.enabled && queueStatus && queueStatus.queueLength > 0 && (
+				<div className="rounded-lg border p-3" style={{ borderColor: theme.colors.border }}>
+					{/* Collapsed view */}
+					<button
+						className="w-full flex items-center justify-between text-left"
+						onClick={() => setQueueExpanded(!queueExpanded)}
+					>
+						<div className="flex items-center gap-2 flex-1 min-w-0">
+							<Loader2
+								className="w-3.5 h-3.5 animate-spin shrink-0"
+								style={{ color: theme.colors.accent }}
+							/>
+							<div className="flex-1 min-w-0">
+								<div className="text-xs" style={{ color: theme.colors.textMain }}>
+									{queueStatus.currentActivity ?? 'Learning from recent session...'}
+								</div>
+								{/* Progress bar */}
+								<div className="mt-1.5 flex items-center gap-2">
+									<div
+										className="flex-1 h-1.5 rounded-full overflow-hidden"
+										style={{ backgroundColor: `${theme.colors.border}40` }}
+									>
+										<div
+											className="h-full rounded-full transition-all duration-500"
+											style={{
+												backgroundColor: theme.colors.accent,
+												width: queueStatus.estimatedSecondsRemaining
+													? `${Math.max(10, 100 - (queueStatus.queueLength / Math.max(queueStatus.queueLength + 1, 1)) * 100)}%`
+													: '50%',
+											}}
+										/>
+									</div>
+									<span className="text-xs shrink-0" style={{ color: theme.colors.textDim }}>
+										{queueStatus.queueLength} task{queueStatus.queueLength !== 1 ? 's' : ''}{' '}
+										remaining
+										{queueStatus.estimatedSecondsRemaining
+											? ` (~${queueStatus.estimatedSecondsRemaining}s)`
+											: ''}
+									</span>
+								</div>
+							</div>
+						</div>
+						{queueExpanded ? (
+							<ChevronUp
+								className="w-3.5 h-3.5 shrink-0 ml-2"
+								style={{ color: theme.colors.textDim }}
+							/>
+						) : (
+							<ChevronDown
+								className="w-3.5 h-3.5 shrink-0 ml-2"
+								style={{ color: theme.colors.textDim }}
+							/>
+						)}
+					</button>
+
+					{/* Expanded detail view */}
+					{queueExpanded && (
+						<div
+							className="mt-3 pt-3 border-t space-y-2"
+							style={{ borderColor: theme.colors.border }}
+						>
+							{queueStatus.currentJob && (
+								<div
+									className="flex items-center gap-1.5 text-xs"
+									style={{ color: theme.colors.textMain }}
+								>
+									<span style={{ color: theme.colors.accent }}>●</span>
+									{queueStatus.currentActivity}
+								</div>
+							)}
+							{queueStatus.queueLength > 0 && (
+								<div className="text-xs" style={{ color: theme.colors.textDim }}>
+									{queueStatus.queueLength} job{queueStatus.queueLength !== 1 ? 's' : ''} queued
+								</div>
+							)}
+
+							{/* Token usage section */}
+							{tokenUsage &&
+								(tokenUsage.extractionTokens > 0 || tokenUsage.injectionTokens > 0) && (
+									<div className="pt-2 space-y-1">
+										<div
+											className="flex items-center gap-1.5 text-xs"
+											style={{ color: theme.colors.textDim }}
+										>
+											<Zap className="w-3 h-3" />
+											Token usage (24h)
+										</div>
+										{tokenUsage.extractionTokens > 0 && (
+											<div className="text-xs" style={{ color: theme.colors.textMain }}>
+												Extraction: {tokenUsage.extractionTokens.toLocaleString()} tokens (
+												{tokenUsage.extractionCalls} call
+												{tokenUsage.extractionCalls !== 1 ? 's' : ''}) · $
+												{tokenUsage.estimatedCostUsd.toFixed(2)}
+											</div>
+										)}
+										{tokenUsage.injectionTokens > 0 && (
+											<div className="text-xs" style={{ color: theme.colors.textMain }}>
+												Injection: {tokenUsage.injectionTokens.toLocaleString()} tokens
+											</div>
+										)}
+										<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
+											Total:{' '}
+											{(tokenUsage.extractionTokens + tokenUsage.injectionTokens).toLocaleString()}{' '}
+											tokens · ${tokenUsage.estimatedCostUsd.toFixed(2)}
+										</div>
+									</div>
+								)}
+						</div>
+					)}
+				</div>
+			)}
+
 			{/* Config panel — shown when enabled */}
 			{config.enabled && (
 				<>
@@ -678,6 +827,44 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 							description="Track how injected memories correlate with session outcomes"
 							checked={config.enableEffectivenessTracking}
 							onChange={(v) => updateConfig({ enableEffectivenessTracking: v })}
+							theme={theme}
+						/>
+					</div>
+
+					{/* Background Processing */}
+					<div
+						className="rounded-lg border p-4 space-y-3"
+						style={{ borderColor: theme.colors.border }}
+					>
+						<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+							Background Processing
+						</div>
+
+						<ConfigToggle
+							label="Background Experience Extraction"
+							description="Analyze sessions after completion to extract learnings (uses LLM tokens)"
+							checked={config.enableExperienceExtraction}
+							onChange={(v) => updateConfig({ enableExperienceExtraction: v })}
+							theme={theme}
+						/>
+
+						<ConfigSlider
+							label="Extraction Cooldown"
+							description="Minimum time between analyses per project"
+							value={config.analysisCooldownMs / 60000}
+							min={1}
+							max={30}
+							step={1}
+							onChange={(v) => updateConfig({ analysisCooldownMs: v * 60000 })}
+							theme={theme}
+							formatValue={(v) => `${v} min`}
+						/>
+
+						<ConfigToggle
+							label="Auto-Consolidation"
+							description="Automatically merge similar memories (saves tokens on injection)"
+							checked={config.enableAutoConsolidation}
+							onChange={(v) => updateConfig({ enableAutoConsolidation: v })}
 							theme={theme}
 						/>
 					</div>

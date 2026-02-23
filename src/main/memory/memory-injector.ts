@@ -513,6 +513,14 @@ export async function injectMemories(
 		scopeGroups,
 	});
 
+	// Report injection tokens to job queue tracker (fire-and-forget)
+	try {
+		const { getMemoryJobQueue } = await import('./memory-job-queue');
+		getMemoryJobQueue().trackInjectionTokens(tokenCount);
+	} catch {
+		// Queue not available — skip tracking
+	}
+
 	return {
 		injectedPrompt,
 		injectedIds,

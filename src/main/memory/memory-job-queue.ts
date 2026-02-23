@@ -12,6 +12,10 @@
  */
 
 import { BrowserWindow } from 'electron';
+import type { JobQueueStatus, TokenUsage } from '../../shared/memory-types';
+
+// Re-export shared types for consumers that import from this module
+export type { JobQueueStatus, TokenUsage } from '../../shared/memory-types';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -34,6 +38,55 @@ export interface MemoryJob {
 	deferUntil?: number;
 }
 
+// ─── Estimated processing time per job type (seconds) ────────────────────────
+
+const JOB_TIME_ESTIMATES: Record<MemoryJobType, number> = {
+	'experience-extraction': 60,
+	'effectiveness-update': 1,
+	consolidation: 3,
+	'confidence-decay': 2,
+	'hierarchy-suggestion': 3,
+	'digest-update': 1,
+	'embedding-backfill': 5,
+};
+
+// ─── Human-readable activity descriptions ────────────────────────────────────
+
+function describeJob(job: MemoryJob): string {
+	switch (job.type) {
+		case 'experience-extraction': {
+			const sid = job.payload.sessionId as string | undefined;
+			return `Extracting experiences from session ${sid ? sid.slice(0, 8) + '...' : '(unknown)'}`;
+		}
+		case 'effectiveness-update':
+			return 'Updating effectiveness scores';
+		case 'consolidation':
+			return 'Consolidating similar memories';
+		case 'confidence-decay':
+			return 'Applying confidence decay';
+		case 'hierarchy-suggestion':
+			return 'Generating hierarchy suggestions';
+		case 'digest-update':
+			return 'Updating project digest';
+		case 'embedding-backfill':
+			return 'Backfilling embeddings';
+	}
+}
+
+// ─── Token cost estimates ────────────────────────────────────────────────────
+
+/** Input token rate $/MTok */
+const INPUT_RATE_PER_MTOK = 3;
+/** Output token rate $/MTok */
+const OUTPUT_RATE_PER_MTOK = 15;
+/** Estimated tokens per extraction (8K input + 2K output) */
+const EXTRACTION_INPUT_TOKENS = 8000;
+const EXTRACTION_OUTPUT_TOKENS = 2000;
+const EXTRACTION_TOTAL_TOKENS = EXTRACTION_INPUT_TOKENS + EXTRACTION_OUTPUT_TOKENS;
+const EXTRACTION_COST_USD =
+	(EXTRACTION_INPUT_TOKENS / 1_000_000) * INPUT_RATE_PER_MTOK +
+	(EXTRACTION_OUTPUT_TOKENS / 1_000_000) * OUTPUT_RATE_PER_MTOK;
+
 // ─── Deduplication key fields per job type ───────────────────────────────────
 
 const DEDUP_KEY_FIELDS: Record<MemoryJobType, string[]> = {
@@ -55,6 +108,14 @@ export class MemoryJobQueue {
 	private running = false;
 	private llmInFlight = false;
 	private idCounter = 0;
+	private tokenUsage: TokenUsage = {
+		extractionTokens: 0,
+		injectionTokens: 0,
+		estimatedCostUsd: 0,
+		extractionCalls: 0,
+		trackingSince: Date.now(),
+	};
+	private emitDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 	/** Enqueue a job. Deduplicates by type + key fields. */
 	enqueue(job: Omit<MemoryJob, 'id' | 'createdAt'>): string {
@@ -82,6 +143,7 @@ export class MemoryJobQueue {
 		}
 
 		this.queue.push(fullJob);
+		this.emitStatusDebounced();
 		return id;
 	}
 
@@ -106,20 +168,74 @@ export class MemoryJobQueue {
 	}
 
 	/** Get current queue state for UI. */
-	getStatus(): { queueLength: number; currentJob: MemoryJobType | null; processing: boolean } {
+	getStatus(): JobQueueStatus {
+		const estimatedSecondsRemaining =
+			this.processing || this.queue.length > 0 ? this.estimateRemainingSeconds() : null;
+
 		return {
 			queueLength: this.queue.length,
 			currentJob: this.currentJob?.type ?? null,
+			currentActivity: this.currentJob ? describeJob(this.currentJob) : null,
 			processing: this.processing,
+			estimatedSecondsRemaining,
 		};
+	}
+
+	/** Get cumulative token usage (last 24h). */
+	getTokenUsage(): TokenUsage {
+		return { ...this.tokenUsage };
+	}
+
+	/** Track injection tokens reported by the memory injector. */
+	trackInjectionTokens(tokenCount: number): void {
+		this.tokenUsage.injectionTokens += tokenCount;
+		// Injection cost: all injection tokens are input tokens (prompt prefix)
+		this.tokenUsage.estimatedCostUsd += (tokenCount / 1_000_000) * INPUT_RATE_PER_MTOK;
+	}
+
+	/** Reset token tracking counters (called during daily confidence-decay). */
+	private resetTokenTracking(): void {
+		this.tokenUsage = {
+			extractionTokens: 0,
+			injectionTokens: 0,
+			estimatedCostUsd: 0,
+			extractionCalls: 0,
+			trackingSince: Date.now(),
+		};
+	}
+
+	/** Estimate remaining seconds for all queued + current jobs. */
+	private estimateRemainingSeconds(): number {
+		let seconds = 0;
+		if (this.currentJob) {
+			// Assume half the estimated time remains for the current job
+			seconds += JOB_TIME_ESTIMATES[this.currentJob.type] / 2;
+		}
+		for (const job of this.queue) {
+			seconds += JOB_TIME_ESTIMATES[job.type];
+		}
+		return Math.round(seconds);
 	}
 
 	/** Emit queue status to all renderer windows. */
 	private emitStatus(): void {
-		const status = this.getStatus();
-		for (const win of BrowserWindow.getAllWindows()) {
-			win.webContents.send('memory:job-queue-status', status);
+		try {
+			const status = this.getStatus();
+			for (const win of BrowserWindow.getAllWindows()) {
+				win.webContents.send('memory:jobQueueUpdate', status);
+			}
+		} catch {
+			// Electron not available (testing) — skip
 		}
+	}
+
+	/** Debounced emit — avoids spamming UI when multiple jobs enqueue rapidly. */
+	private emitStatusDebounced(): void {
+		if (this.emitDebounceTimer) return;
+		this.emitDebounceTimer = setTimeout(() => {
+			this.emitDebounceTimer = null;
+			this.emitStatus();
+		}, 200);
 	}
 
 	/** Sleep helper. */
@@ -189,6 +305,10 @@ export class MemoryJobQueue {
 						job.payload.projectPath as string,
 						job.payload.agentType as string
 					);
+					// Track token consumption (~10K tokens per extraction)
+					this.tokenUsage.extractionTokens += EXTRACTION_TOTAL_TOKENS;
+					this.tokenUsage.extractionCalls++;
+					this.tokenUsage.estimatedCostUsd += EXTRACTION_COST_USD;
 				} finally {
 					this.llmInFlight = false;
 				}
@@ -206,6 +326,9 @@ export class MemoryJobQueue {
 			case 'confidence-decay': {
 				const { runGlobalConfidenceDecay } = await import('./memory-effectiveness');
 				await runGlobalConfidenceDecay((job.payload.halfLifeDays as number) ?? 30);
+
+				// Reset daily token tracking counters
+				this.resetTokenTracking();
 
 				// Re-enqueue for next day
 				this.enqueue({

@@ -253,6 +253,36 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	liveSearchCooldownSeconds: 60,
 };
 
+// ─── Job Queue Status & Token Tracking ────────────────────────────────────
+
+/** Status of the background memory job queue (for UI display). */
+export interface JobQueueStatus {
+	/** Number of jobs waiting */
+	queueLength: number;
+	/** Currently processing job type, or null if idle */
+	currentJob: string | null;
+	/** Human-readable description of current activity */
+	currentActivity: string | null;
+	/** Whether the queue is actively processing */
+	processing: boolean;
+	/** Estimated seconds until queue is empty */
+	estimatedSecondsRemaining: number | null;
+}
+
+/** Cumulative token consumption tracked by the job queue (last 24h). */
+export interface TokenUsage {
+	/** Tokens consumed by experience extraction LLM calls (last 24h) */
+	extractionTokens: number;
+	/** Tokens consumed by memory injection (last 24h) — from injection records */
+	injectionTokens: number;
+	/** Estimated USD cost (last 24h) */
+	estimatedCostUsd: number;
+	/** Number of extraction calls (last 24h) */
+	extractionCalls: number;
+	/** Timestamp of oldest tracked event */
+	trackingSince: number;
+}
+
 // ─── Live Injection ───────────────────────────────────────────────────────
 
 /** Source of a pending context update for mid-session injection */
