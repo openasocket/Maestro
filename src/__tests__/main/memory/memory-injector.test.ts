@@ -44,11 +44,16 @@ vi.mock('electron-store', () => {
 // not the store's search implementation (that's tested in memory-store.test.ts).
 const mockCascadingSearch = vi.fn<[], Promise<MemorySearchResult[]>>();
 const mockRecordInjection = vi.fn<[], Promise<void>>();
+const mockHybridSearch = vi.fn<[], Promise<MemorySearchResult[]>>();
+const mockGenerateProjectDigest = vi.fn<[], Promise<string | null>>();
 
 vi.mock('../../../main/memory/memory-store', () => ({
 	getMemoryStore: () => ({
 		cascadingSearch: mockCascadingSearch,
 		recordInjection: mockRecordInjection,
+		hybridSearch: mockHybridSearch,
+		searchFlatScope: vi.fn().mockResolvedValue([]),
+		generateProjectDigest: mockGenerateProjectDigest,
 	}),
 }));
 
@@ -98,13 +103,25 @@ function makeSearchResult(
 	};
 }
 
+/**
+ * Helper: set up mock stores for the budget-first flow.
+ * cascadingSearch returns all results; hybridSearch returns scope-filtered results.
+ */
+function setupMockResults(results: MemorySearchResult[]): void {
+	mockCascadingSearch.mockResolvedValue(results);
+	mockHybridSearch.mockImplementation(async (_query: string, scope: string) => {
+		return results.filter((r) => r.entry.scope === scope && !r.personaName);
+	});
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('MemoryInjector', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mockCascadingSearch.mockResolvedValue([]);
 		mockRecordInjection.mockResolvedValue(undefined);
+		mockGenerateProjectDigest.mockResolvedValue(null);
+		setupMockResults([]);
 	});
 
 	// ─── Settings Store ─────────────────────────────────────────────────
@@ -113,7 +130,7 @@ describe('MemoryInjector', () => {
 		it('uses overrides from settings getter', async () => {
 			setMemorySettingsStore(() => ({ enabled: true, maxTokenBudget: 500 }));
 
-			mockCascadingSearch.mockResolvedValue([]);
+			setupMockResults([]);
 
 			const result = await injectMemories('test prompt', '/project', 'claude-code');
 			// Even though no results, cascadingSearch should have been called
@@ -191,7 +208,7 @@ describe('MemoryInjector', () => {
 				skillAreaId: 'sk2',
 			});
 
-			mockCascadingSearch.mockResolvedValue([
+			setupMockResults([
 				makeSearchResult(entry1, { personaName: 'Rust Dev', skillAreaName: 'Error Handling' }),
 				makeSearchResult(entry2, { personaName: 'Rust Dev', skillAreaName: 'Performance' }),
 			]);
@@ -214,7 +231,7 @@ describe('MemoryInjector', () => {
 				skillAreaId: 'sk1',
 			});
 
-			mockCascadingSearch.mockResolvedValue([
+			setupMockResults([
 				makeSearchResult(entry, { personaName: 'DevOps', skillAreaName: 'CI/CD' }),
 			]);
 
@@ -229,7 +246,7 @@ describe('MemoryInjector', () => {
 				scope: 'global',
 			});
 
-			mockCascadingSearch.mockResolvedValue([makeSearchResult(entry)]);
+			setupMockResults([makeSearchResult(entry)]);
 
 			const result = await injectMemories('testing', '/project', 'claude-code');
 			expect(result.injectedPrompt).toContain('- Always write tests');
@@ -239,7 +256,7 @@ describe('MemoryInjector', () => {
 		it('groups project memories under [project]', async () => {
 			const entry = makeEntry({ content: 'This repo uses tabs', scope: 'project' });
 
-			mockCascadingSearch.mockResolvedValue([makeSearchResult(entry)]);
+			setupMockResults([makeSearchResult(entry)]);
 
 			const result = await injectMemories('format code', '/project', 'claude-code');
 			expect(result.injectedPrompt).toContain('[project]');
@@ -249,7 +266,7 @@ describe('MemoryInjector', () => {
 		it('groups global memories under [global]', async () => {
 			const entry = makeEntry({ content: 'Always write tests', scope: 'global' });
 
-			mockCascadingSearch.mockResolvedValue([makeSearchResult(entry)]);
+			setupMockResults([makeSearchResult(entry)]);
 
 			const result = await injectMemories('testing', '/project', 'claude-code');
 			expect(result.injectedPrompt).toContain('[global]');
@@ -264,7 +281,7 @@ describe('MemoryInjector', () => {
 			const projectEntry = makeEntry({ content: 'project mem', scope: 'project' });
 			const globalEntry = makeEntry({ content: 'global mem', scope: 'global' });
 
-			mockCascadingSearch.mockResolvedValue([
+			setupMockResults([
 				makeSearchResult(globalEntry, { combinedScore: 0.9 }),
 				makeSearchResult(projectEntry, { combinedScore: 0.85 }),
 				makeSearchResult(hierarchyEntry, {
@@ -287,7 +304,7 @@ describe('MemoryInjector', () => {
 
 		it('prepends XML block to the original prompt', async () => {
 			const entry = makeEntry({ content: 'A rule', scope: 'global' });
-			mockCascadingSearch.mockResolvedValue([makeSearchResult(entry)]);
+			setupMockResults([makeSearchResult(entry)]);
 
 			const result = await injectMemories('my actual prompt', '/project', 'claude-code');
 
@@ -297,7 +314,7 @@ describe('MemoryInjector', () => {
 
 		it('includes header text in XML block', async () => {
 			const entry = makeEntry({ content: 'A rule', scope: 'global' });
-			mockCascadingSearch.mockResolvedValue([makeSearchResult(entry)]);
+			setupMockResults([makeSearchResult(entry)]);
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 			expect(result.injectedPrompt).toContain('Relevant knowledge for this task:');
@@ -308,16 +325,16 @@ describe('MemoryInjector', () => {
 
 	describe('token budget', () => {
 		beforeEach(() => {
-			setMemorySettingsStore(() => ({ enabled: true, maxTokenBudget: 300 }));
+			setMemorySettingsStore(() => ({ enabled: true, maxTokenBudget: 1500 }));
 		});
 
-		it('respects token budget by skipping entries that exceed it', async () => {
-			// Budget = 300 - 150 (overhead) = 150 available tokens
-			const small = makeEntry({ content: 'Short rule', tokenEstimate: 50 });
-			const large = makeEntry({ content: 'x'.repeat(600), tokenEstimate: 200 });
-			const small2 = makeEntry({ content: 'Another rule', tokenEstimate: 50 });
+		it('respects per-scope token budget by skipping entries that exceed it', async () => {
+			// Budget = 1500, usable = 1350, skill budget = 675
+			const small = makeEntry({ content: 'Short rule', tokenEstimate: 300 });
+			const large = makeEntry({ content: 'x'.repeat(600), tokenEstimate: 500 });
+			const small2 = makeEntry({ content: 'Another rule', tokenEstimate: 300 });
 
-			mockCascadingSearch.mockResolvedValue([
+			setupMockResults([
 				makeSearchResult(small, { combinedScore: 0.9 }),
 				makeSearchResult(large, { combinedScore: 0.85 }),
 				makeSearchResult(small2, { combinedScore: 0.8 }),
@@ -325,17 +342,19 @@ describe('MemoryInjector', () => {
 
 			const result = await injectMemories('test', '/project', 'claude-code');
 
-			// Should include small and small2 (50+50=100 < 150) but skip large (200 > remaining)
+			// Skill budget = 675: small (300) fits, large (500) doesn't (300+500=800 > 675),
+			// small2 (300) fits (300+300=600 ≤ 675)
 			expect(result.injectedIds).toContain(small.id);
 			expect(result.injectedIds).toContain(small2.id);
 			expect(result.injectedIds).not.toContain(large.id);
 		});
 
 		it('returns unchanged prompt when no memories fit the budget', async () => {
-			// Budget = 300 - 150 = 150 tokens available
+			setMemorySettingsStore(() => ({ enabled: true, maxTokenBudget: 300 }));
+			// Budget = 300, usable = 150, skill budget = 75
 			const huge = makeEntry({ content: 'x'.repeat(800), tokenEstimate: 200 });
 
-			mockCascadingSearch.mockResolvedValue([makeSearchResult(huge, { combinedScore: 0.9 })]);
+			setupMockResults([makeSearchResult(huge, { combinedScore: 0.9 })]);
 
 			const result = await injectMemories('original prompt', '/project', 'claude-code');
 			expect(result.injectedPrompt).toBe('original prompt');
@@ -356,7 +375,7 @@ describe('MemoryInjector', () => {
 			const e2 = makeEntry({ content: 'Rule 2', scope: 'skill' });
 			const e3 = makeEntry({ content: 'Rule 3', scope: 'skill' });
 
-			mockCascadingSearch.mockResolvedValue([
+			setupMockResults([
 				makeSearchResult(e1, { personaName: 'Rust Dev', skillAreaName: 'Errors' }),
 				makeSearchResult(e2, { personaName: 'Rust Dev', skillAreaName: 'Testing' }),
 				makeSearchResult(e3, { personaName: 'Python Dev', skillAreaName: 'API' }),
@@ -378,11 +397,7 @@ describe('MemoryInjector', () => {
 			const proj2 = makeEntry({ content: 'Project B', scope: 'project' });
 			const glob = makeEntry({ content: 'Global', scope: 'global' });
 
-			mockCascadingSearch.mockResolvedValue([
-				makeSearchResult(proj1),
-				makeSearchResult(proj2),
-				makeSearchResult(glob),
-			]);
+			setupMockResults([makeSearchResult(proj1), makeSearchResult(proj2), makeSearchResult(glob)]);
 
 			const result = await injectMemories('test', '/project', 'claude-code');
 			expect(result.flatScopeCounts.project).toBe(2);
@@ -405,7 +420,7 @@ describe('MemoryInjector', () => {
 			});
 			const globalEntry = makeEntry({ content: 'Global rule', scope: 'global' });
 
-			mockCascadingSearch.mockResolvedValue([
+			setupMockResults([
 				makeSearchResult(skillEntry, { personaName: 'Dev', skillAreaName: 'Errors' }),
 				makeSearchResult(globalEntry),
 			]);
@@ -432,7 +447,7 @@ describe('MemoryInjector', () => {
 		it('passes projectPath for project-scope recordInjection', async () => {
 			const projEntry = makeEntry({ content: 'Proj rule', scope: 'project' });
 
-			mockCascadingSearch.mockResolvedValue([makeSearchResult(projEntry)]);
+			setupMockResults([makeSearchResult(projEntry)]);
 
 			await injectMemories('test', '/my/project', 'claude-code');
 
@@ -449,7 +464,7 @@ describe('MemoryInjector', () => {
 			setMemorySettingsStore(() => ({ enabled: true, maxTokenBudget: 5000 }));
 
 			const entry = makeEntry({ content: 'A rule', scope: 'global' });
-			mockCascadingSearch.mockResolvedValue([makeSearchResult(entry)]);
+			setupMockResults([makeSearchResult(entry)]);
 
 			const result = await tryInjectMemories('my prompt', '/project', 'claude-code');
 			expect(result.injectedPrompt).toContain('<agent-memories>');
@@ -498,7 +513,7 @@ describe('MemoryInjector', () => {
 		});
 
 		it('returns unchanged prompt when cascadingSearch returns empty', async () => {
-			mockCascadingSearch.mockResolvedValue([]);
+			setupMockResults([]);
 
 			const result = await injectMemories('my prompt', '/project', 'claude-code');
 			expect(result.injectedPrompt).toBe('my prompt');
@@ -507,7 +522,7 @@ describe('MemoryInjector', () => {
 		});
 
 		it('does not call recordInjection when no memories selected', async () => {
-			mockCascadingSearch.mockResolvedValue([]);
+			setupMockResults([]);
 
 			await injectMemories('my prompt', '/project', 'claude-code');
 			expect(mockRecordInjection).not.toHaveBeenCalled();

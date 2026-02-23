@@ -14,11 +14,17 @@ import type { MemorySearchResult, MemoryEntry } from '../../../shared/memory-typ
 
 const mockCascadingSearch = vi.fn<(...args: any[]) => Promise<MemorySearchResult[]>>();
 const mockRecordInjection = vi.fn<(...args: any[]) => Promise<void>>();
+const mockHybridSearch = vi.fn<(...args: any[]) => Promise<MemorySearchResult[]>>();
+const mockSearchFlatScope = vi.fn<(...args: any[]) => Promise<MemorySearchResult[]>>();
+const mockGenerateProjectDigest = vi.fn<(...args: any[]) => Promise<string | null>>();
 
 vi.mock('../../memory/memory-store', () => ({
 	getMemoryStore: () => ({
 		cascadingSearch: (...args: any[]) => mockCascadingSearch(...args),
 		recordInjection: (...args: any[]) => mockRecordInjection(...args),
+		hybridSearch: (...args: any[]) => mockHybridSearch(...args),
+		searchFlatScope: (...args: any[]) => mockSearchFlatScope(...args),
+		generateProjectDigest: (...args: any[]) => mockGenerateProjectDigest(...args),
 	}),
 }));
 
@@ -75,12 +81,33 @@ function makeResult(
 	};
 }
 
+/**
+ * Helper: set up mock stores for the budget-first flow.
+ * cascadingSearch returns all results (skill scope filtered in injector).
+ * hybridSearch returns scope-filtered results for project/global.
+ */
+function setupMockResults(results: MemorySearchResult[]): void {
+	// cascadingSearch returns all results — injector filters to skill/persona
+	mockCascadingSearch.mockResolvedValue(results);
+	// hybridSearch called for project and global scopes individually
+	mockHybridSearch.mockImplementation(async (_query: string, scope: string) => {
+		return results.filter((r) => r.entry.scope === scope && !r.personaName);
+	});
+}
+
 describe('MemoryInjector', () => {
 	beforeEach(() => {
 		nextId = 0;
 		mockCascadingSearch.mockReset();
 		mockRecordInjection.mockReset();
+		mockHybridSearch.mockReset();
+		mockSearchFlatScope.mockReset();
+		mockGenerateProjectDigest.mockReset();
 		mockRecordInjection.mockResolvedValue(undefined);
+		// Default: per-scope searches return empty (tests that need results set these)
+		mockHybridSearch.mockResolvedValue([]);
+		mockSearchFlatScope.mockResolvedValue([]);
+		mockGenerateProjectDigest.mockResolvedValue(null);
 		// Set settings getter to return enabled config
 		setMemorySettingsStore(() => ({ enabled: true }));
 	});
@@ -120,7 +147,7 @@ describe('MemoryInjector', () => {
 		});
 
 		it('returns original prompt when no memories found', async () => {
-			mockCascadingSearch.mockResolvedValue([]);
+			setupMockResults([]);
 
 			const result = await injectMemories('My prompt', '/project', 'claude-code');
 
@@ -132,34 +159,34 @@ describe('MemoryInjector', () => {
 
 	// ─── 2. Token Budget ────────────────────────────────────────────────
 
-	describe('Token budget: stops at maxTokenBudget minus overhead', () => {
-		it('selects memories that fit within the budget', async () => {
-			// Budget is 1500 by default, minus 150 overhead = 1350 available
+	describe('Token budget: per-scope budget-first allocation', () => {
+		it('selects skill memories within the skill scope budget', async () => {
+			// Budget: 1500 total, 1350 usable, skill = 675
 			const results = [
 				makeResult({
-					entry: { content: 'A'.repeat(2000), tokenEstimate: 500 },
+					entry: { content: 'A'.repeat(2000), tokenEstimate: 300 },
 					combinedScore: 0.9,
 					personaName: 'P1',
 					skillAreaName: 'S1',
 				}),
 				makeResult({
-					entry: { content: 'B'.repeat(2000), tokenEstimate: 500 },
+					entry: { content: 'B'.repeat(2000), tokenEstimate: 300 },
 					combinedScore: 0.8,
 					personaName: 'P1',
 					skillAreaName: 'S1',
 				}),
 				makeResult({
-					entry: { content: 'C'.repeat(2000), tokenEstimate: 500 },
+					entry: { content: 'C'.repeat(2000), tokenEstimate: 300 },
 					combinedScore: 0.7,
 					personaName: 'P1',
 					skillAreaName: 'S1',
 				}),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
-			// Budget = 1350: first two fit (500+500=1000), third would be 1500 → skipped
+			// Skill budget = 675: first two fit (300+300=600), third would be 900 → skipped
 			expect(result.injectedIds).toHaveLength(2);
 			expect(result.injectedIds).toContain(results[0].entry.id);
 			expect(result.injectedIds).toContain(results[1].entry.id);
@@ -168,6 +195,7 @@ describe('MemoryInjector', () => {
 
 		it('skips large entries but includes smaller ones after', async () => {
 			// Greedy: skip items that don't fit, continue to next
+			// Skill budget = 675
 			const results = [
 				makeResult({
 					entry: { tokenEstimate: 200 },
@@ -176,23 +204,22 @@ describe('MemoryInjector', () => {
 					skillAreaName: 'S',
 				}),
 				makeResult({
-					entry: { tokenEstimate: 1200 },
+					entry: { tokenEstimate: 600 },
 					combinedScore: 0.9,
 					personaName: 'P',
 					skillAreaName: 'S',
-				}), // too big after first
+				}), // too big after first (200+600=800 > 675)
 				makeResult({
 					entry: { tokenEstimate: 300 },
 					combinedScore: 0.85,
 					personaName: 'P',
 					skillAreaName: 'S',
-				}), // fits after first
+				}), // fits after first (200+300=500 ≤ 675)
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
-			// 200 fits, 1200 doesn't (200+1200=1400 > 1350), 300 fits (200+300=500)
 			expect(result.injectedIds).toHaveLength(2);
 			expect(result.injectedIds).toContain(results[0].entry.id);
 			expect(result.injectedIds).not.toContain(results[1].entry.id);
@@ -201,27 +228,27 @@ describe('MemoryInjector', () => {
 
 		it('respects custom maxTokenBudget from settings', async () => {
 			setMemorySettingsStore(() => ({ enabled: true, maxTokenBudget: 500 }));
-			// Available = 500 - 150 = 350
+			// Usable = 500 - 150 = 350, skill budget = 175
 
 			const results = [
 				makeResult({
-					entry: { tokenEstimate: 200 },
+					entry: { tokenEstimate: 100 },
 					combinedScore: 0.9,
 					personaName: 'P',
 					skillAreaName: 'S',
 				}),
 				makeResult({
-					entry: { tokenEstimate: 200 },
+					entry: { tokenEstimate: 100 },
 					combinedScore: 0.8,
 					personaName: 'P',
 					skillAreaName: 'S',
 				}),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
-			// 200 fits, second 200 would be 400 > 350 → skipped
+			// skill budget = 175: 100 fits, second 100 would be 200 > 175 → skipped
 			expect(result.injectedIds).toHaveLength(1);
 		});
 
@@ -229,12 +256,38 @@ describe('MemoryInjector', () => {
 			const results = [
 				makeResult({ entry: { tokenEstimate: 100 }, personaName: 'P', skillAreaName: 'S' }),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
 			// tokenCount = totalTokens (100) + WRAPPER_OVERHEAD_TOKENS (150)
 			expect(result.tokenCount).toBe(250);
+		});
+
+		it('scopes cannot starve each other — each fills independently', async () => {
+			// Skill budget = 675, project budget = 405, global budget = 270
+			const skillMem = makeResult({
+				entry: { tokenEstimate: 600 },
+				personaName: 'P',
+				skillAreaName: 'S',
+			});
+			const projectMem = makeResult({
+				entry: { content: 'Project mem', scope: 'project', tokenEstimate: 300 },
+				personaName: undefined,
+			});
+			const globalMem = makeResult({
+				entry: { content: 'Global mem', scope: 'global', tokenEstimate: 200 },
+				personaName: undefined,
+			});
+
+			setupMockResults([skillMem, projectMem, globalMem]);
+
+			const result = await injectMemories('prompt', '/project', 'claude-code');
+
+			// All three should be selected since each fits within its scope budget
+			expect(result.injectedIds).toContain(skillMem.entry.id);
+			expect(result.injectedIds).toContain(projectMem.entry.id);
+			expect(result.injectedIds).toContain(globalMem.entry.id);
 		});
 	});
 
@@ -249,7 +302,7 @@ describe('MemoryInjector', () => {
 					skillAreaName: 'Error Handling',
 				}),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await injectMemories('my prompt', '/project', 'claude-code');
 
@@ -277,7 +330,7 @@ describe('MemoryInjector', () => {
 					skillAreaName: 'Error Handling',
 				}),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
@@ -294,7 +347,7 @@ describe('MemoryInjector', () => {
 					skillAreaName: undefined,
 				}),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
@@ -309,7 +362,7 @@ describe('MemoryInjector', () => {
 					personaName: undefined,
 				}),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
@@ -324,7 +377,7 @@ describe('MemoryInjector', () => {
 					personaName: undefined,
 				}),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
@@ -345,7 +398,7 @@ describe('MemoryInjector', () => {
 					skillAreaName: 'Testing',
 				}),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
@@ -371,7 +424,7 @@ describe('MemoryInjector', () => {
 					personaName: undefined,
 				}),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
@@ -396,7 +449,7 @@ describe('MemoryInjector', () => {
 				makeResult({ entry: { content: 'Mem B' }, personaName: 'Dev', skillAreaName: 'Testing' }),
 				makeResult({ entry: { content: 'Mem C' }, personaName: 'Dev', skillAreaName: 'Errors' }),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
@@ -427,7 +480,7 @@ describe('MemoryInjector', () => {
 				makeResult({ entry: { content: 'C' }, personaName: 'Python Dev', skillAreaName: 'S' }),
 				makeResult({ entry: { content: 'D', scope: 'global' }, personaName: undefined }),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
@@ -444,7 +497,7 @@ describe('MemoryInjector', () => {
 				makeResult({ entry: { content: 'P2', scope: 'project' }, personaName: undefined }),
 				makeResult({ entry: { content: 'G1', scope: 'global' }, personaName: undefined }),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
@@ -473,7 +526,7 @@ describe('MemoryInjector', () => {
 				}),
 				makeResult({ entry: { content: 'G1', scope: 'global' }, personaName: undefined }),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			await injectMemories('prompt', '/project', 'claude-code');
 
@@ -506,7 +559,7 @@ describe('MemoryInjector', () => {
 			const results = [
 				makeResult({ entry: { content: 'proj mem', scope: 'project' }, personaName: undefined }),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await injectMemories('prompt', '/my/project', 'claude-code');
 
@@ -542,7 +595,7 @@ describe('MemoryInjector', () => {
 			const results = [
 				makeResult({ entry: { content: 'A' }, personaName: 'P', skillAreaName: 'S' }),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 			mockRecordInjection.mockRejectedValue(new Error('Write failed'));
 
 			const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -559,7 +612,7 @@ describe('MemoryInjector', () => {
 			const results = [
 				makeResult({ entry: { content: 'Memory' }, personaName: 'P', skillAreaName: 'S' }),
 			];
-			mockCascadingSearch.mockResolvedValue(results);
+			setupMockResults(results);
 
 			const result = await tryInjectMemories('prompt', '/project', 'claude-code');
 
@@ -649,7 +702,7 @@ describe('MemoryInjector', () => {
 	describe('Query truncation: prompt sliced to 2000 chars for search', () => {
 		it('passes truncated prompt to cascadingSearch', async () => {
 			const longPrompt = 'A'.repeat(5000);
-			mockCascadingSearch.mockResolvedValue([]);
+			setupMockResults([]);
 
 			await injectMemories(longPrompt, '/project', 'claude-code');
 
@@ -660,7 +713,7 @@ describe('MemoryInjector', () => {
 
 		it('passes full prompt if shorter than 2000 chars', async () => {
 			const shortPrompt = 'short query';
-			mockCascadingSearch.mockResolvedValue([]);
+			setupMockResults([]);
 
 			await injectMemories(shortPrompt, '/project', 'claude-code');
 

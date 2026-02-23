@@ -41,6 +41,55 @@ function getConfig(): MemoryConfig {
 /** Overhead tokens for the XML wrapper, section headers, etc. */
 const WRAPPER_OVERHEAD_TOKENS = 150;
 
+// ─── Budget-First Allocation ────────────────────────────────────────────────
+
+/** Per-scope token budgets computed before retrieval. */
+interface ScopeBudgets {
+	skill: number;
+	project: number;
+	global: number;
+	total: number;
+}
+
+/**
+ * Compute per-scope token budgets based on injection strategy and total budget.
+ *
+ * Budget-first allocation (Agentic Engineering Book pattern):
+ * Instead of retrieving everything and truncating, allocate budgets per tier
+ * BEFORE searching. Each scope searches within its allocated budget.
+ *
+ * Allocation ratios:
+ *   Skill memories:   50% (hierarchy-based, highest precision)
+ *   Project memories:  30% (project-specific facts)
+ *   Global memories:   20% (universal rules)
+ */
+function computeScopeBudgets(config: MemoryConfig): ScopeBudgets {
+	let total: number;
+
+	switch (config.injectionStrategy) {
+		case 'lean':
+			total = Math.min(config.maxTokenBudget, 600);
+			break;
+		case 'rich':
+			total = Math.min(config.maxTokenBudget * 1.5, 3000);
+			break;
+		case 'balanced':
+		default:
+			total = config.maxTokenBudget;
+			break;
+	}
+
+	// Reserve overhead from the usable total
+	const usable = Math.max(total - WRAPPER_OVERHEAD_TOKENS, 0);
+
+	return {
+		skill: Math.floor(usable * 0.5),
+		project: Math.floor(usable * 0.3),
+		global: Math.floor(usable * 0.2),
+		total,
+	};
+}
+
 // ─── Formatting ─────────────────────────────────────────────────────────────
 
 interface GroupedMemories {
@@ -114,8 +163,34 @@ function formatXmlBlock(selected: MemorySearchResult[]): string {
 // ─── Core Injection ─────────────────────────────────────────────────────────
 
 /**
- * Retrieve relevant memories via cascading search and format them
+ * Greedy token selection within a budget — picks results by combinedScore
+ * until the budget is exhausted.
+ */
+function selectWithinBudget(
+	results: MemorySearchResult[],
+	tokenBudget: number
+): MemorySearchResult[] {
+	const selected: MemorySearchResult[] = [];
+	let used = 0;
+	for (const r of results) {
+		const cost = r.entry.tokenEstimate;
+		if (used + cost > tokenBudget) continue;
+		selected.push(r);
+		used += cost;
+	}
+	return selected;
+}
+
+/**
+ * Retrieve relevant memories via budget-first allocation and format them
  * as an XML block prepended to the user's prompt.
+ *
+ * Budget-first flow:
+ * 1. Compute per-scope budgets via computeScopeBudgets()
+ * 2. Run searches per scope with scope-specific limits
+ * 3. Each scope fills its budget independently — no scope can starve another
+ * 4. Combine results preserving scope ordering (skill > project > global)
+ * 5. Apply strategy-specific filters (lean/rich)
  */
 export async function injectMemories(
 	prompt: string,
@@ -137,24 +212,158 @@ export async function injectMemories(
 	}
 
 	const store = getMemoryStore();
+	const budgets = computeScopeBudgets(config);
 
-	// Cascading search
-	const results = await store.cascadingSearch(query(prompt), config, agentType, projectPath);
+	// Optionally adjust config for rich mode (lower similarity threshold)
+	const searchConfig: MemoryConfig =
+		config.injectionStrategy === 'rich'
+			? {
+					...config,
+					similarityThreshold: Math.max(config.similarityThreshold - 0.1, 0.1),
+				}
+			: config;
 
-	// Greedy token selection — iterate by combinedScore (already sorted), accumulate
-	const tokenBudget = config.maxTokenBudget - WRAPPER_OVERHEAD_TOKENS;
-	const selected: MemorySearchResult[] = [];
-	let totalTokens = 0;
+	// ── Per-scope searches ───────────────────────────────────────────────
 
-	for (const result of results) {
-		const cost = result.entry.tokenEstimate;
-		if (totalTokens + cost > tokenBudget) continue;
-		selected.push(result);
-		totalTokens += cost;
+	// Skill search: cascading persona → skill → memory
+	const skillResults = await store.cascadingSearch(
+		query(prompt),
+		searchConfig,
+		agentType,
+		projectPath
+	);
+	// Filter to skill-scope only (cascading search returns all scopes)
+	const skillOnly = skillResults.filter((r) => r.personaName || r.entry.scope === 'skill');
+	const selectedSkill = selectWithinBudget(skillOnly, budgets.skill);
+
+	// Project search: flat search within project scope
+	let projectSearchResults: MemorySearchResult[] = [];
+	if (projectPath) {
+		if (searchConfig.enableHybridSearch) {
+			projectSearchResults = await store.hybridSearch(
+				query(prompt),
+				'project',
+				searchConfig,
+				undefined,
+				projectPath
+			);
+		} else {
+			const { encode } = await import('../grpo/embedding-service');
+			const qEmbed = await encode(query(prompt));
+			projectSearchResults = await store.searchFlatScope(
+				qEmbed,
+				'project',
+				searchConfig,
+				projectPath
+			);
+		}
+	}
+	const selectedProject = selectWithinBudget(projectSearchResults, budgets.project);
+
+	// Global search: flat search within global scope
+	let globalSearchResults: MemorySearchResult[];
+	if (searchConfig.enableHybridSearch) {
+		globalSearchResults = await store.hybridSearch(query(prompt), 'global', searchConfig);
+	} else {
+		const { encode } = await import('../grpo/embedding-service');
+		const qEmbed = await encode(query(prompt));
+		globalSearchResults = await store.searchFlatScope(qEmbed, 'global', searchConfig);
+	}
+	const selectedGlobal = selectWithinBudget(globalSearchResults, budgets.global);
+
+	// ── Combine results preserving scope ordering (skill > project > global) ──
+	const selected: MemorySearchResult[] = [...selectedSkill, ...selectedProject, ...selectedGlobal];
+
+	// De-duplicate (skill search may include project/global results)
+	const seen = new Set<string>();
+	const deduped: MemorySearchResult[] = [];
+	for (const r of selected) {
+		if (seen.has(r.entry.id)) continue;
+		seen.add(r.entry.id);
+		deduped.push(r);
 	}
 
+	// ── Strategy-specific post-filters ───────────────────────────────────
+
+	let finalSelected: MemorySearchResult[];
+	if (config.injectionStrategy === 'lean') {
+		// Lean: only high-effectiveness memories, max 5
+		finalSelected = deduped.filter((r) => r.entry.effectivenessScore >= 0.5).slice(0, 5);
+	} else if (config.injectionStrategy === 'rich' && projectPath) {
+		// Rich: inject project digest as first project block if available
+		finalSelected = [...deduped];
+		const digest = await store.generateProjectDigest(projectPath, 10);
+		if (digest) {
+			const digestTokens = Math.ceil(digest.length / 4);
+			const digestResult: MemorySearchResult = {
+				entry: {
+					id: 'project-digest',
+					content: digest,
+					type: 'rule',
+					scope: 'project',
+					tags: ['system:project-digest'],
+					source: 'consolidation',
+					confidence: 1.0,
+					pinned: true,
+					active: true,
+					archived: false,
+					embedding: null,
+					effectivenessScore: 0.5,
+					useCount: 0,
+					tokenEstimate: digestTokens,
+					lastUsedAt: 0,
+					createdAt: Date.now(),
+					updatedAt: Date.now(),
+				},
+				similarity: 1.0,
+				combinedScore: 1.0,
+			};
+			// Insert digest before other project entries
+			const firstProjectIdx = finalSelected.findIndex(
+				(r) => r.entry.scope === 'project' && !r.personaName
+			);
+			if (firstProjectIdx >= 0) {
+				finalSelected.splice(firstProjectIdx, 0, digestResult);
+			} else {
+				// No project entries — add after skill entries
+				let lastSkillIdx = -1;
+				for (let i = finalSelected.length - 1; i >= 0; i--) {
+					if (finalSelected[i].personaName || finalSelected[i].entry.scope === 'skill') {
+						lastSkillIdx = i;
+						break;
+					}
+				}
+				finalSelected.splice(lastSkillIdx + 1, 0, digestResult);
+			}
+		}
+
+		// Rich: include recent experiences from last 3 sessions even if low similarity
+		const now = Date.now();
+		const threeSessions = 3 * 60 * 60 * 1000; // rough heuristic: 3 hours
+		const recentExperiences = [
+			...skillResults,
+			...projectSearchResults,
+			...globalSearchResults,
+		].filter(
+			(r) =>
+				r.entry.type === 'experience' &&
+				r.entry.createdAt > now - threeSessions &&
+				!seen.has(r.entry.id)
+		);
+		for (const r of recentExperiences) {
+			if (!seen.has(r.entry.id)) {
+				seen.add(r.entry.id);
+				finalSelected.push(r);
+			}
+		}
+	} else {
+		finalSelected = deduped;
+	}
+
+	let totalTokens = finalSelected.reduce((sum, r) => sum + r.entry.tokenEstimate, 0);
+
 	// Nothing selected → return unchanged
-	if (selected.length === 0) {
+	if (finalSelected.length === 0) {
 		return {
 			injectedPrompt: prompt,
 			injectedIds: [],
@@ -165,69 +374,68 @@ export async function injectMemories(
 		};
 	}
 
-	// Project digest optimization: when many project memories compete for budget,
-	// replace individual project entries with a single digest if more token-efficient.
-	// Track replaced IDs so effectiveness tracking still covers all original memories.
+	// Project digest optimization for balanced mode: when many project memories
+	// compete for budget, replace individual project entries with a single digest.
 	let replacedProjectIds: MemoryId[] = [];
-	const projectResults = selected.filter((r) => r.entry.scope === 'project');
-	if (projectResults.length > 5 && projectPath) {
-		const projectTokenCost = projectResults.reduce((sum, r) => sum + r.entry.tokenEstimate, 0);
-		const projectTokenBudgetRatio = projectTokenCost / config.maxTokenBudget;
+	if (config.injectionStrategy === 'balanced') {
+		const projectResults = finalSelected.filter(
+			(r) => r.entry.scope === 'project' && r.entry.id !== 'project-digest'
+		);
+		if (projectResults.length > 5 && projectPath) {
+			const projectTokenCost = projectResults.reduce((sum, r) => sum + r.entry.tokenEstimate, 0);
+			const projectTokenBudgetRatio = projectTokenCost / config.maxTokenBudget;
 
-		if (projectTokenBudgetRatio > 0.4) {
-			const digest = await store.generateProjectDigest(projectPath, 10);
-			if (digest) {
-				const digestTokens = Math.ceil(digest.length / 4);
-				// Only use digest if it's more token-efficient
-				if (digestTokens < projectTokenCost) {
-					// Track all original project memory IDs for effectiveness
-					replacedProjectIds = projectResults.map((r) => r.entry.id);
-					const projectIdSet = new Set(replacedProjectIds);
-					const nonProjectSelected = selected.filter((r) => !projectIdSet.has(r.entry.id));
+			if (projectTokenBudgetRatio > 0.4) {
+				const digest = await store.generateProjectDigest(projectPath, 10);
+				if (digest) {
+					const digestTokens = Math.ceil(digest.length / 4);
+					if (digestTokens < projectTokenCost) {
+						replacedProjectIds = projectResults.map((r) => r.entry.id);
+						const projectIdSet = new Set(replacedProjectIds);
+						const nonProject = finalSelected.filter((r) => !projectIdSet.has(r.entry.id));
 
-					// Create a synthetic search result for the digest
-					const digestResult: MemorySearchResult = {
-						entry: {
-							id: 'project-digest',
-							content: digest,
-							type: 'rule',
-							scope: 'project',
-							tags: ['system:project-digest'],
-							source: 'consolidation',
-							confidence: 1.0,
-							pinned: true,
-							active: true,
-							archived: false,
-							embedding: null,
-							effectivenessScore: 0.5,
-							useCount: 0,
-							tokenEstimate: digestTokens,
-							lastUsedAt: 0,
-							createdAt: Date.now(),
-							updatedAt: Date.now(),
-						},
-						similarity: 1.0,
-						combinedScore: 1.0,
-					};
+						const digestResult: MemorySearchResult = {
+							entry: {
+								id: 'project-digest',
+								content: digest,
+								type: 'rule',
+								scope: 'project',
+								tags: ['system:project-digest'],
+								source: 'consolidation',
+								confidence: 1.0,
+								pinned: true,
+								active: true,
+								archived: false,
+								embedding: null,
+								effectivenessScore: 0.5,
+								useCount: 0,
+								tokenEstimate: digestTokens,
+								lastUsedAt: 0,
+								createdAt: Date.now(),
+								updatedAt: Date.now(),
+							},
+							similarity: 1.0,
+							combinedScore: 1.0,
+						};
 
-					// Replace selected with non-project + digest
-					selected.length = 0;
-					selected.push(...nonProjectSelected, digestResult);
-					totalTokens = selected.reduce((sum, r) => sum + r.entry.tokenEstimate, 0);
+						finalSelected.length = 0;
+						finalSelected.push(...nonProject, digestResult);
+						totalTokens = finalSelected.reduce((sum, r) => sum + r.entry.tokenEstimate, 0);
+					}
 				}
 			}
 		}
 	}
 
 	// Format XML
-	const xmlBlock = formatXmlBlock(selected);
+	const xmlBlock = formatXmlBlock(finalSelected);
 
 	// Track persona contributions
 	const personaMap = new Map<string, { personaName: string; count: number }>();
 	let projectCount = 0;
 	let globalCount = 0;
 
-	for (const result of selected) {
+	for (const result of finalSelected) {
 		if (result.personaName) {
 			const existing = personaMap.get(result.personaName);
 			if (existing) {
@@ -251,10 +459,10 @@ export async function injectMemories(
 	// Record injection — group by scope for batch recording.
 	// Include replaced project IDs so effectiveness tracking covers all original memories.
 	const injectedIds = [
-		...selected.map((r) => r.entry.id).filter((id) => id !== 'project-digest'),
+		...finalSelected.map((r) => r.entry.id).filter((id) => id !== 'project-digest'),
 		...replacedProjectIds,
 	];
-	const byScope = groupInjectedByScope(selected);
+	const byScope = groupInjectedByScope(finalSelected);
 
 	// Build scope groups with projectPath for effectiveness tracking
 	const scopeGroups = byScope.map(({ scope, skillAreaId, ids }) => ({

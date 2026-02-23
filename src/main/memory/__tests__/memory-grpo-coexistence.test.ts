@@ -18,11 +18,16 @@ import type { MemorySearchResult, MemoryEntry } from '../../../shared/memory-typ
 
 const mockCascadingSearch = vi.fn<(...args: any[]) => Promise<MemorySearchResult[]>>();
 const mockRecordInjection = vi.fn<(...args: any[]) => Promise<void>>();
+const mockHybridSearch = vi.fn<(...args: any[]) => Promise<MemorySearchResult[]>>();
+const mockGenerateProjectDigest = vi.fn<(...args: any[]) => Promise<string | null>>();
 
 vi.mock('../../memory/memory-store', () => ({
 	getMemoryStore: () => ({
 		cascadingSearch: (...args: any[]) => mockCascadingSearch(...args),
 		recordInjection: (...args: any[]) => mockRecordInjection(...args),
+		hybridSearch: (...args: any[]) => mockHybridSearch(...args),
+		searchFlatScope: vi.fn().mockResolvedValue([]),
+		generateProjectDigest: (...args: any[]) => mockGenerateProjectDigest(...args),
 	}),
 }));
 
@@ -75,6 +80,17 @@ function makeResult(
 	};
 }
 
+/**
+ * Helper: set up mock stores for the budget-first flow.
+ * cascadingSearch returns all results; hybridSearch returns scope-filtered results.
+ */
+function setupMockResults(results: MemorySearchResult[]): void {
+	mockCascadingSearch.mockResolvedValue(results);
+	mockHybridSearch.mockImplementation(async (_query: string, scope: string) => {
+		return results.filter((r) => r.entry.scope === scope && !r.personaName);
+	});
+}
+
 /** Simulate GRPO injection — wraps prompt with <project-experiences> XML. */
 function simulateGrpoInjection(prompt: string, experiences: string[]): string {
 	const lines = experiences.map((e) => `- ${e}`).join('\n');
@@ -88,7 +104,11 @@ describe('GRPO Coexistence — Memory + GRPO injection independence', () => {
 		nextId = 0;
 		mockCascadingSearch.mockReset();
 		mockRecordInjection.mockReset();
+		mockHybridSearch.mockReset();
+		mockGenerateProjectDigest.mockReset();
 		mockRecordInjection.mockResolvedValue(undefined);
+		mockHybridSearch.mockResolvedValue([]);
+		mockGenerateProjectDigest.mockResolvedValue(null);
 	});
 
 	afterEach(() => {
@@ -114,7 +134,7 @@ describe('GRPO Coexistence — Memory + GRPO injection independence', () => {
 					skillAreaName: 'Error Handling',
 				}),
 			];
-			mockCascadingSearch.mockResolvedValue(memoryResults);
+			setupMockResults(memoryResults);
 
 			const result = await injectMemories(grpoPrompt, '/project', 'claude-code');
 
@@ -141,7 +161,7 @@ describe('GRPO Coexistence — Memory + GRPO injection independence', () => {
 
 			const grpoPrompt = simulateGrpoInjection('Build a web server', ['Use axum framework']);
 
-			mockCascadingSearch.mockResolvedValue([
+			setupMockResults([
 				makeResult({
 					entry: { content: 'Prefer async/await patterns' },
 					personaName: 'Backend Dev',
@@ -166,7 +186,7 @@ describe('GRPO Coexistence — Memory + GRPO injection independence', () => {
 				'Consider connection pooling',
 			]);
 
-			mockCascadingSearch.mockResolvedValue([
+			setupMockResults([
 				makeResult({
 					entry: { content: 'Use indexes on frequently queried columns' },
 					personaName: 'DB Admin',
@@ -204,24 +224,25 @@ describe('GRPO Coexistence — Memory + GRPO injection independence', () => {
 		it('token budgets are independent — memory respects its own budget regardless of GRPO size', async () => {
 			setMemorySettingsStore(() => ({ enabled: true, maxTokenBudget: 500 }));
 			// Available memory budget = 500 - 150 overhead = 350
+			// Skill budget = 350 * 0.5 = 175
 
 			// Simulate a large GRPO block (this doesn't count against memory budget)
 			const largeGrpoContent = Array.from({ length: 50 }, (_, i) => `Experience ${i}`);
 			const grpoPrompt = simulateGrpoInjection('prompt', largeGrpoContent);
 
-			mockCascadingSearch.mockResolvedValue([
+			setupMockResults([
 				makeResult({
-					entry: { content: 'Fits in budget', tokenEstimate: 200 },
+					entry: { content: 'Fits in budget', tokenEstimate: 80 },
 					personaName: 'Dev',
 					skillAreaName: 'S',
 				}),
 				makeResult({
-					entry: { content: 'Also fits', tokenEstimate: 100 },
+					entry: { content: 'Also fits', tokenEstimate: 80 },
 					personaName: 'Dev',
 					skillAreaName: 'S',
 				}),
 				makeResult({
-					entry: { content: 'Over budget', tokenEstimate: 200 },
+					entry: { content: 'Over budget', tokenEstimate: 80 },
 					personaName: 'Dev',
 					skillAreaName: 'S',
 				}),
@@ -229,8 +250,7 @@ describe('GRPO Coexistence — Memory + GRPO injection independence', () => {
 
 			const result = await injectMemories(grpoPrompt, '/project', 'claude-code');
 
-			// Memory injector should select based on its own budget (350 tokens)
-			// 200 + 100 = 300 fits, adding 200 more = 500 > 350
+			// Skill budget = 175: 80 + 80 = 160 fits, adding 80 more = 240 > 175
 			expect(result.injectedIds).toHaveLength(2);
 
 			// GRPO content still present in full
@@ -309,7 +329,7 @@ describe('GRPO Coexistence — Memory + GRPO injection independence', () => {
 			setMemorySettingsStore(() => ({ enabled: true }));
 
 			const grpoPrompt = simulateGrpoInjection('refactor code', ['Use small functions']);
-			mockCascadingSearch.mockResolvedValue([]);
+			setupMockResults([]);
 
 			const result = await injectMemories(grpoPrompt, '/project', 'claude-code');
 
@@ -370,7 +390,7 @@ describe('GRPO Coexistence — Memory + GRPO injection independence', () => {
 
 			const emptyGrpoPrompt = '<project-experiences>\n</project-experiences>\n\nprompt text';
 
-			mockCascadingSearch.mockResolvedValue([
+			setupMockResults([
 				makeResult({
 					entry: { content: 'Memory content' },
 					personaName: 'Dev',
@@ -395,7 +415,7 @@ describe('GRPO Coexistence — Memory + GRPO injection independence', () => {
 				'Ensure Result<T, E> patterns used',
 			]);
 
-			mockCascadingSearch.mockResolvedValue([
+			setupMockResults([
 				makeResult({
 					entry: { content: 'Always sanitize inputs' },
 					personaName: 'Security',

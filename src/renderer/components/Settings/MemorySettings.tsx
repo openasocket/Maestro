@@ -292,6 +292,54 @@ export function MemorySettings({ theme }: MemorySettingsProps): React.ReactEleme
 							Retrieval Settings
 						</div>
 
+						{/* Injection Strategy */}
+						<div className="pb-2">
+							<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
+								Injection Strategy
+							</div>
+							<div className="text-xs mt-0.5 mb-2" style={{ color: theme.colors.textDim }}>
+								Controls how aggressively memories are injected into agent prompts
+							</div>
+							<div className="flex gap-2">
+								{(['lean', 'balanced', 'rich'] as const).map((strategy) => (
+									<button
+										key={strategy}
+										onClick={() => updateConfig({ injectionStrategy: strategy })}
+										className="flex-1 rounded-md border text-left"
+										style={{
+											padding: '8px 12px',
+											borderColor:
+												config.injectionStrategy === strategy
+													? theme.colors.accent
+													: theme.colors.border,
+											background:
+												config.injectionStrategy === strategy
+													? `${theme.colors.accent}20`
+													: 'transparent',
+											color:
+												config.injectionStrategy === strategy
+													? theme.colors.accent
+													: theme.colors.textMain,
+											cursor: 'pointer',
+											fontWeight: config.injectionStrategy === strategy ? 600 : 400,
+										}}
+									>
+										<div className="text-xs">
+											{strategy.charAt(0).toUpperCase() + strategy.slice(1)}
+										</div>
+										<div
+											className="text-xs mt-0.5"
+											style={{ color: theme.colors.textDim, fontSize: 10 }}
+										>
+											{strategy === 'lean' && '< 600 tokens, top 5 only'}
+											{strategy === 'balanced' && `Up to ${config.maxTokenBudget} tokens`}
+											{strategy === 'rich' && 'Up to 3000 tokens, full context'}
+										</div>
+									</button>
+								))}
+							</div>
+						</div>
+
 						<ConfigSlider
 							label="Token Budget"
 							description="Maximum tokens for memory injection per prompt"
