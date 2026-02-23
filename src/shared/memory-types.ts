@@ -255,6 +255,7 @@ export interface MemoryHistoryEntry {
 		| 'update'
 		| 'delete'
 		| 'consolidate'
+		| 'evict'
 		| 'create-role'
 		| 'update-role'
 		| 'delete-role'

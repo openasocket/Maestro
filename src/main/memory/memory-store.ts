@@ -636,6 +636,17 @@ export class MemoryStore {
 			}
 		}
 
+		// Auto-eviction: when a skill area exceeds maxMemoriesPerSkillArea
+		if (entry.scope === 'skill' && entry.skillAreaId) {
+			const nonArchivedCount = lib.entries.filter((e) => e.active && !e.archived).length;
+			const config = await this.getConfig();
+			if (nonArchivedCount > config.maxMemoriesPerSkillArea) {
+				this.evictMemories(entry.skillAreaId, config.maxMemoriesPerSkillArea).catch(() => {
+					// Fire-and-forget — degrade gracefully
+				});
+			}
+		}
+
 		return memory;
 	}
 
@@ -776,6 +787,100 @@ export class MemoryStore {
 		});
 
 		return lib.entries[idx];
+	}
+
+	// ─── Multi-Dimensional Eviction ─────────────────────────────────────────
+
+	/**
+	 * Evict memories from a skill area when maxMemoriesPerSkillArea is exceeded.
+	 *
+	 * Uses a multi-dimensional eviction score based on the Agentic Engineering
+	 * Book's compaction priority (correctness > completeness > signal > trajectory):
+	 *
+	 * evictionScore =
+	 *   (1 - effectivenessScore) * 0.4   // Low effectiveness = evict first (correctness proxy)
+	 *   + (1 - confidence) * 0.3          // Low confidence = evict first (completeness proxy)
+	 *   + (useCount === 0 ? 0.2 : 0)     // Never injected = evict first (signal proxy)
+	 *   + recencyPenalty * 0.1            // Older = slightly more evictable (trajectory proxy)
+	 *
+	 * Pinned memories always score 0 (never evicted).
+	 * Memories from the last 3 sessions get a -0.3 bonus (trajectory protection).
+	 * Evicted memories are archived, not deleted.
+	 */
+	async evictMemories(skillAreaId: SkillAreaId, maxCount: number): Promise<number> {
+		const dirPath = this.getMemoryPath('skill', skillAreaId);
+		const lib = await this.readLibrary(dirPath);
+		const now = Date.now();
+		const msPerDay = 86400000;
+		const thirtyDaysMs = 30 * msPerDay;
+		const twentyFourHoursMs = 24 * 60 * 60 * 1000;
+
+		// Only consider active, non-archived memories
+		const candidates = lib.entries.filter((e) => e.active && !e.archived);
+		if (candidates.length <= maxCount) return 0;
+
+		// Compute eviction score for each candidate
+		const scored = candidates.map((entry) => {
+			if (entry.pinned) return { entry, score: 0 };
+
+			const effectivenessComponent = (1 - entry.effectivenessScore) * 0.4;
+			const confidenceComponent = (1 - entry.confidence) * 0.3;
+			const signalComponent = entry.useCount === 0 ? 0.2 : 0;
+			const isOlderThan30Days = now - entry.createdAt > thirtyDaysMs;
+			const recencyComponent = isOlderThan30Days ? 0.1 : 0;
+
+			let score = effectivenessComponent + confidenceComponent + signalComponent + recencyComponent;
+
+			// Trajectory protection: recent memories (last 24h) get a -0.3 bonus
+			const isRecent = now - entry.createdAt < twentyFourHoursMs;
+			if (isRecent) {
+				score -= 0.3;
+			}
+
+			return { entry, score };
+		});
+
+		// Sort by eviction score descending (highest = most evictable)
+		scored.sort((a, b) => b.score - a.score);
+
+		// Archive the top N to get back to maxCount
+		const toEvict = candidates.length - maxCount;
+		let evictedCount = 0;
+		const historyEntries: MemoryHistoryEntry[] = [];
+
+		for (let i = 0; i < scored.length && evictedCount < toEvict; i++) {
+			const { entry, score } = scored[i];
+			// Never evict pinned memories
+			if (entry.pinned) continue;
+
+			const idx = lib.entries.findIndex((e) => e.id === entry.id);
+			if (idx !== -1) {
+				lib.entries[idx] = {
+					...lib.entries[idx],
+					archived: true,
+					updatedAt: now,
+				};
+				evictedCount++;
+
+				historyEntries.push({
+					timestamp: now,
+					operation: 'evict',
+					entityType: 'memory',
+					entityId: entry.id,
+					content: entry.content.slice(0, 200),
+					reason: `evictionScore=${score.toFixed(3)}, eff=${entry.effectivenessScore.toFixed(2)}, conf=${entry.confidence.toFixed(2)}, uses=${entry.useCount}`,
+				});
+			}
+		}
+
+		if (evictedCount > 0) {
+			await this.writeLibrary(dirPath, lib);
+			for (const h of historyEntries) {
+				await this.appendHistory(dirPath, h);
+			}
+		}
+
+		return evictedCount;
 	}
 
 	// ─── Keyword & Tag Search ───────────────────────────────────────────────

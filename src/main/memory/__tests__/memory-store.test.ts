@@ -984,4 +984,280 @@ describe('MemoryStore — Hierarchy, CRUD, Isolation, Atomics, History, Seed', (
 			expect(restored!.confidence).toBe(0.3);
 		});
 	});
+
+	// ─── 10. Multi-Dimensional Eviction ─────────────────────────────────
+
+	describe('evictMemories: multi-dimensional eviction policy', () => {
+		let skillId: string;
+
+		beforeEach(async () => {
+			const role = await store.createRole('R', 'd');
+			const persona = await store.createPersona(role.id, 'P', 'd');
+			const skill = await store.createSkillArea(persona.id, 'S', 'd');
+			skillId = skill.id;
+		});
+
+		it('returns 0 when memory count is at or below maxCount', async () => {
+			await store.addMemory({ content: 'Mem 1', scope: 'skill', skillAreaId: skillId });
+			await store.addMemory({ content: 'Mem 2', scope: 'skill', skillAreaId: skillId });
+
+			const evicted = await store.evictMemories(skillId, 5);
+			expect(evicted).toBe(0);
+
+			// All still active
+			const mems = await store.listMemories('skill', skillId);
+			expect(mems).toHaveLength(2);
+		});
+
+		it('archives excess memories when count exceeds maxCount', async () => {
+			// Add 5 memories
+			for (let i = 0; i < 5; i++) {
+				await store.addMemory({
+					content: `Memory ${i}`,
+					scope: 'skill',
+					skillAreaId: skillId,
+				});
+			}
+
+			const evicted = await store.evictMemories(skillId, 3);
+			expect(evicted).toBe(2);
+
+			// Only 3 should remain in active list
+			const active = await store.listMemories('skill', skillId);
+			expect(active).toHaveLength(3);
+
+			// 2 should be archived
+			const archived = await store.listArchivedMemories('skill', skillId);
+			expect(archived).toHaveLength(2);
+		});
+
+		it('never evicts pinned memories', async () => {
+			// Add 3 pinned + 2 unpinned
+			for (let i = 0; i < 3; i++) {
+				await store.addMemory({
+					content: `Pinned ${i}`,
+					scope: 'skill',
+					skillAreaId: skillId,
+					pinned: true,
+				});
+			}
+			for (let i = 0; i < 2; i++) {
+				await store.addMemory({
+					content: `Unpinned ${i}`,
+					scope: 'skill',
+					skillAreaId: skillId,
+				});
+			}
+
+			// Try to evict down to 3 — only unpinned should be evicted
+			const evicted = await store.evictMemories(skillId, 3);
+			expect(evicted).toBe(2);
+
+			const active = await store.listMemories('skill', skillId);
+			expect(active).toHaveLength(3);
+			// All remaining should be pinned
+			for (const m of active) {
+				expect(m.pinned).toBe(true);
+			}
+		});
+
+		it('evicts low-effectiveness memories first', async () => {
+			// Add 3 memories with varying effectiveness
+			const m1 = await store.addMemory({
+				content: 'High effectiveness',
+				scope: 'skill',
+				skillAreaId: skillId,
+			});
+			const m2 = await store.addMemory({
+				content: 'Low effectiveness',
+				scope: 'skill',
+				skillAreaId: skillId,
+			});
+			const m3 = await store.addMemory({
+				content: 'Mid effectiveness',
+				scope: 'skill',
+				skillAreaId: skillId,
+			});
+
+			// Set effectiveness scores directly
+			const dirPath = store.getMemoryPath('skill', skillId);
+			const lib = JSON.parse(fsState.get(`${dirPath}/library.json`)!) as {
+				version: number;
+				entries: any[];
+			};
+			for (const e of lib.entries) {
+				if (e.id === m1.id) e.effectivenessScore = 0.9;
+				if (e.id === m2.id) e.effectivenessScore = 0.1;
+				if (e.id === m3.id) e.effectivenessScore = 0.5;
+			}
+			fsState.set(`${dirPath}/library.json`, JSON.stringify(lib));
+
+			const evicted = await store.evictMemories(skillId, 2);
+			expect(evicted).toBe(1);
+
+			// The low-effectiveness one should be archived
+			const archived = await store.listArchivedMemories('skill', skillId);
+			expect(archived).toHaveLength(1);
+			expect(archived[0].id).toBe(m2.id);
+		});
+
+		it('evicts unused memories (useCount=0) before used ones', async () => {
+			const m1 = await store.addMemory({
+				content: 'Used memory',
+				scope: 'skill',
+				skillAreaId: skillId,
+			});
+			const m2 = await store.addMemory({
+				content: 'Unused memory',
+				scope: 'skill',
+				skillAreaId: skillId,
+			});
+
+			// Set same effectiveness/confidence but different useCount
+			const dirPath = store.getMemoryPath('skill', skillId);
+			const lib = JSON.parse(fsState.get(`${dirPath}/library.json`)!) as {
+				version: number;
+				entries: any[];
+			};
+			for (const e of lib.entries) {
+				e.effectivenessScore = 0.5;
+				e.confidence = 0.5;
+				if (e.id === m1.id) e.useCount = 5;
+				if (e.id === m2.id) e.useCount = 0;
+			}
+			fsState.set(`${dirPath}/library.json`, JSON.stringify(lib));
+
+			const evicted = await store.evictMemories(skillId, 1);
+			expect(evicted).toBe(1);
+
+			const archived = await store.listArchivedMemories('skill', skillId);
+			expect(archived[0].id).toBe(m2.id);
+		});
+
+		it('applies trajectory protection to recent memories (last 24h)', async () => {
+			const now = Date.now();
+
+			const m1 = await store.addMemory({
+				content: 'Old memory',
+				scope: 'skill',
+				skillAreaId: skillId,
+			});
+			const m2 = await store.addMemory({
+				content: 'Recent memory',
+				scope: 'skill',
+				skillAreaId: skillId,
+			});
+
+			// Make m1 old (40 days ago), keep m2 recent
+			const dirPath = store.getMemoryPath('skill', skillId);
+			const lib = JSON.parse(fsState.get(`${dirPath}/library.json`)!) as {
+				version: number;
+				entries: any[];
+			};
+			for (const e of lib.entries) {
+				e.effectivenessScore = 0.5;
+				e.confidence = 0.5;
+				e.useCount = 0;
+				if (e.id === m1.id) {
+					e.createdAt = now - 40 * 86400000; // 40 days ago
+				}
+				// m2 stays recent (just created)
+			}
+			fsState.set(`${dirPath}/library.json`, JSON.stringify(lib));
+
+			const evicted = await store.evictMemories(skillId, 1);
+			expect(evicted).toBe(1);
+
+			// Old memory should be evicted, recent one protected
+			const archived = await store.listArchivedMemories('skill', skillId);
+			expect(archived[0].id).toBe(m1.id);
+		});
+
+		it('writes evict history entries for each archived memory', async () => {
+			for (let i = 0; i < 4; i++) {
+				await store.addMemory({
+					content: `Evict history ${i}`,
+					scope: 'skill',
+					skillAreaId: skillId,
+				});
+			}
+
+			await store.evictMemories(skillId, 2);
+
+			const dirPath = store.getMemoryPath('skill', skillId);
+			const history = readHistory(dirPath);
+			const evictEntries = history.filter((h) => h.operation === 'evict');
+			expect(evictEntries).toHaveLength(2);
+
+			// Each entry should have reason with score info
+			for (const entry of evictEntries) {
+				expect(entry.reason).toBeDefined();
+				expect(String(entry.reason)).toContain('evictionScore=');
+			}
+		});
+
+		it('does not evict already-archived memories', async () => {
+			// Add 4 memories, archive 1 manually
+			const mems = [];
+			for (let i = 0; i < 4; i++) {
+				mems.push(
+					await store.addMemory({
+						content: `Mem ${i}`,
+						scope: 'skill',
+						skillAreaId: skillId,
+					})
+				);
+			}
+
+			// Manually archive one
+			const dirPath = store.getMemoryPath('skill', skillId);
+			const lib = JSON.parse(fsState.get(`${dirPath}/library.json`)!) as {
+				version: number;
+				entries: any[];
+			};
+			const idx = lib.entries.findIndex((e: any) => e.id === mems[0].id);
+			lib.entries[idx].archived = true;
+			fsState.set(`${dirPath}/library.json`, JSON.stringify(lib));
+
+			// Active non-archived = 3. maxCount = 2 => should evict 1
+			const evicted = await store.evictMemories(skillId, 2);
+			expect(evicted).toBe(1);
+
+			// Total archived should be 2 (1 manual + 1 evicted)
+			const archived = await store.listArchivedMemories('skill', skillId);
+			expect(archived).toHaveLength(2);
+		});
+
+		it('handles case where all non-pinned are needed but maxCount forces eviction', async () => {
+			// Add 3 memories: 2 pinned, 1 unpinned
+			await store.addMemory({
+				content: 'Pinned A',
+				scope: 'skill',
+				skillAreaId: skillId,
+				pinned: true,
+			});
+			await store.addMemory({
+				content: 'Pinned B',
+				scope: 'skill',
+				skillAreaId: skillId,
+				pinned: true,
+			});
+			await store.addMemory({
+				content: 'Unpinned',
+				scope: 'skill',
+				skillAreaId: skillId,
+			});
+
+			// maxCount=1 but 2 pinned can't be evicted; only 1 unpinned evicted
+			const evicted = await store.evictMemories(skillId, 1);
+			expect(evicted).toBe(1);
+
+			// 2 pinned remain active
+			const active = await store.listMemories('skill', skillId);
+			expect(active).toHaveLength(2);
+			for (const m of active) {
+				expect(m.pinned).toBe(true);
+			}
+		});
+	});
 });
