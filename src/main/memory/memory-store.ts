@@ -1331,6 +1331,178 @@ export class MemoryStore {
 		return mergeCount;
 	}
 
+	// ─── Project Digest ─────────────────────────────────────────────────────
+
+	/**
+	 * Generate or update a project digest — a single composite memory summarizing
+	 * the top project-scoped memories for a given project path.
+	 *
+	 * Uses incremental delta-merge (GAM pattern): instead of recomputing from all
+	 * memories each time, maintains a persistent digest entry that's updated when
+	 * new experiences are stored. Full regeneration only on explicit request or
+	 * when digest exceeds 500 tokens (triggers compaction).
+	 *
+	 * @param projectPath - The project to generate a digest for
+	 * @param maxMemories - Maximum memories to include in the digest (default 10)
+	 * @param forceRegenerate - If true, recompute from scratch instead of delta-merge
+	 * @returns A single formatted string, or null if no project memories exist
+	 */
+	async generateProjectDigest(
+		projectPath: string,
+		maxMemories: number = 10,
+		forceRegenerate: boolean = false
+	): Promise<string | null> {
+		// Step 1: Check for existing digest
+		const dirPath = this.getMemoryPath('project', undefined, projectPath);
+		const lib = await this.readLibrary(dirPath);
+
+		const existingDigest = lib.entries.find(
+			(e) =>
+				e.active &&
+				e.scope === 'project' &&
+				e.source === 'consolidation' &&
+				e.tags.includes('system:project-digest')
+		);
+
+		if (existingDigest && !forceRegenerate) {
+			return existingDigest.content;
+		}
+
+		// Step 2: Build from scratch
+		const activeMemories = lib.entries.filter(
+			(e) => e.active && !e.archived && !e.tags.includes('system:project-digest')
+		);
+
+		if (activeMemories.length === 0) return null;
+
+		// Sort by combinedScore = effectivenessScore * 0.5 + confidence * 0.3 + (useCount > 0 ? 0.2 : 0)
+		activeMemories.sort((a, b) => {
+			const scoreA = a.effectivenessScore * 0.5 + a.confidence * 0.3 + (a.useCount > 0 ? 0.2 : 0);
+			const scoreB = b.effectivenessScore * 0.5 + b.confidence * 0.3 + (b.useCount > 0 ? 0.2 : 0);
+			return scoreB - scoreA;
+		});
+
+		const topN = activeMemories.slice(0, maxMemories);
+
+		// Count by category
+		const categoryCounts: Record<string, number> = {};
+		for (const m of topN) {
+			const categoryTag = m.tags.find((t) => t.startsWith('category:'));
+			const category = categoryTag ? categoryTag.replace('category:', '') : m.type;
+			categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
+		}
+
+		const patternCount = categoryCounts['pattern-established'] ?? 0;
+		const problemCount = categoryCounts['problem-solved'] ?? 0;
+		const decisionCount = categoryCounts['decision-made'] ?? 0;
+
+		// Format digest lines
+		const lines = topN.map((m) => {
+			const categoryTag = m.tags.find((t) => t.startsWith('category:'));
+			const category = categoryTag ? categoryTag.replace('category:', '') : m.type;
+			const eff = m.effectivenessScore.toFixed(2);
+			return `- [${category}] ${m.content} (eff: ${eff})`;
+		});
+
+		const projectName = path.basename(projectPath);
+		const now = new Date().toISOString().split('T')[0];
+		const digestContent = [
+			`Project: ${projectName} | Updated: ${now}`,
+			'---',
+			`Patterns: ${patternCount} | Problems: ${problemCount} | Decisions: ${decisionCount}`,
+			'',
+			...lines,
+			`(${activeMemories.length} project memories, showing top ${topN.length})`,
+		].join('\n');
+
+		// Step 3: Create or update the digest entry
+		if (existingDigest) {
+			// Update existing digest
+			const idx = lib.entries.findIndex((e) => e.id === existingDigest.id);
+			if (idx !== -1) {
+				lib.entries[idx] = {
+					...lib.entries[idx],
+					content: digestContent,
+					tokenEstimate: Math.ceil(digestContent.length / 4),
+					updatedAt: Date.now(),
+				};
+				await this.writeLibrary(dirPath, lib);
+			}
+		} else {
+			// Create new digest entry
+			await this.addMemory(
+				{
+					content: digestContent,
+					type: 'rule',
+					scope: 'project',
+					source: 'consolidation',
+					confidence: 1.0,
+					pinned: true,
+					tags: ['system:project-digest'],
+				},
+				projectPath
+			);
+		}
+
+		return digestContent;
+	}
+
+	/**
+	 * Incrementally update an existing project digest with a new memory.
+	 *
+	 * Called from storeExperiences() when a new project-scoped memory is added.
+	 * Appends a delta line to the existing digest. If total digest exceeds
+	 * 500 tokens (estimated content.length / 4), triggers full recompaction.
+	 *
+	 * @param projectPath - The project path
+	 * @param newMemory - The newly added memory entry
+	 */
+	async updateProjectDigest(projectPath: string, newMemory: MemoryEntry): Promise<void> {
+		const dirPath = this.getMemoryPath('project', undefined, projectPath);
+		const lib = await this.readLibrary(dirPath);
+
+		const digestEntry = lib.entries.find(
+			(e) =>
+				e.active &&
+				e.scope === 'project' &&
+				e.source === 'consolidation' &&
+				e.tags.includes('system:project-digest')
+		);
+
+		if (!digestEntry) {
+			// No existing digest — generate a fresh one
+			await this.generateProjectDigest(projectPath, 10, true);
+			return;
+		}
+
+		// Append delta line
+		const categoryTag = newMemory.tags.find((t) => t.startsWith('category:'));
+		const category = categoryTag ? categoryTag.replace('category:', '') : newMemory.type;
+		const eff = newMemory.effectivenessScore.toFixed(2);
+		const deltaLine = `- [${category}] ${newMemory.content} (eff: ${eff})`;
+
+		const updatedContent = digestEntry.content + '\n' + deltaLine;
+		const estimatedTokens = Math.ceil(updatedContent.length / 4);
+
+		if (estimatedTokens > 500) {
+			// Exceeds budget — trigger full recompaction
+			await this.generateProjectDigest(projectPath, 10, true);
+			return;
+		}
+
+		// Update digest in place
+		const idx = lib.entries.findIndex((e) => e.id === digestEntry.id);
+		if (idx !== -1) {
+			lib.entries[idx] = {
+				...lib.entries[idx],
+				content: updatedContent,
+				tokenEstimate: estimatedTokens,
+				updatedAt: Date.now(),
+			};
+			await this.writeLibrary(dirPath, lib);
+		}
+	}
+
 	// ─── Seed Data ──────────────────────────────────────────────────────────
 
 	/**

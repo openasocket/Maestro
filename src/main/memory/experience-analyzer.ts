@@ -486,11 +486,19 @@ export class ExperienceAnalyzer {
 			const { promisify } = await import('util');
 			const execFileAsync = promisify(execFile);
 
-			const result = await execFileAsync(
-				'claude',
-				['--print', '--output-format', 'stream-json', '-p', prompt],
-				{ timeout: 120000, maxBuffer: 1024 * 1024 }
-			);
+			// Build args — optionally pass --model from config
+			const config = await this.getMemoryConfig();
+			const model = config.extractionModel;
+			const args = ['--print', '--output-format', 'stream-json'];
+			if (model) {
+				args.push('--model', model);
+			}
+			args.push('-p', prompt);
+
+			const result = await execFileAsync('claude', args, {
+				timeout: 120000,
+				maxBuffer: 1024 * 1024,
+			});
 
 			const rawOutput = result.stdout ?? '';
 

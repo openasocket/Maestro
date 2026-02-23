@@ -446,6 +446,13 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 	);
 
 	ipcMain.handle(
+		'memory:getProjectDigest',
+		createIpcDataHandler(handlerOpts('getProjectDigest'), async (projectPath: string) => {
+			return memoryStore.generateProjectDigest(projectPath);
+		})
+	);
+
+	ipcMain.handle(
 		'memory:consolidate',
 		createIpcDataHandler(
 			handlerOpts('consolidate'),

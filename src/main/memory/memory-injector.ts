@@ -72,6 +72,10 @@ function getGroupKey(result: MemorySearchResult): { key: string; priority: numbe
 		return { key: `[${result.personaName}]`, priority: 0 };
 	}
 	if (result.entry.scope === 'project') {
+		// Render digest entries as [project-digest] group
+		if (result.entry.tags.includes('system:project-digest')) {
+			return { key: '[project-digest]', priority: 1 };
+		}
 		return { key: '[project]', priority: 1 };
 	}
 	return { key: '[global]', priority: 2 };
@@ -161,6 +165,60 @@ export async function injectMemories(
 		};
 	}
 
+	// Project digest optimization: when many project memories compete for budget,
+	// replace individual project entries with a single digest if more token-efficient.
+	// Track replaced IDs so effectiveness tracking still covers all original memories.
+	let replacedProjectIds: MemoryId[] = [];
+	const projectResults = selected.filter((r) => r.entry.scope === 'project');
+	if (projectResults.length > 5 && projectPath) {
+		const projectTokenCost = projectResults.reduce((sum, r) => sum + r.entry.tokenEstimate, 0);
+		const projectTokenBudgetRatio = projectTokenCost / config.maxTokenBudget;
+
+		if (projectTokenBudgetRatio > 0.4) {
+			const digest = await store.generateProjectDigest(projectPath, 10);
+			if (digest) {
+				const digestTokens = Math.ceil(digest.length / 4);
+				// Only use digest if it's more token-efficient
+				if (digestTokens < projectTokenCost) {
+					// Track all original project memory IDs for effectiveness
+					replacedProjectIds = projectResults.map((r) => r.entry.id);
+					const projectIdSet = new Set(replacedProjectIds);
+					const nonProjectSelected = selected.filter((r) => !projectIdSet.has(r.entry.id));
+
+					// Create a synthetic search result for the digest
+					const digestResult: MemorySearchResult = {
+						entry: {
+							id: 'project-digest',
+							content: digest,
+							type: 'rule',
+							scope: 'project',
+							tags: ['system:project-digest'],
+							source: 'consolidation',
+							confidence: 1.0,
+							pinned: true,
+							active: true,
+							archived: false,
+							embedding: null,
+							effectivenessScore: 0.5,
+							useCount: 0,
+							tokenEstimate: digestTokens,
+							lastUsedAt: 0,
+							createdAt: Date.now(),
+							updatedAt: Date.now(),
+						},
+						similarity: 1.0,
+						combinedScore: 1.0,
+					};
+
+					// Replace selected with non-project + digest
+					selected.length = 0;
+					selected.push(...nonProjectSelected, digestResult);
+					totalTokens = selected.reduce((sum, r) => sum + r.entry.tokenEstimate, 0);
+				}
+			}
+		}
+	}
+
 	// Format XML
 	const xmlBlock = formatXmlBlock(selected);
 
@@ -190,8 +248,12 @@ export async function injectMemories(
 		count: v.count,
 	}));
 
-	// Record injection — group by scope for batch recording
-	const injectedIds = selected.map((r) => r.entry.id);
+	// Record injection — group by scope for batch recording.
+	// Include replaced project IDs so effectiveness tracking covers all original memories.
+	const injectedIds = [
+		...selected.map((r) => r.entry.id).filter((id) => id !== 'project-digest'),
+		...replacedProjectIds,
+	];
 	const byScope = groupInjectedByScope(selected);
 
 	// Build scope groups with projectPath for effectiveness tracking

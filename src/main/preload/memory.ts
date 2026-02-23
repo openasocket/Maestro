@@ -210,6 +210,9 @@ export function createMemoryApi() {
 		): Promise<IpcResponse<{ imported: number }>> =>
 			ipcRenderer.invoke('memory:import', json, scope, skillAreaId, projectPath),
 
+		getProjectDigest: (projectPath: string): Promise<IpcResponse<string | null>> =>
+			ipcRenderer.invoke('memory:getProjectDigest', projectPath),
+
 		consolidate: (
 			scope: MemoryScope,
 			skillAreaId?: SkillAreaId,

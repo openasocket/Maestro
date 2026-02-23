@@ -208,6 +208,7 @@ describe('Memory IPC Handler Round-Trips', () => {
 				'memory:delete',
 				'memory:search',
 				'memory:getStats',
+				'memory:getProjectDigest',
 				'memory:export',
 				'memory:import',
 				'memory:consolidate',
