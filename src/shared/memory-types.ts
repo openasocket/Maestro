@@ -209,6 +209,8 @@ export interface MemoryConfig {
 	extractionModel?: string;
 	/** How aggressively to inject memories into agent prompts — default 'balanced' */
 	injectionStrategy: 'lean' | 'balanced' | 'rich';
+	/** Enable multi-signal retrieval (embedding + keyword + tag) — default true */
+	enableHybridSearch: boolean;
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -228,6 +230,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	analysisCooldownMs: 300000,
 	extractionModel: undefined,
 	injectionStrategy: 'balanced',
+	enableHybridSearch: true,
 };
 
 // ─── Stats and Results ─────────────────────────────────────────────────────

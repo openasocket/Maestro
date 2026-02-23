@@ -167,7 +167,11 @@ describe('ExperienceAnalyzer', () => {
 		mockGetEntries.mockReturnValue([]);
 		mockGetQueryEvents.mockReturnValue([]);
 		// Production default is enableExperienceExtraction: false — enable for tests
-		fsState.set(configPath, JSON.stringify({ enableExperienceExtraction: true }));
+		// Disable hybrid search to preserve embedding-only scoring for legacy tests
+		fsState.set(
+			configPath,
+			JSON.stringify({ enableExperienceExtraction: true, enableHybridSearch: false })
+		);
 	});
 
 	// ─── Interface Contracts ─────────────────────────────────────────────

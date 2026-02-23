@@ -109,9 +109,9 @@ function makeVector(angle: number): number[] {
 	return v;
 }
 
-/** Convenience: make a config with overrides. */
+/** Convenience: make a config with overrides. Defaults to embedding-only search for legacy tests. */
 function makeConfig(overrides?: Partial<MemoryConfig>): MemoryConfig {
-	return { ...MEMORY_CONFIG_DEFAULTS, enabled: true, ...overrides };
+	return { ...MEMORY_CONFIG_DEFAULTS, enabled: true, enableHybridSearch: false, ...overrides };
 }
 
 describe('MemoryStore — Cascading Search, Filtering, Scoring, Injection Recording', () => {

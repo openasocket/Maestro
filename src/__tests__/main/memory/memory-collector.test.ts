@@ -125,6 +125,11 @@ describe('MemoryCollector', () => {
 		// Default: embedding service unavailable
 		mockEncode.mockRejectedValue(new Error('Embedding model is not available'));
 		mockEncodeBatch.mockRejectedValue(new Error('Embedding model is not available'));
+		// Disable hybrid search to preserve embedding-only scoring for legacy tests
+		fsState.set(
+			'/mock/userData/memories/config.json',
+			JSON.stringify({ enableHybridSearch: false })
+		);
 	});
 
 	// ─── Ring Buffer ────────────────────────────────────────────────────

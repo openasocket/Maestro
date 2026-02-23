@@ -73,7 +73,7 @@ describe('Memory Effectiveness Tracker', () => {
 	// ─── onProcessComplete ─────────────────────────────────────────────
 
 	describe('onProcessComplete', () => {
-		it('updates effectiveness with score 1.0 on exit code 0', async () => {
+		it('updates effectiveness with base score 0.6 on exit code 0 (multi-signal scoring)', async () => {
 			mockGetInjectionRecord.mockReturnValue({
 				ids: ['mem-1', 'mem-2'],
 				scopeGroups: [{ scope: 'global', ids: ['mem-1', 'mem-2'] }],
@@ -81,9 +81,11 @@ describe('Memory Effectiveness Tracker', () => {
 
 			await onProcessComplete('session-1', 0);
 
+			// Multi-signal scoring: base 0.6 for exit code 0
+			// Bonuses for commits (+0.2) and duration (+0.2) require git/stats unavailable in test
 			expect(mockUpdateEffectiveness).toHaveBeenCalledWith(
 				['mem-1', 'mem-2'],
-				1.0,
+				0.6,
 				'global',
 				undefined,
 				undefined
@@ -122,21 +124,21 @@ describe('Memory Effectiveness Tracker', () => {
 			expect(mockUpdateEffectiveness).toHaveBeenCalledTimes(3);
 			expect(mockUpdateEffectiveness).toHaveBeenCalledWith(
 				['mem-1'],
-				1.0,
+				0.6,
 				'skill',
 				'sk-1',
 				undefined
 			);
 			expect(mockUpdateEffectiveness).toHaveBeenCalledWith(
 				['mem-2'],
-				1.0,
+				0.6,
 				'global',
 				undefined,
 				undefined
 			);
 			expect(mockUpdateEffectiveness).toHaveBeenCalledWith(
 				['mem-3'],
-				1.0,
+				0.6,
 				'project',
 				undefined,
 				'/my/project'

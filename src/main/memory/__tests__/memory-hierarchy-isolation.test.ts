@@ -106,7 +106,7 @@ function makeVector(angle: number): number[] {
 
 /** Convenience: make a config with overrides. */
 function makeConfig(overrides?: Partial<MemoryConfig>): MemoryConfig {
-	return { ...MEMORY_CONFIG_DEFAULTS, enabled: true, ...overrides };
+	return { ...MEMORY_CONFIG_DEFAULTS, enabled: true, enableHybridSearch: false, ...overrides };
 }
 
 /**

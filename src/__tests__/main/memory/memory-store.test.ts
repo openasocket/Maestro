@@ -710,6 +710,11 @@ describe('MemoryStore', () => {
 	// ─── Cascading Search ────────────────────────────────────────────────
 
 	describe('Cascading Search', () => {
+		// Disable hybrid search to preserve embedding-only scoring for legacy tests
+		beforeEach(async () => {
+			await store.setConfig({ enableHybridSearch: false });
+		});
+
 		// Helper: create a unit vector with a dominant component at `idx`
 		// These produce predictable cosine similarities when compared.
 		function makeEmbedding(idx: number, dim = 384): number[] {

@@ -727,6 +727,253 @@ export class MemoryStore {
 		return lib.entries.filter((e) => e.active);
 	}
 
+	// ─── Keyword & Tag Search ───────────────────────────────────────────────
+
+	/** Stop words excluded from keyword tokenization */
+	private static readonly STOP_WORDS = new Set([
+		'a',
+		'the',
+		'is',
+		'are',
+		'was',
+		'were',
+		'to',
+		'of',
+		'in',
+		'for',
+		'on',
+		'with',
+		'and',
+		'or',
+		'but',
+		'not',
+	]);
+
+	/**
+	 * Tokenize text into lowercase, deduplicated tokens with stop words removed.
+	 */
+	private tokenize(text: string): Set<string> {
+		const tokens = text
+			.toLowerCase()
+			.split(/[\s\p{P}]+/u)
+			.filter((t) => t.length > 0);
+		const result = new Set<string>();
+		for (const t of tokens) {
+			if (!MemoryStore.STOP_WORDS.has(t)) result.add(t);
+		}
+		return result;
+	}
+
+	/**
+	 * Search memories by keyword/token overlap (complementary to embedding search).
+	 *
+	 * Splits the query and each memory's content into lowercase tokens, computes
+	 * Jaccard similarity: |intersection| / |union|. Also checks the memory's tags
+	 * array for exact matches (especially `kw:` prefixed tags from extraction).
+	 *
+	 * @returns Scored results above minScore threshold, sorted descending
+	 */
+	async keywordSearch(
+		query: string,
+		scope: MemoryScope,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string,
+		minScore: number = 0.1
+	): Promise<{ entry: MemoryEntry; keywordScore: number }[]> {
+		const memories = await this.listMemories(scope, skillAreaId, projectPath);
+		const active = memories.filter((e) => e.active && !e.archived);
+		const queryTokens = this.tokenize(query);
+		if (queryTokens.size === 0) return [];
+
+		const results: { entry: MemoryEntry; keywordScore: number }[] = [];
+
+		for (const entry of active) {
+			const contentTokens = this.tokenize(entry.content);
+
+			// Jaccard similarity
+			let intersectionSize = 0;
+			for (const t of queryTokens) {
+				if (contentTokens.has(t)) intersectionSize++;
+			}
+			const unionSize = new Set([...queryTokens, ...contentTokens]).size;
+			const jaccardScore = unionSize > 0 ? intersectionSize / unionSize : 0;
+
+			// Tag bonus
+			let tagBonus = 0;
+			for (const tag of entry.tags) {
+				if (tag.startsWith('kw:')) {
+					const keyword = tag.slice(3).toLowerCase();
+					if (queryTokens.has(keyword)) tagBonus += 0.15;
+				} else if (tag.startsWith('category:')) {
+					const category = tag.slice(9).toLowerCase();
+					if (queryTokens.has(category)) tagBonus += 0.1;
+				}
+			}
+
+			const keywordScore = Math.min(1, jaccardScore + tagBonus);
+			if (keywordScore >= minScore) {
+				results.push({ entry, keywordScore });
+			}
+		}
+
+		results.sort((a, b) => b.keywordScore - a.keywordScore);
+		return results;
+	}
+
+	/**
+	 * Search memories by exact tag matching.
+	 * Supports `category:*` tags, `kw:*` keyword tags, and freeform tags.
+	 */
+	async tagSearch(
+		tags: string[],
+		scope: MemoryScope,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string
+	): Promise<{ entry: MemoryEntry; tagScore: number }[]> {
+		if (tags.length === 0) return [];
+		const memories = await this.listMemories(scope, skillAreaId, projectPath);
+		const active = memories.filter((e) => e.active && !e.archived);
+
+		const results: { entry: MemoryEntry; tagScore: number }[] = [];
+
+		for (const entry of active) {
+			const entryTagSet = new Set(entry.tags.map((t) => t.toLowerCase()));
+			let matchCount = 0;
+			for (const queryTag of tags) {
+				if (entryTagSet.has(queryTag.toLowerCase())) matchCount++;
+			}
+			const tagScore = matchCount / tags.length;
+			if (tagScore > 0) {
+				results.push({ entry, tagScore });
+			}
+		}
+
+		results.sort((a, b) => b.tagScore - a.tagScore);
+		return results;
+	}
+
+	/**
+	 * Multi-signal memory search combining embedding similarity, keyword overlap,
+	 * and tag matching. Score fusion formula:
+	 *
+	 *   combined = 0.5 * embeddingSimilarity + 0.3 * keywordScore + 0.2 * tagScore
+	 *
+	 * Falls back gracefully: if embeddings unavailable, uses keyword + tag only.
+	 * If no keywords in query, uses embedding + tag only.
+	 */
+	async hybridSearch(
+		query: string,
+		scope: MemoryScope,
+		config: MemoryConfig,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string,
+		limit: number = 20
+	): Promise<MemorySearchResult[]> {
+		// Parse tags from query (category: or kw: prefixes, plus all unique tokens)
+		const queryTokens = this.tokenize(query);
+		const queryTags: string[] = [];
+		for (const token of queryTokens) {
+			queryTags.push(token);
+			queryTags.push(`kw:${token}`);
+		}
+		// Also parse explicit category:/kw: in raw query
+		const tagPatterns = query.match(/(?:category|kw):\S+/gi) ?? [];
+		for (const p of tagPatterns) queryTags.push(p.toLowerCase());
+		const dedupedTags = [...new Set(queryTags)];
+
+		// Run all three searches in parallel
+		const [keywordResults, tagResults, embeddingResults] = await Promise.all([
+			this.keywordSearch(query, scope, skillAreaId, projectPath, 0.05),
+			this.tagSearch(dedupedTags, scope, skillAreaId, projectPath),
+			this.embeddingSearchForScope(query, scope, config, skillAreaId, projectPath),
+		]);
+
+		// Build union map: memoryId → { embeddingScore, keywordScore, tagScore, entry }
+		const scoreMap = new Map<
+			string,
+			{
+				entry: MemoryEntry;
+				embeddingScore: number;
+				keywordScore: number;
+				tagScore: number;
+			}
+		>();
+
+		const getOrCreate = (entry: MemoryEntry) => {
+			let record = scoreMap.get(entry.id);
+			if (!record) {
+				record = { entry, embeddingScore: 0, keywordScore: 0, tagScore: 0 };
+				scoreMap.set(entry.id, record);
+			}
+			return record;
+		};
+
+		for (const r of embeddingResults) {
+			getOrCreate(r.entry).embeddingScore = r.similarity;
+		}
+		for (const r of keywordResults) {
+			getOrCreate(r.entry).keywordScore = r.keywordScore;
+		}
+		for (const r of tagResults) {
+			getOrCreate(r.entry).tagScore = r.tagScore;
+		}
+
+		// Compute combined scores
+		const results: MemorySearchResult[] = [];
+		const now = Date.now();
+
+		for (const [, record] of scoreMap) {
+			const combined =
+				0.5 * record.embeddingScore + 0.3 * record.keywordScore + 0.2 * record.tagScore;
+			const recencyScore = Math.max(
+				0,
+				1 - (now - record.entry.updatedAt) / (config.decayHalfLifeDays * 86400000)
+			);
+			const finalScore =
+				combined * 0.6 + record.entry.effectivenessScore * 0.2 + recencyScore * 0.2;
+
+			results.push({
+				entry: record.entry,
+				similarity: record.embeddingScore,
+				combinedScore: finalScore,
+			});
+		}
+
+		results.sort((a, b) => b.combinedScore - a.combinedScore);
+		return results.slice(0, limit);
+	}
+
+	/**
+	 * Embedding-only search for a single scope. Used by hybridSearch as one signal.
+	 * Wraps the embedding call in try-catch for graceful fallback.
+	 */
+	private async embeddingSearchForScope(
+		query: string,
+		scope: MemoryScope,
+		config: MemoryConfig,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string
+	): Promise<{ entry: MemoryEntry; similarity: number }[]> {
+		try {
+			const { encode } = await import('../grpo/embedding-service');
+			const queryEmbedding = await encode(query.slice(0, 2000));
+			const dirPath = this.getMemoryPath(scope, skillAreaId, projectPath);
+			const lib = await this.readLibrary(dirPath);
+
+			const results: { entry: MemoryEntry; similarity: number }[] = [];
+			for (const entry of lib.entries) {
+				if (!entry.active || !entry.embedding) continue;
+				const similarity = cosineSimilarity(queryEmbedding, entry.embedding);
+				if (similarity < config.similarityThreshold) continue;
+				results.push({ entry, similarity });
+			}
+			return results;
+		} catch {
+			// Embedding service unavailable — return empty, other signals will carry
+			return [];
+		}
+	}
+
 	// ─── Config Management ──────────────────────────────────────────────────
 
 	async getConfig(): Promise<MemoryConfig> {
@@ -994,35 +1241,63 @@ export class MemoryStore {
 		}
 
 		// ── Level 3: Memory search within matched skill areas ────────────
-		for (const { skill, personaName, skillAreaName } of matchedSkills) {
-			const dirPath = this.getMemoryPath('skill', skill.id);
-			const lib = await this.readLibrary(dirPath);
+		if (config.enableHybridSearch) {
+			// Hybrid: use multi-signal search (embedding + keyword + tag)
+			for (const { skill, personaName, skillAreaName } of matchedSkills) {
+				const skillResults = await this.hybridSearch(
+					query,
+					'skill',
+					config,
+					skill.id,
+					undefined,
+					50
+				);
+				for (const r of skillResults) {
+					hierarchyResults.push({ ...r, personaName, skillAreaName });
+				}
+			}
+		} else {
+			// Embedding-only (legacy behavior)
+			for (const { skill, personaName, skillAreaName } of matchedSkills) {
+				const dirPath = this.getMemoryPath('skill', skill.id);
+				const lib = await this.readLibrary(dirPath);
 
-			for (const entry of lib.entries) {
-				if (!entry.active || !entry.embedding) continue;
+				for (const entry of lib.entries) {
+					if (!entry.active || !entry.embedding) continue;
 
-				const similarity = cosineSimilarity(queryEmbedding, entry.embedding);
-				if (similarity < config.similarityThreshold) continue;
+					const similarity = cosineSimilarity(queryEmbedding, entry.embedding);
+					if (similarity < config.similarityThreshold) continue;
 
-				hierarchyResults.push({
-					entry,
-					similarity,
-					combinedScore: this.computeCombinedScore(similarity, entry, config.decayHalfLifeDays),
-					personaName,
-					skillAreaName,
-				});
+					hierarchyResults.push({
+						entry,
+						similarity,
+						combinedScore: this.computeCombinedScore(similarity, entry, config.decayHalfLifeDays),
+						personaName,
+						skillAreaName,
+					});
+				}
 			}
 		}
 
 		// ── Parallel flat-scope search ───────────────────────────────────
-		const flatSearches: Promise<MemorySearchResult[]>[] = [
-			this.searchFlatScope(queryEmbedding, 'global', config),
-		];
-		if (projectPath) {
-			flatSearches.push(this.searchFlatScope(queryEmbedding, 'project', config, projectPath));
+		let flatResults: MemorySearchResult[];
+		if (config.enableHybridSearch) {
+			const flatSearches: Promise<MemorySearchResult[]>[] = [
+				this.hybridSearch(query, 'global', config),
+			];
+			if (projectPath) {
+				flatSearches.push(this.hybridSearch(query, 'project', config, undefined, projectPath));
+			}
+			flatResults = (await Promise.all(flatSearches)).flat();
+		} else {
+			const flatSearches: Promise<MemorySearchResult[]>[] = [
+				this.searchFlatScope(queryEmbedding, 'global', config),
+			];
+			if (projectPath) {
+				flatSearches.push(this.searchFlatScope(queryEmbedding, 'project', config, projectPath));
+			}
+			flatResults = (await Promise.all(flatSearches)).flat();
 		}
-
-		const flatResults = (await Promise.all(flatSearches)).flat();
 
 		// ── Merge, de-duplicate, rank ────────────────────────────────────
 		const allResults = [...hierarchyResults, ...flatResults];
