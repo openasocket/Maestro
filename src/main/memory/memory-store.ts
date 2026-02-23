@@ -719,12 +719,13 @@ export class MemoryStore {
 		scope: MemoryScope,
 		skillAreaId?: SkillAreaId,
 		projectPath?: string,
-		includeInactive?: boolean
+		includeInactive?: boolean,
+		includeArchived?: boolean
 	): Promise<MemoryEntry[]> {
 		const dirPath = this.getMemoryPath(scope, skillAreaId, projectPath);
 		const lib = await this.readLibrary(dirPath);
 		if (includeInactive) return lib.entries;
-		return lib.entries.filter((e) => e.active);
+		return lib.entries.filter((e) => e.active && (includeArchived || !e.archived));
 	}
 
 	// ─── Keyword & Tag Search ───────────────────────────────────────────────
@@ -962,7 +963,7 @@ export class MemoryStore {
 
 			const results: { entry: MemoryEntry; similarity: number }[] = [];
 			for (const entry of lib.entries) {
-				if (!entry.active || !entry.embedding) continue;
+				if (!entry.active || entry.archived || !entry.embedding) continue;
 				const similarity = cosineSimilarity(queryEmbedding, entry.embedding);
 				if (similarity < config.similarityThreshold) continue;
 				results.push({ entry, similarity });
@@ -1147,7 +1148,7 @@ export class MemoryStore {
 
 		const results: MemorySearchResult[] = [];
 		for (const entry of lib.entries) {
-			if (!entry.active || !entry.embedding) continue;
+			if (!entry.active || entry.archived || !entry.embedding) continue;
 
 			const similarity = cosineSimilarity(queryEmbedding, entry.embedding);
 			if (similarity < config.similarityThreshold) continue;
@@ -1263,7 +1264,7 @@ export class MemoryStore {
 				const lib = await this.readLibrary(dirPath);
 
 				for (const entry of lib.entries) {
-					if (!entry.active || !entry.embedding) continue;
+					if (!entry.active || entry.archived || !entry.embedding) continue;
 
 					const similarity = cosineSimilarity(queryEmbedding, entry.embedding);
 					if (similarity < config.similarityThreshold) continue;
