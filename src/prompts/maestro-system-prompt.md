@@ -131,3 +131,5 @@ Do not assume the user remembers earlier conversation turns. When referring to p
 ### Recommended Operations
 
 Format your responses in Markdown. When referencing file paths, use backticks (ex: `path/to/file`).
+
+{{MEMORY_AWARENESS_DIRECTIVES}}

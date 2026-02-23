@@ -73,6 +73,8 @@ export interface TemplateContext {
 	historyFilePath?: string;
 	// Conductor profile (user's About Me from settings)
 	conductorProfile?: string;
+	/** Memory system self-evaluation directives (EXP-LIVE-03) */
+	memoryAwarenessDirectives?: string;
 }
 
 // List of all available template variables for documentation (alphabetically sorted)
@@ -101,6 +103,10 @@ export const TEMPLATE_VARIABLES = [
 		description: 'Loop iteration (00001, 00002...)',
 		autoRunOnly: true,
 	},
+	{
+		variable: '{{MEMORY_AWARENESS_DIRECTIVES}}',
+		description: 'Memory system self-evaluation directives (auto-populated)',
+	},
 	{ variable: '{{MONTH}}', description: 'Month (01-12)' },
 	{ variable: '{{TIME}}', description: 'Time (HH:MM:SS)' },
 	{ variable: '{{TIMESTAMP}}', description: 'Unix timestamp (ms)' },
@@ -127,6 +133,7 @@ export function substituteTemplateVariables(template: string, context: TemplateC
 		documentPath,
 		historyFilePath,
 		conductorProfile,
+		memoryAwarenessDirectives,
 	} = context;
 	const now = new Date();
 
@@ -180,6 +187,9 @@ export function substituteTemplateVariables(template: string, context: TemplateC
 		// Git variables
 		GIT_BRANCH: gitBranch || '',
 		IS_GIT_REPO: String(session.isGitRepo ?? false),
+
+		// Memory awareness directives
+		MEMORY_AWARENESS_DIRECTIVES: memoryAwarenessDirectives || '',
 
 		// Context variables
 		CONTEXT_USAGE: String(session.contextUsage || 0),

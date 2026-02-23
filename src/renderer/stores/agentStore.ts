@@ -29,7 +29,7 @@ import { createTab, getActiveTab } from '../utils/tabHelpers';
 import { generateId } from '../utils/ids';
 import { useSessionStore } from './sessionStore';
 import { DEFAULT_IMAGE_ONLY_PROMPT } from '../hooks/input/useInputProcessing';
-import { maestroSystemPrompt } from '../../prompts';
+import { maestroSystemPrompt, memoryAwarenessDirectivesPrompt } from '../../prompts';
 import { substituteTemplateVariables } from '../utils/templateVariables';
 import { gitService } from '../services/git';
 
@@ -318,6 +318,7 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 						session,
 						gitBranch,
 						conductorProfile: deps.conductorProfile,
+						memoryAwarenessDirectives: memoryAwarenessDirectivesPrompt,
 					});
 
 					effectivePrompt = `${substitutedSystemPrompt}\n\n---\n\n# User Request\n\n${effectivePrompt}`;
@@ -398,6 +399,7 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 							session,
 							gitBranch,
 							conductorProfile: deps.conductorProfile,
+							memoryAwarenessDirectives: memoryAwarenessDirectivesPrompt,
 						});
 						promptForAgent = `${substitutedSystemPrompt}\n\n---\n\n# User Request\n\n${substitutedPrompt}`;
 					}

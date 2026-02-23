@@ -51,4 +51,7 @@ export {
 
 	// Experience extraction
 	experienceExtractionPrompt,
+
+	// Memory awareness directives
+	memoryAwarenessDirectivesPrompt,
 } from '../generated/prompts';
