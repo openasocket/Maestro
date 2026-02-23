@@ -150,7 +150,7 @@ describe('MemoryStore — Hybrid Search (Keyword + Tag + Embedding)', () => {
 		});
 
 		it('boosts score for kw: tag matches (+0.15)', async () => {
-			const mem = await store.addMemory({
+			await store.addMemory({
 				content: 'Handle errors gracefully',
 				scope: 'global',
 				tags: ['kw:error', 'kw:graceful'],
@@ -549,7 +549,7 @@ describe('MemoryStore — Hybrid Search (Keyword + Tag + Embedding)', () => {
 		});
 
 		it('hybrid combined score formula is correct', async () => {
-			const mem = await store.addMemory({
+			await store.addMemory({
 				content: 'error handling result types',
 				scope: 'global',
 				tags: ['kw:error'],

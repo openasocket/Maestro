@@ -1142,7 +1142,7 @@ describe('MemoryStore — Hierarchy, CRUD, Isolation, Atomics, History, Seed', (
 				scope: 'skill',
 				skillAreaId: skillId,
 			});
-			const m2 = await store.addMemory({
+			await store.addMemory({
 				content: 'Recent memory',
 				scope: 'skill',
 				skillAreaId: skillId,
@@ -1198,7 +1198,7 @@ describe('MemoryStore — Hierarchy, CRUD, Isolation, Atomics, History, Seed', (
 
 		it('does not evict already-archived memories', async () => {
 			// Add 4 memories, archive 1 manually
-			const mems = [];
+			const mems: any[] = [];
 			for (let i = 0; i < 4; i++) {
 				mems.push(
 					await store.addMemory({
