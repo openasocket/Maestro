@@ -26,13 +26,14 @@ const AGENT_OPTIONS = [
 export interface RoleEditModalProps {
 	theme: Theme;
 	role: Role | null; // null = create mode
-	onSave: (data: { name: string; description: string }) => Promise<void>;
+	onSave: (data: { name: string; description: string; systemPrompt: string }) => Promise<void>;
 	onClose: () => void;
 }
 
 export function RoleEditModal({ theme, role, onSave, onClose }: RoleEditModalProps) {
 	const [name, setName] = useState(role?.name ?? '');
 	const [description, setDescription] = useState(role?.description ?? '');
+	const [systemPrompt, setSystemPrompt] = useState(role?.systemPrompt ?? '');
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const nameRef = useRef<HTMLInputElement>(null);
@@ -48,14 +49,18 @@ export function RoleEditModal({ theme, role, onSave, onClose }: RoleEditModalPro
 		setSaving(true);
 		setError(null);
 		try {
-			await onSave({ name: name.trim(), description: description.trim() });
+			await onSave({
+				name: name.trim(),
+				description: description.trim(),
+				systemPrompt: systemPrompt.trim(),
+			});
 			onClose();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : 'Failed to save role');
 		} finally {
 			setSaving(false);
 		}
-	}, [isValid, name, description, onSave, onClose]);
+	}, [isValid, name, description, systemPrompt, onSave, onClose]);
 
 	return (
 		<Modal
@@ -63,7 +68,7 @@ export function RoleEditModal({ theme, role, onSave, onClose }: RoleEditModalPro
 			title={role ? 'Edit Role' : 'Add Role'}
 			priority={MODAL_PRIORITIES.HIERARCHY_EDIT}
 			onClose={onClose}
-			width={440}
+			width={560}
 			headerIcon={<Users className="w-4 h-4" style={{ color: theme.colors.accent }} />}
 			footer={
 				<ModalFooter
@@ -128,6 +133,29 @@ export function RoleEditModal({ theme, role, onSave, onClose }: RoleEditModalPro
 						placeholder="What does this role cover?"
 					/>
 				</div>
+
+				<div>
+					<label
+						className="block text-xs font-bold opacity-70 uppercase mb-2"
+						style={{ color: theme.colors.textMain }}
+					>
+						System Prompt
+					</label>
+					<p className="text-xs mb-2" style={{ color: theme.colors.textDim }}>
+						Behavioral directive injected when this role is active.
+					</p>
+					<textarea
+						value={systemPrompt}
+						onChange={(e) => setSystemPrompt(e.target.value)}
+						rows={8}
+						className="w-full p-3 rounded border bg-transparent outline-none resize-y text-xs font-mono leading-relaxed"
+						style={{
+							borderColor: theme.colors.border,
+							color: theme.colors.textMain,
+						}}
+						placeholder="You are operating as a..."
+					/>
+				</div>
 			</div>
 		</Modal>
 	);
@@ -142,6 +170,7 @@ export interface PersonaEditModalProps {
 	onSave: (data: {
 		name: string;
 		description: string;
+		systemPrompt: string;
 		assignedAgents: string[];
 		assignedProjects: string[];
 	}) => Promise<void>;
@@ -157,6 +186,7 @@ export function PersonaEditModal({
 }: PersonaEditModalProps) {
 	const [name, setName] = useState(persona?.name ?? '');
 	const [description, setDescription] = useState(persona?.description ?? '');
+	const [systemPrompt, setSystemPrompt] = useState(persona?.systemPrompt ?? '');
 	const [assignedAgents, setAssignedAgents] = useState<string[]>(persona?.assignedAgents ?? []);
 	const [projectsText, setProjectsText] = useState((persona?.assignedProjects ?? []).join('\n'));
 	const [saving, setSaving] = useState(false);
@@ -187,6 +217,7 @@ export function PersonaEditModal({
 			await onSave({
 				name: name.trim(),
 				description: description.trim(),
+				systemPrompt: systemPrompt.trim(),
 				assignedAgents,
 				assignedProjects,
 			});
@@ -196,7 +227,7 @@ export function PersonaEditModal({
 		} finally {
 			setSaving(false);
 		}
-	}, [isValid, name, description, assignedAgents, projectsText, onSave, onClose]);
+	}, [isValid, name, description, systemPrompt, assignedAgents, projectsText, onSave, onClose]);
 
 	return (
 		<Modal
@@ -204,7 +235,7 @@ export function PersonaEditModal({
 			title={persona ? 'Edit Persona' : 'Add Persona'}
 			priority={MODAL_PRIORITIES.HIERARCHY_EDIT}
 			onClose={onClose}
-			width={480}
+			width={560}
 			headerIcon={<User className="w-4 h-4" style={{ color: theme.colors.accent }} />}
 			footer={
 				<ModalFooter
@@ -267,6 +298,29 @@ export function PersonaEditModal({
 							color: theme.colors.textMain,
 						}}
 						placeholder="Describe this persona's area of expertise"
+					/>
+				</div>
+
+				<div>
+					<label
+						className="block text-xs font-bold opacity-70 uppercase mb-2"
+						style={{ color: theme.colors.textMain }}
+					>
+						System Prompt
+					</label>
+					<p className="text-xs mb-2" style={{ color: theme.colors.textDim }}>
+						Behavioral directive injected when this persona is active.
+					</p>
+					<textarea
+						value={systemPrompt}
+						onChange={(e) => setSystemPrompt(e.target.value)}
+						rows={8}
+						className="w-full p-3 rounded border bg-transparent outline-none resize-y text-xs font-mono leading-relaxed"
+						style={{
+							borderColor: theme.colors.border,
+							color: theme.colors.textMain,
+						}}
+						placeholder="You are a specialized expert in..."
 					/>
 				</div>
 

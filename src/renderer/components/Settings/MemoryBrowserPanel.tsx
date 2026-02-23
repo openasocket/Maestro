@@ -20,12 +20,13 @@ interface MemoryBrowserPanelProps {
 
 /**
  * Derive the memory store scope and skillAreaId from the selected tree node.
+ * Returns null for container nodes (role/persona) that have no direct memories.
  */
 function deriveStoreParams(node: TreeNode | null): {
 	scope: MemoryScope;
 	skillAreaId?: SkillAreaId;
-} {
-	if (!node) return { scope: 'global' };
+} | null {
+	if (!node) return null;
 
 	switch (node.type) {
 		case 'skill':
@@ -34,13 +35,12 @@ function deriveStoreParams(node: TreeNode | null): {
 			return { scope: 'project' };
 		case 'global':
 			return { scope: 'global' };
-		// For role/persona selections, we show an empty library with a prompt
-		// to select a skill area — use 'skill' scope without an id so it returns empty
+		// Role/persona are container nodes — no direct memories to list
 		case 'role':
 		case 'persona':
-			return { scope: 'skill' };
+			return null;
 		default:
-			return { scope: 'global' };
+			return null;
 	}
 }
 
@@ -52,10 +52,15 @@ export function MemoryBrowserPanel({
 	const hierarchy = useMemoryHierarchy();
 	const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
 
-	// Derive scope params for useMemoryStore
-	const { scope, skillAreaId } = useMemo(() => deriveStoreParams(selectedNode), [selectedNode]);
+	// Derive scope params for useMemoryStore (null = container node, no memories to list)
+	const storeParams = useMemo(() => deriveStoreParams(selectedNode), [selectedNode]);
 
-	const store = useMemoryStore(scope, skillAreaId, projectPath);
+	const store = useMemoryStore(
+		storeParams?.scope ?? 'global',
+		storeParams?.skillAreaId,
+		projectPath,
+		!storeParams // skip fetching when container node selected
+	);
 
 	if (hierarchy.loading) {
 		return (
@@ -105,6 +110,8 @@ export function MemoryBrowserPanel({
 					roles={hierarchy.roles}
 					personas={hierarchy.personas}
 					skillAreas={hierarchy.skillAreas}
+					onUpdateRole={hierarchy.updateRole}
+					onUpdatePersona={hierarchy.updatePersona}
 				/>
 			</div>
 		</div>

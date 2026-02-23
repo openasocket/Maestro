@@ -100,6 +100,10 @@ interface GroupedMemories {
 	priority: number;
 	lines: string[];
 	tokenCost: number;
+	/** Role behavioral directive (set once per role, deduped by role name) */
+	roleSystemPrompt?: string;
+	/** Persona behavioral directive (set once per persona group, deduped by persona name) */
+	personaSystemPrompt?: string;
 }
 
 /**
@@ -150,6 +154,9 @@ function getGroupKey(result: MemorySearchResult): { key: string; priority: numbe
 function formatXmlBlock(selected: MemorySearchResult[], includeComments: boolean): string {
 	// Group by key
 	const groupMap = new Map<string, GroupedMemories>();
+	// Track which role/persona prompts we've already captured (dedup by name)
+	const seenRolePrompts = new Set<string>();
+	const seenPersonaPrompts = new Set<string>();
 
 	for (const result of selected) {
 		const { key, priority } = getGroupKey(result);
@@ -157,6 +164,26 @@ function formatXmlBlock(selected: MemorySearchResult[], includeComments: boolean
 		if (!group) {
 			group = { key, priority, lines: [], tokenCost: 0 };
 			groupMap.set(key, group);
+		}
+		// Capture role system prompt once per role (first group that references this role gets it)
+		if (
+			result.roleName &&
+			result.roleSystemPrompt &&
+			!seenRolePrompts.has(result.roleName) &&
+			!group.roleSystemPrompt
+		) {
+			group.roleSystemPrompt = result.roleSystemPrompt;
+			seenRolePrompts.add(result.roleName);
+		}
+		// Capture persona system prompt once per persona (first group that references this persona gets it)
+		if (
+			result.personaName &&
+			result.personaSystemPrompt &&
+			!seenPersonaPrompts.has(result.personaName) &&
+			!group.personaSystemPrompt
+		) {
+			group.personaSystemPrompt = result.personaSystemPrompt;
+			seenPersonaPrompts.add(result.personaName);
 		}
 		if (includeComments) {
 			group.lines.push(formatMatchComment(result));
@@ -171,8 +198,18 @@ function formatXmlBlock(selected: MemorySearchResult[], includeComments: boolean
 		return a.key.localeCompare(b.key);
 	});
 
-	// Build XML
-	const sections = groups.map((g) => `${g.key}\n${g.lines.join('\n')}`);
+	// Build XML — include role and persona directives before memory entries when present
+	const sections = groups.map((g) => {
+		const parts: string[] = [g.key];
+		if (g.roleSystemPrompt) {
+			parts.push(`<role-directive>\n${g.roleSystemPrompt}\n</role-directive>`);
+		}
+		if (g.personaSystemPrompt) {
+			parts.push(`<persona-directive>\n${g.personaSystemPrompt}\n</persona-directive>`);
+		}
+		parts.push(g.lines.join('\n'));
+		return parts.join('\n');
+	});
 
 	return `<agent-memories>\nRelevant knowledge for this task:\n\n${sections.join('\n\n')}\n</agent-memories>`;
 }

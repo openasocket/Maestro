@@ -25,6 +25,7 @@ import {
 	ChevronDown,
 	ChevronUp,
 	Zap,
+	RotateCcw,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
@@ -151,6 +152,8 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 	const [error, setError] = useState<string | null>(null);
 	const [hasRoles, setHasRoles] = useState(true);
 	const [seeding, setSeeding] = useState(false);
+	const [resetting, setResetting] = useState(false);
+	const [confirmReset, setConfirmReset] = useState(false);
 	const [suggestions, setSuggestions] = useState<HierarchySuggestionResult | null>(null);
 	const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
 	const [applyingSuggestion, setApplyingSuggestion] = useState<string | null>(null);
@@ -256,6 +259,26 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 			setError(err instanceof Error ? err.message : 'Failed to seed defaults');
 		} finally {
 			setSeeding(false);
+		}
+	}, []);
+
+	// Reset all seed defaults handler
+	const handleResetDefaults = useCallback(async () => {
+		setResetting(true);
+		try {
+			const res = await window.maestro.memory.resetSeedDefaults();
+			if (!res.success) {
+				setError(res.error);
+				return;
+			}
+			setConfirmReset(false);
+			// Refresh stats
+			const statsRes = await window.maestro.memory.getAnalytics();
+			if (statsRes.success) setStats(statsRes.data);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : 'Failed to reset defaults');
+		} finally {
+			setResetting(false);
 		}
 	}, []);
 
@@ -646,25 +669,62 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 			{/* Config panel — shown when enabled */}
 			{config.enabled && (
 				<>
-					{/* Seed Defaults Button — shown only when no roles exist */}
-					{!hasRoles && (
-						<button
-							className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg border text-xs font-medium transition-colors"
-							style={{
-								borderColor: theme.colors.accent,
-								color: theme.colors.accent,
-								backgroundColor: `${theme.colors.accent}10`,
-							}}
-							onClick={handleSeedDefaults}
-							disabled={seeding}
-						>
-							{seeding ? (
-								<Loader2 className="w-3.5 h-3.5 animate-spin" />
-							) : (
-								<Sparkles className="w-3.5 h-3.5" />
+					{/* Seed Defaults Button — always shown; merges missing roles when some already exist */}
+					<button
+						className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg border text-xs font-medium transition-colors"
+						style={{
+							borderColor: theme.colors.accent,
+							color: theme.colors.accent,
+							backgroundColor: `${theme.colors.accent}10`,
+						}}
+						onClick={handleSeedDefaults}
+						disabled={seeding}
+					>
+						{seeding ? (
+							<Loader2 className="w-3.5 h-3.5 animate-spin" />
+						) : (
+							<Sparkles className="w-3.5 h-3.5" />
+						)}
+						{seeding
+							? 'Creating default hierarchy...'
+							: hasRoles
+								? 'Sync Missing Default Roles'
+								: 'Seed Default Roles & Personas'}
+					</button>
+
+					{/* Reset All Defaults Button — resets seed roles/personas to original values */}
+					{hasRoles && (
+						<div className="flex items-center gap-2">
+							<button
+								className="flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg border text-xs font-medium transition-colors"
+								style={{
+									borderColor: theme.colors.border,
+									color: theme.colors.textDim,
+								}}
+								onClick={() => (confirmReset ? handleResetDefaults() : setConfirmReset(true))}
+								disabled={resetting}
+							>
+								{resetting ? (
+									<Loader2 className="w-3.5 h-3.5 animate-spin" />
+								) : (
+									<RotateCcw className="w-3.5 h-3.5" />
+								)}
+								{resetting
+									? 'Resetting...'
+									: confirmReset
+										? 'Confirm Reset All Defaults'
+										: 'Reset All Seed Defaults'}
+							</button>
+							{confirmReset && (
+								<button
+									className="px-2 py-2 rounded-lg border text-xs transition-opacity hover:opacity-80"
+									style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
+									onClick={() => setConfirmReset(false)}
+								>
+									Cancel
+								</button>
 							)}
-							{seeding ? 'Creating default hierarchy...' : 'Seed Default Roles & Personas'}
-						</button>
+						</div>
 					)}
 
 					{/* Configuration Inputs */}

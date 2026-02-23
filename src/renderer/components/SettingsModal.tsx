@@ -303,6 +303,8 @@ interface SettingsModalProps {
 	hasNoAgents?: boolean;
 	onThemeImportError?: (message: string) => void;
 	onThemeImportSuccess?: (message: string) => void;
+	/** Active session's working directory for project-scoped memories */
+	activeProjectPath?: string | null;
 }
 
 export const SettingsModal = memo(function SettingsModal(props: SettingsModalProps) {
@@ -388,8 +390,8 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 	const [syncError, setSyncError] = useState<string | null>(null);
 	const [syncMigratedCount, setSyncMigratedCount] = useState<number | null>(null);
 
-	// Memory tab state
-	const [memoryProjectPath] = useState<string | null>(null);
+	// Memory tab state — derive project path from active session prop
+	const memoryProjectPath = props.activeProjectPath ?? null;
 
 	// Stats data management state
 	const [statsDbSize, setStatsDbSize] = useState<number | null>(null);

@@ -22,8 +22,11 @@ export interface UseMemoryHierarchyReturn {
 	loading: boolean;
 	error: string | null;
 	// Role CRUD
-	createRole: (name: string, description: string) => Promise<void>;
-	updateRole: (id: RoleId, updates: { name?: string; description?: string }) => Promise<void>;
+	createRole: (name: string, description: string, systemPrompt?: string) => Promise<void>;
+	updateRole: (
+		id: RoleId,
+		updates: { name?: string; description?: string; systemPrompt?: string }
+	) => Promise<void>;
 	deleteRole: (id: RoleId) => Promise<void>;
 	// Persona CRUD
 	createPersona: (
@@ -31,7 +34,8 @@ export interface UseMemoryHierarchyReturn {
 		name: string,
 		description: string,
 		assignedAgents?: string[],
-		assignedProjects?: string[]
+		assignedProjects?: string[],
+		systemPrompt?: string
 	) => Promise<void>;
 	updatePersona: (id: PersonaId, updates: Partial<Persona>) => Promise<void>;
 	deletePersona: (id: PersonaId) => Promise<void>;
@@ -42,6 +46,7 @@ export interface UseMemoryHierarchyReturn {
 	// Utility
 	refresh: () => void;
 	seedDefaults: () => Promise<void>;
+	resetAllDefaults: () => Promise<{ rolesReset: number; personasReset: number }>;
 }
 
 export function useMemoryHierarchy(): UseMemoryHierarchyReturn {
@@ -120,8 +125,8 @@ export function useMemoryHierarchy(): UseMemoryHierarchyReturn {
 	// ─── Role CRUD ────────────────────────────────────────────────────────────
 
 	const createRole = useCallback(
-		async (name: string, description: string) => {
-			const res = await window.maestro.memory.role.create(name, description);
+		async (name: string, description: string, systemPrompt?: string) => {
+			const res = await window.maestro.memory.role.create(name, description, systemPrompt);
 			if (!res.success) throw new Error(res.error);
 			refresh();
 		},
@@ -129,7 +134,7 @@ export function useMemoryHierarchy(): UseMemoryHierarchyReturn {
 	);
 
 	const updateRole = useCallback(
-		async (id: RoleId, updates: { name?: string; description?: string }) => {
+		async (id: RoleId, updates: { name?: string; description?: string; systemPrompt?: string }) => {
 			const res = await window.maestro.memory.role.update(id, updates);
 			if (!res.success) throw new Error(res.error);
 			refresh();
@@ -154,14 +159,16 @@ export function useMemoryHierarchy(): UseMemoryHierarchyReturn {
 			name: string,
 			description: string,
 			assignedAgents?: string[],
-			assignedProjects?: string[]
+			assignedProjects?: string[],
+			systemPrompt?: string
 		) => {
 			const res = await window.maestro.memory.persona.create(
 				roleId,
 				name,
 				description,
 				assignedAgents,
-				assignedProjects
+				assignedProjects,
+				systemPrompt
 			);
 			if (!res.success) throw new Error(res.error);
 			refresh();
@@ -171,10 +178,11 @@ export function useMemoryHierarchy(): UseMemoryHierarchyReturn {
 
 	const updatePersona = useCallback(
 		async (id: PersonaId, updates: Partial<Persona>) => {
-			const { name, description, assignedAgents, assignedProjects, active } = updates;
+			const { name, description, systemPrompt, assignedAgents, assignedProjects, active } = updates;
 			const res = await window.maestro.memory.persona.update(id, {
 				name,
 				description,
+				systemPrompt,
 				assignedAgents,
 				assignedProjects,
 				active,
@@ -232,6 +240,13 @@ export function useMemoryHierarchy(): UseMemoryHierarchyReturn {
 		refresh();
 	}, [refresh]);
 
+	const resetAllDefaults = useCallback(async () => {
+		const res = await window.maestro.memory.resetSeedDefaults();
+		if (!res.success) throw new Error(res.error);
+		refresh();
+		return res.data;
+	}, [refresh]);
+
 	return {
 		roles,
 		personas,
@@ -249,5 +264,6 @@ export function useMemoryHierarchy(): UseMemoryHierarchyReturn {
 		deleteSkillArea,
 		refresh,
 		seedDefaults,
+		resetAllDefaults,
 	};
 }

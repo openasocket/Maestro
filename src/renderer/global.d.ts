@@ -2723,14 +2723,15 @@ interface MaestroAPI {
 			>;
 			create: (
 				name: string,
-				description: string
+				description: string,
+				systemPrompt?: string
 			) => Promise<
 				| { success: true; data: import('../shared/memory-types').Role }
 				| { success: false; error: string }
 			>;
 			update: (
 				id: string,
-				updates: { name?: string; description?: string }
+				updates: { name?: string; description?: string; systemPrompt?: string }
 			) => Promise<
 				| { success: true; data: import('../shared/memory-types').Role | null }
 				| { success: false; error: string }
@@ -2757,7 +2758,8 @@ interface MaestroAPI {
 				name: string,
 				description: string,
 				assignedAgents?: string[],
-				assignedProjects?: string[]
+				assignedProjects?: string[],
+				systemPrompt?: string
 			) => Promise<
 				| { success: true; data: import('../shared/memory-types').Persona }
 				| { success: false; error: string }
@@ -2767,6 +2769,7 @@ interface MaestroAPI {
 				updates: {
 					name?: string;
 					description?: string;
+					systemPrompt?: string;
 					assignedAgents?: string[];
 					assignedProjects?: string[];
 					active?: boolean;
@@ -2779,6 +2782,10 @@ interface MaestroAPI {
 				id: string
 			) => Promise<{ success: true; data: boolean } | { success: false; error: string }>;
 		};
+		resetSeedDefaults: () => Promise<
+			| { success: true; data: { rolesReset: number; personasReset: number } }
+			| { success: false; error: string }
+		>;
 		skill: {
 			list: (
 				personaId?: string

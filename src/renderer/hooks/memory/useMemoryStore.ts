@@ -64,7 +64,8 @@ export interface UseMemoryStoreReturn {
 export function useMemoryStore(
 	scope: MemoryScope,
 	skillAreaId?: SkillAreaId,
-	projectPath?: string | null
+	projectPath?: string | null,
+	skip?: boolean
 ): UseMemoryStoreReturn {
 	const [memories, setMemories] = useState<MemoryEntry[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -76,6 +77,13 @@ export function useMemoryStore(
 	const resolvedProject = projectPath ?? undefined;
 
 	const fetchMemories = useCallback(async () => {
+		// Skip fetch for container nodes or project scope without a project path
+		if (skip || (scope === 'project' && !resolvedProject)) {
+			setMemories([]);
+			setLoading(false);
+			setError(null);
+			return;
+		}
 		try {
 			setLoading(true);
 			setError(null);
@@ -99,7 +107,7 @@ export function useMemoryStore(
 				setLoading(false);
 			}
 		}
-	}, [scope, skillAreaId, resolvedProject]);
+	}, [scope, skillAreaId, resolvedProject, skip]);
 
 	// Debounced refresh
 	const refresh = useCallback(() => {

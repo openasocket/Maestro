@@ -271,8 +271,12 @@ export class MemoryJobQueue {
 
 			try {
 				await this.executeJob(next);
-			} catch {
-				// Job failed — log, don't retry (will re-trigger naturally)
+			} catch (err) {
+				// Job failed — log for diagnostics, don't retry (will re-trigger naturally)
+				console.error(
+					`[MemoryJobQueue] Job ${next.type} (${next.id}) failed:`,
+					err instanceof Error ? err.message : err
+				);
 			}
 
 			this.currentJob = null;

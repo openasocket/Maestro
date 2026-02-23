@@ -47,12 +47,16 @@ export function createMemoryApi() {
 			get: (id: string): Promise<IpcResponse<Role | null>> =>
 				ipcRenderer.invoke('memory:role:get', id),
 
-			create: (name: string, description: string): Promise<IpcResponse<Role>> =>
-				ipcRenderer.invoke('memory:role:create', name, description),
+			create: (
+				name: string,
+				description: string,
+				systemPrompt?: string
+			): Promise<IpcResponse<Role>> =>
+				ipcRenderer.invoke('memory:role:create', name, description, systemPrompt),
 
 			update: (
 				id: string,
-				updates: { name?: string; description?: string }
+				updates: { name?: string; description?: string; systemPrompt?: string }
 			): Promise<IpcResponse<Role | null>> => ipcRenderer.invoke('memory:role:update', id, updates),
 
 			delete: (id: string): Promise<IpcResponse<boolean>> =>
@@ -72,7 +76,8 @@ export function createMemoryApi() {
 				name: string,
 				description: string,
 				assignedAgents?: string[],
-				assignedProjects?: string[]
+				assignedProjects?: string[],
+				systemPrompt?: string
 			): Promise<IpcResponse<Persona>> =>
 				ipcRenderer.invoke(
 					'memory:persona:create',
@@ -80,7 +85,8 @@ export function createMemoryApi() {
 					name,
 					description,
 					assignedAgents,
-					assignedProjects
+					assignedProjects,
+					systemPrompt
 				),
 
 			update: (
@@ -88,6 +94,7 @@ export function createMemoryApi() {
 				updates: {
 					name?: string;
 					description?: string;
+					systemPrompt?: string;
 					assignedAgents?: string[];
 					assignedProjects?: string[];
 					active?: boolean;
@@ -98,6 +105,10 @@ export function createMemoryApi() {
 			delete: (id: string): Promise<IpcResponse<boolean>> =>
 				ipcRenderer.invoke('memory:persona:delete', id),
 		},
+
+		// ─── Reset Seed Defaults ──────────────────────────────────────────
+		resetSeedDefaults: (): Promise<IpcResponse<{ rolesReset: number; personasReset: number }>> =>
+			ipcRenderer.invoke('memory:resetSeedDefaults'),
 
 		// ─── Skill Areas ──────────────────────────────────────────────────
 		skill: {

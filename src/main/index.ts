@@ -52,11 +52,13 @@ import {
 	registerTabNamingHandlers,
 	registerAgentErrorHandlers,
 	registerDirectorNotesHandlers,
+	registerMemoryHandlers,
 	registerWakatimeHandlers,
 	setupLoggerEventForwarding,
 	cleanupAllGroomingSessions,
 	getActiveGroomingSessionCount,
 } from './ipc/handlers';
+import { getMemoryStore } from './memory/memory-store';
 import { initializeStatsDB, closeStatsDB, getStatsDB } from './stats';
 import { groupChatEmitters } from './ipc/handlers/groupChat';
 import {
@@ -658,6 +660,12 @@ function setupIpcHandlers() {
 		settingsStore: store,
 	});
 
+	// Register memory handlers (Agent Experiences system)
+	registerMemoryHandlers({
+		memoryStore: getMemoryStore(),
+		settingsStore: store,
+	});
+
 	// Register WakaTime handlers (CLI check, API key validation)
 	registerWakatimeHandlers(wakatimeManager);
 }
@@ -717,5 +725,13 @@ function setupProcessListeners() {
 
 		// WakaTime heartbeat listener (query-complete → heartbeat, exit → cleanup)
 		setupWakaTimeListener(processManager, wakatimeManager, store);
+
+		// Wire LiveContextBroadcaster process manager accessor (EXP-LIVE-04)
+		// Must be set after processManager is created so broadcasts can find running sessions.
+		import('./memory/live-context-broadcaster')
+			.then(({ getLiveBroadcaster }) => {
+				getLiveBroadcaster().setProcessManagerGetter(() => processManager!);
+			})
+			.catch(() => {});
 	}
 }

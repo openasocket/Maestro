@@ -151,7 +151,11 @@ import { getSpeckitCommands } from './services/speckit';
 import { getOpenSpecCommands } from './services/openspec';
 
 // Import prompts and synopsis parsing
-import { autorunSynopsisPrompt, maestroSystemPrompt } from '../prompts';
+import {
+	autorunSynopsisPrompt,
+	maestroSystemPrompt,
+	memoryAwarenessDirectivesPrompt,
+} from '../prompts';
 import { parseSynopsis } from '../shared/synopsis';
 import { formatRelativeTime } from '../shared/formatters';
 
@@ -2318,6 +2322,7 @@ You are taking over this conversation. Based on the context above, provide a bri
 							session: targetSession,
 							gitBranch,
 							conductorProfile,
+							memoryAwarenessDirectives: memoryAwarenessDirectivesPrompt,
 						});
 						effectivePrompt = `${substitutedSystemPrompt}\n\n---\n\n# User Request\n\n${effectivePrompt}`;
 					}
@@ -9409,6 +9414,7 @@ You are taking over this conversation. Based on the context above, provide a bri
 							hasNoAgents={hasNoAgents}
 							onThemeImportError={(msg) => setFlashNotification(msg)}
 							onThemeImportSuccess={(msg) => setFlashNotification(msg)}
+							activeProjectPath={activeSession?.cwd}
 						/>
 					</Suspense>
 				)}

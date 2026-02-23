@@ -42,6 +42,7 @@ import type {
 	SkillArea,
 } from '../../../shared/memory-types';
 import type { UseMemoryStoreReturn } from '../../hooks/memory/useMemoryStore';
+import { RoleDetailView, PersonaDetailView } from './EntityDetailView';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,12 @@ interface MemoryLibraryPanelProps {
 	roles: Role[];
 	personas: Persona[];
 	skillAreas: SkillArea[];
+	// Hierarchy CRUD for entity detail editing
+	onUpdateRole?: (
+		id: string,
+		updates: { name?: string; description?: string; systemPrompt?: string }
+	) => Promise<void>;
+	onUpdatePersona?: (id: string, updates: Partial<Persona>) => Promise<void>;
 }
 
 type TypeFilter = 'all' | 'rule' | 'experience';
@@ -637,6 +644,8 @@ export function MemoryLibraryPanel({
 	roles,
 	personas,
 	skillAreas,
+	onUpdateRole,
+	onUpdatePersona,
 }: MemoryLibraryPanelProps): React.ReactElement {
 	const { memories, loading, error } = store;
 
@@ -886,6 +895,30 @@ export function MemoryLibraryPanel({
 				</div>
 			</div>
 		);
+	}
+
+	// ─── Role / Persona Detail View ──────────────────────────────────────
+
+	if (selectedNode.type === 'role') {
+		const role = roles.find((r) => r.id === selectedNode.id);
+		if (role && onUpdateRole) {
+			return <RoleDetailView theme={theme} role={role} onSave={onUpdateRole} />;
+		}
+	}
+
+	if (selectedNode.type === 'persona') {
+		const persona = personas.find((p) => p.id === selectedNode.id);
+		const parentRole = persona ? roles.find((r) => r.id === persona.roleId) : undefined;
+		if (persona && onUpdatePersona) {
+			return (
+				<PersonaDetailView
+					theme={theme}
+					persona={persona}
+					parentRoleName={parentRole?.name ?? 'Unknown Role'}
+					onSave={onUpdatePersona}
+				/>
+			);
+		}
 	}
 
 	// ─── Render ───────────────────────────────────────────────────────────

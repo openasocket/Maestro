@@ -107,16 +107,22 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 
 	ipcMain.handle(
 		'memory:role:create',
-		createIpcDataHandler(handlerOpts('role:create'), async (name: string, description: string) => {
-			return memoryStore.createRole(name, description);
-		})
+		createIpcDataHandler(
+			handlerOpts('role:create'),
+			async (name: string, description: string, systemPrompt?: string) => {
+				return memoryStore.createRole(name, description, systemPrompt);
+			}
+		)
 	);
 
 	ipcMain.handle(
 		'memory:role:update',
 		createIpcDataHandler(
 			handlerOpts('role:update'),
-			async (id: string, updates: { name?: string; description?: string }) => {
+			async (
+				id: string,
+				updates: { name?: string; description?: string; systemPrompt?: string }
+			) => {
 				return memoryStore.updateRole(id, updates);
 			}
 		)
@@ -154,14 +160,16 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 				name: string,
 				description: string,
 				assignedAgents?: string[],
-				assignedProjects?: string[]
+				assignedProjects?: string[],
+				systemPrompt?: string
 			) => {
 				return memoryStore.createPersona(
 					roleId,
 					name,
 					description,
 					assignedAgents,
-					assignedProjects
+					assignedProjects,
+					systemPrompt
 				);
 			}
 		)
@@ -176,6 +184,7 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 				updates: {
 					name?: string;
 					description?: string;
+					systemPrompt?: string;
 					assignedAgents?: string[];
 					assignedProjects?: string[];
 					active?: boolean;
@@ -462,6 +471,13 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		'memory:seedDefaults',
 		createIpcDataHandler(handlerOpts('seedDefaults'), async () => {
 			return memoryStore.seedFromDefaults();
+		})
+	);
+
+	ipcMain.handle(
+		'memory:resetSeedDefaults',
+		createIpcDataHandler(handlerOpts('resetSeedDefaults'), async () => {
+			return memoryStore.resetToSeedDefaults();
 		})
 	);
 

@@ -451,10 +451,10 @@ export function setupExitListener(
 
 				// Priority 3: expensive experience extraction (only if we have required data)
 				if (session?.projectRoot && session?.toolType) {
-					// Check if memory system is enabled before enqueuing expensive work
+					// Check if memory system AND experience extraction are both enabled
 					const { getMemoryStore } = await import('../memory/memory-store');
 					const config = await getMemoryStore().getConfig();
-					if (config.enabled) {
+					if (config.enabled && config.enableExperienceExtraction) {
 						queue.enqueue({
 							type: 'experience-extraction',
 							priority: 3,

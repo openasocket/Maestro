@@ -274,13 +274,14 @@ export class MemoryStore {
 
 	// ─── Role CRUD ──────────────────────────────────────────────────────────
 
-	async createRole(name: string, description: string): Promise<Role> {
+	async createRole(name: string, description: string, systemPrompt?: string): Promise<Role> {
 		const registry = await this.readRegistry();
 		const now = Date.now();
 		const role: Role = {
 			id: crypto.randomUUID(),
 			name,
 			description,
+			systemPrompt: systemPrompt ?? '',
 			personaIds: [],
 			createdAt: now,
 			updatedAt: now,
@@ -299,7 +300,7 @@ export class MemoryStore {
 
 	async updateRole(
 		id: RoleId,
-		updates: { name?: string; description?: string }
+		updates: { name?: string; description?: string; systemPrompt?: string }
 	): Promise<Role | null> {
 		const registry = await this.readRegistry();
 		const idx = registry.roles.findIndex((r) => r.id === id);
@@ -365,7 +366,8 @@ export class MemoryStore {
 		name: string,
 		description: string,
 		assignedAgents?: string[],
-		assignedProjects?: string[]
+		assignedProjects?: string[],
+		systemPrompt?: string
 	): Promise<Persona> {
 		const registry = await this.readRegistry();
 		const roleIdx = registry.roles.findIndex((r) => r.id === roleId);
@@ -377,6 +379,7 @@ export class MemoryStore {
 			roleId,
 			name,
 			description,
+			systemPrompt: systemPrompt ?? '',
 			embedding: null,
 			skillAreaIds: [],
 			assignedAgents: assignedAgents ?? [],
@@ -409,6 +412,7 @@ export class MemoryStore {
 		updates: {
 			name?: string;
 			description?: string;
+			systemPrompt?: string;
 			assignedAgents?: string[];
 			assignedProjects?: string[];
 			active?: boolean;
@@ -1447,8 +1451,15 @@ export class MemoryStore {
 		const hierarchyResults: MemorySearchResult[] = [];
 
 		// ── Level 1: Persona matching ────────────────────────────────────
-		const matchedPersonas: Array<{ persona: (typeof registry.personas)[0]; personaName: string }> =
-			[];
+		// Build a role lookup for attaching role-level context to results
+		const roleById = new Map(registry.roles.map((r) => [r.id, r]));
+
+		const matchedPersonas: Array<{
+			persona: (typeof registry.personas)[0];
+			personaName: string;
+			roleName: string;
+			roleSystemPrompt: string;
+		}> = [];
 
 		for (const persona of registry.personas) {
 			if (!persona.active) continue;
@@ -1473,17 +1484,26 @@ export class MemoryStore {
 				if (sim < config.personaMatchThreshold) continue;
 			}
 
-			matchedPersonas.push({ persona, personaName: persona.name });
+			const role = roleById.get(persona.roleId);
+			matchedPersonas.push({
+				persona,
+				personaName: persona.name,
+				roleName: role?.name ?? '',
+				roleSystemPrompt: role?.systemPrompt ?? '',
+			});
 		}
 
 		// ── Level 2: Skill area matching ─────────────────────────────────
 		const matchedSkills: Array<{
 			skill: (typeof registry.skillAreas)[0];
 			personaName: string;
+			personaSystemPrompt: string;
+			roleName: string;
+			roleSystemPrompt: string;
 			skillAreaName: string;
 		}> = [];
 
-		for (const { persona, personaName } of matchedPersonas) {
+		for (const { persona, personaName, roleName, roleSystemPrompt } of matchedPersonas) {
 			for (const skillId of persona.skillAreaIds) {
 				const skill = registry.skillAreas.find((s) => s.id === skillId);
 				if (!skill || !skill.active) continue;
@@ -1494,14 +1514,28 @@ export class MemoryStore {
 					if (sim < config.skillMatchThreshold) continue;
 				}
 
-				matchedSkills.push({ skill, personaName, skillAreaName: skill.name });
+				matchedSkills.push({
+					skill,
+					personaName,
+					personaSystemPrompt: persona.systemPrompt ?? '',
+					roleName,
+					roleSystemPrompt,
+					skillAreaName: skill.name,
+				});
 			}
 		}
 
 		// ── Level 3: Memory search within matched skill areas ────────────
 		if (config.enableHybridSearch) {
 			// Hybrid: use multi-signal search (embedding + keyword + tag)
-			for (const { skill, personaName, skillAreaName } of matchedSkills) {
+			for (const {
+				skill,
+				personaName,
+				personaSystemPrompt,
+				roleName,
+				roleSystemPrompt,
+				skillAreaName,
+			} of matchedSkills) {
 				const skillResults = await this.hybridSearch(
 					query,
 					'skill',
@@ -1511,12 +1545,26 @@ export class MemoryStore {
 					50
 				);
 				for (const r of skillResults) {
-					hierarchyResults.push({ ...r, personaName, skillAreaName });
+					hierarchyResults.push({
+						...r,
+						roleName,
+						roleSystemPrompt,
+						personaName,
+						personaSystemPrompt,
+						skillAreaName,
+					});
 				}
 			}
 		} else {
 			// Embedding-only (legacy behavior)
-			for (const { skill, personaName, skillAreaName } of matchedSkills) {
+			for (const {
+				skill,
+				personaName,
+				personaSystemPrompt,
+				roleName,
+				roleSystemPrompt,
+				skillAreaName,
+			} of matchedSkills) {
 				const dirPath = this.getMemoryPath('skill', skill.id);
 				const entries = await this.getCachedLibrary(dirPath);
 
@@ -1530,7 +1578,10 @@ export class MemoryStore {
 						entry,
 						similarity,
 						combinedScore: this.computeCombinedScore(similarity, entry, config.decayHalfLifeDays),
+						roleName,
+						roleSystemPrompt,
 						personaName,
+						personaSystemPrompt,
 						skillAreaName,
 					});
 				}
@@ -2979,23 +3030,33 @@ export class MemoryStore {
 	 */
 	async seedFromDefaults(): Promise<{ roles: number; personas: number; skills: number }> {
 		const registry = await this.readRegistry();
-		if (registry.roles.length > 0) {
-			return { roles: 0, personas: 0, skills: 0 };
-		}
+
+		// Build lookup of existing role names (case-insensitive) for merge seeding
+		const existingRoleNames = new Set(registry.roles.map((r) => r.name.toLowerCase()));
 
 		let roleCount = 0;
 		let personaCount = 0;
 		let skillCount = 0;
 
 		for (const seedRole of SEED_ROLES) {
-			const role = await this.createRole(seedRole.name, seedRole.description);
+			// Skip roles that already exist (by name) to preserve user customizations
+			if (existingRoleNames.has(seedRole.name.toLowerCase())) continue;
+
+			const role = await this.createRole(
+				seedRole.name,
+				seedRole.description,
+				seedRole.systemPrompt
+			);
 			roleCount++;
 
 			for (const seedPersona of seedRole.personas) {
 				const persona = await this.createPersona(
 					role.id,
 					seedPersona.name,
-					seedPersona.description
+					seedPersona.description,
+					undefined,
+					undefined,
+					seedPersona.systemPrompt
 				);
 				personaCount++;
 
@@ -3007,6 +3068,46 @@ export class MemoryStore {
 		}
 
 		return { roles: roleCount, personas: personaCount, skills: skillCount };
+	}
+
+	/**
+	 * Reset all seed-derived roles and personas to their original SEED_ROLES values.
+	 * Custom (non-seed) roles and personas are left untouched.
+	 */
+	async resetToSeedDefaults(): Promise<{ rolesReset: number; personasReset: number }> {
+		const registry = await this.readRegistry();
+		let rolesReset = 0;
+		let personasReset = 0;
+
+		for (const seedRole of SEED_ROLES) {
+			const existingRole = registry.roles.find(
+				(r) => r.name.toLowerCase() === seedRole.name.toLowerCase()
+			);
+			if (!existingRole) continue;
+
+			// Reset role fields
+			existingRole.description = seedRole.description;
+			existingRole.systemPrompt = seedRole.systemPrompt;
+			existingRole.updatedAt = Date.now();
+			rolesReset++;
+
+			// Reset matching child personas
+			for (const seedPersona of seedRole.personas) {
+				const existingPersona = registry.personas.find(
+					(p) =>
+						p.roleId === existingRole.id && p.name.toLowerCase() === seedPersona.name.toLowerCase()
+				);
+				if (!existingPersona) continue;
+
+				existingPersona.description = seedPersona.description;
+				existingPersona.systemPrompt = seedPersona.systemPrompt;
+				existingPersona.updatedAt = Date.now();
+				personasReset++;
+			}
+		}
+
+		await this.writeRegistry(registry);
+		return { rolesReset, personasReset };
 	}
 
 	// ─── Analytics ──────────────────────────────────────────────────────────
