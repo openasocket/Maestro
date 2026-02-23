@@ -122,6 +122,12 @@ export interface ExperienceContext {
 	rationale?: string;
 	/** Whether this provenance came from VIBES audit data vs internal history */
 	provenanceSource?: 'vibes' | 'history' | 'inferred';
+	/** Whether this experience came from a detected deviation (backtrack, retry, error→fix) */
+	isDeviation?: boolean;
+	/** Type of deviation detected */
+	deviationType?: 'error-fix' | 'backtrack' | 'retry' | 'approach-change';
+	/** How many attempts were made before resolution (for retry/backtrack deviations) */
+	attemptCount?: number;
 }
 
 /** A single memory entry — explicit declarative knowledge or empirical experience */

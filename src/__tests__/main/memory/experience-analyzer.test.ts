@@ -255,6 +255,40 @@ describe('ExperienceAnalyzer', () => {
 			expect(ctx.rationale).toBeUndefined();
 			expect(ctx.provenanceSource).toBeUndefined();
 		});
+
+		it('ExperienceContext supports deviation tracking fields', () => {
+			const ctx: import('../../../shared/memory-types').ExperienceContext = {
+				situation: 'Build failed, retried with different approach',
+				learning: 'Check compiler flags before switching toolchains',
+				isDeviation: true,
+				deviationType: 'error-fix',
+				attemptCount: 3,
+			};
+			expect(ctx.isDeviation).toBe(true);
+			expect(ctx.deviationType).toBe('error-fix');
+			expect(ctx.attemptCount).toBe(3);
+		});
+
+		it('ExperienceContext deviationType accepts all valid values', () => {
+			const types: import('../../../shared/memory-types').ExperienceContext['deviationType'][] = [
+				'error-fix',
+				'backtrack',
+				'retry',
+				'approach-change',
+				undefined,
+			];
+			expect(types).toHaveLength(5);
+		});
+
+		it('ExperienceContext deviation fields are optional', () => {
+			const ctx: import('../../../shared/memory-types').ExperienceContext = {
+				situation: 'Normal context without deviation',
+				learning: 'Works without deviation fields',
+			};
+			expect(ctx.isDeviation).toBeUndefined();
+			expect(ctx.deviationType).toBeUndefined();
+			expect(ctx.attemptCount).toBeUndefined();
+		});
 	});
 
 	// ─── Prompt Compilation ──────────────────────────────────────────────
