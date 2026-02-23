@@ -2860,6 +2860,23 @@ interface MaestroAPI {
 			skillAreaId?: string,
 			projectPath?: string
 		) => Promise<{ success: true; data: boolean } | { success: false; error: string }>;
+		listArchived: (
+			scope: import('../shared/memory-types').MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry[] }
+			| { success: false; error: string }
+		>;
+		restore: (
+			id: string,
+			scope: import('../shared/memory-types').MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry | null }
+			| { success: false; error: string }
+		>;
 		search: (
 			query: string,
 			agentType: string,

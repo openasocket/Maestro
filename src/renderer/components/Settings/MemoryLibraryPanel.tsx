@@ -26,6 +26,7 @@ import {
 	BarChart3,
 	Hash,
 	Sparkles,
+	RotateCcw,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { TreeNode } from './MemoryTreeBrowser';
@@ -33,6 +34,7 @@ import type {
 	MemoryEntry,
 	MemorySearchResult,
 	MemoryType,
+	MemoryScope,
 	Role,
 	Persona,
 	SkillArea,
@@ -84,6 +86,25 @@ function buildBreadcrumb(
 	return [];
 }
 
+// ─── Scope Derivation ─────────────────────────────────────────────────────
+
+function deriveScope(node: TreeNode | null): { scope: MemoryScope; skillAreaId?: string } {
+	if (!node) return { scope: 'global' };
+	switch (node.type) {
+		case 'skill':
+			return { scope: 'skill', skillAreaId: node.id };
+		case 'project':
+			return { scope: 'project' };
+		case 'global':
+			return { scope: 'global' };
+		case 'role':
+		case 'persona':
+			return { scope: 'skill' };
+		default:
+			return { scope: 'global' };
+	}
+}
+
 // ─── Memory Card ──────────────────────────────────────────────────────────
 
 function MemoryCard({
@@ -92,12 +113,16 @@ function MemoryCard({
 	onTogglePin,
 	onEdit,
 	onDelete,
+	archived,
+	onRestore,
 }: {
 	memory: MemoryEntry;
 	theme: Theme;
 	onTogglePin: () => void;
 	onEdit: () => void;
 	onDelete: () => void;
+	archived?: boolean;
+	onRestore?: () => void;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const [contextExpanded, setContextExpanded] = useState(false);
@@ -111,21 +136,28 @@ function MemoryCard({
 			style={{
 				borderColor: memory.pinned ? theme.colors.accent : theme.colors.border,
 				backgroundColor: memory.pinned ? `${theme.colors.accent}05` : 'transparent',
+				opacity: archived ? 0.7 : 1,
 			}}
 		>
 			{/* Header row */}
 			<div className="flex items-center gap-2">
-				{/* Type badge */}
+				{/* Type badge — shows "Archived" when in archive view */}
 				<span
 					className="text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0"
 					style={{
-						backgroundColor: isExperience
-							? `${theme.colors.warning}20`
-							: `${theme.colors.border}60`,
-						color: isExperience ? theme.colors.warning : theme.colors.textDim,
+						backgroundColor: archived
+							? `${theme.colors.textDim}20`
+							: isExperience
+								? `${theme.colors.warning}20`
+								: `${theme.colors.border}60`,
+						color: archived
+							? theme.colors.textDim
+							: isExperience
+								? theme.colors.warning
+								: theme.colors.textDim,
 					}}
 				>
-					{memory.type}
+					{archived ? 'Archived' : memory.type}
 				</span>
 
 				{/* Source badge */}
@@ -150,14 +182,25 @@ function MemoryCard({
 				>
 					{memory.pinned ? <Pin className="w-3 h-3" /> : <PinOff className="w-3 h-3" />}
 				</button>
-				<button
-					className="p-0.5 rounded hover:opacity-80 transition-opacity"
-					style={{ color: theme.colors.textDim }}
-					title="Edit"
-					onClick={onEdit}
-				>
-					<Edit3 className="w-3 h-3" />
-				</button>
+				{archived && onRestore ? (
+					<button
+						className="p-0.5 rounded hover:opacity-80 transition-opacity"
+						style={{ color: theme.colors.accent }}
+						title="Restore"
+						onClick={onRestore}
+					>
+						<RotateCcw className="w-3 h-3" />
+					</button>
+				) : (
+					<button
+						className="p-0.5 rounded hover:opacity-80 transition-opacity"
+						style={{ color: theme.colors.textDim }}
+						title="Edit"
+						onClick={onEdit}
+					>
+						<Edit3 className="w-3 h-3" />
+					</button>
+				)}
 				<button
 					className="p-0.5 rounded hover:opacity-80 transition-opacity"
 					style={{ color: theme.colors.error }}
@@ -475,9 +518,21 @@ export function MemoryLibraryPanel({
 	const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
 	const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
 
+	// Archive state
+	const [showArchived, setShowArchived] = useState(false);
+	const [archivedMemories, setArchivedMemories] = useState<MemoryEntry[]>([]);
+	const [archivedLoading, setArchivedLoading] = useState(false);
+
 	// Inline editor state
 	const [addingMemory, setAddingMemory] = useState(false);
 	const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
+
+	// Derive scope from selectedNode for direct archive API calls
+	const { scope: resolvedScope, skillAreaId: resolvedSkillAreaId } = useMemo(
+		() => deriveScope(selectedNode),
+		[selectedNode]
+	);
+	const resolvedProjectPath = _projectPath ?? undefined;
 
 	// Reset filters when node changes
 	useEffect(() => {
@@ -487,7 +542,38 @@ export function MemoryLibraryPanel({
 		setSearchResults(null);
 		setAddingMemory(false);
 		setEditingMemoryId(null);
+		setShowArchived(false);
 	}, [selectedNode]);
+
+	// Fetch archived memories for count display and archive view
+	useEffect(() => {
+		let cancelled = false;
+		async function fetchArchived() {
+			if (!selectedNode) {
+				setArchivedMemories([]);
+				return;
+			}
+			setArchivedLoading(true);
+			try {
+				const res = await window.maestro.memory.listArchived(
+					resolvedScope,
+					resolvedSkillAreaId,
+					resolvedProjectPath
+				);
+				if (!cancelled && res.success) {
+					setArchivedMemories(res.data);
+				}
+			} catch {
+				// Ignore — archive count is supplementary
+			} finally {
+				if (!cancelled) setArchivedLoading(false);
+			}
+		}
+		fetchArchived();
+		return () => {
+			cancelled = true;
+		};
+	}, [selectedNode, resolvedScope, resolvedSkillAreaId, resolvedProjectPath]);
 
 	// Debounced search
 	useEffect(() => {
@@ -600,6 +686,28 @@ export function MemoryLibraryPanel({
 			}
 		},
 		[store]
+	);
+
+	const handleRestore = useCallback(
+		async (id: string) => {
+			try {
+				const res = await window.maestro.memory.restore(
+					id,
+					resolvedScope,
+					resolvedSkillAreaId,
+					resolvedProjectPath
+				);
+				if (res.success) {
+					// Remove from archived list
+					setArchivedMemories((prev) => prev.filter((m) => m.id !== id));
+					// Refresh normal memories to show restored entry
+					store.refresh();
+				}
+			} catch {
+				// Error from restore
+			}
+		},
+		[resolvedScope, resolvedSkillAreaId, resolvedProjectPath, store]
 	);
 
 	const handleExport = useCallback(async () => {
@@ -732,8 +840,23 @@ export function MemoryLibraryPanel({
 
 					{/* Memory count */}
 					<span className="text-[10px] ml-auto" style={{ color: theme.colors.textDim }}>
-						{filteredMemories.length} memor{filteredMemories.length === 1 ? 'y' : 'ies'}
+						{showArchived
+							? `${archivedMemories.length} archived`
+							: `${filteredMemories.length} memor${filteredMemories.length === 1 ? 'y' : 'ies'}`}
 					</span>
+
+					{/* Archive toggle */}
+					<button
+						className="text-[10px] px-2 py-0.5 rounded-full font-medium transition-colors"
+						style={{
+							backgroundColor: showArchived ? `${theme.colors.warning}20` : 'transparent',
+							color: showArchived ? theme.colors.warning : theme.colors.textDim,
+							border: `1px solid ${showArchived ? theme.colors.warning : theme.colors.border}`,
+						}}
+						onClick={() => setShowArchived(!showArchived)}
+					>
+						Archived ({archivedLoading ? '...' : archivedMemories.length})
+					</button>
 				</div>
 
 				{/* Tag filter chips */}
@@ -782,7 +905,7 @@ export function MemoryLibraryPanel({
 			{/* Content */}
 			<div className="flex-1 overflow-y-auto scrollbar-thin p-3 space-y-2">
 				{/* Inline add form */}
-				{addingMemory && (
+				{addingMemory && !showArchived && (
 					<InlineMemoryEditor
 						theme={theme}
 						onSave={handleAddMemory}
@@ -791,7 +914,7 @@ export function MemoryLibraryPanel({
 				)}
 
 				{/* Loading */}
-				{loading && (
+				{(showArchived ? archivedLoading : loading) && (
 					<div
 						className="flex items-center justify-center py-4 gap-2"
 						style={{ color: theme.colors.textDim }}
@@ -801,8 +924,33 @@ export function MemoryLibraryPanel({
 					</div>
 				)}
 
-				{/* Search results mode */}
-				{searchResults !== null ? (
+				{showArchived ? (
+					/* Archived memories view */
+					<>
+						{!archivedLoading && archivedMemories.length === 0 && (
+							<div className="flex flex-col items-center justify-center py-8 gap-2">
+								<Brain className="w-6 h-6 opacity-20" style={{ color: theme.colors.textDim }} />
+								<div className="text-xs text-center" style={{ color: theme.colors.textDim }}>
+									No archived memories.
+								</div>
+							</div>
+						)}
+
+						{archivedMemories.map((memory) => (
+							<MemoryCard
+								key={memory.id}
+								memory={memory}
+								theme={theme}
+								archived
+								onRestore={() => handleRestore(memory.id)}
+								onTogglePin={() => handleTogglePin(memory)}
+								onEdit={() => {}}
+								onDelete={() => handleDelete(memory.id)}
+							/>
+						))}
+					</>
+				) : searchResults !== null ? (
+					/* Search results mode */
 					searchResults.length === 0 ? (
 						<div className="text-xs text-center py-4" style={{ color: theme.colors.textDim }}>
 							No matching memories found.
