@@ -116,6 +116,12 @@ export interface ExperienceContext {
 	sessionCostUsd?: number;
 	/** How long the session took (ms) */
 	sessionDurationMs?: number;
+	/** What alternatives were considered before choosing this approach */
+	alternativesConsidered?: string;
+	/** Why this specific approach was chosen over alternatives */
+	rationale?: string;
+	/** Whether this provenance came from VIBES audit data vs internal history */
+	provenanceSource?: 'vibes' | 'history' | 'inferred';
 }
 
 /** A single memory entry — explicit declarative knowledge or empirical experience */

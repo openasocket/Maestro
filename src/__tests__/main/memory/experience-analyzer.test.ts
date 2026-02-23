@@ -221,6 +221,40 @@ describe('ExperienceAnalyzer', () => {
 				'decision-made',
 			]);
 		});
+
+		it('ExperienceContext supports decision provenance fields', async () => {
+			const { ExperienceContext } = (await import('../../../shared/memory-types')) as {
+				ExperienceContext: never;
+			};
+			// Type-level test: verify provenance fields are accepted on ExperienceContext
+			const ctx: import('../../../shared/memory-types').ExperienceContext = {
+				situation: 'Chose REST over GraphQL for API',
+				learning: 'REST is simpler when clients are known',
+				alternativesConsidered: 'GraphQL, gRPC',
+				rationale: 'All clients are internal, schema is simple',
+				provenanceSource: 'vibes',
+			};
+			expect(ctx.alternativesConsidered).toBe('GraphQL, gRPC');
+			expect(ctx.rationale).toBe('All clients are internal, schema is simple');
+			expect(ctx.provenanceSource).toBe('vibes');
+		});
+
+		it('ExperienceContext provenanceSource accepts all valid values', () => {
+			const sources: import('../../../shared/memory-types').ExperienceContext['provenanceSource'][] =
+				['vibes', 'history', 'inferred', undefined];
+			expect(sources).toHaveLength(4);
+		});
+
+		it('ExperienceContext provenance fields are optional', () => {
+			// Verify that ExperienceContext without provenance fields compiles
+			const ctx: import('../../../shared/memory-types').ExperienceContext = {
+				situation: 'Basic context without provenance',
+				learning: 'Works without provenance fields',
+			};
+			expect(ctx.alternativesConsidered).toBeUndefined();
+			expect(ctx.rationale).toBeUndefined();
+			expect(ctx.provenanceSource).toBeUndefined();
+		});
 	});
 
 	// ─── Prompt Compilation ──────────────────────────────────────────────
