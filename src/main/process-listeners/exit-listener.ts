@@ -428,28 +428,8 @@ export function setupExitListener(
 
 		safeSend('process:exit', sessionId, code);
 
-		// Memory effectiveness tracking (EXP-11): update scores based on exit code + quality signals
-		void (async () => {
-			try {
-				// Look up session to get project path for quality signal analysis
-				const { getSessionsStore } = await import('../stores');
-				const sessions = getSessionsStore().get('sessions', []);
-				const baseId = sessionId.replace(/-ai-.+$|-terminal$|-batch-\d+$|-synopsis-\d+$/, '');
-				const session = sessions.find((s: { id: string }) => s.id === baseId);
-				const projectPath = session?.projectRoot || session?.cwd;
-
-				const { onProcessComplete } = await import('../memory/memory-effectiveness');
-				await onProcessComplete(sessionId, code, projectPath);
-			} catch {
-				// Fire-and-forget — degrade gracefully
-			}
-		})();
-
-		// Experience extraction (EXP-12): analyze completed session for novel learnings
-		// Fire-and-forget — never blocks session cleanup. The analyzer handles:
-		// - Minimum history threshold (3+ entries)
-		// - Rate limiting (max 1 per 5 min per project)
-		// - enableExperienceExtraction config check
+		// Memory job queue: enqueue effectiveness update + experience extraction
+		// Replaces individual fire-and-forget promises with prioritized background processing
 		void (async () => {
 			try {
 				// Look up session to get project path and agent type
@@ -457,22 +437,33 @@ export function setupExitListener(
 				const sessions = getSessionsStore().get('sessions', []);
 				const baseId = sessionId.replace(/-ai-.+$|-terminal$|-batch-\d+$|-synopsis-\d+$/, '');
 				const session = sessions.find((s: { id: string }) => s.id === baseId);
-				if (!session?.projectRoot || !session?.toolType) return;
+				const projectPath = session?.projectRoot || session?.cwd;
 
-				// Check if memory system is enabled
-				const { getMemoryStore } = await import('../memory/memory-store');
-				const config = await getMemoryStore().getConfig();
-				if (!config.enabled) return;
+				const { getMemoryJobQueue } = await import('../memory/memory-job-queue');
+				const queue = getMemoryJobQueue();
 
-				// Trigger analysis — the analyzer handles all remaining checks internally
-				const { getExperienceAnalyzer } = await import('../memory/experience-analyzer');
-				getExperienceAnalyzer()
-					.analyzeCompletedSession(sessionId, session.projectRoot, session.toolType)
-					.catch((err) =>
-						logger.debug(`[Memory] Experience analysis failed: ${err}`, 'ProcessListener')
-					);
+				// Priority 1: fast effectiveness update
+				queue.enqueue({
+					type: 'effectiveness-update',
+					priority: 1,
+					payload: { sessionId, exitCode: code, projectPath },
+				});
+
+				// Priority 3: expensive experience extraction (only if we have required data)
+				if (session?.projectRoot && session?.toolType) {
+					// Check if memory system is enabled before enqueuing expensive work
+					const { getMemoryStore } = await import('../memory/memory-store');
+					const config = await getMemoryStore().getConfig();
+					if (config.enabled) {
+						queue.enqueue({
+							type: 'experience-extraction',
+							priority: 3,
+							payload: { sessionId, projectPath: session.projectRoot, agentType: session.toolType },
+						});
+					}
+				}
 			} catch {
-				// Degrade gracefully — experience analysis is non-critical
+				// Degrade gracefully — memory operations are non-critical
 			}
 		})();
 

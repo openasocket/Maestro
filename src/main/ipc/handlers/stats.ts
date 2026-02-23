@@ -190,6 +190,7 @@ export function registerStatsHandlers(deps: StatsHandlerDependencies): void {
 						const config = await getMemoryStore().getConfig();
 						if (!config.enabled) return;
 
+						// Record task completion in memory collector (synchronous ring buffer write)
 						const { getMemoryCollector } = await import('../../memory/memory-collector');
 						const collector = getMemoryCollector();
 						collector.onAutoRunTaskComplete(
@@ -201,8 +202,13 @@ export function registerStatsHandlers(deps: StatsHandlerDependencies): void {
 							task.duration
 						);
 
-						// Run pattern detection after recording
-						await collector.detectPatterns(session.projectRoot, task.agentType);
+						// Enqueue pattern detection via job queue instead of fire-and-forget
+						const { getMemoryJobQueue } = await import('../../memory/memory-job-queue');
+						getMemoryJobQueue().enqueue({
+							type: 'consolidation',
+							priority: 4,
+							payload: { projectPath: session.projectRoot, agentType: task.agentType },
+						});
 					} catch (err) {
 						logger.debug(`[Memory] Auto-collection failed: ${err}`, LOG_CONTEXT);
 					}
