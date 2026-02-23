@@ -128,6 +128,10 @@ export interface ExperienceContext {
 	deviationType?: 'error-fix' | 'backtrack' | 'retry' | 'approach-change';
 	/** How many attempts were made before resolution (for retry/backtrack deviations) */
 	attemptCount?: number;
+	/** Context utilization % when session ended (0.0-1.0) — quality indicator for this learning */
+	contextUtilizationAtEnd?: number;
+	/** Reference to raw session history file for JIT recompilation — the history file path */
+	rawSessionRef?: string;
 }
 
 /** A single memory entry — explicit declarative knowledge or empirical experience */

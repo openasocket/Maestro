@@ -295,6 +295,41 @@ describe('ExperienceAnalyzer', () => {
 			expect(ctx.attemptCount).toBeUndefined();
 		});
 
+		it('ExperienceContext supports context health and raw session ref fields', () => {
+			const ctx: import('../../../shared/memory-types').ExperienceContext = {
+				situation: 'Session ran to 85% context window',
+				learning: 'Late-session reasoning may be degraded',
+				contextUtilizationAtEnd: 0.85,
+				rawSessionRef: '/home/user/.maestro/history/sess-abc123.jsonl',
+			};
+			expect(ctx.contextUtilizationAtEnd).toBe(0.85);
+			expect(ctx.rawSessionRef).toBe('/home/user/.maestro/history/sess-abc123.jsonl');
+		});
+
+		it('ExperienceContext context health and raw session ref fields are optional', () => {
+			const ctx: import('../../../shared/memory-types').ExperienceContext = {
+				situation: 'Basic context without health fields',
+				learning: 'Works without context health fields',
+			};
+			expect(ctx.contextUtilizationAtEnd).toBeUndefined();
+			expect(ctx.rawSessionRef).toBeUndefined();
+		});
+
+		it('ExperienceContext contextUtilizationAtEnd accepts boundary values', () => {
+			const low: import('../../../shared/memory-types').ExperienceContext = {
+				situation: 'Fresh session',
+				learning: 'Low context usage',
+				contextUtilizationAtEnd: 0.0,
+			};
+			const high: import('../../../shared/memory-types').ExperienceContext = {
+				situation: 'Fully used session',
+				learning: 'Max context usage',
+				contextUtilizationAtEnd: 1.0,
+			};
+			expect(low.contextUtilizationAtEnd).toBe(0.0);
+			expect(high.contextUtilizationAtEnd).toBe(1.0);
+		});
+
 		it('MemoryConfig supports extractionModel field', async () => {
 			const { MEMORY_CONFIG_DEFAULTS } = await import('../../../shared/memory-types');
 			const config: import('../../../shared/memory-types').MemoryConfig = {
