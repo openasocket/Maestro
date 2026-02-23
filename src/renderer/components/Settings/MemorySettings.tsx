@@ -44,6 +44,10 @@ import { MEMORY_CONFIG_DEFAULTS } from '../../../shared/memory-types';
 interface MemorySettingsProps {
 	theme: Theme;
 	projectPath?: string | null;
+	/** Called after seed/reset operations so sibling components can refresh. */
+	onHierarchyChange?: () => void;
+	/** Live role count from shared hierarchy — when provided, overrides internal hasRoles check. */
+	hierarchyRoleCount?: number;
 }
 
 /**
@@ -144,13 +148,19 @@ function ConfigToggle({
 	);
 }
 
-export function MemorySettings({ theme, projectPath }: MemorySettingsProps): React.ReactElement {
+export function MemorySettings({
+	theme,
+	projectPath,
+	onHierarchyChange,
+	hierarchyRoleCount,
+}: MemorySettingsProps): React.ReactElement {
 	const [config, setConfig] = useState<MemoryConfig>(MEMORY_CONFIG_DEFAULTS);
 	const [stats, setStats] = useState<MemoryStats | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [hasRoles, setHasRoles] = useState(true);
+	const [hasRolesInternal, setHasRoles] = useState(true);
+	const hasRoles = hierarchyRoleCount !== undefined ? hierarchyRoleCount > 0 : hasRolesInternal;
 	const [seeding, setSeeding] = useState(false);
 	const [resetting, setResetting] = useState(false);
 	const [confirmReset, setConfirmReset] = useState(false);
@@ -252,15 +262,16 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 				return;
 			}
 			setHasRoles(true);
-			// Refresh stats
+			// Refresh stats and notify siblings
 			const statsRes = await window.maestro.memory.getAnalytics();
 			if (statsRes.success) setStats(statsRes.data);
+			onHierarchyChange?.();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : 'Failed to seed defaults');
 		} finally {
 			setSeeding(false);
 		}
-	}, []);
+	}, [onHierarchyChange]);
 
 	// Reset all seed defaults handler
 	const handleResetDefaults = useCallback(async () => {
@@ -272,15 +283,16 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 				return;
 			}
 			setConfirmReset(false);
-			// Refresh stats
+			// Refresh stats and notify siblings
 			const statsRes = await window.maestro.memory.getAnalytics();
 			if (statsRes.success) setStats(statsRes.data);
+			onHierarchyChange?.();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : 'Failed to reset defaults');
 		} finally {
 			setResetting(false);
 		}
-	}, []);
+	}, [onHierarchyChange]);
 
 	// Load hierarchy suggestions when memory system is enabled and projectPath available
 	useEffect(() => {
@@ -305,79 +317,87 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 	}, [config.enabled, projectPath]);
 
 	// Apply persona suggestion
-	const handleApplyPersona = useCallback(async (suggestion: PersonaSuggestion) => {
-		const key = `persona:${suggestion.suggestedName}`;
-		setApplyingSuggestion(key);
-		try {
-			let roleId = suggestion.suggestedRoleId;
-			if (!roleId) {
-				// Create the role first
-				const roleRes = await window.maestro.memory.role.create(
-					suggestion.suggestedRoleName,
-					`${suggestion.suggestedRoleName} role`
+	const handleApplyPersona = useCallback(
+		async (suggestion: PersonaSuggestion) => {
+			const key = `persona:${suggestion.suggestedName}`;
+			setApplyingSuggestion(key);
+			try {
+				let roleId = suggestion.suggestedRoleId;
+				if (!roleId) {
+					// Create the role first
+					const roleRes = await window.maestro.memory.role.create(
+						suggestion.suggestedRoleName,
+						`${suggestion.suggestedRoleName} role`
+					);
+					if (!roleRes.success) {
+						setError(roleRes.error);
+						return;
+					}
+					roleId = roleRes.data.id;
+				}
+				const personaRes = await window.maestro.memory.persona.create(
+					roleId,
+					suggestion.suggestedName,
+					suggestion.suggestedDescription
 				);
-				if (!roleRes.success) {
-					setError(roleRes.error);
+				if (!personaRes.success) {
+					setError(personaRes.error);
 					return;
 				}
-				roleId = roleRes.data.id;
+				// Create suggested skill areas
+				for (const skillName of suggestion.suggestedSkills) {
+					await window.maestro.memory.skill.create(
+						personaRes.data.id,
+						skillName,
+						`${skillName} expertise`
+					);
+				}
+				// Dismiss the suggestion
+				setDismissedSuggestions((prev) => new Set([...prev, key]));
+				// Refresh stats and notify siblings
+				const statsRes = await window.maestro.memory.getAnalytics();
+				if (statsRes.success) setStats(statsRes.data);
+				setHasRoles(true);
+				onHierarchyChange?.();
+			} catch (err) {
+				setError(err instanceof Error ? err.message : 'Failed to create persona');
+			} finally {
+				setApplyingSuggestion(null);
 			}
-			const personaRes = await window.maestro.memory.persona.create(
-				roleId,
-				suggestion.suggestedName,
-				suggestion.suggestedDescription
-			);
-			if (!personaRes.success) {
-				setError(personaRes.error);
-				return;
-			}
-			// Create suggested skill areas
-			for (const skillName of suggestion.suggestedSkills) {
-				await window.maestro.memory.skill.create(
-					personaRes.data.id,
-					skillName,
-					`${skillName} expertise`
-				);
-			}
-			// Dismiss the suggestion
-			setDismissedSuggestions((prev) => new Set([...prev, key]));
-			// Refresh stats
-			const statsRes = await window.maestro.memory.getAnalytics();
-			if (statsRes.success) setStats(statsRes.data);
-			setHasRoles(true);
-		} catch (err) {
-			setError(err instanceof Error ? err.message : 'Failed to create persona');
-		} finally {
-			setApplyingSuggestion(null);
-		}
-	}, []);
+		},
+		[onHierarchyChange]
+	);
 
 	// Apply skill area suggestion
-	const handleApplySkillArea = useCallback(async (suggestion: SkillAreaSuggestion) => {
-		const key = `skill:${suggestion.suggestedName}`;
-		setApplyingSuggestion(key);
-		try {
-			const skillRes = await window.maestro.memory.skill.create(
-				suggestion.suggestedPersonaId,
-				suggestion.suggestedName,
-				suggestion.suggestedDescription
-			);
-			if (!skillRes.success) {
-				setError(skillRes.error);
-				return;
+	const handleApplySkillArea = useCallback(
+		async (suggestion: SkillAreaSuggestion) => {
+			const key = `skill:${suggestion.suggestedName}`;
+			setApplyingSuggestion(key);
+			try {
+				const skillRes = await window.maestro.memory.skill.create(
+					suggestion.suggestedPersonaId,
+					suggestion.suggestedName,
+					suggestion.suggestedDescription
+				);
+				if (!skillRes.success) {
+					setError(skillRes.error);
+					return;
+				}
+				// Move memories to the new skill area — re-add them in skill scope
+				// (project memories stay as-is; this creates linked skill copies)
+				setDismissedSuggestions((prev) => new Set([...prev, key]));
+				// Refresh stats and notify siblings
+				const statsRes = await window.maestro.memory.getAnalytics();
+				if (statsRes.success) setStats(statsRes.data);
+				onHierarchyChange?.();
+			} catch (err) {
+				setError(err instanceof Error ? err.message : 'Failed to create skill area');
+			} finally {
+				setApplyingSuggestion(null);
 			}
-			// Move memories to the new skill area — re-add them in skill scope
-			// (project memories stay as-is; this creates linked skill copies)
-			setDismissedSuggestions((prev) => new Set([...prev, key]));
-			// Refresh stats
-			const statsRes = await window.maestro.memory.getAnalytics();
-			if (statsRes.success) setStats(statsRes.data);
-		} catch (err) {
-			setError(err instanceof Error ? err.message : 'Failed to create skill area');
-		} finally {
-			setApplyingSuggestion(null);
-		}
-	}, []);
+		},
+		[onHierarchyChange]
+	);
 
 	// Dismiss a suggestion
 	const handleDismissSuggestion = useCallback((key: string) => {

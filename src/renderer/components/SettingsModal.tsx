@@ -66,6 +66,7 @@ import { AgentConfigPanel } from './shared/AgentConfigPanel';
 import { AGENT_TILES } from './Wizard/screens/AgentSelectionScreen';
 import { MemorySettings } from './Settings/MemorySettings';
 import { MemoryBrowserPanel } from './Settings/MemoryBrowserPanel';
+import { useMemoryHierarchy } from '../hooks/memory/useMemoryHierarchy';
 
 // Feature flags - set to true to enable dormant features
 const FEATURE_FLAGS = {
@@ -392,6 +393,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 
 	// Memory tab state — derive project path from active session prop
 	const memoryProjectPath = props.activeProjectPath ?? null;
+	const memoryHierarchy = useMemoryHierarchy();
 
 	// Stats data management state
 	const [statsDbSize, setStatsDbSize] = useState<number | null>(null);
@@ -3020,8 +3022,17 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 
 					{activeTab === 'memory' && (
 						<div className="space-y-6">
-							<MemorySettings theme={theme} projectPath={memoryProjectPath} />
-							<MemoryBrowserPanel theme={theme} projectPath={memoryProjectPath} />
+							<MemorySettings
+								theme={theme}
+								projectPath={memoryProjectPath}
+								onHierarchyChange={memoryHierarchy.refresh}
+								hierarchyRoleCount={memoryHierarchy.roles.length}
+							/>
+							<MemoryBrowserPanel
+								theme={theme}
+								projectPath={memoryProjectPath}
+								hierarchy={memoryHierarchy}
+							/>
 						</div>
 					)}
 

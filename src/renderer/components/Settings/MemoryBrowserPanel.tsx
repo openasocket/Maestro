@@ -16,6 +16,8 @@ interface MemoryBrowserPanelProps {
 	theme: Theme;
 	projectPath: string | null;
 	agentType?: string;
+	/** Optional pre-created hierarchy — when provided, skip creating a new one. */
+	hierarchy?: ReturnType<typeof useMemoryHierarchy>;
 }
 
 /**
@@ -48,8 +50,10 @@ export function MemoryBrowserPanel({
 	theme,
 	projectPath,
 	agentType,
+	hierarchy: externalHierarchy,
 }: MemoryBrowserPanelProps): React.ReactElement {
-	const hierarchy = useMemoryHierarchy();
+	const internalHierarchy = useMemoryHierarchy();
+	const hierarchy = externalHierarchy ?? internalHierarchy;
 	const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
 
 	// Derive scope params for useMemoryStore (null = container node, no memories to list)
