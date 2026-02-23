@@ -220,6 +220,9 @@ describe('Memory IPC Handler Round-Trips', () => {
 				'memory:promote',
 				'memory:dismissPromotion',
 				'memory:suggestHierarchy',
+				'memory:link',
+				'memory:unlink',
+				'memory:getLinked',
 			];
 
 			for (const channel of expectedChannels) {

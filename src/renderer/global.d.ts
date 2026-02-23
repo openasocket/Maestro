@@ -2970,6 +2970,37 @@ interface MaestroAPI {
 			| { success: true; data: import('../shared/memory-types').HierarchySuggestionResult }
 			| { success: false; error: string }
 		>;
+		link: (
+			idA: string,
+			scopeA: import('../shared/memory-types').MemoryScope,
+			idB: string,
+			scopeB: import('../shared/memory-types').MemoryScope,
+			skillAreaIdA?: string,
+			projectPathA?: string,
+			skillAreaIdB?: string,
+			projectPathB?: string
+		) => Promise<{ success: true; data: { linked: boolean } } | { success: false; error: string }>;
+		unlink: (
+			idA: string,
+			scopeA: import('../shared/memory-types').MemoryScope,
+			idB: string,
+			scopeB: import('../shared/memory-types').MemoryScope,
+			skillAreaIdA?: string,
+			projectPathA?: string,
+			skillAreaIdB?: string,
+			projectPathB?: string
+		) => Promise<
+			{ success: true; data: { unlinked: boolean } } | { success: false; error: string }
+		>;
+		getLinked: (
+			id: string,
+			scope: import('../shared/memory-types').MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry[] }
+			| { success: false; error: string }
+		>;
 	};
 
 	// WakaTime API (CLI check, API key validation)

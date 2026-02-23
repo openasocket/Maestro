@@ -163,6 +163,8 @@ export interface MemoryEntry {
 	active: boolean;
 	/** Archived memories are preserved but excluded from injection/search by default */
 	archived: boolean;
+	/** IDs of related memories (bidirectional links, A-MEM Zettelkasten pattern) */
+	relatedMemoryIds?: MemoryId[];
 	/** 384-dim embedding vector for semantic search, null if not yet computed */
 	embedding: number[] | null;
 	/** Effectiveness score: EMA of injection→outcome correlation (0.0-1.0) */

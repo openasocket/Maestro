@@ -27,6 +27,8 @@ import {
 	Hash,
 	Sparkles,
 	RotateCcw,
+	Link2,
+	X,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { TreeNode } from './MemoryTreeBrowser';
@@ -126,6 +128,58 @@ function MemoryCard({
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const [contextExpanded, setContextExpanded] = useState(false);
+	const [relatedExpanded, setRelatedExpanded] = useState(false);
+	const [linkedMemories, setLinkedMemories] = useState<MemoryEntry[]>([]);
+	const [linkedLoading, setLinkedLoading] = useState(false);
+
+	const loadLinkedMemories = useCallback(async () => {
+		if (linkedMemories.length > 0 || linkedLoading) return;
+		setLinkedLoading(true);
+		try {
+			const res = await window.maestro.memory.getLinked(
+				memory.id,
+				memory.scope,
+				memory.skillAreaId,
+				undefined // projectPath not available at card level
+			);
+			if (res?.success && res.data) {
+				setLinkedMemories(res.data);
+			}
+		} catch {
+			// Failed to load linked memories — non-critical
+		} finally {
+			setLinkedLoading(false);
+		}
+	}, [memory.id, memory.scope, memory.skillAreaId, linkedMemories.length, linkedLoading]);
+
+	const handleToggleRelated = useCallback(() => {
+		const next = !relatedExpanded;
+		setRelatedExpanded(next);
+		if (next) {
+			loadLinkedMemories();
+		}
+	}, [relatedExpanded, loadLinkedMemories]);
+
+	const handleUnlink = useCallback(
+		async (linkedId: string, linkedScope: MemoryScope, linkedSkillAreaId?: string) => {
+			try {
+				await window.maestro.memory.unlink(
+					memory.id,
+					memory.scope,
+					linkedId,
+					linkedScope,
+					memory.skillAreaId,
+					undefined,
+					linkedSkillAreaId,
+					undefined
+				);
+				setLinkedMemories((prev) => prev.filter((m) => m.id !== linkedId));
+			} catch {
+				// Unlink failed — non-critical
+			}
+		},
+		[memory.id, memory.scope, memory.skillAreaId]
+	);
 
 	const isExperience = memory.type === 'experience';
 	const hasContext = isExperience && memory.experienceContext;
@@ -274,6 +328,84 @@ function MemoryCard({
 							{tag}
 						</span>
 					))}
+				</div>
+			)}
+
+			{/* Related memories — expandable */}
+			{(memory.relatedMemoryIds?.length ?? 0) > 0 && (
+				<div>
+					<button
+						className="flex items-center gap-1 text-[10px] font-medium"
+						style={{ color: theme.colors.textDim }}
+						onClick={handleToggleRelated}
+					>
+						{relatedExpanded ? (
+							<ChevronDown className="w-3 h-3" />
+						) : (
+							<ChevronRight className="w-3 h-3" />
+						)}
+						<Link2 className="w-3 h-3" />
+						Related ({memory.relatedMemoryIds!.length})
+					</button>
+					{relatedExpanded && (
+						<div className="mt-1 pl-4 space-y-1">
+							{linkedLoading && (
+								<div
+									className="flex items-center gap-1 text-[10px]"
+									style={{ color: theme.colors.textDim }}
+								>
+									<Loader2 className="w-3 h-3 animate-spin" />
+									Loading...
+								</div>
+							)}
+							{linkedMemories.map((linked) => (
+								<div
+									key={linked.id}
+									className="flex items-center gap-2 rounded px-2 py-1 text-xs"
+									style={{
+										backgroundColor: `${theme.colors.border}20`,
+										color: theme.colors.textMain,
+									}}
+								>
+									<span
+										className="text-[10px] font-medium px-1 py-0.5 rounded shrink-0"
+										style={{
+											backgroundColor:
+												linked.type === 'experience'
+													? `${theme.colors.warning}20`
+													: `${theme.colors.border}60`,
+											color:
+												linked.type === 'experience' ? theme.colors.warning : theme.colors.textDim,
+										}}
+									>
+										{linked.type}
+									</span>
+									<span className="flex-1 truncate">
+										{linked.content.length > 80
+											? `${linked.content.slice(0, 80)}...`
+											: linked.content}
+									</span>
+									{linked.effectivenessScore > 0 && (
+										<span
+											className="text-[10px] shrink-0"
+											style={{ color: theme.colors.textDim }}
+											title="Effectiveness"
+										>
+											{(linked.effectivenessScore * 100).toFixed(0)}%
+										</span>
+									)}
+									<button
+										className="p-0.5 rounded hover:opacity-80 transition-opacity shrink-0"
+										style={{ color: theme.colors.error }}
+										title="Unlink"
+										onClick={() => handleUnlink(linked.id, linked.scope, linked.skillAreaId)}
+									>
+										<X className="w-3 h-3" />
+									</button>
+								</div>
+							))}
+						</div>
+					)}
 				</div>
 			)}
 

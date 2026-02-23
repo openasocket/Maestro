@@ -1079,7 +1079,7 @@ export class MemoryStore {
 		}
 
 		// Compute combined scores
-		const results: MemorySearchResult[] = [];
+		let results: MemorySearchResult[] = [];
 		const now = Date.now();
 
 		for (const [, record] of scoreMap) {
@@ -1100,6 +1100,46 @@ export class MemoryStore {
 		}
 
 		results.sort((a, b) => b.combinedScore - a.combinedScore);
+
+		// 1-hop graph expansion: add linked memories from top results
+		const topResults = results.slice(0, 3);
+		const linkedMemoryIds = new Set<MemoryId>();
+		const existingIds = new Set(results.map((r) => r.entry.id));
+
+		for (const result of topResults) {
+			const linked = result.entry.relatedMemoryIds ?? [];
+			for (const linkedId of linked) {
+				if (!existingIds.has(linkedId)) {
+					linkedMemoryIds.add(linkedId);
+				}
+			}
+		}
+
+		if (linkedMemoryIds.size > 0 && topResults.length > 0) {
+			const topScore = topResults[0].combinedScore;
+			const topSimilarity = topResults[0].similarity;
+			for (const linkedId of linkedMemoryIds) {
+				const linked = await this.findMemoryById(linkedId);
+				if (linked && linked.active && !linked.archived) {
+					results.push({
+						entry: linked,
+						similarity: topSimilarity * 0.8,
+						combinedScore: topScore * 0.8,
+					});
+					existingIds.add(linkedId);
+				}
+			}
+
+			// Re-sort and deduplicate
+			results.sort((a, b) => b.combinedScore - a.combinedScore);
+			const seen = new Set<MemoryId>();
+			results = results.filter((r) => {
+				if (seen.has(r.entry.id)) return false;
+				seen.add(r.entry.id);
+				return true;
+			});
+		}
+
 		return results.slice(0, limit);
 	}
 
@@ -1720,6 +1760,20 @@ export class MemoryStore {
 					totalUseCount += member.useCount;
 				}
 
+				// Inherit relatedMemoryIds from all cluster members
+				const allRelated = new Set<MemoryId>(center.relatedMemoryIds ?? []);
+				const absorbedIdSet = new Set<MemoryId>(cluster.map((m) => m.id));
+				for (const member of cluster) {
+					for (const relId of member.relatedMemoryIds ?? []) {
+						allRelated.add(relId);
+					}
+				}
+				// Remove self-references and absorbed IDs from merged links
+				allRelated.delete(center.id);
+				for (const absId of absorbedIdSet) {
+					allRelated.delete(absId);
+				}
+
 				// Update center entry
 				lib.entries[centerIdx] = {
 					...lib.entries[centerIdx],
@@ -1727,6 +1781,7 @@ export class MemoryStore {
 					confidence: avgConfidence,
 					effectivenessScore: maxEffectiveness,
 					useCount: totalUseCount,
+					relatedMemoryIds: allRelated.size > 0 ? [...allRelated] : undefined,
 					updatedAt: now,
 					// Content stays from center (highest confidence), no embedding change needed
 				};
@@ -1744,6 +1799,27 @@ export class MemoryStore {
 						};
 					}
 					absorbedIds.push(member.id);
+				}
+
+				// Update links in other memories: replace absorbed IDs → center ID
+				for (const entry of lib.entries) {
+					if (!entry.relatedMemoryIds || entry.id === center.id) continue;
+					let changed = false;
+					const newLinks: MemoryId[] = [];
+					for (const relId of entry.relatedMemoryIds) {
+						if (absorbedIdSet.has(relId)) {
+							if (!newLinks.includes(center.id) && entry.id !== center.id) {
+								newLinks.push(center.id);
+							}
+							changed = true;
+						} else {
+							newLinks.push(relId);
+						}
+					}
+					if (changed) {
+						entry.relatedMemoryIds = newLinks.length > 0 ? [...new Set(newLinks)] : undefined;
+						entry.updatedAt = now;
+					}
 				}
 
 				consumed.add(center.id); // Mark center as consumed so it's not re-clustered
@@ -1770,6 +1846,176 @@ export class MemoryStore {
 		}
 
 		return mergeCount;
+	}
+
+	// ─── Inter-Memory Linking (Zettelkasten) ─────────────────────────────────
+
+	/**
+	 * Create a bidirectional link between two memories.
+	 * Both memories are updated to reference each other.
+	 * No-op if the link already exists.
+	 */
+	async linkMemories(
+		idA: MemoryId,
+		scopeA: MemoryScope,
+		idB: MemoryId,
+		scopeB: MemoryScope,
+		skillAreaIdA?: string,
+		projectPathA?: string,
+		skillAreaIdB?: string,
+		projectPathB?: string
+	): Promise<void> {
+		if (idA === idB) return; // No self-links
+
+		// Load and update memory A
+		const dirA = this.getMemoryPath(scopeA, skillAreaIdA as SkillAreaId, projectPathA);
+		const libA = await this.readLibrary(dirA);
+		const entryA = libA.entries.find((e) => e.id === idA);
+		if (!entryA) throw new Error(`Memory not found: ${idA}`);
+
+		const linksA = entryA.relatedMemoryIds ?? [];
+		if (!linksA.includes(idB)) {
+			entryA.relatedMemoryIds = [...new Set([...linksA, idB])];
+			entryA.updatedAt = Date.now();
+			await this.writeLibrary(dirA, libA);
+		}
+
+		// Load and update memory B
+		const dirB = this.getMemoryPath(scopeB, skillAreaIdB as SkillAreaId, projectPathB);
+		const libB = dirA === dirB ? await this.readLibrary(dirB) : await this.readLibrary(dirB);
+		const entryB = libB.entries.find((e) => e.id === idB);
+		if (!entryB) throw new Error(`Memory not found: ${idB}`);
+
+		const linksB = entryB.relatedMemoryIds ?? [];
+		if (!linksB.includes(idA)) {
+			entryB.relatedMemoryIds = [...new Set([...linksB, idA])];
+			entryB.updatedAt = Date.now();
+			await this.writeLibrary(dirB, libB);
+		}
+	}
+
+	/**
+	 * Remove a bidirectional link between two memories.
+	 */
+	async unlinkMemories(
+		idA: MemoryId,
+		scopeA: MemoryScope,
+		idB: MemoryId,
+		scopeB: MemoryScope,
+		skillAreaIdA?: string,
+		projectPathA?: string,
+		skillAreaIdB?: string,
+		projectPathB?: string
+	): Promise<void> {
+		// Update memory A
+		const dirA = this.getMemoryPath(scopeA, skillAreaIdA as SkillAreaId, projectPathA);
+		const libA = await this.readLibrary(dirA);
+		const entryA = libA.entries.find((e) => e.id === idA);
+		if (entryA && entryA.relatedMemoryIds) {
+			entryA.relatedMemoryIds = entryA.relatedMemoryIds.filter((id) => id !== idB);
+			if (entryA.relatedMemoryIds.length === 0) {
+				delete entryA.relatedMemoryIds;
+			}
+			entryA.updatedAt = Date.now();
+			await this.writeLibrary(dirA, libA);
+		}
+
+		// Update memory B
+		const dirB = this.getMemoryPath(scopeB, skillAreaIdB as SkillAreaId, projectPathB);
+		const libB = await this.readLibrary(dirB);
+		const entryB = libB.entries.find((e) => e.id === idB);
+		if (entryB && entryB.relatedMemoryIds) {
+			entryB.relatedMemoryIds = entryB.relatedMemoryIds.filter((id) => id !== idA);
+			if (entryB.relatedMemoryIds.length === 0) {
+				delete entryB.relatedMemoryIds;
+			}
+			entryB.updatedAt = Date.now();
+			await this.writeLibrary(dirB, libB);
+		}
+	}
+
+	/**
+	 * Get all memories linked to a given memory (1-hop traversal).
+	 * Loads the linked memories by scanning all scopes (bare ID approach).
+	 */
+	async getLinkedMemories(
+		id: MemoryId,
+		scope: MemoryScope,
+		skillAreaId?: string,
+		projectPath?: string
+	): Promise<MemoryEntry[]> {
+		const dirPath = this.getMemoryPath(scope, skillAreaId as SkillAreaId, projectPath);
+		const lib = await this.readLibrary(dirPath);
+		const entry = lib.entries.find((e) => e.id === id);
+		if (!entry || !entry.relatedMemoryIds || entry.relatedMemoryIds.length === 0) {
+			return [];
+		}
+
+		const linkedIds = new Set(entry.relatedMemoryIds);
+		const results: MemoryEntry[] = [];
+
+		// Scan all scopes to find linked memories by ID
+		for (const linkedId of linkedIds) {
+			const found = await this.findMemoryById(linkedId);
+			if (found) {
+				results.push(found);
+			}
+		}
+
+		return results;
+	}
+
+	/**
+	 * Find a memory by ID across all scopes (linear scan).
+	 * With typical memory counts (<500), this is fast enough.
+	 */
+	async findMemoryById(id: MemoryId): Promise<MemoryEntry | null> {
+		// Check global
+		try {
+			const globalDir = this.getMemoryPath('global');
+			const globalLib = await this.readLibrary(globalDir);
+			const found = globalLib.entries.find((e) => e.id === id);
+			if (found) return found;
+		} catch {
+			// Scope dir missing — skip
+		}
+
+		// Check all skill areas
+		try {
+			const registry = await this.readRegistry();
+			for (const skill of registry.skillAreas) {
+				try {
+					const skillDir = this.getMemoryPath('skill', skill.id);
+					const skillLib = await this.readLibrary(skillDir);
+					const found = skillLib.entries.find((e) => e.id === id);
+					if (found) return found;
+				} catch {
+					// Skill dir missing — skip
+				}
+			}
+		} catch {
+			// Registry missing — skip
+		}
+
+		// Check project scopes — scan project directory for hashed subdirs
+		try {
+			const projectsDir = path.join(this.memoriesDir, 'project');
+			const entries = await fs.readdir(projectsDir).catch(() => [] as string[]);
+			for (const dirName of entries) {
+				try {
+					const projectDir = path.join(projectsDir, dirName);
+					const lib = await this.readLibrary(projectDir);
+					const found = lib.entries.find((e) => e.id === id);
+					if (found) return found;
+				} catch {
+					// Skip
+				}
+			}
+		} catch {
+			// No projects dir — skip
+		}
+
+		return null;
 	}
 
 	// ─── Project Digest ─────────────────────────────────────────────────────

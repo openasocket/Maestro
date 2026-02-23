@@ -564,4 +564,74 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 			return { skillSuggestions, personaSuggestions, relevance };
 		})
 	);
+
+	// ─── Inter-Memory Linking ─────────────────────────────────────────
+
+	ipcMain.handle(
+		'memory:link',
+		createIpcDataHandler(
+			handlerOpts('link'),
+			async (
+				idA: string,
+				scopeA: MemoryScope,
+				idB: string,
+				scopeB: MemoryScope,
+				skillAreaIdA?: string,
+				projectPathA?: string,
+				skillAreaIdB?: string,
+				projectPathB?: string
+			) => {
+				await memoryStore.linkMemories(
+					idA,
+					scopeA,
+					idB,
+					scopeB,
+					skillAreaIdA,
+					projectPathA,
+					skillAreaIdB,
+					projectPathB
+				);
+				return { linked: true };
+			}
+		)
+	);
+
+	ipcMain.handle(
+		'memory:unlink',
+		createIpcDataHandler(
+			handlerOpts('unlink'),
+			async (
+				idA: string,
+				scopeA: MemoryScope,
+				idB: string,
+				scopeB: MemoryScope,
+				skillAreaIdA?: string,
+				projectPathA?: string,
+				skillAreaIdB?: string,
+				projectPathB?: string
+			) => {
+				await memoryStore.unlinkMemories(
+					idA,
+					scopeA,
+					idB,
+					scopeB,
+					skillAreaIdA,
+					projectPathA,
+					skillAreaIdB,
+					projectPathB
+				);
+				return { unlinked: true };
+			}
+		)
+	);
+
+	ipcMain.handle(
+		'memory:getLinked',
+		createIpcDataHandler(
+			handlerOpts('getLinked'),
+			async (id: string, scope: MemoryScope, skillAreaId?: string, projectPath?: string) => {
+				return memoryStore.getLinkedMemories(id, scope, skillAreaId, projectPath);
+			}
+		)
+	);
 }

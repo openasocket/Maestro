@@ -272,6 +272,59 @@ export function createMemoryApi() {
 		// ─── Hierarchy Suggestions ────────────────────────────────────────
 		suggestHierarchy: (projectPath: string): Promise<IpcResponse<HierarchySuggestionResult>> =>
 			ipcRenderer.invoke('memory:suggestHierarchy', projectPath),
+
+		// ─── Inter-Memory Linking ─────────────────────────────────────────
+		link: (
+			idA: string,
+			scopeA: MemoryScope,
+			idB: string,
+			scopeB: MemoryScope,
+			skillAreaIdA?: string,
+			projectPathA?: string,
+			skillAreaIdB?: string,
+			projectPathB?: string
+		): Promise<IpcResponse<{ linked: boolean }>> =>
+			ipcRenderer.invoke(
+				'memory:link',
+				idA,
+				scopeA,
+				idB,
+				scopeB,
+				skillAreaIdA,
+				projectPathA,
+				skillAreaIdB,
+				projectPathB
+			),
+
+		unlink: (
+			idA: string,
+			scopeA: MemoryScope,
+			idB: string,
+			scopeB: MemoryScope,
+			skillAreaIdA?: string,
+			projectPathA?: string,
+			skillAreaIdB?: string,
+			projectPathB?: string
+		): Promise<IpcResponse<{ unlinked: boolean }>> =>
+			ipcRenderer.invoke(
+				'memory:unlink',
+				idA,
+				scopeA,
+				idB,
+				scopeB,
+				skillAreaIdA,
+				projectPathA,
+				skillAreaIdB,
+				projectPathB
+			),
+
+		getLinked: (
+			id: string,
+			scope: MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string
+		): Promise<IpcResponse<MemoryEntry[]>> =>
+			ipcRenderer.invoke('memory:getLinked', id, scope, skillAreaId, projectPath),
 	};
 }
 

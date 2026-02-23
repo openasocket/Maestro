@@ -793,7 +793,7 @@ export class ExperienceAnalyzer {
 					}
 				}
 
-				await store.addMemory(
+				const newMemory = await store.addMemory(
 					{
 						content: exp.content,
 						type: 'experience',
@@ -827,6 +827,28 @@ export class ExperienceAnalyzer {
 					},
 					scope === 'project' ? input.projectPath : undefined
 				);
+
+				// Auto-link: memories with similarity 0.5-0.8 are related but not duplicates
+				const relatedResults = searchResults.filter(
+					(r) => r.similarity >= 0.5 && r.similarity < 0.8
+				);
+				const projectPath = scope === 'project' ? input.projectPath : undefined;
+				for (const related of relatedResults.slice(0, 3)) {
+					try {
+						await store.linkMemories(
+							newMemory.id,
+							scope,
+							related.entry.id,
+							related.entry.scope,
+							newMemory.skillAreaId,
+							projectPath,
+							related.entry.skillAreaId,
+							related.entry.scope === 'project' ? input.projectPath : undefined
+						);
+					} catch {
+						// Linking failed — non-critical, continue
+					}
+				}
 
 				stored++;
 			} catch {
