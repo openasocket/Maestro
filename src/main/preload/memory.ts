@@ -24,6 +24,7 @@ import type {
 	MemorySearchResult,
 	ExperienceContext,
 	HierarchySuggestionResult,
+	PromotionCandidate,
 } from '../../shared/memory-types';
 
 /**
@@ -246,6 +247,27 @@ export function createMemoryApi() {
 
 		seedDefaults: (): Promise<IpcResponse<{ roles: number; personas: number; skills: number }>> =>
 			ipcRenderer.invoke('memory:seedDefaults'),
+
+		// ─── Promotion ───────────────────────────────────────────────────
+		getPromotionCandidates: (): Promise<IpcResponse<PromotionCandidate[]>> =>
+			ipcRenderer.invoke('memory:getPromotionCandidates'),
+
+		promote: (
+			id: string,
+			ruleText: string,
+			scope: string,
+			skillAreaId?: string,
+			projectPath?: string
+		): Promise<IpcResponse<MemoryEntry | null>> =>
+			ipcRenderer.invoke('memory:promote', id, ruleText, scope, skillAreaId, projectPath),
+
+		dismissPromotion: (
+			id: string,
+			scope: string,
+			skillAreaId?: string,
+			projectPath?: string
+		): Promise<IpcResponse<MemoryEntry | null>> =>
+			ipcRenderer.invoke('memory:dismissPromotion', id, scope, skillAreaId, projectPath),
 
 		// ─── Hierarchy Suggestions ────────────────────────────────────────
 		suggestHierarchy: (projectPath: string): Promise<IpcResponse<HierarchySuggestionResult>> =>

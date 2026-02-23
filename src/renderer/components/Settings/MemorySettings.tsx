@@ -15,6 +15,10 @@ import {
 	Lightbulb,
 	Plus,
 	X,
+	ArrowUpCircle,
+	Check,
+	Edit3,
+	Pin,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
@@ -23,6 +27,8 @@ import type {
 	SkillAreaSuggestion,
 	PersonaSuggestion,
 	HierarchySuggestionResult,
+	PromotionCandidate,
+	MemoryScope,
 } from '../../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../../shared/memory-types';
 
@@ -141,6 +147,10 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 	const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
 	const [applyingSuggestion, setApplyingSuggestion] = useState<string | null>(null);
 	const suggestionsLoaded = useRef(false);
+	const [promotionCandidates, setPromotionCandidates] = useState<PromotionCandidate[]>([]);
+	const [, setPromotionLoading] = useState(false);
+	const [editingPromotionId, setEditingPromotionId] = useState<string | null>(null);
+	const [editingRuleText, setEditingRuleText] = useState('');
 
 	// Load config and stats on mount
 	useEffect(() => {
@@ -311,6 +321,106 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 	const handleDismissSuggestion = useCallback((key: string) => {
 		setDismissedSuggestions((prev) => new Set([...prev, key]));
 	}, []);
+
+	// Load promotion candidates when memory system is enabled
+	const loadPromotionCandidates = useCallback(async () => {
+		try {
+			const res = await window.maestro.memory.getPromotionCandidates();
+			if (res.success) {
+				setPromotionCandidates(res.data);
+			}
+		} catch {
+			// Non-critical
+		}
+	}, []);
+
+	useEffect(() => {
+		if (!config.enabled) return;
+		let mounted = true;
+		const timer = setTimeout(async () => {
+			if (!mounted) return;
+			setPromotionLoading(true);
+			await loadPromotionCandidates();
+			if (mounted) setPromotionLoading(false);
+		}, 300);
+		return () => {
+			mounted = false;
+			clearTimeout(timer);
+		};
+	}, [config.enabled, loadPromotionCandidates]);
+
+	// Promotion action handlers
+	const handlePromote = useCallback(
+		async (candidate: PromotionCandidate, ruleText: string) => {
+			try {
+				const { memory } = candidate;
+				const res = await window.maestro.memory.promote(
+					memory.id,
+					ruleText,
+					memory.scope as MemoryScope,
+					memory.skillAreaId,
+					memory.experienceContext?.sourceProjectPath
+				);
+				if (!res.success) {
+					setError(res.error);
+					return;
+				}
+				setEditingPromotionId(null);
+				await loadPromotionCandidates();
+				// Refresh stats
+				const statsRes = await window.maestro.memory.getStats();
+				if (statsRes.success) setStats(statsRes.data);
+			} catch (err) {
+				setError(err instanceof Error ? err.message : 'Failed to promote experience');
+			}
+		},
+		[loadPromotionCandidates]
+	);
+
+	const handleDismissPromotion = useCallback(
+		async (candidate: PromotionCandidate) => {
+			try {
+				const { memory } = candidate;
+				const res = await window.maestro.memory.dismissPromotion(
+					memory.id,
+					memory.scope as MemoryScope,
+					memory.skillAreaId,
+					memory.experienceContext?.sourceProjectPath
+				);
+				if (!res.success) {
+					setError(res.error);
+					return;
+				}
+				await loadPromotionCandidates();
+			} catch (err) {
+				setError(err instanceof Error ? err.message : 'Failed to dismiss promotion');
+			}
+		},
+		[loadPromotionCandidates]
+	);
+
+	const handleKeepAsExperience = useCallback(
+		async (candidate: PromotionCandidate) => {
+			try {
+				const { memory } = candidate;
+				const res = await window.maestro.memory.update(
+					memory.id,
+					{ pinned: true },
+					memory.scope as MemoryScope,
+					memory.skillAreaId,
+					memory.experienceContext?.sourceProjectPath
+				);
+				if (!res.success) {
+					setError(res.error);
+					return;
+				}
+				await loadPromotionCandidates();
+			} catch (err) {
+				setError(err instanceof Error ? err.message : 'Failed to pin experience');
+			}
+		},
+		[loadPromotionCandidates]
+	);
 
 	if (loading) {
 		return (
@@ -569,6 +679,25 @@ export function MemorySettings({ theme, projectPath }: MemorySettingsProps): Rea
 						/>
 					</div>
 
+					{/* Promotion Candidates */}
+					{promotionCandidates.length > 0 && (
+						<PromotionSection
+							theme={theme}
+							candidates={promotionCandidates}
+							editingId={editingPromotionId}
+							editingText={editingRuleText}
+							onEditTextChange={setEditingRuleText}
+							onStartEdit={(id, text) => {
+								setEditingPromotionId(id);
+								setEditingRuleText(text);
+							}}
+							onCancelEdit={() => setEditingPromotionId(null)}
+							onApprove={(c, text) => handlePromote(c, text)}
+							onDismiss={handleDismissPromotion}
+							onKeep={handleKeepAsExperience}
+						/>
+					)}
+
 					{/* Stats Display */}
 					{stats && (
 						<div
@@ -792,6 +921,168 @@ function HierarchySuggestions({
 								Dismiss
 							</button>
 						</div>
+					</div>
+				);
+			})}
+		</div>
+	);
+}
+
+/**
+ * Promotion candidates section — shows experiences ready for promotion to rules.
+ */
+function PromotionSection({
+	theme,
+	candidates,
+	editingId,
+	editingText,
+	onEditTextChange,
+	onStartEdit,
+	onCancelEdit,
+	onApprove,
+	onDismiss,
+	onKeep,
+}: {
+	theme: Theme;
+	candidates: PromotionCandidate[];
+	editingId: string | null;
+	editingText: string;
+	onEditTextChange: (text: string) => void;
+	onStartEdit: (id: string, text: string) => void;
+	onCancelEdit: () => void;
+	onApprove: (candidate: PromotionCandidate, ruleText: string) => void;
+	onDismiss: (candidate: PromotionCandidate) => void;
+	onKeep: (candidate: PromotionCandidate) => void;
+}) {
+	return (
+		<div
+			className="rounded-lg border p-4 space-y-3"
+			style={{
+				borderColor: theme.colors.accent,
+				backgroundColor: `${theme.colors.accent}08`,
+			}}
+		>
+			<div className="flex items-center gap-2">
+				<ArrowUpCircle className="w-3.5 h-3.5" style={{ color: theme.colors.accent }} />
+				<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+					{candidates.length} experience{candidates.length !== 1 ? 's' : ''} ready for promotion
+				</div>
+			</div>
+
+			{candidates.map((candidate) => {
+				const { memory } = candidate;
+				const isEditing = editingId === memory.id;
+				return (
+					<div
+						key={memory.id}
+						className="rounded border p-3 space-y-2"
+						style={{ borderColor: theme.colors.border }}
+					>
+						<div className="text-xs" style={{ color: theme.colors.textMain }}>
+							{memory.content.length > 120 ? memory.content.slice(0, 120) + '...' : memory.content}
+						</div>
+						<div className="text-xs font-mono" style={{ color: theme.colors.textDim }}>
+							eff: {(memory.effectivenessScore * 100).toFixed(0)}% | used {memory.useCount}x |
+							confidence: {(memory.confidence * 100).toFixed(0)}%
+						</div>
+
+						{isEditing ? (
+							<div className="space-y-2">
+								<textarea
+									className="w-full rounded border p-2 text-xs font-mono resize-none"
+									style={{
+										borderColor: theme.colors.border,
+										backgroundColor: `${theme.colors.border}20`,
+										color: theme.colors.textMain,
+										outline: 'none',
+									}}
+									rows={3}
+									value={editingText}
+									onChange={(e) => onEditTextChange(e.target.value)}
+								/>
+								<div className="flex gap-2">
+									<button
+										className="px-3 py-1 rounded text-xs font-medium border"
+										style={{
+											borderColor: theme.colors.accent,
+											color: theme.colors.accent,
+											backgroundColor: `${theme.colors.accent}10`,
+										}}
+										onClick={() => onApprove(candidate, editingText)}
+									>
+										<Check className="w-3 h-3 inline mr-1" />
+										Confirm
+									</button>
+									<button
+										className="px-3 py-1 rounded text-xs border"
+										style={{
+											borderColor: theme.colors.border,
+											color: theme.colors.textDim,
+										}}
+										onClick={onCancelEdit}
+									>
+										Cancel
+									</button>
+								</div>
+							</div>
+						) : (
+							<>
+								<div className="text-xs" style={{ color: theme.colors.accent }}>
+									Suggested rule: &ldquo;
+									{candidate.suggestedRuleText.length > 100
+										? candidate.suggestedRuleText.slice(0, 100) + '...'
+										: candidate.suggestedRuleText}
+									&rdquo;
+								</div>
+								<div className="flex gap-2">
+									<button
+										className="px-3 py-1 rounded text-xs font-medium border"
+										style={{
+											borderColor: theme.colors.accent,
+											color: theme.colors.accent,
+											backgroundColor: `${theme.colors.accent}10`,
+										}}
+										onClick={() => onApprove(candidate, candidate.suggestedRuleText)}
+									>
+										<Check className="w-3 h-3 inline mr-1" />
+										Approve
+									</button>
+									<button
+										className="px-3 py-1 rounded text-xs border"
+										style={{
+											borderColor: theme.colors.border,
+											color: theme.colors.textDim,
+										}}
+										onClick={() => onStartEdit(memory.id, candidate.suggestedRuleText)}
+									>
+										<Edit3 className="w-3 h-3 inline mr-1" />
+										Edit & Approve
+									</button>
+									<button
+										className="px-3 py-1 rounded text-xs border"
+										style={{
+											borderColor: theme.colors.border,
+											color: theme.colors.textDim,
+										}}
+										onClick={() => onDismiss(candidate)}
+									>
+										<X className="w-3 h-3 inline mr-1" />
+										Dismiss
+									</button>
+									<button
+										className="px-3 py-1 rounded text-xs border"
+										style={{
+											borderColor: theme.colors.border,
+											color: theme.colors.textDim,
+										}}
+										onClick={() => onKeep(candidate)}
+									>
+										<Pin className="w-3 h-3 inline mr-1" />
+										Keep as XP
+									</button>
+								</div>
+							</>
+						)}
 					</div>
 				);
 			})}

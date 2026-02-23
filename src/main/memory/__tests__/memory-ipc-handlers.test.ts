@@ -216,6 +216,9 @@ describe('Memory IPC Handler Round-Trips', () => {
 				'memory:consolidate',
 				'memory:ensureEmbeddings',
 				'memory:seedDefaults',
+				'memory:getPromotionCandidates',
+				'memory:promote',
+				'memory:dismissPromotion',
 				'memory:suggestHierarchy',
 			];
 

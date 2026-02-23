@@ -282,6 +282,20 @@ export interface PersonaRelevance {
 	injectionCount: number;
 }
 
+// ─── Promotion ────────────────────────────────────────────────────────────
+
+/** Candidate for promotion from experience to rule */
+export interface PromotionCandidate {
+	/** The original experience memory */
+	memory: MemoryEntry;
+	/** Heuristic rewrite as a rule (imperative, prescriptive framing) */
+	suggestedRuleText: string;
+	/** Why this qualifies (human-readable summary) */
+	qualificationReason: string;
+	/** Promotion score (higher = more deserving) */
+	promotionScore: number;
+}
+
 // ─── Stats and Results ─────────────────────────────────────────────────────
 
 export interface MemoryStats {

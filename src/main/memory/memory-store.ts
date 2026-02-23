@@ -40,6 +40,7 @@ import type {
 	SkillAreaSuggestion,
 	PersonaSuggestion,
 	PersonaRelevance,
+	PromotionCandidate,
 } from '../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS, SEED_ROLES } from '../../shared/memory-types';
 import { cosineSimilarity } from '../grpo/embedding-service';
@@ -2479,6 +2480,191 @@ export class MemoryStore {
 		}
 
 		return results;
+	}
+
+	// ─── Experience → Rule Promotion ─────────────────────────────────────────
+
+	/**
+	 * Find experiences that qualify for promotion to rules.
+	 *
+	 * Promotion criteria (ALL must be met):
+	 * - type === 'experience'
+	 * - effectivenessScore >= 0.7
+	 * - useCount >= 5
+	 * - confidence >= 0.6
+	 * - active === true, archived === false
+	 * - Not tagged with 'promotion:dismissed'
+	 * - Not pinned (pinned experiences are intentionally preserved as-is)
+	 */
+	async getPromotionCandidates(): Promise<PromotionCandidate[]> {
+		const registry = await this.readRegistry();
+		const candidates: PromotionCandidate[] = [];
+
+		// Helper: collect candidates from a library
+		const scanLibrary = async (dirPath: string) => {
+			const lib = await this.readLibrary(dirPath);
+			for (const entry of lib.entries) {
+				if (
+					entry.type !== 'experience' ||
+					!entry.active ||
+					entry.archived ||
+					entry.pinned ||
+					entry.effectivenessScore < 0.7 ||
+					entry.useCount < 5 ||
+					entry.confidence < 0.6 ||
+					entry.tags.includes('promotion:dismissed')
+				) {
+					continue;
+				}
+
+				const suggestedRuleText = this.generateRuleText(entry);
+				const qualificationReason =
+					`Effectiveness: ${(entry.effectivenessScore * 100).toFixed(0)}%, ` +
+					`used ${entry.useCount}x, confidence: ${(entry.confidence * 100).toFixed(0)}%`;
+
+				// promotionScore = effectivenessScore * 0.5 + (useCount / 20) * 0.3 + confidence * 0.2
+				const promotionScore = Math.min(
+					1,
+					Math.max(
+						0,
+						entry.effectivenessScore * 0.5 +
+							Math.min(1, entry.useCount / 20) * 0.3 +
+							entry.confidence * 0.2
+					)
+				);
+
+				candidates.push({ memory: entry, suggestedRuleText, qualificationReason, promotionScore });
+			}
+		};
+
+		// Scan all skill area libraries
+		for (const skill of registry.skillAreas) {
+			if (!skill.active) continue;
+			try {
+				await scanLibrary(this.getMemoryPath('skill', skill.id));
+			} catch {
+				// Library may not exist yet
+			}
+		}
+
+		// Scan global library
+		try {
+			await scanLibrary(this.getMemoryPath('global'));
+		} catch {
+			// Library may not exist yet
+		}
+
+		// Sort by promotion score descending
+		candidates.sort((a, b) => b.promotionScore - a.promotionScore);
+		return candidates;
+	}
+
+	/**
+	 * Generate a heuristic rule text from an experience entry.
+	 * Converts experiential framing to imperative/prescriptive framing.
+	 */
+	private generateRuleText(entry: MemoryEntry): string {
+		// Use the learning field from experienceContext as the base text if available
+		const baseText = entry.experienceContext?.learning ?? entry.content;
+
+		// If content starts with "When" → keep as conditional rule
+		if (baseText.startsWith('When') || baseText.startsWith('when')) {
+			return baseText;
+		}
+
+		// Check category tags for framing
+		const hasTag = (tag: string) => entry.tags.includes(tag);
+
+		if (hasTag('category:anti-pattern-identified')) {
+			return `Avoid: ${baseText}`;
+		}
+		if (hasTag('category:pattern-established')) {
+			return `Prefer: ${baseText}`;
+		}
+		if (hasTag('category:dependency-discovered')) {
+			return `Ensure: ${baseText}`;
+		}
+
+		return `Rule: ${baseText}`;
+	}
+
+	/**
+	 * Promote an experience to a rule.
+	 *
+	 * Changes the memory type from 'experience' to 'rule', updates the content
+	 * to the approved rule text, boosts confidence, and preserves the original
+	 * experienceContext as provenance.
+	 */
+	async promoteExperience(
+		id: MemoryId,
+		approvedRuleText: string,
+		scope: MemoryScope,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string
+	): Promise<MemoryEntry | null> {
+		const dirPath = this.getMemoryPath(scope, skillAreaId, projectPath);
+		const lib = await this.readLibrary(dirPath);
+		const idx = lib.entries.findIndex((e) => e.id === id);
+		if (idx === -1) return null;
+
+		const entry = lib.entries[idx];
+		if (entry.type !== 'experience') return null;
+
+		const now = Date.now();
+		lib.entries[idx] = {
+			...entry,
+			type: 'rule',
+			content: approvedRuleText,
+			source: 'consolidation',
+			confidence: Math.max(entry.confidence, 0.8),
+			embedding: null, // Content changed, needs re-computation
+			tokenEstimate: Math.ceil(approvedRuleText.length / 4),
+			tags: entry.tags.includes('promoted:experience')
+				? entry.tags
+				: [...entry.tags, 'promoted:experience'],
+			updatedAt: now,
+		};
+
+		await this.writeLibrary(dirPath, lib);
+		await this.appendHistory(dirPath, {
+			timestamp: now,
+			operation: 'consolidate',
+			entityType: 'memory',
+			entityId: id,
+			content: `Promoted experience to rule: ${approvedRuleText.slice(0, 200)}`,
+			source: 'consolidation',
+		});
+
+		return lib.entries[idx];
+	}
+
+	/**
+	 * Dismiss a promotion candidate — adds 'promotion:dismissed' tag so it won't
+	 * be suggested again. Does not delete or archive the memory.
+	 */
+	async dismissPromotion(
+		id: MemoryId,
+		scope: MemoryScope,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string
+	): Promise<MemoryEntry | null> {
+		const dirPath = this.getMemoryPath(scope, skillAreaId, projectPath);
+		const lib = await this.readLibrary(dirPath);
+		const idx = lib.entries.findIndex((e) => e.id === id);
+		if (idx === -1) return null;
+
+		const entry = lib.entries[idx];
+		if (entry.tags.includes('promotion:dismissed')) return entry; // Already dismissed
+
+		const now = Date.now();
+		lib.entries[idx] = {
+			...entry,
+			tags: [...entry.tags, 'promotion:dismissed'],
+			updatedAt: now,
+		};
+
+		await this.writeLibrary(dirPath, lib);
+		return lib.entries[idx];
 	}
 
 	// ─── Seed Data ──────────────────────────────────────────────────────────

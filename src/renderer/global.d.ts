@@ -2941,6 +2941,29 @@ interface MaestroAPI {
 			| { success: true; data: { roles: number; personas: number; skills: number } }
 			| { success: false; error: string }
 		>;
+		getPromotionCandidates: () => Promise<
+			| { success: true; data: import('../shared/memory-types').PromotionCandidate[] }
+			| { success: false; error: string }
+		>;
+		promote: (
+			id: string,
+			ruleText: string,
+			scope: string,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry | null }
+			| { success: false; error: string }
+		>;
+		dismissPromotion: (
+			id: string,
+			scope: string,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry | null }
+			| { success: false; error: string }
+		>;
 		suggestHierarchy: (
 			projectPath: string
 		) => Promise<

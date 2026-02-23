@@ -516,6 +516,41 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		})
 	);
 
+	// ─── Promotion ───────────────────────────────────────────────────
+
+	ipcMain.handle(
+		'memory:getPromotionCandidates',
+		createIpcDataHandler(handlerOpts('getPromotionCandidates'), async () => {
+			return memoryStore.getPromotionCandidates();
+		})
+	);
+
+	ipcMain.handle(
+		'memory:promote',
+		createIpcDataHandler(
+			handlerOpts('promote'),
+			async (
+				id: string,
+				ruleText: string,
+				scope: MemoryScope,
+				skillAreaId?: SkillAreaId,
+				projectPath?: string
+			) => {
+				return memoryStore.promoteExperience(id, ruleText, scope, skillAreaId, projectPath);
+			}
+		)
+	);
+
+	ipcMain.handle(
+		'memory:dismissPromotion',
+		createIpcDataHandler(
+			handlerOpts('dismissPromotion'),
+			async (id: string, scope: MemoryScope, skillAreaId?: SkillAreaId, projectPath?: string) => {
+				return memoryStore.dismissPromotion(id, scope, skillAreaId, projectPath);
+			}
+		)
+	);
+
 	// ─── Hierarchy Suggestions ────────────────────────────────────────
 
 	ipcMain.handle(
