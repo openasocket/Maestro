@@ -2783,7 +2783,15 @@ interface MaestroAPI {
 			) => Promise<{ success: true; data: boolean } | { success: false; error: string }>;
 		};
 		resetSeedDefaults: () => Promise<
-			| { success: true; data: { rolesReset: number; personasReset: number } }
+			| {
+					success: true;
+					data: {
+						rolesReset: number;
+						personasReset: number;
+						personasCreated?: number;
+						skillsCreated?: number;
+					};
+			  }
 			| { success: false; error: string }
 		>;
 		skill: {
@@ -3015,6 +3023,59 @@ interface MaestroAPI {
 			| { success: true; data: import('../shared/memory-types').MemoryEntry[] }
 			| { success: false; error: string }
 		>;
+		getJobQueueStatus: () => Promise<
+			| { success: true; data: import('../shared/memory-types').JobQueueStatus }
+			| { success: false; error: string }
+		>;
+		getTokenUsage: () => Promise<
+			| { success: true; data: import('../shared/memory-types').TokenUsage }
+			| { success: false; error: string }
+		>;
+		analyzeHistoricalSessions: () => Promise<
+			| { success: true; data: { total: number; queued: number; skipped: number } }
+			| { success: false; error: string }
+		>;
+		getAnalysisStats: () => Promise<
+			| {
+					success: true;
+					data: {
+						totalSessions: number;
+						analyzedSessions: number;
+						unanalyzedSessions: number;
+					};
+			  }
+			| { success: false; error: string }
+		>;
+		analyzeAgentSessions: (
+			agentId: string,
+			agentType: string,
+			projectPath?: string
+		) => Promise<
+			| {
+					success: true;
+					data: {
+						total: number;
+						queued: number;
+						skipped: number;
+						alreadyAnalyzed: number;
+					};
+			  }
+			| { success: false; error: string }
+		>;
+		getAgentAnalysisStats: (agentId: string) => Promise<
+			| {
+					success: true;
+					data: {
+						totalSessions: number;
+						analyzedSessions: number;
+						unanalyzedSessions: number;
+					};
+			  }
+			| { success: false; error: string }
+		>;
+		onJobQueueUpdate: (
+			callback: (status: import('../shared/memory-types').JobQueueStatus) => void
+		) => () => void;
 	};
 
 	// WakaTime API (CLI check, API key validation)

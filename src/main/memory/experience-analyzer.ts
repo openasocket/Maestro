@@ -12,7 +12,11 @@
  * - Graceful degradation: tolerates missing data sources (no git, no VIBES, etc.)
  */
 
-import type { MemoryConfig } from '../../shared/memory-types';
+import type {
+	MemoryConfig,
+	ExtractionDiagnostic,
+	ExtractionProgress,
+} from '../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../shared/memory-types';
 import { experienceExtractionPrompt } from '../../prompts';
 
@@ -117,6 +121,8 @@ export interface ExtractedExperience {
 export class ExperienceAnalyzer {
 	/** Per-project cooldown tracking: projectPath → last analysis timestamp */
 	private readonly lastAnalysisTime = new Map<string, number>();
+	/** Last extraction diagnostic — read by job queue after each run */
+	public lastDiagnostic: ExtractionDiagnostic | null = null;
 
 	/**
 	 * Analyze a completed session and extract experiences.
@@ -133,40 +139,161 @@ export class ExperienceAnalyzer {
 	async analyzeCompletedSession(
 		sessionId: string,
 		projectPath: string,
-		agentType: string
+		agentType: string,
+		trigger: 'exit' | 'retroactive' | 'mid-session' = 'exit',
+		onProgress?: (progress: ExtractionProgress) => void
 	): Promise<number> {
+		const baseDiag: Omit<ExtractionDiagnostic, 'status' | 'message'> = {
+			timestamp: Date.now(),
+			sessionId,
+			agentType,
+			projectPath,
+			trigger,
+		};
+
+		const startedAt = Date.now();
+		const emitProgress = (
+			stage: ExtractionProgress['stage'],
+			message: string,
+			extra?: Partial<ExtractionProgress>
+		) => {
+			onProgress?.({
+				stage,
+				message,
+				startedAt,
+				tokensStreamed: 0,
+				estimatedTotalTokens: 10000,
+				estimatedCostSoFar: 0,
+				sessionId,
+				...extra,
+			});
+		};
+
+		// Check if experience extraction is enabled (check first — cheapest guard)
+		const config = await this.getMemoryConfig();
+		if (config.enableExperienceExtraction === false) {
+			this.lastDiagnostic = {
+				...baseDiag,
+				status: 'skipped-disabled',
+				message: 'Experience extraction is disabled in config',
+			};
+			return 0;
+		}
+
+		// Check if already analyzed (prevents duplicate work during retroactive scans)
+		try {
+			const { getAnalyzedSessionsRegistry } = await import('./analyzed-sessions');
+			if (await getAnalyzedSessionsRegistry().isAnalyzed(sessionId)) {
+				this.lastDiagnostic = {
+					...baseDiag,
+					status: 'skipped-already-analyzed',
+					message: `Session ${sessionId.slice(0, 8)}... already analyzed`,
+				};
+				return 0;
+			}
+		} catch {
+			// Registry unavailable — proceed without dedup check
+		}
+
 		// Check rate limit
 		if (await this.isOnCooldown(projectPath)) {
+			this.lastDiagnostic = {
+				...baseDiag,
+				status: 'skipped-cooldown',
+				message: `On cooldown for project ${projectPath}`,
+			};
 			return 0;
 		}
 
 		// Gather session data
+		emitProgress('gathering', 'Gathering session data...');
 		const input = await this.gatherSessionData(sessionId, projectPath, agentType);
 
 		// Check minimum history threshold
-		const config = await this.getMemoryConfig();
 		const minEntries = config.minHistoryEntriesForAnalysis ?? 3;
 		if (input.historyEntries.length < minEntries) {
-			return 0;
-		}
-
-		// Check if experience extraction is enabled
-		if (config.enableExperienceExtraction === false) {
+			this.lastDiagnostic = {
+				...baseDiag,
+				status: 'skipped-insufficient-history',
+				message: `Only ${input.historyEntries.length} history entries (need ${minEntries})`,
+			};
 			return 0;
 		}
 
 		// Run LLM analysis
-		const experiences = await this.analyzeSession(input);
+		const experiences = await this.analyzeSession(
+			input,
+			onProgress
+				? (tokens, cost, provider) => {
+						emitProgress('streaming', 'Streaming LLM response...', {
+							tokensStreamed: tokens,
+							estimatedCostSoFar: cost,
+							providerUsed: provider,
+						});
+					}
+				: undefined
+		);
+
+		if (experiences.length === 0) {
+			this.lastDiagnostic = {
+				...baseDiag,
+				status: 'failed-no-experiences',
+				message: 'LLM returned no parseable experiences',
+				providerUsed: this.lastDiagnostic?.providerUsed,
+			};
+			emitProgress('error', 'No experiences extracted');
+			return 0;
+		}
 
 		// Filter by novelty score
+		emitProgress('parsing', `Filtering ${experiences.length} experiences...`, {
+			providerUsed: this.lastDiagnostic?.providerUsed,
+		});
 		const minNovelty = config.minNoveltyScore ?? 0.4;
 		const novel = experiences.filter((e) => e.noveltyScore >= minNovelty);
 
 		// Store with deduplication
+		emitProgress('storing', `Storing ${novel.length} experiences...`, {
+			providerUsed: this.lastDiagnostic?.providerUsed,
+		});
 		const stored = await this.storeExperiences(novel, input);
 
 		// Record analysis time for rate limiting
 		this.lastAnalysisTime.set(projectPath, Date.now());
+
+		// Mark session as analyzed in registry
+		try {
+			const { getAnalyzedSessionsRegistry } = await import('./analyzed-sessions');
+			await getAnalyzedSessionsRegistry().markAnalyzed({
+				sessionId,
+				analyzedAt: Date.now(),
+				experiencesStored: stored,
+				providerUsed: this.lastDiagnostic?.providerUsed,
+				trigger,
+			});
+		} catch {
+			// Registry write failed — non-critical
+		}
+
+		this.lastDiagnostic = {
+			...baseDiag,
+			status: 'success',
+			message: `Extracted ${experiences.length} experiences, stored ${stored} after dedup/novelty filter`,
+			experiencesStored: stored,
+			tokenUsage: this.lastDiagnostic?.tokenUsage,
+			providerUsed: this.lastDiagnostic?.providerUsed,
+		};
+
+		emitProgress('complete', `Stored ${stored} experiences`, {
+			tokensStreamed: this.lastDiagnostic?.tokenUsage
+				? this.lastDiagnostic.tokenUsage.inputTokens + this.lastDiagnostic.tokenUsage.outputTokens
+				: 0,
+			estimatedCostSoFar: this.lastDiagnostic?.tokenUsage
+				? (this.lastDiagnostic.tokenUsage.inputTokens / 1_000_000) * 3 +
+					(this.lastDiagnostic.tokenUsage.outputTokens / 1_000_000) * 15
+				: 0,
+			providerUsed: this.lastDiagnostic?.providerUsed,
+		});
 
 		return stored;
 	}
@@ -476,41 +603,199 @@ export class ExperienceAnalyzer {
 	 * Token budget: history truncation (20 entries × 500 chars) plus diff
 	 * truncation (4000 chars) keep the prompt under ~8000 tokens.
 	 */
-	async analyzeSession(input: ExperienceAnalyzerInput): Promise<ExtractedExperience[]> {
+	async analyzeSession(
+		input: ExperienceAnalyzerInput,
+		onStreamProgress?: (tokensStreamed: number, estimatedCost: number, provider: string) => void
+	): Promise<ExtractedExperience[]> {
 		// Compile prompt from template
 		const prompt = this.compilePrompt(input);
 		if (!prompt) return [];
 
+		this.logDebug(
+			`analyzeSession: Prompt compiled (${prompt.length} chars, ${input.historyEntries.length} history entries, ${input.historyEntries.filter((e) => e.fullResponse).length} with fullResponse)`
+		);
+
 		try {
-			const { execFile } = await import('child_process');
-			const { promisify } = await import('util');
-			const execFileAsync = promisify(execFile);
+			const { spawn } = await import('child_process');
 
-			// Build args — optionally pass --model from config
+			// Resolve provider
 			const config = await this.getMemoryConfig();
-			const model = config.extractionModel;
-			const args = ['--print', '--output-format', 'stream-json'];
-			if (model) {
-				args.push('--model', model);
-			}
-			args.push('-p', prompt);
+			const { resolveExtractionProvider } = await import('./extraction-provider-resolver');
+			const provider = await resolveExtractionProvider(config.extractionProvider);
 
-			const result = await execFileAsync('claude', args, {
-				timeout: 120000,
-				maxBuffer: 1024 * 1024,
+			if (!provider) {
+				this.lastDiagnostic = {
+					timestamp: Date.now(),
+					sessionId: input.sessionId,
+					agentType: input.agentType,
+					projectPath: input.projectPath,
+					status: 'failed-provider-not-found',
+					message: config.extractionProvider
+						? `Configured provider '${config.extractionProvider}' not available`
+						: 'No batch-capable AI provider found on this system',
+				};
+				return [];
+			}
+
+			// Build CLI args from resolved provider
+			const args = [...provider.args];
+			if (config.extractionModel && provider.modelArgs) {
+				args.push(...provider.modelArgs(config.extractionModel));
+			}
+			args.push(...provider.promptArgs(prompt));
+
+			this.lastDiagnostic = {
+				timestamp: Date.now(),
+				sessionId: input.sessionId,
+				agentType: input.agentType,
+				projectPath: input.projectPath,
+				status: 'success', // tentative — overwritten on failure
+				message: `Running extraction via ${provider.agentId}`,
+				providerUsed: provider.agentId,
+			};
+
+			// Spawn with streaming to get real-time progress
+			const rawOutput = await new Promise<string>((resolve, reject) => {
+				const child = spawn(provider.command, args, {
+					env: { ...process.env, ...provider.env },
+					stdio: ['ignore', 'pipe', 'pipe'],
+				});
+
+				let stdout = '';
+				let stderr = '';
+				let tokensStreamed = 0;
+
+				// Token cost rates ($/MTok)
+				const inputRate = 3;
+				const outputRate = 15;
+
+				child.stdout.on('data', (chunk: Buffer) => {
+					const text = chunk.toString();
+					stdout += text;
+
+					// Parse JSONL lines for streaming token updates
+					const lines = text.split('\n').filter((l: string) => l.trim());
+					for (const line of lines) {
+						try {
+							const event = JSON.parse(line);
+							// Look for usage data in stream-json events
+							if (event.usage) {
+								tokensStreamed = (event.usage.input_tokens ?? 0) + (event.usage.output_tokens ?? 0);
+								const cost =
+									((event.usage.input_tokens ?? 0) / 1_000_000) * inputRate +
+									((event.usage.output_tokens ?? 0) / 1_000_000) * outputRate;
+								onStreamProgress?.(tokensStreamed, cost, provider.agentId);
+							} else if (event.type === 'content_block_delta' || event.type === 'message_delta') {
+								// Approximate tokens from streaming deltas (rough: 4 chars ≈ 1 token)
+								const deltaText = event.delta?.text ?? event.delta?.content ?? '';
+								if (deltaText) {
+									tokensStreamed += Math.ceil(deltaText.length / 4);
+									const estimatedCost = (tokensStreamed / 1_000_000) * outputRate;
+									onStreamProgress?.(tokensStreamed, estimatedCost, provider.agentId);
+								}
+							}
+						} catch {
+							// Not valid JSON line — ignore (partial line, etc.)
+						}
+					}
+				});
+
+				child.stderr.on('data', (chunk: Buffer) => {
+					stderr += chunk.toString();
+				});
+
+				const timeout = setTimeout(() => {
+					child.kill('SIGTERM');
+					reject(new Error('ETIMEDOUT: extraction timed out after 120s'));
+				}, 120000);
+
+				child.on('close', (code) => {
+					clearTimeout(timeout);
+					if (code !== 0 && !stdout.trim()) {
+						reject(new Error(`Process exited with code ${code}: ${stderr.slice(0, 500)}`));
+					} else {
+						resolve(stdout);
+					}
+				});
+
+				child.on('error', (err) => {
+					clearTimeout(timeout);
+					reject(err);
+				});
 			});
 
-			const rawOutput = result.stdout ?? '';
+			// Extract real token usage from output
+			const tokenUsage = this.extractTokenUsage(rawOutput);
+			if (tokenUsage) {
+				this.lastDiagnostic.tokenUsage = tokenUsage;
+			}
 
 			// Extract text from stream-json JSONL output
 			const text = this.extractResultText(rawOutput);
+			this.logDebug(
+				`analyzeSession: Extracted result text (${text.length} chars). Preview: ${text.slice(0, 500)}`
+			);
 
-			return this.parseExperiences(text);
+			const experiences = this.parseExperiences(text);
+			if (experiences.length === 0) {
+				this.lastDiagnostic.status = 'failed-parse';
+				this.lastDiagnostic.message = `Provider returned ${text.length} chars but no experiences parsed. Preview: ${text.slice(0, 200)}`;
+				this
+					.logDebug(`analyzeSession: Zero experiences parsed. Raw output (${rawOutput.length} chars), extracted text (${text.length} chars). Text preview:
+${text.slice(0, 1000)}`);
+			} else {
+				this.logDebug(`analyzeSession: Parsed ${experiences.length} experiences from LLM output`);
+			}
+			return experiences;
 		} catch (err) {
-			// LLM analysis failed — degrade silently, log for diagnostics
+			const isTimeout = err instanceof Error && err.message.includes('ETIMEDOUT');
+			this.lastDiagnostic = {
+				timestamp: Date.now(),
+				sessionId: input.sessionId,
+				agentType: input.agentType,
+				projectPath: input.projectPath,
+				status: isTimeout ? 'failed-timeout' : 'failed-spawn',
+				message: `LLM analysis failed: ${err instanceof Error ? err.message : String(err)}`,
+				providerUsed: this.lastDiagnostic?.providerUsed,
+			};
 			this.logDebug(`LLM analysis failed: ${err}`);
 			return [];
 		}
+	}
+
+	/**
+	 * Extract real token usage from LLM output.
+	 *
+	 * Claude's stream-json emits a `result` event with `usage: { input_tokens, output_tokens }`.
+	 * Other providers may include similar fields. Returns null if no usage data found.
+	 */
+	extractTokenUsage(rawOutput: string): { inputTokens: number; outputTokens: number } | null {
+		const lines = rawOutput.split('\n');
+		for (const line of lines) {
+			if (!line.trim()) continue;
+			try {
+				const event = JSON.parse(line);
+				// Claude Code stream-json result event
+				if (event.type === 'result' && event.usage) {
+					const inputTokens = event.usage.input_tokens ?? event.usage.inputTokens ?? 0;
+					const outputTokens = event.usage.output_tokens ?? event.usage.outputTokens ?? 0;
+					if (inputTokens > 0 || outputTokens > 0) {
+						return { inputTokens, outputTokens };
+					}
+				}
+				// Generic usage block (some providers embed it at top level)
+				if (event.usage && !event.type) {
+					const inputTokens = event.usage.input_tokens ?? event.usage.prompt_tokens ?? 0;
+					const outputTokens = event.usage.output_tokens ?? event.usage.completion_tokens ?? 0;
+					if (inputTokens > 0 || outputTokens > 0) {
+						return { inputTokens, outputTokens };
+					}
+				}
+			} catch {
+				// Not valid JSON — skip
+			}
+		}
+		return null;
 	}
 
 	/**
@@ -566,10 +851,13 @@ export class ExperienceAnalyzer {
 	 */
 	compilePrompt(input: ExperienceAnalyzerInput): string {
 		const historyText = input.historyEntries
-			.map(
-				(e, i) =>
-					`${i + 1}. ${e.summary}${e.success === false ? ' [FAILED]' : ''}${e.elapsedTimeMs ? ` (${e.elapsedTimeMs}ms)` : ''}`
-			)
+			.map((e, i) => {
+				const header = `${i + 1}. ${e.summary}${e.success === false ? ' [FAILED]' : ''}${e.elapsedTimeMs ? ` (${e.elapsedTimeMs}ms)` : ''}`;
+				if (e.fullResponse) {
+					return `${header}\n   Context: ${e.fullResponse}`;
+				}
+				return header;
+			})
 			.join('\n');
 
 		const durationStr = input.sessionDurationMs
@@ -631,47 +919,64 @@ export class ExperienceAnalyzer {
 		try {
 			// Try to find a JSON array in the output
 			const jsonMatch = output.match(/\[[\s\S]*\]/);
-			if (!jsonMatch) return [];
+			if (!jsonMatch) {
+				this.logDebug(
+					`parseExperiences: No JSON array found in output (${output.length} chars). Preview: ${output.slice(0, 300)}`
+				);
+				return [];
+			}
 
 			const parsed = JSON.parse(jsonMatch[0]);
-			if (!Array.isArray(parsed)) return [];
+			if (!Array.isArray(parsed)) {
+				this.logDebug(`parseExperiences: Parsed JSON is not an array, got ${typeof parsed}`);
+				return [];
+			}
 
-			return parsed
-				.filter(
-					(e: unknown) =>
-						typeof e === 'object' &&
-						e !== null &&
-						typeof (e as Record<string, unknown>).content === 'string' &&
-						typeof (e as Record<string, unknown>).situation === 'string' &&
-						typeof (e as Record<string, unknown>).learning === 'string' &&
-						typeof (e as Record<string, unknown>).noveltyScore === 'number'
-				)
-				.map((e: Record<string, unknown>) => {
-					// Validate category — default to 'pattern-established' if missing or invalid
-					const rawCategory = e.category;
-					const category: ExperienceCategory =
-						typeof rawCategory === 'string' &&
-						(EXPERIENCE_CATEGORIES as readonly string[]).includes(rawCategory)
-							? (rawCategory as ExperienceCategory)
-							: 'pattern-established';
+			const validEntries = parsed.filter(
+				(e: unknown) =>
+					typeof e === 'object' &&
+					e !== null &&
+					typeof (e as Record<string, unknown>).content === 'string' &&
+					typeof (e as Record<string, unknown>).situation === 'string' &&
+					typeof (e as Record<string, unknown>).learning === 'string' &&
+					typeof (e as Record<string, unknown>).noveltyScore === 'number'
+			);
 
-					return {
-						content: String(e.content),
-						situation: String(e.situation),
-						learning: String(e.learning),
-						category,
-						tags: Array.isArray(e.tags) ? e.tags.filter((t: unknown) => typeof t === 'string') : [],
-						noveltyScore: Number(e.noveltyScore),
-						...(typeof e.alternativesConsidered === 'string'
-							? { alternativesConsidered: e.alternativesConsidered }
-							: {}),
-						...(typeof e.rationale === 'string' ? { rationale: e.rationale } : {}),
-						keywords: Array.isArray(e.keywords)
-							? e.keywords.filter((k: unknown) => typeof k === 'string')
-							: [],
-					};
-				});
-		} catch {
+			if (validEntries.length < parsed.length) {
+				this.logDebug(
+					`parseExperiences: ${parsed.length - validEntries.length}/${parsed.length} entries filtered out (missing required fields)`
+				);
+			}
+
+			return validEntries.map((e: Record<string, unknown>) => {
+				// Validate category — default to 'pattern-established' if missing or invalid
+				const rawCategory = e.category;
+				const category: ExperienceCategory =
+					typeof rawCategory === 'string' &&
+					(EXPERIENCE_CATEGORIES as readonly string[]).includes(rawCategory)
+						? (rawCategory as ExperienceCategory)
+						: 'pattern-established';
+
+				return {
+					content: String(e.content),
+					situation: String(e.situation),
+					learning: String(e.learning),
+					category,
+					tags: Array.isArray(e.tags) ? e.tags.filter((t: unknown) => typeof t === 'string') : [],
+					noveltyScore: Number(e.noveltyScore),
+					...(typeof e.alternativesConsidered === 'string'
+						? { alternativesConsidered: e.alternativesConsidered }
+						: {}),
+					...(typeof e.rationale === 'string' ? { rationale: e.rationale } : {}),
+					keywords: Array.isArray(e.keywords)
+						? e.keywords.filter((k: unknown) => typeof k === 'string')
+						: [],
+				};
+			});
+		} catch (err) {
+			this.logDebug(
+				`parseExperiences: JSON parse error: ${err instanceof Error ? err.message : String(err)}. Preview: ${output.slice(0, 300)}`
+			);
 			return [];
 		}
 	}

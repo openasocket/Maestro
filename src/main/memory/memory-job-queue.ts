@@ -12,10 +12,15 @@
  */
 
 import { BrowserWindow } from 'electron';
-import type { JobQueueStatus, TokenUsage } from '../../shared/memory-types';
+import type {
+	JobQueueStatus,
+	TokenUsage,
+	ExtractionDiagnostic,
+	ExtractionProgress,
+} from '../../shared/memory-types';
 
 // Re-export shared types for consumers that import from this module
-export type { JobQueueStatus, TokenUsage } from '../../shared/memory-types';
+export type { JobQueueStatus, TokenUsage, ExtractionProgress } from '../../shared/memory-types';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -116,6 +121,10 @@ export class MemoryJobQueue {
 		trackingSince: Date.now(),
 	};
 	private emitDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Ring buffer of recent extraction diagnostics (max 20, getStatus returns last 5) */
+	private diagnostics: ExtractionDiagnostic[] = [];
+	/** Real-time progress of the current extraction (null when idle) */
+	private currentProgress: ExtractionProgress | null = null;
 
 	/** Enqueue a job. Deduplicates by type + key fields. */
 	enqueue(job: Omit<MemoryJob, 'id' | 'createdAt'>): string {
@@ -178,6 +187,8 @@ export class MemoryJobQueue {
 			currentActivity: this.currentJob ? describeJob(this.currentJob) : null,
 			processing: this.processing,
 			estimatedSecondsRemaining,
+			recentDiagnostics: this.diagnostics.slice(-5),
+			extractionProgress: this.currentProgress,
 		};
 	}
 
@@ -304,17 +315,52 @@ export class MemoryJobQueue {
 				this.llmInFlight = true;
 				try {
 					const { getExperienceAnalyzer } = await import('./experience-analyzer');
-					await getExperienceAnalyzer().analyzeCompletedSession(
+					const analyzer = getExperienceAnalyzer();
+
+					// Progress callback: store progress and emit to UI
+					const onProgress = (progress: ExtractionProgress) => {
+						this.currentProgress = progress;
+						this.emitStatus();
+					};
+
+					await analyzer.analyzeCompletedSession(
 						job.payload.sessionId as string,
 						job.payload.projectPath as string,
-						job.payload.agentType as string
+						job.payload.agentType as string,
+						(job.payload.trigger as 'exit' | 'retroactive' | 'mid-session') ?? 'exit',
+						onProgress
 					);
-					// Track token consumption (~10K tokens per extraction)
-					this.tokenUsage.extractionTokens += EXTRACTION_TOTAL_TOKENS;
-					this.tokenUsage.extractionCalls++;
-					this.tokenUsage.estimatedCostUsd += EXTRACTION_COST_USD;
+
+					// Clear progress after completion
+					this.currentProgress = null;
+
+					// Collect diagnostic from analyzer
+					if (analyzer.lastDiagnostic) {
+						this.diagnostics.push(analyzer.lastDiagnostic);
+						// Keep ring buffer at max 20
+						if (this.diagnostics.length > 20) {
+							this.diagnostics = this.diagnostics.slice(-20);
+						}
+					}
+
+					// Track token consumption — use real data if available, else fallback to estimates
+					const realUsage = analyzer.lastDiagnostic?.tokenUsage;
+					if (realUsage && (realUsage.inputTokens > 0 || realUsage.outputTokens > 0)) {
+						const totalTokens = realUsage.inputTokens + realUsage.outputTokens;
+						this.tokenUsage.extractionTokens += totalTokens;
+						this.tokenUsage.extractionCalls++;
+						this.tokenUsage.estimatedCostUsd +=
+							(realUsage.inputTokens / 1_000_000) * INPUT_RATE_PER_MTOK +
+							(realUsage.outputTokens / 1_000_000) * OUTPUT_RATE_PER_MTOK;
+					} else if (analyzer.lastDiagnostic?.status === 'success') {
+						// Only add fixed estimates if extraction actually ran (success)
+						this.tokenUsage.extractionTokens += EXTRACTION_TOTAL_TOKENS;
+						this.tokenUsage.extractionCalls++;
+						this.tokenUsage.estimatedCostUsd += EXTRACTION_COST_USD;
+					}
 				} finally {
 					this.llmInFlight = false;
+					this.currentProgress = null;
 				}
 				break;
 			}
@@ -357,6 +403,167 @@ export class MemoryJobQueue {
 				// Placeholder — embedding backfill not yet implemented
 				break;
 			}
+		}
+	}
+
+	/**
+	 * Enqueue retroactive analysis for all unanalyzed historical sessions.
+	 * Returns stats about what was queued.
+	 */
+	async enqueueRetroactiveAnalysis(): Promise<{ total: number; queued: number; skipped: number }> {
+		const { getAnalyzedSessionsRegistry } = await import('./analyzed-sessions');
+		const registry = getAnalyzedSessionsRegistry();
+		const unanalyzed = await registry.getUnanalyzedSessionIds();
+
+		const { getHistoryManager } = await import('../history-manager');
+		const hm = getHistoryManager();
+
+		// Load sessions store for metadata
+		const { getSessionsStore } = await import('../stores');
+		const sessions = getSessionsStore().get('sessions', []) as {
+			id: string;
+			toolType?: string;
+			projectRoot?: string;
+			cwd?: string;
+		}[];
+
+		let queued = 0;
+		let skipped = 0;
+
+		for (const sessionId of unanalyzed) {
+			const entries = hm.getEntries(sessionId);
+			if (entries.length < 3) {
+				skipped++;
+				continue;
+			}
+
+			// Get projectPath from history entries
+			const projectPath = entries[0]?.projectPath;
+			if (!projectPath) {
+				skipped++;
+				continue;
+			}
+
+			// Look up agentType from sessions store
+			const baseId = sessionId.replace(/-ai-.+$|-terminal$|-batch-\d+$|-synopsis-\d+$/, '');
+			const session = sessions.find((s) => s.id === baseId);
+			const agentType = session?.toolType ?? 'unknown';
+
+			this.enqueue({
+				type: 'experience-extraction',
+				priority: 5, // Lower than exit-triggered (3)
+				payload: { sessionId, projectPath, agentType, trigger: 'retroactive' },
+			});
+			queued++;
+		}
+
+		return { total: unanalyzed.length, queued, skipped };
+	}
+
+	/**
+	 * Get analysis stats for the UI.
+	 */
+	async getAnalysisStats(): Promise<{
+		totalSessions: number;
+		analyzedSessions: number;
+		unanalyzedSessions: number;
+	}> {
+		try {
+			const { getAnalyzedSessionsRegistry } = await import('./analyzed-sessions');
+			const registry = getAnalyzedSessionsRegistry();
+			const analyzed = await registry.getAnalyzedCount();
+			const unanalyzed = await registry.getUnanalyzedSessionIds();
+			return {
+				totalSessions: analyzed + unanalyzed.length,
+				analyzedSessions: analyzed,
+				unanalyzedSessions: unanalyzed.length,
+			};
+		} catch {
+			return { totalSessions: 0, analyzedSessions: 0, unanalyzedSessions: 0 };
+		}
+	}
+
+	/**
+	 * Enqueue retroactive analysis for history sessions belonging to a specific Maestro agent.
+	 * Matches history files whose session ID starts with the agent's base ID prefix.
+	 */
+	async enqueueAgentAnalysis(
+		agentId: string,
+		agentType: string,
+		projectPath?: string
+	): Promise<{ total: number; queued: number; skipped: number; alreadyAnalyzed: number }> {
+		const { getAnalyzedSessionsRegistry } = await import('./analyzed-sessions');
+		const registry = getAnalyzedSessionsRegistry();
+
+		const { getHistoryManager } = await import('../history-manager');
+		const hm = getHistoryManager();
+		const allHistorySessions = hm.listSessionsWithHistory();
+
+		// Filter to sessions belonging to this agent (history files are named like: {agentId}-ai-{ts})
+		const agentSessions = allHistorySessions.filter((sid) => sid.startsWith(agentId));
+
+		let queued = 0;
+		let skipped = 0;
+		let alreadyAnalyzed = 0;
+
+		for (const sessionId of agentSessions) {
+			if (await registry.isAnalyzed(sessionId)) {
+				alreadyAnalyzed++;
+				continue;
+			}
+
+			const entries = hm.getEntries(sessionId);
+			if (entries.length < 3) {
+				skipped++;
+				continue;
+			}
+
+			const entryProjectPath = projectPath || entries[0]?.projectPath;
+			if (!entryProjectPath) {
+				skipped++;
+				continue;
+			}
+
+			this.enqueue({
+				type: 'experience-extraction',
+				priority: 5,
+				payload: { sessionId, projectPath: entryProjectPath, agentType, trigger: 'retroactive' },
+			});
+			queued++;
+		}
+
+		return { total: agentSessions.length, queued, skipped, alreadyAnalyzed };
+	}
+
+	/**
+	 * Get analysis stats for a specific agent.
+	 */
+	async getAgentAnalysisStats(agentId: string): Promise<{
+		totalSessions: number;
+		analyzedSessions: number;
+		unanalyzedSessions: number;
+	}> {
+		try {
+			const { getAnalyzedSessionsRegistry } = await import('./analyzed-sessions');
+			const registry = getAnalyzedSessionsRegistry();
+
+			const { getHistoryManager } = await import('../history-manager');
+			const hm = getHistoryManager();
+			const allHistorySessions = hm.listSessionsWithHistory();
+			const agentSessions = allHistorySessions.filter((sid) => sid.startsWith(agentId));
+
+			let analyzed = 0;
+			for (const sid of agentSessions) {
+				if (await registry.isAnalyzed(sid)) analyzed++;
+			}
+
+			return {
+				totalSessions: agentSessions.length,
+				analyzedSessions: analyzed,
+				unanalyzedSessions: agentSessions.length - analyzed,
+			};
+		} catch {
+			return { totalSessions: 0, analyzedSessions: 0, unanalyzedSessions: 0 };
 		}
 	}
 }

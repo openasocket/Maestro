@@ -277,6 +277,8 @@ export function setupMemoryMonitorListener(
 	});
 
 	// 5. Periodic trigger: check via interval for write-count based refreshes
+	// Also triggers mid-session experience extraction at every 10th write
+	const midSessionCheckpoints = new Set<string>(); // tracks "sessionId:checkpoint" keys
 	const periodicInterval = setInterval(() => {
 		for (const [, state] of sessionStates) {
 			if (state.effectiveBudget === 0) continue;
@@ -288,6 +290,7 @@ export function setupMemoryMonitorListener(
 				const queue = accessors_.getLiveContextQueue();
 				const writeCount = queue.getWriteCount(state.sessionId);
 
+				// Memory search refresh at every 5th write
 				if (writeCount > 0 && writeCount % 5 === 0) {
 					const now = Date.now();
 					if (now - state.lastSearchAt >= 60000) {
@@ -296,6 +299,41 @@ export function setupMemoryMonitorListener(
 							`recent experiences for ${state.projectPath}`,
 							'monitoring'
 						).catch(() => {});
+					}
+				}
+
+				// Mid-session experience extraction at every 10th write
+				if (writeCount >= 10 && writeCount % 10 === 0) {
+					const checkpoint = `${state.sessionId}:mid:${Math.floor(writeCount / 10)}`;
+					if (!midSessionCheckpoints.has(checkpoint)) {
+						midSessionCheckpoints.add(checkpoint);
+						// Fire-and-forget: check config + enqueue extraction job
+						(async () => {
+							try {
+								const store = accessors_.getMemoryStore();
+								const config = await store.getConfig();
+								if (!config.enabled || !config.enableExperienceExtraction) return;
+
+								const { getMemoryJobQueue } = await import('../memory/memory-job-queue');
+								getMemoryJobQueue().enqueue({
+									type: 'experience-extraction',
+									priority: 4, // Between exit (3) and retroactive (5)
+									payload: {
+										sessionId: state.sessionId,
+										projectPath: state.projectPath,
+										agentType: state.agentType,
+										trigger: 'mid-session',
+									},
+								});
+								logger.debug('[MemoryMonitor] Mid-session extraction enqueued', 'MemoryMonitor', {
+									sessionId: state.sessionId,
+									writeCount,
+									checkpoint,
+								});
+							} catch {
+								// Non-critical — extraction will happen on exit
+							}
+						})();
 					}
 				}
 			} catch {
@@ -309,8 +347,14 @@ export function setupMemoryMonitorListener(
 		periodicInterval.unref();
 	}
 
-	// Cleanup: remove session state on exit
+	// Cleanup: remove session state and checkpoint tracking on exit
 	processManager.on('exit', (sessionId: string) => {
 		sessionStates.delete(sessionId);
+		// Clean up mid-session checkpoint entries for this session
+		for (const key of midSessionCheckpoints) {
+			if (key.startsWith(`${sessionId}:`)) {
+				midSessionCheckpoints.delete(key);
+			}
+		}
 	});
 }

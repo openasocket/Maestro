@@ -213,6 +213,8 @@ export interface MemoryConfig {
 	analysisCooldownMs: number;
 	/** Model to use for experience extraction LLM call — default undefined (use system default) */
 	extractionModel?: string;
+	/** Agent/provider to use for experience extraction — default undefined (auto-detect) */
+	extractionProvider?: string;
 	/** How aggressively to inject memories into agent prompts — default 'balanced' */
 	injectionStrategy: 'lean' | 'balanced' | 'rich';
 	/** Enable multi-signal retrieval (embedding + keyword + tag) — default true */
@@ -247,6 +249,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	minNoveltyScore: 0.4,
 	analysisCooldownMs: 300000,
 	extractionModel: undefined,
+	extractionProvider: undefined,
 	injectionStrategy: 'balanced',
 	enableHybridSearch: true,
 	enableLiveInjection: false,
@@ -258,6 +261,47 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 };
 
 // ─── Job Queue Status & Token Tracking ────────────────────────────────────
+
+/** Diagnostic record for a single experience extraction attempt. */
+export interface ExtractionDiagnostic {
+	timestamp: number;
+	sessionId: string;
+	agentType: string;
+	projectPath: string;
+	status:
+		| 'success'
+		| 'skipped-disabled'
+		| 'skipped-cooldown'
+		| 'skipped-insufficient-history'
+		| 'skipped-no-session-data'
+		| 'skipped-already-analyzed'
+		| 'failed-provider-not-found'
+		| 'failed-spawn'
+		| 'failed-timeout'
+		| 'failed-parse'
+		| 'failed-no-experiences'
+		| 'failed-unknown';
+	message: string;
+	experiencesStored?: number;
+	tokenUsage?: { inputTokens: number; outputTokens: number };
+	providerUsed?: string;
+	trigger?: 'exit' | 'retroactive' | 'mid-session';
+}
+
+/** Real-time progress of an active experience extraction. */
+export interface ExtractionProgress {
+	stage: 'gathering' | 'sending' | 'streaming' | 'parsing' | 'storing' | 'complete' | 'error';
+	message: string;
+	startedAt: number;
+	/** Cumulative tokens seen so far from stream-json events */
+	tokensStreamed: number;
+	/** Estimated total tokens for this extraction (~10000) */
+	estimatedTotalTokens: number;
+	/** Running cost estimate based on tokens streamed so far */
+	estimatedCostSoFar: number;
+	sessionId: string;
+	providerUsed?: string;
+}
 
 /** Status of the background memory job queue (for UI display). */
 export interface JobQueueStatus {
@@ -271,6 +315,10 @@ export interface JobQueueStatus {
 	processing: boolean;
 	/** Estimated seconds until queue is empty */
 	estimatedSecondsRemaining: number | null;
+	/** Recent extraction diagnostics (last 5) */
+	recentDiagnostics?: ExtractionDiagnostic[];
+	/** Real-time progress of current extraction (null when not extracting) */
+	extractionProgress?: ExtractionProgress | null;
 }
 
 /** Cumulative token consumption tracked by the job queue (last 24h). */
@@ -1566,6 +1614,42 @@ export const SEED_ROLES: {
 					'Skill Gap Analysis',
 					'Training Evaluation',
 					'Knowledge Checks',
+				],
+			},
+		],
+	},
+	{
+		name: 'Maestro Internal',
+		description:
+			'Internal roles used by Maestro for automated background analysis and system operations',
+		systemPrompt: [
+			'You are an internal Maestro analysis agent. You operate in the background, never interacting with the user directly.',
+			'Your outputs are consumed programmatically — they must be machine-parseable JSON. No markdown, no commentary, no explanations outside the JSON structure.',
+			'Be precise, factual, and conservative. When uncertain, omit rather than guess. False positives waste token budget on injection.',
+		].join('\n'),
+		personas: [
+			{
+				name: 'Experience Analyst',
+				description:
+					'Analyzes completed and in-progress coding sessions to extract discrete, reusable learnings',
+				systemPrompt: [
+					'You are an Experience Analyst. Your function is to analyze coding session transcripts and extract discrete, novel learnings that will help future sessions.',
+					'',
+					'Analysis principles:',
+					'- Extract only genuinely novel learnings. "Use git to commit" is not novel. "This project requires signing commits with GPG because CI rejects unsigned pushes" is novel.',
+					'- Each learning must be self-contained — understandable without the original session context. Include enough specificity (file names, error codes, tool names) for future retrieval.',
+					'- Distinguish between: patterns established (reusable techniques), problems solved (specific fixes), dependencies discovered (wiring/integration), anti-patterns identified (things to avoid), and decisions made (architectural choices with rationale).',
+					'- For decisions, always capture what alternatives were considered and why this approach was chosen. Decisions without rationale are useless.',
+					'- Assign novelty scores honestly. Boilerplate patterns score low (0.1-0.3). Project-specific discoveries score high (0.7-1.0). Generic best practices score medium (0.4-0.6).',
+					'- Your output MUST be a JSON array of experience objects. No surrounding text, no markdown fences, no explanations.',
+					'- When analyzing mid-session (not yet complete), focus on learnings from the work done so far. Do not speculate about outcomes.',
+				].join('\n'),
+				skills: [
+					'Session Analysis',
+					'Pattern Recognition',
+					'Knowledge Extraction',
+					'Novelty Assessment',
+					'Decision Provenance',
 				],
 			},
 		],

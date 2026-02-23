@@ -306,6 +306,10 @@ interface SettingsModalProps {
 	onThemeImportSuccess?: (message: string) => void;
 	/** Active session's working directory for project-scoped memories */
 	activeProjectPath?: string | null;
+	/** Active agent session ID for per-agent analysis */
+	activeAgentId?: string | null;
+	/** Active agent type (e.g. 'claude-code') */
+	activeAgentType?: string | null;
 }
 
 export const SettingsModal = memo(function SettingsModal(props: SettingsModalProps) {
@@ -3027,6 +3031,8 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 								projectPath={memoryProjectPath}
 								onHierarchyChange={memoryHierarchy.refresh}
 								hierarchyRoleCount={memoryHierarchy.roles.length}
+								activeAgentId={props.activeAgentId}
+								activeAgentType={props.activeAgentType}
 							/>
 							<MemoryBrowserPanel
 								theme={theme}

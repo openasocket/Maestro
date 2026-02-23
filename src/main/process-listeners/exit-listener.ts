@@ -458,7 +458,12 @@ export function setupExitListener(
 						queue.enqueue({
 							type: 'experience-extraction',
 							priority: 3,
-							payload: { sessionId, projectPath: session.projectRoot, agentType: session.toolType },
+							payload: {
+								sessionId,
+								projectPath: session.projectRoot,
+								agentType: session.toolType,
+								trigger: 'exit',
+							},
 						});
 					}
 				}

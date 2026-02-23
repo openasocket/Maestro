@@ -3031,38 +3031,63 @@ export class MemoryStore {
 	async seedFromDefaults(): Promise<{ roles: number; personas: number; skills: number }> {
 		const registry = await this.readRegistry();
 
-		// Build lookup of existing role names (case-insensitive) for merge seeding
-		const existingRoleNames = new Set(registry.roles.map((r) => r.name.toLowerCase()));
-
 		let roleCount = 0;
 		let personaCount = 0;
 		let skillCount = 0;
 
 		for (const seedRole of SEED_ROLES) {
-			// Skip roles that already exist (by name) to preserve user customizations
-			if (existingRoleNames.has(seedRole.name.toLowerCase())) continue;
-
-			const role = await this.createRole(
-				seedRole.name,
-				seedRole.description,
-				seedRole.systemPrompt
+			// Check if role already exists (by name, case-insensitive)
+			let existingRole = registry.roles.find(
+				(r) => r.name.toLowerCase() === seedRole.name.toLowerCase()
 			);
-			roleCount++;
 
-			for (const seedPersona of seedRole.personas) {
-				const persona = await this.createPersona(
-					role.id,
-					seedPersona.name,
-					seedPersona.description,
-					undefined,
-					undefined,
-					seedPersona.systemPrompt
+			if (!existingRole) {
+				// Create new role
+				existingRole = await this.createRole(
+					seedRole.name,
+					seedRole.description,
+					seedRole.systemPrompt
 				);
-				personaCount++;
+				roleCount++;
+				// Re-read registry after createRole (it writes)
+				const updated = await this.readRegistry();
+				Object.assign(registry, updated);
+			}
+
+			// Seed missing personas under this role
+			for (const seedPersona of seedRole.personas) {
+				// Re-read for fresh state
+				const freshRegistry = await this.readRegistry();
+				let existingPersona = freshRegistry.personas.find(
+					(p) =>
+						p.roleId === existingRole!.id && p.name.toLowerCase() === seedPersona.name.toLowerCase()
+				);
+
+				if (!existingPersona) {
+					existingPersona = await this.createPersona(
+						existingRole.id,
+						seedPersona.name,
+						seedPersona.description,
+						undefined,
+						undefined,
+						seedPersona.systemPrompt
+					);
+					personaCount++;
+				}
+
+				// Seed missing skills under this persona
+				const currentRegistry = await this.readRegistry();
+				const existingSkillNames = new Set(
+					currentRegistry.skillAreas
+						.filter((s) => s.personaId === existingPersona!.id)
+						.map((s) => s.name.toLowerCase())
+				);
 
 				for (const skillName of seedPersona.skills) {
-					await this.createSkillArea(persona.id, skillName, `${skillName} expertise`);
-					skillCount++;
+					if (!existingSkillNames.has(skillName.toLowerCase())) {
+						await this.createSkillArea(existingPersona.id, skillName, `${skillName} expertise`);
+						skillCount++;
+					}
 				}
 			}
 		}
@@ -3074,10 +3099,17 @@ export class MemoryStore {
 	 * Reset all seed-derived roles and personas to their original SEED_ROLES values.
 	 * Custom (non-seed) roles and personas are left untouched.
 	 */
-	async resetToSeedDefaults(): Promise<{ rolesReset: number; personasReset: number }> {
+	async resetToSeedDefaults(): Promise<{
+		rolesReset: number;
+		personasReset: number;
+		personasCreated: number;
+		skillsCreated: number;
+	}> {
 		const registry = await this.readRegistry();
 		let rolesReset = 0;
 		let personasReset = 0;
+		let personasCreated = 0;
+		let skillsCreated = 0;
 
 		for (const seedRole of SEED_ROLES) {
 			const existingRole = registry.roles.find(
@@ -3091,23 +3123,55 @@ export class MemoryStore {
 			existingRole.updatedAt = Date.now();
 			rolesReset++;
 
-			// Reset matching child personas
 			for (const seedPersona of seedRole.personas) {
-				const existingPersona = registry.personas.find(
+				let existingPersona = registry.personas.find(
 					(p) =>
 						p.roleId === existingRole.id && p.name.toLowerCase() === seedPersona.name.toLowerCase()
 				);
-				if (!existingPersona) continue;
 
-				existingPersona.description = seedPersona.description;
-				existingPersona.systemPrompt = seedPersona.systemPrompt;
-				existingPersona.updatedAt = Date.now();
-				personasReset++;
+				if (existingPersona) {
+					// Reset existing persona fields
+					existingPersona.description = seedPersona.description;
+					existingPersona.systemPrompt = seedPersona.systemPrompt;
+					existingPersona.updatedAt = Date.now();
+					personasReset++;
+				} else {
+					// Create missing persona (write registry first to save role changes)
+					await this.writeRegistry(registry);
+					existingPersona = await this.createPersona(
+						existingRole.id,
+						seedPersona.name,
+						seedPersona.description,
+						undefined,
+						undefined,
+						seedPersona.systemPrompt
+					);
+					personasCreated++;
+					// Re-read registry after createPersona writes
+					Object.assign(registry, await this.readRegistry());
+				}
+
+				// Seed missing skills under this persona
+				const existingSkillNames = new Set(
+					registry.skillAreas
+						.filter((s) => s.personaId === existingPersona!.id)
+						.map((s) => s.name.toLowerCase())
+				);
+
+				for (const skillName of seedPersona.skills) {
+					if (!existingSkillNames.has(skillName.toLowerCase())) {
+						await this.writeRegistry(registry);
+						await this.createSkillArea(existingPersona.id, skillName, `${skillName} expertise`);
+						skillsCreated++;
+						// Re-read after createSkillArea writes
+						Object.assign(registry, await this.readRegistry());
+					}
+				}
 			}
 		}
 
 		await this.writeRegistry(registry);
-		return { rolesReset, personasReset };
+		return { rolesReset, personasReset, personasCreated, skillsCreated };
 	}
 
 	// ─── Analytics ──────────────────────────────────────────────────────────

@@ -46,7 +46,12 @@ export interface UseMemoryHierarchyReturn {
 	// Utility
 	refresh: () => void;
 	seedDefaults: () => Promise<void>;
-	resetAllDefaults: () => Promise<{ rolesReset: number; personasReset: number }>;
+	resetAllDefaults: () => Promise<{
+		rolesReset: number;
+		personasReset: number;
+		personasCreated?: number;
+		skillsCreated?: number;
+	}>;
 }
 
 export function useMemoryHierarchy(): UseMemoryHierarchyReturn {

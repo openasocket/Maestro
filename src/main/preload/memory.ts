@@ -107,8 +107,14 @@ export function createMemoryApi() {
 		},
 
 		// ─── Reset Seed Defaults ──────────────────────────────────────────
-		resetSeedDefaults: (): Promise<IpcResponse<{ rolesReset: number; personasReset: number }>> =>
-			ipcRenderer.invoke('memory:resetSeedDefaults'),
+		resetSeedDefaults: (): Promise<
+			IpcResponse<{
+				rolesReset: number;
+				personasReset: number;
+				personasCreated?: number;
+				skillsCreated?: number;
+			}>
+		> => ipcRenderer.invoke('memory:resetSeedDefaults'),
 
 		// ─── Skill Areas ──────────────────────────────────────────────────
 		skill: {
@@ -352,6 +358,36 @@ export function createMemoryApi() {
 
 		getTokenUsage: (): Promise<IpcResponse<TokenUsage>> =>
 			ipcRenderer.invoke('memory:getTokenUsage'),
+
+		analyzeHistoricalSessions: (): Promise<
+			IpcResponse<{ total: number; queued: number; skipped: number }>
+		> => ipcRenderer.invoke('memory:analyzeHistoricalSessions'),
+
+		getAnalysisStats: (): Promise<
+			IpcResponse<{
+				totalSessions: number;
+				analyzedSessions: number;
+				unanalyzedSessions: number;
+			}>
+		> => ipcRenderer.invoke('memory:getAnalysisStats'),
+
+		analyzeAgentSessions: (
+			agentId: string,
+			agentType: string,
+			projectPath?: string
+		): Promise<
+			IpcResponse<{ total: number; queued: number; skipped: number; alreadyAnalyzed: number }>
+		> => ipcRenderer.invoke('memory:analyzeAgentSessions', agentId, agentType, projectPath),
+
+		getAgentAnalysisStats: (
+			agentId: string
+		): Promise<
+			IpcResponse<{
+				totalSessions: number;
+				analyzedSessions: number;
+				unanalyzedSessions: number;
+			}>
+		> => ipcRenderer.invoke('memory:getAgentAnalysisStats', agentId),
 
 		onJobQueueUpdate: (callback: (status: JobQueueStatus) => void) => {
 			const handler = (_event: unknown, status: JobQueueStatus) => callback(status);

@@ -636,4 +636,41 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 			return getMemoryJobQueue().getTokenUsage();
 		})
 	);
+
+	// ─── Retroactive Analysis ────────────────────────────────────────────
+
+	ipcMain.handle(
+		'memory:analyzeHistoricalSessions',
+		createIpcDataHandler(handlerOpts('analyzeHistoricalSessions'), async () => {
+			const { getMemoryJobQueue } = await import('../../memory/memory-job-queue');
+			return getMemoryJobQueue().enqueueRetroactiveAnalysis();
+		})
+	);
+
+	ipcMain.handle(
+		'memory:getAnalysisStats',
+		createIpcDataHandler(handlerOpts('getAnalysisStats'), async () => {
+			const { getMemoryJobQueue } = await import('../../memory/memory-job-queue');
+			return getMemoryJobQueue().getAnalysisStats();
+		})
+	);
+
+	ipcMain.handle(
+		'memory:analyzeAgentSessions',
+		createIpcDataHandler(
+			handlerOpts('analyzeAgentSessions'),
+			async (agentId: string, agentType: string, projectPath?: string) => {
+				const { getMemoryJobQueue } = await import('../../memory/memory-job-queue');
+				return getMemoryJobQueue().enqueueAgentAnalysis(agentId, agentType, projectPath);
+			}
+		)
+	);
+
+	ipcMain.handle(
+		'memory:getAgentAnalysisStats',
+		createIpcDataHandler(handlerOpts('getAgentAnalysisStats'), async (agentId: string) => {
+			const { getMemoryJobQueue } = await import('../../memory/memory-job-queue');
+			return getMemoryJobQueue().getAgentAnalysisStats(agentId);
+		})
+	);
 }

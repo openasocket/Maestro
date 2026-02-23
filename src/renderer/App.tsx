@@ -9415,6 +9415,8 @@ You are taking over this conversation. Based on the context above, provide a bri
 							onThemeImportError={(msg) => setFlashNotification(msg)}
 							onThemeImportSuccess={(msg) => setFlashNotification(msg)}
 							activeProjectPath={activeSession?.cwd}
+							activeAgentId={activeSession?.id}
+							activeAgentType={activeSession?.toolType}
 						/>
 					</Suspense>
 				)}

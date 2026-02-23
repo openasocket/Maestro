@@ -444,7 +444,7 @@ export async function routeUserMessage(
 				.map((m) => `[${m.from}]: ${m.content}`)
 				.join('\n');
 
-			const fullPrompt = `${getModeratorSystemPrompt()}
+			let fullPrompt = `${getModeratorSystemPrompt()}
 
 ## Current Participants:
 ${participantContext}${availableSessionsContext}
@@ -454,6 +454,19 @@ ${historyContext}
 
 ## User Request${readOnly ? ' (READ-ONLY MODE - do not make changes)' : ''}:
 ${message}`;
+
+			// Memory injection for group chat moderator — inject relevant knowledge from the hierarchy
+			try {
+				const { tryInjectMemories, recordSessionInjection } =
+					await import('../memory/memory-injector');
+				const memResult = await tryInjectMemories(fullPrompt, os.homedir(), chat.moderatorAgentId);
+				fullPrompt = memResult.injectedPrompt;
+				if (memResult.injectedIds.length > 0) {
+					recordSessionInjection(sessionId, memResult.injectedIds, memResult.scopeGroups);
+				}
+			} catch {
+				// Non-critical — proceed without injection
+			}
 
 			// Get the base args from the agent configuration
 			const args = [...agent.args];
@@ -827,7 +840,7 @@ export async function routeModeratorResponse(
 			// Get the group chat folder path for file access permissions
 			const groupChatFolder = getGroupChatDir(groupChatId);
 
-			const participantPrompt = groupChatParticipantRequestPrompt
+			let participantPrompt = groupChatParticipantRequestPrompt
 				.replace(/\{\{PARTICIPANT_NAME\}\}/g, participantName)
 				.replace(/\{\{GROUP_CHAT_NAME\}\}/g, updatedChat.name)
 				.replace(/\{\{READ_ONLY_NOTE\}\}/g, readOnlyNote)
@@ -840,6 +853,19 @@ export async function routeModeratorResponse(
 			// Create a unique session ID for this batch process
 			const sessionId = `group-chat-${groupChatId}-participant-${participantName}-${Date.now()}`;
 			console.log(`[GroupChat:Debug] Generated session ID: ${sessionId}`);
+
+			// Memory injection for group chat participant — inject relevant knowledge from the hierarchy
+			try {
+				const { tryInjectMemories, recordSessionInjection } =
+					await import('../memory/memory-injector');
+				const memResult = await tryInjectMemories(participantPrompt, cwd, participant.agentId);
+				participantPrompt = memResult.injectedPrompt;
+				if (memResult.injectedIds.length > 0) {
+					recordSessionInjection(sessionId, memResult.injectedIds, memResult.scopeGroups);
+				}
+			} catch {
+				// Non-critical — proceed without injection
+			}
 
 			const agentConfigValues = getAgentConfigCallback?.(participant.agentId) || {};
 			// Note: Don't pass modelId to buildAgentArgs - it will be handled by applyAgentConfigOverrides
@@ -1213,7 +1239,7 @@ export async function spawnModeratorSynthesis(
 					.join('\n')
 			: '(No agents currently in this group chat)';
 
-	const synthesisPrompt = `${getModeratorSystemPrompt()}
+	let synthesisPrompt = `${getModeratorSystemPrompt()}
 
 ${getModeratorSynthesisPrompt()}
 
@@ -1227,6 +1253,18 @@ ${historyContext}
 Review the agent responses above. Either:
 1. Synthesize into a final answer for the user (NO @mentions) if the question is fully answered
 2. @mention specific agents for follow-up if you need more information`;
+
+	// Memory injection for synthesis moderator
+	try {
+		const { tryInjectMemories, recordSessionInjection } = await import('../memory/memory-injector');
+		const memResult = await tryInjectMemories(synthesisPrompt, os.homedir(), chat.moderatorAgentId);
+		synthesisPrompt = memResult.injectedPrompt;
+		if (memResult.injectedIds.length > 0) {
+			recordSessionInjection(sessionId, memResult.injectedIds, memResult.scopeGroups);
+		}
+	} catch {
+		// Non-critical — proceed without injection
+	}
 
 	const agentConfigValues = getAgentConfigCallback?.(chat.moderatorAgentId) || {};
 	const baseArgs = buildAgentArgs(agent, {
@@ -1385,12 +1423,24 @@ export async function respawnParticipantWithRecovery(
 		.replace(/\{\{READ_ONLY_INSTRUCTION\}\}/g, readOnlyInstruction);
 
 	// Prepend recovery context
-	const fullPrompt = `${recoveryContext}\n\n${basePrompt}`;
+	let fullPrompt = `${recoveryContext}\n\n${basePrompt}`;
 	console.log(`[GroupChat:Debug] Full recovery prompt length: ${fullPrompt.length}`);
 
 	// Create a unique session ID for this recovery spawn
 	const sessionId = `group-chat-${groupChatId}-participant-${participantName}-recovery-${Date.now()}`;
 	console.log(`[GroupChat:Debug] Recovery session ID: ${sessionId}`);
+
+	// Memory injection for recovery participant
+	try {
+		const { tryInjectMemories, recordSessionInjection } = await import('../memory/memory-injector');
+		const memResult = await tryInjectMemories(fullPrompt, cwd, participant.agentId);
+		fullPrompt = memResult.injectedPrompt;
+		if (memResult.injectedIds.length > 0) {
+			recordSessionInjection(sessionId, memResult.injectedIds, memResult.scopeGroups);
+		}
+	} catch {
+		// Non-critical — proceed without injection
+	}
 
 	// Build args - note: no agentSessionId since we're starting fresh
 	const agentConfigValues = getAgentConfigCallback?.(participant.agentId) || {};

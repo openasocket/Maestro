@@ -11,7 +11,6 @@ import {
 	Loader2,
 	Sparkles,
 	AlertTriangle,
-	Database,
 	Lightbulb,
 	Plus,
 	X,
@@ -22,9 +21,6 @@ import {
 	Activity,
 	Archive,
 	Link2,
-	ChevronDown,
-	ChevronUp,
-	Zap,
 	RotateCcw,
 } from 'lucide-react';
 import type { Theme } from '../../types';
@@ -38,6 +34,8 @@ import type {
 	MemoryScope,
 	JobQueueStatus,
 	TokenUsage,
+	ExtractionDiagnostic,
+	ExtractionProgress,
 } from '../../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../../shared/memory-types';
 
@@ -48,6 +46,10 @@ interface MemorySettingsProps {
 	onHierarchyChange?: () => void;
 	/** Live role count from shared hierarchy — when provided, overrides internal hasRoles check. */
 	hierarchyRoleCount?: number;
+	/** Active agent session ID for per-agent analysis */
+	activeAgentId?: string | null;
+	/** Active agent type (e.g. 'claude-code') */
+	activeAgentType?: string | null;
 }
 
 /**
@@ -153,6 +155,8 @@ export function MemorySettings({
 	projectPath,
 	onHierarchyChange,
 	hierarchyRoleCount,
+	activeAgentId,
+	activeAgentType,
 }: MemorySettingsProps): React.ReactElement {
 	const [config, setConfig] = useState<MemoryConfig>(MEMORY_CONFIG_DEFAULTS);
 	const [stats, setStats] = useState<MemoryStats | null>(null);
@@ -174,29 +178,43 @@ export function MemorySettings({
 	const [editingRuleText, setEditingRuleText] = useState('');
 	const [queueStatus, setQueueStatus] = useState<JobQueueStatus | null>(null);
 	const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
-	const [queueExpanded, setQueueExpanded] = useState(false);
+	const [batchCapableAgents, setBatchCapableAgents] = useState<{ id: string; name: string }[]>([]);
 
-	// Subscribe to queue status updates
+	// Fetch batch-capable agents for provider dropdown
+	useEffect(() => {
+		if (!config.enabled || !config.enableExperienceExtraction) return;
+		window.maestro.agents
+			.detect()
+			.then((agents: any[]) => {
+				const batchAgents = agents
+					.filter((a: any) => a.available && a.capabilities?.supportsBatchMode && !a.hidden)
+					.map((a: any) => ({ id: a.id, name: a.name }));
+				setBatchCapableAgents(batchAgents);
+			})
+			.catch(() => {});
+	}, [config.enabled, config.enableExperienceExtraction]);
+
+	// Subscribe to queue status updates + periodic refresh for diagnostics and tokens
 	useEffect(() => {
 		if (!config.enabled) return;
 
 		const handler = (status: JobQueueStatus) => setQueueStatus(status);
 		const cleanup = (window.maestro.memory as any).onJobQueueUpdate(handler);
 
-		// Fetch initial status + token usage
-		(window.maestro.memory as any).getJobQueueStatus?.().then((res: any) => {
-			if (res?.success) setQueueStatus(res.data);
-		});
-		(window.maestro.memory as any).getTokenUsage?.().then((res: any) => {
-			if (res?.success) setTokenUsage(res.data);
-		});
-
-		// Periodically refresh token usage (every 30s)
-		const interval = setInterval(() => {
+		const fetchAll = () => {
+			(window.maestro.memory as any).getJobQueueStatus?.().then((res: any) => {
+				if (res?.success) setQueueStatus(res.data);
+			});
 			(window.maestro.memory as any).getTokenUsage?.().then((res: any) => {
 				if (res?.success) setTokenUsage(res.data);
 			});
-		}, 30000);
+		};
+
+		// Fetch initial status + token usage immediately
+		fetchAll();
+
+		// Refresh both every 10s so diagnostics and token data stay current
+		const interval = setInterval(fetchAll, 10000);
 
 		return () => {
 			cleanup?.();
@@ -573,117 +591,19 @@ export function MemorySettings({
 				</div>
 			)}
 
-			{/* Queue Status Indicator — shown when queue has items */}
-			{config.enabled && queueStatus && queueStatus.queueLength > 0 && (
-				<div className="rounded-lg border p-3" style={{ borderColor: theme.colors.border }}>
-					{/* Collapsed view */}
-					<button
-						className="w-full flex items-center justify-between text-left"
-						onClick={() => setQueueExpanded(!queueExpanded)}
-					>
-						<div className="flex items-center gap-2 flex-1 min-w-0">
-							<Loader2
-								className="w-3.5 h-3.5 animate-spin shrink-0"
-								style={{ color: theme.colors.accent }}
-							/>
-							<div className="flex-1 min-w-0">
-								<div className="text-xs" style={{ color: theme.colors.textMain }}>
-									{queueStatus.currentActivity ?? 'Learning from recent session...'}
-								</div>
-								{/* Progress bar */}
-								<div className="mt-1.5 flex items-center gap-2">
-									<div
-										className="flex-1 h-1.5 rounded-full overflow-hidden"
-										style={{ backgroundColor: `${theme.colors.border}40` }}
-									>
-										<div
-											className="h-full rounded-full transition-all duration-500"
-											style={{
-												backgroundColor: theme.colors.accent,
-												width: queueStatus.estimatedSecondsRemaining
-													? `${Math.max(10, 100 - (queueStatus.queueLength / Math.max(queueStatus.queueLength + 1, 1)) * 100)}%`
-													: '50%',
-											}}
-										/>
-									</div>
-									<span className="text-xs shrink-0" style={{ color: theme.colors.textDim }}>
-										{queueStatus.queueLength} task{queueStatus.queueLength !== 1 ? 's' : ''}{' '}
-										remaining
-										{queueStatus.estimatedSecondsRemaining
-											? ` (~${queueStatus.estimatedSecondsRemaining}s)`
-											: ''}
-									</span>
-								</div>
-							</div>
-						</div>
-						{queueExpanded ? (
-							<ChevronUp
-								className="w-3.5 h-3.5 shrink-0 ml-2"
-								style={{ color: theme.colors.textDim }}
-							/>
-						) : (
-							<ChevronDown
-								className="w-3.5 h-3.5 shrink-0 ml-2"
-								style={{ color: theme.colors.textDim }}
-							/>
-						)}
-					</button>
-
-					{/* Expanded detail view */}
-					{queueExpanded && (
-						<div
-							className="mt-3 pt-3 border-t space-y-2"
-							style={{ borderColor: theme.colors.border }}
-						>
-							{queueStatus.currentJob && (
-								<div
-									className="flex items-center gap-1.5 text-xs"
-									style={{ color: theme.colors.textMain }}
-								>
-									<span style={{ color: theme.colors.accent }}>●</span>
-									{queueStatus.currentActivity}
-								</div>
-							)}
-							{queueStatus.queueLength > 0 && (
-								<div className="text-xs" style={{ color: theme.colors.textDim }}>
-									{queueStatus.queueLength} job{queueStatus.queueLength !== 1 ? 's' : ''} queued
-								</div>
-							)}
-
-							{/* Token usage section */}
-							{tokenUsage &&
-								(tokenUsage.extractionTokens > 0 || tokenUsage.injectionTokens > 0) && (
-									<div className="pt-2 space-y-1">
-										<div
-											className="flex items-center gap-1.5 text-xs"
-											style={{ color: theme.colors.textDim }}
-										>
-											<Zap className="w-3 h-3" />
-											Token usage (24h)
-										</div>
-										{tokenUsage.extractionTokens > 0 && (
-											<div className="text-xs" style={{ color: theme.colors.textMain }}>
-												Extraction: {tokenUsage.extractionTokens.toLocaleString()} tokens (
-												{tokenUsage.extractionCalls} call
-												{tokenUsage.extractionCalls !== 1 ? 's' : ''}) · $
-												{tokenUsage.estimatedCostUsd.toFixed(2)}
-											</div>
-										)}
-										{tokenUsage.injectionTokens > 0 && (
-											<div className="text-xs" style={{ color: theme.colors.textMain }}>
-												Injection: {tokenUsage.injectionTokens.toLocaleString()} tokens
-											</div>
-										)}
-										<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
-											Total:{' '}
-											{(tokenUsage.extractionTokens + tokenUsage.injectionTokens).toLocaleString()}{' '}
-											tokens · ${tokenUsage.estimatedCostUsd.toFixed(2)}
-										</div>
-									</div>
-								)}
-						</div>
-					)}
-				</div>
+			{/* Extraction Status Panel — persistent when extraction is enabled */}
+			{config.enabled && config.enableExperienceExtraction && (
+				<ExtractionStatusPanel
+					theme={theme}
+					queueStatus={queueStatus}
+					tokenUsage={tokenUsage}
+					config={config}
+					batchCapableAgents={batchCapableAgents}
+					onUpdateConfig={updateConfig}
+					activeAgentId={activeAgentId}
+					activeAgentType={activeAgentType}
+					projectPath={projectPath}
+				/>
 			)}
 
 			{/* Config panel — shown when enabled */}
@@ -928,18 +848,6 @@ export function MemorySettings({
 							theme={theme}
 						/>
 
-						<ConfigSlider
-							label="Extraction Cooldown"
-							description="Minimum time between analyses per project"
-							value={config.analysisCooldownMs / 60000}
-							min={1}
-							max={30}
-							step={1}
-							onChange={(v) => updateConfig({ analysisCooldownMs: v * 60000 })}
-							theme={theme}
-							formatValue={(v) => `${v} min`}
-						/>
-
 						<ConfigToggle
 							label="Auto-Consolidation"
 							description="Automatically merge similar memories (saves tokens on injection)"
@@ -992,33 +900,6 @@ export function MemorySettings({
 					<EmbeddingModelStatus theme={theme} />
 				</>
 			)}
-		</div>
-	);
-}
-
-/**
- * Stats cell component.
- */
-function StatCell({
-	label,
-	value,
-	theme,
-}: {
-	label: string;
-	value: number | string;
-	theme: Theme;
-}) {
-	return (
-		<div
-			className="rounded p-2 text-center"
-			style={{ backgroundColor: `${theme.colors.border}40` }}
-		>
-			<div className="text-sm font-bold" style={{ color: theme.colors.textMain }}>
-				{value}
-			</div>
-			<div className="text-xs" style={{ color: theme.colors.textDim }}>
-				{label}
-			</div>
 		</div>
 	);
 }
@@ -1485,6 +1366,611 @@ function PromotionSection({
  * Embedding model status display.
  * Reuses grpo:getModelStatus since the embedding model is shared.
  */
+/**
+ * Persistent extraction status panel — always visible when extraction is enabled.
+ * Shows: current activity, provider/model config, token usage (24h), recent extraction history.
+ */
+function ExtractionStatusPanel({
+	theme,
+	queueStatus,
+	tokenUsage,
+	config,
+	batchCapableAgents,
+	onUpdateConfig,
+	activeAgentId,
+	activeAgentType,
+	projectPath,
+}: {
+	theme: Theme;
+	queueStatus: JobQueueStatus | null;
+	tokenUsage: TokenUsage | null;
+	config: MemoryConfig;
+	batchCapableAgents: { id: string; name: string }[];
+	onUpdateConfig: (updates: Partial<MemoryConfig>) => void;
+	activeAgentId?: string | null;
+	activeAgentType?: string | null;
+	projectPath?: string | null;
+}) {
+	const isProcessing =
+		queueStatus?.processing && queueStatus.currentJob === 'experience-extraction';
+	const diagnostics = queueStatus?.recentDiagnostics ?? [];
+	const lastDiag = diagnostics.length > 0 ? diagnostics[diagnostics.length - 1] : null;
+
+	// Global retroactive analysis state
+	const [analysisStats, setAnalysisStats] = useState<{
+		totalSessions: number;
+		analyzedSessions: number;
+		unanalyzedSessions: number;
+	} | null>(null);
+	const [retroactiveResult, setRetroactiveResult] = useState<string | null>(null);
+	const [analyzingHistory, setAnalyzingHistory] = useState(false);
+
+	// Per-agent analysis state
+	const [agentStats, setAgentStats] = useState<{
+		totalSessions: number;
+		analyzedSessions: number;
+		unanalyzedSessions: number;
+	} | null>(null);
+	const [agentAnalysisResult, setAgentAnalysisResult] = useState<string | null>(null);
+	const [analyzingAgent, setAnalyzingAgent] = useState(false);
+
+	// Fetch global + agent analysis stats on mount / agent change
+	useEffect(() => {
+		window.maestro.memory.getAnalysisStats().then((res) => {
+			if (res.success) setAnalysisStats(res.data);
+		});
+	}, []);
+
+	useEffect(() => {
+		if (activeAgentId) {
+			setAgentAnalysisResult(null);
+			window.maestro.memory.getAgentAnalysisStats(activeAgentId).then((res) => {
+				if (res.success) setAgentStats(res.data);
+			});
+		} else {
+			setAgentStats(null);
+		}
+	}, [activeAgentId]);
+
+	const handleAnalyzeHistory = async () => {
+		setAnalyzingHistory(true);
+		setRetroactiveResult(null);
+		try {
+			const res = await window.maestro.memory.analyzeHistoricalSessions();
+			if (res.success) {
+				setRetroactiveResult(
+					`Queued ${res.data.queued} sessions for analysis` +
+						(res.data.skipped > 0 ? ` (${res.data.skipped} skipped)` : '')
+				);
+				// Refresh stats
+				const statsRes = await window.maestro.memory.getAnalysisStats();
+				if (statsRes.success) setAnalysisStats(statsRes.data);
+			} else {
+				setRetroactiveResult('Failed to start analysis');
+			}
+		} catch {
+			setRetroactiveResult('Failed to start analysis');
+		} finally {
+			setAnalyzingHistory(false);
+		}
+	};
+
+	const handleAnalyzeAgent = async () => {
+		if (!activeAgentId || !activeAgentType) return;
+		setAnalyzingAgent(true);
+		setAgentAnalysisResult(null);
+		try {
+			const res = await window.maestro.memory.analyzeAgentSessions(
+				activeAgentId,
+				activeAgentType,
+				projectPath ?? undefined
+			);
+			if (res.success) {
+				const parts: string[] = [];
+				if (res.data.queued > 0) parts.push(`${res.data.queued} queued`);
+				if (res.data.alreadyAnalyzed > 0) parts.push(`${res.data.alreadyAnalyzed} already done`);
+				if (res.data.skipped > 0) parts.push(`${res.data.skipped} skipped`);
+				setAgentAnalysisResult(parts.join(', ') || 'No sessions to analyze');
+				// Refresh agent stats
+				const statsRes = await window.maestro.memory.getAgentAnalysisStats(activeAgentId);
+				if (statsRes.success) setAgentStats(statsRes.data);
+				// Also refresh global stats
+				const globalRes = await window.maestro.memory.getAnalysisStats();
+				if (globalRes.success) setAnalysisStats(globalRes.data);
+			} else {
+				setAgentAnalysisResult('Failed to start analysis');
+			}
+		} catch {
+			setAgentAnalysisResult('Failed to start analysis');
+		} finally {
+			setAnalyzingAgent(false);
+		}
+	};
+
+	// Determine overall status
+	const statusColor = isProcessing
+		? theme.colors.accent
+		: lastDiag?.status === 'success'
+			? '#22c55e'
+			: lastDiag?.status?.startsWith('skipped')
+				? '#eab308'
+				: lastDiag
+					? '#ef4444'
+					: theme.colors.textDim;
+	const statusLabel = isProcessing
+		? 'Running'
+		: lastDiag?.status === 'success'
+			? 'Healthy'
+			: lastDiag?.status?.startsWith('skipped')
+				? 'Idle'
+				: lastDiag
+					? 'Error'
+					: 'Waiting';
+
+	return (
+		<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
+			{/* Header with status indicator */}
+			<div className="flex items-center justify-between">
+				<div className="flex items-center gap-2">
+					<Activity className="w-3.5 h-3.5" style={{ color: theme.colors.accent }} />
+					<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+						Experience Extraction
+					</span>
+				</div>
+				<div className="flex items-center gap-1.5">
+					{isProcessing && (
+						<Loader2 className="w-3 h-3 animate-spin" style={{ color: theme.colors.accent }} />
+					)}
+					<span
+						className="text-xs font-medium px-1.5 py-0.5 rounded"
+						style={{ backgroundColor: `${statusColor}20`, color: statusColor }}
+					>
+						{statusLabel}
+					</span>
+				</div>
+			</div>
+
+			{/* Extraction progress (replaces simple activity text when progress available) */}
+			{isProcessing &&
+			queueStatus?.extractionProgress &&
+			queueStatus.extractionProgress.stage !== 'complete' ? (
+				<ExtractionProgressDisplay
+					progress={queueStatus.extractionProgress}
+					theme={theme}
+					queueLength={queueStatus.queueLength}
+				/>
+			) : isProcessing && queueStatus?.currentActivity ? (
+				<div className="text-xs" style={{ color: theme.colors.textMain }}>
+					{queueStatus.currentActivity}
+					{queueStatus.queueLength > 0 && (
+						<span style={{ color: theme.colors.textDim }}>
+							{' '}
+							({queueStatus.queueLength} more queued)
+						</span>
+					)}
+				</div>
+			) : null}
+
+			{/* Provider config + Token usage row */}
+			<div className="grid grid-cols-2 gap-3">
+				{/* Provider config */}
+				<div
+					className="rounded p-2 space-y-1.5"
+					style={{ backgroundColor: `${theme.colors.border}30` }}
+				>
+					<div className="text-xs" style={{ color: theme.colors.textDim }}>
+						Provider
+					</div>
+					<select
+						className="w-full rounded px-1.5 py-1 text-xs border"
+						style={{
+							backgroundColor: theme.colors.bgMain,
+							borderColor: theme.colors.border,
+							color: theme.colors.textMain,
+						}}
+						value={config.extractionProvider ?? ''}
+						onChange={(e) => onUpdateConfig({ extractionProvider: e.target.value || undefined })}
+					>
+						<option value="">Auto-detect</option>
+						{batchCapableAgents.map((a) => (
+							<option key={a.id} value={a.id}>
+								{a.name}
+							</option>
+						))}
+					</select>
+					<div className="text-xs" style={{ color: theme.colors.textDim }}>
+						Model
+					</div>
+					<input
+						type="text"
+						className="w-full rounded px-1.5 py-1 text-xs border"
+						style={{
+							backgroundColor: theme.colors.bgMain,
+							borderColor: theme.colors.border,
+							color: theme.colors.textMain,
+						}}
+						placeholder="Provider default"
+						value={config.extractionModel ?? ''}
+						onChange={(e) => onUpdateConfig({ extractionModel: e.target.value || undefined })}
+					/>
+				</div>
+
+				{/* Token usage */}
+				<div
+					className="rounded p-2 space-y-0.5"
+					style={{ backgroundColor: `${theme.colors.border}30` }}
+				>
+					<div className="text-xs" style={{ color: theme.colors.textDim }}>
+						Tokens (24h)
+					</div>
+					<div className="text-sm font-bold" style={{ color: theme.colors.textMain }}>
+						{tokenUsage
+							? `${(tokenUsage.extractionTokens + tokenUsage.injectionTokens).toLocaleString()}`
+							: '0'}
+					</div>
+					{tokenUsage && tokenUsage.extractionCalls > 0 ? (
+						<>
+							<div className="text-xs" style={{ color: theme.colors.textMain }}>
+								{tokenUsage.extractionCalls} extraction{tokenUsage.extractionCalls !== 1 ? 's' : ''}
+							</div>
+							<div className="text-xs font-medium" style={{ color: theme.colors.accent }}>
+								${tokenUsage.estimatedCostUsd.toFixed(3)}
+							</div>
+							{tokenUsage.extractionTokens > 0 && (
+								<div className="text-xs" style={{ color: theme.colors.textDim }}>
+									{tokenUsage.extractionTokens.toLocaleString()} extraction
+								</div>
+							)}
+							{tokenUsage.injectionTokens > 0 && (
+								<div className="text-xs" style={{ color: theme.colors.textDim }}>
+									{tokenUsage.injectionTokens.toLocaleString()} injection
+								</div>
+							)}
+						</>
+					) : (
+						<div className="text-xs" style={{ color: theme.colors.textDim }}>
+							No extractions yet
+						</div>
+					)}
+				</div>
+			</div>
+
+			{/* History Analysis */}
+			<div className="space-y-2">
+				<div className="text-xs font-medium" style={{ color: theme.colors.textDim }}>
+					History Analysis
+				</div>
+
+				{/* Per-agent analysis (shown when an agent is selected) */}
+				{activeAgentId && (
+					<div
+						className="flex items-center justify-between rounded p-2"
+						style={{ backgroundColor: `${theme.colors.border}30` }}
+					>
+						<div className="text-xs" style={{ color: theme.colors.textMain }}>
+							{agentStats ? (
+								<>
+									<span style={{ color: theme.colors.textDim }}>Current agent: </span>
+									{agentStats.unanalyzedSessions > 0
+										? `${agentStats.unanalyzedSessions} unanalyzed / ${agentStats.totalSessions} sessions`
+										: agentStats.totalSessions > 0
+											? `All ${agentStats.totalSessions} sessions analyzed`
+											: 'No history yet'}
+								</>
+							) : (
+								'Loading...'
+							)}
+						</div>
+						<button
+							className="text-xs font-medium px-2 py-1 rounded border transition-colors shrink-0"
+							style={{
+								borderColor: theme.colors.accent,
+								color: theme.colors.accent,
+								backgroundColor: `${theme.colors.accent}10`,
+								opacity: analyzingAgent || !agentStats?.unanalyzedSessions ? 0.5 : 1,
+							}}
+							disabled={analyzingAgent || !agentStats?.unanalyzedSessions}
+							onClick={handleAnalyzeAgent}
+						>
+							{analyzingAgent ? 'Queuing...' : 'Analyze Agent'}
+						</button>
+					</div>
+				)}
+				{agentAnalysisResult && (
+					<div className="text-xs px-2" style={{ color: theme.colors.accent }}>
+						{agentAnalysisResult}
+					</div>
+				)}
+
+				{/* Global analysis (all agents) */}
+				<div
+					className="flex items-center justify-between rounded p-2"
+					style={{ backgroundColor: `${theme.colors.border}30` }}
+				>
+					<div className="text-xs" style={{ color: theme.colors.textDim }}>
+						{analysisStats
+							? `All agents: ${analysisStats.unanalyzedSessions} unanalyzed / ${analysisStats.totalSessions} total`
+							: 'Loading session stats...'}
+					</div>
+					<button
+						className="text-xs font-medium px-2 py-1 rounded border transition-colors shrink-0"
+						style={{
+							borderColor: theme.colors.border,
+							color: theme.colors.textMain,
+							backgroundColor: `${theme.colors.border}20`,
+							opacity: analyzingHistory || !analysisStats?.unanalyzedSessions ? 0.5 : 1,
+						}}
+						disabled={analyzingHistory || !analysisStats?.unanalyzedSessions}
+						onClick={handleAnalyzeHistory}
+					>
+						{analyzingHistory ? 'Queuing...' : 'Analyze All'}
+					</button>
+				</div>
+				{retroactiveResult && (
+					<div className="text-xs px-2" style={{ color: theme.colors.accent }}>
+						{retroactiveResult}
+					</div>
+				)}
+			</div>
+
+			{/* Cooldown config */}
+			<div
+				className="flex items-center justify-between text-xs"
+				style={{ color: theme.colors.textDim }}
+			>
+				<span>Cooldown between analyses</span>
+				<select
+					className="rounded px-1.5 py-0.5 text-xs border"
+					style={{
+						backgroundColor: theme.colors.bgMain,
+						borderColor: theme.colors.border,
+						color: theme.colors.textMain,
+					}}
+					value={Math.round(config.analysisCooldownMs / 60000)}
+					onChange={(e) => onUpdateConfig({ analysisCooldownMs: Number(e.target.value) * 60000 })}
+				>
+					{[1, 2, 5, 10, 15, 30].map((m) => (
+						<option key={m} value={m}>
+							{m} min
+						</option>
+					))}
+				</select>
+			</div>
+
+			{/* Recent extraction history */}
+			{diagnostics.length > 0 && (
+				<div className="space-y-1.5">
+					<div className="text-xs font-medium" style={{ color: theme.colors.textDim }}>
+						Recent Activity
+					</div>
+					{diagnostics
+						.slice()
+						.reverse()
+						.map((d, i) => (
+							<ExtractionDiagnosticRow key={`${d.sessionId}-${i}`} diagnostic={d} theme={theme} />
+						))}
+				</div>
+			)}
+
+			{/* No activity yet message */}
+			{diagnostics.length === 0 && !isProcessing && (
+				<div className="text-xs text-center py-2" style={{ color: theme.colors.textDim }}>
+					No extraction activity yet. Complete a session with 3+ interactions to trigger analysis.
+				</div>
+			)}
+		</div>
+	);
+}
+
+/**
+ * Single extraction diagnostic row with status indicator.
+ */
+function ExtractionDiagnosticRow({
+	diagnostic,
+	theme,
+}: {
+	diagnostic: ExtractionDiagnostic;
+	theme: Theme;
+}) {
+	const statusColor =
+		diagnostic.status === 'success'
+			? '#22c55e' // green
+			: diagnostic.status.startsWith('skipped')
+				? '#eab308' // yellow
+				: '#ef4444'; // red
+	const statusIcon =
+		diagnostic.status === 'success' ? '●' : diagnostic.status.startsWith('skipped') ? '○' : '✕';
+	const timeAgo = getRelativeTime(diagnostic.timestamp);
+	const tokens = diagnostic.tokenUsage
+		? `${(diagnostic.tokenUsage.inputTokens + diagnostic.tokenUsage.outputTokens).toLocaleString()} tokens`
+		: null;
+
+	// Trigger badge colors
+	const triggerBadge = diagnostic.trigger
+		? {
+				exit: { label: 'exit', color: '#6366f1' },
+				'mid-session': { label: 'mid-session', color: '#f59e0b' },
+				retroactive: { label: 'retroactive', color: '#8b5cf6' },
+			}[diagnostic.trigger]
+		: null;
+
+	return (
+		<div
+			className="flex items-start gap-1.5 text-xs rounded px-2 py-1"
+			style={{ backgroundColor: `${theme.colors.border}20` }}
+		>
+			<span style={{ color: statusColor, lineHeight: '1.4' }}>{statusIcon}</span>
+			<div className="flex-1 min-w-0">
+				<div className="flex items-center gap-1.5" style={{ color: theme.colors.textMain }}>
+					<span className="truncate">{diagnostic.message}</span>
+					{triggerBadge && (
+						<span
+							className="shrink-0 text-[10px] font-medium px-1 py-px rounded"
+							style={{ backgroundColor: `${triggerBadge.color}20`, color: triggerBadge.color }}
+						>
+							{triggerBadge.label}
+						</span>
+					)}
+				</div>
+				<div className="flex items-center gap-2" style={{ color: theme.colors.textDim }}>
+					<span>{timeAgo}</span>
+					{diagnostic.providerUsed && <span>via {diagnostic.providerUsed}</span>}
+					{tokens && <span>{tokens}</span>}
+					{diagnostic.experiencesStored != null && diagnostic.experiencesStored > 0 && (
+						<span>{diagnostic.experiencesStored} stored</span>
+					)}
+				</div>
+			</div>
+		</div>
+	);
+}
+
+/** Format a timestamp as a relative time string (e.g., "2m ago"). */
+function getRelativeTime(timestamp: number): string {
+	const seconds = Math.round((Date.now() - timestamp) / 1000);
+	if (seconds < 60) return `${seconds}s ago`;
+	const minutes = Math.round(seconds / 60);
+	if (minutes < 60) return `${minutes}m ago`;
+	const hours = Math.round(minutes / 60);
+	if (hours < 24) return `${hours}h ago`;
+	return `${Math.round(hours / 24)}d ago`;
+}
+
+/** Extraction stage definitions for progress display. */
+const EXTRACTION_STAGES: { id: ExtractionProgress['stage']; label: string; activeLabel: string }[] =
+	[
+		{ id: 'gathering', label: 'Gather session data', activeLabel: 'Gathering session data...' },
+		{ id: 'sending', label: 'Send to LLM', activeLabel: 'Sending to LLM...' },
+		{ id: 'streaming', label: 'Stream response', activeLabel: 'Streaming response...' },
+		{ id: 'parsing', label: 'Parse results', activeLabel: 'Filtering experiences...' },
+		{ id: 'storing', label: 'Store experiences', activeLabel: 'Storing experiences...' },
+	];
+
+/** Auto-updating elapsed time display. */
+function ElapsedTime({ startedAt, color }: { startedAt: number; color: string }) {
+	const [elapsed, setElapsed] = useState(Date.now() - startedAt);
+	useEffect(() => {
+		const interval = setInterval(() => setElapsed(Date.now() - startedAt), 1000);
+		return () => clearInterval(interval);
+	}, [startedAt]);
+	const seconds = Math.floor(elapsed / 1000);
+	const mins = Math.floor(seconds / 60);
+	const secs = seconds % 60;
+	return (
+		<span className="font-mono text-xs" style={{ color }}>
+			{mins > 0 ? `${mins}m ${secs}s` : `${secs}s`}
+		</span>
+	);
+}
+
+/** Inline extraction progress display with progress bar, stages, and live token/cost. */
+function ExtractionProgressDisplay({
+	progress,
+	theme,
+	queueLength,
+}: {
+	progress: ExtractionProgress;
+	theme: Theme;
+	queueLength: number;
+}) {
+	const currentStageIndex = EXTRACTION_STAGES.findIndex((s) => s.id === progress.stage);
+	const progressPercent = Math.min(
+		95, // Cap at 95% until complete
+		progress.estimatedTotalTokens > 0
+			? Math.round((progress.tokensStreamed / progress.estimatedTotalTokens) * 100)
+			: (currentStageIndex / EXTRACTION_STAGES.length) * 100
+	);
+
+	return (
+		<div className="space-y-2">
+			{/* Message + elapsed time */}
+			<div className="flex items-center justify-between text-xs">
+				<span style={{ color: theme.colors.textMain }}>{progress.message}</span>
+				<ElapsedTime startedAt={progress.startedAt} color={theme.colors.textDim} />
+			</div>
+
+			{/* Progress bar */}
+			<div>
+				<div className="flex justify-between text-xs mb-1">
+					<span style={{ color: theme.colors.textDim }}>Progress</span>
+					<span style={{ color: theme.colors.textMain }}>{progressPercent}%</span>
+				</div>
+				<div
+					className="h-1.5 rounded-full overflow-hidden"
+					style={{ backgroundColor: `${theme.colors.border}60` }}
+				>
+					<div
+						className="h-full rounded-full transition-all duration-500 ease-out"
+						style={{
+							width: `${progressPercent}%`,
+							backgroundColor: theme.colors.accent,
+						}}
+					/>
+				</div>
+			</div>
+
+			{/* Live metrics */}
+			<div className="flex items-center gap-3 text-xs" style={{ color: theme.colors.textDim }}>
+				{progress.providerUsed && <span>via {progress.providerUsed}</span>}
+				{progress.tokensStreamed > 0 && (
+					<span>{progress.tokensStreamed.toLocaleString()} tokens</span>
+				)}
+				{progress.estimatedCostSoFar > 0 && (
+					<span className="font-medium" style={{ color: theme.colors.accent }}>
+						${progress.estimatedCostSoFar.toFixed(4)}
+					</span>
+				)}
+				{queueLength > 0 && <span>+{queueLength} queued</span>}
+			</div>
+
+			{/* Stage list */}
+			<div className="space-y-1">
+				{EXTRACTION_STAGES.map((stage, index) => {
+					const isActive = index === currentStageIndex;
+					const isCompleted = index < currentStageIndex;
+					return (
+						<div key={stage.id} className="flex items-center gap-2">
+							<div className="w-4 h-4 flex items-center justify-center shrink-0">
+								{isCompleted ? (
+									<div
+										className="w-3.5 h-3.5 rounded-full flex items-center justify-center"
+										style={{ backgroundColor: '#22c55e' }}
+									>
+										<Check className="w-2 h-2" style={{ color: '#fff' }} />
+									</div>
+								) : isActive ? (
+									<Loader2
+										className="w-3.5 h-3.5 animate-spin"
+										style={{ color: theme.colors.accent }}
+									/>
+								) : (
+									<div
+										className="w-3.5 h-3.5 rounded-full border"
+										style={{ borderColor: theme.colors.border }}
+									/>
+								)}
+							</div>
+							<span
+								className="text-xs"
+								style={{
+									color: isActive
+										? theme.colors.textMain
+										: isCompleted
+											? '#22c55e'
+											: theme.colors.textDim,
+									fontWeight: isActive ? 500 : 400,
+								}}
+							>
+								{isActive ? stage.activeLabel : stage.label}
+							</span>
+						</div>
+					);
+				})}
+			</div>
+		</div>
+	);
+}
+
 function EmbeddingModelStatus({ theme }: { theme: Theme }) {
 	const [status, setStatus] = useState<{
 		loaded: boolean;
