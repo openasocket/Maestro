@@ -343,6 +343,66 @@ describe('ExperienceAnalyzer', () => {
 				expect(config.injectionStrategy).toBe(v);
 			}
 		});
+
+		it('MemoryEntry supports archived field', () => {
+			const entry: import('../../../shared/memory-types').MemoryEntry = {
+				id: 'test-id',
+				content: 'Test content',
+				type: 'rule',
+				scope: 'global',
+				tags: [],
+				source: 'user',
+				confidence: 1.0,
+				pinned: false,
+				active: true,
+				archived: false,
+				embedding: null,
+				effectivenessScore: 0.5,
+				useCount: 0,
+				tokenEstimate: 3,
+				lastUsedAt: 0,
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+			};
+			expect(entry.archived).toBe(false);
+		});
+
+		it('MemoryEntry archived field is distinct from active field', () => {
+			// active=false means "user explicitly deleted"
+			// archived=true means "system demoted, preserved but excluded from injection"
+			const archivedEntry: import('../../../shared/memory-types').MemoryEntry = {
+				id: 'test-id',
+				content: 'Low confidence memory',
+				type: 'experience',
+				scope: 'global',
+				tags: [],
+				source: 'session-analysis',
+				confidence: 0.1,
+				pinned: false,
+				active: true,
+				archived: true,
+				embedding: null,
+				effectivenessScore: 0.2,
+				useCount: 0,
+				tokenEstimate: 5,
+				lastUsedAt: 0,
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+			};
+			// Both can be set independently
+			expect(archivedEntry.active).toBe(true);
+			expect(archivedEntry.archived).toBe(true);
+		});
+
+		it('addMemory() sets archived to false by default', async () => {
+			const { MemoryStore } = await import('../../../main/memory/memory-store');
+			const store = new MemoryStore();
+			const mem = await store.addMemory({
+				content: 'Test archived default',
+				scope: 'global',
+			});
+			expect(mem.archived).toBe(false);
+		});
 	});
 
 	// ─── Prompt Compilation ──────────────────────────────────────────────

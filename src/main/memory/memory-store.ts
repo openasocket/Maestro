@@ -604,6 +604,7 @@ export class MemoryStore {
 			confidence: entry.confidence ?? 1.0,
 			pinned: entry.pinned ?? false,
 			active: true,
+			archived: false,
 			embedding: null,
 			effectivenessScore: 0.5,
 			useCount: 0,
