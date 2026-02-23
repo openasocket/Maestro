@@ -146,6 +146,9 @@ import {
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
+// Config path used by memory-store (mocked app.getPath returns /mock/userData)
+const configPath = '/mock/userData/memories/config.json';
+
 describe('ExperienceAnalyzer', () => {
 	let analyzer: ExperienceAnalyzer;
 
@@ -161,6 +164,8 @@ describe('ExperienceAnalyzer', () => {
 		mockEncodeBatch.mockRejectedValue(new Error('Embedding model is not available'));
 		mockGetEntries.mockReturnValue([]);
 		mockGetQueryEvents.mockReturnValue([]);
+		// Production default is enableExperienceExtraction: false — enable for tests
+		fsState.set(configPath, JSON.stringify({ enableExperienceExtraction: true }));
 	});
 
 	// ─── Interface Contracts ─────────────────────────────────────────────
@@ -288,6 +293,25 @@ describe('ExperienceAnalyzer', () => {
 			expect(ctx.isDeviation).toBeUndefined();
 			expect(ctx.deviationType).toBeUndefined();
 			expect(ctx.attemptCount).toBeUndefined();
+		});
+
+		it('MemoryConfig supports extractionModel field', async () => {
+			const { MEMORY_CONFIG_DEFAULTS } = await import('../../../shared/memory-types');
+			const config: import('../../../shared/memory-types').MemoryConfig = {
+				...MEMORY_CONFIG_DEFAULTS,
+				extractionModel: 'claude-sonnet-4-5-20250514',
+			};
+			expect(config.extractionModel).toBe('claude-sonnet-4-5-20250514');
+		});
+
+		it('MemoryConfig extractionModel defaults to undefined', async () => {
+			const { MEMORY_CONFIG_DEFAULTS } = await import('../../../shared/memory-types');
+			expect(MEMORY_CONFIG_DEFAULTS.extractionModel).toBeUndefined();
+		});
+
+		it('MemoryConfig enableExperienceExtraction defaults to false', async () => {
+			const { MEMORY_CONFIG_DEFAULTS } = await import('../../../shared/memory-types');
+			expect(MEMORY_CONFIG_DEFAULTS.enableExperienceExtraction).toBe(false);
 		});
 	});
 
@@ -1541,8 +1565,6 @@ describe('ExperienceAnalyzer', () => {
 	// ─── Config Controls ────────────────────────────────────────────────
 
 	describe('config controls', () => {
-		const configPath = '/mock/userData/memories/config.json';
-
 		afterEach(() => {
 			fsState.delete(configPath);
 		});
@@ -1568,7 +1590,10 @@ describe('ExperienceAnalyzer', () => {
 		});
 
 		it('respects custom minHistoryEntriesForAnalysis', async () => {
-			fsState.set(configPath, JSON.stringify({ minHistoryEntriesForAnalysis: 5 }));
+			fsState.set(
+				configPath,
+				JSON.stringify({ enableExperienceExtraction: true, minHistoryEntriesForAnalysis: 5 })
+			);
 			// 4 entries — below the custom threshold of 5
 			mockGetEntries.mockReturnValue([
 				{ id: '1', summary: 'step 1', type: 'prompt' },
@@ -1586,7 +1611,10 @@ describe('ExperienceAnalyzer', () => {
 		});
 
 		it('respects custom minNoveltyScore', async () => {
-			fsState.set(configPath, JSON.stringify({ minNoveltyScore: 0.7 }));
+			fsState.set(
+				configPath,
+				JSON.stringify({ enableExperienceExtraction: true, minNoveltyScore: 0.7 })
+			);
 			mockGetEntries.mockReturnValue([
 				{ id: '1', summary: 'step 1', type: 'prompt' },
 				{ id: '2', summary: 'step 2', type: 'prompt' },
@@ -1625,7 +1653,10 @@ describe('ExperienceAnalyzer', () => {
 
 		it('respects custom analysisCooldownMs via isOnCooldown', async () => {
 			// Set a very long cooldown
-			fsState.set(configPath, JSON.stringify({ analysisCooldownMs: 999999999 }));
+			fsState.set(
+				configPath,
+				JSON.stringify({ enableExperienceExtraction: true, analysisCooldownMs: 999999999 })
+			);
 			mockGetEntries.mockReturnValue([
 				{ id: '1', summary: 'step 1', type: 'prompt' },
 				{ id: '2', summary: 'step 2', type: 'prompt' },
@@ -1640,7 +1671,8 @@ describe('ExperienceAnalyzer', () => {
 		});
 
 		it('defaults are used when config file is missing', async () => {
-			// No config file set — defaults should apply
+			// Delete the config set in beforeEach — exercise the defaults path
+			fsState.delete(configPath);
 			mockGetEntries.mockReturnValue([
 				{ id: '1', summary: 'step 1', type: 'prompt' },
 				{ id: '2', summary: 'step 2', type: 'prompt' },
@@ -1648,13 +1680,16 @@ describe('ExperienceAnalyzer', () => {
 			]);
 			mockExecFile.mockRejectedValue(new Error('not available'));
 
-			// Should proceed with default minHistoryEntriesForAnalysis=3 (not error)
+			// Default enableExperienceExtraction is false — bails early, returns 0
 			const result = await analyzer.analyzeCompletedSession(
 				'sess-cfg-5',
 				'/project-cfg-5',
 				'claude-code'
 			);
-			expect(result).toBe(0); // 0 because LLM fails, but it still ran (didn't bail early)
+			expect(result).toBe(0);
+			// LLM (claude) should NOT be called — extraction is disabled by default
+			const claudeCalls = mockExecFile.mock.calls.filter((call: unknown[]) => call[0] === 'claude');
+			expect(claudeCalls).toHaveLength(0);
 		});
 	});
 });

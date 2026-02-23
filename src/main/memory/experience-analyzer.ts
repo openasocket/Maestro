@@ -13,6 +13,7 @@
  */
 
 import type { MemoryConfig } from '../../shared/memory-types';
+import { MEMORY_CONFIG_DEFAULTS } from '../../shared/memory-types';
 import { experienceExtractionPrompt } from '../../prompts';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
@@ -535,15 +536,15 @@ export class ExperienceAnalyzer {
 
 	/**
 	 * Get the current memory config.
-	 * Experience extraction fields are now typed in MemoryConfig with defaults.
+	 * Experience extraction fields are typed in MemoryConfig with defaults.
 	 */
-	private async getMemoryConfig(): Promise<Partial<MemoryConfig>> {
+	private async getMemoryConfig(): Promise<MemoryConfig> {
 		try {
 			const { getMemoryStore } = await import('./memory-store');
 			const store = getMemoryStore();
 			return await store.getConfig();
 		} catch {
-			return {};
+			return { ...MEMORY_CONFIG_DEFAULTS };
 		}
 	}
 }

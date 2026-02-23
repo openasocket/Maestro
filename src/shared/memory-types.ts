@@ -191,14 +191,16 @@ export interface MemoryConfig {
 	decayHalfLifeDays: number;
 	enableAutoConsolidation: boolean;
 	enableEffectivenessTracking: boolean;
-	/** Enable LLM-powered experience extraction from completed sessions — default true */
+	/** Enable automatic LLM-powered experience extraction after sessions — default false */
 	enableExperienceExtraction: boolean;
-	/** Minimum history entries for a session to be analyzed — default 3 */
+	/** Minimum session history entries required before running analysis — default 3 */
 	minHistoryEntriesForAnalysis: number;
-	/** Minimum novelty score (0.0-1.0) for an extracted experience to be kept — default 0.4 */
+	/** Minimum novelty score (0.0-1.0) for extracted experiences to be stored — default 0.4 */
 	minNoveltyScore: number;
-	/** Cooldown between analyses per project (ms) — default 300000 (5 min) */
+	/** Cooldown between analyses for the same project in ms — default 300000 (5 min) */
 	analysisCooldownMs: number;
+	/** Model to use for experience extraction LLM call — default undefined (use system default) */
+	extractionModel?: string;
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -212,10 +214,11 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	decayHalfLifeDays: 30,
 	enableAutoConsolidation: true,
 	enableEffectivenessTracking: true,
-	enableExperienceExtraction: true,
+	enableExperienceExtraction: false,
 	minHistoryEntriesForAnalysis: 3,
 	minNoveltyScore: 0.4,
 	analysisCooldownMs: 300000,
+	extractionModel: undefined,
 };
 
 // ─── Stats and Results ─────────────────────────────────────────────────────
