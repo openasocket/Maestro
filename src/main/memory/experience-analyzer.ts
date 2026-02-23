@@ -45,6 +45,8 @@ export interface ExperienceAnalyzerInput {
 	detectedDeviations?: DeviationSignal[];
 	/** Decision provenance signals extracted from VIBES reasoning traces or history */
 	decisionSignals?: DecisionSignal[];
+	/** Context utilization % at session end (0.0-1.0) — quality indicator */
+	contextUtilizationAtEnd?: number;
 }
 
 /** What kind of learning this experience represents */
@@ -319,6 +321,21 @@ export class ExperienceAnalyzer {
 			}
 		} catch {
 			// Stats DB unavailable — proceed without duration
+		}
+
+		// Context utilization: capture from the last history entry's contextUsage field
+		try {
+			const { getHistoryManager } = await import('../history-manager');
+			const historyManager = getHistoryManager();
+			const entries = historyManager.getEntries(sessionId);
+			if (entries.length > 0) {
+				const lastEntry = entries[entries.length - 1];
+				if (lastEntry.contextUsage !== undefined) {
+					input.contextUtilizationAtEnd = lastEntry.contextUsage;
+				}
+			}
+		} catch {
+			// Context utilization unavailable — proceed without
 		}
 
 		return input;
@@ -795,6 +812,9 @@ export class ExperienceAnalyzer {
 								: {}),
 							...(provenanceSource ? { provenanceSource } : {}),
 							...deviationFields,
+							...(input.contextUtilizationAtEnd !== undefined
+								? { contextUtilizationAtEnd: input.contextUtilizationAtEnd }
+								: {}),
 						},
 					},
 					scope === 'project' ? input.projectPath : undefined

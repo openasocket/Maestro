@@ -428,12 +428,22 @@ export function setupExitListener(
 
 		safeSend('process:exit', sessionId, code);
 
-		// Memory effectiveness tracking (EXP-11): update scores based on exit code
-		import('../memory/memory-effectiveness')
-			.then(({ onProcessComplete }) => onProcessComplete(sessionId, code))
-			.catch(() => {
+		// Memory effectiveness tracking (EXP-11): update scores based on exit code + quality signals
+		void (async () => {
+			try {
+				// Look up session to get project path for quality signal analysis
+				const { getSessionsStore } = await import('../stores');
+				const sessions = getSessionsStore().get('sessions', []);
+				const baseId = sessionId.replace(/-ai-.+$|-terminal$|-batch-\d+$|-synopsis-\d+$/, '');
+				const session = sessions.find((s: { id: string }) => s.id === baseId);
+				const projectPath = session?.projectRoot || session?.cwd;
+
+				const { onProcessComplete } = await import('../memory/memory-effectiveness');
+				await onProcessComplete(sessionId, code, projectPath);
+			} catch {
 				// Fire-and-forget — degrade gracefully
-			});
+			}
+		})();
 
 		// Experience extraction (EXP-12): analyze completed session for novel learnings
 		// Fire-and-forget — never blocks session cleanup. The analyzer handles:
