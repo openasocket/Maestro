@@ -168,6 +168,22 @@ export function createMemoryApi() {
 		): Promise<IpcResponse<boolean>> =>
 			ipcRenderer.invoke('memory:delete', id, scope, skillAreaId, projectPath),
 
+		// ─── Archive ──────────────────────────────────────────────────────
+		listArchived: (
+			scope: MemoryScope,
+			skillAreaId?: SkillAreaId,
+			projectPath?: string
+		): Promise<IpcResponse<MemoryEntry[]>> =>
+			ipcRenderer.invoke('memory:listArchived', scope, skillAreaId, projectPath),
+
+		restore: (
+			id: string,
+			scope: MemoryScope,
+			skillAreaId?: SkillAreaId,
+			projectPath?: string
+		): Promise<IpcResponse<MemoryEntry | null>> =>
+			ipcRenderer.invoke('memory:restore', id, scope, skillAreaId, projectPath),
+
 		// ─── Search ───────────────────────────────────────────────────────
 		search: (
 			query: string,

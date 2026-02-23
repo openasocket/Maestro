@@ -206,6 +206,8 @@ describe('Memory IPC Handler Round-Trips', () => {
 				'memory:add',
 				'memory:update',
 				'memory:delete',
+				'memory:listArchived',
+				'memory:restore',
 				'memory:search',
 				'memory:getStats',
 				'memory:getProjectDigest',
@@ -538,6 +540,138 @@ describe('Memory IPC Handler Round-Trips', () => {
 			const listAll = await invoke('memory:list', 'skill', skill.id, undefined, true);
 			expect(listAll.data).toHaveLength(1);
 			expect(listAll.data[0].active).toBe(false);
+		});
+	});
+
+	// ─── Archive ────────────────────────────────────────────────────
+
+	describe('Archive round-trips', () => {
+		it('listArchived returns empty when no archived memories exist', async () => {
+			const role = (await invoke('memory:role:create', 'Dev', 'desc')).data;
+			const persona = (await invoke('memory:persona:create', role.id, 'P', 'desc')).data;
+			const skill = (await invoke('memory:skill:create', persona.id, 'S', 'desc')).data;
+
+			await invoke('memory:add', {
+				content: 'Active memory',
+				scope: 'skill',
+				skillAreaId: skill.id,
+			});
+
+			const result = await invoke('memory:listArchived', 'skill', skill.id);
+			expect(result.success).toBe(true);
+			expect(result.data).toHaveLength(0);
+		});
+
+		it('listArchived returns only archived memories', async () => {
+			const role = (await invoke('memory:role:create', 'Dev', 'desc')).data;
+			const persona = (await invoke('memory:persona:create', role.id, 'P', 'desc')).data;
+			const skill = (await invoke('memory:skill:create', persona.id, 'S', 'desc')).data;
+
+			// Add two memories
+			const mem1 = (
+				await invoke('memory:add', {
+					content: 'Memory to archive',
+					scope: 'skill',
+					skillAreaId: skill.id,
+				})
+			).data;
+			await invoke('memory:add', {
+				content: 'Active memory',
+				scope: 'skill',
+				skillAreaId: skill.id,
+			});
+
+			// Archive mem1 via update
+			await invoke('memory:update', mem1.id, { active: true }, 'skill', skill.id);
+			// Directly archive via store for test setup
+			const skillPath = store.getMemoryPath('skill', skill.id);
+			const lib = await store.readLibrary(skillPath);
+			const entry = lib.entries.find((e: any) => e.id === mem1.id);
+			if (entry) {
+				entry.archived = true;
+			}
+			await store.writeLibrary(skillPath, lib);
+
+			const archivedResult = await invoke('memory:listArchived', 'skill', skill.id);
+			expect(archivedResult.success).toBe(true);
+			expect(archivedResult.data).toHaveLength(1);
+			expect(archivedResult.data[0].id).toBe(mem1.id);
+			expect(archivedResult.data[0].archived).toBe(true);
+
+			// Active list should not include archived
+			const activeResult = await invoke('memory:list', 'skill', skill.id);
+			expect(activeResult.data).toHaveLength(1);
+			expect(activeResult.data[0].content).toBe('Active memory');
+		});
+
+		it('restore brings archived memory back with boosted confidence', async () => {
+			const role = (await invoke('memory:role:create', 'Dev', 'desc')).data;
+			const persona = (await invoke('memory:persona:create', role.id, 'P', 'desc')).data;
+			const skill = (await invoke('memory:skill:create', persona.id, 'S', 'desc')).data;
+
+			const mem = (
+				await invoke('memory:add', {
+					content: 'Memory to archive and restore',
+					scope: 'skill',
+					skillAreaId: skill.id,
+					confidence: 0.02,
+				})
+			).data;
+
+			// Archive it directly
+			const skillPath = store.getMemoryPath('skill', skill.id);
+			const lib = await store.readLibrary(skillPath);
+			const entry = lib.entries.find((e: any) => e.id === mem.id);
+			if (entry) {
+				entry.archived = true;
+				entry.confidence = 0.02;
+			}
+			await store.writeLibrary(skillPath, lib);
+
+			// Verify it's archived
+			const archivedResult = await invoke('memory:listArchived', 'skill', skill.id);
+			expect(archivedResult.data).toHaveLength(1);
+
+			// Restore it
+			const restoreResult = await invoke('memory:restore', mem.id, 'skill', skill.id);
+			expect(restoreResult.success).toBe(true);
+			expect(restoreResult.data).not.toBeNull();
+			expect(restoreResult.data.archived).toBe(false);
+			expect(restoreResult.data.confidence).toBeGreaterThanOrEqual(0.3);
+
+			// Verify it's back in active list
+			const activeResult = await invoke('memory:list', 'skill', skill.id);
+			expect(activeResult.data).toHaveLength(1);
+			expect(activeResult.data[0].id).toBe(mem.id);
+
+			// Verify archived list is empty
+			const archivedAfter = await invoke('memory:listArchived', 'skill', skill.id);
+			expect(archivedAfter.data).toHaveLength(0);
+		});
+
+		it('restore returns null for non-existent memory', async () => {
+			const result = await invoke('memory:restore', 'nonexistent-id', 'global');
+			expect(result.success).toBe(true);
+			expect(result.data).toBeNull();
+		});
+
+		it('listArchived works for global scope', async () => {
+			const mem = (await invoke('memory:add', { content: 'Global archived', scope: 'global' }))
+				.data;
+
+			// Archive it
+			const globalPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(globalPath);
+			const entry = lib.entries.find((e: any) => e.id === mem.id);
+			if (entry) {
+				entry.archived = true;
+			}
+			await store.writeLibrary(globalPath, lib);
+
+			const result = await invoke('memory:listArchived', 'global');
+			expect(result.success).toBe(true);
+			expect(result.data).toHaveLength(1);
+			expect(result.data[0].content).toBe('Global archived');
 		});
 	});
 

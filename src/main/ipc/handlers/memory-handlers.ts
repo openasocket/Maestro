@@ -15,6 +15,7 @@ import { setMemorySettingsStore } from '../../memory/memory-injector';
 import type {
 	MemoryScope,
 	SkillAreaId,
+	MemoryId,
 	MemoryConfig,
 	MemoryEntry,
 	MemoryType,
@@ -294,6 +295,28 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 			handlerOpts('memory:delete'),
 			async (id: string, scope: MemoryScope, skillAreaId?: SkillAreaId, projectPath?: string) => {
 				return memoryStore.deleteMemory(id, scope, skillAreaId, projectPath);
+			}
+		)
+	);
+
+	// ─── Archive ──────────────────────────────────────────────────────────
+
+	ipcMain.handle(
+		'memory:listArchived',
+		createIpcDataHandler(
+			handlerOpts('memory:listArchived'),
+			async (scope: MemoryScope, skillAreaId?: SkillAreaId, projectPath?: string) => {
+				return memoryStore.listArchivedMemories(scope, skillAreaId, projectPath);
+			}
+		)
+	);
+
+	ipcMain.handle(
+		'memory:restore',
+		createIpcDataHandler(
+			handlerOpts('memory:restore'),
+			async (id: MemoryId, scope: MemoryScope, skillAreaId?: SkillAreaId, projectPath?: string) => {
+				return memoryStore.restoreMemory(id, scope, skillAreaId, projectPath);
 			}
 		)
 	);
