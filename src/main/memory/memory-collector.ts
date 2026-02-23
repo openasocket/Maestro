@@ -179,7 +179,7 @@ export class MemoryCollector {
 
 			// Create the memory entry
 			try {
-				await store.addMemory(
+				const storedEntry = await store.addMemory(
 					{
 						content,
 						type: 'rule',
@@ -192,6 +192,14 @@ export class MemoryCollector {
 					},
 					scope === 'project' ? projectPath : undefined
 				);
+
+				// Notify cross-agent broadcaster (EXP-LIVE-04)
+				import('./live-context-broadcaster')
+					.then(({ getLiveBroadcaster }) => {
+						getLiveBroadcaster().onMemoryCreated(storedEntry, projectPath);
+					})
+					.catch(() => {});
+
 				proposed++;
 			} catch {
 				// Memory creation failed — log nothing, degrade silently

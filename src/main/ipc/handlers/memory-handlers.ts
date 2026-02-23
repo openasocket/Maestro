@@ -263,7 +263,16 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 				},
 				projectPath?: string
 			) => {
-				return memoryStore.addMemory(entry, projectPath);
+				const result = await memoryStore.addMemory(entry, projectPath);
+
+				// Notify cross-agent broadcaster for user-created memories (EXP-LIVE-04)
+				import('../../memory/live-context-broadcaster')
+					.then(({ getLiveBroadcaster }) => {
+						getLiveBroadcaster().onMemoryCreated(result, projectPath);
+					})
+					.catch(() => {});
+
+				return result;
 			}
 		)
 	);

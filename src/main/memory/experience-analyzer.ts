@@ -850,6 +850,13 @@ export class ExperienceAnalyzer {
 					}
 				}
 
+				// Notify cross-agent broadcaster (EXP-LIVE-04)
+				import('./live-context-broadcaster')
+					.then(({ getLiveBroadcaster }) => {
+						getLiveBroadcaster().onMemoryCreated(newMemory, input.projectPath, input.sessionId);
+					})
+					.catch(() => {});
+
 				stored++;
 			} catch {
 				// Individual experience storage failed — continue with others
