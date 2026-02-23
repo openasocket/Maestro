@@ -1185,6 +1185,133 @@ describe('ExperienceAnalyzer', () => {
 			// Should store despite no embedding service (skips dedup)
 			expect(stored).toBe(1);
 		});
+
+		it('prepends category tag to stored experience tags', async () => {
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'Category tag test',
+					situation: 'Testing category tags',
+					learning: 'Category tags are prepended',
+					category: 'problem-solved',
+					tags: ['typescript', 'bug'],
+					noveltyScore: 0.7,
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-cat-tag',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(1);
+
+			// Find the stored memory and verify category tag is prepended
+			let foundTags: string[] | undefined;
+			for (const [filePath, content] of fsState) {
+				if (filePath.endsWith('library.json')) {
+					const lib = JSON.parse(content);
+					const entry = (lib.entries ?? []).find(
+						(e: { content: string }) => e.content === 'Category tag test'
+					);
+					if (entry) {
+						foundTags = entry.tags;
+					}
+				}
+			}
+			expect(foundTags).toBeDefined();
+			expect(foundTags![0]).toBe('category:problem-solved');
+			expect(foundTags).toContain('typescript');
+			expect(foundTags).toContain('bug');
+			expect(foundTags).toHaveLength(3);
+		});
+
+		it('does not duplicate category tag if already present', async () => {
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'No duplicate category tag',
+					situation: 'Testing dedup',
+					learning: 'No duplication',
+					category: 'decision-made',
+					tags: ['category:decision-made', 'architecture'],
+					noveltyScore: 0.7,
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-cat-dedup',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(1);
+
+			let foundTags: string[] | undefined;
+			for (const [filePath, content] of fsState) {
+				if (filePath.endsWith('library.json')) {
+					const lib = JSON.parse(content);
+					const entry = (lib.entries ?? []).find(
+						(e: { content: string }) => e.content === 'No duplicate category tag'
+					);
+					if (entry) {
+						foundTags = entry.tags;
+					}
+				}
+			}
+			expect(foundTags).toBeDefined();
+			// Should still have exactly one category:decision-made tag, not two
+			const categoryTags = foundTags!.filter((t: string) => t === 'category:decision-made');
+			expect(categoryTags).toHaveLength(1);
+			expect(foundTags).toContain('architecture');
+		});
+
+		it('prepends category tag for all category values', async () => {
+			const categories: ExperienceCategory[] = [
+				'pattern-established',
+				'problem-solved',
+				'dependency-discovered',
+				'anti-pattern-identified',
+				'decision-made',
+			];
+
+			const experiences: ExtractedExperience[] = categories.map((cat, i) => ({
+				content: `Cat test ${i}`,
+				situation: `Sit ${i}`,
+				learning: `Learn ${i}`,
+				category: cat,
+				tags: ['test'],
+				noveltyScore: 0.7,
+			}));
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-all-cats',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(5);
+
+			// Verify each stored memory has the correct category tag
+			for (const [filePath, content] of fsState) {
+				if (filePath.endsWith('library.json')) {
+					const lib = JSON.parse(content);
+					for (let i = 0; i < categories.length; i++) {
+						const entry = (lib.entries ?? []).find(
+							(e: { content: string }) => e.content === `Cat test ${i}`
+						);
+						if (entry) {
+							expect(entry.tags[0]).toBe(`category:${categories[i]}`);
+						}
+					}
+				}
+			}
+		});
 	});
 
 	// ─── Singleton ───────────────────────────────────────────────────────

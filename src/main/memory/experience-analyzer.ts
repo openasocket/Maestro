@@ -491,6 +491,13 @@ export class ExperienceAnalyzer {
 					skillAreaId = searchResults[0].entry.skillAreaId;
 				}
 
+				// Prepend category tag if not already present
+				const categoryTag = exp.category ? `category:${exp.category}` : null;
+				const tags =
+					categoryTag && !exp.tags.includes(categoryTag)
+						? [categoryTag, ...exp.tags]
+						: [...exp.tags];
+
 				await store.addMemory(
 					{
 						content: exp.content,
@@ -500,7 +507,7 @@ export class ExperienceAnalyzer {
 						source: 'session-analysis',
 						confidence: 0.5,
 						pinned: false,
-						tags: exp.tags,
+						tags,
 						experienceContext: {
 							situation: exp.situation,
 							learning: exp.learning,
