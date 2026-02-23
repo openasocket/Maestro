@@ -60,6 +60,16 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		});
 	setMemorySettingsStore(() => cachedConfig);
 
+	// Pre-warm registry cache so first agent spawn doesn't pay file I/O cost
+	memoryStore
+		.getCachedRegistry()
+		.then(() => {
+			logger.debug('Memory registry cache pre-warmed', LOG_CONTEXT);
+		})
+		.catch(() => {
+			// Non-critical — cache will populate on first search
+		});
+
 	// ─── Config ───────────────────────────────────────────────────────────
 
 	ipcMain.handle(

@@ -82,6 +82,15 @@ export class MemoryStore {
 	private readonly memoriesDir: string;
 	private readonly writeQueues = new Map<string, Promise<void>>();
 
+	// ─── Registry Cache ────────────────────────────────────────────────────
+	private registryCache: RegistryFile | null = null;
+	private registryCacheTime = 0;
+	private static readonly REGISTRY_CACHE_TTL = 30000; // 30 seconds
+
+	// ─── Library Cache ─────────────────────────────────────────────────────
+	private libraryCache = new Map<string, { entries: MemoryEntry[]; loadedAt: number }>();
+	private static readonly LIBRARY_CACHE_TTL = 10000; // 10 seconds
+
 	constructor() {
 		this.memoriesDir = path.join(getConfigDir(), 'memories');
 	}
@@ -150,6 +159,50 @@ export class MemoryStore {
 		await fs.rename(tmp, filePath);
 	}
 
+	// ─── Cache Management ──────────────────────────────────────────────────
+
+	/**
+	 * Return the registry from cache if fresh, otherwise read from disk and cache.
+	 * Used on the hot path (cascadingSearch) to avoid repeated file reads.
+	 */
+	async getCachedRegistry(): Promise<RegistryFile> {
+		if (
+			this.registryCache &&
+			Date.now() - this.registryCacheTime < MemoryStore.REGISTRY_CACHE_TTL
+		) {
+			return this.registryCache;
+		}
+		const registry = await this.readRegistry();
+		this.registryCache = registry;
+		this.registryCacheTime = Date.now();
+		return registry;
+	}
+
+	/** Invalidate the registry cache — called after any registry mutation. */
+	private invalidateRegistryCache(): void {
+		this.registryCache = null;
+		this.registryCacheTime = 0;
+	}
+
+	/**
+	 * Return library entries from cache if fresh, otherwise read from disk and cache.
+	 * Used on the hot path (cascadingSearch) to avoid repeated library file reads.
+	 */
+	private async getCachedLibrary(dirPath: string): Promise<MemoryEntry[]> {
+		const cached = this.libraryCache.get(dirPath);
+		if (cached && Date.now() - cached.loadedAt < MemoryStore.LIBRARY_CACHE_TTL) {
+			return cached.entries;
+		}
+		const lib = await this.readLibrary(dirPath);
+		this.libraryCache.set(dirPath, { entries: lib.entries, loadedAt: Date.now() });
+		return lib.entries;
+	}
+
+	/** Invalidate the library cache for a specific directory — called after writes. */
+	private invalidateLibraryCache(dirPath: string): void {
+		this.libraryCache.delete(dirPath);
+	}
+
 	// ─── Registry Read/Write ────────────────────────────────────────────────
 
 	private emptyRegistry(): RegistryFile {
@@ -174,6 +227,7 @@ export class MemoryStore {
 
 	async writeRegistry(registry: RegistryFile): Promise<void> {
 		this.invalidateAnalyticsCache();
+		this.invalidateRegistryCache();
 		return this.serializeWrite(this.getRegistryPath(), () =>
 			this.atomicWriteJson(this.getRegistryPath(), registry)
 		);
@@ -204,6 +258,7 @@ export class MemoryStore {
 
 	async writeLibrary(dirPath: string, lib: LibraryFile): Promise<void> {
 		this.invalidateAnalyticsCache();
+		this.invalidateLibraryCache(dirPath);
 		const filePath = path.join(dirPath, 'library.json');
 		return this.serializeWrite(filePath, () => this.atomicWriteJson(filePath, lib));
 	}
@@ -1388,7 +1443,7 @@ export class MemoryStore {
 		const { encode } = await import('../grpo/embedding-service');
 		const queryEmbedding = await encode(query.slice(0, 2000));
 
-		const registry = await this.readRegistry();
+		const registry = await this.getCachedRegistry();
 		const hierarchyResults: MemorySearchResult[] = [];
 
 		// ── Level 1: Persona matching ────────────────────────────────────
@@ -1463,9 +1518,9 @@ export class MemoryStore {
 			// Embedding-only (legacy behavior)
 			for (const { skill, personaName, skillAreaName } of matchedSkills) {
 				const dirPath = this.getMemoryPath('skill', skill.id);
-				const lib = await this.readLibrary(dirPath);
+				const entries = await this.getCachedLibrary(dirPath);
 
-				for (const entry of lib.entries) {
+				for (const entry of entries) {
 					if (!entry.active || entry.archived || !entry.embedding) continue;
 
 					const similarity = cosineSimilarity(queryEmbedding, entry.embedding);

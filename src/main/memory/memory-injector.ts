@@ -491,13 +491,13 @@ export async function injectMemories(
 		ids,
 	}));
 
+	// Fire-and-forget — recording injection doesn't need to block agent start.
+	// recordInjection() only updates useCount and lastUsedAt (analytics fields).
+	// The injection record for effectiveness tracking is stored synchronously above.
 	for (const { scope, skillAreaId, ids } of byScope) {
-		await store.recordInjection(
-			ids,
-			scope,
-			skillAreaId,
-			scope === 'project' ? projectPath : undefined
-		);
+		store
+			.recordInjection(ids, scope, skillAreaId, scope === 'project' ? projectPath : undefined)
+			.catch(() => {});
 	}
 
 	// Prepend XML to prompt

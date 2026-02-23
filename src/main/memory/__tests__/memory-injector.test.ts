@@ -591,21 +591,18 @@ describe('MemoryInjector', () => {
 			warnSpy.mockRestore();
 		});
 
-		it('returns original prompt when recordInjection throws', async () => {
+		it('succeeds even when recordInjection throws (fire-and-forget)', async () => {
 			const results = [
 				makeResult({ entry: { content: 'A' }, personaName: 'P', skillAreaName: 'S' }),
 			];
 			setupMockResults(results);
 			mockRecordInjection.mockRejectedValue(new Error('Write failed'));
 
-			const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
 			const result = await tryInjectMemories('safe prompt', '/project', 'claude-code');
 
-			expect(result.injectedPrompt).toBe('safe prompt');
-			expect(result.injectedIds).toEqual([]);
-
-			warnSpy.mockRestore();
+			// recordInjection is fire-and-forget, so injection should succeed
+			expect(result.injectedPrompt).toContain('safe prompt');
+			expect(result.injectedPrompt).toContain('<agent-memories>');
 		});
 
 		it('succeeds when no error occurs (delegates to injectMemories)', async () => {
