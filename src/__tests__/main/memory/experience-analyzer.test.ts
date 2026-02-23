@@ -313,6 +313,36 @@ describe('ExperienceAnalyzer', () => {
 			const { MEMORY_CONFIG_DEFAULTS } = await import('../../../shared/memory-types');
 			expect(MEMORY_CONFIG_DEFAULTS.enableExperienceExtraction).toBe(false);
 		});
+
+		it('MemoryConfig supports injectionStrategy field', async () => {
+			const { MEMORY_CONFIG_DEFAULTS } = await import('../../../shared/memory-types');
+			const config: import('../../../shared/memory-types').MemoryConfig = {
+				...MEMORY_CONFIG_DEFAULTS,
+				injectionStrategy: 'rich',
+			};
+			expect(config.injectionStrategy).toBe('rich');
+		});
+
+		it('MemoryConfig injectionStrategy defaults to balanced', async () => {
+			const { MEMORY_CONFIG_DEFAULTS } = await import('../../../shared/memory-types');
+			expect(MEMORY_CONFIG_DEFAULTS.injectionStrategy).toBe('balanced');
+		});
+
+		it('MemoryConfig injectionStrategy accepts all valid values', async () => {
+			const { MEMORY_CONFIG_DEFAULTS } = await import('../../../shared/memory-types');
+			const values: import('../../../shared/memory-types').MemoryConfig['injectionStrategy'][] = [
+				'lean',
+				'balanced',
+				'rich',
+			];
+			for (const v of values) {
+				const config: import('../../../shared/memory-types').MemoryConfig = {
+					...MEMORY_CONFIG_DEFAULTS,
+					injectionStrategy: v,
+				};
+				expect(config.injectionStrategy).toBe(v);
+			}
+		});
 	});
 
 	// ─── Prompt Compilation ──────────────────────────────────────────────

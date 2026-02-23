@@ -201,6 +201,8 @@ export interface MemoryConfig {
 	analysisCooldownMs: number;
 	/** Model to use for experience extraction LLM call — default undefined (use system default) */
 	extractionModel?: string;
+	/** How aggressively to inject memories into agent prompts — default 'balanced' */
+	injectionStrategy: 'lean' | 'balanced' | 'rich';
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -219,6 +221,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	minNoveltyScore: 0.4,
 	analysisCooldownMs: 300000,
 	extractionModel: undefined,
+	injectionStrategy: 'balanced',
 };
 
 // ─── Stats and Results ─────────────────────────────────────────────────────
