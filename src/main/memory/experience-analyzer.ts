@@ -43,6 +43,8 @@ export interface ExperienceAnalyzerInput {
 	sessionDurationMs?: number;
 	/** Detected deviations in session history (error→fix, retries, backtracks) */
 	detectedDeviations?: DeviationSignal[];
+	/** Decision provenance signals extracted from VIBES reasoning traces or history */
+	decisionSignals?: DecisionSignal[];
 }
 
 /** What kind of learning this experience represents */
@@ -61,6 +63,19 @@ export const EXPERIENCE_CATEGORIES: readonly ExperienceCategory[] = [
 	'anti-pattern-identified',
 	'decision-made',
 ] as const;
+
+export interface DecisionSignal {
+	/** What was decided */
+	decision: string;
+	/** What alternatives were mentioned */
+	alternatives: string[];
+	/** Why this choice was made (from reasoning trace) */
+	rationale: string;
+	/** Source of this signal */
+	source: 'vibes' | 'history';
+	/** Timestamp of the decision moment */
+	timestamp?: number;
+}
 
 /** A detected deviation in the session — where the agent had to backtrack, retry, or change approach */
 export interface DeviationSignal {
@@ -242,8 +257,16 @@ export class ExperienceAnalyzer {
 			const manifestPath = path.join(projectPath, '.ai-audit', 'manifest.json');
 			const manifestContent = await fs.readFile(manifestPath, 'utf-8');
 			const manifest = JSON.parse(manifestContent);
-			if (Array.isArray(manifest.entries)) {
-				input.vibesManifest = manifest.entries
+			// VIBES v1.0 stores entries as object keyed by content hash; normalize to array
+			const rawEntries = manifest.entries;
+			const entryArray: { type?: string; content?: string }[] = Array.isArray(rawEntries)
+				? rawEntries
+				: rawEntries && typeof rawEntries === 'object'
+					? Object.values(rawEntries)
+					: [];
+
+			if (entryArray.length > 0) {
+				input.vibesManifest = entryArray
 					.slice(-20)
 					.map((e: { type?: string; content?: string }) => ({
 						type: e.type ?? 'unknown',
@@ -273,6 +296,19 @@ export class ExperienceAnalyzer {
 			// VIBES not available — proceed without
 		}
 
+		// Decision provenance: extract from VIBES reasoning traces or history
+		try {
+			input.decisionSignals = await this.gatherDecisionProvenance(
+				projectPath,
+				sessionId,
+				input.vibesManifest,
+				input.vibesAnnotations,
+				input.historyEntries
+			);
+		} catch {
+			// Decision provenance unavailable — proceed without
+		}
+
 		// Stats: query stats.db for session query events to get total duration
 		try {
 			const { getStatsDB } = await import('../stats');
@@ -286,6 +322,128 @@ export class ExperienceAnalyzer {
 		}
 
 		return input;
+	}
+
+	/**
+	 * Extract decision provenance signals from VIBES audit data.
+	 *
+	 * VIBES reasoning traces often contain explicit decision moments —
+	 * "I could do X or Y, choosing X because..." These are richer than
+	 * history entry summaries because they capture the agent's actual
+	 * deliberation process.
+	 *
+	 * When VIBES is unavailable, falls back to scanning history entry
+	 * summaries for decision language (lighter signals with source='history').
+	 */
+	async gatherDecisionProvenance(
+		_projectPath: string,
+		_sessionId: string,
+		vibesManifest?: ExperienceAnalyzerInput['vibesManifest'],
+		_vibesAnnotations?: ExperienceAnalyzerInput['vibesAnnotations'],
+		historyEntries?: ExperienceAnalyzerInput['historyEntries']
+	): Promise<DecisionSignal[]> {
+		const signals: DecisionSignal[] = [];
+
+		// Decision keyword patterns
+		const decisionPatterns = [
+			/\b(?:I could (?:do|use|try) .+? or .+)/i,
+			/\b(?:choosing .+? because)\b/i,
+			/\b(?:decided to .+)/i,
+			/\b(?:opted for .+)/i,
+			/\b(?:going with .+)/i,
+			/\b(?:alternatives?:)/i,
+			/\b(?:options?:)/i,
+			/\b(?:trade-?off)/i,
+			/\b(?:pros and cons)\b/i,
+		];
+
+		// Alternatives extraction pattern: "X or Y" / "X vs Y" / "X versus Y"
+		const alternativesPattern =
+			/\b(\w[\w\s.-]*?)\s+(?:or|vs\.?|versus)\s+(\w[\w\s.-]*?)(?:\s|[.,;!?]|$)/gi;
+
+		// Rationale extraction: "because ..." clause
+		const rationalePattern = /\bbecause\s+(.{10,200}?)(?:\.|$)/i;
+
+		/**
+		 * Extract surrounding context (±200 chars) from a match position.
+		 */
+		const extractContext = (text: string, matchIndex: number, matchLength: number): string => {
+			const start = Math.max(0, matchIndex - 200);
+			const end = Math.min(text.length, matchIndex + matchLength + 200);
+			return text.slice(start, end).trim();
+		};
+
+		/**
+		 * Extract a decision signal from a text match.
+		 */
+		const extractSignal = (
+			text: string,
+			matchIndex: number,
+			matchStr: string,
+			source: 'vibes' | 'history',
+			timestamp?: number
+		): DecisionSignal => {
+			const context = extractContext(text, matchIndex, matchStr.length);
+
+			// Extract the sentence containing the decision keyword
+			const sentences = context.split(/(?<=[.!?])\s+/);
+			const decisionSentence =
+				sentences.find((s) => decisionPatterns.some((p) => p.test(s))) || matchStr;
+
+			// Extract alternatives
+			const alternatives: string[] = [];
+			let altMatch: RegExpExecArray | null;
+			const altRegex = new RegExp(alternativesPattern.source, alternativesPattern.flags);
+			while ((altMatch = altRegex.exec(context)) !== null) {
+				const a = altMatch[1].trim();
+				const b = altMatch[2].trim();
+				if (a && !alternatives.includes(a)) alternatives.push(a);
+				if (b && !alternatives.includes(b)) alternatives.push(b);
+			}
+
+			// Extract rationale
+			const ratMatch = rationalePattern.exec(context);
+			const rationale = ratMatch ? ratMatch[1].trim() : '';
+
+			return {
+				decision: decisionSentence.slice(0, 300),
+				alternatives,
+				rationale: rationale.slice(0, 500),
+				source,
+				...(timestamp != null ? { timestamp } : {}),
+			};
+		};
+
+		// VIBES path: scan reasoning entries from manifest
+		if (vibesManifest && vibesManifest.length > 0) {
+			for (const entry of vibesManifest) {
+				if (entry.type !== 'reasoning' && !entry.content) continue;
+				const text = entry.content;
+				for (const pattern of decisionPatterns) {
+					const match = pattern.exec(text);
+					if (match) {
+						signals.push(extractSignal(text, match.index, match[0], 'vibes'));
+						break; // One signal per manifest entry
+					}
+				}
+			}
+		}
+
+		// Internal fallback: scan history entry summaries
+		if (historyEntries && historyEntries.length > 0) {
+			for (const entry of historyEntries) {
+				const text = entry.summary + (entry.fullResponse ? ' ' + entry.fullResponse : '');
+				for (const pattern of decisionPatterns) {
+					const match = pattern.exec(text);
+					if (match) {
+						signals.push(extractSignal(text, match.index, match[0], 'history'));
+						break; // One signal per history entry
+					}
+				}
+			}
+		}
+
+		return signals;
 	}
 
 	/**
@@ -417,6 +575,17 @@ export class ExperienceAnalyzer {
 					.join('\n')
 			: 'None detected';
 
+		const decisionText = input.decisionSignals?.length
+			? input.decisionSignals
+					.map(
+						(d, i) =>
+							`${i + 1}. [${d.source}] ${d.decision}` +
+							(d.alternatives.length ? `\n   Alternatives: ${d.alternatives.join(', ')}` : '') +
+							(d.rationale ? `\n   Rationale: ${d.rationale}` : '')
+					)
+					.join('\n')
+			: 'None detected';
+
 		return experienceExtractionPrompt
 			.replace('{{AGENT_TYPE}}', input.agentType)
 			.replace('{{PROJECT_PATH}}', input.projectPath)
@@ -424,6 +593,7 @@ export class ExperienceAnalyzer {
 			.replace('{{COST}}', costStr)
 			.replace('{{HISTORY_ENTRIES}}', historyText || 'N/A')
 			.replace('{{DEVIATION_SIGNALS}}', deviationText)
+			.replace('{{DECISION_SIGNALS}}', decisionText)
 			.replace('{{GIT_DIFF}}', input.gitDiff || 'N/A')
 			.replace('{{VIBES_DATA}}', vibesSection);
 	}
@@ -550,9 +720,34 @@ export class ExperienceAnalyzer {
 					}
 				}
 
-				// For decision-made, set provenanceSource to 'inferred'
-				const provenanceSource: 'inferred' | undefined =
-					exp.category === 'decision-made' ? 'inferred' : undefined;
+				// For decision-made, determine provenanceSource from matching decision signals
+				let provenanceSource: 'vibes' | 'history' | 'inferred' | undefined;
+				let signalAlternatives: string | undefined;
+				let signalRationale: string | undefined;
+
+				if (exp.category === 'decision-made') {
+					provenanceSource = 'inferred'; // default for decisions
+
+					// Check if any decision signal matches this experience
+					if (input.decisionSignals?.length) {
+						const matchedSignal = input.decisionSignals.find(
+							(s) =>
+								s.decision.includes(exp.situation) ||
+								exp.situation.includes(s.decision) ||
+								s.decision.includes(exp.content) ||
+								exp.content.includes(s.decision)
+						);
+						if (matchedSignal) {
+							provenanceSource = matchedSignal.source;
+							if (matchedSignal.alternatives.length > 0) {
+								signalAlternatives = matchedSignal.alternatives.join('; ');
+							}
+							if (matchedSignal.rationale) {
+								signalRationale = matchedSignal.rationale;
+							}
+						}
+					}
+				}
 
 				// Match deviation context: check if experience situation overlaps with any deviation description
 				let deviationFields:
@@ -592,10 +787,12 @@ export class ExperienceAnalyzer {
 							diffSummary: input.gitDiff?.slice(0, 500),
 							sessionCostUsd: input.sessionCostUsd,
 							sessionDurationMs: input.sessionDurationMs,
-							...(exp.alternativesConsidered
-								? { alternativesConsidered: exp.alternativesConsidered }
+							...(signalAlternatives || exp.alternativesConsidered
+								? { alternativesConsidered: signalAlternatives ?? exp.alternativesConsidered }
 								: {}),
-							...(exp.rationale ? { rationale: exp.rationale } : {}),
+							...(signalRationale || exp.rationale
+								? { rationale: signalRationale ?? exp.rationale }
+								: {}),
 							...(provenanceSource ? { provenanceSource } : {}),
 							...deviationFields,
 						},

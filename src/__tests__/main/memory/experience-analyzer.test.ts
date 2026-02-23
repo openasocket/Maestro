@@ -143,6 +143,7 @@ import {
 	type ExtractedExperience,
 	type ExperienceCategory,
 	type DeviationSignal,
+	type DecisionSignal,
 } from '../../../main/memory/experience-analyzer';
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -2522,6 +2523,513 @@ describe('ExperienceAnalyzer', () => {
 			// LLM (claude) should NOT be called — extraction is disabled by default
 			const claudeCalls = mockExecFile.mock.calls.filter((call: unknown[]) => call[0] === 'claude');
 			expect(claudeCalls).toHaveLength(0);
+		});
+	});
+
+	// ─── Decision Provenance ─────────────────────────────────────────────
+
+	describe('gatherDecisionProvenance', () => {
+		it('extracts decision signals from VIBES reasoning entries', async () => {
+			const signals = await analyzer.gatherDecisionProvenance(
+				'/project',
+				'sess-1',
+				[
+					{
+						type: 'reasoning',
+						content:
+							'I could use Redux or Context API for state management. Choosing Redux because it has better devtools.',
+					},
+					{ type: 'command', content: 'npm install redux' },
+				],
+				undefined,
+				undefined
+			);
+
+			expect(signals.length).toBeGreaterThanOrEqual(1);
+			const vibesSignal = signals.find((s) => s.source === 'vibes');
+			expect(vibesSignal).toBeDefined();
+			expect(vibesSignal!.decision).toBeTruthy();
+		});
+
+		it('extracts decision signals from history entries as fallback', async () => {
+			const signals = await analyzer.gatherDecisionProvenance(
+				'/project',
+				'sess-1',
+				undefined,
+				undefined,
+				[
+					{ summary: 'I decided to use DuckDB for local storage instead of SQLite' },
+					{ summary: 'Fixed a typo in the README' },
+				]
+			);
+
+			expect(signals.length).toBeGreaterThanOrEqual(1);
+			const historySignal = signals.find((s) => s.source === 'history');
+			expect(historySignal).toBeDefined();
+			expect(historySignal!.decision).toContain('decided to');
+		});
+
+		it('returns empty array when no decision patterns found', async () => {
+			const signals = await analyzer.gatherDecisionProvenance(
+				'/project',
+				'sess-1',
+				[{ type: 'command', content: 'npm test' }],
+				undefined,
+				[{ summary: 'Tests passed successfully' }]
+			);
+
+			expect(signals).toEqual([]);
+		});
+
+		it('extracts alternatives from "X or Y" patterns', async () => {
+			const signals = await analyzer.gatherDecisionProvenance(
+				'/project',
+				'sess-1',
+				[
+					{
+						type: 'reasoning',
+						content:
+							'I could use React or Vue for the frontend. Going with React because the team already knows it.',
+					},
+				],
+				undefined,
+				undefined
+			);
+
+			expect(signals.length).toBeGreaterThanOrEqual(1);
+			const signal = signals[0];
+			expect(signal.alternatives.length).toBeGreaterThanOrEqual(1);
+		});
+
+		it('extracts rationale from "because" clauses', async () => {
+			const signals = await analyzer.gatherDecisionProvenance(
+				'/project',
+				'sess-1',
+				[
+					{
+						type: 'reasoning',
+						content:
+							'Opted for TypeScript because it provides better type safety and catches errors at compile time.',
+					},
+				],
+				undefined,
+				undefined
+			);
+
+			expect(signals.length).toBeGreaterThanOrEqual(1);
+			expect(signals[0].rationale).toBeTruthy();
+			expect(signals[0].rationale).toContain('type safety');
+		});
+
+		it('handles both VIBES and history signals together', async () => {
+			const signals = await analyzer.gatherDecisionProvenance(
+				'/project',
+				'sess-1',
+				[
+					{
+						type: 'reasoning',
+						content: 'Going with DuckDB for the database layer.',
+					},
+				],
+				undefined,
+				[{ summary: 'Decided to use Vitest instead of Jest for testing' }]
+			);
+
+			const vibesSignals = signals.filter((s) => s.source === 'vibes');
+			const historySignals = signals.filter((s) => s.source === 'history');
+			expect(vibesSignals.length).toBeGreaterThanOrEqual(1);
+			expect(historySignals.length).toBeGreaterThanOrEqual(1);
+		});
+
+		it('produces at most one signal per manifest entry', async () => {
+			const signals = await analyzer.gatherDecisionProvenance(
+				'/project',
+				'sess-1',
+				[
+					{
+						type: 'reasoning',
+						content: 'I could use X or Y. Decided to go with X. Opted for the simpler approach.',
+					},
+				],
+				undefined,
+				undefined
+			);
+
+			const vibesCount = signals.filter((s) => s.source === 'vibes').length;
+			expect(vibesCount).toBe(1);
+		});
+	});
+
+	describe('compilePrompt with decision signals', () => {
+		it('includes decision signals in compiled prompt', () => {
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/test',
+				historyEntries: [],
+				decisionSignals: [
+					{
+						decision: 'Chose Redux over Context',
+						alternatives: ['Context API', 'Zustand'],
+						rationale: 'Better devtools support',
+						source: 'vibes',
+					},
+				],
+			};
+
+			const prompt = analyzer.compilePrompt(input);
+
+			expect(prompt).toContain('## Decision Signals');
+			expect(prompt).toContain('[vibes] Chose Redux over Context');
+			expect(prompt).toContain('Alternatives: Context API, Zustand');
+			expect(prompt).toContain('Rationale: Better devtools support');
+		});
+
+		it('shows "None detected" when no decision signals', () => {
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/test',
+				historyEntries: [],
+			};
+
+			const prompt = analyzer.compilePrompt(input);
+
+			expect(prompt).toContain('## Decision Signals');
+			expect(prompt).toContain('None detected');
+		});
+
+		it('no leftover template variables with decision signals', () => {
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/test',
+				historyEntries: [{ summary: 'Step 1' }],
+				sessionDurationMs: 10000,
+				sessionCostUsd: 0.01,
+				decisionSignals: [
+					{
+						decision: 'Used REST',
+						alternatives: ['GraphQL'],
+						rationale: 'Simpler',
+						source: 'history',
+					},
+				],
+			};
+
+			const prompt = analyzer.compilePrompt(input);
+
+			expect(prompt).not.toMatch(/\{\{[A-Z_]+\}\}/);
+		});
+	});
+
+	describe('storeExperiences with decision provenance', () => {
+		it('sets provenanceSource to vibes when matching vibes signal exists', async () => {
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'Chose Redux for state management',
+					situation: 'Needed state management solution',
+					learning: 'Redux scales better for cross-cutting state',
+					category: 'decision-made',
+					tags: ['state'],
+					noveltyScore: 0.7,
+					alternativesConsidered: 'Context API',
+					rationale: 'LLM inferred rationale',
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+				decisionSignals: [
+					{
+						decision: 'Needed state management solution',
+						alternatives: ['Context API', 'MobX', 'Zustand'],
+						rationale: 'VIBES reasoning trace rationale',
+						source: 'vibes',
+					},
+				],
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(1);
+
+			// Find the stored memory and check provenance
+			let foundMemory = false;
+			for (const [filePath, content] of fsState) {
+				if (filePath.endsWith('library.json')) {
+					const lib = JSON.parse(content);
+					const entry = (lib.entries ?? []).find(
+						(e: { content: string }) => e.content === 'Chose Redux for state management'
+					);
+					if (entry) {
+						expect(entry.experienceContext.provenanceSource).toBe('vibes');
+						// Signal overrides LLM values
+						expect(entry.experienceContext.alternativesConsidered).toBe(
+							'Context API; MobX; Zustand'
+						);
+						expect(entry.experienceContext.rationale).toBe('VIBES reasoning trace rationale');
+						foundMemory = true;
+					}
+				}
+			}
+			expect(foundMemory).toBe(true);
+		});
+
+		it('sets provenanceSource to history when matching history signal exists', async () => {
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'Used DuckDB for local storage',
+					situation: 'Database choice for local data',
+					learning: 'DuckDB is fast for analytics',
+					category: 'decision-made',
+					tags: ['database'],
+					noveltyScore: 0.6,
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+				decisionSignals: [
+					{
+						decision: 'Database choice for local data',
+						alternatives: ['SQLite'],
+						rationale: 'Better analytics performance',
+						source: 'history',
+					},
+				],
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(1);
+
+			let foundMemory = false;
+			for (const [filePath, content] of fsState) {
+				if (filePath.endsWith('library.json')) {
+					const lib = JSON.parse(content);
+					const entry = (lib.entries ?? []).find(
+						(e: { content: string }) => e.content === 'Used DuckDB for local storage'
+					);
+					if (entry) {
+						expect(entry.experienceContext.provenanceSource).toBe('history');
+						foundMemory = true;
+					}
+				}
+			}
+			expect(foundMemory).toBe(true);
+		});
+
+		it('keeps provenanceSource as inferred when no signal matches', async () => {
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'Chose tabs over spaces',
+					situation: 'Code style decision',
+					learning: 'Tabs are more accessible',
+					category: 'decision-made',
+					tags: ['style'],
+					noveltyScore: 0.5,
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+				decisionSignals: [
+					{
+						decision: 'Completely unrelated decision about API design',
+						alternatives: [],
+						rationale: '',
+						source: 'vibes',
+					},
+				],
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(1);
+
+			let foundMemory = false;
+			for (const [filePath, content] of fsState) {
+				if (filePath.endsWith('library.json')) {
+					const lib = JSON.parse(content);
+					const entry = (lib.entries ?? []).find(
+						(e: { content: string }) => e.content === 'Chose tabs over spaces'
+					);
+					if (entry) {
+						expect(entry.experienceContext.provenanceSource).toBe('inferred');
+						foundMemory = true;
+					}
+				}
+			}
+			expect(foundMemory).toBe(true);
+		});
+
+		it('does not set provenanceSource for non-decision categories', async () => {
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'Extract types to separate file',
+					situation: 'Circular import broke build',
+					learning: 'Separate shared types',
+					category: 'problem-solved',
+					tags: [],
+					noveltyScore: 0.7,
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(1);
+
+			let foundMemory = false;
+			for (const [filePath, content] of fsState) {
+				if (filePath.endsWith('library.json')) {
+					const lib = JSON.parse(content);
+					const entry = (lib.entries ?? []).find(
+						(e: { content: string }) => e.content === 'Extract types to separate file'
+					);
+					if (entry) {
+						expect(entry.experienceContext.provenanceSource).toBeUndefined();
+						foundMemory = true;
+					}
+				}
+			}
+			expect(foundMemory).toBe(true);
+		});
+	});
+
+	describe('DecisionSignal interface', () => {
+		it('DecisionSignal has all required fields', () => {
+			const signal: import('../../../main/memory/experience-analyzer').DecisionSignal = {
+				decision: 'Chose Redux',
+				alternatives: ['Context', 'MobX'],
+				rationale: 'Better devtools',
+				source: 'vibes',
+			};
+			expect(signal.decision).toBe('Chose Redux');
+			expect(signal.alternatives).toEqual(['Context', 'MobX']);
+			expect(signal.rationale).toBe('Better devtools');
+			expect(signal.source).toBe('vibes');
+		});
+
+		it('DecisionSignal source accepts both valid values', () => {
+			const vibes: import('../../../main/memory/experience-analyzer').DecisionSignal = {
+				decision: 'A',
+				alternatives: [],
+				rationale: '',
+				source: 'vibes',
+			};
+			const history: import('../../../main/memory/experience-analyzer').DecisionSignal = {
+				decision: 'B',
+				alternatives: [],
+				rationale: '',
+				source: 'history',
+			};
+			expect(vibes.source).toBe('vibes');
+			expect(history.source).toBe('history');
+		});
+
+		it('DecisionSignal timestamp is optional', () => {
+			const signal: import('../../../main/memory/experience-analyzer').DecisionSignal = {
+				decision: 'A',
+				alternatives: [],
+				rationale: '',
+				source: 'vibes',
+				timestamp: 1234567890,
+			};
+			expect(signal.timestamp).toBe(1234567890);
+		});
+
+		it('ExperienceAnalyzerInput accepts decisionSignals field', () => {
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/test',
+				historyEntries: [],
+				decisionSignals: [
+					{
+						decision: 'Test',
+						alternatives: [],
+						rationale: '',
+						source: 'vibes',
+					},
+				],
+			};
+			expect(input.decisionSignals).toHaveLength(1);
+		});
+	});
+
+	describe('VIBES manifest object-keyed entries', () => {
+		it('reads manifest entries when stored as object (VIBES v1.0 format)', async () => {
+			mockExecFile.mockRejectedValue(new Error('not a git repo'));
+
+			// Set up manifest with object-keyed entries (VIBES v1.0 format)
+			const manifestData = {
+				entries: {
+					abc123: { type: 'reasoning', content: 'Decided to use TypeScript' },
+					def456: { type: 'command', content: 'npm install' },
+				},
+			};
+			fsState.set('/project/.ai-audit/manifest.json', JSON.stringify(manifestData));
+			fsState.set('/project/.ai-audit/annotations.jsonl', '');
+
+			const input = await analyzer.gatherSessionData('sess-1', '/project', 'claude-code');
+
+			expect(input.vibesManifest).toBeDefined();
+			expect(input.vibesManifest!.length).toBe(2);
+			expect(input.vibesManifest!.some((e) => e.type === 'reasoning')).toBe(true);
+			expect(input.vibesManifest!.some((e) => e.type === 'command')).toBe(true);
+		});
+
+		it('reads manifest entries when stored as array (legacy format)', async () => {
+			mockExecFile.mockRejectedValue(new Error('not a git repo'));
+
+			const manifestData = {
+				entries: [
+					{ type: 'reasoning', content: 'Decided to use TypeScript' },
+					{ type: 'command', content: 'npm install' },
+				],
+			};
+			fsState.set('/project/.ai-audit/manifest.json', JSON.stringify(manifestData));
+			fsState.set('/project/.ai-audit/annotations.jsonl', '');
+
+			const input = await analyzer.gatherSessionData('sess-1', '/project', 'claude-code');
+
+			expect(input.vibesManifest).toBeDefined();
+			expect(input.vibesManifest!.length).toBe(2);
+		});
+
+		it('handles manifest with empty entries object', async () => {
+			mockExecFile.mockRejectedValue(new Error('not a git repo'));
+
+			fsState.set('/project/.ai-audit/manifest.json', JSON.stringify({ entries: {} }));
+			fsState.set('/project/.ai-audit/annotations.jsonl', '');
+
+			const input = await analyzer.gatherSessionData('sess-1', '/project', 'claude-code');
+
+			expect(input.vibesManifest).toBeUndefined();
+		});
+
+		it('handles manifest with null entries', async () => {
+			mockExecFile.mockRejectedValue(new Error('not a git repo'));
+
+			fsState.set('/project/.ai-audit/manifest.json', JSON.stringify({ entries: null }));
+			fsState.set('/project/.ai-audit/annotations.jsonl', '');
+
+			const input = await analyzer.gatherSessionData('sess-1', '/project', 'claude-code');
+
+			expect(input.vibesManifest).toBeUndefined();
 		});
 	});
 });

@@ -20,6 +20,9 @@ Pay special attention to deviations listed above — these represent moments whe
 ## VIBES Audit Trail
 {{VIBES_DATA}}
 
+## Decision Signals
+{{DECISION_SIGNALS}}
+
 ## Extraction Categories
 
 Analyze the session data and extract 0-5 discrete experiences. Each MUST be categorized:
@@ -53,6 +56,8 @@ A significant architectural or approach decision with alternatives. Look for:
 - Moments where multiple valid approaches existed
 - Trade-offs that were evaluated (even implicitly)
 - Choices that constrain future work
+
+If Decision Signals are provided above, use them to populate `alternativesConsidered` and `rationale` fields with higher fidelity. Signals from 'vibes' source contain actual reasoning traces and are more reliable than 'history' signals.
 
 ## Quality Criteria
 
