@@ -263,7 +263,8 @@ export interface MemoryHistoryEntry {
 		| 'delete-persona'
 		| 'create-skill'
 		| 'update-skill'
-		| 'delete-skill';
+		| 'delete-skill'
+		| 'restore';
 	entityType: 'role' | 'persona' | 'skill' | 'memory';
 	entityId: string;
 	content?: string;

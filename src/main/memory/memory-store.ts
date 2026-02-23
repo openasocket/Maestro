@@ -728,6 +728,56 @@ export class MemoryStore {
 		return lib.entries.filter((e) => e.active && (includeArchived || !e.archived));
 	}
 
+	/**
+	 * List archived memories for a given scope. Used by the UI archive browser.
+	 */
+	async listArchivedMemories(
+		scope: MemoryScope,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string
+	): Promise<MemoryEntry[]> {
+		const all = await this.listMemories(scope, skillAreaId, projectPath, false, true);
+		return all.filter((e) => e.archived);
+	}
+
+	/**
+	 * Restore an archived memory — set archived=false, boost confidence to 0.3.
+	 * The confidence boost ensures it won't be immediately re-archived by the next decay cycle.
+	 */
+	async restoreMemory(
+		id: MemoryId,
+		scope: MemoryScope,
+		skillAreaId?: SkillAreaId,
+		projectPath?: string
+	): Promise<MemoryEntry | null> {
+		const dirPath = this.getMemoryPath(scope, skillAreaId, projectPath);
+		const lib = await this.readLibrary(dirPath);
+		const idx = lib.entries.findIndex((e) => e.id === id);
+		if (idx === -1) return null;
+
+		const entry = lib.entries[idx];
+		if (!entry.archived) return entry; // Already not archived
+
+		const now = Date.now();
+		lib.entries[idx] = {
+			...entry,
+			archived: false,
+			confidence: Math.max(entry.confidence, 0.3),
+			updatedAt: now,
+		};
+
+		await this.writeLibrary(dirPath, lib);
+		await this.appendHistory(dirPath, {
+			timestamp: now,
+			operation: 'restore',
+			entityType: 'memory',
+			entityId: id,
+			content: entry.content.slice(0, 200),
+		});
+
+		return lib.entries[idx];
+	}
+
 	// ─── Keyword & Tag Search ───────────────────────────────────────────────
 
 	/** Stop words excluded from keyword tokenization */

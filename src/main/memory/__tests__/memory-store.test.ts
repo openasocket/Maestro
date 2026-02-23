@@ -792,4 +792,196 @@ describe('MemoryStore — Hierarchy, CRUD, Isolation, Atomics, History, Seed', (
 			}
 		});
 	});
+
+	// ─── 9. Archive & Restore ──────────────────────────────────────────
+
+	describe('listArchivedMemories and restoreMemory', () => {
+		let skillId: string;
+
+		beforeEach(async () => {
+			const role = await store.createRole('R', 'd');
+			const persona = await store.createPersona(role.id, 'P', 'd');
+			const skill = await store.createSkillArea(persona.id, 'S', 'd');
+			skillId = skill.id;
+		});
+
+		it('listArchivedMemories returns only archived entries', async () => {
+			const m1 = await store.addMemory({ content: 'Active', scope: 'skill', skillAreaId: skillId });
+			const m2 = await store.addMemory({
+				content: 'Will archive',
+				scope: 'skill',
+				skillAreaId: skillId,
+			});
+
+			// Archive m2 via updateMemory
+			await store.updateMemory(m2.id, { active: true }, 'skill', skillId);
+			// Set archived manually through the library
+			const dirPath = store.getMemoryPath('skill', skillId);
+			const lib = JSON.parse(fsState.get(`${dirPath}/library.json`)!) as {
+				version: number;
+				entries: any[];
+			};
+			const idx = lib.entries.findIndex((e: any) => e.id === m2.id);
+			lib.entries[idx].archived = true;
+			fsState.set(`${dirPath}/library.json`, JSON.stringify(lib));
+
+			const archived = await store.listArchivedMemories('skill', skillId);
+			expect(archived).toHaveLength(1);
+			expect(archived[0].id).toBe(m2.id);
+			expect(archived[0].archived).toBe(true);
+
+			// Regular listMemories should NOT include archived
+			const active = await store.listMemories('skill', skillId);
+			expect(active).toHaveLength(1);
+			expect(active[0].id).toBe(m1.id);
+		});
+
+		it('listArchivedMemories returns empty when no archived entries exist', async () => {
+			await store.addMemory({ content: 'Active', scope: 'skill', skillAreaId: skillId });
+			const archived = await store.listArchivedMemories('skill', skillId);
+			expect(archived).toHaveLength(0);
+		});
+
+		it('restoreMemory un-archives and boosts confidence', async () => {
+			const mem = await store.addMemory({
+				content: 'To archive',
+				scope: 'skill',
+				skillAreaId: skillId,
+			});
+
+			// Manually archive via library
+			const dirPath = store.getMemoryPath('skill', skillId);
+			const lib = JSON.parse(fsState.get(`${dirPath}/library.json`)!) as {
+				version: number;
+				entries: any[];
+			};
+			const idx = lib.entries.findIndex((e: any) => e.id === mem.id);
+			lib.entries[idx].archived = true;
+			lib.entries[idx].confidence = 0.02; // below threshold
+			fsState.set(`${dirPath}/library.json`, JSON.stringify(lib));
+
+			const restored = await store.restoreMemory(mem.id, 'skill', skillId);
+			expect(restored).not.toBeNull();
+			expect(restored!.archived).toBe(false);
+			expect(restored!.confidence).toBe(0.3); // boosted from 0.02
+			expect(restored!.active).toBe(true);
+		});
+
+		it('restoreMemory preserves confidence if already above 0.3', async () => {
+			const mem = await store.addMemory({
+				content: 'High confidence archived',
+				scope: 'skill',
+				skillAreaId: skillId,
+			});
+
+			// Archive with high confidence
+			const dirPath = store.getMemoryPath('skill', skillId);
+			const lib = JSON.parse(fsState.get(`${dirPath}/library.json`)!) as {
+				version: number;
+				entries: any[];
+			};
+			const idx = lib.entries.findIndex((e: any) => e.id === mem.id);
+			lib.entries[idx].archived = true;
+			lib.entries[idx].confidence = 0.8;
+			fsState.set(`${dirPath}/library.json`, JSON.stringify(lib));
+
+			const restored = await store.restoreMemory(mem.id, 'skill', skillId);
+			expect(restored!.confidence).toBe(0.8); // Math.max(0.8, 0.3) = 0.8
+		});
+
+		it('restoreMemory returns null for non-existent id', async () => {
+			const result = await store.restoreMemory('nonexistent-id', 'skill', skillId);
+			expect(result).toBeNull();
+		});
+
+		it('restoreMemory returns entry unchanged if not archived', async () => {
+			const mem = await store.addMemory({
+				content: 'Not archived',
+				scope: 'skill',
+				skillAreaId: skillId,
+			});
+			const result = await store.restoreMemory(mem.id, 'skill', skillId);
+			expect(result).not.toBeNull();
+			expect(result!.archived).toBe(false);
+			expect(result!.confidence).toBe(1.0); // unchanged
+		});
+
+		it('restoreMemory writes history entry', async () => {
+			const mem = await store.addMemory({
+				content: 'History test',
+				scope: 'skill',
+				skillAreaId: skillId,
+			});
+
+			// Archive it
+			const dirPath = store.getMemoryPath('skill', skillId);
+			const lib = JSON.parse(fsState.get(`${dirPath}/library.json`)!) as {
+				version: number;
+				entries: any[];
+			};
+			const idx = lib.entries.findIndex((e: any) => e.id === mem.id);
+			lib.entries[idx].archived = true;
+			lib.entries[idx].confidence = 0.01;
+			fsState.set(`${dirPath}/library.json`, JSON.stringify(lib));
+
+			await store.restoreMemory(mem.id, 'skill', skillId);
+
+			const history = readHistory(dirPath);
+			const restoreEntry = history.find((h) => h.operation === 'restore' && h.entityId === mem.id);
+			expect(restoreEntry).toBeDefined();
+			expect(restoreEntry!.entityType).toBe('memory');
+			expect(restoreEntry!.content).toBe('History test');
+		});
+
+		it('restored memory reappears in regular listMemories', async () => {
+			const mem = await store.addMemory({
+				content: 'Round trip',
+				scope: 'skill',
+				skillAreaId: skillId,
+			});
+
+			// Archive
+			const dirPath = store.getMemoryPath('skill', skillId);
+			const lib = JSON.parse(fsState.get(`${dirPath}/library.json`)!) as {
+				version: number;
+				entries: any[];
+			};
+			const idx = lib.entries.findIndex((e: any) => e.id === mem.id);
+			lib.entries[idx].archived = true;
+			fsState.set(`${dirPath}/library.json`, JSON.stringify(lib));
+
+			// Verify hidden from default list
+			expect(await store.listMemories('skill', skillId)).toHaveLength(0);
+
+			// Restore
+			await store.restoreMemory(mem.id, 'skill', skillId);
+
+			// Now visible again
+			const active = await store.listMemories('skill', skillId);
+			expect(active).toHaveLength(1);
+			expect(active[0].id).toBe(mem.id);
+		});
+
+		it('works with global scope', async () => {
+			const mem = await store.addMemory({ content: 'Global archived', scope: 'global' });
+
+			// Archive
+			const dirPath = store.getMemoryPath('global');
+			const lib = JSON.parse(fsState.get(`${dirPath}/library.json`)!) as {
+				version: number;
+				entries: any[];
+			};
+			const idx = lib.entries.findIndex((e: any) => e.id === mem.id);
+			lib.entries[idx].archived = true;
+			lib.entries[idx].confidence = 0.01;
+			fsState.set(`${dirPath}/library.json`, JSON.stringify(lib));
+
+			const archived = await store.listArchivedMemories('global');
+			expect(archived).toHaveLength(1);
+
+			const restored = await store.restoreMemory(mem.id, 'global');
+			expect(restored!.archived).toBe(false);
+			expect(restored!.confidence).toBe(0.3);
+		});
+	});
 });
