@@ -213,6 +213,10 @@ export interface MemoryConfig {
 	injectionStrategy: 'lean' | 'balanced' | 'rich';
 	/** Enable multi-signal retrieval (embedding + keyword + tag) — default true */
 	enableHybridSearch: boolean;
+	/** Enable mid-session live memory injection via monitor triggers — default false */
+	enableLiveInjection: boolean;
+	/** Minimum seconds between live memory searches per session — default 60 */
+	liveSearchCooldownSeconds: number;
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -233,6 +237,8 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	extractionModel: undefined,
 	injectionStrategy: 'balanced',
 	enableHybridSearch: true,
+	enableLiveInjection: false,
+	liveSearchCooldownSeconds: 60,
 };
 
 // ─── Hierarchy Suggestions ─────────────────────────────────────────────────
