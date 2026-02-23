@@ -73,6 +73,12 @@ export interface ExtractedExperience {
 	tags: string[];
 	/** How novel/important this learning is (0.0-1.0) */
 	noveltyScore: number;
+	/** What alternatives were considered (required for decision-made) */
+	alternativesConsidered?: string;
+	/** Why this approach was chosen (required for decision-made) */
+	rationale?: string;
+	/** Specific technical keywords for retrieval (function names, error codes, etc.) */
+	keywords?: string[];
 }
 
 // ─── ExperienceAnalyzer ─────────────────────────────────────────────────────
@@ -432,6 +438,13 @@ export class ExperienceAnalyzer {
 						category,
 						tags: Array.isArray(e.tags) ? e.tags.filter((t: unknown) => typeof t === 'string') : [],
 						noveltyScore: Number(e.noveltyScore),
+						...(typeof e.alternativesConsidered === 'string'
+							? { alternativesConsidered: e.alternativesConsidered }
+							: {}),
+						...(typeof e.rationale === 'string' ? { rationale: e.rationale } : {}),
+						keywords: Array.isArray(e.keywords)
+							? e.keywords.filter((k: unknown) => typeof k === 'string')
+							: [],
 					};
 				});
 		} catch {
@@ -498,6 +511,20 @@ export class ExperienceAnalyzer {
 						? [categoryTag, ...exp.tags]
 						: [...exp.tags];
 
+				// Merge keywords into tags with kw: prefix for keyword-based retrieval
+				if (exp.keywords && exp.keywords.length > 0) {
+					for (const kw of exp.keywords) {
+						const kwTag = `kw:${kw}`;
+						if (!tags.includes(kwTag)) {
+							tags.push(kwTag);
+						}
+					}
+				}
+
+				// For decision-made, set provenanceSource to 'inferred'
+				const provenanceSource: 'inferred' | undefined =
+					exp.category === 'decision-made' ? 'inferred' : undefined;
+
 				await store.addMemory(
 					{
 						content: exp.content,
@@ -517,6 +544,11 @@ export class ExperienceAnalyzer {
 							diffSummary: input.gitDiff?.slice(0, 500),
 							sessionCostUsd: input.sessionCostUsd,
 							sessionDurationMs: input.sessionDurationMs,
+							...(exp.alternativesConsidered
+								? { alternativesConsidered: exp.alternativesConsidered }
+								: {}),
+							...(exp.rationale ? { rationale: exp.rationale } : {}),
+							...(provenanceSource ? { provenanceSource } : {}),
 						},
 					},
 					scope === 'project' ? input.projectPath : undefined

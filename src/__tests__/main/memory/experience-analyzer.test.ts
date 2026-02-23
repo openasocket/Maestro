@@ -518,7 +518,7 @@ describe('ExperienceAnalyzer', () => {
 			expect(prompt).toContain('## Session History');
 			expect(prompt).toContain('## Code Changes (Git Diff)');
 			expect(prompt).toContain('## VIBES Audit Trail');
-			expect(prompt).toContain('## Instructions');
+			expect(prompt).toContain('## Extraction Categories');
 			expect(prompt).toContain('experience extraction agent');
 			expect(prompt).toContain('noveltyScore');
 		});
@@ -734,6 +734,79 @@ describe('ExperienceAnalyzer', () => {
 			expect(results[2].category).toBe('dependency-discovered');
 			expect(results[3].category).toBe('anti-pattern-identified');
 			expect(results[4].category).toBe('decision-made');
+		});
+
+		it('parses alternativesConsidered and rationale for decision-made', () => {
+			const output = JSON.stringify([
+				{
+					content: 'Chose Redux over Context',
+					situation: 'State management needed',
+					learning: 'Redux scales better for cross-cutting state',
+					category: 'decision-made',
+					tags: ['state'],
+					noveltyScore: 0.7,
+					alternativesConsidered: 'React Context, Zustand, MobX',
+					rationale: 'Redux has better devtools and middleware support',
+				},
+			]);
+
+			const results = analyzer.parseExperiences(output);
+			expect(results).toHaveLength(1);
+			expect(results[0].alternativesConsidered).toBe('React Context, Zustand, MobX');
+			expect(results[0].rationale).toBe('Redux has better devtools and middleware support');
+		});
+
+		it('omits alternativesConsidered and rationale when not present', () => {
+			const output = JSON.stringify([
+				{
+					content: 'Simple pattern',
+					situation: 'Test',
+					learning: 'Test',
+					category: 'pattern-established',
+					tags: [],
+					noveltyScore: 0.5,
+				},
+			]);
+
+			const results = analyzer.parseExperiences(output);
+			expect(results).toHaveLength(1);
+			expect(results[0].alternativesConsidered).toBeUndefined();
+			expect(results[0].rationale).toBeUndefined();
+		});
+
+		it('parses keywords array and filters non-strings', () => {
+			const output = JSON.stringify([
+				{
+					content: 'useCallback optimization',
+					situation: 'Re-renders were excessive',
+					learning: 'Wrap callbacks in useCallback',
+					category: 'pattern-established',
+					tags: ['react'],
+					noveltyScore: 0.6,
+					keywords: ['useCallback', 'React.memo', 42, null, 're-render'],
+				},
+			]);
+
+			const results = analyzer.parseExperiences(output);
+			expect(results).toHaveLength(1);
+			expect(results[0].keywords).toEqual(['useCallback', 'React.memo', 're-render']);
+		});
+
+		it('defaults keywords to empty array when missing', () => {
+			const output = JSON.stringify([
+				{
+					content: 'No keywords',
+					situation: 'Test',
+					learning: 'Test',
+					category: 'pattern-established',
+					tags: [],
+					noveltyScore: 0.5,
+				},
+			]);
+
+			const results = analyzer.parseExperiences(output);
+			expect(results).toHaveLength(1);
+			expect(results[0].keywords).toEqual([]);
 		});
 	});
 
@@ -1433,6 +1506,120 @@ describe('ExperienceAnalyzer', () => {
 						if (entry) {
 							expect(entry.tags[0]).toBe(`category:${categories[i]}`);
 						}
+					}
+				}
+			}
+		});
+
+		it('merges keywords into tags with kw: prefix', async () => {
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'useCallback prevents re-renders',
+					situation: 'Performance issue',
+					learning: 'Wrap callbacks',
+					category: 'pattern-established',
+					tags: ['react'],
+					noveltyScore: 0.7,
+					keywords: ['useCallback', 'React.memo', 're-render'],
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-kw',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(1);
+
+			// Verify kw: tags were added
+			for (const [filePath, content] of fsState) {
+				if (filePath.endsWith('library.json')) {
+					const lib = JSON.parse(content);
+					const entry = (lib.entries ?? []).find(
+						(e: { content: string }) => e.content === 'useCallback prevents re-renders'
+					);
+					if (entry) {
+						expect(entry.tags).toContain('kw:useCallback');
+						expect(entry.tags).toContain('kw:React.memo');
+						expect(entry.tags).toContain('kw:re-render');
+					}
+				}
+			}
+		});
+
+		it('sets provenanceSource to inferred for decision-made experiences', async () => {
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'Chose Redux over Context',
+					situation: 'State management needed',
+					learning: 'Redux scales better',
+					category: 'decision-made',
+					tags: ['state'],
+					noveltyScore: 0.8,
+					alternativesConsidered: 'React Context, Zustand',
+					rationale: 'Better devtools',
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-dec',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(1);
+
+			// Verify provenanceSource, alternativesConsidered, rationale in experienceContext
+			for (const [filePath, content] of fsState) {
+				if (filePath.endsWith('library.json')) {
+					const lib = JSON.parse(content);
+					const entry = (lib.entries ?? []).find(
+						(e: { content: string }) => e.content === 'Chose Redux over Context'
+					);
+					if (entry) {
+						expect(entry.experienceContext?.provenanceSource).toBe('inferred');
+						expect(entry.experienceContext?.alternativesConsidered).toBe('React Context, Zustand');
+						expect(entry.experienceContext?.rationale).toBe('Better devtools');
+					}
+				}
+			}
+		});
+
+		it('does not set provenanceSource for non-decision-made experiences', async () => {
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'Pattern test',
+					situation: 'Test',
+					learning: 'Test',
+					category: 'pattern-established',
+					tags: [],
+					noveltyScore: 0.6,
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-nodec',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(1);
+
+			for (const [filePath, content] of fsState) {
+				if (filePath.endsWith('library.json')) {
+					const lib = JSON.parse(content);
+					const entry = (lib.entries ?? []).find(
+						(e: { content: string }) => e.content === 'Pattern test'
+					);
+					if (entry) {
+						expect(entry.experienceContext?.provenanceSource).toBeUndefined();
 					}
 				}
 			}
