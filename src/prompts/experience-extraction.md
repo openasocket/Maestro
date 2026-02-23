@@ -9,6 +9,11 @@ You are an experience extraction agent. Analyze the following coding session dat
 ## Session History
 {{HISTORY_ENTRIES}}
 
+## Detected Deviations
+{{DEVIATION_SIGNALS}}
+
+Pay special attention to deviations listed above — these represent moments where the agent had to change course and typically contain the most valuable learnings. Weight noveltyScore higher for experiences derived from deviations.
+
 ## Code Changes (Git Diff)
 {{GIT_DIFF}}
 

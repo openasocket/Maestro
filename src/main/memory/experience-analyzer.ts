@@ -41,6 +41,8 @@ export interface ExperienceAnalyzerInput {
 	/** Total session cost and duration */
 	sessionCostUsd?: number;
 	sessionDurationMs?: number;
+	/** Detected deviations in session history (error→fix, retries, backtracks) */
+	detectedDeviations?: DeviationSignal[];
 }
 
 /** What kind of learning this experience represents */
@@ -59,6 +61,18 @@ export const EXPERIENCE_CATEGORIES: readonly ExperienceCategory[] = [
 	'anti-pattern-identified',
 	'decision-made',
 ] as const;
+
+/** A detected deviation in the session — where the agent had to backtrack, retry, or change approach */
+export interface DeviationSignal {
+	/** Type of deviation detected */
+	type: 'error-fix' | 'backtrack' | 'retry' | 'approach-change';
+	/** Which history entry indices are involved */
+	entryIndices: number[];
+	/** Brief description of what happened */
+	description: string;
+	/** How many attempts were made (for retries) */
+	attemptCount?: number;
+}
 
 export interface ExtractedExperience {
 	/** The experience content — what was learned */
@@ -190,6 +204,11 @@ export class ExperienceAnalyzer {
 			}));
 		} catch {
 			// History unavailable — proceed with empty
+		}
+
+		// Detect deviations in history entries
+		if (input.historyEntries.length > 0) {
+			input.detectedDeviations = this.detectDeviations(input.historyEntries);
 		}
 
 		// Git diff: attempt to get diff from session start
@@ -389,12 +408,22 @@ export class ExperienceAnalyzer {
 		const vibesSection =
 			vibesText !== 'N/A' || annotationsText ? `${vibesText}\n${annotationsText}` : 'N/A';
 
+		const deviationText = input.detectedDeviations?.length
+			? input.detectedDeviations
+					.map(
+						(d, i) =>
+							`${i + 1}. [${d.type}] ${d.description}${d.attemptCount ? ` (${d.attemptCount} attempts)` : ''}`
+					)
+					.join('\n')
+			: 'None detected';
+
 		return experienceExtractionPrompt
 			.replace('{{AGENT_TYPE}}', input.agentType)
 			.replace('{{PROJECT_PATH}}', input.projectPath)
 			.replace('{{DURATION}}', durationStr)
 			.replace('{{COST}}', costStr)
 			.replace('{{HISTORY_ENTRIES}}', historyText || 'N/A')
+			.replace('{{DEVIATION_SIGNALS}}', deviationText)
 			.replace('{{GIT_DIFF}}', input.gitDiff || 'N/A')
 			.replace('{{VIBES_DATA}}', vibesSection);
 	}
@@ -525,6 +554,25 @@ export class ExperienceAnalyzer {
 				const provenanceSource: 'inferred' | undefined =
 					exp.category === 'decision-made' ? 'inferred' : undefined;
 
+				// Match deviation context: check if experience situation overlaps with any deviation description
+				let deviationFields:
+					| { isDeviation: true; deviationType: DeviationSignal['type']; attemptCount?: number }
+					| Record<string, never> = {};
+				if (input.detectedDeviations?.length) {
+					const matchedDeviation = input.detectedDeviations.find(
+						(d) => d.description.includes(exp.situation) || exp.situation.includes(d.description)
+					);
+					if (matchedDeviation) {
+						deviationFields = {
+							isDeviation: true as const,
+							deviationType: matchedDeviation.type,
+							...(matchedDeviation.attemptCount != null
+								? { attemptCount: matchedDeviation.attemptCount }
+								: {}),
+						};
+					}
+				}
+
 				await store.addMemory(
 					{
 						content: exp.content,
@@ -549,6 +597,7 @@ export class ExperienceAnalyzer {
 								: {}),
 							...(exp.rationale ? { rationale: exp.rationale } : {}),
 							...(provenanceSource ? { provenanceSource } : {}),
+							...deviationFields,
 						},
 					},
 					scope === 'project' ? input.projectPath : undefined
@@ -561,6 +610,146 @@ export class ExperienceAnalyzer {
 		}
 
 		return stored;
+	}
+
+	/**
+	 * Detect deviations in session history — error→fix sequences, backtracks, retries.
+	 *
+	 * Heuristics:
+	 * 1. error-fix: A history entry with success=false followed by success=true on similar content
+	 * 2. retry: Multiple entries with very similar summaries (same task attempted multiple times)
+	 * 3. backtrack: Entry summary contains "revert", "undo", "go back", "previous approach"
+	 * 4. approach-change: Entry summary contains "different approach", "try instead", "let me try", "alternative"
+	 */
+	detectDeviations(entries: ExperienceAnalyzerInput['historyEntries']): DeviationSignal[] {
+		const deviations: DeviationSignal[] = [];
+		const usedIndices = new Set<number>();
+
+		// 1. error-fix: consecutive failures followed by a success
+		for (let i = 0; i < entries.length; i++) {
+			if (entries[i].success !== false) continue;
+			if (usedIndices.has(i)) continue;
+
+			// Count consecutive failures starting at i
+			let failEnd = i;
+			while (failEnd + 1 < entries.length && entries[failEnd + 1].success === false) {
+				failEnd++;
+			}
+
+			// Look for a success within the next 3 entries after the failure block
+			let fixIndex = -1;
+			for (let j = failEnd + 1; j <= Math.min(failEnd + 3, entries.length - 1); j++) {
+				if (entries[j].success === true) {
+					fixIndex = j;
+					break;
+				}
+			}
+
+			if (fixIndex !== -1) {
+				const indices: number[] = [];
+				for (let k = i; k <= fixIndex; k++) indices.push(k);
+				const failCount = failEnd - i + 1;
+				deviations.push({
+					type: 'error-fix',
+					entryIndices: indices,
+					description: `Error at entry ${i + 1} resolved at entry ${fixIndex + 1}: "${entries[i].summary}" → "${entries[fixIndex].summary}"`,
+					attemptCount: failCount + 1,
+				});
+				for (const idx of indices) usedIndices.add(idx);
+			}
+		}
+
+		// 2. retry: entries with >60% word overlap (Jaccard similarity)
+		const summaryWords = entries.map((e) => {
+			const words = e.summary.toLowerCase().split(/\s+/).filter(Boolean);
+			return new Set(words);
+		});
+
+		const retryGroups: number[][] = [];
+		const retryUsed = new Set<number>();
+
+		for (let i = 0; i < entries.length; i++) {
+			if (retryUsed.has(i)) continue;
+			const group = [i];
+			for (let j = i + 1; j < entries.length; j++) {
+				if (retryUsed.has(j)) continue;
+				const a = summaryWords[i];
+				const b = summaryWords[j];
+				const intersection = new Set([...a].filter((w) => b.has(w)));
+				const union = new Set([...a, ...b]);
+				const jaccard = union.size > 0 ? intersection.size / union.size : 0;
+				if (jaccard > 0.6) {
+					group.push(j);
+					retryUsed.add(j);
+				}
+			}
+			if (group.length >= 2) {
+				retryUsed.add(i);
+				retryGroups.push(group);
+			}
+		}
+
+		for (const group of retryGroups) {
+			// Skip if all indices are already used by error-fix
+			if (group.every((idx) => usedIndices.has(idx))) continue;
+			deviations.push({
+				type: 'retry',
+				entryIndices: group,
+				description: `Retried "${entries[group[0]].summary}" ${group.length} times`,
+				attemptCount: group.length,
+			});
+			for (const idx of group) usedIndices.add(idx);
+		}
+
+		// 3. backtrack: keyword detection in summaries
+		const backtrackKeywords = [
+			'revert',
+			'undo',
+			'go back',
+			'roll back',
+			'previous approach',
+			'original approach',
+			'back to',
+		];
+
+		for (let i = 0; i < entries.length; i++) {
+			if (usedIndices.has(i)) continue;
+			const lower = entries[i].summary.toLowerCase();
+			if (backtrackKeywords.some((kw) => lower.includes(kw))) {
+				deviations.push({
+					type: 'backtrack',
+					entryIndices: [i],
+					description: `Backtrack detected at entry ${i + 1}: "${entries[i].summary}"`,
+				});
+				usedIndices.add(i);
+			}
+		}
+
+		// 4. approach-change: keyword detection in summaries
+		const approachChangeKeywords = [
+			'different approach',
+			'try instead',
+			'let me try',
+			'alternative',
+			'switch to',
+			'changed approach',
+			'new approach',
+		];
+
+		for (let i = 0; i < entries.length; i++) {
+			if (usedIndices.has(i)) continue;
+			const lower = entries[i].summary.toLowerCase();
+			if (approachChangeKeywords.some((kw) => lower.includes(kw))) {
+				deviations.push({
+					type: 'approach-change',
+					entryIndices: [i],
+					description: `Approach change detected at entry ${i + 1}: "${entries[i].summary}"`,
+				});
+				usedIndices.add(i);
+			}
+		}
+
+		return deviations;
 	}
 
 	/**

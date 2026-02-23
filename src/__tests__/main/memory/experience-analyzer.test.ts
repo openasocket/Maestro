@@ -142,6 +142,7 @@ import {
 	type ExperienceAnalyzerInput,
 	type ExtractedExperience,
 	type ExperienceCategory,
+	type DeviationSignal,
 } from '../../../main/memory/experience-analyzer';
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -1620,6 +1621,398 @@ describe('ExperienceAnalyzer', () => {
 					);
 					if (entry) {
 						expect(entry.experienceContext?.provenanceSource).toBeUndefined();
+					}
+				}
+			}
+		});
+	});
+
+	// ─── Deviation Detection ────────────────────────────────────────────
+
+	describe('detectDeviations', () => {
+		it('detects error-fix sequences', () => {
+			const entries = [
+				{ summary: 'Tried to build', success: false },
+				{ summary: 'Fixed build error', success: true },
+			];
+			const deviations = analyzer.detectDeviations(entries);
+			expect(deviations).toHaveLength(1);
+			expect(deviations[0].type).toBe('error-fix');
+			expect(deviations[0].entryIndices).toEqual([0, 1]);
+			expect(deviations[0].attemptCount).toBe(2);
+		});
+
+		it('groups consecutive failures followed by a success', () => {
+			const entries = [
+				{ summary: 'Attempt 1', success: false },
+				{ summary: 'Attempt 2', success: false },
+				{ summary: 'Attempt 3', success: false },
+				{ summary: 'Finally fixed', success: true },
+			];
+			const deviations = analyzer.detectDeviations(entries);
+			const errorFix = deviations.find((d) => d.type === 'error-fix');
+			expect(errorFix).toBeDefined();
+			expect(errorFix!.entryIndices).toEqual([0, 1, 2, 3]);
+			expect(errorFix!.attemptCount).toBe(4);
+		});
+
+		it('detects error-fix with gap of up to 3 entries to success', () => {
+			const entries = [
+				{ summary: 'Build failed', success: false },
+				{ summary: 'Investigating issue' },
+				{ summary: 'Found the fix', success: true },
+			];
+			const deviations = analyzer.detectDeviations(entries);
+			const errorFix = deviations.find((d) => d.type === 'error-fix');
+			expect(errorFix).toBeDefined();
+			expect(errorFix!.entryIndices).toEqual([0, 1, 2]);
+		});
+
+		it('does not detect error-fix when success is more than 3 entries away', () => {
+			const entries = [
+				{ summary: 'Build failed', success: false },
+				{ summary: 'Step 2' },
+				{ summary: 'Step 3' },
+				{ summary: 'Step 4' },
+				{ summary: 'Eventually fixed', success: true },
+			];
+			const deviations = analyzer.detectDeviations(entries);
+			const errorFix = deviations.find((d) => d.type === 'error-fix');
+			expect(errorFix).toBeUndefined();
+		});
+
+		it('detects retry via Jaccard similarity > 0.6', () => {
+			const entries = [
+				{ summary: 'Run test suite for auth module' },
+				{ summary: 'Run test suite for auth module again' },
+				{ summary: 'Something unrelated happened' },
+			];
+			const deviations = analyzer.detectDeviations(entries);
+			const retry = deviations.find((d) => d.type === 'retry');
+			expect(retry).toBeDefined();
+			expect(retry!.attemptCount).toBe(2);
+			expect(retry!.entryIndices).toContain(0);
+			expect(retry!.entryIndices).toContain(1);
+		});
+
+		it('does not detect retry for dissimilar summaries', () => {
+			const entries = [
+				{ summary: 'Fixed authentication bug' },
+				{ summary: 'Updated database schema' },
+				{ summary: 'Deployed to staging' },
+			];
+			const deviations = analyzer.detectDeviations(entries);
+			const retry = deviations.find((d) => d.type === 'retry');
+			expect(retry).toBeUndefined();
+		});
+
+		it('detects backtrack keywords', () => {
+			const keywords = [
+				'revert',
+				'undo',
+				'go back',
+				'roll back',
+				'previous approach',
+				'original approach',
+				'back to',
+			];
+			for (const kw of keywords) {
+				const entries = [{ summary: `Need to ${kw} the changes` }];
+				const deviations = analyzer.detectDeviations(entries);
+				const backtrack = deviations.find((d) => d.type === 'backtrack');
+				expect(backtrack).toBeDefined();
+				expect(backtrack!.entryIndices).toEqual([0]);
+			}
+		});
+
+		it('detects approach-change keywords', () => {
+			const keywords = [
+				'different approach',
+				'try instead',
+				'let me try',
+				'alternative',
+				'switch to',
+				'changed approach',
+				'new approach',
+			];
+			for (const kw of keywords) {
+				const entries = [{ summary: `Using ${kw} for this task` }];
+				const deviations = analyzer.detectDeviations(entries);
+				const change = deviations.find((d) => d.type === 'approach-change');
+				expect(change).toBeDefined();
+				expect(change!.entryIndices).toEqual([0]);
+			}
+		});
+
+		it('does not duplicate indices across deviation types', () => {
+			// An error-fix sequence should not also be detected as a retry
+			const entries = [
+				{ summary: 'Build the project', success: false },
+				{ summary: 'Build the project', success: true },
+			];
+			const deviations = analyzer.detectDeviations(entries);
+			// Should detect error-fix but not retry (indices already used)
+			expect(deviations.filter((d) => d.type === 'error-fix')).toHaveLength(1);
+			expect(deviations.filter((d) => d.type === 'retry')).toHaveLength(0);
+		});
+
+		it('returns empty array for entries with no deviations', () => {
+			const entries = [
+				{ summary: 'Step 1', success: true },
+				{ summary: 'Step 2', success: true },
+				{ summary: 'Step 3', success: true },
+			];
+			const deviations = analyzer.detectDeviations(entries);
+			expect(deviations).toEqual([]);
+		});
+
+		it('returns empty array for empty entries', () => {
+			const deviations = analyzer.detectDeviations([]);
+			expect(deviations).toEqual([]);
+		});
+
+		it('detects multiple deviation types in one session', () => {
+			const entries = [
+				{ summary: 'Build failed', success: false },
+				{ summary: 'Fixed the build', success: true },
+				{ summary: 'Let me try a different approach for testing' },
+				{ summary: 'Need to revert the test changes' },
+			];
+			const deviations = analyzer.detectDeviations(entries);
+			const types = deviations.map((d) => d.type);
+			expect(types).toContain('error-fix');
+			expect(types).toContain('approach-change');
+			expect(types).toContain('backtrack');
+		});
+
+		it('DeviationSignal interface accepts all valid types', () => {
+			const signals: DeviationSignal[] = [
+				{ type: 'error-fix', entryIndices: [0, 1], description: 'test', attemptCount: 2 },
+				{ type: 'backtrack', entryIndices: [2], description: 'test' },
+				{ type: 'retry', entryIndices: [3, 4], description: 'test', attemptCount: 2 },
+				{ type: 'approach-change', entryIndices: [5], description: 'test' },
+			];
+			expect(signals).toHaveLength(4);
+		});
+	});
+
+	// ─── Deviation in gatherSessionData ─────────────────────────────────
+
+	describe('gatherSessionData deviation detection', () => {
+		it('populates detectedDeviations from history entries', async () => {
+			mockGetEntries.mockReturnValue([
+				{ id: '1', summary: 'Build failed', success: false, type: 'prompt' },
+				{ id: '2', summary: 'Fixed build error', success: true, type: 'prompt' },
+				{ id: '3', summary: 'All tests pass', success: true, type: 'prompt' },
+			]);
+			mockExecFile.mockRejectedValue(new Error('not a git repo'));
+
+			const input = await analyzer.gatherSessionData('sess-dev', '/project', 'claude-code');
+
+			expect(input.detectedDeviations).toBeDefined();
+			expect(input.detectedDeviations!.length).toBeGreaterThan(0);
+			expect(input.detectedDeviations![0].type).toBe('error-fix');
+		});
+
+		it('does not populate detectedDeviations when history is empty', async () => {
+			mockExecFile.mockRejectedValue(new Error('not a git repo'));
+
+			const input = await analyzer.gatherSessionData('sess-empty', '/project', 'claude-code');
+
+			expect(input.detectedDeviations).toBeUndefined();
+		});
+	});
+
+	// ─── Deviation in compilePrompt ─────────────────────────────────────
+
+	describe('compilePrompt deviation signals', () => {
+		it('includes deviation signals in prompt when deviations exist', () => {
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/test',
+				historyEntries: [{ summary: 'test' }],
+				detectedDeviations: [
+					{
+						type: 'error-fix',
+						entryIndices: [0, 1],
+						description: 'Error resolved',
+						attemptCount: 2,
+					},
+				],
+			};
+
+			const prompt = analyzer.compilePrompt(input);
+			expect(prompt).toContain('[error-fix]');
+			expect(prompt).toContain('Error resolved');
+			expect(prompt).toContain('(2 attempts)');
+			expect(prompt).toContain('## Detected Deviations');
+		});
+
+		it('shows "None detected" when no deviations', () => {
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-2',
+				agentType: 'claude-code',
+				projectPath: '/test',
+				historyEntries: [],
+			};
+
+			const prompt = analyzer.compilePrompt(input);
+			expect(prompt).toContain('None detected');
+		});
+
+		it('includes deviation attention note in prompt template', () => {
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-3',
+				agentType: 'claude-code',
+				projectPath: '/test',
+				historyEntries: [],
+			};
+
+			const prompt = analyzer.compilePrompt(input);
+			expect(prompt).toContain('Pay special attention to deviations');
+		});
+
+		it('leaves no leftover template variables with deviations', () => {
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-4',
+				agentType: 'claude-code',
+				projectPath: '/test',
+				historyEntries: [{ summary: 'test' }],
+				sessionDurationMs: 10000,
+				sessionCostUsd: 0.01,
+				detectedDeviations: [
+					{ type: 'backtrack', entryIndices: [0], description: 'Reverted changes' },
+				],
+			};
+
+			const prompt = analyzer.compilePrompt(input);
+			expect(prompt).not.toMatch(/\{\{[A-Z_]+\}\}/);
+		});
+	});
+
+	// ─── Deviation in storeExperiences ──────────────────────────────────
+
+	describe('storeExperiences deviation context', () => {
+		it('populates deviation fields when situation matches deviation description', async () => {
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'Build requires flag X',
+					situation: 'Error resolved',
+					learning: 'Use flag X for builds',
+					category: 'problem-solved',
+					tags: ['build'],
+					noveltyScore: 0.8,
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-dev-store',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+				detectedDeviations: [
+					{
+						type: 'error-fix',
+						entryIndices: [0, 1],
+						description: 'Error resolved at entry 2',
+						attemptCount: 3,
+					},
+				],
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(1);
+
+			// Find the stored memory and verify deviation fields
+			for (const [filePath, content] of fsState) {
+				if (filePath.endsWith('library.json')) {
+					const lib = JSON.parse(content);
+					const entry = (lib.entries ?? []).find(
+						(e: { content: string }) => e.content === 'Build requires flag X'
+					);
+					if (entry) {
+						expect(entry.experienceContext?.isDeviation).toBe(true);
+						expect(entry.experienceContext?.deviationType).toBe('error-fix');
+						expect(entry.experienceContext?.attemptCount).toBe(3);
+					}
+				}
+			}
+		});
+
+		it('does not set deviation fields when no deviation matches', async () => {
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'Unrelated learning',
+					situation: 'Normal operation',
+					learning: 'Something generic',
+					category: 'pattern-established',
+					tags: [],
+					noveltyScore: 0.6,
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-no-dev-match',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+				detectedDeviations: [
+					{
+						type: 'backtrack',
+						entryIndices: [0],
+						description: 'Completely different description',
+					},
+				],
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(1);
+
+			for (const [filePath, content] of fsState) {
+				if (filePath.endsWith('library.json')) {
+					const lib = JSON.parse(content);
+					const entry = (lib.entries ?? []).find(
+						(e: { content: string }) => e.content === 'Unrelated learning'
+					);
+					if (entry) {
+						expect(entry.experienceContext?.isDeviation).toBeUndefined();
+						expect(entry.experienceContext?.deviationType).toBeUndefined();
+					}
+				}
+			}
+		});
+
+		it('does not set deviation fields when no deviations detected', async () => {
+			const experiences: ExtractedExperience[] = [
+				{
+					content: 'No deviations at all',
+					situation: 'Clean session',
+					learning: 'Nothing special',
+					category: 'pattern-established',
+					tags: [],
+					noveltyScore: 0.6,
+				},
+			];
+
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-clean',
+				agentType: 'claude-code',
+				projectPath: '/test/project',
+				historyEntries: [],
+			};
+
+			const stored = await analyzer.storeExperiences(experiences, input);
+			expect(stored).toBe(1);
+
+			for (const [filePath, content] of fsState) {
+				if (filePath.endsWith('library.json')) {
+					const lib = JSON.parse(content);
+					const entry = (lib.entries ?? []).find(
+						(e: { content: string }) => e.content === 'No deviations at all'
+					);
+					if (entry) {
+						expect(entry.experienceContext?.isDeviation).toBeUndefined();
 					}
 				}
 			}
