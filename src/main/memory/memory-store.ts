@@ -1394,9 +1394,14 @@ export class MemoryStore {
 	 * Apply confidence decay to non-pinned memories using half-life formula.
 	 *
 	 * Formula: confidence *= 2^(-daysSinceLastUsed / halfLifeDays)
-	 * Auto-deactivates entries where confidence drops below 0.05.
+	 * Auto-archives entries where confidence drops below 0.05.
+	 * Archived memories remain active but are hidden from default searches.
 	 *
-	 * @returns Number of entries that were auto-deactivated
+	 * Key distinction:
+	 * - active: false = user explicitly deleted (permanent, not shown anywhere)
+	 * - archived: true = system demoted (recoverable, shown in archive view)
+	 *
+	 * @returns Number of entries that were auto-archived
 	 */
 	async applyConfidenceDecay(
 		scope: MemoryScope,
@@ -1409,21 +1414,22 @@ export class MemoryStore {
 		const now = Date.now();
 		const msPerDay = 86400000;
 
-		let deactivatedCount = 0;
+		let archivedCount = 0;
 		let modified = false;
 
 		for (const entry of lib.entries) {
-			if (!entry.active || entry.pinned) continue;
+			if (!entry.active || entry.pinned || entry.archived) continue;
 
 			const lastUsed = entry.lastUsedAt > 0 ? entry.lastUsedAt : entry.createdAt;
 			const daysSinceLastUsed = (now - lastUsed) / msPerDay;
 			const decayFactor = Math.pow(2, -daysSinceLastUsed / halfLifeDays);
 			entry.confidence = entry.confidence * decayFactor;
 
-			if (entry.confidence < 0.05) {
-				entry.active = false;
+			if (entry.confidence < 0.05 && !entry.pinned) {
+				entry.archived = true;
+				// Keep active: true — archived memories are still "alive" but hidden from default searches
 				entry.updatedAt = now;
-				deactivatedCount++;
+				archivedCount++;
 			}
 
 			modified = true;
@@ -1433,7 +1439,7 @@ export class MemoryStore {
 			await this.writeLibrary(dirPath, lib);
 		}
 
-		return deactivatedCount;
+		return archivedCount;
 	}
 
 	// ─── Memory Consolidation ───────────────────────────────────────────────
