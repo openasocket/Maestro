@@ -23,6 +23,7 @@ import type {
 	MemoryStats,
 	MemorySearchResult,
 	ExperienceContext,
+	HierarchySuggestionResult,
 } from '../../shared/memory-types';
 
 /**
@@ -245,6 +246,10 @@ export function createMemoryApi() {
 
 		seedDefaults: (): Promise<IpcResponse<{ roles: number; personas: number; skills: number }>> =>
 			ipcRenderer.invoke('memory:seedDefaults'),
+
+		// ─── Hierarchy Suggestions ────────────────────────────────────────
+		suggestHierarchy: (projectPath: string): Promise<IpcResponse<HierarchySuggestionResult>> =>
+			ipcRenderer.invoke('memory:suggestHierarchy', projectPath),
 	};
 }
 

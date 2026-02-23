@@ -216,6 +216,7 @@ describe('Memory IPC Handler Round-Trips', () => {
 				'memory:consolidate',
 				'memory:ensureEmbeddings',
 				'memory:seedDefaults',
+				'memory:suggestHierarchy',
 			];
 
 			for (const channel of expectedChannels) {

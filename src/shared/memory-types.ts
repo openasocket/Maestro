@@ -233,6 +233,55 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	enableHybridSearch: true,
 };
 
+// ─── Hierarchy Suggestions ─────────────────────────────────────────────────
+
+/** Suggestion for a new skill area derived from tag clustering of uncategorized memories */
+export interface SkillAreaSuggestion {
+	/** Suggested skill area name (derived from most common tags) */
+	suggestedName: string;
+	/** Suggested description */
+	suggestedDescription: string;
+	/** Which persona this should be added to (best match by embedding similarity) */
+	suggestedPersonaId: PersonaId;
+	suggestedPersonaName: string;
+	/** Memory IDs that would be moved into this skill area */
+	memoryIds: MemoryId[];
+	/** Shared tags that define this cluster */
+	sharedTags: string[];
+	/** Confidence in this suggestion (0.0-1.0) */
+	confidence: number;
+}
+
+/** Suggestion for a new persona derived from project file analysis */
+export interface PersonaSuggestion {
+	/** Suggested persona name */
+	suggestedName: string;
+	suggestedDescription: string;
+	/** Which role this belongs to (existing or new) */
+	suggestedRoleId?: RoleId;
+	suggestedRoleName: string;
+	/** Suggested skill areas for this persona */
+	suggestedSkills: string[];
+	/** Evidence: which files/patterns triggered this suggestion */
+	evidence: string[];
+	/** Whether this matches an existing seed persona */
+	matchesSeed: boolean;
+}
+
+/** Combined hierarchy suggestion result */
+export interface HierarchySuggestionResult {
+	skillSuggestions: SkillAreaSuggestion[];
+	personaSuggestions: PersonaSuggestion[];
+	relevance: PersonaRelevance[];
+}
+
+/** Persona relevance score for a project */
+export interface PersonaRelevance {
+	personaId: PersonaId;
+	relevanceScore: number;
+	injectionCount: number;
+}
+
 // ─── Stats and Results ─────────────────────────────────────────────────────
 
 export interface MemoryStats {

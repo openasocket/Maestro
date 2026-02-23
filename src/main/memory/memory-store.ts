@@ -37,6 +37,9 @@ import type {
 	MemoryHistoryEntry,
 	ExperienceContext,
 	MemorySearchResult,
+	SkillAreaSuggestion,
+	PersonaSuggestion,
+	PersonaRelevance,
 } from '../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS, SEED_ROLES } from '../../shared/memory-types';
 import { cosineSimilarity } from '../grpo/embedding-service';
@@ -1938,6 +1941,544 @@ export class MemoryStore {
 			};
 			await this.writeLibrary(dirPath, lib);
 		}
+	}
+
+	// ─── Hierarchy Suggestions ──────────────────────────────────────────────
+
+	/**
+	 * Analyze project-scoped memories that aren't in any skill area and suggest
+	 * new skill areas based on tag clustering.
+	 *
+	 * Triggered when 3+ project-scoped memories share >50% tag overlap, indicating
+	 * a coherent domain that deserves its own skill area.
+	 *
+	 * @returns Array of suggestions (not auto-applied — requires user approval or auto-mode)
+	 */
+	async suggestSkillAreas(projectPath: string): Promise<SkillAreaSuggestion[]> {
+		// Load all project-scoped memories
+		const dirPath = this.getMemoryPath('project', undefined, projectPath);
+		const lib = await this.readLibrary(dirPath);
+		const activeMemories = lib.entries.filter((e) => e.active && !e.archived && e.tags.length > 0);
+
+		if (activeMemories.length < 3) return [];
+
+		const totalProjectMemories = activeMemories.length;
+
+		// Compute Jaccard tag overlap between all pairs
+		type MemWithTags = { entry: MemoryEntry; tagSet: Set<string> };
+		const memTags: MemWithTags[] = activeMemories.map((e) => ({
+			entry: e,
+			tagSet: new Set(e.tags.map((t) => t.toLowerCase())),
+		}));
+
+		// Greedy clustering: start with highest-overlap pairs, expand
+		const clustered = new Set<string>(); // memory IDs already in a cluster
+		const clusters: MemWithTags[][] = [];
+
+		// Build pair overlaps sorted descending
+		const pairs: { i: number; j: number; overlap: number }[] = [];
+		for (let i = 0; i < memTags.length; i++) {
+			for (let j = i + 1; j < memTags.length; j++) {
+				const a = memTags[i].tagSet;
+				const b = memTags[j].tagSet;
+				let intersection = 0;
+				for (const t of a) {
+					if (b.has(t)) intersection++;
+				}
+				const union = new Set([...a, ...b]).size;
+				const overlap = union > 0 ? intersection / union : 0;
+				if (overlap > 0.5) {
+					pairs.push({ i, j, overlap });
+				}
+			}
+		}
+		pairs.sort((a, b) => b.overlap - a.overlap);
+
+		for (const { i, j } of pairs) {
+			if (clustered.has(memTags[i].entry.id) && clustered.has(memTags[j].entry.id)) continue;
+
+			// Find or create cluster
+			let cluster: MemWithTags[] | undefined;
+			if (clustered.has(memTags[i].entry.id)) {
+				cluster = clusters.find((c) => c.some((m) => m.entry.id === memTags[i].entry.id));
+			} else if (clustered.has(memTags[j].entry.id)) {
+				cluster = clusters.find((c) => c.some((m) => m.entry.id === memTags[j].entry.id));
+			}
+
+			if (cluster) {
+				// Add the non-clustered member if it has >50% overlap with any cluster member
+				const newMem = clustered.has(memTags[i].entry.id) ? memTags[j] : memTags[i];
+				if (clustered.has(newMem.entry.id)) continue;
+				const hasOverlap = cluster.some((m) => {
+					let inter = 0;
+					for (const t of m.tagSet) {
+						if (newMem.tagSet.has(t)) inter++;
+					}
+					const unionSize = new Set([...m.tagSet, ...newMem.tagSet]).size;
+					return unionSize > 0 && inter / unionSize > 0.5;
+				});
+				if (hasOverlap) {
+					cluster.push(newMem);
+					clustered.add(newMem.entry.id);
+				}
+			} else {
+				// Start a new cluster
+				const newCluster = [memTags[i], memTags[j]];
+				clustered.add(memTags[i].entry.id);
+				clustered.add(memTags[j].entry.id);
+				clusters.push(newCluster);
+			}
+		}
+
+		// Expand clusters: try to add unclustered memories with >50% overlap
+		for (const cluster of clusters) {
+			for (const mt of memTags) {
+				if (clustered.has(mt.entry.id)) continue;
+				const hasOverlap = cluster.some((m) => {
+					let inter = 0;
+					for (const t of m.tagSet) {
+						if (mt.tagSet.has(t)) inter++;
+					}
+					const unionSize = new Set([...m.tagSet, ...mt.tagSet]).size;
+					return unionSize > 0 && inter / unionSize > 0.5;
+				});
+				if (hasOverlap) {
+					cluster.push(mt);
+					clustered.add(mt.entry.id);
+				}
+			}
+		}
+
+		// Filter clusters with < 3 members
+		const validClusters = clusters.filter((c) => c.length >= 3);
+		if (validClusters.length === 0) return [];
+
+		// Load registry for persona matching
+		const registry = await this.readRegistry();
+		const activePersonas = registry.personas.filter((p) => p.active);
+
+		const suggestions: SkillAreaSuggestion[] = [];
+
+		for (const cluster of validClusters) {
+			// Compute shared tags (appear in >50% of cluster members)
+			const tagCounts = new Map<string, number>();
+			for (const m of cluster) {
+				for (const t of m.tagSet) {
+					tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1);
+				}
+			}
+			const threshold = cluster.length / 2;
+			const sharedTags = [...tagCounts.entries()]
+				.filter(([, count]) => count >= threshold)
+				.sort((a, b) => b[1] - a[1])
+				.map(([tag]) => tag);
+
+			// Derive skill area name from most common non-prefix tags
+			const nameTags = sharedTags
+				.filter((t) => !t.startsWith('kw:') && !t.startsWith('category:'))
+				.slice(0, 3);
+			const suggestedName =
+				nameTags.length > 0
+					? nameTags
+							.map((t) =>
+								t
+									.split('-')
+									.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+									.join(' ')
+							)
+							.join(' & ')
+					: sharedTags
+							.slice(0, 2)
+							.map((t) => {
+								const clean = t.replace(/^(kw:|category:)/, '');
+								return clean
+									.split('-')
+									.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+									.join(' ');
+							})
+							.join(' & ');
+
+			// Find best-matching persona by embedding similarity
+			let bestPersonaId = activePersonas[0]?.id ?? '';
+			let bestPersonaName = activePersonas[0]?.name ?? 'Unknown';
+
+			if (activePersonas.length > 0) {
+				// Try embedding similarity if available
+				const memoriesWithEmbeddings = cluster.filter((m) => m.entry.embedding !== null);
+				if (memoriesWithEmbeddings.length > 0) {
+					// Average the cluster embeddings
+					const dim = memoriesWithEmbeddings[0].entry.embedding!.length;
+					const avgEmbed = new Array(dim).fill(0);
+					for (const m of memoriesWithEmbeddings) {
+						for (let i = 0; i < dim; i++) {
+							avgEmbed[i] += m.entry.embedding![i];
+						}
+					}
+					for (let i = 0; i < dim; i++) {
+						avgEmbed[i] /= memoriesWithEmbeddings.length;
+					}
+
+					let bestSim = -1;
+					for (const persona of activePersonas) {
+						if (!persona.embedding) continue;
+						const sim = cosineSimilarity(avgEmbed, persona.embedding);
+						if (sim > bestSim) {
+							bestSim = sim;
+							bestPersonaId = persona.id;
+							bestPersonaName = persona.name;
+						}
+					}
+				}
+			}
+
+			// Compute average tag overlap for this cluster
+			let totalOverlap = 0;
+			let overlapPairs = 0;
+			for (let i = 0; i < cluster.length; i++) {
+				for (let j = i + 1; j < cluster.length; j++) {
+					let inter = 0;
+					for (const t of cluster[i].tagSet) {
+						if (cluster[j].tagSet.has(t)) inter++;
+					}
+					const unionSize = new Set([...cluster[i].tagSet, ...cluster[j].tagSet]).size;
+					totalOverlap += unionSize > 0 ? inter / unionSize : 0;
+					overlapPairs++;
+				}
+			}
+			const avgOverlap = overlapPairs > 0 ? totalOverlap / overlapPairs : 0;
+			const confidence = Math.min(1, (cluster.length / totalProjectMemories) * avgOverlap);
+
+			suggestions.push({
+				suggestedName,
+				suggestedDescription: `${suggestedName} patterns derived from ${cluster.length} project memories`,
+				suggestedPersonaId: bestPersonaId,
+				suggestedPersonaName: bestPersonaName,
+				memoryIds: cluster.map((m) => m.entry.id),
+				sharedTags,
+				confidence,
+			});
+		}
+
+		// Sort by confidence descending
+		suggestions.sort((a, b) => b.confidence - a.confidence);
+		return suggestions;
+	}
+
+	/**
+	 * Analyze a project's file structure and suggest personas that match
+	 * the technologies and patterns detected.
+	 *
+	 * Uses file extension mapping + package file analysis to recommend
+	 * personas from SEED_ROLES or suggest new ones.
+	 *
+	 * This method only does file I/O (readdir + readFile for package files).
+	 * It does NOT spawn an LLM. Keep it fast (<2 seconds).
+	 */
+	async suggestPersonas(projectPath: string): Promise<PersonaSuggestion[]> {
+		const suggestions: PersonaSuggestion[] = [];
+
+		// Read top level + 1 level deep
+		const extensionCounts = new Map<string, number>();
+		const detectedTechs: Set<string> = new Set();
+		const evidence: Map<string, string[]> = new Map();
+
+		const addEvidence = (tech: string, ev: string) => {
+			if (!evidence.has(tech)) evidence.set(tech, []);
+			evidence.get(tech)!.push(ev);
+		};
+
+		try {
+			const topEntries = await fs.readdir(projectPath, { withFileTypes: true });
+
+			for (const entry of topEntries) {
+				if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+
+				if (entry.isFile()) {
+					const ext = path.extname(entry.name).toLowerCase();
+					if (ext) {
+						extensionCounts.set(ext, (extensionCounts.get(ext) ?? 0) + 1);
+					}
+				} else if (entry.isDirectory()) {
+					try {
+						const subEntries = await fs.readdir(path.join(projectPath, entry.name), {
+							withFileTypes: true,
+						});
+						for (const subEntry of subEntries) {
+							if (subEntry.isFile()) {
+								const ext = path.extname(subEntry.name).toLowerCase();
+								if (ext) {
+									extensionCounts.set(ext, (extensionCounts.get(ext) ?? 0) + 1);
+								}
+							}
+						}
+					} catch {
+						// Skip unreadable directories
+					}
+				}
+			}
+
+			// Check for package/project files
+			const topFileNames = new Set(topEntries.filter((e) => e.isFile()).map((e) => e.name));
+
+			// package.json → check deps
+			if (topFileNames.has('package.json')) {
+				try {
+					const pkgContent = await fs.readFile(path.join(projectPath, 'package.json'), 'utf-8');
+					const pkg = JSON.parse(pkgContent);
+					const allDeps = {
+						...(pkg.dependencies ?? {}),
+						...(pkg.devDependencies ?? {}),
+					};
+
+					if (allDeps.react || allDeps['react-dom']) {
+						detectedTechs.add('react');
+						addEvidence('react', 'react dependency in package.json');
+					}
+					if (allDeps.next) {
+						detectedTechs.add('nextjs');
+						addEvidence('nextjs', 'next dependency in package.json');
+					}
+					if (allDeps.express) {
+						detectedTechs.add('express');
+						addEvidence('express', 'express dependency in package.json');
+					}
+					if (allDeps.vue) {
+						detectedTechs.add('vue');
+						addEvidence('vue', 'vue dependency in package.json');
+					}
+					if (allDeps.angular || allDeps['@angular/core']) {
+						detectedTechs.add('angular');
+						addEvidence('angular', 'angular dependency in package.json');
+					}
+					if (allDeps.electron) {
+						detectedTechs.add('electron');
+						addEvidence('electron', 'electron dependency in package.json');
+					}
+				} catch {
+					// Invalid package.json
+				}
+			}
+
+			if (topFileNames.has('Cargo.toml')) {
+				detectedTechs.add('rust');
+				addEvidence('rust', 'Cargo.toml present');
+			}
+			if (topFileNames.has('go.mod')) {
+				detectedTechs.add('go');
+				addEvidence('go', 'go.mod present');
+			}
+			if (topFileNames.has('pyproject.toml') || topFileNames.has('requirements.txt')) {
+				detectedTechs.add('python');
+				const file = topFileNames.has('pyproject.toml') ? 'pyproject.toml' : 'requirements.txt';
+				addEvidence('python', `${file} present`);
+
+				// Check for Python frameworks
+				try {
+					const content = await fs.readFile(path.join(projectPath, file), 'utf-8');
+					if (content.includes('fastapi') || content.includes('FastAPI')) {
+						detectedTechs.add('fastapi');
+						addEvidence('fastapi', `fastapi reference in ${file}`);
+					}
+					if (content.includes('django') || content.includes('Django')) {
+						detectedTechs.add('django');
+						addEvidence('django', `django reference in ${file}`);
+					}
+					if (content.includes('flask') || content.includes('Flask')) {
+						detectedTechs.add('flask');
+						addEvidence('flask', `flask reference in ${file}`);
+					}
+				} catch {
+					// Skip
+				}
+			}
+			if (topFileNames.has('tsconfig.json')) {
+				detectedTechs.add('typescript');
+				addEvidence('typescript', 'tsconfig.json present');
+			}
+			if (
+				topFileNames.has('Dockerfile') ||
+				topFileNames.has('docker-compose.yml') ||
+				topFileNames.has('docker-compose.yaml')
+			) {
+				detectedTechs.add('docker');
+				const dockerFile = topFileNames.has('Dockerfile') ? 'Dockerfile' : 'docker-compose.yml';
+				addEvidence('docker', `${dockerFile} present`);
+			}
+		} catch {
+			// Can't read project path — return empty
+			return [];
+		}
+
+		// Add extension-based evidence
+		const tsxCount = extensionCounts.get('.tsx') ?? 0;
+		const tsCount = extensionCounts.get('.ts') ?? 0;
+		const rsCount = extensionCounts.get('.rs') ?? 0;
+		const pyCount = extensionCounts.get('.py') ?? 0;
+		const goCount = extensionCounts.get('.go') ?? 0;
+
+		if (tsxCount > 0) addEvidence('react', `${tsxCount} .tsx files`);
+		if (tsCount > 0) addEvidence('typescript', `${tsCount} .ts files`);
+		if (rsCount > 0) addEvidence('rust', `${rsCount} .rs files`);
+		if (pyCount > 0) addEvidence('python', `${pyCount} .py files`);
+		if (goCount > 0) addEvidence('go', `${goCount} .go files`);
+
+		// Load existing personas to skip duplicates
+		const registry = await this.readRegistry();
+		const existingPersonaNames = new Set(registry.personas.map((p) => p.name.toLowerCase()));
+
+		// Map technologies to persona suggestions
+		const techToPersona: Array<{
+			techs: string[];
+			name: string;
+			description: string;
+			role: string;
+			skills: string[];
+		}> = [
+			{
+				techs: ['react'],
+				name: 'React Frontend Engineer',
+				description: 'React/TypeScript frontend development with modern patterns and tooling',
+				role: 'Software Developer',
+				skills: ['State Management', 'Component Design', 'Performance', 'Testing', 'Accessibility'],
+			},
+			{
+				techs: ['rust'],
+				name: 'Rust Systems Developer',
+				description:
+					'Systems programming in Rust with focus on safety, performance, and correctness',
+				role: 'Software Developer',
+				skills: ['Error Handling', 'Performance', 'Testing', 'Memory Safety', 'Async/Concurrency'],
+			},
+			{
+				techs: ['python', 'fastapi', 'django', 'flask'],
+				name: 'Python Backend Developer',
+				description:
+					'Python backend services, APIs, and scripting with emphasis on clean architecture',
+				role: 'Software Developer',
+				skills: ['API Design', 'Testing', 'Database', 'Error Handling', 'Packaging'],
+			},
+			{
+				techs: ['go'],
+				name: 'Go Backend Developer',
+				description: 'Go backend services, APIs, and systems programming',
+				role: 'Software Developer',
+				skills: ['API Design', 'Concurrency', 'Testing', 'Performance'],
+			},
+			{
+				techs: ['docker'],
+				name: 'CI/CD Specialist',
+				description: 'Build pipeline design, test automation, and deployment workflows',
+				role: 'DevOps Engineer',
+				skills: ['Pipeline Design', 'Docker/Containers', 'Monitoring', 'IaC'],
+			},
+		];
+
+		for (const mapping of techToPersona) {
+			const hasTech = mapping.techs.some(
+				(t) => detectedTechs.has(t) || (evidence.get(t)?.length ?? 0) > 0
+			);
+			if (!hasTech) continue;
+			if (existingPersonaNames.has(mapping.name.toLowerCase())) continue;
+
+			// Gather evidence for this suggestion
+			const suggestionEvidence: string[] = [];
+			for (const t of mapping.techs) {
+				const evList = evidence.get(t);
+				if (evList) suggestionEvidence.push(...evList);
+			}
+			if (suggestionEvidence.length === 0) continue;
+
+			// Check against SEED_ROLES
+			let matchesSeed = false;
+			let suggestedRoleId: string | undefined;
+			const suggestedRoleName = mapping.role;
+
+			for (const seed of SEED_ROLES) {
+				const seedPersona = seed.personas.find(
+					(p) => p.name.toLowerCase() === mapping.name.toLowerCase()
+				);
+				if (seedPersona) {
+					matchesSeed = true;
+					break;
+				}
+			}
+
+			// Find existing role by name
+			const existingRole = registry.roles.find(
+				(r) => r.name.toLowerCase() === mapping.role.toLowerCase()
+			);
+			if (existingRole) {
+				suggestedRoleId = existingRole.id;
+			}
+
+			suggestions.push({
+				suggestedName: mapping.name,
+				suggestedDescription: mapping.description,
+				suggestedRoleId,
+				suggestedRoleName,
+				suggestedSkills: mapping.skills,
+				evidence: suggestionEvidence,
+				matchesSeed,
+			});
+		}
+
+		return suggestions;
+	}
+
+	/**
+	 * Compute how relevant each persona is to a given project based on actual
+	 * memory injection data. After 20+ sessions, personas that have never
+	 * contributed a memory to this project are candidates for deactivation.
+	 *
+	 * This prevents searching irrelevant personas (e.g., "Rust Systems Developer"
+	 * for a Python-only project) which wastes embedding computation budget.
+	 */
+	async computePersonaRelevance(projectPath: string): Promise<PersonaRelevance[]> {
+		const registry = await this.readRegistry();
+		const results: PersonaRelevance[] = [];
+		let totalInjections = 0;
+
+		// For each active persona, count memories with matching sourceProjectPath and useCount > 0
+		const personaCounts = new Map<string, number>();
+
+		for (const persona of registry.personas) {
+			if (!persona.active) continue;
+			let count = 0;
+
+			for (const skillId of persona.skillAreaIds) {
+				const dirPath = this.getMemoryPath('skill', skillId);
+				try {
+					const lib = await this.readLibrary(dirPath);
+					for (const entry of lib.entries) {
+						if (
+							entry.active &&
+							entry.useCount > 0 &&
+							entry.experienceContext?.sourceProjectPath === projectPath
+						) {
+							count += entry.useCount;
+						}
+					}
+				} catch {
+					// Library may not exist yet
+				}
+			}
+
+			personaCounts.set(persona.id, count);
+			totalInjections += count;
+		}
+
+		for (const persona of registry.personas) {
+			if (!persona.active) continue;
+			const count = personaCounts.get(persona.id) ?? 0;
+			const relevanceScore = totalInjections > 0 ? count / totalInjections : 0;
+			results.push({
+				personaId: persona.id,
+				relevanceScore,
+				injectionCount: count,
+			});
+		}
+
+		return results;
 	}
 
 	// ─── Seed Data ──────────────────────────────────────────────────────────

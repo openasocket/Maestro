@@ -3018,7 +3018,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 
 					{activeTab === 'memory' && (
 						<div className="space-y-6">
-							<MemorySettings theme={theme} />
+							<MemorySettings theme={theme} projectPath={memoryProjectPath} />
 							<MemoryBrowserPanel theme={theme} projectPath={memoryProjectPath} />
 						</div>
 					)}

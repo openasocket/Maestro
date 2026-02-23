@@ -515,4 +515,18 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 			return memoryStore.seedFromDefaults();
 		})
 	);
+
+	// ─── Hierarchy Suggestions ────────────────────────────────────────
+
+	ipcMain.handle(
+		'memory:suggestHierarchy',
+		createIpcDataHandler(handlerOpts('suggestHierarchy'), async (projectPath: string) => {
+			const [skillSuggestions, personaSuggestions, relevance] = await Promise.all([
+				memoryStore.suggestSkillAreas(projectPath),
+				memoryStore.suggestPersonas(projectPath),
+				memoryStore.computePersonaRelevance(projectPath),
+			]);
+			return { skillSuggestions, personaSuggestions, relevance };
+		})
+	);
 }

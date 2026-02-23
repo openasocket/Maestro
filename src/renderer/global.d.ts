@@ -2941,6 +2941,12 @@ interface MaestroAPI {
 			| { success: true; data: { roles: number; personas: number; skills: number } }
 			| { success: false; error: string }
 		>;
+		suggestHierarchy: (
+			projectPath: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').HierarchySuggestionResult }
+			| { success: false; error: string }
+		>;
 	};
 
 	// WakaTime API (CLI check, API key validation)

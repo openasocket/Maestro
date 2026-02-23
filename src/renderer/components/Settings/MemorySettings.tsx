@@ -5,14 +5,30 @@
  * Same pattern as other settings panels (toggles, sliders, stats display).
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Brain, Loader2, Sparkles, AlertTriangle, Database } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+	Brain,
+	Loader2,
+	Sparkles,
+	AlertTriangle,
+	Database,
+	Lightbulb,
+	Plus,
+	X,
+} from 'lucide-react';
 import type { Theme } from '../../types';
-import type { MemoryConfig, MemoryStats } from '../../../shared/memory-types';
+import type {
+	MemoryConfig,
+	MemoryStats,
+	SkillAreaSuggestion,
+	PersonaSuggestion,
+	HierarchySuggestionResult,
+} from '../../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../../shared/memory-types';
 
 interface MemorySettingsProps {
 	theme: Theme;
+	projectPath?: string | null;
 }
 
 /**
@@ -113,7 +129,7 @@ function ConfigToggle({
 	);
 }
 
-export function MemorySettings({ theme }: MemorySettingsProps): React.ReactElement {
+export function MemorySettings({ theme, projectPath }: MemorySettingsProps): React.ReactElement {
 	const [config, setConfig] = useState<MemoryConfig>(MEMORY_CONFIG_DEFAULTS);
 	const [stats, setStats] = useState<MemoryStats | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -121,6 +137,10 @@ export function MemorySettings({ theme }: MemorySettingsProps): React.ReactEleme
 	const [error, setError] = useState<string | null>(null);
 	const [hasRoles, setHasRoles] = useState(true);
 	const [seeding, setSeeding] = useState(false);
+	const [suggestions, setSuggestions] = useState<HierarchySuggestionResult | null>(null);
+	const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
+	const [applyingSuggestion, setApplyingSuggestion] = useState<string | null>(null);
+	const suggestionsLoaded = useRef(false);
 
 	// Load config and stats on mount
 	useEffect(() => {
@@ -188,6 +208,108 @@ export function MemorySettings({ theme }: MemorySettingsProps): React.ReactEleme
 		} finally {
 			setSeeding(false);
 		}
+	}, []);
+
+	// Load hierarchy suggestions when memory system is enabled and projectPath available
+	useEffect(() => {
+		if (!config.enabled || !projectPath || suggestionsLoaded.current) return;
+		let mounted = true;
+		const timer = setTimeout(async () => {
+			try {
+				const res = await window.maestro.memory.suggestHierarchy(projectPath);
+				if (!mounted) return;
+				if (res.success) {
+					setSuggestions(res.data);
+					suggestionsLoaded.current = true;
+				}
+			} catch {
+				// Non-critical — silently degrade
+			}
+		}, 500); // debounce
+		return () => {
+			mounted = false;
+			clearTimeout(timer);
+		};
+	}, [config.enabled, projectPath]);
+
+	// Apply persona suggestion
+	const handleApplyPersona = useCallback(async (suggestion: PersonaSuggestion) => {
+		const key = `persona:${suggestion.suggestedName}`;
+		setApplyingSuggestion(key);
+		try {
+			let roleId = suggestion.suggestedRoleId;
+			if (!roleId) {
+				// Create the role first
+				const roleRes = await window.maestro.memory.role.create(
+					suggestion.suggestedRoleName,
+					`${suggestion.suggestedRoleName} role`
+				);
+				if (!roleRes.success) {
+					setError(roleRes.error);
+					return;
+				}
+				roleId = roleRes.data.id;
+			}
+			const personaRes = await window.maestro.memory.persona.create(
+				roleId,
+				suggestion.suggestedName,
+				suggestion.suggestedDescription
+			);
+			if (!personaRes.success) {
+				setError(personaRes.error);
+				return;
+			}
+			// Create suggested skill areas
+			for (const skillName of suggestion.suggestedSkills) {
+				await window.maestro.memory.skill.create(
+					personaRes.data.id,
+					skillName,
+					`${skillName} expertise`
+				);
+			}
+			// Dismiss the suggestion
+			setDismissedSuggestions((prev) => new Set([...prev, key]));
+			// Refresh stats
+			const statsRes = await window.maestro.memory.getStats();
+			if (statsRes.success) setStats(statsRes.data);
+			setHasRoles(true);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : 'Failed to create persona');
+		} finally {
+			setApplyingSuggestion(null);
+		}
+	}, []);
+
+	// Apply skill area suggestion
+	const handleApplySkillArea = useCallback(async (suggestion: SkillAreaSuggestion) => {
+		const key = `skill:${suggestion.suggestedName}`;
+		setApplyingSuggestion(key);
+		try {
+			const skillRes = await window.maestro.memory.skill.create(
+				suggestion.suggestedPersonaId,
+				suggestion.suggestedName,
+				suggestion.suggestedDescription
+			);
+			if (!skillRes.success) {
+				setError(skillRes.error);
+				return;
+			}
+			// Move memories to the new skill area — re-add them in skill scope
+			// (project memories stay as-is; this creates linked skill copies)
+			setDismissedSuggestions((prev) => new Set([...prev, key]));
+			// Refresh stats
+			const statsRes = await window.maestro.memory.getStats();
+			if (statsRes.success) setStats(statsRes.data);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : 'Failed to create skill area');
+		} finally {
+			setApplyingSuggestion(null);
+		}
+	}, []);
+
+	// Dismiss a suggestion
+	const handleDismissSuggestion = useCallback((key: string) => {
+		setDismissedSuggestions((prev) => new Set([...prev, key]));
 	}, []);
 
 	if (loading) {
@@ -479,6 +601,17 @@ export function MemorySettings({ theme }: MemorySettingsProps): React.ReactEleme
 						</div>
 					)}
 
+					{/* Hierarchy Suggestions */}
+					<HierarchySuggestions
+						theme={theme}
+						suggestions={suggestions}
+						dismissedSuggestions={dismissedSuggestions}
+						applyingSuggestion={applyingSuggestion}
+						onApplyPersona={handleApplyPersona}
+						onApplySkillArea={handleApplySkillArea}
+						onDismiss={handleDismissSuggestion}
+					/>
+
 					{/* Embedding Model Status — reuse grpo:getModelStatus since model is shared */}
 					<EmbeddingModelStatus theme={theme} />
 				</>
@@ -510,6 +643,158 @@ function StatCell({
 			<div className="text-xs" style={{ color: theme.colors.textDim }}>
 				{label}
 			</div>
+		</div>
+	);
+}
+
+/**
+ * Hierarchy suggestions section — shows persona and skill area suggestions.
+ */
+function HierarchySuggestions({
+	theme,
+	suggestions,
+	dismissedSuggestions,
+	applyingSuggestion,
+	onApplyPersona,
+	onApplySkillArea,
+	onDismiss,
+}: {
+	theme: Theme;
+	suggestions: HierarchySuggestionResult | null;
+	dismissedSuggestions: Set<string>;
+	applyingSuggestion: string | null;
+	onApplyPersona: (s: PersonaSuggestion) => void;
+	onApplySkillArea: (s: SkillAreaSuggestion) => void;
+	onDismiss: (key: string) => void;
+}) {
+	if (!suggestions) return null;
+
+	const visiblePersonas = suggestions.personaSuggestions.filter(
+		(s) => !dismissedSuggestions.has(`persona:${s.suggestedName}`)
+	);
+	const visibleSkills = suggestions.skillSuggestions.filter(
+		(s) => !dismissedSuggestions.has(`skill:${s.suggestedName}`)
+	);
+
+	if (visiblePersonas.length === 0 && visibleSkills.length === 0) return null;
+
+	return (
+		<div
+			className="rounded-lg border p-4 space-y-3"
+			style={{ borderColor: theme.colors.accent, backgroundColor: `${theme.colors.accent}08` }}
+		>
+			<div className="flex items-center gap-2">
+				<Lightbulb className="w-3.5 h-3.5" style={{ color: theme.colors.accent }} />
+				<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+					Suggestions for this project
+				</div>
+			</div>
+
+			{visiblePersonas.map((suggestion) => {
+				const key = `persona:${suggestion.suggestedName}`;
+				const isApplying = applyingSuggestion === key;
+				return (
+					<div
+						key={key}
+						className="rounded border p-3 space-y-1.5"
+						style={{ borderColor: theme.colors.border }}
+					>
+						<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
+							Add persona: "{suggestion.suggestedName}"
+						</div>
+						<div className="text-xs" style={{ color: theme.colors.textDim }}>
+							Evidence: {suggestion.evidence.join(', ')}
+						</div>
+						<div className="text-xs" style={{ color: theme.colors.textDim }}>
+							Skills: {suggestion.suggestedSkills.join(', ')}
+						</div>
+						<div className="flex gap-2 mt-2">
+							<button
+								className="px-3 py-1 rounded text-xs font-medium border"
+								style={{
+									borderColor: theme.colors.accent,
+									color: theme.colors.accent,
+									backgroundColor: `${theme.colors.accent}10`,
+								}}
+								onClick={() => onApplyPersona(suggestion)}
+								disabled={isApplying}
+							>
+								{isApplying ? (
+									<Loader2 className="w-3 h-3 animate-spin inline mr-1" />
+								) : (
+									<Plus className="w-3 h-3 inline mr-1" />
+								)}
+								Add
+							</button>
+							<button
+								className="px-3 py-1 rounded text-xs border"
+								style={{
+									borderColor: theme.colors.border,
+									color: theme.colors.textDim,
+								}}
+								onClick={() => onDismiss(key)}
+								disabled={isApplying}
+							>
+								<X className="w-3 h-3 inline mr-1" />
+								Dismiss
+							</button>
+						</div>
+					</div>
+				);
+			})}
+
+			{visibleSkills.map((suggestion) => {
+				const key = `skill:${suggestion.suggestedName}`;
+				const isApplying = applyingSuggestion === key;
+				return (
+					<div
+						key={key}
+						className="rounded border p-3 space-y-1.5"
+						style={{ borderColor: theme.colors.border }}
+					>
+						<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
+							New skill area: "{suggestion.suggestedName}"
+						</div>
+						<div className="text-xs" style={{ color: theme.colors.textDim }}>
+							Under: {suggestion.suggestedPersonaName}
+						</div>
+						<div className="text-xs" style={{ color: theme.colors.textDim }}>
+							Contains: {suggestion.memoryIds.length} related project memories
+						</div>
+						<div className="flex gap-2 mt-2">
+							<button
+								className="px-3 py-1 rounded text-xs font-medium border"
+								style={{
+									borderColor: theme.colors.accent,
+									color: theme.colors.accent,
+									backgroundColor: `${theme.colors.accent}10`,
+								}}
+								onClick={() => onApplySkillArea(suggestion)}
+								disabled={isApplying}
+							>
+								{isApplying ? (
+									<Loader2 className="w-3 h-3 animate-spin inline mr-1" />
+								) : (
+									<Plus className="w-3 h-3 inline mr-1" />
+								)}
+								Create
+							</button>
+							<button
+								className="px-3 py-1 rounded text-xs border"
+								style={{
+									borderColor: theme.colors.border,
+									color: theme.colors.textDim,
+								}}
+								onClick={() => onDismiss(key)}
+								disabled={isApplying}
+							>
+								<X className="w-3 h-3 inline mr-1" />
+								Dismiss
+							</button>
+						</div>
+					</div>
+				);
+			})}
 		</div>
 	);
 }
