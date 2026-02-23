@@ -138,8 +138,10 @@ import {
 	getExperienceAnalyzer,
 	initializeExperienceAnalyzer,
 	resetExperienceAnalyzer,
+	EXPERIENCE_CATEGORIES,
 	type ExperienceAnalyzerInput,
 	type ExtractedExperience,
+	type ExperienceCategory,
 } from '../../../main/memory/experience-analyzer';
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -201,11 +203,23 @@ describe('ExperienceAnalyzer', () => {
 				content: 'Always check imports',
 				situation: 'Circular import broke build',
 				learning: 'Extract shared types to separate file',
+				category: 'problem-solved',
 				tags: ['imports', 'typescript'],
 				noveltyScore: 0.8,
 			};
 			expect(exp.content).toBe('Always check imports');
+			expect(exp.category).toBe('problem-solved');
 			expect(exp.noveltyScore).toBe(0.8);
+		});
+
+		it('ExperienceCategory covers all valid values', () => {
+			expect(EXPERIENCE_CATEGORIES).toEqual([
+				'pattern-established',
+				'problem-solved',
+				'dependency-discovered',
+				'anti-pattern-identified',
+				'decision-made',
+			]);
 		});
 	});
 
@@ -302,6 +316,7 @@ describe('ExperienceAnalyzer', () => {
 					content: 'Break circular imports',
 					situation: 'Build failed',
 					learning: 'Extract shared types',
+					category: 'problem-solved',
 					tags: ['typescript'],
 					noveltyScore: 0.8,
 				},
@@ -311,16 +326,18 @@ describe('ExperienceAnalyzer', () => {
 
 			expect(results).toHaveLength(1);
 			expect(results[0].content).toBe('Break circular imports');
+			expect(results[0].category).toBe('problem-solved');
 			expect(results[0].noveltyScore).toBe(0.8);
 			expect(results[0].tags).toEqual(['typescript']);
 		});
 
 		it('extracts JSON from noisy output', () => {
-			const output = `Here are my findings:\n\`\`\`json\n[{"content":"test","situation":"test","learning":"test","tags":[],"noveltyScore":0.5}]\n\`\`\`\nEnd.`;
+			const output = `Here are my findings:\n\`\`\`json\n[{"content":"test","situation":"test","learning":"test","category":"decision-made","tags":[],"noveltyScore":0.5}]\n\`\`\`\nEnd.`;
 
 			const results = analyzer.parseExperiences(output);
 			expect(results).toHaveLength(1);
 			expect(results[0].content).toBe('test');
+			expect(results[0].category).toBe('decision-made');
 		});
 
 		it('returns empty array for empty JSON array', () => {
@@ -397,6 +414,109 @@ describe('ExperienceAnalyzer', () => {
 			const results = analyzer.parseExperiences(output);
 			expect(results).toHaveLength(1);
 			expect(results[0].tags).toEqual([]);
+		});
+
+		it('defaults to pattern-established when category is missing', () => {
+			const output = JSON.stringify([
+				{
+					content: 'No category',
+					situation: 'Test',
+					learning: 'Test',
+					tags: [],
+					noveltyScore: 0.6,
+				},
+			]);
+
+			const results = analyzer.parseExperiences(output);
+			expect(results).toHaveLength(1);
+			expect(results[0].category).toBe('pattern-established');
+		});
+
+		it('defaults to pattern-established when category is invalid', () => {
+			const output = JSON.stringify([
+				{
+					content: 'Invalid category',
+					situation: 'Test',
+					learning: 'Test',
+					category: 'not-a-valid-category',
+					tags: [],
+					noveltyScore: 0.5,
+				},
+			]);
+
+			const results = analyzer.parseExperiences(output);
+			expect(results).toHaveLength(1);
+			expect(results[0].category).toBe('pattern-established');
+		});
+
+		it('defaults to pattern-established when category is non-string', () => {
+			const output = JSON.stringify([
+				{
+					content: 'Numeric category',
+					situation: 'Test',
+					learning: 'Test',
+					category: 42,
+					tags: [],
+					noveltyScore: 0.5,
+				},
+			]);
+
+			const results = analyzer.parseExperiences(output);
+			expect(results).toHaveLength(1);
+			expect(results[0].category).toBe('pattern-established');
+		});
+
+		it('preserves valid category values', () => {
+			const output = JSON.stringify([
+				{
+					content: 'A',
+					situation: 'S',
+					learning: 'L',
+					category: 'pattern-established',
+					tags: [],
+					noveltyScore: 0.5,
+				},
+				{
+					content: 'B',
+					situation: 'S',
+					learning: 'L',
+					category: 'problem-solved',
+					tags: [],
+					noveltyScore: 0.5,
+				},
+				{
+					content: 'C',
+					situation: 'S',
+					learning: 'L',
+					category: 'dependency-discovered',
+					tags: [],
+					noveltyScore: 0.5,
+				},
+				{
+					content: 'D',
+					situation: 'S',
+					learning: 'L',
+					category: 'anti-pattern-identified',
+					tags: [],
+					noveltyScore: 0.5,
+				},
+				{
+					content: 'E',
+					situation: 'S',
+					learning: 'L',
+					category: 'decision-made',
+					tags: [],
+					noveltyScore: 0.5,
+				},
+			]);
+
+			const results = analyzer.parseExperiences(output);
+			expect(results).toHaveLength(5);
+			expect(results[0].category).toBe('pattern-established');
+			expect(results[1].category).toBe('problem-solved');
+			expect(results[2].category).toBe('dependency-discovered');
+			expect(results[3].category).toBe('anti-pattern-identified');
+			expect(results[4].category).toBe('decision-made');
 		});
 	});
 
@@ -596,6 +716,7 @@ describe('ExperienceAnalyzer', () => {
 					content: 'Always run lint before committing',
 					situation: 'CI failed due to lint errors',
 					learning: 'Pre-commit lint catches errors early',
+					category: 'pattern-established',
 					tags: ['ci', 'lint'],
 					noveltyScore: 0.7,
 				},
@@ -659,6 +780,7 @@ describe('ExperienceAnalyzer', () => {
 					content: 'Exp 1',
 					situation: 'Sit 1',
 					learning: 'Learn 1',
+					category: 'pattern-established',
 					tags: [],
 					noveltyScore: 0.6,
 				},
@@ -666,6 +788,7 @@ describe('ExperienceAnalyzer', () => {
 					content: 'Exp 2',
 					situation: 'Sit 2',
 					learning: 'Learn 2',
+					category: 'problem-solved',
 					tags: [],
 					noveltyScore: 0.8,
 				},
@@ -729,6 +852,7 @@ describe('ExperienceAnalyzer', () => {
 					content: 'Run lint before every commit',
 					situation: 'Test',
 					learning: 'Test',
+					category: 'pattern-established',
 					tags: [],
 					noveltyScore: 0.7,
 				},
@@ -827,6 +951,7 @@ describe('ExperienceAnalyzer', () => {
 					content: 'New skill-related learning',
 					situation: 'Working on related task',
 					learning: 'New insight for skill area',
+					category: 'dependency-discovered',
 					tags: ['skill-test'],
 					noveltyScore: 0.7,
 				},
@@ -861,6 +986,7 @@ describe('ExperienceAnalyzer', () => {
 					content: 'Learning with long diff',
 					situation: 'Test situation',
 					learning: 'Test learning',
+					category: 'pattern-established',
 					tags: [],
 					noveltyScore: 0.7,
 				},
@@ -900,6 +1026,7 @@ describe('ExperienceAnalyzer', () => {
 					content: 'Metadata test learning',
 					situation: 'Full metadata situation',
 					learning: 'Full metadata learning',
+					category: 'decision-made',
 					tags: ['meta'],
 					noveltyScore: 0.9,
 				},
@@ -949,6 +1076,7 @@ describe('ExperienceAnalyzer', () => {
 					content: 'Should still store without dedup',
 					situation: 'No embeddings available',
 					learning: 'Graceful degradation works',
+					category: 'anti-pattern-identified',
 					tags: [],
 					noveltyScore: 0.6,
 				},
@@ -1111,6 +1239,7 @@ describe('ExperienceAnalyzer', () => {
 						content: 'Use --skip-git-repo-check for monorepos',
 						situation: 'Codex stalled on monorepo',
 						learning: 'Monorepo flag needed',
+						category: 'problem-solved',
 						tags: ['codex'],
 						noveltyScore: 0.8,
 					},
@@ -1141,6 +1270,7 @@ describe('ExperienceAnalyzer', () => {
 			);
 			expect(experiences).toHaveLength(1);
 			expect(experiences[0].content).toBe('Use --skip-git-repo-check for monorepos');
+			expect(experiences[0].category).toBe('problem-solved');
 		});
 
 		it('returns empty array when LLM call fails', async () => {

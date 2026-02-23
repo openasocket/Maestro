@@ -42,6 +42,23 @@ export interface ExperienceAnalyzerInput {
 	sessionDurationMs?: number;
 }
 
+/** What kind of learning this experience represents */
+export type ExperienceCategory =
+	| 'pattern-established' // A reusable approach or technique that worked
+	| 'problem-solved' // A specific problem encountered and resolved
+	| 'dependency-discovered' // A dependency, integration, or wiring requirement found
+	| 'anti-pattern-identified' // Something that failed or should be avoided
+	| 'decision-made'; // A significant architectural or approach decision
+
+/** Valid category values for runtime validation */
+export const EXPERIENCE_CATEGORIES: readonly ExperienceCategory[] = [
+	'pattern-established',
+	'problem-solved',
+	'dependency-discovered',
+	'anti-pattern-identified',
+	'decision-made',
+] as const;
+
 export interface ExtractedExperience {
 	/** The experience content — what was learned */
 	content: string;
@@ -49,6 +66,8 @@ export interface ExtractedExperience {
 	situation: string;
 	/** The discrete learning or teaching */
 	learning: string;
+	/** What kind of learning this experience represents */
+	category: ExperienceCategory;
 	/** Suggested tags */
 	tags: string[];
 	/** How novel/important this learning is (0.0-1.0) */
@@ -396,13 +415,24 @@ export class ExperienceAnalyzer {
 						typeof (e as Record<string, unknown>).learning === 'string' &&
 						typeof (e as Record<string, unknown>).noveltyScore === 'number'
 				)
-				.map((e: Record<string, unknown>) => ({
-					content: String(e.content),
-					situation: String(e.situation),
-					learning: String(e.learning),
-					tags: Array.isArray(e.tags) ? e.tags.filter((t: unknown) => typeof t === 'string') : [],
-					noveltyScore: Number(e.noveltyScore),
-				}));
+				.map((e: Record<string, unknown>) => {
+					// Validate category — default to 'pattern-established' if missing or invalid
+					const rawCategory = e.category;
+					const category: ExperienceCategory =
+						typeof rawCategory === 'string' &&
+						(EXPERIENCE_CATEGORIES as readonly string[]).includes(rawCategory)
+							? (rawCategory as ExperienceCategory)
+							: 'pattern-established';
+
+					return {
+						content: String(e.content),
+						situation: String(e.situation),
+						learning: String(e.learning),
+						category,
+						tags: Array.isArray(e.tags) ? e.tags.filter((t: unknown) => typeof t === 'string') : [],
+						noveltyScore: Number(e.noveltyScore),
+					};
+				});
 		} catch {
 			return [];
 		}
