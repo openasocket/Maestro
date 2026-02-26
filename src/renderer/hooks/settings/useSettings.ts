@@ -33,6 +33,7 @@ import {
 	loadAllSettings,
 	selectIsLeaderboardRegistered,
 } from '../../stores/settingsStore';
+import type { VibesAssuranceLevel } from '../../../shared/vibes-types';
 
 export interface UseSettingsReturn {
 	// Loading state
@@ -298,6 +299,28 @@ export interface UseSettingsReturn {
 	setUseNativeTitleBar: (value: boolean) => void;
 	autoHideMenuBar: boolean;
 	setAutoHideMenuBar: (value: boolean) => void;
+
+	// VIBES Metadata settings
+	vibesEnabled: boolean;
+	setVibesEnabled: (value: boolean) => void;
+	vibesAssuranceLevel: VibesAssuranceLevel;
+	setVibesAssuranceLevel: (value: VibesAssuranceLevel) => void;
+	vibesTrackedExtensions: string[];
+	setVibesTrackedExtensions: (value: string[]) => void;
+	vibesExcludePatterns: string[];
+	setVibesExcludePatterns: (value: string[]) => void;
+	vibesPerAgentConfig: Record<string, { enabled: boolean }>;
+	setVibesPerAgentConfig: (value: Record<string, { enabled: boolean }>) => void;
+	vibesMaestroOrchestrationEnabled: boolean;
+	setVibesMaestroOrchestrationEnabled: (value: boolean) => void;
+	vibesAutoInit: boolean;
+	setVibesAutoInit: (value: boolean) => void;
+	vibesCheckBinaryPath: string;
+	setVibesCheckBinaryPath: (value: string) => void;
+	vibesCompressReasoningThreshold: number;
+	setVibesCompressReasoningThreshold: (value: number) => void;
+	vibesExternalBlobThreshold: number;
+	setVibesExternalBlobThreshold: (value: number) => void;
 }
 
 export function useSettings(): UseSettingsReturn {

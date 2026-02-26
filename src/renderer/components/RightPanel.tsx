@@ -22,9 +22,10 @@ import { HistoryPanel, HistoryPanelHandle } from './HistoryPanel';
 import { AutoRun, AutoRunHandle } from './AutoRun';
 import type { DocumentTaskCount } from './AutoRunDocumentSelector';
 import { AutoRunExpandedModal } from './AutoRunExpandedModal';
+import { VibesPanel } from './vibes/VibesPanel';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
 import { ConfirmModal } from './ConfirmModal';
-import { useResizablePanel } from '../hooks';
+import { useResizablePanel, useSettings, useVibesLive } from '../hooks';
 
 export interface RightPanelHandle {
 	refreshHistoryPanel: () => void;
@@ -227,6 +228,26 @@ export const RightPanel = memo(
 			side: 'right',
 		});
 
+		// VIBES blame view state — tracks file path to pre-select in blame view
+		const { vibesEnabled } = useSettings();
+		const vibesLive = useVibesLive(vibesEnabled);
+		const vibesAnnotationCount = React.useMemo(() => {
+			let total = 0;
+			for (const update of vibesLive.updates.values()) {
+				total += update.annotationCount;
+			}
+			return total;
+		}, [vibesLive.updates]);
+		const [blameFilePath, setBlameFilePath] = useState<string | undefined>(undefined);
+
+		const handleViewAIBlame = useCallback(
+			(relativePath: string) => {
+				setBlameFilePath(relativePath);
+				setActiveRightTab('vibes');
+			},
+			[setActiveRightTab]
+		);
+
 		// Elapsed time for Auto Run display - tracks wall clock time from startTime
 		const [elapsedTime, setElapsedTime] = useState<string>('');
 
@@ -428,18 +449,31 @@ export const RightPanel = memo(
 
 				{/* Tab Header */}
 				<div className="flex border-b h-16" style={{ borderColor: theme.colors.border }}>
-					{['files', 'history', 'autorun'].map((tab) => (
+					{['files', 'history', 'autorun', 'vibes'].map((tab) => (
 						<button
 							key={tab}
 							onClick={() => setActiveRightTab(tab as RightPanelTab)}
-							className="flex-1 text-xs font-bold border-b-2 transition-colors"
+							className="relative flex-1 text-xs font-bold border-b-2 transition-colors"
 							style={{
 								borderColor: activeRightTab === tab ? theme.colors.accent : 'transparent',
 								color: activeRightTab === tab ? theme.colors.textMain : theme.colors.textDim,
 							}}
 							data-tour={`${tab}-tab`}
 						>
-							{tab === 'autorun' ? 'Auto Run' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+							{tab === 'autorun'
+								? 'Auto Run'
+								: tab === 'vibes'
+									? 'VIBES'
+									: tab.charAt(0).toUpperCase() + tab.slice(1)}
+							{tab === 'vibes' && vibesAnnotationCount > 0 && (
+								<span
+									className="absolute top-1.5 ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold leading-none"
+									style={{ backgroundColor: theme.colors.success, color: '#fff' }}
+									data-testid="vibes-annotation-badge"
+								>
+									{vibesAnnotationCount > 99 ? '99+' : vibesAnnotationCount}
+								</span>
+							)}
 						</button>
 					))}
 
@@ -511,6 +545,7 @@ export const RightPanel = memo(
 								onFocusFileInGraph={onFocusFileInGraph}
 								lastGraphFocusFile={lastGraphFocusFile}
 								onOpenLastDocumentGraph={onOpenLastDocumentGraph}
+								onViewAIBlame={vibesEnabled ? handleViewAIBlame : undefined}
 							/>
 						</div>
 					)}
@@ -534,6 +569,17 @@ export const RightPanel = memo(
 					{activeRightTab === 'autorun' && (
 						<div data-tour="autorun-panel" className="h-full">
 							<AutoRun ref={autoRunRef} {...autoRunSharedProps} onExpand={handleExpandAutoRun} />
+						</div>
+					)}
+
+					{activeRightTab === 'vibes' && (
+						<div data-tour="vibes-panel" className="h-full">
+							<VibesPanel
+								theme={theme}
+								projectPath={session.projectRoot || session.cwd}
+								initialBlameFilePath={blameFilePath}
+								onBlameFileConsumed={() => setBlameFilePath(undefined)}
+							/>
 						</div>
 					)}
 				</div>

@@ -3084,6 +3084,109 @@ interface MaestroAPI {
 		checkCli: () => Promise<{ available: boolean; version?: string }>;
 		validateApiKey: (key: string) => Promise<{ valid: boolean }>;
 	};
+
+	// VIBES API (AI audit metadata integration)
+	vibes: {
+		isInitialized: (projectPath: string) => Promise<boolean>;
+		init: (
+			projectPath: string,
+			config: {
+				projectName: string;
+				assuranceLevel: 'low' | 'medium' | 'high';
+				extensions?: string[];
+			}
+		) => Promise<{ success: boolean; error?: string }>;
+		updateConfig: (
+			projectPath: string,
+			updates: Record<string, unknown>
+		) => Promise<{ success: boolean; error?: string }>;
+		getStats: (
+			projectPath: string,
+			file?: string
+		) => Promise<{
+			success: boolean;
+			data?: string;
+			error?: string;
+		}>;
+		getBlame: (
+			projectPath: string,
+			file: string
+		) => Promise<{
+			success: boolean;
+			data?: string;
+			error?: string;
+		}>;
+		getLog: (
+			projectPath: string,
+			options?: {
+				file?: string;
+				model?: string;
+				session?: string;
+				limit?: number;
+				json?: boolean;
+			}
+		) => Promise<{
+			success: boolean;
+			data?: string;
+			error?: string;
+		}>;
+		getCoverage: (projectPath: string) => Promise<{
+			success: boolean;
+			data?: string;
+			error?: string;
+		}>;
+		getLocCoverage: (projectPath: string) => Promise<{
+			success: boolean;
+			data?: string;
+			error?: string;
+		}>;
+		getReport: (
+			projectPath: string,
+			format?: 'markdown' | 'html' | 'json'
+		) => Promise<{
+			success: boolean;
+			data?: string;
+			error?: string;
+		}>;
+		getSessions: (projectPath: string) => Promise<{
+			success: boolean;
+			data?: string;
+			error?: string;
+		}>;
+		getModels: (projectPath: string) => Promise<{
+			success: boolean;
+			data?: string;
+			error?: string;
+		}>;
+		getManifest: (projectPath: string) => Promise<{
+			success: boolean;
+			data?: string;
+			error?: string;
+		}>;
+		build: (projectPath: string) => Promise<{
+			success: boolean;
+			error?: string;
+		}>;
+		findBinary: (customPath?: string) => Promise<{ path: string | null; version: string | null }>;
+		clearBinaryCache: () => Promise<void>;
+		decompressReasoning: (params: {
+			compressed?: string | null;
+			blobPath?: string | null;
+			projectPath?: string | null;
+		}) => Promise<{ text: string | null; error: string | null }>;
+		onAnnotationUpdate: (
+			callback: (payload: {
+				sessionId: string;
+				annotationCount: number;
+				lastAnnotation: {
+					type: string;
+					filePath?: string;
+					action?: string;
+					timestamp: string;
+				};
+			}) => void
+		) => () => void;
+	};
 }
 
 declare global {

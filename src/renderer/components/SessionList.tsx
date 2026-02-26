@@ -54,7 +54,12 @@ import { getStatusColor, getContextColor, formatActiveTime } from '../utils/them
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
 import { SessionItem } from './SessionItem';
 import { GroupChatList } from './GroupChatList';
-import { useLiveOverlay, useClickOutside, useResizablePanel } from '../hooks';
+import {
+	useLiveOverlay,
+	useClickOutside,
+	useResizablePanel,
+	useVibesSessionIndicators,
+} from '../hooks';
 import { useGitFileStatus } from '../contexts/GitStatusContext';
 import { useUIStore } from '../stores/uiStore';
 
@@ -1162,6 +1167,10 @@ interface SessionListProps {
 	// Context warning thresholds (to match header bar colors with warning sash)
 	contextWarningYellowThreshold?: number;
 	contextWarningRedThreshold?: number;
+
+	// VIBES session indicators
+	vibesEnabled?: boolean;
+	vibesAssuranceLevel?: 'low' | 'medium' | 'high';
 }
 
 function SessionListInner(props: SessionListProps) {
@@ -1257,6 +1266,8 @@ function SessionListInner(props: SessionListProps) {
 		allGroupChatParticipantStates,
 		contextWarningYellowThreshold = 60,
 		contextWarningRedThreshold = 80,
+		vibesEnabled = false,
+		vibesAssuranceLevel,
 	} = props;
 
 	// Derive whether any session is busy or in auto-run (for wand sparkle animation)
@@ -1264,6 +1275,9 @@ function SessionListInner(props: SessionListProps) {
 		() => sessions.some((s) => s.state === 'busy') || activeBatchSessionIds.length > 0,
 		[sessions, activeBatchSessionIds]
 	);
+
+	// VIBES session indicators — lightweight polling for annotation counts per project path
+	const { indicators: vibesIndicators } = useVibesSessionIndicators(sessions, vibesEnabled);
 
 	const [sessionFilter, setSessionFilter] = useState('');
 	const { onResizeStart: onSidebarResizeStart, transitionClass: sidebarTransitionClass } =
@@ -1627,6 +1641,17 @@ function SessionListInner(props: SessionListProps) {
 					gitFileCount={getFileCount(session.id)}
 					isInBatch={activeBatchSessionIds.includes(session.id)}
 					jumpNumber={getSessionJumpNumber(session.id)}
+					vibesEnabled={vibesEnabled}
+					vibesAssuranceLevel={
+						vibesIndicators.get(session.projectRoot || session.cwd)?.assuranceLevel ??
+						vibesAssuranceLevel
+					}
+					vibesAnnotationCount={
+						vibesIndicators.get(session.projectRoot || session.cwd)?.annotationCount
+					}
+					vibesActive={
+						vibesIndicators.get(session.projectRoot || session.cwd)?.isInitialized ?? false
+					}
 					onSelect={selectHandlers.get(session.id)!}
 					onDragStart={dragStartHandlers.get(session.id)!}
 					onDragOver={handleDragOver}
@@ -1689,6 +1714,17 @@ function SessionListInner(props: SessionListProps) {
 										gitFileCount={getFileCount(child.id)}
 										isInBatch={activeBatchSessionIds.includes(child.id)}
 										jumpNumber={getSessionJumpNumber(child.id)}
+										vibesEnabled={vibesEnabled}
+										vibesAssuranceLevel={
+											vibesIndicators.get(child.projectRoot || child.cwd)?.assuranceLevel ??
+											vibesAssuranceLevel
+										}
+										vibesAnnotationCount={
+											vibesIndicators.get(child.projectRoot || child.cwd)?.annotationCount
+										}
+										vibesActive={
+											vibesIndicators.get(child.projectRoot || child.cwd)?.isInitialized ?? false
+										}
 										onSelect={selectHandlers.get(child.id)!}
 										onDragStart={dragStartHandlers.get(child.id)!}
 										onContextMenu={contextMenuHandlers.get(child.id)!}

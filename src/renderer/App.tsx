@@ -150,6 +150,7 @@ import type {
 	RightPanelTab,
 	LogEntry,
 	Session,
+	Group,
 	AITab,
 	QueuedItem,
 	BatchRunConfig,
@@ -3988,7 +3989,12 @@ You are taking over this conversation. Based on the context above, provide a bri
 
 			switch (type) {
 				case 'setRightTab':
-					if (value === 'files' || value === 'history' || value === 'autorun') {
+					if (
+						value === 'files' ||
+						value === 'history' ||
+						value === 'autorun' ||
+						value === 'vibes'
+					) {
 						setActiveRightTab(value as RightPanelTab);
 					}
 					break;
@@ -3997,6 +4003,9 @@ You are taking over this conversation. Based on the context above, provide a bri
 					break;
 				case 'closeRightPanel':
 					setRightPanelOpen(false);
+					break;
+				case 'openSettings':
+					setSettingsModalOpen(true);
 					break;
 				// hamburger menu actions are handled by SessionList.tsx
 				default:
@@ -5570,6 +5579,10 @@ You are taking over this conversation. Based on the context above, provide a bri
 		// Context warning thresholds
 		contextWarningYellowThreshold: contextManagementSettings.contextWarningYellowThreshold,
 		contextWarningRedThreshold: contextManagementSettings.contextWarningRedThreshold,
+
+		// VIBES session indicators
+		vibesEnabled: settings.vibesEnabled,
+		vibesAssuranceLevel: settings.vibesAssuranceLevel,
 
 		// Ref
 		sidebarContainerRef,

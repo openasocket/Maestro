@@ -139,6 +139,10 @@ export interface UseSessionListPropsDeps {
 	contextWarningYellowThreshold: number;
 	contextWarningRedThreshold: number;
 
+	// VIBES session indicators
+	vibesEnabled: boolean;
+	vibesAssuranceLevel: 'low' | 'medium' | 'high';
+
 	// Ref
 	sidebarContainerRef: React.RefObject<HTMLDivElement>;
 }
@@ -275,6 +279,10 @@ export function useSessionListProps(deps: UseSessionListPropsDeps) {
 			contextWarningYellowThreshold: deps.contextWarningYellowThreshold,
 			contextWarningRedThreshold: deps.contextWarningRedThreshold,
 
+			// VIBES session indicators
+			vibesEnabled: deps.vibesEnabled,
+			vibesAssuranceLevel: deps.vibesAssuranceLevel,
+
 			// Ref
 			sidebarContainerRef: deps.sidebarContainerRef,
 		}),
@@ -369,6 +377,8 @@ export function useSessionListProps(deps: UseSessionListPropsDeps) {
 			deps.handleOpenDeleteGroupChatModal,
 			deps.contextWarningYellowThreshold,
 			deps.contextWarningRedThreshold,
+			deps.vibesEnabled,
+			deps.vibesAssuranceLevel,
 			// Refs (stable, but included for completeness)
 			deps.sidebarContainerRef,
 		]

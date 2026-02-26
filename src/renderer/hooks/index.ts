@@ -98,6 +98,26 @@ export * from './stats';
 export * from './worktree';
 
 // ============================================================================
+// VIBES Module - AI audit metadata for projects
+// ============================================================================
+export { useVibesData } from './useVibesData';
+export type {
+	VibesStatsData,
+	VibesSessionInfo,
+	VibesModelInfo,
+	UseVibesDataReturn,
+} from './useVibesData';
+
+export { useVibesLive } from './useVibesLive';
+export type { VibesAnnotationUpdate, UseVibesLiveReturn } from './useVibesLive';
+
+export { useVibesSessionIndicators } from './useVibesSessionIndicators';
+export type {
+	VibesIndicatorData,
+	UseVibesSessionIndicatorsReturn,
+} from './useVibesSessionIndicators';
+
+// ============================================================================
 // Re-export TransferError types from component for convenience
 // ============================================================================
 export type {

@@ -51,6 +51,7 @@ import { createTabNamingApi } from './tabNaming';
 import { createDirectorNotesApi } from './directorNotes';
 import { createMemoryApi } from './memory';
 import { createWakatimeApi } from './wakatime';
+import { createVibesApi } from './vibes';
 
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
@@ -195,6 +196,9 @@ contextBridge.exposeInMainWorld('maestro', {
 
 	// WakaTime API (CLI check, API key validation)
 	wakatime: createWakatimeApi(),
+
+	// VIBES API (AI audit metadata integration)
+	vibes: createVibesApi(),
 });
 
 // Re-export factory functions for external consumers (e.g., tests)
@@ -270,6 +274,8 @@ export {
 	createMemoryApi,
 	// WakaTime
 	createWakatimeApi,
+	// VIBES
+	createVibesApi,
 };
 
 // Re-export types for TypeScript consumers
@@ -482,3 +488,10 @@ export type {
 	// From wakatime
 	WakatimeApi,
 } from './wakatime';
+export type {
+	// From vibes
+	VibesApi,
+	VibesCommandResult,
+	VibesInitConfig,
+	VibesLogOptions,
+} from './vibes';

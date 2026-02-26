@@ -55,6 +55,7 @@ import { registerDirectorNotesHandlers, DirectorNotesHandlerDependencies } from 
 import { registerMemoryHandlers, MemoryHandlerDependencies } from './memory-handlers';
 import { registerWakatimeHandlers } from './wakatime';
 import { getMemoryStore } from '../../memory/memory-store';
+import { registerVibesHandlers, VibesHandlerDependencies } from './vibes-handlers';
 import { AgentDetector } from '../../agents';
 import { ProcessManager } from '../../process-manager';
 import { WebServer } from '../../web-server';
@@ -101,6 +102,8 @@ export type { DirectorNotesHandlerDependencies };
 export { registerMemoryHandlers };
 export type { MemoryHandlerDependencies };
 export { registerWakatimeHandlers };
+export { registerVibesHandlers };
+export type { VibesHandlerDependencies };
 export type { AgentsHandlerDependencies };
 export type { ProcessHandlerDependencies };
 export type { PersistenceHandlerDependencies };
@@ -287,6 +290,10 @@ export function registerAllHandlers(deps: HandlerDependencies): void {
 	// Register memory handlers (Agent Experiences system)
 	registerMemoryHandlers({
 		memoryStore: getMemoryStore(),
+		settingsStore: deps.settingsStore,
+	});
+	// Register VIBES handlers for AI audit metadata integration
+	registerVibesHandlers({
 		settingsStore: deps.settingsStore,
 	});
 	// Setup logger event forwarding to renderer

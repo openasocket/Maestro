@@ -38,6 +38,7 @@ import {
 	HelpCircle,
 	AppWindow,
 } from 'lucide-react';
+import DiscoBallIcon from './icons/DiscoBallIcon';
 import { useSettings } from '../hooks';
 import type {
 	Theme,
@@ -69,6 +70,7 @@ import { AGENT_TILES } from './Wizard/screens/AgentSelectionScreen';
 import { MemorySettings } from './Settings/MemorySettings';
 import { MemoryBrowserPanel } from './Settings/MemoryBrowserPanel';
 import { useMemoryHierarchy } from '../hooks/memory/useMemoryHierarchy';
+import { VibesSettings } from './Settings/VibesSettings';
 
 // Feature flags - set to true to enable dormant features
 const FEATURE_FLAGS = {
@@ -362,7 +364,8 @@ interface SettingsModalProps {
 		| 'aicommands'
 		| 'ssh'
 		| 'memory'
-		| 'encore';
+		| 'encore'
+		| 'vibes';
 	hasNoAgents?: boolean;
 	onThemeImportError?: (message: string) => void;
 	onThemeImportSuccess?: (message: string) => void;
@@ -423,6 +426,27 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 		setUseNativeTitleBar,
 		autoHideMenuBar,
 		setAutoHideMenuBar,
+		// VIBES Metadata settings
+		vibesEnabled,
+		setVibesEnabled,
+		vibesAssuranceLevel,
+		setVibesAssuranceLevel,
+		vibesTrackedExtensions,
+		setVibesTrackedExtensions,
+		vibesExcludePatterns,
+		setVibesExcludePatterns,
+		vibesPerAgentConfig,
+		setVibesPerAgentConfig,
+		vibesMaestroOrchestrationEnabled,
+		setVibesMaestroOrchestrationEnabled,
+		vibesAutoInit,
+		setVibesAutoInit,
+		vibesCheckBinaryPath,
+		setVibesCheckBinaryPath,
+		vibesCompressReasoningThreshold,
+		setVibesCompressReasoningThreshold,
+		vibesExternalBlobThreshold,
+		setVibesExternalBlobThreshold,
 	} = useSettings();
 
 	const [activeTab, setActiveTab] = useState<
@@ -436,6 +460,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 		| 'ssh'
 		| 'memory'
 		| 'encore'
+		| 'vibes'
 	>('general');
 	const [systemFonts, setSystemFonts] = useState<string[]>([]);
 	const [customFonts, setCustomFonts] = useState<string[]>([]);
@@ -737,6 +762,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 				| 'ssh'
 				| 'memory'
 				| 'encore'
+				| 'vibes'
 			> = FEATURE_FLAGS.LLM_SETTINGS
 				? [
 						'general',
@@ -749,6 +775,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 						'ssh',
 						'memory',
 						'encore',
+						'vibes',
 					]
 				: [
 						'general',
@@ -760,6 +787,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 						'ssh',
 						'memory',
 						'encore',
+						'vibes',
 					];
 			const currentIndex = tabs.indexOf(activeTab);
 
@@ -1250,6 +1278,15 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					>
 						<FlaskConical className="w-4 h-4" />
 						{activeTab === 'encore' && <span>Encore Features</span>}
+					</button>
+					<button
+						onClick={() => setActiveTab('vibes')}
+						className={`px-4 py-4 text-sm font-bold border-b-2 ${activeTab === 'vibes' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
+						tabIndex={-1}
+						title="VIBES Metadata"
+					>
+						<DiscoBallIcon className="w-4 h-4" />
+						{activeTab === 'vibes' && <span>VIBES</span>}
 					</button>
 					<div className="flex-1 flex justify-end items-center pr-4">
 						<button onClick={onClose} tabIndex={-1}>
@@ -3626,6 +3663,34 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 										);
 									})()}
 							</div>
+						</div>
+					)}
+
+					{activeTab === 'vibes' && (
+						<div className="space-y-5">
+							<VibesSettings
+								theme={theme}
+								vibesEnabled={vibesEnabled}
+								setVibesEnabled={setVibesEnabled}
+								vibesAssuranceLevel={vibesAssuranceLevel}
+								setVibesAssuranceLevel={setVibesAssuranceLevel}
+								vibesTrackedExtensions={vibesTrackedExtensions}
+								setVibesTrackedExtensions={setVibesTrackedExtensions}
+								vibesExcludePatterns={vibesExcludePatterns}
+								setVibesExcludePatterns={setVibesExcludePatterns}
+								vibesPerAgentConfig={vibesPerAgentConfig}
+								setVibesPerAgentConfig={setVibesPerAgentConfig}
+								vibesMaestroOrchestrationEnabled={vibesMaestroOrchestrationEnabled}
+								setVibesMaestroOrchestrationEnabled={setVibesMaestroOrchestrationEnabled}
+								vibesAutoInit={vibesAutoInit}
+								setVibesAutoInit={setVibesAutoInit}
+								vibesCheckBinaryPath={vibesCheckBinaryPath}
+								setVibesCheckBinaryPath={setVibesCheckBinaryPath}
+								vibesCompressReasoningThreshold={vibesCompressReasoningThreshold}
+								setVibesCompressReasoningThreshold={setVibesCompressReasoningThreshold}
+								vibesExternalBlobThreshold={vibesExternalBlobThreshold}
+								setVibesExternalBlobThreshold={setVibesExternalBlobThreshold}
+							/>
 						</div>
 					)}
 				</div>
