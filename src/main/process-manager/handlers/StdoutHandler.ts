@@ -315,11 +315,25 @@ export class StdoutHandler {
 			}
 		}
 
+		// Reset result guard on new Codex turn so multi-turn sessions can emit results
+		if (
+			managedProcess.toolType === 'codex' &&
+			(event.raw as Record<string, unknown>)?.type === 'turn.started'
+		) {
+			managedProcess.resultEmitted = false;
+			managedProcess.codexPendingResult = undefined;
+			managedProcess.streamedText = '';
+			logger.debug('[ProcessManager] Reset result state for new Codex turn', 'ProcessManager', {
+				sessionId,
+			});
+		}
+
 		// Codex can emit multiple agent_message results in a single turn:
 		// an interim "I'm checking..." message and then the final answer.
 		// Keep the latest result text and emit once at turn completion.
+		// Uses codexPendingResult (not streamedText) to avoid clobbering reasoning accumulation.
 		if (managedProcess.toolType === 'codex' && outputParser.isResultMessage(event) && event.text) {
-			managedProcess.streamedText = event.text;
+			managedProcess.codexPendingResult = event.text;
 		}
 
 		// For Codex, flush the latest captured result when the turn completes.
@@ -329,7 +343,7 @@ export class StdoutHandler {
 			event.type === 'usage' &&
 			!managedProcess.resultEmitted
 		) {
-			const resultText = managedProcess.streamedText || '';
+			const resultText = managedProcess.codexPendingResult || '';
 			if (resultText) {
 				managedProcess.resultEmitted = true;
 				logger.debug(

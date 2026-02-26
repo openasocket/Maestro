@@ -199,8 +199,44 @@ export function useAgentExecution(deps: UseAgentExecutionDeps): UseAgentExecutio
 					let taskUsageStats: UsageStats | undefined;
 					const queryStartTime = Date.now(); // Track start time for stats
 
+					// Activity tracking for per-task stall detection.
+					// Resets on any signal: data output, thinking chunks, or tool execution.
+					// This bridges the IPC channel gap for agents like Codex whose reasoning
+					// and tool events travel on separate channels from data output.
+					let lastActivityTime = Date.now();
+					const markActivity = () => {
+						lastActivityTime = Date.now();
+					};
+
+					// Per-task activity timeout: if no activity (data, thinking, tool) for
+					// this duration, assume the agent is hung and kill it. This catches
+					// mid-execution hangs that the post-execution stall detector in
+					// useBatchProcessor cannot detect (it only triggers after task completion).
+					const ACTIVITY_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+					const activityCheckInterval = setInterval(() => {
+						const idleMs = Date.now() - lastActivityTime;
+						if (idleMs > ACTIVITY_TIMEOUT_MS) {
+							clearInterval(activityCheckInterval);
+							window.maestro.logger.log(
+								'warn',
+								'Auto Run task killed due to inactivity',
+								'AgentExecution',
+								{
+									targetSessionId,
+									idleMs,
+									agentType: session.toolType,
+								}
+							);
+							// Kill the hung process — onExit listener will fire and resolve the promise
+							window.maestro.process.kill(targetSessionId).catch(() => {});
+						}
+					}, 30_000); // Check every 30 seconds
+
 					// Array to collect cleanup functions as listeners are registered
 					const cleanupFns: (() => void)[] = [];
+
+					// Include the activity timeout in cleanup so it's cleared on normal exit
+					cleanupFns.push(() => clearInterval(activityCheckInterval));
 
 					const cleanup = () => {
 						cleanupFns.forEach((fn) => fn());
@@ -210,7 +246,29 @@ export function useAgentExecution(deps: UseAgentExecutionDeps): UseAgentExecutio
 					cleanupFns.push(
 						window.maestro.process.onData((sid: string, data: string) => {
 							if (sid === targetSessionId) {
-								responseText += data;
+								markActivity();
+								// Guard against empty heartbeat data (e.g. from future heartbeat mechanisms)
+								if (data) {
+									responseText += data;
+								}
+							}
+						})
+					);
+
+					// Listen for thinking chunks as activity signals (Codex reasoning)
+					cleanupFns.push(
+						window.maestro.process.onThinkingChunk((sid: string, _content: string) => {
+							if (sid === targetSessionId) {
+								markActivity();
+							}
+						})
+					);
+
+					// Listen for tool execution events as activity signals (Codex tool use)
+					cleanupFns.push(
+						window.maestro.process.onToolExecution((sid: string, _toolEvent) => {
+							if (sid === targetSessionId) {
+								markActivity();
 							}
 						})
 					);
@@ -620,7 +678,11 @@ export function useAgentExecution(deps: UseAgentExecutionDeps): UseAgentExecutio
 				console.log('[cancelPendingSynopsis] Killed synopsis session:', synopsisSessionId);
 			} catch (error) {
 				// Process may have already exited
-				console.warn('[cancelPendingSynopsis] Failed to kill synopsis session:', synopsisSessionId, error);
+				console.warn(
+					'[cancelPendingSynopsis] Failed to kill synopsis session:',
+					synopsisSessionId,
+					error
+				);
 			}
 		});
 
