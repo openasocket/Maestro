@@ -712,6 +712,14 @@ export interface Session {
 
 	// Symphony contribution metadata (only set for Symphony sessions)
 	symphonyMetadata?: SymphonySessionMetadata;
+
+	// Agent Experiences / Memory System
+	/** Memory system version active when this session was spawned */
+	memoryVersion?: number;
+	/** IDs of memories injected into this session's prompt */
+	injectedMemoryIds?: string[];
+	/** Active role IDs resolved for this session */
+	activeRoleIds?: string[];
 }
 
 export interface AgentConfigOption {

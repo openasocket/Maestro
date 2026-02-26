@@ -99,11 +99,10 @@ export function setupExitListener(
 							return await groupChatStorage.loadGroupChat(groupChatId);
 						} catch (firstErr) {
 							debugLog('GroupChat:Debug', ` First chat load failed, retrying after 100ms...`);
-							logger.warn(
-								'[GroupChat] Chat load failed, retrying once',
-								'ProcessListener',
-								{ error: String(firstErr), groupChatId }
-							);
+							logger.warn('[GroupChat] Chat load failed, retrying once', 'ProcessListener', {
+								error: String(firstErr),
+								groupChatId,
+							});
 							// Wait 100ms and retry once for transient I/O issues
 							await new Promise((resolve) => setTimeout(resolve, 100));
 							return await groupChatStorage.loadGroupChat(groupChatId);
@@ -429,14 +428,60 @@ export function setupExitListener(
 
 		safeSend('process:exit', sessionId, code);
 
+		// Memory job queue: enqueue effectiveness update + experience extraction
+		// Replaces individual fire-and-forget promises with prioritized background processing
+		void (async () => {
+			try {
+				// Look up session to get project path and agent type
+				const { getSessionsStore } = await import('../stores');
+				const sessions = getSessionsStore().get('sessions', []);
+				const baseId = sessionId.replace(/-ai-.+$|-terminal$|-batch-\d+$|-synopsis-\d+$/, '');
+				const session = sessions.find((s: { id: string }) => s.id === baseId);
+				const projectPath = session?.projectRoot || session?.cwd;
+
+				const { getMemoryJobQueue } = await import('../memory/memory-job-queue');
+				const queue = getMemoryJobQueue();
+
+				// Priority 1: fast effectiveness update
+				queue.enqueue({
+					type: 'effectiveness-update',
+					priority: 1,
+					payload: { sessionId, exitCode: code, projectPath },
+				});
+
+				// Priority 3: expensive experience extraction (only if we have required data)
+				if (session?.projectRoot && session?.toolType) {
+					// Check if memory system AND experience extraction are both enabled
+					const { getMemoryStore } = await import('../memory/memory-store');
+					const config = await getMemoryStore().getConfig();
+					if (config.enabled && config.enableExperienceExtraction) {
+						queue.enqueue({
+							type: 'experience-extraction',
+							priority: 3,
+							payload: {
+								sessionId,
+								projectPath: session.projectRoot,
+								agentType: session.toolType,
+								trigger: 'exit',
+							},
+						});
+					}
+				}
+			} catch {
+				// Degrade gracefully — memory operations are non-critical
+			}
+		})();
+
+		// Clean up live context queue for this session (EXP-LIVE-01)
+		import('../memory/live-context-queue')
+			.then(({ getLiveContextQueue }) => getLiveContextQueue().clearSession(sessionId))
+			.catch(() => {});
+
 		// Broadcast exit to web clients
 		const webServer = getWebServer();
 		if (webServer) {
 			// Extract base session ID from formats: {id}-ai-{tabId}, {id}-terminal, {id}-batch-{timestamp}, {id}-synopsis-{timestamp}
-			const baseSessionId = sessionId.replace(
-				/-ai-.+$|-terminal$|-batch-\d+$|-synopsis-\d+$/,
-				''
-			);
+			const baseSessionId = sessionId.replace(/-ai-.+$|-terminal$|-batch-\d+$|-synopsis-\d+$/, '');
 			webServer.broadcastToSessionClients(baseSessionId, {
 				type: 'session_exit',
 				sessionId: baseSessionId,

@@ -12,7 +12,11 @@ import { getStdinFlags } from '../../utils/spawnHelpers';
 import { generateId } from '../../utils/ids';
 import { substituteTemplateVariables } from '../../utils/templateVariables';
 import { gitService } from '../../services/git';
-import { imageOnlyDefaultPrompt, maestroSystemPrompt } from '../../../prompts';
+import {
+	imageOnlyDefaultPrompt,
+	maestroSystemPrompt,
+	memoryAwarenessDirectivesPrompt,
+} from '../../../prompts';
 
 /**
  * Default prompt used when user sends only an image without text.
@@ -975,6 +979,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 								gitBranch,
 								historyFilePath,
 								conductorProfile,
+								memoryAwarenessDirectives: memoryAwarenessDirectivesPrompt,
 							});
 
 							// Prepend system prompt to user's message
@@ -982,7 +987,8 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 						}
 
 						const { sendPromptViaStdin, sendPromptViaStdinRaw } = getStdinFlags({
-							isSshSession: !!freshSession.sshRemoteId || !!freshSession.sessionSshRemoteConfig?.enabled,
+							isSshSession:
+								!!freshSession.sshRemoteId || !!freshSession.sessionSshRemoteConfig?.enabled,
 							supportsStreamJsonInput: agent.capabilities?.supportsStreamJsonInput ?? false,
 						});
 

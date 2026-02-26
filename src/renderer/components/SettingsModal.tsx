@@ -66,6 +66,9 @@ import { SshRemotesSection } from './Settings/SshRemotesSection';
 import { SshRemoteIgnoreSection } from './Settings/SshRemoteIgnoreSection';
 import { AgentConfigPanel } from './shared/AgentConfigPanel';
 import { AGENT_TILES } from './Wizard/screens/AgentSelectionScreen';
+import { MemorySettings } from './Settings/MemorySettings';
+import { MemoryBrowserPanel } from './Settings/MemoryBrowserPanel';
+import { useMemoryHierarchy } from '../hooks/memory/useMemoryHierarchy';
 
 // Feature flags - set to true to enable dormant features
 const FEATURE_FLAGS = {
@@ -358,10 +361,17 @@ interface SettingsModalProps {
 		| 'notifications'
 		| 'aicommands'
 		| 'ssh'
+		| 'memory'
 		| 'encore';
 	hasNoAgents?: boolean;
 	onThemeImportError?: (message: string) => void;
 	onThemeImportSuccess?: (message: string) => void;
+	/** Active session's working directory for project-scoped memories */
+	activeProjectPath?: string | null;
+	/** Active agent session ID for per-agent analysis */
+	activeAgentId?: string | null;
+	/** Active agent type (e.g. 'claude-code') */
+	activeAgentType?: string | null;
 }
 
 export const SettingsModal = memo(function SettingsModal(props: SettingsModalProps) {
@@ -424,6 +434,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 		| 'notifications'
 		| 'aicommands'
 		| 'ssh'
+		| 'memory'
 		| 'encore'
 	>('general');
 	const [systemFonts, setSystemFonts] = useState<string[]>([]);
@@ -450,6 +461,10 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 	const [syncMigrating, setSyncMigrating] = useState(false);
 	const [syncError, setSyncError] = useState<string | null>(null);
 	const [syncMigratedCount, setSyncMigratedCount] = useState<number | null>(null);
+
+	// Memory tab state — derive project path from active session prop
+	const memoryProjectPath = props.activeProjectPath ?? null;
+	const memoryHierarchy = useMemoryHierarchy();
 
 	// Stats data management state
 	const [statsDbSize, setStatsDbSize] = useState<number | null>(null);
@@ -720,6 +735,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 				| 'notifications'
 				| 'aicommands'
 				| 'ssh'
+				| 'memory'
 				| 'encore'
 			> = FEATURE_FLAGS.LLM_SETTINGS
 				? [
@@ -731,6 +747,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 						'notifications',
 						'aicommands',
 						'ssh',
+						'memory',
 						'encore',
 					]
 				: [
@@ -741,6 +758,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 						'notifications',
 						'aicommands',
 						'ssh',
+						'memory',
 						'encore',
 					];
 			const currentIndex = tabs.indexOf(activeTab);
@@ -1211,6 +1229,15 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					>
 						<Server className="w-4 h-4" />
 						{activeTab === 'ssh' && <span>SSH Hosts</span>}
+					</button>
+					<button
+						onClick={() => setActiveTab('memory')}
+						className={`px-4 py-4 text-sm font-bold border-b-2 ${activeTab === 'memory' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
+						tabIndex={-1}
+						title="Memory"
+					>
+						<Brain className="w-4 h-4" />
+						{activeTab === 'memory' && <span>Memory</span>}
 					</button>
 					<button
 						onClick={() => setActiveTab('encore')}
@@ -3174,6 +3201,24 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 								onIgnorePatternsChange={setSshRemoteIgnorePatterns}
 								honorGitignore={sshRemoteHonorGitignore}
 								onHonorGitignoreChange={setSshRemoteHonorGitignore}
+							/>
+						</div>
+					)}
+
+					{activeTab === 'memory' && (
+						<div className="space-y-6">
+							<MemorySettings
+								theme={theme}
+								projectPath={memoryProjectPath}
+								onHierarchyChange={memoryHierarchy.refresh}
+								hierarchyRoleCount={memoryHierarchy.roles.length}
+								activeAgentId={props.activeAgentId}
+								activeAgentType={props.activeAgentType}
+							/>
+							<MemoryBrowserPanel
+								theme={theme}
+								projectPath={memoryProjectPath}
+								hierarchy={memoryHierarchy}
 							/>
 						</div>
 					)}

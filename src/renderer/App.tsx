@@ -134,7 +134,11 @@ import { ToastContainer } from './components/Toast';
 import { gitService } from './services/git';
 
 // Import prompts and synopsis parsing
-import { autorunSynopsisPrompt } from '../prompts';
+import {
+	autorunSynopsisPrompt,
+	maestroSystemPrompt,
+	memoryAwarenessDirectivesPrompt,
+} from '../prompts';
 import { parseSynopsis } from '../shared/synopsis';
 import { formatRelativeTime } from '../shared/formatters';
 
@@ -1241,6 +1245,300 @@ function MaestroConsoleInner() {
 		activeSessionIdRef,
 		setActiveSessionId,
 	});
+
+	// --- STABLE HANDLERS FOR APP AGENT MODALS ---
+
+	// Sync autorun stats from server (for new device installations)
+	const handleSyncAutoRunStats = useCallback(
+		(stats: {
+			cumulativeTimeMs: number;
+			totalRuns: number;
+			currentBadgeLevel: number;
+			longestRunMs: number;
+			longestRunTimestamp: number;
+		}) => {
+			setAutoRunStats({
+				...autoRunStats,
+				cumulativeTimeMs: stats.cumulativeTimeMs,
+				totalRuns: stats.totalRuns,
+				currentBadgeLevel: stats.currentBadgeLevel,
+				longestRunMs: stats.longestRunMs,
+				longestRunTimestamp: stats.longestRunTimestamp,
+				// Also update badge tracking to match synced level
+				lastBadgeUnlockLevel: stats.currentBadgeLevel,
+				lastAcknowledgedBadgeLevel: stats.currentBadgeLevel,
+			});
+		},
+		[autoRunStats, setAutoRunStats]
+	);
+
+	// MergeSessionModal handlers
+	const handleCloseMergeSession = useCallback(() => {
+		setMergeSessionModalOpen(false);
+		resetMerge();
+	}, [resetMerge]);
+
+	const handleMerge = useCallback(
+		async (targetSessionId: string, targetTabId: string | undefined, options: MergeOptions) => {
+			// Close the modal - merge will show in the input area overlay
+			setMergeSessionModalOpen(false);
+
+			// Execute merge using the hook (callbacks handle toasts and navigation)
+			const result = await executeMerge(
+				activeSession!,
+				activeSession!.activeTabId,
+				targetSessionId,
+				targetTabId,
+				options
+			);
+
+			if (!result.success) {
+				notifyToast({
+					type: 'error',
+					title: 'Merge Failed',
+					message: result.error || 'Failed to merge contexts',
+				});
+			}
+			// Note: Success toasts are handled by onSessionCreated (for new sessions)
+			// and onMergeComplete (for merging into existing sessions) callbacks
+
+			return result;
+		},
+		[activeSession, executeMerge]
+	);
+
+	// TransferProgressModal handlers
+	const handleCancelTransfer = useCallback(() => {
+		cancelTransfer();
+		setTransferSourceAgent(null);
+		setTransferTargetAgent(null);
+	}, [cancelTransfer]);
+
+	const handleCompleteTransfer = useCallback(() => {
+		resetTransfer();
+		setTransferSourceAgent(null);
+		setTransferTargetAgent(null);
+	}, [resetTransfer]);
+
+	const handleSendToAgent = useCallback(
+		async (targetSessionId: string, options: SendToAgentOptions) => {
+			// Find the target session
+			const targetSession = sessions.find((s) => s.id === targetSessionId);
+			if (!targetSession) {
+				return { success: false, error: 'Target session not found' };
+			}
+
+			// Store source and target agents for progress modal display
+			setTransferSourceAgent(activeSession!.toolType);
+			setTransferTargetAgent(targetSession.toolType);
+
+			// Close the selection modal - progress modal will take over
+			setSendToAgentModalOpen(false);
+
+			// Get source tab context
+			const sourceTab = activeSession!.aiTabs.find((t) => t.id === activeSession!.activeTabId);
+			if (!sourceTab) {
+				return { success: false, error: 'Source tab not found' };
+			}
+
+			// Format the context as text to be sent to the agent
+			// Only include user messages and AI responses, not system messages
+			const formattedContext = sourceTab.logs
+				.filter(
+					(log) =>
+						log.text &&
+						log.text.trim() &&
+						(log.source === 'user' || log.source === 'ai' || log.source === 'stdout')
+				)
+				.map((log) => {
+					const role = log.source === 'user' ? 'User' : 'Assistant';
+					return `${role}: ${log.text}`;
+				})
+				.join('\n\n');
+
+			const sourceName =
+				activeSession!.name || activeSession!.projectRoot.split('/').pop() || 'Unknown';
+			const sourceAgentName = activeSession!.toolType;
+
+			// Create the context message to be sent directly to the agent
+			const contextMessage = formattedContext
+				? `# Context from Previous Session
+
+The following is a conversation from another session ("${sourceName}" using ${sourceAgentName}). Review this context to understand the prior work and decisions made.
+
+---
+
+${formattedContext}
+
+---
+
+# Your Task
+
+You are taking over this conversation. Based on the context above, provide a brief summary of where things left off and ask what the user would like to focus on next.`
+				: 'No context available from the previous session.';
+
+			// Transfer context to the target session's active tab
+			// Create a new tab in the target session and immediately send context to agent
+			const newTabId = `tab-${Date.now()}`;
+			const transferNotice: LogEntry = {
+				id: `transfer-notice-${Date.now()}`,
+				timestamp: Date.now(),
+				source: 'system',
+				text: `Context transferred from "${sourceName}" (${sourceAgentName})${
+					options.groomContext ? ' - cleaned to reduce size' : ''
+				}`,
+			};
+
+			// Create user message entry for the context being sent
+			const userContextMessage: LogEntry = {
+				id: `user-context-${Date.now()}`,
+				timestamp: Date.now(),
+				source: 'user',
+				text: contextMessage,
+			};
+
+			const newTab: AITab = {
+				id: newTabId,
+				name: `From: ${sourceName}`,
+				logs: [transferNotice, userContextMessage],
+				agentSessionId: null,
+				starred: false,
+				inputValue: '',
+				stagedImages: [],
+				createdAt: Date.now(),
+				state: 'busy', // Start in busy state since we're spawning immediately
+				thinkingStartTime: Date.now(),
+				awaitingSessionId: true, // Mark as awaiting session ID
+			};
+
+			// Add the new tab to the target session and set it as active
+			setSessions((prev) =>
+				prev.map((s) => {
+					if (s.id === targetSessionId) {
+						return {
+							...s,
+							state: 'busy',
+							busySource: 'ai',
+							thinkingStartTime: Date.now(),
+							aiTabs: [...s.aiTabs, newTab],
+							activeTabId: newTabId,
+						};
+					}
+					return s;
+				})
+			);
+
+			// Navigate to the target session
+			setActiveSessionId(targetSessionId);
+
+			// Calculate estimated tokens for the toast
+			const estimatedTokens = sourceTab.logs
+				.filter((log) => log.text && log.source !== 'system')
+				.reduce((sum, log) => sum + Math.round((log.text?.length || 0) / 4), 0);
+			const tokenInfo = estimatedTokens > 0 ? ` (~${estimatedTokens.toLocaleString()} tokens)` : '';
+
+			// Show success toast
+			notifyToast({
+				type: 'success',
+				title: 'Context Sent',
+				message: `"${sourceName}" → "${targetSession.name}"${tokenInfo}`,
+				sessionId: targetSessionId,
+				tabId: newTabId,
+			});
+
+			// Reset transfer state
+			resetTransfer();
+			setTransferSourceAgent(null);
+			setTransferTargetAgent(null);
+
+			// Spawn the agent with the context - do this after state updates
+			(async () => {
+				try {
+					// Get agent configuration
+					const agent = await window.maestro.agents.get(targetSession.toolType);
+					if (!agent) throw new Error(`${targetSession.toolType} agent not found`);
+
+					const baseArgs = agent.args ?? [];
+					const commandToUse = agent.path || agent.command;
+
+					// Build the full prompt with Maestro system prompt for new sessions
+					let effectivePrompt = contextMessage;
+
+					// Get git branch for template substitution
+					let gitBranch: string | undefined;
+					if (targetSession.isGitRepo) {
+						try {
+							const status = await gitService.getStatus(targetSession.cwd);
+							gitBranch = status.branch;
+						} catch {
+							// Ignore git errors
+						}
+					}
+
+					// Prepend Maestro system prompt since this is a new session
+					if (maestroSystemPrompt) {
+						const substitutedSystemPrompt = substituteTemplateVariables(maestroSystemPrompt, {
+							session: targetSession,
+							gitBranch,
+							conductorProfile,
+							memoryAwarenessDirectives: memoryAwarenessDirectivesPrompt,
+						});
+						effectivePrompt = `${substitutedSystemPrompt}\n\n---\n\n# User Request\n\n${effectivePrompt}`;
+					}
+
+					// Spawn agent
+					const spawnSessionId = `${targetSessionId}-ai-${newTabId}`;
+					await window.maestro.process.spawn({
+						sessionId: spawnSessionId,
+						toolType: targetSession.toolType,
+						cwd: targetSession.cwd,
+						command: commandToUse,
+						args: [...baseArgs],
+						prompt: effectivePrompt,
+						// Per-session config overrides (if set)
+						sessionCustomPath: targetSession.customPath,
+						sessionCustomArgs: targetSession.customArgs,
+						sessionCustomEnvVars: targetSession.customEnvVars,
+						sessionCustomModel: targetSession.customModel,
+						sessionCustomContextWindow: targetSession.customContextWindow,
+						sessionSshRemoteConfig: targetSession.sessionSshRemoteConfig,
+					});
+				} catch (error) {
+					console.error('Failed to spawn agent for context transfer:', error);
+					const errorLog: LogEntry = {
+						id: `error-${Date.now()}`,
+						timestamp: Date.now(),
+						source: 'system',
+						text: `Error: Failed to spawn agent - ${(error as Error).message}`,
+					};
+					setSessions((prev) =>
+						prev.map((s) => {
+							if (s.id !== targetSessionId) return s;
+							return {
+								...s,
+								state: 'idle',
+								busySource: undefined,
+								thinkingStartTime: undefined,
+								aiTabs: s.aiTabs.map((tab) =>
+									tab.id === newTabId
+										? {
+												...tab,
+												state: 'idle' as const,
+												thinkingStartTime: undefined,
+												logs: [...tab.logs, errorLog],
+											}
+										: tab
+								),
+							};
+						})
+					);
+				}
+			})();
+
+			return { success: true, newSessionId: targetSessionId, newTabId };
+		},
+		[activeSession, sessions, setSessions, setActiveSessionId, resetTransfer]
+	);
 
 	// Summarize & Continue hook for context compaction (non-blocking, per-tab)
 	const {
@@ -6455,6 +6753,9 @@ function MaestroConsoleInner() {
 							hasNoAgents={hasNoAgents}
 							onThemeImportError={(msg) => setFlashNotification(msg)}
 							onThemeImportSuccess={(msg) => setFlashNotification(msg)}
+							activeProjectPath={activeSession?.cwd}
+							activeAgentId={activeSession?.id}
+							activeAgentType={activeSession?.toolType}
 						/>
 					</Suspense>
 				)}

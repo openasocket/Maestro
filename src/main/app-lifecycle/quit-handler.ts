@@ -184,6 +184,16 @@ export function createQuitHandler(deps: QuitHandlerDependencies): QuitHandler {
 			logger.error(`Error stopping web server: ${err}`, 'Shutdown');
 		});
 
+		// Shutdown cross-agent memory broadcaster (EXP-LIVE-04)
+		import('../memory/live-context-broadcaster')
+			.then(({ shutdownLiveBroadcaster }) => shutdownLiveBroadcaster())
+			.catch(() => {});
+
+		// Shutdown memory job queue (EXP-PERF-02)
+		import('../memory/memory-job-queue')
+			.then(({ shutdownMemoryJobQueue }) => shutdownMemoryJobQueue())
+			.catch(() => {});
+
 		// Close stats database
 		logger.info('Closing stats database', 'Shutdown');
 		closeStatsDB();

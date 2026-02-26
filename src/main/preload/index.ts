@@ -49,6 +49,7 @@ import { createAgentsApi } from './agents';
 import { createSymphonyApi } from './symphony';
 import { createTabNamingApi } from './tabNaming';
 import { createDirectorNotesApi } from './directorNotes';
+import { createMemoryApi } from './memory';
 import { createWakatimeApi } from './wakatime';
 
 // Expose protected methods that allow the renderer process to use
@@ -189,6 +190,9 @@ contextBridge.exposeInMainWorld('maestro', {
 	// Director's Notes API (unified history + synopsis)
 	directorNotes: createDirectorNotesApi(),
 
+	// Agent Experiences Memory API (roles, personas, skills, memories)
+	memory: createMemoryApi(),
+
 	// WakaTime API (CLI check, API key validation)
 	wakatime: createWakatimeApi(),
 });
@@ -262,6 +266,8 @@ export {
 	createTabNamingApi,
 	// Director's Notes
 	createDirectorNotesApi,
+	// Memory (Agent Experiences)
+	createMemoryApi,
 	// WakaTime
 	createWakatimeApi,
 };
@@ -468,6 +474,10 @@ export type {
 	SynopsisResult,
 	SynopsisStats,
 } from './directorNotes';
+export type {
+	// From memory
+	MemoryApi,
+} from './memory';
 export type {
 	// From wakatime
 	WakatimeApi,

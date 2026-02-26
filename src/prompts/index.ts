@@ -48,4 +48,10 @@ export {
 
 	// Director's Notes
 	directorNotesPrompt,
+
+	// Experience extraction
+	experienceExtractionPrompt,
+
+	// Memory awareness directives
+	memoryAwarenessDirectivesPrompt,
 } from '../generated/prompts';
