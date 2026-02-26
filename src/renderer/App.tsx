@@ -3468,6 +3468,22 @@ You are taking over this conversation. Based on the context above, provide a bri
 		[sessions]
 	);
 
+	// PERF: Memoize thinkingItems (session + tab pairs) for ThinkingStatusPill.
+	const thinkingItems: import('./types').ThinkingItem[] = useMemo(() => {
+		const items: import('./types').ThinkingItem[] = [];
+		for (const session of thinkingSessions) {
+			const busyTabs = session.aiTabs?.filter((t) => t.state === 'busy') ?? [];
+			if (busyTabs.length > 0) {
+				for (const tab of busyTabs) {
+					items.push({ session, tab });
+				}
+			} else {
+				items.push({ session, tab: null });
+			}
+		}
+		return items;
+	}, [thinkingSessions]);
+
 	// Images are stored per-tab and only used in AI mode
 	// Get staged images from the active tab
 	// PERF: Use memoized activeTab instead of calling getActiveTab again
@@ -11214,7 +11230,7 @@ You are taking over this conversation. Based on the context above, provide a bri
 		agentSessionsOpen,
 		activeAgentSessionId,
 		activeSession,
-		thinkingSessions,
+		thinkingItems,
 		theme,
 		fontFamily,
 		isMobileLandscape,
@@ -11565,6 +11581,10 @@ You are taking over this conversation. Based on the context above, provide a bri
 		// Context warning thresholds
 		contextWarningYellowThreshold: contextManagementSettings.contextWarningYellowThreshold,
 		contextWarningRedThreshold: contextManagementSettings.contextWarningRedThreshold,
+
+		// VIBES
+		vibesEnabled: settings.vibesEnabled,
+		vibesAssuranceLevel: settings.vibesAssuranceLevel,
 
 		// Ref
 		sidebarContainerRef,

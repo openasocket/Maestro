@@ -32,6 +32,8 @@ import type {
 	DirectorNotesSettings,
 	EncoreFeatureFlags,
 } from '../types';
+import type { VibesAssuranceLevel } from '../../shared/vibes-types';
+import { VIBES_SETTINGS_DEFAULTS } from '../../shared/vibes-settings';
 import { DEFAULT_CUSTOM_THEME_COLORS } from '../constants/themes';
 import { DEFAULT_SHORTCUTS, TAB_SHORTCUTS, FIXED_SHORTCUTS } from '../constants/shortcuts';
 import { getLevelIndex } from '../constants/keyboardMastery';
@@ -249,6 +251,17 @@ export interface SettingsStoreState {
 	wakatimeEnabled: boolean;
 	useNativeTitleBar: boolean;
 	autoHideMenuBar: boolean;
+	// VIBES Metadata settings
+	vibesEnabled: boolean;
+	vibesAssuranceLevel: VibesAssuranceLevel;
+	vibesTrackedExtensions: string[];
+	vibesExcludePatterns: string[];
+	vibesPerAgentConfig: Record<string, { enabled: boolean }>;
+	vibesMaestroOrchestrationEnabled: boolean;
+	vibesAutoInit: boolean;
+	vibesCheckBinaryPath: string;
+	vibesCompressReasoningThreshold: number;
+	vibesExternalBlobThreshold: number;
 }
 
 export interface SettingsStoreActions {
@@ -316,6 +329,17 @@ export interface SettingsStoreActions {
 	setWakatimeEnabled: (value: boolean) => void;
 	setUseNativeTitleBar: (value: boolean) => void;
 	setAutoHideMenuBar: (value: boolean) => void;
+	// VIBES setters
+	setVibesEnabled: (value: boolean) => void;
+	setVibesAssuranceLevel: (value: VibesAssuranceLevel) => void;
+	setVibesTrackedExtensions: (value: string[]) => void;
+	setVibesExcludePatterns: (value: string[]) => void;
+	setVibesPerAgentConfig: (value: Record<string, { enabled: boolean }>) => void;
+	setVibesMaestroOrchestrationEnabled: (value: boolean) => void;
+	setVibesAutoInit: (value: boolean) => void;
+	setVibesCheckBinaryPath: (value: string) => void;
+	setVibesCompressReasoningThreshold: (value: number) => void;
+	setVibesExternalBlobThreshold: (value: number) => void;
 
 	// Async setters
 	setLogLevel: (value: string) => Promise<void>;
@@ -459,6 +483,17 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => ({
 	wakatimeEnabled: false,
 	useNativeTitleBar: false,
 	autoHideMenuBar: false,
+	// VIBES defaults
+	vibesEnabled: VIBES_SETTINGS_DEFAULTS.vibesEnabled,
+	vibesAssuranceLevel: VIBES_SETTINGS_DEFAULTS.vibesAssuranceLevel,
+	vibesTrackedExtensions: VIBES_SETTINGS_DEFAULTS.vibesTrackedExtensions,
+	vibesExcludePatterns: VIBES_SETTINGS_DEFAULTS.vibesExcludePatterns,
+	vibesPerAgentConfig: VIBES_SETTINGS_DEFAULTS.vibesPerAgentConfig,
+	vibesMaestroOrchestrationEnabled: VIBES_SETTINGS_DEFAULTS.vibesMaestroOrchestrationEnabled,
+	vibesAutoInit: VIBES_SETTINGS_DEFAULTS.vibesAutoInit,
+	vibesCheckBinaryPath: VIBES_SETTINGS_DEFAULTS.vibesCheckBinaryPath,
+	vibesCompressReasoningThreshold: VIBES_SETTINGS_DEFAULTS.vibesCompressReasoningThreshold,
+	vibesExternalBlobThreshold: VIBES_SETTINGS_DEFAULTS.vibesExternalBlobThreshold,
 
 	// ============================================================================
 	// Simple Setters
@@ -785,6 +820,48 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => ({
 	setAutoHideMenuBar: (value) => {
 		set({ autoHideMenuBar: value });
 		window.maestro.settings.set('autoHideMenuBar', value);
+	},
+
+	// VIBES setters
+	setVibesEnabled: (value) => {
+		set({ vibesEnabled: value });
+		window.maestro.settings.set('vibesEnabled', value);
+	},
+	setVibesAssuranceLevel: (value) => {
+		set({ vibesAssuranceLevel: value });
+		window.maestro.settings.set('vibesAssuranceLevel', value);
+	},
+	setVibesTrackedExtensions: (value) => {
+		set({ vibesTrackedExtensions: value });
+		window.maestro.settings.set('vibesTrackedExtensions', value);
+	},
+	setVibesExcludePatterns: (value) => {
+		set({ vibesExcludePatterns: value });
+		window.maestro.settings.set('vibesExcludePatterns', value);
+	},
+	setVibesPerAgentConfig: (value) => {
+		set({ vibesPerAgentConfig: value });
+		window.maestro.settings.set('vibesPerAgentConfig', value);
+	},
+	setVibesMaestroOrchestrationEnabled: (value) => {
+		set({ vibesMaestroOrchestrationEnabled: value });
+		window.maestro.settings.set('vibesMaestroOrchestrationEnabled', value);
+	},
+	setVibesAutoInit: (value) => {
+		set({ vibesAutoInit: value });
+		window.maestro.settings.set('vibesAutoInit', value);
+	},
+	setVibesCheckBinaryPath: (value) => {
+		set({ vibesCheckBinaryPath: value });
+		window.maestro.settings.set('vibesCheckBinaryPath', value);
+	},
+	setVibesCompressReasoningThreshold: (value) => {
+		set({ vibesCompressReasoningThreshold: value });
+		window.maestro.settings.set('vibesCompressReasoningThreshold', value);
+	},
+	setVibesExternalBlobThreshold: (value) => {
+		set({ vibesExternalBlobThreshold: value });
+		window.maestro.settings.set('vibesExternalBlobThreshold', value);
 	},
 
 	// ============================================================================
@@ -1670,6 +1747,35 @@ export async function loadAllSettings(): Promise<void> {
 		if (allSettings['autoHideMenuBar'] !== undefined)
 			patch.autoHideMenuBar = allSettings['autoHideMenuBar'] as boolean;
 
+		// --- VIBES settings ---
+		if (allSettings['vibesEnabled'] !== undefined)
+			patch.vibesEnabled = allSettings['vibesEnabled'] as boolean;
+		if (allSettings['vibesAssuranceLevel'] !== undefined)
+			patch.vibesAssuranceLevel = allSettings['vibesAssuranceLevel'] as VibesAssuranceLevel;
+		if (allSettings['vibesTrackedExtensions'] !== undefined)
+			patch.vibesTrackedExtensions = allSettings['vibesTrackedExtensions'] as string[];
+		if (allSettings['vibesExcludePatterns'] !== undefined)
+			patch.vibesExcludePatterns = allSettings['vibesExcludePatterns'] as string[];
+		if (allSettings['vibesPerAgentConfig'] !== undefined)
+			patch.vibesPerAgentConfig = allSettings['vibesPerAgentConfig'] as Record<
+				string,
+				{ enabled: boolean }
+			>;
+		if (allSettings['vibesMaestroOrchestrationEnabled'] !== undefined)
+			patch.vibesMaestroOrchestrationEnabled = allSettings[
+				'vibesMaestroOrchestrationEnabled'
+			] as boolean;
+		if (allSettings['vibesAutoInit'] !== undefined)
+			patch.vibesAutoInit = allSettings['vibesAutoInit'] as boolean;
+		if (allSettings['vibesCheckBinaryPath'] !== undefined)
+			patch.vibesCheckBinaryPath = allSettings['vibesCheckBinaryPath'] as string;
+		if (allSettings['vibesCompressReasoningThreshold'] !== undefined)
+			patch.vibesCompressReasoningThreshold = allSettings[
+				'vibesCompressReasoningThreshold'
+			] as number;
+		if (allSettings['vibesExternalBlobThreshold'] !== undefined)
+			patch.vibesExternalBlobThreshold = allSettings['vibesExternalBlobThreshold'] as number;
+
 		// Apply the entire patch in one setState call
 		patch.settingsLoaded = true;
 		useSettingsStore.setState(patch);
@@ -1780,5 +1886,15 @@ export function getSettingsActions() {
 		setWakatimeEnabled: state.setWakatimeEnabled,
 		setUseNativeTitleBar: state.setUseNativeTitleBar,
 		setAutoHideMenuBar: state.setAutoHideMenuBar,
+		setVibesEnabled: state.setVibesEnabled,
+		setVibesAssuranceLevel: state.setVibesAssuranceLevel,
+		setVibesTrackedExtensions: state.setVibesTrackedExtensions,
+		setVibesExcludePatterns: state.setVibesExcludePatterns,
+		setVibesPerAgentConfig: state.setVibesPerAgentConfig,
+		setVibesMaestroOrchestrationEnabled: state.setVibesMaestroOrchestrationEnabled,
+		setVibesAutoInit: state.setVibesAutoInit,
+		setVibesCheckBinaryPath: state.setVibesCheckBinaryPath,
+		setVibesCompressReasoningThreshold: state.setVibesCompressReasoningThreshold,
+		setVibesExternalBlobThreshold: state.setVibesExternalBlobThreshold,
 	};
 }
