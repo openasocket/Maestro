@@ -182,6 +182,26 @@ export class ChildProcessSpawner {
 			finalArgs = args;
 		}
 
+		// Debug: Log Gemini CLI spawn details to diagnose "No input provided via stdin" error
+		if (toolType === 'gemini-cli') {
+			console.log(
+				`[Gemini:Debug] SPAWN — prompt: ${prompt ? `"${prompt.substring(0, 100)}..."` : 'NONE'}`,
+				{
+					hasPrompt: !!prompt,
+					promptLength: prompt?.length,
+					promptViaStdin,
+					promptAddedToArgs,
+					hasPromptArgs: !!promptArgs,
+					sendPromptViaStdin: !!sendPromptViaStdin,
+					sendPromptViaStdinRaw: !!sendPromptViaStdinRaw,
+					argsHaveInputStreamJson,
+					finalArgsCount: finalArgs.length,
+					finalArgsPreview: finalArgs.join(' ').substring(0, 300),
+					command,
+				}
+			);
+		}
+
 		// Log spawn config
 		const spawnConfigLogFn = isWindows ? logger.info.bind(logger) : logger.debug.bind(logger);
 		spawnConfigLogFn('[ProcessManager] spawn() config', 'ProcessManager', {
@@ -547,6 +567,25 @@ export class ChildProcessSpawner {
 					sessionId,
 				});
 				childProcess.stdin?.end();
+			}
+
+			// Debug: Log stdin handling path for Gemini CLI
+			if (toolType === 'gemini-cli') {
+				const stdinPath = config.sshStdinScript
+					? 'ssh-script'
+					: config.sendPromptViaStdinRaw && effectivePrompt
+						? 'raw-stdin'
+						: isStreamJsonMode && effectivePrompt && !promptAddedToArgs
+							? 'stream-json-stdin'
+							: isBatchMode
+								? 'batch-close'
+								: 'none';
+				console.log(`[Gemini:Debug] STDIN handling path: ${stdinPath}`, {
+					isStreamJsonMode,
+					isBatchMode,
+					promptAddedToArgs,
+					hasEffectivePrompt: !!effectivePrompt,
+				});
 			}
 
 			return { pid: childProcess.pid || -1, success: true };

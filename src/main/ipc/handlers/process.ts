@@ -127,6 +127,20 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 				const processManager = requireProcessManager(getProcessManager);
 				const agentDetector = requireDependency(getAgentDetector, 'Agent detector');
 
+				// Debug: Log Gemini CLI spawn config at IPC entry point
+				if (config.toolType === 'gemini-cli') {
+					console.log(`[Gemini:Debug] IPC process:spawn received`, {
+						hasPrompt: !!config.prompt,
+						promptLength: config.prompt?.length,
+						promptPreview: config.prompt?.substring(0, 100),
+						hasArgs: !!config.args?.length,
+						argsPreview: config.args?.join(' ').substring(0, 200),
+						sessionId: config.sessionId,
+						command: config.command,
+						hasAgentSessionId: !!config.agentSessionId,
+					});
+				}
+
 				// Get agent definition to access config options and argument builders
 				const agent = await agentDetector.getAgent(config.toolType);
 				// Use INFO level on Windows for better visibility in logs
