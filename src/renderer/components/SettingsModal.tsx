@@ -3471,7 +3471,8 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 																		const isBeta =
 																			tile.id === 'codex' ||
 																			tile.id === 'opencode' ||
-																			tile.id === 'factory-droid';
+																			tile.id === 'factory-droid' ||
+																			tile.id === 'gemini-cli';
 																		return (
 																			<option key={tile.id} value={tile.id}>
 																				{tile.name}

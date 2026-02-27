@@ -22,11 +22,7 @@ import fs from 'fs/promises';
 import { logger } from '../../utils/logger';
 import { withIpcErrorLogging } from '../../utils/ipcHandler';
 import { isWebContentsAvailable } from '../../utils/safe-send';
-import {
-	getSessionStorage,
-	hasSessionStorage,
-	getAllSessionStorages,
-} from '../../agents';
+import { getSessionStorage, hasSessionStorage, getAllSessionStorages } from '../../agents';
 import { calculateClaudeCost } from '../../utils/pricing';
 import {
 	loadGlobalStatsCache,
@@ -46,6 +42,7 @@ import type {
 } from '../../agents';
 import type { GlobalAgentStats, ProviderStats, SshRemoteConfig } from '../../../shared/types';
 import type { MaestroSettings } from './persistence';
+import type { GeminiSessionStatsData } from '../../stores/types';
 
 // Re-export for backwards compatibility
 export type { GlobalAgentStats, ProviderStats };
@@ -74,10 +71,23 @@ export interface AgentSessionsHandlerDependencies {
 	agentSessionOriginsStore?: Store<AgentSessionOriginsData>;
 	/** Settings store for SSH remote configuration lookup */
 	settingsStore?: Store<MaestroSettings>;
+	/** Gemini session stats store for persisting live token usage */
+	geminiSessionStatsStore?: Store<GeminiSessionStatsData>;
 }
 
 // Module-level reference to settings store (set during registration)
 let agentSessionsSettingsStore: Store<MaestroSettings> | undefined;
+
+// Module-level reference to gemini session stats store (set during registration)
+let geminiStatsStore: Store<GeminiSessionStatsData> | undefined;
+
+/**
+ * Get the Gemini session stats store instance.
+ * Returns undefined if not yet initialized.
+ */
+export function getGeminiStatsStore(): Store<GeminiSessionStatsData> | undefined {
+	return geminiStatsStore;
+}
 
 /**
  * Get SSH remote configuration by ID from the settings store.
@@ -194,6 +204,126 @@ function parseCodexSessionContent(
 		cacheReadTokens: 0,
 		cacheCreationTokens: 0,
 		cachedInputTokens: cachedTokens,
+		sizeBytes,
+	};
+}
+
+/**
+ * Coerce an unknown value into a finite number
+ */
+function asNumber(value: unknown): number {
+	if (typeof value === 'number' && Number.isFinite(value)) {
+		return value;
+	}
+	if (typeof value === 'string') {
+		const parsed = Number(value);
+		return Number.isFinite(parsed) ? parsed : 0;
+	}
+	return 0;
+}
+
+interface GeminiTokenAccumulator {
+	input: number;
+	output: number;
+	cached: number;
+}
+
+/**
+ * Extract Gemini token usage from any metadata object
+ */
+function accumulateGeminiTokens(source: unknown): GeminiTokenAccumulator {
+	if (!source || typeof source !== 'object') {
+		return { input: 0, output: 0, cached: 0 };
+	}
+	const obj = source as Record<string, unknown>;
+	const input =
+		asNumber(obj.input) ||
+		asNumber(obj.prompt) ||
+		asNumber(obj.promptTokens) ||
+		asNumber(obj.inputTokens) ||
+		asNumber(obj.input_tokens);
+	const output =
+		asNumber(obj.output) ||
+		asNumber(obj.completion) ||
+		asNumber(obj.outputTokens) ||
+		asNumber(obj.output_tokens) ||
+		asNumber(obj.responseTokens);
+	const cached =
+		asNumber(obj.cached) ||
+		asNumber(obj.cacheRead) ||
+		asNumber(obj.cache_read) ||
+		asNumber(obj.cachedInputTokens) ||
+		asNumber(obj.cached_input_tokens);
+	return { input, output, cached };
+}
+
+/**
+ * Parse a Gemini CLI session file and extract stats.
+ * When message-level token extraction yields 0 (which is typical for Gemini
+ * session files that don't embed token data), falls back to persistedStats
+ * captured during live execution.
+ *
+ * @internal Exported for testing only
+ */
+export function parseGeminiSessionContent(
+	content: string,
+	sizeBytes: number,
+	persistedStats?: {
+		inputTokens: number;
+		outputTokens: number;
+		cacheReadTokens: number;
+		reasoningTokens: number;
+	}
+): Omit<CachedSessionStats, 'fileMtimeMs'> {
+	let messageCount = 0;
+	let inputTokens = 0;
+	let outputTokens = 0;
+	let cachedInputTokens = 0;
+
+	try {
+		const session = JSON.parse(content) as {
+			messages?: Array<{
+				type?: string;
+				tokens?: unknown;
+				tokenUsage?: unknown;
+				tokenCounts?: unknown;
+				metadata?: Record<string, unknown>;
+			}>;
+		};
+		const messages = Array.isArray(session.messages) ? session.messages : [];
+
+		for (const msg of messages) {
+			const type = typeof msg.type === 'string' ? msg.type.toLowerCase() : '';
+			if (type === 'user' || type === 'gemini' || type === 'assistant' || type === 'human') {
+				messageCount++;
+			}
+
+			const tokenSources = [msg.tokens, msg.tokenUsage, msg.tokenCounts, msg.metadata?.tokens];
+			for (const source of tokenSources) {
+				const { input, output, cached } = accumulateGeminiTokens(source);
+				inputTokens += input;
+				outputTokens += output;
+				cachedInputTokens += cached;
+			}
+		}
+	} catch {
+		// Caller handles parse errors; treat as zeroed stats
+	}
+
+	// Fall back to persisted stats from live session if message-level extraction yielded nothing
+	if (inputTokens === 0 && outputTokens === 0 && persistedStats) {
+		inputTokens = persistedStats.inputTokens;
+		outputTokens = persistedStats.outputTokens;
+		cachedInputTokens = persistedStats.cacheReadTokens;
+	}
+
+	return {
+		messages: messageCount,
+		inputTokens,
+		outputTokens,
+		cacheReadTokens: 0,
+		cacheCreationTokens: 0,
+		cachedInputTokens,
 		sizeBytes,
 	};
 }
@@ -318,6 +448,47 @@ async function discoverCodexSessionFiles(): Promise<SessionFileInfo[]> {
 }
 
 /**
+ * Discover Gemini CLI session files from ~/.gemini/history/{project}/
+ */
+async function discoverGeminiSessionFiles(): Promise<SessionFileInfo[]> {
+	const baseDir = path.join(os.homedir(), '.gemini', 'history');
+	const files: SessionFileInfo[] = [];
+
+	try {
+		await fs.access(baseDir);
+	} catch {
+		return files;
+	}
+
+	const projectDirs = await fs.readdir(baseDir);
+	for (const projectDir of projectDirs) {
+		const projectPath = path.join(baseDir, projectDir);
+		try {
+			const stat = await fs.stat(projectPath);
+			if (!stat.isDirectory()) continue;
+
+			const entries = await fs.readdir(projectPath);
+			for (const entry of entries) {
+				if (!entry.startsWith('session-') || !entry.endsWith('.json')) continue;
+				const filePath = path.join(projectPath, entry);
+				try {
+					const fileStat = await fs.stat(filePath);
+					if (fileStat.size === 0) continue;
+					const sessionKey = `${projectDir}/${entry.replace('.json', '')}`;
+					files.push({ filePath, sessionKey, mtimeMs: fileStat.mtimeMs });
+				} catch {
+					// Skip files we can't read
+				}
+			}
+		} catch {
+			// Skip directories we can't access
+		}
+	}
+
+	return files;
+}
+
+/**
  * Calculate aggregated stats from cached sessions for a provider
  */
 function aggregateProviderStats(
@@ -384,6 +555,9 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 
 	// Store settings reference for SSH remote lookups
 	agentSessionsSettingsStore = deps?.settingsStore;
+
+	// Store gemini session stats reference for token persistence
+	geminiStatsStore = deps?.geminiSessionStatsStore;
 
 	// ============ List Sessions ============
 
@@ -822,6 +996,26 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 					result.totalSizeBytes += codexAgg.sizeBytes;
 				}
 
+				// Aggregate Gemini stats
+				const geminiSessions = cache.providers['gemini-cli']?.sessions || {};
+				const geminiAgg = aggregateProviderStats(geminiSessions, false);
+				if (geminiAgg.sessions > 0) {
+					result.byProvider['gemini-cli'] = {
+						sessions: geminiAgg.sessions,
+						messages: geminiAgg.messages,
+						inputTokens: geminiAgg.inputTokens,
+						outputTokens: geminiAgg.outputTokens,
+						costUsd: 0,
+						hasCostData: false,
+					};
+					result.totalSessions += geminiAgg.sessions;
+					result.totalMessages += geminiAgg.messages;
+					result.totalInputTokens += geminiAgg.inputTokens;
+					result.totalOutputTokens += geminiAgg.outputTokens;
+					result.totalCacheReadTokens += geminiAgg.cachedInputTokens;
+					result.totalSizeBytes += geminiAgg.sizeBytes;
+				}
+
 				return result;
 			};
 
@@ -850,17 +1044,22 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 			if (!cache.providers['codex']) {
 				cache.providers['codex'] = { sessions: {} };
 			}
+			if (!cache.providers['gemini-cli']) {
+				cache.providers['gemini-cli'] = { sessions: {} };
+			}
 
 			// Discover all session files
 			logger.info('Discovering session files for global stats', LOG_CONTEXT);
-			const [claudeFiles, codexFiles] = await Promise.all([
+			const [claudeFiles, codexFiles, geminiFiles] = await Promise.all([
 				discoverClaudeSessionFiles(),
 				discoverCodexSessionFiles(),
+				discoverGeminiSessionFiles(),
 			]);
 
 			// Build sets of current session keys for archive detection
 			const currentClaudeKeys = new Set(claudeFiles.map((f) => f.sessionKey));
 			const currentCodexKeys = new Set(codexFiles.map((f) => f.sessionKey));
+			const currentGeminiKeys = new Set(geminiFiles.map((f) => f.sessionKey));
 
 			// Mark deleted sessions as archived (preserve stats for lifetime cost tracking)
 			for (const key of Object.keys(cache.providers['claude-code'].sessions)) {
@@ -883,6 +1082,14 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 					session.archived = false;
 				}
 			}
+			for (const key of Object.keys(cache.providers['gemini-cli'].sessions)) {
+				const session = cache.providers['gemini-cli'].sessions[key];
+				if (!currentGeminiKeys.has(key)) {
+					session.archived = true;
+				} else if (session.archived) {
+					session.archived = false;
+				}
+			}
 
 			// Find sessions that need processing (new or modified)
 			const claudeToProcess = claudeFiles.filter((f) => {
@@ -893,12 +1100,18 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 				const cached = cache!.providers['codex'].sessions[f.sessionKey];
 				return !cached || cached.fileMtimeMs < f.mtimeMs;
 			});
+			const geminiToProcess = geminiFiles.filter((f) => {
+				const cached = cache!.providers['gemini-cli'].sessions[f.sessionKey];
+				return !cached || cached.fileMtimeMs < f.mtimeMs;
+			});
 
-			const totalToProcess = claudeToProcess.length + codexToProcess.length;
-			const cachedCount = claudeFiles.length + codexFiles.length - totalToProcess;
+			const totalToProcess =
+				claudeToProcess.length + codexToProcess.length + geminiToProcess.length;
+			const cachedCount =
+				claudeFiles.length + codexFiles.length + geminiFiles.length - totalToProcess;
 
 			logger.info(
-				`Global stats: ${totalToProcess} to process (${claudeToProcess.length} Claude, ${codexToProcess.length} Codex), ${cachedCount} cached`,
+				`Global stats: ${totalToProcess} to process (${claudeToProcess.length} Claude, ${codexToProcess.length} Codex, ${geminiToProcess.length} Gemini), ${cachedCount} cached`,
 				LOG_CONTEXT
 			);
 
@@ -951,6 +1164,47 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 					}
 				} catch (error) {
 					logger.warn(`Failed to parse Codex session: ${file.sessionKey}`, LOG_CONTEXT, { error });
+				}
+			}
+
+			// Load persisted Gemini token stats from live sessions
+			const allGeminiPersistedStats = geminiStatsStore?.get('stats', {}) ?? {};
+
+			// Process Gemini sessions incrementally
+			for (const file of geminiToProcess) {
+				try {
+					const content = await fs.readFile(file.filePath, 'utf-8');
+					const fileStat = await fs.stat(file.filePath);
+
+					// Extract sessionId from the session JSON to look up persisted stats
+					let persistedStats:
+						| {
+								inputTokens: number;
+								outputTokens: number;
+								cacheReadTokens: number;
+								reasoningTokens: number;
+						  }
+						| undefined;
+					const sessionIdMatch = content.match(/"sessionId"\s*:\s*"([^"]+)"/);
+					if (sessionIdMatch?.[1] && allGeminiPersistedStats[sessionIdMatch[1]]) {
+						persistedStats = allGeminiPersistedStats[sessionIdMatch[1]];
+					}
+
+					const stats = parseGeminiSessionContent(content, fileStat.size, persistedStats);
+
+					cache.providers['gemini-cli'].sessions[file.sessionKey] = {
+						...stats,
+						fileMtimeMs: file.mtimeMs,
+						archived: false,
+					};
+
+					processedCount++;
+
+					if (processedCount % 10 === 0 || processedCount === totalToProcess) {
+						sendUpdate(cache, false);
+					}
+				} catch (error) {
+					logger.warn(`Failed to parse Gemini session: ${file.sessionKey}`, LOG_CONTEXT, { error });
 				}
 			}
 

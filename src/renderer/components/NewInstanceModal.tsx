@@ -74,7 +74,7 @@ interface EditAgentModalProps {
 }
 
 // Supported agents that are fully implemented
-const SUPPORTED_AGENTS = ['claude-code', 'opencode', 'codex', 'factory-droid'];
+const SUPPORTED_AGENTS = ['claude-code', 'opencode', 'codex', 'factory-droid', 'gemini-cli'];
 
 export function NewInstanceModal({
 	isOpen,
@@ -785,10 +785,11 @@ export function NewInstanceModal({
 														/>
 													)}
 													<span className="font-medium">{agent.name}</span>
-													{/* "Beta" badge for Codex, OpenCode, and Factory Droid */}
+													{/* "Beta" badge for Codex, OpenCode, Factory Droid, Gemini */}
 													{(agent.id === 'codex' ||
 														agent.id === 'opencode' ||
-														agent.id === 'factory-droid') && (
+														agent.id === 'factory-droid' ||
+														agent.id === 'gemini-cli') && (
 														<span
 															className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase"
 															style={{
@@ -1499,6 +1500,7 @@ export function EditAgentModal({
 		'claude-code': 'Claude Code',
 		codex: 'Codex',
 		opencode: 'OpenCode',
+		'gemini-cli': 'Gemini CLI',
 		'factory-droid': 'Factory Droid',
 	};
 	const agentName = agentNameMap[session.toolType] || session.toolType;

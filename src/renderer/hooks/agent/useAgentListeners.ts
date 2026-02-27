@@ -1313,6 +1313,33 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 		);
 
 		// ================================================================
+		// onWorkspaceApproval — Handle Gemini sandbox violations
+		// ================================================================
+		const unsubscribeWorkspaceApproval = window.maestro.process.onWorkspaceApproval?.(
+			(
+				sessionId: string,
+				request: { deniedPath: string; errorMessage: string; timestamp: number }
+			) => {
+				const parsed = parseSessionId(sessionId);
+				const actualSessionId = parsed.baseSessionId;
+
+				console.log('[onWorkspaceApproval] Gemini sandbox violation:', {
+					rawSessionId: sessionId,
+					actualSessionId,
+					deniedPath: request.deniedPath,
+					errorMessage: request.errorMessage,
+				});
+
+				// Open the workspace approval modal
+				openModal('workspaceApproval', {
+					sessionId: actualSessionId,
+					deniedPath: request.deniedPath,
+					errorMessage: request.errorMessage,
+				});
+			}
+		);
+
+		// ================================================================
 		// onThinkingChunk — Handle thinking/streaming content (RAF-throttled)
 		// ================================================================
 		const unsubscribeThinkingChunk = window.maestro.process.onThinkingChunk?.(
@@ -1564,6 +1591,7 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 			unsubscribeCommandExit();
 			unsubscribeUsage();
 			unsubscribeAgentError();
+			unsubscribeWorkspaceApproval?.();
 			unsubscribeThinkingChunk?.();
 			unsubscribeSshRemote?.();
 			unsubscribeToolExecution?.();

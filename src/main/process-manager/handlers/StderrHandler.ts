@@ -107,6 +107,127 @@ export class StderrHandler {
 				return;
 			}
 
+			// Gemini CLI writes informational status messages to stderr during startup
+			// (e.g., "YOLO mode is enabled", "Loaded cached credentials").
+			// It also dumps raw Axios error objects when internal subagents hit API
+			// failures — these contain "[Function: ...]" references and full request
+			// payloads that are noise in the UI.
+			if (toolType === 'gemini-cli') {
+				const geminiInfoPatterns = [
+					/YOLO mode is enabled/i,
+					/All tool calls will be automatically approved/i,
+					/Loaded cached credentials/i,
+					/Loading configuration/i,
+					/Connecting to/i,
+				];
+
+				// Detect capacity/quota errors with model info BEFORE the Axios dump check.
+				// These are actionable — the user can switch models to work around them.
+				const capacityMatch = cleanedStderr.match(/no capacity available for model\s+(\S+)/i);
+				const retryExhaustedMatch = cleanedStderr.match(
+					/(?:attempt\s+\d+\s+failed|max\s+attempts?\s+reached).*?(?:model\s+(\S+))?/i
+				);
+				const quotaErrorMatch = cleanedStderr.match(/RetryableQuotaError:.*?(?:model\s+(\S+))?/i);
+
+				const failedModel =
+					capacityMatch?.[1] || retryExhaustedMatch?.[1] || quotaErrorMatch?.[1] || null;
+
+				if (capacityMatch || retryExhaustedMatch || quotaErrorMatch) {
+					const modelHint = failedModel
+						? ` Model "${failedModel}" has no capacity. Try setting a different model (e.g., "pro" or "flash") in agent settings.`
+						: ' Try a different model or wait before retrying.';
+
+					const message = retryExhaustedMatch
+						? `Gemini API retry limit reached.${modelHint}`
+						: `Gemini API capacity unavailable.${modelHint}`;
+
+					logger.info('[ProcessManager] Gemini capacity/quota error detected', 'ProcessManager', {
+						sessionId,
+						failedModel,
+						hasCapacityMatch: !!capacityMatch,
+						hasRetryExhausted: !!retryExhaustedMatch,
+						hasQuotaError: !!quotaErrorMatch,
+					});
+
+					// Emit as stderr for the log
+					this.emitter.emit('stderr', sessionId, message);
+
+					// Also emit as agent-error so the error modal appears with recovery actions
+					if (!managedProcess.errorEmitted) {
+						managedProcess.errorEmitted = true;
+						const agentError: AgentError = {
+							type: 'rate_limited',
+							message,
+							recoverable: true,
+							agentId: toolType,
+							sessionId,
+							timestamp: Date.now(),
+							raw: {
+								stderr: cleanedStderr.substring(0, 1000),
+							},
+						};
+						this.emitter.emit('agent-error', sessionId, agentError);
+					}
+					return;
+				}
+
+				// Detect raw Axios/API error dumps and internal noise from Gemini CLI.
+				// Gemini CLI writes API URLs, function references, and serializer
+				// details to stderr during normal operation — suppress all of it.
+				// Only emit a user-visible error when there's an actual error indicator
+				// (e.g., "error", "failed", "ECONNREFUSED") alongside the API dump.
+				const isAxiosDump =
+					/\[Function: \w+\]/.test(cleanedStderr) ||
+					/paramsSerializer|validateStatus|errorRedactor/.test(cleanedStderr) ||
+					/cloudcode-pa\.googleapis\.com/.test(cleanedStderr) ||
+					/streamGenerateContent/.test(cleanedStderr);
+
+				if (isAxiosDump) {
+					const hasActualError =
+						/\berror\b/i.test(cleanedStderr) &&
+						(/status(?:Code)?[:\s]+[45]\d{2}/i.test(cleanedStderr) ||
+							/ECONNREFUSED|ETIMEDOUT|ENOTFOUND|socket hang up/i.test(cleanedStderr) ||
+							/\b(?:40[013]|403|429|50[023])\b/.test(cleanedStderr));
+
+					logger.debug(
+						'[ProcessManager] Suppressing Gemini CLI internal stderr dump',
+						'ProcessManager',
+						{
+							sessionId,
+							dumpLength: cleanedStderr.length,
+							hasActualError,
+							preview: cleanedStderr.substring(0, 500),
+						}
+					);
+
+					if (hasActualError) {
+						// Try to extract model from the API URL in the dump
+						const apiModelMatch = cleanedStderr.match(/models\/([^/:?]+)/i);
+						const dumpModel = apiModelMatch?.[1];
+						const apiErrorMsg = dumpModel
+							? `Gemini API error (model: ${dumpModel}). This may be transient — try again or switch to a different model.`
+							: 'Gemini CLI encountered an internal API error. This may be a transient issue — try again or check your model/auth configuration.';
+						this.emitter.emit('stderr', sessionId, apiErrorMsg);
+					}
+					return;
+				}
+
+				const lines = cleanedStderr.split('\n');
+				const nonInfoLines = lines.filter(
+					(line) => line.trim() && !geminiInfoPatterns.some((p) => p.test(line))
+				);
+				if (nonInfoLines.length === 0) {
+					logger.debug('[ProcessManager] Suppressing Gemini CLI info stderr', 'ProcessManager', {
+						sessionId,
+						message: cleanedStderr.substring(0, 200),
+					});
+					return;
+				}
+				// Re-emit only non-informational lines
+				this.emitter.emit('stderr', sessionId, nonInfoLines.join('\n'));
+				return;
+			}
+
 			// Codex writes both Rust tracing diagnostics and actual responses to stderr.
 			// Strip tracing lines (e.g. "2026-02-08T04:39:23Z ERROR codex_core::rollout::list: ...")
 			// and the "Reading prompt from stdin..." prefix, then re-emit any remaining

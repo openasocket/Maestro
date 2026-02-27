@@ -189,6 +189,49 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		binaryName: 'gemini',
 		command: 'gemini',
 		args: [],
+		batchModePrefix: [],
+		batchModeArgs: ['-y'],
+		jsonOutputArgs: ['--output-format', 'stream-json'],
+		resumeArgs: (sessionId: string) => ['--resume', sessionId],
+		// Note: --approval-mode plan requires experimental.plan to be enabled in Gemini CLI config.
+		// Until that feature is generally available, readOnlyArgs is empty and read-only
+		// behavior is enforced via system prompt instructions instead.
+		readOnlyArgs: [],
+		yoloModeArgs: ['-y'],
+		workingDirArgs: (dir: string) => ['--include-directories', dir],
+		imageArgs: undefined,
+		modelArgs: (modelId: string) => ['-m', modelId],
+		promptArgs: (prompt: string) => ['-p', prompt],
+		configOptions: [
+			{
+				key: 'model',
+				type: 'select' as const,
+				label: 'Model',
+				description:
+					'Model to use. Auto lets Gemini route between Pro and Flash based on task complexity.',
+				options: [
+					'',
+					'auto',
+					'pro',
+					'flash',
+					'flash-lite',
+					'gemini-2.5-pro',
+					'gemini-2.5-flash',
+					'gemini-3-pro-preview',
+					'gemini-3-flash-preview',
+				],
+				default: '',
+				argBuilder: (value: string) => (value && value.trim() ? ['-m', value.trim()] : []),
+			},
+			{
+				key: 'contextWindow',
+				type: 'number' as const,
+				label: 'Context Window Size',
+				description:
+					'Maximum context window size in tokens. Common values: 1048576 (Gemini 2.5 Pro), 32767 (Gemini 2.5 Flash).',
+				default: 1048576,
+			},
+		],
 	},
 	{
 		id: 'qwen3-coder',

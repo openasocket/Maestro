@@ -22,6 +22,7 @@ import {
 	getWindowStateStore,
 	getClaudeSessionOriginsStore,
 	getAgentSessionOriginsStore,
+	getGeminiSessionStatsStore,
 	getSshRemoteById,
 } from './stores';
 import {
@@ -239,6 +240,7 @@ const agentConfigsStore = getAgentConfigsStore();
 const windowStateStore = getWindowStateStore();
 const claudeSessionOriginsStore = getClaudeSessionOriginsStore();
 const agentSessionOriginsStore = getAgentSessionOriginsStore();
+const geminiSessionStatsStore = getGeminiSessionStatsStore();
 
 // Note: History storage is now handled by HistoryManager which uses per-session files
 // in the history/ directory. The legacy maestro-history.json file is migrated automatically.
@@ -535,8 +537,12 @@ function setupIpcHandlers() {
 	// Initialize session storages and register generic agent sessions handlers
 	// This provides the new window.maestro.agentSessions.* API
 	// Pass the shared claudeSessionOriginsStore so session names/stars are consistent
-	initializeSessionStorages({ claudeSessionOriginsStore });
-	registerAgentSessionsHandlers({ getMainWindow: () => mainWindow, agentSessionOriginsStore });
+	initializeSessionStorages({ claudeSessionOriginsStore, agentSessionOriginsStore });
+	registerAgentSessionsHandlers({
+		getMainWindow: () => mainWindow,
+		agentSessionOriginsStore,
+		geminiSessionStatsStore,
+	});
 
 	// Helper to get agent config values (custom args/env vars, model, etc.)
 	const getAgentConfigForAgent = (agentId: string): Record<string, any> => {
@@ -703,60 +709,64 @@ function setupIpcHandlers() {
 // Phase 3 refactoring - delegates to extracted process-listeners module
 function setupProcessListeners() {
 	if (processManager) {
-		setupProcessListenersModule(processManager, {
-			getProcessManager: () => processManager,
-			getWebServer: () => webServer,
-			getAgentDetector: () => agentDetector,
-			safeSend,
-			powerManager,
-			groupChatEmitters,
-			groupChatRouter: {
-				routeModeratorResponse,
-				routeAgentResponse,
-				markParticipantResponded,
-				spawnModeratorSynthesis,
-				getGroupChatReadOnlyState,
-				respawnParticipantWithRecovery,
-				getPendingParticipants,
+		setupProcessListenersModule(
+			processManager,
+			{
+				getProcessManager: () => processManager,
+				getWebServer: () => webServer,
+				getAgentDetector: () => agentDetector,
+				safeSend,
+				powerManager,
+				groupChatEmitters,
+				groupChatRouter: {
+					routeModeratorResponse,
+					routeAgentResponse,
+					markParticipantResponded,
+					spawnModeratorSynthesis,
+					getGroupChatReadOnlyState,
+					respawnParticipantWithRecovery,
+					getPendingParticipants,
+				},
+				groupChatLock: {
+					releaseChatLock,
+					clearSynthesisInProgress,
+				},
+				groupChatStorage: {
+					loadGroupChat,
+					updateGroupChat,
+					updateParticipant,
+				},
+				sessionRecovery: {
+					needsSessionRecovery,
+					initiateSessionRecovery,
+				},
+				outputBuffer: {
+					appendToGroupChatBuffer,
+					getGroupChatBufferedOutput,
+					clearGroupChatBuffer,
+				},
+				outputParser: {
+					extractTextFromStreamJson,
+					parseParticipantSessionId,
+				},
+				usageAggregator: {
+					calculateContextTokens,
+				},
+				getStatsDB,
+				debugLog,
+				patterns: {
+					REGEX_MODERATOR_SESSION,
+					REGEX_MODERATOR_SESSION_TIMESTAMP,
+					REGEX_AI_SUFFIX,
+					REGEX_AI_TAB_ID,
+					REGEX_BATCH_SESSION,
+					REGEX_SYNOPSIS_SESSION,
+				},
+				logger,
+				getVibesCoordinator: () => vibesCoordinator,
 			},
-			groupChatLock: {
-				releaseChatLock,
-				clearSynthesisInProgress,
-			},
-			groupChatStorage: {
-				loadGroupChat,
-				updateGroupChat,
-				updateParticipant,
-			},
-			sessionRecovery: {
-				needsSessionRecovery,
-				initiateSessionRecovery,
-			},
-			outputBuffer: {
-				appendToGroupChatBuffer,
-				getGroupChatBufferedOutput,
-				clearGroupChatBuffer,
-			},
-			outputParser: {
-				extractTextFromStreamJson,
-				parseParticipantSessionId,
-			},
-			usageAggregator: {
-				calculateContextTokens,
-			},
-			getStatsDB,
-			debugLog,
-			patterns: {
-				REGEX_MODERATOR_SESSION,
-				REGEX_MODERATOR_SESSION_TIMESTAMP,
-				REGEX_AI_SUFFIX,
-				REGEX_AI_TAB_ID,
-				REGEX_BATCH_SESSION,
-				REGEX_SYNOPSIS_SESSION,
-			},
-			logger,
-			getVibesCoordinator: () => vibesCoordinator,
-		});
+			geminiSessionStatsStore
+		);
 
 		// WakaTime heartbeat listener (query-complete → heartbeat, exit → cleanup)
 		setupWakaTimeListener(processManager, wakatimeManager, store);

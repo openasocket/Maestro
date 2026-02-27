@@ -45,6 +45,7 @@ interface ProcessConfig {
 	// Windows command line length workaround
 	sendPromptViaStdin?: boolean; // If true, send the prompt via stdin as JSON instead of command line
 	sendPromptViaStdinRaw?: boolean; // If true, send the prompt via stdin as raw text instead of command line
+	additionalWorkspaceDirs?: string[];
 }
 
 interface AgentConfigOption {
@@ -281,6 +282,12 @@ interface MaestroAPI {
 					};
 					parsedJson?: unknown;
 				}
+			) => void
+		) => () => void;
+		onWorkspaceApproval: (
+			callback: (
+				sessionId: string,
+				request: { deniedPath: string; errorMessage: string; timestamp: number }
 			) => void
 		) => () => void;
 	};

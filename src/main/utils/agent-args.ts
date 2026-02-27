@@ -60,8 +60,12 @@ export function buildAgentArgs(
 	const skipBatchForReadOnly = options.readOnlyMode && agent.readOnlyArgs?.length;
 	if (agent.batchModeArgs && options.prompt) {
 		if (skipBatchForReadOnly) {
-			const sandboxBypassFlags = new Set(['--dangerously-bypass-approvals-and-sandbox']);
-			const safeArgs = agent.batchModeArgs.filter((arg) => !sandboxBypassFlags.has(arg));
+			// Skip approval-bypass flags when readOnlyMode is active. These conflict
+			// with read-only approval modes (e.g. Gemini CLI rejects -y combined
+			// with --approval-mode plan). Non-bypass flags like --skip-git-repo-check
+			// are still needed and preserved.
+			const approvalBypassFlags = new Set(['--dangerously-bypass-approvals-and-sandbox', '-y']);
+			const safeArgs = agent.batchModeArgs.filter((arg) => !approvalBypassFlags.has(arg));
 			if (safeArgs.length > 0) {
 				finalArgs = [...finalArgs, ...safeArgs];
 			}

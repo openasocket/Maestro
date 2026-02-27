@@ -127,7 +127,11 @@ import { useAgentListeners } from './hooks/agent/useAgentListeners';
 // Import contexts
 import { useLayerStack } from './contexts/LayerStackContext';
 import { useNotificationStore, notifyToast } from './stores/notificationStore';
-import { useModalActions, useModalStore } from './stores/modalStore';
+import {
+	useModalActions,
+	useModalStore,
+	type WorkspaceApprovalModalData,
+} from './stores/modalStore';
 import { GitStatusProvider } from './contexts/GitStatusContext';
 import { InputProvider, useInputContext } from './contexts/InputContext';
 import { useGroupChatStore } from './stores/groupChatStore';
@@ -400,6 +404,55 @@ function MaestroConsoleInner() {
 		directorNotesOpen,
 		setDirectorNotesOpen,
 	} = useModalActions();
+
+	// --- WORKSPACE APPROVAL (Gemini sandbox violation modal) ---
+	const workspaceApprovalData = useModalStore(
+		(state) => state.modals.get('workspaceApproval')?.data as WorkspaceApprovalModalData | undefined
+	);
+	const workspaceApprovalOpen = useModalStore(
+		(state) => state.modals.get('workspaceApproval')?.open ?? false
+	);
+
+	const onApproveWorkspaceDir = useCallback((sessionId: string, directory: string) => {
+		const { setSessions, sessions } = useSessionStore.getState();
+		const { closeModal } = useModalStore.getState();
+
+		// Update session with approved directory
+		setSessions((prev) =>
+			prev.map((s) => {
+				if (s.id !== sessionId) return s;
+				const existing = s.approvedWorkspaceDirs || [];
+				if (existing.includes(directory)) return s;
+				return { ...s, approvedWorkspaceDirs: [...existing, directory] };
+			})
+		);
+
+		// Find the active AI tab's process session ID to kill
+		const session = sessions.find((s) => s.id === sessionId);
+		if (session) {
+			const activeTab = session.aiTabs.find((t) => t.id === session.activeTabId);
+			const processSessionId = activeTab ? `${sessionId}-ai-${activeTab.id}` : `${sessionId}-ai`;
+
+			// Kill current process — next spawn will include the approved directory
+			window.maestro.process.kill(processSessionId).catch((err) => {
+				console.warn('[WorkspaceApproval] Failed to kill process:', err);
+			});
+		}
+
+		// Close the modal
+		closeModal('workspaceApproval');
+
+		// Notify user
+		notifyToast({
+			type: 'success',
+			title: 'Workspace Approved',
+			message: `Approved workspace directory: ${directory}`,
+		});
+	}, []);
+
+	const onDenyWorkspaceDir = useCallback(() => {
+		useModalStore.getState().closeModal('workspaceApproval');
+	}, []);
 
 	// --- MOBILE LANDSCAPE MODE (reading-only view) ---
 	const isMobileLandscape = useMobileLandscape();
@@ -8594,8 +8647,8 @@ You are taking over this conversation. Based on the context above, provide a bri
 				return;
 			}
 
-			// Handle AI mode for batch-mode agents (Claude Code, Codex, OpenCode)
-			const supportedBatchAgents: ToolType[] = ['claude-code', 'codex', 'opencode'];
+			// Handle AI mode for batch-mode agents (Claude Code, Codex, OpenCode, Gemini)
+			const supportedBatchAgents: ToolType[] = ['claude-code', 'codex', 'opencode', 'gemini-cli'];
 			if (!supportedBatchAgents.includes(session.toolType)) {
 				console.log('[Remote] Not a batch-mode agent, skipping');
 				return;
@@ -12093,6 +12146,9 @@ You are taking over this conversation. Based on the context above, provide a bri
 					sendToAgentModalOpen={sendToAgentModalOpen}
 					onCloseSendToAgent={handleCloseSendToAgent}
 					onSendToAgent={handleSendToAgent}
+					workspaceApprovalData={workspaceApprovalOpen ? workspaceApprovalData : undefined}
+					onApproveWorkspaceDir={onApproveWorkspaceDir}
+					onDenyWorkspaceDir={onDenyWorkspaceDir}
 				/>
 
 				{/* --- DEBUG PACKAGE MODAL --- */}

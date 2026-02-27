@@ -18,6 +18,7 @@ vi.mock('../../../cli/services/agent-spawner', () => ({
 	spawnAgent: vi.fn(),
 	detectClaude: vi.fn(),
 	detectCodex: vi.fn(),
+	detectGemini: vi.fn(),
 }));
 
 // Mock storage
@@ -32,7 +33,12 @@ vi.mock('../../../main/parsers/usage-aggregator', () => ({
 }));
 
 import { send } from '../../../cli/commands/send';
-import { spawnAgent, detectClaude, detectCodex } from '../../../cli/services/agent-spawner';
+import {
+	spawnAgent,
+	detectClaude,
+	detectCodex,
+	detectGemini,
+} from '../../../cli/services/agent-spawner';
 import { resolveAgentId, getSessionById } from '../../../cli/services/storage';
 import { estimateContextUsage } from '../../../main/parsers/usage-aggregator';
 
@@ -77,7 +83,12 @@ describe('send command', () => {
 		await send('agent-abc', 'Hello world', {});
 
 		expect(resolveAgentId).toHaveBeenCalledWith('agent-abc');
-		expect(spawnAgent).toHaveBeenCalledWith('claude-code', '/path/to/project', 'Hello world', undefined);
+		expect(spawnAgent).toHaveBeenCalledWith(
+			'claude-code',
+			'/path/to/project',
+			'Hello world',
+			undefined
+		);
 		expect(consoleSpy).toHaveBeenCalledTimes(1);
 
 		const output = JSON.parse(consoleSpy.mock.calls[0][0]);
@@ -144,12 +155,19 @@ describe('send command', () => {
 
 		await send('agent-abc', 'Do something', {});
 
-		expect(spawnAgent).toHaveBeenCalledWith('claude-code', '/custom/project/path', 'Do something', undefined);
+		expect(spawnAgent).toHaveBeenCalledWith(
+			'claude-code',
+			'/custom/project/path',
+			'Do something',
+			undefined
+		);
 	});
 
 	it('should work with codex agent type', async () => {
 		vi.mocked(resolveAgentId).mockReturnValue('agent-codex-1');
-		vi.mocked(getSessionById).mockReturnValue(mockAgent({ id: 'agent-codex-1', toolType: 'codex' }));
+		vi.mocked(getSessionById).mockReturnValue(
+			mockAgent({ id: 'agent-codex-1', toolType: 'codex' })
+		);
 		vi.mocked(detectCodex).mockResolvedValue({ available: true, path: '/usr/bin/codex' });
 		vi.mocked(spawnAgent).mockResolvedValue({
 			success: true,
@@ -162,6 +180,32 @@ describe('send command', () => {
 		expect(detectCodex).toHaveBeenCalled();
 		expect(detectClaude).not.toHaveBeenCalled();
 		expect(spawnAgent).toHaveBeenCalledWith('codex', expect.any(String), 'Use codex', undefined);
+	});
+
+	it('should work with gemini-cli agent type', async () => {
+		vi.mocked(resolveAgentId).mockReturnValue('agent-gem-1');
+		vi.mocked(getSessionById).mockReturnValue(
+			mockAgent({ id: 'agent-gem-1', toolType: 'gemini-cli' })
+		);
+		vi.mocked(detectGemini).mockResolvedValue({
+			available: true,
+			path: '/usr/local/bin/gemini',
+		});
+		vi.mocked(spawnAgent).mockResolvedValue({
+			success: true,
+			response: 'Gemini response',
+			agentSessionId: 'gem-session',
+		});
+
+		await send('agent-gem', 'Use gemini', {});
+
+		expect(detectGemini).toHaveBeenCalled();
+		expect(spawnAgent).toHaveBeenCalledWith(
+			'gemini-cli',
+			expect.any(String),
+			'Use gemini',
+			undefined
+		);
 	});
 
 	it('should exit with error when agent ID is not found', async () => {
@@ -201,6 +245,21 @@ describe('send command', () => {
 		const output = JSON.parse(consoleSpy.mock.calls[0][0]);
 		expect(output.success).toBe(false);
 		expect(output.code).toBe('CLAUDE_NOT_FOUND');
+		expect(processExitSpy).toHaveBeenCalledWith(1);
+	});
+
+	it('should exit with error when Gemini CLI is not found', async () => {
+		vi.mocked(resolveAgentId).mockReturnValue('agent-gem-1');
+		vi.mocked(getSessionById).mockReturnValue(
+			mockAgent({ id: 'agent-gem-1', toolType: 'gemini-cli' })
+		);
+		vi.mocked(detectGemini).mockResolvedValue({ available: false });
+
+		await send('agent-gem', 'Hello', {});
+
+		const output = JSON.parse(consoleSpy.mock.calls[0][0]);
+		expect(output.success).toBe(false);
+		expect(output.code).toBe('GEMINI_NOT_FOUND');
 		expect(processExitSpy).toHaveBeenCalledWith(1);
 	});
 
