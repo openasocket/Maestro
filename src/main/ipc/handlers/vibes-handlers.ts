@@ -51,6 +51,7 @@ import {
 	readVibesConfig,
 	writeVibesConfig,
 	rehashManifest,
+	flushAll,
 } from '../../vibes/vibes-io';
 
 const LOG_CONTEXT = '[VIBES]';
@@ -113,6 +114,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 	// text. We always use the direct computation fallback for reliable JSON output.
 	ipcMain.handle('vibes:getStats', async (_event, projectPath: string, _file?: string) => {
 		try {
+			await flushAll();
 			const stats = await computeStatsFromAnnotations(projectPath);
 			return { success: true, data: JSON.stringify(stats) };
 		} catch (error) {
@@ -124,6 +126,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 	// Get per-line provenance data (falls back to direct annotation parsing)
 	ipcMain.handle('vibes:getBlame', async (_event, projectPath: string, file: string) => {
 		try {
+			await flushAll();
 			const customPath = getCustomBinaryPath(settingsStore);
 			const binaryPath = await findVibesCheckBinary(customPath);
 			if (binaryPath) {
@@ -153,6 +156,11 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 			}
 		) => {
 			try {
+				// Flush in-memory annotation/manifest buffers to disk before reading.
+				// Without this, the vibecheck binary (and readAnnotations) would miss
+				// recently recorded annotations still sitting in the write buffer.
+				await flushAll();
+
 				const customPath = getCustomBinaryPath(settingsStore);
 				const binaryPath = await findVibesCheckBinary(customPath);
 				if (binaryPath) {
@@ -182,6 +190,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 	// Get VIBES coverage statistics (falls back to direct annotation parsing)
 	ipcMain.handle('vibes:getCoverage', async (_event, projectPath: string) => {
 		try {
+			await flushAll();
 			const customPath = getCustomBinaryPath(settingsStore);
 			const binaryPath = await findVibesCheckBinary(customPath);
 			if (binaryPath) {
@@ -199,6 +208,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 	// Get VIBES LOC-based coverage statistics (line-level, not file-level)
 	ipcMain.handle('vibes:getLocCoverage', async (_event, projectPath: string) => {
 		try {
+			await flushAll();
 			const locCoverage = await computeLocCoverageFromAnnotations(projectPath);
 			return { success: true, data: JSON.stringify(locCoverage) };
 		} catch (error) {
@@ -224,6 +234,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 	// List all sessions (falls back to direct annotation parsing)
 	ipcMain.handle('vibes:getSessions', async (_event, projectPath: string) => {
 		try {
+			await flushAll();
 			const customPath = getCustomBinaryPath(settingsStore);
 			const binaryPath = await findVibesCheckBinary(customPath);
 			if (binaryPath) {
@@ -241,6 +252,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 	// List all models used (falls back to direct manifest reading)
 	ipcMain.handle('vibes:getModels', async (_event, projectPath: string) => {
 		try {
+			await flushAll();
 			const customPath = getCustomBinaryPath(settingsStore);
 			const binaryPath = await findVibesCheckBinary(customPath);
 			if (binaryPath) {
@@ -327,6 +339,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 	// Get the manifest (resolved provenance entries keyed by content hash)
 	ipcMain.handle('vibes:getManifest', async (_event, projectPath: string) => {
 		try {
+			await flushAll();
 			const manifest = await readVibesManifest(projectPath);
 			return { success: true, data: JSON.stringify(manifest) };
 		} catch (error) {

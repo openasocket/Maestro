@@ -94,6 +94,14 @@ export function setupDataListener(
 			return; // Don't send to regular process:data handler
 		}
 
+		// [Codex:Debug] Log data forwarding to renderer
+		if (sessionId.includes('codex') || sessionId.match(/-ai-/)) {
+			console.log('[Codex:Debug] DATA-LISTENER safeSend:', {
+				sessionId,
+				dataLength: data.length,
+				dataPreview: data.substring(0, 200),
+			});
+		}
 		safeSend('process:data', sessionId, data);
 
 		// Broadcast to web clients - extract base session ID (remove -ai or -terminal suffix)

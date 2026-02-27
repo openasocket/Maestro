@@ -25,6 +25,14 @@ export function setupForwardingListeners(
 	// Emitted when agents produce partial text events (isPartial: true)
 	// Renderer decides whether to display based on tab's showThinking setting
 	processManager.on('thinking-chunk', (sessionId: string, content: string) => {
+		// [Codex:Debug] Log thinking-chunk forwarding
+		if (sessionId.includes('codex') || sessionId.match(/-ai-/)) {
+			console.log('[Codex:Debug] FORWARDING thinking-chunk:', {
+				sessionId,
+				contentLength: content.length,
+				contentPreview: content.substring(0, 200),
+			});
+		}
 		safeSend('process:thinking-chunk', sessionId, content);
 	});
 

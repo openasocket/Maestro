@@ -435,6 +435,15 @@ export class ChildProcessSpawner {
 				childProcess.stdout.on('data', (data: Buffer | string) => {
 					const output = data.toString();
 
+					// Debug: Log all stdout data for Codex sessions
+					if (managedProcess.toolType === 'codex') {
+						console.log(`[Codex:Debug] RAW STDOUT received:`, {
+							sessionId,
+							outputLength: output.length,
+							outputPreview: output.substring(0, 300),
+						});
+					}
+
 					// Debug: Log all stdout data for group chat sessions
 					if (sessionId.includes('group-chat-')) {
 						console.log(

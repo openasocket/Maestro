@@ -155,7 +155,18 @@ export class StdoutHandler {
 		const managedProcess = this.processes.get(sessionId);
 		if (!managedProcess) return;
 
-		const { isStreamJsonMode, isBatchMode } = managedProcess;
+		const { isStreamJsonMode, isBatchMode, toolType } = managedProcess;
+
+		// Diagnostic: log routing decision for Codex sessions
+		if (toolType === 'codex') {
+			logger.debug('[ProcessManager] Codex stdout routing', 'ProcessManager', {
+				sessionId,
+				isStreamJsonMode,
+				isBatchMode,
+				outputLength: output.length,
+				outputPreview: output.substring(0, 200),
+			});
+		}
 
 		if (isStreamJsonMode) {
 			this.handleStreamJsonData(sessionId, managedProcess, output);
@@ -339,6 +350,18 @@ export class StdoutHandler {
 			this.emitter.emit('slash-commands', sessionId, slashCommands);
 		}
 
+		// DEBUG: Log thinking-chunk emission conditions
+		if (event.type === 'text') {
+			logger.debug('[ProcessManager] Checking thinking-chunk conditions', 'ProcessManager', {
+				sessionId,
+				eventType: event.type,
+				isPartial: event.isPartial,
+				hasText: !!event.text,
+				textLength: event.text?.length,
+				textPreview: event.text?.substring(0, 100),
+			});
+		}
+
 		// Handle streaming text events (OpenCode, Codex reasoning, Gemini messages)
 		// Two paths based on partial flag:
 		//
@@ -353,6 +376,13 @@ export class StdoutHandler {
 		//    so complete message blocks display immediately as regular output.
 		if (event.type === 'text' && event.text) {
 			if (event.isPartial) {
+				if (managedProcess.toolType === 'codex') {
+					console.log('[Codex:Debug] THINKING-CHUNK emitting:', {
+						sessionId,
+						textLength: event.text.length,
+						textPreview: event.text.substring(0, 100),
+					});
+				}
 				// Streaming delta: accumulate for result-time emission, emit thinking-chunk for live display
 				managedProcess.streamedText = (managedProcess.streamedText || '') + event.text;
 				this.emitter.emit('thinking-chunk', sessionId, event.text);
@@ -431,6 +461,11 @@ export class StdoutHandler {
 		// Uses codexPendingResult (not streamedText) to avoid clobbering reasoning accumulation.
 		if (managedProcess.toolType === 'codex' && outputParser.isResultMessage(event) && event.text) {
 			managedProcess.codexPendingResult = event.text;
+			console.log('[Codex:Debug] RESULT CAPTURED (agent_message):', {
+				sessionId,
+				resultLength: event.text.length,
+				resultPreview: event.text.substring(0, 200),
+			});
 		}
 
 		// For Codex, flush the latest captured result when the turn completes.
@@ -441,16 +476,19 @@ export class StdoutHandler {
 			!managedProcess.resultEmitted
 		) {
 			const resultText = managedProcess.codexPendingResult || '';
+			console.log('[Codex:Debug] USAGE EVENT — flushing result:', {
+				sessionId,
+				hasResult: !!resultText,
+				resultLength: resultText.length,
+				resultPreview: resultText.substring(0, 200),
+				streamedTextLength: managedProcess.streamedText?.length || 0,
+			});
 			if (resultText) {
 				managedProcess.resultEmitted = true;
-				logger.debug(
-					'[ProcessManager] Emitting final Codex result at turn completion',
-					'ProcessManager',
-					{
-						sessionId,
-						resultLength: resultText.length,
-					}
-				);
+				console.log('[Codex:Debug] RESULT EMIT via emitDataBuffered:', {
+					sessionId,
+					resultLength: resultText.length,
+				});
 				this.bufferManager.emitDataBuffered(sessionId, resultText);
 			}
 		}

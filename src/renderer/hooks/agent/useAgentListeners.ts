@@ -195,6 +195,15 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 		// onData — Handle process output data (BATCHED for performance)
 		// ================================================================
 		const unsubscribeData = window.maestro.process.onData((sessionId: string, data: string) => {
+			// [Codex:Debug] Log all incoming data events for Codex sessions
+			if (sessionId.includes('codex') || data.includes('codex')) {
+				console.log('[Codex:Debug] RENDERER onData received:', {
+					sessionId,
+					dataLength: data.length,
+					dataPreview: data.substring(0, 200),
+				});
+			}
+
 			// Parse sessionId to determine which process this is from
 			let actualSessionId: string;
 			let isFromAi: boolean;
@@ -1344,6 +1353,15 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 		// ================================================================
 		const unsubscribeThinkingChunk = window.maestro.process.onThinkingChunk?.(
 			(sessionId: string, content: string) => {
+				// [Codex:Debug] Log thinking chunks arriving at renderer
+				if (sessionId.includes('codex')) {
+					console.log('[Codex:Debug] RENDERER onThinkingChunk received:', {
+						sessionId,
+						contentLength: content.length,
+						contentPreview: content.substring(0, 200),
+					});
+				}
+
 				const aiTabMatch = sessionId.match(/^(.+)-ai-(.+)$/);
 				if (!aiTabMatch) return;
 
@@ -1385,7 +1403,15 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 									const targetTab = updatedTabs.find((t) => t.id === chunkTabId);
 									if (!targetTab) continue;
 
-									if (!targetTab.showThinking || targetTab.showThinking === 'off') continue;
+									if (!targetTab.showThinking || targetTab.showThinking === 'off') {
+										// [Codex:Debug] Log when thinking is filtered out
+										console.log('[Codex:Debug] THINKING FILTERED by showThinking:', {
+											sessionId: s.id,
+											tabId: chunkTabId,
+											showThinking: targetTab.showThinking,
+										});
+										continue;
+									}
 
 									// Codex emits reasoning as complete blocks, not streams — large content is expected
 									if (

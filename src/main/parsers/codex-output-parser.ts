@@ -133,8 +133,9 @@ interface CodexOldMessage {
 
 interface CodexItem {
 	id?: string;
-	type?: 'reasoning' | 'agent_message' | 'tool_call' | 'tool_result';
+	type?: 'reasoning' | 'agent_message' | 'tool_call' | 'tool_result' | 'error';
 	text?: string;
+	message?: string; // Used by error items (e.g., cyber safety warnings)
 	tool?: string;
 	args?: Record<string, unknown>;
 	output?: string | number[];
@@ -617,6 +618,17 @@ export class CodexOutputParser implements AgentOutputParser {
 					type: 'result',
 					text: item.text || '',
 					isPartial: false,
+					raw: msg,
+				};
+
+			case 'error':
+				// Codex emits item.completed with type 'error' for warnings like cyber safety routing.
+				// These are NOT fatal errors — the agent continues processing. Surface as thinking text
+				// so users can see the warning (e.g., "routed to gpt-5.2 as a fallback").
+				return {
+					type: 'text',
+					text: `⚠ ${item.message || item.text || 'Unknown warning'}`,
+					isPartial: true,
 					raw: msg,
 				};
 
