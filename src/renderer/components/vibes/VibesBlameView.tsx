@@ -12,6 +12,7 @@ import {
 	ChevronDown,
 	ArrowLeft,
 } from 'lucide-react';
+import { loadFileTree, type FileTreeNode as ExplorerFileTreeNode } from '../../utils/fileExplorer';
 import type { Theme } from '../../types';
 
 // ============================================================================
@@ -162,6 +163,53 @@ function parseCoverageFiles(raw: string): TrackedFileInfo[] {
 	}
 }
 
+/**
+ * Convert explorer FileTreeNode[] to blame-view FileTreeNode[],
+ * merging coverage data from a lookup map keyed by relative path.
+ */
+function convertExplorerTree(
+	nodes: ExplorerFileTreeNode[],
+	parentPath: string,
+	coverageMap: Map<string, TrackedFileInfo>
+): FileTreeNode[] {
+	return nodes.map((node) => {
+		const fullPath = parentPath ? `${parentPath}/${node.name}` : node.name;
+		const isDirectory = node.type === 'folder';
+		const children =
+			isDirectory && node.children ? convertExplorerTree(node.children, fullPath, coverageMap) : [];
+		const fileInfo = !isDirectory ? coverageMap.get(fullPath) : undefined;
+		return {
+			name: node.name,
+			fullPath,
+			isDirectory,
+			children,
+			fileInfo,
+			totalFiles: 0,
+			totalAnnotations: 0,
+		};
+	});
+}
+
+/** Recursively compute totalFiles and totalAnnotations, and sort children. */
+function computeTreeStats(node: FileTreeNode): void {
+	if (!node.isDirectory) {
+		node.totalFiles = 1;
+		node.totalAnnotations = node.fileInfo?.annotationCount ?? 0;
+		return;
+	}
+	node.totalFiles = 0;
+	node.totalAnnotations = 0;
+	for (const child of node.children) {
+		computeTreeStats(child);
+		node.totalFiles += child.totalFiles;
+		node.totalAnnotations += child.totalAnnotations;
+	}
+	node.children.sort((a, b) => {
+		if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+		return a.name.localeCompare(b.name);
+	});
+}
+
 /** Build a directory tree from a flat list of tracked files. */
 function buildFileTree(files: TrackedFileInfo[]): FileTreeNode[] {
 	const root: FileTreeNode = {
@@ -199,29 +247,8 @@ function buildFileTree(files: TrackedFileInfo[]): FileTreeNode[] {
 		}
 	}
 
-	// Compute aggregate stats and sort
-	const computeStats = (node: FileTreeNode): void => {
-		if (!node.isDirectory) {
-			node.totalFiles = 1;
-			node.totalAnnotations = node.fileInfo?.annotationCount ?? 0;
-			return;
-		}
-		node.totalFiles = 0;
-		node.totalAnnotations = 0;
-		for (const child of node.children) {
-			computeStats(child);
-			node.totalFiles += child.totalFiles;
-			node.totalAnnotations += child.totalAnnotations;
-		}
-		// Sort: directories first, then alphabetically
-		node.children.sort((a, b) => {
-			if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-			return a.name.localeCompare(b.name);
-		});
-	};
-
 	for (const child of root.children) {
-		computeStats(child);
+		computeTreeStats(child);
 	}
 	root.children.sort((a, b) => {
 		if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
@@ -231,12 +258,12 @@ function buildFileTree(files: TrackedFileInfo[]): FileTreeNode[] {
 	return root.children;
 }
 
-/** Get all directory paths that should be expanded by default (all of them for annotation trees). */
-function getAllDirPaths(nodes: FileTreeNode[]): Set<string> {
+/** Get directory paths that contain annotations (for selective auto-expand). */
+function getAnnotatedDirPaths(nodes: FileTreeNode[]): Set<string> {
 	const paths = new Set<string>();
 	const walk = (list: FileTreeNode[]) => {
 		for (const node of list) {
-			if (node.isDirectory) {
+			if (node.isDirectory && node.totalAnnotations > 0) {
 				paths.add(node.fullPath);
 				walk(node.children);
 			}
@@ -277,6 +304,8 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 	const [isBuilding, setIsBuilding] = useState(false);
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
 	const [showDropdown, setShowDropdown] = useState(false);
+	const [fullTree, setFullTree] = useState<FileTreeNode[]>([]);
+	const [isLoadingTree, setIsLoadingTree] = useState(false);
 
 	// Build a stable model -> color map
 	const modelColorMap = useMemo(() => {
@@ -288,18 +317,21 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 		return map;
 	}, [blameEntries]);
 
-	// Build file tree from tracked files
-	const fileTree = useMemo(() => buildFileTree(trackedFiles), [trackedFiles]);
+	// Build file tree — use full project tree when available, fallback to coverage-only
+	const fileTree = useMemo(
+		() => (fullTree.length > 0 ? fullTree : buildFileTree(trackedFiles)),
+		[fullTree, trackedFiles]
+	);
 
-	// Auto-expand all directories on initial load
+	// Auto-expand only directories containing annotations on initial load
 	useEffect(() => {
 		if (fileTree.length > 0 && expandedDirs.size === 0) {
-			setExpandedDirs(getAllDirPaths(fileTree));
+			setExpandedDirs(getAnnotatedDirPaths(fileTree));
 		}
 	}, [fileTree, expandedDirs.size]);
 
 	// ========================================================================
-	// Fetch tracked files from coverage data
+	// Fetch coverage data and full project file tree
 	// ========================================================================
 
 	useEffect(() => {
@@ -307,15 +339,43 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 		let cancelled = false;
 
 		(async () => {
+			setIsLoadingTree(true);
 			try {
-				const result = await window.maestro.vibes.getCoverage(projectPath);
+				// Fetch coverage data and full file tree in parallel
+				const [coverageResult, explorerTree] = await Promise.all([
+					window.maestro.vibes.getCoverage(projectPath).catch(() => null),
+					loadFileTree(projectPath),
+				]);
+
 				if (cancelled) return;
-				if (result.success && result.data) {
-					const files = parseCoverageFiles(result.data);
-					setTrackedFiles(files);
+
+				// Parse coverage into a lookup map
+				const coverageMap = new Map<string, TrackedFileInfo>();
+				let parsedFiles: TrackedFileInfo[] = [];
+				if (coverageResult?.success && coverageResult.data) {
+					parsedFiles = parseCoverageFiles(coverageResult.data);
+					for (const f of parsedFiles) {
+						coverageMap.set(f.filePath, f);
+					}
 				}
+				setTrackedFiles(parsedFiles);
+
+				// Convert explorer tree to blame-view format with coverage data merged in
+				const converted = convertExplorerTree(explorerTree, '', coverageMap);
+				for (const node of converted) {
+					computeTreeStats(node);
+				}
+				// Sort root level
+				converted.sort((a, b) => {
+					if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+					return a.name.localeCompare(b.name);
+				});
+
+				setFullTree(converted);
 			} catch {
-				// Coverage fetch failed silently
+				// Tree load failed — fall back to coverage-only tree
+			} finally {
+				if (!cancelled) setIsLoadingTree(false);
 			}
 		})();
 
@@ -434,11 +494,36 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 	// Search filter for dropdown
 	// ========================================================================
 
+	// Flatten tree to get all file paths for search
+	const allFilePaths = useMemo(() => {
+		const paths: { filePath: string; fileInfo?: TrackedFileInfo }[] = [];
+		const walk = (nodes: FileTreeNode[]) => {
+			for (const node of nodes) {
+				if (node.isDirectory) {
+					walk(node.children);
+				} else {
+					paths.push({ filePath: node.fullPath, fileInfo: node.fileInfo });
+				}
+			}
+		};
+		walk(fileTree);
+		return paths;
+	}, [fileTree]);
+
 	const filteredFiles = useMemo(() => {
 		if (!fileSearch.trim()) return [];
 		const search = fileSearch.toLowerCase();
-		return trackedFiles.filter((f) => f.filePath.toLowerCase().includes(search));
-	}, [trackedFiles, fileSearch]);
+		return allFilePaths
+			.filter((f) => f.filePath.toLowerCase().includes(search))
+			.map(
+				(f) =>
+					({
+						filePath: f.filePath,
+						status: f.fileInfo?.status,
+						annotationCount: f.fileInfo?.annotationCount,
+					}) as TrackedFileInfo
+			);
+	}, [allFilePaths, fileSearch]);
 
 	const handleInputKeyDown = useCallback(
 		(e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -498,11 +583,9 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 							<span className="text-[11px] font-semibold" style={{ color: theme.colors.textDim }}>
 								File Browser
 							</span>
-							{trackedFiles.length > 0 && (
-								<span className="text-[10px] ml-auto" style={{ color: theme.colors.textDim }}>
-									{trackedFiles.length} file{trackedFiles.length !== 1 ? 's' : ''}
-								</span>
-							)}
+							<span className="text-[10px] ml-auto" style={{ color: theme.colors.textDim }}>
+								{trackedFiles.length > 0 ? `${trackedFiles.length} tracked` : '0 tracked'}
+							</span>
 						</div>
 						<div className="relative">
 							<div className="flex items-center gap-2">
@@ -591,10 +674,20 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 					</div>
 				)}
 
+				{/* Loading tree indicator */}
+				{isLoadingTree && fullTree.length === 0 && (
+					<div className="flex flex-col items-center justify-center gap-2 py-8 px-4">
+						<Folder className="w-5 h-5 animate-pulse" style={{ color: theme.colors.textDim }} />
+						<span className="text-[11px]" style={{ color: theme.colors.textDim }}>
+							Loading project files...
+						</span>
+					</div>
+				)}
+
 				{/* ====== TREE VIEW (no file selected) ====== */}
 				{binaryAvailable !== false && !isViewingBlame && !isLoading && (
 					<>
-						{trackedFiles.length === 0 ? (
+						{fileTree.length === 0 && !isLoadingTree ? (
 							<EmptyState
 								theme={theme}
 								icon={<Folder className="w-6 h-6 opacity-40" />}
@@ -816,6 +909,7 @@ const FileTreeItem: React.FC<FileTreeItemProps> = ({
 			style={{
 				paddingLeft: `${8 + indent + 16}px`,
 				color: theme.colors.textMain,
+				opacity: node.fileInfo ? 1 : 0.45,
 			}}
 			title={node.fullPath}
 		>
