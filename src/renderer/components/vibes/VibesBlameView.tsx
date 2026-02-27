@@ -11,7 +11,10 @@ import {
 	ChevronRight,
 	ChevronDown,
 	ArrowLeft,
+	ChevronsLeft,
+	ChevronsRight,
 } from 'lucide-react';
+import { loadFileTree, type FileTreeNode as ExplorerFileTreeNode } from '../../utils/fileExplorer';
 import type { Theme } from '../../types';
 
 // ============================================================================
@@ -87,12 +90,16 @@ const STATUS_COLORS: Record<string, string> = {
 	uncovered: '#6b7280',
 };
 
+/** Maximum blame entries to render per page to avoid overwhelming the DOM. */
+const BLAME_PAGE_SIZE = 100;
+
 // ============================================================================
 // Helpers
 // ============================================================================
 
 /** Format a timestamp as relative time (e.g., "3 days ago"). */
-function formatRelativeTime(timestamp: string): string {
+function formatRelativeTime(timestamp: string | undefined | null): string {
+	if (!timestamp) return '—';
 	const now = Date.now();
 	const then = new Date(timestamp).getTime();
 	if (isNaN(then)) return timestamp;
@@ -120,15 +127,131 @@ function formatToolName(toolName?: string): string {
 	return toolName;
 }
 
-/** Parse the JSON output from `vibecheck blame --json`. */
+/**
+ * A per-line entry from the vibecheck Rust binary (`vibecheck blame --json`).
+ * Fields are nullable because human-written lines have no AI attribution.
+ */
+interface BinaryBlameEntry {
+	line_number: number;
+	env_hash?: string | null;
+	model_name?: string | null;
+	action?: string | null;
+	timestamp?: string | null;
+	git_author?: string | null;
+	line_content?: string;
+}
+
+/**
+ * Detect whether raw entries are in the vibecheck binary per-line format
+ * (has `line_number`) vs the fallback per-range format (has `line_start`).
+ */
+function isBinaryFormat(entries: Record<string, unknown>[]): boolean {
+	return entries.length > 0 && 'line_number' in entries[0];
+}
+
+/**
+ * Collapse per-line binary entries into range-based BlameEntry[].
+ * Groups consecutive lines with the same model_name + action + timestamp into ranges.
+ * Skips lines with no AI attribution (null model_name).
+ */
+function collapseBinaryEntries(entries: BinaryBlameEntry[]): BlameEntry[] {
+	// Filter to only AI-attributed lines
+	const attributed = entries.filter((e) => e.model_name && e.action);
+	if (attributed.length === 0) return [];
+
+	const result: BlameEntry[] = [];
+	let current: {
+		line_start: number;
+		line_end: number;
+		model_name: string;
+		action: string;
+		timestamp: string;
+	} | null = null;
+
+	for (const entry of attributed) {
+		const model = entry.model_name!;
+		const action = entry.action!;
+		const timestamp = entry.timestamp ?? '';
+
+		if (
+			current &&
+			current.model_name === model &&
+			current.action === action &&
+			current.timestamp === timestamp &&
+			entry.line_number === current.line_end + 1
+		) {
+			// Extend current range
+			current.line_end = entry.line_number;
+		} else {
+			// Flush previous range
+			if (current) {
+				result.push({
+					line_start: current.line_start,
+					line_end: current.line_end,
+					model_name: current.model_name,
+					action: current.action as BlameEntry['action'],
+					timestamp: current.timestamp,
+				});
+			}
+			// Start new range
+			current = {
+				line_start: entry.line_number,
+				line_end: entry.line_number,
+				model_name: model,
+				action,
+				timestamp,
+			};
+		}
+	}
+	// Flush last range
+	if (current) {
+		result.push({
+			line_start: current.line_start,
+			line_end: current.line_end,
+			model_name: current.model_name,
+			action: current.action as BlameEntry['action'],
+			timestamp: current.timestamp,
+		});
+	}
+
+	return result;
+}
+
+/** Parse the JSON output from `vibecheck blame --json` or fallback blame data. */
 function parseBlameData(raw: string | undefined): BlameEntry[] {
 	if (!raw) return [];
 	try {
 		const data = JSON.parse(raw);
-		if (Array.isArray(data)) return data;
-		if (data.entries && Array.isArray(data.entries)) return data.entries;
-		if (data.blame && Array.isArray(data.blame)) return data.blame;
-		return [];
+		let entries: Record<string, unknown>[];
+
+		if (Array.isArray(data)) {
+			entries = data;
+		} else if (data.entries && Array.isArray(data.entries)) {
+			entries = data.entries;
+		} else if (data.blame && Array.isArray(data.blame)) {
+			entries = data.blame;
+		} else {
+			return [];
+		}
+
+		if (entries.length === 0) return [];
+
+		// Detect binary per-line format vs fallback per-range format
+		if (isBinaryFormat(entries)) {
+			return collapseBinaryEntries(entries as unknown as BinaryBlameEntry[]);
+		}
+
+		// Fallback format — normalize fields defensively
+		return entries.map((e) => ({
+			line_start: (e.line_start as number) ?? 0,
+			line_end: (e.line_end as number) ?? (e.line_start as number) ?? 0,
+			model_name: (e.model_name as string) ?? 'unknown',
+			model_version: (e.model_version as string) ?? undefined,
+			tool_name: (e.tool_name as string) ?? undefined,
+			action: ((e.action as string) ?? 'modify') as BlameEntry['action'],
+			timestamp: (e.timestamp as string) ?? '',
+			session_id: (e.session_id as string) ?? undefined,
+		}));
 	} catch {
 		return [];
 	}
@@ -151,13 +274,62 @@ function parseCoverageFiles(raw: string): TrackedFileInfo[] {
 			files.push({
 				filePath: fp,
 				status: (item.coverage_status ?? item.status) as TrackedFileInfo['status'],
-				annotationCount: (item.annotation_count ?? item.annotations ?? item.count) as number | undefined,
+				annotationCount: (item.annotation_count ?? item.annotations ?? item.count) as
+					| number
+					| undefined,
 			});
 		}
 		return files.sort((a, b) => a.filePath.localeCompare(b.filePath));
 	} catch {
 		return [];
 	}
+}
+
+/**
+ * Convert explorer FileTreeNode[] to blame-view FileTreeNode[],
+ * merging coverage data from a lookup map keyed by relative path.
+ */
+function convertExplorerTree(
+	nodes: ExplorerFileTreeNode[],
+	parentPath: string,
+	coverageMap: Map<string, TrackedFileInfo>
+): FileTreeNode[] {
+	return nodes.map((node) => {
+		const fullPath = parentPath ? `${parentPath}/${node.name}` : node.name;
+		const isDirectory = node.type === 'folder';
+		const children =
+			isDirectory && node.children ? convertExplorerTree(node.children, fullPath, coverageMap) : [];
+		const fileInfo = !isDirectory ? coverageMap.get(fullPath) : undefined;
+		return {
+			name: node.name,
+			fullPath,
+			isDirectory,
+			children,
+			fileInfo,
+			totalFiles: 0,
+			totalAnnotations: 0,
+		};
+	});
+}
+
+/** Recursively compute totalFiles and totalAnnotations, and sort children. */
+function computeTreeStats(node: FileTreeNode): void {
+	if (!node.isDirectory) {
+		node.totalFiles = 1;
+		node.totalAnnotations = node.fileInfo?.annotationCount ?? 0;
+		return;
+	}
+	node.totalFiles = 0;
+	node.totalAnnotations = 0;
+	for (const child of node.children) {
+		computeTreeStats(child);
+		node.totalFiles += child.totalFiles;
+		node.totalAnnotations += child.totalAnnotations;
+	}
+	node.children.sort((a, b) => {
+		if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+		return a.name.localeCompare(b.name);
+	});
 }
 
 /** Build a directory tree from a flat list of tracked files. */
@@ -197,29 +369,8 @@ function buildFileTree(files: TrackedFileInfo[]): FileTreeNode[] {
 		}
 	}
 
-	// Compute aggregate stats and sort
-	const computeStats = (node: FileTreeNode): void => {
-		if (!node.isDirectory) {
-			node.totalFiles = 1;
-			node.totalAnnotations = node.fileInfo?.annotationCount ?? 0;
-			return;
-		}
-		node.totalFiles = 0;
-		node.totalAnnotations = 0;
-		for (const child of node.children) {
-			computeStats(child);
-			node.totalFiles += child.totalFiles;
-			node.totalAnnotations += child.totalAnnotations;
-		}
-		// Sort: directories first, then alphabetically
-		node.children.sort((a, b) => {
-			if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-			return a.name.localeCompare(b.name);
-		});
-	};
-
 	for (const child of root.children) {
-		computeStats(child);
+		computeTreeStats(child);
 	}
 	root.children.sort((a, b) => {
 		if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
@@ -229,12 +380,12 @@ function buildFileTree(files: TrackedFileInfo[]): FileTreeNode[] {
 	return root.children;
 }
 
-/** Get all directory paths that should be expanded by default (all of them for annotation trees). */
-function getAllDirPaths(nodes: FileTreeNode[]): Set<string> {
+/** Get directory paths that contain annotations (for selective auto-expand). */
+function getAnnotatedDirPaths(nodes: FileTreeNode[]): Set<string> {
 	const paths = new Set<string>();
 	const walk = (list: FileTreeNode[]) => {
 		for (const node of list) {
-			if (node.isDirectory) {
+			if (node.isDirectory && node.totalAnnotations > 0) {
 				paths.add(node.fullPath);
 				walk(node.children);
 			}
@@ -275,6 +426,9 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 	const [isBuilding, setIsBuilding] = useState(false);
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
 	const [showDropdown, setShowDropdown] = useState(false);
+	const [fullTree, setFullTree] = useState<FileTreeNode[]>([]);
+	const [isLoadingTree, setIsLoadingTree] = useState(false);
+	const [blamePage, setBlamePage] = useState(0);
 
 	// Build a stable model -> color map
 	const modelColorMap = useMemo(() => {
@@ -286,18 +440,33 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 		return map;
 	}, [blameEntries]);
 
-	// Build file tree from tracked files
-	const fileTree = useMemo(() => buildFileTree(trackedFiles), [trackedFiles]);
+	// Pagination
+	const totalBlamePages = Math.max(1, Math.ceil(blameEntries.length / BLAME_PAGE_SIZE));
+	const pagedBlameEntries = useMemo(() => {
+		const start = blamePage * BLAME_PAGE_SIZE;
+		return blameEntries.slice(start, start + BLAME_PAGE_SIZE);
+	}, [blameEntries, blamePage]);
 
-	// Auto-expand all directories on initial load
+	// Reset page when entries change (new file selected)
+	useEffect(() => {
+		setBlamePage(0);
+	}, [blameEntries]);
+
+	// Build file tree — use full project tree when available, fallback to coverage-only
+	const fileTree = useMemo(
+		() => (fullTree.length > 0 ? fullTree : buildFileTree(trackedFiles)),
+		[fullTree, trackedFiles]
+	);
+
+	// Auto-expand only directories containing annotations on initial load
 	useEffect(() => {
 		if (fileTree.length > 0 && expandedDirs.size === 0) {
-			setExpandedDirs(getAllDirPaths(fileTree));
+			setExpandedDirs(getAnnotatedDirPaths(fileTree));
 		}
 	}, [fileTree, expandedDirs.size]);
 
 	// ========================================================================
-	// Fetch tracked files from coverage data
+	// Fetch coverage data and full project file tree
 	// ========================================================================
 
 	useEffect(() => {
@@ -305,56 +474,89 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 		let cancelled = false;
 
 		(async () => {
+			setIsLoadingTree(true);
 			try {
-				const result = await window.maestro.vibes.getCoverage(projectPath);
+				// Fetch coverage data and full file tree in parallel
+				const [coverageResult, explorerTree] = await Promise.all([
+					window.maestro.vibes.getCoverage(projectPath).catch(() => null),
+					loadFileTree(projectPath),
+				]);
+
 				if (cancelled) return;
-				if (result.success && result.data) {
-					const files = parseCoverageFiles(result.data);
-					setTrackedFiles(files);
+
+				// Parse coverage into a lookup map
+				const coverageMap = new Map<string, TrackedFileInfo>();
+				let parsedFiles: TrackedFileInfo[] = [];
+				if (coverageResult?.success && coverageResult.data) {
+					parsedFiles = parseCoverageFiles(coverageResult.data);
+					for (const f of parsedFiles) {
+						coverageMap.set(f.filePath, f);
+					}
 				}
+				setTrackedFiles(parsedFiles);
+
+				// Convert explorer tree to blame-view format with coverage data merged in
+				const converted = convertExplorerTree(explorerTree, '', coverageMap);
+				for (const node of converted) {
+					computeTreeStats(node);
+				}
+				// Sort root level
+				converted.sort((a, b) => {
+					if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+					return a.name.localeCompare(b.name);
+				});
+
+				setFullTree(converted);
 			} catch {
-				// Coverage fetch failed silently
+				// Tree load failed — fall back to coverage-only tree
+			} finally {
+				if (!cancelled) setIsLoadingTree(false);
 			}
 		})();
 
-		return () => { cancelled = true; };
+		return () => {
+			cancelled = true;
+		};
 	}, [projectPath]);
 
 	// ========================================================================
 	// Fetch blame data when file is selected
 	// ========================================================================
 
-	const fetchBlame = useCallback(async (path: string) => {
-		if (!projectPath || !path.trim()) return;
+	const fetchBlame = useCallback(
+		async (path: string) => {
+			if (!projectPath || !path.trim()) return;
 
-		setIsLoading(true);
-		setError(null);
-		setNeedsBuild(false);
-		setBlameEntries([]);
+			setIsLoading(true);
+			setError(null);
+			setNeedsBuild(false);
+			setBlameEntries([]);
 
-		try {
-			const result = await window.maestro.vibes.getBlame(projectPath, path);
-			if (result.success) {
-				const entries = parseBlameData(result.data);
-				setBlameEntries(entries);
-			} else {
-				const errMsg = result.error ?? 'Failed to fetch blame data';
-				if (
-					errMsg.toLowerCase().includes('build') ||
-					errMsg.toLowerCase().includes('database') ||
-					errMsg.toLowerCase().includes('audit.db')
-				) {
-					setNeedsBuild(true);
+			try {
+				const result = await window.maestro.vibes.getBlame(projectPath, path);
+				if (result.success) {
+					const entries = parseBlameData(result.data);
+					setBlameEntries(entries);
 				} else {
-					setError(errMsg);
+					const errMsg = result.error ?? 'Failed to fetch blame data';
+					if (
+						errMsg.toLowerCase().includes('build') ||
+						errMsg.toLowerCase().includes('database') ||
+						errMsg.toLowerCase().includes('audit.db')
+					) {
+						setNeedsBuild(true);
+					} else {
+						setError(errMsg);
+					}
 				}
+			} catch (err) {
+				setError(err instanceof Error ? err.message : 'Failed to fetch blame data');
+			} finally {
+				setIsLoading(false);
 			}
-		} catch (err) {
-			setError(err instanceof Error ? err.message : 'Failed to fetch blame data');
-		} finally {
-			setIsLoading(false);
-		}
-	}, [projectPath]);
+		},
+		[projectPath]
+	);
 
 	// Fetch blame when filePath changes
 	useEffect(() => {
@@ -427,11 +629,36 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 	// Search filter for dropdown
 	// ========================================================================
 
+	// Flatten tree to get all file paths for search
+	const allFilePaths = useMemo(() => {
+		const paths: { filePath: string; fileInfo?: TrackedFileInfo }[] = [];
+		const walk = (nodes: FileTreeNode[]) => {
+			for (const node of nodes) {
+				if (node.isDirectory) {
+					walk(node.children);
+				} else {
+					paths.push({ filePath: node.fullPath, fileInfo: node.fileInfo });
+				}
+			}
+		};
+		walk(fileTree);
+		return paths;
+	}, [fileTree]);
+
 	const filteredFiles = useMemo(() => {
 		if (!fileSearch.trim()) return [];
 		const search = fileSearch.toLowerCase();
-		return trackedFiles.filter((f) => f.filePath.toLowerCase().includes(search));
-	}, [trackedFiles, fileSearch]);
+		return allFilePaths
+			.filter((f) => f.filePath.toLowerCase().includes(search))
+			.map(
+				(f) =>
+					({
+						filePath: f.filePath,
+						status: f.fileInfo?.status,
+						annotationCount: f.fileInfo?.annotationCount,
+					}) as TrackedFileInfo
+			);
+	}, [allFilePaths, fileSearch]);
 
 	const handleInputKeyDown = useCallback(
 		(e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -447,7 +674,7 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 				setFileSearch('');
 			}
 		},
-		[fileSearch, filteredFiles, handleSelectFile],
+		[fileSearch, filteredFiles, handleSelectFile]
 	);
 
 	// ========================================================================
@@ -491,11 +718,9 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 							<span className="text-[11px] font-semibold" style={{ color: theme.colors.textDim }}>
 								File Browser
 							</span>
-							{trackedFiles.length > 0 && (
-								<span className="text-[10px] ml-auto" style={{ color: theme.colors.textDim }}>
-									{trackedFiles.length} file{trackedFiles.length !== 1 ? 's' : ''}
-								</span>
-							)}
+							<span className="text-[10px] ml-auto" style={{ color: theme.colors.textDim }}>
+								{trackedFiles.length > 0 ? `${trackedFiles.length} tracked` : '0 tracked'}
+							</span>
 						</div>
 						<div className="relative">
 							<div className="flex items-center gap-2">
@@ -539,21 +764,23 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 												backgroundColor: 'transparent',
 											}}
 										>
-											<FileCode className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
+											<FileCode
+												className="w-3 h-3 shrink-0"
+												style={{ color: theme.colors.textDim }}
+											/>
 											<span className="truncate">{file.filePath}</span>
 											{file.status && (
 												<span
 													className="w-1.5 h-1.5 rounded-full shrink-0 ml-auto"
-													style={{ backgroundColor: STATUS_COLORS[file.status] ?? STATUS_COLORS.uncovered }}
+													style={{
+														backgroundColor: STATUS_COLORS[file.status] ?? STATUS_COLORS.uncovered,
+													}}
 												/>
 											)}
 										</button>
 									))}
 									{filteredFiles.length > 50 && (
-										<div
-											className="px-2 py-1 text-[10px]"
-											style={{ color: theme.colors.textDim }}
-										>
+										<div className="px-2 py-1 text-[10px]" style={{ color: theme.colors.textDim }}>
 											...and {filteredFiles.length - 50} more
 										</div>
 									)}
@@ -582,10 +809,20 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 					</div>
 				)}
 
+				{/* Loading tree indicator */}
+				{isLoadingTree && fullTree.length === 0 && (
+					<div className="flex flex-col items-center justify-center gap-2 py-8 px-4">
+						<Folder className="w-5 h-5 animate-pulse" style={{ color: theme.colors.textDim }} />
+						<span className="text-[11px]" style={{ color: theme.colors.textDim }}>
+							Loading project files...
+						</span>
+					</div>
+				)}
+
 				{/* ====== TREE VIEW (no file selected) ====== */}
 				{binaryAvailable !== false && !isViewingBlame && !isLoading && (
 					<>
-						{trackedFiles.length === 0 ? (
+						{fileTree.length === 0 && !isLoadingTree ? (
 							<EmptyState
 								theme={theme}
 								icon={<Folder className="w-6 h-6 opacity-40" />}
@@ -626,18 +863,12 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 				{!isLoading && needsBuild && (
 					<div className="flex flex-col items-center justify-center gap-3 py-12 px-4 text-center">
 						<Database className="w-6 h-6 opacity-60" style={{ color: theme.colors.warning }} />
-						<span
-							className="text-sm font-medium"
-							style={{ color: theme.colors.textMain }}
-						>
+						<span className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
 							Build Required
 						</span>
-						<span
-							className="text-xs max-w-xs"
-							style={{ color: theme.colors.textDim }}
-						>
-							Annotations exist but the audit database hasn&apos;t been built yet.
-							Build it to view blame data.
+						<span className="text-xs max-w-xs" style={{ color: theme.colors.textDim }}>
+							Annotations exist but the audit database hasn&apos;t been built yet. Build it to view
+							blame data.
 						</span>
 						<button
 							onClick={handleBuild}
@@ -675,12 +906,12 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 					/>
 				)}
 
-				{/* Blame entries */}
+				{/* Blame entries (paginated) */}
 				{!isLoading && !error && !needsBuild && blameEntries.length > 0 && (
 					<div className="flex flex-col">
-						{blameEntries.map((entry, idx) => (
+						{pagedBlameEntries.map((entry, idx) => (
 							<BlameRow
-								key={`${entry.line_start}-${entry.line_end}-${idx}`}
+								key={`${entry.line_start}-${entry.line_end}-${blamePage}-${idx}`}
 								theme={theme}
 								entry={entry}
 								gutterColor={modelColorMap.get(entry.model_name) ?? MODEL_COLORS[0]}
@@ -690,7 +921,7 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 				)}
 			</div>
 
-			{/* Footer */}
+			{/* Footer with pagination */}
 			{isViewingBlame && !isLoading && blameEntries.length > 0 && (
 				<div
 					className="flex items-center justify-between px-3 py-1.5 text-[10px] border-t"
@@ -701,7 +932,34 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 					}}
 				>
 					<span>{blameEntries.length} blame entries</span>
-					<span>{modelColorMap.size} model{modelColorMap.size !== 1 ? 's' : ''}</span>
+					{totalBlamePages > 1 && (
+						<div className="flex items-center gap-1.5">
+							<button
+								onClick={() => setBlamePage((p) => Math.max(0, p - 1))}
+								disabled={blamePage === 0}
+								className="p-0.5 rounded transition-opacity hover:opacity-70 disabled:opacity-30"
+								style={{ color: theme.colors.textDim }}
+								title="Previous page"
+							>
+								<ChevronsLeft className="w-3 h-3" />
+							</button>
+							<span className="tabular-nums">
+								{blamePage + 1} / {totalBlamePages}
+							</span>
+							<button
+								onClick={() => setBlamePage((p) => Math.min(totalBlamePages - 1, p + 1))}
+								disabled={blamePage >= totalBlamePages - 1}
+								className="p-0.5 rounded transition-opacity hover:opacity-70 disabled:opacity-30"
+								style={{ color: theme.colors.textDim }}
+								title="Next page"
+							>
+								<ChevronsRight className="w-3 h-3" />
+							</button>
+						</div>
+					)}
+					<span>
+						{modelColorMap.size} model{modelColorMap.size !== 1 ? 's' : ''}
+					</span>
 				</div>
 			)}
 		</div>
@@ -722,16 +980,10 @@ interface EmptyStateProps {
 const EmptyState: React.FC<EmptyStateProps> = ({ theme, icon, message, detail }) => (
 	<div className="flex flex-col items-center justify-center gap-3 py-12 px-4 text-center">
 		<span style={{ color: theme.colors.textDim }}>{icon}</span>
-		<span
-			className="text-sm font-medium"
-			style={{ color: theme.colors.textMain }}
-		>
+		<span className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
 			{message}
 		</span>
-		<span
-			className="text-xs max-w-xs"
-			style={{ color: theme.colors.textDim }}
-		>
+		<span className="text-xs max-w-xs" style={{ color: theme.colors.textDim }}>
 			{detail}
 		</span>
 	</div>
@@ -772,14 +1024,16 @@ const FileTreeItem: React.FC<FileTreeItemProps> = ({
 						color: theme.colors.textMain,
 					}}
 				>
-					{isExpanded
-						? <ChevronDown className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
-						: <ChevronRight className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
-					}
-					{isExpanded
-						? <FolderOpen className="w-3.5 h-3.5 shrink-0" style={{ color: '#eab308' }} />
-						: <Folder className="w-3.5 h-3.5 shrink-0" style={{ color: '#eab308' }} />
-					}
+					{isExpanded ? (
+						<ChevronDown className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
+					) : (
+						<ChevronRight className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
+					)}
+					{isExpanded ? (
+						<FolderOpen className="w-3.5 h-3.5 shrink-0" style={{ color: '#eab308' }} />
+					) : (
+						<Folder className="w-3.5 h-3.5 shrink-0" style={{ color: '#eab308' }} />
+					)}
 					<span className="text-[11px] font-medium truncate">{node.name}</span>
 					<span
 						className="text-[10px] ml-auto shrink-0 tabular-nums"
@@ -788,17 +1042,18 @@ const FileTreeItem: React.FC<FileTreeItemProps> = ({
 						{node.totalFiles}
 					</span>
 				</button>
-				{isExpanded && node.children.map((child) => (
-					<FileTreeItem
-						key={child.fullPath}
-						node={child}
-						theme={theme}
-						depth={depth + 1}
-						expandedDirs={expandedDirs}
-						onToggleDir={onToggleDir}
-						onSelectFile={onSelectFile}
-					/>
-				))}
+				{isExpanded &&
+					node.children.map((child) => (
+						<FileTreeItem
+							key={child.fullPath}
+							node={child}
+							theme={theme}
+							depth={depth + 1}
+							expandedDirs={expandedDirs}
+							onToggleDir={onToggleDir}
+							onSelectFile={onSelectFile}
+						/>
+					))}
 			</>
 		);
 	}
@@ -814,6 +1069,7 @@ const FileTreeItem: React.FC<FileTreeItemProps> = ({
 			style={{
 				paddingLeft: `${8 + indent + 16}px`,
 				color: theme.colors.textMain,
+				opacity: node.fileInfo ? 1 : 0.45,
 			}}
 			title={node.fullPath}
 		>
@@ -821,10 +1077,7 @@ const FileTreeItem: React.FC<FileTreeItemProps> = ({
 			<span className="text-[11px] font-mono truncate">{node.name}</span>
 			<span className="flex items-center gap-1.5 ml-auto shrink-0">
 				{count != null && count > 0 && (
-					<span
-						className="text-[10px] tabular-nums"
-						style={{ color: theme.colors.textDim }}
-					>
+					<span className="text-[10px] tabular-nums" style={{ color: theme.colors.textDim }}>
 						{count}
 					</span>
 				)}
@@ -863,10 +1116,7 @@ const BlameRow: React.FC<BlameRowProps> = ({ theme, entry, gutterColor }) => {
 			style={{ borderColor: theme.colors.border }}
 		>
 			{/* Color-coded gutter */}
-			<div
-				className="w-1 self-stretch shrink-0"
-				style={{ backgroundColor: gutterColor }}
-			/>
+			<div className="w-1 self-stretch shrink-0" style={{ backgroundColor: gutterColor }} />
 
 			{/* Content */}
 			<div className="flex items-center gap-2 flex-1 min-w-0 px-3 py-2">
@@ -889,10 +1139,7 @@ const BlameRow: React.FC<BlameRowProps> = ({ theme, entry, gutterColor }) => {
 						{entry.model_name}
 					</span>
 					{entry.model_version && (
-						<span
-							className="text-[10px] shrink-0"
-							style={{ color: theme.colors.textDim }}
-						>
+						<span className="text-[10px] shrink-0" style={{ color: theme.colors.textDim }}>
 							v{entry.model_version}
 						</span>
 					)}
