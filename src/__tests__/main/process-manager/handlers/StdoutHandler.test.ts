@@ -47,7 +47,10 @@ vi.mock('../../../../main/parsers/error-patterns', () => ({
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────
 
-import { StdoutHandler, extractDeniedPath } from '../../../../main/process-manager/handlers/StdoutHandler';
+import {
+	StdoutHandler,
+	extractDeniedPath,
+} from '../../../../main/process-manager/handlers/StdoutHandler';
 import type { ManagedProcess } from '../../../../main/process-manager/types';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -1661,5 +1664,46 @@ describe('extractDeniedPath', () => {
 	it('handles tilde paths', () => {
 		const result = extractDeniedPath("'~/projects/foo' not in workspace");
 		expect(result).toBe('~/projects/foo');
+	});
+
+	// Windows path patterns
+	it('extracts Windows quoted directory path', () => {
+		const result = extractDeniedPath("'C:\\Users\\dev\\project' not in workspace");
+		expect(result).toBe('C:\\Users\\dev\\project');
+	});
+
+	it('extracts parent directory from Windows file path', () => {
+		const result = extractDeniedPath("'C:\\Users\\dev\\project\\main.ts' not in workspace");
+		expect(result).toBe('C:\\Users\\dev\\project');
+	});
+
+	it('extracts Windows path with "is outside" pattern', () => {
+		const result = extractDeniedPath("'D:\\workspace\\data' is outside the allowed workspace");
+		expect(result).toBe('D:\\workspace\\data');
+	});
+
+	it('extracts Windows path with permission denied pattern', () => {
+		const result = extractDeniedPath("'C:\\Windows\\config.json' permission denied");
+		expect(result).toBe('C:\\Windows');
+	});
+
+	it('extracts bare Windows path without quotes', () => {
+		const result = extractDeniedPath('C:\\Users\\dev\\project not in workspace');
+		expect(result).toBe('C:\\Users\\dev\\project');
+	});
+
+	it('extracts parent dir for bare Windows file path', () => {
+		const result = extractDeniedPath('C:\\Users\\dev\\project\\index.js not in workspace');
+		expect(result).toBe('C:\\Users\\dev\\project');
+	});
+
+	it('extracts Windows path with forward slashes', () => {
+		const result = extractDeniedPath("'C:/Users/dev/project' not in workspace");
+		expect(result).toBe('C:/Users/dev/project');
+	});
+
+	it('extracts Windows path from generic "path" prefix', () => {
+		const result = extractDeniedPath("path 'C:\\Users\\dev\\src' not in workspace");
+		expect(result).toBe('C:\\Users\\dev\\src');
 	});
 });
