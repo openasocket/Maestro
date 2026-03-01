@@ -193,6 +193,11 @@ interface MainPanelProps {
 	activeFileTab?: FilePreviewTab | null;
 	onFileTabSelect?: (tabId: string) => void;
 	onFileTabClose?: (tabId: string) => void;
+
+	// Terminal tab callbacks (Phase 8)
+	onTerminalTabSelect?: (tabId: string) => void;
+	onTerminalTabClose?: (tabId: string) => void;
+	onTerminalTabRename?: (tabId: string) => void;
 	onOpenFileTab?: (filePath: string) => void;
 	/** Handler to update file tab editMode when toggled in FilePreview */
 	onFileTabEditModeChange?: (tabId: string, editMode: boolean) => void;
@@ -479,6 +484,10 @@ export const MainPanel = React.memo(
 			onFileTabEditContentChange,
 			onFileTabScrollPositionChange,
 			onFileTabSearchQueryChange,
+			// Terminal tab callbacks (Phase 8)
+			onTerminalTabSelect,
+			onTerminalTabClose,
+			onTerminalTabRename,
 		} = props;
 
 		// Get the active tab for header display
@@ -1455,9 +1464,8 @@ export const MainPanel = React.memo(
 							</div>
 						)}
 
-						{/* Tab Bar - always shown in AI mode when we have tabs (includes both AI and file tabs) */}
-						{activeSession.inputMode === 'ai' &&
-							activeSession.aiTabs &&
+						{/* Tab Bar - shown in AI and terminal modes when we have tabs (AI + file + terminal) */}
+						{activeSession.aiTabs &&
 							activeSession.aiTabs.length > 0 &&
 							onTabSelect &&
 							onTabClose &&
@@ -1494,6 +1502,12 @@ export const MainPanel = React.memo(
 									activeFileTabId={activeFileTabId}
 									onFileTabSelect={onFileTabSelect}
 									onFileTabClose={onFileTabClose}
+									// Terminal tab props (Phase 8)
+									activeTerminalTabId={activeSession.activeTerminalTabId}
+									inputMode={activeSession.inputMode}
+									onTerminalTabSelect={onTerminalTabSelect}
+									onTerminalTabClose={onTerminalTabClose}
+									onTerminalTabRename={onTerminalTabRename}
 									// Accessibility
 									colorBlindMode={colorBlindMode}
 								/>
