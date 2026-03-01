@@ -18,6 +18,7 @@ import { useCallback, useState } from 'react';
 import type { ToolType, Session, AITab } from '../../types';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { createTerminalTab } from '../../utils/terminalTabHelpers';
 import { useUIStore } from '../../stores/uiStore';
 import { getModalActions } from '../../stores/modalStore';
 import { notifyToast } from '../../stores/notificationStore';
@@ -189,6 +190,7 @@ export function useSessionCrud(deps: UseSessionCrudDeps): UseSessionCrudReturn {
 
 				const currentDefaults = useSettingsStore.getState();
 				const initialTabId = generateId();
+				const initialTerminalTab = createTerminalTab(currentDefaults.defaultShell || 'zsh', workingDir, null);
 				const initialTab: AITab = {
 					id: initialTabId,
 					agentSessionId: null,
@@ -246,9 +248,12 @@ export function useSessionCrud(deps: UseSessionCrudDeps): UseSessionCrudReturn {
 					closedTabHistory: [],
 					filePreviewTabs: [],
 					activeFileTabId: null,
-					terminalTabs: [],
+					terminalTabs: [initialTerminalTab],
 					activeTerminalTabId: null,
-					unifiedTabOrder: [{ type: 'ai' as const, id: initialTabId }],
+					unifiedTabOrder: [
+						{ type: 'ai' as const, id: initialTabId },
+						{ type: 'terminal' as const, id: initialTerminalTab.id },
+					],
 					unifiedClosedTabHistory: [],
 					nudgeMessage,
 					customPath,
