@@ -538,13 +538,6 @@ export function TabBar({
 	const colors = useThemeColors();
 	const [popoverState, setPopoverState] = useState<TabPopoverState | null>(null);
 
-	// Don't render if there's only one tab
-	if (tabs.length <= 1) {
-		return null;
-	}
-
-	const canClose = tabs.length > 1;
-
 	const handleTabLongPress = useCallback(
 		(tab: AITabData, tabIdx: number, rect: DOMRect) => {
 			setPopoverState({ tab, tabIndex: tabIdx, anchorRect: rect });
@@ -555,6 +548,13 @@ export function TabBar({
 	const handleClosePopover = useCallback(() => {
 		setPopoverState(null);
 	}, []);
+
+	// Don't render if there's only one tab
+	if (tabs.length <= 1) {
+		return null;
+	}
+
+	const canClose = tabs.length > 1;
 
 	return (
 		<div
