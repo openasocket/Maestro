@@ -1791,6 +1791,7 @@ function ExtractionDiagnosticRow({
 				exit: { label: 'exit', color: '#6366f1' },
 				'mid-session': { label: 'mid-session', color: '#f59e0b' },
 				retroactive: { label: 'retroactive', color: '#8b5cf6' },
+				'per-turn': { label: 'per-turn', color: '#10b981' },
 			}[diagnostic.trigger]
 		: null;
 

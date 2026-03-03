@@ -95,7 +95,7 @@ const EXTRACTION_COST_USD =
 // ─── Deduplication key fields per job type ───────────────────────────────────
 
 const DEDUP_KEY_FIELDS: Record<MemoryJobType, string[]> = {
-	'experience-extraction': ['sessionId'],
+	'experience-extraction': ['sessionId', 'turnIndex'],
 	'effectiveness-update': ['sessionId'],
 	consolidation: ['projectPath', 'skillAreaId'],
 	'confidence-decay': [],
@@ -323,13 +323,34 @@ export class MemoryJobQueue {
 						this.emitStatus();
 					};
 
-					await analyzer.analyzeCompletedSession(
-						job.payload.sessionId as string,
-						job.payload.projectPath as string,
-						job.payload.agentType as string,
-						(job.payload.trigger as 'exit' | 'retroactive' | 'mid-session') ?? 'exit',
-						onProgress
-					);
+					// Route per-turn extractions to analyzeTurn()
+					if (job.payload.trigger === 'per-turn' && job.payload.turnIndex != null) {
+						await analyzer.analyzeTurn(
+							job.payload.sessionId as string,
+							job.payload.projectPath as string,
+							job.payload.agentType as string,
+							job.payload.turnIndex as number,
+							(job.payload.interestScore as number) ?? 0.5,
+							job.payload.historyEntry as {
+								summary: string;
+								fullResponse?: string;
+								success?: boolean;
+								elapsedTimeMs?: number;
+							},
+							(job.payload.vibesAnnotationsDelta as number) ?? 0,
+							(job.payload.vibesManifestDelta as number) ?? 0,
+							onProgress
+						);
+					} else {
+						// Existing path: full session analysis
+						await analyzer.analyzeCompletedSession(
+							job.payload.sessionId as string,
+							job.payload.projectPath as string,
+							job.payload.agentType as string,
+							(job.payload.trigger as 'exit' | 'retroactive' | 'mid-session') ?? 'exit',
+							onProgress
+						);
+					}
 
 					// Clear progress after completion
 					this.currentProgress = null;

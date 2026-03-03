@@ -600,6 +600,11 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 				// Never block user writes — degrade silently
 			}
 
+			// Emit turn-start event for per-turn extraction (EXP-TURN-02)
+			import('../../memory/turn-tracker')
+				.then(({ getTurnTracker }) => getTurnTracker().onTurnStart(sessionId))
+				.catch(() => {});
+
 			logger.debug(`Writing to process: ${sessionId}`, LOG_CONTEXT, {
 				sessionId,
 				dataLength: effectiveData.length,

@@ -477,6 +477,11 @@ export function setupExitListener(
 			.then(({ getLiveContextQueue }) => getLiveContextQueue().clearSession(sessionId))
 			.catch(() => {});
 
+		// Clean up turn tracker state (EXP-TURN-02)
+		import('../memory/turn-tracker')
+			.then(({ getTurnTracker }) => getTurnTracker().clearSession(sessionId))
+			.catch(() => {});
+
 		// Broadcast exit to web clients
 		const webServer = getWebServer();
 		if (webServer) {

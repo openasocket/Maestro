@@ -231,6 +231,14 @@ export interface MemoryConfig {
 	enableCrossAgentBroadcast: boolean;
 	/** Minimum seconds between live memory searches per session — default 60 */
 	liveSearchCooldownSeconds: number;
+	/** Enable per-turn experience extraction (requires enableExperienceExtraction) — default false */
+	enablePerTurnExtraction: boolean;
+	/** Minimum interestingness score (0.0-1.0) for a turn to trigger extraction — default 0.4 */
+	perTurnInterestingnessThreshold: number;
+	/** Per-turn extraction cooldown per session in seconds — default 60 */
+	perTurnCooldownSeconds: number;
+	/** Maximum per-turn extractions per session — default 10 */
+	perTurnMaxExtractionsPerSession: number;
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -258,6 +266,10 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	liveInjectionMaxCount: 3,
 	enableCrossAgentBroadcast: false,
 	liveSearchCooldownSeconds: 60,
+	enablePerTurnExtraction: false,
+	perTurnInterestingnessThreshold: 0.4,
+	perTurnCooldownSeconds: 60,
+	perTurnMaxExtractionsPerSession: 10,
 };
 
 // ─── Job Queue Status & Token Tracking ────────────────────────────────────
@@ -285,7 +297,7 @@ export interface ExtractionDiagnostic {
 	experiencesStored?: number;
 	tokenUsage?: { inputTokens: number; outputTokens: number };
 	providerUsed?: string;
-	trigger?: 'exit' | 'retroactive' | 'mid-session';
+	trigger?: 'exit' | 'retroactive' | 'mid-session' | 'per-turn';
 }
 
 /** Real-time progress of an active experience extraction. */

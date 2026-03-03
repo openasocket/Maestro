@@ -25,7 +25,7 @@ import type { ProcessManager } from '../process-manager';
 import type { ProcessListenerDependencies } from './types';
 import { GROUP_CHAT_PREFIX } from './types';
 import type { UsageStats, ToolExecution } from '../process-manager/types';
-import type { AgentError } from '../../shared/types';
+import type { AgentError, HistoryEntry } from '../../shared/types';
 
 export interface SessionMonitorState {
 	sessionId: string;
@@ -45,6 +45,24 @@ export interface SessionMonitorState {
 	lastSearchAt: number;
 	/** Effective token budget (reduced when context >70%) */
 	effectiveBudget: number;
+	/** Current turn index (incremented on each turn-complete for this session) */
+	turnIndex: number;
+	/** Timestamp when the current turn started (set on turn-start) */
+	currentTurnStartedAt: number;
+	/** Tool executions accumulated during the current turn */
+	currentTurnToolExecutions: ToolExecution[];
+	/** Error events accumulated during the current turn */
+	currentTurnErrors: AgentError[];
+	/** Usage stats from the most recent usage event in this turn */
+	currentTurnUsage: UsageStats | null;
+	/** Annotation count snapshot at turn start (for computing VIBES delta) */
+	annotationCountAtTurnStart: number;
+	/** Manifest entry count snapshot at turn start */
+	manifestCountAtTurnStart: number;
+	/** Number of per-turn extractions triggered in this session */
+	perTurnExtractionCount: number;
+	/** Timestamp of last per-turn extraction (for cooldown) */
+	lastPerTurnExtractionAt: number;
 }
 
 /** Memory store shape used by this listener */
@@ -81,6 +99,138 @@ export interface MemoryModuleAccessors {
 	getMemoryStore: () => MemoryStoreAccessor;
 	getLiveContextQueue: () => LiveQueueAccessor;
 }
+
+// ─── Per-Turn Interestingness Scoring ──────────────────────────────────────
+
+export interface TurnSignals {
+	turnDurationMs: number;
+	errors: AgentError[];
+	toolExecutions: ToolExecution[];
+	usage: UsageStats | null;
+	vibesAnnotationsDelta: number;
+	vibesManifestDelta: number;
+	turnIndex: number;
+	entrySuccess: boolean | undefined;
+}
+
+export function scoreTurnInterestingness(signals: TurnSignals): number {
+	let score = 0;
+
+	// Turn duration (longer turns = more likely substantive work)
+	if (signals.turnDurationMs > 30_000) score += 0.1;
+	if (signals.turnDurationMs > 120_000) score += 0.15;
+
+	// Errors (especially error→fix pattern)
+	if (signals.errors.length > 0) score += 0.3;
+	if (signals.errors.length > 0 && signals.entrySuccess === true) score += 0.2;
+
+	// Tool execution volume
+	if (signals.toolExecutions.length > 3) score += 0.1;
+	if (signals.toolExecutions.length > 8) score += 0.15;
+
+	// VIBES richness
+	if (signals.vibesAnnotationsDelta > 5) score += 0.15;
+	if (signals.vibesManifestDelta > 0) score += 0.1;
+
+	// Output token volume
+	if (signals.usage) {
+		const outputTokens = signals.usage.outputTokens ?? 0;
+		if (outputTokens > 2000) score += 0.1;
+		if (outputTokens > 5000) score += 0.1;
+	}
+
+	// Failed turns teach
+	if (signals.entrySuccess === false) score += 0.15;
+
+	// Early turns (setup/context) get penalty
+	if (signals.turnIndex <= 2) score *= 0.5;
+
+	return Math.min(score, 1.0);
+}
+
+// ─── VIBES Delta Tracking ──────────────────────────────────────────────────
+
+async function snapshotVibesCounts(state: SessionMonitorState): Promise<void> {
+	try {
+		const fs = await import('fs/promises');
+		const path = await import('path');
+
+		// Count annotation lines
+		try {
+			const annotPath = path.join(state.projectPath, '.ai-audit', 'annotations.jsonl');
+			const content = await fs.readFile(annotPath, 'utf-8');
+			state.annotationCountAtTurnStart = content
+				.trim()
+				.split('\n')
+				.filter((l) => l.length > 0).length;
+		} catch {
+			state.annotationCountAtTurnStart = 0;
+		}
+
+		// Count manifest entries
+		try {
+			const manifestPath = path.join(state.projectPath, '.ai-audit', 'manifest.json');
+			const content = await fs.readFile(manifestPath, 'utf-8');
+			const manifest = JSON.parse(content);
+			const entries = manifest.entries;
+			state.manifestCountAtTurnStart = Array.isArray(entries)
+				? entries.length
+				: entries && typeof entries === 'object'
+					? Object.keys(entries).length
+					: 0;
+		} catch {
+			state.manifestCountAtTurnStart = 0;
+		}
+	} catch {
+		// VIBES not available — leave snapshots at 0
+	}
+}
+
+async function computeVibesDeltas(
+	state: SessionMonitorState
+): Promise<{ annotationsDelta: number; manifestDelta: number }> {
+	let currentAnnotations = 0;
+	let currentManifest = 0;
+
+	try {
+		const fs = await import('fs/promises');
+		const path = await import('path');
+
+		try {
+			const annotPath = path.join(state.projectPath, '.ai-audit', 'annotations.jsonl');
+			const content = await fs.readFile(annotPath, 'utf-8');
+			currentAnnotations = content
+				.trim()
+				.split('\n')
+				.filter((l) => l.length > 0).length;
+		} catch {
+			/* no file */
+		}
+
+		try {
+			const manifestPath = path.join(state.projectPath, '.ai-audit', 'manifest.json');
+			const content = await fs.readFile(manifestPath, 'utf-8');
+			const manifest = JSON.parse(content);
+			const entries = manifest.entries;
+			currentManifest = Array.isArray(entries)
+				? entries.length
+				: entries && typeof entries === 'object'
+					? Object.keys(entries).length
+					: 0;
+		} catch {
+			/* no file */
+		}
+	} catch {
+		/* fs import failed */
+	}
+
+	return {
+		annotationsDelta: Math.max(0, currentAnnotations - state.annotationCountAtTurnStart),
+		manifestDelta: Math.max(0, currentManifest - state.manifestCountAtTurnStart),
+	};
+}
+
+// ─── Memory Monitor Constants ──────────────────────────────────────────────
 
 /** Common agent tools that don't indicate a novel domain */
 const COMMON_TOOLS = new Set(['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Task']);
@@ -135,6 +285,15 @@ export function setupMemoryMonitorListener(
 				toolDomains: new Set(),
 				lastSearchAt: 0,
 				effectiveBudget: 750,
+				turnIndex: 0,
+				currentTurnStartedAt: 0,
+				currentTurnToolExecutions: [],
+				currentTurnErrors: [],
+				currentTurnUsage: null,
+				annotationCountAtTurnStart: 0,
+				manifestCountAtTurnStart: 0,
+				perTurnExtractionCount: 0,
+				lastPerTurnExtractionAt: 0,
 			};
 			sessionStates.set(sessionId, state);
 		}
@@ -222,6 +381,9 @@ export function setupMemoryMonitorListener(
 		} else {
 			state.effectiveBudget = 750;
 		}
+
+		// Per-turn accumulator: store latest usage stats
+		state.currentTurnUsage = usageStats;
 	});
 
 	// 2. Error event: track error counts, trigger on repeated errors
@@ -235,6 +397,9 @@ export function setupMemoryMonitorListener(
 		state.errorCounts.set(errorType, count);
 		state.lastErrorAt = Date.now();
 
+		// Per-turn accumulator: track errors for interestingness scoring
+		state.currentTurnErrors.push(error);
+
 		if (count === 2) {
 			const query = error.message || errorType;
 			triggerMemorySearch(state, query, 'monitoring').catch(() => {});
@@ -245,6 +410,10 @@ export function setupMemoryMonitorListener(
 	processManager.on('tool-execution', (sessionId: string, toolExec: ToolExecution) => {
 		const state = getState(sessionId);
 		if (!state) return;
+
+		// Per-turn accumulator: track tool executions for interestingness scoring
+		state.currentTurnToolExecutions.push(toolExec);
+
 		if (state.effectiveBudget === 0) return;
 
 		const toolName = toolExec.toolName;
@@ -276,7 +445,141 @@ export function setupMemoryMonitorListener(
 		}
 	});
 
-	// 5. Periodic trigger: check via interval for write-count based refreshes
+	// 5. Per-turn tracking: subscribe to turn-start and turn-complete events
+	import('../memory/turn-tracker')
+		.then(({ getTurnTracker }) => {
+			const turnTracker = getTurnTracker();
+
+			// On turn-start: reset accumulators, snapshot VIBES counts
+			turnTracker.on('turn-start', ({ sessionId }: { sessionId: string }) => {
+				const state = sessionStates.get(sessionId);
+				if (!state) return;
+
+				state.currentTurnStartedAt = Date.now();
+				state.currentTurnToolExecutions = [];
+				state.currentTurnErrors = [];
+				state.currentTurnUsage = null;
+
+				// Snapshot VIBES file sizes for delta tracking
+				snapshotVibesCounts(state).catch(() => {});
+			});
+
+			// On turn-complete: compute signals, score interestingness, maybe enqueue extraction
+			turnTracker.on(
+				'turn-complete',
+				async ({
+					sessionId,
+					entry,
+					turnIndex,
+				}: {
+					sessionId: string;
+					entry: HistoryEntry;
+					turnIndex: number;
+				}) => {
+					const state = sessionStates.get(sessionId);
+					if (!state) return;
+
+					state.turnIndex = turnIndex;
+
+					// Skip excluded session types (same exclusions as existing monitor)
+					if (sessionId.startsWith(GROUP_CHAT_PREFIX)) return;
+					if (/batch-\d+$/.test(sessionId)) return;
+					if (/synopsis-\d+$/.test(sessionId)) return;
+
+					// Check config
+					try {
+						const accessors_ = memoryAccessors;
+						if (!accessors_) return;
+
+						const store = accessors_.getMemoryStore();
+						const config = await store.getConfig();
+						if (
+							!config.enabled ||
+							!config.enableExperienceExtraction ||
+							!config.enablePerTurnExtraction
+						)
+							return;
+
+						// Check per-session extraction cap
+						const maxExtractions =
+							(config.perTurnMaxExtractionsPerSession as number | undefined) ?? 10;
+						if (state.perTurnExtractionCount >= maxExtractions) return;
+
+						// Check per-session cooldown
+						const cooldownMs = ((config.perTurnCooldownSeconds as number | undefined) ?? 60) * 1000;
+						if (Date.now() - state.lastPerTurnExtractionAt < cooldownMs) return;
+
+						// Check high context usage (same guard as existing monitor)
+						if (state.lastContextUsage > 90) return;
+
+						// Compute VIBES deltas
+						const vibesDeltas = await computeVibesDeltas(state);
+
+						// Build turn signals and score
+						const turnDurationMs =
+							state.currentTurnStartedAt > 0
+								? Date.now() - state.currentTurnStartedAt
+								: (entry.elapsedTimeMs ?? 0);
+
+						const signals = {
+							turnDurationMs,
+							errors: state.currentTurnErrors,
+							toolExecutions: state.currentTurnToolExecutions,
+							usage: state.currentTurnUsage,
+							vibesAnnotationsDelta: vibesDeltas.annotationsDelta,
+							vibesManifestDelta: vibesDeltas.manifestDelta,
+							turnIndex,
+							entrySuccess: entry.success,
+						};
+
+						const score = scoreTurnInterestingness(signals);
+						const threshold = (config.perTurnInterestingnessThreshold as number | undefined) ?? 0.4;
+
+						if (score < threshold) return;
+
+						// Enqueue per-turn extraction
+						const { getMemoryJobQueue } = await import('../memory/memory-job-queue');
+						getMemoryJobQueue().enqueue({
+							type: 'experience-extraction',
+							priority: 4,
+							payload: {
+								sessionId: state.sessionId,
+								projectPath: state.projectPath,
+								agentType: state.agentType,
+								trigger: 'per-turn',
+								turnIndex,
+								interestScore: score,
+								historyEntry: {
+									summary: entry.summary,
+									fullResponse: entry.fullResponse?.slice(0, 1500),
+									success: entry.success,
+									elapsedTimeMs: entry.elapsedTimeMs,
+								},
+								vibesAnnotationsDelta: vibesDeltas.annotationsDelta,
+								vibesManifestDelta: vibesDeltas.manifestDelta,
+							},
+						});
+
+						// Update per-turn tracking state
+						state.perTurnExtractionCount++;
+						state.lastPerTurnExtractionAt = Date.now();
+
+						logger.debug('[MemoryMonitor] Per-turn extraction enqueued', 'MemoryMonitor', {
+							sessionId: state.sessionId,
+							turnIndex,
+							score: score.toFixed(2),
+						});
+					} catch {
+						// Non-critical — extraction will happen on exit
+					}
+				}
+			);
+		})
+		.catch(() => {
+			// TurnTracker not available — per-turn extraction won't work
+		});
+
+	// 6. Periodic trigger: check via interval for write-count based refreshes
 	// Also triggers mid-session experience extraction at every 10th write
 	const midSessionCheckpoints = new Set<string>(); // tracks "sessionId:checkpoint" keys
 	const periodicInterval = setInterval(() => {

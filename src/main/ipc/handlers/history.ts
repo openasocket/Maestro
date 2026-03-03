@@ -111,6 +111,12 @@ export function registerHistoryHandlers(): void {
 			const sessionId = entry.sessionId || ORPHANED_SESSION_ID;
 			historyManager.addEntry(sessionId, entry.projectPath, entry);
 			logger.info(`Added history entry: ${entry.type}`, LOG_CONTEXT, { summary: entry.summary });
+
+			// Emit turn-complete event for per-turn extraction (EXP-TURN-02)
+			import('../../memory/turn-tracker')
+				.then(({ getTurnTracker }) => getTurnTracker().onTurnComplete(sessionId, entry))
+				.catch(() => {});
+
 			return true;
 		})
 	);
