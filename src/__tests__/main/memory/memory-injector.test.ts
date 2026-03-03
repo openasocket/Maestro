@@ -46,6 +46,7 @@ const mockCascadingSearch = vi.fn<[], Promise<MemorySearchResult[]>>();
 const mockRecordInjection = vi.fn<[], Promise<void>>();
 const mockHybridSearch = vi.fn<[], Promise<MemorySearchResult[]>>();
 const mockGenerateProjectDigest = vi.fn<[], Promise<string | null>>();
+const mockSelectMatchingPersonas = vi.fn<[], Promise<Array<unknown>>>();
 
 vi.mock('../../../main/memory/memory-store', () => ({
 	getMemoryStore: () => ({
@@ -54,6 +55,7 @@ vi.mock('../../../main/memory/memory-store', () => ({
 		hybridSearch: mockHybridSearch,
 		searchFlatScope: vi.fn().mockResolvedValue([]),
 		generateProjectDigest: mockGenerateProjectDigest,
+		selectMatchingPersonas: mockSelectMatchingPersonas,
 	}),
 }));
 
@@ -121,6 +123,7 @@ describe('MemoryInjector', () => {
 		vi.clearAllMocks();
 		mockRecordInjection.mockResolvedValue(undefined);
 		mockGenerateProjectDigest.mockResolvedValue(null);
+		mockSelectMatchingPersonas.mockResolvedValue([]);
 		setupMockResults([]);
 	});
 

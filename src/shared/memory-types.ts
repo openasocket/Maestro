@@ -494,6 +494,8 @@ export interface MemorySearchResult {
 	personaName?: string;
 	/** Persona behavioral directive — injected once per persona group in the XML block */
 	personaSystemPrompt?: string;
+	/** ID of the persona this memory came from (for tracking contributions) */
+	personaId?: string;
 	/** Which skill area this memory came from */
 	skillAreaName?: string;
 }

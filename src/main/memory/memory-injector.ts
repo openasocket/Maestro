@@ -214,6 +214,37 @@ function formatXmlBlock(selected: MemorySearchResult[], includeComments: boolean
 	return `<agent-memories>\nRelevant knowledge for this task:\n\n${sections.join('\n\n')}\n</agent-memories>`;
 }
 
+/**
+ * Render persona/role behavioral directives as an XML block without memory entries.
+ * Used when personas match but have no memories in matching skill areas.
+ */
+function formatPersonaDirectivesOnly(
+	matchedPersonas: Array<{
+		persona: { systemPrompt?: string; id: string };
+		personaName: string;
+		roleName: string;
+		roleSystemPrompt: string;
+	}>
+): string {
+	const seenRoles = new Set<string>();
+	const seenPersonas = new Set<string>();
+	const parts: string[] = [];
+
+	for (const mp of matchedPersonas) {
+		if (mp.roleSystemPrompt && mp.roleName && !seenRoles.has(mp.roleName)) {
+			parts.push(`<role-directive>\n${mp.roleSystemPrompt}\n</role-directive>`);
+			seenRoles.add(mp.roleName);
+		}
+		if (mp.persona.systemPrompt && mp.personaName && !seenPersonas.has(mp.personaName)) {
+			parts.push(`<persona-directive>\n${mp.persona.systemPrompt}\n</persona-directive>`);
+			seenPersonas.add(mp.personaName);
+		}
+	}
+
+	if (parts.length === 0) return '';
+	return `<agent-persona>\n${parts.join('\n\n')}\n</agent-persona>`;
+}
+
 // ─── Core Injection ─────────────────────────────────────────────────────────
 
 /**
@@ -416,8 +447,34 @@ export async function injectMemories(
 
 	let totalTokens = finalSelected.reduce((sum, r) => sum + r.entry.tokenEstimate, 0);
 
-	// Nothing selected → return unchanged
+	// Nothing selected → inject persona directives if any match, else return unchanged
 	if (finalSelected.length === 0) {
+		const matchedPersonas = await store.selectMatchingPersonas(
+			query(prompt),
+			searchConfig,
+			agentType,
+			projectPath
+		);
+
+		if (matchedPersonas.length > 0) {
+			const directiveBlock = formatPersonaDirectivesOnly(matchedPersonas);
+			if (directiveBlock) {
+				const tokenCount = Math.ceil(directiveBlock.length / 4);
+				return {
+					injectedPrompt: directiveBlock + '\n\n' + prompt,
+					injectedIds: [],
+					tokenCount,
+					personaContributions: matchedPersonas.map((mp) => ({
+						personaId: mp.persona.id,
+						personaName: mp.personaName,
+						count: 0,
+					})),
+					flatScopeCounts: { project: 0, global: 0 },
+					scopeGroups: [],
+				};
+			}
+		}
+
 		return {
 			injectedPrompt: prompt,
 			injectedIds: [],
@@ -487,7 +544,7 @@ export async function injectMemories(
 	const xmlBlock = formatXmlBlock(finalSelected, includeComments);
 
 	// Track persona contributions
-	const personaMap = new Map<string, { personaName: string; count: number }>();
+	const personaMap = new Map<string, { personaName: string; personaId: string; count: number }>();
 	let projectCount = 0;
 	let globalCount = 0;
 
@@ -497,7 +554,11 @@ export async function injectMemories(
 			if (existing) {
 				existing.count++;
 			} else {
-				personaMap.set(result.personaName, { personaName: result.personaName, count: 1 });
+				personaMap.set(result.personaName, {
+					personaName: result.personaName,
+					personaId: result.personaId ?? '',
+					count: 1,
+				});
 			}
 		} else if (result.entry.scope === 'project') {
 			projectCount++;
@@ -507,7 +568,7 @@ export async function injectMemories(
 	}
 
 	const personaContributions = Array.from(personaMap.entries()).map(([, v]) => ({
-		personaId: '', // Persona ID not tracked on search results — use name
+		personaId: v.personaId,
 		personaName: v.personaName,
 		count: v.count,
 	}));

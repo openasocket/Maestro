@@ -1557,6 +1557,7 @@ export class MemoryStore {
 			skill: (typeof registry.skillAreas)[0];
 			personaName: string;
 			personaSystemPrompt: string;
+			personaId: string;
 			roleName: string;
 			roleSystemPrompt: string;
 			skillAreaName: string;
@@ -1577,6 +1578,7 @@ export class MemoryStore {
 					skill,
 					personaName,
 					personaSystemPrompt: persona.systemPrompt ?? '',
+					personaId: persona.id,
 					roleName,
 					roleSystemPrompt,
 					skillAreaName: skill.name,
@@ -1591,6 +1593,7 @@ export class MemoryStore {
 				skill,
 				personaName,
 				personaSystemPrompt,
+				personaId,
 				roleName,
 				roleSystemPrompt,
 				skillAreaName,
@@ -1610,6 +1613,7 @@ export class MemoryStore {
 						roleSystemPrompt,
 						personaName,
 						personaSystemPrompt,
+						personaId,
 						skillAreaName,
 					});
 				}
@@ -1620,6 +1624,7 @@ export class MemoryStore {
 				skill,
 				personaName,
 				personaSystemPrompt,
+				personaId,
 				roleName,
 				roleSystemPrompt,
 				skillAreaName,
@@ -1641,6 +1646,7 @@ export class MemoryStore {
 						roleSystemPrompt,
 						personaName,
 						personaSystemPrompt,
+						personaId,
 						skillAreaName,
 					});
 				}
