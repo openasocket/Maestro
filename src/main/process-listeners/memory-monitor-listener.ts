@@ -616,6 +616,8 @@ export function setupMemoryMonitorListener(
 								const store = accessors_.getMemoryStore();
 								const config = await store.getConfig();
 								if (!config.enabled || !config.enableExperienceExtraction) return;
+								// Skip mid-session extraction when per-turn extraction handles it
+								if (config.enablePerTurnExtraction) return;
 
 								const { getMemoryJobQueue } = await import('../memory/memory-job-queue');
 								getMemoryJobQueue().enqueue({

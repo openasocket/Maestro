@@ -18,7 +18,7 @@ import type {
 	ExtractionProgress,
 } from '../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../shared/memory-types';
-import { experienceExtractionPrompt } from '../../prompts';
+import { experienceExtractionPrompt, experienceExtractionTurnPrompt } from '../../prompts';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -668,7 +668,7 @@ export class ExperienceAnalyzer {
 			const { execFile } = await import('child_process');
 			const { promisify } = await import('util');
 			const execFileAsync = promisify(execFile);
-			const { stdout } = await execFileAsync('git', ['diff', 'HEAD~1..HEAD'], {
+			const { stdout } = await execFileAsync('git', ['diff', 'HEAD'], {
 				cwd: projectPath,
 				timeout: 5000,
 			});
@@ -737,9 +737,7 @@ export class ExperienceAnalyzer {
 		turnIndex: number,
 		interestScore: number
 	): string {
-		const { experienceExtractionTurnPrompt } = require('../../prompts');
-
-		let prompt = experienceExtractionTurnPrompt as string;
+		let prompt = experienceExtractionTurnPrompt;
 
 		prompt = prompt.replace('{{AGENT_TYPE}}', input.agentType);
 		prompt = prompt.replace('{{PROJECT_PATH}}', input.projectPath);

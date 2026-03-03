@@ -91,6 +91,13 @@ const EXTRACTION_TOTAL_TOKENS = EXTRACTION_INPUT_TOKENS + EXTRACTION_OUTPUT_TOKE
 const EXTRACTION_COST_USD =
 	(EXTRACTION_INPUT_TOKENS / 1_000_000) * INPUT_RATE_PER_MTOK +
 	(EXTRACTION_OUTPUT_TOKENS / 1_000_000) * OUTPUT_RATE_PER_MTOK;
+/** Estimated tokens per per-turn extraction (3K input + 1K output) */
+const TURN_EXTRACTION_INPUT_TOKENS = 3000;
+const TURN_EXTRACTION_OUTPUT_TOKENS = 1000;
+const TURN_EXTRACTION_TOTAL_TOKENS = TURN_EXTRACTION_INPUT_TOKENS + TURN_EXTRACTION_OUTPUT_TOKENS;
+const TURN_EXTRACTION_COST_USD =
+	(TURN_EXTRACTION_INPUT_TOKENS / 1_000_000) * INPUT_RATE_PER_MTOK +
+	(TURN_EXTRACTION_OUTPUT_TOKENS / 1_000_000) * OUTPUT_RATE_PER_MTOK;
 
 // ─── Deduplication key fields per job type ───────────────────────────────────
 
@@ -374,10 +381,13 @@ export class MemoryJobQueue {
 							(realUsage.inputTokens / 1_000_000) * INPUT_RATE_PER_MTOK +
 							(realUsage.outputTokens / 1_000_000) * OUTPUT_RATE_PER_MTOK;
 					} else if (analyzer.lastDiagnostic?.status === 'success') {
-						// Only add fixed estimates if extraction actually ran (success)
-						this.tokenUsage.extractionTokens += EXTRACTION_TOTAL_TOKENS;
+						// Use accurate estimates based on extraction type
+						const isPerTurn = job.payload.trigger === 'per-turn';
+						const estTokens = isPerTurn ? TURN_EXTRACTION_TOTAL_TOKENS : EXTRACTION_TOTAL_TOKENS;
+						const estCost = isPerTurn ? TURN_EXTRACTION_COST_USD : EXTRACTION_COST_USD;
+						this.tokenUsage.extractionTokens += estTokens;
 						this.tokenUsage.extractionCalls++;
-						this.tokenUsage.estimatedCostUsd += EXTRACTION_COST_USD;
+						this.tokenUsage.estimatedCostUsd += estCost;
 					}
 				} finally {
 					this.llmInFlight = false;
