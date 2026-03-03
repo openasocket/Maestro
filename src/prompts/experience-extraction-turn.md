@@ -5,6 +5,11 @@ You are an experience extraction agent. Analyze this single turn from a coding s
 - Project: {{PROJECT_PATH}}
 - Turn: {{TURN_INDEX}} (interestingness score: {{INTEREST_SCORE}})
 
+## Persona Perspective
+{{PERSONA_CONTEXT}}
+
+Use this persona's domain expertise and perspective when evaluating what constitutes a novel, valuable learning. Prioritize experiences relevant to the persona's skill areas.
+
 ## This Turn
 {{HISTORY_ENTRIES}}
 

@@ -51,6 +51,14 @@ export interface ExperienceAnalyzerInput {
 	decisionSignals?: DecisionSignal[];
 	/** Context utilization % at session end (0.0-1.0) — quality indicator */
 	contextUtilizationAtEnd?: number;
+	/** Matched persona context — guides extraction perspective */
+	personaContext?: {
+		personaId: string;
+		personaName: string;
+		personaSystemPrompt: string;
+		roleName: string;
+		roleSystemPrompt: string;
+	};
 }
 
 /** What kind of learning this experience represents */
@@ -629,6 +637,36 @@ export class ExperienceAnalyzer {
 			// Context utilization unavailable — proceed without
 		}
 
+		// Persona context for full-session extraction
+		try {
+			const { getMemoryStore } = await import('./memory-store');
+			const store = getMemoryStore();
+			const config = await store.getConfig();
+			const queryText = input.historyEntries
+				.slice(0, 5)
+				.map((e) => e.summary)
+				.join(' ')
+				.slice(0, 2000);
+			const matchedPersonas = await store.selectMatchingPersonas(
+				queryText,
+				config,
+				agentType,
+				projectPath
+			);
+			if (matchedPersonas.length > 0) {
+				const top = matchedPersonas[0];
+				input.personaContext = {
+					personaId: top.persona.id,
+					personaName: top.personaName,
+					personaSystemPrompt: top.persona.systemPrompt ?? '',
+					roleName: top.roleName,
+					roleSystemPrompt: top.roleSystemPrompt,
+				};
+			}
+		} catch {
+			// Persona selection unavailable — proceed without
+		}
+
 		return input;
 	}
 
@@ -726,6 +764,31 @@ export class ExperienceAnalyzer {
 			// VIBES not available — proceed without
 		}
 
+		// Persona context: select matching persona for extraction perspective
+		try {
+			const { getMemoryStore } = await import('./memory-store');
+			const store = getMemoryStore();
+			const config = await store.getConfig();
+			const matchedPersonas = await store.selectMatchingPersonas(
+				historyEntry.summary.slice(0, 2000),
+				config,
+				agentType,
+				projectPath
+			);
+			if (matchedPersonas.length > 0) {
+				const top = matchedPersonas[0];
+				input.personaContext = {
+					personaId: top.persona.id,
+					personaName: top.personaName,
+					personaSystemPrompt: top.persona.systemPrompt ?? '',
+					roleName: top.roleName,
+					roleSystemPrompt: top.roleSystemPrompt,
+				};
+			}
+		} catch {
+			// Persona selection unavailable — proceed without
+		}
+
 		return input;
 	}
 
@@ -774,6 +837,25 @@ export class ExperienceAnalyzer {
 					.join('\n');
 		}
 		prompt = prompt.replace('{{VIBES_DATA}}', vibesText || 'No VIBES data for this turn.');
+
+		// Persona context
+		if (input.personaContext) {
+			const ctx = [
+				`Persona: ${input.personaContext.personaName}`,
+				`Role: ${input.personaContext.roleName}`,
+				input.personaContext.personaSystemPrompt
+					? `Persona Perspective:\n${input.personaContext.personaSystemPrompt}`
+					: '',
+				input.personaContext.roleSystemPrompt
+					? `Role Guidance:\n${input.personaContext.roleSystemPrompt}`
+					: '',
+			]
+				.filter(Boolean)
+				.join('\n');
+			prompt = prompt.replace('{{PERSONA_CONTEXT}}', ctx);
+		} else {
+			prompt = prompt.replace('{{PERSONA_CONTEXT}}', 'No persona matched for this agent.');
+		}
 
 		return prompt;
 	}
@@ -1210,7 +1292,7 @@ ${text.slice(0, 1000)}`);
 					.join('\n')
 			: 'None detected';
 
-		return experienceExtractionPrompt
+		let prompt = experienceExtractionPrompt
 			.replace('{{AGENT_TYPE}}', input.agentType)
 			.replace('{{PROJECT_PATH}}', input.projectPath)
 			.replace('{{DURATION}}', durationStr)
@@ -1220,6 +1302,27 @@ ${text.slice(0, 1000)}`);
 			.replace('{{DECISION_SIGNALS}}', decisionText)
 			.replace('{{GIT_DIFF}}', input.gitDiff || 'N/A')
 			.replace('{{VIBES_DATA}}', vibesSection);
+
+		// Persona context
+		if (input.personaContext) {
+			const ctx = [
+				`Persona: ${input.personaContext.personaName}`,
+				`Role: ${input.personaContext.roleName}`,
+				input.personaContext.personaSystemPrompt
+					? `Persona Perspective:\n${input.personaContext.personaSystemPrompt}`
+					: '',
+				input.personaContext.roleSystemPrompt
+					? `Role Guidance:\n${input.personaContext.roleSystemPrompt}`
+					: '',
+			]
+				.filter(Boolean)
+				.join('\n');
+			prompt = prompt.replace('{{PERSONA_CONTEXT}}', ctx);
+		} else {
+			prompt = prompt.replace('{{PERSONA_CONTEXT}}', 'No persona matched for this agent.');
+		}
+
+		return prompt;
 	}
 
 	/**

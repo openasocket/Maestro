@@ -6,6 +6,11 @@ You are an experience extraction agent. Analyze the following coding session dat
 - Duration: {{DURATION}}
 - Cost: {{COST}}
 
+## Persona Perspective
+{{PERSONA_CONTEXT}}
+
+Use this persona's domain expertise and perspective when evaluating what constitutes a novel, valuable learning. Prioritize experiences relevant to the persona's skill areas.
+
 ## Session History
 {{HISTORY_ENTRIES}}
 
