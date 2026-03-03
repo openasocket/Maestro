@@ -116,6 +116,32 @@ export interface ExtractedExperience {
 	keywords?: string[];
 }
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Extract the text content from a raw VIBES manifest entry.
+ * VIBES entries are a tagged union with type-specific text fields
+ * (e.g. `prompt_text`, `command_text`, `reasoning_text`).
+ */
+function extractManifestContent(entry: Record<string, unknown>): string {
+	switch (String(entry.type ?? 'unknown')) {
+		case 'prompt':
+			return String(entry.prompt_text ?? '');
+		case 'command': {
+			const cmd = String(entry.command_text ?? '');
+			return entry.command_output_summary ? `${cmd} -> ${entry.command_output_summary}` : cmd;
+		}
+		case 'reasoning':
+			return String(entry.reasoning_text ?? entry.reasoning_text_compressed ?? '');
+		case 'decision':
+			return `${entry.decision_point}: chose ${entry.selected} (${entry.rationale})`;
+		case 'environment':
+			return `${entry.tool_name} / ${entry.model_name}`;
+		default:
+			return String(entry.content ?? entry.text ?? '');
+	}
+}
+
 // ─── ExperienceAnalyzer ─────────────────────────────────────────────────────
 
 export class ExperienceAnalyzer {
@@ -388,19 +414,17 @@ export class ExperienceAnalyzer {
 			const manifest = JSON.parse(manifestContent);
 			// VIBES v1.0 stores entries as object keyed by content hash; normalize to array
 			const rawEntries = manifest.entries;
-			const entryArray: { type?: string; content?: string }[] = Array.isArray(rawEntries)
+			const entryArray: Record<string, unknown>[] = Array.isArray(rawEntries)
 				? rawEntries
 				: rawEntries && typeof rawEntries === 'object'
 					? Object.values(rawEntries)
 					: [];
 
 			if (entryArray.length > 0) {
-				input.vibesManifest = entryArray
-					.slice(-20)
-					.map((e: { type?: string; content?: string }) => ({
-						type: e.type ?? 'unknown',
-						content: (e.content ?? '').slice(0, 500),
-					}));
+				input.vibesManifest = entryArray.slice(-20).map((e: Record<string, unknown>) => ({
+					type: String(e.type ?? 'unknown'),
+					content: extractManifestContent(e).slice(0, 500),
+				}));
 			}
 
 			// Annotations
@@ -561,8 +585,8 @@ export class ExperienceAnalyzer {
 		// VIBES path: scan reasoning entries from manifest
 		if (vibesManifest && vibesManifest.length > 0) {
 			for (const entry of vibesManifest) {
-				if (entry.type !== 'reasoning' && !entry.content) continue;
-				const text = entry.content;
+				if (entry.type !== 'reasoning') continue;
+				const text = extractManifestContent(entry);
 				for (const pattern of decisionPatterns) {
 					const match = pattern.exec(text);
 					if (match) {
