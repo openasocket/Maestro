@@ -280,7 +280,8 @@ function selectWithinBudget(
 export async function injectMemories(
 	prompt: string,
 	projectPath: string,
-	agentType: string
+	agentType: string,
+	searchQuery?: string
 ): Promise<MemoryInjectionResult> {
 	const config = getConfig();
 
@@ -298,6 +299,7 @@ export async function injectMemories(
 
 	const store = getMemoryStore();
 	const budgets = computeScopeBudgets(config);
+	const effectiveQuery = query(searchQuery ?? prompt);
 
 	// Optionally adjust config for rich mode (lower similarity threshold)
 	const searchConfig: MemoryConfig =
@@ -312,7 +314,7 @@ export async function injectMemories(
 
 	// Skill search: cascading persona → skill → memory
 	const skillResults = await store.cascadingSearch(
-		query(prompt),
+		effectiveQuery,
 		searchConfig,
 		agentType,
 		projectPath
@@ -326,7 +328,7 @@ export async function injectMemories(
 	if (projectPath) {
 		if (searchConfig.enableHybridSearch) {
 			projectSearchResults = await store.hybridSearch(
-				query(prompt),
+				effectiveQuery,
 				'project',
 				searchConfig,
 				undefined,
@@ -334,7 +336,7 @@ export async function injectMemories(
 			);
 		} else {
 			const { encode } = await import('../grpo/embedding-service');
-			const qEmbed = await encode(query(prompt));
+			const qEmbed = await encode(effectiveQuery);
 			projectSearchResults = await store.searchFlatScope(
 				qEmbed,
 				'project',
@@ -348,10 +350,10 @@ export async function injectMemories(
 	// Global search: flat search within global scope
 	let globalSearchResults: MemorySearchResult[];
 	if (searchConfig.enableHybridSearch) {
-		globalSearchResults = await store.hybridSearch(query(prompt), 'global', searchConfig);
+		globalSearchResults = await store.hybridSearch(effectiveQuery, 'global', searchConfig);
 	} else {
 		const { encode } = await import('../grpo/embedding-service');
-		const qEmbed = await encode(query(prompt));
+		const qEmbed = await encode(effectiveQuery);
 		globalSearchResults = await store.searchFlatScope(qEmbed, 'global', searchConfig);
 	}
 	const selectedGlobal = selectWithinBudget(globalSearchResults, budgets.global);
@@ -450,7 +452,7 @@ export async function injectMemories(
 	// Nothing selected → inject persona directives if any match, else return unchanged
 	if (finalSelected.length === 0) {
 		const matchedPersonas = await store.selectMatchingPersonas(
-			query(prompt),
+			effectiveQuery,
 			searchConfig,
 			agentType,
 			projectPath
@@ -674,10 +676,11 @@ function groupInjectedByScope(
 export async function tryInjectMemories(
 	prompt: string,
 	projectPath: string,
-	agentType: string
+	agentType: string,
+	searchQuery?: string
 ): Promise<MemoryInjectionResult> {
 	try {
-		return await injectMemories(prompt, projectPath, agentType);
+		return await injectMemories(prompt, projectPath, agentType, searchQuery);
 	} catch (error) {
 		console.warn('[MemoryInjector] Failed to inject memories, returning original prompt:', error);
 		return {

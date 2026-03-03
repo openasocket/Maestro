@@ -456,10 +456,17 @@ ${historyContext}
 ${message}`;
 
 			// Memory injection for group chat moderator — inject relevant knowledge from the hierarchy
+			// Use chat topic for persona matching instead of the large composite prompt
+			const moderatorPersonaQuery = `Group chat: ${chat.name}. Moderator. Agent type: ${chat.moderatorAgentId}`;
 			try {
 				const { tryInjectMemories, recordSessionInjection } =
 					await import('../memory/memory-injector');
-				const memResult = await tryInjectMemories(fullPrompt, os.homedir(), chat.moderatorAgentId);
+				const memResult = await tryInjectMemories(
+					fullPrompt,
+					os.homedir(),
+					chat.moderatorAgentId,
+					moderatorPersonaQuery
+				);
 				fullPrompt = memResult.injectedPrompt;
 				if (memResult.injectedIds.length > 0) {
 					recordSessionInjection(sessionId, memResult.injectedIds, memResult.scopeGroups);
@@ -855,10 +862,17 @@ export async function routeModeratorResponse(
 			console.log(`[GroupChat:Debug] Generated session ID: ${sessionId}`);
 
 			// Memory injection for group chat participant — inject relevant knowledge from the hierarchy
+			// Use chat topic + participant name for persona matching instead of the template prompt
+			const participantPersonaQuery = `Group chat: ${updatedChat.name}. Participant: ${participantName}. Agent type: ${participant.agentId}`;
 			try {
 				const { tryInjectMemories, recordSessionInjection } =
 					await import('../memory/memory-injector');
-				const memResult = await tryInjectMemories(participantPrompt, cwd, participant.agentId);
+				const memResult = await tryInjectMemories(
+					participantPrompt,
+					cwd,
+					participant.agentId,
+					participantPersonaQuery
+				);
 				participantPrompt = memResult.injectedPrompt;
 				if (memResult.injectedIds.length > 0) {
 					recordSessionInjection(sessionId, memResult.injectedIds, memResult.scopeGroups);
@@ -1255,9 +1269,16 @@ Review the agent responses above. Either:
 2. @mention specific agents for follow-up if you need more information`;
 
 	// Memory injection for synthesis moderator
+	// Use chat topic for persona matching instead of the large synthesis prompt
+	const synthesisPersonaQuery = `Group chat: ${chat.name}. Moderator synthesis. Agent type: ${chat.moderatorAgentId}`;
 	try {
 		const { tryInjectMemories, recordSessionInjection } = await import('../memory/memory-injector');
-		const memResult = await tryInjectMemories(synthesisPrompt, os.homedir(), chat.moderatorAgentId);
+		const memResult = await tryInjectMemories(
+			synthesisPrompt,
+			os.homedir(),
+			chat.moderatorAgentId,
+			synthesisPersonaQuery
+		);
 		synthesisPrompt = memResult.injectedPrompt;
 		if (memResult.injectedIds.length > 0) {
 			recordSessionInjection(sessionId, memResult.injectedIds, memResult.scopeGroups);
@@ -1431,9 +1452,16 @@ export async function respawnParticipantWithRecovery(
 	console.log(`[GroupChat:Debug] Recovery session ID: ${sessionId}`);
 
 	// Memory injection for recovery participant
+	// Use chat topic + participant name for persona matching instead of recovery prompt
+	const recoveryPersonaQuery = `Group chat: ${chat.name}. Participant: ${participantName}. Agent type: ${participant.agentId}`;
 	try {
 		const { tryInjectMemories, recordSessionInjection } = await import('../memory/memory-injector');
-		const memResult = await tryInjectMemories(fullPrompt, cwd, participant.agentId);
+		const memResult = await tryInjectMemories(
+			fullPrompt,
+			cwd,
+			participant.agentId,
+			recoveryPersonaQuery
+		);
 		fullPrompt = memResult.injectedPrompt;
 		if (memResult.injectedIds.length > 0) {
 			recordSessionInjection(sessionId, memResult.injectedIds, memResult.scopeGroups);
