@@ -15,7 +15,7 @@ export interface AnalyzedSessionRecord {
 	analyzedAt: number;
 	experiencesStored: number;
 	providerUsed?: string;
-	trigger: 'exit' | 'retroactive' | 'mid-session';
+	trigger: 'exit' | 'retroactive' | 'mid-session' | 'per-turn';
 }
 
 export class AnalyzedSessionsRegistry {

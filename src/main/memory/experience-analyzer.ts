@@ -325,6 +325,146 @@ export class ExperienceAnalyzer {
 	}
 
 	/**
+	 * Analyze a single completed turn for experience extraction.
+	 * Lighter than analyzeCompletedSession — operates on a single history entry
+	 * with turn-scoped VIBES data.
+	 */
+	async analyzeTurn(
+		sessionId: string,
+		projectPath: string,
+		agentType: string,
+		turnIndex: number,
+		interestScore: number,
+		historyEntry: {
+			summary: string;
+			fullResponse?: string;
+			success?: boolean;
+			elapsedTimeMs?: number;
+		},
+		vibesAnnotationsDelta: number,
+		vibesManifestDelta: number,
+		onProgress?: (progress: ExtractionProgress) => void
+	): Promise<number> {
+		const config = await this.getMemoryConfig();
+		const baseDiag: Partial<ExtractionDiagnostic> = {
+			timestamp: Date.now(),
+			sessionId,
+			agentType,
+			projectPath,
+			trigger: 'per-turn',
+		};
+
+		const emitProgress = (
+			stage: ExtractionProgress['stage'],
+			message: string,
+			extra?: Partial<ExtractionProgress>
+		) => {
+			if (onProgress) {
+				onProgress({
+					stage,
+					message,
+					startedAt: baseDiag.timestamp!,
+					tokensStreamed: 0,
+					estimatedTotalTokens: 5000,
+					estimatedCostSoFar: 0,
+					sessionId,
+					...extra,
+				});
+			}
+		};
+
+		// Check if this turn was already analyzed
+		try {
+			const { getAnalyzedSessionsRegistry } = await import('./analyzed-sessions');
+			const turnKey = `${sessionId}:turn:${turnIndex}`;
+			if (await getAnalyzedSessionsRegistry().isAnalyzed(turnKey)) {
+				this.lastDiagnostic = {
+					...baseDiag,
+					status: 'skipped-already-analyzed',
+					message: `Turn ${turnIndex} already analyzed`,
+				} as ExtractionDiagnostic;
+				return 0;
+			}
+		} catch {
+			// Registry unavailable — proceed
+		}
+
+		// Gather turn data
+		emitProgress('gathering', `Gathering turn ${turnIndex} data...`);
+		const input = await this.gatherTurnData(
+			sessionId,
+			projectPath,
+			agentType,
+			historyEntry,
+			vibesAnnotationsDelta,
+			vibesManifestDelta
+		);
+
+		// Compile per-turn prompt
+		const compiledPrompt = this.compileTurnPrompt(input, turnIndex, interestScore);
+
+		// Run LLM analysis (reuse existing analyzeSession infrastructure with pre-compiled prompt)
+		const experiences = await this.analyzeSession(
+			input,
+			onProgress
+				? (tokens, cost, provider) => {
+						emitProgress('streaming', 'Streaming LLM response...', {
+							tokensStreamed: tokens,
+							estimatedCostSoFar: cost,
+							providerUsed: provider,
+						});
+					}
+				: undefined,
+			compiledPrompt
+		);
+
+		if (experiences.length === 0) {
+			this.lastDiagnostic = {
+				...baseDiag,
+				status: 'failed-no-experiences',
+				message: `Turn ${turnIndex}: no experiences extracted`,
+				providerUsed: this.lastDiagnostic?.providerUsed,
+			} as ExtractionDiagnostic;
+			return 0;
+		}
+
+		// Filter by novelty
+		const minNovelty = config.minNoveltyScore ?? 0.4;
+		const novel = experiences.filter((e) => e.noveltyScore >= minNovelty);
+
+		// Store with deduplication
+		emitProgress('storing', `Storing ${novel.length} experiences from turn ${turnIndex}...`);
+		const stored = await this.storeExperiences(novel, input);
+
+		// Mark turn as analyzed
+		try {
+			const { getAnalyzedSessionsRegistry } = await import('./analyzed-sessions');
+			const turnKey = `${sessionId}:turn:${turnIndex}`;
+			await getAnalyzedSessionsRegistry().markAnalyzed({
+				sessionId: turnKey,
+				analyzedAt: Date.now(),
+				experiencesStored: stored,
+				providerUsed: this.lastDiagnostic?.providerUsed,
+				trigger: 'per-turn',
+			});
+		} catch {
+			// Non-critical
+		}
+
+		this.lastDiagnostic = {
+			...baseDiag,
+			status: 'success',
+			message: `Turn ${turnIndex}: ${stored} experiences stored`,
+			experiencesStored: stored,
+			tokenUsage: this.lastDiagnostic?.tokenUsage,
+			providerUsed: this.lastDiagnostic?.providerUsed,
+		} as ExtractionDiagnostic;
+
+		emitProgress('complete', `Turn ${turnIndex}: ${stored} experiences stored`);
+		return stored;
+	}
+
+	/**
 	 * Check if a project is on cooldown (rate limiting).
 	 */
 	async isOnCooldown(projectPath: string): Promise<boolean> {
@@ -493,6 +633,154 @@ export class ExperienceAnalyzer {
 	}
 
 	/**
+	 * Gather data for a single turn (lighter than full-session gatherSessionData).
+	 * Uses the history entry passed in from the job payload instead of reading all entries.
+	 */
+	private async gatherTurnData(
+		sessionId: string,
+		projectPath: string,
+		agentType: string,
+		historyEntry: {
+			summary: string;
+			fullResponse?: string;
+			success?: boolean;
+			elapsedTimeMs?: number;
+		},
+		vibesAnnotationsDelta: number,
+		vibesManifestDelta: number
+	): Promise<ExperienceAnalyzerInput> {
+		const input: ExperienceAnalyzerInput = {
+			sessionId,
+			agentType,
+			projectPath,
+			historyEntries: [
+				{
+					summary: historyEntry.summary,
+					fullResponse: historyEntry.fullResponse?.slice(0, 1500),
+					success: historyEntry.success,
+					elapsedTimeMs: historyEntry.elapsedTimeMs,
+				},
+			],
+		};
+
+		// Incremental git diff (HEAD~1 instead of HEAD~5, smaller budget)
+		try {
+			const { execFile } = await import('child_process');
+			const { promisify } = await import('util');
+			const execFileAsync = promisify(execFile);
+			const { stdout } = await execFileAsync('git', ['diff', 'HEAD~1..HEAD'], {
+				cwd: projectPath,
+				timeout: 5000,
+			});
+			if (stdout) {
+				input.gitDiff = stdout.slice(0, 2000);
+			}
+		} catch {
+			// No git or no recent commits — proceed without
+		}
+
+		// VIBES: read only turn-scoped entries using deltas
+		try {
+			const fs = await import('fs/promises');
+			const path = await import('path');
+
+			if (vibesManifestDelta > 0) {
+				const manifestPath = path.join(projectPath, '.ai-audit', 'manifest.json');
+				const manifestContent = await fs.readFile(manifestPath, 'utf-8');
+				const manifest = JSON.parse(manifestContent);
+				const rawEntries = manifest.entries;
+				const entryArray: Record<string, unknown>[] = Array.isArray(rawEntries)
+					? rawEntries
+					: rawEntries && typeof rawEntries === 'object'
+						? Object.values(rawEntries)
+						: [];
+
+				const recentEntries = entryArray.slice(-vibesManifestDelta);
+				input.vibesManifest = recentEntries.map((e) => ({
+					type: String(e.type ?? 'unknown'),
+					content: extractManifestContent(e).slice(0, 500),
+				}));
+			}
+
+			if (vibesAnnotationsDelta > 0) {
+				const annotationsPath = path.join(projectPath, '.ai-audit', 'annotations.jsonl');
+				const annotationsContent = await fs.readFile(annotationsPath, 'utf-8');
+				const allLines = annotationsContent.trim().split('\n');
+				const recentLines = allLines.slice(-vibesAnnotationsDelta);
+				input.vibesAnnotations = recentLines
+					.map((line) => {
+						try {
+							const a = JSON.parse(line);
+							return {
+								filePath: String(a.filePath ?? ''),
+								action: String(a.action ?? ''),
+								...(a.lineRange != null ? { lineRange: String(a.lineRange) } : {}),
+							} as { filePath: string; action: string; lineRange?: string };
+						} catch {
+							return null;
+						}
+					})
+					.filter((a): a is { filePath: string; action: string; lineRange?: string } => a !== null);
+			}
+		} catch {
+			// VIBES not available — proceed without
+		}
+
+		return input;
+	}
+
+	/**
+	 * Compile the per-turn extraction prompt with template variable substitution.
+	 */
+	private compileTurnPrompt(
+		input: ExperienceAnalyzerInput,
+		turnIndex: number,
+		interestScore: number
+	): string {
+		const { experienceExtractionTurnPrompt } = require('../../prompts');
+
+		let prompt = experienceExtractionTurnPrompt as string;
+
+		prompt = prompt.replace('{{AGENT_TYPE}}', input.agentType);
+		prompt = prompt.replace('{{PROJECT_PATH}}', input.projectPath);
+		prompt = prompt.replace('{{TURN_INDEX}}', String(turnIndex));
+		prompt = prompt.replace('{{INTEREST_SCORE}}', interestScore.toFixed(2));
+
+		// History entry (single turn)
+		const historyText =
+			input.historyEntries.length > 0
+				? input.historyEntries
+						.map(
+							(e) =>
+								`Summary: ${e.summary}\nSuccess: ${e.success ?? 'unknown'}\nDuration: ${e.elapsedTimeMs ?? 'unknown'}ms\n${e.fullResponse ? `Response:\n${e.fullResponse}` : ''}`
+						)
+						.join('\n---\n')
+				: 'No history data available.';
+		prompt = prompt.replace('{{HISTORY_ENTRIES}}', historyText);
+
+		// Git diff
+		prompt = prompt.replace('{{GIT_DIFF}}', input.gitDiff || 'No code changes detected.');
+
+		// VIBES data
+		let vibesText = '';
+		if (input.vibesManifest && input.vibesManifest.length > 0) {
+			vibesText +=
+				'Manifest entries:\n' +
+				input.vibesManifest.map((e) => `- [${e.type}] ${e.content}`).join('\n');
+		}
+		if (input.vibesAnnotations && input.vibesAnnotations.length > 0) {
+			vibesText +=
+				'\n\nAnnotations:\n' +
+				input.vibesAnnotations
+					.map((a) => `- ${a.action}: ${a.filePath}${a.lineRange ? ` (${a.lineRange})` : ''}`)
+					.join('\n');
+		}
+		prompt = prompt.replace('{{VIBES_DATA}}', vibesText || 'No VIBES data for this turn.');
+
+		return prompt;
+	}
+
+	/**
 	 * Extract decision provenance signals from VIBES audit data.
 	 *
 	 * VIBES reasoning traces often contain explicit decision moments —
@@ -629,10 +917,11 @@ export class ExperienceAnalyzer {
 	 */
 	async analyzeSession(
 		input: ExperienceAnalyzerInput,
-		onStreamProgress?: (tokensStreamed: number, estimatedCost: number, provider: string) => void
+		onStreamProgress?: (tokensStreamed: number, estimatedCost: number, provider: string) => void,
+		preCompiledPrompt?: string
 	): Promise<ExtractedExperience[]> {
-		// Compile prompt from template
-		const prompt = this.compilePrompt(input);
+		// Allow callers to pass a pre-compiled prompt (used by per-turn extraction)
+		const prompt = preCompiledPrompt || this.compilePrompt(input);
 		if (!prompt) return [];
 
 		this.logDebug(
