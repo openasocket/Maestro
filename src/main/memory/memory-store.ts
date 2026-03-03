@@ -1426,6 +1426,100 @@ export class MemoryStore {
 	}
 
 	/**
+	 * Select personas matching a query — standalone entry point for persona selection
+	 * without running a full cascading memory search.
+	 *
+	 * Encodes the query internally. For callers that already have an embedding,
+	 * use `selectMatchingPersonasWithEmbedding()` instead (private).
+	 */
+	async selectMatchingPersonas(
+		query: string,
+		config: MemoryConfig,
+		agentType: string,
+		projectPath?: string
+	): Promise<
+		Array<{
+			persona: Persona;
+			personaName: string;
+			roleName: string;
+			roleSystemPrompt: string;
+			similarity: number;
+		}>
+	> {
+		const { encode } = await import('../grpo/embedding-service');
+		const queryEmbedding = await encode(query.slice(0, 2000));
+		return this.selectMatchingPersonasWithEmbedding(queryEmbedding, config, agentType, projectPath);
+	}
+
+	/**
+	 * Internal persona matcher that accepts a pre-computed embedding.
+	 * Used by both `selectMatchingPersonas()` and `cascadingSearch()` to avoid
+	 * double-encoding the query.
+	 */
+	private async selectMatchingPersonasWithEmbedding(
+		queryEmbedding: number[],
+		config: MemoryConfig,
+		agentType: string,
+		projectPath?: string
+	): Promise<
+		Array<{
+			persona: Persona;
+			personaName: string;
+			roleName: string;
+			roleSystemPrompt: string;
+			similarity: number;
+		}>
+	> {
+		const registry = await this.getCachedRegistry();
+		const roleById = new Map(registry.roles.map((r) => [r.id, r]));
+
+		const matches: Array<{
+			persona: Persona;
+			personaName: string;
+			roleName: string;
+			roleSystemPrompt: string;
+			similarity: number;
+		}> = [];
+
+		for (const persona of registry.personas) {
+			if (!persona.active) continue;
+
+			// Agent filter: empty assignedAgents = matches all agents
+			if (persona.assignedAgents.length > 0 && !persona.assignedAgents.includes(agentType)) {
+				continue;
+			}
+
+			// Project filter: empty assignedProjects = matches all projects
+			if (
+				projectPath &&
+				persona.assignedProjects.length > 0 &&
+				!persona.assignedProjects.includes(projectPath)
+			) {
+				continue;
+			}
+
+			// Embedding filter: if persona has embedding, check threshold; if not, include it
+			let similarity = 1.0;
+			if (persona.embedding) {
+				similarity = cosineSimilarity(queryEmbedding, persona.embedding);
+				if (similarity < config.personaMatchThreshold) continue;
+			}
+
+			const role = roleById.get(persona.roleId);
+			matches.push({
+				persona,
+				personaName: persona.name,
+				roleName: role?.name ?? '',
+				roleSystemPrompt: role?.systemPrompt ?? '',
+				similarity,
+			});
+		}
+
+		matches.sort((a, b) => b.similarity - a.similarity);
+		return matches;
+	}
+
+	/**
 	 * Cascading semantic search through the hierarchy.
 	 *
 	 * 1. Embed the query
@@ -1450,48 +1544,13 @@ export class MemoryStore {
 		const registry = await this.getCachedRegistry();
 		const hierarchyResults: MemorySearchResult[] = [];
 
-		// ── Level 1: Persona matching ────────────────────────────────────
-		// Build a role lookup for attaching role-level context to results
-		const roleById = new Map(registry.roles.map((r) => [r.id, r]));
-
-		const matchedPersonas: Array<{
-			persona: (typeof registry.personas)[0];
-			personaName: string;
-			roleName: string;
-			roleSystemPrompt: string;
-		}> = [];
-
-		for (const persona of registry.personas) {
-			if (!persona.active) continue;
-
-			// Agent filter: empty assignedAgents = matches all agents
-			if (persona.assignedAgents.length > 0 && !persona.assignedAgents.includes(agentType)) {
-				continue;
-			}
-
-			// Project filter: empty assignedProjects = matches all projects
-			if (
-				projectPath &&
-				persona.assignedProjects.length > 0 &&
-				!persona.assignedProjects.includes(projectPath)
-			) {
-				continue;
-			}
-
-			// Embedding filter: if persona has embedding, check threshold; if not, include it
-			if (persona.embedding) {
-				const sim = cosineSimilarity(queryEmbedding, persona.embedding);
-				if (sim < config.personaMatchThreshold) continue;
-			}
-
-			const role = roleById.get(persona.roleId);
-			matchedPersonas.push({
-				persona,
-				personaName: persona.name,
-				roleName: role?.name ?? '',
-				roleSystemPrompt: role?.systemPrompt ?? '',
-			});
-		}
+		// ── Level 1: Persona matching (delegated to shared helper) ───────
+		const matchedPersonas = await this.selectMatchingPersonasWithEmbedding(
+			queryEmbedding,
+			config,
+			agentType,
+			projectPath
+		);
 
 		// ── Level 2: Skill area matching ─────────────────────────────────
 		const matchedSkills: Array<{
