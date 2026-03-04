@@ -2974,6 +2974,67 @@ export class MemoryStore {
 			// Library may not exist yet
 		}
 
+		// Cross-project candidates (from project-scoped libraries)
+		const config = await this.getConfig();
+		if (config.enableCrossProjectPromotion) {
+			const projectsDir = path.join(this.memoriesDir, 'project');
+			const projEntries = await fs.readdir(projectsDir).catch(() => [] as string[]);
+			for (const dirHash of projEntries) {
+				try {
+					const dirPath = path.join(projectsDir, dirHash);
+					const lib = await this.readLibrary(dirPath);
+					for (const entry of lib.entries) {
+						const evidence = entry.experienceContext?.crossProjectEvidence ?? [];
+						// Count distinct projects (source + evidence targets)
+						const projectCount = 1 + new Set(evidence.map((e) => e.projectPath)).size;
+						if (
+							entry.type !== 'experience' ||
+							!entry.active ||
+							entry.archived ||
+							projectCount < config.crossProjectMinProjects ||
+							entry.effectivenessScore < 0.5 ||
+							entry.useCount < 2 ||
+							entry.confidence < 0.4 ||
+							entry.tags.includes('promotion:dismissed') ||
+							entry.tags.includes('promotion:promoted-to-global')
+						) {
+							continue;
+						}
+
+						const suggestedRuleText = this.generateRuleText(entry);
+						const qualificationReason =
+							`Cross-project: seen in ${projectCount} projects, ` +
+							`effectiveness: ${(entry.effectivenessScore * 100).toFixed(0)}%, ` +
+							`used ${entry.useCount}x`;
+
+						// Heavy weight on project spread
+						const promotionScore = Math.min(
+							1,
+							Math.max(
+								0,
+								entry.effectivenessScore * 0.3 +
+									Math.min(1, entry.useCount / 10) * 0.2 +
+									entry.confidence * 0.1 +
+									Math.min(1, projectCount / 4) * 0.4
+							)
+						);
+
+						candidates.push({
+							memory: entry,
+							suggestedRuleText,
+							qualificationReason,
+							promotionScore,
+							isCrossProjectCandidate: true,
+							crossProjectCount: projectCount,
+							crossProjectPaths: [dirHash, ...evidence.map((e) => e.projectPath)],
+						});
+					}
+				} catch {
+					// Library may not exist
+				}
+			}
+		}
+
 		// Sort by promotion score descending
 		candidates.sort((a, b) => b.promotionScore - a.promotionScore);
 		return candidates;
@@ -3085,6 +3146,200 @@ export class MemoryStore {
 
 		await this.writeLibrary(dirPath, lib);
 		return lib.entries[idx];
+	}
+
+	// ─── Cross-Project Promotion ────────────────────────────────────────────
+
+	/**
+	 * Scan all project libraries for recurring experiences across multiple projects.
+	 * Annotates matching entries with `crossProjectEvidence` in their `experienceContext`.
+	 *
+	 * Budget-capped at 500 comparisons per invocation to avoid CPU spikes.
+	 * Returns the number of entries annotated.
+	 */
+	async scanCrossProjectPatterns(): Promise<number> {
+		const config = await this.getConfig();
+		if (!config.enableCrossProjectPromotion) return 0;
+
+		const threshold = config.crossProjectSimilarityThreshold;
+		const projectsDir = path.join(this.memoriesDir, 'project');
+		const dirEntries = await fs.readdir(projectsDir).catch(() => [] as string[]);
+		if (dirEntries.length < 2) return 0; // Need at least 2 projects
+
+		// Load all project libraries with their directory hashes
+		const projectLibs: { dirHash: string; dirPath: string; entries: MemoryEntry[] }[] = [];
+		for (const dirHash of dirEntries) {
+			try {
+				const dirPath = path.join(projectsDir, dirHash);
+				const lib = await this.readLibrary(dirPath);
+				const active = lib.entries.filter(
+					(e) => e.active && !e.archived && e.type === 'experience' && e.embedding
+				);
+				if (active.length > 0) {
+					projectLibs.push({ dirHash, dirPath, entries: active });
+				}
+			} catch {
+				// Skip unreadable libraries
+			}
+		}
+
+		if (projectLibs.length < 2) return 0;
+
+		let comparisons = 0;
+		let annotated = 0;
+		const MAX_COMPARISONS = 500;
+		const modifiedDirs = new Set<string>();
+
+		// Compare entries across different projects
+		for (let i = 0; i < projectLibs.length && comparisons < MAX_COMPARISONS; i++) {
+			for (const entry of projectLibs[i].entries) {
+				if (comparisons >= MAX_COMPARISONS) break;
+				if (!entry.embedding) continue;
+
+				// Skip if already has sufficient evidence
+				const existingEvidence = entry.experienceContext?.crossProjectEvidence ?? [];
+				const existingProjectHashes = new Set(existingEvidence.map((e) => e.projectPath));
+
+				for (let j = 0; j < projectLibs.length && comparisons < MAX_COMPARISONS; j++) {
+					if (i === j) continue;
+					if (existingProjectHashes.has(projectLibs[j].dirHash)) continue;
+
+					for (const other of projectLibs[j].entries) {
+						if (comparisons >= MAX_COMPARISONS) break;
+						if (!other.embedding) continue;
+						comparisons++;
+
+						const sim = cosineSimilarity(entry.embedding, other.embedding);
+						if (sim >= threshold) {
+							// Annotate entry with cross-project evidence
+							if (!entry.experienceContext) continue;
+							if (!entry.experienceContext.crossProjectEvidence) {
+								entry.experienceContext.crossProjectEvidence = [];
+							}
+							entry.experienceContext.crossProjectEvidence.push({
+								projectPath: projectLibs[j].dirHash,
+								memoryId: other.id,
+								similarity: sim,
+							});
+							modifiedDirs.add(projectLibs[i].dirPath);
+							annotated++;
+							break; // One match per target project is enough
+						}
+					}
+				}
+			}
+		}
+
+		// Write back modified libraries
+		for (const dirPath of modifiedDirs) {
+			const projLib = projectLibs.find((p) => p.dirPath === dirPath);
+			if (!projLib) continue;
+			try {
+				// Re-read and merge to avoid clobbering concurrent writes
+				const lib = await this.readLibrary(dirPath);
+				for (const updated of projLib.entries) {
+					const idx = lib.entries.findIndex((e) => e.id === updated.id);
+					if (idx !== -1 && updated.experienceContext?.crossProjectEvidence) {
+						lib.entries[idx] = {
+							...lib.entries[idx],
+							experienceContext: {
+								...lib.entries[idx].experienceContext!,
+								crossProjectEvidence: updated.experienceContext.crossProjectEvidence,
+							},
+							updatedAt: Date.now(),
+						};
+					}
+				}
+				await this.writeLibrary(dirPath, lib);
+			} catch {
+				// Non-fatal — will retry next scan
+			}
+		}
+
+		return annotated;
+	}
+
+	/**
+	 * Promote a cross-project experience to a global rule.
+	 *
+	 * Creates a new global rule from the experience, archives the source entry
+	 * and contributing entries in other projects with superseded tags.
+	 */
+	async promoteCrossProjectExperience(
+		id: MemoryId,
+		approvedRuleText: string,
+		sourceProjectDirHash: string
+	): Promise<MemoryEntry | null> {
+		const projectsDir = path.join(this.memoriesDir, 'project');
+		const sourceDirPath = path.join(projectsDir, sourceProjectDirHash);
+		const sourceLib = await this.readLibrary(sourceDirPath);
+		const sourceEntry = sourceLib.entries.find((e) => e.id === id);
+		if (!sourceEntry || sourceEntry.type !== 'experience') return null;
+
+		const evidence = sourceEntry.experienceContext?.crossProjectEvidence ?? [];
+
+		// Create global rule
+		const globalRule = await this.addMemory({
+			content: approvedRuleText,
+			type: 'rule',
+			scope: 'global',
+			source: 'consolidation',
+			tags: [
+				'promoted:cross-project',
+				...sourceEntry.tags.filter((t) => t.startsWith('category:')),
+			],
+			confidence: Math.max(sourceEntry.confidence, 0.8),
+			experienceContext: {
+				...(sourceEntry.experienceContext ?? { situation: '', learning: '' }),
+				crossProjectEvidence: evidence,
+			},
+		});
+
+		// Archive the source entry
+		const sourceIdx = sourceLib.entries.findIndex((e) => e.id === id);
+		if (sourceIdx !== -1) {
+			sourceLib.entries[sourceIdx] = {
+				...sourceLib.entries[sourceIdx],
+				archived: true,
+				tags: [...sourceLib.entries[sourceIdx].tags, 'promotion:promoted-to-global'],
+				updatedAt: Date.now(),
+			};
+			await this.writeLibrary(sourceDirPath, sourceLib);
+		}
+
+		// Archive contributing entries in other projects
+		for (const ev of evidence) {
+			try {
+				const evDirPath = path.join(projectsDir, ev.projectPath);
+				const evLib = await this.readLibrary(evDirPath);
+				const evIdx = evLib.entries.findIndex((e) => e.id === ev.memoryId);
+				if (evIdx !== -1) {
+					evLib.entries[evIdx] = {
+						...evLib.entries[evIdx],
+						archived: true,
+						tags: [...evLib.entries[evIdx].tags, `promotion:superseded-by:${globalRule.id}`],
+						updatedAt: Date.now(),
+					};
+					await this.writeLibrary(evDirPath, evLib);
+				}
+			} catch {
+				// Non-fatal — contributing entry may have been deleted
+			}
+		}
+
+		// Record history
+		const globalDirPath = this.getMemoryPath('global');
+		await this.appendHistory(globalDirPath, {
+			timestamp: Date.now(),
+			operation: 'cross-project-promote',
+			entityType: 'memory',
+			entityId: globalRule.id,
+			content: approvedRuleText,
+			reason: `Promoted from project ${sourceProjectDirHash}, seen in ${evidence.length + 1} projects`,
+			source: 'consolidation',
+		});
+
+		return globalRule;
 	}
 
 	// ─── Seed Data ──────────────────────────────────────────────────────────
@@ -3316,6 +3571,7 @@ export class MemoryStore {
 			'session-analysis': 0,
 			consolidation: 0,
 			import: 0,
+			repository: 0,
 		};
 		const byType: Record<MemoryType, number> = { rule: 0, experience: 0 };
 		let totalInjections = 0;
@@ -3409,9 +3665,11 @@ export class MemoryStore {
 
 		// Promotion candidates count
 		let promotionCandidatesCount = 0;
+		let crossProjectCandidatesCount = 0;
 		try {
 			const candidates = await this.getPromotionCandidates();
 			promotionCandidatesCount = candidates.length;
+			crossProjectCandidatesCount = candidates.filter((c) => c.isCrossProjectCandidate).length;
 		} catch {
 			// Skip on error
 		}
@@ -3438,6 +3696,7 @@ export class MemoryStore {
 			avgTokensPerInjection:
 				recentTokenCount > 0 ? Math.round(recentTokenSum / recentTokenCount) : 0,
 			totalLinks: linkPairs.size,
+			crossProjectCandidates: crossProjectCandidatesCount,
 		};
 
 		this._analyticsCache = { data: stats, timestamp: now };

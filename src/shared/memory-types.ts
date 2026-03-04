@@ -89,7 +89,8 @@ export type MemorySource =
 	| 'auto-run' // Auto-collected from Auto Run outcomes
 	| 'session-analysis' // Extracted by LLM analysis of session history/VIBES/diffs
 	| 'consolidation' // Created by merging similar memories
-	| 'import'; // Imported from file
+	| 'import' // Imported from file
+	| 'repository'; // Imported from the Global Experience Repository
 
 /** Whether the entry is a prescriptive rule or an empirical experience */
 export type MemoryType =
@@ -136,6 +137,12 @@ export interface ExperienceContext {
 	contextUtilizationAtEnd?: number;
 	/** Reference to raw session history file for JIT recompilation — the history file path */
 	rawSessionRef?: string;
+	/** Evidence of this experience appearing in other projects */
+	crossProjectEvidence?: {
+		projectPath: string;
+		memoryId: string;
+		similarity: number;
+	}[];
 }
 
 /** A single memory entry — explicit declarative knowledge or empirical experience */
@@ -239,6 +246,12 @@ export interface MemoryConfig {
 	perTurnCooldownSeconds: number;
 	/** Maximum per-turn extractions per session — default 10 */
 	perTurnMaxExtractionsPerSession: number;
+	/** Enable automatic cross-project experience promotion detection — default false */
+	enableCrossProjectPromotion: boolean;
+	/** Minimum distinct projects required for cross-project promotion — default 2 */
+	crossProjectMinProjects: number;
+	/** Cosine similarity threshold for cross-project matching — default 0.75 */
+	crossProjectSimilarityThreshold: number;
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -270,6 +283,9 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	perTurnInterestingnessThreshold: 0.25,
 	perTurnCooldownSeconds: 60,
 	perTurnMaxExtractionsPerSession: 10,
+	enableCrossProjectPromotion: false,
+	crossProjectMinProjects: 2,
+	crossProjectSimilarityThreshold: 0.75,
 };
 
 // ─── Job Queue Status & Token Tracking ────────────────────────────────────
@@ -413,6 +429,12 @@ export interface PromotionCandidate {
 	qualificationReason: string;
 	/** Promotion score (higher = more deserving) */
 	promotionScore: number;
+	/** Number of distinct projects where this experience has been observed */
+	crossProjectCount?: number;
+	/** Project paths where this experience was observed */
+	crossProjectPaths?: string[];
+	/** Whether this candidate was identified through cross-project pattern detection */
+	isCrossProjectCandidate?: boolean;
 }
 
 // ─── Stats and Results ─────────────────────────────────────────────────────
@@ -453,6 +475,8 @@ export interface MemoryStats {
 	avgTokensPerInjection: number;
 	/** Total inter-memory links */
 	totalLinks: number;
+	/** Number of cross-project promotion candidates detected */
+	crossProjectCandidates: number;
 }
 
 export interface MemoryHistoryEntry {
@@ -472,7 +496,8 @@ export interface MemoryHistoryEntry {
 		| 'create-skill'
 		| 'update-skill'
 		| 'delete-skill'
-		| 'restore';
+		| 'restore'
+		| 'cross-project-promote';
 	entityType: 'role' | 'persona' | 'skill' | 'memory';
 	entityId: string;
 	content?: string;

@@ -22,8 +22,10 @@ import {
 	Archive,
 	Link2,
 	RotateCcw,
+	Globe,
 } from 'lucide-react';
 import type { Theme } from '../../types';
+import { ExperienceRepositoryPanel } from './ExperienceRepositoryPanel';
 import type {
 	MemoryConfig,
 	MemoryStats,
@@ -454,17 +456,32 @@ export function MemorySettings({
 		async (candidate: PromotionCandidate, ruleText: string) => {
 			try {
 				const { memory } = candidate;
-				const res = await window.maestro.memory.promote(
-					memory.id,
-					ruleText,
-					memory.scope as MemoryScope,
-					memory.skillAreaId,
-					memory.experienceContext?.sourceProjectPath
-				);
-				if (!res.success) {
-					setError(res.error);
-					return;
+
+				// Cross-project candidates promote to global scope
+				if (candidate.isCrossProjectCandidate && candidate.crossProjectPaths?.[0]) {
+					const res = await window.maestro.memory.promoteCrossProject(
+						memory.id,
+						ruleText,
+						candidate.crossProjectPaths[0]
+					);
+					if (!res.success) {
+						setError(res.error);
+						return;
+					}
+				} else {
+					const res = await window.maestro.memory.promote(
+						memory.id,
+						ruleText,
+						memory.scope as MemoryScope,
+						memory.skillAreaId,
+						memory.experienceContext?.sourceProjectPath
+					);
+					if (!res.success) {
+						setError(res.error);
+						return;
+					}
 				}
+
 				setEditingPromotionId(null);
 				await loadPromotionCandidates();
 				// Refresh stats
@@ -855,6 +872,14 @@ export function MemorySettings({
 							onChange={(v) => updateConfig({ enableAutoConsolidation: v })}
 							theme={theme}
 						/>
+
+						<ConfigToggle
+							label="Cross-Project Promotion"
+							description="Detect recurring experiences across projects and suggest global promotion"
+							checked={config.enableCrossProjectPromotion}
+							onChange={(v) => updateConfig({ enableCrossProjectPromotion: v })}
+							theme={theme}
+						/>
 					</div>
 
 					{/* Promotion Candidates */}
@@ -898,6 +923,9 @@ export function MemorySettings({
 
 					{/* Embedding Model Status — reuse grpo:getModelStatus since model is shared */}
 					<EmbeddingModelStatus theme={theme} />
+
+					{/* Experience Repository */}
+					<ExperienceRepositoryPanel theme={theme} />
 				</>
 			)}
 		</div>
@@ -1253,6 +1281,18 @@ function PromotionSection({
 						<div className="text-xs" style={{ color: theme.colors.textMain }}>
 							{memory.content.length > 120 ? memory.content.slice(0, 120) + '...' : memory.content}
 						</div>
+						{candidate.isCrossProjectCandidate && (
+							<div
+								className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium"
+								style={{
+									backgroundColor: `${theme.colors.accent}15`,
+									color: theme.colors.accent,
+								}}
+							>
+								<Globe className="w-3 h-3" />
+								Seen in {candidate.crossProjectCount} projects — will promote to global scope
+							</div>
+						)}
 						<div className="text-xs font-mono" style={{ color: theme.colors.textDim }}>
 							eff: {(memory.effectivenessScore * 100).toFixed(0)}% | used {memory.useCount}x |
 							confidence: {(memory.confidence * 100).toFixed(0)}%

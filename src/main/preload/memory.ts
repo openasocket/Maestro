@@ -28,6 +28,14 @@ import type {
 	JobQueueStatus,
 	TokenUsage,
 } from '../../shared/memory-types';
+import type {
+	ExperienceBundle,
+	BundleImportResult,
+	ImportedBundleRecord,
+	TrustedKeyEntry,
+	RepositoryCatalogResponse,
+	SubmissionResponse,
+} from '../../shared/experience-bundle-types';
 
 /**
  * Creates the Memory API object for preload exposure
@@ -342,6 +350,13 @@ export function createMemoryApi() {
 		): Promise<IpcResponse<MemoryEntry | null>> =>
 			ipcRenderer.invoke('memory:dismissPromotion', id, scope, skillAreaId, projectPath),
 
+		promoteCrossProject: (
+			id: string,
+			ruleText: string,
+			sourceProjectDirHash: string
+		): Promise<IpcResponse<MemoryEntry | null>> =>
+			ipcRenderer.invoke('memory:promoteCrossProject', id, ruleText, sourceProjectDirHash),
+
 		// ─── Hierarchy Suggestions ────────────────────────────────────────
 		suggestHierarchy: (projectPath: string): Promise<IpcResponse<HierarchySuggestionResult>> =>
 			ipcRenderer.invoke('memory:suggestHierarchy', projectPath),
@@ -449,6 +464,87 @@ export function createMemoryApi() {
 			return () => {
 				ipcRenderer.removeListener('memory:jobQueueUpdate', handler);
 			};
+		},
+
+		// ─── Experience Repository ───────────────────────────────────────
+		repository: {
+			importFromFile: (
+				filePath: string
+			): Promise<
+				IpcResponse<{
+					success: boolean;
+					signatureStatus?: string;
+					result?: BundleImportResult;
+					errors?: string[];
+				}>
+			> => ipcRenderer.invoke('memory:repository:importFromFile', filePath),
+
+			export: (
+				name: string,
+				description: string,
+				author: string,
+				memoryIds: string[],
+				version?: string
+			): Promise<IpcResponse<ExperienceBundle>> =>
+				ipcRenderer.invoke(
+					'memory:repository:export',
+					name,
+					description,
+					author,
+					memoryIds,
+					version
+				),
+
+			verifySignature: (
+				filePath: string
+			): Promise<
+				IpcResponse<{ signed: boolean; valid?: boolean; trusted?: boolean; signerKey?: string }>
+			> => ipcRenderer.invoke('memory:repository:verifySignature', filePath),
+
+			getImportedBundles: (): Promise<IpcResponse<ImportedBundleRecord[]>> =>
+				ipcRenderer.invoke('memory:repository:getImportedBundles'),
+
+			uninstall: (bundleId: string): Promise<IpcResponse<{ removed: number }>> =>
+				ipcRenderer.invoke('memory:repository:uninstall', bundleId),
+
+			getTrustedKeys: (): Promise<IpcResponse<TrustedKeyEntry[]>> =>
+				ipcRenderer.invoke('memory:repository:getTrustedKeys'),
+
+			addTrustedKey: (publicKey: string, label: string): Promise<IpcResponse<{ added: boolean }>> =>
+				ipcRenderer.invoke('memory:repository:addTrustedKey', publicKey, label),
+
+			removeTrustedKey: (publicKey: string): Promise<IpcResponse<{ removed: boolean }>> =>
+				ipcRenderer.invoke('memory:repository:removeTrustedKey', publicKey),
+
+			browseCatalog: (
+				query?: string,
+				page?: number,
+				pageSize?: number
+			): Promise<IpcResponse<RepositoryCatalogResponse>> =>
+				ipcRenderer.invoke('memory:repository:browseCatalog', query, page, pageSize),
+
+			download: (bundleId: string): Promise<IpcResponse<{ success: boolean; error?: string }>> =>
+				ipcRenderer.invoke('memory:repository:download', bundleId),
+
+			submit: (
+				name: string,
+				description: string,
+				author: string,
+				memoryIds: string[],
+				submitterName?: string,
+				submitterEmail?: string,
+				reviewNotes?: string
+			): Promise<IpcResponse<SubmissionResponse>> =>
+				ipcRenderer.invoke(
+					'memory:repository:submit',
+					name,
+					description,
+					author,
+					memoryIds,
+					submitterName,
+					submitterEmail,
+					reviewNotes
+				),
 		},
 	};
 }

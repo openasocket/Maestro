@@ -53,6 +53,7 @@ import { registerAgentErrorHandlers } from './agent-error';
 import { registerTabNamingHandlers, TabNamingHandlerDependencies } from './tabNaming';
 import { registerDirectorNotesHandlers, DirectorNotesHandlerDependencies } from './director-notes';
 import { registerMemoryHandlers, MemoryHandlerDependencies } from './memory-handlers';
+import { registerExperienceRepositoryHandlers } from './experience-repository';
 import { registerWakatimeHandlers } from './wakatime';
 import { getMemoryStore } from '../../memory/memory-store';
 import { AgentDetector } from '../../agents';
@@ -289,6 +290,8 @@ export function registerAllHandlers(deps: HandlerDependencies): void {
 		memoryStore: getMemoryStore(),
 		settingsStore: deps.settingsStore,
 	});
+	// Register experience repository handlers (bundle import/export/signing)
+	registerExperienceRepositoryHandlers();
 	// Setup logger event forwarding to renderer
 	setupLoggerEventForwarding(deps.getMainWindow);
 }

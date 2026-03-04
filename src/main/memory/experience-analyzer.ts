@@ -1601,6 +1601,24 @@ ${text.slice(0, 1000)}`);
 			}
 		}
 
+		// Trigger cross-project scan if experiences were stored and feature is enabled
+		if (stored > 0) {
+			import('./memory-store')
+				.then(async ({ getMemoryStore }) => {
+					const cfg = await getMemoryStore().getConfig();
+					if (cfg.enableCrossProjectPromotion) {
+						const { getMemoryJobQueue } = await import('./memory-job-queue');
+						getMemoryJobQueue().enqueue({
+							type: 'cross-project-scan',
+							priority: 8,
+							payload: {},
+							deferUntil: Date.now() + 30000, // 30s defer to batch rapid extractions
+						});
+					}
+				})
+				.catch(() => {});
+		}
+
 		return stored;
 	}
 

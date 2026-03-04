@@ -31,7 +31,8 @@ export type MemoryJobType =
 	| 'confidence-decay' // File I/O — fast, run daily
 	| 'hierarchy-suggestion' // File scan — medium, run on project open
 	| 'digest-update' // File I/O — fast
-	| 'embedding-backfill'; // Embedding service — batch-friendly
+	| 'embedding-backfill' // Embedding service — batch-friendly
+	| 'cross-project-scan'; // File I/O + embeddings — scan for recurring patterns across projects
 
 export interface MemoryJob {
 	id: string;
@@ -53,6 +54,7 @@ const JOB_TIME_ESTIMATES: Record<MemoryJobType, number> = {
 	'hierarchy-suggestion': 3,
 	'digest-update': 1,
 	'embedding-backfill': 5,
+	'cross-project-scan': 10,
 };
 
 // ─── Human-readable activity descriptions ────────────────────────────────────
@@ -75,6 +77,8 @@ function describeJob(job: MemoryJob): string {
 			return 'Updating project digest';
 		case 'embedding-backfill':
 			return 'Backfilling embeddings';
+		case 'cross-project-scan':
+			return 'Scanning for cross-project patterns';
 	}
 }
 
@@ -109,6 +113,7 @@ const DEDUP_KEY_FIELDS: Record<MemoryJobType, string[]> = {
 	'hierarchy-suggestion': ['projectPath'],
 	'digest-update': ['projectPath'],
 	'embedding-backfill': ['projectPath'],
+	'cross-project-scan': [],
 };
 
 // ─── MemoryJobQueue ─────────────────────────────────────────────────────────
@@ -413,6 +418,22 @@ export class MemoryJobQueue {
 				// Reset daily token tracking counters
 				this.resetTokenTracking();
 
+				// Piggyback cross-project scan if enabled
+				try {
+					const { getMemoryStore } = await import('./memory-store');
+					const cfg = await getMemoryStore().getConfig();
+					if (cfg.enableCrossProjectPromotion) {
+						this.enqueue({
+							type: 'cross-project-scan',
+							priority: 8,
+							payload: {},
+							deferUntil: Date.now() + 60000, // 1 minute after decay
+						});
+					}
+				} catch {
+					// Config unavailable — skip
+				}
+
 				// Re-enqueue for next day
 				this.enqueue({
 					type: 'confidence-decay',
@@ -434,6 +455,12 @@ export class MemoryJobQueue {
 			}
 			case 'embedding-backfill': {
 				// Placeholder — embedding backfill not yet implemented
+				break;
+			}
+			case 'cross-project-scan': {
+				const { getMemoryStore } = await import('./memory-store');
+				const store = getMemoryStore();
+				await store.scanCrossProjectPatterns();
 				break;
 			}
 		}

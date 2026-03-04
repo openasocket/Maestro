@@ -8,6 +8,8 @@
  */
 
 import { ipcMain } from 'electron';
+import { promises as fs } from 'fs';
+import * as crypto from 'crypto';
 import { logger } from '../../utils/logger';
 import { createIpcDataHandler, CreateHandlerOptions } from '../../utils/ipcHandler';
 import type { MemoryStore } from '../../memory/memory-store';
@@ -669,6 +671,16 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		)
 	);
 
+	ipcMain.handle(
+		'memory:promoteCrossProject',
+		createIpcDataHandler(
+			handlerOpts('promoteCrossProject'),
+			async (id: string, ruleText: string, sourceProjectDirHash: string) => {
+				return memoryStore.promoteCrossProjectExperience(id, ruleText, sourceProjectDirHash);
+			}
+		)
+	);
+
 	// ─── Hierarchy Suggestions ────────────────────────────────────────
 
 	ipcMain.handle(
@@ -825,5 +837,193 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 			const { getMemoryJobQueue } = await import('../../memory/memory-job-queue');
 			return getMemoryJobQueue().getAgentAnalysisStats(agentId);
 		})
+	);
+
+	// ─── Experience Repository (Bundle Operations) ─────────────────────
+
+	ipcMain.handle(
+		'memory:repository:importFromFile',
+		createIpcDataHandler(handlerOpts('repository:importFromFile'), async (filePath: string) => {
+			const { importBundle, validateBundleIntegrity, verifyBundleSignature } =
+				await import('../../memory/experience-bundle');
+			const content = await fs.readFile(filePath, 'utf-8');
+			const parsed = JSON.parse(content);
+
+			// Determine if signed or unsigned
+			const isSigned = 'signature' in parsed && 'signingKey' in parsed && 'algorithm' in parsed;
+			const bundle = isSigned ? parsed.bundle : parsed;
+
+			// Validate
+			const validation = validateBundleIntegrity(bundle);
+			if (!validation.valid) {
+				return { success: false, errors: validation.errors };
+			}
+
+			// Verify signature if signed
+			let signatureVerified = false;
+			let signerTrusted = false;
+			let signatureStatus: 'unsigned' | 'verified' | 'untrusted' | 'invalid' = 'unsigned';
+
+			if (isSigned) {
+				const sigResult = await verifyBundleSignature(parsed);
+				if (!sigResult.valid) {
+					signatureStatus = 'invalid';
+					return { success: false, signatureStatus, errors: ['Invalid signature'] };
+				}
+				signatureVerified = true;
+				signerTrusted = sigResult.trusted;
+				signatureStatus = signerTrusted ? 'verified' : 'untrusted';
+			}
+
+			const result = await importBundle(bundle, signatureVerified, signerTrusted);
+			return { success: true, signatureStatus, result };
+		})
+	);
+
+	ipcMain.handle(
+		'memory:repository:export',
+		createIpcDataHandler(
+			handlerOpts('repository:export'),
+			async (
+				name: string,
+				description: string,
+				author: string,
+				memoryIds: string[],
+				version?: string
+			) => {
+				const { exportAsBundle } = await import('../../memory/experience-bundle');
+				return exportAsBundle(memoryIds, 'global', {
+					name,
+					description,
+					author,
+					...(version ? { minMaestroVersion: version } : {}),
+				});
+			}
+		)
+	);
+
+	ipcMain.handle(
+		'memory:repository:verifySignature',
+		createIpcDataHandler(handlerOpts('repository:verifySignature'), async (filePath: string) => {
+			const { verifyBundleSignature } = await import('../../memory/experience-bundle');
+			const content = await fs.readFile(filePath, 'utf-8');
+			const signed = JSON.parse(content);
+			if (!('signature' in signed)) return { signed: false };
+			const { valid, trusted } = await verifyBundleSignature(signed);
+			return { signed: true, valid, trusted, signerKey: signed.signingKey };
+		})
+	);
+
+	ipcMain.handle(
+		'memory:repository:getImportedBundles',
+		createIpcDataHandler(handlerOpts('repository:getImportedBundles'), async () => {
+			const { getImportedBundles } = await import('../../memory/experience-bundle');
+			return getImportedBundles();
+		})
+	);
+
+	ipcMain.handle(
+		'memory:repository:uninstall',
+		createIpcDataHandler(handlerOpts('repository:uninstall'), async (bundleId: string) => {
+			const { uninstallBundle } = await import('../../memory/experience-bundle');
+			return uninstallBundle(bundleId);
+		})
+	);
+
+	// ─── Trusted Key Management ─────────────────────────────────────────
+
+	ipcMain.handle(
+		'memory:repository:getTrustedKeys',
+		createIpcDataHandler(handlerOpts('repository:getTrustedKeys'), async () => {
+			const { getTrustedKeys } = await import('../../memory/experience-bundle');
+			return getTrustedKeys();
+		})
+	);
+
+	ipcMain.handle(
+		'memory:repository:addTrustedKey',
+		createIpcDataHandler(
+			handlerOpts('repository:addTrustedKey'),
+			async (publicKey: string, label: string) => {
+				const { addTrustedKey } = await import('../../memory/experience-bundle');
+				await addTrustedKey({
+					publicKey,
+					name: label,
+					addedAt: Date.now(),
+					expiresAt: 0,
+					fingerprint: crypto
+						.createHash('sha256')
+						.update(Buffer.from(publicKey, 'hex'))
+						.digest('hex')
+						.slice(0, 16),
+				});
+				return { added: true };
+			}
+		)
+	);
+
+	ipcMain.handle(
+		'memory:repository:removeTrustedKey',
+		createIpcDataHandler(handlerOpts('repository:removeTrustedKey'), async (publicKey: string) => {
+			const { removeTrustedKey } = await import('../../memory/experience-bundle');
+			await removeTrustedKey(publicKey);
+			return { removed: true };
+		})
+	);
+
+	// ─── API Stubs (not yet available) ───────────────────────────────────
+
+	ipcMain.handle(
+		'memory:repository:browseCatalog',
+		createIpcDataHandler(
+			handlerOpts('repository:browseCatalog'),
+			async (_query?: string, _page?: number, _pageSize?: number) => {
+				// TODO: Implement when Global Experience Repository API is available
+				return {
+					entries: [],
+					totalCount: 0,
+					page: 1,
+					pageSize: 20,
+					_stub: true,
+					_message: 'Global Experience Repository API not yet available',
+				};
+			}
+		)
+	);
+
+	ipcMain.handle(
+		'memory:repository:download',
+		createIpcDataHandler(handlerOpts('repository:download'), async (_bundleId: string) => {
+			// TODO: Implement when Global Experience Repository API is available
+			return {
+				success: false,
+				error: 'Global Experience Repository API not yet available',
+				_stub: true,
+			};
+		})
+	);
+
+	ipcMain.handle(
+		'memory:repository:submit',
+		createIpcDataHandler(
+			handlerOpts('repository:submit'),
+			async (
+				_name: string,
+				_description: string,
+				_author: string,
+				_memoryIds: string[],
+				_submitterName?: string,
+				_submitterEmail?: string,
+				_reviewNotes?: string
+			) => {
+				// TODO: Implement when Global Experience Repository API is available
+				return {
+					accepted: false,
+					message:
+						'Global Experience Repository API not yet available. Export your bundle locally and share it manually.',
+					_stub: true,
+				};
+			}
+		)
 	);
 }

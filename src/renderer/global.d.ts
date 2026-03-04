@@ -3028,6 +3028,14 @@ interface MaestroAPI {
 			| { success: true; data: import('../shared/memory-types').MemoryEntry | null }
 			| { success: false; error: string }
 		>;
+		promoteCrossProject: (
+			id: string,
+			ruleText: string,
+			sourceProjectDirHash: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry | null }
+			| { success: false; error: string }
+		>;
 		suggestHierarchy: (
 			projectPath: string
 		) => Promise<
@@ -3118,6 +3126,182 @@ interface MaestroAPI {
 		onJobQueueUpdate: (
 			callback: (status: import('../shared/memory-types').JobQueueStatus) => void
 		) => () => void;
+
+		// ─── Experience Repository (programmatic API) ─────────────────────
+		repository: {
+			importFromFile: (filePath: string) => Promise<
+				| {
+						success: true;
+						data: {
+							success: boolean;
+							signatureStatus?: string;
+							result?: import('../shared/experience-bundle-types').BundleImportResult;
+							errors?: string[];
+						};
+				  }
+				| { success: false; error: string }
+			>;
+			export: (
+				name: string,
+				description: string,
+				author: string,
+				memoryIds: string[],
+				version?: string
+			) => Promise<
+				| {
+						success: true;
+						data: import('../shared/experience-bundle-types').ExperienceBundle;
+				  }
+				| { success: false; error: string }
+			>;
+			verifySignature: (filePath: string) => Promise<
+				| {
+						success: true;
+						data: {
+							signed: boolean;
+							valid?: boolean;
+							trusted?: boolean;
+							signerKey?: string;
+						};
+				  }
+				| { success: false; error: string }
+			>;
+			getImportedBundles: () => Promise<
+				| {
+						success: true;
+						data: import('../shared/experience-bundle-types').ImportedBundleRecord[];
+				  }
+				| { success: false; error: string }
+			>;
+			uninstall: (
+				bundleId: string
+			) => Promise<
+				{ success: true; data: { removed: number } } | { success: false; error: string }
+			>;
+			getTrustedKeys: () => Promise<
+				| {
+						success: true;
+						data: import('../shared/experience-bundle-types').TrustedKeyEntry[];
+				  }
+				| { success: false; error: string }
+			>;
+			addTrustedKey: (
+				publicKey: string,
+				label: string
+			) => Promise<{ success: true; data: { added: boolean } } | { success: false; error: string }>;
+			removeTrustedKey: (
+				publicKey: string
+			) => Promise<
+				{ success: true; data: { removed: boolean } } | { success: false; error: string }
+			>;
+			browseCatalog: (
+				query?: string,
+				page?: number,
+				pageSize?: number
+			) => Promise<
+				| {
+						success: true;
+						data: import('../shared/experience-bundle-types').RepositoryCatalogResponse;
+				  }
+				| { success: false; error: string }
+			>;
+			download: (
+				bundleId: string
+			) => Promise<
+				| { success: true; data: { success: boolean; error?: string } }
+				| { success: false; error: string }
+			>;
+			submit: (
+				name: string,
+				description: string,
+				author: string,
+				memoryIds: string[],
+				submitterName?: string,
+				submitterEmail?: string,
+				reviewNotes?: string
+			) => Promise<
+				| {
+						success: true;
+						data: import('../shared/experience-bundle-types').SubmissionResponse;
+				  }
+				| { success: false; error: string }
+			>;
+		};
+	};
+
+	// Experience Repository API (bundle import/export, signing, catalog)
+	experienceRepository: {
+		getCatalog: (
+			page?: number,
+			pageSize?: number,
+			category?: string,
+			search?: string
+		) => Promise<
+			| {
+					success: true;
+					data: import('../shared/experience-bundle-types').RepositoryCatalogResponse;
+			  }
+			| { success: false; error: string }
+		>;
+		downloadBundle: (bundleId: string) => Promise<
+			| {
+					success: true;
+					data: import('../shared/experience-bundle-types').RepositoryDownloadResponse;
+			  }
+			| { success: false; error: string }
+		>;
+		importFromFile: () => Promise<
+			| {
+					success: true;
+					data: import('../shared/experience-bundle-types').BundleImportResult;
+			  }
+			| { success: false; error: string }
+		>;
+		exportToFile: (
+			memoryIds: string[],
+			scope: import('../shared/memory-types').MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string,
+			metadata?: Partial<import('../shared/experience-bundle-types').ExperienceBundle>
+		) => Promise<{ success: true; data: { filePath: string } } | { success: false; error: string }>;
+		submitExperiences: (
+			submission: import('../shared/experience-bundle-types').ExperienceSubmission
+		) => Promise<
+			| {
+					success: true;
+					data: import('../shared/experience-bundle-types').SubmissionResponse;
+			  }
+			| { success: false; error: string }
+		>;
+		getImported: () => Promise<
+			| {
+					success: true;
+					data: import('../shared/experience-bundle-types').ImportedBundleRecord[];
+			  }
+			| { success: false; error: string }
+		>;
+		uninstall: (
+			bundleId: string
+		) => Promise<{ success: true; data: { removed: number } } | { success: false; error: string }>;
+		verifySignature: (
+			signed: import('../shared/experience-bundle-types').SignedExperienceBundle
+		) => Promise<
+			| { success: true; data: { valid: boolean; trusted: boolean } }
+			| { success: false; error: string }
+		>;
+		getTrustedKeys: () => Promise<
+			| {
+					success: true;
+					data: import('../shared/experience-bundle-types').TrustedKeyEntry[];
+			  }
+			| { success: false; error: string }
+		>;
+		addTrustedKey: (
+			key: import('../shared/experience-bundle-types').TrustedKeyEntry
+		) => Promise<{ success: true; data: void } | { success: false; error: string }>;
+		removeTrustedKey: (
+			publicKey: string
+		) => Promise<{ success: true; data: void } | { success: false; error: string }>;
 	};
 
 	// WakaTime API (CLI check, API key validation)
