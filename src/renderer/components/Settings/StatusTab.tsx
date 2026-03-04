@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { MemoryConfig, MemoryStats, MemoryEntry } from '../../../shared/memory-types';
+import { TabDescriptionBanner } from './TabDescriptionBanner';
 
 export interface StatusTabProps {
 	theme: Theme;
@@ -60,6 +61,11 @@ export function StatusTab({
 
 	return (
 		<div className="space-y-4">
+			<TabDescriptionBanner
+				theme={theme}
+				description="System health overview showing how the memory system is performing — which memories are being used, injection activity, and overall system metrics."
+			/>
+
 			{/* Memory Health */}
 			{stats && (
 				<MemoryHealthPanel

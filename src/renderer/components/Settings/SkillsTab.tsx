@@ -10,6 +10,7 @@ import { Layers } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { MemoryConfig, MemoryStats } from '../../../shared/memory-types';
 import { ConfigSlider } from './MemoryConfigWidgets';
+import { TabDescriptionBanner } from './TabDescriptionBanner';
 
 export interface SkillsTabProps {
 	theme: Theme;
@@ -27,6 +28,11 @@ export function SkillsTab({
 }: SkillsTabProps): React.ReactElement {
 	return (
 		<div className="space-y-4">
+			<TabDescriptionBanner
+				theme={theme}
+				description="Skills are specific domains of expertise within a persona. They organize your memories into focused knowledge areas like 'Error Handling' or 'API Design'. The system matches incoming tasks to relevant skills to find the right memories."
+			/>
+
 			{/* Skill-level config */}
 			<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
 				<div className="flex items-center gap-2">

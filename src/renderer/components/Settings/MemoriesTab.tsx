@@ -11,6 +11,7 @@ import { Brain, Timer, Scissors, Loader2 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { MemoryConfig, MemoryStats, MemoryEntry } from '../../../shared/memory-types';
 import { ConfigSlider } from './MemoryConfigWidgets';
+import { TabDescriptionBanner } from './TabDescriptionBanner';
 
 export interface MemoriesTabProps {
 	theme: Theme;
@@ -88,6 +89,11 @@ export function MemoriesTab({
 
 	return (
 		<div className="space-y-4">
+			<TabDescriptionBanner
+				theme={theme}
+				description="Memories are the individual knowledge entries that get injected into your agents' prompts. Rules are prescriptive ('always do X'), while experiences are contextual ('we learned Y when Z happened'). All memories have confidence scores that decay over time if unused."
+			/>
+
 			{/* Memory stats summary */}
 			{stats && (
 				<div

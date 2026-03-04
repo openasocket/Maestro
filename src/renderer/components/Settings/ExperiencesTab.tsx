@@ -21,6 +21,7 @@ import type {
 } from '../../../shared/memory-types';
 import { ConfigToggle } from './MemoryConfigWidgets';
 import { ExperienceRepositoryPanel } from './ExperienceRepositoryPanel';
+import { TabDescriptionBanner } from './TabDescriptionBanner';
 
 export interface ExperiencesTabProps {
 	theme: Theme;
@@ -203,6 +204,11 @@ export function ExperiencesTab({
 
 	return (
 		<div className="space-y-4">
+			<TabDescriptionBanner
+				theme={theme}
+				description="Experiences are lessons learned from real coding sessions — what worked, what didn't, and why. They're automatically extracted from your agent interactions and can be promoted to permanent rules when patterns prove reliable."
+			/>
+
 			{error && (
 				<div
 					className="flex items-center gap-2 p-3 rounded-lg text-xs"

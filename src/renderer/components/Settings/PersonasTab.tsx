@@ -15,6 +15,7 @@ import type {
 	SkillAreaSuggestion,
 	HierarchySuggestionResult,
 } from '../../../shared/memory-types';
+import { TabDescriptionBanner } from './TabDescriptionBanner';
 
 export interface PersonasTabProps {
 	theme: Theme;
@@ -151,6 +152,11 @@ export function PersonasTab({
 
 	return (
 		<div className="space-y-4">
+			<TabDescriptionBanner
+				theme={theme}
+				description="Personas are expert profiles that shape how your AI agents think and respond. Each persona has specialized knowledge areas and a behavioral style. When a task matches a persona's expertise, relevant memories are automatically injected."
+			/>
+
 			{error && (
 				<div
 					className="flex items-center gap-2 p-3 rounded-lg text-xs"
