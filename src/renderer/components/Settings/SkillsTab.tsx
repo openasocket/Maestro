@@ -28,9 +28,18 @@ import {
 	BarChart3,
 	AlertCircle,
 	Archive,
+	Download,
+	Upload,
 } from 'lucide-react';
 import type { Theme } from '../../types';
-import type { MemoryConfig, MemoryStats, Persona, SkillArea } from '../../../shared/memory-types';
+import type {
+	MemoryConfig,
+	MemoryEntry,
+	MemoryStats,
+	MemoryType,
+	Persona,
+	SkillArea,
+} from '../../../shared/memory-types';
 import { ConfigSlider } from './MemoryConfigWidgets';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
 import { SkillEditModal } from './HierarchyEditModals';
@@ -97,6 +106,15 @@ export function SkillsTab({
 	const [mergeTarget, setMergeTarget] = useState<{ source: SkillCard; targetId: string } | null>(
 		null
 	);
+
+	// ─── Import/Export state ────────────────────────────────────────────
+	const [exportIncludeMemories, setExportIncludeMemories] = useState(false);
+	const [exportLoading, setExportLoading] = useState(false);
+	const [importPreview, setImportPreview] = useState<{
+		skills: Array<{ name: string; personaName: string; memoryCount: number }>;
+		raw: SkillExportData;
+	} | null>(null);
+	const [importTargetPersonaId, setImportTargetPersonaId] = useState<string>('');
 
 	const maxPerSkill = config.maxMemoriesPerSkillArea;
 
@@ -440,6 +458,130 @@ export function SkillsTab({
 		}
 	}, [mergeTarget, loadData, onHierarchyChange]);
 
+	// ─── Import/Export ──────────────────────────────────────────────
+
+	const handleExportAll = useCallback(async () => {
+		setExportLoading(true);
+		try {
+			const personaMap = new Map(personas.map((p) => [p.id, p]));
+			const exportSkills: SkillExportData['skills'] = [];
+
+			for (const skill of skills) {
+				const persona = personaMap.get(skill.personaId);
+				const entry: SkillExportData['skills'][number] = {
+					name: skill.name,
+					description: skill.description,
+					active: skill.active,
+					persona: { id: skill.personaId, name: persona?.name ?? 'Unknown' },
+				};
+
+				if (exportIncludeMemories) {
+					try {
+						const memRes = await window.maestro.memory.list('skill', skill.id, undefined, true);
+						if (memRes.success) {
+							entry.memories = memRes.data.map((m: MemoryEntry) => ({
+								content: m.content,
+								type: m.type,
+								tags: m.tags,
+								confidence: m.confidence,
+								pinned: m.pinned,
+							}));
+						}
+					} catch {
+						// Non-fatal: skip memories for this skill
+					}
+				}
+
+				exportSkills.push(entry);
+			}
+
+			const exportData: SkillExportData = {
+				version: 1,
+				exportedAt: new Date().toISOString(),
+				skills: exportSkills,
+			};
+
+			downloadSkillJson(exportData, 'all-skills');
+		} catch (err) {
+			setError(err instanceof Error ? err.message : 'Failed to export skills');
+		} finally {
+			setExportLoading(false);
+		}
+	}, [skills, personas, exportIncludeMemories]);
+
+	const handleImportFile = useCallback(() => {
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.accept = '.json';
+		input.onchange = async () => {
+			const file = input.files?.[0];
+			if (!file) return;
+			try {
+				const text = await file.text();
+				const data = JSON.parse(text) as SkillExportData;
+				if (!data.version || !data.skills) {
+					setError('Invalid skill export file');
+					return;
+				}
+				setImportPreview({
+					skills: data.skills.map((s) => ({
+						name: s.name,
+						personaName: s.persona?.name ?? 'Unknown',
+						memoryCount: s.memories?.length ?? 0,
+					})),
+					raw: data,
+				});
+				if (personas.length > 0) setImportTargetPersonaId(personas[0].id);
+			} catch {
+				setError('Failed to parse import file');
+			}
+		};
+		input.click();
+	}, [personas]);
+
+	const handleImportConfirm = useCallback(async () => {
+		if (!importPreview || !importTargetPersonaId) return;
+		setActionLoading('import');
+		try {
+			for (const exportedSkill of importPreview.raw.skills) {
+				const skillRes = await window.maestro.memory.skill.create(
+					importTargetPersonaId,
+					exportedSkill.name,
+					exportedSkill.description ?? ''
+				);
+				if (!skillRes.success) continue;
+
+				// Trigger embedding
+				try {
+					await window.maestro.memory.ensureEmbeddings('skill', skillRes.data.id);
+				} catch {
+					// Non-fatal
+				}
+
+				// Import memories if present
+				if (exportedSkill.memories && exportedSkill.memories.length > 0) {
+					try {
+						await window.maestro.memory.import(
+							{ memories: exportedSkill.memories },
+							'skill',
+							skillRes.data.id,
+							undefined
+						);
+					} catch {
+						// Non-fatal: memories can be imported separately
+					}
+				}
+			}
+			setImportPreview(null);
+			await loadData();
+			onHierarchyChange?.();
+		} catch (err) {
+			setError(err instanceof Error ? err.message : 'Failed to import skills');
+		} finally {
+			setActionLoading(null);
+		}
+	}, [importPreview, importTargetPersonaId, loadData, onHierarchyChange]);
+
 	// ─── Sibling skills for merge picker ────────────────────────────
 	const getSiblingSkills = useCallback(
 		(skill: SkillCard): SkillCard[] => {
@@ -599,40 +741,77 @@ export function SkillsTab({
 				</div>
 			)}
 
-			{/* ─── Create Skill Button ──────────────────────────────── */}
+			{/* ─── Action Bar: Create + Import/Export ────────────────── */}
 			{!loading && personas.length > 0 && (
-				<div className="flex items-center gap-2">
-					<button
-						className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border"
-						style={{
-							borderColor: theme.colors.accent,
-							color: theme.colors.accent,
-							backgroundColor: `${theme.colors.accent}10`,
-						}}
-						onClick={() => {
-							setCreatePersonaId(personas[0].id);
-							setShowCreateModal(true);
-						}}
-					>
-						<Plus className="w-3 h-3" />
-						Create Skill
-					</button>
-
-					{/* Persona selector for create (inline when creating) */}
-					{showCreateModal && personas.length > 1 && (
-						<select
-							className="px-2 py-1.5 rounded border bg-transparent text-xs outline-none"
-							style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
-							value={createPersonaId}
-							onChange={(e) => setCreatePersonaId(e.target.value)}
+				<div className="flex items-center justify-between gap-2">
+					<div className="flex items-center gap-2">
+						<button
+							className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border"
+							style={{
+								borderColor: theme.colors.accent,
+								color: theme.colors.accent,
+								backgroundColor: `${theme.colors.accent}10`,
+							}}
+							onClick={() => {
+								setCreatePersonaId(personas[0].id);
+								setShowCreateModal(true);
+							}}
 						>
-							{personas.map((p) => (
-								<option key={p.id} value={p.id}>
-									{p.name}
-								</option>
-							))}
-						</select>
-					)}
+							<Plus className="w-3 h-3" />
+							Create Skill
+						</button>
+
+						{/* Persona selector for create (inline when creating) */}
+						{showCreateModal && personas.length > 1 && (
+							<select
+								className="px-2 py-1.5 rounded border bg-transparent text-xs outline-none"
+								style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
+								value={createPersonaId}
+								onChange={(e) => setCreatePersonaId(e.target.value)}
+							>
+								{personas.map((p) => (
+									<option key={p.id} value={p.id}>
+										{p.name}
+									</option>
+								))}
+							</select>
+						)}
+					</div>
+
+					<div className="flex items-center gap-2">
+						<label
+							className="flex items-center gap-1 text-xs"
+							style={{ color: theme.colors.textDim }}
+						>
+							<input
+								type="checkbox"
+								checked={exportIncludeMemories}
+								onChange={(e) => setExportIncludeMemories(e.target.checked)}
+							/>
+							Include memories
+						</label>
+						<button
+							className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border"
+							style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
+							onClick={handleExportAll}
+							disabled={exportLoading || skills.length === 0}
+						>
+							{exportLoading ? (
+								<Loader2 className="w-3 h-3 animate-spin" />
+							) : (
+								<Download className="w-3 h-3" />
+							)}
+							Export
+						</button>
+						<button
+							className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border"
+							style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
+							onClick={handleImportFile}
+						>
+							<Upload className="w-3 h-3" />
+							Import
+						</button>
+					</div>
 				</div>
 			)}
 
@@ -1000,6 +1179,86 @@ export function SkillsTab({
 				</div>
 			)}
 
+			{/* ─── Import Preview Dialog ─────────────────────────────── */}
+			{importPreview && (
+				<div
+					className="fixed inset-0 z-50 flex items-center justify-center"
+					style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+				>
+					<div
+						className="rounded-lg border p-6 space-y-4 max-w-md w-full mx-4"
+						style={{ backgroundColor: theme.colors.bgMain, borderColor: theme.colors.border }}
+					>
+						<div className="text-sm font-bold" style={{ color: theme.colors.textMain }}>
+							Import Skills
+						</div>
+						<div className="text-xs" style={{ color: theme.colors.textDim }}>
+							{importPreview.skills.length} skill(s) found:
+						</div>
+						<div className="space-y-1.5 max-h-48 overflow-y-auto">
+							{importPreview.skills.map((s, i) => (
+								<div
+									key={i}
+									className="flex items-center justify-between px-3 py-2 rounded border text-xs"
+									style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
+								>
+									<span className="font-medium">{s.name}</span>
+									<span style={{ color: theme.colors.textDim }}>
+										{s.personaName} &middot; {s.memoryCount} memories
+									</span>
+								</div>
+							))}
+						</div>
+						<div>
+							<label
+								className="block text-xs font-bold opacity-70 uppercase mb-2"
+								style={{ color: theme.colors.textMain }}
+							>
+								Import into persona
+							</label>
+							<select
+								className="w-full px-3 py-2 rounded border bg-transparent text-xs outline-none"
+								style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
+								value={importTargetPersonaId}
+								onChange={(e) => setImportTargetPersonaId(e.target.value)}
+							>
+								{personas.map((p) => (
+									<option key={p.id} value={p.id}>
+										{p.name}
+									</option>
+								))}
+							</select>
+						</div>
+						<div className="flex justify-end gap-2">
+							<button
+								className="px-3 py-1.5 rounded text-xs border"
+								style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
+								onClick={() => setImportPreview(null)}
+							>
+								Cancel
+							</button>
+							<button
+								className="px-3 py-1.5 rounded text-xs font-medium border"
+								style={{
+									borderColor: theme.colors.accent,
+									color: theme.colors.accent,
+									backgroundColor: `${theme.colors.accent}10`,
+								}}
+								onClick={handleImportConfirm}
+								disabled={actionLoading === 'import' || !importTargetPersonaId}
+							>
+								{actionLoading === 'import' ? (
+									<Loader2 className="w-3 h-3 animate-spin inline mr-1" />
+								) : (
+									<Upload className="w-3 h-3 inline mr-1" />
+								)}
+								Import
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
+
 			{/* ─── Edit/Create Modal ──────────────────────────────────── */}
 			{(editingPersonaId || showCreateModal) && (
 				<SkillEditModal
@@ -1225,4 +1484,37 @@ function ActionButton({
 			)}
 		</button>
 	);
+}
+
+// ─── Export/Import types and helpers ─────────────────────────────────────────
+
+interface SkillExportData {
+	version: number;
+	exportedAt: string;
+	skills: Array<{
+		name: string;
+		description: string;
+		active: boolean;
+		persona: { id: string; name: string };
+		memories?: Array<{
+			content: string;
+			type?: MemoryType;
+			tags?: string[];
+			confidence?: number;
+			pinned?: boolean;
+		}>;
+	}>;
+}
+
+function downloadSkillJson(data: SkillExportData, label: string) {
+	const json = JSON.stringify(data, null, 2);
+	const blob = new Blob([json], { type: 'application/json' });
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = `maestro-skills-${label}-${new Date().toISOString().slice(0, 10)}.json`;
+	document.body.appendChild(a);
+	a.click();
+	document.body.removeChild(a);
+	URL.revokeObjectURL(url);
 }
