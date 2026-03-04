@@ -214,14 +214,21 @@ export class ExperienceAnalyzer {
 			return 0;
 		}
 
-		// Check if already analyzed (prevents duplicate work during retroactive scans)
+		// Check if already analyzed (prevents duplicate work during retroactive scans,
+		// including sessions already covered by per-turn extraction)
 		try {
 			const { getAnalyzedSessionsRegistry } = await import('./analyzed-sessions');
-			if (await getAnalyzedSessionsRegistry().isAnalyzed(sessionId)) {
+			const registry = getAnalyzedSessionsRegistry();
+			if (await registry.isAnalyzed(sessionId)) {
+				// Determine if this was covered by per-turn extraction
+				const entry = await registry.getEntry(sessionId);
+				const coveredByPerTurn = entry?.trigger === 'per-turn';
 				this.lastDiagnostic = {
 					...baseDiag,
 					status: 'skipped-already-analyzed',
-					message: `Session ${sessionId.slice(0, 8)}... already analyzed`,
+					message: coveredByPerTurn
+						? `Session already covered by per-turn extraction`
+						: `Session ${sessionId.slice(0, 8)}... already analyzed`,
 				};
 				return 0;
 			}
@@ -448,13 +455,25 @@ export class ExperienceAnalyzer {
 		try {
 			const { getAnalyzedSessionsRegistry } = await import('./analyzed-sessions');
 			const turnKey = `${sessionId}:turn:${turnIndex}`;
-			await getAnalyzedSessionsRegistry().markAnalyzed({
+			const registry = getAnalyzedSessionsRegistry();
+			await registry.markAnalyzed({
 				sessionId: turnKey,
 				analyzedAt: Date.now(),
 				experiencesStored: stored,
 				providerUsed: this.lastDiagnostic?.providerUsed,
 				trigger: 'per-turn',
 			});
+
+			// Also mark bare sessionId to prevent retroactive double-extraction
+			if (stored > 0) {
+				await registry.markAnalyzed({
+					sessionId,
+					analyzedAt: Date.now(),
+					experiencesStored: stored,
+					providerUsed: this.lastDiagnostic?.providerUsed,
+					trigger: 'per-turn',
+				});
+			}
 		} catch {
 			// Non-critical
 		}

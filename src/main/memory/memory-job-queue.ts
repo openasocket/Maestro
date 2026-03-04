@@ -362,8 +362,10 @@ export class MemoryJobQueue {
 					// Clear progress after completion
 					this.currentProgress = null;
 
-					// Collect diagnostic from analyzer
+					// Collect diagnostic from analyzer, annotate with job trigger for UI clarity
 					if (analyzer.lastDiagnostic) {
+						analyzer.lastDiagnostic.trigger =
+							(job.payload.trigger as ExtractionDiagnostic['trigger']) ?? 'exit';
 						this.diagnostics.push(analyzer.lastDiagnostic);
 						// Keep ring buffer at max 20
 						if (this.diagnostics.length > 20) {
