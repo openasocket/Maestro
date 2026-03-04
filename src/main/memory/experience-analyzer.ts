@@ -14,6 +14,7 @@
 
 import type {
 	MemoryConfig,
+	MemoryScope,
 	ExtractionDiagnostic,
 	ExtractionProgress,
 } from '../../shared/memory-types';
@@ -112,6 +113,8 @@ export interface ExtractedExperience {
 	learning: string;
 	/** What kind of learning this experience represents */
 	category: ExperienceCategory;
+	/** LLM-suggested scope: project-specific or universally applicable */
+	scope?: 'project' | 'global';
 	/** Suggested tags */
 	tags: string[];
 	/** How novel/important this learning is (0.0-1.0) */
@@ -1390,11 +1393,17 @@ ${text.slice(0, 1000)}`);
 						? (rawCategory as ExperienceCategory)
 						: 'pattern-established';
 
+				// Validate scope — only accept 'project' or 'global'
+				const rawScope = e.scope;
+				const suggestedScope: 'project' | 'global' | undefined =
+					rawScope === 'global' ? 'global' : rawScope === 'project' ? 'project' : undefined;
+
 				return {
 					content: String(e.content),
 					situation: String(e.situation),
 					learning: String(e.learning),
 					category,
+					...(suggestedScope ? { scope: suggestedScope } : {}),
 					tags: Array.isArray(e.tags) ? e.tags.filter((t: unknown) => typeof t === 'string') : [],
 					noveltyScore: Number(e.noveltyScore),
 					...(typeof e.alternativesConsidered === 'string'
@@ -1457,8 +1466,8 @@ ${text.slice(0, 1000)}`);
 					continue;
 				}
 
-				// Determine placement: skill scope if cascading search found a match
-				let scope: 'skill' | 'project' = 'project';
+				// Determine placement: skill match > LLM-suggested scope > project default
+				let scope: MemoryScope = exp.scope ?? 'project';
 				let skillAreaId: string | undefined;
 
 				if (searchResults.length > 0 && searchResults[0].entry.skillAreaId) {

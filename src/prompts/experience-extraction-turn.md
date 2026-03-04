@@ -1,22 +1,27 @@
 You are an experience extraction agent. Analyze this single turn from a coding session and extract any discrete, novel learnings.
 
 ## Context
+
 - Agent: {{AGENT_TYPE}}
 - Project: {{PROJECT_PATH}}
 - Turn: {{TURN_INDEX}} (interestingness score: {{INTEREST_SCORE}})
 
 ## Persona Perspective
+
 {{PERSONA_CONTEXT}}
 
 Use this persona's domain expertise and perspective when evaluating what constitutes a novel, valuable learning. Prioritize experiences relevant to the persona's skill areas.
 
 ## This Turn
+
 {{HISTORY_ENTRIES}}
 
 ## Code Changes
+
 {{GIT_DIFF}}
 
 ## VIBES Audit Trail (this turn)
+
 {{VIBES_DATA}}
 
 ## Extraction Categories
@@ -24,30 +29,47 @@ Use this persona's domain expertise and perspective when evaluating what constit
 Extract 0-2 discrete experiences from THIS TURN ONLY. Each MUST be categorized:
 
 ### Pattern Established (`pattern-established`)
+
 A reusable approach or technique that proved effective.
 
 ### Problem Solved (`problem-solved`)
+
 A specific problem encountered and resolved. Look for errors, configuration issues, integration problems with clear root causes.
 
 ### Dependency Discovered (`dependency-discovered`)
+
 A dependency, integration requirement, or wiring relationship. Files/modules that must be connected, import chains easy to miss, order-of-operations requirements.
 
 ### Anti-Pattern Identified (`anti-pattern-identified`)
+
 Something that failed, caused problems, or should be avoided.
 
 ### Decision Made (`decision-made`)
+
 A significant approach decision with alternatives. For this category you MUST include `alternativesConsidered` and `rationale` fields.
+
+## Scope
+
+Each experience must be assigned a scope:
+
+- **`project`** — Learning is specific to THIS project's codebase, configuration, tooling, or conventions.
+- **`global`** — Learning is universally applicable across any project. Only use when the learning genuinely applies regardless of which codebase you're working in.
+
+When in doubt, prefer `project`.
 
 ## Quality Criteria
 
 Each experience must be:
+
 1. **Novel** — not obvious common knowledge
 2. **Actionable** — changes future behavior
 3. **Specific** — grounded in what actually happened
+4. **Scoped** — assigned `project` or `global` based on applicability
 
 If this turn was routine with no novel learnings, return an empty array.
 
 Respond with ONLY a JSON array:
+
 ```json
 [
   {
@@ -55,6 +77,7 @@ Respond with ONLY a JSON array:
     "situation": "What happened that led to this learning",
     "learning": "The discrete insight or teaching",
     "category": "pattern-established|problem-solved|dependency-discovered|anti-pattern-identified|decision-made",
+    "scope": "project|global",
     "tags": ["tag1", "tag2"],
     "noveltyScore": 0.0-1.0,
     "keywords": ["specific-function", "library-name", "error-code"],
