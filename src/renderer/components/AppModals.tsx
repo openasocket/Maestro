@@ -425,7 +425,8 @@ export interface AppSessionModalsProps {
 			enabled: boolean;
 			remoteId: string | null;
 			workingDirOverride?: string;
-		}
+		},
+		selectedPersonaIds?: string[]
 	) => void;
 	editAgentSession: Session | null;
 
@@ -1850,7 +1851,8 @@ export interface AppModalsProps {
 			enabled: boolean;
 			remoteId: string | null;
 			workingDirOverride?: string;
-		}
+		},
+		selectedPersonaIds?: string[]
 	) => void;
 	editAgentSession: Session | null;
 	renameSessionValue: string;

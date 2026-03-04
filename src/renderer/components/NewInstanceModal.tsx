@@ -72,7 +72,8 @@ interface EditAgentModalProps {
 			enabled: boolean;
 			remoteId: string | null;
 			workingDirOverride?: string;
-		}
+		},
+		selectedPersonaIds?: string[]
 	) => void;
 	theme: any;
 	session: Session | null;
@@ -1391,6 +1392,15 @@ export function EditAgentModal({
 		error?: string;
 	}>({ checking: false, valid: false, isDirectory: false });
 
+	// Persona selection state
+	const [selectedPersonaIds, setSelectedPersonaIds] = useState<string[]>([]);
+	const [matchedPersonas, setMatchedPersonas] = useState<MatchedPersona[]>([]);
+	const [allPersonas, setAllPersonas] = useState<Persona[]>([]);
+	const [personaLoading, setPersonaLoading] = useState(false);
+	const [personaSectionExpanded, setPersonaSectionExpanded] = useState(false);
+	const [useCaseDescription, setUseCaseDescription] = useState('');
+	const [isMemoryEnabled, setIsMemoryEnabled] = useState(true);
+
 	const nameInputRef = useRef<HTMLInputElement>(null);
 
 	// Copy session ID to clipboard
@@ -1488,6 +1498,67 @@ export function EditAgentModal({
 			setSelectedToolType(session.toolType);
 		}
 	}, [isOpen, session]);
+
+	// Load existing selectedPersonaIds from session on mount
+	useEffect(() => {
+		if (session?.selectedPersonaIds) {
+			setSelectedPersonaIds([...session.selectedPersonaIds]);
+			setPersonaSectionExpanded(true);
+		} else {
+			setSelectedPersonaIds([]);
+		}
+	}, [session]);
+
+	// Load all personas when the modal opens
+	useEffect(() => {
+		if (!isOpen) return;
+
+		const loadPersonas = async () => {
+			try {
+				let result = await window.maestro.memory.persona.list();
+				if (result.success && result.data && result.data.length === 0) {
+					// Auto-seed default personas
+					await window.maestro.memory.seedDefaults();
+					result = await window.maestro.memory.persona.list();
+				}
+				if (result.success && result.data) {
+					setAllPersonas(result.data);
+					setIsMemoryEnabled(true);
+				} else {
+					setIsMemoryEnabled(false);
+				}
+			} catch {
+				setIsMemoryEnabled(false);
+			}
+		};
+
+		loadPersonas();
+	}, [isOpen]);
+
+	// Debounced persona matching when use-case description changes
+	useEffect(() => {
+		if (!useCaseDescription.trim() || !session) return;
+
+		const timer = setTimeout(async () => {
+			setPersonaLoading(true);
+			try {
+				const result = await window.maestro.memory.matchPersonas(
+					useCaseDescription,
+					session.toolType,
+					session.projectRoot || undefined
+				);
+				if (result.success && result.data) {
+					setMatchedPersonas(result.data);
+				}
+			} catch {
+				// Non-critical
+			} finally {
+				setPersonaLoading(false);
+			}
+		}, 1000);
+
+		return () => clearTimeout(timer);
+	}, [useCaseDescription, session]);
 
 	// Validate session name uniqueness (excluding current session)
 	const validation = useMemo(() => {
@@ -1599,7 +1670,7 @@ export function EditAgentModal({
 					}
 				: { enabled: false, remoteId: null };
 
-		// Save with per-session config fields including model, contextWindow, and SSH config
+		// Save with per-session config fields including model, contextWindow, SSH config, and personas
 		onSave(
 			session.id,
 			name,
@@ -1610,7 +1681,8 @@ export function EditAgentModal({
 			Object.keys(customEnvVars).length > 0 ? customEnvVars : undefined,
 			modelValue,
 			contextWindowValue,
-			sessionSshRemoteConfig
+			sessionSshRemoteConfig,
+			selectedPersonaIds
 		);
 		onClose();
 	}, [
@@ -1622,6 +1694,7 @@ export function EditAgentModal({
 		customEnvVars,
 		agentConfig,
 		sshRemoteConfig,
+		selectedPersonaIds,
 		selectedToolType,
 		providerChanged,
 		onSave,
@@ -1972,6 +2045,95 @@ export function EditAgentModal({
 							onSshRemoteConfigChange={setSshRemoteConfig}
 						/>
 					)}
+
+					{/* Persona Selection Section */}
+					<div
+						style={{ borderTop: `1px solid ${theme.colors.border}`, marginTop: 12, paddingTop: 12 }}
+					>
+						<button
+							onClick={() => setPersonaSectionExpanded(!personaSectionExpanded)}
+							style={{
+								display: 'flex',
+								alignItems: 'center',
+								gap: 8,
+								background: 'none',
+								border: 'none',
+								cursor: 'pointer',
+								color: theme.colors.textMain,
+								fontSize: 13,
+								fontWeight: 600,
+								width: '100%',
+								padding: '4px 0',
+							}}
+						>
+							<ChevronRight
+								size={14}
+								style={{
+									transform: personaSectionExpanded ? 'rotate(90deg)' : 'none',
+									transition: 'transform 150ms',
+								}}
+							/>
+							Personas
+							{selectedPersonaIds.length > 0 && (
+								<span style={{ fontWeight: 400, color: theme.colors.textDim }}>
+									({selectedPersonaIds.length} selected)
+								</span>
+							)}
+						</button>
+
+						{personaSectionExpanded && (
+							<div style={{ marginTop: 8 }}>
+								{/* Use case description */}
+								<textarea
+									value={useCaseDescription}
+									onChange={(e) => setUseCaseDescription(e.target.value.slice(0, 500))}
+									placeholder="Describe what this agent will work on... (optional, helps suggest relevant personas)"
+									maxLength={500}
+									rows={2}
+									className="w-full p-2 rounded border bg-transparent outline-none resize-vertical text-xs"
+									style={{
+										borderColor: theme.colors.border,
+										color: theme.colors.textMain,
+										fontFamily: 'inherit',
+										marginBottom: 8,
+									}}
+								/>
+
+								<PersonaPicker
+									theme={theme}
+									matchedPersonas={matchedPersonas}
+									allPersonas={allPersonas}
+									selectedIds={new Set(selectedPersonaIds)}
+									onToggle={(id) => {
+										setSelectedPersonaIds((prev) =>
+											prev.includes(id) ? prev.filter((pid) => pid !== id) : [...prev, id]
+										);
+									}}
+									isLoading={personaLoading}
+									isMemoryEnabled={isMemoryEnabled}
+									mode="manual"
+									compact
+								/>
+
+								{selectedPersonaIds.length > 0 && (
+									<button
+										onClick={() => setSelectedPersonaIds([])}
+										style={{
+											background: 'none',
+											border: 'none',
+											cursor: 'pointer',
+											color: theme.colors.textDim,
+											fontSize: 11,
+											textDecoration: 'underline',
+											marginTop: 4,
+										}}
+									>
+										Clear selection (use automatic matching)
+									</button>
+								)}
+							</div>
+						)}
+					</div>
 				</div>
 			</Modal>
 		</div>
