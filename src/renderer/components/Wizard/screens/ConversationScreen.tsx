@@ -35,6 +35,7 @@ import { AUTO_RUN_FOLDER_NAME, wizardDebugLogger } from '../services/phaseGenera
 import { getNextFillerPhrase } from '../services/fillerPhrases';
 import { ScreenReaderAnnouncement } from '../ScreenReaderAnnouncement';
 import { formatShortcutKeys } from '../../../utils/shortcutFormatter';
+import { PersonaPicker } from '../../PersonaPicker';
 
 interface ConversationScreenProps {
 	theme: Theme;
@@ -528,6 +529,8 @@ export function ConversationScreen({
 		setIsReadyToProceed,
 		setConversationLoading,
 		setConversationError,
+		setSuggestedPersonas,
+		toggleWizardPersona,
 		previousStep,
 		nextStep,
 	} = useWizard();
@@ -734,6 +737,51 @@ export function ConversationScreen({
 			conversationManager.endConversation();
 		};
 	}, []);
+
+	// Fire background persona matching when confidence is building
+	useEffect(() => {
+		if (state.personaSuggestionsLoaded) return;
+		if (state.confidenceLevel < 60) return;
+		if (!state.selectedAgent || !state.directoryPath) return;
+
+		const runMatch = async () => {
+			try {
+				const userMessages = state.conversationHistory
+					.filter((m) => m.role === 'user')
+					.map((m) => m.content)
+					.join(' ');
+				const matchQuery = [state.agentName || '', state.directoryPath || '', userMessages]
+					.filter(Boolean)
+					.join(' ')
+					.slice(0, 2000);
+
+				const result = await window.maestro.memory.matchPersonas(
+					matchQuery,
+					state.selectedAgent!,
+					state.directoryPath
+				);
+
+				if (result.success && result.data) {
+					const autoSelected = result.data
+						.filter((p) => p.similarity >= 0.5)
+						.map((p) => p.personaId);
+					setSuggestedPersonas(result.data, autoSelected);
+				}
+			} catch {
+				// Non-critical — wizard proceeds without persona suggestions
+			}
+		};
+
+		runMatch();
+	}, [
+		state.confidenceLevel,
+		state.personaSuggestionsLoaded,
+		state.selectedAgent,
+		state.directoryPath,
+		state.agentName,
+		state.conversationHistory,
+		setSuggestedPersonas,
+	]);
 
 	// Announce when ready to proceed status changes
 	useEffect(() => {
@@ -1456,6 +1504,23 @@ export function ConversationScreen({
 						<p className="text-sm font-medium mb-3" style={{ color: theme.colors.success }}>
 							I think I have a good understanding of your project. Ready to create your Playbook?
 						</p>
+
+						{state.suggestedPersonas.length > 0 && (
+							<div style={{ marginBottom: 12, textAlign: 'left' }}>
+								<PersonaPicker
+									theme={theme}
+									matchedPersonas={state.suggestedPersonas}
+									allPersonas={[]}
+									selectedIds={new Set(state.selectedPersonaIds)}
+									onToggle={(id) => toggleWizardPersona(id)}
+									isLoading={false}
+									isMemoryEnabled={true}
+									mode="wizard"
+									compact
+								/>
+							</div>
+						)}
+
 						<button
 							onClick={handleLetsGo}
 							className="px-6 py-2.5 rounded-lg text-sm font-bold transition-all hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2"

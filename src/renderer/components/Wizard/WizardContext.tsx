@@ -138,6 +138,21 @@ export interface WizardState {
 	/** Error message if conversation fails */
 	conversationError: string | null;
 
+	// Persona Selection (within Conversation step)
+	/** Personas suggested by embedding match during conversation */
+	suggestedPersonas: Array<{
+		personaId: string;
+		personaName: string;
+		roleName: string;
+		description: string;
+		systemPrompt: string;
+		similarity: number;
+	}>;
+	/** Persona IDs selected by the user (initially auto-selected above threshold) */
+	selectedPersonaIds: string[];
+	/** Whether persona suggestion has been attempted (prevents re-firing) */
+	personaSuggestionsLoaded: boolean;
+
 	// Phase Review (Step 4)
 	/** Generated Auto Run documents */
 	generatedDocuments: GeneratedDocument[];
@@ -193,6 +208,11 @@ const initialState: WizardState = {
 	isConversationLoading: false,
 	conversationError: null,
 
+	// Persona Selection
+	suggestedPersonas: [],
+	selectedPersonaIds: [],
+	personaSuggestionsLoaded: false,
+
 	// Phase Review
 	generatedDocuments: [],
 	currentDocumentIndex: 0,
@@ -242,6 +262,15 @@ type WizardAction =
 	| { type: 'SET_IS_READY_TO_PROCEED'; ready: boolean }
 	| { type: 'SET_CONVERSATION_LOADING'; loading: boolean }
 	| { type: 'SET_CONVERSATION_ERROR'; error: string | null }
+	| {
+			type: 'SET_SUGGESTED_PERSONAS';
+			payload: {
+				personas: WizardState['suggestedPersonas'];
+				selectedIds: string[];
+			};
+	  }
+	| { type: 'TOGGLE_WIZARD_PERSONA'; payload: string }
+	| { type: 'SET_WIZARD_SELECTED_PERSONAS'; payload: string[] }
 	| { type: 'SET_GENERATED_DOCUMENTS'; documents: GeneratedDocument[] }
 	| { type: 'SET_CURRENT_DOCUMENT_INDEX'; index: number }
 	| { type: 'SET_GENERATING_DOCUMENTS'; generating: boolean }
@@ -360,6 +389,22 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
 		case 'SET_CONVERSATION_ERROR':
 			return { ...state, conversationError: action.error };
 
+		case 'SET_SUGGESTED_PERSONAS':
+			return {
+				...state,
+				suggestedPersonas: action.payload.personas,
+				selectedPersonaIds: action.payload.selectedIds,
+				personaSuggestionsLoaded: true,
+			};
+		case 'TOGGLE_WIZARD_PERSONA': {
+			const id = action.payload;
+			const current = state.selectedPersonaIds;
+			const next = current.includes(id) ? current.filter((pid) => pid !== id) : [...current, id];
+			return { ...state, selectedPersonaIds: next };
+		}
+		case 'SET_WIZARD_SELECTED_PERSONAS':
+			return { ...state, selectedPersonaIds: action.payload };
+
 		case 'SET_GENERATED_DOCUMENTS':
 			return { ...state, generatedDocuments: action.documents };
 
@@ -409,6 +454,8 @@ export interface SerializableWizardState {
 	generatedDocuments: GeneratedDocument[];
 	editedPhase1Content: string | null;
 	wantsTour: boolean;
+	/** Persona IDs explicitly selected during wizard conversation */
+	selectedPersonaIds?: string[];
 	/** Per-session SSH remote configuration (for remote execution) */
 	sessionSshRemoteConfig?: {
 		enabled: boolean;
@@ -489,6 +536,12 @@ export interface WizardContextAPI {
 	setConversationLoading: (loading: boolean) => void;
 	/** Set conversation error */
 	setConversationError: (error: string | null) => void;
+
+	// Persona Selection
+	/** Set suggested personas and auto-selected IDs */
+	setSuggestedPersonas: (personas: WizardState['suggestedPersonas'], selectedIds: string[]) => void;
+	/** Toggle a single persona ID in the selection */
+	toggleWizardPersona: (id: string) => void;
 
 	// Phase Review
 	/** Set generated documents */
@@ -705,6 +758,17 @@ export function WizardProvider({ children }: WizardProviderProps) {
 		dispatch({ type: 'SET_CONVERSATION_ERROR', error });
 	}, []);
 
+	const setSuggestedPersonas = useCallback(
+		(personas: WizardState['suggestedPersonas'], selectedIds: string[]) => {
+			dispatch({ type: 'SET_SUGGESTED_PERSONAS', payload: { personas, selectedIds } });
+		},
+		[]
+	);
+
+	const toggleWizardPersona = useCallback((id: string) => {
+		dispatch({ type: 'TOGGLE_WIZARD_PERSONA', payload: id });
+	}, []);
+
 	// Phase Review
 	const setGeneratedDocuments = useCallback((documents: GeneratedDocument[]) => {
 		dispatch({ type: 'SET_GENERATED_DOCUMENTS', documents });
@@ -761,6 +825,8 @@ export function WizardProvider({ children }: WizardProviderProps) {
 			generatedDocuments: state.generatedDocuments,
 			editedPhase1Content: state.editedPhase1Content,
 			wantsTour: state.wantsTour,
+			selectedPersonaIds:
+				state.selectedPersonaIds.length > 0 ? state.selectedPersonaIds : undefined,
 			sessionSshRemoteConfig: state.sessionSshRemoteConfig,
 		};
 	}, [
@@ -775,6 +841,7 @@ export function WizardProvider({ children }: WizardProviderProps) {
 		state.generatedDocuments,
 		state.editedPhase1Content,
 		state.wantsTour,
+		state.selectedPersonaIds,
 		state.sessionSshRemoteConfig,
 	]);
 
@@ -890,6 +957,10 @@ export function WizardProvider({ children }: WizardProviderProps) {
 			setConversationLoading,
 			setConversationError,
 
+			// Persona Selection
+			setSuggestedPersonas,
+			toggleWizardPersona,
+
 			// Phase Review
 			setGeneratedDocuments,
 			setCurrentDocumentIndex,
@@ -941,6 +1012,8 @@ export function WizardProvider({ children }: WizardProviderProps) {
 			setIsReadyToProceed,
 			setConversationLoading,
 			setConversationError,
+			setSuggestedPersonas,
+			toggleWizardPersona,
 			setGeneratedDocuments,
 			setCurrentDocumentIndex,
 			setGeneratingDocuments,
