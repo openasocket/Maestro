@@ -374,6 +374,14 @@ export function MemorySettings({
 							stats={stats}
 							projectPath={projectPath}
 							onUpdateConfig={updateConfig}
+							onViewMemories={(skillAreaId) => {
+								// Switch to memories tab — the filter will be
+								// handled by the user selecting the skill in the
+								// Memories tab's own filter controls.
+								void skillAreaId;
+								setActiveSubTab('memories');
+							}}
+							onHierarchyChange={onHierarchyChange}
 						/>
 					)}
 					{activeSubTab === 'experiences' && (
