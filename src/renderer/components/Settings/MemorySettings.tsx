@@ -33,6 +33,11 @@ import {
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import { ExperienceRepositoryPanel } from './ExperienceRepositoryPanel';
+import { PersonasTab } from './PersonasTab';
+import { SkillsTab } from './SkillsTab';
+import { ExperiencesTab } from './ExperiencesTab';
+import { MemoriesTab } from './MemoriesTab';
+import { StatusTab } from './StatusTab';
 import type {
 	MemoryConfig,
 	MemoryStats,
@@ -826,7 +831,21 @@ export function MemorySettings({
 					</div>
 
 					{/* Active Sub-Tab Content */}
-					{/* TODO: Route to dedicated sub-tab components (MEM-TAB-02 through MEM-TAB-06) */}
+					{activeSubTab === 'personas' && (
+						<PersonasTab theme={theme} config={config} stats={stats} projectPath={projectPath} />
+					)}
+					{activeSubTab === 'skills' && (
+						<SkillsTab theme={theme} config={config} stats={stats} projectPath={projectPath} />
+					)}
+					{activeSubTab === 'experiences' && (
+						<ExperiencesTab theme={theme} config={config} stats={stats} projectPath={projectPath} />
+					)}
+					{activeSubTab === 'memories' && (
+						<MemoriesTab theme={theme} config={config} stats={stats} projectPath={projectPath} />
+					)}
+					{activeSubTab === 'status' && (
+						<StatusTab theme={theme} config={config} stats={stats} projectPath={projectPath} />
+					)}
 
 					{/* Configuration Inputs */}
 					<div
