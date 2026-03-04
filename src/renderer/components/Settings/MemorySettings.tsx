@@ -1003,6 +1003,41 @@ function MemoryHealthPanel({
 				</div>
 			)}
 
+			{/* Memory Type Distribution Bar */}
+			{stats.totalMemories > 0 && stats.byType && (
+				<div className="space-y-1">
+					<div className="text-xs" style={{ color: theme.colors.textDim }}>
+						Memory Types
+					</div>
+					<div
+						className="flex h-3 rounded-full overflow-hidden"
+						style={{ backgroundColor: `${theme.colors.border}40` }}
+					>
+						{(stats.byType.rule ?? 0) > 0 && (
+							<div
+								style={{
+									width: `${((stats.byType.rule ?? 0) / stats.totalMemories) * 100}%`,
+									backgroundColor: theme.colors.accent,
+								}}
+								title={`Rules: ${stats.byType.rule}`}
+							/>
+						)}
+						{(stats.byType.experience ?? 0) > 0 && (
+							<div
+								style={{
+									width: `${((stats.byType.experience ?? 0) / stats.totalMemories) * 100}%`,
+									backgroundColor: '#22c55e',
+								}}
+								title={`Experiences: ${stats.byType.experience}`}
+							/>
+						)}
+					</div>
+					<div className="text-xs" style={{ color: theme.colors.textDim }}>
+						Rules: {stats.byType.rule ?? 0} | Experiences: {stats.byType.experience ?? 0}
+					</div>
+				</div>
+			)}
+
 			{/* Warning items */}
 			<div className="space-y-1">
 				{stats.neverInjectedCount > 0 && (
@@ -1064,13 +1099,33 @@ function MemoryHealthPanel({
 				</div>
 			)}
 
-			{/* Footer: hierarchy counts */}
+			{/* Footer: hierarchy counts + type/source breakdown */}
 			<div
-				className="pt-2 border-t text-xs"
+				className="pt-2 border-t text-xs space-y-1"
 				style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
 			>
-				Roles: {stats.totalRoles} | Personas: {stats.totalPersonas} | Skills:{' '}
-				{stats.totalSkillAreas} | Total: {stats.totalMemories}
+				<div>
+					Roles: {stats.totalRoles} | Personas: {stats.totalPersonas} | Skills:{' '}
+					{stats.totalSkillAreas}
+				</div>
+				<div style={{ color: theme.colors.textMain }}>
+					Rules: {stats.byType?.rule ?? 0} | Experiences: {stats.byType?.experience ?? 0}
+				</div>
+				{stats.bySource &&
+					(() => {
+						const sourceLabels: Record<string, string> = {
+							user: 'manual',
+							'auto-run': 'auto-run',
+							'session-analysis': 'extracted',
+							consolidation: 'consolidated',
+							grpo: 'promoted',
+							import: 'imported',
+						};
+						const parts = Object.entries(stats.bySource)
+							.filter(([, count]) => count > 0)
+							.map(([key, count]) => `${count} ${sourceLabels[key] || key}`);
+						return parts.length > 0 ? <div>Sources: {parts.join(', ')}</div> : null;
+					})()}
 			</div>
 		</div>
 	);
