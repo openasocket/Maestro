@@ -1756,6 +1756,7 @@ function MaestroConsoleInner() {
 				message: prDetails.title,
 				actionUrl: prDetails.url,
 				actionLabel: prDetails.url,
+				sessionId: session?.id,
 			});
 			// Add history entry with PR details
 			if (session) {
