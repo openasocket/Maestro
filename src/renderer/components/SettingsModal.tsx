@@ -1,295 +1,44 @@
-import React, { useState, useEffect, useRef, memo } from 'react';
+import { useState, useEffect, useRef, memo } from 'react';
 import {
 	X,
 	Key,
-	Moon,
-	Sun,
 	Keyboard,
-	Check,
-	Terminal,
 	Bell,
 	Cpu,
 	Settings,
 	Palette,
-	Sparkles,
-	History,
-	Download,
-	Bug,
-	Cloud,
-	FolderSync,
-	RotateCcw,
-	Folder,
-	ChevronDown,
-	Plus,
-	Trash2,
-	Brain,
-	AlertTriangle,
 	FlaskConical,
-	Database,
 	Server,
-	Battery,
 	Monitor,
-	PartyPopper,
-	Tag,
-	Timer,
-	User,
-	ArrowDownToLine,
-	Clapperboard,
+	Brain,
 } from 'lucide-react';
 import { useSettings } from '../hooks';
-import type {
-	Theme,
-	ThemeColors,
-	ThemeId,
-	Shortcut,
-	ShellInfo,
-	CustomAICommand,
-	LLMProvider,
-	AgentConfig,
-	ToolType,
-	EncoreFeatureFlags,
-} from '../types';
-import { CustomThemeBuilder } from './CustomThemeBuilder';
+import type { Theme, LLMProvider } from '../types';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { AICommandsPanel } from './AICommandsPanel';
 import { SpecKitCommandsPanel } from './SpecKitCommandsPanel';
 import { OpenSpecCommandsPanel } from './OpenSpecCommandsPanel';
-import { formatShortcutKeys, formatMetaKey, formatEnterToSend } from '../utils/shortcutFormatter';
-import { ToggleButtonGroup } from './ToggleButtonGroup';
-import { SettingCheckbox } from './SettingCheckbox';
-import { FontConfigurationPanel } from './FontConfigurationPanel';
 import { NotificationsPanel } from './NotificationsPanel';
 import { SshRemotesSection } from './Settings/SshRemotesSection';
 import { SshRemoteIgnoreSection } from './Settings/SshRemoteIgnoreSection';
-import { AgentConfigPanel } from './shared/AgentConfigPanel';
-import { AGENT_TILES } from './Wizard/screens/AgentSelectionScreen';
-import { MemorySettings } from './Settings/MemorySettings';
-import { MemoryBrowserPanel } from './Settings/MemoryBrowserPanel';
-import { useMemoryHierarchy } from '../hooks/memory/useMemoryHierarchy';
+import { GeneralTab } from './Settings/tabs/GeneralTab';
+import { DisplayTab } from './Settings/tabs/DisplayTab';
+import { EncoreTab } from './Settings/tabs/EncoreTab';
+import { ShortcutsTab } from './Settings/tabs/ShortcutsTab';
+import { ThemeTab } from './Settings/tabs/ThemeTab';
+import { MemoryTab } from './Settings/tabs/MemoryTab';
 
 // Feature flags - set to true to enable dormant features
 const FEATURE_FLAGS = {
 	LLM_SETTINGS: false, // LLM provider configuration (OpenRouter, Anthropic, Ollama)
 };
 
-// Environment Variables Editor - uses stable indices to prevent focus loss during key editing
-interface EnvVarEntry {
-	id: number;
-	key: string;
-	value: string;
-}
-
-interface EnvVarsEditorProps {
-	envVars: Record<string, string>;
-	setEnvVars: (vars: Record<string, string>) => void;
-	theme: Theme;
-}
-
-function EnvVarsEditor({ envVars, setEnvVars, theme }: EnvVarsEditorProps) {
-	// Convert object to array with stable IDs for editing
-	const [entries, setEntries] = useState<EnvVarEntry[]>(() => {
-		return Object.entries(envVars).map(([key, value], index) => ({
-			id: index,
-			key,
-			value,
-		}));
-	});
-	const [nextId, setNextId] = useState(Object.keys(envVars).length);
-
-	// Sync entries back to parent when they change (but debounced to avoid focus issues)
-	const commitChanges = (newEntries: EnvVarEntry[]) => {
-		const newEnvVars: Record<string, string> = {};
-		newEntries.forEach((entry) => {
-			if (entry.key.trim()) {
-				newEnvVars[entry.key] = entry.value;
-			}
-		});
-		setEnvVars(newEnvVars);
-	};
-
-	// Sync from parent when envVars changes externally (e.g., on modal open)
-	useEffect(() => {
-		const parentEntries = Object.entries(envVars);
-		// Only reset if the keys/values actually differ
-		const currentKeys = entries
-			.filter((e) => e.key.trim())
-			.map((e) => `${e.key}=${e.value}`)
-			.sort()
-			.join(',');
-		const parentKeys = parentEntries
-			.map(([k, v]) => `${k}=${v}`)
-			.sort()
-			.join(',');
-		if (currentKeys !== parentKeys) {
-			setEntries(
-				parentEntries.map(([key, value], index) => ({
-					id: index,
-					key,
-					value,
-				}))
-			);
-			setNextId(parentEntries.length);
-		}
-	}, [envVars]);
-
-	const updateEntry = (id: number, field: 'key' | 'value', newValue: string) => {
-		setEntries((prev) => {
-			const updated = prev.map((entry) =>
-				entry.id === id ? { ...entry, [field]: newValue } : entry
-			);
-			// Commit changes on every update for value field, but for key field
-			// only commit valid keys to avoid issues with empty keys
-			commitChanges(updated);
-			return updated;
-		});
-	};
-
-	const removeEntry = (id: number) => {
-		setEntries((prev) => {
-			const updated = prev.filter((entry) => entry.id !== id);
-			commitChanges(updated);
-			return updated;
-		});
-	};
-
-	const addEntry = () => {
-		// Generate a unique default key name
-		let newKey = 'VAR';
-		let counter = 1;
-		const existingKeys = new Set(entries.map((e) => e.key));
-		while (existingKeys.has(newKey)) {
-			newKey = `VAR_${counter}`;
-			counter++;
-		}
-		setEntries((prev) => [...prev, { id: nextId, key: newKey, value: '' }]);
-		setNextId((prev) => prev + 1);
-	};
-
-	return (
-		<div>
-			<label className="block text-xs opacity-60 mb-1">Environment Variables (optional)</label>
-			<div className="space-y-2">
-				{entries.map((entry) => (
-					<div key={entry.id} className="flex gap-2 items-center">
-						<input
-							type="text"
-							value={entry.key}
-							onChange={(e) => updateEntry(entry.id, 'key', e.target.value)}
-							placeholder="VARIABLE"
-							className="flex-1 p-2 rounded border bg-transparent outline-none text-xs font-mono"
-							style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
-						/>
-						<span className="text-xs" style={{ color: theme.colors.textDim }}>
-							=
-						</span>
-						<input
-							type="text"
-							value={entry.value}
-							onChange={(e) => updateEntry(entry.id, 'value', e.target.value)}
-							placeholder="value"
-							className="flex-[2] p-2 rounded border bg-transparent outline-none text-xs font-mono"
-							style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
-						/>
-						<button
-							onClick={() => removeEntry(entry.id)}
-							className="p-2 rounded hover:bg-white/10 transition-colors"
-							title="Remove variable"
-							style={{ color: theme.colors.textDim }}
-						>
-							<Trash2 className="w-3 h-3" />
-						</button>
-					</div>
-				))}
-				<button
-					onClick={addEntry}
-					className="flex items-center gap-1 px-2 py-1.5 rounded text-xs hover:bg-white/10 transition-colors"
-					style={{ color: theme.colors.textDim }}
-				>
-					<Plus className="w-3 h-3" />
-					Add Variable
-				</button>
-			</div>
-			<p className="text-xs opacity-50 mt-1">
-				Environment variables passed to every shell session.
-			</p>
-		</div>
-	);
-}
-
 interface SettingsModalProps {
 	isOpen: boolean;
 	onClose: () => void;
 	theme: Theme;
 	themes: Record<string, Theme>;
-	activeThemeId: ThemeId;
-	setActiveThemeId: (id: ThemeId) => void;
-	customThemeColors: ThemeColors;
-	setCustomThemeColors: (colors: ThemeColors) => void;
-	customThemeBaseId: ThemeId;
-	setCustomThemeBaseId: (id: ThemeId) => void;
-	llmProvider: LLMProvider;
-	setLlmProvider: (provider: LLMProvider) => void;
-	modelSlug: string;
-	setModelSlug: (slug: string) => void;
-	apiKey: string;
-	setApiKey: (key: string) => void;
-	shortcuts: Record<string, Shortcut>;
-	setShortcuts: (shortcuts: Record<string, Shortcut>) => void;
-	tabShortcuts: Record<string, Shortcut>;
-	setTabShortcuts: (shortcuts: Record<string, Shortcut>) => void;
-	fontFamily: string;
-	setFontFamily: (font: string) => void;
-	fontSize: number;
-	setFontSize: (size: number) => void;
-	terminalWidth: number;
-	setTerminalWidth: (width: number) => void;
-	logLevel: string;
-	setLogLevel: (level: string) => void;
-	maxLogBuffer: number;
-	setMaxLogBuffer: (buffer: number) => void;
-	maxOutputLines: number;
-	setMaxOutputLines: (lines: number) => void;
-	defaultShell: string;
-	setDefaultShell: (shell: string) => void;
-	customShellPath: string;
-	setCustomShellPath: (path: string) => void;
-	shellArgs: string;
-	setShellArgs: (args: string) => void;
-	shellEnvVars: Record<string, string>;
-	setShellEnvVars: (vars: Record<string, string>) => void;
-	ghPath: string;
-	setGhPath: (path: string) => void;
-	enterToSendAI: boolean;
-	setEnterToSendAI: (value: boolean) => void;
-	enterToSendTerminal: boolean;
-	setEnterToSendTerminal: (value: boolean) => void;
-	defaultSaveToHistory: boolean;
-	setDefaultSaveToHistory: (value: boolean) => void;
-	defaultShowThinking: 'off' | 'on' | 'sticky';
-	setDefaultShowThinking: (value: 'off' | 'on' | 'sticky') => void;
-	osNotificationsEnabled: boolean;
-	setOsNotificationsEnabled: (value: boolean) => void;
-	audioFeedbackEnabled: boolean;
-	setAudioFeedbackEnabled: (value: boolean) => void;
-	audioFeedbackCommand: string;
-	setAudioFeedbackCommand: (value: string) => void;
-	toastDuration: number;
-	setToastDuration: (value: number) => void;
-	checkForUpdatesOnStartup: boolean;
-	setCheckForUpdatesOnStartup: (value: boolean) => void;
-	enableBetaUpdates: boolean;
-	setEnableBetaUpdates: (value: boolean) => void;
-	crashReportingEnabled: boolean;
-	setCrashReportingEnabled: (value: boolean) => void;
-	customAICommands: CustomAICommand[];
-	setCustomAICommands: (commands: CustomAICommand[]) => void;
-	autoScrollAiMode: boolean;
-	setAutoScrollAiMode: (value: boolean) => void;
-	userMessageAlignment?: 'left' | 'right';
-	setUserMessageAlignment?: (value: 'left' | 'right') => void;
-	encoreFeatures: EncoreFeatureFlags;
-	setEncoreFeatures: (value: EncoreFeatureFlags) => void;
 	initialTab?:
 		| 'general'
 		| 'display'
@@ -313,49 +62,45 @@ interface SettingsModalProps {
 }
 
 export const SettingsModal = memo(function SettingsModal(props: SettingsModalProps) {
-	const { isOpen, onClose, theme, themes, initialTab, encoreFeatures, setEncoreFeatures } = props;
-
-	// Context management settings from useSettings hook
 	const {
-		// Conductor Profile (About Me)
-		conductorProfile,
-		setConductorProfile,
-		contextManagementSettings,
-		updateContextManagementSettings,
-		// Document Graph settings
-		documentGraphShowExternalLinks,
-		setDocumentGraphShowExternalLinks,
-		documentGraphMaxNodes,
-		setDocumentGraphMaxNodes,
-		// Stats settings
-		statsCollectionEnabled,
-		setStatsCollectionEnabled,
-		defaultStatsTimeRange,
-		setDefaultStatsTimeRange,
-		// Power management settings
-		preventSleepEnabled,
-		setPreventSleepEnabled,
-		// Rendering settings
-		disableGpuAcceleration,
-		setDisableGpuAcceleration,
-		disableConfetti,
-		setDisableConfetti,
+		isOpen,
+		onClose,
+		theme,
+		themes,
+		initialTab,
+		hasNoAgents,
+		onThemeImportError,
+		onThemeImportSuccess,
+	} = props;
+
+	// All settings from useSettings hook (self-sourced, Tier 1B)
+	// General tab settings are now self-sourced by GeneralTab
+	// Display tab settings are now self-sourced by DisplayTab
+	const {
+		// LLM settings
+		llmProvider,
+		setLlmProvider,
+		modelSlug,
+		setModelSlug,
+		apiKey,
+		setApiKey,
+		// Notification settings
+		osNotificationsEnabled,
+		setOsNotificationsEnabled,
+		audioFeedbackEnabled,
+		setAudioFeedbackEnabled,
+		audioFeedbackCommand,
+		setAudioFeedbackCommand,
+		toastDuration,
+		setToastDuration,
+		// AI Commands
+		customAICommands,
+		setCustomAICommands,
 		// SSH Remote file indexing settings
 		sshRemoteIgnorePatterns,
 		setSshRemoteIgnorePatterns,
 		sshRemoteHonorGitignore,
 		setSshRemoteHonorGitignore,
-		// Automatic tab naming settings
-		automaticTabNamingEnabled,
-		setAutomaticTabNamingEnabled,
-		// Director's Notes settings
-		directorNotesSettings,
-		setDirectorNotesSettings,
-		// WakaTime integration settings
-		wakatimeApiKey,
-		setWakatimeApiKey,
-		wakatimeEnabled,
-		setWakatimeEnabled,
 	} = useSettings();
 
 	const [activeTab, setActiveTab] = useState<
@@ -370,241 +115,22 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 		| 'memory'
 		| 'encore'
 	>('general');
-	const [systemFonts, setSystemFonts] = useState<string[]>([]);
-	const [customFonts, setCustomFonts] = useState<string[]>([]);
-	const [fontLoading, setFontLoading] = useState(false);
-	const [fontsLoaded, setFontsLoaded] = useState(false);
-	const [recordingId, setRecordingId] = useState<string | null>(null);
-	const [shortcutsFilter, setShortcutsFilter] = useState('');
 	const [testingLLM, setTestingLLM] = useState(false);
 	const [testResult, setTestResult] = useState<{
 		status: 'success' | 'error' | null;
 		message: string;
 	}>({ status: null, message: '' });
-	const [shells, setShells] = useState<ShellInfo[]>([]);
-	const [shellsLoading, setShellsLoading] = useState(false);
-	const [shellsLoaded, setShellsLoaded] = useState(false);
-	const [shellConfigExpanded, setShellConfigExpanded] = useState(false);
-
-	// Sync/storage location state
-	const [defaultStoragePath, setDefaultStoragePath] = useState<string>('');
-	const [_currentStoragePath, setCurrentStoragePath] = useState<string>('');
-	const [customSyncPath, setCustomSyncPath] = useState<string | undefined>(undefined);
-	const [syncRestartRequired, setSyncRestartRequired] = useState(false);
-	const [syncMigrating, setSyncMigrating] = useState(false);
-	const [syncError, setSyncError] = useState<string | null>(null);
-	const [syncMigratedCount, setSyncMigratedCount] = useState<number | null>(null);
-
-	// Memory tab state — derive project path from active session prop
-	const memoryProjectPath = props.activeProjectPath ?? null;
-	const memoryHierarchy = useMemoryHierarchy();
-
-	// Stats data management state
-	const [statsDbSize, setStatsDbSize] = useState<number | null>(null);
-	const [statsEarliestDate, setStatsEarliestDate] = useState<string | null>(null);
-	const [statsClearing, setStatsClearing] = useState(false);
-	const [statsClearResult, setStatsClearResult] = useState<{
-		success: boolean;
-		deletedQueryEvents: number;
-		deletedAutoRunSessions: number;
-		deletedAutoRunTasks: number;
-		error?: string;
-	} | null>(null);
-
-	// Director's Notes agent configuration state
-	const [dnDetectedAgents, setDnDetectedAgents] = useState<AgentConfig[]>([]);
-	const [dnIsDetecting, setDnIsDetecting] = useState(false);
-	const [dnIsConfigExpanded, setDnIsConfigExpanded] = useState(false);
-	const [dnCustomPath, setDnCustomPath] = useState(directorNotesSettings.customPath || '');
-	const [dnCustomArgs, setDnCustomArgs] = useState(directorNotesSettings.customArgs || '');
-	const [dnCustomEnvVars, setDnCustomEnvVars] = useState<Record<string, string>>(
-		directorNotesSettings.customEnvVars || {}
-	);
-	const [dnAgentConfig, setDnAgentConfig] = useState<Record<string, any>>({});
-	const [dnAvailableModels, setDnAvailableModels] = useState<string[]>([]);
-	const [dnLoadingModels, setDnLoadingModels] = useState(false);
-	const [dnRefreshingAgent, setDnRefreshingAgent] = useState(false);
-	const dnAgentConfigRef = useRef<Record<string, any>>({});
-
-	// WakaTime CLI check and API key validation state
-	const [wakatimeCliStatus, setWakatimeCliStatus] = useState<{
-		available: boolean;
-		version?: string;
-	} | null>(null);
-	const [wakatimeKeyValid, setWakatimeKeyValid] = useState<boolean | null>(null);
-	const [wakatimeKeyValidating, setWakatimeKeyValidating] = useState(false);
-
-	// Check WakaTime CLI availability when section renders or toggle is enabled
-	// Retries after a delay to allow auto-installer time to complete
-	useEffect(() => {
-		if (!isOpen || !wakatimeEnabled) return;
-		let cancelled = false;
-		let retryTimer: ReturnType<typeof setTimeout> | null = null;
-
-		window.maestro.wakatime
-			.checkCli()
-			.then((status) => {
-				if (cancelled) return;
-				setWakatimeCliStatus(status);
-				// Retry after 3 seconds if CLI wasn't found (auto-install may be in progress)
-				if (!status.available) {
-					retryTimer = setTimeout(() => {
-						if (!cancelled) {
-							window.maestro.wakatime
-								.checkCli()
-								.then((retryStatus) => {
-									if (!cancelled) setWakatimeCliStatus(retryStatus);
-								})
-								.catch(() => {
-									if (!cancelled) setWakatimeCliStatus({ available: false });
-								});
-						}
-					}, 3000);
-				}
-			})
-			.catch(() => {
-				if (cancelled) return;
-				setWakatimeCliStatus({ available: false });
-				// Also retry on error, in case CLI is being installed
-				retryTimer = setTimeout(() => {
-					if (!cancelled) {
-						window.maestro.wakatime
-							.checkCli()
-							.then((retryStatus) => {
-								if (!cancelled) setWakatimeCliStatus(retryStatus);
-							})
-							.catch(() => {
-								if (!cancelled) setWakatimeCliStatus({ available: false });
-							});
-					}
-				}, 3000);
-			});
-
-		return () => {
-			cancelled = true;
-			if (retryTimer) clearTimeout(retryTimer);
-		};
-	}, [isOpen, wakatimeEnabled]);
-
-	// Reset validation state when API key changes
-	useEffect(() => {
-		setWakatimeKeyValid(null);
-	}, [wakatimeApiKey]);
-
 	// Layer stack integration
-	const { registerLayer, unregisterLayer, updateLayerHandler } = useLayerStack();
+	const { registerLayer, unregisterLayer } = useLayerStack();
 	const layerIdRef = useRef<string>();
-	const shortcutsFilterRef = useRef<HTMLInputElement>(null);
-	const themePickerRef = useRef<HTMLDivElement>(null);
+	const isRecordingShortcutRef = useRef(false);
 
 	useEffect(() => {
 		if (isOpen) {
-			// Don't load fonts immediately - only when user interacts with font selector
 			// Set initial tab if provided, otherwise default to 'general'
 			setActiveTab(initialTab || 'general');
-
-			// Load sync settings
-			Promise.all([
-				window.maestro.sync.getDefaultPath(),
-				window.maestro.sync.getSettings(),
-				window.maestro.sync.getCurrentStoragePath(),
-			])
-				.then(([defaultPath, settings, currentPath]) => {
-					setDefaultStoragePath(defaultPath);
-					setCustomSyncPath(settings.customSyncPath);
-					setCurrentStoragePath(currentPath);
-					setSyncRestartRequired(false);
-					setSyncError(null);
-					setSyncMigratedCount(null);
-				})
-				.catch((err) => {
-					console.error('Failed to load sync settings:', err);
-					setSyncError('Failed to load storage settings');
-				});
-
-			// Load stats database size and earliest timestamp
-			window.maestro.stats
-				.getDatabaseSize()
-				.then((size) => {
-					setStatsDbSize(size);
-				})
-				.catch((err) => {
-					console.error('Failed to load stats database size:', err);
-				});
-
-			window.maestro.stats
-				.getEarliestTimestamp()
-				.then((timestamp) => {
-					if (timestamp) {
-						const date = new Date(timestamp);
-						const formatted = date.toISOString().split('T')[0]; // YYYY-MM-DD
-						setStatsEarliestDate(formatted);
-					} else {
-						setStatsEarliestDate(null);
-					}
-				})
-				.catch((err) => {
-					console.error('Failed to load earliest stats timestamp:', err);
-				});
-
-			// Reset stats clear state
-			setStatsClearResult(null);
 		}
 	}, [isOpen, initialTab]);
-
-	// Detect agents when Encore Features tab is active (needed for Director's Notes config)
-	useEffect(() => {
-		if (!isOpen || activeTab !== 'encore' || !encoreFeatures.directorNotes) return;
-		let cancelled = false;
-		setDnIsDetecting(true);
-		window.maestro.agents
-			.detect()
-			.then((agents) => {
-				if (cancelled) return;
-				const available = agents.filter((a: AgentConfig) => a.available && !a.hidden);
-				setDnDetectedAgents(available);
-				setDnIsDetecting(false);
-			})
-			.catch(() => {
-				if (!cancelled) setDnIsDetecting(false);
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, [isOpen, activeTab, encoreFeatures.directorNotes]);
-
-	// Sync local Director's Notes custom config state from settings when Encore tab opens
-	useEffect(() => {
-		if (activeTab === 'encore') {
-			setDnCustomPath(directorNotesSettings.customPath || '');
-			setDnCustomArgs(directorNotesSettings.customArgs || '');
-			setDnCustomEnvVars(directorNotesSettings.customEnvVars || {});
-			setDnIsConfigExpanded(false);
-		}
-	}, [activeTab]);
-
-	// Load agent config when expanding Director's Notes configuration panel
-	useEffect(() => {
-		if (dnIsConfigExpanded && directorNotesSettings.provider) {
-			const agentId = directorNotesSettings.provider;
-			window.maestro.agents.getConfig(agentId).then((config) => {
-				setDnAgentConfig(config || {});
-				dnAgentConfigRef.current = config || {};
-			});
-			// Load models if agent supports it
-			const agent = dnDetectedAgents.find((a) => a.id === agentId);
-			if (agent?.capabilities?.supportsModelSelection) {
-				setDnLoadingModels(true);
-				window.maestro.agents
-					.getModels(agentId)
-					.then((models) => {
-						setDnAvailableModels(models);
-					})
-					.catch(() => {})
-					.finally(() => setDnLoadingModels(false));
-			}
-		}
-	}, [dnIsConfigExpanded, directorNotesSettings.provider, dnDetectedAgents]);
 
 	// Store onClose in a ref to avoid re-registering layer when onClose changes
 	const onCloseRef = useRef(onClose);
@@ -622,12 +148,9 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 			focusTrap: 'strict',
 			ariaLabel: 'Settings',
 			onEscape: () => {
-				// If recording a shortcut, cancel recording instead of closing modal
-				if (recordingId) {
-					setRecordingId(null);
-				} else {
-					onCloseRef.current();
-				}
+				// If recording a shortcut, ShortcutsTab handles its own escape via onKeyDownCapture
+				if (isRecordingShortcutRef.current) return;
+				onCloseRef.current();
 			},
 		});
 
@@ -639,20 +162,6 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 			}
 		};
 	}, [isOpen, registerLayer, unregisterLayer]); // Removed onClose from deps
-
-	// Update handler when dependencies change
-	useEffect(() => {
-		if (!isOpen || !layerIdRef.current) return;
-
-		updateLayerHandler(layerIdRef.current, () => {
-			// If recording a shortcut, cancel recording instead of closing modal
-			if (recordingId) {
-				setRecordingId(null);
-			} else {
-				onCloseRef.current();
-			}
-		});
-	}, [isOpen, recordingId, updateLayerHandler]); // Use ref for onClose
 
 	// Tab navigation with Cmd+Shift+[ and ]
 	useEffect(() => {
@@ -711,85 +220,6 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 		return () => window.removeEventListener('keydown', handleTabNavigation);
 	}, [isOpen, activeTab]);
 
-	// Focus theme picker when theme tab becomes active
-	useEffect(() => {
-		if (isOpen && activeTab === 'theme') {
-			const timer = setTimeout(() => themePickerRef.current?.focus(), 50);
-			return () => clearTimeout(timer);
-		}
-	}, [isOpen, activeTab]);
-
-	// Auto-focus shortcuts filter when switching to shortcuts tab
-	useEffect(() => {
-		if (isOpen && activeTab === 'shortcuts') {
-			// Small delay to ensure DOM is ready
-			setTimeout(() => shortcutsFilterRef.current?.focus(), 50);
-		}
-	}, [isOpen, activeTab]);
-
-	const loadFonts = async () => {
-		if (fontsLoaded) return; // Don't reload if already loaded
-
-		setFontLoading(true);
-		try {
-			const detected = await window.maestro.fonts.detect();
-			setSystemFonts(detected);
-
-			const savedCustomFonts = (await window.maestro.settings.get('customFonts')) as
-				| string[]
-				| undefined;
-			if (savedCustomFonts && Array.isArray(savedCustomFonts)) {
-				setCustomFonts(savedCustomFonts);
-			}
-			setFontsLoaded(true);
-		} catch (error) {
-			console.error('Failed to load fonts:', error);
-		} finally {
-			setFontLoading(false);
-		}
-	};
-
-	const handleFontInteraction = () => {
-		if (!fontsLoaded && !fontLoading) {
-			loadFonts();
-		}
-	};
-
-	const loadShells = async () => {
-		if (shellsLoaded) return; // Don't reload if already loaded
-
-		setShellsLoading(true);
-		try {
-			const detected = await window.maestro.shells.detect();
-			setShells(detected);
-			setShellsLoaded(true);
-		} catch (error) {
-			console.error('Failed to load shells:', error);
-		} finally {
-			setShellsLoading(false);
-		}
-	};
-
-	const handleShellInteraction = () => {
-		if (!shellsLoaded && !shellsLoading) {
-			loadShells();
-		}
-	};
-
-	const addCustomFont = (font: string) => {
-		if (font && !customFonts.includes(font)) {
-			const newCustomFonts = [...customFonts, font];
-			setCustomFonts(newCustomFonts);
-			window.maestro.settings.set('customFonts', newCustomFonts);
-		}
-	};
-
-	const removeCustomFont = (font: string) => {
-		const newCustomFonts = customFonts.filter((f) => f !== font);
-		setCustomFonts(newCustomFonts);
-		window.maestro.settings.set('customFonts', newCustomFonts);
-	};
-
 	const testLLMConnection = async () => {
 		setTestingLLM(true);
 		setTestResult({ status: null, message: '' });
@@ -798,20 +228,20 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 			let response;
 			const testPrompt = 'Respond with exactly: "Connection successful"';
 
-			if (props.llmProvider === 'openrouter') {
-				if (!props.apiKey) {
+			if (llmProvider === 'openrouter') {
+				if (!apiKey) {
 					throw new Error('API key is required for OpenRouter');
 				}
 
 				response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
 					method: 'POST',
 					headers: {
-						Authorization: `Bearer ${props.apiKey}`,
+						Authorization: `Bearer ${apiKey}`,
 						'Content-Type': 'application/json',
 						'HTTP-Referer': 'https://maestro.local',
 					},
 					body: JSON.stringify({
-						model: props.modelSlug || 'anthropic/claude-3.5-sonnet',
+						model: modelSlug || 'anthropic/claude-3.5-sonnet',
 						messages: [{ role: 'user', content: testPrompt }],
 						max_tokens: 50,
 					}),
@@ -831,20 +261,20 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					status: 'success',
 					message: 'Successfully connected to OpenRouter!',
 				});
-			} else if (props.llmProvider === 'anthropic') {
-				if (!props.apiKey) {
+			} else if (llmProvider === 'anthropic') {
+				if (!apiKey) {
 					throw new Error('API key is required for Anthropic');
 				}
 
 				response = await fetch('https://api.anthropic.com/v1/messages', {
 					method: 'POST',
 					headers: {
-						'x-api-key': props.apiKey,
+						'x-api-key': apiKey,
 						'anthropic-version': '2023-06-01',
 						'Content-Type': 'application/json',
 					},
 					body: JSON.stringify({
-						model: props.modelSlug || 'claude-3-5-sonnet-20241022',
+						model: modelSlug || 'claude-3-5-sonnet-20241022',
 						max_tokens: 50,
 						messages: [{ role: 'user', content: testPrompt }],
 					}),
@@ -864,14 +294,14 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					status: 'success',
 					message: 'Successfully connected to Anthropic!',
 				});
-			} else if (props.llmProvider === 'ollama') {
+			} else if (llmProvider === 'ollama') {
 				response = await fetch('http://localhost:11434/api/generate', {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json',
 					},
 					body: JSON.stringify({
-						model: props.modelSlug || 'llama3:latest',
+						model: modelSlug || 'llama3:latest',
 						prompt: testPrompt,
 						stream: false,
 					}),
@@ -903,180 +333,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 		}
 	};
 
-	const handleRecord = (
-		e: React.KeyboardEvent,
-		actionId: string,
-		isTabShortcut: boolean = false
-	) => {
-		e.preventDefault();
-		e.stopPropagation();
-
-		// Escape cancels recording without saving
-		if (e.key === 'Escape') {
-			setRecordingId(null);
-			return;
-		}
-
-		const keys = [];
-		if (e.metaKey) keys.push('Meta');
-		if (e.ctrlKey) keys.push('Ctrl');
-		if (e.altKey) keys.push('Alt');
-		if (e.shiftKey) keys.push('Shift');
-		if (['Meta', 'Control', 'Alt', 'Shift'].includes(e.key)) return;
-
-		// On macOS, Alt+letter produces special characters (e.g., Alt+L = ¬, Alt+P = π)
-		// Use e.code to get the physical key name when Alt is pressed
-		let mainKey = e.key;
-		if (e.altKey && e.code) {
-			// e.code is like 'KeyL', 'KeyP', 'Digit1', etc.
-			if (e.code.startsWith('Key')) {
-				mainKey = e.code.replace('Key', '').toLowerCase();
-			} else if (e.code.startsWith('Digit')) {
-				mainKey = e.code.replace('Digit', '');
-			} else {
-				// For other keys like Arrow keys, use as-is
-				mainKey = e.key;
-			}
-		}
-		keys.push(mainKey);
-
-		if (isTabShortcut) {
-			props.setTabShortcuts({
-				...props.tabShortcuts,
-				[actionId]: { ...props.tabShortcuts[actionId], keys },
-			});
-		} else {
-			props.setShortcuts({
-				...props.shortcuts,
-				[actionId]: { ...props.shortcuts[actionId], keys },
-			});
-		}
-		setRecordingId(null);
-	};
-
 	if (!isOpen) return null;
-
-	// Group themes by mode for the ThemePicker (exclude 'custom' theme - it's handled separately)
-	const groupedThemes = Object.values(themes).reduce(
-		(acc: Record<string, Theme[]>, t: Theme) => {
-			if (t.id === 'custom') return acc; // Skip custom theme in regular grouping
-			if (!acc[t.mode]) acc[t.mode] = [];
-			acc[t.mode].push(t);
-			return acc;
-		},
-		{} as Record<string, Theme[]>
-	);
-
-	const handleThemePickerKeyDown = (e: React.KeyboardEvent) => {
-		if (e.key === 'Tab') {
-			e.preventDefault();
-			e.stopPropagation();
-			// Create ordered array: dark themes first, then light, then vibe, then custom (cycling back to dark)
-			const allThemes = [
-				...(groupedThemes['dark'] || []),
-				...(groupedThemes['light'] || []),
-				...(groupedThemes['vibe'] || []),
-			];
-			// Add 'custom' as the last item in the cycle
-			const allThemeIds = [...allThemes.map((t) => t.id), 'custom'];
-			const currentIndex = allThemeIds.findIndex((id: string) => id === props.activeThemeId);
-
-			let newThemeId: string;
-			if (e.shiftKey) {
-				// Shift+Tab: go backwards
-				const prevIndex = currentIndex === 0 ? allThemeIds.length - 1 : currentIndex - 1;
-				newThemeId = allThemeIds[prevIndex];
-			} else {
-				// Tab: go forward
-				const nextIndex = (currentIndex + 1) % allThemeIds.length;
-				newThemeId = allThemeIds[nextIndex];
-			}
-			props.setActiveThemeId(newThemeId as ThemeId);
-
-			// Scroll the newly selected theme button into view
-			setTimeout(() => {
-				const themeButton = themePickerRef.current?.querySelector(
-					`[data-theme-id="${newThemeId}"]`
-				);
-				themeButton?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-			}, 0);
-		}
-	};
-
-	// Theme picker JSX (not a separate component to avoid remount issues)
-	const themePickerContent = (
-		<div
-			ref={themePickerRef}
-			className="space-y-6 outline-none"
-			tabIndex={0}
-			onKeyDown={handleThemePickerKeyDown}
-		>
-			{['dark', 'light', 'vibe'].map((mode) => (
-				<div key={mode}>
-					<div
-						className="text-xs font-bold uppercase mb-3 flex items-center gap-2"
-						style={{ color: theme.colors.textDim }}
-					>
-						{mode === 'dark' ? (
-							<Moon className="w-3 h-3" />
-						) : mode === 'light' ? (
-							<Sun className="w-3 h-3" />
-						) : (
-							<Sparkles className="w-3 h-3" />
-						)}
-						{mode} Mode
-					</div>
-					<div className="grid grid-cols-2 gap-3">
-						{groupedThemes[mode]?.map((t: Theme) => (
-							<button
-								key={t.id}
-								data-theme-id={t.id}
-								onClick={() => props.setActiveThemeId(t.id)}
-								className={`p-3 rounded-lg border text-left transition-all ${props.activeThemeId === t.id ? 'ring-2' : ''}`}
-								style={
-									{
-										borderColor: theme.colors.border,
-										backgroundColor: t.colors.bgSidebar,
-										'--tw-ring-color': t.colors.accent,
-									} as React.CSSProperties
-								}
-								tabIndex={-1}
-							>
-								<div className="flex justify-between items-center mb-2">
-									<span className="text-sm font-bold" style={{ color: t.colors.textMain }}>
-										{t.name}
-									</span>
-									{props.activeThemeId === t.id && (
-										<Check className="w-4 h-4" style={{ color: t.colors.accent }} />
-									)}
-								</div>
-								<div className="flex h-3 rounded overflow-hidden">
-									<div className="flex-1" style={{ backgroundColor: t.colors.bgMain }} />
-									<div className="flex-1" style={{ backgroundColor: t.colors.bgActivity }} />
-									<div className="flex-1" style={{ backgroundColor: t.colors.accent }} />
-								</div>
-							</button>
-						))}
-					</div>
-				</div>
-			))}
-
-			{/* Custom Theme Builder */}
-			<div data-theme-id="custom">
-				<CustomThemeBuilder
-					theme={theme}
-					customThemeColors={props.customThemeColors}
-					setCustomThemeColors={props.setCustomThemeColors}
-					customThemeBaseId={props.customThemeBaseId}
-					setCustomThemeBaseId={props.setCustomThemeBaseId}
-					isSelected={props.activeThemeId === 'custom'}
-					onSelect={() => props.setActiveThemeId('custom')}
-					onImportError={props.onThemeImportError}
-					onImportSuccess={props.onThemeImportSuccess}
-				/>
-			</div>
-		</div>
-	);
 
 	return (
 		<div
@@ -1092,8 +349,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 				<div className="flex border-b" style={{ borderColor: theme.colors.border }}>
 					<button
 						onClick={() => setActiveTab('general')}
-						className={`px-4 py-4 text-sm font-bold border-b-2 ${activeTab === 'general' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
-						tabIndex={-1}
+						className={`px-4 py-4 text-sm font-bold border-b-2 cursor-pointer ${activeTab === 'general' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
 						title="General"
 					>
 						<Settings className="w-4 h-4" />
@@ -1101,8 +357,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					</button>
 					<button
 						onClick={() => setActiveTab('display')}
-						className={`px-4 py-4 text-sm font-bold border-b-2 ${activeTab === 'display' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
-						tabIndex={-1}
+						className={`px-4 py-4 text-sm font-bold border-b-2 cursor-pointer ${activeTab === 'display' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
 						title="Display"
 					>
 						<Monitor className="w-4 h-4" />
@@ -1111,8 +366,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					{FEATURE_FLAGS.LLM_SETTINGS && (
 						<button
 							onClick={() => setActiveTab('llm')}
-							className={`px-4 py-4 text-sm font-bold border-b-2 ${activeTab === 'llm' ? 'border-indigo-500' : 'border-transparent'}`}
-							tabIndex={-1}
+							className={`px-4 py-4 text-sm font-bold border-b-2 cursor-pointer ${activeTab === 'llm' ? 'border-indigo-500' : 'border-transparent'}`}
 							title="LLM"
 						>
 							LLM
@@ -1120,8 +374,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					)}
 					<button
 						onClick={() => setActiveTab('shortcuts')}
-						className={`px-4 py-4 text-sm font-bold border-b-2 ${activeTab === 'shortcuts' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
-						tabIndex={-1}
+						className={`px-4 py-4 text-sm font-bold border-b-2 cursor-pointer ${activeTab === 'shortcuts' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
 						title="Shortcuts"
 					>
 						<Keyboard className="w-4 h-4" />
@@ -1129,8 +382,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					</button>
 					<button
 						onClick={() => setActiveTab('theme')}
-						className={`px-4 py-4 text-sm font-bold border-b-2 ${activeTab === 'theme' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
-						tabIndex={-1}
+						className={`px-4 py-4 text-sm font-bold border-b-2 cursor-pointer ${activeTab === 'theme' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
 						title="Themes"
 					>
 						<Palette className="w-4 h-4" />
@@ -1138,8 +390,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					</button>
 					<button
 						onClick={() => setActiveTab('notifications')}
-						className={`px-4 py-4 text-sm font-bold border-b-2 ${activeTab === 'notifications' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
-						tabIndex={-1}
+						className={`px-4 py-4 text-sm font-bold border-b-2 cursor-pointer ${activeTab === 'notifications' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
 						title="Notifications"
 					>
 						<Bell className="w-4 h-4" />
@@ -1147,8 +398,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					</button>
 					<button
 						onClick={() => setActiveTab('aicommands')}
-						className={`px-4 py-4 text-sm font-bold border-b-2 ${activeTab === 'aicommands' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
-						tabIndex={-1}
+						className={`px-4 py-4 text-sm font-bold border-b-2 cursor-pointer ${activeTab === 'aicommands' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
 						title="AI Commands"
 					>
 						<Cpu className="w-4 h-4" />
@@ -1156,8 +406,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					</button>
 					<button
 						onClick={() => setActiveTab('ssh')}
-						className={`px-4 py-4 text-sm font-bold border-b-2 ${activeTab === 'ssh' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
-						tabIndex={-1}
+						className={`px-4 py-4 text-sm font-bold border-b-2 cursor-pointer ${activeTab === 'ssh' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
 						title="SSH Hosts"
 					>
 						<Server className="w-4 h-4" />
@@ -1174,1586 +423,36 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					</button>
 					<button
 						onClick={() => setActiveTab('encore')}
-						className={`px-4 py-4 text-sm font-bold border-b-2 ${activeTab === 'encore' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
+						className={`px-4 py-4 text-sm font-bold border-b-2 cursor-pointer ${activeTab === 'encore' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
 						style={{
 							color: activeTab === 'encore' ? theme.colors.textMain : theme.colors.textDim,
 						}}
-						tabIndex={-1}
 						title="Encore Features"
 					>
 						<FlaskConical className="w-4 h-4" />
 						{activeTab === 'encore' && <span>Encore Features</span>}
 					</button>
 					<div className="flex-1 flex justify-end items-center pr-4">
-						<button onClick={onClose} tabIndex={-1}>
+						<button onClick={onClose} className="cursor-pointer">
 							<X className="w-5 h-5 opacity-50 hover:opacity-100" />
 						</button>
 					</div>
 				</div>
 
 				<div className="flex-1 p-6 overflow-y-auto scrollbar-thin">
-					{activeTab === 'general' && (
-						<div className="space-y-5">
-							{/* About Me (Conductor Profile) */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-1 flex items-center gap-2">
-									<User className="w-3 h-3" />
-									About Me
-								</label>
-								<p className="text-xs opacity-50 mb-2">
-									Tell us a little about yourself so that agents created under Maestro know how to
-									work and communicate with you. As the conductor, you orchestrate the symphony of
-									AI agents. (Optional, max 1000 characters)
-								</p>
-								<div className="relative">
-									<textarea
-										value={conductorProfile}
-										onChange={(e) => setConductorProfile(e.target.value)}
-										placeholder="e.g., I'm a senior developer working on a React/TypeScript project. I prefer concise explanations and clean code patterns..."
-										className="w-full p-3 rounded border bg-transparent outline-none text-sm resize-none"
-										style={{
-											borderColor: theme.colors.border,
-											color: theme.colors.textMain,
-											minHeight: '100px',
-										}}
-										maxLength={1000}
-									/>
-									<div
-										className="absolute bottom-2 right-2 text-xs"
-										style={{
-											color:
-												conductorProfile.length > 900 ? theme.colors.warning : theme.colors.textDim,
-										}}
-									>
-										{conductorProfile.length}/1000
-									</div>
-								</div>
-							</div>
+					{activeTab === 'general' && <GeneralTab theme={theme} isOpen={isOpen} />}
 
-							{/* Default Shell */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-1 flex items-center gap-2">
-									<Terminal className="w-3 h-3" />
-									Default Terminal Shell
-								</label>
-								<p className="text-xs opacity-50 mb-2">
-									Choose which shell to use for terminal sessions. Select any shell and configure a
-									custom path if needed.
-								</p>
-								{shellsLoading ? (
-									<div className="text-sm opacity-50 p-2">Loading shells...</div>
-								) : (
-									<div className="space-y-2">
-										{shellsLoaded && shells.length > 0 ? (
-											shells.map((shell) => (
-												<button
-													key={shell.id}
-													onClick={() => {
-														props.setDefaultShell(shell.id);
-														// Auto-expand shell config when selecting an unavailable shell
-														if (!shell.available) {
-															setShellConfigExpanded(true);
-														}
-													}}
-													onMouseEnter={handleShellInteraction}
-													onFocus={handleShellInteraction}
-													className={`w-full text-left p-3 rounded border transition-all ${
-														props.defaultShell === shell.id ? 'ring-2' : ''
-													} hover:bg-opacity-10`}
-													style={
-														{
-															borderColor: theme.colors.border,
-															backgroundColor:
-																props.defaultShell === shell.id
-																	? theme.colors.accentDim
-																	: theme.colors.bgMain,
-															'--tw-ring-color': theme.colors.accent,
-															color: theme.colors.textMain,
-														} as React.CSSProperties
-													}
-												>
-													<div className="flex items-center justify-between">
-														<div>
-															<div className="font-medium">{shell.name}</div>
-															{shell.path && (
-																<div className="text-xs opacity-50 font-mono mt-1">
-																	{shell.path}
-																</div>
-															)}
-														</div>
-														{shell.available ? (
-															props.defaultShell === shell.id ? (
-																<Check className="w-4 h-4" style={{ color: theme.colors.accent }} />
-															) : (
-																<span
-																	className="text-xs px-2 py-0.5 rounded"
-																	style={{
-																		backgroundColor: theme.colors.success + '20',
-																		color: theme.colors.success,
-																	}}
-																>
-																	Available
-																</span>
-															)
-														) : props.defaultShell === shell.id ? (
-															<div className="flex items-center gap-2">
-																<span
-																	className="text-xs px-2 py-0.5 rounded"
-																	style={{
-																		backgroundColor: theme.colors.warning + '20',
-																		color: theme.colors.warning,
-																	}}
-																>
-																	Custom Path Required
-																</span>
-																<Check className="w-4 h-4" style={{ color: theme.colors.accent }} />
-															</div>
-														) : (
-															<span
-																className="text-xs px-2 py-0.5 rounded"
-																style={{
-																	backgroundColor: theme.colors.warning + '20',
-																	color: theme.colors.warning,
-																}}
-															>
-																Not Found
-															</span>
-														)}
-													</div>
-												</button>
-											))
-										) : (
-											/* Show current default shell before detection runs */
-											<div className="space-y-2">
-												<button
-													className="w-full text-left p-3 rounded border ring-2"
-													style={
-														{
-															borderColor: theme.colors.border,
-															backgroundColor: theme.colors.accentDim,
-															'--tw-ring-color': theme.colors.accent,
-															color: theme.colors.textMain,
-														} as React.CSSProperties
-													}
-												>
-													<div className="flex items-center justify-between">
-														<div>
-															<div className="font-medium">
-																{props.defaultShell.charAt(0).toUpperCase() +
-																	props.defaultShell.slice(1)}
-															</div>
-															<div className="text-xs opacity-50 font-mono mt-1">
-																Current default
-															</div>
-														</div>
-														<Check className="w-4 h-4" style={{ color: theme.colors.accent }} />
-													</div>
-												</button>
-												<button
-													onClick={handleShellInteraction}
-													className="w-full text-left p-3 rounded border hover:bg-white/5 transition-colors"
-													style={{
-														borderColor: theme.colors.border,
-														backgroundColor: theme.colors.bgMain,
-														color: theme.colors.textDim,
-													}}
-												>
-													<div className="flex items-center gap-2">
-														<Terminal className="w-4 h-4" />
-														<span>Detect other available shells...</span>
-													</div>
-												</button>
-											</div>
-										)}
-									</div>
-								)}
-
-								{/* Shell Configuration Expandable Section */}
-								<button
-									onClick={() => setShellConfigExpanded(!shellConfigExpanded)}
-									className="w-full flex items-center justify-between p-3 rounded border mt-3 hover:bg-white/5 transition-colors"
-									style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
-								>
-									<span className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-										Shell Configuration
-									</span>
-									<ChevronDown
-										className={`w-4 h-4 transition-transform ${shellConfigExpanded ? 'rotate-180' : ''}`}
-										style={{ color: theme.colors.textDim }}
-									/>
-								</button>
-
-								{shellConfigExpanded && (
-									<div
-										className="mt-2 space-y-3 p-3 rounded border"
-										style={{
-											borderColor: theme.colors.border,
-											backgroundColor: theme.colors.bgActivity,
-										}}
-									>
-										{/* Custom Shell Path */}
-										<div>
-											<label className="block text-xs opacity-60 mb-1">
-												Custom Path (optional)
-											</label>
-											<div className="flex gap-2">
-												<input
-													type="text"
-													value={props.customShellPath}
-													onChange={(e) => props.setCustomShellPath(e.target.value)}
-													placeholder="/path/to/shell"
-													className="flex-1 p-2 rounded border bg-transparent outline-none text-sm font-mono"
-													style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
-												/>
-												{props.customShellPath && (
-													<button
-														onClick={() => props.setCustomShellPath('')}
-														className="px-2 py-1.5 rounded text-xs"
-														style={{
-															backgroundColor: theme.colors.bgMain,
-															color: theme.colors.textDim,
-														}}
-													>
-														Clear
-													</button>
-												)}
-											</div>
-											<p className="text-xs opacity-50 mt-1">
-												Override the auto-detected shell path. Leave empty to use the detected path.
-											</p>
-										</div>
-
-										{/* Shell Arguments */}
-										<div>
-											<label className="block text-xs opacity-60 mb-1">
-												Additional Arguments (optional)
-											</label>
-											<div className="flex gap-2">
-												<input
-													type="text"
-													value={props.shellArgs}
-													onChange={(e) => props.setShellArgs(e.target.value)}
-													placeholder="--flag value"
-													className="flex-1 p-2 rounded border bg-transparent outline-none text-sm font-mono"
-													style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
-												/>
-												{props.shellArgs && (
-													<button
-														onClick={() => props.setShellArgs('')}
-														className="px-2 py-1.5 rounded text-xs"
-														style={{
-															backgroundColor: theme.colors.bgMain,
-															color: theme.colors.textDim,
-														}}
-													>
-														Clear
-													</button>
-												)}
-											</div>
-											<p className="text-xs opacity-50 mt-1">
-												Additional CLI arguments passed to every shell session (e.g., --login, -c).
-											</p>
-										</div>
-
-										{/* Shell Environment Variables */}
-										<EnvVarsEditor
-											envVars={props.shellEnvVars}
-											setEnvVars={props.setShellEnvVars}
-											theme={theme}
-										/>
-									</div>
-								)}
-							</div>
-
-							{/* System Log Level */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2">
-									System Log Level
-								</label>
-								<ToggleButtonGroup
-									options={[
-										{ value: 'debug', label: 'Debug', activeColor: '#6366f1' },
-										{ value: 'info', label: 'Info', activeColor: '#3b82f6' },
-										{ value: 'warn', label: 'Warn', activeColor: '#f59e0b' },
-										{ value: 'error', label: 'Error', activeColor: '#ef4444' },
-									]}
-									value={props.logLevel}
-									onChange={props.setLogLevel}
-									theme={theme}
-								/>
-								<p className="text-xs opacity-50 mt-2">
-									Higher levels show fewer logs. Debug shows all logs, Error shows only errors.
-								</p>
-							</div>
-
-							{/* GitHub CLI Path */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2 flex items-center gap-2">
-									<Terminal className="w-3 h-3" />
-									GitHub CLI (gh) Path
-								</label>
-								<div
-									className="p-3 rounded border"
-									style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
-								>
-									<label className="block text-xs opacity-60 mb-1">Custom Path (optional)</label>
-									<div className="flex gap-2">
-										<input
-											type="text"
-											value={props.ghPath}
-											onChange={(e) => props.setGhPath(e.target.value)}
-											placeholder="/opt/homebrew/bin/gh"
-											className="flex-1 p-1.5 rounded border bg-transparent outline-none text-xs font-mono"
-											style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
-										/>
-										{props.ghPath && (
-											<button
-												onClick={() => props.setGhPath('')}
-												className="px-2 py-1 rounded text-xs"
-												style={{
-													backgroundColor: theme.colors.bgActivity,
-													color: theme.colors.textDim,
-												}}
-											>
-												Clear
-											</button>
-										)}
-									</div>
-									<p className="text-xs opacity-40 mt-2">
-										Specify the full path to the{' '}
-										<code
-											className="px-1 py-0.5 rounded"
-											style={{ backgroundColor: theme.colors.bgActivity }}
-										>
-											gh
-										</code>{' '}
-										binary if it's not in your PATH. Used for Auto Run worktree features.
-									</p>
-								</div>
-							</div>
-
-							{/* Input Behavior Settings */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2 flex items-center gap-2">
-									<Keyboard className="w-3 h-3" />
-									Input Send Behavior
-								</label>
-								<p className="text-xs opacity-50 mb-3">
-									Configure how to send messages in each mode. Choose between Enter or{' '}
-									{formatMetaKey()}+Enter for each input type.
-								</p>
-
-								{/* AI Mode Setting */}
-								<div
-									className="mb-4 p-3 rounded border"
-									style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
-								>
-									<div className="flex items-center justify-between mb-2">
-										<label className="text-sm font-medium">AI Interaction Mode</label>
-										<button
-											onClick={() => props.setEnterToSendAI(!props.enterToSendAI)}
-											className="px-3 py-1.5 rounded text-xs font-mono transition-all"
-											style={{
-												backgroundColor: props.enterToSendAI
-													? theme.colors.accentDim
-													: theme.colors.bgActivity,
-												color: theme.colors.textMain,
-												border: `1px solid ${theme.colors.border}`,
-											}}
-										>
-											{formatEnterToSend(props.enterToSendAI)}
-										</button>
-									</div>
-									<p className="text-xs opacity-50">
-										{props.enterToSendAI
-											? 'Press Enter to send. Use Shift+Enter for new line.'
-											: `Press ${formatMetaKey()}+Enter to send. Enter creates new line.`}
-									</p>
-								</div>
-
-								{/* Terminal Mode Setting */}
-								<div
-									className="p-3 rounded border"
-									style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
-								>
-									<div className="flex items-center justify-between mb-2">
-										<label className="text-sm font-medium">Terminal Mode</label>
-										<button
-											onClick={() => props.setEnterToSendTerminal(!props.enterToSendTerminal)}
-											className="px-3 py-1.5 rounded text-xs font-mono transition-all"
-											style={{
-												backgroundColor: props.enterToSendTerminal
-													? theme.colors.accentDim
-													: theme.colors.bgActivity,
-												color: theme.colors.textMain,
-												border: `1px solid ${theme.colors.border}`,
-											}}
-										>
-											{formatEnterToSend(props.enterToSendTerminal)}
-										</button>
-									</div>
-									<p className="text-xs opacity-50">
-										{props.enterToSendTerminal
-											? 'Press Enter to send. Use Shift+Enter for new line.'
-											: `Press ${formatMetaKey()}+Enter to send. Enter creates new line.`}
-									</p>
-								</div>
-							</div>
-
-							{/* Default History Toggle */}
-							<SettingCheckbox
-								icon={History}
-								sectionLabel="Default History Toggle"
-								title='Enable "History" by default for new tabs'
-								description='When enabled, new AI tabs will have the "History" toggle on by default, saving a synopsis after each completion'
-								checked={props.defaultSaveToHistory}
-								onChange={props.setDefaultSaveToHistory}
-								theme={theme}
-							/>
-
-							{/* Automatic Tab Naming */}
-							<SettingCheckbox
-								icon={Tag}
-								sectionLabel="Automatic Tab Naming"
-								title="Automatically name tabs based on first message"
-								description="When you send your first message to a new tab, an AI will analyze it and generate a descriptive tab name. The naming request runs in parallel and leaves no history."
-								checked={automaticTabNamingEnabled}
-								onChange={setAutomaticTabNamingEnabled}
-								theme={theme}
-							/>
-
-							{/* Auto-scroll AI Output */}
-							<SettingCheckbox
-								icon={ArrowDownToLine}
-								sectionLabel="Auto-scroll AI Output"
-								title="Auto-scroll AI output"
-								description="Automatically scroll to the bottom when new AI output arrives. When disabled, a floating button appears for new messages."
-								checked={props.autoScrollAiMode}
-								onChange={props.setAutoScrollAiMode}
-								theme={theme}
-							/>
-
-							{/* Default Thinking Toggle - Three states: Off, On, Sticky */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2 flex items-center gap-2">
-									<Brain className="w-3 h-3" />
-									Default Thinking Mode
-								</label>
-								<div
-									className="p-3 rounded border"
-									style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
-								>
-									<div className="font-medium mb-1" style={{ color: theme.colors.textMain }}>
-										Show AI thinking/reasoning content for new tabs
-									</div>
-									<div className="text-sm opacity-60 mb-3" style={{ color: theme.colors.textDim }}>
-										{props.defaultShowThinking === 'off' &&
-											'Thinking hidden, only final responses shown'}
-										{props.defaultShowThinking === 'on' &&
-											'Thinking streams live, clears on completion'}
-										{props.defaultShowThinking === 'sticky' &&
-											'Thinking streams live and stays visible'}
-									</div>
-									<ToggleButtonGroup
-										options={[
-											{ value: 'off' as const, label: 'Off' },
-											{ value: 'on' as const, label: 'On' },
-											{ value: 'sticky' as const, label: 'Sticky' },
-										]}
-										value={props.defaultShowThinking}
-										onChange={props.setDefaultShowThinking}
-										theme={theme}
-									/>
-								</div>
-							</div>
-
-							{/* Sleep Prevention */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2 flex items-center gap-2">
-									<Battery className="w-3 h-3" />
-									Power
-								</label>
-								<div
-									className="p-3 rounded border space-y-3"
-									style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
-								>
-									<div
-										className="flex items-center justify-between cursor-pointer"
-										onClick={() => setPreventSleepEnabled(!preventSleepEnabled)}
-										role="button"
-										tabIndex={0}
-										onKeyDown={(e) => {
-											if (e.key === 'Enter' || e.key === ' ') {
-												e.preventDefault();
-												setPreventSleepEnabled(!preventSleepEnabled);
-											}
-										}}
-									>
-										<div className="flex-1 pr-3">
-											<div className="font-medium" style={{ color: theme.colors.textMain }}>
-												Prevent sleep while working
-											</div>
-											<div
-												className="text-xs opacity-50 mt-0.5"
-												style={{ color: theme.colors.textDim }}
-											>
-												Keeps your computer awake when AI agents are busy or Auto Run is active
-											</div>
-										</div>
-										<button
-											onClick={(e) => {
-												e.stopPropagation();
-												setPreventSleepEnabled(!preventSleepEnabled);
-											}}
-											className="relative w-10 h-5 rounded-full transition-colors flex-shrink-0"
-											style={{
-												backgroundColor: preventSleepEnabled
-													? theme.colors.accent
-													: theme.colors.bgActivity,
-											}}
-											role="switch"
-											aria-checked={preventSleepEnabled}
-										>
-											<span
-												className={`absolute left-0 top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-													preventSleepEnabled ? 'translate-x-5' : 'translate-x-0.5'
-												}`}
-											/>
-										</button>
-									</div>
-
-									{/* Linux note */}
-									{navigator.platform.toLowerCase().includes('linux') && (
-										<div
-											className="text-xs p-2 rounded"
-											style={{
-												backgroundColor: theme.colors.warning + '15',
-												color: theme.colors.warning,
-											}}
-										>
-											Note: May have limited support on some Linux desktop environments.
-										</div>
-									)}
-								</div>
-							</div>
-
-							{/* Rendering Options */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2 flex items-center gap-2">
-									<Monitor className="w-3 h-3" />
-									Rendering Options
-								</label>
-								<div
-									className="p-3 rounded border space-y-3"
-									style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
-								>
-									{/* GPU Acceleration Toggle */}
-									<div
-										className="flex items-center justify-between cursor-pointer"
-										onClick={() => setDisableGpuAcceleration(!disableGpuAcceleration)}
-										role="button"
-										tabIndex={0}
-										onKeyDown={(e) => {
-											if (e.key === 'Enter' || e.key === ' ') {
-												e.preventDefault();
-												setDisableGpuAcceleration(!disableGpuAcceleration);
-											}
-										}}
-									>
-										<div className="flex-1 pr-3">
-											<div className="font-medium" style={{ color: theme.colors.textMain }}>
-												Disable GPU acceleration
-											</div>
-											<div
-												className="text-xs opacity-50 mt-0.5"
-												style={{ color: theme.colors.textDim }}
-											>
-												Use software rendering instead of GPU. Requires restart to take effect.
-											</div>
-										</div>
-										<button
-											onClick={(e) => {
-												e.stopPropagation();
-												setDisableGpuAcceleration(!disableGpuAcceleration);
-											}}
-											className="relative w-10 h-5 rounded-full transition-colors flex-shrink-0"
-											style={{
-												backgroundColor: disableGpuAcceleration
-													? theme.colors.accent
-													: theme.colors.bgActivity,
-											}}
-											role="switch"
-											aria-checked={disableGpuAcceleration}
-										>
-											<span
-												className={`absolute left-0 top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-													disableGpuAcceleration ? 'translate-x-5' : 'translate-x-0.5'
-												}`}
-											/>
-										</button>
-									</div>
-
-									{/* Confetti Toggle */}
-									<div
-										className="flex items-center justify-between cursor-pointer pt-3 border-t"
-										style={{ borderColor: theme.colors.border }}
-										onClick={() => setDisableConfetti(!disableConfetti)}
-										role="button"
-										tabIndex={0}
-										onKeyDown={(e) => {
-											if (e.key === 'Enter' || e.key === ' ') {
-												e.preventDefault();
-												setDisableConfetti(!disableConfetti);
-											}
-										}}
-									>
-										<div className="flex-1 pr-3">
-											<div
-												className="font-medium flex items-center gap-2"
-												style={{ color: theme.colors.textMain }}
-											>
-												<PartyPopper className="w-4 h-4" />
-												Disable confetti animations
-											</div>
-											<div
-												className="text-xs opacity-50 mt-0.5"
-												style={{ color: theme.colors.textDim }}
-											>
-												Skip celebratory confetti effects on achievements and milestones
-											</div>
-										</div>
-										<button
-											onClick={(e) => {
-												e.stopPropagation();
-												setDisableConfetti(!disableConfetti);
-											}}
-											className="relative w-10 h-5 rounded-full transition-colors flex-shrink-0"
-											style={{
-												backgroundColor: disableConfetti
-													? theme.colors.accent
-													: theme.colors.bgActivity,
-											}}
-											role="switch"
-											aria-checked={disableConfetti}
-										>
-											<span
-												className={`absolute left-0 top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-													disableConfetti ? 'translate-x-5' : 'translate-x-0.5'
-												}`}
-											/>
-										</button>
-									</div>
-								</div>
-							</div>
-
-							{/* Check for Updates on Startup */}
-							<SettingCheckbox
-								icon={Download}
-								sectionLabel="Updates"
-								title="Check for updates on startup"
-								description="Automatically check for new Maestro versions when the app starts"
-								checked={props.checkForUpdatesOnStartup}
-								onChange={props.setCheckForUpdatesOnStartup}
-								theme={theme}
-							/>
-
-							{/* Beta Updates */}
-							<SettingCheckbox
-								icon={FlaskConical}
-								sectionLabel="Pre-release Channel"
-								title="Include beta and release candidate updates"
-								description="Opt-in to receive pre-release versions (e.g., v0.11.1-rc, v0.12.0-beta). These may contain experimental features and bugs."
-								checked={props.enableBetaUpdates}
-								onChange={props.setEnableBetaUpdates}
-								theme={theme}
-							/>
-
-							{/* Crash Reporting */}
-							<SettingCheckbox
-								icon={Bug}
-								sectionLabel="Privacy"
-								title="Send anonymous crash reports"
-								description="Help improve Maestro by automatically sending crash reports. No personal data is collected. Changes take effect after restart."
-								checked={props.crashReportingEnabled}
-								onChange={props.setCrashReportingEnabled}
-								theme={theme}
-							/>
-
-							{/* Stats Data Management */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2 flex items-center gap-2">
-									<Database className="w-3 h-3" />
-									Usage & Stats
-									<span
-										className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase"
-										style={{
-											backgroundColor: theme.colors.warning + '30',
-											color: theme.colors.warning,
-										}}
-									>
-										Beta
-									</span>
-								</label>
-								<div
-									className="p-3 rounded border space-y-3"
-									style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
-								>
-									{/* Enable/Disable Stats Collection */}
-									<div className="flex items-center justify-between">
-										<div>
-											<p className="text-sm" style={{ color: theme.colors.textMain }}>
-												Enable stats collection
-											</p>
-											<p className="text-xs opacity-50 mt-0.5">
-												Track queries and Auto Run sessions for the dashboard.
-											</p>
-										</div>
-										<button
-											onClick={() => setStatsCollectionEnabled(!statsCollectionEnabled)}
-											className={`relative w-10 h-5 rounded-full transition-colors ${
-												statsCollectionEnabled ? '' : ''
-											}`}
-											style={{
-												backgroundColor: statsCollectionEnabled
-													? theme.colors.accent
-													: theme.colors.bgActivity,
-											}}
-											role="switch"
-											aria-checked={statsCollectionEnabled}
-										>
-											<span
-												className={`absolute left-0 top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-													statsCollectionEnabled ? 'translate-x-5' : 'translate-x-0.5'
-												}`}
-											/>
-										</button>
-									</div>
-
-									{/* Default Time Range */}
-									<div>
-										<label className="block text-xs opacity-60 mb-2">
-											Default dashboard time range
-										</label>
-										<select
-											value={defaultStatsTimeRange}
-											onChange={(e) =>
-												setDefaultStatsTimeRange(
-													e.target.value as 'day' | 'week' | 'month' | 'year' | 'all'
-												)
-											}
-											className="w-full p-2 rounded border bg-transparent outline-none text-sm"
-											style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
-										>
-											<option value="day">Last 24 hours</option>
-											<option value="week">Last 7 days</option>
-											<option value="month">Last 30 days</option>
-											<option value="year">Last 365 days</option>
-											<option value="all">All time</option>
-										</select>
-										<p className="text-xs opacity-50 mt-1">
-											Time range shown when opening the Usage Dashboard.
-										</p>
-									</div>
-
-									{/* Divider */}
-									<div className="border-t" style={{ borderColor: theme.colors.border }} />
-
-									{/* Database Size Display */}
-									<div className="flex items-center justify-between">
-										<span className="text-sm" style={{ color: theme.colors.textDim }}>
-											Database size
-										</span>
-										<span className="text-sm font-mono" style={{ color: theme.colors.textMain }}>
-											{statsDbSize !== null
-												? (statsDbSize / 1024 / 1024).toFixed(2) + ' MB'
-												: 'Loading...'}
-											{statsEarliestDate && (
-												<span style={{ color: theme.colors.textDim }}>
-													{' '}
-													(since {statsEarliestDate})
-												</span>
-											)}
-										</span>
-									</div>
-
-									{/* Clear Old Data Dropdown */}
-									<div>
-										<label className="block text-xs opacity-60 mb-2">
-											Clear stats older than...
-										</label>
-										<div className="flex items-center gap-2">
-											<select
-												id="clear-stats-period"
-												className="flex-1 p-2 rounded border bg-transparent outline-none text-sm"
-												style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
-												defaultValue=""
-												disabled={statsClearing}
-											>
-												<option value="" disabled>
-													Select a time period
-												</option>
-												<option value="7">7 days</option>
-												<option value="30">30 days</option>
-												<option value="90">90 days</option>
-												<option value="180">6 months</option>
-												<option value="365">1 year</option>
-											</select>
-											<button
-												onClick={async () => {
-													const select = document.getElementById(
-														'clear-stats-period'
-													) as HTMLSelectElement;
-													const days = parseInt(select.value, 10);
-													if (!days || isNaN(days)) {
-														return; // No selection
-													}
-													setStatsClearing(true);
-													setStatsClearResult(null);
-													try {
-														const result = await window.maestro.stats.clearOldData(days);
-														setStatsClearResult(result);
-														if (result.success) {
-															// Refresh database size
-															const newSize = await window.maestro.stats.getDatabaseSize();
-															setStatsDbSize(newSize);
-														}
-													} catch (err) {
-														console.error('Failed to clear old stats:', err);
-														setStatsClearResult({
-															success: false,
-															deletedQueryEvents: 0,
-															deletedAutoRunSessions: 0,
-															deletedAutoRunTasks: 0,
-															error: err instanceof Error ? err.message : 'Unknown error',
-														});
-													} finally {
-														setStatsClearing(false);
-													}
-												}}
-												disabled={statsClearing}
-												className="px-3 py-2 rounded text-xs font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
-												style={{
-													backgroundColor: theme.colors.error + '20',
-													color: theme.colors.error,
-													border: `1px solid ${theme.colors.error}40`,
-												}}
-											>
-												<Trash2 className="w-3 h-3" />
-												{statsClearing ? 'Clearing...' : 'Clear'}
-											</button>
-										</div>
-										<p className="text-xs opacity-50 mt-2">
-											Remove old query events, Auto Run sessions, and tasks from the stats database.
-										</p>
-									</div>
-
-									{/* Clear Result Feedback */}
-									{statsClearResult && (
-										<div
-											className="p-2 rounded text-xs flex items-start gap-2"
-											style={{
-												backgroundColor: statsClearResult.success
-													? theme.colors.success + '20'
-													: theme.colors.error + '20',
-												color: statsClearResult.success ? theme.colors.success : theme.colors.error,
-											}}
-										>
-											{statsClearResult.success ? (
-												<>
-													<Check className="w-3 h-3 flex-shrink-0 mt-0.5" />
-													<span>
-														Cleared{' '}
-														{statsClearResult.deletedQueryEvents +
-															statsClearResult.deletedAutoRunSessions +
-															statsClearResult.deletedAutoRunTasks}{' '}
-														records ({statsClearResult.deletedQueryEvents} queries,{' '}
-														{statsClearResult.deletedAutoRunSessions} sessions,{' '}
-														{statsClearResult.deletedAutoRunTasks} tasks)
-													</span>
-												</>
-											) : (
-												<>
-													<X className="w-3 h-3 flex-shrink-0 mt-0.5" />
-													<span>{statsClearResult.error || 'Failed to clear stats data'}</span>
-												</>
-											)}
-										</div>
-									)}
-
-									{/* Divider */}
-									<div className="border-t" style={{ borderColor: theme.colors.border }} />
-
-									{/* WakaTime Integration */}
-									<div className="flex items-center justify-between">
-										<div>
-											<p
-												className="text-sm flex items-center gap-2"
-												style={{ color: theme.colors.textMain }}
-											>
-												<Timer className="w-3.5 h-3.5 opacity-60" />
-												Enable WakaTime tracking
-											</p>
-											<p className="text-xs opacity-50 mt-0.5">
-												Track coding activity in Maestro sessions via WakaTime.
-											</p>
-										</div>
-										<button
-											onClick={() => setWakatimeEnabled(!wakatimeEnabled)}
-											className="relative w-10 h-5 rounded-full transition-colors"
-											style={{
-												backgroundColor: wakatimeEnabled
-													? theme.colors.accent
-													: theme.colors.bgActivity,
-											}}
-											role="switch"
-											aria-checked={wakatimeEnabled}
-										>
-											<span
-												className={`absolute left-0 top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-													wakatimeEnabled ? 'translate-x-5' : 'translate-x-0.5'
-												}`}
-											/>
-										</button>
-									</div>
-
-									{/* CLI not found warning */}
-									{wakatimeEnabled && wakatimeCliStatus && !wakatimeCliStatus.available && (
-										<p className="text-xs mt-1" style={{ color: theme.colors.warning }}>
-											WakaTime CLI is being installed automatically...
-										</p>
-									)}
-
-									{/* API Key Input (only shown when enabled) */}
-									{wakatimeEnabled && (
-										<div>
-											<label className="block text-xs opacity-60 mb-1">API Key</label>
-											<div
-												className="flex items-center border rounded px-3 py-2"
-												style={{
-													backgroundColor: theme.colors.bgMain,
-													borderColor: theme.colors.border,
-												}}
-											>
-												<Key className="w-4 h-4 mr-2 opacity-50" />
-												<input
-													type="password"
-													value={wakatimeApiKey}
-													onChange={(e) => setWakatimeApiKey(e.target.value)}
-													onBlur={() => {
-														if (wakatimeApiKey) {
-															setWakatimeKeyValidating(true);
-															setWakatimeKeyValid(null);
-															window.maestro.wakatime
-																.validateApiKey(wakatimeApiKey)
-																.then((result) => setWakatimeKeyValid(result.valid))
-																.catch(() => setWakatimeKeyValid(false))
-																.finally(() => setWakatimeKeyValidating(false));
-														}
-													}}
-													className="bg-transparent flex-1 text-sm outline-none"
-													style={{ color: theme.colors.textMain }}
-													placeholder="waka_..."
-												/>
-												{wakatimeKeyValidating && (
-													<span className="ml-2 text-xs opacity-50">...</span>
-												)}
-												{!wakatimeKeyValidating && wakatimeKeyValid === true && (
-													<Check className="w-4 h-4 ml-2" style={{ color: theme.colors.success }} />
-												)}
-												{!wakatimeKeyValidating && wakatimeKeyValid === false && wakatimeApiKey && (
-													<X className="w-4 h-4 ml-2" style={{ color: theme.colors.error }} />
-												)}
-												{wakatimeApiKey && (
-													<button
-														onClick={() => setWakatimeApiKey('')}
-														className="ml-2 opacity-50 hover:opacity-100"
-														title="Clear API key"
-													>
-														<X className="w-3 h-3" />
-													</button>
-												)}
-											</div>
-											<p className="text-[10px] mt-1.5 opacity-50">
-												Get your API key from wakatime.com/settings/api-key. Keys are stored locally
-												in ~/.maestro/settings.json.
-											</p>
-										</div>
-									)}
-								</div>
-							</div>
-
-							{/* Settings Storage Location */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2 flex items-center gap-2">
-									<FolderSync className="w-3 h-3" />
-									Storage Location
-									<span
-										className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase"
-										style={{
-											backgroundColor: theme.colors.warning + '30',
-											color: theme.colors.warning,
-										}}
-									>
-										Beta
-									</span>
-								</label>
-								<div
-									className="p-3 rounded border space-y-3"
-									style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
-								>
-									{/* Settings folder header */}
-									<div>
-										<p className="text-sm font-semibold" style={{ color: theme.colors.textMain }}>
-											Settings folder
-										</p>
-										<p className="text-xs opacity-60 mt-0.5">
-											Choose where Maestro stores settings, sessions, and groups. Use a synced
-											folder (iCloud Drive, Dropbox, OneDrive) to share across devices.
-										</p>
-										<p className="text-xs opacity-50 mt-1 italic">
-											Note: Only run Maestro on one device at a time to avoid sync conflicts.
-										</p>
-									</div>
-
-									{/* Default Location */}
-									<div>
-										<label className="block text-xs opacity-60 mb-1">Default Location</label>
-										<div
-											className="text-xs p-2 rounded font-mono truncate"
-											style={{ backgroundColor: theme.colors.bgActivity }}
-											title={defaultStoragePath}
-										>
-											{defaultStoragePath || 'Loading...'}
-										</div>
-									</div>
-
-									{/* Current Location (if different) */}
-									{customSyncPath && (
-										<div>
-											<label className="block text-xs opacity-60 mb-1">
-												Current Location (Custom)
-											</label>
-											<div
-												className="text-xs p-2 rounded font-mono truncate flex items-center gap-2"
-												style={{
-													backgroundColor: theme.colors.accent + '15',
-													border: `1px solid ${theme.colors.accent}40`,
-												}}
-												title={customSyncPath}
-											>
-												<Cloud
-													className="w-3 h-3 flex-shrink-0"
-													style={{ color: theme.colors.accent }}
-												/>
-												<span className="truncate">{customSyncPath}</span>
-											</div>
-										</div>
-									)}
-
-									{/* Action Buttons */}
-									<div className="flex items-center gap-2 flex-wrap">
-										<button
-											onClick={async () => {
-												const folder = await window.maestro.sync.selectSyncFolder();
-												if (folder) {
-													setSyncMigrating(true);
-													setSyncError(null);
-													setSyncMigratedCount(null);
-													try {
-														const result = await window.maestro.sync.setCustomPath(folder);
-														if (result.success) {
-															setCustomSyncPath(folder);
-															setCurrentStoragePath(folder);
-															setSyncRestartRequired(true);
-															if (result.migrated !== undefined) {
-																setSyncMigratedCount(result.migrated);
-															}
-														} else {
-															setSyncError(result.error || 'Failed to change storage location');
-														}
-														if (result.errors && result.errors.length > 0) {
-															setSyncError(result.errors.join(', '));
-														}
-													} finally {
-														setSyncMigrating(false);
-													}
-												}
-											}}
-											disabled={syncMigrating}
-											className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-50"
-											style={{
-												backgroundColor: theme.colors.accent,
-												color: theme.colors.bgMain,
-											}}
-										>
-											<Folder className="w-3 h-3" />
-											{syncMigrating
-												? 'Migrating...'
-												: customSyncPath
-													? 'Change Folder...'
-													: 'Choose Folder...'}
-										</button>
-
-										{customSyncPath && (
-											<button
-												onClick={async () => {
-													setSyncMigrating(true);
-													setSyncError(null);
-													setSyncMigratedCount(null);
-													try {
-														const result = await window.maestro.sync.setCustomPath(null);
-														if (result.success) {
-															setCustomSyncPath(undefined);
-															setCurrentStoragePath(defaultStoragePath);
-															setSyncRestartRequired(true);
-															if (result.migrated !== undefined) {
-																setSyncMigratedCount(result.migrated);
-															}
-														} else {
-															setSyncError(result.error || 'Failed to reset storage location');
-														}
-													} finally {
-														setSyncMigrating(false);
-													}
-												}}
-												disabled={syncMigrating}
-												className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-50"
-												style={{
-													backgroundColor: theme.colors.border,
-													color: theme.colors.textMain,
-												}}
-												title="Reset to default location"
-											>
-												<RotateCcw className="w-3 h-3" />
-												Use Default
-											</button>
-										)}
-									</div>
-
-									{/* Success Message */}
-									{syncMigratedCount !== null && syncMigratedCount > 0 && !syncError && (
-										<div
-											className="p-2 rounded text-xs flex items-center gap-2"
-											style={{
-												backgroundColor: theme.colors.success + '20',
-												color: theme.colors.success,
-											}}
-										>
-											<Check className="w-3 h-3" />
-											Migrated {syncMigratedCount} settings file{syncMigratedCount !== 1 ? 's' : ''}
-										</div>
-									)}
-
-									{/* Error Message */}
-									{syncError && (
-										<div
-											className="p-2 rounded text-xs flex items-start gap-2"
-											style={{
-												backgroundColor: theme.colors.error + '20',
-												color: theme.colors.error,
-											}}
-										>
-											<X className="w-3 h-3 flex-shrink-0 mt-0.5" />
-											<span>{syncError}</span>
-										</div>
-									)}
-
-									{/* Restart Required Warning */}
-									{syncRestartRequired && !syncError && (
-										<div
-											className="p-2 rounded text-xs flex items-center gap-2"
-											style={{
-												backgroundColor: theme.colors.warning + '20',
-												color: theme.colors.warning,
-											}}
-										>
-											<RotateCcw className="w-3 h-3" />
-											Restart Maestro for changes to take effect
-										</div>
-									)}
-								</div>
-							</div>
-						</div>
-					)}
-
-					{activeTab === 'display' && (
-						<div className="space-y-5">
-							{/* Font Family */}
-							<FontConfigurationPanel
-								fontFamily={props.fontFamily}
-								setFontFamily={props.setFontFamily}
-								systemFonts={systemFonts}
-								fontsLoaded={fontsLoaded}
-								fontLoading={fontLoading}
-								customFonts={customFonts}
-								onAddCustomFont={addCustomFont}
-								onRemoveCustomFont={removeCustomFont}
-								onFontInteraction={handleFontInteraction}
-								theme={theme}
-							/>
-
-							{/* Font Size */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2">
-									Font Size
-								</label>
-								<ToggleButtonGroup
-									options={[
-										{ value: 12, label: 'Small' },
-										{ value: 14, label: 'Medium' },
-										{ value: 16, label: 'Large' },
-										{ value: 18, label: 'X-Large' },
-									]}
-									value={props.fontSize}
-									onChange={props.setFontSize}
-									theme={theme}
-								/>
-							</div>
-
-							{/* Terminal Width */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2">
-									Terminal Width (Columns)
-								</label>
-								<ToggleButtonGroup
-									options={[80, 100, 120, 160]}
-									value={props.terminalWidth}
-									onChange={props.setTerminalWidth}
-									theme={theme}
-								/>
-							</div>
-
-							{/* Max Log Buffer */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2">
-									Maximum Log Buffer
-								</label>
-								<ToggleButtonGroup
-									options={[1000, 5000, 10000, 25000]}
-									value={props.maxLogBuffer}
-									onChange={props.setMaxLogBuffer}
-									theme={theme}
-								/>
-								<p className="text-xs opacity-50 mt-2">
-									Maximum number of log messages to keep in memory. Older logs are automatically
-									removed.
-								</p>
-							</div>
-
-							{/* Max Output Lines */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2">
-									Max Output Lines per Response
-								</label>
-								<ToggleButtonGroup
-									options={[
-										{ value: 15 },
-										{ value: 25 },
-										{ value: 50 },
-										{ value: 100 },
-										{ value: Infinity, label: 'All' },
-									]}
-									value={props.maxOutputLines}
-									onChange={props.setMaxOutputLines}
-									theme={theme}
-								/>
-								<p className="text-xs opacity-50 mt-2">
-									Long outputs will be collapsed into a scrollable window. Set to "All" to always
-									show full output.
-								</p>
-							</div>
-
-							{/* Message Alignment */}
-							{props.setUserMessageAlignment && (
-								<div>
-									<label className="block text-xs font-bold opacity-70 uppercase mb-2">
-										User Message Alignment
-									</label>
-									<ToggleButtonGroup
-										options={[
-											{ value: 'right', label: 'Right' },
-											{ value: 'left', label: 'Left' },
-										]}
-										value={props.userMessageAlignment ?? 'right'}
-										onChange={props.setUserMessageAlignment}
-										theme={theme}
-									/>
-									<p className="text-xs opacity-50 mt-2">
-										Position your messages on the left or right side of the chat. AI responses
-										appear on the opposite side.
-									</p>
-								</div>
-							)}
-
-							{/* Document Graph Settings */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2 flex items-center gap-2">
-									<Sparkles className="w-3 h-3" />
-									Document Graph
-									<span
-										className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase"
-										style={{
-											backgroundColor: theme.colors.warning + '30',
-											color: theme.colors.warning,
-										}}
-									>
-										Beta
-									</span>
-								</label>
-								<div
-									className="p-3 rounded border space-y-3"
-									style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
-								>
-									{/* Show External Links */}
-									<div className="flex items-center justify-between">
-										<div>
-											<p className="text-sm" style={{ color: theme.colors.textMain }}>
-												Show external links by default
-											</p>
-											<p className="text-xs opacity-50 mt-0.5">
-												Display external website links as nodes. Can be toggled in the graph view.
-											</p>
-										</div>
-										<button
-											onClick={() =>
-												setDocumentGraphShowExternalLinks(!documentGraphShowExternalLinks)
-											}
-											className="relative w-10 h-5 rounded-full transition-colors"
-											style={{
-												backgroundColor: documentGraphShowExternalLinks
-													? theme.colors.accent
-													: theme.colors.bgActivity,
-											}}
-											role="switch"
-											aria-checked={documentGraphShowExternalLinks}
-										>
-											<span
-												className={`absolute left-0 top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-													documentGraphShowExternalLinks ? 'translate-x-5' : 'translate-x-0.5'
-												}`}
-											/>
-										</button>
-									</div>
-
-									{/* Max Nodes */}
-									<div>
-										<label className="block text-xs opacity-60 mb-2">
-											Maximum nodes to display
-										</label>
-										<div className="flex items-center gap-3">
-											<input
-												type="range"
-												min={50}
-												max={1000}
-												step={50}
-												value={documentGraphMaxNodes}
-												onChange={(e) => setDocumentGraphMaxNodes(Number(e.target.value))}
-												className="flex-1 h-2 rounded-lg appearance-none cursor-pointer"
-												style={{
-													background: `linear-gradient(to right, ${theme.colors.accent} 0%, ${theme.colors.accent} ${((documentGraphMaxNodes - 50) / 950) * 100}%, ${theme.colors.bgActivity} ${((documentGraphMaxNodes - 50) / 950) * 100}%, ${theme.colors.bgActivity} 100%)`,
-												}}
-											/>
-											<span
-												className="text-sm font-mono w-12 text-right"
-												style={{ color: theme.colors.textMain }}
-											>
-												{documentGraphMaxNodes}
-											</span>
-										</div>
-										<p className="text-xs opacity-50 mt-1">
-											Limits initial graph size for performance. Use &quot;Load more&quot; to show
-											additional nodes.
-										</p>
-									</div>
-								</div>
-							</div>
-
-							{/* Context Window Warnings */}
-							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2 flex items-center gap-2">
-									<AlertTriangle className="w-3 h-3" />
-									Context Window Warnings
-								</label>
-								<div
-									className="p-3 rounded border space-y-3"
-									style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
-								>
-									{/* Enable/Disable Toggle */}
-									<div
-										className="flex items-center justify-between cursor-pointer"
-										onClick={() =>
-											updateContextManagementSettings({
-												contextWarningsEnabled: !contextManagementSettings.contextWarningsEnabled,
-											})
-										}
-										role="button"
-										tabIndex={0}
-										onKeyDown={(e) => {
-											if (e.key === 'Enter' || e.key === ' ') {
-												e.preventDefault();
-												updateContextManagementSettings({
-													contextWarningsEnabled: !contextManagementSettings.contextWarningsEnabled,
-												});
-											}
-										}}
-									>
-										<div className="flex-1 pr-3">
-											<div className="font-medium" style={{ color: theme.colors.textMain }}>
-												Show context consumption warnings
-											</div>
-											<div
-												className="text-xs opacity-50 mt-0.5"
-												style={{ color: theme.colors.textDim }}
-											>
-												Display warning banners when context window usage reaches configurable
-												thresholds
-											</div>
-										</div>
-										<button
-											onClick={(e) => {
-												e.stopPropagation();
-												updateContextManagementSettings({
-													contextWarningsEnabled: !contextManagementSettings.contextWarningsEnabled,
-												});
-											}}
-											className="relative w-10 h-5 rounded-full transition-colors flex-shrink-0"
-											style={{
-												backgroundColor: contextManagementSettings.contextWarningsEnabled
-													? theme.colors.accent
-													: theme.colors.bgActivity,
-											}}
-											role="switch"
-											aria-checked={contextManagementSettings.contextWarningsEnabled}
-										>
-											<span
-												className={`absolute left-0 top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-													contextManagementSettings.contextWarningsEnabled
-														? 'translate-x-5'
-														: 'translate-x-0.5'
-												}`}
-											/>
-										</button>
-									</div>
-
-									{/* Threshold Sliders (ghosted when disabled) */}
-									<div
-										className="space-y-4 pt-3 border-t"
-										style={{
-											borderColor: theme.colors.border,
-											opacity: contextManagementSettings.contextWarningsEnabled ? 1 : 0.4,
-											pointerEvents: contextManagementSettings.contextWarningsEnabled
-												? 'auto'
-												: 'none',
-										}}
-									>
-										{/* Yellow Warning Threshold */}
-										<div>
-											<div className="flex items-center justify-between mb-2">
-												<label
-													className="text-xs font-medium flex items-center gap-2"
-													style={{ color: theme.colors.textMain }}
-												>
-													<div
-														className="w-2.5 h-2.5 rounded-full"
-														style={{ backgroundColor: '#eab308' }}
-													/>
-													Yellow warning threshold
-												</label>
-												<span
-													className="text-xs font-mono px-2 py-0.5 rounded"
-													style={{ backgroundColor: 'rgba(234, 179, 8, 0.2)', color: '#fde047' }}
-												>
-													{contextManagementSettings.contextWarningYellowThreshold}%
-												</span>
-											</div>
-											<input
-												type="range"
-												min={0}
-												max={100}
-												step={5}
-												value={contextManagementSettings.contextWarningYellowThreshold}
-												onChange={(e) => {
-													const newYellow = Number(e.target.value);
-													// Validation: ensure yellow < red by at least 10%
-													if (newYellow >= contextManagementSettings.contextWarningRedThreshold) {
-														// Bump red threshold up
-														updateContextManagementSettings({
-															contextWarningYellowThreshold: newYellow,
-															contextWarningRedThreshold: Math.min(100, newYellow + 10),
-														});
-													} else {
-														updateContextManagementSettings({
-															contextWarningYellowThreshold: newYellow,
-														});
-													}
-												}}
-												className="w-full h-2 rounded-lg appearance-none cursor-pointer"
-												style={{
-													background: `linear-gradient(to right, #eab308 0%, #eab308 ${contextManagementSettings.contextWarningYellowThreshold}%, ${theme.colors.bgActivity} ${contextManagementSettings.contextWarningYellowThreshold}%, ${theme.colors.bgActivity} 100%)`,
-												}}
-											/>
-										</div>
-
-										{/* Red Warning Threshold */}
-										<div>
-											<div className="flex items-center justify-between mb-2">
-												<label
-													className="text-xs font-medium flex items-center gap-2"
-													style={{ color: theme.colors.textMain }}
-												>
-													<div
-														className="w-2.5 h-2.5 rounded-full"
-														style={{ backgroundColor: '#ef4444' }}
-													/>
-													Red warning threshold
-												</label>
-												<span
-													className="text-xs font-mono px-2 py-0.5 rounded"
-													style={{ backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#fca5a5' }}
-												>
-													{contextManagementSettings.contextWarningRedThreshold}%
-												</span>
-											</div>
-											<input
-												type="range"
-												min={0}
-												max={100}
-												step={5}
-												value={contextManagementSettings.contextWarningRedThreshold}
-												onChange={(e) => {
-													const newRed = Number(e.target.value);
-													// Validation: ensure red > yellow by at least 10%
-													if (newRed <= contextManagementSettings.contextWarningYellowThreshold) {
-														// Bump yellow threshold down
-														updateContextManagementSettings({
-															contextWarningRedThreshold: newRed,
-															contextWarningYellowThreshold: Math.max(0, newRed - 10),
-														});
-													} else {
-														updateContextManagementSettings({ contextWarningRedThreshold: newRed });
-													}
-												}}
-												className="w-full h-2 rounded-lg appearance-none cursor-pointer"
-												style={{
-													background: `linear-gradient(to right, #ef4444 0%, #ef4444 ${contextManagementSettings.contextWarningRedThreshold}%, ${theme.colors.bgActivity} ${contextManagementSettings.contextWarningRedThreshold}%, ${theme.colors.bgActivity} 100%)`,
-												}}
-											/>
-										</div>
-									</div>
-								</div>
-							</div>
-						</div>
-					)}
+					{activeTab === 'display' && <DisplayTab theme={theme} />}
 
 					{activeTab === 'llm' && FEATURE_FLAGS.LLM_SETTINGS && (
 						<div className="space-y-5">
 							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2">
+								<div className="block text-xs font-bold opacity-70 uppercase mb-2">
 									LLM Provider
-								</label>
+								</div>
 								<select
-									value={props.llmProvider}
-									onChange={(e) => props.setLlmProvider(e.target.value as LLMProvider)}
+									value={llmProvider}
+									onChange={(e) => setLlmProvider(e.target.value as LLMProvider)}
 									className="w-full p-2 rounded border bg-transparent outline-none"
 									style={{ borderColor: theme.colors.border }}
 								>
@@ -2764,25 +463,21 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 							</div>
 
 							<div>
-								<label className="block text-xs font-bold opacity-70 uppercase mb-2">
-									Model Slug
-								</label>
+								<div className="block text-xs font-bold opacity-70 uppercase mb-2">Model Slug</div>
 								<input
-									value={props.modelSlug}
-									onChange={(e) => props.setModelSlug(e.target.value)}
+									value={modelSlug}
+									onChange={(e) => setModelSlug(e.target.value)}
 									className="w-full p-2 rounded border bg-transparent outline-none"
 									style={{ borderColor: theme.colors.border }}
 									placeholder={
-										props.llmProvider === 'ollama' ? 'llama3:latest' : 'anthropic/claude-3.5-sonnet'
+										llmProvider === 'ollama' ? 'llama3:latest' : 'anthropic/claude-3.5-sonnet'
 									}
 								/>
 							</div>
 
-							{props.llmProvider !== 'ollama' && (
+							{llmProvider !== 'ollama' && (
 								<div>
-									<label className="block text-xs font-bold opacity-70 uppercase mb-2">
-										API Key
-									</label>
+									<div className="block text-xs font-bold opacity-70 uppercase mb-2">API Key</div>
 									<div
 										className="flex items-center border rounded px-3 py-2"
 										style={{
@@ -2793,8 +488,8 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 										<Key className="w-4 h-4 mr-2 opacity-50" />
 										<input
 											type="password"
-											value={props.apiKey}
-											onChange={(e) => props.setApiKey(e.target.value)}
+											value={apiKey}
+											onChange={(e) => setApiKey(e.target.value)}
 											className="bg-transparent flex-1 text-sm outline-none"
 											placeholder="sk-..."
 										/>
@@ -2809,7 +504,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 							<div className="pt-4 border-t" style={{ borderColor: theme.colors.border }}>
 								<button
 									onClick={testLLMConnection}
-									disabled={testingLLM || (props.llmProvider !== 'ollama' && !props.apiKey)}
+									disabled={testingLLM || (llmProvider !== 'ollama' && !apiKey)}
 									className="w-full py-3 rounded-lg font-bold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
 									style={{
 										backgroundColor: theme.colors.accent,
@@ -2843,148 +538,35 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 						</div>
 					)}
 
-					{activeTab === 'shortcuts' &&
-						(() => {
-							const allShortcuts = [
-								...Object.values(props.shortcuts).map((sc) => ({ ...sc, isTabShortcut: false })),
-								...Object.values(props.tabShortcuts).map((sc) => ({ ...sc, isTabShortcut: true })),
-							];
-							const totalShortcuts = allShortcuts.length;
-							const filteredShortcuts = allShortcuts.filter((sc) =>
-								sc.label.toLowerCase().includes(shortcutsFilter.toLowerCase())
-							);
-							const filteredCount = filteredShortcuts.length;
+					{activeTab === 'shortcuts' && (
+						<ShortcutsTab
+							theme={theme}
+							hasNoAgents={hasNoAgents}
+							onRecordingChange={(isRecording) => {
+								isRecordingShortcutRef.current = isRecording;
+							}}
+						/>
+					)}
 
-							// Group shortcuts by category
-							const generalShortcuts = filteredShortcuts.filter((sc) => !sc.isTabShortcut);
-							const tabShortcutsFiltered = filteredShortcuts.filter((sc) => sc.isTabShortcut);
-
-							const renderShortcutItem = (sc: Shortcut & { isTabShortcut: boolean }) => (
-								<div
-									key={sc.id}
-									className="flex items-center justify-between p-3 rounded border"
-									style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
-								>
-									<span className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-										{sc.label}
-									</span>
-									<button
-										onClick={(e) => {
-											setRecordingId(sc.id);
-											e.currentTarget.focus();
-										}}
-										onKeyDownCapture={(e) => {
-											if (recordingId === sc.id) {
-												e.preventDefault();
-												e.stopPropagation();
-												handleRecord(e, sc.id, sc.isTabShortcut);
-											}
-										}}
-										className={`px-3 py-1.5 rounded border text-xs font-mono min-w-[80px] text-center transition-colors ${recordingId === sc.id ? 'ring-2' : ''}`}
-										style={
-											{
-												borderColor:
-													recordingId === sc.id ? theme.colors.accent : theme.colors.border,
-												backgroundColor:
-													recordingId === sc.id ? theme.colors.accentDim : theme.colors.bgActivity,
-												color: recordingId === sc.id ? theme.colors.accent : theme.colors.textDim,
-												'--tw-ring-color': theme.colors.accent,
-											} as React.CSSProperties
-										}
-									>
-										{recordingId === sc.id ? 'Press keys...' : formatShortcutKeys(sc.keys)}
-									</button>
-								</div>
-							);
-
-							return (
-								<div className="flex flex-col" style={{ minHeight: '450px' }}>
-									{props.hasNoAgents && (
-										<p
-											className="text-xs mb-3 px-2 py-1.5 rounded"
-											style={{
-												backgroundColor: theme.colors.accent + '20',
-												color: theme.colors.accent,
-											}}
-										>
-											Note: Most functionality is unavailable until you've created your first agent.
-										</p>
-									)}
-									<div className="flex items-center gap-2 mb-3">
-										<input
-											ref={shortcutsFilterRef}
-											type="text"
-											value={shortcutsFilter}
-											onChange={(e) => setShortcutsFilter(e.target.value)}
-											placeholder="Filter shortcuts..."
-											className="flex-1 px-3 py-2 rounded border bg-transparent outline-none text-sm"
-											style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
-										/>
-										<span
-											className="text-xs px-2 py-1.5 rounded font-medium"
-											style={{
-												backgroundColor: theme.colors.bgActivity,
-												color: theme.colors.textDim,
-											}}
-										>
-											{shortcutsFilter ? `${filteredCount} / ${totalShortcuts}` : totalShortcuts}
-										</span>
-									</div>
-									<p className="text-xs opacity-50 mb-3" style={{ color: theme.colors.textDim }}>
-										Not all shortcuts can be modified. Press{' '}
-										<kbd
-											className="px-1.5 py-0.5 rounded font-mono"
-											style={{ backgroundColor: theme.colors.bgActivity }}
-										>
-											{formatShortcutKeys(['Meta', '/'])}
-										</kbd>{' '}
-										from the main interface to view the full list of keyboard shortcuts.
-									</p>
-									<div className="space-y-4 flex-1 overflow-y-auto pr-2 scrollbar-thin">
-										{/* General Shortcuts Section */}
-										{generalShortcuts.length > 0 && (
-											<div>
-												<h3
-													className="text-xs font-bold uppercase mb-2 px-1"
-													style={{ color: theme.colors.textDim }}
-												>
-													General
-												</h3>
-												<div className="space-y-2">{generalShortcuts.map(renderShortcutItem)}</div>
-											</div>
-										)}
-
-										{/* AI Tab Shortcuts Section */}
-										{tabShortcutsFiltered.length > 0 && (
-											<div>
-												<h3
-													className="text-xs font-bold uppercase mb-2 px-1"
-													style={{ color: theme.colors.textDim }}
-												>
-													AI Tab
-												</h3>
-												<div className="space-y-2">
-													{tabShortcutsFiltered.map(renderShortcutItem)}
-												</div>
-											</div>
-										)}
-									</div>
-								</div>
-							);
-						})()}
-
-					{activeTab === 'theme' && themePickerContent}
+					{activeTab === 'theme' && (
+						<ThemeTab
+							theme={theme}
+							themes={themes}
+							onThemeImportError={onThemeImportError}
+							onThemeImportSuccess={onThemeImportSuccess}
+						/>
+					)}
 
 					{activeTab === 'notifications' && (
 						<NotificationsPanel
-							osNotificationsEnabled={props.osNotificationsEnabled}
-							setOsNotificationsEnabled={props.setOsNotificationsEnabled}
-							audioFeedbackEnabled={props.audioFeedbackEnabled}
-							setAudioFeedbackEnabled={props.setAudioFeedbackEnabled}
-							audioFeedbackCommand={props.audioFeedbackCommand}
-							setAudioFeedbackCommand={props.setAudioFeedbackCommand}
-							toastDuration={props.toastDuration}
-							setToastDuration={props.setToastDuration}
+							osNotificationsEnabled={osNotificationsEnabled}
+							setOsNotificationsEnabled={setOsNotificationsEnabled}
+							audioFeedbackEnabled={audioFeedbackEnabled}
+							setAudioFeedbackEnabled={setAudioFeedbackEnabled}
+							audioFeedbackCommand={audioFeedbackCommand}
+							setAudioFeedbackCommand={setAudioFeedbackCommand}
+							toastDuration={toastDuration}
+							setToastDuration={setToastDuration}
 							theme={theme}
 						/>
 					)}
@@ -2993,8 +575,8 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 						<div className="space-y-8">
 							<AICommandsPanel
 								theme={theme}
-								customAICommands={props.customAICommands}
-								setCustomAICommands={props.setCustomAICommands}
+								customAICommands={customAICommands}
+								setCustomAICommands={setCustomAICommands}
 							/>
 
 							{/* Divider */}
@@ -3025,428 +607,15 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					)}
 
 					{activeTab === 'memory' && (
-						<div className="space-y-6">
-							<MemorySettings
-								theme={theme}
-								projectPath={memoryProjectPath}
-								onHierarchyChange={memoryHierarchy.refresh}
-								hierarchyRoleCount={memoryHierarchy.roles.length}
-								activeAgentId={props.activeAgentId}
-								activeAgentType={props.activeAgentType}
-							/>
-							<MemoryBrowserPanel
-								theme={theme}
-								projectPath={memoryProjectPath}
-								hierarchy={memoryHierarchy}
-							/>
-						</div>
+						<MemoryTab
+							theme={theme}
+							activeProjectPath={props.activeProjectPath}
+							activeAgentId={props.activeAgentId}
+							activeAgentType={props.activeAgentType}
+						/>
 					)}
 
-					{activeTab === 'encore' && (
-						<div className="space-y-6">
-							{/* Encore Features Header */}
-							<div>
-								<h3 className="text-sm font-bold mb-2" style={{ color: theme.colors.textMain }}>
-									Encore Features
-								</h3>
-								<p className="text-xs" style={{ color: theme.colors.textDim }}>
-									Optional features that extend Maestro's capabilities. Enable the ones you want.
-									Disabled features are completely hidden from shortcuts, menus, and the command
-									palette. Contributors building new features should consider gating them here to
-									keep the core experience focused.
-								</p>
-							</div>
-
-							{/* Director's Notes Feature Section */}
-							<div
-								className="rounded-lg border"
-								style={{
-									borderColor: encoreFeatures.directorNotes
-										? theme.colors.accent
-										: theme.colors.border,
-									backgroundColor: encoreFeatures.directorNotes
-										? `${theme.colors.accent}08`
-										: 'transparent',
-								}}
-							>
-								{/* Feature Toggle Header */}
-								<button
-									className="w-full flex items-center justify-between p-4 text-left"
-									onClick={() =>
-										setEncoreFeatures({
-											...encoreFeatures,
-											directorNotes: !encoreFeatures.directorNotes,
-										})
-									}
-								>
-									<div className="flex items-center gap-3">
-										<Clapperboard
-											className="w-5 h-5"
-											style={{
-												color: encoreFeatures.directorNotes
-													? theme.colors.accent
-													: theme.colors.textDim,
-											}}
-										/>
-										<div>
-											<div className="text-sm font-bold" style={{ color: theme.colors.textMain }}>
-												Director's Notes
-											</div>
-											<div className="text-xs mt-0.5" style={{ color: theme.colors.textDim }}>
-												Unified history view and AI-generated synopsis across all sessions
-											</div>
-										</div>
-									</div>
-									<div
-										className={`relative w-10 h-5 rounded-full transition-colors ${encoreFeatures.directorNotes ? '' : 'opacity-50'}`}
-										style={{
-											backgroundColor: encoreFeatures.directorNotes
-												? theme.colors.accent
-												: theme.colors.border,
-										}}
-									>
-										<div
-											className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform"
-											style={{
-												transform: encoreFeatures.directorNotes
-													? 'translateX(22px)'
-													: 'translateX(2px)',
-											}}
-										/>
-									</div>
-								</button>
-
-								{/* Director's Notes Settings (shown when enabled) */}
-								{encoreFeatures.directorNotes &&
-									(() => {
-										const dnAvailableTiles = AGENT_TILES.filter((tile) => {
-											if (!tile.supported) return false;
-											return dnDetectedAgents.some((a: AgentConfig) => a.id === tile.id);
-										});
-										const dnSelectedAgentConfig = dnDetectedAgents.find(
-											(a) => a.id === directorNotesSettings.provider
-										);
-										const dnSelectedTile = AGENT_TILES.find(
-											(t) => t.id === directorNotesSettings.provider
-										);
-										const dnHasCustomization =
-											dnCustomPath || dnCustomArgs || Object.keys(dnCustomEnvVars).length > 0;
-
-										const handleDnAgentChange = (agentId: ToolType) => {
-											setDirectorNotesSettings({
-												...directorNotesSettings,
-												provider: agentId,
-												customPath: undefined,
-												customArgs: undefined,
-												customEnvVars: undefined,
-											});
-											setDnCustomPath('');
-											setDnCustomArgs('');
-											setDnCustomEnvVars({});
-											setDnAgentConfig({});
-											dnAgentConfigRef.current = {};
-											if (dnIsConfigExpanded) {
-												window.maestro.agents.getConfig(agentId).then((config) => {
-													setDnAgentConfig(config || {});
-													dnAgentConfigRef.current = config || {};
-												});
-												const agent = dnDetectedAgents.find((a) => a.id === agentId);
-												if (agent?.capabilities?.supportsModelSelection) {
-													setDnLoadingModels(true);
-													window.maestro.agents
-														.getModels(agentId)
-														.then((models) => {
-															setDnAvailableModels(models);
-														})
-														.catch(() => {})
-														.finally(() => setDnLoadingModels(false));
-												}
-											}
-										};
-
-										const handleDnRefreshAgent = async () => {
-											setDnRefreshingAgent(true);
-											try {
-												const agents = await window.maestro.agents.detect();
-												const available = agents.filter(
-													(a: AgentConfig) => a.available && !a.hidden
-												);
-												setDnDetectedAgents(available);
-											} finally {
-												setDnRefreshingAgent(false);
-											}
-										};
-
-										const handleDnRefreshModels = async () => {
-											if (!directorNotesSettings.provider) return;
-											setDnLoadingModels(true);
-											try {
-												const models = await window.maestro.agents.getModels(
-													directorNotesSettings.provider,
-													true
-												);
-												setDnAvailableModels(models);
-											} catch (err) {
-												console.error('Failed to refresh models:', err);
-											} finally {
-												setDnLoadingModels(false);
-											}
-										};
-
-										const persistDnCustomConfig = () => {
-											setDirectorNotesSettings({
-												...directorNotesSettings,
-												customPath: dnCustomPath || undefined,
-												customArgs: dnCustomArgs || undefined,
-												customEnvVars:
-													Object.keys(dnCustomEnvVars).length > 0 ? dnCustomEnvVars : undefined,
-											});
-										};
-
-										return (
-											<div
-												className="px-4 pb-4 space-y-6 border-t"
-												style={{ borderColor: theme.colors.border }}
-											>
-												{/* Provider Selection */}
-												<div className="pt-4">
-													<label
-														className="block text-xs font-bold opacity-70 uppercase mb-2"
-														style={{ color: theme.colors.textMain }}
-													>
-														Synopsis Provider
-													</label>
-
-													{dnIsDetecting ? (
-														<div className="flex items-center gap-2 py-2">
-															<div
-																className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin"
-																style={{
-																	borderColor: theme.colors.accent,
-																	borderTopColor: 'transparent',
-																}}
-															/>
-															<span className="text-sm" style={{ color: theme.colors.textDim }}>
-																Detecting agents...
-															</span>
-														</div>
-													) : dnAvailableTiles.length === 0 ? (
-														<div className="text-sm py-2" style={{ color: theme.colors.textDim }}>
-															No agents available. Please install Claude Code, OpenCode, Codex, or
-															Factory Droid.
-														</div>
-													) : (
-														<div className="flex items-center gap-2">
-															<div className="relative flex-1">
-																<select
-																	value={directorNotesSettings.provider}
-																	onChange={(e) => handleDnAgentChange(e.target.value as ToolType)}
-																	className="w-full px-3 py-2 pr-10 rounded-lg border outline-none appearance-none cursor-pointer text-sm"
-																	style={{
-																		backgroundColor: theme.colors.bgMain,
-																		borderColor: theme.colors.border,
-																		color: theme.colors.textMain,
-																	}}
-																	aria-label="Select synopsis provider agent"
-																>
-																	{dnAvailableTiles.map((tile) => {
-																		const isBeta =
-																			tile.id === 'codex' ||
-																			tile.id === 'opencode' ||
-																			tile.id === 'factory-droid';
-																		return (
-																			<option key={tile.id} value={tile.id}>
-																				{tile.name}
-																				{isBeta ? ' (Beta)' : ''}
-																			</option>
-																		);
-																	})}
-																</select>
-																<ChevronDown
-																	className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"
-																	style={{ color: theme.colors.textDim }}
-																/>
-															</div>
-
-															<button
-																onClick={() => setDnIsConfigExpanded((prev) => !prev)}
-																className="flex items-center gap-1.5 px-3 py-2 rounded-lg border transition-colors hover:bg-white/5"
-																style={{
-																	borderColor: dnIsConfigExpanded
-																		? theme.colors.accent
-																		: theme.colors.border,
-																	color: dnIsConfigExpanded
-																		? theme.colors.accent
-																		: theme.colors.textDim,
-																	backgroundColor: dnIsConfigExpanded
-																		? `${theme.colors.accent}10`
-																		: 'transparent',
-																}}
-																title="Customize provider settings"
-															>
-																<Settings className="w-4 h-4" />
-																<span className="text-sm">Customize</span>
-																{dnHasCustomization && (
-																	<span
-																		className="w-2 h-2 rounded-full"
-																		style={{ backgroundColor: theme.colors.accent }}
-																	/>
-																)}
-															</button>
-														</div>
-													)}
-
-													{dnIsConfigExpanded && dnSelectedAgentConfig && dnSelectedTile && (
-														<div
-															className="mt-3 p-4 rounded-lg border"
-															style={{
-																backgroundColor: theme.colors.bgActivity,
-																borderColor: theme.colors.border,
-															}}
-														>
-															<div className="flex items-center justify-between mb-3">
-																<span
-																	className="text-xs font-medium"
-																	style={{ color: theme.colors.textDim }}
-																>
-																	{dnSelectedTile.name} Configuration
-																</span>
-																{dnHasCustomization && (
-																	<div className="flex items-center gap-1">
-																		<Check
-																			className="w-3 h-3"
-																			style={{ color: theme.colors.success }}
-																		/>
-																		<span
-																			className="text-xs"
-																			style={{ color: theme.colors.success }}
-																		>
-																			Customized
-																		</span>
-																	</div>
-																)}
-															</div>
-															<AgentConfigPanel
-																theme={theme}
-																agent={dnSelectedAgentConfig}
-																customPath={dnCustomPath}
-																onCustomPathChange={setDnCustomPath}
-																onCustomPathBlur={persistDnCustomConfig}
-																onCustomPathClear={() => {
-																	setDnCustomPath('');
-																	setDirectorNotesSettings({
-																		...directorNotesSettings,
-																		customPath: undefined,
-																	});
-																}}
-																customArgs={dnCustomArgs}
-																onCustomArgsChange={setDnCustomArgs}
-																onCustomArgsBlur={persistDnCustomConfig}
-																onCustomArgsClear={() => {
-																	setDnCustomArgs('');
-																	setDirectorNotesSettings({
-																		...directorNotesSettings,
-																		customArgs: undefined,
-																	});
-																}}
-																customEnvVars={dnCustomEnvVars}
-																onEnvVarKeyChange={(oldKey, newKey, value) => {
-																	const newVars = { ...dnCustomEnvVars };
-																	delete newVars[oldKey];
-																	newVars[newKey] = value;
-																	setDnCustomEnvVars(newVars);
-																}}
-																onEnvVarValueChange={(key, value) => {
-																	setDnCustomEnvVars({ ...dnCustomEnvVars, [key]: value });
-																}}
-																onEnvVarRemove={(key) => {
-																	const newVars = { ...dnCustomEnvVars };
-																	delete newVars[key];
-																	setDnCustomEnvVars(newVars);
-																}}
-																onEnvVarAdd={() => {
-																	let newKey = 'NEW_VAR';
-																	let counter = 1;
-																	while (dnCustomEnvVars[newKey]) {
-																		newKey = `NEW_VAR_${counter}`;
-																		counter++;
-																	}
-																	setDnCustomEnvVars({ ...dnCustomEnvVars, [newKey]: '' });
-																}}
-																onEnvVarsBlur={persistDnCustomConfig}
-																agentConfig={dnAgentConfig}
-																onConfigChange={(key, value) => {
-																	const newConfig = { ...dnAgentConfig, [key]: value };
-																	setDnAgentConfig(newConfig);
-																	dnAgentConfigRef.current = newConfig;
-																}}
-																onConfigBlur={async () => {
-																	if (directorNotesSettings.provider) {
-																		await window.maestro.agents.setConfig(
-																			directorNotesSettings.provider,
-																			dnAgentConfigRef.current
-																		);
-																	}
-																}}
-																availableModels={dnAvailableModels}
-																loadingModels={dnLoadingModels}
-																onRefreshModels={handleDnRefreshModels}
-																onRefreshAgent={handleDnRefreshAgent}
-																refreshingAgent={dnRefreshingAgent}
-																compact
-																showBuiltInEnvVars
-															/>
-														</div>
-													)}
-
-													<p className="text-xs mt-2" style={{ color: theme.colors.textDim }}>
-														The AI agent used to generate synopsis summaries
-													</p>
-												</div>
-
-												{/* Default Lookback Period */}
-												<div>
-													<label
-														className="block text-xs font-bold mb-2"
-														style={{ color: theme.colors.textMain }}
-													>
-														Default Lookback Period: {directorNotesSettings.defaultLookbackDays}{' '}
-														days
-													</label>
-													<input
-														type="range"
-														min={1}
-														max={90}
-														value={directorNotesSettings.defaultLookbackDays}
-														onChange={(e) =>
-															setDirectorNotesSettings({
-																...directorNotesSettings,
-																defaultLookbackDays: parseInt(e.target.value, 10),
-															})
-														}
-														className="w-full"
-													/>
-													<div
-														className="flex justify-between text-[10px] mt-1"
-														style={{ color: theme.colors.textDim }}
-													>
-														<span>1 day</span>
-														<span>7</span>
-														<span>14</span>
-														<span>30</span>
-														<span>60</span>
-														<span>90 days</span>
-													</div>
-													<p className="text-xs mt-2" style={{ color: theme.colors.textDim }}>
-														How far back to look when generating notes (can be adjusted per-report)
-													</p>
-												</div>
-											</div>
-										);
-									})()}
-							</div>
-						</div>
-					)}
+					{activeTab === 'encore' && <EncoreTab theme={theme} isOpen={isOpen} />}
 				</div>
 			</div>
 		</div>

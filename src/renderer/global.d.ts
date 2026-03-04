@@ -155,6 +155,48 @@ interface SessionMessagesResult {
 	hasMore: boolean;
 }
 
+/** Shared return shape for group chat methods (mirrors GroupChat from shared/group-chat-types.ts) */
+type GroupChatData = {
+	id: string;
+	name: string;
+	createdAt: number;
+	updatedAt?: number;
+	moderatorAgentId: string;
+	moderatorSessionId: string;
+	moderatorAgentSessionId?: string;
+	moderatorConfig?: {
+		customPath?: string;
+		customArgs?: string;
+		customEnvVars?: Record<string, string>;
+		customModel?: string;
+		sshRemoteConfig?: {
+			enabled: boolean;
+			remoteId: string | null;
+			workingDirOverride?: string;
+		};
+	};
+	participants: Array<{
+		name: string;
+		agentId: string;
+		sessionId: string;
+		agentSessionId?: string;
+		addedAt: number;
+		lastActivity?: number;
+		lastSummary?: string;
+		contextUsage?: number;
+		color?: string;
+		tokenCount?: number;
+		messageCount?: number;
+		processingTimeMs?: number;
+		totalCost?: number;
+		sshRemoteName?: string;
+	}>;
+	logPath: string;
+	imagesDir: string;
+	draftMessage?: string;
+	archived?: boolean;
+};
+
 interface MaestroAPI {
 	// Context merging API (for session context transfer and grooming)
 	context: {
@@ -260,6 +302,13 @@ interface MaestroAPI {
 		onRemoteRenameTab: (
 			callback: (sessionId: string, tabId: string, newName: string) => void
 		) => () => void;
+		onRemoteStarTab: (
+			callback: (sessionId: string, tabId: string, starred: boolean) => void
+		) => () => void;
+		onRemoteReorderTab: (
+			callback: (sessionId: string, fromIndex: number, toIndex: number) => void
+		) => () => void;
+		onRemoteToggleBookmark: (callback: (sessionId: string) => void) => () => void;
 		onStderr: (callback: (sessionId: string, data: string) => void) => () => void;
 		onCommandExit: (callback: (sessionId: string, code: number) => void) => () => void;
 		onUsage: (callback: (sessionId: string, usageStats: UsageStats) => void) => () => void;
@@ -563,7 +612,7 @@ interface MaestroAPI {
 	fs: {
 		homeDir: () => Promise<string>;
 		readDir: (dirPath: string, sshRemoteId?: string) => Promise<DirectoryEntry[]>;
-		readFile: (filePath: string, sshRemoteId?: string) => Promise<string>;
+		readFile: (filePath: string, sshRemoteId?: string) => Promise<string | null>;
 		writeFile: (
 			filePath: string,
 			content: string,
@@ -873,6 +922,7 @@ interface MaestroAPI {
 	};
 	shell: {
 		openExternal: (url: string) => Promise<void>;
+		openPath: (itemPath: string) => Promise<void>;
 		trashItem: (itemPath: string) => Promise<void>;
 		showItemInFolder: (itemPath: string) => Promise<void>;
 	};
@@ -986,6 +1036,7 @@ interface MaestroAPI {
 		cancelQuit: () => void;
 		onSystemResume: (callback: () => void) => () => void;
 	};
+	platform: string;
 	logger: {
 		log: (
 			level: 'debug' | 'info' | 'warn' | 'error' | 'toast' | 'autorun',
@@ -1638,6 +1689,7 @@ interface MaestroAPI {
 	};
 	// Group Chat API (multi-agent coordination)
 	groupChat: {
+		// Shared return shape for group chat methods (mirrors GroupChat from shared/group-chat-types.ts)
 		// Storage
 		create: (
 			name: string,
@@ -1647,72 +1699,11 @@ interface MaestroAPI {
 				customArgs?: string;
 				customEnvVars?: Record<string, string>;
 			}
-		) => Promise<{
-			id: string;
-			name: string;
-			moderatorAgentId: string;
-			moderatorSessionId: string;
-			participants: Array<{
-				name: string;
-				agentId: string;
-				sessionId: string;
-				addedAt: number;
-			}>;
-			logPath: string;
-			imagesDir: string;
-			createdAt: number;
-		}>;
-		list: () => Promise<
-			Array<{
-				id: string;
-				name: string;
-				moderatorAgentId: string;
-				moderatorSessionId: string;
-				participants: Array<{
-					name: string;
-					agentId: string;
-					sessionId: string;
-					addedAt: number;
-				}>;
-				logPath: string;
-				imagesDir: string;
-				createdAt: number;
-			}>
-		>;
-		load: (id: string) => Promise<{
-			id: string;
-			name: string;
-			moderatorAgentId: string;
-			moderatorSessionId: string;
-			participants: Array<{
-				name: string;
-				agentId: string;
-				sessionId: string;
-				addedAt: number;
-			}>;
-			logPath: string;
-			imagesDir: string;
-			createdAt: number;
-		} | null>;
+		) => Promise<GroupChatData>;
+		list: () => Promise<Array<GroupChatData>>;
+		load: (id: string) => Promise<GroupChatData | null>;
 		delete: (id: string) => Promise<boolean>;
-		rename: (
-			id: string,
-			name: string
-		) => Promise<{
-			id: string;
-			name: string;
-			moderatorAgentId: string;
-			moderatorSessionId: string;
-			participants: Array<{
-				name: string;
-				agentId: string;
-				sessionId: string;
-				addedAt: number;
-			}>;
-			logPath: string;
-			imagesDir: string;
-			createdAt: number;
-		}>;
+		rename: (id: string, name: string) => Promise<GroupChatData>;
 		update: (
 			id: string,
 			updates: {
@@ -1724,21 +1715,8 @@ interface MaestroAPI {
 					customEnvVars?: Record<string, string>;
 				};
 			}
-		) => Promise<{
-			id: string;
-			name: string;
-			moderatorAgentId: string;
-			moderatorSessionId: string;
-			participants: Array<{
-				name: string;
-				agentId: string;
-				sessionId: string;
-				addedAt: number;
-			}>;
-			logPath: string;
-			imagesDir: string;
-			createdAt: number;
-		}>;
+		) => Promise<GroupChatData>;
+		archive: (id: string, archived: boolean) => Promise<GroupChatData>;
 		// Chat log
 		appendMessage: (id: string, from: string, content: string) => Promise<void>;
 		getMessages: (id: string) => Promise<
@@ -2350,6 +2328,16 @@ interface MaestroAPI {
 			cacheAge?: number;
 			error?: string;
 		}>;
+		getIssueCounts: (
+			repoSlugs: string[],
+			forceRefresh?: boolean
+		) => Promise<{
+			success: boolean;
+			counts?: Record<string, number>;
+			fromCache?: boolean;
+			cacheAge?: number;
+			error?: string;
+		}>;
 		// State operations
 		getState: () => Promise<{
 			success: boolean;
@@ -2548,7 +2536,18 @@ interface MaestroAPI {
 			draftPrNumber?: number;
 			draftPrUrl?: string;
 		}) => Promise<{ success: boolean; updated?: boolean; error?: string }>;
-		complete: (params: { contributionId: string; prBody?: string }) => Promise<{
+		complete: (params: {
+			contributionId: string;
+			prBody?: string;
+			stats?: {
+				inputTokens: number;
+				outputTokens: number;
+				estimatedCost: number;
+				timeSpentMs: number;
+				documentsProcessed: number;
+				tasksCompleted: number;
+			};
+		}) => Promise<{
 			success: boolean;
 			prUrl?: string;
 			prNumber?: number;

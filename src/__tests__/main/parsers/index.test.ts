@@ -156,12 +156,12 @@ describe('parsers/index', () => {
 			initializeOutputParsers();
 
 			const parser = getOutputParser('opencode');
-			// OpenCode step_finish format uses part.reason to determine result vs system
+			// step_finish always emits 'system' (usage stats only); result text comes from 'text' events
 			const event = parser?.parseJsonLine(
 				JSON.stringify({ type: 'step_finish', sessionID: 'oc-123', part: { reason: 'stop' } })
 			);
 
-			expect(event?.type).toBe('result');
+			expect(event?.type).toBe('system');
 			expect(event?.sessionId).toBe('oc-123');
 		});
 

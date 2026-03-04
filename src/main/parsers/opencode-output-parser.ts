@@ -154,13 +154,15 @@ export class OpenCodeOutputParser implements AgentOutputParser {
 			};
 		}
 
-		// Handle text messages (streaming content)
+		// Handle text messages (final response content)
+		// OpenCode sends text as a single complete event (not streamed chunks) —
+		// time.start === time.end in practice. Emitting as 'result' ensures it flows
+		// through the result path and does NOT appear as thinking-stream content.
 		if (msg.type === 'text') {
 			return {
-				type: 'text',
+				type: 'result',
 				text: msg.part?.text || '',
 				sessionId: msg.sessionID,
-				isPartial: true,
 				raw: msg,
 			};
 		}
@@ -179,13 +181,11 @@ export class OpenCodeOutputParser implements AgentOutputParser {
 
 		// Handle step_finish messages (step completion with token stats)
 		// part.reason indicates: "stop" (final), "tool-calls" (more work), "error"
+		// NOTE: The actual response text arrives in a 'text' event (type: 'result') BEFORE
+		// step_finish. step_finish is used only for usage stats, not for result emission.
 		if (msg.type === 'step_finish') {
-			// Only mark as "result" if reason is "stop" (final response)
-			// "tool-calls" means more work is coming, so treat as system event
-			const isFinalResult = msg.part?.reason === 'stop';
-
 			const event: ParsedEvent = {
-				type: isFinalResult ? 'result' : 'system',
+				type: 'system',
 				sessionId: msg.sessionID,
 				raw: msg,
 			};

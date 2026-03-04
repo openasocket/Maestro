@@ -384,6 +384,13 @@ export interface SymphonyCache {
 		data: Record<string, number>;
 		fetchedAt: number;
 	};
+	/** Cached issue counts by repo slug (from Search API) */
+	issueCounts?: {
+		data: Record<string, number>;
+		fetchedAt: number;
+		/** Slugs the cache was fetched for (cache invalidates on slug mismatch) */
+		repoSlugs: string[];
+	};
 }
 
 // ============================================================================
@@ -398,6 +405,12 @@ export interface GetRegistryResponse {
 
 export interface GetIssuesResponse {
 	issues: SymphonyIssue[];
+	fromCache: boolean;
+	cacheAge?: number;
+}
+
+export interface GetIssueCountsResponse {
+	counts: Record<string, number>;
 	fromCache: boolean;
 	cacheAge?: number;
 }

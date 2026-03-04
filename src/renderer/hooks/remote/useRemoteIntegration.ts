@@ -107,7 +107,17 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 				// If web provided an inputMode, sync the session state before executing
 				// This ensures the renderer uses the same mode the web intended
 				if (inputMode && targetSession.inputMode !== inputMode) {
-					setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, inputMode } : s)));
+					setSessions((prev) =>
+						prev.map((s) =>
+							s.id === sessionId
+								? {
+										...s,
+										inputMode,
+										...(inputMode === 'terminal' && { activeFileTabId: null }),
+									}
+								: s
+						)
+					);
 				}
 
 				// Switch to the target session (for visual feedback)
@@ -155,7 +165,13 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 
 					return prev.map((s) => {
 						if (s.id !== sessionId) return s;
-						return { ...s, inputMode: mode };
+						// Clear activeFileTabId when switching to terminal mode to prevent
+						// orphaned file preview without tab bar
+						return {
+							...s,
+							inputMode: mode,
+							...(mode === 'terminal' && { activeFileTabId: null }),
+						};
 					});
 				});
 			}
@@ -349,12 +365,73 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 			}
 		);
 
+		// Handle remote star tab from web interface
+		const unsubscribeStarTab = window.maestro.process.onRemoteStarTab(
+			(sessionId: string, tabId: string, starred: boolean) => {
+				setSessions((prev) =>
+					prev.map((s) => {
+						if (s.id !== sessionId) return s;
+
+						const tab = s.aiTabs.find((t) => t.id === tabId);
+						if (!tab?.agentSessionId) return s;
+
+						// Persist starred state (same logic as desktop handleTabStar)
+						const agentId = s.toolType || 'claude-code';
+						if (agentId === 'claude-code') {
+							window.maestro.claude
+								.updateSessionStarred(s.projectRoot, tab.agentSessionId, starred)
+								.catch((err) => console.error('Failed to persist tab starred:', err));
+						} else {
+							window.maestro.agentSessions
+								.setSessionStarred(agentId, s.projectRoot, tab.agentSessionId, starred)
+								.catch((err) => console.error('Failed to persist tab starred:', err));
+						}
+
+						return {
+							...s,
+							aiTabs: s.aiTabs.map((t) => (t.id === tabId ? { ...t, starred } : t)),
+						};
+					})
+				);
+			}
+		);
+
+		// Handle remote reorder tab from web interface
+		const unsubscribeReorderTab = window.maestro.process.onRemoteReorderTab(
+			(sessionId: string, fromIndex: number, toIndex: number) => {
+				setSessions((prev) =>
+					prev.map((s) => {
+						if (s.id !== sessionId || !s.aiTabs) return s;
+						const tabs = [...s.aiTabs];
+						const [movedTab] = tabs.splice(fromIndex, 1);
+						tabs.splice(toIndex, 0, movedTab);
+						return { ...s, aiTabs: tabs };
+					})
+				);
+			}
+		);
+
+		// Handle remote bookmark toggle from web interface
+		const unsubscribeToggleBookmark = window.maestro.process.onRemoteToggleBookmark(
+			(sessionId: string) => {
+				setSessions((prev) =>
+					prev.map((s) => {
+						if (s.id !== sessionId) return s;
+						return { ...s, bookmarked: !s.bookmarked };
+					})
+				);
+			}
+		);
+
 		return () => {
 			unsubscribeSelectSession();
 			unsubscribeSelectTab();
 			unsubscribeNewTab();
 			unsubscribeCloseTab();
 			unsubscribeRenameTab();
+			unsubscribeStarTab();
+			unsubscribeReorderTab();
+			unsubscribeToggleBookmark();
 		};
 	}, [sessionsRef, activeSessionIdRef, setSessions, setActiveSessionId, defaultSaveToHistory]);
 

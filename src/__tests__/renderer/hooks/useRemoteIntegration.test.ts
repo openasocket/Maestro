@@ -66,6 +66,13 @@ describe('useRemoteIntegration', () => {
 	let onRemoteRenameTabHandler:
 		| ((sessionId: string, tabId: string, newName: string) => void)
 		| undefined;
+	let onRemoteStarTabHandler:
+		| ((sessionId: string, tabId: string, starred: boolean) => void)
+		| undefined;
+	let onRemoteReorderTabHandler:
+		| ((sessionId: string, fromIndex: number, toIndex: number) => void)
+		| undefined;
+	let onRemoteToggleBookmarkHandler: ((sessionId: string) => void) | undefined;
 
 	const mockProcess = {
 		...window.maestro.process,
@@ -102,6 +109,18 @@ describe('useRemoteIntegration', () => {
 			onRemoteRenameTabHandler = handler;
 			return () => {};
 		}),
+		onRemoteStarTab: vi.fn().mockImplementation((handler) => {
+			onRemoteStarTabHandler = handler;
+			return () => {};
+		}),
+		onRemoteReorderTab: vi.fn().mockImplementation((handler) => {
+			onRemoteReorderTabHandler = handler;
+			return () => {};
+		}),
+		onRemoteToggleBookmark: vi.fn().mockImplementation((handler) => {
+			onRemoteToggleBookmarkHandler = handler;
+			return () => {};
+		}),
 		sendRemoteNewTabResponse: vi.fn(),
 	};
 
@@ -113,6 +132,7 @@ describe('useRemoteIntegration', () => {
 	const mockWeb = {
 		...window.maestro.web,
 		broadcastTabsChange: vi.fn(),
+		broadcastSessionState: vi.fn(),
 	};
 
 	const mockClaude = {
@@ -141,6 +161,9 @@ describe('useRemoteIntegration', () => {
 		onRemoteNewTabHandler = undefined;
 		onRemoteCloseTabHandler = undefined;
 		onRemoteRenameTabHandler = undefined;
+		onRemoteStarTabHandler = undefined;
+		onRemoteReorderTabHandler = undefined;
+		onRemoteToggleBookmarkHandler = undefined;
 
 		window.maestro = {
 			...originalMaestro,
@@ -183,6 +206,7 @@ describe('useRemoteIntegration', () => {
 			setSessions,
 			setActiveSessionId,
 			defaultSaveToHistory: true,
+			defaultShowThinking: 'off' as const,
 		};
 	};
 
@@ -272,6 +296,27 @@ describe('useRemoteIntegration', () => {
 
 			expect(deps.setSessions).toHaveBeenCalled();
 		});
+
+		it('clears activeFileTabId when remote command syncs to terminal mode', () => {
+			const session = createMockSession({
+				id: 'session-1',
+				state: 'idle',
+				inputMode: 'ai',
+				activeFileTabId: 'file-tab-1',
+			});
+			const deps = createDeps({ sessions: [session] });
+
+			renderHook(() => useRemoteIntegration(deps));
+
+			act(() => {
+				onRemoteCommandHandler?.('session-1', 'ls -la', 'terminal');
+			});
+
+			const updater = deps.setSessions.mock.calls[0][0];
+			const result = typeof updater === 'function' ? updater([session]) : updater;
+			expect(result[0].inputMode).toBe('terminal');
+			expect(result[0].activeFileTabId).toBeNull();
+		});
 	});
 
 	describe('remote mode switching', () => {
@@ -318,6 +363,46 @@ describe('useRemoteIntegration', () => {
 			const updater = deps.setSessions.mock.calls[0][0];
 			const result = typeof updater === 'function' ? updater([session]) : updater;
 			expect(result).toEqual([session]);
+		});
+
+		it('clears activeFileTabId when switching to terminal mode', () => {
+			const session = createMockSession({
+				id: 'session-1',
+				inputMode: 'ai',
+				activeFileTabId: 'file-tab-1',
+			});
+			const deps = createDeps({ sessions: [session] });
+
+			renderHook(() => useRemoteIntegration(deps));
+
+			act(() => {
+				onRemoteSwitchModeHandler?.('session-1', 'terminal');
+			});
+
+			const updater = deps.setSessions.mock.calls[0][0];
+			const result = typeof updater === 'function' ? updater([session]) : updater;
+			expect(result[0].inputMode).toBe('terminal');
+			expect(result[0].activeFileTabId).toBeNull();
+		});
+
+		it('preserves activeFileTabId when switching to ai mode', () => {
+			const session = createMockSession({
+				id: 'session-1',
+				inputMode: 'terminal',
+				activeFileTabId: 'file-tab-1',
+			});
+			const deps = createDeps({ sessions: [session] });
+
+			renderHook(() => useRemoteIntegration(deps));
+
+			act(() => {
+				onRemoteSwitchModeHandler?.('session-1', 'ai');
+			});
+
+			const updater = deps.setSessions.mock.calls[0][0];
+			const result = typeof updater === 'function' ? updater([session]) : updater;
+			expect(result[0].inputMode).toBe('ai');
+			expect(result[0].activeFileTabId).toBe('file-tab-1');
 		});
 	});
 

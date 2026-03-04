@@ -172,6 +172,9 @@ contextBridge.exposeInMainWorld('maestro', {
 	// App lifecycle API
 	app: createAppApi(),
 
+	// Synchronous platform string — process.platform never changes at runtime
+	platform: process.platform,
+
 	// Stats API
 	stats: createStatsApi(),
 

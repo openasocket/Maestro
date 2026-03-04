@@ -199,7 +199,7 @@ export function useAppHandlers(deps: UseAppHandlersDeps): UseAppHandlersReturn {
 					useModalStore.getState().openModal('confirm', {
 						message: `Open "${node.name}" in external application?`,
 						onConfirm: async () => {
-							await window.maestro.shell.openExternal(`file://${fullPath}`);
+							await window.maestro.shell.openPath(fullPath);
 						},
 					});
 					return;
@@ -219,6 +219,7 @@ export function useAppHandlers(deps: UseAppHandlersDeps): UseAppHandlersReturn {
 						window.maestro.fs.readFile(fullPath, sshRemoteId),
 						window.maestro.fs.stat(fullPath, sshRemoteId),
 					]);
+					if (content === null) return;
 					const lastModified = stat?.modifiedAt ? new Date(stat.modifiedAt).getTime() : Date.now();
 
 					// Open file in tab-based file preview

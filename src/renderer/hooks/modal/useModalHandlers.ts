@@ -13,17 +13,18 @@
  * directly. These will be migrated in a future cleanup pass.
  */
 
-import { useCallback, useEffect, useMemo } from 'react';
-import type { Session, LeaderboardRegistration } from '../../types';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import type { Session, LeaderboardRegistration, AgentError } from '../../types';
 import type { RecoveryAction } from '../../components/AgentErrorModal';
 import { getModalActions, useModalStore } from '../../stores/modalStore';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { useSessionStore } from '../../stores/sessionStore';
+import { useSessionStore, selectActiveSession } from '../../stores/sessionStore';
 import { useGroupChatStore } from '../../stores/groupChatStore';
 import { useAgentStore } from '../../stores/agentStore';
 import { useAgentErrorRecovery } from '../agent/useAgentErrorRecovery';
 import { getInitialRenameValue } from '../../utils/tabHelpers';
 import { CONDUCTOR_BADGES } from '../../constants/conductorBadges';
+import { gitService } from '../../services/git';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,6 +33,8 @@ import { CONDUCTOR_BADGES } from '../../constants/conductorBadges';
 export interface ModalHandlersReturn {
 	// Derived state
 	errorSession: Session | null;
+	/** The error to display — live session error or historical from chat log */
+	effectiveAgentError: AgentError | null;
 	recoveryActions: RecoveryAction[];
 
 	// Simple close handlers
@@ -72,7 +75,7 @@ export interface ModalHandlersReturn {
 
 	// Agent error handlers
 	handleCloseAgentErrorModal: () => void;
-	handleShowAgentErrorModal: () => void;
+	handleShowAgentErrorModal: (error?: AgentError) => void;
 	handleClearAgentError: (sessionId: string, tabId?: string) => void;
 	handleStartNewSessionAfterError: (sessionId: string) => void;
 	handleRetryAfterError: (sessionId: string) => void;
@@ -128,6 +131,12 @@ export interface ModalHandlersReturn {
 
 	// LogViewer shortcut handler
 	handleLogViewerShortcutUsed: (shortcutId: string) => void;
+
+	// Git diff opener (Tier 3C)
+	handleViewGitDiff: () => Promise<void>;
+
+	// Director's Notes session navigation (Tier 3C)
+	handleDirectorNotesResumeSession: (sourceSessionId: string, agentSessionId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +145,8 @@ export interface ModalHandlersReturn {
 
 const selectAgentErrorSessionId = (s: ReturnType<typeof useModalStore.getState>) =>
 	s.getData('agentError')?.sessionId ?? null;
+const selectAgentErrorHistorical = (s: ReturnType<typeof useModalStore.getState>) =>
+	s.getData('agentError')?.historicalError ?? null;
 const selectLogViewerOpen = (s: ReturnType<typeof useModalStore.getState>) => s.isOpen('logViewer');
 const selectShortcutsHelpOpen = (s: ReturnType<typeof useModalStore.getState>) =>
 	s.isOpen('shortcutsHelp');
@@ -146,10 +157,12 @@ const selectShortcutsHelpOpen = (s: ReturnType<typeof useModalStore.getState>) =
 
 export function useModalHandlers(
 	inputRef: React.RefObject<HTMLTextAreaElement | null>,
-	terminalOutputRef: React.RefObject<HTMLDivElement | null>
+	terminalOutputRef: React.RefObject<HTMLDivElement | null>,
+	handleResumeSessionRef?: React.MutableRefObject<((agentSessionId: string) => void) | null>
 ): ModalHandlersReturn {
 	// --- Reactive subscriptions (for derived state & effects) ---
 	const agentErrorModalSessionId = useModalStore(selectAgentErrorSessionId);
+	const historicalAgentError = useModalStore(selectAgentErrorHistorical);
 	const sessions = useSessionStore((s) => s.sessions);
 	const logViewerOpen = useModalStore(selectLogViewerOpen);
 	const shortcutsHelpOpen = useModalStore(selectShortcutsHelpOpen);
@@ -328,13 +341,20 @@ export function useModalHandlers(
 		getModalActions().setAgentErrorModalSessionId(null);
 	}, []);
 
-	const handleShowAgentErrorModal = useCallback(() => {
+	const handleShowAgentErrorModal = useCallback((historicalError?: AgentError) => {
 		const { sessions: currentSessions, activeSessionId } = useSessionStore.getState();
 		const currentSession = currentSessions.find((s) => s.id === activeSessionId);
 		if (!currentSession) return;
-		const activeTab = currentSession.aiTabs.find((t) => t.id === currentSession.activeTabId);
-		if (!activeTab?.agentError) return;
-		getModalActions().setAgentErrorModalSessionId(currentSession.id);
+
+		if (historicalError) {
+			// Show a historical error from a chat log entry
+			getModalActions().showHistoricalAgentError(currentSession.id, historicalError);
+		} else {
+			// Show the current live error on the active tab
+			const activeTab = currentSession.aiTabs.find((t) => t.id === currentSession.activeTabId);
+			if (!activeTab?.agentError) return;
+			getModalActions().setAgentErrorModalSessionId(currentSession.id);
+		}
 	}, []);
 
 	const handleClearAgentError = useCallback((sessionId: string, tabId?: string) => {
@@ -382,16 +402,35 @@ export function useModalHandlers(
 		[inputRef]
 	);
 
+	// Determine the effective error: historical wins when explicitly requested (user clicked Details),
+	// otherwise fall back to live session error
+	const isHistorical = !!historicalAgentError;
+	const effectiveError = isHistorical
+		? historicalAgentError
+		: (errorSession?.agentError ?? undefined);
+
 	// Use the agent error recovery hook to get recovery actions
+	// Historical errors get no recovery actions (they're read-only)
 	const { recoveryActions } = useAgentErrorRecovery({
-		error: errorSession?.agentError,
+		error: effectiveError,
 		agentId: errorSession?.toolType || 'claude-code',
 		sessionId: errorSession?.id || '',
-		onNewSession: errorSession ? () => handleStartNewSessionAfterError(errorSession.id) : undefined,
-		onRetry: errorSession ? () => handleRetryAfterError(errorSession.id) : undefined,
-		onClearError: errorSession ? () => handleClearAgentError(errorSession.id) : undefined,
-		onRestartAgent: errorSession ? () => handleRestartAgentAfterError(errorSession.id) : undefined,
-		onAuthenticate: errorSession ? () => handleAuthenticateAfterError(errorSession.id) : undefined,
+		onNewSession:
+			!isHistorical && errorSession
+				? () => handleStartNewSessionAfterError(errorSession.id)
+				: undefined,
+		onRetry:
+			!isHistorical && errorSession ? () => handleRetryAfterError(errorSession.id) : undefined,
+		onClearError:
+			!isHistorical && errorSession ? () => handleClearAgentError(errorSession.id) : undefined,
+		onRestartAgent:
+			!isHistorical && errorSession
+				? () => handleRestartAgentAfterError(errorSession.id)
+				: undefined,
+		onAuthenticate:
+			!isHistorical && errorSession
+				? () => handleAuthenticateAfterError(errorSession.id)
+				: undefined,
 	});
 
 	// ====================================================================
@@ -749,12 +788,75 @@ export function useModalHandlers(
 	}, [settingsLoaded, sessionsLoaded]);
 
 	// ====================================================================
+	// Git Diff Opener (Tier 3C)
+	// ====================================================================
+
+	const activeSession = useSessionStore(selectActiveSession);
+
+	const handleViewGitDiff = useCallback(async () => {
+		if (!activeSession || !activeSession.isGitRepo) return;
+
+		const cwd =
+			activeSession.inputMode === 'terminal'
+				? activeSession.shellCwd || activeSession.cwd
+				: activeSession.cwd;
+		const sshRemoteId =
+			activeSession.sshRemoteId ||
+			(activeSession.sessionSshRemoteConfig?.enabled
+				? activeSession.sessionSshRemoteConfig.remoteId
+				: undefined) ||
+			undefined;
+		const diff = await gitService.getDiff(cwd, undefined, sshRemoteId);
+
+		if (diff.diff) {
+			getModalActions().setGitDiffPreview(diff.diff);
+		}
+	}, [activeSession]);
+
+	// ====================================================================
+	// Director's Notes Session Navigation (Tier 3C)
+	// ====================================================================
+
+	const pendingResumeRef = useRef<{ agentSessionId: string; targetSessionId: string } | null>(null);
+
+	const handleDirectorNotesResumeSession = useCallback(
+		(sourceSessionId: string, agentSessionId: string) => {
+			// Close the Director's Notes modal
+			getModalActions().setDirectorNotesOpen(false);
+
+			// If already on the right agent, resume directly
+			if (activeSession?.id === sourceSessionId) {
+				handleResumeSessionRef?.current?.(agentSessionId);
+				return;
+			}
+
+			// Switch to the target agent and defer resume until activeSession updates
+			pendingResumeRef.current = { agentSessionId, targetSessionId: sourceSessionId };
+			useSessionStore.getState().setActiveSessionId(sourceSessionId);
+		},
+		[activeSession?.id, handleResumeSessionRef]
+	);
+
+	// Effect: process pending resume after agent switch completes
+	useEffect(() => {
+		if (
+			pendingResumeRef.current &&
+			activeSession?.id === pendingResumeRef.current.targetSessionId
+		) {
+			const { agentSessionId } = pendingResumeRef.current;
+			pendingResumeRef.current = null;
+			handleResumeSessionRef?.current?.(agentSessionId);
+		}
+	}, [activeSession?.id, handleResumeSessionRef]);
+
+	// ====================================================================
 	// Return
 	// ====================================================================
 
 	return {
 		// Derived state
 		errorSession,
+		effectiveAgentError: effectiveError ?? null,
 		recoveryActions,
 
 		// Simple close handlers
@@ -847,5 +949,11 @@ export function useModalHandlers(
 
 		// LogViewer shortcut handler
 		handleLogViewerShortcutUsed,
+
+		// Git diff opener (Tier 3C)
+		handleViewGitDiff,
+
+		// Director's Notes session navigation (Tier 3C)
+		handleDirectorNotesResumeSession,
 	};
 }
