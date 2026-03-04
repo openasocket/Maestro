@@ -31,6 +31,8 @@ import {
 	X,
 	CheckSquare,
 	Archive,
+	Tag,
+	FolderInput,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { TreeNode } from './MemoryTreeBrowser';
@@ -697,6 +699,9 @@ export function MemoryLibraryPanel({
 		total: number;
 	} | null>(null);
 	const [bulkConfirm, setBulkConfirm] = useState<{ action: 'delete'; count: number } | null>(null);
+	const [bulkTagInput, setBulkTagInput] = useState(false);
+	const [bulkTagValue, setBulkTagValue] = useState('');
+	const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
 
 	// Editor state
 	const [addingMemory, setAddingMemory] = useState(false);
@@ -925,6 +930,71 @@ export function MemoryLibraryPanel({
 			store.refresh();
 		}
 	}, [selectedIds, resolvedScope, resolvedSkillAreaId, resolvedProjectPath, store]);
+
+	const handleBulkTag = useCallback(
+		async (rawInput: string) => {
+			const newTags = rawInput
+				.split(',')
+				.map((t) => t.trim())
+				.filter(Boolean);
+			if (newTags.length === 0) return;
+			const ids = Array.from(selectedIds);
+			setBulkTagInput(false);
+			setBulkTagValue('');
+			setBulkOpProgress({ label: 'Tagging', current: 0, total: ids.length });
+			try {
+				for (let i = 0; i < ids.length; i++) {
+					setBulkOpProgress({ label: 'Tagging', current: i + 1, total: ids.length });
+					const memory = memories.find((m) => m.id === ids[i]);
+					const existingTags = memory?.tags ?? [];
+					const merged = [...new Set([...existingTags, ...newTags])];
+					await window.maestro.memory.update(
+						ids[i],
+						{ tags: merged },
+						resolvedScope,
+						resolvedSkillAreaId,
+						resolvedProjectPath
+					);
+				}
+			} catch {
+				// Partial failure
+			} finally {
+				setBulkOpProgress(null);
+				setSelectedIds(new Set());
+				store.refresh();
+			}
+		},
+		[selectedIds, memories, resolvedScope, resolvedSkillAreaId, resolvedProjectPath, store]
+	);
+
+	const handleBulkMove = useCallback(
+		async (toScope: MemoryScope, toSkillAreaId?: string) => {
+			const ids = Array.from(selectedIds);
+			setBulkMoveOpen(false);
+			setBulkOpProgress({ label: 'Moving', current: 0, total: ids.length });
+			try {
+				for (let i = 0; i < ids.length; i++) {
+					setBulkOpProgress({ label: 'Moving', current: i + 1, total: ids.length });
+					await window.maestro.memory.moveScope(
+						ids[i],
+						resolvedScope,
+						resolvedSkillAreaId,
+						resolvedScope === 'project' ? resolvedProjectPath : undefined,
+						toScope,
+						toSkillAreaId,
+						toScope === 'project' ? resolvedProjectPath : undefined
+					);
+				}
+			} catch {
+				// Partial failure
+			} finally {
+				setBulkOpProgress(null);
+				setSelectedIds(new Set());
+				store.refresh();
+			}
+		},
+		[selectedIds, resolvedScope, resolvedSkillAreaId, resolvedProjectPath, store]
+	);
 
 	const handleAddMemory = useCallback(
 		async (content: string, type: MemoryType, tags: string[]) => {
@@ -1424,6 +1494,106 @@ export function MemoryLibraryPanel({
 								Confirm Delete
 							</button>
 						</>
+					) : bulkTagInput ? (
+						<form
+							className="flex items-center gap-2 flex-1"
+							onSubmit={(e) => {
+								e.preventDefault();
+								handleBulkTag(bulkTagValue);
+							}}
+						>
+							<Tag className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+							<input
+								autoFocus
+								className="flex-1 text-xs px-2 py-1 rounded border outline-none"
+								style={{
+									backgroundColor: theme.colors.bgMain,
+									borderColor: theme.colors.border,
+									color: theme.colors.textMain,
+								}}
+								placeholder="tag1, tag2, tag3..."
+								value={bulkTagValue}
+								onChange={(e) => setBulkTagValue(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === 'Escape') {
+										setBulkTagInput(false);
+										setBulkTagValue('');
+									}
+								}}
+							/>
+							<button
+								type="submit"
+								className="text-xs px-2 py-1 rounded font-medium hover:opacity-80 transition-opacity"
+								style={{ backgroundColor: theme.colors.accent, color: '#fff' }}
+							>
+								Apply
+							</button>
+							<button
+								type="button"
+								className="text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
+								style={{ color: theme.colors.textDim }}
+								onClick={() => {
+									setBulkTagInput(false);
+									setBulkTagValue('');
+								}}
+							>
+								Cancel
+							</button>
+						</form>
+					) : bulkMoveOpen ? (
+						<div className="flex items-center gap-1 flex-1 flex-wrap">
+							<span className="text-xs" style={{ color: theme.colors.textDim }}>
+								Move to:
+							</span>
+							{resolvedScope !== 'project' && (
+								<button
+									className="text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
+									style={{
+										color: theme.colors.textMain,
+										backgroundColor: `${theme.colors.border}60`,
+									}}
+									onClick={() => handleBulkMove('project')}
+								>
+									Project
+								</button>
+							)}
+							{resolvedScope !== 'global' && (
+								<button
+									className="text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
+									style={{
+										color: theme.colors.textMain,
+										backgroundColor: `${theme.colors.border}60`,
+									}}
+									onClick={() => handleBulkMove('global')}
+								>
+									Global
+								</button>
+							)}
+							{skillAreas
+								.filter((s) => s.id !== resolvedSkillAreaId)
+								.map((s) => (
+									<button
+										key={s.id}
+										className="text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
+										style={{
+											color: theme.colors.textMain,
+											backgroundColor: `${theme.colors.border}60`,
+										}}
+										onClick={() => handleBulkMove('skill', s.id)}
+										title={`Move to skill: ${s.name}`}
+									>
+										{s.name}
+									</button>
+								))}
+							<div className="flex-1" />
+							<button
+								className="text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
+								style={{ color: theme.colors.textDim }}
+								onClick={() => setBulkMoveOpen(false)}
+							>
+								Cancel
+							</button>
+						</div>
 					) : (
 						<>
 							<button
@@ -1470,6 +1640,30 @@ export function MemoryLibraryPanel({
 							>
 								<PinOff className="w-3 h-3" />
 								Unpin
+							</button>
+							<button
+								className="flex items-center gap-1 text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
+								style={{
+									color: theme.colors.textMain,
+									backgroundColor: `${theme.colors.border}60`,
+								}}
+								title="Tag selected"
+								onClick={() => setBulkTagInput(true)}
+							>
+								<Tag className="w-3 h-3" />
+								Tag
+							</button>
+							<button
+								className="flex items-center gap-1 text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
+								style={{
+									color: theme.colors.textMain,
+									backgroundColor: `${theme.colors.border}60`,
+								}}
+								title="Move selected to another scope"
+								onClick={() => setBulkMoveOpen(true)}
+							>
+								<FolderInput className="w-3 h-3" />
+								Move
 							</button>
 						</>
 					)}
