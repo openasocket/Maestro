@@ -1,10 +1,11 @@
 /**
  * ExperiencesTab - Experiences sub-tab within MemorySettings.
  *
- * Three-section layout:
+ * Four-section layout:
  *   1. Extraction — pipeline config, status, background processing toggles
- *   2. Review — experience card list with filters, promotion candidates
- *   3. Repository — global experience repository (import/export/browse)
+ *   2. Review — experience card list with filters, sort, per-card actions
+ *   3. Promotion Candidates — system-identified promotion-ready experiences + cross-project config
+ *   4. Repository — global experience repository (import/export/browse)
  *
  * Moved from MemorySettings.tsx during MEM-TAB-01 redistribution.
  * Restructured into sections during MEM-TAB-04.
@@ -142,6 +143,7 @@ export function ExperiencesTab({
 	// ─── Section collapse state ─────────────────────────────────────────
 	const [extractionCollapsed, setExtractionCollapsed] = useState(false);
 	const [reviewCollapsed, setReviewCollapsed] = useState(false);
+	const [promotionCollapsed, setPromotionCollapsed] = useState(false);
 	const [repositoryCollapsed, setRepositoryCollapsed] = useState(true);
 
 	// ─── Promotion state ────────────────────────────────────────────────
@@ -607,14 +609,6 @@ export function ExperiencesTab({
 							theme={theme}
 						/>
 
-						<ConfigToggle
-							label="Cross-Project Promotion"
-							description="Detect recurring experiences across projects and suggest global promotion"
-							checked={config.enableCrossProjectPromotion}
-							onChange={(v) => onUpdateConfig({ enableCrossProjectPromotion: v })}
-							theme={theme}
-						/>
-
 						{/* Per-Turn Extraction */}
 						{config.enableExperienceExtraction && (
 							<div
@@ -699,30 +693,10 @@ export function ExperiencesTab({
 					subtitle={`${totalExperiences} total${currentProjectExperiences > 0 ? `, ${currentProjectExperiences} from this project` : ''}`}
 					collapsed={reviewCollapsed}
 					onToggle={() => setReviewCollapsed(!reviewCollapsed)}
-					badge={promotionCandidates.length > 0 ? promotionCandidates.length : null}
 				/>
 
 				{!reviewCollapsed && (
 					<div className="px-4 pb-4 space-y-3">
-						{/* Promotion Candidates (when available) */}
-						{promotionCandidates.length > 0 && (
-							<PromotionSection
-								theme={theme}
-								candidates={promotionCandidates}
-								editingId={editingPromotionId}
-								editingText={editingRuleText}
-								onEditTextChange={setEditingRuleText}
-								onStartEdit={(id, text) => {
-									setEditingPromotionId(id);
-									setEditingRuleText(text);
-								}}
-								onCancelEdit={() => setEditingPromotionId(null)}
-								onApprove={(c, text) => handlePromote(c, text)}
-								onDismiss={handleDismissPromotion}
-								onKeep={handleKeepAsExperience}
-							/>
-						)}
-
 						{/* Filter Bar */}
 						<div className="space-y-2">
 							{/* Search */}
@@ -925,7 +899,109 @@ export function ExperiencesTab({
 			</div>
 
 			{/* ═══════════════════════════════════════════════════════════════════
-			    Section 3: Repository
+			    Section 3: Promotion Candidates
+			    ═══════════════════════════════════════════════════════════════════ */}
+			<div className="rounded-lg border" style={{ borderColor: theme.colors.border }}>
+				<SectionHeader
+					theme={theme}
+					icon={ArrowUpCircle}
+					title="Promotion Candidates"
+					subtitle="Experiences ready to become rules"
+					collapsed={promotionCollapsed}
+					onToggle={() => setPromotionCollapsed(!promotionCollapsed)}
+					badge={promotionCandidates.length > 0 ? promotionCandidates.length : null}
+				/>
+
+				{!promotionCollapsed && (
+					<div className="px-4 pb-4 space-y-4">
+						{/* Description */}
+						<div
+							className="text-xs leading-relaxed rounded-md px-3 py-2"
+							style={{ color: theme.colors.textDim, backgroundColor: `${theme.colors.border}15` }}
+						>
+							Experiences that have been used multiple times, show high confidence, or appear across
+							projects are surfaced here as candidates for promotion to permanent rules.
+						</div>
+
+						{/* Cross-Project Promotion Config */}
+						<div
+							className="rounded border p-3 space-y-3"
+							style={{
+								borderColor: theme.colors.border,
+								backgroundColor: `${theme.colors.border}08`,
+							}}
+						>
+							<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
+								Cross-Project Detection
+							</div>
+							<ConfigToggle
+								label="Enable Cross-Project Promotion"
+								description="Detect recurring experiences across projects and suggest global promotion"
+								checked={config.enableCrossProjectPromotion}
+								onChange={(v) => onUpdateConfig({ enableCrossProjectPromotion: v })}
+								theme={theme}
+							/>
+							{config.enableCrossProjectPromotion && (
+								<>
+									<ConfigSlider
+										label="Min. Projects Required"
+										description="Number of distinct projects an experience must appear in before being flagged for cross-project promotion"
+										value={config.crossProjectMinProjects}
+										min={2}
+										max={10}
+										step={1}
+										onChange={(v) => onUpdateConfig({ crossProjectMinProjects: v })}
+										theme={theme}
+									/>
+									<ConfigSlider
+										label="Similarity Threshold"
+										description="Cosine similarity threshold for matching experiences across projects (higher = stricter matching)"
+										value={config.crossProjectSimilarityThreshold}
+										min={0.5}
+										max={1.0}
+										step={0.05}
+										onChange={(v) => onUpdateConfig({ crossProjectSimilarityThreshold: v })}
+										theme={theme}
+									/>
+								</>
+							)}
+						</div>
+
+						{/* Candidates list */}
+						{promotionCandidates.length > 0 ? (
+							<PromotionSection
+								theme={theme}
+								candidates={promotionCandidates}
+								editingId={editingPromotionId}
+								editingText={editingRuleText}
+								onEditTextChange={setEditingRuleText}
+								onStartEdit={(id, text) => {
+									setEditingPromotionId(id);
+									setEditingRuleText(text);
+								}}
+								onCancelEdit={() => setEditingPromotionId(null)}
+								onApprove={(c, text) => handlePromote(c, text)}
+								onDismiss={handleDismissPromotion}
+								onKeep={handleKeepAsExperience}
+							/>
+						) : (
+							<div className="flex flex-col items-center justify-center py-6 gap-2">
+								<ArrowUpCircle
+									className="w-6 h-6 opacity-20"
+									style={{ color: theme.colors.textDim }}
+								/>
+								<div className="text-xs text-center" style={{ color: theme.colors.textDim }}>
+									No promotion candidates right now. Experiences become candidates when they show
+									high confidence, repeated use, or cross-project evidence.
+								</div>
+							</div>
+						)}
+					</div>
+				)}
+			</div>
+
+			{/* ═══════════════════════════════════════════════════════════════════
+			    Section 4: Repository
 			    ═══════════════════════════════════════════════════════════════════ */}
 			<div className="rounded-lg border" style={{ borderColor: theme.colors.border }}>
 				<SectionHeader
@@ -1949,6 +2025,11 @@ function PromotionSection({
 						<div className="text-xs" style={{ color: theme.colors.textMain }}>
 							{memory.content.length > 120 ? memory.content.slice(0, 120) + '...' : memory.content}
 						</div>
+						{candidate.qualificationReason && (
+							<div className="text-xs italic" style={{ color: theme.colors.accent }}>
+								{candidate.qualificationReason}
+							</div>
+						)}
 						{candidate.isCrossProjectCandidate && (
 							<div
 								className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium"
