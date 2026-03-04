@@ -206,6 +206,8 @@ describe('Memory IPC Handler Round-Trips', () => {
 				'memory:add',
 				'memory:update',
 				'memory:delete',
+				'memory:listAllExperiences',
+				'memory:moveScope',
 				'memory:listArchived',
 				'memory:restore',
 				'memory:search',
@@ -216,6 +218,7 @@ describe('Memory IPC Handler Round-Trips', () => {
 				'memory:consolidate',
 				'memory:ensureEmbeddings',
 				'memory:seedDefaults',
+				'memory:resetSeedDefaults',
 				'memory:getPromotionCandidates',
 				'memory:promote',
 				'memory:dismissPromotion',
@@ -227,6 +230,10 @@ describe('Memory IPC Handler Round-Trips', () => {
 				'memory:getRecentInjections',
 				'memory:getJobQueueStatus',
 				'memory:getTokenUsage',
+				'memory:analyzeHistoricalSessions',
+				'memory:getAnalysisStats',
+				'memory:analyzeAgentSessions',
+				'memory:getAgentAnalysisStats',
 			];
 
 			for (const channel of expectedChannels) {

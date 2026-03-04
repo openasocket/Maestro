@@ -189,6 +189,42 @@ export function createMemoryApi() {
 		): Promise<IpcResponse<boolean>> =>
 			ipcRenderer.invoke('memory:delete', id, scope, skillAreaId, projectPath),
 
+		// ─── All Experiences ──────────────────────────────────────────────
+		listAllExperiences: (
+			projectPath?: string
+		): Promise<
+			IpcResponse<
+				Array<
+					MemoryEntry & {
+						scopeLabel: string;
+						skillAreaName?: string;
+						personaName?: string;
+					}
+				>
+			>
+		> => ipcRenderer.invoke('memory:listAllExperiences', projectPath),
+
+		// ─── Move Scope ──────────────────────────────────────────────────
+		moveScope: (
+			memoryId: string,
+			fromScope: MemoryScope,
+			fromSkillAreaId: string | undefined,
+			fromProjectPath: string | undefined,
+			toScope: MemoryScope,
+			toSkillAreaId: string | undefined,
+			toProjectPath: string | undefined
+		): Promise<IpcResponse<MemoryEntry>> =>
+			ipcRenderer.invoke(
+				'memory:moveScope',
+				memoryId,
+				fromScope,
+				fromSkillAreaId,
+				fromProjectPath,
+				toScope,
+				toSkillAreaId,
+				toProjectPath
+			),
+
 		// ─── Archive ──────────────────────────────────────────────────────
 		listArchived: (
 			scope: MemoryScope,

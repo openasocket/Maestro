@@ -327,6 +327,124 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		)
 	);
 
+	// ─── All Experiences ──────────────────────────────────────────────────
+
+	ipcMain.handle(
+		'memory:listAllExperiences',
+		createIpcDataHandler(handlerOpts('listAllExperiences'), async (projectPath?: string) => {
+			const registry = await memoryStore.getCachedRegistry();
+			const results: Array<
+				MemoryEntry & { scopeLabel: string; skillAreaName?: string; personaName?: string }
+			> = [];
+
+			// 1. Skill-scoped experiences
+			for (const skill of registry.skillAreas) {
+				if (!skill.active) continue;
+				const entries = await memoryStore.listMemories('skill', skill.id);
+				const persona = registry.personas.find((p) => p.id === skill.personaId);
+				for (const entry of entries) {
+					if (entry.type === 'experience') {
+						results.push({
+							...entry,
+							scopeLabel: `${persona?.name ?? 'Unknown'} → ${skill.name}`,
+							skillAreaName: skill.name,
+							personaName: persona?.name,
+						});
+					}
+				}
+			}
+
+			// 2. Project-scoped experiences
+			if (projectPath) {
+				const projectEntries = await memoryStore.listMemories('project', undefined, projectPath);
+				for (const entry of projectEntries) {
+					if (entry.type === 'experience') {
+						results.push({ ...entry, scopeLabel: 'Project' });
+					}
+				}
+			}
+
+			// 3. Global experiences
+			const globalEntries = await memoryStore.listMemories('global');
+			for (const entry of globalEntries) {
+				if (entry.type === 'experience') {
+					results.push({ ...entry, scopeLabel: 'Global' });
+				}
+			}
+
+			// Sort by createdAt descending (most recent first)
+			results.sort((a, b) => b.createdAt - a.createdAt);
+			return results;
+		})
+	);
+
+	// ─── Move Scope ───────────────────────────────────────────────────────
+
+	ipcMain.handle(
+		'memory:moveScope',
+		createIpcDataHandler(
+			handlerOpts('moveScope'),
+			async (
+				memoryId: string,
+				fromScope: MemoryScope,
+				fromSkillAreaId: string | undefined,
+				fromProjectPath: string | undefined,
+				toScope: MemoryScope,
+				toSkillAreaId: string | undefined,
+				toProjectPath: string | undefined
+			) => {
+				// 1. Read the existing entries from the source scope to find target
+				const entries = await memoryStore.listMemories(
+					fromScope,
+					fromSkillAreaId,
+					fromProjectPath,
+					true
+				);
+				const source = entries.find((e) => e.id === memoryId);
+				if (!source) {
+					throw new Error(`Memory ${memoryId} not found in scope=${fromScope}`);
+				}
+
+				// 2. Delete from source scope
+				await memoryStore.deleteMemory(memoryId, fromScope, fromSkillAreaId, fromProjectPath);
+
+				// 3. Derive personaId/roleId for skill-scoped destination
+				let personaId: string | undefined;
+				let roleId: string | undefined;
+				if (toScope === 'skill' && toSkillAreaId) {
+					const registry = await memoryStore.getCachedRegistry();
+					const skill = registry.skillAreas.find((s) => s.id === toSkillAreaId);
+					if (skill) {
+						personaId = skill.personaId;
+						const persona = registry.personas.find((p) => p.id === skill.personaId);
+						if (persona) roleId = persona.roleId;
+					}
+				}
+
+				// 4. Add to destination scope with same content
+				const newEntry = await memoryStore.addMemory(
+					{
+						content: source.content,
+						type: source.type,
+						scope: toScope,
+						skillAreaId: toSkillAreaId,
+						personaId,
+						roleId,
+						tags: source.tags,
+						source: source.source,
+						confidence: source.confidence,
+						pinned: source.pinned,
+						experienceContext: source.experienceContext,
+					},
+					toProjectPath
+				);
+
+				logger.info(`Moved memory ${memoryId} from ${fromScope} to ${toScope}`, LOG_CONTEXT);
+				return newEntry;
+			}
+		)
+	);
+
 	// ─── Archive ──────────────────────────────────────────────────────────
 
 	ipcMain.handle(

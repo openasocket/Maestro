@@ -2875,6 +2875,31 @@ interface MaestroAPI {
 			skillAreaId?: string,
 			projectPath?: string
 		) => Promise<{ success: true; data: boolean } | { success: false; error: string }>;
+		listAllExperiences: (projectPath?: string) => Promise<
+			| {
+					success: true;
+					data: Array<
+						import('../shared/memory-types').MemoryEntry & {
+							scopeLabel: string;
+							skillAreaName?: string;
+							personaName?: string;
+						}
+					>;
+			  }
+			| { success: false; error: string }
+		>;
+		moveScope: (
+			memoryId: string,
+			fromScope: import('../shared/memory-types').MemoryScope,
+			fromSkillAreaId: string | undefined,
+			fromProjectPath: string | undefined,
+			toScope: import('../shared/memory-types').MemoryScope,
+			toSkillAreaId: string | undefined,
+			toProjectPath: string | undefined
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry }
+			| { success: false; error: string }
+		>;
 		listArchived: (
 			scope: import('../shared/memory-types').MemoryScope,
 			skillAreaId?: string,

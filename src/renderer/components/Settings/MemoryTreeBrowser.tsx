@@ -20,6 +20,7 @@ import {
 	Globe,
 	Sparkles,
 	Brain,
+	Lightbulb,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { UseMemoryHierarchyReturn } from '../../hooks/memory/useMemoryHierarchy';
@@ -32,11 +33,13 @@ export type TreeNode =
 	| { type: 'persona'; id: PersonaId }
 	| { type: 'skill'; id: SkillAreaId }
 	| { type: 'project' }
-	| { type: 'global' };
+	| { type: 'global' }
+	| { type: 'all-experiences' };
 
 function nodeKey(node: TreeNode): string {
 	if (node.type === 'project') return '__project__';
 	if (node.type === 'global') return '__global__';
+	if (node.type === 'all-experiences') return '__all-experiences__';
 	return `${node.type}:${'id' in node ? node.id : ''}`;
 }
 
@@ -50,6 +53,8 @@ interface MemoryTreeBrowserProps {
 	hierarchy: UseMemoryHierarchyReturn;
 	selectedNode: TreeNode | null;
 	onSelectNode: (node: TreeNode) => void;
+	/** Total experience count for the "All Experiences" node */
+	totalExperienceCount?: number;
 }
 
 // ─── Inline Name Editor ───────────────────────────────────────────────────
@@ -173,6 +178,7 @@ export function MemoryTreeBrowser({
 	hierarchy,
 	selectedNode,
 	onSelectNode,
+	totalExperienceCount,
 }: MemoryTreeBrowserProps): React.ReactElement {
 	const { roles, personas, skillAreas } = hierarchy;
 
@@ -723,6 +729,40 @@ export function MemoryTreeBrowser({
 
 				{/* Separator */}
 				<div className="my-2 mx-3 border-t" style={{ borderColor: theme.colors.border }} />
+
+				{/* All Experiences */}
+				<div
+					className="group flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:opacity-90 transition-opacity"
+					style={{
+						backgroundColor: nodesEqual(selectedNode, { type: 'all-experiences' })
+							? `${theme.colors.accent}18`
+							: 'transparent',
+					}}
+					onClick={() => onSelectNode({ type: 'all-experiences' })}
+				>
+					<Lightbulb
+						className="w-3.5 h-3.5 shrink-0"
+						style={{
+							color: nodesEqual(selectedNode, { type: 'all-experiences' })
+								? theme.colors.warning
+								: theme.colors.textDim,
+						}}
+					/>
+					<span className="flex-1 text-xs font-medium" style={{ color: theme.colors.textMain }}>
+						All Experiences
+					</span>
+					{totalExperienceCount !== undefined && totalExperienceCount > 0 && (
+						<span
+							className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0"
+							style={{
+								backgroundColor: `${theme.colors.warning}20`,
+								color: theme.colors.warning,
+							}}
+						>
+							{totalExperienceCount}
+						</span>
+					)}
+				</div>
 
 				{/* Project Memories */}
 				<div

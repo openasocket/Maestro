@@ -37,12 +37,14 @@ import type {
 	MemorySearchResult,
 	MemoryType,
 	MemoryScope,
+	SkillAreaId,
 	Role,
 	Persona,
 	SkillArea,
 } from '../../../shared/memory-types';
 import type { UseMemoryStoreReturn } from '../../hooks/memory/useMemoryStore';
 import { RoleDetailView, PersonaDetailView } from './EntityDetailView';
+import { MemoryEditModal } from './MemoryEditModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -77,6 +79,7 @@ function buildBreadcrumb(
 	if (!node) return [];
 	if (node.type === 'project') return ['Project Memories'];
 	if (node.type === 'global') return ['Global Memories'];
+	if (node.type === 'all-experiences') return ['All Experiences'];
 	if (node.type === 'role') {
 		const role = roles.find((r) => r.id === node.id);
 		return role ? [role.name] : ['Unknown Role'];
@@ -664,9 +667,9 @@ export function MemoryLibraryPanel({
 	const [archivedMemories, setArchivedMemories] = useState<MemoryEntry[]>([]);
 	const [archivedLoading, setArchivedLoading] = useState(false);
 
-	// Inline editor state
+	// Editor state
 	const [addingMemory, setAddingMemory] = useState(false);
-	const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
+	const [editingMemory, setEditingMemory] = useState<MemoryEntry | null>(null);
 
 	// Derive scope from selectedNode for direct archive API calls
 	const { scope: resolvedScope, skillAreaId: resolvedSkillAreaId } = useMemo(
@@ -682,7 +685,7 @@ export function MemoryLibraryPanel({
 		setSearchQuery('');
 		setSearchResults(null);
 		setAddingMemory(false);
-		setEditingMemoryId(null);
+		setEditingMemory(null);
 		setShowArchived(false);
 	}, [selectedNode]);
 
@@ -795,16 +798,59 @@ export function MemoryLibraryPanel({
 		[store, selectedNode, skillAreas, personas]
 	);
 
-	const handleUpdateMemory = useCallback(
-		async (id: string, content: string, type: MemoryType, tags: string[]) => {
-			try {
-				await store.updateMemory(id, { content, type, tags });
-			} catch {
-				// Error from store
+	// Available skills for the edit modal
+	const availableSkills = useMemo(
+		() =>
+			skillAreas.map((s) => ({
+				id: s.id as SkillAreaId,
+				name: s.name,
+				personaName: personas.find((p) => p.id === s.personaId)?.name ?? 'Unknown',
+			})),
+		[skillAreas, personas]
+	);
+
+	const handleSaveEdit = useCallback(
+		async (data: {
+			content: string;
+			type: MemoryType;
+			scope: MemoryScope;
+			skillAreaId?: SkillAreaId;
+			tags: string[];
+			confidence: number;
+			pinned: boolean;
+			experienceContext?: MemoryEntry['experienceContext'];
+		}) => {
+			if (!editingMemory) return;
+
+			const scopeChanged =
+				data.scope !== editingMemory.scope || data.skillAreaId !== editingMemory.skillAreaId;
+
+			if (scopeChanged) {
+				// Move to new scope via moveScope IPC
+				await window.maestro.memory.moveScope(
+					editingMemory.id,
+					editingMemory.scope,
+					editingMemory.skillAreaId,
+					editingMemory.scope === 'project' ? resolvedProjectPath : undefined,
+					data.scope,
+					data.skillAreaId,
+					data.scope === 'project' ? resolvedProjectPath : undefined
+				);
+			} else {
+				// Update in place
+				await store.updateMemory(editingMemory.id, {
+					content: data.content,
+					type: data.type,
+					tags: data.tags,
+					confidence: data.confidence,
+					pinned: data.pinned,
+					experienceContext: data.experienceContext,
+				});
 			}
-			setEditingMemoryId(null);
+
+			store.refresh();
 		},
-		[store]
+		[editingMemory, store, resolvedProjectPath]
 	);
 
 	const handleTogglePin = useCallback(
@@ -1139,35 +1185,32 @@ export function MemoryLibraryPanel({
 							</div>
 						)}
 
-						{filteredMemories.map((memory) =>
-							editingMemoryId === memory.id ? (
-								<InlineMemoryEditor
-									key={memory.id}
-									theme={theme}
-									initial={{
-										content: memory.content,
-										type: memory.type,
-										tags: memory.tags,
-									}}
-									onSave={(content, type, tags) =>
-										handleUpdateMemory(memory.id, content, type, tags)
-									}
-									onCancel={() => setEditingMemoryId(null)}
-								/>
-							) : (
-								<MemoryCard
-									key={memory.id}
-									memory={memory}
-									theme={theme}
-									onTogglePin={() => handleTogglePin(memory)}
-									onEdit={() => setEditingMemoryId(memory.id)}
-									onDelete={() => handleDelete(memory.id)}
-								/>
-							)
-						)}
+						{filteredMemories.map((memory) => (
+							<MemoryCard
+								key={memory.id}
+								memory={memory}
+								theme={theme}
+								onTogglePin={() => handleTogglePin(memory)}
+								onEdit={() => setEditingMemory(memory)}
+								onDelete={() => handleDelete(memory.id)}
+							/>
+						))}
 					</>
 				)}
 			</div>
+
+			{/* Edit Modal */}
+			{editingMemory && (
+				<MemoryEditModal
+					theme={theme}
+					memory={editingMemory}
+					defaultScope={resolvedScope}
+					defaultSkillAreaId={resolvedSkillAreaId}
+					availableSkills={availableSkills}
+					onSave={handleSaveEdit}
+					onClose={() => setEditingMemory(null)}
+				/>
+			)}
 		</div>
 	);
 }

@@ -3,12 +3,13 @@
  * in a side-by-side layout. This is the main content of the Memory settings tab.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { MemoryScope, SkillAreaId } from '../../../shared/memory-types';
 import { MemoryTreeBrowser, type TreeNode } from './MemoryTreeBrowser';
 import { MemoryLibraryPanel } from './MemoryLibraryPanel';
+import { AllExperiencesPanel } from './AllExperiencesPanel';
 import { useMemoryHierarchy } from '../../hooks/memory/useMemoryHierarchy';
 import { useMemoryStore } from '../../hooks/memory/useMemoryStore';
 
@@ -37,9 +38,10 @@ function deriveStoreParams(node: TreeNode | null): {
 			return { scope: 'project' };
 		case 'global':
 			return { scope: 'global' };
-		// Role/persona are container nodes — no direct memories to list
+		// Role/persona/all-experiences are container/special nodes — no direct memories to list
 		case 'role':
 		case 'persona':
+		case 'all-experiences':
 			return null;
 		default:
 			return null;
@@ -55,6 +57,25 @@ export function MemoryBrowserPanel({
 	const internalHierarchy = useMemoryHierarchy();
 	const hierarchy = externalHierarchy ?? internalHierarchy;
 	const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
+
+	// Track all experiences for count display on tree node
+	const [allExperiencesCount, setAllExperiencesCount] = useState<number>(0);
+
+	// Fetch experience count on mount and when hierarchy changes
+	useEffect(() => {
+		let cancelled = false;
+		window.maestro.memory
+			.listAllExperiences(projectPath ?? undefined)
+			.then((res) => {
+				if (!cancelled && res.success) {
+					setAllExperiencesCount(res.data.length);
+				}
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	}, [projectPath, hierarchy.skillAreas]);
 
 	// Derive scope params for useMemoryStore (null = container node, no memories to list)
 	const storeParams = useMemo(() => deriveStoreParams(selectedNode), [selectedNode]);
@@ -100,23 +121,33 @@ export function MemoryBrowserPanel({
 					hierarchy={hierarchy}
 					selectedNode={selectedNode}
 					onSelectNode={setSelectedNode}
+					totalExperienceCount={allExperiencesCount}
 				/>
 			</div>
 
-			{/* Right: Library Panel (70%) */}
+			{/* Right: Library Panel or All Experiences Panel (70%) */}
 			<div className="flex-1 overflow-hidden" style={{ backgroundColor: theme.colors.bgMain }}>
-				<MemoryLibraryPanel
-					theme={theme}
-					selectedNode={selectedNode}
-					projectPath={projectPath}
-					agentType={agentType}
-					store={store}
-					roles={hierarchy.roles}
-					personas={hierarchy.personas}
-					skillAreas={hierarchy.skillAreas}
-					onUpdateRole={hierarchy.updateRole}
-					onUpdatePersona={hierarchy.updatePersona}
-				/>
+				{selectedNode?.type === 'all-experiences' ? (
+					<AllExperiencesPanel
+						theme={theme}
+						projectPath={projectPath}
+						hierarchy={hierarchy}
+						onCountChange={setAllExperiencesCount}
+					/>
+				) : (
+					<MemoryLibraryPanel
+						theme={theme}
+						selectedNode={selectedNode}
+						projectPath={projectPath}
+						agentType={agentType}
+						store={store}
+						roles={hierarchy.roles}
+						personas={hierarchy.personas}
+						skillAreas={hierarchy.skillAreas}
+						onUpdateRole={hierarchy.updateRole}
+						onUpdatePersona={hierarchy.updatePersona}
+					/>
+				)}
 			</div>
 		</div>
 	);
