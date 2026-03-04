@@ -45,7 +45,7 @@ import type {
 	ExtractionDiagnostic,
 	ExtractionProgress,
 } from '../../../shared/memory-types';
-import { ConfigToggle } from './MemoryConfigWidgets';
+import { ConfigToggle, ConfigSlider } from './MemoryConfigWidgets';
 import { ExperienceRepositoryPanel } from './ExperienceRepositoryPanel';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
 import { MemoryEditModal } from './MemoryEditModal';
@@ -527,6 +527,16 @@ export function ExperiencesTab({
 
 				{!extractionCollapsed && (
 					<div className="px-4 pb-4 space-y-3">
+						{/* Brief explanation */}
+						<div
+							className="text-xs leading-relaxed rounded p-2.5"
+							style={{ backgroundColor: `${theme.colors.accent}08`, color: theme.colors.textDim }}
+						>
+							Experience extraction automatically learns from your coding sessions. After each
+							session, the system analyzes what happened and captures reusable insights — patterns
+							that worked, mistakes to avoid, and techniques worth remembering.
+						</div>
+
 						{/* Background Processing Toggles */}
 						<ConfigToggle
 							label="Background Experience Extraction"
@@ -551,6 +561,61 @@ export function ExperiencesTab({
 							onChange={(v) => onUpdateConfig({ enableCrossProjectPromotion: v })}
 							theme={theme}
 						/>
+
+						{/* Per-Turn Extraction */}
+						{config.enableExperienceExtraction && (
+							<div
+								className="rounded border p-3 space-y-3"
+								style={{
+									borderColor: theme.colors.border,
+									backgroundColor: `${theme.colors.border}08`,
+								}}
+							>
+								<ConfigToggle
+									label="Per-Turn Extraction"
+									description="Extract experiences during a session (not just after), when an interesting turn is detected"
+									checked={config.enablePerTurnExtraction}
+									onChange={(v) => onUpdateConfig({ enablePerTurnExtraction: v })}
+									theme={theme}
+								/>
+
+								{config.enablePerTurnExtraction && (
+									<>
+										<ConfigSlider
+											label="Interestingness Threshold"
+											description="Minimum interestingness score (0-1) for a turn to trigger extraction"
+											value={config.perTurnInterestingnessThreshold}
+											min={0}
+											max={1}
+											step={0.05}
+											onChange={(v) => onUpdateConfig({ perTurnInterestingnessThreshold: v })}
+											theme={theme}
+											formatValue={(v) => v.toFixed(2)}
+										/>
+										<ConfigSlider
+											label="Cooldown (seconds)"
+											description="Minimum seconds between per-turn extractions within the same session"
+											value={config.perTurnCooldownSeconds}
+											min={10}
+											max={300}
+											step={10}
+											onChange={(v) => onUpdateConfig({ perTurnCooldownSeconds: v })}
+											theme={theme}
+										/>
+										<ConfigSlider
+											label="Max Extractions per Session"
+											description="Maximum per-turn extractions allowed in a single session"
+											value={config.perTurnMaxExtractionsPerSession}
+											min={1}
+											max={50}
+											step={1}
+											onChange={(v) => onUpdateConfig({ perTurnMaxExtractionsPerSession: v })}
+											theme={theme}
+										/>
+									</>
+								)}
+							</div>
+						)}
 
 						{/* Extraction Status Panel */}
 						{config.enableExperienceExtraction && (
@@ -1331,26 +1396,8 @@ function ExtractionStatusPanel({
 				</select>
 			</div>
 
-			{/* Recent extraction history */}
-			{diagnostics.length > 0 && (
-				<div className="space-y-1.5">
-					<div className="text-xs font-medium" style={{ color: theme.colors.textDim }}>
-						Recent Activity
-					</div>
-					{diagnostics
-						.slice()
-						.reverse()
-						.map((d, i) => (
-							<ExtractionDiagnosticRow key={`${d.sessionId}-${i}`} diagnostic={d} theme={theme} />
-						))}
-				</div>
-			)}
-
-			{diagnostics.length === 0 && !isProcessing && (
-				<div className="text-xs text-center py-2" style={{ color: theme.colors.textDim }}>
-					No extraction activity yet. Complete a session with 3+ interactions to trigger analysis.
-				</div>
-			)}
+			{/* Full extraction diagnostic history (last 10) */}
+			<ExtractionHistory diagnostics={diagnostics} isProcessing={!!isProcessing} theme={theme} />
 		</div>
 	);
 }
@@ -1404,15 +1451,73 @@ function ExtractionDiagnosticRow({
 						</span>
 					)}
 				</div>
-				<div className="flex items-center gap-2" style={{ color: theme.colors.textDim }}>
+				<div className="flex items-center gap-2 flex-wrap" style={{ color: theme.colors.textDim }}>
 					<span>{timeAgo}</span>
+					{diagnostic.agentType && <span>{diagnostic.agentType}</span>}
 					{diagnostic.providerUsed && <span>via {diagnostic.providerUsed}</span>}
 					{tokens && <span>{tokens}</span>}
 					{diagnostic.experiencesStored != null && diagnostic.experiencesStored > 0 && (
-						<span>{diagnostic.experiencesStored} stored</span>
+						<span style={{ color: '#22c55e' }}>{diagnostic.experiencesStored} stored</span>
 					)}
 				</div>
+				{diagnostic.status.startsWith('failed') && diagnostic.message && (
+					<div className="text-[10px] mt-0.5" style={{ color: '#ef4444' }}>
+						{diagnostic.message}
+					</div>
+				)}
 			</div>
+		</div>
+	);
+}
+
+function ExtractionHistory({
+	diagnostics,
+	isProcessing,
+	theme,
+}: {
+	diagnostics: ExtractionDiagnostic[];
+	isProcessing: boolean;
+	theme: Theme;
+}) {
+	const [expanded, setExpanded] = useState(false);
+	const last10 = diagnostics.slice().reverse().slice(0, 10);
+
+	if (last10.length === 0 && !isProcessing) {
+		return (
+			<div className="text-xs text-center py-2" style={{ color: theme.colors.textDim }}>
+				No extraction activity yet. Complete a session with 3+ interactions to trigger analysis.
+			</div>
+		);
+	}
+
+	if (last10.length === 0) return null;
+
+	const successCount = last10.filter((d) => d.status === 'success').length;
+	const failedCount = last10.filter((d) => d.status.startsWith('failed')).length;
+	const skippedCount = last10.filter((d) => d.status.startsWith('skipped')).length;
+
+	return (
+		<div className="space-y-1.5">
+			<button
+				className="flex items-center justify-between w-full text-xs font-medium group"
+				style={{ color: theme.colors.textDim }}
+				onClick={() => setExpanded(!expanded)}
+			>
+				<div className="flex items-center gap-1.5">
+					{expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+					<span>Extraction History ({last10.length})</span>
+				</div>
+				<div className="flex items-center gap-2 text-[10px]">
+					{successCount > 0 && <span style={{ color: '#22c55e' }}>{successCount} ok</span>}
+					{failedCount > 0 && <span style={{ color: '#ef4444' }}>{failedCount} failed</span>}
+					{skippedCount > 0 && <span style={{ color: '#eab308' }}>{skippedCount} skipped</span>}
+				</div>
+			</button>
+
+			{expanded &&
+				last10.map((d, i) => (
+					<ExtractionDiagnosticRow key={`${d.sessionId}-${i}`} diagnostic={d} theme={theme} />
+				))}
 		</div>
 	);
 }
