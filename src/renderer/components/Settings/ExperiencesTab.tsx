@@ -1003,6 +1003,7 @@ export function ExperiencesTab({
 			{/* ═══════════════════════════════════════════════════════════════════
 			    Section 4: Repository
 			    ═══════════════════════════════════════════════════════════════════ */}
+			<div className="border-t pt-4" style={{ borderColor: theme.colors.border }} />
 			<div className="rounded-lg border" style={{ borderColor: theme.colors.border }}>
 				<SectionHeader
 					theme={theme}
