@@ -1,18 +1,44 @@
 /**
  * ExperiencesTab - Experiences sub-tab within MemorySettings.
  *
- * Contains: extraction status panel, background processing config,
- * promotion candidates, experience repository.
+ * Three-section layout:
+ *   1. Extraction — pipeline config, status, background processing toggles
+ *   2. Review — experience card list with filters, promotion candidates
+ *   3. Repository — global experience repository (import/export/browse)
+ *
  * Moved from MemorySettings.tsx during MEM-TAB-01 redistribution.
+ * Restructured into sections during MEM-TAB-04.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Activity, Loader2, Check, ArrowUpCircle, Edit3, X, Pin, Globe } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+	Activity,
+	Loader2,
+	Check,
+	ArrowUpCircle,
+	Edit3,
+	X,
+	Pin,
+	PinOff,
+	Globe,
+	Search,
+	ChevronDown,
+	ChevronRight,
+	Archive,
+	BarChart3,
+	Sparkles,
+	Hash,
+	Brain,
+	ArrowUpDown,
+} from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
 	MemoryConfig,
 	MemoryStats,
+	MemoryEntry,
 	MemoryScope,
+	MemorySource,
+	SkillAreaId,
 	PromotionCandidate,
 	JobQueueStatus,
 	TokenUsage,
@@ -22,6 +48,71 @@ import type {
 import { ConfigToggle } from './MemoryConfigWidgets';
 import { ExperienceRepositoryPanel } from './ExperienceRepositoryPanel';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
+import { MemoryEditModal } from './MemoryEditModal';
+
+// ─── Types ──────────────────────────────────────────────────────────────────────
+
+type ReviewSortField = 'newest' | 'confidence' | 'most-used' | 'effectiveness';
+type ReviewSourceFilter = 'all' | MemorySource;
+type ReviewDeviationFilter = 'all' | 'deviation' | 'normal';
+
+type EnrichedExperience = MemoryEntry & {
+	scopeLabel: string;
+	skillAreaName?: string;
+	personaName?: string;
+};
+
+// ─── Section Header ─────────────────────────────────────────────────────────────
+
+function SectionHeader({
+	theme,
+	icon: Icon,
+	title,
+	subtitle,
+	collapsed,
+	onToggle,
+	badge,
+}: {
+	theme: Theme;
+	icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
+	title: string;
+	subtitle?: string;
+	collapsed: boolean;
+	onToggle: () => void;
+	badge?: number | null;
+}) {
+	return (
+		<button className="flex items-center gap-2 w-full py-2 group" onClick={onToggle}>
+			{collapsed ? (
+				<ChevronRight className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+			) : (
+				<ChevronDown className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+			)}
+			<Icon className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.accent }} />
+			<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+				{title}
+			</span>
+			{subtitle && (
+				<span className="text-xs" style={{ color: theme.colors.textDim }}>
+					{subtitle}
+				</span>
+			)}
+			{badge != null && badge > 0 && (
+				<span
+					className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
+					style={{
+						backgroundColor: `${theme.colors.accent}20`,
+						color: theme.colors.accent,
+					}}
+				>
+					{badge}
+				</span>
+			)}
+		</button>
+	);
+}
+
+// ─── Props ──────────────────────────────────────────────────────────────────────
 
 export interface ExperiencesTabProps {
 	theme: Theme;
@@ -34,6 +125,8 @@ export interface ExperiencesTabProps {
 	activeAgentType?: string | null;
 }
 
+// ─── Main Component ─────────────────────────────────────────────────────────────
+
 export function ExperiencesTab({
 	theme,
 	config,
@@ -44,18 +137,32 @@ export function ExperiencesTab({
 	activeAgentId,
 	activeAgentType,
 }: ExperiencesTabProps): React.ReactElement {
-	// Promotion state
+	// ─── Section collapse state ─────────────────────────────────────────
+	const [extractionCollapsed, setExtractionCollapsed] = useState(false);
+	const [reviewCollapsed, setReviewCollapsed] = useState(false);
+	const [repositoryCollapsed, setRepositoryCollapsed] = useState(true);
+
+	// ─── Promotion state ────────────────────────────────────────────────
 	const [promotionCandidates, setPromotionCandidates] = useState<PromotionCandidate[]>([]);
 	const [editingPromotionId, setEditingPromotionId] = useState<string | null>(null);
 	const [editingRuleText, setEditingRuleText] = useState('');
 	const [error, setError] = useState<string | null>(null);
 
-	// Extraction state
+	// ─── Extraction state ───────────────────────────────────────────────
 	const [queueStatus, setQueueStatus] = useState<JobQueueStatus | null>(null);
 	const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
 	const [batchCapableAgents, setBatchCapableAgents] = useState<{ id: string; name: string }[]>([]);
 
-	// Fetch batch-capable agents for provider dropdown
+	// ─── Review state ───────────────────────────────────────────────────
+	const [experiences, setExperiences] = useState<EnrichedExperience[]>([]);
+	const [experiencesLoading, setExperiencesLoading] = useState(false);
+	const [reviewSearch, setReviewSearch] = useState('');
+	const [reviewSort, setReviewSort] = useState<ReviewSortField>('newest');
+	const [reviewSourceFilter, setReviewSourceFilter] = useState<ReviewSourceFilter>('all');
+	const [reviewDeviationFilter, setReviewDeviationFilter] = useState<ReviewDeviationFilter>('all');
+	const [editingMemory, setEditingMemory] = useState<EnrichedExperience | null>(null);
+
+	// ─── Fetch batch-capable agents ─────────────────────────────────────
 	useEffect(() => {
 		if (!config.enabled || !config.enableExperienceExtraction) return;
 		window.maestro.agents
@@ -69,7 +176,7 @@ export function ExperiencesTab({
 			.catch(() => {});
 	}, [config.enabled, config.enableExperienceExtraction]);
 
-	// Subscribe to queue status updates + periodic refresh
+	// ─── Subscribe to queue status updates ──────────────────────────────
 	useEffect(() => {
 		if (!config.enabled) return;
 
@@ -94,7 +201,7 @@ export function ExperiencesTab({
 		};
 	}, [config.enabled]);
 
-	// Load promotion candidates
+	// ─── Load promotion candidates ──────────────────────────────────────
 	const loadPromotionCandidates = useCallback(async () => {
 		try {
 			const res = await window.maestro.memory.getPromotionCandidates();
@@ -119,7 +226,95 @@ export function ExperiencesTab({
 		};
 	}, [config.enabled, loadPromotionCandidates]);
 
-	// Promotion action handlers
+	// ─── Load experiences for review ────────────────────────────────────
+	const loadExperiences = useCallback(async () => {
+		setExperiencesLoading(true);
+		try {
+			const res = await window.maestro.memory.listAllExperiences(projectPath ?? undefined);
+			if (res.success) {
+				setExperiences(res.data);
+			}
+		} catch {
+			// Non-critical
+		} finally {
+			setExperiencesLoading(false);
+		}
+	}, [projectPath]);
+
+	useEffect(() => {
+		if (!config.enabled) return;
+		loadExperiences();
+	}, [config.enabled, loadExperiences]);
+
+	// ─── Filtered & sorted experiences ──────────────────────────────────
+	const filteredExperiences = useMemo(() => {
+		let result = experiences;
+
+		// Source filter
+		if (reviewSourceFilter !== 'all') {
+			result = result.filter((e) => e.source === reviewSourceFilter);
+		}
+
+		// Deviation filter
+		if (reviewDeviationFilter === 'deviation') {
+			result = result.filter((e) => e.experienceContext?.isDeviation);
+		} else if (reviewDeviationFilter === 'normal') {
+			result = result.filter((e) => !e.experienceContext?.isDeviation);
+		}
+
+		// Search
+		if (reviewSearch.length >= 2) {
+			const q = reviewSearch.toLowerCase();
+			result = result.filter(
+				(e) =>
+					e.content.toLowerCase().includes(q) ||
+					e.experienceContext?.situation?.toLowerCase().includes(q) ||
+					e.experienceContext?.learning?.toLowerCase().includes(q) ||
+					e.tags.some((t) => t.toLowerCase().includes(q))
+			);
+		}
+
+		// Sort
+		return [...result].sort((a, b) => {
+			switch (reviewSort) {
+				case 'newest':
+					return b.createdAt - a.createdAt;
+				case 'confidence':
+					return b.confidence - a.confidence;
+				case 'most-used':
+					return b.useCount - a.useCount;
+				case 'effectiveness':
+					return b.effectivenessScore - a.effectivenessScore;
+				default:
+					return 0;
+			}
+		});
+	}, [experiences, reviewSourceFilter, reviewDeviationFilter, reviewSearch, reviewSort]);
+
+	// ─── Available skills for edit modal ────────────────────────────────
+	const [availableSkills, setAvailableSkills] = useState<
+		{ id: SkillAreaId; name: string; personaName: string }[]
+	>([]);
+
+	useEffect(() => {
+		if (!config.enabled) return;
+		Promise.all([window.maestro.memory.skill.list(), window.maestro.memory.persona.list()]).then(
+			([skillsRes, personasRes]) => {
+				if (skillsRes.success && personasRes.success) {
+					setAvailableSkills(
+						skillsRes.data.map((s: any) => ({
+							id: s.id,
+							name: s.name,
+							personaName:
+								personasRes.data.find((p: any) => p.id === s.personaId)?.name ?? 'Unknown',
+						}))
+					);
+				}
+			}
+		);
+	}, [config.enabled]);
+
+	// ─── Promotion action handlers ──────────────────────────────────────
 	const handlePromote = useCallback(
 		async (candidate: PromotionCandidate, ruleText: string) => {
 			try {
@@ -202,6 +397,99 @@ export function ExperiencesTab({
 		[loadPromotionCandidates]
 	);
 
+	// ─── Review card action handlers ────────────────────────────────────
+	const handleTogglePin = useCallback(
+		async (exp: EnrichedExperience) => {
+			try {
+				await window.maestro.memory.update(
+					exp.id,
+					{ pinned: !exp.pinned },
+					exp.scope,
+					exp.skillAreaId,
+					exp.scope === 'project' ? (projectPath ?? undefined) : undefined
+				);
+				await loadExperiences();
+			} catch {
+				// Non-critical
+			}
+		},
+		[projectPath, loadExperiences]
+	);
+
+	const handleArchive = useCallback(
+		async (exp: EnrichedExperience) => {
+			try {
+				await window.maestro.memory.update(
+					exp.id,
+					{ active: false },
+					exp.scope,
+					exp.skillAreaId,
+					exp.scope === 'project' ? (projectPath ?? undefined) : undefined
+				);
+				await loadExperiences();
+			} catch {
+				// Non-critical
+			}
+		},
+		[projectPath, loadExperiences]
+	);
+
+	const handleSaveEdit = useCallback(
+		async (data: {
+			content: string;
+			type: 'rule' | 'experience';
+			scope: MemoryScope;
+			skillAreaId?: SkillAreaId;
+			tags: string[];
+			confidence: number;
+			pinned: boolean;
+			experienceContext?: MemoryEntry['experienceContext'];
+		}) => {
+			if (!editingMemory) return;
+
+			const scopeChanged =
+				data.scope !== editingMemory.scope || data.skillAreaId !== editingMemory.skillAreaId;
+
+			if (scopeChanged) {
+				await window.maestro.memory.moveScope(
+					editingMemory.id,
+					editingMemory.scope,
+					editingMemory.skillAreaId,
+					editingMemory.scope === 'project' ? (projectPath ?? undefined) : undefined,
+					data.scope,
+					data.skillAreaId,
+					data.scope === 'project' ? (projectPath ?? undefined) : undefined
+				);
+			} else {
+				await window.maestro.memory.update(
+					editingMemory.id,
+					{
+						content: data.content,
+						type: data.type,
+						tags: data.tags,
+						confidence: data.confidence,
+						pinned: data.pinned,
+						experienceContext: data.experienceContext,
+					},
+					editingMemory.scope,
+					editingMemory.skillAreaId,
+					editingMemory.scope === 'project' ? (projectPath ?? undefined) : undefined
+				);
+			}
+
+			setEditingMemory(null);
+			await loadExperiences();
+			await onRefresh();
+		},
+		[editingMemory, projectPath, loadExperiences, onRefresh]
+	);
+
+	// ─── Experience counts ──────────────────────────────────────────────
+	const totalExperiences = experiences.length;
+	const currentProjectExperiences = experiences.filter(
+		(e) => e.experienceContext?.sourceProjectPath === projectPath
+	).length;
+
 	return (
 		<div className="space-y-4">
 			<TabDescriptionBanner
@@ -215,76 +503,466 @@ export function ExperiencesTab({
 					style={{ backgroundColor: `${theme.colors.error}15`, color: theme.colors.error }}
 				>
 					{error}
+					<button
+						className="ml-auto shrink-0 p-0.5 rounded hover:opacity-80"
+						onClick={() => setError(null)}
+					>
+						<X className="w-3 h-3" />
+					</button>
 				</div>
 			)}
 
-			{/* Extraction Status Panel */}
-			{config.enableExperienceExtraction && (
-				<ExtractionStatusPanel
+			{/* ═══════════════════════════════════════════════════════════════════
+			    Section 1: Extraction Pipeline
+			    ═══════════════════════════════════════════════════════════════════ */}
+			<div className="rounded-lg border" style={{ borderColor: theme.colors.border }}>
+				<SectionHeader
 					theme={theme}
-					queueStatus={queueStatus}
-					tokenUsage={tokenUsage}
-					config={config}
-					batchCapableAgents={batchCapableAgents}
-					onUpdateConfig={onUpdateConfig}
-					activeAgentId={activeAgentId}
-					activeAgentType={activeAgentType}
-					projectPath={projectPath}
-				/>
-			)}
-
-			{/* Background Processing Config */}
-			<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
-				<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-					Background Processing
-				</div>
-
-				<ConfigToggle
-					label="Background Experience Extraction"
-					description="Analyze sessions after completion to extract learnings (uses LLM tokens)"
-					checked={config.enableExperienceExtraction}
-					onChange={(v) => onUpdateConfig({ enableExperienceExtraction: v })}
-					theme={theme}
+					icon={Activity}
+					title="Extraction Pipeline"
+					subtitle="Configure how experiences are extracted from sessions"
+					collapsed={extractionCollapsed}
+					onToggle={() => setExtractionCollapsed(!extractionCollapsed)}
 				/>
 
-				<ConfigToggle
-					label="Auto-Consolidation"
-					description="Automatically merge similar memories (saves tokens on injection)"
-					checked={config.enableAutoConsolidation}
-					onChange={(v) => onUpdateConfig({ enableAutoConsolidation: v })}
-					theme={theme}
-				/>
+				{!extractionCollapsed && (
+					<div className="px-4 pb-4 space-y-3">
+						{/* Background Processing Toggles */}
+						<ConfigToggle
+							label="Background Experience Extraction"
+							description="Analyze sessions after completion to extract learnings (uses LLM tokens)"
+							checked={config.enableExperienceExtraction}
+							onChange={(v) => onUpdateConfig({ enableExperienceExtraction: v })}
+							theme={theme}
+						/>
 
-				<ConfigToggle
-					label="Cross-Project Promotion"
-					description="Detect recurring experiences across projects and suggest global promotion"
-					checked={config.enableCrossProjectPromotion}
-					onChange={(v) => onUpdateConfig({ enableCrossProjectPromotion: v })}
-					theme={theme}
-				/>
+						<ConfigToggle
+							label="Auto-Consolidation"
+							description="Automatically merge similar memories (saves tokens on injection)"
+							checked={config.enableAutoConsolidation}
+							onChange={(v) => onUpdateConfig({ enableAutoConsolidation: v })}
+							theme={theme}
+						/>
+
+						<ConfigToggle
+							label="Cross-Project Promotion"
+							description="Detect recurring experiences across projects and suggest global promotion"
+							checked={config.enableCrossProjectPromotion}
+							onChange={(v) => onUpdateConfig({ enableCrossProjectPromotion: v })}
+							theme={theme}
+						/>
+
+						{/* Extraction Status Panel */}
+						{config.enableExperienceExtraction && (
+							<ExtractionStatusPanel
+								theme={theme}
+								queueStatus={queueStatus}
+								tokenUsage={tokenUsage}
+								config={config}
+								batchCapableAgents={batchCapableAgents}
+								onUpdateConfig={onUpdateConfig}
+								activeAgentId={activeAgentId}
+								activeAgentType={activeAgentType}
+								projectPath={projectPath}
+							/>
+						)}
+					</div>
+				)}
 			</div>
 
-			{/* Promotion Candidates */}
-			{promotionCandidates.length > 0 && (
-				<PromotionSection
+			{/* ═══════════════════════════════════════════════════════════════════
+			    Section 2: Experience Review
+			    ═══════════════════════════════════════════════════════════════════ */}
+			<div className="rounded-lg border" style={{ borderColor: theme.colors.border }}>
+				<SectionHeader
 					theme={theme}
-					candidates={promotionCandidates}
-					editingId={editingPromotionId}
-					editingText={editingRuleText}
-					onEditTextChange={setEditingRuleText}
-					onStartEdit={(id, text) => {
-						setEditingPromotionId(id);
-						setEditingRuleText(text);
-					}}
-					onCancelEdit={() => setEditingPromotionId(null)}
-					onApprove={(c, text) => handlePromote(c, text)}
-					onDismiss={handleDismissPromotion}
-					onKeep={handleKeepAsExperience}
+					icon={Brain}
+					title="Experience Review"
+					subtitle={`${totalExperiences} total${currentProjectExperiences > 0 ? `, ${currentProjectExperiences} from this project` : ''}`}
+					collapsed={reviewCollapsed}
+					onToggle={() => setReviewCollapsed(!reviewCollapsed)}
+					badge={promotionCandidates.length > 0 ? promotionCandidates.length : null}
+				/>
+
+				{!reviewCollapsed && (
+					<div className="px-4 pb-4 space-y-3">
+						{/* Promotion Candidates (when available) */}
+						{promotionCandidates.length > 0 && (
+							<PromotionSection
+								theme={theme}
+								candidates={promotionCandidates}
+								editingId={editingPromotionId}
+								editingText={editingRuleText}
+								onEditTextChange={setEditingRuleText}
+								onStartEdit={(id, text) => {
+									setEditingPromotionId(id);
+									setEditingRuleText(text);
+								}}
+								onCancelEdit={() => setEditingPromotionId(null)}
+								onApprove={(c, text) => handlePromote(c, text)}
+								onDismiss={handleDismissPromotion}
+								onKeep={handleKeepAsExperience}
+							/>
+						)}
+
+						{/* Filter Bar */}
+						<div className="space-y-2">
+							{/* Search */}
+							<div
+								className="flex items-center gap-2 px-2 py-1.5 rounded-lg border"
+								style={{ borderColor: theme.colors.border }}
+							>
+								<Search className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+								<input
+									type="text"
+									value={reviewSearch}
+									onChange={(e) => setReviewSearch(e.target.value)}
+									placeholder="Search experiences..."
+									className="flex-1 bg-transparent outline-none text-xs"
+									style={{ color: theme.colors.textMain }}
+								/>
+							</div>
+
+							{/* Filters row */}
+							<div className="flex items-center gap-1.5 flex-wrap">
+								{/* Source filter */}
+								<select
+									value={reviewSourceFilter}
+									onChange={(e) => setReviewSourceFilter(e.target.value as ReviewSourceFilter)}
+									className="text-[10px] rounded px-1.5 py-0.5 border bg-transparent"
+									style={{
+										color: theme.colors.textMain,
+										borderColor: theme.colors.border,
+									}}
+								>
+									<option value="all">All sources</option>
+									<option value="session-analysis">Session analysis</option>
+									<option value="auto-run">Auto run</option>
+									<option value="user">User</option>
+									<option value="consolidation">Consolidation</option>
+									<option value="grpo">GRPO</option>
+									<option value="import">Import</option>
+									<option value="repository">Repository</option>
+								</select>
+
+								{/* Deviation filter */}
+								<select
+									value={reviewDeviationFilter}
+									onChange={(e) =>
+										setReviewDeviationFilter(e.target.value as ReviewDeviationFilter)
+									}
+									className="text-[10px] rounded px-1.5 py-0.5 border bg-transparent"
+									style={{
+										color: theme.colors.textMain,
+										borderColor: theme.colors.border,
+									}}
+								>
+									<option value="all">All types</option>
+									<option value="deviation">Deviations only</option>
+									<option value="normal">Normal only</option>
+								</select>
+
+								{/* Sort */}
+								<div className="flex items-center gap-1 ml-auto">
+									<ArrowUpDown className="w-3 h-3" style={{ color: theme.colors.textDim }} />
+									<select
+										value={reviewSort}
+										onChange={(e) => setReviewSort(e.target.value as ReviewSortField)}
+										className="text-[10px] rounded px-1.5 py-0.5 border bg-transparent"
+										style={{
+											color: theme.colors.textMain,
+											borderColor: theme.colors.border,
+										}}
+									>
+										<option value="newest">Newest first</option>
+										<option value="confidence">Highest confidence</option>
+										<option value="most-used">Most used</option>
+										<option value="effectiveness">Most effective</option>
+									</select>
+								</div>
+							</div>
+						</div>
+
+						{/* Experience Cards */}
+						{experiencesLoading ? (
+							<div
+								className="flex items-center justify-center py-4 gap-2"
+								style={{ color: theme.colors.textDim }}
+							>
+								<Loader2 className="w-4 h-4 animate-spin" />
+								<span className="text-xs">Loading experiences...</span>
+							</div>
+						) : filteredExperiences.length === 0 ? (
+							<div className="flex flex-col items-center justify-center py-6 gap-2">
+								<Brain className="w-6 h-6 opacity-20" style={{ color: theme.colors.textDim }} />
+								<div className="text-xs text-center" style={{ color: theme.colors.textDim }}>
+									{reviewSearch || reviewSourceFilter !== 'all' || reviewDeviationFilter !== 'all'
+										? 'No experiences match your filters.'
+										: 'No experiences extracted yet. Complete a session with 3+ interactions to trigger analysis.'}
+								</div>
+							</div>
+						) : (
+							<div className="space-y-2 max-h-96 overflow-y-auto scrollbar-thin">
+								{filteredExperiences.map((exp) => (
+									<ExperienceReviewCard
+										key={exp.id}
+										experience={exp}
+										theme={theme}
+										onEdit={() => setEditingMemory(exp)}
+										onTogglePin={() => handleTogglePin(exp)}
+										onArchive={() => handleArchive(exp)}
+										onPromote={(ruleText) =>
+											handlePromote(
+												{
+													memory: exp,
+													isCrossProjectCandidate: false,
+													suggestedRuleText: ruleText,
+													qualificationReason: 'Manual promotion',
+													promotionScore: 1,
+												},
+												ruleText
+											)
+										}
+									/>
+								))}
+							</div>
+						)}
+					</div>
+				)}
+			</div>
+
+			{/* ═══════════════════════════════════════════════════════════════════
+			    Section 3: Repository
+			    ═══════════════════════════════════════════════════════════════════ */}
+			<div className="rounded-lg border" style={{ borderColor: theme.colors.border }}>
+				<SectionHeader
+					theme={theme}
+					icon={Globe}
+					title="Repository"
+					subtitle="Import and share experience bundles"
+					collapsed={repositoryCollapsed}
+					onToggle={() => setRepositoryCollapsed(!repositoryCollapsed)}
+				/>
+
+				{!repositoryCollapsed && (
+					<div className="px-4 pb-4">
+						<ExperienceRepositoryPanel theme={theme} />
+					</div>
+				)}
+			</div>
+
+			{/* Edit Modal */}
+			{editingMemory && (
+				<MemoryEditModal
+					theme={theme}
+					memory={editingMemory}
+					defaultScope={editingMemory.scope}
+					defaultSkillAreaId={editingMemory.skillAreaId}
+					availableSkills={availableSkills}
+					onSave={handleSaveEdit}
+					onClose={() => setEditingMemory(null)}
 				/>
 			)}
+		</div>
+	);
+}
 
-			{/* Experience Repository */}
-			<ExperienceRepositoryPanel theme={theme} />
+// ─── Experience Review Card ─────────────────────────────────────────────────────
+
+function ExperienceReviewCard({
+	experience,
+	theme,
+	onEdit,
+	onTogglePin,
+	onArchive,
+	onPromote,
+}: {
+	experience: EnrichedExperience;
+	theme: Theme;
+	onEdit: () => void;
+	onTogglePin: () => void;
+	onArchive: () => void;
+	onPromote: (ruleText: string) => void;
+}) {
+	const [expanded, setExpanded] = useState(false);
+	const ctx = experience.experienceContext;
+	const crossProjectCount = ctx?.crossProjectEvidence?.length ?? 0;
+
+	const confidenceColor =
+		experience.confidence >= 0.7 ? '#22c55e' : experience.confidence >= 0.4 ? '#eab308' : '#ef4444';
+
+	return (
+		<div
+			className="rounded-lg border p-3 space-y-2 transition-colors"
+			style={{
+				borderColor: experience.pinned ? theme.colors.accent : theme.colors.border,
+				backgroundColor: experience.pinned ? `${theme.colors.accent}05` : 'transparent',
+			}}
+		>
+			{/* Situation (italic) */}
+			{ctx?.situation && (
+				<div className="text-xs italic leading-relaxed" style={{ color: theme.colors.textDim }}>
+					{ctx.situation}
+				</div>
+			)}
+
+			{/* Learning (bold) */}
+			{ctx?.learning && (
+				<div
+					className="text-xs font-semibold leading-relaxed"
+					style={{ color: theme.colors.textMain }}
+				>
+					{ctx.learning}
+				</div>
+			)}
+
+			{/* Content */}
+			<div
+				className="text-xs leading-relaxed cursor-pointer"
+				style={{ color: theme.colors.textMain }}
+				onClick={() => setExpanded(!expanded)}
+			>
+				{expanded
+					? experience.content
+					: experience.content.length > 200
+						? `${experience.content.slice(0, 200)}...`
+						: experience.content}
+			</div>
+
+			{/* Provenance badges */}
+			<div className="flex items-center gap-1.5 flex-wrap">
+				{/* Source badge */}
+				<span
+					className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+					style={{
+						backgroundColor: `${theme.colors.border}40`,
+						color: theme.colors.textDim,
+					}}
+				>
+					{experience.source}
+				</span>
+
+				{/* Deviation badge */}
+				{ctx?.isDeviation && ctx.deviationType && (
+					<span
+						className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+						style={{
+							backgroundColor: `${theme.colors.warning}20`,
+							color: theme.colors.warning,
+						}}
+					>
+						{ctx.deviationType}
+					</span>
+				)}
+
+				{/* Project path badge */}
+				{ctx?.sourceProjectPath && (
+					<span
+						className="text-[10px] px-1.5 py-0.5 rounded truncate max-w-[120px]"
+						style={{
+							backgroundColor: `${theme.colors.accent}10`,
+							color: theme.colors.textDim,
+						}}
+						title={ctx.sourceProjectPath}
+					>
+						{ctx.sourceProjectPath.split('/').pop()}
+					</span>
+				)}
+
+				{/* Timestamp */}
+				<span className="text-[10px] ml-auto shrink-0" style={{ color: theme.colors.textDim }}>
+					{getRelativeTime(experience.createdAt)}
+				</span>
+			</div>
+
+			{/* Confidence bar + quality indicators */}
+			<div className="flex items-center gap-3 text-[10px]" style={{ color: theme.colors.textDim }}>
+				{/* Confidence bar */}
+				<div
+					className="flex items-center gap-1"
+					title={`Confidence: ${(experience.confidence * 100).toFixed(0)}%`}
+				>
+					<BarChart3 className="w-3 h-3" />
+					<div
+						className="w-12 h-1.5 rounded-full"
+						style={{ backgroundColor: `${theme.colors.border}60` }}
+					>
+						<div
+							className="h-1.5 rounded-full transition-all"
+							style={{
+								width: `${experience.confidence * 100}%`,
+								backgroundColor: confidenceColor,
+							}}
+						/>
+					</div>
+					<span>{(experience.confidence * 100).toFixed(0)}%</span>
+				</div>
+
+				{/* Effectiveness */}
+				{experience.effectivenessScore > 0 && (
+					<div className="flex items-center gap-1" title="Effectiveness">
+						<Sparkles className="w-3 h-3" />
+						{(experience.effectivenessScore * 100).toFixed(0)}%
+					</div>
+				)}
+
+				{/* Use count */}
+				{experience.useCount > 0 && (
+					<div className="flex items-center gap-1" title="Times used">
+						<Hash className="w-3 h-3" />
+						{experience.useCount}x
+					</div>
+				)}
+
+				{/* Cross-project evidence */}
+				{crossProjectCount > 0 && (
+					<div className="flex items-center gap-1" title="Cross-project evidence">
+						<Globe className="w-3 h-3" />
+						{crossProjectCount} project{crossProjectCount !== 1 ? 's' : ''}
+					</div>
+				)}
+			</div>
+
+			{/* Action buttons */}
+			<div className="flex items-center gap-1.5">
+				<button
+					className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors"
+					style={{
+						borderColor: theme.colors.accent,
+						color: theme.colors.accent,
+						backgroundColor: `${theme.colors.accent}10`,
+					}}
+					title="Promote to Rule"
+					onClick={() => onPromote(experience.content)}
+				>
+					<ArrowUpCircle className="w-3 h-3" />
+					Promote
+				</button>
+				<button
+					className="p-1 rounded hover:opacity-80 transition-opacity"
+					style={{ color: theme.colors.textDim }}
+					title="Edit"
+					onClick={onEdit}
+				>
+					<Edit3 className="w-3 h-3" />
+				</button>
+				<button
+					className="p-1 rounded hover:opacity-80 transition-opacity"
+					style={{ color: theme.colors.textDim }}
+					title="Archive"
+					onClick={onArchive}
+				>
+					<Archive className="w-3 h-3" />
+				</button>
+				<button
+					className="p-1 rounded hover:opacity-80 transition-opacity"
+					style={{ color: experience.pinned ? theme.colors.accent : theme.colors.textDim }}
+					title={experience.pinned ? 'Unpin' : 'Pin'}
+					onClick={onTogglePin}
+				>
+					{experience.pinned ? <Pin className="w-3 h-3" /> : <PinOff className="w-3 h-3" />}
+				</button>
+			</div>
 		</div>
 	);
 }
@@ -425,13 +1103,16 @@ function ExtractionStatusPanel({
 					: 'Waiting';
 
 	return (
-		<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
+		<div
+			className="rounded border p-3 space-y-3"
+			style={{ borderColor: theme.colors.border, backgroundColor: `${theme.colors.border}10` }}
+		>
 			{/* Header with status indicator */}
 			<div className="flex items-center justify-between">
 				<div className="flex items-center gap-2">
 					<Activity className="w-3.5 h-3.5" style={{ color: theme.colors.accent }} />
 					<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-						Experience Extraction
+						Extraction Status
 					</span>
 				</div>
 				<div className="flex items-center gap-1.5">
