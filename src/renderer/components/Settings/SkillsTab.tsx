@@ -24,6 +24,7 @@ import {
 	GitMerge,
 	RefreshCw,
 	Trash2,
+	Plus,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { MemoryConfig, MemoryStats, Persona, SkillArea } from '../../../shared/memory-types';
@@ -85,6 +86,8 @@ export function SkillsTab({
 	const [editingSkill, setEditingSkill] = useState<SkillArea | null>(null);
 	const [editingPersonaId, setEditingPersonaId] = useState<string | null>(null);
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState<{ skill: SkillCard } | null>(null);
+	const [showCreateModal, setShowCreateModal] = useState(false);
+	const [createPersonaId, setCreatePersonaId] = useState<string>('');
 	const [moveTarget, setMoveTarget] = useState<{ skill: SkillCard; personaId: string } | null>(
 		null
 	);
@@ -236,16 +239,35 @@ export function SkillsTab({
 
 	const handleSaveSkill = useCallback(
 		async (data: { name: string; description: string }) => {
-			if (!editingSkill) return;
-			const res = await window.maestro.memory.skill.update(editingSkill.id, {
-				name: data.name,
-				description: data.description,
-			});
-			if (!res.success) throw new Error(res.error ?? 'Failed to update skill');
+			if (editingSkill) {
+				// Update existing skill
+				const res = await window.maestro.memory.skill.update(editingSkill.id, {
+					name: data.name,
+					description: data.description,
+				});
+				if (!res.success) throw new Error(res.error ?? 'Failed to update skill');
+			} else if (createPersonaId) {
+				// Create new skill
+				const res = await window.maestro.memory.skill.create(
+					createPersonaId,
+					data.name,
+					data.description
+				);
+				if (!res.success) throw new Error(res.error ?? 'Failed to create skill');
+				// Trigger embedding computation for the new skill
+				try {
+					await window.maestro.memory.ensureEmbeddings('skill', res.data.id);
+				} catch {
+					// Non-fatal: embedding can be re-triggered later
+				}
+			}
+			setEditingSkill(null);
+			setEditingPersonaId(null);
+			setShowCreateModal(false);
 			await loadData();
 			onHierarchyChange?.();
 		},
-		[editingSkill, loadData, onHierarchyChange]
+		[editingSkill, createPersonaId, loadData, onHierarchyChange]
 	);
 
 	const handleReEmbed = useCallback(
@@ -443,6 +465,43 @@ export function SkillsTab({
 					<button className="p-0.5 hover:opacity-70" onClick={() => setError(null)}>
 						<X className="w-3 h-3" />
 					</button>
+				</div>
+			)}
+
+			{/* ─── Create Skill Button ──────────────────────────────── */}
+			{!loading && personas.length > 0 && (
+				<div className="flex items-center gap-2">
+					<button
+						className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border"
+						style={{
+							borderColor: theme.colors.accent,
+							color: theme.colors.accent,
+							backgroundColor: `${theme.colors.accent}10`,
+						}}
+						onClick={() => {
+							setCreatePersonaId(personas[0].id);
+							setShowCreateModal(true);
+						}}
+					>
+						<Plus className="w-3 h-3" />
+						Create Skill
+					</button>
+
+					{/* Persona selector for create (inline when creating) */}
+					{showCreateModal && personas.length > 1 && (
+						<select
+							className="px-2 py-1.5 rounded border bg-transparent text-xs outline-none"
+							style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
+							value={createPersonaId}
+							onChange={(e) => setCreatePersonaId(e.target.value)}
+						>
+							{personas.map((p) => (
+								<option key={p.id} value={p.id}>
+									{p.name}
+								</option>
+							))}
+						</select>
+					)}
 				</div>
 			)}
 
@@ -810,16 +869,17 @@ export function SkillsTab({
 				</div>
 			)}
 
-			{/* ─── Edit Modal ─────────────────────────────────────────── */}
-			{editingPersonaId && (
+			{/* ─── Edit/Create Modal ──────────────────────────────────── */}
+			{(editingPersonaId || showCreateModal) && (
 				<SkillEditModal
 					theme={theme}
 					skill={editingSkill}
-					personaId={editingPersonaId}
+					personaId={editingPersonaId || createPersonaId}
 					onSave={handleSaveSkill}
 					onClose={() => {
 						setEditingSkill(null);
 						setEditingPersonaId(null);
+						setShowCreateModal(false);
 					}}
 				/>
 			)}
