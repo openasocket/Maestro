@@ -30,6 +30,8 @@ import {
 	Hash,
 	Brain,
 	ArrowUpDown,
+	Layers,
+	SlidersHorizontal,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
@@ -161,6 +163,12 @@ export function ExperiencesTab({
 	const [reviewSourceFilter, setReviewSourceFilter] = useState<ReviewSourceFilter>('all');
 	const [reviewDeviationFilter, setReviewDeviationFilter] = useState<ReviewDeviationFilter>('all');
 	const [editingMemory, setEditingMemory] = useState<EnrichedExperience | null>(null);
+	const [reviewConfidenceMin, setReviewConfidenceMin] = useState<number>(0);
+	const [reviewConfidenceMax, setReviewConfidenceMax] = useState<number>(1);
+	const [reviewDateRange, setReviewDateRange] = useState<'all' | '24h' | '7d' | '30d' | '90d'>(
+		'all'
+	);
+	const [reviewProjectFilter, setReviewProjectFilter] = useState<string>('all');
 
 	// ─── Fetch batch-capable agents ─────────────────────────────────────
 	useEffect(() => {
@@ -246,6 +254,16 @@ export function ExperiencesTab({
 		loadExperiences();
 	}, [config.enabled, loadExperiences]);
 
+	// ─── Unique projects for filter ────────────────────────────────────
+	const availableProjects = useMemo(() => {
+		const projects = new Set<string>();
+		for (const e of experiences) {
+			const p = e.experienceContext?.sourceProjectPath;
+			if (p) projects.add(p);
+		}
+		return Array.from(projects).sort();
+	}, [experiences]);
+
 	// ─── Filtered & sorted experiences ──────────────────────────────────
 	const filteredExperiences = useMemo(() => {
 		let result = experiences;
@@ -260,6 +278,31 @@ export function ExperiencesTab({
 			result = result.filter((e) => e.experienceContext?.isDeviation);
 		} else if (reviewDeviationFilter === 'normal') {
 			result = result.filter((e) => !e.experienceContext?.isDeviation);
+		}
+
+		// Confidence range filter
+		if (reviewConfidenceMin > 0 || reviewConfidenceMax < 1) {
+			result = result.filter(
+				(e) => e.confidence >= reviewConfidenceMin && e.confidence <= reviewConfidenceMax
+			);
+		}
+
+		// Date range filter
+		if (reviewDateRange !== 'all') {
+			const now = Date.now();
+			const cutoffs: Record<string, number> = {
+				'24h': 24 * 60 * 60 * 1000,
+				'7d': 7 * 24 * 60 * 60 * 1000,
+				'30d': 30 * 24 * 60 * 60 * 1000,
+				'90d': 90 * 24 * 60 * 60 * 1000,
+			};
+			const cutoff = now - (cutoffs[reviewDateRange] ?? 0);
+			result = result.filter((e) => e.createdAt >= cutoff);
+		}
+
+		// Project filter
+		if (reviewProjectFilter !== 'all') {
+			result = result.filter((e) => e.experienceContext?.sourceProjectPath === reviewProjectFilter);
 		}
 
 		// Search
@@ -289,7 +332,17 @@ export function ExperiencesTab({
 					return 0;
 			}
 		});
-	}, [experiences, reviewSourceFilter, reviewDeviationFilter, reviewSearch, reviewSort]);
+	}, [
+		experiences,
+		reviewSourceFilter,
+		reviewDeviationFilter,
+		reviewConfidenceMin,
+		reviewConfidenceMax,
+		reviewDateRange,
+		reviewProjectFilter,
+		reviewSearch,
+		reviewSort,
+	]);
 
 	// ─── Available skills for edit modal ────────────────────────────────
 	const [availableSkills, setAvailableSkills] = useState<
@@ -727,6 +780,43 @@ export function ExperiencesTab({
 									<option value="normal">Normal only</option>
 								</select>
 
+								{/* Date range filter */}
+								<select
+									value={reviewDateRange}
+									onChange={(e) => setReviewDateRange(e.target.value as typeof reviewDateRange)}
+									className="text-[10px] rounded px-1.5 py-0.5 border bg-transparent"
+									style={{
+										color: theme.colors.textMain,
+										borderColor: theme.colors.border,
+									}}
+								>
+									<option value="all">All time</option>
+									<option value="24h">Last 24h</option>
+									<option value="7d">Last 7 days</option>
+									<option value="30d">Last 30 days</option>
+									<option value="90d">Last 90 days</option>
+								</select>
+
+								{/* Project filter */}
+								{availableProjects.length > 1 && (
+									<select
+										value={reviewProjectFilter}
+										onChange={(e) => setReviewProjectFilter(e.target.value)}
+										className="text-[10px] rounded px-1.5 py-0.5 border bg-transparent truncate max-w-[120px]"
+										style={{
+											color: theme.colors.textMain,
+											borderColor: theme.colors.border,
+										}}
+									>
+										<option value="all">All projects</option>
+										{availableProjects.map((p) => (
+											<option key={p} value={p}>
+												{p.split('/').pop()}
+											</option>
+										))}
+									</select>
+								)}
+
 								{/* Sort */}
 								<div className="flex items-center gap-1 ml-auto">
 									<ArrowUpDown className="w-3 h-3" style={{ color: theme.colors.textDim }} />
@@ -745,6 +835,42 @@ export function ExperiencesTab({
 										<option value="effectiveness">Most effective</option>
 									</select>
 								</div>
+							</div>
+
+							{/* Confidence range filter */}
+							<div
+								className="flex items-center gap-2 text-[10px]"
+								style={{ color: theme.colors.textDim }}
+							>
+								<SlidersHorizontal className="w-3 h-3 shrink-0" />
+								<span className="shrink-0">Confidence:</span>
+								<input
+									type="range"
+									min={0}
+									max={1}
+									step={0.05}
+									value={reviewConfidenceMin}
+									onChange={(e) => setReviewConfidenceMin(Number(e.target.value))}
+									className="w-16 h-1 accent-current"
+									title={`Min: ${(reviewConfidenceMin * 100).toFixed(0)}%`}
+								/>
+								<span className="font-mono w-8 text-center">
+									{(reviewConfidenceMin * 100).toFixed(0)}%
+								</span>
+								<span>–</span>
+								<input
+									type="range"
+									min={0}
+									max={1}
+									step={0.05}
+									value={reviewConfidenceMax}
+									onChange={(e) => setReviewConfidenceMax(Number(e.target.value))}
+									className="w-16 h-1 accent-current"
+									title={`Max: ${(reviewConfidenceMax * 100).toFixed(0)}%`}
+								/>
+								<span className="font-mono w-8 text-center">
+									{(reviewConfidenceMax * 100).toFixed(0)}%
+								</span>
 							</div>
 						</div>
 
@@ -773,6 +899,8 @@ export function ExperiencesTab({
 										key={exp.id}
 										experience={exp}
 										theme={theme}
+										projectPath={projectPath}
+										agentType={activeAgentType}
 										onEdit={() => setEditingMemory(exp)}
 										onTogglePin={() => handleTogglePin(exp)}
 										onArchive={() => handleArchive(exp)}
@@ -837,6 +965,8 @@ export function ExperiencesTab({
 function ExperienceReviewCard({
 	experience,
 	theme,
+	projectPath,
+	agentType,
 	onEdit,
 	onTogglePin,
 	onArchive,
@@ -844,12 +974,41 @@ function ExperienceReviewCard({
 }: {
 	experience: EnrichedExperience;
 	theme: Theme;
+	projectPath?: string | null;
+	agentType?: string | null;
 	onEdit: () => void;
 	onTogglePin: () => void;
 	onArchive: () => void;
 	onPromote: (ruleText: string) => void;
 }) {
 	const [expanded, setExpanded] = useState(false);
+	const [similarExpanded, setSimilarExpanded] = useState(false);
+	const [similarMemories, setSimilarMemories] = useState<
+		{ entry: MemoryEntry; similarity: number; combinedScore: number }[] | null
+	>(null);
+	const [similarLoading, setSimilarLoading] = useState(false);
+
+	const loadSimilarMemories = useCallback(async () => {
+		if (similarMemories !== null || similarLoading) return;
+		setSimilarLoading(true);
+		try {
+			const res = await window.maestro.memory.search(
+				experience.content.slice(0, 200),
+				agentType ?? 'claude-code',
+				projectPath ?? undefined
+			);
+			if (res?.success && res.data) {
+				const filtered = res.data.filter((r: any) => r.entry.id !== experience.id).slice(0, 5);
+				setSimilarMemories(filtered);
+			} else {
+				setSimilarMemories([]);
+			}
+		} catch {
+			setSimilarMemories([]);
+		} finally {
+			setSimilarLoading(false);
+		}
+	}, [experience.id, experience.content, agentType, projectPath, similarMemories, similarLoading]);
 	const ctx = experience.experienceContext;
 	const crossProjectCount = ctx?.crossProjectEvidence?.length ?? 0;
 
@@ -1021,6 +1180,18 @@ function ExperienceReviewCard({
 				</button>
 				<button
 					className="p-1 rounded hover:opacity-80 transition-opacity"
+					style={{ color: similarExpanded ? theme.colors.accent : theme.colors.textDim }}
+					title="Find Similar"
+					onClick={() => {
+						const next = !similarExpanded;
+						setSimilarExpanded(next);
+						if (next) loadSimilarMemories();
+					}}
+				>
+					<Layers className="w-3 h-3" />
+				</button>
+				<button
+					className="p-1 rounded hover:opacity-80 transition-opacity"
 					style={{ color: experience.pinned ? theme.colors.accent : theme.colors.textDim }}
 					title={experience.pinned ? 'Unpin' : 'Pin'}
 					onClick={onTogglePin}
@@ -1028,6 +1199,72 @@ function ExperienceReviewCard({
 					{experience.pinned ? <Pin className="w-3 h-3" /> : <PinOff className="w-3 h-3" />}
 				</button>
 			</div>
+
+			{/* Similar memories — expandable */}
+			{similarExpanded && (
+				<div>
+					<div
+						className="flex items-center gap-1 text-[10px] font-medium"
+						style={{ color: theme.colors.textDim }}
+					>
+						<Layers className="w-3 h-3" />
+						Similar Memories
+					</div>
+					<div className="mt-1 pl-4 space-y-1">
+						{similarLoading && (
+							<div
+								className="flex items-center gap-1 text-[10px]"
+								style={{ color: theme.colors.textDim }}
+							>
+								<Loader2 className="w-3 h-3 animate-spin" />
+								Finding similar...
+							</div>
+						)}
+						{similarMemories && similarMemories.length === 0 && !similarLoading && (
+							<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
+								No similar memories found.
+							</div>
+						)}
+						{similarMemories?.map((result) => (
+							<div
+								key={result.entry.id}
+								className="flex items-center gap-2 rounded px-2 py-1 text-xs"
+								style={{
+									backgroundColor: `${theme.colors.border}20`,
+									color: theme.colors.textMain,
+								}}
+							>
+								<span
+									className="text-[10px] font-medium px-1 py-0.5 rounded shrink-0"
+									style={{
+										backgroundColor:
+											result.entry.type === 'experience'
+												? `${theme.colors.warning}20`
+												: `${theme.colors.border}60`,
+										color:
+											result.entry.type === 'experience'
+												? theme.colors.warning
+												: theme.colors.textDim,
+									}}
+								>
+									{result.entry.type}
+								</span>
+								<span className="truncate flex-1">
+									{result.entry.content.length > 80
+										? result.entry.content.slice(0, 80) + '...'
+										: result.entry.content}
+								</span>
+								<span
+									className="text-[10px] font-medium shrink-0"
+									style={{ color: theme.colors.accent }}
+								>
+									{(result.combinedScore * 100).toFixed(0)}%
+								</span>
+							</div>
+						))}
+					</div>
+				</div>
+			)}
 		</div>
 	);
 }
