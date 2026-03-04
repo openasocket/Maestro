@@ -2674,13 +2674,7 @@ interface MaestroAPI {
 				validated?: boolean;
 				agentName?: string;
 				sourceSessionId: string;
-				usageStats?: {
-					totalCostUsd: number;
-					inputTokens: number;
-					outputTokens: number;
-					cacheReadTokens: number;
-					cacheWriteTokens: number;
-				};
+				usageStats?: UsageStats;
 			}>;
 			total: number;
 			limit: number;
@@ -2728,13 +2722,7 @@ interface MaestroAPI {
 					success?: boolean;
 					elapsedTimeMs?: number;
 					validated?: boolean;
-					usageStats?: {
-						totalCostUsd: number;
-						inputTokens: number;
-						outputTokens: number;
-						cacheReadTokens: number;
-						cacheWriteTokens: number;
-					};
+					usageStats?: UsageStats;
 				},
 				sourceSessionId: string
 			) => void
