@@ -23,12 +23,18 @@ import {
 	Link2,
 	RotateCcw,
 	Globe,
+	Scissors,
+	Timer,
+	Zap,
+	ChevronDown,
+	ChevronRight,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import { ExperienceRepositoryPanel } from './ExperienceRepositoryPanel';
 import type {
 	MemoryConfig,
 	MemoryStats,
+	MemoryEntry,
 	SkillAreaSuggestion,
 	PersonaSuggestion,
 	HierarchySuggestionResult,
@@ -181,6 +187,12 @@ export function MemorySettings({
 	const [queueStatus, setQueueStatus] = useState<JobQueueStatus | null>(null);
 	const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
 	const [batchCapableAgents, setBatchCapableAgents] = useState<{ id: string; name: string }[]>([]);
+	const [pruneConfirm, setPruneConfirm] = useState(false);
+	const [pruning, setPruning] = useState(false);
+	const [pruneProgress, setPruneProgress] = useState<{ done: number; total: number } | null>(null);
+	const [allMemories, setAllMemories] = useState<
+		(MemoryEntry & { scopeLabel: string; skillAreaName?: string; personaName?: string })[]
+	>([]);
 
 	// Fetch batch-capable agents for provider dropdown
 	useEffect(() => {
@@ -252,6 +264,34 @@ export function MemorySettings({
 		};
 	}, []);
 
+	// Load all memories for lifecycle stats (prune count, at-risk count)
+	useEffect(() => {
+		if (!config.enabled) return;
+		let mounted = true;
+		window.maestro.memory
+			.listAllExperiences(projectPath ?? undefined)
+			.then((res) => {
+				if (mounted && res.success) setAllMemories(res.data);
+			})
+			.catch(() => {});
+		return () => {
+			mounted = false;
+		};
+	}, [config.enabled, projectPath, stats]); // re-fetch when stats change (after prune etc.)
+
+	// Compute prunable and at-risk memory counts
+	const prunableMemories = allMemories.filter(
+		(m) => m.active && !m.archived && !m.pinned && m.confidence < config.minConfidenceThreshold
+	);
+	const atRiskMemories = allMemories.filter(
+		(m) =>
+			m.active &&
+			!m.archived &&
+			!m.pinned &&
+			m.confidence < config.minConfidenceThreshold * 2 &&
+			m.confidence >= config.minConfidenceThreshold
+	);
+
 	// Persist config changes with debounce
 	const updateConfig = useCallback(
 		async (updates: Partial<MemoryConfig>) => {
@@ -313,6 +353,34 @@ export function MemorySettings({
 			setResetting(false);
 		}
 	}, [onHierarchyChange]);
+
+	// Prune low-confidence memories handler
+	const handlePruneMemories = useCallback(async () => {
+		setPruning(true);
+		setPruneProgress({ done: 0, total: prunableMemories.length });
+		try {
+			for (let i = 0; i < prunableMemories.length; i++) {
+				const m = prunableMemories[i];
+				await window.maestro.memory.update(
+					m.id,
+					{ active: false },
+					m.scope,
+					m.skillAreaId,
+					undefined
+				);
+				setPruneProgress({ done: i + 1, total: prunableMemories.length });
+			}
+			// Refresh stats after pruning
+			const statsRes = await window.maestro.memory.getAnalytics();
+			if (statsRes.success) setStats(statsRes.data);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : 'Failed to prune memories');
+		} finally {
+			setPruning(false);
+			setPruneConfirm(false);
+			setPruneProgress(null);
+		}
+	}, [prunableMemories]);
 
 	// Load hierarchy suggestions when memory system is enabled and projectPath available
 	useEffect(() => {
@@ -882,6 +950,124 @@ export function MemorySettings({
 						/>
 					</div>
 
+					{/* Memory Lifecycle */}
+					<div
+						className="rounded-lg border p-4 space-y-3"
+						style={{ borderColor: theme.colors.border }}
+					>
+						<div className="flex items-center gap-2">
+							<Timer className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
+							<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+								Memory Lifecycle
+							</div>
+						</div>
+
+						<ConfigSlider
+							label="Confidence Decay Rate"
+							description="How much confidence decreases per day for unused memories (0 = no decay)"
+							value={config.confidenceDecayRate}
+							min={0}
+							max={0.1}
+							step={0.005}
+							onChange={(v) => updateConfig({ confidenceDecayRate: v })}
+							theme={theme}
+							formatValue={(v) => v.toFixed(3)}
+						/>
+
+						<ConfigSlider
+							label="Auto-Archive Threshold"
+							description="Memories below this confidence are automatically archived"
+							value={config.minConfidenceThreshold}
+							min={0}
+							max={0.5}
+							step={0.05}
+							onChange={(v) => updateConfig({ minConfidenceThreshold: v })}
+							theme={theme}
+							formatValue={(v) => v.toFixed(2)}
+						/>
+
+						<ConfigSlider
+							label="Max Memories Per Skill"
+							description="Oldest memories are evicted when a skill area exceeds this count"
+							value={config.maxMemoriesPerSkillArea}
+							min={10}
+							max={200}
+							step={10}
+							onChange={(v) => updateConfig({ maxMemoriesPerSkillArea: v })}
+							theme={theme}
+						/>
+
+						{/* Prune Now */}
+						<div className="pt-2 border-t" style={{ borderColor: theme.colors.border }}>
+							{!pruneConfirm ? (
+								<button
+									className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs transition-colors"
+									style={{
+										color: theme.colors.textDim,
+										backgroundColor: `${theme.colors.border}40`,
+									}}
+									onClick={() => setPruneConfirm(true)}
+									disabled={pruning || prunableMemories.length === 0}
+									title={
+										prunableMemories.length === 0
+											? 'No memories below threshold'
+											: `${prunableMemories.length} memories below ${config.minConfidenceThreshold} confidence`
+									}
+								>
+									<Scissors className="w-3 h-3" />
+									Prune Low-Confidence Memories
+									{prunableMemories.length > 0 && (
+										<span
+											className="ml-1 px-1.5 py-0.5 rounded-full text-xs"
+											style={{ backgroundColor: `${theme.colors.border}60` }}
+										>
+											{prunableMemories.length}
+										</span>
+									)}
+								</button>
+							) : pruning ? (
+								<div
+									className="flex items-center gap-2 text-xs"
+									style={{ color: theme.colors.textDim }}
+								>
+									<Loader2 className="w-3 h-3 animate-spin" />
+									{pruneProgress
+										? `Pruning... ${pruneProgress.done}/${pruneProgress.total}`
+										: 'Pruning...'}
+								</div>
+							) : (
+								<div className="space-y-2">
+									<div className="text-xs" style={{ color: theme.colors.textMain }}>
+										Archive {prunableMemories.length} memories below {config.minConfidenceThreshold}{' '}
+										confidence?
+									</div>
+									<div className="flex gap-2">
+										<button
+											className="px-2.5 py-1 rounded text-xs"
+											style={{
+												color: theme.colors.textMain,
+												backgroundColor: '#ef4444',
+											}}
+											onClick={handlePruneMemories}
+										>
+											Confirm
+										</button>
+										<button
+											className="px-2.5 py-1 rounded text-xs"
+											style={{
+												color: theme.colors.textDim,
+												backgroundColor: `${theme.colors.border}40`,
+											}}
+											onClick={() => setPruneConfirm(false)}
+										>
+											Cancel
+										</button>
+									</div>
+								</div>
+							)}
+						</div>
+					</div>
+
 					{/* Promotion Candidates */}
 					{promotionCandidates.length > 0 && (
 						<PromotionSection
@@ -907,8 +1093,12 @@ export function MemorySettings({
 							stats={stats}
 							theme={theme}
 							promotionCandidatesCount={promotionCandidates.length}
+							atRiskCount={atRiskMemories.length}
 						/>
 					)}
+
+					{/* Injection Activity */}
+					<InjectionActivityPanel theme={theme} />
 
 					{/* Hierarchy Suggestions */}
 					<HierarchySuggestions
@@ -939,10 +1129,12 @@ function MemoryHealthPanel({
 	stats,
 	theme,
 	promotionCandidatesCount,
+	atRiskCount,
 }: {
 	stats: MemoryStats;
 	theme: Theme;
 	promotionCandidatesCount: number;
+	atRiskCount: number;
 }) {
 	const dist = stats.effectivenessDistribution;
 	const total = dist.high + dist.medium + dist.low + dist.unscored;
@@ -1046,6 +1238,12 @@ function MemoryHealthPanel({
 						{stats.neverInjectedCount} memories never injected
 					</div>
 				)}
+				{atRiskCount > 0 && (
+					<div className="flex items-center gap-1.5 text-xs" style={{ color: '#eab308' }}>
+						<AlertTriangle className="w-3 h-3" />
+						{atRiskCount} memories approaching archive threshold
+					</div>
+				)}
 				{(promotionCandidatesCount > 0 || stats.promotionCandidates > 0) && (
 					<div className="flex items-center gap-1.5 text-xs" style={{ color: theme.colors.accent }}>
 						<ArrowUpCircle className="w-3 h-3" />
@@ -1129,6 +1327,138 @@ function MemoryHealthPanel({
 			</div>
 		</div>
 	);
+}
+
+// ─── Injection Event Type (mirrors main-process InjectionEvent) ──────────────
+
+interface InjectionEventRecord {
+	sessionId: string;
+	memoryIds: string[];
+	tokenCount: number;
+	timestamp: number;
+	scopeGroups: Array<{ scope: string; skillAreaId?: string; projectPath?: string; ids: string[] }>;
+}
+
+/**
+ * Injection Activity panel — shows recent memory injection log.
+ * Default collapsed; header shows 7-day count.
+ */
+function InjectionActivityPanel({ theme }: { theme: Theme }) {
+	const [expanded, setExpanded] = useState(false);
+	const [injections, setInjections] = useState<InjectionEventRecord[]>([]);
+	const [loaded, setLoaded] = useState(false);
+
+	useEffect(() => {
+		let cancelled = false;
+		window.maestro.memory
+			.getRecentInjections(20)
+			.then((res: { success: boolean; data?: unknown[] }) => {
+				if (cancelled) return;
+				if (res.success && Array.isArray(res.data)) {
+					setInjections(res.data as InjectionEventRecord[]);
+				}
+				setLoaded(true);
+			})
+			.catch(() => setLoaded(true));
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+	const recentCount = injections.filter((e) => e.timestamp >= sevenDaysAgo).length;
+
+	return (
+		<div className="rounded-lg border p-4 space-y-2" style={{ borderColor: theme.colors.border }}>
+			<button
+				className="w-full flex items-center gap-2 text-left"
+				onClick={() => setExpanded(!expanded)}
+			>
+				{expanded ? (
+					<ChevronDown className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+				) : (
+					<ChevronRight className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+				)}
+				<Zap className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+				<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+					Recent Injections ({loaded ? `${recentCount} in 7 days` : '...'})
+				</span>
+			</button>
+
+			{expanded && (
+				<div className="space-y-1.5 pt-1">
+					{!loaded && (
+						<div className="text-xs" style={{ color: theme.colors.textDim }}>
+							Loading...
+						</div>
+					)}
+					{loaded && injections.length === 0 && (
+						<div className="text-xs" style={{ color: theme.colors.textDim }}>
+							No memories injected recently. Memories are injected when agents encounter relevant
+							tasks.
+						</div>
+					)}
+					{loaded &&
+						injections.slice(0, 20).map((event, i) => {
+							const preview =
+								event.memoryIds.length > 0
+									? `${event.memoryIds.length} memor${event.memoryIds.length === 1 ? 'y' : 'ies'}`
+									: 'No memories';
+							const scopes = event.scopeGroups
+								.map((g) => g.scope)
+								.filter((v, idx, arr) => arr.indexOf(v) === idx)
+								.join(', ');
+							return (
+								<div
+									key={`${event.timestamp}-${i}`}
+									className="flex items-center gap-2 text-[10px] py-1 px-2 rounded"
+									style={{ backgroundColor: `${theme.colors.border}20` }}
+								>
+									<span
+										className="shrink-0 px-1.5 py-0.5 rounded font-medium"
+										style={{
+											backgroundColor: `${theme.colors.accent}20`,
+											color: theme.colors.accent,
+										}}
+									>
+										{preview}
+									</span>
+									{scopes && (
+										<span
+											className="shrink-0 px-1.5 py-0.5 rounded"
+											style={{
+												backgroundColor: `${theme.colors.border}40`,
+												color: theme.colors.textDim,
+											}}
+										>
+											{scopes}
+										</span>
+									)}
+									<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
+										{event.tokenCount > 0 && `${event.tokenCount} tokens`}
+									</span>
+									<span className="ml-auto shrink-0" style={{ color: theme.colors.textDim }}>
+										{formatInjectionTime(event.timestamp)}
+									</span>
+								</div>
+							);
+						})}
+				</div>
+			)}
+		</div>
+	);
+}
+
+function formatInjectionTime(ts: number): string {
+	const diff = Date.now() - ts;
+	const mins = Math.floor(diff / 60000);
+	if (mins < 1) return 'just now';
+	if (mins < 60) return `${mins}m ago`;
+	const hours = Math.floor(mins / 60);
+	if (hours < 24) return `${hours}h ago`;
+	const days = Math.floor(hours / 24);
+	if (days < 30) return `${days}d ago`;
+	return `${Math.floor(days / 30)}mo ago`;
 }
 
 /**

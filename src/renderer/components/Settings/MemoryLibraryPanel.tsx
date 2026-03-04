@@ -41,6 +41,7 @@ import type {
 	MemorySearchResult,
 	MemoryType,
 	MemoryScope,
+	MemorySource,
 	SkillAreaId,
 	Role,
 	Persona,
@@ -71,6 +72,27 @@ interface MemoryLibraryPanelProps {
 }
 
 type TypeFilter = 'all' | 'rule' | 'experience';
+type SourceFilter = MemorySource | 'all';
+type SortOption = 'newest' | 'oldest' | 'most-used' | 'most-effective' | 'highest-confidence';
+
+const SOURCE_LABELS: Record<MemorySource | 'all', string> = {
+	all: 'All Sources',
+	user: 'Manual',
+	'auto-run': 'Auto Run',
+	'session-analysis': 'Extracted',
+	consolidation: 'Consolidated',
+	grpo: 'Promoted',
+	import: 'Imported',
+	repository: 'Repository',
+};
+
+const SORT_LABELS: Record<SortOption, string> = {
+	newest: 'Newest first',
+	oldest: 'Oldest first',
+	'most-used': 'Most used',
+	'most-effective': 'Most effective',
+	'highest-confidence': 'Highest confidence',
+};
 
 // ─── Breadcrumb Builder ───────────────────────────────────────────────────
 
@@ -311,6 +333,36 @@ function MemoryCard({
 				)}
 			</div>
 
+			{/* Metadata badges row */}
+			<div className="flex items-center gap-2 text-[10px]" style={{ color: theme.colors.textDim }}>
+				<span>{formatRelativeTime(memory.createdAt)}</span>
+				{memory.useCount > 0 ? (
+					<UseCountBadge useCount={memory.useCount} lastUsedAt={memory.lastUsedAt} theme={theme} />
+				) : (
+					memory.createdAt < Date.now() - 7 * 24 * 60 * 60 * 1000 && (
+						<span style={{ color: '#ea8b23', opacity: 0.8 }}>Never used</span>
+					)
+				)}
+				{memory.effectivenessScore > 0 && (
+					<span
+						className="flex items-center gap-1"
+						title={`Effectiveness: ${(memory.effectivenessScore * 100).toFixed(1)}%`}
+					>
+						<span
+							className="inline-block w-1.5 h-1.5 rounded-full"
+							style={{
+								backgroundColor:
+									memory.effectivenessScore > 0.7
+										? '#22c55e'
+										: memory.effectivenessScore > 0.4
+											? '#eab308'
+											: '#ef4444',
+							}}
+						/>
+					</span>
+				)}
+			</div>
+
 			{/* Experience context — expandable */}
 			{hasContext && memory.experienceContext && (
 				<div>
@@ -472,22 +524,59 @@ function MemoryCard({
 				)}
 
 				{/* Use count */}
-				{memory.useCount > 0 && (
-					<div className="flex items-center gap-1" title="Times used">
-						<Hash className="w-3 h-3" />
-						{memory.useCount}
-					</div>
-				)}
-
-				{/* Last used */}
-				{memory.lastUsedAt > 0 && (
-					<div className="flex items-center gap-1" title="Last used">
-						<Clock className="w-3 h-3" />
-						{formatRelativeTime(memory.lastUsedAt)}
-					</div>
+				{memory.useCount > 0 ? (
+					<UseCountBadge useCount={memory.useCount} lastUsedAt={memory.lastUsedAt} theme={theme} />
+				) : (
+					memory.createdAt < Date.now() - 7 * 24 * 60 * 60 * 1000 && (
+						<span style={{ color: '#ea8b23', opacity: 0.8 }}>Never used</span>
+					)
 				)}
 			</div>
 		</div>
+	);
+}
+
+/**
+ * Clickable "Used Nx" badge that shows a tooltip with lastUsedAt on click.
+ */
+function UseCountBadge({
+	useCount,
+	lastUsedAt,
+	theme,
+}: {
+	useCount: number;
+	lastUsedAt: number;
+	theme: Theme;
+}) {
+	const [showTooltip, setShowTooltip] = useState(false);
+
+	return (
+		<span className="relative inline-flex">
+			<button
+				className="px-1 py-0.5 rounded text-[10px] cursor-pointer hover:opacity-80 transition-opacity"
+				style={{ backgroundColor: `${theme.colors.border}40` }}
+				onClick={(e) => {
+					e.stopPropagation();
+					setShowTooltip(!showTooltip);
+				}}
+				onBlur={() => setShowTooltip(false)}
+			>
+				Used {useCount}x
+			</button>
+			{showTooltip && lastUsedAt > 0 && (
+				<span
+					className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 rounded text-[10px] whitespace-nowrap z-50"
+					style={{
+						backgroundColor: theme.colors.bgMain,
+						color: theme.colors.textMain,
+						border: `1px solid ${theme.colors.border}`,
+						boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+					}}
+				>
+					Last used: {formatRelativeTime(lastUsedAt)}
+				</span>
+			)}
+		</span>
 	);
 }
 
@@ -565,98 +654,6 @@ function SearchResultCard({ result, theme }: { result: MemorySearchResult; theme
 	);
 }
 
-// ─── Inline Memory Editor ─────────────────────────────────────────────────
-
-function InlineMemoryEditor({
-	theme,
-	initial,
-	onSave,
-	onCancel,
-}: {
-	theme: Theme;
-	initial?: { content: string; type: MemoryType; tags: string[] };
-	onSave: (content: string, type: MemoryType, tags: string[]) => void;
-	onCancel: () => void;
-}) {
-	const [content, setContent] = useState(initial?.content ?? '');
-	const [type, setType] = useState<MemoryType>(initial?.type ?? 'rule');
-	const [tagsInput, setTagsInput] = useState(initial?.tags.join(', ') ?? '');
-	const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-	useEffect(() => {
-		textareaRef.current?.focus();
-	}, []);
-
-	const handleSave = () => {
-		if (!content.trim()) return;
-		const tags = tagsInput
-			.split(',')
-			.map((t) => t.trim())
-			.filter(Boolean);
-		onSave(content.trim(), type, tags);
-	};
-
-	return (
-		<div className="rounded-lg border p-3 space-y-2" style={{ borderColor: theme.colors.accent }}>
-			<textarea
-				ref={textareaRef}
-				value={content}
-				onChange={(e) => setContent(e.target.value)}
-				placeholder="Memory content..."
-				rows={3}
-				className="w-full bg-transparent outline-none text-xs resize-none"
-				style={{ color: theme.colors.textMain }}
-				onKeyDown={(e) => {
-					if (e.key === 'Escape') onCancel();
-					if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSave();
-				}}
-			/>
-			<div className="flex items-center gap-2">
-				<select
-					value={type}
-					onChange={(e) => setType(e.target.value as MemoryType)}
-					className="bg-transparent outline-none text-xs rounded px-1.5 py-0.5 border"
-					style={{
-						color: theme.colors.textMain,
-						borderColor: theme.colors.border,
-					}}
-				>
-					<option value="rule">Rule</option>
-					<option value="experience">Experience</option>
-				</select>
-				<input
-					type="text"
-					value={tagsInput}
-					onChange={(e) => setTagsInput(e.target.value)}
-					placeholder="Tags (comma-separated)"
-					className="flex-1 bg-transparent outline-none text-xs"
-					style={{ color: theme.colors.textMain }}
-				/>
-			</div>
-			<div className="flex items-center justify-end gap-2">
-				<button
-					className="text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
-					style={{ color: theme.colors.textDim }}
-					onClick={onCancel}
-				>
-					Cancel
-				</button>
-				<button
-					className="text-xs px-3 py-1 rounded font-medium hover:opacity-80 transition-opacity"
-					style={{
-						backgroundColor: theme.colors.accent,
-						color: theme.colors.accentForeground,
-					}}
-					onClick={handleSave}
-					disabled={!content.trim()}
-				>
-					{initial ? 'Save' : 'Add'}
-				</button>
-			</div>
-		</div>
-	);
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────
 
 export function MemoryLibraryPanel({
@@ -681,7 +678,10 @@ export function MemoryLibraryPanel({
 
 	// Filters
 	const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+	const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+	const [sortBy, setSortBy] = useState<SortOption>('newest');
 	const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+	const [neverInjectedOnly, setNeverInjectedOnly] = useState(false);
 
 	// Archive state
 	const [showArchived, setShowArchived] = useState(false);
@@ -714,10 +714,28 @@ export function MemoryLibraryPanel({
 	);
 	const resolvedProjectPath = _projectPath ?? undefined;
 
+	// Derive persona/role IDs from selected node for create modal defaults
+	const { defaultPersonaId, defaultRoleId } = useMemo(() => {
+		if (selectedNode?.type === 'skill') {
+			const skill = skillAreas.find((s) => s.id === selectedNode.id);
+			if (skill) {
+				const persona = personas.find((p) => p.id === skill.personaId);
+				return {
+					defaultPersonaId: skill.personaId,
+					defaultRoleId: persona?.roleId,
+				};
+			}
+		}
+		return { defaultPersonaId: undefined, defaultRoleId: undefined };
+	}, [selectedNode, skillAreas, personas]);
+
 	// Reset filters when node changes
 	useEffect(() => {
 		setTypeFilter('all');
+		setSourceFilter('all');
+		setSortBy('newest');
 		setSelectedTags(new Set());
+		setNeverInjectedOnly(false);
 		setSearchQuery('');
 		setSearchResults(null);
 		setAddingMemory(false);
@@ -792,21 +810,45 @@ export function MemoryLibraryPanel({
 		return Array.from(tagSet).sort();
 	}, [memories]);
 
-	// Apply filters
+	// Apply filters and sorting
 	const filteredMemories = useMemo(() => {
 		let result = memories;
 		if (typeFilter !== 'all') {
 			result = result.filter((m) => m.type === typeFilter);
 		}
+		if (sourceFilter !== 'all') {
+			result = result.filter((m) => m.source === sourceFilter);
+		}
 		if (selectedTags.size > 0) {
 			result = result.filter((m) => m.tags.some((t) => selectedTags.has(t)));
 		}
-		// Pinned first, then by updatedAt desc
+		if (neverInjectedOnly) {
+			result = result.filter((m) => m.useCount === 0);
+		}
+		// Pinned first, then apply sort
 		return result.sort((a, b) => {
 			if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-			return b.updatedAt - a.updatedAt;
+			switch (sortBy) {
+				case 'oldest':
+					return a.createdAt - b.createdAt;
+				case 'most-used':
+					return b.useCount - a.useCount;
+				case 'most-effective':
+					return b.effectivenessScore - a.effectivenessScore;
+				case 'highest-confidence':
+					return b.confidence - a.confidence;
+				case 'newest':
+				default:
+					return b.createdAt - a.createdAt;
+			}
 		});
-	}, [memories, typeFilter, selectedTags]);
+	}, [memories, typeFilter, sourceFilter, selectedTags, neverInjectedOnly, sortBy]);
+
+	// Count of never-injected memories for the filter badge
+	const neverInjectedCount = useMemo(
+		() => memories.filter((m) => m.useCount === 0).length,
+		[memories]
+	);
 
 	// Breadcrumb
 	const breadcrumb = buildBreadcrumb(selectedNode, roles, personas, skillAreas);
@@ -996,29 +1038,6 @@ export function MemoryLibraryPanel({
 		[selectedIds, resolvedScope, resolvedSkillAreaId, resolvedProjectPath, store]
 	);
 
-	const handleAddMemory = useCallback(
-		async (content: string, type: MemoryType, tags: string[]) => {
-			try {
-				// Derive personaId and roleId from the selected node for skill-scoped memories
-				let personaId: string | undefined;
-				let roleId: string | undefined;
-				if (selectedNode?.type === 'skill') {
-					const skill = skillAreas.find((s) => s.id === selectedNode.id);
-					if (skill) {
-						personaId = skill.personaId;
-						const persona = personas.find((p) => p.id === skill.personaId);
-						if (persona) roleId = persona.roleId;
-					}
-				}
-				await store.addMemory({ content, type, tags, source: 'user', personaId, roleId });
-			} catch {
-				// Error from store
-			}
-			setAddingMemory(false);
-		},
-		[store, selectedNode, skillAreas, personas]
-	);
-
 	// Available skills for the edit modal
 	const availableSkills = useMemo(
 		() =>
@@ -1072,6 +1091,41 @@ export function MemoryLibraryPanel({
 			store.refresh();
 		},
 		[editingMemory, store, resolvedProjectPath]
+	);
+
+	const handleSaveCreate = useCallback(
+		async (data: {
+			content: string;
+			type: MemoryType;
+			scope: MemoryScope;
+			skillAreaId?: SkillAreaId;
+			personaId?: string;
+			roleId?: string;
+			tags: string[];
+			confidence: number;
+			pinned: boolean;
+			experienceContext?: MemoryEntry['experienceContext'];
+		}) => {
+			const res = await window.maestro.memory.add(
+				{
+					content: data.content,
+					type: data.type,
+					scope: data.scope,
+					skillAreaId: data.skillAreaId,
+					personaId: data.personaId,
+					roleId: data.roleId,
+					tags: data.tags,
+					source: 'user',
+					confidence: data.confidence,
+					pinned: data.pinned,
+					experienceContext: data.experienceContext,
+				},
+				data.scope === 'project' ? resolvedProjectPath : undefined
+			);
+			if (!res.success) throw new Error(res.error);
+			store.refresh();
+		},
+		[store, resolvedProjectPath]
 	);
 
 	const handleTogglePin = useCallback(
@@ -1297,6 +1351,60 @@ export function MemoryLibraryPanel({
 					>
 						Archived ({archivedLoading ? '...' : archivedMemories.length})
 					</button>
+
+					{/* Never injected filter */}
+					{neverInjectedCount > 0 && (
+						<button
+							className="text-[10px] px-2 py-0.5 rounded-full font-medium transition-colors"
+							style={{
+								backgroundColor: neverInjectedOnly ? '#ea8b2320' : 'transparent',
+								color: neverInjectedOnly ? '#ea8b23' : theme.colors.textDim,
+								border: `1px solid ${neverInjectedOnly ? '#ea8b23' : theme.colors.border}`,
+							}}
+							onClick={() => setNeverInjectedOnly(!neverInjectedOnly)}
+						>
+							Never injected ({neverInjectedCount})
+						</button>
+					)}
+				</div>
+
+				{/* Source filter + Sort */}
+				<div className="flex items-center gap-1.5">
+					<select
+						className="text-[10px] px-1.5 py-0.5 rounded font-medium outline-none cursor-pointer"
+						style={{
+							backgroundColor: sourceFilter !== 'all' ? `${theme.colors.accent}20` : 'transparent',
+							color: sourceFilter !== 'all' ? theme.colors.accent : theme.colors.textDim,
+							border: `1px solid ${sourceFilter !== 'all' ? theme.colors.accent : theme.colors.border}`,
+						}}
+						value={sourceFilter}
+						onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}
+					>
+						{(Object.keys(SOURCE_LABELS) as (MemorySource | 'all')[]).map((key) => (
+							<option key={key} value={key}>
+								{SOURCE_LABELS[key]}
+							</option>
+						))}
+					</select>
+
+					<div className="flex-1" />
+
+					<select
+						className="text-[10px] px-1.5 py-0.5 rounded font-medium outline-none cursor-pointer"
+						style={{
+							backgroundColor: 'transparent',
+							color: theme.colors.textDim,
+							border: `1px solid ${theme.colors.border}`,
+						}}
+						value={sortBy}
+						onChange={(e) => setSortBy(e.target.value as SortOption)}
+					>
+						{(Object.keys(SORT_LABELS) as SortOption[]).map((key) => (
+							<option key={key} value={key}>
+								{SORT_LABELS[key]}
+							</option>
+						))}
+					</select>
 				</div>
 
 				{/* Bulk mode controls */}
@@ -1367,15 +1475,6 @@ export function MemoryLibraryPanel({
 
 			{/* Content */}
 			<div className="flex-1 overflow-y-auto scrollbar-thin p-3 space-y-2">
-				{/* Inline add form */}
-				{addingMemory && !showArchived && (
-					<InlineMemoryEditor
-						theme={theme}
-						onSave={handleAddMemory}
-						onCancel={() => setAddingMemory(false)}
-					/>
-				)}
-
 				{/* Loading */}
 				{(showArchived ? archivedLoading : loading) && (
 					<div
@@ -1680,6 +1779,21 @@ export function MemoryLibraryPanel({
 					availableSkills={availableSkills}
 					onSave={handleSaveEdit}
 					onClose={() => setEditingMemory(null)}
+				/>
+			)}
+
+			{/* Create Modal */}
+			{addingMemory && (
+				<MemoryEditModal
+					theme={theme}
+					memory={null}
+					defaultScope={resolvedScope}
+					defaultSkillAreaId={resolvedSkillAreaId}
+					defaultPersonaId={defaultPersonaId}
+					defaultRoleId={defaultRoleId}
+					availableSkills={availableSkills}
+					onSave={handleSaveCreate}
+					onClose={() => setAddingMemory(false)}
 				/>
 			)}
 		</div>
