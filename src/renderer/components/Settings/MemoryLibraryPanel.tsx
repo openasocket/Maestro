@@ -30,6 +30,7 @@ import {
 	Link2,
 	X,
 	CheckSquare,
+	Archive,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { TreeNode } from './MemoryTreeBrowser';
@@ -689,6 +690,14 @@ export function MemoryLibraryPanel({
 	const [bulkMode, setBulkMode] = useState(false);
 	const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+	// Bulk operation state
+	const [bulkOpProgress, setBulkOpProgress] = useState<{
+		label: string;
+		current: number;
+		total: number;
+	} | null>(null);
+	const [bulkConfirm, setBulkConfirm] = useState<{ action: 'delete'; count: number } | null>(null);
+
 	// Editor state
 	const [addingMemory, setAddingMemory] = useState(false);
 	const [editingMemory, setEditingMemory] = useState<MemoryEntry | null>(null);
@@ -822,6 +831,100 @@ export function MemoryLibraryPanel({
 	const handleDeselectAll = useCallback(() => {
 		setSelectedIds(new Set());
 	}, []);
+
+	// ─── Bulk Operations ──────────────────────────────────────────────
+
+	const handleBulkDelete = useCallback(async () => {
+		const ids = Array.from(selectedIds);
+		setBulkConfirm(null);
+		setBulkOpProgress({ label: 'Deleting', current: 0, total: ids.length });
+		try {
+			for (let i = 0; i < ids.length; i++) {
+				setBulkOpProgress({ label: 'Deleting', current: i + 1, total: ids.length });
+				await window.maestro.memory.delete(
+					ids[i],
+					resolvedScope,
+					resolvedSkillAreaId,
+					resolvedProjectPath
+				);
+			}
+		} catch {
+			// Partial failure — still clear and refresh what we can
+		} finally {
+			setBulkOpProgress(null);
+			setSelectedIds(new Set());
+			store.refresh();
+		}
+	}, [selectedIds, resolvedScope, resolvedSkillAreaId, resolvedProjectPath, store]);
+
+	const handleBulkArchive = useCallback(async () => {
+		const ids = Array.from(selectedIds);
+		setBulkOpProgress({ label: 'Archiving', current: 0, total: ids.length });
+		try {
+			for (let i = 0; i < ids.length; i++) {
+				setBulkOpProgress({ label: 'Archiving', current: i + 1, total: ids.length });
+				await window.maestro.memory.update(
+					ids[i],
+					{ active: false },
+					resolvedScope,
+					resolvedSkillAreaId,
+					resolvedProjectPath
+				);
+			}
+		} catch {
+			// Partial failure
+		} finally {
+			setBulkOpProgress(null);
+			setSelectedIds(new Set());
+			store.refresh();
+		}
+	}, [selectedIds, resolvedScope, resolvedSkillAreaId, resolvedProjectPath, store]);
+
+	const handleBulkPin = useCallback(async () => {
+		const ids = Array.from(selectedIds);
+		setBulkOpProgress({ label: 'Pinning', current: 0, total: ids.length });
+		try {
+			for (let i = 0; i < ids.length; i++) {
+				setBulkOpProgress({ label: 'Pinning', current: i + 1, total: ids.length });
+				await window.maestro.memory.update(
+					ids[i],
+					{ pinned: true },
+					resolvedScope,
+					resolvedSkillAreaId,
+					resolvedProjectPath
+				);
+			}
+		} catch {
+			// Partial failure
+		} finally {
+			setBulkOpProgress(null);
+			setSelectedIds(new Set());
+			store.refresh();
+		}
+	}, [selectedIds, resolvedScope, resolvedSkillAreaId, resolvedProjectPath, store]);
+
+	const handleBulkUnpin = useCallback(async () => {
+		const ids = Array.from(selectedIds);
+		setBulkOpProgress({ label: 'Unpinning', current: 0, total: ids.length });
+		try {
+			for (let i = 0; i < ids.length; i++) {
+				setBulkOpProgress({ label: 'Unpinning', current: i + 1, total: ids.length });
+				await window.maestro.memory.update(
+					ids[i],
+					{ pinned: false },
+					resolvedScope,
+					resolvedSkillAreaId,
+					resolvedProjectPath
+				);
+			}
+		} catch {
+			// Partial failure
+		} finally {
+			setBulkOpProgress(null);
+			setSelectedIds(new Set());
+			store.refresh();
+		}
+	}, [selectedIds, resolvedScope, resolvedSkillAreaId, resolvedProjectPath, store]);
 
 	const handleAddMemory = useCallback(
 		async (content: string, type: MemoryType, tags: string[]) => {
@@ -1280,6 +1383,98 @@ export function MemoryLibraryPanel({
 					</>
 				)}
 			</div>
+
+			{/* Bulk Action Toolbar */}
+			{bulkMode && selectedIds.size > 0 && !showArchived && (
+				<div
+					className="shrink-0 flex items-center gap-2 px-3 py-2 border-t"
+					style={{
+						backgroundColor: theme.colors.bgMain,
+						borderColor: theme.colors.border,
+						boxShadow: '0 -2px 8px rgba(0,0,0,0.15)',
+					}}
+				>
+					{bulkOpProgress ? (
+						<div
+							className="flex items-center gap-2 text-xs"
+							style={{ color: theme.colors.textMain }}
+						>
+							<Loader2 className="w-3.5 h-3.5 animate-spin" />
+							{bulkOpProgress.label} {bulkOpProgress.current}/{bulkOpProgress.total}...
+						</div>
+					) : bulkConfirm ? (
+						<>
+							<span className="text-xs" style={{ color: theme.colors.error }}>
+								Delete {bulkConfirm.count} memor{bulkConfirm.count === 1 ? 'y' : 'ies'}? This cannot
+								be undone.
+							</span>
+							<div className="flex-1" />
+							<button
+								className="text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
+								style={{ color: theme.colors.textDim }}
+								onClick={() => setBulkConfirm(null)}
+							>
+								Cancel
+							</button>
+							<button
+								className="text-xs px-2 py-1 rounded font-medium hover:opacity-80 transition-opacity"
+								style={{ backgroundColor: theme.colors.error, color: '#fff' }}
+								onClick={handleBulkDelete}
+							>
+								Confirm Delete
+							</button>
+						</>
+					) : (
+						<>
+							<button
+								className="flex items-center gap-1 text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
+								style={{ color: '#fff', backgroundColor: theme.colors.error }}
+								title="Delete selected"
+								onClick={() => setBulkConfirm({ action: 'delete', count: selectedIds.size })}
+							>
+								<Trash2 className="w-3 h-3" />
+								Delete
+							</button>
+							<button
+								className="flex items-center gap-1 text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
+								style={{
+									color: theme.colors.textMain,
+									backgroundColor: `${theme.colors.border}60`,
+								}}
+								title="Archive selected"
+								onClick={handleBulkArchive}
+							>
+								<Archive className="w-3 h-3" />
+								Archive
+							</button>
+							<button
+								className="flex items-center gap-1 text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
+								style={{
+									color: theme.colors.textMain,
+									backgroundColor: `${theme.colors.border}60`,
+								}}
+								title="Pin selected"
+								onClick={handleBulkPin}
+							>
+								<Pin className="w-3 h-3" />
+								Pin
+							</button>
+							<button
+								className="flex items-center gap-1 text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
+								style={{
+									color: theme.colors.textMain,
+									backgroundColor: `${theme.colors.border}60`,
+								}}
+								title="Unpin selected"
+								onClick={handleBulkUnpin}
+							>
+								<PinOff className="w-3 h-3" />
+								Unpin
+							</button>
+						</>
+					)}
+				</div>
+			)}
 
 			{/* Edit Modal */}
 			{editingMemory && (
