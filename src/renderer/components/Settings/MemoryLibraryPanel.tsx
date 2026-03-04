@@ -29,6 +29,7 @@ import {
 	RotateCcw,
 	Link2,
 	X,
+	CheckSquare,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { TreeNode } from './MemoryTreeBrowser';
@@ -127,6 +128,9 @@ function MemoryCard({
 	onDelete,
 	archived,
 	onRestore,
+	bulkMode,
+	selected,
+	onToggleSelect,
 }: {
 	memory: MemoryEntry;
 	theme: Theme;
@@ -135,6 +139,9 @@ function MemoryCard({
 	onDelete: () => void;
 	archived?: boolean;
 	onRestore?: () => void;
+	bulkMode?: boolean;
+	selected?: boolean;
+	onToggleSelect?: () => void;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const [contextExpanded, setContextExpanded] = useState(false);
@@ -205,6 +212,17 @@ function MemoryCard({
 		>
 			{/* Header row */}
 			<div className="flex items-center gap-2">
+				{/* Bulk select checkbox */}
+				{bulkMode && (
+					<input
+						type="checkbox"
+						checked={!!selected}
+						onChange={onToggleSelect}
+						className="shrink-0 w-3.5 h-3.5 cursor-pointer accent-current"
+						style={{ accentColor: theme.colors.accent }}
+						onClick={(e) => e.stopPropagation()}
+					/>
+				)}
 				{/* Type badge — shows "Archived" when in archive view */}
 				<span
 					className="text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0"
@@ -667,6 +685,10 @@ export function MemoryLibraryPanel({
 	const [archivedMemories, setArchivedMemories] = useState<MemoryEntry[]>([]);
 	const [archivedLoading, setArchivedLoading] = useState(false);
 
+	// Bulk selection state
+	const [bulkMode, setBulkMode] = useState(false);
+	const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
 	// Editor state
 	const [addingMemory, setAddingMemory] = useState(false);
 	const [editingMemory, setEditingMemory] = useState<MemoryEntry | null>(null);
@@ -687,6 +709,8 @@ export function MemoryLibraryPanel({
 		setAddingMemory(false);
 		setEditingMemory(null);
 		setShowArchived(false);
+		setBulkMode(false);
+		setSelectedIds(new Set());
 	}, [selectedNode]);
 
 	// Fetch archived memories for count display and archive view
@@ -774,6 +798,30 @@ export function MemoryLibraryPanel({
 	const breadcrumb = buildBreadcrumb(selectedNode, roles, personas, skillAreas);
 
 	// ─── Handlers ─────────────────────────────────────────────────────────
+
+	const handleToggleBulkMode = useCallback(() => {
+		setBulkMode((prev) => {
+			if (prev) setSelectedIds(new Set());
+			return !prev;
+		});
+	}, []);
+
+	const handleToggleSelect = useCallback((id: string) => {
+		setSelectedIds((prev) => {
+			const next = new Set(prev);
+			if (next.has(id)) next.delete(id);
+			else next.add(id);
+			return next;
+		});
+	}, []);
+
+	const handleSelectAll = useCallback(() => {
+		setSelectedIds(new Set(filteredMemories.map((m) => m.id)));
+	}, [filteredMemories]);
+
+	const handleDeselectAll = useCallback(() => {
+		setSelectedIds(new Set());
+	}, []);
 
 	const handleAddMemory = useCallback(
 		async (content: string, type: MemoryType, tags: string[]) => {
@@ -984,6 +1032,14 @@ export function MemoryLibraryPanel({
 					<div className="flex items-center gap-1">
 						<button
 							className="p-1 rounded hover:opacity-80 transition-opacity"
+							style={{ color: bulkMode ? theme.colors.accent : theme.colors.textDim }}
+							title={bulkMode ? 'Exit Select' : 'Select'}
+							onClick={handleToggleBulkMode}
+						>
+							<CheckSquare className="w-3.5 h-3.5" />
+						</button>
+						<button
+							className="p-1 rounded hover:opacity-80 transition-opacity"
 							style={{ color: theme.colors.textDim }}
 							title="Export"
 							onClick={handleExport}
@@ -1069,6 +1125,29 @@ export function MemoryLibraryPanel({
 						Archived ({archivedLoading ? '...' : archivedMemories.length})
 					</button>
 				</div>
+
+				{/* Bulk mode controls */}
+				{bulkMode && !showArchived && (
+					<div className="flex items-center gap-2">
+						<button
+							className="text-[10px] px-2 py-0.5 rounded font-medium hover:opacity-80 transition-opacity"
+							style={{ color: theme.colors.accent }}
+							onClick={handleSelectAll}
+						>
+							Select All
+						</button>
+						<button
+							className="text-[10px] px-2 py-0.5 rounded font-medium hover:opacity-80 transition-opacity"
+							style={{ color: theme.colors.textDim }}
+							onClick={handleDeselectAll}
+						>
+							Deselect All
+						</button>
+						<span className="text-[10px] ml-auto" style={{ color: theme.colors.accent }}>
+							{selectedIds.size} selected
+						</span>
+					</div>
+				)}
 
 				{/* Tag filter chips */}
 				{allTags.length > 0 && (
@@ -1193,6 +1272,9 @@ export function MemoryLibraryPanel({
 								onTogglePin={() => handleTogglePin(memory)}
 								onEdit={() => setEditingMemory(memory)}
 								onDelete={() => handleDelete(memory.id)}
+								bulkMode={bulkMode}
+								selected={selectedIds.has(memory.id)}
+								onToggleSelect={() => handleToggleSelect(memory.id)}
 							/>
 						))}
 					</>
