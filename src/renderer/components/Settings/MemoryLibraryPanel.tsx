@@ -22,9 +22,7 @@ import {
 	Loader2,
 	AlertTriangle,
 	Brain,
-	Clock,
 	BarChart3,
-	Hash,
 	Sparkles,
 	RotateCcw,
 	Link2,
@@ -33,6 +31,13 @@ import {
 	Archive,
 	Tag,
 	FolderInput,
+	Layers,
+	Copy,
+	ClipboardPaste,
+	Filter,
+	FileDown,
+	FileUp,
+	Check,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { TreeNode } from './MemoryTreeBrowser';
@@ -46,6 +51,7 @@ import type {
 	Role,
 	Persona,
 	SkillArea,
+	ExperienceContext,
 } from '../../../shared/memory-types';
 import type { UseMemoryStoreReturn } from '../../hooks/memory/useMemoryStore';
 import { RoleDetailView, PersonaDetailView } from './EntityDetailView';
@@ -74,6 +80,19 @@ interface MemoryLibraryPanelProps {
 type TypeFilter = 'all' | 'rule' | 'experience';
 type SourceFilter = MemorySource | 'all';
 type SortOption = 'newest' | 'oldest' | 'most-used' | 'most-effective' | 'highest-confidence';
+type SearchMode = 'smart' | 'keyword' | 'tags';
+
+const SEARCH_MODE_LABELS: Record<SearchMode, string> = {
+	smart: 'Smart',
+	keyword: 'Keyword',
+	tags: 'Tags',
+};
+
+const SEARCH_MODE_STRATEGY: Record<SearchMode, 'cascading' | 'keyword' | 'tag'> = {
+	smart: 'cascading',
+	keyword: 'keyword',
+	tags: 'tag',
+};
 
 const SOURCE_LABELS: Record<MemorySource | 'all', string> = {
 	all: 'All Sources',
@@ -151,6 +170,11 @@ function MemoryCard({
 	onTogglePin,
 	onEdit,
 	onDelete,
+	onAddContext,
+	onCopy,
+	copied,
+	agentType,
+	projectPath,
 	archived,
 	onRestore,
 	bulkMode,
@@ -162,6 +186,11 @@ function MemoryCard({
 	onTogglePin: () => void;
 	onEdit: () => void;
 	onDelete: () => void;
+	onAddContext?: () => void;
+	onCopy?: () => void;
+	copied?: boolean;
+	agentType?: string;
+	projectPath?: string;
 	archived?: boolean;
 	onRestore?: () => void;
 	bulkMode?: boolean;
@@ -170,9 +199,13 @@ function MemoryCard({
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const [contextExpanded, setContextExpanded] = useState(false);
+	const [originExpanded, setOriginExpanded] = useState(false);
 	const [relatedExpanded, setRelatedExpanded] = useState(false);
 	const [linkedMemories, setLinkedMemories] = useState<MemoryEntry[]>([]);
 	const [linkedLoading, setLinkedLoading] = useState(false);
+	const [similarExpanded, setSimilarExpanded] = useState(false);
+	const [similarMemories, setSimilarMemories] = useState<MemorySearchResult[] | null>(null);
+	const [similarLoading, setSimilarLoading] = useState(false);
 
 	const loadLinkedMemories = useCallback(async () => {
 		if (linkedMemories.length > 0 || linkedLoading) return;
@@ -193,6 +226,29 @@ function MemoryCard({
 			setLinkedLoading(false);
 		}
 	}, [memory.id, memory.scope, memory.skillAreaId, linkedMemories.length, linkedLoading]);
+
+	const loadSimilarMemories = useCallback(async () => {
+		if (similarMemories !== null || similarLoading) return;
+		setSimilarLoading(true);
+		try {
+			const res = await window.maestro.memory.search(
+				memory.content.slice(0, 200),
+				agentType ?? 'claude-code',
+				projectPath
+			);
+			if (res?.success && res.data) {
+				// Exclude the source memory and limit to top 5
+				const filtered = res.data.filter((r) => r.entry.id !== memory.id).slice(0, 5);
+				setSimilarMemories(filtered);
+			} else {
+				setSimilarMemories([]);
+			}
+		} catch {
+			setSimilarMemories([]);
+		} finally {
+			setSimilarLoading(false);
+		}
+	}, [memory.id, memory.content, agentType, projectPath, similarMemories, similarLoading]);
 
 	const handleToggleRelated = useCallback(() => {
 		const next = !relatedExpanded;
@@ -289,6 +345,20 @@ function MemoryCard({
 				>
 					{memory.pinned ? <Pin className="w-3 h-3" /> : <PinOff className="w-3 h-3" />}
 				</button>
+				{!archived && (
+					<button
+						className="p-0.5 rounded hover:opacity-80 transition-opacity"
+						style={{ color: similarExpanded ? theme.colors.accent : theme.colors.textDim }}
+						title="Find Similar"
+						onClick={() => {
+							const next = !similarExpanded;
+							setSimilarExpanded(next);
+							if (next) loadSimilarMemories();
+						}}
+					>
+						<Layers className="w-3 h-3" />
+					</button>
+				)}
 				{archived && onRestore ? (
 					<button
 						className="p-0.5 rounded hover:opacity-80 transition-opacity"
@@ -306,6 +376,16 @@ function MemoryCard({
 						onClick={onEdit}
 					>
 						<Edit3 className="w-3 h-3" />
+					</button>
+				)}
+				{onCopy && (
+					<button
+						className="p-0.5 rounded hover:opacity-80 transition-opacity"
+						style={{ color: copied ? theme.colors.accent : theme.colors.textDim }}
+						title={copied ? 'Copied!' : 'Copy to Clipboard'}
+						onClick={onCopy}
+					>
+						{copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
 					</button>
 				)}
 				<button
@@ -394,6 +474,99 @@ function MemoryCard({
 						</div>
 					)}
 				</div>
+			)}
+
+			{/* Rule context (experienceContext on a rule) — expandable */}
+			{!isExperience && memory.experienceContext && (
+				<div>
+					<button
+						className="flex items-center gap-1 text-[10px] font-medium"
+						style={{ color: theme.colors.textDim }}
+						onClick={() => setContextExpanded(!contextExpanded)}
+					>
+						{contextExpanded ? (
+							<ChevronDown className="w-3 h-3" />
+						) : (
+							<ChevronRight className="w-3 h-3" />
+						)}
+						Context
+					</button>
+					{contextExpanded && (
+						<div className="mt-1 pl-4 space-y-1 text-xs" style={{ color: theme.colors.textDim }}>
+							{memory.experienceContext.situation && (
+								<div>
+									<span className="font-medium">Situation:</span>{' '}
+									{memory.experienceContext.situation}
+								</div>
+							)}
+							{memory.experienceContext.learning && (
+								<div>
+									<span className="font-medium">Learning:</span> {memory.experienceContext.learning}
+								</div>
+							)}
+						</div>
+					)}
+				</div>
+			)}
+
+			{/* Source origin — expandable, for rules with non-user sources */}
+			{!isExperience && memory.source !== 'user' && (
+				<div>
+					<button
+						className="flex items-center gap-1 text-[10px] font-medium"
+						style={{ color: theme.colors.textDim }}
+						onClick={() => setOriginExpanded(!originExpanded)}
+					>
+						{originExpanded ? (
+							<ChevronDown className="w-3 h-3" />
+						) : (
+							<ChevronRight className="w-3 h-3" />
+						)}
+						Origin
+					</button>
+					{originExpanded && (
+						<div className="mt-1 pl-4 text-xs" style={{ color: theme.colors.textDim }}>
+							{memory.source === 'auto-run' && (
+								<div>
+									Auto-detected from repeated task pattern — {formatRelativeTime(memory.createdAt)}
+									{memory.tags.length > 0 && (
+										<div className="mt-0.5">Related tags: {memory.tags.join(', ')}</div>
+									)}
+								</div>
+							)}
+							{memory.source === 'consolidation' && (
+								<div>
+									Consolidated from similar memories — {formatRelativeTime(memory.createdAt)}
+								</div>
+							)}
+							{memory.source === 'grpo' && (
+								<div>Promoted from experience — {formatRelativeTime(memory.createdAt)}</div>
+							)}
+							{memory.source === 'session-analysis' && (
+								<div>Extracted from session analysis — {formatRelativeTime(memory.createdAt)}</div>
+							)}
+							{memory.source === 'import' && (
+								<div>Imported — {formatRelativeTime(memory.createdAt)}</div>
+							)}
+							{memory.source === 'repository' && (
+								<div>
+									From Global Experience Repository — {formatRelativeTime(memory.createdAt)}
+								</div>
+							)}
+						</div>
+					)}
+				</div>
+			)}
+
+			{/* Add Context action for rules without experienceContext */}
+			{!isExperience && !memory.experienceContext && onAddContext && !archived && (
+				<button
+					className="text-[10px] font-medium hover:opacity-80 transition-opacity"
+					style={{ color: theme.colors.accent }}
+					onClick={onAddContext}
+				>
+					+ Add Context
+				</button>
 			)}
 
 			{/* Tags */}
@@ -489,6 +662,75 @@ function MemoryCard({
 							))}
 						</div>
 					)}
+				</div>
+			)}
+
+			{/* Similar memories — expandable */}
+			{similarExpanded && (
+				<div>
+					<div
+						className="flex items-center gap-1 text-[10px] font-medium"
+						style={{ color: theme.colors.textDim }}
+					>
+						<Layers className="w-3 h-3" />
+						Similar Memories
+					</div>
+					<div className="mt-1 pl-4 space-y-1">
+						{similarLoading && (
+							<div
+								className="flex items-center gap-1 text-[10px]"
+								style={{ color: theme.colors.textDim }}
+							>
+								<Loader2 className="w-3 h-3 animate-spin" />
+								Finding similar...
+							</div>
+						)}
+						{similarMemories && similarMemories.length === 0 && !similarLoading && (
+							<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
+								No similar memories found.
+							</div>
+						)}
+						{similarMemories?.map((result) => (
+							<div
+								key={result.entry.id}
+								className="flex items-center gap-2 rounded px-2 py-1 text-xs"
+								style={{
+									backgroundColor: `${theme.colors.border}20`,
+									color: theme.colors.textMain,
+								}}
+							>
+								<span
+									className="text-[10px] font-medium px-1 py-0.5 rounded shrink-0"
+									style={{
+										backgroundColor:
+											result.entry.type === 'experience'
+												? `${theme.colors.warning}20`
+												: `${theme.colors.border}60`,
+										color:
+											result.entry.type === 'experience'
+												? theme.colors.warning
+												: theme.colors.textDim,
+									}}
+								>
+									{result.entry.type}
+								</span>
+								<span className="flex-1 truncate">
+									{result.entry.content.length > 80
+										? `${result.entry.content.slice(0, 80)}...`
+										: result.entry.content}
+								</span>
+								<span
+									className="text-[10px] font-mono shrink-0 px-1 py-0.5 rounded"
+									style={{
+										backgroundColor: `${theme.colors.accent}15`,
+										color: theme.colors.accent,
+									}}
+								>
+									{(result.similarity * 100).toFixed(0)}%
+								</span>
+							</div>
+						))}
+					</div>
 				</div>
 			)}
 
@@ -674,6 +916,7 @@ export function MemoryLibraryPanel({
 	const [searchQuery, setSearchQuery] = useState('');
 	const [searchResults, setSearchResults] = useState<MemorySearchResult[] | null>(null);
 	const [searching, setSearching] = useState(false);
+	const [searchMode, setSearchMode] = useState<SearchMode>('smart');
 	const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	// Filters
@@ -703,9 +946,36 @@ export function MemoryLibraryPanel({
 	const [bulkTagValue, setBulkTagValue] = useState('');
 	const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
 
+	// Export/Import UI state
+	const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
+	const [importPreview, setImportPreview] = useState<{
+		memories: Array<{
+			content: string;
+			type?: MemoryType;
+			tags?: string[];
+			confidence?: number;
+			pinned?: boolean;
+			experienceContext?: ExperienceContext;
+		}>;
+		newCount: number;
+		duplicateCount: number;
+		typeBreakdown: Record<string, number>;
+		targetScope: MemoryScope;
+	} | null>(null);
+	const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(
+		null
+	);
+	const [importResult, setImportResult] = useState<{
+		imported: number;
+		skipped: number;
+	} | null>(null);
+	const [copiedId, setCopiedId] = useState<string | null>(null);
+	const exportDropdownRef = useRef<HTMLDivElement>(null);
+
 	// Editor state
 	const [addingMemory, setAddingMemory] = useState(false);
 	const [editingMemory, setEditingMemory] = useState<MemoryEntry | null>(null);
+	const [editShowContext, setEditShowContext] = useState(false);
 
 	// Derive scope from selectedNode for direct archive API calls
 	const { scope: resolvedScope, skillAreaId: resolvedSkillAreaId } = useMemo(
@@ -738,8 +1008,11 @@ export function MemoryLibraryPanel({
 		setNeverInjectedOnly(false);
 		setSearchQuery('');
 		setSearchResults(null);
+		setSearchMode('smart');
+		setTagCloudExpanded(false);
 		setAddingMemory(false);
 		setEditingMemory(null);
+		setEditShowContext(false);
 		setShowArchived(false);
 		setBulkMode(false);
 		setSelectedIds(new Set());
@@ -779,7 +1052,8 @@ export function MemoryLibraryPanel({
 	useEffect(() => {
 		if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
 
-		if (searchQuery.length < 3) {
+		const minLen = searchMode === 'tags' ? 1 : 3;
+		if (searchQuery.length < minLen) {
 			setSearchResults(null);
 			return;
 		}
@@ -787,7 +1061,12 @@ export function MemoryLibraryPanel({
 		searchTimerRef.current = setTimeout(async () => {
 			setSearching(true);
 			try {
-				const results = await store.searchMemories(searchQuery, agentType ?? 'claude-code');
+				const strategy = SEARCH_MODE_STRATEGY[searchMode];
+				const results = await store.searchMemories(
+					searchQuery,
+					agentType ?? 'claude-code',
+					strategy
+				);
 				setSearchResults(results);
 			} catch {
 				setSearchResults(null);
@@ -799,15 +1078,20 @@ export function MemoryLibraryPanel({
 		return () => {
 			if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
 		};
-	}, [searchQuery, agentType, store]);
+	}, [searchQuery, searchMode, agentType, store]);
 
-	// Derive unique tags from memories
-	const allTags = useMemo(() => {
-		const tagSet = new Set<string>();
+	// Tag cloud state
+	const [tagCloudExpanded, setTagCloudExpanded] = useState(false);
+
+	// Derive unique tags with counts from memories
+	const tagCounts = useMemo(() => {
+		const counts = new Map<string, number>();
 		for (const m of memories) {
-			for (const t of m.tags) tagSet.add(t);
+			for (const t of m.tags) {
+				counts.set(t, (counts.get(t) ?? 0) + 1);
+			}
 		}
-		return Array.from(tagSet).sort();
+		return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 	}, [memories]);
 
 	// Apply filters and sorting
@@ -1172,22 +1456,79 @@ export function MemoryLibraryPanel({
 		[resolvedScope, resolvedSkillAreaId, resolvedProjectPath, store]
 	);
 
-	const handleExport = useCallback(async () => {
-		try {
-			const data = await store.exportLibrary();
+	// ─── Export Helpers ──────────────────────────────────────────────────
+
+	const buildExportPayload = useCallback(
+		(memoriesToExport: MemoryEntry[]) => ({
+			version: 1,
+			exportedAt: new Date().toISOString(),
+			scope: resolvedScope,
+			memoryCount: memoriesToExport.length,
+			memories: memoriesToExport.map((m) => ({
+				content: m.content,
+				type: m.type,
+				tags: m.tags,
+				confidence: m.confidence,
+				pinned: m.pinned,
+				source: m.source,
+				experienceContext: m.experienceContext,
+			})),
+		}),
+		[resolvedScope]
+	);
+
+	const downloadJson = useCallback(
+		(data: unknown, suffix: string) => {
 			const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
-			a.download = `memories-${breadcrumb.join('-').replace(/\s+/g, '_')}.json`;
+			a.download = `memories-${breadcrumb.join('-').replace(/\s+/g, '_')}-${suffix}.json`;
 			a.click();
 			URL.revokeObjectURL(url);
+		},
+		[breadcrumb]
+	);
+
+	const handleExportCurrentView = useCallback(() => {
+		const exported = buildExportPayload(filteredMemories);
+		downloadJson(exported, 'filtered');
+		setExportDropdownOpen(false);
+	}, [filteredMemories, buildExportPayload, downloadJson]);
+
+	const handleExportAllInScope = useCallback(async () => {
+		try {
+			const data = await store.exportLibrary();
+			const exported = buildExportPayload(data.memories);
+			downloadJson(exported, 'all');
 		} catch {
 			// Export error
 		}
-	}, [store, breadcrumb]);
+		setExportDropdownOpen(false);
+	}, [store, buildExportPayload, downloadJson]);
 
-	const handleImport = useCallback(async () => {
+	const handleExportSelected = useCallback(() => {
+		const selected = memories.filter((m) => selectedIds.has(m.id));
+		const exported = buildExportPayload(selected);
+		downloadJson(exported, 'selected');
+		setExportDropdownOpen(false);
+	}, [memories, selectedIds, buildExportPayload, downloadJson]);
+
+	// Close export dropdown on outside click
+	useEffect(() => {
+		if (!exportDropdownOpen) return;
+		const handler = (e: MouseEvent) => {
+			if (exportDropdownRef.current && !exportDropdownRef.current.contains(e.target as Node)) {
+				setExportDropdownOpen(false);
+			}
+		};
+		document.addEventListener('mousedown', handler);
+		return () => document.removeEventListener('mousedown', handler);
+	}, [exportDropdownOpen]);
+
+	// ─── Import Helpers ──────────────────────────────────────────────────
+
+	const handleImport = useCallback(() => {
 		const input = document.createElement('input');
 		input.type = 'file';
 		input.accept = '.json';
@@ -1197,13 +1538,124 @@ export function MemoryLibraryPanel({
 			try {
 				const text = await file.text();
 				const json = JSON.parse(text);
-				await store.importLibrary(json);
+				const importMemories: Array<{
+					content: string;
+					type?: MemoryType;
+					tags?: string[];
+					confidence?: number;
+					pinned?: boolean;
+					experienceContext?: ExperienceContext;
+				}> = json.memories ?? [];
+
+				// Duplicate detection: compare by content
+				const existingContents = new Set(memories.map((m) => m.content.trim().toLowerCase()));
+				let newCount = 0;
+				let duplicateCount = 0;
+				const typeBreakdown: Record<string, number> = {};
+				for (const m of importMemories) {
+					const key = m.content.trim().toLowerCase();
+					if (existingContents.has(key)) {
+						duplicateCount++;
+					} else {
+						newCount++;
+					}
+					const t = m.type ?? 'rule';
+					typeBreakdown[t] = (typeBreakdown[t] ?? 0) + 1;
+				}
+
+				setImportPreview({
+					memories: importMemories,
+					newCount,
+					duplicateCount,
+					typeBreakdown,
+					targetScope: resolvedScope,
+				});
 			} catch {
-				// Import error
+				// Parse error
 			}
 		};
 		input.click();
-	}, [store]);
+	}, [memories, resolvedScope]);
+
+	const handleImportConfirm = useCallback(async () => {
+		if (!importPreview) return;
+		const existingContents = new Set(memories.map((m) => m.content.trim().toLowerCase()));
+		const toImport = importPreview.memories.filter(
+			(m) => !existingContents.has(m.content.trim().toLowerCase())
+		);
+		setImportProgress({ current: 0, total: toImport.length });
+		let imported = 0;
+		for (const m of toImport) {
+			try {
+				await store.addMemory({
+					content: m.content,
+					type: m.type,
+					tags: m.tags,
+					confidence: m.confidence,
+					pinned: m.pinned,
+					experienceContext: m.experienceContext,
+				});
+				imported++;
+				setImportProgress({ current: imported, total: toImport.length });
+			} catch {
+				// Skip failed
+			}
+		}
+		setImportResult({ imported, skipped: importPreview.duplicateCount });
+		setImportPreview(null);
+		setImportProgress(null);
+		store.refresh();
+	}, [importPreview, memories, store]);
+
+	const handleImportCancel = useCallback(() => {
+		setImportPreview(null);
+		setImportProgress(null);
+		setImportResult(null);
+	}, []);
+
+	// ─── Clipboard Helpers ───────────────────────────────────────────────
+
+	const handleCopyMemory = useCallback(async (memory: MemoryEntry) => {
+		const payload = {
+			content: memory.content,
+			type: memory.type,
+			tags: memory.tags,
+			...(memory.experienceContext ? { experienceContext: memory.experienceContext } : {}),
+		};
+		await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+		setCopiedId(memory.id);
+		setTimeout(() => setCopiedId(null), 1500);
+	}, []);
+
+	const [pastedMemory, setPastedMemory] = useState<MemoryEntry | null>(null);
+
+	const handlePasteFromClipboard = useCallback(async () => {
+		try {
+			const text = await navigator.clipboard.readText();
+			const parsed = JSON.parse(text);
+			if (parsed && typeof parsed.content === 'string') {
+				const pasted = {
+					id: '__pasted__',
+					content: parsed.content,
+					type: parsed.type ?? 'rule',
+					scope: resolvedScope,
+					tags: parsed.tags ?? [],
+					confidence: parsed.confidence ?? 0.5,
+					pinned: false,
+					active: true,
+					useCount: 0,
+					effectivenessScore: 0,
+					createdAt: Date.now(),
+					updatedAt: Date.now(),
+					source: 'user' as const,
+					experienceContext: parsed.experienceContext,
+				} as MemoryEntry;
+				setPastedMemory(pasted);
+			}
+		} catch {
+			// Invalid clipboard content or parse error
+		}
+	}, [resolvedScope]);
 
 	// ─── No Selection State ───────────────────────────────────────────────
 
@@ -1265,14 +1717,64 @@ export function MemoryLibraryPanel({
 						>
 							<CheckSquare className="w-3.5 h-3.5" />
 						</button>
-						<button
-							className="p-1 rounded hover:opacity-80 transition-opacity"
-							style={{ color: theme.colors.textDim }}
-							title="Export"
-							onClick={handleExport}
-						>
-							<Download className="w-3.5 h-3.5" />
-						</button>
+						{/* Export dropdown */}
+						<div className="relative" ref={exportDropdownRef}>
+							<button
+								className="p-1 rounded hover:opacity-80 transition-opacity"
+								style={{
+									color: exportDropdownOpen ? theme.colors.accent : theme.colors.textDim,
+								}}
+								title="Export"
+								onClick={() => setExportDropdownOpen((p) => !p)}
+							>
+								<Download className="w-3.5 h-3.5" />
+							</button>
+							{exportDropdownOpen && (
+								<div
+									className="absolute right-0 top-full mt-1 z-50 rounded-lg border shadow-lg py-1 min-w-[180px]"
+									style={{
+										backgroundColor: theme.colors.bgSidebar,
+										borderColor: theme.colors.border,
+									}}
+								>
+									<button
+										className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 hover:opacity-80"
+										style={{ color: theme.colors.textMain }}
+										onClick={handleExportCurrentView}
+									>
+										<Filter className="w-3 h-3" style={{ color: theme.colors.textDim }} />
+										Export Current View
+										<span className="ml-auto text-[10px]" style={{ color: theme.colors.textDim }}>
+											{filteredMemories.length}
+										</span>
+									</button>
+									<button
+										className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 hover:opacity-80"
+										style={{ color: theme.colors.textMain }}
+										onClick={handleExportAllInScope}
+									>
+										<FileDown className="w-3 h-3" style={{ color: theme.colors.textDim }} />
+										Export All in Scope
+										<span className="ml-auto text-[10px]" style={{ color: theme.colors.textDim }}>
+											{memories.length}
+										</span>
+									</button>
+									{bulkMode && selectedIds.size > 0 && (
+										<button
+											className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 hover:opacity-80"
+											style={{ color: theme.colors.accent }}
+											onClick={handleExportSelected}
+										>
+											<CheckSquare className="w-3 h-3" style={{ color: theme.colors.accent }} />
+											Export Selected
+											<span className="ml-auto text-[10px]" style={{ color: theme.colors.accent }}>
+												{selectedIds.size}
+											</span>
+										</button>
+									)}
+								</div>
+							)}
+						</div>
 						<button
 							className="p-1 rounded hover:opacity-80 transition-opacity"
 							style={{ color: theme.colors.textDim }}
@@ -1280,6 +1782,14 @@ export function MemoryLibraryPanel({
 							onClick={handleImport}
 						>
 							<Upload className="w-3.5 h-3.5" />
+						</button>
+						<button
+							className="p-1 rounded hover:opacity-80 transition-opacity"
+							style={{ color: theme.colors.textDim }}
+							title="Paste from Clipboard"
+							onClick={handlePasteFromClipboard}
+						>
+							<ClipboardPaste className="w-3.5 h-3.5" />
 						</button>
 						<button
 							className="p-1 rounded hover:opacity-80 transition-opacity"
@@ -1293,26 +1803,57 @@ export function MemoryLibraryPanel({
 				</div>
 
 				{/* Search bar */}
-				<div
-					className="flex items-center gap-2 px-2 py-1.5 rounded-lg border"
-					style={{ borderColor: theme.colors.border }}
-				>
-					{searching ? (
-						<Loader2
-							className="w-3.5 h-3.5 animate-spin shrink-0"
-							style={{ color: theme.colors.textDim }}
+				<div className="flex items-center gap-1.5">
+					<div
+						className="flex items-center gap-2 px-2 py-1.5 rounded-lg border flex-1"
+						style={{ borderColor: theme.colors.border }}
+					>
+						{searching ? (
+							<Loader2
+								className="w-3.5 h-3.5 animate-spin shrink-0"
+								style={{ color: theme.colors.textDim }}
+							/>
+						) : (
+							<Search className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+						)}
+						<input
+							type="text"
+							value={searchQuery}
+							onChange={(e) => setSearchQuery(e.target.value)}
+							placeholder={searchMode === 'tags' ? 'tag1, tag2, tag3...' : 'Search memories...'}
+							className="flex-1 bg-transparent outline-none text-xs"
+							style={{ color: theme.colors.textMain }}
 						/>
-					) : (
-						<Search className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-					)}
-					<input
-						type="text"
-						value={searchQuery}
-						onChange={(e) => setSearchQuery(e.target.value)}
-						placeholder="Search memories..."
-						className="flex-1 bg-transparent outline-none text-xs"
-						style={{ color: theme.colors.textMain }}
-					/>
+					</div>
+					{/* Search mode toggle */}
+					<div className="flex items-center shrink-0">
+						{(['smart', 'keyword', 'tags'] as SearchMode[]).map((mode) => (
+							<button
+								key={mode}
+								className="text-[10px] px-1.5 py-1 font-medium transition-colors"
+								style={{
+									color: searchMode === mode ? theme.colors.accent : theme.colors.textDim,
+									borderBottom:
+										searchMode === mode
+											? `2px solid ${theme.colors.accent}`
+											: '2px solid transparent',
+								}}
+								onClick={() => {
+									setSearchMode(mode);
+									setSearchResults(null);
+								}}
+								title={
+									mode === 'smart'
+										? 'Cascading semantic search'
+										: mode === 'keyword'
+											? 'Keyword overlap search'
+											: 'Search by tag names (comma-separated)'
+								}
+							>
+								{SEARCH_MODE_LABELS[mode]}
+							</button>
+						))}
+					</div>
 				</div>
 
 				{/* Type filter */}
@@ -1430,34 +1971,48 @@ export function MemoryLibraryPanel({
 					</div>
 				)}
 
-				{/* Tag filter chips */}
-				{allTags.length > 0 && (
-					<div className="flex flex-wrap gap-1">
-						{allTags.map((tag) => {
-							const isSelected = selectedTags.has(tag);
-							return (
-								<button
-									key={tag}
-									className="text-[10px] px-1.5 py-0.5 rounded-full transition-colors"
-									style={{
-										backgroundColor: isSelected
-											? `${theme.colors.accent}25`
-											: `${theme.colors.border}40`,
-										color: isSelected ? theme.colors.accent : theme.colors.textDim,
-									}}
-									onClick={() => {
-										setSelectedTags((prev) => {
-											const next = new Set(prev);
-											if (next.has(tag)) next.delete(tag);
-											else next.add(tag);
-											return next;
-										});
-									}}
-								>
-									{tag}
-								</button>
-							);
-						})}
+				{/* Tag cloud / tag filter panel */}
+				{tagCounts.length > 0 && (
+					<div className="space-y-1">
+						<div className="flex flex-wrap gap-1">
+							{(tagCounts.length > 10 && !tagCloudExpanded
+								? tagCounts.slice(0, 10)
+								: tagCounts
+							).map(([tag, count]) => {
+								const isSelected = selectedTags.has(tag);
+								return (
+									<button
+										key={tag}
+										className="text-[10px] px-1.5 py-0.5 rounded-full transition-colors"
+										style={{
+											backgroundColor: isSelected
+												? `${theme.colors.accent}25`
+												: `${theme.colors.border}40`,
+											color: isSelected ? theme.colors.accent : theme.colors.textDim,
+										}}
+										onClick={() => {
+											setSelectedTags((prev) => {
+												const next = new Set(prev);
+												if (next.has(tag)) next.delete(tag);
+												else next.add(tag);
+												return next;
+											});
+										}}
+									>
+										{tag} ({count})
+									</button>
+								);
+							})}
+						</div>
+						{tagCounts.length > 10 && (
+							<button
+								className="text-[10px] font-medium hover:opacity-80 transition-opacity"
+								style={{ color: theme.colors.accent }}
+								onClick={() => setTagCloudExpanded(!tagCloudExpanded)}
+							>
+								{tagCloudExpanded ? 'Show fewer tags' : `Show all tags (${tagCounts.length})`}
+							</button>
+						)}
 					</div>
 				)}
 			</div>
@@ -1508,6 +2063,8 @@ export function MemoryLibraryPanel({
 								onTogglePin={() => handleTogglePin(memory)}
 								onEdit={() => {}}
 								onDelete={() => handleDelete(memory.id)}
+								agentType={agentType}
+								projectPath={resolvedProjectPath}
 							/>
 						))}
 					</>
@@ -1542,8 +2099,19 @@ export function MemoryLibraryPanel({
 								memory={memory}
 								theme={theme}
 								onTogglePin={() => handleTogglePin(memory)}
-								onEdit={() => setEditingMemory(memory)}
+								onEdit={() => {
+									setEditShowContext(false);
+									setEditingMemory(memory);
+								}}
 								onDelete={() => handleDelete(memory.id)}
+								onAddContext={() => {
+									setEditShowContext(true);
+									setEditingMemory(memory);
+								}}
+								onCopy={() => handleCopyMemory(memory)}
+								copied={copiedId === memory.id}
+								agentType={agentType}
+								projectPath={resolvedProjectPath}
 								bulkMode={bulkMode}
 								selected={selectedIds.has(memory.id)}
 								onToggleSelect={() => handleToggleSelect(memory.id)}
@@ -1776,9 +2344,13 @@ export function MemoryLibraryPanel({
 					memory={editingMemory}
 					defaultScope={resolvedScope}
 					defaultSkillAreaId={resolvedSkillAreaId}
+					initialShowContext={editShowContext}
 					availableSkills={availableSkills}
 					onSave={handleSaveEdit}
-					onClose={() => setEditingMemory(null)}
+					onClose={() => {
+						setEditingMemory(null);
+						setEditShowContext(false);
+					}}
 				/>
 			)}
 
@@ -1795,6 +2367,139 @@ export function MemoryLibraryPanel({
 					onSave={handleSaveCreate}
 					onClose={() => setAddingMemory(false)}
 				/>
+			)}
+
+			{/* Paste from Clipboard Modal */}
+			{pastedMemory && (
+				<MemoryEditModal
+					theme={theme}
+					memory={pastedMemory}
+					defaultScope={resolvedScope}
+					defaultSkillAreaId={resolvedSkillAreaId}
+					defaultPersonaId={defaultPersonaId}
+					defaultRoleId={defaultRoleId}
+					availableSkills={availableSkills}
+					onSave={async (data) => {
+						await handleSaveCreate(data);
+						setPastedMemory(null);
+					}}
+					onClose={() => setPastedMemory(null)}
+				/>
+			)}
+
+			{/* Import Preview Panel */}
+			{importPreview && (
+				<div
+					className="absolute inset-0 z-50 flex items-center justify-center"
+					style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+					onClick={handleImportCancel}
+				>
+					<div
+						className="rounded-lg border shadow-xl p-4 max-w-sm w-full space-y-3"
+						style={{
+							backgroundColor: theme.colors.bgSidebar,
+							borderColor: theme.colors.border,
+						}}
+						onClick={(e) => e.stopPropagation()}
+					>
+						<div className="flex items-center gap-2">
+							<FileUp className="w-4 h-4" style={{ color: theme.colors.accent }} />
+							<span className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
+								Import Preview
+							</span>
+						</div>
+
+						<div className="space-y-1.5">
+							<div className="text-xs" style={{ color: theme.colors.textMain }}>
+								Total memories: {importPreview.memories.length}
+							</div>
+							<div className="text-xs" style={{ color: theme.colors.textDim }}>
+								Type breakdown:{' '}
+								{Object.entries(importPreview.typeBreakdown)
+									.map(([t, n]) => `${n} ${t}${n !== 1 ? 's' : ''}`)
+									.join(', ')}
+							</div>
+							<div className="text-xs" style={{ color: theme.colors.accent }}>
+								{importPreview.newCount} new
+							</div>
+							{importPreview.duplicateCount > 0 && (
+								<div className="text-xs" style={{ color: theme.colors.warning }}>
+									{importPreview.duplicateCount} duplicate
+									{importPreview.duplicateCount !== 1 ? 's' : ''} (will skip)
+								</div>
+							)}
+							<div className="text-xs" style={{ color: theme.colors.textDim }}>
+								Target scope: {importPreview.targetScope}
+							</div>
+						</div>
+
+						{importProgress && (
+							<div className="space-y-1">
+								<div
+									className="h-1.5 rounded-full overflow-hidden"
+									style={{ backgroundColor: theme.colors.border }}
+								>
+									<div
+										className="h-full rounded-full transition-all"
+										style={{
+											width: `${(importProgress.current / importProgress.total) * 100}%`,
+											backgroundColor: theme.colors.accent,
+										}}
+									/>
+								</div>
+								<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
+									{importProgress.current} / {importProgress.total}
+								</div>
+							</div>
+						)}
+
+						<div className="flex justify-end gap-2 pt-1">
+							<button
+								className="text-xs px-3 py-1.5 rounded hover:opacity-80 transition-opacity"
+								style={{ color: theme.colors.textDim }}
+								onClick={handleImportCancel}
+							>
+								Cancel
+							</button>
+							<button
+								className="text-xs px-3 py-1.5 rounded font-medium hover:opacity-80 transition-opacity"
+								style={{ backgroundColor: theme.colors.accent, color: '#fff' }}
+								onClick={handleImportConfirm}
+								disabled={!!importProgress || importPreview.newCount === 0}
+							>
+								{importProgress
+									? 'Importing...'
+									: `Import ${importPreview.newCount} memor${importPreview.newCount === 1 ? 'y' : 'ies'}`}
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
+
+			{/* Import Result Banner */}
+			{importResult && (
+				<div
+					className="absolute bottom-3 left-3 right-3 z-50 flex items-center gap-2 px-3 py-2 rounded-lg border shadow-lg"
+					style={{
+						backgroundColor: theme.colors.bgSidebar,
+						borderColor: theme.colors.accent,
+					}}
+				>
+					<Check className="w-4 h-4 shrink-0" style={{ color: theme.colors.accent }} />
+					<span className="text-xs" style={{ color: theme.colors.textMain }}>
+						Imported {importResult.imported} memor{importResult.imported === 1 ? 'y' : 'ies'}
+						{importResult.skipped > 0 &&
+							`, skipped ${importResult.skipped} duplicate${importResult.skipped !== 1 ? 's' : ''}`}
+					</span>
+					<div className="flex-1" />
+					<button
+						className="text-xs hover:opacity-80 transition-opacity"
+						style={{ color: theme.colors.textDim }}
+						onClick={() => setImportResult(null)}
+					>
+						<X className="w-3.5 h-3.5" />
+					</button>
+				</div>
 			)}
 		</div>
 	);

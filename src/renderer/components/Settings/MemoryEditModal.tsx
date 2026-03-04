@@ -4,10 +4,13 @@
  * Supports both rule-type and experience-type memories with scope selection,
  * skill area dropdown grouped by persona, tags input, confidence slider,
  * and pinned checkbox.
+ *
+ * Handles rule→experience conversion with auto-population of situation/learning,
+ * and supports adding experienceContext to rules without type conversion.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Brain, Pin } from 'lucide-react';
+import { Brain, Pin, Info } from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
 	MemoryEntry,
@@ -21,6 +24,17 @@ import type {
 import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
 import { Modal, ModalFooter } from '../ui/Modal';
 
+/** Common imperative verbs that indicate a prescriptive rule */
+const IMPERATIVE_VERB_RE =
+	/^(always|never|use|avoid|prefer|ensure|make|keep|do|don't|dont|follow|apply|run|check|require|enforce|validate|prevent|limit)\b/i;
+
+/** Extract the first sentence from text, or up to 120 chars if no sentence boundary found */
+function getFirstSentence(text: string): string {
+	const trimmed = text.trim();
+	const match = trimmed.match(/^[^.!?]+[.!?]/);
+	return match ? match[0].trim() : trimmed.slice(0, 120);
+}
+
 export interface MemoryEditModalProps {
 	theme: Theme;
 	memory: MemoryEntry | null; // null = add mode
@@ -30,6 +44,8 @@ export interface MemoryEditModalProps {
 	defaultRoleId?: RoleId;
 	/** Available skill areas for the dropdown (from hierarchy) */
 	availableSkills: { id: SkillAreaId; name: string; personaName: string }[];
+	/** When true, show context fields even for rule type (for "Add Context" flow) */
+	initialShowContext?: boolean;
 	onSave: (data: {
 		content: string;
 		type: MemoryType;
@@ -53,6 +69,7 @@ export function MemoryEditModal({
 	defaultPersonaId,
 	defaultRoleId,
 	availableSkills,
+	initialShowContext,
 	onSave,
 	onClose,
 }: MemoryEditModalProps) {
@@ -70,6 +87,16 @@ export function MemoryEditModal({
 	// Experience context fields
 	const [situation, setSituation] = useState(memory?.experienceContext?.situation ?? '');
 	const [learning, setLearning] = useState(memory?.experienceContext?.learning ?? '');
+
+	// Show context fields for rules (via "Add Context" flow or existing context)
+	const [showRuleContext, setShowRuleContext] = useState(
+		initialShowContext ?? (memory?.type === 'rule' && !!memory?.experienceContext)
+	);
+	// Helper text shown during rule→experience conversion
+	const [conversionHelper, setConversionHelper] = useState(false);
+
+	// Whether context fields should be visible
+	const showContextFields = type === 'experience' || showRuleContext;
 
 	// UI state
 	const [saving, setSaving] = useState(false);
@@ -94,6 +121,35 @@ export function MemoryEditModal({
 			return acc;
 		},
 		{}
+	);
+
+	// Handle type change with auto-population for rule→experience conversion
+	const handleTypeChange = useCallback(
+		(newType: MemoryType) => {
+			const oldType = type;
+			setType(newType);
+
+			if (oldType === 'rule' && newType === 'experience') {
+				// Auto-populate situation from content if empty
+				if (!situation.trim() && content.trim()) {
+					const firstSentence = getFirstSentence(content);
+					if (IMPERATIVE_VERB_RE.test(content.trim())) {
+						setSituation(`Observed pattern: ${firstSentence}`);
+					} else {
+						setSituation(firstSentence);
+					}
+				}
+				// Auto-populate learning with full content if empty
+				if (!learning.trim() && content.trim()) {
+					setLearning(content.trim());
+				}
+				setConversionHelper(true);
+				setShowRuleContext(false); // Not needed when type is experience
+			} else {
+				setConversionHelper(false);
+			}
+		},
+		[type, content, situation, learning]
 	);
 
 	const isValid = content.trim().length > 0 && (scope !== 'skill' || skillAreaId);
@@ -126,7 +182,10 @@ export function MemoryEditModal({
 				if (defaultRoleId) data.roleId = defaultRoleId;
 			}
 
-			if (type === 'experience') {
+			// Include experienceContext when type is experience, or when
+			// context fields have content (rules with added context)
+			const hasSituationOrLearning = situation.trim() || learning.trim();
+			if (type === 'experience' || hasSituationOrLearning) {
 				data.experienceContext = {
 					situation: situation.trim(),
 					learning: learning.trim(),
@@ -216,7 +275,7 @@ export function MemoryEditModal({
 							<button
 								key={t}
 								type="button"
-								onClick={() => setType(t)}
+								onClick={() => handleTypeChange(t)}
 								className="px-3 py-1.5 rounded border text-xs font-medium transition-colors"
 								style={{
 									borderColor: type === t ? theme.colors.accent : theme.colors.border,
@@ -233,6 +292,18 @@ export function MemoryEditModal({
 							? 'Prescriptive: "always do X" — user-curated'
 							: 'Empirical: "we learned Y when Z happened" — contextual'}
 					</p>
+					{conversionHelper && (
+						<div
+							className="flex items-center gap-2 mt-1.5 p-2 rounded text-xs"
+							style={{
+								backgroundColor: `${theme.colors.accent}10`,
+								color: theme.colors.accent,
+							}}
+						>
+							<Info className="w-3.5 h-3.5 shrink-0" />
+							Converting to experience — fill in the context of when this was learned
+						</div>
+					)}
 				</div>
 
 				{/* Content */}
@@ -261,9 +332,14 @@ export function MemoryEditModal({
 					/>
 				</div>
 
-				{/* Experience Context Fields */}
-				{type === 'experience' && (
+				{/* Experience Context Fields — shown for experiences, or rules with "Add Context" */}
+				{showContextFields && (
 					<div className="space-y-3">
+						{type === 'rule' && showRuleContext && (
+							<p className="text-xs" style={{ color: theme.colors.textDim }}>
+								Adding provenance context to this rule — type remains &quot;rule&quot;
+							</p>
+						)}
 						<div>
 							<label
 								className="block text-xs font-bold opacity-70 uppercase mb-2"

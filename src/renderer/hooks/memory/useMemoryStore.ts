@@ -40,7 +40,11 @@ export interface UseMemoryStoreReturn {
 		>
 	) => Promise<void>;
 	deleteMemory: (id: string) => Promise<void>;
-	searchMemories: (query: string, agentType: string) => Promise<MemorySearchResult[]>;
+	searchMemories: (
+		query: string,
+		agentType: string,
+		strategy?: 'cascading' | 'keyword' | 'tag'
+	) => Promise<MemorySearchResult[]>;
 	refresh: () => void;
 	exportLibrary: () => Promise<{
 		memories: MemoryEntry[];
@@ -190,8 +194,12 @@ export function useMemoryStore(
 	);
 
 	const searchMemories = useCallback(
-		async (query: string, agentType: string): Promise<MemorySearchResult[]> => {
-			const res = await window.maestro.memory.search(query, agentType, resolvedProject);
+		async (
+			query: string,
+			agentType: string,
+			strategy?: 'cascading' | 'keyword' | 'tag'
+		): Promise<MemorySearchResult[]> => {
+			const res = await window.maestro.memory.search(query, agentType, resolvedProject, strategy);
 			if (!res.success) throw new Error(res.error);
 			return res.data;
 		},

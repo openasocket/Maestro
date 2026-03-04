@@ -271,9 +271,10 @@ export function createMemoryApi() {
 		search: (
 			query: string,
 			agentType: string,
-			projectPath?: string
+			projectPath?: string,
+			strategy?: 'cascading' | 'keyword' | 'tag'
 		): Promise<IpcResponse<MemorySearchResult[]>> =>
-			ipcRenderer.invoke('memory:search', query, agentType, projectPath),
+			ipcRenderer.invoke('memory:search', query, agentType, projectPath, strategy),
 
 		// ─── Utility ──────────────────────────────────────────────────────
 		getStats: (): Promise<IpcResponse<MemoryStats>> => ipcRenderer.invoke('memory:getStats'),

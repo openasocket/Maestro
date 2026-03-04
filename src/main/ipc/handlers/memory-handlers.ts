@@ -24,6 +24,7 @@ import type {
 	MemorySource,
 	ExperienceContext,
 	MemoryStats,
+	MemorySearchResult,
 } from '../../../shared/memory-types';
 
 const LOG_CONTEXT = '[Memory]';
@@ -510,8 +511,61 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		'memory:search',
 		createIpcDataHandler(
 			handlerOpts('memory:search'),
-			async (query: string, agentType: string, projectPath?: string) => {
+			async (
+				query: string,
+				agentType: string,
+				projectPath?: string,
+				strategy?: 'cascading' | 'keyword' | 'tag'
+			) => {
 				const config = await memoryStore.getConfig();
+				if (strategy === 'keyword') {
+					// Keyword-only search across all scopes
+					const scopes: Array<{ scope: MemoryScope; projectPath?: string }> = [{ scope: 'global' }];
+					if (projectPath) scopes.push({ scope: 'project', projectPath });
+					const allResults: MemorySearchResult[] = [];
+					for (const s of scopes) {
+						const results = await memoryStore.keywordSearch(
+							query,
+							s.scope,
+							undefined,
+							s.projectPath,
+							0.05
+						);
+						for (const r of results) {
+							allResults.push({
+								entry: r.entry,
+								similarity: r.keywordScore,
+								combinedScore: r.keywordScore,
+							});
+						}
+					}
+					allResults.sort((a, b) => b.combinedScore - a.combinedScore);
+					return allResults.slice(0, 30);
+				}
+				if (strategy === 'tag') {
+					// Tag-based search: split query by commas
+					const tags = query
+						.split(',')
+						.map((t) => t.trim())
+						.filter(Boolean);
+					if (tags.length === 0) return [];
+					const scopes: Array<{ scope: MemoryScope; projectPath?: string }> = [{ scope: 'global' }];
+					if (projectPath) scopes.push({ scope: 'project', projectPath });
+					const allResults: MemorySearchResult[] = [];
+					for (const s of scopes) {
+						const results = await memoryStore.tagSearch(tags, s.scope, undefined, s.projectPath);
+						for (const r of results) {
+							allResults.push({
+								entry: r.entry,
+								similarity: r.tagScore,
+								combinedScore: r.tagScore,
+							});
+						}
+					}
+					allResults.sort((a, b) => b.combinedScore - a.combinedScore);
+					return allResults.slice(0, 30);
+				}
+				// Default: cascading search
 				return memoryStore.cascadingSearch(query, config, agentType, projectPath);
 			}
 		)

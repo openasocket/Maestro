@@ -2937,7 +2937,8 @@ interface MaestroAPI {
 		search: (
 			query: string,
 			agentType: string,
-			projectPath?: string
+			projectPath?: string,
+			strategy?: 'cascading' | 'keyword' | 'tag'
 		) => Promise<
 			| { success: true; data: import('../shared/memory-types').MemorySearchResult[] }
 			| { success: false; error: string }
