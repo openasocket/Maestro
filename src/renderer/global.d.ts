@@ -2781,6 +2781,24 @@ interface MaestroAPI {
 				id: string
 			) => Promise<{ success: true; data: boolean } | { success: false; error: string }>;
 		};
+		matchPersonas: (
+			query: string,
+			agentType: string,
+			projectPath?: string
+		) => Promise<
+			| {
+					success: true;
+					data: Array<{
+						personaId: string;
+						personaName: string;
+						roleName: string;
+						description: string;
+						systemPrompt: string;
+						similarity: number;
+					}>;
+			  }
+			| { success: false; error: string }
+		>;
 		resetSeedDefaults: () => Promise<
 			| {
 					success: true;

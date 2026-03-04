@@ -714,6 +714,8 @@ export interface Session {
 	injectedMemoryIds?: string[];
 	/** Active role IDs resolved for this session */
 	activeRoleIds?: string[];
+	/** Persona IDs explicitly selected by the user (wizard or new agent modal) */
+	selectedPersonaIds?: string[];
 }
 
 export interface AgentConfigOption {

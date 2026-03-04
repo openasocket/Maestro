@@ -106,6 +106,24 @@ export function createMemoryApi() {
 				ipcRenderer.invoke('memory:persona:delete', id),
 		},
 
+		// ─── Persona Matching ─────────────────────────────────────────────
+		matchPersonas: (
+			query: string,
+			agentType: string,
+			projectPath?: string
+		): Promise<
+			IpcResponse<
+				Array<{
+					personaId: string;
+					personaName: string;
+					roleName: string;
+					description: string;
+					systemPrompt: string;
+					similarity: number;
+				}>
+			>
+		> => ipcRenderer.invoke('memory:matchPersonas', query, agentType, projectPath),
+
 		// ─── Reset Seed Defaults ──────────────────────────────────────────
 		resetSeedDefaults: (): Promise<
 			IpcResponse<{

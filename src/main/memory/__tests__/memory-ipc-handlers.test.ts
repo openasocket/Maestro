@@ -197,6 +197,7 @@ describe('Memory IPC Handler Round-Trips', () => {
 				'memory:persona:create',
 				'memory:persona:update',
 				'memory:persona:delete',
+				'memory:matchPersonas',
 				'memory:skill:list',
 				'memory:skill:get',
 				'memory:skill:create',

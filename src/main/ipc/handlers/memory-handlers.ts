@@ -202,6 +202,41 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		})
 	);
 
+	// ─── Persona Matching ─────────────────────────────────────────────────
+
+	ipcMain.handle(
+		'memory:matchPersonas',
+		createIpcDataHandler(
+			handlerOpts('matchPersonas'),
+			async (query: string, agentType: string, projectPath?: string) => {
+				const config = await memoryStore.getConfig();
+				if (!config.enabled) return [];
+
+				// Auto-seed if no personas exist
+				const personas = await memoryStore.listPersonas();
+				if (personas.length === 0) {
+					await memoryStore.seedFromDefaults();
+				}
+
+				const matches = await memoryStore.selectMatchingPersonas(
+					query,
+					config,
+					agentType,
+					projectPath
+				);
+
+				return matches.map((m) => ({
+					personaId: m.persona.id,
+					personaName: m.personaName,
+					roleName: m.roleName,
+					description: m.persona.description,
+					systemPrompt: m.persona.systemPrompt ?? '',
+					similarity: m.similarity,
+				}));
+			}
+		)
+	);
+
 	// ─── Skill Areas ──────────────────────────────────────────────────────
 
 	ipcMain.handle(
