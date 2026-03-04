@@ -252,6 +252,10 @@ export interface MemoryConfig {
 	crossProjectMinProjects: number;
 	/** Cosine similarity threshold for cross-project matching — default 0.75 */
 	crossProjectSimilarityThreshold: number;
+	/** How much confidence decreases per day for unused memories (0 = no decay) — default 0.02 */
+	confidenceDecayRate: number;
+	/** Memories below this confidence are automatically archived — default 0.1 */
+	minConfidenceThreshold: number;
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -286,6 +290,8 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	enableCrossProjectPromotion: false,
 	crossProjectMinProjects: 2,
 	crossProjectSimilarityThreshold: 0.75,
+	confidenceDecayRate: 0.02,
+	minConfidenceThreshold: 0.1,
 };
 
 // ─── Job Queue Status & Token Tracking ────────────────────────────────────

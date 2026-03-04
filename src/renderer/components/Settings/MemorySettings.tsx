@@ -28,6 +28,8 @@ import {
 	Zap,
 	ChevronDown,
 	ChevronRight,
+	Users,
+	Layers,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import { ExperienceRepositoryPanel } from './ExperienceRepositoryPanel';
@@ -46,6 +48,33 @@ import type {
 	ExtractionProgress,
 } from '../../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../../shared/memory-types';
+
+// ─── Sub-Tab Navigation ───────────────────────────────────────────────────────
+
+export type MemorySubTab = 'personas' | 'skills' | 'experiences' | 'memories' | 'status';
+
+const MEMORY_SUB_TABS: {
+	id: MemorySubTab;
+	label: string;
+	icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
+	getCount: (stats: MemoryStats | null) => number | null;
+}[] = [
+	{ id: 'personas', label: 'Personas', icon: Users, getCount: (s) => s?.totalPersonas ?? null },
+	{ id: 'skills', label: 'Skills', icon: Layers, getCount: (s) => s?.totalSkillAreas ?? null },
+	{
+		id: 'experiences',
+		label: 'Experiences',
+		icon: Lightbulb,
+		getCount: (s) => (s ? (s.byType?.experience ?? 0) : null),
+	},
+	{ id: 'memories', label: 'Memories', icon: Brain, getCount: (s) => s?.totalMemories ?? null },
+	{
+		id: 'status',
+		label: 'Status',
+		icon: Activity,
+		getCount: (s) => (s ? s.recentInjections : null),
+	},
+];
 
 interface MemorySettingsProps {
 	theme: Theme;
@@ -166,6 +195,7 @@ export function MemorySettings({
 	activeAgentId,
 	activeAgentType,
 }: MemorySettingsProps): React.ReactElement {
+	const [activeSubTab, setActiveSubTab] = useState<MemorySubTab>('personas');
 	const [config, setConfig] = useState<MemoryConfig>(MEMORY_CONFIG_DEFAULTS);
 	const [stats, setStats] = useState<MemoryStats | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -248,7 +278,7 @@ export function MemorySettings({
 				]);
 				if (!mounted) return;
 
-				if (configRes.success) setConfig(configRes.data);
+				if (configRes.success) setConfig({ ...MEMORY_CONFIG_DEFAULTS, ...configRes.data });
 				if (statsRes.success) setStats(statsRes.data);
 				if (rolesRes.success) setHasRoles(rolesRes.data.length > 0);
 			} catch (err) {
@@ -751,6 +781,52 @@ export function MemorySettings({
 							)}
 						</div>
 					)}
+
+					{/* Sub-Tab Navigation Bar */}
+					<div
+						className="sticky top-0 z-10 flex gap-1.5 py-2 px-1 -mx-1 rounded-lg overflow-x-auto"
+						style={{ backgroundColor: theme.colors.bgSidebar }}
+					>
+						{MEMORY_SUB_TABS.map((tab) => {
+							const isActive = activeSubTab === tab.id;
+							const count = tab.getCount(stats);
+							const Icon = tab.icon;
+							return (
+								<button
+									key={tab.id}
+									onClick={() => setActiveSubTab(tab.id)}
+									className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap shrink-0"
+									style={{
+										backgroundColor: isActive ? `${theme.colors.accent}20` : 'transparent',
+										color: isActive ? theme.colors.accent : theme.colors.textDim,
+										border: `1px solid ${isActive ? theme.colors.accent : 'transparent'}`,
+									}}
+								>
+									<Icon
+										className="w-3.5 h-3.5"
+										style={{ color: isActive ? theme.colors.accent : theme.colors.textDim }}
+									/>
+									{tab.label}
+									{count !== null && (
+										<span
+											className="ml-0.5 px-1.5 py-px rounded-full text-[10px]"
+											style={{
+												backgroundColor: isActive
+													? `${theme.colors.accent}15`
+													: `${theme.colors.border}60`,
+												color: isActive ? theme.colors.accent : theme.colors.textDim,
+											}}
+										>
+											{count}
+										</span>
+									)}
+								</button>
+							);
+						})}
+					</div>
+
+					{/* Active Sub-Tab Content */}
+					{/* TODO: Route to dedicated sub-tab components (MEM-TAB-02 through MEM-TAB-06) */}
 
 					{/* Configuration Inputs */}
 					<div

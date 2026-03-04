@@ -143,7 +143,7 @@ function extractManifestContent(entry: Record<string, unknown>): string {
 			return entry.command_output_summary ? `${cmd} -> ${entry.command_output_summary}` : cmd;
 		}
 		case 'reasoning':
-			return String(entry.reasoning_text ?? entry.reasoning_text_compressed ?? '');
+			return resolveReasoningText(entry);
 		case 'decision':
 			return `${entry.decision_point}: chose ${entry.selected} (${entry.rationale})`;
 		case 'environment':
@@ -151,6 +151,85 @@ function extractManifestContent(entry: Record<string, unknown>): string {
 		default:
 			return String(entry.content ?? entry.text ?? '');
 	}
+}
+
+/**
+ * Resolve reasoning text from a VIBES Reasoning manifest entry.
+ *
+ * Handles three storage modes used by the instrumenter:
+ * 1. Inline: `reasoning_text` contains raw text (< 10KB)
+ * 2. Compressed: `reasoning_text_compressed` is gzip+base64 (10KB-100KB)
+ * 3. External blob: `blob_path` references a file in `.ai-audit/blobs/` (> 100KB)
+ *
+ * External blobs are NOT resolved here (would need projectPath + async I/O).
+ * They are resolved separately in gatherSessionData when full context is available.
+ */
+function resolveReasoningText(entry: Record<string, unknown>): string {
+	// Prefer raw text if available
+	if (typeof entry.reasoning_text === 'string' && entry.reasoning_text) {
+		return entry.reasoning_text;
+	}
+
+	// Decompress gzip+base64 compressed text
+	if (typeof entry.reasoning_text_compressed === 'string' && entry.reasoning_text_compressed) {
+		try {
+			const { gunzipSync } = require('zlib') as typeof import('zlib');
+			const buf = Buffer.from(entry.reasoning_text_compressed, 'base64');
+			return gunzipSync(buf).toString('utf-8');
+		} catch {
+			// Decompression failed — return marker so it's visible in diagnostics
+			return '[compressed reasoning - decompression failed]';
+		}
+	}
+
+	// External blob — return marker; actual resolution happens in gatherSessionData
+	if (entry.external === true && typeof entry.blob_path === 'string') {
+		return `[external reasoning blob: ${entry.blob_path}]`;
+	}
+
+	return '';
+}
+
+/**
+ * Resolve external reasoning blobs in manifest entries.
+ *
+ * VIBES instrumenters store large reasoning (> 100KB) as external gzipped files
+ * in `.ai-audit/blobs/`. This function reads those files and populates
+ * `reasoning_text` so downstream consumers (extractManifestContent, decision
+ * provenance) can access the full CoT text.
+ *
+ * Mutates entries in-place for entries where external blob is successfully read.
+ * Silently skips entries where blob is missing or unreadable.
+ */
+async function resolveExternalReasoningBlobs(
+	entries: Record<string, unknown>[],
+	auditDir: string
+): Promise<Record<string, unknown>[]> {
+	const fsPromises = await import('fs/promises');
+	const pathMod = await import('path');
+
+	for (const entry of entries) {
+		if (
+			String(entry.type ?? '') !== 'reasoning' ||
+			entry.external !== true ||
+			typeof entry.blob_path !== 'string' ||
+			typeof entry.reasoning_text === 'string'
+		) {
+			continue;
+		}
+
+		try {
+			const blobFullPath = pathMod.join(auditDir, entry.blob_path);
+			const raw = await fsPromises.readFile(blobFullPath);
+			// External blobs are gzipped
+			const { gunzipSync } = require('zlib') as typeof import('zlib');
+			entry.reasoning_text = gunzipSync(raw).toString('utf-8');
+		} catch {
+			// Blob missing or unreadable — leave as-is
+		}
+	}
+
+	return entries;
 }
 
 // ─── ExperienceAnalyzer ─────────────────────────────────────────────────────
@@ -279,13 +358,18 @@ export class ExperienceAnalyzer {
 		);
 
 		if (experiences.length === 0) {
-			this.lastDiagnostic = {
-				...baseDiag,
-				status: 'failed-no-experiences',
-				message: 'LLM returned no parseable experiences',
-				providerUsed: this.lastDiagnostic?.providerUsed,
-			};
-			emitProgress('error', 'No experiences extracted');
+			// Preserve the detailed diagnostic from analyzeSession() if it contains
+			// parse failure info (includes LLM output preview for debugging)
+			if (this.lastDiagnostic?.status !== 'failed-parse') {
+				this.lastDiagnostic = {
+					...baseDiag,
+					status: 'failed-no-experiences',
+					message: 'LLM returned no parseable experiences',
+					providerUsed: this.lastDiagnostic?.providerUsed,
+					tokenUsage: this.lastDiagnostic?.tokenUsage,
+				};
+			}
+			emitProgress('error', this.lastDiagnostic?.message ?? 'No experiences extracted');
 			return 0;
 		}
 
@@ -437,12 +521,16 @@ export class ExperienceAnalyzer {
 		);
 
 		if (experiences.length === 0) {
-			this.lastDiagnostic = {
-				...baseDiag,
-				status: 'failed-no-experiences',
-				message: `Turn ${turnIndex}: no experiences extracted`,
-				providerUsed: this.lastDiagnostic?.providerUsed,
-			} as ExtractionDiagnostic;
+			// Preserve the detailed diagnostic from analyzeSession() if available
+			if (this.lastDiagnostic?.status !== 'failed-parse') {
+				this.lastDiagnostic = {
+					...baseDiag,
+					status: 'failed-no-experiences',
+					message: `Turn ${turnIndex}: no experiences extracted`,
+					providerUsed: this.lastDiagnostic?.providerUsed,
+					tokenUsage: this.lastDiagnostic?.tokenUsage,
+				} as ExtractionDiagnostic;
+			}
 			return 0;
 		}
 
@@ -591,10 +679,20 @@ export class ExperienceAnalyzer {
 					: [];
 
 			if (entryArray.length > 0) {
-				input.vibesManifest = entryArray.slice(-20).map((e: Record<string, unknown>) => ({
-					type: String(e.type ?? 'unknown'),
-					content: extractManifestContent(e).slice(0, 500),
-				}));
+				// Resolve external reasoning blobs before content extraction
+				const resolvedEntries = await resolveExternalReasoningBlobs(
+					entryArray.slice(-20),
+					path.join(projectPath, '.ai-audit')
+				);
+				input.vibesManifest = resolvedEntries.map((e: Record<string, unknown>) => {
+					// Reasoning traces are high-value CoT — allow more content
+					const isReasoning = String(e.type ?? '') === 'reasoning';
+					const limit = isReasoning ? 4000 : 500;
+					return {
+						type: String(e.type ?? 'unknown'),
+						content: extractManifestContent(e).slice(0, limit),
+					};
+				});
 			}
 
 			// Annotations
@@ -756,10 +854,18 @@ export class ExperienceAnalyzer {
 						: [];
 
 				const recentEntries = entryArray.slice(-vibesManifestDelta);
-				input.vibesManifest = recentEntries.map((e) => ({
-					type: String(e.type ?? 'unknown'),
-					content: extractManifestContent(e).slice(0, 500),
-				}));
+				const resolvedEntries = await resolveExternalReasoningBlobs(
+					recentEntries,
+					path.join(projectPath, '.ai-audit')
+				);
+				input.vibesManifest = resolvedEntries.map((e) => {
+					const isReasoning = String(e.type ?? '') === 'reasoning';
+					const limit = isReasoning ? 4000 : 500;
+					return {
+						type: String(e.type ?? 'unknown'),
+						content: extractManifestContent(e).slice(0, limit),
+					};
+				});
 			}
 
 			if (vibesAnnotationsDelta > 0) {
@@ -1070,7 +1176,10 @@ export class ExperienceAnalyzer {
 			};
 
 			// Spawn with streaming to get real-time progress
-			const rawOutput = await new Promise<string>((resolve, reject) => {
+			const { stdout: rawOutput, stderr: rawStderr } = await new Promise<{
+				stdout: string;
+				stderr: string;
+			}>((resolve, reject) => {
 				const child = spawn(provider.command, args, {
 					env: { ...process.env, ...provider.env },
 					stdio: ['ignore', 'pipe', 'pipe'],
@@ -1129,7 +1238,7 @@ export class ExperienceAnalyzer {
 					if (code !== 0 && !stdout.trim()) {
 						reject(new Error(`Process exited with code ${code}: ${stderr.slice(0, 500)}`));
 					} else {
-						resolve(stdout);
+						resolve({ stdout, stderr });
 					}
 				});
 
@@ -1153,11 +1262,16 @@ export class ExperienceAnalyzer {
 
 			const experiences = this.parseExperiences(text);
 			if (experiences.length === 0) {
+				// Distinguish "LLM returned empty []" from actual parse failures
+				const looksLikeEmptyArray = /^\s*\[\s*\]\s*$/.test(text.trim());
+				const stderrHint = rawStderr.trim() ? ` stderr: ${rawStderr.slice(0, 200)}` : '';
 				this.lastDiagnostic.status = 'failed-parse';
-				this.lastDiagnostic.message = `Provider returned ${text.length} chars but no experiences parsed. Preview: ${text.slice(0, 200)}`;
-				this
-					.logDebug(`analyzeSession: Zero experiences parsed. Raw output (${rawOutput.length} chars), extracted text (${text.length} chars). Text preview:
-${text.slice(0, 1000)}`);
+				this.lastDiagnostic.message = looksLikeEmptyArray
+					? `LLM returned empty array (no learnings found).${stderrHint}`
+					: `Provider returned ${text.length} chars but no experiences parsed. Preview: ${text.slice(0, 200)}${stderrHint}`;
+				this.logDebug(
+					`analyzeSession: Zero experiences parsed. Raw output (${rawOutput.length} chars), extracted text (${text.length} chars).${stderrHint ? ` Stderr: ${rawStderr.slice(0, 500)}` : ''} Text preview:\n${text.slice(0, 1000)}`
+				);
 			} else {
 				this.logDebug(`analyzeSession: Parsed ${experiences.length} experiences from LLM output`);
 			}
