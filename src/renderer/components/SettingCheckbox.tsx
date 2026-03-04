@@ -63,7 +63,7 @@ export function SettingCheckbox({
 						</div>
 					)}
 				</div>
-				<ToggleSwitch checked={checked} onChange={onChange} theme={theme} />
+				<ToggleSwitch checked={checked} onChange={onChange} theme={theme} ariaLabel={title} />
 			</div>
 		</div>
 	);

@@ -27,6 +27,7 @@ export function ToggleSwitch({
 }: ToggleSwitchProps): React.ReactElement {
 	return (
 		<button
+			type="button"
 			onClick={(e) => {
 				e.stopPropagation();
 				if (!disabled) onChange(!checked);
