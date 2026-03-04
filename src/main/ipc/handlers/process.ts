@@ -163,16 +163,33 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 				// Must happen BEFORE buildAgentArgs so injected content is included in args
 				// ========================================================================
 				if (effectivePrompt && config.cwd && config.toolType !== 'terminal') {
+					// Read selectedPersonaIds from persisted session (if user explicitly chose personas)
+					let selectedPersonaIds: string[] | undefined;
+					try {
+						const storedSessions = deps.sessionsStore.get('sessions', {} as any);
+						const storedSession = (storedSessions as Record<string, any>)[config.sessionId];
+						selectedPersonaIds = storedSession?.selectedPersonaIds;
+					} catch {
+						// Non-critical — fall through to automatic matching
+					}
+
 					try {
 						const { tryInjectMemories } = await import('../../memory/memory-injector');
-						const result = await tryInjectMemories(effectivePrompt, config.cwd, config.toolType);
+						const result = await tryInjectMemories(
+							effectivePrompt,
+							config.cwd,
+							config.toolType,
+							undefined,
+							selectedPersonaIds
+						);
 						effectivePrompt = result.injectedPrompt;
-						if (result.injectedIds.length > 0) {
+						if (result.injectedIds.length > 0 || result.personaContributions.length > 0) {
 							const personaSummary = result.personaContributions
 								.map((p) => `${p.personaName}(${p.count})`)
 								.join(', ');
+							const mode = selectedPersonaIds?.length ? 'explicit' : 'auto';
 							logger.debug(
-								`[Memory] Injected ${result.injectedIds.length} memories (${result.tokenCount} tokens) for ${config.toolType} — personas: ${personaSummary}, project=${result.flatScopeCounts.project}, global=${result.flatScopeCounts.global}`,
+								`[Memory] Injected ${result.injectedIds.length} memories (${result.tokenCount} tokens) for ${config.toolType} — mode=${mode}, personas: ${personaSummary}, project=${result.flatScopeCounts.project}, global=${result.flatScopeCounts.global}`,
 								LOG_CONTEXT
 							);
 

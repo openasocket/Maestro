@@ -281,7 +281,8 @@ export async function injectMemories(
 	prompt: string,
 	projectPath: string,
 	agentType: string,
-	searchQuery?: string
+	searchQuery?: string,
+	selectedPersonaIds?: string[]
 ): Promise<MemoryInjectionResult> {
 	const config = getConfig();
 
@@ -312,16 +313,129 @@ export async function injectMemories(
 
 	// ── Per-scope searches ───────────────────────────────────────────────
 
-	// Skill search: cascading persona → skill → memory
-	const skillResults = await store.cascadingSearch(
-		effectiveQuery,
-		searchConfig,
-		agentType,
-		projectPath
-	);
-	// Filter to skill-scope only (cascading search returns all scopes)
-	const skillOnly = skillResults.filter((r) => r.personaName || r.entry.scope === 'skill');
-	const selectedSkill = selectWithinBudget(skillOnly, budgets.skill);
+	let selectedSkill: MemorySearchResult[];
+	// Hoist skill-scope raw results so the `rich` strategy block can access them
+	// regardless of whether we took the explicit or automatic persona path.
+	let skillResults: MemorySearchResult[] = [];
+
+	if (selectedPersonaIds && selectedPersonaIds.length > 0) {
+		// Explicit persona path: load user-selected personas and their memories
+		const explicitResults: MemorySearchResult[] = [];
+		const resolvedPersonas: Array<{
+			persona: { systemPrompt?: string; id: string };
+			personaName: string;
+			roleName: string;
+			roleSystemPrompt: string;
+		}> = [];
+
+		for (const pid of selectedPersonaIds) {
+			const persona = await store.getPersona(pid);
+			if (!persona || !persona.active) continue;
+			const role = await store.getRole(persona.roleId);
+			resolvedPersonas.push({
+				persona,
+				personaName: persona.name,
+				roleName: role?.name ?? '',
+				roleSystemPrompt: role?.systemPrompt ?? '',
+			});
+
+			// Search memories in each skill area
+			for (const skillId of persona.skillAreaIds) {
+				const skill = await store.getSkillArea(skillId);
+				if (!skill || !skill.active) continue;
+
+				if (searchConfig.enableHybridSearch) {
+					const skillMemResults = await store.hybridSearch(
+						effectiveQuery,
+						'skill',
+						searchConfig,
+						skill.id,
+						undefined,
+						50
+					);
+					for (const r of skillMemResults) {
+						explicitResults.push({
+							...r,
+							roleName: role?.name ?? '',
+							roleSystemPrompt: role?.systemPrompt ?? '',
+							personaName: persona.name,
+							personaSystemPrompt: persona.systemPrompt ?? '',
+							personaId: persona.id,
+							skillAreaName: skill.name,
+						});
+					}
+				} else {
+					const { encode, cosineSimilarity } = await import('../grpo/embedding-service');
+					const qEmbed = await encode(effectiveQuery);
+					const entries = await store.listMemories('skill', skill.id);
+					for (const entry of entries) {
+						if (!entry.embedding) continue;
+						const similarity = cosineSimilarity(qEmbed, entry.embedding);
+						if (similarity < searchConfig.similarityThreshold) continue;
+						explicitResults.push({
+							entry,
+							similarity,
+							combinedScore: similarity,
+							roleName: role?.name ?? '',
+							roleSystemPrompt: role?.systemPrompt ?? '',
+							personaName: persona.name,
+							personaSystemPrompt: persona.systemPrompt ?? '',
+							personaId: persona.id,
+							skillAreaName: skill.name,
+						});
+					}
+				}
+			}
+		}
+
+		// If personas resolved but no memories found, inject directives only
+		if (resolvedPersonas.length > 0 && explicitResults.length === 0) {
+			const directiveBlock = formatPersonaDirectivesOnly(resolvedPersonas);
+			if (directiveBlock) {
+				explicitResults.push({
+					entry: {
+						id: 'persona-directives-only',
+						content: directiveBlock,
+						type: 'rule',
+						scope: 'skill',
+						tags: ['system:persona-directives'],
+						source: 'consolidation',
+						confidence: 1.0,
+						pinned: true,
+						active: true,
+						archived: false,
+						embedding: null,
+						effectivenessScore: 0.5,
+						useCount: 0,
+						tokenEstimate: Math.ceil(directiveBlock.length / 4),
+						lastUsedAt: 0,
+						createdAt: Date.now(),
+						updatedAt: Date.now(),
+					},
+					similarity: 1.0,
+					combinedScore: 1.0,
+					personaName: resolvedPersonas[0].personaName,
+					personaId: resolvedPersonas[0].persona.id,
+					roleName: resolvedPersonas[0].roleName,
+					roleSystemPrompt: resolvedPersonas[0].roleSystemPrompt,
+				});
+			}
+		}
+
+		skillResults = explicitResults;
+		selectedSkill = selectWithinBudget(explicitResults, budgets.skill);
+	} else {
+		// Automatic persona path: cascading persona → skill → memory search
+		skillResults = await store.cascadingSearch(
+			effectiveQuery,
+			searchConfig,
+			agentType,
+			projectPath
+		);
+		// Filter to skill-scope only (cascading search returns all scopes)
+		const skillOnly = skillResults.filter((r) => r.personaName || r.entry.scope === 'skill');
+		selectedSkill = selectWithinBudget(skillOnly, budgets.skill);
+	}
 
 	// Project search: flat search within project scope
 	let projectSearchResults: MemorySearchResult[] = [];
@@ -677,10 +791,11 @@ export async function tryInjectMemories(
 	prompt: string,
 	projectPath: string,
 	agentType: string,
-	searchQuery?: string
+	searchQuery?: string,
+	selectedPersonaIds?: string[]
 ): Promise<MemoryInjectionResult> {
 	try {
-		return await injectMemories(prompt, projectPath, agentType, searchQuery);
+		return await injectMemories(prompt, projectPath, agentType, searchQuery, selectedPersonaIds);
 	} catch (error) {
 		console.warn('[MemoryInjector] Failed to inject memories, returning original prompt:', error);
 		return {
