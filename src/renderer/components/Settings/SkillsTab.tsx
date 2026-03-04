@@ -25,6 +25,9 @@ import {
 	RefreshCw,
 	Trash2,
 	Plus,
+	BarChart3,
+	AlertCircle,
+	Archive,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { MemoryConfig, MemoryStats, Persona, SkillArea } from '../../../shared/memory-types';
@@ -208,6 +211,39 @@ export function SkillsTab({
 		capacityFilter,
 		maxPerSkill,
 	]);
+
+	// ─── Visualization stats ────────────────────────────────────────
+	const vizStats = useMemo(() => {
+		const allCards: SkillCard[] = skills.map((s) => ({
+			...s,
+			memoryCount: memoryCounts.get(s.id) ?? 0,
+			personaName: personas.find((p) => p.id === s.personaId)?.name ?? 'Unknown',
+		}));
+
+		const activeCount = allCards.filter((s) => s.active).length;
+		const inactiveCount = allCards.length - activeCount;
+		const withEmbedding = allCards.filter((s) => s.embedding && s.embedding.length > 0).length;
+		const nearCapacity = allCards.filter((s) => s.memoryCount / maxPerSkill > 0.8).length;
+		const emptySkills = allCards.filter((s) => s.memoryCount === 0).length;
+
+		// Top 10 skills by memory count for distribution bar
+		const sorted = [...allCards].sort((a, b) => b.memoryCount - a.memoryCount);
+		const top10 = sorted.slice(0, 10);
+		const otherCount = sorted.slice(10).reduce((sum, s) => sum + s.memoryCount, 0);
+		const totalMemories = allCards.reduce((sum, s) => sum + s.memoryCount, 0);
+
+		return {
+			total: allCards.length,
+			activeCount,
+			inactiveCount,
+			withEmbedding,
+			nearCapacity,
+			emptySkills,
+			top10,
+			otherCount,
+			totalMemories,
+		};
+	}, [skills, memoryCounts, personas, maxPerSkill]);
 
 	// ─── Toggle description expansion ───────────────────────────────
 	const toggleDescription = useCallback((id: string) => {
@@ -428,6 +464,101 @@ export function SkillsTab({
 				theme={theme}
 				description="Skills are specific domains of expertise within a persona. They organize your memories into focused knowledge areas like 'Error Handling' or 'API Design'. The system matches incoming tasks to relevant skills to find the right memories."
 			/>
+
+			{/* ─── Visualization Summary ────────────────────────────────── */}
+			{!loading && skills.length > 0 && (
+				<div
+					className="rounded-lg border p-4 space-y-3"
+					style={{ borderColor: theme.colors.border }}
+				>
+					<div className="flex items-center gap-2">
+						<BarChart3 className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
+						<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+							Skills Overview
+						</div>
+					</div>
+
+					{/* Stats row */}
+					<div className="flex flex-wrap gap-4 text-xs" style={{ color: theme.colors.textDim }}>
+						<span>
+							Total: {vizStats.total} ({vizStats.activeCount} active, {vizStats.inactiveCount}{' '}
+							inactive)
+						</span>
+						<span>
+							Embeddings: {vizStats.withEmbedding}/{vizStats.total}
+							{vizStats.withEmbedding < vizStats.total && (
+								<span style={{ color: theme.colors.warning }}>
+									{' '}
+									— {vizStats.total - vizStats.withEmbedding} missing
+								</span>
+							)}
+						</span>
+					</div>
+
+					{/* Alerts row */}
+					<div className="flex flex-wrap gap-4 text-xs">
+						{vizStats.nearCapacity > 0 && (
+							<span className="flex items-center gap-1" style={{ color: theme.colors.warning }}>
+								<AlertCircle className="w-3 h-3" />
+								{vizStats.nearCapacity} skill{vizStats.nearCapacity !== 1 ? 's' : ''} near capacity
+								(&gt;80%)
+							</span>
+						)}
+						{vizStats.emptySkills > 0 && (
+							<span className="flex items-center gap-1" style={{ color: theme.colors.textDim }}>
+								<Archive className="w-3 h-3" />
+								{vizStats.emptySkills} skill{vizStats.emptySkills !== 1 ? 's' : ''} with no memories
+							</span>
+						)}
+					</div>
+
+					{/* Memory distribution bar */}
+					{vizStats.totalMemories > 0 && (
+						<div className="space-y-1">
+							<div className="text-xs" style={{ color: theme.colors.textDim }}>
+								Memory distribution ({vizStats.totalMemories} total)
+							</div>
+							<div className="flex gap-0.5 h-3 rounded overflow-hidden">
+								{vizStats.top10.map((skill, i) =>
+									skill.memoryCount > 0 ? (
+										<div
+											key={skill.id}
+											className="h-full"
+											style={{
+												width: `${(skill.memoryCount / vizStats.totalMemories) * 100}%`,
+												backgroundColor: theme.colors.accent,
+												opacity: 0.3 + ((10 - i) / 10) * 0.7,
+											}}
+											title={`${skill.name}: ${skill.memoryCount} memories`}
+										/>
+									) : null
+								)}
+								{vizStats.otherCount > 0 && (
+									<div
+										className="h-full"
+										style={{
+											width: `${(vizStats.otherCount / vizStats.totalMemories) * 100}%`,
+											backgroundColor: theme.colors.textDim,
+											opacity: 0.3,
+										}}
+										title={`Other: ${vizStats.otherCount} memories`}
+									/>
+								)}
+							</div>
+							<div className="flex flex-wrap gap-3 text-xs" style={{ color: theme.colors.textDim }}>
+								{vizStats.top10
+									.filter((s) => s.memoryCount > 0)
+									.map((skill) => (
+										<span key={skill.id}>
+											{skill.name}: {skill.memoryCount}
+										</span>
+									))}
+								{vizStats.otherCount > 0 && <span>Other: {vizStats.otherCount}</span>}
+							</div>
+						</div>
+					)}
+				</div>
+			)}
 
 			{/* Skill-level config */}
 			<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
