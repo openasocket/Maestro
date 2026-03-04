@@ -233,7 +233,7 @@ export interface MemoryConfig {
 	liveSearchCooldownSeconds: number;
 	/** Enable per-turn experience extraction (requires enableExperienceExtraction) — default false */
 	enablePerTurnExtraction: boolean;
-	/** Minimum interestingness score (0.0-1.0) for a turn to trigger extraction — default 0.4 */
+	/** Minimum interestingness score (0.0-1.0) for a turn to trigger extraction — default 0.25 */
 	perTurnInterestingnessThreshold: number;
 	/** Per-turn extraction cooldown per session in seconds — default 60 */
 	perTurnCooldownSeconds: number;
@@ -267,7 +267,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	enableCrossAgentBroadcast: false,
 	liveSearchCooldownSeconds: 60,
 	enablePerTurnExtraction: false,
-	perTurnInterestingnessThreshold: 0.4,
+	perTurnInterestingnessThreshold: 0.25,
 	perTurnCooldownSeconds: 60,
 	perTurnMaxExtractionsPerSession: 10,
 };

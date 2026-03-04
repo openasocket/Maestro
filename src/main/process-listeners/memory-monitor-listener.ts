@@ -488,8 +488,12 @@ export function setupMemoryMonitorListener(
 
 					// Check config
 					try {
-						const accessors_ = memoryAccessors;
-						if (!accessors_) return;
+						let accessors_ = memoryAccessors;
+						if (!accessors_) {
+							const resolved = await defaultGetMemoryAccessors();
+							if (!resolved) return;
+							accessors_ = resolved;
+						}
 
 						const store = accessors_.getMemoryStore();
 						const config = await store.getConfig();
@@ -497,17 +501,40 @@ export function setupMemoryMonitorListener(
 							!config.enabled ||
 							!config.enableExperienceExtraction ||
 							!config.enablePerTurnExtraction
-						)
+						) {
+							logger.debug(
+								'[MemoryMonitor] Per-turn extraction disabled by config',
+								'MemoryMonitor',
+								{
+									enabled: config.enabled,
+									experienceExtraction: config.enableExperienceExtraction,
+									perTurnExtraction: config.enablePerTurnExtraction,
+								}
+							);
 							return;
+						}
 
 						// Check per-session extraction cap
 						const maxExtractions =
 							(config.perTurnMaxExtractionsPerSession as number | undefined) ?? 10;
-						if (state.perTurnExtractionCount >= maxExtractions) return;
+						if (state.perTurnExtractionCount >= maxExtractions) {
+							logger.debug('[MemoryMonitor] Per-turn extraction cap reached', 'MemoryMonitor', {
+								sessionId: state.sessionId,
+								count: state.perTurnExtractionCount,
+								max: maxExtractions,
+							});
+							return;
+						}
 
 						// Check per-session cooldown
 						const cooldownMs = ((config.perTurnCooldownSeconds as number | undefined) ?? 60) * 1000;
-						if (Date.now() - state.lastPerTurnExtractionAt < cooldownMs) return;
+						if (Date.now() - state.lastPerTurnExtractionAt < cooldownMs) {
+							logger.debug('[MemoryMonitor] Per-turn extraction in cooldown', 'MemoryMonitor', {
+								sessionId: state.sessionId,
+								remaining: cooldownMs - (Date.now() - state.lastPerTurnExtractionAt),
+							});
+							return;
+						}
 
 						// Check high context usage (same guard as existing monitor)
 						if (state.lastContextUsage > 90) return;
@@ -533,7 +560,16 @@ export function setupMemoryMonitorListener(
 						};
 
 						const score = scoreTurnInterestingness(signals);
-						const threshold = (config.perTurnInterestingnessThreshold as number | undefined) ?? 0.4;
+						const threshold =
+							(config.perTurnInterestingnessThreshold as number | undefined) ?? 0.25;
+
+						logger.debug('[MemoryMonitor] Turn interestingness scored', 'MemoryMonitor', {
+							sessionId: state.sessionId,
+							turnIndex,
+							score: score.toFixed(2),
+							threshold: threshold.toFixed(2),
+							passed: score >= threshold,
+						});
 
 						if (score < threshold) return;
 
@@ -582,13 +618,17 @@ export function setupMemoryMonitorListener(
 	// 6. Periodic trigger: check via interval for write-count based refreshes
 	// Also triggers mid-session experience extraction at every 10th write
 	const midSessionCheckpoints = new Set<string>(); // tracks "sessionId:checkpoint" keys
-	const periodicInterval = setInterval(() => {
+	const periodicInterval = setInterval(async () => {
 		for (const [, state] of sessionStates) {
 			if (state.effectiveBudget === 0) continue;
 
 			try {
-				const accessors_ = memoryAccessors;
-				if (!accessors_) continue;
+				let accessors_ = memoryAccessors;
+				if (!accessors_) {
+					const resolved = await defaultGetMemoryAccessors();
+					if (!resolved) continue;
+					accessors_ = resolved;
+				}
 
 				const queue = accessors_.getLiveContextQueue();
 				const writeCount = queue.getWriteCount(state.sessionId);
