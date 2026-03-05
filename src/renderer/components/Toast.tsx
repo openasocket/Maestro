@@ -1,6 +1,7 @@
 import React, { memo, useEffect, useState } from 'react';
-import type { Theme } from '../types';
+import type { Theme, SettingsTab } from '../types';
 import { useNotificationStore, type Toast as ToastType } from '../stores/notificationStore';
+import { useModalStore } from '../stores/modalStore';
 
 interface ToastContainerProps {
 	theme: Theme;
@@ -225,7 +226,13 @@ const ToastItem = memo(function ToastItem({
 							style={{ color: theme.colors.accent }}
 							onClick={(e) => {
 								e.stopPropagation();
-								window.maestro.shell.openExternal(toast.actionUrl!);
+								const url = toast.actionUrl!;
+								if (url.startsWith('settings:')) {
+									const tab = (url.slice('settings:'.length) || 'general') as SettingsTab;
+									useModalStore.getState().openModal('settings', { tab });
+								} else {
+									window.maestro.shell.openExternal(url);
+								}
 							}}
 						>
 							<svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
