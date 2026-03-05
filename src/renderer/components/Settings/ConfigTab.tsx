@@ -9,7 +9,7 @@ import React, { useState } from 'react';
 import { ChevronRight, ChevronDown, AlertTriangle } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { MemoryConfig, MemoryStats } from '../../../shared/memory-types';
-import { ConfigSlider, ConfigToggle } from './MemoryConfigWidgets';
+import { ConfigSlider, ConfigToggle, InfoTooltip } from './MemoryConfigWidgets';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
 import { EmbeddingProviderSettings } from './EmbeddingProviderSettings';
 
@@ -40,8 +40,15 @@ export function ConfigTab({
 		<>
 			{/* Injection Tone */}
 			<div className="pt-3 pb-2">
-				<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
+				<div
+					className="text-xs font-medium flex items-center"
+					style={{ color: theme.colors.textMain }}
+				>
 					Injection Tone
+					<InfoTooltip
+						text="How memories are framed when presented to agents. Prescriptive treats them as rules. Adaptive mixes directives and observations. Observational presents everything as past experience."
+						theme={theme}
+					/>
 				</div>
 				<div className="text-xs mt-0.5 mb-2" style={{ color: theme.colors.textDim }}>
 					Controls how memories are framed when presented to agents
@@ -77,6 +84,7 @@ export function ConfigTab({
 			<ConfigSlider
 				label="Token Budget"
 				description="Maximum tokens for memory injection per prompt"
+				tooltip="How many tokens of memory content to inject per session. Higher = more context for the agent, but uses more of the context window."
 				value={config.maxTokenBudget}
 				min={500}
 				max={5000}
@@ -88,6 +96,7 @@ export function ConfigTab({
 			<ConfigSlider
 				label="Similarity Threshold"
 				description="Minimum cosine similarity for memory relevance"
+				tooltip="How closely a memory must match the current task to be injected. Lower = more memories injected but potentially less relevant."
 				value={config.similarityThreshold}
 				min={0.1}
 				max={0.95}
@@ -100,6 +109,7 @@ export function ConfigTab({
 			<ConfigSlider
 				label="Persona Match Threshold"
 				description="Minimum similarity for persona matching (coarser filter)"
+				tooltip="How closely a persona must match the current project to be selected. Lower = more personas considered, higher = stricter matching."
 				value={config.personaMatchThreshold}
 				min={0.1}
 				max={0.8}
@@ -112,6 +122,7 @@ export function ConfigTab({
 			<ConfigSlider
 				label="Skill Match Threshold"
 				description="Minimum similarity for skill area matching"
+				tooltip="How closely a skill area must match the current task to include its memories. Lower = broader skill matching."
 				value={config.skillMatchThreshold}
 				min={0.2}
 				max={0.9}
@@ -216,8 +227,15 @@ export function ConfigTab({
 					>
 						{/* Injection Strategy — always visible */}
 						<div className="pt-3 pb-2">
-							<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
+							<div
+								className="text-xs font-medium flex items-center"
+								style={{ color: theme.colors.textMain }}
+							>
 								Injection Strategy
+								<InfoTooltip
+									text="Lean uses minimal context. Balanced is the default. Rich provides maximum context but uses more tokens."
+									theme={theme}
+								/>
 							</div>
 							<div className="text-xs mt-0.5 mb-2" style={{ color: theme.colors.textDim }}>
 								Controls how aggressively memories are injected into agent prompts
@@ -327,6 +345,7 @@ export function ConfigTab({
 								<ConfigSlider
 									label="Consolidation Threshold"
 									description="Similarity threshold for merging duplicate memories"
+									tooltip="How similar two memories must be before they are merged into one. Higher = only near-duplicates are merged. Lower = more aggressive deduplication."
 									value={config.consolidationThreshold}
 									min={0.5}
 									max={0.99}
@@ -340,6 +359,7 @@ export function ConfigTab({
 							<ConfigSlider
 								label="Decay Half-Life (days)"
 								description="Days until unreinforced memories lose half their confidence"
+								tooltip="How quickly unused memories fade. Shorter = memories decay faster if not reinforced by new sessions. Longer = memories persist even without recent use."
 								value={config.decayHalfLifeDays}
 								min={7}
 								max={365}
@@ -351,6 +371,7 @@ export function ConfigTab({
 							<ConfigToggle
 								label="Auto-Consolidation"
 								description="Automatically merge similar memories during maintenance"
+								tooltip="When enabled, the system periodically scans for near-duplicate memories and merges them to reduce clutter. Disable if you prefer manual control."
 								checked={config.enableAutoConsolidation}
 								onChange={(v) => onUpdateConfig({ enableAutoConsolidation: v })}
 								theme={theme}
@@ -359,6 +380,7 @@ export function ConfigTab({
 							<ConfigToggle
 								label="Effectiveness Tracking"
 								description="Track how injected memories correlate with session outcomes"
+								tooltip="Monitors whether injected memories lead to better session outcomes. Helps identify which memories are most useful over time."
 								checked={config.enableEffectivenessTracking}
 								onChange={(v) => onUpdateConfig({ enableEffectivenessTracking: v })}
 								theme={theme}

@@ -4,7 +4,46 @@
  * Extracted to avoid circular imports between MemorySettings and sub-tab components.
  */
 
+import { useState } from 'react';
+import { HelpCircle } from 'lucide-react';
 import type { Theme } from '../../types';
+
+/**
+ * Inline info tooltip icon that shows a plain-English explanation on click.
+ */
+export function InfoTooltip({ text, theme }: { text: string; theme: Theme }) {
+	const [open, setOpen] = useState(false);
+	return (
+		<div className="relative inline-block ml-1">
+			<button
+				onClick={(e) => {
+					e.stopPropagation();
+					setOpen((v) => !v);
+				}}
+				onBlur={() => setTimeout(() => setOpen(false), 150)}
+				className="p-0.5 rounded hover:bg-white/10 transition-colors"
+				title="More info"
+				style={{ color: theme.colors.textDim }}
+			>
+				<HelpCircle className="w-3 h-3" />
+			</button>
+			{open && (
+				<div
+					className="absolute left-1/2 bottom-full mb-1 z-50 p-3 rounded shadow-lg text-xs whitespace-normal leading-relaxed"
+					style={{
+						backgroundColor: theme.colors.bgMain,
+						border: `1px solid ${theme.colors.border}`,
+						color: theme.colors.textMain,
+						width: '280px',
+						transform: 'translateX(-50%)',
+					}}
+				>
+					{text}
+				</div>
+			)}
+		</div>
+	);
+}
 
 /**
  * Reusable slider row for numeric config values.
@@ -19,6 +58,7 @@ export function ConfigSlider({
 	onChange,
 	theme,
 	formatValue,
+	tooltip,
 }: {
 	label: string;
 	description: string;
@@ -29,12 +69,17 @@ export function ConfigSlider({
 	onChange: (value: number) => void;
 	theme: Theme;
 	formatValue?: (v: number) => string;
+	tooltip?: string;
 }) {
 	return (
 		<div className="flex items-center justify-between gap-4">
 			<div className="flex-1 min-w-0">
-				<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
+				<div
+					className="text-xs font-medium flex items-center"
+					style={{ color: theme.colors.textMain }}
+				>
 					{label}
+					{tooltip && <InfoTooltip text={tooltip} theme={theme} />}
 				</div>
 				<div className="text-xs mt-0.5" style={{ color: theme.colors.textDim }}>
 					{description}
@@ -142,12 +187,14 @@ export function ConfigToggle({
 	checked,
 	onChange,
 	theme,
+	tooltip,
 }: {
 	label: string;
 	description: string;
 	checked: boolean;
 	onChange: (value: boolean) => void;
 	theme: Theme;
+	tooltip?: string;
 }) {
 	return (
 		<button
@@ -155,8 +202,12 @@ export function ConfigToggle({
 			onClick={() => onChange(!checked)}
 		>
 			<div className="flex-1 min-w-0">
-				<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
+				<div
+					className="text-xs font-medium flex items-center"
+					style={{ color: theme.colors.textMain }}
+				>
 					{label}
+					{tooltip && <InfoTooltip text={tooltip} theme={theme} />}
 				</div>
 				<div className="text-xs mt-0.5" style={{ color: theme.colors.textDim }}>
 					{description}
