@@ -1701,4 +1701,146 @@ describe('MemoryStore', () => {
 			expect(updated!.archived).toBe(true);
 		});
 	});
+
+	// ─── Changelog Event Emission ───────────────────────────────────────
+
+	describe('changelog event emission', () => {
+		it('emits "created" event on addMemory', async () => {
+			await store.addMemory({ content: 'Test memory', scope: 'global' });
+			const events = store.changelog.getChangeLog();
+			expect(events.length).toBeGreaterThanOrEqual(1);
+			const created = events.find((e) => e.type === 'created');
+			expect(created).toBeDefined();
+			expect(created!.triggeredBy).toBe('user');
+			expect(created!.memoryType).toBe('rule');
+			expect(created!.scope).toBe('global');
+		});
+
+		it('emits "imported" event when source is import', async () => {
+			await store.addMemory({ content: 'Imported memory', scope: 'global', source: 'import' });
+			const events = store.changelog.getChangeLog();
+			const imported = events.find((e) => e.type === 'imported');
+			expect(imported).toBeDefined();
+			expect(imported!.triggeredBy).toBe('system');
+		});
+
+		it('emits "updated" event on updateMemory', async () => {
+			const mem = await store.addMemory({ content: 'Original', scope: 'global' });
+			await store.updateMemory(mem.id, { content: 'Updated' }, 'global');
+			const events = store.changelog.getChangeLog();
+			const updated = events.find((e) => e.type === 'updated');
+			expect(updated).toBeDefined();
+			expect(updated!.details).toContain('content');
+		});
+
+		it('emits "deleted" event on deleteMemory', async () => {
+			const mem = await store.addMemory({ content: 'To delete', scope: 'global' });
+			await store.deleteMemory(mem.id, 'global');
+			const events = store.changelog.getChangeLog();
+			const deleted = events.find((e) => e.type === 'deleted');
+			expect(deleted).toBeDefined();
+			expect(deleted!.triggeredBy).toBe('user');
+		});
+
+		it('emits "decayed" event on applyConfidenceDecay for meaningful decay', async () => {
+			const mem = await store.addMemory({
+				content: 'Decayable memory',
+				scope: 'global',
+				confidence: 1.0,
+			});
+
+			// Set lastUsedAt to 60 days ago → 30-day half-life: 1.0 * 0.25 = 0.25
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			const entry = lib.entries.find((e) => e.id === mem.id)!;
+			entry.lastUsedAt = Date.now() - 60 * 86400000;
+			await store.writeLibrary(dirPath, lib);
+
+			await store.applyConfidenceDecay('global', 30);
+
+			const events = store.changelog.getChangeLog();
+			const decayed = events.find((e) => e.type === 'decayed' && e.memoryId === mem.id);
+			expect(decayed).toBeDefined();
+			expect(decayed!.triggeredBy).toBe('system');
+			expect(decayed!.details).toMatch(/Confidence: .+ → .+/);
+		});
+
+		it('emits "archived" event on auto-archive from decay', async () => {
+			const mem = await store.addMemory({
+				content: 'Will be archived',
+				scope: 'global',
+				confidence: 0.1,
+			});
+
+			// 120 days with 30-day half-life: 0.1 * 2^(-4) = 0.00625 < 0.05 → archived
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			const entry = lib.entries.find((e) => e.id === mem.id)!;
+			entry.lastUsedAt = Date.now() - 120 * 86400000;
+			await store.writeLibrary(dirPath, lib);
+
+			await store.applyConfidenceDecay('global', 30);
+
+			const events = store.changelog.getChangeLog();
+			const archived = events.find((e) => e.type === 'archived' && e.memoryId === mem.id);
+			expect(archived).toBeDefined();
+			expect(archived!.triggeredBy).toBe('system');
+			expect(archived!.details).toContain('Auto-archived');
+		});
+
+		it('emits "updated" event on restoreMemory', async () => {
+			const mem = await store.addMemory({
+				content: 'Archived memory',
+				scope: 'global',
+				confidence: 0.01,
+			});
+
+			// Manually archive
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			const idx = lib.entries.findIndex((e) => e.id === mem.id);
+			lib.entries[idx] = { ...lib.entries[idx], archived: true };
+			await store.writeLibrary(dirPath, lib);
+
+			await store.restoreMemory(mem.id, 'global');
+
+			const events = store.changelog.getChangeLog();
+			const restored = events.find(
+				(e) => e.type === 'updated' && e.memoryId === mem.id && e.details?.includes('Restored')
+			);
+			expect(restored).toBeDefined();
+			expect(restored!.triggeredBy).toBe('user');
+			expect(restored!.details).toContain('Restored from archive');
+		});
+
+		it('does not emit decay event for pinned memories', async () => {
+			const mem = await store.addMemory({
+				content: 'Pinned memory',
+				scope: 'global',
+				confidence: 1.0,
+				pinned: true,
+			});
+
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			const entry = lib.entries.find((e) => e.id === mem.id)!;
+			entry.lastUsedAt = Date.now() - 365 * 86400000;
+			await store.writeLibrary(dirPath, lib);
+
+			await store.applyConfidenceDecay('global', 30);
+
+			const events = store.changelog.getChangeLog();
+			const decayed = events.find((e) => e.type === 'decayed' && e.memoryId === mem.id);
+			expect(decayed).toBeUndefined();
+		});
+
+		it('truncates memoryContent to 200 chars in changelog events', async () => {
+			const longContent = 'A'.repeat(500);
+			await store.addMemory({ content: longContent, scope: 'global' });
+			const events = store.changelog.getChangeLog();
+			const created = events.find((e) => e.type === 'created');
+			expect(created).toBeDefined();
+			expect(created!.memoryContent.length).toBeLessThanOrEqual(200);
+		});
+	});
 });

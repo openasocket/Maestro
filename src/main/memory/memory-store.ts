@@ -908,6 +908,16 @@ export class MemoryStore {
 			entityId: id,
 			content: entry.content.slice(0, 200),
 		});
+		this.emitChangeEvent(
+			'updated',
+			id,
+			entry.content,
+			entry.type,
+			scope,
+			'user',
+			undefined,
+			`Restored from archive, confidence boosted to ${lib.entries[idx].confidence.toFixed(2)}`
+		);
 
 		return lib.entries[idx];
 	}
@@ -2035,6 +2045,7 @@ export class MemoryStore {
 			const lastUsed = entry.lastUsedAt > 0 ? entry.lastUsedAt : entry.createdAt;
 			const daysSinceLastUsed = (now - lastUsed) / msPerDay;
 			const decayFactor = Math.pow(2, -daysSinceLastUsed / halfLifeDays);
+			const oldConfidence = entry.confidence;
 			entry.confidence = entry.confidence * decayFactor;
 
 			// Effectiveness decay: extra 0.05/day penalty for consistently unhelpful memories
@@ -2048,6 +2059,28 @@ export class MemoryStore {
 				// Keep active: true — archived memories are still "alive" but hidden from default searches
 				entry.updatedAt = now;
 				archivedCount++;
+				this.emitChangeEvent(
+					'archived',
+					entry.id,
+					entry.content,
+					entry.type,
+					scope,
+					'system',
+					undefined,
+					`Auto-archived: confidence decayed to ${entry.confidence.toFixed(3)}`
+				);
+			} else if (Math.abs(oldConfidence - entry.confidence) >= 0.01) {
+				// Only emit decay events for meaningful changes (>= 0.01 delta)
+				this.emitChangeEvent(
+					'decayed',
+					entry.id,
+					entry.content,
+					entry.type,
+					scope,
+					'system',
+					undefined,
+					`Confidence: ${oldConfidence.toFixed(2)} → ${entry.confidence.toFixed(2)}`
+				);
 			}
 
 			modified = true;
