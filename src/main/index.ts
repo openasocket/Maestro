@@ -716,7 +716,20 @@ function initializeEmbeddingProvider(settingsStore: { get: (key: string) => unkn
 			| undefined;
 		const config = memoryConfig?.embeddingProvider;
 		if (config?.enabled) {
-			embeddingRegistry.activate(config).catch((err) => {
+			// Ensure persistent cache directory for Electron
+			const activationConfig = { ...config };
+			if (
+				activationConfig.providerId === 'transformers-js' &&
+				!activationConfig.transformersJs?.cacheDir
+			) {
+				const cacheDir = `${app.getPath('userData')}/models/transformers-js/`;
+				activationConfig.transformersJs = {
+					...activationConfig.transformersJs,
+					modelId: activationConfig.transformersJs?.modelId ?? 'Xenova/gte-small',
+					cacheDir,
+				};
+			}
+			embeddingRegistry.activate(activationConfig).catch((err) => {
 				logger.warn(`Embedding provider activation failed at startup: ${err}`, '[Embedding]');
 			});
 		} else {

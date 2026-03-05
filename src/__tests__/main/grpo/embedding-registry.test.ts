@@ -182,4 +182,56 @@ describe('EmbeddingRegistry', () => {
 		await registry.deactivate();
 		expect(registry.isReady()).toBe(false);
 	});
+
+	describe('progress events', () => {
+		it('should forward progress events to listeners', () => {
+			const events: any[] = [];
+			registry.onProgress((event) => events.push(event));
+
+			registry.emitProgress({
+				providerId: 'transformers-js',
+				modelId: 'Xenova/gte-small',
+				progress: 0.5,
+				status: 'downloading',
+				message: 'test',
+			});
+
+			expect(events).toHaveLength(1);
+			expect(events[0].progress).toBe(0.5);
+			expect(events[0].status).toBe('downloading');
+		});
+
+		it('should allow unsubscribing from progress events', () => {
+			const events: any[] = [];
+			const unsub = registry.onProgress((event) => events.push(event));
+
+			registry.emitProgress({
+				providerId: 'transformers-js',
+				modelId: 'Xenova/gte-small',
+				progress: 0.5,
+				status: 'downloading',
+			});
+			unsub();
+			registry.emitProgress({
+				providerId: 'transformers-js',
+				modelId: 'Xenova/gte-small',
+				progress: 1.0,
+				status: 'ready',
+			});
+
+			expect(events).toHaveLength(1);
+		});
+
+		it('should wire progress callback on providers that support it during activate', async () => {
+			const provider = createMockProvider('transformers-js');
+			const setProgressCallback = vi.fn();
+			(provider as any).setProgressCallback = setProgressCallback;
+			registry.register(provider);
+
+			const config: EmbeddingProviderConfig = { ...DEFAULT_EMBEDDING_CONFIG, enabled: true };
+			await registry.activate(config);
+
+			expect(setProgressCallback).toHaveBeenCalledWith(expect.any(Function));
+		});
+	});
 });

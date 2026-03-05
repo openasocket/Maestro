@@ -6,14 +6,40 @@
  */
 
 import { logger } from '../utils/logger';
-import type { EmbeddingProvider, EmbeddingProviderStatus } from './embedding-types';
+import type {
+	EmbeddingProvider,
+	EmbeddingProviderStatus,
+	DownloadProgressEvent,
+} from './embedding-types';
 import type { EmbeddingProviderId, EmbeddingProviderConfig } from '../../shared/memory-types';
 
 const LOG_CONTEXT = '[EmbeddingRegistry]';
 
+export type ProgressListener = (event: DownloadProgressEvent) => void;
+
 export class EmbeddingRegistry {
 	private activeProvider: EmbeddingProvider | null = null;
 	private providers: Map<EmbeddingProviderId, EmbeddingProvider> = new Map();
+	private progressListeners: Set<ProgressListener> = new Set();
+
+	/** Subscribe to download/loading progress events */
+	onProgress(listener: ProgressListener): () => void {
+		this.progressListeners.add(listener);
+		return () => {
+			this.progressListeners.delete(listener);
+		};
+	}
+
+	/** Emit a progress event to all listeners */
+	emitProgress(event: DownloadProgressEvent): void {
+		for (const listener of this.progressListeners) {
+			try {
+				listener(event);
+			} catch (err) {
+				logger.warn(`Progress listener error: ${err}`, LOG_CONTEXT);
+			}
+		}
+	}
 
 	/** Register a provider implementation */
 	register(provider: EmbeddingProvider): void {
@@ -32,6 +58,16 @@ export class EmbeddingRegistry {
 		if (!provider) {
 			logger.warn(`Embedding provider "${config.providerId}" not registered`, LOG_CONTEXT);
 			return;
+		}
+
+		// Wire up progress forwarding if the provider supports it
+		if (
+			'setProgressCallback' in provider &&
+			typeof (provider as any).setProgressCallback === 'function'
+		) {
+			(provider as any).setProgressCallback((event: DownloadProgressEvent) => {
+				this.emitProgress(event);
+			});
 		}
 
 		try {

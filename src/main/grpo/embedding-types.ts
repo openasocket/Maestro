@@ -62,6 +62,16 @@ export interface EmbeddingUsageEvent {
 	timestamp: number;
 }
 
+/** Progress event emitted during model download/loading */
+export interface DownloadProgressEvent {
+	providerId: EmbeddingProviderId;
+	modelId: string;
+	/** 0.0 to 1.0 */
+	progress: number;
+	status: 'downloading' | 'loading' | 'ready' | 'error';
+	message?: string;
+}
+
 // ─── Error ────────────────────────────────────────────────────────────────
 
 export class EmbeddingModelNotAvailableError extends Error {

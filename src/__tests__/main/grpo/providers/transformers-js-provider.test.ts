@@ -158,4 +158,104 @@ describe('TransformersJsProvider', () => {
 		expect(status.modelName).toBe('Xenova/gte-small');
 		expect(status.error).toBeUndefined();
 	});
+
+	describe('progress callbacks', () => {
+		it('should emit progress events during initialization', async () => {
+			const progressEvents: any[] = [];
+			provider.setProgressCallback((event) => progressEvents.push(event));
+
+			const config: EmbeddingProviderConfig = { ...DEFAULT_EMBEDDING_CONFIG, enabled: true };
+			await provider.initialize(config);
+
+			// Should have at least: downloading(0), downloading(0.1), ready(1.0)
+			expect(progressEvents.length).toBeGreaterThanOrEqual(3);
+			expect(progressEvents[0].status).toBe('downloading');
+			expect(progressEvents[0].progress).toBe(0);
+			expect(progressEvents[progressEvents.length - 1].status).toBe('ready');
+			expect(progressEvents[progressEvents.length - 1].progress).toBe(1.0);
+		});
+
+		it('should pass progress_callback in pipeline options when callback is set', async () => {
+			provider.setProgressCallback(() => {});
+
+			const config: EmbeddingProviderConfig = { ...DEFAULT_EMBEDDING_CONFIG, enabled: true };
+			await provider.initialize(config);
+
+			const pipelineCallArgs = mockPipelineFn.mock.calls[0];
+			expect(pipelineCallArgs[2]).toHaveProperty('progress_callback');
+			expect(typeof pipelineCallArgs[2].progress_callback).toBe('function');
+		});
+
+		it('should not pass progress_callback when no callback is set', async () => {
+			const config: EmbeddingProviderConfig = { ...DEFAULT_EMBEDDING_CONFIG, enabled: true };
+			await provider.initialize(config);
+
+			const pipelineCallArgs = mockPipelineFn.mock.calls[0];
+			expect(pipelineCallArgs[2]).toEqual({ quantized: true });
+		});
+
+		it('should emit error progress on initialization failure', async () => {
+			const progressEvents: any[] = [];
+			provider.setProgressCallback((event) => progressEvents.push(event));
+			mockPipelineFn.mockRejectedValueOnce(new Error('WASM load failed'));
+
+			const config: EmbeddingProviderConfig = { ...DEFAULT_EMBEDDING_CONFIG, enabled: true };
+			await expect(provider.initialize(config)).rejects.toThrow('WASM load failed');
+
+			const lastEvent = progressEvents[progressEvents.length - 1];
+			expect(lastEvent.status).toBe('error');
+			expect(lastEvent.message).toBe('WASM load failed');
+		});
+
+		it('should map download progress to 0.1–0.9 range', async () => {
+			const progressEvents: any[] = [];
+			provider.setProgressCallback((event) => progressEvents.push(event));
+
+			// Make pipeline call the progress_callback during creation
+			mockPipelineFn.mockImplementation(async (_task: string, _model: string, opts: any) => {
+				if (opts.progress_callback) {
+					opts.progress_callback({ status: 'progress', progress: 50, file: 'model.onnx' });
+					opts.progress_callback({ status: 'done' });
+				}
+				return mockPipeline;
+			});
+
+			const config: EmbeddingProviderConfig = { ...DEFAULT_EMBEDDING_CONFIG, enabled: true };
+			await provider.initialize(config);
+
+			const downloadEvent = progressEvents.find(
+				(e) => e.status === 'downloading' && e.message === 'model.onnx'
+			);
+			expect(downloadEvent).toBeDefined();
+			// 50% progress mapped to 0.1 + (50/100)*0.8 = 0.5
+			expect(downloadEvent.progress).toBeCloseTo(0.5, 2);
+
+			const loadingEvent = progressEvents.find((e) => e.status === 'loading');
+			expect(loadingEvent).toBeDefined();
+			expect(loadingEvent.progress).toBe(0.95);
+		});
+	});
+
+	describe('cache directory', () => {
+		it('should set cacheDir from config.transformersJs.cacheDir', async () => {
+			mockEnv.cacheDir = '';
+			const config: EmbeddingProviderConfig = {
+				...DEFAULT_EMBEDDING_CONFIG,
+				enabled: true,
+				transformersJs: {
+					modelId: 'Xenova/gte-small',
+					cacheDir: '/app/data/models/transformers-js/',
+				},
+			};
+			await provider.initialize(config);
+			expect(mockEnv.cacheDir).toBe('/app/data/models/transformers-js/');
+		});
+
+		it('should not set cacheDir when not provided', async () => {
+			mockEnv.cacheDir = '';
+			const config: EmbeddingProviderConfig = { ...DEFAULT_EMBEDDING_CONFIG, enabled: true };
+			await provider.initialize(config);
+			expect(mockEnv.cacheDir).toBe('');
+		});
+	});
 });

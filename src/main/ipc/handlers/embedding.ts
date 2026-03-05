@@ -7,7 +7,7 @@
  * - Available provider detection
  */
 
-import { ipcMain } from 'electron';
+import { ipcMain, BrowserWindow } from 'electron';
 import { logger } from '../../utils/logger';
 import { createIpcDataHandler, CreateHandlerOptions } from '../../utils/ipcHandler';
 import { embeddingRegistry } from '../../grpo/embedding-registry';
@@ -49,6 +49,17 @@ export function registerEmbeddingHandlers(): void {
 			return { available };
 		})
 	);
+
+	// Forward download/loading progress events to all renderer windows
+	embeddingRegistry.onProgress((event) => {
+		try {
+			for (const win of BrowserWindow.getAllWindows()) {
+				win.webContents.send('embedding:progress', event);
+			}
+		} catch {
+			// Electron not available (testing) — skip
+		}
+	});
 
 	logger.debug('Embedding IPC handlers registered', LOG_CONTEXT);
 }

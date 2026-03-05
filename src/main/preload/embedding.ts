@@ -10,7 +10,10 @@
 import { ipcRenderer } from 'electron';
 import type { IpcResponse } from '../../main/utils/ipcHandler';
 import type { EmbeddingProviderId, EmbeddingProviderConfig } from '../../shared/memory-types';
-import type { EmbeddingProviderStatus } from '../../main/grpo/embedding-types';
+import type {
+	EmbeddingProviderStatus,
+	DownloadProgressEvent,
+} from '../../main/grpo/embedding-types';
 
 export interface EmbeddingStatusResult {
 	activeProviderId: EmbeddingProviderId | null;
@@ -24,6 +27,8 @@ export interface EmbeddingApi {
 		config: EmbeddingProviderConfig
 	) => Promise<IpcResponse<{ activeProviderId: EmbeddingProviderId | null }>>;
 	detectAvailable: () => Promise<IpcResponse<{ available: EmbeddingProviderId[] }>>;
+	/** Subscribe to model download/loading progress events. Returns unsubscribe function. */
+	onProgress: (callback: (event: DownloadProgressEvent) => void) => () => void;
 }
 
 export function createEmbeddingApi(): EmbeddingApi {
@@ -32,5 +37,13 @@ export function createEmbeddingApi(): EmbeddingApi {
 		switchProvider: (providerId, config) =>
 			ipcRenderer.invoke('embedding:switchProvider', providerId, config),
 		detectAvailable: () => ipcRenderer.invoke('embedding:detectAvailable'),
+		onProgress: (callback) => {
+			const handler = (_event: unknown, progressEvent: DownloadProgressEvent) =>
+				callback(progressEvent);
+			ipcRenderer.on('embedding:progress', handler);
+			return () => {
+				ipcRenderer.removeListener('embedding:progress', handler);
+			};
+		},
 	};
 }

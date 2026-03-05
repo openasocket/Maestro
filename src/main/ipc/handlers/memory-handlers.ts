@@ -7,7 +7,7 @@
  * All channels are prefixed with `memory:` and subnamespaced by entity type.
  */
 
-import { ipcMain } from 'electron';
+import { app, ipcMain } from 'electron';
 import { promises as fs } from 'fs';
 import * as crypto from 'crypto';
 import { logger } from '../../utils/logger';
@@ -1127,6 +1127,22 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
  * Handle changes to the embedding provider configuration.
  * Activates, switches, or deactivates the provider as needed.
  */
+/** Ensure transformers-js configs have a persistent cache directory */
+function ensureCacheDir(config: EmbeddingProviderConfig): EmbeddingProviderConfig {
+	if (config.providerId !== 'transformers-js' || config.transformersJs?.cacheDir) {
+		return config;
+	}
+	const cacheDir = `${app.getPath('userData')}/models/transformers-js/`;
+	return {
+		...config,
+		transformersJs: {
+			...config.transformersJs,
+			modelId: config.transformersJs?.modelId ?? 'Xenova/gte-small',
+			cacheDir,
+		},
+	};
+}
+
 async function handleEmbeddingConfigChange(
 	previous: EmbeddingProviderConfig | undefined,
 	current: EmbeddingProviderConfig | undefined
@@ -1136,6 +1152,7 @@ async function handleEmbeddingConfigChange(
 	const wasEnabled = previous?.enabled ?? false;
 	const isEnabled = current.enabled;
 	const providerChanged = previous?.providerId !== current.providerId;
+	const withCache = ensureCacheDir(current);
 
 	if (!isEnabled && wasEnabled) {
 		// Provider was disabled
@@ -1147,10 +1164,10 @@ async function handleEmbeddingConfigChange(
 			`Switching embedding provider: ${previous?.providerId ?? 'none'} → ${current.providerId}`,
 			LOG_CONTEXT
 		);
-		await embeddingRegistry.switchProvider(current.providerId, current);
+		await embeddingRegistry.switchProvider(current.providerId, withCache);
 	} else if (isEnabled && !wasEnabled) {
 		// Provider was just enabled
 		logger.info(`Enabling embedding provider: ${current.providerId}`, LOG_CONTEXT);
-		await embeddingRegistry.activate(current);
+		await embeddingRegistry.activate(withCache);
 	}
 }

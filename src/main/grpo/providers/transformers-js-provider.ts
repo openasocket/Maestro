@@ -6,9 +6,15 @@
  * Zero external dependencies — works on all platforms.
  */
 
-import type { EmbeddingProvider, EmbeddingProviderStatus } from '../embedding-types';
+import type {
+	EmbeddingProvider,
+	EmbeddingProviderStatus,
+	DownloadProgressEvent,
+} from '../embedding-types';
 import type { EmbeddingProviderConfig } from '../../../shared/memory-types';
 import { VECTOR_DIM } from '../embedding-types';
+
+export type ProgressCallback = (event: DownloadProgressEvent) => void;
 
 export class TransformersJsProvider implements EmbeddingProvider {
 	readonly id = 'transformers-js' as const;
@@ -20,12 +26,34 @@ export class TransformersJsProvider implements EmbeddingProvider {
 	private ready = false;
 	private error: string | null = null;
 	private modelId = 'Xenova/gte-small';
+	private onProgress: ProgressCallback | null = null;
+
+	/** Set a callback to receive download/loading progress events */
+	setProgressCallback(callback: ProgressCallback | null): void {
+		this.onProgress = callback;
+	}
+
+	private emitProgress(
+		status: DownloadProgressEvent['status'],
+		progress: number,
+		message?: string
+	): void {
+		this.onProgress?.({
+			providerId: this.id,
+			modelId: this.modelId,
+			progress,
+			status,
+			message,
+		});
+	}
 
 	async initialize(config: EmbeddingProviderConfig): Promise<void> {
 		const modelId = config.transformersJs?.modelId ?? 'Xenova/gte-small';
 		this.modelId = modelId;
 
 		try {
+			this.emitProgress('downloading', 0, `Preparing ${modelId}...`);
+
 			// Dynamic import to avoid loading the heavy module unless needed
 			const { pipeline, env } = await import('@xenova/transformers');
 
@@ -34,16 +62,36 @@ export class TransformersJsProvider implements EmbeddingProvider {
 				env.cacheDir = config.transformersJs.cacheDir;
 			}
 
+			this.emitProgress('downloading', 0.1, `Loading model ${modelId}...`);
+
+			// Build pipeline options with progress callback if available
+			const pipelineOpts: Record<string, unknown> = { quantized: true };
+			if (this.onProgress) {
+				pipelineOpts.progress_callback = (progressData: {
+					status?: string;
+					progress?: number;
+					file?: string;
+				}) => {
+					if (progressData.status === 'progress' && typeof progressData.progress === 'number') {
+						// Map download progress to 0.1–0.9 range
+						const mapped = 0.1 + (progressData.progress / 100) * 0.8;
+						this.emitProgress('downloading', mapped, progressData.file ?? undefined);
+					} else if (progressData.status === 'done') {
+						this.emitProgress('loading', 0.95, 'Finalizing model...');
+					}
+				};
+			}
+
 			// Load the feature-extraction pipeline
-			this.pipeline = await pipeline('feature-extraction', modelId, {
-				quantized: true,
-			});
+			this.pipeline = await pipeline('feature-extraction', modelId, pipelineOpts);
 
 			this.ready = true;
 			this.error = null;
+			this.emitProgress('ready', 1.0, 'Model ready');
 		} catch (err: any) {
 			this.ready = false;
 			this.error = err.message;
+			this.emitProgress('error', 0, err.message);
 			throw err;
 		}
 	}
