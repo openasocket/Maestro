@@ -62,6 +62,7 @@ import {
 import { getMemoryStore } from './memory/memory-store';
 import { embeddingRegistry } from './grpo/embedding-registry';
 import { TransformersJsProvider } from './grpo/providers/transformers-js-provider';
+import { OllamaEmbeddingProvider } from './grpo/providers/ollama-provider';
 import type { EmbeddingProviderConfig } from '../shared/memory-types';
 import { initializeStatsDB, closeStatsDB, getStatsDB } from './stats';
 import { groupChatEmitters } from './ipc/handlers/groupChat';
@@ -709,6 +710,7 @@ function setupIpcHandlers() {
 function initializeEmbeddingProvider(settingsStore: { get: (key: string) => unknown }) {
 	// Register built-in providers
 	embeddingRegistry.register(new TransformersJsProvider());
+	embeddingRegistry.register(new OllamaEmbeddingProvider());
 
 	try {
 		const memoryConfig = settingsStore.get('memoryConfig') as
