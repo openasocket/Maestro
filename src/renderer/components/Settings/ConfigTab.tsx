@@ -6,11 +6,12 @@
  */
 
 import React, { useState } from 'react';
-import { ChevronRight, ChevronDown } from 'lucide-react';
+import { ChevronRight, ChevronDown, AlertTriangle } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { MemoryConfig, MemoryStats } from '../../../shared/memory-types';
 import { ConfigSlider, ConfigToggle } from './MemoryConfigWidgets';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
+import { EmbeddingProviderSettings } from './EmbeddingProviderSettings';
 
 interface ConfigTabProps {
 	theme: Theme;
@@ -20,8 +21,11 @@ interface ConfigTabProps {
 }
 
 export function ConfigTab({ theme, config, onUpdateConfig }: ConfigTabProps): React.ReactElement {
+	const [embeddingOpen, setEmbeddingOpen] = useState(true);
 	const [retrievalOpen, setRetrievalOpen] = useState(true);
 	const [storageOpen, setStorageOpen] = useState(false);
+
+	const embeddingActive = config.embeddingProvider?.enabled && config.embeddingProvider?.providerId;
 
 	return (
 		<div className="space-y-3">
@@ -29,6 +33,63 @@ export function ConfigTab({ theme, config, onUpdateConfig }: ConfigTabProps): Re
 				theme={theme}
 				description="Fine-tune how the memory system retrieves, injects, and maintains knowledge. These settings affect all personas and skill areas globally."
 			/>
+
+			{/* Embedding Provider — prerequisite for semantic search */}
+			<div
+				className="rounded-lg border overflow-hidden"
+				style={{ borderColor: theme.colors.border }}
+			>
+				<button
+					className="w-full flex items-center gap-2 px-4 py-2.5 text-left transition-colors"
+					style={{
+						backgroundColor: embeddingOpen ? `${theme.colors.border}20` : 'transparent',
+					}}
+					onClick={() => setEmbeddingOpen((v) => !v)}
+				>
+					{embeddingOpen ? (
+						<ChevronDown className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
+					) : (
+						<ChevronRight className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
+					)}
+					<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+						Embedding Provider
+					</span>
+					{!embeddingActive && (
+						<span
+							className="text-[10px] px-1.5 py-0.5 rounded-full ml-1"
+							style={{ backgroundColor: `${theme.colors.warning}20`, color: theme.colors.warning }}
+						>
+							Not configured
+						</span>
+					)}
+				</button>
+
+				{embeddingOpen && (
+					<div className="px-4 pb-4 border-t" style={{ borderColor: theme.colors.border }}>
+						{!embeddingActive && (
+							<div
+								className="flex items-center gap-2 p-2.5 mt-3 rounded-lg text-xs"
+								style={{
+									backgroundColor: `${theme.colors.warning}10`,
+									borderLeft: `3px solid ${theme.colors.warning}`,
+									color: theme.colors.warning,
+								}}
+							>
+								<AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+								Embedding provider not configured. Semantic search is disabled — only keyword
+								matching is available.
+							</div>
+						)}
+						<div className="pt-3">
+							<EmbeddingProviderSettings
+								theme={theme}
+								config={config}
+								onUpdateConfig={onUpdateConfig}
+							/>
+						</div>
+					</div>
+				)}
+			</div>
 
 			{/* Retrieval & Injection */}
 			<div
