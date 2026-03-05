@@ -924,83 +924,406 @@ export function ExperiencesTab({
 	}, [queueStatus?.recentDiagnostics]);
 
 	return (
-		<div className="space-y-4">
-			<TabDescriptionBanner
-				theme={theme}
-				description="Experiences are lessons learned from real coding sessions — what worked, what didn't, and why. They're automatically extracted from your agent interactions and can be promoted to permanent rules when patterns prove reliable."
-			/>
-
-			{/* ═══════════════════════════════════════════════════════════════════
-			    Visualization Summary
-			    ═══════════════════════════════════════════════════════════════════ */}
-			<ExperienceVisualizationSummary
-				theme={theme}
-				experiences={experiences}
-				currentProjectCount={currentProjectExperiences}
-				promotionCandidateCount={promotionCandidates.length}
-				promotedCount={promotedCount}
-				lastDiagnostic={lastDiagnostic}
-			/>
-
-			{error && (
-				<div
-					className="flex items-center gap-2 p-3 rounded-lg text-xs"
-					style={{ backgroundColor: `${theme.colors.error}15`, color: theme.colors.error }}
-				>
-					{error}
-					<button
-						className="ml-auto shrink-0 p-0.5 rounded hover:opacity-80"
-						onClick={() => setError(null)}
-					>
-						<X className="w-3 h-3" />
-					</button>
-				</div>
-			)}
-
-			{/* ═══════════════════════════════════════════════════════════════════
-			    Section 1: Extraction Pipeline
-			    ═══════════════════════════════════════════════════════════════════ */}
-			<div className="rounded-lg border" style={{ borderColor: theme.colors.border }}>
-				<SectionHeader
+		<div className="flex flex-col" style={{ height: '100%' }}>
+			{/* Fixed header region — does not scroll */}
+			<div className="shrink-0 space-y-3 pb-2">
+				<TabDescriptionBanner
 					theme={theme}
-					icon={Activity}
-					title="Extraction Pipeline"
-					subtitle="Configure how experiences are extracted from sessions"
-					collapsed={extractionCollapsed}
-					onToggle={() => setExtractionCollapsed(!extractionCollapsed)}
+					description="Experiences are lessons learned from real coding sessions — what worked, what didn't, and why. They're automatically extracted from your agent interactions and can be promoted to permanent rules when patterns prove reliable."
 				/>
 
-				{!extractionCollapsed && (
-					<div className="px-4 pb-4 space-y-3">
-						{/* Brief explanation */}
-						<div
-							className="text-xs leading-relaxed rounded p-2.5"
-							style={{ backgroundColor: `${theme.colors.accent}08`, color: theme.colors.textDim }}
+				{/* Visualization Summary */}
+				<ExperienceVisualizationSummary
+					theme={theme}
+					experiences={experiences}
+					currentProjectCount={currentProjectExperiences}
+					promotionCandidateCount={promotionCandidates.length}
+					promotedCount={promotedCount}
+					lastDiagnostic={lastDiagnostic}
+				/>
+
+				{error && (
+					<div
+						className="flex items-center gap-2 p-3 rounded-lg text-xs"
+						style={{ backgroundColor: `${theme.colors.error}15`, color: theme.colors.error }}
+					>
+						{error}
+						<button
+							className="ml-auto shrink-0 p-0.5 rounded hover:opacity-80"
+							onClick={() => setError(null)}
 						>
-							Experience extraction automatically learns from your coding sessions. After each
-							session, the system analyzes what happened and captures reusable insights — patterns
-							that worked, mistakes to avoid, and techniques worth remembering.
+							<X className="w-3 h-3" />
+						</button>
+					</div>
+				)}
+			</div>
+
+			{/* Scrollable content region — independent scroll */}
+			<div className="flex-1 overflow-y-auto min-h-0 space-y-4 mt-2">
+				{/* ═══════════════════════════════════════════════════════════════════
+			    Section 1: Extraction Pipeline
+			    ═══════════════════════════════════════════════════════════════════ */}
+				<div className="rounded-lg border" style={{ borderColor: theme.colors.border }}>
+					<SectionHeader
+						theme={theme}
+						icon={Activity}
+						title="Extraction Pipeline"
+						subtitle="Configure how experiences are extracted from sessions"
+						collapsed={extractionCollapsed}
+						onToggle={() => setExtractionCollapsed(!extractionCollapsed)}
+					/>
+
+					{!extractionCollapsed && (
+						<div className="px-4 pb-4 space-y-3">
+							{/* Brief explanation */}
+							<div
+								className="text-xs leading-relaxed rounded p-2.5"
+								style={{ backgroundColor: `${theme.colors.accent}08`, color: theme.colors.textDim }}
+							>
+								Experience extraction automatically learns from your coding sessions. After each
+								session, the system analyzes what happened and captures reusable insights — patterns
+								that worked, mistakes to avoid, and techniques worth remembering.
+							</div>
+
+							{/* Background Processing Toggles */}
+							<ConfigToggle
+								label="Background Experience Extraction"
+								description="Analyze sessions after completion to extract learnings (uses LLM tokens)"
+								checked={config.enableExperienceExtraction}
+								onChange={(v) => onUpdateConfig({ enableExperienceExtraction: v })}
+								theme={theme}
+							/>
+
+							<ConfigToggle
+								label="Auto-Consolidation"
+								description="Automatically merge similar memories (saves tokens on injection)"
+								checked={config.enableAutoConsolidation}
+								onChange={(v) => onUpdateConfig({ enableAutoConsolidation: v })}
+								theme={theme}
+							/>
+
+							{/* Per-Turn Extraction */}
+							{config.enableExperienceExtraction && (
+								<div
+									className="rounded border p-3 space-y-3"
+									style={{
+										borderColor: theme.colors.border,
+										backgroundColor: `${theme.colors.border}08`,
+									}}
+								>
+									<ConfigToggle
+										label="Per-Turn Extraction"
+										description="Extract experiences during a session (not just after), when an interesting turn is detected"
+										checked={config.enablePerTurnExtraction}
+										onChange={(v) => onUpdateConfig({ enablePerTurnExtraction: v })}
+										theme={theme}
+									/>
+
+									{config.enablePerTurnExtraction && (
+										<>
+											<ConfigSlider
+												label="Interestingness Threshold"
+												description="Minimum interestingness score (0-1) for a turn to trigger extraction"
+												value={config.perTurnInterestingnessThreshold}
+												min={0}
+												max={1}
+												step={0.05}
+												onChange={(v) => onUpdateConfig({ perTurnInterestingnessThreshold: v })}
+												theme={theme}
+												formatValue={(v) => v.toFixed(2)}
+											/>
+											<ConfigSlider
+												label="Cooldown (seconds)"
+												description="Minimum seconds between per-turn extractions within the same session"
+												value={config.perTurnCooldownSeconds}
+												min={10}
+												max={300}
+												step={10}
+												onChange={(v) => onUpdateConfig({ perTurnCooldownSeconds: v })}
+												theme={theme}
+											/>
+											<ConfigSlider
+												label="Max Extractions per Session"
+												description="Maximum per-turn extractions allowed in a single session"
+												value={config.perTurnMaxExtractionsPerSession}
+												min={1}
+												max={50}
+												step={1}
+												onChange={(v) => onUpdateConfig({ perTurnMaxExtractionsPerSession: v })}
+												theme={theme}
+											/>
+										</>
+									)}
+								</div>
+							)}
+
+							{/* Extraction Status Panel */}
+							{config.enableExperienceExtraction && (
+								<ExtractionStatusPanel
+									theme={theme}
+									queueStatus={queueStatus}
+									tokenUsage={tokenUsage}
+									config={config}
+									batchCapableAgents={batchCapableAgents}
+									onUpdateConfig={onUpdateConfig}
+									activeAgentId={activeAgentId}
+									activeAgentType={activeAgentType}
+									projectPath={projectPath}
+								/>
+							)}
 						</div>
+					)}
+				</div>
 
-						{/* Background Processing Toggles */}
-						<ConfigToggle
-							label="Background Experience Extraction"
-							description="Analyze sessions after completion to extract learnings (uses LLM tokens)"
-							checked={config.enableExperienceExtraction}
-							onChange={(v) => onUpdateConfig({ enableExperienceExtraction: v })}
-							theme={theme}
-						/>
+				{/* ═══════════════════════════════════════════════════════════════════
+			    Section 2: Experience Review
+			    ═══════════════════════════════════════════════════════════════════ */}
+				<div className="rounded-lg border" style={{ borderColor: theme.colors.border }}>
+					<SectionHeader
+						theme={theme}
+						icon={Brain}
+						title="Experience Review"
+						subtitle={`${totalExperiences} total${currentProjectExperiences > 0 ? `, ${currentProjectExperiences} from this project` : ''}`}
+						collapsed={reviewCollapsed}
+						onToggle={() => setReviewCollapsed(!reviewCollapsed)}
+					/>
 
-						<ConfigToggle
-							label="Auto-Consolidation"
-							description="Automatically merge similar memories (saves tokens on injection)"
-							checked={config.enableAutoConsolidation}
-							onChange={(v) => onUpdateConfig({ enableAutoConsolidation: v })}
-							theme={theme}
-						/>
+					{!reviewCollapsed && (
+						<div className="px-4 pb-4 space-y-3">
+							{/* Filter Bar */}
+							<div className="space-y-2">
+								{/* Search */}
+								<div
+									className="flex items-center gap-2 px-2 py-1.5 rounded-lg border"
+									style={{ borderColor: theme.colors.border }}
+								>
+									<Search
+										className="w-3.5 h-3.5 shrink-0"
+										style={{ color: theme.colors.textDim }}
+									/>
+									<input
+										type="text"
+										value={reviewSearch}
+										onChange={(e) => setReviewSearch(e.target.value)}
+										placeholder="Search experiences..."
+										className="flex-1 bg-transparent outline-none text-xs"
+										style={{ color: theme.colors.textMain }}
+									/>
+								</div>
 
-						{/* Per-Turn Extraction */}
-						{config.enableExperienceExtraction && (
+								{/* Filters row */}
+								<div className="flex items-center gap-1.5 flex-wrap">
+									{/* Source filter */}
+									<select
+										value={reviewSourceFilter}
+										onChange={(e) => setReviewSourceFilter(e.target.value as ReviewSourceFilter)}
+										className="text-[10px] rounded px-1.5 py-0.5 border bg-transparent"
+										style={{
+											color: theme.colors.textMain,
+											borderColor: theme.colors.border,
+										}}
+									>
+										<option value="all">All sources</option>
+										<option value="session-analysis">Session analysis</option>
+										<option value="auto-run">Auto run</option>
+										<option value="user">User</option>
+										<option value="consolidation">Consolidation</option>
+										<option value="grpo">GRPO</option>
+										<option value="import">Import</option>
+										<option value="repository">Repository</option>
+									</select>
+
+									{/* Deviation filter */}
+									<select
+										value={reviewDeviationFilter}
+										onChange={(e) =>
+											setReviewDeviationFilter(e.target.value as ReviewDeviationFilter)
+										}
+										className="text-[10px] rounded px-1.5 py-0.5 border bg-transparent"
+										style={{
+											color: theme.colors.textMain,
+											borderColor: theme.colors.border,
+										}}
+									>
+										<option value="all">All types</option>
+										<option value="deviation">Deviations only</option>
+										<option value="normal">Normal only</option>
+									</select>
+
+									{/* Date range filter */}
+									<select
+										value={reviewDateRange}
+										onChange={(e) => setReviewDateRange(e.target.value as typeof reviewDateRange)}
+										className="text-[10px] rounded px-1.5 py-0.5 border bg-transparent"
+										style={{
+											color: theme.colors.textMain,
+											borderColor: theme.colors.border,
+										}}
+									>
+										<option value="all">All time</option>
+										<option value="24h">Last 24h</option>
+										<option value="7d">Last 7 days</option>
+										<option value="30d">Last 30 days</option>
+										<option value="90d">Last 90 days</option>
+									</select>
+
+									{/* Project filter */}
+									{availableProjects.length > 1 && (
+										<select
+											value={reviewProjectFilter}
+											onChange={(e) => setReviewProjectFilter(e.target.value)}
+											className="text-[10px] rounded px-1.5 py-0.5 border bg-transparent truncate max-w-[120px]"
+											style={{
+												color: theme.colors.textMain,
+												borderColor: theme.colors.border,
+											}}
+										>
+											<option value="all">All projects</option>
+											{availableProjects.map((p) => (
+												<option key={p} value={p}>
+													{p.split('/').pop()}
+												</option>
+											))}
+										</select>
+									)}
+
+									{/* Sort */}
+									<div className="flex items-center gap-1 ml-auto">
+										<ArrowUpDown className="w-3 h-3" style={{ color: theme.colors.textDim }} />
+										<select
+											value={reviewSort}
+											onChange={(e) => setReviewSort(e.target.value as ReviewSortField)}
+											className="text-[10px] rounded px-1.5 py-0.5 border bg-transparent"
+											style={{
+												color: theme.colors.textMain,
+												borderColor: theme.colors.border,
+											}}
+										>
+											<option value="newest">Newest first</option>
+											<option value="confidence">Highest confidence</option>
+											<option value="most-used">Most used</option>
+											<option value="effectiveness">Most effective</option>
+										</select>
+									</div>
+								</div>
+
+								{/* Confidence range filter */}
+								<div
+									className="flex items-center gap-2 text-[10px]"
+									style={{ color: theme.colors.textDim }}
+								>
+									<SlidersHorizontal className="w-3 h-3 shrink-0" />
+									<span className="shrink-0">Confidence:</span>
+									<input
+										type="range"
+										min={0}
+										max={1}
+										step={0.05}
+										value={reviewConfidenceMin}
+										onChange={(e) => setReviewConfidenceMin(Number(e.target.value))}
+										className="w-16 h-1 accent-current"
+										title={`Min: ${(reviewConfidenceMin * 100).toFixed(0)}%`}
+									/>
+									<span className="font-mono w-8 text-center">
+										{(reviewConfidenceMin * 100).toFixed(0)}%
+									</span>
+									<span>–</span>
+									<input
+										type="range"
+										min={0}
+										max={1}
+										step={0.05}
+										value={reviewConfidenceMax}
+										onChange={(e) => setReviewConfidenceMax(Number(e.target.value))}
+										className="w-16 h-1 accent-current"
+										title={`Max: ${(reviewConfidenceMax * 100).toFixed(0)}%`}
+									/>
+									<span className="font-mono w-8 text-center">
+										{(reviewConfidenceMax * 100).toFixed(0)}%
+									</span>
+								</div>
+							</div>
+
+							{/* Experience Cards */}
+							{experiencesLoading ? (
+								<div
+									className="flex items-center justify-center py-4 gap-2"
+									style={{ color: theme.colors.textDim }}
+								>
+									<Loader2 className="w-4 h-4 animate-spin" />
+									<span className="text-xs">Loading experiences...</span>
+								</div>
+							) : filteredExperiences.length === 0 ? (
+								<div className="flex flex-col items-center justify-center py-6 gap-2">
+									<Brain className="w-6 h-6 opacity-20" style={{ color: theme.colors.textDim }} />
+									<div className="text-xs text-center" style={{ color: theme.colors.textDim }}>
+										{reviewSearch || reviewSourceFilter !== 'all' || reviewDeviationFilter !== 'all'
+											? 'No experiences match your filters.'
+											: 'No experiences extracted yet. Complete a session with 3+ interactions to trigger analysis.'}
+									</div>
+								</div>
+							) : (
+								<div className="space-y-2 max-h-96 overflow-y-auto scrollbar-thin">
+									{filteredExperiences.map((exp) => (
+										<ExperienceReviewCard
+											key={exp.id}
+											experience={exp}
+											theme={theme}
+											projectPath={projectPath}
+											agentType={activeAgentType}
+											onEdit={() => setEditingMemory(exp)}
+											onTogglePin={() => handleTogglePin(exp)}
+											onArchive={() => handleArchive(exp)}
+											onPromote={(ruleText) =>
+												handlePromote(
+													{
+														memory: exp,
+														isCrossProjectCandidate: false,
+														suggestedRuleText: ruleText,
+														qualificationReason: 'Manual promotion',
+														promotionScore: 1,
+													},
+													ruleText
+												)
+											}
+											onMovePromote={handleMovePromoteAction}
+											skillAreas={skillAreas}
+											personas={personasList}
+											isPromotionCandidate={promotionCandidateIds.has(exp.id)}
+										/>
+									))}
+								</div>
+							)}
+						</div>
+					)}
+				</div>
+
+				{/* ═══════════════════════════════════════════════════════════════════
+			    Section 3: Promotion Candidates
+			    ═══════════════════════════════════════════════════════════════════ */}
+				<div className="rounded-lg border" style={{ borderColor: theme.colors.border }}>
+					<SectionHeader
+						theme={theme}
+						icon={ArrowUpCircle}
+						title="Promotion Candidates"
+						subtitle="Experiences ready to become rules"
+						collapsed={promotionCollapsed}
+						onToggle={() => setPromotionCollapsed(!promotionCollapsed)}
+						badge={promotionCandidates.length > 0 ? promotionCandidates.length : null}
+					/>
+
+					{!promotionCollapsed && (
+						<div className="px-4 pb-4 space-y-4">
+							{/* Description */}
+							<div
+								className="text-xs leading-relaxed rounded-md px-3 py-2"
+								style={{ color: theme.colors.textDim, backgroundColor: `${theme.colors.border}15` }}
+							>
+								Experiences that have been used multiple times, show high confidence, or appear
+								across projects are surfaced here as candidates for promotion to permanent rules.
+							</div>
+
+							{/* Cross-Project Promotion Config */}
 							<div
 								className="rounded border p-3 space-y-3"
 								style={{
@@ -1008,412 +1331,97 @@ export function ExperiencesTab({
 									backgroundColor: `${theme.colors.border}08`,
 								}}
 							>
+								<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
+									Cross-Project Detection
+								</div>
 								<ConfigToggle
-									label="Per-Turn Extraction"
-									description="Extract experiences during a session (not just after), when an interesting turn is detected"
-									checked={config.enablePerTurnExtraction}
-									onChange={(v) => onUpdateConfig({ enablePerTurnExtraction: v })}
+									label="Enable Cross-Project Promotion"
+									description="Detect recurring experiences across projects and suggest global promotion"
+									checked={config.enableCrossProjectPromotion}
+									onChange={(v) => onUpdateConfig({ enableCrossProjectPromotion: v })}
 									theme={theme}
 								/>
-
-								{config.enablePerTurnExtraction && (
+								{config.enableCrossProjectPromotion && (
 									<>
 										<ConfigSlider
-											label="Interestingness Threshold"
-											description="Minimum interestingness score (0-1) for a turn to trigger extraction"
-											value={config.perTurnInterestingnessThreshold}
-											min={0}
-											max={1}
-											step={0.05}
-											onChange={(v) => onUpdateConfig({ perTurnInterestingnessThreshold: v })}
-											theme={theme}
-											formatValue={(v) => v.toFixed(2)}
-										/>
-										<ConfigSlider
-											label="Cooldown (seconds)"
-											description="Minimum seconds between per-turn extractions within the same session"
-											value={config.perTurnCooldownSeconds}
-											min={10}
-											max={300}
-											step={10}
-											onChange={(v) => onUpdateConfig({ perTurnCooldownSeconds: v })}
-											theme={theme}
-										/>
-										<ConfigSlider
-											label="Max Extractions per Session"
-											description="Maximum per-turn extractions allowed in a single session"
-											value={config.perTurnMaxExtractionsPerSession}
-											min={1}
-											max={50}
+											label="Min. Projects Required"
+											description="Number of distinct projects an experience must appear in before being flagged for cross-project promotion"
+											value={config.crossProjectMinProjects}
+											min={2}
+											max={10}
 											step={1}
-											onChange={(v) => onUpdateConfig({ perTurnMaxExtractionsPerSession: v })}
+											onChange={(v) => onUpdateConfig({ crossProjectMinProjects: v })}
+											theme={theme}
+										/>
+										<ConfigSlider
+											label="Similarity Threshold"
+											description="Cosine similarity threshold for matching experiences across projects (higher = stricter matching)"
+											value={config.crossProjectSimilarityThreshold}
+											min={0.5}
+											max={1.0}
+											step={0.05}
+											onChange={(v) => onUpdateConfig({ crossProjectSimilarityThreshold: v })}
 											theme={theme}
 										/>
 									</>
 								)}
 							</div>
-						)}
 
-						{/* Extraction Status Panel */}
-						{config.enableExperienceExtraction && (
-							<ExtractionStatusPanel
-								theme={theme}
-								queueStatus={queueStatus}
-								tokenUsage={tokenUsage}
-								config={config}
-								batchCapableAgents={batchCapableAgents}
-								onUpdateConfig={onUpdateConfig}
-								activeAgentId={activeAgentId}
-								activeAgentType={activeAgentType}
-								projectPath={projectPath}
-							/>
-						)}
-					</div>
-				)}
-			</div>
-
-			{/* ═══════════════════════════════════════════════════════════════════
-			    Section 2: Experience Review
-			    ═══════════════════════════════════════════════════════════════════ */}
-			<div className="rounded-lg border" style={{ borderColor: theme.colors.border }}>
-				<SectionHeader
-					theme={theme}
-					icon={Brain}
-					title="Experience Review"
-					subtitle={`${totalExperiences} total${currentProjectExperiences > 0 ? `, ${currentProjectExperiences} from this project` : ''}`}
-					collapsed={reviewCollapsed}
-					onToggle={() => setReviewCollapsed(!reviewCollapsed)}
-				/>
-
-				{!reviewCollapsed && (
-					<div className="px-4 pb-4 space-y-3">
-						{/* Filter Bar */}
-						<div className="space-y-2">
-							{/* Search */}
-							<div
-								className="flex items-center gap-2 px-2 py-1.5 rounded-lg border"
-								style={{ borderColor: theme.colors.border }}
-							>
-								<Search className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-								<input
-									type="text"
-									value={reviewSearch}
-									onChange={(e) => setReviewSearch(e.target.value)}
-									placeholder="Search experiences..."
-									className="flex-1 bg-transparent outline-none text-xs"
-									style={{ color: theme.colors.textMain }}
+							{/* Candidates list */}
+							{promotionCandidates.length > 0 ? (
+								<PromotionSection
+									theme={theme}
+									candidates={promotionCandidates}
+									editingId={editingPromotionId}
+									editingText={editingRuleText}
+									onEditTextChange={setEditingRuleText}
+									onStartEdit={(id, text) => {
+										setEditingPromotionId(id);
+										setEditingRuleText(text);
+									}}
+									onCancelEdit={() => setEditingPromotionId(null)}
+									onApprove={(c, text) => handlePromote(c, text)}
+									onDismiss={handleDismissPromotion}
+									onKeep={handleKeepAsExperience}
 								/>
-							</div>
-
-							{/* Filters row */}
-							<div className="flex items-center gap-1.5 flex-wrap">
-								{/* Source filter */}
-								<select
-									value={reviewSourceFilter}
-									onChange={(e) => setReviewSourceFilter(e.target.value as ReviewSourceFilter)}
-									className="text-[10px] rounded px-1.5 py-0.5 border bg-transparent"
-									style={{
-										color: theme.colors.textMain,
-										borderColor: theme.colors.border,
-									}}
-								>
-									<option value="all">All sources</option>
-									<option value="session-analysis">Session analysis</option>
-									<option value="auto-run">Auto run</option>
-									<option value="user">User</option>
-									<option value="consolidation">Consolidation</option>
-									<option value="grpo">GRPO</option>
-									<option value="import">Import</option>
-									<option value="repository">Repository</option>
-								</select>
-
-								{/* Deviation filter */}
-								<select
-									value={reviewDeviationFilter}
-									onChange={(e) =>
-										setReviewDeviationFilter(e.target.value as ReviewDeviationFilter)
-									}
-									className="text-[10px] rounded px-1.5 py-0.5 border bg-transparent"
-									style={{
-										color: theme.colors.textMain,
-										borderColor: theme.colors.border,
-									}}
-								>
-									<option value="all">All types</option>
-									<option value="deviation">Deviations only</option>
-									<option value="normal">Normal only</option>
-								</select>
-
-								{/* Date range filter */}
-								<select
-									value={reviewDateRange}
-									onChange={(e) => setReviewDateRange(e.target.value as typeof reviewDateRange)}
-									className="text-[10px] rounded px-1.5 py-0.5 border bg-transparent"
-									style={{
-										color: theme.colors.textMain,
-										borderColor: theme.colors.border,
-									}}
-								>
-									<option value="all">All time</option>
-									<option value="24h">Last 24h</option>
-									<option value="7d">Last 7 days</option>
-									<option value="30d">Last 30 days</option>
-									<option value="90d">Last 90 days</option>
-								</select>
-
-								{/* Project filter */}
-								{availableProjects.length > 1 && (
-									<select
-										value={reviewProjectFilter}
-										onChange={(e) => setReviewProjectFilter(e.target.value)}
-										className="text-[10px] rounded px-1.5 py-0.5 border bg-transparent truncate max-w-[120px]"
-										style={{
-											color: theme.colors.textMain,
-											borderColor: theme.colors.border,
-										}}
-									>
-										<option value="all">All projects</option>
-										{availableProjects.map((p) => (
-											<option key={p} value={p}>
-												{p.split('/').pop()}
-											</option>
-										))}
-									</select>
-								)}
-
-								{/* Sort */}
-								<div className="flex items-center gap-1 ml-auto">
-									<ArrowUpDown className="w-3 h-3" style={{ color: theme.colors.textDim }} />
-									<select
-										value={reviewSort}
-										onChange={(e) => setReviewSort(e.target.value as ReviewSortField)}
-										className="text-[10px] rounded px-1.5 py-0.5 border bg-transparent"
-										style={{
-											color: theme.colors.textMain,
-											borderColor: theme.colors.border,
-										}}
-									>
-										<option value="newest">Newest first</option>
-										<option value="confidence">Highest confidence</option>
-										<option value="most-used">Most used</option>
-										<option value="effectiveness">Most effective</option>
-									</select>
+							) : (
+								<div className="flex flex-col items-center justify-center py-6 gap-2">
+									<ArrowUpCircle
+										className="w-6 h-6 opacity-20"
+										style={{ color: theme.colors.textDim }}
+									/>
+									<div className="text-xs text-center" style={{ color: theme.colors.textDim }}>
+										No promotion candidates right now. Experiences become candidates when they show
+										high confidence, repeated use, or cross-project evidence.
+									</div>
 								</div>
-							</div>
-
-							{/* Confidence range filter */}
-							<div
-								className="flex items-center gap-2 text-[10px]"
-								style={{ color: theme.colors.textDim }}
-							>
-								<SlidersHorizontal className="w-3 h-3 shrink-0" />
-								<span className="shrink-0">Confidence:</span>
-								<input
-									type="range"
-									min={0}
-									max={1}
-									step={0.05}
-									value={reviewConfidenceMin}
-									onChange={(e) => setReviewConfidenceMin(Number(e.target.value))}
-									className="w-16 h-1 accent-current"
-									title={`Min: ${(reviewConfidenceMin * 100).toFixed(0)}%`}
-								/>
-								<span className="font-mono w-8 text-center">
-									{(reviewConfidenceMin * 100).toFixed(0)}%
-								</span>
-								<span>–</span>
-								<input
-									type="range"
-									min={0}
-									max={1}
-									step={0.05}
-									value={reviewConfidenceMax}
-									onChange={(e) => setReviewConfidenceMax(Number(e.target.value))}
-									className="w-16 h-1 accent-current"
-									title={`Max: ${(reviewConfidenceMax * 100).toFixed(0)}%`}
-								/>
-								<span className="font-mono w-8 text-center">
-									{(reviewConfidenceMax * 100).toFixed(0)}%
-								</span>
-							</div>
-						</div>
-
-						{/* Experience Cards */}
-						{experiencesLoading ? (
-							<div
-								className="flex items-center justify-center py-4 gap-2"
-								style={{ color: theme.colors.textDim }}
-							>
-								<Loader2 className="w-4 h-4 animate-spin" />
-								<span className="text-xs">Loading experiences...</span>
-							</div>
-						) : filteredExperiences.length === 0 ? (
-							<div className="flex flex-col items-center justify-center py-6 gap-2">
-								<Brain className="w-6 h-6 opacity-20" style={{ color: theme.colors.textDim }} />
-								<div className="text-xs text-center" style={{ color: theme.colors.textDim }}>
-									{reviewSearch || reviewSourceFilter !== 'all' || reviewDeviationFilter !== 'all'
-										? 'No experiences match your filters.'
-										: 'No experiences extracted yet. Complete a session with 3+ interactions to trigger analysis.'}
-								</div>
-							</div>
-						) : (
-							<div className="space-y-2 max-h-96 overflow-y-auto scrollbar-thin">
-								{filteredExperiences.map((exp) => (
-									<ExperienceReviewCard
-										key={exp.id}
-										experience={exp}
-										theme={theme}
-										projectPath={projectPath}
-										agentType={activeAgentType}
-										onEdit={() => setEditingMemory(exp)}
-										onTogglePin={() => handleTogglePin(exp)}
-										onArchive={() => handleArchive(exp)}
-										onPromote={(ruleText) =>
-											handlePromote(
-												{
-													memory: exp,
-													isCrossProjectCandidate: false,
-													suggestedRuleText: ruleText,
-													qualificationReason: 'Manual promotion',
-													promotionScore: 1,
-												},
-												ruleText
-											)
-										}
-										onMovePromote={handleMovePromoteAction}
-										skillAreas={skillAreas}
-										personas={personasList}
-										isPromotionCandidate={promotionCandidateIds.has(exp.id)}
-									/>
-								))}
-							</div>
-						)}
-					</div>
-				)}
-			</div>
-
-			{/* ═══════════════════════════════════════════════════════════════════
-			    Section 3: Promotion Candidates
-			    ═══════════════════════════════════════════════════════════════════ */}
-			<div className="rounded-lg border" style={{ borderColor: theme.colors.border }}>
-				<SectionHeader
-					theme={theme}
-					icon={ArrowUpCircle}
-					title="Promotion Candidates"
-					subtitle="Experiences ready to become rules"
-					collapsed={promotionCollapsed}
-					onToggle={() => setPromotionCollapsed(!promotionCollapsed)}
-					badge={promotionCandidates.length > 0 ? promotionCandidates.length : null}
-				/>
-
-				{!promotionCollapsed && (
-					<div className="px-4 pb-4 space-y-4">
-						{/* Description */}
-						<div
-							className="text-xs leading-relaxed rounded-md px-3 py-2"
-							style={{ color: theme.colors.textDim, backgroundColor: `${theme.colors.border}15` }}
-						>
-							Experiences that have been used multiple times, show high confidence, or appear across
-							projects are surfaced here as candidates for promotion to permanent rules.
-						</div>
-
-						{/* Cross-Project Promotion Config */}
-						<div
-							className="rounded border p-3 space-y-3"
-							style={{
-								borderColor: theme.colors.border,
-								backgroundColor: `${theme.colors.border}08`,
-							}}
-						>
-							<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
-								Cross-Project Detection
-							</div>
-							<ConfigToggle
-								label="Enable Cross-Project Promotion"
-								description="Detect recurring experiences across projects and suggest global promotion"
-								checked={config.enableCrossProjectPromotion}
-								onChange={(v) => onUpdateConfig({ enableCrossProjectPromotion: v })}
-								theme={theme}
-							/>
-							{config.enableCrossProjectPromotion && (
-								<>
-									<ConfigSlider
-										label="Min. Projects Required"
-										description="Number of distinct projects an experience must appear in before being flagged for cross-project promotion"
-										value={config.crossProjectMinProjects}
-										min={2}
-										max={10}
-										step={1}
-										onChange={(v) => onUpdateConfig({ crossProjectMinProjects: v })}
-										theme={theme}
-									/>
-									<ConfigSlider
-										label="Similarity Threshold"
-										description="Cosine similarity threshold for matching experiences across projects (higher = stricter matching)"
-										value={config.crossProjectSimilarityThreshold}
-										min={0.5}
-										max={1.0}
-										step={0.05}
-										onChange={(v) => onUpdateConfig({ crossProjectSimilarityThreshold: v })}
-										theme={theme}
-									/>
-								</>
 							)}
 						</div>
+					)}
+				</div>
 
-						{/* Candidates list */}
-						{promotionCandidates.length > 0 ? (
-							<PromotionSection
-								theme={theme}
-								candidates={promotionCandidates}
-								editingId={editingPromotionId}
-								editingText={editingRuleText}
-								onEditTextChange={setEditingRuleText}
-								onStartEdit={(id, text) => {
-									setEditingPromotionId(id);
-									setEditingRuleText(text);
-								}}
-								onCancelEdit={() => setEditingPromotionId(null)}
-								onApprove={(c, text) => handlePromote(c, text)}
-								onDismiss={handleDismissPromotion}
-								onKeep={handleKeepAsExperience}
-							/>
-						) : (
-							<div className="flex flex-col items-center justify-center py-6 gap-2">
-								<ArrowUpCircle
-									className="w-6 h-6 opacity-20"
-									style={{ color: theme.colors.textDim }}
-								/>
-								<div className="text-xs text-center" style={{ color: theme.colors.textDim }}>
-									No promotion candidates right now. Experiences become candidates when they show
-									high confidence, repeated use, or cross-project evidence.
-								</div>
-							</div>
-						)}
-					</div>
-				)}
-			</div>
-
-			{/* ═══════════════════════════════════════════════════════════════════
+				{/* ═══════════════════════════════════════════════════════════════════
 			    Section 4: Repository
 			    ═══════════════════════════════════════════════════════════════════ */}
-			<div className="border-t pt-4" style={{ borderColor: theme.colors.border }} />
-			<div className="rounded-lg border" style={{ borderColor: theme.colors.border }}>
-				<SectionHeader
-					theme={theme}
-					icon={Globe}
-					title="Repository"
-					subtitle="Import and share experience bundles"
-					collapsed={repositoryCollapsed}
-					onToggle={() => setRepositoryCollapsed(!repositoryCollapsed)}
-				/>
+				<div className="border-t pt-4" style={{ borderColor: theme.colors.border }} />
+				<div className="rounded-lg border" style={{ borderColor: theme.colors.border }}>
+					<SectionHeader
+						theme={theme}
+						icon={Globe}
+						title="Repository"
+						subtitle="Import and share experience bundles"
+						collapsed={repositoryCollapsed}
+						onToggle={() => setRepositoryCollapsed(!repositoryCollapsed)}
+					/>
 
-				{!repositoryCollapsed && (
-					<div className="px-4 pb-4">
-						<ExperienceRepositoryPanel theme={theme} />
-					</div>
-				)}
+					{!repositoryCollapsed && (
+						<div className="px-4 pb-4">
+							<ExperienceRepositoryPanel theme={theme} />
+						</div>
+					)}
+				</div>
 			</div>
+			{/* end scrollable content region */}
 
 			{/* Edit Modal */}
 			{editingMemory && (
