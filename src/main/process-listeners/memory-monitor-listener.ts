@@ -297,6 +297,133 @@ async function computeVibesDeltas(
 	};
 }
 
+// ─── Effectiveness Evaluation on Exit (MEM-EVOLVE-04) ──────────────────────
+
+/**
+ * Gather SessionOutcomeSignals from accumulated monitor state and evaluate
+ * effectiveness for all injected memories. Called once at session exit.
+ */
+async function evaluateEffectivenessOnExit(
+	state: SessionMonitorState,
+	exitCode: number,
+	logger: { debug: (msg: string, category: string, meta?: Record<string, unknown>) => void }
+): Promise<void> {
+	try {
+		const { getInjectionRecord, clearSessionInjection } = await import('../memory/memory-injector');
+		const record = getInjectionRecord(state.sessionId);
+		if (!record || record.ids.length === 0) return;
+
+		const { EffectivenessEvaluator } = await import('../memory/effectiveness-evaluator');
+		const { getMemoryStore } = await import('../memory/memory-store');
+
+		// Gather signals from accumulated monitor state
+		const totalErrors = Array.from(state.errorCounts.values()).reduce((s, c) => s + c, 0);
+		const completed = exitCode === 0;
+		const cancelled = exitCode !== 0 && exitCode !== null;
+
+		// Check for git diff (code changes produced)
+		let gitDiffProduced = false;
+		try {
+			const { execFile } = await import('child_process');
+			const { promisify } = await import('util');
+			const execFileAsync = promisify(execFile);
+			const result = await execFileAsync('git', ['diff', '--stat', 'HEAD'], {
+				cwd: state.projectPath,
+				timeout: 5000,
+			});
+			gitDiffProduced = (result.stdout ?? '').trim().length > 0;
+		} catch {
+			// Git unavailable or not a repo — assume no diff
+		}
+
+		const signals: import('../../shared/memory-types').SessionOutcomeSignals = {
+			completed,
+			cancelled,
+			errorCount: totalErrors,
+			resolvedErrorCount: 0, // Not tracked granularly yet — conservative default
+			gitDiffProduced,
+			contextUtilization: state.lastContextUsage / 100, // Convert 0-100 to 0.0-1.0
+			turnCount: state.turnIndex,
+			durationMs:
+				Date.now() -
+				(state.currentTurnStartedAt > 0
+					? state.currentTurnStartedAt - (state.turnIndex > 0 ? 0 : 0)
+					: Date.now()),
+		};
+
+		// Use session start approximation: first turn started at some point
+		// Duration is best-effort since we don't track exact session start
+		if (state.turnIndex > 0 && state.currentTurnStartedAt > 0) {
+			// Approximate: we know the last turn start, but not session start
+			// Use a rough estimate based on turn count
+			signals.durationMs = state.turnIndex * 30_000; // ~30s per turn average
+		}
+
+		const evaluator = new EffectivenessEvaluator();
+		const updates = evaluator.evaluateSession(state.sessionId, record, signals);
+
+		if (updates.length === 0) return;
+
+		const store = getMemoryStore();
+
+		// Group updates by scope+skillAreaId for batch updateEffectiveness calls
+		const groups = new Map<
+			string,
+			{ ids: string[]; score: number; scope: string; skillAreaId?: string }
+		>();
+		for (const update of updates) {
+			const key = update.scope === 'skill' ? `skill:${update.skillAreaId}` : update.scope;
+			let group = groups.get(key);
+			if (!group) {
+				group = {
+					ids: [],
+					score: update.outcomeScore,
+					scope: update.scope,
+					skillAreaId: update.skillAreaId,
+				};
+				groups.set(key, group);
+			}
+			group.ids.push(update.memoryId);
+		}
+
+		for (const group of groups.values()) {
+			await store.updateEffectiveness(
+				group.ids,
+				group.score,
+				group.scope as import('../../shared/memory-types').MemoryScope,
+				group.skillAreaId,
+				state.projectPath
+			);
+		}
+
+		const avgScore = updates.reduce((sum, u) => sum + u.outcomeScore, 0) / updates.length;
+
+		logger.debug(
+			`[memory-effectiveness] Session ${state.sessionId}: updated effectiveness for ${updates.length} memories (avg score: ${avgScore.toFixed(2)})`,
+			'MemoryEffectiveness',
+			{
+				sessionId: state.sessionId,
+				memoryCount: updates.length,
+				avgScore: avgScore.toFixed(2),
+				exitCode,
+				signals: {
+					completed: signals.completed,
+					cancelled: signals.cancelled,
+					errorCount: signals.errorCount,
+					gitDiffProduced: signals.gitDiffProduced,
+					contextUtilization: signals.contextUtilization.toFixed(2),
+					turnCount: signals.turnCount,
+				},
+			}
+		);
+
+		// Clean up injection record now that effectiveness has been evaluated
+		clearSessionInjection(state.sessionId);
+	} catch {
+		// Non-critical — effectiveness evaluation is best-effort
+	}
+}
+
 // ─── Memory Monitor Constants ──────────────────────────────────────────────
 
 /** Common agent tools that don't indicate a novel domain */
@@ -1213,8 +1340,15 @@ export function setupMemoryMonitorListener(
 		periodicInterval.unref();
 	}
 
-	// Cleanup: remove session state and checkpoint tracking on exit
-	processManager.on('exit', (sessionId: string) => {
+	// Cleanup + effectiveness evaluation on exit
+	processManager.on('exit', (sessionId: string, code: number) => {
+		const state = sessionStates.get(sessionId);
+
+		// Fire-and-forget effectiveness evaluation before cleanup
+		if (state) {
+			evaluateEffectivenessOnExit(state, code, logger).catch(() => {});
+		}
+
 		sessionStates.delete(sessionId);
 		// Clean up mid-session checkpoint entries for this session
 		for (const key of midSessionCheckpoints) {
