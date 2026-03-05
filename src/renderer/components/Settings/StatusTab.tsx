@@ -527,6 +527,7 @@ interface InjectionEventRecord {
 	noMatch?: boolean;
 	matchedPersonas?: PersonaMatchRecord[];
 	matchedSkills?: SkillMatchRecord[];
+	checkpointType?: string;
 }
 
 /** Timeline bucket for hour-by-hour or day-by-day display. */
@@ -626,6 +627,9 @@ function InjectionActivitySection({
 	const realInjections = injections.filter((e) => !e.noMatch);
 	const recentCount = realInjections.filter((e) => e.timestamp >= sevenDaysAgo).length;
 	const noMatchCount = injections.filter((e) => e.noMatch && e.timestamp >= sevenDaysAgo).length;
+	const checkpointCount = realInjections.filter(
+		(e) => e.checkpointType && e.timestamp >= sevenDaysAgo
+	).length;
 
 	// Timeline buckets
 	const timeline = useMemo(() => buildTimeline(injections), [injections]);
@@ -682,14 +686,24 @@ function InjectionActivitySection({
 				collapsed={!expanded}
 				onToggle={() => setExpanded(!expanded)}
 				action={
-					noMatchCount > 0 ? (
-						<span
-							className="text-[10px] px-1.5 py-0.5 rounded"
-							style={{ color: '#eab308', backgroundColor: '#eab30815' }}
-						>
-							{noMatchCount} no-match
-						</span>
-					) : undefined
+					<span className="flex items-center gap-1">
+						{checkpointCount > 0 && (
+							<span
+								className="text-[10px] px-1.5 py-0.5 rounded"
+								style={{ color: theme.colors.accent, backgroundColor: `${theme.colors.accent}15` }}
+							>
+								{checkpointCount} checkpoint
+							</span>
+						)}
+						{noMatchCount > 0 && (
+							<span
+								className="text-[10px] px-1.5 py-0.5 rounded"
+								style={{ color: '#eab308', backgroundColor: '#eab30815' }}
+							>
+								{noMatchCount} no-match
+							</span>
+						)}
+					</span>
 				}
 			/>
 
@@ -925,6 +939,32 @@ function InjectionActivitySection({
 													}}
 												>
 													{scopes}
+												</span>
+											)}
+											{event.checkpointType && (
+												<span
+													className="shrink-0 px-1.5 py-0.5 rounded font-medium"
+													style={{
+														backgroundColor:
+															event.checkpointType === 'first-error' ||
+															event.checkpointType === 'context-pressure'
+																? `${theme.colors.error ?? '#ef4444'}25`
+																: `${theme.colors.warning ?? '#f59e0b'}20`,
+														color:
+															event.checkpointType === 'first-error' ||
+															event.checkpointType === 'context-pressure'
+																? (theme.colors.error ?? '#ef4444')
+																: (theme.colors.warning ?? '#f59e0b'),
+													}}
+													title={`Checkpoint trigger: ${event.checkpointType}`}
+												>
+													{event.checkpointType === 'first-error'
+														? 'error'
+														: event.checkpointType === 'context-pressure'
+															? 'context'
+															: event.checkpointType === 'query-complete'
+																? 'question'
+																: event.checkpointType.replace(/-/g, ' ')}
 												</span>
 											)}
 											<span style={{ color: theme.colors.textDim }}>

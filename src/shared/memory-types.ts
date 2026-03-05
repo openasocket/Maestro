@@ -308,6 +308,12 @@ export interface MemoryConfig {
 	confidenceDecayRate: number;
 	/** Memories below this confidence are automatically archived — default 0.1 */
 	minConfidenceThreshold: number;
+	/** Enable checkpoint-style injection at natural pause points — default true */
+	enableCheckpointInjection: boolean;
+	/** Maximum checkpoint injections per session — default 5 */
+	checkpointMaxPerSession: number;
+	/** Cooldown between standard-priority checkpoints in seconds — default 120 */
+	checkpointCooldownSeconds: number;
 	/** Embedding provider configuration */
 	embeddingProvider?: EmbeddingProviderConfig;
 	/** Config schema version for migration — absent in pre-migration configs */
@@ -352,11 +358,46 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	crossProjectSimilarityThreshold: 0.75,
 	confidenceDecayRate: 0.02,
 	minConfidenceThreshold: 0.1,
+	enableCheckpointInjection: true,
+	checkpointMaxPerSession: 5,
+	checkpointCooldownSeconds: 120,
 	embeddingProvider: DEFAULT_EMBEDDING_CONFIG,
 	_configVersion: 1,
 	_autoEnabledBannerDismissed: false,
 	_firstInjectionNotified: false,
 };
+
+// ─── Checkpoint Injection Types ────────────────────────────────────────────
+
+export type CheckpointPriority = 'critical' | 'standard' | 'low';
+
+export type CheckpointEventType =
+	| 'first-error'
+	| 'context-pressure'
+	| 'query-complete'
+	| 'new-tool-domain'
+	| 'domain-shift'
+	| 'periodic-refresh';
+
+export interface CheckpointTrigger {
+	event: CheckpointEventType;
+	priority: CheckpointPriority;
+	searchQuery: string;
+	cooldownMs: number;
+	budgetOverride?: number;
+}
+
+/** Record of a checkpoint injection event for UI display */
+export interface CheckpointInjectionEvent {
+	timestamp: number;
+	sessionId: string;
+	triggerType: CheckpointEventType;
+	priority: CheckpointPriority;
+	searchQuery: string;
+	resultCount: number;
+	tokenEstimate: number;
+	usedDiff: boolean;
+}
 
 // ─── Job Queue Status & Token Tracking ────────────────────────────────────
 

@@ -1009,6 +1009,8 @@ export interface InjectionEvent {
 	matchedPersonas?: PersonaMatch[];
 	/** Skill areas matched during injection (with similarity scores). */
 	matchedSkills?: SkillMatch[];
+	/** Checkpoint trigger type, if this injection was from a checkpoint event. */
+	checkpointType?: string;
 }
 
 const recentInjections: InjectionEvent[] = [];
@@ -1018,7 +1020,7 @@ const MAX_INJECTION_HISTORY = 200;
  * Push an injection event to the ring buffer.
  * Automatically evicts oldest entries when exceeding MAX_INJECTION_HISTORY.
  */
-function pushInjectionEvent(event: InjectionEvent): void {
+export function pushInjectionEvent(event: InjectionEvent): void {
 	recentInjections.push(event);
 	if (recentInjections.length > MAX_INJECTION_HISTORY) {
 		recentInjections.shift();

@@ -24,8 +24,13 @@
 import type { ProcessManager } from '../process-manager';
 import type { ProcessListenerDependencies } from './types';
 import { GROUP_CHAT_PREFIX } from './types';
-import type { UsageStats, ToolExecution } from '../process-manager/types';
+import type { UsageStats, ToolExecution, QueryCompleteData } from '../process-manager/types';
 import type { AgentError, HistoryEntry } from '../../shared/types';
+import type {
+	CheckpointPriority,
+	CheckpointEventType,
+	CheckpointInjectionEvent,
+} from '../../shared/memory-types';
 
 export interface SessionMonitorState {
 	sessionId: string;
@@ -69,6 +74,14 @@ export interface SessionMonitorState {
 	lastPersonaEvalTurnIndex: number;
 	/** Timestamp of last persona re-evaluation */
 	lastPersonaEvalAt: number;
+	/** Checkpoint injection count this session */
+	checkpointInjectionCount: number;
+	/** Per-checkpoint-type cooldown timestamps */
+	checkpointCooldowns: Map<CheckpointEventType, number>;
+	/** Whether the 60% context pressure checkpoint has fired */
+	contextPressureFired: boolean;
+	/** Checkpoint injection events for UI display */
+	checkpointEvents: CheckpointInjectionEvent[];
 }
 
 /** Memory store shape used by this listener */
@@ -117,9 +130,7 @@ export interface LiveQueueAccessor {
 
 /** Diff injection helpers from memory-injector (MEM-EVOLVE-02) */
 export interface InjectorAccessor {
-	getInjectionRecord: (
-		sessionId: string
-	) =>
+	getInjectionRecord: (sessionId: string) =>
 		| {
 				ids: string[];
 				scopeGroups: any[];
@@ -360,8 +371,27 @@ export function setupMemoryMonitorListener(
 				initialPersonaMatch: null,
 				lastPersonaEvalTurnIndex: 0,
 				lastPersonaEvalAt: 0,
+				checkpointInjectionCount: 0,
+				checkpointCooldowns: new Map(),
+				contextPressureFired: false,
+				checkpointEvents: [],
 			};
 			sessionStates.set(sessionId, state);
+
+			// Log checkpoint availability per agent type
+			if (CHECKPOINT_CAPABLE_AGENTS.has(state.agentType)) {
+				logger.debug(
+					`[MemoryMonitor] Checkpoint injection available for ${state.agentType}`,
+					'MemoryMonitor',
+					{ sessionId }
+				);
+			} else {
+				logger.debug(
+					`[MemoryMonitor] Checkpoint injection not available for ${state.agentType}, falling back to periodic`,
+					'MemoryMonitor',
+					{ sessionId }
+				);
+			}
 		}
 		return state;
 	}
@@ -493,6 +523,216 @@ export function setupMemoryMonitorListener(
 		}
 	}
 
+	// ── Checkpoint injection helpers ──
+
+	/** Agents that support rich checkpoint events (result, tool, error parsing) */
+	const CHECKPOINT_CAPABLE_AGENTS = new Set(['claude-code', 'codex', 'opencode', 'factory-droid']);
+
+	/** Default cooldowns per checkpoint type (ms) */
+	const CHECKPOINT_COOLDOWN_MAP: Record<CheckpointEventType, number> = {
+		'first-error': 0, // critical — bypass cooldown
+		'context-pressure': 0, // critical — bypass cooldown
+		'query-complete': 120_000, // standard — 2 min
+		'new-tool-domain': 120_000, // standard — 2 min
+		'domain-shift': 120_000, // standard — 2 min
+		'periodic-refresh': 300_000, // low — 5 min
+	};
+
+	const CHECKPOINT_PRIORITY_MAP: Record<CheckpointEventType, CheckpointPriority> = {
+		'first-error': 'critical',
+		'context-pressure': 'critical',
+		'query-complete': 'standard',
+		'new-tool-domain': 'standard',
+		'domain-shift': 'standard',
+		'periodic-refresh': 'low',
+	};
+
+	/**
+	 * Trigger a checkpoint-style memory injection. Respects per-type cooldowns,
+	 * per-session caps, and priority levels. Uses diff-based injection when
+	 * previous injections exist.
+	 */
+	async function triggerCheckpointSearch(
+		state: SessionMonitorState,
+		eventType: CheckpointEventType,
+		query: string,
+		budgetOverride?: number
+	): Promise<void> {
+		const now = Date.now();
+		const priority = CHECKPOINT_PRIORITY_MAP[eventType];
+
+		try {
+			const accessors = memoryAccessors ?? (await defaultGetMemoryAccessors());
+			if (!accessors) return;
+
+			const store = accessors.getMemoryStore();
+			const config = await store.getConfig();
+
+			if (!config.enableCheckpointInjection) return;
+			if (!config.enableLiveInjection) return;
+
+			// Per-session cap
+			const maxPerSession = (config.checkpointMaxPerSession as number | undefined) ?? 5;
+			if (state.checkpointInjectionCount >= maxPerSession) return;
+
+			// Per-type cooldown (critical bypasses)
+			if (priority !== 'critical') {
+				const cooldownMs =
+					(config.checkpointCooldownSeconds as number | undefined) !== undefined
+						? (config.checkpointCooldownSeconds as number) * 1000
+						: CHECKPOINT_COOLDOWN_MAP[eventType];
+				const lastFired = state.checkpointCooldowns.get(eventType) ?? 0;
+				if (now - lastFired < cooldownMs) return;
+			}
+
+			// Budget check
+			if (state.effectiveBudget === 0 && priority !== 'critical') return;
+
+			state.checkpointCooldowns.set(eventType, now);
+
+			const effectiveBudget = budgetOverride ?? state.effectiveBudget;
+
+			const results = await store.cascadingSearch(
+				query,
+				config,
+				state.agentType,
+				state.projectPath
+			);
+			if (!results || results.length === 0) return;
+
+			// Enqueue via LiveContextQueue with diff support
+			try {
+				const queue = accessors.getLiveContextQueue();
+				const topResults = results.slice(0, 5);
+				const memoryIds = topResults.map((r) => r.entry.id).filter(Boolean);
+
+				// Resolve injector
+				let injector: InjectorAccessor | undefined;
+				if (accessors.getInjector) {
+					injector = accessors.getInjector();
+				} else {
+					try {
+						const mod = await import('../memory/memory-injector');
+						injector = {
+							getInjectionRecord: mod.getInjectionRecord,
+							generateDiffInjection: mod.generateDiffInjection,
+							recordSessionInjection: mod.recordSessionInjection,
+							hashContent: mod.hashContent,
+						};
+					} catch {
+						// memory-injector not available
+					}
+				}
+
+				let content: string;
+				let tokenEstimate: number;
+				let hasDiff = false;
+
+				const previousRecord = injector?.getInjectionRecord(state.sessionId);
+
+				if (injector && previousRecord && previousRecord.contentHashes.size > 0) {
+					const diff = injector.generateDiffInjection(topResults, previousRecord);
+					if (diff.injectedPrompt === '') return; // nothing changed
+
+					content = diff.injectedPrompt;
+					tokenEstimate = diff.tokenCount;
+					hasDiff = true;
+
+					// Token savings tracking
+					const fullLines = topResults.map(
+						(r) => `- (${r.entry.type ?? 'experience'}) ${r.entry.content}`
+					);
+					const fullTokens = Math.ceil(fullLines.join('\n').length / 4);
+					const savedTokens = fullTokens - diff.tokenCount;
+					if (savedTokens > 0) {
+						previousRecord.totalTokensSaved += savedTokens;
+					}
+
+					const mergedIds = [
+						...previousRecord.ids.filter((id) => !diff.removedIds.includes(id)),
+						...diff.addedIds,
+					];
+					injector.recordSessionInjection(
+						state.sessionId,
+						mergedIds,
+						previousRecord.scopeGroups,
+						topResults
+					);
+				} else {
+					const lines = topResults.map(
+						(r) => `- (${r.entry.type ?? 'experience'}) ${r.entry.content}`
+					);
+					content = lines.join('\n');
+					tokenEstimate = Math.ceil(content.length / 4);
+
+					if (injector) {
+						injector.recordSessionInjection(state.sessionId, memoryIds, [], topResults);
+					}
+				}
+
+				// Enforce budget
+				if (tokenEstimate > effectiveBudget && effectiveBudget > 0) {
+					content = content.slice(0, effectiveBudget * 4);
+					tokenEstimate = effectiveBudget;
+				}
+
+				queue.enqueue(
+					state.sessionId,
+					content,
+					`checkpoint:${eventType}`,
+					tokenEstimate,
+					memoryIds,
+					hasDiff
+				);
+
+				state.checkpointInjectionCount++;
+
+				// Record event for UI (local state)
+				state.checkpointEvents.push({
+					timestamp: now,
+					sessionId: state.sessionId,
+					triggerType: eventType,
+					priority,
+					searchQuery: query.slice(0, 200),
+					resultCount: topResults.length,
+					tokenEstimate,
+					usedDiff: hasDiff,
+				});
+
+				// Record in the global injection event ring buffer for StatusTab display
+				try {
+					const { pushInjectionEvent } = await import('../memory/memory-injector');
+					pushInjectionEvent({
+						sessionId: state.sessionId,
+						memoryIds,
+						tokenCount: tokenEstimate,
+						timestamp: now,
+						scopeGroups: [],
+						checkpointType: eventType,
+					});
+				} catch {
+					// memory-injector not available
+				}
+
+				logger.debug('[MemoryMonitor] Checkpoint injection triggered', 'MemoryMonitor', {
+					sessionId: state.sessionId,
+					eventType,
+					priority,
+					query: query.slice(0, 100),
+					resultCount: topResults.length,
+					count: `${state.checkpointInjectionCount}/${maxPerSession}`,
+					hasDiff,
+				});
+			} catch {
+				// LiveContextQueue not available
+			}
+		} catch (err) {
+			logger.debug('[MemoryMonitor] Checkpoint search failed (non-critical)', 'MemoryMonitor', {
+				error: String(err),
+			});
+		}
+	}
+
 	// ── Event handlers ──
 
 	// 1. Usage event: track context utilization, adjust budget
@@ -517,13 +757,27 @@ export function setupMemoryMonitorListener(
 
 		// Per-turn accumulator: store latest usage stats
 		state.currentTurnUsage = usageStats;
+
+		// Checkpoint: context pressure at 60% — proactively inject critical memories
+		if (
+			state.lastContextUsage >= 60 &&
+			!state.contextPressureFired &&
+			CHECKPOINT_CAPABLE_AGENTS.has(state.agentType)
+		) {
+			state.contextPressureFired = true;
+			triggerCheckpointSearch(
+				state,
+				'context-pressure',
+				`critical context for ${state.projectPath}`,
+				300 // reduced budget for context-constrained injection
+			).catch(() => {});
+		}
 	});
 
-	// 2. Error event: track error counts, trigger on repeated errors
+	// 2. Error event: track error counts, trigger on repeated errors + first-error checkpoint
 	processManager.on('agent-error', (sessionId: string, error: AgentError) => {
 		const state = getState(sessionId);
 		if (!state) return;
-		if (state.effectiveBudget === 0) return;
 
 		const errorType = error.type || 'unknown';
 		const count = (state.errorCounts.get(errorType) || 0) + 1;
@@ -533,6 +787,15 @@ export function setupMemoryMonitorListener(
 		// Per-turn accumulator: track errors for interestingness scoring
 		state.currentTurnErrors.push(error);
 
+		if (state.effectiveBudget === 0) return;
+
+		// Checkpoint: first error in session — critical priority
+		if (count === 1 && CHECKPOINT_CAPABLE_AGENTS.has(state.agentType)) {
+			const query = error.message || errorType;
+			triggerCheckpointSearch(state, 'first-error', query).catch(() => {});
+		}
+
+		// Existing: repeated error trigger (2nd occurrence)
 		if (count === 2) {
 			const query = error.message || errorType;
 			triggerMemorySearch(state, query, 'monitoring').catch(() => {});
@@ -576,6 +839,23 @@ export function setupMemoryMonitorListener(
 			});
 			triggerMemorySearch(state, domain, 'monitoring').catch(() => {});
 		}
+	});
+
+	// 4b. Checkpoint: query-complete — agent finished responding, good time to inject
+	//     memories before the user's next message. Uses the agent's response summary
+	//     as search context.
+	processManager.on('query-complete', (sessionId: string, _data: QueryCompleteData) => {
+		const state = getState(sessionId);
+		if (!state) return;
+		if (!CHECKPOINT_CAPABLE_AGENTS.has(state.agentType)) return;
+
+		// Only fire after the first few turns when there's meaningful context
+		if (state.turnIndex < 2) return;
+
+		// Use project path as a generic query — the cascading search will
+		// match against recent session context
+		const query = `recent experiences for ${state.projectPath}`;
+		triggerCheckpointSearch(state, 'query-complete', query).catch(() => {});
 	});
 
 	// 5. Persona shift re-evaluation: run selectMatchingPersonas periodically
