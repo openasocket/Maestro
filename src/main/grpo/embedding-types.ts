@@ -10,6 +10,26 @@
 export type { EmbeddingProviderId, EmbeddingProviderConfig } from '../../shared/memory-types';
 export { DEFAULT_EMBEDDING_CONFIG } from '../../shared/memory-types';
 
+// ─── Provider Comparison ────────────────────────────────────────────────
+//
+// Provider         │ Trans.js          │ Ollama             │ OpenAI                │ Xenova/ONNX (deferred)
+// ─────────────────┼───────────────────┼────────────────────┼───────────────────────┼───────────────────────
+// Setup            │ Auto (WASM)       │ Requires Ollama    │ API key required      │ Auto (native addon)
+// External Dep     │ None              │ Ollama daemon      │ None                  │ onnxruntime-node
+// Platform         │ All               │ All                │ All                   │ All (needs rebuild)
+// Offline          │ Yes (after DL)    │ Yes                │ No                    │ Yes (after DL)
+// Cost             │ Free              │ Free               │ ~$0.02/1M tokens      │ Free
+// Quality          │ Good              │ Good+              │ Best                  │ Good
+// Model            │ Xenova/gte-small  │ nomic-embed-text   │ text-embedding-3-small│ Xenova/gte-small
+// Native Dim       │ 384               │ 768                │ 1536                  │ 384
+// Default          │ YES               │ No                 │ No                    │ No
+//
+// Recommendations:
+// - Default/offline use: Transformers.js — zero config, runs in-process via WASM
+// - Already using Ollama: Ollama provider — higher-quality nomic-embed-text (768-dim)
+// - Quality-critical / large-scale: OpenAI — best embeddings, pay-per-use
+// - Xenova/ONNX: Deferred — see note below
+//
 // 'xenova-onnx' provider evaluated but deferred — Transformers.js (@xenova/transformers v2)
 // already uses ONNX Runtime under the hood (onnxruntime-web for WASM, with onnxruntime-node
 // as an optional dependency for native performance). A separate onnxruntime-node provider
