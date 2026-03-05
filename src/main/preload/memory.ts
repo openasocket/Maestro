@@ -28,6 +28,7 @@ import type {
 	JobQueueStatus,
 	TokenUsage,
 } from '../../shared/memory-types';
+import type { MemoryChangeEvent } from '../memory/memory-changelog';
 import type {
 	ExperienceBundle,
 	BundleImportResult,
@@ -429,6 +430,9 @@ export function createMemoryApi() {
 		// ─── Analytics ────────────────────────────────────────────────────
 		getAnalytics: (): Promise<IpcResponse<MemoryStats>> =>
 			ipcRenderer.invoke('memory:getAnalytics'),
+
+		getChangeLog: (since?: number, limit?: number): Promise<IpcResponse<MemoryChangeEvent[]>> =>
+			ipcRenderer.invoke('memory:getChangeLog', since, limit),
 
 		getRecentInjections: (limit?: number): Promise<IpcResponse<unknown[]>> =>
 			ipcRenderer.invoke('memory:getRecentInjections', limit),

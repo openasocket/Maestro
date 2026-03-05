@@ -618,6 +618,13 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 	);
 
 	ipcMain.handle(
+		'memory:getChangeLog',
+		createIpcDataHandler(handlerOpts('getChangeLog'), async (since?: number, limit?: number) => {
+			return memoryStore.changelog.getChangeLog(since, limit);
+		})
+	);
+
+	ipcMain.handle(
 		'memory:export',
 		createIpcDataHandler(
 			handlerOpts('export'),

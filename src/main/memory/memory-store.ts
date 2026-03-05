@@ -45,6 +45,8 @@ import type {
 } from '../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS, SEED_ROLES } from '../../shared/memory-types';
 import { cosineSimilarity } from '../grpo/embedding-service';
+import { MemoryChangeLog } from './memory-changelog';
+import type { MemoryChangeEvent, MemoryChangeEventType } from './memory-changelog';
 
 // ─── File Interfaces ──────────────────────────────────────────────────────────
 
@@ -81,6 +83,7 @@ function getConfigDir(): string {
 export class MemoryStore {
 	private readonly memoriesDir: string;
 	private readonly writeQueues = new Map<string, Promise<void>>();
+	readonly changelog: MemoryChangeLog;
 
 	// ─── Registry Cache ────────────────────────────────────────────────────
 	private registryCache: RegistryFile | null = null;
@@ -93,6 +96,34 @@ export class MemoryStore {
 
 	constructor() {
 		this.memoriesDir = path.join(getConfigDir(), 'memories');
+		this.changelog = new MemoryChangeLog(this.memoriesDir);
+		this.changelog.load().catch(() => {});
+	}
+
+	/**
+	 * Fire-and-forget emit a structured change event to the changelog.
+	 */
+	private emitChangeEvent(
+		type: MemoryChangeEventType,
+		memoryId: MemoryId,
+		memoryContent: string,
+		memoryType: MemoryType,
+		scope: MemoryScope,
+		triggeredBy: 'user' | 'system',
+		source?: MemorySource,
+		details?: string
+	): void {
+		this.changelog.emit({
+			timestamp: Date.now(),
+			type,
+			memoryId,
+			memoryContent: memoryContent.slice(0, 200),
+			memoryType,
+			scope,
+			source,
+			details,
+			triggeredBy,
+		});
 	}
 
 	// ─── Path Helpers ───────────────────────────────────────────────────────
@@ -692,6 +723,18 @@ export class MemoryStore {
 			content: entry.content.slice(0, 200),
 			source: entry.source ?? 'user',
 		});
+		const changeType: MemoryChangeEventType = entry.source === 'import' ? 'imported' : 'created';
+		this.emitChangeEvent(
+			changeType,
+			memory.id,
+			memory.content,
+			memory.type,
+			memory.scope,
+			entry.source === 'extraction' || entry.source === 'consolidation' || entry.source === 'import'
+				? 'system'
+				: 'user',
+			entry.source ?? 'user'
+		);
 
 		// Auto-consolidation: fire-and-forget when active count is divisible by 10
 		const activeCount = lib.entries.filter((e) => e.active).length;
@@ -755,6 +798,17 @@ export class MemoryStore {
 			oldContent: oldEntry.content.slice(0, 200),
 			newContent: (updates.content ?? oldEntry.content).slice(0, 200),
 		});
+		const changedFields = Object.keys(updates).join(', ');
+		this.emitChangeEvent(
+			'updated',
+			id,
+			updated.content,
+			updated.type,
+			scope,
+			'user',
+			undefined,
+			`Changed fields: ${changedFields}`
+		);
 		return updated;
 	}
 
@@ -780,6 +834,7 @@ export class MemoryStore {
 			entityId: id,
 			content: entry.content.slice(0, 200),
 		});
+		this.emitChangeEvent('deleted', id, entry.content, entry.type, scope, 'user');
 		return true;
 	}
 
@@ -938,6 +993,16 @@ export class MemoryStore {
 					content: entry.content.slice(0, 200),
 					reason: `evictionScore=${score.toFixed(3)}, eff=${entry.effectivenessScore.toFixed(2)}, conf=${entry.confidence.toFixed(2)}, uses=${entry.useCount}`,
 				});
+				this.emitChangeEvent(
+					'pruned',
+					entry.id,
+					entry.content,
+					entry.type,
+					'skill',
+					'system',
+					undefined,
+					`Evicted: score=${score.toFixed(3)}, confidence=${entry.confidence.toFixed(2)}`
+				);
 			}
 		}
 
@@ -2186,6 +2251,16 @@ export class MemoryStore {
 					reason: `Absorbed: ${absorbedIds.join(', ')}`,
 					source: 'consolidation',
 				});
+				this.emitChangeEvent(
+					'consolidated',
+					center.id,
+					center.content,
+					center.type,
+					scope,
+					'system',
+					'consolidation',
+					`Merged ${cluster.length} memories`
+				);
 
 				mergeCount++;
 			}
@@ -3294,6 +3369,16 @@ export class MemoryStore {
 			content: `Promoted experience to rule: ${approvedRuleText.slice(0, 200)}`,
 			source: 'consolidation',
 		});
+		this.emitChangeEvent(
+			'promoted',
+			id,
+			approvedRuleText,
+			'rule',
+			scope,
+			'user',
+			'consolidation',
+			'Promoted from experience'
+		);
 
 		return lib.entries[idx];
 	}
@@ -3517,6 +3602,16 @@ export class MemoryStore {
 			reason: `Promoted from project ${sourceProjectDirHash}, seen in ${evidence.length + 1} projects`,
 			source: 'consolidation',
 		});
+		this.emitChangeEvent(
+			'promoted',
+			globalRule.id,
+			approvedRuleText,
+			'rule',
+			'global',
+			'system',
+			'consolidation',
+			`Cross-project promotion from ${sourceProjectDirHash}, seen in ${evidence.length + 1} projects`
+		);
 
 		return globalRule;
 	}
