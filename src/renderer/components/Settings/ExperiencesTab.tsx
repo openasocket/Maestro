@@ -33,6 +33,9 @@ import {
 	ArrowUpDown,
 	Layers,
 	SlidersHorizontal,
+	TrendingUp,
+	Clock,
+	AlertTriangle,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
@@ -115,6 +118,224 @@ function SectionHeader({
 	);
 }
 
+// ─── Source color map for the stacked bar ────────────────────────────────────────
+
+const SOURCE_COLORS: Record<string, string> = {
+	'session-analysis': '#3b82f6', // blue
+	'auto-run': '#8b5cf6', // purple
+	user: '#22c55e', // green
+	grpo: '#f59e0b', // amber
+	consolidation: '#06b6d4', // cyan
+	import: '#64748b', // slate
+	repository: '#ec4899', // pink
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+	'session-analysis': 'Session Analysis',
+	'auto-run': 'Auto Run',
+	user: 'User',
+	grpo: 'Promoted',
+	consolidation: 'Consolidation',
+	import: 'Imported',
+	repository: 'Repository',
+};
+
+// ─── Experience Visualization Summary ────────────────────────────────────────────
+
+function ExperienceVisualizationSummary({
+	theme,
+	experiences,
+	currentProjectCount,
+	promotionCandidateCount,
+	promotedCount,
+	lastDiagnostic,
+}: {
+	theme: Theme;
+	experiences: EnrichedExperience[];
+	currentProjectCount: number;
+	promotionCandidateCount: number;
+	promotedCount: number;
+	lastDiagnostic: ExtractionDiagnostic | null;
+}) {
+	const total = experiences.length;
+
+	// Source breakdown
+	const sourceCounts = useMemo(() => {
+		const counts: Record<string, number> = {};
+		for (const e of experiences) {
+			counts[e.source] = (counts[e.source] ?? 0) + 1;
+		}
+		return Object.entries(counts).sort(([, a], [, b]) => b - a);
+	}, [experiences]);
+
+	// Deviation counts
+	const deviationCount = useMemo(
+		() => experiences.filter((e) => e.experienceContext?.isDeviation).length,
+		[experiences]
+	);
+	const normalCount = total - deviationCount;
+
+	if (total === 0) {
+		return (
+			<div
+				className="rounded-lg border p-4 text-center"
+				style={{ borderColor: theme.colors.border }}
+			>
+				<Sparkles className="w-5 h-5 mx-auto mb-2" style={{ color: theme.colors.textDim }} />
+				<div className="text-xs" style={{ color: theme.colors.textDim }}>
+					No experiences yet. Complete sessions with 3+ interactions to start building your
+					experience library.
+				</div>
+			</div>
+		);
+	}
+
+	return (
+		<div className="rounded-lg border p-3 space-y-3" style={{ borderColor: theme.colors.border }}>
+			{/* Row 1: Totals + Source Bar */}
+			<div className="flex items-start gap-4">
+				{/* Total count */}
+				<div className="shrink-0">
+					<div className="text-lg font-bold leading-tight" style={{ color: theme.colors.textMain }}>
+						{total}
+					</div>
+					<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
+						{currentProjectCount > 0
+							? `total (${currentProjectCount} this project)`
+							: 'total experiences'}
+					</div>
+				</div>
+
+				{/* Source stacked bar */}
+				<div className="flex-1 min-w-0">
+					<div className="text-[10px] mb-1" style={{ color: theme.colors.textDim }}>
+						Sources
+					</div>
+					<div
+						className="flex h-2.5 rounded-full overflow-hidden"
+						style={{ backgroundColor: `${theme.colors.border}40` }}
+					>
+						{sourceCounts.map(([source, count]) => (
+							<div
+								key={source}
+								title={`${SOURCE_LABELS[source] ?? source}: ${count}`}
+								style={{
+									width: `${(count / total) * 100}%`,
+									backgroundColor: SOURCE_COLORS[source] ?? '#94a3b8',
+									minWidth: count > 0 ? '3px' : 0,
+								}}
+							/>
+						))}
+					</div>
+					{/* Legend */}
+					<div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+						{sourceCounts.map(([source, count]) => (
+							<div key={source} className="flex items-center gap-1">
+								<div
+									className="w-1.5 h-1.5 rounded-full shrink-0"
+									style={{ backgroundColor: SOURCE_COLORS[source] ?? '#94a3b8' }}
+								/>
+								<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
+									{SOURCE_LABELS[source] ?? source} ({count})
+								</span>
+							</div>
+						))}
+					</div>
+				</div>
+			</div>
+
+			{/* Row 2: Deviation + Funnel + Last Extraction */}
+			<div className="flex items-stretch gap-2">
+				{/* Deviation analysis */}
+				<div className="flex-1 rounded p-2" style={{ backgroundColor: `${theme.colors.border}15` }}>
+					<div className="flex items-center gap-1 mb-1">
+						<AlertTriangle className="w-3 h-3" style={{ color: theme.colors.textDim }} />
+						<span className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
+							Deviations
+						</span>
+					</div>
+					<div className="flex items-baseline gap-2">
+						<span
+							className="text-sm font-bold"
+							style={{ color: deviationCount > 0 ? '#f59e0b' : theme.colors.textMain }}
+						>
+							{deviationCount}
+						</span>
+						<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
+							deviation{deviationCount !== 1 ? 's' : ''}
+						</span>
+						<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
+							/ {normalCount} normal
+						</span>
+					</div>
+				</div>
+
+				{/* Promotion funnel */}
+				<div className="flex-1 rounded p-2" style={{ backgroundColor: `${theme.colors.border}15` }}>
+					<div className="flex items-center gap-1 mb-1">
+						<TrendingUp className="w-3 h-3" style={{ color: theme.colors.textDim }} />
+						<span className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
+							Promotion Funnel
+						</span>
+					</div>
+					<div
+						className="flex items-center gap-1 text-[11px]"
+						style={{ color: theme.colors.textMain }}
+					>
+						<span className="font-bold">{total}</span>
+						<span style={{ color: theme.colors.textDim }}>→</span>
+						<span
+							className="font-bold"
+							style={{ color: promotionCandidateCount > 0 ? '#f59e0b' : undefined }}
+						>
+							{promotionCandidateCount}
+						</span>
+						<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
+							candidates
+						</span>
+						<span style={{ color: theme.colors.textDim }}>→</span>
+						<span
+							className="font-bold"
+							style={{ color: promotedCount > 0 ? '#22c55e' : undefined }}
+						>
+							{promotedCount}
+						</span>
+						<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
+							promoted
+						</span>
+					</div>
+				</div>
+
+				{/* Last extraction */}
+				<div className="flex-1 rounded p-2" style={{ backgroundColor: `${theme.colors.border}15` }}>
+					<div className="flex items-center gap-1 mb-1">
+						<Clock className="w-3 h-3" style={{ color: theme.colors.textDim }} />
+						<span className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
+							Last Extraction
+						</span>
+					</div>
+					{lastDiagnostic ? (
+						<div>
+							<div className="text-[11px] font-medium" style={{ color: theme.colors.textMain }}>
+								{getRelativeTime(lastDiagnostic.timestamp)}
+							</div>
+							<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
+								{lastDiagnostic.status === 'success'
+									? `extracted ${lastDiagnostic.experiencesStored ?? 0} experience${(lastDiagnostic.experiencesStored ?? 0) !== 1 ? 's' : ''}`
+									: lastDiagnostic.status.replace(/-/g, ' ')}
+							</div>
+						</div>
+					) : (
+						<div className="text-[11px]" style={{ color: theme.colors.textDim }}>
+							No extractions yet
+						</div>
+					)}
+				</div>
+			</div>
+		</div>
+	);
+}
+
 // ─── Props ──────────────────────────────────────────────────────────────────────
 
 export interface ExperiencesTabProps {
@@ -133,7 +354,7 @@ export interface ExperiencesTabProps {
 export function ExperiencesTab({
 	theme,
 	config,
-	stats: _stats,
+	stats,
 	projectPath,
 	onUpdateConfig,
 	onRefresh,
@@ -545,11 +766,31 @@ export function ExperiencesTab({
 		(e) => e.experienceContext?.sourceProjectPath === projectPath
 	).length;
 
+	// ─── Summary data ──────────────────────────────────────────────────
+	const promotedCount = stats?.bySource?.grpo ?? 0;
+	const lastDiagnostic = useMemo(() => {
+		const diags = queueStatus?.recentDiagnostics;
+		if (!diags || diags.length === 0) return null;
+		return diags[diags.length - 1];
+	}, [queueStatus?.recentDiagnostics]);
+
 	return (
 		<div className="space-y-4">
 			<TabDescriptionBanner
 				theme={theme}
 				description="Experiences are lessons learned from real coding sessions — what worked, what didn't, and why. They're automatically extracted from your agent interactions and can be promoted to permanent rules when patterns prove reliable."
+			/>
+
+			{/* ═══════════════════════════════════════════════════════════════════
+			    Visualization Summary
+			    ═══════════════════════════════════════════════════════════════════ */}
+			<ExperienceVisualizationSummary
+				theme={theme}
+				experiences={experiences}
+				currentProjectCount={currentProjectExperiences}
+				promotionCandidateCount={promotionCandidates.length}
+				promotedCount={promotedCount}
+				lastDiagnostic={lastDiagnostic}
 			/>
 
 			{error && (
