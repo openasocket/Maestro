@@ -36,7 +36,10 @@ import {
 	getSessionInjection,
 	getInjectionRecord,
 	clearSessionInjection,
+	pushPersonaShiftEvent,
+	getRecentPersonaShifts,
 } from '../../memory/memory-injector';
+import type { PersonaShiftEvent } from '../../memory/memory-injector';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -716,6 +719,54 @@ describe('MemoryInjector', () => {
 
 			const queryArg = mockCascadingSearch.mock.calls[0][0];
 			expect(queryArg).toBe('short query');
+		});
+	});
+
+	// ─── Persona Shift Ring Buffer ──────────────────────────────────────────
+
+	describe('Persona Shift Ring Buffer', () => {
+		function makeShiftEvent(overrides?: Partial<PersonaShiftEvent>): PersonaShiftEvent {
+			return {
+				timestamp: Date.now(),
+				sessionId: 'test-session',
+				fromPersona: { id: 'p1', name: 'React Frontend', score: 0.7 },
+				toPersona: { id: 'p2', name: 'API Design', score: 0.85 },
+				triggerContext: 'discussing endpoint structure',
+				...overrides,
+			};
+		}
+
+		it('stores and retrieves persona shift events', () => {
+			const event = makeShiftEvent();
+			pushPersonaShiftEvent(event);
+
+			const shifts = getRecentPersonaShifts();
+			expect(shifts.length).toBeGreaterThanOrEqual(1);
+			const last = shifts[0];
+			expect(last.sessionId).toBe('test-session');
+			expect(last.fromPersona.name).toBe('React Frontend');
+			expect(last.toPersona.name).toBe('API Design');
+		});
+
+		it('returns events newest first', () => {
+			const event1 = makeShiftEvent({ timestamp: 1000, sessionId: 'sess-1' });
+			const event2 = makeShiftEvent({ timestamp: 2000, sessionId: 'sess-2' });
+			pushPersonaShiftEvent(event1);
+			pushPersonaShiftEvent(event2);
+
+			const shifts = getRecentPersonaShifts();
+			// Find our two events (there may be others from prior tests)
+			const sess1Idx = shifts.findIndex((s) => s.sessionId === 'sess-1');
+			const sess2Idx = shifts.findIndex((s) => s.sessionId === 'sess-2');
+			expect(sess2Idx).toBeLessThan(sess1Idx); // newer first
+		});
+
+		it('respects limit parameter', () => {
+			for (let i = 0; i < 5; i++) {
+				pushPersonaShiftEvent(makeShiftEvent({ timestamp: 3000 + i }));
+			}
+			const shifts = getRecentPersonaShifts(2);
+			expect(shifts.length).toBe(2);
 		});
 	});
 });

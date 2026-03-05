@@ -1085,3 +1085,34 @@ export async function debugInjectionPipeline(): Promise<InjectionDiagnostic[]> {
 
 	return results;
 }
+
+// ─── Persona Shift Event Ring Buffer ─────────────────────────────────────────
+
+export interface PersonaShiftEvent {
+	timestamp: number;
+	sessionId: string;
+	fromPersona: { id: string; name: string; score: number };
+	toPersona: { id: string; name: string; score: number };
+	triggerContext: string;
+}
+
+const recentPersonaShifts: PersonaShiftEvent[] = [];
+const MAX_PERSONA_SHIFT_EVENTS = 100;
+
+/**
+ * Push a persona shift event to the ring buffer.
+ */
+export function pushPersonaShiftEvent(event: PersonaShiftEvent): void {
+	recentPersonaShifts.push(event);
+	if (recentPersonaShifts.length > MAX_PERSONA_SHIFT_EVENTS) {
+		recentPersonaShifts.shift();
+	}
+}
+
+/**
+ * Return the last N persona shift events (newest first).
+ */
+export function getRecentPersonaShifts(limit?: number): PersonaShiftEvent[] {
+	const n = limit ?? MAX_PERSONA_SHIFT_EVENTS;
+	return recentPersonaShifts.slice(-n).reverse();
+}

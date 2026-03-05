@@ -108,6 +108,7 @@ describe('Memory Monitor Listener', () => {
 			getMemoryStore: () => ({
 				getConfig: mockGetConfig,
 				cascadingSearch: mockCascadingSearch,
+				selectMatchingPersonas: vi.fn().mockResolvedValue([]),
 			}),
 			getLiveContextQueue: () => ({
 				enqueue: mockEnqueue,

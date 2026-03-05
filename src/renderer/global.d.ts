@@ -2958,6 +2958,19 @@ interface MaestroAPI {
 			| { success: true; data: Array<{ label: string; ok: boolean; detail?: string }> }
 			| { success: false; error: string }
 		>;
+		getPersonaShifts: (limit?: number) => Promise<
+			| {
+					success: true;
+					data: Array<{
+						timestamp: number;
+						sessionId: string;
+						fromPersona: { id: string; name: string; score: number };
+						toPersona: { id: string; name: string; score: number };
+						triggerContext: string;
+					}>;
+			  }
+			| { success: false; error: string }
+		>;
 		export: (
 			scope: import('../shared/memory-types').MemoryScope,
 			skillAreaId?: string,

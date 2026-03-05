@@ -426,6 +426,20 @@ export function createMemoryApi() {
 			IpcResponse<Array<{ label: string; ok: boolean; detail?: string }>>
 		> => ipcRenderer.invoke('memory:debugInjection'),
 
+		getPersonaShifts: (
+			limit?: number
+		): Promise<
+			IpcResponse<
+				Array<{
+					timestamp: number;
+					sessionId: string;
+					fromPersona: { id: string; name: string; score: number };
+					toPersona: { id: string; name: string; score: number };
+					triggerContext: string;
+				}>
+			>
+		> => ipcRenderer.invoke('memory:getPersonaShifts', limit),
+
 		// ─── Job Queue Status & Token Tracking ────────────────────────────
 		getJobQueueStatus: (): Promise<IpcResponse<JobQueueStatus>> =>
 			ipcRenderer.invoke('memory:getJobQueueStatus'),

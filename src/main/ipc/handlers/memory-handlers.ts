@@ -848,6 +848,16 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		})
 	);
 
+	// ─── Persona Shifts ─────────────────────────────────────────────────
+
+	ipcMain.handle(
+		'memory:getPersonaShifts',
+		createIpcDataHandler(handlerOpts('getPersonaShifts'), async (limit?: number) => {
+			const { getRecentPersonaShifts } = await import('../../memory/memory-injector');
+			return getRecentPersonaShifts(limit);
+		})
+	);
+
 	// ─── Job Queue Status & Token Tracking ───────────────────────────────
 
 	ipcMain.handle(

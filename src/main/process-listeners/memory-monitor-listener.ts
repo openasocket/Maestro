@@ -63,6 +63,12 @@ export interface SessionMonitorState {
 	perTurnExtractionCount: number;
 	/** Timestamp of last per-turn extraction (for cooldown) */
 	lastPerTurnExtractionAt: number;
+	/** Initial persona match from spawn time (set on first re-evaluation) */
+	initialPersonaMatch: { id: string; name: string; score: number } | null;
+	/** Turn index of last persona re-evaluation */
+	lastPersonaEvalTurnIndex: number;
+	/** Timestamp of last persona re-evaluation */
+	lastPersonaEvalAt: number;
 }
 
 /** Memory store shape used by this listener */
@@ -78,6 +84,20 @@ export interface MemoryStoreAccessor {
 			entry: { id: string; type?: string; content: string };
 			similarity: number;
 			combinedScore: number;
+		}>
+	>;
+	selectMatchingPersonas: (
+		query: string,
+		config: unknown,
+		agentType: string,
+		projectPath?: string
+	) => Promise<
+		Array<{
+			persona: { id: string; name: string };
+			personaName: string;
+			roleName: string;
+			roleSystemPrompt: string;
+			similarity: number;
 		}>
 	>;
 }
@@ -241,10 +261,17 @@ const DOMAIN_SHIFT_REGEX = /\[domain-shift:\s*(.+?)\]/;
 /** Default accessors that lazy-import memory modules at runtime */
 async function defaultGetMemoryAccessors(): Promise<MemoryModuleAccessors | null> {
 	try {
-		const { getMemoryStore } = await import('../memory/memory-store');
+		const memStore = await import('../memory/memory-store');
 		const { getLiveContextQueue } = await import('../memory/live-context-queue');
+		const rawStore = memStore.getMemoryStore();
 		return {
-			getMemoryStore: getMemoryStore as unknown as () => MemoryStoreAccessor,
+			getMemoryStore: () => ({
+				getConfig: () => rawStore.getConfig(),
+				cascadingSearch: (q: string, c: unknown, a: string, p?: string) =>
+					rawStore.cascadingSearch(q, c as never, a, p),
+				selectMatchingPersonas: (q: string, c: unknown, a: string, p?: string) =>
+					rawStore.selectMatchingPersonas(q, c as never, a, p),
+			}),
 			getLiveContextQueue: getLiveContextQueue as unknown as () => LiveQueueAccessor,
 		};
 	} catch {
@@ -294,6 +321,9 @@ export function setupMemoryMonitorListener(
 				manifestCountAtTurnStart: 0,
 				perTurnExtractionCount: 0,
 				lastPerTurnExtractionAt: 0,
+				initialPersonaMatch: null,
+				lastPersonaEvalTurnIndex: 0,
+				lastPersonaEvalAt: 0,
 			};
 			sessionStates.set(sessionId, state);
 		}
@@ -445,7 +475,109 @@ export function setupMemoryMonitorListener(
 		}
 	});
 
-	// 5. Per-turn tracking: subscribe to turn-start and turn-complete events
+	// 5. Persona shift re-evaluation: run selectMatchingPersonas periodically
+	//    and detect when a different persona becomes more relevant mid-session.
+	const PERSONA_EVAL_TURN_INTERVAL = 5;
+	const PERSONA_EVAL_TIME_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+	const PERSONA_SHIFT_MARGIN = 0.1;
+
+	async function evaluatePersonaShift(
+		state: SessionMonitorState,
+		turnContext: string,
+		turnIndex: number
+	): Promise<void> {
+		const now = Date.now();
+
+		// Performance guard: only re-evaluate every N turns or M minutes
+		const turnsSinceLastEval = turnIndex - state.lastPersonaEvalTurnIndex;
+		const timeSinceLastEval = now - state.lastPersonaEvalAt;
+		if (
+			turnsSinceLastEval < PERSONA_EVAL_TURN_INTERVAL &&
+			timeSinceLastEval < PERSONA_EVAL_TIME_INTERVAL_MS
+		) {
+			return;
+		}
+
+		try {
+			let accessors_ = memoryAccessors;
+			if (!accessors_) {
+				const resolved = await defaultGetMemoryAccessors();
+				if (!resolved) return;
+				accessors_ = resolved;
+			}
+
+			const store = accessors_.getMemoryStore();
+			const config = await store.getConfig();
+			if (!config.enabled) return;
+
+			const matches = await store.selectMatchingPersonas(
+				turnContext,
+				config,
+				state.agentType,
+				state.projectPath
+			);
+
+			state.lastPersonaEvalTurnIndex = turnIndex;
+			state.lastPersonaEvalAt = now;
+
+			if (matches.length === 0) return;
+
+			const topMatch = matches.reduce((best, m) => (m.similarity > best.similarity ? m : best));
+
+			// Set initial persona on first evaluation
+			if (!state.initialPersonaMatch) {
+				state.initialPersonaMatch = {
+					id: topMatch.persona.id,
+					name: topMatch.personaName,
+					score: topMatch.similarity,
+				};
+				logger.debug('[MemoryMonitor] Initial persona match set', 'MemoryMonitor', {
+					sessionId: state.sessionId,
+					personaId: topMatch.persona.id,
+					personaName: topMatch.personaName,
+					score: topMatch.similarity.toFixed(3),
+				});
+				return;
+			}
+
+			// Check if a different persona now has a higher score by the margin threshold
+			if (
+				topMatch.persona.id !== state.initialPersonaMatch.id &&
+				topMatch.similarity > state.initialPersonaMatch.score + PERSONA_SHIFT_MARGIN
+			) {
+				const { pushPersonaShiftEvent } = await import('../memory/memory-injector');
+				pushPersonaShiftEvent({
+					timestamp: now,
+					sessionId: state.sessionId,
+					fromPersona: { ...state.initialPersonaMatch },
+					toPersona: {
+						id: topMatch.persona.id,
+						name: topMatch.personaName,
+						score: topMatch.similarity,
+					},
+					triggerContext: turnContext.slice(0, 500),
+				});
+
+				logger.debug('[MemoryMonitor] Persona shift detected', 'MemoryMonitor', {
+					sessionId: state.sessionId,
+					from: state.initialPersonaMatch.name,
+					to: topMatch.personaName,
+					scoreDelta: (topMatch.similarity - state.initialPersonaMatch.score).toFixed(3),
+				});
+
+				// Update baseline to the new persona so we detect further shifts
+				state.initialPersonaMatch = {
+					id: topMatch.persona.id,
+					name: topMatch.personaName,
+					score: topMatch.similarity,
+				};
+			}
+		} catch {
+			// Non-critical — persona shift tracking is best-effort
+		}
+	}
+
+	// 6. Per-turn tracking: subscribe to turn-start and turn-complete events
 	import('../memory/turn-tracker')
 		.then(({ getTurnTracker }) => {
 			const turnTracker = getTurnTracker();
@@ -485,6 +617,12 @@ export function setupMemoryMonitorListener(
 					if (sessionId.startsWith(GROUP_CHAT_PREFIX)) return;
 					if (/batch-\d+$/.test(sessionId)) return;
 					if (/synopsis-\d+$/.test(sessionId)) return;
+
+					// Persona shift re-evaluation (fire-and-forget, best-effort)
+					const turnContext = entry.summary || entry.fullResponse?.slice(0, 500) || '';
+					if (turnContext.length > 0) {
+						evaluatePersonaShift(state, turnContext, turnIndex).catch(() => {});
+					}
 
 					// Check config
 					try {
@@ -615,7 +753,7 @@ export function setupMemoryMonitorListener(
 			// TurnTracker not available — per-turn extraction won't work
 		});
 
-	// 6. Periodic trigger: check via interval for write-count based refreshes
+	// 7. Periodic trigger: check via interval for write-count based refreshes
 	// Also triggers mid-session experience extraction at every 10th write
 	const midSessionCheckpoints = new Set<string>(); // tracks "sessionId:checkpoint" keys
 	const periodicInterval = setInterval(async () => {
