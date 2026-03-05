@@ -8,7 +8,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
 	AlertTriangle,
-	ArrowUpCircle,
 	Archive,
 	ChevronDown,
 	ChevronRight,
@@ -138,6 +137,9 @@ export function StatusTab({
 
 			{/* Section 4: Impact Dashboard */}
 			{stats && <ImpactDashboardSection stats={stats} theme={theme} allMemories={allMemories} />}
+
+			{/* Section 5: Promotion History */}
+			<PromotionHistorySection theme={theme} allMemories={allMemories} />
 		</div>
 	);
 }
@@ -335,12 +337,10 @@ function SystemHealthSection({
 						</div>
 					)}
 					{(stats.promotionCandidates ?? 0) > 0 && (
-						<div
-							className="flex items-center gap-1.5 text-xs"
-							style={{ color: theme.colors.accent }}
-						>
-							<ArrowUpCircle className="w-3 h-3" />
-							{stats.promotionCandidates} experiences ready for promotion
+						<div className="flex items-center gap-1.5 text-xs" style={{ color: '#d4a017' }}>
+							<Star className="w-3 h-3" />
+							Promotion Suggestions: {stats.promotionCandidates} experience
+							{stats.promotionCandidates !== 1 ? 's' : ''} ready
 						</div>
 					)}
 					{stats.archivedCount > 0 && (
@@ -1372,6 +1372,97 @@ function formatBytes(bytes: number): string {
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
 	if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 	return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+// ─── Section 5: Promotion History ──────────────────────────────────────────────
+
+function PromotionHistorySection({
+	theme,
+	allMemories,
+}: {
+	theme: Theme;
+	allMemories: MemoryEntry[];
+}) {
+	const [collapsed, setCollapsed] = useState(true);
+
+	// Derive promotion history from memories with 'promoted:experience' tag
+	const promotionHistory = useMemo(() => {
+		return allMemories
+			.filter(
+				(m) => m.type === 'rule' && m.tags.includes('promoted:experience') && m.experienceContext
+			)
+			.sort((a, b) => b.updatedAt - a.updatedAt)
+			.slice(0, 20);
+	}, [allMemories]);
+
+	if (promotionHistory.length === 0) return null;
+
+	return (
+		<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
+			<button className="flex items-center gap-2 w-full" onClick={() => setCollapsed(!collapsed)}>
+				{collapsed ? (
+					<ChevronRight className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+				) : (
+					<ChevronDown className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+				)}
+				<TrendingUp className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.accent }} />
+				<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+					Promotion History
+				</span>
+				<span className="text-[10px] ml-auto" style={{ color: theme.colors.textDim }}>
+					{promotionHistory.length} promotion{promotionHistory.length !== 1 ? 's' : ''}
+				</span>
+			</button>
+
+			{!collapsed && (
+				<div className="space-y-2 max-h-80 overflow-y-auto scrollbar-thin">
+					{promotionHistory.map((entry) => (
+						<div
+							key={entry.id}
+							className="rounded border p-2.5 space-y-1.5"
+							style={{ borderColor: theme.colors.border }}
+						>
+							{/* Original experience (if context available) */}
+							{entry.experienceContext?.situation && (
+								<div className="text-[10px] italic" style={{ color: theme.colors.textDim }}>
+									{entry.experienceContext.situation.length > 120
+										? `${entry.experienceContext.situation.slice(0, 120)}...`
+										: entry.experienceContext.situation}
+								</div>
+							)}
+
+							{/* Resulting rule */}
+							<div className="text-xs" style={{ color: theme.colors.textMain }}>
+								{entry.content.length > 150 ? `${entry.content.slice(0, 150)}...` : entry.content}
+							</div>
+
+							{/* Meta: timestamp + source */}
+							<div
+								className="flex items-center gap-2 text-[10px]"
+								style={{ color: theme.colors.textDim }}
+							>
+								<span>{formatRelativeTime(entry.updatedAt)}</span>
+								<span
+									className="px-1.5 py-0.5 rounded"
+									style={{ backgroundColor: `${theme.colors.border}40` }}
+								>
+									{entry.source === 'consolidation' ? 'user' : entry.source}
+								</span>
+								{entry.experienceContext?.sourceProjectPath && (
+									<span
+										className="truncate max-w-[100px]"
+										title={entry.experienceContext.sourceProjectPath}
+									>
+										{entry.experienceContext.sourceProjectPath.split('/').pop()}
+									</span>
+								)}
+							</div>
+						</div>
+					))}
+				</div>
+			)}
+		</div>
+	);
 }
 
 function formatInjectionTime(ts: number): string {

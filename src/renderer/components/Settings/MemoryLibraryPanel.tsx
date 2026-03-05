@@ -38,6 +38,7 @@ import {
 	FileDown,
 	FileUp,
 	Check,
+	ArrowUpCircle,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { TreeNode } from './MemoryTreeBrowser';
@@ -56,6 +57,12 @@ import type {
 import type { UseMemoryStoreReturn } from '../../hooks/memory/useMemoryStore';
 import { RoleDetailView, PersonaDetailView } from './EntityDetailView';
 import { MemoryEditModal } from './MemoryEditModal';
+import {
+	MemoryMovePromotePopover,
+	PromotionDialog,
+	ScopeConfirmDialog,
+	type MovePromoteAction,
+} from './MemoryMovePromotePopover';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -180,6 +187,9 @@ function MemoryCard({
 	bulkMode,
 	selected,
 	onToggleSelect,
+	onMovePromote,
+	skillAreas,
+	personas,
 }: {
 	memory: MemoryEntry;
 	theme: Theme;
@@ -196,6 +206,9 @@ function MemoryCard({
 	bulkMode?: boolean;
 	selected?: boolean;
 	onToggleSelect?: () => void;
+	onMovePromote?: (action: MovePromoteAction) => void;
+	skillAreas?: SkillArea[];
+	personas?: Persona[];
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const [contextExpanded, setContextExpanded] = useState(false);
@@ -358,6 +371,15 @@ function MemoryCard({
 					>
 						<Layers className="w-3 h-3" />
 					</button>
+				)}
+				{!archived && onMovePromote && (
+					<MemoryMovePromotePopover
+						memory={memory}
+						theme={theme}
+						skillAreas={skillAreas}
+						personas={personas}
+						onAction={onMovePromote}
+					/>
 				)}
 				{archived && onRestore ? (
 					<button
@@ -945,6 +967,7 @@ export function MemoryLibraryPanel({
 	const [bulkTagInput, setBulkTagInput] = useState(false);
 	const [bulkTagValue, setBulkTagValue] = useState('');
 	const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
+	const [bulkResult, setBulkResult] = useState<string | null>(null);
 
 	// Export/Import UI state
 	const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
@@ -976,6 +999,35 @@ export function MemoryLibraryPanel({
 	const [addingMemory, setAddingMemory] = useState(false);
 	const [editingMemory, setEditingMemory] = useState<MemoryEntry | null>(null);
 	const [editShowContext, setEditShowContext] = useState(false);
+
+	// Promotion-ready filter
+	const [promotionReadyOnly, setPromotionReadyOnly] = useState(false);
+	const [promotionReadyIds, setPromotionReadyIds] = useState<Set<string>>(new Set());
+
+	useEffect(() => {
+		let cancelled = false;
+		(async () => {
+			try {
+				const res = await window.maestro.memory.getPromotionCandidates();
+				if (!cancelled && res.success) {
+					setPromotionReadyIds(new Set(res.data.map((c) => c.memory.id)));
+				}
+			} catch {
+				// Non-critical
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [memories]);
+
+	// Move/Promote dialog state
+	const [promotingMemory, setPromotingMemory] = useState<MemoryEntry | null>(null);
+	const [scopeConfirm, setScopeConfirm] = useState<{
+		memory: MemoryEntry;
+		direction: 'to-global' | 'to-project';
+	} | null>(null);
+	const [_demotionHelperText, setDemotionHelperText] = useState<string | null>(null);
 
 	// Derive scope from selectedNode for direct archive API calls
 	const { scope: resolvedScope, skillAreaId: resolvedSkillAreaId } = useMemo(
@@ -1016,6 +1068,10 @@ export function MemoryLibraryPanel({
 		setShowArchived(false);
 		setBulkMode(false);
 		setSelectedIds(new Set());
+		setPromotingMemory(null);
+		setScopeConfirm(null);
+		setDemotionHelperText(null);
+		setPromotionReadyOnly(false);
 	}, [selectedNode]);
 
 	// Fetch archived memories for count display and archive view
@@ -1109,6 +1165,9 @@ export function MemoryLibraryPanel({
 		if (neverInjectedOnly) {
 			result = result.filter((m) => m.useCount === 0);
 		}
+		if (promotionReadyOnly) {
+			result = result.filter((m) => promotionReadyIds.has(m.id));
+		}
 		// Pinned first, then apply sort
 		return result.sort((a, b) => {
 			if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
@@ -1126,7 +1185,16 @@ export function MemoryLibraryPanel({
 					return b.createdAt - a.createdAt;
 			}
 		});
-	}, [memories, typeFilter, sourceFilter, selectedTags, neverInjectedOnly, sortBy]);
+	}, [
+		memories,
+		typeFilter,
+		sourceFilter,
+		selectedTags,
+		neverInjectedOnly,
+		promotionReadyOnly,
+		promotionReadyIds,
+		sortBy,
+	]);
 
 	// Count of never-injected memories for the filter badge
 	const neverInjectedCount = useMemo(
@@ -1322,6 +1390,53 @@ export function MemoryLibraryPanel({
 		[selectedIds, resolvedScope, resolvedSkillAreaId, resolvedProjectPath, store]
 	);
 
+	const handleBulkPromote = useCallback(async () => {
+		const ids = Array.from(selectedIds);
+		const experienceIds = ids.filter((id) => {
+			const m = memories.find((mem) => mem.id === id);
+			return m?.type === 'experience';
+		});
+		const skipped = ids.length - experienceIds.length;
+		let promoted = 0;
+		setBulkOpProgress({ label: 'Promoting', current: 0, total: experienceIds.length });
+		try {
+			for (let i = 0; i < experienceIds.length; i++) {
+				setBulkOpProgress({ label: 'Promoting', current: i + 1, total: experienceIds.length });
+				const mem = memories.find((m) => m.id === experienceIds[i]);
+				if (!mem) continue;
+				const ruleText = mem.experienceContext?.learning ?? mem.content;
+				await window.maestro.memory.promote(
+					mem.id,
+					ruleText,
+					mem.scope as string,
+					mem.skillAreaId,
+					mem.scope === 'project' ? resolvedProjectPath : undefined
+				);
+				promoted++;
+			}
+		} catch {
+			// Partial failure
+		} finally {
+			setBulkOpProgress(null);
+			setSelectedIds(new Set());
+			setBulkResult(
+				`Promoted ${promoted} experience${promoted !== 1 ? 's' : ''} to rules` +
+					(skipped > 0 ? `, ${skipped} skipped (already rules)` : '')
+			);
+			setTimeout(() => setBulkResult(null), 4000);
+			store.refresh();
+		}
+	}, [selectedIds, memories, resolvedProjectPath, store]);
+
+	// Check if all selected are experiences (for enabling bulk promote)
+	const allSelectedAreExperiences = useMemo(() => {
+		if (selectedIds.size === 0) return false;
+		return Array.from(selectedIds).every((id) => {
+			const m = memories.find((mem) => mem.id === id);
+			return m?.type === 'experience';
+		});
+	}, [selectedIds, memories]);
+
 	// Available skills for the edit modal
 	const availableSkills = useMemo(
 		() =>
@@ -1454,6 +1569,133 @@ export function MemoryLibraryPanel({
 			}
 		},
 		[resolvedScope, resolvedSkillAreaId, resolvedProjectPath, store]
+	);
+
+	// ─── Move/Promote Handlers ──────────────────────────────────────────
+
+	const handleMovePromote = useCallback(
+		(action: MovePromoteAction) => {
+			switch (action.kind) {
+				case 'promote-to-rule':
+					setPromotingMemory(action.memory);
+					break;
+				case 'demote-to-experience':
+					// Open edit modal with type changed to experience and helper text
+					setDemotionHelperText(
+						'Converting to experience — add context about when this was learned'
+					);
+					setEditShowContext(true);
+					setEditingMemory({
+						...action.memory,
+						type: 'experience',
+						experienceContext: action.memory.experienceContext ?? {
+							situation: '',
+							learning: action.memory.content,
+						},
+					});
+					break;
+				case 'scope-to-global':
+					setScopeConfirm({ memory: action.memory, direction: 'to-global' });
+					break;
+				case 'scope-to-project':
+					setScopeConfirm({ memory: action.memory, direction: 'to-project' });
+					break;
+				case 'move-to-skill':
+				case 'assign-skill':
+					(async () => {
+						try {
+							await window.maestro.memory.moveScope(
+								action.memory.id,
+								action.memory.scope,
+								action.memory.skillAreaId,
+								action.memory.scope === 'project' ? resolvedProjectPath : undefined,
+								'skill',
+								action.skillAreaId,
+								undefined
+							);
+							store.refresh();
+						} catch {
+							// Move failed
+						}
+					})();
+					break;
+			}
+		},
+		[resolvedProjectPath, store]
+	);
+
+	const handlePromoteConfirm = useCallback(
+		async (ruleText: string, archiveSource: boolean) => {
+			if (!promotingMemory) return;
+			try {
+				await window.maestro.memory.promote(
+					promotingMemory.id,
+					ruleText,
+					promotingMemory.scope as string,
+					promotingMemory.skillAreaId,
+					promotingMemory.scope === 'project' ? resolvedProjectPath : undefined
+				);
+				if (archiveSource) {
+					await window.maestro.memory.update(
+						promotingMemory.id,
+						{ active: false },
+						promotingMemory.scope,
+						promotingMemory.skillAreaId,
+						promotingMemory.scope === 'project' ? resolvedProjectPath : undefined
+					);
+				}
+				store.refresh();
+			} catch {
+				// Promotion failed
+			} finally {
+				setPromotingMemory(null);
+			}
+		},
+		[promotingMemory, resolvedProjectPath, store]
+	);
+
+	const handleScopeConfirm = useCallback(
+		async (keepCopy: boolean) => {
+			if (!scopeConfirm) return;
+			const { memory, direction } = scopeConfirm;
+			try {
+				const toScope: MemoryScope = direction === 'to-global' ? 'global' : 'project';
+
+				if (keepCopy) {
+					// Add a copy in the new scope, keep original
+					await window.maestro.memory.add(
+						{
+							content: memory.content,
+							type: memory.type,
+							scope: toScope,
+							tags: memory.tags,
+							source: memory.source,
+							confidence: memory.confidence,
+							pinned: memory.pinned,
+							experienceContext: memory.experienceContext,
+						},
+						toScope === 'project' ? resolvedProjectPath : undefined
+					);
+				} else {
+					// Move to new scope
+					await window.maestro.memory.moveScope(
+						memory.id,
+						memory.scope,
+						memory.skillAreaId,
+						memory.scope === 'project' ? resolvedProjectPath : undefined,
+						toScope,
+						undefined,
+						toScope === 'project' ? resolvedProjectPath : undefined
+					);
+				}
+				store.refresh();
+			} catch {
+				// Scope change failed
+			} finally {
+				setScopeConfirm(null);
+			}
+		},
+		[scopeConfirm, resolvedProjectPath, store]
 	);
 
 	// ─── Export Helpers ──────────────────────────────────────────────────
@@ -1907,6 +2149,21 @@ export function MemoryLibraryPanel({
 							Never injected ({neverInjectedCount})
 						</button>
 					)}
+
+					{/* Promotion-ready filter */}
+					{promotionReadyIds.size > 0 && (
+						<button
+							className="text-[10px] px-2 py-0.5 rounded-full font-medium transition-colors"
+							style={{
+								backgroundColor: promotionReadyOnly ? '#d4a01720' : 'transparent',
+								color: promotionReadyOnly ? '#d4a017' : theme.colors.textDim,
+								border: `1px solid ${promotionReadyOnly ? '#d4a017' : theme.colors.border}`,
+							}}
+							onClick={() => setPromotionReadyOnly(!promotionReadyOnly)}
+						>
+							Promotion-ready ({promotionReadyIds.size})
+						</button>
+					)}
 				</div>
 
 				{/* Source filter + Sort */}
@@ -2100,6 +2357,7 @@ export function MemoryLibraryPanel({
 								theme={theme}
 								onTogglePin={() => handleTogglePin(memory)}
 								onEdit={() => {
+									setDemotionHelperText(null);
 									setEditShowContext(false);
 									setEditingMemory(memory);
 								}}
@@ -2115,6 +2373,9 @@ export function MemoryLibraryPanel({
 								bulkMode={bulkMode}
 								selected={selectedIds.has(memory.id)}
 								onToggleSelect={() => handleToggleSelect(memory.id)}
+								onMovePromote={handleMovePromote}
+								skillAreas={skillAreas}
+								personas={personas}
 							/>
 						))}
 					</>
@@ -2332,6 +2593,26 @@ export function MemoryLibraryPanel({
 								<FolderInput className="w-3 h-3" />
 								Move
 							</button>
+							<button
+								className="flex items-center gap-1 text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
+								style={{
+									color: allSelectedAreExperiences ? theme.colors.accent : theme.colors.textDim,
+									backgroundColor: allSelectedAreExperiences
+										? `${theme.colors.accent}15`
+										: `${theme.colors.border}40`,
+									opacity: allSelectedAreExperiences ? 1 : 0.5,
+								}}
+								title={
+									allSelectedAreExperiences
+										? 'Promote selected experiences to rules'
+										: 'Only available when all selected are experiences'
+								}
+								onClick={handleBulkPromote}
+								disabled={!allSelectedAreExperiences}
+							>
+								<ArrowUpCircle className="w-3 h-3" />
+								Promote
+							</button>
 						</>
 					)}
 				</div>
@@ -2350,6 +2631,7 @@ export function MemoryLibraryPanel({
 					onClose={() => {
 						setEditingMemory(null);
 						setEditShowContext(false);
+						setDemotionHelperText(null);
 					}}
 				/>
 			)}
@@ -2500,6 +2782,50 @@ export function MemoryLibraryPanel({
 						<X className="w-3.5 h-3.5" />
 					</button>
 				</div>
+			)}
+
+			{/* Bulk Result Banner */}
+			{bulkResult && (
+				<div
+					className="absolute bottom-3 left-3 right-3 z-50 flex items-center gap-2 px-3 py-2 rounded-lg border shadow-lg"
+					style={{
+						backgroundColor: theme.colors.bgSidebar,
+						borderColor: theme.colors.accent,
+					}}
+				>
+					<Check className="w-4 h-4 shrink-0" style={{ color: theme.colors.accent }} />
+					<span className="text-xs" style={{ color: theme.colors.textMain }}>
+						{bulkResult}
+					</span>
+					<div className="flex-1" />
+					<button
+						className="text-xs hover:opacity-80 transition-opacity"
+						style={{ color: theme.colors.textDim }}
+						onClick={() => setBulkResult(null)}
+					>
+						<X className="w-3.5 h-3.5" />
+					</button>
+				</div>
+			)}
+
+			{/* Promotion Dialog */}
+			{promotingMemory && (
+				<PromotionDialog
+					memory={promotingMemory}
+					theme={theme}
+					onConfirm={handlePromoteConfirm}
+					onClose={() => setPromotingMemory(null)}
+				/>
+			)}
+
+			{/* Scope Confirmation Dialog */}
+			{scopeConfirm && (
+				<ScopeConfirmDialog
+					direction={scopeConfirm.direction}
+					theme={theme}
+					onConfirm={handleScopeConfirm}
+					onClose={() => setScopeConfirm(null)}
+				/>
 			)}
 		</div>
 	);

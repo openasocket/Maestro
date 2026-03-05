@@ -50,11 +50,19 @@ import type {
 	TokenUsage,
 	ExtractionDiagnostic,
 	ExtractionProgress,
+	SkillArea,
+	Persona,
 } from '../../../shared/memory-types';
 import { ConfigToggle, ConfigSlider } from './MemoryConfigWidgets';
 import { ExperienceRepositoryPanel } from './ExperienceRepositoryPanel';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
 import { MemoryEditModal } from './MemoryEditModal';
+import {
+	MemoryMovePromotePopover,
+	PromotionDialog,
+	ScopeConfirmDialog,
+	type MovePromoteAction,
+} from './MemoryMovePromotePopover';
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
@@ -392,6 +400,141 @@ export function ExperiencesTab({
 		'all'
 	);
 	const [reviewProjectFilter, setReviewProjectFilter] = useState<string>('all');
+
+	// ─── Hierarchy data for Move/Promote ────────────────────────────────
+	const [skillAreas, setSkillAreas] = useState<SkillArea[]>([]);
+	const [personasList, setPersonasList] = useState<Persona[]>([]);
+	const [movePromoteMemory, setMovePromoteMemory] = useState<MemoryEntry | null>(null);
+	const [movePromoteScopeConfirm, setMovePromoteScopeConfirm] = useState<{
+		memory: MemoryEntry;
+		direction: 'to-global' | 'to-project';
+	} | null>(null);
+
+	useEffect(() => {
+		if (!config.enabled) return;
+		(async () => {
+			try {
+				const [, personasRes, skillsRes] = await Promise.all([
+					window.maestro.memory.role.list(),
+					window.maestro.memory.persona.list(),
+					window.maestro.memory.skill.list(),
+				]);
+				if (personasRes.success) setPersonasList(personasRes.data);
+				if (skillsRes.success) setSkillAreas(skillsRes.data);
+			} catch {
+				// Non-critical
+			}
+		})();
+	}, [config.enabled]);
+
+	const handleMovePromoteAction = useCallback(
+		(action: MovePromoteAction) => {
+			switch (action.kind) {
+				case 'promote-to-rule':
+					setMovePromoteMemory(action.memory);
+					break;
+				case 'scope-to-global':
+					setMovePromoteScopeConfirm({ memory: action.memory, direction: 'to-global' });
+					break;
+				case 'scope-to-project':
+					setMovePromoteScopeConfirm({ memory: action.memory, direction: 'to-project' });
+					break;
+				case 'move-to-skill':
+				case 'assign-skill':
+					(async () => {
+						try {
+							await window.maestro.memory.moveScope(
+								action.memory.id,
+								action.memory.scope,
+								action.memory.skillAreaId,
+								action.memory.scope === 'project' ? (projectPath ?? undefined) : undefined,
+								'skill',
+								action.skillAreaId,
+								undefined
+							);
+							onRefresh();
+						} catch {
+							// Move failed
+						}
+					})();
+					break;
+				default:
+					break;
+			}
+		},
+		[projectPath, onRefresh]
+	);
+
+	const handleMovePromoteConfirm = useCallback(
+		async (ruleText: string, archiveSource: boolean) => {
+			if (!movePromoteMemory) return;
+			try {
+				await window.maestro.memory.promote(
+					movePromoteMemory.id,
+					ruleText,
+					movePromoteMemory.scope as string,
+					movePromoteMemory.skillAreaId,
+					movePromoteMemory.scope === 'project' ? (projectPath ?? undefined) : undefined
+				);
+				if (archiveSource) {
+					await window.maestro.memory.update(
+						movePromoteMemory.id,
+						{ active: false },
+						movePromoteMemory.scope,
+						movePromoteMemory.skillAreaId,
+						movePromoteMemory.scope === 'project' ? (projectPath ?? undefined) : undefined
+					);
+				}
+				onRefresh();
+			} catch {
+				// Promotion failed
+			} finally {
+				setMovePromoteMemory(null);
+			}
+		},
+		[movePromoteMemory, projectPath, onRefresh]
+	);
+
+	const handleMovePromoteScopeConfirm = useCallback(
+		async (keepCopy: boolean) => {
+			if (!movePromoteScopeConfirm) return;
+			const { memory, direction } = movePromoteScopeConfirm;
+			try {
+				const toScope: MemoryScope = direction === 'to-global' ? 'global' : 'project';
+				if (keepCopy) {
+					await window.maestro.memory.add(
+						{
+							content: memory.content,
+							type: memory.type,
+							scope: toScope,
+							tags: memory.tags,
+							source: memory.source,
+							confidence: memory.confidence,
+							pinned: memory.pinned,
+							experienceContext: memory.experienceContext,
+						},
+						toScope === 'project' ? (projectPath ?? undefined) : undefined
+					);
+				} else {
+					await window.maestro.memory.moveScope(
+						memory.id,
+						memory.scope,
+						memory.skillAreaId,
+						memory.scope === 'project' ? (projectPath ?? undefined) : undefined,
+						toScope,
+						undefined,
+						toScope === 'project' ? (projectPath ?? undefined) : undefined
+					);
+				}
+				onRefresh();
+			} catch {
+				// Scope change failed
+			} finally {
+				setMovePromoteScopeConfirm(null);
+			}
+		},
+		[movePromoteScopeConfirm, projectPath, onRefresh]
+	);
 
 	// ─── Fetch batch-capable agents ─────────────────────────────────────
 	useEffect(() => {
@@ -768,6 +911,12 @@ export function ExperiencesTab({
 
 	// ─── Summary data ──────────────────────────────────────────────────
 	const promotedCount = stats?.bySource?.grpo ?? 0;
+
+	// Set of promotion candidate memory IDs for highlighting in review cards
+	const promotionCandidateIds = useMemo(
+		() => new Set(promotionCandidates.map((c) => c.memory.id)),
+		[promotionCandidates]
+	);
 	const lastDiagnostic = useMemo(() => {
 		const diags = queueStatus?.recentDiagnostics;
 		if (!diags || diags.length === 0) return null;
@@ -1131,6 +1280,10 @@ export function ExperiencesTab({
 												ruleText
 											)
 										}
+										onMovePromote={handleMovePromoteAction}
+										skillAreas={skillAreas}
+										personas={personasList}
+										isPromotionCandidate={promotionCandidateIds.has(exp.id)}
 									/>
 								))}
 							</div>
@@ -1274,6 +1427,26 @@ export function ExperiencesTab({
 					onClose={() => setEditingMemory(null)}
 				/>
 			)}
+
+			{/* Move/Promote Promotion Dialog */}
+			{movePromoteMemory && (
+				<PromotionDialog
+					memory={movePromoteMemory}
+					theme={theme}
+					onConfirm={handleMovePromoteConfirm}
+					onClose={() => setMovePromoteMemory(null)}
+				/>
+			)}
+
+			{/* Move/Promote Scope Confirmation */}
+			{movePromoteScopeConfirm && (
+				<ScopeConfirmDialog
+					direction={movePromoteScopeConfirm.direction}
+					theme={theme}
+					onConfirm={handleMovePromoteScopeConfirm}
+					onClose={() => setMovePromoteScopeConfirm(null)}
+				/>
+			)}
 		</div>
 	);
 }
@@ -1289,6 +1462,10 @@ function ExperienceReviewCard({
 	onTogglePin,
 	onArchive,
 	onPromote,
+	onMovePromote,
+	skillAreas,
+	personas,
+	isPromotionCandidate,
 }: {
 	experience: EnrichedExperience;
 	theme: Theme;
@@ -1298,6 +1475,10 @@ function ExperienceReviewCard({
 	onTogglePin: () => void;
 	onArchive: () => void;
 	onPromote: (ruleText: string) => void;
+	onMovePromote?: (action: MovePromoteAction) => void;
+	skillAreas?: SkillArea[];
+	personas?: Persona[];
+	isPromotionCandidate?: boolean;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const [similarExpanded, setSimilarExpanded] = useState(false);
@@ -1337,10 +1518,28 @@ function ExperienceReviewCard({
 		<div
 			className="rounded-lg border p-3 space-y-2 transition-colors"
 			style={{
-				borderColor: experience.pinned ? theme.colors.accent : theme.colors.border,
-				backgroundColor: experience.pinned ? `${theme.colors.accent}05` : 'transparent',
+				borderColor: isPromotionCandidate
+					? '#d4a017'
+					: experience.pinned
+						? theme.colors.accent
+						: theme.colors.border,
+				backgroundColor: isPromotionCandidate
+					? '#d4a01708'
+					: experience.pinned
+						? `${theme.colors.accent}05`
+						: 'transparent',
 			}}
 		>
+			{/* Promotion candidate indicator */}
+			{isPromotionCandidate && (
+				<div
+					className="flex items-center gap-1 text-[10px] font-medium"
+					style={{ color: '#d4a017' }}
+				>
+					<Sparkles className="w-3 h-3" />
+					Promotion-ready
+				</div>
+			)}
 			{/* Situation (italic) */}
 			{ctx?.situation && (
 				<div className="text-xs italic leading-relaxed" style={{ color: theme.colors.textDim }}>
@@ -1480,6 +1679,15 @@ function ExperienceReviewCard({
 					<ArrowUpCircle className="w-3 h-3" />
 					Promote
 				</button>
+				{onMovePromote && (
+					<MemoryMovePromotePopover
+						memory={experience}
+						theme={theme}
+						skillAreas={skillAreas}
+						personas={personas}
+						onAction={onMovePromote}
+					/>
+				)}
 				<button
 					className="p-1 rounded hover:opacity-80 transition-opacity"
 					style={{ color: theme.colors.textDim }}
