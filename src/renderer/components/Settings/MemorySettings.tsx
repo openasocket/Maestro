@@ -16,6 +16,7 @@ import {
 	RotateCcw,
 	Users,
 	Layers,
+	Settings,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import { PersonasTab } from './PersonasTab';
@@ -23,13 +24,13 @@ import { SkillsTab } from './SkillsTab';
 import { ExperiencesTab } from './ExperiencesTab';
 import { MemoriesTab, type MemoryFilter } from './MemoriesTab';
 import { StatusTab } from './StatusTab';
-import { ConfigSlider, ConfigToggle } from './MemoryConfigWidgets';
+import { ConfigTab } from './ConfigTab';
 import type { MemoryConfig, MemoryStats } from '../../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../../shared/memory-types';
 
 // ─── Sub-Tab Navigation ───────────────────────────────────────────────────────
 
-export type MemorySubTab = 'personas' | 'skills' | 'experiences' | 'memories' | 'status';
+export type MemorySubTab = 'personas' | 'skills' | 'experiences' | 'memories' | 'config' | 'status';
 
 const MEMORY_SUB_TABS: {
 	id: MemorySubTab;
@@ -46,6 +47,7 @@ const MEMORY_SUB_TABS: {
 		getCount: (s) => (s ? (s.byType?.experience ?? 0) : null),
 	},
 	{ id: 'memories', label: 'Memories', icon: Brain, getCount: (s) => s?.totalMemories ?? null },
+	{ id: 'config', label: 'Config', icon: Settings, getCount: () => null },
 	{
 		id: 'status',
 		label: 'Status',
@@ -420,6 +422,9 @@ export function MemorySettings({
 							onClearFilter={() => setMemoriesFilter(null)}
 						/>
 					)}
+					{activeSubTab === 'config' && (
+						<ConfigTab theme={theme} config={config} stats={stats} onUpdateConfig={updateConfig} />
+					)}
 					{activeSubTab === 'status' && (
 						<StatusTab
 							theme={theme}
@@ -429,160 +434,6 @@ export function MemorySettings({
 							onConfigChange={refreshConfigAndStats}
 						/>
 					)}
-
-					{/* Global Retrieval Settings */}
-					<div
-						className="rounded-lg border p-4 space-y-3"
-						style={{ borderColor: theme.colors.border }}
-					>
-						<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-							Retrieval Settings
-						</div>
-
-						{/* Injection Strategy */}
-						<div className="pb-2">
-							<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
-								Injection Strategy
-							</div>
-							<div className="text-xs mt-0.5 mb-2" style={{ color: theme.colors.textDim }}>
-								Controls how aggressively memories are injected into agent prompts
-							</div>
-							<div className="flex gap-2">
-								{(['lean', 'balanced', 'rich'] as const).map((strategy) => (
-									<button
-										key={strategy}
-										onClick={() => updateConfig({ injectionStrategy: strategy })}
-										className="flex-1 rounded-md border text-left"
-										style={{
-											padding: '8px 12px',
-											borderColor:
-												config.injectionStrategy === strategy
-													? theme.colors.accent
-													: theme.colors.border,
-											background:
-												config.injectionStrategy === strategy
-													? `${theme.colors.accent}20`
-													: 'transparent',
-											color:
-												config.injectionStrategy === strategy
-													? theme.colors.accent
-													: theme.colors.textMain,
-											cursor: 'pointer',
-											fontWeight: config.injectionStrategy === strategy ? 600 : 400,
-										}}
-									>
-										<div className="text-xs">
-											{strategy.charAt(0).toUpperCase() + strategy.slice(1)}
-										</div>
-										<div
-											className="text-xs mt-0.5"
-											style={{ color: theme.colors.textDim, fontSize: 10 }}
-										>
-											{strategy === 'lean' && '< 600 tokens, top 5 only'}
-											{strategy === 'balanced' && `Up to ${config.maxTokenBudget} tokens`}
-											{strategy === 'rich' && 'Up to 3000 tokens, full context'}
-										</div>
-									</button>
-								))}
-							</div>
-						</div>
-
-						<ConfigSlider
-							label="Token Budget"
-							description="Maximum tokens for memory injection per prompt"
-							value={config.maxTokenBudget}
-							min={500}
-							max={5000}
-							step={100}
-							onChange={(v) => updateConfig({ maxTokenBudget: v })}
-							theme={theme}
-						/>
-
-						<ConfigSlider
-							label="Similarity Threshold"
-							description="Minimum cosine similarity for memory relevance"
-							value={config.similarityThreshold}
-							min={0.1}
-							max={0.95}
-							step={0.05}
-							onChange={(v) => updateConfig({ similarityThreshold: v })}
-							theme={theme}
-							formatValue={(v) => v.toFixed(2)}
-						/>
-
-						<ConfigSlider
-							label="Persona Match Threshold"
-							description="Minimum similarity for persona matching (coarser filter)"
-							value={config.personaMatchThreshold}
-							min={0.1}
-							max={0.8}
-							step={0.05}
-							onChange={(v) => updateConfig({ personaMatchThreshold: v })}
-							theme={theme}
-							formatValue={(v) => v.toFixed(2)}
-						/>
-
-						<ConfigSlider
-							label="Skill Match Threshold"
-							description="Minimum similarity for skill area matching"
-							value={config.skillMatchThreshold}
-							min={0.2}
-							max={0.9}
-							step={0.05}
-							onChange={(v) => updateConfig({ skillMatchThreshold: v })}
-							theme={theme}
-							formatValue={(v) => v.toFixed(2)}
-						/>
-					</div>
-
-					{/* Global Storage & Maintenance */}
-					<div
-						className="rounded-lg border p-4 space-y-3"
-						style={{ borderColor: theme.colors.border }}
-					>
-						<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-							Storage & Maintenance
-						</div>
-
-						<ConfigSlider
-							label="Consolidation Threshold"
-							description="Similarity threshold for merging duplicate memories"
-							value={config.consolidationThreshold}
-							min={0.5}
-							max={0.99}
-							step={0.01}
-							onChange={(v) => updateConfig({ consolidationThreshold: v })}
-							theme={theme}
-							formatValue={(v) => v.toFixed(2)}
-						/>
-
-						<ConfigSlider
-							label="Decay Half-Life (days)"
-							description="Days until unreinforced memories lose half their confidence"
-							value={config.decayHalfLifeDays}
-							min={7}
-							max={365}
-							step={1}
-							onChange={(v) => updateConfig({ decayHalfLifeDays: v })}
-							theme={theme}
-						/>
-
-						<ConfigToggle
-							label="Auto-Consolidation"
-							description="Automatically merge similar memories during maintenance"
-							checked={config.enableAutoConsolidation}
-							onChange={(v) => updateConfig({ enableAutoConsolidation: v })}
-							theme={theme}
-						/>
-
-						<ConfigToggle
-							label="Effectiveness Tracking"
-							description="Track how injected memories correlate with session outcomes"
-							checked={config.enableEffectivenessTracking}
-							onChange={(v) => updateConfig({ enableEffectivenessTracking: v })}
-							theme={theme}
-						/>
-					</div>
 				</>
 			)}
 		</div>
