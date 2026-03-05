@@ -447,6 +447,54 @@ interface InjectionEventRecord {
 	tokenCount: number;
 	timestamp: number;
 	scopeGroups: Array<{ scope: string; skillAreaId?: string; projectPath?: string; ids: string[] }>;
+	noMatch?: boolean;
+}
+
+/** Timeline bucket for hour-by-hour or day-by-day display. */
+interface TimelineBucket {
+	label: string;
+	start: number;
+	end: number;
+	events: InjectionEventRecord[];
+	noMatchCount: number;
+}
+
+function buildTimeline(injections: InjectionEventRecord[]): TimelineBucket[] {
+	const todayStart = new Date();
+	todayStart.setHours(0, 0, 0, 0);
+	const buckets: TimelineBucket[] = [];
+
+	// Hour-by-hour for today (up to current hour)
+	const currentHour = new Date().getHours();
+	for (let h = 0; h <= currentHour; h++) {
+		const start = todayStart.getTime() + h * 3600000;
+		const end = start + 3600000;
+		const events = injections.filter((e) => e.timestamp >= start && e.timestamp < end);
+		buckets.push({
+			label: `${h.toString().padStart(2, '0')}:00`,
+			start,
+			end,
+			events,
+			noMatchCount: events.filter((e) => e.noMatch).length,
+		});
+	}
+
+	// Day-by-day for previous 6 days
+	for (let d = 1; d <= 6; d++) {
+		const dayStart = todayStart.getTime() - d * 86400000;
+		const dayEnd = dayStart + 86400000;
+		const events = injections.filter((e) => e.timestamp >= dayStart && e.timestamp < dayEnd);
+		const dt = new Date(dayStart);
+		buckets.push({
+			label: `${dt.getMonth() + 1}/${dt.getDate()}`,
+			start: dayStart,
+			end: dayEnd,
+			events,
+			noMatchCount: events.filter((e) => e.noMatch).length,
+		});
+	}
+
+	return buckets;
 }
 
 function InjectionActivitySection({
@@ -461,11 +509,12 @@ function InjectionActivitySection({
 	const [expanded, setExpanded] = useState(true);
 	const [injections, setInjections] = useState<InjectionEventRecord[]>([]);
 	const [loaded, setLoaded] = useState(false);
+	const [expandedEvent, setExpandedEvent] = useState<number | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
 		window.maestro.memory
-			.getRecentInjections(50)
+			.getRecentInjections(200)
 			.then((res: { success: boolean; data?: unknown[] }) => {
 				if (cancelled) return;
 				if (res.success && Array.isArray(res.data)) {
@@ -480,22 +529,54 @@ function InjectionActivitySection({
 	}, []);
 
 	const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-	const recentCount = injections.filter((e) => e.timestamp >= sevenDaysAgo).length;
+	const realInjections = injections.filter((e) => !e.noMatch);
+	const recentCount = realInjections.filter((e) => e.timestamp >= sevenDaysAgo).length;
+	const noMatchCount = injections.filter((e) => e.noMatch && e.timestamp >= sevenDaysAgo).length;
+
+	// Timeline buckets
+	const timeline = useMemo(() => buildTimeline(injections), [injections]);
+	const maxTimelineEvents = Math.max(...timeline.map((b) => b.events.length), 1);
 
 	// Diagnostic checklist when no injections
 	const diagnosticItems = useMemo(() => {
-		if (injections.length > 0) return [];
-		const items: string[] = [];
-		if (!config.enabled) items.push('Memory system is disabled');
-		if (stats && stats.totalMemories === 0) items.push('No memories exist yet');
-		if (stats && stats.pendingEmbeddings > 0)
-			items.push(`${stats.pendingEmbeddings} memories missing embeddings`);
-		if (stats && stats.totalMemories > 0 && stats.neverInjectedCount === stats.totalMemories)
-			items.push('No matching memories found for recent tasks');
-		if (items.length === 0 && config.enabled)
-			items.push('No agents have been started since system was enabled');
+		const realEvents = injections.filter((e) => !e.noMatch);
+		if (realEvents.length > 0) return [];
+		const items: Array<{ text: string; ok: boolean }> = [];
+		// Prerequisites checklist
+		items.push({ text: 'Memory system enabled', ok: config.enabled });
+		items.push({
+			text: 'Memories exist',
+			ok: stats != null && stats.totalMemories > 0,
+		});
+		items.push({
+			text: 'Embeddings computed',
+			ok: stats != null && stats.pendingEmbeddings === 0,
+		});
+		if (stats && stats.pendingEmbeddings > 0) {
+			items.push({
+				text: `${stats.pendingEmbeddings} memories still missing embeddings`,
+				ok: false,
+			});
+		}
+		items.push({
+			text: 'Hierarchy seeded (personas/skills exist)',
+			ok: stats != null && stats.totalPersonas > 0 && stats.totalSkillAreas > 0,
+		});
+		const hasNoMatchEvents = injections.some((e) => e.noMatch);
+		if (hasNoMatchEvents) {
+			items.push({
+				text: 'Matching memories found for tasks (recent searches returned no matches)',
+				ok: false,
+			});
+		}
+		if (items.every((item) => item.ok) && realEvents.length === 0) {
+			items.push({
+				text: 'Agent sessions started (no agents launched since system enabled)',
+				ok: false,
+			});
+		}
 		return items;
-	}, [injections.length, config.enabled, stats]);
+	}, [injections, config.enabled, stats]);
 
 	return (
 		<div className="rounded-lg border p-4 space-y-2" style={{ borderColor: theme.colors.border }}>
@@ -512,18 +593,65 @@ function InjectionActivitySection({
 				<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
 					Injection Activity ({loaded ? `${recentCount} in 7 days` : '...'})
 				</span>
+				{noMatchCount > 0 && (
+					<span
+						className="text-[10px] px-1.5 py-0.5 rounded"
+						style={{ color: '#eab308', backgroundColor: `${'#eab308'}15` }}
+					>
+						{noMatchCount} no-match
+					</span>
+				)}
 			</button>
 
 			{expanded && (
-				<div className="space-y-1.5 pt-1">
+				<div className="space-y-3 pt-1">
 					{!loaded && (
 						<div className="text-xs" style={{ color: theme.colors.textDim }}>
 							Loading...
 						</div>
 					)}
 
+					{/* Timeline view */}
+					{loaded && injections.length > 0 && (
+						<div className="space-y-1">
+							<div className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
+								Timeline — today (hourly) + last 6 days
+							</div>
+							<div className="flex items-end gap-px" style={{ height: 32 }}>
+								{timeline.map((bucket, i) => {
+									const total = bucket.events.filter((e) => !e.noMatch).length;
+									const height = (total / maxTimelineEvents) * 100;
+									const hasNoMatch = bucket.noMatchCount > 0;
+									return (
+										<div
+											key={i}
+											className="flex-1 rounded-t relative"
+											style={{
+												height: `${Math.max(height, total > 0 ? 10 : 2)}%`,
+												backgroundColor:
+													total > 0
+														? theme.colors.accent
+														: hasNoMatch
+															? '#eab30830'
+															: `${theme.colors.border}40`,
+											}}
+											title={`${bucket.label}: ${total} injection${total !== 1 ? 's' : ''}${hasNoMatch ? `, ${bucket.noMatchCount} no-match` : ''}`}
+										/>
+									);
+								})}
+							</div>
+							<div className="flex text-[9px]" style={{ color: theme.colors.textDim }}>
+								<span>{timeline[0]?.label}</span>
+								{/* Separator between today and prior days */}
+								{timeline.length > 1 && (
+									<span className="ml-auto">{timeline[timeline.length - 1]?.label}</span>
+								)}
+							</div>
+						</div>
+					)}
+
 					{/* No activity diagnostic */}
-					{loaded && injections.length === 0 && (
+					{loaded && realInjections.length === 0 && (
 						<div className="space-y-1.5">
 							<div className="text-xs" style={{ color: theme.colors.textDim }}>
 								No injection activity recorded.
@@ -534,16 +662,20 @@ function InjectionActivitySection({
 									style={{ backgroundColor: `${theme.colors.border}20` }}
 								>
 									<div className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
-										Diagnostic checklist:
+										Prerequisites checklist:
 									</div>
 									{diagnosticItems.map((item, i) => (
 										<div
 											key={i}
 											className="flex items-center gap-1.5 text-[10px]"
-											style={{ color: '#eab308' }}
+											style={{ color: item.ok ? '#22c55e' : '#eab308' }}
 										>
-											<MinusCircle className="w-3 h-3 shrink-0" />
-											{item}
+											{item.ok ? (
+												<CheckCircle2 className="w-3 h-3 shrink-0" />
+											) : (
+												<MinusCircle className="w-3 h-3 shrink-0" />
+											)}
+											{item.text}
 										</div>
 									))}
 								</div>
@@ -551,52 +683,164 @@ function InjectionActivitySection({
 						</div>
 					)}
 
-					{/* Injection event list */}
-					{loaded &&
-						injections.slice(0, 30).map((event, i) => {
-							const preview =
-								event.memoryIds.length > 0
-									? `${event.memoryIds.length} memor${event.memoryIds.length === 1 ? 'y' : 'ies'}`
-									: 'No memories';
-							const scopes = event.scopeGroups
-								.map((g) => g.scope)
-								.filter((v, idx, arr) => arr.indexOf(v) === idx)
-								.join(', ');
-							return (
-								<div
-									key={`${event.timestamp}-${i}`}
-									className="flex items-center gap-2 text-[10px] py-1 px-2 rounded"
-									style={{ backgroundColor: `${theme.colors.border}20` }}
-								>
-									<span
-										className="shrink-0 px-1.5 py-0.5 rounded font-medium"
-										style={{
-											backgroundColor: `${theme.colors.accent}20`,
-											color: theme.colors.accent,
-										}}
-									>
-										{preview}
-									</span>
-									{scopes && (
-										<span
-											className="shrink-0 px-1.5 py-0.5 rounded"
-											style={{
-												backgroundColor: `${theme.colors.border}40`,
-												color: theme.colors.textDim,
-											}}
+					{/* Injection event list with drill-down */}
+					{loaded && realInjections.length > 0 && (
+						<div className="space-y-1">
+							<div className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
+								Recent events (newest first)
+							</div>
+							{realInjections.slice(0, 30).map((event, i) => {
+								const preview =
+									event.memoryIds.length > 0
+										? `${event.memoryIds.length} memor${event.memoryIds.length === 1 ? 'y' : 'ies'}`
+										: 'No memories';
+								const scopes = event.scopeGroups
+									.map((g) => g.scope)
+									.filter((v, idx, arr) => arr.indexOf(v) === idx)
+									.join(', ');
+								const isExpanded = expandedEvent === i;
+
+								return (
+									<div key={`${event.timestamp}-${i}`}>
+										<button
+											className="w-full flex items-center gap-2 text-[10px] py-1 px-2 rounded text-left"
+											style={{ backgroundColor: `${theme.colors.border}20` }}
+											onClick={() => setExpandedEvent(isExpanded ? null : i)}
 										>
-											{scopes}
-										</span>
-									)}
-									<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
-										{event.tokenCount > 0 && `${event.tokenCount} tokens`}
-									</span>
-									<span className="ml-auto shrink-0" style={{ color: theme.colors.textDim }}>
-										{formatInjectionTime(event.timestamp)}
-									</span>
-								</div>
-							);
-						})}
+											{isExpanded ? (
+												<ChevronDown
+													className="w-2.5 h-2.5 shrink-0"
+													style={{ color: theme.colors.textDim }}
+												/>
+											) : (
+												<ChevronRight
+													className="w-2.5 h-2.5 shrink-0"
+													style={{ color: theme.colors.textDim }}
+												/>
+											)}
+											<span
+												className="shrink-0 px-1.5 py-0.5 rounded font-medium"
+												style={{
+													backgroundColor: `${theme.colors.accent}20`,
+													color: theme.colors.accent,
+												}}
+											>
+												{preview}
+											</span>
+											{scopes && (
+												<span
+													className="shrink-0 px-1.5 py-0.5 rounded"
+													style={{
+														backgroundColor: `${theme.colors.border}40`,
+														color: theme.colors.textDim,
+													}}
+												>
+													{scopes}
+												</span>
+											)}
+											<span style={{ color: theme.colors.textDim }}>
+												{event.tokenCount > 0 && `${event.tokenCount} tok`}
+											</span>
+											<span className="ml-auto shrink-0" style={{ color: theme.colors.textDim }}>
+												{formatInjectionTime(event.timestamp)}
+											</span>
+										</button>
+										{/* Drill-down details */}
+										{isExpanded && (
+											<div
+												className="ml-5 mt-1 mb-1 rounded p-2 space-y-1.5 text-[10px]"
+												style={{ backgroundColor: `${theme.colors.border}10` }}
+											>
+												{event.sessionId && (
+													<div style={{ color: theme.colors.textDim }}>
+														<span className="font-medium">Agent:</span>{' '}
+														{event.sessionId.slice(0, 12)}...
+													</div>
+												)}
+												<div style={{ color: theme.colors.textDim }}>
+													<span className="font-medium">Time:</span>{' '}
+													{new Date(event.timestamp).toLocaleString()}
+												</div>
+												{event.scopeGroups.length > 0 && (
+													<div className="space-y-0.5">
+														<div className="font-medium" style={{ color: theme.colors.textDim }}>
+															Scope breakdown:
+														</div>
+														{event.scopeGroups.map((sg, si) => (
+															<div
+																key={si}
+																className="flex items-center gap-1.5 ml-2"
+																style={{ color: theme.colors.textMain }}
+															>
+																<span
+																	className="px-1 rounded"
+																	style={{ backgroundColor: `${theme.colors.border}30` }}
+																>
+																	{sg.scope}
+																</span>
+																<span style={{ color: theme.colors.textDim }}>
+																	{sg.ids.length} memor{sg.ids.length === 1 ? 'y' : 'ies'}
+																</span>
+																{sg.skillAreaId && (
+																	<span style={{ color: theme.colors.textDim }}>
+																		(skill: {sg.skillAreaId.slice(0, 8)}...)
+																	</span>
+																)}
+																{sg.projectPath && (
+																	<span style={{ color: theme.colors.textDim }}>
+																		({sg.projectPath.split('/').pop()})
+																	</span>
+																)}
+															</div>
+														))}
+													</div>
+												)}
+												{event.memoryIds.length > 0 && (
+													<div className="space-y-0.5">
+														<div className="font-medium" style={{ color: theme.colors.textDim }}>
+															Memory IDs:
+														</div>
+														<div className="ml-2 flex flex-wrap gap-1">
+															{event.memoryIds.slice(0, 10).map((id, mi) => (
+																<span
+																	key={mi}
+																	className="px-1 rounded font-mono"
+																	style={{
+																		backgroundColor: `${theme.colors.border}30`,
+																		color: theme.colors.textDim,
+																		fontSize: '9px',
+																	}}
+																>
+																	{id.slice(0, 12)}
+																</span>
+															))}
+															{event.memoryIds.length > 10 && (
+																<span style={{ color: theme.colors.textDim }}>
+																	+{event.memoryIds.length - 10} more
+																</span>
+															)}
+														</div>
+													</div>
+												)}
+											</div>
+										)}
+									</div>
+								);
+							})}
+						</div>
+					)}
+
+					{/* No-match events summary */}
+					{loaded && noMatchCount > 0 && (
+						<div
+							className="rounded p-2 text-[10px] flex items-center gap-1.5"
+							style={{ backgroundColor: '#eab30810', color: '#eab308' }}
+						>
+							<AlertTriangle className="w-3 h-3 shrink-0" />
+							{noMatchCount} search{noMatchCount !== 1 ? 'es' : ''} returned no matching memories in
+							the last 7 days
+						</div>
+					)}
 				</div>
 			)}
 		</div>

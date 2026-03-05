@@ -565,6 +565,16 @@ export async function injectMemories(
 
 	// Nothing selected → inject persona directives if any match, else return unchanged
 	if (finalSelected.length === 0) {
+		// Record a "no match" event so the UI can surface it
+		pushInjectionEvent({
+			sessionId: '',
+			memoryIds: [],
+			tokenCount: 0,
+			timestamp: Date.now(),
+			scopeGroups: [],
+			noMatch: true,
+		});
+
 		const matchedPersonas = await store.selectMatchingPersonas(
 			effectiveQuery,
 			searchConfig,
@@ -711,7 +721,9 @@ export async function injectMemories(
 	for (const { scope, skillAreaId, ids } of byScope) {
 		store
 			.recordInjection(ids, scope, skillAreaId, scope === 'project' ? projectPath : undefined)
-			.catch(() => {});
+			.catch((err) => {
+				console.warn(`[MemoryInjector] recordInjection failed for scope=${scope}:`, err);
+			});
 	}
 
 	// Prepend XML to prompt
@@ -817,6 +829,8 @@ export interface InjectionEvent {
 	tokenCount: number;
 	timestamp: number;
 	scopeGroups: InjectionScopeGroup[];
+	/** True when cascading search returned no matching memories for the task. */
+	noMatch?: boolean;
 }
 
 const recentInjections: InjectionEvent[] = [];
