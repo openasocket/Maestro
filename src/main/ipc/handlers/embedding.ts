@@ -50,6 +50,14 @@ export function registerEmbeddingHandlers(): void {
 		})
 	);
 
+	ipcMain.handle(
+		'embedding:getOllamaModels',
+		createIpcDataHandler(handlerOpts('getOllamaModels'), async (baseUrl?: string) => {
+			const models = await embeddingRegistry.getOllamaModels(baseUrl);
+			return { models };
+		})
+	);
+
 	// Forward download/loading progress events to all renderer windows
 	embeddingRegistry.onProgress((event) => {
 		try {

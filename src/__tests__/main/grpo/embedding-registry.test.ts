@@ -163,16 +163,36 @@ describe('EmbeddingRegistry', () => {
 		});
 	});
 
-	it('should detect available providers', async () => {
-		// Mock fetch for Ollama detection
+	it('should detect available providers when embedding model is present', async () => {
 		const originalFetch = global.fetch;
-		global.fetch = vi.fn(async () => ({ ok: true }) as Response);
+		global.fetch = vi.fn(
+			async () =>
+				({
+					ok: true,
+					json: async () => ({ models: [{ name: 'nomic-embed-text:latest' }] }),
+				}) as Response
+		);
 
 		const available = await registry.detectAvailable();
 
-		// Ollama should be detected (fetch returns ok)
 		expect(available).toContain('ollama');
-		// transformers-js may or may not be available depending on environment
+
+		global.fetch = originalFetch;
+	});
+
+	it('should not detect ollama when no embedding models are present', async () => {
+		const originalFetch = global.fetch;
+		global.fetch = vi.fn(
+			async () =>
+				({
+					ok: true,
+					json: async () => ({ models: [{ name: 'llama3:latest' }] }),
+				}) as Response
+		);
+
+		const available = await registry.detectAvailable();
+
+		expect(available).not.toContain('ollama');
 
 		global.fetch = originalFetch;
 	});
@@ -232,6 +252,80 @@ describe('EmbeddingRegistry', () => {
 			await registry.activate(config);
 
 			expect(setProgressCallback).toHaveBeenCalledWith(expect.any(Function));
+		});
+	});
+
+	describe('getOllamaModels', () => {
+		it('should return embedding-capable models from Ollama', async () => {
+			const originalFetch = global.fetch;
+			global.fetch = vi.fn(
+				async () =>
+					({
+						ok: true,
+						json: async () => ({
+							models: [
+								{ name: 'nomic-embed-text:latest' },
+								{ name: 'llama3:latest' },
+								{ name: 'mxbai-embed-large:latest' },
+								{ name: 'gte-small:latest' },
+							],
+						}),
+					}) as Response
+			);
+
+			const models = await registry.getOllamaModels();
+
+			expect(models).toContain('nomic-embed-text:latest');
+			expect(models).toContain('mxbai-embed-large:latest');
+			expect(models).toContain('gte-small:latest');
+			expect(models).not.toContain('llama3:latest');
+
+			global.fetch = originalFetch;
+		});
+
+		it('should return empty array when Ollama is not running', async () => {
+			const originalFetch = global.fetch;
+			global.fetch = vi.fn(async () => {
+				throw new Error('Connection refused');
+			});
+
+			const models = await registry.getOllamaModels();
+
+			expect(models).toEqual([]);
+
+			global.fetch = originalFetch;
+		});
+
+		it('should use custom baseUrl', async () => {
+			const originalFetch = global.fetch;
+			const fetchMock = vi.fn(
+				async () =>
+					({
+						ok: true,
+						json: async () => ({ models: [{ name: 'nomic-embed-text:latest' }] }),
+					}) as Response
+			);
+			global.fetch = fetchMock;
+
+			await registry.getOllamaModels('http://remote:11434');
+
+			expect(fetchMock).toHaveBeenCalledWith(
+				'http://remote:11434/api/tags',
+				expect.objectContaining({ signal: expect.any(AbortSignal) })
+			);
+
+			global.fetch = originalFetch;
+		});
+
+		it('should return empty array when response is not ok', async () => {
+			const originalFetch = global.fetch;
+			global.fetch = vi.fn(async () => ({ ok: false }) as Response);
+
+			const models = await registry.getOllamaModels();
+
+			expect(models).toEqual([]);
+
+			global.fetch = originalFetch;
 		});
 	});
 });

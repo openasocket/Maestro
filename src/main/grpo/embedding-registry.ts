@@ -129,6 +129,16 @@ export class EmbeddingRegistry {
 		}
 	}
 
+	/** Known embedding model name patterns for Ollama auto-detection */
+	private static readonly OLLAMA_EMBEDDING_PATTERNS = [
+		'nomic-embed',
+		'gte-small',
+		'mxbai-embed',
+		'all-minilm',
+		'snowflake-arctic-embed',
+		'bge-',
+	];
+
 	/** Auto-detect available local providers */
 	async detectAvailable(): Promise<EmbeddingProviderId[]> {
 		const available: EmbeddingProviderId[] = [];
@@ -142,7 +152,7 @@ export class EmbeddingRegistry {
 			// Not available
 		}
 
-		// Check if Ollama is running
+		// Check if Ollama is running and has an embedding-capable model
 		try {
 			const controller = new AbortController();
 			const timeout = setTimeout(() => controller.abort(), 2000);
@@ -151,7 +161,13 @@ export class EmbeddingRegistry {
 			});
 			clearTimeout(timeout);
 			if (res.ok) {
-				available.push('ollama');
+				const data = (await res.json()) as { models?: { name: string }[] };
+				const hasEmbeddingModel = data.models?.some((m) =>
+					EmbeddingRegistry.OLLAMA_EMBEDDING_PATTERNS.some((pattern) => m.name.includes(pattern))
+				);
+				if (hasEmbeddingModel) {
+					available.push('ollama');
+				}
 			}
 		} catch {
 			// Ollama not running
@@ -162,6 +178,31 @@ export class EmbeddingRegistry {
 		// Callers should check config.openai?.apiKey separately
 
 		return available;
+	}
+
+	/**
+	 * Fetch available embedding-capable models from a running Ollama instance.
+	 * Returns model names that match known embedding model patterns.
+	 */
+	async getOllamaModels(baseUrl = 'http://localhost:11434'): Promise<string[]> {
+		try {
+			const controller = new AbortController();
+			const timeout = setTimeout(() => controller.abort(), 3000);
+			const res = await fetch(`${baseUrl}/api/tags`, {
+				signal: controller.signal,
+			});
+			clearTimeout(timeout);
+			if (!res.ok) return [];
+
+			const data = (await res.json()) as { models?: { name: string }[] };
+			const allModels = data.models?.map((m) => m.name) ?? [];
+
+			return allModels.filter((name) =>
+				EmbeddingRegistry.OLLAMA_EMBEDDING_PATTERNS.some((pattern) => name.includes(pattern))
+			);
+		} catch {
+			return [];
+		}
 	}
 
 	/** Get status of all registered providers */
