@@ -146,6 +146,7 @@ describe('Effectiveness Evaluation on Exit', () => {
 			contentHashes: new Map(),
 			lastInjectedAt: Date.now(),
 			totalTokensSaved: 0,
+			injectionEvents: [],
 		});
 
 		setup();
@@ -196,6 +197,7 @@ describe('Effectiveness Evaluation on Exit', () => {
 			contentHashes: new Map(),
 			lastInjectedAt: Date.now(),
 			totalTokensSaved: 0,
+			injectionEvents: [],
 		});
 
 		setup();
@@ -236,6 +238,7 @@ describe('Effectiveness Evaluation on Exit', () => {
 			contentHashes: new Map(),
 			lastInjectedAt: Date.now(),
 			totalTokensSaved: 0,
+			injectionEvents: [],
 		});
 
 		setup();

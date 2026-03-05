@@ -201,7 +201,9 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 								result.injectedIds,
 								result.scopeGroups,
 								undefined,
-								result.contentHashes
+								result.contentHashes,
+								'spawn',
+								0
 							);
 
 							// First-injection notification (MEM-EVOLVE-01)

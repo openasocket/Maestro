@@ -5,11 +5,13 @@
  * Takes a session's injection record and outcome signals, then computes
  * an EffectivenessUpdate[] that can be fed to store.updateEffectiveness().
  *
- * This class encapsulates the scoring logic separately from the wiring
- * (which lives in memory-monitor-listener.ts and memory-effectiveness.ts).
+ * When per-injection events are available (injectionEvents[]), memories
+ * injected early in a successful session get higher scores than memories
+ * injected late (recency bias adjustment). Without events, falls back to
+ * uniform scoring for backward compatibility.
  */
 
-import type { MemoryId, MemoryScope, SkillAreaId } from '../../shared/memory-types';
+import type { MemoryId, MemoryScope, SkillAreaId, InjectionEvent } from '../../shared/memory-types';
 import type { SessionOutcomeSignals, EffectivenessUpdate } from '../../shared/memory-types';
 import type { InjectionRecord } from './memory-injector';
 
@@ -22,19 +24,12 @@ export class EffectivenessEvaluator {
 	 * Evaluate a session's outcome and produce effectiveness updates for each
 	 * injected memory, grouped by scope.
 	 *
-	 * The outcome score is computed from SessionOutcomeSignals using additive
-	 * positive/negative signals, clamped to [0.0, 1.0]:
+	 * When injectionEvents are present, applies per-injection scoring:
+	 * - Memories injected at spawn (turn 0) get the full outcome score
+	 * - Memories injected later get a recency-discounted score
+	 * - The discount is proportional to how late in the session the injection occurred
 	 *
-	 * Positive:
-	 *   +0.3 session completed without errors
-	 *   +0.2 agent completed task (not cancelled)
-	 *   +0.1 low context utilization at end (<70%)
-	 *   +0.2 git diff produced (actual code changes)
-	 *
-	 * Negative:
-	 *   -0.3 repeated errors (errorCount > resolvedErrorCount)
-	 *   -0.1 session abandoned/cancelled
-	 *   -0.1 very high context usage (>90%)
+	 * Without injectionEvents, all memories get the uniform session score.
 	 */
 	evaluateSession(
 		sessionId: string,
@@ -43,13 +38,68 @@ export class EffectivenessEvaluator {
 	): EffectivenessUpdate[] {
 		if (injectionRecord.ids.length === 0) return [];
 
-		const outcomeScore = this.computeOutcomeScore(sessionSignals);
-		const updates: EffectivenessUpdate[] = [];
-
-		// Produce one update per memory, using the scope from its group
+		const baseScore = this.computeOutcomeScore(sessionSignals);
 		const memoryScopes = this.buildMemoryScopeMap(injectionRecord);
 
+		// If we have per-injection events, use granular scoring
+		if (injectionRecord.injectionEvents && injectionRecord.injectionEvents.length > 0) {
+			return this.evaluateWithEvents(
+				injectionRecord.injectionEvents,
+				baseScore,
+				sessionSignals.turnCount,
+				memoryScopes
+			);
+		}
+
+		// Fallback: uniform scoring for all memories
+		const updates: EffectivenessUpdate[] = [];
 		for (const memoryId of injectionRecord.ids) {
+			const scopeInfo = memoryScopes.get(memoryId);
+			updates.push({
+				memoryId,
+				outcomeScore: baseScore,
+				scope: scopeInfo?.scope ?? 'global',
+				skillAreaId: scopeInfo?.skillAreaId,
+			});
+		}
+		return updates;
+	}
+
+	/**
+	 * Per-injection granular scoring. Each injection event gets a score based on:
+	 * - The base session outcome score
+	 * - A recency multiplier: spawn-time injections get full credit, later ones less
+	 *
+	 * Recency multiplier: 1.0 at turn 0, linearly decreasing to 0.5 at the last turn.
+	 * This means late injections can still score well (50% of base) but early ones
+	 * that "set the stage" for success are rewarded more.
+	 *
+	 * Deduplication: if a memory appears in multiple injection events, the highest
+	 * score wins (it was injected at the most favorable time).
+	 */
+	private evaluateWithEvents(
+		events: InjectionEvent[],
+		baseScore: number,
+		totalTurns: number,
+		memoryScopes: Map<MemoryId, { scope: MemoryScope; skillAreaId?: SkillAreaId }>
+	): EffectivenessUpdate[] {
+		// Map memoryId → best (highest) score across all injection events
+		const bestScores = new Map<MemoryId, number>();
+
+		for (const event of events) {
+			const multiplier = this.computeRecencyMultiplier(event.turnIndex, totalTurns);
+			const eventScore = Math.max(0, Math.min(1, baseScore * multiplier));
+
+			for (const memoryId of event.memoryIds) {
+				const existing = bestScores.get(memoryId) ?? -1;
+				if (eventScore > existing) {
+					bestScores.set(memoryId, eventScore);
+				}
+			}
+		}
+
+		const updates: EffectivenessUpdate[] = [];
+		for (const [memoryId, outcomeScore] of bestScores) {
 			const scopeInfo = memoryScopes.get(memoryId);
 			updates.push({
 				memoryId,
@@ -60,6 +110,18 @@ export class EffectivenessEvaluator {
 		}
 
 		return updates;
+	}
+
+	/**
+	 * Compute the recency multiplier for an injection at a given turn.
+	 * Linear decay from 1.0 (turn 0) to 0.5 (last turn).
+	 * If totalTurns is 0 or 1, returns 1.0 (no decay).
+	 */
+	computeRecencyMultiplier(injectionTurn: number, totalTurns: number): number {
+		if (totalTurns <= 1) return 1.0;
+		const progress = Math.min(injectionTurn / totalTurns, 1.0);
+		// Linear: 1.0 → 0.5
+		return 1.0 - progress * 0.5;
 	}
 
 	/**

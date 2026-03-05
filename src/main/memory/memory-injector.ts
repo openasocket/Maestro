@@ -14,6 +14,8 @@ import type {
 	MemoryScope,
 	SkillAreaId,
 	InjectionScopeGroup,
+	InjectionEvent,
+	InjectionTrigger,
 } from '../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../shared/memory-types';
 import { getMemoryStore } from './memory-store';
@@ -1060,6 +1062,8 @@ export interface InjectionRecord {
 	lastInjectedAt: number;
 	/** Accumulated token savings from diff injections */
 	totalTokensSaved: number;
+	/** Per-injection event log for granular effectiveness scoring (MEM-EVOLVE-04) */
+	injectionEvents: InjectionEvent[];
 }
 
 /**
@@ -1091,7 +1095,9 @@ export function recordSessionInjection(
 	memoryIds: MemoryId[],
 	scopeGroups?: InjectionScopeRecord[],
 	searchResults?: MemorySearchResult[],
-	precomputedHashes?: Map<MemoryId, string>
+	precomputedHashes?: Map<MemoryId, string>,
+	trigger?: InjectionTrigger,
+	turnIndex?: number
 ): void {
 	let contentHashes: Map<MemoryId, string>;
 	if (precomputedHashes && precomputedHashes.size > 0) {
@@ -1106,12 +1112,23 @@ export function recordSessionInjection(
 	}
 
 	const existing = _sessionInjections.get(sessionId);
+
+	// Append a new injection event for per-injection tracking (MEM-EVOLVE-04)
+	const newEvent: InjectionEvent = {
+		memoryIds: [...memoryIds],
+		injectedAt: Date.now(),
+		turnIndex: turnIndex ?? 0,
+		trigger: trigger ?? 'spawn',
+	};
+	const previousEvents = existing?.injectionEvents ?? [];
+
 	_sessionInjections.set(sessionId, {
 		ids: memoryIds,
 		scopeGroups: scopeGroups ?? [],
 		contentHashes,
 		lastInjectedAt: Date.now(),
 		totalTokensSaved: existing?.totalTokensSaved ?? 0,
+		injectionEvents: [...previousEvents, newEvent],
 	});
 
 	// Register spawn-time IDs with live context queue for dedup (EXP-LIVE-01).

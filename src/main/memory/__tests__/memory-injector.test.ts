@@ -828,6 +828,90 @@ describe('MemoryInjector', () => {
 			});
 		});
 
+		describe('recordSessionInjection with injection events (MEM-EVOLVE-04)', () => {
+			it('stores trigger and turnIndex as injection event', () => {
+				recordSessionInjection(
+					'sess-evt-1',
+					['mem-1', 'mem-2'],
+					[],
+					undefined,
+					undefined,
+					'spawn',
+					0
+				);
+				const record = getInjectionRecord('sess-evt-1');
+				expect(record!.injectionEvents).toHaveLength(1);
+				expect(record!.injectionEvents[0].trigger).toBe('spawn');
+				expect(record!.injectionEvents[0].turnIndex).toBe(0);
+				expect(record!.injectionEvents[0].memoryIds).toEqual(['mem-1', 'mem-2']);
+				expect(record!.injectionEvents[0].injectedAt).toBeGreaterThan(0);
+				clearSessionInjection('sess-evt-1');
+			});
+
+			it('defaults trigger to spawn and turnIndex to 0', () => {
+				recordSessionInjection('sess-evt-2', ['mem-1']);
+				const record = getInjectionRecord('sess-evt-2');
+				expect(record!.injectionEvents).toHaveLength(1);
+				expect(record!.injectionEvents[0].trigger).toBe('spawn');
+				expect(record!.injectionEvents[0].turnIndex).toBe(0);
+				clearSessionInjection('sess-evt-2');
+			});
+
+			it('accumulates injection events across multiple calls', () => {
+				recordSessionInjection('sess-evt-3', ['mem-1'], [], undefined, undefined, 'spawn', 0);
+				recordSessionInjection(
+					'sess-evt-3',
+					['mem-1', 'mem-2'],
+					[],
+					undefined,
+					undefined,
+					'checkpoint',
+					5
+				);
+				recordSessionInjection(
+					'sess-evt-3',
+					['mem-1', 'mem-3'],
+					[],
+					undefined,
+					undefined,
+					'live',
+					8
+				);
+
+				const record = getInjectionRecord('sess-evt-3');
+				expect(record!.injectionEvents).toHaveLength(3);
+				expect(record!.injectionEvents[0].trigger).toBe('spawn');
+				expect(record!.injectionEvents[0].turnIndex).toBe(0);
+				expect(record!.injectionEvents[1].trigger).toBe('checkpoint');
+				expect(record!.injectionEvents[1].turnIndex).toBe(5);
+				expect(record!.injectionEvents[2].trigger).toBe('live');
+				expect(record!.injectionEvents[2].turnIndex).toBe(8);
+				clearSessionInjection('sess-evt-3');
+			});
+
+			it('preserves previous events when overwriting IDs', () => {
+				recordSessionInjection('sess-evt-4', ['old-mem'], [], undefined, undefined, 'spawn', 0);
+				recordSessionInjection(
+					'sess-evt-4',
+					['new-mem'],
+					[],
+					undefined,
+					undefined,
+					'checkpoint',
+					3
+				);
+
+				const record = getInjectionRecord('sess-evt-4');
+				// IDs are overwritten
+				expect(record!.ids).toEqual(['new-mem']);
+				// But events accumulate
+				expect(record!.injectionEvents).toHaveLength(2);
+				expect(record!.injectionEvents[0].memoryIds).toEqual(['old-mem']);
+				expect(record!.injectionEvents[1].memoryIds).toEqual(['new-mem']);
+				clearSessionInjection('sess-evt-4');
+			});
+		});
+
 		describe('generateDiffInjection', () => {
 			function makePrevRecord(ids: string[], contents: string[]): InjectionRecord {
 				const contentHashes = new Map<string, string>();
@@ -840,6 +924,7 @@ describe('MemoryInjector', () => {
 					contentHashes,
 					lastInjectedAt: Date.now(),
 					totalTokensSaved: 0,
+					injectionEvents: [],
 				};
 			}
 

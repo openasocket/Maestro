@@ -644,6 +644,27 @@ export interface InjectionScopeGroup {
 	ids: MemoryId[];
 }
 
+// ─── Per-Injection Event Tracking (MEM-EVOLVE-04) ─────────────────────────
+
+/** Trigger type that caused an injection event */
+export type InjectionTrigger = 'spawn' | 'checkpoint' | 'periodic' | 'live';
+
+/**
+ * A single injection event within a session. Each call to recordSessionInjection
+ * appends one of these, allowing per-injection effectiveness scoring rather than
+ * uniform per-session scoring.
+ */
+export interface InjectionEvent {
+	/** Which memories were injected in this event */
+	memoryIds: MemoryId[];
+	/** Timestamp when injection occurred */
+	injectedAt: number;
+	/** Which turn the injection happened at (spawn = 0) */
+	turnIndex: number;
+	/** What triggered this injection */
+	trigger: InjectionTrigger;
+}
+
 // ─── Session Outcome Signals (MEM-EVOLVE-04) ─────────────────────────────
 
 /**

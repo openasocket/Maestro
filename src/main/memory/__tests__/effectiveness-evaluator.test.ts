@@ -34,6 +34,7 @@ function makeRecord(overrides: Partial<InjectionRecord> = {}): InjectionRecord {
 		contentHashes: new Map(),
 		lastInjectedAt: Date.now(),
 		totalTokensSaved: 0,
+		injectionEvents: [],
 		...overrides,
 	};
 }
@@ -202,10 +203,11 @@ describe('EffectivenessEvaluator', () => {
 			expect(updates[0].scope).toBe('global');
 		});
 
-		it('applies same outcome score to all memories in a session', () => {
+		it('applies same outcome score to all memories when no injection events', () => {
 			const record = makeRecord({
 				ids: ['a', 'b', 'c'],
 				scopeGroups: [{ scope: 'global', ids: ['a', 'b', 'c'] }],
+				injectionEvents: [],
 			});
 			const signals = makeSignals({
 				completed: true,
@@ -236,6 +238,143 @@ describe('EffectivenessEvaluator', () => {
 
 			expect(updates).toHaveLength(1);
 			expect(updates[0].outcomeScore).toBe(0.0);
+		});
+	});
+
+	// ─── Per-injection tracking (MEM-EVOLVE-04) ──────────────────────────
+
+	describe('per-injection granular scoring', () => {
+		it('gives spawn-time memories full score and late memories discounted score', () => {
+			const record = makeRecord({
+				ids: ['early', 'late'],
+				scopeGroups: [{ scope: 'global', ids: ['early', 'late'] }],
+				injectionEvents: [
+					{ memoryIds: ['early'], injectedAt: 1000, turnIndex: 0, trigger: 'spawn' },
+					{ memoryIds: ['late'], injectedAt: 5000, turnIndex: 8, trigger: 'checkpoint' },
+				],
+			});
+			const signals = makeSignals({
+				completed: true,
+				errorCount: 0,
+				gitDiffProduced: true,
+				contextUtilization: 0.5,
+				turnCount: 10,
+			});
+			const updates = evaluator.evaluateSession('sess-1', record, signals);
+
+			const earlyUpdate = updates.find((u) => u.memoryId === 'early')!;
+			const lateUpdate = updates.find((u) => u.memoryId === 'late')!;
+
+			// Early (turn 0): multiplier=1.0, score=0.8
+			expect(earlyUpdate.outcomeScore).toBe(0.8);
+			// Late (turn 8/10): multiplier=1.0 - 0.8*0.5 = 0.6, score=0.8*0.6=0.48
+			expect(lateUpdate.outcomeScore).toBeCloseTo(0.48, 2);
+			expect(earlyUpdate.outcomeScore).toBeGreaterThan(lateUpdate.outcomeScore);
+		});
+
+		it('uses highest score when a memory appears in multiple events', () => {
+			const record = makeRecord({
+				ids: ['reinjected'],
+				scopeGroups: [{ scope: 'global', ids: ['reinjected'] }],
+				injectionEvents: [
+					{ memoryIds: ['reinjected'], injectedAt: 1000, turnIndex: 0, trigger: 'spawn' },
+					{ memoryIds: ['reinjected'], injectedAt: 5000, turnIndex: 5, trigger: 'live' },
+				],
+			});
+			const signals = makeSignals({
+				completed: true,
+				errorCount: 0,
+				contextUtilization: 0.5,
+				turnCount: 10,
+			});
+			const updates = evaluator.evaluateSession('sess-1', record, signals);
+
+			expect(updates).toHaveLength(1);
+			// Should use the spawn-time score (turn 0 → multiplier 1.0)
+			// Base: +0.3 +0.2 +0.1 = 0.6
+			expect(updates[0].outcomeScore).toBe(0.6);
+		});
+
+		it('handles single-turn sessions (no recency decay)', () => {
+			const record = makeRecord({
+				ids: ['only'],
+				scopeGroups: [{ scope: 'global', ids: ['only'] }],
+				injectionEvents: [
+					{ memoryIds: ['only'], injectedAt: 1000, turnIndex: 0, trigger: 'spawn' },
+				],
+			});
+			const signals = makeSignals({ turnCount: 1 });
+			const updates = evaluator.evaluateSession('sess-1', record, signals);
+
+			// Multiplier should be 1.0 for single-turn
+			const baseScore = evaluator.computeOutcomeScore(signals);
+			expect(updates[0].outcomeScore).toBe(baseScore);
+		});
+
+		it('assigns correct scopes from scope groups in per-injection mode', () => {
+			const record = makeRecord({
+				ids: ['mem-g', 'mem-s'],
+				scopeGroups: [
+					{ scope: 'global', ids: ['mem-g'] },
+					{ scope: 'skill', skillAreaId: 'rust', ids: ['mem-s'] },
+				],
+				injectionEvents: [
+					{ memoryIds: ['mem-g', 'mem-s'], injectedAt: 1000, turnIndex: 0, trigger: 'spawn' },
+				],
+			});
+			const signals = makeSignals({ turnCount: 5 });
+			const updates = evaluator.evaluateSession('sess-1', record, signals);
+
+			const globalMem = updates.find((u) => u.memoryId === 'mem-g')!;
+			const skillMem = updates.find((u) => u.memoryId === 'mem-s')!;
+
+			expect(globalMem.scope).toBe('global');
+			expect(skillMem.scope).toBe('skill');
+			expect(skillMem.skillAreaId).toBe('rust');
+		});
+
+		it('mid-session injection at turn 5 of 10 gets 0.75x multiplier', () => {
+			const multiplier = evaluator.computeRecencyMultiplier(5, 10);
+			expect(multiplier).toBeCloseTo(0.75, 2);
+		});
+
+		it('last-turn injection gets 0.5x multiplier', () => {
+			const multiplier = evaluator.computeRecencyMultiplier(10, 10);
+			expect(multiplier).toBeCloseTo(0.5, 2);
+		});
+
+		it('zero-turn sessions return 1.0 multiplier', () => {
+			expect(evaluator.computeRecencyMultiplier(0, 0)).toBe(1.0);
+		});
+	});
+
+	// ─── computeRecencyMultiplier ────────────────────────────────────────
+
+	describe('computeRecencyMultiplier', () => {
+		it('returns 1.0 for turn 0', () => {
+			expect(evaluator.computeRecencyMultiplier(0, 10)).toBe(1.0);
+		});
+
+		it('returns 0.5 for injection at the last turn', () => {
+			expect(evaluator.computeRecencyMultiplier(10, 10)).toBeCloseTo(0.5);
+		});
+
+		it('decays linearly between 1.0 and 0.5', () => {
+			expect(evaluator.computeRecencyMultiplier(5, 10)).toBeCloseTo(0.75);
+			expect(evaluator.computeRecencyMultiplier(2, 10)).toBeCloseTo(0.9);
+		});
+
+		it('returns 1.0 when totalTurns is 0', () => {
+			expect(evaluator.computeRecencyMultiplier(0, 0)).toBe(1.0);
+		});
+
+		it('returns 1.0 when totalTurns is 1', () => {
+			expect(evaluator.computeRecencyMultiplier(0, 1)).toBe(1.0);
+		});
+
+		it('clamps injectionTurn to totalTurns', () => {
+			// If somehow injection turn exceeds total, multiplier should be 0.5 (minimum)
+			expect(evaluator.computeRecencyMultiplier(20, 10)).toBeCloseTo(0.5);
 		});
 	});
 });

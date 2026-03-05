@@ -137,6 +137,7 @@ export interface InjectorAccessor {
 				contentHashes: Map<string, string>;
 				lastInjectedAt: number;
 				totalTokensSaved: number;
+				injectionEvents: import('../../shared/memory-types').InjectionEvent[];
 		  }
 		| undefined;
 	generateDiffInjection: (
@@ -155,7 +156,9 @@ export interface InjectorAccessor {
 		memoryIds: string[],
 		scopeGroups?: any[],
 		searchResults?: any[],
-		precomputedHashes?: Map<string, string>
+		precomputedHashes?: Map<string, string>,
+		trigger?: import('../../shared/memory-types').InjectionTrigger,
+		turnIndex?: number
 	) => void;
 	hashContent: (content: string) => string;
 }
@@ -616,7 +619,10 @@ export function setupMemoryMonitorListener(
 						state.sessionId,
 						mergedIds,
 						previousRecord.scopeGroups,
-						topResults
+						topResults,
+						undefined,
+						'live',
+						state.turnIndex
 					);
 				} else {
 					// First mid-session injection — full format
@@ -628,7 +634,15 @@ export function setupMemoryMonitorListener(
 
 					// Record for future diff comparisons
 					if (injector) {
-						injector.recordSessionInjection(state.sessionId, memoryIds, [], topResults);
+						injector.recordSessionInjection(
+							state.sessionId,
+							memoryIds,
+							[],
+							topResults,
+							undefined,
+							'live',
+							state.turnIndex
+						);
 					}
 				}
 
@@ -783,7 +797,10 @@ export function setupMemoryMonitorListener(
 						state.sessionId,
 						mergedIds,
 						previousRecord.scopeGroups,
-						topResults
+						topResults,
+						undefined,
+						'checkpoint',
+						state.turnIndex
 					);
 				} else {
 					const lines = topResults.map(
@@ -793,7 +810,15 @@ export function setupMemoryMonitorListener(
 					tokenEstimate = Math.ceil(content.length / 4);
 
 					if (injector) {
-						injector.recordSessionInjection(state.sessionId, memoryIds, [], topResults);
+						injector.recordSessionInjection(
+							state.sessionId,
+							memoryIds,
+							[],
+							topResults,
+							undefined,
+							'checkpoint',
+							state.turnIndex
+						);
 					}
 				}
 
