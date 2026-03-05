@@ -2652,6 +2652,212 @@ describe('ExperienceAnalyzer', () => {
 		});
 	});
 
+	// ─── Extraction Depth Backwards Compatibility ──────────────────────
+
+	describe('extractionDepth backwards compatibility', () => {
+		afterEach(() => {
+			fsState.delete(configPath);
+		});
+
+		it('uses gatherSessionData (standard) by default when extractionDepth is not set', async () => {
+			fsState.set(configPath, JSON.stringify({ enableExperienceExtraction: true }));
+			const entries = Array.from({ length: 30 }, (_, i) => ({
+				id: `${i}`,
+				summary: `Step ${i}`,
+				fullResponse: 'x'.repeat(1000),
+				type: 'prompt',
+			}));
+			mockGetEntries.mockReturnValue(entries);
+			mockExecFile.mockRejectedValue(new Error('not available'));
+
+			const gatherStandardSpy = vi.spyOn(analyzer, 'gatherSessionData');
+			const gatherRichSpy = vi.spyOn(analyzer, 'gatherRichSessionData');
+			const gatherMinimalSpy = vi.spyOn(analyzer, 'gatherMinimalSessionData');
+
+			await analyzer.analyzeCompletedSession('sess-compat-1', '/project-compat-1', 'claude-code');
+
+			expect(gatherStandardSpy).toHaveBeenCalled();
+			expect(gatherRichSpy).not.toHaveBeenCalled();
+			expect(gatherMinimalSpy).not.toHaveBeenCalled();
+
+			gatherStandardSpy.mockRestore();
+			gatherRichSpy.mockRestore();
+			gatherMinimalSpy.mockRestore();
+		});
+
+		it('uses gatherSessionData when extractionDepth is "standard"', async () => {
+			fsState.set(
+				configPath,
+				JSON.stringify({ enableExperienceExtraction: true, extractionDepth: 'standard' })
+			);
+			const entries = Array.from({ length: 5 }, (_, i) => ({
+				id: `${i}`,
+				summary: `Step ${i}`,
+				type: 'prompt',
+			}));
+			mockGetEntries.mockReturnValue(entries);
+			mockExecFile.mockRejectedValue(new Error('not available'));
+
+			const gatherStandardSpy = vi.spyOn(analyzer, 'gatherSessionData');
+			const gatherRichSpy = vi.spyOn(analyzer, 'gatherRichSessionData');
+			const gatherMinimalSpy = vi.spyOn(analyzer, 'gatherMinimalSessionData');
+
+			await analyzer.analyzeCompletedSession('sess-compat-2', '/project-compat-2', 'claude-code');
+
+			expect(gatherStandardSpy).toHaveBeenCalled();
+			expect(gatherRichSpy).not.toHaveBeenCalled();
+			expect(gatherMinimalSpy).not.toHaveBeenCalled();
+
+			gatherStandardSpy.mockRestore();
+			gatherRichSpy.mockRestore();
+			gatherMinimalSpy.mockRestore();
+		});
+
+		it('uses gatherRichSessionData when extractionDepth is "rich"', async () => {
+			fsState.set(
+				configPath,
+				JSON.stringify({
+					enableExperienceExtraction: true,
+					extractionDepth: 'rich',
+					_configVersion: 1,
+				})
+			);
+			const entries = Array.from({ length: 5 }, (_, i) => ({
+				id: `${i}`,
+				summary: `Step ${i}`,
+				type: 'prompt',
+			}));
+			mockGetEntries.mockReturnValue(entries);
+			mockExecFile.mockRejectedValue(new Error('not available'));
+
+			const gatherStandardSpy = vi.spyOn(analyzer, 'gatherSessionData');
+			const gatherRichSpy = vi.spyOn(analyzer, 'gatherRichSessionData');
+			const gatherMinimalSpy = vi.spyOn(analyzer, 'gatherMinimalSessionData');
+
+			await analyzer.analyzeCompletedSession('sess-compat-3', '/project-compat-3', 'claude-code');
+
+			expect(gatherRichSpy).toHaveBeenCalled();
+			expect(gatherStandardSpy).not.toHaveBeenCalled();
+			expect(gatherMinimalSpy).not.toHaveBeenCalled();
+
+			gatherStandardSpy.mockRestore();
+			gatherRichSpy.mockRestore();
+			gatherMinimalSpy.mockRestore();
+		});
+
+		it('uses gatherMinimalSessionData when extractionDepth is "minimal"', async () => {
+			fsState.set(
+				configPath,
+				JSON.stringify({
+					enableExperienceExtraction: true,
+					extractionDepth: 'minimal',
+					_configVersion: 1,
+				})
+			);
+			const entries = Array.from({ length: 5 }, (_, i) => ({
+				id: `${i}`,
+				summary: `Step ${i}`,
+				type: 'prompt',
+			}));
+			mockGetEntries.mockReturnValue(entries);
+			mockExecFile.mockRejectedValue(new Error('not available'));
+
+			const gatherStandardSpy = vi.spyOn(analyzer, 'gatherSessionData');
+			const gatherRichSpy = vi.spyOn(analyzer, 'gatherRichSessionData');
+			const gatherMinimalSpy = vi.spyOn(analyzer, 'gatherMinimalSessionData');
+
+			await analyzer.analyzeCompletedSession('sess-compat-4', '/project-compat-4', 'claude-code');
+
+			expect(gatherMinimalSpy).toHaveBeenCalled();
+			expect(gatherStandardSpy).not.toHaveBeenCalled();
+			expect(gatherRichSpy).not.toHaveBeenCalled();
+
+			gatherStandardSpy.mockRestore();
+			gatherRichSpy.mockRestore();
+			gatherMinimalSpy.mockRestore();
+		});
+
+		it('standard gatherSessionData truncates fullResponse to 500 and limits to 20 entries', async () => {
+			const entries = Array.from({ length: 30 }, (_, i) => ({
+				id: `${i}`,
+				summary: `Step ${i}`,
+				fullResponse: 'x'.repeat(1000),
+				type: 'prompt',
+			}));
+			mockGetEntries.mockReturnValue(entries);
+			mockExecFile.mockRejectedValue(new Error('not a git repo'));
+
+			const input = await analyzer.gatherSessionData('sess-std', '/project', 'claude-code');
+
+			expect(input.historyEntries).toHaveLength(20);
+			expect(input.historyEntries[0].fullResponse).toHaveLength(500);
+		});
+
+		it('rich gatherRichSessionData includes all entries with 2000-char fullResponse', async () => {
+			const entries = Array.from({ length: 30 }, (_, i) => ({
+				id: `${i}`,
+				summary: `Step ${i}`,
+				fullResponse: 'x'.repeat(3000),
+				type: 'prompt',
+			}));
+			mockGetEntries.mockReturnValue(entries);
+			mockExecFile.mockRejectedValue(new Error('not a git repo'));
+
+			const input = await analyzer.gatherRichSessionData('sess-rich', '/project', 'claude-code');
+
+			expect(input.historyEntries).toHaveLength(30);
+			expect(input.historyEntries[0].fullResponse).toHaveLength(2000);
+		});
+
+		it('minimal gatherMinimalSessionData excludes fullResponse and VIBES data', async () => {
+			const entries = Array.from({ length: 5 }, (_, i) => ({
+				id: `${i}`,
+				summary: `Step ${i}`,
+				fullResponse: 'should be excluded',
+				type: 'prompt',
+			}));
+			mockGetEntries.mockReturnValue(entries);
+			mockExecFile.mockRejectedValue(new Error('not a git repo'));
+
+			const input = await analyzer.gatherMinimalSessionData('sess-min', '/project', 'claude-code');
+
+			// Minimal mode: no fullResponse, no VIBES, no git diff
+			for (const entry of input.historyEntries) {
+				expect(entry.fullResponse).toBeUndefined();
+			}
+			expect(input.vibesManifest).toBeUndefined();
+			expect(input.gitDiff).toBeUndefined();
+		});
+
+		it('compilePrompt works with minimal input (no optional fields)', () => {
+			const minimalInput: ExperienceAnalyzerInput = {
+				sessionId: 'sess-min-prompt',
+				agentType: 'claude-code',
+				projectPath: '/project',
+				historyEntries: [{ summary: 'Did something' }],
+			};
+
+			const prompt = analyzer.compilePrompt(minimalInput);
+			expect(prompt).toContain('Did something');
+			expect(prompt).not.toContain('## Tool Execution Sequence');
+		});
+
+		it('compilePrompt includes tool execution sequence when present', () => {
+			const richInput: ExperienceAnalyzerInput = {
+				sessionId: 'sess-rich-prompt',
+				agentType: 'claude-code',
+				projectPath: '/project',
+				historyEntries: [{ summary: 'Fixed a bug' }],
+				toolExecutionLog: 'Turn 1:\n  Agent: Read src/main.ts\n  Agent: Edit src/main.ts',
+			};
+
+			const prompt = analyzer.compilePrompt(richInput);
+			expect(prompt).toContain('## Tool Execution Sequence');
+			expect(prompt).toContain('Turn 1:');
+			expect(prompt).toContain('Read src/main.ts');
+		});
+	});
+
 	// ─── Decision Provenance ─────────────────────────────────────────────
 
 	describe('gatherDecisionProvenance', () => {
