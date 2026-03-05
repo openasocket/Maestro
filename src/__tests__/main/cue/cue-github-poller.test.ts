@@ -502,7 +502,7 @@ describe('cue-github-poller', () => {
 			'pr list': JSON.stringify(samplePRs),
 		});
 
-		createCueGitHubPoller(config);
+		const cleanup = createCueGitHubPoller(config);
 
 		// At 0ms, nothing should have happened
 		expect(mockExecFile).not.toHaveBeenCalled();
@@ -514,6 +514,8 @@ describe('cue-github-poller', () => {
 		// At 2000ms, poll starts
 		await vi.advanceTimersByTimeAsync(1);
 		expect(mockExecFile).toHaveBeenCalled();
+
+		cleanup();
 	});
 
 	it('poll interval — subsequent polls at configured interval', async () => {

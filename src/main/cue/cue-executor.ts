@@ -204,7 +204,28 @@ export async function executeCuePrompt(config: CueExecutionConfig): Promise<CueR
 	let spawnEnvVars = effectiveEnvVars;
 	let prompt: string | undefined = substitutedPrompt;
 
-	if (sshRemoteConfig?.enabled && sshStore) {
+	let sendPromptViaStdin = false;
+
+	if (sshRemoteConfig?.enabled) {
+		if (!sshStore) {
+			const message = `SSH is enabled for session "${session.name}" but SSH settings store is unavailable`;
+			onLog('error', message);
+			return {
+				runId,
+				sessionId: session.id,
+				sessionName: session.name,
+				subscriptionName: subscription.name,
+				event,
+				status: 'failed',
+				stdout: '',
+				stderr: message,
+				exitCode: null,
+				durationMs: Date.now() - startTime,
+				startedAt,
+				endedAt: new Date().toISOString(),
+			};
+		}
+
 		const sshWrapConfig: SshSpawnWrapConfig = {
 			command,
 			args: finalArgs,
@@ -222,6 +243,7 @@ export async function executeCuePrompt(config: CueExecutionConfig): Promise<CueR
 		spawnCwd = sshResult.cwd;
 		spawnEnvVars = sshResult.customEnvVars;
 		prompt = sshResult.prompt;
+		sendPromptViaStdin = Boolean(sshResult.prompt);
 
 		if (sshResult.sshRemoteUsed) {
 			onLog(
@@ -306,7 +328,7 @@ export async function executeCuePrompt(config: CueExecutionConfig): Promise<CueR
 		// For agents with promptArgs (like OpenCode -p), the prompt is in the args
 		// For others (like Claude --print), if prompt was passed via args separator, skip stdin
 		// When SSH wrapping returns a prompt, it means "send via stdin"
-		if (prompt && sshRemoteConfig?.enabled) {
+		if (prompt && sendPromptViaStdin) {
 			// SSH large prompt mode — send via stdin
 			child.stdin?.write(prompt);
 			child.stdin?.end();
@@ -351,9 +373,9 @@ export function stopCueRun(runId: string): boolean {
 
 	child.kill('SIGTERM');
 
-	// Escalate to SIGKILL after delay
+	// Escalate to SIGKILL after delay if process hasn't exited
 	setTimeout(() => {
-		if (!child.killed) {
+		if (child.exitCode === null && child.signalCode === null) {
 			child.kill('SIGKILL');
 		}
 	}, SIGKILL_DELAY_MS);

@@ -97,10 +97,9 @@ import { AutoRunSetupModal } from './AutoRunSetupModal';
 import { LightboxModal } from './LightboxModal';
 
 // Group Chat Modal Components
-import { NewGroupChatModal } from './NewGroupChatModal';
+import { GroupChatModal } from './GroupChatModal';
 import { DeleteGroupChatModal } from './DeleteGroupChatModal';
 import { RenameGroupChatModal } from './RenameGroupChatModal';
-import { EditGroupChatModal } from './EditGroupChatModal';
 import { GroupChatInfoOverlay } from './GroupChatInfoOverlay';
 
 // Agent/Transfer Modal Components
@@ -1494,7 +1493,8 @@ export const AppGroupChatModals = memo(function AppGroupChatModals({
 		<>
 			{/* --- NEW GROUP CHAT MODAL --- */}
 			{showNewGroupChatModal && (
-				<NewGroupChatModal
+				<GroupChatModal
+					mode="create"
 					theme={theme}
 					isOpen={showNewGroupChatModal}
 					onClose={onCloseNewGroupChatModal}
@@ -1526,7 +1526,8 @@ export const AppGroupChatModals = memo(function AppGroupChatModals({
 
 			{/* --- EDIT GROUP CHAT MODAL --- */}
 			{showEditGroupChatModal && (
-				<EditGroupChatModal
+				<GroupChatModal
+					mode="edit"
 					theme={theme}
 					isOpen={!!showEditGroupChatModal}
 					groupChat={editGroupChat || null}
@@ -1591,6 +1592,8 @@ export interface AppAgentModalsProps {
 
 	// AgentErrorModal (for individual agents)
 	errorSession: Session | null | undefined;
+	/** The effective error to display — live or historical from chat log */
+	effectiveAgentError: AgentError | null;
 	recoveryActions: RecoveryAction[];
 	onDismissAgentError: () => void;
 
@@ -1648,6 +1651,7 @@ export const AppAgentModals = memo(function AppAgentModals({
 	onSyncAutoRunStats,
 	// AgentErrorModal (for individual agents)
 	errorSession,
+	effectiveAgentError,
 	recoveryActions,
 	onDismissAgentError,
 	// AgentErrorModal (for group chats)
@@ -1687,17 +1691,21 @@ export const AppAgentModals = memo(function AppAgentModals({
 			)}
 
 			{/* --- AGENT ERROR MODAL (individual agents) --- */}
-			{errorSession?.agentError && (
+			{effectiveAgentError && (
 				<AgentErrorModal
 					theme={theme}
-					error={errorSession.agentError}
+					error={effectiveAgentError}
 					agentName={
-						errorSession.toolType === 'claude-code' ? 'Claude Code' : errorSession.toolType
+						errorSession
+							? errorSession.toolType === 'claude-code'
+								? 'Claude Code'
+								: errorSession.toolType
+							: undefined
 					}
-					sessionName={errorSession.name}
+					sessionName={errorSession?.name}
 					recoveryActions={recoveryActions}
 					onDismiss={onDismissAgentError}
-					dismissible={errorSession.agentError.recoverable}
+					dismissible={effectiveAgentError.recoverable !== false}
 				/>
 			)}
 
@@ -2078,6 +2086,8 @@ export interface AppModalsProps {
 		longestRunTimestamp: number;
 	}) => void;
 	errorSession: Session | null | undefined;
+	/** The effective error to display — live or historical from chat log */
+	effectiveAgentError: AgentError | null;
 	recoveryActions: RecoveryAction[];
 	onDismissAgentError: () => void;
 	groupChatError: GroupChatErrorInfo | null;
@@ -2419,6 +2429,7 @@ export const AppModals = memo(function AppModals(props: AppModalsProps) {
 		onLeaderboardOptOut,
 		onSyncAutoRunStats,
 		errorSession,
+		effectiveAgentError,
 		recoveryActions,
 		onDismissAgentError,
 		groupChatError,
@@ -2747,6 +2758,7 @@ export const AppModals = memo(function AppModals(props: AppModalsProps) {
 				onLeaderboardOptOut={onLeaderboardOptOut}
 				onSyncAutoRunStats={onSyncAutoRunStats}
 				errorSession={errorSession}
+				effectiveAgentError={effectiveAgentError}
 				recoveryActions={recoveryActions}
 				onDismissAgentError={onDismissAgentError}
 				groupChatError={groupChatError}

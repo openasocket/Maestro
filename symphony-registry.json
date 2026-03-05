@@ -1,6 +1,6 @@
 {
 	"schemaVersion": "1.0",
-	"lastUpdated": "2026-02-25T00:00:00Z",
+	"lastUpdated": "2026-02-28T00:00:00Z",
 	"repositories": [
 		{
 			"slug": "RunMaestro/Maestro",
@@ -91,6 +91,21 @@
 			"isActive": true,
 			"featured": false,
 			"addedAt": "2026-02-25"
+		},
+		{
+			"slug": "volvoxllc/volvox-bot",
+			"name": "volvox-bot",
+			"description": "An AI-powered Discord bot used for managing servers that includes interaction, question answering, full memory of users, interaction, games, and much more.",
+			"url": "https://github.com/VolvoxLLC/volvox-bot",
+			"category": "ai-ml",
+			"tags": ["discord-bot", "claude-sdk", "moderation", "discord.js", "typescript"],
+			"maintainer": {
+				"name": "BillChirico",
+				"url": "https://github.com/BillChirico"
+			},
+			"isActive": true,
+			"featured": false,
+			"addedAt": "2026-02-28"
 		}
 	]
 }

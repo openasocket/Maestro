@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
 // SettingsModal is lazy-loaded for performance (large component, only loaded when settings opened)
 const SettingsModal = lazy(() =>
-	import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal }))
+	import('./components/Settings/SettingsModal').then((m) => ({ default: m.SettingsModal }))
 );
 import { SessionList } from './components/SessionList';
 import { RightPanel, RightPanelHandle } from './components/RightPanel';
@@ -508,7 +508,6 @@ function MaestroConsoleInner() {
 	const bookmarksCollapsed = useUIStore((s) => s.bookmarksCollapsed);
 	// groupChatsExpanded moved to useCycleSession hook
 	const showUnreadOnly = useUIStore((s) => s.showUnreadOnly);
-	const _selectedFileIndex = useFileExplorerStore((s) => s.selectedFileIndex);
 	const fileTreeFilter = useFileExplorerStore((s) => s.fileTreeFilter);
 	const fileTreeFilterOpen = useFileExplorerStore((s) => s.fileTreeFilterOpen);
 	const editingGroupId = useUIStore((s) => s.editingGroupId);
@@ -647,8 +646,6 @@ function MaestroConsoleInner() {
 	// Content is per-session in session.autoRunContent
 	const autoRunDocumentList = useBatchStore((s) => s.documentList);
 	const autoRunDocumentTree = useBatchStore((s) => s.documentTree);
-	const _autoRunIsLoadingDocuments = useBatchStore((s) => s.isLoadingDocuments);
-	const _autoRunDocumentTaskCounts = useBatchStore((s) => s.documentTaskCounts);
 	const {
 		setDocumentList: setAutoRunDocumentList,
 		setDocumentTree: setAutoRunDocumentTree,
@@ -839,6 +836,7 @@ function MaestroConsoleInner() {
 	// --- MODAL HANDLERS (open/close, error recovery, lightbox, celebrations) ---
 	const {
 		errorSession,
+		effectiveAgentError,
 		recoveryActions,
 		handleCloseGitDiff,
 		handleCloseGitLog,
@@ -2719,6 +2717,7 @@ function MaestroConsoleInner() {
 					onLeaderboardOptOut={handleLeaderboardOptOut}
 					onSyncAutoRunStats={handleSyncAutoRunStats}
 					errorSession={errorSession}
+					effectiveAgentError={effectiveAgentError}
 					recoveryActions={recoveryActions}
 					onDismissAgentError={handleCloseAgentErrorModal}
 					groupChatError={groupChatError}

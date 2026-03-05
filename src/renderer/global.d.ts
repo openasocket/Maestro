@@ -302,6 +302,13 @@ interface MaestroAPI {
 		onRemoteRenameTab: (
 			callback: (sessionId: string, tabId: string, newName: string) => void
 		) => () => void;
+		onRemoteStarTab: (
+			callback: (sessionId: string, tabId: string, starred: boolean) => void
+		) => () => void;
+		onRemoteReorderTab: (
+			callback: (sessionId: string, fromIndex: number, toIndex: number) => void
+		) => () => void;
+		onRemoteToggleBookmark: (callback: (sessionId: string) => void) => () => void;
 		onStderr: (callback: (sessionId: string, data: string) => void) => () => void;
 		onCommandExit: (callback: (sessionId: string, code: number) => void) => () => void;
 		onUsage: (callback: (sessionId: string, usageStats: UsageStats) => void) => () => void;
@@ -2529,7 +2536,18 @@ interface MaestroAPI {
 			draftPrNumber?: number;
 			draftPrUrl?: string;
 		}) => Promise<{ success: boolean; updated?: boolean; error?: string }>;
-		complete: (params: { contributionId: string; prBody?: string }) => Promise<{
+		complete: (params: {
+			contributionId: string;
+			prBody?: string;
+			stats?: {
+				inputTokens: number;
+				outputTokens: number;
+				estimatedCost: number;
+				timeSpentMs: number;
+				documentsProcessed: number;
+				tasksCompleted: number;
+			};
+		}) => Promise<{
 			success: boolean;
 			prUrl?: string;
 			prNumber?: number;

@@ -8,6 +8,12 @@
 
 import picomatch from 'picomatch';
 
+/** Convert a value to a finite number, returning null if not representable. */
+function toFiniteNumber(value: unknown): number | null {
+	const n = typeof value === 'number' ? value : Number(value);
+	return Number.isFinite(n) ? n : null;
+}
+
 /**
  * Resolve a dot-notation key to a value in a nested object.
  * e.g., "source.status" accesses payload.source.status
@@ -43,17 +49,21 @@ export function matchesFilter(
 		} else {
 			// String filter expression
 			if (filterValue.startsWith('>=')) {
-				const threshold = Number(filterValue.slice(2));
-				if (Number(payloadValue) < threshold) return false;
+				const threshold = toFiniteNumber(filterValue.slice(2));
+				const current = toFiniteNumber(payloadValue);
+				if (threshold === null || current === null || current < threshold) return false;
 			} else if (filterValue.startsWith('<=')) {
-				const threshold = Number(filterValue.slice(2));
-				if (Number(payloadValue) > threshold) return false;
+				const threshold = toFiniteNumber(filterValue.slice(2));
+				const current = toFiniteNumber(payloadValue);
+				if (threshold === null || current === null || current > threshold) return false;
 			} else if (filterValue.startsWith('>')) {
-				const threshold = Number(filterValue.slice(1));
-				if (Number(payloadValue) <= threshold) return false;
+				const threshold = toFiniteNumber(filterValue.slice(1));
+				const current = toFiniteNumber(payloadValue);
+				if (threshold === null || current === null || current <= threshold) return false;
 			} else if (filterValue.startsWith('<')) {
-				const threshold = Number(filterValue.slice(1));
-				if (Number(payloadValue) >= threshold) return false;
+				const threshold = toFiniteNumber(filterValue.slice(1));
+				const current = toFiniteNumber(payloadValue);
+				if (threshold === null || current === null || current >= threshold) return false;
 			} else if (filterValue.startsWith('!')) {
 				const remainder = filterValue.slice(1);
 				if (String(payloadValue) === remainder) return false;

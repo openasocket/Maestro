@@ -65,8 +65,17 @@ export function loadCueConfig(projectRoot: string): CueConfig | null {
 					interval_minutes:
 						typeof sub.interval_minutes === 'number' ? sub.interval_minutes : undefined,
 					watch: typeof sub.watch === 'string' ? sub.watch : undefined,
-					source_session: sub.source_session,
-					fan_out: Array.isArray(sub.fan_out) ? sub.fan_out : undefined,
+					source_session:
+						typeof sub.source_session === 'string'
+							? sub.source_session
+							: Array.isArray(sub.source_session) &&
+								  sub.source_session.every((s: unknown) => typeof s === 'string')
+								? sub.source_session
+								: undefined,
+					fan_out:
+						Array.isArray(sub.fan_out) && sub.fan_out.every((s: unknown) => typeof s === 'string')
+							? sub.fan_out
+							: undefined,
 					filter,
 					repo: typeof sub.repo === 'string' ? sub.repo : undefined,
 					poll_minutes: typeof sub.poll_minutes === 'number' ? sub.poll_minutes : undefined,
@@ -78,7 +87,9 @@ export function loadCueConfig(projectRoot: string): CueConfig | null {
 	const rawSettings = parsed.settings as Record<string, unknown> | undefined;
 	const settings: CueSettings = {
 		timeout_minutes:
-			typeof rawSettings?.timeout_minutes === 'number'
+			typeof rawSettings?.timeout_minutes === 'number' &&
+			Number.isFinite(rawSettings.timeout_minutes) &&
+			rawSettings.timeout_minutes > 0
 				? rawSettings.timeout_minutes
 				: DEFAULT_CUE_SETTINGS.timeout_minutes,
 		timeout_on_fail:
@@ -190,6 +201,13 @@ export function validateCueConfig(config: unknown): { valid: boolean; errors: st
 					errors.push(
 						`${prefix}: "source_session" must be a string or array of strings for agent.completed events`
 					);
+				} else if (
+					Array.isArray(sub.source_session) &&
+					!sub.source_session.every(
+						(s: unknown) => typeof s === 'string' && (s as string).length > 0
+					)
+				) {
+					errors.push(`${prefix}: "source_session" array must contain only non-empty strings`);
 				}
 			} else if (event === 'github.pull_request' || event === 'github.issue') {
 				// repo is optional (auto-detected from git remote)
@@ -233,6 +251,15 @@ export function validateCueConfig(config: unknown): { valid: boolean; errors: st
 			errors.push('"settings" must be an object');
 		} else {
 			const settings = cfg.settings as Record<string, unknown>;
+			if (settings.timeout_minutes !== undefined) {
+				if (
+					typeof settings.timeout_minutes !== 'number' ||
+					!Number.isFinite(settings.timeout_minutes) ||
+					settings.timeout_minutes <= 0
+				) {
+					errors.push('"settings.timeout_minutes" must be a positive number');
+				}
+			}
 			if (settings.timeout_on_fail !== undefined) {
 				if (settings.timeout_on_fail !== 'break' && settings.timeout_on_fail !== 'continue') {
 					errors.push('"settings.timeout_on_fail" must be "break" or "continue"');

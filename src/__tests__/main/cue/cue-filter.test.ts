@@ -85,6 +85,20 @@ describe('cue-filter', () => {
 			it('handles string payload values with numeric comparison', () => {
 				expect(matchesFilter({ size: '1500' }, { size: '>1000' })).toBe(true);
 			});
+
+			it('rejects NaN payload values in numeric comparisons', () => {
+				expect(matchesFilter({ size: 'not-a-number' }, { size: '>1000' })).toBe(false);
+				expect(matchesFilter({ size: 'abc' }, { size: '<1000' })).toBe(false);
+				expect(matchesFilter({ size: 'xyz' }, { size: '>=100' })).toBe(false);
+				expect(matchesFilter({ size: '' }, { size: '<=100' })).toBe(false);
+			});
+
+			it('rejects NaN threshold values in numeric comparisons', () => {
+				expect(matchesFilter({ size: 500 }, { size: '>abc' })).toBe(false);
+				expect(matchesFilter({ size: 500 }, { size: '<xyz' })).toBe(false);
+				expect(matchesFilter({ size: 500 }, { size: '>=foo' })).toBe(false);
+				expect(matchesFilter({ size: 500 }, { size: '<=bar' })).toBe(false);
+			});
 		});
 
 		describe('glob pattern matching', () => {

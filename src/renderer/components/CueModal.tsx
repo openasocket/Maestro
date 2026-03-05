@@ -215,8 +215,11 @@ function ActivityLog({ log, theme }: { log: CueRunResult[]; theme: Theme }) {
 				const isFailed = entry.status === 'failed' || entry.status === 'timeout';
 				const eventType = entry.event.type;
 				const filePayload =
-					eventType === 'file.changed' && entry.event.payload?.file
-						? ` (${String(entry.event.payload.file).split('/').pop()})`
+					eventType === 'file.changed' &&
+					(entry.event.payload?.filename || entry.event.payload?.path)
+						? ` (${String(entry.event.payload.filename ?? entry.event.payload.path)
+								.split('/')
+								.pop()})`
 						: '';
 				const githubPayload =
 					(eventType === 'github.pull_request' || eventType === 'github.issue') &&
@@ -248,6 +251,8 @@ function ActivityLog({ log, theme }: { log: CueRunResult[]; theme: Theme }) {
 							</span>
 							{isFailed ? (
 								<span style={{ color: '#ef4444' }}>{entry.status} ✗</span>
+							) : entry.status === 'stopped' ? (
+								<span style={{ color: '#f59e0b' }}>stopped</span>
 							) : (
 								<span style={{ color: '#22c55e' }}>
 									completed in {formatDuration(entry.durationMs)} ✓

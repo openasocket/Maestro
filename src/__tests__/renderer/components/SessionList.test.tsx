@@ -411,7 +411,7 @@ describe('SessionList', () => {
 			fireEvent.click(screen.getByText('LIVE'));
 
 			// Overlay should appear with description text
-			expect(screen.getByText(/Control your AI sessions/)).toBeInTheDocument();
+			expect(screen.getByText(/Control your agents/)).toBeInTheDocument();
 		});
 
 		it('shows QR code in live overlay', () => {
@@ -2877,13 +2877,13 @@ describe('SessionList', () => {
 			fireEvent.click(screen.getByText('LIVE'));
 
 			// Verify overlay is open
-			expect(screen.getByText(/Control your AI sessions/)).toBeInTheDocument();
+			expect(screen.getByText(/Control your agents/)).toBeInTheDocument();
 
 			// Press Escape
 			fireEvent.keyDown(document, { key: 'Escape' });
 
 			// Overlay should be closed
-			expect(screen.queryByText(/Control your AI sessions/)).not.toBeInTheDocument();
+			expect(screen.queryByText(/Control your agents/)).not.toBeInTheDocument();
 		});
 	});
 
@@ -3146,17 +3146,15 @@ describe('SessionList', () => {
 
 			// Mock Cue status to return session with subscriptions
 			(window.maestro as Record<string, unknown>).cue = {
-				getStatus: vi
-					.fn()
-					.mockResolvedValue([
-						{
-							sessionId: 's1',
-							sessionName: 'Cue Session',
-							subscriptionCount: 3,
-							enabled: true,
-							activeRuns: 0,
-						},
-					]),
+				getStatus: vi.fn().mockResolvedValue([
+					{
+						sessionId: 's1',
+						sessionName: 'Cue Session',
+						subscriptionCount: 3,
+						enabled: true,
+						activeRuns: 0,
+					},
+				]),
 				getActiveRuns: vi.fn().mockResolvedValue([]),
 				getActivityLog: vi.fn().mockResolvedValue([]),
 				onActivityUpdate: vi.fn().mockReturnValue(() => {}),

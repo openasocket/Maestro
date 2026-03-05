@@ -146,6 +146,7 @@ export function CueYamlEditor({
 	const [loading, setLoading] = useState(true);
 	const [copied, setCopied] = useState(false);
 	const validateTimerRef = useRef<ReturnType<typeof setTimeout>>();
+	const validateSeqRef = useRef(0);
 	const yamlTextareaRef = useRef<HTMLTextAreaElement>(null);
 
 	// Load existing YAML on mount
@@ -161,6 +162,16 @@ export function CueYamlEditor({
 				const initial = content ?? YAML_TEMPLATE;
 				setYamlContent(initial);
 				setOriginalContent(initial);
+				// Validate immediately so the UI shows correct validity on load
+				try {
+					const validationResult = await window.maestro.cue.validateYaml(initial);
+					if (!cancelled) {
+						setIsValid(validationResult.valid);
+						setValidationErrors(validationResult.errors);
+					}
+				} catch {
+					// Validation failure on load is non-fatal
+				}
 			} catch {
 				if (cancelled) return;
 				setYamlContent(YAML_TEMPLATE);
@@ -182,11 +193,14 @@ export function CueYamlEditor({
 			clearTimeout(validateTimerRef.current);
 		}
 		validateTimerRef.current = setTimeout(async () => {
+			const seq = ++validateSeqRef.current;
 			try {
 				const result = await window.maestro.cue.validateYaml(content);
+				if (seq !== validateSeqRef.current) return;
 				setIsValid(result.valid);
 				setValidationErrors(result.errors);
 			} catch {
+				if (seq !== validateSeqRef.current) return;
 				setIsValid(false);
 				setValidationErrors(['Failed to validate YAML']);
 			}

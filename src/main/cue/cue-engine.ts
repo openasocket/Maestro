@@ -260,8 +260,15 @@ export class CueEngine {
 		run.result.endedAt = new Date().toISOString();
 		run.result.durationMs = Date.now() - new Date(run.result.startedAt).getTime();
 
+		const sessionId = run.result.sessionId;
 		this.activeRuns.delete(runId);
 		this.pushActivityLog(run.result);
+
+		// Decrement active run count and drain queue (same as normal completion)
+		const count = this.activeRunCount.get(sessionId) ?? 1;
+		this.activeRunCount.set(sessionId, Math.max(0, count - 1));
+		this.drainQueue(sessionId);
+
 		this.deps.onLog('cue', `[CUE] Run stopped: ${runId}`);
 		return true;
 	}

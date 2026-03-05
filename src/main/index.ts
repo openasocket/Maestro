@@ -8,6 +8,7 @@ import { ProcessManager } from './process-manager';
 import { WebServer } from './web-server';
 import { AgentDetector } from './agents';
 import { CueEngine } from './cue/cue-engine';
+import type { ToolType } from '../shared/types';
 import { logger } from './utils/logger';
 import { tunnelManager } from './tunnel-manager';
 import { powerManager } from './power-manager';
@@ -341,24 +342,70 @@ app.whenReady().then(async () => {
 				projectRoot: s.cwd || s.fullPath || os.homedir(),
 			}));
 		},
-		onCueRun: async (sessionId, _prompt, event) => {
-			// Stub for Phase 03 executor integration — returns a placeholder result.
-			// The actual executor (cue-executor.ts) is wired in a future phase.
-			logger.info(`[CUE] Run triggered for session ${sessionId}: ${event.triggerName}`, 'Cue');
-			return {
+		onCueRun: async (sessionId, prompt, event) => {
+			const session = sessionsStore.get('sessions', []).find((s: any) => s.id === sessionId);
+			if (!session) {
+				logger.error(`[CUE] Session not found: ${sessionId}`, 'Cue');
+				return {
+					runId: event.id,
+					sessionId,
+					sessionName: '',
+					subscriptionName: event.triggerName,
+					event,
+					status: 'failed' as const,
+					stdout: '',
+					stderr: 'Session not found',
+					exitCode: null,
+					durationMs: 0,
+					startedAt: new Date().toISOString(),
+					endedAt: new Date().toISOString(),
+				};
+			}
+
+			const { executeCuePrompt } = await import('./cue/cue-executor');
+			const agentConfigs = agentConfigsStore.get('configs', {}) as Record<string, any>;
+			const sessionConfig = agentConfigs[session.toolType] || {};
+			const projectRoot = session.cwd || session.fullPath || os.homedir();
+			const toolType = session.toolType as ToolType;
+			return await executeCuePrompt({
 				runId: event.id,
-				sessionId,
-				sessionName: '',
-				subscriptionName: event.triggerName,
+				session: {
+					id: session.id,
+					name: session.name,
+					toolType,
+					cwd: projectRoot,
+					projectRoot,
+				},
+				subscription: { name: event.triggerName, event: event.type, enabled: true, prompt },
 				event,
-				status: 'completed' as const,
-				stdout: '',
-				stderr: '',
-				exitCode: 0,
-				durationMs: 0,
-				startedAt: new Date().toISOString(),
-				endedAt: new Date().toISOString(),
-			};
+				promptPath: prompt,
+				toolType,
+				projectRoot,
+				templateContext: {
+					session: {
+						id: session.id,
+						name: session.name,
+						toolType: session.toolType as string,
+						cwd: projectRoot,
+						projectRoot,
+					},
+				},
+				timeoutMs: 30 * 60 * 1000, // 30 minute default; engine handles timeout_minutes config
+				sshRemoteConfig: session.sshRemoteConfig,
+				customPath: sessionConfig.customPath,
+				customArgs: sessionConfig.customArgs,
+				customEnvVars: sessionConfig.customEnvVars,
+				customModel: sessionConfig.customModel,
+				onLog: (level, message) => {
+					if (level === 'error') {
+						logger.error(message, 'Cue');
+					} else {
+						logger.cue(message, 'Cue');
+					}
+				},
+				sshStore: createSshRemoteStoreAdapter(store),
+				agentConfigValues: sessionConfig,
+			});
 		},
 		onLog: (_level, message, data) => {
 			logger.cue(message, 'Cue', data);
