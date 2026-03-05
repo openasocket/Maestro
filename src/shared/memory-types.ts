@@ -226,7 +226,7 @@ export const DEFAULT_EMBEDDING_CONFIG: EmbeddingProviderConfig = {
 	enabled: false,
 	ollama: {
 		baseUrl: 'http://localhost:11434',
-		model: 'nomic-embed-text',
+		model: 'nomic-embed-text-v2-moe',
 	},
 	openai: {
 		apiKey: '', // Secret value — stored encrypted at rest, never exposed to renderer

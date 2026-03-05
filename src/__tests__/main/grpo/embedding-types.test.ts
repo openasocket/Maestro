@@ -26,7 +26,7 @@ describe('Embedding types', () => {
 		expect(DEFAULT_EMBEDDING_CONFIG.providerId).toBe('transformers-js');
 		expect(DEFAULT_EMBEDDING_CONFIG.enabled).toBe(false);
 		expect(DEFAULT_EMBEDDING_CONFIG.ollama?.baseUrl).toBe('http://localhost:11434');
-		expect(DEFAULT_EMBEDDING_CONFIG.ollama?.model).toBe('nomic-embed-text');
+		expect(DEFAULT_EMBEDDING_CONFIG.ollama?.model).toBe('nomic-embed-text-v2-moe');
 		expect(DEFAULT_EMBEDDING_CONFIG.openai?.model).toBe('text-embedding-3-small');
 		expect(DEFAULT_EMBEDDING_CONFIG.openai?.dimensions).toBe(384);
 		expect(DEFAULT_EMBEDDING_CONFIG.transformersJs?.modelId).toBe('Xenova/gte-small');

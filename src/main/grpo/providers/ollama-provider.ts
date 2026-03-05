@@ -2,7 +2,7 @@
  * Ollama Embedding Provider
  *
  * Connects to Ollama's HTTP API for local embedding generation.
- * Default model: nomic-embed-text (768-dim, projected to 384-dim via truncation).
+ * Default model: nomic-embed-text-v2-moe (768-dim, projected to 384-dim via truncation).
  * Supports batch embedding and automatic model pulling.
  */
 
@@ -23,7 +23,7 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
 	readonly nativeDimension = 768;
 
 	private baseUrl = 'http://localhost:11434';
-	private model = 'nomic-embed-text';
+	private model = 'nomic-embed-text-v2-moe';
 	private ready = false;
 	private error: string | null = null;
 	private onProgress: ProgressCallback | null = null;
@@ -49,7 +49,7 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
 
 	async initialize(config: EmbeddingProviderConfig): Promise<void> {
 		this.baseUrl = config.ollama?.baseUrl ?? 'http://localhost:11434';
-		this.model = config.ollama?.model ?? 'nomic-embed-text';
+		this.model = config.ollama?.model ?? 'nomic-embed-text-v2-moe';
 
 		try {
 			this.emitProgress('downloading', 0, `Connecting to Ollama at ${this.baseUrl}...`);

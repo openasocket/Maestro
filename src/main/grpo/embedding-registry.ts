@@ -137,6 +137,7 @@ export class EmbeddingRegistry {
 		'all-minilm',
 		'snowflake-arctic-embed',
 		'bge-',
+		'embeddinggemma',
 	];
 
 	/** Auto-detect available local providers */

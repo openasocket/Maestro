@@ -38,7 +38,7 @@ describe('OllamaEmbeddingProvider', () => {
 	});
 
 	/** Mock a successful Ollama flow: /api/tags (model present) + /api/embed (test) */
-	function mockOllamaReady(model = 'nomic-embed-text', embedDim = 768) {
+	function mockOllamaReady(model = 'nomic-embed-text-v2-moe', embedDim = 768) {
 		fetchSpy.mockImplementation(async (input: string | URL | Request) => {
 			const url =
 				typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
@@ -96,7 +96,7 @@ describe('OllamaEmbeddingProvider', () => {
 	});
 
 	it('should encode and return 384-dim array from 768-dim input (truncation)', async () => {
-		mockOllamaReady('nomic-embed-text', 768);
+		mockOllamaReady('nomic-embed-text-v2-moe', 768);
 		await provider.initialize(ollamaConfig());
 
 		const result = await provider.encode('hello world');
@@ -118,9 +118,10 @@ describe('OllamaEmbeddingProvider', () => {
 			const url =
 				typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 			if (url.endsWith('/api/tags')) {
-				return new Response(JSON.stringify({ models: [{ name: 'nomic-embed-text:latest' }] }), {
-					status: 200,
-				});
+				return new Response(
+					JSON.stringify({ models: [{ name: 'nomic-embed-text-v2-moe:latest' }] }),
+					{ status: 200 }
+				);
 			}
 			if (url.endsWith('/api/embed')) {
 				const body = JSON.parse((init?.body as string) ?? '{}');
@@ -157,7 +158,7 @@ describe('OllamaEmbeddingProvider', () => {
 		const status = provider.getStatus();
 		expect(status.ready).toBe(false);
 		expect(status.error).toBe('Connection refused');
-		expect(status.modelName).toBe('nomic-embed-text');
+		expect(status.modelName).toBe('nomic-embed-text-v2-moe');
 	});
 
 	it('should throw when encode called without initialization', async () => {
@@ -233,7 +234,7 @@ describe('OllamaEmbeddingProvider', () => {
 
 	describe('dimension projection', () => {
 		it('should truncate embeddings longer than VECTOR_DIM', async () => {
-			mockOllamaReady('nomic-embed-text', 1024);
+			mockOllamaReady('nomic-embed-text-v2-moe', 1024);
 			await provider.initialize(ollamaConfig());
 
 			const result = await provider.encode('test');

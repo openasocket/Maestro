@@ -20,7 +20,7 @@ export { DEFAULT_EMBEDDING_CONFIG } from '../../shared/memory-types';
 // Offline          │ Yes (after DL)    │ Yes                │ No                    │ Yes (after DL)
 // Cost             │ Free              │ Free               │ ~$0.02/1M tokens      │ Free
 // Quality          │ Good              │ Good+              │ Best                  │ Good
-// Model            │ Xenova/gte-small  │ nomic-embed-text   │ text-embedding-3-small│ Xenova/gte-small
+// Model            │ Xenova/gte-small  │ nomic-embed-text-v2-moe│ text-embedding-3-small│ Xenova/gte-small
 // Native Dim       │ 384               │ 768                │ 1536                  │ 384
 // Default          │ YES               │ No                 │ No                    │ No
 //

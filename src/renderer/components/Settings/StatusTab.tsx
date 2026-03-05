@@ -602,6 +602,8 @@ function InjectionActivitySection({
 	const [debugResults, setDebugResults] = useState<DiagnosticResult[] | null>(null);
 	const [debugRunning, setDebugRunning] = useState(false);
 	const [enabling, setEnabling] = useState(false);
+	const [computing, setComputing] = useState(false);
+	const [computeResult, setComputeResult] = useState<string | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -738,10 +740,43 @@ function InjectionActivitySection({
 							style={{ backgroundColor: '#eab30810', border: '1px solid #eab30820' }}
 						>
 							<AlertTriangle className="w-3 h-3 shrink-0" style={{ color: '#eab308' }} />
-							<span style={{ color: '#eab308' }}>
+							<span className="flex-1" style={{ color: '#eab308' }}>
 								{stats.pendingEmbeddings} item{stats.pendingEmbeddings !== 1 ? 's' : ''} missing
 								embeddings — memories under these personas cannot be matched to tasks.
+								{computeResult && (
+									<span style={{ color: theme.colors.textDim, marginLeft: 4 }}>
+										({computeResult})
+									</span>
+								)}
 							</span>
+							<button
+								className="shrink-0 px-2 py-0.5 rounded text-[10px] font-medium"
+								style={{
+									backgroundColor: theme.colors.accent,
+									color: theme.colors.bgMain,
+									opacity: computing ? 0.6 : 1,
+								}}
+								disabled={computing}
+								onClick={async () => {
+									setComputing(true);
+									setComputeResult(null);
+									try {
+										const res = await window.maestro.memory.computeAllEmbeddings();
+										if (res.success) {
+											const total = res.data.memoriesUpdated + res.data.hierarchyUpdated;
+											setComputeResult(`${total} embedded`);
+											onConfigChange?.();
+										} else {
+											setComputeResult(res.error);
+										}
+									} catch (err: any) {
+										setComputeResult(err.message ?? 'Failed');
+									}
+									setComputing(false);
+								}}
+							>
+								{computing ? 'Computing...' : 'Compute All'}
+							</button>
 						</div>
 					)}
 

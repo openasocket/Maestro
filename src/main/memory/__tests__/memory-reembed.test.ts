@@ -92,7 +92,7 @@ function realCosineSimilarity(a: number[], b: number[]): number {
 const DIM = 384;
 let embedCallCount = 0;
 
-const mockEncode = vi.fn(async () => {
+const mockEncode = vi.fn(async (_text: string) => {
 	embedCallCount++;
 	const v = new Array(DIM).fill(0);
 	v[0] = 1; // simple unit vector
@@ -257,7 +257,7 @@ describe('MemoryStore.reEmbedAll', () => {
 	it('clears hierarchy embeddings and re-computes them', async () => {
 		const role = await store.createRole('Dev', 'Developer');
 		const persona = await store.createPersona(role.id, 'FE Dev', 'Frontend development');
-		const skill = await store.createSkillArea(persona.id, 'React', 'React patterns');
+		await store.createSkillArea(persona.id, 'React', 'React patterns');
 
 		// Give hierarchy embeddings
 		await store.ensureHierarchyEmbeddings();
