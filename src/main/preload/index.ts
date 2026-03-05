@@ -52,6 +52,7 @@ import { createDirectorNotesApi } from './directorNotes';
 import { createMemoryApi } from './memory';
 import { createExperienceRepositoryApi } from './experience-repository';
 import { createWakatimeApi } from './wakatime';
+import { createEmbeddingApi } from './embedding';
 
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
@@ -193,6 +194,9 @@ contextBridge.exposeInMainWorld('maestro', {
 
 	// Agent Experiences Memory API (roles, personas, skills, memories)
 	memory: createMemoryApi(),
+
+	// Embedding Provider API (status, switching, detection)
+	embedding: createEmbeddingApi(),
 
 	// Experience Repository API (bundle import/export, signing, catalog)
 	experienceRepository: createExperienceRepositoryApi(),
@@ -484,6 +488,10 @@ export type {
 	// From memory
 	MemoryApi,
 } from './memory';
+export type {
+	// From embedding
+	EmbeddingApi,
+} from './embedding';
 export type {
 	// From experience repository
 	ExperienceRepositoryApi,

@@ -55,6 +55,7 @@ import { registerDirectorNotesHandlers, DirectorNotesHandlerDependencies } from 
 import { registerMemoryHandlers, MemoryHandlerDependencies } from './memory-handlers';
 import { registerExperienceRepositoryHandlers } from './experience-repository';
 import { registerWakatimeHandlers } from './wakatime';
+import { registerEmbeddingHandlers } from './embedding';
 import { getMemoryStore } from '../../memory/memory-store';
 import { AgentDetector } from '../../agents';
 import { ProcessManager } from '../../process-manager';
@@ -102,6 +103,7 @@ export type { DirectorNotesHandlerDependencies };
 export { registerMemoryHandlers };
 export type { MemoryHandlerDependencies };
 export { registerWakatimeHandlers };
+export { registerEmbeddingHandlers };
 export type { AgentsHandlerDependencies };
 export type { ProcessHandlerDependencies };
 export type { PersistenceHandlerDependencies };
@@ -292,6 +294,8 @@ export function registerAllHandlers(deps: HandlerDependencies): void {
 	});
 	// Register experience repository handlers (bundle import/export/signing)
 	registerExperienceRepositoryHandlers();
+	// Register embedding provider handlers (status, switching, detection)
+	registerEmbeddingHandlers();
 	// Setup logger event forwarding to renderer
 	setupLoggerEventForwarding(deps.getMainWindow);
 }

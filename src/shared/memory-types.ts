@@ -190,6 +190,57 @@ export interface MemoryEntry {
 	updatedAt: number;
 }
 
+// ─── Embedding Provider Configuration ─────────────────────────────────────
+
+export type EmbeddingProviderId = 'transformers-js' | 'ollama' | 'openai' | 'xenova-onnx';
+
+export interface EmbeddingProviderConfig {
+	/** Which provider to use */
+	providerId: EmbeddingProviderId;
+	/** Whether the provider is enabled */
+	enabled: boolean;
+	/** Provider-specific settings */
+	ollama?: {
+		baseUrl: string;
+		model: string;
+	};
+	openai?: {
+		apiKey: string;
+		model: string;
+		dimensions: number;
+		baseUrl: string;
+	};
+	transformersJs?: {
+		modelId: string;
+		cacheDir?: string;
+	};
+	xenovaOnnx?: {
+		modelId: string;
+		cacheDir?: string;
+	};
+}
+
+export const DEFAULT_EMBEDDING_CONFIG: EmbeddingProviderConfig = {
+	providerId: 'transformers-js',
+	enabled: false,
+	ollama: {
+		baseUrl: 'http://localhost:11434',
+		model: 'nomic-embed-text',
+	},
+	openai: {
+		apiKey: '',
+		model: 'text-embedding-3-small',
+		dimensions: 384,
+		baseUrl: 'https://api.openai.com/v1',
+	},
+	transformersJs: {
+		modelId: 'Xenova/gte-small',
+	},
+	xenovaOnnx: {
+		modelId: 'Xenova/gte-small',
+	},
+};
+
 // ─── Configuration ─────────────────────────────────────────────────────────
 
 export interface MemoryConfig {
@@ -256,6 +307,8 @@ export interface MemoryConfig {
 	confidenceDecayRate: number;
 	/** Memories below this confidence are automatically archived — default 0.1 */
 	minConfidenceThreshold: number;
+	/** Embedding provider configuration */
+	embeddingProvider?: EmbeddingProviderConfig;
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -292,6 +345,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	crossProjectSimilarityThreshold: 0.75,
 	confidenceDecayRate: 0.02,
 	minConfidenceThreshold: 0.1,
+	embeddingProvider: DEFAULT_EMBEDDING_CONFIG,
 };
 
 // ─── Job Queue Status & Token Tracking ────────────────────────────────────

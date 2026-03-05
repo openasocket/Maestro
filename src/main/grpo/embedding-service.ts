@@ -1,51 +1,35 @@
 /**
  * Embedding service — shared infrastructure for computing text embeddings.
  *
- * Provides encode() and encodeBatch() for computing 384-dim embeddings
- * using a local model. Used by both GRPO and Memory systems.
- *
- * Stub implementation — will be fully implemented in a future task.
+ * Routes encode() and encodeBatch() calls through the embedding registry.
+ * Falls back to throwing EmbeddingModelNotAvailableError when no provider is active,
+ * preserving the existing graceful degradation behavior.
  */
 
-export class EmbeddingModelNotAvailableError extends Error {
-	constructor(message = 'Embedding model is not available') {
-		super(message);
-		this.name = 'EmbeddingModelNotAvailableError';
-	}
-}
+import { embeddingRegistry } from './embedding-registry';
+import { EmbeddingModelNotAvailableError, VECTOR_DIM, cosineSimilarity } from './embedding-types';
+
+// Re-export for backward compatibility — all existing callers import from this module
+export { EmbeddingModelNotAvailableError, VECTOR_DIM, cosineSimilarity };
 
 /**
  * Encode a single text into a 384-dim embedding vector.
- * Throws EmbeddingModelNotAvailableError if no model is loaded.
+ * Throws EmbeddingModelNotAvailableError if no provider is active.
  */
-export async function encode(_text: string): Promise<number[]> {
-	throw new EmbeddingModelNotAvailableError();
+export async function encode(text: string): Promise<number[]> {
+	if (!embeddingRegistry.isReady()) {
+		throw new EmbeddingModelNotAvailableError();
+	}
+	return embeddingRegistry.getActive().encode(text);
 }
 
 /**
  * Encode multiple texts into 384-dim embedding vectors.
- * Throws EmbeddingModelNotAvailableError if no model is loaded.
+ * Throws EmbeddingModelNotAvailableError if no provider is active.
  */
-export async function encodeBatch(_texts: string[]): Promise<number[][]> {
-	throw new EmbeddingModelNotAvailableError();
-}
-
-/** Dimensionality of the embedding vectors. */
-export const VECTOR_DIM = 384;
-
-/**
- * Cosine similarity between two vectors.
- * Returns a value in [-1, 1]; higher = more similar.
- */
-export function cosineSimilarity(a: number[], b: number[]): number {
-	let dot = 0;
-	let normA = 0;
-	let normB = 0;
-	for (let i = 0; i < a.length; i++) {
-		dot += a[i] * b[i];
-		normA += a[i] * a[i];
-		normB += b[i] * b[i];
+export async function encodeBatch(texts: string[]): Promise<number[][]> {
+	if (!embeddingRegistry.isReady()) {
+		throw new EmbeddingModelNotAvailableError();
 	}
-	const denom = Math.sqrt(normA) * Math.sqrt(normB);
-	return denom === 0 ? 0 : dot / denom;
+	return embeddingRegistry.getActive().encodeBatch(texts);
 }

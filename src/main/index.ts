@@ -53,12 +53,15 @@ import {
 	registerAgentErrorHandlers,
 	registerDirectorNotesHandlers,
 	registerMemoryHandlers,
+	registerEmbeddingHandlers,
 	registerWakatimeHandlers,
 	setupLoggerEventForwarding,
 	cleanupAllGroomingSessions,
 	getActiveGroomingSessionCount,
 } from './ipc/handlers';
 import { getMemoryStore } from './memory/memory-store';
+import { embeddingRegistry } from './grpo/embedding-registry';
+import type { EmbeddingProviderConfig } from '../shared/memory-types';
 import { initializeStatsDB, closeStatsDB, getStatsDB } from './stats';
 import { groupChatEmitters } from './ipc/handlers/groupChat';
 import {
@@ -688,8 +691,36 @@ function setupIpcHandlers() {
 		settingsStore: store,
 	});
 
+	// Register embedding provider handlers (status, switching, detection)
+	registerEmbeddingHandlers();
+
+	// Initialize embedding registry from saved config
+	initializeEmbeddingProvider(store);
+
 	// Register WakaTime handlers (CLI check, API key validation)
 	registerWakatimeHandlers(wakatimeManager);
+}
+
+/**
+ * Initialize the embedding provider from saved config.
+ * Non-blocking — logs errors but doesn't prevent startup.
+ */
+function initializeEmbeddingProvider(settingsStore: { get: (key: string) => unknown }) {
+	try {
+		const memoryConfig = settingsStore.get('memoryConfig') as
+			| { embeddingProvider?: EmbeddingProviderConfig }
+			| undefined;
+		const config = memoryConfig?.embeddingProvider;
+		if (config?.enabled) {
+			embeddingRegistry.activate(config).catch((err) => {
+				logger.warn(`Embedding provider activation failed at startup: ${err}`, '[Embedding]');
+			});
+		} else {
+			logger.debug('Embedding provider not enabled, skipping activation', '[Embedding]');
+		}
+	} catch (err) {
+		logger.warn(`Failed to read embedding config at startup: ${err}`, '[Embedding]');
+	}
 }
 
 // Handle process output streaming (set up after initialization)
