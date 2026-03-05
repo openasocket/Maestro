@@ -820,7 +820,7 @@ export interface InjectionEvent {
 }
 
 const recentInjections: InjectionEvent[] = [];
-const MAX_INJECTION_HISTORY = 50;
+const MAX_INJECTION_HISTORY = 200;
 
 /**
  * Push an injection event to the ring buffer.
