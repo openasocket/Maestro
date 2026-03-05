@@ -116,41 +116,81 @@ export function StatusTab({
 			m.confidence >= config.minConfidenceThreshold
 	).length;
 
+	const overallHealth = getOverallHealth(config, stats);
+	const healthLabel =
+		overallHealth === 'green' ? 'Healthy' : overallHealth === 'yellow' ? 'Degraded' : 'Unhealthy';
+
 	return (
-		<div className="space-y-4">
-			<TabDescriptionBanner
-				theme={theme}
-				description="System diagnostics and impact visualization — health status, injection activity, technical metrics, and evidence that the memory system is delivering value."
-			/>
+		<div className="flex flex-col" style={{ height: '100%' }}>
+			{/* ─── Fixed Header: Banner + Health Summary ───────────────── */}
+			<div className="shrink-0 space-y-3 pb-2">
+				<TabDescriptionBanner
+					theme={theme}
+					description="System diagnostics and impact visualization — health status, injection activity, technical metrics, and evidence that the memory system is delivering value."
+				/>
 
-			{/* Section 1: System Health */}
-			<SystemHealthSection
-				stats={stats}
-				theme={theme}
-				config={config}
-				atRiskCount={atRiskCount}
-				healthCtx={healthCtx}
-			/>
+				{/* Quick health summary bar */}
+				<div
+					className="flex items-center gap-3 px-3 py-2 rounded-lg text-xs"
+					style={{
+						backgroundColor: theme.colors.bgActivity,
+						border: `1px solid ${theme.colors.border}`,
+					}}
+				>
+					<HealthDot level={overallHealth} size={10} />
+					<span style={{ color: theme.colors.textMain, fontWeight: 600 }}>
+						System: {healthLabel}
+					</span>
+					{stats && (
+						<>
+							<span style={{ color: theme.colors.textDim }}>·</span>
+							<span style={{ color: theme.colors.textDim }}>{stats.totalMemories} memories</span>
+							<span style={{ color: theme.colors.textDim }}>·</span>
+							<span style={{ color: theme.colors.textDim }}>
+								{stats.recentInjections} recent injections
+							</span>
+							{atRiskCount > 0 && (
+								<>
+									<span style={{ color: theme.colors.textDim }}>·</span>
+									<span style={{ color: '#eab308' }}>{atRiskCount} at risk</span>
+								</>
+							)}
+						</>
+					)}
+				</div>
+			</div>
 
-			{/* Section 2: Injection Activity */}
-			<InjectionActivitySection
-				theme={theme}
-				config={config}
-				stats={stats}
-				onConfigChange={onConfigChange}
-			/>
+			{/* ─── Scrollable Content: All sections ────────────────────── */}
+			<div className="flex-1 overflow-y-auto min-h-0 space-y-4 mt-2">
+				{/* Section 1: System Health */}
+				<SystemHealthSection
+					stats={stats}
+					theme={theme}
+					config={config}
+					atRiskCount={atRiskCount}
+					healthCtx={healthCtx}
+				/>
 
-			{/* Section 3: System Metrics (collapsed by default) */}
-			<SystemMetricsSection theme={theme} />
+				{/* Section 2: Injection Activity */}
+				<InjectionActivitySection
+					theme={theme}
+					config={config}
+					stats={stats}
+					onConfigChange={onConfigChange}
+				/>
 
-			{/* Section 4: Impact Dashboard */}
-			{stats && <ImpactDashboardSection stats={stats} theme={theme} allMemories={allMemories} />}
+				{/* Section 3: System Metrics (collapsed by default) */}
+				<SystemMetricsSection theme={theme} />
 
-			{/* Section 5: Promotion History */}
-			<PromotionHistorySection theme={theme} allMemories={allMemories} />
+				{/* Section 4: Impact Dashboard */}
+				{stats && <ImpactDashboardSection stats={stats} theme={theme} allMemories={allMemories} />}
 
-			{/* Section 6: Persona Shifts */}
-			<PersonaShiftSection theme={theme} config={config} allMemories={allMemories} />
+				{/* Section 5: Promotion History */}
+				<PromotionHistorySection theme={theme} allMemories={allMemories} />
+
+				{/* Section 6: Persona Shifts */}
+				<PersonaShiftSection theme={theme} config={config} allMemories={allMemories} />
+			</div>
 		</div>
 	);
 }
