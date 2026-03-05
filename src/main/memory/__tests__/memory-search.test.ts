@@ -914,4 +914,49 @@ describe('MemoryStore — Cascading Search, Filtering, Scoring, Injection Record
 			expect(results.length).toBeLessThanOrEqual(3);
 		});
 	});
+
+	// ─── Graceful Degradation ─────────────────────────────────────────────
+
+	describe('Graceful degradation when embeddings unavailable', () => {
+		it('falls back to project+global search when encode() throws', async () => {
+			// Create global memory with keyword match
+			await store.addMemory({ content: 'rust error handling patterns', scope: 'global' });
+
+			// Make encode throw (embedding model not ready)
+			mockEncode.mockRejectedValue(new Error('EmbeddingModelNotAvailableError'));
+
+			const config = makeConfig({ enableHybridSearch: true });
+			const results = await store.cascadingSearch('rust error', config, 'claude-code');
+
+			// Should not throw — fallback returns keyword/tag-matched results
+			expect(results).toBeDefined();
+			expect(Array.isArray(results)).toBe(true);
+		});
+
+		it('includes project+global results in fallback when encode fails with projectPath', async () => {
+			const projPath = '/test/project';
+
+			// Create project-scoped memory
+			await store.addMemory(
+				{
+					content: 'project-specific debugging tip',
+					scope: 'project',
+				},
+				projPath
+			);
+
+			// Create global memory
+			await store.addMemory({ content: 'global debugging tip', scope: 'global' });
+
+			// Make encode throw (embedding model not ready)
+			mockEncode.mockRejectedValue(new Error('EmbeddingModelNotAvailableError'));
+
+			const config = makeConfig({ enableHybridSearch: true });
+			const results = await store.cascadingSearch('debugging', config, 'claude-code', projPath);
+
+			// Should not throw — fallback searches project+global via hybrid (keyword+tag)
+			expect(results).toBeDefined();
+			expect(Array.isArray(results)).toBe(true);
+		});
+	});
 });

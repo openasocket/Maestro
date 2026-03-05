@@ -1661,8 +1661,22 @@ export class MemoryStore {
 		// Auto-seed hierarchy on first search if empty
 		await this.ensureHierarchyInitialized();
 
-		const { encode } = await import('../grpo/embedding-service');
-		const queryEmbedding = await encode(query.slice(0, 2000));
+		// Try to encode the query; if embedding model isn't ready, fall back to
+		// keyword+tag search on project+global scopes (no persona matching).
+		let queryEmbedding: number[] | null = null;
+		try {
+			const { encode } = await import('../grpo/embedding-service');
+			queryEmbedding = await encode(query.slice(0, 2000));
+		} catch {
+			// Embedding service unavailable — use fallback path
+		}
+
+		if (!queryEmbedding) {
+			console.log(
+				'[memory] Persona matching unavailable (embeddings not computed). Falling back to project+global search.'
+			);
+			return this.fallbackFlatSearch(query, config, projectPath, limit);
+		}
 
 		const registry = await this.getCachedRegistry();
 		const hierarchyResults: MemorySearchResult[] = [];
@@ -1798,6 +1812,38 @@ export class MemoryStore {
 
 		// ── Merge, de-duplicate, rank ────────────────────────────────────
 		const allResults = [...hierarchyResults, ...flatResults];
+		const seen = new Set<string>();
+		const deduped: MemorySearchResult[] = [];
+		for (const r of allResults) {
+			if (seen.has(r.entry.id)) continue;
+			seen.add(r.entry.id);
+			deduped.push(r);
+		}
+
+		deduped.sort((a, b) => b.combinedScore - a.combinedScore);
+		return deduped.slice(0, limit);
+	}
+
+	/**
+	 * Fallback search when embedding model is unavailable or persona embeddings
+	 * haven't been computed yet. Searches project-scoped and global memories
+	 * using hybrid search (keyword + tag signals only; embedding component
+	 * gracefully returns empty inside hybridSearch).
+	 */
+	private async fallbackFlatSearch(
+		query: string,
+		config: MemoryConfig,
+		projectPath?: string,
+		limit: number = 30
+	): Promise<MemorySearchResult[]> {
+		const searches: Promise<MemorySearchResult[]>[] = [this.hybridSearch(query, 'global', config)];
+		if (projectPath) {
+			searches.push(this.hybridSearch(query, 'project', config, undefined, projectPath));
+		}
+
+		const allResults = (await Promise.all(searches)).flat();
+
+		// De-duplicate and rank
 		const seen = new Set<string>();
 		const deduped: MemorySearchResult[] = [];
 		for (const r of allResults) {
