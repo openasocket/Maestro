@@ -308,6 +308,10 @@ export interface UseSettingsReturn {
 	setUseNativeTitleBar: (value: boolean) => void;
 	autoHideMenuBar: boolean;
 	setAutoHideMenuBar: (value: boolean) => void;
+
+	// Memory tab visit tracking
+	lastMemoryTabVisitAt: number;
+	setLastMemoryTabVisitAt: (value: number) => void;
 }
 
 export function useSettings(): UseSettingsReturn {

@@ -16,10 +16,10 @@ import {
 	Clock,
 	Filter,
 	GitMerge,
-	Layers,
 	Plus,
 	Scissors,
 	Trash2,
+	X,
 	Zap,
 	Cpu,
 	BarChart3,
@@ -34,6 +34,7 @@ import {
 	Download,
 	Edit3,
 } from 'lucide-react';
+import { useSettingsStore } from '../../stores/settingsStore';
 import type { Theme } from '../../types';
 import type {
 	MemoryConfig,
@@ -184,6 +185,9 @@ export function StatusTab({
 
 			{/* ─── Scrollable Content: All sections ────────────────────── */}
 			<div className="flex-1 overflow-y-auto min-h-0 space-y-4 mt-2">
+				{/* What Changed Since Last Visit digest */}
+				<WhatChangedDigest theme={theme} config={config} />
+
 				{/* Section 1: System Health */}
 				<SystemHealthSection
 					stats={stats}
@@ -1267,6 +1271,104 @@ function getTimeRangeStart(range: TimeRange): number | undefined {
 		case '30d':
 			return now - 30 * dayMs;
 	}
+}
+
+// ─── What Changed Since Last Visit Digest ──────────────────────────────────
+
+function WhatChangedDigest({ theme, config }: { theme: Theme; config: MemoryConfig }) {
+	const lastVisit = useSettingsStore((s) => s.lastMemoryTabVisitAt);
+	const setLastVisit = useSettingsStore((s) => s.setLastMemoryTabVisitAt);
+	const [dismissed, setDismissed] = useState(false);
+	const [events, setEvents] = useState<MemoryChangeEvent[]>([]);
+	const [loaded, setLoaded] = useState(false);
+
+	// Record the visit timestamp on mount
+	useEffect(() => {
+		const now = Date.now();
+		// Defer the update so the current render uses the *previous* lastVisit
+		return () => {
+			setLastVisit(now);
+		};
+	}, []);  
+
+	// Fetch events since last visit
+	useEffect(() => {
+		if (!config.enabled || !lastVisit) return;
+		let cancelled = false;
+		window.maestro.memory
+			.getChangeLog(lastVisit, 500)
+			.then((res) => {
+				if (cancelled) return;
+				if (res.success && Array.isArray(res.data)) {
+					setEvents(res.data);
+				}
+				setLoaded(true);
+			})
+			.catch(() => setLoaded(true));
+		return () => {
+			cancelled = true;
+		};
+	}, [config.enabled, lastVisit]);
+
+	const summary = useMemo(() => {
+		const counts: Partial<Record<MemoryChangeEventType, number>> = {};
+		for (const e of events) {
+			counts[e.type] = (counts[e.type] ?? 0) + 1;
+		}
+		return counts;
+	}, [events]);
+
+	// Don't show if: disabled, dismissed, no last visit, no events, or still loading
+	if (!config.enabled || dismissed || !lastVisit || !loaded || events.length === 0) return null;
+
+	const parts: string[] = [];
+	if (summary.created)
+		parts.push(`${summary.created} new experience${summary.created > 1 ? 's' : ''} extracted`);
+	if (summary.promoted)
+		parts.push(`${summary.promoted} memor${summary.promoted > 1 ? 'ies' : 'y'} promoted to rule`);
+	if (summary.decayed)
+		parts.push(`${summary.decayed} memor${summary.decayed > 1 ? 'ies' : 'y'} had confidence decay`);
+	if (summary.pruned)
+		parts.push(`${summary.pruned} memor${summary.pruned > 1 ? 'ies' : 'y'} pruned`);
+	if (summary.updated)
+		parts.push(`${summary.updated} memor${summary.updated > 1 ? 'ies' : 'y'} updated`);
+	if (summary.deleted)
+		parts.push(`${summary.deleted} memor${summary.deleted > 1 ? 'ies' : 'y'} deleted`);
+	if (summary.consolidated)
+		parts.push(`${summary.consolidated} consolidation${summary.consolidated > 1 ? 's' : ''}`);
+	if (summary.archived)
+		parts.push(`${summary.archived} memor${summary.archived > 1 ? 'ies' : 'y'} archived`);
+	if (summary.imported)
+		parts.push(`${summary.imported} memor${summary.imported > 1 ? 'ies' : 'y'} imported`);
+
+	if (parts.length === 0) return null;
+
+	return (
+		<div
+			className="rounded-lg border px-3 py-2 text-xs"
+			style={{
+				backgroundColor: `${theme.colors.accent}08`,
+				borderColor: `${theme.colors.accent}30`,
+			}}
+		>
+			<div className="flex items-start gap-2">
+				<Zap className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: theme.colors.accent }} />
+				<div className="flex-1 min-w-0">
+					<span style={{ color: theme.colors.textDim }}>
+						Since your last visit ({formatRelativeTime(lastVisit)}):
+					</span>{' '}
+					<span style={{ color: theme.colors.textMain }}>{parts.join(', ')}</span>
+				</div>
+				<button
+					className="shrink-0 p-0.5 rounded hover:bg-white/10 transition-colors"
+					onClick={() => setDismissed(true)}
+					title="Dismiss"
+				>
+					<X className="w-3 h-3" style={{ color: theme.colors.textDim }} />
+				</button>
+			</div>
+		</div>
+	);
 }
 
 function MemoryTimelineSection({ theme, config }: { theme: Theme; config: MemoryConfig }) {
