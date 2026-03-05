@@ -27,7 +27,18 @@ vi.mock('../../memory/memory-store', () => ({
 		searchFlatScope: (...args: any[]) => mockSearchFlatScope(...args),
 		generateProjectDigest: (...args: any[]) => mockGenerateProjectDigest(...args),
 		selectMatchingPersonas: (...args: any[]) => mockSelectMatchingPersonas(...args),
+		getMemoriesDir: () => '/tmp/test-memories',
 	}),
+}));
+
+const mockReadFile = vi.fn<(...args: any[]) => Promise<string>>();
+const mockWriteFile = vi.fn<(...args: any[]) => Promise<void>>();
+const mockMkdir = vi.fn<(...args: any[]) => Promise<string | undefined>>();
+
+vi.mock('fs/promises', () => ({
+	readFile: (...args: any[]) => mockReadFile(...args),
+	writeFile: (...args: any[]) => mockWriteFile(...args),
+	mkdir: (...args: any[]) => mockMkdir(...args),
 }));
 
 import {
@@ -44,6 +55,11 @@ import {
 	generateDiffInjection,
 	getLastSessionInjection,
 	applyPreviousSessionBoost,
+	loadPersistedInjectionRecords,
+	persistInjectionRecord,
+	getPersistedLastSessionInjection,
+	getPersistedInjectionStore,
+	resetPersistedInjectionRecords,
 } from '../../memory/memory-injector';
 import type { PersonaShiftEvent, InjectionRecord } from '../../memory/memory-injector';
 
@@ -1196,6 +1212,7 @@ describe('MemoryInjector', () => {
 			clearSessionInjection('prev-session-1');
 			clearSessionInjection('prev-session-2');
 			clearSessionInjection('current-session');
+			resetPersistedInjectionRecords();
 		});
 
 		it('returns undefined when no previous sessions exist', () => {
@@ -1346,6 +1363,7 @@ describe('MemoryInjector', () => {
 		afterEach(() => {
 			clearSessionInjection('sess-meta-1');
 			clearSessionInjection('sess-meta-2');
+			resetPersistedInjectionRecords();
 		});
 
 		it('stores projectPath and agentType', () => {
@@ -1384,6 +1402,330 @@ describe('MemoryInjector', () => {
 			const record = getInjectionRecord('sess-meta-2');
 			expect(record!.projectPath).toBe('/my/project');
 			expect(record!.agentType).toBe('claude-code');
+		});
+	});
+
+	// ─── Persistent Injection Records (MEM-EVOLVE-07) ────────────────────
+
+	describe('persistent injection records', () => {
+		beforeEach(() => {
+			resetPersistedInjectionRecords();
+			mockReadFile.mockReset();
+			mockWriteFile.mockReset();
+			mockMkdir.mockReset();
+			mockWriteFile.mockResolvedValue(undefined);
+			mockMkdir.mockResolvedValue(undefined);
+		});
+
+		afterEach(() => {
+			resetPersistedInjectionRecords();
+		});
+
+		describe('persistInjectionRecord', () => {
+			it('stores a record indexed by projectPath', () => {
+				const record: InjectionRecord = {
+					ids: ['mem-1', 'mem-2'],
+					scopeGroups: [],
+					contentHashes: new Map([['mem-1', 'abc']]),
+					lastInjectedAt: 1000,
+					totalTokensSaved: 0,
+					injectionEvents: [],
+					projectPath: '/project-a',
+					agentType: 'claude-code',
+				};
+
+				persistInjectionRecord('sess-1', record);
+
+				const store = getPersistedInjectionStore();
+				expect(store).toBeDefined();
+				expect(store!.projects['/project-a::claude-code']).toHaveLength(1);
+				expect(store!.projects['/project-a::claude-code'][0].sessionId).toBe('sess-1');
+			});
+
+			it('skips records without projectPath', () => {
+				const record: InjectionRecord = {
+					ids: ['mem-1'],
+					scopeGroups: [],
+					contentHashes: new Map(),
+					lastInjectedAt: 1000,
+					totalTokensSaved: 0,
+					injectionEvents: [],
+				};
+
+				persistInjectionRecord('sess-1', record);
+
+				const store = getPersistedInjectionStore();
+				// Store may be initialized but should have no project entries
+				expect(store?.projects ?? {}).toEqual({});
+			});
+
+			it('maintains ring buffer of max 5 sessions per project', () => {
+				for (let i = 0; i < 7; i++) {
+					const record: InjectionRecord = {
+						ids: [`mem-${i}`],
+						scopeGroups: [],
+						contentHashes: new Map(),
+						lastInjectedAt: 1000 + i,
+						totalTokensSaved: 0,
+						injectionEvents: [],
+						projectPath: '/project-b',
+					};
+					persistInjectionRecord(`sess-${i}`, record);
+				}
+
+				const store = getPersistedInjectionStore();
+				const records = store!.projects['/project-b'];
+				expect(records).toHaveLength(5);
+				// Oldest two (sess-0, sess-1) should be evicted
+				expect(records[0].sessionId).toBe('sess-2');
+				expect(records[4].sessionId).toBe('sess-6');
+			});
+
+			it('deduplicates same session ID', () => {
+				const record1: InjectionRecord = {
+					ids: ['mem-1'],
+					scopeGroups: [],
+					contentHashes: new Map(),
+					lastInjectedAt: 1000,
+					totalTokensSaved: 0,
+					injectionEvents: [],
+					projectPath: '/project-c',
+				};
+				const record2: InjectionRecord = {
+					ids: ['mem-2', 'mem-3'],
+					scopeGroups: [],
+					contentHashes: new Map(),
+					lastInjectedAt: 2000,
+					totalTokensSaved: 0,
+					injectionEvents: [],
+					projectPath: '/project-c',
+				};
+
+				persistInjectionRecord('sess-dup', record1);
+				persistInjectionRecord('sess-dup', record2);
+
+				const store = getPersistedInjectionStore();
+				const records = store!.projects['/project-c'];
+				expect(records).toHaveLength(1);
+				expect(records[0].ids).toEqual(['mem-2', 'mem-3']);
+			});
+
+			it('serializes Maps as plain objects', () => {
+				const record: InjectionRecord = {
+					ids: ['mem-1'],
+					scopeGroups: [],
+					contentHashes: new Map([
+						['mem-1', 'hash-a'],
+						['mem-2', 'hash-b'],
+					]),
+					lastInjectedAt: 1000,
+					totalTokensSaved: 0,
+					injectionEvents: [],
+					projectPath: '/project-d',
+				};
+
+				persistInjectionRecord('sess-ser', record);
+
+				const store = getPersistedInjectionStore();
+				const persisted = store!.projects['/project-d'][0];
+				// Should be a plain object, not a Map
+				expect(persisted.contentHashes).toEqual({ 'mem-1': 'hash-a', 'mem-2': 'hash-b' });
+			});
+		});
+
+		describe('getPersistedLastSessionInjection', () => {
+			it('returns undefined when no persisted records exist', () => {
+				expect(getPersistedLastSessionInjection('/project')).toBeUndefined();
+			});
+
+			it('returns the most recent record for a project', () => {
+				const older: InjectionRecord = {
+					ids: ['mem-old'],
+					scopeGroups: [],
+					contentHashes: new Map(),
+					lastInjectedAt: 1000,
+					totalTokensSaved: 0,
+					injectionEvents: [],
+					projectPath: '/project-e',
+				};
+				const newer: InjectionRecord = {
+					ids: ['mem-new'],
+					scopeGroups: [],
+					contentHashes: new Map(),
+					lastInjectedAt: 2000,
+					totalTokensSaved: 0,
+					injectionEvents: [],
+					projectPath: '/project-e',
+				};
+
+				persistInjectionRecord('sess-old', older);
+				persistInjectionRecord('sess-new', newer);
+
+				const result = getPersistedLastSessionInjection('/project-e');
+				expect(result).toBeDefined();
+				expect(result!.ids).toEqual(['mem-new']);
+				expect(result!.lastInjectedAt).toBe(2000);
+			});
+
+			it('excludes current session ID', () => {
+				const record: InjectionRecord = {
+					ids: ['mem-1'],
+					scopeGroups: [],
+					contentHashes: new Map(),
+					lastInjectedAt: 1000,
+					totalTokensSaved: 0,
+					injectionEvents: [],
+					projectPath: '/project-f',
+				};
+
+				persistInjectionRecord('current-sess', record);
+
+				expect(getPersistedLastSessionInjection('/project-f', 'current-sess')).toBeUndefined();
+			});
+
+			it('deserializes contentHashes back to a Map', () => {
+				const record: InjectionRecord = {
+					ids: ['mem-1'],
+					scopeGroups: [],
+					contentHashes: new Map([['mem-1', 'hash-x']]),
+					lastInjectedAt: 1000,
+					totalTokensSaved: 0,
+					injectionEvents: [],
+					projectPath: '/project-g',
+				};
+
+				persistInjectionRecord('sess-deser', record);
+
+				const result = getPersistedLastSessionInjection('/project-g');
+				expect(result!.contentHashes).toBeInstanceOf(Map);
+				expect(result!.contentHashes.get('mem-1')).toBe('hash-x');
+			});
+		});
+
+		describe('loadPersistedInjectionRecords', () => {
+			it('loads valid JSON from disk', async () => {
+				const stored = {
+					version: 1,
+					projects: {
+						'/project-h': [
+							{
+								sessionId: 'sess-loaded',
+								ids: ['mem-1'],
+								scopeGroups: [],
+								contentHashes: { 'mem-1': 'abc' },
+								lastInjectedAt: 5000,
+								totalTokensSaved: 0,
+								injectionEvents: [],
+								projectPath: '/project-h',
+							},
+						],
+					},
+				};
+				mockReadFile.mockResolvedValue(JSON.stringify(stored));
+
+				await loadPersistedInjectionRecords();
+
+				const result = getPersistedLastSessionInjection('/project-h');
+				expect(result).toBeDefined();
+				expect(result!.ids).toEqual(['mem-1']);
+			});
+
+			it('starts fresh when file does not exist', async () => {
+				mockReadFile.mockRejectedValue(new Error('ENOENT'));
+
+				await loadPersistedInjectionRecords();
+
+				const store = getPersistedInjectionStore();
+				expect(store).toEqual({ version: 1, projects: {} });
+			});
+
+			it('starts fresh when file contains invalid JSON', async () => {
+				mockReadFile.mockResolvedValue('not json!!!');
+
+				await loadPersistedInjectionRecords();
+
+				const store = getPersistedInjectionStore();
+				expect(store).toEqual({ version: 1, projects: {} });
+			});
+		});
+
+		describe('clearSessionInjection persists before clearing', () => {
+			it('persists record to disk when clearing a session with projectPath', () => {
+				recordSessionInjection(
+					'sess-persist-clear',
+					['mem-1'],
+					[],
+					undefined,
+					undefined,
+					'spawn',
+					0,
+					'/project-persist',
+					'claude-code'
+				);
+
+				clearSessionInjection('sess-persist-clear');
+
+				// In-memory record should be gone
+				expect(getInjectionRecord('sess-persist-clear')).toBeUndefined();
+
+				// Persisted record should exist
+				const persisted = getPersistedLastSessionInjection('/project-persist');
+				expect(persisted).toBeDefined();
+				expect(persisted!.ids).toEqual(['mem-1']);
+			});
+		});
+
+		describe('getLastSessionInjection falls back to persisted', () => {
+			it('returns persisted record when in-memory map is empty', () => {
+				// Persist a record directly
+				const record: InjectionRecord = {
+					ids: ['mem-fallback'],
+					scopeGroups: [],
+					contentHashes: new Map(),
+					lastInjectedAt: 3000,
+					totalTokensSaved: 0,
+					injectionEvents: [],
+					projectPath: '/project-fallback',
+				};
+				persistInjectionRecord('old-sess', record);
+
+				// getLastSessionInjection should find it via persisted fallback
+				const result = getLastSessionInjection('/project-fallback');
+				expect(result).toBeDefined();
+				expect(result!.ids).toEqual(['mem-fallback']);
+			});
+
+			it('prefers in-memory record over persisted when both exist', () => {
+				// Persist an older record
+				const persistedRecord: InjectionRecord = {
+					ids: ['mem-persisted'],
+					scopeGroups: [],
+					contentHashes: new Map(),
+					lastInjectedAt: 1000,
+					totalTokensSaved: 0,
+					injectionEvents: [],
+					projectPath: '/project-both',
+				};
+				persistInjectionRecord('old-sess', persistedRecord);
+
+				// Record a newer in-memory session
+				recordSessionInjection(
+					'in-memory-sess',
+					['mem-inmemory'],
+					[],
+					undefined,
+					undefined,
+					'spawn',
+					0,
+					'/project-both'
+				);
+
+				const result = getLastSessionInjection('/project-both', 'current-sess');
+				expect(result).toBeDefined();
+				expect(result!.ids).toEqual(['mem-inmemory']);
+
+				clearSessionInjection('in-memory-sess');
+			});
 		});
 	});
 });

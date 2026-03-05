@@ -6,6 +6,9 @@
  * Groups output by persona/skill for readable injection.
  */
 
+import * as fs from 'fs/promises';
+import * as path from 'path';
+
 import type {
 	MemoryConfig,
 	MemoryInjectionResult,
@@ -1230,8 +1233,14 @@ export function getInjectionRecord(sessionId: string): InjectionRecord | undefin
 
 /**
  * Clear the injection record for a session (e.g., after session ends).
+ * Persists the record to disk before removing from in-memory map,
+ * enabling cross-session continuity after app restart.
  */
 export function clearSessionInjection(sessionId: string): void {
+	const record = _sessionInjections.get(sessionId);
+	if (record) {
+		persistInjectionRecord(sessionId, record);
+	}
 	_sessionInjections.delete(sessionId);
 }
 
@@ -1244,11 +1253,15 @@ const PREVIOUS_SESSION_BOOST = 0.15;
  * Find the most recent injection record for a given project path,
  * excluding the current session. Used to boost memories that were
  * relevant in the user's last session on the same project.
+ *
+ * Falls back to persisted records when in-memory map has no match
+ * (e.g., after app restart).
  */
 export function getLastSessionInjection(
 	projectPath: string,
 	currentSessionId?: string
 ): InjectionRecord | undefined {
+	// First check in-memory sessions
 	let best: InjectionRecord | undefined;
 	let bestTime = 0;
 	for (const [sid, record] of _sessionInjections) {
@@ -1259,7 +1272,11 @@ export function getLastSessionInjection(
 			best = record;
 		}
 	}
-	return best;
+
+	if (best) return best;
+
+	// Fall back to persisted records (cross-restart continuity)
+	return getPersistedLastSessionInjection(projectPath, currentSessionId);
 }
 
 /**
@@ -1280,6 +1297,203 @@ export function applyPreviousSessionBoost(
 	});
 	boosted.sort((a, b) => b.combinedScore - a.combinedScore);
 	return boosted;
+}
+
+// ─── Persistent Injection Records (MEM-EVOLVE-07) ───────────────────────────
+
+/** Max sessions to keep per project key in the persisted store. */
+const MAX_PERSISTED_SESSIONS_PER_PROJECT = 5;
+
+/** Filename for persisted injection records. */
+const INJECTION_RECORDS_FILE = 'injection-records.json';
+
+/**
+ * JSON-serializable version of InjectionRecord.
+ * Maps are converted to plain objects for persistence.
+ */
+interface SerializableInjectionRecord {
+	sessionId: string;
+	ids: MemoryId[];
+	scopeGroups: InjectionScopeRecord[];
+	contentHashes: Record<string, string>;
+	lastInjectedAt: number;
+	totalTokensSaved: number;
+	injectionEvents: InjectionTrackingEvent[];
+	projectPath?: string;
+	agentType?: string;
+}
+
+/** Persisted file structure: map of project key → ring buffer of records. */
+interface PersistedInjectionStore {
+	version: 1;
+	projects: Record<string, SerializableInjectionRecord[]>;
+}
+
+/** In-memory cache of persisted records. */
+let _persistedRecords: PersistedInjectionStore | null = null;
+
+/** Build a project key from projectPath and optional agentType. */
+function injectionProjectKey(projectPath: string, agentType?: string): string {
+	return agentType ? `${projectPath}::${agentType}` : projectPath;
+}
+
+/** Convert InjectionRecord to serializable form. */
+function serializeRecord(sessionId: string, record: InjectionRecord): SerializableInjectionRecord {
+	const contentHashes: Record<string, string> = {};
+	for (const [k, v] of record.contentHashes) {
+		contentHashes[k] = v;
+	}
+	return {
+		sessionId,
+		ids: [...record.ids],
+		scopeGroups: record.scopeGroups.map((sg) => ({ ...sg, ids: [...sg.ids] })),
+		contentHashes,
+		lastInjectedAt: record.lastInjectedAt,
+		totalTokensSaved: record.totalTokensSaved,
+		injectionEvents: record.injectionEvents.map((e) => ({ ...e, memoryIds: [...e.memoryIds] })),
+		projectPath: record.projectPath,
+		agentType: record.agentType,
+	};
+}
+
+/** Convert serializable record back to InjectionRecord. */
+function deserializeRecord(sr: SerializableInjectionRecord): InjectionRecord {
+	return {
+		ids: sr.ids,
+		scopeGroups: sr.scopeGroups,
+		contentHashes: new Map(Object.entries(sr.contentHashes)),
+		lastInjectedAt: sr.lastInjectedAt,
+		totalTokensSaved: sr.totalTokensSaved,
+		injectionEvents: sr.injectionEvents,
+		projectPath: sr.projectPath,
+		agentType: sr.agentType,
+	};
+}
+
+/** Get the file path for persisted injection records. */
+function getInjectionRecordsPath(): string {
+	return path.join(getMemoryStore().getMemoriesDir(), INJECTION_RECORDS_FILE);
+}
+
+/**
+ * Load persisted injection records from disk.
+ * Called on memory system initialization.
+ */
+export async function loadPersistedInjectionRecords(): Promise<void> {
+	try {
+		const filePath = getInjectionRecordsPath();
+		const raw = await fs.readFile(filePath, 'utf-8');
+		const parsed = JSON.parse(raw) as PersistedInjectionStore;
+		if (parsed.version === 1 && parsed.projects) {
+			_persistedRecords = parsed;
+		}
+	} catch {
+		// File doesn't exist or is corrupt — start fresh
+		_persistedRecords = { version: 1, projects: {} };
+	}
+}
+
+/**
+ * Save persisted injection records to disk.
+ * Fire-and-forget — errors are silently ignored.
+ */
+async function savePersistedInjectionRecords(): Promise<void> {
+	if (!_persistedRecords) return;
+	try {
+		const filePath = getInjectionRecordsPath();
+		await fs.mkdir(path.dirname(filePath), { recursive: true });
+		await fs.writeFile(filePath, JSON.stringify(_persistedRecords, null, 2), 'utf-8');
+	} catch {
+		// Non-critical — best effort persistence
+	}
+}
+
+/**
+ * Persist a session's injection record to the ring buffer.
+ * Should be called when a session ends (before clearing from in-memory map).
+ */
+export function persistInjectionRecord(sessionId: string, record: InjectionRecord): void {
+	if (!record.projectPath) return; // Can't persist without project context
+	if (!_persistedRecords) {
+		_persistedRecords = { version: 1, projects: {} };
+	}
+
+	const key = injectionProjectKey(record.projectPath, record.agentType);
+	const serialized = serializeRecord(sessionId, record);
+
+	if (!_persistedRecords.projects[key]) {
+		_persistedRecords.projects[key] = [];
+	}
+
+	const ringBuffer = _persistedRecords.projects[key];
+
+	// Remove existing entry for same session if present
+	const existingIdx = ringBuffer.findIndex((r) => r.sessionId === sessionId);
+	if (existingIdx >= 0) {
+		ringBuffer.splice(existingIdx, 1);
+	}
+
+	ringBuffer.push(serialized);
+
+	// Trim to ring buffer size
+	while (ringBuffer.length > MAX_PERSISTED_SESSIONS_PER_PROJECT) {
+		ringBuffer.shift();
+	}
+
+	// Fire-and-forget save
+	savePersistedInjectionRecords().catch(() => {});
+}
+
+/**
+ * Look up the most recent persisted injection record for a project.
+ * Used as fallback when in-memory map doesn't have previous sessions
+ * (e.g., after app restart).
+ */
+export function getPersistedLastSessionInjection(
+	projectPath: string,
+	currentSessionId?: string,
+	agentType?: string
+): InjectionRecord | undefined {
+	if (!_persistedRecords) return undefined;
+
+	// Search all matching project keys (with and without agent type)
+	const candidates: SerializableInjectionRecord[] = [];
+	for (const [key, records] of Object.entries(_persistedRecords.projects)) {
+		if (key === projectPath || key.startsWith(`${projectPath}::`)) {
+			if (agentType) {
+				// Prefer exact match
+				if (key === injectionProjectKey(projectPath, agentType)) {
+					for (const r of records) {
+						if (r.sessionId !== currentSessionId) candidates.push(r);
+					}
+				}
+			} else {
+				for (const r of records) {
+					if (r.sessionId !== currentSessionId) candidates.push(r);
+				}
+			}
+		}
+	}
+
+	if (candidates.length === 0) return undefined;
+
+	// Return most recent
+	candidates.sort((a, b) => b.lastInjectedAt - a.lastInjectedAt);
+	return deserializeRecord(candidates[0]);
+}
+
+/**
+ * Get all persisted injection records (for testing/diagnostics).
+ */
+export function getPersistedInjectionStore(): PersistedInjectionStore | null {
+	return _persistedRecords;
+}
+
+/**
+ * Reset persisted records (for testing).
+ */
+export function resetPersistedInjectionRecords(): void {
+	_persistedRecords = null;
 }
 
 // ─── Injection Diagnostics ──────────────────────────────────────────────────

@@ -85,6 +85,11 @@ export class MemoryStore {
 	private readonly writeQueues = new Map<string, Promise<void>>();
 	readonly changelog: MemoryChangeLog;
 
+	/** Public accessor for the memories directory path. */
+	getMemoriesDir(): string {
+		return this.memoriesDir;
+	}
+
 	// ─── Registry Cache ────────────────────────────────────────────────────
 	private registryCache: RegistryFile | null = null;
 	private registryCacheTime = 0;

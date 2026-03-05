@@ -13,7 +13,10 @@ import * as crypto from 'crypto';
 import { logger } from '../../utils/logger';
 import { createIpcDataHandler, CreateHandlerOptions } from '../../utils/ipcHandler';
 import type { MemoryStore } from '../../memory/memory-store';
-import { setMemorySettingsStore } from '../../memory/memory-injector';
+import {
+	setMemorySettingsStore,
+	loadPersistedInjectionRecords,
+} from '../../memory/memory-injector';
 import type {
 	MemoryScope,
 	SkillAreaId,
@@ -73,6 +76,15 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		})
 		.catch(() => {
 			// Non-critical — cache will populate on first search
+		});
+
+	// Load persisted injection records for cross-session continuity (MEM-EVOLVE-07)
+	loadPersistedInjectionRecords()
+		.then(() => {
+			logger.debug('Persisted injection records loaded', LOG_CONTEXT);
+		})
+		.catch(() => {
+			// Non-critical — fresh start without previous session data
 		});
 
 	// ─── Config ───────────────────────────────────────────────────────────
