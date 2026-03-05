@@ -3420,6 +3420,11 @@ export class MemoryStore {
 			'Promoted from experience'
 		);
 
+		// Milestone check: first promotion (MEM-EVOLVE-08)
+		import('./memory-milestones')
+			.then(({ checkMemoryMilestones }) => checkMemoryMilestones(this, 'promotion'))
+			.catch(() => {});
+
 		return lib.entries[idx];
 	}
 
@@ -3558,6 +3563,13 @@ export class MemoryStore {
 			} catch {
 				// Non-fatal — will retry next scan
 			}
+		}
+
+		// Milestone check: first cross-project evidence (MEM-EVOLVE-08)
+		if (annotated > 0) {
+			import('./memory-milestones')
+				.then(({ checkMemoryMilestones }) => checkMemoryMilestones(this, 'cross-project-evidence'))
+				.catch(() => {});
 		}
 
 		return annotated;

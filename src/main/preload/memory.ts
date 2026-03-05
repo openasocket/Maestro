@@ -527,6 +527,31 @@ export function createMemoryApi() {
 			};
 		},
 
+		onMilestone: (
+			callback: (data: {
+				id: number;
+				title: string;
+				message: string;
+				type: 'success' | 'info';
+				duration: number;
+			}) => void
+		) => {
+			const handler = (
+				_event: unknown,
+				data: {
+					id: number;
+					title: string;
+					message: string;
+					type: 'success' | 'info';
+					duration: number;
+				}
+			) => callback(data);
+			ipcRenderer.on('memory:milestone', handler);
+			return () => {
+				ipcRenderer.removeListener('memory:milestone', handler);
+			};
+		},
+
 		// ─── Experience Repository ───────────────────────────────────────
 		repository: {
 			importFromFile: (

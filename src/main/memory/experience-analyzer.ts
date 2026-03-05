@@ -2033,6 +2033,11 @@ export class ExperienceAnalyzer {
 					}
 				})
 				.catch(() => {});
+
+			// Milestone check: fire toast on experience count thresholds (MEM-EVOLVE-08)
+			import('./memory-milestones')
+				.then(({ checkMemoryMilestones }) => checkMemoryMilestones(store, 'experience-count'))
+				.catch(() => {});
 		}
 
 		return stored;

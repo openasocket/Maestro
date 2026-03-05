@@ -3172,6 +3172,15 @@ interface MaestroAPI {
 		onFirstInjection: (
 			callback: (data: { count: number; tokenCount: number; personaName?: string }) => void
 		) => () => void;
+		onMilestone: (
+			callback: (data: {
+				id: number;
+				title: string;
+				message: string;
+				type: 'success' | 'info';
+				duration: number;
+			}) => void
+		) => () => void;
 
 		// ─── Experience Repository (programmatic API) ─────────────────────
 		repository: {

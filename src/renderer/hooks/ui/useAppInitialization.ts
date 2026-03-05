@@ -280,6 +280,19 @@ export function useAppInitialization(): AppInitializationReturn {
 		return () => cleanup?.();
 	}, []);
 
+	// --- Memory milestone notifications (MEM-EVOLVE-08) ---
+	useEffect(() => {
+		const cleanup = window.maestro?.memory?.onMilestone?.((data) => {
+			notifyToast({
+				type: data.type,
+				title: data.title,
+				message: data.message,
+				duration: data.duration,
+			});
+		});
+		return () => cleanup?.();
+	}, []);
+
 	// --- Notification settings sync ---
 	useEffect(() => {
 		useNotificationStore.getState().setDefaultDuration(toastDuration);

@@ -346,6 +346,11 @@ export interface MemoryConfig {
 	 * Never auto-demotes — only manual reset.
 	 */
 	userEngagementLevel?: 0 | 1 | 2;
+	/**
+	 * Milestone IDs that have already been shown to the user.
+	 * Milestones: 10 = 10 experiences, 50 = 50 memories, 100 = first promotion, 200 = first cross-project evidence.
+	 */
+	memoryMilestonesShown?: number[];
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -392,6 +397,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	_autoEnabledBannerDismissed: false,
 	_firstInjectionNotified: false,
 	userEngagementLevel: 0,
+	memoryMilestonesShown: [],
 };
 
 // ─── Checkpoint Injection Types ────────────────────────────────────────────
