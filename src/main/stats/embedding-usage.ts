@@ -21,6 +21,7 @@ export interface EmbeddingUsageSummary {
 	totalTokens: number;
 	totalCostUsd: number;
 	totalTexts: number;
+	avgDurationMs: number;
 	byProvider: Record<string, { tokens: number; cost: number; texts: number }>;
 }
 
@@ -61,11 +62,17 @@ export function getEmbeddingUsageSummary(
 			`SELECT
 				COALESCE(SUM(token_count), 0) AS totalTokens,
 				COALESCE(SUM(cost_usd), 0) AS totalCostUsd,
-				COALESCE(SUM(text_count), 0) AS totalTexts
+				COALESCE(SUM(text_count), 0) AS totalTexts,
+				COALESCE(AVG(duration_ms), 0) AS avgDurationMs
 			FROM embedding_usage
 			WHERE timestamp >= ?`
 		)
-		.get(since) as { totalTokens: number; totalCostUsd: number; totalTexts: number };
+		.get(since) as {
+		totalTokens: number;
+		totalCostUsd: number;
+		totalTexts: number;
+		avgDurationMs: number;
+	};
 
 	const providerRows = db
 		.prepare(
@@ -93,6 +100,7 @@ export function getEmbeddingUsageSummary(
 		totalTokens: totalRow.totalTokens,
 		totalCostUsd: totalRow.totalCostUsd,
 		totalTexts: totalRow.totalTexts,
+		avgDurationMs: totalRow.avgDurationMs,
 		byProvider,
 	};
 }

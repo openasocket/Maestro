@@ -3364,6 +3364,48 @@ interface MaestroAPI {
 				message?: string;
 			}) => void
 		) => () => void;
+		getOllamaModels: (
+			baseUrl?: string
+		) => Promise<{ success: true; data: { models: string[] } } | { success: false; error: string }>;
+		checkOllamaConnection: (
+			baseUrl?: string
+		) => Promise<
+			| { success: true; data: { connected: boolean; modelCount: number } }
+			| { success: false; error: string }
+		>;
+		pullOllamaModel: (
+			model: string,
+			baseUrl?: string
+		) => Promise<{ success: true; data: { success: boolean } } | { success: false; error: string }>;
+		hasOpenAIKey: () => Promise<
+			{ success: true; data: boolean } | { success: false; error: string }
+		>;
+		setOpenAIKey: (
+			key: string
+		) => Promise<{ success: true; data: void } | { success: false; error: string }>;
+		clearOpenAIKey: () => Promise<
+			{ success: true; data: void } | { success: false; error: string }
+		>;
+		getUsageSummary: (since: number) => Promise<
+			| {
+					success: true;
+					data: {
+						totalTokens: number;
+						totalCostUsd: number;
+						totalTexts: number;
+						avgDurationMs: number;
+						byProvider: Record<string, { tokens: number; cost: number; texts: number }>;
+					};
+			  }
+			| { success: false; error: string }
+		>;
+		getUsageTimeline: (
+			since: number,
+			bucketMs: number
+		) => Promise<
+			| { success: true; data: Array<{ bucket: number; tokens: number; cost: number }> }
+			| { success: false; error: string }
+		>;
 	};
 
 	// WakaTime API (CLI check, API key validation)

@@ -5,7 +5,7 @@
  * Provides diagnostics, injection tracking, and visual evidence of memory system value.
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
 	AlertTriangle,
 	Archive,
@@ -21,6 +21,7 @@ import {
 	Star,
 	TrendingUp,
 	Users,
+	DollarSign,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
@@ -31,6 +32,10 @@ import type {
 	TokenUsage,
 	ExtractionDiagnostic,
 } from '../../../shared/memory-types';
+import type {
+	EmbeddingUsageSummary,
+	EmbeddingUsageBucket,
+} from '../../../main/stats/embedding-usage';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
 import { SectionHeader } from './SectionHeader';
 
@@ -190,10 +195,13 @@ export function StatusTab({
 				{/* Section 4: Impact Dashboard */}
 				{stats && <ImpactDashboardSection stats={stats} theme={theme} allMemories={allMemories} />}
 
-				{/* Section 5: Promotion History */}
+				{/* Section 5: Embedding Usage */}
+				<EmbeddingUsageSection theme={theme} config={config} />
+
+				{/* Section 6: Promotion History */}
 				<PromotionHistorySection theme={theme} allMemories={allMemories} />
 
-				{/* Section 6: Persona Shifts */}
+				{/* Section 7: Persona Shifts */}
 				<PersonaShiftSection theme={theme} config={config} allMemories={allMemories} />
 			</div>
 		</div>
@@ -1634,7 +1642,272 @@ function formatBytes(bytes: number): string {
 	return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-// ─── Section 5: Promotion History ──────────────────────────────────────────────
+// ─── Section 5: Embedding Usage ─────────────────────────────────────────────────
+
+function EmbeddingUsageSection({ theme, config }: { theme: Theme; config: MemoryConfig }) {
+	const [expanded, setExpanded] = useState(false);
+	const [summaryAllTime, setSummaryAllTime] = useState<EmbeddingUsageSummary | null>(null);
+	const [summary24h, setSummary24h] = useState<EmbeddingUsageSummary | null>(null);
+	const [summary7d, setSummary7d] = useState<EmbeddingUsageSummary | null>(null);
+	const [summary30d, setSummary30d] = useState<EmbeddingUsageSummary | null>(null);
+	const [timeline, setTimeline] = useState<EmbeddingUsageBucket[]>([]);
+	const [providerStatus, setProviderStatus] = useState<{
+		ready: boolean;
+		modelName: string;
+		error?: string;
+	} | null>(null);
+
+	const isCloud = config.embeddingProvider?.providerId === 'openai';
+	const providerId = config.embeddingProvider?.providerId ?? null;
+
+	const fetchUsage = useCallback(async () => {
+		const now = Date.now();
+		try {
+			const results = await Promise.allSettled([
+				window.maestro.embedding.getUsageSummary(0), // all-time
+				window.maestro.embedding.getUsageSummary(now - 86400000),
+				window.maestro.embedding.getUsageSummary(now - 604800000),
+				window.maestro.embedding.getStatus(),
+				...(isCloud
+					? [
+							window.maestro.embedding.getUsageSummary(now - 2592000000),
+							window.maestro.embedding.getUsageTimeline(now - 604800000, 86400000),
+						]
+					: []),
+			]);
+			if (results[0].status === 'fulfilled' && results[0].value.success)
+				setSummaryAllTime(results[0].value.data);
+			if (results[1].status === 'fulfilled' && results[1].value.success)
+				setSummary24h(results[1].value.data);
+			if (results[2].status === 'fulfilled' && results[2].value.success)
+				setSummary7d(results[2].value.data);
+			if (results[3].status === 'fulfilled' && results[3].value.success) {
+				const statusData = results[3].value.data;
+				if (providerId && statusData.statuses[providerId]) {
+					setProviderStatus(statusData.statuses[providerId]);
+				}
+			}
+			if (isCloud) {
+				if (
+					results[4]?.status === 'fulfilled' &&
+					(results[4].value as { success: boolean; data?: EmbeddingUsageSummary }).success
+				)
+					setSummary30d(
+						(results[4].value as { success: boolean; data: EmbeddingUsageSummary }).data
+					);
+				if (
+					results[5]?.status === 'fulfilled' &&
+					(results[5].value as { success: boolean; data?: EmbeddingUsageBucket[] }).success
+				)
+					setTimeline(
+						(results[5].value as { success: boolean; data: EmbeddingUsageBucket[] }).data
+					);
+			}
+		} catch {
+			// Non-critical
+		}
+	}, [isCloud, providerId]);
+
+	useEffect(() => {
+		if (!config.enabled) return;
+		fetchUsage();
+	}, [config.enabled, fetchUsage]);
+
+	const providerName = providerId ?? 'none';
+	const latencyStr =
+		summary24h && summary24h.totalTexts > 0 && summary24h.avgDurationMs > 0
+			? `${Math.round(summary24h.avgDurationMs)}ms`
+			: 'N/A';
+
+	// Billing period estimate: extrapolate 30d cost to current month
+	const billingEstimate = useMemo(() => {
+		if (!isCloud || !summary30d) return null;
+		const now = new Date();
+		const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+		const dayOfMonth = now.getDate();
+		if (dayOfMonth === 0 || summary30d.totalCostUsd === 0) return null;
+		const dailyAvg = summary30d.totalCostUsd / 30;
+		return dailyAvg * daysInMonth;
+	}, [isCloud, summary30d]);
+
+	return (
+		<div className="rounded-lg border overflow-hidden" style={{ borderColor: theme.colors.border }}>
+			<SectionHeader
+				title="Embedding Usage"
+				theme={theme}
+				icon={DollarSign}
+				description={isCloud ? 'Cost & usage tracking' : 'Usage tracking'}
+				collapsible
+				collapsed={!expanded}
+				onToggle={() => setExpanded((v) => !v)}
+			/>
+
+			{expanded && (
+				<div className="px-4 pb-4 space-y-3 border-t" style={{ borderColor: theme.colors.border }}>
+					{/* Provider info with model name and status */}
+					<div
+						className="flex items-center gap-2 pt-3 text-xs"
+						style={{ color: theme.colors.textDim }}
+					>
+						<span>Provider:</span>
+						<span style={{ color: theme.colors.textMain, fontWeight: 500 }}>{providerName}</span>
+						{providerStatus && (
+							<>
+								<span>·</span>
+								<span style={{ color: theme.colors.textMain }}>{providerStatus.modelName}</span>
+								<span>·</span>
+								<span
+									className="inline-flex items-center gap-1"
+									style={{
+										color: providerStatus.ready
+											? '#22c55e'
+											: providerStatus.error
+												? '#ef4444'
+												: theme.colors.textDim,
+									}}
+								>
+									<span
+										className="inline-block w-1.5 h-1.5 rounded-full"
+										style={{
+											backgroundColor: providerStatus.ready
+												? '#22c55e'
+												: providerStatus.error
+													? '#ef4444'
+													: theme.colors.textDim,
+										}}
+									/>
+									{providerStatus.ready ? 'Ready' : providerStatus.error ? 'Error' : 'Inactive'}
+								</span>
+							</>
+						)}
+					</div>
+
+					{/* Core metrics */}
+					<div className="grid grid-cols-3 gap-2">
+						<UsageStatCard
+							theme={theme}
+							label="Texts (all-time)"
+							value={formatNumber(summaryAllTime?.totalTexts ?? 0)}
+						/>
+						<UsageStatCard theme={theme} label="Texts (24h)" value={summary24h?.totalTexts ?? 0} />
+						<UsageStatCard theme={theme} label="Avg Latency" value={latencyStr} />
+					</div>
+
+					{/* OpenAI-specific: cost breakdown */}
+					{isCloud && (
+						<>
+							<div className="text-xs font-medium pt-1" style={{ color: theme.colors.textMain }}>
+								Cost Breakdown
+							</div>
+							<div className="grid grid-cols-3 gap-2">
+								<UsageStatCard
+									theme={theme}
+									label="Tokens (24h)"
+									value={formatNumber(summary24h?.totalTokens ?? 0)}
+									sub={`$${(summary24h?.totalCostUsd ?? 0).toFixed(4)}`}
+								/>
+								<UsageStatCard
+									theme={theme}
+									label="Tokens (7d)"
+									value={formatNumber(summary7d?.totalTokens ?? 0)}
+									sub={`$${(summary7d?.totalCostUsd ?? 0).toFixed(4)}`}
+								/>
+								<UsageStatCard
+									theme={theme}
+									label="Tokens (30d)"
+									value={formatNumber(summary30d?.totalTokens ?? 0)}
+									sub={`$${(summary30d?.totalCostUsd ?? 0).toFixed(4)}`}
+								/>
+							</div>
+
+							{/* Billing period estimate */}
+							{billingEstimate !== null && billingEstimate > 0 && (
+								<div
+									className="flex items-center gap-2 p-2 rounded-lg text-xs"
+									style={{ backgroundColor: theme.colors.bgActivity }}
+								>
+									<TrendingUp
+										className="w-3.5 h-3.5 shrink-0"
+										style={{ color: theme.colors.accent }}
+									/>
+									<span style={{ color: theme.colors.textDim }}>Current period estimate:</span>
+									<span style={{ color: theme.colors.textMain, fontWeight: 600 }}>
+										${billingEstimate.toFixed(4)}
+									</span>
+								</div>
+							)}
+
+							{/* Mini bar chart for daily cost */}
+							{timeline.length > 0 && (
+								<div className="pt-1">
+									<div className="text-xs mb-1.5" style={{ color: theme.colors.textDim }}>
+										Daily Cost (7d)
+									</div>
+									<div className="flex items-end gap-1" style={{ height: 40 }}>
+										{(() => {
+											const maxCost = Math.max(...timeline.map((b) => b.cost), 0.0001);
+											return timeline.map((bucket, i) => (
+												<div
+													key={i}
+													className="flex-1 rounded-t"
+													style={{
+														height: `${Math.max((bucket.cost / maxCost) * 100, 2)}%`,
+														backgroundColor: theme.colors.accent,
+														opacity: 0.7,
+													}}
+													title={`$${bucket.cost.toFixed(4)} — ${new Date(bucket.bucket).toLocaleDateString()}`}
+												/>
+											));
+										})()}
+									</div>
+								</div>
+							)}
+						</>
+					)}
+				</div>
+			)}
+		</div>
+	);
+}
+
+function UsageStatCard({
+	theme,
+	label,
+	value,
+	sub,
+}: {
+	theme: Theme;
+	label: string;
+	value: string | number;
+	sub?: string;
+}) {
+	return (
+		<div
+			className="p-2 rounded-lg text-center"
+			style={{ backgroundColor: theme.colors.bgActivity }}
+		>
+			<div className="text-sm font-bold" style={{ color: theme.colors.textMain }}>
+				{value}
+			</div>
+			<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
+				{label}
+			</div>
+			{sub && (
+				<div className="text-[10px] mt-0.5" style={{ color: theme.colors.accent }}>
+					{sub}
+				</div>
+			)}
+		</div>
+	);
+}
+
+function formatNumber(n: number): string {
+	if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+	if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+	return String(n);
+}
+
+// ─── Section 6: Promotion History ──────────────────────────────────────────────
 
 function PromotionHistorySection({
 	theme,

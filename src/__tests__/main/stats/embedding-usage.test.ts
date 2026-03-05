@@ -11,7 +11,7 @@ import * as os from 'os';
 
 const mockStatement = {
 	run: vi.fn(() => ({ changes: 1 })),
-	get: vi.fn(() => ({ totalTokens: 0, totalCostUsd: 0, totalTexts: 0 })),
+	get: vi.fn(() => ({ totalTokens: 0, totalCostUsd: 0, totalTexts: 0, avgDurationMs: 0 })),
 	all: vi.fn(() => []),
 };
 
@@ -144,6 +144,7 @@ describe('Embedding usage tracking', () => {
 							totalTokens: 5000,
 							totalCostUsd: 0.0001,
 							totalTexts: 10,
+							avgDurationMs: 125,
 						})),
 					};
 				}
@@ -168,6 +169,7 @@ describe('Embedding usage tracking', () => {
 			expect(summary.totalTokens).toBe(5000);
 			expect(summary.totalCostUsd).toBe(0.0001);
 			expect(summary.totalTexts).toBe(10);
+			expect(summary.avgDurationMs).toBe(125);
 			expect(summary.byProvider['openai']).toEqual({
 				tokens: 3000,
 				cost: 0.00006,
@@ -189,6 +191,7 @@ describe('Embedding usage tracking', () => {
 							totalTokens: 0,
 							totalCostUsd: 0,
 							totalTexts: 0,
+							avgDurationMs: 0,
 						})),
 					};
 				}
