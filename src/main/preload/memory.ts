@@ -429,6 +429,9 @@ export function createMemoryApi() {
 		getTokenUsage: (): Promise<IpcResponse<TokenUsage>> =>
 			ipcRenderer.invoke('memory:getTokenUsage'),
 
+		getStoreSize: (): Promise<IpcResponse<{ totalBytes: number; fileCount: number }>> =>
+			ipcRenderer.invoke('memory:getStoreSize'),
+
 		analyzeHistoricalSessions: (): Promise<
 			IpcResponse<{ total: number; queued: number; skipped: number }>
 		> => ipcRenderer.invoke('memory:analyzeHistoricalSessions'),

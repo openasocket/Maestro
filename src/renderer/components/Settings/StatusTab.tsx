@@ -858,6 +858,9 @@ function SystemMetricsSection({ theme }: { theme: Theme }) {
 	} | null>(null);
 	const [queueStatus, setQueueStatus] = useState<JobQueueStatus | null>(null);
 	const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
+	const [storeSize, setStoreSize] = useState<{ totalBytes: number; fileCount: number } | null>(
+		null
+	);
 
 	useEffect(() => {
 		let mounted = true;
@@ -866,7 +869,8 @@ function SystemMetricsSection({ theme }: { theme: Theme }) {
 			window.maestro.settings.get('grpo:modelStatus'),
 			window.maestro.memory.getJobQueueStatus(),
 			window.maestro.memory.getTokenUsage(),
-		]).then(([embResult, queueResult, tokenResult]) => {
+			window.maestro.memory.getStoreSize(),
+		]).then(([embResult, queueResult, tokenResult, sizeResult]) => {
 			if (!mounted) return;
 			if (
 				embResult.status === 'fulfilled' &&
@@ -884,6 +888,13 @@ function SystemMetricsSection({ theme }: { theme: Theme }) {
 			if (tokenResult.status === 'fulfilled') {
 				const res = tokenResult.value as { success: boolean; data?: TokenUsage };
 				if (res.success && res.data) setTokenUsage(res.data);
+			}
+			if (sizeResult.status === 'fulfilled') {
+				const res = sizeResult.value as {
+					success: boolean;
+					data?: { totalBytes: number; fileCount: number };
+				};
+				if (res.success && res.data) setStoreSize(res.data);
 			}
 		});
 
@@ -978,7 +989,30 @@ function SystemMetricsSection({ theme }: { theme: Theme }) {
 						</div>
 					)}
 
-					{!embeddingStatus && !tokenUsage && !queueStatus && (
+					{/* Search Performance */}
+					<div className="flex items-center gap-2 text-xs">
+						<div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: '#6b7280' }} />
+						<span style={{ color: theme.colors.textMain }}>Search Performance</span>
+						<span className="ml-auto text-[10px]" style={{ color: theme.colors.textDim }}>
+							Not tracked
+						</span>
+					</div>
+
+					{/* Store Size */}
+					{storeSize && (
+						<div className="flex items-center gap-2 text-xs">
+							<div
+								className="w-2 h-2 rounded-full shrink-0"
+								style={{ backgroundColor: '#22c55e' }}
+							/>
+							<span style={{ color: theme.colors.textMain }}>Store Size</span>
+							<span className="ml-auto text-[10px]" style={{ color: theme.colors.textDim }}>
+								{formatBytes(storeSize.totalBytes)} ({storeSize.fileCount} files)
+							</span>
+						</div>
+					)}
+
+					{!embeddingStatus && !tokenUsage && !queueStatus && !storeSize && (
 						<div className="text-xs" style={{ color: theme.colors.textDim }}>
 							No metrics available
 						</div>
@@ -1236,6 +1270,13 @@ function ImpactDashboardSection({
 }
 
 // ─── Utilities ──────────────────────────────────────────────────────────────────
+
+function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes} B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+	if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
 
 function formatInjectionTime(ts: number): string {
 	return formatRelativeTime(ts);

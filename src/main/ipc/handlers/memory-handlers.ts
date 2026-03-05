@@ -856,6 +856,13 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		})
 	);
 
+	ipcMain.handle(
+		'memory:getStoreSize',
+		createIpcDataHandler(handlerOpts('getStoreSize'), async () => {
+			return store.getStoreSize();
+		})
+	);
+
 	// ─── Retroactive Analysis ────────────────────────────────────────────
 
 	ipcMain.handle(

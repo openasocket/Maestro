@@ -3082,6 +3082,10 @@ interface MaestroAPI {
 			| { success: true; data: import('../shared/memory-types').TokenUsage }
 			| { success: false; error: string }
 		>;
+		getStoreSize: () => Promise<
+			| { success: true; data: { totalBytes: number; fileCount: number } }
+			| { success: false; error: string }
+		>;
 		analyzeHistoricalSessions: () => Promise<
 			| { success: true; data: { total: number; queued: number; skipped: number } }
 			| { success: false; error: string }

@@ -231,6 +231,7 @@ describe('Memory IPC Handler Round-Trips', () => {
 				'memory:getRecentInjections',
 				'memory:getJobQueueStatus',
 				'memory:getTokenUsage',
+				'memory:getStoreSize',
 				'memory:analyzeHistoricalSessions',
 				'memory:getAnalysisStats',
 				'memory:analyzeAgentSessions',

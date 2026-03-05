@@ -3702,6 +3702,41 @@ export class MemoryStore {
 		this._analyticsCache = { data: stats, timestamp: now };
 		return stats;
 	}
+
+	/**
+	 * Calculate approximate disk usage of the memories directory.
+	 * Walks the tree recursively, summing file sizes.
+	 */
+	async getStoreSize(): Promise<{ totalBytes: number; fileCount: number }> {
+		let totalBytes = 0;
+		let fileCount = 0;
+
+		const walk = async (dir: string): Promise<void> => {
+			let entries: fs.Dirent[];
+			try {
+				entries = await fs.readdir(dir, { withFileTypes: true });
+			} catch {
+				return; // directory doesn't exist or unreadable
+			}
+			for (const entry of entries) {
+				const fullPath = path.join(dir, entry.name);
+				if (entry.isDirectory()) {
+					await walk(fullPath);
+				} else if (entry.isFile()) {
+					try {
+						const stat = await fs.stat(fullPath);
+						totalBytes += stat.size;
+						fileCount++;
+					} catch {
+						// skip unreadable files
+					}
+				}
+			}
+		};
+
+		await walk(this.memoriesDir);
+		return { totalBytes, fileCount };
+	}
 }
 
 // ─── Singleton ──────────────────────────────────────────────────────────────
