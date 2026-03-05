@@ -15,6 +15,7 @@
  * Also provides confidence decay for stale memories (half-life formula).
  */
 
+import type { SessionOutcomeSignals } from '../../shared/memory-types';
 import { getInjectionRecord, clearSessionInjection } from './memory-injector';
 import { getMemoryStore } from './memory-store';
 
@@ -131,6 +132,68 @@ export async function computeOutcomeScore(
 	}
 
 	// Clamp to [0.0, 1.0]
+	return Math.max(0, Math.min(1, score));
+}
+
+/**
+ * Compute an outcome score from structured session signals (MEM-EVOLVE-04).
+ *
+ * Additive scoring from positive and negative signals, clamped to [0.0, 1.0].
+ * Computed once at session end, not per-turn.
+ *
+ * Positive signals:
+ *   +0.3 session completed without errors
+ *   +0.2 agent completed task (not cancelled)
+ *   +0.1 low context utilization at end (<70%) — efficient session
+ *   +0.2 git diff produced (actual code changes)
+ *
+ * Negative signals:
+ *   -0.3 repeated errors (errorCount > resolvedErrorCount)
+ *   -0.1 session abandoned/cancelled
+ *   -0.1 very high context usage (>90%)
+ */
+export function computeSessionOutcomeScore(signals: SessionOutcomeSignals): number {
+	let score = 0;
+
+	// ── Positive signals ──
+
+	// Session completed without errors
+	if (signals.completed && signals.errorCount === 0) {
+		score += 0.3;
+	}
+
+	// Agent completed task (user didn't cancel)
+	if (signals.completed && !signals.cancelled) {
+		score += 0.2;
+	}
+
+	// Low context utilization at end (<70%) — efficient session
+	if (signals.contextUtilization < 0.7) {
+		score += 0.1;
+	}
+
+	// Git diff produced (actual code changes)
+	if (signals.gitDiffProduced) {
+		score += 0.2;
+	}
+
+	// ── Negative signals ──
+
+	// Repeated errors that weren't resolved
+	if (signals.errorCount > signals.resolvedErrorCount) {
+		score -= 0.3;
+	}
+
+	// Session abandoned/cancelled
+	if (signals.cancelled) {
+		score -= 0.1;
+	}
+
+	// Very high context usage (>90%) — injected memories may have consumed too much budget
+	if (signals.contextUtilization > 0.9) {
+		score -= 0.1;
+	}
+
 	return Math.max(0, Math.min(1, score));
 }
 

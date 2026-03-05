@@ -49,7 +49,12 @@ vi.mock('../../memory/memory-injector', () => ({
 	clearSessionInjection: (...args: any[]) => mockClearSessionInjection(...args),
 }));
 
-import { computeOutcomeScore, onProcessComplete } from '../../memory/memory-effectiveness';
+import {
+	computeOutcomeScore,
+	computeSessionOutcomeScore,
+	onProcessComplete,
+} from '../../memory/memory-effectiveness';
+import type { SessionOutcomeSignals } from '../../../shared/memory-types';
 
 // ─── Setup ──────────────────────────────────────────────────────────────────
 
@@ -284,5 +289,130 @@ describe('onProcessComplete', () => {
 			undefined,
 			undefined
 		);
+	});
+});
+
+// ─── computeSessionOutcomeScore (MEM-EVOLVE-04) ────────────────────────────
+
+describe('computeSessionOutcomeScore', () => {
+	function makeSignals(overrides: Partial<SessionOutcomeSignals> = {}): SessionOutcomeSignals {
+		return {
+			completed: true,
+			cancelled: false,
+			errorCount: 0,
+			resolvedErrorCount: 0,
+			gitDiffProduced: false,
+			contextUtilization: 0.5,
+			turnCount: 5,
+			durationMs: 60000,
+			...overrides,
+		};
+	}
+
+	it('returns maximum positive score for ideal session', () => {
+		const score = computeSessionOutcomeScore(
+			makeSignals({
+				completed: true,
+				cancelled: false,
+				errorCount: 0,
+				gitDiffProduced: true,
+				contextUtilization: 0.5,
+			})
+		);
+		// +0.3 (no errors) +0.2 (completed) +0.1 (low context) +0.2 (git diff) = 0.8
+		expect(score).toBe(0.8);
+	});
+
+	it('gives +0.3 for session completed without errors', () => {
+		const withErrors = computeSessionOutcomeScore(makeSignals({ errorCount: 1 }));
+		const withoutErrors = computeSessionOutcomeScore(makeSignals({ errorCount: 0 }));
+		// withErrors also gets -0.3 for unresolved errors, so delta is 0.6
+		expect(withoutErrors - withErrors).toBeCloseTo(0.6);
+	});
+
+	it('gives +0.2 for agent completing task (not cancelled)', () => {
+		const cancelled = computeSessionOutcomeScore(
+			makeSignals({ cancelled: true, completed: false })
+		);
+		const completed = computeSessionOutcomeScore(makeSignals({ completed: true }));
+		// completed gets +0.2 for completion, cancelled gets -0.1 for abandonment
+		expect(completed).toBeGreaterThan(cancelled);
+	});
+
+	it('gives +0.1 for low context utilization (<70%)', () => {
+		const lowCtx = computeSessionOutcomeScore(makeSignals({ contextUtilization: 0.5 }));
+		const highCtx = computeSessionOutcomeScore(makeSignals({ contextUtilization: 0.8 }));
+		expect(lowCtx - highCtx).toBeCloseTo(0.1);
+	});
+
+	it('gives +0.2 for git diff produced', () => {
+		const withDiff = computeSessionOutcomeScore(makeSignals({ gitDiffProduced: true }));
+		const noDiff = computeSessionOutcomeScore(makeSignals({ gitDiffProduced: false }));
+		expect(withDiff - noDiff).toBeCloseTo(0.2);
+	});
+
+	it('gives -0.3 for unresolved repeated errors', () => {
+		const clean = computeSessionOutcomeScore(makeSignals({ errorCount: 0 }));
+		const errored = computeSessionOutcomeScore(
+			makeSignals({ errorCount: 3, resolvedErrorCount: 1 })
+		);
+		// clean has +0.3 (no errors), errored has -0.3 (unresolved) and no +0.3
+		expect(clean - errored).toBeCloseTo(0.6);
+	});
+
+	it('does not penalize when all errors were resolved', () => {
+		const resolved = computeSessionOutcomeScore(
+			makeSignals({ errorCount: 3, resolvedErrorCount: 3 })
+		);
+		// No -0.3 penalty since resolved >= errorCount, but also no +0.3 since errorCount > 0
+		// +0.2 (completed) +0.1 (low context) = 0.3
+		expect(resolved).toBeCloseTo(0.3);
+	});
+
+	it('gives -0.1 for cancelled session', () => {
+		const normal = computeSessionOutcomeScore(makeSignals({ completed: true }));
+		const cancelled = computeSessionOutcomeScore(
+			makeSignals({ completed: false, cancelled: true })
+		);
+		// normal: +0.3 +0.2 +0.1 = 0.6; cancelled: -0.1 +0.1 = 0.0 (clamped)
+		expect(cancelled).toBeLessThan(normal);
+		// cancelled loses +0.3 (errors), +0.2 (completed), gains -0.1 (cancelled)
+		expect(cancelled).toBe(0.0);
+	});
+
+	it('gives -0.1 for very high context usage (>90%)', () => {
+		const normal = computeSessionOutcomeScore(makeSignals({ contextUtilization: 0.8 }));
+		const highCtx = computeSessionOutcomeScore(makeSignals({ contextUtilization: 0.95 }));
+		expect(normal - highCtx).toBeCloseTo(0.1);
+	});
+
+	it('clamps to 0.0 when all negative signals fire', () => {
+		const score = computeSessionOutcomeScore(
+			makeSignals({
+				completed: false,
+				cancelled: true,
+				errorCount: 5,
+				resolvedErrorCount: 0,
+				gitDiffProduced: false,
+				contextUtilization: 0.95,
+			})
+		);
+		// No positive signals, -0.3 -0.1 -0.1 = -0.5 → clamped to 0.0
+		expect(score).toBe(0.0);
+	});
+
+	it('clamps to 1.0 (never exceeds)', () => {
+		const score = computeSessionOutcomeScore(
+			makeSignals({
+				completed: true,
+				cancelled: false,
+				errorCount: 0,
+				gitDiffProduced: true,
+				contextUtilization: 0.3,
+			})
+		);
+		// +0.3 +0.2 +0.1 +0.2 = 0.8, well within bounds
+		expect(score).toBeLessThanOrEqual(1.0);
+		expect(score).toBeGreaterThanOrEqual(0.0);
 	});
 });

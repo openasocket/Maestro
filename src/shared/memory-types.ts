@@ -644,6 +644,43 @@ export interface InjectionScopeGroup {
 	ids: MemoryId[];
 }
 
+// ─── Session Outcome Signals (MEM-EVOLVE-04) ─────────────────────────────
+
+/**
+ * Signals gathered at session end that correlate with injection effectiveness.
+ * Computed once from monitor state, then fed to the scoring function.
+ */
+export interface SessionOutcomeSignals {
+	/** Session ended normally (not killed/crashed) */
+	completed: boolean;
+	/** User explicitly cancelled/killed the session */
+	cancelled: boolean;
+	/** Total errors during session */
+	errorCount: number;
+	/** Errors that were subsequently resolved (error→fix pattern) */
+	resolvedErrorCount: number;
+	/** Code changes were made (git diff non-empty) */
+	gitDiffProduced: boolean;
+	/** Context utilization at session end (0.0-1.0) */
+	contextUtilization: number;
+	/** Number of agent turns */
+	turnCount: number;
+	/** Session duration in milliseconds */
+	durationMs: number;
+}
+
+/**
+ * Per-memory effectiveness update computed at session end.
+ * Maps an injected memory to its outcome-derived score.
+ */
+export interface EffectivenessUpdate {
+	memoryId: MemoryId;
+	/** Outcome score (0.0-1.0) for the EMA update */
+	outcomeScore: number;
+	scope: MemoryScope;
+	skillAreaId?: SkillAreaId;
+}
+
 export interface MemoryInjectionResult {
 	injectedPrompt: string;
 	injectedIds: MemoryId[];
