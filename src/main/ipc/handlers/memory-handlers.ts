@@ -9,7 +9,6 @@
 
 import { ipcMain } from 'electron';
 import { promises as fs } from 'fs';
-import * as crypto from 'crypto';
 import { logger } from '../../utils/logger';
 import { createIpcDataHandler, CreateHandlerOptions } from '../../utils/ipcHandler';
 import type { MemoryStore } from '../../memory/memory-store';
@@ -25,7 +24,9 @@ import type {
 	ExperienceContext,
 	MemoryStats,
 	MemorySearchResult,
+	EmbeddingProviderConfig,
 } from '../../../shared/memory-types';
+import { embeddingRegistry } from '../../grpo/embedding-registry';
 
 const LOG_CONTEXT = '[Memory]';
 
@@ -85,9 +86,21 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 	ipcMain.handle(
 		'memory:setConfig',
 		createIpcDataHandler(handlerOpts('setConfig'), async (config: Partial<MemoryConfig>) => {
+			const previousConfig = cachedConfig;
 			const result = await memoryStore.setConfig(config);
 			// Update the cached config for the memory injector
 			cachedConfig = result;
+
+			// React to embedding provider config changes
+			if (config.embeddingProvider !== undefined) {
+				handleEmbeddingConfigChange(
+					previousConfig?.embeddingProvider,
+					result.embeddingProvider
+				).catch((err) => {
+					logger.warn(`Failed to apply embedding config change: ${err}`, LOG_CONTEXT);
+				});
+			}
+
 			return result;
 		})
 	);
@@ -879,7 +892,7 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 	ipcMain.handle(
 		'memory:getStoreSize',
 		createIpcDataHandler(handlerOpts('getStoreSize'), async () => {
-			return store.getStoreSize();
+			return memoryStore.getStoreSize();
 		})
 	);
 
@@ -1029,14 +1042,9 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 				const { addTrustedKey } = await import('../../memory/experience-bundle');
 				await addTrustedKey({
 					publicKey,
-					name: label,
-					addedAt: Date.now(),
-					expiresAt: 0,
-					fingerprint: crypto
-						.createHash('sha256')
-						.update(Buffer.from(publicKey, 'hex'))
-						.digest('hex')
-						.slice(0, 16),
+					label,
+					addedAt: new Date().toISOString(),
+					isOfficial: false,
 				});
 				return { added: true };
 			}
@@ -1107,4 +1115,36 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 			}
 		)
 	);
+}
+
+/**
+ * Handle changes to the embedding provider configuration.
+ * Activates, switches, or deactivates the provider as needed.
+ */
+async function handleEmbeddingConfigChange(
+	previous: EmbeddingProviderConfig | undefined,
+	current: EmbeddingProviderConfig | undefined
+): Promise<void> {
+	if (!current) return;
+
+	const wasEnabled = previous?.enabled ?? false;
+	const isEnabled = current.enabled;
+	const providerChanged = previous?.providerId !== current.providerId;
+
+	if (!isEnabled && wasEnabled) {
+		// Provider was disabled
+		logger.info('Embedding provider disabled via config change', LOG_CONTEXT);
+		await embeddingRegistry.deactivate();
+	} else if (isEnabled && providerChanged) {
+		// Provider ID changed while enabled — switch
+		logger.info(
+			`Switching embedding provider: ${previous?.providerId ?? 'none'} → ${current.providerId}`,
+			LOG_CONTEXT
+		);
+		await embeddingRegistry.switchProvider(current.providerId, current);
+	} else if (isEnabled && !wasEnabled) {
+		// Provider was just enabled
+		logger.info(`Enabling embedding provider: ${current.providerId}`, LOG_CONTEXT);
+		await embeddingRegistry.activate(current);
+	}
 }
