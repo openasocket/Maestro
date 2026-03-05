@@ -3478,13 +3478,30 @@ export class MemoryStore {
 			`[memory] Seeded ${result.roles} roles, ${result.personas} personas, ${result.skills} skills`
 		);
 
-		// Attempt to compute embeddings for the seeded hierarchy.
+		// Attempt to compute embeddings for the seeded hierarchy and any existing memories.
 		// If no embedding provider is active yet, this gracefully returns 0
-		// and embeddings will be computed when a provider activates.
+		// and embeddings will be computed when a provider activates
+		// (see handleEmbeddingConfigChange in memory-handlers.ts).
 		try {
-			const embedded = await this.ensureHierarchyEmbeddings();
-			if (embedded > 0) {
-				console.log(`[memory] Computed embeddings for ${embedded} hierarchy entries`);
+			const hierarchyEmbedded = await this.ensureHierarchyEmbeddings();
+
+			// Also embed any memories in skill areas and global scope
+			let memoriesEmbedded = 0;
+			const skillAreas = await this.listSkillAreas();
+			for (const skill of skillAreas) {
+				memoriesEmbedded += await this.ensureAllEmbeddings('skill', skill.id);
+			}
+			memoriesEmbedded += await this.ensureAllEmbeddings('global');
+
+			if (hierarchyEmbedded > 0 || memoriesEmbedded > 0) {
+				// Count personas vs skills for detailed logging
+				const postRegistry = await this.readRegistry();
+				const embeddedPersonas = postRegistry.personas.filter((p) => p.embedding !== null).length;
+				const embeddedSkills = postRegistry.skillAreas.filter((s) => s.embedding !== null).length;
+				console.log(
+					`[memory] Computed embeddings for ${embeddedPersonas} personas and ${embeddedSkills} skills` +
+						(memoriesEmbedded > 0 ? `, plus ${memoriesEmbedded} memories` : '')
+				);
 			}
 		} catch {
 			// Embedding provider not ready — embeddings will be computed on provider activation
