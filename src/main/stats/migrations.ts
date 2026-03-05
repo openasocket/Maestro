@@ -25,6 +25,8 @@ import {
 	CREATE_SESSION_LIFECYCLE_SQL,
 	CREATE_SESSION_LIFECYCLE_INDEXES_SQL,
 	CREATE_COMPOUND_INDEXES_SQL,
+	CREATE_EMBEDDING_USAGE_SQL,
+	CREATE_EMBEDDING_USAGE_INDEXES_SQL,
 	runStatements,
 } from './schema';
 import { LOG_CONTEXT } from './utils';
@@ -59,6 +61,11 @@ export function getMigrations(): Migration[] {
 			version: 4,
 			description: 'Add compound indexes on query_events for dashboard query performance',
 			up: (db) => migrateV4(db),
+		},
+		{
+			version: 5,
+			description: 'Add embedding_usage table for tracking embedding API costs',
+			up: (db) => migrateV5(db),
 		},
 	];
 }
@@ -246,4 +253,14 @@ function migrateV4(db: Database.Database): void {
 	runStatements(db, CREATE_COMPOUND_INDEXES_SQL);
 
 	logger.debug('Added compound indexes on query_events', LOG_CONTEXT);
+}
+
+/**
+ * Migration v5: Add embedding_usage table for tracking embedding API costs
+ */
+function migrateV5(db: Database.Database): void {
+	db.prepare(CREATE_EMBEDDING_USAGE_SQL).run();
+	runStatements(db, CREATE_EMBEDDING_USAGE_INDEXES_SQL);
+
+	logger.debug('Created embedding_usage table', LOG_CONTEXT);
 }

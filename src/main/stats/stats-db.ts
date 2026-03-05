@@ -54,6 +54,14 @@ import {
 } from './session-lifecycle';
 import { getAggregatedStats } from './aggregations';
 import { clearOldData, exportToCsv } from './data-management';
+import {
+	insertEmbeddingUsage,
+	getEmbeddingUsageSummary,
+	getEmbeddingUsageTimeline,
+	clearEmbeddingUsageCache,
+} from './embedding-usage';
+import type { EmbeddingUsageEvent } from '../grpo/embedding-types';
+import type { EmbeddingUsageSummary, EmbeddingUsageBucket } from './embedding-usage';
 
 /**
  * StatsDB manages the SQLite database for usage statistics.
@@ -151,6 +159,7 @@ export class StatsDB {
 			clearQueryEventCache();
 			clearAutoRunCache();
 			clearSessionLifecycleCache();
+			clearEmbeddingUsageCache();
 
 			logger.info('Stats database closed', LOG_CONTEXT);
 		}
@@ -785,6 +794,22 @@ export class StatsDB {
 
 	exportToCsv(range: StatsTimeRange): string {
 		return exportToCsv(this.database, range);
+	}
+
+	// ============================================================================
+	// Embedding Usage (delegated)
+	// ============================================================================
+
+	insertEmbeddingUsage(event: EmbeddingUsageEvent): void {
+		insertEmbeddingUsage(this.database, event);
+	}
+
+	getEmbeddingUsageSummary(since: number): EmbeddingUsageSummary {
+		return getEmbeddingUsageSummary(this.database, since);
+	}
+
+	getEmbeddingUsageTimeline(since: number, bucketMs: number): EmbeddingUsageBucket[] {
+		return getEmbeddingUsageTimeline(this.database, since, bucketMs);
 	}
 
 	// ============================================================================

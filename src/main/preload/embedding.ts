@@ -14,6 +14,7 @@ import type {
 	EmbeddingProviderStatus,
 	DownloadProgressEvent,
 } from '../../main/grpo/embedding-types';
+import type { EmbeddingUsageSummary, EmbeddingUsageBucket } from '../../main/stats/embedding-usage';
 
 export interface EmbeddingStatusResult {
 	activeProviderId: EmbeddingProviderId | null;
@@ -37,6 +38,19 @@ export interface EmbeddingApi {
 	pullOllamaModel: (model: string, baseUrl?: string) => Promise<IpcResponse<{ success: boolean }>>;
 	/** Subscribe to model download/loading progress events. Returns unsubscribe function. */
 	onProgress: (callback: (event: DownloadProgressEvent) => void) => () => void;
+	/** Get aggregated embedding usage since a timestamp */
+	getUsageSummary: (since: number) => Promise<IpcResponse<EmbeddingUsageSummary>>;
+	/** Get embedding usage grouped into time buckets */
+	getUsageTimeline: (
+		since: number,
+		bucketMs: number
+	) => Promise<IpcResponse<EmbeddingUsageBucket[]>>;
+	/** Check if an OpenAI API key is configured */
+	hasOpenAIKey: () => Promise<IpcResponse<boolean>>;
+	/** Set the OpenAI API key */
+	setOpenAIKey: (key: string) => Promise<IpcResponse<void>>;
+	/** Clear the stored OpenAI API key */
+	clearOpenAIKey: () => Promise<IpcResponse<void>>;
 }
 
 export function createEmbeddingApi(): EmbeddingApi {
@@ -58,5 +72,11 @@ export function createEmbeddingApi(): EmbeddingApi {
 				ipcRenderer.removeListener('embedding:progress', handler);
 			};
 		},
+		getUsageSummary: (since) => ipcRenderer.invoke('embedding:getUsageSummary', since),
+		getUsageTimeline: (since, bucketMs) =>
+			ipcRenderer.invoke('embedding:getUsageTimeline', since, bucketMs),
+		hasOpenAIKey: () => ipcRenderer.invoke('embedding:hasOpenAIKey'),
+		setOpenAIKey: (key) => ipcRenderer.invoke('embedding:setOpenAIKey', key),
+		clearOpenAIKey: () => ipcRenderer.invoke('embedding:clearOpenAIKey'),
 	};
 }

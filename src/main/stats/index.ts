@@ -32,6 +32,9 @@ export { normalizePath } from './utils';
 // ============ Core Database ============
 export { StatsDB } from './stats-db';
 
+// ============ Embedding Usage ============
+export type { EmbeddingUsageSummary, EmbeddingUsageBucket } from './embedding-usage';
+
 // ============ Singleton & Lifecycle ============
 export { getStatsDB, initializeStatsDB, closeStatsDB } from './singleton';
 
