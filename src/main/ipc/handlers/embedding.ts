@@ -59,6 +59,10 @@ export function registerEmbeddingHandlers(settingsStore?: SettingsStore): void {
 		createIpcDataHandler(
 			handlerOpts('switchProvider'),
 			async (providerId: EmbeddingProviderId, config: EmbeddingProviderConfig) => {
+				logger.debug(
+					`Switching to provider "${providerId}" with config: ${JSON.stringify(sanitizeConfig(config))}`,
+					LOG_CONTEXT
+				);
 				await embeddingRegistry.switchProvider(providerId, config);
 				return { activeProviderId: embeddingRegistry.getActiveProviderId() };
 			}

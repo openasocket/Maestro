@@ -63,7 +63,7 @@ import { getMemoryStore } from './memory/memory-store';
 import { embeddingRegistry } from './grpo/embedding-registry';
 import { TransformersJsProvider } from './grpo/providers/transformers-js-provider';
 import { OllamaEmbeddingProvider } from './grpo/providers/ollama-provider';
-import { OpenAIEmbeddingProvider, embeddingUsageEmitter } from './grpo/providers/openai-provider';
+import { OpenAIEmbeddingProvider } from './grpo/providers/openai-provider';
 import type { EmbeddingProviderConfig } from '../shared/memory-types';
 import { initializeStatsDB, closeStatsDB, getStatsDB } from './stats';
 import { groupChatEmitters } from './ipc/handlers/groupChat';
@@ -714,17 +714,7 @@ function initializeEmbeddingProvider(settingsStore: { get: (key: string) => unkn
 	embeddingRegistry.register(new OllamaEmbeddingProvider());
 	embeddingRegistry.register(new OpenAIEmbeddingProvider());
 
-	// Wire up embedding usage tracking — persists every usage event to the stats database
-	embeddingUsageEmitter.on('usage', (event) => {
-		try {
-			const statsDb = getStatsDB();
-			if (statsDb.isReady()) {
-				statsDb.insertEmbeddingUsage(event);
-			}
-		} catch (err) {
-			logger.warn(`Failed to record embedding usage: ${err}`, '[Embedding]');
-		}
-	});
+	// Usage tracking listener is registered in registerEmbeddingHandlers() (embedding.ts)
 
 	try {
 		const memoryConfig = settingsStore.get('memoryConfig') as

@@ -205,6 +205,7 @@ export interface EmbeddingProviderConfig {
 		model: string;
 	};
 	openai?: {
+		/** Secret — never expose to renderer or log. Use sanitizeConfig() before logging. */
 		apiKey: string;
 		model: string;
 		dimensions: number;
@@ -228,7 +229,7 @@ export const DEFAULT_EMBEDDING_CONFIG: EmbeddingProviderConfig = {
 		model: 'nomic-embed-text',
 	},
 	openai: {
-		apiKey: '',
+		apiKey: '', // Secret value — stored encrypted at rest, never exposed to renderer
 		model: 'text-embedding-3-small',
 		dimensions: 384,
 		baseUrl: 'https://api.openai.com/v1',
