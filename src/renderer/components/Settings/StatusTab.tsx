@@ -449,6 +449,18 @@ function EffectivenessBar({ stats, theme }: { stats: MemoryStats; theme: Theme }
 
 // ─── Section 2: Injection Activity ──────────────────────────────────────────────
 
+interface PersonaMatchRecord {
+	personaId: string;
+	personaName: string;
+	score: number;
+}
+
+interface SkillMatchRecord {
+	skillAreaId: string;
+	skillAreaName: string;
+	score: number;
+}
+
 interface InjectionEventRecord {
 	sessionId: string;
 	memoryIds: string[];
@@ -456,6 +468,8 @@ interface InjectionEventRecord {
 	timestamp: number;
 	scopeGroups: Array<{ scope: string; skillAreaId?: string; projectPath?: string; ids: string[] }>;
 	noMatch?: boolean;
+	matchedPersonas?: PersonaMatchRecord[];
+	matchedSkills?: SkillMatchRecord[];
 }
 
 /** Timeline bucket for hour-by-hour or day-by-day display. */
@@ -798,6 +812,20 @@ function InjectionActivitySection({
 											>
 												{preview}
 											</span>
+											{event.matchedPersonas && event.matchedPersonas.length > 0 && (
+												<span
+													className="shrink-0 px-1.5 py-0.5 rounded truncate max-w-[120px]"
+													style={{
+														backgroundColor: `${theme.colors.accent}15`,
+														color: theme.colors.accent,
+													}}
+													title={event.matchedPersonas.map((p) => p.personaName).join(', ')}
+												>
+													{event.matchedPersonas[0].personaName}
+													{event.matchedPersonas.length > 1 &&
+														` +${event.matchedPersonas.length - 1}`}
+												</span>
+											)}
 											{scopes && (
 												<span
 													className="shrink-0 px-1.5 py-0.5 rounded"
@@ -826,6 +854,57 @@ function InjectionActivitySection({
 													<div style={{ color: theme.colors.textDim }}>
 														<span className="font-medium">Agent:</span>{' '}
 														{event.sessionId.slice(0, 12)}...
+													</div>
+												)}
+												{event.matchedPersonas && event.matchedPersonas.length > 0 && (
+													<div className="space-y-0.5">
+														<div className="font-medium" style={{ color: theme.colors.textDim }}>
+															Matched personas:
+														</div>
+														{event.matchedPersonas.map((p, pi) => (
+															<div
+																key={pi}
+																className="flex items-center gap-1.5 ml-2"
+																style={{ color: theme.colors.textMain }}
+															>
+																<span
+																	className="px-1 rounded"
+																	style={{
+																		backgroundColor: `${theme.colors.accent}20`,
+																		color: theme.colors.accent,
+																	}}
+																>
+																	{p.personaName}
+																</span>
+																<span style={{ color: theme.colors.textDim }}>
+																	score: {p.score.toFixed(2)}
+																</span>
+															</div>
+														))}
+													</div>
+												)}
+												{event.matchedSkills && event.matchedSkills.length > 0 && (
+													<div className="space-y-0.5">
+														<div className="font-medium" style={{ color: theme.colors.textDim }}>
+															Matched skills:
+														</div>
+														{event.matchedSkills.map((s, si) => (
+															<div
+																key={si}
+																className="flex items-center gap-1.5 ml-2"
+																style={{ color: theme.colors.textMain }}
+															>
+																<span
+																	className="px-1 rounded"
+																	style={{ backgroundColor: `${theme.colors.border}30` }}
+																>
+																	{s.skillAreaName}
+																</span>
+																<span style={{ color: theme.colors.textDim }}>
+																	score: {s.score.toFixed(2)}
+																</span>
+															</div>
+														))}
 													</div>
 												)}
 												<div style={{ color: theme.colors.textDim }}>

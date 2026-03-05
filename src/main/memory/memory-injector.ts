@@ -738,6 +738,36 @@ export async function injectMemories(
 	const injectedPrompt = `${xmlBlock}\n\n${prompt}`;
 	const tokenCount = totalTokens + WRAPPER_OVERHEAD_TOKENS;
 
+	// Extract persona/skill match data from skill-scope results for analytics
+	const personaMatchMap = new Map<string, PersonaMatch>();
+	const skillMatchMap = new Map<string, SkillMatch>();
+	for (const r of skillResults) {
+		if (r.personaId && r.personaName && !personaMatchMap.has(r.personaId)) {
+			personaMatchMap.set(r.personaId, {
+				personaId: r.personaId,
+				personaName: r.personaName,
+				score: r.combinedScore,
+			});
+		} else if (r.personaId && personaMatchMap.has(r.personaId)) {
+			const existing = personaMatchMap.get(r.personaId)!;
+			if (r.combinedScore > existing.score) existing.score = r.combinedScore;
+		}
+		const skillId = r.entry.skillAreaId;
+		if (r.skillAreaName && skillId) {
+			const key = skillId;
+			if (!skillMatchMap.has(key)) {
+				skillMatchMap.set(key, {
+					skillAreaId: key,
+					skillAreaName: r.skillAreaName,
+					score: r.combinedScore,
+				});
+			} else {
+				const existing = skillMatchMap.get(key)!;
+				if (r.combinedScore > existing.score) existing.score = r.combinedScore;
+			}
+		}
+	}
+
 	// Record injection event for analytics ring buffer
 	pushInjectionEvent({
 		sessionId: '', // Populated later via recordSessionInjection
@@ -745,6 +775,8 @@ export async function injectMemories(
 		tokenCount,
 		timestamp: Date.now(),
 		scopeGroups,
+		matchedPersonas: personaMatchMap.size > 0 ? Array.from(personaMatchMap.values()) : undefined,
+		matchedSkills: skillMatchMap.size > 0 ? Array.from(skillMatchMap.values()) : undefined,
 	});
 
 	// Report injection tokens to job queue tracker (fire-and-forget)
@@ -831,6 +863,18 @@ export async function tryInjectMemories(
 
 // ─── Injection Event Ring Buffer ─────────────────────────────────────────────
 
+export interface PersonaMatch {
+	personaId: string;
+	personaName: string;
+	score: number;
+}
+
+export interface SkillMatch {
+	skillAreaId: string;
+	skillAreaName: string;
+	score: number;
+}
+
 export interface InjectionEvent {
 	sessionId: string;
 	memoryIds: MemoryId[];
@@ -839,6 +883,10 @@ export interface InjectionEvent {
 	scopeGroups: InjectionScopeGroup[];
 	/** True when cascading search returned no matching memories for the task. */
 	noMatch?: boolean;
+	/** Personas matched during injection (with similarity scores). */
+	matchedPersonas?: PersonaMatch[];
+	/** Skill areas matched during injection (with similarity scores). */
+	matchedSkills?: SkillMatch[];
 }
 
 const recentInjections: InjectionEvent[] = [];
