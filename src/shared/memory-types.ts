@@ -312,6 +312,8 @@ export interface MemoryConfig {
 	embeddingProvider?: EmbeddingProviderConfig;
 	/** Config schema version for migration — absent in pre-migration configs */
 	_configVersion?: number;
+	/** Whether the auto-enabled info banner has been dismissed by the user */
+	_autoEnabledBannerDismissed?: boolean;
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -350,6 +352,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	minConfidenceThreshold: 0.1,
 	embeddingProvider: DEFAULT_EMBEDDING_CONFIG,
 	_configVersion: 1,
+	_autoEnabledBannerDismissed: false,
 };
 
 // ─── Job Queue Status & Token Tracking ────────────────────────────────────

@@ -19,6 +19,8 @@ import {
 	Settings,
 	Download,
 	CheckCircle2,
+	Info,
+	X,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import { PersonasTab } from './PersonasTab';
@@ -95,6 +97,7 @@ export function MemorySettings({
 	const [resetting, setResetting] = useState(false);
 	const [confirmReset, setConfirmReset] = useState(false);
 	const [memoriesFilter, setMemoriesFilter] = useState<MemoryFilter | null>(null);
+	const [bannerDismissed, setBannerDismissed] = useState(false);
 
 	// Embedding model download/loading progress
 	const [embeddingProgress, setEmbeddingProgress] = useState<{
@@ -329,7 +332,9 @@ export function MemorySettings({
 			>
 				<button
 					className="w-full flex items-center justify-between text-left"
-					onClick={() => updateConfig({ enabled: !config.enabled })}
+					onClick={() =>
+						updateConfig({ enabled: !config.enabled, _autoEnabledBannerDismissed: true })
+					}
 				>
 					<div className="flex items-center gap-3">
 						<Brain
@@ -362,6 +367,20 @@ export function MemorySettings({
 						</div>
 					</div>
 				</button>
+				{config.enabled && (
+					<div className="flex justify-end mt-2">
+						<button
+							className="text-[10px] hover:underline transition-opacity opacity-60 hover:opacity-100"
+							style={{ color: theme.colors.textDim }}
+							onClick={(e) => {
+								e.stopPropagation();
+								updateConfig({ enabled: false, _autoEnabledBannerDismissed: true });
+							}}
+						>
+							Disable Memory
+						</button>
+					</div>
+				)}
 			</div>
 
 			{/* Embedding model download/loading progress */}
@@ -439,10 +458,41 @@ export function MemorySettings({
 				</div>
 			)}
 
+			{/* Auto-enabled info banner */}
+			{config.enabled && !config._autoEnabledBannerDismissed && !bannerDismissed && (
+				<div
+					className="flex items-start gap-2.5 p-3 rounded-lg text-xs"
+					style={{
+						backgroundColor: `${theme.colors.accent}10`,
+						border: `1px solid ${theme.colors.accent}30`,
+						color: theme.colors.textMain,
+					}}
+				>
+					<Info className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: theme.colors.accent }} />
+					<div className="flex-1 min-w-0">
+						<span>
+							The memory system is automatically active with conservative defaults. Your agents will
+							start building knowledge from your coding sessions.
+						</span>
+					</div>
+					<button
+						className="shrink-0 p-0.5 rounded hover:opacity-80 transition-opacity"
+						style={{ color: theme.colors.textDim }}
+						onClick={() => {
+							setBannerDismissed(true);
+							updateConfig({ _autoEnabledBannerDismissed: true });
+						}}
+						aria-label="Dismiss banner"
+					>
+						<X className="w-3.5 h-3.5" />
+					</button>
+				</div>
+			)}
+
 			{/* Config panel — shown when enabled */}
 			{config.enabled && (
 				<div className="flex flex-col flex-1 min-h-0 gap-4">
-					{/* Seed Defaults Button */}
+					{/* Seed / Manage Hierarchy Button */}
 					<button
 						className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg border text-xs font-medium transition-colors"
 						style={{
@@ -450,18 +500,20 @@ export function MemorySettings({
 							color: theme.colors.accent,
 							backgroundColor: `${theme.colors.accent}10`,
 						}}
-						onClick={handleSeedDefaults}
+						onClick={hasRoles ? () => handleTabSwitch('personas') : handleSeedDefaults}
 						disabled={seeding}
 					>
 						{seeding ? (
 							<Loader2 className="w-3.5 h-3.5 animate-spin" />
+						) : hasRoles ? (
+							<Users className="w-3.5 h-3.5" />
 						) : (
 							<Sparkles className="w-3.5 h-3.5" />
 						)}
 						{seeding
 							? 'Creating default hierarchy...'
 							: hasRoles
-								? 'Sync Missing Default Roles'
+								? 'Manage Hierarchy'
 								: 'Seed Default Roles & Personas'}
 					</button>
 
