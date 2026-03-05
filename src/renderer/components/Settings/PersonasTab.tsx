@@ -91,6 +91,9 @@ export function PersonasTab({
 	const [expandedDescriptions, setExpandedDescriptions] = useState<Set<string>>(new Set());
 	const [expandedPrompts, setExpandedPrompts] = useState<Set<string>>(new Set());
 
+	// ─── Search state ───────────────────────────────────────────────────
+	const [searchQuery, setSearchQuery] = useState('');
+
 	// ─── Modal state ────────────────────────────────────────────────────
 	const [editingPersona, setEditingPersona] = useState<Persona | null>(null);
 	const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
@@ -213,6 +216,18 @@ export function PersonasTab({
 
 		return groups;
 	}, [roles, personas, skills, memories]);
+
+	// ─── Filtered role groups (by search query) ─────────────────────────
+	const filteredRoleGroups = useMemo((): RoleGroup[] => {
+		if (!searchQuery.trim()) return roleGroups;
+		const q = searchQuery.toLowerCase();
+		return roleGroups
+			.map((g) => ({
+				...g,
+				personas: g.personas.filter((p) => p.name.toLowerCase().includes(q)),
+			}))
+			.filter((g) => g.personas.length > 0);
+	}, [roleGroups, searchQuery]);
 
 	// ─── Visualization stats ────────────────────────────────────────────
 	const vizStats = useMemo(() => {
@@ -585,122 +600,131 @@ export function PersonasTab({
 	const hasSuggestions = visiblePersonas.length > 0 || visibleSkills.length > 0;
 
 	return (
-		<div className="space-y-4">
-			<TabDescriptionBanner
-				theme={theme}
-				description="Personas are expert profiles that shape how your AI agents think and respond. Each persona has specialized knowledge areas and a behavioral style. When a task matches a persona's expertise, relevant memories are automatically injected."
-			/>
+		<div className="flex flex-col" style={{ height: '100%' }}>
+			{/* ─── Fixed Header: Banner + Search/Actions + Stats ─────────── */}
+			<div className="shrink-0 space-y-3 pb-2">
+				<TabDescriptionBanner
+					theme={theme}
+					description="Personas are expert profiles that shape how your AI agents think and respond. Each persona has specialized knowledge areas and a behavioral style. When a task matches a persona's expertise, relevant memories are automatically injected."
+				/>
 
-			{error && (
-				<div
-					className="flex items-center justify-between gap-2 p-3 rounded-lg text-xs"
-					style={{ backgroundColor: `${theme.colors.error}15`, color: theme.colors.error }}
-				>
-					<span>{error}</span>
-					<button onClick={() => setError(null)} className="hover:opacity-70">
-						<X className="w-3 h-3" />
-					</button>
-				</div>
-			)}
-
-			{/* ─── Action Bar: Create + Import/Export ─────────────────────── */}
-			<div className="flex items-center justify-between gap-2">
-				<div className="flex items-center gap-2">
-					<button
-						className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border"
-						style={{
-							borderColor: theme.colors.accent,
-							color: theme.colors.accent,
-							backgroundColor: `${theme.colors.accent}10`,
-						}}
-						onClick={() => {
-							if (roles.length > 0) {
-								setCreateRoleId(roles[0].id);
-								setShowCreateModal(true);
-							} else {
-								setError('Create a role first before adding personas');
-							}
-						}}
+				{error && (
+					<div
+						className="flex items-center justify-between gap-2 p-3 rounded-lg text-xs"
+						style={{ backgroundColor: `${theme.colors.error}15`, color: theme.colors.error }}
 					>
-						<Plus className="w-3 h-3" />
-						Create Persona
-					</button>
+						<span>{error}</span>
+						<button onClick={() => setError(null)} className="hover:opacity-70">
+							<X className="w-3 h-3" />
+						</button>
+					</div>
+				)}
 
-					{/* Role selector for create (inline when creating) */}
-					{showCreateModal && roles.length > 1 && (
-						<select
-							className="px-2 py-1.5 rounded border bg-transparent text-xs outline-none"
-							style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
-							value={createRoleId}
-							onChange={(e) => setCreateRoleId(e.target.value)}
+				{/* ─── Search + Action Bar: Search + Create + Import/Export ── */}
+				<div className="flex items-center justify-between gap-2">
+					<div className="flex items-center gap-2 flex-1 min-w-0">
+						<div className="relative flex-1 min-w-0 max-w-[240px]">
+							<Search
+								className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3"
+								style={{ color: theme.colors.textDim }}
+							/>
+							<input
+								type="text"
+								placeholder="Search personas..."
+								value={searchQuery}
+								onChange={(e) => setSearchQuery(e.target.value)}
+								className="w-full pl-7 pr-2 py-1.5 rounded border bg-transparent text-xs outline-none"
+								style={{
+									borderColor: theme.colors.border,
+									color: theme.colors.textMain,
+								}}
+							/>
+						</div>
+						<button
+							className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border shrink-0"
+							style={{
+								borderColor: theme.colors.accent,
+								color: theme.colors.accent,
+								backgroundColor: `${theme.colors.accent}10`,
+							}}
+							onClick={() => {
+								if (roles.length > 0) {
+									setCreateRoleId(roles[0].id);
+									setShowCreateModal(true);
+								} else {
+									setError('Create a role first before adding personas');
+								}
+							}}
 						>
-							{roles.map((r) => (
-								<option key={r.id} value={r.id}>
-									{r.name}
-								</option>
-							))}
-						</select>
-					)}
-				</div>
+							<Plus className="w-3 h-3" />
+							Create Persona
+						</button>
 
-				<div className="flex items-center gap-2">
-					<div className="relative" ref={exportRef}>
+						{/* Role selector for create (inline when creating) */}
+						{showCreateModal && roles.length > 1 && (
+							<select
+								className="px-2 py-1.5 rounded border bg-transparent text-xs outline-none"
+								style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
+								value={createRoleId}
+								onChange={(e) => setCreateRoleId(e.target.value)}
+							>
+								{roles.map((r) => (
+									<option key={r.id} value={r.id}>
+										{r.name}
+									</option>
+								))}
+							</select>
+						)}
+					</div>
+
+					<div className="flex items-center gap-2 shrink-0">
+						<div className="relative" ref={exportRef}>
+							<button
+								className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border"
+								style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
+								onClick={() => setShowExportDropdown(!showExportDropdown)}
+							>
+								<Download className="w-3 h-3" />
+								Export
+								<ChevronDown className="w-3 h-3" />
+							</button>
+							{showExportDropdown && (
+								<div
+									className="absolute right-0 top-full mt-1 rounded-lg border shadow-lg z-50 min-w-[160px]"
+									style={{
+										backgroundColor: theme.colors.bgMain,
+										borderColor: theme.colors.border,
+									}}
+								>
+									<button
+										className="w-full text-left px-3 py-2 text-xs hover:opacity-80"
+										style={{ color: theme.colors.textMain }}
+										onClick={handleExportAll}
+									>
+										Export all personas
+									</button>
+								</div>
+							)}
+						</div>
 						<button
 							className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border"
 							style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
-							onClick={() => setShowExportDropdown(!showExportDropdown)}
+							onClick={handleImportFile}
 						>
-							<Download className="w-3 h-3" />
-							Export
-							<ChevronDown className="w-3 h-3" />
+							<Upload className="w-3 h-3" />
+							Import
 						</button>
-						{showExportDropdown && (
-							<div
-								className="absolute right-0 top-full mt-1 rounded-lg border shadow-lg z-50 min-w-[160px]"
-								style={{
-									backgroundColor: theme.colors.bgMain,
-									borderColor: theme.colors.border,
-								}}
-							>
-								<button
-									className="w-full text-left px-3 py-2 text-xs hover:opacity-80"
-									style={{ color: theme.colors.textMain }}
-									onClick={handleExportAll}
-								>
-									Export all personas
-								</button>
-							</div>
-						)}
 					</div>
-					<button
-						className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border"
-						style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
-						onClick={handleImportFile}
-					>
-						<Upload className="w-3 h-3" />
-						Import
-					</button>
 				</div>
-			</div>
 
-			{/* ─── Visualization Summary ─────────────────────────────────── */}
-			{personas.length > 0 && (
-				<div
-					className="rounded-lg border p-4 space-y-3"
-					style={{ borderColor: theme.colors.border }}
-				>
-					<div className="flex items-center gap-2">
-						<Users className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
-						<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-							Persona Overview
-						</div>
-					</div>
-
-					{/* Stats row */}
-					<div className="flex flex-wrap gap-4 text-xs" style={{ color: theme.colors.textDim }}>
+				{/* ─── Summary Stats Row ─────────────────────────────────────── */}
+				{personas.length > 0 && (
+					<div
+						className="flex flex-wrap gap-4 text-xs px-1"
+						style={{ color: theme.colors.textDim }}
+					>
 						<span>
-							Total: {vizStats.total} ({vizStats.activeCount} active, {vizStats.inactiveCount}{' '}
-							inactive)
+							{vizStats.total} personas ({vizStats.activeCount} active)
 						</span>
 						<span>
 							Embeddings: {vizStats.withEmbedding}/{vizStats.total}
@@ -717,219 +741,204 @@ export function PersonasTab({
 								injections)
 							</span>
 						)}
+						{vizStats.roleDistribution.length > 1 && (
+							<span>
+								Roles:{' '}
+								{vizStats.roleDistribution.map((rd) => `${rd.name} (${rd.count})`).join(', ')}
+							</span>
+						)}
 					</div>
+				)}
+			</div>
 
-					{/* Role distribution bar */}
-					{vizStats.roleDistribution.length > 1 && (
-						<div className="space-y-1">
-							<div className="text-xs" style={{ color: theme.colors.textDim }}>
-								Role distribution
+			{/* ─── Scrollable Content: Cards + Suggestions ───────────────── */}
+			<div className="flex-1 overflow-y-auto min-h-0 space-y-4 mt-2">
+				{/* ─── Hierarchy Suggestions ──────────────────────────────────── */}
+				{hasSuggestions && (
+					<div
+						className="rounded-lg border p-4 space-y-3"
+						style={{
+							borderColor: theme.colors.accent,
+							backgroundColor: `${theme.colors.accent}08`,
+						}}
+					>
+						<div className="flex items-center gap-2">
+							<Lightbulb className="w-3.5 h-3.5" style={{ color: theme.colors.accent }} />
+							<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+								Suggestions for this project
 							</div>
-							<div className="flex gap-0.5 h-3 rounded overflow-hidden">
-								{vizStats.roleDistribution.map((rd, i) => (
-									<div
-										key={rd.name}
-										className="h-full"
-										style={{
-											width: `${(rd.count / vizStats.total) * 100}%`,
-											backgroundColor: theme.colors.accent,
-											opacity: 0.4 + (i / vizStats.roleDistribution.length) * 0.6,
-										}}
-										title={`${rd.name}: ${rd.count}`}
+						</div>
+
+						{visiblePersonas.map((suggestion) => {
+							const key = `persona:${suggestion.suggestedName}`;
+							const isApplying = applyingSuggestion === key;
+							return (
+								<div
+									key={key}
+									className="rounded border p-3 space-y-1.5"
+									style={{ borderColor: theme.colors.border }}
+								>
+									<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
+										Add persona: &ldquo;{suggestion.suggestedName}&rdquo;
+									</div>
+									<div className="text-xs" style={{ color: theme.colors.textDim }}>
+										Evidence: {suggestion.evidence.join(', ')}
+									</div>
+									<div className="text-xs" style={{ color: theme.colors.textDim }}>
+										Skills: {suggestion.suggestedSkills.join(', ')}
+									</div>
+									<div className="flex gap-2 mt-2">
+										<button
+											className="px-3 py-1 rounded text-xs font-medium border"
+											style={{
+												borderColor: theme.colors.accent,
+												color: theme.colors.accent,
+												backgroundColor: `${theme.colors.accent}10`,
+											}}
+											onClick={() => handleApplyPersona(suggestion)}
+											disabled={isApplying}
+										>
+											{isApplying ? (
+												<Loader2 className="w-3 h-3 animate-spin inline mr-1" />
+											) : (
+												<Plus className="w-3 h-3 inline mr-1" />
+											)}
+											Add
+										</button>
+										<button
+											className="px-3 py-1 rounded text-xs border"
+											style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
+											onClick={() => handleDismissSuggestion(key)}
+											disabled={isApplying}
+										>
+											<X className="w-3 h-3 inline mr-1" />
+											Dismiss
+										</button>
+									</div>
+								</div>
+							);
+						})}
+
+						{visibleSkills.map((suggestion) => {
+							const key = `skill:${suggestion.suggestedName}`;
+							const isApplying = applyingSuggestion === key;
+							return (
+								<div
+									key={key}
+									className="rounded border p-3 space-y-1.5"
+									style={{ borderColor: theme.colors.border }}
+								>
+									<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
+										New skill area: &ldquo;{suggestion.suggestedName}&rdquo;
+									</div>
+									<div className="text-xs" style={{ color: theme.colors.textDim }}>
+										Under: {suggestion.suggestedPersonaName}
+									</div>
+									<div className="text-xs" style={{ color: theme.colors.textDim }}>
+										Contains: {suggestion.memoryIds.length} related project memories
+									</div>
+									<div className="flex gap-2 mt-2">
+										<button
+											className="px-3 py-1 rounded text-xs font-medium border"
+											style={{
+												borderColor: theme.colors.accent,
+												color: theme.colors.accent,
+												backgroundColor: `${theme.colors.accent}10`,
+											}}
+											onClick={() => handleApplySkillArea(suggestion)}
+											disabled={isApplying}
+										>
+											{isApplying ? (
+												<Loader2 className="w-3 h-3 animate-spin inline mr-1" />
+											) : (
+												<Plus className="w-3 h-3 inline mr-1" />
+											)}
+											Create
+										</button>
+										<button
+											className="px-3 py-1 rounded text-xs border"
+											style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
+											onClick={() => handleDismissSuggestion(key)}
+											disabled={isApplying}
+										>
+											<X className="w-3 h-3 inline mr-1" />
+											Dismiss
+										</button>
+									</div>
+								</div>
+							);
+						})}
+					</div>
+				)}
+
+				{/* ─── Persona Match Preview ─────────────────────────────────── */}
+				<PersonaMatchPreview theme={theme} config={config} />
+
+				{/* ─── Persona Cards by Role ──────────────────────────────────── */}
+				{loading ? (
+					<div className="flex items-center justify-center py-12">
+						<Loader2 className="w-5 h-5 animate-spin" style={{ color: theme.colors.textDim }} />
+					</div>
+				) : filteredRoleGroups.length === 0 ? (
+					<div
+						className="flex flex-col items-center justify-center py-12 gap-3"
+						style={{ color: theme.colors.textDim }}
+					>
+						<Users className="w-8 h-8" style={{ color: theme.colors.accent, opacity: 0.5 }} />
+						<div className="text-xs font-medium">
+							{searchQuery.trim()
+								? `No personas matching "${searchQuery}"`
+								: 'No personas yet. Create one or apply a suggestion above.'}
+						</div>
+					</div>
+				) : (
+					filteredRoleGroups.map((group) => (
+						<div key={group.role.id} className="space-y-2">
+							{/* Role header */}
+							<div className="flex items-center gap-2 pt-2">
+								<div
+									className="w-2 h-2 rounded-full"
+									style={{ backgroundColor: theme.colors.accent }}
+								/>
+								<div
+									className="text-xs font-bold uppercase tracking-wider"
+									style={{ color: theme.colors.textDim }}
+								>
+									{group.role.name}
+								</div>
+								<div className="text-xs" style={{ color: theme.colors.textDim, opacity: 0.6 }}>
+									({group.personas.length})
+								</div>
+							</div>
+
+							{/* Persona cards */}
+							<div
+								className="grid gap-3"
+								style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}
+							>
+								{group.personas.map((persona) => (
+									<PersonaCardView
+										key={persona.id}
+										persona={persona}
+										theme={theme}
+										actionLoading={actionLoading}
+										expandedDescriptions={expandedDescriptions}
+										expandedPrompts={expandedPrompts}
+										onToggleDescription={() => toggleExpanded(persona.id, setExpandedDescriptions)}
+										onTogglePrompt={() => toggleExpanded(persona.id, setExpandedPrompts)}
+										onEdit={() => handleEditPersona(persona)}
+										onDuplicate={() => handleDuplicate(persona)}
+										onToggleActive={() => handleToggleActive(persona)}
+										onDelete={() => setShowDeleteConfirm({ persona })}
+										onReEmbed={() => handleReEmbed(persona)}
 									/>
 								))}
 							</div>
-							<div className="flex flex-wrap gap-3 text-xs" style={{ color: theme.colors.textDim }}>
-								{vizStats.roleDistribution.map((rd) => (
-									<span key={rd.name}>
-										{rd.name}: {rd.count}
-									</span>
-								))}
-							</div>
 						</div>
-					)}
-				</div>
-			)}
-
-			{/* ─── Hierarchy Suggestions ──────────────────────────────────── */}
-			{hasSuggestions && (
-				<div
-					className="rounded-lg border p-4 space-y-3"
-					style={{ borderColor: theme.colors.accent, backgroundColor: `${theme.colors.accent}08` }}
-				>
-					<div className="flex items-center gap-2">
-						<Lightbulb className="w-3.5 h-3.5" style={{ color: theme.colors.accent }} />
-						<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-							Suggestions for this project
-						</div>
-					</div>
-
-					{visiblePersonas.map((suggestion) => {
-						const key = `persona:${suggestion.suggestedName}`;
-						const isApplying = applyingSuggestion === key;
-						return (
-							<div
-								key={key}
-								className="rounded border p-3 space-y-1.5"
-								style={{ borderColor: theme.colors.border }}
-							>
-								<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
-									Add persona: &ldquo;{suggestion.suggestedName}&rdquo;
-								</div>
-								<div className="text-xs" style={{ color: theme.colors.textDim }}>
-									Evidence: {suggestion.evidence.join(', ')}
-								</div>
-								<div className="text-xs" style={{ color: theme.colors.textDim }}>
-									Skills: {suggestion.suggestedSkills.join(', ')}
-								</div>
-								<div className="flex gap-2 mt-2">
-									<button
-										className="px-3 py-1 rounded text-xs font-medium border"
-										style={{
-											borderColor: theme.colors.accent,
-											color: theme.colors.accent,
-											backgroundColor: `${theme.colors.accent}10`,
-										}}
-										onClick={() => handleApplyPersona(suggestion)}
-										disabled={isApplying}
-									>
-										{isApplying ? (
-											<Loader2 className="w-3 h-3 animate-spin inline mr-1" />
-										) : (
-											<Plus className="w-3 h-3 inline mr-1" />
-										)}
-										Add
-									</button>
-									<button
-										className="px-3 py-1 rounded text-xs border"
-										style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
-										onClick={() => handleDismissSuggestion(key)}
-										disabled={isApplying}
-									>
-										<X className="w-3 h-3 inline mr-1" />
-										Dismiss
-									</button>
-								</div>
-							</div>
-						);
-					})}
-
-					{visibleSkills.map((suggestion) => {
-						const key = `skill:${suggestion.suggestedName}`;
-						const isApplying = applyingSuggestion === key;
-						return (
-							<div
-								key={key}
-								className="rounded border p-3 space-y-1.5"
-								style={{ borderColor: theme.colors.border }}
-							>
-								<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
-									New skill area: &ldquo;{suggestion.suggestedName}&rdquo;
-								</div>
-								<div className="text-xs" style={{ color: theme.colors.textDim }}>
-									Under: {suggestion.suggestedPersonaName}
-								</div>
-								<div className="text-xs" style={{ color: theme.colors.textDim }}>
-									Contains: {suggestion.memoryIds.length} related project memories
-								</div>
-								<div className="flex gap-2 mt-2">
-									<button
-										className="px-3 py-1 rounded text-xs font-medium border"
-										style={{
-											borderColor: theme.colors.accent,
-											color: theme.colors.accent,
-											backgroundColor: `${theme.colors.accent}10`,
-										}}
-										onClick={() => handleApplySkillArea(suggestion)}
-										disabled={isApplying}
-									>
-										{isApplying ? (
-											<Loader2 className="w-3 h-3 animate-spin inline mr-1" />
-										) : (
-											<Plus className="w-3 h-3 inline mr-1" />
-										)}
-										Create
-									</button>
-									<button
-										className="px-3 py-1 rounded text-xs border"
-										style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
-										onClick={() => handleDismissSuggestion(key)}
-										disabled={isApplying}
-									>
-										<X className="w-3 h-3 inline mr-1" />
-										Dismiss
-									</button>
-								</div>
-							</div>
-						);
-					})}
-				</div>
-			)}
-
-			{/* ─── Persona Match Preview ─────────────────────────────────── */}
-			<PersonaMatchPreview theme={theme} config={config} />
-
-			{/* ─── Persona Cards by Role ──────────────────────────────────── */}
-			{loading ? (
-				<div className="flex items-center justify-center py-12">
-					<Loader2 className="w-5 h-5 animate-spin" style={{ color: theme.colors.textDim }} />
-				</div>
-			) : roleGroups.length === 0 ? (
-				<div
-					className="flex flex-col items-center justify-center py-12 gap-3"
-					style={{ color: theme.colors.textDim }}
-				>
-					<Users className="w-8 h-8" style={{ color: theme.colors.accent, opacity: 0.5 }} />
-					<div className="text-xs font-medium">
-						No personas yet. Create one or apply a suggestion above.
-					</div>
-				</div>
-			) : (
-				roleGroups.map((group) => (
-					<div key={group.role.id} className="space-y-2">
-						{/* Role header */}
-						<div className="flex items-center gap-2 pt-2">
-							<div
-								className="w-2 h-2 rounded-full"
-								style={{ backgroundColor: theme.colors.accent }}
-							/>
-							<div
-								className="text-xs font-bold uppercase tracking-wider"
-								style={{ color: theme.colors.textDim }}
-							>
-								{group.role.name}
-							</div>
-							<div className="text-xs" style={{ color: theme.colors.textDim, opacity: 0.6 }}>
-								({group.personas.length})
-							</div>
-						</div>
-
-						{/* Persona cards */}
-						<div
-							className="grid gap-3"
-							style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}
-						>
-							{group.personas.map((persona) => (
-								<PersonaCardView
-									key={persona.id}
-									persona={persona}
-									theme={theme}
-									actionLoading={actionLoading}
-									expandedDescriptions={expandedDescriptions}
-									expandedPrompts={expandedPrompts}
-									onToggleDescription={() => toggleExpanded(persona.id, setExpandedDescriptions)}
-									onTogglePrompt={() => toggleExpanded(persona.id, setExpandedPrompts)}
-									onEdit={() => handleEditPersona(persona)}
-									onDuplicate={() => handleDuplicate(persona)}
-									onToggleActive={() => handleToggleActive(persona)}
-									onDelete={() => setShowDeleteConfirm({ persona })}
-									onReEmbed={() => handleReEmbed(persona)}
-								/>
-							))}
-						</div>
-					</div>
-				))
-			)}
+					))
+				)}
+			</div>
+			{/* end scrollable content */}
 
 			{/* ─── Delete Confirmation Dialog ─────────────────────────────── */}
 			{showDeleteConfirm && (
