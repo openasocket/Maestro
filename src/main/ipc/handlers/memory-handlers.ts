@@ -88,6 +88,27 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		'memory:setConfig',
 		createIpcDataHandler(handlerOpts('setConfig'), async (config: Partial<MemoryConfig>) => {
 			const previousConfig = cachedConfig;
+
+			// Auto-enable embedding provider when memory system is turned on
+			const wasMemoryEnabled = previousConfig?.enabled ?? false;
+			const isMemoryEnabled = config.enabled ?? wasMemoryEnabled;
+			if (isMemoryEnabled && !wasMemoryEnabled && !config.embeddingProvider) {
+				const currentEmbedding = previousConfig?.embeddingProvider;
+				if (!currentEmbedding?.enabled) {
+					config = {
+						...config,
+						embeddingProvider: {
+							...(currentEmbedding ?? { providerId: 'transformers-js' as const }),
+							enabled: true,
+						},
+					};
+					logger.info(
+						'Auto-enabling embedding provider (transformers-js) with memory system',
+						LOG_CONTEXT
+					);
+				}
+			}
+
 			const result = await memoryStore.setConfig(config);
 			// Update the cached config for the memory injector
 			cachedConfig = result;
@@ -96,7 +117,8 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 			if (config.embeddingProvider !== undefined) {
 				handleEmbeddingConfigChange(
 					previousConfig?.embeddingProvider,
-					result.embeddingProvider
+					result.embeddingProvider,
+					memoryStore
 				).catch((err) => {
 					logger.warn(`Failed to apply embedding config change: ${err}`, LOG_CONTEXT);
 				});
@@ -1145,7 +1167,8 @@ function ensureCacheDir(config: EmbeddingProviderConfig): EmbeddingProviderConfi
 
 async function handleEmbeddingConfigChange(
 	previous: EmbeddingProviderConfig | undefined,
-	current: EmbeddingProviderConfig | undefined
+	current: EmbeddingProviderConfig | undefined,
+	store?: MemoryStore
 ): Promise<void> {
 	if (!current) return;
 
@@ -1169,5 +1192,19 @@ async function handleEmbeddingConfigChange(
 		// Provider was just enabled
 		logger.info(`Enabling embedding provider: ${current.providerId}`, LOG_CONTEXT);
 		await embeddingRegistry.activate(withCache);
+	}
+
+	// After successful activation, embed any hierarchy items missing embeddings
+	if (isEnabled && embeddingRegistry.isReady() && store) {
+		store
+			.ensureHierarchyEmbeddings()
+			.then((count) => {
+				if (count > 0) {
+					logger.info(`Embedded ${count} hierarchy items after provider activation`, LOG_CONTEXT);
+				}
+			})
+			.catch((err) => {
+				logger.warn(`Failed to embed hierarchy after activation: ${err}`, LOG_CONTEXT);
+			});
 	}
 }

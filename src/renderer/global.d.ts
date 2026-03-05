@@ -3326,6 +3326,46 @@ interface MaestroAPI {
 		) => Promise<{ success: true; data: void } | { success: false; error: string }>;
 	};
 
+	// Embedding Provider API (model status, switching, progress)
+	embedding: {
+		getStatus: () => Promise<
+			| {
+					success: true;
+					data: {
+						activeProviderId: import('../shared/memory-types').EmbeddingProviderId | null;
+						statuses: Record<string, { ready: boolean; modelName: string; error?: string }>;
+					};
+			  }
+			| { success: false; error: string }
+		>;
+		switchProvider: (
+			providerId: import('../shared/memory-types').EmbeddingProviderId,
+			config: import('../shared/memory-types').EmbeddingProviderConfig
+		) => Promise<
+			| {
+					success: true;
+					data: { activeProviderId: import('../shared/memory-types').EmbeddingProviderId | null };
+			  }
+			| { success: false; error: string }
+		>;
+		detectAvailable: () => Promise<
+			| {
+					success: true;
+					data: { available: import('../shared/memory-types').EmbeddingProviderId[] };
+			  }
+			| { success: false; error: string }
+		>;
+		onProgress: (
+			callback: (event: {
+				providerId: import('../shared/memory-types').EmbeddingProviderId;
+				modelId: string;
+				progress: number;
+				status: 'downloading' | 'loading' | 'ready' | 'error';
+				message?: string;
+			}) => void
+		) => () => void;
+	};
+
 	// WakaTime API (CLI check, API key validation)
 	wakatime: {
 		checkCli: () => Promise<{ available: boolean; version?: string }>;

@@ -17,6 +17,8 @@ import {
 	Users,
 	Layers,
 	Settings,
+	Download,
+	CheckCircle2,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import { PersonasTab } from './PersonasTab';
@@ -93,6 +95,33 @@ export function MemorySettings({
 	const [resetting, setResetting] = useState(false);
 	const [confirmReset, setConfirmReset] = useState(false);
 	const [memoriesFilter, setMemoriesFilter] = useState<MemoryFilter | null>(null);
+
+	// Embedding model download/loading progress
+	const [embeddingProgress, setEmbeddingProgress] = useState<{
+		progress: number;
+		status: 'downloading' | 'loading' | 'ready' | 'error';
+		message?: string;
+	} | null>(null);
+
+	// Subscribe to embedding progress events
+	useEffect(() => {
+		if (!config.enabled) {
+			setEmbeddingProgress(null);
+			return;
+		}
+		const unsub = window.maestro.embedding.onProgress((event) => {
+			setEmbeddingProgress({
+				progress: event.progress,
+				status: event.status,
+				message: event.message,
+			});
+			// Auto-clear after ready
+			if (event.status === 'ready') {
+				setTimeout(() => setEmbeddingProgress(null), 3000);
+			}
+		});
+		return unsub;
+	}, [config.enabled]);
 
 	// Scroll position persistence across tab switches
 	const scrollPositions = useRef<Record<MemorySubTab, number>>({
@@ -334,6 +363,71 @@ export function MemorySettings({
 					</div>
 				</button>
 			</div>
+
+			{/* Embedding model download/loading progress */}
+			{embeddingProgress && embeddingProgress.status !== 'ready' && (
+				<div
+					className="flex items-center gap-3 p-3 rounded-lg text-xs"
+					style={{
+						backgroundColor:
+							embeddingProgress.status === 'error'
+								? `${theme.colors.error}15`
+								: `${theme.colors.accent}10`,
+						color:
+							embeddingProgress.status === 'error' ? theme.colors.error : theme.colors.textMain,
+						borderLeft: `3px solid ${embeddingProgress.status === 'error' ? theme.colors.error : theme.colors.accent}`,
+					}}
+				>
+					{embeddingProgress.status === 'downloading' && (
+						<Download className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.accent }} />
+					)}
+					{embeddingProgress.status === 'loading' && (
+						<Loader2
+							className="w-3.5 h-3.5 shrink-0 animate-spin"
+							style={{ color: theme.colors.accent }}
+						/>
+					)}
+					{embeddingProgress.status === 'error' && (
+						<AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+					)}
+					<div className="flex-1 min-w-0">
+						<div style={{ color: theme.colors.textMain }}>
+							{embeddingProgress.status === 'downloading'
+								? `Downloading embedding model... ${Math.round(embeddingProgress.progress * 100)}%`
+								: embeddingProgress.status === 'loading'
+									? 'Loading embedding model...'
+									: (embeddingProgress.message ?? 'Embedding model error')}
+						</div>
+						{embeddingProgress.status === 'downloading' && (
+							<div
+								className="mt-1.5 h-1.5 rounded-full overflow-hidden"
+								style={{ backgroundColor: `${theme.colors.accent}20` }}
+							>
+								<div
+									className="h-full rounded-full transition-all"
+									style={{
+										width: `${Math.round(embeddingProgress.progress * 100)}%`,
+										backgroundColor: theme.colors.accent,
+									}}
+								/>
+							</div>
+						)}
+					</div>
+				</div>
+			)}
+
+			{embeddingProgress?.status === 'ready' && (
+				<div
+					className="flex items-center gap-2 p-3 rounded-lg text-xs"
+					style={{
+						backgroundColor: `${theme.colors.accent}15`,
+						color: theme.colors.accent,
+					}}
+				>
+					<CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+					Embedding model ready
+				</div>
+			)}
 
 			{error && (
 				<div
