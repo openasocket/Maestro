@@ -1,16 +1,13 @@
 /**
  * MemoryTab - Memory/Experiences settings tab for SettingsModal
  *
- * Contains: MemorySettings (master toggle + config) and MemoryBrowserPanel
- * (hierarchy tree + memory library).
- *
- * Self-sourced: creates its own useMemoryHierarchy instance shared between
- * MemorySettings and MemoryBrowserPanel to avoid duplicate fetches.
+ * Thin wrapper that renders MemorySettings with sub-tab navigation.
+ * Each sub-tab (Personas, Skills, Experiences, Memories, Config, Status)
+ * is self-contained — MemoryBrowserPanel lives inside MemoriesTab.
  */
 
 import type { Theme } from '../../../types';
 import { MemorySettings } from '../MemorySettings';
-import { MemoryBrowserPanel } from '../MemoryBrowserPanel';
 import { useMemoryHierarchy } from '../../../hooks/memory/useMemoryHierarchy';
 
 interface MemoryTabProps {
@@ -33,16 +30,13 @@ export function MemoryTab({
 	const projectPath = activeProjectPath ?? null;
 
 	return (
-		<div className="space-y-6">
-			<MemorySettings
-				theme={theme}
-				projectPath={projectPath}
-				onHierarchyChange={memoryHierarchy.refresh}
-				hierarchyRoleCount={memoryHierarchy.roles.length}
-				activeAgentId={activeAgentId}
-				activeAgentType={activeAgentType}
-			/>
-			<MemoryBrowserPanel theme={theme} projectPath={projectPath} hierarchy={memoryHierarchy} />
-		</div>
+		<MemorySettings
+			theme={theme}
+			projectPath={projectPath}
+			onHierarchyChange={memoryHierarchy.refresh}
+			hierarchyRoleCount={memoryHierarchy.roles.length}
+			activeAgentId={activeAgentId}
+			activeAgentType={activeAgentType}
+		/>
 	);
 }
