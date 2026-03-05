@@ -476,7 +476,7 @@ async function defaultGetMemoryAccessors(): Promise<MemoryModuleAccessors | null
  * Inspired by claude-subconscious transcript_utils — shows just enough
  * to reconstruct the operational sequence.
  */
-function summarizeToolInput(toolName: string, state: unknown): string {
+export function summarizeToolInput(toolName: string, state: unknown): string {
 	if (!state || typeof state !== 'object') return '';
 	const s = state as Record<string, unknown>;
 

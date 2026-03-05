@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { setupMemoryMonitorListener } from '../memory-monitor-listener';
+import { setupMemoryMonitorListener, summarizeToolInput } from '../memory-monitor-listener';
 import type { MemoryModuleAccessors } from '../memory-monitor-listener';
 import type { ProcessManager } from '../../process-manager';
 import type { ProcessListenerDependencies } from '../types';
@@ -554,5 +554,67 @@ describe('Memory Monitor Listener', () => {
 		await flushPromises();
 
 		expect(mockEnqueue).not.toHaveBeenCalled();
+	});
+});
+
+describe('summarizeToolInput', () => {
+	it('returns file path for Read tool', () => {
+		expect(summarizeToolInput('Read', { file_path: '/src/app.ts' })).toBe('/src/app.ts');
+	});
+
+	it('returns file path for Write tool', () => {
+		expect(summarizeToolInput('Write', { file_path: '/src/output.ts' })).toBe('/src/output.ts');
+	});
+
+	it('returns file path for Edit tool (filePath variant)', () => {
+		expect(summarizeToolInput('Edit', { filePath: '/src/edit.ts' })).toBe('/src/edit.ts');
+	});
+
+	it('truncates Bash command to 150 chars', () => {
+		const longCommand = 'npm run build -- ' + 'x'.repeat(200);
+		const result = summarizeToolInput('Bash', { command: longCommand });
+		expect(result.length).toBe(150);
+		expect(result).toBe(longCommand.slice(0, 150));
+	});
+
+	it('returns short Bash command as-is', () => {
+		expect(summarizeToolInput('Bash', { command: 'npm test' })).toBe('npm test');
+	});
+
+	it('returns pattern + path for Grep', () => {
+		expect(summarizeToolInput('Grep', { pattern: 'TODO', path: '/src' })).toBe('TODO /src');
+	});
+
+	it('returns pattern + path for Glob', () => {
+		expect(summarizeToolInput('Glob', { pattern: '**/*.ts', path: '/src' })).toBe('**/*.ts /src');
+	});
+
+	it('returns pattern only for Grep without path', () => {
+		expect(summarizeToolInput('Grep', { pattern: 'TODO' })).toBe('TODO');
+	});
+
+	it('returns description for Agent', () => {
+		expect(summarizeToolInput('Agent', { description: 'search codebase' })).toBe('search codebase');
+	});
+
+	it('returns URL for WebFetch', () => {
+		expect(summarizeToolInput('WebFetch', { url: 'https://example.com' })).toBe(
+			'https://example.com'
+		);
+	});
+
+	it('returns truncated JSON for unknown tools', () => {
+		const input = { key: 'value', data: 'x'.repeat(200) };
+		const result = summarizeToolInput('CustomTool', input);
+		expect(result.length).toBeLessThanOrEqual(100);
+	});
+
+	it('returns empty string for null/undefined state', () => {
+		expect(summarizeToolInput('Read', null)).toBe('');
+		expect(summarizeToolInput('Read', undefined)).toBe('');
+	});
+
+	it('returns empty string for non-object state', () => {
+		expect(summarizeToolInput('Read', 'string')).toBe('');
 	});
 });
