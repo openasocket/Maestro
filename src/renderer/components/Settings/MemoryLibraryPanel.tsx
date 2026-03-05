@@ -783,6 +783,7 @@ function MemoryCard({
 function EffectivenessBadge({ memory }: { memory: MemoryEntry }) {
 	const hasData = memory.effectivenessUpdatedAt > 0 || memory.effectivenessScore !== 0.5;
 	const score = memory.effectivenessScore;
+	const isLowEffectiveness = hasData && score < 0.2 && memory.useCount >= 10;
 
 	let color: string;
 	let bgColor: string;
@@ -807,13 +808,27 @@ function EffectivenessBadge({ memory }: { memory: MemoryEntry }) {
 	}
 
 	return (
-		<span
-			className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[10px] font-medium"
-			style={{ backgroundColor: bgColor, color }}
-			title={`Effectiveness: ${hasData ? `${(score * 100).toFixed(1)}%` : 'Not yet evaluated'}`}
-		>
-			<span className="inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
-			{label}
+		<span className="inline-flex items-center gap-1">
+			<span
+				className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[10px] font-medium"
+				style={{ backgroundColor: bgColor, color }}
+				title={`Effectiveness: ${hasData ? `${(score * 100).toFixed(1)}%` : 'Not yet evaluated'}${isLowEffectiveness ? ' — confidence decaying faster due to low effectiveness' : ''}`}
+			>
+				<span
+					className="inline-block w-1.5 h-1.5 rounded-full"
+					style={{ backgroundColor: color }}
+				/>
+				{label}
+			</span>
+			{isLowEffectiveness && (
+				<span
+					className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[10px] font-medium"
+					style={{ backgroundColor: '#ef444415', color: '#f87171', border: '1px solid #ef444430' }}
+					title="This memory has been consistently unhelpful across 10+ injections. Its confidence is decaying faster. Consider archiving or editing it."
+				>
+					Low effectiveness
+				</span>
+			)}
 		</span>
 	);
 }

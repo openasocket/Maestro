@@ -1972,6 +1972,12 @@ export class MemoryStore {
 			const decayFactor = Math.pow(2, -daysSinceLastUsed / halfLifeDays);
 			entry.confidence = entry.confidence * decayFactor;
 
+			// Effectiveness decay: extra 0.05/day penalty for consistently unhelpful memories
+			// (effectivenessScore < 0.2 after 10+ injections — outcome-based, not time-based)
+			if (entry.useCount >= 10 && entry.effectivenessScore < 0.2) {
+				entry.confidence = Math.max(0, entry.confidence - 0.05);
+			}
+
 			if (entry.confidence < 0.05 && !entry.pinned) {
 				entry.archived = true;
 				// Keep active: true — archived memories are still "alive" but hidden from default searches

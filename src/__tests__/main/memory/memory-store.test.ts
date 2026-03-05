@@ -1609,5 +1609,96 @@ describe('MemoryStore', () => {
 			// Created just now — decay should be negligible
 			expect(updated!.confidence).toBeGreaterThan(0.99);
 		});
+
+		it('applies extra effectiveness decay for low-effectiveness high-use memories', async () => {
+			const mem = await store.addMemory({
+				content: 'Consistently unhelpful memory',
+				scope: 'global',
+				confidence: 0.5,
+			});
+
+			// Set up: effectivenessScore < 0.2, useCount >= 10, recent lastUsedAt
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			const entry = lib.entries.find((e) => e.id === mem.id)!;
+			entry.effectivenessScore = 0.15;
+			entry.useCount = 12;
+			entry.lastUsedAt = Date.now(); // recent, so half-life decay is negligible
+			await store.writeLibrary(dirPath, lib);
+
+			await store.applyConfidenceDecay('global', 30);
+
+			const updated = await store.getMemory(mem.id, 'global');
+			// Half-life decay is negligible (just created), but effectiveness penalty of -0.05
+			// 0.5 * ~1.0 - 0.05 ≈ 0.45
+			expect(updated!.confidence).toBeCloseTo(0.45, 1);
+		});
+
+		it('does not apply effectiveness decay when useCount < 10', async () => {
+			const mem = await store.addMemory({
+				content: 'Low use memory',
+				scope: 'global',
+				confidence: 0.5,
+			});
+
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			const entry = lib.entries.find((e) => e.id === mem.id)!;
+			entry.effectivenessScore = 0.1;
+			entry.useCount = 5; // below threshold
+			entry.lastUsedAt = Date.now();
+			await store.writeLibrary(dirPath, lib);
+
+			await store.applyConfidenceDecay('global', 30);
+
+			const updated = await store.getMemory(mem.id, 'global');
+			// No effectiveness penalty — confidence should be ~0.5 (negligible half-life decay)
+			expect(updated!.confidence).toBeGreaterThan(0.49);
+		});
+
+		it('does not apply effectiveness decay when effectivenessScore >= 0.2', async () => {
+			const mem = await store.addMemory({
+				content: 'Moderately effective memory',
+				scope: 'global',
+				confidence: 0.5,
+			});
+
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			const entry = lib.entries.find((e) => e.id === mem.id)!;
+			entry.effectivenessScore = 0.3;
+			entry.useCount = 15;
+			entry.lastUsedAt = Date.now();
+			await store.writeLibrary(dirPath, lib);
+
+			await store.applyConfidenceDecay('global', 30);
+
+			const updated = await store.getMemory(mem.id, 'global');
+			// No effectiveness penalty — confidence should be ~0.5
+			expect(updated!.confidence).toBeGreaterThan(0.49);
+		});
+
+		it('effectiveness decay can push confidence below auto-archive threshold', async () => {
+			const mem = await store.addMemory({
+				content: 'Almost dead memory',
+				scope: 'global',
+				confidence: 0.08,
+			});
+
+			const dirPath = store.getMemoryPath('global');
+			const lib = await store.readLibrary(dirPath);
+			const entry = lib.entries.find((e) => e.id === mem.id)!;
+			entry.effectivenessScore = 0.1;
+			entry.useCount = 20;
+			entry.lastUsedAt = Date.now();
+			await store.writeLibrary(dirPath, lib);
+
+			const archived = await store.applyConfidenceDecay('global', 30);
+
+			// 0.08 * ~1.0 - 0.05 = 0.03 < 0.05 → auto-archived
+			expect(archived).toBe(1);
+			const updated = await store.getMemory(mem.id, 'global');
+			expect(updated!.archived).toBe(true);
+		});
 	});
 });
