@@ -64,6 +64,8 @@ function makeEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
 		embedding: null,
 		tokenEstimate: overrides.tokenEstimate ?? Math.ceil(content.length / 4),
 		effectivenessScore: 0.5,
+		effectivenessDelta: 0,
+		effectivenessUpdatedAt: 0,
 		useCount: 0,
 		lastUsedAt: 0,
 		active: true,

@@ -14,8 +14,8 @@ import type {
 	MemoryScope,
 	SkillAreaId,
 	InjectionScopeGroup,
-	InjectionEvent,
 	InjectionTrigger,
+	InjectionTrackingEvent,
 } from '../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../shared/memory-types';
 import { getMemoryStore } from './memory-store';
@@ -524,6 +524,8 @@ export async function injectMemories(
 						archived: false,
 						embedding: null,
 						effectivenessScore: 0.5,
+						effectivenessDelta: 0,
+						effectivenessUpdatedAt: 0,
 						useCount: 0,
 						tokenEstimate: Math.ceil(directiveBlock.length / 4),
 						lastUsedAt: 0,
@@ -635,6 +637,8 @@ export async function injectMemories(
 					archived: false,
 					embedding: null,
 					effectivenessScore: 0.5,
+					effectivenessDelta: 0,
+					effectivenessUpdatedAt: 0,
 					useCount: 0,
 					tokenEstimate: digestTokens,
 					lastUsedAt: 0,
@@ -770,6 +774,8 @@ export async function injectMemories(
 								archived: false,
 								embedding: null,
 								effectivenessScore: 0.5,
+								effectivenessDelta: 0,
+								effectivenessUpdatedAt: 0,
 								useCount: 0,
 								tokenEstimate: digestTokens,
 								lastUsedAt: 0,
@@ -1063,7 +1069,7 @@ export interface InjectionRecord {
 	/** Accumulated token savings from diff injections */
 	totalTokensSaved: number;
 	/** Per-injection event log for granular effectiveness scoring (MEM-EVOLVE-04) */
-	injectionEvents: InjectionEvent[];
+	injectionEvents: InjectionTrackingEvent[];
 }
 
 /**
@@ -1114,7 +1120,7 @@ export function recordSessionInjection(
 	const existing = _sessionInjections.get(sessionId);
 
 	// Append a new injection event for per-injection tracking (MEM-EVOLVE-04)
-	const newEvent: InjectionEvent = {
+	const newEvent: InjectionTrackingEvent = {
 		memoryIds: [...memoryIds],
 		injectedAt: Date.now(),
 		turnIndex: turnIndex ?? 0,

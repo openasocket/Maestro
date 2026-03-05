@@ -673,6 +673,8 @@ export class MemoryStore {
 			archived: false,
 			embedding: null,
 			effectivenessScore: 0.5,
+			effectivenessDelta: 0,
+			effectivenessUpdatedAt: 0,
 			useCount: 0,
 			tokenEstimate: Math.ceil(entry.content.length / 4),
 			lastUsedAt: 0,
@@ -1918,12 +1920,14 @@ export class MemoryStore {
 		const idSet = new Set(injectedIds);
 
 		let modified = false;
+		const now = Date.now();
 		for (const entry of lib.entries) {
 			if (idSet.has(entry.id)) {
-				entry.effectivenessScore = Math.min(
-					1,
-					Math.max(0, 0.3 * outcomeScore + 0.7 * entry.effectivenessScore)
-				);
+				const oldScore = entry.effectivenessScore;
+				const newScore = Math.min(1, Math.max(0, 0.3 * outcomeScore + 0.7 * oldScore));
+				entry.effectivenessDelta = newScore - oldScore;
+				entry.effectivenessUpdatedAt = now;
+				entry.effectivenessScore = newScore;
 				modified = true;
 			}
 		}

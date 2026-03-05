@@ -11,7 +11,12 @@
  * uniform scoring for backward compatibility.
  */
 
-import type { MemoryId, MemoryScope, SkillAreaId, InjectionEvent } from '../../shared/memory-types';
+import type {
+	MemoryId,
+	MemoryScope,
+	SkillAreaId,
+	InjectionTrackingEvent,
+} from '../../shared/memory-types';
 import type { SessionOutcomeSignals, EffectivenessUpdate } from '../../shared/memory-types';
 import type { InjectionRecord } from './memory-injector';
 
@@ -32,7 +37,7 @@ export class EffectivenessEvaluator {
 	 * Without injectionEvents, all memories get the uniform session score.
 	 */
 	evaluateSession(
-		sessionId: string,
+		_sessionId: string,
 		injectionRecord: InjectionRecord,
 		sessionSignals: SessionOutcomeSignals
 	): EffectivenessUpdate[] {
@@ -78,7 +83,7 @@ export class EffectivenessEvaluator {
 	 * score wins (it was injected at the most favorable time).
 	 */
 	private evaluateWithEvents(
-		events: InjectionEvent[],
+		events: InjectionTrackingEvent[],
 		baseScore: number,
 		totalTurns: number,
 		memoryScopes: Map<MemoryId, { scope: MemoryScope; skillAreaId?: SkillAreaId }>

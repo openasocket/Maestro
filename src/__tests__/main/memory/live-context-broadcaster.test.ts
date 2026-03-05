@@ -154,6 +154,8 @@ function makeMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
 		archived: false,
 		embedding: null,
 		effectivenessScore: 0,
+		effectivenessDelta: 0,
+		effectivenessUpdatedAt: 0,
 		useCount: 0,
 		tokenEstimate: 50,
 		lastUsedAt: Date.now(),

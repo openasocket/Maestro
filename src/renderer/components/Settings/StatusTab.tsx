@@ -20,6 +20,7 @@ import {
 	MinusCircle,
 	Star,
 	TrendingUp,
+	TrendingDown,
 	Users,
 	DollarSign,
 } from 'lucide-react';
@@ -1473,6 +1474,31 @@ function ImpactDashboardSection({
 	const bucketLabels = ['0-0.2', '0.2-0.4', '0.4-0.6', '0.6-0.8', '0.8-1.0'];
 	const maxBucket = Math.max(...effectBuckets, 1);
 
+	// Effectiveness trends: improving, declining, never evaluated
+	const effectivenessTrends = useMemo(() => {
+		const sevenDaysAgo = Date.now() - 7 * 86400000;
+		let improving = 0;
+		let declining = 0;
+		let neverEvaluated = 0;
+
+		for (const m of allMemories) {
+			if (!m.active || m.archived) continue;
+			// Never evaluated: injected at least once but effectiveness never updated
+			if (m.useCount > 0 && (!m.effectivenessUpdatedAt || m.effectivenessUpdatedAt === 0)) {
+				neverEvaluated++;
+				continue;
+			}
+			// Check recent delta (updated within last 7 days)
+			if (m.effectivenessUpdatedAt && m.effectivenessUpdatedAt >= sevenDaysAgo) {
+				const delta = m.effectivenessDelta ?? 0;
+				if (delta > 0.1) improving++;
+				else if (delta < -0.1) declining++;
+			}
+		}
+
+		return { improving, declining, neverEvaluated };
+	}, [allMemories]);
+
 	// Extraction ROI
 	const experienceCount = stats.byType?.experience ?? 0;
 	const promotedCount = stats.bySource?.grpo ?? 0;
@@ -1652,6 +1678,46 @@ function ImpactDashboardSection({
 								</span>
 							</div>
 						))}
+					</div>
+				</div>
+			)}
+
+			{/* Effectiveness Trends (7 day) */}
+			{(effectivenessTrends.improving > 0 ||
+				effectivenessTrends.declining > 0 ||
+				effectivenessTrends.neverEvaluated > 0) && (
+				<div className="space-y-1">
+					<div className="text-xs" style={{ color: theme.colors.textDim }}>
+						Effectiveness Trends (7d)
+					</div>
+					<div className="flex items-center gap-2 text-[10px] flex-wrap">
+						{effectivenessTrends.improving > 0 && (
+							<span
+								className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded"
+								style={{ backgroundColor: '#22c55e20', color: '#22c55e' }}
+							>
+								<TrendingUp className="w-3 h-3" />
+								{effectivenessTrends.improving} improving
+							</span>
+						)}
+						{effectivenessTrends.declining > 0 && (
+							<span
+								className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded"
+								style={{ backgroundColor: '#ef444420', color: '#ef4444' }}
+							>
+								<TrendingDown className="w-3 h-3" />
+								{effectivenessTrends.declining} declining
+							</span>
+						)}
+						{effectivenessTrends.neverEvaluated > 0 && (
+							<span
+								className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded"
+								style={{ backgroundColor: '#6b728020', color: '#9ca3af' }}
+							>
+								<MinusCircle className="w-3 h-3" />
+								{effectivenessTrends.neverEvaluated} never evaluated
+							</span>
+						)}
 					</div>
 				</div>
 			)}

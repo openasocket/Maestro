@@ -83,6 +83,8 @@ function makeEntry(overrides: Partial<MemoryEntry> & { content: string }): Memor
 		active: true,
 		embedding: null,
 		effectivenessScore: 0.5,
+		effectivenessDelta: 0,
+		effectivenessUpdatedAt: 0,
 		useCount: 0,
 		tokenEstimate: Math.ceil(overrides.content.length / 4),
 		lastUsedAt: 0,

@@ -137,7 +137,7 @@ export interface InjectorAccessor {
 				contentHashes: Map<string, string>;
 				lastInjectedAt: number;
 				totalTokensSaved: number;
-				injectionEvents: import('../../shared/memory-types').InjectionEvent[];
+				injectionEvents: import('../../shared/memory-types').InjectionTrackingEvent[];
 		  }
 		| undefined;
 	generateDiffInjection: (

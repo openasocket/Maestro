@@ -23,7 +23,6 @@ import {
 	AlertTriangle,
 	Brain,
 	BarChart3,
-	Sparkles,
 	RotateCcw,
 	Link2,
 	X,
@@ -445,24 +444,7 @@ function MemoryCard({
 						<span style={{ color: '#ea8b23', opacity: 0.8 }}>Never used</span>
 					)
 				)}
-				{memory.effectivenessScore > 0 && (
-					<span
-						className="flex items-center gap-1"
-						title={`Effectiveness: ${(memory.effectivenessScore * 100).toFixed(1)}%`}
-					>
-						<span
-							className="inline-block w-1.5 h-1.5 rounded-full"
-							style={{
-								backgroundColor:
-									memory.effectivenessScore > 0.7
-										? '#22c55e'
-										: memory.effectivenessScore > 0.4
-											? '#eab308'
-											: '#ef4444',
-							}}
-						/>
-					</span>
-				)}
+				<EffectivenessBadge memory={memory} />
 			</div>
 
 			{/* Experience context — expandable */}
@@ -780,12 +762,7 @@ function MemoryCard({
 				</div>
 
 				{/* Effectiveness */}
-				{memory.effectivenessScore > 0 && (
-					<div className="flex items-center gap-1" title="Effectiveness">
-						<Sparkles className="w-3 h-3" />
-						{(memory.effectivenessScore * 100).toFixed(0)}%
-					</div>
-				)}
+				<EffectivenessBadge memory={memory} />
 
 				{/* Use count */}
 				{memory.useCount > 0 ? (
@@ -797,6 +774,47 @@ function MemoryCard({
 				)}
 			</div>
 		</div>
+	);
+}
+
+/**
+ * Colored effectiveness badge: green (>0.7), yellow (0.4-0.7), red (<0.4), gray (no data).
+ */
+function EffectivenessBadge({ memory }: { memory: MemoryEntry }) {
+	const hasData = memory.effectivenessUpdatedAt > 0 || memory.effectivenessScore !== 0.5;
+	const score = memory.effectivenessScore;
+
+	let color: string;
+	let bgColor: string;
+	let label: string;
+
+	if (!hasData) {
+		color = '#9ca3af';
+		bgColor = '#9ca3af20';
+		label = 'No data';
+	} else if (score > 0.7) {
+		color = '#22c55e';
+		bgColor = '#22c55e20';
+		label = `${(score * 100).toFixed(0)}%`;
+	} else if (score > 0.4) {
+		color = '#eab308';
+		bgColor = '#eab30820';
+		label = `${(score * 100).toFixed(0)}%`;
+	} else {
+		color = '#ef4444';
+		bgColor = '#ef444420';
+		label = `${(score * 100).toFixed(0)}%`;
+	}
+
+	return (
+		<span
+			className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[10px] font-medium"
+			style={{ backgroundColor: bgColor, color }}
+			title={`Effectiveness: ${hasData ? `${(score * 100).toFixed(1)}%` : 'Not yet evaluated'}`}
+		>
+			<span className="inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
+			{label}
+		</span>
 	);
 }
 
@@ -1887,6 +1905,8 @@ export function MemoryLibraryPanel({
 					active: true,
 					useCount: 0,
 					effectivenessScore: 0,
+					effectivenessDelta: 0,
+					effectivenessUpdatedAt: 0,
 					createdAt: Date.now(),
 					updatedAt: Date.now(),
 					source: 'user' as const,

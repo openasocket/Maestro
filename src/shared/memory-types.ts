@@ -180,6 +180,10 @@ export interface MemoryEntry {
 	embedding: number[] | null;
 	/** Effectiveness score: EMA of injection→outcome correlation (0.0-1.0) */
 	effectivenessScore: number;
+	/** Change from last effectiveness update (positive = improving, negative = declining) */
+	effectivenessDelta: number;
+	/** When effectiveness was last updated (ms timestamp, 0 = never) */
+	effectivenessUpdatedAt: number;
 	/** How many times this memory has been injected into an agent prompt */
 	useCount: number;
 	/** Estimated token count for injection budgeting */
@@ -654,7 +658,7 @@ export type InjectionTrigger = 'spawn' | 'checkpoint' | 'periodic' | 'live';
  * appends one of these, allowing per-injection effectiveness scoring rather than
  * uniform per-session scoring.
  */
-export interface InjectionEvent {
+export interface InjectionTrackingEvent {
 	/** Which memories were injected in this event */
 	memoryIds: MemoryId[];
 	/** Timestamp when injection occurred */
