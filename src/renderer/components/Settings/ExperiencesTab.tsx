@@ -310,6 +310,8 @@ export interface ExperiencesTabProps {
 	onRefresh: () => Promise<void>;
 	activeAgentId?: string | null;
 	activeAgentType?: string | null;
+	/** Called when user creates/edits/promotes — promotes engagement level to Active Curator */
+	onCuratorAction?: () => void;
 }
 
 // ─── Main Component ─────────────────────────────────────────────────────────────
@@ -323,6 +325,7 @@ export function ExperiencesTab({
 	onRefresh,
 	activeAgentId,
 	activeAgentType,
+	onCuratorAction,
 }: ExperiencesTabProps): React.ReactElement {
 	// ─── Section collapse state ─────────────────────────────────────────
 	const [extractionCollapsed, setExtractionCollapsed] = useState(false);
@@ -441,13 +444,14 @@ export function ExperiencesTab({
 					);
 				}
 				onRefresh();
+				onCuratorAction?.();
 			} catch {
 				// Promotion failed
 			} finally {
 				setMovePromoteMemory(null);
 			}
 		},
-		[movePromoteMemory, projectPath, onRefresh]
+		[movePromoteMemory, projectPath, onRefresh, onCuratorAction]
 	);
 
 	const handleMovePromoteScopeConfirm = useCallback(
@@ -719,11 +723,12 @@ export function ExperiencesTab({
 				setEditingPromotionId(null);
 				await loadPromotionCandidates();
 				await onRefresh();
+				onCuratorAction?.();
 			} catch (err) {
 				setError(err instanceof Error ? err.message : 'Failed to promote experience');
 			}
 		},
-		[loadPromotionCandidates, onRefresh]
+		[loadPromotionCandidates, onRefresh, onCuratorAction]
 	);
 
 	const handleDismissPromotion = useCallback(

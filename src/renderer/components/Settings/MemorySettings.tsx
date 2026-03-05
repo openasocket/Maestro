@@ -210,7 +210,16 @@ export function MemorySettings({
 				]);
 				if (!mounted) return;
 
-				if (configRes.success) setConfig({ ...MEMORY_CONFIG_DEFAULTS, ...configRes.data });
+				if (configRes.success) {
+					const loadedConfig = { ...MEMORY_CONFIG_DEFAULTS, ...configRes.data };
+					setConfig(loadedConfig);
+					// Auto-promote 0 → 1 on Memory tab visit
+					if ((loadedConfig.userEngagementLevel ?? 0) < 1) {
+						window.maestro.memory.setConfig({ userEngagementLevel: 1 });
+						loadedConfig.userEngagementLevel = 1;
+						setConfig({ ...loadedConfig });
+					}
+				}
 				if (statsRes.success) setStats(statsRes.data);
 				if (rolesRes.success) setHasRoles(rolesRes.data.length > 0);
 			} catch (err) {
@@ -245,6 +254,13 @@ export function MemorySettings({
 		},
 		[config]
 	);
+
+	// Auto-promote engagement level 1→2 on curator action (create/edit/promote)
+	const handleCuratorAction = useCallback(() => {
+		if ((config.userEngagementLevel ?? 0) < 2) {
+			updateConfig({ userEngagementLevel: 2 });
+		}
+	}, [config.userEngagementLevel, updateConfig]);
 
 	// Refresh stats — passed to tabs so they can trigger refresh after mutations
 	const refreshStats = useCallback(async () => {
@@ -633,6 +649,7 @@ export function MemorySettings({
 								onHierarchyChange={onHierarchyChange}
 								onRefresh={refreshStats}
 								onNavigateToTab={navigateToTab}
+								onCuratorAction={handleCuratorAction}
 							/>
 						)}
 						{activeSubTab === 'skills' && (
@@ -647,6 +664,7 @@ export function MemorySettings({
 									handleTabSwitch('memories');
 								}}
 								onHierarchyChange={onHierarchyChange}
+								onCuratorAction={handleCuratorAction}
 							/>
 						)}
 						{activeSubTab === 'experiences' && (
@@ -659,6 +677,7 @@ export function MemorySettings({
 								onRefresh={refreshStats}
 								activeAgentId={activeAgentId}
 								activeAgentType={activeAgentType}
+								onCuratorAction={handleCuratorAction}
 							/>
 						)}
 						{activeSubTab === 'memories' && (
@@ -671,6 +690,7 @@ export function MemorySettings({
 								onRefresh={refreshStats}
 								initialFilter={memoriesFilter}
 								onClearFilter={() => setMemoriesFilter(null)}
+								onCuratorAction={handleCuratorAction}
 							/>
 						)}
 						{activeSubTab === 'config' && (

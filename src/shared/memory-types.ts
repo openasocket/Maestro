@@ -338,6 +338,14 @@ export interface MemoryConfig {
 	_autoEnabledBannerDismissed?: boolean;
 	/** Whether the first-injection toast notification has been shown */
 	_firstInjectionNotified?: boolean;
+	/**
+	 * User engagement level for progressive disclosure:
+	 * 0 = Passive (default): minimal UI, system runs silently
+	 * 1 = Aware: user has visited Memory tab, sees full sub-tabs with banners
+	 * 2 = Active curator: user has created/edited/promoted content, sees all power-user features
+	 * Never auto-demotes — only manual reset.
+	 */
+	userEngagementLevel?: 0 | 1 | 2;
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -383,6 +391,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	_configVersion: 1,
 	_autoEnabledBannerDismissed: false,
 	_firstInjectionNotified: false,
+	userEngagementLevel: 0,
 };
 
 // ─── Checkpoint Injection Types ────────────────────────────────────────────

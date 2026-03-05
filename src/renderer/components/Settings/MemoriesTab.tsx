@@ -61,6 +61,8 @@ export interface MemoriesTabProps {
 	initialFilter?: MemoryFilter | null;
 	/** Called when the user clears cross-tab filters */
 	onClearFilter?: () => void;
+	/** Called when user creates/edits/promotes — promotes engagement level to Active Curator */
+	onCuratorAction?: () => void;
 }
 
 export function MemoriesTab({
@@ -72,6 +74,7 @@ export function MemoriesTab({
 	onRefresh,
 	initialFilter,
 	onClearFilter,
+	onCuratorAction,
 }: MemoriesTabProps): React.ReactElement {
 	const [allMemories, setAllMemories] = useState<MemoryEntry[]>([]);
 	const [pruneConfirm, setPruneConfirm] = useState(false);
@@ -265,8 +268,9 @@ export function MemoriesTab({
 			);
 			setEditModal(null);
 			await onRefresh();
+			onCuratorAction?.();
 		},
-		[projectPath, onRefresh]
+		[projectPath, onRefresh, onCuratorAction]
 	);
 
 	return (

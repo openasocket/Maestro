@@ -55,6 +55,8 @@ export interface SkillsTabProps {
 	onViewMemories?: (skillAreaId: string) => void;
 	/** Called when hierarchy structure changes (skills created/deleted/moved) */
 	onHierarchyChange?: () => void;
+	/** Called when user creates/edits/deletes — promotes engagement level to Active Curator */
+	onCuratorAction?: () => void;
 }
 
 /** Skill with resolved counts for display */
@@ -79,6 +81,7 @@ export function SkillsTab({
 	onUpdateConfig,
 	onViewMemories,
 	onHierarchyChange,
+	onCuratorAction,
 }: SkillsTabProps): React.ReactElement {
 	// ─── Data state ─────────────────────────────────────────────────
 	const [personas, setPersonas] = useState<Persona[]>([]);
@@ -321,8 +324,9 @@ export function SkillsTab({
 			setShowCreateModal(false);
 			await loadData();
 			onHierarchyChange?.();
+			onCuratorAction?.();
 		},
-		[editingSkill, createPersonaId, loadData, onHierarchyChange]
+		[editingSkill, createPersonaId, loadData, onHierarchyChange, onCuratorAction]
 	);
 
 	const handleReEmbed = useCallback(

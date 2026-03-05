@@ -54,6 +54,8 @@ export interface PersonasTabProps {
 	onRefresh: () => Promise<void>;
 	/** Navigate to another sub-tab with optional filter */
 	onNavigateToTab?: (tab: string, filter?: Record<string, string> | null) => void;
+	/** Called when user creates/edits/deletes — promotes engagement level to Active Curator */
+	onCuratorAction?: () => void;
 }
 
 /** Persona with resolved counts for display */
@@ -78,6 +80,7 @@ export function PersonasTab({
 	onHierarchyChange,
 	onRefresh,
 	onNavigateToTab,
+	onCuratorAction,
 }: PersonasTabProps): React.ReactElement {
 	// ─── Suggestion state (preserved from original) ─────────────────────
 	const [suggestions, setSuggestions] = useState<HierarchySuggestionResult | null>(null);
@@ -317,13 +320,14 @@ export function PersonasTab({
 				await onRefresh();
 				await loadData();
 				onHierarchyChange?.();
+				onCuratorAction?.();
 			} catch (err) {
 				setError(err instanceof Error ? err.message : 'Failed to create persona');
 			} finally {
 				setApplyingSuggestion(null);
 			}
 		},
-		[onHierarchyChange, onRefresh, loadData]
+		[onHierarchyChange, onRefresh, loadData, onCuratorAction]
 	);
 
 	const handleApplySkillArea = useCallback(
@@ -344,13 +348,14 @@ export function PersonasTab({
 				await onRefresh();
 				await loadData();
 				onHierarchyChange?.();
+				onCuratorAction?.();
 			} catch (err) {
 				setError(err instanceof Error ? err.message : 'Failed to create skill area');
 			} finally {
 				setApplyingSuggestion(null);
 			}
 		},
-		[onHierarchyChange, onRefresh, loadData]
+		[onHierarchyChange, onRefresh, loadData, onCuratorAction]
 	);
 
 	const handleDismissSuggestion = useCallback((key: string) => {
@@ -391,8 +396,9 @@ export function PersonasTab({
 			await onRefresh();
 			await loadData();
 			onHierarchyChange?.();
+			onCuratorAction?.();
 		},
-		[editingPersona, createRoleId, onRefresh, loadData, onHierarchyChange]
+		[editingPersona, createRoleId, onRefresh, loadData, onHierarchyChange, onCuratorAction]
 	);
 
 	const handleDuplicate = useCallback(
@@ -414,13 +420,14 @@ export function PersonasTab({
 				await onRefresh();
 				await loadData();
 				onHierarchyChange?.();
+				onCuratorAction?.();
 			} catch (err) {
 				setError(err instanceof Error ? err.message : 'Failed to duplicate persona');
 			} finally {
 				setActionLoading(null);
 			}
 		},
-		[onRefresh, loadData, onHierarchyChange]
+		[onRefresh, loadData, onHierarchyChange, onCuratorAction]
 	);
 
 	const handleToggleActive = useCallback(
