@@ -5,7 +5,7 @@
  * Tab-specific content is in PersonasTab, SkillsTab, ExperiencesTab, MemoriesTab, StatusTab.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
 	Brain,
 	Loader2,
@@ -67,6 +67,8 @@ interface MemorySettingsProps {
 	activeAgentId?: string | null;
 	/** Active agent type (e.g. 'claude-code') */
 	activeAgentType?: string | null;
+	/** Initial sub-tab to show (for deep-linking from outside) */
+	initialSubTab?: string;
 }
 
 export function MemorySettings({
@@ -76,8 +78,10 @@ export function MemorySettings({
 	hierarchyRoleCount,
 	activeAgentId,
 	activeAgentType,
+	initialSubTab,
 }: MemorySettingsProps): React.ReactElement {
-	const [activeSubTab, setActiveSubTab] = useState<MemorySubTab>('personas');
+	const validInitialTab = MEMORY_SUB_TABS.find((t) => t.id === initialSubTab)?.id ?? 'personas';
+	const [activeSubTab, setActiveSubTab] = useState<MemorySubTab>(validInitialTab);
 	const [config, setConfig] = useState<MemoryConfig>(MEMORY_CONFIG_DEFAULTS);
 	const [stats, setStats] = useState<MemoryStats | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -89,6 +93,78 @@ export function MemorySettings({
 	const [resetting, setResetting] = useState(false);
 	const [confirmReset, setConfirmReset] = useState(false);
 	const [memoriesFilter, setMemoriesFilter] = useState<MemoryFilter | null>(null);
+
+	// Scroll position persistence across tab switches
+	const scrollPositions = useRef<Record<MemorySubTab, number>>({
+		personas: 0,
+		skills: 0,
+		experiences: 0,
+		memories: 0,
+		config: 0,
+		status: 0,
+	});
+	const contentRef = useRef<HTMLDivElement>(null);
+
+	const handleTabSwitch = useCallback(
+		(newTab: MemorySubTab) => {
+			if (contentRef.current) {
+				scrollPositions.current[activeSubTab] = contentRef.current.scrollTop;
+			}
+			setActiveSubTab(newTab);
+		},
+		[activeSubTab]
+	);
+
+	// Restore scroll position after tab switch
+	useEffect(() => {
+		if (contentRef.current) {
+			contentRef.current.scrollTop = scrollPositions.current[activeSubTab];
+		}
+	}, [activeSubTab]);
+
+	// Refs for tab buttons (keyboard focus management)
+	const tabButtonRefs = useRef<Record<MemorySubTab, HTMLButtonElement | null>>({
+		personas: null,
+		skills: null,
+		experiences: null,
+		memories: null,
+		config: null,
+		status: null,
+	});
+
+	// Keyboard navigation for sub-tab bar
+	const handleTabBarKeyDown = useCallback(
+		(e: React.KeyboardEvent) => {
+			const tabs = MEMORY_SUB_TABS;
+			const currentIndex = tabs.findIndex((t) => t.id === activeSubTab);
+			let newIndex = currentIndex;
+
+			if (e.key === 'ArrowRight') newIndex = (currentIndex + 1) % tabs.length;
+			else if (e.key === 'ArrowLeft') newIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+			else if (e.key === 'Home') newIndex = 0;
+			else if (e.key === 'End') newIndex = tabs.length - 1;
+			else return;
+
+			e.preventDefault();
+			const newTab = tabs[newIndex].id;
+			handleTabSwitch(newTab);
+			tabButtonRefs.current[newTab]?.focus();
+		},
+		[activeSubTab, handleTabSwitch]
+	);
+
+	// Cross-tab navigation with optional filter state
+	const navigateToTab = useCallback(
+		(tab: string, filter?: Record<string, string> | null) => {
+			const validTab = MEMORY_SUB_TABS.find((t) => t.id === tab)?.id;
+			if (!validTab) return;
+			if (validTab === 'memories' && filter) {
+				setMemoriesFilter(filter as MemoryFilter);
+			}
+			handleTabSwitch(validTab);
+		},
+		[handleTabSwitch]
+	);
 
 	// Load config and stats on mount
 	useEffect(() => {
@@ -332,6 +408,8 @@ export function MemorySettings({
 
 					{/* Sub-Tab Navigation Bar */}
 					<div
+						role="tablist"
+						aria-label="Memory sub-tabs"
 						className="shrink-0 sticky top-0 z-10 flex gap-1.5 py-2 px-1 -mx-1 overflow-x-auto"
 						style={{
 							backgroundColor: theme.colors.bgSidebar,
@@ -339,6 +417,7 @@ export function MemorySettings({
 							paddingBottom: '8px',
 							marginBottom: '4px',
 						}}
+						onKeyDown={handleTabBarKeyDown}
 					>
 						{MEMORY_SUB_TABS.map((tab) => {
 							const isActive = activeSubTab === tab.id;
@@ -347,7 +426,15 @@ export function MemorySettings({
 							return (
 								<button
 									key={tab.id}
-									onClick={() => setActiveSubTab(tab.id)}
+									ref={(el) => {
+										tabButtonRefs.current[tab.id] = el;
+									}}
+									role="tab"
+									aria-selected={isActive}
+									aria-controls={`memory-tabpanel-${tab.id}`}
+									id={`memory-tab-${tab.id}`}
+									tabIndex={isActive ? 0 : -1}
+									onClick={() => handleTabSwitch(tab.id)}
 									className="flex items-center gap-1.5 px-3 rounded-full text-xs font-medium transition-colors whitespace-nowrap shrink-0"
 									style={{
 										minHeight: '36px',
@@ -384,7 +471,11 @@ export function MemorySettings({
 
 					{/* Active Sub-Tab Content — constrained height for per-tab scrolling */}
 					<div
-						className="flex-1 min-h-0 flex flex-col"
+						ref={contentRef}
+						role="tabpanel"
+						id={`memory-tabpanel-${activeSubTab}`}
+						aria-labelledby={`memory-tab-${activeSubTab}`}
+						className="flex-1 min-h-0 flex flex-col overflow-y-auto"
 						style={{ maxHeight: 'calc(100vh - 420px)' }}
 					>
 						{activeSubTab === 'personas' && (
@@ -395,6 +486,7 @@ export function MemorySettings({
 								projectPath={projectPath}
 								onHierarchyChange={onHierarchyChange}
 								onRefresh={refreshStats}
+								onNavigateToTab={navigateToTab}
 							/>
 						)}
 						{activeSubTab === 'skills' && (
@@ -406,7 +498,7 @@ export function MemorySettings({
 								onUpdateConfig={updateConfig}
 								onViewMemories={(skillAreaId) => {
 									setMemoriesFilter(skillAreaId ? { skillAreaId } : null);
-									setActiveSubTab('memories');
+									handleTabSwitch('memories');
 								}}
 								onHierarchyChange={onHierarchyChange}
 							/>
@@ -450,6 +542,7 @@ export function MemorySettings({
 								stats={stats}
 								projectPath={projectPath}
 								onConfigChange={refreshConfigAndStats}
+								onNavigateToTab={navigateToTab}
 							/>
 						)}
 					</div>

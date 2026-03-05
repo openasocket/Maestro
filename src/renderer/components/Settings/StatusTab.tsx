@@ -40,6 +40,8 @@ export interface StatusTabProps {
 	stats: MemoryStats | null;
 	projectPath?: string | null;
 	onConfigChange?: () => void;
+	/** Navigate to another sub-tab with optional filter */
+	onNavigateToTab?: (tab: string, filter?: Record<string, string> | null) => void;
 }
 
 /** Shared health context fetched once and passed to subsections. */
@@ -55,6 +57,7 @@ export function StatusTab({
 	stats,
 	projectPath,
 	onConfigChange,
+	onNavigateToTab,
 }: StatusTabProps): React.ReactElement {
 	const [allMemories, setAllMemories] = useState<MemoryEntry[]>([]);
 	const [healthCtx, setHealthCtx] = useState<HealthContext>({
@@ -178,6 +181,7 @@ export function StatusTab({
 					config={config}
 					stats={stats}
 					onConfigChange={onConfigChange}
+					onNavigateToTab={onNavigateToTab}
 				/>
 
 				{/* Section 3: System Metrics (collapsed by default) */}
@@ -575,11 +579,13 @@ function InjectionActivitySection({
 	config,
 	stats,
 	onConfigChange,
+	onNavigateToTab,
 }: {
 	theme: Theme;
 	config: MemoryConfig;
 	stats: MemoryStats | null;
 	onConfigChange?: () => void;
+	onNavigateToTab?: (tab: string, filter?: Record<string, string> | null) => void;
 }) {
 	const [expanded, setExpanded] = useState(true);
 	const [injections, setInjections] = useState<InjectionEventRecord[]>([]);
@@ -909,11 +915,14 @@ function InjectionActivitySection({
 																style={{ color: theme.colors.textMain }}
 															>
 																<span
-																	className="px-1 rounded"
+																	className={`px-1 rounded${onNavigateToTab ? ' cursor-pointer hover:opacity-80' : ''}`}
 																	style={{
 																		backgroundColor: `${theme.colors.accent}20`,
 																		color: theme.colors.accent,
 																	}}
+																	onClick={
+																		onNavigateToTab ? () => onNavigateToTab('personas') : undefined
+																	}
 																>
 																	{p.personaName}
 																</span>

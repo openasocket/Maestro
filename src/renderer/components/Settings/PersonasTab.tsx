@@ -52,6 +52,8 @@ export interface PersonasTabProps {
 	projectPath?: string | null;
 	onHierarchyChange?: () => void;
 	onRefresh: () => Promise<void>;
+	/** Navigate to another sub-tab with optional filter */
+	onNavigateToTab?: (tab: string, filter?: Record<string, string> | null) => void;
 }
 
 /** Persona with resolved counts for display */
@@ -75,6 +77,7 @@ export function PersonasTab({
 	projectPath,
 	onHierarchyChange,
 	onRefresh,
+	onNavigateToTab,
 }: PersonasTabProps): React.ReactElement {
 	// ─── Suggestion state (preserved from original) ─────────────────────
 	const [suggestions, setSuggestions] = useState<HierarchySuggestionResult | null>(null);
@@ -927,6 +930,7 @@ export function PersonasTab({
 										onToggleActive={() => handleToggleActive(persona)}
 										onDelete={() => setShowDeleteConfirm({ persona })}
 										onReEmbed={() => handleReEmbed(persona)}
+										onNavigateToTab={onNavigateToTab}
 									/>
 								))}
 							</div>
@@ -1259,6 +1263,7 @@ interface PersonaCardViewProps {
 	onToggleActive: () => void;
 	onDelete: () => void;
 	onReEmbed: () => void;
+	onNavigateToTab?: (tab: string, filter?: Record<string, string> | null) => void;
 }
 
 function PersonaCardView({
@@ -1274,6 +1279,7 @@ function PersonaCardView({
 	onToggleActive,
 	onDelete,
 	onReEmbed,
+	onNavigateToTab,
 }: PersonaCardViewProps) {
 	const isDescExpanded = expandedDescriptions.has(persona.id);
 	const isPromptExpanded = expandedPrompts.has(persona.id);
@@ -1394,8 +1400,20 @@ function PersonaCardView({
 
 			{/* Badges row: skills, memories, agents, projects */}
 			<div className="flex flex-wrap gap-1.5">
-				<Badge theme={theme} label={`${persona.skillCount} skills`} />
-				<Badge theme={theme} label={`${persona.memoryCount} memories`} />
+				<Badge
+					theme={theme}
+					label={`${persona.skillCount} skills`}
+					onClick={onNavigateToTab ? () => onNavigateToTab('skills') : undefined}
+				/>
+				<Badge
+					theme={theme}
+					label={`${persona.memoryCount} memories`}
+					onClick={
+						onNavigateToTab
+							? () => onNavigateToTab('memories', { personaId: persona.id })
+							: undefined
+					}
+				/>
 				{persona.assignedAgents.length > 0 ? (
 					persona.assignedAgents.map((a) => <Badge key={a} theme={theme} label={a} accent />)
 				) : (
@@ -1449,17 +1467,29 @@ function ActionButton({
 	);
 }
 
-function Badge({ theme, label, accent }: { theme: Theme; label: string; accent?: boolean }) {
+function Badge({
+	theme,
+	label,
+	accent,
+	onClick,
+}: {
+	theme: Theme;
+	label: string;
+	accent?: boolean;
+	onClick?: () => void;
+}) {
+	const Tag = onClick ? 'button' : 'span';
 	return (
-		<span
-			className="px-1.5 py-0.5 rounded text-xs"
+		<Tag
+			className={`px-1.5 py-0.5 rounded text-xs${onClick ? ' cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
 			style={{
 				backgroundColor: accent ? `${theme.colors.accent}15` : `${theme.colors.border}30`,
 				color: accent ? theme.colors.accent : theme.colors.textDim,
 			}}
+			onClick={onClick}
 		>
 			{label}
-		</span>
+		</Tag>
 	);
 }
 

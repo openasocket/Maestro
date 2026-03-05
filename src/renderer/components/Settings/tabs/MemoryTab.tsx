@@ -18,6 +18,8 @@ interface MemoryTabProps {
 	activeAgentId?: string | null;
 	/** Active agent type (e.g. 'claude-code') */
 	activeAgentType?: string | null;
+	/** Initial sub-tab to show (for deep-linking from outside) */
+	initialSubTab?: string;
 }
 
 export function MemoryTab({
@@ -25,6 +27,7 @@ export function MemoryTab({
 	activeProjectPath,
 	activeAgentId,
 	activeAgentType,
+	initialSubTab,
 }: MemoryTabProps): React.ReactElement {
 	const memoryHierarchy = useMemoryHierarchy();
 	const projectPath = activeProjectPath ?? null;
@@ -37,6 +40,7 @@ export function MemoryTab({
 			hierarchyRoleCount={memoryHierarchy.roles.length}
 			activeAgentId={activeAgentId}
 			activeAgentType={activeAgentType}
+			initialSubTab={initialSubTab}
 		/>
 	);
 }

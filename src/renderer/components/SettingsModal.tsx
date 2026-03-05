@@ -53,6 +53,8 @@ interface SettingsModalProps {
 	hasNoAgents?: boolean;
 	onThemeImportError?: (message: string) => void;
 	onThemeImportSuccess?: (message: string) => void;
+	/** When opening to the memory tab, optionally specify which sub-tab to show */
+	initialMemorySubTab?: string;
 	/** Active session's working directory for project-scoped memories */
 	activeProjectPath?: string | null;
 	/** Active agent session ID for per-agent analysis */
@@ -612,6 +614,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 							activeProjectPath={props.activeProjectPath}
 							activeAgentId={props.activeAgentId}
 							activeAgentType={props.activeAgentType}
+							initialSubTab={props.initialMemorySubTab}
 						/>
 					)}
 
