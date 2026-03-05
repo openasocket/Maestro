@@ -38,6 +38,9 @@ import {
 	FileUp,
 	Check,
 	ArrowUpCircle,
+	Shield,
+	Lightbulb,
+	Eye,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { TreeNode } from './MemoryTreeBrowser';
@@ -52,6 +55,7 @@ import type {
 	Persona,
 	SkillArea,
 	ExperienceContext,
+	InjectionTone,
 } from '../../../shared/memory-types';
 import type { UseMemoryStoreReturn } from '../../hooks/memory/useMemoryStore';
 import { RoleDetailView, PersonaDetailView } from './EntityDetailView';
@@ -71,6 +75,8 @@ interface MemoryLibraryPanelProps {
 	projectPath: string | null;
 	agentType?: string;
 	store: UseMemoryStoreReturn;
+	/** Current injection tone setting for preview rendering */
+	injectionTone?: InjectionTone;
 	// Hierarchy data for breadcrumbs
 	roles: Role[];
 	personas: Persona[];
@@ -149,6 +155,32 @@ function buildBreadcrumb(
 	return [];
 }
 
+// ─── Injection Preview ───────────────────────────────────────────────────
+
+/**
+ * Build a preview of how a memory will appear to the agent under a given tone.
+ */
+function previewInjectionLine(entry: MemoryEntry, tone: InjectionTone): string {
+	const effective =
+		entry.toneOverride ??
+		(tone === 'prescriptive'
+			? 'prescriptive'
+			: tone === 'observational'
+				? 'observational'
+				: entry.type === 'rule'
+					? 'prescriptive'
+					: 'observational');
+
+	if (effective === 'observational') {
+		const ctx = entry.experienceContext;
+		if (ctx?.situation && ctx?.learning) {
+			return `- OBSERVATION: In a previous session (${ctx.situation}), it was found that: ${ctx.learning}`;
+		}
+		return `- OBSERVATION: In past work, ${entry.content}`;
+	}
+	return `- RULE: ${entry.content}`;
+}
+
 // ─── Scope Derivation ─────────────────────────────────────────────────────
 
 function deriveScope(node: TreeNode | null): { scope: MemoryScope; skillAreaId?: string } {
@@ -189,6 +221,7 @@ function MemoryCard({
 	onMovePromote,
 	skillAreas,
 	personas,
+	injectionTone,
 }: {
 	memory: MemoryEntry;
 	theme: Theme;
@@ -208,8 +241,10 @@ function MemoryCard({
 	onMovePromote?: (action: MovePromoteAction) => void;
 	skillAreas?: SkillArea[];
 	personas?: Persona[];
+	injectionTone?: InjectionTone;
 }) {
 	const [expanded, setExpanded] = useState(false);
+	const [injectionPreview, setInjectionPreview] = useState(false);
 	const [contextExpanded, setContextExpanded] = useState(false);
 	const [originExpanded, setOriginExpanded] = useState(false);
 	const [relatedExpanded, setRelatedExpanded] = useState(false);
@@ -299,6 +334,13 @@ function MemoryCard({
 			className="rounded-lg border p-3 space-y-2 transition-colors"
 			style={{
 				borderColor: memory.pinned ? theme.colors.accent : theme.colors.border,
+				borderLeftWidth: 3,
+				borderLeftStyle: isExperience ? 'dashed' : 'solid',
+				borderLeftColor: memory.pinned
+					? theme.colors.accent
+					: isExperience
+						? theme.colors.textDim
+						: theme.colors.accent,
 				backgroundColor: memory.pinned ? `${theme.colors.accent}05` : 'transparent',
 				opacity: archived ? 0.7 : 1,
 			}}
@@ -315,6 +357,12 @@ function MemoryCard({
 						style={{ accentColor: theme.colors.accent }}
 						onClick={(e) => e.stopPropagation()}
 					/>
+				)}
+				{/* Type icon */}
+				{isExperience ? (
+					<Lightbulb className="w-3 h-3 shrink-0" style={{ color: theme.colors.warning }} />
+				) : (
+					<Shield className="w-3 h-3 shrink-0" style={{ color: theme.colors.accent }} />
 				)}
 				{/* Type badge — shows "Archived" when in archive view */}
 				<span
@@ -411,6 +459,14 @@ function MemoryCard({
 				)}
 				<button
 					className="p-0.5 rounded hover:opacity-80 transition-opacity"
+					style={{ color: injectionPreview ? theme.colors.accent : theme.colors.textDim }}
+					title="Preview Injection"
+					onClick={() => setInjectionPreview(!injectionPreview)}
+				>
+					<Eye className="w-3 h-3" />
+				</button>
+				<button
+					className="p-0.5 rounded hover:opacity-80 transition-opacity"
 					style={{ color: theme.colors.error }}
 					title="Delete"
 					onClick={onDelete}
@@ -418,6 +474,23 @@ function MemoryCard({
 					<Trash2 className="w-3 h-3" />
 				</button>
 			</div>
+
+			{/* Injection Preview */}
+			{injectionPreview && (
+				<div
+					className="text-[11px] font-mono px-2 py-1.5 rounded"
+					style={{
+						backgroundColor: `${theme.colors.border}20`,
+						color: theme.colors.textDim,
+						borderLeft: `2px solid ${theme.colors.accent}`,
+					}}
+				>
+					<div className="text-[10px] font-medium mb-1" style={{ color: theme.colors.accent }}>
+						Agent sees:
+					</div>
+					{previewInjectionLine(memory, injectionTone ?? 'adaptive')}
+				</div>
+			)}
 
 			{/* Content */}
 			<div
@@ -959,6 +1032,7 @@ export function MemoryLibraryPanel({
 	projectPath: _projectPath,
 	agentType,
 	store,
+	injectionTone,
 	roles,
 	personas,
 	skillAreas,
@@ -2357,6 +2431,7 @@ export function MemoryLibraryPanel({
 								onDelete={() => handleDelete(memory.id)}
 								agentType={agentType}
 								projectPath={resolvedProjectPath}
+								injectionTone={injectionTone}
 							/>
 						))}
 					</>
@@ -2411,6 +2486,7 @@ export function MemoryLibraryPanel({
 								onMovePromote={handleMovePromote}
 								skillAreas={skillAreas}
 								personas={personas}
+								injectionTone={injectionTone}
 							/>
 						))}
 					</>

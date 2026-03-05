@@ -166,6 +166,46 @@ export function ConfigTab({ theme, config, onUpdateConfig }: ConfigTabProps): Re
 							</div>
 						</div>
 
+						{/* Injection Tone */}
+						<div className="pt-3 pb-2">
+							<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
+								Injection Tone
+							</div>
+							<div className="text-xs mt-0.5 mb-2" style={{ color: theme.colors.textDim }}>
+								Controls how memories are framed when presented to agents
+							</div>
+							<div className="flex gap-2">
+								{(['prescriptive', 'adaptive', 'observational'] as const).map((tone) => (
+									<button
+										key={tone}
+										onClick={() => onUpdateConfig({ injectionTone: tone })}
+										className="flex-1 rounded-md border text-left"
+										style={{
+											padding: '8px 12px',
+											borderColor:
+												config.injectionTone === tone ? theme.colors.accent : theme.colors.border,
+											background:
+												config.injectionTone === tone ? `${theme.colors.accent}20` : 'transparent',
+											color:
+												config.injectionTone === tone ? theme.colors.accent : theme.colors.textMain,
+											cursor: 'pointer',
+											fontWeight: config.injectionTone === tone ? 600 : 400,
+										}}
+									>
+										<div className="text-xs">{tone.charAt(0).toUpperCase() + tone.slice(1)}</div>
+										<div
+											className="text-xs mt-0.5"
+											style={{ color: theme.colors.textDim, fontSize: 10 }}
+										>
+											{tone === 'prescriptive' && 'Frame all memories as directives'}
+											{tone === 'adaptive' && 'Rules as directives, experiences as observations'}
+											{tone === 'observational' && 'Frame all memories as past observations'}
+										</div>
+									</button>
+								))}
+							</div>
+						</div>
+
 						<ConfigSlider
 							label="Token Budget"
 							description="Maximum tokens for memory injection per prompt"

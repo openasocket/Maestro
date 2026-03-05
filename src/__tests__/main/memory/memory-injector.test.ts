@@ -223,11 +223,11 @@ describe('MemoryInjector', () => {
 			expect(result.injectedPrompt).toContain('</agent-memories>');
 			expect(result.injectedPrompt).toContain('[Rust Dev > Error Handling]');
 			expect(result.injectedPrompt).toContain('[Rust Dev > Performance]');
-			expect(result.injectedPrompt).toContain('- Use Result<T, E> for errors');
-			expect(result.injectedPrompt).toContain('- Prefer iterators over loops');
+			expect(result.injectedPrompt).toContain('- RULE: Use Result<T, E> for errors');
+			expect(result.injectedPrompt).toContain('- RULE: Prefer iterators over loops');
 		});
 
-		it('formats experience entries with (experience) prefix', async () => {
+		it('formats experience entries as observations in adaptive mode', async () => {
 			const entry = makeEntry({
 				content: 'Codex stalls without --skip-git-repo-check',
 				type: 'experience',
@@ -240,10 +240,10 @@ describe('MemoryInjector', () => {
 			]);
 
 			const result = await injectMemories('batch mode', '/project', 'claude-code');
-			expect(result.injectedPrompt).toContain('- (experience) Codex stalls without');
+			expect(result.injectedPrompt).toContain('- OBSERVATION: In past work, Codex stalls without');
 		});
 
-		it('formats rule entries without prefix', async () => {
+		it('formats rule entries as RULE directives', async () => {
 			const entry = makeEntry({
 				content: 'Always write tests',
 				type: 'rule',
@@ -253,8 +253,8 @@ describe('MemoryInjector', () => {
 			setupMockResults([makeSearchResult(entry)]);
 
 			const result = await injectMemories('testing', '/project', 'claude-code');
-			expect(result.injectedPrompt).toContain('- Always write tests');
-			expect(result.injectedPrompt).not.toContain('(experience)');
+			expect(result.injectedPrompt).toContain('- RULE: Always write tests');
+			expect(result.injectedPrompt).not.toContain('- OBSERVATION:');
 		});
 
 		it('groups project memories under [project]', async () => {
@@ -264,7 +264,7 @@ describe('MemoryInjector', () => {
 
 			const result = await injectMemories('format code', '/project', 'claude-code');
 			expect(result.injectedPrompt).toContain('[project]');
-			expect(result.injectedPrompt).toContain('- This repo uses tabs');
+			expect(result.injectedPrompt).toContain('- RULE: This repo uses tabs');
 		});
 
 		it('groups global memories under [global]', async () => {
@@ -321,7 +321,7 @@ describe('MemoryInjector', () => {
 			setupMockResults([makeSearchResult(entry)]);
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
-			expect(result.injectedPrompt).toContain('Relevant knowledge for this task:');
+			expect(result.injectedPrompt).toContain('The following knowledge is relevant to this task.');
 		});
 	});
 

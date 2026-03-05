@@ -624,7 +624,12 @@ export function MemoriesTab({
 			</div>
 
 			{/* Memory Browser Panel (tree + library) */}
-			<MemoryBrowserPanel theme={theme} projectPath={projectPath ?? null} hierarchy={hierarchy} />
+			<MemoryBrowserPanel
+				theme={theme}
+				projectPath={projectPath ?? null}
+				hierarchy={hierarchy}
+				injectionTone={config.injectionTone}
+			/>
 
 			{/* Quick Create Modal */}
 			{editModal && (

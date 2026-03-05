@@ -57,6 +57,7 @@ export interface MemoryEditModalProps {
 		confidence: number;
 		pinned: boolean;
 		experienceContext?: ExperienceContext;
+		toneOverride?: 'prescriptive' | 'observational';
 	}) => Promise<void>;
 	onClose: () => void;
 }
@@ -83,6 +84,9 @@ export function MemoryEditModal({
 	const [tags, setTags] = useState<string>(memory?.tags?.join(', ') ?? '');
 	const [confidence, setConfidence] = useState(memory?.confidence ?? 0.8);
 	const [pinned, setPinned] = useState(memory?.pinned ?? false);
+	const [toneOverride, setToneOverride] = useState<'prescriptive' | 'observational' | ''>(
+		memory?.toneOverride ?? ''
+	);
 
 	// Experience context fields
 	const [situation, setSituation] = useState(memory?.experienceContext?.situation ?? '');
@@ -202,6 +206,10 @@ export function MemoryEditModal({
 				};
 			}
 
+			if (toneOverride) {
+				data.toneOverride = toneOverride;
+			}
+
 			await onSave(data);
 			onClose();
 		} catch (err) {
@@ -218,6 +226,7 @@ export function MemoryEditModal({
 		tags,
 		confidence,
 		pinned,
+		toneOverride,
 		situation,
 		learning,
 		memory,
@@ -524,6 +533,43 @@ export function MemoryEditModal({
 						</div>
 					</div>
 				</button>
+
+				{/* Advanced — Tone Override */}
+				<div className="pt-3 mt-1 border-t" style={{ borderColor: theme.colors.border }}>
+					<div
+						className="text-[10px] font-bold uppercase tracking-wider mb-2"
+						style={{ color: theme.colors.textDim }}
+					>
+						Advanced
+					</div>
+					<div>
+						<label
+							className="block text-xs font-medium mb-1"
+							style={{ color: theme.colors.textMain }}
+						>
+							Tone Override
+						</label>
+						<select
+							value={toneOverride}
+							onChange={(e) =>
+								setToneOverride((e.target.value as 'prescriptive' | 'observational' | '') || '')
+							}
+							className="w-full p-2 rounded border bg-transparent outline-none text-xs"
+							style={{
+								borderColor: theme.colors.border,
+								color: theme.colors.textMain,
+								backgroundColor: theme.colors.bgSidebar,
+							}}
+						>
+							<option value="">Use global setting</option>
+							<option value="prescriptive">Prescriptive (directive)</option>
+							<option value="observational">Observational (past observation)</option>
+						</select>
+						<p className="text-[10px] mt-1" style={{ color: theme.colors.textDim }}>
+							Override the global injection tone for this specific memory
+						</p>
+					</div>
+				</div>
 			</div>
 		</Modal>
 	);

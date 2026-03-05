@@ -16,6 +16,7 @@ import type {
 	InjectionScopeGroup,
 	InjectionTrigger,
 	InjectionTrackingEvent,
+	InjectionTone,
 } from '../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../shared/memory-types';
 import { getMemoryStore } from './memory-store';
@@ -109,12 +110,36 @@ interface GroupedMemories {
 }
 
 /**
- * Build a display line for a single memory entry.
- * Rules render as plain bullets; experiences get an (experience) prefix.
+ * Resolve the effective tone for a memory entry.
+ * Per-entry toneOverride takes precedence over the global config tone.
  */
-function formatMemoryLine(result: MemorySearchResult): string {
-	const prefix = result.entry.type === 'experience' ? '(experience) ' : '';
-	return `- ${prefix}${result.entry.content}`;
+function resolveEntryTone(
+	entry: { type: 'rule' | 'experience'; toneOverride?: 'prescriptive' | 'observational' },
+	globalTone: InjectionTone
+): 'prescriptive' | 'observational' {
+	if (entry.toneOverride) return entry.toneOverride;
+	if (globalTone === 'prescriptive') return 'prescriptive';
+	if (globalTone === 'observational') return 'observational';
+	// adaptive: rules → prescriptive, experiences → observational
+	return entry.type === 'rule' ? 'prescriptive' : 'observational';
+}
+
+/**
+ * Build a display line for a single memory entry.
+ * Formatting depends on the resolved injection tone.
+ */
+function formatMemoryLine(result: MemorySearchResult, tone: InjectionTone): string {
+	const effectiveTone = resolveEntryTone(result.entry, tone);
+
+	if (effectiveTone === 'observational') {
+		const ctx = result.entry.experienceContext;
+		if (ctx?.situation && ctx?.learning) {
+			return `- OBSERVATION: In a previous session (${ctx.situation}), it was found that: ${ctx.learning}`;
+		}
+		return `- OBSERVATION: In past work, ${result.entry.content}`;
+	}
+
+	return `- RULE: ${result.entry.content}`;
 }
 
 /**
@@ -153,7 +178,11 @@ function getGroupKey(result: MemorySearchResult): { key: string; priority: numbe
  * When includeComments is true, adds XML comments before each memory
  * explaining why it was injected (omitted in lean mode to save tokens).
  */
-function formatXmlBlock(selected: MemorySearchResult[], includeComments: boolean): string {
+function formatXmlBlock(
+	selected: MemorySearchResult[],
+	includeComments: boolean,
+	tone: InjectionTone
+): string {
 	// Group by key
 	const groupMap = new Map<string, GroupedMemories>();
 	// Track which role/persona prompts we've already captured (dedup by name)
@@ -190,7 +219,7 @@ function formatXmlBlock(selected: MemorySearchResult[], includeComments: boolean
 		if (includeComments) {
 			group.lines.push(formatMatchComment(result));
 		}
-		group.lines.push(formatMemoryLine(result));
+		group.lines.push(formatMemoryLine(result, tone));
 		group.tokenCost += result.entry.tokenEstimate;
 	}
 
@@ -213,7 +242,14 @@ function formatXmlBlock(selected: MemorySearchResult[], includeComments: boolean
 		return parts.join('\n');
 	});
 
-	return `<agent-memories>\nRelevant knowledge for this task:\n\n${sections.join('\n\n')}\n</agent-memories>`;
+	const preamble =
+		tone === 'prescriptive'
+			? 'The following rules and guidelines are relevant to this task. Follow these directives:'
+			: tone === 'observational'
+				? 'The following observations from past sessions may be relevant to this task. Consider these patterns:'
+				: 'The following knowledge is relevant to this task. RULES are directives to follow. OBSERVATIONS are patterns from past sessions to consider:';
+
+	return `<agent-memories>\n${preamble}\n\n${sections.join('\n\n')}\n</agent-memories>`;
 }
 
 // ─── Diff-Based Injection ───────────────────────────────────────────────────
@@ -239,9 +275,9 @@ export interface DiffInjectionResult {
 /**
  * Format a single memory result as a display line for diff output.
  */
-function formatDiffLine(result: MemorySearchResult): string {
+function formatDiffLine(result: MemorySearchResult, tone: InjectionTone): string {
 	const { key } = getGroupKey(result);
-	return `${key}\n${formatMemoryLine(result)}`;
+	return `${key}\n${formatMemoryLine(result, tone)}`;
 }
 
 /**
@@ -250,8 +286,10 @@ function formatDiffLine(result: MemorySearchResult): string {
  */
 export function generateDiffInjection(
 	newResults: MemorySearchResult[],
-	previousRecord: InjectionRecord
+	previousRecord: InjectionRecord,
+	tone?: InjectionTone
 ): DiffInjectionResult {
+	const resolvedTone = tone ?? getConfig().injectionTone;
 	const previousIds = new Set(previousRecord.ids);
 	const newIdSet = new Set(newResults.map((r) => r.entry.id));
 
@@ -303,7 +341,7 @@ export function generateDiffInjection(
 	}
 
 	if (added.length > 0) {
-		const addedLines = added.map(formatDiffLine).join('\n\n');
+		const addedLines = added.map((r) => formatDiffLine(r, resolvedTone)).join('\n\n');
 		parts.push(`<added>\n${addedLines}\n</added>`);
 	}
 
@@ -314,7 +352,7 @@ export function generateDiffInjection(
 	}
 
 	if (modified.length > 0) {
-		const modifiedLines = modified.map(formatDiffLine).join('\n\n');
+		const modifiedLines = modified.map((r) => formatDiffLine(r, resolvedTone)).join('\n\n');
 		parts.push(`<modified>\n${modifiedLines}\n</modified>`);
 	}
 
@@ -798,7 +836,7 @@ export async function injectMemories(
 	// Format XML
 	// Include injection transparency comments (omit in lean mode to save tokens)
 	const includeComments = config.injectionStrategy !== 'lean';
-	const xmlBlock = formatXmlBlock(finalSelected, includeComments);
+	const xmlBlock = formatXmlBlock(finalSelected, includeComments, config.injectionTone);
 
 	// Track persona contributions
 	const personaMap = new Map<string, { personaName: string; personaId: string; count: number }>();

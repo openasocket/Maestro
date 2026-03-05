@@ -6,7 +6,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { Theme } from '../../types';
-import type { MemoryScope, SkillAreaId } from '../../../shared/memory-types';
+import type { MemoryScope, SkillAreaId, InjectionTone } from '../../../shared/memory-types';
 import { MemoryTreeBrowser, type TreeNode } from './MemoryTreeBrowser';
 import { MemoryLibraryPanel } from './MemoryLibraryPanel';
 import { AllExperiencesPanel } from './AllExperiencesPanel';
@@ -17,6 +17,8 @@ interface MemoryBrowserPanelProps {
 	theme: Theme;
 	projectPath: string | null;
 	agentType?: string;
+	/** Current injection tone setting for preview rendering */
+	injectionTone?: InjectionTone;
 	/** Optional pre-created hierarchy — when provided, skip creating a new one. */
 	hierarchy?: ReturnType<typeof useMemoryHierarchy>;
 }
@@ -52,6 +54,7 @@ export function MemoryBrowserPanel({
 	theme,
 	projectPath,
 	agentType,
+	injectionTone,
 	hierarchy: externalHierarchy,
 }: MemoryBrowserPanelProps): React.ReactElement {
 	const internalHierarchy = useMemoryHierarchy();
@@ -141,6 +144,7 @@ export function MemoryBrowserPanel({
 						projectPath={projectPath}
 						agentType={agentType}
 						store={store}
+						injectionTone={injectionTone}
 						roles={hierarchy.roles}
 						personas={hierarchy.personas}
 						skillAreas={hierarchy.skillAreas}

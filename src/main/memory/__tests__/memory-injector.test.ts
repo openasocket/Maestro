@@ -319,8 +319,8 @@ describe('MemoryInjector', () => {
 
 			expect(result.injectedPrompt).toContain('<agent-memories>');
 			expect(result.injectedPrompt).toContain('</agent-memories>');
-			expect(result.injectedPrompt).toContain('Relevant knowledge for this task:');
-			expect(result.injectedPrompt).toContain('- Use Result<T,E> for errors');
+			expect(result.injectedPrompt).toContain('The following knowledge is relevant to this task.');
+			expect(result.injectedPrompt).toContain('- RULE: Use Result<T,E> for errors');
 			// Prompt should appear after the XML block
 			expect(result.injectedPrompt).toContain('my prompt');
 			expect(result.injectedPrompt.indexOf('</agent-memories>')).toBeLessThan(
@@ -346,8 +346,8 @@ describe('MemoryInjector', () => {
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
 			expect(result.injectedPrompt).toContain('[Rust Dev > Error Handling]');
-			expect(result.injectedPrompt).toContain('- Memory 1');
-			expect(result.injectedPrompt).toContain('- Memory 2');
+			expect(result.injectedPrompt).toContain('- RULE: Memory 1');
+			expect(result.injectedPrompt).toContain('- RULE: Memory 2');
 		});
 
 		it('uses [PersonaName] header when no skill area name', async () => {
@@ -363,7 +363,7 @@ describe('MemoryInjector', () => {
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
 			expect(result.injectedPrompt).toContain('[Rust Dev]');
-			expect(result.injectedPrompt).toContain('- Persona-level memory');
+			expect(result.injectedPrompt).toContain('- RULE: Persona-level memory');
 		});
 
 		it('uses [project] header for project-scoped memories', async () => {
@@ -378,7 +378,7 @@ describe('MemoryInjector', () => {
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
 			expect(result.injectedPrompt).toContain('[project]');
-			expect(result.injectedPrompt).toContain('- Project memory');
+			expect(result.injectedPrompt).toContain('- RULE: Project memory');
 		});
 
 		it('uses [global] header for global-scoped memories', async () => {
@@ -393,10 +393,10 @@ describe('MemoryInjector', () => {
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
 			expect(result.injectedPrompt).toContain('[global]');
-			expect(result.injectedPrompt).toContain('- Global memory');
+			expect(result.injectedPrompt).toContain('- RULE: Global memory');
 		});
 
-		it('prefixes experience type memories with (experience)', async () => {
+		it('formats experiences as observations and rules as directives in adaptive mode', async () => {
 			const results = [
 				makeResult({
 					entry: { content: 'Learned from session', type: 'experience' },
@@ -413,10 +413,10 @@ describe('MemoryInjector', () => {
 
 			const result = await injectMemories('prompt', '/project', 'claude-code');
 
-			expect(result.injectedPrompt).toContain('- (experience) Learned from session');
-			expect(result.injectedPrompt).toContain('- Standard rule');
-			// Rule should NOT have the (experience) prefix
-			expect(result.injectedPrompt).not.toContain('(experience) Standard rule');
+			expect(result.injectedPrompt).toContain('- OBSERVATION: In past work, Learned from session');
+			expect(result.injectedPrompt).toContain('- RULE: Standard rule');
+			// Rule should NOT have OBSERVATION prefix
+			expect(result.injectedPrompt).not.toContain('OBSERVATION: In past work, Standard rule');
 		});
 
 		it('sorts groups: hierarchy (0) → project (1) → global (2)', async () => {
@@ -470,9 +470,9 @@ describe('MemoryInjector', () => {
 
 			const errorsIdx = result.injectedPrompt.indexOf('[Dev > Errors]');
 			const testingIdx = result.injectedPrompt.indexOf('[Dev > Testing]');
-			const memAIdx = result.injectedPrompt.indexOf('- Mem A');
-			const memBIdx = result.injectedPrompt.indexOf('- Mem B');
-			const memCIdx = result.injectedPrompt.indexOf('- Mem C');
+			const memAIdx = result.injectedPrompt.indexOf('- RULE: Mem A');
+			const memBIdx = result.injectedPrompt.indexOf('- RULE: Mem B');
+			const memCIdx = result.injectedPrompt.indexOf('- RULE: Mem C');
 
 			// Alphabetical: Errors before Testing
 			expect(errorsIdx).toBeLessThan(testingIdx);
@@ -1031,6 +1031,159 @@ describe('MemoryInjector', () => {
 				expect(diff.injectedPrompt).toContain('<modified>');
 				expect(diff.injectedPrompt).toContain('1 memories unchanged');
 			});
+		});
+	});
+
+	// ─── 9. Injection Tone ──────────────────────────────────────────────
+
+	describe('Injection Tone', () => {
+		it('prescriptive mode: all memories formatted as RULE directives', async () => {
+			setMemorySettingsStore(() => ({
+				enabled: true,
+				injectionStrategy: 'balanced',
+				injectionTone: 'prescriptive',
+			}));
+
+			const results = [
+				makeResult({
+					entry: { content: 'Use error boundaries', type: 'rule' },
+					personaName: 'Dev',
+					skillAreaName: 'React',
+				}),
+				makeResult({
+					entry: { content: 'Hooks prevent cascade failures', type: 'experience' },
+					personaName: 'Dev',
+					skillAreaName: 'React',
+				}),
+			];
+			setupMockResults(results);
+
+			const result = await injectMemories('prompt', '/project', 'claude-code');
+
+			expect(result.injectedPrompt).toContain('- RULE: Use error boundaries');
+			expect(result.injectedPrompt).toContain('- RULE: Hooks prevent cascade failures');
+			expect(result.injectedPrompt).toContain('Follow these directives:');
+			expect(result.injectedPrompt).not.toContain('OBSERVATION');
+		});
+
+		it('observational mode: all memories formatted as OBSERVATION', async () => {
+			setMemorySettingsStore(() => ({
+				enabled: true,
+				injectionStrategy: 'balanced',
+				injectionTone: 'observational',
+			}));
+
+			const results = [
+				makeResult({
+					entry: { content: 'Use error boundaries', type: 'rule' },
+					personaName: 'Dev',
+					skillAreaName: 'React',
+				}),
+				makeResult({
+					entry: { content: 'Hooks prevent failures', type: 'experience' },
+					personaName: 'Dev',
+					skillAreaName: 'React',
+				}),
+			];
+			setupMockResults(results);
+
+			const result = await injectMemories('prompt', '/project', 'claude-code');
+
+			expect(result.injectedPrompt).toContain('- OBSERVATION: In past work, Use error boundaries');
+			expect(result.injectedPrompt).toContain(
+				'- OBSERVATION: In past work, Hooks prevent failures'
+			);
+			expect(result.injectedPrompt).toContain('Consider these patterns:');
+			expect(result.injectedPrompt).not.toContain('- RULE:');
+		});
+
+		it('adaptive mode: rules are prescriptive, experiences are observational', async () => {
+			setMemorySettingsStore(() => ({
+				enabled: true,
+				injectionStrategy: 'balanced',
+				injectionTone: 'adaptive',
+			}));
+
+			const results = [
+				makeResult({
+					entry: { content: 'Always use TypeScript', type: 'rule' },
+					personaName: 'Dev',
+					skillAreaName: 'JS',
+				}),
+				makeResult({
+					entry: { content: 'Found that strict mode helps', type: 'experience' },
+					personaName: 'Dev',
+					skillAreaName: 'JS',
+				}),
+			];
+			setupMockResults(results);
+
+			const result = await injectMemories('prompt', '/project', 'claude-code');
+
+			expect(result.injectedPrompt).toContain('- RULE: Always use TypeScript');
+			expect(result.injectedPrompt).toContain(
+				'- OBSERVATION: In past work, Found that strict mode helps'
+			);
+			expect(result.injectedPrompt).toContain('RULES are directives to follow');
+		});
+
+		it('experience with structured context uses situation/learning in observational format', async () => {
+			setMemorySettingsStore(() => ({
+				enabled: true,
+				injectionStrategy: 'balanced',
+				injectionTone: 'adaptive',
+			}));
+
+			const results = [
+				makeResult({
+					entry: {
+						content: 'Error boundaries matter',
+						type: 'experience',
+						experienceContext: {
+							situation: 'refactoring the auth module',
+							learning: 'error boundaries prevented cascade failures',
+						},
+					},
+					personaName: 'Dev',
+					skillAreaName: 'React',
+				}),
+			];
+			setupMockResults(results);
+
+			const result = await injectMemories('prompt', '/project', 'claude-code');
+
+			expect(result.injectedPrompt).toContain(
+				'- OBSERVATION: In a previous session (refactoring the auth module), it was found that: error boundaries prevented cascade failures'
+			);
+		});
+
+		it('per-entry toneOverride takes precedence over global tone', async () => {
+			setMemorySettingsStore(() => ({
+				enabled: true,
+				injectionStrategy: 'balanced',
+				injectionTone: 'adaptive',
+			}));
+
+			const results = [
+				makeResult({
+					entry: {
+						content: 'Security rule: always sanitize inputs',
+						type: 'experience',
+						toneOverride: 'prescriptive',
+					},
+					personaName: 'Dev',
+					skillAreaName: 'Security',
+				}),
+			];
+			setupMockResults(results);
+
+			const result = await injectMemories('prompt', '/project', 'claude-code');
+
+			// Even though type is experience and mode is adaptive,
+			// toneOverride forces prescriptive
+			expect(result.injectedPrompt).toContain('- RULE: Security rule: always sanitize inputs');
+			// Should not contain any OBSERVATION-formatted memory lines
+			expect(result.injectedPrompt).not.toContain('- OBSERVATION:');
 		});
 	});
 });

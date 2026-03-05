@@ -97,6 +97,12 @@ export type MemoryType =
 	| 'rule' // Declarative: "always do X" — prescriptive, user-curated
 	| 'experience'; // Empirical: "we learned Y when Z happened" — contextual, earned through practice
 
+/** How memories are framed when injected into agent prompts */
+export type InjectionTone =
+	| 'prescriptive' // All memories framed as directives
+	| 'observational' // All memories framed as past observations
+	| 'adaptive'; // Rules as directives, experiences as observations (default)
+
 /** Where the memory lives */
 export type MemoryScope =
 	| 'skill' // Within the hierarchy (Role → Persona → Skill → Memory)
@@ -174,6 +180,8 @@ export interface MemoryEntry {
 	active: boolean;
 	/** Archived memories are preserved but excluded from injection/search by default */
 	archived: boolean;
+	/** Override the global injection tone for this specific memory */
+	toneOverride?: 'prescriptive' | 'observational';
 	/** IDs of related memories (bidirectional links, A-MEM Zettelkasten pattern) */
 	relatedMemoryIds?: MemoryId[];
 	/** 384-dim embedding vector for semantic search, null if not yet computed */
@@ -280,6 +288,8 @@ export interface MemoryConfig {
 	extractionProvider?: string;
 	/** How aggressively to inject memories into agent prompts — default 'balanced' */
 	injectionStrategy: 'lean' | 'balanced' | 'rich';
+	/** How memories are framed when injected into agent prompts — default 'adaptive' */
+	injectionTone: InjectionTone;
 	/** Enable multi-signal retrieval (embedding + keyword + tag) — default true */
 	enableHybridSearch: boolean;
 	/** Enable mid-session live memory injection via monitor triggers — default false */
@@ -348,6 +358,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	extractionModel: undefined,
 	extractionProvider: undefined,
 	injectionStrategy: 'lean',
+	injectionTone: 'adaptive',
 	enableHybridSearch: true,
 	enableLiveInjection: false,
 	liveInjectionTokenBudget: 750,
