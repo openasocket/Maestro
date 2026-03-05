@@ -42,6 +42,7 @@ import type {
 } from '../../../shared/memory-types';
 import { ConfigSlider } from './MemoryConfigWidgets';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
+import { SectionHeader } from './SectionHeader';
 import { SkillEditModal } from './HierarchyEditModals';
 
 export interface SkillsTabProps {
@@ -613,12 +614,7 @@ export function SkillsTab({
 					className="rounded-lg border p-4 space-y-3"
 					style={{ borderColor: theme.colors.border }}
 				>
-					<div className="flex items-center gap-2">
-						<BarChart3 className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
-						<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-							Skills Overview
-						</div>
-					</div>
+					<SectionHeader theme={theme} icon={BarChart3} title="Skills Overview" />
 
 					{/* Stats row */}
 					<div className="flex flex-wrap gap-4 text-xs" style={{ color: theme.colors.textDim }}>
@@ -704,12 +700,7 @@ export function SkillsTab({
 
 			{/* Skill-level config */}
 			<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
-				<div className="flex items-center gap-2">
-					<Layers className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
-					<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-						Skill Configuration
-					</div>
-				</div>
+				<SectionHeader theme={theme} icon={Layers} title="Skill Configuration" />
 
 				<ConfigSlider
 					label="Max Memories per Skill Area"

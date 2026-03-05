@@ -13,8 +13,6 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
 	Scissors,
 	Loader2,
-	ChevronRight,
-	ChevronDown,
 	Settings,
 	Plus,
 	Shield,
@@ -38,6 +36,7 @@ import type {
 } from '../../../shared/memory-types';
 import { ConfigSlider } from './MemoryConfigWidgets';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
+import { SectionHeader } from './SectionHeader';
 import { MemoryBrowserPanel } from './MemoryBrowserPanel';
 import { MemoryEditModal } from './MemoryEditModal';
 import { useMemoryHierarchy } from '../../hooks/memory/useMemoryHierarchy';
@@ -310,34 +309,34 @@ export function MemoriesTab({
 				className="rounded-lg border overflow-hidden"
 				style={{ borderColor: theme.colors.border }}
 			>
-				<button
-					className="w-full flex items-center gap-2 px-4 py-2.5 text-left transition-colors"
+				<div
+					className="px-4 transition-colors"
 					style={{
 						backgroundColor: lifecycleOpen ? `${theme.colors.border}20` : 'transparent',
 					}}
-					onClick={() => setLifecycleOpen((v) => !v)}
 				>
-					{lifecycleOpen ? (
-						<ChevronDown className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
-					) : (
-						<ChevronRight className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
-					)}
-					<Settings className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-					<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-						Lifecycle Settings
-					</span>
-					{prunableMemories.length > 0 && (
-						<span
-							className="ml-auto px-1.5 py-0.5 rounded-full text-[10px]"
-							style={{
-								backgroundColor: '#eab30820',
-								color: '#eab308',
-							}}
-						>
-							{prunableMemories.length} prunable
-						</span>
-					)}
-				</button>
+					<SectionHeader
+						theme={theme}
+						icon={Settings}
+						title="Lifecycle Settings"
+						collapsible
+						collapsed={!lifecycleOpen}
+						onToggle={() => setLifecycleOpen((v) => !v)}
+						action={
+							prunableMemories.length > 0 ? (
+								<span
+									className="px-1.5 py-0.5 rounded-full text-[10px]"
+									style={{
+										backgroundColor: '#eab30820',
+										color: '#eab308',
+									}}
+								>
+									{prunableMemories.length} prunable
+								</span>
+							) : undefined
+						}
+					/>
+				</div>
 
 				{lifecycleOpen && (
 					<div
@@ -460,12 +459,7 @@ export function MemoriesTab({
 					className="rounded-lg border p-3 space-y-2"
 					style={{ borderColor: theme.colors.border }}
 				>
-					<div className="flex items-center gap-2 mb-1">
-						<BarChart3 className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
-						<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-							Memory Overview
-						</span>
-					</div>
+					<SectionHeader theme={theme} icon={BarChart3} title="Memory Overview" />
 
 					{/* Row 1: counts */}
 					<div

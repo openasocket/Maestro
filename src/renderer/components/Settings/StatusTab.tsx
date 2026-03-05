@@ -32,6 +32,7 @@ import type {
 	ExtractionDiagnostic,
 } from '../../../shared/memory-types';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
+import { SectionHeader } from './SectionHeader';
 
 export interface StatusTabProps {
 	theme: Theme;
@@ -657,28 +658,24 @@ function InjectionActivitySection({
 
 	return (
 		<div className="rounded-lg border p-4 space-y-2" style={{ borderColor: theme.colors.border }}>
-			<button
-				className="w-full flex items-center gap-2 text-left"
-				onClick={() => setExpanded(!expanded)}
-			>
-				{expanded ? (
-					<ChevronDown className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-				) : (
-					<ChevronRight className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-				)}
-				<Zap className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-				<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-					Injection Activity ({loaded ? `${recentCount} in 7 days` : '...'})
-				</span>
-				{noMatchCount > 0 && (
-					<span
-						className="text-[10px] px-1.5 py-0.5 rounded"
-						style={{ color: '#eab308', backgroundColor: `${'#eab308'}15` }}
-					>
-						{noMatchCount} no-match
-					</span>
-				)}
-			</button>
+			<SectionHeader
+				theme={theme}
+				icon={Zap}
+				title={`Injection Activity (${loaded ? `${recentCount} in 7 days` : '...'})`}
+				collapsible
+				collapsed={!expanded}
+				onToggle={() => setExpanded(!expanded)}
+				action={
+					noMatchCount > 0 ? (
+						<span
+							className="text-[10px] px-1.5 py-0.5 rounded"
+							style={{ color: '#eab308', backgroundColor: '#eab30815' }}
+						>
+							{noMatchCount} no-match
+						</span>
+					) : undefined
+				}
+			/>
 
 			{expanded && (
 				<div className="space-y-3 pt-1">
@@ -1173,23 +1170,15 @@ function SystemMetricsSection({ theme }: { theme: Theme }) {
 
 	return (
 		<div className="rounded-lg border p-4 space-y-2" style={{ borderColor: theme.colors.border }}>
-			<button
-				className="w-full flex items-center gap-2 text-left"
-				onClick={() => setExpanded(!expanded)}
-			>
-				{expanded ? (
-					<ChevronDown className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-				) : (
-					<ChevronRight className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-				)}
-				<Cpu className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-				<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-					System Metrics
-				</span>
-				<span className="text-[10px] ml-auto" style={{ color: theme.colors.textDim }}>
-					(power users)
-				</span>
-			</button>
+			<SectionHeader
+				theme={theme}
+				icon={Cpu}
+				title="System Metrics"
+				description="(power users)"
+				collapsible
+				collapsed={!expanded}
+				onToggle={() => setExpanded(!expanded)}
+			/>
 
 			{expanded && (
 				<div className="space-y-3 pt-1">
@@ -1450,12 +1439,7 @@ function ImpactDashboardSection({
 
 	return (
 		<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
-			<div className="flex items-center gap-2">
-				<BarChart3 className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
-				<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-					Impact Dashboard
-				</div>
-			</div>
+			<SectionHeader theme={theme} icon={BarChart3} title="Impact Dashboard" />
 
 			{/* Non-technical summary */}
 			<div
@@ -1666,20 +1650,19 @@ function PromotionHistorySection({
 
 	return (
 		<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
-			<button className="flex items-center gap-2 w-full" onClick={() => setCollapsed(!collapsed)}>
-				{collapsed ? (
-					<ChevronRight className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-				) : (
-					<ChevronDown className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-				)}
-				<TrendingUp className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.accent }} />
-				<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-					Promotion History
-				</span>
-				<span className="text-[10px] ml-auto" style={{ color: theme.colors.textDim }}>
-					{promotionHistory.length} promotion{promotionHistory.length !== 1 ? 's' : ''}
-				</span>
-			</button>
+			<SectionHeader
+				theme={theme}
+				icon={TrendingUp}
+				title="Promotion History"
+				collapsible
+				collapsed={collapsed}
+				onToggle={() => setCollapsed(!collapsed)}
+				action={
+					<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
+						{promotionHistory.length} promotion{promotionHistory.length !== 1 ? 's' : ''}
+					</span>
+				}
+			/>
 
 			{!collapsed && (
 				<div className="space-y-2 max-h-80 overflow-y-auto scrollbar-thin">
@@ -1833,22 +1816,21 @@ function PersonaShiftSection({
 
 	return (
 		<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
-			<button className="flex items-center gap-2 w-full" onClick={() => setCollapsed(!collapsed)}>
-				{collapsed ? (
-					<ChevronRight className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-				) : (
-					<ChevronDown className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-				)}
-				<ArrowRightLeft className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.accent }} />
-				<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-					Persona Shifts
-				</span>
-				<span className="text-[10px] ml-auto" style={{ color: theme.colors.textDim }}>
-					{loaded
-						? `${recentShifts.length} shift${recentShifts.length !== 1 ? 's' : ''} (7d)`
-						: '...'}
-				</span>
-			</button>
+			<SectionHeader
+				theme={theme}
+				icon={ArrowRightLeft}
+				title="Persona Shifts"
+				collapsible
+				collapsed={collapsed}
+				onToggle={() => setCollapsed(!collapsed)}
+				action={
+					<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
+						{loaded
+							? `${recentShifts.length} shift${recentShifts.length !== 1 ? 's' : ''} (7d)`
+							: '...'}
+					</span>
+				}
+			/>
 
 			{!collapsed && (
 				<div className="space-y-3 pt-1">

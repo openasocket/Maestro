@@ -42,6 +42,7 @@ import type {
 	MemoryEntry,
 } from '../../../shared/memory-types';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
+import { SectionHeader } from './SectionHeader';
 import { PersonaEditModal } from './HierarchyEditModals';
 
 export interface PersonasTabProps {
@@ -762,12 +763,7 @@ export function PersonasTab({
 							backgroundColor: `${theme.colors.accent}08`,
 						}}
 					>
-						<div className="flex items-center gap-2">
-							<Lightbulb className="w-3.5 h-3.5" style={{ color: theme.colors.accent }} />
-							<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-								Suggestions for this project
-							</div>
-						</div>
+						<SectionHeader theme={theme} icon={Lightbulb} title="Suggestions for this project" />
 
 						{visiblePersonas.map((suggestion) => {
 							const key = `persona:${suggestion.suggestedName}`;
@@ -1142,15 +1138,12 @@ function PersonaMatchPreview({ theme, config }: { theme: Theme; config: MemoryCo
 
 	return (
 		<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
-			<div className="flex items-center gap-2">
-				<Search className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
-				<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-					Persona Match Preview
-				</div>
-				<div className="text-xs" style={{ color: theme.colors.textDim }}>
-					— type a task description to see which personas would match
-				</div>
-			</div>
+			<SectionHeader
+				theme={theme}
+				icon={Search}
+				title="Persona Match Preview"
+				description="— type a task description to see which personas would match"
+			/>
 
 			<input
 				type="text"

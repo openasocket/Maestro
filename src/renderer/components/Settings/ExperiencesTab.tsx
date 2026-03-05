@@ -56,6 +56,7 @@ import type {
 import { ConfigToggle, ConfigSlider } from './MemoryConfigWidgets';
 import { ExperienceRepositoryPanel } from './ExperienceRepositoryPanel';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
+import { SectionHeader } from './SectionHeader';
 import { MemoryEditModal } from './MemoryEditModal';
 import {
 	MemoryMovePromotePopover,
@@ -78,53 +79,7 @@ type EnrichedExperience = MemoryEntry & {
 
 // ─── Section Header ─────────────────────────────────────────────────────────────
 
-function SectionHeader({
-	theme,
-	icon: Icon,
-	title,
-	subtitle,
-	collapsed,
-	onToggle,
-	badge,
-}: {
-	theme: Theme;
-	icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
-	title: string;
-	subtitle?: string;
-	collapsed: boolean;
-	onToggle: () => void;
-	badge?: number | null;
-}) {
-	return (
-		<button className="flex items-center gap-2 w-full py-2 group" onClick={onToggle}>
-			{collapsed ? (
-				<ChevronRight className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-			) : (
-				<ChevronDown className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
-			)}
-			<Icon className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.accent }} />
-			<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-				{title}
-			</span>
-			{subtitle && (
-				<span className="text-xs" style={{ color: theme.colors.textDim }}>
-					{subtitle}
-				</span>
-			)}
-			{badge != null && badge > 0 && (
-				<span
-					className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
-					style={{
-						backgroundColor: `${theme.colors.accent}20`,
-						color: theme.colors.accent,
-					}}
-				>
-					{badge}
-				</span>
-			)}
-		</button>
-	);
-}
+// SectionHeader is now imported from ./SectionHeader
 
 // ─── Source color map for the stacked bar ────────────────────────────────────────
 
@@ -968,7 +923,8 @@ export function ExperiencesTab({
 						theme={theme}
 						icon={Activity}
 						title="Extraction Pipeline"
-						subtitle="Configure how experiences are extracted from sessions"
+						description="Configure how experiences are extracted from sessions"
+						collapsible
 						collapsed={extractionCollapsed}
 						onToggle={() => setExtractionCollapsed(!extractionCollapsed)}
 					/>
@@ -1083,7 +1039,8 @@ export function ExperiencesTab({
 						theme={theme}
 						icon={Brain}
 						title="Experience Review"
-						subtitle={`${totalExperiences} total${currentProjectExperiences > 0 ? `, ${currentProjectExperiences} from this project` : ''}`}
+						description={`${totalExperiences} total${currentProjectExperiences > 0 ? `, ${currentProjectExperiences} from this project` : ''}`}
+						collapsible
 						collapsed={reviewCollapsed}
 						onToggle={() => setReviewCollapsed(!reviewCollapsed)}
 					/>
@@ -1306,7 +1263,8 @@ export function ExperiencesTab({
 						theme={theme}
 						icon={ArrowUpCircle}
 						title="Promotion Candidates"
-						subtitle="Experiences ready to become rules"
+						description="Experiences ready to become rules"
+						collapsible
 						collapsed={promotionCollapsed}
 						onToggle={() => setPromotionCollapsed(!promotionCollapsed)}
 						badge={promotionCandidates.length > 0 ? promotionCandidates.length : null}
@@ -1409,7 +1367,8 @@ export function ExperiencesTab({
 						theme={theme}
 						icon={Globe}
 						title="Repository"
-						subtitle="Import and share experience bundles"
+						description="Import and share experience bundles"
+						collapsible
 						collapsed={repositoryCollapsed}
 						onToggle={() => setRepositoryCollapsed(!repositoryCollapsed)}
 					/>
