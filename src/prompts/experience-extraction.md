@@ -17,6 +17,8 @@ Use this persona's domain expertise and perspective when evaluating what constit
 
 {{HISTORY_ENTRIES}}
 
+{{TOOL_EXECUTION_SEQUENCE}}
+
 ## Detected Deviations
 
 {{DEVIATION_SIGNALS}}

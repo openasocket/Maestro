@@ -1706,12 +1706,27 @@ export class ExperienceAnalyzer {
 					.join('\n')
 			: 'None detected';
 
+		// Build tool execution sequence section (rich mode only)
+		let toolSequenceSection = '';
+		if (input.toolExecutionLog) {
+			const preamble =
+				input.toolExecutionLog.length > 8000
+					? '> Note: This is a large tool execution log. Focus on deviations, error→fix sequences, and novel patterns rather than routine operations.\n\n'
+					: '';
+			toolSequenceSection =
+				`## Tool Execution Sequence\n\n` +
+				preamble +
+				`The tool execution sequence shows exactly what the agent tried. Look for patterns: repeated attempts at the same tool (retry behavior), switching between tools (exploration), error→fix sequences (learning moments). These patterns are the most valuable experiences to extract.\n\n` +
+				input.toolExecutionLog;
+		}
+
 		let prompt = experienceExtractionPrompt
 			.replace('{{AGENT_TYPE}}', input.agentType)
 			.replace('{{PROJECT_PATH}}', input.projectPath)
 			.replace('{{DURATION}}', durationStr)
 			.replace('{{COST}}', costStr)
 			.replace('{{HISTORY_ENTRIES}}', historyText || 'N/A')
+			.replace('{{TOOL_EXECUTION_SEQUENCE}}', toolSequenceSection)
 			.replace('{{DEVIATION_SIGNALS}}', deviationText)
 			.replace('{{DECISION_SIGNALS}}', decisionText)
 			.replace('{{GIT_DIFF}}', input.gitDiff || 'N/A')

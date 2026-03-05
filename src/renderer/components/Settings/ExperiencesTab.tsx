@@ -53,7 +53,7 @@ import type {
 	SkillArea,
 	Persona,
 } from '../../../shared/memory-types';
-import { ConfigToggle, ConfigSlider } from './MemoryConfigWidgets';
+import { ConfigToggle, ConfigSlider, ConfigSelect } from './MemoryConfigWidgets';
 import { ExperienceRepositoryPanel } from './ExperienceRepositoryPanel';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
 import { SectionHeader } from './SectionHeader';
@@ -1011,6 +1011,38 @@ export function ExperiencesTab({
 										</>
 									)}
 								</div>
+							)}
+
+							{/* Extraction Depth */}
+							{config.enableExperienceExtraction && (
+								<ConfigSelect
+									label="Extraction Depth"
+									description="How much session data to include in extraction analysis"
+									value={config.extractionDepth}
+									options={[
+										{
+											value: 'minimal' as const,
+											label: 'Minimal',
+											description:
+												'Fast extraction from session summaries. Lower quality, lower cost. ~500 tokens.',
+										},
+										{
+											value: 'standard' as const,
+											label: 'Standard',
+											description:
+												'Balanced extraction using history, VIBES data, and git diffs. ~2,000 tokens.',
+										},
+										{
+											value: 'rich' as const,
+											label: 'Rich',
+											description:
+												'Deep extraction including full tool sequences and reasoning chains. ~5,000 tokens.',
+										},
+									]}
+									onChange={(v) => onUpdateConfig({ extractionDepth: v })}
+									theme={theme}
+									warning="Rich extraction uses more tokens per analysis. Recommended for complex debugging sessions."
+								/>
 							)}
 
 							{/* Extraction Status Panel */}

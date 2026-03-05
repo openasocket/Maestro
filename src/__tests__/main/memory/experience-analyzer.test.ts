@@ -1943,6 +1943,81 @@ describe('ExperienceAnalyzer', () => {
 		});
 	});
 
+	// ─── Tool Execution Sequence in compilePrompt ───────────────────────
+
+	describe('compilePrompt tool execution sequence', () => {
+		it('includes tool execution section when toolExecutionLog is provided', () => {
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-1',
+				agentType: 'claude-code',
+				projectPath: '/test',
+				historyEntries: [],
+				toolExecutionLog: 'Turn 1:\n  Agent: Read src/index.ts\n  Agent: Edit src/index.ts',
+			};
+
+			const prompt = analyzer.compilePrompt(input);
+			expect(prompt).toContain('## Tool Execution Sequence');
+			expect(prompt).toContain('Turn 1:');
+			expect(prompt).toContain('Agent: Read src/index.ts');
+			expect(prompt).toContain('repeated attempts at the same tool');
+		});
+
+		it('omits tool execution section when toolExecutionLog is absent', () => {
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-2',
+				agentType: 'claude-code',
+				projectPath: '/test',
+				historyEntries: [],
+			};
+
+			const prompt = analyzer.compilePrompt(input);
+			expect(prompt).not.toContain('## Tool Execution Sequence');
+		});
+
+		it('adds large-context preamble when toolExecutionLog exceeds 8000 chars', () => {
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-3',
+				agentType: 'claude-code',
+				projectPath: '/test',
+				historyEntries: [],
+				toolExecutionLog: 'x'.repeat(8001),
+			};
+
+			const prompt = analyzer.compilePrompt(input);
+			expect(prompt).toContain('## Tool Execution Sequence');
+			expect(prompt).toContain('Focus on deviations');
+		});
+
+		it('does not add large-context preamble for small toolExecutionLog', () => {
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-4',
+				agentType: 'claude-code',
+				projectPath: '/test',
+				historyEntries: [],
+				toolExecutionLog: 'Turn 1:\n  Agent: Read file.ts',
+			};
+
+			const prompt = analyzer.compilePrompt(input);
+			expect(prompt).toContain('## Tool Execution Sequence');
+			expect(prompt).not.toContain('Focus on deviations');
+		});
+
+		it('leaves no template variables when toolExecutionLog is provided', () => {
+			const input: ExperienceAnalyzerInput = {
+				sessionId: 'sess-5',
+				agentType: 'claude-code',
+				projectPath: '/test',
+				historyEntries: [{ summary: 'Step 1' }],
+				sessionDurationMs: 10000,
+				sessionCostUsd: 0.01,
+				toolExecutionLog: 'Turn 1:\n  Agent: Bash "npm test"',
+			};
+
+			const prompt = analyzer.compilePrompt(input);
+			expect(prompt).not.toMatch(/\{\{[A-Z_]+\}\}/);
+		});
+	});
+
 	// ─── Deviation in storeExperiences ──────────────────────────────────
 
 	describe('storeExperiences deviation context', () => {
