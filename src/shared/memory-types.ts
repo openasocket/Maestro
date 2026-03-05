@@ -312,6 +312,8 @@ export interface MemoryConfig {
 	confidenceDecayRate: number;
 	/** Memories below this confidence are automatically archived — default 0.1 */
 	minConfidenceThreshold: number;
+	/** How much session data to include in extraction analysis — default 'standard' */
+	extractionDepth: 'minimal' | 'standard' | 'rich';
 	/** Enable checkpoint-style injection at natural pause points — default true */
 	enableCheckpointInjection: boolean;
 	/** Maximum checkpoint injections per session — default 5 */
@@ -362,6 +364,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	crossProjectSimilarityThreshold: 0.75,
 	confidenceDecayRate: 0.02,
 	minConfidenceThreshold: 0.1,
+	extractionDepth: 'standard',
 	enableCheckpointInjection: true,
 	checkpointMaxPerSession: 5,
 	checkpointCooldownSeconds: 120,
