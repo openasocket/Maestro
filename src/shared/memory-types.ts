@@ -310,6 +310,8 @@ export interface MemoryConfig {
 	minConfidenceThreshold: number;
 	/** Embedding provider configuration */
 	embeddingProvider?: EmbeddingProviderConfig;
+	/** Config schema version for migration — absent in pre-migration configs */
+	_configVersion?: number;
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -347,6 +349,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	confidenceDecayRate: 0.02,
 	minConfidenceThreshold: 0.1,
 	embeddingProvider: DEFAULT_EMBEDDING_CONFIG,
+	_configVersion: 1,
 };
 
 // ─── Job Queue Status & Token Tracking ────────────────────────────────────

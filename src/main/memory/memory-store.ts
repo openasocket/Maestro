@@ -1242,7 +1242,18 @@ export class MemoryStore {
 		try {
 			const content = await fs.readFile(this.getConfigPath(), 'utf-8');
 			if (!content.trim()) return { ...MEMORY_CONFIG_DEFAULTS };
-			return { ...MEMORY_CONFIG_DEFAULTS, ...JSON.parse(content) };
+			const stored = JSON.parse(content);
+			if (stored._configVersion == null) {
+				// Pre-migration config: old defaults had enabled=false, so no user
+				// deliberately disabled memory. Apply new defaults and stamp version.
+				const migrated = { ...MEMORY_CONFIG_DEFAULTS };
+				console.log(
+					'[memory] Migrating pre-v1 config to new defaults (enabled=true, strategy=lean)'
+				);
+				await this.atomicWriteJson(this.getConfigPath(), migrated);
+				return migrated;
+			}
+			return { ...MEMORY_CONFIG_DEFAULTS, ...stored };
 		} catch (error: unknown) {
 			if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
 				return { ...MEMORY_CONFIG_DEFAULTS };
