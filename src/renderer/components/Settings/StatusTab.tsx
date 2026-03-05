@@ -28,6 +28,7 @@ import type {
 	MemoryEntry,
 	JobQueueStatus,
 	TokenUsage,
+	ExtractionDiagnostic,
 } from '../../../shared/memory-types';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
 
@@ -38,6 +39,13 @@ export interface StatusTabProps {
 	projectPath?: string | null;
 }
 
+/** Shared health context fetched once and passed to subsections. */
+interface HealthContext {
+	lastInjectionTime: number | null;
+	liveSessionCount: number;
+	extractionDiagnostics: ExtractionDiagnostic[];
+}
+
 export function StatusTab({
 	theme,
 	config,
@@ -45,16 +53,52 @@ export function StatusTab({
 	projectPath,
 }: StatusTabProps): React.ReactElement {
 	const [allMemories, setAllMemories] = useState<MemoryEntry[]>([]);
+	const [healthCtx, setHealthCtx] = useState<HealthContext>({
+		lastInjectionTime: null,
+		liveSessionCount: 0,
+		extractionDiagnostics: [],
+	});
 
 	useEffect(() => {
 		if (!config.enabled) return;
 		let mounted = true;
-		window.maestro.memory
-			.listAllExperiences(projectPath ?? undefined)
-			.then((res) => {
-				if (mounted && res.success) setAllMemories(res.data);
-			})
-			.catch(() => {});
+		// Fetch memories, recent injections, and job queue in parallel
+		Promise.allSettled([
+			window.maestro.memory.listAllExperiences(projectPath ?? undefined),
+			window.maestro.memory.getRecentInjections(200),
+			window.maestro.memory.getJobQueueStatus(),
+		]).then(([memResult, injResult, queueResult]) => {
+			if (!mounted) return;
+			if (memResult.status === 'fulfilled' && memResult.value.success) {
+				setAllMemories(memResult.value.data);
+			}
+			const ctx: HealthContext = {
+				lastInjectionTime: null,
+				liveSessionCount: 0,
+				extractionDiagnostics: [],
+			};
+			if (injResult.status === 'fulfilled') {
+				const res = injResult.value as { success: boolean; data?: InjectionEventRecord[] };
+				if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+					// Most recent event first (ring buffer returns newest last)
+					const sorted = [...res.data].sort((a, b) => b.timestamp - a.timestamp);
+					ctx.lastInjectionTime = sorted[0].timestamp;
+					// Count unique sessions in last 24h
+					const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+					const recentSessions = new Set(
+						sorted.filter((e) => e.timestamp >= oneDayAgo).map((e) => e.sessionId)
+					);
+					ctx.liveSessionCount = recentSessions.size;
+				}
+			}
+			if (queueResult.status === 'fulfilled') {
+				const res = queueResult.value as { success: boolean; data?: JobQueueStatus };
+				if (res.success && res.data?.recentDiagnostics) {
+					ctx.extractionDiagnostics = res.data.recentDiagnostics;
+				}
+			}
+			setHealthCtx(ctx);
+		});
 		return () => {
 			mounted = false;
 		};
@@ -77,7 +121,13 @@ export function StatusTab({
 			/>
 
 			{/* Section 1: System Health */}
-			<SystemHealthSection stats={stats} theme={theme} config={config} atRiskCount={atRiskCount} />
+			<SystemHealthSection
+				stats={stats}
+				theme={theme}
+				config={config}
+				atRiskCount={atRiskCount}
+				healthCtx={healthCtx}
+			/>
 
 			{/* Section 2: Injection Activity */}
 			<InjectionActivitySection theme={theme} config={config} stats={stats} />
@@ -159,11 +209,13 @@ function SystemHealthSection({
 	theme,
 	config,
 	atRiskCount,
+	healthCtx,
 }: {
 	stats: MemoryStats | null;
 	theme: Theme;
 	config: MemoryConfig;
 	atRiskCount: number;
+	healthCtx: HealthContext;
 }) {
 	const overallHealth = getOverallHealth(config, stats);
 
@@ -175,6 +227,40 @@ function SystemHealthSection({
 				: !config.enabled
 					? 'System disabled'
 					: 'System needs attention';
+
+	// Derive extraction details from diagnostics
+	const extractionDetail = useMemo(() => {
+		const diags = healthCtx.extractionDiagnostics;
+		if (diags.length === 0) return undefined;
+		const successes = diags.filter((d) => d.status === 'success').length;
+		const lastDiag = diags[0]; // most recent
+		const lastTime = lastDiag ? formatRelativeTime(lastDiag.timestamp) : '';
+		return `${successes}/${diags.length} ok${lastTime ? ` · last ${lastTime}` : ''}`;
+	}, [healthCtx.extractionDiagnostics]);
+
+	// Injection detail: count + last time
+	const injectionDetail = useMemo(() => {
+		const parts: string[] = [];
+		if (stats) parts.push(`${stats.recentInjections} in 7d`);
+		if (healthCtx.lastInjectionTime) {
+			parts.push(`last ${formatRelativeTime(healthCtx.lastInjectionTime)}`);
+		}
+		return parts.length > 0 ? parts.join(' · ') : undefined;
+	}, [stats, healthCtx.lastInjectionTime]);
+
+	// Decay detail: rate + half-life
+	const decayDetail = useMemo(() => {
+		if (config.confidenceDecayRate <= 0) return undefined;
+		return `${config.confidenceDecayRate}/day · ${config.decayHalfLifeDays}d half-life`;
+	}, [config.confidenceDecayRate, config.decayHalfLifeDays]);
+
+	// Live injection: session count
+	const liveDetail = useMemo(() => {
+		if (!config.enableLiveInjection) return undefined;
+		return healthCtx.liveSessionCount > 0
+			? `${healthCtx.liveSessionCount} session${healthCtx.liveSessionCount !== 1 ? 's' : ''} (24h)`
+			: 'no recent sessions';
+	}, [config.enableLiveInjection, healthCtx.liveSessionCount]);
 
 	return (
 		<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
@@ -195,25 +281,31 @@ function SystemHealthSection({
 					theme={theme}
 					label="Memory Injection"
 					enabled={config.enabled}
-					detail={stats ? `${stats.recentInjections} in 7d` : undefined}
+					detail={injectionDetail}
 				/>
 				<SubsystemRow
 					theme={theme}
 					label="Experience Extraction"
 					enabled={config.enableExperienceExtraction}
+					detail={extractionDetail}
 				/>
 				<SubsystemRow
 					theme={theme}
 					label="Confidence Decay"
 					enabled={config.confidenceDecayRate > 0}
-					detail={config.confidenceDecayRate > 0 ? `${config.confidenceDecayRate}/day` : undefined}
+					detail={decayDetail}
 				/>
 				<SubsystemRow
 					theme={theme}
 					label="Auto-Consolidation"
 					enabled={config.enableAutoConsolidation}
 				/>
-				<SubsystemRow theme={theme} label="Live Injection" enabled={config.enableLiveInjection} />
+				<SubsystemRow
+					theme={theme}
+					label="Live Injection"
+					enabled={config.enableLiveInjection}
+					detail={liveDetail}
+				/>
 				<SubsystemRow
 					theme={theme}
 					label="Cross-Agent Broadcast"
@@ -902,6 +994,10 @@ function ImpactDashboardSection({
 // ─── Utilities ──────────────────────────────────────────────────────────────────
 
 function formatInjectionTime(ts: number): string {
+	return formatRelativeTime(ts);
+}
+
+function formatRelativeTime(ts: number): string {
 	const diff = Date.now() - ts;
 	const mins = Math.floor(diff / 60000);
 	if (mins < 1) return 'just now';
