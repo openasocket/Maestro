@@ -889,7 +889,16 @@ export function ExperiencesTab({
 			<div className="shrink-0 space-y-3 pb-2">
 				<TabDescriptionBanner
 					theme={theme}
-					description="Experiences are lessons learned from real coding sessions — what worked, what didn't, and why. They're automatically extracted from your agent interactions and can be promoted to permanent rules when patterns prove reliable."
+					descriptionKey={
+						experiences.length === 0 && !experiencesLoading
+							? 'experiences-empty'
+							: 'experiences-populated'
+					}
+					description={
+						experiences.length === 0 && !experiencesLoading
+							? 'No experiences yet. Complete a few agent sessions and the system will start extracting lessons learned. Or trigger a retroactive analysis of past sessions.'
+							: `You have ${experiences.length} experience${experiences.length === 1 ? '' : 's'}. Review them below \u2014 promote the valuable ones to permanent rules.`
+					}
 				/>
 
 				{/* Visualization Summary */}

@@ -619,7 +619,14 @@ export function PersonasTab({
 			<div className="shrink-0 space-y-3 pb-2">
 				<TabDescriptionBanner
 					theme={theme}
-					description="Personas are expert profiles that shape how your AI agents think and respond. Each persona has specialized knowledge areas and a behavioral style. When a task matches a persona's expertise, relevant memories are automatically injected."
+					descriptionKey={
+						personas.length === 0 && !loading ? 'personas-empty' : 'personas-populated'
+					}
+					description={
+						personas.length === 0 && !loading
+							? 'No personas yet. The system will auto-create expert profiles as you work. You can also create them manually to guide how your agents think.'
+							: "Personas are expert profiles that shape how your AI agents think and respond. Each persona has specialized knowledge areas and a behavioral style. When a task matches a persona's expertise, relevant memories are automatically injected."
+					}
 				/>
 
 				{error && (

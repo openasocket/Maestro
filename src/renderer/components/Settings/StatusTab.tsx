@@ -149,7 +149,20 @@ export function StatusTab({
 			<div className="shrink-0 space-y-3 pb-2">
 				<TabDescriptionBanner
 					theme={theme}
-					description="System diagnostics and impact visualization — health status, injection activity, technical metrics, and evidence that the memory system is delivering value."
+					descriptionKey={
+						!config.enabled
+							? 'status-disabled'
+							: !healthCtx.lastInjectionTime
+								? 'status-no-injections'
+								: 'status-healthy'
+					}
+					description={
+						!config.enabled
+							? 'The memory system is currently disabled. Enable it above to start building agent knowledge.'
+							: !healthCtx.lastInjectionTime
+								? "The system is active but hasn't injected memories into any agents yet. Start a new agent session to see injections."
+								: 'System diagnostics and impact visualization \u2014 health status, injection activity, technical metrics, and evidence that the memory system is delivering value.'
+					}
 				/>
 
 				{/* Quick health summary bar */}
@@ -1289,7 +1302,7 @@ function WhatChangedDigest({ theme, config }: { theme: Theme; config: MemoryConf
 		return () => {
 			setLastVisit(now);
 		};
-	}, []);  
+	}, []);
 
 	// Fetch events since last visit
 	useEffect(() => {
