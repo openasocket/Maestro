@@ -27,6 +27,7 @@ import {
 	Download,
 	Upload,
 	ChevronDown,
+	Search,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
@@ -865,6 +866,9 @@ export function PersonasTab({
 				</div>
 			)}
 
+			{/* ─── Persona Match Preview ─────────────────────────────────── */}
+			<PersonaMatchPreview theme={theme} config={config} />
+
 			{/* ─── Persona Cards by Role ──────────────────────────────────── */}
 			{loading ? (
 				<div className="flex items-center justify-center py-12">
@@ -1070,6 +1074,169 @@ export function PersonasTab({
 						setShowCreateModal(false);
 					}}
 				/>
+			)}
+		</div>
+	);
+}
+
+// ─── PersonaMatchPreview ─────────────────────────────────────────────────────
+
+interface PersonaMatchResult {
+	personaId: string;
+	personaName: string;
+	roleName: string;
+	description: string;
+	systemPrompt: string;
+	similarity: number;
+}
+
+function PersonaMatchPreview({ theme, config }: { theme: Theme; config: MemoryConfig }) {
+	const [query, setQuery] = useState('');
+	const [results, setResults] = useState<PersonaMatchResult[]>([]);
+	const [loading, setLoading] = useState(false);
+	const [hasSearched, setHasSearched] = useState(false);
+	const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+	const runPreview = useCallback(async (text: string) => {
+		if (!text.trim()) {
+			setResults([]);
+			setHasSearched(false);
+			return;
+		}
+		setLoading(true);
+		setHasSearched(true);
+		try {
+			const resp = await window.maestro.memory.matchPersonas(text, 'claude-code');
+			if (resp.success) {
+				setResults(resp.data);
+			} else {
+				setResults([]);
+			}
+		} catch {
+			setResults([]);
+		} finally {
+			setLoading(false);
+		}
+	}, []);
+
+	const handleChange = useCallback(
+		(e: React.ChangeEvent<HTMLInputElement>) => {
+			const val = e.target.value;
+			setQuery(val);
+			if (debounceRef.current) clearTimeout(debounceRef.current);
+			debounceRef.current = setTimeout(() => runPreview(val), 400);
+		},
+		[runPreview]
+	);
+
+	const threshold = config.personaMatchThreshold ?? 0.3;
+
+	return (
+		<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
+			<div className="flex items-center gap-2">
+				<Search className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
+				<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+					Persona Match Preview
+				</div>
+				<div className="text-xs" style={{ color: theme.colors.textDim }}>
+					— type a task description to see which personas would match
+				</div>
+			</div>
+
+			<input
+				type="text"
+				placeholder="e.g. Fix the React component state management bug..."
+				value={query}
+				onChange={handleChange}
+				className="w-full px-3 py-2 rounded border bg-transparent text-xs outline-none"
+				style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
+			/>
+
+			{loading && (
+				<div className="flex items-center gap-2 py-2">
+					<Loader2 className="w-3 h-3 animate-spin" style={{ color: theme.colors.textDim }} />
+					<span className="text-xs" style={{ color: theme.colors.textDim }}>
+						Matching...
+					</span>
+				</div>
+			)}
+
+			{!loading && hasSearched && results.length === 0 && (
+				<div className="text-xs py-2 space-y-1" style={{ color: theme.colors.textDim }}>
+					<div>No personas matched this task description.</div>
+					<div>
+						Possible reasons: personas may lack embeddings, the similarity threshold (
+						{threshold.toFixed(2)}) may be too high, or no persona's description is semantically
+						close to this query.
+					</div>
+				</div>
+			)}
+
+			{!loading && results.length > 0 && (
+				<div className="space-y-2">
+					{results.map((match) => {
+						const pct = (match.similarity * 100).toFixed(1);
+						const barColor =
+							match.similarity >= 0.7
+								? theme.colors.success
+								: match.similarity >= 0.4
+									? theme.colors.warning
+									: theme.colors.error;
+						return (
+							<div
+								key={match.personaId}
+								className="rounded border p-3 space-y-1.5"
+								style={{ borderColor: theme.colors.border }}
+							>
+								<div className="flex items-center justify-between gap-2">
+									<div className="flex items-center gap-2 min-w-0">
+										<div
+											className="text-xs font-bold truncate"
+											style={{ color: theme.colors.textMain }}
+										>
+											{match.personaName}
+										</div>
+										<span
+											className="px-1.5 py-0.5 rounded text-xs shrink-0"
+											style={{
+												backgroundColor: `${theme.colors.accent}15`,
+												color: theme.colors.accent,
+											}}
+										>
+											{match.roleName}
+										</span>
+									</div>
+									<div className="text-xs font-mono font-bold shrink-0" style={{ color: barColor }}>
+										{pct}%
+									</div>
+								</div>
+								{/* Similarity bar */}
+								<div
+									className="h-1.5 rounded-full overflow-hidden"
+									style={{ backgroundColor: `${theme.colors.border}40` }}
+								>
+									<div
+										className="h-full rounded-full transition-all"
+										style={{
+											width: `${match.similarity * 100}%`,
+											backgroundColor: barColor,
+										}}
+									/>
+								</div>
+								{match.description && (
+									<div className="text-xs" style={{ color: theme.colors.textDim }}>
+										{match.description.length > 150
+											? match.description.slice(0, 150) + '...'
+											: match.description}
+									</div>
+								)}
+							</div>
+						);
+					})}
+					<div className="text-xs" style={{ color: theme.colors.textDim, opacity: 0.7 }}>
+						Match threshold: {threshold.toFixed(2)} — personas below this score are excluded
+					</div>
+				</div>
 			)}
 		</div>
 	);
