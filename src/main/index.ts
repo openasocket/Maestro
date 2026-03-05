@@ -61,6 +61,7 @@ import {
 } from './ipc/handlers';
 import { getMemoryStore } from './memory/memory-store';
 import { embeddingRegistry } from './grpo/embedding-registry';
+import { TransformersJsProvider } from './grpo/providers/transformers-js-provider';
 import type { EmbeddingProviderConfig } from '../shared/memory-types';
 import { initializeStatsDB, closeStatsDB, getStatsDB } from './stats';
 import { groupChatEmitters } from './ipc/handlers/groupChat';
@@ -706,6 +707,9 @@ function setupIpcHandlers() {
  * Non-blocking — logs errors but doesn't prevent startup.
  */
 function initializeEmbeddingProvider(settingsStore: { get: (key: string) => unknown }) {
+	// Register built-in providers
+	embeddingRegistry.register(new TransformersJsProvider());
+
 	try {
 		const memoryConfig = settingsStore.get('memoryConfig') as
 			| { embeddingProvider?: EmbeddingProviderConfig }
