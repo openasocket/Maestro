@@ -18,14 +18,110 @@ interface ConfigTabProps {
 	config: MemoryConfig;
 	stats: MemoryStats | null;
 	onUpdateConfig: (updates: Partial<MemoryConfig>) => void;
+	/** User engagement level for progressive disclosure (0=passive, 1=aware, 2=active curator) */
+	engagementLevel?: number;
 }
 
-export function ConfigTab({ theme, config, onUpdateConfig }: ConfigTabProps): React.ReactElement {
+export function ConfigTab({
+	theme,
+	config,
+	onUpdateConfig,
+	engagementLevel = 2,
+}: ConfigTabProps): React.ReactElement {
+	const isActiveCurator = engagementLevel >= 2;
 	const [embeddingOpen, setEmbeddingOpen] = useState(true);
 	const [retrievalOpen, setRetrievalOpen] = useState(true);
 	const [storageOpen, setStorageOpen] = useState(false);
+	const [advancedOpen, setAdvancedOpen] = useState(isActiveCurator);
 
 	const embeddingActive = config.embeddingProvider?.enabled && config.embeddingProvider?.providerId;
+
+	const renderAdvancedRetrievalSettings = () => (
+		<>
+			{/* Injection Tone */}
+			<div className="pt-3 pb-2">
+				<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
+					Injection Tone
+				</div>
+				<div className="text-xs mt-0.5 mb-2" style={{ color: theme.colors.textDim }}>
+					Controls how memories are framed when presented to agents
+				</div>
+				<div className="flex gap-2">
+					{(['prescriptive', 'adaptive', 'observational'] as const).map((tone) => (
+						<button
+							key={tone}
+							onClick={() => onUpdateConfig({ injectionTone: tone })}
+							className="flex-1 rounded-md border text-left"
+							style={{
+								padding: '8px 12px',
+								borderColor:
+									config.injectionTone === tone ? theme.colors.accent : theme.colors.border,
+								background:
+									config.injectionTone === tone ? `${theme.colors.accent}20` : 'transparent',
+								color: config.injectionTone === tone ? theme.colors.accent : theme.colors.textMain,
+								cursor: 'pointer',
+								fontWeight: config.injectionTone === tone ? 600 : 400,
+							}}
+						>
+							<div className="text-xs">{tone.charAt(0).toUpperCase() + tone.slice(1)}</div>
+							<div className="text-xs mt-0.5" style={{ color: theme.colors.textDim, fontSize: 10 }}>
+								{tone === 'prescriptive' && 'Frame all memories as directives'}
+								{tone === 'adaptive' && 'Rules as directives, experiences as observations'}
+								{tone === 'observational' && 'Frame all memories as past observations'}
+							</div>
+						</button>
+					))}
+				</div>
+			</div>
+
+			<ConfigSlider
+				label="Token Budget"
+				description="Maximum tokens for memory injection per prompt"
+				value={config.maxTokenBudget}
+				min={500}
+				max={5000}
+				step={100}
+				onChange={(v) => onUpdateConfig({ maxTokenBudget: v })}
+				theme={theme}
+			/>
+
+			<ConfigSlider
+				label="Similarity Threshold"
+				description="Minimum cosine similarity for memory relevance"
+				value={config.similarityThreshold}
+				min={0.1}
+				max={0.95}
+				step={0.05}
+				onChange={(v) => onUpdateConfig({ similarityThreshold: v })}
+				theme={theme}
+				formatValue={(v) => v.toFixed(2)}
+			/>
+
+			<ConfigSlider
+				label="Persona Match Threshold"
+				description="Minimum similarity for persona matching (coarser filter)"
+				value={config.personaMatchThreshold}
+				min={0.1}
+				max={0.8}
+				step={0.05}
+				onChange={(v) => onUpdateConfig({ personaMatchThreshold: v })}
+				theme={theme}
+				formatValue={(v) => v.toFixed(2)}
+			/>
+
+			<ConfigSlider
+				label="Skill Match Threshold"
+				description="Minimum similarity for skill area matching"
+				value={config.skillMatchThreshold}
+				min={0.2}
+				max={0.9}
+				step={0.05}
+				onChange={(v) => onUpdateConfig({ skillMatchThreshold: v })}
+				theme={theme}
+				formatValue={(v) => v.toFixed(2)}
+			/>
+		</>
+	);
 
 	return (
 		<div className="space-y-3">
@@ -118,7 +214,7 @@ export function ConfigTab({ theme, config, onUpdateConfig }: ConfigTabProps): Re
 						className="px-4 pb-4 space-y-3 border-t"
 						style={{ borderColor: theme.colors.border }}
 					>
-						{/* Injection Strategy */}
+						{/* Injection Strategy — always visible */}
 						<div className="pt-3 pb-2">
 							<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
 								Injection Strategy
@@ -166,166 +262,111 @@ export function ConfigTab({ theme, config, onUpdateConfig }: ConfigTabProps): Re
 							</div>
 						</div>
 
-						{/* Injection Tone */}
-						<div className="pt-3 pb-2">
-							<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
-								Injection Tone
-							</div>
-							<div className="text-xs mt-0.5 mb-2" style={{ color: theme.colors.textDim }}>
-								Controls how memories are framed when presented to agents
-							</div>
-							<div className="flex gap-2">
-								{(['prescriptive', 'adaptive', 'observational'] as const).map((tone) => (
-									<button
-										key={tone}
-										onClick={() => onUpdateConfig({ injectionTone: tone })}
-										className="flex-1 rounded-md border text-left"
-										style={{
-											padding: '8px 12px',
-											borderColor:
-												config.injectionTone === tone ? theme.colors.accent : theme.colors.border,
-											background:
-												config.injectionTone === tone ? `${theme.colors.accent}20` : 'transparent',
-											color:
-												config.injectionTone === tone ? theme.colors.accent : theme.colors.textMain,
-											cursor: 'pointer',
-											fontWeight: config.injectionTone === tone ? 600 : 400,
-										}}
-									>
-										<div className="text-xs">{tone.charAt(0).toUpperCase() + tone.slice(1)}</div>
-										<div
-											className="text-xs mt-0.5"
-											style={{ color: theme.colors.textDim, fontSize: 10 }}
-										>
-											{tone === 'prescriptive' && 'Frame all memories as directives'}
-											{tone === 'adaptive' && 'Rules as directives, experiences as observations'}
-											{tone === 'observational' && 'Frame all memories as past observations'}
-										</div>
-									</button>
-								))}
-							</div>
-						</div>
-
-						<ConfigSlider
-							label="Token Budget"
-							description="Maximum tokens for memory injection per prompt"
-							value={config.maxTokenBudget}
-							min={500}
-							max={5000}
-							step={100}
-							onChange={(v) => onUpdateConfig({ maxTokenBudget: v })}
-							theme={theme}
-						/>
-
-						<ConfigSlider
-							label="Similarity Threshold"
-							description="Minimum cosine similarity for memory relevance"
-							value={config.similarityThreshold}
-							min={0.1}
-							max={0.95}
-							step={0.05}
-							onChange={(v) => onUpdateConfig({ similarityThreshold: v })}
-							theme={theme}
-							formatValue={(v) => v.toFixed(2)}
-						/>
-
-						<ConfigSlider
-							label="Persona Match Threshold"
-							description="Minimum similarity for persona matching (coarser filter)"
-							value={config.personaMatchThreshold}
-							min={0.1}
-							max={0.8}
-							step={0.05}
-							onChange={(v) => onUpdateConfig({ personaMatchThreshold: v })}
-							theme={theme}
-							formatValue={(v) => v.toFixed(2)}
-						/>
-
-						<ConfigSlider
-							label="Skill Match Threshold"
-							description="Minimum similarity for skill area matching"
-							value={config.skillMatchThreshold}
-							min={0.2}
-							max={0.9}
-							step={0.05}
-							onChange={(v) => onUpdateConfig({ skillMatchThreshold: v })}
-							theme={theme}
-							formatValue={(v) => v.toFixed(2)}
-						/>
+						{/* Advanced settings — collapsible at Level 1, expanded at Level 2 */}
+						{!isActiveCurator ? (
+							<>
+								<button
+									className="w-full flex items-center gap-2 py-2 text-left"
+									onClick={() => setAdvancedOpen((v) => !v)}
+								>
+									{advancedOpen ? (
+										<ChevronDown
+											className="w-3 h-3 shrink-0"
+											style={{ color: theme.colors.textDim }}
+										/>
+									) : (
+										<ChevronRight
+											className="w-3 h-3 shrink-0"
+											style={{ color: theme.colors.textDim }}
+										/>
+									)}
+									<span className="text-xs font-medium" style={{ color: theme.colors.textDim }}>
+										Advanced Settings
+									</span>
+								</button>
+								{advancedOpen && (
+									<div className="space-y-3">{renderAdvancedRetrievalSettings()}</div>
+								)}
+							</>
+						) : (
+							<div className="space-y-3">{renderAdvancedRetrievalSettings()}</div>
+						)}
 					</div>
 				)}
 			</div>
 
-			{/* Storage & Maintenance */}
-			<div
-				className="rounded-lg border overflow-hidden"
-				style={{ borderColor: theme.colors.border }}
-			>
-				<button
-					className="w-full flex items-center gap-2 px-4 py-2.5 text-left transition-colors"
-					style={{
-						backgroundColor: storageOpen ? `${theme.colors.border}20` : 'transparent',
-					}}
-					onClick={() => setStorageOpen((v) => !v)}
+			{/* Storage & Maintenance — gated behind Advanced at Level 1 */}
+			{(isActiveCurator || advancedOpen) && (
+				<div
+					className="rounded-lg border overflow-hidden"
+					style={{ borderColor: theme.colors.border }}
 				>
-					{storageOpen ? (
-						<ChevronDown className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
-					) : (
-						<ChevronRight className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
-					)}
-					<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-						Storage & Maintenance
-					</span>
-				</button>
-
-				{storageOpen && (
-					<div
-						className="px-4 pb-4 space-y-3 border-t"
-						style={{ borderColor: theme.colors.border }}
+					<button
+						className="w-full flex items-center gap-2 px-4 py-2.5 text-left transition-colors"
+						style={{
+							backgroundColor: storageOpen ? `${theme.colors.border}20` : 'transparent',
+						}}
+						onClick={() => setStorageOpen((v) => !v)}
 					>
-						<div className="pt-3">
+						{storageOpen ? (
+							<ChevronDown className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
+						) : (
+							<ChevronRight className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
+						)}
+						<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+							Storage & Maintenance
+						</span>
+					</button>
+
+					{storageOpen && (
+						<div
+							className="px-4 pb-4 space-y-3 border-t"
+							style={{ borderColor: theme.colors.border }}
+						>
+							<div className="pt-3">
+								<ConfigSlider
+									label="Consolidation Threshold"
+									description="Similarity threshold for merging duplicate memories"
+									value={config.consolidationThreshold}
+									min={0.5}
+									max={0.99}
+									step={0.01}
+									onChange={(v) => onUpdateConfig({ consolidationThreshold: v })}
+									theme={theme}
+									formatValue={(v) => v.toFixed(2)}
+								/>
+							</div>
+
 							<ConfigSlider
-								label="Consolidation Threshold"
-								description="Similarity threshold for merging duplicate memories"
-								value={config.consolidationThreshold}
-								min={0.5}
-								max={0.99}
-								step={0.01}
-								onChange={(v) => onUpdateConfig({ consolidationThreshold: v })}
+								label="Decay Half-Life (days)"
+								description="Days until unreinforced memories lose half their confidence"
+								value={config.decayHalfLifeDays}
+								min={7}
+								max={365}
+								step={1}
+								onChange={(v) => onUpdateConfig({ decayHalfLifeDays: v })}
 								theme={theme}
-								formatValue={(v) => v.toFixed(2)}
+							/>
+
+							<ConfigToggle
+								label="Auto-Consolidation"
+								description="Automatically merge similar memories during maintenance"
+								checked={config.enableAutoConsolidation}
+								onChange={(v) => onUpdateConfig({ enableAutoConsolidation: v })}
+								theme={theme}
+							/>
+
+							<ConfigToggle
+								label="Effectiveness Tracking"
+								description="Track how injected memories correlate with session outcomes"
+								checked={config.enableEffectivenessTracking}
+								onChange={(v) => onUpdateConfig({ enableEffectivenessTracking: v })}
+								theme={theme}
 							/>
 						</div>
-
-						<ConfigSlider
-							label="Decay Half-Life (days)"
-							description="Days until unreinforced memories lose half their confidence"
-							value={config.decayHalfLifeDays}
-							min={7}
-							max={365}
-							step={1}
-							onChange={(v) => onUpdateConfig({ decayHalfLifeDays: v })}
-							theme={theme}
-						/>
-
-						<ConfigToggle
-							label="Auto-Consolidation"
-							description="Automatically merge similar memories during maintenance"
-							checked={config.enableAutoConsolidation}
-							onChange={(v) => onUpdateConfig({ enableAutoConsolidation: v })}
-							theme={theme}
-						/>
-
-						<ConfigToggle
-							label="Effectiveness Tracking"
-							description="Track how injected memories correlate with session outcomes"
-							checked={config.enableEffectivenessTracking}
-							onChange={(v) => onUpdateConfig({ enableEffectivenessTracking: v })}
-							theme={theme}
-						/>
-					</div>
-				)}
-			</div>
+					)}
+				</div>
+			)}
 		</div>
 	);
 }

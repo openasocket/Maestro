@@ -21,6 +21,7 @@ import {
 	CheckCircle2,
 	Info,
 	X,
+	ArrowRight,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import { PersonasTab } from './PersonasTab';
@@ -213,12 +214,6 @@ export function MemorySettings({
 				if (configRes.success) {
 					const loadedConfig = { ...MEMORY_CONFIG_DEFAULTS, ...configRes.data };
 					setConfig(loadedConfig);
-					// Auto-promote 0 → 1 on Memory tab visit
-					if ((loadedConfig.userEngagementLevel ?? 0) < 1) {
-						window.maestro.memory.setConfig({ userEngagementLevel: 1 });
-						loadedConfig.userEngagementLevel = 1;
-						setConfig({ ...loadedConfig });
-					}
 				}
 				if (statsRes.success) setStats(statsRes.data);
 				if (rolesRes.success) setHasRoles(rolesRes.data.length > 0);
@@ -285,6 +280,15 @@ export function MemorySettings({
 			// Non-critical
 		}
 	}, []);
+
+	const engagementLevel = config.userEngagementLevel ?? 0;
+
+	// Promote from Level 0 (Passive) to Level 1 (Aware) — triggered by "Learn More" click
+	const handlePromoteToAware = useCallback(() => {
+		if (engagementLevel < 1) {
+			updateConfig({ userEngagementLevel: 1 });
+		}
+	}, [engagementLevel, updateConfig]);
 
 	// Seed defaults handler
 	const handleSeedDefaults = useCallback(async () => {
@@ -505,8 +509,40 @@ export function MemorySettings({
 				</div>
 			)}
 
-			{/* Config panel — shown when enabled */}
-			{config.enabled && (
+			{/* Level 0: Simplified single-panel view */}
+			{config.enabled && engagementLevel === 0 && (
+				<div
+					className="rounded-lg border p-4 space-y-3"
+					style={{ borderColor: theme.colors.border }}
+				>
+					<div className="flex items-center gap-2.5">
+						<div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#22c55e' }} />
+						<span className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
+							Memory system active
+						</span>
+					</div>
+					<div className="text-xs" style={{ color: theme.colors.textDim }}>
+						{stats
+							? `${stats.totalMemories} memories | ${stats.byType?.experience ?? 0} experiences${stats.recentInjections > 0 ? ` | ${stats.recentInjections} injections this week` : ''}`
+							: 'Loading stats...'}
+					</div>
+					<button
+						className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors"
+						style={{
+							backgroundColor: `${theme.colors.accent}15`,
+							color: theme.colors.accent,
+							border: `1px solid ${theme.colors.accent}40`,
+						}}
+						onClick={handlePromoteToAware}
+					>
+						Learn More
+						<ArrowRight className="w-3 h-3" />
+					</button>
+				</div>
+			)}
+
+			{/* Config panel — shown when enabled and engagement level >= 1 */}
+			{config.enabled && engagementLevel >= 1 && (
 				<div className="flex flex-col flex-1 min-h-0 gap-4">
 					{/* Seed / Manage Hierarchy Button */}
 					<button
@@ -650,6 +686,7 @@ export function MemorySettings({
 								onRefresh={refreshStats}
 								onNavigateToTab={navigateToTab}
 								onCuratorAction={handleCuratorAction}
+								engagementLevel={engagementLevel}
 							/>
 						)}
 						{activeSubTab === 'skills' && (
@@ -665,6 +702,7 @@ export function MemorySettings({
 								}}
 								onHierarchyChange={onHierarchyChange}
 								onCuratorAction={handleCuratorAction}
+								engagementLevel={engagementLevel}
 							/>
 						)}
 						{activeSubTab === 'experiences' && (
@@ -699,6 +737,7 @@ export function MemorySettings({
 								config={config}
 								stats={stats}
 								onUpdateConfig={updateConfig}
+								engagementLevel={engagementLevel}
 							/>
 						)}
 						{activeSubTab === 'status' && (

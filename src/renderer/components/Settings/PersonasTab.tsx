@@ -56,6 +56,8 @@ export interface PersonasTabProps {
 	onNavigateToTab?: (tab: string, filter?: Record<string, string> | null) => void;
 	/** Called when user creates/edits/deletes — promotes engagement level to Active Curator */
 	onCuratorAction?: () => void;
+	/** User engagement level for progressive disclosure (0=passive, 1=aware, 2=active curator) */
+	engagementLevel?: number;
 }
 
 /** Persona with resolved counts for display */
@@ -81,6 +83,7 @@ export function PersonasTab({
 	onRefresh,
 	onNavigateToTab,
 	onCuratorAction,
+	engagementLevel = 2,
 }: PersonasTabProps): React.ReactElement {
 	// ─── Suggestion state (preserved from original) ─────────────────────
 	const [suggestions, setSuggestions] = useState<HierarchySuggestionResult | null>(null);
@@ -688,44 +691,46 @@ export function PersonasTab({
 						)}
 					</div>
 
-					<div className="flex items-center gap-2 shrink-0">
-						<div className="relative" ref={exportRef}>
+					{engagementLevel >= 2 && (
+						<div className="flex items-center gap-2 shrink-0">
+							<div className="relative" ref={exportRef}>
+								<button
+									className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border"
+									style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
+									onClick={() => setShowExportDropdown(!showExportDropdown)}
+								>
+									<Download className="w-3 h-3" />
+									Export
+									<ChevronDown className="w-3 h-3" />
+								</button>
+								{showExportDropdown && (
+									<div
+										className="absolute right-0 top-full mt-1 rounded-lg border shadow-lg z-50 min-w-[160px]"
+										style={{
+											backgroundColor: theme.colors.bgMain,
+											borderColor: theme.colors.border,
+										}}
+									>
+										<button
+											className="w-full text-left px-3 py-2 text-xs hover:opacity-80"
+											style={{ color: theme.colors.textMain }}
+											onClick={handleExportAll}
+										>
+											Export all personas
+										</button>
+									</div>
+								)}
+							</div>
 							<button
 								className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border"
 								style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
-								onClick={() => setShowExportDropdown(!showExportDropdown)}
+								onClick={handleImportFile}
 							>
-								<Download className="w-3 h-3" />
-								Export
-								<ChevronDown className="w-3 h-3" />
+								<Upload className="w-3 h-3" />
+								Import
 							</button>
-							{showExportDropdown && (
-								<div
-									className="absolute right-0 top-full mt-1 rounded-lg border shadow-lg z-50 min-w-[160px]"
-									style={{
-										backgroundColor: theme.colors.bgMain,
-										borderColor: theme.colors.border,
-									}}
-								>
-									<button
-										className="w-full text-left px-3 py-2 text-xs hover:opacity-80"
-										style={{ color: theme.colors.textMain }}
-										onClick={handleExportAll}
-									>
-										Export all personas
-									</button>
-								</div>
-							)}
 						</div>
-						<button
-							className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border"
-							style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
-							onClick={handleImportFile}
-						>
-							<Upload className="w-3 h-3" />
-							Import
-						</button>
-					</div>
+					)}
 				</div>
 
 				{/* ─── Summary Stats Row ─────────────────────────────────────── */}

@@ -57,6 +57,8 @@ export interface SkillsTabProps {
 	onHierarchyChange?: () => void;
 	/** Called when user creates/edits/deletes — promotes engagement level to Active Curator */
 	onCuratorAction?: () => void;
+	/** User engagement level for progressive disclosure (0=passive, 1=aware, 2=active curator) */
+	engagementLevel?: number;
 }
 
 /** Skill with resolved counts for display */
@@ -82,6 +84,7 @@ export function SkillsTab({
 	onViewMemories,
 	onHierarchyChange,
 	onCuratorAction,
+	engagementLevel = 2,
 }: SkillsTabProps): React.ReactElement {
 	// ─── Data state ─────────────────────────────────────────────────
 	const [personas, setPersonas] = useState<Persona[]>([]);
@@ -773,40 +776,42 @@ export function SkillsTab({
 						)}
 					</div>
 
-					<div className="flex items-center gap-2">
-						<label
-							className="flex items-center gap-1 text-xs"
-							style={{ color: theme.colors.textDim }}
-						>
-							<input
-								type="checkbox"
-								checked={exportIncludeMemories}
-								onChange={(e) => setExportIncludeMemories(e.target.checked)}
-							/>
-							Include memories
-						</label>
-						<button
-							className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border"
-							style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
-							onClick={handleExportAll}
-							disabled={exportLoading || skills.length === 0}
-						>
-							{exportLoading ? (
-								<Loader2 className="w-3 h-3 animate-spin" />
-							) : (
-								<Download className="w-3 h-3" />
-							)}
-							Export
-						</button>
-						<button
-							className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border"
-							style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
-							onClick={handleImportFile}
-						>
-							<Upload className="w-3 h-3" />
-							Import
-						</button>
-					</div>
+					{engagementLevel >= 2 && (
+						<div className="flex items-center gap-2">
+							<label
+								className="flex items-center gap-1 text-xs"
+								style={{ color: theme.colors.textDim }}
+							>
+								<input
+									type="checkbox"
+									checked={exportIncludeMemories}
+									onChange={(e) => setExportIncludeMemories(e.target.checked)}
+								/>
+								Include memories
+							</label>
+							<button
+								className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border"
+								style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
+								onClick={handleExportAll}
+								disabled={exportLoading || skills.length === 0}
+							>
+								{exportLoading ? (
+									<Loader2 className="w-3 h-3 animate-spin" />
+								) : (
+									<Download className="w-3 h-3" />
+								)}
+								Export
+							</button>
+							<button
+								className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border"
+								style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
+								onClick={handleImportFile}
+							>
+								<Upload className="w-3 h-3" />
+								Import
+							</button>
+						</div>
+					)}
 				</div>
 			)}
 
