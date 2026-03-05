@@ -328,4 +328,134 @@ describe('EmbeddingRegistry', () => {
 			global.fetch = originalFetch;
 		});
 	});
+
+	describe('checkOllamaConnection', () => {
+		it('should return connected=true when Ollama responds', async () => {
+			const originalFetch = global.fetch;
+			global.fetch = vi.fn(
+				async () =>
+					({
+						ok: true,
+						json: async () => ({
+							models: [{ name: 'nomic-embed-text:latest' }, { name: 'llama3:latest' }],
+						}),
+					}) as Response
+			);
+
+			const result = await registry.checkOllamaConnection();
+
+			expect(result.connected).toBe(true);
+			expect(result.modelCount).toBe(2);
+
+			global.fetch = originalFetch;
+		});
+
+		it('should return connected=false when Ollama is not reachable', async () => {
+			const originalFetch = global.fetch;
+			global.fetch = vi.fn(async () => {
+				throw new Error('Connection refused');
+			});
+
+			const result = await registry.checkOllamaConnection();
+
+			expect(result.connected).toBe(false);
+			expect(result.modelCount).toBe(0);
+
+			global.fetch = originalFetch;
+		});
+
+		it('should return connected=false when response is not ok', async () => {
+			const originalFetch = global.fetch;
+			global.fetch = vi.fn(async () => ({ ok: false }) as Response);
+
+			const result = await registry.checkOllamaConnection();
+
+			expect(result.connected).toBe(false);
+			expect(result.modelCount).toBe(0);
+
+			global.fetch = originalFetch;
+		});
+
+		it('should use custom baseUrl', async () => {
+			const originalFetch = global.fetch;
+			const fetchMock = vi.fn(
+				async () =>
+					({
+						ok: true,
+						json: async () => ({ models: [] }),
+					}) as Response
+			);
+			global.fetch = fetchMock;
+
+			await registry.checkOllamaConnection('http://remote:11434');
+
+			expect(fetchMock).toHaveBeenCalledWith(
+				'http://remote:11434/api/tags',
+				expect.objectContaining({ signal: expect.any(AbortSignal) })
+			);
+
+			global.fetch = originalFetch;
+		});
+	});
+
+	describe('pullOllamaModel', () => {
+		it('should pull a model and emit progress events', async () => {
+			const originalFetch = global.fetch;
+			const progressEvents: any[] = [];
+			registry.onProgress((event) => progressEvents.push(event));
+
+			// Mock a streaming response with progress lines
+			const stream = new ReadableStream({
+				start(controller) {
+					controller.enqueue(
+						new TextEncoder().encode(
+							JSON.stringify({ status: 'pulling', completed: 50, total: 100 }) + '\n'
+						)
+					);
+					controller.enqueue(
+						new TextEncoder().encode(
+							JSON.stringify({ status: 'pulling', completed: 100, total: 100 }) + '\n'
+						)
+					);
+					controller.close();
+				},
+			});
+
+			global.fetch = vi.fn(async () => ({
+				ok: true,
+				body: stream,
+			})) as any;
+
+			await registry.pullOllamaModel('nomic-embed-text');
+
+			// Should have: initial "Pulling..." + 2 progress updates + final "ready"
+			expect(progressEvents.length).toBeGreaterThanOrEqual(3);
+			expect(progressEvents[0].status).toBe('downloading');
+			expect(progressEvents[progressEvents.length - 1].status).toBe('ready');
+
+			global.fetch = originalFetch;
+		});
+
+		it('should throw and emit error when pull fails', async () => {
+			const originalFetch = global.fetch;
+			const progressEvents: any[] = [];
+			registry.onProgress((event) => progressEvents.push(event));
+
+			global.fetch = vi.fn(
+				async () =>
+					({
+						ok: false,
+						statusText: 'Not Found',
+					}) as Response
+			);
+
+			await expect(registry.pullOllamaModel('bad-model')).rejects.toThrow(
+				'Failed to pull Ollama model bad-model'
+			);
+
+			expect(progressEvents.some((e) => e.status === 'error')).toBe(true);
+
+			global.fetch = originalFetch;
+		});
+	});
 });

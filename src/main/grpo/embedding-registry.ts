@@ -205,6 +205,97 @@ export class EmbeddingRegistry {
 		}
 	}
 
+	/**
+	 * Check if Ollama is reachable at the given URL.
+	 * Returns an object with connection status and available model count.
+	 */
+	async checkOllamaConnection(
+		baseUrl = 'http://localhost:11434'
+	): Promise<{ connected: boolean; modelCount: number }> {
+		try {
+			const controller = new AbortController();
+			const timeout = setTimeout(() => controller.abort(), 3000);
+			const res = await fetch(`${baseUrl}/api/tags`, {
+				signal: controller.signal,
+			});
+			clearTimeout(timeout);
+			if (!res.ok) return { connected: false, modelCount: 0 };
+
+			const data = (await res.json()) as { models?: { name: string }[] };
+			return { connected: true, modelCount: data.models?.length ?? 0 };
+		} catch {
+			return { connected: false, modelCount: 0 };
+		}
+	}
+
+	/**
+	 * Pull (download) an Ollama model by name.
+	 * Emits progress events during the download.
+	 */
+	async pullOllamaModel(model: string, baseUrl = 'http://localhost:11434'): Promise<void> {
+		this.emitProgress({
+			providerId: 'ollama',
+			modelId: model,
+			progress: 0,
+			status: 'downloading',
+			message: `Pulling model ${model}...`,
+		});
+
+		const res = await fetch(`${baseUrl}/api/pull`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ name: model }),
+		});
+		if (!res.ok) {
+			this.emitProgress({
+				providerId: 'ollama',
+				modelId: model,
+				progress: 0,
+				status: 'error',
+				message: `Failed to pull model: ${res.statusText}`,
+			});
+			throw new Error(`Failed to pull Ollama model ${model}: ${res.statusText}`);
+		}
+
+		// Stream the pull progress
+		const reader = res.body?.getReader();
+		if (!reader) return;
+		const decoder = new TextDecoder();
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			const text = decoder.decode(value, { stream: true });
+			for (const line of text.split('\n').filter(Boolean)) {
+				try {
+					const progress = JSON.parse(line);
+					if (
+						typeof progress.completed === 'number' &&
+						typeof progress.total === 'number' &&
+						progress.total > 0
+					) {
+						this.emitProgress({
+							providerId: 'ollama',
+							modelId: model,
+							progress: progress.completed / progress.total,
+							status: 'downloading',
+							message: progress.status ?? undefined,
+						});
+					}
+				} catch {
+					// Ignore malformed JSON lines
+				}
+			}
+		}
+
+		this.emitProgress({
+			providerId: 'ollama',
+			modelId: model,
+			progress: 1.0,
+			status: 'ready',
+			message: `Model ${model} pulled successfully`,
+		});
+	}
+
 	/** Get status of all registered providers */
 	getStatuses(): Record<string, EmbeddingProviderStatus> {
 		const statuses: Record<string, EmbeddingProviderStatus> = {};

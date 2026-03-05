@@ -58,6 +58,24 @@ export function registerEmbeddingHandlers(): void {
 		})
 	);
 
+	ipcMain.handle(
+		'embedding:checkOllamaConnection',
+		createIpcDataHandler(handlerOpts('checkOllamaConnection'), async (baseUrl?: string) => {
+			return embeddingRegistry.checkOllamaConnection(baseUrl);
+		})
+	);
+
+	ipcMain.handle(
+		'embedding:pullOllamaModel',
+		createIpcDataHandler(
+			handlerOpts('pullOllamaModel'),
+			async (model: string, baseUrl?: string) => {
+				await embeddingRegistry.pullOllamaModel(model, baseUrl);
+				return { success: true };
+			}
+		)
+	);
+
 	// Forward download/loading progress events to all renderer windows
 	embeddingRegistry.onProgress((event) => {
 		try {

@@ -29,6 +29,12 @@ export interface EmbeddingApi {
 	detectAvailable: () => Promise<IpcResponse<{ available: EmbeddingProviderId[] }>>;
 	/** Fetch embedding-capable models from a running Ollama instance */
 	getOllamaModels: (baseUrl?: string) => Promise<IpcResponse<{ models: string[] }>>;
+	/** Check if Ollama is reachable at the given URL */
+	checkOllamaConnection: (
+		baseUrl?: string
+	) => Promise<IpcResponse<{ connected: boolean; modelCount: number }>>;
+	/** Pull (download) an Ollama model */
+	pullOllamaModel: (model: string, baseUrl?: string) => Promise<IpcResponse<{ success: boolean }>>;
 	/** Subscribe to model download/loading progress events. Returns unsubscribe function. */
 	onProgress: (callback: (event: DownloadProgressEvent) => void) => () => void;
 }
@@ -40,6 +46,10 @@ export function createEmbeddingApi(): EmbeddingApi {
 			ipcRenderer.invoke('embedding:switchProvider', providerId, config),
 		detectAvailable: () => ipcRenderer.invoke('embedding:detectAvailable'),
 		getOllamaModels: (baseUrl?) => ipcRenderer.invoke('embedding:getOllamaModels', baseUrl),
+		checkOllamaConnection: (baseUrl?) =>
+			ipcRenderer.invoke('embedding:checkOllamaConnection', baseUrl),
+		pullOllamaModel: (model, baseUrl?) =>
+			ipcRenderer.invoke('embedding:pullOllamaModel', model, baseUrl),
 		onProgress: (callback) => {
 			const handler = (_event: unknown, progressEvent: DownloadProgressEvent) =>
 				callback(progressEvent);
