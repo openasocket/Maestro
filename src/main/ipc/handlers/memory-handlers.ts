@@ -838,6 +838,16 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		})
 	);
 
+	// ─── Injection Diagnostics ──────────────────────────────────────────
+
+	ipcMain.handle(
+		'memory:debugInjection',
+		createIpcDataHandler(handlerOpts('debugInjection'), async () => {
+			const { debugInjectionPipeline } = await import('../../memory/memory-injector');
+			return debugInjectionPipeline();
+		})
+	);
+
 	// ─── Job Queue Status & Token Tracking ───────────────────────────────
 
 	ipcMain.handle(

@@ -146,6 +146,20 @@ export function MemorySettings({
 		}
 	}, []);
 
+	// Refresh config + stats — used when config is changed from child components (e.g. enable button)
+	const refreshConfigAndStats = useCallback(async () => {
+		try {
+			const [configRes, statsRes] = await Promise.all([
+				window.maestro.memory.getConfig(),
+				window.maestro.memory.getAnalytics(),
+			]);
+			if (configRes.success) setConfig({ ...MEMORY_CONFIG_DEFAULTS, ...configRes.data });
+			if (statsRes.success) setStats(statsRes.data);
+		} catch {
+			// Non-critical
+		}
+	}, []);
+
 	// Seed defaults handler
 	const handleSeedDefaults = useCallback(async () => {
 		setSeeding(true);
@@ -407,7 +421,13 @@ export function MemorySettings({
 						/>
 					)}
 					{activeSubTab === 'status' && (
-						<StatusTab theme={theme} config={config} stats={stats} projectPath={projectPath} />
+						<StatusTab
+							theme={theme}
+							config={config}
+							stats={stats}
+							projectPath={projectPath}
+							onConfigChange={refreshConfigAndStats}
+						/>
 					)}
 
 					{/* Global Retrieval Settings */}

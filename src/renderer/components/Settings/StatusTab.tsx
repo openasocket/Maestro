@@ -37,6 +37,7 @@ export interface StatusTabProps {
 	config: MemoryConfig;
 	stats: MemoryStats | null;
 	projectPath?: string | null;
+	onConfigChange?: () => void;
 }
 
 /** Shared health context fetched once and passed to subsections. */
@@ -51,6 +52,7 @@ export function StatusTab({
 	config,
 	stats,
 	projectPath,
+	onConfigChange,
 }: StatusTabProps): React.ReactElement {
 	const [allMemories, setAllMemories] = useState<MemoryEntry[]>([]);
 	const [healthCtx, setHealthCtx] = useState<HealthContext>({
@@ -130,7 +132,12 @@ export function StatusTab({
 			/>
 
 			{/* Section 2: Injection Activity */}
-			<InjectionActivitySection theme={theme} config={config} stats={stats} />
+			<InjectionActivitySection
+				theme={theme}
+				config={config}
+				stats={stats}
+				onConfigChange={onConfigChange}
+			/>
 
 			{/* Section 3: System Metrics (collapsed by default) */}
 			<SystemMetricsSection theme={theme} />
@@ -498,19 +505,30 @@ function buildTimeline(injections: InjectionEventRecord[]): TimelineBucket[] {
 	return buckets;
 }
 
+interface DiagnosticResult {
+	label: string;
+	ok: boolean;
+	detail?: string;
+}
+
 function InjectionActivitySection({
 	theme,
 	config,
 	stats,
+	onConfigChange,
 }: {
 	theme: Theme;
 	config: MemoryConfig;
 	stats: MemoryStats | null;
+	onConfigChange?: () => void;
 }) {
 	const [expanded, setExpanded] = useState(true);
 	const [injections, setInjections] = useState<InjectionEventRecord[]>([]);
 	const [loaded, setLoaded] = useState(false);
 	const [expandedEvent, setExpandedEvent] = useState<number | null>(null);
+	const [debugResults, setDebugResults] = useState<DiagnosticResult[] | null>(null);
+	const [debugRunning, setDebugRunning] = useState(false);
+	const [enabling, setEnabling] = useState(false);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -606,6 +624,58 @@ function InjectionActivitySection({
 
 			{expanded && (
 				<div className="space-y-3 pt-1">
+					{/* Prominent disabled warning with one-click enable */}
+					{!config.enabled && (
+						<div
+							className="rounded p-3 flex items-center gap-2"
+							style={{ backgroundColor: '#eab30810', border: '1px solid #eab30830' }}
+						>
+							<AlertTriangle className="w-4 h-4 shrink-0" style={{ color: '#eab308' }} />
+							<div className="flex-1 min-w-0">
+								<div className="text-xs font-medium" style={{ color: '#eab308' }}>
+									Memory system is disabled
+								</div>
+								<div className="text-[10px]" style={{ color: '#eab30899' }}>
+									Enable it to start injecting memories into your agents.
+								</div>
+							</div>
+							<button
+								className="shrink-0 px-3 py-1 rounded text-[10px] font-medium"
+								style={{
+									backgroundColor: theme.colors.accent,
+									color: theme.colors.bgMain,
+								}}
+								disabled={enabling}
+								onClick={async () => {
+									setEnabling(true);
+									try {
+										await window.maestro.memory.setConfig({ enabled: true });
+										onConfigChange?.();
+									} catch {
+										// non-critical
+									}
+									setEnabling(false);
+								}}
+							>
+								{enabling ? 'Enabling...' : 'Enable'}
+							</button>
+						</div>
+					)}
+
+					{/* Embedding health check */}
+					{config.enabled && stats && stats.pendingEmbeddings > 0 && (
+						<div
+							className="rounded p-2 flex items-center gap-2 text-[10px]"
+							style={{ backgroundColor: '#eab30810', border: '1px solid #eab30820' }}
+						>
+							<AlertTriangle className="w-3 h-3 shrink-0" style={{ color: '#eab308' }} />
+							<span style={{ color: '#eab308' }}>
+								{stats.pendingEmbeddings} item{stats.pendingEmbeddings !== 1 ? 's' : ''} missing
+								embeddings — memories under these personas cannot be matched to tasks.
+							</span>
+						</div>
+					)}
+
 					{!loaded && (
 						<div className="text-xs" style={{ color: theme.colors.textDim }}>
 							Loading...
@@ -840,6 +910,80 @@ function InjectionActivitySection({
 							<AlertTriangle className="w-3 h-3 shrink-0" />
 							{noMatchCount} search{noMatchCount !== 1 ? 'es' : ''} returned no matching memories in
 							the last 7 days
+						</div>
+					)}
+
+					{/* Debug Injection button */}
+					{loaded && (
+						<div className="pt-1">
+							<button
+								className="text-[10px] px-2 py-1 rounded"
+								style={{
+									backgroundColor: `${theme.colors.border}30`,
+									color: theme.colors.textDim,
+								}}
+								disabled={debugRunning}
+								onClick={async () => {
+									setDebugRunning(true);
+									try {
+										const res = await window.maestro.memory.debugInjection();
+										if (res.success) {
+											setDebugResults(res.data);
+										}
+									} catch {
+										// non-critical
+									}
+									setDebugRunning(false);
+								}}
+							>
+								{debugRunning ? 'Running...' : 'Debug Injection'}
+							</button>
+
+							{debugResults && (
+								<div
+									className="mt-2 rounded p-2 space-y-1"
+									style={{ backgroundColor: `${theme.colors.border}15` }}
+								>
+									<div className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
+										Injection pipeline diagnostic:
+									</div>
+									{debugResults.map((item, i) => (
+										<div key={i} className="space-y-0.5">
+											<div
+												className="flex items-center gap-1.5 text-[10px]"
+												style={{ color: item.ok ? '#22c55e' : '#ef4444' }}
+											>
+												{item.ok ? (
+													<CheckCircle2 className="w-3 h-3 shrink-0" />
+												) : (
+													<XCircle className="w-3 h-3 shrink-0" />
+												)}
+												{item.label}
+											</div>
+											{item.detail && (
+												<div
+													className="ml-[18px] text-[9px]"
+													style={{ color: theme.colors.textDim }}
+												>
+													{item.detail}
+												</div>
+											)}
+										</div>
+									))}
+									{debugResults.every((r) => r.ok) && realInjections.length === 0 && (
+										<div
+											className="mt-1 text-[10px] p-1.5 rounded"
+											style={{
+												backgroundColor: `${theme.colors.accent}10`,
+												color: theme.colors.accent,
+											}}
+										>
+											All prerequisites pass. Try starting a new agent session — memories are
+											injected at agent startup when the task context matches a persona's expertise.
+										</div>
+									)}
+								</div>
+							)}
 						</div>
 					)}
 				</div>

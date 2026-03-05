@@ -288,6 +288,7 @@ export async function injectMemories(
 
 	// If disabled, return unchanged prompt
 	if (!config.enabled) {
+		console.log('[memory-inject] Skipped: memory system is disabled (config.enabled = false)');
 		return {
 			injectedPrompt: prompt,
 			injectedIds: [],
@@ -432,6 +433,13 @@ export async function injectMemories(
 			agentType,
 			projectPath
 		);
+		if (skillResults.length === 0) {
+			console.log('[memory-inject] cascadingSearch returned 0 results for:', {
+				agentType,
+				projectPath,
+				taskContextPreview: effectiveQuery.slice(0, 200),
+			});
+		}
 		// Filter to skill-scope only (cascading search returns all scopes)
 		const skillOnly = skillResults.filter((r) => r.personaName || r.entry.scope === 'skill');
 		selectedSkill = selectWithinBudget(skillOnly, budgets.skill);
@@ -929,4 +937,103 @@ export function getInjectionRecord(sessionId: string): InjectionRecord | undefin
  */
 export function clearSessionInjection(sessionId: string): void {
 	_sessionInjections.delete(sessionId);
+}
+
+// ─── Injection Diagnostics ──────────────────────────────────────────────────
+
+export interface InjectionDiagnostic {
+	label: string;
+	ok: boolean;
+	detail?: string;
+}
+
+/**
+ * Run a diagnostic check on the injection pipeline.
+ * Returns a checklist of prerequisites with pass/fail status.
+ */
+export async function debugInjectionPipeline(): Promise<InjectionDiagnostic[]> {
+	const results: InjectionDiagnostic[] = [];
+	const config = getConfig();
+
+	// 1. Config enabled
+	results.push({
+		label: 'Memory system enabled',
+		ok: config.enabled,
+		detail: config.enabled
+			? undefined
+			: 'Enable the memory system in settings to start injecting memories',
+	});
+
+	if (!config.enabled) return results;
+
+	// 2. Hierarchy seeded
+	try {
+		const store = getMemoryStore();
+		const stats = await store.getAnalytics();
+
+		const hasPersonas = stats.totalPersonas > 0;
+		const hasSkills = stats.totalSkillAreas > 0;
+		results.push({
+			label: 'Hierarchy seeded (personas exist)',
+			ok: hasPersonas,
+			detail: hasPersonas
+				? `${stats.totalPersonas} persona(s)`
+				: 'No personas found — seed the hierarchy first',
+		});
+		results.push({
+			label: 'Hierarchy seeded (skill areas exist)',
+			ok: hasSkills,
+			detail: hasSkills ? `${stats.totalSkillAreas} skill area(s)` : 'No skill areas found',
+		});
+
+		// 3. Embeddings computed
+		const hasPendingEmbeddings = stats.pendingEmbeddings > 0;
+		results.push({
+			label: 'Embeddings computed',
+			ok: !hasPendingEmbeddings,
+			detail: hasPendingEmbeddings
+				? `${stats.pendingEmbeddings} item(s) missing embeddings — persona/skill matching requires embeddings`
+				: 'All embeddings computed',
+		});
+
+		// 4. Memories exist
+		const hasMemories = stats.totalMemories > 0;
+		results.push({
+			label: 'Memories exist',
+			ok: hasMemories,
+			detail: hasMemories
+				? `${stats.totalMemories} memor${stats.totalMemories === 1 ? 'y' : 'ies'}`
+				: 'No memories stored yet',
+		});
+
+		// 5. Recent injection events
+		const events = getRecentInjectionEvents(200);
+		const realEvents = events.filter((e) => !e.noMatch);
+		results.push({
+			label: 'Recent injection events recorded',
+			ok: realEvents.length > 0,
+			detail:
+				realEvents.length > 0
+					? `${realEvents.length} event(s) in ring buffer`
+					: 'No injection events — try starting a new agent session with the memory system enabled',
+		});
+
+		// 6. Recent search queries (no-match events indicate searches happened)
+		const noMatchEvents = events.filter((e) => e.noMatch);
+		if (realEvents.length === 0 && noMatchEvents.length > 0) {
+			results.push({
+				label: 'Search attempted but no matches found',
+				ok: false,
+				detail: `${noMatchEvents.length} search(es) returned no matching memories — check persona descriptions and similarity thresholds`,
+			});
+		}
+	} catch (err) {
+		results.push({
+			label: 'Memory store accessible',
+			ok: false,
+			detail: `Failed to access memory store: ${String(err)}`,
+		});
+	}
+
+	return results;
 }

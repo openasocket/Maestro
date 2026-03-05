@@ -2954,6 +2954,10 @@ interface MaestroAPI {
 		getRecentInjections: (
 			limit?: number
 		) => Promise<{ success: true; data: unknown[] } | { success: false; error: string }>;
+		debugInjection: () => Promise<
+			| { success: true; data: Array<{ label: string; ok: boolean; detail?: string }> }
+			| { success: false; error: string }
+		>;
 		export: (
 			scope: import('../shared/memory-types').MemoryScope,
 			skillAreaId?: string,

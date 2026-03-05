@@ -422,6 +422,10 @@ export function createMemoryApi() {
 		getRecentInjections: (limit?: number): Promise<IpcResponse<unknown[]>> =>
 			ipcRenderer.invoke('memory:getRecentInjections', limit),
 
+		debugInjection: (): Promise<
+			IpcResponse<Array<{ label: string; ok: boolean; detail?: string }>>
+		> => ipcRenderer.invoke('memory:debugInjection'),
+
 		// ─── Job Queue Status & Token Tracking ────────────────────────────
 		getJobQueueStatus: (): Promise<IpcResponse<JobQueueStatus>> =>
 			ipcRenderer.invoke('memory:getJobQueueStatus'),
