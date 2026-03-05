@@ -18,6 +18,7 @@ import {
 	Download,
 	Eye,
 	EyeOff,
+	RotateCcw,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
@@ -134,6 +135,15 @@ export function EmbeddingProviderSettings({
 	const [showKey, setShowKey] = useState(false);
 	const [settingKey, setSettingKey] = useState(false);
 
+	// Re-embed state
+	const [reEmbedding, setReEmbedding] = useState(false);
+	const [reEmbedResult, setReEmbedResult] = useState<{
+		total: number;
+		succeeded: number;
+		failed: number;
+		durationMs: number;
+	} | null>(null);
+
 	// Progress
 	const [progress, setProgress] = useState<{
 		progress: number;
@@ -209,9 +219,54 @@ export function EmbeddingProviderSettings({
 		return unsub;
 	}, [fetchStatus]);
 
+	const handleReEmbedAll = useCallback(async () => {
+		if (reEmbedding) return;
+		setReEmbedding(true);
+		setReEmbedResult(null);
+		try {
+			const res = await window.maestro.memory.reEmbedAll();
+			if (res.success) {
+				setReEmbedResult(res.data);
+				notifyToast({
+					type: 'success',
+					title: 'Re-embedding Complete',
+					message: `${res.data.succeeded}/${res.data.total} memories re-embedded in ${(res.data.durationMs / 1000).toFixed(1)}s`,
+					duration: 5000,
+				});
+			} else {
+				notifyToast({
+					type: 'error',
+					title: 'Re-embedding Failed',
+					message: res.error ?? 'Unknown error',
+					duration: 5000,
+				});
+			}
+		} catch (err) {
+			notifyToast({
+				type: 'error',
+				title: 'Re-embedding Failed',
+				message: err instanceof Error ? err.message : 'Unknown error',
+				duration: 5000,
+			});
+		} finally {
+			setReEmbedding(false);
+		}
+	}, [reEmbedding]);
+
 	const handleSelectProvider = useCallback(
 		async (providerId: EmbeddingProviderId) => {
 			if (switching) return;
+
+			const isProviderSwitch = activeProviderId && activeProviderId !== providerId;
+
+			if (isProviderSwitch) {
+				const confirmed = window.confirm(
+					'Switching embedding providers requires re-computing all embeddings. ' +
+						'This may take a few minutes for large memory stores. Proceed?'
+				);
+				if (!confirmed) return;
+			}
+
 			setSwitching(true);
 			try {
 				const newEmbeddingConfig: EmbeddingProviderConfig = {
@@ -223,6 +278,14 @@ export function EmbeddingProviderSettings({
 				if (res.success) {
 					onUpdateConfig({ embeddingProvider: newEmbeddingConfig });
 					fetchStatus();
+
+					// Trigger re-embedding after provider switch
+					if (isProviderSwitch) {
+						// Small delay to let the provider fully initialize
+						setTimeout(() => {
+							handleReEmbedAll();
+						}, 500);
+					}
 				} else {
 					notifyToast({
 						type: 'error',
@@ -242,7 +305,7 @@ export function EmbeddingProviderSettings({
 				setSwitching(false);
 			}
 		},
-		[switching, embeddingConfig, onUpdateConfig, fetchStatus]
+		[switching, activeProviderId, embeddingConfig, onUpdateConfig, fetchStatus, handleReEmbedAll]
 	);
 
 	// Ollama helpers
@@ -541,6 +604,46 @@ export function EmbeddingProviderSettings({
 							}
 						/>
 					)}
+
+					{/* Re-embed All */}
+					<div
+						className="flex items-center justify-between pt-2 mt-2"
+						style={{ borderTop: `1px solid ${theme.colors.border}` }}
+					>
+						<div>
+							<div className="text-xs" style={{ color: theme.colors.textDim }}>
+								Re-compute all memory embeddings with the current provider
+							</div>
+							{reEmbedResult && (
+								<div
+									className="text-[10px] mt-1"
+									style={{
+										color: reEmbedResult.failed > 0 ? theme.colors.warning : theme.colors.success,
+									}}
+								>
+									{reEmbedResult.succeeded}/{reEmbedResult.total} succeeded
+									{reEmbedResult.failed > 0 && `, ${reEmbedResult.failed} failed`} (
+									{(reEmbedResult.durationMs / 1000).toFixed(1)}s)
+								</div>
+							)}
+						</div>
+						<button
+							className="px-2.5 py-1.5 rounded border text-xs font-medium transition-colors disabled:opacity-50 flex items-center gap-1.5"
+							style={{
+								borderColor: theme.colors.border,
+								color: theme.colors.textMain,
+							}}
+							onClick={handleReEmbedAll}
+							disabled={reEmbedding || switching}
+						>
+							{reEmbedding ? (
+								<Loader2 className="w-3 h-3 animate-spin" />
+							) : (
+								<RotateCcw className="w-3 h-3" />
+							)}
+							{reEmbedding ? 'Re-embedding...' : 'Re-embed All'}
+						</button>
+					</div>
 				</div>
 			)}
 		</div>
@@ -615,7 +718,7 @@ function OllamaSettings({
 
 	useEffect(() => {
 		onCheckConnection();
-	}, []);  
+	}, []);
 
 	return (
 		<>

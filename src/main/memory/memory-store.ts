@@ -1375,6 +1375,115 @@ export class MemoryStore {
 		}
 	}
 
+	/**
+	 * Clear all existing embeddings and re-embed everything using the current active provider.
+	 * Used when switching embedding providers (different vector spaces are incompatible).
+	 */
+	async reEmbedAll(options?: {
+		scope?: MemoryScope;
+		batchSize?: number;
+	}): Promise<{ total: number; succeeded: number; failed: number; durationMs: number }> {
+		const start = Date.now();
+		const batchSize = options?.batchSize ?? 50;
+		let total = 0;
+		let succeeded = 0;
+		let failed = 0;
+
+		const { encodeBatch } = await import('../grpo/embedding-service');
+
+		// Helper: clear + re-embed a single library file
+		const processLibrary = async (dirPath: string): Promise<void> => {
+			const lib = await this.readLibrary(dirPath);
+			const active = lib.entries.filter((e) => e.active && !e.archived);
+			if (active.length === 0) return;
+
+			// Clear all embeddings first
+			for (const entry of lib.entries) {
+				entry.embedding = null;
+			}
+
+			total += active.length;
+
+			// Re-embed in batches
+			for (let i = 0; i < active.length; i += batchSize) {
+				const batch = active.slice(i, i + batchSize);
+				const texts = batch.map((e) => e.content);
+				try {
+					const embeddings = await encodeBatch(texts);
+					for (let j = 0; j < batch.length; j++) {
+						const idx = lib.entries.findIndex((e) => e.id === batch[j].id);
+						if (idx !== -1) {
+							lib.entries[idx].embedding = embeddings[j];
+							succeeded++;
+						}
+					}
+				} catch {
+					failed += batch.length;
+				}
+			}
+
+			await this.writeLibrary(dirPath, lib);
+		};
+
+		const registry = await this.readRegistry();
+
+		// Process based on scope filter or all scopes
+		const processSkill = !options?.scope || options.scope === 'skill';
+		const processGlobal = !options?.scope || options.scope === 'global';
+		const processProject = !options?.scope || options.scope === 'project';
+
+		if (processSkill) {
+			for (const skill of registry.skillAreas) {
+				try {
+					await processLibrary(this.getMemoryPath('skill', skill.id));
+				} catch {
+					// Library may not exist
+				}
+			}
+		}
+
+		if (processGlobal) {
+			try {
+				await processLibrary(this.getMemoryPath('global'));
+			} catch {
+				// Library may not exist
+			}
+		}
+
+		if (processProject) {
+			try {
+				const projectsDir = path.join(this.memoriesDir, 'project');
+				const dirEntries = await fs.readdir(projectsDir).catch(() => [] as string[]);
+				for (const dirName of dirEntries) {
+					try {
+						await processLibrary(path.join(projectsDir, dirName));
+					} catch {
+						// Skip
+					}
+				}
+			} catch {
+				// No projects dir
+			}
+		}
+
+		// Re-embed hierarchy (personas + skill areas)
+		if (!options?.scope) {
+			// Clear hierarchy embeddings
+			for (const persona of registry.personas) {
+				persona.embedding = null;
+			}
+			for (const skill of registry.skillAreas) {
+				skill.embedding = null;
+			}
+			await this.writeRegistry(registry);
+
+			// Re-compute
+			await this.ensureHierarchyEmbeddings();
+		}
+
+		return { total, succeeded, failed, durationMs: Date.now() - start };
+	}
+
 	// ─── Semantic Search ─────────────────────────────────────────────────────
 
 	/**

@@ -327,6 +327,17 @@ export function createMemoryApi() {
 		): Promise<IpcResponse<{ memoriesUpdated: number; hierarchyUpdated: number }>> =>
 			ipcRenderer.invoke('memory:ensureEmbeddings', scope, skillAreaId, projectPath),
 
+		computeAllEmbeddings: (): Promise<
+			IpcResponse<{ memoriesUpdated: number; hierarchyUpdated: number }>
+		> => ipcRenderer.invoke('memory:computeAllEmbeddings'),
+
+		reEmbedAll: (options?: {
+			scope?: MemoryScope;
+			batchSize?: number;
+		}): Promise<
+			IpcResponse<{ total: number; succeeded: number; failed: number; durationMs: number }>
+		> => ipcRenderer.invoke('memory:reEmbedAll', options),
+
 		seedDefaults: (): Promise<IpcResponse<{ roles: number; personas: number; skills: number }>> =>
 			ipcRenderer.invoke('memory:seedDefaults'),
 

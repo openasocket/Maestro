@@ -3019,6 +3019,20 @@ interface MaestroAPI {
 			| { success: true; data: { memoriesUpdated: number; hierarchyUpdated: number } }
 			| { success: false; error: string }
 		>;
+		computeAllEmbeddings: () => Promise<
+			| { success: true; data: { memoriesUpdated: number; hierarchyUpdated: number } }
+			| { success: false; error: string }
+		>;
+		reEmbedAll: (options?: {
+			scope?: import('../shared/memory-types').MemoryScope;
+			batchSize?: number;
+		}) => Promise<
+			| {
+					success: true;
+					data: { total: number; succeeded: number; failed: number; durationMs: number };
+			  }
+			| { success: false; error: string }
+		>;
 		seedDefaults: () => Promise<
 			| { success: true; data: { roles: number; personas: number; skills: number } }
 			| { success: false; error: string }

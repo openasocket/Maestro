@@ -713,6 +713,43 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 	);
 
 	ipcMain.handle(
+		'memory:computeAllEmbeddings',
+		createIpcDataHandler(handlerOpts('computeAllEmbeddings'), async () => {
+			let totalMemories = 0;
+
+			// 1. Embed all skill-scoped memories
+			const skillAreas = await memoryStore.listSkillAreas();
+			for (const skill of skillAreas) {
+				totalMemories += await memoryStore.ensureAllEmbeddings('skill', skill.id);
+			}
+
+			// 2. Embed global-scoped memories
+			totalMemories += await memoryStore.ensureAllEmbeddings('global');
+
+			// 3. Embed hierarchy (personas + skill area descriptions)
+			const hierarchyUpdated = await memoryStore.ensureHierarchyEmbeddings();
+
+			return { memoriesUpdated: totalMemories, hierarchyUpdated };
+		})
+	);
+
+	ipcMain.handle(
+		'memory:reEmbedAll',
+		createIpcDataHandler(
+			handlerOpts('reEmbedAll'),
+			async (options?: { scope?: MemoryScope; batchSize?: number }) => {
+				logger.info('Starting re-embedding of all memories...', LOG_CONTEXT);
+				const result = await memoryStore.reEmbedAll(options);
+				logger.info(
+					`Re-embedding complete: ${result.succeeded}/${result.total} succeeded, ${result.failed} failed (${result.durationMs}ms)`,
+					LOG_CONTEXT
+				);
+				return result;
+			}
+		)
+	);
+
+	ipcMain.handle(
 		'memory:seedDefaults',
 		createIpcDataHandler(handlerOpts('seedDefaults'), async () => {
 			return memoryStore.seedFromDefaults();
