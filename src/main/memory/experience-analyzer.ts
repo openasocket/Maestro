@@ -60,6 +60,8 @@ export interface ExperienceAnalyzerInput {
 		roleName: string;
 		roleSystemPrompt: string;
 	};
+	/** Per-turn tool execution log (rich mode only) — reconstructed action sequence */
+	toolExecutionLog?: string;
 }
 
 /** What kind of learning this experience represents */
@@ -328,9 +330,17 @@ export class ExperienceAnalyzer {
 			return 0;
 		}
 
-		// Gather session data
-		emitProgress('gathering', 'Gathering session data...');
-		const input = await this.gatherSessionData(sessionId, projectPath, agentType);
+		// Gather session data (depth depends on config)
+		emitProgress(
+			'gathering',
+			`Gathering session data (${config.extractionDepth ?? 'standard'} depth)...`
+		);
+		const input =
+			config.extractionDepth === 'rich'
+				? await this.gatherRichSessionData(sessionId, projectPath, agentType)
+				: config.extractionDepth === 'minimal'
+					? await this.gatherMinimalSessionData(sessionId, projectPath, agentType)
+					: await this.gatherSessionData(sessionId, projectPath, agentType);
 
 		// Check minimum history threshold
 		const minEntries = config.minHistoryEntriesForAnalysis ?? 3;
@@ -785,6 +795,282 @@ export class ExperienceAnalyzer {
 			}
 		} catch {
 			// Persona selection unavailable — proceed without
+		}
+
+		return input;
+	}
+
+	/**
+	 * Gather rich session data for deep extraction.
+	 *
+	 * Compared to standard gatherSessionData():
+	 * - All history entries (not just last 20), fullResponse up to 2000 chars
+	 * - VIBES reasoning truncated to 8000 chars, resolves ALL entries (not just last 20)
+	 * - Git diff up to 10000 chars
+	 * - All detected deviations (not summarized)
+	 * - Per-turn tool execution log when available (from SessionMonitorState.sessionToolLog)
+	 */
+	async gatherRichSessionData(
+		sessionId: string,
+		projectPath: string,
+		agentType: string
+	): Promise<ExperienceAnalyzerInput> {
+		const input: ExperienceAnalyzerInput = {
+			sessionId,
+			agentType,
+			projectPath,
+			historyEntries: [],
+		};
+
+		// History: ALL entries with expanded fullResponse (2000 chars vs 500)
+		try {
+			const { getHistoryManager } = await import('../history-manager');
+			const historyManager = getHistoryManager();
+			const entries = historyManager.getEntries(sessionId);
+			input.historyEntries = entries.map((e) => ({
+				summary: e.summary,
+				fullResponse: e.fullResponse?.slice(0, 2000),
+				success: e.success,
+				elapsedTimeMs: e.elapsedTimeMs,
+			}));
+		} catch {
+			// History unavailable — proceed with empty
+		}
+
+		// Detect deviations — all of them, no summarization
+		if (input.historyEntries.length > 0) {
+			input.detectedDeviations = this.detectDeviations(input.historyEntries);
+		}
+
+		// Git diff: full diff up to 10000 chars
+		try {
+			const { execFile } = await import('child_process');
+			const { promisify } = await import('util');
+			const execFileAsync = promisify(execFile);
+			const result = await execFileAsync('git', ['diff', '--stat', 'HEAD~5..HEAD'], {
+				cwd: projectPath,
+				timeout: 10000,
+			});
+			const diffStat = result.stdout?.slice(0, 2000) ?? '';
+
+			const diffResult = await execFileAsync('git', ['diff', 'HEAD~5..HEAD'], {
+				cwd: projectPath,
+				timeout: 10000,
+			});
+			const fullDiff = diffResult.stdout?.slice(0, 10000) ?? '';
+			input.gitDiff = diffStat ? `${diffStat}\n\n${fullDiff}` : fullDiff;
+		} catch {
+			// No git repo or git unavailable — proceed without diff
+		}
+
+		// VIBES data: resolve ALL entries (not just last 20), expanded reasoning (8000 chars)
+		try {
+			const fs = await import('fs/promises');
+			const path = await import('path');
+
+			// Manifest — resolve all entries
+			const manifestPath = path.join(projectPath, '.ai-audit', 'manifest.json');
+			const manifestContent = await fs.readFile(manifestPath, 'utf-8');
+			const manifest = JSON.parse(manifestContent);
+			const rawEntries = manifest.entries;
+			const entryArray: Record<string, unknown>[] = Array.isArray(rawEntries)
+				? rawEntries
+				: rawEntries && typeof rawEntries === 'object'
+					? Object.values(rawEntries)
+					: [];
+
+			if (entryArray.length > 0) {
+				// Rich mode: resolve ALL entries, not just last 20
+				const resolvedEntries = await resolveExternalReasoningBlobs(
+					entryArray,
+					path.join(projectPath, '.ai-audit')
+				);
+				input.vibesManifest = resolvedEntries.map((e: Record<string, unknown>) => {
+					const isReasoning = String(e.type ?? '') === 'reasoning';
+					const limit = isReasoning ? 8000 : 500;
+					return {
+						type: String(e.type ?? 'unknown'),
+						content: extractManifestContent(e).slice(0, limit),
+					};
+				});
+			}
+
+			// Annotations — all of them (not just last 20)
+			const annotationsPath = path.join(projectPath, '.ai-audit', 'annotations.jsonl');
+			const annotationsContent = await fs.readFile(annotationsPath, 'utf-8');
+			const lines = annotationsContent.trim().split('\n');
+			input.vibesAnnotations = lines
+				.map((line) => {
+					try {
+						const a = JSON.parse(line);
+						return {
+							filePath: String(a.filePath ?? ''),
+							action: String(a.action ?? ''),
+							...(a.lineRange != null ? { lineRange: String(a.lineRange) } : {}),
+						} as { filePath: string; action: string; lineRange?: string };
+					} catch {
+						return null;
+					}
+				})
+				.filter((a): a is { filePath: string; action: string; lineRange?: string } => a !== null);
+		} catch {
+			// VIBES not available — proceed without
+		}
+
+		// Decision provenance
+		try {
+			input.decisionSignals = await this.gatherDecisionProvenance(
+				projectPath,
+				sessionId,
+				input.vibesManifest,
+				input.vibesAnnotations,
+				input.historyEntries
+			);
+		} catch {
+			// Decision provenance unavailable — proceed without
+		}
+
+		// Stats: session duration
+		try {
+			const { getStatsDB } = await import('../stats');
+			const statsDb = getStatsDB();
+			const queryEvents = statsDb.getQueryEvents('all', { sessionId });
+			if (queryEvents.length > 0) {
+				input.sessionDurationMs = queryEvents.reduce((sum, q) => sum + q.duration, 0);
+			}
+		} catch {
+			// Stats DB unavailable — proceed without duration
+		}
+
+		// Context utilization
+		try {
+			const { getHistoryManager } = await import('../history-manager');
+			const historyManager = getHistoryManager();
+			const entries = historyManager.getEntries(sessionId);
+			if (entries.length > 0) {
+				const lastEntry = entries[entries.length - 1];
+				if (lastEntry.contextUsage !== undefined) {
+					input.contextUtilizationAtEnd = lastEntry.contextUsage;
+				}
+			}
+		} catch {
+			// Context utilization unavailable — proceed without
+		}
+
+		// Persona context
+		try {
+			const { getMemoryStore } = await import('./memory-store');
+			const store = getMemoryStore();
+			const config = await store.getConfig();
+			const queryText = input.historyEntries
+				.slice(0, 5)
+				.map((e) => e.summary)
+				.join(' ')
+				.slice(0, 2000);
+			const matchedPersonas = await store.selectMatchingPersonas(
+				queryText,
+				config,
+				agentType,
+				projectPath
+			);
+			if (matchedPersonas.length > 0) {
+				const top = matchedPersonas[0];
+				input.personaContext = {
+					personaId: top.persona.id,
+					personaName: top.personaName,
+					personaSystemPrompt: top.persona.systemPrompt ?? '',
+					roleName: top.roleName,
+					roleSystemPrompt: top.roleSystemPrompt,
+				};
+			}
+		} catch {
+			// Persona selection unavailable — proceed without
+		}
+
+		// Per-turn tool execution log (populated by MEM-EVOLVE-05 task #3 — sessionToolLog)
+		// The getSessionToolLog accessor is added by a later task; check dynamically
+		try {
+			 
+			const monitorModule = (await import('../process-listeners/memory-monitor-listener')) as any;
+			if (typeof monitorModule.getSessionToolLog === 'function') {
+				const toolLog = monitorModule.getSessionToolLog(sessionId) as Array<{
+					turnIndex: number;
+					tools: Array<{ name: string; input: string; success: boolean; durationMs: number }>;
+					errors: string[];
+				}> | null;
+				if (toolLog && toolLog.length > 0) {
+					const logText = toolLog
+						.map((turn) => {
+							const toolLines = turn.tools
+								.map(
+									(t) =>
+										`      Agent: ${t.name} ${t.input}${t.success ? '' : ' [FAILED]'} (${t.durationMs}ms)`
+								)
+								.join('\n');
+							const errorLines =
+								turn.errors.length > 0
+									? turn.errors.map((e: string) => `      Error: ${e}`).join('\n')
+									: '';
+							return `    Turn ${turn.turnIndex}:\n${toolLines}${errorLines ? '\n' + errorLines : ''}`;
+						})
+						.join('\n');
+					input.toolExecutionLog = logText.slice(0, 15000);
+				}
+			}
+		} catch {
+			// Tool log not yet available — proceed without
+		}
+
+		return input;
+	}
+
+	/**
+	 * Gather minimal session data for fast/cheap extraction.
+	 *
+	 * Only includes history summaries — no fullResponse, no VIBES, no git diff.
+	 * Useful for high-volume extraction where cost matters more than depth.
+	 */
+	async gatherMinimalSessionData(
+		sessionId: string,
+		projectPath: string,
+		agentType: string
+	): Promise<ExperienceAnalyzerInput> {
+		const input: ExperienceAnalyzerInput = {
+			sessionId,
+			agentType,
+			projectPath,
+			historyEntries: [],
+		};
+
+		// History: summaries only, no fullResponse
+		try {
+			const { getHistoryManager } = await import('../history-manager');
+			const historyManager = getHistoryManager();
+			const entries = historyManager.getEntries(sessionId);
+			input.historyEntries = entries.slice(-20).map((e) => ({
+				summary: e.summary,
+				success: e.success,
+				elapsedTimeMs: e.elapsedTimeMs,
+			}));
+		} catch {
+			// History unavailable — proceed with empty
+		}
+
+		// Detect deviations (lightweight — still useful for minimal mode)
+		if (input.historyEntries.length > 0) {
+			input.detectedDeviations = this.detectDeviations(input.historyEntries);
+		}
+
+		// Stats: session duration
+		try {
+			const { getStatsDB } = await import('../stats');
+			const statsDb = getStatsDB();
+			const queryEvents = statsDb.getQueryEvents('all', { sessionId });
+			if (queryEvents.length > 0) {
+				input.sessionDurationMs = queryEvents.reduce((sum, q) => sum + q.duration, 0);
+			}
+		} catch {
+			// Stats DB unavailable — proceed without duration
 		}
 
 		return input;
