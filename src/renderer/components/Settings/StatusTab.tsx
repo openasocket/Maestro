@@ -219,6 +219,17 @@ export function StatusTab({
 					/>
 				)}
 
+				{/* Diagnostic warning banners for common issues */}
+				<DiagnosticBanners
+					theme={theme}
+					config={config}
+					stats={stats}
+					healthCtx={healthCtx}
+					onUpdateConfig={onUpdateConfig}
+					onConfigChange={onConfigChange}
+					onNavigateToTab={onNavigateToTab}
+				/>
+
 				{/* What Changed Since Last Visit digest */}
 				<WhatChangedDigest theme={theme} config={config} />
 
@@ -319,6 +330,161 @@ function SubsystemRow({
 					{detail}
 				</span>
 			)}
+		</div>
+	);
+}
+
+// ─── Diagnostic Warning Banners ──────────────────────────────────────────────────
+
+interface DiagnosticBanner {
+	id: string;
+	title: string;
+	message: string;
+	actionLabel?: string;
+	onAction?: () => void;
+}
+
+function DiagnosticBanners({
+	theme,
+	config,
+	stats,
+	healthCtx,
+	onUpdateConfig,
+	onConfigChange,
+	onNavigateToTab,
+}: {
+	theme: Theme;
+	config: MemoryConfig;
+	stats: MemoryStats | null;
+	healthCtx: HealthContext;
+	onUpdateConfig?: (updates: Partial<MemoryConfig>) => void;
+	onConfigChange?: () => void;
+	onNavigateToTab?: (tab: string, filter?: Record<string, string> | null) => void;
+}) {
+	const [enabling, setEnabling] = useState(false);
+
+	if (!config.enabled) return null;
+
+	const dismissed = config.dismissedDiagnostics ?? [];
+	const dismiss = (id: string) => {
+		onUpdateConfig?.({ dismissedDiagnostics: [...dismissed, id] });
+	};
+
+	const banners: DiagnosticBanner[] = [];
+
+	// 1. No embeddings computed (friendlier copy for existing partial implementation)
+	if (stats && stats.pendingEmbeddings > 0 && !dismissed.includes('no-embeddings')) {
+		banners.push({
+			id: 'no-embeddings',
+			title: 'Embeddings needed',
+			message: `${stats.pendingEmbeddings} persona${stats.pendingEmbeddings !== 1 ? 's' : ''} need${stats.pendingEmbeddings === 1 ? 's' : ''} embeddings to match tasks. Without embeddings, memories under these personas cannot be injected.`,
+			actionLabel: 'Compute Now',
+			onAction: async () => {
+				try {
+					await window.maestro.memory.computeAllEmbeddings();
+					onConfigChange?.();
+				} catch {
+					// handled by existing error display
+				}
+			},
+		});
+	}
+
+	// 2. No injection in 7 days
+	const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+	const noRecentInjection =
+		healthCtx.lastInjectionTime !== null && Date.now() - healthCtx.lastInjectionTime > sevenDaysMs;
+	if (noRecentInjection && !dismissed.includes('no-injection-7d')) {
+		banners.push({
+			id: 'no-injection-7d',
+			title: 'No recent injections',
+			message:
+				'No memories have been injected in the last 7 days. This usually means no agent sessions have been started, or no memories match your recent tasks.',
+		});
+	}
+
+	// 3. All extractions failing
+	const failedDiagnostics = healthCtx.extractionDiagnostics.filter((d) =>
+		d.status.startsWith('failed-')
+	);
+	if (failedDiagnostics.length >= 3 && !dismissed.includes('extraction-failures')) {
+		banners.push({
+			id: 'extraction-failures',
+			title: 'Experience extraction issues',
+			message: `Experience extraction has failed ${failedDiagnostics.length} time${failedDiagnostics.length !== 1 ? 's' : ''} recently. Check that your extraction provider is configured and running.`,
+			actionLabel: 'View Diagnostics',
+			onAction: () => onNavigateToTab?.('experiences'),
+		});
+	}
+
+	// 4. Config mismatch: enabled but extraction disabled
+	if (
+		config.enabled &&
+		!config.enableExperienceExtraction &&
+		!dismissed.includes('config-mismatch')
+	) {
+		banners.push({
+			id: 'config-mismatch',
+			title: 'Extraction disabled',
+			message:
+				"Memory system is enabled but extraction is disabled — you're using existing memories but not learning new ones.",
+			actionLabel: 'Enable Extraction',
+			onAction: async () => {
+				setEnabling(true);
+				try {
+					await window.maestro.memory.setConfig({ enableExperienceExtraction: true });
+					onConfigChange?.();
+				} catch {
+					// non-critical
+				}
+				setEnabling(false);
+			},
+		});
+	}
+
+	if (banners.length === 0) return null;
+
+	return (
+		<div className="space-y-2">
+			{banners.map((banner) => (
+				<div
+					key={banner.id}
+					className="rounded-lg p-3 flex items-start gap-2"
+					style={{ backgroundColor: '#eab30810', border: '1px solid #eab30830' }}
+				>
+					<AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: '#eab308' }} />
+					<div className="flex-1 min-w-0 space-y-1">
+						<div className="text-xs font-medium" style={{ color: '#eab308' }}>
+							{banner.title}
+						</div>
+						<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
+							{banner.message}
+						</div>
+						{banner.actionLabel && banner.onAction && (
+							<button
+								className="mt-1 px-2.5 py-1 rounded text-[10px] font-medium"
+								style={{
+									backgroundColor: theme.colors.accent,
+									color: theme.colors.bgMain,
+									opacity: enabling ? 0.6 : 1,
+								}}
+								disabled={enabling}
+								onClick={banner.onAction}
+							>
+								{banner.actionLabel}
+							</button>
+						)}
+					</div>
+					<button
+						className="shrink-0 p-0.5 rounded opacity-50 hover:opacity-100"
+						style={{ color: theme.colors.textDim }}
+						onClick={() => dismiss(banner.id)}
+						title="Dismiss"
+					>
+						<X className="w-3 h-3" />
+					</button>
+				</div>
+			))}
 		</div>
 	);
 }

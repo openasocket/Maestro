@@ -359,6 +359,11 @@ export interface MemoryConfig {
 	 * Whether the user has completed the Memory Quick Tour walkthrough.
 	 */
 	memoryTourCompleted?: boolean;
+	/**
+	 * Diagnostic banner IDs that the user has dismissed.
+	 * e.g. ['no-embeddings', 'no-injection-7d', 'extraction-failures', 'config-mismatch']
+	 */
+	dismissedDiagnostics?: string[];
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -408,6 +413,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	memoryMilestonesShown: [],
 	gettingStartedDismissed: false,
 	memoryTourCompleted: false,
+	dismissedDiagnostics: [],
 };
 
 // ─── Checkpoint Injection Types ────────────────────────────────────────────
