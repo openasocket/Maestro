@@ -42,6 +42,8 @@ import {
 	getRecentPersonaShifts,
 	hashContent,
 	generateDiffInjection,
+	getLastSessionInjection,
+	applyPreviousSessionBoost,
 } from '../../memory/memory-injector';
 import type { PersonaShiftEvent, InjectionRecord } from '../../memory/memory-injector';
 
@@ -1184,6 +1186,204 @@ describe('MemoryInjector', () => {
 			expect(result.injectedPrompt).toContain('- RULE: Security rule: always sanitize inputs');
 			// Should not contain any OBSERVATION-formatted memory lines
 			expect(result.injectedPrompt).not.toContain('- OBSERVATION:');
+		});
+	});
+
+	// ─── Cross-Session Continuity (MEM-EVOLVE-07) ────────────────────────
+
+	describe('getLastSessionInjection', () => {
+		afterEach(() => {
+			clearSessionInjection('prev-session-1');
+			clearSessionInjection('prev-session-2');
+			clearSessionInjection('current-session');
+		});
+
+		it('returns undefined when no previous sessions exist', () => {
+			expect(getLastSessionInjection('/project')).toBeUndefined();
+		});
+
+		it('returns the most recent record for the same project', () => {
+			// Record first session, then advance time for the second
+			const now = Date.now();
+			vi.spyOn(Date, 'now').mockReturnValue(now - 10000);
+			recordSessionInjection(
+				'prev-session-1',
+				['mem-a'],
+				[],
+				undefined,
+				undefined,
+				'spawn',
+				0,
+				'/project',
+				'claude-code'
+			);
+			vi.spyOn(Date, 'now').mockReturnValue(now);
+			recordSessionInjection(
+				'prev-session-2',
+				['mem-b', 'mem-c'],
+				[],
+				undefined,
+				undefined,
+				'spawn',
+				0,
+				'/project',
+				'claude-code'
+			);
+			vi.restoreAllMocks();
+
+			const result = getLastSessionInjection('/project');
+			expect(result).toBeDefined();
+			// prev-session-2 is more recent
+			expect(result!.ids).toEqual(['mem-b', 'mem-c']);
+		});
+
+		it('excludes the current session', () => {
+			recordSessionInjection(
+				'current-session',
+				['mem-current'],
+				[],
+				undefined,
+				undefined,
+				'spawn',
+				0,
+				'/project',
+				'claude-code'
+			);
+
+			const result = getLastSessionInjection('/project', 'current-session');
+			expect(result).toBeUndefined();
+		});
+
+		it('does not return records from a different project', () => {
+			recordSessionInjection(
+				'prev-session-1',
+				['mem-a'],
+				[],
+				undefined,
+				undefined,
+				'spawn',
+				0,
+				'/other-project',
+				'claude-code'
+			);
+
+			const result = getLastSessionInjection('/project');
+			expect(result).toBeUndefined();
+		});
+	});
+
+	describe('applyPreviousSessionBoost', () => {
+		it('boosts combinedScore of memories that were in the previous session', () => {
+			const results = [
+				makeResult({ entry: { id: 'mem-a' }, combinedScore: 0.7 }),
+				makeResult({ entry: { id: 'mem-b' }, combinedScore: 0.8 }),
+				makeResult({ entry: { id: 'mem-c' }, combinedScore: 0.6 }),
+			];
+
+			const previousRecord: InjectionRecord = {
+				ids: ['mem-a', 'mem-c'],
+				scopeGroups: [],
+				contentHashes: new Map(),
+				lastInjectedAt: Date.now() - 60000,
+				totalTokensSaved: 0,
+				injectionEvents: [],
+			};
+
+			const boosted = applyPreviousSessionBoost(results, previousRecord);
+
+			// mem-a: 0.7 + 0.15 = 0.85
+			// mem-b: 0.8 (unchanged)
+			// mem-c: 0.6 + 0.15 = 0.75
+			const memA = boosted.find((r) => r.entry.id === 'mem-a')!;
+			const memB = boosted.find((r) => r.entry.id === 'mem-b')!;
+			const memC = boosted.find((r) => r.entry.id === 'mem-c')!;
+
+			expect(memA.combinedScore).toBeCloseTo(0.85);
+			expect(memB.combinedScore).toBeCloseTo(0.8);
+			expect(memC.combinedScore).toBeCloseTo(0.75);
+		});
+
+		it('re-sorts results by boosted combinedScore', () => {
+			const results = [
+				makeResult({ entry: { id: 'mem-high' }, combinedScore: 0.9 }),
+				makeResult({ entry: { id: 'mem-boosted' }, combinedScore: 0.8 }),
+			];
+
+			const previousRecord: InjectionRecord = {
+				ids: ['mem-boosted'],
+				scopeGroups: [],
+				contentHashes: new Map(),
+				lastInjectedAt: Date.now() - 60000,
+				totalTokensSaved: 0,
+				injectionEvents: [],
+			};
+
+			const boosted = applyPreviousSessionBoost(results, previousRecord);
+
+			// mem-boosted: 0.8 + 0.15 = 0.95 > mem-high: 0.9
+			expect(boosted[0].entry.id).toBe('mem-boosted');
+			expect(boosted[1].entry.id).toBe('mem-high');
+		});
+
+		it('does not mutate original results', () => {
+			const results = [makeResult({ entry: { id: 'mem-a' }, combinedScore: 0.7 })];
+
+			const previousRecord: InjectionRecord = {
+				ids: ['mem-a'],
+				scopeGroups: [],
+				contentHashes: new Map(),
+				lastInjectedAt: Date.now() - 60000,
+				totalTokensSaved: 0,
+				injectionEvents: [],
+			};
+
+			applyPreviousSessionBoost(results, previousRecord);
+			expect(results[0].combinedScore).toBe(0.7);
+		});
+	});
+
+	describe('recordSessionInjection with project/agent metadata', () => {
+		afterEach(() => {
+			clearSessionInjection('sess-meta-1');
+			clearSessionInjection('sess-meta-2');
+		});
+
+		it('stores projectPath and agentType', () => {
+			recordSessionInjection(
+				'sess-meta-1',
+				['mem-1'],
+				[],
+				undefined,
+				undefined,
+				'spawn',
+				0,
+				'/my/project',
+				'claude-code'
+			);
+
+			const record = getInjectionRecord('sess-meta-1');
+			expect(record!.projectPath).toBe('/my/project');
+			expect(record!.agentType).toBe('claude-code');
+		});
+
+		it('preserves projectPath from first call on subsequent calls', () => {
+			recordSessionInjection(
+				'sess-meta-2',
+				['mem-1'],
+				[],
+				undefined,
+				undefined,
+				'spawn',
+				0,
+				'/my/project',
+				'claude-code'
+			);
+			// Second call without projectPath (e.g., checkpoint injection)
+			recordSessionInjection('sess-meta-2', ['mem-2']);
+
+			const record = getInjectionRecord('sess-meta-2');
+			expect(record!.projectPath).toBe('/my/project');
+			expect(record!.agentType).toBe('claude-code');
 		});
 	});
 });

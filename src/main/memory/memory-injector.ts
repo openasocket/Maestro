@@ -624,7 +624,7 @@ export async function injectMemories(
 			);
 		}
 	}
-	const selectedProject = selectWithinBudget(projectSearchResults, budgets.project);
+	let selectedProject = selectWithinBudget(projectSearchResults, budgets.project);
 
 	// Global search: flat search within global scope
 	let globalSearchResults: MemorySearchResult[];
@@ -635,7 +635,26 @@ export async function injectMemories(
 		const qEmbed = await encode(effectiveQuery);
 		globalSearchResults = await store.searchFlatScope(qEmbed, 'global', searchConfig);
 	}
-	const selectedGlobal = selectWithinBudget(globalSearchResults, budgets.global);
+	let selectedGlobal = selectWithinBudget(globalSearchResults, budgets.global);
+
+	// ── Cross-session continuity boost (MEM-EVOLVE-07) ──────────────────
+	// If the user had a previous session on this project, boost memories
+	// that were injected in that session to maintain continuity.
+	const previousSessionRecord = projectPath ? getLastSessionInjection(projectPath) : undefined;
+	if (previousSessionRecord && previousSessionRecord.ids.length > 0) {
+		skillResults = applyPreviousSessionBoost(skillResults, previousSessionRecord);
+		projectSearchResults = applyPreviousSessionBoost(projectSearchResults, previousSessionRecord);
+		globalSearchResults = applyPreviousSessionBoost(globalSearchResults, previousSessionRecord);
+		// Re-select within budget with boosted scores
+		if (selectedPersonaIds && selectedPersonaIds.length > 0) {
+			selectedSkill = selectWithinBudget(skillResults, budgets.skill);
+		} else {
+			const skillOnly = skillResults.filter((r) => r.personaName || r.entry.scope === 'skill');
+			selectedSkill = selectWithinBudget(skillOnly, budgets.skill);
+		}
+		selectedProject = selectWithinBudget(projectSearchResults, budgets.project);
+		selectedGlobal = selectWithinBudget(globalSearchResults, budgets.global);
+	}
 
 	// ── Combine results preserving scope ordering (skill > project > global) ──
 	const selected: MemorySearchResult[] = [...selectedSkill, ...selectedProject, ...selectedGlobal];
@@ -1108,6 +1127,10 @@ export interface InjectionRecord {
 	totalTokensSaved: number;
 	/** Per-injection event log for granular effectiveness scoring (MEM-EVOLVE-04) */
 	injectionEvents: InjectionTrackingEvent[];
+	/** Project path this injection was associated with (MEM-EVOLVE-07) */
+	projectPath?: string;
+	/** Agent type this injection was associated with (MEM-EVOLVE-07) */
+	agentType?: string;
 }
 
 /**
@@ -1141,7 +1164,9 @@ export function recordSessionInjection(
 	searchResults?: MemorySearchResult[],
 	precomputedHashes?: Map<MemoryId, string>,
 	trigger?: InjectionTrigger,
-	turnIndex?: number
+	turnIndex?: number,
+	projectPath?: string,
+	agentType?: string
 ): void {
 	let contentHashes: Map<MemoryId, string>;
 	if (precomputedHashes && precomputedHashes.size > 0) {
@@ -1173,6 +1198,8 @@ export function recordSessionInjection(
 		lastInjectedAt: Date.now(),
 		totalTokensSaved: existing?.totalTokensSaved ?? 0,
 		injectionEvents: [...previousEvents, newEvent],
+		projectPath: projectPath ?? existing?.projectPath,
+		agentType: agentType ?? existing?.agentType,
 	});
 
 	// Register spawn-time IDs with live context queue for dedup (EXP-LIVE-01).
@@ -1206,6 +1233,53 @@ export function getInjectionRecord(sessionId: string): InjectionRecord | undefin
  */
 export function clearSessionInjection(sessionId: string): void {
 	_sessionInjections.delete(sessionId);
+}
+
+// ─── Cross-Session Continuity (MEM-EVOLVE-07) ──────────────────────────────
+
+/** Score bonus applied to memories that were injected in the previous session */
+const PREVIOUS_SESSION_BOOST = 0.15;
+
+/**
+ * Find the most recent injection record for a given project path,
+ * excluding the current session. Used to boost memories that were
+ * relevant in the user's last session on the same project.
+ */
+export function getLastSessionInjection(
+	projectPath: string,
+	currentSessionId?: string
+): InjectionRecord | undefined {
+	let best: InjectionRecord | undefined;
+	let bestTime = 0;
+	for (const [sid, record] of _sessionInjections) {
+		if (sid === currentSessionId) continue;
+		if (record.projectPath !== projectPath) continue;
+		if (record.lastInjectedAt > bestTime) {
+			bestTime = record.lastInjectedAt;
+			best = record;
+		}
+	}
+	return best;
+}
+
+/**
+ * Apply a score boost to search results whose memory IDs match
+ * the previous session's injection record for the same project.
+ * Returns a new array (does not mutate input). Re-sorts by combinedScore.
+ */
+export function applyPreviousSessionBoost(
+	results: MemorySearchResult[],
+	previousRecord: InjectionRecord
+): MemorySearchResult[] {
+	const previousIds = new Set(previousRecord.ids);
+	const boosted = results.map((r) => {
+		if (previousIds.has(r.entry.id)) {
+			return { ...r, combinedScore: r.combinedScore + PREVIOUS_SESSION_BOOST };
+		}
+		return r;
+	});
+	boosted.sort((a, b) => b.combinedScore - a.combinedScore);
+	return boosted;
 }
 
 // ─── Injection Diagnostics ──────────────────────────────────────────────────
