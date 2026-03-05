@@ -613,6 +613,8 @@ export interface MemoryInjectionResult {
 	flatScopeCounts: { project: number; global: number };
 	/** Scope groupings for effectiveness tracking (EXP-11) */
 	scopeGroups: InjectionScopeGroup[];
+	/** memoryId → content hash for diff tracking (MEM-EVOLVE-02) */
+	contentHashes?: Map<MemoryId, string>;
 }
 
 // ─── Seed Data ─────────────────────────────────────────────────────────────

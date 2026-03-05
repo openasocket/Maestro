@@ -109,15 +109,51 @@ export interface LiveQueueAccessor {
 		content: string,
 		source: string,
 		tokenEstimate: number,
-		memoryIds: string[]
+		memoryIds: string[],
+		hasDiff?: boolean
 	) => void;
 	getWriteCount: (sessionId: string) => number;
+}
+
+/** Diff injection helpers from memory-injector (MEM-EVOLVE-02) */
+export interface InjectorAccessor {
+	getInjectionRecord: (
+		sessionId: string
+	) =>
+		| {
+				ids: string[];
+				scopeGroups: any[];
+				contentHashes: Map<string, string>;
+				lastInjectedAt: number;
+				totalTokensSaved: number;
+		  }
+		| undefined;
+	generateDiffInjection: (
+		newResults: any[],
+		previousRecord: any
+	) => {
+		injectedPrompt: string;
+		addedIds: string[];
+		removedIds: string[];
+		modifiedIds: string[];
+		unchangedCount: number;
+		tokenCount: number;
+	};
+	recordSessionInjection: (
+		sessionId: string,
+		memoryIds: string[],
+		scopeGroups?: any[],
+		searchResults?: any[],
+		precomputedHashes?: Map<string, string>
+	) => void;
+	hashContent: (content: string) => string;
 }
 
 /** Injectable memory module accessors — resolved lazily in production, injected in tests */
 export interface MemoryModuleAccessors {
 	getMemoryStore: () => MemoryStoreAccessor;
 	getLiveContextQueue: () => LiveQueueAccessor;
+	getInjector?: () => InjectorAccessor;
 }
 
 // ─── Per-Turn Interestingness Scoring ──────────────────────────────────────
@@ -365,14 +401,81 @@ export function setupMemoryMonitorListener(
 				const queue = accessors.getLiveContextQueue();
 
 				const topResults = results.slice(0, 5);
-				const lines = topResults.map(
-					(r) => `- (${r.entry.type ?? 'experience'}) ${r.entry.content}`
-				);
-				const content = lines.join('\n');
-				const tokenEstimate = Math.ceil(content.length / 4);
 				const memoryIds = topResults.map((r) => r.entry.id).filter(Boolean);
 
-				queue.enqueue(state.sessionId, content, source, tokenEstimate, memoryIds);
+				// Resolve injector — from accessor (test-injectable) or lazy import (production)
+				let injector: InjectorAccessor | undefined;
+				if (accessors.getInjector) {
+					injector = accessors.getInjector();
+				} else {
+					try {
+						const mod = await import('../memory/memory-injector');
+						injector = {
+							getInjectionRecord: mod.getInjectionRecord,
+							generateDiffInjection: mod.generateDiffInjection,
+							recordSessionInjection: mod.recordSessionInjection,
+							hashContent: mod.hashContent,
+						};
+					} catch {
+						// memory-injector not available — fall through to non-diff path
+					}
+				}
+
+				let content: string;
+				let tokenEstimate: number;
+				let hasDiff = false;
+
+				const previousRecord = injector?.getInjectionRecord(state.sessionId);
+
+				if (injector && previousRecord && previousRecord.contentHashes.size > 0) {
+					// Diff-based injection (MEM-EVOLVE-02)
+					const diff = injector.generateDiffInjection(topResults, previousRecord);
+
+					if (diff.injectedPrompt === '') {
+						// Nothing changed — skip enqueue entirely
+						return;
+					}
+
+					content = diff.injectedPrompt;
+					tokenEstimate = diff.tokenCount;
+					hasDiff = true;
+
+					// Track token savings
+					const fullLines = topResults.map(
+						(r) => `- (${r.entry.type ?? 'experience'}) ${r.entry.content}`
+					);
+					const fullTokens = Math.ceil(fullLines.join('\n').length / 4);
+					const savedTokens = fullTokens - diff.tokenCount;
+					if (savedTokens > 0) {
+						previousRecord.totalTokensSaved += savedTokens;
+					}
+
+					// Merge injection record: keep unchanged + add new - remove old
+					const mergedIds = [
+						...previousRecord.ids.filter((id) => !diff.removedIds.includes(id)),
+						...diff.addedIds,
+					];
+					injector.recordSessionInjection(
+						state.sessionId,
+						mergedIds,
+						previousRecord.scopeGroups,
+						topResults
+					);
+				} else {
+					// First mid-session injection — full format
+					const lines = topResults.map(
+						(r) => `- (${r.entry.type ?? 'experience'}) ${r.entry.content}`
+					);
+					content = lines.join('\n');
+					tokenEstimate = Math.ceil(content.length / 4);
+
+					// Record for future diff comparisons
+					if (injector) {
+						injector.recordSessionInjection(state.sessionId, memoryIds, [], topResults);
+					}
+				}
+
+				queue.enqueue(state.sessionId, content, source, tokenEstimate, memoryIds, hasDiff);
 			} catch {
 				// LiveContextQueue not available yet (EXP-LIVE-01) — skip enqueue
 			}

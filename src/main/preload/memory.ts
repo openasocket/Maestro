@@ -461,6 +461,17 @@ export function createMemoryApi() {
 		getStoreSize: (): Promise<IpcResponse<{ totalBytes: number; fileCount: number }>> =>
 			ipcRenderer.invoke('memory:getStoreSize'),
 
+		getSessionDiffStats: (
+			sessionId: string
+		): Promise<
+			IpcResponse<{
+				injectedMemoryCount: number;
+				trackedContentHashes: number;
+				lastInjectedAt: number;
+				totalTokensSaved: number;
+			} | null>
+		> => ipcRenderer.invoke('memory:getSessionDiffStats', sessionId),
+
 		analyzeHistoricalSessions: (): Promise<
 			IpcResponse<{ total: number; queued: number; skipped: number }>
 		> => ipcRenderer.invoke('memory:analyzeHistoricalSessions'),

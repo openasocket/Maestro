@@ -40,8 +40,10 @@ import {
 	clearSessionInjection,
 	pushPersonaShiftEvent,
 	getRecentPersonaShifts,
+	hashContent,
+	generateDiffInjection,
 } from '../../memory/memory-injector';
-import type { PersonaShiftEvent } from '../../memory/memory-injector';
+import type { PersonaShiftEvent, InjectionRecord } from '../../memory/memory-injector';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -771,6 +773,177 @@ describe('MemoryInjector', () => {
 			}
 			const shifts = getRecentPersonaShifts(2);
 			expect(shifts.length).toBe(2);
+		});
+	});
+
+	// ─── 7. Diff-Based Injection (MEM-EVOLVE-02) ─────────────────────
+
+	describe('Diff-based injection', () => {
+		describe('hashContent', () => {
+			it('produces consistent hashes for same content', () => {
+				expect(hashContent('hello world')).toBe(hashContent('hello world'));
+			});
+
+			it('produces different hashes for different content', () => {
+				expect(hashContent('hello')).not.toBe(hashContent('world'));
+			});
+
+			it('returns a base-36 string', () => {
+				const hash = hashContent('test');
+				expect(hash).toMatch(/^[0-9a-z]+$/);
+			});
+		});
+
+		describe('recordSessionInjection with content hashes', () => {
+			it('stores content hashes from search results', () => {
+				const results = [
+					makeResult({ entry: { id: 'mem-100', content: 'Alpha' } }),
+					makeResult({ entry: { id: 'mem-101', content: 'Beta' } }),
+				];
+				recordSessionInjection('sess-hash-1', ['mem-100', 'mem-101'], [], results);
+
+				const record = getInjectionRecord('sess-hash-1');
+				expect(record).toBeDefined();
+				expect(record!.contentHashes.size).toBe(2);
+				expect(record!.contentHashes.get('mem-100')).toBe(hashContent('Alpha'));
+				expect(record!.contentHashes.get('mem-101')).toBe(hashContent('Beta'));
+				expect(record!.lastInjectedAt).toBeGreaterThan(0);
+				expect(record!.totalTokensSaved).toBe(0);
+
+				clearSessionInjection('sess-hash-1');
+			});
+
+			it('accepts precomputed hashes', () => {
+				const precomputed = new Map([
+					['mem-200', 'abc'],
+					['mem-201', 'def'],
+				]);
+				recordSessionInjection('sess-hash-2', ['mem-200', 'mem-201'], [], undefined, precomputed);
+
+				const record = getInjectionRecord('sess-hash-2');
+				expect(record!.contentHashes.get('mem-200')).toBe('abc');
+				expect(record!.contentHashes.get('mem-201')).toBe('def');
+
+				clearSessionInjection('sess-hash-2');
+			});
+		});
+
+		describe('generateDiffInjection', () => {
+			function makePrevRecord(ids: string[], contents: string[]): InjectionRecord {
+				const contentHashes = new Map<string, string>();
+				for (let i = 0; i < ids.length; i++) {
+					contentHashes.set(ids[i], hashContent(contents[i]));
+				}
+				return {
+					ids,
+					scopeGroups: [],
+					contentHashes,
+					lastInjectedAt: Date.now(),
+					totalTokensSaved: 0,
+				};
+			}
+
+			it('detects added memories', () => {
+				const prev = makePrevRecord(['mem-1'], ['content A']);
+				const newResults = [
+					makeResult({ entry: { id: 'mem-1', content: 'content A' } }),
+					makeResult({
+						entry: { id: 'mem-2', content: 'content B' },
+						personaName: 'P1',
+						skillAreaName: 'S1',
+					}),
+				];
+
+				const diff = generateDiffInjection(newResults, prev);
+
+				expect(diff.addedIds).toEqual(['mem-2']);
+				expect(diff.removedIds).toEqual([]);
+				expect(diff.modifiedIds).toEqual([]);
+				expect(diff.unchangedCount).toBe(1);
+				expect(diff.injectedPrompt).toContain('<added>');
+				expect(diff.injectedPrompt).toContain('<agent-memory-update>');
+				expect(diff.tokenCount).toBeGreaterThan(0);
+			});
+
+			it('detects removed memories', () => {
+				const prev = makePrevRecord(['mem-1', 'mem-2'], ['content A', 'content B']);
+				const newResults = [makeResult({ entry: { id: 'mem-1', content: 'content A' } })];
+
+				const diff = generateDiffInjection(newResults, prev);
+
+				expect(diff.addedIds).toEqual([]);
+				expect(diff.removedIds).toEqual(['mem-2']);
+				expect(diff.modifiedIds).toEqual([]);
+				expect(diff.unchangedCount).toBe(1);
+				expect(diff.injectedPrompt).toContain('<removed>');
+			});
+
+			it('detects modified memories', () => {
+				const prev = makePrevRecord(['mem-1'], ['original content']);
+				const newResults = [
+					makeResult({
+						entry: { id: 'mem-1', content: 'updated content' },
+						personaName: 'P1',
+						skillAreaName: 'S1',
+					}),
+				];
+
+				const diff = generateDiffInjection(newResults, prev);
+
+				expect(diff.addedIds).toEqual([]);
+				expect(diff.removedIds).toEqual([]);
+				expect(diff.modifiedIds).toEqual(['mem-1']);
+				expect(diff.unchangedCount).toBe(0);
+				expect(diff.injectedPrompt).toContain('<modified>');
+			});
+
+			it('returns empty prompt when nothing changed', () => {
+				const prev = makePrevRecord(['mem-1', 'mem-2'], ['content A', 'content B']);
+				const newResults = [
+					makeResult({ entry: { id: 'mem-1', content: 'content A' } }),
+					makeResult({ entry: { id: 'mem-2', content: 'content B' } }),
+				];
+
+				const diff = generateDiffInjection(newResults, prev);
+
+				expect(diff.injectedPrompt).toBe('');
+				expect(diff.addedIds).toEqual([]);
+				expect(diff.removedIds).toEqual([]);
+				expect(diff.modifiedIds).toEqual([]);
+				expect(diff.unchangedCount).toBe(2);
+				expect(diff.tokenCount).toBe(0);
+			});
+
+			it('handles mixed add/remove/modify', () => {
+				const prev = makePrevRecord(
+					['mem-1', 'mem-2', 'mem-3'],
+					['keep', 'old-modify', 'to-remove']
+				);
+				const newResults = [
+					makeResult({ entry: { id: 'mem-1', content: 'keep' } }),
+					makeResult({
+						entry: { id: 'mem-2', content: 'new-modify' },
+						personaName: 'P1',
+						skillAreaName: 'S1',
+					}),
+					makeResult({
+						entry: { id: 'mem-4', content: 'brand new' },
+						personaName: 'P2',
+						skillAreaName: 'S2',
+					}),
+				];
+
+				const diff = generateDiffInjection(newResults, prev);
+
+				expect(diff.addedIds).toEqual(['mem-4']);
+				expect(diff.removedIds).toEqual(['mem-3']);
+				expect(diff.modifiedIds).toEqual(['mem-2']);
+				expect(diff.unchangedCount).toBe(1);
+				expect(diff.injectedPrompt).toContain('<added>');
+				expect(diff.injectedPrompt).toContain('<removed>');
+				expect(diff.injectedPrompt).toContain('<modified>');
+				expect(diff.injectedPrompt).toContain('1 memories unchanged');
+			});
 		});
 	});
 });

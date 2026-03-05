@@ -194,8 +194,15 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 							);
 
 							// Store injected IDs + scope groups for effectiveness tracking (EXP-11)
+							// Pass contentHashes for diff tracking (MEM-EVOLVE-02)
 							const { recordSessionInjection } = await import('../../memory/memory-injector');
-							recordSessionInjection(config.sessionId, result.injectedIds, result.scopeGroups);
+							recordSessionInjection(
+								config.sessionId,
+								result.injectedIds,
+								result.scopeGroups,
+								undefined,
+								result.contentHashes
+							);
 
 							// First-injection notification (MEM-EVOLVE-01)
 							if (result.injectedIds.length > 0) {

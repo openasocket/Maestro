@@ -956,6 +956,23 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		})
 	);
 
+	// ─── Diff Injection Stats (MEM-EVOLVE-02) ──────────────────────────
+
+	ipcMain.handle(
+		'memory:getSessionDiffStats',
+		createIpcDataHandler(handlerOpts('getSessionDiffStats'), async (sessionId: string) => {
+			const { getInjectionRecord } = await import('../../memory/memory-injector');
+			const record = getInjectionRecord(sessionId);
+			if (!record) return null;
+			return {
+				injectedMemoryCount: record.ids.length,
+				trackedContentHashes: record.contentHashes.size,
+				lastInjectedAt: record.lastInjectedAt,
+				totalTokensSaved: record.totalTokensSaved,
+			};
+		})
+	);
+
 	// ─── Retroactive Analysis ────────────────────────────────────────────
 
 	ipcMain.handle(

@@ -11,6 +11,12 @@ import type { ProcessListenerDependencies } from '../types';
 import type { AgentError } from '../../../shared/types';
 import type { UsageStats, ToolExecution } from '../../process-manager/types';
 
+// Mock memory-injector for diff injection (MEM-EVOLVE-02)
+const mockGetInjectionRecord = vi.fn().mockReturnValue(undefined);
+const mockGenerateDiffInjection = vi.fn();
+const mockRecordSessionInjection = vi.fn();
+const mockHashContent = vi.fn((s: string) => s);
+
 /**
  * Flush microtask queue multiple times to resolve chained async operations.
  * triggerMemorySearch has ~5 await points, so we need multiple flushes.
@@ -113,6 +119,12 @@ describe('Memory Monitor Listener', () => {
 			getLiveContextQueue: () => ({
 				enqueue: mockEnqueue,
 				getWriteCount: mockGetWriteCount,
+			}),
+			getInjector: () => ({
+				getInjectionRecord: mockGetInjectionRecord,
+				generateDiffInjection: mockGenerateDiffInjection,
+				recordSessionInjection: mockRecordSessionInjection,
+				hashContent: mockHashContent,
 			}),
 		} as unknown as MemoryModuleAccessors;
 	});
@@ -520,7 +532,8 @@ describe('Memory Monitor Listener', () => {
 			expect.stringContaining('Fix: use --force flag'),
 			'monitoring',
 			expect.any(Number),
-			['mem-1', 'mem-2']
+			['mem-1', 'mem-2'],
+			false
 		);
 	});
 

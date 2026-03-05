@@ -214,6 +214,121 @@ function formatXmlBlock(selected: MemorySearchResult[], includeComments: boolean
 	return `<agent-memories>\nRelevant knowledge for this task:\n\n${sections.join('\n\n')}\n</agent-memories>`;
 }
 
+// ─── Diff-Based Injection ───────────────────────────────────────────────────
+
+/**
+ * Result of a diff-based injection comparison.
+ */
+export interface DiffInjectionResult {
+	/** Diff XML block to prepend to the prompt */
+	injectedPrompt: string;
+	/** Memory IDs that are new since last injection */
+	addedIds: MemoryId[];
+	/** Memory IDs that were removed since last injection */
+	removedIds: MemoryId[];
+	/** Memory IDs whose content changed since last injection */
+	modifiedIds: MemoryId[];
+	/** Number of memories unchanged from previous injection */
+	unchangedCount: number;
+	/** Token count for the diff block only */
+	tokenCount: number;
+}
+
+/**
+ * Format a single memory result as a display line for diff output.
+ */
+function formatDiffLine(result: MemorySearchResult): string {
+	const { key } = getGroupKey(result);
+	return `${key}\n${formatMemoryLine(result)}`;
+}
+
+/**
+ * Compare new search results against a previous injection record
+ * and produce a minimal diff-style XML block.
+ */
+export function generateDiffInjection(
+	newResults: MemorySearchResult[],
+	previousRecord: InjectionRecord
+): DiffInjectionResult {
+	const previousIds = new Set(previousRecord.ids);
+	const newIdSet = new Set(newResults.map((r) => r.entry.id));
+
+	const added: MemorySearchResult[] = [];
+	const modified: MemorySearchResult[] = [];
+	const removed: MemoryId[] = [];
+	let unchangedCount = 0;
+
+	// Categorize new results
+	for (const result of newResults) {
+		const id = result.entry.id;
+		if (!previousIds.has(id)) {
+			added.push(result);
+		} else {
+			const prevHash = previousRecord.contentHashes.get(id);
+			const currHash = hashContent(result.entry.content);
+			if (prevHash && prevHash !== currHash) {
+				modified.push(result);
+			} else {
+				unchangedCount++;
+			}
+		}
+	}
+
+	// Find removed (in previous but not in new)
+	for (const prevId of previousRecord.ids) {
+		if (!newIdSet.has(prevId)) {
+			removed.push(prevId);
+		}
+	}
+
+	// If nothing changed, return empty diff
+	if (added.length === 0 && removed.length === 0 && modified.length === 0) {
+		return {
+			injectedPrompt: '',
+			addedIds: [],
+			removedIds: [],
+			modifiedIds: [],
+			unchangedCount,
+			tokenCount: 0,
+		};
+	}
+
+	// Build diff XML
+	const parts: string[] = [];
+
+	if (unchangedCount > 0) {
+		parts.push(`<!-- ${unchangedCount} memories unchanged, still active -->`);
+	}
+
+	if (added.length > 0) {
+		const addedLines = added.map(formatDiffLine).join('\n\n');
+		parts.push(`<added>\n${addedLines}\n</added>`);
+	}
+
+	if (removed.length > 0) {
+		parts.push(
+			`<removed>\n<!-- The following memories are no longer relevant to this context -->\n${removed.map((id) => `- [id=${id}]`).join('\n')}\n</removed>`
+		);
+	}
+
+	if (modified.length > 0) {
+		const modifiedLines = modified.map(formatDiffLine).join('\n\n');
+		parts.push(`<modified>\n${modifiedLines}\n</modified>`);
+	}
+
+	const xmlBlock = `<agent-memory-update>\n${parts.join('\n\n')}\n</agent-memory-update>`;
+	const tokenCount = Math.ceil(xmlBlock.length / 4);
+
+	return {
+		injectedPrompt: xmlBlock,
+		addedIds: added.map((r) => r.entry.id),
+		removedIds: removed,
+		modifiedIds: modified.map((r) => r.entry.id),
+		unchangedCount,
+		tokenCount,
+	};
+}
+
 /**
  * Render persona/role behavioral directives as an XML block without memory entries.
  * Used when personas match but have no memories in matching skill areas.
@@ -787,6 +902,12 @@ export async function injectMemories(
 		// Queue not available — skip tracking
 	}
 
+	// Build content hashes for diff tracking (MEM-EVOLVE-02)
+	const contentHashes = new Map<MemoryId, string>();
+	for (const r of finalSelected) {
+		contentHashes.set(r.entry.id, hashContent(r.entry.content));
+	}
+
 	return {
 		injectedPrompt,
 		injectedIds,
@@ -794,6 +915,7 @@ export async function injectMemories(
 		personaContributions,
 		flatScopeCounts: { project: projectCount, global: globalCount },
 		scopeGroups,
+		contentHashes,
 	};
 }
 
@@ -930,6 +1052,12 @@ export interface InjectionScopeRecord {
 export interface InjectionRecord {
 	ids: MemoryId[];
 	scopeGroups: InjectionScopeRecord[];
+	/** memoryId → hash of content at injection time (for diff detection) */
+	contentHashes: Map<MemoryId, string>;
+	/** Timestamp of last injection */
+	lastInjectedAt: number;
+	/** Accumulated token savings from diff injections */
+	totalTokensSaved: number;
 }
 
 /**
@@ -940,18 +1068,48 @@ export interface InjectionRecord {
 const _sessionInjections = new Map<string, InjectionRecord>();
 
 /**
+ * Fast non-crypto string hash (djb2). Used for content dedup — not security.
+ */
+export function hashContent(content: string): string {
+	let hash = 5381;
+	for (let i = 0; i < content.length; i++) {
+		hash = ((hash << 5) + hash + content.charCodeAt(i)) | 0;
+	}
+	return (hash >>> 0).toString(36);
+}
+
+/**
  * Record which memory IDs were injected for a given session,
  * along with scope grouping for per-scope effectiveness updates.
  * Called from process.ts after successful injection.
+ * Pass searchResults to compute content hashes, or precomputedHashes if already available.
  */
 export function recordSessionInjection(
 	sessionId: string,
 	memoryIds: MemoryId[],
-	scopeGroups?: InjectionScopeRecord[]
+	scopeGroups?: InjectionScopeRecord[],
+	searchResults?: MemorySearchResult[],
+	precomputedHashes?: Map<MemoryId, string>
 ): void {
+	let contentHashes: Map<MemoryId, string>;
+	if (precomputedHashes && precomputedHashes.size > 0) {
+		contentHashes = precomputedHashes;
+	} else {
+		contentHashes = new Map<MemoryId, string>();
+		if (searchResults) {
+			for (const r of searchResults) {
+				contentHashes.set(r.entry.id, hashContent(r.entry.content));
+			}
+		}
+	}
+
+	const existing = _sessionInjections.get(sessionId);
 	_sessionInjections.set(sessionId, {
 		ids: memoryIds,
 		scopeGroups: scopeGroups ?? [],
+		contentHashes,
+		lastInjectedAt: Date.now(),
+		totalTokensSaved: existing?.totalTokensSaved ?? 0,
 	});
 
 	// Register spawn-time IDs with live context queue for dedup (EXP-LIVE-01).

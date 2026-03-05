@@ -29,6 +29,8 @@ interface PendingContext {
 	tokenEstimate: number;
 	/** Memory IDs included in this content (for dedup tracking) */
 	memoryIds?: string[];
+	/** True when content is a diff update — bypasses "all IDs known" dedup (MEM-EVOLVE-02) */
+	hasDiff?: boolean;
 }
 
 interface SessionQueueState {
@@ -93,7 +95,8 @@ export class LiveContextQueue {
 		content: string,
 		source: PendingContextSource,
 		tokenEstimate: number,
-		memoryIds?: string[]
+		memoryIds?: string[],
+		hasDiff?: boolean
 	): void {
 		const config = getCachedConfigSync();
 		if (!config.enableLiveInjection) return;
@@ -101,7 +104,8 @@ export class LiveContextQueue {
 		const state = this.getOrCreateState(sessionId);
 
 		// Dedup: skip if ALL memoryIds are already delivered or spawn-injected
-		if (memoryIds && memoryIds.length > 0) {
+		// But if hasDiff is true, bypass — diffs include removals/modifications that must be delivered
+		if (!hasDiff && memoryIds && memoryIds.length > 0) {
 			const allKnown = memoryIds.every(
 				(id) => state.deliveredMemoryIds.has(id) || state.spawnInjectedIds.has(id)
 			);
@@ -114,6 +118,7 @@ export class LiveContextQueue {
 			queuedAt: Date.now(),
 			tokenEstimate,
 			memoryIds,
+			hasDiff,
 		};
 
 		state.pending.push(item);
@@ -183,6 +188,12 @@ export class LiveContextQueue {
 
 		state.injectionCount++;
 		state.injectedTokens += usedTokens;
+
+		// If any selected item is a diff, pass through its pre-formatted XML directly
+		const hasDiffItem = selected.some((item) => item.hasDiff);
+		if (hasDiffItem && selected.length === 1) {
+			return selected[0].content;
+		}
 
 		// Format as XML block
 		const contentLines = selected.map((item) => item.content).join('\n');
