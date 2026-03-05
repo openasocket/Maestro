@@ -20,6 +20,7 @@ import {
 	MinusCircle,
 	Star,
 	TrendingUp,
+	Users,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
@@ -1034,8 +1035,42 @@ function ImpactDashboardSection({
 	theme: Theme;
 	allMemories: MemoryEntry[];
 }) {
+	// Injection events for frequency chart and session counting
+	const [injectionEvents, setInjectionEvents] = useState<InjectionEventRecord[]>([]);
+	useEffect(() => {
+		let cancelled = false;
+		window.maestro.memory
+			.getRecentInjections(200)
+			.then((res: { success: boolean; data?: unknown[] }) => {
+				if (cancelled) return;
+				if (res.success && Array.isArray(res.data)) {
+					setInjectionEvents(res.data as InjectionEventRecord[]);
+				}
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	// Weekly stats for non-technical summary
+	const weeklyStats = useMemo(() => {
+		const oneWeekAgo = Date.now() - 7 * 86400000;
+		const weekEvents = injectionEvents.filter((e) => e.timestamp >= oneWeekAgo && !e.noMatch);
+		const weekSessions = new Set(weekEvents.map((e) => e.sessionId).filter(Boolean));
+		let totalMemoriesDelivered = 0;
+		for (const ev of weekEvents) {
+			totalMemoriesDelivered += ev.memoryIds.length;
+		}
+		return {
+			memoriesDelivered: totalMemoriesDelivered,
+			sessionCount: weekSessions.size,
+			experiencesLearned: stats.byType?.experience ?? 0,
+		};
+	}, [injectionEvents, stats]);
+
 	// Non-technical summary
-	const summaryText = `Your memory system has delivered ${stats.recentInjections} relevant memories across ${stats.totalInjections} total injections, with ${stats.byType?.experience ?? 0} experiences learned.`;
+	const summaryText = `Your memory system has delivered ${weeklyStats.memoriesDelivered} relevant memories across ${weeklyStats.sessionCount} agent sessions this week, with ${weeklyStats.experiencesLearned} new experiences learned.`;
 
 	// Most-used memories (top 5 by useCount)
 	const topMemories = useMemo(() => {
@@ -1043,6 +1078,33 @@ function ImpactDashboardSection({
 			.filter((m) => m.useCount > 0)
 			.sort((a, b) => b.useCount - a.useCount)
 			.slice(0, 5);
+	}, [allMemories]);
+
+	// Most active personas (top 3 by total useCount across their memories)
+	const topPersonas = useMemo(() => {
+		const personaMap = new Map<
+			string,
+			{ personaId: string; personaName: string; totalUseCount: number; memoryCount: number }
+		>();
+		for (const m of allMemories) {
+			if (!m.personaId || !m.active || m.archived) continue;
+			const pName = (m as MemoryEntry & { personaName?: string }).personaName ?? m.personaId;
+			const existing = personaMap.get(m.personaId);
+			if (existing) {
+				existing.totalUseCount += m.useCount;
+				existing.memoryCount++;
+			} else {
+				personaMap.set(m.personaId, {
+					personaId: m.personaId,
+					personaName: pName,
+					totalUseCount: m.useCount,
+					memoryCount: 1,
+				});
+			}
+		}
+		return Array.from(personaMap.values())
+			.sort((a, b) => b.totalUseCount - a.totalUseCount)
+			.slice(0, 3);
 	}, [allMemories]);
 
 	// Effectiveness distribution buckets
@@ -1067,24 +1129,7 @@ function ImpactDashboardSection({
 	const experienceCount = stats.byType?.experience ?? 0;
 	const promotedCount = stats.bySource?.grpo ?? 0;
 
-	// Injection frequency: simple bar chart for last 14 days (from injection events)
-	const [injectionsByDay, setInjectionsByDay] = useState<InjectionEventRecord[]>([]);
-	useEffect(() => {
-		let cancelled = false;
-		window.maestro.memory
-			.getRecentInjections(200)
-			.then((res: { success: boolean; data?: unknown[] }) => {
-				if (cancelled) return;
-				if (res.success && Array.isArray(res.data)) {
-					setInjectionsByDay(res.data as InjectionEventRecord[]);
-				}
-			})
-			.catch(() => {});
-		return () => {
-			cancelled = true;
-		};
-	}, []);
-
+	// Injection frequency: bar chart for last 14 days, segmented by scope
 	const dayBars = useMemo(() => {
 		const now = Date.now();
 		const days: { label: string; count: number; skill: number; project: number; global: number }[] =
@@ -1092,7 +1137,7 @@ function ImpactDashboardSection({
 		for (let i = 13; i >= 0; i--) {
 			const dayStart = now - (i + 1) * 86400000;
 			const dayEnd = now - i * 86400000;
-			const dayEvents = injectionsByDay.filter(
+			const dayEvents = injectionEvents.filter(
 				(e) => e.timestamp >= dayStart && e.timestamp < dayEnd
 			);
 			let skill = 0,
@@ -1115,9 +1160,26 @@ function ImpactDashboardSection({
 			});
 		}
 		return days;
-	}, [injectionsByDay]);
+	}, [injectionEvents]);
 
 	const maxDayCount = Math.max(...dayBars.map((d) => d.count), 1);
+
+	// Before/After: count sessions with memory injection vs total unique sessions
+	const sessionContext = useMemo(() => {
+		const allSessions = new Set(injectionEvents.map((e) => e.sessionId).filter(Boolean));
+		const matchSessions = new Set(
+			injectionEvents
+				.filter((e) => !e.noMatch && e.memoryIds.length > 0)
+				.map((e) => e.sessionId)
+				.filter(Boolean)
+		);
+		const noMatchSessions = allSessions.size - matchSessions.size;
+		return {
+			withMemory: matchSessions.size,
+			withoutMemory: noMatchSessions,
+			total: allSessions.size,
+		};
+	}, [injectionEvents]);
 
 	return (
 		<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
@@ -1194,6 +1256,30 @@ function ImpactDashboardSection({
 				</div>
 			)}
 
+			{/* Most active personas (top 3) */}
+			{topPersonas.length > 0 && (
+				<div className="space-y-1">
+					<div className="text-xs" style={{ color: theme.colors.textDim }}>
+						Most Active Personas
+					</div>
+					{topPersonas.map((p) => (
+						<div
+							key={p.personaId}
+							className="flex items-center gap-2 text-[10px] py-1 px-2 rounded"
+							style={{ backgroundColor: `${theme.colors.border}20` }}
+						>
+							<Users className="w-3 h-3 shrink-0" style={{ color: theme.colors.accent }} />
+							<span className="truncate flex-1 min-w-0" style={{ color: theme.colors.textMain }}>
+								{p.personaName}
+							</span>
+							<span className="shrink-0 text-right" style={{ color: theme.colors.textDim }}>
+								{p.totalUseCount} injections / {p.memoryCount} memories
+							</span>
+						</div>
+					))}
+				</div>
+			)}
+
 			{/* Effectiveness distribution (5 buckets) */}
 			{allMemories.length > 0 && (
 				<div className="space-y-1">
@@ -1233,7 +1319,7 @@ function ImpactDashboardSection({
 					Learning Pipeline
 				</div>
 				<div
-					className="flex items-center gap-1 text-[10px]"
+					className="flex items-center gap-1 text-[10px] flex-wrap"
 					style={{ color: theme.colors.textMain }}
 				>
 					<span
@@ -1259,10 +1345,20 @@ function ImpactDashboardSection({
 				</div>
 			</div>
 
-			{/* Session count context */}
-			{stats.totalInjections > 0 && (
-				<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
-					Memory-equipped agents: {stats.totalInjections} total injection events recorded
+			{/* Before/After: session context */}
+			{sessionContext.total > 0 && (
+				<div
+					className="text-[10px] rounded p-2 space-y-0.5"
+					style={{ backgroundColor: `${theme.colors.border}15`, color: theme.colors.textDim }}
+				>
+					<div>
+						Memory-equipped agents: {sessionContext.withMemory} sessions with memories injected
+					</div>
+					{sessionContext.withoutMemory > 0 && (
+						<div>
+							Standard agents: {sessionContext.withoutMemory} sessions without matching memories
+						</div>
+					)}
 				</div>
 			)}
 		</div>
