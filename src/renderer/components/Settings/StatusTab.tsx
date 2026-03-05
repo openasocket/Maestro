@@ -33,6 +33,8 @@ import {
 	DollarSign,
 	Download,
 	Edit3,
+	Rocket,
+	Square,
 } from 'lucide-react';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Theme } from '../../types';
@@ -52,6 +54,7 @@ import type {
 } from '../../../main/stats/embedding-usage';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
 import { SectionHeader } from './SectionHeader';
+import { notifyToast } from '../../stores/notificationStore';
 
 export interface StatusTabProps {
 	theme: Theme;
@@ -61,6 +64,10 @@ export interface StatusTabProps {
 	onConfigChange?: () => void;
 	/** Navigate to another sub-tab with optional filter */
 	onNavigateToTab?: (tab: string, filter?: Record<string, string> | null) => void;
+	/** Update memory config (for persisting quickstart card state) */
+	onUpdateConfig?: (updates: Partial<MemoryConfig>) => void;
+	/** User engagement level for progressive disclosure */
+	engagementLevel?: number;
 }
 
 /** Shared health context fetched once and passed to subsections. */
@@ -77,6 +84,8 @@ export function StatusTab({
 	projectPath,
 	onConfigChange,
 	onNavigateToTab,
+	onUpdateConfig,
+	engagementLevel = 0,
 }: StatusTabProps): React.ReactElement {
 	const [allMemories, setAllMemories] = useState<MemoryEntry[]>([]);
 	const [healthCtx, setHealthCtx] = useState<HealthContext>({
@@ -198,6 +207,18 @@ export function StatusTab({
 
 			{/* ─── Scrollable Content: All sections ────────────────────── */}
 			<div className="flex-1 overflow-y-auto min-h-0 space-y-4 mt-2">
+				{/* Getting Started quickstart card (engagement level 0 or 1 only) */}
+				{engagementLevel <= 1 && !config.gettingStartedDismissed && (
+					<GettingStartedCard
+						theme={theme}
+						config={config}
+						stats={stats}
+						hasInjections={healthCtx.lastInjectionTime !== null}
+						onDismiss={() => onUpdateConfig?.({ gettingStartedDismissed: true })}
+						onNavigateToTab={onNavigateToTab}
+					/>
+				)}
+
 				{/* What Changed Since Last Visit digest */}
 				<WhatChangedDigest theme={theme} config={config} />
 
@@ -298,6 +319,141 @@ function SubsystemRow({
 					{detail}
 				</span>
 			)}
+		</div>
+	);
+}
+
+// ─── Getting Started Quickstart Card ─────────────────────────────────────────────
+
+interface GettingStartedStep {
+	label: string;
+	done: boolean;
+	action?: { label: string; onClick: () => void };
+}
+
+function GettingStartedCard({
+	theme,
+	config,
+	stats,
+	hasInjections,
+	onDismiss,
+	onNavigateToTab,
+}: {
+	theme: Theme;
+	config: MemoryConfig;
+	stats: MemoryStats | null;
+	hasInjections: boolean;
+	onDismiss: () => void;
+	onNavigateToTab?: (tab: string, filter?: Record<string, string> | null) => void;
+}) {
+	const hasPersonas = (stats?.totalPersonas ?? 0) > 0;
+	const hasPromotions = (stats?.bySource?.grpo ?? 0) > 0;
+
+	const steps: GettingStartedStep[] = [
+		{ label: 'System enabled', done: config.enabled },
+		{ label: 'Default hierarchy seeded', done: hasPersonas },
+		{
+			label: 'Complete your first agent session',
+			done: hasInjections,
+		},
+		{
+			label: 'Review extracted experiences',
+			done: (stats?.totalMemories ?? 0) > 0 && hasInjections,
+			action: onNavigateToTab
+				? { label: 'Go to Experiences', onClick: () => onNavigateToTab('experiences') }
+				: undefined,
+		},
+		{
+			label: 'Promote your first experience to a rule',
+			done: hasPromotions,
+			action: onNavigateToTab
+				? { label: 'Go to Experiences', onClick: () => onNavigateToTab('experiences') }
+				: undefined,
+		},
+	];
+
+	const allDone = steps.every((s) => s.done);
+
+	// Auto-dismiss when all steps are complete
+	useEffect(() => {
+		if (allDone) {
+			const timer = setTimeout(() => {
+				notifyToast({
+					type: 'success',
+					title: 'Setup Complete',
+					message: "You've completed all the getting started steps. Happy coding!",
+					duration: 8,
+				});
+				onDismiss();
+			}, 1500);
+			return () => clearTimeout(timer);
+		}
+	}, [allDone, onDismiss]);
+
+	return (
+		<div
+			className="rounded-lg border p-4 space-y-3"
+			style={{
+				borderColor: theme.colors.accent,
+				backgroundColor: `${theme.colors.accent}10`,
+			}}
+		>
+			<div className="flex items-center justify-between">
+				<div className="flex items-center gap-2">
+					<Rocket className="w-4 h-4" style={{ color: theme.colors.accent }} />
+					<span className="text-sm font-semibold" style={{ color: theme.colors.textMain }}>
+						Getting Started with Agent Memory
+					</span>
+				</div>
+				<button
+					className="text-[10px] hover:underline cursor-pointer"
+					style={{ color: theme.colors.textDim, background: 'none', border: 'none' }}
+					onClick={onDismiss}
+				>
+					Don't show again
+				</button>
+			</div>
+
+			<div
+				className="w-full"
+				style={{
+					height: 1,
+					backgroundColor: theme.colors.border,
+				}}
+			/>
+
+			<div className="space-y-1.5">
+				{steps.map((step) => (
+					<div key={step.label} className="flex items-center gap-2 text-xs">
+						{step.done ? (
+							<CheckCircle2 className="w-3.5 h-3.5 shrink-0" style={{ color: '#22c55e' }} />
+						) : (
+							<Square className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+						)}
+						<span
+							style={{
+								color: step.done ? theme.colors.textDim : theme.colors.textMain,
+								textDecoration: step.done ? 'line-through' : 'none',
+							}}
+						>
+							{step.label}
+						</span>
+						{!step.done && step.action && (
+							<button
+								className="ml-auto text-[10px] hover:underline cursor-pointer"
+								style={{
+									color: theme.colors.accent,
+									background: 'none',
+									border: 'none',
+								}}
+								onClick={step.action.onClick}
+							>
+								{step.action.label}
+							</button>
+						)}
+					</div>
+				))}
+			</div>
 		</div>
 	);
 }

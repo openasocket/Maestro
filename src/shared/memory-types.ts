@@ -351,6 +351,10 @@ export interface MemoryConfig {
 	 * Milestones: 10 = 10 experiences, 50 = 50 memories, 100 = first promotion, 200 = first cross-project evidence.
 	 */
 	memoryMilestonesShown?: number[];
+	/**
+	 * Whether the "Getting Started" quickstart card in the Status tab has been dismissed.
+	 */
+	gettingStartedDismissed?: boolean;
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -398,6 +402,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	_firstInjectionNotified: false,
 	userEngagementLevel: 0,
 	memoryMilestonesShown: [],
+	gettingStartedDismissed: false,
 };
 
 // ─── Checkpoint Injection Types ────────────────────────────────────────────

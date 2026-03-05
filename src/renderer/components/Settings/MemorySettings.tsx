@@ -748,6 +748,8 @@ export function MemorySettings({
 								projectPath={projectPath}
 								onConfigChange={refreshConfigAndStats}
 								onNavigateToTab={navigateToTab}
+								onUpdateConfig={updateConfig}
+								engagementLevel={engagementLevel}
 							/>
 						)}
 					</div>
