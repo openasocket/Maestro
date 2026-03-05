@@ -10,6 +10,16 @@
 export type { EmbeddingProviderId, EmbeddingProviderConfig } from '../../shared/memory-types';
 export { DEFAULT_EMBEDDING_CONFIG } from '../../shared/memory-types';
 
+// 'xenova-onnx' provider evaluated but deferred — Transformers.js (@xenova/transformers v2)
+// already uses ONNX Runtime under the hood (onnxruntime-web for WASM, with onnxruntime-node
+// as an optional dependency for native performance). A separate onnxruntime-node provider
+// would require independent tokenization (Transformers.js handles this automatically),
+// adding significant implementation complexity. Additionally, native addons like
+// onnxruntime-node require electron-rebuild and per-platform packaging steps that
+// increase build fragility. Since Transformers.js provides equivalent functionality
+// via WASM without these issues, the raw ONNX provider is deferred.
+// Revisit if Transformers.js performance is insufficient for batch operations.
+
 /** Dimensionality of the embedding vectors used throughout the system. */
 export const VECTOR_DIM = 384;
 
