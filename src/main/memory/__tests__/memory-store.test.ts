@@ -793,6 +793,43 @@ describe('MemoryStore — Hierarchy, CRUD, Isolation, Atomics, History, Seed', (
 		});
 	});
 
+	// ─── 8b. Auto-Initialization ───────────────────────────────────────
+
+	describe('ensureHierarchyInitialized: auto-seeds on first run', () => {
+		it('seeds hierarchy when registry is empty', async () => {
+			const seeded = await store.ensureHierarchyInitialized();
+			expect(seeded).toBe(true);
+
+			const roles = await store.listRoles();
+			expect(roles.length).toBeGreaterThan(0);
+		});
+
+		it('does not seed when roles already exist', async () => {
+			await store.createRole('Existing', 'Already here');
+			const seeded = await store.ensureHierarchyInitialized();
+			expect(seeded).toBe(false);
+
+			const roles = await store.listRoles();
+			expect(roles).toHaveLength(1);
+			expect(roles[0].name).toBe('Existing');
+		});
+
+		it('only seeds once even when called multiple times', async () => {
+			const first = await store.ensureHierarchyInitialized();
+			expect(first).toBe(true);
+
+			const rolesAfterFirst = await store.listRoles();
+			const countAfterFirst = rolesAfterFirst.length;
+
+			const second = await store.ensureHierarchyInitialized();
+			expect(second).toBe(false);
+
+			// Role count should not change
+			const rolesAfterSecond = await store.listRoles();
+			expect(rolesAfterSecond).toHaveLength(countAfterFirst);
+		});
+	});
+
 	// ─── 9. Archive & Restore ──────────────────────────────────────────
 
 	describe('listArchivedMemories and restoreMemory', () => {

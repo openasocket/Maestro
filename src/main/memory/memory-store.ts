@@ -1647,6 +1647,9 @@ export class MemoryStore {
 		projectPath?: string,
 		limit: number = 30
 	): Promise<MemorySearchResult[]> {
+		// Auto-seed hierarchy on first search if empty
+		await this.ensureHierarchyInitialized();
+
 		const { encode } = await import('../grpo/embedding-service');
 		const queryEmbedding = await encode(query.slice(0, 2000));
 
@@ -3449,6 +3452,46 @@ export class MemoryStore {
 		});
 
 		return globalRule;
+	}
+
+	// ─── Auto-Initialization ────────────────────────────────────────────────
+
+	private _hierarchyInitialized = false;
+
+	/**
+	 * Ensure the hierarchy has at least one role. If empty (first run),
+	 * automatically seed defaults so the memory system works out of the box.
+	 * Safe to call repeatedly — only seeds once.
+	 */
+	async ensureHierarchyInitialized(): Promise<boolean> {
+		if (this._hierarchyInitialized) return false;
+
+		const registry = await this.readRegistry();
+		if (registry.roles.length > 0) {
+			this._hierarchyInitialized = true;
+			return false;
+		}
+
+		console.log('[memory] Auto-seeding default hierarchy (first run)');
+		const result = await this.seedFromDefaults();
+		console.log(
+			`[memory] Seeded ${result.roles} roles, ${result.personas} personas, ${result.skills} skills`
+		);
+
+		// Attempt to compute embeddings for the seeded hierarchy.
+		// If no embedding provider is active yet, this gracefully returns 0
+		// and embeddings will be computed when a provider activates.
+		try {
+			const embedded = await this.ensureHierarchyEmbeddings();
+			if (embedded > 0) {
+				console.log(`[memory] Computed embeddings for ${embedded} hierarchy entries`);
+			}
+		} catch {
+			// Embedding provider not ready — embeddings will be computed on provider activation
+		}
+
+		this._hierarchyInitialized = true;
+		return true;
 	}
 
 	// ─── Seed Data ──────────────────────────────────────────────────────────
