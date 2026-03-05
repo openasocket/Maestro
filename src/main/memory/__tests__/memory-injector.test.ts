@@ -17,6 +17,7 @@ const mockRecordInjection = vi.fn<(...args: any[]) => Promise<void>>();
 const mockHybridSearch = vi.fn<(...args: any[]) => Promise<MemorySearchResult[]>>();
 const mockSearchFlatScope = vi.fn<(...args: any[]) => Promise<MemorySearchResult[]>>();
 const mockGenerateProjectDigest = vi.fn<(...args: any[]) => Promise<string | null>>();
+const mockSelectMatchingPersonas = vi.fn<(...args: any[]) => Promise<any[]>>();
 
 vi.mock('../../memory/memory-store', () => ({
 	getMemoryStore: () => ({
@@ -25,6 +26,7 @@ vi.mock('../../memory/memory-store', () => ({
 		hybridSearch: (...args: any[]) => mockHybridSearch(...args),
 		searchFlatScope: (...args: any[]) => mockSearchFlatScope(...args),
 		generateProjectDigest: (...args: any[]) => mockGenerateProjectDigest(...args),
+		selectMatchingPersonas: (...args: any[]) => mockSelectMatchingPersonas(...args),
 	}),
 }));
 
@@ -106,13 +108,16 @@ describe('MemoryInjector', () => {
 		mockHybridSearch.mockReset();
 		mockSearchFlatScope.mockReset();
 		mockGenerateProjectDigest.mockReset();
+		mockSelectMatchingPersonas.mockReset();
 		mockRecordInjection.mockResolvedValue(undefined);
-		// Default: per-scope searches return empty (tests that need results set these)
+		// Default: searches return empty (tests that need results set these)
+		mockCascadingSearch.mockResolvedValue([]);
 		mockHybridSearch.mockResolvedValue([]);
 		mockSearchFlatScope.mockResolvedValue([]);
 		mockGenerateProjectDigest.mockResolvedValue(null);
-		// Set settings getter to return enabled config
-		setMemorySettingsStore(() => ({ enabled: true }));
+		mockSelectMatchingPersonas.mockResolvedValue([]);
+		// Set settings getter to return enabled config with balanced strategy for budget tests
+		setMemorySettingsStore(() => ({ enabled: true, injectionStrategy: 'balanced' }));
 	});
 
 	afterEach(() => {
@@ -139,14 +144,13 @@ describe('MemoryInjector', () => {
 			expect(mockCascadingSearch).not.toHaveBeenCalled();
 		});
 
-		it('returns original prompt when settings getter returns undefined', async () => {
-			// MEMORY_CONFIG_DEFAULTS has enabled: false
+		it('uses defaults when settings getter returns undefined', async () => {
+			// MEMORY_CONFIG_DEFAULTS has enabled: true — cascadingSearch will be called
 			setMemorySettingsStore(() => undefined);
 
-			const result = await injectMemories('Prompt text', '/project', 'claude-code');
+			await injectMemories('Prompt text', '/project', 'claude-code');
 
-			expect(result.injectedPrompt).toBe('Prompt text');
-			expect(mockCascadingSearch).not.toHaveBeenCalled();
+			expect(mockCascadingSearch).toHaveBeenCalled();
 		});
 
 		it('returns original prompt when no memories found', async () => {

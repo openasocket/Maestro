@@ -20,6 +20,7 @@ const mockCascadingSearch = vi.fn<(...args: any[]) => Promise<MemorySearchResult
 const mockRecordInjection = vi.fn<(...args: any[]) => Promise<void>>();
 const mockHybridSearch = vi.fn<(...args: any[]) => Promise<MemorySearchResult[]>>();
 const mockGenerateProjectDigest = vi.fn<(...args: any[]) => Promise<string | null>>();
+const mockSelectMatchingPersonas = vi.fn<(...args: any[]) => Promise<any[]>>();
 
 vi.mock('../../memory/memory-store', () => ({
 	getMemoryStore: () => ({
@@ -28,6 +29,7 @@ vi.mock('../../memory/memory-store', () => ({
 		hybridSearch: (...args: any[]) => mockHybridSearch(...args),
 		searchFlatScope: vi.fn().mockResolvedValue([]),
 		generateProjectDigest: (...args: any[]) => mockGenerateProjectDigest(...args),
+		selectMatchingPersonas: (...args: any[]) => mockSelectMatchingPersonas(...args),
 	}),
 }));
 
@@ -106,7 +108,12 @@ describe('GRPO Coexistence — Memory + GRPO injection independence', () => {
 		mockRecordInjection.mockReset();
 		mockHybridSearch.mockReset();
 		mockGenerateProjectDigest.mockReset();
+		mockSelectMatchingPersonas.mockReset();
 		mockRecordInjection.mockResolvedValue(undefined);
+		mockCascadingSearch.mockResolvedValue([]);
+		mockHybridSearch.mockResolvedValue([]);
+		mockGenerateProjectDigest.mockResolvedValue(null);
+		mockSelectMatchingPersonas.mockResolvedValue([]);
 		mockHybridSearch.mockResolvedValue([]);
 		mockGenerateProjectDigest.mockResolvedValue(null);
 	});
@@ -311,9 +318,9 @@ describe('GRPO Coexistence — Memory + GRPO injection independence', () => {
 			expect(mockCascadingSearch).not.toHaveBeenCalled();
 		});
 
-		it('returns GRPO-enriched prompt unchanged when settings getter returns undefined', async () => {
-			// MEMORY_CONFIG_DEFAULTS has enabled: false
-			setMemorySettingsStore(() => undefined);
+		it('returns GRPO-enriched prompt unchanged when memory explicitly disabled', async () => {
+			// Explicitly disable memory — MEMORY_CONFIG_DEFAULTS now has enabled: true
+			setMemorySettingsStore(() => ({ enabled: false }));
 
 			const grpoPrompt = simulateGrpoInjection('debug issue', ['Check stack traces']);
 
@@ -358,8 +365,8 @@ describe('GRPO Coexistence — Memory + GRPO injection independence', () => {
 			expect(mockCascadingSearch).not.toHaveBeenCalled();
 		});
 
-		it('plain prompt returned unchanged when settings undefined and no GRPO', async () => {
-			setMemorySettingsStore(() => undefined);
+		it('plain prompt returned unchanged when memory explicitly disabled and no GRPO', async () => {
+			setMemorySettingsStore(() => ({ enabled: false }));
 
 			const originalPrompt = 'simple task';
 

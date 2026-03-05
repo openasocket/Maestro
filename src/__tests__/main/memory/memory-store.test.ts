@@ -616,7 +616,7 @@ describe('MemoryStore', () => {
 	describe('Config Management', () => {
 		it('returns defaults when no config file exists', async () => {
 			const config = await store.getConfig();
-			expect(config.enabled).toBe(false);
+			expect(config.enabled).toBe(true);
 			expect(config.maxTokenBudget).toBe(1500);
 			expect(config.similarityThreshold).toBe(0.65);
 		});

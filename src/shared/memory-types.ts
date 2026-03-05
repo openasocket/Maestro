@@ -313,7 +313,7 @@ export interface MemoryConfig {
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
-	enabled: false,
+	enabled: true,
 	maxTokenBudget: 1500,
 	similarityThreshold: 0.65,
 	personaMatchThreshold: 0.4,
@@ -323,13 +323,13 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	decayHalfLifeDays: 30,
 	enableAutoConsolidation: true,
 	enableEffectivenessTracking: true,
-	enableExperienceExtraction: false,
+	enableExperienceExtraction: true,
 	minHistoryEntriesForAnalysis: 3,
 	minNoveltyScore: 0.4,
 	analysisCooldownMs: 300000,
 	extractionModel: undefined,
 	extractionProvider: undefined,
-	injectionStrategy: 'balanced',
+	injectionStrategy: 'lean',
 	enableHybridSearch: true,
 	enableLiveInjection: false,
 	liveInjectionTokenBudget: 750,

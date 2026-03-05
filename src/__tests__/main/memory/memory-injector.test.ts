@@ -147,10 +147,9 @@ describe('MemoryInjector', () => {
 		it('falls back to defaults when getter returns undefined', async () => {
 			setMemorySettingsStore(() => undefined);
 
-			// Defaults have enabled=false
+			// Defaults have enabled=true, so cascadingSearch will be called
 			const result = await injectMemories('test prompt', '/project', 'claude-code');
-			expect(result.injectedPrompt).toBe('test prompt');
-			expect(mockCascadingSearch).not.toHaveBeenCalled();
+			expect(mockCascadingSearch).toHaveBeenCalled();
 		});
 	});
 
@@ -328,7 +327,11 @@ describe('MemoryInjector', () => {
 
 	describe('token budget', () => {
 		beforeEach(() => {
-			setMemorySettingsStore(() => ({ enabled: true, maxTokenBudget: 1500 }));
+			setMemorySettingsStore(() => ({
+				enabled: true,
+				maxTokenBudget: 1500,
+				injectionStrategy: 'balanced',
+			}));
 		});
 
 		it('respects per-scope token budget by skipping entries that exceed it', async () => {

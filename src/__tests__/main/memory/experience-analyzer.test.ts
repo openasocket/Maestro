@@ -350,9 +350,9 @@ describe('ExperienceAnalyzer', () => {
 			expect(MEMORY_CONFIG_DEFAULTS.extractionModel).toBeUndefined();
 		});
 
-		it('MemoryConfig enableExperienceExtraction defaults to false', async () => {
+		it('MemoryConfig enableExperienceExtraction defaults to true', async () => {
 			const { MEMORY_CONFIG_DEFAULTS } = await import('../../../shared/memory-types');
-			expect(MEMORY_CONFIG_DEFAULTS.enableExperienceExtraction).toBe(false);
+			expect(MEMORY_CONFIG_DEFAULTS.enableExperienceExtraction).toBe(true);
 		});
 
 		it('MemoryConfig supports injectionStrategy field', async () => {
@@ -364,9 +364,9 @@ describe('ExperienceAnalyzer', () => {
 			expect(config.injectionStrategy).toBe('rich');
 		});
 
-		it('MemoryConfig injectionStrategy defaults to balanced', async () => {
+		it('MemoryConfig injectionStrategy defaults to lean', async () => {
 			const { MEMORY_CONFIG_DEFAULTS } = await import('../../../shared/memory-types');
-			expect(MEMORY_CONFIG_DEFAULTS.injectionStrategy).toBe('balanced');
+			expect(MEMORY_CONFIG_DEFAULTS.injectionStrategy).toBe('lean');
 		});
 
 		it('MemoryConfig injectionStrategy accepts all valid values', async () => {
