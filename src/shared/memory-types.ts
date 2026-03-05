@@ -1883,3 +1883,32 @@ export const SEED_ROLES: {
 		],
 	},
 ];
+
+// ─── Memory Change Log Types ──────────────────────────────────────────────────
+
+export type MemoryChangeEventType =
+	| 'created'
+	| 'updated'
+	| 'archived'
+	| 'deleted'
+	| 'promoted'
+	| 'decayed'
+	| 'pruned'
+	| 'consolidated'
+	| 'imported';
+
+export interface MemoryChangeEvent {
+	timestamp: number;
+	type: MemoryChangeEventType;
+	memoryId: MemoryId;
+	/** Snapshot of content at change time (first 200 chars) */
+	memoryContent: string;
+	memoryType: MemoryType;
+	scope: MemoryScope;
+	/** For 'created' events — how the memory was created */
+	source?: MemorySource;
+	/** Human-readable detail */
+	details?: string;
+	/** Whether this was triggered by a user action or an automatic process */
+	triggeredBy: 'user' | 'system';
+}

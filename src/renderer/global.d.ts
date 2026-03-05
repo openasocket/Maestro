@@ -2951,6 +2951,13 @@ interface MaestroAPI {
 			| { success: true; data: import('../shared/memory-types').MemoryStats }
 			| { success: false; error: string }
 		>;
+		getChangeLog: (
+			since?: number,
+			limit?: number
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryChangeEvent[] }
+			| { success: false; error: string }
+		>;
 		getRecentInjections: (
 			limit?: number
 		) => Promise<{ success: true; data: unknown[] } | { success: false; error: string }>;

@@ -12,36 +12,10 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { MemoryId, MemoryType, MemoryScope, MemorySource } from '../../shared/memory-types';
+import type { MemoryChangeEvent } from '../../shared/memory-types';
 
-// ─── Event Types ─────────────────────────────────────────────────────────────
-
-export type MemoryChangeEventType =
-	| 'created'
-	| 'updated'
-	| 'archived'
-	| 'deleted'
-	| 'promoted'
-	| 'decayed'
-	| 'pruned'
-	| 'consolidated'
-	| 'imported';
-
-export interface MemoryChangeEvent {
-	timestamp: number;
-	type: MemoryChangeEventType;
-	memoryId: MemoryId;
-	/** Snapshot of content at change time (first 200 chars) */
-	memoryContent: string;
-	memoryType: MemoryType;
-	scope: MemoryScope;
-	/** For 'created' events — how the memory was created */
-	source?: MemorySource;
-	/** Human-readable detail: "Promoted from experience", "Confidence decayed to 0.3", etc. */
-	details?: string;
-	/** Whether this was triggered by a user action or an automatic process */
-	triggeredBy: 'user' | 'system';
-}
+// Re-export for downstream consumers
+export type { MemoryChangeEvent, MemoryChangeEventType } from '../../shared/memory-types';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 

@@ -10,8 +10,16 @@ import {
 	AlertTriangle,
 	Archive,
 	ArrowRightLeft,
+	ArrowUp,
 	ChevronDown,
 	ChevronRight,
+	Clock,
+	Filter,
+	GitMerge,
+	Layers,
+	Plus,
+	Scissors,
+	Trash2,
 	Zap,
 	Cpu,
 	BarChart3,
@@ -23,6 +31,8 @@ import {
 	TrendingDown,
 	Users,
 	DollarSign,
+	Download,
+	Edit3,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
@@ -32,6 +42,8 @@ import type {
 	JobQueueStatus,
 	TokenUsage,
 	ExtractionDiagnostic,
+	MemoryChangeEvent,
+	MemoryChangeEventType,
 } from '../../../shared/memory-types';
 import type {
 	EmbeddingUsageSummary,
@@ -190,7 +202,10 @@ export function StatusTab({
 					onNavigateToTab={onNavigateToTab}
 				/>
 
-				{/* Section 3: System Metrics (collapsed by default) */}
+				{/* Section 3: Memory Timeline */}
+				<MemoryTimelineSection theme={theme} config={config} />
+
+				{/* Section 4: System Metrics (collapsed by default) */}
 				<SystemMetricsSection theme={theme} />
 
 				{/* Section 4: Impact Dashboard */}
@@ -1205,7 +1220,256 @@ function InjectionActivitySection({
 	);
 }
 
-// ─── Section 3: System Metrics ──────────────────────────────────────────────────
+// ─── Section 3: Memory Timeline ─────────────────────────────────────────────────
+
+type TimelineFilter = 'all' | 'created' | 'promoted' | 'decayed' | 'pruned';
+type TimeRange = 'today' | '7d' | '30d' | 'all';
+
+const EVENT_TYPE_CONFIG: Record<
+	MemoryChangeEventType,
+	{
+		icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
+		color: string;
+		label: string;
+	}
+> = {
+	created: { icon: Plus, color: '#22c55e', label: 'Created' },
+	updated: { icon: Edit3, color: '#3b82f6', label: 'Updated' },
+	archived: { icon: Archive, color: '#6b7280', label: 'Archived' },
+	deleted: { icon: Trash2, color: '#ef4444', label: 'Deleted' },
+	promoted: { icon: ArrowUp, color: '#8b5cf6', label: 'Promoted' },
+	decayed: { icon: TrendingDown, color: '#eab308', label: 'Decayed' },
+	pruned: { icon: Scissors, color: '#ef4444', label: 'Pruned' },
+	consolidated: { icon: GitMerge, color: '#3b82f6', label: 'Consolidated' },
+	imported: { icon: Download, color: '#22c55e', label: 'Imported' },
+};
+
+const FILTER_TYPES: Record<TimelineFilter, MemoryChangeEventType[]> = {
+	all: [],
+	created: ['created', 'imported'],
+	promoted: ['promoted'],
+	decayed: ['decayed'],
+	pruned: ['pruned', 'deleted', 'archived'],
+};
+
+function getTimeRangeStart(range: TimeRange): number | undefined {
+	if (range === 'all') return undefined;
+	const now = Date.now();
+	const dayMs = 24 * 60 * 60 * 1000;
+	switch (range) {
+		case 'today': {
+			const today = new Date();
+			today.setHours(0, 0, 0, 0);
+			return today.getTime();
+		}
+		case '7d':
+			return now - 7 * dayMs;
+		case '30d':
+			return now - 30 * dayMs;
+	}
+}
+
+function MemoryTimelineSection({ theme, config }: { theme: Theme; config: MemoryConfig }) {
+	const [collapsed, setCollapsed] = useState(false);
+	const [events, setEvents] = useState<MemoryChangeEvent[]>([]);
+	const [loaded, setLoaded] = useState(false);
+	const [typeFilter, setTypeFilter] = useState<TimelineFilter>('all');
+	const [timeRange, setTimeRange] = useState<TimeRange>('7d');
+	const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+
+	useEffect(() => {
+		if (!config.enabled) return;
+		let cancelled = false;
+		const since = getTimeRangeStart(timeRange);
+		window.maestro.memory
+			.getChangeLog(since, 200)
+			.then((res) => {
+				if (cancelled) return;
+				if (res.success && Array.isArray(res.data)) {
+					setEvents(res.data);
+				}
+				setLoaded(true);
+			})
+			.catch(() => setLoaded(true));
+		return () => {
+			cancelled = true;
+		};
+	}, [config.enabled, timeRange]);
+
+	const filtered = useMemo(() => {
+		const allowedTypes = FILTER_TYPES[typeFilter];
+		if (allowedTypes.length === 0) return events;
+		return events.filter((e) => allowedTypes.includes(e.type));
+	}, [events, typeFilter]);
+
+	// Summary stats for the header
+	const summary = useMemo(() => {
+		const counts: Partial<Record<MemoryChangeEventType, number>> = {};
+		for (const e of events) {
+			counts[e.type] = (counts[e.type] ?? 0) + 1;
+		}
+		return counts;
+	}, [events]);
+
+	if (!config.enabled) return null;
+
+	const summaryParts: string[] = [];
+	if (summary.created) summaryParts.push(`+${summary.created} created`);
+	if (summary.promoted) summaryParts.push(`${summary.promoted} promoted`);
+	if (summary.decayed) summaryParts.push(`${summary.decayed} decayed`);
+	if (summary.pruned) summaryParts.push(`${summary.pruned} pruned`);
+	if (summary.deleted) summaryParts.push(`${summary.deleted} deleted`);
+
+	return (
+		<div className="rounded-lg border p-4 space-y-2" style={{ borderColor: theme.colors.border }}>
+			<SectionHeader
+				theme={theme}
+				icon={Clock}
+				title="Memory Timeline"
+				description={summaryParts.length > 0 ? `(${summaryParts.join(', ')})` : undefined}
+				collapsible
+				collapsed={collapsed}
+				onToggle={() => setCollapsed((c) => !c)}
+				badge={events.length || null}
+			/>
+
+			{!collapsed && (
+				<div className="space-y-3">
+					{/* Filter bar */}
+					<div className="flex items-center gap-2 flex-wrap">
+						<Filter className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
+						{(['all', 'created', 'promoted', 'decayed', 'pruned'] as TimelineFilter[]).map((f) => (
+							<button
+								key={f}
+								className="text-[10px] px-2 py-0.5 rounded-full transition-colors"
+								style={{
+									backgroundColor: typeFilter === f ? `${theme.colors.accent}20` : 'transparent',
+									color: typeFilter === f ? theme.colors.accent : theme.colors.textDim,
+									border: `1px solid ${typeFilter === f ? theme.colors.accent : theme.colors.border}`,
+								}}
+								onClick={() => setTypeFilter(f)}
+							>
+								{f.charAt(0).toUpperCase() + f.slice(1)}
+							</button>
+						))}
+						<div className="ml-auto flex items-center gap-1">
+							{(['today', '7d', '30d', 'all'] as TimeRange[]).map((r) => (
+								<button
+									key={r}
+									className="text-[10px] px-1.5 py-0.5 rounded transition-colors"
+									style={{
+										backgroundColor: timeRange === r ? `${theme.colors.accent}20` : 'transparent',
+										color: timeRange === r ? theme.colors.accent : theme.colors.textDim,
+									}}
+									onClick={() => setTimeRange(r)}
+								>
+									{r === 'all' ? 'All' : r === 'today' ? 'Today' : r}
+								</button>
+							))}
+						</div>
+					</div>
+
+					{/* Timeline */}
+					{!loaded ? (
+						<div className="text-[10px] py-4 text-center" style={{ color: theme.colors.textDim }}>
+							Loading timeline...
+						</div>
+					) : filtered.length === 0 ? (
+						<div className="text-[10px] py-4 text-center" style={{ color: theme.colors.textDim }}>
+							No events for this filter/time range.
+						</div>
+					) : (
+						<div className="space-y-0 max-h-[320px] overflow-y-auto">
+							{filtered.slice(0, 50).map((evt, idx) => {
+								const cfg = EVENT_TYPE_CONFIG[evt.type];
+								const Icon = cfg.icon;
+								const isExpanded = expandedIdx === idx;
+								const contentPreview = evt.memoryContent
+									? evt.memoryContent.split('\n')[0].slice(0, 80)
+									: '';
+
+								return (
+									<button
+										key={`${evt.timestamp}-${evt.memoryId}-${idx}`}
+										className="flex items-start gap-2 w-full text-left py-1.5 px-1 rounded hover:bg-white/5 transition-colors"
+										onClick={() => setExpandedIdx(isExpanded ? null : idx)}
+									>
+										{/* Timeline line + icon */}
+										<div className="flex flex-col items-center shrink-0 mt-0.5">
+											<div
+												className="w-5 h-5 rounded-full flex items-center justify-center"
+												style={{ backgroundColor: `${cfg.color}20` }}
+											>
+												<Icon className="w-3 h-3" style={{ color: cfg.color }} />
+											</div>
+											{idx < filtered.length - 1 && (
+												<div
+													className="w-px flex-1 min-h-[12px]"
+													style={{ backgroundColor: theme.colors.border }}
+												/>
+											)}
+										</div>
+
+										{/* Content */}
+										<div className="flex-1 min-w-0 pb-1">
+											<div className="flex items-center gap-1.5">
+												<span className="text-[10px] font-medium" style={{ color: cfg.color }}>
+													{cfg.label}
+												</span>
+												<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
+													{formatRelativeTime(evt.timestamp)}
+												</span>
+												<span
+													className="text-[10px] ml-auto"
+													style={{ color: theme.colors.textDim }}
+												>
+													{evt.triggeredBy === 'user' ? 'manual' : 'auto'}
+												</span>
+											</div>
+											{contentPreview && (
+												<div
+													className="text-[10px] truncate mt-0.5"
+													style={{ color: theme.colors.textMain }}
+												>
+													{contentPreview}
+												</div>
+											)}
+											{isExpanded && (
+												<div
+													className="text-[10px] mt-1 p-1.5 rounded space-y-1"
+													style={{
+														backgroundColor: theme.colors.bgActivity,
+														color: theme.colors.textDim,
+													}}
+												>
+													{evt.details && <div>{evt.details}</div>}
+													<div>
+														Type: {evt.memoryType} · Scope: {evt.scope}
+													</div>
+													<div className="font-mono text-[9px] opacity-60">ID: {evt.memoryId}</div>
+												</div>
+											)}
+										</div>
+									</button>
+								);
+							})}
+							{filtered.length > 50 && (
+								<div
+									className="text-[10px] text-center py-1"
+									style={{ color: theme.colors.textDim }}
+								>
+									Showing 50 of {filtered.length} events
+								</div>
+							)}
+						</div>
+					)}
+				</div>
+			)}
+		</div>
+	);
+}
+
+// ─── Section 4: System Metrics ──────────────────────────────────────────────────
 
 function SystemMetricsSection({ theme }: { theme: Theme }) {
 	const [expanded, setExpanded] = useState(false);

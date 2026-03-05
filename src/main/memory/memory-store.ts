@@ -46,7 +46,7 @@ import type {
 import { MEMORY_CONFIG_DEFAULTS, SEED_ROLES } from '../../shared/memory-types';
 import { cosineSimilarity } from '../grpo/embedding-service';
 import { MemoryChangeLog } from './memory-changelog';
-import type { MemoryChangeEvent, MemoryChangeEventType } from './memory-changelog';
+import type { MemoryChangeEventType } from './memory-changelog';
 
 // ─── File Interfaces ──────────────────────────────────────────────────────────
 
@@ -730,7 +730,9 @@ export class MemoryStore {
 			memory.content,
 			memory.type,
 			memory.scope,
-			entry.source === 'extraction' || entry.source === 'consolidation' || entry.source === 'import'
+			entry.source === 'session-analysis' ||
+				entry.source === 'consolidation' ||
+				entry.source === 'import'
 				? 'system'
 				: 'user',
 			entry.source ?? 'user'
