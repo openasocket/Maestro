@@ -355,6 +355,10 @@ export interface MemoryConfig {
 	 * Whether the "Getting Started" quickstart card in the Status tab has been dismissed.
 	 */
 	gettingStartedDismissed?: boolean;
+	/**
+	 * Whether the user has completed the Memory Quick Tour walkthrough.
+	 */
+	memoryTourCompleted?: boolean;
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -403,6 +407,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	userEngagementLevel: 0,
 	memoryMilestonesShown: [],
 	gettingStartedDismissed: false,
+	memoryTourCompleted: false,
 };
 
 // ─── Checkpoint Injection Types ────────────────────────────────────────────

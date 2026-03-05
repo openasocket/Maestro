@@ -83,6 +83,8 @@ interface UseTourOptions {
 	startStep?: number;
 	/** Callback to execute UI actions */
 	onUIAction?: (action: TourUIAction) => void;
+	/** Custom steps to use instead of the default tourSteps */
+	steps?: TourStepConfig[];
 }
 
 /**
@@ -182,7 +184,9 @@ export function useTour({
 	onComplete,
 	startStep = 0,
 	onUIAction,
+	steps: customSteps,
 }: UseTourOptions): UseTourReturn {
+	const activeSteps = customSteps ?? tourSteps;
 	const [currentStepIndex, setCurrentStepIndex] = useState(startStep);
 	const [spotlight, setSpotlight] = useState<SpotlightInfo | null>(null);
 	const [isTransitioning, setIsTransitioning] = useState(false);
@@ -191,8 +195,8 @@ export function useTour({
 	const transitionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const repositionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-	const totalSteps = tourSteps.length;
-	const currentStep = tourSteps[currentStepIndex] || null;
+	const totalSteps = activeSteps.length;
+	const currentStep = activeSteps[currentStepIndex] || null;
 	const isLastStep = currentStepIndex === totalSteps - 1;
 
 	/**
@@ -269,7 +273,7 @@ export function useTour({
 			transitionTimeoutRef.current = setTimeout(() => {
 				setCurrentStepIndex(stepIndex);
 
-				const nextStep = tourSteps[stepIndex];
+				const nextStep = activeSteps[stepIndex];
 				if (nextStep) {
 					executeUIActions(nextStep);
 				}
@@ -281,7 +285,7 @@ export function useTour({
 				}, 200);
 			}, 150);
 		},
-		[totalSteps, executeUIActions]
+		[totalSteps, activeSteps, executeUIActions]
 	);
 
 	/**
@@ -318,12 +322,12 @@ export function useTour({
 			// Reset position ready state - will be set true after spotlight position is calculated
 			setIsPositionReady(false);
 			setCurrentStepIndex(startStep);
-			const initialStep = tourSteps[startStep];
+			const initialStep = activeSteps[startStep];
 			if (initialStep) {
 				executeUIActions(initialStep);
 			}
 		}
-	}, [isOpen, startStep, executeUIActions]);
+	}, [isOpen, startStep, activeSteps, executeUIActions]);
 
 	// Update spotlight when step changes
 	useEffect(() => {

@@ -22,6 +22,7 @@ import {
 	Info,
 	X,
 	ArrowRight,
+	Map,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import { PersonasTab } from './PersonasTab';
@@ -30,6 +31,7 @@ import { ExperiencesTab } from './ExperiencesTab';
 import { MemoriesTab, type MemoryFilter } from './MemoriesTab';
 import { StatusTab } from './StatusTab';
 import { ConfigTab } from './ConfigTab';
+import { TourOverlay, memoryTourSteps } from '../Wizard/tour';
 import type { MemoryConfig, MemoryStats } from '../../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS } from '../../../shared/memory-types';
 
@@ -99,6 +101,7 @@ export function MemorySettings({
 	const [confirmReset, setConfirmReset] = useState(false);
 	const [memoriesFilter, setMemoriesFilter] = useState<MemoryFilter | null>(null);
 	const [bannerDismissed, setBannerDismissed] = useState(false);
+	const [memoryTourOpen, setMemoryTourOpen] = useState(false);
 
 	// Embedding model download/loading progress
 	const [embeddingProgress, setEmbeddingProgress] = useState<{
@@ -388,7 +391,22 @@ export function MemorySettings({
 					</div>
 				</button>
 				{config.enabled && (
-					<div className="flex justify-end mt-2">
+					<div className="flex justify-between items-center mt-2">
+						{!config.memoryTourCompleted && engagementLevel >= 1 ? (
+							<button
+								className="flex items-center gap-1 text-[10px] font-medium transition-opacity opacity-70 hover:opacity-100"
+								style={{ color: theme.colors.accent }}
+								onClick={(e) => {
+									e.stopPropagation();
+									setMemoryTourOpen(true);
+								}}
+							>
+								<Map className="w-3 h-3" />
+								Quick Tour
+							</button>
+						) : (
+							<span />
+						)}
 						<button
 							className="text-[10px] hover:underline transition-opacity opacity-60 hover:opacity-100"
 							style={{ color: theme.colors.textDim }}
@@ -631,6 +649,7 @@ export function MemorySettings({
 									aria-selected={isActive}
 									aria-controls={`memory-tabpanel-${tab.id}`}
 									id={`memory-tab-${tab.id}`}
+									data-tour={`memory-tab-${tab.id}`}
 									tabIndex={isActive ? 0 : -1}
 									onClick={() => handleTabSwitch(tab.id)}
 									className="flex items-center gap-1.5 px-3 rounded-full text-xs font-medium transition-colors whitespace-nowrap shrink-0"
@@ -755,6 +774,18 @@ export function MemorySettings({
 					</div>
 				</div>
 			)}
+
+			{/* Memory Quick Tour Overlay */}
+			<TourOverlay
+				theme={theme}
+				isOpen={memoryTourOpen}
+				onClose={() => {
+					setMemoryTourOpen(false);
+					updateConfig({ memoryTourCompleted: true });
+				}}
+				steps={memoryTourSteps}
+				skipWelcome
+			/>
 		</div>
 	);
 }

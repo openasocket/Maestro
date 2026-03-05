@@ -35,6 +35,10 @@ interface TourOverlayProps {
 	onTourComplete?: (stepsViewed: number) => void;
 	/** Analytics callback: Called when tour is skipped before completion */
 	onTourSkip?: (stepsViewed: number) => void;
+	/** Custom tour steps (overrides default tourSteps) */
+	steps?: TourStepConfig[];
+	/** Skip the welcome screen and go straight to steps */
+	skipWelcome?: boolean;
 }
 
 /**
@@ -95,11 +99,13 @@ export function TourOverlay({
 	onTourStart,
 	onTourComplete,
 	onTourSkip,
+	steps: customSteps,
+	skipWelcome = false,
 }: TourOverlayProps): JSX.Element | null {
 	const { registerLayer, unregisterLayer } = useLayerStack();
 
 	// Track whether we're showing the welcome screen (before tour steps)
-	const [showWelcome, setShowWelcome] = useState(true);
+	const [showWelcome, setShowWelcome] = useState(!skipWelcome);
 
 	// Track if tour start has been recorded for this open session
 	const tourStartedRef = useRef(false);
@@ -142,6 +148,7 @@ export function TourOverlay({
 		isOpen,
 		onComplete: handleComplete,
 		startStep,
+		steps: customSteps,
 	});
 
 	// Wrapper for skipTour that calls analytics callback
@@ -160,7 +167,7 @@ export function TourOverlay({
 		if (isOpen && !tourStartedRef.current) {
 			tourStartedRef.current = true;
 			maxStepViewedRef.current = 1; // Reset to 1 (first step)
-			setShowWelcome(true); // Reset to welcome screen when tour opens
+			setShowWelcome(!skipWelcome); // Reset to welcome screen when tour opens (unless skipped)
 			if (onTourStartRef.current) {
 				onTourStartRef.current();
 			}
