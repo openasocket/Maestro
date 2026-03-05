@@ -196,6 +196,31 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 							// Store injected IDs + scope groups for effectiveness tracking (EXP-11)
 							const { recordSessionInjection } = await import('../../memory/memory-injector');
 							recordSessionInjection(config.sessionId, result.injectedIds, result.scopeGroups);
+
+							// First-injection notification (MEM-EVOLVE-01)
+							if (result.injectedIds.length > 0) {
+								try {
+									const { getMemoryStore } = await import('../../memory/memory-store');
+									const memStore = getMemoryStore();
+									const memConfig = await memStore.getConfig();
+									if (!memConfig._firstInjectionNotified) {
+										await memStore.setConfig({ _firstInjectionNotified: true });
+										const mainWindow = getMainWindow();
+										if (isWebContentsAvailable(mainWindow)) {
+											mainWindow.webContents.send('memory:firstInjection', {
+												count: result.injectedIds.length,
+												tokenCount: result.tokenCount,
+												personaName: result.personaContributions[0]?.personaName,
+											});
+										}
+									}
+								} catch (notifyErr) {
+									logger.debug(
+										`[Memory] First-injection notification failed: ${notifyErr}`,
+										LOG_CONTEXT
+									);
+								}
+							}
 						}
 					} catch (err) {
 						logger.warn(

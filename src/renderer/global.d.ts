@@ -3162,6 +3162,9 @@ interface MaestroAPI {
 		onJobQueueUpdate: (
 			callback: (status: import('../shared/memory-types').JobQueueStatus) => void
 		) => () => void;
+		onFirstInjection: (
+			callback: (data: { count: number; tokenCount: number; personaName?: string }) => void
+		) => () => void;
 
 		// ─── Experience Repository (programmatic API) ─────────────────────
 		repository: {

@@ -499,6 +499,19 @@ export function createMemoryApi() {
 			};
 		},
 
+		onFirstInjection: (
+			callback: (data: { count: number; tokenCount: number; personaName?: string }) => void
+		) => {
+			const handler = (
+				_event: unknown,
+				data: { count: number; tokenCount: number; personaName?: string }
+			) => callback(data);
+			ipcRenderer.on('memory:firstInjection', handler);
+			return () => {
+				ipcRenderer.removeListener('memory:firstInjection', handler);
+			};
+		},
+
 		// ─── Experience Repository ───────────────────────────────────────
 		repository: {
 			importFromFile: (

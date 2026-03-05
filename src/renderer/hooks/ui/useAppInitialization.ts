@@ -264,6 +264,20 @@ export function useAppInitialization(): AppInitializationReturn {
 			.catch(console.error);
 	}, []);
 
+	// --- Memory first-injection notification (MEM-EVOLVE-01) ---
+	useEffect(() => {
+		const cleanup = window.maestro?.memory?.onFirstInjection?.((data) => {
+			const persona = data.personaName ? ` from ${data.personaName} persona` : '';
+			notifyToast({
+				type: 'info',
+				title: 'Memory System Active',
+				message: `Injected ${data.count} relevant memories${persona}`,
+				duration: 8000,
+			});
+		});
+		return () => cleanup?.();
+	}, []);
+
 	// --- Notification settings sync ---
 	useEffect(() => {
 		useNotificationStore.getState().setDefaultDuration(toastDuration);

@@ -314,6 +314,8 @@ export interface MemoryConfig {
 	_configVersion?: number;
 	/** Whether the auto-enabled info banner has been dismissed by the user */
 	_autoEnabledBannerDismissed?: boolean;
+	/** Whether the first-injection toast notification has been shown */
+	_firstInjectionNotified?: boolean;
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -353,6 +355,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	embeddingProvider: DEFAULT_EMBEDDING_CONFIG,
 	_configVersion: 1,
 	_autoEnabledBannerDismissed: false,
+	_firstInjectionNotified: false,
 };
 
 // ─── Job Queue Status & Token Tracking ────────────────────────────────────
