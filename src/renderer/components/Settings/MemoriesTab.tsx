@@ -1,17 +1,55 @@
 /**
- * MemoriesTab - Memories sub-tab within MemorySettings.
+ * MemoriesTab - Primary memory management view within MemorySettings.
  *
- * Contains: memory lifecycle config (decay rate, min threshold, prune controls).
- * MemoryLibraryPanel integration comes in MEM-TAB-05.
- * Moved from MemorySettings.tsx during MEM-TAB-01 redistribution.
+ * Contains:
+ * - Collapsible lifecycle settings (decay, pruning)
+ * - Quick Create toolbar (New Rule, New Experience, Paste from Clipboard)
+ * - Memory statistics summary bar
+ * - Embedded MemoryBrowserPanel (tree browser + library panel)
+ * - Cross-tab navigation via initialFilter prop
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Brain, Timer, Scissors, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+	Scissors,
+	Loader2,
+	ChevronRight,
+	ChevronDown,
+	Settings,
+	Plus,
+	Shield,
+	Lightbulb,
+	ClipboardPaste,
+	X,
+	BarChart3,
+	AlertTriangle,
+	Eye,
+} from 'lucide-react';
 import type { Theme } from '../../types';
-import type { MemoryConfig, MemoryStats, MemoryEntry } from '../../../shared/memory-types';
+import type {
+	MemoryConfig,
+	MemoryStats,
+	MemoryEntry,
+	MemoryScope,
+	MemoryType,
+	SkillAreaId,
+	PersonaId,
+	RoleId,
+} from '../../../shared/memory-types';
 import { ConfigSlider } from './MemoryConfigWidgets';
 import { TabDescriptionBanner } from './TabDescriptionBanner';
+import { MemoryBrowserPanel } from './MemoryBrowserPanel';
+import { MemoryEditModal } from './MemoryEditModal';
+import { useMemoryHierarchy } from '../../hooks/memory/useMemoryHierarchy';
+
+// ─── Types ────────────────────────────────────────────────────────────────
+
+export interface MemoryFilter {
+	skillAreaId?: SkillAreaId;
+	personaId?: PersonaId;
+	type?: MemoryType;
+	source?: string;
+}
 
 export interface MemoriesTabProps {
 	theme: Theme;
@@ -20,6 +58,10 @@ export interface MemoriesTabProps {
 	projectPath?: string | null;
 	onUpdateConfig: (updates: Partial<MemoryConfig>) => void;
 	onRefresh: () => Promise<void>;
+	/** Optional filter for cross-tab navigation (e.g., from Skills tab) */
+	initialFilter?: MemoryFilter | null;
+	/** Called when the user clears cross-tab filters */
+	onClearFilter?: () => void;
 }
 
 export function MemoriesTab({
@@ -29,11 +71,25 @@ export function MemoriesTab({
 	projectPath,
 	onUpdateConfig,
 	onRefresh,
+	initialFilter,
+	onClearFilter,
 }: MemoriesTabProps): React.ReactElement {
 	const [allMemories, setAllMemories] = useState<MemoryEntry[]>([]);
 	const [pruneConfirm, setPruneConfirm] = useState(false);
 	const [pruning, setPruning] = useState(false);
 	const [pruneProgress, setPruneProgress] = useState<{ done: number; total: number } | null>(null);
+	const [lifecycleOpen, setLifecycleOpen] = useState(false);
+	const [defaultScope, setDefaultScope] = useState<MemoryScope>('project');
+
+	// Modal state for Quick Create
+	const [editModal, setEditModal] = useState<{
+		memory: MemoryEntry | null;
+		type: MemoryType;
+		scope: MemoryScope;
+	} | null>(null);
+
+	// Hierarchy for edit modal skill areas and breadcrumb display
+	const hierarchy = useMemoryHierarchy();
 
 	// Load all memories for lifecycle stats
 	useEffect(() => {
@@ -62,6 +118,56 @@ export function MemoriesTab({
 			m.confidence >= config.minConfidenceThreshold
 	);
 
+	// Computed stats from allMemories
+	const computedStats = useMemo(() => {
+		const active = allMemories.filter((m) => m.active && !m.archived);
+		const archived = allMemories.filter((m) => m.archived || !m.active);
+		const rules = active.filter((m) => m.type === 'rule');
+		const experiences = active.filter((m) => m.type === 'experience');
+		const bySkill = active.filter((m) => m.scope === 'skill');
+		const byProject = active.filter((m) => m.scope === 'project');
+		const byGlobal = active.filter((m) => m.scope === 'global');
+		const avgConfidence =
+			active.length > 0 ? active.reduce((sum, m) => sum + m.confidence, 0) / active.length : 0;
+		const neverUsed = active.filter((m) => m.useCount === 0);
+		const totalTokens = active.reduce((sum, m) => sum + (m.tokenEstimate || 0), 0);
+
+		return {
+			activeCount: active.length,
+			archivedCount: archived.length,
+			ruleCount: rules.length,
+			experienceCount: experiences.length,
+			skillCount: bySkill.length,
+			projectCount: byProject.length,
+			globalCount: byGlobal.length,
+			avgConfidence,
+			neverUsedCount: neverUsed.length,
+			totalTokens,
+		};
+	}, [allMemories]);
+
+	// Breadcrumb for cross-tab filter
+	const filterBreadcrumb = useMemo(() => {
+		if (!initialFilter) return null;
+		const parts: string[] = [];
+		if (initialFilter.skillAreaId) {
+			const skill = hierarchy.skillAreas.find((s) => s.id === initialFilter.skillAreaId);
+			if (skill) {
+				const persona = hierarchy.personas.find((p) => p.id === skill.personaId);
+				if (persona) parts.push(persona.name);
+				parts.push(skill.name);
+			}
+		}
+		if (initialFilter.personaId && !initialFilter.skillAreaId) {
+			const persona = hierarchy.personas.find((p) => p.id === initialFilter.personaId);
+			if (persona) parts.push(persona.name);
+		}
+		if (initialFilter.type) {
+			parts.push(initialFilter.type === 'rule' ? 'Rules' : 'Experiences');
+		}
+		return parts.length > 0 ? parts.join(' > ') : null;
+	}, [initialFilter, hierarchy.skillAreas, hierarchy.personas]);
+
 	const handlePruneMemories = useCallback(async () => {
 		setPruning(true);
 		setPruneProgress({ done: 0, total: prunableMemories.length });
@@ -87,160 +193,456 @@ export function MemoriesTab({
 		}
 	}, [prunableMemories, onRefresh]);
 
+	// Available skills for the edit modal
+	const availableSkills = useMemo(() => {
+		return hierarchy.skillAreas.map((s) => {
+			const persona = hierarchy.personas.find((p) => p.id === s.personaId);
+			return {
+				id: s.id,
+				name: s.name,
+				personaName: persona?.name ?? 'Unknown',
+			};
+		});
+	}, [hierarchy.skillAreas, hierarchy.personas]);
+
+	const handleQuickCreate = useCallback(
+		(type: MemoryType) => {
+			setEditModal({ memory: null, type, scope: defaultScope });
+		},
+		[defaultScope]
+	);
+
+	const handlePasteFromClipboard = useCallback(async () => {
+		try {
+			const text = await navigator.clipboard.readText();
+			const parsed = JSON.parse(text);
+			// Pre-populate from parsed JSON
+			const entry: Partial<MemoryEntry> = {
+				content: parsed.content ?? '',
+				type: parsed.type ?? 'rule',
+				scope: parsed.scope ?? defaultScope,
+				tags: parsed.tags ?? [],
+				confidence: parsed.confidence ?? 0.8,
+				pinned: parsed.pinned ?? false,
+				experienceContext: parsed.experienceContext,
+			};
+			setEditModal({
+				memory: entry as MemoryEntry,
+				type: entry.type as MemoryType,
+				scope: entry.scope as MemoryScope,
+			});
+		} catch {
+			// If not valid JSON, just open empty modal
+			setEditModal({ memory: null, type: 'rule', scope: defaultScope });
+		}
+	}, [defaultScope]);
+
+	const handleSaveMemory = useCallback(
+		async (data: {
+			content: string;
+			type: MemoryType;
+			scope: MemoryScope;
+			skillAreaId?: SkillAreaId;
+			personaId?: PersonaId;
+			roleId?: RoleId;
+			tags: string[];
+			confidence: number;
+			pinned: boolean;
+		}) => {
+			await window.maestro.memory.add(
+				{
+					content: data.content,
+					type: data.type,
+					scope: data.scope,
+					skillAreaId: data.skillAreaId,
+					personaId: data.personaId,
+					roleId: data.roleId,
+					tags: data.tags,
+					confidence: data.confidence,
+					pinned: data.pinned,
+					source: 'user',
+				},
+				data.scope === 'project' ? (projectPath ?? undefined) : undefined
+			);
+			setEditModal(null);
+			await onRefresh();
+		},
+		[projectPath, onRefresh]
+	);
+
 	return (
-		<div className="space-y-4">
+		<div className="space-y-3">
 			<TabDescriptionBanner
 				theme={theme}
 				description="Memories are the individual knowledge entries that get injected into your agents' prompts. Rules are prescriptive ('always do X'), while experiences are contextual ('we learned Y when Z happened'). All memories have confidence scores that decay over time if unused."
 			/>
 
-			{/* Memory stats summary */}
-			{stats && (
+			{/* Cross-tab filter breadcrumb */}
+			{filterBreadcrumb && (
 				<div
-					className="rounded-lg border p-4 space-y-2"
-					style={{ borderColor: theme.colors.border }}
+					className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
+					style={{
+						backgroundColor: `${theme.colors.accent}10`,
+						borderLeft: `3px solid ${theme.colors.accent}`,
+						color: theme.colors.textMain,
+					}}
 				>
-					<div className="flex items-center gap-2">
-						<Brain className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
-						<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-							Memory Overview
-						</div>
-					</div>
-					<div className="text-xs" style={{ color: theme.colors.textDim }}>
-						Total: {stats.totalMemories} | Rules: {stats.byType?.rule ?? 0} | Experiences:{' '}
-						{stats.byType?.experience ?? 0}
-					</div>
-					{atRiskMemories.length > 0 && (
-						<div className="text-xs" style={{ color: '#eab308' }}>
-							{atRiskMemories.length} memories approaching archive threshold
-						</div>
-					)}
+					<Eye className="w-3 h-3 shrink-0" style={{ color: theme.colors.accent }} />
+					<span>
+						Showing memories in: <strong>{filterBreadcrumb}</strong>
+					</span>
+					<button
+						className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors hover:opacity-80"
+						style={{
+							color: theme.colors.textDim,
+							backgroundColor: `${theme.colors.border}40`,
+						}}
+						onClick={() => onClearFilter?.()}
+					>
+						<X className="w-3 h-3" />
+						Clear Filters
+					</button>
 				</div>
 			)}
 
-			{/* Memory Lifecycle */}
-			<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
-				<div className="flex items-center gap-2">
-					<Timer className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
-					<div className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
-						Memory Lifecycle
-					</div>
-				</div>
-
-				<ConfigSlider
-					label="Confidence Decay Rate"
-					description="How much confidence decreases per day for unused memories (0 = no decay)"
-					value={config.confidenceDecayRate}
-					min={0}
-					max={0.1}
-					step={0.005}
-					onChange={(v) => onUpdateConfig({ confidenceDecayRate: v })}
-					theme={theme}
-					formatValue={(v) => v.toFixed(3)}
-				/>
-
-				<ConfigSlider
-					label="Auto-Archive Threshold"
-					description="Memories below this confidence are automatically archived"
-					value={config.minConfidenceThreshold}
-					min={0}
-					max={0.5}
-					step={0.05}
-					onChange={(v) => onUpdateConfig({ minConfidenceThreshold: v })}
-					theme={theme}
-					formatValue={(v) => v.toFixed(2)}
-				/>
-
-				<ConfigSlider
-					label="Max Memories Per Skill"
-					description="Oldest memories are evicted when a skill area exceeds this count"
-					value={config.maxMemoriesPerSkillArea}
-					min={10}
-					max={200}
-					step={10}
-					onChange={(v) => onUpdateConfig({ maxMemoriesPerSkillArea: v })}
-					theme={theme}
-				/>
-
-				{/* Prune Now */}
-				<div className="pt-2 border-t" style={{ borderColor: theme.colors.border }}>
-					{!pruneConfirm ? (
-						<button
-							className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs transition-colors"
-							style={{
-								color: theme.colors.textDim,
-								backgroundColor: `${theme.colors.border}40`,
-							}}
-							onClick={() => setPruneConfirm(true)}
-							disabled={pruning || prunableMemories.length === 0}
-							title={
-								prunableMemories.length === 0
-									? 'No memories below threshold'
-									: `${prunableMemories.length} memories below ${config.minConfidenceThreshold} confidence`
-							}
-						>
-							<Scissors className="w-3 h-3" />
-							Prune Low-Confidence Memories
-							{prunableMemories.length > 0 && (
-								<span
-									className="ml-1 px-1.5 py-0.5 rounded-full text-xs"
-									style={{ backgroundColor: `${theme.colors.border}60` }}
-								>
-									{prunableMemories.length}
-								</span>
-							)}
-						</button>
-					) : pruning ? (
-						<div
-							className="flex items-center gap-2 text-xs"
-							style={{ color: theme.colors.textDim }}
-						>
-							<Loader2 className="w-3 h-3 animate-spin" />
-							{pruneProgress
-								? `Pruning... ${pruneProgress.done}/${pruneProgress.total}`
-								: 'Pruning...'}
-						</div>
+			{/* Collapsible Lifecycle Settings */}
+			<div
+				className="rounded-lg border overflow-hidden"
+				style={{ borderColor: theme.colors.border }}
+			>
+				<button
+					className="w-full flex items-center gap-2 px-4 py-2.5 text-left transition-colors"
+					style={{
+						backgroundColor: lifecycleOpen ? `${theme.colors.border}20` : 'transparent',
+					}}
+					onClick={() => setLifecycleOpen((v) => !v)}
+				>
+					{lifecycleOpen ? (
+						<ChevronDown className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
 					) : (
-						<div className="space-y-2">
-							<div className="text-xs" style={{ color: theme.colors.textMain }}>
-								Archive {prunableMemories.length} memories below {config.minConfidenceThreshold}{' '}
-								confidence?
-							</div>
-							<div className="flex gap-2">
+						<ChevronRight className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
+					)}
+					<Settings className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+					<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+						Lifecycle Settings
+					</span>
+					{prunableMemories.length > 0 && (
+						<span
+							className="ml-auto px-1.5 py-0.5 rounded-full text-[10px]"
+							style={{
+								backgroundColor: '#eab30820',
+								color: '#eab308',
+							}}
+						>
+							{prunableMemories.length} prunable
+						</span>
+					)}
+				</button>
+
+				{lifecycleOpen && (
+					<div
+						className="px-4 pb-4 space-y-3 border-t"
+						style={{ borderColor: theme.colors.border }}
+					>
+						<div className="pt-3">
+							<ConfigSlider
+								label="Confidence Decay Rate"
+								description="How much confidence decreases per day for unused memories (0 = no decay)"
+								value={config.confidenceDecayRate}
+								min={0}
+								max={0.1}
+								step={0.005}
+								onChange={(v) => onUpdateConfig({ confidenceDecayRate: v })}
+								theme={theme}
+								formatValue={(v) => v.toFixed(3)}
+							/>
+						</div>
+
+						<ConfigSlider
+							label="Auto-Archive Threshold"
+							description="Memories below this confidence are automatically archived"
+							value={config.minConfidenceThreshold}
+							min={0}
+							max={0.5}
+							step={0.05}
+							onChange={(v) => onUpdateConfig({ minConfidenceThreshold: v })}
+							theme={theme}
+							formatValue={(v) => v.toFixed(2)}
+						/>
+
+						<ConfigSlider
+							label="Max Memories Per Skill"
+							description="Oldest memories are evicted when a skill area exceeds this count"
+							value={config.maxMemoriesPerSkillArea}
+							min={10}
+							max={200}
+							step={10}
+							onChange={(v) => onUpdateConfig({ maxMemoriesPerSkillArea: v })}
+							theme={theme}
+						/>
+
+						{/* Prune Now */}
+						<div className="pt-2 border-t" style={{ borderColor: theme.colors.border }}>
+							{!pruneConfirm ? (
 								<button
-									className="px-2.5 py-1 rounded text-xs"
-									style={{
-										color: theme.colors.textMain,
-										backgroundColor: '#ef4444',
-									}}
-									onClick={handlePruneMemories}
-								>
-									Confirm
-								</button>
-								<button
-									className="px-2.5 py-1 rounded text-xs"
+									className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs transition-colors"
 									style={{
 										color: theme.colors.textDim,
 										backgroundColor: `${theme.colors.border}40`,
 									}}
-									onClick={() => setPruneConfirm(false)}
+									onClick={() => setPruneConfirm(true)}
+									disabled={pruning || prunableMemories.length === 0}
+									title={
+										prunableMemories.length === 0
+											? 'No memories below threshold'
+											: `${prunableMemories.length} memories below ${config.minConfidenceThreshold} confidence`
+									}
 								>
-									Cancel
+									<Scissors className="w-3 h-3" />
+									Prune Low-Confidence Memories
+									{prunableMemories.length > 0 && (
+										<span
+											className="ml-1 px-1.5 py-0.5 rounded-full text-xs"
+											style={{ backgroundColor: `${theme.colors.border}60` }}
+										>
+											{prunableMemories.length}
+										</span>
+									)}
 								</button>
-							</div>
+							) : pruning ? (
+								<div
+									className="flex items-center gap-2 text-xs"
+									style={{ color: theme.colors.textDim }}
+								>
+									<Loader2 className="w-3 h-3 animate-spin" />
+									{pruneProgress
+										? `Pruning... ${pruneProgress.done}/${pruneProgress.total}`
+										: 'Pruning...'}
+								</div>
+							) : (
+								<div className="space-y-2">
+									<div className="text-xs" style={{ color: theme.colors.textMain }}>
+										Archive {prunableMemories.length} memories below {config.minConfidenceThreshold}{' '}
+										confidence?
+									</div>
+									<div className="flex gap-2">
+										<button
+											className="px-2.5 py-1 rounded text-xs"
+											style={{
+												color: theme.colors.textMain,
+												backgroundColor: '#ef4444',
+											}}
+											onClick={handlePruneMemories}
+										>
+											Confirm
+										</button>
+										<button
+											className="px-2.5 py-1 rounded text-xs"
+											style={{
+												color: theme.colors.textDim,
+												backgroundColor: `${theme.colors.border}40`,
+											}}
+											onClick={() => setPruneConfirm(false)}
+										>
+											Cancel
+										</button>
+									</div>
+								</div>
+							)}
 						</div>
-					)}
+					</div>
+				)}
+			</div>
+
+			{/* Memory Statistics Summary Bar */}
+			{stats && (
+				<div
+					className="rounded-lg border p-3 space-y-2"
+					style={{ borderColor: theme.colors.border }}
+				>
+					<div className="flex items-center gap-2 mb-1">
+						<BarChart3 className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
+						<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+							Memory Overview
+						</span>
+					</div>
+
+					{/* Row 1: counts */}
+					<div
+						className="flex flex-wrap gap-x-4 gap-y-1 text-xs"
+						style={{ color: theme.colors.textDim }}
+					>
+						<span>
+							<strong style={{ color: theme.colors.textMain }}>{computedStats.activeCount}</strong>{' '}
+							active
+							{computedStats.archivedCount > 0 && (
+								<>
+									, <strong>{computedStats.archivedCount}</strong> archived
+								</>
+							)}
+						</span>
+						<span>
+							<span
+								className="inline-block w-2 h-2 rounded-full mr-1"
+								style={{ backgroundColor: theme.colors.accent }}
+							/>
+							{computedStats.ruleCount} rules
+						</span>
+						<span>
+							<span
+								className="inline-block w-2 h-2 rounded-full mr-1"
+								style={{ backgroundColor: '#eab308' }}
+							/>
+							{computedStats.experienceCount} experiences
+						</span>
+					</div>
+
+					{/* Row 2: scope breakdown */}
+					<div
+						className="flex flex-wrap gap-x-4 gap-y-1 text-xs"
+						style={{ color: theme.colors.textDim }}
+					>
+						<span>{computedStats.skillCount} in skills</span>
+						<span>{computedStats.projectCount} project-scoped</span>
+						<span>{computedStats.globalCount} global</span>
+					</div>
+
+					{/* Row 3: confidence + alerts */}
+					<div
+						className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs"
+						style={{ color: theme.colors.textDim }}
+					>
+						{/* Average confidence bar */}
+						<span className="flex items-center gap-1.5">
+							Avg confidence:
+							<span
+								className="inline-block h-1.5 rounded-full"
+								style={{
+									width: '60px',
+									backgroundColor: `${theme.colors.border}40`,
+								}}
+							>
+								<span
+									className="block h-full rounded-full"
+									style={{
+										width: `${Math.round(computedStats.avgConfidence * 100)}%`,
+										backgroundColor:
+											computedStats.avgConfidence >= 0.6
+												? '#22c55e'
+												: computedStats.avgConfidence >= 0.3
+													? '#eab308'
+													: '#ef4444',
+									}}
+								/>
+							</span>
+							<span>{(computedStats.avgConfidence * 100).toFixed(0)}%</span>
+						</span>
+					</div>
+
+					{/* Row 4: alerts */}
+					<div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+						{atRiskMemories.length > 0 && (
+							<span style={{ color: '#eab308' }}>
+								<AlertTriangle
+									className="w-3 h-3 inline mr-1"
+									style={{ verticalAlign: 'text-bottom' }}
+								/>
+								{atRiskMemories.length} below archive threshold
+							</span>
+						)}
+						{computedStats.neverUsedCount > 0 && (
+							<span style={{ color: theme.colors.textDim }}>
+								{computedStats.neverUsedCount} never used
+							</span>
+						)}
+						<span style={{ color: theme.colors.textDim }}>
+							{computedStats.totalTokens.toLocaleString()} tokens /{' '}
+							{config.maxTokenBudget.toLocaleString()} budget
+						</span>
+					</div>
+				</div>
+			)}
+
+			{/* Quick Create Toolbar */}
+			<div className="flex items-center gap-2 flex-wrap">
+				<button
+					className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors hover:opacity-80"
+					style={{
+						color: theme.colors.accent,
+						backgroundColor: `${theme.colors.accent}15`,
+						border: `1px solid ${theme.colors.accent}30`,
+					}}
+					onClick={() => handleQuickCreate('rule')}
+					title="Create a new rule memory"
+				>
+					<Plus className="w-3 h-3" />
+					<Shield className="w-3 h-3" />
+					New Rule
+				</button>
+				<button
+					className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors hover:opacity-80"
+					style={{
+						color: '#eab308',
+						backgroundColor: '#eab30815',
+						border: '1px solid #eab30830',
+					}}
+					onClick={() => handleQuickCreate('experience')}
+					title="Create a new experience memory"
+				>
+					<Plus className="w-3 h-3" />
+					<Lightbulb className="w-3 h-3" />
+					New Experience
+				</button>
+				<button
+					className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors hover:opacity-80"
+					style={{
+						color: theme.colors.textDim,
+						backgroundColor: `${theme.colors.border}30`,
+						border: `1px solid ${theme.colors.border}60`,
+					}}
+					onClick={handlePasteFromClipboard}
+					title="Paste memory JSON from clipboard"
+				>
+					<ClipboardPaste className="w-3 h-3" />
+					Paste from Clipboard
+				</button>
+
+				{/* Scope selector */}
+				<div className="ml-auto flex items-center gap-1.5">
+					<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
+						Default scope:
+					</span>
+					<select
+						className="text-xs rounded px-1.5 py-1 border outline-none"
+						style={{
+							backgroundColor: 'transparent',
+							borderColor: theme.colors.border,
+							color: theme.colors.textMain,
+						}}
+						value={defaultScope}
+						onChange={(e) => setDefaultScope(e.target.value as MemoryScope)}
+					>
+						<option value="skill">Skill</option>
+						<option value="project">Project</option>
+						<option value="global">Global</option>
+					</select>
 				</div>
 			</div>
 
-			{/* Placeholder for MemoryLibraryPanel integration (MEM-TAB-05) */}
-			<div
-				className="flex flex-col items-center justify-center py-8 gap-3"
-				style={{ color: theme.colors.textDim }}
-			>
-				<Brain className="w-8 h-8" style={{ color: theme.colors.accent, opacity: 0.5 }} />
-				<div className="text-xs font-medium">Memory library browser coming in MEM-TAB-05</div>
-			</div>
+			{/* Memory Browser Panel (tree + library) */}
+			<MemoryBrowserPanel theme={theme} projectPath={projectPath ?? null} hierarchy={hierarchy} />
+
+			{/* Quick Create Modal */}
+			{editModal && (
+				<MemoryEditModal
+					theme={theme}
+					memory={editModal.memory}
+					defaultScope={editModal.scope}
+					availableSkills={availableSkills}
+					onSave={handleSaveMemory}
+					onClose={() => setEditModal(null)}
+				/>
+			)}
 		</div>
 	);
 }

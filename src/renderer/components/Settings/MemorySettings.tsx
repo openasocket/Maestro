@@ -21,7 +21,7 @@ import type { Theme } from '../../types';
 import { PersonasTab } from './PersonasTab';
 import { SkillsTab } from './SkillsTab';
 import { ExperiencesTab } from './ExperiencesTab';
-import { MemoriesTab } from './MemoriesTab';
+import { MemoriesTab, type MemoryFilter } from './MemoriesTab';
 import { StatusTab } from './StatusTab';
 import { ConfigSlider, ConfigToggle } from './MemoryConfigWidgets';
 import type { MemoryConfig, MemoryStats } from '../../../shared/memory-types';
@@ -86,6 +86,7 @@ export function MemorySettings({
 	const [seeding, setSeeding] = useState(false);
 	const [resetting, setResetting] = useState(false);
 	const [confirmReset, setConfirmReset] = useState(false);
+	const [memoriesFilter, setMemoriesFilter] = useState<MemoryFilter | null>(null);
 
 	// Load config and stats on mount
 	useEffect(() => {
@@ -375,10 +376,7 @@ export function MemorySettings({
 							projectPath={projectPath}
 							onUpdateConfig={updateConfig}
 							onViewMemories={(skillAreaId) => {
-								// Switch to memories tab — the filter will be
-								// handled by the user selecting the skill in the
-								// Memories tab's own filter controls.
-								void skillAreaId;
+								setMemoriesFilter(skillAreaId ? { skillAreaId } : null);
 								setActiveSubTab('memories');
 							}}
 							onHierarchyChange={onHierarchyChange}
@@ -404,6 +402,8 @@ export function MemorySettings({
 							projectPath={projectPath}
 							onUpdateConfig={updateConfig}
 							onRefresh={refreshStats}
+							initialFilter={memoriesFilter}
+							onClearFilter={() => setMemoriesFilter(null)}
 						/>
 					)}
 					{activeSubTab === 'status' && (
