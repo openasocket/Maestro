@@ -213,10 +213,10 @@ export function MemorySettings({
 	}
 
 	return (
-		<div className="space-y-4">
+		<div className="flex flex-col gap-4" style={{ height: '100%' }}>
 			{/* Master Toggle */}
 			<div
-				className="rounded-lg border p-4"
+				className="shrink-0 rounded-lg border p-4"
 				style={{
 					borderColor: config.enabled ? theme.colors.accent : theme.colors.border,
 					backgroundColor: config.enabled ? `${theme.colors.accent}08` : 'transparent',
@@ -271,7 +271,7 @@ export function MemorySettings({
 
 			{/* Config panel — shown when enabled */}
 			{config.enabled && (
-				<>
+				<div className="flex flex-col flex-1 min-h-0 gap-4">
 					{/* Seed Defaults Button */}
 					<button
 						className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg border text-xs font-medium transition-colors"
@@ -332,7 +332,7 @@ export function MemorySettings({
 
 					{/* Sub-Tab Navigation Bar */}
 					<div
-						className="sticky top-0 z-10 flex gap-1.5 py-2 px-1 -mx-1 overflow-x-auto"
+						className="shrink-0 sticky top-0 z-10 flex gap-1.5 py-2 px-1 -mx-1 overflow-x-auto"
 						style={{
 							backgroundColor: theme.colors.bgSidebar,
 							borderBottom: `1px solid ${theme.colors.border}`,
@@ -382,68 +382,78 @@ export function MemorySettings({
 						})}
 					</div>
 
-					{/* Active Sub-Tab Content */}
-					{activeSubTab === 'personas' && (
-						<PersonasTab
-							theme={theme}
-							config={config}
-							stats={stats}
-							projectPath={projectPath}
-							onHierarchyChange={onHierarchyChange}
-							onRefresh={refreshStats}
-						/>
-					)}
-					{activeSubTab === 'skills' && (
-						<SkillsTab
-							theme={theme}
-							config={config}
-							stats={stats}
-							projectPath={projectPath}
-							onUpdateConfig={updateConfig}
-							onViewMemories={(skillAreaId) => {
-								setMemoriesFilter(skillAreaId ? { skillAreaId } : null);
-								setActiveSubTab('memories');
-							}}
-							onHierarchyChange={onHierarchyChange}
-						/>
-					)}
-					{activeSubTab === 'experiences' && (
-						<ExperiencesTab
-							theme={theme}
-							config={config}
-							stats={stats}
-							projectPath={projectPath}
-							onUpdateConfig={updateConfig}
-							onRefresh={refreshStats}
-							activeAgentId={activeAgentId}
-							activeAgentType={activeAgentType}
-						/>
-					)}
-					{activeSubTab === 'memories' && (
-						<MemoriesTab
-							theme={theme}
-							config={config}
-							stats={stats}
-							projectPath={projectPath}
-							onUpdateConfig={updateConfig}
-							onRefresh={refreshStats}
-							initialFilter={memoriesFilter}
-							onClearFilter={() => setMemoriesFilter(null)}
-						/>
-					)}
-					{activeSubTab === 'config' && (
-						<ConfigTab theme={theme} config={config} stats={stats} onUpdateConfig={updateConfig} />
-					)}
-					{activeSubTab === 'status' && (
-						<StatusTab
-							theme={theme}
-							config={config}
-							stats={stats}
-							projectPath={projectPath}
-							onConfigChange={refreshConfigAndStats}
-						/>
-					)}
-				</>
+					{/* Active Sub-Tab Content — constrained height for per-tab scrolling */}
+					<div
+						className="flex-1 min-h-0 flex flex-col"
+						style={{ maxHeight: 'calc(100vh - 420px)' }}
+					>
+						{activeSubTab === 'personas' && (
+							<PersonasTab
+								theme={theme}
+								config={config}
+								stats={stats}
+								projectPath={projectPath}
+								onHierarchyChange={onHierarchyChange}
+								onRefresh={refreshStats}
+							/>
+						)}
+						{activeSubTab === 'skills' && (
+							<SkillsTab
+								theme={theme}
+								config={config}
+								stats={stats}
+								projectPath={projectPath}
+								onUpdateConfig={updateConfig}
+								onViewMemories={(skillAreaId) => {
+									setMemoriesFilter(skillAreaId ? { skillAreaId } : null);
+									setActiveSubTab('memories');
+								}}
+								onHierarchyChange={onHierarchyChange}
+							/>
+						)}
+						{activeSubTab === 'experiences' && (
+							<ExperiencesTab
+								theme={theme}
+								config={config}
+								stats={stats}
+								projectPath={projectPath}
+								onUpdateConfig={updateConfig}
+								onRefresh={refreshStats}
+								activeAgentId={activeAgentId}
+								activeAgentType={activeAgentType}
+							/>
+						)}
+						{activeSubTab === 'memories' && (
+							<MemoriesTab
+								theme={theme}
+								config={config}
+								stats={stats}
+								projectPath={projectPath}
+								onUpdateConfig={updateConfig}
+								onRefresh={refreshStats}
+								initialFilter={memoriesFilter}
+								onClearFilter={() => setMemoriesFilter(null)}
+							/>
+						)}
+						{activeSubTab === 'config' && (
+							<ConfigTab
+								theme={theme}
+								config={config}
+								stats={stats}
+								onUpdateConfig={updateConfig}
+							/>
+						)}
+						{activeSubTab === 'status' && (
+							<StatusTab
+								theme={theme}
+								config={config}
+								stats={stats}
+								projectPath={projectPath}
+								onConfigChange={refreshConfigAndStats}
+							/>
+						)}
+					</div>
+				</div>
 			)}
 		</div>
 	);
