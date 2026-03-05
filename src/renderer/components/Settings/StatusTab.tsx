@@ -9,6 +9,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
 	AlertTriangle,
 	Archive,
+	ArrowRightLeft,
 	ChevronDown,
 	ChevronRight,
 	Zap,
@@ -147,6 +148,9 @@ export function StatusTab({
 
 			{/* Section 5: Promotion History */}
 			<PromotionHistorySection theme={theme} allMemories={allMemories} />
+
+			{/* Section 6: Persona Shifts */}
+			<PersonaShiftSection theme={theme} config={config} allMemories={allMemories} />
 		</div>
 	);
 }
@@ -1682,6 +1686,311 @@ function PromotionHistorySection({
 							</div>
 						</div>
 					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
+// ─── Section 6: Persona Shifts ──────────────────────────────────────────────────
+
+interface PersonaShiftRecord {
+	timestamp: number;
+	sessionId: string;
+	fromPersona: { id: string; name: string; score: number };
+	toPersona: { id: string; name: string; score: number };
+	triggerContext: string;
+}
+
+function PersonaShiftSection({
+	theme,
+	config,
+	allMemories,
+}: {
+	theme: Theme;
+	config: MemoryConfig;
+	allMemories: MemoryEntry[];
+}) {
+	const [collapsed, setCollapsed] = useState(true);
+	const [shifts, setShifts] = useState<PersonaShiftRecord[]>([]);
+	const [injections, setInjections] = useState<InjectionEventRecord[]>([]);
+	const [loaded, setLoaded] = useState(false);
+
+	useEffect(() => {
+		if (!config.enabled) return;
+		let cancelled = false;
+		Promise.allSettled([
+			window.maestro.memory.getPersonaShifts(100),
+			window.maestro.memory.getRecentInjections(200),
+		]).then(([shiftResult, injResult]) => {
+			if (cancelled) return;
+			if (shiftResult.status === 'fulfilled' && shiftResult.value.success) {
+				setShifts(shiftResult.value.data as PersonaShiftRecord[]);
+			}
+			if (injResult.status === 'fulfilled' && injResult.value.success) {
+				setInjections((injResult.value as { success: true; data: InjectionEventRecord[] }).data);
+			}
+			setLoaded(true);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [config.enabled]);
+
+	const sevenDaysAgo = Date.now() - 7 * 86400000;
+
+	// Persona usage: count how many times each persona was matched in the last 7 days
+	const personaUsage = useMemo(() => {
+		const counts = new Map<string, { name: string; count: number }>();
+		for (const ev of injections) {
+			if (ev.timestamp < sevenDaysAgo || !ev.matchedPersonas) continue;
+			for (const p of ev.matchedPersonas) {
+				const existing = counts.get(p.personaId);
+				if (existing) {
+					existing.count++;
+				} else {
+					counts.set(p.personaId, { name: p.personaName, count: 1 });
+				}
+			}
+		}
+		return Array.from(counts.entries())
+			.map(([id, v]) => ({ id, name: v.name, count: v.count }))
+			.sort((a, b) => b.count - a.count);
+	}, [injections, sevenDaysAgo]);
+
+	const maxUsageCount = Math.max(...personaUsage.map((p) => p.count), 1);
+
+	// Shift frequency in last 7 days
+	const recentShifts = useMemo(
+		() => shifts.filter((s) => s.timestamp >= sevenDaysAgo),
+		[shifts, sevenDaysAgo]
+	);
+
+	// Never-matched personas: personas from allMemories that have never appeared in any injection event
+	const neverMatched = useMemo(() => {
+		const matchedIds = new Set<string>();
+		for (const ev of injections) {
+			if (ev.matchedPersonas) {
+				for (const p of ev.matchedPersonas) matchedIds.add(p.personaId);
+			}
+		}
+		// Collect unique personas from memories
+		const personaMap = new Map<string, string>();
+		for (const m of allMemories) {
+			if (m.personaId && !personaMap.has(m.personaId)) {
+				personaMap.set(
+					m.personaId,
+					(m as MemoryEntry & { personaName?: string }).personaName ?? m.personaId
+				);
+			}
+		}
+		return Array.from(personaMap.entries())
+			.filter(([id]) => !matchedIds.has(id))
+			.map(([id, name]) => ({ id, name }));
+	}, [injections, allMemories]);
+
+	if (!config.enabled) return null;
+
+	return (
+		<div className="rounded-lg border p-4 space-y-3" style={{ borderColor: theme.colors.border }}>
+			<button className="flex items-center gap-2 w-full" onClick={() => setCollapsed(!collapsed)}>
+				{collapsed ? (
+					<ChevronRight className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+				) : (
+					<ChevronDown className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.textDim }} />
+				)}
+				<ArrowRightLeft className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.accent }} />
+				<span className="text-xs font-bold" style={{ color: theme.colors.textMain }}>
+					Persona Shifts
+				</span>
+				<span className="text-[10px] ml-auto" style={{ color: theme.colors.textDim }}>
+					{loaded
+						? `${recentShifts.length} shift${recentShifts.length !== 1 ? 's' : ''} (7d)`
+						: '...'}
+				</span>
+			</button>
+
+			{!collapsed && (
+				<div className="space-y-3 pt-1">
+					{!loaded && (
+						<div className="text-xs" style={{ color: theme.colors.textDim }}>
+							Loading...
+						</div>
+					)}
+
+					{/* Persona Usage Chart (horizontal bars) */}
+					{loaded && personaUsage.length > 0 && (
+						<div className="space-y-1">
+							<div className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
+								Persona Match Frequency (7 days)
+							</div>
+							<div className="space-y-1">
+								{personaUsage.map((p) => (
+									<div key={p.id} className="flex items-center gap-2 text-[10px]">
+										<span
+											className="w-24 truncate text-right shrink-0"
+											style={{ color: theme.colors.textMain }}
+											title={p.name}
+										>
+											{p.name}
+										</span>
+										<div
+											className="flex-1 h-3 rounded-full overflow-hidden"
+											style={{ backgroundColor: `${theme.colors.border}30` }}
+										>
+											<div
+												className="h-full rounded-full"
+												style={{
+													width: `${(p.count / maxUsageCount) * 100}%`,
+													backgroundColor: theme.colors.accent,
+												}}
+											/>
+										</div>
+										<span
+											className="w-6 text-right shrink-0"
+											style={{ color: theme.colors.textDim }}
+										>
+											{p.count}
+										</span>
+									</div>
+								))}
+							</div>
+						</div>
+					)}
+
+					{loaded && personaUsage.length === 0 && injections.length > 0 && (
+						<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
+							No persona matches recorded in the last 7 days.
+						</div>
+					)}
+
+					{/* Shift Frequency Summary */}
+					{loaded && recentShifts.length > 0 && (
+						<div
+							className="rounded p-2 text-[10px]"
+							style={{ backgroundColor: `${theme.colors.border}15` }}
+						>
+							<span style={{ color: theme.colors.textMain }}>
+								{recentShifts.length} persona shift{recentShifts.length !== 1 ? 's' : ''} detected
+								in the last 7 days
+							</span>
+							{recentShifts.length >= 10 && (
+								<span style={{ color: '#eab308' }}>
+									{' '}
+									— high shift count may indicate personas need better differentiation or the
+									hierarchy needs reorganization
+								</span>
+							)}
+						</div>
+					)}
+
+					{/* Shift Timeline */}
+					{loaded && recentShifts.length > 0 && (
+						<div className="space-y-1">
+							<div className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
+								Shift Timeline
+							</div>
+							<div className="space-y-1 max-h-60 overflow-y-auto scrollbar-thin">
+								{recentShifts.slice(0, 20).map((shift, i) => (
+									<div
+										key={`${shift.timestamp}-${i}`}
+										className="rounded border p-2 space-y-1"
+										style={{ borderColor: theme.colors.border }}
+									>
+										<div className="flex items-center gap-1.5 text-[10px] flex-wrap">
+											<span
+												className="px-1.5 py-0.5 rounded"
+												style={{
+													backgroundColor: `${theme.colors.border}40`,
+													color: theme.colors.textMain,
+												}}
+											>
+												{shift.fromPersona.name}
+											</span>
+											<ArrowRightLeft
+												className="w-3 h-3 shrink-0"
+												style={{ color: theme.colors.textDim }}
+											/>
+											<span
+												className="px-1.5 py-0.5 rounded"
+												style={{
+													backgroundColor: `${theme.colors.accent}20`,
+													color: theme.colors.accent,
+												}}
+											>
+												{shift.toPersona.name}
+											</span>
+											<span className="ml-auto shrink-0" style={{ color: theme.colors.textDim }}>
+												{formatRelativeTime(shift.timestamp)}
+											</span>
+										</div>
+										<div className="flex items-center gap-1.5 text-[9px]">
+											<span style={{ color: theme.colors.textDim }}>
+												{shift.fromPersona.score.toFixed(2)} → {shift.toPersona.score.toFixed(2)}
+											</span>
+											<span style={{ color: theme.colors.textDim }}>
+												· {shift.sessionId.slice(0, 12)}...
+											</span>
+										</div>
+										{shift.triggerContext && (
+											<div
+												className="text-[9px] italic truncate"
+												style={{ color: theme.colors.textDim }}
+												title={shift.triggerContext}
+											>
+												{shift.triggerContext.length > 100
+													? `${shift.triggerContext.slice(0, 100)}...`
+													: shift.triggerContext}
+											</div>
+										)}
+									</div>
+								))}
+							</div>
+						</div>
+					)}
+
+					{/* Never-Matched Personas */}
+					{loaded && neverMatched.length > 0 && (
+						<div className="space-y-1">
+							<div className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
+								Never-Matched Personas
+							</div>
+							<div
+								className="rounded p-2 space-y-0.5 text-[10px]"
+								style={{ backgroundColor: `${theme.colors.border}10` }}
+							>
+								<div style={{ color: '#eab308' }}>
+									{neverMatched.length} persona{neverMatched.length !== 1 ? 's have' : ' has'} never
+									been matched to any task. Consider improving descriptions/embeddings or removing
+									unnecessary personas.
+								</div>
+								<div className="flex flex-wrap gap-1 mt-1">
+									{neverMatched.map((p) => (
+										<span
+											key={p.id}
+											className="px-1.5 py-0.5 rounded"
+											style={{
+												backgroundColor: `${theme.colors.border}30`,
+												color: theme.colors.textDim,
+											}}
+										>
+											{p.name}
+										</span>
+									))}
+								</div>
+							</div>
+						</div>
+					)}
+
+					{loaded &&
+						shifts.length === 0 &&
+						personaUsage.length === 0 &&
+						neverMatched.length === 0 && (
+							<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
+								No persona activity recorded yet. Start agent sessions to begin tracking persona
+								matches and shifts.
+							</div>
+						)}
 				</div>
 			)}
 		</div>
