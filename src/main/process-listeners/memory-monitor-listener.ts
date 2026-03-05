@@ -32,6 +32,19 @@ import type {
 	CheckpointInjectionEvent,
 } from '../../shared/memory-types';
 
+/** Per-turn tool execution log entry for rich extraction */
+export interface TurnToolLog {
+	turnIndex: number;
+	startedAt: number;
+	tools: Array<{
+		name: string;
+		input: string;
+		success: boolean;
+		durationMs: number;
+	}>;
+	errors: string[];
+}
+
 export interface SessionMonitorState {
 	sessionId: string;
 	agentType: string;
@@ -82,6 +95,8 @@ export interface SessionMonitorState {
 	contextPressureFired: boolean;
 	/** Checkpoint injection events for UI display */
 	checkpointEvents: CheckpointInjectionEvent[];
+	/** Accumulated per-turn tool execution logs for rich extraction (MEM-EVOLVE-05) */
+	sessionToolLog: TurnToolLog[];
 }
 
 /** Memory store shape used by this listener */
@@ -456,12 +471,61 @@ async function defaultGetMemoryAccessors(): Promise<MemoryModuleAccessors | null
 	}
 }
 
+/**
+ * Summarize tool input for compact display in the tool execution log.
+ * Inspired by claude-subconscious transcript_utils — shows just enough
+ * to reconstruct the operational sequence.
+ */
+function summarizeToolInput(toolName: string, state: unknown): string {
+	if (!state || typeof state !== 'object') return '';
+	const s = state as Record<string, unknown>;
+
+	switch (toolName) {
+		case 'Read':
+		case 'Write':
+		case 'Edit':
+			return String(s.file_path ?? s.filePath ?? '');
+		case 'Bash':
+			return String(s.command ?? '').slice(0, 150);
+		case 'Grep':
+			return `${String(s.pattern ?? '')} ${String(s.path ?? '')}`.trim();
+		case 'Glob':
+			return `${String(s.pattern ?? '')} ${String(s.path ?? '')}`.trim();
+		case 'Agent':
+			return String(s.description ?? '');
+		case 'WebFetch':
+			return String(s.url ?? '');
+		default: {
+			try {
+				return JSON.stringify(s).slice(0, 100);
+			} catch {
+				return '';
+			}
+		}
+	}
+}
+
+/** Module-level ref to sessionStates for the accessor */
+let _sessionStatesRef: Map<string, SessionMonitorState> | null = null;
+
+/**
+ * Get the accumulated per-turn tool execution log for a session.
+ * Used by gatherRichSessionData() in experience-analyzer.ts (MEM-EVOLVE-05).
+ */
+export function getSessionToolLog(sessionId: string): TurnToolLog[] | null {
+	if (!_sessionStatesRef) return null;
+	const state = _sessionStatesRef.get(sessionId);
+	if (!state) return null;
+	return state.sessionToolLog.length > 0 ? state.sessionToolLog : null;
+}
+
 export function setupMemoryMonitorListener(
 	processManager: ProcessManager,
 	deps: Pick<ProcessListenerDependencies, 'logger' | 'patterns'>,
 	memoryAccessors?: MemoryModuleAccessors
 ): void {
 	const sessionStates = new Map<string, SessionMonitorState>();
+	_sessionStatesRef = sessionStates;
 	const { logger, patterns } = deps;
 	const { REGEX_BATCH_SESSION, REGEX_SYNOPSIS_SESSION } = patterns;
 
@@ -505,6 +569,7 @@ export function setupMemoryMonitorListener(
 				checkpointCooldowns: new Map(),
 				contextPressureFired: false,
 				checkpointEvents: [],
+				sessionToolLog: [],
 			};
 			sessionStates.set(sessionId, state);
 
@@ -1147,6 +1212,26 @@ export function setupMemoryMonitorListener(
 					if (!state) return;
 
 					state.turnIndex = turnIndex;
+
+					// Accumulate per-turn tool log for rich extraction (MEM-EVOLVE-05)
+					if (state.currentTurnToolExecutions.length > 0 || state.currentTurnErrors.length > 0) {
+						const turnLog: TurnToolLog = {
+							turnIndex,
+							startedAt: state.currentTurnStartedAt || Date.now(),
+							tools: state.currentTurnToolExecutions.map((te) => ({
+								name: te.toolName,
+								input: summarizeToolInput(te.toolName, te.state),
+								success: true, // ToolExecution doesn't track failure; errors captured separately
+								durationMs: 0, // ToolExecution doesn't track duration
+							})),
+							errors: state.currentTurnErrors.map((e) => e.message || String(e)),
+						};
+						state.sessionToolLog.push(turnLog);
+						// Cap at 50 turns to prevent memory bloat
+						if (state.sessionToolLog.length > 50) {
+							state.sessionToolLog = state.sessionToolLog.slice(-50);
+						}
+					}
 
 					// Skip excluded session types (same exclusions as existing monitor)
 					if (sessionId.startsWith(GROUP_CHAT_PREFIX)) return;

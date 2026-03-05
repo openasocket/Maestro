@@ -987,38 +987,30 @@ export class ExperienceAnalyzer {
 			// Persona selection unavailable — proceed without
 		}
 
-		// Per-turn tool execution log (populated by MEM-EVOLVE-05 task #3 — sessionToolLog)
-		// The getSessionToolLog accessor is added by a later task; check dynamically
+		// Per-turn tool execution log from memory monitor (MEM-EVOLVE-05)
 		try {
-			 
-			const monitorModule = (await import('../process-listeners/memory-monitor-listener')) as any;
-			if (typeof monitorModule.getSessionToolLog === 'function') {
-				const toolLog = monitorModule.getSessionToolLog(sessionId) as Array<{
-					turnIndex: number;
-					tools: Array<{ name: string; input: string; success: boolean; durationMs: number }>;
-					errors: string[];
-				}> | null;
-				if (toolLog && toolLog.length > 0) {
-					const logText = toolLog
-						.map((turn) => {
-							const toolLines = turn.tools
-								.map(
-									(t) =>
-										`      Agent: ${t.name} ${t.input}${t.success ? '' : ' [FAILED]'} (${t.durationMs}ms)`
-								)
-								.join('\n');
-							const errorLines =
-								turn.errors.length > 0
-									? turn.errors.map((e: string) => `      Error: ${e}`).join('\n')
-									: '';
-							return `    Turn ${turn.turnIndex}:\n${toolLines}${errorLines ? '\n' + errorLines : ''}`;
-						})
-						.join('\n');
-					input.toolExecutionLog = logText.slice(0, 15000);
-				}
+			const { getSessionToolLog } = await import('../process-listeners/memory-monitor-listener');
+			const toolLog = getSessionToolLog(sessionId);
+			if (toolLog && toolLog.length > 0) {
+				const logText = toolLog
+					.map((turn) => {
+						const toolLines = turn.tools
+							.map(
+								(t) =>
+									`      Agent: ${t.name} ${t.input}${t.success ? '' : ' [FAILED]'} (${t.durationMs}ms)`
+							)
+							.join('\n');
+						const errorLines =
+							turn.errors.length > 0
+								? turn.errors.map((e: string) => `      Error: ${e}`).join('\n')
+								: '';
+						return `    Turn ${turn.turnIndex}:\n${toolLines}${errorLines ? '\n' + errorLines : ''}`;
+					})
+					.join('\n');
+				input.toolExecutionLog = logText.slice(0, 15000);
 			}
 		} catch {
-			// Tool log not yet available — proceed without
+			// Tool log not available — proceed without
 		}
 
 		return input;
