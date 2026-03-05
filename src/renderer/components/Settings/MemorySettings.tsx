@@ -332,8 +332,13 @@ export function MemorySettings({
 
 					{/* Sub-Tab Navigation Bar */}
 					<div
-						className="sticky top-0 z-10 flex gap-1.5 py-2 px-1 -mx-1 rounded-lg overflow-x-auto"
-						style={{ backgroundColor: theme.colors.bgSidebar }}
+						className="sticky top-0 z-10 flex gap-1.5 py-2 px-1 -mx-1 overflow-x-auto"
+						style={{
+							backgroundColor: theme.colors.bgSidebar,
+							borderBottom: `1px solid ${theme.colors.border}`,
+							paddingBottom: '8px',
+							marginBottom: '4px',
+						}}
 					>
 						{MEMORY_SUB_TABS.map((tab) => {
 							const isActive = activeSubTab === tab.id;
@@ -343,11 +348,15 @@ export function MemorySettings({
 								<button
 									key={tab.id}
 									onClick={() => setActiveSubTab(tab.id)}
-									className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap shrink-0"
+									className="flex items-center gap-1.5 px-3 rounded-full text-xs font-medium transition-colors whitespace-nowrap shrink-0"
 									style={{
-										backgroundColor: isActive ? `${theme.colors.accent}20` : 'transparent',
+										minHeight: '36px',
+										backgroundColor: isActive ? `${theme.colors.accent}30` : 'transparent',
 										color: isActive ? theme.colors.accent : theme.colors.textDim,
 										border: `1px solid ${isActive ? theme.colors.accent : 'transparent'}`,
+										borderBottom: isActive
+											? `2px solid ${theme.colors.accent}`
+											: '2px solid transparent',
 									}}
 								>
 									<Icon
