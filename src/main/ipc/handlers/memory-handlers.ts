@@ -9,6 +9,7 @@
 
 import { ipcMain } from 'electron';
 import { promises as fs } from 'fs';
+import * as crypto from 'crypto';
 import { logger } from '../../utils/logger';
 import { createIpcDataHandler, CreateHandlerOptions } from '../../utils/ipcHandler';
 import type { MemoryStore } from '../../memory/memory-store';
@@ -1042,9 +1043,14 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 				const { addTrustedKey } = await import('../../memory/experience-bundle');
 				await addTrustedKey({
 					publicKey,
-					label,
-					addedAt: new Date().toISOString(),
-					isOfficial: false,
+					name: label,
+					addedAt: Date.now(),
+					expiresAt: 0,
+					fingerprint: crypto
+						.createHash('sha256')
+						.update(Buffer.from(publicKey, 'hex'))
+						.digest('hex')
+						.slice(0, 16),
 				});
 				return { added: true };
 			}

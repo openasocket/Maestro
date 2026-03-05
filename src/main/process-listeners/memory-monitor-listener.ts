@@ -266,7 +266,7 @@ async function defaultGetMemoryAccessors(): Promise<MemoryModuleAccessors | null
 		const rawStore = memStore.getMemoryStore();
 		return {
 			getMemoryStore: () => ({
-				getConfig: () => rawStore.getConfig(),
+				getConfig: () => rawStore.getConfig() as unknown as Promise<Record<string, unknown>>,
 				cascadingSearch: (q: string, c: unknown, a: string, p?: string) =>
 					rawStore.cascadingSearch(q, c as never, a, p),
 				selectMatchingPersonas: (q: string, c: unknown, a: string, p?: string) =>

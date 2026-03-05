@@ -3712,7 +3712,7 @@ export class MemoryStore {
 		let fileCount = 0;
 
 		const walk = async (dir: string): Promise<void> => {
-			let entries: fs.Dirent[];
+			let entries: import('fs').Dirent[];
 			try {
 				entries = await fs.readdir(dir, { withFileTypes: true });
 			} catch {
