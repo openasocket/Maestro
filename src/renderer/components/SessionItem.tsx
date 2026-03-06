@@ -1,5 +1,5 @@
-import React, { memo } from 'react';
-import { Activity, GitBranch, Bot, Bookmark, AlertCircle, Server } from 'lucide-react';
+import React, { memo, useEffect, useRef } from 'react';
+import { Activity, GitBranch, Bot, Bookmark, AlertCircle, Server, Sparkles } from 'lucide-react';
 import type { Session, Group, Theme } from '../types';
 import { getStatusColor } from '../utils/theme';
 
@@ -84,6 +84,20 @@ export const SessionItem = memo(function SessionItem({
 	onStartRename,
 	onToggleBookmark,
 }: SessionItemProps) {
+	// Track persona changes for pulse animation
+	const personaRef = useRef<HTMLDivElement>(null);
+	const prevPersonaId = useRef<string | undefined>(session.activePersona?.id);
+	useEffect(() => {
+		const currentId = session.activePersona?.id;
+		if (currentId && currentId !== prevPersonaId.current && personaRef.current) {
+			personaRef.current.style.opacity = '0.4';
+			requestAnimationFrame(() => {
+				if (personaRef.current) personaRef.current.style.opacity = '0.7';
+			});
+		}
+		prevPersonaId.current = currentId;
+	}, [session.activePersona?.id]);
+
 	// Determine if we show the GIT/LOCAL badge (not shown in bookmark variant, terminal sessions, or worktree variant)
 	const showGitLocalBadge =
 		variant !== 'bookmark' && variant !== 'worktree' && session.toolType !== 'terminal';
@@ -251,6 +265,24 @@ export const SessionItem = memo(function SessionItem({
 							{session.sessionSshRemoteConfig?.enabled ? 'REMOTE' : 'LOCAL'}
 						</div>
 					))}
+
+				{/* Active Persona Indicator (only in wide mode) */}
+				{session.activePersona && leftSidebarOpen && (
+					<div
+						ref={personaRef}
+						className="flex items-center gap-0.5 text-[9px] font-medium truncate"
+						style={{
+							color: theme.colors.accent,
+							maxWidth: '80px',
+							opacity: 0.7,
+							transition: 'opacity 0.3s ease-in-out',
+						}}
+						title={`Active persona: ${session.activePersona.name}`}
+					>
+						<Sparkles className="w-2.5 h-2.5 shrink-0" />
+						<span className="truncate">{session.activePersona.name}</span>
+					</div>
+				)}
 
 				{/* AUTO Mode Indicator */}
 				{isInBatch && (
