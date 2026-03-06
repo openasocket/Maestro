@@ -15,7 +15,7 @@ import { withIpcErrorLogging, type CreateHandlerOptions } from '../../utils/ipcH
 import { validateCueConfig } from '../../cue/cue-yaml-loader';
 import { CUE_YAML_FILENAME } from '../../cue/cue-types';
 import type { CueEngine } from '../../cue/cue-engine';
-import type { CueRunResult, CueSessionStatus } from '../../cue/cue-types';
+import type { CueGraphSession, CueRunResult, CueSessionStatus } from '../../cue/cue-types';
 
 const LOG_CONTEXT = '[Cue]';
 
@@ -139,6 +139,14 @@ export function registerCueHandlers(deps: CueHandlerDependencies): void {
 				requireEngine().refreshSession(options.sessionId, options.projectRoot);
 			}
 		)
+	);
+
+	// Get all sessions with their subscriptions (for graph visualization)
+	ipcMain.handle(
+		'cue:getGraphData',
+		withIpcErrorLogging(handlerOpts('getGraphData'), async (): Promise<CueGraphSession[]> => {
+			return requireEngine().getGraphData();
+		})
 	);
 
 	// Read raw YAML content from a session's maestro-cue.yaml

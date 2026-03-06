@@ -68,6 +68,28 @@ export function createCueApi() {
 		// Get status of all Cue-enabled sessions
 		getStatus: (): Promise<CueSessionStatus[]> => ipcRenderer.invoke('cue:getStatus'),
 
+		// Get all sessions with their subscriptions (for graph visualization)
+		getGraphData: (): Promise<
+			Array<{
+				sessionId: string;
+				sessionName: string;
+				toolType: string;
+				subscriptions: Array<{
+					name: string;
+					event: CueEventType;
+					enabled: boolean;
+					prompt: string;
+					interval_minutes?: number;
+					watch?: string;
+					source_session?: string | string[];
+					fan_out?: string[];
+					filter?: Record<string, string | number | boolean>;
+					repo?: string;
+					poll_minutes?: number;
+				}>;
+			}>
+		> => ipcRenderer.invoke('cue:getGraphData'),
+
 		// Get currently active Cue runs
 		getActiveRuns: (): Promise<CueRunResult[]> => ipcRenderer.invoke('cue:getActiveRuns'),
 

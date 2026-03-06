@@ -2744,6 +2744,32 @@ interface MaestroAPI {
 				nextTrigger?: string;
 			}>
 		>;
+		getGraphData: () => Promise<
+			Array<{
+				sessionId: string;
+				sessionName: string;
+				toolType: string;
+				subscriptions: Array<{
+					name: string;
+					event:
+						| 'time.interval'
+						| 'file.changed'
+						| 'agent.completed'
+						| 'github.pull_request'
+						| 'github.issue'
+						| 'task.pending';
+					enabled: boolean;
+					prompt: string;
+					interval_minutes?: number;
+					watch?: string;
+					source_session?: string | string[];
+					fan_out?: string[];
+					filter?: Record<string, string | number | boolean>;
+					repo?: string;
+					poll_minutes?: number;
+				}>;
+			}>
+		>;
 		getActiveRuns: () => Promise<
 			Array<{
 				runId: string;

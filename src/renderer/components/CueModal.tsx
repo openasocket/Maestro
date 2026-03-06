@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Zap, Square, HelpCircle, StopCircle, FileEdit } from 'lucide-react';
+import {
+	X,
+	Zap,
+	Square,
+	HelpCircle,
+	StopCircle,
+	FileEdit,
+	LayoutDashboard,
+	GitFork,
+	ArrowLeft,
+} from 'lucide-react';
 import type { Theme } from '../types';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
@@ -8,6 +18,9 @@ import { useCue } from '../hooks/useCue';
 import type { CueSessionStatus, CueRunResult } from '../hooks/useCue';
 import { CueYamlEditor } from './CueYamlEditor';
 import { CueHelpContent } from './CueHelpModal';
+import { CueGraphView } from './CueGraphView';
+
+type CueModalTab = 'dashboard' | 'graph';
 
 interface CueModalProps {
 	theme: Theme;
@@ -325,6 +338,9 @@ export function CueModal({ theme, onClose, cueShortcutKeys }: CueModalProps) {
 		};
 	}, [registerLayer, unregisterLayer]);
 
+	// Tab state
+	const [activeTab, setActiveTab] = useState<CueModalTab>('dashboard');
+
 	// Help modal state
 	const [showHelp, setShowHelp] = useState(false);
 
@@ -359,56 +375,118 @@ export function CueModal({ theme, onClose, cueShortcutKeys }: CueModalProps) {
 					<div
 						className="relative rounded-xl shadow-2xl flex flex-col"
 						style={{
-							width: 780,
-							maxHeight: '85vh',
+							width: '80vw',
+							maxWidth: 1400,
+							height: '85vh',
+							maxHeight: 900,
 							backgroundColor: theme.colors.bgMain,
 							border: `1px solid ${theme.colors.border}`,
 						}}
 					>
 						{/* Header */}
 						<div
-							className="flex items-center justify-between px-5 py-4 border-b"
+							className="flex items-center justify-between px-5 py-4 border-b shrink-0"
 							style={{ borderColor: theme.colors.border }}
 						>
 							<div className="flex items-center gap-3">
-								<Zap className="w-5 h-5" style={{ color: CUE_TEAL }} />
-								<h2 className="text-base font-bold" style={{ color: theme.colors.textMain }}>
-									Maestro Cue
-								</h2>
+								{showHelp ? (
+									<>
+										<button
+											onClick={() => setShowHelp(false)}
+											className="p-1 rounded-md hover:bg-white/10 transition-colors"
+											style={{ color: theme.colors.textDim }}
+											title="Back to dashboard"
+										>
+											<ArrowLeft className="w-4 h-4" />
+										</button>
+										<Zap className="w-5 h-5" style={{ color: CUE_TEAL }} />
+										<h2 className="text-base font-bold" style={{ color: theme.colors.textMain }}>
+											Maestro Cue Guide
+										</h2>
+									</>
+								) : (
+									<>
+										<Zap className="w-5 h-5" style={{ color: CUE_TEAL }} />
+										<h2 className="text-base font-bold" style={{ color: theme.colors.textMain }}>
+											Maestro Cue
+										</h2>
+
+										{/* Tab bar */}
+										<div
+											className="flex items-center gap-1 ml-3 rounded-md p-0.5"
+											style={{ backgroundColor: theme.colors.bgActivity }}
+										>
+											<button
+												onClick={() => setActiveTab('dashboard')}
+												className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors"
+												style={{
+													backgroundColor:
+														activeTab === 'dashboard' ? theme.colors.bgMain : 'transparent',
+													color:
+														activeTab === 'dashboard'
+															? theme.colors.textMain
+															: theme.colors.textDim,
+												}}
+											>
+												<LayoutDashboard className="w-3.5 h-3.5" />
+												Dashboard
+											</button>
+											<button
+												onClick={() => setActiveTab('graph')}
+												className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors"
+												style={{
+													backgroundColor:
+														activeTab === 'graph' ? theme.colors.bgMain : 'transparent',
+													color:
+														activeTab === 'graph' ? theme.colors.textMain : theme.colors.textDim,
+												}}
+											>
+												<GitFork className="w-3.5 h-3.5" />
+												Graph
+											</button>
+										</div>
+									</>
+								)}
 							</div>
 							<div className="flex items-center gap-3">
-								{/* Master toggle */}
-								<button
-									onClick={handleToggle}
-									className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
-									style={{
-										backgroundColor: isEnabled ? `${CUE_TEAL}20` : theme.colors.bgActivity,
-										color: isEnabled ? CUE_TEAL : theme.colors.textDim,
-									}}
-								>
-									<div
-										className="relative w-8 h-4 rounded-full transition-colors"
-										style={{ backgroundColor: isEnabled ? CUE_TEAL : theme.colors.border }}
-									>
-										<div
-											className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform"
+								{!showHelp && (
+									<>
+										{/* Master toggle */}
+										<button
+											onClick={handleToggle}
+											className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
 											style={{
-												transform: isEnabled ? 'translateX(17px)' : 'translateX(2px)',
+												backgroundColor: isEnabled ? `${CUE_TEAL}20` : theme.colors.bgActivity,
+												color: isEnabled ? CUE_TEAL : theme.colors.textDim,
 											}}
-										/>
-									</div>
-									{isEnabled ? 'Enabled' : 'Disabled'}
-								</button>
+										>
+											<div
+												className="relative w-8 h-4 rounded-full transition-colors"
+												style={{
+													backgroundColor: isEnabled ? CUE_TEAL : theme.colors.border,
+												}}
+											>
+												<div
+													className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform"
+													style={{
+														transform: isEnabled ? 'translateX(17px)' : 'translateX(2px)',
+													}}
+												/>
+											</div>
+											{isEnabled ? 'Enabled' : 'Disabled'}
+										</button>
 
-								{/* Help button */}
-								<button
-									onClick={() => setShowHelp(true)}
-									className="p-1.5 rounded-md hover:bg-white/10 transition-colors"
-									title="Help"
-									style={{ color: theme.colors.textDim }}
-								>
-									<HelpCircle className="w-4 h-4" />
-								</button>
+										{/* Help button */}
+										<button
+											onClick={() => setShowHelp(true)}
+											className="p-1.5 rounded-md hover:bg-white/10 transition-colors"
+											title="Help"
+											style={{ color: theme.colors.textDim }}
+										>
+											<HelpCircle className="w-4 h-4" />
+										</button>
+									</>
+								)}
 
 								{/* Close button */}
 								<button
@@ -422,88 +500,102 @@ export function CueModal({ theme, onClose, cueShortcutKeys }: CueModalProps) {
 						</div>
 
 						{/* Body */}
-						<div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-							{loading ? (
-								<div className="text-center py-12 text-sm" style={{ color: theme.colors.textDim }}>
-									Loading Cue status...
-								</div>
-							) : (
-								<>
-									{/* Section 1: Sessions with Cue */}
-									<div>
-										<h3
-											className="text-xs font-bold uppercase tracking-wider mb-3"
-											style={{ color: theme.colors.textDim }}
-										>
-											Sessions with Cue
-										</h3>
-										<SessionsTable
-											sessions={sessions}
-											theme={theme}
-											onEditYaml={handleEditYaml}
-											queueStatus={queueStatus}
-										/>
+						{showHelp ? (
+							<div className="flex-1 overflow-y-auto px-5 py-4">
+								<CueHelpContent theme={theme} cueShortcutKeys={cueShortcutKeys} />
+							</div>
+						) : activeTab === 'dashboard' ? (
+							<div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+								{loading ? (
+									<div
+										className="text-center py-12 text-sm"
+										style={{ color: theme.colors.textDim }}
+									>
+										Loading Cue status...
 									</div>
-
-									{/* Section 2: Active Runs */}
-									<div>
-										<button
-											onClick={() => setActiveRunsExpanded(!activeRunsExpanded)}
-											className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider mb-3 hover:opacity-80 transition-opacity"
-											style={{ color: theme.colors.textDim }}
-										>
-											Active Runs
-											{activeRuns.length > 0 && (
-												<span
-													className="px-1.5 py-0.5 rounded-full text-[10px] font-bold"
-													style={{ backgroundColor: CUE_TEAL, color: '#fff' }}
-												>
-													{activeRuns.length}
-												</span>
-											)}
-											{activeRuns.length > 0 && sessions.some((s) => s.activeRuns > 0) && (
-												<span
-													className="text-[10px] font-normal normal-case tracking-normal"
-													style={{ color: theme.colors.textDim }}
-												>
-													{sessions
-														.filter((s) => s.activeRuns > 0)
-														.map(
-															(s) =>
-																`${s.sessionName}: ${s.activeRuns} slot${s.activeRuns !== 1 ? 's' : ''} used`
-														)
-														.join(' · ')}
-												</span>
-											)}
-										</button>
-										{activeRunsExpanded && (
-											<ActiveRunsList
-												runs={activeRuns}
+								) : (
+									<>
+										{/* Section 1: Sessions with Cue */}
+										<div>
+											<h3
+												className="text-xs font-bold uppercase tracking-wider mb-3"
+												style={{ color: theme.colors.textDim }}
+											>
+												Sessions with Cue
+											</h3>
+											<SessionsTable
+												sessions={sessions}
 												theme={theme}
-												onStopRun={stopRun}
-												onStopAll={stopAll}
+												onEditYaml={handleEditYaml}
+												queueStatus={queueStatus}
 											/>
-										)}
-									</div>
-
-									{/* Section 3: Activity Log */}
-									<div>
-										<h3
-											className="text-xs font-bold uppercase tracking-wider mb-3"
-											style={{ color: theme.colors.textDim }}
-										>
-											Activity Log
-										</h3>
-										<div
-											className="max-h-64 overflow-y-auto rounded-md px-3 py-2"
-											style={{ backgroundColor: theme.colors.bgActivity }}
-										>
-											<ActivityLog log={activityLog} theme={theme} />
 										</div>
-									</div>
-								</>
-							)}
-						</div>
+
+										{/* Section 2: Active Runs */}
+										<div>
+											<button
+												onClick={() => setActiveRunsExpanded(!activeRunsExpanded)}
+												className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider mb-3 hover:opacity-80 transition-opacity"
+												style={{ color: theme.colors.textDim }}
+											>
+												Active Runs
+												{activeRuns.length > 0 && (
+													<span
+														className="px-1.5 py-0.5 rounded-full text-[10px] font-bold"
+														style={{
+															backgroundColor: CUE_TEAL,
+															color: '#fff',
+														}}
+													>
+														{activeRuns.length}
+													</span>
+												)}
+												{activeRuns.length > 0 && sessions.some((s) => s.activeRuns > 0) && (
+													<span
+														className="text-[10px] font-normal normal-case tracking-normal"
+														style={{ color: theme.colors.textDim }}
+													>
+														{sessions
+															.filter((s) => s.activeRuns > 0)
+															.map(
+																(s) =>
+																	`${s.sessionName}: ${s.activeRuns} slot${s.activeRuns !== 1 ? 's' : ''} used`
+															)
+															.join(' · ')}
+													</span>
+												)}
+											</button>
+											{activeRunsExpanded && (
+												<ActiveRunsList
+													runs={activeRuns}
+													theme={theme}
+													onStopRun={stopRun}
+													onStopAll={stopAll}
+												/>
+											)}
+										</div>
+
+										{/* Section 3: Activity Log */}
+										<div>
+											<h3
+												className="text-xs font-bold uppercase tracking-wider mb-3"
+												style={{ color: theme.colors.textDim }}
+											>
+												Activity Log
+											</h3>
+											<div
+												className="max-h-64 overflow-y-auto rounded-md px-3 py-2"
+												style={{ backgroundColor: theme.colors.bgActivity }}
+											>
+												<ActivityLog log={activityLog} theme={theme} />
+											</div>
+										</div>
+									</>
+								)}
+							</div>
+						) : (
+							<CueGraphView theme={theme} onClose={onClose} />
+						)}
 					</div>
 				</div>,
 				document.body

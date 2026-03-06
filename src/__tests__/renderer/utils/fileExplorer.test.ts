@@ -477,6 +477,26 @@ describe('fileExplorer utils', () => {
 			expect(result.find((n) => n.name === 'src')).toBeDefined();
 		});
 
+		it('always shows maestro-cue.yaml even when it matches ignore patterns', async () => {
+			vi.mocked(window.maestro.fs.readDir).mockResolvedValueOnce([
+				{ name: 'maestro-cue.yaml', isFile: true, isDirectory: false },
+				{ name: 'other.yaml', isFile: true, isDirectory: false },
+				{ name: 'src', isFile: false, isDirectory: true },
+			]);
+			vi.mocked(window.maestro.fs.readDir).mockResolvedValue([]);
+
+			// Use ignore patterns that would match yaml files
+			const result = await loadFileTree('/project', 10, 0, undefined, undefined, {
+				ignorePatterns: ['*.yaml'],
+			});
+
+			// maestro-cue.yaml should survive despite matching *.yaml
+			expect(result.find((n) => n.name === 'maestro-cue.yaml')).toBeDefined();
+			// other.yaml should be filtered out
+			expect(result.find((n) => n.name === 'other.yaml')).toBeUndefined();
+			expect(result.find((n) => n.name === 'src')).toBeDefined();
+		});
+
 		it('deduplicates entries returned by readDir', async () => {
 			vi.mocked(window.maestro.fs.readDir).mockResolvedValueOnce([
 				{ name: 'src', isFile: false, isDirectory: true, path: '/project/src' },

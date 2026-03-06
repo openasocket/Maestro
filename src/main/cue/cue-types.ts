@@ -107,5 +107,13 @@ export interface AgentCompletionData {
 	triggeredBy?: string;
 }
 
+/** Session data with subscriptions for the Cue Graph visualization */
+export interface CueGraphSession {
+	sessionId: string;
+	sessionName: string;
+	toolType: string;
+	subscriptions: CueSubscription[];
+}
+
 /** Default filename for Cue configuration */
 export const CUE_YAML_FILENAME = 'maestro-cue.yaml';

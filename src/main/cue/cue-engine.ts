@@ -17,6 +17,7 @@ import type {
 	AgentCompletionData,
 	CueConfig,
 	CueEvent,
+	CueGraphSession,
 	CueRunResult,
 	CueSessionStatus,
 	CueSubscription,
@@ -289,6 +290,26 @@ export class CueEngine {
 				result.set(sessionId, queue.length);
 			}
 		}
+		return result;
+	}
+
+	/** Returns all sessions with their parsed subscriptions (for graph visualization) */
+	getGraphData(): CueGraphSession[] {
+		const result: CueGraphSession[] = [];
+		const allSessions = this.deps.getSessions();
+
+		for (const [sessionId, state] of this.sessions) {
+			const session = allSessions.find((s) => s.id === sessionId);
+			if (!session) continue;
+
+			result.push({
+				sessionId,
+				sessionName: session.name,
+				toolType: session.toolType,
+				subscriptions: state.config.subscriptions,
+			});
+		}
+
 		return result;
 	}
 

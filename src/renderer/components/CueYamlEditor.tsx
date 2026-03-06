@@ -405,7 +405,7 @@ export function CueYamlEditor({
 	return (
 		<Modal
 			theme={theme}
-			title="Edit maestro-cue.yaml"
+			title={`Edit maestro-cue.yaml${session?.name ? ` — ${session.name}` : ''}`}
 			priority={MODAL_PRIORITIES.CUE_YAML_EDITOR}
 			onClose={handleClose}
 			width={1200}
