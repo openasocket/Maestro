@@ -7,8 +7,9 @@
  * All channels are prefixed with `memory:` and subnamespaced by entity type.
  */
 
-import { app, ipcMain } from 'electron';
+import { app, ipcMain, BrowserWindow } from 'electron';
 import { promises as fs } from 'fs';
+import * as path from 'path';
 import * as crypto from 'crypto';
 import { logger } from '../../utils/logger';
 import { createIpcDataHandler, CreateHandlerOptions } from '../../utils/ipcHandler';
@@ -51,7 +52,7 @@ export interface MemoryHandlerDependencies {
  * Register all memory IPC handlers.
  */
 export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
-	const { memoryStore } = deps;
+	const { memoryStore, settingsStore } = deps;
 
 	// ─── Initialize Memory Injector Settings ─────────────────────────────
 	// Cache the file-based config for synchronous access in the injector.
@@ -144,7 +145,7 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 
 	ipcMain.handle(
 		'memory:role:list',
-		createIpcDataHandler(handlerOpts('role:list'), async () => {
+		createIpcDataHandler({ ...handlerOpts('role:list'), logSuccess: false }, async () => {
 			return memoryStore.listRoles();
 		})
 	);
@@ -292,9 +293,12 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 
 	ipcMain.handle(
 		'memory:skill:list',
-		createIpcDataHandler(handlerOpts('skill:list'), async (personaId?: string) => {
-			return memoryStore.listSkillAreas(personaId);
-		})
+		createIpcDataHandler(
+			{ ...handlerOpts('skill:list'), logSuccess: false },
+			async (personaId?: string) => {
+				return memoryStore.listSkillAreas(personaId);
+			}
+		)
 	);
 
 	ipcMain.handle(
@@ -336,7 +340,7 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 	ipcMain.handle(
 		'memory:list',
 		createIpcDataHandler(
-			handlerOpts('memory:list'),
+			{ ...handlerOpts('memory:list'), logSuccess: false },
 			async (
 				scope: MemoryScope,
 				skillAreaId?: SkillAreaId,
@@ -417,51 +421,54 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 
 	ipcMain.handle(
 		'memory:listAllExperiences',
-		createIpcDataHandler(handlerOpts('listAllExperiences'), async (projectPath?: string) => {
-			const registry = await memoryStore.getCachedRegistry();
-			const results: Array<
-				MemoryEntry & { scopeLabel: string; skillAreaName?: string; personaName?: string }
-			> = [];
+		createIpcDataHandler(
+			{ ...handlerOpts('listAllExperiences'), logSuccess: false },
+			async (projectPath?: string) => {
+				const registry = await memoryStore.getCachedRegistry();
+				const results: Array<
+					MemoryEntry & { scopeLabel: string; skillAreaName?: string; personaName?: string }
+				> = [];
 
-			// 1. Skill-scoped experiences
-			for (const skill of registry.skillAreas) {
-				if (!skill.active) continue;
-				const entries = await memoryStore.listMemories('skill', skill.id);
-				const persona = registry.personas.find((p) => p.id === skill.personaId);
-				for (const entry of entries) {
-					if (entry.type === 'experience') {
-						results.push({
-							...entry,
-							scopeLabel: `${persona?.name ?? 'Unknown'} → ${skill.name}`,
-							skillAreaName: skill.name,
-							personaName: persona?.name,
-						});
+				// 1. Skill-scoped experiences
+				for (const skill of registry.skillAreas) {
+					if (!skill.active) continue;
+					const entries = await memoryStore.listMemories('skill', skill.id);
+					const persona = registry.personas.find((p) => p.id === skill.personaId);
+					for (const entry of entries) {
+						if (entry.type === 'experience') {
+							results.push({
+								...entry,
+								scopeLabel: `${persona?.name ?? 'Unknown'} → ${skill.name}`,
+								skillAreaName: skill.name,
+								personaName: persona?.name,
+							});
+						}
 					}
 				}
-			}
 
-			// 2. Project-scoped experiences
-			if (projectPath) {
-				const projectEntries = await memoryStore.listMemories('project', undefined, projectPath);
-				for (const entry of projectEntries) {
-					if (entry.type === 'experience') {
-						results.push({ ...entry, scopeLabel: 'Project' });
+				// 2. Project-scoped experiences
+				if (projectPath) {
+					const projectEntries = await memoryStore.listMemories('project', undefined, projectPath);
+					for (const entry of projectEntries) {
+						if (entry.type === 'experience') {
+							results.push({ ...entry, scopeLabel: 'Project' });
+						}
 					}
 				}
-			}
 
-			// 3. Global experiences
-			const globalEntries = await memoryStore.listMemories('global');
-			for (const entry of globalEntries) {
-				if (entry.type === 'experience') {
-					results.push({ ...entry, scopeLabel: 'Global' });
+				// 3. Global experiences
+				const globalEntries = await memoryStore.listMemories('global');
+				for (const entry of globalEntries) {
+					if (entry.type === 'experience') {
+						results.push({ ...entry, scopeLabel: 'Global' });
+					}
 				}
-			}
 
-			// Sort by createdAt descending (most recent first)
-			results.sort((a, b) => b.createdAt - a.createdAt);
-			return results;
-		})
+				// Sort by createdAt descending (most recent first)
+				results.sort((a, b) => b.createdAt - a.createdAt);
+				return results;
+			}
+		)
 	);
 
 	// ─── Move Scope ───────────────────────────────────────────────────────
@@ -536,7 +543,7 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 	ipcMain.handle(
 		'memory:listArchived',
 		createIpcDataHandler(
-			handlerOpts('memory:listArchived'),
+			{ ...handlerOpts('memory:listArchived'), logSuccess: false },
 			async (scope: MemoryScope, skillAreaId?: SkillAreaId, projectPath?: string) => {
 				return memoryStore.listArchivedMemories(scope, skillAreaId, projectPath);
 			}
@@ -565,6 +572,7 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 				projectPath?: string,
 				strategy?: 'cascading' | 'keyword' | 'tag'
 			) => {
+				const searchStart = performance.now();
 				const config = await memoryStore.getConfig();
 				if (strategy === 'keyword') {
 					// Keyword-only search across all scopes
@@ -588,7 +596,16 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 						}
 					}
 					allResults.sort((a, b) => b.combinedScore - a.combinedScore);
-					return allResults.slice(0, 30);
+					const finalResults = allResults.slice(0, 30);
+					memoryStore.recordSearchEvent({
+						timestamp: Date.now(),
+						latencyMs: Math.round(performance.now() - searchStart),
+						resultCount: finalResults.length,
+						usedEmbedding: false,
+						strategy: 'keyword',
+						topSimilarity: 0,
+					});
+					return finalResults;
 				}
 				if (strategy === 'tag') {
 					// Tag-based search: split query by commas
@@ -611,9 +628,18 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 						}
 					}
 					allResults.sort((a, b) => b.combinedScore - a.combinedScore);
-					return allResults.slice(0, 30);
+					const finalResults = allResults.slice(0, 30);
+					memoryStore.recordSearchEvent({
+						timestamp: Date.now(),
+						latencyMs: Math.round(performance.now() - searchStart),
+						resultCount: finalResults.length,
+						usedEmbedding: false,
+						strategy: 'tag',
+						topSimilarity: 0,
+					});
+					return finalResults;
 				}
-				// Default: cascading search
+				// Default: cascading search (records its own metrics internally)
 				return memoryStore.cascadingSearch(query, config, agentType, projectPath);
 			}
 		)
@@ -736,17 +762,115 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		createIpcDataHandler(handlerOpts('computeAllEmbeddings'), async () => {
 			let totalMemories = 0;
 
-			// 1. Embed all skill-scoped memories
+			const sendProgress = (current: number, total: number, detail?: string) => {
+				try {
+					for (const win of BrowserWindow.getAllWindows()) {
+						win.webContents.send('memory:embeddingComputeProgress', {
+							current,
+							total,
+							detail,
+						});
+					}
+				} catch {
+					// Electron not available (testing) — skip
+				}
+			};
+
+			// Ensure embedding provider is active before computing
+			if (!embeddingRegistry.isReady()) {
+				logger.info(
+					'Embedding provider not ready — attempting auto-activation for compute',
+					LOG_CONTEXT
+				);
+				const memoryConfig = settingsStore.get('memoryConfig') as
+					| { embeddingProvider?: EmbeddingProviderConfig }
+					| undefined;
+				const embConfig = memoryConfig?.embeddingProvider;
+				if (embConfig) {
+					const activationConfig = { ...embConfig, enabled: true };
+					const withCache = ensureCacheDir(activationConfig);
+					await embeddingRegistry.activate(withCache);
+
+					// Persist the enabled state so it stays active on restart
+					settingsStore.set('memoryConfig', {
+						...(memoryConfig ?? {}),
+						embeddingProvider: { ...embConfig, enabled: true },
+					});
+				}
+
+				if (!embeddingRegistry.isReady()) {
+					throw new Error(
+						'No embedding provider is available. Configure one in Settings > Memory > Embeddings.'
+					);
+				}
+			}
+
+			// Smoke-test the provider before starting bulk work
+			try {
+				const { encodeBatch } = await import('../../grpo/embedding-service');
+				const testResult = await encodeBatch(['embedding provider smoke test']);
+				if (!testResult || testResult.length === 0 || testResult[0].length === 0) {
+					throw new Error('Provider returned empty embedding');
+				}
+				logger.info(
+					`Embedding provider smoke test passed (dim=${testResult[0].length})`,
+					LOG_CONTEXT
+				);
+			} catch (err: any) {
+				throw new Error(
+					`Embedding provider failed smoke test: ${err.message}. Ensure your embedding model is running.`
+				);
+			}
+
+			// First pass: count total items needing embeddings
 			const skillAreas = await memoryStore.listSkillAreas();
+			const analytics = await memoryStore.getAnalytics();
+			const totalItems = analytics.pendingEmbeddings;
+			let processed = 0;
+
+			sendProgress(0, totalItems, 'Starting...');
+
+			// 1. Embed all skill-scoped memories
 			for (const skill of skillAreas) {
-				totalMemories += await memoryStore.ensureAllEmbeddings('skill', skill.id);
+				sendProgress(processed, totalItems, skill.name);
+				const embedded = await memoryStore.ensureAllEmbeddings('skill', skill.id);
+				totalMemories += embedded;
+				processed += embedded;
 			}
 
 			// 2. Embed global-scoped memories
-			totalMemories += await memoryStore.ensureAllEmbeddings('global');
+			sendProgress(processed, totalItems, 'Global memories');
+			const globalEmbedded = await memoryStore.ensureAllEmbeddings('global');
+			totalMemories += globalEmbedded;
+			processed += globalEmbedded;
 
-			// 3. Embed hierarchy (personas + skill area descriptions)
+			// 3. Embed project-scoped memories
+			const projectDirs = await memoryStore.listProjectDirs();
+			for (const projectHash of projectDirs) {
+				sendProgress(processed, totalItems, `Project ${projectHash.slice(0, 8)}...`);
+				const projectDir = path.join(memoryStore.getMemoriesDir(), 'project', projectHash);
+				const projectEmbedded = await memoryStore.ensureEmbeddingsForDir(projectDir);
+				totalMemories += projectEmbedded;
+				processed += projectEmbedded;
+			}
+
+			// 4. Embed hierarchy (personas + skill area descriptions)
+			sendProgress(processed, totalItems, 'Personas & skill areas');
 			const hierarchyUpdated = await memoryStore.ensureHierarchyEmbeddings();
+			processed += hierarchyUpdated;
+
+			sendProgress(totalItems, totalItems, 'Complete');
+
+			// If nothing was embedded despite pending items, the provider likely failed silently
+			if (totalItems > 0 && totalMemories === 0 && hierarchyUpdated === 0) {
+				logger.warn(
+					`Compute completed but 0 items were embedded out of ${totalItems} pending — provider may have failed`,
+					LOG_CONTEXT
+				);
+				throw new Error(
+					`Embedding provider returned no results. Check that your embedding model (${embeddingRegistry.getActiveProviderId() ?? 'unknown'}) is running and accessible.`
+				);
+			}
 
 			return { memoriesUpdated: totalMemories, hierarchyUpdated };
 		})

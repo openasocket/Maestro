@@ -42,11 +42,24 @@ import type {
 	PersonaRelevance,
 	PromotionCandidate,
 	MemoryStats,
+	SearchPerformanceMetrics,
 } from '../../shared/memory-types';
 import { MEMORY_CONFIG_DEFAULTS, SEED_ROLES } from '../../shared/memory-types';
-import { cosineSimilarity } from '../grpo/embedding-service';
+import { cosineSimilarity, EmbeddingModelNotAvailableError } from '../grpo/embedding-service';
 import { MemoryChangeLog } from './memory-changelog';
 import type { MemoryChangeEventType } from './memory-changelog';
+
+// ─── Search Event (ring buffer entry) ─────────────────────────────────────────
+
+export interface SearchEvent {
+	timestamp: number;
+	latencyMs: number;
+	resultCount: number;
+	usedEmbedding: boolean;
+	strategy: string; // 'cascading' | 'hybrid' | 'keyword' | 'tag' | 'fallback'
+	topSimilarity: number; // best cosine similarity in results (0 if no embedding results)
+	scope?: string; // optional: which scope was searched
+}
 
 // ─── File Interfaces ──────────────────────────────────────────────────────────
 
@@ -99,6 +112,67 @@ export class MemoryStore {
 	private libraryCache = new Map<string, { entries: MemoryEntry[]; loadedAt: number }>();
 	private static readonly LIBRARY_CACHE_TTL = 10000; // 10 seconds
 
+	// ─── Search Metrics Ring Buffer ────────────────────────────────────────
+	private static readonly SEARCH_METRICS_MAX = 500;
+	private searchMetricsBuffer: SearchEvent[] = [];
+
+	/** Record a search event into the ring buffer. */
+	recordSearchEvent(event: SearchEvent): void {
+		this.searchMetricsBuffer.push(event);
+		if (this.searchMetricsBuffer.length > MemoryStore.SEARCH_METRICS_MAX) {
+			this.searchMetricsBuffer.shift();
+		}
+	}
+
+	/** Aggregate the ring buffer into summary metrics. */
+	getSearchPerformanceMetrics(): SearchPerformanceMetrics {
+		const buf = this.searchMetricsBuffer;
+		if (buf.length === 0) {
+			return {
+				totalSearches: 0,
+				avgLatencyMs: 0,
+				p95LatencyMs: 0,
+				hitRate: 0,
+				avgResultCount: 0,
+				embeddingSearches: 0,
+				fallbackSearches: 0,
+				byStrategy: {},
+				avgTopSimilarity: 0,
+				lastSearchAt: 0,
+			};
+		}
+
+		const latencies = buf.map((e) => e.latencyMs).sort((a, b) => a - b);
+		const p95Idx = Math.min(Math.floor(latencies.length * 0.95), latencies.length - 1);
+		const hits = buf.filter((e) => e.resultCount > 0).length;
+		const embeddingCount = buf.filter((e) => e.usedEmbedding).length;
+		const byStrategy: Record<string, number> = {};
+		let topSimSum = 0;
+		let topSimCount = 0;
+
+		for (const e of buf) {
+			byStrategy[e.strategy] = (byStrategy[e.strategy] ?? 0) + 1;
+			if (e.topSimilarity > 0) {
+				topSimSum += e.topSimilarity;
+				topSimCount++;
+			}
+		}
+
+		return {
+			totalSearches: buf.length,
+			avgLatencyMs: Math.round(latencies.reduce((a, b) => a + b, 0) / buf.length),
+			p95LatencyMs: Math.round(latencies[p95Idx]),
+			hitRate: hits / buf.length,
+			avgResultCount:
+				Math.round((buf.reduce((a, e) => a + e.resultCount, 0) / buf.length) * 10) / 10,
+			embeddingSearches: embeddingCount,
+			fallbackSearches: buf.length - embeddingCount,
+			byStrategy,
+			avgTopSimilarity: topSimCount > 0 ? Math.round((topSimSum / topSimCount) * 1000) / 1000 : 0,
+			lastSearchAt: buf[buf.length - 1].timestamp,
+		};
+	}
+
 	constructor() {
 		this.memoriesDir = path.join(getConfigDir(), 'memories');
 		this.changelog = new MemoryChangeLog(this.memoriesDir);
@@ -150,6 +224,15 @@ export class MemoryStore {
 			default:
 				throw new Error(`Unknown scope: ${scope}`);
 		}
+	}
+
+	/**
+	 * List hashed project subdirectory names under memories/project/.
+	 * Each entry is the directory name (a hash), not the original project path.
+	 */
+	async listProjectDirs(): Promise<string[]> {
+		const projectsDir = path.join(this.memoriesDir, 'project');
+		return fs.readdir(projectsDir).catch(() => [] as string[]);
 	}
 
 	private getRegistryPath(): string {
@@ -1175,6 +1258,8 @@ export class MemoryStore {
 		projectPath?: string,
 		limit: number = 20
 	): Promise<MemorySearchResult[]> {
+		const hybridStart = performance.now();
+
 		// Parse tags from query (category: or kw: prefixes, plus all unique tokens)
 		const queryTokens = this.tokenize(query);
 		const queryTags: string[] = [];
@@ -1286,7 +1371,17 @@ export class MemoryStore {
 			});
 		}
 
-		return results.slice(0, limit);
+		const hybridResults = results.slice(0, limit);
+		this.recordSearchEvent({
+			timestamp: Date.now(),
+			latencyMs: Math.round(performance.now() - hybridStart),
+			resultCount: hybridResults.length,
+			usedEmbedding: hybridResults.some((r) => r.similarity > 0),
+			strategy: 'hybrid',
+			topSimilarity: hybridResults[0]?.similarity ?? 0,
+			scope,
+		});
+		return hybridResults;
 	}
 
 	/**
@@ -1417,9 +1512,43 @@ export class MemoryStore {
 
 			await this.writeLibrary(dirPath, lib);
 			return missing.length;
-		} catch {
-			// EmbeddingModelNotAvailableError — degrade gracefully
-			return 0;
+		} catch (err) {
+			if (err instanceof EmbeddingModelNotAvailableError) {
+				// No provider active — degrade gracefully during background operations
+				return 0;
+			}
+			throw err;
+		}
+	}
+
+	/**
+	 * Compute embeddings for all active entries missing them in the given raw directory path.
+	 * Unlike ensureAllEmbeddings, this takes a direct filesystem path (no scope/hash resolution).
+	 */
+	async ensureEmbeddingsForDir(dirPath: string): Promise<number> {
+		const lib = await this.readLibrary(dirPath);
+		const missing = lib.entries.filter((e) => e.embedding === null && e.active);
+		if (missing.length === 0) return 0;
+
+		try {
+			const { encodeBatch } = await import('../grpo/embedding-service');
+			const texts = missing.map((e) => e.content);
+			const embeddings = await encodeBatch(texts);
+
+			for (let i = 0; i < missing.length; i++) {
+				const idx = lib.entries.findIndex((e) => e.id === missing[i].id);
+				if (idx !== -1) {
+					lib.entries[idx].embedding = embeddings[i];
+				}
+			}
+
+			await this.writeLibrary(dirPath, lib);
+			return missing.length;
+		} catch (err) {
+			if (err instanceof EmbeddingModelNotAvailableError) {
+				return 0;
+			}
+			throw err;
 		}
 	}
 
@@ -1464,9 +1593,12 @@ export class MemoryStore {
 
 			await this.writeRegistry(registry);
 			return textsToEmbed.length;
-		} catch {
-			// EmbeddingModelNotAvailableError — degrade gracefully
-			return 0;
+		} catch (err) {
+			if (err instanceof EmbeddingModelNotAvailableError) {
+				// No provider active — degrade gracefully during background operations
+				return 0;
+			}
+			throw err;
 		}
 	}
 
@@ -1484,7 +1616,13 @@ export class MemoryStore {
 		let succeeded = 0;
 		let failed = 0;
 
-		const { encodeBatch } = await import('../grpo/embedding-service');
+		const { encodeBatch, isReady } = await import('../grpo/embedding-service');
+
+		if (!isReady()) {
+			throw new Error(
+				'Cannot re-embed: No embedding provider is active. Please select and activate a provider first.'
+			);
+		}
 
 		// Helper: clear + re-embed a single library file
 		const processLibrary = async (dirPath: string): Promise<void> => {
@@ -1512,7 +1650,11 @@ export class MemoryStore {
 							succeeded++;
 						}
 					}
-				} catch {
+				} catch (err) {
+					console.warn(
+						'[MemoryStore] reEmbedAll batch failed:',
+						err instanceof Error ? err.message : err
+					);
 					failed += batch.length;
 				}
 			}
@@ -1702,12 +1844,15 @@ export class MemoryStore {
 				continue;
 			}
 
-			// Embedding filter: if persona has embedding, check threshold; if not, include it
-			let similarity = 1.0;
-			if (persona.embedding) {
-				similarity = cosineSimilarity(queryEmbedding, persona.embedding);
-				if (similarity < config.personaMatchThreshold) continue;
+			// Embedding filter: require embedding for semantic matching
+			if (!persona.embedding) {
+				// Persona has no embedding — skip it for semantic matching.
+				// Without an embedding we can't compute similarity, and defaulting to 1.0
+				// would rank unembedded personas above all real matches.
+				continue;
 			}
+			const similarity = cosineSimilarity(queryEmbedding, persona.embedding);
+			if (similarity < config.personaMatchThreshold) continue;
 
 			const role = roleById.get(persona.roleId);
 			matches.push({
@@ -1742,6 +1887,8 @@ export class MemoryStore {
 		projectPath?: string,
 		limit: number = 30
 	): Promise<MemorySearchResult[]> {
+		const searchStart = performance.now();
+
 		// Auto-seed hierarchy on first search if empty
 		await this.ensureHierarchyInitialized();
 
@@ -1751,15 +1898,25 @@ export class MemoryStore {
 		try {
 			const { encode } = await import('../grpo/embedding-service');
 			queryEmbedding = await encode(query.slice(0, 2000));
-		} catch {
-			// Embedding service unavailable — use fallback path
+		} catch (err) {
+			// Embedding service unavailable — log and use fallback path
+			console.warn('[memory] Embedding encode failed, falling back to keyword+tag search:', err);
 		}
 
 		if (!queryEmbedding) {
 			console.log(
 				'[memory] Persona matching unavailable (embeddings not computed). Falling back to project+global search.'
 			);
-			return this.fallbackFlatSearch(query, config, projectPath, limit);
+			const fallbackResults = await this.fallbackFlatSearch(query, config, projectPath, limit);
+			this.recordSearchEvent({
+				timestamp: Date.now(),
+				latencyMs: Math.round(performance.now() - searchStart),
+				resultCount: fallbackResults.length,
+				usedEmbedding: false,
+				strategy: 'fallback',
+				topSimilarity: fallbackResults[0]?.similarity ?? 0,
+			});
+			return fallbackResults;
 		}
 
 		const registry = await this.getCachedRegistry();
@@ -1876,22 +2033,30 @@ export class MemoryStore {
 
 		// ── Parallel flat-scope search ───────────────────────────────────
 		let flatResults: MemorySearchResult[];
-		if (config.enableHybridSearch) {
-			const flatSearches: Promise<MemorySearchResult[]>[] = [
-				this.hybridSearch(query, 'global', config),
-			];
-			if (projectPath) {
-				flatSearches.push(this.hybridSearch(query, 'project', config, undefined, projectPath));
+		try {
+			if (config.enableHybridSearch) {
+				const flatSearches: Promise<MemorySearchResult[]>[] = [
+					this.hybridSearch(query, 'global', config),
+				];
+				if (projectPath) {
+					flatSearches.push(this.hybridSearch(query, 'project', config, undefined, projectPath));
+				}
+				flatResults = (await Promise.all(flatSearches)).flat();
+			} else {
+				const flatSearches: Promise<MemorySearchResult[]>[] = [
+					this.searchFlatScope(queryEmbedding, 'global', config),
+				];
+				if (projectPath) {
+					flatSearches.push(this.searchFlatScope(queryEmbedding, 'project', config, projectPath));
+				}
+				flatResults = (await Promise.all(flatSearches)).flat();
 			}
-			flatResults = (await Promise.all(flatSearches)).flat();
-		} else {
-			const flatSearches: Promise<MemorySearchResult[]>[] = [
-				this.searchFlatScope(queryEmbedding, 'global', config),
-			];
-			if (projectPath) {
-				flatSearches.push(this.searchFlatScope(queryEmbedding, 'project', config, projectPath));
-			}
-			flatResults = (await Promise.all(flatSearches)).flat();
+		} catch (err) {
+			console.warn(
+				'[memory] Flat-scope search failed, continuing with hierarchy results only:',
+				err
+			);
+			flatResults = [];
 		}
 
 		// ── Merge, de-duplicate, rank ────────────────────────────────────
@@ -1905,7 +2070,16 @@ export class MemoryStore {
 		}
 
 		deduped.sort((a, b) => b.combinedScore - a.combinedScore);
-		return deduped.slice(0, limit);
+		const finalResults = deduped.slice(0, limit);
+		this.recordSearchEvent({
+			timestamp: Date.now(),
+			latencyMs: Math.round(performance.now() - searchStart),
+			resultCount: finalResults.length,
+			usedEmbedding: true,
+			strategy: 'cascading',
+			topSimilarity: finalResults[0]?.similarity ?? 0,
+		});
+		return finalResults;
 	}
 
 	/**
@@ -3717,7 +3891,10 @@ export class MemoryStore {
 						(memoriesEmbedded > 0 ? `, plus ${memoriesEmbedded} memories` : '')
 				);
 			}
-		} catch {
+		} catch (err) {
+			if (!(err instanceof EmbeddingModelNotAvailableError)) {
+				console.warn('[memory] Unexpected error during seed embedding:', err);
+			}
 			// Embedding provider not ready — embeddings will be computed on provider activation
 		}
 
@@ -4080,6 +4257,7 @@ export class MemoryStore {
 				recentTokenCount > 0 ? Math.round(recentTokenSum / recentTokenCount) : 0,
 			totalLinks: linkPairs.size,
 			crossProjectCandidates: crossProjectCandidatesCount,
+			searchPerformance: this.getSearchPerformanceMetrics(),
 		};
 
 		this._analyticsCache = { data: stats, timestamp: now };

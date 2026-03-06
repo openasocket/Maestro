@@ -7,10 +7,16 @@
 
 import type Database from 'better-sqlite3';
 import type { EmbeddingUsageEvent } from '../grpo/embedding-types';
+import {
+	CREATE_EMBEDDING_USAGE_SQL,
+	CREATE_EMBEDDING_USAGE_INDEXES_SQL,
+	runStatements,
+} from './schema';
 import { StatementCache, LOG_CONTEXT } from './utils';
 import { logger } from '../utils/logger';
 
 const stmtCache = new StatementCache();
+let tableEnsured = false;
 
 const INSERT_SQL = `
   INSERT INTO embedding_usage (provider_id, token_count, text_count, duration_ms, cost_usd, timestamp)
@@ -32,9 +38,20 @@ export interface EmbeddingUsageBucket {
 }
 
 /**
+ * Ensure the embedding_usage table exists (idempotent, runs once per session).
+ */
+function ensureTable(db: Database.Database): void {
+	if (tableEnsured) return;
+	db.prepare(CREATE_EMBEDDING_USAGE_SQL).run();
+	runStatements(db, CREATE_EMBEDDING_USAGE_INDEXES_SQL);
+	tableEnsured = true;
+}
+
+/**
  * Insert a new embedding usage record
  */
 export function insertEmbeddingUsage(db: Database.Database, event: EmbeddingUsageEvent): void {
+	ensureTable(db);
 	const stmt = stmtCache.get(db, INSERT_SQL);
 	stmt.run(
 		event.providerId,
@@ -134,4 +151,5 @@ export function getEmbeddingUsageTimeline(
  */
 export function clearEmbeddingUsageCache(): void {
 	stmtCache.clear();
+	tableEnsured = false;
 }

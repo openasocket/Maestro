@@ -353,6 +353,11 @@ describe('Memory Integration — End-to-End Pipeline', () => {
 			lib.entries[0].embedding = makeVector(0.05);
 			await store.writeLibrary(skillPath, lib);
 
+			// Set persona embedding so cascadingSearch can match it
+			const reg = await store.readRegistry();
+			reg.personas[0].embedding = makeVector(0.02);
+			await store.writeRegistry(reg);
+
 			mockEncode.mockResolvedValue(vec);
 
 			// Search
@@ -409,6 +414,11 @@ describe('Memory Integration — End-to-End Pipeline', () => {
 			lib.entries[0].embedding = sameVec;
 			lib.entries[1].embedding = sameVec;
 			await store.writeLibrary(skillPath, lib);
+
+			// Set persona embedding so cascadingSearch can match it
+			const reg = await store.readRegistry();
+			reg.personas[0].embedding = makeVector(0.02);
+			await store.writeRegistry(reg);
 
 			// Both start with effectivenessScore=0 — ranking should be by order
 			const config = makeConfig();
@@ -548,6 +558,11 @@ describe('Memory Integration — End-to-End Pipeline', () => {
 			const vec = makeVector(0);
 			const nearVec = makeVector(0.05);
 			mockEncode.mockResolvedValue(vec);
+
+			// Set persona embedding so cascadingSearch can match it
+			const reg = await store.readRegistry();
+			reg.personas[0].embedding = makeVector(0.02);
+			await store.writeRegistry(reg);
 
 			// Set all embeddings
 			const skillPath = store.getMemoryPath('skill', skill.id);

@@ -1172,8 +1172,11 @@ export function setupMemoryMonitorListener(
 					score: topMatch.similarity,
 				};
 			}
-		} catch {
-			// Non-critical — persona shift tracking is best-effort
+		} catch (err) {
+			logger.debug('[MemoryMonitor] Persona shift evaluation failed', 'MemoryMonitor', {
+				sessionId: state.sessionId,
+				error: String(err),
+			});
 		}
 	}
 

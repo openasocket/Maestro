@@ -117,14 +117,25 @@ export function registerEmbeddingHandlers(settingsStore?: SettingsStore): void {
 	// ─── Embedding Usage Cost Tracking ──────────────────────────────────────
 
 	// Record usage events from cloud providers to the stats database
+	let embeddingUsageDisabled = false;
 	embeddingUsageEmitter.on('usage', (event: EmbeddingUsageEvent) => {
+		if (embeddingUsageDisabled) return;
 		try {
 			const statsDb = getStatsDB();
 			if (statsDb.isReady()) {
 				statsDb.insertEmbeddingUsage(event);
 			}
 		} catch (err) {
-			logger.warn(`Failed to record embedding usage: ${err}`, LOG_CONTEXT);
+			const msg = String(err);
+			if (msg.includes('no such table')) {
+				logger.warn(
+					'Embedding usage table missing — cost tracking disabled for this session',
+					LOG_CONTEXT
+				);
+				embeddingUsageDisabled = true;
+			} else {
+				logger.warn(`Failed to record embedding usage: ${err}`, LOG_CONTEXT);
+			}
 		}
 	});
 
