@@ -173,72 +173,115 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 						// Non-critical — fall through to automatic matching
 					}
 
-					try {
-						const { tryInjectMemories } = await import('../../memory/memory-injector');
-						const result = await tryInjectMemories(
-							effectivePrompt,
-							config.cwd,
-							config.toolType,
-							undefined,
-							selectedPersonaIds
-						);
-						effectivePrompt = result.injectedPrompt;
-						if (result.injectedIds.length > 0 || result.personaContributions.length > 0) {
-							const personaSummary = result.personaContributions
-								.map((p) => `${p.personaName}(${p.count})`)
-								.join(', ');
-							const mode = selectedPersonaIds?.length ? 'explicit' : 'auto';
-							logger.debug(
-								`[Memory] Injected ${result.injectedIds.length} memories (${result.tokenCount} tokens) for ${config.toolType} — mode=${mode}, personas: ${personaSummary}, project=${result.flatScopeCounts.project}, global=${result.flatScopeCounts.global}`,
-								LOG_CONTEXT
-							);
-
-							// Store injected IDs + scope groups for effectiveness tracking (EXP-11)
-							// Pass contentHashes for diff tracking (MEM-EVOLVE-02)
-							const { recordSessionInjection } = await import('../../memory/memory-injector');
-							recordSessionInjection(
-								config.sessionId,
-								result.injectedIds,
-								result.scopeGroups,
-								undefined,
-								result.contentHashes,
-								'spawn',
-								0,
-								config.cwd,
-								config.toolType
-							);
-
-							// First-injection notification (MEM-EVOLVE-01)
-							if (result.injectedIds.length > 0) {
-								try {
-									const { getMemoryStore } = await import('../../memory/memory-store');
-									const memStore = getMemoryStore();
-									const memConfig = await memStore.getConfig();
-									if (!memConfig._firstInjectionNotified) {
-										await memStore.setConfig({ _firstInjectionNotified: true });
-										const mainWindow = getMainWindow();
-										if (isWebContentsAvailable(mainWindow)) {
-											mainWindow.webContents.send('memory:firstInjection', {
-												count: result.injectedIds.length,
-												tokenCount: result.tokenCount,
-												personaName: result.personaContributions[0]?.personaName,
-											});
-										}
-									}
-								} catch (notifyErr) {
-									logger.debug(
-										`[Memory] First-injection notification failed: ${notifyErr}`,
-										LOG_CONTEXT
-									);
-								}
-							}
-						}
-					} catch (err) {
-						logger.warn(
-							`[Memory] Memory injection failed, proceeding without: ${err}`,
+					const { isReady: embeddingReady } = await import('../../grpo/embedding-service');
+					if (!embeddingReady()) {
+						logger.debug(
+							'[Memory] Embedding not ready, skipping memory injection on spawn',
 							LOG_CONTEXT
 						);
-					}
+					} else
+						try {
+							const { tryInjectMemories } = await import('../../memory/memory-injector');
+							const result = await tryInjectMemories(
+								effectivePrompt,
+								config.cwd,
+								config.toolType,
+								undefined,
+								selectedPersonaIds
+							);
+							effectivePrompt = result.injectedPrompt;
+							if (result.injectedIds.length > 0 || result.personaContributions.length > 0) {
+								const personaSummary = result.personaContributions
+									.map((p) => `${p.personaName}(${p.count})`)
+									.join(', ');
+								const mode = selectedPersonaIds?.length ? 'explicit' : 'auto';
+								logger.debug(
+									`[Memory] Injected ${result.injectedIds.length} memories (${result.tokenCount} tokens) for ${config.toolType} — mode=${mode}, personas: ${personaSummary}, project=${result.flatScopeCounts.project}, global=${result.flatScopeCounts.global}`,
+									LOG_CONTEXT
+								);
+
+								// Store injected IDs + scope groups for effectiveness tracking (EXP-11)
+								// Pass contentHashes for diff tracking (MEM-EVOLVE-02)
+								const {
+									recordSessionInjection,
+									pushPersonaShiftEvent,
+									getSessionLastPersona,
+									setSessionLastPersona,
+								} = await import('../../memory/memory-injector');
+								recordSessionInjection(
+									config.sessionId,
+									result.injectedIds,
+									result.scopeGroups,
+									undefined,
+									result.contentHashes,
+									'spawn',
+									0,
+									config.cwd,
+									config.toolType
+								);
+
+								// Pre-spawn persona shift detection: compare current top persona
+								// against the last persona used for this session. This fires BEFORE
+								// the prompt reaches the LLM, so the injected memories are already
+								// from the correct (new) persona.
+								if (result.personaContributions.length > 0) {
+									const topPersona = result.personaContributions[0];
+									const lastPersona = getSessionLastPersona(config.sessionId);
+									if (lastPersona && lastPersona.id !== topPersona.personaId) {
+										pushPersonaShiftEvent({
+											timestamp: Date.now(),
+											sessionId: config.sessionId,
+											fromPersona: lastPersona,
+											toPersona: {
+												id: topPersona.personaId,
+												name: topPersona.personaName,
+												score: 0, // not available from injection result
+											},
+											triggerContext: effectivePrompt.slice(0, 500),
+										});
+										logger.debug(
+											`[Memory] Pre-spawn persona shift: ${lastPersona.name} → ${topPersona.personaName}`,
+											LOG_CONTEXT
+										);
+									}
+									setSessionLastPersona(config.sessionId, {
+										id: topPersona.personaId,
+										name: topPersona.personaName,
+										score: 0,
+									});
+								}
+
+								// First-injection notification (MEM-EVOLVE-01)
+								if (result.injectedIds.length > 0) {
+									try {
+										const { getMemoryStore } = await import('../../memory/memory-store');
+										const memStore = getMemoryStore();
+										const memConfig = await memStore.getConfig();
+										if (!memConfig._firstInjectionNotified) {
+											await memStore.setConfig({ _firstInjectionNotified: true });
+											const mainWindow = getMainWindow();
+											if (isWebContentsAvailable(mainWindow)) {
+												mainWindow.webContents.send('memory:firstInjection', {
+													count: result.injectedIds.length,
+													tokenCount: result.tokenCount,
+													personaName: result.personaContributions[0]?.personaName,
+												});
+											}
+										}
+									} catch (notifyErr) {
+										logger.debug(
+											`[Memory] First-injection notification failed: ${notifyErr}`,
+											LOG_CONTEXT
+										);
+									}
+								}
+							}
+						} catch (err) {
+							logger.warn(
+								`[Memory] Memory injection failed, proceeding without: ${err}`,
+								LOG_CONTEXT
+							);
+						}
 				}
 
 				let finalArgs = buildAgentArgs(agent, {
@@ -689,6 +732,111 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 				queue.notifyWrite(sessionId);
 			} catch {
 				// Never block user writes — degrade silently
+			}
+
+			// ── Persona-aware memory injection on follow-up prompts ──
+			// The user's prompt drives persona matching — if the task focus shifted,
+			// inject updated persona/skill/memory context with this message.
+			// Only fires when the prompt is substantial (>20 chars) and not a
+			// simple confirmation/control input.
+			const proc = processManager.get(sessionId);
+			if (
+				proc &&
+				!proc.sshRemoteId &&
+				proc.toolType !== 'terminal' &&
+				proc.projectPath &&
+				data.length > 20
+			) {
+				const { isReady: embeddingReady } = await import('../../grpo/embedding-service');
+				if (!embeddingReady()) {
+					logger.debug(
+						'[Memory] Embedding not ready, skipping persona evaluation on write',
+						LOG_CONTEXT
+					);
+				} else
+					try {
+						const { getSessionLastPersona, setSessionLastPersona, pushPersonaShiftEvent } =
+							await import('../../memory/memory-injector');
+						const { getMemoryStore } = await import('../../memory/memory-store');
+						const store = getMemoryStore();
+						const config = await store.getConfig();
+
+						if (config.enabled && config.enableLivePersonaShift) {
+							const matches = await store.selectMatchingPersonas(
+								data.slice(0, 2000),
+								config,
+								proc.toolType,
+								proc.projectPath
+							);
+
+							if (matches.length > 0) {
+								const topMatch = matches[0];
+								const lastPersona = getSessionLastPersona(sessionId);
+
+								// Persona shift: different persona matched with sufficient confidence
+								if (
+									!lastPersona ||
+									(lastPersona.id !== topMatch.persona.id &&
+										topMatch.similarity > (lastPersona.score ?? 0))
+								) {
+									// Run full memory injection with the user's prompt
+									const { tryInjectMemories } = await import('../../memory/memory-injector');
+									const result = await tryInjectMemories(data, proc.projectPath, proc.toolType);
+
+									// Only prepend if we got actual content beyond the original prompt
+									if (result.injectedIds.length > 0 || result.personaContributions.length > 0) {
+										// Extract just the injected block (everything before the original prompt)
+										const injectedBlock = result.injectedPrompt
+											.slice(0, result.injectedPrompt.length - data.length)
+											.trim();
+										if (injectedBlock) {
+											effectiveData = injectedBlock + '\n\n' + effectiveData;
+											logger.debug(
+												`[Memory] Persona shift on write: ${lastPersona?.name ?? '(none)'} → ${topMatch.personaName}`,
+												LOG_CONTEXT,
+												{
+													sessionId,
+													from: lastPersona?.name,
+													to: topMatch.personaName,
+													similarity: topMatch.similarity.toFixed(3),
+													injectedCount: result.injectedIds.length,
+													tokenCount: result.tokenCount,
+												}
+											);
+										}
+									}
+
+									// Record the shift event
+									if (lastPersona) {
+										pushPersonaShiftEvent({
+											timestamp: Date.now(),
+											sessionId,
+											fromPersona: lastPersona,
+											toPersona: {
+												id: topMatch.persona.id,
+												name: topMatch.personaName,
+												score: topMatch.similarity,
+											},
+											triggerContext: data.slice(0, 500),
+										});
+									}
+
+									// Update last persona tracker
+									setSessionLastPersona(sessionId, {
+										id: topMatch.persona.id,
+										name: topMatch.personaName,
+										score: topMatch.similarity,
+									});
+								}
+							}
+						}
+					} catch (err) {
+						// Non-critical — never block user writes
+						logger.debug('[Memory] Persona shift evaluation skipped on write', LOG_CONTEXT, {
+							sessionId,
+							error: String(err),
+						});
+					}
 			}
 
 			// Emit turn-start event for per-turn extraction (EXP-TURN-02)
