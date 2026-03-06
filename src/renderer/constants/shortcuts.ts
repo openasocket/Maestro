@@ -83,6 +83,11 @@ export const DEFAULT_SHORTCUTS: Record<string, Shortcut> = {
 		label: 'Maestro Cue',
 		keys: ['Meta', 'Shift', 'q'],
 	},
+	filterUnreadAgents: {
+		id: 'filterUnreadAgents',
+		label: 'Filter Unread Agents',
+		keys: ['Meta', 'Shift', 'u'],
+	},
 };
 
 // Non-editable shortcuts (displayed in help but not configurable)
@@ -123,6 +128,21 @@ export const FIXED_SHORTCUTS: Record<string, Shortcut> = {
 		id: 'filePreviewForward',
 		label: 'File Preview: Go Forward',
 		keys: ['Meta', 'ArrowRight'],
+	},
+	fontSizeIncrease: {
+		id: 'fontSizeIncrease',
+		label: 'Increase Font Size',
+		keys: ['Meta', '='],
+	},
+	fontSizeDecrease: {
+		id: 'fontSizeDecrease',
+		label: 'Decrease Font Size',
+		keys: ['Meta', '-'],
+	},
+	fontSizeReset: {
+		id: 'fontSizeReset',
+		label: 'Reset Font Size',
+		keys: ['Meta', '0'],
 	},
 };
 
@@ -168,7 +188,7 @@ export const TAB_SHORTCUTS: Record<string, Shortcut> = {
 	toggleTabUnread: {
 		id: 'toggleTabUnread',
 		label: 'Toggle Tab Unread',
-		keys: ['Meta', 'Shift', 'u'],
+		keys: ['Alt', 'Shift', 'u'],
 	},
 	goToTab1: { id: 'goToTab1', label: 'Go to Tab 1', keys: ['Meta', '1'] },
 	goToTab2: { id: 'goToTab2', label: 'Go to Tab 2', keys: ['Meta', '2'] },

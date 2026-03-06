@@ -839,6 +839,7 @@ export interface AppUtilityModalsProps {
 	) => boolean;
 	onOpenMergeSession: () => void;
 	onOpenSendToAgent: () => void;
+	onQuickCreateWorktree: (session: Session) => void;
 	onOpenCreatePR: (session: Session) => void;
 	onSummarizeAndContinue: () => void;
 	canSummarizeActiveTab: boolean;
@@ -1048,6 +1049,7 @@ export const AppUtilityModals = memo(function AppUtilityModals({
 	hasActiveSessionCapability,
 	onOpenMergeSession,
 	onOpenSendToAgent,
+	onQuickCreateWorktree,
 	onOpenCreatePR,
 	onSummarizeAndContinue,
 	canSummarizeActiveTab,
@@ -1211,6 +1213,7 @@ export const AppUtilityModals = memo(function AppUtilityModals({
 					hasActiveSessionCapability={hasActiveSessionCapability}
 					onOpenMergeSession={onOpenMergeSession}
 					onOpenSendToAgent={onOpenSendToAgent}
+					onQuickCreateWorktree={onQuickCreateWorktree}
 					onOpenCreatePR={onOpenCreatePR}
 					onSummarizeAndContinue={onSummarizeAndContinue}
 					canSummarizeActiveTab={canSummarizeActiveTab}
@@ -1959,6 +1962,7 @@ export interface AppModalsProps {
 	) => boolean;
 	onOpenMergeSession: () => void;
 	onOpenSendToAgent: () => void;
+	onQuickCreateWorktree: (session: Session) => void;
 	onOpenCreatePR: (session: Session) => void;
 	onSummarizeAndContinue: () => void;
 	canSummarizeActiveTab: boolean;
@@ -2333,6 +2337,7 @@ export const AppModals = memo(function AppModals(props: AppModalsProps) {
 		hasActiveSessionCapability,
 		onOpenMergeSession,
 		onOpenSendToAgent,
+		onQuickCreateWorktree,
 		onOpenCreatePR,
 		onSummarizeAndContinue,
 		canSummarizeActiveTab,
@@ -2642,6 +2647,7 @@ export const AppModals = memo(function AppModals(props: AppModalsProps) {
 				hasActiveSessionCapability={hasActiveSessionCapability}
 				onOpenMergeSession={onOpenMergeSession}
 				onOpenSendToAgent={onOpenSendToAgent}
+				onQuickCreateWorktree={onQuickCreateWorktree}
 				onOpenCreatePR={onOpenCreatePR}
 				onSummarizeAndContinue={onSummarizeAndContinue}
 				canSummarizeActiveTab={canSummarizeActiveTab}
