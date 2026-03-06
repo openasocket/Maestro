@@ -775,6 +775,13 @@ export async function injectMemories(
 			const directiveBlock = formatPersonaDirectivesOnly(matchedPersonas);
 			if (directiveBlock) {
 				const tokenCount = Math.ceil(directiveBlock.length / 4);
+				// Track persona-directive-only injection tokens
+				try {
+					const { getMemoryJobQueue } = await import('./memory-job-queue');
+					getMemoryJobQueue().trackInjectionTokens(tokenCount);
+				} catch {
+					// Queue not available
+				}
 				return {
 					injectedPrompt: directiveBlock + '\n\n' + prompt,
 					injectedIds: [],
@@ -1624,4 +1631,67 @@ export function pushPersonaShiftEvent(event: PersonaShiftEvent): void {
 export function getRecentPersonaShifts(limit?: number): PersonaShiftEvent[] {
 	const n = limit ?? MAX_PERSONA_SHIFT_EVENTS;
 	return recentPersonaShifts.slice(-n).reverse();
+}
+
+// ─── Persona Activation Event Ring Buffer ────────────────────────────────────
+
+export interface PersonaActivationEvent {
+	timestamp: number;
+	sessionId: string;
+	persona: { id: string; name: string; score: number };
+	triggerContext: string;
+	type: 'activation' | 'shift';
+}
+
+const recentPersonaActivations: PersonaActivationEvent[] = [];
+const MAX_PERSONA_ACTIVATION_EVENTS = 100;
+
+/**
+ * Push a persona activation event to the ring buffer.
+ */
+export function pushPersonaActivationEvent(event: PersonaActivationEvent): void {
+	recentPersonaActivations.push(event);
+	if (recentPersonaActivations.length > MAX_PERSONA_ACTIVATION_EVENTS) {
+		recentPersonaActivations.shift();
+	}
+}
+
+/**
+ * Return the last N persona activation events (newest first).
+ */
+export function getRecentPersonaActivations(limit?: number): PersonaActivationEvent[] {
+	const n = limit ?? MAX_PERSONA_ACTIVATION_EVENTS;
+	return recentPersonaActivations.slice(-n).reverse();
+}
+
+// ─── Per-Session Last Persona Tracker ────────────────────────────────────────
+
+/** Tracks the last persona used per session for pre-spawn shift detection. */
+const _sessionLastPersona = new Map<string, { id: string; name: string; score: number }>();
+
+/**
+ * Get the last persona used for injection in a session.
+ * Returns undefined if this is the first injection for the session.
+ */
+export function getSessionLastPersona(
+	sessionId: string
+): { id: string; name: string; score: number } | undefined {
+	return _sessionLastPersona.get(sessionId);
+}
+
+/**
+ * Set the last persona used for injection in a session.
+ */
+export function setSessionLastPersona(
+	sessionId: string,
+	persona: { id: string; name: string; score: number }
+): void {
+	_sessionLastPersona.set(sessionId, persona);
+}
+
+/**
+ * Clear the last persona for a session (e.g., on session end).
+ */
+export function clearSessionLastPersona(sessionId: string): void {
+	_sessionLastPersona.delete(sessionId);
 }

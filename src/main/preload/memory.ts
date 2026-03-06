@@ -332,6 +332,19 @@ export function createMemoryApi() {
 			IpcResponse<{ memoriesUpdated: number; hierarchyUpdated: number }>
 		> => ipcRenderer.invoke('memory:computeAllEmbeddings'),
 
+		onEmbeddingComputeProgress: (
+			callback: (event: { current: number; total: number; detail?: string }) => void
+		): (() => void) => {
+			const handler = (
+				_event: unknown,
+				progressEvent: { current: number; total: number; detail?: string }
+			) => callback(progressEvent);
+			ipcRenderer.on('memory:embeddingComputeProgress', handler);
+			return () => {
+				ipcRenderer.removeListener('memory:embeddingComputeProgress', handler);
+			};
+		},
+
 		reEmbedAll: (options?: {
 			scope?: MemoryScope;
 			batchSize?: number;
@@ -454,6 +467,20 @@ export function createMemoryApi() {
 				}>
 			>
 		> => ipcRenderer.invoke('memory:getPersonaShifts', limit),
+
+		getPersonaActivations: (
+			limit?: number
+		): Promise<
+			IpcResponse<
+				Array<{
+					timestamp: number;
+					sessionId: string;
+					persona: { id: string; name: string; score: number };
+					triggerContext: string;
+					type: 'activation' | 'shift';
+				}>
+			>
+		> => ipcRenderer.invoke('memory:getPersonaActivations', limit),
 
 		// ─── Job Queue Status & Token Tracking ────────────────────────────
 		getJobQueueStatus: (): Promise<IpcResponse<JobQueueStatus>> =>

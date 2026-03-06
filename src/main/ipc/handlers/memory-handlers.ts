@@ -429,13 +429,17 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 					MemoryEntry & { scopeLabel: string; skillAreaName?: string; personaName?: string }
 				> = [];
 
-				// 1. Skill-scoped experiences
+				const isExperienceOrPromoted = (entry: MemoryEntry) =>
+					entry.type === 'experience' ||
+					(entry.type === 'rule' && entry.tags.includes('promoted:experience'));
+
+				// 1. Skill-scoped experiences (+ promoted rules)
 				for (const skill of registry.skillAreas) {
 					if (!skill.active) continue;
 					const entries = await memoryStore.listMemories('skill', skill.id);
 					const persona = registry.personas.find((p) => p.id === skill.personaId);
 					for (const entry of entries) {
-						if (entry.type === 'experience') {
+						if (isExperienceOrPromoted(entry)) {
 							results.push({
 								...entry,
 								scopeLabel: `${persona?.name ?? 'Unknown'} → ${skill.name}`,
@@ -446,20 +450,20 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 					}
 				}
 
-				// 2. Project-scoped experiences
+				// 2. Project-scoped experiences (+ promoted rules)
 				if (projectPath) {
 					const projectEntries = await memoryStore.listMemories('project', undefined, projectPath);
 					for (const entry of projectEntries) {
-						if (entry.type === 'experience') {
+						if (isExperienceOrPromoted(entry)) {
 							results.push({ ...entry, scopeLabel: 'Project' });
 						}
 					}
 				}
 
-				// 3. Global experiences
+				// 3. Global experiences (+ promoted rules)
 				const globalEntries = await memoryStore.listMemories('global');
 				for (const entry of globalEntries) {
-					if (entry.type === 'experience') {
+					if (isExperienceOrPromoted(entry)) {
 						results.push({ ...entry, scopeLabel: 'Global' });
 					}
 				}
@@ -1071,6 +1075,16 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 		createIpcDataHandler(handlerOpts('getPersonaShifts'), async (limit?: number) => {
 			const { getRecentPersonaShifts } = await import('../../memory/memory-injector');
 			return getRecentPersonaShifts(limit);
+		})
+	);
+
+	// ─── Persona Activations ────────────────────────────────────────────
+
+	ipcMain.handle(
+		'memory:getPersonaActivations',
+		createIpcDataHandler(handlerOpts('getPersonaActivations'), async (limit?: number) => {
+			const { getRecentPersonaActivations } = await import('../../memory/memory-injector');
+			return getRecentPersonaActivations(limit);
 		})
 	);
 

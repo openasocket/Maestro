@@ -205,6 +205,7 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 								const {
 									recordSessionInjection,
 									pushPersonaShiftEvent,
+									pushPersonaActivationEvent,
 									getSessionLastPersona,
 									setSessionLastPersona,
 								} = await import('../../memory/memory-injector');
@@ -243,6 +244,19 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 											`[Memory] Pre-spawn persona shift: ${lastPersona.name} → ${topPersona.personaName}`,
 											LOG_CONTEXT
 										);
+									}
+									if (!lastPersona) {
+										pushPersonaActivationEvent({
+											timestamp: Date.now(),
+											sessionId: config.sessionId,
+											persona: {
+												id: topPersona.personaId,
+												name: topPersona.personaName,
+												score: 0,
+											},
+											triggerContext: effectivePrompt.slice(0, 500),
+											type: 'activation',
+										});
 									}
 									setSessionLastPersona(config.sessionId, {
 										id: topPersona.personaId,
@@ -755,8 +769,12 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 					);
 				} else
 					try {
-						const { getSessionLastPersona, setSessionLastPersona, pushPersonaShiftEvent } =
-							await import('../../memory/memory-injector');
+						const {
+							getSessionLastPersona,
+							setSessionLastPersona,
+							pushPersonaShiftEvent,
+							pushPersonaActivationEvent,
+						} = await import('../../memory/memory-injector');
 						const { getMemoryStore } = await import('../../memory/memory-store');
 						const store = getMemoryStore();
 						const config = await store.getConfig();
@@ -818,6 +836,21 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 												score: topMatch.similarity,
 											},
 											triggerContext: data.slice(0, 500),
+										});
+									}
+
+									// Record activation event when this is the first persona for the session
+									if (!lastPersona) {
+										pushPersonaActivationEvent({
+											timestamp: Date.now(),
+											sessionId,
+											persona: {
+												id: topMatch.persona.id,
+												name: topMatch.personaName,
+												score: topMatch.similarity,
+											},
+											triggerContext: data.slice(0, 500),
+											type: 'activation',
 										});
 									}
 

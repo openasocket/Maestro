@@ -2978,6 +2978,19 @@ interface MaestroAPI {
 			  }
 			| { success: false; error: string }
 		>;
+		getPersonaActivations: (limit?: number) => Promise<
+			| {
+					success: true;
+					data: Array<{
+						timestamp: number;
+						sessionId: string;
+						persona: { id: string; name: string; score: number };
+						triggerContext: string;
+						type: 'activation' | 'shift';
+					}>;
+			  }
+			| { success: false; error: string }
+		>;
 		export: (
 			scope: import('../shared/memory-types').MemoryScope,
 			skillAreaId?: string,
@@ -3030,6 +3043,9 @@ interface MaestroAPI {
 			| { success: true; data: { memoriesUpdated: number; hierarchyUpdated: number } }
 			| { success: false; error: string }
 		>;
+		onEmbeddingComputeProgress: (
+			callback: (event: { current: number; total: number; detail?: string }) => void
+		) => () => void;
 		reEmbedAll: (options?: {
 			scope?: import('../shared/memory-types').MemoryScope;
 			batchSize?: number;
