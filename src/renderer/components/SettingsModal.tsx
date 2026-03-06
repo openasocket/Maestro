@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, memo } from 'react';
+import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import {
 	X,
 	Key,
@@ -126,6 +126,27 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 	const { registerLayer, unregisterLayer } = useLayerStack();
 	const layerIdRef = useRef<string>();
 	const isRecordingShortcutRef = useRef(false);
+
+	// Resizable modal dimensions
+	const [modalSize, setModalSize] = useState<{ width: number; height: number }>({
+		width: 780,
+		height: 720,
+	});
+
+	// Load persisted size on open
+	useEffect(() => {
+		const loadSize = async () => {
+			const saved = await window.maestro.settings.get('settingsModalSize');
+			if (saved && typeof saved === 'object' && 'width' in saved && 'height' in saved) {
+				const s = saved as { width: number; height: number };
+				setModalSize({
+					width: Math.max(640, Math.min(s.width, window.innerWidth - 80)),
+					height: Math.max(480, Math.min(s.height, window.innerHeight - 80)),
+				});
+			}
+		};
+		if (isOpen) loadSize();
+	}, [isOpen]);
 
 	useEffect(() => {
 		if (isOpen) {
@@ -345,8 +366,17 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 			aria-label="Settings"
 		>
 			<div
-				className="w-[780px] h-[720px] rounded-xl border shadow-2xl overflow-hidden flex flex-col"
-				style={{ backgroundColor: theme.colors.bgSidebar, borderColor: theme.colors.border }}
+				className="relative rounded-xl border shadow-2xl overflow-hidden flex flex-col"
+				style={{
+					backgroundColor: theme.colors.bgSidebar,
+					borderColor: theme.colors.border,
+					width: modalSize.width,
+					height: modalSize.height,
+					minWidth: 640,
+					minHeight: 480,
+					maxWidth: 'calc(100vw - 80px)',
+					maxHeight: 'calc(100vh - 80px)',
+				}}
 			>
 				<div className="flex border-b" style={{ borderColor: theme.colors.border }}>
 					<button
