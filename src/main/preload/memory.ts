@@ -606,6 +606,11 @@ export function createMemoryApi() {
 			};
 		},
 
+		getSessionPersona: (
+			sessionId: string
+		): Promise<IpcResponse<{ id: string; name: string; score: number } | null>> =>
+			ipcRenderer.invoke('memory:getSessionPersona', sessionId),
+
 		// ─── Experience Repository ───────────────────────────────────────
 		repository: {
 			importFromFile: (

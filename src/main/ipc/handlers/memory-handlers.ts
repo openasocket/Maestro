@@ -17,6 +17,7 @@ import type { MemoryStore } from '../../memory/memory-store';
 import {
 	setMemorySettingsStore,
 	loadPersistedInjectionRecords,
+	getSessionLastPersona,
 } from '../../memory/memory-injector';
 import type {
 	MemoryScope,
@@ -1353,6 +1354,15 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 				};
 			}
 		)
+	);
+
+	// ─── Session Persona Lookup ─────────────────────────────────────────
+
+	ipcMain.handle(
+		'memory:getSessionPersona',
+		createIpcDataHandler(handlerOpts('getSessionPersona'), async (sessionId: string) => {
+			return getSessionLastPersona(sessionId) ?? null;
+		})
 	);
 }
 

@@ -43,6 +43,7 @@ import { useAgentCapabilities, useHoverTooltip } from '../hooks';
 import { safeClipboardWrite } from '../utils/clipboard';
 import { useUIStore } from '../stores/uiStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useSessionStore } from '../stores/sessionStore';
 import type {
 	Session,
 	Theme,
@@ -552,6 +553,29 @@ export const MainPanel = React.memo(
 			activeSession?.sessionSshRemoteConfig?.enabled,
 			activeSession?.sessionSshRemoteConfig?.remoteId,
 		]);
+
+		// Fetch active persona from main process when switching to a session that
+		// doesn't have it populated yet (e.g., persona was set before renderer subscribed).
+		useEffect(() => {
+			if (!activeSession?.id || activeSession.activePersona) return;
+			let cancelled = false;
+			window.maestro.memory
+				.getSessionPersona?.(activeSession.id)
+				.then((result) => {
+					if (cancelled) return;
+					if (result && 'success' in result && result.success && result.data) {
+						useSessionStore.getState().updateSession(activeSession.id, {
+							activePersona: result.data,
+						});
+					}
+				})
+				.catch(() => {
+					/* memory system may be disabled */
+				});
+			return () => {
+				cancelled = true;
+			};
+		}, [activeSession?.id]);
 
 		const activeTabContextWindow = useMemo(() => {
 			const configured = configuredContextWindow;

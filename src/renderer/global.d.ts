@@ -3207,6 +3207,12 @@ interface MaestroAPI {
 				timestamp: number;
 			}) => void
 		) => () => void;
+		getSessionPersona: (
+			sessionId: string
+		) => Promise<
+			| { success: true; data: { id: string; name: string; score: number } | null }
+			| { success: false; error: string }
+		>;
 
 		// ─── Experience Repository (programmatic API) ─────────────────────
 		repository: {
