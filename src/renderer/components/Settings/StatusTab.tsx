@@ -5,7 +5,7 @@
  * Provides diagnostics, injection tracking, and visual evidence of memory system value.
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
 	AlertTriangle,
 	Archive,
@@ -35,6 +35,7 @@ import {
 	Edit3,
 	Rocket,
 	Square,
+	Play,
 } from 'lucide-react';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { Theme } from '../../types';
@@ -255,7 +256,7 @@ export function StatusTab({
 				<MemoryTimelineSection theme={theme} config={config} />
 
 				{/* Section 4: System Metrics (collapsed by default) */}
-				<SystemMetricsSection theme={theme} />
+				<SystemMetricsSection theme={theme} stats={stats} />
 
 				{/* Section 4: Impact Dashboard */}
 				{stats && <ImpactDashboardSection stats={stats} theme={theme} allMemories={allMemories} />}
@@ -362,6 +363,12 @@ function DiagnosticBanners({
 	onNavigateToTab?: (tab: string, filter?: Record<string, string> | null) => void;
 }) {
 	const [enabling, setEnabling] = useState(false);
+	const [embeddingComputing, setEmbeddingComputing] = useState(false);
+	const [embeddingProgress, setEmbeddingProgress] = useState<{
+		current: number;
+		total: number;
+		detail?: string;
+	} | null>(null);
 
 	if (!config.enabled) return null;
 
@@ -378,14 +385,33 @@ function DiagnosticBanners({
 			id: 'no-embeddings',
 			title: 'Embeddings needed',
 			message: `${stats.pendingEmbeddings} persona${stats.pendingEmbeddings !== 1 ? 's' : ''} need${stats.pendingEmbeddings === 1 ? 's' : ''} embeddings to match tasks. Without embeddings, memories under these personas cannot be injected.`,
-			actionLabel: 'Compute Now',
+			actionLabel: embeddingComputing ? 'Computing...' : 'Compute Now',
 			onAction: async () => {
+				if (embeddingComputing) return;
+				setEmbeddingComputing(true);
+				setEmbeddingProgress(null);
+				const unsub = window.maestro.memory.onEmbeddingComputeProgress((event) =>
+					setEmbeddingProgress(event)
+				);
 				try {
-					await window.maestro.memory.computeAllEmbeddings();
-					onConfigChange?.();
-				} catch {
-					// handled by existing error display
+					const res = await window.maestro.memory.computeAllEmbeddings();
+					// Allow queued progress events to flush before cleanup
+					await new Promise((r) => setTimeout(r, 100));
+					unsub();
+					if (res.success) {
+						onConfigChange?.();
+					} else {
+						setEmbeddingProgress({ current: 0, total: 0, detail: res.error });
+					}
+				} catch (err: any) {
+					unsub();
+					setEmbeddingProgress({
+						current: 0,
+						total: 0,
+						detail: err.message ?? 'Embedding computation failed',
+					});
 				}
+				setEmbeddingComputing(false);
 			},
 		});
 	}
@@ -466,13 +492,46 @@ function DiagnosticBanners({
 								style={{
 									backgroundColor: theme.colors.accent,
 									color: theme.colors.bgMain,
-									opacity: enabling ? 0.6 : 1,
+									opacity: enabling || embeddingComputing ? 0.6 : 1,
 								}}
-								disabled={enabling}
+								disabled={enabling || embeddingComputing}
 								onClick={banner.onAction}
 							>
 								{banner.actionLabel}
 							</button>
+						)}
+						{banner.id === 'no-embeddings' && embeddingProgress && (
+							<div className="mt-1.5 space-y-0.5">
+								{embeddingProgress.total > 0 && (
+									<div className="flex items-center gap-2">
+										<div
+											className="flex-1 h-1.5 rounded-full overflow-hidden"
+											style={{ backgroundColor: `${theme.colors.border}40` }}
+										>
+											<div
+												className="h-full rounded-full transition-all duration-300"
+												style={{
+													width: `${Math.round((embeddingProgress.current / embeddingProgress.total) * 100)}%`,
+													backgroundColor: theme.colors.accent,
+												}}
+											/>
+										</div>
+										<span className="text-[9px]" style={{ color: theme.colors.textDim }}>
+											{embeddingProgress.current}/{embeddingProgress.total}
+										</span>
+									</div>
+								)}
+								{embeddingProgress.detail && (
+									<div
+										className="text-[9px]"
+										style={{
+											color: embeddingProgress.total === 0 ? '#ef4444' : theme.colors.textDim,
+										}}
+									>
+										{embeddingProgress.detail}
+									</div>
+								)}
+							</div>
 						)}
 					</div>
 					<button
@@ -513,7 +572,7 @@ function GettingStartedCard({
 	onNavigateToTab?: (tab: string, filter?: Record<string, string> | null) => void;
 }) {
 	const hasPersonas = (stats?.totalPersonas ?? 0) > 0;
-	const hasPromotions = (stats?.bySource?.grpo ?? 0) > 0;
+	const hasPromotions = (stats?.promotedCount ?? 0) > 0;
 
 	const steps: GettingStartedStep[] = [
 		{ label: 'System enabled', done: config.enabled },
@@ -727,6 +786,11 @@ function SystemHealthSection({
 					label="Live Injection"
 					enabled={config.enableLiveInjection}
 					detail={liveDetail}
+				/>
+				<SubsystemRow
+					theme={theme}
+					label="Live Persona Shifting"
+					enabled={config.enableLivePersonaShift}
 				/>
 				<SubsystemRow
 					theme={theme}
@@ -960,6 +1024,11 @@ function InjectionActivitySection({
 	const [enabling, setEnabling] = useState(false);
 	const [computing, setComputing] = useState(false);
 	const [computeResult, setComputeResult] = useState<string | null>(null);
+	const [computeProgress, setComputeProgress] = useState<{
+		current: number;
+		total: number;
+		detail?: string;
+	} | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -1105,47 +1174,82 @@ function InjectionActivitySection({
 					{/* Embedding health check */}
 					{config.enabled && stats && stats.pendingEmbeddings > 0 && (
 						<div
-							className="rounded p-2 flex items-center gap-2 text-[10px]"
+							className="rounded p-2 space-y-1.5 text-[10px]"
 							style={{ backgroundColor: '#eab30810', border: '1px solid #eab30820' }}
 						>
-							<AlertTriangle className="w-3 h-3 shrink-0" style={{ color: '#eab308' }} />
-							<span className="flex-1" style={{ color: '#eab308' }}>
-								{stats.pendingEmbeddings} item{stats.pendingEmbeddings !== 1 ? 's' : ''} missing
-								embeddings — memories under these personas cannot be matched to tasks.
-								{computeResult && (
-									<span style={{ color: theme.colors.textDim, marginLeft: 4 }}>
-										({computeResult})
-									</span>
-								)}
-							</span>
-							<button
-								className="shrink-0 px-2 py-0.5 rounded text-[10px] font-medium"
-								style={{
-									backgroundColor: theme.colors.accent,
-									color: theme.colors.bgMain,
-									opacity: computing ? 0.6 : 1,
-								}}
-								disabled={computing}
-								onClick={async () => {
-									setComputing(true);
-									setComputeResult(null);
-									try {
-										const res = await window.maestro.memory.computeAllEmbeddings();
-										if (res.success) {
-											const total = res.data.memoriesUpdated + res.data.hierarchyUpdated;
-											setComputeResult(`${total} embedded`);
-											onConfigChange?.();
-										} else {
-											setComputeResult(res.error);
+							<div className="flex items-center gap-2">
+								<AlertTriangle className="w-3 h-3 shrink-0" style={{ color: '#eab308' }} />
+								<span className="flex-1" style={{ color: '#eab308' }}>
+									{stats.pendingEmbeddings} item{stats.pendingEmbeddings !== 1 ? 's' : ''} missing
+									embeddings — memories under these personas cannot be matched to tasks.
+									{computeResult && !computing && (
+										<span style={{ color: theme.colors.textDim, marginLeft: 4 }}>
+											({computeResult})
+										</span>
+									)}
+								</span>
+								<button
+									className="shrink-0 px-2 py-0.5 rounded text-[10px] font-medium"
+									style={{
+										backgroundColor: theme.colors.accent,
+										color: theme.colors.bgMain,
+										opacity: computing ? 0.6 : 1,
+									}}
+									disabled={computing}
+									onClick={async () => {
+										setComputing(true);
+										setComputeResult(null);
+										setComputeProgress(null);
+										const unsub = window.maestro.memory.onEmbeddingComputeProgress((event) =>
+											setComputeProgress(event)
+										);
+										try {
+											const res = await window.maestro.memory.computeAllEmbeddings();
+											// Allow queued progress events to flush before cleanup
+											await new Promise((r) => setTimeout(r, 100));
+											unsub();
+											if (res.success) {
+												const total = res.data.memoriesUpdated + res.data.hierarchyUpdated;
+												setComputeResult(`${total} embedded`);
+												onConfigChange?.();
+											} else {
+												setComputeResult(res.error);
+											}
+										} catch (err: any) {
+											unsub();
+											setComputeResult(err.message ?? 'Failed');
 										}
-									} catch (err: any) {
-										setComputeResult(err.message ?? 'Failed');
-									}
-									setComputing(false);
-								}}
-							>
-								{computing ? 'Computing...' : 'Compute All'}
-							</button>
+										setComputing(false);
+										setComputeProgress(null);
+									}}
+								>
+									{computing ? 'Computing...' : 'Compute All'}
+								</button>
+							</div>
+							{computing && computeProgress && computeProgress.total > 0 && (
+								<div className="space-y-1">
+									<div className="flex items-center gap-2">
+										<div
+											className="flex-1 h-1.5 rounded-full overflow-hidden"
+											style={{ backgroundColor: `${theme.colors.border}40` }}
+										>
+											<div
+												className="h-full rounded-full transition-all duration-300"
+												style={{
+													width: `${Math.round((computeProgress.current / computeProgress.total) * 100)}%`,
+													backgroundColor: theme.colors.accent,
+												}}
+											/>
+										</div>
+										<span style={{ color: theme.colors.textDim, minWidth: 32, textAlign: 'right' }}>
+											{computeProgress.current}/{computeProgress.total}
+										</span>
+									</div>
+									{computeProgress.detail && (
+										<div style={{ color: theme.colors.textDim }}>{computeProgress.detail}</div>
+									)}
+								</div>
+							)}
 						</div>
 					)}
 
@@ -1908,7 +2012,7 @@ function MemoryTimelineSection({ theme, config }: { theme: Theme; config: Memory
 
 // ─── Section 4: System Metrics ──────────────────────────────────────────────────
 
-function SystemMetricsSection({ theme }: { theme: Theme }) {
+function SystemMetricsSection({ theme, stats }: { theme: Theme; stats: MemoryStats | null }) {
 	const [expanded, setExpanded] = useState(false);
 	const [embeddingStatus, setEmbeddingStatus] = useState<{
 		loaded: boolean;
@@ -2041,13 +2145,67 @@ function SystemMetricsSection({ theme }: { theme: Theme }) {
 					)}
 
 					{/* Search Performance */}
-					<div className="flex items-center gap-2 text-xs">
-						<div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: '#6b7280' }} />
-						<span style={{ color: theme.colors.textMain }}>Search Performance</span>
-						<span className="ml-auto text-[10px]" style={{ color: theme.colors.textDim }}>
-							Not tracked
-						</span>
-					</div>
+					{(() => {
+						const sp = stats?.searchPerformance;
+						if (!sp || sp.totalSearches === 0) {
+							return (
+								<div className="flex items-center gap-2 text-xs">
+									<div
+										className="w-2 h-2 rounded-full shrink-0"
+										style={{ backgroundColor: '#6b7280' }}
+									/>
+									<span style={{ color: theme.colors.textMain }}>Search Performance</span>
+									<span className="ml-auto text-[10px]" style={{ color: theme.colors.textDim }}>
+										No searches yet
+									</span>
+								</div>
+							);
+						}
+						const hitPct = Math.round(sp.hitRate * 100);
+						const statusColor = hitPct >= 70 ? '#22c55e' : hitPct >= 40 ? '#eab308' : '#ef4444';
+						return (
+							<div className="space-y-1">
+								<div className="flex items-center gap-2 text-xs">
+									<div
+										className="w-2 h-2 rounded-full shrink-0"
+										style={{ backgroundColor: statusColor }}
+									/>
+									<span style={{ color: theme.colors.textMain }}>Search Performance</span>
+									<span className="ml-auto text-[10px]" style={{ color: theme.colors.textDim }}>
+										{sp.totalSearches} searches
+									</span>
+								</div>
+								<div className="pl-4 text-[10px] space-y-0.5">
+									<div className="flex justify-between" style={{ color: theme.colors.textDim }}>
+										<span>Avg latency</span>
+										<span style={{ color: theme.colors.textMain }}>
+											{sp.avgLatencyMs}ms (p95: {sp.p95LatencyMs}ms)
+										</span>
+									</div>
+									<div className="flex justify-between" style={{ color: theme.colors.textDim }}>
+										<span>Hit rate</span>
+										<span style={{ color: theme.colors.textMain }}>
+											{hitPct}% ({sp.avgResultCount} avg results)
+										</span>
+									</div>
+									<div className="flex justify-between" style={{ color: theme.colors.textDim }}>
+										<span>Embedding vs fallback</span>
+										<span style={{ color: theme.colors.textMain }}>
+											{sp.embeddingSearches} / {sp.fallbackSearches}
+										</span>
+									</div>
+									{sp.avgTopSimilarity > 0 && (
+										<div className="flex justify-between" style={{ color: theme.colors.textDim }}>
+											<span>Avg top similarity</span>
+											<span style={{ color: theme.colors.textMain }}>
+												{sp.avgTopSimilarity.toFixed(3)}
+											</span>
+										</div>
+									)}
+								</div>
+							</div>
+						);
+					})()}
 
 					{/* Store Size */}
 					{storeSize && (
@@ -2202,7 +2360,7 @@ function ImpactDashboardSection({
 
 	// Extraction ROI
 	const experienceCount = stats.byType?.experience ?? 0;
-	const promotedCount = stats.bySource?.grpo ?? 0;
+	const promotedCount = stats.promotedCount ?? 0;
 
 	// Injection frequency: bar chart for last 14 days, segmented by scope
 	const dayBars = useMemo(() => {
@@ -2498,19 +2656,36 @@ function EmbeddingUsageSection({ theme, config }: { theme: Theme; config: Memory
 		modelName: string;
 		error?: string;
 	} | null>(null);
+	const [activeProviderId, setActiveProviderId] = useState<string | null>(null);
 
-	const isCloud = config.embeddingProvider?.providerId === 'openai';
-	const providerId = config.embeddingProvider?.providerId ?? null;
+	const configProviderId = config.embeddingProvider?.providerId ?? null;
+	// Use the actual active provider from the registry, falling back to config
+	const providerId = activeProviderId ?? configProviderId;
+	const isCloud = providerId === 'openai';
 
 	const fetchUsage = useCallback(async () => {
 		const now = Date.now();
 		try {
+			// Always fetch status first to determine the actual active provider
+			const statusRes = await window.maestro.embedding.getStatus();
+			let resolvedProviderId = configProviderId;
+			if (statusRes.success) {
+				const statusData = statusRes.data;
+				if (statusData.activeProviderId) {
+					resolvedProviderId = statusData.activeProviderId;
+					setActiveProviderId(statusData.activeProviderId);
+				}
+				if (resolvedProviderId && statusData.statuses[resolvedProviderId]) {
+					setProviderStatus(statusData.statuses[resolvedProviderId]);
+				}
+			}
+
+			const resolvedIsCloud = resolvedProviderId === 'openai';
 			const results = await Promise.allSettled([
 				window.maestro.embedding.getUsageSummary(0), // all-time
 				window.maestro.embedding.getUsageSummary(now - 86400000),
 				window.maestro.embedding.getUsageSummary(now - 604800000),
-				window.maestro.embedding.getStatus(),
-				...(isCloud
+				...(resolvedIsCloud
 					? [
 							window.maestro.embedding.getUsageSummary(now - 2592000000),
 							window.maestro.embedding.getUsageTimeline(now - 604800000, 86400000),
@@ -2523,32 +2698,26 @@ function EmbeddingUsageSection({ theme, config }: { theme: Theme; config: Memory
 				setSummary24h(results[1].value.data);
 			if (results[2].status === 'fulfilled' && results[2].value.success)
 				setSummary7d(results[2].value.data);
-			if (results[3].status === 'fulfilled' && results[3].value.success) {
-				const statusData = results[3].value.data;
-				if (providerId && statusData.statuses[providerId]) {
-					setProviderStatus(statusData.statuses[providerId]);
-				}
-			}
-			if (isCloud) {
+			if (resolvedIsCloud) {
 				if (
-					results[4]?.status === 'fulfilled' &&
-					(results[4].value as { success: boolean; data?: EmbeddingUsageSummary }).success
+					results[3]?.status === 'fulfilled' &&
+					(results[3].value as { success: boolean; data?: EmbeddingUsageSummary }).success
 				)
 					setSummary30d(
-						(results[4].value as { success: boolean; data: EmbeddingUsageSummary }).data
+						(results[3].value as { success: boolean; data: EmbeddingUsageSummary }).data
 					);
 				if (
-					results[5]?.status === 'fulfilled' &&
-					(results[5].value as { success: boolean; data?: EmbeddingUsageBucket[] }).success
+					results[4]?.status === 'fulfilled' &&
+					(results[4].value as { success: boolean; data?: EmbeddingUsageBucket[] }).success
 				)
 					setTimeline(
-						(results[5].value as { success: boolean; data: EmbeddingUsageBucket[] }).data
+						(results[4].value as { success: boolean; data: EmbeddingUsageBucket[] }).data
 					);
 			}
 		} catch {
 			// Non-critical
 		}
-	}, [isCloud, providerId]);
+	}, [configProviderId]);
 
 	useEffect(() => {
 		if (!config.enabled) return;
@@ -2849,6 +3018,14 @@ interface PersonaShiftRecord {
 	triggerContext: string;
 }
 
+interface PersonaActivationRecord {
+	timestamp: number;
+	sessionId: string;
+	persona: { id: string; name: string; score: number };
+	triggerContext: string;
+	type: 'activation' | 'shift';
+}
+
 function PersonaShiftSection({
 	theme,
 	config,
@@ -2860,16 +3037,39 @@ function PersonaShiftSection({
 }) {
 	const [collapsed, setCollapsed] = useState(true);
 	const [shifts, setShifts] = useState<PersonaShiftRecord[]>([]);
+	const [activations, setActivations] = useState<PersonaActivationRecord[]>([]);
 	const [injections, setInjections] = useState<InjectionEventRecord[]>([]);
 	const [loaded, setLoaded] = useState(false);
+	const [fetchKey, setFetchKey] = useState(0);
+	const [showUpdated, setShowUpdated] = useState(false);
+	const updatedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+	// Subscribe to live persona change events
+	useEffect(() => {
+		if (!config.enabled) return;
+		const unsub = window.maestro.memory.onPersonaChanged(() => {
+			// Bump fetchKey to trigger data re-fetch
+			setFetchKey((k) => k + 1);
+			// Show "Updated" badge briefly
+			setShowUpdated(true);
+			if (updatedTimerRef.current) clearTimeout(updatedTimerRef.current);
+			updatedTimerRef.current = setTimeout(() => setShowUpdated(false), 2000);
+		});
+		return () => {
+			unsub();
+			if (updatedTimerRef.current) clearTimeout(updatedTimerRef.current);
+		};
+	}, [config.enabled]);
+
+	// Fetch data on mount and when fetchKey changes
 	useEffect(() => {
 		if (!config.enabled) return;
 		let cancelled = false;
 		Promise.allSettled([
 			window.maestro.memory.getPersonaShifts(100),
 			window.maestro.memory.getRecentInjections(200),
-		]).then(([shiftResult, injResult]) => {
+			window.maestro.memory.getPersonaActivations(100),
+		]).then(([shiftResult, injResult, actResult]) => {
 			if (cancelled) return;
 			if (shiftResult.status === 'fulfilled' && shiftResult.value.success) {
 				setShifts(shiftResult.value.data as PersonaShiftRecord[]);
@@ -2877,12 +3077,15 @@ function PersonaShiftSection({
 			if (injResult.status === 'fulfilled' && injResult.value.success) {
 				setInjections((injResult.value as { success: true; data: InjectionEventRecord[] }).data);
 			}
+			if (actResult.status === 'fulfilled' && actResult.value.success) {
+				setActivations(actResult.value.data as PersonaActivationRecord[]);
+			}
 			setLoaded(true);
 		});
 		return () => {
 			cancelled = true;
 		};
-	}, [config.enabled]);
+	}, [config.enabled, fetchKey]);
 
 	const sevenDaysAgo = Date.now() - 7 * 86400000;
 
@@ -2912,6 +3115,29 @@ function PersonaShiftSection({
 		() => shifts.filter((s) => s.timestamp >= sevenDaysAgo),
 		[shifts, sevenDaysAgo]
 	);
+
+	// Recent activations (activation type only) in last 7 days
+	const recentActivations = useMemo(
+		() => activations.filter((a) => a.type === 'activation' && a.timestamp >= sevenDaysAgo),
+		[activations, sevenDaysAgo]
+	);
+
+	// Combined timeline: merge shifts and activations, sorted by timestamp descending
+	type TimelineEntry =
+		| { kind: 'shift'; data: PersonaShiftRecord; timestamp: number }
+		| { kind: 'activation'; data: PersonaActivationRecord; timestamp: number };
+
+	const combinedTimeline = useMemo<TimelineEntry[]>(() => {
+		const entries: TimelineEntry[] = [
+			...recentShifts.map((s) => ({ kind: 'shift' as const, data: s, timestamp: s.timestamp })),
+			...recentActivations.map((a) => ({
+				kind: 'activation' as const,
+				data: a,
+				timestamp: a.timestamp,
+			})),
+		];
+		return entries.sort((a, b) => b.timestamp - a.timestamp);
+	}, [recentShifts, recentActivations]);
 
 	// Never-matched personas: personas from allMemories that have never appeared in any injection event
 	const neverMatched = useMemo(() => {
@@ -2943,12 +3169,27 @@ function PersonaShiftSection({
 			<SectionHeader
 				theme={theme}
 				icon={ArrowRightLeft}
-				title="Persona Shifts"
+				title="Persona Activity"
 				collapsible
 				collapsed={collapsed}
 				onToggle={() => setCollapsed(!collapsed)}
 				action={
-					<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
+					<span
+						className="flex items-center gap-1.5 text-[10px]"
+						style={{ color: theme.colors.textDim }}
+					>
+						{showUpdated && (
+							<span
+								className="px-1 py-0.5 rounded text-[9px] font-medium"
+								style={{
+									backgroundColor: `${theme.colors.accent}25`,
+									color: theme.colors.accent,
+									transition: 'opacity 0.3s ease',
+								}}
+							>
+								Updated
+							</span>
+						)}
 						{loaded
 							? `${recentShifts.length} shift${recentShifts.length !== 1 ? 's' : ''} (7d)`
 							: '...'}
@@ -3010,14 +3251,20 @@ function PersonaShiftSection({
 						</div>
 					)}
 
-					{/* Shift Frequency Summary */}
-					{loaded && recentShifts.length > 0 && (
+					{/* Activity Frequency Summary */}
+					{loaded && (recentShifts.length > 0 || recentActivations.length > 0) && (
 						<div
 							className="rounded p-2 text-[10px]"
 							style={{ backgroundColor: `${theme.colors.border}15` }}
 						>
 							<span style={{ color: theme.colors.textMain }}>
-								{recentShifts.length} persona shift{recentShifts.length !== 1 ? 's' : ''} detected
+								{recentShifts.length} shift{recentShifts.length !== 1 ? 's' : ''}
+								{recentActivations.length > 0 && (
+									<>
+										, {recentActivations.length} activation
+										{recentActivations.length !== 1 ? 's' : ''}
+									</>
+								)}{' '}
 								in the last 7 days
 							</span>
 							{recentShifts.length >= 10 && (
@@ -3030,64 +3277,139 @@ function PersonaShiftSection({
 						</div>
 					)}
 
-					{/* Shift Timeline */}
-					{loaded && recentShifts.length > 0 && (
+					{/* Activity Timeline (shifts + activations) */}
+					{loaded && combinedTimeline.length > 0 && (
 						<div className="space-y-1">
 							<div className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
-								Shift Timeline
+								Activity Timeline
 							</div>
 							<div className="space-y-1 max-h-60 overflow-y-auto scrollbar-thin">
-								{recentShifts.slice(0, 20).map((shift, i) => (
+								{combinedTimeline.slice(0, 30).map((entry, i) => (
 									<div
-										key={`${shift.timestamp}-${i}`}
+										key={`${entry.kind}-${entry.timestamp}-${i}`}
 										className="rounded border p-2 space-y-1"
-										style={{ borderColor: theme.colors.border }}
+										style={{
+											borderColor:
+												entry.kind === 'activation'
+													? `${theme.colors.accent}30`
+													: theme.colors.border,
+										}}
 									>
-										<div className="flex items-center gap-1.5 text-[10px] flex-wrap">
-											<span
-												className="px-1.5 py-0.5 rounded"
-												style={{
-													backgroundColor: `${theme.colors.border}40`,
-													color: theme.colors.textMain,
-												}}
-											>
-												{shift.fromPersona.name}
-											</span>
-											<ArrowRightLeft
-												className="w-3 h-3 shrink-0"
-												style={{ color: theme.colors.textDim }}
-											/>
-											<span
-												className="px-1.5 py-0.5 rounded"
-												style={{
-													backgroundColor: `${theme.colors.accent}20`,
-													color: theme.colors.accent,
-												}}
-											>
-												{shift.toPersona.name}
-											</span>
-											<span className="ml-auto shrink-0" style={{ color: theme.colors.textDim }}>
-												{formatRelativeTime(shift.timestamp)}
-											</span>
-										</div>
-										<div className="flex items-center gap-1.5 text-[9px]">
-											<span style={{ color: theme.colors.textDim }}>
-												{shift.fromPersona.score.toFixed(2)} → {shift.toPersona.score.toFixed(2)}
-											</span>
-											<span style={{ color: theme.colors.textDim }}>
-												· {shift.sessionId.slice(0, 12)}...
-											</span>
-										</div>
-										{shift.triggerContext && (
-											<div
-												className="text-[9px] italic truncate"
-												style={{ color: theme.colors.textDim }}
-												title={shift.triggerContext}
-											>
-												{shift.triggerContext.length > 100
-													? `${shift.triggerContext.slice(0, 100)}...`
-													: shift.triggerContext}
-											</div>
+										{entry.kind === 'shift' ? (
+											<>
+												<div className="flex items-center gap-1.5 text-[10px] flex-wrap">
+													<span
+														className="px-1 py-0.5 rounded text-[9px] font-medium"
+														style={{
+															backgroundColor: `${theme.colors.accent}20`,
+															color: theme.colors.accent,
+														}}
+													>
+														Shifted
+													</span>
+													<span
+														className="px-1.5 py-0.5 rounded"
+														style={{
+															backgroundColor: `${theme.colors.border}40`,
+															color: theme.colors.textMain,
+														}}
+													>
+														{entry.data.fromPersona.name}
+													</span>
+													<ArrowRightLeft
+														className="w-3 h-3 shrink-0"
+														style={{ color: theme.colors.textDim }}
+													/>
+													<span
+														className="px-1.5 py-0.5 rounded"
+														style={{
+															backgroundColor: `${theme.colors.accent}20`,
+															color: theme.colors.accent,
+														}}
+													>
+														{entry.data.toPersona.name}
+													</span>
+													<span
+														className="ml-auto shrink-0"
+														style={{ color: theme.colors.textDim }}
+													>
+														{formatRelativeTime(entry.timestamp)}
+													</span>
+												</div>
+												<div className="flex items-center gap-1.5 text-[9px]">
+													<span style={{ color: theme.colors.textDim }}>
+														{entry.data.fromPersona.score.toFixed(2)} →{' '}
+														{entry.data.toPersona.score.toFixed(2)}
+													</span>
+													<span style={{ color: theme.colors.textDim }}>
+														· {entry.data.sessionId.slice(0, 12)}...
+													</span>
+												</div>
+												{entry.data.triggerContext && (
+													<div
+														className="text-[9px] italic truncate"
+														style={{ color: theme.colors.textDim }}
+														title={entry.data.triggerContext}
+													>
+														{entry.data.triggerContext.length > 100
+															? `${entry.data.triggerContext.slice(0, 100)}...`
+															: entry.data.triggerContext}
+													</div>
+												)}
+											</>
+										) : (
+											<>
+												<div className="flex items-center gap-1.5 text-[10px] flex-wrap">
+													<span
+														className="px-1 py-0.5 rounded text-[9px] font-medium"
+														style={{
+															backgroundColor: `${theme.colors.accent}40`,
+															color: theme.colors.accent,
+															opacity: 0.7,
+														}}
+													>
+														Activated
+													</span>
+													<Play
+														className="w-3 h-3 shrink-0"
+														style={{ color: `${theme.colors.accent}66` }}
+													/>
+													<span
+														className="px-1.5 py-0.5 rounded"
+														style={{
+															backgroundColor: `${theme.colors.accent}15`,
+															color: `${theme.colors.accent}99`,
+														}}
+													>
+														{entry.data.persona.name}
+													</span>
+													<span
+														className="ml-auto shrink-0"
+														style={{ color: theme.colors.textDim }}
+													>
+														{formatRelativeTime(entry.timestamp)}
+													</span>
+												</div>
+												<div className="flex items-center gap-1.5 text-[9px]">
+													<span style={{ color: theme.colors.textDim }}>
+														score: {entry.data.persona.score.toFixed(2)}
+													</span>
+													<span style={{ color: theme.colors.textDim }}>
+														· {entry.data.sessionId.slice(0, 12)}...
+													</span>
+												</div>
+												{entry.data.triggerContext && (
+													<div
+														className="text-[9px] italic truncate"
+														style={{ color: theme.colors.textDim }}
+														title={entry.data.triggerContext}
+													>
+														{entry.data.triggerContext.length > 100
+															? `${entry.data.triggerContext.slice(0, 100)}...`
+															: entry.data.triggerContext}
+													</div>
+												)}
+											</>
 										)}
 									</div>
 								))}
@@ -3130,11 +3452,12 @@ function PersonaShiftSection({
 
 					{loaded &&
 						shifts.length === 0 &&
+						activations.length === 0 &&
 						personaUsage.length === 0 &&
 						neverMatched.length === 0 && (
 							<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
 								No persona activity recorded yet. Start agent sessions to begin tracking persona
-								matches and shifts.
+								matches, activations, and shifts.
 							</div>
 						)}
 				</div>
