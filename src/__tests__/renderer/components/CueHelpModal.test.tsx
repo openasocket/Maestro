@@ -198,8 +198,25 @@ describe('CueHelpModal', () => {
 
 		it('should render keyboard shortcut tip for opening Cue dashboard', () => {
 			const kbdElements = document.querySelectorAll('kbd');
-			const hasShortcut = Array.from(kbdElements).some((kbd) => kbd.textContent?.includes('Meta'));
-			expect(hasShortcut).toBe(true);
+			expect(kbdElements.length).toBeGreaterThan(0);
+			expect(screen.getByText(/to open the Cue dashboard/)).toBeInTheDocument();
+		});
+
+		it('should render custom shortcut keys when provided', () => {
+			cleanup();
+			render(
+				<CueHelpModal
+					theme={mockTheme}
+					onClose={mockOnClose}
+					cueShortcutKeys={['Meta', 'Shift', 'c']}
+				/>
+			);
+			const kbdElements = document.querySelectorAll('kbd');
+			const hasCustomShortcut = Array.from(kbdElements).some((kbd) => {
+				const text = kbd.textContent || '';
+				return text.includes('C') || text.includes('c');
+			});
+			expect(hasCustomShortcut).toBe(true);
 		});
 
 		it('should render Coordination Patterns section', () => {
@@ -222,6 +239,10 @@ describe('CueHelpModal', () => {
 
 		it('should render YAML editor pattern presets tip', () => {
 			expect(screen.getByText(/pattern presets to get started quickly/)).toBeInTheDocument();
+		});
+
+		it('should mention triggeredBy filter for selective chaining', () => {
+			expect(screen.getByText(/triggeredBy/)).toBeInTheDocument();
 		});
 	});
 

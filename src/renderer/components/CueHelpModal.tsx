@@ -15,13 +15,15 @@ import type { Theme } from '../types';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { Modal } from './ui/Modal';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
+import { DEFAULT_SHORTCUTS } from '../constants/shortcuts';
 
 interface CueHelpModalProps {
 	theme: Theme;
 	onClose: () => void;
+	cueShortcutKeys?: string[];
 }
 
-export function CueHelpModal({ theme, onClose }: CueHelpModalProps) {
+export function CueHelpModal({ theme, onClose, cueShortcutKeys }: CueHelpModalProps) {
 	return (
 		<Modal
 			theme={theme}
@@ -182,7 +184,14 @@ export function CueHelpModal({ theme, onClose }: CueHelpModalProps) {
 								>
 									source_session
 								</code>{' '}
-								to the session name.
+								to the session name. Use{' '}
+								<code
+									className="px-1 rounded text-xs"
+									style={{ backgroundColor: theme.colors.bgActivity }}
+								>
+									filter: {'{'} triggeredBy: "sub-name" {'}'}
+								</code>{' '}
+								to chain from a specific subscription only.
 							</p>
 						</div>
 						<div>
@@ -406,6 +415,7 @@ export function CueHelpModal({ theme, onClose }: CueHelpModalProps) {
 									['"<N"', 'Less than', 'priority: "<5"'],
 									['"glob*"', 'Glob pattern', 'path: "src/**/*.ts"'],
 									['true/false', 'Boolean', 'active: true'],
+									['triggeredBy', 'Source subscription', 'triggeredBy: "build-step"'],
 								].map(([expr, meaning, example], i) => (
 									<tr key={i}>
 										<td
@@ -873,7 +883,7 @@ export function CueHelpModal({ theme, onClose }: CueHelpModalProps) {
 										border: `1px solid ${theme.colors.border}`,
 									}}
 								>
-									{formatShortcutKeys(['Meta', 'Shift', 'u'])}
+									{formatShortcutKeys(cueShortcutKeys ?? DEFAULT_SHORTCUTS.maestroCue.keys)}
 								</kbd>{' '}
 								to open the Cue dashboard.
 							</span>

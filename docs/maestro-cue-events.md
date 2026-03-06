@@ -135,7 +135,16 @@ subscriptions:
 | `{{CUE_SOURCE_SESSION}}` | Name of the completing agent(s)                 | `builder`         |
 | `{{CUE_SOURCE_OUTPUT}}`  | Truncated stdout from the source (max 5K chars) | `Build succeeded` |
 
-The event payload also includes `status` (completed/failed/timeout), `exitCode`, and `durationMs` which can be used in [filters](./maestro-cue-advanced#filtering).
+The event payload also includes these fields which can be used in [filters](./maestro-cue-advanced#filtering):
+
+| Payload Field | Description                                            | Example        |
+| ------------- | ------------------------------------------------------ | -------------- |
+| `status`      | Run status (`completed`, `failed`, `timeout`)          | `completed`    |
+| `exitCode`    | Process exit code                                      | `0`            |
+| `durationMs`  | Run duration in milliseconds                           | `15000`        |
+| `triggeredBy` | Name of the subscription that triggered the source run | `lint-on-save` |
+
+The `triggeredBy` field is particularly useful when a source agent has multiple Cue subscriptions but you only want to chain from a specific one. See [Selective Chaining](./maestro-cue-examples#selective-chaining-with-triggeredby) for a complete example.
 
 ---
 

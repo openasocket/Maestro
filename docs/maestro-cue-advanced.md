@@ -139,6 +139,19 @@ filter:
   prompt: Build succeeded. Deploy now.
 ```
 
+**Only chain from a specific subscription** (when the source agent has multiple subscriptions):
+
+```yaml
+- name: review-feature
+  event: agent.completed
+  source_session: 'worker'
+  filter:
+    triggeredBy: 'implement-feature' # Ignores completions from other subscriptions
+  prompt: Review the feature implementation.
+```
+
+The `triggeredBy` field contains the subscription name that triggered the completing run. It supports glob patterns (e.g., `triggeredBy: "deploy-*"`). See [Selective Chaining](./maestro-cue-examples#selective-chaining-with-triggeredby) for a full walkthrough.
+
 **Trigger when there are 3 or more pending tasks:**
 
 ```yaml
