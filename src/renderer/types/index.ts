@@ -722,6 +722,8 @@ export interface Session {
 	activeRoleIds?: string[];
 	/** Persona IDs explicitly selected by the user (wizard or new agent modal) */
 	selectedPersonaIds?: string[];
+	/** Active persona for this session (runtime-only, not persisted) */
+	activePersona?: { id: string; name: string; roleName?: string; score: number };
 }
 
 export interface AgentConfigOption {
