@@ -5,10 +5,9 @@
  * - Loading existing YAML content on mount
  * - YAML template shown when no file exists
  * - Real-time validation with error display
- * - AI assist section with clipboard copy
+ * - AI assist chat with agent spawn and conversation resume
  * - Save/Cancel functionality with dirty state
  * - Line numbers gutter
- * - Tab key indentation
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -64,13 +63,40 @@ vi.mock('../../../renderer/constants/modalPriorities', () => ({
 	},
 }));
 
+// Mock sessionStore
+const mockSession = {
+	id: 'sess-1',
+	toolType: 'claude-code',
+	cwd: '/test/project',
+	customPath: undefined,
+	customArgs: undefined,
+	customEnvVars: undefined,
+	customModel: undefined,
+	customContextWindow: undefined,
+	sessionSshRemoteConfig: undefined,
+};
+
+vi.mock('../../../renderer/stores/sessionStore', () => ({
+	useSessionStore: vi.fn((selector: (s: any) => any) => selector({ sessions: [mockSession] })),
+	selectSessionById: (id: string) => (state: any) => state.sessions.find((s: any) => s.id === id),
+}));
+
+// Mock buildSpawnConfigForAgent
+const mockBuildSpawnConfig = vi.fn();
+vi.mock('../../../renderer/utils/sessionHelpers', () => ({
+	buildSpawnConfigForAgent: (...args: any[]) => mockBuildSpawnConfig(...args),
+}));
+
 // Mock IPC methods
 const mockReadYaml = vi.fn();
 const mockWriteYaml = vi.fn();
 const mockValidateYaml = vi.fn();
 const mockRefreshSession = vi.fn();
-
-const mockClipboardWriteText = vi.fn().mockResolvedValue(undefined);
+const mockSpawn = vi.fn();
+const mockOnData = vi.fn();
+const mockOnExit = vi.fn();
+const mockOnSessionId = vi.fn();
+const mockOnAgentError = vi.fn();
 
 const existingWindowMaestro = (window as any).maestro;
 
@@ -86,19 +112,36 @@ beforeEach(() => {
 			validateYaml: mockValidateYaml,
 			refreshSession: mockRefreshSession,
 		},
-	};
-
-	Object.assign(navigator, {
-		clipboard: {
-			writeText: mockClipboardWriteText,
+		process: {
+			...existingWindowMaestro?.process,
+			spawn: mockSpawn,
+			onData: mockOnData,
+			onExit: mockOnExit,
+			onSessionId: mockOnSessionId,
+			onAgentError: mockOnAgentError,
 		},
-	});
+	};
 
 	// Default: file doesn't exist, YAML is valid
 	mockReadYaml.mockResolvedValue(null);
 	mockWriteYaml.mockResolvedValue(undefined);
 	mockValidateYaml.mockResolvedValue({ valid: true, errors: [] });
 	mockRefreshSession.mockResolvedValue(undefined);
+	mockSpawn.mockResolvedValue({ pid: 123, success: true });
+	mockBuildSpawnConfig.mockResolvedValue({
+		sessionId: 'sess-1-cue-assist-123',
+		toolType: 'claude-code',
+		cwd: '/test/project',
+		command: 'claude',
+		args: [],
+		prompt: 'test prompt',
+	});
+
+	// Default: listeners return cleanup functions
+	mockOnData.mockReturnValue(vi.fn());
+	mockOnExit.mockReturnValue(vi.fn());
+	mockOnSessionId.mockReturnValue(vi.fn());
+	mockOnAgentError.mockReturnValue(vi.fn());
 });
 
 afterEach(() => {
@@ -151,21 +194,21 @@ describe('CueYamlEditor', () => {
 		});
 
 		it('should show loading state initially', () => {
-			// Make readYaml never resolve to keep loading state
 			mockReadYaml.mockReturnValue(new Promise(() => {}));
 			render(<CueYamlEditor {...defaultProps} />);
 
 			expect(screen.getByText('Loading YAML...')).toBeInTheDocument();
 		});
 
-		it('should render AI assist section', async () => {
+		it('should render AI assist chat section', async () => {
 			render(<CueYamlEditor {...defaultProps} />);
 
 			await waitFor(() => {
 				expect(screen.getByText('AI Assist')).toBeInTheDocument();
 			});
-			expect(screen.getByTestId('ai-description-input')).toBeInTheDocument();
-			expect(screen.getByTestId('copy-prompt-button')).toBeInTheDocument();
+			expect(screen.getByTestId('ai-chat-input')).toBeInTheDocument();
+			expect(screen.getByTestId('ai-chat-send')).toBeInTheDocument();
+			expect(screen.getByTestId('ai-chat-history')).toBeInTheDocument();
 		});
 
 		it('should render YAML editor section', async () => {
@@ -248,7 +291,6 @@ describe('CueYamlEditor', () => {
 				expect(screen.getByTestId('yaml-editor')).toBeInTheDocument();
 			});
 
-			// Change the content to trigger validation
 			mockValidateYaml.mockResolvedValue({
 				valid: false,
 				errors: ['Missing required field: name'],
@@ -301,27 +343,21 @@ describe('CueYamlEditor', () => {
 
 			render(<CueYamlEditor {...defaultProps} />);
 
-			// Wait for initial load
 			await act(async () => {
 				await vi.runAllTimersAsync();
 			});
 
-			// Rapidly change the content
 			const editor = screen.getByTestId('yaml-editor');
 			fireEvent.change(editor, { target: { value: 'change1' } });
 			fireEvent.change(editor, { target: { value: 'change2' } });
 			fireEvent.change(editor, { target: { value: 'change3' } });
 
-			// Before debounce window, validateYaml should not be called for the changes
-			// (may have been called during initial load)
 			const callsBeforeDebounce = mockValidateYaml.mock.calls.length;
 
-			// Advance past debounce timer
 			await act(async () => {
 				vi.advanceTimersByTime(600);
 			});
 
-			// Should only have added one validation call (for the last change)
 			expect(mockValidateYaml.mock.calls.length).toBe(callsBeforeDebounce + 1);
 			expect(mockValidateYaml).toHaveBeenLastCalledWith('change3');
 
@@ -329,68 +365,215 @@ describe('CueYamlEditor', () => {
 		});
 	});
 
-	describe('AI assist', () => {
-		it('should have disabled copy button when description is empty', async () => {
+	describe('AI assist chat', () => {
+		it('should have disabled send button when input is empty', async () => {
 			render(<CueYamlEditor {...defaultProps} />);
 
 			await waitFor(() => {
-				expect(screen.getByTestId('copy-prompt-button')).toBeInTheDocument();
+				expect(screen.getByTestId('ai-chat-send')).toBeInTheDocument();
 			});
 
-			expect(screen.getByTestId('copy-prompt-button')).toBeDisabled();
+			expect(screen.getByTestId('ai-chat-send')).toBeDisabled();
 		});
 
-		it('should enable copy button when description has text', async () => {
+		it('should enable send button when input has text', async () => {
 			render(<CueYamlEditor {...defaultProps} />);
 
 			await waitFor(() => {
-				expect(screen.getByTestId('ai-description-input')).toBeInTheDocument();
+				expect(screen.getByTestId('ai-chat-input')).toBeInTheDocument();
 			});
 
-			fireEvent.change(screen.getByTestId('ai-description-input'), {
+			fireEvent.change(screen.getByTestId('ai-chat-input'), {
 				target: { value: 'Watch for file changes' },
 			});
 
-			expect(screen.getByTestId('copy-prompt-button')).not.toBeDisabled();
+			expect(screen.getByTestId('ai-chat-send')).not.toBeDisabled();
 		});
 
-		it('should copy system prompt + description to clipboard', async () => {
+		it('should add user message to chat history on send', async () => {
 			render(<CueYamlEditor {...defaultProps} />);
 
 			await waitFor(() => {
-				expect(screen.getByTestId('ai-description-input')).toBeInTheDocument();
+				expect(screen.getByTestId('ai-chat-input')).toBeInTheDocument();
 			});
 
-			fireEvent.change(screen.getByTestId('ai-description-input'), {
-				target: { value: 'Run code review on save' },
+			fireEvent.change(screen.getByTestId('ai-chat-input'), {
+				target: { value: 'Set up file watching' },
 			});
 
-			fireEvent.click(screen.getByTestId('copy-prompt-button'));
+			fireEvent.click(screen.getByTestId('ai-chat-send'));
 
 			await waitFor(() => {
-				expect(mockClipboardWriteText).toHaveBeenCalledOnce();
+				expect(screen.getByTestId('chat-message-user')).toBeInTheDocument();
 			});
-
-			const copiedText = mockClipboardWriteText.mock.calls[0][0];
-			expect(copiedText).toContain('Maestro Cue configuration generator');
-			expect(copiedText).toContain('Run code review on save');
+			expect(screen.getByText('Set up file watching')).toBeInTheDocument();
 		});
 
-		it('should show "Copied!" feedback after copying', async () => {
+		it('should show busy indicator while agent is working', async () => {
 			render(<CueYamlEditor {...defaultProps} />);
 
 			await waitFor(() => {
-				expect(screen.getByTestId('ai-description-input')).toBeInTheDocument();
+				expect(screen.getByTestId('ai-chat-input')).toBeInTheDocument();
 			});
 
-			fireEvent.change(screen.getByTestId('ai-description-input'), {
-				target: { value: 'test' },
+			fireEvent.change(screen.getByTestId('ai-chat-input'), {
+				target: { value: 'Set up file watching' },
 			});
 
-			fireEvent.click(screen.getByTestId('copy-prompt-button'));
+			fireEvent.click(screen.getByTestId('ai-chat-send'));
 
 			await waitFor(() => {
-				expect(screen.getByText('Copied!')).toBeInTheDocument();
+				expect(screen.getByTestId('chat-busy-indicator')).toBeInTheDocument();
+			});
+			expect(screen.getByText('Agent is working...')).toBeInTheDocument();
+		});
+
+		it('should clear input after sending', async () => {
+			render(<CueYamlEditor {...defaultProps} />);
+
+			await waitFor(() => {
+				expect(screen.getByTestId('ai-chat-input')).toBeInTheDocument();
+			});
+
+			fireEvent.change(screen.getByTestId('ai-chat-input'), {
+				target: { value: 'Set up file watching' },
+			});
+
+			fireEvent.click(screen.getByTestId('ai-chat-send'));
+
+			await waitFor(() => {
+				expect((screen.getByTestId('ai-chat-input') as HTMLTextAreaElement).value).toBe('');
+			});
+		});
+
+		it('should include system prompt on first message', async () => {
+			render(<CueYamlEditor {...defaultProps} />);
+
+			await waitFor(() => {
+				expect(screen.getByTestId('ai-chat-input')).toBeInTheDocument();
+			});
+
+			fireEvent.change(screen.getByTestId('ai-chat-input'), {
+				target: { value: 'Run code review' },
+			});
+
+			fireEvent.click(screen.getByTestId('ai-chat-send'));
+
+			await waitFor(() => {
+				expect(mockBuildSpawnConfig).toHaveBeenCalledWith(
+					expect.objectContaining({
+						prompt: expect.stringContaining('configuring maestro-cue.yaml'),
+					})
+				);
+			});
+
+			// Should include the file path
+			const prompt = mockBuildSpawnConfig.mock.calls[0][0].prompt;
+			expect(prompt).toContain('/test/project/maestro-cue.yaml');
+			expect(prompt).toContain('Run code review');
+		});
+
+		it('should spawn agent process', async () => {
+			render(<CueYamlEditor {...defaultProps} />);
+
+			await waitFor(() => {
+				expect(screen.getByTestId('ai-chat-input')).toBeInTheDocument();
+			});
+
+			fireEvent.change(screen.getByTestId('ai-chat-input'), {
+				target: { value: 'Run code review' },
+			});
+
+			fireEvent.click(screen.getByTestId('ai-chat-send'));
+
+			await waitFor(() => {
+				expect(mockSpawn).toHaveBeenCalled();
+			});
+		});
+
+		it('should freeze YAML editor while agent is working', async () => {
+			render(<CueYamlEditor {...defaultProps} />);
+
+			await waitFor(() => {
+				expect(screen.getByTestId('ai-chat-input')).toBeInTheDocument();
+			});
+
+			fireEvent.change(screen.getByTestId('ai-chat-input'), {
+				target: { value: 'Set up automation' },
+			});
+
+			fireEvent.click(screen.getByTestId('ai-chat-send'));
+
+			await waitFor(() => {
+				const editor = screen.getByTestId('yaml-editor') as HTMLTextAreaElement;
+				expect(editor.readOnly).toBe(true);
+			});
+		});
+
+		it('should register onData, onExit, onSessionId, and onAgentError listeners', async () => {
+			render(<CueYamlEditor {...defaultProps} />);
+
+			await waitFor(() => {
+				expect(screen.getByTestId('ai-chat-input')).toBeInTheDocument();
+			});
+
+			fireEvent.change(screen.getByTestId('ai-chat-input'), {
+				target: { value: 'Set up automation' },
+			});
+
+			fireEvent.click(screen.getByTestId('ai-chat-send'));
+
+			await waitFor(() => {
+				expect(mockOnData).toHaveBeenCalledWith(expect.any(Function));
+				expect(mockOnExit).toHaveBeenCalledWith(expect.any(Function));
+				expect(mockOnSessionId).toHaveBeenCalledWith(expect.any(Function));
+				expect(mockOnAgentError).toHaveBeenCalledWith(expect.any(Function));
+			});
+		});
+
+		it('should show error message when agent config is unavailable', async () => {
+			mockBuildSpawnConfig.mockResolvedValue(null);
+
+			render(<CueYamlEditor {...defaultProps} />);
+
+			await waitFor(() => {
+				expect(screen.getByTestId('ai-chat-input')).toBeInTheDocument();
+			});
+
+			fireEvent.change(screen.getByTestId('ai-chat-input'), {
+				target: { value: 'Set up automation' },
+			});
+
+			fireEvent.click(screen.getByTestId('ai-chat-send'));
+
+			await waitFor(() => {
+				expect(screen.getByText(/Agent not available/)).toBeInTheDocument();
+			});
+		});
+
+		it('should show placeholder text when chat is empty', async () => {
+			render(<CueYamlEditor {...defaultProps} />);
+
+			await waitFor(() => {
+				expect(screen.getByText(/Describe what you want to automate/)).toBeInTheDocument();
+			});
+		});
+
+		it('should disable input while agent is working', async () => {
+			render(<CueYamlEditor {...defaultProps} />);
+
+			await waitFor(() => {
+				expect(screen.getByTestId('ai-chat-input')).toBeInTheDocument();
+			});
+
+			fireEvent.change(screen.getByTestId('ai-chat-input'), {
+				target: { value: 'Do something' },
+			});
+
+			fireEvent.click(screen.getByTestId('ai-chat-send'));
+
+			await waitFor(() => {
+				expect(screen.getByTestId('ai-chat-input')).toBeDisabled();
 			});
 		});
 	});
@@ -421,7 +604,6 @@ describe('CueYamlEditor', () => {
 				target: { value: 'modified content' },
 			});
 
-			// Save should be enabled since content changed and validation is still valid
 			expect(screen.getByText('Save')).not.toBeDisabled();
 		});
 
@@ -441,12 +623,10 @@ describe('CueYamlEditor', () => {
 				target: { value: 'invalid' },
 			});
 
-			// Advance past debounce
 			await act(async () => {
 				vi.advanceTimersByTime(600);
 			});
 
-			// Wait for async validation to complete
 			await act(async () => {
 				await vi.runAllTimersAsync();
 			});
@@ -583,7 +763,6 @@ describe('CueYamlEditor', () => {
 				expect(screen.getByTestId('yaml-editor')).toBeInTheDocument();
 			});
 
-			// Make the editor dirty
 			fireEvent.change(screen.getByTestId('yaml-editor'), {
 				target: { value: 'modified content' },
 			});
@@ -594,7 +773,6 @@ describe('CueYamlEditor', () => {
 				'Replace current YAML with this pattern? Unsaved changes will be lost.'
 			);
 
-			// Should NOT have replaced content since user declined
 			const editor = screen.getByTestId('yaml-editor') as HTMLTextAreaElement;
 			expect(editor.value).toBe('modified content');
 
@@ -611,7 +789,6 @@ describe('CueYamlEditor', () => {
 				expect(screen.getByTestId('yaml-editor')).toBeInTheDocument();
 			});
 
-			// Make the editor dirty
 			fireEvent.change(screen.getByTestId('yaml-editor'), {
 				target: { value: 'modified content' },
 			});

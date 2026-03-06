@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { CheckCircle, XCircle, Copy, Zap } from 'lucide-react';
+import { CheckCircle, XCircle, Zap, Send, Loader2 } from 'lucide-react';
 import { Modal, ModalFooter } from './ui/Modal';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { CUE_PATTERNS } from '../constants/cuePatterns';
+import { useSessionStore, selectSessionById } from '../stores/sessionStore';
+import { buildSpawnConfigForAgent } from '../utils/sessionHelpers';
 import type { Theme } from '../types';
 
 const CUE_TEAL = '#06b6d4';
@@ -55,83 +57,36 @@ const YAML_TEMPLATE = `# maestro-cue.yaml
 #   queue_size: 10
 `;
 
-const AI_SYSTEM_PROMPT = `You are a Maestro Cue configuration generator. Generate valid maestro-cue.yaml content based on the user's description.
+const AI_SYSTEM_PROMPT = `You are configuring maestro-cue.yaml for the user. Be terse. Plain text only — no markdown, no code fences, no bullet lists, no formatting.
 
-Available event types:
-- time.interval: Runs on a timer. Requires \`interval_minutes\`.
-- file.changed: Runs when files matching a glob pattern change. Requires \`watch\` (glob pattern).
-- agent.completed: Runs when another agent session completes. Requires \`source_session\` (name or array for fan-in). Optional \`fan_out\` array to trigger multiple sessions.
-- github.pull_request: Polls for new GitHub pull requests via \`gh\` CLI. Optional \`repo\` (owner/repo, auto-detected from git remote). Optional \`poll_minutes\` (default 5, min 1). Requires \`gh\` CLI installed and authenticated.
-- github.issue: Polls for new GitHub issues via \`gh\` CLI. Same options as github.pull_request.
-- task.pending: Polls markdown files for unchecked tasks (\`- [ ]\`). Requires \`watch\` (glob pattern for markdown files). Optional \`poll_minutes\` (default 1, min 1). Fires once per file that has pending tasks and has changed since last scan.
+Event types: time.interval (interval_minutes), file.changed (watch glob), agent.completed (source_session, optional fan_out), github.pull_request (poll_minutes, optional repo), github.issue (poll_minutes, optional repo), task.pending (watch glob, poll_minutes).
 
-Event filtering (optional \`filter\` block on any subscription):
-- All conditions are AND'd together. Keys are payload field names (dot-notation for nested).
-- "value" — exact string match
-- "!value" — not equal
-- ">N" / "<N" / ">=N" / "<=N" — numeric comparison
-- "glob*" or "src/**/*.ts" — glob pattern match (any string containing *)
-- true / false — boolean match
-- Plain number — numeric equality
+Optional filter block on any subscription: AND'd conditions on payload fields. Operators: exact string, "!value" negation, ">N"/"<N" numeric, glob patterns, boolean.
 
-file.changed payload fields: path, filename, directory, extension, changeType
-agent.completed payload fields: sourceSession, sourceSessionId, status, exitCode, durationMs
-github.pull_request payload fields: type, number, title, author, url, body, state, draft, labels, head_branch, base_branch, repo, created_at, updated_at
-github.issue payload fields: type, number, title, author, url, body, state, labels, assignees, repo, created_at, updated_at
-task.pending payload fields: path, filename, directory, extension, taskCount, taskList, tasks, content
-
-YAML format:
+YAML structure:
 subscriptions:
   - name: "descriptive name"
-    event: time.interval | file.changed | agent.completed | github.pull_request | github.issue | task.pending
-    interval_minutes: N          # for time.interval
-    watch: "glob/pattern/**"     # for file.changed
-    source_session: "name"       # for agent.completed (string or string[])
-    fan_out: ["name1", "name2"]  # optional, for agent.completed
-    repo: "owner/repo"            # for github.* (optional, auto-detected)
-    poll_minutes: 5               # for github.* or task.pending (optional)
-    filter:                      # optional, narrow when subscription fires
-      extension: ".ts"           # example: only .ts files
-      path: "!*.test.ts"         # example: exclude test files
-    prompt: path/to/prompt.md    # relative to project root
+    event: <type>
+    <type-specific fields>
+    filter: {field: value}  # optional
+    prompt: path/to/prompt.md
     enabled: true
-
 settings:
   timeout_minutes: 30
-  timeout_on_fail: break         # or "continue"
-  max_concurrent: 1              # max simultaneous runs per session (1-10)
-  queue_size: 10                 # max queued events per session (0-50)
+  timeout_on_fail: break | continue
+  max_concurrent: 1
+  queue_size: 10
 
-When the user describes a multi-agent workflow, identify the best matching pattern:
+Multi-agent patterns: Scheduled Task (time.interval), File Enrichment (file.changed), Research Swarm (fan_out + fan-in), Sequential Chain (agent.completed chain), Debate (fan_out to opposing + fan-in to moderator), PR Review (github.pull_request), Issue Triage (github.issue), Task Queue (task.pending).
 
-- **Scheduled Task**: Single agent, periodic execution → time.interval
-- **File Enrichment**: React to file changes → file.changed with watch glob
-- **Research Swarm**: Multiple agents research in parallel, then synthesize → fan_out + fan-in with source_session array
-- **Sequential Chain**: A → B → C pipeline → agent.completed linking sessions
-- **Debate**: Multiple perspectives, then synthesis → fan_out to opposing agents + fan-in to moderator
-- **PR Review**: Auto-review new pull requests → github.pull_request with optional author filter
-- **Issue Triage**: Auto-triage new issues → github.issue with optional label filter
-- **Task Queue**: Process pending markdown tasks from a directory → task.pending with watch glob
+Edit the file directly using your tools. After editing, summarize what you changed in 1-2 short sentences. If you need clarification, ask briefly.`;
 
-For multi-session patterns (Swarm, Chain, Debate), generate the YAML for the primary orchestrator session and include commented-out YAML for the secondary sessions, clearly labeled with which session each block belongs to.
+const AI_PLACEHOLDER = 'Describe what you want to automate...';
 
-Available filter operators for narrowing events:
-- Exact: extension: ".ts"
-- Negation: status: "!archived"
-- Comparison: size: ">1000"
-- Glob: path: "src/**/*.ts"
-- Boolean: active: true
-
-Available settings:
-- timeout_minutes: 30 (default)
-- timeout_on_fail: break | continue
-- max_concurrent: 1 (default, max 10)
-- queue_size: 10 (default, max 50)
-
-Output ONLY the YAML content, no markdown code fences, no explanation.`;
-
-const AI_PLACEHOLDER =
-	'Watch for changes in src/ and run a code review every time a TypeScript file is modified. Also run a security audit every 2 hours.';
+interface ChatMessage {
+	role: 'user' | 'assistant';
+	text: string;
+}
 
 interface CueYamlEditorProps {
 	isOpen: boolean;
@@ -150,13 +105,24 @@ export function CueYamlEditor({
 }: CueYamlEditorProps) {
 	const [yamlContent, setYamlContent] = useState('');
 	const [originalContent, setOriginalContent] = useState('');
-	const [aiDescription, setAiDescription] = useState('');
 	const [validationErrors, setValidationErrors] = useState<string[]>([]);
 	const [isValid, setIsValid] = useState(true);
 	const [loading, setLoading] = useState(true);
-	const [copied, setCopied] = useState(false);
+
+	// Chat state
+	const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+	const [chatInput, setChatInput] = useState('');
+	const [chatBusy, setChatBusy] = useState(false);
+	const agentSessionIdRef = useRef<string | null>(null);
+	const spawnSessionIdRef = useRef<string>(`${sessionId}-cue-assist-${Date.now()}`);
+	const aiCleanupRef = useRef<(() => void)[]>([]);
+	const aiResponseRef = useRef('');
+	const chatEndRef = useRef<HTMLDivElement>(null);
+
 	const validateTimerRef = useRef<ReturnType<typeof setTimeout>>();
 	const yamlTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+	const session = useSessionStore(selectSessionById(sessionId));
 
 	// Load existing YAML on mount
 	useEffect(() => {
@@ -171,6 +137,15 @@ export function CueYamlEditor({
 				const initial = content ?? YAML_TEMPLATE;
 				setYamlContent(initial);
 				setOriginalContent(initial);
+				try {
+					const validationResult = await window.maestro.cue.validateYaml(initial);
+					if (!cancelled) {
+						setIsValid(validationResult.valid);
+						setValidationErrors(validationResult.errors);
+					}
+				} catch {
+					// Validation failure on load is non-fatal
+				}
 			} catch {
 				if (cancelled) return;
 				setYamlContent(YAML_TEMPLATE);
@@ -185,6 +160,30 @@ export function CueYamlEditor({
 			cancelled = true;
 		};
 	}, [isOpen, projectRoot]);
+
+	// Reset chat state when modal opens
+	useEffect(() => {
+		if (isOpen) {
+			setChatMessages([]);
+			setChatInput('');
+			setChatBusy(false);
+			agentSessionIdRef.current = null;
+			spawnSessionIdRef.current = `${sessionId}-cue-assist-${Date.now()}`;
+		}
+	}, [isOpen, sessionId]);
+
+	// Cleanup AI assist listeners on unmount
+	useEffect(() => {
+		return () => {
+			aiCleanupRef.current.forEach((fn) => fn());
+			aiCleanupRef.current = [];
+		};
+	}, []);
+
+	// Auto-scroll chat to bottom
+	useEffect(() => {
+		chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+	}, [chatMessages, chatBusy]);
 
 	// Debounced validation
 	const validateYaml = useCallback((content: string) => {
@@ -255,16 +254,129 @@ export function CueYamlEditor({
 		[yamlContent, originalContent, validateYaml]
 	);
 
-	const handleCopyPrompt = useCallback(async () => {
-		const fullPrompt = `${AI_SYSTEM_PROMPT}\n\n---\n\nUser request:\n${aiDescription}`;
+	const refreshYamlFromDisk = useCallback(async () => {
 		try {
-			await navigator.clipboard.writeText(fullPrompt);
-			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
+			const content = await window.maestro.cue.readYaml(projectRoot);
+			if (content) {
+				setYamlContent(content);
+				setOriginalContent(content);
+				try {
+					const result = await window.maestro.cue.validateYaml(content);
+					setIsValid(result.valid);
+					setValidationErrors(result.errors);
+				} catch {
+					// non-fatal
+				}
+			}
 		} catch {
-			// Clipboard API may fail in some contexts
+			// non-fatal
 		}
-	}, [aiDescription]);
+	}, [projectRoot]);
+
+	const handleChatSend = useCallback(async () => {
+		const text = chatInput.trim();
+		if (!text || !session || chatBusy) return;
+
+		setChatInput('');
+		setChatMessages((prev) => [...prev, { role: 'user', text }]);
+		setChatBusy(true);
+		aiResponseRef.current = '';
+
+		const isFirstMessage = chatMessages.length === 0;
+		const yamlPath = `${projectRoot}/maestro-cue.yaml`;
+
+		// First message gets system prompt + file path; follow-ups are just the user text
+		const prompt = isFirstMessage
+			? `${AI_SYSTEM_PROMPT}\n\nThe config file is at: ${yamlPath}\n\n${text}`
+			: text;
+
+		try {
+			const spawnConfig = await buildSpawnConfigForAgent({
+				sessionId: spawnSessionIdRef.current,
+				toolType: session.toolType,
+				cwd: projectRoot,
+				prompt,
+				agentSessionId: agentSessionIdRef.current ?? undefined,
+				sessionCustomPath: session.customPath,
+				sessionCustomArgs: session.customArgs,
+				sessionCustomEnvVars: session.customEnvVars,
+				sessionCustomModel: session.customModel,
+				sessionCustomContextWindow: session.customContextWindow,
+				sessionSshRemoteConfig: session.sessionSshRemoteConfig,
+			});
+
+			if (!spawnConfig) {
+				setChatMessages((prev) => [
+					...prev,
+					{ role: 'assistant', text: 'Agent not available. Is the agent installed?' },
+				]);
+				setChatBusy(false);
+				return;
+			}
+
+			// Register listeners before spawning
+			const cleanupData = window.maestro.process.onData((sid: string, data: string) => {
+				if (sid === spawnSessionIdRef.current) {
+					aiResponseRef.current += data;
+				}
+			});
+			aiCleanupRef.current.push(cleanupData);
+
+			const cleanupSessionId = window.maestro.process.onSessionId(
+				(sid: string, capturedId: string) => {
+					if (sid === spawnSessionIdRef.current) {
+						agentSessionIdRef.current = capturedId;
+					}
+				}
+			);
+			aiCleanupRef.current.push(cleanupSessionId);
+
+			const cleanupExit = window.maestro.process.onExit((sid: string) => {
+				if (sid === spawnSessionIdRef.current) {
+					aiCleanupRef.current.forEach((fn) => fn());
+					aiCleanupRef.current = [];
+
+					const response = aiResponseRef.current.trim() || 'Done.';
+					setChatMessages((prev) => [...prev, { role: 'assistant', text: response }]);
+					setChatBusy(false);
+
+					// Refresh YAML from disk to pick up agent changes
+					refreshYamlFromDisk();
+				}
+			});
+			aiCleanupRef.current.push(cleanupExit);
+
+			const cleanupError = window.maestro.process.onAgentError(
+				(sid: string, error: { message: string }) => {
+					if (sid === spawnSessionIdRef.current) {
+						const msg = error.message || 'Agent encountered an error.';
+						setChatMessages((prev) => [...prev, { role: 'assistant', text: msg }]);
+						setChatBusy(false);
+						aiCleanupRef.current.forEach((fn) => fn());
+						aiCleanupRef.current = [];
+					}
+				}
+			);
+			aiCleanupRef.current.push(cleanupError);
+
+			await window.maestro.process.spawn(spawnConfig);
+		} catch {
+			setChatMessages((prev) => [...prev, { role: 'assistant', text: 'Failed to start agent.' }]);
+			setChatBusy(false);
+			aiCleanupRef.current.forEach((fn) => fn());
+			aiCleanupRef.current = [];
+		}
+	}, [chatInput, session, projectRoot, chatMessages.length, chatBusy, refreshYamlFromDisk]);
+
+	const handleChatKeyDown = useCallback(
+		(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+			if (e.key === 'Enter' && !e.shiftKey) {
+				e.preventDefault();
+				handleChatSend();
+			}
+		},
+		[handleChatSend]
+	);
 
 	// Handle Tab key in textarea for indentation
 	const handleYamlKeyDown = useCallback(
@@ -278,7 +390,6 @@ export function CueYamlEditor({
 				const newValue = yamlContent.substring(0, start) + indent + yamlContent.substring(end);
 				setYamlContent(newValue);
 				validateYaml(newValue);
-				// Restore cursor position after React re-renders
 				requestAnimationFrame(() => {
 					textarea.selectionStart = textarea.selectionEnd = start + indent.length;
 				});
@@ -297,7 +408,7 @@ export function CueYamlEditor({
 			title="Edit maestro-cue.yaml"
 			priority={MODAL_PRIORITIES.CUE_YAML_EDITOR}
 			onClose={handleClose}
-			width={960}
+			width={1200}
 			maxHeight="85vh"
 			closeOnBackdropClick={false}
 			headerIcon={<Zap className="w-4 h-4" style={{ color: CUE_TEAL }} />}
@@ -324,7 +435,7 @@ export function CueYamlEditor({
 						onCancel={handleClose}
 						onConfirm={handleSave}
 						confirmLabel="Save"
-						confirmDisabled={!isValid || !isDirty}
+						confirmDisabled={!isValid || !isDirty || chatBusy}
 					/>
 				</div>
 			}
@@ -334,21 +445,22 @@ export function CueYamlEditor({
 					Loading YAML...
 				</div>
 			) : (
-				<div className="flex gap-4" style={{ minHeight: 400 }}>
-					{/* Left side: AI input (40%) */}
-					<div className="flex flex-col gap-3" style={{ width: '40%' }}>
+				<div className="flex gap-4" style={{ height: 'calc(85vh - 140px)', maxHeight: 600 }}>
+					{/* Left side: Patterns + AI Chat (35%) */}
+					<div className="flex flex-col gap-3 overflow-hidden" style={{ width: '35%' }}>
 						<h3
-							className="text-xs font-bold uppercase tracking-wider"
+							className="text-xs font-bold uppercase tracking-wider shrink-0"
 							style={{ color: theme.colors.textDim }}
 						>
 							Start from a pattern
 						</h3>
-						<div className="grid grid-cols-2 gap-1.5" data-testid="pattern-presets">
+						<div className="grid grid-cols-2 gap-1.5 shrink-0" data-testid="pattern-presets">
 							{CUE_PATTERNS.map((pattern) => (
 								<button
 									key={pattern.id}
 									onClick={() => handlePatternSelect(pattern.yaml)}
-									className="text-left px-2 py-1.5 rounded border text-xs transition-colors hover:opacity-90"
+									disabled={chatBusy}
+									className="text-left px-2 py-1.5 rounded border text-xs transition-colors hover:opacity-90 disabled:opacity-50"
 									style={{
 										borderColor: theme.colors.border,
 										color: theme.colors.textMain,
@@ -367,58 +479,106 @@ export function CueYamlEditor({
 							))}
 						</div>
 
-						<div className="w-full border-t" style={{ borderColor: theme.colors.border }} />
+						<div
+							className="w-full border-t shrink-0"
+							style={{ borderColor: theme.colors.border }}
+						/>
 
 						<h3
-							className="text-xs font-bold uppercase tracking-wider"
+							className="text-xs font-bold uppercase tracking-wider shrink-0"
 							style={{ color: theme.colors.textDim }}
 						>
 							AI Assist
 						</h3>
-						<p className="text-xs" style={{ color: theme.colors.textDim }}>
-							Describe what you want your agent to do, then copy the prompt to paste into any agent.
-						</p>
-						<textarea
-							value={aiDescription}
-							onChange={(e) => setAiDescription(e.target.value)}
-							placeholder={AI_PLACEHOLDER}
-							className="flex-1 w-full p-3 rounded border bg-transparent outline-none text-sm resize-none"
-							style={{
-								borderColor: theme.colors.border,
-								color: theme.colors.textMain,
-								minHeight: 160,
-							}}
-							data-testid="ai-description-input"
-						/>
-						<button
-							onClick={handleCopyPrompt}
-							disabled={!aiDescription.trim()}
-							className="flex items-center justify-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-							style={{
-								backgroundColor: aiDescription.trim() ? CUE_TEAL : theme.colors.bgActivity,
-								color: aiDescription.trim() ? '#fff' : theme.colors.textDim,
-							}}
-							data-testid="copy-prompt-button"
-						>
-							<Copy className="w-3.5 h-3.5" />
-							{copied ? 'Copied!' : 'Copy Prompt to Clipboard'}
-						</button>
+
+						{/* Chat history */}
+						<div className="flex-1 overflow-y-auto min-h-0 space-y-2" data-testid="ai-chat-history">
+							{chatMessages.length === 0 && !chatBusy && (
+								<p className="text-xs" style={{ color: theme.colors.textDim }}>
+									Describe what you want to automate. The agent will edit the config file and can
+									answer questions.
+								</p>
+							)}
+							{chatMessages.map((msg, i) => (
+								<div
+									key={i}
+									className="rounded px-2.5 py-1.5 text-xs whitespace-pre-wrap"
+									style={{
+										backgroundColor:
+											msg.role === 'user' ? `${CUE_TEAL}15` : theme.colors.bgActivity,
+										color: theme.colors.textMain,
+									}}
+									data-testid={`chat-message-${msg.role}`}
+								>
+									{msg.text}
+								</div>
+							))}
+							{chatBusy && (
+								<div
+									className="flex items-center gap-2 px-2.5 py-1.5 text-xs"
+									style={{ color: theme.colors.textDim }}
+									data-testid="chat-busy-indicator"
+								>
+									<Loader2 className="w-3 h-3 animate-spin" />
+									Agent is working...
+								</div>
+							)}
+							<div ref={chatEndRef} />
+						</div>
+
+						{/* Chat input */}
+						<div className="flex gap-1.5 shrink-0">
+							<textarea
+								value={chatInput}
+								onChange={(e) => setChatInput(e.target.value)}
+								onKeyDown={handleChatKeyDown}
+								placeholder={AI_PLACEHOLDER}
+								disabled={chatBusy}
+								rows={2}
+								className="flex-1 p-2 rounded border bg-transparent outline-none text-xs resize-none disabled:opacity-50"
+								style={{
+									borderColor: theme.colors.border,
+									color: theme.colors.textMain,
+								}}
+								data-testid="ai-chat-input"
+							/>
+							<button
+								onClick={handleChatSend}
+								disabled={!chatInput.trim() || chatBusy}
+								className="self-end p-2 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+								style={{
+									backgroundColor:
+										chatInput.trim() && !chatBusy ? CUE_TEAL : theme.colors.bgActivity,
+									color: chatInput.trim() && !chatBusy ? '#fff' : theme.colors.textDim,
+								}}
+								data-testid="ai-chat-send"
+							>
+								<Send className="w-3.5 h-3.5" />
+							</button>
+						</div>
 					</div>
 
 					{/* Divider */}
-					<div className="w-px self-stretch" style={{ backgroundColor: theme.colors.border }} />
+					<div
+						className="w-px self-stretch shrink-0"
+						style={{ backgroundColor: theme.colors.border }}
+					/>
 
-					{/* Right side: YAML editor (60%) */}
-					<div className="flex flex-col gap-3" style={{ width: '60%' }}>
+					{/* Right side: YAML editor (65%) */}
+					<div className="flex flex-col gap-3 overflow-hidden" style={{ width: '65%' }}>
 						<h3
-							className="text-xs font-bold uppercase tracking-wider"
+							className="text-xs font-bold uppercase tracking-wider shrink-0"
 							style={{ color: theme.colors.textDim }}
 						>
 							YAML Configuration
 						</h3>
 						<div
-							className="flex-1 flex rounded border overflow-hidden"
-							style={{ borderColor: theme.colors.border }}
+							className="flex-1 flex rounded border overflow-hidden min-h-0"
+							style={{
+								borderColor: theme.colors.border,
+								opacity: chatBusy ? 0.5 : 1,
+								pointerEvents: chatBusy ? 'none' : 'auto',
+							}}
 						>
 							{/* Line numbers gutter */}
 							<div
@@ -441,6 +601,7 @@ export function CueYamlEditor({
 								value={yamlContent}
 								onChange={(e) => handleYamlChange(e.target.value)}
 								onKeyDown={handleYamlKeyDown}
+								readOnly={chatBusy}
 								spellCheck={false}
 								className="flex-1 py-3 px-3 bg-transparent outline-none text-sm resize-none font-mono leading-[1.35rem]"
 								style={{ color: theme.colors.textMain }}
@@ -451,7 +612,7 @@ export function CueYamlEditor({
 						{/* Validation errors */}
 						{!isValid && validationErrors.length > 0 && (
 							<div
-								className="rounded px-3 py-2 text-xs space-y-1"
+								className="rounded px-3 py-2 text-xs space-y-1 shrink-0"
 								style={{ backgroundColor: `${theme.colors.error}15` }}
 								data-testid="validation-errors"
 							>
