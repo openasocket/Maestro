@@ -133,6 +133,44 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 		height: 720,
 	});
 
+	// Resize handler for drag handles
+	const handleResize = useCallback(
+		(e: React.PointerEvent, direction: 'right' | 'bottom' | 'corner') => {
+			e.preventDefault();
+			e.stopPropagation();
+			const startX = e.clientX;
+			const startY = e.clientY;
+			const startW = modalSize.width;
+			const startH = modalSize.height;
+
+			const onMove = (ev: PointerEvent) => {
+				const dx = ev.clientX - startX;
+				const dy = ev.clientY - startY;
+				const maxW = window.innerWidth - 80;
+				const maxH = window.innerHeight - 80;
+
+				setModalSize((prev) => ({
+					width: direction === 'bottom' ? prev.width : Math.max(640, Math.min(startW + dx, maxW)),
+					height: direction === 'right' ? prev.height : Math.max(480, Math.min(startH + dy, maxH)),
+				}));
+			};
+
+			const onUp = () => {
+				document.removeEventListener('pointermove', onMove);
+				document.removeEventListener('pointerup', onUp);
+				// Persist on drag end
+				setModalSize((current) => {
+					window.maestro.settings.set('settingsModalSize', current);
+					return current;
+				});
+			};
+
+			document.addEventListener('pointermove', onMove);
+			document.addEventListener('pointerup', onUp);
+		},
+		[modalSize]
+	);
+
 	// Load persisted size on open
 	useEffect(() => {
 		const loadSize = async () => {
@@ -650,6 +688,20 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 
 					{activeTab === 'encore' && <EncoreTab theme={theme} isOpen={isOpen} />}
 				</div>
+
+				{/* Resize handles */}
+				<div
+					className="absolute top-0 right-0 w-1.5 h-full cursor-ew-resize hover:bg-white/10 transition-colors"
+					onPointerDown={(e) => handleResize(e, 'right')}
+				/>
+				<div
+					className="absolute bottom-0 left-0 h-1.5 w-full cursor-ns-resize hover:bg-white/10 transition-colors"
+					onPointerDown={(e) => handleResize(e, 'bottom')}
+				/>
+				<div
+					className="absolute bottom-0 right-0 w-3 h-3 cursor-nwse-resize hover:bg-white/10 transition-colors"
+					onPointerDown={(e) => handleResize(e, 'corner')}
+				/>
 			</div>
 		</div>
 	);
