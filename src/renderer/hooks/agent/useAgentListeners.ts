@@ -1538,6 +1538,21 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 		);
 
 		// ================================================================
+		// Persona changed — update activePersona on the session
+		// ================================================================
+		const unsubscribePersonaChanged = window.maestro.memory.onPersonaChanged((event) => {
+			const persona = event.type === 'shift' ? event.toPersona : event.persona;
+			if (!persona) return;
+			useSessionStore.getState().updateSession(event.sessionId, {
+				activePersona: {
+					id: persona.id,
+					name: persona.name,
+					score: persona.score,
+				},
+			});
+		});
+
+		// ================================================================
 		// Cleanup — unsubscribe all listeners on unmount
 		// ================================================================
 		return () => {
@@ -1552,6 +1567,7 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 			unsubscribeThinkingChunk?.();
 			unsubscribeSshRemote?.();
 			unsubscribeToolExecution?.();
+			unsubscribePersonaChanged();
 			// Cancel any pending thinking chunk RAF and clear buffer
 			if (thinkingChunkRafIdRef.current !== null) {
 				cancelAnimationFrame(thinkingChunkRafIdRef.current);
