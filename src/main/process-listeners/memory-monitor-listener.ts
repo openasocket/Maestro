@@ -21,9 +21,11 @@
  * - SSH remote sessions (handled by LiveContextQueue drain)
  */
 
+import { BrowserWindow } from 'electron';
 import type { ProcessManager } from '../process-manager';
 import type { ProcessListenerDependencies } from './types';
 import { GROUP_CHAT_PREFIX } from './types';
+import { isWebContentsAvailable } from '../utils/safe-send';
 import type { UsageStats, ToolExecution, QueryCompleteData } from '../process-manager/types';
 import type { AgentError, HistoryEntry } from '../../shared/types';
 import type {
@@ -741,6 +743,7 @@ export function setupMemoryMonitorListener(
 		'query-complete': 120_000, // standard — 2 min
 		'new-tool-domain': 120_000, // standard — 2 min
 		'domain-shift': 120_000, // standard — 2 min
+		'persona-shift': 120_000, // standard — 2 min
 		'periodic-refresh': 300_000, // low — 5 min
 	};
 
@@ -750,6 +753,7 @@ export function setupMemoryMonitorListener(
 		'query-complete': 'standard',
 		'new-tool-domain': 'standard',
 		'domain-shift': 'standard',
+		'persona-shift': 'standard',
 		'periodic-refresh': 'low',
 	};
 
@@ -1145,7 +1149,8 @@ export function setupMemoryMonitorListener(
 				topMatch.persona.id !== state.initialPersonaMatch.id &&
 				topMatch.similarity > state.initialPersonaMatch.score + PERSONA_SHIFT_MARGIN
 			) {
-				const { pushPersonaShiftEvent } = await import('../memory/memory-injector');
+				const { pushPersonaShiftEvent, setSessionLastPersona } =
+					await import('../memory/memory-injector');
 				pushPersonaShiftEvent({
 					timestamp: now,
 					sessionId: state.sessionId,
@@ -1157,12 +1162,38 @@ export function setupMemoryMonitorListener(
 					},
 					triggerContext: turnContext.slice(0, 500),
 				});
+				BrowserWindow.getAllWindows().forEach((win) => {
+					if (isWebContentsAvailable(win)) {
+						win.webContents.send('memory:personaChanged', {
+							type: 'shift',
+							sessionId: state.sessionId,
+							fromPersona: { ...state.initialPersonaMatch },
+							toPersona: {
+								id: topMatch.persona.id,
+								name: topMatch.personaName,
+								score: topMatch.similarity,
+							},
+							timestamp: now,
+						});
+					}
+				});
 
-				logger.debug('[MemoryMonitor] Persona shift detected', 'MemoryMonitor', {
-					sessionId: state.sessionId,
-					from: state.initialPersonaMatch.name,
-					to: topMatch.personaName,
-					scoreDelta: (topMatch.similarity - state.initialPersonaMatch.score).toFixed(3),
+				logger.debug(
+					'[MemoryMonitor] Persona shift detected — triggering checkpoint injection',
+					'MemoryMonitor',
+					{
+						sessionId: state.sessionId,
+						from: state.initialPersonaMatch.name,
+						to: topMatch.personaName,
+						scoreDelta: (topMatch.similarity - state.initialPersonaMatch.score).toFixed(3),
+					}
+				);
+
+				// Update the per-session last persona tracker so pre-spawn detection stays in sync
+				setSessionLastPersona(state.sessionId, {
+					id: topMatch.persona.id,
+					name: topMatch.personaName,
+					score: topMatch.similarity,
 				});
 
 				// Update baseline to the new persona so we detect further shifts
@@ -1171,6 +1202,16 @@ export function setupMemoryMonitorListener(
 					name: topMatch.personaName,
 					score: topMatch.similarity,
 				};
+
+				// Trigger a checkpoint injection with the new persona's context.
+				// cascadingSearch will naturally match the new best persona and pull
+				// its memories, giving the agent updated knowledge mid-session.
+				// Gated by enableLivePersonaShift — user can disable mid-session shifts.
+				if (config.enableLivePersonaShift) {
+					triggerCheckpointSearch(state, 'persona-shift', turnContext).catch(() => {
+						// Non-critical — persona shift is best-effort
+					});
+				}
 			}
 		} catch (err) {
 			logger.debug('[MemoryMonitor] Persona shift evaluation failed', 'MemoryMonitor', {

@@ -240,6 +240,21 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 											},
 											triggerContext: effectivePrompt.slice(0, 500),
 										});
+										BrowserWindow.getAllWindows().forEach((win) => {
+											if (isWebContentsAvailable(win)) {
+												win.webContents.send('memory:personaChanged', {
+													type: 'shift',
+													sessionId: config.sessionId,
+													fromPersona: lastPersona,
+													toPersona: {
+														id: topPersona.personaId,
+														name: topPersona.personaName,
+														score: 0,
+													},
+													timestamp: Date.now(),
+												});
+											}
+										});
 										logger.debug(
 											`[Memory] Pre-spawn persona shift: ${lastPersona.name} → ${topPersona.personaName}`,
 											LOG_CONTEXT
@@ -256,6 +271,20 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 											},
 											triggerContext: effectivePrompt.slice(0, 500),
 											type: 'activation',
+										});
+										BrowserWindow.getAllWindows().forEach((win) => {
+											if (isWebContentsAvailable(win)) {
+												win.webContents.send('memory:personaChanged', {
+													type: 'activation',
+													sessionId: config.sessionId,
+													persona: {
+														id: topPersona.personaId,
+														name: topPersona.personaName,
+														score: 0,
+													},
+													timestamp: Date.now(),
+												});
+											}
 										});
 									}
 									setSessionLastPersona(config.sessionId, {
@@ -837,6 +866,21 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 											},
 											triggerContext: data.slice(0, 500),
 										});
+										BrowserWindow.getAllWindows().forEach((win) => {
+											if (isWebContentsAvailable(win)) {
+												win.webContents.send('memory:personaChanged', {
+													type: 'shift',
+													sessionId,
+													fromPersona: lastPersona,
+													toPersona: {
+														id: topMatch.persona.id,
+														name: topMatch.personaName,
+														score: topMatch.similarity,
+													},
+													timestamp: Date.now(),
+												});
+											}
+										});
 									}
 
 									// Record activation event when this is the first persona for the session
@@ -851,6 +895,20 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 											},
 											triggerContext: data.slice(0, 500),
 											type: 'activation',
+										});
+										BrowserWindow.getAllWindows().forEach((win) => {
+											if (isWebContentsAvailable(win)) {
+												win.webContents.send('memory:personaChanged', {
+													type: 'activation',
+													sessionId,
+													persona: {
+														id: topMatch.persona.id,
+														name: topMatch.personaName,
+														score: topMatch.similarity,
+													},
+													timestamp: Date.now(),
+												});
+											}
 										});
 									}
 

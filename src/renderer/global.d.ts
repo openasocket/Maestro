@@ -3197,6 +3197,16 @@ interface MaestroAPI {
 				duration: number;
 			}) => void
 		) => () => void;
+		onPersonaChanged: (
+			callback: (event: {
+				type: 'shift' | 'activation';
+				sessionId: string;
+				fromPersona?: { id: string; name: string; score: number };
+				toPersona?: { id: string; name: string; score: number };
+				persona?: { id: string; name: string; score: number };
+				timestamp: number;
+			}) => void
+		) => () => void;
 
 		// ─── Experience Repository (programmatic API) ─────────────────────
 		repository: {

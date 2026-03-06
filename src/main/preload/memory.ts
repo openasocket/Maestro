@@ -579,6 +579,33 @@ export function createMemoryApi() {
 			};
 		},
 
+		onPersonaChanged: (
+			callback: (event: {
+				type: 'shift' | 'activation';
+				sessionId: string;
+				fromPersona?: { id: string; name: string; score: number };
+				toPersona?: { id: string; name: string; score: number };
+				persona?: { id: string; name: string; score: number };
+				timestamp: number;
+			}) => void
+		): (() => void) => {
+			const handler = (
+				_event: unknown,
+				data: {
+					type: 'shift' | 'activation';
+					sessionId: string;
+					fromPersona?: { id: string; name: string; score: number };
+					toPersona?: { id: string; name: string; score: number };
+					persona?: { id: string; name: string; score: number };
+					timestamp: number;
+				}
+			) => callback(data);
+			ipcRenderer.on('memory:personaChanged', handler);
+			return () => {
+				ipcRenderer.removeListener('memory:personaChanged', handler);
+			};
+		},
+
 		// ─── Experience Repository ───────────────────────────────────────
 		repository: {
 			importFromFile: (
