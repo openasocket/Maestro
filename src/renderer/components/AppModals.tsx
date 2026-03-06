@@ -933,6 +933,7 @@ export interface AppUtilityModalsProps {
 	onCloseTabSwitcher: () => void;
 	onTabSelect: (tabId: string) => void;
 	onFileTabSelect?: (tabId: string) => void;
+	onTerminalTabSelect?: (tabId: string) => void;
 	onNamedSessionSelect: (
 		agentSessionId: string,
 		projectPath: string,
@@ -1123,6 +1124,7 @@ export const AppUtilityModals = memo(function AppUtilityModals({
 	onCloseTabSwitcher,
 	onTabSelect,
 	onFileTabSelect,
+	onTerminalTabSelect,
 	onNamedSessionSelect,
 	colorBlindMode,
 	// FileSearchModal
@@ -1337,13 +1339,16 @@ export const AppUtilityModals = memo(function AppUtilityModals({
 					theme={theme}
 					tabs={activeSession.aiTabs}
 					fileTabs={activeSession.filePreviewTabs}
+					terminalTabs={activeSession.terminalTabs}
 					activeTabId={activeSession.activeTabId}
 					activeFileTabId={activeSession.activeFileTabId}
+					activeTerminalTabId={activeSession.activeTerminalTabId}
 					projectRoot={activeSession.projectRoot}
 					agentId={activeSession.toolType}
 					shortcut={tabShortcuts.tabSwitcher}
 					onTabSelect={onTabSelect}
 					onFileTabSelect={onFileTabSelect}
+					onTerminalTabSelect={onTerminalTabSelect}
 					onNamedSessionSelect={onNamedSessionSelect}
 					onClose={onCloseTabSwitcher}
 					colorBlindMode={colorBlindMode}
@@ -2026,6 +2031,7 @@ export interface AppModalsProps {
 	onCloseTabSwitcher: () => void;
 	onTabSelect: (tabId: string) => void;
 	onFileTabSelect?: (tabId: string) => void;
+	onTerminalTabSelect?: (tabId: string) => void;
 	onNamedSessionSelect: (
 		agentSessionId: string,
 		projectPath: string,
@@ -2393,6 +2399,7 @@ export const AppModals = memo(function AppModals(props: AppModalsProps) {
 		onCloseTabSwitcher,
 		onTabSelect,
 		onFileTabSelect,
+		onTerminalTabSelect,
 		onNamedSessionSelect,
 		filteredFileTree,
 		fileExplorerExpanded,
@@ -2699,6 +2706,7 @@ export const AppModals = memo(function AppModals(props: AppModalsProps) {
 				onCloseTabSwitcher={onCloseTabSwitcher}
 				onTabSelect={onTabSelect}
 				onFileTabSelect={onFileTabSelect}
+				onTerminalTabSelect={onTerminalTabSelect}
 				onNamedSessionSelect={onNamedSessionSelect}
 				colorBlindMode={colorBlindMode}
 				fuzzyFileSearchOpen={fuzzyFileSearchOpen}
