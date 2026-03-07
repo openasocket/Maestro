@@ -29,7 +29,7 @@ export const AgentNode = memo(function AgentNode({
 				boxShadow: selected ? `0 4px 16px ${accentColor}30` : '0 2px 8px rgba(0,0,0,0.3)',
 				display: 'flex',
 				flexDirection: 'row',
-				overflow: 'hidden',
+				overflow: 'visible',
 				cursor: 'pointer',
 				transition: 'border-color 0.15s, box-shadow 0.15s',
 				position: 'relative',
@@ -53,6 +53,7 @@ export const AgentNode = memo(function AgentNode({
 					justifyContent: 'center',
 					padding: '8px 12px',
 					overflow: 'hidden',
+					borderRadius: '0 6px 6px 0',
 				}}
 			>
 				<div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
