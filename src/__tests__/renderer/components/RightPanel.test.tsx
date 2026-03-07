@@ -323,7 +323,12 @@ describe('RightPanel', () => {
 			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
-			expect(screen.getByTestId('file-explorer-panel')).toBeInTheDocument();
+			// FileExplorerPanel stays mounted (for auto-refresh timer) but is visible only on files tab
+			const fileExplorer = screen.getByTestId('file-explorer-panel');
+			expect(fileExplorer).toBeInTheDocument();
+			expect(fileExplorer.closest('[data-tour="files-panel"]')).not.toHaveStyle({
+				display: 'none',
+			});
 			expect(screen.queryByTestId('history-panel')).not.toBeInTheDocument();
 			expect(screen.queryByTestId('auto-run')).not.toBeInTheDocument();
 		});
@@ -333,7 +338,9 @@ describe('RightPanel', () => {
 			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
-			expect(screen.queryByTestId('file-explorer-panel')).not.toBeInTheDocument();
+			// FileExplorerPanel stays mounted but hidden (for auto-refresh timer persistence)
+			const fileExplorer = screen.getByTestId('file-explorer-panel');
+			expect(fileExplorer.closest('[data-tour="files-panel"]')).toHaveStyle({ display: 'none' });
 			expect(screen.getByTestId('history-panel')).toBeInTheDocument();
 			expect(screen.queryByTestId('auto-run')).not.toBeInTheDocument();
 		});
@@ -343,7 +350,9 @@ describe('RightPanel', () => {
 			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
-			expect(screen.queryByTestId('file-explorer-panel')).not.toBeInTheDocument();
+			// FileExplorerPanel stays mounted but hidden (for auto-refresh timer persistence)
+			const fileExplorer = screen.getByTestId('file-explorer-panel');
+			expect(fileExplorer.closest('[data-tour="files-panel"]')).toHaveStyle({ display: 'none' });
 			expect(screen.queryByTestId('history-panel')).not.toBeInTheDocument();
 			expect(screen.getByTestId('auto-run')).toBeInTheDocument();
 		});

@@ -456,39 +456,42 @@ export const RightPanel = memo(
 						}
 					}}
 				>
-					{activeRightTab === 'files' && (
-						<div data-tour="files-panel" className="h-full">
-							<FileExplorerPanel
-								session={session}
-								theme={theme}
-								fileTreeFilter={fileTreeFilter}
-								setFileTreeFilter={setFileTreeFilter}
-								fileTreeFilterOpen={fileTreeFilterOpen}
-								setFileTreeFilterOpen={setFileTreeFilterOpen}
-								filteredFileTree={filteredFileTree}
-								selectedFileIndex={selectedFileIndex}
-								setSelectedFileIndex={setSelectedFileIndex}
-								activeFocus={activeFocus}
-								activeRightTab={activeRightTab}
-								setActiveFocus={setActiveFocus}
-								fileTreeFilterInputRef={fileTreeFilterInputRef}
-								toggleFolder={toggleFolder}
-								handleFileClick={handleFileClick}
-								expandAllFolders={expandAllFolders}
-								collapseAllFolders={collapseAllFolders}
-								updateSessionWorkingDirectory={updateSessionWorkingDirectory}
-								refreshFileTree={refreshFileTree}
-								setSessions={setSessions}
-								onAutoRefreshChange={onAutoRefreshChange}
-								onShowFlash={onShowFlash}
-								showHiddenFiles={showHiddenFiles}
-								setShowHiddenFiles={setShowHiddenFiles}
-								onFocusFileInGraph={onFocusFileInGraph}
-								lastGraphFocusFile={lastGraphFocusFile}
-								onOpenLastDocumentGraph={onOpenLastDocumentGraph}
-							/>
-						</div>
-					)}
+					{/* FileExplorerPanel stays mounted so auto-refresh timer persists across tab switches */}
+					<div
+						data-tour="files-panel"
+						className="h-full"
+						style={{ display: activeRightTab === 'files' ? undefined : 'none' }}
+					>
+						<FileExplorerPanel
+							session={session}
+							theme={theme}
+							fileTreeFilter={fileTreeFilter}
+							setFileTreeFilter={setFileTreeFilter}
+							fileTreeFilterOpen={fileTreeFilterOpen}
+							setFileTreeFilterOpen={setFileTreeFilterOpen}
+							filteredFileTree={filteredFileTree}
+							selectedFileIndex={selectedFileIndex}
+							setSelectedFileIndex={setSelectedFileIndex}
+							activeFocus={activeFocus}
+							activeRightTab={activeRightTab}
+							setActiveFocus={setActiveFocus}
+							fileTreeFilterInputRef={fileTreeFilterInputRef}
+							toggleFolder={toggleFolder}
+							handleFileClick={handleFileClick}
+							expandAllFolders={expandAllFolders}
+							collapseAllFolders={collapseAllFolders}
+							updateSessionWorkingDirectory={updateSessionWorkingDirectory}
+							refreshFileTree={refreshFileTree}
+							setSessions={setSessions}
+							onAutoRefreshChange={onAutoRefreshChange}
+							onShowFlash={onShowFlash}
+							showHiddenFiles={showHiddenFiles}
+							setShowHiddenFiles={setShowHiddenFiles}
+							onFocusFileInGraph={onFocusFileInGraph}
+							lastGraphFocusFile={lastGraphFocusFile}
+							onOpenLastDocumentGraph={onOpenLastDocumentGraph}
+						/>
+					</div>
 
 					{activeRightTab === 'history' && (
 						<div data-tour="history-panel" className="h-full">
