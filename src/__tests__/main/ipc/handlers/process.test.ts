@@ -200,6 +200,7 @@ describe('process IPC handlers', () => {
 		resize: ReturnType<typeof vi.fn>;
 		getAll: ReturnType<typeof vi.fn>;
 		runCommand: ReturnType<typeof vi.fn>;
+		get: ReturnType<typeof vi.fn>;
 	};
 	let mockAgentDetector: {
 		getAgent: ReturnType<typeof vi.fn>;
@@ -227,6 +228,7 @@ describe('process IPC handlers', () => {
 			resize: vi.fn(),
 			getAll: vi.fn(),
 			runCommand: vi.fn(),
+			get: vi.fn().mockReturnValue(undefined),
 		};
 
 		// Create mock agent detector

@@ -51,6 +51,11 @@ import {
 	clearSessionInjection,
 	pushPersonaShiftEvent,
 	getRecentPersonaShifts,
+	pushPersonaActivationEvent,
+	getRecentPersonaActivations,
+	getSessionLastPersona,
+	setSessionLastPersona,
+	clearSessionLastPersona,
 	hashContent,
 	generateDiffInjection,
 	getLastSessionInjection,
@@ -61,7 +66,11 @@ import {
 	getPersistedInjectionStore,
 	resetPersistedInjectionRecords,
 } from '../../memory/memory-injector';
-import type { PersonaShiftEvent, InjectionRecord } from '../../memory/memory-injector';
+import type {
+	PersonaShiftEvent,
+	PersonaActivationEvent,
+	InjectionRecord,
+} from '../../memory/memory-injector';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -793,6 +802,108 @@ describe('MemoryInjector', () => {
 			}
 			const shifts = getRecentPersonaShifts(2);
 			expect(shifts.length).toBe(2);
+		});
+
+		it('caps ring buffer at 100 entries', () => {
+			// Push 105 events with unique timestamps
+			for (let i = 0; i < 105; i++) {
+				pushPersonaShiftEvent(
+					makeShiftEvent({ timestamp: 100000 + i, sessionId: `cap-sess-${i}` })
+				);
+			}
+			const shifts = getRecentPersonaShifts();
+			expect(shifts.length).toBeLessThanOrEqual(100);
+			// Oldest entries (0-4) should have been evicted; newest should be present
+			const ids = shifts.map((s) => s.sessionId);
+			expect(ids).toContain('cap-sess-104');
+			expect(ids).not.toContain('cap-sess-0');
+		});
+	});
+
+	// ─── Persona Activation Ring Buffer ──────────────────────────────────
+
+	describe('Persona Activation Ring Buffer', () => {
+		function makeActivationEvent(
+			overrides?: Partial<PersonaActivationEvent>
+		): PersonaActivationEvent {
+			return {
+				timestamp: Date.now(),
+				sessionId: 'test-activation-session',
+				persona: { id: 'p1', name: 'React Frontend', score: 0.85 },
+				triggerContext: 'working on component rendering',
+				type: 'activation',
+				...overrides,
+			};
+		}
+
+		it('stores and retrieves persona activation events', () => {
+			const event = makeActivationEvent();
+			pushPersonaActivationEvent(event);
+
+			const activations = getRecentPersonaActivations();
+			expect(activations.length).toBeGreaterThanOrEqual(1);
+			const last = activations[0];
+			expect(last.sessionId).toBe('test-activation-session');
+			expect(last.persona.name).toBe('React Frontend');
+		});
+
+		it('returns events newest first', () => {
+			const event1 = makeActivationEvent({ timestamp: 5000, sessionId: 'act-sess-1' });
+			const event2 = makeActivationEvent({ timestamp: 6000, sessionId: 'act-sess-2' });
+			pushPersonaActivationEvent(event1);
+			pushPersonaActivationEvent(event2);
+
+			const activations = getRecentPersonaActivations();
+			const idx1 = activations.findIndex((a) => a.sessionId === 'act-sess-1');
+			const idx2 = activations.findIndex((a) => a.sessionId === 'act-sess-2');
+			expect(idx2).toBeLessThan(idx1); // newer first
+		});
+
+		it('respects limit parameter', () => {
+			for (let i = 0; i < 5; i++) {
+				pushPersonaActivationEvent(makeActivationEvent({ timestamp: 7000 + i }));
+			}
+			const activations = getRecentPersonaActivations(2);
+			expect(activations.length).toBe(2);
+		});
+
+		it('caps ring buffer at 100 entries', () => {
+			for (let i = 0; i < 105; i++) {
+				pushPersonaActivationEvent(
+					makeActivationEvent({ timestamp: 200000 + i, sessionId: `act-cap-${i}` })
+				);
+			}
+			const activations = getRecentPersonaActivations();
+			expect(activations.length).toBeLessThanOrEqual(100);
+			const ids = activations.map((a) => a.sessionId);
+			expect(ids).toContain('act-cap-104');
+			expect(ids).not.toContain('act-cap-0');
+		});
+	});
+
+	describe('Session last persona tracker', () => {
+		it('returns undefined for unknown session', () => {
+			expect(getSessionLastPersona('unknown-session')).toBeUndefined();
+		});
+
+		it('stores and retrieves last persona per session', () => {
+			const persona = { id: 'p1', name: 'Backend', score: 0.85 };
+			setSessionLastPersona('sess-track-1', persona);
+			expect(getSessionLastPersona('sess-track-1')).toEqual(persona);
+		});
+
+		it('updates when set again', () => {
+			setSessionLastPersona('sess-track-2', { id: 'p1', name: 'Frontend', score: 0.8 });
+			setSessionLastPersona('sess-track-2', { id: 'p2', name: 'API', score: 0.9 });
+			expect(getSessionLastPersona('sess-track-2')!.id).toBe('p2');
+		});
+
+		it('clears per session without affecting others', () => {
+			setSessionLastPersona('sess-a', { id: 'p1', name: 'A', score: 0.7 });
+			setSessionLastPersona('sess-b', { id: 'p2', name: 'B', score: 0.8 });
+			clearSessionLastPersona('sess-a');
+			expect(getSessionLastPersona('sess-a')).toBeUndefined();
+			expect(getSessionLastPersona('sess-b')).toBeDefined();
 		});
 	});
 
