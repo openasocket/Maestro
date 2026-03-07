@@ -2,7 +2,13 @@ import { memo, forwardRef, useImperativeHandle, useRef, useEffect, useCallback }
 import { AlertCircle } from 'lucide-react';
 import { XTerminal, XTerminalHandle } from './XTerminal';
 import { TerminalSearchBar } from './TerminalSearchBar';
-import { getActiveTerminalTab, getTerminalSessionId, parseTerminalSessionId, updateTerminalTabState, updateTerminalTabPid } from '../utils/terminalTabHelpers';
+import {
+	getActiveTerminalTab,
+	getTerminalSessionId,
+	parseTerminalSessionId,
+	updateTerminalTabState,
+	updateTerminalTabPid,
+} from '../utils/terminalTabHelpers';
 import { useSessionStore } from '../stores/sessionStore';
 import type { Session, TerminalTab } from '../types';
 import type { Theme } from '../../shared/theme-types';
@@ -114,14 +120,14 @@ export const TerminalView = memo(
 				const effectiveSshConfig = session.sessionSshRemoteConfig?.enabled
 					? session.sessionSshRemoteConfig
 					: session.sshRemoteId
-					? {
-							enabled: true,
-							remoteId: session.sshRemoteId,
-							// Use session.cwd as the remote working directory so the terminal starts
-							// in the project directory rather than the remote home directory.
-							workingDirOverride: session.cwd || undefined,
-					  }
-					: undefined;
+						? {
+								enabled: true,
+								remoteId: session.sshRemoteId,
+								// Use session.cwd as the remote working directory so the terminal starts
+								// in the project directory rather than the remote home directory.
+								workingDirOverride: session.cwd || undefined,
+							}
+						: undefined;
 
 				window.maestro.process
 					.spawnTerminalTab({
@@ -146,7 +152,17 @@ export const TerminalView = memo(
 						spawnInFlightRef.current.delete(tabId);
 					});
 			},
-			[session.id, session.cwd, session.sessionSshRemoteConfig, session.sshRemoteId, defaultShell, shellArgs, shellEnvVars, onTabPidChange, onTabStateChange]
+			[
+				session.id,
+				session.cwd,
+				session.sessionSshRemoteConfig,
+				session.sshRemoteId,
+				defaultShell,
+				shellArgs,
+				shellEnvVars,
+				onTabPidChange,
+				onTabStateChange,
+			]
 		);
 
 		// Spawn PTY when active tab changes and has no PID yet
@@ -178,20 +194,19 @@ export const TerminalView = memo(
 		// explicit refresh here. The display:none → display:flex transition can wipe the WebGL/canvas
 		// framebuffer, so we must tell xterm.js to redraw from its internal buffer.
 		useEffect(() => {
-				if (isVisible && activeTab) {
+			if (isVisible && activeTab) {
 				const timer = setTimeout(() => {
 					const handle = terminalRefs.current.get(activeTab.id);
-						handle?.refresh();
+					handle?.refresh();
 					handle?.focus();
 				}, 50);
 				return () => clearTimeout(timer);
 			}
-		}, [isVisible]); // eslint-disable-line react-hooks/exhaustive-deps
+		}, [isVisible]);
 
 		// Close search when the active terminal tab changes.
 		// Intentionally depends only on activeTab?.id — we want to close search when
 		// switching tabs, not every time searchOpen/onSearchClose props change.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 		useEffect(() => {
 			if (searchOpen) {
 				onSearchClose?.();
@@ -217,7 +232,9 @@ export const TerminalView = memo(
 					const handle = terminalRefs.current.get(tab.id);
 					if (handle) {
 						const code = tab.exitCode ?? 0;
-						handle.write(`\r\n\x1b[33mShell exited (code: ${code}).\x1b[0m Press Ctrl+Shift+\` for new terminal.\r\n`);
+						handle.write(
+							`\r\n\x1b[33mShell exited (code: ${code}).\x1b[0m Press Ctrl+Shift+\` for new terminal.\r\n`
+						);
 					}
 				}
 				prevTabStatesRef.current.set(tab.id, tab.state);
@@ -228,7 +245,10 @@ export const TerminalView = memo(
 
 		if (terminalTabs.length === 0) {
 			return (
-				<div className="flex-1 flex items-center justify-center text-sm" style={{ color: theme.colors.textDim }}>
+				<div
+					className="flex-1 flex items-center justify-center text-sm"
+					style={{ color: theme.colors.textDim }}
+				>
 					No terminal tabs
 				</div>
 			);
@@ -308,7 +328,8 @@ export const TerminalView = memo(
 												borderBottom: `1px solid ${theme.colors.accentDim}`,
 											}}
 										>
-											Process exited{tab.exitCode !== undefined ? ` (code ${tab.exitCode})` : ''} — press any key or create a new tab
+											Process exited{tab.exitCode !== undefined ? ` (code ${tab.exitCode})` : ''} —
+											press any key or create a new tab
 										</div>
 									)}
 									<XTerminal
@@ -316,7 +337,11 @@ export const TerminalView = memo(
 											if (handle) {
 												terminalRefs.current.set(tab.id, handle);
 												// Write loading indicator once per idle cycle — guard prevents duplicate writes on re-renders
-												if (tab.pid === 0 && tab.state === 'idle' && !loadingWrittenRef.current.has(tab.id)) {
+												if (
+													tab.pid === 0 &&
+													tab.state === 'idle' &&
+													!loadingWrittenRef.current.has(tab.id)
+												) {
 													loadingWrittenRef.current.add(tab.id);
 													setTimeout(() => {
 														handle.write('\x1b[2mStarting terminal...\x1b[0m');
@@ -353,11 +378,13 @@ export const TerminalView = memo(
  */
 export function createTabStateChangeHandler(sessionId: string) {
 	return (tabId: string, state: TerminalTab['state'], exitCode?: number) => {
-		useSessionStore.getState().setSessions((prev) =>
-			prev.map((s) =>
-				s.id === sessionId ? updateTerminalTabState(s, tabId, state, exitCode) : s
-			)
-		);
+		useSessionStore
+			.getState()
+			.setSessions((prev) =>
+				prev.map((s) =>
+					s.id === sessionId ? updateTerminalTabState(s, tabId, state, exitCode) : s
+				)
+			);
 	};
 }
 
@@ -367,8 +394,10 @@ export function createTabStateChangeHandler(sessionId: string) {
  */
 export function createTabPidChangeHandler(sessionId: string) {
 	return (tabId: string, pid: number) => {
-		useSessionStore.getState().setSessions((prev) =>
-			prev.map((s) => (s.id === sessionId ? updateTerminalTabPid(s, tabId, pid) : s))
-		);
+		useSessionStore
+			.getState()
+			.setSessions((prev) =>
+				prev.map((s) => (s.id === sessionId ? updateTerminalTabPid(s, tabId, pid) : s))
+			);
 	};
 }

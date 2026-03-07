@@ -10,6 +10,7 @@ import picomatch from 'picomatch';
 
 /** Convert a value to a finite number, returning null if not representable. */
 function toFiniteNumber(value: unknown): number | null {
+	if (typeof value === 'string' && value.trim() === '') return null;
 	const n = typeof value === 'number' ? value : Number(value);
 	return Number.isFinite(n) ? n : null;
 }

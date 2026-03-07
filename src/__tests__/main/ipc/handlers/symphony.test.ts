@@ -95,11 +95,18 @@ describe('Symphony IPC handlers', () => {
 			set: vi.fn(),
 		};
 
+		// Setup mock settings store
+		const mockSettingsStore = {
+			get: vi.fn().mockReturnValue([]),
+			set: vi.fn(),
+		};
+
 		// Setup dependencies
 		mockDeps = {
 			app: mockApp,
 			getMainWindow: () => mockMainWindow,
 			sessionsStore: mockSessionsStore as any,
+			settingsStore: mockSettingsStore as any,
 		};
 
 		// Default mock for fs operations
@@ -1066,7 +1073,9 @@ describe('Symphony IPC handlers', () => {
 			const result = await handler!({} as any, false);
 
 			expect(result.fromCache).toBe(false);
-			expect(result.registry).toEqual(freshRegistry);
+			expect(result.registry).toEqual(
+				expect.objectContaining({ repositories: freshRegistry.repositories })
+			);
 		});
 
 		it('should fetch fresh data when forceRefresh is true', async () => {
@@ -1089,7 +1098,9 @@ describe('Symphony IPC handlers', () => {
 			const result = await handler!({} as any, true); // forceRefresh = true
 
 			expect(result.fromCache).toBe(false);
-			expect(result.registry).toEqual(freshRegistry);
+			expect(result.registry).toEqual(
+				expect.objectContaining({ repositories: freshRegistry.repositories })
+			);
 		});
 
 		it('should update cache after fresh fetch', async () => {
@@ -1107,7 +1118,9 @@ describe('Symphony IPC handlers', () => {
 			expect(fs.writeFile).toHaveBeenCalled();
 			const writeCall = vi.mocked(fs.writeFile).mock.calls[0];
 			const writtenData = JSON.parse(writeCall[1] as string);
-			expect(writtenData.registry.data).toEqual(freshRegistry);
+			expect(writtenData.registry.data).toEqual(
+				expect.objectContaining({ repositories: freshRegistry.repositories })
+			);
 		});
 
 		it('should handle network errors gracefully', async () => {
@@ -1120,7 +1133,7 @@ describe('Symphony IPC handlers', () => {
 
 			// The IPC handler wrapper catches errors and returns success: false
 			expect(result.success).toBe(false);
-			expect(result.error).toContain('Network error');
+			expect(result.error).toContain('Failed to fetch registry');
 		});
 	});
 

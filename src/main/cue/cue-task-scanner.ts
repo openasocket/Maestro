@@ -59,7 +59,8 @@ function walkDir(dir: string, root: string): string[] {
 	let entries: fs.Dirent[];
 	try {
 		entries = fs.readdirSync(dir, { withFileTypes: true });
-	} catch {
+	} catch (err) {
+		if (dir === root) throw err;
 		return results;
 	}
 

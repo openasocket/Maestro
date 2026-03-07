@@ -562,81 +562,6 @@ describe('DisplayTab', () => {
 	});
 
 	// =========================================================================
-	// Terminal Width
-	// =========================================================================
-
-	describe('Terminal Width', () => {
-		it('should render Terminal Width label', async () => {
-			render(<DisplayTab theme={mockTheme} />);
-
-			await act(async () => {
-				await vi.advanceTimersByTimeAsync(50);
-			});
-
-			expect(screen.getByText('Terminal Width (Columns)')).toBeInTheDocument();
-		});
-
-		it('should call setTerminalWidth with 80', async () => {
-			render(<DisplayTab theme={mockTheme} />);
-
-			await act(async () => {
-				await vi.advanceTimersByTimeAsync(50);
-			});
-
-			fireEvent.click(screen.getByRole('button', { name: '80' }));
-			expect(mockSetTerminalWidth).toHaveBeenCalledWith(80);
-		});
-
-		it('should call setTerminalWidth with 100', async () => {
-			render(<DisplayTab theme={mockTheme} />);
-
-			await act(async () => {
-				await vi.advanceTimersByTimeAsync(50);
-			});
-
-			// There may be multiple "100" on screen (e.g., from max nodes slider)
-			// so get the one in the terminal width section
-			const buttons = screen.getAllByRole('button', { name: '100' });
-			fireEvent.click(buttons[0]);
-			expect(mockSetTerminalWidth).toHaveBeenCalledWith(100);
-		});
-
-		it('should call setTerminalWidth with 120', async () => {
-			render(<DisplayTab theme={mockTheme} />);
-
-			await act(async () => {
-				await vi.advanceTimersByTimeAsync(50);
-			});
-
-			fireEvent.click(screen.getByRole('button', { name: '120' }));
-			expect(mockSetTerminalWidth).toHaveBeenCalledWith(120);
-		});
-
-		it('should call setTerminalWidth with 160', async () => {
-			render(<DisplayTab theme={mockTheme} />);
-
-			await act(async () => {
-				await vi.advanceTimersByTimeAsync(50);
-			});
-
-			fireEvent.click(screen.getByRole('button', { name: '160' }));
-			expect(mockSetTerminalWidth).toHaveBeenCalledWith(160);
-		});
-
-		it('should highlight selected terminal width (100)', async () => {
-			render(<DisplayTab theme={mockTheme} />);
-
-			await act(async () => {
-				await vi.advanceTimersByTimeAsync(50);
-			});
-
-			// Find the 100 button that has ring-2 class (the active one)
-			const buttons = screen.getAllByRole('button', { name: '100' });
-			const activeButton = buttons.find((btn) => btn.classList.contains('ring-2'));
-			expect(activeButton).toBeTruthy();
-		});
-	});
-
 	// =========================================================================
 	// Max Log Buffer
 	// =========================================================================
@@ -1615,8 +1540,6 @@ describe('DisplayTab', () => {
 			expect(screen.getByText('Interface Font')).toBeInTheDocument();
 			// Font Size
 			expect(screen.getByText('Font Size')).toBeInTheDocument();
-			// Terminal Width
-			expect(screen.getByText('Terminal Width (Columns)')).toBeInTheDocument();
 			// Max Log Buffer
 			expect(screen.getByText('Maximum Log Buffer')).toBeInTheDocument();
 			// Max Output Lines

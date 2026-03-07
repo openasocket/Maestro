@@ -970,7 +970,8 @@ describe('SettingsModal', () => {
 		});
 
 		it('should show clear button when ghPath has value', async () => {
-			render(<SettingsModal {...createDefaultProps({ ghPath: '/usr/local/bin/gh' })} />);
+			mockUseSettingsOverrides = { ghPath: '/usr/local/bin/gh' };
+			render(<SettingsModal {...createDefaultProps()} />);
 
 			await act(async () => {
 				await vi.advanceTimersByTimeAsync(100);
@@ -2140,7 +2141,9 @@ describe('SettingsModal', () => {
 
 		it('should call setEncoreFeatures with false when toggling DN off', async () => {
 			mockSetEncoreFeatures.mockClear();
-			mockUseSettingsOverrides = { encoreFeatures: { directorNotes: true, usageStats: true, symphony: true } };
+			mockUseSettingsOverrides = {
+				encoreFeatures: { directorNotes: true, usageStats: true, symphony: true },
+			};
 			render(<SettingsModal {...createDefaultProps()} />);
 
 			await act(async () => {
@@ -2254,7 +2257,9 @@ describe('SettingsModal', () => {
 
 		it('should call setEncoreFeatures when Symphony toggle is clicked on', async () => {
 			mockSetEncoreFeatures.mockClear();
-			mockUseSettingsOverrides = { encoreFeatures: { directorNotes: false, usageStats: true, symphony: false } };
+			mockUseSettingsOverrides = {
+				encoreFeatures: { directorNotes: false, usageStats: true, symphony: false },
+			};
 
 			render(<SettingsModal {...createDefaultProps()} />);
 
@@ -2280,7 +2285,9 @@ describe('SettingsModal', () => {
 		});
 
 		it('should hide Symphony registry settings when symphony is disabled', async () => {
-			mockUseSettingsOverrides = { encoreFeatures: { directorNotes: false, usageStats: true, symphony: false } };
+			mockUseSettingsOverrides = {
+				encoreFeatures: { directorNotes: false, usageStats: true, symphony: false },
+			};
 
 			render(<SettingsModal {...createDefaultProps()} />);
 
@@ -2300,7 +2307,9 @@ describe('SettingsModal', () => {
 
 		describe("with Director's Notes enabled", () => {
 			beforeEach(() => {
-				mockUseSettingsOverrides = { encoreFeatures: { directorNotes: true, usageStats: true, symphony: true } };
+				mockUseSettingsOverrides = {
+					encoreFeatures: { directorNotes: true, usageStats: true, symphony: true },
+				};
 			});
 
 			it('should render provider dropdown with detected available agents', async () => {
@@ -2452,7 +2461,8 @@ describe('SettingsModal', () => {
 				});
 
 				expect(screen.getByText('1 day')).toBeInTheDocument();
-				expect(screen.getByText('90 days')).toBeInTheDocument();
+				// "90 days" appears in both the scale marker <span> and a <select> <option>
+				expect(screen.getAllByText('90 days').length).toBeGreaterThanOrEqual(1);
 			});
 		});
 	});

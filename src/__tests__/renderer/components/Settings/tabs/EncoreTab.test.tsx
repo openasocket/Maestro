@@ -68,7 +68,7 @@ vi.mock('../../../../../renderer/components/shared/AgentConfigPanel', () => ({
 			/>
 			<button
 				data-testid="trigger-config-blur"
-				onClick={() => props.onConfigBlur('model', 'test-model')}
+				onClick={() => props.onConfigBlur('model', 'claude-3-opus')}
 			/>
 			<button data-testid="trigger-refresh-models" onClick={() => props.onRefreshModels?.()} />
 			<button data-testid="trigger-refresh-agent" onClick={() => props.onRefreshAgent?.()} />

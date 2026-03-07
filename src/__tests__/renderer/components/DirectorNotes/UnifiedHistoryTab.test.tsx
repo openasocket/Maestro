@@ -17,18 +17,6 @@ vi.mock('../../../../renderer/hooks/settings/useSettings', () => ({
 	}),
 }));
 
-// Mock useSettings hook (mutable so individual tests can override)
-const mockDirNotesSettings = vi.hoisted(() => ({
-	provider: 'claude-code' as const,
-	defaultLookbackDays: 7,
-}));
-
-vi.mock('../../../../renderer/hooks/settings/useSettings', () => ({
-	useSettings: () => ({
-		directorNotesSettings: mockDirNotesSettings,
-	}),
-}));
-
 // Mock useListNavigation
 const mockHandleKeyDown = vi.fn();
 const mockSetSelectedIndex = vi.fn();
@@ -248,6 +236,7 @@ beforeEach(() => {
 	(window as any).maestro = {
 		directorNotes: {
 			getUnifiedHistory: mockGetUnifiedHistory,
+			onHistoryEntryAdded: vi.fn().mockReturnValue(() => {}),
 		},
 		history: {
 			update: mockHistoryUpdate,
@@ -257,7 +246,9 @@ beforeEach(() => {
 	mockGetUnifiedHistory.mockResolvedValue(createPaginatedResponse(createMockEntries()));
 
 	// Default: maestroCue disabled
-	useSettingsStore.setState({ encoreFeatures: { directorNotes: false, maestroCue: false } });
+	useSettingsStore.setState({
+		encoreFeatures: { directorNotes: false, usageStats: false, symphony: false, maestroCue: false },
+	});
 });
 
 afterEach(() => {
@@ -422,7 +413,14 @@ describe('UnifiedHistoryTab', () => {
 		});
 
 		it('hides CUE filter when maestroCue is disabled', async () => {
-			useSettingsStore.setState({ encoreFeatures: { directorNotes: false, maestroCue: false } });
+			useSettingsStore.setState({
+				encoreFeatures: {
+					directorNotes: false,
+					usageStats: false,
+					symphony: false,
+					maestroCue: false,
+				},
+			});
 
 			render(<UnifiedHistoryTab theme={mockTheme} />);
 
@@ -435,7 +433,14 @@ describe('UnifiedHistoryTab', () => {
 		});
 
 		it('shows CUE filter when maestroCue is enabled', async () => {
-			useSettingsStore.setState({ encoreFeatures: { directorNotes: false, maestroCue: true } });
+			useSettingsStore.setState({
+				encoreFeatures: {
+					directorNotes: false,
+					usageStats: false,
+					symphony: false,
+					maestroCue: true,
+				},
+			});
 
 			render(<UnifiedHistoryTab theme={mockTheme} />);
 

@@ -171,7 +171,14 @@ describe('HistoryPanel', () => {
 		useUIStore.setState({ historySearchFilterOpen: false });
 
 		// Default: maestroCue disabled
-		useSettingsStore.setState({ encoreFeatures: { directorNotes: false, maestroCue: false } });
+		useSettingsStore.setState({
+			encoreFeatures: {
+				directorNotes: false,
+				usageStats: false,
+				symphony: false,
+				maestroCue: false,
+			},
+		});
 
 		// Mock scrollIntoView for jsdom
 		Element.prototype.scrollIntoView = vi.fn();
@@ -515,7 +522,14 @@ describe('HistoryPanel', () => {
 
 		it('should toggle CUE filter', async () => {
 			// Enable maestroCue so CUE filter button is visible
-			useSettingsStore.setState({ encoreFeatures: { directorNotes: false, maestroCue: true } });
+			useSettingsStore.setState({
+				encoreFeatures: {
+					directorNotes: false,
+					usageStats: false,
+					symphony: false,
+					maestroCue: true,
+				},
+			});
 
 			const autoEntry = createMockEntry({ type: 'AUTO', summary: 'Auto task' });
 			const cueEntry = createMockEntry({
@@ -552,7 +566,14 @@ describe('HistoryPanel', () => {
 		});
 
 		it('should hide CUE filter button when maestroCue is disabled', async () => {
-			useSettingsStore.setState({ encoreFeatures: { directorNotes: false, maestroCue: false } });
+			useSettingsStore.setState({
+				encoreFeatures: {
+					directorNotes: false,
+					usageStats: false,
+					symphony: false,
+					maestroCue: false,
+				},
+			});
 
 			const cueEntry = createMockEntry({
 				type: 'CUE',
@@ -1726,6 +1747,14 @@ describe('HistoryPanel', () => {
 	describe('filter button styling', () => {
 		it('should apply active styling to selected filters', async () => {
 			mockHistoryGetAll.mockResolvedValue([]);
+			useSettingsStore.setState({
+				encoreFeatures: {
+					directorNotes: false,
+					usageStats: false,
+					symphony: false,
+					maestroCue: true,
+				},
+			});
 
 			render(<HistoryPanel session={createMockSession()} theme={mockTheme} />);
 
