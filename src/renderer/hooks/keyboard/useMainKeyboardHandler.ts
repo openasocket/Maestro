@@ -287,7 +287,8 @@ export function useMainKeyboardHandler(): UseMainKeyboardHandlerReturn {
 					// handleOpenTerminalTab creates the tab and sets inputMode:'terminal' automatically.
 					ctx.handleOpenTerminalTab();
 					setTimeout(() => ctx.mainPanelRef?.current?.focusActiveTerminal(), 100);
-				}				trackShortcut('toggleMode');
+				}
+				trackShortcut('toggleMode');
 			} else if (ctx.isShortcut(e, 'quickAction')) {
 				e.preventDefault();
 				if (ctx.sessions.length > 0) {
@@ -612,27 +613,13 @@ export function useMainKeyboardHandler(): UseMainKeyboardHandlerReturn {
 				}
 				if (ctx.isTabShortcut(e, 'renameTab')) {
 					e.preventDefault();
-					if (ctx.activeSession?.inputMode === 'terminal') {
-						// Rename active terminal tab
-						const activeTerminalTabId = ctx.activeSession?.activeTerminalTabId;
-						const terminalTab = ctx.activeSession?.terminalTabs?.find(
-							(t: { id: string }) => t.id === activeTerminalTabId
-						);
-						if (activeTerminalTabId && terminalTab) {
-							ctx.setRenameTabId(activeTerminalTabId);
-							ctx.setRenameTabInitialName(terminalTab.name ?? '');
-							ctx.setRenameTabModalOpen(true);
-							trackShortcut('renameTab');
-						}
-					} else {
-						const activeTab = ctx.getActiveTab(ctx.activeSession);
-						// Only allow rename if tab has an active Claude session
-						if (activeTab?.agentSessionId) {
-							ctx.setRenameTabId(activeTab.id);
-							ctx.setRenameTabInitialName(getInitialRenameValue(activeTab));
-							ctx.setRenameTabModalOpen(true);
-							trackShortcut('renameTab');
-						}
+					const activeTab = ctx.getActiveTab(ctx.activeSession);
+					// Only allow rename if tab has an active Claude session
+					if (activeTab?.agentSessionId) {
+						ctx.setRenameTabId(activeTab.id);
+						ctx.setRenameTabInitialName(getInitialRenameValue(activeTab));
+						ctx.setRenameTabModalOpen(true);
+						trackShortcut('renameTab');
 					}
 				}
 				if (ctx.isTabShortcut(e, 'toggleReadOnlyMode')) {
@@ -788,6 +775,20 @@ export function useMainKeyboardHandler(): UseMainKeyboardHandlerReturn {
 			) {
 				const activeTerminalTabId = ctx.activeSession?.activeTerminalTabId;
 
+				// Cmd+Shift+R: Rename the active terminal tab
+				if (ctx.isTabShortcut(e, 'renameTab') && activeTerminalTabId) {
+					e.preventDefault();
+					const terminalTab = ctx.activeSession?.terminalTabs?.find(
+						(t: { id: string }) => t.id === activeTerminalTabId
+					);
+					if (terminalTab) {
+						ctx.setRenameTabId(activeTerminalTabId);
+						ctx.setRenameTabInitialName(terminalTab.name ?? '');
+						ctx.setRenameTabModalOpen(true);
+						trackShortcut('renameTab');
+					}
+				}
+
 				// Cmd+W: Close the active terminal tab (switching to AI mode if it was the last one)
 				if (ctx.isTabShortcut(e, 'closeTab') && activeTerminalTabId) {
 					e.preventDefault();
@@ -805,9 +806,7 @@ export function useMainKeyboardHandler(): UseMainKeyboardHandlerReturn {
 					if (result) {
 						ctx.setSessions((prev: Session[]) =>
 							prev.map((s: Session) =>
-								s.id === ctx.activeSession!.id
-									? { ...result.session, inputMode: 'ai' as const }
-									: s
+								s.id === ctx.activeSession!.id ? { ...result.session, inputMode: 'ai' as const } : s
 							)
 						);
 						ctx.setActiveFocus('main');
