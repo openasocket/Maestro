@@ -1083,6 +1083,13 @@ function CuePipelineEditorInner({
 					updatedPipelines.push(targetPipeline);
 				}
 
+				// Auto-select the dropped node to open config panel
+				const compositeId = `${targetPipeline.id}:${newNode.id}`;
+				setTimeout(() => {
+					setSelectedNodeId(compositeId);
+					setSelectedEdgeId(null);
+				}, 50);
+
 				return {
 					pipelines: updatedPipelines,
 					selectedPipelineId: prev.selectedPipelineId ?? targetPipeline.id,
@@ -1123,6 +1130,8 @@ function CuePipelineEditorInner({
 						onCreatePipeline={createPipeline}
 						onDeletePipeline={deletePipeline}
 						onRenamePipeline={renamePipeline}
+						textColor={theme.colors.textMain}
+						borderColor={theme.colors.border}
 					/>
 				</div>
 				<div className="flex items-center gap-2">
@@ -1347,6 +1356,69 @@ function CuePipelineEditorInner({
 					onCanvasSessionIds={onCanvasSessionIds}
 					theme={theme}
 				/>
+
+				{/* Pipeline legend (shown in All Pipelines view) */}
+				{pipelineState.selectedPipelineId === null && pipelineState.pipelines.length > 0 && (
+					<div
+						style={{
+							position: 'absolute',
+							top: 8,
+							left: '50%',
+							transform: 'translateX(-50%)',
+							zIndex: 10,
+							display: 'flex',
+							alignItems: 'center',
+							gap: 12,
+							padding: '6px 14px',
+							backgroundColor: `${theme.colors.bgActivity}ee`,
+							border: `1px solid ${theme.colors.border}`,
+							borderRadius: 6,
+							backdropFilter: 'blur(8px)',
+						}}
+					>
+						{pipelineState.pipelines.map((p) => (
+							<button
+								key={p.id}
+								onClick={() => selectPipeline(p.id)}
+								style={{
+									display: 'flex',
+									alignItems: 'center',
+									gap: 6,
+									fontSize: 11,
+									color: theme.colors.textMain,
+									backgroundColor: 'transparent',
+									border: 'none',
+									cursor: 'pointer',
+									padding: '2px 4px',
+									borderRadius: 4,
+									transition: 'background-color 0.15s',
+								}}
+								onMouseEnter={(e) => {
+									e.currentTarget.style.backgroundColor = `${theme.colors.accent}15`;
+								}}
+								onMouseLeave={(e) => {
+									e.currentTarget.style.backgroundColor = 'transparent';
+								}}
+								title={`Switch to ${p.name}`}
+							>
+								<span
+									style={{
+										width: 10,
+										height: 10,
+										borderRadius: '50%',
+										backgroundColor: p.color,
+										flexShrink: 0,
+										border: '1px solid rgba(255,255,255,0.15)',
+									}}
+								/>
+								<span style={{ fontWeight: 500 }}>{p.name}</span>
+								<span style={{ color: theme.colors.textDim, fontSize: 10 }}>
+									({p.nodes.length})
+								</span>
+							</button>
+						))}
+					</div>
+				)}
 
 				{/* Config panels */}
 				{selectedNode && !selectedEdge && (

@@ -18,6 +18,8 @@ export interface PipelineSelectorProps {
 	onCreatePipeline: () => void;
 	onDeletePipeline: (id: string) => void;
 	onRenamePipeline: (id: string, name: string) => void;
+	textColor?: string;
+	borderColor?: string;
 }
 
 export function PipelineSelector({
@@ -27,6 +29,8 @@ export function PipelineSelector({
 	onCreatePipeline,
 	onDeletePipeline,
 	onRenamePipeline,
+	textColor = 'rgba(255,255,255,0.9)',
+	borderColor = 'rgba(255,255,255,0.12)',
 }: PipelineSelectorProps) {
 	const [isOpen, setIsOpen] = useState(false);
 	const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -103,8 +107,8 @@ export function PipelineSelector({
 				className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium"
 				style={{
 					backgroundColor: 'rgba(255,255,255,0.05)',
-					border: '1px solid rgba(255,255,255,0.12)',
-					color: 'rgba(255,255,255,0.9)',
+					border: `1px solid ${borderColor}`,
+					color: textColor,
 					cursor: 'pointer',
 					transition: 'all 0.15s',
 				}}
