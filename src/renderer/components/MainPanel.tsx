@@ -502,7 +502,7 @@ export const MainPanel = React.memo(
 				mountedTerminalSessionsRef.current.delete(activeSession.id);
 				setMountedTerminalSessionIds((prev) => prev.filter((id) => id !== activeSession.id));
 			}
-		}, [activeSession?.id, activeSession?.terminalTabs?.length]);  
+		}, [activeSession?.id, activeSession?.terminalTabs?.length]);
 
 		// Evict sessions that were deleted entirely from the store.
 		useEffect(() => {
@@ -938,7 +938,7 @@ export const MainPanel = React.memo(
 			<>
 				<ErrorBoundary>
 					<div
-						className={`flex-1 flex flex-col min-w-0 relative ${activeFocus === 'main' ? 'ring-1 ring-inset z-10' : ''}`}
+						className={`flex-1 flex flex-col min-w-0 relative ${activeFocus === 'main' ? 'ring-1 ring-inset' : ''}`}
 						style={
 							{
 								backgroundColor: theme.colors.bgMain,
