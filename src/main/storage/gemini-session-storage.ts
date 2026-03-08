@@ -588,8 +588,11 @@ export class GeminiSessionStorage implements AgentSessionStorage {
 					matchPreview,
 					matchCount,
 				});
-			} catch {
-				// Skip files that can't be read during search
+			} catch (error) {
+				captureException(error, {
+					operation: 'geminiStorage:searchSessions',
+					sessionId: session.sessionId,
+				});
 			}
 		}
 
@@ -768,8 +771,11 @@ export class GeminiSessionStorage implements AgentSessionStorage {
 				if (session.sessionId === sessionId) {
 					return filePath;
 				}
-			} catch {
-				// Skip files that can't be read
+			} catch (error) {
+				captureException(error, {
+					operation: 'geminiStorage:findSessionFile',
+					filePath,
+				});
 			}
 		}
 
