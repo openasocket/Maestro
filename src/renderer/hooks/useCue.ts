@@ -61,6 +61,7 @@ export interface UseCueReturn {
 	disable: () => Promise<void>;
 	stopRun: (runId: string) => Promise<void>;
 	stopAll: () => Promise<void>;
+	triggerSubscription: (subscriptionName: string) => Promise<void>;
 	refresh: () => Promise<void>;
 }
 
@@ -126,6 +127,14 @@ export function useCue(): UseCueReturn {
 		await refresh();
 	}, [refresh]);
 
+	const triggerSubscription = useCallback(
+		async (subscriptionName: string) => {
+			await window.maestro.cue.triggerSubscription(subscriptionName);
+			await refresh();
+		},
+		[refresh]
+	);
+
 	// Initial fetch + event subscription + polling
 	useEffect(() => {
 		mountedRef.current = true;
@@ -156,6 +165,7 @@ export function useCue(): UseCueReturn {
 		disable,
 		stopRun,
 		stopAll,
+		triggerSubscription,
 		refresh,
 	};
 }
