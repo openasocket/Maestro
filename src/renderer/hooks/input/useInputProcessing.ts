@@ -11,6 +11,7 @@ import { getActiveTab, extractQuickTabName } from '../../utils/tabHelpers';
 import { getStdinFlags } from '../../utils/spawnHelpers';
 import { generateId } from '../../utils/ids';
 import { substituteTemplateVariables } from '../../utils/templateVariables';
+import { filterYoloArgs } from '../../utils/agentArgs';
 import { gitService } from '../../services/git';
 import { imageOnlyDefaultPrompt, maestroSystemPrompt } from '../../../prompts';
 
@@ -603,7 +604,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 						return {
 							...s,
 							// TODO: Remove shellLogs once terminal tabs migration is complete
-							...(!(s.terminalTabs?.length) && { shellLogs: [...s.shellLogs, newEntry] }),
+							...(!s.terminalTabs?.length && { shellLogs: [...s.shellLogs, newEntry] }),
 							state: 'busy',
 							busySource: currentMode,
 							shellCwd: newShellCwd,
@@ -884,16 +885,8 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 
 						// For read-only mode, filter out any YOLO/skip-permissions flags from base args
 						// (they would override the read-only mode we're requesting)
-						// - Claude Code: --dangerously-skip-permissions
-						// - Codex: --dangerously-bypass-approvals-and-sandbox
 						const baseArgs = agent.args ?? [];
-						const spawnArgs = isReadOnly
-							? baseArgs.filter(
-									(arg) =>
-										arg !== '--dangerously-skip-permissions' &&
-										arg !== '--dangerously-bypass-approvals-and-sandbox'
-								)
-							: [...baseArgs];
+						const spawnArgs = isReadOnly ? filterYoloArgs(baseArgs, agent) : [...baseArgs];
 
 						// Use agent.path (full path) if available, otherwise fall back to agent.command
 						const commandToUse = agent.path || agent.command;
@@ -1108,16 +1101,18 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 									state: 'idle',
 									busySource: undefined,
 									thinkingStartTime: undefined,
-// TODO: Remove shellLogs once terminal tabs migration is complete
-									...(!(s.terminalTabs?.length) && { shellLogs: [
-										...s.shellLogs,
-										{
-											id: generateId(),
-											timestamp: Date.now(),
-											source: 'system',
-											text: `Error: Failed to run command - ${(error as Error).message}`,
-										},
-									] }),
+									// TODO: Remove shellLogs once terminal tabs migration is complete
+									...(!s.terminalTabs?.length && {
+										shellLogs: [
+											...s.shellLogs,
+											{
+												id: generateId(),
+												timestamp: Date.now(),
+												source: 'system',
+												text: `Error: Failed to run command - ${(error as Error).message}`,
+											},
+										],
+									}),
 								};
 							})
 						);

@@ -98,6 +98,7 @@ export interface AgentConfig {
 	noPromptSeparator?: boolean; // If true, don't add '--' before the prompt in batch mode (OpenCode doesn't support it)
 	defaultEnvVars?: Record<string, string>; // Default environment variables for this agent (merged with user customEnvVars)
 	readOnlyEnvOverrides?: Record<string, string>; // Env var overrides applied in read-only mode (replaces keys from defaultEnvVars)
+	readOnlyCliEnforced?: boolean; // Whether the agent's CLI enforces read-only mode (false = prompt-only enforcement)
 }
 
 /**
@@ -137,6 +138,7 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		],
 		resumeArgs: (sessionId: string) => ['--resume', sessionId], // Resume with session ID
 		readOnlyArgs: ['--permission-mode', 'plan'], // Read-only/plan mode
+		readOnlyCliEnforced: true, // CLI enforces read-only via --permission-mode plan
 	},
 	{
 		id: 'codex',
@@ -155,6 +157,7 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		jsonOutputArgs: ['--json'], // JSON output format (must come before resume subcommand)
 		resumeArgs: (sessionId: string) => ['resume', sessionId], // Resume with session/thread ID
 		readOnlyArgs: ['--sandbox', 'read-only'], // Read-only/plan mode
+		readOnlyCliEnforced: true, // CLI enforces read-only via --sandbox read-only
 		yoloModeArgs: ['--dangerously-bypass-approvals-and-sandbox'], // Full access mode
 		workingDirArgs: (dir: string) => ['-C', dir], // Set working directory
 		imageArgs: (imagePath: string) => ['-i', imagePath], // Image attachment: codex exec -i /path/to/image.png
@@ -199,6 +202,7 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		// Until that feature is generally available, readOnlyArgs is empty and read-only
 		// behavior is enforced via system prompt instructions instead.
 		readOnlyArgs: [],
+		readOnlyCliEnforced: false, // No CLI-level read-only enforcement; prompt-only
 		yoloModeArgs: ['-y'],
 		workingDirArgs: (dir: string) => ['--include-directories', dir],
 		imageArgs: undefined,
@@ -209,7 +213,8 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 				key: 'model',
 				type: 'select' as const,
 				label: 'Model',
-				description: 'Model to use. Auto lets Gemini route between Pro and Flash based on task complexity.',
+				description:
+					'Model to use. Auto lets Gemini route between Pro and Flash based on task complexity.',
 				options: [
 					'',
 					'auto',
@@ -255,6 +260,7 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		jsonOutputArgs: ['--format', 'json'], // JSON output format
 		resumeArgs: (sessionId: string) => ['--session', sessionId], // Resume with session ID
 		readOnlyArgs: ['--agent', 'plan'], // Read-only/plan mode
+		readOnlyCliEnforced: true, // CLI enforces read-only via --agent plan
 		modelArgs: (modelId: string) => ['--model', modelId], // Model selection (e.g., 'ollama/qwen3:8b')
 		imageArgs: (imagePath: string) => ['-f', imagePath], // Image/file attachment: opencode run -f /path/to/image.png -- "prompt"
 		noPromptSeparator: true, // OpenCode doesn't need '--' before prompt - yargs handles positional args
@@ -322,6 +328,7 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 
 		// Read-only mode is DEFAULT in droid exec (no flag needed)
 		readOnlyArgs: [],
+		readOnlyCliEnforced: true, // exec is read-only by default (no flag needed)
 
 		// YOLO mode (same as batchModeArgs, kept for explicit yoloMode requests)
 		yoloModeArgs: ['--skip-permissions-unsafe'],

@@ -89,6 +89,8 @@ interface AgentConfig {
 	args?: string[];
 	hidden?: boolean;
 	configOptions?: AgentConfigOption[];
+	yoloModeArgs?: string[];
+	readOnlyCliEnforced?: boolean;
 	capabilities?: AgentCapabilities;
 }
 
@@ -347,7 +349,12 @@ interface MaestroAPI {
 				}
 			) => void
 		) => () => void;
-		onWorkspaceApproval: (callback: (sessionId: string, request: { deniedPath: string; errorMessage: string; timestamp: number }) => void) => () => void;
+		onWorkspaceApproval: (
+			callback: (
+				sessionId: string,
+				request: { deniedPath: string; errorMessage: string; timestamp: number }
+			) => void
+		) => () => void;
 	};
 	agentError: {
 		clearError: (sessionId: string) => Promise<{ success: boolean }>;
