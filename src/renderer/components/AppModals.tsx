@@ -1772,7 +1772,6 @@ export const AppAgentModals = memo(function AppAgentModals({
 				<WorkspaceApprovalModal
 					theme={theme}
 					deniedPath={workspaceApprovalData.deniedPath}
-					errorMessage={workspaceApprovalData.errorMessage}
 					sessionName={
 						sessions.find((s) => s.id === workspaceApprovalData.sessionId)?.name || 'Gemini CLI'
 					}

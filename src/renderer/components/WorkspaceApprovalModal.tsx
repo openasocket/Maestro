@@ -17,7 +17,6 @@ import { Modal } from './ui/Modal';
 export interface WorkspaceApprovalModalProps {
 	theme: Theme;
 	deniedPath: string;
-	errorMessage: string;
 	sessionName: string;
 	sshRemoteId?: string;
 	projectCwd?: string;
@@ -28,7 +27,6 @@ export interface WorkspaceApprovalModalProps {
 export function WorkspaceApprovalModal({
 	theme,
 	deniedPath,
-	errorMessage: _errorMessage,
 	sessionName: _sessionName,
 	sshRemoteId,
 	projectCwd,

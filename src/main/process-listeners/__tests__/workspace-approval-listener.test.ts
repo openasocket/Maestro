@@ -35,19 +35,27 @@ describe('Workspace Approval Listener', () => {
 	});
 
 	it('should register the workspace-approval-request event listener', () => {
-		setupWorkspaceApprovalListener(mockProcessManager, { safeSend: mockSafeSend, logger: mockLogger });
+		setupWorkspaceApprovalListener(mockProcessManager, {
+			safeSend: mockSafeSend,
+			logger: mockLogger,
+		});
 
-		expect(mockProcessManager.on).toHaveBeenCalledWith('workspace-approval-request', expect.any(Function));
+		expect(mockProcessManager.on).toHaveBeenCalledWith(
+			'workspace-approval-request',
+			expect.any(Function)
+		);
 	});
 
 	it('should log and forward workspace approval requests to renderer', () => {
-		setupWorkspaceApprovalListener(mockProcessManager, { safeSend: mockSafeSend, logger: mockLogger });
+		setupWorkspaceApprovalListener(mockProcessManager, {
+			safeSend: mockSafeSend,
+			logger: mockLogger,
+		});
 
 		const handler = eventHandlers.get('workspace-approval-request');
 		const testSessionId = 'test-session-123';
 		const testRequest = {
 			deniedPath: '/home/user/outside-workspace',
-			errorMessage: "path '/home/user/outside-workspace' not in workspace",
 			timestamp: Date.now(),
 		};
 
@@ -62,18 +70,24 @@ describe('Workspace Approval Listener', () => {
 			})
 		);
 
-		expect(mockSafeSend).toHaveBeenCalledWith('process:workspace-approval', testSessionId, testRequest);
+		expect(mockSafeSend).toHaveBeenCalledWith(
+			'process:workspace-approval',
+			testSessionId,
+			testRequest
+		);
 	});
 
 	it('should forward the complete request object including timestamp', () => {
-		setupWorkspaceApprovalListener(mockProcessManager, { safeSend: mockSafeSend, logger: mockLogger });
+		setupWorkspaceApprovalListener(mockProcessManager, {
+			safeSend: mockSafeSend,
+			logger: mockLogger,
+		});
 
 		const handler = eventHandlers.get('workspace-approval-request');
 		const testSessionId = 'gemini-session-456';
 		const timestamp = 1708473600000;
 		const testRequest = {
 			deniedPath: '/etc/config',
-			errorMessage: "'/etc/config.json' permission denied sandbox",
 			timestamp,
 		};
 
@@ -84,7 +98,6 @@ describe('Workspace Approval Listener', () => {
 			testSessionId,
 			expect.objectContaining({
 				deniedPath: '/etc/config',
-				errorMessage: "'/etc/config.json' permission denied sandbox",
 				timestamp,
 			})
 		);

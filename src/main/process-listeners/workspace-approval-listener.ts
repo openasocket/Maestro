@@ -16,11 +16,18 @@ export function setupWorkspaceApprovalListener(
 ): void {
 	const { safeSend, logger } = deps;
 
-	processManager.on('workspace-approval-request', (sessionId: string, request: { deniedPath: string; errorMessage: string; timestamp: number }) => {
-		logger.info('Workspace approval requested for Gemini sandbox violation', 'WorkspaceApproval', {
-			sessionId,
-			deniedPath: request.deniedPath,
-		});
-		safeSend('process:workspace-approval', sessionId, request);
-	});
+	processManager.on(
+		'workspace-approval-request',
+		(sessionId: string, request: { deniedPath: string; timestamp: number }) => {
+			logger.info(
+				'Workspace approval requested for Gemini sandbox violation',
+				'WorkspaceApproval',
+				{
+					sessionId,
+					deniedPath: request.deniedPath,
+				}
+			);
+			safeSend('process:workspace-approval', sessionId, request);
+		}
+	);
 }

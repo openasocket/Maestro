@@ -114,7 +114,6 @@ export interface AgentErrorModalData {
 export interface WorkspaceApprovalModalData {
 	sessionId: string;
 	deniedPath: string;
-	errorMessage: string;
 }
 
 /** Delete agent modal data */

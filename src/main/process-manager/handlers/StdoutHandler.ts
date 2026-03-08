@@ -434,7 +434,6 @@ export class StdoutHandler {
 					});
 					this.emitter.emit('workspace-approval-request', sessionId, {
 						deniedPath,
-						errorMessage: errorMsg,
 						timestamp: Date.now(),
 					});
 				}
