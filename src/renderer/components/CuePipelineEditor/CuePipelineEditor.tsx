@@ -46,6 +46,7 @@ import { NodeConfigPanel } from './panels/NodeConfigPanel';
 import { EdgeConfigPanel } from './panels/EdgeConfigPanel';
 import { graphSessionsToPipelines } from './utils/yamlToPipeline';
 import { pipelinesToYaml } from './utils/pipelineToYaml';
+import { mergePipelinesWithSavedLayout } from './utils/pipelineLayout';
 import { CueSettingsPanel } from './panels/CueSettingsPanel';
 import type { CueSettings } from '../../../main/cue/cue-types';
 import { DEFAULT_CUE_SETTINGS } from '../../../main/cue/cue-types';
@@ -435,27 +436,10 @@ function CuePipelineEditorInner({
 			}
 
 			if (savedLayout && savedLayout.pipelines) {
-				// Merge: live data takes precedence for node existence, saved provides positions
-				const savedPositions = new Map<string, { x: number; y: number }>();
-				for (const sp of savedLayout.pipelines) {
-					for (const node of sp.nodes) {
-						savedPositions.set(`${sp.id}:${node.id}`, node.position);
-					}
-				}
+				const merged = mergePipelinesWithSavedLayout(livePipelines, savedLayout);
 
-				const mergedPipelines = livePipelines.map((pipeline) => ({
-					...pipeline,
-					nodes: pipeline.nodes.map((node) => {
-						const savedPos = savedPositions.get(`${pipeline.id}:${node.id}`);
-						return savedPos ? { ...node, position: savedPos } : node;
-					}),
-				}));
-
-				setPipelineState({
-					pipelines: mergedPipelines,
-					selectedPipelineId: savedLayout.selectedPipelineId ?? mergedPipelines[0]?.id ?? null,
-				});
-				savedStateRef.current = JSON.stringify(mergedPipelines);
+				setPipelineState(merged);
+				savedStateRef.current = JSON.stringify(merged.pipelines);
 
 				// Restore viewport if available
 				if (savedLayout.viewport) {
@@ -639,9 +623,13 @@ function CuePipelineEditorInner({
 		}));
 	}, []);
 
-	const selectPipeline = useCallback((id: string | null) => {
-		setPipelineState((prev) => ({ ...prev, selectedPipelineId: id }));
-	}, []);
+	const selectPipeline = useCallback(
+		(id: string | null) => {
+			setPipelineState((prev) => ({ ...prev, selectedPipelineId: id }));
+			persistLayout();
+		},
+		[persistLayout]
+	);
 
 	const changePipelineColor = useCallback((id: string, color: string) => {
 		setPipelineState((prev) => ({
