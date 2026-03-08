@@ -424,14 +424,6 @@ function SessionListInner(props: SessionListProps) {
 		sortedGroups,
 	} = useSessionCategories(sessionFilter, sortedSessions, showUnreadAgentsOnly, activeSessionId);
 
-	const hasUnreadAgents = useMemo(
-		() =>
-			sessions.some(
-				(s) => !s.parentSessionId && (s.aiTabs?.some((tab) => tab.hasUnread) || s.state === 'busy')
-			),
-		[sessions]
-	);
-
 	// PERF: Cached callback maps to prevent SessionItem re-renders
 	// These Maps store stable function references keyed by session/editing ID
 	// The callbacks themselves are memoized, so the Map values remain stable
@@ -1264,7 +1256,6 @@ function SessionListInner(props: SessionListProps) {
 				hasNoSessions={sessions.length === 0}
 				shortcuts={shortcuts}
 				showUnreadAgentsOnly={showUnreadAgentsOnly}
-				hasUnreadAgents={hasUnreadAgents}
 				addNewSession={addNewSession}
 				openWizard={openWizard}
 				setLeftSidebarOpen={setLeftSidebarOpen}
