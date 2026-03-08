@@ -51,6 +51,9 @@ import Store from 'electron-store';
 
 const LOG_CONTEXT = 'gemini-session-storage';
 
+/** Maximum session file size (50 MB). Files exceeding this are skipped to prevent OOM. */
+const MAX_SESSION_FILE_SIZE = 50 * 1024 * 1024;
+
 /**
  * Gemini session file JSON structure
  */
@@ -340,6 +343,30 @@ export class GeminiSessionStorage implements AgentSessionStorage {
 		stats: { size: number; mtimeMs: number }
 	): Promise<AgentSessionInfo | null> {
 		try {
+			// Guard: skip oversized files to prevent OOM
+			if (stats.size > MAX_SESSION_FILE_SIZE) {
+				logger.warn('Skipping oversized Gemini session file', LOG_CONTEXT, {
+					filePath: path.basename(filePath),
+					sizeBytes: stats.size,
+					maxBytes: MAX_SESSION_FILE_SIZE,
+				});
+				return {
+					sessionId: fallbackSessionId,
+					projectPath: '',
+					timestamp: new Date(stats.mtimeMs).toISOString(),
+					modifiedAt: new Date(stats.mtimeMs).toISOString(),
+					firstMessage: '[Session file too large to parse]',
+					messageCount: 0,
+					sizeBytes: stats.size,
+					inputTokens: 0,
+					outputTokens: 0,
+					cacheReadTokens: 0,
+					cacheCreationTokens: 0,
+					durationSeconds: 0,
+					sessionName: `Gemini session ${fallbackSessionId.slice(0, 8)} (oversized)`,
+				};
+			}
+
 			const content = await fs.readFile(filePath, 'utf-8');
 			const session = JSON.parse(content) as GeminiSessionFile;
 
@@ -564,6 +591,22 @@ export class GeminiSessionStorage implements AgentSessionStorage {
 		}
 
 		try {
+			// Guard: reject oversized files to prevent OOM
+			const fileStat = await fs.stat(sessionFilePath);
+			if (fileStat.size > MAX_SESSION_FILE_SIZE) {
+				logger.warn('Gemini session file too large to read', LOG_CONTEXT, {
+					sessionId,
+					sizeBytes: fileStat.size,
+					maxBytes: MAX_SESSION_FILE_SIZE,
+				});
+				return {
+					messages: [],
+					total: 0,
+					hasMore: false,
+					error: 'Session file exceeds maximum size limit',
+				};
+			}
+
 			const content = await fs.readFile(sessionFilePath, 'utf-8');
 			const session = JSON.parse(content) as GeminiSessionFile;
 
@@ -645,6 +688,16 @@ export class GeminiSessionStorage implements AgentSessionStorage {
 				try {
 					const fileStat = await fs.stat(filePath);
 					if (fileStat.size === 0) return;
+
+					// Skip oversized files to prevent OOM during search
+					if (fileStat.size > MAX_SESSION_FILE_SIZE) {
+						logger.warn('Skipping oversized file in session search', LOG_CONTEXT, {
+							filename,
+							sizeBytes: fileStat.size,
+							maxBytes: MAX_SESSION_FILE_SIZE,
+						});
+						return;
+					}
 
 					const content = await fs.readFile(filePath, 'utf-8');
 					const sessionData = JSON.parse(content) as GeminiSessionFile;
@@ -778,6 +831,25 @@ export class GeminiSessionStorage implements AgentSessionStorage {
 		if (!sessionFilePath) {
 			logger.warn('Gemini session file not found for deletion', LOG_CONTEXT, { sessionId });
 			return { success: false, error: 'Session file not found' };
+		}
+
+		// Guard: reject deletion of oversized files
+		try {
+			const fileStat = await fs.stat(sessionFilePath);
+			if (fileStat.size > MAX_SESSION_FILE_SIZE) {
+				logger.warn('Refusing to modify oversized Gemini session file', LOG_CONTEXT, {
+					sessionId,
+					sizeBytes: fileStat.size,
+					maxBytes: MAX_SESSION_FILE_SIZE,
+				});
+				return { success: false, error: 'Session file exceeds maximum size limit' };
+			}
+		} catch (statError) {
+			logger.error('Failed to stat session file for deletion', LOG_CONTEXT, {
+				sessionId,
+				error: statError,
+			});
+			return { success: false, error: 'Failed to read session file metadata' };
 		}
 
 		return this.enqueueFileWrite(sessionFilePath, async () => {

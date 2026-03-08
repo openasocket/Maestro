@@ -156,6 +156,7 @@ interface SessionMessagesResult {
 	}>;
 	total: number;
 	hasMore: boolean;
+	error?: string;
 }
 
 /** Shared return shape for group chat methods (mirrors GroupChat from shared/group-chat-types.ts) */

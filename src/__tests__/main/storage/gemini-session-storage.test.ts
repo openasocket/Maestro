@@ -1250,6 +1250,204 @@ describe('GeminiSessionStorage', () => {
 		});
 	});
 
+	describe('file size guards (MAX_SESSION_FILE_SIZE)', () => {
+		const OVERSIZED = 51 * 1024 * 1024; // 51 MB — exceeds 50 MB limit
+
+		describe('parseSessionFile (via listSessions)', () => {
+			it('should return minimal metadata for oversized files instead of parsing', async () => {
+				(fs.access as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+				(fs.readdir as ReturnType<typeof vi.fn>).mockResolvedValue(['session-100-sess-big.json']);
+				(fs.readFile as ReturnType<typeof vi.fn>).mockImplementation((filePath: string) => {
+					if (filePath.endsWith('.project_root')) {
+						return Promise.resolve('/test/project');
+					}
+					// Should NOT be called for session file — size guard should prevent it
+					return Promise.resolve(
+						buildSessionJson([{ type: 'user', content: 'Should not read' }], 'sess-big')
+					);
+				});
+				(fs.stat as ReturnType<typeof vi.fn>).mockResolvedValue({
+					size: OVERSIZED,
+					mtimeMs: 1700000000000,
+					isDirectory: () => true,
+				});
+
+				const sessions = await storage.listSessions('/test/project');
+
+				expect(sessions).toHaveLength(1);
+				expect(sessions[0].sessionId).toBe('sess-big');
+				expect(sessions[0].sessionName).toContain('oversized');
+				expect(sessions[0].firstMessage).toContain('too large');
+				expect(sessions[0].messageCount).toBe(0);
+				expect(sessions[0].sizeBytes).toBe(OVERSIZED);
+			});
+
+			it('should still parse normal-sized files alongside oversized ones', async () => {
+				(fs.access as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+				(fs.readdir as ReturnType<typeof vi.fn>).mockResolvedValue([
+					'session-100-sess-big.json',
+					'session-200-sess-ok.json',
+				]);
+				(fs.readFile as ReturnType<typeof vi.fn>).mockImplementation((filePath: string) => {
+					if (filePath.endsWith('.project_root')) {
+						return Promise.resolve('/test/project');
+					}
+					return Promise.resolve(
+						buildSessionJson(
+							[
+								{ type: 'user', content: 'Hello' },
+								{ type: 'gemini', content: 'Hi' },
+							],
+							'sess-ok'
+						)
+					);
+				});
+				(fs.stat as ReturnType<typeof vi.fn>).mockImplementation((filePath: string) => {
+					if ((filePath as string).includes('sess-big')) {
+						return Promise.resolve({
+							size: OVERSIZED,
+							mtimeMs: 1700000000000,
+							isDirectory: () => true,
+						});
+					}
+					return Promise.resolve({
+						size: 1000,
+						mtimeMs: 1700000001000,
+						isDirectory: () => true,
+					});
+				});
+
+				const sessions = await storage.listSessions('/test/project');
+
+				expect(sessions).toHaveLength(2);
+				const bigSession = sessions.find((s) => s.sessionId === 'sess-big');
+				const okSession = sessions.find((s) => s.sessionId === 'sess-ok');
+				expect(bigSession?.sessionName).toContain('oversized');
+				expect(okSession?.messageCount).toBe(2);
+			});
+		});
+
+		describe('readSessionMessages', () => {
+			it('should return empty result with error for oversized files', async () => {
+				(fs.access as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+				(fs.readFile as ReturnType<typeof vi.fn>).mockImplementation((filePath: string) => {
+					if (filePath.endsWith('.project_root')) {
+						return Promise.resolve('/test/project');
+					}
+					return Promise.resolve(
+						buildSessionJson([{ type: 'user', content: 'Should not read' }], 'test-session-id')
+					);
+				});
+				(fs.readdir as ReturnType<typeof vi.fn>).mockResolvedValue([
+					'session-123-test-session-id.json',
+				]);
+				(fs.stat as ReturnType<typeof vi.fn>).mockResolvedValue({
+					size: OVERSIZED,
+					mtimeMs: Date.now(),
+					isDirectory: () => true,
+				});
+
+				const result = await storage.readSessionMessages('/test/project', 'test-session-id', {
+					limit: 100,
+				});
+
+				expect(result.messages).toEqual([]);
+				expect(result.total).toBe(0);
+				expect(result.hasMore).toBe(false);
+				expect(result.error).toContain('maximum size');
+			});
+		});
+
+		describe('searchSessions', () => {
+			it('should skip oversized files with warning', async () => {
+				(fs.access as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+				(fs.readdir as ReturnType<typeof vi.fn>).mockResolvedValue([
+					'session-100-sess-big.json',
+					'session-200-sess-ok.json',
+				]);
+				(fs.readFile as ReturnType<typeof vi.fn>).mockImplementation((filePath: string) => {
+					if (filePath.endsWith('.project_root')) {
+						return Promise.resolve('/test/project');
+					}
+					return Promise.resolve(
+						buildSessionJson(
+							[
+								{ type: 'user', content: 'findme keyword' },
+								{ type: 'gemini', content: 'Found it' },
+							],
+							'sess-ok'
+						)
+					);
+				});
+				(fs.stat as ReturnType<typeof vi.fn>).mockImplementation((filePath: string) => {
+					if ((filePath as string).includes('sess-big')) {
+						return Promise.resolve({
+							size: OVERSIZED,
+							mtimeMs: Date.now(),
+							isDirectory: () => true,
+						});
+					}
+					return Promise.resolve({
+						size: 1000,
+						mtimeMs: Date.now(),
+						isDirectory: () => true,
+					});
+				});
+
+				const results = await storage.searchSessions('/test/project', 'findme', 'all');
+
+				// Only the normal-sized file should be searched
+				expect(results).toHaveLength(1);
+				expect(results[0].sessionId).toBe('sess-ok');
+			});
+		});
+
+		describe('deleteMessagePair', () => {
+			it('should reject deletion of oversized files', async () => {
+				(fs.access as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+				(fs.readFile as ReturnType<typeof vi.fn>).mockImplementation((filePath: string) => {
+					if (filePath.endsWith('.project_root')) {
+						return Promise.resolve('/test/project');
+					}
+					return Promise.resolve(
+						buildSessionJson(
+							[
+								{ type: 'user', content: 'Hello' },
+								{ type: 'gemini', content: 'Hi' },
+							],
+							'test-session-id'
+						)
+					);
+				});
+				(fs.readdir as ReturnType<typeof vi.fn>).mockResolvedValue([
+					'session-123-test-session-id.json',
+				]);
+				(fs.stat as ReturnType<typeof vi.fn>).mockResolvedValue({
+					size: OVERSIZED,
+					mtimeMs: Date.now(),
+					isDirectory: () => true,
+				});
+
+				const result = await storage.deleteMessagePair('/test/project', 'test-session-id', '0');
+
+				expect(result.success).toBe(false);
+				expect(result.error).toContain('maximum size');
+			});
+
+			it('should allow deletion of normal-sized files', async () => {
+				const sessionContent = buildSessionJson([
+					{ type: 'user', content: 'Hello' },
+					{ type: 'gemini', content: 'Hi' },
+				]);
+				mockFindSessionFile(sessionContent);
+
+				const result = await storage.deleteMessagePair('/test/project', 'test-session-id', '0');
+
+				expect(result.success).toBe(true);
+			});
+		});
+	});
+
 	describe('bounded concurrency in listSessions', () => {
 		it('should process multiple session files concurrently', async () => {
 			const filenames = Array.from({ length: 5 }, (_, i) => `session-${i}-sess-${i}.json`);
