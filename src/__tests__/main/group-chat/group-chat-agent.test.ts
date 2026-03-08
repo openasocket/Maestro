@@ -613,6 +613,7 @@ describe('group-chat-agent', () => {
 
 			// All --include-directories paths should be the remote cwd only
 			// (buildAgentArgs adds one, buildGeminiWorkspaceDirArgs adds another for cwd)
+			expect(includeDirIndices.length).toBeGreaterThan(0);
 			const allDirPaths = includeDirIndices.map((i: number) => sshCallArgs[i + 1]);
 			expect(allDirPaths.every((p: string) => p === '/home/remoteuser/project')).toBe(true);
 			// Should NOT contain local home directory or local config paths
