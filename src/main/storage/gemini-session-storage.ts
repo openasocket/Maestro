@@ -206,8 +206,8 @@ export class GeminiSessionStorage implements AgentSessionStorage {
 					return directPath;
 				}
 			} catch {
-				// No .project_root file — basename match is the best we have
-				return directPath;
+				// No .project_root file — basename alone is ambiguous (e.g. two projects
+				// named "myapp" in different parents). Fall through to scan.
 			}
 		} catch {
 			// Direct path doesn't exist, continue to scan

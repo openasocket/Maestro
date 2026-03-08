@@ -519,6 +519,108 @@ describe('listGeminiSessions', () => {
 		expect(result.totalCount).toBe(0);
 	});
 
+	it('should fallback to scan when .project_root is missing on basename match', () => {
+		// Regression: basename-matched dir without .project_root should NOT be
+		// returned blindly — it could belong to a different project with the same
+		// folder name. Instead, fall through to the full scan.
+		const altProjectPath = '/other/parent/project'; // same basename "project"
+		const altHistoryDir = '/home/testuser/.gemini/history/renamed-project';
+
+		vi.mocked(fs.existsSync).mockImplementation((p) => {
+			// The basename "project" dir exists at the default location
+			if (p === geminiHistoryDir) return true;
+			return false;
+		});
+
+		vi.mocked(fs.readdirSync).mockImplementation((p) => {
+			const pStr = p.toString();
+			// Fallback scan returns both dirs
+			if (pStr === '/home/testuser/.gemini/history') {
+				return ['project' as unknown as fs.Dirent, 'renamed-project' as unknown as fs.Dirent];
+			}
+			// Session files in the correct dir
+			if (pStr === altHistoryDir) {
+				return ['session-1000-found.json' as unknown as fs.Dirent];
+			}
+			return [];
+		});
+
+		vi.mocked(fs.statSync).mockImplementation((p) => {
+			return {
+				size: 500,
+				mtimeMs: Date.now(),
+				isDirectory: () => true,
+			} as unknown as fs.Stats;
+		});
+
+		vi.mocked(fs.readFileSync).mockImplementation((p) => {
+			const pStr = p.toString();
+			// The basename-matched dir's .project_root doesn't exist
+			if (pStr === path.join(geminiHistoryDir, '.project_root')) {
+				throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+			}
+			// The renamed dir's .project_root points to our alt project
+			if (pStr === path.join(altHistoryDir, '.project_root')) {
+				return altProjectPath;
+			}
+			// project dir's .project_root (during scan) — doesn't exist
+			if (pStr.includes('project') && pStr.endsWith('.project_root')) {
+				throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+			}
+			if (pStr.includes('found')) {
+				return makeGeminiSession({
+					sessionId: 'found-id',
+					messages: [
+						{ type: 'user', content: 'Hello' },
+						{ type: 'gemini', content: 'Hi' },
+					],
+				});
+			}
+			throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+		});
+
+		const result = listGeminiSessions(altProjectPath);
+
+		expect(result.totalCount).toBe(1);
+		expect(result.sessions[0].sessionId).toBe('found-id');
+	});
+
+	it('should return empty when basename match has no .project_root and no scan match', () => {
+		// When basename dir exists but has no .project_root, and no other dir
+		// matches via scan, should return empty — not the wrong project's dir.
+		vi.mocked(fs.existsSync).mockImplementation((p) => {
+			if (p === geminiHistoryDir) return true;
+			return false;
+		});
+
+		vi.mocked(fs.readdirSync).mockImplementation((p) => {
+			const pStr = p.toString();
+			if (pStr === '/home/testuser/.gemini/history') {
+				return ['project' as unknown as fs.Dirent];
+			}
+			return [];
+		});
+
+		vi.mocked(fs.statSync).mockImplementation(() => {
+			return {
+				size: 500,
+				mtimeMs: Date.now(),
+				isDirectory: () => true,
+			} as unknown as fs.Stats;
+		});
+
+		vi.mocked(fs.readFileSync).mockImplementation((p) => {
+			// .project_root doesn't exist for any dir
+			throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+		});
+
+		// Different project with same basename
+		const result = listGeminiSessions('/different/parent/project');
+
+		expect(result.totalCount).toBe(0);
+		expect(result.sessions).toEqual([]);
+	});
+
 	it('should parse Gemini session JSON files and return sorted results', () => {
 		vi.mocked(fs.existsSync).mockImplementation((p) => {
 			if (p === geminiHistoryDir) return true;
