@@ -1636,19 +1636,19 @@ describe('extractDeniedPath', () => {
 		expect(result).toBe('/tmp/data');
 	});
 
-	it('extracts directory from permission denied pattern', () => {
+	it('rejects system-critical paths (permission denied on /etc)', () => {
 		const result = extractDeniedPath("'/etc/config.json' permission denied");
-		expect(result).toBe('/etc');
+		expect(result).toBeNull(); // /etc is a system path
 	});
 
-	it('extracts bare path without quotes', () => {
+	it('rejects system-critical paths (bare /usr/local/bin)', () => {
 		const result = extractDeniedPath('/usr/local/bin not in workspace');
-		expect(result).toBe('/usr/local/bin');
+		expect(result).toBeNull(); // /usr is a system path
 	});
 
-	it('extracts parent dir for bare file path', () => {
+	it('rejects system-critical paths (bare file under /usr)', () => {
 		const result = extractDeniedPath('/usr/local/bin/tool.py not in workspace');
-		expect(result).toBe('/usr/local/bin');
+		expect(result).toBeNull(); // /usr is a system path
 	});
 
 	it('returns null when no path pattern matches', () => {
@@ -1682,9 +1682,9 @@ describe('extractDeniedPath', () => {
 		expect(result).toBe('D:\\workspace\\data');
 	});
 
-	it('extracts Windows path with permission denied pattern', () => {
+	it('rejects Windows system path (C:\\Windows)', () => {
 		const result = extractDeniedPath("'C:\\Windows\\config.json' permission denied");
-		expect(result).toBe('C:\\Windows');
+		expect(result).toBeNull(); // C:\Windows is a system path
 	});
 
 	it('extracts bare Windows path without quotes', () => {
@@ -1705,5 +1705,25 @@ describe('extractDeniedPath', () => {
 	it('extracts Windows path from generic "path" prefix', () => {
 		const result = extractDeniedPath("path 'C:\\Users\\dev\\src' not in workspace");
 		expect(result).toBe('C:\\Users\\dev\\src');
+	});
+
+	// Tests with projectCwd normalization
+	it('normalizes relative traversal paths when projectCwd is provided', () => {
+		const result = extractDeniedPath("path '../../sibling' not in workspace", '/home/user/project');
+		expect(result).toBe('/home/sibling');
+	});
+
+	it('resolves tilde paths when projectCwd is provided', () => {
+		const result = extractDeniedPath("'~/projects/foo' not in workspace", '/tmp/cwd');
+		const os = require('os');
+		expect(result).toBe(`${os.homedir()}/projects/foo`);
+	});
+
+	it('rejects root path from traversal with projectCwd', () => {
+		const result = extractDeniedPath(
+			"path '../../../../..' not in workspace",
+			'/home/user/project'
+		);
+		expect(result).toBeNull(); // resolves to / which is a system path
 	});
 });

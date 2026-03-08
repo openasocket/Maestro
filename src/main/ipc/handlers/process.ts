@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import Store from 'electron-store';
 import * as os from 'os';
+import * as path from 'path';
 import { ProcessManager } from '../../process-manager';
 import { AgentDetector } from '../../agents';
 import { logger } from '../../utils/logger';
@@ -170,7 +171,8 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 				if (config.additionalWorkspaceDirs?.length && agent?.workingDirArgs) {
 					for (const dir of config.additionalWorkspaceDirs) {
 						if (dir && dir.trim()) {
-							finalArgs = [...finalArgs, ...agent.workingDirArgs(dir.trim())];
+							const resolved = path.resolve(config.cwd, dir.trim());
+							finalArgs = [...finalArgs, ...agent.workingDirArgs(resolved)];
 						}
 					}
 					logger.debug('Appending workspace directories', LOG_CONTEXT, {

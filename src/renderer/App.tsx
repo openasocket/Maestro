@@ -368,13 +368,14 @@ function MaestroConsoleInner() {
 		const { setSessions, sessions } = useSessionStore.getState();
 		const { closeModal } = useModalStore.getState();
 
-		// Update session with approved directory
+		// Update session with approved directory (normalize for dedup)
+		const normalizedDir = directory.replace(/[\\/]+$/, '');
 		setSessions((prev) =>
 			prev.map((s) => {
 				if (s.id !== sessionId) return s;
 				const existing = s.approvedWorkspaceDirs || [];
-				if (existing.includes(directory)) return s;
-				return { ...s, approvedWorkspaceDirs: [...existing, directory] };
+				if (existing.some((d) => d.replace(/[\\/]+$/, '') === normalizedDir)) return s;
+				return { ...s, approvedWorkspaceDirs: [...existing, normalizedDir] };
 			})
 		);
 
@@ -885,11 +886,8 @@ function MaestroConsoleInner() {
 	} = useTabHandlers();
 
 	// --- TERMINAL TAB HANDLERS ---
-	const {
-		handleOpenTerminalTab,
-		handleSelectTerminalTab,
-		handleCloseTerminalTab,
-	} = useTerminalTabHandlers();
+	const { handleOpenTerminalTab, handleSelectTerminalTab, handleCloseTerminalTab } =
+		useTerminalTabHandlers();
 
 	// Opens the rename modal for a terminal tab (1-arg wrapper for useMainPanelProps)
 	const handleRequestTerminalTabRename = useCallback(
@@ -1917,7 +1915,13 @@ function MaestroConsoleInner() {
 			setSessions((prev) =>
 				prev.map((s) =>
 					s.id === activeSession.id
-						? { ...s, activeTabId: tabId, activeFileTabId: null, activeTerminalTabId: null, inputMode: 'ai' }
+						? {
+								...s,
+								activeTabId: tabId,
+								activeFileTabId: null,
+								activeTerminalTabId: null,
+								inputMode: 'ai',
+							}
 						: s
 				)
 			);

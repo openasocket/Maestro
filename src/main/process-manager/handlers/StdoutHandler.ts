@@ -5,6 +5,7 @@ import { logger } from '../../utils/logger';
 import { appendToBuffer } from '../utils/bufferUtils';
 import { aggregateModelUsage, type ModelStats } from '../../parsers/usage-aggregator';
 import { matchSshErrorPattern } from '../../parsers/error-patterns';
+import { normalizeApprovalPathSync, isSystemPath } from '../../utils/path-validation';
 import type {
 	ManagedProcess,
 	UsageStats,
@@ -17,9 +18,11 @@ import type { DataBufferManager } from './DataBufferManager';
 /**
  * Extract the denied directory path from a Gemini CLI sandbox violation error message.
  * Returns the parent directory if the path looks like a file, or the path as-is for directories.
- * Returns null if no path can be extracted.
+ * Returns null if no path can be extracted or if the path is a system-critical directory.
+ *
+ * When projectCwd is provided, paths are normalized (tilde-expanded, resolved relative to CWD).
  */
-export function extractDeniedPath(errorMsg: string): string | null {
+export function extractDeniedPath(errorMsg: string, projectCwd?: string): string | null {
 	const patterns = [
 		// path '/foo/bar' not in workspace
 		/path\s+['"]([^'"]+)['"]\s*(?:not\s+in\s+workspace|is\s+outside)/i,
@@ -36,13 +39,27 @@ export function extractDeniedPath(errorMsg: string): string | null {
 	for (const pattern of patterns) {
 		const match = errorMsg.match(pattern);
 		if (match) {
-			const extracted = match[1];
+			let extracted = match[1];
 			// Check if it looks like a file (has a dot-extension at the end)
 			if (/\.\w+$/.test(extracted)) {
 				// Return parent directory (handle both / and \ separators)
 				const lastSeparator = Math.max(extracted.lastIndexOf('/'), extracted.lastIndexOf('\\'));
-				return lastSeparator > 0 ? extracted.substring(0, lastSeparator) : extracted;
+				extracted = lastSeparator > 0 ? extracted.substring(0, lastSeparator) : extracted;
 			}
+
+			// Normalize if CWD is available
+			if (projectCwd) {
+				extracted = normalizeApprovalPathSync(extracted, projectCwd);
+			}
+
+			// Reject system-critical paths
+			if (isSystemPath(extracted)) {
+				logger.warn('Rejected workspace approval for system-critical path', 'WorkspaceApproval', {
+					deniedPath: extracted,
+				});
+				return null;
+			}
+
 			return extracted;
 		}
 	}
@@ -397,7 +414,7 @@ export class StdoutHandler {
 						: null;
 
 			if (errorMsg && /path.*not.*in.*workspace|permission.*denied.*sandbox/i.test(errorMsg)) {
-				const deniedPath = extractDeniedPath(errorMsg);
+				const deniedPath = extractDeniedPath(errorMsg, managedProcess.cwd);
 				if (deniedPath) {
 					logger.info('[ProcessManager] Gemini sandbox violation detected', 'WorkspaceApproval', {
 						sessionId,

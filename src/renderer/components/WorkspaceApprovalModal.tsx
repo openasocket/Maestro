@@ -20,6 +20,7 @@ export interface WorkspaceApprovalModalProps {
 	errorMessage: string;
 	sessionName: string;
 	sshRemoteId?: string;
+	projectCwd?: string;
 	onApprove: (directory: string) => void;
 	onDeny: () => void;
 }
@@ -30,16 +31,26 @@ export function WorkspaceApprovalModal({
 	errorMessage: _errorMessage,
 	sessionName: _sessionName,
 	sshRemoteId,
+	projectCwd,
 	onApprove,
 	onDeny,
 }: WorkspaceApprovalModalProps) {
 	const [showFiles, setShowFiles] = useState(false);
-	const [files, setFiles] = useState<Array<{ name: string; isDirectory: boolean; path: string }>>([]);
-	const [fileCount, setFileCount] = useState<{ fileCount: number; folderCount: number } | null>(null);
+	const [files, setFiles] = useState<Array<{ name: string; isDirectory: boolean; path: string }>>(
+		[]
+	);
+	const [fileCount, setFileCount] = useState<{ fileCount: number; folderCount: number } | null>(
+		null
+	);
 	const [loadingFiles, setLoadingFiles] = useState(false);
 	const [fileError, setFileError] = useState<string | null>(null);
 
 	const approveButtonRef = useRef<HTMLButtonElement>(null);
+
+	// Determine if the path is outside the project working directory
+	const isOutsideProject = projectCwd
+		? !deniedPath.startsWith(projectCwd + '/') && deniedPath !== projectCwd
+		: false;
 
 	const loadDirectoryFiles = useCallback(async () => {
 		setLoadingFiles(true);
@@ -113,17 +124,46 @@ export function WorkspaceApprovalModal({
 				}}
 			>
 				<div className="flex gap-2" style={{ alignItems: 'flex-start' }}>
-					<AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: theme.colors.warning }} />
+					<AlertTriangle
+						className="w-4 h-4 shrink-0 mt-0.5"
+						style={{ color: theme.colors.warning }}
+					/>
 					<div>
 						<div className="text-xs font-semibold" style={{ color: theme.colors.warning }}>
 							Security Notice
 						</div>
 						<div className="text-xs" style={{ marginTop: '4px', color: theme.colors.textDim }}>
-							Adding this directory grants Gemini CLI read and write access to all files within it. Only approve directories you trust the agent to modify. The agent will be restarted to apply this change.
+							Adding this directory grants Gemini CLI read and write access to all files within it.
+							Only approve directories you trust the agent to modify. The agent will be restarted to
+							apply this change.
 						</div>
 					</div>
 				</div>
 			</div>
+
+			{/* Warning for paths outside project CWD */}
+			{isOutsideProject && (
+				<div
+					style={{
+						marginTop: '8px',
+						padding: '10px 12px',
+						borderRadius: '6px',
+						border: `1px solid ${theme.colors.error}40`,
+						background: `${theme.colors.error}10`,
+					}}
+				>
+					<div className="flex gap-2" style={{ alignItems: 'flex-start' }}>
+						<AlertTriangle
+							className="w-4 h-4 shrink-0 mt-0.5"
+							style={{ color: theme.colors.error }}
+						/>
+						<div className="text-xs" style={{ color: theme.colors.error }}>
+							This path is outside your project directory{projectCwd ? ` (${projectCwd})` : ''}.
+							Approve with caution.
+						</div>
+					</div>
+				</div>
+			)}
 
 			{/* Show Files expandable section */}
 			<div
@@ -162,7 +202,10 @@ export function WorkspaceApprovalModal({
 						}}
 					>
 						{loadingFiles && (
-							<div className="flex items-center justify-center gap-2 py-3" style={{ color: theme.colors.textDim }}>
+							<div
+								className="flex items-center justify-center gap-2 py-3"
+								style={{ color: theme.colors.textDim }}
+							>
 								<Loader2 className="w-4 h-4 animate-spin" />
 								<span className="text-xs">Loading...</span>
 							</div>
@@ -177,25 +220,29 @@ export function WorkspaceApprovalModal({
 								Directory is empty
 							</div>
 						)}
-						{!loadingFiles && !fileError && sortedFiles.map((entry) => (
-							<div
-								key={entry.path}
-								className="flex items-center gap-2 text-xs"
-								style={{
-									padding: '2px 12px',
-									color: theme.colors.textMain,
-								}}
-							>
-								{entry.isDirectory ? (
-									<Folder className="w-3 h-3 shrink-0" style={{ color: theme.colors.warning }} />
-								) : (
-									<File className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
-								)}
-								<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-									{entry.name}
-								</span>
-							</div>
-						))}
+						{!loadingFiles &&
+							!fileError &&
+							sortedFiles.map((entry) => (
+								<div
+									key={entry.path}
+									className="flex items-center gap-2 text-xs"
+									style={{
+										padding: '2px 12px',
+										color: theme.colors.textMain,
+									}}
+								>
+									{entry.isDirectory ? (
+										<Folder className="w-3 h-3 shrink-0" style={{ color: theme.colors.warning }} />
+									) : (
+										<File className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
+									)}
+									<span
+										style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+									>
+										{entry.name}
+									</span>
+								</div>
+							))}
 					</div>
 				)}
 			</div>

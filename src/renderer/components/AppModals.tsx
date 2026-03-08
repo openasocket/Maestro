@@ -490,9 +490,7 @@ export const AppSessionModals = memo(function AppSessionModals({
 }: AppSessionModalsProps) {
 	// Determine if the rename modal is for a terminal tab or an AI tab
 	const terminalTabs = activeSession?.terminalTabs ?? [];
-	const renamingTerminalTab = renameTabId
-		? terminalTabs.find((t) => t.id === renameTabId)
-		: null;
+	const renamingTerminalTab = renameTabId ? terminalTabs.find((t) => t.id === renameTabId) : null;
 	const renamingTerminalTabIndex = renamingTerminalTab
 		? terminalTabs.findIndex((t) => t.id === renameTabId)
 		: -1;
@@ -1788,6 +1786,7 @@ export const AppAgentModals = memo(function AppAgentModals({
 							undefined
 						);
 					})()}
+					projectCwd={sessions.find((s) => s.id === workspaceApprovalData.sessionId)?.projectRoot}
 					onApprove={(directory) =>
 						onApproveWorkspaceDir(workspaceApprovalData.sessionId, directory)
 					}
