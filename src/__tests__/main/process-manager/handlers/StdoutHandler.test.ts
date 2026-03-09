@@ -1277,11 +1277,27 @@ describe('StdoutHandler', () => {
 					}
 					return { type: 'system' };
 				}),
+				parseJsonObject: vi.fn((parsed: any) => {
+					if (parsed.type === 'step_start') {
+						return { type: 'init', sessionId: parsed.sessionID };
+					}
+					if (parsed.type === 'text') {
+						return { type: 'result', text: parsed.part?.text, sessionId: parsed.sessionID };
+					}
+					if (parsed.type === 'tool_use') {
+						return { type: 'tool_use', toolName: parsed.part?.tool, sessionId: parsed.sessionID };
+					}
+					if (parsed.type === 'step_finish') {
+						return { type: 'system', sessionId: parsed.sessionID };
+					}
+					return { type: 'system' };
+				}),
 				extractUsage: vi.fn(() => null),
 				extractSessionId: vi.fn((event: any) => event.sessionId || null),
 				extractSlashCommands: vi.fn(() => null),
 				isResultMessage: vi.fn((event: any) => event.type === 'result'),
 				detectErrorFromLine: vi.fn(() => null),
+				detectErrorFromParsed: vi.fn(() => null),
 			};
 		}
 
@@ -1382,11 +1398,17 @@ describe('StdoutHandler', () => {
 					if (parsed.type === 'text') return { type: 'result', text: parsed.text };
 					return { type: 'system' };
 				}),
+				parseJsonObject: vi.fn((parsed: any) => {
+					if (parsed.type === 'step_start') return { type: 'init', sessionId: 'x' };
+					if (parsed.type === 'text') return { type: 'result', text: parsed.text };
+					return { type: 'system' };
+				}),
 				extractUsage: vi.fn(() => null),
 				extractSessionId: vi.fn(() => null),
 				extractSlashCommands: vi.fn(() => null),
 				isResultMessage: vi.fn((event: any) => event.type === 'result'),
 				detectErrorFromLine: vi.fn(() => null),
+				detectErrorFromParsed: vi.fn(() => null),
 			};
 
 			const { handler, proc, sessionId } = createTestContext({
