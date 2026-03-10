@@ -275,12 +275,20 @@ export async function addParticipant(
 		sshRemoteName: sessionOverrides?.sshRemoteName,
 	};
 
-	// Store the session mapping
+	// Add participant to the group chat storage first, then store session mapping.
+	// This order prevents orphaned processes: if storage rejects (e.g., duplicate
+	// name via race condition between concurrent addParticipant calls), we kill
+	// the spawned process before it becomes unreachable.
+	try {
+		await addParticipantToChat(groupChatId, participant);
+	} catch (error) {
+		processManager.kill(sessionId);
+		throw error;
+	}
+
+	// Only store the session mapping after successful storage write
 	activeParticipantSessions.set(getParticipantKey(groupChatId, name), sessionId);
 	console.log(`[GroupChat:Debug] Session stored in active map`);
-
-	// Add participant to the group chat
-	await addParticipantToChat(groupChatId, participant);
 	console.log(`[GroupChat:Debug] Participant added to chat storage`);
 	console.log(`[GroupChat:Debug] =====================================`);
 

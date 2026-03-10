@@ -530,6 +530,41 @@ describe('group-chat-agent', () => {
 			expect(updated?.participants[0].agentId).toBe('claude-code');
 			expect(updated?.participants[1].agentId).toBe('opencode');
 		});
+
+		it('kills spawned process when addParticipantToChat rejects (race condition)', async () => {
+			const chat = await createTestChatWithModerator('Race Condition Test');
+
+			// Launch two concurrent addParticipant calls with the same name.
+			// Both will read the initial state (0 participants), both pass the
+			// early duplicate check, both spawn a process. The serialized
+			// addParticipantToChat write queue ensures one succeeds and the
+			// other rejects with "already exists". The losing call must kill
+			// its spawned process to avoid orphans.
+			const [result1, result2] = await Promise.allSettled([
+				addParticipant(chat.id, 'Client', 'claude-code', mockProcessManager),
+				addParticipant(chat.id, 'Client', 'claude-code', mockProcessManager),
+			]);
+
+			const successes = [result1, result2].filter((r) => r.status === 'fulfilled');
+			const failures = [result1, result2].filter((r) => r.status === 'rejected');
+
+			expect(successes).toHaveLength(1);
+			expect(failures).toHaveLength(1);
+
+			// Both calls spawned a process
+			expect(mockProcessManager.spawn).toHaveBeenCalledTimes(2);
+			// The failed call should have killed its orphaned process
+			expect(mockProcessManager.kill).toHaveBeenCalledTimes(1);
+
+			// Only one participant should exist in storage
+			const updated = await loadGroupChat(chat.id);
+			expect(updated?.participants).toHaveLength(1);
+			expect(updated?.participants[0].name).toBe('Client');
+
+			// Only one active session should remain
+			expect(isParticipantActive(chat.id, 'Client')).toBe(true);
+			expect(getActiveParticipants(chat.id)).toHaveLength(1);
+		});
 	});
 
 	// ===========================================================================
