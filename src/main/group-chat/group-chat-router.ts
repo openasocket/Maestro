@@ -1022,7 +1022,16 @@ export async function routeModeratorResponse(
 				participant.agentId,
 				participantWorkspaceDirs
 			);
-			const participantFinalArgs = [...configResolution.args, ...geminiParticipantDirArgs];
+			// For Gemini CLI: only disable workspace sandbox when read-only mode is
+			// CLI-enforced (same rationale as moderator/synthesis spawns above)
+			const participantCanBeUnsandboxed =
+				participant.agentId === 'gemini-cli' && !!agent.readOnlyCliEnforced;
+			const participantNoSandbox = participantCanBeUnsandboxed ? ['--no-sandbox'] : [];
+			const participantFinalArgs = [
+				...configResolution.args,
+				...geminiParticipantDirArgs,
+				...participantNoSandbox,
+			];
 
 			try {
 				// Emit participant state change to show this participant is working
