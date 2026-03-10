@@ -15,6 +15,48 @@ import type { ManagedProcess, AgentError } from '../types';
 const CODEX_TRACING_LINE =
 	/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[\d.]*Z\s+(?:TRACE|DEBUG|INFO|WARN|ERROR)\s+\w+/;
 
+/**
+ * Known SSH informational messages that should be silently suppressed.
+ * Hoisted to module scope to avoid regex recompilation per event.
+ */
+const SSH_INFO_PATTERNS = [
+	/^Pseudo-terminal will not be allocated/i,
+	/^Warning: Permanently added .* to the list of known hosts/i,
+];
+
+/**
+ * Known Gemini CLI informational stderr messages to suppress.
+ * These fire during startup and on every turn. Hoisted to module scope
+ * to avoid re-creating 13 regex objects per stderr event.
+ */
+const GEMINI_INFO_PATTERNS = [
+	/YOLO mode is enabled/i,
+	/All tool calls will be automatically approved/i,
+	/Loaded cached credentials/i,
+	/Loading configuration/i,
+	/Connecting to/i,
+	/Loading extension:/i,
+	/Hook execution for \w+:/i,
+	/Created execution plan for \w+:/i,
+	/Expanding hook command:/i,
+	/Hook\(s\) \[.*?\] (?:failed|succeeded) for event/i,
+	/hooks? executed successfully/i,
+	/^\[WARNING\] Hook/i,
+	/Press F12 to see the debug drawer/i,
+];
+
+/**
+ * Detects Gemini CLI Axios/API internal stderr dumps.
+ * Single combined regex avoids 4 separate .test() calls per event.
+ */
+const GEMINI_AXIOS_DUMP =
+	/\[Function: \w+\]|paramsSerializer|validateStatus|errorRedactor|cloudcode-pa\.googleapis\.com|streamGenerateContent/;
+
+/** Detects actual network/HTTP errors inside an Axios dump */
+const GEMINI_AXIOS_ERROR_INDICATOR = /\berror\b/i;
+const GEMINI_AXIOS_ERROR_DETAIL =
+	/status(?:Code)?[:\s]+[45]\d{2}|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|socket hang up|\b(?:40[013]|403|429|50[023])\b/i;
+
 interface StderrHandlerDependencies {
 	processes: Map<string, ManagedProcess>;
 	emitter: EventEmitter;
@@ -94,11 +136,7 @@ export class StderrHandler {
 		const cleanedStderr = stripAllAnsiCodes(stderrData).trim();
 		if (cleanedStderr) {
 			// Filter out known SSH informational messages that aren't actual errors
-			const sshInfoPatterns = [
-				/^Pseudo-terminal will not be allocated/i,
-				/^Warning: Permanently added .* to the list of known hosts/i,
-			];
-			const isKnownSshInfo = sshInfoPatterns.some((pattern) => pattern.test(cleanedStderr));
+			const isKnownSshInfo = SSH_INFO_PATTERNS.some((pattern) => pattern.test(cleanedStderr));
 			if (isKnownSshInfo) {
 				logger.debug('[ProcessManager] Suppressing known SSH info message', 'ProcessManager', {
 					sessionId,
@@ -113,23 +151,6 @@ export class StderrHandler {
 			// is active (stdout is reserved for the JSON event stream).
 			// Filter out known informational lines and re-emit the rest as 'data'.
 			if (toolType === 'gemini-cli') {
-				const geminiInfoPatterns = [
-					/YOLO mode is enabled/i,
-					/All tool calls will be automatically approved/i,
-					/Loaded cached credentials/i,
-					/Loading configuration/i,
-					/Connecting to/i,
-					// Extension and hook lifecycle messages
-					/Loading extension:/i,
-					/Hook execution for \w+:/i,
-					/Created execution plan for \w+:/i,
-					/Expanding hook command:/i,
-					/Hook\(s\) \[.*?\] (?:failed|succeeded) for event/i,
-					/hooks? executed successfully/i,
-					/^\[WARNING\] Hook/i,
-					/Press F12 to see the debug drawer/i,
-				];
-
 				// Detect capacity/quota errors with model info BEFORE the Axios dump check.
 				// These are actionable — the user can switch models to work around them.
 				const capacityMatch = cleanedStderr.match(/no capacity available for model\s+(\S+)/i);
@@ -185,18 +206,12 @@ export class StderrHandler {
 				// details to stderr during normal operation — suppress all of it.
 				// Only emit a user-visible error when there's an actual error indicator
 				// (e.g., "error", "failed", "ECONNREFUSED") alongside the API dump.
-				const isAxiosDump =
-					/\[Function: \w+\]/.test(cleanedStderr) ||
-					/paramsSerializer|validateStatus|errorRedactor/.test(cleanedStderr) ||
-					/cloudcode-pa\.googleapis\.com/.test(cleanedStderr) ||
-					/streamGenerateContent/.test(cleanedStderr);
+				const isAxiosDump = GEMINI_AXIOS_DUMP.test(cleanedStderr);
 
 				if (isAxiosDump) {
 					const hasActualError =
-						/\berror\b/i.test(cleanedStderr) &&
-						(/status(?:Code)?[:\s]+[45]\d{2}/i.test(cleanedStderr) ||
-							/ECONNREFUSED|ETIMEDOUT|ENOTFOUND|socket hang up/i.test(cleanedStderr) ||
-							/\b(?:40[013]|403|429|50[023])\b/.test(cleanedStderr));
+						GEMINI_AXIOS_ERROR_INDICATOR.test(cleanedStderr) &&
+						GEMINI_AXIOS_ERROR_DETAIL.test(cleanedStderr);
 
 					logger.debug(
 						'[ProcessManager] Suppressing Gemini CLI internal stderr dump',
@@ -223,7 +238,7 @@ export class StderrHandler {
 
 				const lines = cleanedStderr.split('\n');
 				const nonInfoLines = lines.filter(
-					(line) => line.trim() && !geminiInfoPatterns.some((p) => p.test(line))
+					(line) => line.trim() && !GEMINI_INFO_PATTERNS.some((p) => p.test(line))
 				);
 				if (nonInfoLines.length === 0) {
 					logger.debug('[ProcessManager] Suppressing Gemini CLI info stderr', 'ProcessManager', {

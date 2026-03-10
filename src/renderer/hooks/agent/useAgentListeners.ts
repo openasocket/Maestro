@@ -1388,7 +1388,17 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 
 									const lastLog = targetTab.logs[targetTab.logs.length - 1];
 									if (lastLog?.source === 'thinking') {
-										const combinedText = lastLog.text + bufferedContent;
+										let combinedText = lastLog.text + bufferedContent;
+										// Cap thinking log text to prevent unbounded memory growth
+										const MAX_THINKING_TEXT = 512 * 1024;
+										if (combinedText.length > MAX_THINKING_TEXT) {
+											const keepFrom = combinedText.length - MAX_THINKING_TEXT;
+											const newlineIdx = combinedText.indexOf('\n', keepFrom);
+											combinedText =
+												newlineIdx !== -1
+													? combinedText.slice(newlineIdx + 1)
+													: combinedText.slice(keepFrom);
+										}
 										if (isLikelyConcatenatedToolNames(combinedText)) {
 											console.warn(
 												'[App] Detected malformed thinking content, replacing instead of appending'

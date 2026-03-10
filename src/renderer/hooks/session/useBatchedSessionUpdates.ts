@@ -21,6 +21,18 @@ import { useSessionStore } from '../../stores/sessionStore';
 export const DEFAULT_BATCH_FLUSH_INTERVAL = 150;
 
 /**
+ * Maximum text size per log entry (512KB).
+ * When a grouped log entry exceeds this, the oldest text is trimmed and a
+ * truncation marker is prepended. This prevents unbounded memory growth
+ * during long streaming sessions where the 500ms time-based grouping
+ * concatenates all output into a single LogEntry.
+ */
+const MAX_LOG_ENTRY_TEXT = 512 * 1024;
+
+/** Marker prepended to truncated log entries so the user knows output was trimmed */
+const TRUNCATION_MARKER = '\n--- earlier output truncated ---\n';
+
+/**
  * Accumulated log data for efficient string concatenation
  */
 interface LogAccumulator {
@@ -230,10 +242,20 @@ export function useBatchedSessionUpdates(
 
 								let updatedLogs: LogEntry[];
 								if (shouldGroup) {
+									let merged = lastLog.text + logData.data;
+									// Cap log entry text size to prevent unbounded memory growth
+									if (merged.length > MAX_LOG_ENTRY_TEXT) {
+										// Keep the most recent output, trim from the beginning
+										const keepFrom = merged.length - MAX_LOG_ENTRY_TEXT + TRUNCATION_MARKER.length;
+										// Find the next newline after keepFrom to avoid cutting mid-line
+										const newlineIdx = merged.indexOf('\n', keepFrom);
+										const trimAt = newlineIdx !== -1 ? newlineIdx + 1 : keepFrom;
+										merged = TRUNCATION_MARKER + merged.slice(trimAt);
+									}
 									updatedLogs = [...existingLogs];
 									updatedLogs[updatedLogs.length - 1] = {
 										...lastLog,
-										text: lastLog.text + logData.data,
+										text: merged,
 									};
 								} else {
 									const newLog: LogEntry = {
@@ -252,7 +274,7 @@ export function useBatchedSessionUpdates(
 
 					// Apply shell logs (legacy fallback — only when no terminal tabs present)
 					// TODO: Remove shellLogs once terminal tabs migration is complete
-					if ((shellStdout || shellStderr) && !(updatedSession.terminalTabs?.length)) {
+					if ((shellStdout || shellStderr) && !updatedSession.terminalTabs?.length) {
 						const shellLogs = [...updatedSession.shellLogs];
 
 						if (shellStdout) {
@@ -261,9 +283,16 @@ export function useBatchedSessionUpdates(
 								lastLog && lastLog.source === 'stdout' && updatedSession.state === 'busy';
 
 							if (shouldGroup) {
+								let merged = lastLog.text + shellStdout;
+								if (merged.length > MAX_LOG_ENTRY_TEXT) {
+									const keepFrom = merged.length - MAX_LOG_ENTRY_TEXT + TRUNCATION_MARKER.length;
+									const newlineIdx = merged.indexOf('\n', keepFrom);
+									const trimAt = newlineIdx !== -1 ? newlineIdx + 1 : keepFrom;
+									merged = TRUNCATION_MARKER + merged.slice(trimAt);
+								}
 								shellLogs[shellLogs.length - 1] = {
 									...lastLog,
-									text: lastLog.text + shellStdout,
+									text: merged,
 								};
 							} else {
 								shellLogs.push({
@@ -281,9 +310,16 @@ export function useBatchedSessionUpdates(
 								lastLog && lastLog.source === 'stderr' && updatedSession.state === 'busy';
 
 							if (shouldGroup) {
+								let merged = lastLog.text + shellStderr;
+								if (merged.length > MAX_LOG_ENTRY_TEXT) {
+									const keepFrom = merged.length - MAX_LOG_ENTRY_TEXT + TRUNCATION_MARKER.length;
+									const newlineIdx = merged.indexOf('\n', keepFrom);
+									const trimAt = newlineIdx !== -1 ? newlineIdx + 1 : keepFrom;
+									merged = TRUNCATION_MARKER + merged.slice(trimAt);
+								}
 								shellLogs[shellLogs.length - 1] = {
 									...lastLog,
-									text: lastLog.text + shellStderr,
+									text: merged,
 								};
 							} else {
 								shellLogs.push({
