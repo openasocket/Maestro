@@ -366,7 +366,7 @@ export class GeminiOutputParser implements AgentOutputParser {
 				recoverable: match.recoverable,
 				agentId: this.agentId,
 				timestamp: Date.now(),
-				raw: { parsedJson: parsed },
+				parsedJson: parsed,
 			};
 		}
 
