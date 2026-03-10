@@ -13,6 +13,9 @@ import { GroupChat, loadGroupChat, updateGroupChat } from './group-chat-storage'
 import { appendToLog, readLog } from './group-chat-log';
 import { groupChatModeratorSystemPrompt, groupChatModeratorSynthesisPrompt } from '../../prompts';
 import { powerManager } from '../power-manager';
+import { logger } from '../utils/logger';
+
+const LOG_CONTEXT = 'GroupChatModerator';
 
 /**
  * Interface for the process manager dependency.
@@ -238,8 +241,15 @@ export async function killModerator(
 	// Clear the session ID in storage
 	try {
 		await updateGroupChat(groupChatId, { moderatorSessionId: '' });
-	} catch {
-		// Chat may already be deleted
+	} catch (error) {
+		// Expected when chat is already deleted; log unexpected errors
+		const message = error instanceof Error ? error.message : String(error);
+		if (!message.includes('not found') && !message.includes('deleted')) {
+			logger.debug('Failed to clear moderatorSessionId on kill', LOG_CONTEXT, {
+				groupChatId,
+				error: message,
+			});
+		}
 	}
 }
 

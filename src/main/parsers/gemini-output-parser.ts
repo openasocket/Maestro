@@ -23,6 +23,9 @@
 import type { ToolType, AgentError } from '../../shared/types';
 import type { AgentOutputParser, ParsedEvent } from './agent-output-parser';
 import { getErrorPatterns, matchErrorPattern } from './error-patterns';
+import { logger } from '../utils/logger';
+
+const LOG_CONTEXT = 'GeminiOutputParser';
 
 // ============================================================================
 // Gemini stream-json Event Interfaces
@@ -238,6 +241,9 @@ export class GeminiOutputParser implements AgentOutputParser {
 			}
 
 			default:
+				logger.debug('Unknown Gemini event type', LOG_CONTEXT, {
+					eventType: (event as { type: string }).type,
+				});
 				return null;
 		}
 	}

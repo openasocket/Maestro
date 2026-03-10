@@ -439,7 +439,12 @@ export class GeminiSessionStorage implements AgentSessionStorage {
 			async ({ filePath, filename }) => {
 				try {
 					const fileStat = await fs.stat(filePath);
-					if (fileStat.size === 0) return null;
+					if (fileStat.size === 0) {
+						logger.warn('Skipping empty Gemini session file', LOG_CONTEXT, {
+							filename,
+						});
+						return null;
+					}
 
 					const sessionId = extractSessionIdFromFilename(filename) || filename.replace('.json', '');
 					const session = await this.parseSessionFile(filePath, sessionId, {
@@ -656,7 +661,7 @@ export class GeminiSessionStorage implements AgentSessionStorage {
 		} catch (error) {
 			logger.error(`Error reading Gemini session: ${sessionId}`, LOG_CONTEXT, error);
 			captureException(error, { operation: 'geminiStorage:readSessionMessages', sessionId });
-			return { messages: [], total: 0, hasMore: false };
+			return { messages: [], total: 0, hasMore: false, error: 'Session file is corrupted' };
 		}
 	}
 
@@ -687,7 +692,12 @@ export class GeminiSessionStorage implements AgentSessionStorage {
 			async ({ filePath, filename }) => {
 				try {
 					const fileStat = await fs.stat(filePath);
-					if (fileStat.size === 0) return;
+					if (fileStat.size === 0) {
+						logger.warn('Skipping empty Gemini session file in search', LOG_CONTEXT, {
+							filename,
+						});
+						return;
+					}
 
 					// Skip oversized files to prevent OOM during search
 					if (fileStat.size > MAX_SESSION_FILE_SIZE) {

@@ -286,12 +286,20 @@ export class ExitHandler {
 			error: error.message,
 		});
 
+		// Produce a user-friendly message for ENOENT (binary not found)
+		const isEnoent =
+			(error as NodeJS.ErrnoException).code === 'ENOENT' || error.message.includes('ENOENT');
+		const agentName = managedProcess?.toolType || 'Agent';
+		const userMessage = isEnoent
+			? `${agentName} not found. Please verify the agent is installed and available on your PATH.`
+			: `Agent process error: ${error.message}`;
+
 		// Emit agent error for process spawn failures
 		if (managedProcess && !managedProcess.errorEmitted) {
 			managedProcess.errorEmitted = true;
 			const agentError: AgentError = {
-				type: 'agent_crashed',
-				message: `Agent process error: ${error.message}`,
+				type: isEnoent ? 'agent_not_found' : 'agent_crashed',
+				message: userMessage,
 				recoverable: true,
 				agentId: managedProcess.toolType,
 				sessionId,
@@ -308,7 +316,7 @@ export class ExitHandler {
 			cleanupTempFiles(managedProcess.tempImageFiles);
 		}
 
-		this.emitter.emit('data', sessionId, `[error] ${error.message}`);
+		this.emitter.emit('data', sessionId, `[error] ${userMessage}`);
 		this.emitter.emit('exit', sessionId, 1);
 		this.processes.delete(sessionId);
 	}

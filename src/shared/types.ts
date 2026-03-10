@@ -1,7 +1,13 @@
 // Shared type definitions for Maestro CLI and Electron app
 // These types are used by both the CLI tool and the renderer process
 
-export type ToolType = 'claude-code' | 'opencode' | 'codex' | 'terminal' | 'factory-droid' | 'gemini-cli';
+export type ToolType =
+	| 'claude-code'
+	| 'opencode'
+	| 'codex'
+	| 'terminal'
+	| 'factory-droid'
+	| 'gemini-cli';
 
 /**
  * ThinkingMode controls how AI reasoning/thinking content is displayed.
@@ -157,6 +163,7 @@ export type AgentErrorType =
 	| 'rate_limited' // Too many requests, quota exceeded
 	| 'network_error' // Connection failed, timeout
 	| 'agent_crashed' // Process exited unexpectedly
+	| 'agent_not_found' // Agent binary not found (ENOENT)
 	| 'permission_denied' // Agent lacks required permissions
 	| 'session_not_found' // Session was deleted or doesn't exist
 	| 'unknown'; // Unrecognized error
