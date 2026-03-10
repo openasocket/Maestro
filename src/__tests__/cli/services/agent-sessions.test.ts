@@ -1038,4 +1038,43 @@ describe('listGeminiSessions', () => {
 		expect(result.sessions[0].durationSeconds).toBe(300); // 5 minutes
 		expect(result.sessions[0].costUsd).toBe(0); // Gemini doesn't expose cost
 	});
+
+	it('should return durationSeconds 0 when timestamps are invalid (NaN guard)', () => {
+		vi.mocked(fs.existsSync).mockImplementation((p) => {
+			if (p === geminiHistoryDir) return true;
+			return false;
+		});
+
+		vi.mocked(fs.readdirSync).mockImplementation((p) => {
+			const pStr = p.toString();
+			if (pStr === geminiHistoryDir) {
+				return ['session-1000-badtime.json' as unknown as fs.Dirent];
+			}
+			return [];
+		});
+
+		vi.mocked(fs.statSync).mockReturnValue({
+			size: 500,
+			mtimeMs: Date.now(),
+			isDirectory: () => false,
+		} as unknown as fs.Stats);
+
+		vi.mocked(fs.readFileSync).mockImplementation((p) => {
+			const pStr = p.toString();
+			if (pStr.includes('.project_root')) return projectPath;
+			if (pStr.includes('badtime')) {
+				return makeGeminiSession({
+					sessionId: 'badtime-id',
+					startTime: 'not-a-date',
+					lastUpdated: 'also-not-a-date',
+				});
+			}
+			throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+		});
+
+		const result = listGeminiSessions(projectPath);
+
+		expect(result.sessions).toHaveLength(1);
+		expect(result.sessions[0].durationSeconds).toBe(0);
+	});
 });

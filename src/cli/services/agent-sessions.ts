@@ -550,7 +550,10 @@ export function listGeminiSessions(
 
 			const startTime = new Date(startedAt).getTime();
 			const endTime = new Date(lastActiveAt).getTime();
-			const durationSeconds = Math.max(0, Math.floor((endTime - startTime) / 1000));
+			const durationSeconds =
+				Number.isNaN(startTime) || Number.isNaN(endTime)
+					? 0
+					: Math.max(0, Math.floor((endTime - startTime) / 1000));
 
 			const session: AgentSessionInfo = {
 				sessionId,
