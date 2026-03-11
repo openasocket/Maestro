@@ -1,1 +1,13 @@
-{}
+{
+	"hamburger": {
+		"new_agent": "New Agent",
+		"new_group_chat": "New Group Chat",
+		"settings": "Settings",
+		"quit": "Quit Maestro"
+	},
+	"context": {
+		"copy": "Copy",
+		"paste": "Paste",
+		"rename": "Rename"
+	}
+}

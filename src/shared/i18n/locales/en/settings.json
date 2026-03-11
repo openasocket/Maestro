@@ -1,1 +1,12 @@
-{}
+{
+	"general": {
+		"title": "General",
+		"theme_label": "Theme",
+		"language_label": "Language",
+		"language_description": "Select your preferred display language"
+	},
+	"encore": {
+		"title": "Encore Features",
+		"virtuosos_title": "Virtuosos"
+	}
+}

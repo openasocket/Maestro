@@ -1,1 +1,10 @@
-{}
+{
+	"sidebar": {
+		"toggle_button": "Toggle left panel",
+		"agent_list": "Agent list"
+	},
+	"main_panel": {
+		"output_region": "AI output region",
+		"input_field": "Message input"
+	}
+}

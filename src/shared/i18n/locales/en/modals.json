@@ -1,1 +1,13 @@
-{}
+{
+	"edit_agent": {
+		"title": "Edit Agent",
+		"name_label": "Agent Name",
+		"save_button": "Save Changes",
+		"cancel_button": "Cancel"
+	},
+	"confirm_delete": {
+		"title": "Confirm Deletion",
+		"message": "Are you sure you want to delete {{name}}?",
+		"confirm_button": "Delete"
+	}
+}

@@ -32,6 +32,10 @@
 	"refresh": "Refresh",
 	"settings": "Settings",
 	"help": "Help",
+	"items_count_one": "{{count}} item",
+	"items_count_other": "{{count}} items",
+	"agents_running_one": "{{count}} agent running",
+	"agents_running_other": "{{count}} agents running",
 	"time": {
 		"milliseconds_short": "{{count}}ms",
 		"seconds_short": "{{count}}s",

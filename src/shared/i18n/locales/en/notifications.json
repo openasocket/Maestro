@@ -1,1 +1,12 @@
-{}
+{
+	"task": {
+		"completed_title": "Task Complete",
+		"completed_message": "{{agent}} finished in {{duration}}",
+		"failed_title": "Task Failed",
+		"failed_message": "{{agent}} encountered an error"
+	},
+	"connection": {
+		"lost_title": "Connection Lost",
+		"restored_title": "Connection Restored"
+	}
+}
