@@ -5,7 +5,7 @@
  * session ID, context usage, stats, and cost.
  */
 
-import { MessageSquare, Copy, Check, DollarSign, RotateCcw, Server } from 'lucide-react';
+import { MessageSquare, Copy, Check, RotateCcw, Server } from 'lucide-react';
 import { useState, useCallback } from 'react';
 import type { Theme, GroupChatParticipant, SessionState } from '../types';
 import { getStatusColor } from '../utils/theme';
@@ -203,8 +203,7 @@ export function ParticipantCard({
 						}}
 						title="Total cost"
 					>
-						<DollarSign className="w-3 h-3" />
-						{formatCost(participant.totalCost).slice(1)}
+						{formatCost(participant.totalCost)}
 					</span>
 				)}
 				{/* Reset button */}

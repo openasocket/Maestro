@@ -328,11 +328,13 @@ describe('shared/formatters', () => {
 	describe('formatCost', () => {
 		it('should format zero cost', () => {
 			expect(formatCost(0)).toBe('$0.00');
+			expect(formatCost(0, 'en')).toBe('$0.00');
 		});
 
 		it('should format very small costs as <$0.01', () => {
 			expect(formatCost(0.001)).toBe('<$0.01');
 			expect(formatCost(0.009)).toBe('<$0.01');
+			expect(formatCost(0.001, 'en')).toBe('<$0.01');
 		});
 
 		it('should format normal costs with 2 decimal places', () => {
@@ -343,9 +345,25 @@ describe('shared/formatters', () => {
 		});
 
 		it('should round to 2 decimal places', () => {
-			expect(formatCost(1.234)).toBe('$1.23');
-			expect(formatCost(1.235)).toBe('$1.24'); // rounds up
-			expect(formatCost(1.999)).toBe('$2.00');
+			expect(formatCost(1.234, 'en')).toBe('$1.23');
+			expect(formatCost(1.235, 'en')).toBe('$1.24'); // rounds up
+			expect(formatCost(1.999, 'en')).toBe('$2.00');
+		});
+
+		it('should use locale-aware currency formatting with explicit locale', () => {
+			// German uses comma for decimal, currency symbol after number
+			const deCost = formatCost(1.23, 'de');
+			expect(deCost).toContain('1,23');
+
+			// French uses comma for decimal, currency symbol after number
+			const frCost = formatCost(1.23, 'fr');
+			expect(frCost).toContain('1,23');
+		});
+
+		it('should handle locale-aware less-than formatting', () => {
+			const deCost = formatCost(0.005, 'de');
+			expect(deCost).toContain('<');
+			expect(deCost).toContain('0,01');
 		});
 	});
 

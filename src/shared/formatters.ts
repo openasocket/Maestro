@@ -246,16 +246,33 @@ export function formatElapsedTime(ms: number, locale?: string): string {
 }
 
 /**
- * Format cost as USD with appropriate precision.
- * Shows "<$0.01" for very small amounts.
+ * Format cost as locale-aware USD currency display.
+ * Uses Intl.NumberFormat for locale-appropriate currency formatting
+ * (e.g., "$1.23" in English, "1,23 $US" in French, "US$1.23" in Chinese).
+ * Shows a "less than minimum" indicator for very small amounts.
  *
  * @param cost - The cost in USD
+ * @param locale - Optional BCP 47 locale override (auto-detected from i18n if omitted)
  * @returns Formatted string (e.g., "$1.23", "<$0.01", "$0.00")
  */
-export function formatCost(cost: number): string {
-	if (cost === 0) return '$0.00';
-	if (cost < 0.01) return '<$0.01';
-	return '$' + cost.toFixed(2);
+export function formatCost(cost: number, locale?: string): string {
+	const activeLocale = getActiveLocale(locale);
+
+	const formatter = new Intl.NumberFormat(activeLocale, {
+		style: 'currency',
+		currency: 'USD',
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2,
+	});
+
+	if (cost === 0) return formatter.format(0);
+
+	if (cost > 0 && cost < 0.01) {
+		// Prepend '<' to the locale-formatted minimum amount
+		return '<' + formatter.format(0.01);
+	}
+
+	return formatter.format(cost);
 }
 
 /**
