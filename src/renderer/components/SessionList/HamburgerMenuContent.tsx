@@ -15,6 +15,7 @@ import {
 	Music,
 	Command,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { Theme } from '../../types';
 import { formatShortcutKeys } from '../../utils/shortcutFormatter';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -35,6 +36,7 @@ export function HamburgerMenuContent({
 	startTour,
 	setMenuOpen,
 }: HamburgerMenuContentProps) {
+	const { t } = useTranslation('menus');
 	const shortcuts = useSettingsStore((s) => s.shortcuts);
 	const directorNotesEnabled = useSettingsStore((s) => s.encoreFeatures.directorNotes);
 	const {
@@ -64,10 +66,10 @@ export function HamburgerMenuContent({
 					<Plus className="w-5 h-5" style={{ color: theme.colors.accent }} />
 					<div className="flex-1">
 						<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-							New Agent
+							{t('hamburger.new_agent')}
 						</div>
 						<div className="text-xs" style={{ color: theme.colors.textDim }}>
-							Create a new agent session
+							{t('hamburger.new_agent_desc')}
 						</div>
 					</div>
 					<span
@@ -89,10 +91,10 @@ export function HamburgerMenuContent({
 					<Wand2 className="w-5 h-5" style={{ color: theme.colors.accent }} />
 					<div className="flex-1">
 						<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-							New Agent Wizard
+							{t('hamburger.wizard')}
 						</div>
 						<div className="text-xs" style={{ color: theme.colors.textDim }}>
-							Get started with AI
+							{t('hamburger.wizard_desc')}
 						</div>
 					</div>
 					<span
@@ -113,10 +115,10 @@ export function HamburgerMenuContent({
 				<Command className="w-5 h-5" style={{ color: theme.colors.accent }} />
 				<div className="flex-1">
 					<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-						Command Palette
+						{t('hamburger.command_palette')}
 					</div>
 					<div className="text-xs" style={{ color: theme.colors.textDim }}>
-						Quick actions and navigation
+						{t('hamburger.command_palette_desc')}
 					</div>
 				</div>
 				<span
@@ -137,10 +139,10 @@ export function HamburgerMenuContent({
 					<Compass className="w-5 h-5" style={{ color: theme.colors.accent }} />
 					<div className="flex-1">
 						<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-							Introductory Tour
+							{t('hamburger.tour')}
 						</div>
 						<div className="text-xs" style={{ color: theme.colors.textDim }}>
-							Learn how to use Maestro
+							{t('hamburger.tour_desc')}
 						</div>
 					</div>
 				</button>
@@ -156,10 +158,10 @@ export function HamburgerMenuContent({
 				<Keyboard className="w-5 h-5" style={{ color: theme.colors.accent }} />
 				<div className="flex-1">
 					<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-						Keyboard Shortcuts
+						{t('hamburger.keyboard_shortcuts')}
 					</div>
 					<div className="text-xs" style={{ color: theme.colors.textDim }}>
-						View all available shortcuts
+						{t('hamburger.keyboard_shortcuts_desc')}
 					</div>
 				</div>
 				<span
@@ -180,10 +182,10 @@ export function HamburgerMenuContent({
 				<Settings className="w-5 h-5" style={{ color: theme.colors.accent }} />
 				<div className="flex-1">
 					<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-						Settings
+						{t('hamburger.settings')}
 					</div>
 					<div className="text-xs" style={{ color: theme.colors.textDim }}>
-						Configure preferences
+						{t('hamburger.settings_desc')}
 					</div>
 				</div>
 				<span
@@ -203,10 +205,10 @@ export function HamburgerMenuContent({
 				<ScrollText className="w-5 h-5" style={{ color: theme.colors.accent }} />
 				<div className="flex-1">
 					<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-						System Logs
+						{t('hamburger.system_logs')}
 					</div>
 					<div className="text-xs" style={{ color: theme.colors.textDim }}>
-						View application logs
+						{t('hamburger.system_logs_desc')}
 					</div>
 				</div>
 				<span
@@ -226,10 +228,10 @@ export function HamburgerMenuContent({
 				<Cpu className="w-5 h-5" style={{ color: theme.colors.accent }} />
 				<div className="flex-1">
 					<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-						Process Monitor
+						{t('hamburger.process_monitor')}
 					</div>
 					<div className="text-xs" style={{ color: theme.colors.textDim }}>
-						View running processes
+						{t('hamburger.process_monitor_desc')}
 					</div>
 				</div>
 				<span
@@ -249,10 +251,10 @@ export function HamburgerMenuContent({
 				<BarChart3 className="w-5 h-5" style={{ color: theme.colors.accent }} />
 				<div className="flex-1">
 					<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-						Usage Dashboard
+						{t('hamburger.usage_dashboard')}
 					</div>
 					<div className="text-xs" style={{ color: theme.colors.textDim }}>
-						View usage analytics
+						{t('hamburger.usage_dashboard_desc')}
 					</div>
 				</div>
 				<span
@@ -272,10 +274,10 @@ export function HamburgerMenuContent({
 				<Music className="w-5 h-5" style={{ color: theme.colors.accent }} />
 				<div className="flex-1">
 					<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-						Maestro Symphony
+						{t('hamburger.symphony')}
 					</div>
 					<div className="text-xs" style={{ color: theme.colors.textDim }}>
-						Contribute to open source
+						{t('hamburger.symphony_desc')}
 					</div>
 				</div>
 				<span
@@ -296,10 +298,10 @@ export function HamburgerMenuContent({
 					<ScrollText className="w-5 h-5" style={{ color: theme.colors.accent }} />
 					<div className="flex-1">
 						<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-							Director's Notes
+							{t('hamburger.director_notes')}
 						</div>
 						<div className="text-xs" style={{ color: theme.colors.textDim }}>
-							Unified history & AI synopsis
+							{t('hamburger.director_notes_desc')}
 						</div>
 					</div>
 					{shortcuts.directorNotes && (
@@ -323,10 +325,10 @@ export function HamburgerMenuContent({
 				<Globe className="w-5 h-5" style={{ color: theme.colors.accent }} />
 				<div className="flex-1">
 					<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-						Maestro Website
+						{t('hamburger.website')}
 					</div>
 					<div className="text-xs" style={{ color: theme.colors.textDim }}>
-						Visit runmaestro.ai
+						{t('hamburger.website_desc')}
 					</div>
 				</div>
 				<ExternalLink className="w-4 h-4" style={{ color: theme.colors.textDim }} />
@@ -341,10 +343,10 @@ export function HamburgerMenuContent({
 				<BookOpen className="w-5 h-5" style={{ color: theme.colors.accent }} />
 				<div className="flex-1">
 					<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-						Documentation
+						{t('hamburger.documentation')}
 					</div>
 					<div className="text-xs" style={{ color: theme.colors.textDim }}>
-						See usage docs on docs.runmaestro.ai
+						{t('hamburger.documentation_desc')}
 					</div>
 				</div>
 				<ExternalLink className="w-4 h-4" style={{ color: theme.colors.textDim }} />
@@ -359,10 +361,10 @@ export function HamburgerMenuContent({
 				<Download className="w-5 h-5" style={{ color: theme.colors.accent }} />
 				<div className="flex-1">
 					<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-						Check for Updates
+						{t('hamburger.check_updates')}
 					</div>
 					<div className="text-xs" style={{ color: theme.colors.textDim }}>
-						Get the latest version
+						{t('hamburger.check_updates_desc')}
 					</div>
 				</div>
 			</button>
@@ -376,10 +378,10 @@ export function HamburgerMenuContent({
 				<Info className="w-5 h-5" style={{ color: theme.colors.accent }} />
 				<div className="flex-1">
 					<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-						About Maestro
+						{t('hamburger.about')}
 					</div>
 					<div className="text-xs" style={{ color: theme.colors.textDim }}>
-						Version, Credits, Stats
+						{t('hamburger.about_desc')}
 					</div>
 				</div>
 			</button>
