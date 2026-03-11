@@ -17,6 +17,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Bot, RefreshCw } from 'lucide-react';
 import type { Theme, AgentConfig } from '../../types';
 import { isBetaAgent } from '../../../shared/agentMetadata';
@@ -86,6 +87,7 @@ export function AgentCard({
 	isSupported = true,
 	showComingSoon,
 }: AgentCardProps) {
+	const { t } = useTranslation('settings');
 	const agentIsBeta = isBetaAgent(agent.id);
 
 	return (
@@ -119,7 +121,7 @@ export function AgentCard({
 									color: theme.colors.warning,
 								}}
 							>
-								Beta
+								{t('agent_selector.badge_beta')}
 							</span>
 						)}
 					</div>
@@ -138,14 +140,14 @@ export function AgentCard({
 										color: theme.colors.success,
 									}}
 								>
-									Available
+									{t('agent_selector.available')}
 								</span>
 							) : (
 								<span
 									className="text-xs px-2 py-0.5 rounded"
 									style={{ backgroundColor: theme.colors.error + '20', color: theme.colors.error }}
 								>
-									Not Found
+									{t('agent_selector.not_found')}
 								</span>
 							)}
 							{onRefresh && (
@@ -155,7 +157,7 @@ export function AgentCard({
 										onRefresh();
 									}}
 									className="p-1 rounded hover:bg-white/10 transition-colors"
-									title="Refresh detection"
+									title={t('agent_selector.refresh_detection')}
 									style={{ color: theme.colors.textDim }}
 								>
 									<RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
@@ -173,7 +175,7 @@ export function AgentCard({
 							className="text-xs px-2 py-0.5 rounded"
 							style={{ backgroundColor: theme.colors.warning + '20', color: theme.colors.warning }}
 						>
-							Coming Soon
+							{t('agent_selector.coming_soon')}
 						</span>
 					) : null}
 				</div>
@@ -203,6 +205,7 @@ export function AgentSelector({
 	showComingSoon,
 	supportedAgentIds,
 }: AgentSelectorProps) {
+	const { t } = useTranslation('settings');
 	// Apply filter if provided
 	const filteredAgents = filterFn ? agents.filter(filterFn) : agents;
 
@@ -219,8 +222,7 @@ export function AgentSelector({
 	if (filteredAgents.length === 0) {
 		return (
 			<div className="text-center py-4" style={{ color: theme.colors.textDim }}>
-				{emptyMessage ||
-					'No AI agents detected. Please install Claude Code or another supported agent.'}
+				{emptyMessage || t('agent_selector.no_agents')}
 			</div>
 		);
 	}
