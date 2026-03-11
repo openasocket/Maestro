@@ -17,6 +17,7 @@ import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import ReactMarkdown from 'react-markdown';
 import { Modal } from './ui/Modal';
 import { useSettings } from '../hooks';
+import { getActiveLocale } from '../utils/formatters';
 
 interface Release {
 	tag_name: string;
@@ -125,7 +126,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 	};
 
 	const formatDate = (dateString: string) => {
-		return new Date(dateString).toLocaleDateString('en-US', {
+		return new Date(dateString).toLocaleDateString(getActiveLocale(), {
 			year: 'numeric',
 			month: 'short',
 			day: 'numeric',

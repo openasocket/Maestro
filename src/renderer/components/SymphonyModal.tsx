@@ -59,6 +59,7 @@ import { useContributorStats, type Achievement } from '../hooks/symphony/useCont
 import { AgentCreationDialog, type AgentCreationConfig } from './AgentCreationDialog';
 import { generateProseStyles, createMarkdownComponents } from '../utils/markdownConfig';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
+import { getActiveLocale } from '../utils/formatters';
 
 // ============================================================================
 // Types
@@ -129,7 +130,7 @@ function formatDurationMs(ms: number): string {
 }
 
 function formatDate(isoString: string): string {
-	return new Date(isoString).toLocaleDateString('en-US', {
+	return new Date(isoString).toLocaleDateString(getActiveLocale(), {
 		month: 'short',
 		day: 'numeric',
 		year: 'numeric',

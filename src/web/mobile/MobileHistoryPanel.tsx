@@ -19,7 +19,7 @@ import { buildApiUrl } from '../utils/config';
 import { webLogger } from '../utils/logger';
 import { HistoryEntry } from '../../shared/types';
 import { stripAnsiCodes } from '../../shared/stringUtils';
-import { formatElapsedTime } from '../../shared/formatters';
+import { formatElapsedTime, getActiveLocale } from '../../shared/formatters';
 import { useSwipeGestures } from '../hooks/useSwipeGestures';
 
 /**
@@ -621,10 +621,10 @@ function HistoryDetailView({
 							}}
 						>
 							<span style={{ color: colors.accent }}>
-								In: {(entry.usageStats.inputTokens ?? 0).toLocaleString('en-US')}
+								In: {(entry.usageStats.inputTokens ?? 0).toLocaleString(getActiveLocale())}
 							</span>
 							<span style={{ color: colors.success }}>
-								Out: {(entry.usageStats.outputTokens ?? 0).toLocaleString('en-US')}
+								Out: {(entry.usageStats.outputTokens ?? 0).toLocaleString(getActiveLocale())}
 							</span>
 						</div>
 					)}

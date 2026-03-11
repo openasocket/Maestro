@@ -41,6 +41,7 @@ import { calculateContextDisplay } from '../utils/contextUsage';
 import { useAgentCapabilities, useHoverTooltip } from '../hooks';
 import { safeClipboardWrite } from '../utils/clipboard';
 import { useUIStore } from '../stores/uiStore';
+import { getActiveLocale } from '../utils/formatters';
 import { useSettingsStore } from '../stores/settingsStore';
 import type {
 	Session,
@@ -1326,7 +1327,7 @@ export const MainPanel = React.memo(
 																			>
 																				{(
 																					activeTab?.usageStats?.reasoningTokens ?? 0
-																				).toLocaleString('en-US')}
+																				).toLocaleString(getActiveLocale())}
 																			</span>
 																		</div>
 																	)}
@@ -1343,7 +1344,7 @@ export const MainPanel = React.memo(
 																		>
 																			{(
 																				activeTab?.usageStats?.cacheReadInputTokens ?? 0
-																			).toLocaleString('en-US')}
+																			).toLocaleString(getActiveLocale())}
 																		</span>
 																	</div>
 																	<div className="flex justify-between items-center">
@@ -1359,7 +1360,7 @@ export const MainPanel = React.memo(
 																		>
 																			{(
 																				activeTab?.usageStats?.cacheCreationInputTokens ?? 0
-																			).toLocaleString('en-US')}
+																			).toLocaleString(getActiveLocale())}
 																		</span>
 																	</div>
 
@@ -1380,7 +1381,7 @@ export const MainPanel = React.memo(
 																					className="text-xs font-mono font-bold"
 																					style={{ color: theme.colors.accent }}
 																				>
-																					{activeTabContextTokens.toLocaleString('en-US')}
+																					{activeTabContextTokens.toLocaleString(getActiveLocale())}
 																				</span>
 																			</div>
 																			<div className="flex justify-between items-center mt-1">
@@ -1394,7 +1395,7 @@ export const MainPanel = React.memo(
 																					className="text-xs font-mono font-bold"
 																					style={{ color: theme.colors.textMain }}
 																				>
-																					{activeTabContextWindow.toLocaleString('en-US')}
+																					{activeTabContextWindow.toLocaleString(getActiveLocale())}
 																				</span>
 																			</div>
 																			<div className="flex justify-between items-center mt-1">

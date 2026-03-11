@@ -6,7 +6,7 @@ import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { TEMPLATE_VARIABLES } from '../utils/templateVariables';
 import { useTemplateAutocomplete } from '../hooks';
 import { TemplateAutocompleteDropdown } from './TemplateAutocompleteDropdown';
-import { estimateTokenCount } from '../../shared/formatters';
+import { estimateTokenCount, getActiveLocale } from '../../shared/formatters';
 
 interface AgentPromptComposerModalProps {
 	isOpen: boolean;
@@ -255,8 +255,8 @@ export function AgentPromptComposerModal({
 					style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgSidebar }}
 				>
 					<div className="text-xs flex items-center gap-3" style={{ color: theme.colors.textDim }}>
-						<span>{value.length.toLocaleString('en-US')} characters</span>
-						<span>~{tokenCount.toLocaleString('en-US')} tokens</span>
+						<span>{value.length.toLocaleString(getActiveLocale())} characters</span>
+						<span>~{tokenCount.toLocaleString(getActiveLocale())} tokens</span>
 					</div>
 					<button
 						onClick={handleDone}

@@ -17,6 +17,7 @@ import { Play, CheckSquare, ListChecks, Target, Clock, Timer } from 'lucide-reac
 import type { Theme } from '../../types';
 import type { StatsTimeRange } from '../../hooks/stats/useStats';
 import { captureException } from '../../utils/sentry';
+import { getActiveLocale } from '../../utils/formatters';
 
 /**
  * Auto Run session data shape from the API
@@ -516,14 +517,17 @@ function parseLocalDate(dateStr: string): Date {
  * Format date for X-axis labels (short format)
  */
 function formatDateLabel(dateStr: string): string {
-	return parseLocalDate(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+	return parseLocalDate(dateStr).toLocaleDateString(getActiveLocale(), {
+		month: 'short',
+		day: 'numeric',
+	});
 }
 
 /**
  * Format date for tooltip (full format)
  */
 function formatFullDate(dateStr: string): string {
-	return parseLocalDate(dateStr).toLocaleDateString('en-US', {
+	return parseLocalDate(dateStr).toLocaleDateString(getActiveLocale(), {
 		weekday: 'short',
 		month: 'short',
 		day: 'numeric',

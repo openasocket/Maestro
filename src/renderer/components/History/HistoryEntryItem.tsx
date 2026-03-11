@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { Bot, User, ExternalLink, Check, X, Clock, Award } from 'lucide-react';
 import type { Theme, HistoryEntry, HistoryEntryType } from '../../types';
-import { formatElapsedTime } from '../../utils/formatters';
+import { formatElapsedTime, getActiveLocale } from '../../utils/formatters';
 import { stripMarkdown } from '../../utils/textProcessing';
 import { DoubleCheck } from './historyConstants';
 
@@ -48,12 +48,12 @@ const formatTime = (timestamp: number) => {
 	const isToday = date.toDateString() === now.toDateString();
 
 	if (isToday) {
-		return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+		return date.toLocaleTimeString(getActiveLocale(), { hour: '2-digit', minute: '2-digit' });
 	} else {
 		return (
-			date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
+			date.toLocaleDateString(getActiveLocale(), { month: 'short', day: 'numeric' }) +
 			' ' +
-			date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+			date.toLocaleTimeString(getActiveLocale(), { hour: '2-digit', minute: '2-digit' })
 		);
 	}
 };

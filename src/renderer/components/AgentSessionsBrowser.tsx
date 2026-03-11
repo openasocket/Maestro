@@ -31,7 +31,13 @@ import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { SessionActivityGraph, type ActivityEntry } from './SessionActivityGraph';
 import { SessionListItem } from './SessionListItem';
 import { ToolCallCard, getToolName } from './ToolCallCard';
-import { formatSize, formatNumber, formatTokens, formatRelativeTime } from '../utils/formatters';
+import {
+	formatSize,
+	formatNumber,
+	formatTokens,
+	formatRelativeTime,
+	getActiveLocale,
+} from '../utils/formatters';
 import {
 	useSessionViewer,
 	useSessionPagination,
@@ -1224,7 +1230,7 @@ export function AgentSessionsBrowser({
 										style={{ color: theme.colors.success }}
 									>
 										$
-										{stats.totalCost.toLocaleString('en-US', {
+										{stats.totalCost.toLocaleString(getActiveLocale(), {
 											minimumFractionDigits: 2,
 											maximumFractionDigits: 2,
 										})}

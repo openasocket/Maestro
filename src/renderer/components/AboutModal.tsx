@@ -16,7 +16,7 @@ import type { GlobalAgentStats } from '../../shared/types';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import pedramAvatar from '../assets/pedram-avatar.png';
 import { AchievementCard } from './AchievementCard';
-import { formatTokensCompact } from '../utils/formatters';
+import { formatTokensCompact, getActiveLocale } from '../utils/formatters';
 import { Modal } from './ui/Modal';
 
 interface AboutModalProps {
@@ -308,7 +308,7 @@ export function AboutModal({
 												style={{ color: theme.colors.success }}
 											>
 												$
-												{(globalStats.totalCostUsd ?? 0).toLocaleString('en-US', {
+												{(globalStats.totalCostUsd ?? 0).toLocaleString(getActiveLocale(), {
 													minimumFractionDigits: 2,
 													maximumFractionDigits: 2,
 												})}

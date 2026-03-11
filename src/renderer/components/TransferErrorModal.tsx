@@ -31,6 +31,7 @@ import type { Theme, ToolType } from '../types';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { Modal } from './ui/Modal';
 import { getAgentDisplayName } from '../services/contextGroomer';
+import { getActiveLocale } from '../utils/formatters';
 
 /**
  * Types of transfer errors that can occur
@@ -249,7 +250,7 @@ function formatDetails(error: TransferError): string | null {
 
 	if (details.estimatedTokens && details.targetLimit) {
 		parts.push(
-			`Context size: ~${details.estimatedTokens.toLocaleString('en-US')} tokens (limit: ${details.targetLimit.toLocaleString('en-US')})`
+			`Context size: ~${details.estimatedTokens.toLocaleString(getActiveLocale())} tokens (limit: ${details.targetLimit.toLocaleString(getActiveLocale())})`
 		);
 	}
 

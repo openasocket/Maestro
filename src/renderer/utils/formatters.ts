@@ -12,4 +12,5 @@ export {
 	formatActiveTime,
 	formatElapsedTime,
 	formatCost,
+	getActiveLocale,
 } from '../../shared/formatters';

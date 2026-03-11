@@ -3,7 +3,7 @@ import { X, PenLine, Send, ImageIcon, History, Eye, Keyboard, Brain, Pin } from 
 import type { Theme, ThinkingMode } from '../types';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
-import { estimateTokenCount } from '../../shared/formatters';
+import { estimateTokenCount, getActiveLocale } from '../../shared/formatters';
 import {
 	formatShortcutKeys,
 	formatEnterToSend,
@@ -382,7 +382,7 @@ export function PromptComposerModal({
 							style={{ color: theme.colors.textDim }}
 						>
 							<span>{value.length} characters</span>
-							<span>~{tokenCount.toLocaleString('en-US')} tokens</span>
+							<span>~{tokenCount.toLocaleString(getActiveLocale())} tokens</span>
 						</div>
 					</div>
 

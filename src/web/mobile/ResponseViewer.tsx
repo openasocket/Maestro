@@ -26,6 +26,7 @@ import type { LastResponsePreview } from '../hooks/useSessions';
 import { triggerHaptic, HAPTIC_PATTERNS } from './constants';
 import { webLogger } from '../utils/logger';
 import { stripAnsiCodes } from '../../shared/stringUtils';
+import { getActiveLocale } from '../../shared/formatters';
 
 /**
  * Represents a response item that can be navigated to
@@ -68,7 +69,7 @@ export interface ResponseViewerProps {
  */
 function formatTimestamp(timestamp: number): string {
 	const date = new Date(timestamp);
-	return date.toLocaleString('en-US', {
+	return date.toLocaleString(getActiveLocale(), {
 		month: 'short',
 		day: 'numeric',
 		hour: '2-digit',

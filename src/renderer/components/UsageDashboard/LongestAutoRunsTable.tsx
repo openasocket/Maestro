@@ -18,6 +18,7 @@ import { Trophy } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { StatsTimeRange } from '../../hooks/stats/useStats';
 import { captureException } from '../../utils/sentry';
+import { getActiveLocale } from '../../utils/formatters';
 
 /**
  * Auto Run session data shape from the API
@@ -102,7 +103,7 @@ function extractProjectName(path?: string): string {
  * Format date for table display
  */
 function formatDate(timestamp: number): string {
-	return new Date(timestamp).toLocaleDateString('en-US', {
+	return new Date(timestamp).toLocaleDateString(getActiveLocale(), {
 		month: 'short',
 		day: 'numeric',
 		year: 'numeric',
@@ -113,7 +114,7 @@ function formatDate(timestamp: number): string {
  * Format time for table display
  */
 function formatTime(timestamp: number): string {
-	return new Date(timestamp).toLocaleTimeString('en-US', {
+	return new Date(timestamp).toLocaleTimeString(getActiveLocale(), {
 		hour: 'numeric',
 		minute: '2-digit',
 	});
