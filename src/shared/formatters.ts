@@ -37,6 +37,35 @@ export function getActiveLocale(override?: string): string {
 }
 
 /**
+ * Get a localized time unit label using i18n translations.
+ * Falls back to a hardcoded English template if i18n is not initialized.
+ *
+ * @param key - Translation key under 'common:time.' (e.g., 'seconds_short')
+ * @param count - The numeric value to interpolate
+ * @param fallback - English fallback template with {{count}} placeholder
+ * @param locale - Optional BCP 47 locale override
+ * @returns Formatted time unit string (e.g., "5s", "10m")
+ */
+function getTimeUnitLabel(key: string, count: number, fallback: string, locale?: string): string {
+	try {
+		if (typeof i18n?.t === 'function') {
+			const opts: Record<string, unknown> = { count };
+			if (locale) opts.lng = locale;
+			const fullKey = `common:time.${key}`;
+			// Dynamic key constructed at runtime; cast to bypass strict typed-key checking
+			const result = (i18n.t as (key: string, options?: Record<string, unknown>) => string)(
+				fullKey,
+				opts
+			);
+			if (result && result !== fullKey) return result;
+		}
+	} catch {
+		// i18n not initialized, use fallback
+	}
+	return fallback.replace('{{count}}', String(count));
+}
+
+/**
  * Format a file size in bytes to a human-readable string.
  * Automatically scales to appropriate unit (B, KB, MB, GB, TB).
  *
@@ -137,51 +166,64 @@ export function formatRelativeTime(
 }
 
 /**
- * Format duration in milliseconds as compact display string.
- * Uses uppercase units (D, H, M) for consistency.
+ * Format duration in milliseconds as locale-aware compact display string.
+ * Uses uppercase units (D, H, M) for consistency in English;
+ * other locales use translated abbreviations via i18n.
  *
  * @param ms - Duration in milliseconds
+ * @param locale - Optional BCP 47 locale override (auto-detected from i18n if omitted)
  * @returns Formatted string (e.g., "1D", "2H 30M", "15M", "<1M")
  */
-export function formatActiveTime(ms: number): string {
+export function formatActiveTime(ms: number, locale?: string): string {
+	const activeLocale = getActiveLocale(locale);
 	const totalSeconds = Math.floor(ms / 1000);
 	const totalMinutes = Math.floor(totalSeconds / 60);
 	const totalHours = Math.floor(totalMinutes / 60);
 	const totalDays = Math.floor(totalHours / 24);
 
 	if (totalDays > 0) {
-		return `${totalDays}D`;
+		return getTimeUnitLabel('days_compact', totalDays, '{{count}}D', activeLocale);
 	} else if (totalHours > 0) {
 		const remainingMinutes = totalMinutes % 60;
 		if (remainingMinutes > 0) {
-			return `${totalHours}H ${remainingMinutes}M`;
+			const h = getTimeUnitLabel('hours_compact', totalHours, '{{count}}H', activeLocale);
+			const m = getTimeUnitLabel('minutes_compact', remainingMinutes, '{{count}}M', activeLocale);
+			return `${h} ${m}`;
 		}
-		return `${totalHours}H`;
+		return getTimeUnitLabel('hours_compact', totalHours, '{{count}}H', activeLocale);
 	} else if (totalMinutes > 0) {
-		return `${totalMinutes}M`;
+		return getTimeUnitLabel('minutes_compact', totalMinutes, '{{count}}M', activeLocale);
 	} else {
-		return '<1M';
+		return getTimeUnitLabel('less_than_minute', 0, '<1M', activeLocale);
 	}
 }
 
 /**
- * Format elapsed time in milliseconds as precise human-readable format.
+ * Format elapsed time in milliseconds as locale-aware precise human-readable format.
  * Shows milliseconds for sub-second, seconds for <1m, minutes+seconds for <1h,
  * and hours+minutes for longer durations.
  *
  * @param ms - Duration in milliseconds
+ * @param locale - Optional BCP 47 locale override (auto-detected from i18n if omitted)
  * @returns Formatted string (e.g., "500ms", "30s", "5m 12s", "1h 10m")
  */
-export function formatElapsedTime(ms: number): string {
-	if (ms < 1000) return `${ms}ms`;
+export function formatElapsedTime(ms: number, locale?: string): string {
+	const activeLocale = getActiveLocale(locale);
+	if (ms < 1000) return getTimeUnitLabel('milliseconds_short', ms, '{{count}}ms', activeLocale);
 	const seconds = Math.floor(ms / 1000);
-	if (seconds < 60) return `${seconds}s`;
+	if (seconds < 60) return getTimeUnitLabel('seconds_short', seconds, '{{count}}s', activeLocale);
 	const minutes = Math.floor(seconds / 60);
 	const remainingSeconds = seconds % 60;
-	if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
+	if (minutes < 60) {
+		const m = getTimeUnitLabel('minutes_short', minutes, '{{count}}m', activeLocale);
+		const s = getTimeUnitLabel('seconds_short', remainingSeconds, '{{count}}s', activeLocale);
+		return `${m} ${s}`;
+	}
 	const hours = Math.floor(minutes / 60);
 	const remainingMinutes = minutes % 60;
-	return `${hours}h ${remainingMinutes}m`;
+	const h = getTimeUnitLabel('hours_short', hours, '{{count}}h', activeLocale);
+	const mLabel = getTimeUnitLabel('minutes_short', remainingMinutes, '{{count}}m', activeLocale);
+	return `${h} ${mLabel}`;
 }
 
 /**

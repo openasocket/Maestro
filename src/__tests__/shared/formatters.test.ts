@@ -19,9 +19,31 @@ import {
 	getActiveLocale,
 } from '../../shared/formatters';
 
-// Mock i18n to avoid initializing the full i18n stack in tests
+// Mock i18n to avoid initializing the full i18n stack in tests.
+// Includes a basic t() that resolves English time unit translations.
+const timeTranslations: Record<string, string> = {
+	'common:time.milliseconds_short': '{{count}}ms',
+	'common:time.seconds_short': '{{count}}s',
+	'common:time.minutes_short': '{{count}}m',
+	'common:time.hours_short': '{{count}}h',
+	'common:time.days_short': '{{count}}d',
+	'common:time.minutes_compact': '{{count}}M',
+	'common:time.hours_compact': '{{count}}H',
+	'common:time.days_compact': '{{count}}D',
+	'common:time.less_than_minute': '<1M',
+};
 vi.mock('../../shared/i18n/config', () => ({
-	default: { language: 'en' },
+	default: {
+		language: 'en',
+		t: (key: string, opts?: Record<string, unknown>) => {
+			const template = timeTranslations[key];
+			if (!template) return key;
+			if (opts?.count !== undefined) {
+				return template.replace('{{count}}', String(opts.count));
+			}
+			return template;
+		},
+	},
 }));
 
 describe('shared/formatters', () => {
@@ -238,6 +260,14 @@ describe('shared/formatters', () => {
 			expect(formatActiveTime(24 * 60 * 60000)).toBe('1D');
 			expect(formatActiveTime(3 * 24 * 60 * 60000)).toBe('3D');
 		});
+
+		it('should accept optional locale parameter without breaking output', () => {
+			// Locale parameter is accepted but English output stays the same
+			expect(formatActiveTime(0, 'en')).toBe('<1M');
+			expect(formatActiveTime(5 * 60000, 'en')).toBe('5M');
+			expect(formatActiveTime(90 * 60000, 'en')).toBe('1H 30M');
+			expect(formatActiveTime(24 * 60 * 60000, 'en')).toBe('1D');
+		});
 	});
 
 	// ==========================================================================
@@ -268,6 +298,13 @@ describe('shared/formatters', () => {
 			expect(formatElapsedTime(60 * 60000)).toBe('1h 0m');
 			expect(formatElapsedTime(70 * 60000)).toBe('1h 10m');
 			expect(formatElapsedTime(2 * 60 * 60000 + 30 * 60000)).toBe('2h 30m');
+		});
+
+		it('should accept optional locale parameter without breaking output', () => {
+			expect(formatElapsedTime(500, 'en')).toBe('500ms');
+			expect(formatElapsedTime(5000, 'en')).toBe('5s');
+			expect(formatElapsedTime(90000, 'en')).toBe('1m 30s');
+			expect(formatElapsedTime(70 * 60000, 'en')).toBe('1h 10m');
 		});
 	});
 

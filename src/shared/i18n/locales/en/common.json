@@ -31,5 +31,16 @@
 	"export": "Export",
 	"refresh": "Refresh",
 	"settings": "Settings",
-	"help": "Help"
+	"help": "Help",
+	"time": {
+		"milliseconds_short": "{{count}}ms",
+		"seconds_short": "{{count}}s",
+		"minutes_short": "{{count}}m",
+		"hours_short": "{{count}}h",
+		"days_short": "{{count}}d",
+		"minutes_compact": "{{count}}M",
+		"hours_compact": "{{count}}H",
+		"days_compact": "{{count}}D",
+		"less_than_minute": "<1M"
+	}
 }
