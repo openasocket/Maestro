@@ -7,7 +7,7 @@
  * and provides options to view, clear, or retry them.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { OfflineQueueBanner } from '../../../web/mobile/OfflineQueueBanner';
@@ -49,6 +49,10 @@ vi.mock('../../../web/components/ThemeProvider', () => ({
 
 // Track haptic calls
 const mockTriggerHaptic = vi.fn();
+
+vi.mock('../../../shared/i18n/config', () => ({
+	default: { language: 'en' },
+}));
 
 vi.mock('../../../web/mobile/constants', () => ({
 	triggerHaptic: (...args: unknown[]) => mockTriggerHaptic(...args),
@@ -183,86 +187,75 @@ describe('OfflineQueueBanner', () => {
 	// ============================================================
 
 	describe('formatRelativeTime (tested via component)', () => {
-		// Freeze time to prevent Date.now() drift during full test suite runs
-		const frozenNow = 1710000000000; // fixed epoch ms
-
-		beforeEach(() => {
-			vi.useFakeTimers({ now: frozenNow });
-		});
-
-		afterEach(() => {
-			vi.useRealTimers();
-		});
-
-		it('shows "just now" for recent timestamps', () => {
-			const queue = [createQueuedCommand({ timestamp: frozenNow - 1000 })]; // 1 second ago
+		it('shows "now" for recent timestamps', () => {
+			const queue = [createQueuedCommand({ timestamp: Date.now() - 1000 })]; // 1 second ago
 			render(<OfflineQueueBanner {...defaultProps} queue={queue} />);
 
 			const toggleButton = screen.getByRole('button', { name: /command.* queued/i });
 			fireEvent.click(toggleButton);
 
-			expect(screen.getByText(/just now/i)).toBeInTheDocument();
+			expect(screen.getByText('now')).toBeInTheDocument();
 		});
 
-		it('shows "just now" for timestamps less than 60 seconds ago', () => {
-			const queue = [createQueuedCommand({ timestamp: frozenNow - 59000 })]; // 59 seconds ago
+		it('shows "now" for timestamps less than 60 seconds ago', () => {
+			const queue = [createQueuedCommand({ timestamp: Date.now() - 59000 })]; // 59 seconds ago
 			render(<OfflineQueueBanner {...defaultProps} queue={queue} />);
 
 			const toggleButton = screen.getByRole('button', { name: /command.* queued/i });
 			fireEvent.click(toggleButton);
 
-			expect(screen.getByText(/just now/i)).toBeInTheDocument();
+			expect(screen.getByText('now')).toBeInTheDocument();
 		});
 
 		it('shows minutes ago for timestamps 1-59 minutes ago', () => {
-			const queue = [createQueuedCommand({ timestamp: frozenNow - 120000 })]; // 2 minutes ago
+			const queue = [createQueuedCommand({ timestamp: Date.now() - 120000 })]; // 2 minutes ago
 			render(<OfflineQueueBanner {...defaultProps} queue={queue} />);
 
 			const toggleButton = screen.getByRole('button', { name: /command.* queued/i });
 			fireEvent.click(toggleButton);
 
-			expect(screen.getByText(/2m ago/)).toBeInTheDocument();
+			expect(screen.getByText(/2 minutes ago/)).toBeInTheDocument();
 		});
 
-		it('shows "1m ago" at exactly 60 seconds', () => {
-			const queue = [createQueuedCommand({ timestamp: frozenNow - 60000 })]; // 1 minute ago
+		it('shows "1 minute ago" at exactly 60 seconds', () => {
+			const queue = [createQueuedCommand({ timestamp: Date.now() - 60000 })]; // 1 minute ago
 			render(<OfflineQueueBanner {...defaultProps} queue={queue} />);
 
 			const toggleButton = screen.getByRole('button', { name: /command.* queued/i });
 			fireEvent.click(toggleButton);
 
-			expect(screen.getByText(/1m ago/)).toBeInTheDocument();
+			expect(screen.getByText(/1 minute ago/)).toBeInTheDocument();
 		});
 
 		it('shows hours ago for timestamps 1+ hours ago', () => {
-			const queue = [createQueuedCommand({ timestamp: frozenNow - 3600000 })]; // 1 hour ago
+			const queue = [createQueuedCommand({ timestamp: Date.now() - 3600000 })]; // 1 hour ago
 			render(<OfflineQueueBanner {...defaultProps} queue={queue} />);
 
 			const toggleButton = screen.getByRole('button', { name: /command.* queued/i });
 			fireEvent.click(toggleButton);
 
-			expect(screen.getByText(/1h ago/)).toBeInTheDocument();
+			expect(screen.getByText(/1 hour ago/)).toBeInTheDocument();
 		});
 
-		it('shows "2h ago" for 2 hour old timestamp', () => {
-			const queue = [createQueuedCommand({ timestamp: frozenNow - 7200000 })]; // 2 hours ago
+		it('shows "2 hours ago" for 2 hour old timestamp', () => {
+			const queue = [createQueuedCommand({ timestamp: Date.now() - 7200000 })]; // 2 hours ago
 			render(<OfflineQueueBanner {...defaultProps} queue={queue} />);
 
 			const toggleButton = screen.getByRole('button', { name: /command.* queued/i });
 			fireEvent.click(toggleButton);
 
-			expect(screen.getByText(/2h ago/)).toBeInTheDocument();
+			expect(screen.getByText(/2 hours ago/)).toBeInTheDocument();
 		});
 
 		it('handles very old timestamps', () => {
-			const queue = [createQueuedCommand({ timestamp: frozenNow - 86400000 })]; // 24 hours ago
+			const queue = [createQueuedCommand({ timestamp: Date.now() - 86400000 })]; // 24 hours ago
 			render(<OfflineQueueBanner {...defaultProps} queue={queue} />);
 
 			const toggleButton = screen.getByRole('button', { name: /command.* queued/i });
 			fireEvent.click(toggleButton);
 
-			// 24 hours = 1 day, so formatRelativeTime returns "1d ago"
-			expect(screen.getByText(/1d ago/)).toBeInTheDocument();
+			// 24 hours = 1 day, so formatRelativeTime returns "yesterday"
+			expect(screen.getByText(/yesterday/)).toBeInTheDocument();
 		});
 	});
 
@@ -658,7 +651,7 @@ describe('OfflineQueueBanner', () => {
 			const toggleButton = screen.getByRole('button', { name: /command.* queued/i });
 			fireEvent.click(toggleButton);
 
-			expect(screen.getByText(/5m ago/)).toBeInTheDocument();
+			expect(screen.getByText(/5 minutes ago/)).toBeInTheDocument();
 		});
 
 		it('displays attempt count when attempts > 0', () => {
@@ -993,8 +986,8 @@ describe('OfflineQueueBanner', () => {
 			const toggleButton = screen.getByRole('button', { name: /command.* queued/i });
 			fireEvent.click(toggleButton);
 
-			// Should show "just now" for negative time difference
-			expect(screen.getByText(/just now/i)).toBeInTheDocument();
+			// Should show "now" for negative time difference
+			expect(screen.getByText('now')).toBeInTheDocument();
 		});
 
 		it('handles zero timestamp', () => {

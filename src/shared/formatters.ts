@@ -3,11 +3,12 @@
  * These pure functions are used by both renderer (desktop) and web (mobile) code.
  *
  * Functions:
+ * - getActiveLocale: Get current locale from i18n (auto-detected)
  * - formatSize: File sizes (B, KB, MB, GB, TB)
  * - formatNumber: Large numbers with k/M/B suffixes
  * - formatTokens: Token counts with K/M/B suffixes (~prefix)
  * - formatTokensCompact: Token counts without ~prefix
- * - formatRelativeTime: Relative timestamps ("5m ago", "2h ago")
+ * - formatRelativeTime: Locale-aware relative timestamps ("5 minutes ago", "hace 5 minutos")
  * - formatActiveTime: Duration display (1D, 2H 30M, <1M)
  * - formatElapsedTime: Precise elapsed time (1h 10m, 30s, 500ms)
  * - formatElapsedTimeColon: Timer-style elapsed time (mm:ss or hh:mm:ss)
@@ -16,6 +17,24 @@
  * - truncatePath: Truncate file paths for display (.../<parent>/<current>)
  * - truncateCommand: Truncate command text for display with ellipsis
  */
+
+import i18n from './i18n/config';
+
+/**
+ * Get the currently active locale from i18n, falling back to 'en'.
+ * Used by locale-aware formatters to auto-detect the user's language.
+ *
+ * @param override - Optional locale override; if provided, returned as-is
+ * @returns BCP 47 locale string (e.g., 'en', 'es', 'fr')
+ */
+export function getActiveLocale(override?: string): string {
+	if (override) return override;
+	try {
+		return i18n?.language || 'en';
+	} catch {
+		return 'en';
+	}
+}
 
 /**
  * Format a file size in bytes to a human-readable string.
@@ -74,13 +93,20 @@ export function formatTokensCompact(tokens: number): string {
 }
 
 /**
- * Format a date/timestamp as relative time (e.g., "just now", "5m ago", "2h ago").
- * Accepts either a timestamp (number of milliseconds) or a date string.
+ * Format a date/timestamp as locale-aware relative time.
+ * Uses Intl.RelativeTimeFormat for localized output (e.g., "5 minutes ago" in English,
+ * "hace 5 minutos" in Spanish, "5 分钟前" in Chinese).
+ *
+ * Thresholds: <1m → "now", <1h → minutes, <24h → hours, <7d → days, ≥7d → formatted date.
  *
  * @param dateOrTimestamp - Either a Date object, timestamp in milliseconds, or ISO date string
- * @returns Relative time string (e.g., "just now", "5m ago", "3d ago", or localized date)
+ * @param locale - Optional BCP 47 locale override (auto-detected from i18n if omitted)
+ * @returns Locale-aware relative time string
  */
-export function formatRelativeTime(dateOrTimestamp: Date | number | string): string {
+export function formatRelativeTime(
+	dateOrTimestamp: Date | number | string,
+	locale?: string
+): string {
 	let timestamp: number;
 
 	if (typeof dateOrTimestamp === 'number') {
@@ -91,18 +117,23 @@ export function formatRelativeTime(dateOrTimestamp: Date | number | string): str
 		timestamp = dateOrTimestamp.getTime();
 	}
 
+	const activeLocale = getActiveLocale(locale);
 	const now = Date.now();
 	const diffMs = now - timestamp;
 	const diffMins = Math.floor(diffMs / 60000);
 	const diffHours = Math.floor(diffMins / 60);
 	const diffDays = Math.floor(diffHours / 24);
 
-	if (diffMins < 1) return 'just now';
-	if (diffMins < 60) return `${diffMins}m ago`;
-	if (diffHours < 24) return `${diffHours}h ago`;
-	if (diffDays < 7) return `${diffDays}d ago`;
-	// Show compact date format (e.g., "Dec 3") for older dates
-	return new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+	const rtf = new Intl.RelativeTimeFormat(activeLocale, { numeric: 'auto' });
+
+	if (diffMins < 1) return rtf.format(0, 'second');
+	if (diffMins < 60) return rtf.format(-diffMins, 'minute');
+	if (diffHours < 24) return rtf.format(-diffHours, 'hour');
+	if (diffDays < 7) return rtf.format(-diffDays, 'day');
+	// Show locale-aware date format (e.g., "Dec 3" in English) for older dates
+	return new Intl.DateTimeFormat(activeLocale, { month: 'short', day: 'numeric' }).format(
+		new Date(timestamp)
+	);
 }
 
 /**

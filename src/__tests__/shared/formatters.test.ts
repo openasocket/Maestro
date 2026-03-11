@@ -16,7 +16,13 @@ import {
 	estimateTokenCount,
 	truncatePath,
 	truncateCommand,
+	getActiveLocale,
 } from '../../shared/formatters';
+
+// Mock i18n to avoid initializing the full i18n stack in tests
+vi.mock('../../shared/i18n/config', () => ({
+	default: { language: 'en' },
+}));
 
 describe('shared/formatters', () => {
 	// ==========================================================================
@@ -131,32 +137,46 @@ describe('shared/formatters', () => {
 	});
 
 	// ==========================================================================
-	// formatRelativeTime tests
+	// getActiveLocale tests
+	// ==========================================================================
+	describe('getActiveLocale', () => {
+		it('should return override locale when provided', () => {
+			expect(getActiveLocale('fr')).toBe('fr');
+			expect(getActiveLocale('es')).toBe('es');
+		});
+
+		it('should return i18n language when no override', () => {
+			expect(getActiveLocale()).toBe('en');
+		});
+	});
+
+	// ==========================================================================
+	// formatRelativeTime tests (locale-aware via Intl.RelativeTimeFormat)
 	// ==========================================================================
 	describe('formatRelativeTime', () => {
 		const now = Date.now();
 
-		it('should format just now for < 1 minute', () => {
-			expect(formatRelativeTime(now)).toBe('just now');
-			expect(formatRelativeTime(now - 30000)).toBe('just now'); // 30 seconds
+		it('should format "now" for < 1 minute', () => {
+			expect(formatRelativeTime(now)).toBe('now');
+			expect(formatRelativeTime(now - 30000)).toBe('now'); // 30 seconds
 		});
 
 		it('should format minutes ago', () => {
-			expect(formatRelativeTime(now - 60000)).toBe('1m ago');
-			expect(formatRelativeTime(now - 5 * 60000)).toBe('5m ago');
-			expect(formatRelativeTime(now - 59 * 60000)).toBe('59m ago');
+			expect(formatRelativeTime(now - 60000)).toBe('1 minute ago');
+			expect(formatRelativeTime(now - 5 * 60000)).toBe('5 minutes ago');
+			expect(formatRelativeTime(now - 59 * 60000)).toBe('59 minutes ago');
 		});
 
 		it('should format hours ago', () => {
-			expect(formatRelativeTime(now - 60 * 60000)).toBe('1h ago');
-			expect(formatRelativeTime(now - 5 * 60 * 60000)).toBe('5h ago');
-			expect(formatRelativeTime(now - 23 * 60 * 60000)).toBe('23h ago');
+			expect(formatRelativeTime(now - 60 * 60000)).toBe('1 hour ago');
+			expect(formatRelativeTime(now - 5 * 60 * 60000)).toBe('5 hours ago');
+			expect(formatRelativeTime(now - 23 * 60 * 60000)).toBe('23 hours ago');
 		});
 
 		it('should format days ago', () => {
-			expect(formatRelativeTime(now - 24 * 60 * 60000)).toBe('1d ago');
-			expect(formatRelativeTime(now - 5 * 24 * 60 * 60000)).toBe('5d ago');
-			expect(formatRelativeTime(now - 6 * 24 * 60 * 60000)).toBe('6d ago');
+			expect(formatRelativeTime(now - 24 * 60 * 60000)).toBe('yesterday');
+			expect(formatRelativeTime(now - 5 * 24 * 60 * 60000)).toBe('5 days ago');
+			expect(formatRelativeTime(now - 6 * 24 * 60 * 60000)).toBe('6 days ago');
 		});
 
 		it('should format older dates as localized date', () => {
@@ -167,13 +187,24 @@ describe('shared/formatters', () => {
 		});
 
 		it('should accept Date objects', () => {
-			expect(formatRelativeTime(new Date(now))).toBe('just now');
-			expect(formatRelativeTime(new Date(now - 60000))).toBe('1m ago');
+			expect(formatRelativeTime(new Date(now))).toBe('now');
+			expect(formatRelativeTime(new Date(now - 60000))).toBe('1 minute ago');
 		});
 
 		it('should accept ISO date strings', () => {
-			expect(formatRelativeTime(new Date(now).toISOString())).toBe('just now');
-			expect(formatRelativeTime(new Date(now - 60000).toISOString())).toBe('1m ago');
+			expect(formatRelativeTime(new Date(now).toISOString())).toBe('now');
+			expect(formatRelativeTime(new Date(now - 60000).toISOString())).toBe('1 minute ago');
+		});
+
+		it('should respect locale parameter for Spanish', () => {
+			expect(formatRelativeTime(now - 5 * 60000, 'es')).toBe('hace 5 minutos');
+		});
+
+		it('should respect locale parameter for French', () => {
+			const result = formatRelativeTime(now - 60 * 60000, 'fr');
+			expect(result).toContain('1');
+			// French: "il y a 1 heure"
+			expect(result.length).toBeGreaterThan(0);
 		});
 	});
 
