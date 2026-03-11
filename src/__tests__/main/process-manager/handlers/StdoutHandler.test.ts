@@ -389,32 +389,34 @@ describe('StdoutHandler', () => {
 			// Reproduces the bug where Codex tool calls cause an interim flush,
 			// then a second agent_message with @mentions arrives but the buffer
 			// is never updated because resultEmitted was already true.
+			const parseObject = (parsed: any) => {
+				if (parsed.type === 'agent') {
+					return { type: 'result', text: parsed.text };
+				}
+				if (parsed.type === 'done') {
+					return {
+						type: 'usage',
+						usage: {
+							inputTokens: 100,
+							outputTokens: 50,
+							cacheReadTokens: 0,
+							cacheCreationTokens: 0,
+							contextWindow: 400000,
+						},
+					};
+				}
+				return { type: 'system' };
+			};
 			const parser = {
 				agentId: 'codex',
-				parseJsonLine: vi.fn((line: string) => {
-					const parsed = JSON.parse(line);
-					if (parsed.type === 'agent') {
-						return { type: 'result', text: parsed.text };
-					}
-					if (parsed.type === 'done') {
-						return {
-							type: 'usage',
-							usage: {
-								inputTokens: 100,
-								outputTokens: 50,
-								cacheReadTokens: 0,
-								cacheCreationTokens: 0,
-								contextWindow: 400000,
-							},
-						};
-					}
-					return { type: 'system' };
-				}),
+				parseJsonLine: vi.fn((line: string) => parseObject(JSON.parse(line))),
+				parseJsonObject: vi.fn((parsed: any) => parseObject(parsed)),
 				extractUsage: vi.fn((event: any) => event.usage || null),
 				extractSessionId: vi.fn(() => null),
 				extractSlashCommands: vi.fn(() => null),
 				isResultMessage: vi.fn((event: any) => event.type === 'result' && !!event.text),
 				detectErrorFromLine: vi.fn(() => null),
+				detectErrorFromParsed: vi.fn(() => null),
 			};
 
 			const { handler, bufferManager, sessionId, proc } = createTestContext({
@@ -1149,30 +1151,35 @@ describe('StdoutHandler', () => {
 		 */
 
 		function createSessionIdOutputParser(sessionIdToReturn: string | null) {
+			const parseObject = (parsed: any) => {
+				if (!parsed || typeof parsed !== 'object') return null;
+				return {
+					type:
+						parsed.type === 'system' && parsed.subtype === 'init'
+							? 'init'
+							: parsed.type || 'message',
+					text: parsed.result || parsed.text,
+					sessionId: parsed.session_id || undefined,
+					isPartial: parsed.type === 'assistant',
+					slashCommands: parsed.slash_commands,
+				};
+			};
 			return {
 				agentId: 'claude-code',
 				parseJsonLine: vi.fn((line: string) => {
 					try {
-						const parsed = JSON.parse(line);
-						return {
-							type:
-								parsed.type === 'system' && parsed.subtype === 'init'
-									? 'init'
-									: parsed.type || 'message',
-							text: parsed.result || parsed.text,
-							sessionId: parsed.session_id || undefined,
-							isPartial: parsed.type === 'assistant',
-							slashCommands: parsed.slash_commands,
-						};
+						return parseObject(JSON.parse(line));
 					} catch {
 						return null;
 					}
 				}),
+				parseJsonObject: vi.fn((parsed: any) => parseObject(parsed)),
 				extractUsage: vi.fn(() => null),
 				extractSessionId: vi.fn((event: any) => event?.sessionId || sessionIdToReturn),
 				extractSlashCommands: vi.fn((event: any) => event?.slashCommands || null),
 				isResultMessage: vi.fn((event: any) => event?.type === 'result'),
 				detectErrorFromLine: vi.fn(() => null),
+				detectErrorFromParsed: vi.fn(() => null),
 			};
 		}
 

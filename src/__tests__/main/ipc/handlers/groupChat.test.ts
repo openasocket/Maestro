@@ -77,6 +77,16 @@ vi.mock('../../../../main/agent-detector', () => ({
 	AgentDetector: vi.fn(),
 }));
 
+// Mock validation to pass through (we're testing handler logic, not validation)
+vi.mock('../../../../main/group-chat/validation', () => ({
+	validateGroupChatId: vi.fn((id: unknown) => String(id)),
+	validateParticipantName: vi.fn((name: unknown) => String(name).trim()),
+	validateMessageContent: vi.fn((content: unknown) => String(content)),
+	validateBase64Image: vi.fn((data: unknown) => String(data)),
+	validateCustomArgs: vi.fn((args: unknown) => (args == null ? undefined : String(args))),
+	sanitizeCustomEnvVars: vi.fn((vars: unknown) => (vars == null ? undefined : vars)),
+}));
+
 // Mock the logger
 vi.mock('../../../../main/utils/logger', () => ({
 	logger: {
