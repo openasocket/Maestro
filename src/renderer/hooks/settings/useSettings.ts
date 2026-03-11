@@ -33,6 +33,8 @@ import {
 	selectIsLeaderboardRegistered,
 } from '../../stores/settingsStore';
 import type { DocumentGraphLayoutType } from '../../stores/settingsStore';
+import { RTL_LANGUAGES } from '../../../shared/i18n/config';
+import type { SupportedLanguage } from '../../../shared/i18n/config';
 
 export interface UseSettingsReturn {
 	// Loading state
@@ -229,6 +231,10 @@ export interface UseSettingsReturn {
 	colorBlindMode: boolean;
 	setColorBlindMode: (value: boolean) => void;
 
+	// Language / i18n
+	language: string;
+	setLanguage: (value: string) => void;
+
 	// Document Graph settings
 	documentGraphShowExternalLinks: boolean;
 	setDocumentGraphShowExternalLinks: (value: boolean) => void;
@@ -338,6 +344,16 @@ export function useSettings(): UseSettingsReturn {
 			document.documentElement.style.fontSize = `${store.fontSize}px`;
 		}
 	}, [store.fontSize, store.settingsLoaded]);
+
+	// Apply language attributes to HTML root element for i18n and RTL support
+	useEffect(() => {
+		if (store.settingsLoaded) {
+			document.documentElement.lang = store.language;
+			document.documentElement.dir = RTL_LANGUAGES.includes(store.language as SupportedLanguage)
+				? 'rtl'
+				: 'ltr';
+		}
+	}, [store.language, store.settingsLoaded]);
 
 	return {
 		...store,
