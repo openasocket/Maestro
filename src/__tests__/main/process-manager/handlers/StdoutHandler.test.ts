@@ -417,6 +417,9 @@ describe('StdoutHandler', () => {
 					if (parsed.type === 'agent') {
 						return { type: 'result', text: parsed.text };
 					}
+					if (parsed.type === 'reasoning') {
+						return { type: 'text', text: parsed.text, isPartial: true };
+					}
 					if (parsed.type === 'done') {
 						return {
 							type: 'usage',
@@ -428,6 +431,9 @@ describe('StdoutHandler', () => {
 								contextWindow: 400000,
 							},
 						};
+					}
+					if (parsed.type === 'turn.started') {
+						return { type: 'system', raw: { type: 'turn.started' } };
 					}
 					return { type: 'system' };
 				}),
