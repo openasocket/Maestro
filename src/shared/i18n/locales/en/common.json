@@ -36,6 +36,19 @@
 	"items_count_other": "{{count}} items",
 	"agents_running_one": "{{count}} agent running",
 	"agents_running_other": "{{count}} agents running",
+	"status": {
+		"no_active_session": "No active Claude session",
+		"ready": "Ready and waiting",
+		"thinking": "Agent is thinking",
+		"connecting": "Attempting to establish connection",
+		"no_connection": "No connection with agent",
+		"waiting_input": "Waiting for input",
+		"running_playbook": "CLI: Running playbook \"{{playbookName}}\"",
+		"unread_messages": "Unread messages",
+		"auto_run_active": "Auto Run active",
+		"ssh_remote": "Running on remote host via SSH",
+		"error_prefix": "Error: {{message}}"
+	},
 	"time": {
 		"milliseconds_short": "{{count}}ms",
 		"seconds_short": "{{count}}s",
