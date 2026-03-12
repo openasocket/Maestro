@@ -1028,6 +1028,11 @@
 		"confirm_title": "Are you sure?",
 		"confirm_message": "This cannot be undone."
 	},
+	"kill_process": {
+		"title": "Force Kill Process",
+		"message": "This will immediately terminate the running agent process. The current task will be interrupted mid-execution and may leave incomplete changes. Are you sure?",
+		"confirm_button": "Kill Process"
+	},
 	"playbook_delete": {
 		"title": "Delete Playbook",
 		"message": "This cannot be undone.",
