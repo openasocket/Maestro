@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { RefreshCw, RotateCcw, FolderOpen, AlertTriangle, Bot } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { Theme, AgentConfig } from '../../types';
 import { useLayerStack } from '../../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
@@ -55,6 +56,7 @@ export function WizardResumeModal({
 	onStartFresh,
 	onClose,
 }: WizardResumeModalProps) {
+	const { t } = useTranslation('modals');
 	const { registerLayer, unregisterLayer, updateLayerHandler } = useLayerStack();
 	const layerIdRef = useRef<string>();
 	const resumeButtonRef = useRef<HTMLButtonElement>(null);
@@ -206,10 +208,10 @@ export function WizardResumeModal({
 				{/* Header */}
 				<div className="p-5 border-b" style={{ borderColor: theme.colors.border }}>
 					<h2 className="text-lg font-semibold" style={{ color: theme.colors.textMain }}>
-						Resume Setup?
+						{t('wizard_resume.title')}
 					</h2>
 					<p className="text-sm mt-1" style={{ color: theme.colors.textDim }}>
-						You have an incomplete project setup in progress.
+						{t('wizard_resume.message')}
 					</p>
 				</div>
 
@@ -219,10 +221,13 @@ export function WizardResumeModal({
 					<div>
 						<div className="flex justify-between mb-2">
 							<span className="text-xs font-medium" style={{ color: theme.colors.textDim }}>
-								Progress
+								{t('wizard_resume.progress_label')}
 							</span>
 							<span className="text-xs font-medium" style={{ color: theme.colors.accent }}>
-								Step {STEP_INDEX[resumeState.currentStep]} of {WIZARD_TOTAL_STEPS}
+								{t('wizard_resume.step_of', {
+									step: STEP_INDEX[resumeState.currentStep],
+									total: WIZARD_TOTAL_STEPS,
+								})}
 							</span>
 						</div>
 						<div
@@ -253,7 +258,7 @@ export function WizardResumeModal({
 							</div>
 							<div className="flex-1 min-w-0">
 								<p className="text-xs" style={{ color: theme.colors.textDim }}>
-									Current Step
+									{t('wizard_resume.current_step')}
 								</p>
 								<p
 									className="text-sm font-medium truncate"
@@ -269,10 +274,10 @@ export function WizardResumeModal({
 								<div className="w-8" />
 								<div>
 									<p className="text-xs" style={{ color: theme.colors.textDim }}>
-										Project Name
+										{t('wizard_resume.project_name')}
 									</p>
 									<p className="text-sm" style={{ color: theme.colors.textMain }}>
-										{resumeState.agentName || 'Unnamed Project'}
+										{resumeState.agentName || t('wizard_resume.unnamed_project')}
 									</p>
 								</div>
 							</div>
@@ -284,7 +289,7 @@ export function WizardResumeModal({
 								<div className="min-w-0 flex-1">
 									<div className="flex items-center gap-2">
 										<p className="text-xs" style={{ color: theme.colors.textDim }}>
-											AI Agent
+											{t('wizard_resume.ai_agent')}
 										</p>
 										{isValidating && (
 											<div
@@ -318,7 +323,7 @@ export function WizardResumeModal({
 												style={{ color: theme.colors.warning }}
 											/>
 											<p className="text-xs" style={{ color: theme.colors.warning }}>
-												Agent no longer available — you'll need to select a different agent
+												{t('wizard_resume.agent_unavailable')}
 											</p>
 										</div>
 									)}
@@ -332,7 +337,7 @@ export function WizardResumeModal({
 								<div className="min-w-0 flex-1">
 									<div className="flex items-center gap-2">
 										<p className="text-xs" style={{ color: theme.colors.textDim }}>
-											Directory
+											{t('wizard_resume.directory_label')}
 										</p>
 										{isValidating && (
 											<div
@@ -357,7 +362,7 @@ export function WizardResumeModal({
 												style={{ color: theme.colors.warning }}
 											/>
 											<p className="text-xs" style={{ color: theme.colors.warning }}>
-												Directory no longer exists — you'll need to select a new location
+												{t('wizard_resume.directory_unavailable')}
 											</p>
 										</div>
 									)}
@@ -370,7 +375,7 @@ export function WizardResumeModal({
 								<div className="w-8" />
 								<div>
 									<p className="text-xs" style={{ color: theme.colors.textDim }}>
-										Conversation Progress
+										{t('wizard_resume.conversation_progress')}
 									</p>
 									<p className="text-sm" style={{ color: theme.colors.textMain }}>
 										{resumeState.conversationHistory.length} messages exchanged
@@ -410,12 +415,12 @@ export function WizardResumeModal({
 										borderTopColor: 'transparent',
 									}}
 								/>
-								Checking...
+								{t('wizard_resume.checking')}
 							</>
 						) : (
 							<>
 								<RefreshCw className="w-4 h-4" />
-								Resume Where I Left Off
+								{t('wizard_resume.resume_button')}
 							</>
 						)}
 					</button>
@@ -434,7 +439,7 @@ export function WizardResumeModal({
 						}}
 					>
 						<RotateCcw className="w-4 h-4" />
-						Start Fresh
+						{t('wizard_resume.start_fresh_button')}
 					</button>
 
 					{/* Keyboard hints */}

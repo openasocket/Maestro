@@ -31,8 +31,10 @@ export interface TNotifyOptions extends Omit<Toast, 'id' | 'timestamp' | 'title'
  * @returns The generated toast ID (from notifyToast)
  */
 export function tNotify({ titleKey, messageKey, values, ...rest }: TNotifyOptions): string {
-	const title = i18n.t(titleKey, values);
-	const message = i18n.t(messageKey, values);
+	 
+	const title = (i18n as any).t(titleKey, values) as string;
+	 
+	const message = (i18n as any).t(messageKey, values) as string;
 
 	return notifyToast({ title, message, ...rest });
 }

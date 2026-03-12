@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Copy, Check, Trash2 } from 'lucide-react';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
@@ -26,6 +27,7 @@ export function LightboxModal({
 	onDelete,
 	theme,
 }: LightboxModalProps) {
+	const { t } = useTranslation('modals');
 	const lightboxRef = useRef<HTMLDivElement>(null);
 	const currentIndex = stagedImages.indexOf(image);
 	const canNavigate = stagedImages.length > 1;
@@ -66,7 +68,7 @@ export function LightboxModal({
 			blocksLowerLayers: true,
 			capturesFocus: true,
 			focusTrap: 'none',
-			ariaLabel: 'Image Lightbox',
+			ariaLabel: t('lightbox.aria_label'),
 			onEscape: onClose,
 			allowClickOutside: true,
 		});
@@ -183,7 +185,7 @@ export function LightboxModal({
 			tabIndex={-1}
 			role="dialog"
 			aria-modal="true"
-			aria-label="Image Lightbox"
+			aria-label={t('lightbox.aria_label')}
 		>
 			{canNavigate && (
 				<button
@@ -198,7 +200,7 @@ export function LightboxModal({
 			)}
 			<img
 				src={image}
-				alt="Expanded image preview"
+				alt={t('lightbox.expanded_image_alt')}
 				className="max-w-[90%] max-h-[90%] rounded shadow-2xl"
 				onMouseDown={(e) => e.stopPropagation()}
 				onClick={(e) => e.stopPropagation()}
@@ -213,10 +215,10 @@ export function LightboxModal({
 						copyImageToClipboard();
 					}}
 					className="bg-white/10 hover:bg-white/20 text-white rounded-full p-3 backdrop-blur-sm transition-colors flex items-center gap-2"
-					title={`Copy image to clipboard (${formatShortcutKeys(['Meta', 'c'])})`}
+					title={t('lightbox.copy_tooltip', { shortcut: formatShortcutKeys(['Meta', 'c']) })}
 				>
 					{copied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
-					{copied && <span className="text-sm">Copied!</span>}
+					{copied && <span className="text-sm">{t('lightbox.copied_label')}</span>}
 				</button>
 
 				{/* Delete button - only if onDelete is provided */}
@@ -227,7 +229,7 @@ export function LightboxModal({
 							promptDelete();
 						}}
 						className="bg-red-500/80 hover:bg-red-500 text-white rounded-full p-3 backdrop-blur-sm transition-colors"
-						title="Delete image (Delete key)"
+						title={t('lightbox.delete_tooltip')}
 					>
 						<Trash2 className="w-5 h-5" />
 					</button>
@@ -250,18 +252,18 @@ export function LightboxModal({
 			<div className="absolute bottom-10 text-white text-sm opacity-70 text-center">
 				{canNavigate && (
 					<span>
-						Image {currentIndex + 1} of {stagedImages.length} • ← → to navigate •{' '}
+						{t('lightbox.image_count', { current: currentIndex + 1, total: stagedImages.length })}
 					</span>
 				)}
-				{canDelete && <span>Delete to remove • </span>}
-				<span>ESC to close</span>
+				{canDelete && <span>{t('lightbox.delete_to_remove')}</span>}
+				<span>{t('lightbox.esc_to_close')}</span>
 			</div>
 
 			{/* Delete confirmation modal */}
 			{showDeleteConfirm && (
 				<ConfirmModal
 					theme={theme || defaultTheme}
-					message="Are you sure you want to remove this image? This will remove it from the staged images."
+					message={t('lightbox.delete_confirm')}
 					onConfirm={handleDeleteConfirmed}
 					onClose={() => setShowDeleteConfirm(false)}
 				/>

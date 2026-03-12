@@ -15,6 +15,7 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, ChevronRight, ChevronDown, GitMerge, Clipboard, Check, X } from 'lucide-react';
 import type { Theme, Session, AITab } from '../types';
 import type { MergeResult } from '../types/contextMerge';
@@ -93,11 +94,13 @@ const AnimatedTokenCount = memo(
 		accentColor,
 		textColor,
 		prefix = '~',
+		tokensLabel = 'tokens',
 	}: {
 		tokens: number;
 		accentColor: string;
 		textColor: string;
 		prefix?: string;
+		tokensLabel?: string;
 	}) => {
 		const [animating, setAnimating] = useState(false);
 		const prevTokensRef = useRef(tokens);
@@ -124,7 +127,7 @@ const AnimatedTokenCount = memo(
 				}
 			>
 				{prefix}
-				{formatTokensCompact(tokens)} tokens
+				{formatTokensCompact(tokens)} {tokensLabel}
 			</span>
 		);
 	}
@@ -133,19 +136,23 @@ const AnimatedTokenCount = memo(
 /**
  * Get display name for a session
  */
-function getSessionDisplayName(session: Session): string {
-	return session.name || session.projectRoot.split('/').pop() || 'Unnamed Session';
+function getSessionDisplayName(session: Session, t?: (key: any) => string): string {
+	return (
+		session.name ||
+		session.projectRoot.split('/').pop() ||
+		(t ? t('merge_session.unnamed_session') : 'Unnamed Session')
+	);
 }
 
 /**
  * Get display name for a tab
  */
-function getTabDisplayName(tab: AITab): string {
+function getTabDisplayName(tab: AITab, t?: (key: any) => string): string {
 	if (tab.name) return tab.name;
 	if (tab.agentSessionId) {
 		return tab.agentSessionId.split('-')[0].toUpperCase();
 	}
-	return 'New Tab';
+	return t ? t('merge_session.new_tab') : 'New Tab';
 }
 
 /**
@@ -160,6 +167,8 @@ export function MergeSessionModal({
 	onClose,
 	onMerge,
 }: MergeSessionModalProps) {
+	const { t } = useTranslation('modals');
+
 	// View mode state
 	const [viewMode, setViewMode] = useState<ViewMode>('search');
 
@@ -257,14 +266,14 @@ export function MergeSessionModal({
 		// Build a map of session IDs to names for parent lookups
 		const sessionNameMap = new Map<string, string>();
 		for (const session of allSessions) {
-			sessionNameMap.set(session.id, getSessionDisplayName(session));
+			sessionNameMap.set(session.id, getSessionDisplayName(session, t));
 		}
 
 		for (const session of allSessions) {
 			// Add session tabs (if it has tabs)
 			if (session.aiTabs.length > 0) {
 				// Build display name - prefix worktree children with parent name
-				let displayName = getSessionDisplayName(session);
+				let displayName = getSessionDisplayName(session, t);
 				if (session.parentSessionId) {
 					const parentName = sessionNameMap.get(session.parentSessionId);
 					if (parentName) {
@@ -281,7 +290,7 @@ export function MergeSessionModal({
 						sessionId: session.id,
 						tabId: tab.id,
 						sessionName: displayName,
-						tabName: getTabDisplayName(tab),
+						tabName: getTabDisplayName(tab, t),
 						agentSessionId: tab.agentSessionId || undefined,
 						estimatedTokens: estimateTokens(tab.logs),
 						lastActivity:
@@ -614,7 +623,9 @@ export function MergeSessionModal({
 							className="text-sm font-bold"
 							style={{ color: theme.colors.textMain }}
 						>
-							Merge "{sourceTab ? getTabDisplayName(sourceTab) : 'Context'}" Into
+							{sourceTab
+								? t('merge_session.title', { tabName: getTabDisplayName(sourceTab, t) })
+								: t('merge_session.title_fallback')}
 						</h2>
 					</div>
 					<button
@@ -622,7 +633,7 @@ export function MergeSessionModal({
 						onClick={onClose}
 						className="p-1 rounded hover:bg-white/10 transition-colors"
 						style={{ color: theme.colors.textDim }}
-						aria-label="Close merge dialog"
+						aria-label={t('merge_session.close_aria')}
 					>
 						<X className="w-4 h-4" aria-hidden="true" />
 					</button>
@@ -630,8 +641,7 @@ export function MergeSessionModal({
 
 				{/* Description for screen readers */}
 				<p id="merge-modal-description" className="sr-only">
-					Select a session and tab to merge your current context into. Use Tab to switch between
-					Paste ID and Open Tabs modes. Use arrow keys to navigate the list.
+					{t('merge_session.sr_description')}
 				</p>
 
 				{/* View Mode Tabs */}
@@ -642,8 +652,8 @@ export function MergeSessionModal({
 					aria-label="Selection mode"
 				>
 					{[
-						{ mode: 'paste' as ViewMode, label: 'Paste ID', icon: Clipboard },
-						{ mode: 'search' as ViewMode, label: 'Open Tabs', icon: Search },
+						{ mode: 'paste' as ViewMode, label: t('merge_session.paste_id_tab'), icon: Clipboard },
+						{ mode: 'search' as ViewMode, label: t('merge_session.open_tabs_tab'), icon: Search },
 					].map(({ mode, label, icon: Icon }) => (
 						<button
 							key={mode}
@@ -682,7 +692,7 @@ export function MergeSessionModal({
 									id="paste-id-input"
 									ref={inputRef}
 									type="text"
-									placeholder="Paste session or tab ID..."
+									placeholder={t('merge_session.paste_placeholder')}
 									value={pastedId}
 									onChange={(e) => setPastedId(e.target.value)}
 									aria-invalid={pastedIdValid === false}
@@ -739,7 +749,8 @@ export function MergeSessionModal({
 										)}
 									</div>
 									<div className="text-xs mt-1" style={{ color: theme.colors.textDim }}>
-										~{formatTokensCompact(pastedIdMatch.estimatedTokens)} tokens
+										~{formatTokensCompact(pastedIdMatch.estimatedTokens)}{' '}
+										{t('merge_session.tokens_label')}
 									</div>
 								</div>
 							)}
@@ -751,7 +762,7 @@ export function MergeSessionModal({
 									style={{ color: theme.colors.error }}
 									role="alert"
 								>
-									No matching session or tab found for this ID
+									{t('merge_session.no_match_error')}
 								</div>
 							)}
 						</div>
@@ -780,7 +791,7 @@ export function MergeSessionModal({
 										id="search-sessions-input"
 										ref={inputRef}
 										type="text"
-										placeholder="Search open tabs across all agents..."
+										placeholder={t('merge_session.search_placeholder')}
 										value={searchQuery}
 										onChange={(e) => handleSearchChange(e.target.value)}
 										aria-controls="session-list"
@@ -808,7 +819,9 @@ export function MergeSessionModal({
 										style={{ color: theme.colors.textDim }}
 										role="status"
 									>
-										{searchQuery ? 'No matching sessions found' : 'No other sessions available'}
+										{searchQuery
+											? t('merge_session.no_matching_sessions')
+											: t('merge_session.no_other_sessions')}
 									</div>
 								) : (
 									Array.from(groupedItems.entries()).map(([sessionId, items]) => {
@@ -849,7 +862,9 @@ export function MergeSessionModal({
 														{sessionName}
 													</span>
 													<span className="text-xs ml-auto" style={{ color: theme.colors.textDim }}>
-														{items.length} tab{items.length !== 1 ? 's' : ''}
+														{items.length !== 1
+															? t('merge_session.tab_count_plural', { count: items.length })
+															: t('merge_session.tab_count', { count: items.length })}
 													</span>
 												</button>
 
@@ -957,10 +972,12 @@ export function MergeSessionModal({
 					>
 						<div className="flex justify-between">
 							<span style={{ color: theme.colors.textDim }}>
-								Source: {sourceTab?.name || getTabDisplayName(sourceTab!)}
+								{t('merge_session.source_label', {
+									name: sourceTab?.name || getTabDisplayName(sourceTab!, t),
+								})}
 							</span>
 							<span style={{ color: theme.colors.textMain }}>
-								~{formatTokensCompact(sourceTokens)} tokens
+								~{formatTokensCompact(sourceTokens)} {t('merge_session.tokens_label')}
 							</span>
 						</div>
 
@@ -968,14 +985,16 @@ export function MergeSessionModal({
 							<>
 								<div className="flex justify-between">
 									<span style={{ color: theme.colors.textDim }}>
-										Target: {(viewMode === 'paste' ? pastedIdMatch : selectedTarget)?.tabName}
+										{t('merge_session.target_label', {
+											name: (viewMode === 'paste' ? pastedIdMatch : selectedTarget)?.tabName,
+										})}
 									</span>
 									<span style={{ color: theme.colors.textMain }}>
 										~
 										{formatTokensCompact(
 											(viewMode === 'paste' ? pastedIdMatch : selectedTarget)?.estimatedTokens || 0
 										)}{' '}
-										tokens
+										{t('merge_session.tokens_label')}
 									</span>
 								</div>
 
@@ -984,20 +1003,25 @@ export function MergeSessionModal({
 									style={{ borderColor: theme.colors.border }}
 								>
 									<span style={{ color: theme.colors.textMain }} className="font-medium">
-										Estimated merged size:
+										{t('merge_session.estimated_merged_size')}
 									</span>
 									<AnimatedTokenCount
 										tokens={estimatedMergedTokens}
 										accentColor={theme.colors.accent}
 										textColor={theme.colors.textMain}
+										tokensLabel={t('merge_session.tokens_label')}
 									/>
 								</div>
 
 								{options.groomContext && (
 									<div className="flex justify-between">
-										<span style={{ color: theme.colors.success }}>After cleaning:</span>
 										<span style={{ color: theme.colors.success }}>
-											~{formatTokensCompact(estimatedGroomedTokens)} tokens (estimated)
+											{t('merge_session.after_cleaning_label')}
+										</span>
+										<span style={{ color: theme.colors.success }}>
+											{t('merge_session.tokens_estimated', {
+												tokens: formatTokensCompact(estimatedGroomedTokens),
+											})}
 										</span>
 									</div>
 								)}
@@ -1022,7 +1046,7 @@ export function MergeSessionModal({
 								aria-describedby="groom-context-desc"
 							/>
 							<span className="text-xs" id="groom-context-desc">
-								Clean context (remove duplicates, reduce size)
+								{t('merge_session.clean_context_label')}
 							</span>
 						</label>
 					</fieldset>
@@ -1042,7 +1066,7 @@ export function MergeSessionModal({
 							color: theme.colors.textMain,
 						}}
 					>
-						Cancel
+						{t('merge_session.cancel_button')}
 					</button>
 					<button
 						type="button"
@@ -1054,7 +1078,7 @@ export function MergeSessionModal({
 							color: theme.colors.accentForeground,
 						}}
 					>
-						{isMerging ? 'Merging...' : 'Merge Into'}
+						{isMerging ? t('merge_session.merging_button') : t('merge_session.merge_into_button')}
 					</button>
 				</div>
 			</div>

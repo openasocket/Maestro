@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Share2, Copy, Check, ExternalLink } from 'lucide-react';
 import type { Theme } from '../types';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
@@ -34,6 +35,7 @@ export function GistPublishModal({
 	onSuccess,
 	existingGist,
 }: GistPublishModalProps) {
+	const { t } = useTranslation('modals');
 	const secretButtonRef = useRef<HTMLButtonElement>(null);
 	const copyButtonRef = useRef<HTMLButtonElement>(null);
 	const [isPublishing, setIsPublishing] = useState(false);
@@ -109,7 +111,7 @@ export function GistPublishModal({
 		return (
 			<Modal
 				theme={theme}
-				title="Published Gist"
+				title={t('gist_publish.published_title')}
 				headerIcon={<Share2 className="w-4 h-4" style={{ color: theme.colors.accent }} />}
 				priority={MODAL_PRIORITIES.GIST_PUBLISH}
 				onClose={onClose}
@@ -127,7 +129,7 @@ export function GistPublishModal({
 								color: theme.colors.textMain,
 							}}
 						>
-							Close
+							{t('gist_publish.close_button')}
 						</button>
 						<div className="flex gap-2">
 							<button
@@ -139,7 +141,7 @@ export function GistPublishModal({
 									color: theme.colors.textMain,
 								}}
 							>
-								Re-publish
+								{t('gist_publish.republish_button')}
 							</button>
 							<button
 								ref={copyButtonRef}
@@ -152,7 +154,7 @@ export function GistPublishModal({
 								}}
 							>
 								{copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-								{copied ? 'Copied!' : 'Copy URL'}
+								{copied ? t('gist_publish.copied_button') : t('gist_publish.copy_url_button')}
 							</button>
 						</div>
 					</div>
@@ -163,7 +165,11 @@ export function GistPublishModal({
 						<span className="font-medium" style={{ color: theme.colors.accent }}>
 							{filename}
 						</span>{' '}
-						is published as a {existingGist.isPublic ? 'public' : 'secret'} gist.
+						{t('gist_publish.is_published_as', {
+							visibility: existingGist.isPublic
+								? t('gist_publish.visibility_public')
+								: t('gist_publish.visibility_secret'),
+						})}
 					</p>
 
 					{/* Gist URL with copy/open buttons */}
@@ -184,7 +190,7 @@ export function GistPublishModal({
 							onClick={handleCopyUrl}
 							className="p-1.5 rounded hover:bg-white/10 transition-colors"
 							style={{ color: copied ? theme.colors.success : theme.colors.textDim }}
-							title="Copy URL"
+							title={t('gist_publish.copy_url_tooltip')}
 						>
 							{copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
 						</button>
@@ -193,14 +199,16 @@ export function GistPublishModal({
 							onClick={handleOpenGist}
 							className="p-1.5 rounded hover:bg-white/10 transition-colors"
 							style={{ color: theme.colors.textDim }}
-							title="Open in browser"
+							title={t('gist_publish.open_in_browser_tooltip')}
 						>
 							<ExternalLink className="w-4 h-4" />
 						</button>
 					</div>
 
 					<p className="text-xs" style={{ color: theme.colors.textDim }}>
-						Published {formatPublishedDate(existingGist.publishedAt)}
+						{t('gist_publish.published_date', {
+							date: formatPublishedDate(existingGist.publishedAt),
+						})}
 					</p>
 				</div>
 			</Modal>
@@ -211,7 +219,9 @@ export function GistPublishModal({
 	return (
 		<Modal
 			theme={theme}
-			title={showRepublishOptions ? 'Re-publish as GitHub Gist' : 'Publish as GitHub Gist'}
+			title={
+				showRepublishOptions ? t('gist_publish.republish_title') : t('gist_publish.publish_title')
+			}
 			headerIcon={<Share2 className="w-4 h-4" style={{ color: theme.colors.accent }} />}
 			priority={MODAL_PRIORITIES.GIST_PUBLISH}
 			onClose={onClose}
@@ -231,7 +241,7 @@ export function GistPublishModal({
 							opacity: isPublishing ? 0.5 : 1,
 						}}
 					>
-						{showRepublishOptions ? 'Back' : 'Cancel'}
+						{showRepublishOptions ? t('gist_publish.back_button') : t('gist_publish.cancel_button')}
 					</button>
 					<div className="flex gap-2">
 						<button
@@ -245,7 +255,7 @@ export function GistPublishModal({
 								opacity: isPublishing ? 0.5 : 1,
 							}}
 						>
-							Publish Public
+							{t('gist_publish.publish_public_button')}
 						</button>
 						<button
 							ref={secretButtonRef}
@@ -259,7 +269,9 @@ export function GistPublishModal({
 								opacity: isPublishing ? 0.5 : 1,
 							}}
 						>
-							{isPublishing ? 'Publishing...' : 'Publish Secret'}
+							{isPublishing
+								? t('gist_publish.publishing_button')
+								: t('gist_publish.publish_secret_button')}
 						</button>
 					</div>
 				</div>
@@ -267,31 +279,35 @@ export function GistPublishModal({
 		>
 			<div className="space-y-4">
 				<p className="text-sm leading-relaxed" style={{ color: theme.colors.textMain }}>
-					{showRepublishOptions ? 'Create a new gist for ' : 'Publish '}
+					{showRepublishOptions
+						? t('gist_publish.republish_prompt_prefix')
+						: t('gist_publish.publish_prefix')}
 					<span className="font-medium" style={{ color: theme.colors.accent }}>
 						{filename}
 					</span>
-					{showRepublishOptions ? '?' : ' as a GitHub Gist?'}
+					{showRepublishOptions
+						? t('gist_publish.republish_prompt_suffix')
+						: ' ' + t('gist_publish.publish_prompt')}
 				</p>
 
 				{showRepublishOptions && (
 					<p className="text-xs" style={{ color: theme.colors.warning }}>
-						This will create a new gist. The existing gist URL will be replaced.
+						{t('gist_publish.republish_warning')}
 					</p>
 				)}
 
 				<div className="text-xs space-y-2" style={{ color: theme.colors.textDim }}>
 					<p>
 						<span className="font-medium" style={{ color: theme.colors.textMain }}>
-							Secret:
+							{t('gist_publish.secret_label')}
 						</span>{' '}
-						Not searchable, only accessible via direct link
+						{t('gist_publish.secret_desc')}
 					</p>
 					<p>
 						<span className="font-medium" style={{ color: theme.colors.textMain }}>
-							Public:
+							{t('gist_publish.public_label')}
 						</span>{' '}
-						Visible on your public profile and searchable
+						{t('gist_publish.public_desc')}
 					</p>
 				</div>
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
 	X,
 	Bot,
@@ -64,6 +65,7 @@ export function HistoryDetailModal({
 	projectRoot,
 	onFileClick,
 }: HistoryDetailModalProps) {
+	const { t } = useTranslation('modals');
 	const { registerLayer, unregisterLayer, updateLayerHandler } = useLayerStack();
 	const layerIdRef = useRef<string>();
 	const onCloseRef = useRef(onClose);
@@ -267,9 +269,9 @@ export function HistoryDetailModal({
 									title={
 										entry.success
 											? entry.validated
-												? 'Task completed successfully and human-validated'
-												: 'Task completed successfully'
-											: 'Task failed'
+												? t('history_detail.task_success_validated')
+												: t('history_detail.task_success')
+											: t('history_detail.task_failed')
 									}
 								>
 									{entry.success ? (
@@ -328,7 +330,7 @@ export function HistoryDetailModal({
 											color: theme.colors.accent,
 											border: `1px solid ${theme.colors.accent}40`,
 										}}
-										title={`Copy session ID: ${entry.agentSessionId}`}
+										title={t('history_detail.copy_session_tooltip', { id: entry.agentSessionId })}
 									>
 										{entry.agentSessionId.split('-')[0].toUpperCase()}
 										{copiedSessionId ? (
@@ -350,10 +352,12 @@ export function HistoryDetailModal({
 												color: theme.colors.success,
 												border: `1px solid ${theme.colors.success}40`,
 											}}
-											title={`Resume session ${entry.agentSessionId}`}
+											title={t('history_detail.resume_session_tooltip', {
+												id: entry.agentSessionId,
+											})}
 										>
 											<Play className="w-2.5 h-2.5" />
-											Resume
+											{t('history_detail.resume_button')}
 										</button>
 									)}
 								</div>
@@ -376,14 +380,18 @@ export function HistoryDetailModal({
 										color: entry.validated ? theme.colors.success : theme.colors.textDim,
 										border: `1px solid ${entry.validated ? theme.colors.success + '40' : theme.colors.border}`,
 									}}
-									title={entry.validated ? 'Mark as not validated' : 'Mark as human-validated'}
+									title={
+										entry.validated
+											? t('history_detail.mark_not_validated')
+											: t('history_detail.mark_validated')
+									}
 								>
 									{entry.validated ? (
 										<DoubleCheck className="w-3 h-3" />
 									) : (
 										<Check className="w-3 h-3" />
 									)}
-									Validated
+									{t('history_detail.validated_label')}
 								</button>
 							)}
 						</div>
@@ -409,7 +417,7 @@ export function HistoryDetailModal({
 											className="text-[10px] font-bold uppercase"
 											style={{ color: theme.colors.textDim }}
 										>
-											Context
+											{t('history_detail.context_label')}
 										</span>
 									</div>
 									{(() => {
@@ -452,7 +460,8 @@ export function HistoryDetailModal({
 													style={{ color: theme.colors.textDim }}
 												>
 													{(contextTokens / 1000).toFixed(1)}k /{' '}
-													{(entry.usageStats!.contextWindow / 1000).toFixed(0)}k tokens
+													{(entry.usageStats!.contextWindow / 1000).toFixed(0)}k{' '}
+													{t('history_detail.tokens_label')}
 												</span>
 											</div>
 										);
@@ -469,16 +478,20 @@ export function HistoryDetailModal({
 											className="text-[10px] font-bold uppercase"
 											style={{ color: theme.colors.textDim }}
 										>
-											Tokens
+											{t('history_detail.tokens_header_label')}
 										</span>
 									</div>
 									<div className="flex items-center gap-3 text-xs font-mono">
 										<span style={{ color: theme.colors.accent }}>
-											<span style={{ color: theme.colors.textDim }}>In:</span>{' '}
+											<span style={{ color: theme.colors.textDim }}>
+												{t('history_detail.in_label')}
+											</span>{' '}
 											{(entry.usageStats.inputTokens ?? 0).toLocaleString(getActiveLocale())}
 										</span>
 										<span style={{ color: theme.colors.success }}>
-											<span style={{ color: theme.colors.textDim }}>Out:</span>{' '}
+											<span style={{ color: theme.colors.textDim }}>
+												{t('history_detail.out_label')}
+											</span>{' '}
 											{(entry.usageStats.outputTokens ?? 0).toLocaleString(getActiveLocale())}
 										</span>
 									</div>
@@ -540,10 +553,10 @@ export function HistoryDetailModal({
 								color: theme.colors.error,
 								border: `1px solid ${theme.colors.error}40`,
 							}}
-							title="Delete this history entry"
+							title={t('history_detail.delete_tooltip')}
 						>
 							<Trash2 className="w-4 h-4" />
-							Delete
+							{t('history_detail.delete_button')}
 						</button>
 					) : (
 						<div />
@@ -563,10 +576,12 @@ export function HistoryDetailModal({
 									opacity: hasPrev ? 1 : 0.4,
 									cursor: hasPrev ? 'pointer' : 'default',
 								}}
-								title={hasPrev ? 'Previous entry (←)' : 'No previous entry'}
+								title={
+									hasPrev ? t('history_detail.prev_tooltip') : t('history_detail.no_prev_tooltip')
+								}
 							>
 								<ChevronLeft className="w-4 h-4" />
-								Prev
+								{t('history_detail.prev_button')}
 							</button>
 							<button
 								onClick={goToNext}
@@ -579,9 +594,11 @@ export function HistoryDetailModal({
 									opacity: hasNext ? 1 : 0.4,
 									cursor: hasNext ? 'pointer' : 'default',
 								}}
-								title={hasNext ? 'Next entry (→)' : 'No next entry'}
+								title={
+									hasNext ? t('history_detail.next_tooltip') : t('history_detail.no_next_tooltip')
+								}
 							>
-								Next
+								{t('history_detail.next_button')}
 								<ChevronRight className="w-4 h-4" />
 							</button>
 						</div>
@@ -595,7 +612,7 @@ export function HistoryDetailModal({
 							color: theme.colors.accentForeground,
 						}}
 					>
-						Close
+						{t('history_detail.close_button')}
 					</button>
 				</div>
 			</div>
@@ -622,7 +639,7 @@ export function HistoryDetailModal({
 							<div className="flex items-center gap-2">
 								<Trash2 className="w-4 h-4" style={{ color: theme.colors.error }} />
 								<h2 className="text-sm font-bold" style={{ color: theme.colors.textMain }}>
-									Delete History Entry
+									{t('history_detail.delete_title')}
 								</h2>
 							</div>
 							<button
@@ -641,8 +658,9 @@ export function HistoryDetailModal({
 									<AlertTriangle className="w-5 h-5" style={{ color: theme.colors.error }} />
 								</div>
 								<p className="leading-relaxed" style={{ color: theme.colors.textMain }}>
-									Are you sure you want to delete this {entry.type === 'AUTO' ? 'auto' : 'user'}{' '}
-									history entry? This action cannot be undone.
+									{t('history_detail.delete_message', {
+										type: entry.type === 'AUTO' ? 'auto' : 'user',
+									})}
 								</p>
 							</div>
 							<div className="mt-6 flex justify-end gap-2">
@@ -657,7 +675,7 @@ export function HistoryDetailModal({
 									className="px-4 py-2 rounded border hover:bg-white/5 transition-colors"
 									style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
 								>
-									Cancel
+									{t('history_detail.cancel_button')}
 								</button>
 								<button
 									ref={deleteButtonRef}
@@ -682,7 +700,7 @@ export function HistoryDetailModal({
 									style={{ backgroundColor: theme.colors.error }}
 									tabIndex={0}
 								>
-									Delete
+									{t('history_detail.delete_button')}
 								</button>
 							</div>
 						</div>

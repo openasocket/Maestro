@@ -12,6 +12,7 @@ import {
 	RotateCcw,
 	FlaskConical,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { Theme } from '../types';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import ReactMarkdown from 'react-markdown';
@@ -58,6 +59,7 @@ interface UpdateCheckModalProps {
 }
 
 export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
+	const { t } = useTranslation('modals');
 	const [loading, setLoading] = useState(true);
 	const [result, setResult] = useState<UpdateCheckResult | null>(null);
 	const [expandedReleases, setExpandedReleases] = useState<Set<string>>(new Set());
@@ -171,7 +173,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 			<div className="flex items-center gap-2">
 				<Download className="w-5 h-5" style={{ color: theme.colors.accent }} />
 				<h2 className="text-sm font-bold" style={{ color: theme.colors.textMain }}>
-					Check for Updates
+					{t('update_check.title')}
 				</h2>
 			</div>
 			<div className="flex items-center gap-2">
@@ -179,7 +181,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 					onClick={checkForUpdates}
 					disabled={loading || isDownloading}
 					className="p-1 rounded hover:bg-white/10 transition-colors disabled:opacity-50"
-					title="Refresh"
+					title={t('update_check.refresh_button')}
 				>
 					<RefreshCw
 						className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}
@@ -200,7 +202,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 	return (
 		<Modal
 			theme={theme}
-			title="Check for Updates"
+			title={t('update_check.title')}
 			priority={MODAL_PRIORITIES.UPDATE_CHECK}
 			onClose={onClose}
 			customHeader={customHeader}
@@ -212,7 +214,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 					<div className="flex flex-col items-center justify-center py-8 gap-3">
 						<Loader2 className="w-8 h-8 animate-spin" style={{ color: theme.colors.accent }} />
 						<span className="text-sm" style={{ color: theme.colors.textDim }}>
-							Checking for updates...
+							{t('update_check.checking')}
 						</span>
 					</div>
 				) : result?.error ? (
@@ -226,7 +228,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 							className="flex items-center gap-2 text-sm hover:underline"
 							style={{ color: theme.colors.accent }}
 						>
-							Check releases manually
+							{t('update_check.check_releases')}
 							<ExternalLink className="w-3 h-3" />
 						</button>
 					</div>
@@ -244,7 +246,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 								<Download className="w-5 h-5 mt-0.5" style={{ color: theme.colors.warning }} />
 								<div className="flex-1">
 									<div className="text-sm font-bold mb-1" style={{ color: theme.colors.textMain }}>
-										Update Available!
+										{t('update_check.update_available')}
 									</div>
 									<div className="text-xs mb-2" style={{ color: theme.colors.textDim }}>
 										You are{' '}
@@ -263,7 +265,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 						{/* Release Notes */}
 						<div>
 							<div className="text-sm font-bold mb-3" style={{ color: theme.colors.textMain }}>
-								Release Notes
+								{t('update_check.release_notes')}
 							</div>
 							<div className="space-y-2">
 								{result.releases.map((release) => (
@@ -414,7 +416,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 														),
 													}}
 												>
-													{release.body || 'No release notes available.'}
+													{release.body || t('update_check.no_release_notes')}
 												</ReactMarkdown>
 											</div>
 										)}
@@ -435,7 +437,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 							>
 								<div className="flex items-center gap-2 mb-1">
 									<AlertCircle className="w-4 h-4" />
-									<span className="font-bold">Download failed</span>
+									<span className="font-bold">{t('update_check.download_failed')}</span>
 								</div>
 								<p style={{ color: theme.colors.textDim }}>{downloadError}</p>
 								<button
@@ -443,7 +445,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 									className="flex items-center gap-1 mt-2 hover:underline"
 									style={{ color: theme.colors.accent }}
 								>
-									Download manually from GitHub
+									{t('update_check.download_manually')}
 									<ExternalLink className="w-3 h-3" />
 								</button>
 							</div>
@@ -456,7 +458,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 									className="flex items-center justify-between text-xs"
 									style={{ color: theme.colors.textDim }}
 								>
-									<span>Downloading update...</span>
+									<span>{t('update_check.downloading')}</span>
 									<span>{Math.round(downloadStatus.progress.percent)}%</span>
 								</div>
 								<div
@@ -493,7 +495,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 									style={{ backgroundColor: theme.colors.success, color: theme.colors.bgMain }}
 								>
 									<RotateCcw className="w-4 h-4" />
-									Restart to Update
+									{t('update_check.restart_button')}
 								</button>
 							) : !result.assetsReady ? (
 								/* Assets not yet available - show building message */
@@ -502,7 +504,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 									style={{ backgroundColor: theme.colors.bgActivity, color: theme.colors.textDim }}
 								>
 									<Loader2 className="w-4 h-4 animate-spin" />
-									Binaries are still building...
+									{t('update_check.binaries_building')}
 								</div>
 							) : (
 								<button
@@ -514,12 +516,12 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 									{isDownloading ? (
 										<>
 											<Loader2 className="w-4 h-4 animate-spin" />
-											Downloading...
+											{t('update_check.downloading')}
 										</>
 									) : (
 										<>
 											<Download className="w-4 h-4" />
-											Download and Install Update
+											{t('update_check.download_button')}
 										</>
 									)}
 								</button>
@@ -532,8 +534,8 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 								style={{ color: theme.colors.textDim }}
 							>
 								{result.assetsReady
-									? 'Or download manually from GitHub'
-									: 'Check release page for updates'}
+									? t('update_check.or_download_manually')
+									: t('update_check.check_release_page')}
 								<ExternalLink className="w-3 h-3" />
 							</button>
 						</div>
@@ -543,7 +545,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 						<CheckCircle2 className="w-12 h-12" style={{ color: theme.colors.success }} />
 						<div className="text-center">
 							<div className="text-sm font-bold mb-1" style={{ color: theme.colors.textMain }}>
-								You're up to date!
+								{t('update_check.up_to_date')}
 							</div>
 							<div className="text-xs font-mono" style={{ color: theme.colors.textDim }}>
 								Maestro v{result?.currentVersion || __APP_VERSION__}
@@ -558,7 +560,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 							className="flex items-center gap-2 text-xs hover:underline mt-2"
 							style={{ color: theme.colors.accent }}
 						>
-							View all releases
+							{t('update_check.view_all_releases')}
 							<ExternalLink className="w-3 h-3" />
 						</button>
 					</div>
@@ -606,10 +608,10 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 						/>
 						<div className="flex-1">
 							<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-								Include pre-release updates
+								{t('update_check.include_prerelease')}
 							</div>
 							<div className="text-xs mt-0.5" style={{ color: theme.colors.textDim }}>
-								Beta and release candidate versions
+								{t('update_check.prerelease_description')}
 							</div>
 						</div>
 					</label>

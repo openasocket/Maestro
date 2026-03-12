@@ -27,6 +27,7 @@ import {
 	HardDrive,
 	ArrowRight,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { Theme, ToolType } from '../types';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { Modal } from './ui/Modal';
@@ -280,6 +281,7 @@ export function TransferErrorModal({
 	onCancel,
 	isRetrying = false,
 }: TransferErrorModalProps) {
+	const { t } = useTranslation('modals');
 	const primaryButtonRef = useRef<HTMLButtonElement>(null);
 
 	// Determine available actions
@@ -438,7 +440,7 @@ export function TransferErrorModal({
 						)}
 						<div className="flex-1 min-w-0 text-left">
 							<div className="text-sm font-medium">
-								{isRetrying ? 'Retrying...' : actions.retryLabel}
+								{isRetrying ? t('transfer_error.retrying') : actions.retryLabel}
 							</div>
 							{actions.retryDescription && !isRetrying && (
 								<div
@@ -493,7 +495,7 @@ export function TransferErrorModal({
 					className="w-full text-center text-sm py-2 rounded hover:bg-white/5 transition-colors disabled:opacity-50"
 					style={{ color: theme.colors.textDim }}
 				>
-					Cancel
+					{t('transfer_error.close_button')}
 				</button>
 			</div>
 		</Modal>

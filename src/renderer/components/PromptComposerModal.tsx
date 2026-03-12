@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, PenLine, Send, ImageIcon, History, Eye, Keyboard, Brain, Pin } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { Theme, ThinkingMode } from '../types';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
@@ -59,6 +60,7 @@ export function PromptComposerModal({
 	enterToSend = false,
 	onToggleEnterToSend,
 }: PromptComposerModalProps) {
+	const { t } = useTranslation('modals');
 	const [value, setValue] = useState('');
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
@@ -272,7 +274,7 @@ export function PromptComposerModal({
 					<div className="flex items-center gap-2">
 						<PenLine className="w-5 h-5" style={{ color: theme.colors.accent }} />
 						<span className="font-medium" style={{ color: theme.colors.textMain }}>
-							Prompt Composer
+							{t('prompt_composer.title')}
 						</span>
 						<span className="text-sm opacity-60" style={{ color: theme.colors.textDim }}>
 							— {sessionName}
@@ -285,7 +287,7 @@ export function PromptComposerModal({
 								onClose();
 							}}
 							className="p-1.5 rounded hover:bg-white/10 transition-colors"
-							title="Close (Escape)"
+							title={t('prompt_composer.close_button')}
 						>
 							<X className="w-5 h-5" style={{ color: theme.colors.textDim }} />
 						</button>
@@ -346,7 +348,7 @@ export function PromptComposerModal({
 						onPaste={handlePaste}
 						className="w-full h-full bg-transparent resize-none outline-none text-base leading-relaxed scrollbar-thin"
 						style={{ color: theme.colors.textMain }}
-						placeholder="Write your prompt here..."
+						placeholder={t('prompt_composer.placeholder')}
 					/>
 				</div>
 
@@ -363,7 +365,7 @@ export function PromptComposerModal({
 								<button
 									onClick={() => fileInputRef.current?.click()}
 									className="p-1.5 rounded hover:bg-white/10 transition-colors opacity-60 hover:opacity-100"
-									title="Attach Image"
+									title={t('prompt_composer.attach_image')}
 								>
 									<ImageIcon className="w-4 h-4" style={{ color: theme.colors.textDim }} />
 								</button>
@@ -381,8 +383,12 @@ export function PromptComposerModal({
 							className="text-xs flex items-center gap-3"
 							style={{ color: theme.colors.textDim }}
 						>
-							<span>{value.length} characters</span>
-							<span>~{tokenCount.toLocaleString(getActiveLocale())} tokens</span>
+							<span>{t('prompt_composer.characters_count', { count: value.length })}</span>
+							<span>
+								{t('prompt_composer.tokens_count', {
+									amount: tokenCount.toLocaleString(getActiveLocale()),
+								})}
+							</span>
 						</div>
 					</div>
 
@@ -405,7 +411,7 @@ export function PromptComposerModal({
 								title={`Save to History (${formatShortcutKeys(['Meta', 's'])}) - Synopsis added after each completion`}
 							>
 								<History className="w-3 h-3" />
-								<span>History</span>
+								<span>{t('prompt_composer.save_to_history')}</span>
 							</button>
 						)}
 
@@ -426,7 +432,7 @@ export function PromptComposerModal({
 								title="Toggle read-only mode (Claude won't modify files)"
 							>
 								<Eye className="w-3 h-3" />
-								<span>Read-only</span>
+								<span>{t('prompt_composer.readonly_toggle')}</span>
 							</button>
 						)}
 
@@ -466,7 +472,7 @@ export function PromptComposerModal({
 								}
 							>
 								<Brain className="w-3 h-3" />
-								<span>Thinking</span>
+								<span>{t('prompt_composer.thinking_toggle')}</span>
 								{tabShowThinking === 'sticky' && <Pin className="w-2.5 h-2.5" />}
 							</button>
 						)}
@@ -496,7 +502,7 @@ export function PromptComposerModal({
 							}}
 						>
 							<Send className="w-4 h-4" />
-							Send
+							{t('prompt_composer.send_button')}
 						</button>
 					</div>
 				</div>

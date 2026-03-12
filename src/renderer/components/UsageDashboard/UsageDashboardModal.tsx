@@ -15,6 +15,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { X, BarChart3, Calendar, Download, Database } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { SummaryCards } from './SummaryCards';
 import { ActivityHeatmap } from './ActivityHeatmap';
 import { AgentComparisonChart } from './AgentComparisonChart';
@@ -150,6 +151,7 @@ export function UsageDashboardModal({
 	defaultTimeRange = 'week',
 	sessions = EMPTY_SESSIONS,
 }: UsageDashboardModalProps) {
+	const { t } = useTranslation('modals');
 	const [timeRange, setTimeRange] = useState<StatsTimeRange>(defaultTimeRange);
 	const [viewMode, setViewMode] = useState<ViewMode>('overview');
 	const [data, setData] = useState<StatsAggregation | null>(null);
@@ -471,7 +473,7 @@ export function UsageDashboardModal({
 			const filePath = await window.maestro.dialog.saveFile({
 				defaultPath: defaultFilename,
 				filters: [{ name: 'CSV Files', extensions: ['csv'] }],
-				title: 'Export Usage Data',
+				title: t('usage_dashboard.export_dialog_title'),
 			});
 
 			// User cancelled the dialog
@@ -531,13 +533,13 @@ export function UsageDashboardModal({
 					<div className="flex items-center gap-3">
 						<BarChart3 className="w-5 h-5" style={{ color: theme.colors.accent }} />
 						<h2 className="text-lg font-semibold" style={{ color: theme.colors.textMain }}>
-							Usage Dashboard
+							{t('usage_dashboard.title')}
 						</h2>
 						<span
 							className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase"
 							style={{ backgroundColor: theme.colors.warning + '30', color: theme.colors.warning }}
 						>
-							Beta
+							{t('usage_dashboard.beta_label')}
 						</span>
 						{/* New Data Indicator - appears briefly when real-time data arrives */}
 						{showNewDataIndicator && (
@@ -557,7 +559,7 @@ export function UsageDashboardModal({
 										animation: 'pulse-dot 1s ease-in-out 3',
 									}}
 								/>
-								Updated
+								{t('usage_dashboard.updated')}
 							</div>
 						)}
 					</div>
@@ -620,7 +622,7 @@ export function UsageDashboardModal({
 							disabled={isExporting}
 						>
 							<Download className={`w-4 h-4 ${isExporting ? 'animate-pulse' : ''}`} />
-							Export CSV
+							{t('usage_dashboard.export_csv_button')}
 						</button>
 
 						{/* Close Button */}
@@ -700,7 +702,7 @@ export function UsageDashboardModal({
 							className="h-full flex flex-col items-center justify-center gap-4"
 							style={{ color: theme.colors.textDim }}
 						>
-							<p>Failed to load usage data</p>
+							<p>{t('usage_dashboard.failed_to_load')}</p>
 							<button
 								onClick={() => fetchStats()}
 								className="px-4 py-2 rounded text-sm"
@@ -709,7 +711,7 @@ export function UsageDashboardModal({
 									color: theme.colors.bgMain,
 								}}
 							>
-								Retry
+								{t('usage_dashboard.retry_button')}
 							</button>
 						</div>
 					) : !data ||
@@ -1210,15 +1212,19 @@ export function UsageDashboardModal({
 					<div className="flex items-center gap-4">
 						<span>
 							{data && data.totalQueries > 0
-								? `Showing ${TIME_RANGE_OPTIONS.find((o) => o.value === timeRange)?.label.toLowerCase()} data`
-								: 'No data for selected time range'}
+								? t('usage_dashboard.showing_data', {
+										range: TIME_RANGE_OPTIONS.find(
+											(o) => o.value === timeRange
+										)?.label.toLowerCase(),
+									})
+								: t('usage_dashboard.no_data')}
 						</span>
 						{/* Database size indicator */}
 						{databaseSize !== null && (
 							<span
 								className="flex items-center gap-1"
 								style={{ opacity: 0.7 }}
-								title="Stats database size"
+								title={t('usage_dashboard.database_size_title')}
 								data-testid="database-size-indicator"
 							>
 								<Database className="w-3 h-3" />
@@ -1226,7 +1232,7 @@ export function UsageDashboardModal({
 							</span>
 						)}
 					</div>
-					<span style={{ opacity: 0.7 }}>Press Esc to close</span>
+					<span style={{ opacity: 0.7 }}>{t('usage_dashboard.footer_text')}</span>
 				</div>
 			</div>
 		</div>
