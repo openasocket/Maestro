@@ -114,8 +114,10 @@ export function formatMetaKey(): string {
  * @returns Display string like 'Enter' or '⌘ + Enter' / 'Ctrl + Enter'
  */
 export function formatEnterToSend(enterToSend: boolean): string {
-	if (enterToSend) return 'Enter';
-	return isMac() ? '⌘ + Enter' : 'Ctrl + Enter';
+	if (enterToSend) return i18n.t('common:input.enter_to_send', { defaultValue: 'Enter' });
+	return isMac()
+		? i18n.t('common:input.meta_enter_to_send_mac', { defaultValue: '⌘ + Enter' })
+		: i18n.t('common:input.meta_enter_to_send_other', { defaultValue: 'Ctrl + Enter' });
 }
 
 /**
@@ -126,9 +128,13 @@ export function formatEnterToSend(enterToSend: boolean): string {
  */
 export function formatEnterToSendTooltip(enterToSend: boolean): string {
 	if (enterToSend) {
-		return `Switch to ${isMac() ? 'Cmd' : 'Ctrl'}+Enter to send`;
+		const key = isMac() ? 'Cmd' : 'Ctrl';
+		return i18n.t('common:input.switch_to_meta_enter', {
+			key,
+			defaultValue: `Switch to ${key}+Enter to send`,
+		});
 	}
-	return 'Switch to Enter to send';
+	return i18n.t('common:input.switch_to_enter', { defaultValue: 'Switch to Enter to send' });
 }
 
 /**
