@@ -27,6 +27,7 @@ import type {
 	UsageStats,
 } from '../../types';
 import { notifyToast } from '../../stores/notificationStore';
+import { tNotify } from '../../utils/tNotify';
 import type { HistoryEntryInput } from './useAgentSessionManagement';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useModalStore } from '../../stores/modalStore';
@@ -865,17 +866,17 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 									})
 								);
 
-								notifyToast({
+								tNotify({
 									type: 'info',
-									title: 'Synopsis',
-									message: parsed.shortSummary,
+									titleKey: 'notifications:synopsis.title',
+									messageKey: 'notifications:synopsis.message',
+									values: { message: parsed.shortSummary },
 									group: synopsisData!.groupName,
 									project: synopsisData!.projectName,
-									taskDuration: duration,
 									sessionId: synopsisData!.sessionId,
 									tabId: synopsisData!.tabId,
 									tabName: synopsisData!.tabName,
-									skipCustomNotification: true,
+									taskDuration: synopsisData!.taskDuration,
 								});
 
 								if (deps.rightPanelRef.current) {
@@ -1286,10 +1287,11 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 						}
 
 						const errorTitle = getErrorTitleForType(agentError.type);
-						notifyToast({
+						tNotify({
 							type: 'error',
-							title: `Auto Run: ${errorTitle}`,
-							message: agentError.message,
+							titleKey: 'notifications:autorun.error_title',
+							messageKey: 'notifications:autorun.error_message',
+							values: { errorTitle, message: agentError.message },
 							sessionId: actualSessionId,
 						});
 					}

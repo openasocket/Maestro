@@ -8,5 +8,143 @@
 	"connection": {
 		"lost_title": "Connection Lost",
 		"restored_title": "Connection Restored"
+	},
+	"group_chat": {
+		"error_title": "Group Chat",
+		"create_failed_message": "Failed to create group chat",
+		"create_failed_dynamic_message": "{{message}}"
+	},
+	"worktree": {
+		"discovered_title": "Worktrees Discovered",
+		"discovered_message_one": "Found {{count}} worktree sub-agent",
+		"discovered_message_other": "Found {{count}} worktree sub-agents",
+		"disabled_title": "Worktrees Disabled",
+		"disabled_message": "Worktree configuration cleared for this agent.",
+		"disabled_with_removed_message_one": "Worktree configuration cleared for this agent. Removed {{count}} worktree sub-agent.",
+		"disabled_with_removed_message_other": "Worktree configuration cleared for this agent. Removed {{count}} worktree sub-agents.",
+		"no_directory_title": "Error",
+		"no_directory_message": "No worktree directory configured",
+		"created_title": "Worktree Created",
+		"created_message": "{{branch}}",
+		"create_failed_title": "Failed to Create Worktree",
+		"create_failed_message": "{{message}}",
+		"new_discovered_title": "New Worktree Discovered",
+		"new_discovered_message": "{{name}}",
+		"agent_not_found_title": "Worktree Agent Not Found",
+		"agent_not_found_message": "The selected worktree agent was removed. Running on the active agent instead.",
+		"target_busy_title": "Target Agent Busy",
+		"target_busy_message": "Target agent is busy. Please try again.",
+		"error_title": "Worktree Error",
+		"error_message": "{{message}}"
+	},
+	"autorun": {
+		"started_title": "Auto Run Started",
+		"started_message_one": "{{count}} task across {{docCount}} document",
+		"started_message_other": "{{count}} tasks across {{docCount}} documents",
+		"complete_title": "Auto-Run Complete",
+		"complete_stopped_message": "Stopped after completing {{completed}} of {{total}} tasks",
+		"complete_all_message_one": "All {{total}} task completed successfully",
+		"complete_all_message_other": "All {{total}} tasks completed successfully",
+		"complete_partial_message": "Completed {{completed}} of {{total}} tasks",
+		"error_title": "Auto Run: {{errorTitle}}",
+		"error_message": "{{message}}"
+	},
+	"leaderboard": {
+		"updated_title": "Leaderboard Updated",
+		"updated_message": "{{message}}"
+	},
+	"symphony": {
+		"pr_ready_title": "Symphony: PR Ready for Review",
+		"pr_ready_message": "PR opened: {{prUrl}}",
+		"manual_needed_title": "Symphony: Manual Finalization Needed",
+		"manual_needed_message": "{{message}}",
+		"manual_needed_default_message": "Could not auto-finalize PR. Open Symphony to finalize.",
+		"auto_finalize_failed_title": "Symphony: Auto-Finalize Failed",
+		"auto_finalize_failed_message": "PR remains as draft. Open Symphony to finalize manually.",
+		"error_title": "Symphony Error",
+		"agent_not_found_message": "Agent not found: {{agentType}}"
+	},
+	"pr": {
+		"created_title": "PR Created",
+		"created_message": "{{message}}",
+		"created_default_message": "Pull request created successfully",
+		"failed_title": "PR Creation Failed",
+		"failed_message": "{{message}}",
+		"failed_default_message": "Failed to create pull request",
+		"app_created_title": "Pull Request Created",
+		"app_created_message": "{{title}}"
+	},
+	"merge": {
+		"session_merged_title": "Session Merged",
+		"session_merged_message": "Created \"{{sessionName}}\" from {{sourceInfo}}{{tokenInfo}}.{{savedInfo}}",
+		"context_merged_title": "Context Merged",
+		"context_merged_message": "\"{{source}}\" → \"{{target}}\"{{tokenInfo}}.{{savedInfo}}",
+		"context_transferred_title": "Context Transferred",
+		"context_transferred_message": "Created \"{{sessionName}}\" with transferred context",
+		"failed_title": "Merge Failed",
+		"failed_message": "{{message}}",
+		"failed_default_message": "Failed to merge contexts",
+		"context_sent_title": "Context Sent",
+		"context_sent_message": "\"{{source}}\" → \"{{target}}\"{{tokenInfo}}"
+	},
+	"compact": {
+		"cannot_title": "Cannot Compact",
+		"cannot_message": "Context too small. Need at least {{percent}}% usage, ~2k tokens, or 8+ messages to compact.",
+		"success_title": "Context Compacted",
+		"success_message": "Reduced context by {{percent}}%. Click to view the new tab.",
+		"failed_title": "Compaction Failed",
+		"failed_message": "Failed to compact context. Check the tab for details.",
+		"failed_unexpected_message": "An unexpected error occurred during compaction."
+	},
+	"agent": {
+		"creation_failed_title": "Agent Creation Failed",
+		"creation_failed_message": "{{message}}",
+		"creation_failed_default_message": "Cannot create duplicate agent"
+	},
+	"session": {
+		"group_removed_title": "Group Removed",
+		"group_removed_message_one": "Removed \"{{name}}\" and {{count}} agent",
+		"group_removed_message_other": "Removed \"{{name}}\" and {{count}} agents",
+		"erase_failed_title": "Failed to Erase Directory",
+		"erase_failed_message": "{{message}}"
+	},
+	"export": {
+		"nothing_to_copy_title": "Nothing to Copy",
+		"nothing_to_copy_message": "No user or assistant messages to copy.",
+		"context_copied_title": "Context Copied",
+		"context_copied_message": "Conversation copied to clipboard.",
+		"copy_failed_title": "Copy Failed",
+		"copy_failed_message": "Failed to copy context to clipboard.",
+		"export_complete_title": "Export Complete",
+		"export_complete_message": "Conversation exported as HTML.",
+		"export_failed_title": "Export Failed",
+		"export_failed_message": "Failed to export conversation as HTML.",
+		"nothing_to_publish_title": "Nothing to Publish",
+		"nothing_to_publish_message": "No user or assistant messages to publish."
+	},
+	"stats": {
+		"database_title": "Statistics Database",
+		"database_message": "{{message}}"
+	},
+	"history": {
+		"entry_added_title": "History Entry Added",
+		"entry_added_message": "{{message}}"
+	},
+	"synopsis": {
+		"title": "Synopsis",
+		"message": "{{message}}"
+	},
+	"playbook": {
+		"imported_title": "Playbook Imported",
+		"imported_message": "Successfully imported playbook to {{folder}}"
+	},
+	"gist": {
+		"published_title": "Gist Published",
+		"published_public_message": "Public gist created! URL copied to clipboard.",
+		"published_secret_message": "Secret gist created! URL copied to clipboard."
+	},
+	"debug": {
+		"test_title": "Test Notification",
+		"test_message": "This is a test toast notification from the console!"
 	}
 }
