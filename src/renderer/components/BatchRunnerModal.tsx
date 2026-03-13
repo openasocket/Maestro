@@ -16,6 +16,7 @@ import {
 	Loader2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useI18n } from '../hooks/useI18n';
 import type { Theme, BatchDocumentEntry, BatchRunConfig, WorktreeRunTarget } from '../types';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
@@ -104,6 +105,7 @@ export function BatchRunnerModal(props: BatchRunnerModalProps) {
 	} = props;
 
 	const { t } = useTranslation('modals');
+	const { t: tA } = useTranslation('accessibility');
 
 	// Worktree run target state
 	const [worktreeTarget, setWorktreeTarget] = useState<WorktreeRunTarget | null>(null);
@@ -410,7 +412,7 @@ export function BatchRunnerModal(props: BatchRunnerModalProps) {
 			className="fixed inset-0 modal-overlay flex items-center justify-center z-[9999] animate-in fade-in duration-200"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Auto Run Configuration"
+			aria-label={tA('modal.autorun_config')}
 			tabIndex={-1}
 		>
 			<div

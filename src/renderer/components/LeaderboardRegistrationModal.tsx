@@ -30,6 +30,7 @@ import { getBadgeForTime } from '../constants/conductorBadges';
 import { KEYBOARD_MASTERY_LEVELS } from '../constants/keyboardMastery';
 import { DEFAULT_SHORTCUTS, TAB_SHORTCUTS, FIXED_SHORTCUTS } from '../constants/shortcuts';
 import { generateId } from '../utils/ids';
+import { useI18n } from '../hooks/useI18n';
 
 // Total shortcuts for calculating mastery percentage
 const TOTAL_SHORTCUTS_COUNT =
@@ -132,6 +133,7 @@ export function LeaderboardRegistrationModal({
 	onSyncStats,
 }: LeaderboardRegistrationModalProps) {
 	const { t } = useTranslation('modals');
+	const { t: tA } = useTranslation('accessibility');
 	const { registerLayer, unregisterLayer } = useLayerStack();
 	const layerIdRef = useRef<string>();
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -775,7 +777,7 @@ export function LeaderboardRegistrationModal({
 			className="fixed inset-0 modal-overlay flex items-center justify-center z-[9999] animate-in fade-in duration-200"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Register for Leaderboard"
+			aria-label={tA('modal.register_leaderboard')}
 			tabIndex={-1}
 			onKeyDown={handleKeyDown}
 		>

@@ -12,6 +12,7 @@ import {
 	BookOpen,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useI18n } from '../hooks/useI18n';
 import type { Theme, AutoRunStats, MaestroUsageStats, LeaderboardRegistration } from '../types';
 import type { GlobalAgentStats } from '../../shared/types';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
@@ -43,6 +44,7 @@ export function AboutModal({
 	leaderboardRegistration,
 }: AboutModalProps) {
 	const { t } = useTranslation('modals');
+	const { t: tA } = useTranslation('accessibility');
 	const [globalStats, setGlobalStats] = useState<GlobalAgentStats | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [isStatsComplete, setIsStatsComplete] = useState(false);
@@ -159,7 +161,7 @@ export function AboutModal({
 				onClick={onClose}
 				className="p-1 rounded hover:bg-white/10 transition-colors"
 				style={{ color: theme.colors.textDim }}
-				aria-label="Close modal"
+				aria-label={tA('modal.close')}
 			>
 				<X className="w-4 h-4" />
 			</button>

@@ -12,6 +12,7 @@ import { formatShortcutKeys } from '../utils/shortcutFormatter';
 import { safeClipboardWrite } from '../utils/clipboard';
 import { isBetaAgent, getAgentDisplayName } from '../../shared/agentMetadata';
 import { useTranslation } from 'react-i18next';
+import { useI18n } from '../hooks/useI18n';
 
 // Maximum character length for nudge message
 const NUDGE_MESSAGE_MAX_LENGTH = 1000;
@@ -89,6 +90,7 @@ export function NewInstanceModal({
 	sourceSession,
 }: NewInstanceModalProps) {
 	const { t } = useTranslation('modals');
+	const { t: tA } = useTranslation('accessibility');
 	const [agents, setAgents] = useState<AgentConfig[]>([]);
 	const [selectedAgent, setSelectedAgent] = useState('');
 	const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
@@ -669,7 +671,7 @@ export function NewInstanceModal({
 	if (!isOpen) return null;
 
 	return (
-		<div onKeyDown={handleKeyDown} role="group" aria-label="Create new agent dialog">
+		<div onKeyDown={handleKeyDown} role="group" aria-label={tA('modal.create_agent_dialog')}>
 			<Modal
 				theme={theme}
 				title={t('new_instance.create_title')}
@@ -1249,6 +1251,7 @@ export function EditAgentModal({
 	existingSessions,
 }: EditAgentModalProps) {
 	const { t } = useTranslation('modals');
+	const { t: tA } = useTranslation('accessibility');
 	const [instanceName, setInstanceName] = useState('');
 	const [nudgeMessage, setNudgeMessage] = useState('');
 	const [agent, setAgent] = useState<AgentConfig | null>(null);
@@ -1572,7 +1575,7 @@ export function EditAgentModal({
 	const agentName = getAgentDisplayName(selectedToolType);
 
 	return (
-		<div onKeyDown={handleKeyDown} role="group" aria-label="Edit agent dialog">
+		<div onKeyDown={handleKeyDown} role="group" aria-label={tA('modal.edit_agent_dialog')}>
 			<Modal
 				theme={theme}
 				title={t('new_instance.edit_title', { name: session.name })}
@@ -1614,7 +1617,7 @@ export function EditAgentModal({
 								onClick={onClose}
 								className="p-1 rounded hover:bg-white/10 transition-colors"
 								style={{ color: theme.colors.textDim }}
-								aria-label="Close modal"
+								aria-label={tA('modal.close')}
 							>
 								<X className="w-4 h-4" />
 							</button>

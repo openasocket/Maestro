@@ -1352,6 +1352,7 @@ export function SymphonyModal({
 	onSelectSession,
 }: SymphonyModalProps) {
 	const { t } = useTranslation('modals');
+	const { t: tA } = useTranslation('accessibility');
 	const { registerLayer, unregisterLayer } = useLayerStack();
 	const onCloseRef = useRef(onClose);
 	onCloseRef.current = onClose;
@@ -1807,7 +1808,7 @@ export function SymphonyModal({
 										onClick={() => setShowHelp(!showHelp)}
 										className="p-1 rounded hover:bg-white/10 transition-colors"
 										title={t('symphony.help.about_tooltip')}
-										aria-label="Help"
+										aria-label={tA('modal.help')}
 									>
 										<HelpCircle className="w-4 h-4" style={{ color: theme.colors.textDim }} />
 									</button>
@@ -2074,7 +2075,7 @@ export function SymphonyModal({
 												tabIndex={0}
 												className="grid grid-cols-3 gap-4 outline-none"
 												role="grid"
-												aria-label="Repository tiles"
+												aria-label={tA('navigation.repository_tiles')}
 											>
 												{filteredRepositories.map((repo, index) => (
 													<RepositoryTile
@@ -2417,7 +2418,7 @@ export function SymphonyModal({
 							style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
 							tabIndex={-1}
 							onClick={() => setShowBuildWarning(false)}
-							aria-label="Close pre-flight check dialog"
+							aria-label={tA('modal.close_precheck_dialog')}
 						/>
 						<div
 							className="relative rounded-lg border shadow-2xl p-6 max-w-md mx-4"

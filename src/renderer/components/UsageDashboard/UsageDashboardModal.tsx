@@ -152,6 +152,7 @@ export function UsageDashboardModal({
 	sessions = EMPTY_SESSIONS,
 }: UsageDashboardModalProps) {
 	const { t } = useTranslation('modals');
+	const { t: tA } = useTranslation('accessibility');
 	const [timeRange, setTimeRange] = useState<StatsTimeRange>(defaultTimeRange);
 	const [viewMode, setViewMode] = useState<ViewMode>('overview');
 	const [data, setData] = useState<StatsAggregation | null>(null);
@@ -506,14 +507,14 @@ export function UsageDashboardModal({
 					e.stopPropagation();
 					onClose();
 				}}
-				aria-label="Close usage dashboard"
+				aria-label={tA('modal.close_usage_dashboard')}
 			/>
 			<div
 				ref={containerRef}
 				tabIndex={-1}
 				role="dialog"
 				aria-modal="true"
-				aria-label="Usage Dashboard"
+				aria-label={tA('modal.usage_dashboard')}
 				className="relative z-10 rounded-xl shadow-2xl border overflow-hidden flex flex-col outline-none"
 				onClick={(e) => e.stopPropagation()}
 				style={{
@@ -647,7 +648,7 @@ export function UsageDashboardModal({
 					className="px-6 py-2 border-b flex items-center gap-1 flex-shrink-0 outline-none"
 					style={{ borderColor: theme.colors.border }}
 					role="tablist"
-					aria-label="Dashboard view modes"
+					aria-label={tA('navigation.dashboard_view_modes')}
 					tabIndex={0}
 					onKeyDown={handleTabKeyDown}
 					data-testid="view-mode-tabs"

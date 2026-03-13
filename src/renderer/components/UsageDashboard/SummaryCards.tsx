@@ -30,6 +30,7 @@ import {
 	Zap,
 	PanelTop,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { Theme, Session } from '../../types';
 import type { StatsAggregation } from '../../hooks/stats/useStats';
 
@@ -98,6 +99,7 @@ const MetricCard = memo(function MetricCard({
 	theme,
 	animationIndex = 0,
 }: MetricCardProps) {
+	const { t: tA } = useTranslation('accessibility');
 	return (
 		<div
 			className="p-4 rounded-lg flex items-start gap-3 dashboard-card-enter"
@@ -107,7 +109,7 @@ const MetricCard = memo(function MetricCard({
 			}}
 			data-testid="metric-card"
 			role="group"
-			aria-label={`${label}: ${value}`}
+			aria-label={tA('dashboard.metric_label', { label, value })}
 		>
 			<div
 				className="flex-shrink-0 p-2 rounded-md"
@@ -149,6 +151,7 @@ export const SummaryCards = memo(function SummaryCards({
 	columns = 3,
 	sessions,
 }: SummaryCardsProps) {
+	const { t: tA } = useTranslation('accessibility');
 	// Count agent sessions (exclude terminal-only sessions) for accurate total
 	const agentCount = useMemo(() => {
 		if (sessions) {
@@ -267,7 +270,7 @@ export const SummaryCards = memo(function SummaryCards({
 			}}
 			data-testid="summary-cards"
 			role="region"
-			aria-label="Usage summary metrics"
+			aria-label={tA('dashboard.usage_summary_metrics')}
 		>
 			{metrics.map((metric, index) => (
 				<MetricCard

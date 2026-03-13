@@ -8,6 +8,8 @@ import { parseGitDiff } from '../utils/gitDiffParser';
 import { useListNavigation } from '../hooks';
 import { generateDiffViewStyles } from '../utils/markdownConfig';
 import { getActiveLocale } from '../utils/formatters';
+import { useI18n } from '../hooks/useI18n';
+import { useTranslation } from 'react-i18next';
 import 'react-diff-view/style/index.css';
 
 interface GitLogEntry {
@@ -34,6 +36,7 @@ export const GitLogViewer = memo(function GitLogViewer({
 	onClose,
 	sshRemoteId,
 }: GitLogViewerProps) {
+	const { t: tA } = useTranslation('accessibility');
 	const [entries, setEntries] = useState<GitLogEntry[]>([]);
 	const [totalCommits, setTotalCommits] = useState<number | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -299,7 +302,7 @@ export const GitLogViewer = memo(function GitLogViewer({
 				onClick={(e) => e.stopPropagation()}
 				role="dialog"
 				aria-modal="true"
-				aria-label="Git Log Viewer"
+				aria-label={tA('modal.git_log_viewer')}
 				tabIndex={-1}
 				ref={(el) => el?.focus()}
 			>

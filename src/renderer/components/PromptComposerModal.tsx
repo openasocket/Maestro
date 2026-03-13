@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, PenLine, Send, ImageIcon, History, Eye, Keyboard, Brain, Pin } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useI18n } from '../hooks/useI18n';
 import type { Theme, ThinkingMode } from '../types';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
@@ -61,6 +62,7 @@ export function PromptComposerModal({
 	onToggleEnterToSend,
 }: PromptComposerModalProps) {
 	const { t } = useTranslation('modals');
+	const { t: tA } = useTranslation('accessibility');
 	const [value, setValue] = useState('');
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
@@ -256,7 +258,7 @@ export function PromptComposerModal({
 					onSubmit(value);
 					onClose();
 				}}
-				aria-label="Close prompt composer"
+				aria-label={tA('modal.close_prompt_composer')}
 			/>
 			<div
 				className="relative z-10 w-[90vw] h-[80vh] max-w-5xl rounded-xl border shadow-2xl flex flex-col overflow-hidden"

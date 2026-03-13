@@ -21,6 +21,7 @@ import { HistoryEntry } from '../../shared/types';
 import { stripAnsiCodes } from '../../shared/stringUtils';
 import { formatElapsedTime, getActiveLocale } from '../../shared/formatters';
 import { useSwipeGestures } from '../hooks/useSwipeGestures';
+import { useI18n } from '../../renderer/hooks/useI18n';
 
 /**
  * Format timestamp for display
@@ -51,6 +52,7 @@ interface HistoryCardProps {
 
 function HistoryCard({ entry, onSelect }: HistoryCardProps) {
 	const colors = useThemeColors();
+	const { t: ta } = useI18n('accessibility');
 
 	// Get pill color based on type
 	const getPillColor = () => {
@@ -89,7 +91,10 @@ function HistoryCard({ entry, onSelect }: HistoryCardProps) {
 				userSelect: 'none',
 				WebkitUserSelect: 'none',
 			}}
-			aria-label={`${entry.type} entry from ${formatTime(entry.timestamp)}`}
+			aria-label={ta('mobile.history_entry', {
+				type: entry.type,
+				time: formatTime(entry.timestamp),
+			})}
 		>
 			{/* Top row: Type pill, success indicator (for AUTO), and timestamp */}
 			<div
@@ -302,6 +307,7 @@ function HistoryDetailView({
 	onNavigate,
 }: HistoryDetailViewProps) {
 	const colors = useThemeColors();
+	const { t: ta } = useI18n('accessibility');
 
 	const canGoNext = currentIndex < totalCount - 1;
 	const canGoPrev = currentIndex > 0;
@@ -515,7 +521,7 @@ function HistoryDetailView({
 						WebkitTapHighlightColor: 'transparent',
 						flexShrink: 0,
 					}}
-					aria-label="Close detail view"
+					aria-label={ta('mobile.close_detail_view')}
 				>
 					Done
 				</button>
@@ -742,7 +748,7 @@ function HistoryDetailView({
 						fontSize: '14px',
 						fontWeight: 500,
 					}}
-					aria-label="Previous entry"
+					aria-label={ta('mobile.previous_entry')}
 				>
 					<svg
 						width="16"
@@ -789,7 +795,7 @@ function HistoryDetailView({
 						fontSize: '14px',
 						fontWeight: 500,
 					}}
-					aria-label="Next entry"
+					aria-label={ta('mobile.next_entry')}
 				>
 					Next
 					<svg
@@ -865,6 +871,7 @@ export function MobileHistoryPanel({
 	onSearchChange,
 }: MobileHistoryPanelProps) {
 	const colors = useThemeColors();
+	const { t: ta } = useI18n('accessibility');
 	const [entries, setEntries] = useState<HistoryEntry[]>([]);
 	const [isLoading, setIsLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -1079,7 +1086,7 @@ export function MobileHistoryPanel({
 							touchAction: 'manipulation',
 							WebkitTapHighlightColor: 'transparent',
 						}}
-						aria-label="Close history"
+						aria-label={ta('mobile.close_history')}
 					>
 						Done
 					</button>
@@ -1125,7 +1132,7 @@ export function MobileHistoryPanel({
 								transition:
 									'background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease',
 							}}
-							aria-label="Search history"
+							aria-label={ta('mobile.search_history')}
 							aria-pressed={isSearchOpen}
 						>
 							<svg
@@ -1270,7 +1277,7 @@ export function MobileHistoryPanel({
 											touchAction: 'manipulation',
 											WebkitTapHighlightColor: 'transparent',
 										}}
-										aria-label="Clear search"
+										aria-label={ta('mobile.clear_search')}
 									>
 										<svg
 											width="12"

@@ -16,6 +16,7 @@
 
 import React, { memo, useState, useMemo, useCallback } from 'react';
 import { format, subDays, startOfWeek, addDays, getDay } from 'date-fns';
+import { useTranslation } from 'react-i18next';
 import type { Theme } from '../../types';
 import type { StatsTimeRange, StatsAggregation } from '../../hooks/stats/useStats';
 import { COLORBLIND_HEATMAP_SCALE } from '../../constants/colorblindPalettes';
@@ -425,6 +426,7 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
 	theme,
 	colorBlindMode = false,
 }: ActivityHeatmapProps) {
+	const { t: tA } = useTranslation('accessibility');
 	const [metricMode, setMetricMode] = useState<MetricMode>('count');
 	const [hoveredCell, setHoveredCell] = useState<HourData | DayCell | TimeBlockCell | null>(null);
 	const [cellRect, setCellRect] = useState<DOMRect | null>(null);
@@ -592,7 +594,13 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
 			className="p-4 rounded-lg"
 			style={{ backgroundColor: theme.colors.bgMain }}
 			role="figure"
-			aria-label={`Activity heatmap showing ${metricMode === 'count' ? 'query activity' : 'duration'} over ${getDaysForRange(timeRange)} days.`}
+			aria-label={tA('dashboard.activity_heatmap', {
+				metric:
+					metricMode === 'count'
+						? tA('dashboard.query_count_label')
+						: tA('dashboard.total_duration_label'),
+				days: getDaysForRange(timeRange),
+			})}
 		>
 			{/* Header with title and metric toggle */}
 			<div className="flex items-center justify-between mb-4">
@@ -616,7 +624,7 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
 								color: metricMode === 'count' ? theme.colors.accent : theme.colors.textDim,
 							}}
 							aria-pressed={metricMode === 'count'}
-							aria-label="Show query count"
+							aria-label={tA('dashboard.show_query_count')}
 						>
 							Count
 						</button>
@@ -630,7 +638,7 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
 								borderLeft: `1px solid ${theme.colors.border}`,
 							}}
 							aria-pressed={metricMode === 'duration'}
-							aria-label="Show total duration"
+							aria-label={tA('dashboard.show_total_duration')}
 						>
 							Duration
 						</button>
@@ -879,7 +887,7 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
 			<div
 				className="flex items-center justify-end gap-2 mt-3"
 				role="list"
-				aria-label="Activity intensity scale from less to more"
+				aria-label={tA('dashboard.activity_scale')}
 			>
 				<span className="text-xs" style={{ color: theme.colors.textDim }} aria-hidden="true">
 					Less
@@ -894,7 +902,7 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
 							backgroundColor: getIntensityColor(level, theme, colorBlindMode),
 						}}
 						role="listitem"
-						aria-label={`Intensity level ${level}: ${level === 0 ? 'No activity' : level === 1 ? 'Low' : level === 2 ? 'Medium-low' : level === 3 ? 'Medium-high' : 'High'} activity`}
+						aria-label={tA(`dashboard.intensity_level_${level}` as any)}
 					/>
 				))}
 				<span className="text-xs" style={{ color: theme.colors.textDim }} aria-hidden="true">

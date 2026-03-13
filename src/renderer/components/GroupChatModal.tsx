@@ -22,6 +22,7 @@ import { AGENT_TILES } from './Wizard/screens/AgentSelectionScreen';
 import { AgentConfigPanel } from './shared/AgentConfigPanel';
 import { SshRemoteSelector } from './shared/SshRemoteSelector';
 import { useAgentConfiguration } from '../hooks/agent';
+import { useI18n } from '../hooks/useI18n';
 
 interface GroupChatModalCreateProps {
 	mode: 'create';
@@ -53,6 +54,7 @@ type GroupChatModalProps = GroupChatModalCreateProps | GroupChatModalEditProps;
 export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 	const { mode, theme, isOpen, onClose } = props;
 	const { t } = useTranslation('modals');
+	const { t: tA } = useTranslation('accessibility');
 	const groupChat = mode === 'edit' ? props.groupChat : undefined;
 
 	const [name, setName] = useState('');
@@ -249,7 +251,7 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 							onClick={onClose}
 							className="p-1 rounded hover:bg-white/10 transition-colors"
 							style={{ color: theme.colors.textDim }}
-							aria-label="Close modal"
+							aria-label={tA('modal.close')}
 						>
 							<X className="w-4 h-4" />
 						</button>
@@ -334,7 +336,7 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 										color: theme.colors.textMain,
 										zIndex: 10000,
 									}}
-									aria-label="Select moderator agent"
+									aria-label={tA('modal.select_moderator')}
 								>
 									{availableTiles.map((tile) => {
 										const isBeta = isBetaAgent(tile.id);

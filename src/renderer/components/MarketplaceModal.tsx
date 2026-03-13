@@ -730,6 +730,7 @@ export function MarketplaceModal({
 	onImportComplete,
 }: MarketplaceModalProps) {
 	const { t } = useTranslation('modals');
+	const { t: tA } = useTranslation('accessibility');
 	// Layer stack for escape handling
 	const { registerLayer, unregisterLayer } = useLayerStack();
 	const onCloseRef = useRef(onClose);
@@ -1147,7 +1148,7 @@ export function MarketplaceModal({
 										onClick={() => setShowHelp(!showHelp)}
 										className="p-1 rounded hover:bg-white/10 transition-colors"
 										title={t('marketplace.about_tooltip')}
-										aria-label="Help"
+										aria-label={tA('modal.help')}
 									>
 										<HelpCircle className="w-4 h-4" style={{ color: theme.colors.textDim }} />
 									</button>
@@ -1232,7 +1233,7 @@ export function MarketplaceModal({
 									disabled={isRefreshing}
 									className="p-1.5 rounded hover:bg-white/10 transition-colors disabled:opacity-50"
 									title={t('marketplace.refresh_tooltip')}
-									aria-label="Refresh marketplace"
+									aria-label={tA('action.refresh_marketplace')}
 									aria-busy={isRefreshing}
 								>
 									<RefreshCw
@@ -1245,7 +1246,7 @@ export function MarketplaceModal({
 									onClick={onClose}
 									className="p-1.5 rounded hover:bg-white/10 transition-colors"
 									title={t('marketplace.close_tooltip')}
-									aria-label="Close marketplace"
+									aria-label={tA('modal.close_marketplace')}
 								>
 									<X className="w-5 h-5" style={{ color: theme.colors.textDim }} />
 								</button>

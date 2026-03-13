@@ -14,6 +14,7 @@
 
 import React, { memo, useState, useMemo, useCallback, useId } from 'react';
 import { format, parseISO } from 'date-fns';
+import { useTranslation } from 'react-i18next';
 import type { Theme } from '../../types';
 import type { StatsTimeRange, StatsAggregation } from '../../hooks/stats/useStats';
 import { COLORBLIND_LINE_COLORS } from '../../constants/colorblindPalettes';
@@ -149,6 +150,7 @@ export const DurationTrendsChart = memo(function DurationTrendsChart({
 	theme,
 	colorBlindMode = false,
 }: DurationTrendsChartProps) {
+	const { t: tA } = useTranslation('accessibility');
 	const [showSmoothed, setShowSmoothed] = useState(false);
 	const [hoveredPoint, setHoveredPoint] = useState<DataPoint | null>(null);
 	const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
@@ -302,7 +304,10 @@ export const DurationTrendsChart = memo(function DurationTrendsChart({
 			className="p-4 rounded-lg"
 			style={{ backgroundColor: theme.colors.bgMain }}
 			role="figure"
-			aria-label={`Duration trends chart showing ${showSmoothed ? 'smoothed ' : ''}average response duration over time. ${chartData.length} data points displayed.`}
+			aria-label={tA('dashboard.duration_trends', {
+				smoothed: showSmoothed ? 'smoothed ' : '',
+				count: chartData.length,
+			})}
 		>
 			{/* Header with title and smoothing toggle */}
 			<div className="flex items-center justify-between mb-4">
@@ -465,7 +470,12 @@ export const DurationTrendsChart = memo(function DurationTrendsChart({
 									onMouseEnter={(e) => handleMouseEnter(point, e)}
 									onMouseLeave={handleMouseLeave}
 									role="graphics-symbol"
-									aria-label={`${point.formattedDate}: Average duration ${formatDuration(point.displayDuration)}, ${point.count} ${point.count === 1 ? 'query' : 'queries'}`}
+									aria-label={tA('dashboard.duration_point', {
+										date: point.formattedDate,
+										duration: formatDuration(point.displayDuration),
+										count: point.count,
+										queryLabel: point.count === 1 ? 'query' : 'queries',
+									})}
 									tabIndex={0}
 								/>
 							);

@@ -26,6 +26,7 @@ import {
 	Edit3,
 } from 'lucide-react';
 import type { Theme, Session, LogEntry, UsageStats } from '../types';
+import { useTranslation } from 'react-i18next';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { SessionActivityGraph, type ActivityEntry } from './SessionActivityGraph';
@@ -84,6 +85,7 @@ export function AgentSessionsBrowser({
 	onNewSession,
 	onUpdateTab,
 }: AgentSessionsBrowserProps) {
+	const { t: tA } = useTranslation('accessibility');
 	// Get agentId from the active session's toolType
 	const agentId = activeSession?.toolType || 'claude-code';
 
@@ -1102,7 +1104,7 @@ export function AgentSessionsBrowser({
 						onKeyDown={handleKeyDown}
 						tabIndex={0}
 						role="region"
-						aria-label="Session messages"
+						aria-label={tA('modal.session_messages')}
 					>
 						{/* Load more indicator */}
 						{hasMoreMessages && (

@@ -21,6 +21,7 @@ import { triggerHaptic, HAPTIC_PATTERNS, GESTURE_THRESHOLDS } from './constants'
 import { formatRelativeTime, truncateCommand } from '../../shared/formatters';
 import { useSwipeGestures } from '../hooks/useSwipeGestures';
 import type { CommandHistoryEntry } from '../hooks/useCommandHistory';
+import { useI18n } from '../../renderer/hooks/useI18n';
 
 /** Height of the drawer handle area */
 const HANDLE_HEIGHT = 28;
@@ -85,6 +86,7 @@ function SwipeableHistoryItem({
 	onLongPressEnd,
 }: SwipeableHistoryItemProps) {
 	const colors = useThemeColors();
+	const { t: ta } = useI18n('accessibility');
 	const [showDeleteAction, setShowDeleteAction] = useState(false);
 
 	// Swipe gesture hook for swipe-to-delete
@@ -164,7 +166,7 @@ function SwipeableHistoryItem({
 						border: 'none',
 					}}
 					onClick={handleDeleteTap}
-					aria-label="Delete command"
+					aria-label={ta('mobile.delete_command')}
 				>
 					<svg
 						width="20"
@@ -315,6 +317,7 @@ export function CommandHistoryDrawer({
 	onClearHistory,
 }: CommandHistoryDrawerProps) {
 	const colors = useThemeColors();
+	const { t: ta } = useI18n('accessibility');
 	const drawerRef = useRef<HTMLDivElement>(null);
 	const contentRef = useRef<HTMLDivElement>(null);
 
@@ -497,7 +500,7 @@ export function CommandHistoryDrawer({
 					border: 'none',
 					padding: 0,
 				}}
-				aria-label="Close command history drawer"
+				aria-label={ta('mobile.close_command_history')}
 			/>
 
 			{/* Drawer container */}

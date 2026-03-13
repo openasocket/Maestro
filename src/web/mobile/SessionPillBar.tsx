@@ -21,6 +21,7 @@ import type { Session, GroupInfo } from '../hooks/useSessions';
 import { triggerHaptic, HAPTIC_PATTERNS } from './constants';
 import { truncatePath } from '../../shared/formatters';
 import { getAgentDisplayName } from '../../shared/agentMetadata';
+import { useI18n } from '../../renderer/hooks/useI18n';
 
 /** Duration in ms to trigger long-press */
 const LONG_PRESS_DURATION = 500;
@@ -48,6 +49,7 @@ interface SessionPillProps {
  */
 function SessionPill({ session, isActive, onSelect, onLongPress }: SessionPillProps) {
 	const colors = useThemeColors();
+	const { t: ta } = useI18n('accessibility');
 	const buttonRef = useRef<HTMLButtonElement>(null);
 	const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const isLongPressTriggeredRef = useRef(false);
@@ -212,7 +214,11 @@ function SessionPill({ session, isActive, onSelect, onLongPress }: SessionPillPr
 				WebkitUserSelect: 'none',
 			}}
 			aria-pressed={isActive}
-			aria-label={`${session.name} session, ${getStatus()}, ${session.inputMode} mode${isActive ? ', active' : ''}. Long press for details.`}
+			aria-label={ta(isActive ? 'mobile.session_card_active' : 'mobile.session_card', {
+				name: session.name,
+				status: getStatus(),
+				mode: session.inputMode,
+			})}
 		>
 			{/* Status dot */}
 			<StatusDot status={getStatus()} size="sm" />
@@ -254,6 +260,7 @@ function SessionInfoPopover({
 	onToggleBookmark,
 }: SessionInfoPopoverProps) {
 	const colors = useThemeColors();
+	const { t: ta } = useI18n('accessibility');
 	const popoverRef = useRef<HTMLDivElement>(null);
 
 	// Get status label based on session state
@@ -358,7 +365,7 @@ function SessionInfoPopover({
 			<div
 				ref={popoverRef}
 				role="dialog"
-				aria-label={`Session info for ${session.name}`}
+				aria-label={ta('mobile.session_info', { name: session.name })}
 				style={{
 					...calculatePosition(),
 					backgroundColor: colors.bgSidebar,
@@ -395,7 +402,7 @@ function SessionInfoPopover({
 					</div>
 					<button
 						onClick={onClose}
-						aria-label="Close popover"
+						aria-label={ta('mobile.close_popover')}
 						style={{
 							padding: '4px 8px',
 							fontSize: '18px',
@@ -604,6 +611,7 @@ function GroupHeader({
 	onToggleCollapse,
 }: GroupHeaderProps) {
 	const colors = useThemeColors();
+	const { t: ta } = useI18n('accessibility');
 	const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 	const isScrollingRef = useRef(false);
 
@@ -683,7 +691,10 @@ function GroupHeader({
 				transition: 'all 0.15s ease',
 			}}
 			aria-expanded={!isCollapsed}
-			aria-label={`${name} group with ${sessionCount} sessions. ${isCollapsed ? 'Tap to expand' : 'Tap to collapse'}`}
+			aria-label={ta(isCollapsed ? 'mobile.group_expand' : 'mobile.group_collapse', {
+				name,
+				count: sessionCount,
+			})}
 		>
 			{/* Collapse/expand indicator */}
 			<span
@@ -778,6 +789,7 @@ export function SessionPillBar({
 	style,
 }: SessionPillBarProps) {
 	const colors = useThemeColors();
+	const { t: ta } = useI18n('accessibility');
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	const [popoverState, setPopoverState] = useState<PopoverState | null>(null);
 	const [collapsedGroups, setCollapsedGroups] = useState<Set<string> | null>(null);
@@ -1008,7 +1020,7 @@ export function SessionPillBar({
 								WebkitTapHighlightColor: 'transparent',
 								outline: 'none',
 							}}
-							aria-label={`Search ${sessions.length} sessions`}
+							aria-label={ta('mobile.search_sessions', { count: sessions.length })}
 							title="Search Sessions"
 						>
 							{/* Search icon */}
@@ -1050,7 +1062,7 @@ export function SessionPillBar({
 									WebkitTapHighlightColor: 'transparent',
 									outline: 'none',
 								}}
-								aria-label="View history"
+								aria-label={ta('mobile.view_history')}
 								title="History"
 							>
 								{/* Clock/history icon */}
@@ -1091,7 +1103,7 @@ export function SessionPillBar({
 					// Hide scrollbar using inline style (for webkit browsers)
 					className="hide-scrollbar"
 					role="tablist"
-					aria-label="Session selector organized by groups. Long press a session for details."
+					aria-label={ta('mobile.session_selector_hint')}
 				>
 					{sortedGroupKeys.map((groupKey) => {
 						const group = sessionsByGroup[groupKey];

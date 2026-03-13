@@ -13,6 +13,7 @@ import { useListNavigation } from '../hooks';
 import { useUIStore } from '../stores/uiStore';
 import { useFileExplorerStore } from '../stores/fileExplorerStore';
 import { useTranslation } from 'react-i18next';
+import { useI18n } from '../hooks/useI18n';
 
 interface QuickAction {
 	id: string;
@@ -211,6 +212,7 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 	} = props;
 
 	const { t } = useTranslation(['menus', 'common']);
+	const { t: tA } = useTranslation('accessibility');
 
 	// UI store actions for search commands (avoid threading more props through 3-layer chain)
 	const setActiveFocus = useUIStore((s) => s.setActiveFocus);
@@ -1477,7 +1479,7 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 				ref={modalRef}
 				role="dialog"
 				aria-modal="true"
-				aria-label="Quick Actions"
+				aria-label={tA('modal.quick_actions')}
 				tabIndex={-1}
 				className="w-[600px] rounded-xl shadow-2xl border overflow-hidden flex flex-col max-h-[550px] outline-none"
 				style={{ backgroundColor: theme.colors.bgActivity, borderColor: theme.colors.border }}

@@ -22,6 +22,7 @@ import type { MergeResult } from '../types/contextMerge';
 import { fuzzyMatchWithScore } from '../utils/search';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { useListNavigation } from '../hooks';
+import { useI18n } from '../hooks/useI18n';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { formatTokensCompact } from '../utils/formatters';
 import { ScreenReaderAnnouncement, useAnnouncement } from './Wizard/ScreenReaderAnnouncement';
@@ -168,6 +169,7 @@ export function MergeSessionModal({
 	onMerge,
 }: MergeSessionModalProps) {
 	const { t } = useTranslation('modals');
+	const { t: ta } = useI18n('accessibility');
 
 	// View mode state
 	const [viewMode, setViewMode] = useState<ViewMode>('search');
@@ -649,7 +651,7 @@ export function MergeSessionModal({
 					className="px-4 pt-3 pb-2 border-b flex gap-1"
 					style={{ borderColor: theme.colors.border }}
 					role="tablist"
-					aria-label="Selection mode"
+					aria-label={ta('form.selection_mode')}
 				>
 					{[
 						{ mode: 'paste' as ViewMode, label: t('merge_session.paste_id_tab'), icon: Clipboard },
@@ -811,7 +813,7 @@ export function MergeSessionModal({
 								ref={scrollContainerRef}
 								className="flex-1 overflow-y-auto px-2 pb-2"
 								role="listbox"
-								aria-label="Available sessions and tabs"
+								aria-label={ta('form.available_sessions_tabs')}
 							>
 								{filteredItems.length === 0 ? (
 									<div
@@ -833,7 +835,7 @@ export function MergeSessionModal({
 												key={sessionId}
 												className="mb-1"
 												role="group"
-												aria-label={`Session: ${sessionName}`}
+												aria-label={ta('form.session_label', { name: sessionName })}
 											>
 												{/* Session Header */}
 												<button
@@ -923,7 +925,9 @@ export function MergeSessionModal({
 																							? theme.colors.accentForeground
 																							: theme.colors.textDim,
 																					}}
-																					aria-label={`Session ID: ${item.agentSessionId}`}
+																					aria-label={ta('form.session_id_label', {
+																						id: item.agentSessionId,
+																					})}
 																				>
 																					{item.agentSessionId.split('-')[0].toUpperCase()}
 																				</span>
@@ -937,7 +941,9 @@ export function MergeSessionModal({
 																				? theme.colors.accentForeground
 																				: theme.colors.textDim,
 																		}}
-																		aria-label={`approximately ${formatTokensCompact(item.estimatedTokens)} tokens`}
+																		aria-label={ta('form.token_count_label', {
+																			tokens: formatTokensCompact(item.estimatedTokens),
+																		})}
 																	>
 																		~{formatTokensCompact(item.estimatedTokens)}
 																	</span>
@@ -960,7 +966,7 @@ export function MergeSessionModal({
 					className="p-4 border-t space-y-3"
 					style={{ borderColor: theme.colors.border }}
 					role="region"
-					aria-label="Merge preview and options"
+					aria-label={ta('form.merge_preview_options')}
 				>
 					{/* Token Preview */}
 					<div
@@ -968,7 +974,7 @@ export function MergeSessionModal({
 						style={{ backgroundColor: theme.colors.bgMain }}
 						role="status"
 						aria-live="polite"
-						aria-label="Token estimate"
+						aria-label={ta('form.token_estimate')}
 					>
 						<div className="flex justify-between">
 							<span style={{ color: theme.colors.textDim }}>

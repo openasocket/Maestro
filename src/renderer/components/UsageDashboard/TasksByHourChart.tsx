@@ -12,6 +12,7 @@
  */
 
 import { memo, useState, useEffect, useMemo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Theme } from '../../types';
 import type { StatsTimeRange } from '../../hooks/stats/useStats';
 import { captureException } from '../../utils/sentry';
@@ -61,6 +62,7 @@ export const TasksByHourChart = memo(function TasksByHourChart({
 	timeRange,
 	theme,
 }: TasksByHourChartProps) {
+	const { t: tA } = useTranslation('accessibility');
 	const [tasks, setTasks] = useState<AutoRunTask[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -236,7 +238,11 @@ export const TasksByHourChart = memo(function TasksByHourChart({
 				)}
 
 				{/* Bars */}
-				<div className="flex items-end gap-0.5 h-24" role="img" aria-label="Tasks by hour of day">
+				<div
+					className="flex items-end gap-0.5 h-24"
+					role="img"
+					aria-label={tA('dashboard.tasks_by_hour')}
+				>
 					{hourlyData.map((hourData) => {
 						const height = maxCount > 0 ? (hourData.count / maxCount) * 100 : 0;
 						const isPeak = peakHours.includes(hourData.hour);

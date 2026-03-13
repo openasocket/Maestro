@@ -26,6 +26,7 @@ import type { GroomingProgress } from '../types/contextMerge';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { getAgentDisplayName } from '../services/contextGroomer';
+import { useI18n } from '../hooks/useI18n';
 
 /**
  * Progress stage definition for transfer display
@@ -255,6 +256,7 @@ export function TransferProgressModal({
 	onComplete,
 }: TransferProgressModalProps) {
 	const { t } = useTranslation('modals');
+	const { t: tA } = useTranslation('accessibility');
 	// Track start time for elapsed time display
 	const [startTime] = useState(() => Date.now());
 
@@ -354,7 +356,7 @@ export function TransferProgressModal({
 			className="fixed inset-0 modal-overlay flex items-center justify-center z-[9999]"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Transfer Progress"
+			aria-label={tA('modal.transfer_progress')}
 			tabIndex={-1}
 		>
 			<div
@@ -390,7 +392,7 @@ export function TransferProgressModal({
 							onClick={() => onComplete?.() || onCancel()}
 							className="p-1 rounded hover:bg-white/10 transition-colors"
 							style={{ color: theme.colors.textDim }}
-							aria-label="Close modal"
+							aria-label={tA('modal.close')}
 						>
 							<X className="w-4 h-4" />
 						</button>

@@ -22,6 +22,7 @@ import type { Theme } from '../types';
 import type { GroomingProgress } from '../types/contextMerge';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
+import { useI18n } from '../hooks/useI18n';
 
 /**
  * Progress stage definition for display
@@ -188,6 +189,7 @@ export function MergeProgressModal({
 	onCancel,
 }: MergeProgressModalProps) {
 	const { t } = useTranslation('modals');
+	const { t: tA } = useTranslation('accessibility');
 
 	// Track start time for elapsed time display
 	const [startTime] = useState(() => Date.now());
@@ -275,7 +277,7 @@ export function MergeProgressModal({
 			className="fixed inset-0 modal-overlay flex items-center justify-center z-[9999]"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Merge Progress"
+			aria-label={tA('modal.merge_progress')}
 			tabIndex={-1}
 		>
 			<div

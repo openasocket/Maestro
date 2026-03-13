@@ -7,6 +7,8 @@ import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { ImageDiffViewer } from './ImageDiffViewer';
 import { generateDiffViewStyles } from '../utils/markdownConfig';
+import { useTranslation } from 'react-i18next';
+import { useI18n } from '../hooks/useI18n';
 import 'react-diff-view/style/index.css';
 
 interface GitDiffViewerProps {
@@ -22,6 +24,7 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 	theme,
 	onClose,
 }: GitDiffViewerProps) {
+	const { t: tA } = useTranslation('accessibility');
 	const [activeTab, setActiveTab] = useState(0);
 	const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 	const { registerLayer, unregisterLayer, updateLayerHandler } = useLayerStack();
@@ -108,7 +111,7 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 					onClick={(e) => e.stopPropagation()}
 					role="dialog"
 					aria-modal="true"
-					aria-label="Git Diff Preview"
+					aria-label={tA('modal.git_diff_preview')}
 					tabIndex={-1}
 					ref={(el) => el?.focus()}
 				>
@@ -155,7 +158,7 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 				onClick={(e) => e.stopPropagation()}
 				role="dialog"
 				aria-modal="true"
-				aria-label="Git Diff Preview"
+				aria-label={tA('modal.git_diff_preview')}
 				tabIndex={-1}
 				ref={(el) => el?.focus()}
 			>

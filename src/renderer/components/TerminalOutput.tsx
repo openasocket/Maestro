@@ -31,6 +31,8 @@ import { LogFilterControls } from './LogFilterControls';
 import { SaveMarkdownModal } from './SaveMarkdownModal';
 import { generateTerminalProseStyles } from '../utils/markdownConfig';
 import { safeClipboardWrite } from '../utils/clipboard';
+import { useI18n } from '../hooks/useI18n';
+import { useTranslation } from 'react-i18next';
 
 // ============================================================================
 // Tool display helpers (pure functions, hoisted out of render path)
@@ -1079,6 +1081,7 @@ export const TerminalOutput = memo(
 			onOpenInTab,
 		} = props;
 
+		const { t: tA } = useTranslation('accessibility');
 		// Use the forwarded ref if provided, otherwise create a local one
 		const localRef = useRef<HTMLDivElement>(null);
 		const terminalOutputRef = (ref as React.RefObject<HTMLDivElement>) || localRef;
@@ -1611,7 +1614,7 @@ export const TerminalOutput = memo(
 				ref={terminalOutputRef}
 				tabIndex={0}
 				role="region"
-				aria-label="Terminal output"
+				aria-label={tA('modal.terminal_output')}
 				className="terminal-output flex-1 flex flex-col overflow-hidden transition-colors outline-none relative"
 				style={{
 					backgroundColor:

@@ -15,6 +15,8 @@ import { formatShortcutKeys } from '../utils/shortcutFormatter';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { ConfirmModal } from './ConfirmModal';
+import { useI18n } from '../hooks/useI18n';
+import { useTranslation } from 'react-i18next';
 
 interface SystemLogEntry {
 	timestamp: number;
@@ -59,6 +61,7 @@ export function LogViewer({
 	onSelectedLevelsChange,
 	onShortcutUsed,
 }: LogViewerProps) {
+	const { t: tA } = useTranslation('accessibility');
 	const [logs, setLogs] = useState<SystemLogEntry[]>([]);
 	const [filteredLogs, setFilteredLogs] = useState<SystemLogEntry[]>([]);
 	const [searchOpen, setSearchOpen] = useState(false);
@@ -365,7 +368,7 @@ export function LogViewer({
 			onKeyDown={handleKeyDown}
 			role="dialog"
 			aria-modal="true"
-			aria-label="System Log Viewer"
+			aria-label={tA('modal.system_log_viewer')}
 			tabIndex={-1}
 		>
 			{/* Header */}

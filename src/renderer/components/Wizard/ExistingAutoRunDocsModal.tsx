@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Trash2, BookOpen, FolderOpen, AlertTriangle, FileText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useI18n } from '../../hooks/useI18n';
 import type { Theme } from '../../types';
 import { useLayerStack } from '../../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
@@ -32,6 +33,7 @@ export function ExistingAutoRunDocsModal({
 	onCancel,
 }: ExistingAutoRunDocsModalProps) {
 	const { t } = useTranslation('modals');
+	const { t: tA } = useTranslation('accessibility');
 	const { registerLayer, unregisterLayer, updateLayerHandler } = useLayerStack();
 	const layerIdRef = useRef<string>();
 	const continueButtonRef = useRef<HTMLButtonElement>(null);
@@ -109,7 +111,7 @@ export function ExistingAutoRunDocsModal({
 			className="fixed inset-0 modal-overlay flex items-center justify-center z-[10000] animate-in fade-in duration-200"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Existing Auto Run Documents Detected"
+			aria-label={tA('modal.existing_autorun_docs')}
 			tabIndex={-1}
 			onKeyDown={handleKeyDown}
 		>
