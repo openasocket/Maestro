@@ -23,6 +23,7 @@ import type { Theme } from '../types';
 import type { SummarizeProgress, SummarizeResult } from '../types/contextMerge';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
+import { useI18n } from '../hooks/useI18n';
 
 /**
  * Progress stage definition for display
@@ -220,6 +221,7 @@ export function SummarizeProgressModal({
 	onComplete,
 }: SummarizeProgressModalProps) {
 	const { t } = useTranslation('modals');
+	const { t: ta } = useI18n('accessibility');
 	// Track start time for elapsed time display
 	const [startTime] = useState(() => Date.now());
 
@@ -310,7 +312,7 @@ export function SummarizeProgressModal({
 			className="fixed inset-0 modal-overlay flex items-center justify-center z-[9999]"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Summarization Progress"
+			aria-label={ta('modal.summarization_progress')}
 			tabIndex={-1}
 		>
 			<div
@@ -346,7 +348,7 @@ export function SummarizeProgressModal({
 							onClick={onComplete}
 							className="p-1 rounded hover:bg-white/10 transition-colors"
 							style={{ color: theme.colors.textDim }}
-							aria-label="Close modal"
+							aria-label={ta('modal.close')}
 						>
 							<X className="w-4 h-4" />
 						</button>
@@ -396,6 +398,11 @@ export function SummarizeProgressModal({
 						<div
 							className="h-2 rounded-full overflow-hidden"
 							style={{ backgroundColor: theme.colors.bgMain }}
+							role="progressbar"
+							aria-valuenow={progressValue}
+							aria-valuemin={0}
+							aria-valuemax={100}
+							aria-label={ta('status.summarization_progress', { percent: progressValue })}
 						>
 							<div
 								className="h-full rounded-full transition-all duration-300 ease-out"

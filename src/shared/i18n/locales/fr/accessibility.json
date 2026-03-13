@@ -42,5 +42,31 @@
 		"shell_input": "Shell command input",
 		"open_command_history": "Open command history",
 		"quick_actions": "Quick actions"
+	},
+	"modal": {
+		"close_panel": "Fermer le panneau",
+		"confirm_remove_queued": "Confirmer la suppression du message en file d'attente"
+	},
+	"form": {
+		"env_var_name": "Nom de la variable d'environnement",
+		"env_var_value": "Valeur de la variable d'environnement",
+		"ignore_pattern_input": "Ajouter un nouveau motif d'exclusion",
+		"search_autorun_docs": "Rechercher dans les documents d'exécution automatique",
+		"filter_log_output": "Filtrer la sortie du journal"
+	},
+	"status": {
+		"toast_notifications": "Notifications contextuelles",
+		"ai_thinking": "L'IA réfléchit : {{name}}",
+		"items_queued": "{{count}} élément en file d'attente",
+		"items_queued_other": "{{count}} éléments en file d'attente",
+		"summarization_progress": "Progression du résumé : {{percent}}%"
+	},
+	"action": {
+		"clear_filter": "Effacer le filtre",
+		"show_more_lines": "Tout afficher ({{count}} lignes)",
+		"show_less": "Afficher moins",
+		"expand_json_node": "Développer",
+		"collapse_json_node": "Réduire",
+		"close_queue_browser": "Fermer le navigateur de file d'attente"
 	}
 }

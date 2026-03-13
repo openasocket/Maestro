@@ -42,5 +42,31 @@
 		"shell_input": "Shell command input",
 		"open_command_history": "Open command history",
 		"quick_actions": "Quick actions"
+	},
+	"modal": {
+		"close_panel": "প্যানেল বন্ধ করুন",
+		"confirm_remove_queued": "সারিবদ্ধ বার্তা সরানো নিশ্চিত করুন"
+	},
+	"form": {
+		"env_var_name": "পরিবেশ পরিবর্তনশীলের নাম",
+		"env_var_value": "পরিবেশ পরিবর্তনশীলের মান",
+		"ignore_pattern_input": "নতুন উপেক্ষা প্যাটার্ন যোগ করুন",
+		"search_autorun_docs": "অটো রান নথি অনুসন্ধান করুন",
+		"filter_log_output": "লগ আউটপুট ফিল্টার করুন"
+	},
+	"status": {
+		"toast_notifications": "টোস্ট বিজ্ঞপ্তি",
+		"ai_thinking": "AI ভাবছে: {{name}}",
+		"items_queued": "{{count}}টি আইটেম সারিবদ্ধ",
+		"items_queued_other": "{{count}}টি আইটেম সারিবদ্ধ",
+		"summarization_progress": "সারসংক্ষেপ অগ্রগতি: {{percent}}%"
+	},
+	"action": {
+		"clear_filter": "ফিল্টার মুছুন",
+		"show_more_lines": "সব দেখান ({{count}} লাইন)",
+		"show_less": "কম দেখান",
+		"expand_json_node": "প্রসারিত করুন",
+		"collapse_json_node": "সংকুচিত করুন",
+		"close_queue_browser": "সারি ব্রাউজার বন্ধ করুন"
 	}
 }

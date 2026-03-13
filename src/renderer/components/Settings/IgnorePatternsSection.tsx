@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 import type { LucideIcon } from 'lucide-react';
 import { FolderX, Plus, X, Check, FileText } from 'lucide-react';
 import type { Theme } from '../../types';
+import { useI18n } from '../../hooks/useI18n';
 
 export interface IgnorePatternsSectionProps {
 	/** Theme object for styling */
@@ -62,6 +63,7 @@ export function IgnorePatternsSection({
 	onReset,
 }: IgnorePatternsSectionProps) {
 	const { t } = useTranslation('settings');
+	const { t: tA } = useI18n('accessibility');
 	// Local state for the new pattern input
 	const [newPattern, setNewPattern] = useState('');
 	const [inputError, setInputError] = useState<string | null>(null);
@@ -219,6 +221,7 @@ export function IgnorePatternsSection({
 							}}
 							onKeyDown={handleKeyDown}
 							placeholder={t('ignore_patterns.input_placeholder')}
+							aria-label={tA('form.ignore_pattern_input')}
 							className="w-full px-3 py-2 rounded text-sm font-mono outline-none"
 							style={{
 								backgroundColor: theme.colors.bgActivity,

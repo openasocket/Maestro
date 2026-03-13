@@ -42,5 +42,31 @@
 		"shell_input": "Shell command input",
 		"open_command_history": "Open command history",
 		"quick_actions": "Quick actions"
+	},
+	"modal": {
+		"close_panel": "إغلاق اللوحة",
+		"confirm_remove_queued": "تأكيد إزالة الرسالة المنتظرة"
+	},
+	"form": {
+		"env_var_name": "اسم متغير البيئة",
+		"env_var_value": "قيمة متغير البيئة",
+		"ignore_pattern_input": "إضافة نمط تجاهل جديد",
+		"search_autorun_docs": "البحث في مستندات التشغيل التلقائي",
+		"filter_log_output": "تصفية مخرجات السجل"
+	},
+	"status": {
+		"toast_notifications": "إشعارات منبثقة",
+		"ai_thinking": "الذكاء الاصطناعي يفكر: {{name}}",
+		"items_queued": "{{count}} عنصر في قائمة الانتظار",
+		"items_queued_other": "{{count}} عناصر في قائمة الانتظار",
+		"summarization_progress": "تقدم التلخيص: {{percent}}%"
+	},
+	"action": {
+		"clear_filter": "مسح التصفية",
+		"show_more_lines": "عرض الكل ({{count}} سطر)",
+		"show_less": "عرض أقل",
+		"expand_json_node": "توسيع",
+		"collapse_json_node": "طي",
+		"close_queue_browser": "إغلاق متصفح قائمة الانتظار"
 	}
 }

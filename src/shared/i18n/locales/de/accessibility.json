@@ -42,5 +42,31 @@
 		"shell_input": "Shell command input",
 		"open_command_history": "Open command history",
 		"quick_actions": "Quick actions"
+	},
+	"modal": {
+		"close_panel": "Panel schließen",
+		"confirm_remove_queued": "Entfernung der wartenden Nachricht bestätigen"
+	},
+	"form": {
+		"env_var_name": "Name der Umgebungsvariable",
+		"env_var_value": "Wert der Umgebungsvariable",
+		"ignore_pattern_input": "Neues Ignoriermuster hinzufügen",
+		"search_autorun_docs": "Auto-Run-Dokumente durchsuchen",
+		"filter_log_output": "Protokollausgabe filtern"
+	},
+	"status": {
+		"toast_notifications": "Benachrichtigungen",
+		"ai_thinking": "KI denkt nach: {{name}}",
+		"items_queued": "{{count}} Element in der Warteschlange",
+		"items_queued_other": "{{count}} Elemente in der Warteschlange",
+		"summarization_progress": "Zusammenfassungsfortschritt: {{percent}}%"
+	},
+	"action": {
+		"clear_filter": "Filter löschen",
+		"show_more_lines": "Alle anzeigen ({{count}} Zeilen)",
+		"show_less": "Weniger anzeigen",
+		"expand_json_node": "Erweitern",
+		"collapse_json_node": "Zuklappen",
+		"close_queue_browser": "Warteschlangen-Browser schließen"
 	}
 }

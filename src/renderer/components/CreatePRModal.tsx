@@ -4,6 +4,7 @@ import { X, GitPullRequest, Loader2, AlertTriangle, ExternalLink } from 'lucide-
 import type { Theme, GhCliStatus } from '../types';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
+import { useI18n } from '../hooks/useI18n';
 
 /**
  * Renders error text with URLs converted to clickable links
@@ -86,6 +87,7 @@ export function CreatePRModal({
 	onPRCreated,
 }: CreatePRModalProps) {
 	const { t } = useTranslation('modals');
+	const { t: tA } = useI18n('accessibility');
 	const { registerLayer, unregisterLayer } = useLayerStack();
 	const onCloseRef = useRef(onClose);
 	onCloseRef.current = onClose;
@@ -229,7 +231,11 @@ export function CreatePRModal({
 							{t('create_pr.title')}
 						</h2>
 					</div>
-					<button onClick={onClose} className="p-1 rounded hover:bg-white/10 transition-colors">
+					<button
+						onClick={onClose}
+						className="p-1 rounded hover:bg-white/10 transition-colors"
+						aria-label={tA('modal.close')}
+					>
 						<X className="w-4 h-4" style={{ color: theme.colors.textDim }} />
 					</button>
 				</div>

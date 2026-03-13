@@ -42,5 +42,31 @@
 		"shell_input": "Shell command input",
 		"open_command_history": "Open command history",
 		"quick_actions": "Quick actions"
+	},
+	"modal": {
+		"close_panel": "关闭面板",
+		"confirm_remove_queued": "确认移除排队消息"
+	},
+	"form": {
+		"env_var_name": "环境变量名称",
+		"env_var_value": "环境变量值",
+		"ignore_pattern_input": "添加新的忽略模式",
+		"search_autorun_docs": "搜索自动运行文档",
+		"filter_log_output": "过滤日志输出"
+	},
+	"status": {
+		"toast_notifications": "弹出通知",
+		"ai_thinking": "AI 正在思考：{{name}}",
+		"items_queued": "{{count}} 个项目排队中",
+		"items_queued_other": "{{count}} 个项目排队中",
+		"summarization_progress": "摘要进度：{{percent}}%"
+	},
+	"action": {
+		"clear_filter": "清除筛选",
+		"show_more_lines": "显示全部（{{count}} 行）",
+		"show_less": "收起",
+		"expand_json_node": "展开",
+		"collapse_json_node": "折叠",
+		"close_queue_browser": "关闭队列浏览器"
 	}
 }

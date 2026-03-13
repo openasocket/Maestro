@@ -311,6 +311,9 @@ export const ToastContainer = memo(function ToastContainer({
 		<div
 			className="fixed bottom-4 right-4 z-50 flex flex-col-reverse"
 			style={{ pointerEvents: 'none' }}
+			role="status"
+			aria-live="polite"
+			aria-label="Toast notifications"
 		>
 			<div style={{ pointerEvents: 'auto' }}>
 				{toasts.map((toast) => (

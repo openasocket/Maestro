@@ -15,6 +15,7 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus, Trash2 } from 'lucide-react';
 import type { Theme } from '../../types';
+import { useI18n } from '../../hooks/useI18n';
 
 export interface EnvVarEntry {
 	id: number;
@@ -30,6 +31,7 @@ export interface EnvVarsEditorProps {
 
 export function EnvVarsEditor({ envVars, setEnvVars, theme }: EnvVarsEditorProps) {
 	const { t } = useTranslation('settings');
+	const { t: tA } = useI18n('accessibility');
 	// Convert object to array with stable IDs for editing
 	const [entries, setEntries] = useState<EnvVarEntry[]>(() => {
 		return Object.entries(envVars).map(([key, value], index) => ({
@@ -158,6 +160,7 @@ export function EnvVarsEditor({ envVars, setEnvVars, theme }: EnvVarsEditorProps
 									value={entry.key}
 									onChange={(e) => updateEntry(entry.id, 'key', e.target.value)}
 									placeholder={t('env_editor.variable_placeholder')}
+									aria-label={tA('form.env_var_name')}
 									className={`flex-1 p-2 rounded border bg-transparent outline-none text-xs font-mono ${
 										entry.key.trim() &&
 										!validateEntry({ id: entry.id, key: entry.key, value: entry.value })
@@ -177,6 +180,7 @@ export function EnvVarsEditor({ envVars, setEnvVars, theme }: EnvVarsEditorProps
 									value={entry.value}
 									onChange={(e) => updateEntry(entry.id, 'value', e.target.value)}
 									placeholder={t('env_editor.value_placeholder')}
+									aria-label={tA('form.env_var_value')}
 									className="flex-[2] p-2 rounded border bg-transparent outline-none text-xs font-mono"
 									style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
 								/>

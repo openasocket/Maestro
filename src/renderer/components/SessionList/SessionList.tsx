@@ -35,6 +35,7 @@ import { SkinnySidebar } from './SkinnySidebar';
 import { LiveOverlayPanel } from './LiveOverlayPanel';
 import { useSessionCategories } from '../../hooks/session/useSessionCategories';
 import { useSessionFilterMode } from '../../hooks/session/useSessionFilterMode';
+import { useI18n } from '../../hooks/useI18n';
 
 // ============================================================================
 // SessionContextMenu - Right-click context menu for session items
@@ -103,6 +104,7 @@ function SessionListInner(props: SessionListProps) {
 	// Store subscriptions
 	const sessions = useSessionStore((s) => s.sessions);
 	const groups = useSessionStore((s) => s.groups);
+	const { t: tA } = useI18n('accessibility');
 	const activeSessionId = useSessionStore((s) => s.activeSessionId);
 	const leftSidebarOpen = useUIStore((s) => s.leftSidebarOpen);
 	const activeFocus = useUIStore((s) => s.activeFocus);
@@ -941,6 +943,7 @@ function SessionListInner(props: SessionListProps) {
 											className="p-1 rounded hover:bg-red-500/20 opacity-0 group-hover:opacity-100 transition-opacity"
 											style={{ color: theme.colors.error }}
 											title="Delete empty group"
+											aria-label={tA('action.delete_empty_group')}
 										>
 											<X className="w-3 h-3" />
 										</button>
@@ -955,6 +958,7 @@ function SessionListInner(props: SessionListProps) {
 											className="p-1 rounded hover:bg-red-500/20 opacity-0 group-hover:opacity-100 transition-opacity"
 											style={{ color: theme.colors.error }}
 											title="Remove group and all agents"
+											aria-label={tA('action.remove_group_all')}
 										>
 											<Trash2 className="w-3 h-3" />
 										</button>

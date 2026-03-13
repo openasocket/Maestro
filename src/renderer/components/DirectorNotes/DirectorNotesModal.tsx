@@ -4,6 +4,7 @@ import { X, History, Sparkles, Loader2, Clapperboard, HelpCircle } from 'lucide-
 import { useTranslation } from 'react-i18next';
 import type { Theme } from '../../types';
 import { useLayerStack } from '../../contexts/LayerStackContext';
+import { useI18n } from '../../hooks/useI18n';
 import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
 import { OverviewTab, type TabFocusHandle } from './OverviewTab';
 import { hasCachedSynopsis } from './AIOverviewTab';
@@ -43,6 +44,7 @@ export function DirectorNotesModal({
 	onFileClick,
 }: DirectorNotesModalProps) {
 	const { t } = useTranslation('modals');
+	const { t: tA } = useI18n('accessibility');
 	const { directorNotesSettings: _directorNotesSettings, shortcuts } = useSettings();
 	const cached = hasCachedSynopsis();
 	const [activeTab, setActiveTab] = useState<TabId>('history');
@@ -205,7 +207,11 @@ export function DirectorNotesModal({
 					</div>
 
 					{/* Close button */}
-					<button onClick={onClose} className="p-1 rounded hover:bg-white/10 transition-colors">
+					<button
+						onClick={onClose}
+						className="p-1 rounded hover:bg-white/10 transition-colors"
+						aria-label={tA('modal.close')}
+					>
 						<X className="w-4 h-4" style={{ color: theme.colors.textDim }} />
 					</button>
 				</div>

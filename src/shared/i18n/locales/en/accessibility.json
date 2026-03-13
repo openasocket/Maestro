@@ -72,6 +72,8 @@
 	},
 	"modal": {
 		"close": "Close modal",
+		"close_panel": "Close panel",
+		"confirm_remove_queued": "Confirm remove queued message",
 		"summarization_progress": "Summarization Progress",
 		"register_leaderboard": "Register for Leaderboard",
 		"merge_progress": "Merge Progress",
@@ -124,7 +126,12 @@
 		"session_label": "Session: {{name}}",
 		"session_id_label": "Session ID: {{id}}",
 		"token_count_label": "approximately {{tokens}} tokens",
-		"create_new_document": "Create New Document"
+		"create_new_document": "Create New Document",
+		"env_var_name": "Environment variable name",
+		"env_var_value": "Environment variable value",
+		"ignore_pattern_input": "Add new ignore pattern",
+		"search_autorun_docs": "Search Auto Run documents",
+		"filter_log_output": "Filter log output"
 	},
 	"status": {
 		"context_usage": "Context window at {{usage}}% capacity",
@@ -141,7 +148,12 @@
 		"external_link_edge": "External link edge",
 		"external_link_edge_highlighted": "External link edge (highlighted)",
 		"process_details": "Process Details",
-		"system_processes": "System Processes"
+		"system_processes": "System Processes",
+		"toast_notifications": "Toast notifications",
+		"ai_thinking": "AI is thinking: {{name}}",
+		"items_queued": "{{count}} item queued",
+		"items_queued_other": "{{count}} items queued",
+		"summarization_progress": "Summarization progress: {{percent}}%"
 	},
 	"action": {
 		"refresh_marketplace": "Refresh marketplace",
@@ -249,7 +261,13 @@
 		"ssh_failed": "SSH connection failed",
 		"remote_ssh": "Remote SSH",
 		"toggle_readonly_claude": "Toggle read-only mode (Claude won't modify files)",
-		"copy_code": "Copy code"
+		"copy_code": "Copy code",
+		"clear_filter": "Clear filter",
+		"show_more_lines": "Show all ({{count}} lines)",
+		"show_less": "Show less",
+		"expand_json_node": "Expand",
+		"collapse_json_node": "Collapse",
+		"close_queue_browser": "Close queue browser"
 	},
 	"dashboard": {
 		"usage_summary_metrics": "Usage summary metrics",
