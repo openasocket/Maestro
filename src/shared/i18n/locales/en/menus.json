@@ -31,6 +31,8 @@
 		"check_updates_desc": "Get the latest version",
 		"about": "About Maestro",
 		"about_desc": "Version, Credits, Stats",
+		"language": "Language",
+		"language_desc": "Change display language",
 		"quit": "Quit Maestro"
 	},
 	"context": {
