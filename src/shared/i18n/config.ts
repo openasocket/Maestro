@@ -119,6 +119,8 @@ export const LANGUAGE_NATIVE_NAMES: Record<SupportedLanguage, string> = {
 	pt: 'Português',
 };
 
+const isDev = process.env.NODE_ENV === 'development';
+
 /**
  * Initialize i18next with all plugins and configuration.
  * Returns a promise that resolves when i18n is ready.
@@ -224,6 +226,24 @@ export function initI18n(): Promise<typeof i18n> {
 			interpolation: {
 				escapeValue: false, // React already escapes rendered output
 			},
+
+			// Log missing keys in development so translators can track gaps
+			saveMissing: isDev,
+			missingKeyHandler: isDev
+				? (lngs, ns, key, fallbackValue) => {
+						console.warn(
+							`[i18n] Missing key: "${ns}:${key}" for language(s): ${(lngs as string[]).join(', ')} (fallback: "${fallbackValue}")`
+						);
+					}
+				: false,
+
+			// On interpolation failure (missing variable), show key in dev, fallback in prod
+			missingInterpolationHandler: isDev
+				? (text, value) => {
+						console.warn(`[i18n] Missing interpolation value: "${value}" in "${text}"`);
+						return text;
+					}
+				: undefined,
 
 			detection: {
 				order: ['localStorage', 'navigator'],

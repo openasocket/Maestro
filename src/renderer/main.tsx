@@ -104,10 +104,29 @@ const bootstrap = async () => {
 		}
 	}
 
+	// Minimal loading fallback while i18n resources initialize (<100ms typically).
+	// Uses inline styles to avoid FOUC — no external CSS needed.
+	const i18nFallback = (
+		<div
+			style={{
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				height: '100vh',
+				background: '#1a1a2e',
+				color: '#888',
+				fontFamily: 'system-ui, sans-serif',
+				fontSize: '14px',
+			}}
+		>
+			Loading…
+		</div>
+	);
+
 	ReactDOM.createRoot(document.getElementById('root')!).render(
 		<React.StrictMode>
 			<ErrorBoundary>
-				<Suspense fallback={null}>
+				<Suspense fallback={i18nFallback}>
 					<LayerStackProvider>
 						<WizardProvider>
 							<MaestroConsole />
