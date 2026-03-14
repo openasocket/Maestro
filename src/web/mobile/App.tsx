@@ -19,7 +19,7 @@ import { useNotifications } from '../hooks/useNotifications';
 import { useUnreadBadge } from '../hooks/useUnreadBadge';
 import { useOfflineQueue } from '../hooks/useOfflineQueue';
 import { useMobileSessionManagement } from '../hooks/useMobileSessionManagement';
-import { useOfflineStatus, useMaestroMode, useDesktopTheme } from '../main';
+import { useOfflineStatus, useMaestroMode, useDesktopTheme, useDesktopLanguage } from '../main';
 import { buildApiUrl } from '../utils/config';
 import { formatCost } from '../../shared/formatters';
 // SYNC: Uses estimateContextUsage() from shared/contextUsage.ts
@@ -282,6 +282,7 @@ export default function MobileApp() {
 	const { t } = useTranslation('common');
 	const isOffline = useOfflineStatus();
 	const { setDesktopTheme } = useDesktopTheme();
+	const { setDesktopLanguage } = useDesktopLanguage();
 
 	// View state persistence and screen tracking (hook consolidates multiple effects)
 	const {
@@ -472,6 +473,7 @@ export default function MobileApp() {
 		hapticTapPattern: HAPTIC_PATTERNS.tap,
 		onResponseComplete: handleResponseComplete,
 		onThemeUpdate: setDesktopTheme,
+		onLanguageUpdate: setDesktopLanguage,
 		onCustomCommands: setCustomCommands,
 		onAutoRunStateChange: (sessionId, state) => {
 			webLogger.info(

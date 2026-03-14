@@ -8,7 +8,7 @@ import { webLogger } from './utils/logger';
 import { initI18n } from '../shared/i18n/config';
 import './index.css';
 
-export { useOfflineStatus, useMaestroMode, useDesktopTheme } from './App';
+export { useOfflineStatus, useMaestroMode, useDesktopTheme, useDesktopLanguage } from './App';
 
 // Initialize i18n then mount the application
 initI18n().then(() => {
