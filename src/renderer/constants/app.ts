@@ -119,7 +119,6 @@ export function getSlashCommandDescription(cmd: string): string {
 	// Check for built-in command with i18n key
 	const i18nKey = BUILTIN_COMMAND_I18N_KEYS[cmdName];
 	if (i18nKey) {
-		 
 		return i18n.t(`common:${i18nKey}` as any);
 	}
 

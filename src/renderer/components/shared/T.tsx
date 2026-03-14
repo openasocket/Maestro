@@ -34,7 +34,6 @@ export function T({ k, count, values, fallback }: TProps): React.ReactElement {
 
 	const { t } = useTranslation(ns);
 
-	 
 	const result = (t as any)(key, {
 		...values,
 		...(count !== undefined ? { count } : {}),
