@@ -22,6 +22,7 @@ import { stripAnsiCodes } from '../../shared/stringUtils';
 import { formatElapsedTime, getActiveLocale } from '../../shared/formatters';
 import { useSwipeGestures } from '../hooks/useSwipeGestures';
 import { useI18n } from '../../renderer/hooks/useI18n';
+import { useDirection, getDirectionalTranslateX } from '../utils/rtlCoordinates';
 
 /**
  * Format timestamp for display
@@ -308,31 +309,41 @@ function HistoryDetailView({
 }: HistoryDetailViewProps) {
 	const colors = useThemeColors();
 	const { t: ta } = useI18n('accessibility');
+	const dir = useDirection();
+	const isRTL = dir === 'rtl';
 
 	const canGoNext = currentIndex < totalCount - 1;
 	const canGoPrev = currentIndex > 0;
 
+	// RTL-aware navigation callbacks
+	const goNext = canGoNext
+		? () => {
+				triggerHaptic(HAPTIC_PATTERNS.tap);
+				onNavigate(currentIndex + 1);
+			}
+		: undefined;
+	const goPrev = canGoPrev
+		? () => {
+				triggerHaptic(HAPTIC_PATTERNS.tap);
+				onNavigate(currentIndex - 1);
+			}
+		: undefined;
+
 	// Swipe gestures for mobile navigation
+	// In RTL, swipe directions are mirrored: swipe-left → prev, swipe-right → next
 	const {
 		handlers: swipeHandlers,
 		offsetX,
 		isSwiping,
 	} = useSwipeGestures({
-		onSwipeLeft: canGoNext
-			? () => {
-					triggerHaptic(HAPTIC_PATTERNS.tap);
-					onNavigate(currentIndex + 1);
-				}
-			: undefined,
-		onSwipeRight: canGoPrev
-			? () => {
-					triggerHaptic(HAPTIC_PATTERNS.tap);
-					onNavigate(currentIndex - 1);
-				}
-			: undefined,
+		onSwipeLeft: isRTL ? goPrev : goNext,
+		onSwipeRight: isRTL ? goNext : goPrev,
 		trackOffset: true,
 		threshold: 50,
 	});
+
+	// Logical offset: positive = swiping toward "start" (prev direction)
+	const logicalOffsetX = isRTL ? -offsetX : offsetX;
 
 	// Get pill color based on type
 	const getPillColor = () => {
@@ -389,8 +400,8 @@ function HistoryDetailView({
 			style={{
 				position: 'fixed',
 				top: 0,
-				left: 0,
-				right: 0,
+				insetInlineStart: 0,
+				insetInlineEnd: 0,
 				bottom: 0,
 				backgroundColor: colors.bgMain,
 				zIndex: 210, // Higher than MobileHistoryPanel (200) to overlay it
@@ -645,7 +656,7 @@ function HistoryDetailView({
 					overflowY: 'auto',
 					overflowX: 'hidden',
 					padding: '16px',
-					transform: `translateX(${offsetX}px)`,
+					transform: getDirectionalTranslateX(logicalOffsetX, dir),
 					transition: isSwiping ? 'none' : 'transform 0.2s ease-out',
 					touchAction: 'pan-y', // Allow vertical scrolling, capture horizontal swipes
 				}}
@@ -665,17 +676,17 @@ function HistoryDetailView({
 				</pre>
 			</div>
 
-			{/* Swipe hint overlays */}
-			{isSwiping && offsetX > 20 && canGoPrev && (
+			{/* Swipe hint overlays — use logical offset and positioning for RTL */}
+			{isSwiping && logicalOffsetX > 20 && canGoPrev && (
 				<div
 					style={{
 						position: 'absolute',
-						left: 0,
+						insetInlineStart: 0,
 						top: '50%',
 						transform: 'translateY(-50%)',
 						padding: '16px',
 						color: colors.accent,
-						opacity: Math.min(1, offsetX / 50),
+						opacity: Math.min(1, logicalOffsetX / 50),
 					}}
 				>
 					<svg
@@ -686,20 +697,20 @@ function HistoryDetailView({
 						stroke="currentColor"
 						strokeWidth="2"
 					>
-						<polyline points="15 18 9 12 15 6" />
+						<polyline points={isRTL ? '9 18 15 12 9 6' : '15 18 9 12 15 6'} />
 					</svg>
 				</div>
 			)}
-			{isSwiping && offsetX < -20 && canGoNext && (
+			{isSwiping && logicalOffsetX < -20 && canGoNext && (
 				<div
 					style={{
 						position: 'absolute',
-						right: 0,
+						insetInlineEnd: 0,
 						top: '50%',
 						transform: 'translateY(-50%)',
 						padding: '16px',
 						color: colors.accent,
-						opacity: Math.min(1, Math.abs(offsetX) / 50),
+						opacity: Math.min(1, Math.abs(logicalOffsetX) / 50),
 					}}
 				>
 					<svg
@@ -710,7 +721,7 @@ function HistoryDetailView({
 						stroke="currentColor"
 						strokeWidth="2"
 					>
-						<polyline points="9 18 15 12 9 6" />
+						<polyline points={isRTL ? '15 18 9 12 15 6' : '9 18 15 12 9 6'} />
 					</svg>
 				</div>
 			)}
@@ -1038,8 +1049,8 @@ export function MobileHistoryPanel({
 				style={{
 					position: 'fixed',
 					top: 0,
-					left: 0,
-					right: 0,
+					insetInlineStart: 0,
+					insetInlineEnd: 0,
 					bottom: 0,
 					backgroundColor: colors.bgMain,
 					zIndex: 200, // Higher than CommandInputBar (100) to fully cover the screen including input box
