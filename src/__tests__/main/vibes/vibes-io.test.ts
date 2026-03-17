@@ -55,6 +55,7 @@ import type {
 	VibesLineAnnotation,
 	VibeFunctionAnnotation,
 	VibesSessionRecord,
+	VibesEdgeRecord,
 	VibesEnvironmentEntry,
 	VibesCommandEntry,
 	VibesPromptEntry,
@@ -113,6 +114,17 @@ const SAMPLE_SESSION_RECORD: VibesSessionRecord = {
 	environment_hash: null,
 	assurance_level: 'medium',
 	description: null,
+};
+
+const SAMPLE_EDGE_RECORD: VibesEdgeRecord = {
+	type: 'edge',
+	edge_type: 'caused_by',
+	source_ref: 'a'.repeat(64),
+	source_type: 'annotation',
+	target_ref: 'b'.repeat(64),
+	target_type: 'context',
+	timestamp: '2026-02-10T12:10:00Z',
+	session_id: 'session-001',
 };
 
 const SAMPLE_ENVIRONMENT_ENTRY: VibesEnvironmentEntry = {
@@ -1911,6 +1923,109 @@ describe('vibes-io', () => {
 			const result = await computeLocCoverageFromAnnotations(tmpDir);
 			const deleted = result.files.find((f) => f.file_path === 'src/deleted.ts');
 			expect(deleted).toBeUndefined();
+		});
+	});
+
+	// ========================================================================
+	// Edge Record I/O (Spec Section 7.6)
+	// ========================================================================
+	describe('edge record I/O', () => {
+		it('should append and read back edge records via buffered write', async () => {
+			await appendAnnotation(tmpDir, SAMPLE_EDGE_RECORD);
+
+			const annotations = await readAnnotations(tmpDir);
+			expect(annotations).toHaveLength(1);
+			expect(annotations[0]).toEqual(SAMPLE_EDGE_RECORD);
+		});
+
+		it('should append edge records via immediate write', async () => {
+			await appendAnnotationImmediate(tmpDir, SAMPLE_EDGE_RECORD);
+
+			const annotations = await readAnnotations(tmpDir);
+			expect(annotations).toHaveLength(1);
+			expect(annotations[0]).toEqual(SAMPLE_EDGE_RECORD);
+		});
+
+		it('should interleave edge records with other annotation types', async () => {
+			await appendAnnotation(tmpDir, SAMPLE_LINE_ANNOTATION);
+			await appendAnnotation(tmpDir, SAMPLE_EDGE_RECORD);
+			await appendAnnotation(tmpDir, SAMPLE_FUNCTION_ANNOTATION);
+			await appendAnnotation(tmpDir, {
+				...SAMPLE_EDGE_RECORD,
+				edge_type: 'informed_by',
+				source_ref: 'c'.repeat(64),
+				target_ref: 'd'.repeat(64),
+			} as VibesEdgeRecord);
+			await appendAnnotation(tmpDir, SAMPLE_SESSION_RECORD);
+
+			const annotations = await readAnnotations(tmpDir);
+			expect(annotations).toHaveLength(5);
+			expect(annotations[0].type).toBe('line');
+			expect(annotations[1].type).toBe('edge');
+			expect(annotations[2].type).toBe('function');
+			expect(annotations[3].type).toBe('edge');
+			expect(annotations[4].type).toBe('session');
+		});
+
+		it('should batch-append edge records via appendAnnotations', async () => {
+			const edges: VibesEdgeRecord[] = [
+				SAMPLE_EDGE_RECORD,
+				{
+					...SAMPLE_EDGE_RECORD,
+					edge_type: 'supersedes',
+					source_ref: 'e'.repeat(64),
+					target_ref: 'f'.repeat(64),
+					timestamp: '2026-02-10T12:15:00Z',
+				},
+			];
+			await appendAnnotations(tmpDir, edges);
+
+			const annotations = await readAnnotations(tmpDir);
+			expect(annotations).toHaveLength(2);
+			expect(annotations[0].type).toBe('edge');
+			expect(annotations[1].type).toBe('edge');
+			expect((annotations[0] as VibesEdgeRecord).edge_type).toBe('caused_by');
+			expect((annotations[1] as VibesEdgeRecord).edge_type).toBe('supersedes');
+		});
+
+		it('should not count edge records in computeStatsFromAnnotations totals', async () => {
+			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
+
+			await appendAnnotationImmediate(tmpDir, SAMPLE_LINE_ANNOTATION);
+			await appendAnnotationImmediate(tmpDir, SAMPLE_EDGE_RECORD);
+			await appendAnnotationImmediate(tmpDir, SAMPLE_EDGE_RECORD);
+
+			const stats = await computeStatsFromAnnotations(tmpDir);
+			// Only line/function annotations count — edge records are excluded
+			expect(stats.total_annotations).toBe(1);
+		});
+
+		it('should preserve all edge record fields through round-trip', async () => {
+			const edgeWithMetadata: VibesEdgeRecord = {
+				type: 'edge',
+				edge_type: 'informed_by',
+				source_ref: '1'.repeat(64),
+				source_type: 'annotation',
+				target_ref: '2'.repeat(64),
+				target_type: 'context',
+				timestamp: '2026-02-10T12:20:00Z',
+				session_id: 'session-042',
+				metadata: { file: 'src/index.ts', reason: 'file read' },
+			};
+			await appendAnnotationImmediate(tmpDir, edgeWithMetadata);
+
+			const annotations = await readAnnotations(tmpDir);
+			expect(annotations).toHaveLength(1);
+			const read = annotations[0] as VibesEdgeRecord;
+			expect(read.type).toBe('edge');
+			expect(read.edge_type).toBe('informed_by');
+			expect(read.source_ref).toBe('1'.repeat(64));
+			expect(read.source_type).toBe('annotation');
+			expect(read.target_ref).toBe('2'.repeat(64));
+			expect(read.target_type).toBe('context');
+			expect(read.timestamp).toBe('2026-02-10T12:20:00Z');
+			expect(read.session_id).toBe('session-042');
+			expect(read.metadata).toEqual({ file: 'src/index.ts', reason: 'file read' });
 		});
 	});
 });
