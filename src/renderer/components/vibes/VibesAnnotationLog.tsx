@@ -12,6 +12,7 @@ import {
 	Play,
 	Square,
 	AlertTriangle,
+	GitBranch,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
@@ -113,8 +114,11 @@ function isValidAnnotation(annotation: VibesAnnotation): boolean {
 		if (typeof annotation.assurance_level !== 'string') return false;
 		return true;
 	}
+	if (annotation.type === 'edge') {
+		return typeof annotation.source_ref === 'string' && typeof annotation.target_ref === 'string';
+	}
 	// Accept unknown annotation types if they have a timestamp
-	return !!(annotation as Record<string, unknown>).timestamp;
+	return !!(annotation as unknown as Record<string, unknown>).timestamp;
 }
 
 /** Format a timestamp as relative time (e.g., "2 min ago"). */
@@ -232,30 +236,33 @@ export const VibesAnnotationLog: React.FC<VibesAnnotationLogProps> = ({
 	const [manifest, setManifest] = useState<VibesManifest | null>(null);
 	const [isLoadingManifest, setIsLoadingManifest] = useState(false);
 
-	const handleViewDetails = useCallback(async (id: string) => {
-		if (detailId === id) {
-			setDetailId(null);
-			return;
-		}
-		setDetailId(id);
-		if (!manifest && projectPath) {
-			setIsLoadingManifest(true);
-			try {
-				const result = await window.maestro.vibes.getManifest(projectPath);
-				if (result.success && result.data) {
-					try {
-						setManifest(JSON.parse(result.data));
-					} catch (parseErr) {
-						console.warn('Failed to parse manifest JSON:', parseErr);
-					}
-				}
-			} catch {
-				// Manifest unavailable — detail panel shows hashes only
-			} finally {
-				setIsLoadingManifest(false);
+	const handleViewDetails = useCallback(
+		async (id: string) => {
+			if (detailId === id) {
+				setDetailId(null);
+				return;
 			}
-		}
-	}, [detailId, manifest, projectPath]);
+			setDetailId(id);
+			if (!manifest && projectPath) {
+				setIsLoadingManifest(true);
+				try {
+					const result = await window.maestro.vibes.getManifest(projectPath);
+					if (result.success && result.data) {
+						try {
+							setManifest(JSON.parse(result.data));
+						} catch (parseErr) {
+							console.warn('Failed to parse manifest JSON:', parseErr);
+						}
+					}
+				} catch {
+					// Manifest unavailable — detail panel shows hashes only
+				} finally {
+					setIsLoadingManifest(false);
+				}
+			}
+		},
+		[detailId, manifest, projectPath]
+	);
 
 	// Filter out malformed annotations and track parse errors
 	const { validAnnotations, parseErrorCount } = useMemo(() => {
@@ -273,14 +280,14 @@ export const VibesAnnotationLog: React.FC<VibesAnnotationLogProps> = ({
 
 	const filteredAnnotations = useMemo(
 		() => validAnnotations.filter((a) => matchesFilters(a, filters)),
-		[validAnnotations, filters],
+		[validAnnotations, filters]
 	);
 
 	const updateFilter = useCallback(
 		<K extends keyof AnnotationFilters>(key: K, value: AnnotationFilters[K]) => {
 			setFilters((prev) => ({ ...prev, [key]: value }));
 		},
-		[],
+		[]
 	);
 
 	const toggleExpanded = useCallback((id: string) => {
@@ -294,6 +301,9 @@ export const VibesAnnotationLog: React.FC<VibesAnnotationLogProps> = ({
 		}
 		if (annotation.type === 'line') {
 			return `line-${annotation.file_path}-${annotation.line_start}-${annotation.timestamp}-${index}`;
+		}
+		if (annotation.type === 'edge') {
+			return `edge-${annotation.edge_type}-${annotation.source_ref.slice(0, 8)}-${annotation.target_ref.slice(0, 8)}-${index}`;
 		}
 		return `fn-${annotation.file_path}-${annotation.function_name}-${annotation.timestamp}-${index}`;
 	}, []);
@@ -320,10 +330,7 @@ export const VibesAnnotationLog: React.FC<VibesAnnotationLogProps> = ({
 						className="flex items-center gap-2 px-3 py-2.5 border-b animate-pulse"
 						style={{ borderColor: theme.colors.border }}
 					>
-						<div
-							className="w-3 h-3 rounded"
-							style={{ backgroundColor: theme.colors.bgActivity }}
-						/>
+						<div className="w-3 h-3 rounded" style={{ backgroundColor: theme.colors.bgActivity }} />
 						<div
 							className="w-14 h-3 rounded"
 							style={{ backgroundColor: theme.colors.bgActivity }}
@@ -417,7 +424,8 @@ export const VibesAnnotationLog: React.FC<VibesAnnotationLogProps> = ({
 				>
 					<AlertTriangle className="w-3 h-3 shrink-0" style={{ color: '#eab308' }} />
 					<span style={{ color: '#eab308' }}>
-						{parseErrorCount} annotation{parseErrorCount !== 1 ? 's' : ''} skipped due to malformed data
+						{parseErrorCount} annotation{parseErrorCount !== 1 ? 's' : ''} skipped due to malformed
+						data
 					</span>
 				</div>
 			)}
@@ -440,13 +448,11 @@ export const VibesAnnotationLog: React.FC<VibesAnnotationLogProps> = ({
 							const isExpanded = expandedId === key;
 
 							if (annotation.type === 'session') {
-								return (
-									<SessionAnnotationRow
-										key={key}
-										theme={theme}
-										annotation={annotation}
-									/>
-								);
+								return <SessionAnnotationRow key={key} theme={theme} annotation={annotation} />;
+							}
+
+							if (annotation.type === 'edge') {
+								return <EdgeAnnotationRow key={key} theme={theme} annotation={annotation} />;
 							}
 
 							return (
@@ -481,7 +487,9 @@ export const VibesAnnotationLog: React.FC<VibesAnnotationLogProps> = ({
 					{parseErrorCount > 0 && ` (${parseErrorCount} skipped)`}
 				</span>
 				{activeFilterCount > 0 && (
-					<span>{activeFilterCount} filter{activeFilterCount !== 1 ? 's' : ''} active</span>
+					<span>
+						{activeFilterCount} filter{activeFilterCount !== 1 ? 's' : ''} active
+					</span>
 				)}
 			</div>
 		</div>
@@ -538,9 +546,7 @@ const SessionAnnotationRow: React.FC<SessionAnnotationRowProps> = ({ theme, anno
 			className="flex items-center gap-2 px-3 py-2 text-xs border-b"
 			style={{
 				borderColor: theme.colors.border,
-				backgroundColor: isStart
-					? 'rgba(34, 197, 94, 0.05)'
-					: 'rgba(239, 68, 68, 0.05)',
+				backgroundColor: isStart ? 'rgba(34, 197, 94, 0.05)' : 'rgba(239, 68, 68, 0.05)',
 			}}
 		>
 			{isStart ? (
@@ -548,10 +554,7 @@ const SessionAnnotationRow: React.FC<SessionAnnotationRowProps> = ({ theme, anno
 			) : (
 				<Square className="w-3 h-3 shrink-0" style={{ color: '#ef4444' }} />
 			)}
-			<span
-				className="font-medium"
-				style={{ color: isStart ? '#22c55e' : '#ef4444' }}
-			>
+			<span className="font-medium" style={{ color: isStart ? '#22c55e' : '#ef4444' }}>
 				Session {isStart ? 'Started' : 'Ended'}
 			</span>
 			<span className="text-[10px] font-mono" style={{ color: theme.colors.textDim }}>
@@ -570,12 +573,44 @@ const SessionAnnotationRow: React.FC<SessionAnnotationRowProps> = ({ theme, anno
 };
 
 // ----------------------------------------------------------------------------
+// Edge annotation row (relationship records)
+// ----------------------------------------------------------------------------
+
+interface EdgeAnnotationRowProps {
+	theme: Theme;
+	annotation: Extract<VibesAnnotation, { type: 'edge' }>;
+}
+
+const EdgeAnnotationRow: React.FC<EdgeAnnotationRowProps> = ({ theme, annotation }) => {
+	return (
+		<div
+			className="flex items-center gap-2 px-3 py-2 text-xs border-b"
+			style={{
+				borderColor: theme.colors.border,
+				backgroundColor: 'rgba(147, 51, 234, 0.05)',
+			}}
+		>
+			<GitBranch className="w-3 h-3 shrink-0" style={{ color: '#9333ea' }} />
+			<span className="font-medium" style={{ color: '#9333ea' }}>
+				{annotation.edge_type.replace(/_/g, ' ')}
+			</span>
+			<span className="text-[10px] font-mono truncate" style={{ color: theme.colors.textDim }}>
+				{annotation.source_ref.slice(0, 8)} → {annotation.target_ref.slice(0, 8)}
+			</span>
+			<span className="text-[10px] ml-auto shrink-0" style={{ color: theme.colors.textDim }}>
+				{formatRelativeTime(annotation.timestamp)}
+			</span>
+		</div>
+	);
+};
+
+// ----------------------------------------------------------------------------
 // Line/function annotation row
 // ----------------------------------------------------------------------------
 
 interface AnnotationRowProps {
 	theme: Theme;
-	annotation: Exclude<VibesAnnotation, { type: 'session' }>;
+	annotation: Exclude<VibesAnnotation, { type: 'session' } | { type: 'edge' }>;
 	isExpanded: boolean;
 	onToggle: () => void;
 	showDetail?: boolean;
@@ -599,10 +634,7 @@ const AnnotationRow: React.FC<AnnotationRowProps> = ({
 	const assuranceColor = ASSURANCE_COLORS[annotation.assurance_level] ?? ASSURANCE_COLORS.medium;
 
 	return (
-		<div
-			className="border-b"
-			style={{ borderColor: theme.colors.border }}
-		>
+		<div className="border-b" style={{ borderColor: theme.colors.border }}>
 			{/* Main row — clickable */}
 			<button
 				onClick={onToggle}
@@ -618,12 +650,18 @@ const AnnotationRow: React.FC<AnnotationRowProps> = ({
 				)}
 
 				{/* Timestamp */}
-				<span className="text-[10px] shrink-0 w-16 tabular-nums" style={{ color: theme.colors.textDim }}>
+				<span
+					className="text-[10px] shrink-0 w-16 tabular-nums"
+					style={{ color: theme.colors.textDim }}
+				>
 					{formatRelativeTime(annotation.timestamp)}
 				</span>
 
 				{/* File path + line range */}
-				<span className="flex-1 truncate font-mono text-[11px]" style={{ color: theme.colors.textMain }}>
+				<span
+					className="flex-1 truncate font-mono text-[11px]"
+					style={{ color: theme.colors.textMain }}
+				>
 					{annotation.file_path}
 					{annotation.type === 'line' && (
 						<span style={{ color: theme.colors.accent }}>
@@ -632,9 +670,7 @@ const AnnotationRow: React.FC<AnnotationRowProps> = ({
 						</span>
 					)}
 					{annotation.type === 'function' && (
-						<span style={{ color: theme.colors.accent }}>
-							:{annotation.function_name}
-						</span>
+						<span style={{ color: theme.colors.accent }}>:{annotation.function_name}</span>
 					)}
 				</span>
 
@@ -707,7 +743,7 @@ const AnnotationRow: React.FC<AnnotationRowProps> = ({
 
 interface AnnotationDetailProps {
 	theme: Theme;
-	annotation: Exclude<VibesAnnotation, { type: 'session' }>;
+	annotation: Exclude<VibesAnnotation, { type: 'session' } | { type: 'edge' }>;
 }
 
 const AnnotationDetail: React.FC<AnnotationDetailProps> = ({ theme, annotation }) => {
@@ -725,13 +761,22 @@ const AnnotationDetail: React.FC<AnnotationDetailProps> = ({ theme, annotation }
 			<DetailSection theme={theme} icon={<Terminal className="w-3 h-3" />} label="Environment">
 				<DetailRow theme={theme} label="Hash" value={annotation.environment_hash} mono />
 				{annotation.session_id && (
-					<DetailRow theme={theme} label="Session" value={annotation.session_id.slice(0, 12)} mono />
+					<DetailRow
+						theme={theme}
+						label="Session"
+						value={annotation.session_id.slice(0, 12)}
+						mono
+					/>
 				)}
 				{annotation.commit_hash && (
 					<DetailRow theme={theme} label="Commit" value={annotation.commit_hash.slice(0, 8)} mono />
 				)}
 				<DetailRow theme={theme} label="Assurance" value={annotation.assurance_level} />
-				<DetailRow theme={theme} label="Timestamp" value={new Date(annotation.timestamp).toLocaleString()} />
+				<DetailRow
+					theme={theme}
+					label="Timestamp"
+					value={new Date(annotation.timestamp).toLocaleString()}
+				/>
 			</DetailSection>
 
 			{/* Command info (if command_hash present) */}

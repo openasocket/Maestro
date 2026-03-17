@@ -184,5 +184,30 @@ export interface VibesSessionRecord {
 	description: string | null;
 }
 
+/** Directed relationship between audit events/context entries (spec section 7.6). */
+export interface VibesEdgeRecord {
+	type: 'edge';
+	edge_type: VibesEdgeType;
+	source_ref: string; // annotation_id, context hash, or session_id
+	source_type: 'annotation' | 'context' | 'session';
+	target_ref: string; // annotation_id, context hash, or session_id
+	target_type: 'annotation' | 'context' | 'session';
+	timestamp: string; // ISO-8601
+	session_id?: string; // Session that recorded this edge
+	metadata?: Record<string, unknown>; // Arbitrary key-value metadata
+}
+
+export type VibesEdgeType =
+	| 'caused_by' // Source was directly caused by target
+	| 'depends_on' // Source depends on target
+	| 'informed_by' // Source was informed by target context
+	| 'delegated_to' // Source session delegated to target session
+	| 'supersedes' // Source replaces target
+	| 'reviewed_by'; // Source was reviewed in context of target
+
 /** Union of all annotation types written to .ai-audit/annotations.jsonl. */
-export type VibesAnnotation = VibesLineAnnotation | VibeFunctionAnnotation | VibesSessionRecord;
+export type VibesAnnotation =
+	| VibesLineAnnotation
+	| VibeFunctionAnnotation
+	| VibesSessionRecord
+	| VibesEdgeRecord;
