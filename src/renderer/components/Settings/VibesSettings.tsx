@@ -31,6 +31,8 @@ import {
 	CheckCircle2,
 	AlertCircle,
 	Loader2,
+	Shield,
+	RefreshCw,
 } from 'lucide-react';
 import DiscoBallIcon from '../icons/DiscoBallIcon';
 import type { Theme } from '../../types';
@@ -59,17 +61,25 @@ export interface VibesSettingsProps {
 	setVibesCompressReasoningThreshold: (value: number) => void;
 	vibesExternalBlobThreshold: number;
 	setVibesExternalBlobThreshold: (value: number) => void;
+	vibesAttestationCosign: boolean;
+	setVibesAttestationCosign: (value: boolean) => void;
+	vibesAttestationSubmit: boolean;
+	setVibesAttestationSubmit: (value: boolean) => void;
 }
 
 const ASSURANCE_LEVELS: { value: VibesAssuranceLevel; label: string; description: string }[] = [
 	{ value: 'low', label: 'Low', description: 'Environment context only (~200 bytes/annotation)' },
 	{ value: 'medium', label: 'Medium', description: 'Adds prompt context (~2-10 KB/annotation)' },
-	{ value: 'high', label: 'High', description: 'Adds reasoning/chain-of-thought (~10-500 KB/annotation)' },
+	{
+		value: 'high',
+		label: 'High',
+		description: 'Adds reasoning/chain-of-thought (~10-500 KB/annotation)',
+	},
 ];
 
 const AGENT_LABELS: Record<string, string> = {
 	'claude-code': 'Claude Code',
-	'codex': 'Codex',
+	codex: 'Codex',
 };
 
 export function VibesSettings({
@@ -94,16 +104,24 @@ export function VibesSettings({
 	setVibesCompressReasoningThreshold,
 	vibesExternalBlobThreshold,
 	setVibesExternalBlobThreshold,
+	vibesAttestationCosign,
+	setVibesAttestationCosign,
+	vibesAttestationSubmit,
+	setVibesAttestationSubmit,
 }: VibesSettingsProps) {
 	const [newExtension, setNewExtension] = useState('');
 	const [extensionError, setExtensionError] = useState<string | null>(null);
 	const [newPattern, setNewPattern] = useState('');
 	const [patternError, setPatternError] = useState<string | null>(null);
 	const [advancedOpen, setAdvancedOpen] = useState(false);
-	const [binaryDetectStatus, setBinaryDetectStatus] = useState<'idle' | 'checking' | 'found' | 'not-found'>('idle');
+	const [binaryDetectStatus, setBinaryDetectStatus] = useState<
+		'idle' | 'checking' | 'found' | 'not-found'
+	>('idle');
 	const [binaryDetectedPath, setBinaryDetectedPath] = useState<string | null>(null);
 	const [binaryVersion, setBinaryVersion] = useState<string | null>(null);
 	const prevBinaryPath = useRef(vibesCheckBinaryPath);
+	const [signingKeyId, setSigningKeyId] = useState<string | null>(null);
+	const [keygenLoading, setKeygenLoading] = useState(false);
 
 	// Detect binary when VIBES is enabled or binary path changes
 	useEffect(() => {
@@ -124,9 +142,7 @@ export function VibesSettings({
 				if (pathChanged && window.maestro?.vibes?.clearBinaryCache) {
 					await window.maestro.vibes.clearBinaryCache();
 				}
-				const result = await window.maestro.vibes.findBinary(
-					vibesCheckBinaryPath || undefined,
-				);
+				const result = await window.maestro.vibes.findBinary(vibesCheckBinaryPath || undefined);
 				if (!cancelled) {
 					if (result.path) {
 						setBinaryDetectStatus('found');
@@ -147,8 +163,51 @@ export function VibesSettings({
 			}
 		})();
 
-		return () => { cancelled = true; };
+		return () => {
+			cancelled = true;
+		};
 	}, [vibesEnabled, vibesCheckBinaryPath]);
+
+	// Fetch signing key info when VIBES is enabled
+	useEffect(() => {
+		if (!vibesEnabled) {
+			setSigningKeyId(null);
+			return;
+		}
+		let cancelled = false;
+		(async () => {
+			try {
+				const result = await window.maestro.vibes.attestation.getKeyInfo();
+				const data = result.data as Record<string, unknown> | undefined;
+				if (!cancelled && result.success && data?.keyId) {
+					setSigningKeyId(data.keyId as string);
+				} else if (!cancelled) {
+					setSigningKeyId(null);
+				}
+			} catch {
+				if (!cancelled) setSigningKeyId(null);
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [vibesEnabled, keygenLoading]);
+
+	// Regenerate key handler
+	const handleRegenerateKey = useCallback(async () => {
+		setKeygenLoading(true);
+		try {
+			const result = await window.maestro.vibes.attestation.keygen();
+			const data = result.data as Record<string, unknown> | undefined;
+			if (result.success && data?.keyId) {
+				setSigningKeyId(data.keyId as string);
+			}
+		} catch {
+			// Let Sentry capture unexpected errors
+		} finally {
+			setKeygenLoading(false);
+		}
+	}, []);
 
 	// --- Extension handlers ---
 	const handleAddExtension = useCallback(() => {
@@ -272,8 +331,8 @@ export function VibesSettings({
 								Enable VIBES Tracking
 							</p>
 							<p className="text-xs opacity-60 mt-0.5" style={{ color: theme.colors.textDim }}>
-								Verified Integrity for Builds and Edits Standard — captures AI code
-								provenance metadata in .ai-audit/ directories.
+								Verified Integrity for Builds and Edits Standard — captures AI code provenance
+								metadata in .ai-audit/ directories.
 							</p>
 						</div>
 						<button
@@ -358,10 +417,7 @@ export function VibesSettings({
 											>
 												{level.label}
 											</span>
-											<p
-												className="text-xs mt-0.5"
-												style={{ color: theme.colors.textDim }}
-											>
+											<p className="text-xs mt-0.5" style={{ color: theme.colors.textDim }}>
 												{level.description}
 											</p>
 										</div>
@@ -616,34 +672,21 @@ export function VibesSettings({
 
 							<div className="space-y-2">
 								{Object.entries(vibesPerAgentConfig).map(([agentId, config]) => (
-									<label
-										key={agentId}
-										className="flex items-center gap-2 cursor-pointer"
-									>
+									<label key={agentId} className="flex items-center gap-2 cursor-pointer">
 										<button
 											type="button"
 											onClick={() => handleAgentToggle(agentId)}
 											className="w-5 h-5 rounded border flex items-center justify-center transition-colors"
 											style={{
-												borderColor: config.enabled
-													? theme.colors.accent
-													: theme.colors.border,
-												backgroundColor: config.enabled
-													? theme.colors.accent
-													: 'transparent',
+												borderColor: config.enabled ? theme.colors.accent : theme.colors.border,
+												backgroundColor: config.enabled ? theme.colors.accent : 'transparent',
 											}}
 										>
 											{config.enabled && (
-												<Check
-													className="w-3 h-3"
-													style={{ color: theme.colors.bgMain }}
-												/>
+												<Check className="w-3 h-3" style={{ color: theme.colors.bgMain }} />
 											)}
 										</button>
-										<span
-											className="text-sm"
-											style={{ color: theme.colors.textMain }}
-										>
+										<span className="text-sm" style={{ color: theme.colors.textMain }}>
 											{AGENT_LABELS[agentId] || agentId}
 										</span>
 									</label>
@@ -667,7 +710,9 @@ export function VibesSettings({
 							<p className="text-[10px] uppercase font-bold opacity-50 mb-1">Orchestration</p>
 							<div
 								className="flex items-center justify-between cursor-pointer"
-								onClick={() => setVibesMaestroOrchestrationEnabled(!vibesMaestroOrchestrationEnabled)}
+								onClick={() =>
+									setVibesMaestroOrchestrationEnabled(!vibesMaestroOrchestrationEnabled)
+								}
 								role="button"
 								tabIndex={0}
 								onKeyDown={(e) => {
@@ -681,10 +726,7 @@ export function VibesSettings({
 									<p className="font-semibold" style={{ color: theme.colors.textMain }}>
 										Maestro Orchestration Data
 									</p>
-									<p
-										className="text-xs opacity-60 mt-0.5"
-										style={{ color: theme.colors.textDim }}
-									>
+									<p className="text-xs opacity-60 mt-0.5" style={{ color: theme.colors.textDim }}>
 										Capture Maestro-level session management and batch run metadata.
 									</p>
 								</div>
@@ -741,12 +783,9 @@ export function VibesSettings({
 									<p className="font-semibold" style={{ color: theme.colors.textMain }}>
 										Auto-Initialize Projects
 									</p>
-									<p
-										className="text-xs opacity-60 mt-0.5"
-										style={{ color: theme.colors.textDim }}
-									>
-										Automatically run <code className="font-mono">vibecheck init</code> when
-										opening projects without an .ai-audit/ directory.
+									<p className="text-xs opacity-60 mt-0.5" style={{ color: theme.colors.textDim }}>
+										Automatically run <code className="font-mono">vibecheck init</code> when opening
+										projects without an .ai-audit/ directory.
 									</p>
 								</div>
 								<button
@@ -756,9 +795,7 @@ export function VibesSettings({
 									}}
 									className="relative w-10 h-5 rounded-full transition-colors flex-shrink-0"
 									style={{
-										backgroundColor: vibesAutoInit
-											? theme.colors.accent
-											: theme.colors.bgActivity,
+										backgroundColor: vibesAutoInit ? theme.colors.accent : theme.colors.bgActivity,
 									}}
 									role="switch"
 									aria-checked={vibesAutoInit}
@@ -790,8 +827,8 @@ export function VibesSettings({
 								VibeCheck Binary Path
 							</p>
 							<p className="text-xs opacity-60 mb-3" style={{ color: theme.colors.textDim }}>
-								Path to the <code className="font-mono">vibecheck</code> binary. Leave
-								empty to auto-detect from $PATH.
+								Path to the <code className="font-mono">vibecheck</code> binary. Leave empty to
+								auto-detect from $PATH.
 							</p>
 							<div className="flex items-center gap-2">
 								<input
@@ -823,20 +860,29 @@ export function VibesSettings({
 							{/* Binary Detection Status */}
 							<div className="mt-3">
 								{binaryDetectStatus === 'checking' && (
-									<div className="flex items-center gap-2 text-xs" data-testid="binary-status-checking">
-										<Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: theme.colors.textDim }} />
-										<span style={{ color: theme.colors.textDim }}>Detecting vibecheck binary...</span>
+									<div
+										className="flex items-center gap-2 text-xs"
+										data-testid="binary-status-checking"
+									>
+										<Loader2
+											className="w-3.5 h-3.5 animate-spin"
+											style={{ color: theme.colors.textDim }}
+										/>
+										<span style={{ color: theme.colors.textDim }}>
+											Detecting vibecheck binary...
+										</span>
 									</div>
 								)}
 								{binaryDetectStatus === 'found' && (
 									<div className="flex flex-col gap-1" data-testid="binary-status-found">
 										<div className="flex items-center gap-2 text-xs">
-											<CheckCircle2 className="w-3.5 h-3.5" style={{ color: theme.colors.success }} />
+											<CheckCircle2
+												className="w-3.5 h-3.5"
+												style={{ color: theme.colors.success }}
+											/>
 											<span style={{ color: theme.colors.success }}>
 												vibecheck found
-												{binaryVersion && (
-													<span className="font-mono ml-1">({binaryVersion})</span>
-												)}
+												{binaryVersion && <span className="font-mono ml-1">({binaryVersion})</span>}
 											</span>
 										</div>
 										{binaryDetectedPath && (
@@ -864,18 +910,125 @@ export function VibesSettings({
 										>
 											<p className="mb-1">Install vibecheck from source:</p>
 											<p className="font-mono text-[11px]" style={{ color: theme.colors.textMain }}>
-												git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo install --path .
+												git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck &&
+												cargo install --path .
 											</p>
-											<p
-												className="text-[10px] mt-1"
-												style={{ color: theme.colors.textDim }}
-											>
+											<p className="text-[10px] mt-1" style={{ color: theme.colors.textDim }}>
 												Requires Rust 1.91.0+. Or set a manual path override above.
 											</p>
 										</div>
 									</div>
 								)}
 							</div>
+						</div>
+					</div>
+
+					{/* Attestation Section */}
+					<div
+						className="flex items-start gap-3 p-4 rounded-xl border relative"
+						style={{ backgroundColor: theme.colors.bgMain, borderColor: theme.colors.border }}
+					>
+						<div
+							className="p-2 rounded-lg flex-shrink-0"
+							style={{ backgroundColor: theme.colors.accent + '20' }}
+						>
+							<Shield className="w-5 h-5" style={{ color: theme.colors.accent }} />
+						</div>
+						<div className="flex-1 min-w-0">
+							<p className="text-[10px] uppercase font-bold opacity-50 mb-1">Attestation</p>
+							<p className="font-semibold mb-1" style={{ color: theme.colors.textMain }}>
+								Signing & Attestation
+							</p>
+							<p className="text-xs opacity-60 mb-3" style={{ color: theme.colors.textDim }}>
+								Cryptographic attestation of VIBES audit data per VERIFY spec.
+							</p>
+
+							{/* Key display */}
+							<div
+								className="flex items-center gap-2 mb-4 p-2 rounded"
+								style={{
+									backgroundColor: theme.colors.bgActivity,
+									border: '1px solid',
+									borderColor: theme.colors.border,
+								}}
+							>
+								<span className="text-xs font-medium" style={{ color: theme.colors.textDim }}>
+									Signing Key:
+								</span>
+								{signingKeyId ? (
+									<span
+										className="text-xs font-mono"
+										style={{ color: theme.colors.textMain }}
+										data-testid="attestation-key-id"
+									>
+										{signingKeyId}
+									</span>
+								) : (
+									<span
+										className="text-xs italic"
+										style={{ color: theme.colors.textDim }}
+										data-testid="attestation-no-key"
+									>
+										No key generated
+									</span>
+								)}
+								<button
+									type="button"
+									onClick={handleRegenerateKey}
+									disabled={keygenLoading}
+									className="ml-auto flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50"
+									style={{
+										backgroundColor: theme.colors.accent + '20',
+										color: theme.colors.accent,
+									}}
+									data-testid="attestation-regenerate-btn"
+								>
+									<RefreshCw className={`w-3 h-3 ${keygenLoading ? 'animate-spin' : ''}`} />
+									{signingKeyId ? 'Regenerate' : 'Generate'}
+								</button>
+							</div>
+
+							{/* Cosign toggle */}
+							<label className="flex items-center gap-2 cursor-pointer mb-2">
+								<button
+									type="button"
+									onClick={() => setVibesAttestationCosign(!vibesAttestationCosign)}
+									className="w-5 h-5 rounded border flex items-center justify-center transition-colors"
+									style={{
+										borderColor: vibesAttestationCosign ? theme.colors.accent : theme.colors.border,
+										backgroundColor: vibesAttestationCosign ? theme.colors.accent : 'transparent',
+									}}
+									data-testid="attestation-cosign-toggle"
+								>
+									{vibesAttestationCosign && (
+										<Check className="w-3 h-3" style={{ color: theme.colors.bgMain }} />
+									)}
+								</button>
+								<span className="text-sm" style={{ color: theme.colors.textMain }}>
+									Request tool cosignature when attesting
+								</span>
+							</label>
+
+							{/* Submit toggle */}
+							<label className="flex items-center gap-2 cursor-pointer">
+								<button
+									type="button"
+									onClick={() => setVibesAttestationSubmit(!vibesAttestationSubmit)}
+									className="w-5 h-5 rounded border flex items-center justify-center transition-colors"
+									style={{
+										borderColor: vibesAttestationSubmit ? theme.colors.accent : theme.colors.border,
+										backgroundColor: vibesAttestationSubmit ? theme.colors.accent : 'transparent',
+									}}
+									data-testid="attestation-submit-toggle"
+								>
+									{vibesAttestationSubmit && (
+										<Check className="w-3 h-3" style={{ color: theme.colors.bgMain }} />
+									)}
+								</button>
+								<span className="text-sm" style={{ color: theme.colors.textMain }}>
+									Submit attestations to public registry
+								</span>
+							</label>
 						</div>
 					</div>
 
@@ -914,10 +1067,7 @@ export function VibesSettings({
 										>
 											Compression Threshold (bytes)
 										</label>
-										<p
-											className="text-xs mb-2"
-											style={{ color: theme.colors.textDim }}
-										>
+										<p className="text-xs mb-2" style={{ color: theme.colors.textDim }}>
 											Reasoning text above this size will be compressed.
 										</p>
 										<input
@@ -948,10 +1098,7 @@ export function VibesSettings({
 										>
 											External Blob Threshold (bytes)
 										</label>
-										<p
-											className="text-xs mb-2"
-											style={{ color: theme.colors.textDim }}
-										>
+										<p className="text-xs mb-2" style={{ color: theme.colors.textDim }}>
 											Data above this size will be stored as external blobs.
 										</p>
 										<input

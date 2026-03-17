@@ -51,7 +51,7 @@ const createDefaultProps = (overrides = {}) => ({
 	setVibesTrackedExtensions: vi.fn(),
 	vibesExcludePatterns: [...VIBES_SETTINGS_DEFAULTS.vibesExcludePatterns],
 	setVibesExcludePatterns: vi.fn(),
-	vibesPerAgentConfig: { 'claude-code': { enabled: true }, 'codex': { enabled: true } },
+	vibesPerAgentConfig: { 'claude-code': { enabled: true }, codex: { enabled: true } },
 	setVibesPerAgentConfig: vi.fn(),
 	vibesMaestroOrchestrationEnabled: true,
 	setVibesMaestroOrchestrationEnabled: vi.fn(),
@@ -63,6 +63,10 @@ const createDefaultProps = (overrides = {}) => ({
 	setVibesCompressReasoningThreshold: vi.fn(),
 	vibesExternalBlobThreshold: 102400,
 	setVibesExternalBlobThreshold: vi.fn(),
+	vibesAttestationCosign: true,
+	setVibesAttestationCosign: vi.fn(),
+	vibesAttestationSubmit: true,
+	setVibesAttestationSubmit: vi.fn(),
 	...overrides,
 });
 
@@ -125,16 +129,20 @@ describe('Settings/VibesSettings', () => {
 			render(<VibesSettings {...props} />);
 			expect(screen.getByText('Environment context only (~200 bytes/annotation)')).toBeTruthy();
 			expect(screen.getByText('Adds prompt context (~2-10 KB/annotation)')).toBeTruthy();
-			expect(screen.getByText('Adds reasoning/chain-of-thought (~10-500 KB/annotation)')).toBeTruthy();
+			expect(
+				screen.getByText('Adds reasoning/chain-of-thought (~10-500 KB/annotation)')
+			).toBeTruthy();
 		});
 
 		it('should call setVibesAssuranceLevel when a level is clicked', () => {
 			const props = createDefaultProps({ vibesEnabled: true });
 			render(<VibesSettings {...props} />);
 			// Find the radio buttons for assurance levels
-			const radioButtons = screen.getAllByRole('button').filter(
-				(btn) => btn.className.includes('rounded-full') && btn.className.includes('border-2')
-			);
+			const radioButtons = screen
+				.getAllByRole('button')
+				.filter(
+					(btn) => btn.className.includes('rounded-full') && btn.className.includes('border-2')
+				);
 			// Click the first one (Low)
 			fireEvent.click(radioButtons[0]);
 			expect(props.setVibesAssuranceLevel).toHaveBeenCalledWith('low');
@@ -270,7 +278,9 @@ describe('Settings/VibesSettings', () => {
 				vibesExcludePatterns: [],
 			});
 			render(<VibesSettings {...props} />);
-			expect(screen.getByText('No exclude patterns configured. All directories will be tracked.')).toBeTruthy();
+			expect(
+				screen.getByText('No exclude patterns configured. All directories will be tracked.')
+			).toBeTruthy();
 		});
 
 		it('should remove a pattern when X button is clicked', () => {
@@ -310,9 +320,11 @@ describe('Settings/VibesSettings', () => {
 			const props = createDefaultProps({ vibesEnabled: true });
 			render(<VibesSettings {...props} />);
 			// Find the checkboxes (buttons with rounded border class)
-			const checkboxes = screen.getAllByRole('button').filter(
-				(btn) => btn.className.includes('rounded border') && btn.className.includes('w-5 h-5')
-			);
+			const checkboxes = screen
+				.getAllByRole('button')
+				.filter(
+					(btn) => btn.className.includes('rounded border') && btn.className.includes('w-5 h-5')
+				);
 			// Click Claude Code checkbox (should be first)
 			fireEvent.click(checkboxes[0]);
 			expect(props.setVibesPerAgentConfig).toHaveBeenCalledWith(
@@ -474,13 +486,94 @@ describe('Settings/VibesSettings', () => {
 	});
 
 	// ==========================================================================
+	// Attestation Settings
+	// ==========================================================================
+	describe('attestation settings', () => {
+		it('should render the attestation section when enabled', () => {
+			const props = createDefaultProps({ vibesEnabled: true });
+			render(<VibesSettings {...props} />);
+			expect(screen.getByText('Signing & Attestation')).toBeTruthy();
+		});
+
+		it('should not render the attestation section when disabled', () => {
+			const props = createDefaultProps({ vibesEnabled: false });
+			render(<VibesSettings {...props} />);
+			expect(screen.queryByText('Signing & Attestation')).toBeNull();
+		});
+
+		it('should render cosign toggle with correct initial state', () => {
+			const props = createDefaultProps({ vibesEnabled: true, vibesAttestationCosign: true });
+			render(<VibesSettings {...props} />);
+			expect(screen.getByText('Request tool cosignature when attesting')).toBeTruthy();
+			const toggle = screen.getByTestId('attestation-cosign-toggle');
+			expect(toggle).toBeTruthy();
+		});
+
+		it('should call setVibesAttestationCosign when cosign toggle is clicked', () => {
+			const props = createDefaultProps({ vibesEnabled: true, vibesAttestationCosign: true });
+			render(<VibesSettings {...props} />);
+			const toggle = screen.getByTestId('attestation-cosign-toggle');
+			fireEvent.click(toggle);
+			expect(props.setVibesAttestationCosign).toHaveBeenCalledWith(false);
+		});
+
+		it('should render submit toggle with correct initial state', () => {
+			const props = createDefaultProps({ vibesEnabled: true, vibesAttestationSubmit: true });
+			render(<VibesSettings {...props} />);
+			expect(screen.getByText('Submit attestations to public registry')).toBeTruthy();
+			const toggle = screen.getByTestId('attestation-submit-toggle');
+			expect(toggle).toBeTruthy();
+		});
+
+		it('should call setVibesAttestationSubmit when submit toggle is clicked', () => {
+			const props = createDefaultProps({ vibesEnabled: true, vibesAttestationSubmit: true });
+			render(<VibesSettings {...props} />);
+			const toggle = screen.getByTestId('attestation-submit-toggle');
+			fireEvent.click(toggle);
+			expect(props.setVibesAttestationSubmit).toHaveBeenCalledWith(false);
+		});
+
+		it('should enable cosign when toggle is clicked from disabled state', () => {
+			const props = createDefaultProps({ vibesEnabled: true, vibesAttestationCosign: false });
+			render(<VibesSettings {...props} />);
+			const toggle = screen.getByTestId('attestation-cosign-toggle');
+			fireEvent.click(toggle);
+			expect(props.setVibesAttestationCosign).toHaveBeenCalledWith(true);
+		});
+
+		it('should enable submit when toggle is clicked from disabled state', () => {
+			const props = createDefaultProps({ vibesEnabled: true, vibesAttestationSubmit: false });
+			render(<VibesSettings {...props} />);
+			const toggle = screen.getByTestId('attestation-submit-toggle');
+			fireEvent.click(toggle);
+			expect(props.setVibesAttestationSubmit).toHaveBeenCalledWith(true);
+		});
+
+		it('should show "No key generated" when no signing key exists', () => {
+			const props = createDefaultProps({ vibesEnabled: true });
+			render(<VibesSettings {...props} />);
+			expect(screen.getByTestId('attestation-no-key')).toBeTruthy();
+			expect(screen.getByText('No key generated')).toBeTruthy();
+		});
+
+		it('should render the Regenerate/Generate button', () => {
+			const props = createDefaultProps({ vibesEnabled: true });
+			render(<VibesSettings {...props} />);
+			expect(screen.getByTestId('attestation-regenerate-btn')).toBeTruthy();
+			expect(screen.getByText('Generate')).toBeTruthy();
+		});
+	});
+
+	// ==========================================================================
 	// Keyboard Accessibility
 	// ==========================================================================
 	describe('keyboard accessibility', () => {
 		it('should toggle master switch on Enter key', () => {
 			const props = createDefaultProps();
 			render(<VibesSettings {...props} />);
-			const toggleArea = screen.getByRole('button', { name: /Enable VIBES Tracking/i }).closest('[role="button"]');
+			const toggleArea = screen
+				.getByRole('button', { name: /Enable VIBES Tracking/i })
+				.closest('[role="button"]');
 			if (toggleArea) {
 				fireEvent.keyDown(toggleArea, { key: 'Enter' });
 				expect(props.setVibesEnabled).toHaveBeenCalledWith(true);

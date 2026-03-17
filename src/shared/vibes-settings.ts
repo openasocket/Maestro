@@ -38,6 +38,12 @@ export interface VibesSettingsConfig {
 
 	/** Byte threshold above which data is stored as an external blob. */
 	vibesExternalBlobThreshold: number;
+
+	/** Request tool cosignature when creating attestations. */
+	vibesAttestationCosign: boolean;
+
+	/** Submit attestations to public registry. */
+	vibesAttestationSubmit: boolean;
 }
 
 // ============================================================================
@@ -50,28 +56,60 @@ export const VIBES_SETTINGS_DEFAULTS: VibesSettingsConfig = {
 	vibesAssuranceLevel: 'medium',
 	vibesTrackedExtensions: [
 		// JavaScript & TypeScript
-		'.js', '.jsx', '.mjs', '.cjs',
-		'.ts', '.tsx', '.mts', '.cts',
+		'.js',
+		'.jsx',
+		'.mjs',
+		'.cjs',
+		'.ts',
+		'.tsx',
+		'.mts',
+		'.cts',
 		// Frontend frameworks
-		'.vue', '.svelte', '.astro',
+		'.vue',
+		'.svelte',
+		'.astro',
 		// Web fundamentals
-		'.html', '.css', '.scss', '.sass', '.less',
+		'.html',
+		'.css',
+		'.scss',
+		'.sass',
+		'.less',
 		// Systems programming
-		'.rs', '.go', '.c', '.cpp', '.h', '.hpp', '.zig',
+		'.rs',
+		'.go',
+		'.c',
+		'.cpp',
+		'.h',
+		'.hpp',
+		'.zig',
 		// JVM ecosystem
-		'.java', '.kt', '.scala',
+		'.java',
+		'.kt',
+		'.scala',
 		// .NET
 		'.cs',
 		// Mobile
-		'.swift', '.dart', '.m',
+		'.swift',
+		'.dart',
+		'.m',
 		// Scripting & dynamic
-		'.py', '.rb', '.php', '.lua', '.sh',
+		'.py',
+		'.rb',
+		'.php',
+		'.lua',
+		'.sh',
 		// Elixir / Erlang
-		'.ex', '.exs',
+		'.ex',
+		'.exs',
 		// Data & query
-		'.sql', '.graphql', '.proto',
+		'.sql',
+		'.graphql',
+		'.proto',
 		// Config as code
-		'.tf', '.yaml', '.yml', '.toml',
+		'.tf',
+		'.yaml',
+		'.yml',
+		'.toml',
 	],
 	vibesExcludePatterns: [
 		'**/node_modules/**',
@@ -100,13 +138,15 @@ export const VIBES_SETTINGS_DEFAULTS: VibesSettingsConfig = {
 	],
 	vibesPerAgentConfig: {
 		'claude-code': { enabled: true },
-		'codex': { enabled: true },
+		codex: { enabled: true },
 	},
 	vibesMaestroOrchestrationEnabled: true,
 	vibesAutoInit: true,
 	vibesCheckBinaryPath: '',
 	vibesCompressReasoningThreshold: 10240,
 	vibesExternalBlobThreshold: 102400,
+	vibesAttestationCosign: true,
+	vibesAttestationSubmit: true,
 };
 
 // ============================================================================
@@ -119,7 +159,7 @@ export const VIBES_SETTINGS_DEFAULTS: VibesSettingsConfig = {
  */
 export function getVibesSettingWithDefault<K extends keyof VibesSettingsConfig>(
 	key: K,
-	value: VibesSettingsConfig[K] | undefined,
+	value: VibesSettingsConfig[K] | undefined
 ): VibesSettingsConfig[K] {
 	return value !== undefined ? value : VIBES_SETTINGS_DEFAULTS[key];
 }

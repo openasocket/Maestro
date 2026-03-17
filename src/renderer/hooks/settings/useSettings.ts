@@ -19,7 +19,10 @@ import { DEFAULT_SHORTCUTS, TAB_SHORTCUTS, FIXED_SHORTCUTS } from '../../constan
 import { getLevelIndex } from '../../constants/keyboardMastery';
 import { commitCommandPrompt } from '../../../prompts';
 import type { VibesAssuranceLevel } from '../../../shared/vibes-types';
-import { VIBES_SETTINGS_DEFAULTS, getVibesSettingWithDefault } from '../../../shared/vibes-settings';
+import {
+	VIBES_SETTINGS_DEFAULTS,
+	getVibesSettingWithDefault,
+} from '../../../shared/vibes-settings';
 
 // Default context management settings
 const DEFAULT_CONTEXT_MANAGEMENT_SETTINGS: ContextManagementSettings = {
@@ -382,6 +385,10 @@ export interface UseSettingsReturn {
 	setVibesCompressReasoningThreshold: (value: number) => void;
 	vibesExternalBlobThreshold: number;
 	setVibesExternalBlobThreshold: (value: number) => void;
+	vibesAttestationCosign: boolean;
+	setVibesAttestationCosign: (value: boolean) => void;
+	vibesAttestationSubmit: boolean;
+	setVibesAttestationSubmit: (value: boolean) => void;
 }
 
 export function useSettings(): UseSettingsReturn {
@@ -548,15 +555,37 @@ export function useSettings(): UseSettingsReturn {
 
 	// VIBES Metadata settings
 	const [vibesEnabled, setVibesEnabledState] = useState(VIBES_SETTINGS_DEFAULTS.vibesEnabled);
-	const [vibesAssuranceLevel, setVibesAssuranceLevelState] = useState<VibesAssuranceLevel>(VIBES_SETTINGS_DEFAULTS.vibesAssuranceLevel);
-	const [vibesTrackedExtensions, setVibesTrackedExtensionsState] = useState<string[]>(VIBES_SETTINGS_DEFAULTS.vibesTrackedExtensions);
-	const [vibesExcludePatterns, setVibesExcludePatternsState] = useState<string[]>(VIBES_SETTINGS_DEFAULTS.vibesExcludePatterns);
-	const [vibesPerAgentConfig, setVibesPerAgentConfigState] = useState<Record<string, { enabled: boolean }>>(VIBES_SETTINGS_DEFAULTS.vibesPerAgentConfig);
-	const [vibesMaestroOrchestrationEnabled, setVibesMaestroOrchestrationEnabledState] = useState(VIBES_SETTINGS_DEFAULTS.vibesMaestroOrchestrationEnabled);
+	const [vibesAssuranceLevel, setVibesAssuranceLevelState] = useState<VibesAssuranceLevel>(
+		VIBES_SETTINGS_DEFAULTS.vibesAssuranceLevel
+	);
+	const [vibesTrackedExtensions, setVibesTrackedExtensionsState] = useState<string[]>(
+		VIBES_SETTINGS_DEFAULTS.vibesTrackedExtensions
+	);
+	const [vibesExcludePatterns, setVibesExcludePatternsState] = useState<string[]>(
+		VIBES_SETTINGS_DEFAULTS.vibesExcludePatterns
+	);
+	const [vibesPerAgentConfig, setVibesPerAgentConfigState] = useState<
+		Record<string, { enabled: boolean }>
+	>(VIBES_SETTINGS_DEFAULTS.vibesPerAgentConfig);
+	const [vibesMaestroOrchestrationEnabled, setVibesMaestroOrchestrationEnabledState] = useState(
+		VIBES_SETTINGS_DEFAULTS.vibesMaestroOrchestrationEnabled
+	);
 	const [vibesAutoInit, setVibesAutoInitState] = useState(VIBES_SETTINGS_DEFAULTS.vibesAutoInit);
-	const [vibesCheckBinaryPath, setVibesCheckBinaryPathState] = useState(VIBES_SETTINGS_DEFAULTS.vibesCheckBinaryPath);
-	const [vibesCompressReasoningThreshold, setVibesCompressReasoningThresholdState] = useState(VIBES_SETTINGS_DEFAULTS.vibesCompressReasoningThreshold);
-	const [vibesExternalBlobThreshold, setVibesExternalBlobThresholdState] = useState(VIBES_SETTINGS_DEFAULTS.vibesExternalBlobThreshold);
+	const [vibesCheckBinaryPath, setVibesCheckBinaryPathState] = useState(
+		VIBES_SETTINGS_DEFAULTS.vibesCheckBinaryPath
+	);
+	const [vibesCompressReasoningThreshold, setVibesCompressReasoningThresholdState] = useState(
+		VIBES_SETTINGS_DEFAULTS.vibesCompressReasoningThreshold
+	);
+	const [vibesExternalBlobThreshold, setVibesExternalBlobThresholdState] = useState(
+		VIBES_SETTINGS_DEFAULTS.vibesExternalBlobThreshold
+	);
+	const [vibesAttestationCosign, setVibesAttestationCosignState] = useState(
+		VIBES_SETTINGS_DEFAULTS.vibesAttestationCosign
+	);
+	const [vibesAttestationSubmit, setVibesAttestationSubmitState] = useState(
+		VIBES_SETTINGS_DEFAULTS.vibesAttestationSubmit
+	);
 
 	// Wrapper functions that persist to electron-store
 	// PERF: All wrapped in useCallback to prevent re-renders
@@ -1438,6 +1467,16 @@ export function useSettings(): UseSettingsReturn {
 		window.maestro.settings.set('vibesExternalBlobThreshold', value);
 	}, []);
 
+	const setVibesAttestationCosign = useCallback((value: boolean) => {
+		setVibesAttestationCosignState(value);
+		window.maestro.settings.set('vibesAttestationCosign', value);
+	}, []);
+
+	const setVibesAttestationSubmit = useCallback((value: boolean) => {
+		setVibesAttestationSubmitState(value);
+		window.maestro.settings.set('vibesAttestationSubmit', value);
+	}, []);
+
 	// Load settings from electron-store
 	// This function is called on mount and on system resume (after sleep/suspend)
 	// PERF: Use batch loading to reduce IPC calls from ~60 to 3
@@ -1894,34 +1933,76 @@ export function useSettings(): UseSettingsReturn {
 
 			// VIBES Metadata settings
 			setVibesEnabledState(
-				getVibesSettingWithDefault('vibesEnabled', allSettings['vibesEnabled'] as boolean | undefined)
+				getVibesSettingWithDefault(
+					'vibesEnabled',
+					allSettings['vibesEnabled'] as boolean | undefined
+				)
 			);
 			setVibesAssuranceLevelState(
-				getVibesSettingWithDefault('vibesAssuranceLevel', allSettings['vibesAssuranceLevel'] as VibesAssuranceLevel | undefined)
+				getVibesSettingWithDefault(
+					'vibesAssuranceLevel',
+					allSettings['vibesAssuranceLevel'] as VibesAssuranceLevel | undefined
+				)
 			);
 			setVibesTrackedExtensionsState(
-				getVibesSettingWithDefault('vibesTrackedExtensions', allSettings['vibesTrackedExtensions'] as string[] | undefined)
+				getVibesSettingWithDefault(
+					'vibesTrackedExtensions',
+					allSettings['vibesTrackedExtensions'] as string[] | undefined
+				)
 			);
 			setVibesExcludePatternsState(
-				getVibesSettingWithDefault('vibesExcludePatterns', allSettings['vibesExcludePatterns'] as string[] | undefined)
+				getVibesSettingWithDefault(
+					'vibesExcludePatterns',
+					allSettings['vibesExcludePatterns'] as string[] | undefined
+				)
 			);
 			setVibesPerAgentConfigState(
-				getVibesSettingWithDefault('vibesPerAgentConfig', allSettings['vibesPerAgentConfig'] as Record<string, { enabled: boolean }> | undefined)
+				getVibesSettingWithDefault(
+					'vibesPerAgentConfig',
+					allSettings['vibesPerAgentConfig'] as Record<string, { enabled: boolean }> | undefined
+				)
 			);
 			setVibesMaestroOrchestrationEnabledState(
-				getVibesSettingWithDefault('vibesMaestroOrchestrationEnabled', allSettings['vibesMaestroOrchestrationEnabled'] as boolean | undefined)
+				getVibesSettingWithDefault(
+					'vibesMaestroOrchestrationEnabled',
+					allSettings['vibesMaestroOrchestrationEnabled'] as boolean | undefined
+				)
 			);
 			setVibesAutoInitState(
-				getVibesSettingWithDefault('vibesAutoInit', allSettings['vibesAutoInit'] as boolean | undefined)
+				getVibesSettingWithDefault(
+					'vibesAutoInit',
+					allSettings['vibesAutoInit'] as boolean | undefined
+				)
 			);
 			setVibesCheckBinaryPathState(
-				getVibesSettingWithDefault('vibesCheckBinaryPath', allSettings['vibesCheckBinaryPath'] as string | undefined)
+				getVibesSettingWithDefault(
+					'vibesCheckBinaryPath',
+					allSettings['vibesCheckBinaryPath'] as string | undefined
+				)
 			);
 			setVibesCompressReasoningThresholdState(
-				getVibesSettingWithDefault('vibesCompressReasoningThreshold', allSettings['vibesCompressReasoningThreshold'] as number | undefined)
+				getVibesSettingWithDefault(
+					'vibesCompressReasoningThreshold',
+					allSettings['vibesCompressReasoningThreshold'] as number | undefined
+				)
 			);
 			setVibesExternalBlobThresholdState(
-				getVibesSettingWithDefault('vibesExternalBlobThreshold', allSettings['vibesExternalBlobThreshold'] as number | undefined)
+				getVibesSettingWithDefault(
+					'vibesExternalBlobThreshold',
+					allSettings['vibesExternalBlobThreshold'] as number | undefined
+				)
+			);
+			setVibesAttestationCosignState(
+				getVibesSettingWithDefault(
+					'vibesAttestationCosign',
+					allSettings['vibesAttestationCosign'] as boolean | undefined
+				)
+			);
+			setVibesAttestationSubmitState(
+				getVibesSettingWithDefault(
+					'vibesAttestationSubmit',
+					allSettings['vibesAttestationSubmit'] as boolean | undefined
+				)
 			);
 		} catch (error) {
 			console.error('[Settings] Failed to load settings:', error);
@@ -2131,6 +2212,10 @@ export function useSettings(): UseSettingsReturn {
 			setVibesCompressReasoningThreshold,
 			vibesExternalBlobThreshold,
 			setVibesExternalBlobThreshold,
+			vibesAttestationCosign,
+			setVibesAttestationCosign,
+			vibesAttestationSubmit,
+			setVibesAttestationSubmit,
 		}),
 		[
 			// State values
@@ -2302,6 +2387,10 @@ export function useSettings(): UseSettingsReturn {
 			setVibesCheckBinaryPath,
 			setVibesCompressReasoningThreshold,
 			setVibesExternalBlobThreshold,
+			vibesAttestationCosign,
+			setVibesAttestationCosign,
+			vibesAttestationSubmit,
+			setVibesAttestationSubmit,
 		]
 	);
 }

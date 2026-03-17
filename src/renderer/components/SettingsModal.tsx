@@ -347,10 +347,22 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 		setVibesCompressReasoningThreshold,
 		vibesExternalBlobThreshold,
 		setVibesExternalBlobThreshold,
+		vibesAttestationCosign,
+		setVibesAttestationCosign,
+		vibesAttestationSubmit,
+		setVibesAttestationSubmit,
 	} = useSettings();
 
 	const [activeTab, setActiveTab] = useState<
-		'general' | 'display' | 'llm' | 'shortcuts' | 'theme' | 'notifications' | 'aicommands' | 'ssh' | 'vibes'
+		| 'general'
+		| 'display'
+		| 'llm'
+		| 'shortcuts'
+		| 'theme'
+		| 'notifications'
+		| 'aicommands'
+		| 'ssh'
+		| 'vibes'
 	>('general');
 	const [systemFonts, setSystemFonts] = useState<string[]>([]);
 	const [customFonts, setCustomFonts] = useState<string[]>([]);
@@ -514,8 +526,27 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 				| 'ssh'
 				| 'vibes'
 			> = FEATURE_FLAGS.LLM_SETTINGS
-				? ['general', 'display', 'llm', 'shortcuts', 'theme', 'notifications', 'aicommands', 'ssh', 'vibes']
-				: ['general', 'display', 'shortcuts', 'theme', 'notifications', 'aicommands', 'ssh', 'vibes'];
+				? [
+						'general',
+						'display',
+						'llm',
+						'shortcuts',
+						'theme',
+						'notifications',
+						'aicommands',
+						'ssh',
+						'vibes',
+					]
+				: [
+						'general',
+						'display',
+						'shortcuts',
+						'theme',
+						'notifications',
+						'aicommands',
+						'ssh',
+						'vibes',
+					];
 			const currentIndex = tabs.indexOf(activeTab);
 
 			if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === '[') {
@@ -2729,6 +2760,10 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 								setVibesCompressReasoningThreshold={setVibesCompressReasoningThreshold}
 								vibesExternalBlobThreshold={vibesExternalBlobThreshold}
 								setVibesExternalBlobThreshold={setVibesExternalBlobThreshold}
+								vibesAttestationCosign={vibesAttestationCosign}
+								setVibesAttestationCosign={setVibesAttestationCosign}
+								vibesAttestationSubmit={vibesAttestationSubmit}
+								setVibesAttestationSubmit={setVibesAttestationSubmit}
 							/>
 						</div>
 					)}
