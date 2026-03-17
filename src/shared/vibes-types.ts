@@ -266,3 +266,36 @@ export type VibesAnnotation =
 	| VibesSessionRecord
 	| VibesEdgeRecord
 	| VibesDelegationRecord;
+
+// ============================================================================
+// VERIFY Spec Types — DSSE Envelope & in-toto v1 Statement
+// ============================================================================
+
+/** DSSE envelope wrapping an in-toto attestation statement (VERIFY spec section 3). */
+export interface DSSEEnvelope {
+	payloadType: 'application/vnd.in-toto+json';
+	payload: string; // Base64url-encoded in-toto statement
+	signatures: DSSESignature[];
+}
+
+/** A single signature entry within a DSSE envelope. */
+export interface DSSESignature {
+	keyid: string; // SHA-256(DER public key)[0:16] — 16 hex chars
+	sig: string; // Base64url-encoded Ed25519 signature over PAE bytes
+	keytype?: 'user' | 'tool_provider';
+}
+
+/** in-toto v1 attestation statement (VERIFY spec section 4). */
+export interface InTotoStatement {
+	_type: 'https://in-toto.io/Statement/v1';
+	subject: Array<{
+		name: string; // e.g., '.ai-audit/manifest.json'
+		digest: { sha256: string };
+	}>;
+	predicateType: 'https://itsavibe.ai/vibes/attestation/v1';
+	predicate: {
+		validation: { result: 'PASS' | 'FAIL'; version: string };
+		project: { name: string; assurance_level: string };
+		stats: { total_annotations: number; unique_models: number };
+	};
+}

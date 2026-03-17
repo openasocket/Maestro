@@ -53,35 +53,10 @@ export interface VibesKeyInfo {
 	exists: boolean;
 }
 
-// === VERIFY Spec: DSSE Envelope ===
+// VERIFY spec types — re-exported from shared for backward compat
+export type { DSSEEnvelope, DSSESignature, InTotoStatement } from '../../shared/vibes-types';
 
-export interface DSSEEnvelope {
-	payloadType: 'application/vnd.in-toto+json';
-	payload: string; // Base64url-encoded in-toto statement
-	signatures: DSSESignature[];
-}
-
-export interface DSSESignature {
-	keyid: string; // 16 hex chars
-	sig: string; // Base64url-encoded Ed25519 signature over PAE bytes
-	keytype?: 'user' | 'tool_provider';
-}
-
-// === VERIFY Spec: in-toto v1 Statement ===
-
-export interface InTotoStatement {
-	_type: 'https://in-toto.io/Statement/v1';
-	subject: Array<{
-		name: string; // e.g., '.ai-audit/manifest.json'
-		digest: { sha256: string };
-	}>;
-	predicateType: 'https://itsavibe.ai/vibes/attestation/v1';
-	predicate: {
-		validation: { result: 'PASS' | 'FAIL'; version: string };
-		project: { name: string; assurance_level: string };
-		stats: { total_annotations: number; unique_models: number };
-	};
-}
+import type { DSSEEnvelope, DSSESignature, InTotoStatement } from '../../shared/vibes-types';
 
 // ============================================================================
 // Key Generation & ID Computation
@@ -368,11 +343,32 @@ export async function buildDSSEEnvelope(
 // ============================================================================
 
 /**
- * Compute content-addressed attestation ID per VERIFY spec.
- * SHA-256 of canonicalized (sorted keys, no whitespace) DSSE envelope JSON.
+ * Recursively sort all keys in a JSON-compatible value.
+ * Per VERIFY spec section 7: "Sort all keys recursively."
+ * Arrays preserve order; objects get sorted keys at every nesting level.
+ */
+export function sortKeysRecursively(value: unknown): unknown {
+	if (value === null || value === undefined) return value;
+	if (Array.isArray(value)) return value.map(sortKeysRecursively);
+	if (typeof value === 'object') {
+		const sorted: Record<string, unknown> = {};
+		for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+			sorted[key] = sortKeysRecursively((value as Record<string, unknown>)[key]);
+		}
+		return sorted;
+	}
+	return value;
+}
+
+/**
+ * Compute content-addressed attestation ID per VERIFY spec section 7.
+ * 1. Sort all keys recursively.
+ * 2. Serialize with no whitespace.
+ * 3. SHA-256 of resulting string.
+ * 4. 64-character lowercase hex.
  */
 export function computeAttestationId(envelope: DSSEEnvelope): string {
-	const canonical = JSON.stringify(envelope, Object.keys(envelope).sort());
+	const canonical = JSON.stringify(sortKeysRecursively(envelope));
 	return createHash('sha256').update(canonical, 'utf8').digest('hex');
 }
 
