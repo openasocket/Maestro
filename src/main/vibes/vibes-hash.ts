@@ -27,6 +27,16 @@ export function computeVibesHash(context: Record<string, unknown>): string {
 }
 
 /**
+ * Compute a VIBES annotation ID per spec section 6.4.
+ * SHA-256 of canonical JSON (sorted keys, no whitespace, excluding annotation_id).
+ */
+export function computeAnnotationId(record: Record<string, unknown>): string {
+	const { annotation_id: _, ...hashable } = record;
+	const canonical = JSON.stringify(hashable, Object.keys(hashable).sort());
+	return createHash('sha256').update(canonical, 'utf8').digest('hex');
+}
+
+/**
  * Return the first 16 hex characters of a hash for display purposes.
  */
 export function shortHash(hash: string): string {
