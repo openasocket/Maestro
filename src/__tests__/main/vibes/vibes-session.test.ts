@@ -11,7 +11,14 @@ import * as os from 'os';
 
 import { VibesSessionManager } from '../../../main/vibes/vibes-session';
 import type { VibesSessionState } from '../../../main/vibes/vibes-session';
-import { readAnnotations, readVibesManifest, ensureAuditDir, flushAll, resetAllBuffers, getBufferedAnnotationCount } from '../../../main/vibes/vibes-io';
+import {
+	readAnnotations,
+	readVibesManifest,
+	ensureAuditDir,
+	flushAll,
+	resetAllBuffers,
+	getBufferedAnnotationCount,
+} from '../../../main/vibes/vibes-io';
 import * as vibesIo from '../../../main/vibes/vibes-io';
 import type {
 	VibesLineAnnotation,
@@ -52,7 +59,7 @@ describe('vibes-session', () => {
 
 			expect(state.sessionId).toBe('sess-1');
 			expect(state.vibesSessionId).toMatch(
-				/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+				/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 			);
 			expect(state.projectPath).toBe(tmpDir);
 			expect(state.agentType).toBe('claude-code');
@@ -98,7 +105,13 @@ describe('vibes-session', () => {
 
 		it('should include environment_hash in session start annotation when provided', async () => {
 			const envHash = 'a'.repeat(64);
-			const state = await manager.startSession('sess-env', tmpDir, 'claude-code', 'medium', envHash);
+			const state = await manager.startSession(
+				'sess-env',
+				tmpDir,
+				'claude-code',
+				'medium',
+				envHash
+			);
 
 			expect(state.environmentHash).toBe(envHash);
 
@@ -234,6 +247,7 @@ describe('vibes-session', () => {
 
 			const lineAnnotation: VibesLineAnnotation = {
 				type: 'line',
+				annotation_id: '0'.repeat(64),
 				file_path: 'src/index.ts',
 				line_start: 1,
 				line_end: 10,
@@ -261,6 +275,7 @@ describe('vibes-session', () => {
 
 			const lineAnnotation: VibesLineAnnotation = {
 				type: 'line',
+				annotation_id: '0'.repeat(64),
 				file_path: 'src/main.ts',
 				line_start: 5,
 				line_end: 15,
@@ -288,6 +303,7 @@ describe('vibes-session', () => {
 
 			const lineAnnotation: VibesLineAnnotation = {
 				type: 'line',
+				annotation_id: '0'.repeat(64),
 				file_path: 'src/main.ts',
 				line_start: 1,
 				line_end: 1,
@@ -312,6 +328,7 @@ describe('vibes-session', () => {
 		it('should be a no-op for unknown session IDs', async () => {
 			const lineAnnotation: VibesLineAnnotation = {
 				type: 'line',
+				annotation_id: '0'.repeat(64),
 				file_path: 'src/main.ts',
 				line_start: 1,
 				line_end: 1,
@@ -619,6 +636,7 @@ describe('vibes-session', () => {
 
 			const lineAnnotation: VibesLineAnnotation = {
 				type: 'line',
+				annotation_id: '0'.repeat(64),
 				file_path: 'src/index.ts',
 				line_start: 1,
 				line_end: 10,
@@ -699,6 +717,7 @@ describe('vibes-session', () => {
 
 			const lineAnnotation: VibesLineAnnotation = {
 				type: 'line',
+				annotation_id: '0'.repeat(64),
 				file_path: 'src/index.ts',
 				line_start: 1,
 				line_end: 10,
@@ -728,6 +747,7 @@ describe('vibes-session', () => {
 
 			const lineAnnotation: VibesLineAnnotation = {
 				type: 'line',
+				annotation_id: '0'.repeat(64),
 				file_path: 'src/index.ts',
 				line_start: 1,
 				line_end: 10,
@@ -773,7 +793,7 @@ describe('vibes-session', () => {
 				expect.objectContaining({
 					type: 'session',
 					event: 'start',
-				}),
+				})
 			);
 
 			spy.mockRestore();
@@ -792,7 +812,7 @@ describe('vibes-session', () => {
 				expect.objectContaining({
 					type: 'session',
 					event: 'end',
-				}),
+				})
 			);
 
 			spy.mockRestore();
@@ -805,6 +825,7 @@ describe('vibes-session', () => {
 
 			const lineAnnotation: VibesLineAnnotation = {
 				type: 'line',
+				annotation_id: '0'.repeat(64),
 				file_path: 'src/index.ts',
 				line_start: 1,
 				line_end: 10,
@@ -864,6 +885,7 @@ describe('vibes-session', () => {
 			// 3. Record a line annotation
 			const lineAnnotation: VibesLineAnnotation = {
 				type: 'line',
+				annotation_id: '0'.repeat(64),
 				file_path: 'src/index.ts',
 				line_start: 1,
 				line_end: 25,
@@ -925,6 +947,7 @@ describe('vibes-session', () => {
 				// Record annotation to each project
 				const annotation1: VibesLineAnnotation = {
 					type: 'line',
+					annotation_id: '0'.repeat(64),
 					file_path: 'src/a.ts',
 					line_start: 1,
 					line_end: 5,
@@ -940,6 +963,7 @@ describe('vibes-session', () => {
 				};
 				const annotation2: VibesLineAnnotation = {
 					type: 'line',
+					annotation_id: '0'.repeat(64),
 					file_path: 'src/b.ts',
 					line_start: 10,
 					line_end: 20,

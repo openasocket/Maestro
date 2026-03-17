@@ -66,7 +66,8 @@ export type VibesManifestEntry =
 	| VibesEnvironmentEntry
 	| VibesCommandEntry
 	| VibesPromptEntry
-	| VibesReasoningEntry;
+	| VibesReasoningEntry
+	| VibesDecisionEntry;
 
 /** Records the tool/model environment that produced annotations. */
 export interface VibesEnvironmentEntry {
@@ -113,6 +114,22 @@ export interface VibesReasoningEntry {
 	created_at: string;
 }
 
+/** Records a structured decision point. Present at all assurance levels. */
+export interface VibesDecisionEntry {
+	type: 'decision';
+	decision_point: string; // Description of the decision being made
+	options: Array<{
+		id: string; // Short identifier
+		description: string; // Description of the option
+		pros?: string[]; // Advantages
+		cons?: string[]; // Disadvantages
+	}>;
+	selected: string; // The id of the chosen option
+	rationale: string; // Why this option was selected
+	confidence?: 'high' | 'medium' | 'low';
+	created_at: string; // ISO-8601
+}
+
 // ============================================================================
 // Annotations
 // ============================================================================
@@ -120,6 +137,7 @@ export interface VibesReasoningEntry {
 /** Line-level annotation linking code ranges to provenance metadata. */
 export interface VibesLineAnnotation {
 	type: 'line';
+	annotation_id: string; // SHA-256 content-derived ID (spec section 6.4)
 	file_path: string;
 	line_start: number;
 	line_end: number;
@@ -127,6 +145,7 @@ export interface VibesLineAnnotation {
 	command_hash: string | null;
 	prompt_hash: string | null;
 	reasoning_hash: string | null;
+	decision_hash?: string | null; // References a decision entry in the manifest (spec section 7.3)
 	action: VibesAction;
 	timestamp: string;
 	commit_hash: string | null;
@@ -137,6 +156,7 @@ export interface VibesLineAnnotation {
 /** Function-level annotation linking named functions to provenance metadata. */
 export interface VibeFunctionAnnotation {
 	type: 'function';
+	annotation_id: string; // SHA-256 content-derived ID (spec section 6.4)
 	file_path: string;
 	function_name: string;
 	function_signature?: string;
@@ -144,6 +164,7 @@ export interface VibeFunctionAnnotation {
 	command_hash?: string;
 	prompt_hash?: string;
 	reasoning_hash?: string;
+	decision_hash?: string | null; // References a decision entry in the manifest (spec section 7.3)
 	action: VibesAction;
 	timestamp: string;
 	commit_hash?: string;
@@ -154,6 +175,7 @@ export interface VibeFunctionAnnotation {
 /** Session-level record marking the start or end of an agent session. */
 export interface VibesSessionRecord {
 	type: 'session';
+	annotation_id: string; // SHA-256 content-derived ID (spec section 6.4)
 	event: 'start' | 'end';
 	session_id: string;
 	timestamp: string;
@@ -163,7 +185,4 @@ export interface VibesSessionRecord {
 }
 
 /** Union of all annotation types written to .ai-audit/annotations.jsonl. */
-export type VibesAnnotation =
-	| VibesLineAnnotation
-	| VibeFunctionAnnotation
-	| VibesSessionRecord;
+export type VibesAnnotation = VibesLineAnnotation | VibeFunctionAnnotation | VibesSessionRecord;

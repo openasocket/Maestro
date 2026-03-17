@@ -18,7 +18,7 @@ import {
 	readAnnotations,
 	readVibesManifest,
 } from '../main/vibes/vibes-io';
-import { computeVibesHash } from '../main/vibes/vibes-hash';
+import { computeVibesHash, computeAnnotationId } from '../main/vibes/vibes-hash';
 import type {
 	VibesEnvironmentEntry,
 	VibesCommandEntry,
@@ -68,37 +68,45 @@ const environments: VibesEnvironmentEntry[] = [
 const prompts: VibesPromptEntry[] = [
 	{
 		type: 'prompt',
-		prompt_text: 'Add VIBES panel to the right sidebar with sub-tab navigation for Overview, Log, Models, Blame, Coverage, and Reports views.',
+		prompt_text:
+			'Add VIBES panel to the right sidebar with sub-tab navigation for Overview, Log, Models, Blame, Coverage, and Reports views.',
 		prompt_type: 'user_instruction',
 		prompt_context_files: ['src/renderer/components/RightPanel.tsx'],
 		created_at: '2026-02-10T09:05:00Z',
 	},
 	{
 		type: 'prompt',
-		prompt_text: 'Implement annotation write buffering with auto-flush every 2 seconds or 20 annotations, whichever comes first.',
+		prompt_text:
+			'Implement annotation write buffering with auto-flush every 2 seconds or 20 annotations, whichever comes first.',
 		prompt_type: 'edit_command',
 		prompt_context_files: ['src/main/vibes/vibes-io.ts'],
 		created_at: '2026-02-10T10:15:00Z',
 	},
 	{
 		type: 'prompt',
-		prompt_text: 'Fix the content-addressed hashing to exclude created_at fields and sort keys deterministically.',
+		prompt_text:
+			'Fix the content-addressed hashing to exclude created_at fields and sort keys deterministically.',
 		prompt_type: 'edit_command',
 		prompt_context_files: ['src/main/vibes/vibes-hash.ts'],
 		created_at: '2026-02-10T11:30:00Z',
 	},
 	{
 		type: 'prompt',
-		prompt_text: 'Add Claude Code instrumenter that captures prompts, reasoning, and tool executions as VIBES annotations.',
+		prompt_text:
+			'Add Claude Code instrumenter that captures prompts, reasoning, and tool executions as VIBES annotations.',
 		prompt_type: 'user_instruction',
 		prompt_context_files: ['src/main/vibes/instrumenters/claude-code-instrumenter.ts'],
 		created_at: '2026-02-10T14:05:00Z',
 	},
 	{
 		type: 'prompt',
-		prompt_text: 'Review the VIBES coordinator for potential race conditions in session lifecycle management.',
+		prompt_text:
+			'Review the VIBES coordinator for potential race conditions in session lifecycle management.',
 		prompt_type: 'review_request',
-		prompt_context_files: ['src/main/vibes/vibes-coordinator.ts', 'src/main/vibes/vibes-session.ts'],
+		prompt_context_files: [
+			'src/main/vibes/vibes-coordinator.ts',
+			'src/main/vibes/vibes-session.ts',
+		],
 		created_at: '2026-02-11T08:00:00Z',
 	},
 ];
@@ -106,21 +114,24 @@ const prompts: VibesPromptEntry[] = [
 const reasoning: VibesReasoningEntry[] = [
 	{
 		type: 'reasoning',
-		reasoning_text: 'The VIBES panel needs to be a full-featured sub-application within the right sidebar. I will implement a tab-based navigation system with 6 sub-tabs. The Overview tab will show a dashboard with stats cards and quick actions. Each tab will receive vibesData from a shared hook.',
+		reasoning_text:
+			'The VIBES panel needs to be a full-featured sub-application within the right sidebar. I will implement a tab-based navigation system with 6 sub-tabs. The Overview tab will show a dashboard with stats cards and quick actions. Each tab will receive vibesData from a shared hook.',
 		reasoning_token_count: 85,
 		reasoning_model: 'claude-sonnet-4-5-20250929',
 		created_at: '2026-02-10T09:05:30Z',
 	},
 	{
 		type: 'reasoning',
-		reasoning_text: 'Write buffering is essential for performance. Appending to JSONL on every annotation would be too many I/O operations. A buffer with both size-based (20 annotations) and time-based (2 seconds) flush triggers ensures data is written promptly without excessive I/O.',
+		reasoning_text:
+			'Write buffering is essential for performance. Appending to JSONL on every annotation would be too many I/O operations. A buffer with both size-based (20 annotations) and time-based (2 seconds) flush triggers ensures data is written promptly without excessive I/O.',
 		reasoning_token_count: 62,
 		reasoning_model: 'claude-sonnet-4-5-20250929',
 		created_at: '2026-02-10T10:15:30Z',
 	},
 	{
 		type: 'reasoning',
-		reasoning_text: 'The hashing must be deterministic for content-addressed deduplication. The created_at timestamp varies per call so it must be excluded. Sorting object keys ensures { a: 1, b: 2 } and { b: 2, a: 1 } produce the same hash.',
+		reasoning_text:
+			'The hashing must be deterministic for content-addressed deduplication. The created_at timestamp varies per call so it must be excluded. Sorting object keys ensures { a: 1, b: 2 } and { b: 2, a: 1 } produce the same hash.',
 		reasoning_token_count: 55,
 		reasoning_model: 'o3',
 		created_at: '2026-02-10T11:30:30Z',
@@ -177,30 +188,246 @@ interface AnnotationDef {
 
 const annotationDefs: AnnotationDef[] = [
 	// Session 1: Claude Code + Sonnet — VIBES panel creation
-	{ file_path: 'src/renderer/components/vibes/VibesPanel.tsx', line_start: 1, line_end: 60, action: 'create', envIndex: 0, cmdIndex: 0, promptIndex: 0, reasoningIndex: 0, assurance_level: 'high', timestamp: '2026-02-10T09:10:00Z', sessionIndex: 0 },
-	{ file_path: 'src/renderer/components/vibes/VibesPanel.tsx', line_start: 61, line_end: 120, action: 'create', envIndex: 0, cmdIndex: 0, promptIndex: 0, reasoningIndex: 0, assurance_level: 'high', timestamp: '2026-02-10T09:10:05Z', sessionIndex: 0 },
-	{ file_path: 'src/renderer/components/vibes/VibesPanel.tsx', line_start: 121, line_end: 199, action: 'create', envIndex: 0, cmdIndex: 0, promptIndex: 0, reasoningIndex: 0, assurance_level: 'high', timestamp: '2026-02-10T09:10:10Z', sessionIndex: 0 },
-	{ file_path: 'src/renderer/components/vibes/VibesDashboard.tsx', line_start: 1, line_end: 80, action: 'create', envIndex: 0, cmdIndex: 0, promptIndex: 0, reasoningIndex: 0, assurance_level: 'high', timestamp: '2026-02-10T09:15:00Z', sessionIndex: 0 },
-	{ file_path: 'src/renderer/components/vibes/VibesDashboard.tsx', line_start: 81, line_end: 180, action: 'create', envIndex: 0, cmdIndex: 0, promptIndex: 0, reasoningIndex: 0, assurance_level: 'high', timestamp: '2026-02-10T09:15:05Z', sessionIndex: 0 },
-	{ file_path: 'src/renderer/components/vibes/VibesAnnotationLog.tsx', line_start: 1, line_end: 120, action: 'create', envIndex: 0, cmdIndex: 0, promptIndex: 0, reasoningIndex: 0, assurance_level: 'high', timestamp: '2026-02-10T09:20:00Z', sessionIndex: 0 },
+	{
+		file_path: 'src/renderer/components/vibes/VibesPanel.tsx',
+		line_start: 1,
+		line_end: 60,
+		action: 'create',
+		envIndex: 0,
+		cmdIndex: 0,
+		promptIndex: 0,
+		reasoningIndex: 0,
+		assurance_level: 'high',
+		timestamp: '2026-02-10T09:10:00Z',
+		sessionIndex: 0,
+	},
+	{
+		file_path: 'src/renderer/components/vibes/VibesPanel.tsx',
+		line_start: 61,
+		line_end: 120,
+		action: 'create',
+		envIndex: 0,
+		cmdIndex: 0,
+		promptIndex: 0,
+		reasoningIndex: 0,
+		assurance_level: 'high',
+		timestamp: '2026-02-10T09:10:05Z',
+		sessionIndex: 0,
+	},
+	{
+		file_path: 'src/renderer/components/vibes/VibesPanel.tsx',
+		line_start: 121,
+		line_end: 199,
+		action: 'create',
+		envIndex: 0,
+		cmdIndex: 0,
+		promptIndex: 0,
+		reasoningIndex: 0,
+		assurance_level: 'high',
+		timestamp: '2026-02-10T09:10:10Z',
+		sessionIndex: 0,
+	},
+	{
+		file_path: 'src/renderer/components/vibes/VibesDashboard.tsx',
+		line_start: 1,
+		line_end: 80,
+		action: 'create',
+		envIndex: 0,
+		cmdIndex: 0,
+		promptIndex: 0,
+		reasoningIndex: 0,
+		assurance_level: 'high',
+		timestamp: '2026-02-10T09:15:00Z',
+		sessionIndex: 0,
+	},
+	{
+		file_path: 'src/renderer/components/vibes/VibesDashboard.tsx',
+		line_start: 81,
+		line_end: 180,
+		action: 'create',
+		envIndex: 0,
+		cmdIndex: 0,
+		promptIndex: 0,
+		reasoningIndex: 0,
+		assurance_level: 'high',
+		timestamp: '2026-02-10T09:15:05Z',
+		sessionIndex: 0,
+	},
+	{
+		file_path: 'src/renderer/components/vibes/VibesAnnotationLog.tsx',
+		line_start: 1,
+		line_end: 120,
+		action: 'create',
+		envIndex: 0,
+		cmdIndex: 0,
+		promptIndex: 0,
+		reasoningIndex: 0,
+		assurance_level: 'high',
+		timestamp: '2026-02-10T09:20:00Z',
+		sessionIndex: 0,
+	},
 	// Session 1: Write buffering
-	{ file_path: 'src/main/vibes/vibes-io.ts', line_start: 112, line_end: 192, action: 'create', envIndex: 0, cmdIndex: 0, promptIndex: 1, reasoningIndex: 1, assurance_level: 'high', timestamp: '2026-02-10T10:20:00Z', sessionIndex: 0 },
-	{ file_path: 'src/main/vibes/vibes-io.ts', line_start: 402, line_end: 480, action: 'create', envIndex: 0, cmdIndex: 0, promptIndex: 1, reasoningIndex: 1, assurance_level: 'high', timestamp: '2026-02-10T10:20:05Z', sessionIndex: 0 },
+	{
+		file_path: 'src/main/vibes/vibes-io.ts',
+		line_start: 112,
+		line_end: 192,
+		action: 'create',
+		envIndex: 0,
+		cmdIndex: 0,
+		promptIndex: 1,
+		reasoningIndex: 1,
+		assurance_level: 'high',
+		timestamp: '2026-02-10T10:20:00Z',
+		sessionIndex: 0,
+	},
+	{
+		file_path: 'src/main/vibes/vibes-io.ts',
+		line_start: 402,
+		line_end: 480,
+		action: 'create',
+		envIndex: 0,
+		cmdIndex: 0,
+		promptIndex: 1,
+		reasoningIndex: 1,
+		assurance_level: 'high',
+		timestamp: '2026-02-10T10:20:05Z',
+		sessionIndex: 0,
+	},
 	// Session 1: Hash fix
-	{ file_path: 'src/main/vibes/vibes-hash.ts', line_start: 15, line_end: 45, action: 'modify', envIndex: 0, cmdIndex: 2, promptIndex: 2, reasoningIndex: -1, assurance_level: 'medium', timestamp: '2026-02-10T11:35:00Z', sessionIndex: 0 },
+	{
+		file_path: 'src/main/vibes/vibes-hash.ts',
+		line_start: 15,
+		line_end: 45,
+		action: 'modify',
+		envIndex: 0,
+		cmdIndex: 2,
+		promptIndex: 2,
+		reasoningIndex: -1,
+		assurance_level: 'medium',
+		timestamp: '2026-02-10T11:35:00Z',
+		sessionIndex: 0,
+	},
 	// Session 2: Codex + o3 — instrumenter
-	{ file_path: 'src/main/vibes/instrumenters/claude-code-instrumenter.ts', line_start: 1, line_end: 50, action: 'create', envIndex: 1, cmdIndex: 0, promptIndex: 3, reasoningIndex: 2, assurance_level: 'high', timestamp: '2026-02-10T14:10:00Z', sessionIndex: 1 },
-	{ file_path: 'src/main/vibes/instrumenters/claude-code-instrumenter.ts', line_start: 51, line_end: 120, action: 'create', envIndex: 1, cmdIndex: 0, promptIndex: 3, reasoningIndex: 2, assurance_level: 'high', timestamp: '2026-02-10T14:10:05Z', sessionIndex: 1 },
-	{ file_path: 'src/main/vibes/instrumenters/codex-instrumenter.ts', line_start: 1, line_end: 80, action: 'create', envIndex: 1, cmdIndex: 0, promptIndex: 3, reasoningIndex: 2, assurance_level: 'high', timestamp: '2026-02-10T14:15:00Z', sessionIndex: 1 },
+	{
+		file_path: 'src/main/vibes/instrumenters/claude-code-instrumenter.ts',
+		line_start: 1,
+		line_end: 50,
+		action: 'create',
+		envIndex: 1,
+		cmdIndex: 0,
+		promptIndex: 3,
+		reasoningIndex: 2,
+		assurance_level: 'high',
+		timestamp: '2026-02-10T14:10:00Z',
+		sessionIndex: 1,
+	},
+	{
+		file_path: 'src/main/vibes/instrumenters/claude-code-instrumenter.ts',
+		line_start: 51,
+		line_end: 120,
+		action: 'create',
+		envIndex: 1,
+		cmdIndex: 0,
+		promptIndex: 3,
+		reasoningIndex: 2,
+		assurance_level: 'high',
+		timestamp: '2026-02-10T14:10:05Z',
+		sessionIndex: 1,
+	},
+	{
+		file_path: 'src/main/vibes/instrumenters/codex-instrumenter.ts',
+		line_start: 1,
+		line_end: 80,
+		action: 'create',
+		envIndex: 1,
+		cmdIndex: 0,
+		promptIndex: 3,
+		reasoningIndex: 2,
+		assurance_level: 'high',
+		timestamp: '2026-02-10T14:15:00Z',
+		sessionIndex: 1,
+	},
 	// Session 2: Coordinator + session review
-	{ file_path: 'src/main/vibes/vibes-coordinator.ts', line_start: 1, line_end: 40, action: 'review', envIndex: 2, cmdIndex: 1, promptIndex: 4, reasoningIndex: -1, assurance_level: 'medium', timestamp: '2026-02-11T08:05:00Z', sessionIndex: 1 },
-	{ file_path: 'src/main/vibes/vibes-session.ts', line_start: 1, line_end: 60, action: 'review', envIndex: 2, cmdIndex: 1, promptIndex: 4, reasoningIndex: -1, assurance_level: 'medium', timestamp: '2026-02-11T08:05:05Z', sessionIndex: 1 },
+	{
+		file_path: 'src/main/vibes/vibes-coordinator.ts',
+		line_start: 1,
+		line_end: 40,
+		action: 'review',
+		envIndex: 2,
+		cmdIndex: 1,
+		promptIndex: 4,
+		reasoningIndex: -1,
+		assurance_level: 'medium',
+		timestamp: '2026-02-11T08:05:00Z',
+		sessionIndex: 1,
+	},
+	{
+		file_path: 'src/main/vibes/vibes-session.ts',
+		line_start: 1,
+		line_end: 60,
+		action: 'review',
+		envIndex: 2,
+		cmdIndex: 1,
+		promptIndex: 4,
+		reasoningIndex: -1,
+		assurance_level: 'medium',
+		timestamp: '2026-02-11T08:05:05Z',
+		sessionIndex: 1,
+	},
 	// Low assurance annotations
-	{ file_path: 'src/shared/vibes-types.ts', line_start: 1, line_end: 170, action: 'create', envIndex: 0, cmdIndex: 0, promptIndex: 0, reasoningIndex: -1, assurance_level: 'low', timestamp: '2026-02-10T09:08:00Z', sessionIndex: 0 },
-	{ file_path: 'src/shared/vibes-settings.ts', line_start: 1, line_end: 50, action: 'create', envIndex: 0, cmdIndex: 0, promptIndex: 0, reasoningIndex: -1, assurance_level: 'low', timestamp: '2026-02-10T09:09:00Z', sessionIndex: 0 },
+	{
+		file_path: 'src/shared/vibes-types.ts',
+		line_start: 1,
+		line_end: 170,
+		action: 'create',
+		envIndex: 0,
+		cmdIndex: 0,
+		promptIndex: 0,
+		reasoningIndex: -1,
+		assurance_level: 'low',
+		timestamp: '2026-02-10T09:08:00Z',
+		sessionIndex: 0,
+	},
+	{
+		file_path: 'src/shared/vibes-settings.ts',
+		line_start: 1,
+		line_end: 50,
+		action: 'create',
+		envIndex: 0,
+		cmdIndex: 0,
+		promptIndex: 0,
+		reasoningIndex: -1,
+		assurance_level: 'low',
+		timestamp: '2026-02-10T09:09:00Z',
+		sessionIndex: 0,
+	},
 	// Additional annotations for coverage
-	{ file_path: 'src/main/vibes/vibes-annotations.ts', line_start: 1, line_end: 100, action: 'create', envIndex: 0, cmdIndex: 0, promptIndex: 1, reasoningIndex: 1, assurance_level: 'high', timestamp: '2026-02-10T10:25:00Z', sessionIndex: 0 },
-	{ file_path: 'src/renderer/components/vibes/VibesModelAttribution.tsx', line_start: 1, line_end: 80, action: 'create', envIndex: 0, cmdIndex: 0, promptIndex: 0, reasoningIndex: 0, assurance_level: 'high', timestamp: '2026-02-10T09:25:00Z', sessionIndex: 0 },
+	{
+		file_path: 'src/main/vibes/vibes-annotations.ts',
+		line_start: 1,
+		line_end: 100,
+		action: 'create',
+		envIndex: 0,
+		cmdIndex: 0,
+		promptIndex: 1,
+		reasoningIndex: 1,
+		assurance_level: 'high',
+		timestamp: '2026-02-10T10:25:00Z',
+		sessionIndex: 0,
+	},
+	{
+		file_path: 'src/renderer/components/vibes/VibesModelAttribution.tsx',
+		line_start: 1,
+		line_end: 80,
+		action: 'create',
+		envIndex: 0,
+		cmdIndex: 0,
+		promptIndex: 0,
+		reasoningIndex: 0,
+		assurance_level: 'high',
+		timestamp: '2026-02-10T09:25:00Z',
+		sessionIndex: 0,
+	},
 ];
 
 const sessions = [
@@ -221,8 +448,11 @@ async function main() {
 		assuranceLevel: 'high',
 		trackedExtensions: ['.ts', '.tsx', '.js', '.jsx'],
 		excludePatterns: [
-			'**/node_modules/**', '**/dist/**', '**/.git/**',
-			'**/build/**', '**/coverage/**',
+			'**/node_modules/**',
+			'**/dist/**',
+			'**/.git/**',
+			'**/build/**',
+			'**/coverage/**',
 		],
 	});
 	if (!initResult.success) {
@@ -267,6 +497,7 @@ async function main() {
 	for (let i = 0; i < sessions.length; i++) {
 		const startRecord: VibesSessionRecord = {
 			type: 'session',
+			annotation_id: '', // placeholder, computed below
 			event: 'start',
 			session_id: sessions[i].id,
 			timestamp: i === 0 ? '2026-02-10T09:00:00Z' : '2026-02-10T14:00:00Z',
@@ -274,6 +505,9 @@ async function main() {
 			assurance_level: 'high',
 			description: sessions[i].description,
 		};
+		startRecord.annotation_id = computeAnnotationId(
+			startRecord as unknown as Record<string, unknown>
+		);
 		await appendAnnotationImmediate(PROJECT_PATH, startRecord);
 	}
 	console.log(`  ✓ ${sessions.length} session starts`);
@@ -283,6 +517,7 @@ async function main() {
 	for (const def of annotationDefs) {
 		const annotation: VibesLineAnnotation = {
 			type: 'line',
+			annotation_id: '', // placeholder, computed below
 			file_path: def.file_path,
 			line_start: def.line_start,
 			line_end: def.line_end,
@@ -290,12 +525,18 @@ async function main() {
 			environment_hash: envHashes[def.envIndex],
 			command_hash: cmdHashes[def.cmdIndex],
 			prompt_hash: def.assurance_level !== 'low' ? promptHashes[def.promptIndex] : null,
-			reasoning_hash: def.reasoningIndex >= 0 && def.assurance_level === 'high' ? reasoningHashes[def.reasoningIndex] : null,
+			reasoning_hash:
+				def.reasoningIndex >= 0 && def.assurance_level === 'high'
+					? reasoningHashes[def.reasoningIndex]
+					: null,
 			assurance_level: def.assurance_level,
 			timestamp: def.timestamp,
 			commit_hash: null,
 			session_id: sessions[def.sessionIndex].id,
 		};
+		annotation.annotation_id = computeAnnotationId(
+			annotation as unknown as Record<string, unknown>
+		);
 		await appendAnnotationImmediate(PROJECT_PATH, annotation);
 		annotationCount++;
 	}
@@ -305,6 +546,7 @@ async function main() {
 	for (let i = 0; i < sessions.length; i++) {
 		const endRecord: VibesSessionRecord = {
 			type: 'session',
+			annotation_id: '', // placeholder, computed below
 			event: 'end',
 			session_id: sessions[i].id,
 			timestamp: i === 0 ? '2026-02-10T12:00:00Z' : '2026-02-11T09:00:00Z',
@@ -312,6 +554,7 @@ async function main() {
 			assurance_level: 'high',
 			description: `${sessions[i].description} ended`,
 		};
+		endRecord.annotation_id = computeAnnotationId(endRecord as unknown as Record<string, unknown>);
 		await appendAnnotationImmediate(PROJECT_PATH, endRecord);
 	}
 	console.log(`  ✓ ${sessions.length} session ends`);
@@ -330,7 +573,11 @@ async function main() {
 	let missingRefs = 0;
 	for (const a of annotations) {
 		if (a.type === 'line' || a.type === 'function') {
-			if ('environment_hash' in a && a.environment_hash && !(a.environment_hash in finalManifest.entries)) {
+			if (
+				'environment_hash' in a &&
+				a.environment_hash &&
+				!(a.environment_hash in finalManifest.entries)
+			) {
 				missingRefs++;
 			}
 		}

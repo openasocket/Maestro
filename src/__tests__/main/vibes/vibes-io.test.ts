@@ -7,7 +7,15 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, rm, readFile, access, constants, writeFile as fsWriteFile, mkdir } from 'fs/promises';
+import {
+	mkdtemp,
+	rm,
+	readFile,
+	access,
+	constants,
+	writeFile as fsWriteFile,
+	mkdir,
+} from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -69,6 +77,7 @@ const SAMPLE_CONFIG: VibesConfig = {
 
 const SAMPLE_LINE_ANNOTATION: VibesLineAnnotation = {
 	type: 'line',
+	annotation_id: '0'.repeat(64),
 	file_path: 'src/index.ts',
 	line_start: 1,
 	line_end: 10,
@@ -85,6 +94,7 @@ const SAMPLE_LINE_ANNOTATION: VibesLineAnnotation = {
 
 const SAMPLE_FUNCTION_ANNOTATION: VibeFunctionAnnotation = {
 	type: 'function',
+	annotation_id: '1'.repeat(64),
 	file_path: 'src/utils.ts',
 	function_name: 'computeHash',
 	function_signature: 'computeHash(data: string): string',
@@ -96,6 +106,7 @@ const SAMPLE_FUNCTION_ANNOTATION: VibeFunctionAnnotation = {
 
 const SAMPLE_SESSION_RECORD: VibesSessionRecord = {
 	type: 'session',
+	annotation_id: '2'.repeat(64),
 	event: 'start',
 	session_id: 'session-001',
 	timestamp: '2026-02-10T12:00:00Z',
@@ -138,7 +149,9 @@ describe('vibes-io', () => {
 			await ensureAuditDir(tmpDir);
 
 			await expect(access(path.join(tmpDir, '.ai-audit'), constants.F_OK)).resolves.toBeUndefined();
-			await expect(access(path.join(tmpDir, '.ai-audit', 'blobs'), constants.F_OK)).resolves.toBeUndefined();
+			await expect(
+				access(path.join(tmpDir, '.ai-audit', 'blobs'), constants.F_OK)
+			).resolves.toBeUndefined();
 		});
 
 		it('should be idempotent (safe to call multiple times)', async () => {
@@ -146,7 +159,9 @@ describe('vibes-io', () => {
 			await ensureAuditDir(tmpDir);
 
 			await expect(access(path.join(tmpDir, '.ai-audit'), constants.F_OK)).resolves.toBeUndefined();
-			await expect(access(path.join(tmpDir, '.ai-audit', 'blobs'), constants.F_OK)).resolves.toBeUndefined();
+			await expect(
+				access(path.join(tmpDir, '.ai-audit', 'blobs'), constants.F_OK)
+			).resolves.toBeUndefined();
 		});
 	});
 
@@ -280,8 +295,8 @@ describe('vibes-io', () => {
 				standard: 'VIBES',
 				version: '1.0',
 				entries: {
-					'abc123': SAMPLE_ENVIRONMENT_ENTRY,
-					'def456': {
+					abc123: SAMPLE_ENVIRONMENT_ENTRY,
+					def456: {
 						type: 'command',
 						command_text: 'npm test',
 						command_type: 'shell',
@@ -313,9 +328,7 @@ describe('vibes-io', () => {
 			const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 			try {
 				await readVibesManifest(tmpDir);
-				expect(warnSpy).toHaveBeenCalledWith(
-					expect.stringContaining("unsupported version: '2.0'"),
-				);
+				expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("unsupported version: '2.0'"));
 			} finally {
 				warnSpy.mockRestore();
 			}
@@ -334,7 +347,7 @@ describe('vibes-io', () => {
 			try {
 				await readVibesConfig(tmpDir);
 				expect(warnSpy).toHaveBeenCalledWith(
-					expect.stringContaining("unsupported standard_version: '2.0'"),
+					expect.stringContaining("unsupported standard_version: '2.0'")
 				);
 			} finally {
 				warnSpy.mockRestore();
@@ -347,7 +360,16 @@ describe('vibes-io', () => {
 			const badManifest = {
 				standard: 'VIBES',
 				version: '99.0',
-				entries: { 'abc': { type: 'environment', tool_name: 'test', tool_version: '1.0', model_name: 'm', model_version: '1', created_at: '2026-02-10T12:00:00Z' } },
+				entries: {
+					abc: {
+						type: 'environment',
+						tool_name: 'test',
+						tool_version: '1.0',
+						model_name: 'm',
+						model_version: '1',
+						created_at: '2026-02-10T12:00:00Z',
+					},
+				},
 			};
 			await fsWriteFile(manifestPath, JSON.stringify(badManifest), 'utf8');
 
@@ -480,14 +502,18 @@ describe('vibes-io', () => {
 			await flushAll();
 
 			await expect(
-				access(path.join(tmpDir, '.ai-audit', 'annotations.jsonl'), constants.F_OK),
+				access(path.join(tmpDir, '.ai-audit', 'annotations.jsonl'), constants.F_OK)
 			).resolves.toBeUndefined();
 		});
 	});
 
 	describe('appendAnnotations', () => {
 		it('should write multiple annotations via buffer', async () => {
-			const annotations = [SAMPLE_LINE_ANNOTATION, SAMPLE_FUNCTION_ANNOTATION, SAMPLE_SESSION_RECORD];
+			const annotations = [
+				SAMPLE_LINE_ANNOTATION,
+				SAMPLE_FUNCTION_ANNOTATION,
+				SAMPLE_SESSION_RECORD,
+			];
 			await appendAnnotations(tmpDir, annotations);
 
 			const result = await readAnnotations(tmpDir);
@@ -548,8 +574,11 @@ describe('vibes-io', () => {
 		it('should skip blank lines', async () => {
 			await ensureAuditDir(tmpDir);
 			const annotationsPath = path.join(tmpDir, '.ai-audit', 'annotations.jsonl');
-			const content = JSON.stringify(SAMPLE_LINE_ANNOTATION) + '\n\n' +
-				JSON.stringify(SAMPLE_FUNCTION_ANNOTATION) + '\n\n';
+			const content =
+				JSON.stringify(SAMPLE_LINE_ANNOTATION) +
+				'\n\n' +
+				JSON.stringify(SAMPLE_FUNCTION_ANNOTATION) +
+				'\n\n';
 			await fsWriteFile(annotationsPath, content, 'utf8');
 
 			const annotations = await readAnnotations(tmpDir);
@@ -809,7 +838,7 @@ describe('vibes-io', () => {
 		it('should not throw when buffering an annotation for invalid path', async () => {
 			// appendAnnotation should never throw — just log
 			await expect(
-				appendAnnotation('/nonexistent/path/that/will/fail', SAMPLE_LINE_ANNOTATION),
+				appendAnnotation('/nonexistent/path/that/will/fail', SAMPLE_LINE_ANNOTATION)
 			).resolves.toBeUndefined();
 		});
 
@@ -821,7 +850,7 @@ describe('vibes-io', () => {
 
 		it('should not throw when addManifestEntry target is invalid', async () => {
 			await expect(
-				addManifestEntry('/nonexistent/path', 'hash', SAMPLE_ENVIRONMENT_ENTRY),
+				addManifestEntry('/nonexistent/path', 'hash', SAMPLE_ENVIRONMENT_ENTRY)
 			).resolves.toBeUndefined();
 		});
 	});
@@ -904,7 +933,9 @@ describe('vibes-io', () => {
 
 			expect(result.success).toBe(true);
 			await expect(access(path.join(tmpDir, '.ai-audit'), constants.F_OK)).resolves.toBeUndefined();
-			await expect(access(path.join(tmpDir, '.ai-audit', 'blobs'), constants.F_OK)).resolves.toBeUndefined();
+			await expect(
+				access(path.join(tmpDir, '.ai-audit', 'blobs'), constants.F_OK)
+			).resolves.toBeUndefined();
 		});
 
 		it('should create a valid config.json', async () => {
@@ -975,7 +1006,16 @@ describe('vibes-io', () => {
 			const existingManifest = {
 				standard: 'VIBES' as const,
 				version: '1.0' as const,
-				entries: { 'hash123': { type: 'environment' as const, tool_name: 'test', tool_version: '1.0', model_name: 'test', model_version: '1.0', created_at: '2026-02-10T12:00:00Z' } },
+				entries: {
+					hash123: {
+						type: 'environment' as const,
+						tool_name: 'test',
+						tool_version: '1.0',
+						model_name: 'test',
+						model_version: '1.0',
+						created_at: '2026-02-10T12:00:00Z',
+					},
+				},
 			};
 			await writeVibesManifest(tmpDir, existingManifest);
 
@@ -1030,9 +1070,7 @@ describe('vibes-io', () => {
 				});
 			}
 
-			await Promise.all(
-				records.map((r) => appendAnnotationImmediate(tmpDir, r)),
-			);
+			await Promise.all(records.map((r) => appendAnnotationImmediate(tmpDir, r)));
 
 			const annotationsPath = path.join(tmpDir, '.ai-audit', 'annotations.jsonl');
 			const raw = await readFile(annotationsPath, 'utf8');
@@ -1343,7 +1381,7 @@ describe('vibes-io', () => {
 			await writeReasoningBlob(tmpDir, hash, 'data');
 
 			await expect(
-				access(path.join(tmpDir, '.ai-audit', 'blobs'), constants.F_OK),
+				access(path.join(tmpDir, '.ai-audit', 'blobs'), constants.F_OK)
 			).resolves.toBeUndefined();
 		});
 
@@ -1395,9 +1433,14 @@ describe('vibes-io', () => {
 				environment_hash: 'envhash2',
 			};
 			const sessionStart: VibesSessionRecord = {
-				type: 'session', event: 'start', session_id: 'sess-1',
-				timestamp: '2026-02-10T12:00:00Z', environment_hash: null,
-				assurance_level: 'high', description: null,
+				type: 'session',
+				annotation_id: '3'.repeat(64),
+				event: 'start',
+				session_id: 'sess-1',
+				timestamp: '2026-02-10T12:00:00Z',
+				environment_hash: null,
+				assurance_level: 'high',
+				description: null,
 			};
 			await appendAnnotationImmediate(tmpDir, sessionStart);
 			await appendAnnotationImmediate(tmpDir, lineA);
@@ -1423,14 +1466,24 @@ describe('vibes-io', () => {
 		it('should count sessions as inactive when ended', async () => {
 			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
 			const start: VibesSessionRecord = {
-				type: 'session', event: 'start', session_id: 'sess-x',
-				timestamp: '2026-02-10T12:00:00Z', environment_hash: null,
-				assurance_level: null, description: null,
+				type: 'session',
+				annotation_id: '4'.repeat(64),
+				event: 'start',
+				session_id: 'sess-x',
+				timestamp: '2026-02-10T12:00:00Z',
+				environment_hash: null,
+				assurance_level: null,
+				description: null,
 			};
 			const end: VibesSessionRecord = {
-				type: 'session', event: 'end', session_id: 'sess-x',
-				timestamp: '2026-02-10T13:00:00Z', environment_hash: null,
-				assurance_level: null, description: null,
+				type: 'session',
+				annotation_id: '5'.repeat(64),
+				event: 'end',
+				session_id: 'sess-x',
+				timestamp: '2026-02-10T13:00:00Z',
+				environment_hash: null,
+				assurance_level: null,
+				description: null,
 			};
 			await appendAnnotationImmediate(tmpDir, start);
 			await appendAnnotationImmediate(tmpDir, end);
@@ -1447,17 +1500,28 @@ describe('vibes-io', () => {
 		it('should return session records with annotation counts', async () => {
 			await initVibesDirectly(tmpDir, { projectName: 'test', assuranceLevel: 'medium' });
 			const start: VibesSessionRecord = {
-				type: 'session', event: 'start', session_id: 'sess-1',
-				timestamp: '2026-02-10T12:00:00Z', environment_hash: null,
-				assurance_level: null, description: 'claude-code',
+				type: 'session',
+				annotation_id: '6'.repeat(64),
+				event: 'start',
+				session_id: 'sess-1',
+				timestamp: '2026-02-10T12:00:00Z',
+				environment_hash: null,
+				assurance_level: null,
+				description: 'claude-code',
 			};
 			const line: VibesLineAnnotation = {
-				...SAMPLE_LINE_ANNOTATION, session_id: 'sess-1',
+				...SAMPLE_LINE_ANNOTATION,
+				session_id: 'sess-1',
 			};
 			const end: VibesSessionRecord = {
-				type: 'session', event: 'end', session_id: 'sess-1',
-				timestamp: '2026-02-10T13:00:00Z', environment_hash: null,
-				assurance_level: null, description: null,
+				type: 'session',
+				annotation_id: '7'.repeat(64),
+				event: 'end',
+				session_id: 'sess-1',
+				timestamp: '2026-02-10T13:00:00Z',
+				environment_hash: null,
+				assurance_level: null,
+				description: null,
 			};
 			await appendAnnotationImmediate(tmpDir, start);
 			await appendAnnotationImmediate(tmpDir, line);
@@ -1489,15 +1553,32 @@ describe('vibes-io', () => {
 				standard: 'VIBES',
 				version: '1.0',
 				entries: {
-					envhash1: { ...SAMPLE_ENVIRONMENT_ENTRY, model_name: 'claude-4', tool_name: 'claude-code' },
+					envhash1: {
+						...SAMPLE_ENVIRONMENT_ENTRY,
+						model_name: 'claude-4',
+						tool_name: 'claude-code',
+					},
 					envhash2: { ...SAMPLE_ENVIRONMENT_ENTRY, model_name: 'gpt-4', tool_name: 'copilot' },
 				},
 			});
 
 			// 3 annotations: 2 for claude-4, 1 for gpt-4
-			await appendAnnotationImmediate(tmpDir, { ...SAMPLE_LINE_ANNOTATION, environment_hash: 'envhash1' });
-			await appendAnnotationImmediate(tmpDir, { ...SAMPLE_LINE_ANNOTATION, environment_hash: 'envhash1', line_start: 11, line_end: 20 });
-			await appendAnnotationImmediate(tmpDir, { ...SAMPLE_LINE_ANNOTATION, environment_hash: 'envhash2', line_start: 21, line_end: 30 });
+			await appendAnnotationImmediate(tmpDir, {
+				...SAMPLE_LINE_ANNOTATION,
+				environment_hash: 'envhash1',
+			});
+			await appendAnnotationImmediate(tmpDir, {
+				...SAMPLE_LINE_ANNOTATION,
+				environment_hash: 'envhash1',
+				line_start: 11,
+				line_end: 20,
+			});
+			await appendAnnotationImmediate(tmpDir, {
+				...SAMPLE_LINE_ANNOTATION,
+				environment_hash: 'envhash2',
+				line_start: 21,
+				line_end: 30,
+			});
 
 			const models = await extractModelsFromManifest(tmpDir);
 			expect(models).toHaveLength(2);
@@ -1531,7 +1612,11 @@ describe('vibes-io', () => {
 				standard: 'VIBES',
 				version: '1.0',
 				entries: {
-					envhash1: { ...SAMPLE_ENVIRONMENT_ENTRY, model_name: 'claude-4', tool_name: 'claude-code' },
+					envhash1: {
+						...SAMPLE_ENVIRONMENT_ENTRY,
+						model_name: 'claude-4',
+						tool_name: 'claude-code',
+					},
 				},
 			});
 
@@ -1574,7 +1659,12 @@ describe('vibes-io', () => {
 				standard: 'VIBES',
 				version: '1.0',
 				entries: {
-					envhash1: { ...SAMPLE_ENVIRONMENT_ENTRY, model_name: 'gpt-4o', model_version: '2026-01', tool_name: 'copilot' },
+					envhash1: {
+						...SAMPLE_ENVIRONMENT_ENTRY,
+						model_name: 'gpt-4o',
+						model_version: '2026-01',
+						tool_name: 'copilot',
+					},
 				},
 			});
 			await appendAnnotationImmediate(tmpDir, {
@@ -1707,7 +1797,7 @@ describe('vibes-io', () => {
 
 		it('should not throw for invalid paths', async () => {
 			await expect(
-				addManifestEntryImmediate('/nonexistent/path', 'hash', SAMPLE_ENVIRONMENT_ENTRY),
+				addManifestEntryImmediate('/nonexistent/path', 'hash', SAMPLE_ENVIRONMENT_ENTRY)
 			).resolves.toBeUndefined();
 		});
 	});
@@ -1746,7 +1836,10 @@ describe('vibes-io', () => {
 			// Create a tracked source file
 			const srcDir = path.join(tmpDir, 'src');
 			await mkdir(srcDir, { recursive: true });
-			await fsWriteFile(path.join(srcDir, 'index.ts'), 'line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n');
+			await fsWriteFile(
+				path.join(srcDir, 'index.ts'),
+				'line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n'
+			);
 
 			// Add annotations covering lines 1-5
 			await appendAnnotationImmediate(tmpDir, {

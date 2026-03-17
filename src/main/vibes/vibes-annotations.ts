@@ -3,7 +3,7 @@
 // along with its content-addressed hash for manifest storage.
 
 import { gzipSync } from 'zlib';
-import { computeVibesHash } from './vibes-hash';
+import { computeVibesHash, computeAnnotationId } from './vibes-hash';
 import type {
 	VibesAssuranceLevel,
 	VibesAction,
@@ -205,8 +205,9 @@ export function createLineAnnotation(params: {
 	commitHash?: string | null;
 	assuranceLevel: VibesAssuranceLevel;
 }): VibesLineAnnotation {
-	return {
+	const annotation: VibesLineAnnotation = {
 		type: 'line',
+		annotation_id: '', // placeholder, computed below
 		file_path: params.filePath,
 		line_start: params.lineStart,
 		line_end: params.lineEnd,
@@ -220,6 +221,8 @@ export function createLineAnnotation(params: {
 		session_id: params.sessionId ?? null,
 		assurance_level: params.assuranceLevel,
 	};
+	annotation.annotation_id = computeAnnotationId(annotation as unknown as Record<string, unknown>);
+	return annotation;
 }
 
 // ============================================================================
@@ -245,6 +248,7 @@ export function createFunctionAnnotation(params: {
 }): VibeFunctionAnnotation {
 	const annotation: VibeFunctionAnnotation = {
 		type: 'function',
+		annotation_id: '', // placeholder, computed below
 		file_path: params.filePath,
 		function_name: params.functionName,
 		environment_hash: params.environmentHash,
@@ -272,6 +276,7 @@ export function createFunctionAnnotation(params: {
 		annotation.commit_hash = params.commitHash;
 	}
 
+	annotation.annotation_id = computeAnnotationId(annotation as unknown as Record<string, unknown>);
 	return annotation;
 }
 
@@ -289,8 +294,9 @@ export function createSessionRecord(params: {
 	assuranceLevel?: VibesAssuranceLevel | null;
 	description?: string | null;
 }): VibesSessionRecord {
-	return {
+	const record: VibesSessionRecord = {
 		type: 'session',
+		annotation_id: '', // placeholder, computed below
 		event: params.event,
 		session_id: params.sessionId,
 		timestamp: new Date().toISOString(),
@@ -298,4 +304,6 @@ export function createSessionRecord(params: {
 		assurance_level: params.assuranceLevel ?? null,
 		description: params.description ?? null,
 	};
+	record.annotation_id = computeAnnotationId(record as unknown as Record<string, unknown>);
+	return record;
 }

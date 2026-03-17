@@ -136,8 +136,14 @@ describe('vibes-annotations', () => {
 
 			const json = JSON.parse(JSON.stringify(entry));
 			const expectedKeys = [
-				'type', 'tool_name', 'tool_version', 'model_name',
-				'model_version', 'model_parameters', 'tool_extensions', 'created_at',
+				'type',
+				'tool_name',
+				'tool_version',
+				'model_name',
+				'model_version',
+				'model_parameters',
+				'tool_extensions',
+				'created_at',
 			];
 			for (const key of expectedKeys) {
 				expect(json).toHaveProperty(key);
@@ -221,9 +227,9 @@ describe('vibes-annotations', () => {
 		});
 
 		it('should support all command types', () => {
-			const types: Array<'shell' | 'file_write' | 'file_read' | 'file_delete' | 'api_call' | 'tool_use' | 'other'> = [
-				'shell', 'file_write', 'file_read', 'file_delete', 'api_call', 'tool_use', 'other',
-			];
+			const types: Array<
+				'shell' | 'file_write' | 'file_read' | 'file_delete' | 'api_call' | 'tool_use' | 'other'
+			> = ['shell', 'file_write', 'file_read', 'file_delete', 'api_call', 'tool_use', 'other'];
 
 			for (const commandType of types) {
 				const { entry } = createCommandEntry({
@@ -287,7 +293,11 @@ describe('vibes-annotations', () => {
 
 			const json = JSON.parse(JSON.stringify(entry));
 			const expectedKeys = [
-				'type', 'prompt_text', 'prompt_type', 'prompt_context_files', 'created_at',
+				'type',
+				'prompt_text',
+				'prompt_type',
+				'prompt_context_files',
+				'created_at',
 			];
 			for (const key of expectedKeys) {
 				expect(json).toHaveProperty(key);
@@ -412,8 +422,15 @@ describe('vibes-annotations', () => {
 
 			const json = JSON.parse(JSON.stringify(entry));
 			const expectedKeys = [
-				'type', 'reasoning_text', 'reasoning_text_compressed', 'compressed',
-				'external', 'blob_path', 'reasoning_token_count', 'reasoning_model', 'created_at',
+				'type',
+				'reasoning_text',
+				'reasoning_text_compressed',
+				'compressed',
+				'external',
+				'blob_path',
+				'reasoning_token_count',
+				'reasoning_model',
+				'created_at',
 			];
 			for (const key of expectedKeys) {
 				expect(json).toHaveProperty(key);
@@ -427,8 +444,15 @@ describe('vibes-annotations', () => {
 
 			const json = JSON.parse(JSON.stringify(entry));
 			const expectedKeys = [
-				'type', 'reasoning_text', 'reasoning_text_compressed', 'compressed',
-				'external', 'blob_path', 'reasoning_token_count', 'reasoning_model', 'created_at',
+				'type',
+				'reasoning_text',
+				'reasoning_text_compressed',
+				'compressed',
+				'external',
+				'blob_path',
+				'reasoning_token_count',
+				'reasoning_model',
+				'created_at',
 			];
 			for (const key of expectedKeys) {
 				expect(json).toHaveProperty(key);
@@ -503,8 +527,15 @@ describe('vibes-annotations', () => {
 
 			const json = JSON.parse(JSON.stringify(entry));
 			const expectedKeys = [
-				'type', 'reasoning_text', 'reasoning_text_compressed', 'compressed',
-				'external', 'blob_path', 'reasoning_token_count', 'reasoning_model', 'created_at',
+				'type',
+				'reasoning_text',
+				'reasoning_text_compressed',
+				'compressed',
+				'external',
+				'blob_path',
+				'reasoning_token_count',
+				'reasoning_model',
+				'created_at',
 			];
 			for (const key of expectedKeys) {
 				expect(json).toHaveProperty(key);
@@ -528,6 +559,7 @@ describe('vibes-annotations', () => {
 			});
 
 			expect(annotation.type).toBe('line');
+			expect(annotation.annotation_id).toMatch(/^[0-9a-f]{64}$/);
 			expect(annotation.file_path).toBe('src/main.ts');
 			expect(annotation.line_start).toBe(10);
 			expect(annotation.line_end).toBe(20);
@@ -578,7 +610,10 @@ describe('vibes-annotations', () => {
 
 		it('should support all action types', () => {
 			const actions: Array<'create' | 'modify' | 'delete' | 'review'> = [
-				'create', 'modify', 'delete', 'review',
+				'create',
+				'modify',
+				'delete',
+				'review',
 			];
 
 			for (const action of actions) {
@@ -594,7 +629,7 @@ describe('vibes-annotations', () => {
 			}
 		});
 
-		it('should always include all 13 fields in serialized JSON', () => {
+		it('should always include all 14 fields in serialized JSON', () => {
 			const annotation = createLineAnnotation({
 				filePath: 'src/app.ts',
 				lineStart: 1,
@@ -606,15 +641,25 @@ describe('vibes-annotations', () => {
 
 			const json = JSON.parse(JSON.stringify(annotation));
 			const expectedKeys = [
-				'type', 'file_path', 'line_start', 'line_end',
-				'environment_hash', 'command_hash', 'prompt_hash',
-				'reasoning_hash', 'action', 'timestamp', 'commit_hash',
-				'session_id', 'assurance_level',
+				'type',
+				'annotation_id',
+				'file_path',
+				'line_start',
+				'line_end',
+				'environment_hash',
+				'command_hash',
+				'prompt_hash',
+				'reasoning_hash',
+				'action',
+				'timestamp',
+				'commit_hash',
+				'session_id',
+				'assurance_level',
 			];
 			for (const key of expectedKeys) {
 				expect(json).toHaveProperty(key);
 			}
-			expect(Object.keys(json)).toHaveLength(13);
+			expect(Object.keys(json)).toHaveLength(14);
 		});
 
 		it('should support all assurance levels', () => {
@@ -648,6 +693,7 @@ describe('vibes-annotations', () => {
 			});
 
 			expect(annotation.type).toBe('function');
+			expect(annotation.annotation_id).toMatch(/^[0-9a-f]{64}$/);
 			expect(annotation.file_path).toBe('src/utils.ts');
 			expect(annotation.function_name).toBe('calculateTotal');
 			expect(annotation.environment_hash).toBe('a'.repeat(64));
@@ -677,7 +723,7 @@ describe('vibes-annotations', () => {
 			});
 
 			expect(annotation.function_signature).toBe(
-				'authenticate(user: string, pass: string): Promise<boolean>',
+				'authenticate(user: string, pass: string): Promise<boolean>'
 			);
 			expect(annotation.command_hash).toBe('c'.repeat(64));
 			expect(annotation.prompt_hash).toBe('p'.repeat(64));
@@ -722,6 +768,7 @@ describe('vibes-annotations', () => {
 			});
 
 			expect(record.type).toBe('session');
+			expect(record.annotation_id).toMatch(/^[0-9a-f]{64}$/);
 			expect(record.event).toBe('start');
 			expect(record.session_id).toBe('session-abc-123');
 			expect(record.timestamp).toBe(FIXED_ISO);
@@ -783,7 +830,7 @@ describe('vibes-annotations', () => {
 			expect(record.description).toBe('Full session record');
 		});
 
-		it('should always include all 7 fields in serialized JSON', () => {
+		it('should always include all 8 fields in serialized JSON', () => {
 			const record = createSessionRecord({
 				event: 'start',
 				sessionId: 'session-schema',
@@ -791,13 +838,19 @@ describe('vibes-annotations', () => {
 
 			const json = JSON.parse(JSON.stringify(record));
 			const expectedKeys = [
-				'type', 'event', 'session_id', 'timestamp',
-				'environment_hash', 'assurance_level', 'description',
+				'type',
+				'annotation_id',
+				'event',
+				'session_id',
+				'timestamp',
+				'environment_hash',
+				'assurance_level',
+				'description',
 			];
 			for (const key of expectedKeys) {
 				expect(json).toHaveProperty(key);
 			}
-			expect(Object.keys(json)).toHaveLength(7);
+			expect(Object.keys(json)).toHaveLength(8);
 		});
 	});
 
