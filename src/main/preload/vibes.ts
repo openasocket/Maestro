@@ -8,6 +8,7 @@
  * - Listing sessions and models
  * - Building audit manifests
  * - Finding the vibecheck binary
+ * - Key management and attestation (VERIFY spec)
  */
 
 import { ipcRenderer } from 'electron';
@@ -49,6 +50,15 @@ export interface VibesLogOptions {
 	session?: string;
 	limit?: number;
 	json?: boolean;
+}
+
+/**
+ * Standard result type for VIBES attestation commands.
+ */
+export interface VibesAttestationResult {
+	success: boolean;
+	data?: unknown;
+	error?: string;
 }
 
 /**
@@ -144,6 +154,40 @@ export function createVibesApi() {
 			const handler = (_: unknown, payload: VibesAnnotationUpdatePayload) => callback(payload);
 			ipcRenderer.on('vibes:annotation-update', handler);
 			return () => ipcRenderer.removeListener('vibes:annotation-update', handler);
+		},
+
+		/**
+		 * VERIFY spec: Key management and attestation sub-namespace.
+		 */
+		attestation: {
+			keygen: (): Promise<VibesAttestationResult> => ipcRenderer.invoke('vibes:keygen'),
+
+			getKeyInfo: (): Promise<VibesAttestationResult> => ipcRenderer.invoke('vibes:getKeyInfo'),
+
+			checkKeyPermissions: (): Promise<VibesAttestationResult> =>
+				ipcRenderer.invoke('vibes:checkKeyPermissions'),
+
+			exportPublicKey: (format: 'pem' | 'ssh'): Promise<VibesAttestationResult> =>
+				ipcRenderer.invoke('vibes:exportPublicKey', format),
+
+			attest: (
+				projectPath: string,
+				options?: {
+					cosign?: boolean;
+					validationResult?: 'PASS' | 'FAIL';
+					vibesVersion?: string;
+				}
+			): Promise<VibesAttestationResult> =>
+				ipcRenderer.invoke('vibes:attest', projectPath, options),
+
+			verifyAttestation: (
+				projectPath: string,
+				envelope: unknown
+			): Promise<VibesAttestationResult> =>
+				ipcRenderer.invoke('vibes:verifyAttestation', projectPath, envelope),
+
+			getProviderKeys: (): Promise<VibesAttestationResult> =>
+				ipcRenderer.invoke('vibes:getProviderKeys'),
 		},
 	};
 }

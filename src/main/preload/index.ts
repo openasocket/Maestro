@@ -456,4 +456,5 @@ export type {
 	VibesCommandResult,
 	VibesInitConfig,
 	VibesLogOptions,
+	VibesAttestationResult,
 } from './vibes';

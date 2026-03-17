@@ -27,6 +27,7 @@ import type {
 	VibesCommandResult,
 	VibesInitConfig,
 	VibesLogOptions,
+	VibesAttestationResult,
 } from '../../../main/preload/vibes';
 
 describe('vibes preload API', () => {
@@ -55,10 +56,23 @@ describe('vibes preload API', () => {
 			expect(api).toHaveProperty('clearBinaryCache');
 			expect(api).toHaveProperty('decompressReasoning');
 			expect(api).toHaveProperty('onAnnotationUpdate');
+			expect(api).toHaveProperty('attestation');
 		});
 
-		it('should have exactly 18 methods', () => {
-			expect(Object.keys(api)).toHaveLength(18);
+		it('should have exactly 19 top-level properties', () => {
+			expect(Object.keys(api)).toHaveLength(19);
+		});
+
+		it('should have attestation sub-namespace with 7 methods', () => {
+			const attestation = (api as any).attestation;
+			expect(attestation).toHaveProperty('keygen');
+			expect(attestation).toHaveProperty('getKeyInfo');
+			expect(attestation).toHaveProperty('checkKeyPermissions');
+			expect(attestation).toHaveProperty('exportPublicKey');
+			expect(attestation).toHaveProperty('attest');
+			expect(attestation).toHaveProperty('verifyAttestation');
+			expect(attestation).toHaveProperty('getProviderKeys');
+			expect(Object.keys(attestation)).toHaveLength(7);
 		});
 	});
 
@@ -317,6 +331,100 @@ describe('vibes preload API', () => {
 			registeredHandler!(null, payload);
 
 			expect(callback).toHaveBeenCalledWith(payload);
+		});
+	});
+
+	// ========================================================================
+	// Attestation sub-namespace
+	// ========================================================================
+
+	describe('attestation.keygen', () => {
+		it('should invoke vibes:keygen', async () => {
+			mockInvoke.mockResolvedValue({ success: true, data: { keyId: 'abc', exists: true } });
+
+			const result = await (api as any).attestation.keygen();
+
+			expect(mockInvoke).toHaveBeenCalledWith('vibes:keygen');
+			expect(result).toEqual({ success: true, data: { keyId: 'abc', exists: true } });
+		});
+	});
+
+	describe('attestation.getKeyInfo', () => {
+		it('should invoke vibes:getKeyInfo', async () => {
+			mockInvoke.mockResolvedValue({ success: true, data: { keyId: 'abc', exists: true } });
+
+			const result = await (api as any).attestation.getKeyInfo();
+
+			expect(mockInvoke).toHaveBeenCalledWith('vibes:getKeyInfo');
+			expect(result).toEqual({ success: true, data: { keyId: 'abc', exists: true } });
+		});
+	});
+
+	describe('attestation.checkKeyPermissions', () => {
+		it('should invoke vibes:checkKeyPermissions', async () => {
+			mockInvoke.mockResolvedValue({ success: true, data: { valid: true } });
+
+			const result = await (api as any).attestation.checkKeyPermissions();
+
+			expect(mockInvoke).toHaveBeenCalledWith('vibes:checkKeyPermissions');
+			expect(result).toEqual({ success: true, data: { valid: true } });
+		});
+	});
+
+	describe('attestation.exportPublicKey', () => {
+		it('should invoke vibes:exportPublicKey with format', async () => {
+			mockInvoke.mockResolvedValue({ success: true, data: 'ssh-ed25519 AAAA...' });
+
+			const result = await (api as any).attestation.exportPublicKey('ssh');
+
+			expect(mockInvoke).toHaveBeenCalledWith('vibes:exportPublicKey', 'ssh');
+			expect(result).toEqual({ success: true, data: 'ssh-ed25519 AAAA...' });
+		});
+	});
+
+	describe('attestation.attest', () => {
+		it('should invoke vibes:attest with project path and options', async () => {
+			const options = { cosign: true, validationResult: 'PASS' as const };
+			mockInvoke.mockResolvedValue({ success: true, data: { attestationId: 'id' } });
+
+			const result = await (api as any).attestation.attest('/project', options);
+
+			expect(mockInvoke).toHaveBeenCalledWith('vibes:attest', '/project', options);
+			expect(result).toEqual({ success: true, data: { attestationId: 'id' } });
+		});
+
+		it('should work without options', async () => {
+			mockInvoke.mockResolvedValue({ success: true, data: {} });
+
+			await (api as any).attestation.attest('/project');
+
+			expect(mockInvoke).toHaveBeenCalledWith('vibes:attest', '/project', undefined);
+		});
+	});
+
+	describe('attestation.verifyAttestation', () => {
+		it('should invoke vibes:verifyAttestation with project path and envelope', async () => {
+			const envelope = { payloadType: 'test', payload: 'data', signatures: [] };
+			mockInvoke.mockResolvedValue({ success: true, data: { valid: true } });
+
+			const result = await (api as any).attestation.verifyAttestation('/project', envelope);
+
+			expect(mockInvoke).toHaveBeenCalledWith('vibes:verifyAttestation', '/project', envelope);
+			expect(result).toEqual({ success: true, data: { valid: true } });
+		});
+	});
+
+	describe('attestation.getProviderKeys', () => {
+		it('should invoke vibes:getProviderKeys', async () => {
+			mockInvoke.mockResolvedValue({ success: true, data: { provider: 'Maestro', keys: [] } });
+
+			const result = await (api as any).attestation.getProviderKeys();
+
+			expect(mockInvoke).toHaveBeenCalledWith('vibes:getProviderKeys');
+			expect(result).toEqual({
+				success: true,
+				data: { provider: 'Maestro', keys: [] },
+			});
 		});
 	});
 });

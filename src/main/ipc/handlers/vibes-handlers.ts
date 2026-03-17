@@ -53,6 +53,26 @@ import {
 	rehashManifest,
 	validateDelegationChain,
 } from '../../vibes/vibes-io';
+import {
+	generateKeyPair,
+	saveUserKeyPair,
+	getUserKeyInfo,
+	checkKeyPermissions,
+	exportPublicKey,
+	loadUserKeyPair,
+	buildInTotoStatement,
+	buildDSSEEnvelope,
+	computeAttestationId,
+	computePAE,
+	verifyPAESignature,
+} from '../../vibes/vibes-key-manager';
+import type { DSSEEnvelope, DSSESignature } from '../../vibes/vibes-key-manager';
+import {
+	fetchProviderKeys,
+	requestCosignature,
+	computePAEHash,
+	verifyProviderSignature,
+} from '../../vibes/vibes-cosign-service';
 
 const LOG_CONTEXT = '[VIBES]';
 
@@ -394,4 +414,222 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 			}
 		}
 	);
+
+	// ========================================================================
+	// VERIFY Spec: Key Management & Attestation Handlers
+	// ========================================================================
+
+	// Generate Ed25519 keypair, save to ~/.vibescheck/keys/, return public key info
+	ipcMain.handle('vibes:keygen', async () => {
+		try {
+			const keyPair = generateKeyPair();
+			await saveUserKeyPair(keyPair);
+			return {
+				success: true,
+				data: {
+					publicKey: keyPair.publicKey,
+					keyId: keyPair.keyId,
+					exists: true,
+				},
+			};
+		} catch (error) {
+			logger.error('keygen error', LOG_CONTEXT, { error: String(error) });
+			return { success: false, error: String(error) };
+		}
+	});
+
+	// Get user key info (public key + key ID) without loading private key
+	ipcMain.handle('vibes:getKeyInfo', async () => {
+		try {
+			const keyInfo = await getUserKeyInfo();
+			return { success: true, data: keyInfo };
+		} catch (error) {
+			logger.error('getKeyInfo error', LOG_CONTEXT, { error: String(error) });
+			return { success: false, error: String(error) };
+		}
+	});
+
+	// Check if private key file has correct permissions (0600)
+	ipcMain.handle('vibes:checkKeyPermissions', async () => {
+		try {
+			const result = await checkKeyPermissions();
+			return { success: true, data: result };
+		} catch (error) {
+			logger.error('checkKeyPermissions error', LOG_CONTEXT, { error: String(error) });
+			return { success: false, error: String(error) };
+		}
+	});
+
+	// Export public key in PEM or SSH format
+	ipcMain.handle('vibes:exportPublicKey', async (_event, format: 'pem' | 'ssh') => {
+		try {
+			const keyInfo = await getUserKeyInfo();
+			if (!keyInfo.exists) {
+				return { success: false, error: 'No keypair found. Run keygen first.' };
+			}
+			const exported = exportPublicKey(keyInfo.publicKey, format);
+			return { success: true, data: exported };
+		} catch (error) {
+			logger.error('exportPublicKey error', LOG_CONTEXT, { error: String(error) });
+			return { success: false, error: String(error) };
+		}
+	});
+
+	// Build in-toto statement, DSSE envelope, optionally cosign via tool provider
+	ipcMain.handle(
+		'vibes:attest',
+		async (
+			_event,
+			projectPath: string,
+			options?: {
+				cosign?: boolean;
+				validationResult?: 'PASS' | 'FAIL';
+				vibesVersion?: string;
+			}
+		) => {
+			try {
+				// Load or require user keypair
+				const userKeyPair = await loadUserKeyPair();
+				if (!userKeyPair) {
+					return {
+						success: false,
+						error: 'No keypair found. Run keygen first.',
+					};
+				}
+
+				// Build the in-toto statement
+				const validationResult = options?.validationResult ?? 'PASS';
+				const vibesVersion = options?.vibesVersion ?? '1.0.0';
+				const statement = await buildInTotoStatement(projectPath, validationResult, vibesVersion);
+
+				// Optionally request a tool provider cosignature
+				let toolProviderSig: DSSESignature | undefined;
+				if (options?.cosign) {
+					const tempPayload = Buffer.from(JSON.stringify(statement), 'utf8').toString('base64url');
+					const paeBytes = computePAE('application/vnd.in-toto+json', tempPayload);
+					const paeHash = computePAEHash(paeBytes);
+					const cosignResult = await requestCosignature(paeHash);
+					if (cosignResult) {
+						toolProviderSig = cosignResult;
+					}
+				}
+
+				// Build the DSSE envelope
+				const envelope = await buildDSSEEnvelope(statement, userKeyPair, toolProviderSig);
+				const attestationId = computeAttestationId(envelope);
+
+				return {
+					success: true,
+					data: {
+						envelope,
+						attestationId,
+						statement,
+						trustTier: toolProviderSig ? 'tool-corroborated' : 'self-attested',
+					},
+				};
+			} catch (error) {
+				logger.error('attest error', LOG_CONTEXT, { error: String(error) });
+				return { success: false, error: String(error) };
+			}
+		}
+	);
+
+	// Verify a DSSE envelope: check signatures and file hash integrity
+	ipcMain.handle(
+		'vibes:verifyAttestation',
+		async (_event, projectPath: string, envelope: DSSEEnvelope) => {
+			try {
+				const results: Array<{
+					keyid: string;
+					keytype?: string;
+					valid: boolean;
+					error?: string;
+				}> = [];
+
+				const paeBytes = computePAE(envelope.payloadType, envelope.payload);
+
+				for (const sigEntry of envelope.signatures) {
+					if (sigEntry.keytype === 'tool_provider') {
+						// Verify against published provider keys
+						const valid = await verifyProviderSignature(paeBytes, sigEntry.sig, sigEntry.keyid);
+						results.push({
+							keyid: sigEntry.keyid,
+							keytype: 'tool_provider',
+							valid,
+						});
+					} else {
+						// Verify user signature — need the user's public key
+						const keyInfo = await getUserKeyInfo();
+						if (!keyInfo.exists || keyInfo.keyId !== sigEntry.keyid) {
+							results.push({
+								keyid: sigEntry.keyid,
+								keytype: 'user',
+								valid: false,
+								error: 'User public key not found or key ID mismatch',
+							});
+						} else {
+							const valid = verifyPAESignature(paeBytes, sigEntry.sig, keyInfo.publicKey);
+							results.push({
+								keyid: sigEntry.keyid,
+								keytype: 'user',
+								valid,
+							});
+						}
+					}
+				}
+
+				// Verify file hashes from the in-toto statement
+				let hashesValid = true;
+				try {
+					const statementJson = Buffer.from(envelope.payload, 'base64url').toString('utf8');
+					const statement = JSON.parse(statementJson);
+					const { createHash } = await import('crypto');
+					const { readFile: readFileAsync } = await import('fs/promises');
+
+					for (const subject of statement.subject || []) {
+						const filePath = path.join(projectPath, subject.name);
+						try {
+							const content = await readFileAsync(filePath);
+							const hash = createHash('sha256').update(content).digest('hex');
+							if (hash !== subject.digest?.sha256) {
+								hashesValid = false;
+							}
+						} catch {
+							hashesValid = false;
+						}
+					}
+				} catch {
+					hashesValid = false;
+				}
+
+				const allSignaturesValid = results.every((r) => r.valid);
+
+				return {
+					success: true,
+					data: {
+						signatures: results,
+						allSignaturesValid,
+						hashesValid,
+						valid: allSignaturesValid && hashesValid,
+					},
+				};
+			} catch (error) {
+				logger.error('verifyAttestation error', LOG_CONTEXT, {
+					error: String(error),
+				});
+				return { success: false, error: String(error) };
+			}
+		}
+	);
+
+	// Fetch and return the Maestro tool provider public keys
+	ipcMain.handle('vibes:getProviderKeys', async () => {
+		try {
+			const keys = await fetchProviderKeys();
+			return { success: true, data: keys };
+		} catch (error) {
+			logger.error('getProviderKeys error', LOG_CONTEXT, { error: String(error) });
+			return { success: false, error: String(error) };
+		}
+	});
 }

@@ -31,6 +31,21 @@ const {
 	mockReadVibesConfig,
 	mockWriteVibesConfig,
 	mockRehashManifest,
+	mockGenerateKeyPair,
+	mockSaveUserKeyPair,
+	mockGetUserKeyInfo,
+	mockCheckKeyPermissions,
+	mockExportPublicKey,
+	mockLoadUserKeyPair,
+	mockBuildInTotoStatement,
+	mockBuildDSSEEnvelope,
+	mockComputeAttestationId,
+	mockComputePAE,
+	mockVerifyPAESignature,
+	mockFetchProviderKeys,
+	mockRequestCosignature,
+	mockComputePAEHash,
+	mockVerifyProviderSignature,
 } = vi.hoisted(() => ({
 	mockFindBinary: vi.fn(),
 	mockGetVersion: vi.fn(),
@@ -56,6 +71,21 @@ const {
 	mockReadVibesConfig: vi.fn(),
 	mockWriteVibesConfig: vi.fn(),
 	mockRehashManifest: vi.fn(),
+	mockGenerateKeyPair: vi.fn(),
+	mockSaveUserKeyPair: vi.fn(),
+	mockGetUserKeyInfo: vi.fn(),
+	mockCheckKeyPermissions: vi.fn(),
+	mockExportPublicKey: vi.fn(),
+	mockLoadUserKeyPair: vi.fn(),
+	mockBuildInTotoStatement: vi.fn(),
+	mockBuildDSSEEnvelope: vi.fn(),
+	mockComputeAttestationId: vi.fn(),
+	mockComputePAE: vi.fn(),
+	mockVerifyPAESignature: vi.fn(),
+	mockFetchProviderKeys: vi.fn(),
+	mockRequestCosignature: vi.fn(),
+	mockComputePAEHash: vi.fn(),
+	mockVerifyProviderSignature: vi.fn(),
 }));
 
 // Mock electron
@@ -81,6 +111,29 @@ vi.mock('../../../main/vibes/vibes-bridge', () => ({
 	vibesSessions: mockVibesSessions,
 	vibesModels: mockVibesModels,
 	vibesBackfillCommit: mockVibesBackfillCommit,
+}));
+
+// Mock vibes-key-manager
+vi.mock('../../../main/vibes/vibes-key-manager', () => ({
+	generateKeyPair: mockGenerateKeyPair,
+	saveUserKeyPair: mockSaveUserKeyPair,
+	getUserKeyInfo: mockGetUserKeyInfo,
+	checkKeyPermissions: mockCheckKeyPermissions,
+	exportPublicKey: mockExportPublicKey,
+	loadUserKeyPair: mockLoadUserKeyPair,
+	buildInTotoStatement: mockBuildInTotoStatement,
+	buildDSSEEnvelope: mockBuildDSSEEnvelope,
+	computeAttestationId: mockComputeAttestationId,
+	computePAE: mockComputePAE,
+	verifyPAESignature: mockVerifyPAESignature,
+}));
+
+// Mock vibes-cosign-service
+vi.mock('../../../main/vibes/vibes-cosign-service', () => ({
+	fetchProviderKeys: mockFetchProviderKeys,
+	requestCosignature: mockRequestCosignature,
+	computePAEHash: mockComputePAEHash,
+	verifyProviderSignature: mockVerifyProviderSignature,
 }));
 
 // Mock vibes-io fallback functions
@@ -139,8 +192,8 @@ describe('vibes-handlers', () => {
 	});
 
 	describe('handler registration', () => {
-		it('should register all 19 VIBES IPC handlers', () => {
-			expect(mockIpcMainHandle).toHaveBeenCalledTimes(19);
+		it('should register all 26 VIBES IPC handlers', () => {
+			expect(mockIpcMainHandle).toHaveBeenCalledTimes(26);
 		});
 
 		it('should register handlers with correct channel names', () => {
@@ -164,6 +217,14 @@ describe('vibes-handlers', () => {
 				'vibes:getManifest',
 				'vibes:backfillCommit',
 				'vibes:decompress-reasoning',
+				// VERIFY spec: Key Management & Attestation
+				'vibes:keygen',
+				'vibes:getKeyInfo',
+				'vibes:checkKeyPermissions',
+				'vibes:exportPublicKey',
+				'vibes:attest',
+				'vibes:verifyAttestation',
+				'vibes:getProviderKeys',
 			];
 			for (const channel of expectedChannels) {
 				expect(handlers[channel]).toBeDefined();
@@ -695,6 +756,392 @@ describe('vibes-handlers', () => {
 
 			expect(mockVibesBlame).toHaveBeenCalled();
 			expect(mockComputeBlame).not.toHaveBeenCalled();
+		});
+	});
+
+	// ========================================================================
+	// VERIFY Spec: Key Management & Attestation Handlers
+	// ========================================================================
+
+	describe('vibes:keygen', () => {
+		it('should generate a keypair, save it, and return key info', async () => {
+			const mockKeyPair = {
+				publicKey: '-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----',
+				privateKey: '-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----',
+				keyId: 'abcdef0123456789',
+			};
+			mockGenerateKeyPair.mockReturnValue(mockKeyPair);
+			mockSaveUserKeyPair.mockResolvedValue(undefined);
+
+			const result = await handlers['vibes:keygen']({});
+
+			expect(mockGenerateKeyPair).toHaveBeenCalled();
+			expect(mockSaveUserKeyPair).toHaveBeenCalledWith(mockKeyPair);
+			expect(result).toEqual({
+				success: true,
+				data: {
+					publicKey: mockKeyPair.publicKey,
+					keyId: mockKeyPair.keyId,
+					exists: true,
+				},
+			});
+		});
+
+		it('should return error on failure', async () => {
+			mockGenerateKeyPair.mockImplementation(() => {
+				throw new Error('crypto failed');
+			});
+
+			const result = await handlers['vibes:keygen']({});
+
+			expect(result).toEqual({ success: false, error: 'Error: crypto failed' });
+		});
+	});
+
+	describe('vibes:getKeyInfo', () => {
+		it('should return user key info', async () => {
+			const keyInfo = {
+				publicKey: '-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----',
+				keyId: 'abcdef0123456789',
+				exists: true,
+			};
+			mockGetUserKeyInfo.mockResolvedValue(keyInfo);
+
+			const result = await handlers['vibes:getKeyInfo']({});
+
+			expect(mockGetUserKeyInfo).toHaveBeenCalled();
+			expect(result).toEqual({ success: true, data: keyInfo });
+		});
+
+		it('should return key info with exists=false when no keys', async () => {
+			mockGetUserKeyInfo.mockResolvedValue({ publicKey: '', keyId: '', exists: false });
+
+			const result = await handlers['vibes:getKeyInfo']({});
+
+			expect(result).toEqual({
+				success: true,
+				data: { publicKey: '', keyId: '', exists: false },
+			});
+		});
+
+		it('should return error on failure', async () => {
+			mockGetUserKeyInfo.mockRejectedValue(new Error('fs error'));
+
+			const result = await handlers['vibes:getKeyInfo']({});
+
+			expect(result).toEqual({ success: false, error: 'Error: fs error' });
+		});
+	});
+
+	describe('vibes:checkKeyPermissions', () => {
+		it('should return permission check result', async () => {
+			mockCheckKeyPermissions.mockResolvedValue({ valid: true });
+
+			const result = await handlers['vibes:checkKeyPermissions']({});
+
+			expect(mockCheckKeyPermissions).toHaveBeenCalled();
+			expect(result).toEqual({ success: true, data: { valid: true } });
+		});
+
+		it('should return invalid with message', async () => {
+			mockCheckKeyPermissions.mockResolvedValue({
+				valid: false,
+				message: 'Permissions are 644, expected 600',
+			});
+
+			const result = await handlers['vibes:checkKeyPermissions']({});
+
+			expect(result).toEqual({
+				success: true,
+				data: { valid: false, message: 'Permissions are 644, expected 600' },
+			});
+		});
+
+		it('should return error on failure', async () => {
+			mockCheckKeyPermissions.mockRejectedValue(new Error('stat failed'));
+
+			const result = await handlers['vibes:checkKeyPermissions']({});
+
+			expect(result).toEqual({ success: false, error: 'Error: stat failed' });
+		});
+	});
+
+	describe('vibes:exportPublicKey', () => {
+		it('should export public key in PEM format', async () => {
+			const pemKey = '-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----';
+			mockGetUserKeyInfo.mockResolvedValue({ publicKey: pemKey, keyId: 'abc123', exists: true });
+			mockExportPublicKey.mockReturnValue(pemKey);
+
+			const result = await handlers['vibes:exportPublicKey']({}, 'pem');
+
+			expect(mockExportPublicKey).toHaveBeenCalledWith(pemKey, 'pem');
+			expect(result).toEqual({ success: true, data: pemKey });
+		});
+
+		it('should export public key in SSH format', async () => {
+			const pemKey = '-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----';
+			const sshKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtest';
+			mockGetUserKeyInfo.mockResolvedValue({ publicKey: pemKey, keyId: 'abc123', exists: true });
+			mockExportPublicKey.mockReturnValue(sshKey);
+
+			const result = await handlers['vibes:exportPublicKey']({}, 'ssh');
+
+			expect(mockExportPublicKey).toHaveBeenCalledWith(pemKey, 'ssh');
+			expect(result).toEqual({ success: true, data: sshKey });
+		});
+
+		it('should return error when no keypair exists', async () => {
+			mockGetUserKeyInfo.mockResolvedValue({ publicKey: '', keyId: '', exists: false });
+
+			const result = await handlers['vibes:exportPublicKey']({}, 'pem');
+
+			expect(result).toEqual({ success: false, error: 'No keypair found. Run keygen first.' });
+			expect(mockExportPublicKey).not.toHaveBeenCalled();
+		});
+
+		it('should return error on failure', async () => {
+			mockGetUserKeyInfo.mockRejectedValue(new Error('read failed'));
+
+			const result = await handlers['vibes:exportPublicKey']({}, 'pem');
+
+			expect(result).toEqual({ success: false, error: 'Error: read failed' });
+		});
+	});
+
+	describe('vibes:attest', () => {
+		const mockKeyPair = {
+			publicKey: 'pub-key',
+			privateKey: 'priv-key',
+			keyId: 'abcdef0123456789',
+		};
+
+		const mockStatement = {
+			_type: 'https://in-toto.io/Statement/v1',
+			subject: [],
+			predicateType: 'https://itsavibe.ai/vibes/attestation/v1',
+			predicate: {
+				validation: { result: 'PASS', version: '1.0.0' },
+				project: { name: 'test', assurance_level: 'high' },
+				stats: { total_annotations: 5, unique_models: 2 },
+			},
+		};
+
+		const mockEnvelope = {
+			payloadType: 'application/vnd.in-toto+json',
+			payload: 'base64url-payload',
+			signatures: [{ keyid: 'abcdef0123456789', sig: 'sig-data', keytype: 'user' }],
+		};
+
+		it('should build an attestation envelope without cosigning', async () => {
+			mockLoadUserKeyPair.mockResolvedValue(mockKeyPair);
+			mockBuildInTotoStatement.mockResolvedValue(mockStatement);
+			mockBuildDSSEEnvelope.mockResolvedValue(mockEnvelope);
+			mockComputeAttestationId.mockReturnValue('attestation-id-hash');
+
+			const result = await handlers['vibes:attest']({}, '/project');
+
+			expect(mockLoadUserKeyPair).toHaveBeenCalled();
+			expect(mockBuildInTotoStatement).toHaveBeenCalledWith('/project', 'PASS', '1.0.0');
+			expect(mockBuildDSSEEnvelope).toHaveBeenCalledWith(mockStatement, mockKeyPair, undefined);
+			expect(result).toEqual({
+				success: true,
+				data: {
+					envelope: mockEnvelope,
+					attestationId: 'attestation-id-hash',
+					statement: mockStatement,
+					trustTier: 'self-attested',
+				},
+			});
+		});
+
+		it('should build an attestation envelope with cosigning', async () => {
+			const cosignResponse = {
+				keyid: 'provider-key-id',
+				sig: 'provider-sig',
+				keytype: 'tool_provider' as const,
+			};
+			mockLoadUserKeyPair.mockResolvedValue(mockKeyPair);
+			mockBuildInTotoStatement.mockResolvedValue(mockStatement);
+			mockComputePAE.mockReturnValue(Buffer.from('pae-bytes'));
+			mockComputePAEHash.mockReturnValue('pae-hash');
+			mockRequestCosignature.mockResolvedValue(cosignResponse);
+			mockBuildDSSEEnvelope.mockResolvedValue({
+				...mockEnvelope,
+				signatures: [...mockEnvelope.signatures, cosignResponse],
+			});
+			mockComputeAttestationId.mockReturnValue('attestation-id-cosigned');
+
+			const result = await handlers['vibes:attest']({}, '/project', { cosign: true });
+
+			expect(mockComputePAEHash).toHaveBeenCalled();
+			expect(mockRequestCosignature).toHaveBeenCalledWith('pae-hash');
+			expect(mockBuildDSSEEnvelope).toHaveBeenCalledWith(
+				mockStatement,
+				mockKeyPair,
+				cosignResponse
+			);
+			expect(result).toEqual({
+				success: true,
+				data: expect.objectContaining({ trustTier: 'tool-corroborated' }),
+			});
+		});
+
+		it('should return error when no keypair exists', async () => {
+			mockLoadUserKeyPair.mockResolvedValue(null);
+
+			const result = await handlers['vibes:attest']({}, '/project');
+
+			expect(result).toEqual({
+				success: false,
+				error: 'No keypair found. Run keygen first.',
+			});
+		});
+
+		it('should pass custom validation result and version', async () => {
+			mockLoadUserKeyPair.mockResolvedValue(mockKeyPair);
+			mockBuildInTotoStatement.mockResolvedValue(mockStatement);
+			mockBuildDSSEEnvelope.mockResolvedValue(mockEnvelope);
+			mockComputeAttestationId.mockReturnValue('id');
+
+			await handlers['vibes:attest']({}, '/project', {
+				validationResult: 'FAIL',
+				vibesVersion: '2.0.0',
+			});
+
+			expect(mockBuildInTotoStatement).toHaveBeenCalledWith('/project', 'FAIL', '2.0.0');
+		});
+
+		it('should return error on failure', async () => {
+			mockLoadUserKeyPair.mockRejectedValue(new Error('key read failed'));
+
+			const result = await handlers['vibes:attest']({}, '/project');
+
+			expect(result).toEqual({ success: false, error: 'Error: key read failed' });
+		});
+	});
+
+	describe('vibes:verifyAttestation', () => {
+		const mockEnvelope = {
+			payloadType: 'application/vnd.in-toto+json',
+			payload: Buffer.from(
+				JSON.stringify({
+					_type: 'https://in-toto.io/Statement/v1',
+					subject: [],
+					predicateType: 'https://itsavibe.ai/vibes/attestation/v1',
+					predicate: {
+						validation: { result: 'PASS', version: '1.0.0' },
+						project: { name: 'test', assurance_level: 'high' },
+						stats: { total_annotations: 0, unique_models: 0 },
+					},
+				})
+			).toString('base64url'),
+			signatures: [{ keyid: 'user-key-id', sig: 'user-sig', keytype: 'user' }],
+		};
+
+		it('should verify user signature successfully', async () => {
+			mockComputePAE.mockReturnValue(Buffer.from('pae-bytes'));
+			mockGetUserKeyInfo.mockResolvedValue({
+				publicKey: 'pub-key',
+				keyId: 'user-key-id',
+				exists: true,
+			});
+			mockVerifyPAESignature.mockReturnValue(true);
+
+			const result = await handlers['vibes:verifyAttestation']({}, '/project', mockEnvelope);
+
+			expect(result.success).toBe(true);
+			expect(result.data.signatures[0].valid).toBe(true);
+			expect(result.data.allSignaturesValid).toBe(true);
+		});
+
+		it('should detect invalid user signature', async () => {
+			mockComputePAE.mockReturnValue(Buffer.from('pae-bytes'));
+			mockGetUserKeyInfo.mockResolvedValue({
+				publicKey: 'pub-key',
+				keyId: 'user-key-id',
+				exists: true,
+			});
+			mockVerifyPAESignature.mockReturnValue(false);
+
+			const result = await handlers['vibes:verifyAttestation']({}, '/project', mockEnvelope);
+
+			expect(result.success).toBe(true);
+			expect(result.data.signatures[0].valid).toBe(false);
+			expect(result.data.allSignaturesValid).toBe(false);
+		});
+
+		it('should verify tool provider signature', async () => {
+			const envelopeWithToolSig = {
+				...mockEnvelope,
+				signatures: [{ keyid: 'provider-key-id', sig: 'tool-sig', keytype: 'tool_provider' }],
+			};
+
+			mockComputePAE.mockReturnValue(Buffer.from('pae-bytes'));
+			mockVerifyProviderSignature.mockResolvedValue(true);
+
+			const result = await handlers['vibes:verifyAttestation']({}, '/project', envelopeWithToolSig);
+
+			expect(result.success).toBe(true);
+			expect(result.data.signatures[0].keytype).toBe('tool_provider');
+			expect(result.data.signatures[0].valid).toBe(true);
+		});
+
+		it('should report key ID mismatch for user signature', async () => {
+			mockComputePAE.mockReturnValue(Buffer.from('pae-bytes'));
+			mockGetUserKeyInfo.mockResolvedValue({
+				publicKey: 'pub-key',
+				keyId: 'different-key-id',
+				exists: true,
+			});
+
+			const result = await handlers['vibes:verifyAttestation']({}, '/project', mockEnvelope);
+
+			expect(result.success).toBe(true);
+			expect(result.data.signatures[0].valid).toBe(false);
+			expect(result.data.signatures[0].error).toContain('key ID mismatch');
+		});
+
+		it('should return error on failure', async () => {
+			mockComputePAE.mockImplementation(() => {
+				throw new Error('PAE computation failed');
+			});
+
+			const result = await handlers['vibes:verifyAttestation']({}, '/project', mockEnvelope);
+
+			expect(result).toEqual({ success: false, error: 'Error: PAE computation failed' });
+		});
+	});
+
+	describe('vibes:getProviderKeys', () => {
+		it('should return provider keys', async () => {
+			const bundle = {
+				provider: 'Maestro',
+				tool_name: 'Maestro',
+				keys: [{ keyid: 'abc', algorithm: 'Ed25519', status: 'active' }],
+				rotation_policy: '90 days',
+			};
+			mockFetchProviderKeys.mockResolvedValue(bundle);
+
+			const result = await handlers['vibes:getProviderKeys']({});
+
+			expect(mockFetchProviderKeys).toHaveBeenCalled();
+			expect(result).toEqual({ success: true, data: bundle });
+		});
+
+		it('should return null data when offline', async () => {
+			mockFetchProviderKeys.mockResolvedValue(null);
+
+			const result = await handlers['vibes:getProviderKeys']({});
+
+			expect(result).toEqual({ success: true, data: null });
+		});
+
+		it('should return error on failure', async () => {
+			mockFetchProviderKeys.mockRejectedValue(new Error('network error'));
+
+			const result = await handlers['vibes:getProviderKeys']({});
+
+			expect(result).toEqual({ success: false, error: 'Error: network error' });
 		});
 	});
 });
