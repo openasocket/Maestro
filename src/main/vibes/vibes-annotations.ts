@@ -13,6 +13,7 @@ import type {
 	VibesCommandEntry,
 	VibesPromptEntry,
 	VibesReasoningEntry,
+	VibesDecisionEntry,
 	VibesLineAnnotation,
 	VibeFunctionAnnotation,
 	VibesSessionRecord,
@@ -177,6 +178,41 @@ export function createExternalReasoningEntry(params: {
 		blob_path: params.blobPath,
 		reasoning_token_count: params.tokenCount ?? null,
 		reasoning_model: params.model ?? null,
+		created_at: new Date().toISOString(),
+	};
+
+	const hash = computeVibesHash(entry as unknown as Record<string, unknown>);
+	return { entry, hash };
+}
+
+// ============================================================================
+// Decision Entry
+// ============================================================================
+
+/**
+ * Create a decision manifest entry recording a structured decision point.
+ * Present at all assurance levels per spec section 5.6.
+ * Returns the entry and its content-addressed hash.
+ */
+export function createDecisionEntry(params: {
+	decisionPoint: string;
+	options: Array<{
+		id: string;
+		description: string;
+		pros?: string[];
+		cons?: string[];
+	}>;
+	selected: string;
+	rationale: string;
+	confidence?: 'high' | 'medium' | 'low';
+}): { entry: VibesDecisionEntry; hash: string } {
+	const entry: VibesDecisionEntry = {
+		type: 'decision',
+		decision_point: params.decisionPoint,
+		options: params.options,
+		selected: params.selected,
+		rationale: params.rationale,
+		confidence: params.confidence,
 		created_at: new Date().toISOString(),
 	};
 

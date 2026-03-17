@@ -17,6 +17,7 @@ import * as path from 'path';
 import type { VibesSessionManager } from '../vibes-session';
 import {
 	createCommandEntry,
+	createDecisionEntry,
 	createLineAnnotation,
 	createReasoningEntry,
 	createExternalReasoningEntry,
@@ -213,6 +214,9 @@ export class CodexInstrumenter {
 	/** Most recent reasoning hash per session, for linking to line annotations. */
 	private lastReasoningHashes: Map<string, string> = new Map();
 
+	/** Most recent decision hash per session, for linking to line annotations. */
+	private lastDecisionHashes: Map<string, string> = new Map();
+
 	/** Byte threshold above which reasoning text is compressed (default 10 KB). */
 	private compressThresholdBytes: number;
 
@@ -247,7 +251,7 @@ export class CodexInstrumenter {
 	 */
 	async handleToolExecution(
 		sessionId: string,
-		event: { toolName: string; state: unknown; timestamp: number },
+		event: { toolName: string; state: unknown; timestamp: number }
 	): Promise<void> {
 		try {
 			const session = this.sessionManager.getSession(sessionId);
@@ -290,8 +294,10 @@ export class CodexInstrumenter {
 						return;
 					}
 
-					const promptHash = this.assuranceLevel !== 'low' ? this.lastPromptHashes.get(sessionId) : undefined;
-					const reasoningHash = this.assuranceLevel === 'high' ? this.lastReasoningHashes.get(sessionId) : undefined;
+					const promptHash =
+						this.assuranceLevel !== 'low' ? this.lastPromptHashes.get(sessionId) : undefined;
+					const reasoningHash =
+						this.assuranceLevel === 'high' ? this.lastReasoningHashes.get(sessionId) : undefined;
 					const annotation = createLineAnnotation({
 						filePath: normalizedPath,
 						lineStart: 1,
@@ -394,7 +400,7 @@ export class CodexInstrumenter {
 	async handlePrompt(
 		sessionId: string,
 		promptText: string,
-		contextFiles?: string[],
+		contextFiles?: string[]
 	): Promise<void> {
 		try {
 			if (this.assuranceLevel === 'low') {
@@ -416,6 +422,54 @@ export class CodexInstrumenter {
 		} catch (err) {
 			logWarn('Error handling prompt', { sessionId, error: String(err) });
 		}
+	}
+
+	/**
+	 * Record a structured decision entry in the manifest.
+	 * Only recorded at Medium+ assurance levels. At Low assurance, this is a no-op.
+	 * The decision hash is stored for linking to subsequent annotations via `decision_hash`.
+	 */
+	async handleDecision(
+		sessionId: string,
+		params: {
+			decisionPoint: string;
+			options: Array<{
+				id: string;
+				description: string;
+				pros?: string[];
+				cons?: string[];
+			}>;
+			selected: string;
+			rationale: string;
+			confidence?: 'high' | 'medium' | 'low';
+		}
+	): Promise<string | null> {
+		try {
+			if (this.assuranceLevel === 'low') {
+				return null;
+			}
+
+			const session = this.sessionManager.getSession(sessionId);
+			if (!session || !session.isActive) {
+				return null;
+			}
+
+			const { entry, hash } = createDecisionEntry(params);
+			await this.sessionManager.recordManifestEntry(sessionId, hash, entry);
+			this.lastDecisionHashes.set(sessionId, hash);
+			return hash;
+		} catch (err) {
+			logWarn('Error handling decision', { sessionId, error: String(err) });
+			return null;
+		}
+	}
+
+	/**
+	 * Get the most recent decision hash for a session.
+	 * Returns undefined if no decision has been recorded.
+	 */
+	getLastDecisionHash(sessionId: string): string | undefined {
+		return this.lastDecisionHashes.get(sessionId);
 	}
 
 	/**
@@ -532,5 +586,6 @@ export class CodexInstrumenter {
 		this.modelNames.delete(sessionId);
 		this.lastPromptHashes.delete(sessionId);
 		this.lastReasoningHashes.delete(sessionId);
+		this.lastDecisionHashes.delete(sessionId);
 	}
 }

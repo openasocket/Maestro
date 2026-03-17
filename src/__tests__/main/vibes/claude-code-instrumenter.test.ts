@@ -12,12 +12,19 @@ import * as os from 'os';
 
 import { ClaudeCodeInstrumenter } from '../../../main/vibes/instrumenters/claude-code-instrumenter';
 import { VibesSessionManager } from '../../../main/vibes/vibes-session';
-import { readAnnotations, readVibesManifest, ensureAuditDir, flushAll, resetAllBuffers } from '../../../main/vibes/vibes-io';
+import {
+	readAnnotations,
+	readVibesManifest,
+	ensureAuditDir,
+	flushAll,
+	resetAllBuffers,
+} from '../../../main/vibes/vibes-io';
 import type {
 	VibesLineAnnotation,
 	VibesCommandEntry,
 	VibesPromptEntry,
 	VibesReasoningEntry,
+	VibesDecisionEntry,
 } from '../../../shared/vibes-types';
 
 // ============================================================================
@@ -48,7 +55,7 @@ describe('claude-code-instrumenter', () => {
 	 */
 	async function setupSession(
 		sessionId: string,
-		assuranceLevel: 'low' | 'medium' | 'high' = 'medium',
+		assuranceLevel: 'low' | 'medium' | 'high' = 'medium'
 	) {
 		const state = await manager.startSession(sessionId, tmpDir, 'claude-code', assuranceLevel);
 		state.environmentHash = 'e'.repeat(64);
@@ -97,9 +104,7 @@ describe('claude-code-instrumenter', () => {
 			const annotations = await readAnnotations(tmpDir);
 			// session start + line annotation
 			expect(annotations.length).toBeGreaterThanOrEqual(2);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].file_path).toBe('src/index.ts');
 			// Write defaults to 'modify' because it can overwrite existing files
@@ -121,9 +126,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].action).toBe('modify');
 		});
@@ -430,9 +433,7 @@ describe('claude-code-instrumenter', () => {
 			expect(cmdEntries[0].command_type).toBe('file_write');
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].file_path).toBe('analysis.ipynb');
 			// cell_number used as line range
@@ -460,9 +461,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].line_start).toBe(1);
 			expect(lineAnnotations[0].line_end).toBe(50);
@@ -505,9 +504,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			// old_string starts at line 7, new_string has 4 lines
 			expect(lineAnnotations[0].line_start).toBe(7);
@@ -535,9 +532,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			// Fallback: lineStart=1, lineEnd=3 (3 lines in new_string)
 			expect(lineAnnotations[0].line_start).toBe(1);
@@ -555,17 +550,17 @@ describe('claude-code-instrumenter', () => {
 			const srcDir = path.join(tmpDir, 'src');
 			await mkdir(srcDir, { recursive: true });
 			const fileContent = [
-				'const a = 1;',     // line 1
-				'const b = 2;',     // line 2
-				'const c = 3;',     // line 3
-				'',                  // line 4
+				'const a = 1;', // line 1
+				'const b = 2;', // line 2
+				'const c = 3;', // line 3
+				'', // line 4
 				'function foo() {', // line 5
-				'  return a;',      // line 6
-				'}',                 // line 7
-				'',                  // line 8
+				'  return a;', // line 6
+				'}', // line 7
+				'', // line 8
 				'function bar() {', // line 9
-				'  return b;',      // line 10
-				'}',                 // line 11
+				'  return b;', // line 10
+				'}', // line 11
 			].join('\n');
 			await writeFile(path.join(srcDir, 'multi-edit.ts'), fileContent);
 
@@ -577,7 +572,10 @@ describe('claude-code-instrumenter', () => {
 						file_path: 'src/multi-edit.ts',
 						edits: [
 							{ old_string: 'const a = 1;', new_string: 'const a = 10;' },
-							{ old_string: 'function bar() {\n  return b;\n}', new_string: 'function bar() {\n  return b + c;\n}' },
+							{
+								old_string: 'function bar() {\n  return b;\n}',
+								new_string: 'function bar() {\n  return b + c;\n}',
+							},
 						],
 					},
 				},
@@ -585,9 +583,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			// First edit at line 1 (1 line), second at line 9 (3 lines → 9+3-1=11)
 			expect(lineAnnotations[0].line_start).toBe(1);
@@ -615,9 +611,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			// cell_number=5, new_source has 4 lines → lineEnd = 5 + 4 - 1 = 8
 			expect(lineAnnotations[0].line_start).toBe(5);
@@ -633,14 +627,15 @@ describe('claude-code-instrumenter', () => {
 
 			await instrumenter.handleToolExecution('sess-1', {
 				toolName: 'Write',
-				state: { status: 'running', input: { file_path: 'src/one-liner.ts', content: 'export default 42;' } },
+				state: {
+					status: 'running',
+					input: { file_path: 'src/one-liner.ts', content: 'export default 42;' },
+				},
 				timestamp: Date.now(),
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].line_start).toBe(1);
 			expect(lineAnnotations[0].line_end).toBe(1);
@@ -669,9 +664,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].prompt_hash).toBeDefined();
 			expect(typeof lineAnnotations[0].prompt_hash).toBe('string');
@@ -694,9 +687,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].prompt_hash).toBeDefined();
 			expect(typeof lineAnnotations[0].prompt_hash).toBe('string');
@@ -721,9 +712,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].prompt_hash).toBeNull();
 		});
@@ -753,7 +742,7 @@ describe('claude-code-instrumenter', () => {
 
 			const annotations = await readAnnotations(tmpDir);
 			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line' && (a as VibesLineAnnotation).file_path === 'src/after-cleanup.ts',
+				(a) => a.type === 'line' && (a as VibesLineAnnotation).file_path === 'src/after-cleanup.ts'
 			) as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].prompt_hash).toBeNull();
@@ -781,9 +770,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].reasoning_hash).toBeDefined();
 			expect(typeof lineAnnotations[0].reasoning_hash).toBe('string');
@@ -807,9 +794,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].reasoning_hash).toBeNull();
 		});
@@ -830,9 +815,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].reasoning_hash).toBeNull();
 		});
@@ -863,9 +846,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(2);
 
 			// Both should have reasoning_hash
@@ -898,7 +879,7 @@ describe('claude-code-instrumenter', () => {
 			const manifest = await readVibesManifest(tmpDir);
 			const entries = Object.values(manifest.entries);
 			const reasoningEntries = entries.filter(
-				(e) => e.type === 'reasoning',
+				(e) => e.type === 'reasoning'
 			) as VibesReasoningEntry[];
 			expect(reasoningEntries).toHaveLength(1);
 			expect(reasoningEntries[0].reasoning_text).toBe('First thought. Second thought.');
@@ -969,7 +950,7 @@ describe('claude-code-instrumenter', () => {
 			const manifest = await readVibesManifest(tmpDir);
 			const entries = Object.values(manifest.entries);
 			const reasoningEntries = entries.filter(
-				(e) => e.type === 'reasoning',
+				(e) => e.type === 'reasoning'
 			) as VibesReasoningEntry[];
 			expect(reasoningEntries).toHaveLength(1);
 			expect(reasoningEntries[0].reasoning_text).toBe('Thinking about the file...');
@@ -1001,7 +982,7 @@ describe('claude-code-instrumenter', () => {
 			const manifest = await readVibesManifest(tmpDir);
 			const entries = Object.values(manifest.entries);
 			const reasoningEntries = entries.filter(
-				(e) => e.type === 'reasoning',
+				(e) => e.type === 'reasoning'
 			) as VibesReasoningEntry[];
 			expect(reasoningEntries).toHaveLength(1);
 			expect(reasoningEntries[0].reasoning_token_count).toBe(30);
@@ -1033,7 +1014,7 @@ describe('claude-code-instrumenter', () => {
 			const manifest = await readVibesManifest(tmpDir);
 			const entries = Object.values(manifest.entries);
 			const reasoningEntries = entries.filter(
-				(e) => e.type === 'reasoning',
+				(e) => e.type === 'reasoning'
 			) as VibesReasoningEntry[];
 			expect(reasoningEntries).toHaveLength(1);
 			expect(reasoningEntries[0].reasoning_token_count).toBe(30);
@@ -1127,9 +1108,7 @@ describe('claude-code-instrumenter', () => {
 			await flushAll();
 			const manifest = await readVibesManifest(tmpDir);
 			const entries = Object.values(manifest.entries);
-			const promptEntries = entries.filter(
-				(e) => e.type === 'prompt',
-			) as VibesPromptEntry[];
+			const promptEntries = entries.filter((e) => e.type === 'prompt') as VibesPromptEntry[];
 			expect(promptEntries).toHaveLength(1);
 			expect(promptEntries[0].prompt_text).toBe('Fix the bug in login.ts');
 			expect(promptEntries[0].prompt_type).toBe('user_instruction');
@@ -1182,13 +1161,8 @@ describe('claude-code-instrumenter', () => {
 			await flushAll();
 			const manifest = await readVibesManifest(tmpDir);
 			const entries = Object.values(manifest.entries);
-			const promptEntries = entries.filter(
-				(e) => e.type === 'prompt',
-			) as VibesPromptEntry[];
-			expect(promptEntries[0].prompt_context_files).toEqual([
-				'src/auth.ts',
-				'src/login.ts',
-			]);
+			const promptEntries = entries.filter((e) => e.type === 'prompt') as VibesPromptEntry[];
+			expect(promptEntries[0].prompt_context_files).toEqual(['src/auth.ts', 'src/login.ts']);
 		});
 
 		it('should be a no-op for unknown session IDs', async () => {
@@ -1202,6 +1176,137 @@ describe('claude-code-instrumenter', () => {
 			await flushAll();
 			const manifest = await readVibesManifest(tmpDir);
 			expect(Object.keys(manifest.entries)).toHaveLength(0);
+		});
+	});
+
+	// ========================================================================
+	// handleDecision
+	// ========================================================================
+	describe('handleDecision', () => {
+		it('should create a decision manifest entry at Medium assurance', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			const hash = await instrumenter.handleDecision('sess-1', {
+				decisionPoint: 'Choose auth approach',
+				options: [
+					{ id: 'jwt', description: 'JWT tokens' },
+					{ id: 'session', description: 'Session cookies' },
+				],
+				selected: 'jwt',
+				rationale: 'Stateless and scales better',
+				confidence: 'high',
+			});
+
+			expect(hash).toMatch(/^[0-9a-f]{64}$/);
+
+			await flushAll();
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const decisionEntries = entries.filter((e) => e.type === 'decision') as VibesDecisionEntry[];
+			expect(decisionEntries).toHaveLength(1);
+			expect(decisionEntries[0].decision_point).toBe('Choose auth approach');
+			expect(decisionEntries[0].selected).toBe('jwt');
+			expect(decisionEntries[0].confidence).toBe('high');
+		});
+
+		it('should create a decision manifest entry at High assurance', async () => {
+			await setupSession('sess-1', 'high');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'high',
+			});
+
+			const hash = await instrumenter.handleDecision('sess-1', {
+				decisionPoint: 'Choose database',
+				options: [{ id: 'pg', description: 'PostgreSQL' }],
+				selected: 'pg',
+				rationale: 'Best fit',
+			});
+
+			expect(hash).toMatch(/^[0-9a-f]{64}$/);
+		});
+
+		it('should NOT create a decision entry at Low assurance', async () => {
+			await setupSession('sess-1', 'low');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'low',
+			});
+
+			const hash = await instrumenter.handleDecision('sess-1', {
+				decisionPoint: 'This should be skipped',
+				options: [{ id: 'a', description: 'A' }],
+				selected: 'a',
+				rationale: 'Only option',
+			});
+
+			expect(hash).toBeNull();
+
+			await flushAll();
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const decisionEntries = entries.filter((e) => e.type === 'decision');
+			expect(decisionEntries).toHaveLength(0);
+		});
+
+		it('should store and return the decision hash via getLastDecisionHash', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			expect(instrumenter.getLastDecisionHash('sess-1')).toBeUndefined();
+
+			const hash = await instrumenter.handleDecision('sess-1', {
+				decisionPoint: 'Pick approach',
+				options: [{ id: 'a', description: 'A' }],
+				selected: 'a',
+				rationale: 'Simple',
+			});
+
+			expect(instrumenter.getLastDecisionHash('sess-1')).toBe(hash);
+		});
+
+		it('should return null for unknown session IDs', async () => {
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			const hash = await instrumenter.handleDecision('nonexistent', {
+				decisionPoint: 'Ignored',
+				options: [{ id: 'a', description: 'A' }],
+				selected: 'a',
+				rationale: 'Ignored',
+			});
+
+			expect(hash).toBeNull();
+		});
+
+		it('should clean up decision hash on flush', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleDecision('sess-1', {
+				decisionPoint: 'Pick something',
+				options: [{ id: 'x', description: 'X' }],
+				selected: 'x',
+				rationale: 'Test',
+			});
+
+			expect(instrumenter.getLastDecisionHash('sess-1')).toBeDefined();
+
+			await instrumenter.flush('sess-1');
+
+			expect(instrumenter.getLastDecisionHash('sess-1')).toBeUndefined();
 		});
 	});
 
@@ -1398,7 +1503,10 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			await expect(
-				instrumenter.handleToolExecution('sess-1', null as unknown as { toolName: string; state: unknown; timestamp: number }),
+				instrumenter.handleToolExecution(
+					'sess-1',
+					null as unknown as { toolName: string; state: unknown; timestamp: number }
+				)
 			).resolves.not.toThrow();
 		});
 
@@ -1410,7 +1518,11 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			await expect(
-				instrumenter.handleToolExecution('sess-1', { toolName: undefined as unknown as string, state: {}, timestamp: Date.now() }),
+				instrumenter.handleToolExecution('sess-1', {
+					toolName: undefined as unknown as string,
+					state: {},
+					timestamp: Date.now(),
+				})
 			).resolves.not.toThrow();
 		});
 
@@ -1426,7 +1538,7 @@ describe('claude-code-instrumenter', () => {
 					toolName: 'Write',
 					state: 'not-an-object',
 					timestamp: Date.now(),
-				}),
+				})
 			).resolves.not.toThrow();
 		});
 
@@ -1442,7 +1554,7 @@ describe('claude-code-instrumenter', () => {
 					toolName: 'Write',
 					state: { status: 'running', input: { file_path: 12345 } },
 					timestamp: Date.now(),
-				}),
+				})
 			).resolves.not.toThrow();
 
 			// Command entry should still be created (no line annotation though)
@@ -1470,7 +1582,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			expect(() =>
-				instrumenter.handleUsage('sess-1', { inputTokens: NaN, outputTokens: -1 }),
+				instrumenter.handleUsage('sess-1', { inputTokens: NaN, outputTokens: -1 })
 			).not.toThrow();
 		});
 
@@ -1598,7 +1710,7 @@ describe('claude-code-instrumenter', () => {
 					toolName: 'Write',
 					state: { status: 'running', input: { file_path: 'src/main.ts' } },
 					timestamp: Date.now(),
-				}),
+				})
 			).resolves.not.toThrow();
 
 			// Annotation should still be created since the pattern was invalid
@@ -1852,9 +1964,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].file_path).toBe('src/main.ts');
 		});
@@ -1873,9 +1983,7 @@ describe('claude-code-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].file_path).toBe('/home/user/project/src/main.ts');
 		});

@@ -11,6 +11,7 @@ import * as path from 'path';
 import type { VibesSessionManager } from '../vibes-session';
 import {
 	createCommandEntry,
+	createDecisionEntry,
 	createLineAnnotation,
 	createReasoningEntry,
 	createExternalReasoningEntry,
@@ -152,7 +153,7 @@ function simpleGlobMatch(filePath: string, pattern: string): boolean {
 async function extractLineRange(
 	input: unknown,
 	filePath?: string,
-	projectPath?: string,
+	projectPath?: string
 ): Promise<{ lineStart: number; lineEnd: number } | null> {
 	if (!input || typeof input !== 'object') {
 		return null;
@@ -238,13 +239,12 @@ async function extractLineRange(
 async function findStringPosition(
 	searchString: string,
 	filePath?: string,
-	projectPath?: string,
+	projectPath?: string
 ): Promise<number | null> {
 	if (!filePath) return null;
 	try {
-		const fullPath = (projectPath && !path.isAbsolute(filePath))
-			? path.join(projectPath, filePath)
-			: filePath;
+		const fullPath =
+			projectPath && !path.isAbsolute(filePath) ? path.join(projectPath, filePath) : filePath;
 		const content = await readFile(fullPath, 'utf-8');
 		const idx = content.indexOf(searchString);
 		if (idx < 0) return null;
@@ -346,6 +346,9 @@ export class ClaudeCodeInstrumenter {
 	/** Most recent reasoning hash per session, for linking to line annotations. */
 	private lastReasoningHashes: Map<string, string> = new Map();
 
+	/** Most recent decision hash per session, for linking to line annotations. */
+	private lastDecisionHashes: Map<string, string> = new Map();
+
 	/** Byte threshold above which reasoning text is compressed (default 10 KB). */
 	private compressThresholdBytes: number;
 
@@ -388,7 +391,7 @@ export class ClaudeCodeInstrumenter {
 	 */
 	async handleToolExecution(
 		sessionId: string,
-		event: { toolName: string; state: unknown; timestamp: number },
+		event: { toolName: string; state: unknown; timestamp: number }
 	): Promise<void> {
 		try {
 			const session = this.sessionManager.getSession(sessionId);
@@ -435,12 +438,14 @@ export class ClaudeCodeInstrumenter {
 			// tool_use) but not completion.
 			if (event.toolName === 'Task') {
 				const taskObj = toolInput as Record<string, unknown> | null;
-				const agentType = (taskObj && typeof taskObj.subagent_type === 'string')
-					? taskObj.subagent_type
-					: (taskObj && typeof taskObj.type === 'string') ? taskObj.type : 'unknown';
-				const description = (taskObj && typeof taskObj.description === 'string')
-					? taskObj.description
-					: undefined;
+				const agentType =
+					taskObj && typeof taskObj.subagent_type === 'string'
+						? taskObj.subagent_type
+						: taskObj && typeof taskObj.type === 'string'
+							? taskObj.type
+							: 'unknown';
+				const description =
+					taskObj && typeof taskObj.description === 'string' ? taskObj.description : undefined;
 
 				const subagentAnnotation = createSessionRecord({
 					event: 'start',
@@ -466,8 +471,10 @@ export class ClaudeCodeInstrumenter {
 					}
 
 					const lineRange = await extractLineRange(toolInput, filePath, session.projectPath);
-					const promptHash = this.assuranceLevel !== 'low' ? this.lastPromptHashes.get(sessionId) : undefined;
-					const reasoningHash = this.assuranceLevel === 'high' ? this.lastReasoningHashes.get(sessionId) : undefined;
+					const promptHash =
+						this.assuranceLevel !== 'low' ? this.lastPromptHashes.get(sessionId) : undefined;
+					const reasoningHash =
+						this.assuranceLevel === 'high' ? this.lastReasoningHashes.get(sessionId) : undefined;
 					const annotation = createLineAnnotation({
 						filePath: normalizedPath,
 						lineStart: lineRange?.lineStart ?? 1,
@@ -572,7 +579,7 @@ export class ClaudeCodeInstrumenter {
 	async handlePrompt(
 		sessionId: string,
 		promptText: string,
-		contextFiles?: string[],
+		contextFiles?: string[]
 	): Promise<void> {
 		try {
 			if (this.assuranceLevel === 'low') {
@@ -594,6 +601,54 @@ export class ClaudeCodeInstrumenter {
 		} catch (err) {
 			logWarn('Error handling prompt', { sessionId, error: String(err) });
 		}
+	}
+
+	/**
+	 * Record a structured decision entry in the manifest.
+	 * Only recorded at Medium+ assurance levels. At Low assurance, this is a no-op.
+	 * The decision hash is stored for linking to subsequent annotations via `decision_hash`.
+	 */
+	async handleDecision(
+		sessionId: string,
+		params: {
+			decisionPoint: string;
+			options: Array<{
+				id: string;
+				description: string;
+				pros?: string[];
+				cons?: string[];
+			}>;
+			selected: string;
+			rationale: string;
+			confidence?: 'high' | 'medium' | 'low';
+		}
+	): Promise<string | null> {
+		try {
+			if (this.assuranceLevel === 'low') {
+				return null;
+			}
+
+			const session = this.sessionManager.getSession(sessionId);
+			if (!session || !session.isActive) {
+				return null;
+			}
+
+			const { entry, hash } = createDecisionEntry(params);
+			await this.sessionManager.recordManifestEntry(sessionId, hash, entry);
+			this.lastDecisionHashes.set(sessionId, hash);
+			return hash;
+		} catch (err) {
+			logWarn('Error handling decision', { sessionId, error: String(err) });
+			return null;
+		}
+	}
+
+	/**
+	 * Get the most recent decision hash for a session.
+	 * Returns undefined if no decision has been recorded.
+	 */
+	getLastDecisionHash(sessionId: string): string | undefined {
+		return this.lastDecisionHashes.get(sessionId);
 	}
 
 	/**
@@ -712,7 +767,11 @@ export class ClaudeCodeInstrumenter {
 	 * - Bash: null (stdout not available from stream-json)
 	 * - Read: null
 	 */
-	private buildOutputSummary(toolName: string, input: unknown, projectPath?: string): string | null {
+	private buildOutputSummary(
+		toolName: string,
+		input: unknown,
+		projectPath?: string
+	): string | null {
 		if (!input || typeof input !== 'object') return null;
 		const obj = input as Record<string, unknown>;
 
@@ -748,5 +807,6 @@ export class ClaudeCodeInstrumenter {
 		this.modelNames.delete(sessionId);
 		this.lastPromptHashes.delete(sessionId);
 		this.lastReasoningHashes.delete(sessionId);
+		this.lastDecisionHashes.delete(sessionId);
 	}
 }

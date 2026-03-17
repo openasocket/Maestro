@@ -12,6 +12,7 @@ import {
 	createPromptEntry,
 	createReasoningEntry,
 	createExternalReasoningEntry,
+	createDecisionEntry,
 	createLineAnnotation,
 	createFunctionAnnotation,
 	createSessionRecord,
@@ -851,6 +852,136 @@ describe('vibes-annotations', () => {
 				expect(json).toHaveProperty(key);
 			}
 			expect(Object.keys(json)).toHaveLength(8);
+		});
+	});
+
+	// ========================================================================
+	// createDecisionEntry
+	// ========================================================================
+	describe('createDecisionEntry', () => {
+		it('should create a valid decision entry with required fields', () => {
+			const { entry, hash } = createDecisionEntry({
+				decisionPoint: 'Choose implementation approach for auth module',
+				options: [
+					{ id: 'jwt', description: 'Use JWT tokens' },
+					{ id: 'session', description: 'Use session cookies' },
+				],
+				selected: 'jwt',
+				rationale: 'JWT tokens are stateless and scale better for our microservice architecture',
+			});
+
+			expect(entry.type).toBe('decision');
+			expect(entry.decision_point).toBe('Choose implementation approach for auth module');
+			expect(entry.options).toHaveLength(2);
+			expect(entry.options[0].id).toBe('jwt');
+			expect(entry.options[1].id).toBe('session');
+			expect(entry.selected).toBe('jwt');
+			expect(entry.rationale).toBe(
+				'JWT tokens are stateless and scale better for our microservice architecture'
+			);
+			expect(entry.created_at).toBe(FIXED_ISO);
+			expect(hash).toMatch(/^[0-9a-f]{64}$/);
+		});
+
+		it('should include optional confidence level', () => {
+			const { entry } = createDecisionEntry({
+				decisionPoint: 'Select database',
+				options: [
+					{ id: 'postgres', description: 'PostgreSQL' },
+					{ id: 'sqlite', description: 'SQLite' },
+				],
+				selected: 'postgres',
+				rationale: 'Better concurrency support',
+				confidence: 'high',
+			});
+
+			expect(entry.confidence).toBe('high');
+		});
+
+		it('should include optional pros and cons on options', () => {
+			const { entry } = createDecisionEntry({
+				decisionPoint: 'Choose testing framework',
+				options: [
+					{
+						id: 'vitest',
+						description: 'Vitest',
+						pros: ['Fast', 'ESM native'],
+						cons: ['Newer ecosystem'],
+					},
+					{
+						id: 'jest',
+						description: 'Jest',
+						pros: ['Mature', 'Large community'],
+						cons: ['Slower', 'CJS focused'],
+					},
+				],
+				selected: 'vitest',
+				rationale: 'Performance and ESM support are priorities',
+			});
+
+			expect(entry.options[0].pros).toEqual(['Fast', 'ESM native']);
+			expect(entry.options[0].cons).toEqual(['Newer ecosystem']);
+			expect(entry.options[1].pros).toEqual(['Mature', 'Large community']);
+			expect(entry.options[1].cons).toEqual(['Slower', 'CJS focused']);
+		});
+
+		it('should return a valid 64-char hex hash', () => {
+			const { hash } = createDecisionEntry({
+				decisionPoint: 'Test',
+				options: [{ id: 'a', description: 'Option A' }],
+				selected: 'a',
+				rationale: 'Only option',
+			});
+
+			expect(hash).toMatch(/^[0-9a-f]{64}$/);
+		});
+
+		it('should produce the same hash for same content regardless of created_at', () => {
+			const params = {
+				decisionPoint: 'Pick approach',
+				options: [
+					{ id: 'a', description: 'Approach A' },
+					{ id: 'b', description: 'Approach B' },
+				],
+				selected: 'a',
+				rationale: 'Simpler',
+			};
+
+			const result1 = createDecisionEntry(params);
+			vi.setSystemTime(new Date('2026-12-31T23:59:59.000Z'));
+			const result2 = createDecisionEntry(params);
+
+			expect(result1.hash).toBe(result2.hash);
+			expect(result1.entry.created_at).not.toBe(result2.entry.created_at);
+		});
+
+		it('should produce different hashes for different decisions', () => {
+			const { hash: hash1 } = createDecisionEntry({
+				decisionPoint: 'Decision A',
+				options: [{ id: 'x', description: 'X' }],
+				selected: 'x',
+				rationale: 'Reason A',
+			});
+
+			const { hash: hash2 } = createDecisionEntry({
+				decisionPoint: 'Decision B',
+				options: [{ id: 'y', description: 'Y' }],
+				selected: 'y',
+				rationale: 'Reason B',
+			});
+
+			expect(hash1).not.toBe(hash2);
+		});
+
+		it('should leave confidence undefined when not provided', () => {
+			const { entry } = createDecisionEntry({
+				decisionPoint: 'Test',
+				options: [{ id: 'a', description: 'A' }],
+				selected: 'a',
+				rationale: 'Test',
+			});
+
+			expect(entry.confidence).toBeUndefined();
 		});
 	});
 
