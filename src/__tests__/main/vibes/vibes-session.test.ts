@@ -934,6 +934,85 @@ describe('vibes-session', () => {
 			expect(manager.getActiveSessionCount()).toBe(0);
 		});
 
+		it('should include EVOLVE fields in session start record when provided', async () => {
+			const state = await manager.startSession(
+				'sess-evolve',
+				tmpDir,
+				'claude-code',
+				'medium',
+				undefined,
+				{
+					parentSessionId: 'parent-vibes-uuid',
+					agentName: 'worker-auth',
+					agentType: 'worker',
+				}
+			);
+
+			const annotations = await readAnnotations(tmpDir);
+			expect(annotations).toHaveLength(1);
+
+			const record = annotations[0] as VibesSessionRecord;
+			expect(record.type).toBe('session');
+			expect(record.event).toBe('start');
+			expect(record.parent_session_id).toBe('parent-vibes-uuid');
+			expect(record.agent_name).toBe('worker-auth');
+			expect(record.agent_type).toBe('worker');
+		});
+
+		it('should set parent_session_id to null when explicitly passed null', async () => {
+			await manager.startSession('sess-evolve-null', tmpDir, 'claude-code', 'medium', undefined, {
+				parentSessionId: null,
+				agentName: 'maestro',
+				agentType: 'orchestrator',
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const record = annotations[0] as VibesSessionRecord;
+			expect(record.parent_session_id).toBeNull();
+			expect(record.agent_name).toBe('maestro');
+			expect(record.agent_type).toBe('orchestrator');
+		});
+
+		it('should omit EVOLVE fields when evolveOptions not provided', async () => {
+			await manager.startSession('sess-no-evolve', tmpDir, 'claude-code', 'medium');
+
+			const annotations = await readAnnotations(tmpDir);
+			const record = annotations[0] as VibesSessionRecord;
+			// EVOLVE fields should not be present when not provided
+			expect(record).not.toHaveProperty('parent_session_id');
+			expect(record).not.toHaveProperty('agent_name');
+			expect(record).not.toHaveProperty('agent_type');
+		});
+
+		it('should include EVOLVE fields alongside environment hash', async () => {
+			const envHash = 'b'.repeat(64);
+			await manager.startSession('sess-evolve-env', tmpDir, 'claude-code', 'high', envHash, {
+				parentSessionId: 'parent-uuid',
+				agentName: 'worker-deploy',
+				agentType: 'worker',
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const record = annotations[0] as VibesSessionRecord;
+			expect(record.environment_hash).toBe(envHash);
+			expect(record.parent_session_id).toBe('parent-uuid');
+			expect(record.agent_name).toBe('worker-deploy');
+			expect(record.agent_type).toBe('worker');
+		});
+
+		it('should support partial EVOLVE options (only agentName)', async () => {
+			await manager.startSession('sess-partial-evolve', tmpDir, 'claude-code', 'low', undefined, {
+				agentName: 'my-agent',
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const record = annotations[0] as VibesSessionRecord;
+			expect(record.agent_name).toBe('my-agent');
+			// parentSessionId and agentType not provided, should not appear
+			expect(record).not.toHaveProperty('parent_session_id');
+			expect(record).not.toHaveProperty('agent_type');
+		});
+
 		it('should support multiple concurrent sessions to different projects', async () => {
 			const tmpDir2 = await mkdtemp(path.join(os.tmpdir(), 'vibes-session-test2-'));
 			await ensureAuditDir(tmpDir2);

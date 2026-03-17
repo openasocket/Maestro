@@ -305,12 +305,28 @@ export class VibesCoordinator {
 				toolExtensions: toolExtensions.length > 0 ? toolExtensions : undefined,
 			});
 
+			// EVOLVE: Determine parent session ID, agent name, and agent type
+			// for the session start record (EVOLVE spec section 3).
+			const parentMaestroSessionId = this.parentSessionMap.get(sessionId);
+			let parentVibesSessionId: string | null = null;
+			if (parentMaestroSessionId) {
+				const parentState = this.sessionManager.getSession(parentMaestroSessionId);
+				parentVibesSessionId = parentState?.vibesSessionId ?? null;
+			}
+			const agentName = agentType;
+			const evolveAgentType = parentMaestroSessionId ? 'worker' : 'worker';
+
 			await this.sessionManager.startSession(
 				sessionId,
 				projectPath,
 				agentType,
 				assuranceLevel,
-				envHash
+				envHash,
+				{
+					parentSessionId: parentVibesSessionId,
+					agentName,
+					agentType: evolveAgentType,
+				}
 			);
 
 			this.sessionAgentTypes.set(sessionId, agentType);

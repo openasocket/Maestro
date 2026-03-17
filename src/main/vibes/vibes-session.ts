@@ -4,7 +4,14 @@
 
 import { generateUUID } from '../../shared/uuid';
 import { createSessionRecord } from './vibes-annotations';
-import { appendAnnotation, appendAnnotationImmediate, addManifestEntry, addManifestEntryImmediate, updateManifestEntry, flushAll } from './vibes-io';
+import {
+	appendAnnotation,
+	appendAnnotationImmediate,
+	addManifestEntry,
+	addManifestEntryImmediate,
+	updateManifestEntry,
+	flushAll,
+} from './vibes-io';
 import type {
 	VibesAssuranceLevel,
 	VibesAnnotation,
@@ -44,7 +51,7 @@ export interface VibesSessionState {
 /** Callback invoked when an annotation is recorded for a session. */
 export type OnAnnotationRecordedFn = (
 	sessionId: string,
-	state: { annotationCount: number; lastAnnotation?: VibesAnnotation },
+	state: { annotationCount: number; lastAnnotation?: VibesAnnotation }
 ) => void;
 
 /**
@@ -65,6 +72,10 @@ export class VibesSessionManager {
 	 * Creates the session state and writes a session start annotation.
 	 * If an environmentHash is provided, it is included in the session start
 	 * annotation and set on the session state (VIBES spec requires this).
+	 *
+	 * EVOLVE extensions: When `evolveOptions` is provided, the session start
+	 * record includes parent_session_id, agent_name, and agent_type fields
+	 * per EVOLVE spec section 3.
 	 */
 	async startSession(
 		sessionId: string,
@@ -72,6 +83,11 @@ export class VibesSessionManager {
 		agentType: string,
 		assuranceLevel: VibesAssuranceLevel,
 		environmentHash?: string,
+		evolveOptions?: {
+			parentSessionId?: string | null;
+			agentName?: string;
+			agentType?: string;
+		}
 	): Promise<VibesSessionState> {
 		const vibesSessionId = generateUUID();
 		const startedAt = new Date().toISOString();
@@ -98,6 +114,10 @@ export class VibesSessionManager {
 			environmentHash,
 			assuranceLevel,
 			description: `${agentType} agent session`,
+			// EVOLVE extensions (spec section 3):
+			parentSessionId: evolveOptions?.parentSessionId,
+			agentName: evolveOptions?.agentName,
+			agentType: evolveOptions?.agentType,
 		});
 		await appendAnnotationImmediate(projectPath, startRecord);
 		state.annotationCount++;
@@ -155,9 +175,7 @@ export class VibesSessionManager {
 	 * Return all active session IDs.
 	 */
 	getActiveSessions(): string[] {
-		return [...this.sessions.entries()]
-			.filter(([_, state]) => state.isActive)
-			.map(([id]) => id);
+		return [...this.sessions.entries()].filter(([_, state]) => state.isActive).map(([id]) => id);
 	}
 
 	/**
@@ -193,7 +211,7 @@ export class VibesSessionManager {
 	async recordManifestEntry(
 		sessionId: string,
 		hash: string,
-		entry: VibesManifestEntry,
+		entry: VibesManifestEntry
 	): Promise<void> {
 		const state = this.sessions.get(sessionId);
 		if (!state || !state.isActive) {
@@ -210,7 +228,7 @@ export class VibesSessionManager {
 	async recordManifestEntryImmediate(
 		sessionId: string,
 		hash: string,
-		entry: VibesManifestEntry,
+		entry: VibesManifestEntry
 	): Promise<void> {
 		const state = this.sessions.get(sessionId);
 		if (!state || !state.isActive) {
@@ -226,7 +244,7 @@ export class VibesSessionManager {
 	async updateExistingManifestEntry(
 		sessionId: string,
 		hash: string,
-		entry: VibesManifestEntry,
+		entry: VibesManifestEntry
 	): Promise<void> {
 		const state = this.sessions.get(sessionId);
 		if (!state || !state.isActive) {
@@ -277,7 +295,7 @@ export class VibesSessionManager {
 	 * Returns null if the session does not exist.
 	 */
 	getSessionStats(
-		sessionId: string,
+		sessionId: string
 	): { annotationCount: number; duration: number; assuranceLevel: VibesAssuranceLevel } | null {
 		const state = this.sessions.get(sessionId);
 		if (!state) {
