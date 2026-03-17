@@ -89,6 +89,9 @@ export const MODAL_PRIORITIES = {
 	/** VIBES keygen wizard - key generation walkthrough */
 	KEYGEN_WIZARD: 756,
 
+	/** VIBES attestation progress modal - shows 7-step pipeline progress */
+	ATTESTATION_PROGRESS: 754,
+
 	/** Create PR modal (from worktree) */
 	CREATE_PR: 755,
 

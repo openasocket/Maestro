@@ -11,6 +11,7 @@ import { VibesBlameView } from './VibesBlameView';
 import { VibeCoverageView } from './VibeCoverageView';
 import { VibesReportView } from './VibesReportView';
 import { VibesKeygenWizard } from './VibesKeygenWizard';
+import { VibesAttestationModal } from './VibesAttestationModal';
 
 // ============================================================================
 // Sub-tab type
@@ -217,16 +218,22 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 		[vibesData]
 	);
 
-	// Create attestation handler
-	const handleCreateAttestation = useCallback(async () => {
+	// Attestation progress modal
+	const [showAttestationModal, setShowAttestationModal] = useState(false);
+
+	const handleCreateAttestation = useCallback(() => {
 		if (!projectPath) return;
-		try {
-			await window.maestro.vibes.attestation.attest(projectPath, { cosign: true });
-			vibesData.refresh();
-		} catch {
-			// Error will surface in the dashboard
-		}
-	}, [projectPath, vibesData]);
+		setShowAttestationModal(true);
+	}, [projectPath]);
+
+	const handleAttestationModalClose = useCallback(() => {
+		setShowAttestationModal(false);
+	}, []);
+
+	const handleAttestationComplete = useCallback(() => {
+		setShowAttestationModal(false);
+		vibesData.refresh();
+	}, [vibesData]);
 
 	// Keyboard shortcut: Ctrl+Shift+R (or Cmd+Shift+R on macOS)
 	useEffect(() => {
@@ -489,6 +496,17 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 					theme={theme}
 					onClose={handleKeygenWizardClose}
 					onComplete={handleKeygenComplete}
+				/>
+			)}
+
+			{/* Attestation Progress Modal */}
+			{showAttestationModal && projectPath && (
+				<VibesAttestationModal
+					theme={theme}
+					projectPath={projectPath}
+					cosign={true}
+					onClose={handleAttestationModalClose}
+					onComplete={handleAttestationComplete}
 				/>
 			)}
 		</div>
