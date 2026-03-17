@@ -18,6 +18,7 @@ import type { VibesSessionManager } from '../vibes-session';
 import {
 	createCommandEntry,
 	createDecisionEntry,
+	createEdgeRecord,
 	createLineAnnotation,
 	createReasoningEntry,
 	createExternalReasoningEntry,
@@ -314,6 +315,19 @@ export class CodexInstrumenter {
 						assuranceLevel: session.assuranceLevel,
 					});
 					await this.sessionManager.recordAnnotation(sessionId, annotation);
+
+					// Emit caused_by edge linking annotation to its triggering prompt
+					if (promptHash) {
+						const edge = createEdgeRecord({
+							edgeType: 'caused_by',
+							sourceRef: annotation.annotation_id,
+							sourceType: 'annotation',
+							targetRef: promptHash,
+							targetType: 'context',
+							sessionId: session.vibesSessionId,
+						});
+						await this.sessionManager.recordAnnotation(sessionId, edge);
+					}
 				}
 			}
 		} catch (err) {

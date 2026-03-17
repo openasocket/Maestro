@@ -13,6 +13,7 @@ import {
 	createReasoningEntry,
 	createExternalReasoningEntry,
 	createDecisionEntry,
+	createEdgeRecord,
 	createLineAnnotation,
 	createFunctionAnnotation,
 	createSessionRecord,
@@ -989,6 +990,106 @@ describe('vibes-annotations', () => {
 			});
 
 			expect(entry.confidence).toBeUndefined();
+		});
+	});
+
+	// ========================================================================
+	// createEdgeRecord
+	// ========================================================================
+	describe('createEdgeRecord', () => {
+		it('should create a valid caused_by edge record', () => {
+			const edge = createEdgeRecord({
+				edgeType: 'caused_by',
+				sourceRef: 'a'.repeat(64),
+				sourceType: 'annotation',
+				targetRef: 'b'.repeat(64),
+				targetType: 'context',
+				sessionId: 'sess-1',
+			});
+
+			expect(edge.type).toBe('edge');
+			expect(edge.edge_type).toBe('caused_by');
+			expect(edge.source_ref).toBe('a'.repeat(64));
+			expect(edge.source_type).toBe('annotation');
+			expect(edge.target_ref).toBe('b'.repeat(64));
+			expect(edge.target_type).toBe('context');
+			expect(edge.timestamp).toBe(FIXED_ISO);
+			expect(edge.session_id).toBe('sess-1');
+		});
+
+		it('should support all edge types', () => {
+			const edgeTypes = [
+				'caused_by',
+				'depends_on',
+				'informed_by',
+				'delegated_to',
+				'supersedes',
+				'reviewed_by',
+			] as const;
+			for (const edgeType of edgeTypes) {
+				const edge = createEdgeRecord({
+					edgeType,
+					sourceRef: 'src',
+					sourceType: 'annotation',
+					targetRef: 'tgt',
+					targetType: 'context',
+				});
+				expect(edge.edge_type).toBe(edgeType);
+			}
+		});
+
+		it('should include optional metadata when provided', () => {
+			const edge = createEdgeRecord({
+				edgeType: 'informed_by',
+				sourceRef: 'a'.repeat(64),
+				sourceType: 'annotation',
+				targetRef: 'b'.repeat(64),
+				targetType: 'context',
+				metadata: { file: 'src/index.ts' },
+			});
+
+			expect(edge.metadata).toEqual({ file: 'src/index.ts' });
+		});
+
+		it('should leave optional fields undefined when not provided', () => {
+			const edge = createEdgeRecord({
+				edgeType: 'supersedes',
+				sourceRef: 'a'.repeat(64),
+				sourceType: 'annotation',
+				targetRef: 'b'.repeat(64),
+				targetType: 'annotation',
+			});
+
+			expect(edge.session_id).toBeUndefined();
+			expect(edge.metadata).toBeUndefined();
+		});
+
+		it('should create edges linking annotations to prompts (caused_by pattern)', () => {
+			// Simulate the instrumenter pattern: annotation caused_by prompt
+			const annotation = createLineAnnotation({
+				filePath: 'src/index.ts',
+				lineStart: 1,
+				lineEnd: 10,
+				environmentHash: 'e'.repeat(64),
+				commandHash: 'c'.repeat(64),
+				promptHash: 'p'.repeat(64),
+				action: 'modify',
+				assuranceLevel: 'medium',
+				sessionId: 'sess-1',
+			});
+
+			const edge = createEdgeRecord({
+				edgeType: 'caused_by',
+				sourceRef: annotation.annotation_id,
+				sourceType: 'annotation',
+				targetRef: 'p'.repeat(64),
+				targetType: 'context',
+				sessionId: 'sess-1',
+			});
+
+			expect(edge.source_ref).toBe(annotation.annotation_id);
+			expect(edge.source_ref).toMatch(/^[0-9a-f]{64}$/);
+			expect(edge.target_ref).toBe('p'.repeat(64));
 		});
 	});
 

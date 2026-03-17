@@ -21,6 +21,7 @@ import {
 } from '../../../main/vibes/vibes-io';
 import type {
 	VibesLineAnnotation,
+	VibesEdgeRecord,
 	VibesCommandEntry,
 	VibesPromptEntry,
 	VibesReasoningEntry,
@@ -746,6 +747,103 @@ describe('claude-code-instrumenter', () => {
 			) as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].prompt_hash).toBeNull();
+		});
+	});
+
+	// ========================================================================
+	// caused_by Edge Emission (Spec Section 7.6)
+	// ========================================================================
+	describe('caused_by edge emission', () => {
+		it('emits caused_by edge when line annotation has a prompt_hash', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handlePrompt('sess-1', 'Fix the login bug');
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/login.ts' } },
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const edgeAnnotations = annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[];
+			expect(edgeAnnotations).toHaveLength(1);
+			expect(edgeAnnotations[0].edge_type).toBe('caused_by');
+			expect(edgeAnnotations[0].source_type).toBe('annotation');
+			expect(edgeAnnotations[0].target_type).toBe('context');
+
+			// Source should be the annotation_id of the line annotation
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
+			expect(lineAnnotations).toHaveLength(1);
+			expect(edgeAnnotations[0].source_ref).toBe(lineAnnotations[0].annotation_id);
+
+			// Target should be the prompt_hash
+			expect(edgeAnnotations[0].target_ref).toBe(lineAnnotations[0].prompt_hash);
+		});
+
+		it('does not emit caused_by edge when no prompt_hash (low assurance)', async () => {
+			await setupSession('sess-1', 'low');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'low',
+			});
+
+			await instrumenter.handlePrompt('sess-1', 'Some prompt');
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/test.ts' } },
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const edgeAnnotations = annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[];
+			expect(edgeAnnotations).toHaveLength(0);
+		});
+
+		it('does not emit caused_by edge when no prompt was recorded', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			// No handlePrompt call — directly execute tool
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/test.ts' } },
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const edgeAnnotations = annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[];
+			expect(edgeAnnotations).toHaveLength(0);
+		});
+
+		it('includes session_id on caused_by edges', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handlePrompt('sess-1', 'Refactor module');
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Edit',
+				state: { status: 'running', input: { file_path: 'src/mod.ts' } },
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const edgeAnnotations = annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[];
+			expect(edgeAnnotations).toHaveLength(1);
+			expect(edgeAnnotations[0].session_id).toBeDefined();
+			expect(typeof edgeAnnotations[0].session_id).toBe('string');
 		});
 	});
 

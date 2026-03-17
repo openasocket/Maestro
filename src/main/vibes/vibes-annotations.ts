@@ -17,6 +17,8 @@ import type {
 	VibesLineAnnotation,
 	VibeFunctionAnnotation,
 	VibesSessionRecord,
+	VibesEdgeRecord,
+	VibesEdgeType,
 } from '../../shared/vibes-types';
 
 // ============================================================================
@@ -348,4 +350,34 @@ export function createSessionRecord(params: {
 	};
 	record.annotation_id = computeAnnotationId(record as unknown as Record<string, unknown>);
 	return record;
+}
+
+// ============================================================================
+// Edge Record
+// ============================================================================
+
+/**
+ * Create a directed edge record linking two audit events/context entries.
+ * Per spec section 7.6: "Edges read as 'source [edge_type] target'."
+ */
+export function createEdgeRecord(params: {
+	edgeType: VibesEdgeType;
+	sourceRef: string;
+	sourceType: 'annotation' | 'context' | 'session';
+	targetRef: string;
+	targetType: 'annotation' | 'context' | 'session';
+	sessionId?: string;
+	metadata?: Record<string, unknown>;
+}): VibesEdgeRecord {
+	return {
+		type: 'edge',
+		edge_type: params.edgeType,
+		source_ref: params.sourceRef,
+		source_type: params.sourceType,
+		target_ref: params.targetRef,
+		target_type: params.targetType,
+		timestamp: new Date().toISOString(),
+		session_id: params.sessionId,
+		metadata: params.metadata,
+	};
 }
