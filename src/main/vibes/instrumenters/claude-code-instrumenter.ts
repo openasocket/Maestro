@@ -350,6 +350,9 @@ export class ClaudeCodeInstrumenter {
 	/** Most recent decision hash per session, for linking to line annotations. */
 	private lastDecisionHashes: Map<string, string> = new Map();
 
+	/** Most recent file-read command hash per session per file path, for informed_by edges. */
+	private lastFileReadHashes: Map<string, Map<string, string>> = new Map();
+
 	/** Byte threshold above which reasoning text is compressed (default 10 KB). */
 	private compressThresholdBytes: number;
 
@@ -431,6 +434,20 @@ export class ClaudeCodeInstrumenter {
 			});
 			await this.sessionManager.recordManifestEntry(sessionId, cmdHash, cmdEntry);
 
+			// Track file reads for informed_by edge emission
+			if (commandType === 'file_read') {
+				const readPath = extractFilePath(toolInput);
+				if (readPath) {
+					const normalizedReadPath = normalizePath(readPath, session.projectPath);
+					let fileMap = this.lastFileReadHashes.get(sessionId);
+					if (!fileMap) {
+						fileMap = new Map();
+						this.lastFileReadHashes.set(sessionId, fileMap);
+					}
+					fileMap.set(normalizedReadPath, cmdHash);
+				}
+			}
+
 			// Task tool = subagent delegation — create session boundary annotation.
 			// Follows CCV HOOK-ALIGN-04 pattern: description="subagent:{type}:{desc}".
 			// NOTE: Subagent stop events are not available from stream-json output.
@@ -504,6 +521,21 @@ export class ClaudeCodeInstrumenter {
 							sessionId: session.vibesSessionId,
 						});
 						await this.sessionManager.recordAnnotation(sessionId, edge);
+					}
+
+					// Emit informed_by edge when this file was recently read
+					const fileReadMap = this.lastFileReadHashes.get(sessionId);
+					const readHash = fileReadMap?.get(normalizedPath);
+					if (readHash) {
+						const informedEdge = createEdgeRecord({
+							edgeType: 'informed_by',
+							sourceRef: annotation.annotation_id,
+							sourceType: 'annotation',
+							targetRef: readHash,
+							targetType: 'context',
+							sessionId: session.vibesSessionId,
+						});
+						await this.sessionManager.recordAnnotation(sessionId, informedEdge);
 					}
 				}
 			}
@@ -825,5 +857,6 @@ export class ClaudeCodeInstrumenter {
 		this.lastPromptHashes.delete(sessionId);
 		this.lastReasoningHashes.delete(sessionId);
 		this.lastDecisionHashes.delete(sessionId);
+		this.lastFileReadHashes.delete(sessionId);
 	}
 }

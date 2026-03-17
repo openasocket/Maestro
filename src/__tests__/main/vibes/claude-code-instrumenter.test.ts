@@ -2086,4 +2086,190 @@ describe('claude-code-instrumenter', () => {
 			expect(lineAnnotations[0].file_path).toBe('/home/user/project/src/main.ts');
 		});
 	});
+
+	// ========================================================================
+	// informed_by Edge Emission (Spec Section 7.6)
+	// ========================================================================
+	describe('informed_by edge emission', () => {
+		it('emits informed_by edge when file was read then modified', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			// Read a file first
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Read',
+				state: { status: 'running', input: { file_path: 'src/login.ts' } },
+				timestamp: Date.now(),
+			});
+
+			// Then modify the same file
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/login.ts' } },
+				timestamp: Date.now(),
+			});
+
+			await flushAll();
+			const annotations = await readAnnotations(tmpDir);
+			const edgeAnnotations = annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[];
+			const informedEdges = edgeAnnotations.filter((e) => e.edge_type === 'informed_by');
+			expect(informedEdges).toHaveLength(1);
+			expect(informedEdges[0].source_type).toBe('annotation');
+			expect(informedEdges[0].target_type).toBe('context');
+
+			// Source should be the annotation_id of the line annotation
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
+			expect(lineAnnotations).toHaveLength(1);
+			expect(informedEdges[0].source_ref).toBe(lineAnnotations[0].annotation_id);
+
+			// Target should be the file_read command hash
+			const manifest = await readVibesManifest(tmpDir);
+			const cmdEntries = Object.entries(manifest.entries).filter(
+				([, e]) => e.type === 'command' && (e as VibesCommandEntry).command_type === 'file_read'
+			);
+			expect(cmdEntries).toHaveLength(1);
+			expect(informedEdges[0].target_ref).toBe(cmdEntries[0][0]);
+		});
+
+		it('does not emit informed_by edge when file was not read before modification', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			// Modify a file without reading it first
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/new-file.ts' } },
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const edgeAnnotations = annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[];
+			const informedEdges = edgeAnnotations.filter((e) => e.edge_type === 'informed_by');
+			expect(informedEdges).toHaveLength(0);
+		});
+
+		it('does not emit informed_by edge when a different file was read', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			// Read file A
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Read',
+				state: { status: 'running', input: { file_path: 'src/utils.ts' } },
+				timestamp: Date.now(),
+			});
+
+			// Modify file B (different from read)
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/main.ts' } },
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const edgeAnnotations = annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[];
+			const informedEdges = edgeAnnotations.filter((e) => e.edge_type === 'informed_by');
+			expect(informedEdges).toHaveLength(0);
+		});
+
+		it('includes session_id on informed_by edges', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Read',
+				state: { status: 'running', input: { file_path: 'src/app.ts' } },
+				timestamp: Date.now(),
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Edit',
+				state: { status: 'running', input: { file_path: 'src/app.ts' } },
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const informedEdges = (
+				annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[]
+			).filter((e) => e.edge_type === 'informed_by');
+			expect(informedEdges).toHaveLength(1);
+			expect(informedEdges[0].session_id).toBeDefined();
+			expect(typeof informedEdges[0].session_id).toBe('string');
+		});
+
+		it('emits both caused_by and informed_by edges when file was read and prompt exists', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handlePrompt('sess-1', 'Fix the bug in login');
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Read',
+				state: { status: 'running', input: { file_path: 'src/login.ts' } },
+				timestamp: Date.now(),
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Edit',
+				state: { status: 'running', input: { file_path: 'src/login.ts' } },
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const edgeAnnotations = annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[];
+			const causedByEdges = edgeAnnotations.filter((e) => e.edge_type === 'caused_by');
+			const informedEdges = edgeAnnotations.filter((e) => e.edge_type === 'informed_by');
+			expect(causedByEdges).toHaveLength(1);
+			expect(informedEdges).toHaveLength(1);
+		});
+
+		it('cleans up file read hashes on session flush', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			// Read a file
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Read',
+				state: { status: 'running', input: { file_path: 'src/cleanup.ts' } },
+				timestamp: Date.now(),
+			});
+
+			// Flush the session (cleanup)
+			await instrumenter.flush('sess-1');
+
+			// Start a new session with the same ID
+			await setupSession('sess-1', 'medium');
+
+			// Modify the same file — should NOT produce informed_by edge
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/cleanup.ts' } },
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const informedEdges = (
+				annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[]
+			).filter((e) => e.edge_type === 'informed_by');
+			expect(informedEdges).toHaveLength(0);
+		});
+	});
 });
