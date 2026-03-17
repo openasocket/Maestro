@@ -38,6 +38,11 @@ vi.mock('lucide-react', () => ({
 	),
 	AlertTriangle: () => <svg data-testid="alert-triangle-icon" />,
 	Download: () => <svg data-testid="download-icon" />,
+	Info: () => <svg data-testid="info-icon" />,
+	ClipboardCheck: () => <svg data-testid="clipboard-check-icon" />,
+	Key: () => <svg data-testid="key-icon" />,
+	Lock: () => <svg data-testid="lock-icon" />,
+	ShieldCheck: () => <svg data-testid="shield-check-icon" />,
 }));
 
 vi.mock('../../../../renderer/components/vibes/VibesLiveMonitor', () => ({
@@ -69,9 +74,7 @@ const testTheme: Theme = {
 	},
 };
 
-function createMockVibesData(
-	overrides: Partial<UseVibesDataReturn> = {},
-): UseVibesDataReturn {
+function createMockVibesData(overrides: Partial<UseVibesDataReturn> = {}): UseVibesDataReturn {
 	return {
 		isInitialized: true,
 		stats: {
@@ -102,13 +105,22 @@ const mockGetManifest = vi.fn();
 const mockGetLog = vi.fn();
 const mockSaveFile = vi.fn();
 const mockWriteFile = vi.fn();
+const mockGetKeyInfo = vi.fn();
+const mockVerifyAttestation = vi.fn();
+const mockAttest = vi.fn();
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	mockFindBinary.mockResolvedValue({ path: '/usr/local/bin/vibecheck', version: 'vibecheck 0.3.2' });
+	mockFindBinary.mockResolvedValue({
+		path: '/usr/local/bin/vibecheck',
+		version: 'vibecheck 0.3.2',
+	});
 	mockGetManifest.mockResolvedValue({ success: true, data: '{}' });
 	mockGetLog.mockResolvedValue({ success: true, data: '[]' });
 	mockSaveFile.mockResolvedValue(null);
+	mockGetKeyInfo.mockResolvedValue({ success: false });
+	mockVerifyAttestation.mockResolvedValue({ success: false });
+	mockAttest.mockResolvedValue({ success: true });
 
 	(window as any).maestro = {
 		vibes: {
@@ -117,6 +129,11 @@ beforeEach(() => {
 			getReport: mockGetReport,
 			getManifest: mockGetManifest,
 			getLog: mockGetLog,
+			attestation: {
+				getKeyInfo: mockGetKeyInfo,
+				verifyAttestation: mockVerifyAttestation,
+				attest: mockAttest,
+			},
 		},
 		dialog: {
 			saveFile: mockSaveFile,
@@ -144,7 +161,7 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData()}
 				vibesEnabled={false}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		expect(screen.getByText('VIBES is disabled')).toBeTruthy();
@@ -163,7 +180,7 @@ describe('VibesDashboard', () => {
 				})}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		expect(screen.getByText('Initializing...')).toBeTruthy();
@@ -182,7 +199,7 @@ describe('VibesDashboard', () => {
 				})}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		expect(screen.getByText('VIBES not initialized')).toBeTruthy();
@@ -199,7 +216,7 @@ describe('VibesDashboard', () => {
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
 				binaryAvailable={false}
-			/>,
+			/>
 		);
 
 		const buildBtn = screen.getByText('Build Database').closest('button')!;
@@ -220,7 +237,7 @@ describe('VibesDashboard', () => {
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
 				binaryAvailable={true}
-			/>,
+			/>
 		);
 
 		const buildBtn = screen.getByText('Build Database').closest('button')!;
@@ -238,7 +255,7 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData({ error: 'Connection failed' })}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		expect(screen.getByText('Connection failed')).toBeTruthy();
@@ -252,7 +269,7 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData({ isLoading: true })}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		// Stats cards show "—" when loading
@@ -268,7 +285,7 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData()}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		expect(screen.getByText('VIBES is active')).toBeTruthy();
@@ -283,7 +300,7 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData()}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		expect(screen.getByText('Build Database')).toBeTruthy();
@@ -299,7 +316,7 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData()}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		expect(screen.getByTestId('vibes-live-monitor')).toBeTruthy();
@@ -317,13 +334,31 @@ describe('VibesDashboard', () => {
 				projectPath="/test/project"
 				vibesData={createMockVibesData({
 					annotations: [
-						{ type: 'line', file_path: 'a.ts', line_start: 1, line_end: 5, environment_hash: 'h1', action: 'create', timestamp: new Date(now - 60000).toISOString(), assurance_level: 'medium' },
-						{ type: 'line', file_path: 'b.ts', line_start: 1, line_end: 3, environment_hash: 'h1', action: 'modify', timestamp: new Date(now).toISOString(), assurance_level: 'high' },
+						{
+							type: 'line',
+							file_path: 'a.ts',
+							line_start: 1,
+							line_end: 5,
+							environment_hash: 'h1',
+							action: 'create',
+							timestamp: new Date(now - 60000).toISOString(),
+							assurance_level: 'medium',
+						},
+						{
+							type: 'line',
+							file_path: 'b.ts',
+							line_start: 1,
+							line_end: 3,
+							environment_hash: 'h1',
+							action: 'modify',
+							timestamp: new Date(now).toISOString(),
+							assurance_level: 'high',
+						},
 					],
 				})}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		expect(screen.getByTestId('activity-timeline')).toBeTruthy();
@@ -338,7 +373,7 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData({ annotations: [] })}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		expect(screen.getByText('No activity yet')).toBeTruthy();
@@ -352,12 +387,21 @@ describe('VibesDashboard', () => {
 				projectPath="/test/project"
 				vibesData={createMockVibesData({
 					annotations: [
-						{ type: 'line', file_path: 'a.ts', line_start: 1, line_end: 5, environment_hash: 'h1', action: 'create', timestamp: new Date(now).toISOString(), assurance_level: 'medium' },
+						{
+							type: 'line',
+							file_path: 'a.ts',
+							line_start: 1,
+							line_end: 5,
+							environment_hash: 'h1',
+							action: 'create',
+							timestamp: new Date(now).toISOString(),
+							assurance_level: 'medium',
+						},
 					],
 				})}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		expect(screen.getByTestId('timeline-legend')).toBeTruthy();
@@ -377,12 +421,21 @@ describe('VibesDashboard', () => {
 				projectPath="/test/project"
 				vibesData={createMockVibesData({
 					annotations: [
-						{ type: 'line', file_path: 'a.ts', line_start: 1, line_end: 5, environment_hash: 'h1', action: 'create', timestamp: new Date(now).toISOString(), assurance_level: 'medium' },
+						{
+							type: 'line',
+							file_path: 'a.ts',
+							line_start: 1,
+							line_end: 5,
+							environment_hash: 'h1',
+							action: 'create',
+							timestamp: new Date(now).toISOString(),
+							assurance_level: 'medium',
+						},
 					],
 				})}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		// All four range buttons should be present
@@ -404,12 +457,21 @@ describe('VibesDashboard', () => {
 				projectPath="/test/project"
 				vibesData={createMockVibesData({
 					annotations: [
-						{ type: 'line', file_path: 'a.ts', line_start: 1, line_end: 5, environment_hash: 'h1', action: 'create', timestamp: new Date(now).toISOString(), assurance_level: 'medium' },
+						{
+							type: 'line',
+							file_path: 'a.ts',
+							line_start: 1,
+							line_end: 5,
+							environment_hash: 'h1',
+							action: 'create',
+							timestamp: new Date(now).toISOString(),
+							assurance_level: 'medium',
+						},
 					],
 				})}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		const btn7d = screen.getByText('7d');
@@ -430,14 +492,32 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData({
 					annotations: [
 						// Recent annotation (within 1d)
-						{ type: 'line', file_path: 'recent.ts', line_start: 1, line_end: 5, environment_hash: 'h1', action: 'create', timestamp: new Date(now - 3600_000).toISOString(), assurance_level: 'medium' },
+						{
+							type: 'line',
+							file_path: 'recent.ts',
+							line_start: 1,
+							line_end: 5,
+							environment_hash: 'h1',
+							action: 'create',
+							timestamp: new Date(now - 3600_000).toISOString(),
+							assurance_level: 'medium',
+						},
 						// Old annotation (20 days ago — within 30d but outside 7d and 1d)
-						{ type: 'line', file_path: 'old.ts', line_start: 1, line_end: 3, environment_hash: 'h1', action: 'modify', timestamp: new Date(now - 20 * 86400_000).toISOString(), assurance_level: 'medium' },
+						{
+							type: 'line',
+							file_path: 'old.ts',
+							line_start: 1,
+							line_end: 3,
+							environment_hash: 'h1',
+							action: 'modify',
+							timestamp: new Date(now - 20 * 86400_000).toISOString(),
+							assurance_level: 'medium',
+						},
 					],
 				})}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		// Default 30d: both annotations should produce bar segments
@@ -466,13 +546,25 @@ describe('VibesDashboard', () => {
 				projectPath="/test/project"
 				vibesData={createMockVibesData({
 					models: [
-						{ modelName: 'claude-sonnet', modelVersion: '4.5', toolName: 'claude-code', annotationCount: 30, percentage: 60 },
-						{ modelName: 'gpt-4o', modelVersion: '2024-05', toolName: 'copilot', annotationCount: 20, percentage: 40 },
+						{
+							modelName: 'claude-sonnet',
+							modelVersion: '4.5',
+							toolName: 'claude-code',
+							annotationCount: 30,
+							percentage: 60,
+						},
+						{
+							modelName: 'gpt-4o',
+							modelVersion: '2024-05',
+							toolName: 'copilot',
+							annotationCount: 20,
+							percentage: 40,
+						},
 					],
 				})}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		expect(screen.getByTestId('model-donut-section')).toBeTruthy();
@@ -488,13 +580,25 @@ describe('VibesDashboard', () => {
 				projectPath="/test/project"
 				vibesData={createMockVibesData({
 					models: [
-						{ modelName: 'model-a', modelVersion: '1', toolName: 'tool-a', annotationCount: 10, percentage: 50 },
-						{ modelName: 'model-b', modelVersion: '1', toolName: 'tool-b', annotationCount: 10, percentage: 50 },
+						{
+							modelName: 'model-a',
+							modelVersion: '1',
+							toolName: 'tool-a',
+							annotationCount: 10,
+							percentage: 50,
+						},
+						{
+							modelName: 'model-b',
+							modelVersion: '1',
+							toolName: 'tool-b',
+							annotationCount: 10,
+							percentage: 50,
+						},
 					],
 				})}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		// Donut center shows model count
@@ -510,7 +614,7 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData({ models: [] })}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		expect(screen.queryByTestId('model-donut-section')).toBeNull();
@@ -527,15 +631,51 @@ describe('VibesDashboard', () => {
 				projectPath="/test/project"
 				vibesData={createMockVibesData({
 					annotations: [
-						{ type: 'line', file_path: 'a.ts', line_start: 1, line_end: 5, environment_hash: 'h1', action: 'create', timestamp: '2025-01-01T00:00:00Z', assurance_level: 'low' },
-						{ type: 'line', file_path: 'b.ts', line_start: 1, line_end: 3, environment_hash: 'h1', action: 'modify', timestamp: '2025-01-01T00:01:00Z', assurance_level: 'medium' },
-						{ type: 'line', file_path: 'c.ts', line_start: 1, line_end: 3, environment_hash: 'h1', action: 'modify', timestamp: '2025-01-01T00:02:00Z', assurance_level: 'medium' },
-						{ type: 'line', file_path: 'd.ts', line_start: 1, line_end: 3, environment_hash: 'h1', action: 'create', timestamp: '2025-01-01T00:03:00Z', assurance_level: 'high' },
+						{
+							type: 'line',
+							file_path: 'a.ts',
+							line_start: 1,
+							line_end: 5,
+							environment_hash: 'h1',
+							action: 'create',
+							timestamp: '2025-01-01T00:00:00Z',
+							assurance_level: 'low',
+						},
+						{
+							type: 'line',
+							file_path: 'b.ts',
+							line_start: 1,
+							line_end: 3,
+							environment_hash: 'h1',
+							action: 'modify',
+							timestamp: '2025-01-01T00:01:00Z',
+							assurance_level: 'medium',
+						},
+						{
+							type: 'line',
+							file_path: 'c.ts',
+							line_start: 1,
+							line_end: 3,
+							environment_hash: 'h1',
+							action: 'modify',
+							timestamp: '2025-01-01T00:02:00Z',
+							assurance_level: 'medium',
+						},
+						{
+							type: 'line',
+							file_path: 'd.ts',
+							line_start: 1,
+							line_end: 3,
+							environment_hash: 'h1',
+							action: 'create',
+							timestamp: '2025-01-01T00:03:00Z',
+							assurance_level: 'high',
+						},
 					],
 				})}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		expect(screen.getByTestId('assurance-distribution')).toBeTruthy();
@@ -551,14 +691,41 @@ describe('VibesDashboard', () => {
 				projectPath="/test/project"
 				vibesData={createMockVibesData({
 					annotations: [
-						{ type: 'line', file_path: 'a.ts', line_start: 1, line_end: 5, environment_hash: 'h1', action: 'create', timestamp: '2025-01-01T00:00:00Z', assurance_level: 'low' },
-						{ type: 'line', file_path: 'b.ts', line_start: 1, line_end: 3, environment_hash: 'h1', action: 'modify', timestamp: '2025-01-01T00:01:00Z', assurance_level: 'high' },
-						{ type: 'line', file_path: 'c.ts', line_start: 1, line_end: 3, environment_hash: 'h1', action: 'modify', timestamp: '2025-01-01T00:02:00Z', assurance_level: 'high' },
+						{
+							type: 'line',
+							file_path: 'a.ts',
+							line_start: 1,
+							line_end: 5,
+							environment_hash: 'h1',
+							action: 'create',
+							timestamp: '2025-01-01T00:00:00Z',
+							assurance_level: 'low',
+						},
+						{
+							type: 'line',
+							file_path: 'b.ts',
+							line_start: 1,
+							line_end: 3,
+							environment_hash: 'h1',
+							action: 'modify',
+							timestamp: '2025-01-01T00:01:00Z',
+							assurance_level: 'high',
+						},
+						{
+							type: 'line',
+							file_path: 'c.ts',
+							line_start: 1,
+							line_end: 3,
+							environment_hash: 'h1',
+							action: 'modify',
+							timestamp: '2025-01-01T00:02:00Z',
+							assurance_level: 'high',
+						},
 					],
 				})}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		const legend = screen.getByTestId('assurance-legend');
@@ -575,13 +742,31 @@ describe('VibesDashboard', () => {
 				projectPath="/test/project"
 				vibesData={createMockVibesData({
 					annotations: [
-						{ type: 'line', file_path: 'a.ts', line_start: 1, line_end: 5, environment_hash: 'h1', action: 'create', timestamp: '2025-01-01T00:00:00Z', assurance_level: 'high' },
-						{ type: 'line', file_path: 'b.ts', line_start: 1, line_end: 3, environment_hash: 'h1', action: 'modify', timestamp: '2025-01-01T00:01:00Z', assurance_level: 'high' },
+						{
+							type: 'line',
+							file_path: 'a.ts',
+							line_start: 1,
+							line_end: 5,
+							environment_hash: 'h1',
+							action: 'create',
+							timestamp: '2025-01-01T00:00:00Z',
+							assurance_level: 'high',
+						},
+						{
+							type: 'line',
+							file_path: 'b.ts',
+							line_start: 1,
+							line_end: 3,
+							environment_hash: 'h1',
+							action: 'modify',
+							timestamp: '2025-01-01T00:01:00Z',
+							assurance_level: 'high',
+						},
 					],
 				})}
 				vibesEnabled={true}
 				vibesAssuranceLevel="high"
-			/>,
+			/>
 		);
 
 		expect(screen.getByTestId('assurance-bar-high')).toBeTruthy();
@@ -601,7 +786,7 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData()}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		// Click export button
@@ -625,7 +810,7 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData()}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		fireEvent.click(screen.getByText('Export'));
@@ -648,7 +833,7 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData()}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		// All three level buttons should be present in the status banner
@@ -665,7 +850,7 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData()}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		const mediumBtn = screen.getByTitle('Set assurance level to Medium');
@@ -686,7 +871,7 @@ describe('VibesDashboard', () => {
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
 				onAssuranceLevelChange={handleChange}
-			/>,
+			/>
 		);
 
 		fireEvent.click(screen.getByTitle('Set assurance level to High'));
@@ -704,12 +889,194 @@ describe('VibesDashboard', () => {
 				vibesData={createMockVibesData()}
 				vibesEnabled={true}
 				vibesAssuranceLevel="medium"
-			/>,
+			/>
 		);
 
 		// Should not throw when clicking without handler
 		expect(() => {
 			fireEvent.click(screen.getByTitle('Set assurance level to High'));
 		}).not.toThrow();
+	});
+
+	// ========================================================================
+	// Attestation Card
+	// ========================================================================
+
+	it('shows attestation card with "No signing key found" when no key exists', async () => {
+		mockGetKeyInfo.mockResolvedValue({ success: false });
+
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData()}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('attestation-card')).toBeTruthy();
+			expect(screen.getByText('No signing key found')).toBeTruthy();
+			expect(screen.getByText('Generate a key to create attestations')).toBeTruthy();
+			expect(screen.getByTestId('generate-key-btn')).toBeTruthy();
+		});
+	});
+
+	it('shows attestation card with key info and action buttons when key exists', async () => {
+		mockGetKeyInfo.mockResolvedValue({
+			success: true,
+			data: { keyId: 'a1b2c3d4e5f6a7b8', publicKey: 'test-pub-key' },
+		});
+
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData()}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('attestation-card')).toBeTruthy();
+			expect(screen.getByText('a1b2c3d4e5f6a7b8')).toBeTruthy();
+			expect(screen.getByTestId('attestation-key-ready')).toBeTruthy();
+			expect(screen.getByTestId('create-attestation-btn')).toBeTruthy();
+			expect(screen.getByTestId('verify-attestation-btn')).toBeTruthy();
+		});
+	});
+
+	it('calls onOpenKeygenWizard when Generate Key is clicked', async () => {
+		mockGetKeyInfo.mockResolvedValue({ success: false });
+		const handleOpenKeygen = vi.fn();
+
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData()}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+				onOpenKeygenWizard={handleOpenKeygen}
+			/>
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('generate-key-btn')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('generate-key-btn'));
+		expect(handleOpenKeygen).toHaveBeenCalledOnce();
+	});
+
+	it('calls onCreateAttestation when Create Attestation is clicked', async () => {
+		mockGetKeyInfo.mockResolvedValue({
+			success: true,
+			data: { keyId: 'a1b2c3d4e5f6a7b8' },
+		});
+		const handleCreateAttestation = vi.fn();
+
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData()}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+				onCreateAttestation={handleCreateAttestation}
+			/>
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('create-attestation-btn')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('create-attestation-btn'));
+		expect(handleCreateAttestation).toHaveBeenCalledOnce();
+	});
+
+	it('calls verifyAttestation when Verify is clicked and shows result', async () => {
+		mockGetKeyInfo.mockResolvedValue({
+			success: true,
+			data: { keyId: 'a1b2c3d4e5f6a7b8' },
+		});
+		mockVerifyAttestation.mockResolvedValue({
+			success: true,
+			data: {
+				trustTier: 'tool-corroborated',
+				signatures: [{ keyId: 'a1b2c3d4e5f6a7b8', type: 'User', valid: true }],
+				subjects: [{ name: 'manifest.json', match: true }],
+				attestationId: '7f3a2b1cabcd1234',
+			},
+		});
+
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData()}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('verify-attestation-btn')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('verify-attestation-btn'));
+
+		await waitFor(() => {
+			expect(screen.getByTestId('verification-result')).toBeTruthy();
+			expect(screen.getByText('Tool-Corroborated 🟢')).toBeTruthy();
+			expect(screen.getByText('hash matches')).toBeTruthy();
+		});
+	});
+
+	it('shows verification error when verification fails', async () => {
+		mockGetKeyInfo.mockResolvedValue({
+			success: true,
+			data: { keyId: 'a1b2c3d4e5f6a7b8' },
+		});
+		mockVerifyAttestation
+			.mockResolvedValueOnce({ success: false }) // initial attestation info load
+			.mockResolvedValueOnce({ success: false, error: 'No attestation found' }); // verify click
+
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData()}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('verify-attestation-btn')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('verify-attestation-btn'));
+
+		await waitFor(() => {
+			expect(screen.getByTestId('verification-error')).toBeTruthy();
+			expect(screen.getByText('No attestation found')).toBeTruthy();
+		});
+	});
+
+	it('does not show attestation card when not initialized', () => {
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData({ isInitialized: false, stats: null })}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>
+		);
+
+		expect(screen.queryByTestId('attestation-card')).toBeNull();
 	});
 });

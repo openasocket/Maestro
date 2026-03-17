@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
 	FileText,
 	FolderOpen,
@@ -14,6 +14,10 @@ import {
 	Info,
 	Download,
 	ClipboardCheck,
+	Key,
+	Lock,
+	ShieldCheck,
+	AlertTriangle,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { UseVibesDataReturn } from '../../hooks';
@@ -33,6 +37,26 @@ interface VibesDashboardProps {
 	vibesAutoInit?: boolean;
 	binaryAvailable?: boolean | null;
 	onAssuranceLevelChange?: (level: VibesAssuranceLevel) => void;
+	onOpenKeygenWizard?: () => void;
+	onCreateAttestation?: () => void;
+}
+
+/** Trust tier labels and colors. */
+const TRUST_TIER_DISPLAY: Record<string, { label: string; color: string; icon: string }> = {
+	'self-attested': { label: 'Self-Attested', color: '#eab308', icon: '🟡' },
+	'tool-corroborated': { label: 'Tool-Corroborated', color: '#22c55e', icon: '🟢' },
+	'tool-only': { label: 'Tool-Only', color: '#3b82f6', icon: '🔵' },
+};
+
+interface KeyInfo {
+	keyId: string;
+	publicKey?: string;
+}
+
+interface AttestationInfo {
+	attestationId?: string;
+	trustTier?: string;
+	timestamp?: string;
 }
 
 /** Color mapping for assurance level badges. */
@@ -143,6 +167,8 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 	vibesAutoInit,
 	binaryAvailable,
 	onAssuranceLevelChange,
+	onOpenKeygenWizard,
+	onCreateAttestation,
 }) => {
 	const { isInitialized, stats, sessions, models, isLoading, error, refresh, initialize } =
 		vibesData;
@@ -153,6 +179,96 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 		message: string;
 	} | null>(null);
 	const [timelineRange, setTimelineRange] = useState<TimelineRangeDays>(30);
+
+	// Attestation key info
+	const [keyInfo, setKeyInfo] = useState<KeyInfo | null>(null);
+	const [keyLoading, setKeyLoading] = useState(false);
+	const [attestationInfo, setAttestationInfo] = useState<AttestationInfo | null>(null);
+	const [verificationResult, setVerificationResult] = useState<{
+		show: boolean;
+		data: unknown;
+		error?: string;
+	} | null>(null);
+	const [isVerifying, setIsVerifying] = useState(false);
+
+	// Load key info on mount and when initialized
+	useEffect(() => {
+		if (!vibesEnabled || !isInitialized) return;
+		let cancelled = false;
+		(async () => {
+			setKeyLoading(true);
+			try {
+				const result = await window.maestro.vibes.attestation.getKeyInfo();
+				if (!cancelled && result.success && result.data) {
+					const data = result.data as { keyId: string; publicKey?: string };
+					setKeyInfo({ keyId: data.keyId, publicKey: data.publicKey });
+				} else if (!cancelled) {
+					setKeyInfo(null);
+				}
+			} catch {
+				if (!cancelled) setKeyInfo(null);
+			} finally {
+				if (!cancelled) setKeyLoading(false);
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [vibesEnabled, isInitialized]);
+
+	// Load attestation info when key exists
+	useEffect(() => {
+		if (!projectPath || !keyInfo) return;
+		let cancelled = false;
+		(async () => {
+			try {
+				const result = await window.maestro.vibes.attestation.verifyAttestation(projectPath);
+				if (!cancelled && result.success && result.data) {
+					const data = result.data as {
+						attestationId?: string;
+						trustTier?: string;
+						timestamp?: string;
+					};
+					setAttestationInfo({
+						attestationId: data.attestationId,
+						trustTier: data.trustTier,
+						timestamp: data.timestamp,
+					});
+				}
+			} catch {
+				// No attestation exists — that's fine
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [projectPath, keyInfo]);
+
+	const handleVerify = useCallback(async () => {
+		if (!projectPath) return;
+		setIsVerifying(true);
+		setVerificationResult(null);
+		try {
+			const result = await window.maestro.vibes.attestation.verifyAttestation(projectPath);
+			if (result.success) {
+				setVerificationResult({ show: true, data: result.data });
+			} else {
+				setVerificationResult({ show: true, data: null, error: result.error });
+			}
+		} catch (err) {
+			setVerificationResult({
+				show: true,
+				data: null,
+				error: err instanceof Error ? err.message : 'Verification failed',
+			});
+		} finally {
+			setIsVerifying(false);
+		}
+	}, [projectPath]);
+
+	const handleKeygenComplete = useCallback((keyId: string) => {
+		setKeyInfo({ keyId });
+	}, []);
 
 	// ========================================================================
 	// Computed visualizations
@@ -752,6 +868,21 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 				<SpecComplianceIndicator theme={theme} compliance={specCompliance} />
 			)}
 
+			{/* Attestation Card */}
+			{!isLoading && isInitialized && (
+				<AttestationCard
+					theme={theme}
+					keyInfo={keyInfo}
+					keyLoading={keyLoading}
+					attestationInfo={attestationInfo}
+					verificationResult={verificationResult}
+					isVerifying={isVerifying}
+					onGenerateKey={onOpenKeygenWizard}
+					onCreateAttestation={onCreateAttestation}
+					onVerify={handleVerify}
+				/>
+			)}
+
 			{/* Quick Actions */}
 			<div className="flex flex-col gap-1.5">
 				<span
@@ -1003,6 +1134,312 @@ const SpecComplianceIndicator: React.FC<SpecComplianceIndicatorProps> = ({ theme
 					</div>
 				))}
 			</div>
+		</div>
+	);
+};
+
+// ============================================================================
+// Attestation Card
+// ============================================================================
+
+interface AttestationCardProps {
+	theme: Theme;
+	keyInfo: KeyInfo | null;
+	keyLoading: boolean;
+	attestationInfo: AttestationInfo | null;
+	verificationResult: { show: boolean; data: unknown; error?: string } | null;
+	isVerifying: boolean;
+	onGenerateKey?: () => void;
+	onCreateAttestation?: () => void;
+	onVerify?: () => void;
+}
+
+const AttestationCard: React.FC<AttestationCardProps> = ({
+	theme,
+	keyInfo,
+	keyLoading,
+	attestationInfo,
+	verificationResult,
+	isVerifying,
+	onGenerateKey,
+	onCreateAttestation,
+	onVerify,
+}) => {
+	const formatRelativeTime = (timestamp?: string): string => {
+		if (!timestamp) return '';
+		const delta = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000);
+		if (delta < 60) return 'just now';
+		if (delta < 3600) return `${Math.floor(delta / 60)} minutes ago`;
+		if (delta < 86400) return `${Math.floor(delta / 3600)} hours ago`;
+		return `${Math.floor(delta / 86400)} days ago`;
+	};
+
+	const trustDisplay = attestationInfo?.trustTier
+		? TRUST_TIER_DISPLAY[attestationInfo.trustTier]
+		: null;
+
+	return (
+		<div className="flex flex-col gap-1.5" data-testid="attestation-card">
+			<div className="flex items-center gap-1.5">
+				<Shield className="w-3 h-3" style={{ color: theme.colors.textDim }} />
+				<span
+					className="text-[10px] font-semibold uppercase tracking-wider"
+					style={{ color: theme.colors.textDim }}
+				>
+					Attestation
+				</span>
+			</div>
+			<div
+				className="flex flex-col gap-2 px-3 py-2.5 rounded"
+				style={{
+					backgroundColor: theme.colors.bgActivity,
+					border: `1px solid ${theme.colors.border}`,
+				}}
+			>
+				{keyLoading ? (
+					<div className="flex items-center gap-2 text-xs">
+						<Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: theme.colors.textDim }} />
+						<span style={{ color: theme.colors.textDim }}>Checking signing key...</span>
+					</div>
+				) : keyInfo ? (
+					<>
+						{/* Key info row */}
+						<div className="flex items-center gap-2 text-xs">
+							<Key className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.accent }} />
+							<span className="font-mono text-[11px]" style={{ color: theme.colors.accent }}>
+								{keyInfo.keyId}
+							</span>
+							<span
+								className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium"
+								style={{
+									backgroundColor: 'rgba(34, 197, 94, 0.15)',
+									color: '#22c55e',
+								}}
+								data-testid="attestation-key-ready"
+							>
+								<CheckCircle2 className="w-3 h-3" />
+								Ready
+							</span>
+						</div>
+
+						{/* Last attested info */}
+						{attestationInfo?.timestamp && (
+							<div className="flex items-center gap-1.5 text-[11px]" data-testid="last-attested">
+								<Lock className="w-3 h-3 shrink-0" style={{ color: theme.colors.textDim }} />
+								<span style={{ color: theme.colors.textDim }}>
+									Last attested: {formatRelativeTime(attestationInfo.timestamp)}
+								</span>
+								{trustDisplay && (
+									<span
+										className="px-1.5 py-0.5 rounded text-[10px] font-medium"
+										style={{
+											backgroundColor: `${trustDisplay.color}20`,
+											color: trustDisplay.color,
+										}}
+									>
+										{trustDisplay.label}
+									</span>
+								)}
+							</div>
+						)}
+
+						{/* Action buttons */}
+						<div className="flex gap-2 mt-0.5">
+							<button
+								onClick={onCreateAttestation}
+								className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors hover:opacity-80"
+								style={{
+									backgroundColor: theme.colors.accent,
+									color: theme.colors.accentForeground,
+								}}
+								data-testid="create-attestation-btn"
+							>
+								<ShieldCheck className="w-3.5 h-3.5" />
+								Create Attestation
+							</button>
+							<button
+								onClick={onVerify}
+								disabled={isVerifying}
+								className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors hover:opacity-80"
+								style={{
+									backgroundColor: theme.colors.bgMain,
+									border: `1px solid ${theme.colors.border}`,
+									color: theme.colors.textMain,
+									opacity: isVerifying ? 0.6 : 1,
+								}}
+								data-testid="verify-attestation-btn"
+							>
+								{isVerifying ? (
+									<Loader2 className="w-3.5 h-3.5 animate-spin" />
+								) : (
+									<CheckCircle2 className="w-3.5 h-3.5" />
+								)}
+								Verify
+							</button>
+						</div>
+
+						{/* Inline verification result */}
+						{verificationResult?.show && (
+							<VerificationResultDisplay theme={theme} result={verificationResult} />
+						)}
+					</>
+				) : (
+					<>
+						{/* No key state */}
+						<div className="flex items-center gap-2 text-xs">
+							<AlertTriangle className="w-3.5 h-3.5 shrink-0" style={{ color: '#eab308' }} />
+							<span style={{ color: theme.colors.textMain }}>No signing key found</span>
+						</div>
+						<span className="text-[11px]" style={{ color: theme.colors.textDim }}>
+							Generate a key to create attestations
+						</span>
+						<button
+							onClick={onGenerateKey}
+							className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors hover:opacity-80 self-start"
+							style={{
+								backgroundColor: theme.colors.accent,
+								color: theme.colors.accentForeground,
+							}}
+							data-testid="generate-key-btn"
+						>
+							<Key className="w-3.5 h-3.5" />
+							Generate Key
+						</button>
+					</>
+				)}
+			</div>
+		</div>
+	);
+};
+
+// ============================================================================
+// Verification Result Display
+// ============================================================================
+
+interface VerificationResultDisplayProps {
+	theme: Theme;
+	result: { show: boolean; data: unknown; error?: string };
+}
+
+const VerificationResultDisplay: React.FC<VerificationResultDisplayProps> = ({ theme, result }) => {
+	if (result.error) {
+		return (
+			<div
+				className="flex items-center gap-2 px-2.5 py-2 rounded text-xs mt-1"
+				style={{
+					backgroundColor: 'rgba(239, 68, 68, 0.1)',
+					border: '1px solid rgba(239, 68, 68, 0.3)',
+				}}
+				data-testid="verification-error"
+			>
+				<AlertCircle className="w-3.5 h-3.5 shrink-0" style={{ color: '#ef4444' }} />
+				<span style={{ color: '#ef4444' }}>{result.error}</span>
+			</div>
+		);
+	}
+
+	const data = result.data as {
+		trustTier?: string;
+		signatures?: Array<{ keyId: string; type: string; valid: boolean }>;
+		subjects?: Array<{ name: string; match: boolean; declaredHash?: string; actualHash?: string }>;
+		attestationId?: string;
+	} | null;
+
+	if (!data) return null;
+
+	const trustDisplay = data.trustTier ? TRUST_TIER_DISPLAY[data.trustTier] : null;
+
+	return (
+		<div
+			className="flex flex-col gap-2 px-2.5 py-2 rounded text-xs mt-1"
+			style={{
+				backgroundColor: theme.colors.bgMain,
+				border: `1px solid ${theme.colors.border}`,
+			}}
+			data-testid="verification-result"
+		>
+			{/* Trust Tier */}
+			{trustDisplay && (
+				<div className="flex items-center gap-2">
+					<span style={{ color: theme.colors.textDim }}>Trust Tier:</span>
+					<span className="font-medium" style={{ color: trustDisplay.color }}>
+						{trustDisplay.label} {trustDisplay.icon}
+					</span>
+				</div>
+			)}
+
+			{/* Signatures */}
+			{data.signatures && data.signatures.length > 0 && (
+				<div className="flex flex-col gap-1">
+					<span
+						className="text-[10px] font-semibold uppercase"
+						style={{ color: theme.colors.textDim }}
+					>
+						Signatures
+					</span>
+					{data.signatures.map((sig, i) => (
+						<div key={i} className="flex items-center gap-2">
+							{sig.valid ? (
+								<CheckCircle2 className="w-3 h-3 shrink-0" style={{ color: '#22c55e' }} />
+							) : (
+								<AlertCircle className="w-3 h-3 shrink-0" style={{ color: '#ef4444' }} />
+							)}
+							<span style={{ color: theme.colors.textMain }}>
+								{sig.type} ({sig.keyId.slice(0, 8)}...)
+							</span>
+							<span style={{ color: sig.valid ? '#22c55e' : '#ef4444' }}>
+								{sig.valid ? 'valid' : 'INVALID'}
+							</span>
+						</div>
+					))}
+				</div>
+			)}
+
+			{/* File Integrity */}
+			{data.subjects && data.subjects.length > 0 && (
+				<div className="flex flex-col gap-1">
+					<span
+						className="text-[10px] font-semibold uppercase"
+						style={{ color: theme.colors.textDim }}
+					>
+						File Integrity
+					</span>
+					{data.subjects.map((subj, i) => (
+						<div key={i} className="flex flex-col gap-0.5">
+							<div className="flex items-center gap-2">
+								{subj.match ? (
+									<CheckCircle2 className="w-3 h-3 shrink-0" style={{ color: '#22c55e' }} />
+								) : (
+									<AlertCircle className="w-3 h-3 shrink-0" style={{ color: '#ef4444' }} />
+								)}
+								<span style={{ color: theme.colors.textMain }}>{subj.name}</span>
+								<span style={{ color: subj.match ? '#22c55e' : '#ef4444' }}>
+									{subj.match ? 'hash matches' : 'MODIFIED since attestation'}
+								</span>
+							</div>
+							{!subj.match && subj.declaredHash && subj.actualHash && (
+								<div
+									className="ml-5 flex flex-col text-[10px] font-mono"
+									style={{ color: theme.colors.textDim }}
+								>
+									<span>Declared: {subj.declaredHash.slice(0, 12)}...</span>
+									<span>Actual: {subj.actualHash.slice(0, 12)}...</span>
+								</div>
+							)}
+						</div>
+					))}
+				</div>
+			)}
+
+			{/* Attestation ID */}
+			{data.attestationId && (
+				<div className="flex items-center gap-2">
+					<span style={{ color: theme.colors.textDim }}>Attestation ID:</span>
+					<span className="font-mono text-[10px]" style={{ color: theme.colors.textMain }}>
+						{data.attestationId.slice(0, 16)}...
+					</span>
+				</div>
+			)}
 		</div>
 	);
 };

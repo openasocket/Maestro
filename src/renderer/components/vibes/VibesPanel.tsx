@@ -10,6 +10,7 @@ import { VibesModelAttribution } from './VibesModelAttribution';
 import { VibesBlameView } from './VibesBlameView';
 import { VibeCoverageView } from './VibeCoverageView';
 import { VibesReportView } from './VibesReportView';
+import { VibesKeygenWizard } from './VibesKeygenWizard';
 
 // ============================================================================
 // Sub-tab type
@@ -196,6 +197,36 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 		},
 		[projectPath, vibesData]
 	);
+
+	// Keygen wizard
+	const [showKeygenWizard, setShowKeygenWizard] = useState(false);
+
+	const handleOpenKeygenWizard = useCallback(() => {
+		setShowKeygenWizard(true);
+	}, []);
+
+	const handleKeygenWizardClose = useCallback(() => {
+		setShowKeygenWizard(false);
+	}, []);
+
+	const handleKeygenComplete = useCallback(
+		(_keyId: string) => {
+			setShowKeygenWizard(false);
+			vibesData.refresh();
+		},
+		[vibesData]
+	);
+
+	// Create attestation handler
+	const handleCreateAttestation = useCallback(async () => {
+		if (!projectPath) return;
+		try {
+			await window.maestro.vibes.attestation.attest(projectPath, { cosign: true });
+			vibesData.refresh();
+		} catch {
+			// Error will surface in the dashboard
+		}
+	}, [projectPath, vibesData]);
 
 	// Keyboard shortcut: Ctrl+Shift+R (or Cmd+Shift+R on macOS)
 	useEffect(() => {
@@ -403,6 +434,8 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 						vibesAutoInit={vibesAutoInit}
 						binaryAvailable={binaryAvailable}
 						onAssuranceLevelChange={handleAssuranceLevelChange}
+						onOpenKeygenWizard={handleOpenKeygenWizard}
+						onCreateAttestation={handleCreateAttestation}
 					/>
 				)}
 
@@ -449,6 +482,15 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 					/>
 				)}
 			</div>
+
+			{/* Keygen Wizard Modal */}
+			{showKeygenWizard && (
+				<VibesKeygenWizard
+					theme={theme}
+					onClose={handleKeygenWizardClose}
+					onComplete={handleKeygenComplete}
+				/>
+			)}
 		</div>
 	);
 };
