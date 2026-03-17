@@ -13,6 +13,7 @@ import { CodexInstrumenter } from './instrumenters/codex-instrumenter';
 import { MaestroInstrumenter } from './instrumenters/maestro-instrumenter';
 import { createEnvironmentEntry } from './vibes-annotations';
 import { isVibesInitialized, vibesInit, findVibesCheckBinary } from './vibes-bridge';
+import { getUserKeyInfo, checkKeyPermissions } from './vibes-key-manager';
 import { initVibesDirectly, backfillCommitHash, flushAll } from './vibes-io';
 import { VIBES_SETTINGS_DEFAULTS, getVibesSettingWithDefault } from '../../shared/vibes-settings';
 import type {
@@ -97,6 +98,9 @@ export class VibesCoordinator {
 
 	/** Whether the vibecheck binary missing warning has been logged this session. */
 	private vibesBinaryMissingLogged = false;
+
+	/** Whether key permissions have already been checked this session. */
+	private keyPermissionsChecked = false;
 
 	/** Sessions whose environment entry has already been updated with real model info. */
 	private environmentUpdatedSessions: Set<string> = new Set();
@@ -675,6 +679,43 @@ export class VibesCoordinator {
 			'VibesCoordinator'
 		);
 		return true;
+	}
+
+	/**
+	 * Check signing key permissions on startup (VERIFY spec).
+	 * If a key exists but has incorrect permissions, logs a warning
+	 * and sends a one-time notification to the renderer via safeSend.
+	 */
+	async checkKeyPermissionsOnStartup(): Promise<void> {
+		if (this.keyPermissionsChecked || !this.isEnabled()) {
+			return;
+		}
+		this.keyPermissionsChecked = true;
+
+		try {
+			const keyInfo = await getUserKeyInfo();
+			if (!keyInfo.exists) {
+				return;
+			}
+
+			const permCheck = await checkKeyPermissions();
+			if (!permCheck.valid) {
+				logger.warn('VIBES signing key has incorrect permissions', 'VibesCoordinator', {
+					message: permCheck.message,
+				});
+				if (this.safeSend) {
+					this.safeSend('vibes:keyPermissionsWarning', {
+						message: permCheck.message,
+					});
+				}
+			}
+		} catch (err) {
+			logger.debug(
+				'[VibesCoordinator] Failed to check key permissions on startup',
+				'VibesCoordinator',
+				{ error: String(err) }
+			);
+		}
 	}
 
 	/**

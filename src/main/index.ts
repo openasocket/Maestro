@@ -308,6 +308,16 @@ app.whenReady().then(async () => {
 		vibesCoordinator = null;
 	}
 
+	// Check VIBES signing key permissions on startup (VERIFY spec).
+	// Fire-and-forget — safeSend will deliver the warning when the renderer is ready.
+	if (vibesCoordinator) {
+		vibesCoordinator.checkKeyPermissionsOnStartup().catch((err) => {
+			logger.debug('Failed to check key permissions on startup', 'Startup', {
+				error: String(err),
+			});
+		});
+	}
+
 	// Load custom agent paths from settings
 	const allAgentConfigs = agentConfigsStore.get('configs', {});
 	const customPaths: Record<string, string> = {};

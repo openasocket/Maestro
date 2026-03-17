@@ -157,6 +157,17 @@ export function createVibesApi() {
 		},
 
 		/**
+		 * Subscribe to key permission warnings emitted on startup.
+		 * Fires once if the signing key has incorrect file permissions.
+		 * Returns a cleanup function to unsubscribe.
+		 */
+		onKeyPermissionsWarning: (callback: (payload: { message: string }) => void): (() => void) => {
+			const handler = (_: unknown, payload: { message: string }) => callback(payload);
+			ipcRenderer.on('vibes:keyPermissionsWarning', handler);
+			return () => ipcRenderer.removeListener('vibes:keyPermissionsWarning', handler);
+		},
+
+		/**
 		 * VERIFY spec: Key management and attestation sub-namespace.
 		 */
 		attestation: {

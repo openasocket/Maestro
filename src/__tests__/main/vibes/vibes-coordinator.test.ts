@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as os from 'os';
 
 import { VibesCoordinator } from '../../../main/vibes/vibes-coordinator';
-import type { VibesSettingsStore } from '../../../main/vibes/vibes-coordinator';
+import type { VibesSettingsStore, SafeSendFn } from '../../../main/vibes/vibes-coordinator';
 import {
 	readAnnotations,
 	readVibesManifest,
@@ -27,6 +27,21 @@ import type {
 	VibesPromptEntry,
 } from '../../../shared/vibes-types';
 import type { ProcessConfig } from '../../../main/process-manager/types';
+
+// Mock vibes-key-manager for startup permission checks
+vi.mock('../../../main/vibes/vibes-key-manager', () => ({
+	getUserKeyInfo: vi.fn().mockResolvedValue({ exists: false, publicKey: '', keyId: '' }),
+	checkKeyPermissions: vi.fn().mockResolvedValue({ valid: true }),
+	generateKeyPair: vi.fn(),
+	saveUserKeyPair: vi.fn(),
+	loadUserKeyPair: vi.fn(),
+	computeKeyId: vi.fn(),
+	exportPublicKey: vi.fn(),
+	buildInTotoStatement: vi.fn(),
+	buildDSSEEnvelope: vi.fn(),
+	computeAttestationId: vi.fn(),
+	computePAE: vi.fn(),
+}));
 
 // ============================================================================
 // Helpers
@@ -1828,6 +1843,126 @@ describe('vibes-coordinator', () => {
 			} finally {
 				await rm(freshDir, { recursive: true, force: true });
 			}
+		});
+	});
+
+	// ========================================================================
+	// Key Permissions Startup Check
+	// ========================================================================
+
+	describe('checkKeyPermissionsOnStartup', () => {
+		beforeEach(async () => {
+			const keyManager = await import('../../../main/vibes/vibes-key-manager');
+			vi.mocked(keyManager.getUserKeyInfo).mockClear();
+			vi.mocked(keyManager.checkKeyPermissions).mockClear();
+			// Reset default mock return values
+			vi.mocked(keyManager.getUserKeyInfo).mockResolvedValue({
+				exists: false,
+				publicKey: '',
+				keyId: '',
+			});
+			vi.mocked(keyManager.checkKeyPermissions).mockResolvedValue({ valid: true });
+		});
+
+		it('should warn and send IPC when key has incorrect permissions', async () => {
+			const { getUserKeyInfo, checkKeyPermissions } =
+				await import('../../../main/vibes/vibes-key-manager');
+			vi.mocked(getUserKeyInfo).mockResolvedValue({
+				exists: true,
+				publicKey: 'mock-pub-key',
+				keyId: 'a1b2c3d4e5f6a7b8',
+			});
+			vi.mocked(checkKeyPermissions).mockResolvedValue({
+				valid: false,
+				message:
+					'Private key permissions are 644, expected 600. Run: chmod 600 ~/.vibescheck/keys/vibescheck.key',
+			});
+
+			const safeSend = vi.fn() as unknown as SafeSendFn;
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store, safeSend });
+
+			await coordinator.checkKeyPermissionsOnStartup();
+
+			expect(safeSend).toHaveBeenCalledWith('vibes:keyPermissionsWarning', {
+				message: expect.stringContaining('644'),
+			});
+		});
+
+		it('should not warn when key has correct permissions', async () => {
+			const { getUserKeyInfo, checkKeyPermissions } =
+				await import('../../../main/vibes/vibes-key-manager');
+			vi.mocked(getUserKeyInfo).mockResolvedValue({
+				exists: true,
+				publicKey: 'mock-pub-key',
+				keyId: 'a1b2c3d4e5f6a7b8',
+			});
+			vi.mocked(checkKeyPermissions).mockResolvedValue({ valid: true });
+
+			const safeSend = vi.fn() as unknown as SafeSendFn;
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store, safeSend });
+
+			await coordinator.checkKeyPermissionsOnStartup();
+
+			expect(safeSend).not.toHaveBeenCalled();
+		});
+
+		it('should skip check when no key exists', async () => {
+			const { getUserKeyInfo, checkKeyPermissions } =
+				await import('../../../main/vibes/vibes-key-manager');
+			vi.mocked(getUserKeyInfo).mockResolvedValue({
+				exists: false,
+				publicKey: '',
+				keyId: '',
+			});
+
+			const safeSend = vi.fn() as unknown as SafeSendFn;
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store, safeSend });
+
+			await coordinator.checkKeyPermissionsOnStartup();
+
+			expect(checkKeyPermissions).not.toHaveBeenCalled();
+			expect(safeSend).not.toHaveBeenCalled();
+		});
+
+		it('should skip check when VIBES is disabled', async () => {
+			const { getUserKeyInfo } = await import('../../../main/vibes/vibes-key-manager');
+
+			const safeSend = vi.fn() as unknown as SafeSendFn;
+			const store = createMockSettingsStore({ vibesEnabled: false });
+			const coordinator = new VibesCoordinator({ settingsStore: store, safeSend });
+
+			await coordinator.checkKeyPermissionsOnStartup();
+
+			expect(getUserKeyInfo).not.toHaveBeenCalled();
+			expect(safeSend).not.toHaveBeenCalled();
+		});
+
+		it('should only check once per session (one-time)', async () => {
+			const { getUserKeyInfo, checkKeyPermissions } =
+				await import('../../../main/vibes/vibes-key-manager');
+			vi.mocked(getUserKeyInfo).mockResolvedValue({
+				exists: true,
+				publicKey: 'mock-pub-key',
+				keyId: 'a1b2c3d4e5f6a7b8',
+			});
+			vi.mocked(checkKeyPermissions).mockResolvedValue({
+				valid: false,
+				message: 'bad permissions',
+			});
+
+			const safeSend = vi.fn() as unknown as SafeSendFn;
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store, safeSend });
+
+			await coordinator.checkKeyPermissionsOnStartup();
+			await coordinator.checkKeyPermissionsOnStartup();
+			await coordinator.checkKeyPermissionsOnStartup();
+
+			// safeSend should be called only once despite multiple invocations
+			expect(safeSend).toHaveBeenCalledTimes(1);
 		});
 	});
 });

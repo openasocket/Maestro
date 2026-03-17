@@ -56,11 +56,12 @@ describe('vibes preload API', () => {
 			expect(api).toHaveProperty('clearBinaryCache');
 			expect(api).toHaveProperty('decompressReasoning');
 			expect(api).toHaveProperty('onAnnotationUpdate');
+			expect(api).toHaveProperty('onKeyPermissionsWarning');
 			expect(api).toHaveProperty('attestation');
 		});
 
-		it('should have exactly 19 top-level properties', () => {
-			expect(Object.keys(api)).toHaveLength(19);
+		it('should have exactly 20 top-level properties', () => {
+			expect(Object.keys(api)).toHaveLength(20);
 		});
 
 		it('should have attestation sub-namespace with 7 methods', () => {

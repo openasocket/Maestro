@@ -2713,6 +2713,8 @@ interface MaestroAPI {
 			}) => void
 		) => () => void;
 
+		onKeyPermissionsWarning: (callback: (payload: { message: string }) => void) => () => void;
+
 		// VERIFY spec: Key management and attestation
 		attestation: {
 			keygen: () => Promise<{ success: boolean; data?: unknown; error?: string }>;

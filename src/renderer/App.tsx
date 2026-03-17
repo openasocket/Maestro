@@ -836,6 +836,20 @@ function MaestroConsoleInner() {
 			.catch(console.error);
 	}, [addToast]);
 
+	// Check VIBES signing key permissions on startup (VERIFY spec)
+	useEffect(() => {
+		if (!window.maestro?.vibes?.onKeyPermissionsWarning) return;
+		const cleanup = window.maestro.vibes.onKeyPermissionsWarning((payload) => {
+			addToast({
+				type: 'warning',
+				title: 'VIBES Key Permissions',
+				message: payload.message,
+				duration: 15000,
+			});
+		});
+		return cleanup;
+	}, [addToast]);
+
 	// Compute map of session names to SSH remote names (for group chat participant cards)
 	const sessionSshRemoteNames = useMemo(() => {
 		const map = new Map<string, string>();
@@ -10457,7 +10471,12 @@ You are taking over this conversation. Based on the context above, provide a bri
 
 			switch (type) {
 				case 'setRightTab':
-					if (value === 'files' || value === 'history' || value === 'autorun' || value === 'vibes') {
+					if (
+						value === 'files' ||
+						value === 'history' ||
+						value === 'autorun' ||
+						value === 'vibes'
+					) {
 						setActiveRightTab(value as RightPanelTab);
 					}
 					break;
