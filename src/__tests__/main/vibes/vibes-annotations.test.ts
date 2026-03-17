@@ -571,6 +571,7 @@ describe('vibes-annotations', () => {
 			expect(annotation.command_hash).toBeNull();
 			expect(annotation.prompt_hash).toBeNull();
 			expect(annotation.reasoning_hash).toBeNull();
+			expect(annotation.decision_hash).toBeNull();
 			expect(annotation.session_id).toBeNull();
 			expect(annotation.commit_hash).toBeNull();
 		});
@@ -584,6 +585,7 @@ describe('vibes-annotations', () => {
 				commandHash: 'c'.repeat(64),
 				promptHash: 'p'.repeat(64),
 				reasoningHash: 'r'.repeat(64),
+				decisionHash: 'd'.repeat(64),
 				action: 'modify',
 				assuranceLevel: 'high',
 			});
@@ -591,6 +593,7 @@ describe('vibes-annotations', () => {
 			expect(annotation.command_hash).toBe('c'.repeat(64));
 			expect(annotation.prompt_hash).toBe('p'.repeat(64));
 			expect(annotation.reasoning_hash).toBe('r'.repeat(64));
+			expect(annotation.decision_hash).toBe('d'.repeat(64));
 		});
 
 		it('should include optional sessionId and commitHash', () => {
@@ -630,7 +633,7 @@ describe('vibes-annotations', () => {
 			}
 		});
 
-		it('should always include all 14 fields in serialized JSON', () => {
+		it('should always include all 15 fields in serialized JSON', () => {
 			const annotation = createLineAnnotation({
 				filePath: 'src/app.ts',
 				lineStart: 1,
@@ -651,6 +654,7 @@ describe('vibes-annotations', () => {
 				'command_hash',
 				'prompt_hash',
 				'reasoning_hash',
+				'decision_hash',
 				'action',
 				'timestamp',
 				'commit_hash',
@@ -660,7 +664,7 @@ describe('vibes-annotations', () => {
 			for (const key of expectedKeys) {
 				expect(json).toHaveProperty(key);
 			}
-			expect(Object.keys(json)).toHaveLength(14);
+			expect(Object.keys(json)).toHaveLength(15);
 		});
 
 		it('should support all assurance levels', () => {
@@ -704,6 +708,7 @@ describe('vibes-annotations', () => {
 			expect(annotation.command_hash).toBeUndefined();
 			expect(annotation.prompt_hash).toBeUndefined();
 			expect(annotation.reasoning_hash).toBeUndefined();
+			expect(annotation.decision_hash).toBeUndefined();
 			expect(annotation.session_id).toBeUndefined();
 			expect(annotation.commit_hash).toBeUndefined();
 		});
@@ -717,6 +722,7 @@ describe('vibes-annotations', () => {
 				commandHash: 'c'.repeat(64),
 				promptHash: 'p'.repeat(64),
 				reasoningHash: 'r'.repeat(64),
+				decisionHash: 'd'.repeat(64),
 				action: 'modify',
 				sessionId: 'session-456',
 				commitHash: 'def5678',
@@ -729,6 +735,7 @@ describe('vibes-annotations', () => {
 			expect(annotation.command_hash).toBe('c'.repeat(64));
 			expect(annotation.prompt_hash).toBe('p'.repeat(64));
 			expect(annotation.reasoning_hash).toBe('r'.repeat(64));
+			expect(annotation.decision_hash).toBe('d'.repeat(64));
 			expect(annotation.session_id).toBe('session-456');
 			expect(annotation.commit_hash).toBe('def5678');
 		});

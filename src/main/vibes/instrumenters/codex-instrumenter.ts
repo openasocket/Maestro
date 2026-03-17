@@ -298,6 +298,8 @@ export class CodexInstrumenter {
 						this.assuranceLevel !== 'low' ? this.lastPromptHashes.get(sessionId) : undefined;
 					const reasoningHash =
 						this.assuranceLevel === 'high' ? this.lastReasoningHashes.get(sessionId) : undefined;
+					const decisionHash =
+						this.assuranceLevel !== 'low' ? this.lastDecisionHashes.get(sessionId) : undefined;
 					const annotation = createLineAnnotation({
 						filePath: normalizedPath,
 						lineStart: 1,
@@ -306,6 +308,7 @@ export class CodexInstrumenter {
 						commandHash: cmdHash,
 						promptHash,
 						reasoningHash,
+						decisionHash,
 						action,
 						sessionId: session.vibesSessionId,
 						assuranceLevel: session.assuranceLevel,

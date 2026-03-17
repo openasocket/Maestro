@@ -236,6 +236,7 @@ export function createLineAnnotation(params: {
 	commandHash?: string | null;
 	promptHash?: string | null;
 	reasoningHash?: string | null;
+	decisionHash?: string | null;
 	action: VibesAction;
 	sessionId?: string | null;
 	commitHash?: string | null;
@@ -251,6 +252,7 @@ export function createLineAnnotation(params: {
 		command_hash: params.commandHash ?? null,
 		prompt_hash: params.promptHash ?? null,
 		reasoning_hash: params.reasoningHash ?? null,
+		decision_hash: params.decisionHash ?? null,
 		action: params.action,
 		timestamp: new Date().toISOString(),
 		commit_hash: params.commitHash ?? null,
@@ -277,6 +279,7 @@ export function createFunctionAnnotation(params: {
 	commandHash?: string;
 	promptHash?: string;
 	reasoningHash?: string;
+	decisionHash?: string | null;
 	action: VibesAction;
 	sessionId?: string;
 	commitHash?: string;
@@ -304,6 +307,9 @@ export function createFunctionAnnotation(params: {
 	}
 	if (params.reasoningHash !== undefined) {
 		annotation.reasoning_hash = params.reasoningHash;
+	}
+	if (params.decisionHash !== undefined) {
+		annotation.decision_hash = params.decisionHash;
 	}
 	if (params.sessionId !== undefined) {
 		annotation.session_id = params.sessionId;
