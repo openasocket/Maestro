@@ -22,7 +22,7 @@ import {
 } from 'fs/promises';
 import * as path from 'path';
 
-import { computeVibesHash } from './vibes-hash';
+import { computeVibesHashV2 } from './vibes-hash';
 
 import type {
 	VibesAssuranceLevel,
@@ -671,7 +671,7 @@ export async function flushAll(): Promise<void> {
 
 /**
  * Re-hash all manifest entries and update annotation references.
- * Required after fixing computeVibesHash to strip the `type` field.
+ * Migrates V1 hashes (which excluded `type`) to V2 (which includes `type` per spec section 6.2).
  * Idempotent — entries already matching the new hash are skipped.
  */
 export async function rehashManifest(
@@ -683,7 +683,7 @@ export async function rehashManifest(
 	let rehashedEntries = 0;
 
 	for (const [oldHash, entry] of Object.entries(manifest.entries)) {
-		const newHash = computeVibesHash(entry as unknown as Record<string, unknown>);
+		const newHash = computeVibesHashV2(entry as unknown as Record<string, unknown>);
 		if (oldHash !== newHash) {
 			hashMap.set(oldHash, newHash);
 			rehashedEntries++;

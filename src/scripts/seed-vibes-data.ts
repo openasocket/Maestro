@@ -18,7 +18,7 @@ import {
 	readAnnotations,
 	readVibesManifest,
 } from '../main/vibes/vibes-io';
-import { computeVibesHash, computeAnnotationId } from '../main/vibes/vibes-hash';
+import { computeVibesHashV2, computeAnnotationId } from '../main/vibes/vibes-hash';
 import type {
 	VibesEnvironmentEntry,
 	VibesCommandEntry,
@@ -470,22 +470,22 @@ async function main() {
 	const manifest = await readVibesManifest(PROJECT_PATH);
 
 	for (const env of environments) {
-		const hash = computeVibesHash(env);
+		const hash = computeVibesHashV2(env);
 		envHashes.push(hash);
 		manifest.entries[hash] = env;
 	}
 	for (const p of prompts) {
-		const hash = computeVibesHash(p);
+		const hash = computeVibesHashV2(p);
 		promptHashes.push(hash);
 		manifest.entries[hash] = p;
 	}
 	for (const r of reasoning) {
-		const hash = computeVibesHash(r);
+		const hash = computeVibesHashV2(r);
 		reasoningHashes.push(hash);
 		manifest.entries[hash] = r;
 	}
 	for (const c of commands) {
-		const hash = computeVibesHash(c);
+		const hash = computeVibesHashV2(c);
 		cmdHashes.push(hash);
 		manifest.entries[hash] = c;
 	}

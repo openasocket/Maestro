@@ -47,7 +47,7 @@ import {
 	computeLocCoverageFromAnnotations,
 } from '../../../main/vibes/vibes-io';
 
-import { computeVibesHash } from '../../../main/vibes/vibes-hash';
+import { computeVibesHashV2 } from '../../../main/vibes/vibes-hash';
 
 import type {
 	VibesConfig,
@@ -1243,8 +1243,8 @@ describe('vibes-io', () => {
 			const manifest = await readVibesManifest(tmpDir);
 			// Old hash should be gone
 			expect(manifest.entries[oldHash]).toBeUndefined();
-			// New hash should be the correct computeVibesHash result
-			const correctHash = computeVibesHash(envEntry as unknown as Record<string, unknown>);
+			// New hash should be the correct computeVibesHashV2 result
+			const correctHash = computeVibesHashV2(envEntry as unknown as Record<string, unknown>);
 			expect(manifest.entries[correctHash]).toEqual(envEntry);
 		});
 
@@ -1279,7 +1279,7 @@ describe('vibes-io', () => {
 			expect(result.updatedAnnotations).toBe(1);
 
 			const annotations = await readAnnotations(tmpDir);
-			const newHash = computeVibesHash(envEntry as unknown as Record<string, unknown>);
+			const newHash = computeVibesHashV2(envEntry as unknown as Record<string, unknown>);
 			expect((annotations[0] as VibesLineAnnotation).environment_hash).toBe(newHash);
 		});
 
@@ -1294,7 +1294,7 @@ describe('vibes-io', () => {
 				model_version: 'opus',
 				created_at: '2026-02-10T12:00:00Z',
 			};
-			const correctHash = computeVibesHash(envEntry as unknown as Record<string, unknown>);
+			const correctHash = computeVibesHashV2(envEntry as unknown as Record<string, unknown>);
 			await writeVibesManifest(tmpDir, {
 				standard: 'VIBES',
 				version: '1.0',
@@ -1365,8 +1365,8 @@ describe('vibes-io', () => {
 			expect(result.updatedAnnotations).toBe(2);
 
 			const manifest = await readVibesManifest(tmpDir);
-			const newHash1 = computeVibesHash(envEntry1 as unknown as Record<string, unknown>);
-			const newHash2 = computeVibesHash(envEntry2 as unknown as Record<string, unknown>);
+			const newHash1 = computeVibesHashV2(envEntry1 as unknown as Record<string, unknown>);
+			const newHash2 = computeVibesHashV2(envEntry2 as unknown as Record<string, unknown>);
 			expect(manifest.entries[newHash1]).toEqual(envEntry1);
 			expect(manifest.entries[newHash2]).toEqual(envEntry2);
 		});

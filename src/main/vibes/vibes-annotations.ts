@@ -3,7 +3,7 @@
 // along with its content-addressed hash for manifest storage.
 
 import { gzipSync } from 'zlib';
-import { computeVibesHash, computeAnnotationId } from './vibes-hash';
+import { computeVibesHashV2, computeAnnotationId } from './vibes-hash';
 import type {
 	VibesAssuranceLevel,
 	VibesAction,
@@ -48,7 +48,7 @@ export function createEnvironmentEntry(params: {
 		created_at: new Date().toISOString(),
 	};
 
-	const hash = computeVibesHash(entry as unknown as Record<string, unknown>);
+	const hash = computeVibesHashV2(entry as unknown as Record<string, unknown>);
 	return { entry, hash };
 }
 
@@ -77,7 +77,7 @@ export function createCommandEntry(params: {
 		created_at: new Date().toISOString(),
 	};
 
-	const hash = computeVibesHash(entry as unknown as Record<string, unknown>);
+	const hash = computeVibesHashV2(entry as unknown as Record<string, unknown>);
 	return { entry, hash };
 }
 
@@ -103,7 +103,7 @@ export function createPromptEntry(params: {
 		created_at: new Date().toISOString(),
 	};
 
-	const hash = computeVibesHash(entry as unknown as Record<string, unknown>);
+	const hash = computeVibesHashV2(entry as unknown as Record<string, unknown>);
 	return { entry, hash };
 }
 
@@ -154,7 +154,7 @@ export function createReasoningEntry(params: {
 		created_at: new Date().toISOString(),
 	};
 
-	const hash = computeVibesHash(entry as unknown as Record<string, unknown>);
+	const hash = computeVibesHashV2(entry as unknown as Record<string, unknown>);
 	return { entry, hash };
 }
 
@@ -183,7 +183,7 @@ export function createExternalReasoningEntry(params: {
 		created_at: new Date().toISOString(),
 	};
 
-	const hash = computeVibesHash(entry as unknown as Record<string, unknown>);
+	const hash = computeVibesHashV2(entry as unknown as Record<string, unknown>);
 	return { entry, hash };
 }
 
@@ -218,7 +218,7 @@ export function createDecisionEntry(params: {
 		created_at: new Date().toISOString(),
 	};
 
-	const hash = computeVibesHash(entry as unknown as Record<string, unknown>);
+	const hash = computeVibesHashV2(entry as unknown as Record<string, unknown>);
 	return { entry, hash };
 }
 
