@@ -9,7 +9,17 @@
 // - Per-project file locking to prevent concurrent write corruption
 // - Graceful error handling (log + never crash the agent session)
 
-import { mkdir, readFile, writeFile, appendFile, access, constants, open, rename, readdir } from 'fs/promises';
+import {
+	mkdir,
+	readFile,
+	writeFile,
+	appendFile,
+	access,
+	constants,
+	open,
+	rename,
+	readdir,
+} from 'fs/promises';
 import * as path from 'path';
 
 import { computeVibesHash } from './vibes-hash';
@@ -215,7 +225,9 @@ async function flushManifestDebounce(projectPath: string): Promise<void> {
 
 		// Drain pending entries and overwrite set
 		const entries = new Map(state.pendingEntries);
-		const overwriteHashes = state.overwriteHashes ? new Set(state.overwriteHashes) : new Set<string>();
+		const overwriteHashes = state.overwriteHashes
+			? new Set(state.overwriteHashes)
+			: new Set<string>();
 		state.pendingEntries.clear();
 		if (state.overwriteHashes) {
 			state.overwriteHashes.clear();
@@ -233,7 +245,9 @@ async function flushManifestDebounce(projectPath: string): Promise<void> {
 			// readVibesManifest() already validates, but we log an extra note
 			// when we're about to modify a manifest with an unexpected version.
 			if (manifest.version !== '1.0') {
-				logWarn(`Adding entries to manifest with version '${manifest.version}' — proceeding (forward-compat)`);
+				logWarn(
+					`Adding entries to manifest with version '${manifest.version}' — proceeding (forward-compat)`
+				);
 			}
 
 			let changed = false;
@@ -286,7 +300,7 @@ export async function ensureAuditDir(projectPath: string): Promise<void> {
 export async function writeReasoningBlob(
 	projectPath: string,
 	hash: string,
-	data: Buffer | string,
+	data: Buffer | string
 ): Promise<string> {
 	await ensureAuditDir(projectPath);
 	const blobFileName = `${hash}.blob`;
@@ -321,7 +335,9 @@ export async function readVibesConfig(projectPath: string): Promise<VibesConfig 
 			logWarn(`Config has unexpected standard: '${config.standard}' (expected 'VIBES')`);
 		}
 		if (config.standard_version !== '1.0') {
-			logWarn(`Config has unsupported standard_version: '${config.standard_version}' (expected '1.0')`);
+			logWarn(
+				`Config has unsupported standard_version: '${config.standard_version}' (expected '1.0')`
+			);
 		}
 
 		return config;
@@ -355,7 +371,23 @@ export async function readVibesManifest(projectPath: string): Promise<VibesManif
 	try {
 		await access(manifestPath, constants.F_OK);
 		const raw = await readFile(manifestPath, 'utf8');
-		const manifest = JSON.parse(raw) as VibesManifest;
+		const parsed = JSON.parse(raw);
+
+		// Handle both formats:
+		// 1. Standard VIBES envelope: { standard, version, entries: { hash: entry } }
+		// 2. Flat format (legacy/external tools): { hash: entry, hash: entry, ... }
+		let manifest: VibesManifest;
+		if (parsed.standard === 'VIBES' && parsed.entries) {
+			manifest = parsed as VibesManifest;
+		} else if (parsed.entries) {
+			// Has entries but no standard field — add envelope
+			logWarn('Manifest missing "standard" field — adding VIBES envelope');
+			manifest = { standard: 'VIBES', version: '1.0', entries: parsed.entries };
+		} else {
+			// Flat format — all top-level keys are entry hashes
+			logWarn('Manifest in flat format (no "entries" wrapper) — auto-wrapping');
+			manifest = { standard: 'VIBES', version: '1.0', entries: parsed };
+		}
 
 		// Validate standard and version — warn but don't block (fail open)
 		if (manifest.standard !== 'VIBES') {
@@ -377,7 +409,7 @@ export async function readVibesManifest(projectPath: string): Promise<VibesManif
  */
 export async function writeVibesManifest(
 	projectPath: string,
-	manifest: VibesManifest,
+	manifest: VibesManifest
 ): Promise<void> {
 	await ensureAuditDir(projectPath);
 	const manifestPath = path.join(projectPath, AUDIT_DIR, MANIFEST_FILE);
@@ -399,7 +431,7 @@ export async function writeVibesManifest(
  */
 export async function appendAnnotationImmediate(
 	projectPath: string,
-	annotation: VibesAnnotation,
+	annotation: VibesAnnotation
 ): Promise<void> {
 	return withProjectLock(projectPath, async () => {
 		try {
@@ -424,7 +456,7 @@ export async function appendAnnotationImmediate(
  */
 export async function appendAnnotation(
 	projectPath: string,
-	annotation: VibesAnnotation,
+	annotation: VibesAnnotation
 ): Promise<void> {
 	try {
 		const buf = getBuffer(projectPath);
@@ -449,7 +481,7 @@ export async function appendAnnotation(
  */
 export async function appendAnnotations(
 	projectPath: string,
-	annotations: VibesAnnotation[],
+	annotations: VibesAnnotation[]
 ): Promise<void> {
 	if (annotations.length === 0) {
 		return;
@@ -504,7 +536,7 @@ export async function readAnnotations(projectPath: string): Promise<VibesAnnotat
 export async function addManifestEntry(
 	projectPath: string,
 	hash: string,
-	entry: VibesManifestEntry,
+	entry: VibesManifestEntry
 ): Promise<void> {
 	try {
 		let state = manifestDebounces.get(projectPath);
@@ -542,7 +574,7 @@ export async function addManifestEntry(
 export async function addManifestEntryImmediate(
 	projectPath: string,
 	hash: string,
-	entry: VibesManifestEntry,
+	entry: VibesManifestEntry
 ): Promise<void> {
 	try {
 		await ensureAuditDir(projectPath);
@@ -568,7 +600,7 @@ export async function addManifestEntryImmediate(
 export async function updateManifestEntry(
 	projectPath: string,
 	hash: string,
-	entry: VibesManifestEntry,
+	entry: VibesManifestEntry
 ): Promise<void> {
 	try {
 		let state = manifestDebounces.get(projectPath);
@@ -616,7 +648,7 @@ export async function flushAll(): Promise<void> {
 		manifestPromises.push(
 			flushManifestDebounce(projectPath).catch((err) => {
 				logWarn(`flushAll: manifest flush failed for ${projectPath}`, err);
-			}),
+			})
 		);
 	}
 	await Promise.all(manifestPromises);
@@ -627,7 +659,7 @@ export async function flushAll(): Promise<void> {
 		annotationPromises.push(
 			flushAnnotationBuffer(projectPath).catch((err) => {
 				logWarn(`flushAll: annotation flush failed for ${projectPath}`, err);
-			}),
+			})
 		);
 	}
 	await Promise.all(annotationPromises);
@@ -642,7 +674,9 @@ export async function flushAll(): Promise<void> {
  * Required after fixing computeVibesHash to strip the `type` field.
  * Idempotent — entries already matching the new hash are skipped.
  */
-export async function rehashManifest(projectPath: string): Promise<{ rehashedEntries: number; updatedAnnotations: number }> {
+export async function rehashManifest(
+	projectPath: string
+): Promise<{ rehashedEntries: number; updatedAnnotations: number }> {
 	const manifest = await readVibesManifest(projectPath);
 	const hashMap = new Map<string, string>(); // oldHash → newHash
 	const newEntries: Record<string, VibesManifestEntry> = {};
@@ -708,7 +742,7 @@ export async function initVibesDirectly(
 		assuranceLevel: VibesAssuranceLevel;
 		trackedExtensions?: string[];
 		excludePatterns?: string[];
-	},
+	}
 ): Promise<{ success: boolean; error?: string }> {
 	try {
 		await ensureAuditDir(projectPath);
@@ -719,8 +753,19 @@ export async function initVibesDirectly(
 			assurance_level: config.assuranceLevel,
 			project_name: config.projectName,
 			tracked_extensions: config.trackedExtensions ?? [
-				'.ts', '.tsx', '.js', '.jsx', '.py', '.rs',
-				'.go', '.java', '.c', '.cpp', '.rb', '.swift', '.kt',
+				'.ts',
+				'.tsx',
+				'.js',
+				'.jsx',
+				'.py',
+				'.rs',
+				'.go',
+				'.java',
+				'.c',
+				'.cpp',
+				'.rb',
+				'.swift',
+				'.kt',
 			],
 			exclude_patterns: config.excludePatterns ?? [
 				'**/node_modules/**',
@@ -783,7 +828,7 @@ export async function initVibesDirectly(
 export async function backfillCommitHash(
 	projectPath: string,
 	commitHash: string,
-	sessionId?: string,
+	sessionId?: string
 ): Promise<number> {
 	// Flush any pending buffered annotations first so we operate on
 	// the complete set of annotations on disk.
@@ -819,9 +864,8 @@ export async function backfillCommitHash(
 				// Only backfill line and function annotations (they have commit_hash)
 				if (annotation.type === 'line' || annotation.type === 'function') {
 					const hasCommitHash = 'commit_hash' in annotation && annotation.commit_hash;
-					const matchesSession = !sessionId || (
-						'session_id' in annotation && annotation.session_id === sessionId
-					);
+					const matchesSession =
+						!sessionId || ('session_id' in annotation && annotation.session_id === sessionId);
 
 					if (!hasCommitHash && matchesSession) {
 						(annotation as any).commit_hash = commitHash;
@@ -869,9 +913,7 @@ export async function computeStatsFromAnnotations(projectPath: string): Promise<
 	const manifest = await readVibesManifest(projectPath);
 
 	// Count line/function annotations
-	const lineAnnotations = annotations.filter(
-		(a) => a.type === 'line' || a.type === 'function',
-	);
+	const lineAnnotations = annotations.filter((a) => a.type === 'line' || a.type === 'function');
 
 	// Unique file paths from line annotations
 	const coveredFiles = new Set<string>();
@@ -909,7 +951,7 @@ export async function computeStatsFromAnnotations(projectPath: string): Promise<
 			const trackedFiles = await scanTrackedFiles(
 				projectPath,
 				config.tracked_extensions,
-				config.exclude_patterns ?? [],
+				config.exclude_patterns ?? []
 			);
 			if (trackedFiles.length > 0) {
 				totalTrackedFiles = trackedFiles.length;
@@ -923,7 +965,8 @@ export async function computeStatsFromAnnotations(projectPath: string): Promise<
 		total_annotations: lineAnnotations.length,
 		files_covered: filesCovered,
 		total_tracked_files: totalTrackedFiles,
-		coverage_percent: totalTrackedFiles > 0 ? Math.round((filesCovered / totalTrackedFiles) * 100) : 0,
+		coverage_percent:
+			totalTrackedFiles > 0 ? Math.round((filesCovered / totalTrackedFiles) * 100) : 0,
 		active_sessions: activeSessions,
 		contributing_models: modelNames.size,
 		assurance_level: config?.assurance_level ?? 'low',
@@ -934,13 +977,15 @@ export async function computeStatsFromAnnotations(projectPath: string): Promise<
  * Extract session records from annotations.
  * Used as fallback when the vibecheck CLI binary is not installed.
  */
-export async function extractSessionsFromAnnotations(projectPath: string): Promise<Array<{
-	session_id: string;
-	event: string;
-	timestamp: string;
-	agent_type?: string;
-	annotation_count: number;
-}>> {
+export async function extractSessionsFromAnnotations(projectPath: string): Promise<
+	Array<{
+		session_id: string;
+		event: string;
+		timestamp: string;
+		agent_type?: string;
+		annotation_count: number;
+	}>
+> {
 	const annotations = await readAnnotations(projectPath);
 
 	// Count annotations per session
@@ -982,13 +1027,15 @@ export async function extractSessionsFromAnnotations(projectPath: string): Promi
  * Extract model information from the manifest.
  * Used as fallback when the vibecheck CLI binary is not installed.
  */
-export async function extractModelsFromManifest(projectPath: string): Promise<Array<{
-	model_name: string;
-	model_version: string;
-	tool_name: string;
-	annotation_count: number;
-	percentage: number;
-}>> {
+export async function extractModelsFromManifest(projectPath: string): Promise<
+	Array<{
+		model_name: string;
+		model_version: string;
+		tool_name: string;
+		annotation_count: number;
+		percentage: number;
+	}>
+> {
 	const manifest = await readVibesManifest(projectPath);
 	const annotations = await readAnnotations(projectPath);
 
@@ -1002,12 +1049,15 @@ export async function extractModelsFromManifest(projectPath: string): Promise<Ar
 	}
 
 	// Group by model name (multiple env hashes can map to same model)
-	const modelMap = new Map<string, {
-		model_name: string;
-		model_version: string;
-		tool_name: string;
-		count: number;
-	}>();
+	const modelMap = new Map<
+		string,
+		{
+			model_name: string;
+			model_version: string;
+			tool_name: string;
+			count: number;
+		}
+	>();
 
 	for (const [hash, entry] of Object.entries(manifest.entries)) {
 		if (entry.type === 'environment') {
@@ -1044,30 +1094,31 @@ export async function extractModelsFromManifest(projectPath: string): Promise<Ar
  */
 export async function computeBlameFromAnnotations(
 	projectPath: string,
-	filePath: string,
-): Promise<Array<{
-	line_start: number;
-	line_end: number;
-	action: string;
-	model_name: string;
-	model_version: string;
-	tool_name: string;
-	timestamp: string;
-	session_id: string | null;
-}>> {
+	filePath: string
+): Promise<
+	Array<{
+		line_start: number;
+		line_end: number;
+		action: string;
+		model_name: string;
+		model_version: string;
+		tool_name: string;
+		timestamp: string;
+		session_id: string | null;
+	}>
+> {
 	const annotations = await readAnnotations(projectPath);
 	const manifest = await readVibesManifest(projectPath);
 
 	// Filter for line annotations matching the file
 	const fileAnnotations = annotations.filter(
-		(a): a is VibesLineAnnotation =>
-			a.type === 'line' && a.file_path === filePath,
+		(a): a is VibesLineAnnotation => a.type === 'line' && a.file_path === filePath
 	);
 
 	// Resolve environment info and build blame entries
 	const blame = fileAnnotations.map((a) => {
 		const envEntry = manifest.entries[a.environment_hash];
-		const env = envEntry?.type === 'environment' ? envEntry as VibesEnvironmentEntry : undefined;
+		const env = envEntry?.type === 'environment' ? (envEntry as VibesEnvironmentEntry) : undefined;
 
 		return {
 			line_start: a.line_start,
@@ -1091,13 +1142,13 @@ export async function computeBlameFromAnnotations(
  * Compute file coverage from annotations.
  * Used as fallback when the vibecheck CLI binary is not installed.
  */
-export async function computeCoverageFromAnnotations(
-	projectPath: string,
-): Promise<Array<{
-	file_path: string;
-	coverage_status: 'full' | 'partial' | 'uncovered';
-	annotation_count: number;
-}>> {
+export async function computeCoverageFromAnnotations(projectPath: string): Promise<
+	Array<{
+		file_path: string;
+		coverage_status: 'full' | 'partial' | 'uncovered';
+		annotation_count: number;
+	}>
+> {
 	const annotations = await readAnnotations(projectPath);
 	const config = await readVibesConfig(projectPath);
 
@@ -1126,7 +1177,11 @@ export async function computeCoverageFromAnnotations(
 
 	// Try to find uncovered files from tracked extensions
 	if (config?.tracked_extensions && config.tracked_extensions.length > 0) {
-		const trackedFiles = await scanTrackedFiles(projectPath, config.tracked_extensions, config.exclude_patterns ?? []);
+		const trackedFiles = await scanTrackedFiles(
+			projectPath,
+			config.tracked_extensions,
+			config.exclude_patterns ?? []
+		);
 		for (const fp of trackedFiles) {
 			if (!fileCounts.has(fp)) {
 				results.push({ file_path: fp, coverage_status: 'uncovered', annotation_count: 0 });
@@ -1136,7 +1191,11 @@ export async function computeCoverageFromAnnotations(
 
 	// Sort: full first, then partial, then uncovered, then by path
 	const statusOrder = { full: 0, partial: 1, uncovered: 2 };
-	results.sort((a, b) => statusOrder[a.coverage_status] - statusOrder[b.coverage_status] || a.file_path.localeCompare(b.file_path));
+	results.sort(
+		(a, b) =>
+			statusOrder[a.coverage_status] - statusOrder[b.coverage_status] ||
+			a.file_path.localeCompare(b.file_path)
+	);
 
 	return results;
 }
@@ -1145,9 +1204,7 @@ export async function computeCoverageFromAnnotations(
  * Compute Lines of Code (LOC) coverage from annotations.
  * Counts unique annotated lines vs total lines across all tracked files.
  */
-export async function computeLocCoverageFromAnnotations(
-	projectPath: string,
-): Promise<{
+export async function computeLocCoverageFromAnnotations(projectPath: string): Promise<{
 	totalLines: number;
 	annotatedLines: number;
 	coveragePercent: number;
@@ -1179,7 +1236,11 @@ export async function computeLocCoverageFromAnnotations(
 	// Determine tracked files
 	let trackedFiles: string[] = [];
 	if (config?.tracked_extensions && config.tracked_extensions.length > 0) {
-		trackedFiles = await scanTrackedFiles(projectPath, config.tracked_extensions, config.exclude_patterns ?? []);
+		trackedFiles = await scanTrackedFiles(
+			projectPath,
+			config.tracked_extensions,
+			config.exclude_patterns ?? []
+		);
 	}
 
 	// Include any annotated files not already in tracked list
@@ -1222,7 +1283,9 @@ export async function computeLocCoverageFromAnnotations(
 	}
 
 	// Sort by coverage percent descending, then by path
-	files.sort((a, b) => b.coverage_percent - a.coverage_percent || a.file_path.localeCompare(b.file_path));
+	files.sort(
+		(a, b) => b.coverage_percent - a.coverage_percent || a.file_path.localeCompare(b.file_path)
+	);
 
 	return {
 		totalLines,
@@ -1239,7 +1302,7 @@ export async function computeLocCoverageFromAnnotations(
 async function scanTrackedFiles(
 	projectPath: string,
 	trackedExtensions: string[],
-	excludePatterns: string[],
+	excludePatterns: string[]
 ): Promise<string[]> {
 	const results: string[] = [];
 	const extSet = new Set(trackedExtensions);

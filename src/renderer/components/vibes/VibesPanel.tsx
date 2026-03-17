@@ -85,7 +85,7 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 		if (liveAnnotationCount === 0) return;
 		const timer = setTimeout(() => vibesData.refresh(), 2000);
 		return () => clearTimeout(timer);
-	}, [liveAnnotationCount]);  
+	}, [liveAnnotationCount]);
 
 	// Check vibecheck binary availability on mount and when settings change
 	useEffect(() => {
@@ -419,7 +419,8 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 					<VibesModelAttribution
 						theme={theme}
 						models={vibesData.models}
-						isLoading={vibesData.isLoading}
+						isLoading={vibesData.isLoadingModels}
+						onMount={vibesData.loadModels}
 					/>
 				)}
 

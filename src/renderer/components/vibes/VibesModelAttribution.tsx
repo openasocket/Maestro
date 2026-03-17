@@ -1,12 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import {
-	Cpu,
-	Award,
-	BarChart3,
-	Clock,
-	Search,
-	ArrowUpDown,
-} from 'lucide-react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { Cpu, Award, BarChart3, Clock, Search, ArrowUpDown } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { VibesModelInfo } from '../../hooks';
 
@@ -18,6 +11,8 @@ interface VibesModelAttributionProps {
 	theme: Theme;
 	models: VibesModelInfo[];
 	isLoading: boolean;
+	/** Called when component mounts — triggers lazy data load. */
+	onMount?: () => void;
 }
 
 // ============================================================================
@@ -53,24 +48,29 @@ export const VibesModelAttribution: React.FC<VibesModelAttributionProps> = ({
 	theme,
 	models,
 	isLoading,
+	onMount,
 }) => {
+	// Trigger lazy load on first mount
+	useEffect(() => {
+		onMount?.();
+	}, []);  
 	const [searchQuery, setSearchQuery] = useState('');
 	const [sortBy, setSortBy] = useState<SortField>('count');
 	const [showAll, setShowAll] = useState(false);
 
 	const sortedModels = useMemo(
 		() => [...models].sort((a, b) => b.annotationCount - a.annotationCount),
-		[models],
+		[models]
 	);
 
 	const totalAnnotations = useMemo(
 		() => models.reduce((sum, m) => sum + m.annotationCount, 0),
-		[models],
+		[models]
 	);
 
 	const primaryModel = useMemo(
 		() => (sortedModels.length > 0 ? sortedModels[0] : null),
-		[sortedModels],
+		[sortedModels]
 	);
 
 	// Filtered and re-sorted models for the list
@@ -79,7 +79,7 @@ export const VibesModelAttribution: React.FC<VibesModelAttributionProps> = ({
 		if (searchQuery) {
 			const q = searchQuery.toLowerCase();
 			filtered = filtered.filter(
-				(m) => m.modelName.toLowerCase().includes(q) || (m.toolName ?? '').toLowerCase().includes(q),
+				(m) => m.modelName.toLowerCase().includes(q) || (m.toolName ?? '').toLowerCase().includes(q)
 			);
 		}
 		filtered.sort((a, b) => {
@@ -93,7 +93,7 @@ export const VibesModelAttribution: React.FC<VibesModelAttributionProps> = ({
 
 	const maxPercentage = useMemo(
 		() => (displayModels.length > 0 ? Math.max(...displayModels.map((m) => m.percentage)) : 0),
-		[displayModels],
+		[displayModels]
 	);
 
 	// ========================================================================
@@ -123,7 +123,8 @@ export const VibesModelAttribution: React.FC<VibesModelAttributionProps> = ({
 					No models recorded
 				</span>
 				<span className="text-xs max-w-xs" style={{ color: theme.colors.textDim }}>
-					Model attribution data will appear here once AI agents have contributed annotations to this project.
+					Model attribution data will appear here once AI agents have contributed annotations to
+					this project.
 				</span>
 			</div>
 		);
@@ -173,7 +174,8 @@ export const VibesModelAttribution: React.FC<VibesModelAttributionProps> = ({
 								{primaryModel.modelName}
 								{primaryModel.modelVersion && (
 									<span className="font-normal" style={{ color: theme.colors.textDim }}>
-										{' '}v{primaryModel.modelVersion}
+										{' '}
+										v{primaryModel.modelVersion}
 									</span>
 								)}
 							</span>
@@ -224,7 +226,11 @@ export const VibesModelAttribution: React.FC<VibesModelAttributionProps> = ({
 							/>
 						</div>
 						<button
-							onClick={() => setSortBy((prev) => (prev === 'count' ? 'name' : prev === 'name' ? 'percentage' : 'count'))}
+							onClick={() =>
+								setSortBy((prev) =>
+									prev === 'count' ? 'name' : prev === 'name' ? 'percentage' : 'count'
+								)
+							}
 							className="flex items-center gap-1 px-2 py-1 rounded text-[10px] shrink-0 transition-opacity hover:opacity-80"
 							style={{
 								backgroundColor: theme.colors.bgActivity,
@@ -301,10 +307,7 @@ const SummaryCard: React.FC<SummaryCardProps> = ({ theme, icon, label, value }) 
 				{label}
 			</span>
 		</div>
-		<span
-			className="text-lg font-bold tabular-nums"
-			style={{ color: theme.colors.textMain }}
-		>
+		<span className="text-lg font-bold tabular-nums" style={{ color: theme.colors.textMain }}>
 			{value}
 		</span>
 	</div>
@@ -342,10 +345,7 @@ const ModelRow: React.FC<ModelRowProps> = ({ theme, model, maxPercentage }) => {
 					{model.modelName}
 				</span>
 				{model.modelVersion && (
-					<span
-						className="text-[10px] shrink-0"
-						style={{ color: theme.colors.textDim }}
-					>
+					<span className="text-[10px] shrink-0" style={{ color: theme.colors.textDim }}>
 						v{model.modelVersion}
 					</span>
 				)}
@@ -377,10 +377,7 @@ const ModelRow: React.FC<ModelRowProps> = ({ theme, model, maxPercentage }) => {
 				</div>
 
 				{/* Annotation count and percentage */}
-				<span
-					className="text-[10px] tabular-nums shrink-0"
-					style={{ color: theme.colors.textDim }}
-				>
+				<span className="text-[10px] tabular-nums shrink-0" style={{ color: theme.colors.textDim }}>
 					{model.annotationCount} ann
 				</span>
 				<span

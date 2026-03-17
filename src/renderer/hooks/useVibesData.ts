@@ -61,8 +61,12 @@ export interface UseVibesDataReturn {
 	annotations: VibesAnnotation[];
 	/** Session list for this project. */
 	sessions: VibesSessionInfo[];
-	/** Contributing model list for this project. */
+	/** Contributing model list for this project (lazy-loaded). */
 	models: VibesModelInfo[];
+	/** Whether model data is loading (separate from main isLoading). */
+	isLoadingModels: boolean;
+	/** Trigger lazy-load of model data (call when Models tab is opened). */
+	loadModels: () => void;
 	/** Whether data is currently being fetched. */
 	isLoading: boolean;
 	/** Error message if a fetch failed, null otherwise. */
@@ -161,7 +165,9 @@ function parseAnnotations(raw: string | undefined): VibesAnnotation[] {
 		}
 		return list
 			.slice(0, ANNOTATION_LIMIT)
-			.map((entry) => normalizeAnnotation(entry as Record<string, unknown>)) as unknown as VibesAnnotation[];
+			.map((entry) =>
+				normalizeAnnotation(entry as Record<string, unknown>)
+			) as unknown as VibesAnnotation[];
 	} catch {
 		return [];
 	}
@@ -172,17 +178,21 @@ export function parseSessions(raw: string | object | undefined): VibesSessionInf
 	if (!raw) return [];
 	try {
 		const data = typeof raw === 'object' ? raw : JSON.parse(raw);
-		const list = Array.isArray(data) ? data : data.sessions ?? [];
+		const list = Array.isArray(data) ? data : (data.sessions ?? []);
 		// Filter out 'end' events so each session only appears once
 		const filtered = list.filter((s: Record<string, unknown>) => s.event !== 'end');
-		return filtered.map((s: Record<string, unknown>) => ({
-			sessionId: (s.session_id ?? s.sessionId ?? '') as string,
-			startTime: (s.start ?? s.start_time ?? s.startTime ?? s.timestamp ?? '') as string,
-			endTime: (s.end ?? s.end_time ?? s.endTime ?? undefined) as string | undefined,
-			annotationCount: (s.annotation_count ?? s.annotationCount ?? 0) as number,
-			toolName: (s.tool_name ?? s.toolName ?? s.agent_type ?? undefined) as string | undefined,
-			modelName: (s.environment ?? s.model_name ?? s.modelName ?? undefined) as string | undefined,
-		})).filter((s: VibesSessionInfo) => s.sessionId);
+		return filtered
+			.map((s: Record<string, unknown>) => ({
+				sessionId: (s.session_id ?? s.sessionId ?? '') as string,
+				startTime: (s.start ?? s.start_time ?? s.startTime ?? s.timestamp ?? '') as string,
+				endTime: (s.end ?? s.end_time ?? s.endTime ?? undefined) as string | undefined,
+				annotationCount: (s.annotation_count ?? s.annotationCount ?? 0) as number,
+				toolName: (s.tool_name ?? s.toolName ?? s.agent_type ?? undefined) as string | undefined,
+				modelName: (s.environment ?? s.model_name ?? s.modelName ?? undefined) as
+					| string
+					| undefined,
+			}))
+			.filter((s: VibesSessionInfo) => s.sessionId);
 	} catch (e) {
 		console.warn('useVibesData: parseSessions failed', e, raw);
 		return [];
@@ -194,7 +204,7 @@ export function parseModels(raw: string | object | undefined): VibesModelInfo[] 
 	if (!raw) return [];
 	try {
 		const data = typeof raw === 'object' ? raw : JSON.parse(raw);
-		const list = Array.isArray(data) ? data : data.models ?? [];
+		const list = Array.isArray(data) ? data : (data.models ?? []);
 		const models = list.map((m: Record<string, unknown>) => ({
 			modelName: (m.model_name ?? m.modelName ?? 'Unknown') as string,
 			modelVersion: (m.model_version ?? m.modelVersion ?? undefined) as string | undefined,
@@ -203,7 +213,10 @@ export function parseModels(raw: string | object | undefined): VibesModelInfo[] 
 			percentage: (m.percentage ?? 0) as number,
 		}));
 		// Compute percentages if not provided by the backend (vibecheck CLI omits them)
-		const totalAnnotations = models.reduce((sum: number, m: VibesModelInfo) => sum + m.annotationCount, 0);
+		const totalAnnotations = models.reduce(
+			(sum: number, m: VibesModelInfo) => sum + m.annotationCount,
+			0
+		);
 		if (totalAnnotations > 0) {
 			for (const m of models) {
 				if (m.percentage === 0 && m.annotationCount > 0) {
@@ -240,33 +253,33 @@ export function parseModels(raw: string | object | undefined): VibesModelInfo[] 
  */
 export function useVibesData(
 	projectPath: string | undefined,
-	enabled: boolean = true,
+	enabled: boolean = true
 ): UseVibesDataReturn {
 	const [isInitialized, setIsInitialized] = useState(false);
 	const [stats, setStats] = useState<VibesStatsData | null>(null);
 	const [annotations, setAnnotations] = useState<VibesAnnotation[]>([]);
 	const [sessions, setSessions] = useState<VibesSessionInfo[]>([]);
 	const [models, setModels] = useState<VibesModelInfo[]>([]);
+	const [isLoadingModels, setIsLoadingModels] = useState(false);
+	const modelsLoadedRef = useRef(false);
 	const [isLoading, setIsLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
 	const mountedRef = useRef(true);
 
-	// Core data fetch — calls all VIBES IPC endpoints in parallel.
+	// Core data fetch — calls VIBES IPC endpoints in parallel (excludes models for perf).
 	const fetchData = useCallback(async () => {
 		if (!projectPath || !enabled) return;
 
 		setError(null);
 
 		try {
-			const [initResult, statsResult, logResult, sessionsResult, modelsResult] =
-				await Promise.all([
-					window.maestro.vibes.isInitialized(projectPath),
-					window.maestro.vibes.getStats(projectPath),
-					window.maestro.vibes.getLog(projectPath, { limit: ANNOTATION_LIMIT, json: true }),
-					window.maestro.vibes.getSessions(projectPath),
-					window.maestro.vibes.getModels(projectPath),
-				]);
+			const [initResult, statsResult, logResult, sessionsResult] = await Promise.all([
+				window.maestro.vibes.isInitialized(projectPath),
+				window.maestro.vibes.getStats(projectPath),
+				window.maestro.vibes.getLog(projectPath, { limit: ANNOTATION_LIMIT, json: true }),
+				window.maestro.vibes.getSessions(projectPath),
+			]);
 
 			if (!mountedRef.current) return;
 
@@ -274,7 +287,6 @@ export function useVibesData(
 			setStats(parseStats(statsResult.data));
 			setAnnotations(parseAnnotations(logResult.data));
 			setSessions(parseSessions(sessionsResult.data));
-			setModels(parseModels(modelsResult.data));
 		} catch (err) {
 			console.error('useVibesData: fetch failed', err);
 			if (mountedRef.current) {
@@ -286,6 +298,25 @@ export function useVibesData(
 			}
 		}
 	}, [projectPath, enabled]);
+
+	// Lazy-load models — called when the Models sub-tab is first viewed.
+	const loadModels = useCallback(async () => {
+		if (!projectPath || !enabled || isLoadingModels) return;
+		setIsLoadingModels(true);
+		try {
+			const modelsResult = await window.maestro.vibes.getModels(projectPath);
+			if (mountedRef.current) {
+				setModels(parseModels(modelsResult.data));
+				modelsLoadedRef.current = true;
+			}
+		} catch (err) {
+			console.error('useVibesData: models fetch failed', err);
+		} finally {
+			if (mountedRef.current) {
+				setIsLoadingModels(false);
+			}
+		}
+	}, [projectPath, enabled, isLoadingModels]);
 
 	// Manual refresh trigger.
 	const refresh = useCallback(() => {
@@ -320,7 +351,7 @@ export function useVibesData(
 				}
 			}
 		},
-		[projectPath, fetchData],
+		[projectPath, fetchData]
 	);
 
 	// Initial fetch and auto-refresh interval.
@@ -355,6 +386,7 @@ export function useVibesData(
 		setAnnotations([]);
 		setSessions([]);
 		setModels([]);
+		modelsLoadedRef.current = false;
 		setIsLoading(true);
 		setError(null);
 	}, [projectPath]);
@@ -366,11 +398,25 @@ export function useVibesData(
 			annotations,
 			sessions,
 			models,
+			isLoadingModels,
+			loadModels,
 			isLoading,
 			error,
 			refresh,
 			initialize,
 		}),
-		[isInitialized, stats, annotations, sessions, models, isLoading, error, refresh, initialize],
+		[
+			isInitialized,
+			stats,
+			annotations,
+			sessions,
+			models,
+			isLoadingModels,
+			loadModels,
+			isLoading,
+			error,
+			refresh,
+			initialize,
+		]
 	);
 }
