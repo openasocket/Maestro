@@ -1005,10 +1005,17 @@ describe('VibesDashboard', () => {
 		mockVerifyAttestation.mockResolvedValue({
 			success: true,
 			data: {
+				valid: true,
 				trustTier: 'tool-corroborated',
-				signatures: [{ keyId: 'a1b2c3d4e5f6a7b8', type: 'User', valid: true }],
-				subjects: [{ name: 'manifest.json', match: true }],
+				signatures: [
+					{ keyid: 'a1b2c3d4e5f6a7b8', keytype: 'user', valid: true },
+					{ keyid: 'maestro12345678', keytype: 'tool_provider', valid: true },
+				],
+				fileIntegrity: [
+					{ name: 'manifest.json', declaredHash: 'abc123', actualHash: 'abc123', matches: true },
+				],
 				attestationId: '7f3a2b1cabcd1234',
+				issues: [],
 			},
 		});
 
@@ -1063,6 +1070,243 @@ describe('VibesDashboard', () => {
 		await waitFor(() => {
 			expect(screen.getByTestId('verification-error')).toBeTruthy();
 			expect(screen.getByText('No attestation found')).toBeTruthy();
+		});
+	});
+
+	it('shows user and tool_provider signature labels in verification result', async () => {
+		mockGetKeyInfo.mockResolvedValue({
+			success: true,
+			data: { keyId: 'a1b2c3d4e5f6a7b8' },
+		});
+		mockVerifyAttestation.mockResolvedValue({
+			success: true,
+			data: {
+				valid: true,
+				trustTier: 'tool-corroborated',
+				signatures: [
+					{ keyid: 'a1b2c3d4e5f6a7b8', keytype: 'user', valid: true },
+					{ keyid: 'maestro12345678', keytype: 'tool_provider', valid: true },
+				],
+				fileIntegrity: [],
+				attestationId: 'abc123',
+				issues: [],
+			},
+		});
+
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData()}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('verify-attestation-btn')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('verify-attestation-btn'));
+
+		await waitFor(() => {
+			expect(screen.getByTestId('verification-result')).toBeTruthy();
+			// Check formatted keytype labels
+			expect(screen.getByText(/User \(a1b2c3d4\.\.\.\)/)).toBeTruthy();
+			expect(screen.getByText(/Tool Provider \(maestro1\.\.\.\)/)).toBeTruthy();
+			// Both should show "valid"
+			const validLabels = screen.getAllByText('valid');
+			expect(validLabels.length).toBe(2);
+		});
+	});
+
+	it('shows MODIFIED files with hash details in verification result', async () => {
+		mockGetKeyInfo.mockResolvedValue({
+			success: true,
+			data: { keyId: 'a1b2c3d4e5f6a7b8' },
+		});
+		mockVerifyAttestation.mockResolvedValue({
+			success: true,
+			data: {
+				valid: false,
+				trustTier: 'self-attested',
+				signatures: [{ keyid: 'a1b2c3d4e5f6a7b8', keytype: 'user', valid: true }],
+				fileIntegrity: [
+					{
+						name: 'manifest.json',
+						declaredHash: 'aabbccdd1122',
+						actualHash: 'aabbccdd1122',
+						matches: true,
+					},
+					{
+						name: 'annotations.jsonl',
+						declaredHash: 'a1b2c3d4e5f6',
+						actualHash: 'd4e5f6a7b8c9',
+						matches: false,
+					},
+					{
+						name: 'config.json',
+						declaredHash: 'deadbeef1234',
+						actualHash: 'deadbeef1234',
+						matches: true,
+					},
+				],
+				attestationId: '7f3a2b1cabcd1234',
+				issues: ['File annotations.jsonl hash mismatch'],
+			},
+		});
+
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData()}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('verify-attestation-btn')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('verify-attestation-btn'));
+
+		await waitFor(() => {
+			expect(screen.getByTestId('verification-result')).toBeTruthy();
+			// Two matching files
+			const matchLabels = screen.getAllByText('hash matches');
+			expect(matchLabels.length).toBe(2);
+			// One modified file
+			expect(screen.getByText('MODIFIED since attestation')).toBeTruthy();
+			// Hash details shown for modified file
+			expect(screen.getByText(/Declared: a1b2c3d4e5f6/)).toBeTruthy();
+			expect(screen.getByText(/Actual: d4e5f6a7b8c9/)).toBeTruthy();
+		});
+	});
+
+	it('shows INVALID signature for failed verification', async () => {
+		mockGetKeyInfo.mockResolvedValue({
+			success: true,
+			data: { keyId: 'a1b2c3d4e5f6a7b8' },
+		});
+		mockVerifyAttestation.mockResolvedValue({
+			success: true,
+			data: {
+				valid: false,
+				trustTier: 'none',
+				signatures: [
+					{
+						keyid: 'a1b2c3d4e5f6a7b8',
+						keytype: 'user',
+						valid: false,
+						error: 'Signature verification failed',
+					},
+				],
+				fileIntegrity: [],
+				attestationId: 'deadbeef',
+				issues: ['User signature failed verification'],
+			},
+		});
+
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData()}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('verify-attestation-btn')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('verify-attestation-btn'));
+
+		await waitFor(() => {
+			expect(screen.getByTestId('verification-result')).toBeTruthy();
+			expect(screen.getByText('INVALID')).toBeTruthy();
+		});
+	});
+
+	it('shows attestation ID in verification result', async () => {
+		mockGetKeyInfo.mockResolvedValue({
+			success: true,
+			data: { keyId: 'a1b2c3d4e5f6a7b8' },
+		});
+		mockVerifyAttestation.mockResolvedValue({
+			success: true,
+			data: {
+				valid: true,
+				trustTier: 'self-attested',
+				signatures: [{ keyid: 'a1b2c3d4e5f6a7b8', keytype: 'user', valid: true }],
+				fileIntegrity: [],
+				attestationId: '7f3a2b1cabcd12345678abcdef',
+				issues: [],
+			},
+		});
+
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData()}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('verify-attestation-btn')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('verify-attestation-btn'));
+
+		await waitFor(() => {
+			expect(screen.getByTestId('verification-result')).toBeTruthy();
+			// Attestation ID truncated to 16 chars
+			expect(screen.getByText('7f3a2b1cabcd1234...')).toBeTruthy();
+			expect(screen.getByText('Attestation ID:')).toBeTruthy();
+		});
+	});
+
+	it('shows "Verification Result" header in result display', async () => {
+		mockGetKeyInfo.mockResolvedValue({
+			success: true,
+			data: { keyId: 'a1b2c3d4e5f6a7b8' },
+		});
+		mockVerifyAttestation.mockResolvedValue({
+			success: true,
+			data: {
+				valid: true,
+				trustTier: 'self-attested',
+				signatures: [{ keyid: 'a1b2c3d4e5f6a7b8', keytype: 'user', valid: true }],
+				fileIntegrity: [],
+				attestationId: 'abc123',
+				issues: [],
+			},
+		});
+
+		render(
+			<VibesDashboard
+				theme={testTheme}
+				projectPath="/test/project"
+				vibesData={createMockVibesData()}
+				vibesEnabled={true}
+				vibesAssuranceLevel="medium"
+			/>
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('verify-attestation-btn')).toBeTruthy();
+		});
+
+		fireEvent.click(screen.getByTestId('verify-attestation-btn'));
+
+		await waitFor(() => {
+			expect(screen.getByText('Verification Result')).toBeTruthy();
 		});
 	});
 

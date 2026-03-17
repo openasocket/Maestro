@@ -1321,6 +1321,12 @@ interface VerificationResultDisplayProps {
 	result: { show: boolean; data: unknown; error?: string };
 }
 
+/** Format keytype label for display. */
+const KEYTYPE_LABELS: Record<string, string> = {
+	user: 'User',
+	tool_provider: 'Tool Provider',
+};
+
 const VerificationResultDisplay: React.FC<VerificationResultDisplayProps> = ({ theme, result }) => {
 	if (result.error) {
 		return (
@@ -1338,11 +1344,24 @@ const VerificationResultDisplay: React.FC<VerificationResultDisplayProps> = ({ t
 		);
 	}
 
+	// Shape matches backend VerificationResult from vibes-verify-attestation.ts
 	const data = result.data as {
+		valid?: boolean;
 		trustTier?: string;
-		signatures?: Array<{ keyId: string; type: string; valid: boolean }>;
-		subjects?: Array<{ name: string; match: boolean; declaredHash?: string; actualHash?: string }>;
+		signatures?: Array<{
+			keyid: string;
+			keytype: 'user' | 'tool_provider';
+			valid: boolean;
+			error?: string;
+		}>;
+		fileIntegrity?: Array<{
+			name: string;
+			declaredHash: string;
+			actualHash: string;
+			matches: boolean;
+		}>;
 		attestationId?: string;
+		issues?: string[];
 	} | null;
 
 	if (!data) return null;
@@ -1358,6 +1377,14 @@ const VerificationResultDisplay: React.FC<VerificationResultDisplayProps> = ({ t
 			}}
 			data-testid="verification-result"
 		>
+			{/* Section header */}
+			<span
+				className="text-[10px] font-semibold uppercase tracking-wider"
+				style={{ color: theme.colors.textDim }}
+			>
+				Verification Result
+			</span>
+
 			{/* Trust Tier */}
 			{trustDisplay && (
 				<div className="flex items-center gap-2">
@@ -1378,14 +1405,14 @@ const VerificationResultDisplay: React.FC<VerificationResultDisplayProps> = ({ t
 						Signatures
 					</span>
 					{data.signatures.map((sig, i) => (
-						<div key={i} className="flex items-center gap-2">
+						<div key={i} className="flex items-center gap-2" data-testid={`signature-${i}`}>
 							{sig.valid ? (
 								<CheckCircle2 className="w-3 h-3 shrink-0" style={{ color: '#22c55e' }} />
 							) : (
 								<AlertCircle className="w-3 h-3 shrink-0" style={{ color: '#ef4444' }} />
 							)}
 							<span style={{ color: theme.colors.textMain }}>
-								{sig.type} ({sig.keyId.slice(0, 8)}...)
+								{KEYTYPE_LABELS[sig.keytype] ?? sig.keytype} ({sig.keyid.slice(0, 8)}...)
 							</span>
 							<span style={{ color: sig.valid ? '#22c55e' : '#ef4444' }}>
 								{sig.valid ? 'valid' : 'INVALID'}
@@ -1396,7 +1423,7 @@ const VerificationResultDisplay: React.FC<VerificationResultDisplayProps> = ({ t
 			)}
 
 			{/* File Integrity */}
-			{data.subjects && data.subjects.length > 0 && (
+			{data.fileIntegrity && data.fileIntegrity.length > 0 && (
 				<div className="flex flex-col gap-1">
 					<span
 						className="text-[10px] font-semibold uppercase"
@@ -1404,26 +1431,26 @@ const VerificationResultDisplay: React.FC<VerificationResultDisplayProps> = ({ t
 					>
 						File Integrity
 					</span>
-					{data.subjects.map((subj, i) => (
-						<div key={i} className="flex flex-col gap-0.5">
+					{data.fileIntegrity.map((file, i) => (
+						<div key={i} className="flex flex-col gap-0.5" data-testid={`file-integrity-${i}`}>
 							<div className="flex items-center gap-2">
-								{subj.match ? (
+								{file.matches ? (
 									<CheckCircle2 className="w-3 h-3 shrink-0" style={{ color: '#22c55e' }} />
 								) : (
 									<AlertCircle className="w-3 h-3 shrink-0" style={{ color: '#ef4444' }} />
 								)}
-								<span style={{ color: theme.colors.textMain }}>{subj.name}</span>
-								<span style={{ color: subj.match ? '#22c55e' : '#ef4444' }}>
-									{subj.match ? 'hash matches' : 'MODIFIED since attestation'}
+								<span style={{ color: theme.colors.textMain }}>{file.name}</span>
+								<span style={{ color: file.matches ? '#22c55e' : '#ef4444' }}>
+									{file.matches ? 'hash matches' : 'MODIFIED since attestation'}
 								</span>
 							</div>
-							{!subj.match && subj.declaredHash && subj.actualHash && (
+							{!file.matches && file.declaredHash && file.actualHash && (
 								<div
 									className="ml-5 flex flex-col text-[10px] font-mono"
 									style={{ color: theme.colors.textDim }}
 								>
-									<span>Declared: {subj.declaredHash.slice(0, 12)}...</span>
-									<span>Actual: {subj.actualHash.slice(0, 12)}...</span>
+									<span>Declared: {file.declaredHash.slice(0, 12)}...</span>
+									<span>Actual: {file.actualHash.slice(0, 12)}...</span>
 								</div>
 							)}
 						</div>
