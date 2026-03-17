@@ -83,7 +83,7 @@ interface AgentConfig {
 	binaryName?: string;
 	available: boolean;
 	path?: string;
-  	customPath?: string;
+	customPath?: string;
 	command: string;
 	args?: string[];
 	hidden?: boolean;
@@ -542,7 +542,11 @@ interface MaestroAPI {
 		homeDir: () => Promise<string>;
 		readDir: (dirPath: string, sshRemoteId?: string) => Promise<DirectoryEntry[]>;
 		readFile: (filePath: string, sshRemoteId?: string) => Promise<string>;
-		writeFile: (filePath: string, content: string, sshRemoteId?: string) => Promise<{ success: boolean }>;
+		writeFile: (
+			filePath: string,
+			content: string,
+			sshRemoteId?: string
+		) => Promise<{ success: boolean }>;
 		stat: (
 			filePath: string,
 			sshRemoteId?: string
@@ -2620,14 +2624,20 @@ interface MaestroAPI {
 		) => Promise<{ success: boolean; error?: string }>;
 		updateConfig: (
 			projectPath: string,
-			updates: Record<string, unknown>,
+			updates: Record<string, unknown>
 		) => Promise<{ success: boolean; error?: string }>;
-		getStats: (projectPath: string, file?: string) => Promise<{
+		getStats: (
+			projectPath: string,
+			file?: string
+		) => Promise<{
 			success: boolean;
 			data?: string;
 			error?: string;
 		}>;
-		getBlame: (projectPath: string, file: string) => Promise<{
+		getBlame: (
+			projectPath: string,
+			file: string
+		) => Promise<{
 			success: boolean;
 			data?: string;
 			error?: string;
@@ -2702,6 +2712,29 @@ interface MaestroAPI {
 				};
 			}) => void
 		) => () => void;
+
+		// VERIFY spec: Key management and attestation
+		attestation: {
+			keygen: () => Promise<{ success: boolean; data?: unknown; error?: string }>;
+			getKeyInfo: () => Promise<{ success: boolean; data?: unknown; error?: string }>;
+			checkKeyPermissions: () => Promise<{ success: boolean; data?: unknown; error?: string }>;
+			exportPublicKey: (
+				format: 'pem' | 'ssh'
+			) => Promise<{ success: boolean; data?: unknown; error?: string }>;
+			attest: (
+				projectPath: string,
+				options?: {
+					cosign?: boolean;
+					validationResult?: 'PASS' | 'FAIL';
+					vibesVersion?: string;
+				}
+			) => Promise<{ success: boolean; data?: unknown; error?: string }>;
+			verifyAttestation: (
+				projectPath: string,
+				envelope?: unknown
+			) => Promise<{ success: boolean; data?: unknown; error?: string }>;
+			getProviderKeys: () => Promise<{ success: boolean; data?: unknown; error?: string }>;
+		};
 	};
 }
 

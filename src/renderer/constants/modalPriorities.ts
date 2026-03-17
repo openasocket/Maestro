@@ -86,6 +86,9 @@ export const MODAL_PRIORITIES = {
 	/** Inline wizard exit confirmation dialog - appears when user presses Escape during wizard */
 	INLINE_WIZARD_EXIT_CONFIRM: 775,
 
+	/** VIBES keygen wizard - key generation walkthrough */
+	KEYGEN_WIZARD: 756,
+
 	/** Create PR modal (from worktree) */
 	CREATE_PR: 755,
 
