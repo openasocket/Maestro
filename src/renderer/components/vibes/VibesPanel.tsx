@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Settings, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Settings, RefreshCw, AlertTriangle, CheckCircle2, Lock, ShieldAlert } from 'lucide-react';
 import DiscoBallIcon from '../icons/DiscoBallIcon';
 import type { Theme } from '../../types';
 import type { VibesAssuranceLevel } from '../../../shared/vibes-types';
@@ -218,6 +218,61 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 		[vibesData]
 	);
 
+	// Attestation status badge state
+	type AttestationStatus = 'none' | 'no-attestation' | 'valid' | 'stale';
+	const [attestationStatus, setAttestationStatus] = useState<AttestationStatus>('none');
+	const [attestationTrustTier, setAttestationTrustTier] = useState<string | null>(null);
+
+	// Check attestation status on mount and after data refreshes
+	useEffect(() => {
+		if (!vibesEnabled || !projectPath) {
+			setAttestationStatus('none');
+			return;
+		}
+		let cancelled = false;
+		(async () => {
+			try {
+				const keyResult = await window.maestro.vibes.attestation.getKeyInfo();
+				if (cancelled) return;
+				if (!keyResult.success || !keyResult.data) {
+					setAttestationStatus('none');
+					return;
+				}
+
+				const verifyResult = await window.maestro.vibes.attestation.verifyAttestation(projectPath);
+				if (cancelled) return;
+				if (!verifyResult.success || !verifyResult.data) {
+					setAttestationStatus('no-attestation');
+					return;
+				}
+
+				const result = verifyResult.data as {
+					valid: boolean;
+					trustTier: string;
+					fileIntegrity?: Array<{ matches: boolean }>;
+				};
+
+				const hasStaleFiles = result.fileIntegrity?.some((f) => !f.matches) ?? false;
+				if (hasStaleFiles) {
+					setAttestationStatus('stale');
+					setAttestationTrustTier(result.trustTier);
+				} else if (result.valid) {
+					setAttestationStatus('valid');
+					setAttestationTrustTier(result.trustTier);
+				} else {
+					setAttestationStatus('no-attestation');
+				}
+			} catch {
+				if (!cancelled) {
+					setAttestationStatus('none');
+				}
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [vibesEnabled, projectPath, vibesData.isLoading]);
+
 	// Attestation progress modal
 	const [showAttestationModal, setShowAttestationModal] = useState(false);
 
@@ -309,6 +364,47 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 						data-testid="binary-version-badge"
 					>
 						<CheckCircle2 className="w-3 h-3" />v{binaryVersion}
+					</span>
+				)}
+				{/* Attestation status badge */}
+				{attestationStatus === 'no-attestation' && (
+					<span
+						className="shrink-0 flex items-center gap-1 px-2 text-[10px]"
+						style={{ color: theme.colors.warning }}
+						data-testid="attestation-badge"
+						title="Key exists but no attestation has been created"
+					>
+						<ShieldAlert className="w-3 h-3" />
+						Not attested
+					</span>
+				)}
+				{attestationStatus === 'valid' && (
+					<span
+						className="shrink-0 flex items-center gap-1 px-2 text-[10px]"
+						style={{
+							color:
+								attestationTrustTier === 'tool-corroborated'
+									? '#22c55e'
+									: attestationTrustTier === 'tool-only'
+										? '#3b82f6'
+										: '#eab308',
+						}}
+						data-testid="attestation-badge"
+						title={`Attested (${attestationTrustTier ?? 'unknown'})`}
+					>
+						<Lock className="w-3 h-3" />
+						Attested
+					</span>
+				)}
+				{attestationStatus === 'stale' && (
+					<span
+						className="shrink-0 flex items-center gap-1 px-2 text-[10px]"
+						style={{ color: theme.colors.warning }}
+						data-testid="attestation-badge"
+						title="Files have been modified since the last attestation"
+					>
+						<ShieldAlert className="w-3 h-3" />
+						Stale attestation
 					</span>
 				)}
 				{relativeTime && (

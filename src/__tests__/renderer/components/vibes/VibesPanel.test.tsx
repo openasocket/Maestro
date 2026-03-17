@@ -40,40 +40,42 @@ vi.mock('../../../../renderer/hooks', () => ({
 vi.mock('../../../../renderer/components/vibes/VibesDashboard', () => ({
 	VibesDashboard: (props: Record<string, unknown>) => (
 		<div data-testid="vibes-dashboard">
-			Dashboard: enabled={String(props.vibesEnabled)} level={String(props.vibesAssuranceLevel)} binaryAvailable={String(props.binaryAvailable)}
+			Dashboard: enabled={String(props.vibesEnabled)} level={String(props.vibesAssuranceLevel)}{' '}
+			binaryAvailable={String(props.binaryAvailable)}
 		</div>
 	),
 }));
 
 vi.mock('../../../../renderer/components/vibes/VibesAnnotationLog', () => ({
-	VibesAnnotationLog: () => (
-		<div data-testid="vibes-annotation-log">AnnotationLog</div>
-	),
+	VibesAnnotationLog: () => <div data-testid="vibes-annotation-log">AnnotationLog</div>,
 }));
 
 vi.mock('../../../../renderer/components/vibes/VibesModelAttribution', () => ({
-	VibesModelAttribution: () => (
-		<div data-testid="vibes-model-attribution">ModelAttribution</div>
-	),
+	VibesModelAttribution: () => <div data-testid="vibes-model-attribution">ModelAttribution</div>,
 }));
 
 vi.mock('../../../../renderer/components/vibes/VibesBlameView', () => ({
 	VibesBlameView: (props: Record<string, unknown>) => (
 		<div data-testid="vibes-blame-view">
-			BlameView{props.initialFilePath ? `: file=${String(props.initialFilePath)}` : ''} binaryAvailable={String(props.binaryAvailable)}
+			BlameView{props.initialFilePath ? `: file=${String(props.initialFilePath)}` : ''}{' '}
+			binaryAvailable={String(props.binaryAvailable)}
 		</div>
 	),
 }));
 
 vi.mock('../../../../renderer/components/vibes/VibeCoverageView', () => ({
 	VibeCoverageView: (props: Record<string, unknown>) => (
-		<div data-testid="vibes-coverage-view">CoverageView binaryAvailable={String(props.binaryAvailable)}</div>
+		<div data-testid="vibes-coverage-view">
+			CoverageView binaryAvailable={String(props.binaryAvailable)}
+		</div>
 	),
 }));
 
 vi.mock('../../../../renderer/components/vibes/VibesReportView', () => ({
 	VibesReportView: (props: Record<string, unknown>) => (
-		<div data-testid="vibes-report-view">ReportView binaryAvailable={String(props.binaryAvailable)}</div>
+		<div data-testid="vibes-report-view">
+			ReportView binaryAvailable={String(props.binaryAvailable)}
+		</div>
 	),
 }));
 
@@ -81,14 +83,20 @@ vi.mock('lucide-react', () => ({
 	Shield: () => <span data-testid="icon-shield">Shield</span>,
 	Settings: () => <span data-testid="icon-settings">Settings</span>,
 	RefreshCw: (props: { className?: string }) => (
-		<span data-testid="icon-refresh" className={props.className}>RefreshCw</span>
+		<span data-testid="icon-refresh" className={props.className}>
+			RefreshCw
+		</span>
 	),
 	AlertTriangle: () => <span data-testid="icon-alert-triangle">AlertTriangle</span>,
 	CheckCircle2: () => <span data-testid="icon-check-circle">CheckCircle2</span>,
+	Lock: () => <span data-testid="icon-lock">Lock</span>,
+	ShieldAlert: () => <span data-testid="icon-shield-alert">ShieldAlert</span>,
 }));
 
-// Mock window.maestro.vibes.findBinary
+// Mock window.maestro.vibes IPC
 const mockFindBinary = vi.fn();
+const mockGetKeyInfo = vi.fn();
+const mockVerifyAttestation = vi.fn();
 
 const mockTheme = {
 	id: 'dracula',
@@ -121,9 +129,15 @@ describe('VibesPanel', () => {
 		vi.clearAllMocks();
 		mockVibesLiveData.updates = new Map();
 		mockFindBinary.mockResolvedValue({ path: '/usr/local/bin/vibecheck', version: '0.3.2' });
+		mockGetKeyInfo.mockResolvedValue({ success: false });
+		mockVerifyAttestation.mockResolvedValue({ success: false });
 		(window as any).maestro = {
 			vibes: {
 				findBinary: mockFindBinary,
+				attestation: {
+					getKeyInfo: mockGetKeyInfo,
+					verifyAttestation: mockVerifyAttestation,
+				},
 			},
 		};
 	});
@@ -156,7 +170,7 @@ describe('VibesPanel', () => {
 			expect.objectContaining({
 				type: 'tour:action',
 				detail: { type: 'openSettings' },
-			}),
+			})
 		);
 		dispatchSpy.mockRestore();
 	});
@@ -318,11 +332,7 @@ describe('VibesPanel', () => {
 
 	it('auto-navigates to blame sub-tab when initialBlameFilePath is provided', () => {
 		render(
-			<VibesPanel
-				theme={mockTheme}
-				projectPath="/project"
-				initialBlameFilePath="src/index.ts"
-			/>,
+			<VibesPanel theme={mockTheme} projectPath="/project" initialBlameFilePath="src/index.ts" />
 		);
 
 		// Should show blame view, not dashboard
@@ -336,7 +346,7 @@ describe('VibesPanel', () => {
 				theme={mockTheme}
 				projectPath="/project"
 				initialBlameFilePath="src/utils/helpers.ts"
-			/>,
+			/>
 		);
 
 		const blameView = screen.getByTestId('vibes-blame-view');
@@ -351,7 +361,7 @@ describe('VibesPanel', () => {
 				projectPath="/project"
 				initialBlameFilePath="src/index.ts"
 				onBlameFileConsumed={onBlameFileConsumed}
-			/>,
+			/>
 		);
 
 		expect(onBlameFileConsumed).toHaveBeenCalledTimes(1);
@@ -359,11 +369,7 @@ describe('VibesPanel', () => {
 
 	it('does not auto-navigate when initialBlameFilePath is undefined', () => {
 		render(
-			<VibesPanel
-				theme={mockTheme}
-				projectPath="/project"
-				initialBlameFilePath={undefined}
-			/>,
+			<VibesPanel theme={mockTheme} projectPath="/project" initialBlameFilePath={undefined} />
 		);
 
 		// Should remain on Overview (default)
@@ -639,7 +645,14 @@ describe('VibesPanel', () => {
 
 		// Simulate a live annotation update
 		mockVibesLiveData.updates = new Map([
-			['session-1', { sessionId: 'session-1', annotationCount: 5, lastAnnotation: { type: 'code_authorship', timestamp: '2026-02-13T00:00:00Z' } }],
+			[
+				'session-1',
+				{
+					sessionId: 'session-1',
+					annotationCount: 5,
+					lastAnnotation: { type: 'code_authorship', timestamp: '2026-02-13T00:00:00Z' },
+				},
+			],
 		]);
 		rerender(<VibesPanel theme={mockTheme} projectPath="/project" />);
 
@@ -680,7 +693,14 @@ describe('VibesPanel', () => {
 
 		// First update
 		mockVibesLiveData.updates = new Map([
-			['session-1', { sessionId: 'session-1', annotationCount: 1, lastAnnotation: { type: 'code_authorship', timestamp: '2026-02-13T00:00:00Z' } }],
+			[
+				'session-1',
+				{
+					sessionId: 'session-1',
+					annotationCount: 1,
+					lastAnnotation: { type: 'code_authorship', timestamp: '2026-02-13T00:00:00Z' },
+				},
+			],
 		]);
 		rerender(<VibesPanel theme={mockTheme} projectPath="/project" />);
 
@@ -691,7 +711,14 @@ describe('VibesPanel', () => {
 
 		// Second update before debounce fires — resets timer
 		mockVibesLiveData.updates = new Map([
-			['session-1', { sessionId: 'session-1', annotationCount: 3, lastAnnotation: { type: 'code_authorship', timestamp: '2026-02-13T00:00:01Z' } }],
+			[
+				'session-1',
+				{
+					sessionId: 'session-1',
+					annotationCount: 3,
+					lastAnnotation: { type: 'code_authorship', timestamp: '2026-02-13T00:00:01Z' },
+				},
+			],
 		]);
 		rerender(<VibesPanel theme={mockTheme} projectPath="/project" />);
 
@@ -718,8 +745,22 @@ describe('VibesPanel', () => {
 
 		// Two sessions with annotations
 		mockVibesLiveData.updates = new Map([
-			['session-1', { sessionId: 'session-1', annotationCount: 3, lastAnnotation: { type: 'code_authorship', timestamp: '2026-02-13T00:00:00Z' } }],
-			['session-2', { sessionId: 'session-2', annotationCount: 7, lastAnnotation: { type: 'code_authorship', timestamp: '2026-02-13T00:00:01Z' } }],
+			[
+				'session-1',
+				{
+					sessionId: 'session-1',
+					annotationCount: 3,
+					lastAnnotation: { type: 'code_authorship', timestamp: '2026-02-13T00:00:00Z' },
+				},
+			],
+			[
+				'session-2',
+				{
+					sessionId: 'session-2',
+					annotationCount: 7,
+					lastAnnotation: { type: 'code_authorship', timestamp: '2026-02-13T00:00:01Z' },
+				},
+			],
 		]);
 		rerender(<VibesPanel theme={mockTheme} projectPath="/project" />);
 
@@ -731,5 +772,151 @@ describe('VibesPanel', () => {
 		expect(mockVibesData.refresh).toHaveBeenCalledTimes(1);
 
 		vi.useRealTimers();
+	});
+
+	// ========================================================================
+	// Attestation status badge
+	// ========================================================================
+
+	it('shows no attestation badge when no signing key exists', async () => {
+		mockGetKeyInfo.mockResolvedValue({ success: false });
+
+		render(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		await waitFor(() => {
+			expect(mockGetKeyInfo).toHaveBeenCalled();
+		});
+
+		expect(screen.queryByTestId('attestation-badge')).toBeNull();
+	});
+
+	it('shows "Not attested" badge when key exists but no attestation', async () => {
+		mockGetKeyInfo.mockResolvedValue({ success: true, data: { keyId: 'a1b2c3d4e5f6a7b8' } });
+		mockVerifyAttestation.mockResolvedValue({ success: false });
+
+		render(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('attestation-badge')).toBeTruthy();
+		});
+
+		expect(screen.getByText('Not attested')).toBeTruthy();
+		expect(screen.getByTestId('icon-shield-alert')).toBeTruthy();
+	});
+
+	it('shows "Attested" badge with trust tier color when valid attestation exists', async () => {
+		mockGetKeyInfo.mockResolvedValue({ success: true, data: { keyId: 'a1b2c3d4e5f6a7b8' } });
+		mockVerifyAttestation.mockResolvedValue({
+			success: true,
+			data: {
+				valid: true,
+				trustTier: 'tool-corroborated',
+				fileIntegrity: [
+					{ name: 'manifest.json', matches: true },
+					{ name: 'annotations.jsonl', matches: true },
+				],
+			},
+		});
+
+		render(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('attestation-badge')).toBeTruthy();
+		});
+
+		expect(screen.getByText('Attested')).toBeTruthy();
+		expect(screen.getByTestId('icon-lock')).toBeTruthy();
+		// Trust tier color: tool-corroborated = green
+		const badge = screen.getByTestId('attestation-badge');
+		expect(badge.style.color).toBe('rgb(34, 197, 94)');
+	});
+
+	it('shows "Attested" badge with yellow color for self-attested tier', async () => {
+		mockGetKeyInfo.mockResolvedValue({ success: true, data: { keyId: 'a1b2c3d4e5f6a7b8' } });
+		mockVerifyAttestation.mockResolvedValue({
+			success: true,
+			data: {
+				valid: true,
+				trustTier: 'self-attested',
+				fileIntegrity: [{ name: 'manifest.json', matches: true }],
+			},
+		});
+
+		render(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('attestation-badge')).toBeTruthy();
+		});
+
+		expect(screen.getByText('Attested')).toBeTruthy();
+		const badge = screen.getByTestId('attestation-badge');
+		expect(badge.style.color).toBe('rgb(234, 179, 8)');
+	});
+
+	it('shows "Stale attestation" badge when files modified since attestation', async () => {
+		mockGetKeyInfo.mockResolvedValue({ success: true, data: { keyId: 'a1b2c3d4e5f6a7b8' } });
+		mockVerifyAttestation.mockResolvedValue({
+			success: true,
+			data: {
+				valid: true,
+				trustTier: 'tool-corroborated',
+				fileIntegrity: [
+					{ name: 'manifest.json', matches: true },
+					{ name: 'annotations.jsonl', matches: false },
+				],
+			},
+		});
+
+		render(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('attestation-badge')).toBeTruthy();
+		});
+
+		expect(screen.getByText('Stale attestation')).toBeTruthy();
+		expect(screen.getByTestId('icon-shield-alert')).toBeTruthy();
+	});
+
+	it('shows no attestation badge when VIBES is disabled', async () => {
+		mockVibesEnabled = false;
+
+		render(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		// Disabled state renders the disabled message, no tab bar
+		expect(screen.queryByTestId('attestation-badge')).toBeNull();
+		expect(mockGetKeyInfo).not.toHaveBeenCalled();
+	});
+
+	it('shows no attestation badge when projectPath is undefined', async () => {
+		render(<VibesPanel theme={mockTheme} projectPath={undefined} />);
+
+		await waitFor(() => {
+			expect(mockFindBinary).toHaveBeenCalled();
+		});
+
+		expect(screen.queryByTestId('attestation-badge')).toBeNull();
+		expect(mockGetKeyInfo).not.toHaveBeenCalled();
+	});
+
+	it('shows "Attested" badge with blue color for tool-only tier', async () => {
+		mockGetKeyInfo.mockResolvedValue({ success: true, data: { keyId: 'a1b2c3d4e5f6a7b8' } });
+		mockVerifyAttestation.mockResolvedValue({
+			success: true,
+			data: {
+				valid: true,
+				trustTier: 'tool-only',
+				fileIntegrity: [{ name: 'manifest.json', matches: true }],
+			},
+		});
+
+		render(<VibesPanel theme={mockTheme} projectPath="/project" />);
+
+		await waitFor(() => {
+			expect(screen.getByTestId('attestation-badge')).toBeTruthy();
+		});
+
+		expect(screen.getByText('Attested')).toBeTruthy();
+		const badge = screen.getByTestId('attestation-badge');
+		expect(badge.style.color).toBe('rgb(59, 130, 246)');
 	});
 });
