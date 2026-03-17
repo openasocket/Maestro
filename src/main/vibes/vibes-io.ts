@@ -1347,6 +1347,104 @@ async function scanTrackedFiles(
 }
 
 // ============================================================================
+// Delegation Chain Validation (EVOLVE Spec Section 3)
+// ============================================================================
+
+/**
+ * Result of validating the EVOLVE delegation chain integrity.
+ */
+export interface DelegationChainValidationResult {
+	valid: boolean;
+	totalSessions: number;
+	orphanedSessions: string[]; // Worker sessions with no delegation record pointing to them
+	brokenChains: string[]; // Sessions where parent_session_id doesn't match any delegation
+}
+
+/**
+ * Validate that every sub-agent action is traceable back to an
+ * orchestrating decision through delegation and session records.
+ *
+ * Per EVOLVE spec section 3: "Every action taken by a sub-agent
+ * MUST be traceable back to the orchestrating decision through
+ * the delegation and session records."
+ *
+ * Logic:
+ * 1. Collect all session start records and their agent_type / parent_session_id.
+ * 2. Collect all delegation records (parent → child mappings).
+ * 3. For each worker session, check that either:
+ *    a) A delegation record exists with that session as child_session_id, OR
+ *    b) The session has no parent_session_id (user-spawned, not delegated).
+ * 4. For sessions that declare a parent_session_id, verify that a matching
+ *    delegation record exists linking parent → child.
+ */
+export async function validateDelegationChain(
+	projectPath: string
+): Promise<DelegationChainValidationResult> {
+	const annotations = await readAnnotations(projectPath);
+
+	// Collect session start records (keyed by session_id)
+	const sessionStarts = new Map<
+		string,
+		{
+			session_id: string;
+			agent_type?: string;
+			parent_session_id?: string | null;
+		}
+	>();
+
+	// Collect delegation records as a set of child_session_ids
+	const delegationChildren = new Set<string>();
+	// Also track parent→child pairs from delegation records
+	const delegationPairs = new Map<string, Set<string>>(); // parent → Set<child>
+
+	for (const a of annotations) {
+		if (a.type === 'session' && a.event === 'start') {
+			sessionStarts.set(a.session_id, {
+				session_id: a.session_id,
+				agent_type: a.agent_type ?? undefined,
+				parent_session_id: a.parent_session_id ?? undefined,
+			});
+		} else if (a.type === 'delegation') {
+			delegationChildren.add(a.child_session_id);
+			if (!delegationPairs.has(a.parent_session_id)) {
+				delegationPairs.set(a.parent_session_id, new Set());
+			}
+			delegationPairs.get(a.parent_session_id)!.add(a.child_session_id);
+		}
+	}
+
+	const orphanedSessions: string[] = [];
+	const brokenChains: string[] = [];
+
+	for (const [sessionId, session] of sessionStarts) {
+		const isWorker = session.agent_type === 'worker';
+		const hasParent = session.parent_session_id != null;
+		const hasDelegation = delegationChildren.has(sessionId);
+
+		// Check for orphaned worker sessions: workers with a parent but no delegation record
+		if (isWorker && hasParent && !hasDelegation) {
+			orphanedSessions.push(sessionId);
+		}
+
+		// Check for broken chains: session declares a parent_session_id but no delegation
+		// record exists from that parent to this child
+		if (hasParent) {
+			const parentChildren = delegationPairs.get(session.parent_session_id!);
+			if (!parentChildren || !parentChildren.has(sessionId)) {
+				brokenChains.push(sessionId);
+			}
+		}
+	}
+
+	return {
+		valid: orphanedSessions.length === 0 && brokenChains.length === 0,
+		totalSessions: sessionStarts.size,
+		orphanedSessions,
+		brokenChains,
+	};
+}
+
+// ============================================================================
 // Buffer Inspection (Testing)
 // ============================================================================
 

@@ -22,7 +22,12 @@ vi.mock('electron', () => ({
 }));
 
 import { createVibesApi } from '../../../main/preload/vibes';
-import type { VibesApi, VibesCommandResult, VibesInitConfig, VibesLogOptions } from '../../../main/preload/vibes';
+import type {
+	VibesApi,
+	VibesCommandResult,
+	VibesInitConfig,
+	VibesLogOptions,
+} from '../../../main/preload/vibes';
 
 describe('vibes preload API', () => {
 	let api: VibesApi;
@@ -52,8 +57,8 @@ describe('vibes preload API', () => {
 			expect(api).toHaveProperty('onAnnotationUpdate');
 		});
 
-		it('should have exactly 17 methods', () => {
-			expect(Object.keys(api)).toHaveLength(17);
+		it('should have exactly 18 methods', () => {
+			expect(Object.keys(api)).toHaveLength(18);
 		});
 	});
 
@@ -225,7 +230,10 @@ describe('vibes preload API', () => {
 
 	describe('findBinary', () => {
 		it('should invoke vibes:findBinary with custom path', async () => {
-			mockInvoke.mockResolvedValue({ path: '/usr/local/bin/vibecheck', version: 'vibecheck 0.3.2' });
+			mockInvoke.mockResolvedValue({
+				path: '/usr/local/bin/vibecheck',
+				version: 'vibecheck 0.3.2',
+			});
 
 			const result = await api.findBinary('/custom/vibecheck');
 
@@ -278,7 +286,7 @@ describe('vibes preload API', () => {
 
 			expect(mockRemoveListener).toHaveBeenCalledWith(
 				'vibes:annotation-update',
-				expect.any(Function),
+				expect.any(Function)
 			);
 		});
 
@@ -286,9 +294,11 @@ describe('vibes preload API', () => {
 			const callback = vi.fn();
 			let registeredHandler: (event: unknown, payload: unknown) => void;
 
-			mockOn.mockImplementation((_channel: string, handler: (event: unknown, payload: unknown) => void) => {
-				registeredHandler = handler;
-			});
+			mockOn.mockImplementation(
+				(_channel: string, handler: (event: unknown, payload: unknown) => void) => {
+					registeredHandler = handler;
+				}
+			);
 
 			api.onAnnotationUpdate(callback);
 

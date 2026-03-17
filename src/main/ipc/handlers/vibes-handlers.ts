@@ -51,6 +51,7 @@ import {
 	readVibesConfig,
 	writeVibesConfig,
 	rehashManifest,
+	validateDelegationChain,
 } from '../../vibes/vibes-io';
 
 const LOG_CONTEXT = '[VIBES]';
@@ -96,7 +97,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 				projectName: string;
 				assuranceLevel: VibesAssuranceLevel;
 				extensions?: string[];
-			},
+			}
 		) => {
 			try {
 				const customPath = getCustomBinaryPath(settingsStore);
@@ -105,7 +106,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 				logger.error('init error', LOG_CONTEXT, { error: String(error) });
 				return { success: false, error: String(error) };
 			}
-		},
+		}
 	);
 
 	// Get project statistics (falls back to direct file reading when binary unavailable)
@@ -150,7 +151,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 				session?: string;
 				limit?: number;
 				json?: boolean;
-			},
+			}
 		) => {
 			try {
 				const customPath = getCustomBinaryPath(settingsStore);
@@ -164,7 +165,9 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 					annotations = annotations.filter((a) => 'file_path' in a && a.file_path === options.file);
 				}
 				if (options?.session) {
-					annotations = annotations.filter((a) => 'session_id' in a && a.session_id === options.session);
+					annotations = annotations.filter(
+						(a) => 'session_id' in a && a.session_id === options.session
+					);
 				}
 				if (options?.limit && options.limit > 0) {
 					annotations = annotations.slice(-options.limit);
@@ -174,7 +177,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 				logger.error('getLog error', LOG_CONTEXT, { error: String(error) });
 				return { success: false, error: String(error) };
 			}
-		},
+		}
 	);
 
 	// Get VIBES coverage statistics (falls back to direct annotation parsing)
@@ -216,7 +219,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 				logger.error('getReport error', LOG_CONTEXT, { error: String(error) });
 				return { success: false, error: String(error) };
 			}
-		},
+		}
 	);
 
 	// List all sessions (falls back to direct annotation parsing)
@@ -275,6 +278,17 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 		}
 	});
 
+	// Validate EVOLVE delegation chain integrity (EVOLVE spec section 3)
+	ipcMain.handle('vibes:validateDelegationChain', async (_event, projectPath: string) => {
+		try {
+			const result = await validateDelegationChain(projectPath);
+			return { success: true, data: JSON.stringify(result) };
+		} catch (error) {
+			logger.error('validateDelegationChain error', LOG_CONTEXT, { error: String(error) });
+			return { success: false, error: String(error) };
+		}
+	});
+
 	// Update per-project VIBES config fields (e.g. assurance_level)
 	ipcMain.handle(
 		'vibes:updateConfig',
@@ -285,7 +299,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 				assurance_level: VibesAssuranceLevel;
 				tracked_extensions: string[];
 				exclude_patterns: string[];
-			}>,
+			}>
 		) => {
 			try {
 				const config = await readVibesConfig(projectPath);
@@ -299,7 +313,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 				logger.error('updateConfig error', LOG_CONTEXT, { error: String(error) });
 				return { success: false, error: String(error) };
 			}
-		},
+		}
 	);
 
 	// Find the vibecheck binary — returns { path, version } or { path: null, version: null }
@@ -336,12 +350,7 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 	// Backfill commit_hash on annotations missing it
 	ipcMain.handle(
 		'vibes:backfillCommit',
-		async (
-			_event,
-			projectPath: string,
-			commitHash: string,
-			sessionId?: string,
-		) => {
+		async (_event, projectPath: string, commitHash: string, sessionId?: string) => {
 			try {
 				const customPath = getCustomBinaryPath(settingsStore);
 				return await vibesBackfillCommit(projectPath, commitHash, sessionId, customPath);
@@ -349,34 +358,40 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 				logger.error('backfillCommit error', LOG_CONTEXT, { error: String(error) });
 				return { success: false, updatedCount: 0, error: String(error) };
 			}
-		},
+		}
 	);
 
 	// Decompress compressed reasoning text or read external blob files
-	ipcMain.handle('vibes:decompress-reasoning', async (_event, params: {
-		compressed?: string | null;
-		blobPath?: string | null;
-		projectPath?: string | null;
-	}) => {
-		try {
-			// Handle compressed inline text (gzip + base64)
-			if (params.compressed) {
-				const buf = Buffer.from(params.compressed, 'base64');
-				const decompressed = gunzipSync(buf);
-				return { text: decompressed.toString('utf-8'), error: null };
+	ipcMain.handle(
+		'vibes:decompress-reasoning',
+		async (
+			_event,
+			params: {
+				compressed?: string | null;
+				blobPath?: string | null;
+				projectPath?: string | null;
 			}
+		) => {
+			try {
+				// Handle compressed inline text (gzip + base64)
+				if (params.compressed) {
+					const buf = Buffer.from(params.compressed, 'base64');
+					const decompressed = gunzipSync(buf);
+					return { text: decompressed.toString('utf-8'), error: null };
+				}
 
-			// Handle external blob file
-			if (params.blobPath && params.projectPath) {
-				const fullPath = path.join(params.projectPath, '.ai-audit', params.blobPath);
-				const content = await readFile(fullPath, 'utf-8');
-				return { text: content, error: null };
+				// Handle external blob file
+				if (params.blobPath && params.projectPath) {
+					const fullPath = path.join(params.projectPath, '.ai-audit', params.blobPath);
+					const content = await readFile(fullPath, 'utf-8');
+					return { text: content, error: null };
+				}
+
+				return { text: null, error: 'No compressed data or blob path provided' };
+			} catch (error) {
+				logger.error('decompress-reasoning error', LOG_CONTEXT, { error: String(error) });
+				return { text: null, error: String(error) };
 			}
-
-			return { text: null, error: 'No compressed data or blob path provided' };
-		} catch (error) {
-			logger.error('decompress-reasoning error', LOG_CONTEXT, { error: String(error) });
-			return { text: null, error: String(error) };
 		}
-	});
+	);
 }

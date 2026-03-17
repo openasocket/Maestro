@@ -76,13 +76,13 @@ export function createVibesApi() {
 
 		init: (
 			projectPath: string,
-			config: VibesInitConfig,
+			config: VibesInitConfig
 		): Promise<{ success: boolean; error?: string }> =>
 			ipcRenderer.invoke('vibes:init', projectPath, config),
 
 		updateConfig: (
 			projectPath: string,
-			updates: Record<string, unknown>,
+			updates: Record<string, unknown>
 		): Promise<{ success: boolean; error?: string }> =>
 			ipcRenderer.invoke('vibes:updateConfig', projectPath, updates),
 
@@ -103,9 +103,8 @@ export function createVibesApi() {
 
 		getReport: (
 			projectPath: string,
-			format?: 'markdown' | 'html' | 'json',
-		): Promise<VibesCommandResult> =>
-			ipcRenderer.invoke('vibes:getReport', projectPath, format),
+			format?: 'markdown' | 'html' | 'json'
+		): Promise<VibesCommandResult> => ipcRenderer.invoke('vibes:getReport', projectPath, format),
 
 		getSessions: (projectPath: string): Promise<VibesCommandResult> =>
 			ipcRenderer.invoke('vibes:getSessions', projectPath),
@@ -122,8 +121,10 @@ export function createVibesApi() {
 		findBinary: (customPath?: string): Promise<VibesBinaryInfo> =>
 			ipcRenderer.invoke('vibes:findBinary', customPath),
 
-		clearBinaryCache: (): Promise<void> =>
-			ipcRenderer.invoke('vibes:clearBinaryCache'),
+		clearBinaryCache: (): Promise<void> => ipcRenderer.invoke('vibes:clearBinaryCache'),
+
+		validateDelegationChain: (projectPath: string): Promise<VibesCommandResult> =>
+			ipcRenderer.invoke('vibes:validateDelegationChain', projectPath),
 
 		decompressReasoning: (params: {
 			compressed?: string | null;
@@ -138,10 +139,9 @@ export function createVibesApi() {
 		 * Returns a cleanup function to unsubscribe.
 		 */
 		onAnnotationUpdate: (
-			callback: (payload: VibesAnnotationUpdatePayload) => void,
+			callback: (payload: VibesAnnotationUpdatePayload) => void
 		): (() => void) => {
-			const handler = (_: unknown, payload: VibesAnnotationUpdatePayload) =>
-				callback(payload);
+			const handler = (_: unknown, payload: VibesAnnotationUpdatePayload) => callback(payload);
 			ipcRenderer.on('vibes:annotation-update', handler);
 			return () => ipcRenderer.removeListener('vibes:annotation-update', handler);
 		},

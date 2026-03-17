@@ -117,9 +117,11 @@ describe('vibes-handlers', () => {
 		handlers = {};
 
 		// Capture registered handlers
-		mockIpcMainHandle.mockImplementation((channel: string, handler: (...args: unknown[]) => Promise<unknown>) => {
-			handlers[channel] = handler;
-		});
+		mockIpcMainHandle.mockImplementation(
+			(channel: string, handler: (...args: unknown[]) => Promise<unknown>) => {
+				handlers[channel] = handler;
+			}
+		);
 
 		mockSettingsStore = {
 			get: vi.fn().mockReturnValue(''),
@@ -137,8 +139,8 @@ describe('vibes-handlers', () => {
 	});
 
 	describe('handler registration', () => {
-		it('should register all 18 VIBES IPC handlers', () => {
-			expect(mockIpcMainHandle).toHaveBeenCalledTimes(18);
+		it('should register all 19 VIBES IPC handlers', () => {
+			expect(mockIpcMainHandle).toHaveBeenCalledTimes(19);
 		});
 
 		it('should register handlers with correct channel names', () => {
@@ -155,6 +157,7 @@ describe('vibes-handlers', () => {
 				'vibes:getModels',
 				'vibes:build',
 				'vibes:rehash',
+				'vibes:validateDelegationChain',
 				'vibes:updateConfig',
 				'vibes:findBinary',
 				'vibes:clearBinaryCache',
@@ -275,7 +278,15 @@ describe('vibes-handlers', () => {
 		it('should fall back to direct blame computation when binary not found', async () => {
 			mockFindBinary.mockResolvedValue(null);
 			mockComputeBlame.mockResolvedValue([
-				{ line_start: 1, line_end: 10, action: 'create', model_name: 'claude-4', model_version: 'opus', tool_name: 'claude-code', timestamp: '2026-02-10T12:00:00Z' },
+				{
+					line_start: 1,
+					line_end: 10,
+					action: 'create',
+					model_name: 'claude-4',
+					model_version: 'opus',
+					tool_name: 'claude-code',
+					timestamp: '2026-02-10T12:00:00Z',
+				},
 			]);
 
 			const result = await handlers['vibes:getBlame']({}, '/project', 'src/index.ts');
@@ -384,7 +395,12 @@ describe('vibes-handlers', () => {
 		it('should fall back to direct session extraction when binary not found', async () => {
 			mockFindBinary.mockResolvedValue(null);
 			mockExtractSessions.mockResolvedValue([
-				{ session_id: 'sess-1', event: 'start', timestamp: '2026-02-10T12:00:00Z', annotation_count: 5 },
+				{
+					session_id: 'sess-1',
+					event: 'start',
+					timestamp: '2026-02-10T12:00:00Z',
+					annotation_count: 5,
+				},
 			]);
 
 			const result = await handlers['vibes:getSessions']({}, '/project');
@@ -411,7 +427,13 @@ describe('vibes-handlers', () => {
 		it('should fall back to direct model extraction when binary not found', async () => {
 			mockFindBinary.mockResolvedValue(null);
 			mockExtractModels.mockResolvedValue([
-				{ model_name: 'claude-4', model_version: 'opus', tool_name: 'claude-code', annotation_count: 10, percentage: 100 },
+				{
+					model_name: 'claude-4',
+					model_version: 'opus',
+					tool_name: 'claude-code',
+					annotation_count: 10,
+					percentage: 100,
+				},
 			]);
 
 			const result = await handlers['vibes:getModels']({}, '/project');
@@ -493,11 +515,9 @@ describe('vibes-handlers', () => {
 			mockReadVibesConfig.mockResolvedValue({ ...existingConfig });
 			mockWriteVibesConfig.mockResolvedValue(undefined);
 
-			const result = await handlers['vibes:updateConfig'](
-				{},
-				'/project',
-				{ assurance_level: 'high' },
-			);
+			const result = await handlers['vibes:updateConfig']({}, '/project', {
+				assurance_level: 'high',
+			});
 
 			expect(mockReadVibesConfig).toHaveBeenCalledWith('/project');
 			expect(mockWriteVibesConfig).toHaveBeenCalledWith('/project', {
@@ -510,11 +530,9 @@ describe('vibes-handlers', () => {
 		it('should return error when no config exists', async () => {
 			mockReadVibesConfig.mockResolvedValue(null);
 
-			const result = await handlers['vibes:updateConfig'](
-				{},
-				'/project',
-				{ assurance_level: 'high' },
-			);
+			const result = await handlers['vibes:updateConfig']({}, '/project', {
+				assurance_level: 'high',
+			});
 
 			expect(result).toEqual({
 				success: false,
@@ -526,11 +544,9 @@ describe('vibes-handlers', () => {
 		it('should return error on exception', async () => {
 			mockReadVibesConfig.mockRejectedValue(new Error('disk error'));
 
-			const result = await handlers['vibes:updateConfig'](
-				{},
-				'/project',
-				{ assurance_level: 'high' },
-			);
+			const result = await handlers['vibes:updateConfig']({}, '/project', {
+				assurance_level: 'high',
+			});
 
 			expect(result).toEqual({ success: false, error: 'Error: disk error' });
 		});
@@ -539,11 +555,9 @@ describe('vibes-handlers', () => {
 			mockReadVibesConfig.mockResolvedValue({ ...existingConfig });
 			mockWriteVibesConfig.mockResolvedValue(undefined);
 
-			const result = await handlers['vibes:updateConfig'](
-				{},
-				'/project',
-				{ tracked_extensions: ['.ts', '.tsx', '.js', '.jsx'] },
-			);
+			const result = await handlers['vibes:updateConfig']({}, '/project', {
+				tracked_extensions: ['.ts', '.tsx', '.js', '.jsx'],
+			});
 
 			expect(mockWriteVibesConfig).toHaveBeenCalledWith('/project', {
 				...existingConfig,
@@ -605,7 +619,12 @@ describe('vibes-handlers', () => {
 
 			const result = await handlers['vibes:backfillCommit']({}, '/project', 'abc123', 'sess-1');
 
-			expect(mockVibesBackfillCommit).toHaveBeenCalledWith('/project', 'abc123', 'sess-1', undefined);
+			expect(mockVibesBackfillCommit).toHaveBeenCalledWith(
+				'/project',
+				'abc123',
+				'sess-1',
+				undefined
+			);
 			expect(result).toEqual({ success: true, updatedCount: 5 });
 		});
 
@@ -614,7 +633,12 @@ describe('vibes-handlers', () => {
 
 			const result = await handlers['vibes:backfillCommit']({}, '/project', 'def456');
 
-			expect(mockVibesBackfillCommit).toHaveBeenCalledWith('/project', 'def456', undefined, undefined);
+			expect(mockVibesBackfillCommit).toHaveBeenCalledWith(
+				'/project',
+				'def456',
+				undefined,
+				undefined
+			);
 			expect(result).toEqual({ success: true, updatedCount: 3 });
 		});
 
@@ -632,7 +656,12 @@ describe('vibes-handlers', () => {
 
 			await handlers['vibes:backfillCommit']({}, '/project', 'abc123', 'sess-1');
 
-			expect(mockVibesBackfillCommit).toHaveBeenCalledWith('/project', 'abc123', 'sess-1', '/custom/vibecheck');
+			expect(mockVibesBackfillCommit).toHaveBeenCalledWith(
+				'/project',
+				'abc123',
+				'sess-1',
+				'/custom/vibecheck'
+			);
 		});
 	});
 
