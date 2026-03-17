@@ -2272,4 +2272,199 @@ describe('claude-code-instrumenter', () => {
 			expect(informedEdges).toHaveLength(0);
 		});
 	});
+
+	// ========================================================================
+	// supersedes Edge Emission (Spec Section 7.6)
+	// ========================================================================
+	describe('supersedes edge emission', () => {
+		it('emits supersedes edge when same file is modified twice in same session', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			// First modification
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/app.ts' } },
+				timestamp: Date.now(),
+			});
+
+			// Second modification to the same file
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Edit',
+				state: { status: 'running', input: { file_path: 'src/app.ts' } },
+				timestamp: Date.now(),
+			});
+
+			await flushAll();
+			const annotations = await readAnnotations(tmpDir);
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
+			const edgeAnnotations = annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[];
+			const supersedesEdges = edgeAnnotations.filter((e) => e.edge_type === 'supersedes');
+
+			expect(lineAnnotations).toHaveLength(2);
+			expect(supersedesEdges).toHaveLength(1);
+			expect(supersedesEdges[0].source_ref).toBe(lineAnnotations[1].annotation_id);
+			expect(supersedesEdges[0].target_ref).toBe(lineAnnotations[0].annotation_id);
+			expect(supersedesEdges[0].source_type).toBe('annotation');
+			expect(supersedesEdges[0].target_type).toBe('annotation');
+		});
+
+		it('does not emit supersedes edge on first modification of a file', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			// Single modification
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/new-file.ts' } },
+				timestamp: Date.now(),
+			});
+
+			await flushAll();
+			const annotations = await readAnnotations(tmpDir);
+			const edgeAnnotations = annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[];
+			const supersedesEdges = edgeAnnotations.filter((e) => e.edge_type === 'supersedes');
+			expect(supersedesEdges).toHaveLength(0);
+		});
+
+		it('does not emit supersedes edge when different files are modified', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			// Modify file A
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/file-a.ts' } },
+				timestamp: Date.now(),
+			});
+
+			// Modify file B (different from A)
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/file-b.ts' } },
+				timestamp: Date.now(),
+			});
+
+			await flushAll();
+			const annotations = await readAnnotations(tmpDir);
+			const edgeAnnotations = annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[];
+			const supersedesEdges = edgeAnnotations.filter((e) => e.edge_type === 'supersedes');
+			expect(supersedesEdges).toHaveLength(0);
+		});
+
+		it('includes session_id on supersedes edges', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/app.ts' } },
+				timestamp: Date.now(),
+			});
+
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Edit',
+				state: { status: 'running', input: { file_path: 'src/app.ts' } },
+				timestamp: Date.now(),
+			});
+
+			await flushAll();
+			const annotations = await readAnnotations(tmpDir);
+			const supersedesEdges = (
+				annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[]
+			).filter((e) => e.edge_type === 'supersedes');
+			expect(supersedesEdges).toHaveLength(1);
+			expect(supersedesEdges[0].session_id).toBeDefined();
+			expect(typeof supersedesEdges[0].session_id).toBe('string');
+		});
+
+		it('chains supersedes edges across three modifications of the same file', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			// Three modifications to the same file
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/chain.ts' } },
+				timestamp: Date.now(),
+			});
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Edit',
+				state: { status: 'running', input: { file_path: 'src/chain.ts' } },
+				timestamp: Date.now(),
+			});
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Edit',
+				state: { status: 'running', input: { file_path: 'src/chain.ts' } },
+				timestamp: Date.now(),
+			});
+
+			await flushAll();
+			const annotations = await readAnnotations(tmpDir);
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
+			const supersedesEdges = (
+				annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[]
+			).filter((e) => e.edge_type === 'supersedes');
+
+			expect(lineAnnotations).toHaveLength(3);
+			expect(supersedesEdges).toHaveLength(2);
+
+			// Second annotation supersedes first
+			expect(supersedesEdges[0].source_ref).toBe(lineAnnotations[1].annotation_id);
+			expect(supersedesEdges[0].target_ref).toBe(lineAnnotations[0].annotation_id);
+
+			// Third annotation supersedes second
+			expect(supersedesEdges[1].source_ref).toBe(lineAnnotations[2].annotation_id);
+			expect(supersedesEdges[1].target_ref).toBe(lineAnnotations[1].annotation_id);
+		});
+
+		it('cleans up annotation tracking on session flush', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			// Modify a file
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/cleanup.ts' } },
+				timestamp: Date.now(),
+			});
+
+			// Flush the session (cleanup)
+			await instrumenter.flush('sess-1');
+
+			// Start a new session with the same ID
+			await setupSession('sess-1', 'medium');
+
+			// Modify the same file — should NOT produce supersedes edge (session was flushed)
+			await instrumenter.handleToolExecution('sess-1', {
+				toolName: 'Write',
+				state: { status: 'running', input: { file_path: 'src/cleanup.ts' } },
+				timestamp: Date.now(),
+			});
+
+			const annotations = await readAnnotations(tmpDir);
+			const supersedesEdges = (
+				annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[]
+			).filter((e) => e.edge_type === 'supersedes');
+			expect(supersedesEdges).toHaveLength(0);
+		});
+	});
 });

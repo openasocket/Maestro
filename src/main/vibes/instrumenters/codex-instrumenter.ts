@@ -221,6 +221,9 @@ export class CodexInstrumenter {
 	/** Most recent file-read command hash per session per file path, for informed_by edges. */
 	private lastFileReadHashes: Map<string, Map<string, string>> = new Map();
 
+	/** Most recent line annotation ID per session per file path, for supersedes edges. */
+	private lastLineAnnotations: Map<string, Map<string, string>> = new Map();
+
 	/** Byte threshold above which reasoning text is compressed (default 10 KB). */
 	private compressThresholdBytes: number;
 
@@ -360,6 +363,31 @@ export class CodexInstrumenter {
 						});
 						await this.sessionManager.recordAnnotation(sessionId, informedEdge);
 					}
+
+					// Emit supersedes edge when modifying a file that already has an annotation in this session
+					if (action === 'modify') {
+						const annotationMap = this.lastLineAnnotations.get(sessionId);
+						const previousAnnotationId = annotationMap?.get(normalizedPath);
+						if (previousAnnotationId) {
+							const supersedesEdge = createEdgeRecord({
+								edgeType: 'supersedes',
+								sourceRef: annotation.annotation_id,
+								sourceType: 'annotation',
+								targetRef: previousAnnotationId,
+								targetType: 'annotation',
+								sessionId: session.vibesSessionId,
+							});
+							await this.sessionManager.recordAnnotation(sessionId, supersedesEdge);
+						}
+					}
+
+					// Track this annotation for future supersedes edges
+					let annotationMap = this.lastLineAnnotations.get(sessionId);
+					if (!annotationMap) {
+						annotationMap = new Map();
+						this.lastLineAnnotations.set(sessionId, annotationMap);
+					}
+					annotationMap.set(normalizedPath, annotation.annotation_id);
 				}
 			}
 		} catch (err) {
@@ -637,5 +665,6 @@ export class CodexInstrumenter {
 		this.lastReasoningHashes.delete(sessionId);
 		this.lastDecisionHashes.delete(sessionId);
 		this.lastFileReadHashes.delete(sessionId);
+		this.lastLineAnnotations.delete(sessionId);
 	}
 }
