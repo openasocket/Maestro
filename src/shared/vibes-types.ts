@@ -182,6 +182,10 @@ export interface VibesSessionRecord {
 	environment_hash: string | null;
 	assurance_level: VibesAssuranceLevel | null;
 	description: string | null;
+	// EVOLVE extensions (spec section 3):
+	parent_session_id?: string | null; // UUID of parent/orchestrator session
+	agent_name?: string; // Human-readable: "maestro", "worker-auth", etc.
+	agent_type?: string; // Role: "orchestrator", "worker", "reviewer", "other"
 }
 
 /** Directed relationship between audit events/context entries (spec section 7.6). */
@@ -205,9 +209,23 @@ export type VibesEdgeType =
 	| 'supersedes' // Source replaces target
 	| 'reviewed_by'; // Source was reviewed in context of target
 
+/** Records a multi-agent orchestration event (EVOLVE spec section 3). */
+export interface VibesDelegationRecord {
+	type: 'delegation';
+	parent_session_id: string; // UUID of orchestrator session
+	child_session_id: string; // UUID of delegated sub-agent session
+	timestamp: string; // ISO-8601
+	task_description?: string; // Human-readable task description
+	delegated_files?: string[]; // Relative file paths assigned to sub-agent
+	delegation_type?: 'task' | 'review' | 'research' | 'other';
+	parent_environment_hash?: string; // References parent's environment entry
+	child_environment_hash?: string; // References child's environment entry
+}
+
 /** Union of all annotation types written to .ai-audit/annotations.jsonl. */
 export type VibesAnnotation =
 	| VibesLineAnnotation
 	| VibeFunctionAnnotation
 	| VibesSessionRecord
-	| VibesEdgeRecord;
+	| VibesEdgeRecord
+	| VibesDelegationRecord;

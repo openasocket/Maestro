@@ -6,11 +6,8 @@
 // to ensure instrumentation failures never crash the agent session.
 
 import type { VibesSessionManager } from '../vibes-session';
-import {
-	createCommandEntry,
-	createPromptEntry,
-} from '../vibes-annotations';
-import type { VibesAssuranceLevel } from '../../../shared/vibes-types';
+import { createCommandEntry, createPromptEntry, createEdgeRecord } from '../vibes-annotations';
+import type { VibesAssuranceLevel, VibesDelegationRecord } from '../../../shared/vibes-types';
 
 // ============================================================================
 // Truncation Helper
@@ -86,7 +83,9 @@ export class MaestroInstrumenter {
 	 * Record an agent spawn event.
 	 *
 	 * Creates a command annotation recording agent dispatch with type 'tool_use',
-	 * and a prompt annotation (Medium+ assurance) recording the task assignment.
+	 * a prompt annotation (Medium+ assurance) recording the task assignment,
+	 * a delegation record (EVOLVE spec section 3) linking parent to child session,
+	 * and a delegated_to edge record linking the two sessions.
 	 */
 	async handleAgentSpawn(params: {
 		maestroSessionId: string;
@@ -94,6 +93,14 @@ export class MaestroInstrumenter {
 		agentType: string;
 		taskDescription?: string;
 		projectPath: string;
+		/** Files delegated to the sub-agent (relative paths). */
+		delegatedFiles?: string[];
+		/** Classification of the delegation. Defaults to 'task'. */
+		delegationType?: 'task' | 'review' | 'research' | 'other';
+		/** Override for the child's VIBES session UUID. Looked up from session manager if omitted. */
+		childVibesSessionId?: string;
+		/** Override for the child's environment hash. Looked up from session manager if omitted. */
+		childEnvironmentHash?: string;
 	}): Promise<void> {
 		try {
 			const session = this.sessionManager.getSession(params.maestroSessionId);
@@ -108,11 +115,7 @@ export class MaestroInstrumenter {
 				commandType: 'tool_use',
 				workingDirectory: params.projectPath,
 			});
-			await this.sessionManager.recordManifestEntry(
-				params.maestroSessionId,
-				cmdHash,
-				cmdEntry,
-			);
+			await this.sessionManager.recordManifestEntry(params.maestroSessionId, cmdHash, cmdEntry);
 
 			// Record the task description as a prompt entry (Medium+ assurance)
 			if (params.taskDescription && this.assuranceLevel !== 'low') {
@@ -123,9 +126,45 @@ export class MaestroInstrumenter {
 				await this.sessionManager.recordManifestEntry(
 					params.maestroSessionId,
 					promptHash,
-					promptEntry,
+					promptEntry
 				);
 			}
+
+			// Emit delegation record (EVOLVE spec section 3)
+			const parentVibesSessionId = session.vibesSessionId;
+			const childVibesSessionId =
+				params.childVibesSessionId ??
+				this.sessionManager.getSession(params.agentSessionId)?.vibesSessionId ??
+				params.agentSessionId;
+
+			const childEnvHash =
+				params.childEnvironmentHash ??
+				this.sessionManager.getEnvironmentHash(params.agentSessionId) ??
+				undefined;
+
+			const delegation: VibesDelegationRecord = {
+				type: 'delegation',
+				parent_session_id: parentVibesSessionId,
+				child_session_id: childVibesSessionId,
+				timestamp: new Date().toISOString(),
+				task_description: params.taskDescription,
+				delegated_files: params.delegatedFiles,
+				delegation_type: params.delegationType ?? 'task',
+				parent_environment_hash: session.environmentHash ?? undefined,
+				child_environment_hash: childEnvHash,
+			};
+			await this.sessionManager.recordAnnotation(params.maestroSessionId, delegation);
+
+			// Emit delegated_to edge record linking parent session to child session
+			const edge = createEdgeRecord({
+				edgeType: 'delegated_to',
+				sourceRef: parentVibesSessionId,
+				sourceType: 'session',
+				targetRef: childVibesSessionId,
+				targetType: 'session',
+				sessionId: parentVibesSessionId,
+			});
+			await this.sessionManager.recordAnnotation(params.maestroSessionId, edge);
 		} catch (err) {
 			logWarn('Error handling agent spawn', {
 				maestroSessionId: params.maestroSessionId,
@@ -164,11 +203,7 @@ export class MaestroInstrumenter {
 				exitCode,
 				outputSummary: truncateSummary(outputSummary),
 			});
-			await this.sessionManager.recordManifestEntry(
-				params.maestroSessionId,
-				cmdHash,
-				cmdEntry,
-			);
+			await this.sessionManager.recordManifestEntry(params.maestroSessionId, cmdHash, cmdEntry);
 		} catch (err) {
 			logWarn('Error handling agent complete', {
 				maestroSessionId: params.maestroSessionId,
@@ -205,11 +240,7 @@ export class MaestroInstrumenter {
 				workingDirectory: params.projectPath,
 				outputSummary: truncateSummary(outputSummary),
 			});
-			await this.sessionManager.recordManifestEntry(
-				params.maestroSessionId,
-				cmdHash,
-				cmdEntry,
-			);
+			await this.sessionManager.recordManifestEntry(params.maestroSessionId, cmdHash, cmdEntry);
 		} catch (err) {
 			logWarn('Error handling batch run start', {
 				maestroSessionId: params.maestroSessionId,
@@ -244,11 +275,7 @@ export class MaestroInstrumenter {
 				exitCode: 0,
 				outputSummary: truncateSummary(outputSummary),
 			});
-			await this.sessionManager.recordManifestEntry(
-				params.maestroSessionId,
-				cmdHash,
-				cmdEntry,
-			);
+			await this.sessionManager.recordManifestEntry(params.maestroSessionId, cmdHash, cmdEntry);
 		} catch (err) {
 			logWarn('Error handling batch run complete', {
 				maestroSessionId: params.maestroSessionId,

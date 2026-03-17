@@ -839,7 +839,7 @@ describe('vibes-annotations', () => {
 			expect(record.description).toBe('Full session record');
 		});
 
-		it('should always include all 8 fields in serialized JSON', () => {
+		it('should always include all 8 base fields in serialized JSON (no EVOLVE params)', () => {
 			const record = createSessionRecord({
 				event: 'start',
 				sessionId: 'session-schema',
@@ -860,6 +860,122 @@ describe('vibes-annotations', () => {
 				expect(json).toHaveProperty(key);
 			}
 			expect(Object.keys(json)).toHaveLength(8);
+		});
+
+		it('should include parent_session_id when provided (EVOLVE)', () => {
+			const record = createSessionRecord({
+				event: 'start',
+				sessionId: 'child-session-1',
+				parentSessionId: 'parent-session-1',
+			});
+
+			expect(record.parent_session_id).toBe('parent-session-1');
+		});
+
+		it('should set parent_session_id to null when explicitly null (EVOLVE)', () => {
+			const record = createSessionRecord({
+				event: 'start',
+				sessionId: 'root-session',
+				parentSessionId: null,
+			});
+
+			expect(record.parent_session_id).toBeNull();
+		});
+
+		it('should not include parent_session_id when not provided (EVOLVE)', () => {
+			const record = createSessionRecord({
+				event: 'start',
+				sessionId: 'standalone-session',
+			});
+
+			expect(record.parent_session_id).toBeUndefined();
+		});
+
+		it('should include agent_name when provided (EVOLVE)', () => {
+			const record = createSessionRecord({
+				event: 'start',
+				sessionId: 'named-session',
+				agentName: 'maestro',
+			});
+
+			expect(record.agent_name).toBe('maestro');
+		});
+
+		it('should include agent_type when provided (EVOLVE)', () => {
+			const record = createSessionRecord({
+				event: 'start',
+				sessionId: 'typed-session',
+				agentType: 'orchestrator',
+			});
+
+			expect(record.agent_type).toBe('orchestrator');
+		});
+
+		it('should include all EVOLVE fields when provided together', () => {
+			const record = createSessionRecord({
+				event: 'start',
+				sessionId: 'full-evolve-session',
+				environmentHash: 'e'.repeat(64),
+				assuranceLevel: 'high',
+				description: 'Worker agent for auth module',
+				parentSessionId: 'orchestrator-session-id',
+				agentName: 'worker-auth',
+				agentType: 'worker',
+			});
+
+			expect(record.parent_session_id).toBe('orchestrator-session-id');
+			expect(record.agent_name).toBe('worker-auth');
+			expect(record.agent_type).toBe('worker');
+			expect(record.environment_hash).toBe('e'.repeat(64));
+			expect(record.assurance_level).toBe('high');
+			expect(record.description).toBe('Worker agent for auth module');
+		});
+
+		it('should include 11 fields when all EVOLVE params are provided', () => {
+			const record = createSessionRecord({
+				event: 'start',
+				sessionId: 'evolve-schema-test',
+				parentSessionId: 'parent-1',
+				agentName: 'worker-1',
+				agentType: 'worker',
+			});
+
+			const json = JSON.parse(JSON.stringify(record));
+			const expectedKeys = [
+				'type',
+				'annotation_id',
+				'event',
+				'session_id',
+				'timestamp',
+				'environment_hash',
+				'assurance_level',
+				'description',
+				'parent_session_id',
+				'agent_name',
+				'agent_type',
+			];
+			for (const key of expectedKeys) {
+				expect(json).toHaveProperty(key);
+			}
+			expect(Object.keys(json)).toHaveLength(11);
+		});
+
+		it('should compute different annotation_ids with and without EVOLVE fields', () => {
+			const baseRecord = createSessionRecord({
+				event: 'start',
+				sessionId: 'diff-id-test',
+			});
+
+			const evolveRecord = createSessionRecord({
+				event: 'start',
+				sessionId: 'diff-id-test',
+				parentSessionId: 'parent-1',
+				agentName: 'worker',
+				agentType: 'worker',
+			});
+
+			// annotation_id is content-derived, so EVOLVE fields change it
+			expect(baseRecord.annotation_id).not.toBe(evolveRecord.annotation_id);
 		});
 	});
 

@@ -14,11 +14,12 @@ import { MaestroInstrumenter } from './instrumenters/maestro-instrumenter';
 import { createEnvironmentEntry } from './vibes-annotations';
 import { isVibesInitialized, vibesInit, findVibesCheckBinary } from './vibes-bridge';
 import { initVibesDirectly, backfillCommitHash, flushAll } from './vibes-io';
-import {
-	VIBES_SETTINGS_DEFAULTS,
-	getVibesSettingWithDefault,
-} from '../../shared/vibes-settings';
-import type { VibesAnnotation, VibesAssuranceLevel, VibesEnvironmentEntry } from '../../shared/vibes-types';
+import { VIBES_SETTINGS_DEFAULTS, getVibesSettingWithDefault } from '../../shared/vibes-settings';
+import type {
+	VibesAnnotation,
+	VibesAssuranceLevel,
+	VibesEnvironmentEntry,
+} from '../../shared/vibes-types';
 import type { ProcessConfig, ToolExecution, UsageStats } from '../process-manager/types';
 
 // ============================================================================
@@ -106,6 +107,14 @@ export class VibesCoordinator {
 	/** Optional safeSend function for emitting IPC events to the renderer. */
 	private safeSend: SafeSendFn | null = null;
 
+	/**
+	 * Maps child session IDs to their parent (orchestrator) session IDs.
+	 * Populated by `registerDelegation()` when Auto Run, Group Chat, or
+	 * context grooming spawns a sub-agent. Used to set `parent_session_id`
+	 * on child session start records (EVOLVE spec section 3).
+	 */
+	private parentSessionMap: Map<string, string> = new Map();
+
 	constructor(params: { settingsStore: VibesSettingsStore; safeSend?: SafeSendFn }) {
 		this.settingsStore = params.settingsStore;
 		this.safeSend = params.safeSend ?? null;
@@ -155,66 +164,51 @@ export class VibesCoordinator {
 		if (!this.isEnabled()) {
 			logger.debug(
 				'[VibesCoordinator] VIBES is disabled, skipping ProcessManager attachment',
-				'VibesCoordinator',
+				'VibesCoordinator'
 			);
 			return;
 		}
 
-		processManager.on(
-			'tool-execution',
-			(sessionId: string, tool: ToolExecution) => {
-				try {
-					this.handleToolExecution(sessionId, tool).catch((err) => {
-						logger.warn(
-							'[VibesCoordinator] Error handling tool-execution event',
-							'VibesCoordinator',
-							{ sessionId, error: String(err) },
-						);
-					});
-				} catch (err) {
+		processManager.on('tool-execution', (sessionId: string, tool: ToolExecution) => {
+			try {
+				this.handleToolExecution(sessionId, tool).catch((err) => {
 					logger.warn(
-						'[VibesCoordinator] Sync error in tool-execution handler',
+						'[VibesCoordinator] Error handling tool-execution event',
 						'VibesCoordinator',
-						{ sessionId, error: String(err) },
+						{ sessionId, error: String(err) }
 					);
-				}
-			},
-		);
+				});
+			} catch (err) {
+				logger.warn('[VibesCoordinator] Sync error in tool-execution handler', 'VibesCoordinator', {
+					sessionId,
+					error: String(err),
+				});
+			}
+		});
 
-		processManager.on(
-			'thinking-chunk',
-			(sessionId: string, text: string) => {
-				try {
-					this.handleThinkingChunk(sessionId, text);
-				} catch (err) {
-					logger.warn(
-						'[VibesCoordinator] Error handling thinking-chunk event',
-						'VibesCoordinator',
-						{ sessionId, error: String(err) },
-					);
-				}
-			},
-		);
+		processManager.on('thinking-chunk', (sessionId: string, text: string) => {
+			try {
+				this.handleThinkingChunk(sessionId, text);
+			} catch (err) {
+				logger.warn('[VibesCoordinator] Error handling thinking-chunk event', 'VibesCoordinator', {
+					sessionId,
+					error: String(err),
+				});
+			}
+		});
 
-		processManager.on(
-			'usage',
-			(sessionId: string, stats: UsageStats) => {
-				try {
-					this.handleUsage(sessionId, stats);
-				} catch (err) {
-					logger.warn(
-						'[VibesCoordinator] Error handling usage event',
-						'VibesCoordinator',
-						{ sessionId, error: String(err) },
-					);
-				}
-			},
-		);
+		processManager.on('usage', (sessionId: string, stats: UsageStats) => {
+			try {
+				this.handleUsage(sessionId, stats);
+			} catch (err) {
+				logger.warn('[VibesCoordinator] Error handling usage event', 'VibesCoordinator', {
+					sessionId,
+					error: String(err),
+				});
+			}
+		});
 
-		logger.info(
-			'[VibesCoordinator] Attached to ProcessManager event emitter',
-			'VibesCoordinator',
-		);
+		logger.info('[VibesCoordinator] Attached to ProcessManager event emitter', 'VibesCoordinator');
 	}
 
 	// ========================================================================
@@ -236,7 +230,7 @@ export class VibesCoordinator {
 			logger.debug(
 				'[VibesCoordinator] VIBES not enabled for agent type, skipping session',
 				'VibesCoordinator',
-				{ sessionId, agentType },
+				{ sessionId, agentType }
 			);
 			return;
 		}
@@ -246,7 +240,7 @@ export class VibesCoordinator {
 			logger.debug(
 				'[VibesCoordinator] No project path available, skipping VIBES session',
 				'VibesCoordinator',
-				{ sessionId, agentType },
+				{ sessionId, agentType }
 			);
 			return;
 		}
@@ -256,7 +250,7 @@ export class VibesCoordinator {
 			logger.debug(
 				'[VibesCoordinator] Project .ai-audit/ is not writable, skipping VIBES session',
 				'VibesCoordinator',
-				{ sessionId, agentType, projectPath },
+				{ sessionId, agentType, projectPath }
 			);
 			return;
 		}
@@ -273,7 +267,7 @@ export class VibesCoordinator {
 				logger.warn(
 					'[VibesCoordinator] Auto-init check failed, continuing without initialization',
 					'VibesCoordinator',
-					{ projectPath, error: String(err) },
+					{ projectPath, error: String(err) }
 				);
 			}
 		}
@@ -316,7 +310,7 @@ export class VibesCoordinator {
 				projectPath,
 				agentType,
 				assuranceLevel,
-				envHash,
+				envHash
 			);
 
 			this.sessionAgentTypes.set(sessionId, agentType);
@@ -328,11 +322,12 @@ export class VibesCoordinator {
 			// Environment is the most critical entry — every annotation references it.
 			await this.sessionManager.recordManifestEntryImmediate(sessionId, envHash, envEntry);
 
-			logger.info(
-				'[VibesCoordinator] VIBES session started',
-				'VibesCoordinator',
-				{ sessionId, agentType, assuranceLevel, projectPath },
-			);
+			logger.info('[VibesCoordinator] VIBES session started', 'VibesCoordinator', {
+				sessionId,
+				agentType,
+				assuranceLevel,
+				projectPath,
+			});
 		} catch (err) {
 			// If session start fails due to write permissions, mark project as unwritable
 			const errMsg = String(err);
@@ -341,14 +336,14 @@ export class VibesCoordinator {
 				logger.warn(
 					'[VibesCoordinator] .ai-audit/ directory is not writable, disabling VIBES for this project',
 					'VibesCoordinator',
-					{ sessionId, agentType, projectPath, error: errMsg },
+					{ sessionId, agentType, projectPath, error: errMsg }
 				);
 			} else {
-				logger.warn(
-					'[VibesCoordinator] Failed to start VIBES session',
-					'VibesCoordinator',
-					{ sessionId, agentType, error: errMsg },
-				);
+				logger.warn('[VibesCoordinator] Failed to start VIBES session', 'VibesCoordinator', {
+					sessionId,
+					agentType,
+					error: errMsg,
+				});
 			}
 		}
 	}
@@ -377,18 +372,17 @@ export class VibesCoordinator {
 			this.sessionAgentTypes.delete(sessionId);
 			this.environmentUpdatedSessions.delete(sessionId);
 			this.sessionToolExtensions.delete(sessionId);
+			this.parentSessionMap.delete(sessionId);
 
-			logger.info(
-				'[VibesCoordinator] VIBES session ended',
-				'VibesCoordinator',
-				{ sessionId, agentType },
-			);
+			logger.info('[VibesCoordinator] VIBES session ended', 'VibesCoordinator', {
+				sessionId,
+				agentType,
+			});
 		} catch (err) {
-			logger.warn(
-				'[VibesCoordinator] Failed to end VIBES session',
-				'VibesCoordinator',
-				{ sessionId, error: String(err) },
-			);
+			logger.warn('[VibesCoordinator] Failed to end VIBES session', 'VibesCoordinator', {
+				sessionId,
+				error: String(err),
+			});
 		}
 	}
 
@@ -413,7 +407,11 @@ export class VibesCoordinator {
 				}
 				await this.sessionManager.endSession(sessionId);
 			} catch (err) {
-				logger.warn(`[VibesCoordinator] shutdown: failed to end session ${sessionId}`, 'VibesCoordinator', { error: String(err) });
+				logger.warn(
+					`[VibesCoordinator] shutdown: failed to end session ${sessionId}`,
+					'VibesCoordinator',
+					{ error: String(err) }
+				);
 			}
 		}
 		// Final safety flush for any remaining debounced writes
@@ -437,7 +435,7 @@ export class VibesCoordinator {
 	async handleGitCommit(
 		projectPath: string,
 		commitHash: string,
-		sessionId?: string,
+		sessionId?: string
 	): Promise<number> {
 		if (!this.isEnabled()) {
 			return 0;
@@ -462,16 +460,16 @@ export class VibesCoordinator {
 				logger.info(
 					'[VibesCoordinator] Backfilled commit_hash on annotations',
 					'VibesCoordinator',
-					{ projectPath, commitHash, updatedCount: count },
+					{ projectPath, commitHash, updatedCount: count }
 				);
 			}
 			return count;
 		} catch (err) {
-			logger.warn(
-				'[VibesCoordinator] Failed to backfill commit_hash',
-				'VibesCoordinator',
-				{ projectPath, commitHash, error: String(err) },
-			);
+			logger.warn('[VibesCoordinator] Failed to backfill commit_hash', 'VibesCoordinator', {
+				projectPath,
+				commitHash,
+				error: String(err),
+			});
 			return 0;
 		}
 	}
@@ -487,7 +485,7 @@ export class VibesCoordinator {
 	async handlePromptSent(
 		sessionId: string,
 		prompt: string,
-		contextFiles?: string[],
+		contextFiles?: string[]
 	): Promise<void> {
 		if (!this.sessionManager.isSessionActive(sessionId)) {
 			return;
@@ -504,11 +502,10 @@ export class VibesCoordinator {
 				await instrumenter.handlePrompt(sessionId, prompt, contextFiles);
 			}
 		} catch (err) {
-			logger.warn(
-				'[VibesCoordinator] Failed to record prompt',
-				'VibesCoordinator',
-				{ sessionId, error: String(err) },
-			);
+			logger.warn('[VibesCoordinator] Failed to record prompt', 'VibesCoordinator', {
+				sessionId,
+				error: String(err),
+			});
 		}
 	}
 
@@ -535,7 +532,7 @@ export class VibesCoordinator {
 
 		const perAgentConfig = this.settingsStore.get(
 			'vibesPerAgentConfig',
-			VIBES_SETTINGS_DEFAULTS.vibesPerAgentConfig,
+			VIBES_SETTINGS_DEFAULTS.vibesPerAgentConfig
 		) as Record<string, { enabled: boolean }>;
 
 		const agentConfig = perAgentConfig[agentType];
@@ -553,9 +550,40 @@ export class VibesCoordinator {
 	 * Returns annotation stats for a session.
 	 */
 	getSessionStats(
-		sessionId: string,
+		sessionId: string
 	): { annotationCount: number; duration: number; assuranceLevel: VibesAssuranceLevel } | null {
 		return this.sessionManager.getSessionStats(sessionId);
+	}
+
+	// ========================================================================
+	// Delegation Tracking (EVOLVE Section 3)
+	// ========================================================================
+
+	/**
+	 * Register a parent→child delegation relationship.
+	 *
+	 * Called by Auto Run, Group Chat, or context grooming when an orchestrator
+	 * session spawns a sub-agent session. The mapping is consumed when the
+	 * child session starts to populate `parent_session_id` on its session
+	 * start record (EVOLVE spec section 3).
+	 *
+	 * @param parentSessionId - Maestro session ID of the orchestrator
+	 * @param childSessionId  - Maestro session ID of the spawned sub-agent
+	 */
+	registerDelegation(parentSessionId: string, childSessionId: string): void {
+		this.parentSessionMap.set(childSessionId, parentSessionId);
+		logger.debug('[VibesCoordinator] Registered delegation', 'VibesCoordinator', {
+			parentSessionId,
+			childSessionId,
+		});
+	}
+
+	/**
+	 * Look up the parent (orchestrator) session ID for a child session.
+	 * Returns null if the session has no registered parent delegation.
+	 */
+	getParentSessionId(childSessionId: string): string | null {
+		return this.parentSessionMap.get(childSessionId) ?? null;
 	}
 
 	/**
@@ -583,7 +611,7 @@ export class VibesCoordinator {
 		this.vibesBinaryMissingLogged = true;
 		logger.warn(
 			'[VibesCoordinator] vibecheck binary not found — CLI-dependent features disabled',
-			'VibesCoordinator',
+			'VibesCoordinator'
 		);
 		return true;
 	}
@@ -617,10 +645,7 @@ export class VibesCoordinator {
 	 * Route a tool-execution event to the appropriate instrumenter.
 	 * Called internally by the ProcessManager event listener, or directly.
 	 */
-	async handleToolExecution(
-		sessionId: string,
-		tool: ToolExecution,
-	): Promise<void> {
+	async handleToolExecution(sessionId: string, tool: ToolExecution): Promise<void> {
 		if (!this.sessionManager.isSessionActive(sessionId)) {
 			return;
 		}
@@ -636,11 +661,10 @@ export class VibesCoordinator {
 				await instrumenter.handleToolExecution(sessionId, tool);
 			}
 		} catch (err) {
-			logger.warn(
-				'[VibesCoordinator] Error routing tool-execution event',
-				'VibesCoordinator',
-				{ sessionId, error: String(err) },
-			);
+			logger.warn('[VibesCoordinator] Error routing tool-execution event', 'VibesCoordinator', {
+				sessionId,
+				error: String(err),
+			});
 		}
 	}
 
@@ -664,11 +688,10 @@ export class VibesCoordinator {
 				instrumenter.handleThinkingChunk(sessionId, text);
 			}
 		} catch (err) {
-			logger.warn(
-				'[VibesCoordinator] Error routing thinking-chunk event',
-				'VibesCoordinator',
-				{ sessionId, error: String(err) },
-			);
+			logger.warn('[VibesCoordinator] Error routing thinking-chunk event', 'VibesCoordinator', {
+				sessionId,
+				error: String(err),
+			});
 		}
 	}
 
@@ -710,21 +733,19 @@ export class VibesCoordinator {
 			// Update the environment entry with real model info (once per session)
 			if (stats.modelName && !this.environmentUpdatedSessions.has(sessionId)) {
 				this.environmentUpdatedSessions.add(sessionId);
-				this.updateEnvironmentWithModelInfo(sessionId, agentType, stats.modelName)
-					.catch((err) => {
-						logger.warn(
-							'[VibesCoordinator] Failed to update environment with model info',
-							'VibesCoordinator',
-							{ sessionId, error: String(err) },
-						);
-					});
+				this.updateEnvironmentWithModelInfo(sessionId, agentType, stats.modelName).catch((err) => {
+					logger.warn(
+						'[VibesCoordinator] Failed to update environment with model info',
+						'VibesCoordinator',
+						{ sessionId, error: String(err) }
+					);
+				});
 			}
 		} catch (err) {
-			logger.warn(
-				'[VibesCoordinator] Error routing usage event',
-				'VibesCoordinator',
-				{ sessionId, error: String(err) },
-			);
+			logger.warn('[VibesCoordinator] Error routing usage event', 'VibesCoordinator', {
+				sessionId,
+				error: String(err),
+			});
 		}
 	}
 
@@ -736,14 +757,14 @@ export class VibesCoordinator {
 	private async updateEnvironmentWithModelInfo(
 		sessionId: string,
 		agentType: string,
-		modelName: string,
+		modelName: string
 	): Promise<void> {
 		const existingHash = this.sessionManager.getEnvironmentHash(sessionId);
 		if (!existingHash) {
 			logger.warn(
 				'[VibesCoordinator] Cannot update environment — no environment hash on session',
 				'VibesCoordinator',
-				{ sessionId },
+				{ sessionId }
 			);
 			return;
 		}
@@ -767,7 +788,7 @@ export class VibesCoordinator {
 		logger.info(
 			'[VibesCoordinator] Updated environment entry with model info',
 			'VibesCoordinator',
-			{ sessionId, modelName, modelVersion, hash: existingHash },
+			{ sessionId, modelName, modelVersion, hash: existingHash }
 		);
 	}
 
@@ -798,9 +819,7 @@ export class VibesCoordinator {
 	 * Get the appropriate instrumenter for an agent type.
 	 * Returns null for unsupported agent types.
 	 */
-	private getInstrumenter(
-		agentType: string,
-	): ClaudeCodeInstrumenter | CodexInstrumenter | null {
+	private getInstrumenter(agentType: string): ClaudeCodeInstrumenter | CodexInstrumenter | null {
 		switch (agentType) {
 			case 'claude-code':
 				return this.claudeInstrumenter;
@@ -852,10 +871,9 @@ export class VibesCoordinator {
 	private getAssuranceLevel(): VibesAssuranceLevel {
 		return getVibesSettingWithDefault(
 			'vibesAssuranceLevel',
-			this.settingsStore.get(
-				'vibesAssuranceLevel',
-				VIBES_SETTINGS_DEFAULTS.vibesAssuranceLevel,
-			) as VibesAssuranceLevel | undefined,
+			this.settingsStore.get('vibesAssuranceLevel', VIBES_SETTINGS_DEFAULTS.vibesAssuranceLevel) as
+				| VibesAssuranceLevel
+				| undefined
 		);
 	}
 
@@ -863,10 +881,7 @@ export class VibesCoordinator {
 	 * Check whether vibesAutoInit is enabled in settings.
 	 */
 	private isAutoInitEnabled(): boolean {
-		return !!this.settingsStore.get(
-			'vibesAutoInit',
-			VIBES_SETTINGS_DEFAULTS.vibesAutoInit,
-		);
+		return !!this.settingsStore.get('vibesAutoInit', VIBES_SETTINGS_DEFAULTS.vibesAutoInit);
 	}
 
 	/**
@@ -879,7 +894,7 @@ export class VibesCoordinator {
 		state: {
 			annotationCount: number;
 			lastAnnotation?: VibesAnnotation;
-		},
+		}
 	): void {
 		if (!this.safeSend) {
 			return;
@@ -902,7 +917,7 @@ export class VibesCoordinator {
 			logger.debug(
 				'[VibesCoordinator] Failed to emit annotation-update event',
 				'VibesCoordinator',
-				{ error: String(err) },
+				{ error: String(err) }
 			);
 		}
 	}
@@ -919,26 +934,30 @@ export class VibesCoordinator {
 		const assuranceLevel = this.getAssuranceLevel();
 		const customBinaryPath = this.settingsStore.get('vibesCheckBinaryPath', '') as string;
 
-		logger.info(
-			'[VibesCoordinator] Auto-initializing VIBES for project',
-			'VibesCoordinator',
-			{ projectPath, projectName, assuranceLevel },
-		);
+		logger.info('[VibesCoordinator] Auto-initializing VIBES for project', 'VibesCoordinator', {
+			projectPath,
+			projectName,
+			assuranceLevel,
+		});
 
 		// Try vibecheck binary first
 		const binaryPath = await findVibesCheckBinary(customBinaryPath || undefined, projectPath);
 		if (binaryPath) {
 			try {
-				const result = await vibesInit(projectPath, {
-					projectName,
-					assuranceLevel,
-				}, customBinaryPath || undefined);
+				const result = await vibesInit(
+					projectPath,
+					{
+						projectName,
+						assuranceLevel,
+					},
+					customBinaryPath || undefined
+				);
 
 				if (result.success) {
 					logger.info(
 						'[VibesCoordinator] Auto-init succeeded via vibecheck binary',
 						'VibesCoordinator',
-						{ projectPath },
+						{ projectPath }
 					);
 					return;
 				}
@@ -946,13 +965,13 @@ export class VibesCoordinator {
 				logger.warn(
 					'[VibesCoordinator] vibecheck init failed, falling back to direct init',
 					'VibesCoordinator',
-					{ projectPath, error: result.error },
+					{ projectPath, error: result.error }
 				);
 			} catch (err) {
 				logger.warn(
 					'[VibesCoordinator] vibecheck init threw, falling back to direct init',
 					'VibesCoordinator',
-					{ projectPath, error: String(err) },
+					{ projectPath, error: String(err) }
 				);
 			}
 		}
@@ -967,14 +986,13 @@ export class VibesCoordinator {
 			logger.info(
 				'[VibesCoordinator] Auto-init succeeded via direct directory creation',
 				'VibesCoordinator',
-				{ projectPath },
+				{ projectPath }
 			);
 		} else {
-			logger.warn(
-				'[VibesCoordinator] Auto-init failed',
-				'VibesCoordinator',
-				{ projectPath, error: directResult.error },
-			);
+			logger.warn('[VibesCoordinator] Auto-init failed', 'VibesCoordinator', {
+				projectPath,
+				error: directResult.error,
+			});
 		}
 	}
 }

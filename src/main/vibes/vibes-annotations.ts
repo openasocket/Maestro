@@ -330,6 +330,7 @@ export function createFunctionAnnotation(params: {
 
 /**
  * Create a session start/end record for tracking agent session boundaries.
+ * Supports EVOLVE extensions: parent_session_id, agent_name, agent_type.
  */
 export function createSessionRecord(params: {
 	event: 'start' | 'end';
@@ -337,6 +338,10 @@ export function createSessionRecord(params: {
 	environmentHash?: string | null;
 	assuranceLevel?: VibesAssuranceLevel | null;
 	description?: string | null;
+	// EVOLVE extensions (spec section 3):
+	parentSessionId?: string | null;
+	agentName?: string;
+	agentType?: string;
 }): VibesSessionRecord {
 	const record: VibesSessionRecord = {
 		type: 'session',
@@ -348,6 +353,16 @@ export function createSessionRecord(params: {
 		assurance_level: params.assuranceLevel ?? null,
 		description: params.description ?? null,
 	};
+	// Set EVOLVE fields only when provided (keeps records clean for non-EVOLVE usage)
+	if (params.parentSessionId !== undefined) {
+		record.parent_session_id = params.parentSessionId ?? null;
+	}
+	if (params.agentName !== undefined) {
+		record.agent_name = params.agentName;
+	}
+	if (params.agentType !== undefined) {
+		record.agent_type = params.agentType;
+	}
 	record.annotation_id = computeAnnotationId(record as unknown as Record<string, unknown>);
 	return record;
 }

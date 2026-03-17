@@ -12,7 +12,13 @@ import * as os from 'os';
 
 import { VibesCoordinator } from '../../../main/vibes/vibes-coordinator';
 import type { VibesSettingsStore } from '../../../main/vibes/vibes-coordinator';
-import { readAnnotations, readVibesManifest, ensureAuditDir, flushAll, resetAllBuffers } from '../../../main/vibes/vibes-io';
+import {
+	readAnnotations,
+	readVibesManifest,
+	ensureAuditDir,
+	flushAll,
+	resetAllBuffers,
+} from '../../../main/vibes/vibes-io';
 import { VIBES_SETTINGS_DEFAULTS } from '../../../shared/vibes-settings';
 import type {
 	VibesSessionRecord,
@@ -29,15 +35,13 @@ import type { ProcessConfig } from '../../../main/process-manager/types';
 /**
  * Create a mock settings store with configurable overrides.
  */
-function createMockSettingsStore(
-	overrides: Record<string, unknown> = {},
-): VibesSettingsStore {
+function createMockSettingsStore(overrides: Record<string, unknown> = {}): VibesSettingsStore {
 	const settings: Record<string, unknown> = {
 		vibesEnabled: true,
 		vibesAssuranceLevel: 'medium',
 		vibesPerAgentConfig: {
 			'claude-code': { enabled: true },
-			'codex': { enabled: true },
+			codex: { enabled: true },
 		},
 		vibesMaestroOrchestrationEnabled: true,
 		...overrides,
@@ -54,9 +58,7 @@ function createMockSettingsStore(
 /**
  * Create a minimal ProcessConfig for testing.
  */
-function createProcessConfig(
-	overrides: Partial<ProcessConfig> = {},
-): ProcessConfig {
+function createProcessConfig(overrides: Partial<ProcessConfig> = {}): ProcessConfig {
 	return {
 		sessionId: 'sess-1',
 		toolType: 'claude-code',
@@ -142,7 +144,7 @@ describe('vibes-coordinator', () => {
 			const store = createMockSettingsStore({
 				vibesPerAgentConfig: {
 					'claude-code': { enabled: false },
-					'codex': { enabled: true },
+					codex: { enabled: true },
 				},
 			});
 			const coordinator = new VibesCoordinator({ settingsStore: store });
@@ -328,7 +330,7 @@ describe('vibes-coordinator', () => {
 			await flushAll();
 			const manifest = await readVibesManifest(tmpDir);
 			const envHashes = Object.keys(manifest.entries).filter(
-				(k) => manifest.entries[k].type === 'environment',
+				(k) => manifest.entries[k].type === 'environment'
 			);
 			expect(envHashes).toHaveLength(1);
 
@@ -397,9 +399,7 @@ describe('vibes-coordinator', () => {
 			await coordinator.handleProcessExit('sess-1', 0);
 
 			const annotations = await readAnnotations(tmpDir);
-			const endRecords = annotations.filter(
-				(a) => (a as VibesSessionRecord).event === 'end',
-			);
+			const endRecords = annotations.filter((a) => (a as VibesSessionRecord).event === 'end');
 			expect(endRecords).toHaveLength(1);
 		});
 
@@ -426,9 +426,7 @@ describe('vibes-coordinator', () => {
 			await coordinator.handleProcessExit('sess-1', 0); // second call
 
 			const annotations = await readAnnotations(tmpDir);
-			const endRecords = annotations.filter(
-				(a) => (a as VibesSessionRecord).event === 'end',
-			);
+			const endRecords = annotations.filter((a) => (a as VibesSessionRecord).event === 'end');
 			expect(endRecords).toHaveLength(1);
 		});
 	});
@@ -447,9 +445,9 @@ describe('vibes-coordinator', () => {
 				toolType: 'claude-code',
 				projectPath: tmpDir,
 			});
-			const tmpDir2 = await (await import('fs/promises')).mkdtemp(
-				(await import('path')).join((await import('os')).tmpdir(), 'vibes-shutdown-test-'),
-			);
+			const tmpDir2 = await (
+				await import('fs/promises')
+			).mkdtemp((await import('path')).join((await import('os')).tmpdir(), 'vibes-shutdown-test-'));
 			await ensureAuditDir(tmpDir2);
 
 			const config2 = createProcessConfig({
@@ -473,15 +471,11 @@ describe('vibes-coordinator', () => {
 
 			// Verify end annotations were written
 			const annotations1 = await readAnnotations(tmpDir);
-			const endRecords1 = annotations1.filter(
-				(a) => (a as VibesSessionRecord).event === 'end',
-			);
+			const endRecords1 = annotations1.filter((a) => (a as VibesSessionRecord).event === 'end');
 			expect(endRecords1).toHaveLength(1);
 
 			const annotations2 = await readAnnotations(tmpDir2);
-			const endRecords2 = annotations2.filter(
-				(a) => (a as VibesSessionRecord).event === 'end',
-			);
+			const endRecords2 = annotations2.filter((a) => (a as VibesSessionRecord).event === 'end');
 			expect(endRecords2).toHaveLength(1);
 
 			await (await import('fs/promises')).rm(tmpDir2, { recursive: true, force: true });
@@ -935,12 +929,8 @@ describe('vibes-coordinator', () => {
 
 			// 5. Verify annotations
 			const annotations = await readAnnotations(tmpDir);
-			const sessionStarts = annotations.filter(
-				(a) => (a as VibesSessionRecord).event === 'start',
-			);
-			const sessionEnds = annotations.filter(
-				(a) => (a as VibesSessionRecord).event === 'end',
-			);
+			const sessionStarts = annotations.filter((a) => (a as VibesSessionRecord).event === 'start');
+			const sessionEnds = annotations.filter((a) => (a as VibesSessionRecord).event === 'end');
 			expect(sessionStarts).toHaveLength(1);
 			expect(sessionEnds).toHaveLength(1);
 
@@ -1154,8 +1144,9 @@ describe('vibes-coordinator', () => {
 
 			const annotations = await readAnnotations(tmpDir);
 			const subagentAnnotations = annotations.filter(
-				(a) => (a as VibesSessionRecord).type === 'session'
-					&& (a as VibesSessionRecord).description?.startsWith('subagent:'),
+				(a) =>
+					(a as VibesSessionRecord).type === 'session' &&
+					(a as VibesSessionRecord).description?.startsWith('subagent:')
 			) as VibesSessionRecord[];
 			expect(subagentAnnotations).toHaveLength(1);
 			expect(subagentAnnotations[0].event).toBe('start');
@@ -1184,8 +1175,9 @@ describe('vibes-coordinator', () => {
 
 			const annotations = await readAnnotations(tmpDir);
 			const subagentAnnotations = annotations.filter(
-				(a) => (a as VibesSessionRecord).type === 'session'
-					&& (a as VibesSessionRecord).description?.startsWith('subagent:'),
+				(a) =>
+					(a as VibesSessionRecord).type === 'session' &&
+					(a as VibesSessionRecord).description?.startsWith('subagent:')
 			) as VibesSessionRecord[];
 			expect(subagentAnnotations).toHaveLength(1);
 			expect(subagentAnnotations[0].description).toBe('subagent:unknown');
@@ -1209,7 +1201,10 @@ describe('vibes-coordinator', () => {
 
 			// Pass malformed event data — should not throw
 			await expect(
-				coordinator.handleToolExecution('sess-1', null as unknown as { toolName: string; state: unknown; timestamp: number }),
+				coordinator.handleToolExecution(
+					'sess-1',
+					null as unknown as { toolName: string; state: unknown; timestamp: number }
+				)
 			).resolves.not.toThrow();
 		});
 
@@ -1241,7 +1236,10 @@ describe('vibes-coordinator', () => {
 
 			// Should not throw with null stats
 			expect(() =>
-				coordinator.handleUsage('sess-1', null as unknown as import('../../../main/process-manager/types').UsageStats),
+				coordinator.handleUsage(
+					'sess-1',
+					null as unknown as import('../../../main/process-manager/types').UsageStats
+				)
 			).not.toThrow();
 		});
 
@@ -1346,6 +1344,111 @@ describe('vibes-coordinator', () => {
 
 			coordinator.clearUnwritableProjectCache();
 			// Should not throw
+		});
+	});
+
+	// ========================================================================
+	// Delegation Tracking (EVOLVE Section 3)
+	// ========================================================================
+	describe('delegation tracking', () => {
+		it('should register and retrieve parent session ID for a child', () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			coordinator.registerDelegation('parent-sess-1', 'child-sess-1');
+			expect(coordinator.getParentSessionId('child-sess-1')).toBe('parent-sess-1');
+		});
+
+		it('should return null for sessions with no registered parent', () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			expect(coordinator.getParentSessionId('unknown-sess')).toBeNull();
+		});
+
+		it('should support multiple child sessions under the same parent', () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			coordinator.registerDelegation('parent-sess-1', 'child-sess-1');
+			coordinator.registerDelegation('parent-sess-1', 'child-sess-2');
+			coordinator.registerDelegation('parent-sess-1', 'child-sess-3');
+
+			expect(coordinator.getParentSessionId('child-sess-1')).toBe('parent-sess-1');
+			expect(coordinator.getParentSessionId('child-sess-2')).toBe('parent-sess-1');
+			expect(coordinator.getParentSessionId('child-sess-3')).toBe('parent-sess-1');
+		});
+
+		it('should support different parents for different children', () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			coordinator.registerDelegation('orchestrator-A', 'worker-1');
+			coordinator.registerDelegation('orchestrator-B', 'worker-2');
+
+			expect(coordinator.getParentSessionId('worker-1')).toBe('orchestrator-A');
+			expect(coordinator.getParentSessionId('worker-2')).toBe('orchestrator-B');
+		});
+
+		it('should clean up parent mapping when child session exits', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			// Start a child session so handleProcessExit has something to end
+			const config = createProcessConfig({
+				sessionId: 'child-sess-1',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			await coordinator.handleProcessSpawn('child-sess-1', config);
+
+			// Register the delegation
+			coordinator.registerDelegation('parent-sess-1', 'child-sess-1');
+			expect(coordinator.getParentSessionId('child-sess-1')).toBe('parent-sess-1');
+
+			// Exit the child session — should clean up the mapping
+			await coordinator.handleProcessExit('child-sess-1', 0);
+			expect(coordinator.getParentSessionId('child-sess-1')).toBeNull();
+		});
+
+		it('should not affect other delegations when one child exits', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			// Start two child sessions
+			const config1 = createProcessConfig({
+				sessionId: 'child-1',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			const config2 = createProcessConfig({
+				sessionId: 'child-2',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			await coordinator.handleProcessSpawn('child-1', config1);
+			await coordinator.handleProcessSpawn('child-2', config2);
+
+			coordinator.registerDelegation('parent-1', 'child-1');
+			coordinator.registerDelegation('parent-1', 'child-2');
+
+			// Exit only child-1
+			await coordinator.handleProcessExit('child-1', 0);
+
+			expect(coordinator.getParentSessionId('child-1')).toBeNull();
+			expect(coordinator.getParentSessionId('child-2')).toBe('parent-1');
+		});
+
+		it('should allow overwriting a delegation (re-assignment)', () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			coordinator.registerDelegation('parent-A', 'child-1');
+			expect(coordinator.getParentSessionId('child-1')).toBe('parent-A');
+
+			// Re-assign to different parent
+			coordinator.registerDelegation('parent-B', 'child-1');
+			expect(coordinator.getParentSessionId('child-1')).toBe('parent-B');
 		});
 	});
 
@@ -1494,9 +1597,7 @@ describe('vibes-coordinator', () => {
 			});
 
 			// Should not throw even when auto-init fails
-			await expect(
-				coordinator.handleProcessSpawn('sess-fail-1', config),
-			).resolves.not.toThrow();
+			await expect(coordinator.handleProcessSpawn('sess-fail-1', config)).resolves.not.toThrow();
 		});
 
 		it('should use settings assurance level for auto-init', async () => {

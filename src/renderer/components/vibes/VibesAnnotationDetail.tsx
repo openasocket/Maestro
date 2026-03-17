@@ -24,7 +24,10 @@ import type {
 
 interface VibesAnnotationDetailProps {
 	theme: Theme;
-	annotation: Exclude<VibesAnnotation, { type: 'session' } | { type: 'edge' }>;
+	annotation: Exclude<
+		VibesAnnotation,
+		{ type: 'session' } | { type: 'edge' } | { type: 'delegation' }
+	>;
 	manifest: VibesManifest | null;
 	isLoadingManifest: boolean;
 	onClose: () => void;
@@ -566,7 +569,10 @@ const HashRow: React.FC<{
 
 const RawJsonSection: React.FC<{
 	theme: Theme;
-	annotation: Exclude<VibesAnnotation, { type: 'session' } | { type: 'edge' }>;
+	annotation: Exclude<
+		VibesAnnotation,
+		{ type: 'session' } | { type: 'edge' } | { type: 'delegation' }
+	>;
 	env?: VibesEnvironmentEntry;
 	cmd?: VibesCommandEntry;
 	prompt?: VibesPromptEntry;

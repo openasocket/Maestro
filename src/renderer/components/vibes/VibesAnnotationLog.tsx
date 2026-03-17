@@ -305,6 +305,9 @@ export const VibesAnnotationLog: React.FC<VibesAnnotationLogProps> = ({
 		if (annotation.type === 'edge') {
 			return `edge-${annotation.edge_type}-${annotation.source_ref.slice(0, 8)}-${annotation.target_ref.slice(0, 8)}-${index}`;
 		}
+		if (annotation.type === 'delegation') {
+			return `delegation-${annotation.parent_session_id.slice(0, 8)}-${annotation.child_session_id.slice(0, 8)}-${index}`;
+		}
 		return `fn-${annotation.file_path}-${annotation.function_name}-${annotation.timestamp}-${index}`;
 	}, []);
 
@@ -453,6 +456,10 @@ export const VibesAnnotationLog: React.FC<VibesAnnotationLogProps> = ({
 
 							if (annotation.type === 'edge') {
 								return <EdgeAnnotationRow key={key} theme={theme} annotation={annotation} />;
+							}
+
+							if (annotation.type === 'delegation') {
+								return <DelegationAnnotationRow key={key} theme={theme} annotation={annotation} />;
 							}
 
 							return (
@@ -605,12 +612,52 @@ const EdgeAnnotationRow: React.FC<EdgeAnnotationRowProps> = ({ theme, annotation
 };
 
 // ----------------------------------------------------------------------------
+// Delegation annotation row
+// ----------------------------------------------------------------------------
+
+interface DelegationAnnotationRowProps {
+	theme: Theme;
+	annotation: Extract<VibesAnnotation, { type: 'delegation' }>;
+}
+
+const DelegationAnnotationRow: React.FC<DelegationAnnotationRowProps> = ({ theme, annotation }) => {
+	return (
+		<div
+			className="flex items-center gap-2 px-3 py-2 text-xs border-b"
+			style={{
+				borderColor: theme.colors.border,
+				backgroundColor: 'rgba(234, 147, 51, 0.05)',
+			}}
+		>
+			<GitBranch className="w-3 h-3 shrink-0" style={{ color: '#ea9333' }} />
+			<span className="font-medium" style={{ color: '#ea9333' }}>
+				delegation
+			</span>
+			<span className="text-[10px] font-mono truncate" style={{ color: theme.colors.textDim }}>
+				{annotation.parent_session_id.slice(0, 8)} → {annotation.child_session_id.slice(0, 8)}
+			</span>
+			{annotation.delegation_type && (
+				<span className="text-[10px] px-1 rounded" style={{ color: theme.colors.textDim }}>
+					({annotation.delegation_type})
+				</span>
+			)}
+			<span className="text-[10px] ml-auto shrink-0" style={{ color: theme.colors.textDim }}>
+				{formatRelativeTime(annotation.timestamp)}
+			</span>
+		</div>
+	);
+};
+
+// ----------------------------------------------------------------------------
 // Line/function annotation row
 // ----------------------------------------------------------------------------
 
 interface AnnotationRowProps {
 	theme: Theme;
-	annotation: Exclude<VibesAnnotation, { type: 'session' } | { type: 'edge' }>;
+	annotation: Exclude<
+		VibesAnnotation,
+		{ type: 'session' } | { type: 'edge' } | { type: 'delegation' }
+	>;
 	isExpanded: boolean;
 	onToggle: () => void;
 	showDetail?: boolean;
@@ -743,7 +790,10 @@ const AnnotationRow: React.FC<AnnotationRowProps> = ({
 
 interface AnnotationDetailProps {
 	theme: Theme;
-	annotation: Exclude<VibesAnnotation, { type: 'session' } | { type: 'edge' }>;
+	annotation: Exclude<
+		VibesAnnotation,
+		{ type: 'session' } | { type: 'edge' } | { type: 'delegation' }
+	>;
 }
 
 const AnnotationDetail: React.FC<AnnotationDetailProps> = ({ theme, annotation }) => {

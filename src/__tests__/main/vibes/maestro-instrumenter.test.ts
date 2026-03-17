@@ -12,10 +12,18 @@ import * as os from 'os';
 
 import { MaestroInstrumenter } from '../../../main/vibes/instrumenters/maestro-instrumenter';
 import { VibesSessionManager } from '../../../main/vibes/vibes-session';
-import { readVibesManifest, ensureAuditDir, flushAll, resetAllBuffers } from '../../../main/vibes/vibes-io';
+import {
+	readVibesManifest,
+	readAnnotations,
+	ensureAuditDir,
+	flushAll,
+	resetAllBuffers,
+} from '../../../main/vibes/vibes-io';
 import type {
 	VibesCommandEntry,
 	VibesPromptEntry,
+	VibesDelegationRecord,
+	VibesEdgeRecord,
 } from '../../../shared/vibes-types';
 
 // ============================================================================
@@ -46,7 +54,7 @@ describe('maestro-instrumenter', () => {
 	 */
 	async function setupSession(
 		sessionId: string,
-		assuranceLevel: 'low' | 'medium' | 'high' = 'medium',
+		assuranceLevel: 'low' | 'medium' | 'high' = 'medium'
 	) {
 		const state = await manager.startSession(sessionId, tmpDir, 'maestro', assuranceLevel);
 		state.environmentHash = 'e'.repeat(64);
@@ -100,9 +108,7 @@ describe('maestro-instrumenter', () => {
 			await flushAll();
 			const manifest = await readVibesManifest(tmpDir);
 			const entries = Object.values(manifest.entries);
-			const promptEntries = entries.filter(
-				(e) => e.type === 'prompt',
-			) as VibesPromptEntry[];
+			const promptEntries = entries.filter((e) => e.type === 'prompt') as VibesPromptEntry[];
 			expect(promptEntries).toHaveLength(1);
 			expect(promptEntries[0].prompt_text).toBe('Fix the login page bug');
 			expect(promptEntries[0].prompt_type).toBe('user_instruction');
@@ -213,6 +219,234 @@ describe('maestro-instrumenter', () => {
 			await flushAll();
 			const manifest = await readVibesManifest(tmpDir);
 			expect(Object.keys(manifest.entries)).toHaveLength(0);
+		});
+	});
+
+	// ========================================================================
+	// handleAgentSpawn — Delegation Records (EVOLVE Section 3)
+	// ========================================================================
+	describe('handleAgentSpawn delegation records', () => {
+		it('should emit a delegation record with correct parent/child session IDs', async () => {
+			const parentState = await setupSession('maestro-1');
+			const instrumenter = new MaestroInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleAgentSpawn({
+				maestroSessionId: 'maestro-1',
+				agentSessionId: 'agent-abc',
+				agentType: 'claude-code',
+				taskDescription: 'Fix the auth module',
+				projectPath: tmpDir,
+				childVibesSessionId: 'child-vibes-uuid-123',
+			});
+
+			await flushAll();
+			const annotations = await readAnnotations(tmpDir);
+			const delegations = annotations.filter(
+				(a) => a.type === 'delegation'
+			) as VibesDelegationRecord[];
+
+			expect(delegations).toHaveLength(1);
+			expect(delegations[0].parent_session_id).toBe(parentState.vibesSessionId);
+			expect(delegations[0].child_session_id).toBe('child-vibes-uuid-123');
+			expect(delegations[0].task_description).toBe('Fix the auth module');
+			expect(delegations[0].delegation_type).toBe('task');
+		});
+
+		it('should emit a delegated_to edge record alongside the delegation record', async () => {
+			const parentState = await setupSession('maestro-1');
+			const instrumenter = new MaestroInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleAgentSpawn({
+				maestroSessionId: 'maestro-1',
+				agentSessionId: 'agent-abc',
+				agentType: 'claude-code',
+				projectPath: tmpDir,
+				childVibesSessionId: 'child-vibes-uuid-456',
+			});
+
+			await flushAll();
+			const annotations = await readAnnotations(tmpDir);
+			const edges = annotations.filter((a) => a.type === 'edge') as VibesEdgeRecord[];
+
+			expect(edges).toHaveLength(1);
+			expect(edges[0].edge_type).toBe('delegated_to');
+			expect(edges[0].source_ref).toBe(parentState.vibesSessionId);
+			expect(edges[0].source_type).toBe('session');
+			expect(edges[0].target_ref).toBe('child-vibes-uuid-456');
+			expect(edges[0].target_type).toBe('session');
+			expect(edges[0].session_id).toBe(parentState.vibesSessionId);
+		});
+
+		it('should include delegated_files and delegation_type when provided', async () => {
+			await setupSession('maestro-1');
+			const instrumenter = new MaestroInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleAgentSpawn({
+				maestroSessionId: 'maestro-1',
+				agentSessionId: 'agent-abc',
+				agentType: 'claude-code',
+				taskDescription: 'Review the PR',
+				projectPath: tmpDir,
+				childVibesSessionId: 'child-vibes-uuid-789',
+				delegatedFiles: ['src/auth.ts', 'src/login.ts'],
+				delegationType: 'review',
+			});
+
+			await flushAll();
+			const annotations = await readAnnotations(tmpDir);
+			const delegations = annotations.filter(
+				(a) => a.type === 'delegation'
+			) as VibesDelegationRecord[];
+
+			expect(delegations).toHaveLength(1);
+			expect(delegations[0].delegated_files).toEqual(['src/auth.ts', 'src/login.ts']);
+			expect(delegations[0].delegation_type).toBe('review');
+		});
+
+		it('should include parent_environment_hash from the session state', async () => {
+			await setupSession('maestro-1');
+			const instrumenter = new MaestroInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleAgentSpawn({
+				maestroSessionId: 'maestro-1',
+				agentSessionId: 'agent-abc',
+				agentType: 'claude-code',
+				projectPath: tmpDir,
+				childVibesSessionId: 'child-vibes-uuid',
+				childEnvironmentHash: 'c'.repeat(64),
+			});
+
+			await flushAll();
+			const annotations = await readAnnotations(tmpDir);
+			const delegations = annotations.filter(
+				(a) => a.type === 'delegation'
+			) as VibesDelegationRecord[];
+
+			expect(delegations).toHaveLength(1);
+			expect(delegations[0].parent_environment_hash).toBe('e'.repeat(64));
+			expect(delegations[0].child_environment_hash).toBe('c'.repeat(64));
+		});
+
+		it('should look up child VIBES session ID from session manager when not provided', async () => {
+			const parentState = await setupSession('maestro-1');
+			// Create a child session in the session manager
+			const childState = await manager.startSession('agent-abc', tmpDir, 'claude-code', 'medium');
+
+			const instrumenter = new MaestroInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleAgentSpawn({
+				maestroSessionId: 'maestro-1',
+				agentSessionId: 'agent-abc',
+				agentType: 'claude-code',
+				projectPath: tmpDir,
+				// No childVibesSessionId — should be looked up
+			});
+
+			await flushAll();
+			const annotations = await readAnnotations(tmpDir);
+			const delegations = annotations.filter(
+				(a) => a.type === 'delegation'
+			) as VibesDelegationRecord[];
+
+			expect(delegations).toHaveLength(1);
+			expect(delegations[0].parent_session_id).toBe(parentState.vibesSessionId);
+			expect(delegations[0].child_session_id).toBe(childState.vibesSessionId);
+		});
+
+		it('should fall back to agentSessionId when child VIBES session is not available', async () => {
+			await setupSession('maestro-1');
+			const instrumenter = new MaestroInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleAgentSpawn({
+				maestroSessionId: 'maestro-1',
+				agentSessionId: 'raw-agent-id',
+				agentType: 'claude-code',
+				projectPath: tmpDir,
+				// No childVibesSessionId and no child session in manager
+			});
+
+			await flushAll();
+			const annotations = await readAnnotations(tmpDir);
+			const delegations = annotations.filter(
+				(a) => a.type === 'delegation'
+			) as VibesDelegationRecord[];
+
+			expect(delegations).toHaveLength(1);
+			expect(delegations[0].child_session_id).toBe('raw-agent-id');
+		});
+
+		it('should default delegation_type to task when not specified', async () => {
+			await setupSession('maestro-1');
+			const instrumenter = new MaestroInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			await instrumenter.handleAgentSpawn({
+				maestroSessionId: 'maestro-1',
+				agentSessionId: 'agent-abc',
+				agentType: 'claude-code',
+				projectPath: tmpDir,
+				childVibesSessionId: 'child-uuid',
+			});
+
+			await flushAll();
+			const annotations = await readAnnotations(tmpDir);
+			const delegations = annotations.filter(
+				(a) => a.type === 'delegation'
+			) as VibesDelegationRecord[];
+
+			expect(delegations).toHaveLength(1);
+			expect(delegations[0].delegation_type).toBe('task');
+		});
+
+		it('should emit delegation records even at Low assurance (prompts are skipped, not delegations)', async () => {
+			await setupSession('maestro-1', 'low');
+			const instrumenter = new MaestroInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'low',
+			});
+
+			await instrumenter.handleAgentSpawn({
+				maestroSessionId: 'maestro-1',
+				agentSessionId: 'agent-abc',
+				agentType: 'claude-code',
+				taskDescription: 'Should appear in delegation but not as prompt',
+				projectPath: tmpDir,
+				childVibesSessionId: 'child-uuid',
+			});
+
+			await flushAll();
+			const annotations = await readAnnotations(tmpDir);
+			const delegations = annotations.filter((a) => a.type === 'delegation');
+			const edges = annotations.filter((a) => a.type === 'edge');
+
+			// Delegation and edge records are always emitted regardless of assurance level
+			expect(delegations).toHaveLength(1);
+			expect(edges).toHaveLength(1);
+
+			// But prompts are gated by assurance level
+			const manifest = await readVibesManifest(tmpDir);
+			const promptEntries = Object.values(manifest.entries).filter((e) => e.type === 'prompt');
+			expect(promptEntries).toHaveLength(0);
 		});
 	});
 
@@ -699,7 +933,7 @@ describe('maestro-instrumenter', () => {
 					agentSessionId: 'agent-abc',
 					agentType: 'claude-code',
 					projectPath: '/tmp/test',
-				}),
+				})
 			).resolves.not.toThrow();
 		});
 
@@ -716,7 +950,7 @@ describe('maestro-instrumenter', () => {
 					agentType: 'claude-code',
 					success: true,
 					duration: 1000,
-				}),
+				})
 			).resolves.not.toThrow();
 		});
 
@@ -732,7 +966,7 @@ describe('maestro-instrumenter', () => {
 					projectPath: '/tmp/test',
 					documents: ['doc.md'],
 					agentType: 'claude-code',
-				}),
+				})
 			).resolves.not.toThrow();
 		});
 
@@ -747,7 +981,7 @@ describe('maestro-instrumenter', () => {
 					maestroSessionId: 'nonexistent',
 					documentsCompleted: 0,
 					totalTasks: 0,
-				}),
+				})
 			).resolves.not.toThrow();
 		});
 	});
