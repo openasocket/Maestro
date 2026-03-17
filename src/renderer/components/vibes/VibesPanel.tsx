@@ -65,7 +65,7 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 	const [binaryAvailable, setBinaryAvailable] = useState<boolean | null>(null);
 	const [binaryVersion, setBinaryVersion] = useState<string | null>(null);
 	const [showInstallGuide, setShowInstallGuide] = useState(false);
-	const { vibesEnabled, vibesAssuranceLevel, vibesAutoInit } = useSettings();
+	const { vibesEnabled, vibesAssuranceLevel, vibesAutoInit, vibesCheckBinaryPath } = useSettings();
 	const vibesData = useVibesData(projectPath, vibesEnabled);
 
 	// Subscribe to real-time annotation updates
@@ -85,18 +85,23 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 		if (liveAnnotationCount === 0) return;
 		const timer = setTimeout(() => vibesData.refresh(), 2000);
 		return () => clearTimeout(timer);
-	}, [liveAnnotationCount]); // eslint-disable-line react-hooks/exhaustive-deps
+	}, [liveAnnotationCount]);  
 
-	// Check vibecheck binary availability on mount
+	// Check vibecheck binary availability on mount and when settings change
 	useEffect(() => {
 		if (!vibesEnabled) return;
 		let cancelled = false;
 		(async () => {
 			try {
-				const result = await window.maestro.vibes.findBinary();
+				// Clear cache when custom path changes so we re-detect
+				if (window.maestro?.vibes?.clearBinaryCache) {
+					await window.maestro.vibes.clearBinaryCache();
+				}
+				const result = await window.maestro.vibes.findBinary(vibesCheckBinaryPath || undefined);
 				if (!cancelled) {
 					setBinaryAvailable(!!result.path);
 					setBinaryVersion(result.version ?? null);
+					if (result.path) setShowInstallGuide(false);
 				}
 			} catch {
 				if (!cancelled) {
@@ -104,19 +109,24 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 				}
 			}
 		})();
-		return () => { cancelled = true; };
-	}, [vibesEnabled]);
+		return () => {
+			cancelled = true;
+		};
+	}, [vibesEnabled, vibesCheckBinaryPath]);
 
 	const handleCheckBinary = useCallback(async () => {
 		try {
-			const result = await window.maestro.vibes.findBinary();
+			if (window.maestro?.vibes?.clearBinaryCache) {
+				await window.maestro.vibes.clearBinaryCache();
+			}
+			const result = await window.maestro.vibes.findBinary(vibesCheckBinaryPath || undefined);
 			setBinaryAvailable(!!result.path);
 			setBinaryVersion(result.version ?? null);
 			if (result.path) setShowInstallGuide(false);
 		} catch {
 			setBinaryAvailable(false);
 		}
-	}, []);
+	}, [vibesCheckBinaryPath]);
 
 	// When an initialBlameFilePath is provided, switch to blame tab and set the file path
 	useEffect(() => {
@@ -132,7 +142,7 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 		window.dispatchEvent(
 			new CustomEvent('tour:action', {
 				detail: { type: 'openSettings' },
-			}),
+			})
 		);
 	}, []);
 
@@ -168,19 +178,24 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 		vibesData.refresh();
 	}, [vibesData]);
 
-	const handleAssuranceLevelChange = useCallback(async (level: VibesAssuranceLevel) => {
-		if (!projectPath) return;
-		try {
-			const result = await window.maestro.vibes.updateConfig(projectPath, { assurance_level: level });
-			if (result.success) {
-				vibesData.refresh();
-			} else {
-				console.warn('Failed to update assurance level:', result.error);
+	const handleAssuranceLevelChange = useCallback(
+		async (level: VibesAssuranceLevel) => {
+			if (!projectPath) return;
+			try {
+				const result = await window.maestro.vibes.updateConfig(projectPath, {
+					assurance_level: level,
+				});
+				if (result.success) {
+					vibesData.refresh();
+				} else {
+					console.warn('Failed to update assurance level:', result.error);
+				}
+			} catch (err) {
+				console.warn('Failed to update assurance level:', err);
 			}
-		} catch (err) {
-			console.warn('Failed to update assurance level:', err);
-		}
-	}, [projectPath, vibesData]);
+		},
+		[projectPath, vibesData]
+	);
 
 	// Keyboard shortcut: Ctrl+Shift+R (or Cmd+Shift+R on macOS)
 	useEffect(() => {
@@ -202,16 +217,10 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 		return (
 			<div className="h-full flex flex-col items-center justify-center gap-3 text-center px-4">
 				<DiscoBallIcon className="w-8 h-8 opacity-40" style={{ color: theme.colors.textDim }} />
-				<span
-					className="text-sm font-medium"
-					style={{ color: theme.colors.textMain }}
-				>
+				<span className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
 					VIBES is disabled
 				</span>
-				<span
-					className="text-xs max-w-xs"
-					style={{ color: theme.colors.textDim }}
-				>
+				<span className="text-xs max-w-xs" style={{ color: theme.colors.textDim }}>
 					Enable VIBES in Settings to start tracking AI attribution metadata for your project.
 				</span>
 				<button
@@ -261,8 +270,7 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 						style={{ color: theme.colors.success }}
 						data-testid="binary-version-badge"
 					>
-						<CheckCircle2 className="w-3 h-3" />
-						v{binaryVersion}
+						<CheckCircle2 className="w-3 h-3" />v{binaryVersion}
 					</span>
 				)}
 				{relativeTime && (
@@ -281,9 +289,7 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 					style={{ color: theme.colors.textDim }}
 					data-testid="vibes-refresh-button"
 				>
-					<RefreshCw
-						className={`w-3.5 h-3.5${vibesData.isLoading ? ' animate-spin' : ''}`}
-					/>
+					<RefreshCw className={`w-3.5 h-3.5${vibesData.isLoading ? ' animate-spin' : ''}`} />
 				</button>
 			</div>
 
@@ -331,19 +337,33 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 							<span className="text-[10px] font-semibold" style={{ color: theme.colors.textMain }}>
 								Install vibecheck
 							</span>
-							<div className="flex flex-col gap-1.5 text-[10px]" style={{ color: theme.colors.textDim }}>
+							<div
+								className="flex flex-col gap-1.5 text-[10px]"
+								style={{ color: theme.colors.textDim }}
+							>
 								<div className="flex flex-col gap-1">
 									<span className="font-medium">From source (requires Rust):</span>
-									<code className="font-mono px-1.5 py-0.5 rounded" style={{ backgroundColor: theme.colors.bgMain }}>
-										git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo install --path .
+									<code
+										className="font-mono px-1.5 py-0.5 rounded"
+										style={{ backgroundColor: theme.colors.bgMain }}
+									>
+										git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo
+										install --path .
 									</code>
 								</div>
 								<div className="flex flex-col gap-1">
 									<span className="font-medium">Or build manually:</span>
-									<code className="font-mono px-1.5 py-0.5 rounded" style={{ backgroundColor: theme.colors.bgMain }}>
-										git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo build --release
+									<code
+										className="font-mono px-1.5 py-0.5 rounded"
+										style={{ backgroundColor: theme.colors.bgMain }}
+									>
+										git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo
+										build --release
 									</code>
-									<span>Then copy <code className="font-mono">target/release/vibecheck</code> to a directory in your PATH (e.g. <code className="font-mono">/usr/local/bin/</code>)</span>
+									<span>
+										Then copy <code className="font-mono">target/release/vibecheck</code> to a
+										directory in your PATH (e.g. <code className="font-mono">/usr/local/bin/</code>)
+									</span>
 								</div>
 								<a
 									href="https://github.com/openasocket/VibeCheck"
@@ -358,7 +378,10 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 							<button
 								onClick={handleCheckBinary}
 								className="self-start px-2.5 py-1 rounded text-[10px] font-medium hover:opacity-80 mt-1"
-								style={{ backgroundColor: theme.colors.accent, color: theme.colors.accentForeground }}
+								style={{
+									backgroundColor: theme.colors.accent,
+									color: theme.colors.accentForeground,
+								}}
 								data-testid="check-again-btn"
 							>
 								Check Again

@@ -72,7 +72,7 @@ interface ExecVibesCheckResult {
 async function execVibesCheck(
 	binaryPath: string,
 	args: string[],
-	cwd: string,
+	cwd: string
 ): Promise<ExecVibesCheckResult> {
 	try {
 		const { stdout, stderr } = await execFileAsync(binaryPath, args, {
@@ -106,7 +106,7 @@ async function execVibesCheck(
  */
 export async function findVibesCheckBinary(
 	customPath?: string,
-	projectPath?: string,
+	projectPath?: string
 ): Promise<string | null> {
 	// Check custom path first — always check, skip cache
 	if (customPath) {
@@ -134,34 +134,40 @@ export async function findVibesCheckBinary(
 	}
 
 	// Build the list of candidate paths to search
-	const candidates: string[] = [
-		...COMMON_BINARY_PATHS,
-	];
+	const candidates: string[] = [...COMMON_BINARY_PATHS];
 
 	// Add project-local node_modules/.bin/ if a project path is provided
 	if (projectPath) {
-		candidates.push(
-			path.join(projectPath, 'node_modules', '.bin', VIBES_BINARY_NAME),
-		);
+		candidates.push(path.join(projectPath, 'node_modules', '.bin', VIBES_BINARY_NAME));
 	}
 
 	// Check common installation paths first
 	for (const candidate of candidates) {
 		try {
 			await access(candidate, constants.X_OK);
+			console.log(`[VibesBridge] Found vibecheck at: ${candidate}`);
 			cachedBinaryPath = candidate;
 			return candidate;
-		} catch {
-			// Not found at this path, continue
+		} catch (err: any) {
+			console.debug(`[VibesBridge] Not found at ${candidate}: ${err.code || err.message}`);
 		}
 	}
 
-	// Search $PATH
-	const pathDirs = (process.env.PATH || '').split(path.delimiter);
+	// Search $PATH (use expanded PATH from path-prober if available)
+	let searchPath = process.env.PATH || '';
+	try {
+		const { getExpandedEnv } = await import('../agents/path-prober');
+		const expanded = getExpandedEnv();
+		searchPath = expanded.PATH || searchPath;
+	} catch {
+		// path-prober not available, use process.env.PATH
+	}
+	const pathDirs = searchPath.split(path.delimiter);
 	for (const dir of pathDirs) {
 		const candidate = path.join(dir, VIBES_BINARY_NAME);
 		try {
 			await access(candidate, constants.X_OK);
+			console.log(`[VibesBridge] Found vibecheck in PATH at: ${candidate}`);
 			cachedBinaryPath = candidate;
 			return candidate;
 		} catch {
@@ -229,9 +235,7 @@ interface VibesCommandResult {
 async function resolveBinary(customBinaryPath?: string): Promise<string> {
 	const binaryPath = await findVibesCheckBinary(customBinaryPath);
 	if (!binaryPath) {
-		throw new Error(
-			'vibecheck binary not found. Install it or set the path in Settings > VIBES.',
-		);
+		throw new Error('vibecheck binary not found. Install it or set the path in Settings > VIBES.');
 	}
 	return binaryPath;
 }
@@ -251,14 +255,16 @@ export async function vibesInit(
 		assuranceLevel: VibesAssuranceLevel;
 		extensions?: string[];
 	},
-	customBinaryPath?: string,
+	customBinaryPath?: string
 ): Promise<{ success: boolean; error?: string }> {
 	const binaryPath = await resolveBinary(customBinaryPath);
 
 	const args = [
 		'init',
-		'--project-name', config.projectName,
-		'--assurance-level', config.assuranceLevel,
+		'--project-name',
+		config.projectName,
+		'--assurance-level',
+		config.assuranceLevel,
 	];
 	if (config.extensions && config.extensions.length > 0) {
 		args.push('--extensions', config.extensions.join(','));
@@ -276,7 +282,7 @@ export async function vibesInit(
  */
 export async function vibesBuild(
 	projectPath: string,
-	customBinaryPath?: string,
+	customBinaryPath?: string
 ): Promise<{ success: boolean; error?: string }> {
 	const binaryPath = await resolveBinary(customBinaryPath);
 	const result = await execVibesCheck(binaryPath, ['build'], projectPath);
@@ -293,7 +299,7 @@ export async function vibesBuild(
 export async function vibesStats(
 	projectPath: string,
 	file?: string,
-	customBinaryPath?: string,
+	customBinaryPath?: string
 ): Promise<VibesCommandResult> {
 	const binaryPath = await resolveBinary(customBinaryPath);
 	const args = ['stats'];
@@ -314,7 +320,7 @@ export async function vibesStats(
 export async function vibesBlame(
 	projectPath: string,
 	file: string,
-	customBinaryPath?: string,
+	customBinaryPath?: string
 ): Promise<VibesCommandResult> {
 	const binaryPath = await resolveBinary(customBinaryPath);
 	const result = await execVibesCheck(binaryPath, ['blame', '--json', file], projectPath);
@@ -336,7 +342,7 @@ export async function vibesLog(
 		limit?: number;
 		json?: boolean;
 	},
-	customBinaryPath?: string,
+	customBinaryPath?: string
 ): Promise<VibesCommandResult> {
 	const binaryPath = await resolveBinary(customBinaryPath);
 	const args = ['log'];
@@ -370,7 +376,7 @@ export async function vibesLog(
 export async function vibesCoverage(
 	projectPath: string,
 	json?: boolean,
-	customBinaryPath?: string,
+	customBinaryPath?: string
 ): Promise<VibesCommandResult> {
 	const binaryPath = await resolveBinary(customBinaryPath);
 	const args = ['coverage'];
@@ -391,7 +397,7 @@ export async function vibesCoverage(
 export async function vibesReport(
 	projectPath: string,
 	format?: 'markdown' | 'html' | 'json',
-	customBinaryPath?: string,
+	customBinaryPath?: string
 ): Promise<VibesCommandResult> {
 	const binaryPath = await resolveBinary(customBinaryPath);
 	const args = ['report'];
@@ -411,7 +417,7 @@ export async function vibesReport(
  */
 export async function vibesSessions(
 	projectPath: string,
-	customBinaryPath?: string,
+	customBinaryPath?: string
 ): Promise<VibesCommandResult> {
 	const binaryPath = await resolveBinary(customBinaryPath);
 	const result = await execVibesCheck(binaryPath, ['sessions', '--json'], projectPath);
@@ -426,7 +432,7 @@ export async function vibesSessions(
  */
 export async function vibesModels(
 	projectPath: string,
-	customBinaryPath?: string,
+	customBinaryPath?: string
 ): Promise<VibesCommandResult> {
 	const binaryPath = await resolveBinary(customBinaryPath);
 	const result = await execVibesCheck(binaryPath, ['models', '--json'], projectPath);
@@ -450,7 +456,7 @@ export async function vibesBackfillCommit(
 	projectPath: string,
 	commitHash: string,
 	sessionId?: string,
-	customBinaryPath?: string,
+	customBinaryPath?: string
 ): Promise<{ success: boolean; updatedCount: number; error?: string }> {
 	// Try vibecheck binary first
 	const binaryPath = await findVibesCheckBinary(customBinaryPath);
