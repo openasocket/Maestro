@@ -182,7 +182,7 @@ export function createVibesApi() {
 
 			verifyAttestation: (
 				projectPath: string,
-				envelope: unknown
+				envelope?: unknown
 			): Promise<VibesAttestationResult> =>
 				ipcRenderer.invoke('vibes:verifyAttestation', projectPath, envelope),
 

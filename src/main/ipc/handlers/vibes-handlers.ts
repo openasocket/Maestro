@@ -59,20 +59,11 @@ import {
 	getUserKeyInfo,
 	checkKeyPermissions,
 	exportPublicKey,
-	loadUserKeyPair,
-	buildInTotoStatement,
-	buildDSSEEnvelope,
-	computeAttestationId,
-	computePAE,
-	verifyPAESignature,
 } from '../../vibes/vibes-key-manager';
-import type { DSSEEnvelope, DSSESignature } from '../../vibes/vibes-key-manager';
-import {
-	fetchProviderKeys,
-	requestCosignature,
-	computePAEHash,
-	verifyProviderSignature,
-} from '../../vibes/vibes-cosign-service';
+import type { DSSEEnvelope } from '../../vibes/vibes-key-manager';
+import { fetchProviderKeys } from '../../vibes/vibes-cosign-service';
+import { createAttestation } from '../../vibes/vibes-attestation';
+import { verifyAttestation } from '../../vibes/vibes-verify-attestation';
 
 const LOG_CONTEXT = '[VIBES]';
 
@@ -488,43 +479,24 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 			}
 		) => {
 			try {
-				// Load or require user keypair
-				const userKeyPair = await loadUserKeyPair();
-				if (!userKeyPair) {
-					return {
-						success: false,
-						error: 'No keypair found. Run keygen first.',
-					};
+				const result = await createAttestation({
+					projectPath,
+					cosign: options?.cosign,
+					validationResult: options?.validationResult,
+					vibesVersion: options?.vibesVersion,
+				});
+
+				if (!result.success) {
+					return { success: false, error: result.error };
 				}
-
-				// Build the in-toto statement
-				const validationResult = options?.validationResult ?? 'PASS';
-				const vibesVersion = options?.vibesVersion ?? '1.0.0';
-				const statement = await buildInTotoStatement(projectPath, validationResult, vibesVersion);
-
-				// Optionally request a tool provider cosignature
-				let toolProviderSig: DSSESignature | undefined;
-				if (options?.cosign) {
-					const tempPayload = Buffer.from(JSON.stringify(statement), 'utf8').toString('base64url');
-					const paeBytes = computePAE('application/vnd.in-toto+json', tempPayload);
-					const paeHash = computePAEHash(paeBytes);
-					const cosignResult = await requestCosignature(paeHash);
-					if (cosignResult) {
-						toolProviderSig = cosignResult;
-					}
-				}
-
-				// Build the DSSE envelope
-				const envelope = await buildDSSEEnvelope(statement, userKeyPair, toolProviderSig);
-				const attestationId = computeAttestationId(envelope);
 
 				return {
 					success: true,
 					data: {
-						envelope,
-						attestationId,
-						statement,
-						trustTier: toolProviderSig ? 'tool-corroborated' : 'self-attested',
+						envelope: result.envelope,
+						attestationId: result.attestationId,
+						trustTier: result.trustTier,
+						steps: result.steps,
 					},
 				};
 			} catch (error) {
@@ -537,81 +509,13 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 	// Verify a DSSE envelope: check signatures and file hash integrity
 	ipcMain.handle(
 		'vibes:verifyAttestation',
-		async (_event, projectPath: string, envelope: DSSEEnvelope) => {
+		async (_event, projectPath: string, envelope?: DSSEEnvelope) => {
 			try {
-				const results: Array<{
-					keyid: string;
-					keytype?: string;
-					valid: boolean;
-					error?: string;
-				}> = [];
-
-				const paeBytes = computePAE(envelope.payloadType, envelope.payload);
-
-				for (const sigEntry of envelope.signatures) {
-					if (sigEntry.keytype === 'tool_provider') {
-						// Verify against published provider keys
-						const valid = await verifyProviderSignature(paeBytes, sigEntry.sig, sigEntry.keyid);
-						results.push({
-							keyid: sigEntry.keyid,
-							keytype: 'tool_provider',
-							valid,
-						});
-					} else {
-						// Verify user signature — need the user's public key
-						const keyInfo = await getUserKeyInfo();
-						if (!keyInfo.exists || keyInfo.keyId !== sigEntry.keyid) {
-							results.push({
-								keyid: sigEntry.keyid,
-								keytype: 'user',
-								valid: false,
-								error: 'User public key not found or key ID mismatch',
-							});
-						} else {
-							const valid = verifyPAESignature(paeBytes, sigEntry.sig, keyInfo.publicKey);
-							results.push({
-								keyid: sigEntry.keyid,
-								keytype: 'user',
-								valid,
-							});
-						}
-					}
-				}
-
-				// Verify file hashes from the in-toto statement
-				let hashesValid = true;
-				try {
-					const statementJson = Buffer.from(envelope.payload, 'base64url').toString('utf8');
-					const statement = JSON.parse(statementJson);
-					const { createHash } = await import('crypto');
-					const { readFile: readFileAsync } = await import('fs/promises');
-
-					for (const subject of statement.subject || []) {
-						const filePath = path.join(projectPath, subject.name);
-						try {
-							const content = await readFileAsync(filePath);
-							const hash = createHash('sha256').update(content).digest('hex');
-							if (hash !== subject.digest?.sha256) {
-								hashesValid = false;
-							}
-						} catch {
-							hashesValid = false;
-						}
-					}
-				} catch {
-					hashesValid = false;
-				}
-
-				const allSignaturesValid = results.every((r) => r.valid);
+				const result = await verifyAttestation(projectPath, envelope ?? undefined);
 
 				return {
 					success: true,
-					data: {
-						signatures: results,
-						allSignaturesValid,
-						hashesValid,
-						valid: allSignaturesValid && hashesValid,
-					},
+					data: result,
 				};
 			} catch (error) {
 				logger.error('verifyAttestation error', LOG_CONTEXT, {

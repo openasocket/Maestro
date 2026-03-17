@@ -46,6 +46,8 @@ const {
 	mockRequestCosignature,
 	mockComputePAEHash,
 	mockVerifyProviderSignature,
+	mockCreateAttestation,
+	mockVerifyAttestationFn,
 } = vi.hoisted(() => ({
 	mockFindBinary: vi.fn(),
 	mockGetVersion: vi.fn(),
@@ -86,6 +88,8 @@ const {
 	mockRequestCosignature: vi.fn(),
 	mockComputePAEHash: vi.fn(),
 	mockVerifyProviderSignature: vi.fn(),
+	mockCreateAttestation: vi.fn(),
+	mockVerifyAttestationFn: vi.fn(),
 }));
 
 // Mock electron
@@ -134,6 +138,16 @@ vi.mock('../../../main/vibes/vibes-cosign-service', () => ({
 	requestCosignature: mockRequestCosignature,
 	computePAEHash: mockComputePAEHash,
 	verifyProviderSignature: mockVerifyProviderSignature,
+}));
+
+// Mock vibes-attestation pipeline
+vi.mock('../../../main/vibes/vibes-attestation', () => ({
+	createAttestation: mockCreateAttestation,
+}));
+
+// Mock vibes-verify-attestation
+vi.mock('../../../main/vibes/vibes-verify-attestation', () => ({
+	verifyAttestation: mockVerifyAttestationFn,
 }));
 
 // Mock vibes-io fallback functions
@@ -909,110 +923,94 @@ describe('vibes-handlers', () => {
 	});
 
 	describe('vibes:attest', () => {
-		const mockKeyPair = {
-			publicKey: 'pub-key',
-			privateKey: 'priv-key',
-			keyId: 'abcdef0123456789',
-		};
-
-		const mockStatement = {
-			_type: 'https://in-toto.io/Statement/v1',
-			subject: [],
-			predicateType: 'https://itsavibe.ai/vibes/attestation/v1',
-			predicate: {
-				validation: { result: 'PASS', version: '1.0.0' },
-				project: { name: 'test', assurance_level: 'high' },
-				stats: { total_annotations: 5, unique_models: 2 },
-			},
-		};
-
 		const mockEnvelope = {
 			payloadType: 'application/vnd.in-toto+json',
 			payload: 'base64url-payload',
 			signatures: [{ keyid: 'abcdef0123456789', sig: 'sig-data', keytype: 'user' }],
 		};
 
-		it('should build an attestation envelope without cosigning', async () => {
-			mockLoadUserKeyPair.mockResolvedValue(mockKeyPair);
-			mockBuildInTotoStatement.mockResolvedValue(mockStatement);
-			mockBuildDSSEEnvelope.mockResolvedValue(mockEnvelope);
-			mockComputeAttestationId.mockReturnValue('attestation-id-hash');
+		const mockSteps = {
+			audit: 'pass' as const,
+			hash: 'pass' as const,
+			toolSign: 'skipped' as const,
+			userSign: 'pass' as const,
+			timestamp: 'skipped' as const,
+			submit: 'skipped' as const,
+		};
+
+		it('should delegate to createAttestation and return result', async () => {
+			mockCreateAttestation.mockResolvedValue({
+				success: true,
+				attestationId: 'attestation-id-hash',
+				envelope: mockEnvelope,
+				trustTier: 'self-attested',
+				steps: mockSteps,
+			});
 
 			const result = await handlers['vibes:attest']({}, '/project');
 
-			expect(mockLoadUserKeyPair).toHaveBeenCalled();
-			expect(mockBuildInTotoStatement).toHaveBeenCalledWith('/project', 'PASS', '1.0.0');
-			expect(mockBuildDSSEEnvelope).toHaveBeenCalledWith(mockStatement, mockKeyPair, undefined);
+			expect(mockCreateAttestation).toHaveBeenCalledWith({
+				projectPath: '/project',
+				cosign: undefined,
+				validationResult: undefined,
+				vibesVersion: undefined,
+			});
 			expect(result).toEqual({
 				success: true,
 				data: {
 					envelope: mockEnvelope,
 					attestationId: 'attestation-id-hash',
-					statement: mockStatement,
 					trustTier: 'self-attested',
+					steps: mockSteps,
 				},
 			});
 		});
 
-		it('should build an attestation envelope with cosigning', async () => {
-			const cosignResponse = {
-				keyid: 'provider-key-id',
-				sig: 'provider-sig',
-				keytype: 'tool_provider' as const,
-			};
-			mockLoadUserKeyPair.mockResolvedValue(mockKeyPair);
-			mockBuildInTotoStatement.mockResolvedValue(mockStatement);
-			mockComputePAE.mockReturnValue(Buffer.from('pae-bytes'));
-			mockComputePAEHash.mockReturnValue('pae-hash');
-			mockRequestCosignature.mockResolvedValue(cosignResponse);
-			mockBuildDSSEEnvelope.mockResolvedValue({
-				...mockEnvelope,
-				signatures: [...mockEnvelope.signatures, cosignResponse],
+		it('should pass cosign and custom options to createAttestation', async () => {
+			mockCreateAttestation.mockResolvedValue({
+				success: true,
+				attestationId: 'attestation-id-cosigned',
+				envelope: mockEnvelope,
+				trustTier: 'tool-corroborated',
+				steps: { ...mockSteps, toolSign: 'pass' as const },
 			});
-			mockComputeAttestationId.mockReturnValue('attestation-id-cosigned');
 
-			const result = await handlers['vibes:attest']({}, '/project', { cosign: true });
+			const result = await handlers['vibes:attest']({}, '/project', {
+				cosign: true,
+				validationResult: 'FAIL',
+				vibesVersion: '2.0.0',
+			});
 
-			expect(mockComputePAEHash).toHaveBeenCalled();
-			expect(mockRequestCosignature).toHaveBeenCalledWith('pae-hash');
-			expect(mockBuildDSSEEnvelope).toHaveBeenCalledWith(
-				mockStatement,
-				mockKeyPair,
-				cosignResponse
-			);
+			expect(mockCreateAttestation).toHaveBeenCalledWith({
+				projectPath: '/project',
+				cosign: true,
+				validationResult: 'FAIL',
+				vibesVersion: '2.0.0',
+			});
 			expect(result).toEqual({
 				success: true,
 				data: expect.objectContaining({ trustTier: 'tool-corroborated' }),
 			});
 		});
 
-		it('should return error when no keypair exists', async () => {
-			mockLoadUserKeyPair.mockResolvedValue(null);
+		it('should return error when createAttestation fails', async () => {
+			mockCreateAttestation.mockResolvedValue({
+				success: false,
+				trustTier: 'none',
+				error: 'No signing key found. Run keygen first.',
+				steps: mockSteps,
+			});
 
 			const result = await handlers['vibes:attest']({}, '/project');
 
 			expect(result).toEqual({
 				success: false,
-				error: 'No keypair found. Run keygen first.',
+				error: 'No signing key found. Run keygen first.',
 			});
 		});
 
-		it('should pass custom validation result and version', async () => {
-			mockLoadUserKeyPair.mockResolvedValue(mockKeyPair);
-			mockBuildInTotoStatement.mockResolvedValue(mockStatement);
-			mockBuildDSSEEnvelope.mockResolvedValue(mockEnvelope);
-			mockComputeAttestationId.mockReturnValue('id');
-
-			await handlers['vibes:attest']({}, '/project', {
-				validationResult: 'FAIL',
-				vibesVersion: '2.0.0',
-			});
-
-			expect(mockBuildInTotoStatement).toHaveBeenCalledWith('/project', 'FAIL', '2.0.0');
-		});
-
-		it('should return error on failure', async () => {
-			mockLoadUserKeyPair.mockRejectedValue(new Error('key read failed'));
+		it('should return error on exception', async () => {
+			mockCreateAttestation.mockRejectedValue(new Error('key read failed'));
 
 			const result = await handlers['vibes:attest']({}, '/project');
 
@@ -1038,36 +1036,49 @@ describe('vibes-handlers', () => {
 			signatures: [{ keyid: 'user-key-id', sig: 'user-sig', keytype: 'user' }],
 		};
 
-		it('should verify user signature successfully', async () => {
-			mockComputePAE.mockReturnValue(Buffer.from('pae-bytes'));
-			mockGetUserKeyInfo.mockResolvedValue({
-				publicKey: 'pub-key',
-				keyId: 'user-key-id',
-				exists: true,
-			});
-			mockVerifyPAESignature.mockReturnValue(true);
+		it('should delegate to verifyAttestation and return result', async () => {
+			const verifyResult = {
+				valid: true,
+				trustTier: 'self-attested' as const,
+				signatures: [{ keyid: 'user-key-id', keytype: 'user' as const, valid: true }],
+				fileIntegrity: [],
+				attestationId: 'abc123',
+				issues: [],
+			};
+			mockVerifyAttestationFn.mockResolvedValue(verifyResult);
 
 			const result = await handlers['vibes:verifyAttestation']({}, '/project', mockEnvelope);
 
+			expect(mockVerifyAttestationFn).toHaveBeenCalledWith('/project', mockEnvelope);
 			expect(result.success).toBe(true);
+			expect(result.data.valid).toBe(true);
 			expect(result.data.signatures[0].valid).toBe(true);
-			expect(result.data.allSignaturesValid).toBe(true);
+			expect(result.data.trustTier).toBe('self-attested');
 		});
 
 		it('should detect invalid user signature', async () => {
-			mockComputePAE.mockReturnValue(Buffer.from('pae-bytes'));
-			mockGetUserKeyInfo.mockResolvedValue({
-				publicKey: 'pub-key',
-				keyId: 'user-key-id',
-				exists: true,
-			});
-			mockVerifyPAESignature.mockReturnValue(false);
+			const verifyResult = {
+				valid: false,
+				trustTier: 'none' as const,
+				signatures: [
+					{
+						keyid: 'user-key-id',
+						keytype: 'user' as const,
+						valid: false,
+						error: 'Ed25519 signature verification failed',
+					},
+				],
+				fileIntegrity: [],
+				attestationId: 'abc123',
+				issues: ['User signature user-key-id failed verification'],
+			};
+			mockVerifyAttestationFn.mockResolvedValue(verifyResult);
 
 			const result = await handlers['vibes:verifyAttestation']({}, '/project', mockEnvelope);
 
 			expect(result.success).toBe(true);
 			expect(result.data.signatures[0].valid).toBe(false);
-			expect(result.data.allSignaturesValid).toBe(false);
+			expect(result.data.valid).toBe(false);
 		});
 
 		it('should verify tool provider signature', async () => {
@@ -1075,9 +1086,15 @@ describe('vibes-handlers', () => {
 				...mockEnvelope,
 				signatures: [{ keyid: 'provider-key-id', sig: 'tool-sig', keytype: 'tool_provider' }],
 			};
-
-			mockComputePAE.mockReturnValue(Buffer.from('pae-bytes'));
-			mockVerifyProviderSignature.mockResolvedValue(true);
+			const verifyResult = {
+				valid: true,
+				trustTier: 'tool-only' as const,
+				signatures: [{ keyid: 'provider-key-id', keytype: 'tool_provider' as const, valid: true }],
+				fileIntegrity: [],
+				attestationId: 'abc123',
+				issues: [],
+			};
+			mockVerifyAttestationFn.mockResolvedValue(verifyResult);
 
 			const result = await handlers['vibes:verifyAttestation']({}, '/project', envelopeWithToolSig);
 
@@ -1087,28 +1104,54 @@ describe('vibes-handlers', () => {
 		});
 
 		it('should report key ID mismatch for user signature', async () => {
-			mockComputePAE.mockReturnValue(Buffer.from('pae-bytes'));
-			mockGetUserKeyInfo.mockResolvedValue({
-				publicKey: 'pub-key',
-				keyId: 'different-key-id',
-				exists: true,
-			});
+			const verifyResult = {
+				valid: false,
+				trustTier: 'none' as const,
+				signatures: [
+					{
+						keyid: 'user-key-id',
+						keytype: 'user' as const,
+						valid: false,
+						error: 'Key ID mismatch: envelope has user-key-id, local key is different-key-id',
+					},
+				],
+				fileIntegrity: [],
+				attestationId: 'abc123',
+				issues: ['User key ID mismatch: envelope=user-key-id, local=different-key-id'],
+			};
+			mockVerifyAttestationFn.mockResolvedValue(verifyResult);
 
 			const result = await handlers['vibes:verifyAttestation']({}, '/project', mockEnvelope);
 
 			expect(result.success).toBe(true);
 			expect(result.data.signatures[0].valid).toBe(false);
-			expect(result.data.signatures[0].error).toContain('key ID mismatch');
+			expect(result.data.signatures[0].error).toContain('Key ID mismatch');
 		});
 
-		it('should return error on failure', async () => {
-			mockComputePAE.mockImplementation(() => {
-				throw new Error('PAE computation failed');
-			});
+		it('should return error on exception', async () => {
+			mockVerifyAttestationFn.mockRejectedValue(new Error('PAE computation failed'));
 
 			const result = await handlers['vibes:verifyAttestation']({}, '/project', mockEnvelope);
 
 			expect(result).toEqual({ success: false, error: 'Error: PAE computation failed' });
+		});
+
+		it('should pass undefined envelope when not provided', async () => {
+			const verifyResult = {
+				valid: false,
+				trustTier: 'none' as const,
+				signatures: [],
+				fileIntegrity: [],
+				attestationId: '',
+				issues: ['No attestation envelope found. Expected .ai-audit/attestation.json'],
+			};
+			mockVerifyAttestationFn.mockResolvedValue(verifyResult);
+
+			const result = await handlers['vibes:verifyAttestation']({}, '/project');
+
+			expect(mockVerifyAttestationFn).toHaveBeenCalledWith('/project', undefined);
+			expect(result.success).toBe(true);
+			expect(result.data.valid).toBe(false);
 		});
 	});
 
