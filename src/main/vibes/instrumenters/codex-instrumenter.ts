@@ -19,7 +19,7 @@ import {
 	createCommandEntry,
 	createDecisionEntry,
 	createEdgeRecord,
-	createLineAnnotation,
+	createLineAnnotationWithAnchors,
 	createReasoningEntry,
 	createExternalReasoningEntry,
 	createPromptEntry,
@@ -321,7 +321,7 @@ export class CodexInstrumenter {
 						this.assuranceLevel === 'high' ? this.lastReasoningHashes.get(sessionId) : undefined;
 					const decisionHash =
 						this.assuranceLevel !== 'low' ? this.lastDecisionHashes.get(sessionId) : undefined;
-					const annotation = createLineAnnotation({
+					const annotation = await createLineAnnotationWithAnchors({
 						filePath: normalizedPath,
 						lineStart: 1,
 						lineEnd: 1,
@@ -333,6 +333,8 @@ export class CodexInstrumenter {
 						action,
 						sessionId: session.vibesSessionId,
 						assuranceLevel: session.assuranceLevel,
+						projectPath: session.projectPath,
+						fileContentHashCache: session.fileContentHashCache,
 					});
 					await this.sessionManager.recordAnnotation(sessionId, annotation);
 

@@ -13,10 +13,15 @@ import {
 	Loader2,
 	Info,
 	Download,
+	ClipboardCheck,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { UseVibesDataReturn } from '../../hooks';
-import type { VibesAssuranceLevel, VibesAnnotation, VibesAction } from '../../../shared/vibes-types';
+import type {
+	VibesAssuranceLevel,
+	VibesAnnotation,
+	VibesAction,
+} from '../../../shared/vibes-types';
 import { VibesLiveMonitor } from './VibesLiveMonitor';
 
 interface VibesDashboardProps {
@@ -68,7 +73,7 @@ type TimelineRangeDays = (typeof TIMELINE_RANGES)[number]['days'];
 /** Group annotations into time buckets for the activity timeline. */
 function buildTimeline(
 	annotations: VibesAnnotation[],
-	rangeDays: TimelineRangeDays,
+	rangeDays: TimelineRangeDays
 ): {
 	buckets: { label: string; counts: Record<VibesAction, number>; total: number }[];
 	maxCount: number;
@@ -78,8 +83,7 @@ function buildTimeline(
 
 	const lineAnnotations = annotations.filter(
 		(a): a is Extract<VibesAnnotation, { action: VibesAction }> =>
-			(a.type === 'line' || a.type === 'function') &&
-			new Date(a.timestamp).getTime() >= cutoff,
+			(a.type === 'line' || a.type === 'function') && new Date(a.timestamp).getTime() >= cutoff
 	);
 
 	if (lineAnnotations.length === 0) return { buckets: [], maxCount: 0 };
@@ -140,17 +144,24 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 	binaryAvailable,
 	onAssuranceLevelChange,
 }) => {
-	const { isInitialized, stats, sessions, models, isLoading, error, refresh, initialize } = vibesData;
+	const { isInitialized, stats, sessions, models, isLoading, error, refresh, initialize } =
+		vibesData;
 	const [initProjectName, setInitProjectName] = useState('');
 	const [isInitializing, setIsInitializing] = useState(false);
-	const [actionStatus, setActionStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+	const [actionStatus, setActionStatus] = useState<{
+		type: 'success' | 'error';
+		message: string;
+	} | null>(null);
 	const [timelineRange, setTimelineRange] = useState<TimelineRangeDays>(30);
 
 	// ========================================================================
 	// Computed visualizations
 	// ========================================================================
 
-	const timeline = useMemo(() => buildTimeline(vibesData.annotations, timelineRange), [vibesData.annotations, timelineRange]);
+	const timeline = useMemo(
+		() => buildTimeline(vibesData.annotations, timelineRange),
+		[vibesData.annotations, timelineRange]
+	);
 
 	const assuranceDist = useMemo(() => {
 		const dist = { low: 0, medium: 0, high: 0 };
@@ -224,68 +235,94 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 		}
 	}, [initProjectName, initialize]);
 
+	// Spec compliance checks
+	const specCompliance = useMemo(() => {
+		const lineAnnotations = vibesData.annotations.filter(
+			(a) => a.type === 'line' || a.type === 'function'
+		);
+		const hasAnnotationIds =
+			lineAnnotations.length > 0 &&
+			lineAnnotations.every((a) => a.annotation_id && a.annotation_id.length > 0);
+		const delegationRecords = vibesData.annotations.filter((a) => a.type === 'delegation');
+		const sessionRecords = vibesData.annotations.filter((a) => a.type === 'session');
+		const hasDelegations =
+			delegationRecords.length > 0 ||
+			sessionRecords.some(
+				(a) => a.type === 'session' && 'parent_session_id' in a && a.parent_session_id
+			);
+		const edgeRecords = vibesData.annotations.filter((a) => a.type === 'edge');
+		const hasEdges = edgeRecords.length > 0;
+		const hasAnchors = lineAnnotations.some(
+			(a) => a.type === 'line' && 'anchor_context' in a && a.anchor_context
+		);
+		return { hasAnnotationIds, hasDelegations, hasEdges, hasAnchors };
+	}, [vibesData.annotations]);
+
 	// Export dropdown state
 	const [showExportMenu, setShowExportMenu] = useState(false);
 
-	const handleExport = useCallback(async (type: 'annotations' | 'manifest' | 'summary') => {
-		if (!projectPath) return;
-		setShowExportMenu(false);
-		setActionStatus(null);
-		try {
-			let content: string;
-			let defaultName: string;
-			let ext: string;
+	const handleExport = useCallback(
+		async (type: 'annotations' | 'manifest' | 'summary') => {
+			if (!projectPath) return;
+			setShowExportMenu(false);
+			setActionStatus(null);
+			try {
+				let content: string;
+				let defaultName: string;
+				let ext: string;
 
-			if (type === 'annotations') {
-				const result = await window.maestro.vibes.getLog(projectPath, { json: true });
-				content = result.data ?? '[]';
-				defaultName = 'annotations.jsonl';
-				ext = 'jsonl';
-			} else if (type === 'manifest') {
-				const result = await window.maestro.vibes.getManifest(projectPath);
-				content = result.data ?? '{}';
-				defaultName = 'manifest.json';
-				ext = 'json';
-			} else {
-				// Generate markdown summary
-				const lines = [
-					'# VIBES Summary',
-					'',
-					`- **Annotations:** ${stats?.totalAnnotations ?? 0}`,
-					`- **Files Covered:** ${stats?.filesCovered ?? 0} / ${stats?.totalTrackedFiles ?? 0}`,
-					`- **Coverage:** ${stats?.coveragePercent ?? 0}%`,
-					`- **Active Sessions:** ${stats?.activeSessions ?? 0}`,
-					`- **Contributing Models:** ${stats?.contributingModels ?? 0}`,
-					`- **Assurance Level:** ${vibesAssuranceLevel}`,
-					'',
-					'## Models',
-					...vibesData.models.map(m => `- ${m.modelName} (${m.percentage.toFixed(1)}%)`),
-				];
-				content = lines.join('\n');
-				defaultName = 'vibes-summary.md';
-				ext = 'md';
+				if (type === 'annotations') {
+					const result = await window.maestro.vibes.getLog(projectPath, { json: true });
+					content = result.data ?? '[]';
+					defaultName = 'annotations.jsonl';
+					ext = 'jsonl';
+				} else if (type === 'manifest') {
+					const result = await window.maestro.vibes.getManifest(projectPath);
+					content = result.data ?? '{}';
+					defaultName = 'manifest.json';
+					ext = 'json';
+				} else {
+					// Generate markdown summary
+					const lines = [
+						'# VIBES Summary',
+						'',
+						`- **Annotations:** ${stats?.totalAnnotations ?? 0}`,
+						`- **Files Covered:** ${stats?.filesCovered ?? 0} / ${stats?.totalTrackedFiles ?? 0}`,
+						`- **Coverage:** ${stats?.coveragePercent ?? 0}%`,
+						`- **Active Sessions:** ${stats?.activeSessions ?? 0}`,
+						`- **Contributing Models:** ${stats?.contributingModels ?? 0}`,
+						`- **Assurance Level:** ${vibesAssuranceLevel}`,
+						'',
+						'## Models',
+						...vibesData.models.map((m) => `- ${m.modelName} (${m.percentage.toFixed(1)}%)`),
+					];
+					content = lines.join('\n');
+					defaultName = 'vibes-summary.md';
+					ext = 'md';
+				}
+
+				const savePath = await window.maestro.dialog.saveFile({
+					title: `Export VIBES ${type}`,
+					defaultPath: defaultName,
+					filters: [
+						{ name: `${ext.toUpperCase()} files`, extensions: [ext] },
+						{ name: 'All files', extensions: ['*'] },
+					],
+				});
+
+				if (savePath) {
+					await window.maestro.fs.writeFile(savePath, content);
+					setActionStatus({ type: 'success', message: `Exported ${type} successfully` });
+				}
+			} catch (err) {
+				setActionStatus({
+					type: 'error',
+					message: err instanceof Error ? err.message : `Export ${type} failed`,
+				});
 			}
-
-			const savePath = await window.maestro.dialog.saveFile({
-				title: `Export VIBES ${type}`,
-				defaultPath: defaultName,
-				filters: [
-					{ name: `${ext.toUpperCase()} files`, extensions: [ext] },
-					{ name: 'All files', extensions: ['*'] },
-				],
-			});
-
-			if (savePath) {
-				await window.maestro.fs.writeFile(savePath, content);
-				setActionStatus({ type: 'success', message: `Exported ${type} successfully` });
-			}
-		} catch (err) {
-			setActionStatus({
-				type: 'error',
-				message: err instanceof Error ? err.message : `Export ${type} failed`,
-			});
-		}
-	}, [projectPath, stats, vibesAssuranceLevel, vibesData.models]);
+		},
+		[projectPath, stats, vibesAssuranceLevel, vibesData.models]
+	);
 
 	// ========================================================================
 	// Status Banner — disabled / not initialized / error states
@@ -327,7 +364,8 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 					VIBES not initialized
 				</span>
 				<span className="text-xs max-w-xs" style={{ color: theme.colors.textDim }}>
-					No <code>.ai-audit/</code> directory found for this project. Initialize VIBES to start recording AI attribution metadata.
+					No <code>.ai-audit/</code> directory found for this project. Initialize VIBES to start
+					recording AI attribution metadata.
 				</span>
 				{vibesAutoInit === false && (
 					<div
@@ -339,7 +377,8 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 					>
 						<Info className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: '#3b82f6' }} />
 						<span style={{ color: theme.colors.textDim }}>
-							Auto-initialization is disabled. Enable it in Settings to automatically set up VIBES when opening new projects, or initialize manually below.
+							Auto-initialization is disabled. Enable it in Settings to automatically set up VIBES
+							when opening new projects, or initialize manually below.
 						</span>
 					</div>
 				)}
@@ -373,7 +412,11 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 					</button>
 				</div>
 				{actionStatus && (
-					<StatusMessage theme={theme} status={actionStatus} onDismiss={() => setActionStatus(null)} />
+					<StatusMessage
+						theme={theme}
+						status={actionStatus}
+						onDismiss={() => setActionStatus(null)}
+					/>
 				)}
 			</div>
 		);
@@ -397,9 +440,7 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 				}}
 			>
 				<CheckCircle2 className="w-3.5 h-3.5 shrink-0" style={{ color: theme.colors.success }} />
-				<span style={{ color: theme.colors.textMain }}>
-					VIBES is active
-				</span>
+				<span style={{ color: theme.colors.textMain }}>VIBES is active</span>
 				<span style={{ color: theme.colors.textDim }}>—</span>
 				<div className="flex items-center gap-0.5 ml-1">
 					{(['low', 'medium', 'high'] as VibesAssuranceLevel[]).map((level) => {
@@ -454,11 +495,7 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 					theme={theme}
 					icon={<FolderOpen className="w-4 h-4" />}
 					label="Coverage"
-					value={
-						stats
-							? `${stats.filesCovered}/${stats.totalTrackedFiles}`
-							: '0/0'
-					}
+					value={stats ? `${stats.filesCovered}/${stats.totalTrackedFiles}` : '0/0'}
 					subtitle={
 						stats && stats.totalTrackedFiles > 0
 							? `${stats.coveragePercent.toFixed(0)}%`
@@ -486,7 +523,10 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 			{!isLoading && isInitialized && (
 				<div className="flex flex-col gap-1.5" data-testid="activity-timeline">
 					<div className="flex items-center justify-between">
-						<span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: theme.colors.textDim }}>
+						<span
+							className="text-[10px] font-semibold uppercase tracking-wider"
+							style={{ color: theme.colors.textDim }}
+						>
 							Activity Timeline
 						</span>
 						<div className="flex items-center gap-0.5">
@@ -496,8 +536,10 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 									onClick={() => setTimelineRange(range.days)}
 									className="px-1.5 py-0.5 rounded text-[9px] font-medium transition-colors"
 									style={{
-										backgroundColor: timelineRange === range.days ? theme.colors.accent + '22' : 'transparent',
-										color: timelineRange === range.days ? theme.colors.accent : theme.colors.textDim,
+										backgroundColor:
+											timelineRange === range.days ? theme.colors.accent + '22' : 'transparent',
+										color:
+											timelineRange === range.days ? theme.colors.accent : theme.colors.textDim,
 										opacity: timelineRange === range.days ? 1 : 0.6,
 									}}
 								>
@@ -526,7 +568,7 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 													minHeight: 2,
 												}}
 											/>
-										) : null,
+										) : null
 									)}
 								</div>
 							))}
@@ -537,7 +579,10 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 						</span>
 					)}
 					{timeline.buckets.length > 0 && (
-						<div className="flex justify-between text-[9px]" style={{ color: theme.colors.textDim }}>
+						<div
+							className="flex justify-between text-[9px]"
+							style={{ color: theme.colors.textDim }}
+						>
 							<span>{timeline.buckets[0]?.label}</span>
 							<span>{timeline.buckets[timeline.buckets.length - 1]?.label}</span>
 						</div>
@@ -547,7 +592,10 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 						<div className="flex items-center gap-3 text-[9px]" data-testid="timeline-legend">
 							{Object.entries(ACTION_COLORS).map(([action, color]) => (
 								<span key={action} className="flex items-center gap-1">
-									<span className="inline-block w-2 h-2 rounded-sm" style={{ backgroundColor: color }} />
+									<span
+										className="inline-block w-2 h-2 rounded-sm"
+										style={{ backgroundColor: color }}
+									/>
 									{action}
 								</span>
 							))}
@@ -559,13 +607,27 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 			{/* Model Contribution Donut */}
 			{!isLoading && isInitialized && vibesData.models.length > 0 && (
 				<div className="flex flex-col gap-1.5" data-testid="model-donut-section">
-					<span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: theme.colors.textDim }}>
+					<span
+						className="text-[10px] font-semibold uppercase tracking-wider"
+						style={{ color: theme.colors.textDim }}
+					>
 						Model Contributions
 					</span>
 					<div className="flex items-center gap-3">
-						<div className="relative shrink-0" style={{ width: 64, height: 64 }} data-testid="model-donut">
+						<div
+							className="relative shrink-0"
+							style={{ width: 64, height: 64 }}
+							data-testid="model-donut"
+						>
 							<svg viewBox="0 0 36 36" width="64" height="64">
-								<circle cx="18" cy="18" r="14" fill="none" stroke={theme.colors.bgActivity} strokeWidth="4" />
+								<circle
+									cx="18"
+									cy="18"
+									r="14"
+									fill="none"
+									stroke={theme.colors.bgActivity}
+									strokeWidth="4"
+								/>
 								{(() => {
 									let offset = 25; // start at 12 o'clock (25% offset on a 100-unit circle)
 									return vibesData.models.map((model, i) => {
@@ -574,7 +636,9 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 										const el = (
 											<circle
 												key={model.modelName}
-												cx="18" cy="18" r="14"
+												cx="18"
+												cy="18"
+												r="14"
 												fill="none"
 												stroke={MODEL_PALETTE[i % MODEL_PALETTE.length]}
 												strokeWidth="4"
@@ -613,45 +677,69 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 			{/* Assurance Level Distribution */}
 			{!isLoading && isInitialized && assuranceTotal > 0 && (
 				<div className="flex flex-col gap-1.5" data-testid="assurance-distribution">
-					<span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: theme.colors.textDim }}>
+					<span
+						className="text-[10px] font-semibold uppercase tracking-wider"
+						style={{ color: theme.colors.textDim }}
+					>
 						Assurance Distribution
 					</span>
-					<div className="flex h-3 rounded overflow-hidden" style={{ backgroundColor: theme.colors.bgActivity }}>
+					<div
+						className="flex h-3 rounded overflow-hidden"
+						style={{ backgroundColor: theme.colors.bgActivity }}
+					>
 						{assuranceDist.low > 0 && (
 							<div
 								data-testid="assurance-bar-low"
-								style={{ width: `${(assuranceDist.low / assuranceTotal) * 100}%`, backgroundColor: ASSURANCE_BAR_COLORS.low }}
+								style={{
+									width: `${(assuranceDist.low / assuranceTotal) * 100}%`,
+									backgroundColor: ASSURANCE_BAR_COLORS.low,
+								}}
 							/>
 						)}
 						{assuranceDist.medium > 0 && (
 							<div
 								data-testid="assurance-bar-medium"
-								style={{ width: `${(assuranceDist.medium / assuranceTotal) * 100}%`, backgroundColor: ASSURANCE_BAR_COLORS.medium }}
+								style={{
+									width: `${(assuranceDist.medium / assuranceTotal) * 100}%`,
+									backgroundColor: ASSURANCE_BAR_COLORS.medium,
+								}}
 							/>
 						)}
 						{assuranceDist.high > 0 && (
 							<div
 								data-testid="assurance-bar-high"
-								style={{ width: `${(assuranceDist.high / assuranceTotal) * 100}%`, backgroundColor: ASSURANCE_BAR_COLORS.high }}
+								style={{
+									width: `${(assuranceDist.high / assuranceTotal) * 100}%`,
+									backgroundColor: ASSURANCE_BAR_COLORS.high,
+								}}
 							/>
 						)}
 					</div>
 					<div className="flex items-center gap-3 text-[10px]" data-testid="assurance-legend">
 						{assuranceDist.low > 0 && (
 							<span className="flex items-center gap-1">
-								<span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: ASSURANCE_BAR_COLORS.low }} />
+								<span
+									className="inline-block w-2 h-2 rounded-full"
+									style={{ backgroundColor: ASSURANCE_BAR_COLORS.low }}
+								/>
 								Low: {assuranceDist.low}
 							</span>
 						)}
 						{assuranceDist.medium > 0 && (
 							<span className="flex items-center gap-1">
-								<span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: ASSURANCE_BAR_COLORS.medium }} />
+								<span
+									className="inline-block w-2 h-2 rounded-full"
+									style={{ backgroundColor: ASSURANCE_BAR_COLORS.medium }}
+								/>
 								Medium: {assuranceDist.medium}
 							</span>
 						)}
 						{assuranceDist.high > 0 && (
 							<span className="flex items-center gap-1">
-								<span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: ASSURANCE_BAR_COLORS.high }} />
+								<span
+									className="inline-block w-2 h-2 rounded-full"
+									style={{ backgroundColor: ASSURANCE_BAR_COLORS.high }}
+								/>
 								High: {assuranceDist.high}
 							</span>
 						)}
@@ -659,9 +747,17 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 				</div>
 			)}
 
+			{/* Spec Compliance Indicator */}
+			{!isLoading && isInitialized && (
+				<SpecComplianceIndicator theme={theme} compliance={specCompliance} />
+			)}
+
 			{/* Quick Actions */}
 			<div className="flex flex-col gap-1.5">
-				<span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: theme.colors.textDim }}>
+				<span
+					className="text-[10px] font-semibold uppercase tracking-wider"
+					style={{ color: theme.colors.textDim }}
+				>
 					Quick Actions
 				</span>
 				<div className="flex gap-2">
@@ -735,7 +831,11 @@ export const VibesDashboard: React.FC<VibesDashboardProps> = ({
 
 			{/* Action Status */}
 			{actionStatus && (
-				<StatusMessage theme={theme} status={actionStatus} onDismiss={() => setActionStatus(null)} />
+				<StatusMessage
+					theme={theme}
+					status={actionStatus}
+					onDismiss={() => setActionStatus(null)}
+				/>
 			)}
 		</div>
 	);
@@ -754,7 +854,14 @@ interface StatsCardProps {
 	isLoading: boolean;
 }
 
-const StatsCard: React.FC<StatsCardProps> = ({ theme, icon, label, value, subtitle, isLoading }) => (
+const StatsCard: React.FC<StatsCardProps> = ({
+	theme,
+	icon,
+	label,
+	value,
+	subtitle,
+	isLoading,
+}) => (
 	<div
 		className="flex flex-col gap-1 px-3 py-2.5 rounded"
 		style={{
@@ -764,7 +871,10 @@ const StatsCard: React.FC<StatsCardProps> = ({ theme, icon, label, value, subtit
 	>
 		<div className="flex items-center gap-1.5">
 			<span style={{ color: theme.colors.textDim }}>{icon}</span>
-			<span className="text-[10px] uppercase tracking-wider font-medium" style={{ color: theme.colors.textDim }}>
+			<span
+				className="text-[10px] uppercase tracking-wider font-medium"
+				style={{ color: theme.colors.textDim }}
+			>
 				{label}
 			</span>
 		</div>
@@ -793,7 +903,14 @@ interface ActionButtonProps {
 	title?: string;
 }
 
-const ActionButton: React.FC<ActionButtonProps> = ({ theme, icon, label, onClick, disabled, title }) => (
+const ActionButton: React.FC<ActionButtonProps> = ({
+	theme,
+	icon,
+	label,
+	onClick,
+	disabled,
+	title,
+}) => (
 	<button
 		onClick={disabled ? undefined : onClick}
 		disabled={disabled}
@@ -818,19 +935,87 @@ interface StatusMessageProps {
 	onDismiss: () => void;
 }
 
+interface SpecComplianceIndicatorProps {
+	theme: Theme;
+	compliance: {
+		hasAnnotationIds: boolean;
+		hasDelegations: boolean;
+		hasEdges: boolean;
+		hasAnchors: boolean;
+	};
+}
+
+const SpecComplianceIndicator: React.FC<SpecComplianceIndicatorProps> = ({ theme, compliance }) => {
+	const checks = [
+		{
+			label: 'Annotation IDs',
+			spec: 'VIBES 1.0',
+			status: compliance.hasAnnotationIds,
+			required: true,
+		},
+		{
+			label: 'Delegation records',
+			spec: 'EVOLVE',
+			status: compliance.hasDelegations,
+			required: false,
+		},
+		{
+			label: 'Content anchoring',
+			spec: 'VIBES 1.0',
+			status: compliance.hasAnchors,
+			required: false,
+		},
+		{ label: 'Edge records', spec: 'VIBES 1.0', status: compliance.hasEdges, required: false },
+	];
+
+	return (
+		<div className="flex flex-col gap-1.5" data-testid="spec-compliance">
+			<div className="flex items-center gap-1.5">
+				<ClipboardCheck className="w-3 h-3" style={{ color: theme.colors.textDim }} />
+				<span
+					className="text-[10px] font-semibold uppercase tracking-wider"
+					style={{ color: theme.colors.textDim }}
+				>
+					Spec Compliance
+				</span>
+			</div>
+			<div
+				className="flex flex-col gap-0.5 px-3 py-2 rounded text-[11px]"
+				style={{
+					backgroundColor: theme.colors.bgActivity,
+					border: `1px solid ${theme.colors.border}`,
+				}}
+			>
+				{checks.map((check) => (
+					<div key={check.label} className="flex items-center gap-2">
+						{check.status ? (
+							<CheckCircle2 className="w-3 h-3 shrink-0" style={{ color: theme.colors.success }} />
+						) : (
+							<AlertCircle
+								className="w-3 h-3 shrink-0"
+								style={{ color: check.required ? theme.colors.error : '#eab308' }}
+							/>
+						)}
+						<span style={{ color: theme.colors.textMain }}>{check.label}</span>
+						<span className="text-[9px] ml-auto" style={{ color: theme.colors.textDim }}>
+							{check.spec}
+						</span>
+					</div>
+				))}
+			</div>
+		</div>
+	);
+};
+
 const StatusMessage: React.FC<StatusMessageProps> = ({ theme, status, onDismiss }) => (
 	<div
 		className="flex items-center gap-2 px-3 py-2 rounded text-xs cursor-pointer"
 		onClick={onDismiss}
 		style={{
 			backgroundColor:
-				status.type === 'success'
-					? 'rgba(34, 197, 94, 0.1)'
-					: 'rgba(239, 68, 68, 0.1)',
+				status.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
 			border: `1px solid ${
-				status.type === 'success'
-					? 'rgba(34, 197, 94, 0.3)'
-					: 'rgba(239, 68, 68, 0.3)'
+				status.type === 'success' ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'
 			}`,
 		}}
 	>

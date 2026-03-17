@@ -2,6 +2,9 @@
 // from Maestro's internal event data. Each builder function returns a typed entry
 // along with its content-addressed hash for manifest storage.
 
+import { createHash } from 'crypto';
+import { readFile } from 'fs/promises';
+import * as path from 'path';
 import { gzipSync } from 'zlib';
 import { computeVibesHashV2, computeAnnotationId } from './vibes-hash';
 import type {
@@ -262,6 +265,70 @@ export function createLineAnnotation(params: {
 		assurance_level: params.assuranceLevel,
 	};
 	annotation.annotation_id = computeAnnotationId(annotation as unknown as Record<string, unknown>);
+	return annotation;
+}
+
+/**
+ * Create a line-level annotation with content anchoring fields (spec section 7.3).
+ * Reads the file to compute anchor_context, anchor_hash, and file_content_hash.
+ * Falls back gracefully if the file is unreadable — anchoring is RECOMMENDED, not REQUIRED.
+ *
+ * Uses an optional file content hash cache to avoid re-reading unchanged files.
+ */
+export async function createLineAnnotationWithAnchors(params: {
+	filePath: string;
+	lineStart: number;
+	lineEnd: number;
+	environmentHash: string;
+	commandHash?: string | null;
+	promptHash?: string | null;
+	reasoningHash?: string | null;
+	decisionHash?: string | null;
+	action: VibesAction;
+	sessionId?: string | null;
+	commitHash?: string | null;
+	assuranceLevel: VibesAssuranceLevel;
+	projectPath: string;
+	fileContentHashCache?: Map<string, { hash: string; mtime: number }>;
+}): Promise<VibesLineAnnotation> {
+	const annotation = createLineAnnotation(params);
+
+	// Compute content anchors (best-effort — don't fail if file unreadable)
+	try {
+		const fullPath = path.isAbsolute(params.filePath)
+			? params.filePath
+			: path.join(params.projectPath, params.filePath);
+		const content = await readFile(fullPath, 'utf8');
+
+		// file_content_hash: SHA-256 of entire file
+		const fileHash = createHash('sha256').update(content, 'utf8').digest('hex');
+		annotation.file_content_hash = fileHash;
+
+		// Update cache if provided
+		if (params.fileContentHashCache) {
+			const { stat } = await import('fs/promises');
+			try {
+				const st = await stat(fullPath);
+				params.fileContentHashCache.set(fullPath, { hash: fileHash, mtime: st.mtimeMs });
+			} catch {
+				// stat failed — skip cache update
+			}
+		}
+
+		const lines = content.split('\n');
+
+		// anchor_context: first 3 lines of annotated range, truncated to 256 bytes
+		const rangeLines = lines.slice(params.lineStart - 1, params.lineStart + 2); // 3 lines
+		const anchorText = rangeLines.join('\n').slice(0, 256);
+		annotation.anchor_context = anchorText;
+
+		// anchor_hash: SHA-256 of full content at line_start through line_end
+		const rangeContent = lines.slice(params.lineStart - 1, params.lineEnd).join('\n');
+		annotation.anchor_hash = createHash('sha256').update(rangeContent, 'utf8').digest('hex');
+	} catch {
+		// File not readable — anchoring is RECOMMENDED, not REQUIRED
+	}
+
 	return annotation;
 }
 

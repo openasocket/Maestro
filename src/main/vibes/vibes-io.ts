@@ -277,6 +277,7 @@ async function flushManifestDebounce(projectPath: string): Promise<void> {
 /**
  * Ensure the .ai-audit/ and .ai-audit/blobs/ directories exist.
  * Creates them recursively if they don't exist.
+ * Also creates .ai-audit/.gitignore with audit.db exclusion per spec section 4.1.
  */
 export async function ensureAuditDir(projectPath: string): Promise<void> {
 	const auditDir = path.join(projectPath, AUDIT_DIR);
@@ -284,6 +285,18 @@ export async function ensureAuditDir(projectPath: string): Promise<void> {
 
 	await mkdir(auditDir, { recursive: true });
 	await mkdir(blobsDir, { recursive: true });
+
+	// Create .gitignore if it doesn't exist (spec section 4.1)
+	const gitignorePath = path.join(auditDir, '.gitignore');
+	try {
+		await access(gitignorePath, constants.F_OK);
+	} catch {
+		await writeFile(
+			gitignorePath,
+			'# Derived artifacts — regenerate with vibecheck build\naudit.db\naudit.db-shm\naudit.db-wal\n',
+			'utf8'
+		);
+	}
 }
 
 // ============================================================================

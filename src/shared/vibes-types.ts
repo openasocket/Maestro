@@ -151,6 +151,26 @@ export interface VibesLineAnnotation {
 	commit_hash: string | null;
 	session_id: string | null;
 	assurance_level: VibesAssuranceLevel;
+	// Content anchoring fields (spec section 7.3 — RECOMMENDED)
+	/** First 3 lines of the annotated range at annotation time, truncated to 256 bytes.
+	 *  Enables fuzzy re-matching after line shifts. */
+	anchor_context?: string;
+	/** SHA-256 of the full content at line_start through line_end at annotation time.
+	 *  Enables exact-match detection for drift. */
+	anchor_hash?: string;
+	/** SHA-256 of the entire file at annotation time. If this matches the current file,
+	 *  line numbers are still valid — no anchor search needed. */
+	file_content_hash?: string;
+	// PRISM risk score fields (spec section 10.5 — Optional)
+	/** Aggregate PRISM score, 0.0–1.0. See PRISM spec. */
+	risk_score?: number;
+	/** Array of signal assessments. */
+	risk_factors?: Array<{
+		signal: string; // e.g., "action_type", "scope_lines", "human_review_present"
+		value: number; // 0.0–1.0
+		weight: number; // 0.0–1.0
+		reason?: string; // Optional explanation
+	}>;
 }
 
 /** Function-level annotation linking named functions to provenance metadata. */
@@ -170,6 +190,23 @@ export interface VibeFunctionAnnotation {
 	commit_hash?: string;
 	session_id?: string;
 	assurance_level: VibesAssuranceLevel;
+	// Content anchoring fields (spec section 7.3/7.4 — RECOMMENDED)
+	/** First 3 lines of function body at annotation time, truncated to 256 bytes. */
+	anchor_context?: string;
+	/** SHA-256 of full function body at annotation time. */
+	anchor_hash?: string;
+	/** SHA-256 of entire file at annotation time. */
+	file_content_hash?: string;
+	// PRISM risk score fields (spec section 10.5 — Optional)
+	/** Aggregate PRISM score, 0.0–1.0. See PRISM spec. */
+	risk_score?: number;
+	/** Array of signal assessments. */
+	risk_factors?: Array<{
+		signal: string; // e.g., "action_type", "scope_lines", "human_review_present"
+		value: number; // 0.0–1.0
+		weight: number; // 0.0–1.0
+		reason?: string; // Optional explanation
+	}>;
 }
 
 /** Session-level record marking the start or end of an agent session. */

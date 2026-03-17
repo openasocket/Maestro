@@ -42,6 +42,8 @@ export interface VibesSessionState {
 	startedAt: string;
 	/** Whether the session is still active. */
 	isActive: boolean;
+	/** Cache of file content hashes to avoid re-reading unchanged files. */
+	fileContentHashCache: Map<string, { hash: string; mtime: number }>;
 }
 
 // ============================================================================
@@ -102,6 +104,7 @@ export class VibesSessionManager {
 			annotationCount: 0,
 			startedAt,
 			isActive: true,
+			fileContentHashCache: new Map(),
 		};
 
 		this.sessions.set(sessionId, state);

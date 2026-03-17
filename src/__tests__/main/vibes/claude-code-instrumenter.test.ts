@@ -2467,4 +2467,144 @@ describe('claude-code-instrumenter', () => {
 			expect(supersedesEdges).toHaveLength(0);
 		});
 	});
+
+	// ========================================================================
+	// Opportunistic decision detection from thinking chunks
+	// ========================================================================
+	describe('opportunistic decision detection', () => {
+		it('should auto-detect a decision from reasoning text during flush', async () => {
+			await setupSession('sess-1', 'high');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'high',
+			});
+
+			// Feed reasoning text that contains a decision pattern
+			instrumenter.handleThinkingChunk(
+				'sess-1',
+				'I need to decide how to implement the cache.\n' +
+					'Option A: Use a Map for O(1) lookups with memory overhead\n' +
+					'Option B: Use an array with linear search but lower memory\n' +
+					"I'll go with a Map because it provides constant-time lookups.\n"
+			);
+
+			await instrumenter.flush('sess-1');
+			await flushAll();
+
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const decisionEntries = entries.filter((e) => e.type === 'decision') as VibesDecisionEntry[];
+
+			expect(decisionEntries).toHaveLength(1);
+			expect(decisionEntries[0].options).toHaveLength(2);
+			expect(decisionEntries[0].rationale).toContain('constant-time lookups');
+		});
+
+		it('should NOT auto-detect decisions at Medium assurance (no reasoning captured)', async () => {
+			await setupSession('sess-1', 'medium');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'medium',
+			});
+
+			// At Medium assurance, handleThinkingChunk is a no-op
+			instrumenter.handleThinkingChunk(
+				'sess-1',
+				"Option A: foo\nOption B: bar\nI'll go with foo because it is simpler.\n"
+			);
+
+			await instrumenter.flush('sess-1');
+			await flushAll();
+
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const decisionEntries = entries.filter((e) => e.type === 'decision');
+			expect(decisionEntries).toHaveLength(0);
+		});
+
+		it('should NOT auto-detect decisions when reasoning has no decision pattern', async () => {
+			await setupSession('sess-1', 'high');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'high',
+			});
+
+			instrumenter.handleThinkingChunk(
+				'sess-1',
+				'I need to read the file first and check the imports. ' +
+					'Let me look at the structure of this module. ' +
+					'The component uses several React hooks for state management.'
+			);
+
+			await instrumenter.flush('sess-1');
+			await flushAll();
+
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const decisionEntries = entries.filter((e) => e.type === 'decision');
+			expect(decisionEntries).toHaveLength(0);
+		});
+
+		it('should NOT auto-detect if an explicit decision was already recorded', async () => {
+			await setupSession('sess-1', 'high');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'high',
+			});
+
+			// Record an explicit decision first
+			await instrumenter.handleDecision('sess-1', {
+				decisionPoint: 'Explicit decision',
+				options: [
+					{ id: 'x', description: 'X' },
+					{ id: 'y', description: 'Y' },
+				],
+				selected: 'x',
+				rationale: 'Explicitly chosen',
+			});
+
+			// Then feed reasoning with another decision pattern
+			instrumenter.handleThinkingChunk(
+				'sess-1',
+				'Option A: Use a Map for lookups\n' +
+					'Option B: Use an array with search\n' +
+					"I'll go with a Map because it is faster.\n"
+			);
+
+			await instrumenter.flush('sess-1');
+			await flushAll();
+
+			const manifest = await readVibesManifest(tmpDir);
+			const entries = Object.values(manifest.entries);
+			const decisionEntries = entries.filter((e) => e.type === 'decision') as VibesDecisionEntry[];
+
+			// Only the explicit decision should exist, not the auto-detected one
+			expect(decisionEntries).toHaveLength(1);
+			expect(decisionEntries[0].decision_point).toBe('Explicit decision');
+		});
+
+		it('should set the decision hash for linking to subsequent annotations', async () => {
+			await setupSession('sess-1', 'high');
+			const instrumenter = new ClaudeCodeInstrumenter({
+				sessionManager: manager,
+				assuranceLevel: 'high',
+			});
+
+			// No decision hash before
+			expect(instrumenter.getLastDecisionHash('sess-1')).toBeUndefined();
+
+			instrumenter.handleThinkingChunk(
+				'sess-1',
+				'Choosing TypeScript enums over string unions because they provide runtime validation.'
+			);
+
+			// Trigger flush via handleResult (which calls flushReasoning internally)
+			await instrumenter.handleResult('sess-1', 'Done.');
+			await flushAll();
+
+			// Decision hash should now be set
+			const decisionHash = instrumenter.getLastDecisionHash('sess-1');
+			expect(decisionHash).toMatch(/^[0-9a-f]{64}$/);
+		});
+	});
 });

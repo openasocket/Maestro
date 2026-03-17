@@ -13,13 +13,14 @@ import {
 	createCommandEntry,
 	createDecisionEntry,
 	createEdgeRecord,
-	createLineAnnotation,
+	createLineAnnotationWithAnchors,
 	createReasoningEntry,
 	createExternalReasoningEntry,
 	createPromptEntry,
 	createSessionRecord,
 } from '../vibes-annotations';
 import { writeReasoningBlob } from '../vibes-io';
+import { detectDecision } from '../vibes-decision-detector';
 import type { ParsedEvent } from '../../parsers/agent-output-parser';
 import type {
 	VibesAssuranceLevel,
@@ -498,7 +499,7 @@ export class ClaudeCodeInstrumenter {
 						this.assuranceLevel === 'high' ? this.lastReasoningHashes.get(sessionId) : undefined;
 					const decisionHash =
 						this.assuranceLevel !== 'low' ? this.lastDecisionHashes.get(sessionId) : undefined;
-					const annotation = createLineAnnotation({
+					const annotation = await createLineAnnotationWithAnchors({
 						filePath: normalizedPath,
 						lineStart: lineRange?.lineStart ?? 1,
 						lineEnd: lineRange?.lineEnd ?? 1,
@@ -510,6 +511,8 @@ export class ClaudeCodeInstrumenter {
 						action,
 						sessionId: session.vibesSessionId,
 						assuranceLevel: session.assuranceLevel,
+						projectPath: session.projectPath,
+						fileContentHashCache: session.fileContentHashCache,
 					});
 					await this.sessionManager.recordAnnotation(sessionId, annotation);
 
@@ -796,6 +799,29 @@ export class ClaudeCodeInstrumenter {
 
 		await this.sessionManager.recordManifestEntry(sessionId, hash, entry);
 		this.lastReasoningHashes.set(sessionId, hash);
+
+		// Opportunistic decision detection: scan reasoning text for decision patterns
+		// and auto-create decision entries when found. Only at High assurance where
+		// reasoning text is available. Skip if a decision was already recorded for
+		// this session (explicit handleDecision call takes precedence).
+		if (!this.lastDecisionHashes.has(sessionId)) {
+			const detected = detectDecision(text);
+			if (detected) {
+				try {
+					const { entry: decisionEntry, hash: decisionHash } = createDecisionEntry({
+						decisionPoint: detected.decision_point,
+						options: detected.options,
+						selected: detected.selected,
+						rationale: detected.rationale,
+						confidence: detected.confidence,
+					});
+					await this.sessionManager.recordManifestEntry(sessionId, decisionHash, decisionEntry);
+					this.lastDecisionHashes.set(sessionId, decisionHash);
+				} catch (err) {
+					logWarn('Error recording detected decision', { sessionId, error: String(err) });
+				}
+			}
+		}
 
 		// Clear the buffer after flushing
 		this.reasoningBuffers.delete(sessionId);
