@@ -115,6 +115,17 @@ export class VibesCoordinator {
 	 */
 	private parentSessionMap: Map<string, string> = new Map();
 
+	/**
+	 * Sessions explicitly registered as orchestrators (EVOLVE spec section 3).
+	 * Only sessions in this set get `agent_type: 'orchestrator'` — all others
+	 * default to `'worker'`. Populated by `registerOrchestrator()`.
+	 *
+	 * Orchestrator sessions include:
+	 *   - Maestro's own VIBES session (orchestrator layer)
+	 *   - Group Chat moderator sessions
+	 */
+	private orchestratorSessions: Set<string> = new Set();
+
 	constructor(params: { settingsStore: VibesSettingsStore; safeSend?: SafeSendFn }) {
 		this.settingsStore = params.settingsStore;
 		this.safeSend = params.safeSend ?? null;
@@ -314,7 +325,7 @@ export class VibesCoordinator {
 				parentVibesSessionId = parentState?.vibesSessionId ?? null;
 			}
 			const agentName = agentType;
-			const evolveAgentType = parentMaestroSessionId ? 'worker' : 'worker';
+			const evolveAgentType = this.orchestratorSessions.has(sessionId) ? 'orchestrator' : 'worker';
 
 			await this.sessionManager.startSession(
 				sessionId,
@@ -389,6 +400,7 @@ export class VibesCoordinator {
 			this.environmentUpdatedSessions.delete(sessionId);
 			this.sessionToolExtensions.delete(sessionId);
 			this.parentSessionMap.delete(sessionId);
+			this.orchestratorSessions.delete(sessionId);
 
 			logger.info('[VibesCoordinator] VIBES session ended', 'VibesCoordinator', {
 				sessionId,
@@ -600,6 +612,39 @@ export class VibesCoordinator {
 	 */
 	getParentSessionId(childSessionId: string): string | null {
 		return this.parentSessionMap.get(childSessionId) ?? null;
+	}
+
+	// ========================================================================
+	// Orchestrator Role Registration (EVOLVE Section 3)
+	// ========================================================================
+
+	/**
+	 * Mark a session as an orchestrator.
+	 *
+	 * Sessions registered as orchestrators will have `agent_type: 'orchestrator'`
+	 * on their session start records. All other sessions default to `'worker'`.
+	 *
+	 * Call this BEFORE `handleProcessSpawn()` for the session so the correct
+	 * agent_type is set on the session start record.
+	 *
+	 * Orchestrator sessions:
+	 *   - Maestro's own VIBES session (orchestrator layer)
+	 *   - Group Chat moderator sessions
+	 *
+	 * @param sessionId - Maestro session ID to mark as orchestrator
+	 */
+	registerOrchestrator(sessionId: string): void {
+		this.orchestratorSessions.add(sessionId);
+		logger.debug('[VibesCoordinator] Registered orchestrator', 'VibesCoordinator', {
+			sessionId,
+		});
+	}
+
+	/**
+	 * Check whether a session is registered as an orchestrator.
+	 */
+	isOrchestrator(sessionId: string): boolean {
+		return this.orchestratorSessions.has(sessionId);
 	}
 
 	/**

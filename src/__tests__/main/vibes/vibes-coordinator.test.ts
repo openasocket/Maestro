@@ -1453,6 +1453,210 @@ describe('vibes-coordinator', () => {
 	});
 
 	// ========================================================================
+	// Orchestrator Role Determination (EVOLVE Section 3)
+	// ========================================================================
+	describe('orchestrator role determination', () => {
+		it('should default to agent_type "worker" for unregistered sessions', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			const config = createProcessConfig({
+				sessionId: 'user-tab-sess',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			await coordinator.handleProcessSpawn('user-tab-sess', config);
+
+			// Read annotations and verify the session start record
+			const annotations = await readAnnotations(tmpDir);
+			const sessionStart = annotations.find(
+				(a) =>
+					a.type === 'session' &&
+					(a as VibesSessionRecord).event === 'start' &&
+					(a as VibesSessionRecord).session_id !== undefined
+			) as VibesSessionRecord | undefined;
+			expect(sessionStart).toBeDefined();
+			expect(sessionStart!.agent_type).toBe('worker');
+		});
+
+		it('should set agent_type "orchestrator" for registered orchestrator sessions', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			// Register as orchestrator BEFORE spawning
+			coordinator.registerOrchestrator('maestro-sess');
+
+			const config = createProcessConfig({
+				sessionId: 'maestro-sess',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			await coordinator.handleProcessSpawn('maestro-sess', config);
+
+			const annotations = await readAnnotations(tmpDir);
+			const sessionStart = annotations.find(
+				(a) => a.type === 'session' && (a as VibesSessionRecord).event === 'start'
+			) as VibesSessionRecord | undefined;
+			expect(sessionStart).toBeDefined();
+			expect(sessionStart!.agent_type).toBe('orchestrator');
+		});
+
+		it('should return correct isOrchestrator() status', () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			expect(coordinator.isOrchestrator('any-sess')).toBe(false);
+			coordinator.registerOrchestrator('maestro-sess');
+			expect(coordinator.isOrchestrator('maestro-sess')).toBe(true);
+			expect(coordinator.isOrchestrator('other-sess')).toBe(false);
+		});
+
+		it('should keep worker type for delegated child sessions even if parent is orchestrator', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			// Start orchestrator session first
+			coordinator.registerOrchestrator('orchestrator-sess');
+			const orchConfig = createProcessConfig({
+				sessionId: 'orchestrator-sess',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			await coordinator.handleProcessSpawn('orchestrator-sess', orchConfig);
+
+			// Register delegation and spawn worker
+			coordinator.registerDelegation('orchestrator-sess', 'worker-sess');
+			const workerConfig = createProcessConfig({
+				sessionId: 'worker-sess',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			await coordinator.handleProcessSpawn('worker-sess', workerConfig);
+
+			const annotations = await readAnnotations(tmpDir);
+			const sessionStarts = annotations.filter(
+				(a) => a.type === 'session' && (a as VibesSessionRecord).event === 'start'
+			) as VibesSessionRecord[];
+
+			expect(sessionStarts.length).toBe(2);
+
+			// Find orchestrator and worker session starts by session_id content
+			const orchStart = sessionStarts.find((s) => s.agent_type === 'orchestrator');
+			const workerStart = sessionStarts.find((s) => s.agent_type === 'worker');
+
+			expect(orchStart).toBeDefined();
+			expect(workerStart).toBeDefined();
+			expect(workerStart!.parent_session_id).toBeTruthy();
+		});
+
+		it('should clean up orchestrator registration on session exit', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			coordinator.registerOrchestrator('orch-sess');
+			expect(coordinator.isOrchestrator('orch-sess')).toBe(true);
+
+			const config = createProcessConfig({
+				sessionId: 'orch-sess',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			await coordinator.handleProcessSpawn('orch-sess', config);
+			await coordinator.handleProcessExit('orch-sess', 0);
+
+			expect(coordinator.isOrchestrator('orch-sess')).toBe(false);
+		});
+
+		it('should set worker type for Auto Run spawned agents', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			// Simulate Auto Run: orchestrator spawns a worker
+			coordinator.registerOrchestrator('autorun-orch');
+			const orchConfig = createProcessConfig({
+				sessionId: 'autorun-orch',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			await coordinator.handleProcessSpawn('autorun-orch', orchConfig);
+
+			// Worker spawned by Auto Run — has parent, not registered as orchestrator
+			coordinator.registerDelegation('autorun-orch', 'autorun-worker');
+			const workerConfig = createProcessConfig({
+				sessionId: 'autorun-worker',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			await coordinator.handleProcessSpawn('autorun-worker', workerConfig);
+
+			const annotations = await readAnnotations(tmpDir);
+			const workerStarts = annotations.filter(
+				(a) =>
+					a.type === 'session' &&
+					(a as VibesSessionRecord).event === 'start' &&
+					(a as VibesSessionRecord).agent_type === 'worker'
+			) as VibesSessionRecord[];
+			expect(workerStarts.length).toBe(1);
+		});
+
+		it('should set orchestrator type for Group Chat moderator', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			// Group Chat moderator is registered as orchestrator
+			coordinator.registerOrchestrator('gc-moderator-sess');
+			const modConfig = createProcessConfig({
+				sessionId: 'gc-moderator-sess',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			await coordinator.handleProcessSpawn('gc-moderator-sess', modConfig);
+
+			const annotations = await readAnnotations(tmpDir);
+			const sessionStart = annotations.find(
+				(a) => a.type === 'session' && (a as VibesSessionRecord).event === 'start'
+			) as VibesSessionRecord | undefined;
+			expect(sessionStart).toBeDefined();
+			expect(sessionStart!.agent_type).toBe('orchestrator');
+		});
+
+		it('should set worker type for Group Chat participants', async () => {
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+
+			// Moderator is orchestrator
+			coordinator.registerOrchestrator('gc-mod');
+			const modConfig = createProcessConfig({
+				sessionId: 'gc-mod',
+				toolType: 'claude-code',
+				projectPath: tmpDir,
+			});
+			await coordinator.handleProcessSpawn('gc-mod', modConfig);
+
+			// Participant is a delegated worker
+			coordinator.registerDelegation('gc-mod', 'gc-participant');
+			const partConfig = createProcessConfig({
+				sessionId: 'gc-participant',
+				toolType: 'codex',
+				projectPath: tmpDir,
+			});
+			await coordinator.handleProcessSpawn('gc-participant', partConfig);
+
+			const annotations = await readAnnotations(tmpDir);
+			const starts = annotations.filter(
+				(a) => a.type === 'session' && (a as VibesSessionRecord).event === 'start'
+			) as VibesSessionRecord[];
+
+			const modStart = starts.find((s) => s.agent_type === 'orchestrator');
+			const partStart = starts.find((s) => s.agent_type === 'worker');
+
+			expect(modStart).toBeDefined();
+			expect(partStart).toBeDefined();
+			expect(partStart!.parent_session_id).toBeTruthy();
+		});
+	});
+
+	// ========================================================================
 	// Auto-Initialization
 	// ========================================================================
 	describe('auto-initialization', () => {
