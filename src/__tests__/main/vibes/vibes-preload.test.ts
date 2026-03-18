@@ -56,12 +56,13 @@ describe('vibes preload API', () => {
 			expect(api).toHaveProperty('clearBinaryCache');
 			expect(api).toHaveProperty('decompressReasoning');
 			expect(api).toHaveProperty('onAnnotationUpdate');
+			expect(api).toHaveProperty('onActivityFeed');
 			expect(api).toHaveProperty('onKeyPermissionsWarning');
 			expect(api).toHaveProperty('attestation');
 		});
 
-		it('should have exactly 20 top-level properties', () => {
-			expect(Object.keys(api)).toHaveLength(20);
+		it('should have exactly 21 top-level properties', () => {
+			expect(Object.keys(api)).toHaveLength(21);
 		});
 
 		it('should have attestation sub-namespace with 7 methods', () => {
@@ -332,6 +333,58 @@ describe('vibes preload API', () => {
 			registeredHandler!(null, payload);
 
 			expect(callback).toHaveBeenCalledWith(payload);
+		});
+	});
+
+	describe('onActivityFeed', () => {
+		it('should register a listener on vibes:activity-feed channel', () => {
+			const callback = vi.fn();
+
+			api.onActivityFeed(callback);
+
+			expect(mockOn).toHaveBeenCalledWith('vibes:activity-feed', expect.any(Function));
+		});
+
+		it('should return a cleanup function that removes the listener', () => {
+			const callback = vi.fn();
+
+			const cleanup = api.onActivityFeed(callback);
+			cleanup();
+
+			expect(mockRemoveListener).toHaveBeenCalledWith('vibes:activity-feed', expect.any(Function));
+		});
+
+		it('should forward the event to the callback (unwrapping the IPC event arg)', () => {
+			const callback = vi.fn();
+			let registeredHandler: (event: unknown, payload: unknown) => void;
+
+			mockOn.mockImplementation(
+				(_channel: string, handler: (event: unknown, payload: unknown) => void) => {
+					registeredHandler = handler;
+				}
+			);
+
+			api.onActivityFeed(callback);
+
+			const feedEvent = {
+				sessionId: 'sess-1',
+				vibesSessionId: 'vibes-sess-1',
+				category: 'tool' as const,
+				summary: 'Tool: Write → src/index.ts',
+				timestamp: '2026-03-17T12:00:00.000Z',
+				detail: {
+					toolName: 'Write',
+					filePath: 'src/index.ts',
+					action: 'create',
+				},
+				isSubagent: false,
+				depth: 0,
+			};
+
+			// Simulate IPC event (first arg is the IPC event, second is the payload)
+			registeredHandler!(null, feedEvent);
+
+			expect(callback).toHaveBeenCalledWith(feedEvent);
 		});
 	});
 

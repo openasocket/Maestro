@@ -13,7 +13,7 @@
 
 import { ipcRenderer } from 'electron';
 
-import type { VibesAssuranceLevel } from '../../shared/vibes-types';
+import type { VibesAssuranceLevel, VibesActivityFeedEvent } from '../../shared/vibes-types';
 
 /**
  * Standard result type for VIBES CLI commands.
@@ -154,6 +154,17 @@ export function createVibesApi() {
 			const handler = (_: unknown, payload: VibesAnnotationUpdatePayload) => callback(payload);
 			ipcRenderer.on('vibes:annotation-update', handler);
 			return () => ipcRenderer.removeListener('vibes:annotation-update', handler);
+		},
+
+		/**
+		 * Subscribe to live activity feed events from the main process.
+		 * Emitted by the VibesCoordinator for real-time insights display.
+		 * Returns a cleanup function to unsubscribe.
+		 */
+		onActivityFeed: (callback: (event: VibesActivityFeedEvent) => void): (() => void) => {
+			const handler = (_: unknown, event: VibesActivityFeedEvent) => callback(event);
+			ipcRenderer.on('vibes:activity-feed', handler);
+			return () => ipcRenderer.removeListener('vibes:activity-feed', handler);
 		},
 
 		/**
