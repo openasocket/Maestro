@@ -2188,4 +2188,104 @@ describe('InputArea', () => {
 			expect(screen.getByText('$')).toBeInTheDocument();
 		});
 	});
+
+	describe('VIBES Insights Toggle', () => {
+		it('shows Insights button when VIBES enabled and AI mode', () => {
+			const props = createDefaultProps({
+				session: createMockSession({ inputMode: 'ai' }),
+				vibesEnabled: true,
+				vibesInsightsEnabled: false,
+				onToggleVibesInsights: vi.fn(),
+			});
+			render(<InputArea {...props} />);
+
+			const button = screen.getByTitle('VIBES Insights — click to show real-time agent activity');
+			expect(button).toBeInTheDocument();
+			expect(button).toHaveTextContent('Insights');
+		});
+
+		it('hides Insights button when VIBES is disabled', () => {
+			const props = createDefaultProps({
+				session: createMockSession({ inputMode: 'ai' }),
+				vibesEnabled: false,
+				vibesInsightsEnabled: false,
+				onToggleVibesInsights: vi.fn(),
+			});
+			render(<InputArea {...props} />);
+
+			expect(
+				screen.queryByTitle('VIBES Insights — click to show real-time agent activity')
+			).not.toBeInTheDocument();
+			expect(
+				screen.queryByTitle('VIBES Insights ON — showing real-time activity feed')
+			).not.toBeInTheDocument();
+		});
+
+		it('hides Insights button in terminal mode', () => {
+			const props = createDefaultProps({
+				session: createMockSession({ inputMode: 'terminal' }),
+				vibesEnabled: true,
+				vibesInsightsEnabled: false,
+				onToggleVibesInsights: vi.fn(),
+			});
+			render(<InputArea {...props} />);
+
+			expect(
+				screen.queryByTitle('VIBES Insights — click to show real-time agent activity')
+			).not.toBeInTheDocument();
+		});
+
+		it('hides Insights button when no toggle handler provided', () => {
+			const props = createDefaultProps({
+				session: createMockSession({ inputMode: 'ai' }),
+				vibesEnabled: true,
+				vibesInsightsEnabled: false,
+			});
+			render(<InputArea {...props} />);
+
+			expect(
+				screen.queryByTitle('VIBES Insights — click to show real-time agent activity')
+			).not.toBeInTheDocument();
+		});
+
+		it('applies active (green) styling when Insights is enabled', () => {
+			const props = createDefaultProps({
+				session: createMockSession({ inputMode: 'ai' }),
+				vibesEnabled: true,
+				vibesInsightsEnabled: true,
+				onToggleVibesInsights: vi.fn(),
+			});
+			render(<InputArea {...props} />);
+
+			const button = screen.getByTitle('VIBES Insights ON — showing real-time activity feed');
+			expect(button).toHaveStyle({ color: mockTheme.colors.success });
+		});
+
+		it('applies dim styling when Insights is disabled', () => {
+			const props = createDefaultProps({
+				session: createMockSession({ inputMode: 'ai' }),
+				vibesEnabled: true,
+				vibesInsightsEnabled: false,
+				onToggleVibesInsights: vi.fn(),
+			});
+			render(<InputArea {...props} />);
+
+			const button = screen.getByTitle('VIBES Insights — click to show real-time agent activity');
+			expect(button).toHaveStyle({ color: mockTheme.colors.textDim });
+		});
+
+		it('calls onToggleVibesInsights when clicked', () => {
+			const onToggleVibesInsights = vi.fn();
+			const props = createDefaultProps({
+				session: createMockSession({ inputMode: 'ai' }),
+				vibesEnabled: true,
+				vibesInsightsEnabled: false,
+				onToggleVibesInsights,
+			});
+			render(<InputArea {...props} />);
+
+			fireEvent.click(screen.getByTitle('VIBES Insights — click to show real-time agent activity'));
+			expect(onToggleVibesInsights).toHaveBeenCalledTimes(1);
+		});
+	});
 });
