@@ -44,6 +44,9 @@ export interface VibesSettingsConfig {
 
 	/** Submit attestations to public registry. */
 	vibesAttestationSubmit: boolean;
+
+	/** Toggle for real-time VIBES Insights activity feed in the chat window. */
+	vibesInsightsEnabled: boolean;
 }
 
 // ============================================================================
@@ -147,6 +150,7 @@ export const VIBES_SETTINGS_DEFAULTS: VibesSettingsConfig = {
 	vibesExternalBlobThreshold: 102400,
 	vibesAttestationCosign: true,
 	vibesAttestationSubmit: true,
+	vibesInsightsEnabled: false,
 };
 
 // ============================================================================

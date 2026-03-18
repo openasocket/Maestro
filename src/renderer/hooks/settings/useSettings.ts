@@ -389,6 +389,8 @@ export interface UseSettingsReturn {
 	setVibesAttestationCosign: (value: boolean) => void;
 	vibesAttestationSubmit: boolean;
 	setVibesAttestationSubmit: (value: boolean) => void;
+	vibesInsightsEnabled: boolean;
+	setVibesInsightsEnabled: (value: boolean) => void;
 }
 
 export function useSettings(): UseSettingsReturn {
@@ -585,6 +587,9 @@ export function useSettings(): UseSettingsReturn {
 	);
 	const [vibesAttestationSubmit, setVibesAttestationSubmitState] = useState(
 		VIBES_SETTINGS_DEFAULTS.vibesAttestationSubmit
+	);
+	const [vibesInsightsEnabled, setVibesInsightsEnabledState] = useState(
+		VIBES_SETTINGS_DEFAULTS.vibesInsightsEnabled
 	);
 
 	// Wrapper functions that persist to electron-store
@@ -1477,6 +1482,11 @@ export function useSettings(): UseSettingsReturn {
 		window.maestro.settings.set('vibesAttestationSubmit', value);
 	}, []);
 
+	const setVibesInsightsEnabled = useCallback((value: boolean) => {
+		setVibesInsightsEnabledState(value);
+		window.maestro.settings.set('vibesInsightsEnabled', value);
+	}, []);
+
 	// Load settings from electron-store
 	// This function is called on mount and on system resume (after sleep/suspend)
 	// PERF: Use batch loading to reduce IPC calls from ~60 to 3
@@ -2004,6 +2014,12 @@ export function useSettings(): UseSettingsReturn {
 					allSettings['vibesAttestationSubmit'] as boolean | undefined
 				)
 			);
+			setVibesInsightsEnabledState(
+				getVibesSettingWithDefault(
+					'vibesInsightsEnabled',
+					allSettings['vibesInsightsEnabled'] as boolean | undefined
+				)
+			);
 		} catch (error) {
 			console.error('[Settings] Failed to load settings:', error);
 		} finally {
@@ -2216,6 +2232,8 @@ export function useSettings(): UseSettingsReturn {
 			setVibesAttestationCosign,
 			vibesAttestationSubmit,
 			setVibesAttestationSubmit,
+			vibesInsightsEnabled,
+			setVibesInsightsEnabled,
 		}),
 		[
 			// State values
@@ -2391,6 +2409,8 @@ export function useSettings(): UseSettingsReturn {
 			setVibesAttestationCosign,
 			vibesAttestationSubmit,
 			setVibesAttestationSubmit,
+			vibesInsightsEnabled,
+			setVibesInsightsEnabled,
 		]
 	);
 }

@@ -84,6 +84,10 @@ describe('shared/vibes-settings', () => {
 		it('should have vibesExternalBlobThreshold defaulting to 102400', () => {
 			expect(VIBES_SETTINGS_DEFAULTS.vibesExternalBlobThreshold).toBe(102400);
 		});
+
+		it('should have vibesInsightsEnabled defaulting to false', () => {
+			expect(VIBES_SETTINGS_DEFAULTS.vibesInsightsEnabled).toBe(false);
+		});
 	});
 
 	// ==========================================================================
@@ -159,6 +163,9 @@ describe('shared/vibes-settings', () => {
 				vibesCheckBinaryPath: '/usr/bin/vibecheck',
 				vibesCompressReasoningThreshold: 8192,
 				vibesExternalBlobThreshold: 65536,
+				vibesAttestationCosign: true,
+				vibesAttestationSubmit: true,
+				vibesInsightsEnabled: false,
 			};
 			expect(config.vibesEnabled).toBe(true);
 			expect(config.vibesAssuranceLevel).toBe('high');
