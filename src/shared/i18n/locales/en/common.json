@@ -651,6 +651,21 @@
 		"web_subtitle": "Remote control interface",
 		"web_connect_hint": "Connect to your Maestro desktop app to get started"
 	},
+	"vibes_insights": {
+		"toggle_on": "VIBES Insights ON — showing real-time activity feed",
+		"toggle_off": "VIBES Insights — click to show real-time agent activity",
+		"label": "Insights",
+		"header": "VIBES",
+		"tool_event": "Tool: {{name}} → {{path}}",
+		"thinking_event": "Thinking...",
+		"prompt_event": "Prompt sent",
+		"decision_event": "Decision: {{point}} → {{selected}}",
+		"delegation_event": "Agent spawned → {{task}}",
+		"session_start": "Session started",
+		"session_end": "Session ended ({{count}} annotations)",
+		"subagent_completed": "Subagent completed ({{duration}})",
+		"error_event": "Error: {{message}}"
+	},
 	"vibes_attestation": {
 		"key_ready": "Ready",
 		"no_key": "No signing key found",

@@ -651,6 +651,21 @@
 		"web_subtitle": "রিমোট কন্ট্রোল ইন্টারফেস",
 		"web_connect_hint": "শুরু করতে আপনার Maestro ডেস্কটপ অ্যাপের সাথে সংযুক্ত হন"
 	},
+	"vibes_insights": {
+		"toggle_on": "VIBES Insights চালু — রিয়েল-টাইম কার্যকলাপ ফিড দেখাচ্ছে",
+		"toggle_off": "VIBES Insights — রিয়েল-টাইম এজেন্ট কার্যকলাপ দেখতে ক্লিক করুন",
+		"label": "Insights",
+		"header": "VIBES",
+		"tool_event": "টুল: {{name}} → {{path}}",
+		"thinking_event": "চিন্তা করছে...",
+		"prompt_event": "প্রম্পট পাঠানো হয়েছে",
+		"decision_event": "সিদ্ধান্ত: {{point}} → {{selected}}",
+		"delegation_event": "এজেন্ট শুরু হয়েছে → {{task}}",
+		"session_start": "সেশন শুরু হয়েছে",
+		"session_end": "সেশন শেষ হয়েছে ({{count}} টি টীকা)",
+		"subagent_completed": "সাবএজেন্ট সম্পন্ন ({{duration}})",
+		"error_event": "ত্রুটি: {{message}}"
+	},
 	"vibes_attestation": {
 		"key_ready": "প্রস্তুত",
 		"no_key": "কোনো স্বাক্ষর কী পাওয়া যায়নি",

@@ -651,6 +651,21 @@
 		"web_subtitle": "रिमोट कंट्रोल इंटरफ़ेस",
 		"web_connect_hint": "शुरू करने के लिए अपने Maestro डेस्कटॉप ऐप से कनेक्ट करें"
 	},
+	"vibes_insights": {
+		"toggle_on": "VIBES Insights चालू — रीयल-टाइम गतिविधि फ़ीड दिखा रहा है",
+		"toggle_off": "VIBES Insights — रीयल-टाइम एजेंट गतिविधि दिखाने के लिए क्लिक करें",
+		"label": "Insights",
+		"header": "VIBES",
+		"tool_event": "टूल: {{name}} → {{path}}",
+		"thinking_event": "सोच रहा है...",
+		"prompt_event": "प्रॉम्प्ट भेजा गया",
+		"decision_event": "निर्णय: {{point}} → {{selected}}",
+		"delegation_event": "एजेंट शुरू किया → {{task}}",
+		"session_start": "सत्र शुरू हुआ",
+		"session_end": "सत्र समाप्त ({{count}} एनोटेशन)",
+		"subagent_completed": "सबएजेंट पूर्ण ({{duration}})",
+		"error_event": "त्रुटि: {{message}}"
+	},
 	"vibes_attestation": {
 		"key_ready": "तैयार",
 		"no_key": "कोई हस्ताक्षर कुंजी नहीं मिली",

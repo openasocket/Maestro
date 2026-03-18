@@ -651,6 +651,21 @@
 		"web_subtitle": "Interfaz de control remoto",
 		"web_connect_hint": "Conectese a su aplicacion de escritorio Maestro para comenzar"
 	},
+	"vibes_insights": {
+		"toggle_on": "VIBES Insights ACTIVADO — mostrando actividad en tiempo real",
+		"toggle_off": "VIBES Insights — clic para mostrar actividad del agente en tiempo real",
+		"label": "Insights",
+		"header": "VIBES",
+		"tool_event": "Herramienta: {{name}} → {{path}}",
+		"thinking_event": "Pensando...",
+		"prompt_event": "Prompt enviado",
+		"decision_event": "Decisión: {{point}} → {{selected}}",
+		"delegation_event": "Agente iniciado → {{task}}",
+		"session_start": "Sesión iniciada",
+		"session_end": "Sesión finalizada ({{count}} anotaciones)",
+		"subagent_completed": "Subagente completado ({{duration}})",
+		"error_event": "Error: {{message}}"
+	},
 	"vibes_attestation": {
 		"key_ready": "Listo",
 		"no_key": "No se encontró clave de firma",

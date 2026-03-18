@@ -651,6 +651,21 @@
 		"web_subtitle": "远程控制界面",
 		"web_connect_hint": "连接到您的 Maestro 桌面应用以开始"
 	},
+	"vibes_insights": {
+		"toggle_on": "VIBES Insights 已开启 — 显示实时活动流",
+		"toggle_off": "VIBES Insights — 点击显示实时代理活动",
+		"label": "Insights",
+		"header": "VIBES",
+		"tool_event": "工具：{{name}} → {{path}}",
+		"thinking_event": "思考中...",
+		"prompt_event": "提示已发送",
+		"decision_event": "决策：{{point}} → {{selected}}",
+		"delegation_event": "代理已启动 → {{task}}",
+		"session_start": "会话已开始",
+		"session_end": "会话已结束（{{count}} 个注解）",
+		"subagent_completed": "子代理已完成（{{duration}}）",
+		"error_event": "错误：{{message}}"
+	},
 	"vibes_attestation": {
 		"key_ready": "就绪",
 		"no_key": "未找到签名密钥",

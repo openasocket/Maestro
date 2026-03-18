@@ -651,6 +651,21 @@
 		"web_subtitle": "Fernsteuerungsoberfläche",
 		"web_connect_hint": "Verbinden Sie sich mit Ihrer Maestro-Desktop-App, um zu beginnen"
 	},
+	"vibes_insights": {
+		"toggle_on": "VIBES Insights EIN — Echtzeit-Aktivitätsfeed wird angezeigt",
+		"toggle_off": "VIBES Insights — klicken, um Echtzeit-Agentenaktivität anzuzeigen",
+		"label": "Insights",
+		"header": "VIBES",
+		"tool_event": "Werkzeug: {{name}} → {{path}}",
+		"thinking_event": "Denkt nach...",
+		"prompt_event": "Prompt gesendet",
+		"decision_event": "Entscheidung: {{point}} → {{selected}}",
+		"delegation_event": "Agent gestartet → {{task}}",
+		"session_start": "Sitzung gestartet",
+		"session_end": "Sitzung beendet ({{count}} Annotationen)",
+		"subagent_completed": "Subagent abgeschlossen ({{duration}})",
+		"error_event": "Fehler: {{message}}"
+	},
 	"vibes_attestation": {
 		"key_ready": "Bereit",
 		"no_key": "Kein Signaturschlüssel gefunden",

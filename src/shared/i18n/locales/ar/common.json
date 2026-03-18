@@ -679,6 +679,21 @@
 		"web_subtitle": "واجهة التحكم عن بُعد",
 		"web_connect_hint": "اتصل بتطبيق \u200FMaestro\u200E على سطح المكتب للبدء"
 	},
+	"vibes_insights": {
+		"toggle_on": "VIBES Insights مُفعَّل — عرض تغذية النشاط في الوقت الفعلي",
+		"toggle_off": "VIBES Insights — انقر لعرض نشاط الوكيل في الوقت الفعلي",
+		"label": "Insights",
+		"header": "VIBES",
+		"tool_event": "أداة: {{name}} → {{path}}",
+		"thinking_event": "يفكر...",
+		"prompt_event": "تم إرسال الموجه",
+		"decision_event": "قرار: {{point}} → {{selected}}",
+		"delegation_event": "تم بدء الوكيل → {{task}}",
+		"session_start": "بدأت الجلسة",
+		"session_end": "انتهت الجلسة ({{count}} تعليق توضيحي)",
+		"subagent_completed": "اكتمل الوكيل الفرعي ({{duration}})",
+		"error_event": "خطأ: {{message}}"
+	},
 	"vibes_attestation": {
 		"key_ready": "جاهز",
 		"no_key": "لم يتم العثور على مفتاح توقيع",

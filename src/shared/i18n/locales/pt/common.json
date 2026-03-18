@@ -651,6 +651,21 @@
 		"web_subtitle": "Interface de controle remoto",
 		"web_connect_hint": "Conecte-se ao seu aplicativo desktop Maestro para começar"
 	},
+	"vibes_insights": {
+		"toggle_on": "VIBES Insights ATIVADO — exibindo feed de atividade em tempo real",
+		"toggle_off": "VIBES Insights — clique para exibir atividade do agente em tempo real",
+		"label": "Insights",
+		"header": "VIBES",
+		"tool_event": "Ferramenta: {{name}} → {{path}}",
+		"thinking_event": "Pensando...",
+		"prompt_event": "Prompt enviado",
+		"decision_event": "Decisão: {{point}} → {{selected}}",
+		"delegation_event": "Agente iniciado → {{task}}",
+		"session_start": "Sessão iniciada",
+		"session_end": "Sessão encerrada ({{count}} anotações)",
+		"subagent_completed": "Subagente concluído ({{duration}})",
+		"error_event": "Erro: {{message}}"
+	},
 	"vibes_attestation": {
 		"key_ready": "Pronto",
 		"no_key": "Nenhuma chave de assinatura encontrada",

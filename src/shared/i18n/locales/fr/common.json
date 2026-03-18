@@ -651,6 +651,21 @@
 		"web_subtitle": "Interface de contrôle à distance",
 		"web_connect_hint": "Connectez-vous à votre application de bureau Maestro pour commencer"
 	},
+	"vibes_insights": {
+		"toggle_on": "VIBES Insights ACTIVÉ — affichage du flux d'activité en temps réel",
+		"toggle_off": "VIBES Insights — cliquez pour afficher l'activité de l'agent en temps réel",
+		"label": "Insights",
+		"header": "VIBES",
+		"tool_event": "Outil : {{name}} → {{path}}",
+		"thinking_event": "Réflexion...",
+		"prompt_event": "Prompt envoyé",
+		"decision_event": "Décision : {{point}} → {{selected}}",
+		"delegation_event": "Agent lancé → {{task}}",
+		"session_start": "Session démarrée",
+		"session_end": "Session terminée ({{count}} annotations)",
+		"subagent_completed": "Sous-agent terminé ({{duration}})",
+		"error_event": "Erreur : {{message}}"
+	},
 	"vibes_attestation": {
 		"key_ready": "Prêt",
 		"no_key": "Aucune clé de signature trouvée",
