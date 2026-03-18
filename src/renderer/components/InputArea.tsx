@@ -16,6 +16,7 @@ import {
 	Brain,
 	Wand2,
 	Pin,
+	Activity,
 } from 'lucide-react';
 import type { Session, Theme, BatchRunState, Shortcut, ThinkingMode } from '../types';
 import { formatShortcutKeys, isMacOS } from '../utils/shortcutFormatter';
@@ -152,6 +153,10 @@ interface InputAreaProps {
 	// Wizard thinking toggle
 	wizardShowThinking?: boolean;
 	onToggleWizardShowThinking?: () => void;
+	// VIBES Insights toggle (per-tab)
+	vibesEnabled?: boolean;
+	vibesInsightsEnabled?: boolean;
+	onToggleVibesInsights?: () => void;
 }
 
 export const InputArea = React.memo(function InputArea(props: InputAreaProps) {
@@ -243,6 +248,10 @@ export const InputArea = React.memo(function InputArea(props: InputAreaProps) {
 		// Wizard thinking toggle
 		wizardShowThinking = false,
 		onToggleWizardShowThinking,
+		// VIBES Insights toggle
+		vibesEnabled = false,
+		vibesInsightsEnabled = false,
+		onToggleVibesInsights,
 	} = props;
 
 	// Get agent capabilities for conditional feature rendering
@@ -1083,6 +1092,32 @@ export const InputArea = React.memo(function InputArea(props: InputAreaProps) {
 										<Brain className="w-3 h-3" />
 										<span>Thinking</span>
 										{tabShowThinking === 'sticky' && <Pin className="w-2.5 h-2.5" />}
+									</button>
+								)}
+								{/* VIBES Insights toggle — AI mode only, when VIBES is enabled */}
+								{session.inputMode === 'ai' && vibesEnabled && onToggleVibesInsights && (
+									<button
+										onClick={onToggleVibesInsights}
+										className={`flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-full cursor-pointer transition-all ${
+											vibesInsightsEnabled ? '' : 'opacity-40 hover:opacity-70'
+										}`}
+										style={{
+											backgroundColor: vibesInsightsEnabled
+												? `${theme.colors.success}25`
+												: 'transparent',
+											color: vibesInsightsEnabled ? theme.colors.success : theme.colors.textDim,
+											border: vibesInsightsEnabled
+												? `1px solid ${theme.colors.success}50`
+												: '1px solid transparent',
+										}}
+										title={
+											vibesInsightsEnabled
+												? 'VIBES Insights ON — showing real-time activity feed'
+												: 'VIBES Insights — click to show real-time agent activity'
+										}
+									>
+										<Activity className="w-3 h-3" />
+										<span>Insights</span>
 									</button>
 								)}
 								<button
