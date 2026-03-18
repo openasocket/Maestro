@@ -39,6 +39,7 @@ import { useGitBranch, useGitDetail, useGitFileStatus } from '../contexts/GitSta
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
 import { calculateContextTokens } from '../utils/contextUsage';
 import { useAgentCapabilities, useHoverTooltip } from '../hooks';
+import { useVibesInsights } from '../hooks/useVibesInsights';
 import type {
 	Session,
 	Theme,
@@ -476,6 +477,12 @@ export const MainPanel = React.memo(
 			// Inline wizard exit handler
 			onExitWizard,
 		} = props;
+
+		// VIBES Insights: subscribe to real-time activity feed events for the active session
+		const { events: vibesInsightsEvents } = useVibesInsights(
+			activeSession?.id,
+			vibesInsightsEnabled
+		);
 
 		// isCurrentSessionAutoMode: THIS session has active batch run (for all UI indicators)
 		const isCurrentSessionAutoMode = currentSessionBatchState?.isRunning || false;
@@ -1796,6 +1803,9 @@ export const MainPanel = React.memo(
 													? () => props.refreshFileTree?.(activeSession.id)
 													: undefined
 											}
+											// VIBES Insights
+											vibesInsightsEnabled={vibesInsightsEnabled}
+											vibesInsightsEvents={vibesInsightsEvents}
 										/>
 									)}
 								</div>
