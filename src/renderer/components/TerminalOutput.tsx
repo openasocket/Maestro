@@ -30,7 +30,9 @@ import { MarkdownRenderer } from './MarkdownRenderer';
 import { QueuedItemsList } from './QueuedItemsList';
 import { LogFilterControls } from './LogFilterControls';
 import { SaveMarkdownModal } from './SaveMarkdownModal';
+import { VibesInsightsFeed } from './vibes/VibesInsightsFeed';
 import { generateTerminalProseStyles } from '../utils/markdownConfig';
+import type { VibesActivityFeedEvent } from '../../shared/vibes-types';
 
 // ============================================================================
 // LogItem - Memoized component for individual log entries
@@ -474,9 +476,7 @@ const LogItemComponent = memo(
 									thinking
 								</span>
 							</div>
-							<div className="whitespace-pre-wrap">
-								{log.text}
-							</div>
+							<div className="whitespace-pre-wrap">{log.text}</div>
 						</div>
 					)}
 					{/* Special rendering for tool execution events (shown alongside thinking) */}
@@ -965,6 +965,9 @@ interface TerminalOutputProps {
 	onFileClick?: (path: string) => void; // Callback when a file link is clicked
 	onShowErrorDetails?: () => void; // Callback to show the error modal (for error log entries)
 	onFileSaved?: () => void; // Callback when markdown content is saved to file (e.g., to refresh file list)
+	// VIBES Insights Feed
+	vibesInsightsEnabled?: boolean; // Whether the VIBES Insights feed is toggled on
+	vibesInsightsEvents?: VibesActivityFeedEvent[]; // Real-time activity feed events
 }
 
 // PERFORMANCE: Wrap in React.memo to prevent re-renders when parent re-renders
@@ -1001,6 +1004,8 @@ export const TerminalOutput = memo(
 			onFileClick,
 			onShowErrorDetails,
 			onFileSaved,
+			vibesInsightsEnabled,
+			vibesInsightsEvents,
 		} = props;
 
 		// Use the forwarded ref if provided, otherwise create a local one
@@ -1665,6 +1670,32 @@ export const TerminalOutput = memo(
 					<div ref={logsEndRef} />
 				</div>
 
+				{/* VIBES Insights Feed — shown between output and input */}
+				<div
+					className="mx-4 rounded border overflow-hidden transition-all duration-300 ease-in-out"
+					style={{
+						backgroundColor: `${theme.colors.bgActivity}80`,
+						borderColor:
+							vibesInsightsEnabled && vibesInsightsEvents && vibesInsightsEvents.length > 0
+								? theme.colors.border
+								: 'transparent',
+						maxHeight:
+							vibesInsightsEnabled && vibesInsightsEvents && vibesInsightsEvents.length > 0
+								? '200px'
+								: '0px',
+						marginBottom:
+							vibesInsightsEnabled && vibesInsightsEvents && vibesInsightsEvents.length > 0
+								? '8px'
+								: '0px',
+						opacity:
+							vibesInsightsEnabled && vibesInsightsEvents && vibesInsightsEvents.length > 0 ? 1 : 0,
+					}}
+				>
+					{vibesInsightsEnabled && vibesInsightsEvents && vibesInsightsEvents.length > 0 && (
+						<VibesInsightsFeed theme={theme} events={vibesInsightsEvents} maxVisible={8} />
+					)}
+				</div>
+
 				{/* New Message Indicator - floating arrow button (AI mode only, terminal auto-scrolls) */}
 				{hasNewMessages && !isAtBottom && session.inputMode === 'ai' && (
 					<button
@@ -1708,12 +1739,11 @@ export const TerminalOutput = memo(
 						onClose={() => setSaveModalContent(null)}
 						defaultFolder={cwd || session.cwd || ''}
 						isRemoteSession={
-							session.sessionSshRemoteConfig?.enabled &&
-							!!session.sessionSshRemoteConfig?.remoteId
+							session.sessionSshRemoteConfig?.enabled && !!session.sessionSshRemoteConfig?.remoteId
 						}
 						sshRemoteId={
 							session.sessionSshRemoteConfig?.enabled
-								? session.sessionSshRemoteConfig?.remoteId ?? undefined
+								? (session.sessionSshRemoteConfig?.remoteId ?? undefined)
 								: undefined
 						}
 						onFileSaved={onFileSaved}
