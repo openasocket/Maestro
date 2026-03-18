@@ -299,3 +299,56 @@ export interface InTotoStatement {
 		stats: { total_annotations: number; unique_models: number };
 	};
 }
+
+// ============================================================================
+// Activity Feed — Real-Time VIBES Insights
+// ============================================================================
+
+/** Event category for rendering activity feed entries. */
+export type VibesActivityFeedCategory =
+	| 'tool'
+	| 'thinking'
+	| 'prompt'
+	| 'decision'
+	| 'delegation'
+	| 'session'
+	| 'error';
+
+/** Activity feed event emitted in real-time for the renderer's inline display. */
+export interface VibesActivityFeedEvent {
+	/** Maestro session ID (maps to a tab) */
+	sessionId: string;
+	/** VIBES session ID (for delegation chain tracking) */
+	vibesSessionId: string;
+	/** Event category for rendering */
+	category: VibesActivityFeedCategory;
+	/** Human-readable summary line */
+	summary: string;
+	/** ISO-8601 timestamp */
+	timestamp: string;
+	/** Additional structured data per category */
+	detail?: {
+		// Tool events
+		toolName?: string;
+		filePath?: string;
+		lineStart?: number;
+		lineEnd?: number;
+		action?: string; // create, modify, delete, review
+		// Thinking events
+		thinkingPreview?: string; // First ~200 chars of reasoning
+		// Delegation events
+		parentSessionId?: string;
+		childSessionId?: string;
+		taskDescription?: string;
+		agentName?: string;
+		agentType?: string;
+		// Decision events
+		decisionPoint?: string;
+		selectedOption?: string;
+		confidence?: string;
+	};
+	/** Whether this event is from a subagent (child session) */
+	isSubagent: boolean;
+	/** Nesting depth (0 = top-level, 1 = first subagent, 2 = sub-subagent) */
+	depth: number;
+}
