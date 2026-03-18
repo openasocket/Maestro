@@ -2713,6 +2713,34 @@ interface MaestroAPI {
 			}) => void
 		) => () => void;
 
+		onActivityFeed: (
+			callback: (event: {
+				sessionId: string;
+				vibesSessionId: string;
+				category: 'tool' | 'thinking' | 'prompt' | 'decision' | 'delegation' | 'session' | 'error';
+				summary: string;
+				timestamp: string;
+				detail?: {
+					toolName?: string;
+					filePath?: string;
+					lineStart?: number;
+					lineEnd?: number;
+					action?: string;
+					thinkingPreview?: string;
+					parentSessionId?: string;
+					childSessionId?: string;
+					taskDescription?: string;
+					agentName?: string;
+					agentType?: string;
+					decisionPoint?: string;
+					selectedOption?: string;
+					confidence?: string;
+				};
+				isSubagent: boolean;
+				depth: number;
+			}) => void
+		) => () => void;
+
 		onKeyPermissionsWarning: (callback: (payload: { message: string }) => void) => () => void;
 
 		// VERIFY spec: Key management and attestation
