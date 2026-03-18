@@ -228,7 +228,11 @@ export interface UseMainPanelPropsDeps {
 	handleFileTabSelect: (tabId: string) => void;
 	handleFileTabClose: (tabId: string) => void;
 	handleFileTabEditModeChange: (tabId: string, editMode: boolean) => void;
-	handleFileTabEditContentChange: (tabId: string, editContent: string | undefined, savedContent?: string) => void;
+	handleFileTabEditContentChange: (
+		tabId: string,
+		editContent: string | undefined,
+		savedContent?: string
+	) => void;
 	handleFileTabScrollPositionChange: (tabId: string, scrollTop: number) => void;
 	handleFileTabSearchQueryChange: (tabId: string, searchQuery: string) => void;
 
@@ -291,6 +295,11 @@ export interface UseMainPanelPropsDeps {
 	onWizardRetry?: () => void;
 	onWizardClearError?: () => void;
 	onToggleWizardShowThinking?: () => void;
+
+	// VIBES Insights
+	vibesEnabled: boolean;
+	vibesInsightsEnabled: boolean;
+	onToggleVibesInsights: () => void;
 
 	// Helper functions
 	getActiveTab: (session: Session) => AITab | undefined;
@@ -517,6 +526,10 @@ export function useMainPanelProps(deps: UseMainPanelPropsDeps) {
 			onToggleWizardShowThinking: deps.onToggleWizardShowThinking,
 			// File tree refresh
 			refreshFileTree: deps.refreshFileTree,
+			// VIBES Insights
+			vibesEnabled: deps.vibesEnabled,
+			vibesInsightsEnabled: deps.vibesInsightsEnabled,
+			onToggleVibesInsights: deps.onToggleVibesInsights,
 		}),
 		[
 			// Primitive dependencies for minimal re-computation
@@ -703,6 +716,10 @@ export function useMainPanelProps(deps: UseMainPanelPropsDeps) {
 			deps.onToggleWizardShowThinking,
 			// File tree refresh
 			deps.refreshFileTree,
+			// VIBES Insights
+			deps.vibesEnabled,
+			deps.vibesInsightsEnabled,
+			deps.onToggleVibesInsights,
 			// Refs (stable, but included for completeness)
 			deps.inputRef,
 			deps.logsEndRef,

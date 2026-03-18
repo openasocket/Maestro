@@ -6185,6 +6185,10 @@ You are taking over this conversation. Based on the context above, provide a bri
 		);
 	}, []);
 
+	const handleToggleVibesInsights = useCallback(() => {
+		settings.setVibesInsightsEnabled(!settings.vibesInsightsEnabled);
+	}, [settings.vibesInsightsEnabled, settings.setVibesInsightsEnabled]);
+
 	const handleScrollPositionChange = useCallback((scrollTop: number) => {
 		const session = sessionsRef.current.find((s) => s.id === activeSessionIdRef.current);
 		if (!session) return;
@@ -13342,6 +13346,11 @@ You are taking over this conversation. Based on the context above, provide a bri
 
 		// File tree refresh
 		refreshFileTree,
+
+		// VIBES Insights
+		vibesEnabled: settings.vibesEnabled,
+		vibesInsightsEnabled: settings.vibesInsightsEnabled,
+		onToggleVibesInsights: handleToggleVibesInsights,
 
 		// Helper functions
 		getActiveTab,

@@ -320,6 +320,14 @@ interface MainPanelProps {
 	// Document Graph
 	onOpenInGraph?: () => void;
 
+	// VIBES Insights
+	/** Whether VIBES is globally enabled */
+	vibesEnabled?: boolean;
+	/** Whether the VIBES Insights feed is toggled on */
+	vibesInsightsEnabled?: boolean;
+	/** Toggle handler for VIBES Insights feed */
+	onToggleVibesInsights?: () => void;
+
 	// Wizard document generation callbacks
 	/** Called when wizard document generation completes and user clicks Done */
 	onWizardComplete?: () => void;
@@ -461,6 +469,10 @@ export const MainPanel = React.memo(
 			mergeSourceName,
 			mergeTargetName,
 			onCancelMerge,
+			// VIBES Insights
+			vibesEnabled = false,
+			vibesInsightsEnabled = false,
+			onToggleVibesInsights,
 			// Inline wizard exit handler
 			onExitWizard,
 		} = props;
@@ -1883,6 +1895,10 @@ export const MainPanel = React.memo(
 											mergeSourceName={mergeSourceName}
 											mergeTargetName={mergeTargetName}
 											onCancelMerge={onCancelMerge}
+											// VIBES Insights
+											vibesEnabled={vibesEnabled}
+											vibesInsightsEnabled={vibesInsightsEnabled}
+											onToggleVibesInsights={onToggleVibesInsights}
 											// Inline wizard mode
 											onExitWizard={onExitWizard}
 											wizardShowThinking={activeTab?.wizardState?.showWizardThinking ?? false}
