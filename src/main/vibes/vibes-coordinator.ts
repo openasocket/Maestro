@@ -20,6 +20,7 @@ import type {
 	VibesAnnotation,
 	VibesAssuranceLevel,
 	VibesEnvironmentEntry,
+	VibesActivityFeedEvent,
 } from '../../shared/vibes-types';
 import type { ProcessConfig, ToolExecution, UsageStats } from '../process-manager/types';
 
@@ -129,6 +130,12 @@ export class VibesCoordinator {
 	 *   - Group Chat moderator sessions
 	 */
 	private orchestratorSessions: Set<string> = new Set();
+
+	/** Debounce timers for thinking activity feed events (one per session). */
+	private thinkingDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
+
+	/** Buffered thinking text awaiting debounced emission (one per session). */
+	private thinkingBuffers: Map<string, string> = new Map();
 
 	constructor(params: { settingsStore: VibesSettingsStore; safeSend?: SafeSendFn }) {
 		this.settingsStore = params.settingsStore;
@@ -359,6 +366,35 @@ export class VibesCoordinator {
 				assuranceLevel,
 				projectPath,
 			});
+
+			// Emit activity feed: delegation event for subagent sessions, session start otherwise
+			if (parentMaestroSessionId) {
+				this.emitActivityFeed({
+					sessionId: parentMaestroSessionId,
+					vibesSessionId: parentVibesSessionId ?? '',
+					category: 'delegation',
+					summary: `Agent spawned → ${agentName}`,
+					timestamp: new Date().toISOString(),
+					detail: {
+						parentSessionId: parentMaestroSessionId,
+						childSessionId: sessionId,
+						agentName,
+						agentType: evolveAgentType,
+					},
+					isSubagent: false,
+					depth: this.getSessionDepth(parentMaestroSessionId),
+				});
+			} else {
+				this.emitActivityFeed({
+					sessionId,
+					vibesSessionId: this.getVibesSessionId(sessionId),
+					category: 'session',
+					summary: `Session started (${agentType})`,
+					timestamp: new Date().toISOString(),
+					isSubagent: false,
+					depth: 0,
+				});
+			}
 		} catch (err) {
 			// If session start fails due to write permissions, mark project as unwritable
 			const errMsg = String(err);
@@ -390,6 +426,13 @@ export class VibesCoordinator {
 
 		const agentType = this.sessionAgentTypes.get(sessionId);
 
+		// Flush any pending thinking activity before session ends
+		this.flushThinkingActivity(sessionId);
+
+		// Capture annotation count before ending the session
+		const stats = this.sessionManager.getSessionStats(sessionId);
+		const annotationCount = stats?.annotationCount ?? 0;
+
 		try {
 			// Flush the appropriate instrumenter's buffers
 			if (agentType) {
@@ -398,6 +441,17 @@ export class VibesCoordinator {
 					await instrumenter.flush(sessionId);
 				}
 			}
+
+			// Emit session-end activity feed event
+			this.emitActivityFeed({
+				sessionId,
+				vibesSessionId: this.getVibesSessionId(sessionId),
+				category: 'session',
+				summary: `Session ended (${annotationCount} annotations)`,
+				timestamp: new Date().toISOString(),
+				isSubagent: this.parentSessionMap.has(sessionId),
+				depth: this.getSessionDepth(sessionId),
+			});
 
 			await this.sessionManager.endSession(sessionId);
 			this.sessionAgentTypes.delete(sessionId);
@@ -427,6 +481,13 @@ export class VibesCoordinator {
 	 * Must be called on app quit/before-quit to prevent manifest entry loss.
 	 */
 	async shutdown(): Promise<void> {
+		// Clear all thinking debounce timers to avoid post-shutdown callbacks
+		for (const [sessionId, timer] of this.thinkingDebounceTimers) {
+			clearTimeout(timer);
+			this.thinkingBuffers.delete(sessionId);
+		}
+		this.thinkingDebounceTimers.clear();
+
 		const activeSessions = this.sessionManager.getActiveSessions();
 		for (const sessionId of activeSessions) {
 			try {
@@ -533,6 +594,17 @@ export class VibesCoordinator {
 			if (instrumenter) {
 				await instrumenter.handlePrompt(sessionId, prompt, contextFiles);
 			}
+
+			// Emit activity feed event for prompt
+			this.emitActivityFeed({
+				sessionId,
+				vibesSessionId: this.getVibesSessionId(sessionId),
+				category: 'prompt',
+				summary: prompt.slice(0, 80) + (prompt.length > 80 ? '...' : ''),
+				timestamp: new Date().toISOString(),
+				isSubagent: this.parentSessionMap.has(sessionId),
+				depth: this.getSessionDepth(sessionId),
+			});
 		} catch (err) {
 			logger.warn('[VibesCoordinator] Failed to record prompt', 'VibesCoordinator', {
 				sessionId,
@@ -762,6 +834,22 @@ export class VibesCoordinator {
 			if (instrumenter) {
 				await instrumenter.handleToolExecution(sessionId, tool);
 			}
+
+			// Emit activity feed event for tool execution
+			const filePath = this.extractFilePathForFeed(tool.state);
+			this.emitActivityFeed({
+				sessionId,
+				vibesSessionId: this.getVibesSessionId(sessionId),
+				category: 'tool',
+				summary: `Tool: ${tool.toolName}${filePath ? ` → ${filePath}` : ''}`,
+				timestamp: new Date().toISOString(),
+				detail: {
+					toolName: tool.toolName,
+					filePath: filePath ?? undefined,
+				},
+				isSubagent: this.parentSessionMap.has(sessionId),
+				depth: this.getSessionDepth(sessionId),
+			});
 		} catch (err) {
 			logger.warn('[VibesCoordinator] Error routing tool-execution event', 'VibesCoordinator', {
 				sessionId,
@@ -789,6 +877,9 @@ export class VibesCoordinator {
 			if (instrumenter) {
 				instrumenter.handleThinkingChunk(sessionId, text);
 			}
+
+			// Emit debounced activity feed event for thinking
+			this.emitThinkingActivity(sessionId, text);
 		} catch (err) {
 			logger.warn('[VibesCoordinator] Error routing thinking-chunk event', 'VibesCoordinator', {
 				sessionId,
@@ -1021,6 +1112,135 @@ export class VibesCoordinator {
 				'VibesCoordinator',
 				{ error: String(err) }
 			);
+		}
+	}
+
+	// ========================================================================
+	// Activity Feed — Real-Time VIBES Insights
+	// ========================================================================
+
+	/**
+	 * Check whether the activity feed is enabled in settings.
+	 * Reads the `vibesInsightsEnabled` setting (default: false).
+	 */
+	private isActivityFeedEnabled(): boolean {
+		return !!this.settingsStore.get('vibesInsightsEnabled', false);
+	}
+
+	/**
+	 * Emit a rich activity feed event for the renderer's inline display.
+	 * Called alongside emitAnnotationUpdate() but with more detail.
+	 * Only emitted when VIBES Insights is enabled (checked via settings flag).
+	 */
+	private emitActivityFeed(event: VibesActivityFeedEvent): void {
+		if (!this.safeSend || !this.isActivityFeedEnabled()) {
+			return;
+		}
+		try {
+			this.safeSend('vibes:activity-feed', event);
+		} catch {
+			// Never block — activity feed is best-effort
+		}
+	}
+
+	/**
+	 * Walk the parentSessionMap chain to determine nesting depth.
+	 * Returns 0 for top-level sessions, 1 for first subagent, etc.
+	 */
+	private getSessionDepth(sessionId: string): number {
+		let depth = 0;
+		let current = sessionId;
+		while (this.parentSessionMap.has(current)) {
+			current = this.parentSessionMap.get(current)!;
+			depth++;
+			if (depth > 10) break; // Safety limit
+		}
+		return depth;
+	}
+
+	/**
+	 * Get the VIBES session ID for a Maestro session ID.
+	 * Returns empty string if session not found (for best-effort feed events).
+	 */
+	private getVibesSessionId(sessionId: string): string {
+		const state = this.sessionManager.getSession(sessionId);
+		return state?.vibesSessionId ?? '';
+	}
+
+	/**
+	 * Extract a file path from a tool execution's state for feed display.
+	 * Handles common tool input shapes (file_path, path fields).
+	 */
+	private extractFilePathForFeed(state: unknown): string | null {
+		if (!state || typeof state !== 'object') return null;
+		const obj = state as Record<string, unknown>;
+		if (typeof obj.file_path === 'string') return obj.file_path;
+		if (typeof obj.path === 'string') return obj.path;
+		if (typeof obj.notebook_path === 'string') return obj.notebook_path;
+		return null;
+	}
+
+	/**
+	 * Emit a debounced thinking activity feed event.
+	 * Buffers thinking text and emits at most once every 2 seconds per session
+	 * to avoid flooding the renderer with rapid thinking chunks.
+	 */
+	private emitThinkingActivity(sessionId: string, text: string): void {
+		// Buffer thinking text
+		const existing = this.thinkingBuffers.get(sessionId) || '';
+		this.thinkingBuffers.set(sessionId, existing + text);
+
+		// Debounce: emit every 2 seconds
+		if (this.thinkingDebounceTimers.has(sessionId)) return;
+
+		this.thinkingDebounceTimers.set(
+			sessionId,
+			setTimeout(() => {
+				const buffered = this.thinkingBuffers.get(sessionId) || '';
+				this.thinkingBuffers.delete(sessionId);
+				this.thinkingDebounceTimers.delete(sessionId);
+
+				if (buffered) {
+					this.emitActivityFeed({
+						sessionId,
+						vibesSessionId: this.getVibesSessionId(sessionId),
+						category: 'thinking',
+						summary: buffered.slice(0, 100) + (buffered.length > 100 ? '...' : ''),
+						timestamp: new Date().toISOString(),
+						detail: { thinkingPreview: buffered.slice(0, 200) },
+						isSubagent: this.parentSessionMap.has(sessionId),
+						depth: this.getSessionDepth(sessionId),
+					});
+				}
+			}, 2000)
+		);
+	}
+
+	/**
+	 * Flush any pending thinking activity for a session.
+	 * Called during session exit to ensure final thinking text is emitted.
+	 */
+	private flushThinkingActivity(sessionId: string): void {
+		const timer = this.thinkingDebounceTimers.get(sessionId);
+		if (timer) {
+			clearTimeout(timer);
+			this.thinkingDebounceTimers.delete(sessionId);
+		}
+
+		const buffered = this.thinkingBuffers.get(sessionId);
+		this.thinkingBuffers.delete(sessionId);
+
+		if (buffered) {
+			this.emitActivityFeed({
+				sessionId,
+				vibesSessionId: this.getVibesSessionId(sessionId),
+				category: 'thinking',
+				summary: buffered.slice(0, 100) + (buffered.length > 100 ? '...' : ''),
+				timestamp: new Date().toISOString(),
+				detail: { thinkingPreview: buffered.slice(0, 200) },
+				isSubagent: this.parentSessionMap.has(sessionId),
+				depth: this.getSessionDepth(sessionId),
+			});
 		}
 	}
 
