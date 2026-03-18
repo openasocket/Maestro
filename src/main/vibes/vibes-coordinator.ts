@@ -859,6 +859,69 @@ export class VibesCoordinator {
 	}
 
 	/**
+	 * Route a decision event to the appropriate instrumenter and emit
+	 * a decision activity feed event.
+	 * Called when a structured decision is detected (e.g., from flushReasoning
+	 * in an instrumenter, or from explicit decision tracking).
+	 */
+	async handleDecision(
+		sessionId: string,
+		params: {
+			decisionPoint: string;
+			options: Array<{
+				id: string;
+				description: string;
+				pros?: string[];
+				cons?: string[];
+			}>;
+			selected: string;
+			rationale: string;
+			confidence?: 'high' | 'medium' | 'low';
+		}
+	): Promise<string | null> {
+		if (!this.sessionManager.isSessionActive(sessionId)) {
+			return null;
+		}
+
+		const agentType = this.sessionAgentTypes.get(sessionId);
+		if (!agentType) {
+			return null;
+		}
+
+		let hash: string | null = null;
+
+		try {
+			const instrumenter = this.getInstrumenter(agentType);
+			if (instrumenter) {
+				hash = await instrumenter.handleDecision(sessionId, params);
+			}
+
+			// Emit activity feed event for decision
+			this.emitActivityFeed({
+				sessionId,
+				vibesSessionId: this.getVibesSessionId(sessionId),
+				category: 'decision',
+				summary: `Decision: ${params.decisionPoint} → ${params.selected}`,
+				timestamp: new Date().toISOString(),
+				detail: {
+					decisionPoint: params.decisionPoint,
+					selectedOption: params.selected,
+					confidence: params.confidence,
+				},
+				isSubagent: this.parentSessionMap.has(sessionId),
+				depth: this.getSessionDepth(sessionId),
+			});
+		} catch (err) {
+			logger.warn('[VibesCoordinator] Error routing decision event', 'VibesCoordinator', {
+				sessionId,
+				error: String(err),
+			});
+		}
+
+		return hash;
+	}
+
+	/**
 	 * Route a thinking-chunk event to the appropriate instrumenter.
 	 * Called internally by the ProcessManager event listener, or directly.
 	 */

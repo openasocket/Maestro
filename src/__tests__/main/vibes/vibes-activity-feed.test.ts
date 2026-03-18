@@ -437,6 +437,137 @@ describe('vibes:activity-feed emission', () => {
 	});
 
 	// ========================================================================
+	// Decision Events
+	// ========================================================================
+
+	it('should emit decision activity feed event with selected option and confidence', async () => {
+		const mockSafeSend = vi.fn();
+		const coordinator = new VibesCoordinator({
+			settingsStore: createMockSettingsStore(),
+			safeSend: mockSafeSend,
+		});
+
+		const config = createProcessConfig({ projectPath: tmpDir });
+		await coordinator.handleProcessSpawn('sess-1', config);
+		mockSafeSend.mockClear();
+
+		await coordinator.handleDecision('sess-1', {
+			decisionPoint: 'Database technology',
+			options: [
+				{ id: 'postgres', description: 'PostgreSQL' },
+				{ id: 'sqlite', description: 'SQLite' },
+			],
+			selected: 'sqlite',
+			rationale: 'Local-only app, no server needed',
+			confidence: 'high',
+		});
+
+		const feedEvents = getActivityFeedCalls(mockSafeSend);
+		const decisionEvent = feedEvents.find((e) => e.category === 'decision');
+		expect(decisionEvent).toBeDefined();
+		expect(decisionEvent!.sessionId).toBe('sess-1');
+		expect(decisionEvent!.summary).toBe('Decision: Database technology → sqlite');
+		expect(decisionEvent!.detail?.decisionPoint).toBe('Database technology');
+		expect(decisionEvent!.detail?.selectedOption).toBe('sqlite');
+		expect(decisionEvent!.detail?.confidence).toBe('high');
+		expect(decisionEvent!.isSubagent).toBe(false);
+		expect(decisionEvent!.depth).toBe(0);
+	});
+
+	it('should emit decision event without confidence when not provided', async () => {
+		const mockSafeSend = vi.fn();
+		const coordinator = new VibesCoordinator({
+			settingsStore: createMockSettingsStore(),
+			safeSend: mockSafeSend,
+		});
+
+		const config = createProcessConfig({ projectPath: tmpDir });
+		await coordinator.handleProcessSpawn('sess-1', config);
+		mockSafeSend.mockClear();
+
+		await coordinator.handleDecision('sess-1', {
+			decisionPoint: 'API style',
+			options: [
+				{ id: 'rest', description: 'REST' },
+				{ id: 'graphql', description: 'GraphQL' },
+			],
+			selected: 'rest',
+			rationale: 'Simpler for CRUD operations',
+		});
+
+		const feedEvents = getActivityFeedCalls(mockSafeSend);
+		const decisionEvent = feedEvents.find((e) => e.category === 'decision');
+		expect(decisionEvent).toBeDefined();
+		expect(decisionEvent!.detail?.confidence).toBeUndefined();
+		expect(decisionEvent!.detail?.selectedOption).toBe('rest');
+	});
+
+	it('should emit decision event with correct depth for subagent decisions', async () => {
+		const mockSafeSend = vi.fn();
+		const coordinator = new VibesCoordinator({
+			settingsStore: createMockSettingsStore(),
+			safeSend: mockSafeSend,
+		});
+
+		// Parent session
+		const parentConfig = createProcessConfig({ projectPath: tmpDir });
+		await coordinator.handleProcessSpawn('parent-sess', parentConfig);
+
+		// Register delegation + start child
+		coordinator.registerDelegation('parent-sess', 'child-sess');
+		const childConfig = createProcessConfig({
+			projectPath: tmpDir,
+			sessionId: 'child-sess',
+		});
+		await coordinator.handleProcessSpawn('child-sess', childConfig);
+		mockSafeSend.mockClear();
+
+		await coordinator.handleDecision('child-sess', {
+			decisionPoint: 'File format',
+			options: [
+				{ id: 'json', description: 'JSON' },
+				{ id: 'yaml', description: 'YAML' },
+			],
+			selected: 'json',
+			rationale: 'Better tooling support',
+			confidence: 'medium',
+		});
+
+		const feedEvents = getActivityFeedCalls(mockSafeSend);
+		const decisionEvent = feedEvents.find((e) => e.category === 'decision');
+		expect(decisionEvent).toBeDefined();
+		expect(decisionEvent!.isSubagent).toBe(true);
+		expect(decisionEvent!.depth).toBe(1);
+		expect(decisionEvent!.detail?.confidence).toBe('medium');
+	});
+
+	it('should NOT emit decision feed event when vibesInsightsEnabled is false', async () => {
+		const mockSafeSend = vi.fn();
+		const coordinator = new VibesCoordinator({
+			settingsStore: createMockSettingsStore({ vibesInsightsEnabled: false }),
+			safeSend: mockSafeSend,
+		});
+
+		const config = createProcessConfig({ projectPath: tmpDir });
+		await coordinator.handleProcessSpawn('sess-1', config);
+		mockSafeSend.mockClear();
+
+		await coordinator.handleDecision('sess-1', {
+			decisionPoint: 'Test framework',
+			options: [
+				{ id: 'vitest', description: 'Vitest' },
+				{ id: 'jest', description: 'Jest' },
+			],
+			selected: 'vitest',
+			rationale: 'Faster, native ESM',
+			confidence: 'high',
+		});
+
+		const feedEvents = getActivityFeedCalls(mockSafeSend);
+		expect(feedEvents.length).toBe(0);
+	});
+
+	// ========================================================================
 	// Cleanup
 	// ========================================================================
 
