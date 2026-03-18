@@ -41,7 +41,7 @@ export type VibesPromptType =
 /** Project-level VIBES configuration stored in .ai-audit/config.json. */
 export interface VibesConfig {
 	standard: 'VIBES';
-	standard_version: '1.0';
+	standard_version: '1.0' | '1.1';
 	assurance_level: VibesAssuranceLevel;
 	project_name: string;
 	tracked_extensions: string[];

@@ -347,9 +347,9 @@ export async function readVibesConfig(projectPath: string): Promise<VibesConfig 
 		if (config.standard !== 'VIBES') {
 			logWarn(`Config has unexpected standard: '${config.standard}' (expected 'VIBES')`);
 		}
-		if (config.standard_version !== '1.0') {
+		if (config.standard_version !== '1.0' && config.standard_version !== '1.1') {
 			logWarn(
-				`Config has unsupported standard_version: '${config.standard_version}' (expected '1.0')`
+				`Config has unsupported standard_version: '${config.standard_version}' (expected '1.0' or '1.1')`
 			);
 		}
 
@@ -406,8 +406,8 @@ export async function readVibesManifest(projectPath: string): Promise<VibesManif
 		if (manifest.standard !== 'VIBES') {
 			logWarn(`Manifest has unexpected standard: '${manifest.standard}' (expected 'VIBES')`);
 		}
-		if (manifest.version !== '1.0') {
-			logWarn(`Manifest has unsupported version: '${manifest.version}' (expected '1.0')`);
+		if (manifest.version !== '1.0' && manifest.version !== '1.1') {
+			logWarn(`Manifest has unsupported version: '${manifest.version}' (expected '1.0' or '1.1')`);
 		}
 
 		return manifest;
