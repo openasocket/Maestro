@@ -29,6 +29,7 @@ import type {
 	KeyboardMasteryStats,
 	ThinkingMode,
 	DirectorNotesSettings,
+	TeamOrchestrationSettings,
 	EncoreFeatureFlags,
 } from '../types';
 import { DEFAULT_CUSTOM_THEME_COLORS } from '../constants/themes';
@@ -125,6 +126,14 @@ export const DEFAULT_ENCORE_FEATURES: EncoreFeatureFlags = {
 export const DEFAULT_DIRECTOR_NOTES_SETTINGS: DirectorNotesSettings = {
 	provider: 'claude-code',
 	defaultLookbackDays: 7,
+};
+
+export const DEFAULT_TEAM_ORCHESTRATION_SETTINGS: TeamOrchestrationSettings = {
+	enableTemplates: true,
+	enableWorkflowTopology: false,
+	enableVisualization: false,
+	maxIterations: 5,
+	defaultTerminationMode: 'moderator-decides',
 };
 
 export const DEFAULT_AI_COMMANDS: CustomAICommand[] = [
@@ -251,6 +260,7 @@ export interface SettingsStoreState {
 	encoreFeatures: EncoreFeatureFlags;
 	symphonyRegistryUrls: string[];
 	directorNotesSettings: DirectorNotesSettings;
+	teamOrchestrationSettings: TeamOrchestrationSettings;
 	wakatimeApiKey: string;
 	wakatimeEnabled: boolean;
 	wakatimeDetailedTracking: boolean;
@@ -323,6 +333,7 @@ export interface SettingsStoreActions {
 	setEncoreFeatures: (value: EncoreFeatureFlags) => void;
 	setSymphonyRegistryUrls: (value: string[]) => void;
 	setDirectorNotesSettings: (value: DirectorNotesSettings) => void;
+	setTeamOrchestrationSettings: (value: TeamOrchestrationSettings) => void;
 	setWakatimeApiKey: (value: string) => void;
 	setWakatimeEnabled: (value: boolean) => void;
 	setWakatimeDetailedTracking: (value: boolean) => void;
@@ -475,6 +486,7 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => {
 		encoreFeatures: DEFAULT_ENCORE_FEATURES,
 		symphonyRegistryUrls: [],
 		directorNotesSettings: DEFAULT_DIRECTOR_NOTES_SETTINGS,
+		teamOrchestrationSettings: DEFAULT_TEAM_ORCHESTRATION_SETTINGS,
 		wakatimeApiKey: '',
 		wakatimeEnabled: false,
 		wakatimeDetailedTracking: false,
@@ -865,6 +877,11 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => {
 		setDirectorNotesSettings: (value) => {
 			set({ directorNotesSettings: value });
 			window.maestro.settings.set('directorNotesSettings', value);
+		},
+
+		setTeamOrchestrationSettings: (value) => {
+			set({ teamOrchestrationSettings: value });
+			window.maestro.settings.set('teamOrchestrationSettings', value);
 		},
 
 		setWakatimeApiKey: (value) => {
@@ -1790,6 +1807,14 @@ export async function loadAllSettings(): Promise<void> {
 			};
 		}
 
+		// Team Orchestration settings (merge with defaults to preserve new fields)
+		if (allSettings['teamOrchestrationSettings'] !== undefined) {
+			patch.teamOrchestrationSettings = {
+				...DEFAULT_TEAM_ORCHESTRATION_SETTINGS,
+				...(allSettings['teamOrchestrationSettings'] as Partial<TeamOrchestrationSettings>),
+			};
+		}
+
 		if (allSettings['wakatimeApiKey'] !== undefined)
 			patch.wakatimeApiKey = allSettings['wakatimeApiKey'] as string;
 
@@ -1915,6 +1940,7 @@ export function getSettingsActions() {
 		setEncoreFeatures: state.setEncoreFeatures,
 		setSymphonyRegistryUrls: state.setSymphonyRegistryUrls,
 		setDirectorNotesSettings: state.setDirectorNotesSettings,
+		setTeamOrchestrationSettings: state.setTeamOrchestrationSettings,
 		setWakatimeApiKey: state.setWakatimeApiKey,
 		setWakatimeEnabled: state.setWakatimeEnabled,
 		setWakatimeDetailedTracking: state.setWakatimeDetailedTracking,
