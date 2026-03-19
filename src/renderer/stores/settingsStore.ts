@@ -119,6 +119,7 @@ export const DEFAULT_ENCORE_FEATURES: EncoreFeatureFlags = {
 	usageStats: true,
 	symphony: true,
 	maestroCue: false,
+	teamOrchestration: false,
 };
 
 export const DEFAULT_DIRECTOR_NOTES_SETTINGS: DirectorNotesSettings = {
