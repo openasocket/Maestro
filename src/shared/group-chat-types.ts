@@ -34,6 +34,78 @@ export function mentionMatches(mentionedName: string, actualName: string): boole
 }
 
 // ============================================================================
+// TEAM TEMPLATE TYPES
+// ============================================================================
+
+/**
+ * A role definition within a team template.
+ * Roles represent abstract positions (not bound to specific sessions).
+ */
+export interface TeamTemplateRole {
+	/** Role display name, e.g., "Frontend Specialist" */
+	name: string;
+	/** Default agent type for this role */
+	agentId: string;
+	/** What this role does */
+	description: string;
+	/** Additional context injected into participant prompt */
+	systemPromptSuffix?: string;
+	/** What this role expects (for TEAM-ORCH-05) */
+	inputContract?: string[];
+	/** What this role produces (for TEAM-ORCH-05) */
+	outputContract?: string[];
+}
+
+/**
+ * Workflow topology for structured agent routing.
+ * Placeholder for TEAM-ORCH-04, defined minimally now.
+ */
+export interface WorkflowTopology {
+	/** Directed edges between roles */
+	edges: Array<{ source: string; target: string; condition?: string }>;
+	/** Role name that receives initial input */
+	entryPoint: string;
+	/** Role name that produces final output */
+	exitPoint: string;
+}
+
+/**
+ * A reusable team configuration template.
+ * Users can save Group Chat configurations as templates and
+ * load them when creating new group chats.
+ */
+export interface TeamTemplate {
+	/** Unique identifier (UUID or deterministic ID for builtins) */
+	id: string;
+	/** Template display name, e.g., "Code Review Team" */
+	name: string;
+	/** What this team does */
+	description: string;
+	/** Lucide icon name (optional) */
+	icon?: string;
+	/** Source category */
+	category: 'builtin' | 'user' | 'exchange';
+	/** Creation timestamp (epoch ms) */
+	createdAt: number;
+	/** Last update timestamp (epoch ms) */
+	updatedAt: number;
+
+	/** Default agent type for moderator */
+	moderatorAgentId: string;
+	/** Optional moderator configuration overrides */
+	moderatorConfig?: {
+		customArgs?: string;
+		customEnvVars?: Record<string, string>;
+	};
+
+	/** Participant role definitions */
+	roles: TeamTemplateRole[];
+
+	/** Optional workflow topology (for TEAM-ORCH-04) */
+	topology?: WorkflowTopology;
+}
+
+// ============================================================================
 // TYPE DEFINITIONS
 // ============================================================================
 
