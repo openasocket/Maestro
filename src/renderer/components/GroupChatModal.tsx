@@ -21,6 +21,7 @@ import {
 	Users,
 	Star,
 	ChevronRight,
+	Sparkles,
 } from 'lucide-react';
 import { isBetaAgent } from '../../shared/agentMetadata';
 import type { TeamTemplate } from '../../shared/group-chat-types';
@@ -33,6 +34,7 @@ import { SshRemoteSelector } from './shared/SshRemoteSelector';
 import { TemplateBrowserModal } from './TemplateBrowserModal';
 import { useAgentConfiguration } from '../hooks/agent';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useModalStore } from '../stores/modalStore';
 
 interface GroupChatModalCreateProps {
 	mode: 'create';
@@ -341,6 +343,28 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 						<span style={{ color: theme.colors.accent }}>@mention</span> any agent defined in
 						Maestro to bring them into the discussion. We're still working on this feature, but
 						right now Claude appears to be the best performing moderator.
+					</div>
+				)}
+
+				{/* Build with AI (create mode only, gated behind teamOrchestration) */}
+				{isCreate && encoreFeatures.teamOrchestration && (
+					<div className="mb-6">
+						<button
+							type="button"
+							onClick={() => {
+								onClose();
+								useModalStore.getState().openModal('teamBuilderWizard');
+							}}
+							className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border transition-colors hover:bg-white/5"
+							style={{
+								borderColor: theme.colors.accent,
+								color: theme.colors.accent,
+								backgroundColor: `${theme.colors.accent}10`,
+							}}
+						>
+							<Sparkles className="w-4 h-4" />
+							<span className="text-sm font-medium">Build with AI</span>
+						</button>
 					</div>
 				)}
 

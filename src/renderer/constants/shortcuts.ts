@@ -89,6 +89,11 @@ export const DEFAULT_SHORTCUTS: Record<string, Shortcut> = {
 		label: 'Filter Unread Agents',
 		keys: ['Meta', 'Shift', 'u'],
 	},
+	teamBuilder: {
+		id: 'teamBuilder',
+		label: 'Team Builder',
+		keys: ['Alt', 'Shift', 't'],
+	},
 	jumpToTerminal: {
 		id: 'jumpToTerminal',
 		label: 'Jump to Terminal Tab',

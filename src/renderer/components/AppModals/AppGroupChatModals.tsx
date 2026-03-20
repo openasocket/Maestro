@@ -1,11 +1,18 @@
-import { memo } from 'react';
+import { memo, useCallback } from 'react';
 import type { Theme, GroupChat, GroupChatMessage, ModeratorConfig } from '../../types';
+import type { TeamTemplateRole, WorkflowTopology } from '../../../shared/group-chat-types';
+import { useModalStore } from '../../stores/modalStore';
+import { useGroupChatStore } from '../../stores/groupChatStore';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { notifyToast } from '../../stores/notificationStore';
+import { generateId } from '../../utils/ids';
 
 // Group Chat Modal Components
 import { GroupChatModal } from '../GroupChatModal';
 import { DeleteGroupChatModal } from '../DeleteGroupChatModal';
 import { RenameGroupChatModal } from '../RenameGroupChatModal';
 import { GroupChatInfoOverlay } from '../GroupChatInfoOverlay';
+import { TeamBuilderWizard } from '../GroupChat/TeamBuilderWizard';
 
 /**
  * Props for the AppGroupChatModals component
@@ -60,6 +67,7 @@ export interface AppGroupChatModalsProps {
  * - RenameGroupChatModal: Rename an existing group chat
  * - EditGroupChatModal: Edit group chat settings (name, moderator)
  * - GroupChatInfoOverlay: View group chat info and statistics
+ * - TeamBuilderWizard: AI-powered team composition wizard (gated behind teamOrchestration)
  */
 export const AppGroupChatModals = memo(function AppGroupChatModals({
 	theme,
@@ -87,6 +95,91 @@ export const AppGroupChatModals = memo(function AppGroupChatModals({
 	onCloseGroupChatInfo,
 	onOpenModeratorSession,
 }: AppGroupChatModalsProps) {
+	// Team Builder Wizard state (self-sourced from modal store)
+	const teamBuilderWizardOpen = useModalStore(
+		(s) => s.modals.get('teamBuilderWizard')?.open ?? false
+	);
+	const teamOrchestrationEnabled = useSettingsStore((s) => s.encoreFeatures.teamOrchestration);
+
+	const handleCloseTeamBuilderWizard = useCallback(() => {
+		useModalStore.getState().closeModal('teamBuilderWizard');
+	}, []);
+
+	const handleTeamBuilderCreateGroupChat = useCallback(
+		async (
+			teamName: string,
+			moderatorAgentId: string,
+			roles: TeamTemplateRole[],
+			_topology?: WorkflowTopology
+		) => {
+			const { closeModal } = useModalStore.getState();
+			const { setGroupChats } = useGroupChatStore.getState();
+			try {
+				// Create the group chat with moderator
+				const chat = await window.maestro.groupChat.create(teamName, moderatorAgentId);
+				setGroupChats((prev) => [chat, ...prev]);
+
+				// Add each role as a participant
+				for (const role of roles) {
+					await window.maestro.groupChat.addParticipant(chat.id, role.name, role.agentId);
+				}
+
+				closeModal('teamBuilderWizard');
+
+				// Open the newly created group chat
+				const { setActiveGroupChatId } = useGroupChatStore.getState();
+				setActiveGroupChatId(chat.id);
+			} catch (err) {
+				closeModal('teamBuilderWizard');
+				notifyToast({
+					type: 'error',
+					title: 'Team Builder',
+					message: 'Failed to create group chat from team configuration',
+				});
+				throw err; // Let Sentry capture
+			}
+		},
+		[]
+	);
+
+	const handleTeamBuilderSaveTemplate = useCallback(
+		async (template: {
+			name: string;
+			description: string;
+			moderatorAgentId: string;
+			roles: TeamTemplateRole[];
+			topology?: WorkflowTopology;
+		}) => {
+			try {
+				const now = Date.now();
+				await window.maestro.teamTemplates.save({
+					id: generateId(),
+					name: template.name,
+					description: template.description,
+					category: 'user',
+					createdAt: now,
+					updatedAt: now,
+					moderatorAgentId: template.moderatorAgentId,
+					roles: template.roles,
+					topology: template.topology,
+				});
+				notifyToast({
+					type: 'success',
+					title: 'Team Builder',
+					message: 'Team template saved',
+				});
+			} catch (err) {
+				notifyToast({
+					type: 'error',
+					title: 'Team Builder',
+					message: 'Failed to save team template',
+				});
+				throw err;
+			}
+		},
+		[]
+	);
+
 	// Find group chats by ID for modal props
 	const deleteGroupChat = showDeleteGroupChatModal
 		? groupChats.find((c) => c.id === showDeleteGroupChatModal)
@@ -160,6 +253,17 @@ export const AppGroupChatModals = memo(function AppGroupChatModals({
 					messages={groupChatMessages}
 					onClose={onCloseGroupChatInfo}
 					onOpenModeratorSession={onOpenModeratorSession}
+				/>
+			)}
+
+			{/* --- TEAM BUILDER WIZARD (gated behind teamOrchestration) --- */}
+			{teamBuilderWizardOpen && teamOrchestrationEnabled && (
+				<TeamBuilderWizard
+					theme={theme}
+					isOpen={teamBuilderWizardOpen}
+					onClose={handleCloseTeamBuilderWizard}
+					onCreateGroupChat={handleTeamBuilderCreateGroupChat}
+					onSaveTemplate={handleTeamBuilderSaveTemplate}
 				/>
 			)}
 		</>

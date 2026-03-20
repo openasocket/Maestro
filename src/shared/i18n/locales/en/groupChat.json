@@ -1,4 +1,39 @@
 {
+	"teamBuilder": {
+		"title": "Team Builder",
+		"buildWithAI": "Build with AI",
+		"intentPlaceholder": "Describe what you want this team to accomplish...",
+		"examples": {
+			"fullStack": "Build a full-stack feature with code review",
+			"research": "Research a topic and produce a comprehensive report",
+			"refactor": "Refactor a module with architecture and security review",
+			"debug": "Debug a complex issue across frontend and backend"
+		},
+		"buildTeam": "Build Team",
+		"stage1": {
+			"title": "Team Composition",
+			"subtitle": "Review the suggested roles for your team",
+			"addRole": "Add Role",
+			"revise": "Revise",
+			"approve": "Approve & Continue"
+		},
+		"stage2": {
+			"title": "Workflow Topology",
+			"subtitle": "How should these agents communicate?",
+			"pattern": "Pattern",
+			"skipToHubSpoke": "Skip (use hub-spoke)"
+		},
+		"stage3": {
+			"title": "Confirm Team",
+			"subtitle": "Review your team configuration",
+			"createChat": "Create Group Chat",
+			"saveTemplate": "Save as Template",
+			"createAndSave": "Create & Save"
+		},
+		"thinking": "Building your team...",
+		"error": "Failed to generate team configuration. Try again or adjust your description.",
+		"retry": "Try Again"
+	},
 	"teamTemplates": {
 		"title": "Team Templates",
 		"saveAsTemplate": "Save as Template",

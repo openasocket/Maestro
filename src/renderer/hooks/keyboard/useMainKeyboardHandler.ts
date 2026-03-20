@@ -483,6 +483,10 @@ export function useMainKeyboardHandler(): UseMainKeyboardHandlerReturn {
 				e.preventDefault();
 				ctx.setCueModalOpen?.(true);
 				trackShortcut('openCue');
+			} else if (ctx.isShortcut(e, 'teamBuilder') && ctx.encoreFeatures?.teamOrchestration) {
+				e.preventDefault();
+				useModalStore.getState().openModal('teamBuilderWizard');
+				trackShortcut('teamBuilder');
 			} else if (ctx.isShortcut(e, 'filterUnreadAgents')) {
 				e.preventDefault();
 				ctx.toggleShowUnreadAgentsOnly();

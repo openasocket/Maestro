@@ -93,6 +93,11 @@ vi.mock('lucide-react', () => ({
 			C
 		</span>
 	),
+	Sparkles: ({ className }: { className?: string }) => (
+		<span data-testid="sparkles-icon" className={className}>
+			✨
+		</span>
+	),
 }));
 
 // Mock layer stack context
