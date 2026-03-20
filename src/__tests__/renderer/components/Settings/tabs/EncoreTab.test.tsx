@@ -249,6 +249,7 @@ describe('EncoreTab', () => {
 
 			const betaBadges = screen.getAllByText('Beta');
 			expect(betaBadges.length).toBeGreaterThanOrEqual(1);
+			expect(betaBadges[0]).toBeInTheDocument();
 		});
 
 		it("should render subtitle description for Director's Notes", async () => {
