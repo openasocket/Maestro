@@ -15,6 +15,7 @@ import {
 	Hash,
 	Play,
 	ExternalLink,
+	Tag,
 } from 'lucide-react';
 import type { Session, Group, Theme, GroupChat } from '../types';
 import { useLayerStack } from '../contexts/LayerStackContext';
@@ -84,6 +85,7 @@ interface ProcessNode {
 	cueSubscriptionName?: string; // Subscription name that triggered this Cue run
 	cueEventType?: string; // Event type that triggered this Cue run
 	cueSessionName?: string; // Target session name for this Cue run
+	tabName?: string; // AI tab name (e.g., user-assigned tab label)
 }
 
 // Format runtime in human readable format (e.g., "2m 30s", "1h 5m", "3d 2h")
@@ -126,6 +128,7 @@ interface ProcessDetailData {
 	cueSubscriptionName?: string;
 	cueEventType?: string;
 	cueSessionName?: string;
+	tabName?: string;
 }
 
 export function ProcessMonitor(props: ProcessMonitorProps) {
@@ -468,6 +471,7 @@ export function ProcessMonitor(props: ProcessMonitorProps) {
 					command: proc.command,
 					args: proc.args,
 					sshRemote,
+					tabName,
 				});
 			});
 
@@ -742,6 +746,7 @@ export function ProcessMonitor(props: ProcessMonitorProps) {
 			cueSubscriptionName: node.cueSubscriptionName,
 			cueEventType: node.cueEventType,
 			cueSessionName: node.cueSessionName,
+			tabName: node.tabName,
 		});
 	};
 
@@ -1477,6 +1482,24 @@ export function ProcessMonitor(props: ProcessMonitorProps) {
 							</div>
 						)}
 
+						{/* Tab Name (if available) */}
+						{detailView.tabName && (
+							<div className="p-4 rounded-lg" style={{ backgroundColor: theme.colors.bgMain }}>
+								<div className="flex items-center gap-2 mb-2">
+									<Tag className="w-4 h-4" style={{ color: theme.colors.accent }} />
+									<span
+										className="text-xs font-medium uppercase tracking-wide"
+										style={{ color: theme.colors.textDim }}
+									>
+										Tab Name
+									</span>
+								</div>
+								<span className="text-sm" style={{ color: theme.colors.textMain }}>
+									{detailView.tabName}
+								</span>
+							</div>
+						)}
+
 						{/* PID & Runtime Row */}
 						<div className="grid grid-cols-2 gap-4">
 							<div className="p-4 rounded-lg" style={{ backgroundColor: theme.colors.bgMain }}>
@@ -1688,7 +1711,7 @@ export function ProcessMonitor(props: ProcessMonitorProps) {
 				role="dialog"
 				aria-modal="true"
 				aria-label={detailView ? 'Process Details' : 'System Processes'}
-				className="w-[700px] max-h-[80vh] rounded-xl shadow-2xl border overflow-hidden flex flex-col outline-none"
+				className="w-[875px] max-h-[80vh] rounded-xl shadow-2xl border overflow-hidden flex flex-col outline-none"
 				style={{ backgroundColor: theme.colors.bgActivity, borderColor: theme.colors.border }}
 				onClick={(e) => e.stopPropagation()}
 				onKeyDown={detailView ? undefined : handleKeyDown}

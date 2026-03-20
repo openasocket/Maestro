@@ -51,6 +51,11 @@ vi.mock('lucide-react', () => ({
 			↗
 		</span>
 	),
+	Tag: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
+		<span data-testid="tag-icon" className={className} style={style}>
+			🏷
+		</span>
+	),
 }));
 
 // Mock layer stack context
