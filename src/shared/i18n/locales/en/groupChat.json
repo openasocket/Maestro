@@ -1,0 +1,23 @@
+{
+	"teamTemplates": {
+		"title": "Team Templates",
+		"saveAsTemplate": "Save as Template",
+		"fromTemplate": "Start from Template",
+		"browseAll": "Browse All Templates",
+		"builtIn": "Built-in",
+		"custom": "Custom",
+		"roles": "{{count}} roles",
+		"saveDialog": {
+			"title": "Save Team Template",
+			"nameLabel": "Template Name",
+			"descriptionLabel": "Description",
+			"save": "Save Template",
+			"cancel": "Cancel"
+		},
+		"deleteConfirm": "Delete this template? This cannot be undone.",
+		"duplicated": "Template duplicated",
+		"saved": "Team template saved",
+		"deleted": "Team template deleted",
+		"cannotDeleteBuiltin": "Built-in templates cannot be deleted. Duplicate it to create a customizable copy."
+	}
+}
