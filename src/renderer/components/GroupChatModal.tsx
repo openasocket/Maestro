@@ -12,15 +12,27 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Settings, ChevronDown, Check } from 'lucide-react';
+import {
+	X,
+	Settings,
+	ChevronDown,
+	Check,
+	BookTemplate,
+	Users,
+	Star,
+	ChevronRight,
+} from 'lucide-react';
 import { isBetaAgent } from '../../shared/agentMetadata';
+import type { TeamTemplate } from '../../shared/group-chat-types';
 import type { Theme, AgentConfig, ModeratorConfig, GroupChat } from '../types';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { Modal, ModalFooter, FormInput } from './ui';
 import { AGENT_TILES } from './Wizard/screens/AgentSelectionScreen';
 import { AgentConfigPanel } from './shared/AgentConfigPanel';
 import { SshRemoteSelector } from './shared/SshRemoteSelector';
+import { TemplateBrowserModal } from './TemplateBrowserModal';
 import { useAgentConfiguration } from '../hooks/agent';
+import { useSettingsStore } from '../stores/settingsStore';
 
 interface GroupChatModalCreateProps {
 	mode: 'create';
@@ -56,6 +68,17 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 	const [name, setName] = useState('');
 	// Track if user has visited/modified the config panel (edit mode only)
 	const [configWasModified, setConfigWasModified] = useState(false);
+
+	// Template state (create mode only)
+	const [templates, setTemplates] = useState<TeamTemplate[]>([]);
+	const [selectedTemplate, setSelectedTemplate] = useState<TeamTemplate | null>(null);
+	const [showTemplateBrowser, setShowTemplateBrowser] = useState(false);
+
+	// Feature flags for templates
+	const encoreFeatures = useSettingsStore((s) => s.encoreFeatures);
+	const teamOrchestrationSettings = useSettingsStore((s) => s.teamOrchestrationSettings);
+	const templatesEnabled =
+		encoreFeatures.teamOrchestration && teamOrchestrationSettings.enableTemplates;
 
 	const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -117,8 +140,52 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 		if (!isOpen) {
 			setName('');
 			setConfigWasModified(false);
+			setSelectedTemplate(null);
 		}
 	}, [isOpen]);
+
+	// Load templates when create mode modal opens and feature is enabled
+	useEffect(() => {
+		if (mode !== 'create' || !isOpen || !templatesEnabled) {
+			setTemplates([]);
+			return;
+		}
+		window.maestro.teamTemplates
+			.list()
+			.then(setTemplates)
+			.catch(() => setTemplates([]));
+	}, [mode, isOpen, templatesEnabled]);
+
+	// Apply a template to the form
+	const applyTemplate = useCallback(
+		(template: TeamTemplate) => {
+			setSelectedTemplate(template);
+			// Set moderator agent from template
+			if (ac.detectedAgents.some((a) => a.id === template.moderatorAgentId)) {
+				ac.setSelectedAgent(template.moderatorAgentId);
+			}
+			// Apply moderator config from template
+			if (template.moderatorConfig?.customArgs) {
+				ac.setCustomArgs(template.moderatorConfig.customArgs);
+			}
+			if (
+				template.moderatorConfig?.customEnvVars &&
+				Object.keys(template.moderatorConfig.customEnvVars).length > 0
+			) {
+				ac.setCustomEnvVars(template.moderatorConfig.customEnvVars);
+			}
+		},
+		[ac]
+	);
+
+	// Handle template selection from browser modal
+	const handleBrowserTemplateSelect = useCallback(
+		(template: TeamTemplate) => {
+			applyTemplate(template);
+			setShowTemplateBrowser(false);
+		},
+		[applyTemplate]
+	);
 
 	// Build moderator config from state
 	const buildModeratorConfig = useCallback((): ModeratorConfig | undefined => {
@@ -275,6 +342,109 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 						Maestro to bring them into the discussion. We're still working on this feature, but
 						right now Claude appears to be the best performing moderator.
 					</div>
+				)}
+
+				{/* Start from Template (create mode only, gated behind feature flag) */}
+				{isCreate && templatesEnabled && templates.length > 0 && (
+					<div className="mb-6">
+						<div className="flex items-center justify-between mb-2">
+							<label
+								className="block text-xs font-bold opacity-70 uppercase"
+								style={{ color: theme.colors.textMain }}
+							>
+								Start from Template
+							</label>
+							<button
+								type="button"
+								onClick={() => setShowTemplateBrowser(true)}
+								className="flex items-center gap-1 text-xs transition-colors hover:underline"
+								style={{ color: theme.colors.accent }}
+							>
+								Browse All Templates
+								<ChevronRight className="w-3 h-3" />
+							</button>
+						</div>
+						<div className="flex gap-2 pb-2 overflow-x-auto scrollbar-thin">
+							{templates.map((template) => {
+								const isActive = selectedTemplate?.id === template.id;
+								return (
+									<button
+										key={template.id}
+										type="button"
+										onClick={() => applyTemplate(template)}
+										className="shrink-0 flex flex-col gap-1.5 p-3 rounded-lg border text-left transition-colors"
+										style={{
+											width: 180,
+											borderColor: isActive ? theme.colors.accent : theme.colors.border,
+											backgroundColor: isActive ? `${theme.colors.accent}10` : 'transparent',
+										}}
+									>
+										<div className="flex items-center gap-2">
+											{template.category === 'builtin' ? (
+												<Star
+													className="w-3.5 h-3.5 shrink-0"
+													style={{ color: theme.colors.accent }}
+												/>
+											) : (
+												<BookTemplate
+													className="w-3.5 h-3.5 shrink-0"
+													style={{ color: theme.colors.accent }}
+												/>
+											)}
+											<span
+												className="text-xs font-medium truncate"
+												style={{ color: theme.colors.textMain }}
+											>
+												{template.name}
+											</span>
+										</div>
+										<p className="text-[11px] line-clamp-2" style={{ color: theme.colors.textDim }}>
+											{template.description}
+										</p>
+										<div
+											className="flex items-center gap-1"
+											style={{ color: theme.colors.textDim }}
+										>
+											<Users className="w-3 h-3" />
+											<span className="text-[10px]">
+												{template.roles.length} role
+												{template.roles.length !== 1 ? 's' : ''}
+											</span>
+										</div>
+									</button>
+								);
+							})}
+						</div>
+						{selectedTemplate && (
+							<div
+								className="mt-2 text-xs px-3 py-2 rounded"
+								style={{
+									backgroundColor: `${theme.colors.accent}10`,
+									color: theme.colors.textDim,
+									border: `1px solid ${theme.colors.accent}20`,
+								}}
+							>
+								<span style={{ color: theme.colors.textMain }}>{selectedTemplate.name}:</span>{' '}
+								{selectedTemplate.description}
+								{selectedTemplate.roles.length > 0 && (
+									<span>
+										{' '}
+										&mdash; Roles: {selectedTemplate.roles.map((r) => r.name).join(', ')}
+									</span>
+								)}
+							</div>
+						)}
+					</div>
+				)}
+
+				{/* Template Browser Modal */}
+				{showTemplateBrowser && (
+					<TemplateBrowserModal
+						theme={theme}
+						isOpen={showTemplateBrowser}
+						onClose={() => setShowTemplateBrowser(false)}
+						onSelect={handleBrowserTemplateSelect}
+					/>
 				)}
 
 				{/* Name Input (edit mode: before moderator, create mode: after) */}

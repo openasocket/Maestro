@@ -68,6 +68,9 @@ export const MODAL_PRIORITIES = {
 	/** Save group chat as team template modal */
 	SAVE_AS_TEMPLATE: 643,
 
+	/** Team template browser modal (full list with search/filter) */
+	TEMPLATE_BROWSER: 642,
+
 	/** Rename group chat modal */
 	RENAME_GROUP_CHAT: 640,
 

@@ -63,6 +63,36 @@ vi.mock('lucide-react', () => ({
 			←
 		</span>
 	),
+	BookTemplate: ({ className }: { className?: string }) => (
+		<span data-testid="book-template-icon" className={className}>
+			T
+		</span>
+	),
+	Users: ({ className }: { className?: string }) => (
+		<span data-testid="users-icon" className={className}>
+			U
+		</span>
+	),
+	Star: ({ className }: { className?: string }) => (
+		<span data-testid="star-icon" className={className}>
+			*
+		</span>
+	),
+	ChevronRight: ({ className }: { className?: string }) => (
+		<span data-testid="chevron-right-icon" className={className}>
+			&gt;
+		</span>
+	),
+	Search: ({ className }: { className?: string }) => (
+		<span data-testid="search-icon" className={className}>
+			S
+		</span>
+	),
+	Copy: ({ className }: { className?: string }) => (
+		<span data-testid="copy-icon" className={className}>
+			C
+		</span>
+	),
 }));
 
 // Mock layer stack context
@@ -76,6 +106,22 @@ vi.mock('../../../renderer/contexts/LayerStackContext', () => ({
 		unregisterLayer: mockUnregisterLayer,
 		updateLayerHandler: mockUpdateLayerHandler,
 	}),
+}));
+
+// Mock settings store for template feature flag
+const mockSettingsState = {
+	encoreFeatures: { teamOrchestration: true },
+	teamOrchestrationSettings: { enableTemplates: true },
+};
+
+vi.mock('../../../renderer/stores/settingsStore', () => ({
+	useSettingsStore: (selector: (state: typeof mockSettingsState) => unknown) =>
+		selector(mockSettingsState),
+}));
+
+// Mock notification store
+vi.mock('../../../renderer/stores/notificationStore', () => ({
+	notifyToast: vi.fn(),
 }));
 
 // =============================================================================
@@ -231,6 +277,182 @@ describe('GroupChatModal', () => {
 			expect(screen.getByRole('option', { name: /Codex.*Beta/i })).toBeInTheDocument();
 			expect(screen.getByRole('option', { name: /OpenCode.*Beta/i })).toBeInTheDocument();
 			expect(screen.getByRole('option', { name: /Factory Droid.*Beta/i })).toBeInTheDocument();
+		});
+	});
+
+	describe('template integration (create mode)', () => {
+		it('should show "Start from Template" section when templates are enabled and loaded', async () => {
+			const mockTemplates = [
+				{
+					id: 'builtin-code-review',
+					name: 'Code Review Team',
+					description: 'Collaborative code review',
+					category: 'builtin' as const,
+					createdAt: Date.now(),
+					updatedAt: Date.now(),
+					moderatorAgentId: 'claude-code',
+					roles: [
+						{ name: 'Implementer', agentId: 'claude-code', description: 'Writes code' },
+						{ name: 'Reviewer', agentId: 'claude-code', description: 'Reviews code' },
+					],
+				},
+			];
+
+			vi.mocked(window.maestro.teamTemplates.list).mockResolvedValue(mockTemplates);
+
+			render(
+				<GroupChatModal
+					mode="create"
+					theme={createMockTheme()}
+					isOpen={true}
+					onClose={vi.fn()}
+					onCreate={vi.fn()}
+				/>
+			);
+
+			await waitFor(() => {
+				expect(screen.getByText('Start from Template')).toBeInTheDocument();
+			});
+
+			// Should show template card
+			expect(screen.getByText('Code Review Team')).toBeInTheDocument();
+			expect(screen.getByText('2 roles')).toBeInTheDocument();
+		});
+
+		it('should NOT show templates section when feature flag is disabled', async () => {
+			mockSettingsState.encoreFeatures.teamOrchestration = false;
+
+			vi.mocked(window.maestro.teamTemplates.list).mockResolvedValue([]);
+
+			render(
+				<GroupChatModal
+					mode="create"
+					theme={createMockTheme()}
+					isOpen={true}
+					onClose={vi.fn()}
+					onCreate={vi.fn()}
+				/>
+			);
+
+			// Wait for initial render
+			await waitFor(
+				() => {
+					expect(screen.getByRole('combobox', { name: /select moderator/i })).toBeInTheDocument();
+				},
+				{ timeout: 3000 }
+			);
+
+			expect(screen.queryByText('Start from Template')).not.toBeInTheDocument();
+
+			// Restore
+			mockSettingsState.encoreFeatures.teamOrchestration = true;
+		});
+
+		it('should NOT show templates section in edit mode', async () => {
+			vi.mocked(window.maestro.teamTemplates.list).mockResolvedValue([
+				{
+					id: 't1',
+					name: 'Template',
+					description: 'Desc',
+					category: 'builtin',
+					createdAt: Date.now(),
+					updatedAt: Date.now(),
+					moderatorAgentId: 'claude-code',
+					roles: [],
+				},
+			]);
+
+			render(
+				<GroupChatModal
+					mode="edit"
+					theme={createMockTheme()}
+					isOpen={true}
+					groupChat={createMockGroupChat()}
+					onClose={vi.fn()}
+					onSave={vi.fn()}
+				/>
+			);
+
+			await waitFor(
+				() => {
+					expect(screen.getByRole('combobox', { name: /select moderator/i })).toBeInTheDocument();
+				},
+				{ timeout: 3000 }
+			);
+
+			expect(screen.queryByText('Start from Template')).not.toBeInTheDocument();
+		});
+
+		it('should show "Browse All Templates" link', async () => {
+			vi.mocked(window.maestro.teamTemplates.list).mockResolvedValue([
+				{
+					id: 't1',
+					name: 'Test Template',
+					description: 'Desc',
+					category: 'builtin',
+					createdAt: Date.now(),
+					updatedAt: Date.now(),
+					moderatorAgentId: 'claude-code',
+					roles: [{ name: 'Dev', agentId: 'claude-code', description: 'Develops' }],
+				},
+			]);
+
+			render(
+				<GroupChatModal
+					mode="create"
+					theme={createMockTheme()}
+					isOpen={true}
+					onClose={vi.fn()}
+					onCreate={vi.fn()}
+				/>
+			);
+
+			await waitFor(() => {
+				expect(screen.getByText('Browse All Templates')).toBeInTheDocument();
+			});
+		});
+
+		it('should show template description when a template is selected', async () => {
+			const mockTemplates = [
+				{
+					id: 'builtin-code-review',
+					name: 'Code Review Team',
+					description: 'Collaborative code review with multiple perspectives.',
+					category: 'builtin' as const,
+					createdAt: Date.now(),
+					updatedAt: Date.now(),
+					moderatorAgentId: 'claude-code',
+					roles: [
+						{ name: 'Implementer', agentId: 'claude-code', description: 'Writes code' },
+						{ name: 'Reviewer', agentId: 'claude-code', description: 'Reviews code' },
+					],
+				},
+			];
+
+			vi.mocked(window.maestro.teamTemplates.list).mockResolvedValue(mockTemplates);
+
+			render(
+				<GroupChatModal
+					mode="create"
+					theme={createMockTheme()}
+					isOpen={true}
+					onClose={vi.fn()}
+					onCreate={vi.fn()}
+				/>
+			);
+
+			await waitFor(() => {
+				expect(screen.getByText('Code Review Team')).toBeInTheDocument();
+			});
+
+			// Click the template card
+			const templateCards = screen.getAllByText('Code Review Team');
+			fireEvent.click(templateCards[0]);
+
+			// Should show the description helper with role names
+			await waitFor(() => {
+				expect(screen.getByText(/Implementer, Reviewer/)).toBeInTheDocument();
+			});
 		});
 	});
 
