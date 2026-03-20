@@ -50,6 +50,7 @@ import { createSymphonyApi } from './symphony';
 import { createTabNamingApi } from './tabNaming';
 import { createDirectorNotesApi } from './directorNotes';
 import { createCueApi } from './cue';
+import { createTeamTemplatesApi } from './teamTemplates';
 import { createWakatimeApi } from './wakatime';
 
 // Expose protected methods that allow the renderer process to use
@@ -193,6 +194,9 @@ contextBridge.exposeInMainWorld('maestro', {
 	// Cue API (event-driven automation)
 	cue: createCueApi(),
 
+	// Team Templates API (template CRUD for group chat presets)
+	teamTemplates: createTeamTemplatesApi(),
+
 	// WakaTime API (CLI check, API key validation)
 	wakatime: createWakatimeApi(),
 });
@@ -268,6 +272,8 @@ export {
 	createDirectorNotesApi,
 	// Cue
 	createCueApi,
+	// Team Templates
+	createTeamTemplatesApi,
 	// WakaTime
 	createWakatimeApi,
 };
@@ -484,6 +490,10 @@ export type {
 	CueEventType,
 	CueRunStatus,
 } from './cue';
+export type {
+	// From teamTemplates
+	TeamTemplatesApi,
+} from './teamTemplates';
 export type {
 	// From wakatime
 	WakatimeApi,

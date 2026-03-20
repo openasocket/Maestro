@@ -62,6 +62,7 @@ import {
 	registerAgentErrorHandlers,
 	registerDirectorNotesHandlers,
 	registerCueHandlers,
+	registerTeamTemplateHandlers,
 	registerWakatimeHandlers,
 	setupLoggerEventForwarding,
 	cleanupAllGroomingSessions,
@@ -767,6 +768,9 @@ function setupIpcHandlers() {
 		groupsStore,
 		bootstrapStore,
 	});
+
+	// Register Team Template handlers (no dependencies needed)
+	registerTeamTemplateHandlers();
 
 	// Register Spec Kit handlers (no dependencies needed)
 	registerSpeckitHandlers();
