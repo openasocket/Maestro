@@ -16,12 +16,13 @@ import {
 	Music,
 	Lock,
 	Plus,
+	Users,
 	X,
 	Zap,
 } from 'lucide-react';
 import { useSettings } from '../../../hooks';
 import { useAgentConfiguration } from '../../../hooks/agent/useAgentConfiguration';
-import type { Theme, AgentConfig, ToolType } from '../../../types';
+import type { Theme, AgentConfig, ToolType, TerminationMode } from '../../../types';
 import { AgentConfigPanel } from '../../shared/AgentConfigPanel';
 import { AGENT_TILES } from '../../Wizard/screens/AgentSelectionScreen';
 import { isBetaAgent } from '../../../../shared/agentMetadata';
@@ -40,6 +41,8 @@ export function EncoreTab({ theme, isOpen }: EncoreTabProps) {
 		setDirectorNotesSettings,
 		symphonyRegistryUrls,
 		setSymphonyRegistryUrls,
+		teamOrchestrationSettings,
+		setTeamOrchestrationSettings,
 	} = useSettings();
 
 	// Symphony registry URL management
@@ -733,6 +736,294 @@ export function EncoreTab({ theme, isOpen }: EncoreTabProps) {
 							</div>
 							<p className="text-xs mt-2" style={{ color: theme.colors.textDim }}>
 								How far back to look when generating notes (can be adjusted per-report)
+							</p>
+						</div>
+					</div>
+				)}
+			</div>
+
+			{/* Team Orchestration Feature Section */}
+			<div
+				className="rounded-lg border"
+				style={{
+					borderColor: encoreFeatures.teamOrchestration ? theme.colors.accent : theme.colors.border,
+					backgroundColor: encoreFeatures.teamOrchestration
+						? `${theme.colors.accent}08`
+						: 'transparent',
+				}}
+			>
+				{/* Feature Toggle Header */}
+				<button
+					className="w-full flex items-center justify-between p-4 text-left"
+					onClick={() =>
+						setEncoreFeatures({
+							...encoreFeatures,
+							teamOrchestration: !encoreFeatures.teamOrchestration,
+						})
+					}
+				>
+					<div className="flex items-center gap-3">
+						<Users
+							className="w-5 h-5"
+							style={{
+								color: encoreFeatures.teamOrchestration
+									? theme.colors.accent
+									: theme.colors.textDim,
+							}}
+						/>
+						<div>
+							<div
+								className="text-sm font-bold flex items-center gap-2"
+								style={{ color: theme.colors.textMain }}
+							>
+								Team Orchestration
+								<span
+									className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase"
+									style={{
+										backgroundColor: theme.colors.warning + '30',
+										color: theme.colors.warning,
+									}}
+								>
+									Beta
+								</span>
+							</div>
+							<div className="text-xs mt-0.5" style={{ color: theme.colors.textDim }}>
+								Advanced multi-agent coordination with templates, workflow topologies, and
+								structured routing
+							</div>
+						</div>
+					</div>
+					<div
+						className={`relative w-10 h-5 rounded-full transition-colors ${encoreFeatures.teamOrchestration ? '' : 'opacity-50'}`}
+						style={{
+							backgroundColor: encoreFeatures.teamOrchestration
+								? theme.colors.accent
+								: theme.colors.border,
+						}}
+					>
+						<div
+							className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform"
+							style={{
+								transform: encoreFeatures.teamOrchestration
+									? 'translateX(22px)'
+									: 'translateX(2px)',
+							}}
+						/>
+					</div>
+				</button>
+
+				{/* Team Orchestration Settings (shown when enabled) */}
+				{encoreFeatures.teamOrchestration && (
+					<div
+						className="px-4 pb-4 space-y-4 border-t"
+						style={{ borderColor: theme.colors.border }}
+					>
+						<p className="text-xs pt-3" style={{ color: theme.colors.textDim }}>
+							Enhances Group Chat with reusable team templates, graph-based agent workflows, and
+							visual orchestration controls
+						</p>
+
+						{/* Team Templates Toggle */}
+						<div className="flex items-center justify-between">
+							<div>
+								<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
+									Team Templates
+								</div>
+								<div className="text-xs mt-0.5" style={{ color: theme.colors.textDim }}>
+									Save and reuse team configurations across group chats
+								</div>
+							</div>
+							<button
+								className="relative w-10 h-5 rounded-full transition-colors"
+								style={{
+									backgroundColor: teamOrchestrationSettings.enableTemplates
+										? theme.colors.accent
+										: theme.colors.border,
+								}}
+								onClick={() =>
+									setTeamOrchestrationSettings({
+										...teamOrchestrationSettings,
+										enableTemplates: !teamOrchestrationSettings.enableTemplates,
+									})
+								}
+							>
+								<div
+									className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform"
+									style={{
+										transform: teamOrchestrationSettings.enableTemplates
+											? 'translateX(22px)'
+											: 'translateX(2px)',
+									}}
+								/>
+							</button>
+						</div>
+
+						{/* Workflow Topology Toggle */}
+						<div className="flex items-center justify-between">
+							<div>
+								<div
+									className="text-sm font-medium flex items-center gap-2"
+									style={{ color: theme.colors.textMain }}
+								>
+									Workflow Topology
+									<span
+										className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase"
+										style={{
+											backgroundColor: theme.colors.warning + '30',
+											color: theme.colors.warning,
+										}}
+									>
+										Beta
+									</span>
+								</div>
+								<div className="text-xs mt-0.5" style={{ color: theme.colors.textDim }}>
+									Define agent dependency graphs instead of hub-spoke routing
+								</div>
+							</div>
+							<button
+								className="relative w-10 h-5 rounded-full transition-colors"
+								style={{
+									backgroundColor: teamOrchestrationSettings.enableWorkflowTopology
+										? theme.colors.accent
+										: theme.colors.border,
+								}}
+								onClick={() =>
+									setTeamOrchestrationSettings({
+										...teamOrchestrationSettings,
+										enableWorkflowTopology: !teamOrchestrationSettings.enableWorkflowTopology,
+									})
+								}
+							>
+								<div
+									className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform"
+									style={{
+										transform: teamOrchestrationSettings.enableWorkflowTopology
+											? 'translateX(22px)'
+											: 'translateX(2px)',
+									}}
+								/>
+							</button>
+						</div>
+
+						{/* Workflow Visualization Toggle */}
+						<div className="flex items-center justify-between">
+							<div>
+								<div
+									className="text-sm font-medium flex items-center gap-2"
+									style={{ color: theme.colors.textMain }}
+								>
+									Workflow Visualization
+									<span
+										className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase"
+										style={{
+											backgroundColor: theme.colors.warning + '30',
+											color: theme.colors.warning,
+										}}
+									>
+										Beta
+									</span>
+								</div>
+								<div className="text-xs mt-0.5" style={{ color: theme.colors.textDim }}>
+									Visual graph of agent workflow in the right panel
+								</div>
+							</div>
+							<button
+								className="relative w-10 h-5 rounded-full transition-colors"
+								style={{
+									backgroundColor: teamOrchestrationSettings.enableVisualization
+										? theme.colors.accent
+										: theme.colors.border,
+								}}
+								onClick={() =>
+									setTeamOrchestrationSettings({
+										...teamOrchestrationSettings,
+										enableVisualization: !teamOrchestrationSettings.enableVisualization,
+									})
+								}
+							>
+								<div
+									className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform"
+									style={{
+										transform: teamOrchestrationSettings.enableVisualization
+											? 'translateX(22px)'
+											: 'translateX(2px)',
+									}}
+								/>
+							</button>
+						</div>
+
+						{/* Max Iterations */}
+						<div>
+							<div
+								className="block text-xs font-bold mb-2"
+								style={{ color: theme.colors.textMain }}
+							>
+								Max Iterations: {teamOrchestrationSettings.maxIterations}
+							</div>
+							<input
+								type="range"
+								min={1}
+								max={20}
+								value={teamOrchestrationSettings.maxIterations}
+								onChange={(e) =>
+									setTeamOrchestrationSettings({
+										...teamOrchestrationSettings,
+										maxIterations: parseInt(e.target.value, 10),
+									})
+								}
+								className="w-full"
+							/>
+							<div
+								className="flex justify-between text-[10px] mt-1"
+								style={{ color: theme.colors.textDim }}
+							>
+								<span>1</span>
+								<span>5</span>
+								<span>10</span>
+								<span>15</span>
+								<span>20</span>
+							</div>
+							<p className="text-xs mt-2" style={{ color: theme.colors.textDim }}>
+								Maximum retry/revision loops before auto-terminating
+							</p>
+						</div>
+
+						{/* Termination Mode */}
+						<div>
+							<div
+								className="block text-xs font-bold opacity-70 uppercase mb-2"
+								style={{ color: theme.colors.textMain }}
+							>
+								Termination Mode
+							</div>
+							<div className="relative">
+								<select
+									value={teamOrchestrationSettings.defaultTerminationMode}
+									onChange={(e) =>
+										setTeamOrchestrationSettings({
+											...teamOrchestrationSettings,
+											defaultTerminationMode: e.target.value as TerminationMode,
+										})
+									}
+									className="w-full px-3 py-2 pr-10 rounded-lg border outline-none appearance-none cursor-pointer text-sm"
+									style={{
+										backgroundColor: theme.colors.bgMain,
+										borderColor: theme.colors.border,
+										color: theme.colors.textMain,
+									}}
+									aria-label="Select termination mode"
+								>
+									<option value="moderator-decides">Moderator Decides</option>
+									<option value="max-iterations">Max Iterations</option>
+									<option value="quality-gate">Quality Gate</option>
+								</select>
+								<ChevronDown
+									className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"
+									style={{ color: theme.colors.textDim }}
+								/>
+							</div>
+							<p className="text-xs mt-2" style={{ color: theme.colors.textDim }}>
+								How the system decides when a workflow is complete
 							</p>
 						</div>
 					</div>
