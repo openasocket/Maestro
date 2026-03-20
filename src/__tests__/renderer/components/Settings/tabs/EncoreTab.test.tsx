@@ -95,6 +95,7 @@ const mockSetDefaultStatsTimeRange = vi.fn();
 const mockSetWakatimeEnabled = vi.fn();
 const mockSetWakatimeApiKey = vi.fn();
 const mockSetWakatimeDetailedTracking = vi.fn();
+const mockSetTeamOrchestrationSettings = vi.fn();
 
 // Override mechanism for per-test customization
 let mockUseSettingsOverrides: Record<string, any> = {};
@@ -123,6 +124,15 @@ vi.mock('../../../../../renderer/hooks/settings/useSettings', () => ({
 		// Symphony
 		symphonyRegistryUrls: [],
 		setSymphonyRegistryUrls: vi.fn(),
+		// Team Orchestration
+		teamOrchestrationSettings: {
+			enableTemplates: true,
+			enableWorkflowTopology: false,
+			enableVisualization: false,
+			maxIterations: 5,
+			defaultTerminationMode: 'moderator-decides',
+		},
+		setTeamOrchestrationSettings: mockSetTeamOrchestrationSettings,
 		...mockUseSettingsOverrides,
 	}),
 }));
@@ -1518,6 +1528,212 @@ describe('EncoreTab', () => {
 			expect(mockSetEncoreFeatures).toHaveBeenCalledWith(
 				expect.objectContaining({ maestroCue: true })
 			);
+		});
+	});
+
+	// ── Team Orchestration ───────────────────────────────────────────────
+
+	describe('Team Orchestration', () => {
+		it('should render Team Orchestration section', async () => {
+			render(<EncoreTab theme={mockTheme} isOpen={true} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			expect(screen.getByText('Team Orchestration')).toBeInTheDocument();
+		});
+
+		it('should hide sub-settings when teamOrchestration flag is off', async () => {
+			render(<EncoreTab theme={mockTheme} isOpen={true} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			// Sub-settings should not be visible when flag is off (default)
+			expect(screen.queryByText('Team Templates')).not.toBeInTheDocument();
+			expect(screen.queryByText('Workflow Topology')).not.toBeInTheDocument();
+			expect(screen.queryByText('Workflow Visualization')).not.toBeInTheDocument();
+		});
+
+		it('should show sub-settings when teamOrchestration flag is on', async () => {
+			mockUseSettingsOverrides = {
+				encoreFeatures: { directorNotes: false, teamOrchestration: true },
+			};
+
+			render(<EncoreTab theme={mockTheme} isOpen={true} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			expect(screen.getByText('Team Templates')).toBeInTheDocument();
+			expect(screen.getByText('Workflow Topology')).toBeInTheDocument();
+			expect(screen.getByText('Workflow Visualization')).toBeInTheDocument();
+			expect(screen.getByText('Max Iterations: 5')).toBeInTheDocument();
+			expect(screen.getByText('Termination Mode')).toBeInTheDocument();
+		});
+
+		it('should toggle teamOrchestration flag when header clicked', async () => {
+			render(<EncoreTab theme={mockTheme} isOpen={true} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			const headerButton = screen.getByText('Team Orchestration').closest('button')!;
+			fireEvent.click(headerButton);
+
+			expect(mockSetEncoreFeatures).toHaveBeenCalledWith(
+				expect.objectContaining({ teamOrchestration: true })
+			);
+		});
+
+		it('should toggle sub-settings off when header clicked while on', async () => {
+			mockUseSettingsOverrides = {
+				encoreFeatures: { directorNotes: false, teamOrchestration: true },
+			};
+
+			render(<EncoreTab theme={mockTheme} isOpen={true} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			const headerButton = screen.getByText('Team Orchestration').closest('button')!;
+			fireEvent.click(headerButton);
+
+			expect(mockSetEncoreFeatures).toHaveBeenCalledWith(
+				expect.objectContaining({ teamOrchestration: false })
+			);
+		});
+
+		it('should render Beta badges for Workflow Topology and Visualization', async () => {
+			mockUseSettingsOverrides = {
+				encoreFeatures: { directorNotes: false, teamOrchestration: true },
+			};
+
+			render(<EncoreTab theme={mockTheme} isOpen={true} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			// Team Orchestration header has a Beta badge, plus Workflow Topology and Visualization
+			const badges = screen.getAllByText('Beta');
+			expect(badges.length).toBeGreaterThanOrEqual(3);
+		});
+
+		it('should toggle enableTemplates sub-setting', async () => {
+			mockUseSettingsOverrides = {
+				encoreFeatures: { directorNotes: false, teamOrchestration: true },
+			};
+
+			render(<EncoreTab theme={mockTheme} isOpen={true} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			// Find the Team Templates toggle button (the toggle next to "Team Templates")
+			const templatesLabel = screen.getByText('Team Templates');
+			const templatesRow = templatesLabel.closest('.flex.items-center.justify-between')!;
+			const toggleButton = templatesRow.querySelector('button')!;
+			fireEvent.click(toggleButton);
+
+			expect(mockSetTeamOrchestrationSettings).toHaveBeenCalledWith(
+				expect.objectContaining({ enableTemplates: false })
+			);
+		});
+
+		it('should render max iterations slider with default value', async () => {
+			mockUseSettingsOverrides = {
+				encoreFeatures: { directorNotes: false, teamOrchestration: true },
+			};
+
+			render(<EncoreTab theme={mockTheme} isOpen={true} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			expect(screen.getByText('Max Iterations: 5')).toBeInTheDocument();
+			const slider = screen.getByRole('slider');
+			expect(slider).toHaveAttribute('min', '1');
+			expect(slider).toHaveAttribute('max', '20');
+		});
+
+		it('should update max iterations when slider changes', async () => {
+			mockUseSettingsOverrides = {
+				encoreFeatures: { directorNotes: false, teamOrchestration: true },
+			};
+
+			render(<EncoreTab theme={mockTheme} isOpen={true} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			const slider = screen.getByRole('slider');
+			fireEvent.change(slider, { target: { value: '10' } });
+
+			expect(mockSetTeamOrchestrationSettings).toHaveBeenCalledWith(
+				expect.objectContaining({ maxIterations: 10 })
+			);
+		});
+
+		it('should render termination mode dropdown with default value', async () => {
+			mockUseSettingsOverrides = {
+				encoreFeatures: { directorNotes: false, teamOrchestration: true },
+			};
+
+			render(<EncoreTab theme={mockTheme} isOpen={true} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			const select = screen.getByLabelText('Select termination mode') as HTMLSelectElement;
+			expect(select.value).toBe('moderator-decides');
+			expect(screen.getByText('Moderator Decides')).toBeInTheDocument();
+			expect(screen.getByText('Max Iterations')).toBeInTheDocument();
+			expect(screen.getByText('Quality Gate')).toBeInTheDocument();
+		});
+
+		it('should update termination mode when dropdown changes', async () => {
+			mockUseSettingsOverrides = {
+				encoreFeatures: { directorNotes: false, teamOrchestration: true },
+			};
+
+			render(<EncoreTab theme={mockTheme} isOpen={true} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			const select = screen.getByLabelText('Select termination mode');
+			fireEvent.change(select, { target: { value: 'quality-gate' } });
+
+			expect(mockSetTeamOrchestrationSettings).toHaveBeenCalledWith(
+				expect.objectContaining({ defaultTerminationMode: 'quality-gate' })
+			);
+		});
+
+		it('should show description text when enabled', async () => {
+			mockUseSettingsOverrides = {
+				encoreFeatures: { directorNotes: false, teamOrchestration: true },
+			};
+
+			render(<EncoreTab theme={mockTheme} isOpen={true} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			expect(
+				screen.getByText(/Enhances Group Chat with reusable team templates/)
+			).toBeInTheDocument();
 		});
 	});
 });
