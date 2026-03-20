@@ -197,6 +197,7 @@ export type ModalId =
 	| 'deleteGroupChat'
 	| 'renameGroupChat'
 	| 'editGroupChat'
+	| 'teamBuilderWizard'
 	| 'groupChatInfo'
 	// Git
 	| 'gitDiff'

@@ -59,6 +59,9 @@ export const MODAL_PRIORITIES = {
 	/** Delete group chat confirmation */
 	DELETE_GROUP_CHAT: 660,
 
+	/** Team Builder Wizard — AI-powered team composition */
+	TEAM_BUILDER_WIZARD: 655,
+
 	/** New group chat creation modal */
 	NEW_GROUP_CHAT: 650,
 
