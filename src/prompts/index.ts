@@ -48,4 +48,9 @@ export {
 
 	// Director's Notes
 	directorNotesPrompt,
+
+	// Team Builder Wizard
+	teamBuilderRoleAssignmentPrompt,
+	teamBuilderTopologyPrompt,
+	teamBuilderCompletionPrompt,
 } from '../generated/prompts';
