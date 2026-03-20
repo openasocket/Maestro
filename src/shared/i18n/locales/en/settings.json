@@ -1,0 +1,35 @@
+{
+	"encore": {
+		"teamOrchestration": {
+			"title": "Team Orchestration",
+			"badge_beta": "Beta",
+			"description": "Advanced multi-agent coordination with templates, workflow topologies, and structured routing",
+			"help": "Enhances Group Chat with reusable team templates, graph-based agent workflows, and visual orchestration controls",
+			"templates": {
+				"title": "Team Templates",
+				"description": "Save and reuse team configurations across group chats"
+			},
+			"workflowTopology": {
+				"title": "Workflow Topology",
+				"description": "Define agent dependency graphs instead of hub-spoke routing"
+			},
+			"visualization": {
+				"title": "Workflow Visualization",
+				"description": "Visual graph of agent workflow in the right panel"
+			},
+			"maxIterations": {
+				"title": "Max Iterations",
+				"description": "Maximum retry/revision loops before auto-terminating"
+			},
+			"terminationMode": {
+				"title": "Termination Mode",
+				"description": "How the system decides when a workflow is complete",
+				"options": {
+					"moderator-decides": "Moderator Decides",
+					"max-iterations": "Max Iterations",
+					"quality-gate": "Quality Gate"
+				}
+			}
+		}
+	}
+}
