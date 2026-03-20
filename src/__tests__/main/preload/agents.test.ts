@@ -91,7 +91,7 @@ describe('Agents Preload API', () => {
 
 			const result = await api.get('claude-code');
 
-			expect(mockInvoke).toHaveBeenCalledWith('agents:get', 'claude-code');
+			expect(mockInvoke).toHaveBeenCalledWith('agents:get', 'claude-code', undefined);
 			expect(result).toEqual(mockAgent);
 		});
 
