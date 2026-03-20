@@ -116,19 +116,24 @@ describe('team-template-storage', () => {
 	// listTemplates
 	// ===========================================================================
 	describe('listTemplates', () => {
-		it('returns empty array when no templates exist', async () => {
+		it('returns seeded builtins when no user templates exist', async () => {
 			const result = await listTemplates();
-			expect(result).toEqual([]);
+			// Only builtins should be present (4 built-in templates)
+			expect(result).toHaveLength(4);
+			expect(result.every((t) => t.category === 'builtin')).toBe(true);
 		});
 
-		it('returns saved templates', async () => {
+		it('returns saved templates alongside builtins', async () => {
 			const template = makeTemplate({ id: 'tmpl-1', name: 'Alpha' });
 			await saveTemplate(template);
 
 			const result = await listTemplates();
-			expect(result).toHaveLength(1);
-			expect(result[0].id).toBe('tmpl-1');
-			expect(result[0].name).toBe('Alpha');
+			// 4 builtins + 1 user template
+			expect(result).toHaveLength(5);
+			const userTemplates = result.filter((t) => t.category === 'user');
+			expect(userTemplates).toHaveLength(1);
+			expect(userTemplates[0].id).toBe('tmpl-1');
+			expect(userTemplates[0].name).toBe('Alpha');
 		});
 
 		it('sorts templates by category then name', async () => {
@@ -141,12 +146,21 @@ describe('team-template-storage', () => {
 			await saveTemplate(user2);
 
 			const result = await listTemplates();
-			expect(result).toHaveLength(3);
-			// builtin first
-			expect(result[0].id).toBe('b1');
-			// user alphabetical
-			expect(result[1].id).toBe('u2'); // Alpha
-			expect(result[2].id).toBe('u1'); // Beta
+			// 4 seeded builtins + 1 custom builtin + 2 user = 7
+			expect(result).toHaveLength(7);
+			// All builtins come first (sorted alphabetically)
+			const builtins = result.filter((t) => t.category === 'builtin');
+			const users = result.filter((t) => t.category === 'user');
+			expect(builtins).toHaveLength(5); // 4 seeded + b1
+			expect(users).toHaveLength(2);
+			// Verify user templates are sorted alphabetically
+			expect(users[0].id).toBe('u2'); // Alpha
+			expect(users[1].id).toBe('u1'); // Beta
+			// Verify builtins come before users in the full list
+			const firstUserIdx = result.findIndex((t) => t.category === 'user');
+			const lastBuiltinIdx =
+				result.length - 1 - [...result].reverse().findIndex((t) => t.category === 'builtin');
+			expect(lastBuiltinIdx).toBeLessThan(firstUserIdx);
 		});
 
 		it('skips .tmp files', async () => {
@@ -158,7 +172,8 @@ describe('team-template-storage', () => {
 			await fs.writeFile(path.join(dir, 'orphaned.json.tmp'), '{}', 'utf-8');
 
 			const result = await listTemplates();
-			expect(result).toHaveLength(1);
+			// 4 builtins + 1 user template (tmp file should be skipped)
+			expect(result).toHaveLength(5);
 		});
 
 		it('skips corrupted JSON files', async () => {
@@ -170,8 +185,11 @@ describe('team-template-storage', () => {
 			await fs.writeFile(path.join(dir, 'bad.json'), '{not valid json', 'utf-8');
 
 			const result = await listTemplates();
-			expect(result).toHaveLength(1);
-			expect(result[0].id).toBe('good');
+			// 4 builtins + 1 user template (corrupted file should be skipped)
+			expect(result).toHaveLength(5);
+			const userTemplates = result.filter((t) => t.category === 'user');
+			expect(userTemplates).toHaveLength(1);
+			expect(userTemplates[0].id).toBe('good');
 		});
 	});
 
@@ -367,9 +385,74 @@ describe('team-template-storage', () => {
 	// getBuiltinTemplates
 	// ===========================================================================
 	describe('getBuiltinTemplates', () => {
-		it('returns an array', () => {
+		it('returns an array of 4 built-in templates', () => {
 			const builtins = getBuiltinTemplates();
-			expect(Array.isArray(builtins)).toBe(true);
+			expect(builtins).toHaveLength(4);
+		});
+
+		it('all builtins have category "builtin"', () => {
+			const builtins = getBuiltinTemplates();
+			for (const t of builtins) {
+				expect(t.category).toBe('builtin');
+			}
+		});
+
+		it('all builtins have deterministic IDs starting with "builtin-"', () => {
+			const builtins = getBuiltinTemplates();
+			for (const t of builtins) {
+				expect(t.id).toMatch(/^builtin-/);
+			}
+		});
+
+		it('all builtins have at least one role', () => {
+			const builtins = getBuiltinTemplates();
+			for (const t of builtins) {
+				expect(t.roles.length).toBeGreaterThanOrEqual(1);
+			}
+		});
+
+		it('includes Code Review Team', () => {
+			const builtins = getBuiltinTemplates();
+			const cr = builtins.find((t) => t.id === 'builtin-code-review');
+			expect(cr).toBeDefined();
+			expect(cr!.name).toBe('Code Review Team');
+			expect(cr!.roles).toHaveLength(3);
+			expect(cr!.roles.map((r) => r.name)).toEqual(['Implementer', 'Code Reviewer', 'Test Writer']);
+		});
+
+		it('includes Research & Synthesis Team', () => {
+			const builtins = getBuiltinTemplates();
+			const rs = builtins.find((t) => t.id === 'builtin-research-synthesis');
+			expect(rs).toBeDefined();
+			expect(rs!.name).toBe('Research & Synthesis Team');
+			expect(rs!.roles).toHaveLength(3);
+			expect(rs!.roles.map((r) => r.name)).toEqual(['Researcher', 'Analyst', 'Synthesizer']);
+		});
+
+		it('includes Full Stack Development', () => {
+			const builtins = getBuiltinTemplates();
+			const fs = builtins.find((t) => t.id === 'builtin-full-stack');
+			expect(fs).toBeDefined();
+			expect(fs!.name).toBe('Full Stack Development');
+			expect(fs!.roles).toHaveLength(3);
+			expect(fs!.roles.map((r) => r.name)).toEqual([
+				'Frontend Developer',
+				'Backend Developer',
+				'DevOps Engineer',
+			]);
+		});
+
+		it('includes Architecture Review', () => {
+			const builtins = getBuiltinTemplates();
+			const ar = builtins.find((t) => t.id === 'builtin-architecture-review');
+			expect(ar).toBeDefined();
+			expect(ar!.name).toBe('Architecture Review');
+			expect(ar!.roles).toHaveLength(3);
+			expect(ar!.roles.map((r) => r.name)).toEqual([
+				'Architect',
+				'Security Reviewer',
+				'Performance Analyst',
+			]);
 		});
 	});
 
@@ -385,6 +468,35 @@ describe('team-template-storage', () => {
 				.then(() => true)
 				.catch(() => false);
 			expect(dirExists).toBe(true);
+		});
+
+		it('seeds builtin templates to disk on first list', async () => {
+			const result = await listTemplates();
+			const builtinIds = result.filter((t) => t.category === 'builtin').map((t) => t.id);
+			expect(builtinIds).toContain('builtin-code-review');
+			expect(builtinIds).toContain('builtin-research-synthesis');
+			expect(builtinIds).toContain('builtin-full-stack');
+			expect(builtinIds).toContain('builtin-architecture-review');
+		});
+
+		it('does not overwrite existing builtin templates on re-seed', async () => {
+			// Seed once
+			await listTemplates();
+
+			// Manually modify a seeded template on disk
+			const dir = getTeamTemplatesDir();
+			const filePath = path.join(dir, 'builtin-code-review.json');
+			const content = JSON.parse(await fs.readFile(filePath, 'utf-8'));
+			content.description = 'User-modified description';
+			await fs.writeFile(filePath, JSON.stringify(content), 'utf-8');
+
+			// Reset and re-seed
+			_resetSeededFlag();
+			await listTemplates();
+
+			// Should not have overwritten
+			const loaded = await getTemplate('builtin-code-review');
+			expect(loaded!.description).toBe('User-modified description');
 		});
 	});
 
@@ -414,7 +526,10 @@ describe('team-template-storage', () => {
 			await Promise.all(saves);
 
 			const all = await listTemplates();
-			expect(all).toHaveLength(5);
+			// 4 builtins + 5 user templates
+			expect(all).toHaveLength(9);
+			const userTemplates = all.filter((t) => t.category === 'user');
+			expect(userTemplates).toHaveLength(5);
 		});
 	});
 });

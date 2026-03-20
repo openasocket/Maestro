@@ -103,10 +103,133 @@ let builtinSeeded = false;
 /**
  * Returns the array of built-in team templates.
  * These are read-only starter templates shipped with Maestro.
- * Content will be populated by TEAM-ORCH-02 task 3.
+ * Built-in templates have deterministic IDs and are read-only — users can
+ * duplicate them to customize.
  */
 export function getBuiltinTemplates(): TeamTemplate[] {
-	return [];
+	const now = Date.now();
+	return [
+		{
+			id: 'builtin-code-review',
+			name: 'Code Review Team',
+			description:
+				'Collaborative code review with implementation, review, and testing perspectives.',
+			icon: 'GitPullRequest',
+			category: 'builtin',
+			createdAt: now,
+			updatedAt: now,
+			moderatorAgentId: 'claude-code',
+			roles: [
+				{
+					name: 'Implementer',
+					agentId: 'claude-code',
+					description:
+						'Writes and refactors code based on review feedback. Focuses on clean implementation.',
+				},
+				{
+					name: 'Code Reviewer',
+					agentId: 'claude-code',
+					description:
+						'Reviews code for correctness, style, and maintainability. Identifies bugs and suggests improvements.',
+				},
+				{
+					name: 'Test Writer',
+					agentId: 'claude-code',
+					description:
+						'Writes unit and integration tests to verify code changes. Ensures adequate coverage.',
+				},
+			],
+		},
+		{
+			id: 'builtin-research-synthesis',
+			name: 'Research & Synthesis Team',
+			description: 'Multi-perspective research with analysis and synthesis into a final report.',
+			icon: 'BookOpen',
+			category: 'builtin',
+			createdAt: now,
+			updatedAt: now,
+			moderatorAgentId: 'claude-code',
+			roles: [
+				{
+					name: 'Researcher',
+					agentId: 'claude-code',
+					description: 'Gathers information, explores codebases, and surfaces relevant findings.',
+				},
+				{
+					name: 'Analyst',
+					agentId: 'claude-code',
+					description:
+						'Evaluates findings for patterns, risks, and trade-offs. Provides structured analysis.',
+				},
+				{
+					name: 'Synthesizer',
+					agentId: 'claude-code',
+					description:
+						'Combines research and analysis into a coherent final report with actionable recommendations.',
+				},
+			],
+		},
+		{
+			id: 'builtin-full-stack',
+			name: 'Full Stack Development',
+			description: 'Cross-functional development team for full-stack feature work.',
+			icon: 'Layers',
+			category: 'builtin',
+			createdAt: now,
+			updatedAt: now,
+			moderatorAgentId: 'claude-code',
+			roles: [
+				{
+					name: 'Frontend Developer',
+					agentId: 'claude-code',
+					description:
+						'Builds UI components, handles client-side logic, and ensures responsive design.',
+				},
+				{
+					name: 'Backend Developer',
+					agentId: 'claude-code',
+					description:
+						'Implements APIs, business logic, and data layer. Focuses on performance and correctness.',
+				},
+				{
+					name: 'DevOps Engineer',
+					agentId: 'claude-code',
+					description:
+						'Handles deployment configuration, CI/CD pipelines, and infrastructure concerns.',
+				},
+			],
+		},
+		{
+			id: 'builtin-architecture-review',
+			name: 'Architecture Review',
+			description: 'Technical architecture review from multiple engineering perspectives.',
+			icon: 'Building',
+			category: 'builtin',
+			createdAt: now,
+			updatedAt: now,
+			moderatorAgentId: 'claude-code',
+			roles: [
+				{
+					name: 'Architect',
+					agentId: 'claude-code',
+					description:
+						'Evaluates system design, component boundaries, and scalability. Proposes structural improvements.',
+				},
+				{
+					name: 'Security Reviewer',
+					agentId: 'claude-code',
+					description:
+						'Audits for security vulnerabilities, access control gaps, and data protection concerns.',
+				},
+				{
+					name: 'Performance Analyst',
+					agentId: 'claude-code',
+					description:
+						'Identifies performance bottlenecks, memory issues, and optimization opportunities.',
+				},
+			],
+		},
+	];
 }
 
 /**
