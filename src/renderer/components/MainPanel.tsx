@@ -23,6 +23,7 @@ import {
 	GitPullRequest,
 	Settings2,
 	Server,
+	Bookmark,
 } from 'lucide-react';
 import { LogViewer } from './LogViewer';
 import { TerminalOutput } from './TerminalOutput';
@@ -962,6 +963,14 @@ export const MainPanel = React.memo(
 									<div className="flex items-center gap-2 text-sm font-medium min-w-0 overflow-hidden">
 										{/* Session name - hidden at narrow widths via CSS container query */}
 										<span className="header-session-name truncate">{activeSession.name}</span>
+										{activeSession.bookmarked && (
+											<Bookmark
+												className="w-3.5 h-3.5 shrink-0"
+												style={{ color: theme.colors.accent }}
+												fill={theme.colors.accent}
+												data-testid="bookmark-icon"
+											/>
+										)}
 										<div
 											className="relative shrink-0"
 											onMouseEnter={

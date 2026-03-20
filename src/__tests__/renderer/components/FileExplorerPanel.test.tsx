@@ -66,6 +66,11 @@ vi.mock('lucide-react', () => ({
 			🔗
 		</span>
 	),
+	FolderOpen: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
+		<span data-testid="folder-open-icon" className={className} style={style}>
+			📂
+		</span>
+	),
 	FileText: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
 		<span data-testid="filetext-icon" className={className} style={style}>
 			📄
