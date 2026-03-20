@@ -546,6 +546,14 @@ const mockMaestro = {
 		cancelQuit: vi.fn(),
 		onSystemResume: vi.fn().mockReturnValue(() => {}),
 	},
+	teamTemplates: {
+		list: vi.fn().mockResolvedValue([]),
+		get: vi.fn().mockResolvedValue(null),
+		save: vi.fn().mockResolvedValue(undefined),
+		delete: vi.fn().mockResolvedValue(undefined),
+		duplicate: vi.fn().mockResolvedValue({}),
+		createFromChat: vi.fn().mockResolvedValue({}),
+	},
 	wakatime: {
 		checkCli: vi.fn().mockResolvedValue({ available: false }),
 		validateApiKey: vi.fn().mockResolvedValue({ valid: false }),

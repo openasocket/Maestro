@@ -2919,6 +2919,23 @@ interface MaestroAPI {
 		) => () => void;
 	};
 
+	// Team Templates API (template CRUD for group chat presets)
+	teamTemplates: {
+		list: () => Promise<import('../shared/group-chat-types').TeamTemplate[]>;
+		get: (id: string) => Promise<import('../shared/group-chat-types').TeamTemplate | null>;
+		save: (template: import('../shared/group-chat-types').TeamTemplate) => Promise<void>;
+		delete: (id: string) => Promise<void>;
+		duplicate: (
+			id: string,
+			newName: string
+		) => Promise<import('../shared/group-chat-types').TeamTemplate>;
+		createFromChat: (
+			chatId: string,
+			name?: string,
+			description?: string
+		) => Promise<import('../shared/group-chat-types').TeamTemplate>;
+	};
+
 	// WakaTime API (CLI check, API key validation)
 	wakatime: {
 		checkCli: () => Promise<{ available: boolean; version?: string }>;

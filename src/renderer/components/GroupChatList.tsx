@@ -14,10 +14,13 @@ import {
 	Settings,
 	Archive,
 	ArchiveRestore,
+	BookTemplate,
 } from 'lucide-react';
 import type { Theme, GroupChat, GroupChatState } from '../types';
 import { useClickOutside, useContextMenuPosition } from '../hooks';
 import { getStatusColor } from '../utils/theme';
+import { useSettingsStore } from '../stores/settingsStore';
+import { SaveAsTemplateModal } from './SaveAsTemplateModal';
 
 // ============================================================================
 // GroupChatContextMenu - Right-click context menu for group chat items
@@ -31,6 +34,7 @@ interface GroupChatContextMenuProps {
 	onEdit: () => void;
 	onRename: () => void;
 	onArchive?: () => void;
+	onSaveAsTemplate?: () => void;
 	onDelete: () => void;
 	onClose: () => void;
 }
@@ -43,6 +47,7 @@ function GroupChatContextMenu({
 	onEdit,
 	onRename,
 	onArchive,
+	onSaveAsTemplate,
 	onDelete,
 	onClose,
 }: GroupChatContextMenuProps) {
@@ -115,6 +120,19 @@ function GroupChatContextMenu({
 						<Archive className="w-3.5 h-3.5" />
 					)}
 					{isArchived ? 'Unarchive' : 'Archive'}
+				</button>
+			)}
+			{onSaveAsTemplate && (
+				<button
+					onClick={() => {
+						onSaveAsTemplate();
+						onClose();
+					}}
+					className="w-full text-left px-3 py-1.5 text-xs hover:bg-white/5 transition-colors flex items-center gap-2"
+					style={{ color: theme.colors.textMain }}
+				>
+					<BookTemplate className="w-3.5 h-3.5" />
+					Save as Template
 				</button>
 			)}
 			<button
@@ -201,6 +219,18 @@ export function GroupChatList({
 		y: number;
 		chatId: string;
 	} | null>(null);
+
+	// Save as Template modal state
+	const [saveAsTemplateChat, setSaveAsTemplateChat] = useState<{
+		chatId: string;
+		chatName: string;
+	} | null>(null);
+
+	// Read feature flags for Team Templates
+	const encoreFeatures = useSettingsStore((s) => s.encoreFeatures);
+	const teamOrchestrationSettings = useSettingsStore((s) => s.teamOrchestrationSettings);
+	const templatesEnabled =
+		encoreFeatures.teamOrchestration && teamOrchestrationSettings.enableTemplates;
 
 	// Track previous count to detect when chats are added
 	const prevCountRef = useRef(groupChats.length);
@@ -407,8 +437,32 @@ export function GroupChatList({
 								}
 							: undefined
 					}
+					onSaveAsTemplate={
+						templatesEnabled
+							? () => {
+									const chat = groupChats.find((c) => c.id === contextMenu.chatId);
+									if (chat) {
+										setSaveAsTemplateChat({
+											chatId: chat.id,
+											chatName: chat.name,
+										});
+									}
+								}
+							: undefined
+					}
 					onDelete={() => onDeleteGroupChat(contextMenu.chatId)}
 					onClose={() => setContextMenu(null)}
+				/>
+			)}
+
+			{/* Save as Template Modal */}
+			{saveAsTemplateChat && (
+				<SaveAsTemplateModal
+					theme={theme}
+					isOpen={true}
+					chatId={saveAsTemplateChat.chatId}
+					chatName={saveAsTemplateChat.chatName}
+					onClose={() => setSaveAsTemplateChat(null)}
 				/>
 			)}
 		</div>

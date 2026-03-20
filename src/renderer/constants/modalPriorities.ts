@@ -65,6 +65,9 @@ export const MODAL_PRIORITIES = {
 	/** Edit group chat modal */
 	EDIT_GROUP_CHAT: 645,
 
+	/** Save group chat as team template modal */
+	SAVE_AS_TEMPLATE: 643,
+
 	/** Rename group chat modal */
 	RENAME_GROUP_CHAT: 640,
 
