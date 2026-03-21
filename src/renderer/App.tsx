@@ -3447,6 +3447,7 @@ function MaestroConsoleInner() {
 									}}
 									participantColors={groupChatParticipantColors}
 									messagesRef={groupChatMessagesRef}
+									onShowWorkflow={() => handleGroupChatRightTabChange('workflow')}
 								/>
 							</div>
 							<GroupChatRightPanel

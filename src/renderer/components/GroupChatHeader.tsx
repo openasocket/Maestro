@@ -7,7 +7,14 @@
 
 import { Info, Edit2, Columns, DollarSign } from 'lucide-react';
 import type { Theme, Shortcut } from '../types';
+import type {
+	WorkflowTopology,
+	WorkflowExecutionState,
+	GroupChatParticipant,
+} from '../../shared/group-chat-types';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
+import { useSettingsStore } from '../stores/settingsStore';
+import { WorkflowGraph } from './GroupChat/WorkflowGraph';
 
 interface GroupChatHeaderProps {
 	theme: Theme;
@@ -22,6 +29,14 @@ interface GroupChatHeaderProps {
 	rightPanelOpen: boolean;
 	onToggleRightPanel: () => void;
 	shortcuts: Record<string, Shortcut>;
+	/** Workflow topology for compact minimap preview */
+	topology?: WorkflowTopology;
+	/** Current execution state for status coloring */
+	executionState?: WorkflowExecutionState;
+	/** Participants for color mapping in the minimap */
+	participants?: GroupChatParticipant[];
+	/** Called when user clicks the compact workflow graph to open the Workflow tab */
+	onShowWorkflow?: () => void;
 }
 
 export function GroupChatHeader({
@@ -35,7 +50,18 @@ export function GroupChatHeader({
 	rightPanelOpen,
 	onToggleRightPanel,
 	shortcuts,
+	topology,
+	executionState,
+	participants,
+	onShowWorkflow,
 }: GroupChatHeaderProps): JSX.Element {
+	const encoreFeatures = useSettingsStore((s) => s.encoreFeatures);
+	const teamOrchestrationSettings = useSettingsStore((s) => s.teamOrchestrationSettings);
+	const showMinimap =
+		encoreFeatures.teamOrchestration &&
+		teamOrchestrationSettings.enableVisualization &&
+		!!topology &&
+		!!participants?.length;
 	return (
 		<div
 			className="flex items-center justify-between px-6 h-16 border-b shrink-0"
@@ -81,6 +107,29 @@ export function GroupChatHeader({
 				>
 					{participantCount} participant{participantCount !== 1 ? 's' : ''}
 				</span>
+				{/* Compact workflow minimap — clickable to open Workflow tab */}
+				{showMinimap && topology && participants && (
+					<button
+						onClick={() => {
+							if (!rightPanelOpen) onToggleRightPanel();
+							onShowWorkflow?.();
+						}}
+						className="flex items-center px-1.5 py-0.5 rounded hover:opacity-80"
+						style={{
+							backgroundColor: `${theme.colors.accent}15`,
+							maxWidth: 100,
+						}}
+						title="Show workflow"
+					>
+						<WorkflowGraph
+							topology={topology}
+							executionState={executionState}
+							participants={participants}
+							theme={theme}
+							compact
+						/>
+					</button>
+				)}
 				{/* Total cost pill - only show when there's a cost */}
 				{totalCost !== undefined && totalCost > 0 && (
 					<span

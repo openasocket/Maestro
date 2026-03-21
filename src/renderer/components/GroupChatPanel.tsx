@@ -70,6 +70,8 @@ interface GroupChatPanelProps {
 	participantColors?: Record<string, string>;
 	/** Ref to expose scrollToMessage on the messages component */
 	messagesRef?: React.RefObject<GroupChatMessagesHandle>;
+	/** Called when user clicks compact workflow minimap to open Workflow tab */
+	onShowWorkflow?: () => void;
 }
 
 export function GroupChatPanel({
@@ -108,6 +110,7 @@ export function GroupChatPanel({
 	showFlashNotification,
 	participantColors,
 	messagesRef,
+	onShowWorkflow,
 }: GroupChatPanelProps): JSX.Element {
 	return (
 		<div className="flex flex-col h-full" style={{ backgroundColor: theme.colors.bgMain }}>
@@ -122,6 +125,10 @@ export function GroupChatPanel({
 				rightPanelOpen={rightPanelOpen}
 				onToggleRightPanel={onToggleRightPanel}
 				shortcuts={shortcuts}
+				topology={groupChat.topology}
+				executionState={groupChat.executionState}
+				participants={groupChat.participants}
+				onShowWorkflow={onShowWorkflow}
 			/>
 
 			<GroupChatMessages
