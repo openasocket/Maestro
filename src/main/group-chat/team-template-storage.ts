@@ -139,6 +139,30 @@ export function getBuiltinTemplates(): TeamTemplate[] {
 						'Writes unit and integration tests to verify code changes. Ensures adequate coverage.',
 				},
 			],
+			topology: {
+				pattern: 'review-loop',
+				entryPoint: 'Implementer',
+				exitPoint: 'Test Writer',
+				edges: [
+					{
+						source: 'Implementer',
+						target: 'Code Reviewer',
+						edgeType: 'sequential',
+					},
+					{
+						source: 'Code Reviewer',
+						target: 'Test Writer',
+						condition: 'Code is approved and ready for testing',
+						edgeType: 'conditional',
+					},
+					{
+						source: 'Code Reviewer',
+						target: 'Implementer',
+						condition: 'Code needs changes or has issues to address',
+						edgeType: 'conditional',
+					},
+				],
+			},
 		},
 		{
 			id: 'builtin-research-synthesis',
@@ -168,6 +192,23 @@ export function getBuiltinTemplates(): TeamTemplate[] {
 						'Combines research and analysis into a coherent final report with actionable recommendations.',
 				},
 			],
+			topology: {
+				pattern: 'pipeline',
+				entryPoint: 'Researcher',
+				exitPoint: 'Synthesizer',
+				edges: [
+					{
+						source: 'Researcher',
+						target: 'Analyst',
+						edgeType: 'sequential',
+					},
+					{
+						source: 'Analyst',
+						target: 'Synthesizer',
+						edgeType: 'sequential',
+					},
+				],
+			},
 		},
 		{
 			id: 'builtin-full-stack',
