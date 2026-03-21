@@ -28,6 +28,13 @@ import type {
 	CorruptionRecoveryResult,
 	MigrationRecord,
 } from './types';
+import type {
+	TeamOrchEvent,
+	TeamOrchAggregation,
+	TeamOrchHistoryQuery,
+	TeamOrchHistoryResult,
+	TeamOrchTimeRange,
+} from '../../shared/team-orch-stats-types';
 import { LOG_CONTEXT } from './utils';
 import { CREATE_META_TABLE_SQL } from './schema';
 import {
@@ -54,6 +61,15 @@ import {
 } from './session-lifecycle';
 import { getAggregatedStats } from './aggregations';
 import { clearOldData, exportToCsv } from './data-management';
+import {
+	insertTeamOrchEvent,
+	getTeamOrchAggregation,
+	getTeamOrchHistory,
+	getTeamOrchEventDetail,
+	exportTeamOrchEvents,
+	getTeamOrchTimeRangeStart,
+	clearTeamOrchEventCache,
+} from './team-orch-events';
 
 /**
  * StatsDB manages the SQLite database for usage statistics.
@@ -151,6 +167,7 @@ export class StatsDB {
 			clearQueryEventCache();
 			clearAutoRunCache();
 			clearSessionLifecycleCache();
+			clearTeamOrchEventCache();
 
 			logger.info('Stats database closed', LOG_CONTEXT);
 		}
@@ -763,6 +780,32 @@ export class StatsDB {
 
 	getAggregatedStats(range: StatsTimeRange): StatsAggregation {
 		return getAggregatedStats(this.database, range);
+	}
+
+	// ============================================================================
+	// Team Orchestration Events (delegated)
+	// ============================================================================
+
+	insertTeamOrchEvent(event: TeamOrchEvent): void {
+		return insertTeamOrchEvent(this.database, event);
+	}
+
+	getTeamOrchAggregation(range: TeamOrchTimeRange): TeamOrchAggregation {
+		const startTime = getTeamOrchTimeRangeStart(range);
+		return getTeamOrchAggregation(this.database, startTime);
+	}
+
+	getTeamOrchHistory(query: TeamOrchHistoryQuery): TeamOrchHistoryResult {
+		return getTeamOrchHistory(this.database, query);
+	}
+
+	getTeamOrchEventDetail(id: string): TeamOrchEvent | null {
+		return getTeamOrchEventDetail(this.database, id);
+	}
+
+	exportTeamOrchEvents(range: TeamOrchTimeRange): TeamOrchEvent[] {
+		const startTime = getTeamOrchTimeRangeStart(range);
+		return exportTeamOrchEvents(this.database, startTime);
 	}
 
 	// ============================================================================

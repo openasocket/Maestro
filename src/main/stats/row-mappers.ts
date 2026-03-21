@@ -11,6 +11,7 @@ import type {
 	AutoRunTask,
 	SessionLifecycleEvent,
 } from '../../shared/stats-types';
+import type { TeamOrchEvent, TeamOrchParticipantStats } from '../../shared/team-orch-stats-types';
 import type { MigrationRecord } from './types';
 
 // ============================================================================
@@ -62,6 +63,28 @@ export interface SessionLifecycleRow {
 	closed_at: number | null;
 	duration: number | null;
 	is_remote: number | null;
+}
+
+export interface TeamOrchEventRow {
+	id: string;
+	group_chat_id: string;
+	group_chat_name: string;
+	template_id: string | null;
+	template_name: string | null;
+	topology_pattern: string;
+	termination_mode: string;
+	status: 'completed' | 'failed' | 'terminated';
+	iteration_count: number;
+	max_iterations: number;
+	start_time: number;
+	end_time: number;
+	duration: number;
+	participant_count: number;
+	participant_breakdown: string | null;
+	total_tokens: number;
+	total_cost: number;
+	moderator_agent_id: string;
+	project_path: string | null;
 }
 
 export interface MigrationRecordRow {
@@ -128,6 +151,38 @@ export function mapSessionLifecycleRow(row: SessionLifecycleRow): SessionLifecyc
 		closedAt: row.closed_at ?? undefined,
 		duration: row.duration ?? undefined,
 		isRemote: row.is_remote !== null ? row.is_remote === 1 : undefined,
+	};
+}
+
+export function mapTeamOrchEventRow(row: TeamOrchEventRow): TeamOrchEvent {
+	let participantBreakdown: TeamOrchParticipantStats[] = [];
+	if (row.participant_breakdown) {
+		try {
+			participantBreakdown = JSON.parse(row.participant_breakdown) as TeamOrchParticipantStats[];
+		} catch {
+			participantBreakdown = [];
+		}
+	}
+	return {
+		id: row.id,
+		groupChatId: row.group_chat_id,
+		groupChatName: row.group_chat_name,
+		templateId: row.template_id ?? undefined,
+		templateName: row.template_name ?? undefined,
+		topologyPattern: row.topology_pattern,
+		terminationMode: row.termination_mode,
+		status: row.status,
+		iterationCount: row.iteration_count,
+		maxIterations: row.max_iterations,
+		startTime: row.start_time,
+		endTime: row.end_time,
+		duration: row.duration,
+		participantCount: row.participant_count,
+		participantBreakdown,
+		totalTokens: row.total_tokens,
+		totalCost: row.total_cost,
+		moderatorAgentId: row.moderator_agent_id,
+		projectPath: row.project_path ?? undefined,
 	};
 }
 
