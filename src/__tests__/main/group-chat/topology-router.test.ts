@@ -27,6 +27,7 @@ import {
 	isWorkflowComplete,
 	updateExecutionState,
 	finalizeWorkflow,
+	markNodeFailed,
 	buildConditionEvalPrompt,
 	validateTopology,
 	describeTopology,
@@ -683,6 +684,93 @@ describe('finalizeWorkflow', () => {
 		const finalized = finalizeWorkflow(state, 'completed');
 		expect(finalized.completedNodes).toEqual(['Researcher', 'Writer']);
 		expect(finalized.nodeOutputs).toEqual({ Researcher: 'Data', Writer: 'Draft' });
+	});
+});
+
+// ============================================================================
+// markNodeFailed
+// ============================================================================
+
+describe('markNodeFailed', () => {
+	it('removes the failed node from activeNodes', () => {
+		const state: WorkflowExecutionState = {
+			...createBaseExecutionState(),
+			activeNodes: ['Writer', 'Editor'],
+			pendingNodes: [],
+		};
+
+		const updated = markNodeFailed(state, 'Writer', 'Spawn timeout');
+		expect(updated.activeNodes).toEqual(['Editor']);
+		expect(updated.activeNodes).not.toContain('Writer');
+	});
+
+	it('removes the failed node from pendingNodes', () => {
+		const state: WorkflowExecutionState = {
+			...createBaseExecutionState(),
+			activeNodes: ['Researcher'],
+			pendingNodes: ['Writer', 'Editor'],
+		};
+
+		const updated = markNodeFailed(state, 'Writer', 'Connection refused');
+		expect(updated.pendingNodes).toEqual(['Editor']);
+		expect(updated.pendingNodes).not.toContain('Writer');
+	});
+
+	it('sets status to failed', () => {
+		const state: WorkflowExecutionState = {
+			...createBaseExecutionState(),
+			activeNodes: ['Writer'],
+		};
+
+		const updated = markNodeFailed(state, 'Writer', 'Process crashed');
+		expect(updated.status).toBe('failed');
+	});
+
+	it('sets currentPhase to the failed node', () => {
+		const state: WorkflowExecutionState = {
+			...createBaseExecutionState(),
+			currentPhase: 'Researcher',
+			activeNodes: ['Writer'],
+		};
+
+		const updated = markNodeFailed(state, 'Writer', 'Error');
+		expect(updated.currentPhase).toBe('Writer');
+	});
+
+	it('stores error message in nodeOutputs with [FAILED] prefix', () => {
+		const state: WorkflowExecutionState = {
+			...createBaseExecutionState(),
+			activeNodes: ['Writer'],
+			nodeOutputs: { Researcher: 'Research data' },
+		};
+
+		const updated = markNodeFailed(state, 'Writer', 'Spawn timeout');
+		expect(updated.nodeOutputs['Writer']).toBe('[FAILED] Spawn timeout');
+		expect(updated.nodeOutputs['Researcher']).toBe('Research data');
+	});
+
+	it('does not mutate original state', () => {
+		const state: WorkflowExecutionState = {
+			...createBaseExecutionState(),
+			activeNodes: ['Writer'],
+			pendingNodes: ['Editor'],
+		};
+
+		const updated = markNodeFailed(state, 'Writer', 'Error');
+		expect(state.activeNodes).toEqual(['Writer']);
+		expect(state.status).toBe('running');
+		expect(updated).not.toBe(state);
+	});
+
+	it('preserves existing completed nodes', () => {
+		const state: WorkflowExecutionState = {
+			...createBaseExecutionState(),
+			activeNodes: ['Writer'],
+			completedNodes: ['Researcher'],
+		};
+
+		const updated = markNodeFailed(state, 'Writer', 'Error');
+		expect(updated.completedNodes).toEqual(['Researcher']);
 	});
 });
 

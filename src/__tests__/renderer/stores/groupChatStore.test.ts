@@ -522,6 +522,140 @@ describe('groupChatStore', () => {
 	});
 
 	// ==========================================================================
+	// Execution state derivation
+	// ==========================================================================
+
+	describe('execution state derivation', () => {
+		it('retrieves execution state from active group chat', () => {
+			const executionState = {
+				currentPhase: 'Writer',
+				completedNodes: ['Researcher'],
+				pendingNodes: ['Editor'],
+				activeNodes: ['Writer'],
+				iterationCount: 0,
+				nodeOutputs: { Researcher: 'Research done' },
+				status: 'running' as const,
+			};
+
+			const chat = createMockGroupChat({ id: 'gc-1', executionState } as any);
+			useGroupChatStore.getState().setGroupChats([chat]);
+			useGroupChatStore.getState().setActiveGroupChatId('gc-1');
+
+			const state = useGroupChatStore.getState();
+			const activeChat = state.groupChats.find((c) => c.id === state.activeGroupChatId);
+			expect(activeChat?.executionState).toBeDefined();
+			expect(activeChat?.executionState?.currentPhase).toBe('Writer');
+			expect(activeChat?.executionState?.completedNodes).toEqual(['Researcher']);
+			expect(activeChat?.executionState?.activeNodes).toEqual(['Writer']);
+		});
+
+		it('returns undefined execution state when no active chat', () => {
+			const state = useGroupChatStore.getState();
+			const activeChat = state.groupChats.find((c) => c.id === state.activeGroupChatId);
+			expect(activeChat?.executionState).toBeUndefined();
+		});
+
+		it('returns undefined execution state when active chat has no topology workflow', () => {
+			const chat = createMockGroupChat({ id: 'gc-1' });
+			useGroupChatStore.getState().setGroupChats([chat]);
+			useGroupChatStore.getState().setActiveGroupChatId('gc-1');
+
+			const state = useGroupChatStore.getState();
+			const activeChat = state.groupChats.find((c) => c.id === state.activeGroupChatId);
+			expect(activeChat?.executionState).toBeUndefined();
+		});
+
+		it('updates execution state via setGroupChats functional updater', () => {
+			const chat = createMockGroupChat({ id: 'gc-1' });
+			useGroupChatStore.getState().setGroupChats([chat]);
+			useGroupChatStore.getState().setActiveGroupChatId('gc-1');
+
+			const executionState = {
+				currentPhase: 'Researcher',
+				completedNodes: [],
+				pendingNodes: ['Writer', 'Editor'],
+				activeNodes: ['Researcher'],
+				iterationCount: 0,
+				nodeOutputs: {},
+				status: 'running' as const,
+			};
+
+			// Simulate how the IPC listener updates execution state
+			useGroupChatStore
+				.getState()
+				.setGroupChats((prev) => prev.map((c) => (c.id === 'gc-1' ? { ...c, executionState } : c)));
+
+			const state = useGroupChatStore.getState();
+			const activeChat = state.groupChats.find((c) => c.id === 'gc-1');
+			expect(activeChat?.executionState?.status).toBe('running');
+			expect(activeChat?.executionState?.activeNodes).toEqual(['Researcher']);
+		});
+
+		it('tracks execution state transitions through the store', () => {
+			const chat = createMockGroupChat({ id: 'gc-1' });
+			useGroupChatStore.getState().setGroupChats([chat]);
+			useGroupChatStore.getState().setActiveGroupChatId('gc-1');
+
+			// Simulate initial state
+			const initialState = {
+				currentPhase: 'Researcher',
+				completedNodes: [] as string[],
+				pendingNodes: ['Writer'],
+				activeNodes: ['Researcher'],
+				iterationCount: 0,
+				nodeOutputs: {} as Record<string, string>,
+				status: 'running' as const,
+			};
+			useGroupChatStore
+				.getState()
+				.setGroupChats((prev) =>
+					prev.map((c) => (c.id === 'gc-1' ? { ...c, executionState: initialState } : c))
+				);
+
+			// Simulate node completion
+			const updatedState = {
+				...initialState,
+				currentPhase: 'Writer',
+				completedNodes: ['Researcher'],
+				pendingNodes: [],
+				activeNodes: ['Writer'],
+				nodeOutputs: { Researcher: 'Done' },
+			};
+			useGroupChatStore
+				.getState()
+				.setGroupChats((prev) =>
+					prev.map((c) => (c.id === 'gc-1' ? { ...c, executionState: updatedState } : c))
+				);
+
+			const state = useGroupChatStore.getState();
+			const activeChat = state.groupChats.find((c) => c.id === 'gc-1');
+			expect(activeChat?.executionState?.completedNodes).toContain('Researcher');
+			expect(activeChat?.executionState?.activeNodes).toEqual(['Writer']);
+		});
+
+		it('handles failed execution state', () => {
+			const executionState = {
+				currentPhase: 'Writer',
+				completedNodes: ['Researcher'],
+				pendingNodes: ['Editor'],
+				activeNodes: [],
+				iterationCount: 0,
+				nodeOutputs: { Researcher: 'Done', Writer: '[FAILED] Spawn timeout' },
+				status: 'failed' as const,
+			};
+
+			const chat = createMockGroupChat({ id: 'gc-1', executionState } as any);
+			useGroupChatStore.getState().setGroupChats([chat]);
+			useGroupChatStore.getState().setActiveGroupChatId('gc-1');
+
+			const state = useGroupChatStore.getState();
+			const activeChat = state.groupChats.find((c) => c.id === state.activeGroupChatId);
+			expect(activeChat?.executionState?.status).toBe('failed');
+			expect(activeChat?.executionState?.nodeOutputs['Writer']).toContain('[FAILED]');
+		});
+	});
+
+	// ==========================================================================
 	// Store reset
 	// ==========================================================================
 

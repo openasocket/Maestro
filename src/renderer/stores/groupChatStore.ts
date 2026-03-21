@@ -13,8 +13,10 @@
  */
 
 import { create } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 import type { GroupChat, GroupChatMessage, GroupChatState, AgentError } from '../types';
 import type { QueuedItem } from '../types';
+import type { WorkflowExecutionState } from '../../shared/group-chat-types';
 
 // ============================================================================
 // Types
@@ -228,4 +230,25 @@ export function getGroupChatActions() {
 		clearGroupChatError: state.clearGroupChatError,
 		resetGroupChatState: state.resetGroupChatState,
 	};
+}
+
+// ============================================================================
+// Selectors
+// ============================================================================
+
+/**
+ * Subscribe to the active group chat's execution state.
+ * Re-renders only when the execution state object changes, not on
+ * unrelated group chat store updates.
+ *
+ * Use in components that display workflow progress (WorkflowGraph,
+ * IterationControls) to avoid prop drilling through the component tree.
+ */
+export function useActiveExecutionState(): WorkflowExecutionState | undefined {
+	return useGroupChatStore(
+		useShallow((s) => {
+			if (!s.activeGroupChatId) return undefined;
+			return s.groupChats.find((c) => c.id === s.activeGroupChatId)?.executionState;
+		})
+	);
 }

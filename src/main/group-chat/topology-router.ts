@@ -398,6 +398,33 @@ export function finalizeWorkflow(
 	};
 }
 
+/**
+ * Mark a specific node as failed in the execution state.
+ * Removes the node from active/pending lists and records the error.
+ *
+ * @param executionState - Current state (will not be mutated)
+ * @param failedNode - The node that failed
+ * @param error - Error message describing the failure
+ * @returns Updated execution state with the node marked as failed
+ */
+export function markNodeFailed(
+	executionState: WorkflowExecutionState,
+	failedNode: string,
+	error: string
+): WorkflowExecutionState {
+	return {
+		...executionState,
+		currentPhase: failedNode,
+		activeNodes: executionState.activeNodes.filter((n) => n !== failedNode),
+		pendingNodes: executionState.pendingNodes.filter((n) => n !== failedNode),
+		nodeOutputs: {
+			...executionState.nodeOutputs,
+			[failedNode]: `[FAILED] ${error}`,
+		},
+		status: 'failed',
+	};
+}
+
 // ============================================================================
 // CONDITION EVALUATION PROMPT
 // ============================================================================

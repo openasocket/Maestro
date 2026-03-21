@@ -33,6 +33,7 @@ import {
 	isWorkflowComplete,
 	updateExecutionState,
 	finalizeWorkflow,
+	markNodeFailed,
 	describeTopology,
 } from './topology-router';
 import {
@@ -1262,6 +1263,9 @@ async function routeViaTopology(
 		// Update execution state
 		updatedState = updateExecutionState(updatedState, completedNode, nodeOutput, nextNodes, isLoop);
 
+		// Emit per-node state transition for real-time UI updates
+		groupChatEmitters.emitExecutionStateChanged?.(groupChatId, updatedState);
+
 		for (const n of nextNodes) {
 			allNextNodes.add(n);
 		}
@@ -1359,6 +1363,12 @@ async function routeViaTopology(
 					nodeName,
 					groupChatId,
 				});
+
+				// Mark the failed node in execution state and emit
+				const errorMsg = error instanceof Error ? error.message : String(error);
+				updatedState = markNodeFailed(updatedState, nodeName, errorMsg);
+				await updateGroupChat(groupChatId, { executionState: updatedState });
+				groupChatEmitters.emitExecutionStateChanged?.(groupChatId, updatedState);
 			}
 		}
 
