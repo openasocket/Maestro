@@ -132,10 +132,10 @@
 			}
 		},
 		"executionLog": {
-			"completed": "{{name}}: completed",
+			"completed": "{{name}}: completed ({{time}}, {{tokens}} tokens)",
 			"working": "{{name}}: working...",
 			"pending": "{{name}}: pending",
-			"failed": "{{name}}: failed"
+			"failed": "{{name}}: failed — {{error}}"
 		},
 		"noExecution": "Send a message to start the workflow.",
 		"workflowCompleted": "Workflow completed",
