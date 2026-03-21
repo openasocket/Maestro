@@ -215,6 +215,8 @@ export interface GroupChat {
 	topology?: WorkflowTopology;
 	/** Runtime execution state for topology-based workflows */
 	executionState?: WorkflowExecutionState;
+	/** Template role definitions (preserved for contract-based routing) */
+	templateRoles?: TeamTemplateRole[];
 }
 
 /**

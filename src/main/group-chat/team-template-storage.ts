@@ -125,18 +125,24 @@ export function getBuiltinTemplates(): TeamTemplate[] {
 					agentId: 'claude-code',
 					description:
 						'Writes and refactors code based on review feedback. Focuses on clean implementation.',
+					inputContract: ['Task description', 'Review feedback (if revision)'],
+					outputContract: ['Code changes', 'Summary of implementation approach'],
 				},
 				{
 					name: 'Code Reviewer',
 					agentId: 'claude-code',
 					description:
 						'Reviews code for correctness, style, and maintainability. Identifies bugs and suggests improvements.',
+					inputContract: ['Code changes to review'],
+					outputContract: ['Review comments', 'Approval or rejection with rationale'],
 				},
 				{
 					name: 'Test Writer',
 					agentId: 'claude-code',
 					description:
 						'Writes unit and integration tests to verify code changes. Ensures adequate coverage.',
+					inputContract: ['Code changes', 'Review approval'],
+					outputContract: ['Test files', 'Coverage report summary'],
 				},
 			],
 			topology: {
@@ -178,18 +184,24 @@ export function getBuiltinTemplates(): TeamTemplate[] {
 					name: 'Researcher',
 					agentId: 'claude-code',
 					description: 'Gathers information, explores codebases, and surfaces relevant findings.',
+					inputContract: ['Research topic', 'Scope constraints'],
+					outputContract: ['Raw findings', 'Source references'],
 				},
 				{
 					name: 'Analyst',
 					agentId: 'claude-code',
 					description:
 						'Evaluates findings for patterns, risks, and trade-offs. Provides structured analysis.',
+					inputContract: ['Raw findings', 'Source references'],
+					outputContract: ['Structured analysis', 'Key patterns and risks'],
 				},
 				{
 					name: 'Synthesizer',
 					agentId: 'claude-code',
 					description:
 						'Combines research and analysis into a coherent final report with actionable recommendations.',
+					inputContract: ['Structured analysis', 'Key patterns and risks'],
+					outputContract: ['Final report', 'Actionable recommendations'],
 				},
 			],
 			topology: {

@@ -46,16 +46,52 @@ function getParticipantKey(groupChatId: string, participantName: string): string
 /**
  * Generate the system prompt for a participant.
  * Uses template from src/prompts/group-chat-participant.md
+ *
+ * When inputContract/outputContract are provided (from template roles),
+ * appends a structured contract section to focus the agent's work.
  */
 export function getParticipantSystemPrompt(
 	participantName: string,
 	groupChatName: string,
-	logPath: string
+	logPath: string,
+	inputContract?: string[],
+	outputContract?: string[]
 ): string {
-	return groupChatParticipantPrompt
+	let prompt = groupChatParticipantPrompt
 		.replace(/\{\{GROUP_CHAT_NAME\}\}/g, groupChatName)
 		.replace(/\{\{PARTICIPANT_NAME\}\}/g, participantName)
 		.replace(/\{\{LOG_PATH\}\}/g, logPath);
+
+	// Append contract section when contracts are defined
+	if (
+		(inputContract && inputContract.length > 0) ||
+		(outputContract && outputContract.length > 0)
+	) {
+		const sections: string[] = ['\n\n## Your Role Contract'];
+
+		if (inputContract && inputContract.length > 0) {
+			sections.push('\n### What You Receive');
+			sections.push('You will be given the following information to work with:');
+			for (const item of inputContract) {
+				sections.push(`- ${item}`);
+			}
+		}
+
+		if (outputContract && outputContract.length > 0) {
+			sections.push('\n### What You Must Produce');
+			sections.push('Your response must include the following:');
+			for (const item of outputContract) {
+				sections.push(`- ${item}`);
+			}
+		}
+
+		sections.push(
+			'\nFocus your response on fulfilling your output contract. Do not go beyond your scope.'
+		);
+		prompt += sections.join('\n');
+	}
+
+	return prompt;
 }
 
 /**
@@ -150,7 +186,15 @@ export async function addParticipant(
 		args = [...agentConfig.args];
 	}
 
-	const prompt = getParticipantSystemPrompt(name, chat.name, chat.logPath);
+	// Look up template role contracts for this participant
+	const templateRole = chat.templateRoles?.find((r) => r.name === name);
+	const prompt = getParticipantSystemPrompt(
+		name,
+		chat.name,
+		chat.logPath,
+		templateRole?.inputContract,
+		templateRole?.outputContract
+	);
 	// Note: Don't pass modelId to buildAgentArgs - it will be handled by applyAgentConfigOverrides
 	// via sessionCustomModel to avoid duplicate --model args
 	const baseArgs = buildAgentArgs(agentConfig, {

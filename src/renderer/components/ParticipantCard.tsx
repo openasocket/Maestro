@@ -5,7 +5,16 @@
  * session ID, context usage, stats, and cost.
  */
 
-import { MessageSquare, Copy, Check, DollarSign, RotateCcw, Server } from 'lucide-react';
+import {
+	MessageSquare,
+	Copy,
+	Check,
+	DollarSign,
+	RotateCcw,
+	Server,
+	ChevronDown,
+	ChevronRight,
+} from 'lucide-react';
 import { useState, useCallback } from 'react';
 import type { Theme, GroupChatParticipant, SessionState } from '../types';
 import { getStatusColor } from '../utils/theme';
@@ -19,6 +28,10 @@ interface ParticipantCardProps {
 	color?: string;
 	groupChatId?: string;
 	onContextReset?: (participantName: string) => void;
+	/** Input contract items from template role (optional) */
+	inputContract?: string[];
+	/** Output contract items from template role (optional) */
+	outputContract?: string[];
 }
 
 /**
@@ -39,9 +52,15 @@ export function ParticipantCard({
 	color,
 	groupChatId,
 	onContextReset,
+	inputContract,
+	outputContract,
 }: ParticipantCardProps): JSX.Element {
 	const [copied, setCopied] = useState(false);
 	const [isResetting, setIsResetting] = useState(false);
+	const [contractsExpanded, setContractsExpanded] = useState(false);
+
+	const hasContracts =
+		(inputContract && inputContract.length > 0) || (outputContract && outputContract.length > 0);
 
 	// Use agent's session ID (clean GUID) when available, otherwise show pending
 	const agentSessionId = participant.agentSessionId;
@@ -237,6 +256,38 @@ export function ParticipantCard({
 					</span>
 				)}
 			</div>
+
+			{/* Contract display (collapsed by default) */}
+			{hasContracts && (
+				<div className="mt-2">
+					<button
+						onClick={() => setContractsExpanded((p) => !p)}
+						className="flex items-center gap-1 text-[10px] hover:opacity-80 transition-opacity cursor-pointer"
+						style={{ color: theme.colors.textDim }}
+					>
+						{contractsExpanded ? (
+							<ChevronDown className="w-2.5 h-2.5" />
+						) : (
+							<ChevronRight className="w-2.5 h-2.5" />
+						)}
+						Contracts
+					</button>
+					{contractsExpanded && (
+						<div className="mt-1 space-y-1 pl-3">
+							{inputContract && inputContract.length > 0 && (
+								<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
+									<span className="font-bold uppercase">Expects:</span> {inputContract.join(', ')}
+								</div>
+							)}
+							{outputContract && outputContract.length > 0 && (
+								<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
+									<span className="font-bold uppercase">Produces:</span> {outputContract.join(', ')}
+								</div>
+							)}
+						</div>
+					)}
+				</div>
+			)}
 		</div>
 	);
 }

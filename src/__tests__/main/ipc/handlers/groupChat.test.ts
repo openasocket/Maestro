@@ -222,6 +222,7 @@ describe('groupChat IPC handlers', () => {
 				'Test Chat',
 				'claude-code',
 				undefined,
+				undefined,
 				undefined
 			);
 			expect(groupChatModerator.spawnModerator).toHaveBeenCalledWith(mockChat, mockProcessManager);
@@ -257,6 +258,7 @@ describe('groupChat IPC handlers', () => {
 				'Config Chat',
 				'claude-code',
 				moderatorConfig,
+				undefined,
 				undefined
 			);
 		});

@@ -116,12 +116,13 @@ export const AppGroupChatModals = memo(function AppGroupChatModals({
 			const { closeModal } = useModalStore.getState();
 			const { setGroupChats } = useGroupChatStore.getState();
 			try {
-				// Create the group chat with moderator and optional topology
+				// Create the group chat with moderator, topology, and template roles (for contracts)
 				const chat = await window.maestro.groupChat.create(
 					teamName,
 					moderatorAgentId,
 					undefined,
-					topology
+					topology,
+					roles
 				);
 				setGroupChats((prev) => [chat, ...prev]);
 

@@ -15,12 +15,14 @@ import {
 	Plus,
 	Trash2,
 	ChevronDown,
+	ChevronRight,
 	RotateCcw,
 	ArrowRight,
 	ArrowLeft,
 	Save,
 	MessageSquarePlus,
 	Loader2,
+	X,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
@@ -208,6 +210,9 @@ export function TeamBuilderWizard({
 	const [editableTeamName, setEditableTeamName] = useState('');
 	const [moderatorAgentId, setModeratorAgentId] = useState('claude-code');
 
+	const [expandedContracts, setExpandedContracts] = useState<Set<number>>(new Set());
+	const [contractInputValues, setContractInputValues] = useState<Record<string, string>>({});
+
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const enableTopology = useSettingsStore(
 		(s) => s.teamOrchestrationSettings?.enableWorkflowTopology ?? false
@@ -225,6 +230,8 @@ export function TeamBuilderWizard({
 		setEditableRoles([]);
 		setEditableTeamName('');
 		setModeratorAgentId('claude-code');
+		setExpandedContracts(new Set());
+		setContractInputValues({});
 	}, []);
 
 	const handleClose = useCallback(() => {
@@ -325,6 +332,51 @@ export function TeamBuilderWizard({
 			{ name: 'New Role', agentId: 'claude-code', description: 'Describe this role' },
 		]);
 	}, []);
+
+	// -- Contract editing --
+
+	const toggleContractExpanded = useCallback((index: number) => {
+		setExpandedContracts((prev) => {
+			const next = new Set(prev);
+			if (next.has(index)) {
+				next.delete(index);
+			} else {
+				next.add(index);
+			}
+			return next;
+		});
+	}, []);
+
+	const addContractItem = useCallback(
+		(roleIndex: number, type: 'inputContract' | 'outputContract') => {
+			const key = `${roleIndex}-${type}`;
+			const value = contractInputValues[key]?.trim();
+			if (!value) return;
+
+			setEditableRoles((prev) =>
+				prev.map((r, i) => {
+					if (i !== roleIndex) return r;
+					const existing = r[type] || [];
+					return { ...r, [type]: [...existing, value] };
+				})
+			);
+			setContractInputValues((prev) => ({ ...prev, [key]: '' }));
+		},
+		[contractInputValues]
+	);
+
+	const removeContractItem = useCallback(
+		(roleIndex: number, type: 'inputContract' | 'outputContract', itemIndex: number) => {
+			setEditableRoles((prev) =>
+				prev.map((r, i) => {
+					if (i !== roleIndex) return r;
+					const existing = r[type] || [];
+					return { ...r, [type]: existing.filter((_, j) => j !== itemIndex) };
+				})
+			);
+		},
+		[]
+	);
 
 	// -- Final actions --
 
@@ -663,25 +715,195 @@ export function TeamBuilderWizard({
 				Roles ({editableRoles.length})
 			</label>
 			<div className="flex flex-col gap-2 mb-4">
-				{editableRoles.map((role, i) => (
-					<div
-						key={i}
-						className="px-3 py-2 rounded border text-xs"
-						style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
-					>
-						<div className="flex items-center justify-between">
-							<span className="font-medium" style={{ color: theme.colors.textMain }}>
-								{role.name}
-							</span>
-							<span style={{ color: theme.colors.textDim }}>
-								{AGENT_OPTIONS.find((a) => a.id === role.agentId)?.name || role.agentId}
-							</span>
+				{editableRoles.map((role, i) => {
+					const isContractExpanded = expandedContracts.has(i);
+					const hasContracts =
+						(role.inputContract && role.inputContract.length > 0) ||
+						(role.outputContract && role.outputContract.length > 0);
+
+					return (
+						<div
+							key={i}
+							className="px-3 py-2 rounded border text-xs"
+							style={{
+								borderColor: theme.colors.border,
+								backgroundColor: theme.colors.bgMain,
+							}}
+						>
+							<div className="flex items-center justify-between">
+								<span className="font-medium" style={{ color: theme.colors.textMain }}>
+									{role.name}
+								</span>
+								<span style={{ color: theme.colors.textDim }}>
+									{AGENT_OPTIONS.find((a) => a.id === role.agentId)?.name || role.agentId}
+								</span>
+							</div>
+							<p className="mt-1" style={{ color: theme.colors.textDim }}>
+								{role.description}
+							</p>
+
+							{/* Collapsible contracts section */}
+							<button
+								onClick={() => toggleContractExpanded(i)}
+								className="flex items-center gap-1 mt-2 text-[10px] hover:opacity-80 transition-opacity cursor-pointer"
+								style={{ color: theme.colors.textDim }}
+							>
+								{isContractExpanded ? (
+									<ChevronDown className="w-3 h-3" />
+								) : (
+									<ChevronRight className="w-3 h-3" />
+								)}
+								Input/Output Contracts
+								{hasContracts && (
+									<span
+										className="ml-1 px-1 rounded"
+										style={{
+											backgroundColor: `${theme.colors.accent}20`,
+											color: theme.colors.accent,
+										}}
+									>
+										{(role.inputContract?.length || 0) + (role.outputContract?.length || 0)}
+									</span>
+								)}
+							</button>
+
+							{isContractExpanded && (
+								<div
+									className="mt-2 pl-3 border-l-2 space-y-2"
+									style={{ borderColor: `${theme.colors.accent}30` }}
+								>
+									{/* Input contracts */}
+									<div>
+										<span
+											className="text-[10px] font-bold uppercase"
+											style={{ color: theme.colors.textDim }}
+										>
+											Expects
+										</span>
+										<div className="flex flex-wrap gap-1 mt-1">
+											{(role.inputContract || []).map((item, j) => (
+												<span
+													key={j}
+													className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px]"
+													style={{
+														backgroundColor: `${theme.colors.accent}15`,
+														color: theme.colors.accent,
+													}}
+												>
+													{item}
+													<button
+														onClick={() => removeContractItem(i, 'inputContract', j)}
+														className="hover:opacity-60 cursor-pointer"
+													>
+														<X className="w-2.5 h-2.5" />
+													</button>
+												</span>
+											))}
+										</div>
+										<div className="flex items-center gap-1 mt-1">
+											<input
+												value={contractInputValues[`${i}-inputContract`] || ''}
+												onChange={(e) =>
+													setContractInputValues((prev) => ({
+														...prev,
+														[`${i}-inputContract`]: e.target.value,
+													}))
+												}
+												onKeyDown={(e) => {
+													if (e.key === 'Enter') {
+														e.preventDefault();
+														addContractItem(i, 'inputContract');
+													}
+												}}
+												placeholder="e.g., requirements document"
+												className="flex-1 px-1.5 py-0.5 rounded border text-[10px] outline-none"
+												style={{
+													backgroundColor: 'transparent',
+													borderColor: theme.colors.border,
+													color: theme.colors.textMain,
+												}}
+											/>
+											<button
+												onClick={() => addContractItem(i, 'inputContract')}
+												className="px-1.5 py-0.5 rounded text-[10px] hover:opacity-80 transition-opacity cursor-pointer"
+												style={{
+													backgroundColor: `${theme.colors.accent}20`,
+													color: theme.colors.accent,
+												}}
+											>
+												Add
+											</button>
+										</div>
+									</div>
+
+									{/* Output contracts */}
+									<div>
+										<span
+											className="text-[10px] font-bold uppercase"
+											style={{ color: theme.colors.textDim }}
+										>
+											Produces
+										</span>
+										<div className="flex flex-wrap gap-1 mt-1">
+											{(role.outputContract || []).map((item, j) => (
+												<span
+													key={j}
+													className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px]"
+													style={{
+														backgroundColor: `${theme.colors.success}15`,
+														color: theme.colors.success,
+													}}
+												>
+													{item}
+													<button
+														onClick={() => removeContractItem(i, 'outputContract', j)}
+														className="hover:opacity-60 cursor-pointer"
+													>
+														<X className="w-2.5 h-2.5" />
+													</button>
+												</span>
+											))}
+										</div>
+										<div className="flex items-center gap-1 mt-1">
+											<input
+												value={contractInputValues[`${i}-outputContract`] || ''}
+												onChange={(e) =>
+													setContractInputValues((prev) => ({
+														...prev,
+														[`${i}-outputContract`]: e.target.value,
+													}))
+												}
+												onKeyDown={(e) => {
+													if (e.key === 'Enter') {
+														e.preventDefault();
+														addContractItem(i, 'outputContract');
+													}
+												}}
+												placeholder="e.g., implementation plan"
+												className="flex-1 px-1.5 py-0.5 rounded border text-[10px] outline-none"
+												style={{
+													backgroundColor: 'transparent',
+													borderColor: theme.colors.border,
+													color: theme.colors.textMain,
+												}}
+											/>
+											<button
+												onClick={() => addContractItem(i, 'outputContract')}
+												className="px-1.5 py-0.5 rounded text-[10px] hover:opacity-80 transition-opacity cursor-pointer"
+												style={{
+													backgroundColor: `${theme.colors.success}20`,
+													color: theme.colors.success,
+												}}
+											>
+												Add
+											</button>
+										</div>
+									</div>
+								</div>
+							)}
 						</div>
-						<p className="mt-1" style={{ color: theme.colors.textDim }}>
-							{role.description}
-						</p>
-					</div>
-				))}
+					);
+				})}
 			</div>
 
 			{topology && (

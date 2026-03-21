@@ -19,6 +19,7 @@ import type {
 	GroupChatHistoryEntry,
 	WorkflowTopology,
 	WorkflowExecutionState,
+	TeamTemplateRole,
 } from '../../shared/group-chat-types';
 import { hasCapability } from '../agents/capabilities';
 
@@ -132,6 +133,8 @@ export interface GroupChat {
 	topology?: WorkflowTopology;
 	/** Runtime execution state for topology-based workflows */
 	executionState?: WorkflowExecutionState;
+	/** Template role definitions (preserved for contract-based routing) */
+	templateRoles?: TeamTemplateRole[];
 }
 
 /**
@@ -150,6 +153,7 @@ export type GroupChatUpdate = Partial<
 		| 'archived'
 		| 'topology'
 		| 'executionState'
+		| 'templateRoles'
 	>
 >;
 
@@ -227,7 +231,8 @@ export async function createGroupChat(
 	name: string,
 	moderatorAgentId: string,
 	moderatorConfig?: ModeratorConfig,
-	topology?: WorkflowTopology
+	topology?: WorkflowTopology,
+	templateRoles?: TeamTemplateRole[]
 ): Promise<GroupChat> {
 	// Validate agent ID supports group chat moderation
 	if (!hasCapability(moderatorAgentId, 'supportsGroupChatModeration')) {
@@ -265,6 +270,7 @@ export async function createGroupChat(
 		logPath,
 		imagesDir,
 		...(topology ? { topology } : {}),
+		...(templateRoles && templateRoles.length > 0 ? { templateRoles } : {}),
 	};
 
 	// Write metadata (atomic: write tmp then rename)

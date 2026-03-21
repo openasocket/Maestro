@@ -99,6 +99,16 @@
 			"waitingFor": "Waiting for {{names}}"
 		}
 	},
+	"contracts": {
+		"title": "Input/Output Contracts",
+		"inputContract": "Expects",
+		"outputContract": "Produces",
+		"addInput": "Add input",
+		"addOutput": "Add output",
+		"placeholder": "e.g., requirements document, code to review",
+		"noContracts": "No contracts defined — agent receives full chat history",
+		"help": "Contracts focus each agent on specific inputs and outputs, reducing token usage and improving response quality"
+	},
 	"teamTemplates": {
 		"title": "Team Templates",
 		"saveAsTemplate": "Save as Template",

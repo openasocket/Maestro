@@ -3489,6 +3489,7 @@ function MaestroConsoleInner() {
 								onTabChange={handleGroupChatRightTabChange}
 								onJumpToMessage={handleJumpToGroupChatMessage}
 								onColorsComputed={setGroupChatParticipantColors}
+								templateRoles={groupChats.find((c) => c.id === activeGroupChatId)?.templateRoles}
 							/>
 						</>
 					)}

@@ -23,6 +23,7 @@ vi.mock('lucide-react', () => {
 		Plus: icon('plus'),
 		Trash2: icon('trash2'),
 		ChevronDown: icon('chevron-down'),
+		ChevronRight: icon('chevron-right'),
 		RotateCcw: icon('rotate-ccw'),
 		ArrowRight: icon('arrow-right'),
 		ArrowLeft: icon('arrow-left'),

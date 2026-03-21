@@ -9,7 +9,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { PanelRightClose } from 'lucide-react';
 import type { Theme, GroupChatParticipant, SessionState, Shortcut } from '../types';
-import type { GroupChatHistoryEntry } from '../../shared/group-chat-types';
+import type { GroupChatHistoryEntry, TeamTemplateRole } from '../../shared/group-chat-types';
 import { ParticipantCard } from './ParticipantCard';
 import { GroupChatHistoryPanel } from './GroupChatHistoryPanel';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
@@ -56,6 +56,8 @@ interface GroupChatRightPanelProps {
 	onJumpToMessage?: (timestamp: number) => void;
 	/** Callback when participant colors are computed (for sharing with other components) */
 	onColorsComputed?: (colors: Record<string, string>) => void;
+	/** Template role definitions for contract display */
+	templateRoles?: TeamTemplateRole[];
 }
 
 export function GroupChatRightPanel({
@@ -79,6 +81,7 @@ export function GroupChatRightPanel({
 	onTabChange,
 	onJumpToMessage,
 	onColorsComputed,
+	templateRoles,
 }: GroupChatRightPanelProps): JSX.Element | null {
 	// Color preferences state
 	const [colorPreferences, setColorPreferences] = useState<Record<string, number>>({});
@@ -313,6 +316,7 @@ export function GroupChatRightPanel({
 							// Convert 'working' state to 'busy' for SessionState compatibility
 							const workState = participantStates.get(participant.name);
 							const sessionState = workState === 'working' ? 'busy' : 'idle';
+							const role = templateRoles?.find((r) => r.name === participant.name);
 							return (
 								<ParticipantCard
 									key={participant.sessionId}
@@ -322,6 +326,8 @@ export function GroupChatRightPanel({
 									color={participantColors[participant.name]}
 									groupChatId={groupChatId}
 									onContextReset={handleContextReset}
+									inputContract={role?.inputContract}
+									outputContract={role?.outputContract}
 								/>
 							);
 						})

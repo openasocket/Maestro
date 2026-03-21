@@ -44,6 +44,7 @@ import {
 	getModeratorTopologyPrompt,
 } from './group-chat-moderator';
 import { addParticipant } from './group-chat-agent';
+import { formatAgentInput, formatSynthesisContext } from './message-formatter';
 import { AgentDetector } from '../agents';
 import { powerManager } from '../power-manager';
 import { logger } from '../utils/logger';
@@ -919,6 +920,26 @@ export async function routeModeratorResponse(
 			// Get the group chat folder path for file access permissions
 			const groupChatFolder = getGroupChatDir(groupChatId);
 
+			// Use contract-based formatting when participant has contracts defined
+			const templateRole = updatedChat.templateRoles?.find((r) => r.name === participantName);
+			let formattedMessage = message;
+			if (
+				templateRole &&
+				(templateRole.inputContract?.length || templateRole.outputContract?.length)
+			) {
+				try {
+					formattedMessage = formatAgentInput(
+						templateRole,
+						[{ roleName: 'Moderator', output: message }],
+						message,
+						updatedChat.topology
+					);
+				} catch {
+					// Fall back to raw message on formatting error
+					formattedMessage = message;
+				}
+			}
+
 			const participantPrompt = groupChatParticipantRequestPrompt
 				.replace(/\{\{PARTICIPANT_NAME\}\}/g, participantName)
 				.replace(/\{\{GROUP_CHAT_NAME\}\}/g, updatedChat.name)
@@ -926,7 +947,7 @@ export async function routeModeratorResponse(
 				.replace(/\{\{GROUP_CHAT_FOLDER\}\}/g, groupChatFolder)
 				.replace(/\{\{HISTORY_CONTEXT\}\}/g, historyContext)
 				.replace(/\{\{READ_ONLY_LABEL\}\}/g, readOnlyLabel)
-				.replace(/\{\{MESSAGE\}\}/g, message)
+				.replace(/\{\{MESSAGE\}\}/g, formattedMessage)
 				.replace(/\{\{READ_ONLY_INSTRUCTION\}\}/g, readOnlyInstruction);
 
 			// Create a unique session ID for this batch process
@@ -1280,13 +1301,37 @@ async function routeViaTopology(
 	if (processManager && agentDetector && allNextNodes.size > 0) {
 		const participantsToRespond = new Set<string>();
 
+		// Reload chat to access templateRoles for contract-based formatting
+		const chatForContracts = await loadGroupChat(groupChatId);
+		const templateRoles = chatForContracts?.templateRoles;
+
 		for (const nodeName of allNextNodes) {
 			try {
-				// Build input for the next node from the previous node's output
-				const inputSource = completedNodes.length === 1 ? completedNodes[0] : undefined;
-				const nodeInput = inputSource
-					? updatedState.nodeOutputs[inputSource] || moderatorResponse
-					: moderatorResponse;
+				// Build input for the next node, using contracts when available
+				const downstreamRole = templateRoles?.find((r) => r.name === nodeName);
+				let nodeInput: string;
+
+				if (
+					downstreamRole &&
+					(downstreamRole.inputContract?.length || downstreamRole.outputContract?.length)
+				) {
+					// Contract-based formatting: build structured context from upstream outputs
+					const upstreamOutputs = Object.entries(updatedState.nodeOutputs).map(
+						([roleName, output]) => ({ roleName, output })
+					);
+					nodeInput = formatAgentInput(
+						downstreamRole,
+						upstreamOutputs,
+						moderatorResponse,
+						topology
+					);
+				} else {
+					// Fallback: pass raw upstream output
+					const inputSource = completedNodes.length === 1 ? completedNodes[0] : undefined;
+					nodeInput = inputSource
+						? updatedState.nodeOutputs[inputSource] || moderatorResponse
+						: moderatorResponse;
+				}
 
 				await spawnTopologyNode(
 					groupChatId,
@@ -1716,6 +1761,28 @@ export async function spawnModeratorSynthesis(
 					.join('\n')
 			: '(No agents currently in this group chat)';
 
+	// Build contract-enhanced synthesis context if template roles have contracts
+	let contractContext = '';
+	if (chat.templateRoles && chat.templateRoles.some((r) => r.outputContract?.length)) {
+		// Extract recent participant responses and pair with contract metadata
+		const participantResponses = chatHistory
+			.slice(-30)
+			.filter((m) => m.from !== 'user' && m.from !== 'system' && m.from !== 'moderator')
+			.reduce((acc, m) => {
+				// Keep only the latest response per participant
+				acc.set(m.from, m.content);
+				return acc;
+			}, new Map<string, string>());
+
+		if (participantResponses.size > 0) {
+			const synthResponses = [...participantResponses.entries()].map(([from, output]) => {
+				const role = chat.templateRoles?.find((r) => r.name === from);
+				return { roleName: from, output, outputContract: role?.outputContract };
+			});
+			contractContext = '\n\n' + formatSynthesisContext(synthResponses);
+		}
+	}
+
 	const synthesisPrompt = `${buildModeratorSystemPrompt(chat.topology, chat.executionState)}
 
 ${getModeratorSynthesisPrompt()}
@@ -1724,7 +1791,7 @@ ${getModeratorSynthesisPrompt()}
 ${participantContext}
 
 ## Recent Chat History (including participant responses):
-${historyContext}
+${historyContext}${contractContext}
 
 ## Your Task:
 Review the agent responses above. Either:

@@ -1799,7 +1799,15 @@ interface MaestroAPI {
 				}>;
 				entryPoint: string;
 				exitPoint: string;
-			}
+			},
+			templateRoles?: Array<{
+				name: string;
+				agentId: string;
+				description: string;
+				systemPromptSuffix?: string;
+				inputContract?: string[];
+				outputContract?: string[];
+			}>
 		) => Promise<GroupChatData>;
 		list: () => Promise<Array<GroupChatData>>;
 		load: (id: string) => Promise<GroupChatData | null>;

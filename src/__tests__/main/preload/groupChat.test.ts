@@ -44,6 +44,7 @@ describe('GroupChat Preload API', () => {
 					'My Group Chat',
 					'claude-code',
 					undefined,
+					undefined,
 					undefined
 				);
 				expect(result).toEqual({ id: 'gc-123' });
@@ -60,6 +61,7 @@ describe('GroupChat Preload API', () => {
 					'My Group Chat',
 					'claude-code',
 					moderatorConfig,
+					undefined,
 					undefined
 				);
 			});
@@ -80,7 +82,8 @@ describe('GroupChat Preload API', () => {
 					'My Group Chat',
 					'claude-code',
 					undefined,
-					topology
+					topology,
+					undefined
 				);
 			});
 		});

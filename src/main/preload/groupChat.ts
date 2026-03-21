@@ -8,7 +8,7 @@
  */
 
 import { ipcRenderer } from 'electron';
-import type { WorkflowTopology } from '../../shared/group-chat-types';
+import type { WorkflowTopology, TeamTemplateRole } from '../../shared/group-chat-types';
 
 /**
  * Moderator configuration
@@ -73,8 +73,17 @@ export function createGroupChatApi() {
 			name: string,
 			moderatorAgentId: string,
 			moderatorConfig?: ModeratorConfig,
-			topology?: WorkflowTopology
-		) => ipcRenderer.invoke('groupChat:create', name, moderatorAgentId, moderatorConfig, topology),
+			topology?: WorkflowTopology,
+			templateRoles?: TeamTemplateRole[]
+		) =>
+			ipcRenderer.invoke(
+				'groupChat:create',
+				name,
+				moderatorAgentId,
+				moderatorConfig,
+				topology,
+				templateRoles
+			),
 
 		list: () => ipcRenderer.invoke('groupChat:list'),
 
