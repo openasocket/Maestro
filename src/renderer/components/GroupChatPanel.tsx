@@ -15,10 +15,12 @@ import type {
 	Shortcut,
 	Session,
 	QueuedItem,
+	TerminationMode,
 } from '../types';
 import { GroupChatHeader } from './GroupChatHeader';
 import { GroupChatMessages, type GroupChatMessagesHandle } from './GroupChatMessages';
 import { GroupChatInput } from './GroupChatInput';
+import { IterationControls } from './GroupChat/IterationControls';
 
 interface GroupChatPanelProps {
 	theme: Theme;
@@ -72,6 +74,14 @@ interface GroupChatPanelProps {
 	messagesRef?: React.RefObject<GroupChatMessagesHandle>;
 	/** Called when user clicks compact workflow minimap to open Workflow tab */
 	onShowWorkflow?: () => void;
+	// Iteration control callbacks (wired to IPC by parent)
+	onStopAfterIteration?: () => void;
+	onForceComplete?: () => void;
+	onAddIteration?: () => void;
+	/** Max iterations from team orchestration settings */
+	maxIterations?: number;
+	/** Termination mode from team orchestration settings */
+	terminationMode?: TerminationMode;
 }
 
 export function GroupChatPanel({
@@ -111,6 +121,11 @@ export function GroupChatPanel({
 	participantColors,
 	messagesRef,
 	onShowWorkflow,
+	onStopAfterIteration,
+	onForceComplete,
+	onAddIteration,
+	maxIterations,
+	terminationMode,
 }: GroupChatPanelProps): JSX.Element {
 	return (
 		<div className="flex flex-col h-full" style={{ backgroundColor: theme.colors.bgMain }}>
@@ -143,6 +158,26 @@ export function GroupChatPanel({
 				participantColors={participantColors}
 				onOpenLightbox={onOpenLightbox}
 			/>
+
+			{groupChat.topology &&
+				groupChat.executionState &&
+				groupChat.executionState.status === 'running' &&
+				onStopAfterIteration &&
+				onForceComplete &&
+				onAddIteration &&
+				maxIterations != null &&
+				terminationMode && (
+					<IterationControls
+						theme={theme}
+						executionState={groupChat.executionState}
+						topology={groupChat.topology}
+						maxIterations={maxIterations}
+						terminationMode={terminationMode}
+						onStopAfterIteration={onStopAfterIteration}
+						onForceComplete={onForceComplete}
+						onAddIteration={onAddIteration}
+					/>
+				)}
 
 			<GroupChatInput
 				theme={theme}
