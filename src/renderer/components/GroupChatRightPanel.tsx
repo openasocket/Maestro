@@ -2,16 +2,22 @@
  * GroupChatRightPanel.tsx
  *
  * Right panel component for group chats with tabbed interface.
- * Contains "Participants" and "History" tabs.
+ * Contains "Participants", "History", and optionally "Workflow" tabs.
  * Replaces direct use of GroupChatParticipants when group chat is active.
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { PanelRightClose } from 'lucide-react';
 import type { Theme, GroupChatParticipant, SessionState, Shortcut } from '../types';
-import type { GroupChatHistoryEntry, TeamTemplateRole } from '../../shared/group-chat-types';
+import type {
+	GroupChatHistoryEntry,
+	TeamTemplateRole,
+	WorkflowTopology,
+	WorkflowExecutionState,
+} from '../../shared/group-chat-types';
 import { ParticipantCard } from './ParticipantCard';
 import { GroupChatHistoryPanel } from './GroupChatHistoryPanel';
+import { WorkflowGraph } from './GroupChat/WorkflowGraph';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
 import {
 	buildParticipantColorMapWithPreferences,
@@ -20,8 +26,9 @@ import {
 	type ParticipantColorInfo,
 } from '../utils/participantColors';
 import { useResizablePanel } from '../hooks';
+import { useSettingsStore } from '../stores/settingsStore';
 
-export type GroupChatRightTab = 'participants' | 'history';
+export type GroupChatRightTab = 'participants' | 'history' | 'workflow';
 
 interface GroupChatRightPanelProps {
 	theme: Theme;
@@ -58,6 +65,10 @@ interface GroupChatRightPanelProps {
 	onColorsComputed?: (colors: Record<string, string>) => void;
 	/** Template role definitions for contract display */
 	templateRoles?: TeamTemplateRole[];
+	/** Workflow topology for visualization */
+	topology?: WorkflowTopology;
+	/** Current workflow execution state */
+	executionState?: WorkflowExecutionState;
 }
 
 export function GroupChatRightPanel({
@@ -82,7 +93,25 @@ export function GroupChatRightPanel({
 	onJumpToMessage,
 	onColorsComputed,
 	templateRoles,
+	topology,
+	executionState,
 }: GroupChatRightPanelProps): JSX.Element | null {
+	// Check visualization feature flag
+	const encoreFeatures = useSettingsStore((s) => s.encoreFeatures);
+	const teamOrchestrationSettings = useSettingsStore((s) => s.teamOrchestrationSettings);
+	const showWorkflowTab =
+		encoreFeatures.teamOrchestration && teamOrchestrationSettings.enableVisualization && !!topology;
+
+	// Build available tabs list — workflow tab only appears when visualization is enabled and topology exists
+	const availableTabs = useMemo(() => {
+		const tabs: GroupChatRightTab[] = ['participants', 'history'];
+		if (showWorkflowTab) tabs.push('workflow');
+		return tabs;
+	}, [showWorkflowTab]);
+
+	// If current tab is workflow but it's no longer available, fall back to participants
+	const effectiveTab = activeTab === 'workflow' && !showWorkflowTab ? 'participants' : activeTab;
+
 	// Color preferences state
 	const [colorPreferences, setColorPreferences] = useState<Record<string, number>>({});
 	const { panelRef, onResizeStart, transitionClass } = useResizablePanel({
@@ -263,16 +292,22 @@ export function GroupChatRightPanel({
 
 			{/* Tab Header - matches RightPanel styling */}
 			<div className="flex border-b h-16" style={{ borderColor: theme.colors.border }}>
-				{(['participants', 'history'] as const).map((tab) => (
+				{availableTabs.map((tab) => (
 					<button
 						key={tab}
 						onClick={() => onTabChange(tab)}
 						className="flex-1 text-xs font-bold border-b-2 transition-colors"
 						style={{
-							borderColor: activeTab === tab ? theme.colors.accent : 'transparent',
-							color: activeTab === tab ? theme.colors.textMain : theme.colors.textDim,
+							borderColor: effectiveTab === tab ? theme.colors.accent : 'transparent',
+							color: effectiveTab === tab ? theme.colors.textMain : theme.colors.textDim,
 						}}
-						title={tab === 'participants' ? 'View participants' : 'View task history'}
+						title={
+							tab === 'participants'
+								? 'View participants'
+								: tab === 'history'
+									? 'View task history'
+									: 'View workflow topology'
+						}
 					>
 						{tab.charAt(0).toUpperCase() + tab.slice(1)}
 					</button>
@@ -288,7 +323,7 @@ export function GroupChatRightPanel({
 			</div>
 
 			{/* Tab Content */}
-			{activeTab === 'participants' ? (
+			{effectiveTab === 'participants' && (
 				<div className="flex-1 overflow-y-auto p-3 space-y-3">
 					{/* Moderator card always at top */}
 					<ParticipantCard
@@ -333,7 +368,8 @@ export function GroupChatRightPanel({
 						})
 					)}
 				</div>
-			) : (
+			)}
+			{effectiveTab === 'history' && (
 				<GroupChatHistoryPanel
 					theme={theme}
 					groupChatId={groupChatId}
@@ -342,6 +378,117 @@ export function GroupChatRightPanel({
 					participantColors={participantColors}
 					onJumpToMessage={onJumpToMessage}
 				/>
+			)}
+			{effectiveTab === 'workflow' && topology && (
+				<div className="flex-1 overflow-y-auto p-3 space-y-3">
+					{/* Workflow topology graph */}
+					<WorkflowGraph
+						topology={topology}
+						executionState={executionState}
+						participants={participants}
+						theme={theme}
+					/>
+
+					{/* Execution log */}
+					<div
+						className="border-t pt-2 mt-2 space-y-1"
+						style={{ borderColor: theme.colors.border }}
+					>
+						{/* Iteration counter */}
+						{executionState && (
+							<div className="text-xs font-semibold mb-1" style={{ color: theme.colors.textMain }}>
+								Iteration {executionState.iterationCount} of{' '}
+								{teamOrchestrationSettings.maxIterations}
+							</div>
+						)}
+
+						{/* Per-node status log */}
+						{topology.edges
+							.reduce<string[]>((roles, edge) => {
+								if (
+									edge.source !== '__entry__' &&
+									edge.source !== '__exit__' &&
+									!roles.includes(edge.source)
+								)
+									roles.push(edge.source);
+								if (
+									edge.target !== '__entry__' &&
+									edge.target !== '__exit__' &&
+									!roles.includes(edge.target)
+								)
+									roles.push(edge.target);
+								return roles;
+							}, [])
+							.map((role) => {
+								const isActive = executionState?.activeNodes.includes(role);
+								const isCompleted = executionState?.completedNodes.includes(role);
+								const isFailed =
+									executionState?.status === 'failed' && executionState?.currentPhase === role;
+
+								let statusText: string;
+								let statusColor: string;
+								if (isActive) {
+									statusText = 'working...';
+									statusColor = theme.colors.warning;
+								} else if (isCompleted) {
+									statusText = 'completed';
+									statusColor = theme.colors.success;
+								} else if (isFailed) {
+									statusText = 'failed';
+									statusColor = theme.colors.error;
+								} else {
+									statusText = 'pending';
+									statusColor = theme.colors.textDim;
+								}
+
+								return (
+									<div
+										key={role}
+										className="flex items-center gap-1.5 text-xs"
+										style={{ color: theme.colors.textDim }}
+									>
+										<div
+											style={{
+												width: 6,
+												height: 6,
+												borderRadius: '50%',
+												backgroundColor: statusColor,
+												flexShrink: 0,
+											}}
+										/>
+										<span className="font-medium truncate" style={{ color: theme.colors.textMain }}>
+											{role}:
+										</span>
+										<span style={{ color: statusColor }}>{statusText}</span>
+									</div>
+								);
+							})}
+
+						{/* Workflow status */}
+						{executionState?.status === 'completed' && (
+							<div className="text-xs font-medium mt-1" style={{ color: theme.colors.success }}>
+								Workflow completed
+							</div>
+						)}
+						{executionState?.status === 'terminated' && (
+							<div className="text-xs font-medium mt-1" style={{ color: theme.colors.warning }}>
+								Workflow terminated
+							</div>
+						)}
+						{executionState?.status === 'failed' && (
+							<div className="text-xs font-medium mt-1" style={{ color: theme.colors.error }}>
+								Workflow failed
+							</div>
+						)}
+
+						{/* No execution state yet */}
+						{!executionState && (
+							<div className="text-xs" style={{ color: theme.colors.textDim }}>
+								Send a message to start the workflow.
+							</div>
+						)}
+					</div>
+				</div>
 			)}
 		</div>
 	);

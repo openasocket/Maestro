@@ -109,6 +109,39 @@
 		"noContracts": "No contracts defined — agent receives full chat history",
 		"help": "Contracts focus each agent on specific inputs and outputs, reducing token usage and improving response quality"
 	},
+	"workflow": {
+		"tab": "Workflow",
+		"graph": {
+			"start": "Start",
+			"end": "End",
+			"waiting": "Waiting",
+			"working": "Working",
+			"completed": "Completed",
+			"failed": "Failed"
+		},
+		"iteration": {
+			"label": "Iteration {{current}} of {{max}}",
+			"mode": "Mode: {{mode}}",
+			"stopAfter": "Stop After This Iteration",
+			"forceComplete": "Force Complete",
+			"addIteration": "+1 Iteration",
+			"modeLabels": {
+				"moderator-decides": "Moderator Decides",
+				"max-iterations": "Max Iterations",
+				"quality-gate": "Quality Gate"
+			}
+		},
+		"executionLog": {
+			"completed": "{{name}}: completed",
+			"working": "{{name}}: working...",
+			"pending": "{{name}}: pending",
+			"failed": "{{name}}: failed"
+		},
+		"noExecution": "Send a message to start the workflow.",
+		"workflowCompleted": "Workflow completed",
+		"workflowTerminated": "Workflow terminated",
+		"workflowFailed": "Workflow failed"
+	},
 	"teamTemplates": {
 		"title": "Team Templates",
 		"saveAsTemplate": "Save as Template",

@@ -21,7 +21,7 @@ import type { QueuedItem } from '../types';
 // ============================================================================
 
 /** Right panel tab within the group chat view */
-export type GroupChatRightTab = 'participants' | 'history';
+export type GroupChatRightTab = 'participants' | 'history' | 'workflow';
 
 /** Group chat error state — tracks which chat has an error and from which participant */
 export interface GroupChatErrorState {

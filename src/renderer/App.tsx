@@ -3490,6 +3490,8 @@ function MaestroConsoleInner() {
 								onJumpToMessage={handleJumpToGroupChatMessage}
 								onColorsComputed={setGroupChatParticipantColors}
 								templateRoles={groupChats.find((c) => c.id === activeGroupChatId)?.templateRoles}
+								topology={groupChats.find((c) => c.id === activeGroupChatId)?.topology}
+								executionState={groupChats.find((c) => c.id === activeGroupChatId)?.executionState}
 							/>
 						</>
 					)}
