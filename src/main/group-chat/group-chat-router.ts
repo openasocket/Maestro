@@ -13,6 +13,7 @@ import * as path from 'path';
 import {
 	GroupChatParticipant,
 	loadGroupChat,
+	updateGroupChat,
 	updateParticipant,
 	addGroupChatHistoryEntry,
 	extractFirstSentence,
@@ -21,9 +22,18 @@ import {
 import { appendToLog, readLog, saveImage } from './group-chat-log';
 import {
 	type GroupChatMessage,
+	type WorkflowTopology,
+	type WorkflowExecutionState,
 	mentionMatches,
 	normalizeMentionName,
 } from '../../shared/group-chat-types';
+import {
+	initExecutionState,
+	getNextNodes,
+	isWorkflowComplete,
+	updateExecutionState,
+	finalizeWorkflow,
+} from './topology-router';
 import {
 	IProcessManager,
 	getModeratorSessionId,
@@ -95,6 +105,23 @@ let getAgentConfigCallback: GetAgentConfigCallback | null = null;
 
 // Module-level SSH store for remote execution support
 let sshStore: SshRemoteSettingsStore | null = null;
+
+/**
+ * Topology settings needed for routing decisions.
+ */
+export interface TopologyRoutingSettings {
+	teamOrchestrationEnabled: boolean;
+	workflowTopologyEnabled: boolean;
+	maxIterations: number;
+}
+
+/**
+ * Callback type for getting topology routing settings.
+ */
+export type GetTopologySettingsCallback = () => TopologyRoutingSettings;
+
+// Module-level callback for topology settings
+let getTopologySettingsCallback: GetTopologySettingsCallback | null = null;
 
 /**
  * Tracks pending participant responses for each group chat.
@@ -173,6 +200,14 @@ export function setGetCustomEnvVarsCallback(callback: GetCustomEnvVarsCallback):
 
 export function setGetAgentConfigCallback(callback: GetAgentConfigCallback): void {
 	getAgentConfigCallback = callback;
+}
+
+/**
+ * Sets the callback for getting topology routing settings.
+ * Called from index.ts during initialization.
+ */
+export function setTopologySettingsCallback(callback: GetTopologySettingsCallback): void {
+	getTopologySettingsCallback = callback;
 }
 
 /**
@@ -698,6 +733,24 @@ export async function routeModeratorResponse(
 		// Don't throw - history logging failure shouldn't break the message flow
 	}
 
+	// Topology routing: if the chat has a workflow topology and the feature is enabled,
+	// route via the topology graph instead of parsing @mentions.
+	if (isTopologyRoutingActive(chat.topology)) {
+		console.log(
+			`[GroupChat:Debug] Topology active — routing via topology (${chat.topology.pattern})`
+		);
+		await routeViaTopology(
+			groupChatId,
+			chat.topology,
+			chat.executionState,
+			message,
+			processManager,
+			agentDetector,
+			readOnly
+		);
+		return;
+	}
+
 	// Extract ALL mentions from the message
 	const allMentions = extractAllMentions(message);
 	console.log(`[GroupChat:Debug] Extracted @mentions: ${allMentions.join(', ') || '(none)'}`);
@@ -1039,6 +1092,364 @@ export async function routeModeratorResponse(
 	console.log(`[GroupChat:Debug] ===================================================`);
 }
 
+// ============================================================================
+// TOPOLOGY-BASED ROUTING
+// ============================================================================
+
+/**
+ * Check if topology routing is active for a group chat.
+ * Requires: topology on the chat, teamOrchestration feature enabled,
+ * and enableWorkflowTopology setting enabled.
+ */
+function isTopologyRoutingActive(
+	topology: WorkflowTopology | undefined
+): topology is WorkflowTopology {
+	if (!topology || topology.pattern === 'hub-spoke') return false;
+	if (!getTopologySettingsCallback) return false;
+
+	const settings = getTopologySettingsCallback();
+	return settings.teamOrchestrationEnabled && settings.workflowTopologyEnabled;
+}
+
+/**
+ * Route a message via the workflow topology instead of @mention-based hub-spoke routing.
+ *
+ * Called from routeModeratorResponse() when a topology is active. Handles:
+ * - Initializing execution state on first call
+ * - Determining next nodes after a node completes
+ * - Spawning next participant agents
+ * - Finalizing workflow when complete
+ * - Persisting execution state
+ *
+ * @param groupChatId - The group chat ID
+ * @param topology - The workflow topology definition
+ * @param executionState - Current execution state (may be undefined on first call)
+ * @param moderatorResponse - The moderator's response (used as routing input/decision)
+ * @param processManager - Process manager for spawning agents
+ * @param agentDetector - Agent detector for resolving agent commands
+ * @param readOnly - Whether read-only mode is active
+ */
+async function routeViaTopology(
+	groupChatId: string,
+	topology: WorkflowTopology,
+	executionState: WorkflowExecutionState | undefined,
+	moderatorResponse: string,
+	processManager?: IProcessManager,
+	agentDetector?: AgentDetector,
+	readOnly?: boolean
+): Promise<void> {
+	console.log(`[GroupChat:Debug] ========== ROUTE VIA TOPOLOGY ==========`);
+	console.log(`[GroupChat:Debug] Group Chat ID: ${groupChatId}`);
+	console.log(`[GroupChat:Debug] Pattern: ${topology.pattern}`);
+	console.log(`[GroupChat:Debug] Has execution state: ${!!executionState}`);
+
+	const settings = getTopologySettingsCallback?.() ?? {
+		teamOrchestrationEnabled: false,
+		workflowTopologyEnabled: false,
+		maxIterations: 5,
+	};
+
+	// Initialize execution state if this is the first topology call
+	if (!executionState) {
+		console.log(`[GroupChat:Debug] Initializing execution state for topology`);
+		executionState = initExecutionState(topology);
+
+		// Persist initial state
+		await updateGroupChat(groupChatId, { executionState });
+
+		// Spawn the entry point agent with the moderator's processed message
+		if (processManager && agentDetector) {
+			await spawnTopologyNode(
+				groupChatId,
+				topology.entryPoint,
+				moderatorResponse,
+				processManager,
+				agentDetector,
+				readOnly
+			);
+
+			// Track as pending
+			const pending = new Set<string>([topology.entryPoint]);
+			pendingParticipantResponses.set(groupChatId, pending);
+
+			// Update UI state
+			groupChatEmitters.emitStateChange?.(groupChatId, 'agent-working');
+		}
+		console.log(`[GroupChat:Debug] =============================================`);
+		return;
+	}
+
+	// Subsequent call: a node has completed and synthesis produced moderator output
+	// Determine which node(s) just completed by checking activeNodes
+	const completedNodes = [...executionState.activeNodes];
+	console.log(`[GroupChat:Debug] Completed nodes: ${completedNodes.join(', ')}`);
+
+	if (completedNodes.length === 0) {
+		console.log(`[GroupChat:Debug] No active nodes to complete — finalizing`);
+		const finalState = finalizeWorkflow(executionState, 'completed');
+		await updateGroupChat(groupChatId, { executionState: finalState });
+		groupChatEmitters.emitStateChange?.(groupChatId, 'idle');
+		powerManager.removeBlockReason(`groupchat:${groupChatId}`);
+		return;
+	}
+
+	// Process each completed node and collect all next nodes
+	let updatedState = executionState;
+	const allNextNodes = new Set<string>();
+
+	for (const completedNode of completedNodes) {
+		// Get the node's output from chat history (stored during routeAgentResponse)
+		const nodeOutput = updatedState.nodeOutputs[completedNode] || moderatorResponse;
+
+		// Get next nodes from topology
+		const nextNodes = getNextNodes(topology, updatedState, completedNode, moderatorResponse);
+		console.log(
+			`[GroupChat:Debug] Next nodes after ${completedNode}: ${nextNodes.join(', ') || '(none)'}`
+		);
+
+		// Check if this is a loop-back (a next node was already completed before)
+		const isLoop = nextNodes.some((n) => updatedState.completedNodes.includes(n));
+
+		// Update execution state
+		updatedState = updateExecutionState(updatedState, completedNode, nodeOutput, nextNodes, isLoop);
+
+		for (const n of nextNodes) {
+			allNextNodes.add(n);
+		}
+	}
+
+	// Check if workflow is complete
+	if (
+		isWorkflowComplete(topology, updatedState, settings.maxIterations) ||
+		allNextNodes.size === 0
+	) {
+		const terminationReason =
+			updatedState.iterationCount >= settings.maxIterations ? 'terminated' : 'completed';
+		console.log(`[GroupChat:Debug] Workflow ${terminationReason}`);
+
+		const finalState = finalizeWorkflow(updatedState, terminationReason);
+		await updateGroupChat(groupChatId, { executionState: finalState });
+
+		// Emit a system message about completion
+		const completionMessage =
+			terminationReason === 'terminated'
+				? `Workflow terminated: maximum iterations (${settings.maxIterations}) reached.`
+				: 'Workflow completed successfully.';
+
+		groupChatEmitters.emitMessage?.(groupChatId, {
+			timestamp: new Date().toISOString(),
+			from: 'system',
+			content: completionMessage,
+		});
+
+		groupChatEmitters.emitStateChange?.(groupChatId, 'idle');
+		powerManager.removeBlockReason(`groupchat:${groupChatId}`);
+		return;
+	}
+
+	// Persist updated execution state
+	await updateGroupChat(groupChatId, { executionState: updatedState });
+
+	// Spawn next node agents
+	if (processManager && agentDetector && allNextNodes.size > 0) {
+		const participantsToRespond = new Set<string>();
+
+		for (const nodeName of allNextNodes) {
+			try {
+				// Build input for the next node from the previous node's output
+				const inputSource = completedNodes.length === 1 ? completedNodes[0] : undefined;
+				const nodeInput = inputSource
+					? updatedState.nodeOutputs[inputSource] || moderatorResponse
+					: moderatorResponse;
+
+				await spawnTopologyNode(
+					groupChatId,
+					nodeName,
+					nodeInput,
+					processManager,
+					agentDetector,
+					readOnly
+				);
+				participantsToRespond.add(nodeName);
+			} catch (error) {
+				logger.error(`Failed to spawn topology node ${nodeName}`, LOG_CONTEXT, {
+					error,
+					groupChatId,
+				});
+				captureException(error, {
+					operation: 'groupChat:spawnTopologyNode',
+					nodeName,
+					groupChatId,
+				});
+			}
+		}
+
+		if (participantsToRespond.size > 0) {
+			pendingParticipantResponses.set(groupChatId, participantsToRespond);
+			groupChatEmitters.emitStateChange?.(groupChatId, 'agent-working');
+		}
+	}
+
+	console.log(`[GroupChat:Debug] =============================================`);
+}
+
+/**
+ * Spawn a single topology node agent as a participant.
+ * Finds the matching participant in the chat and spawns its process.
+ */
+async function spawnTopologyNode(
+	groupChatId: string,
+	nodeName: string,
+	input: string,
+	processManager: IProcessManager,
+	agentDetector: AgentDetector,
+	readOnly?: boolean
+): Promise<void> {
+	const chat = await loadGroupChat(groupChatId);
+	if (!chat) {
+		throw new Error(`Group chat not found: ${groupChatId}`);
+	}
+
+	// Find the participant matching this topology node name
+	const participant = chat.participants.find((p) => p.name === nodeName);
+	if (!participant) {
+		logger.error(`Topology node "${nodeName}" has no matching participant in chat`, LOG_CONTEXT, {
+			groupChatId,
+		});
+		return;
+	}
+
+	// Get sessions for cwd lookup
+	const sessions = getSessionsCallback?.() || [];
+	const matchingSession = sessions.find(
+		(s) => mentionMatches(s.name, nodeName) || s.name === nodeName
+	);
+	const cwd = matchingSession?.cwd || os.homedir();
+
+	// Resolve agent configuration
+	const agent = await agentDetector.getAgent(participant.agentId);
+	if (!agent || !agent.available) {
+		logger.error(
+			`Agent '${participant.agentId}' not available for topology node ${nodeName}`,
+			LOG_CONTEXT,
+			{ groupChatId }
+		);
+		return;
+	}
+
+	// Build the prompt for this topology node
+	const readOnlyNote = readOnly
+		? '\n\n**READ-ONLY MODE:** Do not make any file changes. Only analyze, review, or provide information.'
+		: '';
+	const readOnlyLabel = readOnly ? ' (READ-ONLY MODE)' : '';
+	const readOnlyInstruction = readOnly
+		? ' Remember: READ-ONLY mode is active, do not modify any files.'
+		: ' If you need to perform any actions, do so and report your findings.';
+
+	const groupChatFolder = getGroupChatDir(groupChatId);
+
+	// Get recent chat history for context
+	const chatHistory = await readLog(chat.logPath);
+	const historyContext = chatHistory
+		.slice(-15)
+		.map((m) => `[${m.from}]: ${m.content.substring(0, 500)}${m.content.length > 500 ? '...' : ''}`)
+		.join('\n');
+
+	const participantPrompt = groupChatParticipantRequestPrompt
+		.replace(/\{\{PARTICIPANT_NAME\}\}/g, nodeName)
+		.replace(/\{\{GROUP_CHAT_NAME\}\}/g, chat.name)
+		.replace(/\{\{READ_ONLY_NOTE\}\}/g, readOnlyNote)
+		.replace(/\{\{GROUP_CHAT_FOLDER\}\}/g, groupChatFolder)
+		.replace(/\{\{HISTORY_CONTEXT\}\}/g, historyContext)
+		.replace(/\{\{READ_ONLY_LABEL\}\}/g, readOnlyLabel)
+		.replace(/\{\{MESSAGE\}\}/g, input)
+		.replace(/\{\{READ_ONLY_INSTRUCTION\}\}/g, readOnlyInstruction);
+
+	// Create unique session ID
+	const sessionId = `group-chat-${groupChatId}-participant-${nodeName}-${Date.now()}`;
+
+	const agentConfigValues = getAgentConfigCallback?.(participant.agentId) || {};
+	const baseArgs = buildAgentArgs(agent, {
+		baseArgs: [...agent.args],
+		prompt: participantPrompt,
+		cwd,
+		readOnlyMode: readOnly ?? false,
+		agentSessionId: participant.agentSessionId,
+	});
+	const configResolution = applyAgentConfigOverrides(agent, baseArgs, {
+		agentConfigValues,
+		sessionCustomModel: matchingSession?.customModel,
+		sessionCustomArgs: matchingSession?.customArgs,
+		sessionCustomEnvVars: matchingSession?.customEnvVars,
+	});
+
+	// Emit participant state change
+	groupChatEmitters.emitParticipantState?.(groupChatId, nodeName, 'working');
+
+	// Prepare spawn config with potential SSH wrapping
+	let finalSpawnCommand = agent.path || agent.command;
+	let finalSpawnArgs = configResolution.args;
+	let finalSpawnCwd = cwd;
+	let finalSpawnPrompt: string | undefined = participantPrompt;
+	let finalSpawnEnvVars =
+		configResolution.effectiveCustomEnvVars ?? getCustomEnvVarsCallback?.(participant.agentId);
+	let finalSpawnShell: string | undefined;
+	let finalSpawnRunInShell = false;
+	let finalSshStdinScript: string | undefined;
+
+	// Apply SSH wrapping if configured
+	if (sshStore && matchingSession?.sshRemoteConfig) {
+		const sshWrapped = await wrapSpawnWithSsh(
+			{
+				command: finalSpawnCommand,
+				args: finalSpawnArgs,
+				cwd,
+				prompt: participantPrompt,
+				customEnvVars: finalSpawnEnvVars,
+				promptArgs: agent.promptArgs,
+				noPromptSeparator: agent.noPromptSeparator,
+				agentBinaryName: agent.binaryName,
+			},
+			matchingSession.sshRemoteConfig,
+			sshStore
+		);
+		finalSpawnCommand = sshWrapped.command;
+		finalSpawnArgs = sshWrapped.args;
+		finalSpawnCwd = sshWrapped.cwd;
+		finalSpawnPrompt = sshWrapped.prompt;
+		finalSpawnEnvVars = sshWrapped.customEnvVars;
+		finalSshStdinScript = sshWrapped.sshStdinScript;
+	}
+
+	// Get Windows-specific spawn config
+	const winConfig = getWindowsSpawnConfig(participant.agentId, matchingSession?.sshRemoteConfig);
+	if (winConfig.shell) {
+		finalSpawnShell = winConfig.shell;
+		finalSpawnRunInShell = winConfig.runInShell;
+	}
+
+	processManager.spawn({
+		sessionId,
+		toolType: participant.agentId,
+		cwd: finalSpawnCwd,
+		command: finalSpawnCommand,
+		args: finalSpawnArgs,
+		readOnlyMode: readOnly ?? false,
+		prompt: finalSpawnPrompt,
+		contextWindow: getContextWindowValue(agent, agentConfigValues),
+		customEnvVars: finalSpawnEnvVars,
+		promptArgs: agent.promptArgs,
+		noPromptSeparator: agent.noPromptSeparator,
+		shell: finalSpawnShell,
+		runInShell: finalSpawnRunInShell,
+		sendPromptViaStdin: winConfig.sendPromptViaStdin,
+		sendPromptViaStdinRaw: winConfig.sendPromptViaStdinRaw,
+		sshStdinScript: finalSshStdinScript,
+	});
+
+	console.log(`[GroupChat:Debug] Spawned topology node: ${nodeName} (session: ${sessionId})`);
+}
+
 /**
  * Routes an agent's response back to the moderator.
  *
@@ -1152,6 +1563,32 @@ export async function routeAgentResponse(
 			groupChatId,
 		});
 		// Don't throw - history logging failure shouldn't break the message flow
+	}
+
+	// For topology mode: store the participant's output in execution state
+	// so it's available for routing decisions when the moderator synthesis completes
+	if (chat.topology && chat.executionState && isTopologyRoutingActive(chat.topology)) {
+		try {
+			const updatedNodeOutputs = {
+				...chat.executionState.nodeOutputs,
+				[participantName]: message,
+			};
+			await updateGroupChat(groupChatId, {
+				executionState: {
+					...chat.executionState,
+					nodeOutputs: updatedNodeOutputs,
+				},
+			});
+			console.log(
+				`[GroupChat:Debug] Stored topology node output for ${participantName} (${message.length} chars)`
+			);
+		} catch (error) {
+			logger.error(`Failed to store topology node output for ${participantName}`, LOG_CONTEXT, {
+				error,
+				groupChatId,
+			});
+			// Non-fatal — routing can still work from moderator response
+		}
 	}
 
 	// Note: The moderator runs in batch mode (one-shot per message), so we can't write to it.

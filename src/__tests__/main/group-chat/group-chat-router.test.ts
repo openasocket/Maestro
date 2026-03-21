@@ -53,6 +53,7 @@ import {
 	routeAgentResponse,
 	getGroupChatReadOnlyState,
 	setGetSessionsCallback,
+	setTopologySettingsCallback,
 	setSshStore,
 	type SessionInfo,
 } from '../../../main/group-chat/group-chat-router';
@@ -69,8 +70,10 @@ import {
 	createGroupChat,
 	deleteGroupChat,
 	loadGroupChat,
+	updateGroupChat,
 	GroupChatParticipant,
 } from '../../../main/group-chat/group-chat-storage';
+import type { WorkflowTopology } from '../../../shared/group-chat-types';
 import { readLog } from '../../../main/group-chat/group-chat-log';
 import { AgentDetector } from '../../../main/agents';
 
@@ -901,6 +904,310 @@ describe('group-chat-router', () => {
 
 			// SSH wrapper should NOT be called for local sessions
 			expect(mockWrapSpawnWithSsh).not.toHaveBeenCalled();
+		});
+	});
+
+	// ===========================================================================
+	// Test: Topology Routing Integration
+	// ===========================================================================
+	describe('topology routing integration', () => {
+		const pipelineTopology: WorkflowTopology = {
+			pattern: 'pipeline',
+			edges: [
+				{ source: '__entry__', target: 'Researcher', edgeType: 'sequential' },
+				{ source: 'Researcher', target: 'Writer', edgeType: 'sequential' },
+				{ source: 'Writer', target: '__exit__', edgeType: 'sequential' },
+			],
+			entryPoint: 'Researcher',
+			exitPoint: 'Writer',
+		};
+
+		function enableTopologySettings() {
+			setTopologySettingsCallback(() => ({
+				teamOrchestrationEnabled: true,
+				workflowTopologyEnabled: true,
+				maxIterations: 5,
+			}));
+		}
+
+		function disableTopologySettings() {
+			setTopologySettingsCallback(() => ({
+				teamOrchestrationEnabled: false,
+				workflowTopologyEnabled: false,
+				maxIterations: 5,
+			}));
+		}
+
+		afterEach(() => {
+			// Reset topology settings callback
+			setTopologySettingsCallback(() => ({
+				teamOrchestrationEnabled: false,
+				workflowTopologyEnabled: false,
+				maxIterations: 5,
+			}));
+		});
+
+		it('should route via topology when enabled and topology exists', async () => {
+			enableTopologySettings();
+
+			const chat = await createTestChatWithModerator('Topology Test');
+
+			// Add topology to chat
+			await updateGroupChat(chat.id, { topology: pipelineTopology });
+
+			// Add participants matching topology nodes
+			await addParticipant(
+				chat.id,
+				'Researcher',
+				'claude-code',
+				mockProcessManager,
+				os.homedir(),
+				mockAgentDetector
+			);
+			await addParticipant(
+				chat.id,
+				'Writer',
+				'claude-code',
+				mockProcessManager,
+				os.homedir(),
+				mockAgentDetector
+			);
+
+			// Route user message first (to set up moderator)
+			await routeUserMessage(
+				chat.id,
+				'Research and write about topology routing',
+				mockProcessManager,
+				mockAgentDetector
+			);
+
+			// Simulate moderator response — with topology active, this should
+			// initialize execution state and spawn entry point (Researcher)
+			await routeModeratorResponse(
+				chat.id,
+				'I will route this to the Researcher first.',
+				mockProcessManager,
+				mockAgentDetector
+			);
+
+			// Check that execution state was initialized
+			const updatedChat = await loadGroupChat(chat.id);
+			expect(updatedChat?.executionState).toBeDefined();
+			expect(updatedChat?.executionState?.currentPhase).toBe('Researcher');
+			expect(updatedChat?.executionState?.activeNodes).toContain('Researcher');
+			expect(updatedChat?.executionState?.status).toBe('running');
+
+			// Verify spawn was called for Researcher participant (not @mention-based)
+			const spawnCalls = (mockProcessManager.spawn as ReturnType<typeof vi.fn>).mock.calls;
+			const participantSpawn = spawnCalls.find((call: any[]) =>
+				call[0]?.sessionId?.includes('participant-Researcher')
+			);
+			expect(participantSpawn).toBeDefined();
+		});
+
+		it('should fall back to hub-spoke when topology is disabled', async () => {
+			disableTopologySettings();
+
+			const chat = await createTestChatWithModerator('No Topology Test');
+
+			// Add topology to chat but keep feature disabled
+			await updateGroupChat(chat.id, { topology: pipelineTopology });
+
+			// Add a participant
+			await addParticipant(
+				chat.id,
+				'Researcher',
+				'claude-code',
+				mockProcessManager,
+				os.homedir(),
+				mockAgentDetector
+			);
+
+			await routeUserMessage(chat.id, 'Hello team', mockProcessManager, mockAgentDetector);
+
+			// Moderator response with @mention — should use hub-spoke routing
+			await routeModeratorResponse(
+				chat.id,
+				'@Researcher please look into this.',
+				mockProcessManager,
+				mockAgentDetector
+			);
+
+			// No execution state should be set
+			const updatedChat = await loadGroupChat(chat.id);
+			expect(updatedChat?.executionState).toBeUndefined();
+		});
+
+		it('should fall back to hub-spoke for hub-spoke pattern topology', async () => {
+			enableTopologySettings();
+
+			const hubSpokeTopology: WorkflowTopology = {
+				pattern: 'hub-spoke',
+				edges: [],
+				entryPoint: 'Moderator',
+				exitPoint: 'Moderator',
+			};
+
+			const chat = await createTestChatWithModerator('Hub-spoke Test');
+			await updateGroupChat(chat.id, { topology: hubSpokeTopology });
+
+			await addParticipant(
+				chat.id,
+				'Researcher',
+				'claude-code',
+				mockProcessManager,
+				os.homedir(),
+				mockAgentDetector
+			);
+
+			await routeUserMessage(chat.id, 'Hello', mockProcessManager, mockAgentDetector);
+
+			// With hub-spoke pattern, topology routing should not activate
+			await routeModeratorResponse(
+				chat.id,
+				'@Researcher please look into this.',
+				mockProcessManager,
+				mockAgentDetector
+			);
+
+			const updatedChat = await loadGroupChat(chat.id);
+			expect(updatedChat?.executionState).toBeUndefined();
+		});
+
+		it('should store node output in execution state during routeAgentResponse', async () => {
+			enableTopologySettings();
+
+			const chat = await createTestChatWithModerator('Node Output Test');
+			await updateGroupChat(chat.id, { topology: pipelineTopology });
+
+			await addParticipant(
+				chat.id,
+				'Researcher',
+				'claude-code',
+				mockProcessManager,
+				os.homedir(),
+				mockAgentDetector
+			);
+			await addParticipant(
+				chat.id,
+				'Writer',
+				'claude-code',
+				mockProcessManager,
+				os.homedir(),
+				mockAgentDetector
+			);
+
+			// Initialize execution state
+			await updateGroupChat(chat.id, {
+				executionState: {
+					currentPhase: 'Researcher',
+					completedNodes: [],
+					pendingNodes: ['Writer'],
+					activeNodes: ['Researcher'],
+					iterationCount: 0,
+					nodeOutputs: {},
+					status: 'running',
+				},
+			});
+
+			// Route agent response — should store output in execution state
+			await routeAgentResponse(
+				chat.id,
+				'Researcher',
+				'Here are my research findings about topology routing.'
+			);
+
+			const updatedChat = await loadGroupChat(chat.id);
+			expect(updatedChat?.executionState?.nodeOutputs['Researcher']).toBe(
+				'Here are my research findings about topology routing.'
+			);
+		});
+
+		it('should route to next node after moderator synthesis in topology mode', async () => {
+			enableTopologySettings();
+
+			const chat = await createTestChatWithModerator('Next Node Test');
+			await updateGroupChat(chat.id, { topology: pipelineTopology });
+
+			await addParticipant(
+				chat.id,
+				'Researcher',
+				'claude-code',
+				mockProcessManager,
+				os.homedir(),
+				mockAgentDetector
+			);
+			await addParticipant(
+				chat.id,
+				'Writer',
+				'claude-code',
+				mockProcessManager,
+				os.homedir(),
+				mockAgentDetector
+			);
+
+			// Set execution state as if Researcher just completed
+			await updateGroupChat(chat.id, {
+				executionState: {
+					currentPhase: 'Researcher',
+					completedNodes: [],
+					pendingNodes: ['Writer'],
+					activeNodes: ['Researcher'],
+					iterationCount: 0,
+					nodeOutputs: { Researcher: 'Research results here.' },
+					status: 'running',
+				},
+			});
+
+			await routeUserMessage(chat.id, 'Start', mockProcessManager, mockAgentDetector);
+
+			// Moderator synthesis response — topology should route to Writer next
+			await routeModeratorResponse(
+				chat.id,
+				'The Researcher has completed. Passing to Writer.',
+				mockProcessManager,
+				mockAgentDetector
+			);
+
+			// Check execution state was updated
+			const updatedChat = await loadGroupChat(chat.id);
+			expect(updatedChat?.executionState).toBeDefined();
+			expect(updatedChat?.executionState?.completedNodes).toContain('Researcher');
+
+			// Verify Writer was spawned
+			const spawnCalls = (mockProcessManager.spawn as ReturnType<typeof vi.fn>).mock.calls;
+			const writerSpawn = spawnCalls.find((call: any[]) =>
+				call[0]?.sessionId?.includes('participant-Writer')
+			);
+			expect(writerSpawn).toBeDefined();
+		});
+
+		it('should not activate topology for chats without topology', async () => {
+			enableTopologySettings();
+
+			const chat = await createTestChatWithModerator('Plain Chat');
+
+			await addParticipant(
+				chat.id,
+				'Agent1',
+				'claude-code',
+				mockProcessManager,
+				os.homedir(),
+				mockAgentDetector
+			);
+
+			await routeUserMessage(chat.id, 'Hello', mockProcessManager, mockAgentDetector);
+
+			// Normal moderator response — no topology, should use hub-spoke
+			await routeModeratorResponse(
+				chat.id,
+				'@Agent1 please assist.',
+				mockProcessManager,
+				mockAgentDetector
+			);
+
+			const updatedChat = await loadGroupChat(chat.id);
+			expect(updatedChat?.executionState).toBeUndefined();
 		});
 	});
 });

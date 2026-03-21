@@ -78,6 +78,7 @@ import {
 	setGetAgentConfigCallback,
 	setSshStore,
 	setGetCustomShellPathCallback,
+	setTopologySettingsCallback,
 	markParticipantResponded,
 	spawnModeratorSynthesis,
 	getGroupChatReadOnlyState,
@@ -845,6 +846,17 @@ function setupIpcHandlers() {
 	// This is used by both group-chat-router.ts and group-chat-agent.ts via the shared config module
 	const getCustomShellPathFn = () => store.get('customShellPath', '') as string | undefined;
 	setGetCustomShellPathCallback(getCustomShellPathFn);
+
+	// Set up topology routing settings callback for group chat router
+	setTopologySettingsCallback(() => {
+		const encoreFeatures = store.get('encoreFeatures', {}) as Record<string, boolean>;
+		const teamOrchSettings = store.get('teamOrchestrationSettings', {}) as Record<string, any>;
+		return {
+			teamOrchestrationEnabled: encoreFeatures.teamOrchestration ?? false,
+			workflowTopologyEnabled: (teamOrchSettings.enableWorkflowTopology as boolean) ?? false,
+			maxIterations: (teamOrchSettings.maxIterations as number) ?? 5,
+		};
+	});
 
 	// Setup logger event forwarding to renderer
 	setupLoggerEventForwarding(() => mainWindow);

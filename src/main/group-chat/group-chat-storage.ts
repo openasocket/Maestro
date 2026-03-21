@@ -14,7 +14,12 @@ import * as path from 'path';
 import { app } from 'electron';
 import Store from 'electron-store';
 import { v4 as uuidv4 } from 'uuid';
-import type { ModeratorConfig, GroupChatHistoryEntry } from '../../shared/group-chat-types';
+import type {
+	ModeratorConfig,
+	GroupChatHistoryEntry,
+	WorkflowTopology,
+	WorkflowExecutionState,
+} from '../../shared/group-chat-types';
 import { hasCapability } from '../agents/capabilities';
 
 // ---------------------------------------------------------------------------
@@ -123,6 +128,10 @@ export interface GroupChat {
 	logPath: string;
 	imagesDir: string;
 	archived?: boolean;
+	/** Optional workflow topology (when using graph-based routing) */
+	topology?: WorkflowTopology;
+	/** Runtime execution state for topology-based workflows */
+	executionState?: WorkflowExecutionState;
 }
 
 /**
@@ -139,6 +148,8 @@ export type GroupChatUpdate = Partial<
 		| 'participants'
 		| 'updatedAt'
 		| 'archived'
+		| 'topology'
+		| 'executionState'
 	>
 >;
 
