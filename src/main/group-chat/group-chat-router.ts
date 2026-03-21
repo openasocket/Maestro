@@ -33,6 +33,7 @@ import {
 	isWorkflowComplete,
 	updateExecutionState,
 	finalizeWorkflow,
+	describeTopology,
 } from './topology-router';
 import {
 	IProcessManager,
@@ -40,6 +41,7 @@ import {
 	isModeratorActive,
 	getModeratorSystemPrompt,
 	getModeratorSynthesisPrompt,
+	getModeratorTopologyPrompt,
 } from './group-chat-moderator';
 import { addParticipant } from './group-chat-agent';
 import { AgentDetector } from '../agents';
@@ -505,7 +507,7 @@ export async function routeUserMessage(
 				imageContext = `\n\n## Attached Images (${savedImageFilenames.length}):\nThe user attached ${savedImageFilenames.length} image(s) to this message. The images are saved at:\n${imagePaths.map((p, i) => `${i + 1}. ${p}`).join('\n')}\nPlease read/view these images to understand the user's request. When delegating to agents, mention the image paths so they can view them too.`;
 			}
 
-			const fullPrompt = `${getModeratorSystemPrompt()}
+			const fullPrompt = `${buildModeratorSystemPrompt(chat.topology, chat.executionState)}
 
 ## Current Participants:
 ${participantContext}${availableSessionsContext}
@@ -1112,6 +1114,30 @@ function isTopologyRoutingActive(
 }
 
 /**
+ * Build the moderator system prompt, using the topology-aware variant when
+ * a workflow topology is active. Substitutes topology template variables.
+ */
+function buildModeratorSystemPrompt(
+	topology: WorkflowTopology | undefined,
+	executionState: WorkflowExecutionState | undefined
+): string {
+	if (!topology || !isTopologyRoutingActive(topology)) {
+		return getModeratorSystemPrompt();
+	}
+
+	const settings = getTopologySettingsCallback?.() ?? {
+		teamOrchestrationEnabled: false,
+		workflowTopologyEnabled: false,
+		maxIterations: 5,
+	};
+
+	return getModeratorTopologyPrompt()
+		.replace(/\{\{topology_description\}\}/g, describeTopology(topology))
+		.replace(/\{\{max_iterations\}\}/g, String(settings.maxIterations))
+		.replace(/\{\{current_iteration\}\}/g, String(executionState?.iterationCount ?? 0));
+}
+
+/**
  * Route a message via the workflow topology instead of @mention-based hub-spoke routing.
  *
  * Called from routeModeratorResponse() when a topology is active. Handles:
@@ -1690,7 +1716,7 @@ export async function spawnModeratorSynthesis(
 					.join('\n')
 			: '(No agents currently in this group chat)';
 
-	const synthesisPrompt = `${getModeratorSystemPrompt()}
+	const synthesisPrompt = `${buildModeratorSystemPrompt(chat.topology, chat.executionState)}
 
 ${getModeratorSynthesisPrompt()}
 

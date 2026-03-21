@@ -11,7 +11,11 @@
 import * as os from 'os';
 import { GroupChat, loadGroupChat, updateGroupChat } from './group-chat-storage';
 import { appendToLog, readLog } from './group-chat-log';
-import { groupChatModeratorSystemPrompt, groupChatModeratorSynthesisPrompt } from '../../prompts';
+import {
+	groupChatModeratorSystemPrompt,
+	groupChatModeratorSynthesisPrompt,
+	groupChatModeratorTopologyPrompt,
+} from '../../prompts';
 import { powerManager } from '../power-manager';
 
 /**
@@ -138,6 +142,17 @@ export function getModeratorSystemPrompt(): string {
  */
 export function getModeratorSynthesisPrompt(): string {
 	return groupChatModeratorSynthesisPrompt;
+}
+
+/**
+ * Gets the topology-aware system prompt for the moderator.
+ * Used when the group chat has a workflow topology defined.
+ * Template variables ({{topology_description}}, {{max_iterations}}, {{current_iteration}})
+ * must be substituted by the caller.
+ * Loaded from src/prompts/group-chat-moderator-topology.md
+ */
+export function getModeratorTopologyPrompt(): string {
+	return groupChatModeratorTopologyPrompt;
 }
 
 /**
