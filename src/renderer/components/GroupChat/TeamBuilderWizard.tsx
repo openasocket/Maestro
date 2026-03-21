@@ -23,7 +23,11 @@ import {
 	Loader2,
 } from 'lucide-react';
 import type { Theme } from '../../types';
-import type { TeamTemplateRole, WorkflowTopology } from '../../../shared/group-chat-types';
+import type {
+	TeamTemplateRole,
+	WorkflowTopology,
+	WorkflowEdge,
+} from '../../../shared/group-chat-types';
 import { Modal } from '../ui';
 import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -43,8 +47,8 @@ interface RoleAssignment {
 }
 
 interface TopologyResult {
-	pattern: string;
-	edges: Array<{ source: string; target: string; condition?: string }>;
+	pattern: WorkflowTopology['pattern'];
+	edges: WorkflowEdge[];
 	entryPoint: string;
 	exitPoint: string;
 	reasoning: string;
@@ -119,10 +123,22 @@ async function invokeTopology(_intent: string, roles: TeamTemplateRole[]): Promi
 		edges:
 			names.length >= 2
 				? [
-						{ source: names[0], target: names[1] },
-						{ source: names[1], target: names[0], condition: 'Changes requested' },
+						{ source: names[0], target: names[1], edgeType: 'sequential' as const },
+						{
+							source: names[1],
+							target: names[0],
+							condition: 'Changes requested',
+							edgeType: 'conditional' as const,
+						},
 						...(names.length >= 3
-							? [{ source: names[1], target: names[2], condition: 'Approved' }]
+							? [
+									{
+										source: names[1],
+										target: names[2],
+										condition: 'Approved',
+										edgeType: 'conditional' as const,
+									},
+								]
 							: []),
 					]
 				: [],
@@ -220,6 +236,7 @@ export function TeamBuilderWizard({
 		(): WorkflowTopology | undefined =>
 			topology
 				? {
+						pattern: topology.pattern,
 						edges: topology.edges,
 						entryPoint: topology.entryPoint,
 						exitPoint: topology.exitPoint,

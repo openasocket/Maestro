@@ -57,16 +57,52 @@ export interface TeamTemplateRole {
 }
 
 /**
+ * A directed edge between two roles in a workflow topology.
+ */
+export interface WorkflowEdge {
+	/** Role name (or '__entry__' for user input) */
+	source: string;
+	/** Role name (or '__exit__' for final output) */
+	target: string;
+	/** Natural-language condition evaluated by moderator */
+	condition?: string;
+	/** How this edge is traversed */
+	edgeType: 'sequential' | 'parallel' | 'conditional';
+}
+
+/**
  * Workflow topology for structured agent routing.
- * Placeholder for TEAM-ORCH-04, defined minimally now.
+ * Defines graph-based patterns beyond hub-spoke moderator routing.
  */
 export interface WorkflowTopology {
+	/** The routing pattern for this workflow */
+	pattern: 'hub-spoke' | 'pipeline' | 'parallel-then-merge' | 'review-loop' | 'custom';
 	/** Directed edges between roles */
-	edges: Array<{ source: string; target: string; condition?: string }>;
+	edges: WorkflowEdge[];
 	/** Role name that receives initial input */
 	entryPoint: string;
 	/** Role name that produces final output */
 	exitPoint: string;
+}
+
+/**
+ * Runtime state for tracking workflow execution progress.
+ */
+export interface WorkflowExecutionState {
+	/** Which node/role is currently active */
+	currentPhase: string;
+	/** Roles that have finished */
+	completedNodes: string[];
+	/** Roles waiting for upstream */
+	pendingNodes: string[];
+	/** Roles currently executing */
+	activeNodes: string[];
+	/** Loop iteration count (for review-loop patterns) */
+	iterationCount: number;
+	/** Last output per role name */
+	nodeOutputs: Record<string, string>;
+	/** Overall workflow status */
+	status: 'running' | 'completed' | 'failed' | 'terminated';
 }
 
 /**
@@ -175,6 +211,10 @@ export interface GroupChat {
 	imagesDir: string;
 	draftMessage?: string;
 	archived?: boolean;
+	/** Optional workflow topology (when using graph-based routing) */
+	topology?: WorkflowTopology;
+	/** Runtime execution state for topology-based workflows */
+	executionState?: WorkflowExecutionState;
 }
 
 /**
