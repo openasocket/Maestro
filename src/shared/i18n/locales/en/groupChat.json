@@ -10,9 +10,21 @@
 			"debug": "Debug a complex issue across frontend and backend"
 		},
 		"buildTeam": "Build Team",
+		"steps": {
+			"describe": "Describe",
+			"roles": "Roles",
+			"topology": "Topology",
+			"confirm": "Confirm"
+		},
 		"stage1": {
 			"title": "Team Composition",
 			"subtitle": "Review the suggested roles for your team",
+			"teamName": "Team Name",
+			"roleName": "Role name",
+			"roleDescription": "Role description",
+			"newRole": "New Role",
+			"describeRole": "Describe this role",
+			"removeRole": "Remove role",
 			"addRole": "Add Role",
 			"revise": "Revise",
 			"approve": "Approve & Continue"
@@ -21,17 +33,26 @@
 			"title": "Workflow Topology",
 			"subtitle": "How should these agents communicate?",
 			"pattern": "Pattern",
+			"entryPoint": "Entry",
+			"exitPoint": "Exit",
 			"skipToHubSpoke": "Skip (use hub-spoke)"
 		},
 		"stage3": {
 			"title": "Confirm Team",
 			"subtitle": "Review your team configuration",
+			"rolesCount": "Roles ({{count}})",
+			"topologyLabel": "Topology",
 			"createChat": "Create Group Chat",
 			"saveTemplate": "Save as Template",
 			"createAndSave": "Create & Save"
 		},
+		"back": "Back",
+		"cancel": "Cancel",
+		"dismiss": "Dismiss",
 		"thinking": "Building your team...",
 		"error": "Failed to generate team configuration. Try again or adjust your description.",
+		"errorTopology": "Failed to generate topology. Try again.",
+		"errorCompletion": "Failed to finalize configuration. Try again.",
 		"retry": "Try Again"
 	},
 	"teamTemplates": {
