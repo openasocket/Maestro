@@ -74,6 +74,9 @@ export const MODAL_PRIORITIES = {
 	/** Team template browser modal (full list with search/filter) */
 	TEMPLATE_BROWSER: 642,
 
+	/** Topology editor modal (edit workflow graph from Group Chat creation) */
+	TOPOLOGY_EDITOR: 641,
+
 	/** Rename group chat modal */
 	RENAME_GROUP_CHAT: 640,
 

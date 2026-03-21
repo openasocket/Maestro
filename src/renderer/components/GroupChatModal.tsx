@@ -34,6 +34,7 @@ import { AGENT_TILES } from './Wizard/screens/AgentSelectionScreen';
 import { AgentConfigPanel } from './shared/AgentConfigPanel';
 import { SshRemoteSelector } from './shared/SshRemoteSelector';
 import { TemplateBrowserModal } from './TemplateBrowserModal';
+import { TopologyEditor } from './GroupChat/TopologyEditor';
 import { useAgentConfiguration } from '../hooks/agent';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useModalStore } from '../stores/modalStore';
@@ -82,6 +83,8 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 	const [templates, setTemplates] = useState<TeamTemplate[]>([]);
 	const [selectedTemplate, setSelectedTemplate] = useState<TeamTemplate | null>(null);
 	const [showTemplateBrowser, setShowTemplateBrowser] = useState(false);
+	const [showTopologyEditor, setShowTopologyEditor] = useState(false);
+	const [editedTopology, setEditedTopology] = useState<WorkflowTopology | null>(null);
 
 	// Feature flags for templates and topology
 	const encoreFeatures = useSettingsStore((s) => s.encoreFeatures);
@@ -152,6 +155,8 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 			setName('');
 			setConfigWasModified(false);
 			setSelectedTemplate(null);
+			setEditedTopology(null);
+			setShowTopologyEditor(false);
 		}
 	}, [isOpen]);
 
@@ -171,6 +176,7 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 	const applyTemplate = useCallback(
 		(template: TeamTemplate) => {
 			setSelectedTemplate(template);
+			setEditedTopology(null); // Reset any previous topology edits
 			// Set moderator agent from template
 			if (ac.detectedAgents.some((a) => a.id === template.moderatorAgentId)) {
 				ac.setSelectedAgent(template.moderatorAgentId);
@@ -224,9 +230,11 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 		const moderatorConfig = buildModeratorConfig();
 
 		if (mode === 'create') {
-			// Pass topology from selected template when topology feature is enabled
+			// Pass topology (edited or from template) when topology feature is enabled
 			const topology =
-				topologyEnabled && selectedTemplate?.topology ? selectedTemplate.topology : undefined;
+				topologyEnabled && (editedTopology || selectedTemplate?.topology)
+					? editedTopology || selectedTemplate?.topology
+					: undefined;
 			props.onCreate(name.trim(), ac.selectedAgent, moderatorConfig, topology);
 		} else if (groupChat) {
 			props.onSave(groupChat.id, name.trim(), ac.selectedAgent, moderatorConfig);
@@ -245,6 +253,7 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 		onClose,
 		topologyEnabled,
 		selectedTemplate,
+		editedTopology,
 	]);
 
 	// Check if anything has changed (edit mode only)
@@ -479,21 +488,21 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 									</span>
 								)}
 								{/* Topology summary (when template has topology and feature is enabled) */}
-								{topologyEnabled && selectedTemplate.topology && (
+								{topologyEnabled && (editedTopology || selectedTemplate.topology) && (
 									<div className="mt-2 flex items-start gap-2">
 										<GitBranch
 											className="w-3 h-3 mt-0.5 shrink-0"
 											style={{ color: theme.colors.accent }}
 										/>
 										<div className="flex-1">
-											<TopologySummary topology={selectedTemplate.topology} theme={theme} />
+											<TopologySummary
+												topology={editedTopology || selectedTemplate.topology!}
+												theme={theme}
+											/>
 										</div>
 										<button
 											type="button"
-											onClick={() => {
-												// Edit Topology — opens editor (TopologyEditor component, next task)
-												useModalStore.getState().openModal('topologyEditor');
-											}}
+											onClick={() => setShowTopologyEditor(true)}
 											className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded border transition-colors hover:bg-white/5"
 											style={{
 												borderColor: theme.colors.border,
@@ -520,6 +529,23 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 						onSelect={handleBrowserTemplateSelect}
 					/>
 				)}
+
+				{/* Topology Editor Modal */}
+				{showTopologyEditor &&
+					selectedTemplate &&
+					(editedTopology || selectedTemplate.topology) && (
+						<TopologyEditor
+							theme={theme}
+							isOpen={showTopologyEditor}
+							topology={editedTopology || selectedTemplate.topology!}
+							roleNames={selectedTemplate.roles.map((r) => r.name)}
+							onSave={(topo) => {
+								setEditedTopology(topo);
+								setShowTopologyEditor(false);
+							}}
+							onClose={() => setShowTopologyEditor(false)}
+						/>
+					)}
 
 				{/* Name Input (edit mode: before moderator, create mode: after) */}
 				{!isCreate && (
