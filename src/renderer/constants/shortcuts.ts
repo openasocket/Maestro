@@ -92,7 +92,7 @@ export const DEFAULT_SHORTCUTS: Record<string, Shortcut> = {
 	teamBuilder: {
 		id: 'teamBuilder',
 		label: 'Team Builder',
-		keys: ['Alt', 'Shift', 't'],
+		keys: ['Meta', 'Shift', 't'],
 	},
 	jumpToTerminal: {
 		id: 'jumpToTerminal',
