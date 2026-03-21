@@ -55,6 +55,50 @@
 		"errorCompletion": "Failed to finalize configuration. Try again.",
 		"retry": "Try Again"
 	},
+	"topology": {
+		"title": "Workflow Topology",
+		"pattern": "Pattern",
+		"patterns": {
+			"hub-spoke": "Hub & Spoke (default)",
+			"pipeline": "Pipeline",
+			"parallel-then-merge": "Parallel then Merge",
+			"review-loop": "Review Loop",
+			"custom": "Custom"
+		},
+		"edges": "Edges",
+		"addEdge": "Add Edge",
+		"removeEdge": "Remove",
+		"noEdges": "No edges defined. Add edges to connect roles.",
+		"entryPoint": "Entry Point",
+		"exitPoint": "Exit Point",
+		"selectPlaceholder": "— select —",
+		"condition": "Condition (optional)",
+		"conditionFor": "Condition for {{source}} → {{target}}:",
+		"conditionPlaceholder": "e.g., output contains 'approved'",
+		"editTopology": "Edit Topology",
+		"edgeTypes": {
+			"sequential": "sequential",
+			"parallel": "parallel",
+			"conditional": "conditional"
+		},
+		"save": "Save",
+		"cancel": "Cancel",
+		"validation": {
+			"disconnectedNode": "{{name}} is not connected to any edge",
+			"missingEntry": "No entry point defined",
+			"entryNotRole": "Entry point \"{{name}}\" is not a known role",
+			"missingExit": "No exit point defined",
+			"exitNotRole": "Exit point \"{{name}}\" is not a known role",
+			"noEdges": "No edges defined"
+		},
+		"execution": {
+			"iteration": "Iteration {{current}} of {{max}}",
+			"completed": "Workflow completed",
+			"terminated": "Workflow terminated (max iterations reached)",
+			"activeNode": "{{name}} is working...",
+			"waitingFor": "Waiting for {{names}}"
+		}
+	},
 	"teamTemplates": {
 		"title": "Team Templates",
 		"saveAsTemplate": "Save as Template",
