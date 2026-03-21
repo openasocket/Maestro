@@ -138,6 +138,42 @@ export const CREATE_COMPOUND_INDEXES_SQL = `
 `;
 
 // ============================================================================
+// Team Orchestration Events (Migration v5)
+// ============================================================================
+
+export const CREATE_TEAM_ORCH_EVENTS_SQL = `
+  CREATE TABLE IF NOT EXISTS team_orch_events (
+    id TEXT PRIMARY KEY,
+    group_chat_id TEXT NOT NULL,
+    group_chat_name TEXT NOT NULL,
+    template_id TEXT,
+    template_name TEXT,
+    topology_pattern TEXT NOT NULL,
+    termination_mode TEXT NOT NULL,
+    status TEXT NOT NULL,
+    iteration_count INTEGER NOT NULL,
+    max_iterations INTEGER NOT NULL,
+    start_time INTEGER NOT NULL,
+    end_time INTEGER NOT NULL,
+    duration INTEGER NOT NULL,
+    participant_count INTEGER NOT NULL,
+    participant_breakdown TEXT,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    total_cost REAL NOT NULL DEFAULT 0,
+    moderator_agent_id TEXT NOT NULL,
+    project_path TEXT
+  )
+`;
+
+export const CREATE_TEAM_ORCH_EVENTS_INDEXES_SQL = `
+  CREATE INDEX IF NOT EXISTS idx_team_orch_start_time ON team_orch_events(start_time);
+  CREATE INDEX IF NOT EXISTS idx_team_orch_status ON team_orch_events(status);
+  CREATE INDEX IF NOT EXISTS idx_team_orch_topology ON team_orch_events(topology_pattern);
+  CREATE INDEX IF NOT EXISTS idx_team_orch_template ON team_orch_events(template_id);
+  CREATE INDEX IF NOT EXISTS idx_team_orch_time_topology ON team_orch_events(start_time, topology_pattern)
+`;
+
+// ============================================================================
 // Utilities
 // ============================================================================
 
