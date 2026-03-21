@@ -464,6 +464,7 @@ function MaestroConsoleInner() {
 		setAutoScrollAiMode,
 		setSuppressWindowsWarning,
 		encoreFeatures,
+		teamOrchestrationSettings,
 	} = settings;
 
 	// Reset modal-open flags when their Encore Feature toggle is disabled
@@ -888,6 +889,9 @@ function MaestroConsoleInner() {
 		handleProcessMonitorNavigateToGroupChat,
 		handleOpenModeratorSession,
 		handleJumpToGroupChatMessage,
+		handleStopAfterIteration,
+		handleForceComplete,
+		handleAddIteration,
 		handleGroupChatRightTabChange,
 		handleSendGroupChatMessage,
 		handleGroupChatDraftChange,
@@ -3448,6 +3452,11 @@ function MaestroConsoleInner() {
 									participantColors={groupChatParticipantColors}
 									messagesRef={groupChatMessagesRef}
 									onShowWorkflow={() => handleGroupChatRightTabChange('workflow')}
+									onStopAfterIteration={handleStopAfterIteration}
+									onForceComplete={handleForceComplete}
+									onAddIteration={handleAddIteration}
+									maxIterations={teamOrchestrationSettings.maxIterations}
+									terminationMode={teamOrchestrationSettings.defaultTerminationMode}
 								/>
 							</div>
 							<GroupChatRightPanel

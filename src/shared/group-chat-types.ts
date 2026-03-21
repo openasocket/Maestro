@@ -103,6 +103,8 @@ export interface WorkflowExecutionState {
 	nodeOutputs: Record<string, string>;
 	/** Overall workflow status */
 	status: 'running' | 'completed' | 'failed' | 'terminated';
+	/** When true, workflow terminates after the current iteration completes */
+	stopAfterIteration?: boolean;
 }
 
 /**

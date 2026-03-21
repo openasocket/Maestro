@@ -159,6 +159,16 @@ export function createGroupChatApi() {
 		getImages: (id: string): Promise<Record<string, string>> =>
 			ipcRenderer.invoke('groupChat:getImages', id),
 
+		// Iteration Controls
+		setStopAfterIteration: (id: string): Promise<void> =>
+			ipcRenderer.invoke('groupChat:setStopAfterIteration', id),
+
+		forceComplete: (id: string): Promise<void> => ipcRenderer.invoke('groupChat:forceComplete', id),
+
+		addIteration: (id: string): Promise<void> => ipcRenderer.invoke('groupChat:addIteration', id),
+
+		getExecutionState: (id: string) => ipcRenderer.invoke('groupChat:getExecutionState', id),
+
 		// Events
 		onMessage: (callback: (groupChatId: string, message: ChatMessage) => void) => {
 			const handler = (_: any, groupChatId: string, message: ChatMessage) =>
@@ -223,6 +233,12 @@ export function createGroupChatApi() {
 				callback(groupChatId, sessionId);
 			ipcRenderer.on('groupChat:moderatorSessionIdChanged', handler);
 			return () => ipcRenderer.removeListener('groupChat:moderatorSessionIdChanged', handler);
+		},
+
+		onExecutionStateChanged: (callback: (groupChatId: string, state: any) => void) => {
+			const handler = (_: any, groupChatId: string, state: any) => callback(groupChatId, state);
+			ipcRenderer.on('groupChat:executionStateChanged', handler);
+			return () => ipcRenderer.removeListener('groupChat:executionStateChanged', handler);
 		},
 	};
 }

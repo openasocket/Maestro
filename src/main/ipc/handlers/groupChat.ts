@@ -36,7 +36,13 @@ import {
 } from '../../group-chat/group-chat-storage';
 
 // Group chat history type
-import type { GroupChatHistoryEntry } from '../../../shared/group-chat-types';
+import type {
+	GroupChatHistoryEntry,
+	WorkflowExecutionState,
+} from '../../../shared/group-chat-types';
+
+// Topology router imports
+import { finalizeWorkflow } from '../../group-chat/topology-router';
 
 // Group chat log imports
 import { appendToLog, readLog, saveImage, GroupChatMessage } from '../../group-chat/group-chat-log';
@@ -102,6 +108,7 @@ export const groupChatEmitters: {
 		state: ParticipantState
 	) => void;
 	emitModeratorSessionIdChanged?: (groupChatId: string, sessionId: string) => void;
+	emitExecutionStateChanged?: (groupChatId: string, state: WorkflowExecutionState) => void;
 } = {};
 
 // Helper to create handler options with consistent context
@@ -799,6 +806,97 @@ Respond with ONLY the summary text, no additional commentary.`;
 		)
 	);
 
+	// ========== Iteration Control Handlers ==========
+
+	// Set stop-after-iteration flag on execution state
+	ipcMain.handle(
+		'groupChat:setStopAfterIteration',
+		withIpcErrorLogging(handlerOpts('setStopAfterIteration'), async (id: string): Promise<void> => {
+			const chat = await loadGroupChat(id);
+			if (!chat) {
+				throw new Error(`Group chat not found: ${id}`);
+			}
+			if (!chat.executionState) {
+				throw new Error(`No active execution state for group chat: ${id}`);
+			}
+
+			const updatedState: WorkflowExecutionState = {
+				...chat.executionState,
+				stopAfterIteration: true,
+			};
+
+			await updateGroupChat(id, { executionState: updatedState });
+			groupChatEmitters.emitExecutionStateChanged?.(id, updatedState);
+			logger.info(`Set stopAfterIteration for group chat: ${id}`, LOG_CONTEXT);
+		})
+	);
+
+	// Force complete the workflow immediately
+	ipcMain.handle(
+		'groupChat:forceComplete',
+		withIpcErrorLogging(handlerOpts('forceComplete'), async (id: string): Promise<void> => {
+			const chat = await loadGroupChat(id);
+			if (!chat) {
+				throw new Error(`Group chat not found: ${id}`);
+			}
+			if (!chat.executionState) {
+				throw new Error(`No active execution state for group chat: ${id}`);
+			}
+
+			const finalState = finalizeWorkflow(chat.executionState, 'terminated');
+			await updateGroupChat(id, { executionState: finalState });
+			groupChatEmitters.emitExecutionStateChanged?.(id, finalState);
+			groupChatEmitters.emitStateChange?.(id, 'idle');
+
+			groupChatEmitters.emitMessage?.(id, {
+				timestamp: new Date().toISOString(),
+				from: 'system',
+				content: 'Workflow force-completed by user.',
+			});
+
+			logger.info(`Force-completed workflow for group chat: ${id}`, LOG_CONTEXT);
+		})
+	);
+
+	// Add one more iteration to maxIterations
+	ipcMain.handle(
+		'groupChat:addIteration',
+		withIpcErrorLogging(handlerOpts('addIteration'), async (id: string): Promise<void> => {
+			const chat = await loadGroupChat(id);
+			if (!chat) {
+				throw new Error(`Group chat not found: ${id}`);
+			}
+			if (!chat.executionState) {
+				throw new Error(`No active execution state for group chat: ${id}`);
+			}
+
+			// If stopAfterIteration was set, clear it since user wants more iterations
+			const updatedState: WorkflowExecutionState = {
+				...chat.executionState,
+				stopAfterIteration: false,
+			};
+
+			await updateGroupChat(id, { executionState: updatedState });
+			groupChatEmitters.emitExecutionStateChanged?.(id, updatedState);
+			logger.info(`Added iteration for group chat: ${id}`, LOG_CONTEXT);
+		})
+	);
+
+	// Get current execution state
+	ipcMain.handle(
+		'groupChat:getExecutionState',
+		withIpcErrorLogging(
+			handlerOpts('getExecutionState'),
+			async (id: string): Promise<WorkflowExecutionState | null> => {
+				const chat = await loadGroupChat(id);
+				if (!chat) {
+					throw new Error(`Group chat not found: ${id}`);
+				}
+				return chat.executionState ?? null;
+			}
+		)
+	);
+
 	// ========== Event Emission Helpers ==========
 	// These are stored in module scope for access by the exported emitters
 
@@ -902,6 +1000,20 @@ Respond with ONLY the summary text, no additional commentary.`;
 		const mainWindow = getMainWindow();
 		if (isWebContentsAvailable(mainWindow)) {
 			mainWindow.webContents.send('groupChat:moderatorSessionIdChanged', groupChatId, sessionId);
+		}
+	};
+
+	/**
+	 * Emit an execution state change event to the renderer.
+	 * Called when the workflow execution state is updated (iteration controls, node completion, etc.).
+	 */
+	groupChatEmitters.emitExecutionStateChanged = (
+		groupChatId: string,
+		state: WorkflowExecutionState
+	): void => {
+		const mainWindow = getMainWindow();
+		if (isWebContentsAvailable(mainWindow)) {
+			mainWindow.webContents.send('groupChat:executionStateChanged', groupChatId, state);
 		}
 	};
 

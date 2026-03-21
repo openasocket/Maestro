@@ -494,6 +494,30 @@ describe('isWorkflowComplete', () => {
 
 		expect(isWorkflowComplete(topology, state, 10)).toBe(true);
 	});
+
+	it('returns true when stopAfterIteration flag is set', () => {
+		const topology = createPipelineTopology();
+		const state: WorkflowExecutionState = {
+			...createBaseExecutionState(),
+			activeNodes: ['Writer'],
+			pendingNodes: ['Editor'],
+			stopAfterIteration: true,
+		};
+
+		expect(isWorkflowComplete(topology, state, 10)).toBe(true);
+	});
+
+	it('returns false when stopAfterIteration is false', () => {
+		const topology = createPipelineTopology();
+		const state: WorkflowExecutionState = {
+			...createBaseExecutionState(),
+			activeNodes: ['Writer'],
+			pendingNodes: ['Editor'],
+			stopAfterIteration: false,
+		};
+
+		expect(isWorkflowComplete(topology, state, 10)).toBe(false);
+	});
 });
 
 // ============================================================================

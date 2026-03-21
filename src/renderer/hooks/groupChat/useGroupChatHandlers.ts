@@ -15,6 +15,7 @@ import type { WorkflowTopology } from '../../../shared/group-chat-types';
 import { useGroupChatStore } from '../../stores/groupChatStore';
 import { useModalStore } from '../../stores/modalStore';
 import { useSessionStore } from '../../stores/sessionStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { useUIStore } from '../../stores/uiStore';
 import { useAgentErrorRecovery } from '../agent/useAgentErrorRecovery';
 import { notifyToast } from '../../stores/notificationStore';
@@ -66,6 +67,11 @@ export interface GroupChatHandlersReturn {
 	handleProcessMonitorNavigateToGroupChat: (groupChatId: string) => void;
 	handleOpenModeratorSession: (moderatorSessionId: string) => void;
 	handleJumpToGroupChatMessage: (timestamp: number) => void;
+
+	// Iteration controls
+	handleStopAfterIteration: () => void;
+	handleForceComplete: () => void;
+	handleAddIteration: () => void;
 
 	// Right panel
 	handleGroupChatRightTabChange: (tab: GroupChatRightTab) => void;
@@ -214,11 +220,18 @@ export function useGroupChatHandlers(): GroupChatHandlersReturn {
 			}
 		);
 
+		const unsubExecutionState = window.maestro.groupChat.onExecutionStateChanged?.((id, state) => {
+			setGroupChats((prev) =>
+				prev.map((chat) => (chat.id === id ? { ...chat, executionState: state } : chat))
+			);
+		});
+
 		return () => {
 			unsubState();
 			unsubParticipants();
 			unsubParticipantState?.();
 			unsubModeratorSessionId?.();
+			unsubExecutionState?.();
 		};
 	}, []); // Mount once — global listeners read activeGroupChatId from store at call time
 
@@ -598,6 +611,35 @@ export function useGroupChatHandlers(): GroupChatHandlersReturn {
 	}, []);
 
 	// =======================================================================
+	// Iteration control handlers
+	// =======================================================================
+
+	const handleStopAfterIteration = useCallback(() => {
+		const { activeGroupChatId } = useGroupChatStore.getState();
+		if (!activeGroupChatId) return;
+		window.maestro.groupChat.setStopAfterIteration(activeGroupChatId);
+	}, []);
+
+	const handleForceComplete = useCallback(() => {
+		const { activeGroupChatId } = useGroupChatStore.getState();
+		if (!activeGroupChatId) return;
+		window.maestro.groupChat.forceComplete(activeGroupChatId);
+	}, []);
+
+	const handleAddIteration = useCallback(() => {
+		const { activeGroupChatId } = useGroupChatStore.getState();
+		if (!activeGroupChatId) return;
+		// Increment maxIterations in settings
+		const { teamOrchestrationSettings, setTeamOrchestrationSettings } = useSettingsStore.getState();
+		setTeamOrchestrationSettings({
+			...teamOrchestrationSettings,
+			maxIterations: teamOrchestrationSettings.maxIterations + 1,
+		});
+		// Also clear stopAfterIteration flag on the execution state
+		window.maestro.groupChat.addIteration(activeGroupChatId);
+	}, []);
+
+	// =======================================================================
 	// Modal openers
 	// =======================================================================
 
@@ -687,6 +729,11 @@ export function useGroupChatHandlers(): GroupChatHandlersReturn {
 		handleProcessMonitorNavigateToGroupChat,
 		handleOpenModeratorSession,
 		handleJumpToGroupChatMessage,
+
+		// Iteration controls
+		handleStopAfterIteration,
+		handleForceComplete,
+		handleAddIteration,
 
 		// Right panel
 		handleGroupChatRightTabChange,

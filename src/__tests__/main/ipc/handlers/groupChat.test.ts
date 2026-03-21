@@ -72,6 +72,16 @@ vi.mock('../../../../main/group-chat/group-chat-router', () => ({
 	routeUserMessage: vi.fn(),
 }));
 
+// Mock topology-router
+vi.mock('../../../../main/group-chat/topology-router', () => ({
+	finalizeWorkflow: vi.fn((state: any, status: string) => ({
+		...state,
+		activeNodes: [],
+		pendingNodes: [],
+		status,
+	})),
+}));
+
 // Mock agent-detector
 vi.mock('../../../../main/agent-detector', () => ({
 	AgentDetector: vi.fn(),
@@ -183,6 +193,11 @@ describe('groupChat IPC handlers', () => {
 				'groupChat:getHistoryFilePath',
 				// Image handlers
 				'groupChat:getImages',
+				// Iteration control handlers
+				'groupChat:setStopAfterIteration',
+				'groupChat:forceComplete',
+				'groupChat:addIteration',
+				'groupChat:getExecutionState',
 			];
 
 			for (const channel of expectedChannels) {
@@ -1084,6 +1099,237 @@ describe('groupChat IPC handlers', () => {
 					content: 'Test',
 				});
 			}).not.toThrow();
+		});
+	});
+
+	// ========== Iteration Control Handlers ==========
+
+	describe('groupChat:setStopAfterIteration', () => {
+		it('should set stopAfterIteration flag on execution state', async () => {
+			const mockChat: GroupChat = {
+				id: 'gc-stop',
+				name: 'Stop Chat',
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+				moderatorAgentId: 'claude-code',
+				moderatorSessionId: 'session-stop',
+				participants: [],
+				logPath: '/path/to/chat.log',
+				imagesDir: '/path/to/images',
+				executionState: {
+					currentPhase: 'Writer',
+					completedNodes: [],
+					pendingNodes: ['Reviewer'],
+					activeNodes: ['Writer'],
+					iterationCount: 1,
+					nodeOutputs: {},
+					status: 'running',
+				},
+			};
+
+			vi.mocked(groupChatStorage.loadGroupChat).mockResolvedValue(mockChat);
+			vi.mocked(groupChatStorage.updateGroupChat).mockResolvedValue(mockChat);
+
+			const handler = handlers.get('groupChat:setStopAfterIteration');
+			await handler!({} as any, 'gc-stop');
+
+			expect(groupChatStorage.updateGroupChat).toHaveBeenCalledWith('gc-stop', {
+				executionState: expect.objectContaining({
+					stopAfterIteration: true,
+					status: 'running',
+				}),
+			});
+		});
+
+		it('should throw when no execution state exists', async () => {
+			const mockChat: GroupChat = {
+				id: 'gc-no-exec',
+				name: 'No Exec Chat',
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+				moderatorAgentId: 'claude-code',
+				moderatorSessionId: 'session-no-exec',
+				participants: [],
+				logPath: '/path/to/chat.log',
+				imagesDir: '/path/to/images',
+			};
+
+			vi.mocked(groupChatStorage.loadGroupChat).mockResolvedValue(mockChat);
+
+			const handler = handlers.get('groupChat:setStopAfterIteration');
+			await expect(handler!({} as any, 'gc-no-exec')).rejects.toThrow('No active execution state');
+		});
+	});
+
+	describe('groupChat:forceComplete', () => {
+		it('should finalize workflow as terminated and emit events', async () => {
+			const mockChat: GroupChat = {
+				id: 'gc-force',
+				name: 'Force Chat',
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+				moderatorAgentId: 'claude-code',
+				moderatorSessionId: 'session-force',
+				participants: [],
+				logPath: '/path/to/chat.log',
+				imagesDir: '/path/to/images',
+				executionState: {
+					currentPhase: 'Writer',
+					completedNodes: [],
+					pendingNodes: ['Reviewer'],
+					activeNodes: ['Writer'],
+					iterationCount: 1,
+					nodeOutputs: {},
+					status: 'running',
+				},
+			};
+
+			vi.mocked(groupChatStorage.loadGroupChat).mockResolvedValue(mockChat);
+			vi.mocked(groupChatStorage.updateGroupChat).mockResolvedValue(mockChat);
+
+			const handler = handlers.get('groupChat:forceComplete');
+			await handler!({} as any, 'gc-force');
+
+			expect(groupChatStorage.updateGroupChat).toHaveBeenCalledWith('gc-force', {
+				executionState: expect.objectContaining({
+					status: 'terminated',
+					activeNodes: [],
+					pendingNodes: [],
+				}),
+			});
+
+			// Should emit state change to idle
+			expect(mockMainWindow.webContents.send).toHaveBeenCalledWith(
+				'groupChat:stateChange',
+				'gc-force',
+				'idle'
+			);
+
+			// Should emit system message about force completion
+			expect(mockMainWindow.webContents.send).toHaveBeenCalledWith(
+				'groupChat:message',
+				'gc-force',
+				expect.objectContaining({
+					from: 'system',
+					content: 'Workflow force-completed by user.',
+				})
+			);
+		});
+	});
+
+	describe('groupChat:addIteration', () => {
+		it('should clear stopAfterIteration flag on execution state', async () => {
+			const mockChat: GroupChat = {
+				id: 'gc-add',
+				name: 'Add Iter Chat',
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+				moderatorAgentId: 'claude-code',
+				moderatorSessionId: 'session-add',
+				participants: [],
+				logPath: '/path/to/chat.log',
+				imagesDir: '/path/to/images',
+				executionState: {
+					currentPhase: 'Writer',
+					completedNodes: [],
+					pendingNodes: ['Reviewer'],
+					activeNodes: ['Writer'],
+					iterationCount: 2,
+					nodeOutputs: {},
+					status: 'running',
+					stopAfterIteration: true,
+				},
+			};
+
+			vi.mocked(groupChatStorage.loadGroupChat).mockResolvedValue(mockChat);
+			vi.mocked(groupChatStorage.updateGroupChat).mockResolvedValue(mockChat);
+
+			const handler = handlers.get('groupChat:addIteration');
+			await handler!({} as any, 'gc-add');
+
+			expect(groupChatStorage.updateGroupChat).toHaveBeenCalledWith('gc-add', {
+				executionState: expect.objectContaining({
+					stopAfterIteration: false,
+					iterationCount: 2,
+				}),
+			});
+		});
+	});
+
+	describe('groupChat:getExecutionState', () => {
+		it('should return execution state when it exists', async () => {
+			const execState = {
+				currentPhase: 'Writer',
+				completedNodes: ['Researcher'],
+				pendingNodes: ['Reviewer'],
+				activeNodes: ['Writer'],
+				iterationCount: 1,
+				nodeOutputs: { Researcher: 'output' },
+				status: 'running' as const,
+			};
+
+			const mockChat: GroupChat = {
+				id: 'gc-get-exec',
+				name: 'Get Exec Chat',
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+				moderatorAgentId: 'claude-code',
+				moderatorSessionId: 'session-get-exec',
+				participants: [],
+				logPath: '/path/to/chat.log',
+				imagesDir: '/path/to/images',
+				executionState: execState,
+			};
+
+			vi.mocked(groupChatStorage.loadGroupChat).mockResolvedValue(mockChat);
+
+			const handler = handlers.get('groupChat:getExecutionState');
+			const result = await handler!({} as any, 'gc-get-exec');
+
+			expect(result).toEqual(execState);
+		});
+
+		it('should return null when no execution state exists', async () => {
+			const mockChat: GroupChat = {
+				id: 'gc-no-state',
+				name: 'No State Chat',
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+				moderatorAgentId: 'claude-code',
+				moderatorSessionId: 'session-no-state',
+				participants: [],
+				logPath: '/path/to/chat.log',
+				imagesDir: '/path/to/images',
+			};
+
+			vi.mocked(groupChatStorage.loadGroupChat).mockResolvedValue(mockChat);
+
+			const handler = handlers.get('groupChat:getExecutionState');
+			const result = await handler!({} as any, 'gc-no-state');
+
+			expect(result).toBeNull();
+		});
+	});
+
+	describe('emitExecutionStateChanged', () => {
+		it('should emit execution state change event to renderer', () => {
+			const state = {
+				currentPhase: 'Writer',
+				completedNodes: [],
+				pendingNodes: ['Reviewer'],
+				activeNodes: ['Writer'],
+				iterationCount: 0,
+				nodeOutputs: {},
+				status: 'running' as const,
+			};
+
+			groupChatEmitters.emitExecutionStateChanged!('gc-emit', state);
+
+			expect(mockMainWindow.webContents.send).toHaveBeenCalledWith(
+				'groupChat:executionStateChanged',
+				'gc-emit',
+				state
+			);
 		});
 	});
 });

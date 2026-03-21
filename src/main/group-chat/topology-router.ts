@@ -317,6 +317,11 @@ export function isWorkflowComplete(
 		return true;
 	}
 
+	// User requested stop after current iteration
+	if (executionState.stopAfterIteration) {
+		return true;
+	}
+
 	// No active nodes and no pending nodes — everything is done
 	if (executionState.activeNodes.length === 0 && executionState.pendingNodes.length === 0) {
 		return true;

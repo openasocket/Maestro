@@ -1914,6 +1914,20 @@ interface MaestroAPI {
 		clearHistory: (id: string) => Promise<void>;
 		getHistoryFilePath: (id: string) => Promise<string | null>;
 		getImages: (id: string) => Promise<Record<string, string>>;
+		// Iteration Controls
+		setStopAfterIteration: (id: string) => Promise<void>;
+		forceComplete: (id: string) => Promise<void>;
+		addIteration: (id: string) => Promise<void>;
+		getExecutionState: (id: string) => Promise<{
+			currentPhase: string;
+			completedNodes: string[];
+			pendingNodes: string[];
+			activeNodes: string[];
+			iterationCount: number;
+			nodeOutputs: Record<string, string>;
+			status: 'running' | 'completed' | 'failed' | 'terminated';
+			stopAfterIteration?: boolean;
+		} | null>;
 		// Events
 		onMessage: (
 			callback: (
@@ -1974,6 +1988,21 @@ interface MaestroAPI {
 		) => () => void;
 		onModeratorSessionIdChanged: (
 			callback: (groupChatId: string, sessionId: string) => void
+		) => () => void;
+		onExecutionStateChanged: (
+			callback: (
+				groupChatId: string,
+				state: {
+					currentPhase: string;
+					completedNodes: string[];
+					pendingNodes: string[];
+					activeNodes: string[];
+					iterationCount: number;
+					nodeOutputs: Record<string, string>;
+					status: 'running' | 'completed' | 'failed' | 'terminated';
+					stopAfterIteration?: boolean;
+				}
+			) => void
 		) => () => void;
 	};
 	// Leaderboard API

@@ -1203,6 +1203,7 @@ async function routeViaTopology(
 
 		// Persist initial state
 		await updateGroupChat(groupChatId, { executionState });
+		groupChatEmitters.emitExecutionStateChanged?.(groupChatId, executionState);
 
 		// Spawn the entry point agent with the moderator's processed message
 		if (processManager && agentDetector) {
@@ -1235,6 +1236,7 @@ async function routeViaTopology(
 		console.log(`[GroupChat:Debug] No active nodes to complete — finalizing`);
 		const finalState = finalizeWorkflow(executionState, 'completed');
 		await updateGroupChat(groupChatId, { executionState: finalState });
+		groupChatEmitters.emitExecutionStateChanged?.(groupChatId, finalState);
 		groupChatEmitters.emitStateChange?.(groupChatId, 'idle');
 		powerManager.removeBlockReason(`groupchat:${groupChatId}`);
 		return;
@@ -1271,15 +1273,19 @@ async function routeViaTopology(
 		allNextNodes.size === 0
 	) {
 		const terminationReason =
-			updatedState.iterationCount >= settings.maxIterations ? 'terminated' : 'completed';
+			updatedState.iterationCount >= settings.maxIterations || updatedState.stopAfterIteration
+				? 'terminated'
+				: 'completed';
 		console.log(`[GroupChat:Debug] Workflow ${terminationReason}`);
 
 		const finalState = finalizeWorkflow(updatedState, terminationReason);
 		await updateGroupChat(groupChatId, { executionState: finalState });
+		groupChatEmitters.emitExecutionStateChanged?.(groupChatId, finalState);
 
 		// Emit a system message about completion
-		const completionMessage =
-			terminationReason === 'terminated'
+		const completionMessage = updatedState.stopAfterIteration
+			? 'Workflow stopped after iteration (user requested).'
+			: terminationReason === 'terminated'
 				? `Workflow terminated: maximum iterations (${settings.maxIterations}) reached.`
 				: 'Workflow completed successfully.';
 
@@ -1296,6 +1302,7 @@ async function routeViaTopology(
 
 	// Persist updated execution state
 	await updateGroupChat(groupChatId, { executionState: updatedState });
+	groupChatEmitters.emitExecutionStateChanged?.(groupChatId, updatedState);
 
 	// Spawn next node agents
 	if (processManager && agentDetector && allNextNodes.size > 0) {
