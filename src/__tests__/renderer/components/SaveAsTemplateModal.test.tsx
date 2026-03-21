@@ -58,6 +58,11 @@ vi.mock('lucide-react', () => ({
 			AR
 		</span>
 	),
+	Sparkles: ({ className }: { className?: string }) => (
+		<span data-testid="sparkles-icon" className={className}>
+			✦
+		</span>
+	),
 	X: () => <svg data-testid="x-icon" />,
 }));
 
@@ -77,6 +82,20 @@ vi.mock('../../../renderer/contexts/LayerStackContext', async () => {
 // Mock notification store
 vi.mock('../../../renderer/stores/notificationStore', () => ({
 	notifyToast: vi.fn(),
+}));
+
+// Mock modal store
+vi.mock('../../../renderer/stores/modalStore', () => ({
+	useModalStore: Object.assign(
+		(selector: (state: Record<string, unknown>) => unknown) => selector({ modals: {} }),
+		{
+			getState: () => ({
+				openModal: vi.fn(),
+				closeModal: vi.fn(),
+				modals: {},
+			}),
+		}
+	),
 }));
 
 // Mock settings store
