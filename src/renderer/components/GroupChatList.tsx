@@ -15,11 +15,13 @@ import {
 	Archive,
 	ArchiveRestore,
 	BookTemplate,
+	Sparkles,
 } from 'lucide-react';
 import type { Theme, GroupChat, GroupChatState } from '../types';
 import { useClickOutside, useContextMenuPosition } from '../hooks';
 import { getStatusColor } from '../utils/theme';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useModalStore } from '../stores/modalStore';
 import { SaveAsTemplateModal } from './SaveAsTemplateModal';
 
 // ============================================================================
@@ -312,6 +314,24 @@ export function GroupChatList({
 						>
 							<Archive className="w-3 h-3" />
 							<span>{archivedCount}</span>
+						</button>
+					)}
+					{encoreFeatures.teamOrchestration && (
+						<button
+							onClick={(e) => {
+								e.stopPropagation();
+								useModalStore.getState().openModal('teamBuilderWizard');
+							}}
+							className="px-2 py-0.5 rounded-full text-[10px] font-medium hover:opacity-80 transition-opacity flex items-center gap-1"
+							style={{
+								backgroundColor: theme.colors.accent + '20',
+								color: theme.colors.accent,
+								border: `1px solid ${theme.colors.accent}40`,
+							}}
+							title="Build Team with AI"
+						>
+							<Sparkles className="w-3 h-3" />
+							<span>Build with AI</span>
 						</button>
 					)}
 					<button
