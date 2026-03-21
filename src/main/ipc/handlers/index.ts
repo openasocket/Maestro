@@ -55,6 +55,7 @@ import { registerDirectorNotesHandlers, DirectorNotesHandlerDependencies } from 
 import { registerCueHandlers, CueHandlerDependencies } from './cue';
 import { registerTeamTemplateHandlers } from './teamTemplates';
 import { registerWakatimeHandlers } from './wakatime';
+import { registerTeamOrchStatsHandlers, TeamOrchStatsHandlerDependencies } from './teamOrchStats';
 import { AgentDetector } from '../../agents';
 import { ProcessManager } from '../../process-manager';
 import { WebServer } from '../../web-server';
@@ -104,6 +105,8 @@ export { registerCueHandlers };
 export type { CueHandlerDependencies };
 export { registerTeamTemplateHandlers };
 export { registerWakatimeHandlers };
+export { registerTeamOrchStatsHandlers };
+export type { TeamOrchStatsHandlerDependencies };
 export type { AgentsHandlerDependencies };
 export type { ProcessHandlerDependencies };
 export type { PersistenceHandlerDependencies };
@@ -293,6 +296,11 @@ export function registerAllHandlers(deps: HandlerDependencies): void {
 		getProcessManager: deps.getProcessManager,
 		getAgentDetector: deps.getAgentDetector,
 		agentConfigsStore: deps.agentConfigsStore,
+	});
+	// Register Team Orchestration Stats handlers (workflow analytics)
+	registerTeamOrchStatsHandlers({
+		getMainWindow: deps.getMainWindow,
+		settingsStore: deps.settingsStore,
 	});
 	// Setup logger event forwarding to renderer
 	setupLoggerEventForwarding(deps.getMainWindow);

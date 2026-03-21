@@ -52,6 +52,7 @@ import { createDirectorNotesApi } from './directorNotes';
 import { createCueApi } from './cue';
 import { createTeamTemplatesApi } from './teamTemplates';
 import { createWakatimeApi } from './wakatime';
+import { createTeamOrchStatsApi } from './teamOrchStats';
 
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
@@ -199,6 +200,9 @@ contextBridge.exposeInMainWorld('maestro', {
 
 	// WakaTime API (CLI check, API key validation)
 	wakatime: createWakatimeApi(),
+
+	// Team Orchestration Stats API (workflow analytics dashboard)
+	teamOrchStats: createTeamOrchStatsApi(),
 });
 
 // Re-export factory functions for external consumers (e.g., tests)
@@ -276,6 +280,8 @@ export {
 	createTeamTemplatesApi,
 	// WakaTime
 	createWakatimeApi,
+	// Team Orchestration Stats
+	createTeamOrchStatsApi,
 };
 
 // Re-export types for TypeScript consumers
@@ -498,3 +504,7 @@ export type {
 	// From wakatime
 	WakatimeApi,
 } from './wakatime';
+export type {
+	// From teamOrchStats
+	TeamOrchStatsApi,
+} from './teamOrchStats';
