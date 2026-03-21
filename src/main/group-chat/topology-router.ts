@@ -460,6 +460,74 @@ ${options}
 }
 
 // ============================================================================
+// QUALITY GATE EVALUATION
+// ============================================================================
+
+/**
+ * Build a quality gate evaluation prompt for the moderator.
+ * Used when terminationMode is 'quality-gate' to evaluate whether
+ * the exit point agent's output fully addresses the user's request.
+ *
+ * @param exitPointOutput - The output from the exit point agent
+ * @param userRequest - The original user request (from chat history)
+ * @param iterationCount - Current iteration number
+ * @param maxIterations - Maximum allowed iterations
+ * @returns A formatted prompt string for the moderator to evaluate output quality
+ */
+export function buildQualityGatePrompt(
+	exitPointOutput: string,
+	userRequest: string,
+	iterationCount: number,
+	maxIterations: number
+): string {
+	return `## Quality Gate Evaluation
+
+You are evaluating whether the workflow output fully addresses the user's request.
+
+### Original User Request:
+${userRequest.substring(0, 2000)}${userRequest.length > 2000 ? '\n...(truncated)' : ''}
+
+### Workflow Output (from exit point agent):
+${exitPointOutput.substring(0, 3000)}${exitPointOutput.length > 3000 ? '\n...(truncated)' : ''}
+
+### Iteration: ${iterationCount} of ${maxIterations}
+
+**Evaluate the output quality and respond with EXACTLY one of:**
+- **APPROVED** — if the output fully and correctly addresses the user's request
+- **NEEDS_REVISION: <brief reason>** — if the output is incomplete, incorrect, or could be significantly improved
+
+Respond with ONLY "APPROVED" or "NEEDS_REVISION: <reason>". Do not add any other text.`;
+}
+
+/**
+ * Parse a quality gate evaluation response from the moderator.
+ *
+ * @param response - The moderator's evaluation response
+ * @returns Object with approved flag and optional revision reason
+ */
+export function parseQualityGateResponse(response: string): {
+	approved: boolean;
+	reason?: string;
+} {
+	const trimmed = response.trim();
+
+	// Check for APPROVED (case-insensitive, may appear anywhere in response)
+	if (/\bAPPROVED\b/i.test(trimmed) && !/\bNEEDS_REVISION\b/i.test(trimmed)) {
+		return { approved: true };
+	}
+
+	// Check for NEEDS_REVISION
+	const revisionMatch = trimmed.match(/NEEDS_REVISION[:\s]*(.+)/i);
+	if (revisionMatch) {
+		return { approved: false, reason: revisionMatch[1].trim() };
+	}
+
+	// Default: if we can't determine, treat as needing revision to be safe
+	// (avoids prematurely ending the workflow)
+	return { approved: false, reason: 'Quality gate evaluation was inconclusive' };
+}
+
+// ============================================================================
 // TOPOLOGY VALIDATION
 // ============================================================================
 

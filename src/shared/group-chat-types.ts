@@ -105,6 +105,8 @@ export interface WorkflowExecutionState {
 	status: 'running' | 'completed' | 'failed' | 'terminated';
 	/** When true, workflow terminates after the current iteration completes */
 	stopAfterIteration?: boolean;
+	/** Quality gate evaluation status: pending means waiting for evaluation, approved means gate passed */
+	qualityGatePending?: boolean;
 }
 
 /**

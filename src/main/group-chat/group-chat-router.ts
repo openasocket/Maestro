@@ -35,6 +35,8 @@ import {
 	finalizeWorkflow,
 	markNodeFailed,
 	describeTopology,
+	buildQualityGatePrompt,
+	parseQualityGateResponse,
 } from './topology-router';
 import {
 	IProcessManager,
@@ -117,6 +119,7 @@ export interface TopologyRoutingSettings {
 	teamOrchestrationEnabled: boolean;
 	workflowTopologyEnabled: boolean;
 	maxIterations: number;
+	terminationMode: 'moderator-decides' | 'max-iterations' | 'quality-gate';
 }
 
 /**
@@ -1151,6 +1154,7 @@ function buildModeratorSystemPrompt(
 		teamOrchestrationEnabled: false,
 		workflowTopologyEnabled: false,
 		maxIterations: 5,
+		terminationMode: 'moderator-decides' as const,
 	};
 
 	return getModeratorTopologyPrompt()
@@ -1195,6 +1199,7 @@ async function routeViaTopology(
 		teamOrchestrationEnabled: false,
 		workflowTopologyEnabled: false,
 		maxIterations: 5,
+		terminationMode: 'moderator-decides' as const,
 	};
 
 	// Initialize execution state if this is the first topology call
@@ -1268,6 +1273,129 @@ async function routeViaTopology(
 
 		for (const n of nextNodes) {
 			allNextNodes.add(n);
+		}
+	}
+
+	// Quality gate: when the exit point has completed and termination mode is 'quality-gate',
+	// evaluate the output quality before finalizing
+	const exitPointCompleted = updatedState.completedNodes.includes(topology.exitPoint);
+	if (exitPointCompleted && settings.terminationMode === 'quality-gate') {
+		// Check if we're processing a quality gate response (qualityGatePending was set)
+		if (updatedState.qualityGatePending) {
+			// Parse the moderator's quality gate evaluation response
+			const evaluation = parseQualityGateResponse(moderatorResponse);
+			console.log(
+				`[GroupChat:Debug] Quality gate result: ${evaluation.approved ? 'APPROVED' : 'NEEDS_REVISION'} ${evaluation.reason || ''}`
+			);
+
+			if (evaluation.approved) {
+				// Quality gate passed — finalize as completed
+				const finalState = finalizeWorkflow(
+					{ ...updatedState, qualityGatePending: false },
+					'completed'
+				);
+				await updateGroupChat(groupChatId, { executionState: finalState });
+				groupChatEmitters.emitExecutionStateChanged?.(groupChatId, finalState);
+				groupChatEmitters.emitMessage?.(groupChatId, {
+					timestamp: new Date().toISOString(),
+					from: 'system',
+					content: 'Workflow completed — quality gate approved.',
+				});
+				groupChatEmitters.emitStateChange?.(groupChatId, 'idle');
+				powerManager.removeBlockReason(`groupchat:${groupChatId}`);
+				return;
+			}
+
+			// NEEDS_REVISION: check if we can loop back (maxIterations not reached)
+			if (updatedState.iterationCount >= settings.maxIterations) {
+				console.log(
+					`[GroupChat:Debug] Quality gate rejected but max iterations reached — terminating`
+				);
+				const finalState = finalizeWorkflow(
+					{ ...updatedState, qualityGatePending: false },
+					'terminated'
+				);
+				await updateGroupChat(groupChatId, { executionState: finalState });
+				groupChatEmitters.emitExecutionStateChanged?.(groupChatId, finalState);
+				groupChatEmitters.emitMessage?.(groupChatId, {
+					timestamp: new Date().toISOString(),
+					from: 'system',
+					content: `Workflow terminated: quality gate rejected but maximum iterations (${settings.maxIterations}) reached. Reason: ${evaluation.reason || 'N/A'}`,
+				});
+				groupChatEmitters.emitStateChange?.(groupChatId, 'idle');
+				powerManager.removeBlockReason(`groupchat:${groupChatId}`);
+				return;
+			}
+
+			// Loop back to entry point with revision feedback
+			console.log(`[GroupChat:Debug] Quality gate rejected — looping back to entry point`);
+			const revisionFeedback = `Quality gate revision requested: ${evaluation.reason || 'Output needs improvement'}. Please revise your work to better address the original request.`;
+
+			// Reset state: clear qualityGatePending, move exit point back to pending,
+			// re-activate entry point, increment iteration
+			const loopState: WorkflowExecutionState = {
+				...updatedState,
+				qualityGatePending: false,
+				completedNodes: updatedState.completedNodes.filter((n) => n !== topology.exitPoint),
+				activeNodes: [topology.entryPoint],
+				pendingNodes: updatedState.pendingNodes.includes(topology.exitPoint)
+					? updatedState.pendingNodes
+					: [...updatedState.pendingNodes, topology.exitPoint],
+				currentPhase: topology.entryPoint,
+				iterationCount: updatedState.iterationCount + 1,
+			};
+
+			await updateGroupChat(groupChatId, { executionState: loopState });
+			groupChatEmitters.emitExecutionStateChanged?.(groupChatId, loopState);
+			groupChatEmitters.emitMessage?.(groupChatId, {
+				timestamp: new Date().toISOString(),
+				from: 'system',
+				content: `Quality gate: revision needed (iteration ${loopState.iterationCount} of ${settings.maxIterations}). ${evaluation.reason || ''}`,
+			});
+
+			// Spawn entry point agent with revision feedback
+			if (processManager && agentDetector) {
+				await spawnTopologyNode(
+					groupChatId,
+					topology.entryPoint,
+					revisionFeedback,
+					processManager,
+					agentDetector,
+					readOnly
+				);
+				pendingParticipantResponses.set(groupChatId, new Set([topology.entryPoint]));
+				groupChatEmitters.emitStateChange?.(groupChatId, 'agent-working');
+			}
+			console.log(`[GroupChat:Debug] =============================================`);
+			return;
+		}
+
+		// First time exit point completed in quality-gate mode: spawn evaluation
+		// (but skip if other termination conditions are met first)
+		if (!updatedState.stopAfterIteration && updatedState.iterationCount < settings.maxIterations) {
+			console.log(`[GroupChat:Debug] Quality gate mode — spawning evaluation`);
+			updatedState = { ...updatedState, qualityGatePending: true };
+			await updateGroupChat(groupChatId, { executionState: updatedState });
+			groupChatEmitters.emitExecutionStateChanged?.(groupChatId, updatedState);
+			groupChatEmitters.emitMessage?.(groupChatId, {
+				timestamp: new Date().toISOString(),
+				from: 'system',
+				content: 'Quality gate: evaluating output quality...',
+			});
+
+			// Spawn the quality gate evaluation moderator process
+			if (processManager && agentDetector) {
+				await spawnQualityGateEvaluation(
+					groupChatId,
+					topology,
+					updatedState,
+					settings,
+					processManager,
+					agentDetector
+				);
+			}
+			console.log(`[GroupChat:Debug] =============================================`);
+			return;
 		}
 	}
 
@@ -1925,6 +2053,173 @@ Review the agent responses above. Either:
 		captureException(error, { operation: 'groupChat:spawnSynthesis', groupChatId });
 		groupChatEmitters.emitStateChange?.(groupChatId, 'idle');
 		// Remove power block reason on synthesis error since we're going idle
+		powerManager.removeBlockReason(`groupchat:${groupChatId}`);
+	}
+}
+
+/**
+ * Spawn a quality gate evaluation moderator process.
+ * When terminationMode is 'quality-gate', instead of immediately finalizing the workflow
+ * after the exit point completes, this spawns a moderator process that evaluates
+ * whether the output fully addresses the user's request.
+ *
+ * The evaluation response is routed through the normal moderator response path
+ * (routeModeratorResponse → routeViaTopology) where qualityGatePending is checked.
+ */
+async function spawnQualityGateEvaluation(
+	groupChatId: string,
+	topology: WorkflowTopology,
+	executionState: WorkflowExecutionState,
+	settings: TopologyRoutingSettings,
+	processManager: IProcessManager,
+	agentDetector: AgentDetector
+): Promise<void> {
+	console.log(`[GroupChat:Debug] ========== SPAWN QUALITY GATE EVALUATION ==========`);
+
+	const chat = await loadGroupChat(groupChatId);
+	if (!chat) {
+		logger.error(`Cannot spawn quality gate — chat not found: ${groupChatId}`, LOG_CONTEXT);
+		groupChatEmitters.emitStateChange?.(groupChatId, 'idle');
+		powerManager.removeBlockReason(`groupchat:${groupChatId}`);
+		return;
+	}
+
+	if (!isModeratorActive(groupChatId)) {
+		logger.error(`Cannot spawn quality gate — moderator not active: ${groupChatId}`, LOG_CONTEXT);
+		groupChatEmitters.emitStateChange?.(groupChatId, 'idle');
+		powerManager.removeBlockReason(`groupchat:${groupChatId}`);
+		return;
+	}
+
+	const sessionIdPrefix = getModeratorSessionId(groupChatId);
+	if (!sessionIdPrefix) {
+		logger.error(
+			`Cannot spawn quality gate — no moderator session ID: ${groupChatId}`,
+			LOG_CONTEXT
+		);
+		groupChatEmitters.emitStateChange?.(groupChatId, 'idle');
+		powerManager.removeBlockReason(`groupchat:${groupChatId}`);
+		return;
+	}
+
+	// Use the moderator session ID format so the exit handler routes through routeModeratorResponse
+	const sessionId = `${sessionIdPrefix}-${Date.now()}`;
+
+	const agent = await agentDetector.getAgent(chat.moderatorAgentId);
+	if (!agent || !agent.available) {
+		logger.error(`Agent '${chat.moderatorAgentId}' not available for quality gate`, LOG_CONTEXT);
+		groupChatEmitters.emitStateChange?.(groupChatId, 'idle');
+		powerManager.removeBlockReason(`groupchat:${groupChatId}`);
+		return;
+	}
+
+	// Get the exit point's output and the original user request from chat history
+	const exitPointOutput = executionState.nodeOutputs[topology.exitPoint] || '';
+	const chatHistory = await readLog(chat.logPath);
+	const userMessages = chatHistory.filter((m) => m.from === 'user');
+	const userRequest =
+		userMessages.length > 0
+			? userMessages[userMessages.length - 1].content
+			: '(No user request found)';
+
+	// Build the quality gate prompt
+	const qualityGatePrompt = buildQualityGatePrompt(
+		exitPointOutput,
+		userRequest,
+		executionState.iterationCount,
+		settings.maxIterations
+	);
+
+	const command = chat.moderatorConfig?.customPath || agent.path || agent.command;
+	const args = [...agent.args];
+
+	const agentConfigValues = getAgentConfigCallback?.(chat.moderatorAgentId) || {};
+	const baseArgs = buildAgentArgs(agent, {
+		baseArgs: args,
+		prompt: qualityGatePrompt,
+		cwd: os.homedir(),
+		readOnlyMode: true,
+	});
+	const configResolution = applyAgentConfigOverrides(agent, baseArgs, {
+		agentConfigValues,
+		sessionCustomModel: chat.moderatorConfig?.customModel,
+		sessionCustomArgs: chat.moderatorConfig?.customArgs,
+		sessionCustomEnvVars: chat.moderatorConfig?.customEnvVars,
+	});
+
+	const geminiCanBeUnsandboxed =
+		chat.moderatorAgentId === 'gemini-cli' && !!agent.readOnlyCliEnforced;
+	const geminiNoSandbox = geminiCanBeUnsandboxed ? ['--no-sandbox'] : [];
+	const finalArgs = [...configResolution.args, ...geminiNoSandbox];
+
+	try {
+		groupChatEmitters.emitStateChange?.(groupChatId, 'moderator-thinking');
+
+		let spawnCommand = command;
+		let spawnArgs = finalArgs;
+		let spawnCwd = os.homedir();
+		let spawnPrompt: string | undefined = qualityGatePrompt;
+		let spawnEnvVars =
+			configResolution.effectiveCustomEnvVars ?? getCustomEnvVarsCallback?.(chat.moderatorAgentId);
+		let spawnSshStdinScript: string | undefined;
+
+		if (sshStore && chat.moderatorConfig?.sshRemoteConfig) {
+			const sshWrapped = await wrapSpawnWithSsh(
+				{
+					command,
+					args: finalArgs,
+					cwd: os.homedir(),
+					prompt: qualityGatePrompt,
+					customEnvVars:
+						configResolution.effectiveCustomEnvVars ??
+						getCustomEnvVarsCallback?.(chat.moderatorAgentId),
+					promptArgs: agent.promptArgs,
+					noPromptSeparator: agent.noPromptSeparator,
+					agentBinaryName: agent.binaryName,
+				},
+				chat.moderatorConfig.sshRemoteConfig,
+				sshStore
+			);
+			spawnCommand = sshWrapped.command;
+			spawnArgs = sshWrapped.args;
+			spawnCwd = sshWrapped.cwd;
+			spawnPrompt = sshWrapped.prompt;
+			spawnEnvVars = sshWrapped.customEnvVars;
+			spawnSshStdinScript = sshWrapped.sshStdinScript;
+		}
+
+		const winConfig = getWindowsSpawnConfig(
+			chat.moderatorAgentId,
+			chat.moderatorConfig?.sshRemoteConfig
+		);
+
+		processManager.spawn({
+			sessionId,
+			toolType: chat.moderatorAgentId,
+			cwd: spawnCwd,
+			command: spawnCommand,
+			args: spawnArgs,
+			readOnlyMode: true,
+			prompt: spawnPrompt,
+			contextWindow: getContextWindowValue(agent, agentConfigValues),
+			customEnvVars: spawnEnvVars,
+			promptArgs: agent.promptArgs,
+			noPromptSeparator: agent.noPromptSeparator,
+			shell: winConfig.shell,
+			runInShell: winConfig.runInShell,
+			sendPromptViaStdin: winConfig.sendPromptViaStdin,
+			sendPromptViaStdinRaw: winConfig.sendPromptViaStdinRaw,
+			sshStdinScript: spawnSshStdinScript,
+		});
+
+		console.log(`[GroupChat:Debug] Quality gate evaluation process spawned`);
+		console.log(`[GroupChat:Debug] ================================================`);
+	} catch (error) {
+		logger.error(`Failed to spawn quality gate evaluation for ${groupChatId}`, LOG_CONTEXT, {
+			error,
+		});
+		captureException(error, { operation: 'groupChat:spawnQualityGate', groupChatId });
+		groupChatEmitters.emitStateChange?.(groupChatId, 'idle');
 		powerManager.removeBlockReason(`groupchat:${groupChatId}`);
 	}
 }

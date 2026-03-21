@@ -855,6 +855,11 @@ function setupIpcHandlers() {
 			teamOrchestrationEnabled: encoreFeatures.teamOrchestration ?? false,
 			workflowTopologyEnabled: (teamOrchSettings.enableWorkflowTopology as boolean) ?? false,
 			maxIterations: (teamOrchSettings.maxIterations as number) ?? 5,
+			terminationMode:
+				(teamOrchSettings.defaultTerminationMode as
+					| 'moderator-decides'
+					| 'max-iterations'
+					| 'quality-gate') ?? 'moderator-decides',
 		};
 	});
 

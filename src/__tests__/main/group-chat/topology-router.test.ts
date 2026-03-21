@@ -29,6 +29,8 @@ import {
 	finalizeWorkflow,
 	markNodeFailed,
 	buildConditionEvalPrompt,
+	buildQualityGatePrompt,
+	parseQualityGateResponse,
 	validateTopology,
 	describeTopology,
 } from '../../../main/group-chat/topology-router';
@@ -1098,5 +1100,98 @@ describe('end-to-end: review-loop workflow', () => {
 		expect(isWorkflowComplete(topology, state, 3)).toBe(true);
 		state = finalizeWorkflow(state, 'terminated');
 		expect(state.status).toBe('terminated');
+	});
+});
+
+// ============================================================================
+// Quality gate prompt and response parsing
+// ============================================================================
+
+describe('buildQualityGatePrompt', () => {
+	it('builds a prompt with user request and exit point output', () => {
+		const prompt = buildQualityGatePrompt(
+			'The analysis shows significant trends in the data.',
+			'Analyze the sales data for Q1',
+			1,
+			5
+		);
+
+		expect(prompt).toContain('Quality Gate Evaluation');
+		expect(prompt).toContain('Analyze the sales data for Q1');
+		expect(prompt).toContain('significant trends in the data');
+		expect(prompt).toContain('Iteration: 1 of 5');
+		expect(prompt).toContain('APPROVED');
+		expect(prompt).toContain('NEEDS_REVISION');
+	});
+
+	it('truncates long exit point output', () => {
+		const longOutput = 'x'.repeat(5000);
+		const prompt = buildQualityGatePrompt(longOutput, 'request', 0, 3);
+
+		expect(prompt).toContain('...(truncated)');
+		// Should contain at most 3000 chars of exit point output
+		expect(prompt.indexOf('x'.repeat(3001))).toBe(-1);
+	});
+
+	it('truncates long user request', () => {
+		const longRequest = 'y'.repeat(3000);
+		const prompt = buildQualityGatePrompt('output', longRequest, 0, 3);
+
+		expect(prompt).toContain('...(truncated)');
+	});
+});
+
+describe('parseQualityGateResponse', () => {
+	it('parses APPROVED response', () => {
+		const result = parseQualityGateResponse('APPROVED');
+		expect(result.approved).toBe(true);
+		expect(result.reason).toBeUndefined();
+	});
+
+	it('parses APPROVED with surrounding whitespace', () => {
+		const result = parseQualityGateResponse('  APPROVED  \n');
+		expect(result.approved).toBe(true);
+	});
+
+	it('parses case-insensitive APPROVED', () => {
+		const result = parseQualityGateResponse('Approved');
+		expect(result.approved).toBe(true);
+	});
+
+	it('parses NEEDS_REVISION with reason', () => {
+		const result = parseQualityGateResponse(
+			'NEEDS_REVISION: The output is missing key details about revenue.'
+		);
+		expect(result.approved).toBe(false);
+		expect(result.reason).toBe('The output is missing key details about revenue.');
+	});
+
+	it('parses NEEDS_REVISION without colon', () => {
+		const result = parseQualityGateResponse('NEEDS_REVISION the analysis is incomplete');
+		expect(result.approved).toBe(false);
+		expect(result.reason).toBe('the analysis is incomplete');
+	});
+
+	it('parses case-insensitive NEEDS_REVISION', () => {
+		const result = parseQualityGateResponse('needs_revision: too vague');
+		expect(result.approved).toBe(false);
+		expect(result.reason).toBe('too vague');
+	});
+
+	it('treats NEEDS_REVISION as not approved even if APPROVED also appears', () => {
+		const result = parseQualityGateResponse('NEEDS_REVISION: Not APPROVED yet, needs more detail');
+		expect(result.approved).toBe(false);
+		expect(result.reason).toContain('Not APPROVED yet');
+	});
+
+	it('defaults to not approved for ambiguous response', () => {
+		const result = parseQualityGateResponse('I think this could be better.');
+		expect(result.approved).toBe(false);
+		expect(result.reason).toContain('inconclusive');
+	});
+
+	it('defaults to not approved for empty response', () => {
+		const result = parseQualityGateResponse('');
+		expect(result.approved).toBe(false);
 	});
 });

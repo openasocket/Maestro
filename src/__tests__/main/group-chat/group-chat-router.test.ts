@@ -927,6 +927,7 @@ describe('group-chat-router', () => {
 				teamOrchestrationEnabled: true,
 				workflowTopologyEnabled: true,
 				maxIterations: 5,
+				terminationMode: 'moderator-decides' as const,
 			}));
 		}
 
@@ -935,6 +936,7 @@ describe('group-chat-router', () => {
 				teamOrchestrationEnabled: false,
 				workflowTopologyEnabled: false,
 				maxIterations: 5,
+				terminationMode: 'moderator-decides' as const,
 			}));
 		}
 
@@ -944,6 +946,7 @@ describe('group-chat-router', () => {
 				teamOrchestrationEnabled: false,
 				workflowTopologyEnabled: false,
 				maxIterations: 5,
+				terminationMode: 'moderator-decides' as const,
 			}));
 		});
 
