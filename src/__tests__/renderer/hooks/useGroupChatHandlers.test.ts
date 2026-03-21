@@ -243,7 +243,12 @@ describe('useGroupChatHandlers', () => {
 				await result.current.handleCreateGroupChat('New Chat', 'claude-code');
 			});
 
-			expect(mockGroupChat.create).toHaveBeenCalledWith('New Chat', 'claude-code', undefined);
+			expect(mockGroupChat.create).toHaveBeenCalledWith(
+				'New Chat',
+				'claude-code',
+				undefined,
+				undefined
+			);
 			// After create, handleOpenGroupChat also sets moderatorSessionId from startModerator
 			const storedChat = useGroupChatStore.getState().groupChats.find((c) => c.id === 'gc-new');
 			expect(storedChat).toBeDefined();
@@ -304,7 +309,7 @@ describe('useGroupChatHandlers', () => {
 				await result.current.handleCreateGroupChat('Chat', 'claude-code', config);
 			});
 
-			expect(mockGroupChat.create).toHaveBeenCalledWith('Chat', 'claude-code', config);
+			expect(mockGroupChat.create).toHaveBeenCalledWith('Chat', 'claude-code', config, undefined);
 		});
 	});
 

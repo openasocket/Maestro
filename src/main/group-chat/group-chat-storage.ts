@@ -219,13 +219,15 @@ function sanitizeChatName(name: string): string {
  * @param name - Display name for the group chat
  * @param moderatorAgentId - ID of the agent to use as moderator (e.g., 'claude-code')
  * @param moderatorConfig - Optional custom configuration for the moderator agent
+ * @param topology - Optional workflow topology for graph-based routing
  * @returns The created GroupChat object
  * @throws Error if moderatorAgentId is not a valid agent ID
  */
 export async function createGroupChat(
 	name: string,
 	moderatorAgentId: string,
-	moderatorConfig?: ModeratorConfig
+	moderatorConfig?: ModeratorConfig,
+	topology?: WorkflowTopology
 ): Promise<GroupChat> {
 	// Validate agent ID supports group chat moderation
 	if (!hasCapability(moderatorAgentId, 'supportsGroupChatModeration')) {
@@ -262,6 +264,7 @@ export async function createGroupChat(
 		participants: [],
 		logPath,
 		imagesDir,
+		...(topology ? { topology } : {}),
 	};
 
 	// Write metadata (atomic: write tmp then rename)

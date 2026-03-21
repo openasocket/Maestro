@@ -22,9 +22,11 @@ import {
 	Star,
 	ChevronRight,
 	Sparkles,
+	GitBranch,
+	Pencil,
 } from 'lucide-react';
 import { isBetaAgent } from '../../shared/agentMetadata';
-import type { TeamTemplate } from '../../shared/group-chat-types';
+import type { TeamTemplate, WorkflowTopology } from '../../shared/group-chat-types';
 import type { Theme, AgentConfig, ModeratorConfig, GroupChat } from '../types';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { Modal, ModalFooter, FormInput } from './ui';
@@ -41,7 +43,12 @@ interface GroupChatModalCreateProps {
 	theme: Theme;
 	isOpen: boolean;
 	onClose: () => void;
-	onCreate: (name: string, moderatorAgentId: string, moderatorConfig?: ModeratorConfig) => void;
+	onCreate: (
+		name: string,
+		moderatorAgentId: string,
+		moderatorConfig?: ModeratorConfig,
+		topology?: WorkflowTopology
+	) => void;
 	groupChat?: undefined;
 	onSave?: undefined;
 }
@@ -76,11 +83,13 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 	const [selectedTemplate, setSelectedTemplate] = useState<TeamTemplate | null>(null);
 	const [showTemplateBrowser, setShowTemplateBrowser] = useState(false);
 
-	// Feature flags for templates
+	// Feature flags for templates and topology
 	const encoreFeatures = useSettingsStore((s) => s.encoreFeatures);
 	const teamOrchestrationSettings = useSettingsStore((s) => s.teamOrchestrationSettings);
 	const templatesEnabled =
 		encoreFeatures.teamOrchestration && teamOrchestrationSettings.enableTemplates;
+	const topologyEnabled =
+		encoreFeatures.teamOrchestration && teamOrchestrationSettings.enableWorkflowTopology;
 
 	const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -215,7 +224,10 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 		const moderatorConfig = buildModeratorConfig();
 
 		if (mode === 'create') {
-			props.onCreate(name.trim(), ac.selectedAgent, moderatorConfig);
+			// Pass topology from selected template when topology feature is enabled
+			const topology =
+				topologyEnabled && selectedTemplate?.topology ? selectedTemplate.topology : undefined;
+			props.onCreate(name.trim(), ac.selectedAgent, moderatorConfig, topology);
 		} else if (groupChat) {
 			props.onSave(groupChat.id, name.trim(), ac.selectedAgent, moderatorConfig);
 		}
@@ -223,7 +235,17 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 		setName('');
 		setConfigWasModified(false);
 		onClose();
-	}, [name, ac.selectedAgent, buildModeratorConfig, mode, props, groupChat, onClose]);
+	}, [
+		name,
+		ac.selectedAgent,
+		buildModeratorConfig,
+		mode,
+		props,
+		groupChat,
+		onClose,
+		topologyEnabled,
+		selectedTemplate,
+	]);
 
 	// Check if anything has changed (edit mode only)
 	const hasChanges = useCallback((): boolean => {
@@ -455,6 +477,34 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 										{' '}
 										&mdash; Roles: {selectedTemplate.roles.map((r) => r.name).join(', ')}
 									</span>
+								)}
+								{/* Topology summary (when template has topology and feature is enabled) */}
+								{topologyEnabled && selectedTemplate.topology && (
+									<div className="mt-2 flex items-start gap-2">
+										<GitBranch
+											className="w-3 h-3 mt-0.5 shrink-0"
+											style={{ color: theme.colors.accent }}
+										/>
+										<div className="flex-1">
+											<TopologySummary topology={selectedTemplate.topology} theme={theme} />
+										</div>
+										<button
+											type="button"
+											onClick={() => {
+												// Edit Topology — opens editor (TopologyEditor component, next task)
+												useModalStore.getState().openModal('topologyEditor');
+											}}
+											className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded border transition-colors hover:bg-white/5"
+											style={{
+												borderColor: theme.colors.border,
+												color: theme.colors.textDim,
+											}}
+											title="Edit Topology"
+										>
+											<Pencil className="w-3 h-3" />
+											<span className="text-[10px]">Edit Topology</span>
+										</button>
+									</div>
 								)}
 							</div>
 						)}
@@ -698,5 +748,68 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 				)}
 			</div>
 		</Modal>
+	);
+}
+
+/**
+ * Pattern display names for topology summary.
+ */
+const PATTERN_LABELS: Record<string, string> = {
+	'hub-spoke': 'Hub & Spoke',
+	pipeline: 'Pipeline',
+	'parallel-then-merge': 'Parallel then Merge',
+	'review-loop': 'Review Loop',
+	custom: 'Custom',
+};
+
+/**
+ * Renders a brief human-readable summary of a workflow topology.
+ * Shows the pattern name and the flow (entry → ... → exit).
+ */
+function TopologySummary({
+	topology,
+	theme,
+}: {
+	topology: WorkflowTopology;
+	theme: Theme;
+}): JSX.Element {
+	const patternLabel = PATTERN_LABELS[topology.pattern] || topology.pattern;
+
+	// Build a simple flow description from edges
+	const flowParts: string[] = [];
+	if (topology.pattern === 'pipeline') {
+		// For pipelines, follow the sequential chain
+		let current = topology.entryPoint;
+		flowParts.push(current);
+		const visited = new Set<string>();
+		while (!visited.has(current)) {
+			visited.add(current);
+			const next = topology.edges.find((e) => e.source === current);
+			if (!next || next.target === '__exit__') break;
+			flowParts.push(next.target);
+			current = next.target;
+		}
+	} else if (topology.pattern === 'parallel-then-merge') {
+		// Show parallel branches
+		const parallelTargets = topology.edges
+			.filter((e) => e.edgeType === 'parallel')
+			.map((e) => e.target);
+		if (parallelTargets.length > 0) {
+			flowParts.push(topology.entryPoint);
+			flowParts.push(`{${parallelTargets.join(', ')}}`);
+			flowParts.push(topology.exitPoint);
+		}
+	}
+
+	const flowDescription =
+		flowParts.length > 1
+			? flowParts.join(' \u2192 ')
+			: `${topology.entryPoint} \u2192 ${topology.exitPoint}`;
+
+	return (
+		<div>
+			<span style={{ color: theme.colors.textMain }}>{patternLabel}:</span>{' '}
+			<span style={{ color: theme.colors.textDim }}>{flowDescription}</span>
+		</div>
 	);
 }

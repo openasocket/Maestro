@@ -206,6 +206,26 @@ type GroupChatData = {
 	imagesDir: string;
 	draftMessage?: string;
 	archived?: boolean;
+	topology?: {
+		pattern: 'hub-spoke' | 'pipeline' | 'parallel-then-merge' | 'review-loop' | 'custom';
+		edges: Array<{
+			source: string;
+			target: string;
+			condition?: string;
+			edgeType: 'sequential' | 'parallel' | 'conditional';
+		}>;
+		entryPoint: string;
+		exitPoint: string;
+	};
+	executionState?: {
+		currentPhase: string;
+		completedNodes: string[];
+		pendingNodes: string[];
+		activeNodes: string[];
+		iterationCount: number;
+		nodeOutputs: Record<string, string>;
+		status: 'running' | 'completed' | 'failed' | 'terminated';
+	};
 };
 
 interface MaestroAPI {
@@ -1768,6 +1788,17 @@ interface MaestroAPI {
 				customPath?: string;
 				customArgs?: string;
 				customEnvVars?: Record<string, string>;
+			},
+			topology?: {
+				pattern: 'hub-spoke' | 'pipeline' | 'parallel-then-merge' | 'review-loop' | 'custom';
+				edges: Array<{
+					source: string;
+					target: string;
+					condition?: string;
+					edgeType: 'sequential' | 'parallel' | 'conditional';
+				}>;
+				entryPoint: string;
+				exitPoint: string;
 			}
 		) => Promise<GroupChatData>;
 		list: () => Promise<Array<GroupChatData>>;

@@ -27,6 +27,7 @@ import type { PRDetails } from '../CreatePRModal';
 import type { FlatFileItem } from '../FileSearchModal';
 import type { RecoveryAction } from '../AgentErrorModal';
 import type { MergeOptions } from '../MergeSessionModal';
+import type { WorkflowTopology } from '../../../shared/group-chat-types';
 import type { SendToAgentOptions } from '../SendToAgentModal';
 
 // Group components
@@ -321,7 +322,8 @@ export interface AppModalsProps {
 	onCreateGroupChat: (
 		name: string,
 		moderatorAgentId: string,
-		moderatorConfig?: ModeratorConfig
+		moderatorConfig?: ModeratorConfig,
+		topology?: WorkflowTopology
 	) => void;
 	showDeleteGroupChatModal: string | null;
 	onCloseDeleteGroupChatModal: () => void;

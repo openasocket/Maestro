@@ -27,7 +27,8 @@ export interface AppGroupChatModalsProps {
 	onCreateGroupChat: (
 		name: string,
 		moderatorAgentId: string,
-		moderatorConfig?: ModeratorConfig
+		moderatorConfig?: ModeratorConfig,
+		topology?: WorkflowTopology
 	) => void;
 
 	// DeleteGroupChatModal
@@ -110,13 +111,18 @@ export const AppGroupChatModals = memo(function AppGroupChatModals({
 			teamName: string,
 			moderatorAgentId: string,
 			roles: TeamTemplateRole[],
-			_topology?: WorkflowTopology
+			topology?: WorkflowTopology
 		) => {
 			const { closeModal } = useModalStore.getState();
 			const { setGroupChats } = useGroupChatStore.getState();
 			try {
-				// Create the group chat with moderator
-				const chat = await window.maestro.groupChat.create(teamName, moderatorAgentId);
+				// Create the group chat with moderator and optional topology
+				const chat = await window.maestro.groupChat.create(
+					teamName,
+					moderatorAgentId,
+					undefined,
+					topology
+				);
 				setGroupChats((prev) => [chat, ...prev]);
 
 				// Add each role as a participant

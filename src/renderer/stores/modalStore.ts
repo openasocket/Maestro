@@ -199,6 +199,7 @@ export type ModalId =
 	| 'editGroupChat'
 	| 'teamBuilderWizard'
 	| 'groupChatInfo'
+	| 'topologyEditor'
 	// Git
 	| 'gitDiff'
 	| 'gitLog'

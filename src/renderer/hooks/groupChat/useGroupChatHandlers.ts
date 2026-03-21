@@ -11,6 +11,7 @@ import type { GroupChatMessagesHandle } from '../../components/GroupChatMessages
 import type { GroupChatRightTab } from '../../components/GroupChatRightPanel';
 import type { RecoveryAction } from '../../components/AgentErrorModal';
 import type { QueuedItem } from '../../types';
+import type { WorkflowTopology } from '../../../shared/group-chat-types';
 import { useGroupChatStore } from '../../stores/groupChatStore';
 import { useModalStore } from '../../stores/modalStore';
 import { useSessionStore } from '../../stores/sessionStore';
@@ -43,7 +44,8 @@ export interface GroupChatHandlersReturn {
 			customArgs?: string;
 			customEnvVars?: Record<string, string>;
 			customModel?: string;
-		}
+		},
+		topology?: WorkflowTopology
 	) => Promise<void>;
 	handleDeleteGroupChat: (id: string) => Promise<void>;
 	handleArchiveGroupChat: (id: string, archived: boolean) => Promise<void>;
@@ -412,12 +414,18 @@ export function useGroupChatHandlers(): GroupChatHandlersReturn {
 				customArgs?: string;
 				customEnvVars?: Record<string, string>;
 				customModel?: string;
-			}
+			},
+			topology?: WorkflowTopology
 		) => {
 			const { setGroupChats } = useGroupChatStore.getState();
 			const { closeModal } = useModalStore.getState();
 			try {
-				const chat = await window.maestro.groupChat.create(name, moderatorAgentId, moderatorConfig);
+				const chat = await window.maestro.groupChat.create(
+					name,
+					moderatorAgentId,
+					moderatorConfig,
+					topology
+				);
 				setGroupChats((prev) => [chat, ...prev]);
 				closeModal('newGroupChat');
 				handleOpenGroupChat(chat.id);

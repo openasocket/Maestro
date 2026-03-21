@@ -175,13 +175,15 @@ export function registerGroupChatHandlers(deps: GroupChatHandlerDependencies): v
 					customPath?: string;
 					customArgs?: string;
 					customEnvVars?: Record<string, string>;
-				}
+				},
+				topology?: import('../../../shared/group-chat-types').WorkflowTopology
 			): Promise<GroupChat> => {
 				logger.info(`Creating group chat: ${name}`, LOG_CONTEXT, {
 					moderatorAgentId,
 					hasConfig: !!moderatorConfig,
+					hasTopology: !!topology,
 				});
-				const chat = await createGroupChat(name, moderatorAgentId, moderatorConfig);
+				const chat = await createGroupChat(name, moderatorAgentId, moderatorConfig, topology);
 
 				// Initialize the moderator immediately so it's "hot and ready"
 				// This spawns the session ID prefix so the UI doesn't show "pending"
