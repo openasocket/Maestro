@@ -13,10 +13,13 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Users } from 'lucide-react';
+import { X, Users, Calendar } from 'lucide-react';
 import type { Theme } from '../../types';
+import type { TeamOrchTimeRange } from '../../../shared/team-orch-stats-types';
 import { useLayerStack } from '../../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
+import { useTeamOrchStats } from '../../hooks/teamOrch/useTeamOrchStats';
+import { OverviewTab } from './OverviewTab';
 
 type TabId = 'overview' | 'templates' | 'configuration' | 'analytics' | 'history';
 
@@ -28,6 +31,15 @@ const TABS: { value: TabId; label: string }[] = [
 	{ value: 'history', label: 'History' },
 ];
 
+const TIME_RANGE_OPTIONS: { value: TeamOrchTimeRange; label: string }[] = [
+	{ value: 'day', label: 'Today' },
+	{ value: 'week', label: 'This Week' },
+	{ value: 'month', label: 'This Month' },
+	{ value: 'quarter', label: 'This Quarter' },
+	{ value: 'year', label: 'This Year' },
+	{ value: 'all', label: 'All Time' },
+];
+
 interface TeamOrchestrationModalProps {
 	theme: Theme;
 	onClose: () => void;
@@ -37,11 +49,14 @@ interface TeamOrchestrationModalProps {
 export function TeamOrchestrationModal({
 	theme,
 	onClose,
-	colorBlindMode: _colorBlindMode = false,
+	colorBlindMode = false,
 }: TeamOrchestrationModalProps) {
 	const [activeTab, setActiveTab] = useState<TabId>('overview');
+	const [timeRange, setTimeRange] = useState<TeamOrchTimeRange>('month');
 	const containerRef = useRef<HTMLDivElement>(null);
 	const tabsRef = useRef<HTMLDivElement>(null);
+
+	const stats = useTeamOrchStats(timeRange, true);
 	const { registerLayer, unregisterLayer } = useLayerStack();
 	const onCloseRef = useRef(onClose);
 	onCloseRef.current = onClose;
@@ -151,18 +166,54 @@ export function TeamOrchestrationModal({
 						</h2>
 					</div>
 
-					<button
-						onClick={onClose}
-						className="p-1.5 rounded hover:bg-opacity-10 transition-colors"
-						style={{ color: theme.colors.textDim }}
-						onMouseEnter={(e) =>
-							(e.currentTarget.style.backgroundColor = `${theme.colors.accent}20`)
-						}
-						onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-						title="Close (Esc)"
-					>
-						<X className="w-4 h-4" />
-					</button>
+					<div className="flex items-center gap-3">
+						{/* Time Range Selector — shared between Overview and Analytics */}
+						{(activeTab === 'overview' || activeTab === 'analytics') && (
+							<div className="relative flex items-center">
+								<Calendar
+									className="absolute left-2 w-3.5 h-3.5 pointer-events-none"
+									style={{ color: theme.colors.textDim }}
+								/>
+								<select
+									value={timeRange}
+									onChange={(e) => setTimeRange(e.target.value as TeamOrchTimeRange)}
+									className="pl-7 pr-6 py-1.5 rounded text-sm border cursor-pointer outline-none appearance-none"
+									style={{
+										backgroundColor: theme.colors.bgMain,
+										borderColor: theme.colors.border,
+										color: theme.colors.textMain,
+									}}
+								>
+									{TIME_RANGE_OPTIONS.map((option) => (
+										<option key={option.value} value={option.value}>
+											{option.label}
+										</option>
+									))}
+								</select>
+								<div
+									className="absolute right-1.5 pointer-events-none"
+									style={{ color: theme.colors.textDim }}
+								>
+									<svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor">
+										<path d="M0 0l5 6 5-6z" />
+									</svg>
+								</div>
+							</div>
+						)}
+
+						<button
+							onClick={onClose}
+							className="p-1.5 rounded hover:bg-opacity-10 transition-colors"
+							style={{ color: theme.colors.textDim }}
+							onMouseEnter={(e) =>
+								(e.currentTarget.style.backgroundColor = `${theme.colors.accent}20`)
+							}
+							onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+							title="Close (Esc)"
+						>
+							<X className="w-4 h-4" />
+						</button>
+					</div>
 				</div>
 
 				{/* Tab Bar */}
@@ -214,14 +265,23 @@ export function TeamOrchestrationModal({
 					aria-labelledby={`tab-${activeTab}`}
 					id={`tabpanel-${activeTab}`}
 				>
-					<div
-						className="flex items-center justify-center h-full min-h-[200px]"
-						style={{ color: theme.colors.textDim }}
-					>
-						<p className="text-sm">
-							{TABS.find((t) => t.value === activeTab)?.label} — coming soon
-						</p>
-					</div>
+					{activeTab === 'overview' ? (
+						<OverviewTab
+							theme={theme}
+							data={stats.data}
+							loading={stats.loading}
+							colorBlindMode={colorBlindMode}
+						/>
+					) : (
+						<div
+							className="flex items-center justify-center h-full min-h-[200px]"
+							style={{ color: theme.colors.textDim }}
+						>
+							<p className="text-sm">
+								{TABS.find((t) => t.value === activeTab)?.label} — coming soon
+							</p>
+						</div>
+					)}
 				</div>
 			</div>
 		</div>
