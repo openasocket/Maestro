@@ -2396,6 +2396,28 @@ interface MaestroAPI {
 		// Clear initialization result (after user has acknowledged the notification)
 		clearInitializationResult: () => Promise<boolean>;
 	};
+	// Team Orchestration Stats API (workflow analytics)
+	teamOrchStats: {
+		record: (
+			event: import('../shared/team-orch-stats-types').TeamOrchEvent
+		) => Promise<string | null>;
+		getAggregation: (
+			range: import('../shared/team-orch-stats-types').TeamOrchTimeRange
+		) => Promise<import('../shared/team-orch-stats-types').TeamOrchAggregation>;
+		getHistory: (
+			query: import('../shared/team-orch-stats-types').TeamOrchHistoryQuery
+		) => Promise<import('../shared/team-orch-stats-types').TeamOrchHistoryResult>;
+		getEventDetail: (
+			id: string
+		) => Promise<import('../shared/team-orch-stats-types').TeamOrchEvent | null>;
+		exportCsv: (
+			range: import('../shared/team-orch-stats-types').TeamOrchTimeRange
+		) => Promise<{ saved: boolean; path: string | null }>;
+		exportJson: (
+			range: import('../shared/team-orch-stats-types').TeamOrchTimeRange
+		) => Promise<{ saved: boolean; path: string | null }>;
+		onStatsUpdate: (callback: () => void) => () => void;
+	};
 	// Document Graph API (file watching for graph visualization)
 	documentGraph: {
 		watchFolder: (rootPath: string) => Promise<{ success: boolean; error?: string }>;
