@@ -17,7 +17,7 @@
 import React, { memo, useMemo, useCallback, useState } from 'react';
 import type { Theme } from '../../../types';
 import type { TeamOrchAggregation } from '../../../../shared/team-orch-stats-types';
-import { formatTokenCount, formatDuration } from '../teamOrchUtils';
+import { formatTokenCount, formatDuration, clampTooltipPosition } from '../teamOrchUtils';
 import { COLORBLIND_AGENT_PALETTE } from '../../../constants/colorblindPalettes';
 
 type MetricView = 'tokens' | 'messages' | 'time';
@@ -133,10 +133,12 @@ export const AgentPerformanceChart = memo(function AgentPerformanceChart({
 		(agentId: string, event: React.MouseEvent<HTMLDivElement>) => {
 			setHoveredAgent(agentId);
 			const rect = event.currentTarget.getBoundingClientRect();
-			setTooltipPos({
-				x: rect.right + 8,
-				y: rect.top + rect.height / 2,
-			});
+			setTooltipPos(
+				clampTooltipPosition({
+					x: rect.right + 8,
+					y: rect.top + rect.height / 2,
+				})
+			);
 		},
 		[]
 	);

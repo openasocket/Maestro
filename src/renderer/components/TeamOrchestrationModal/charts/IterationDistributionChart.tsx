@@ -17,6 +17,7 @@ import React, { memo, useState, useMemo, useCallback } from 'react';
 import type { Theme } from '../../../types';
 import type { TeamOrchAggregation } from '../../../../shared/team-orch-stats-types';
 import { COLORBLIND_AGENT_PALETTE } from '../../../constants/colorblindPalettes';
+import { clampTooltipPosition } from '../teamOrchUtils';
 
 interface IterationDistributionChartProps {
 	theme: Theme;
@@ -87,10 +88,12 @@ export const IterationDistributionChart = memo(function IterationDistributionCha
 	const handleMouseEnter = useCallback((index: number, event: React.MouseEvent<SVGRectElement>) => {
 		setHoveredBar(index);
 		const rect = event.currentTarget.getBoundingClientRect();
-		setTooltipPos({
-			x: rect.left + rect.width / 2,
-			y: rect.top,
-		});
+		setTooltipPos(
+			clampTooltipPosition({
+				x: rect.left + rect.width / 2,
+				y: rect.top,
+			})
+		);
 	}, []);
 
 	const handleMouseLeave = useCallback(() => {

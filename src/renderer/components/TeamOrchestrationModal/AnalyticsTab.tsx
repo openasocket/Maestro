@@ -141,7 +141,8 @@ export const AnalyticsTab = memo(function AnalyticsTab({
 			<section
 				ref={tokenChartRef}
 				tabIndex={0}
-				className="outline-none"
+				className="outline-none dashboard-section-enter"
+				style={{ animationDelay: '0ms' }}
 				role="region"
 				aria-label="Token usage chart"
 			>
@@ -161,7 +162,8 @@ export const AnalyticsTab = memo(function AnalyticsTab({
 				<section
 					ref={completionChartRef}
 					tabIndex={0}
-					className="outline-none"
+					className="outline-none dashboard-section-enter"
+					style={{ animationDelay: '100ms' }}
 					role="region"
 					aria-label="Completion rates chart"
 				>
@@ -173,7 +175,8 @@ export const AnalyticsTab = memo(function AnalyticsTab({
 				<section
 					ref={iterationChartRef}
 					tabIndex={0}
-					className="outline-none"
+					className="outline-none dashboard-section-enter"
+					style={{ animationDelay: '100ms' }}
 					role="region"
 					aria-label="Iteration distribution chart"
 				>
@@ -187,7 +190,8 @@ export const AnalyticsTab = memo(function AnalyticsTab({
 			<section
 				ref={agentChartRef}
 				tabIndex={0}
-				className="outline-none"
+				className="outline-none dashboard-section-enter"
+				style={{ animationDelay: '200ms' }}
 				role="region"
 				aria-label="Agent performance chart"
 			>
@@ -201,8 +205,8 @@ export const AnalyticsTab = memo(function AnalyticsTab({
 				<section
 					ref={costRef}
 					tabIndex={0}
-					className="p-4 rounded-lg outline-none"
-					style={{ backgroundColor: theme.colors.bgMain }}
+					className="p-4 rounded-lg outline-none dashboard-section-enter"
+					style={{ backgroundColor: theme.colors.bgMain, animationDelay: '300ms' }}
 					role="region"
 					aria-label="Cost estimation"
 				>

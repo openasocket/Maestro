@@ -15,7 +15,7 @@
 import React, { memo, useMemo, useCallback, useState } from 'react';
 import type { Theme } from '../../../types';
 import type { TeamOrchAggregation } from '../../../../shared/team-orch-stats-types';
-import { topologyDisplayName, formatPercentage } from '../teamOrchUtils';
+import { topologyDisplayName, formatPercentage, clampTooltipPosition } from '../teamOrchUtils';
 
 interface TopologyData {
 	pattern: string;
@@ -61,10 +61,12 @@ export const CompletionRatesChart = memo(function CompletionRatesChart({
 		(pattern: string, event: React.MouseEvent<HTMLDivElement>) => {
 			setHoveredPattern(pattern);
 			const rect = event.currentTarget.getBoundingClientRect();
-			setTooltipPos({
-				x: rect.right + 8,
-				y: rect.top + rect.height / 2,
-			});
+			setTooltipPos(
+				clampTooltipPosition({
+					x: rect.right + 8,
+					y: rect.top + rect.height / 2,
+				})
+			);
 		},
 		[]
 	);

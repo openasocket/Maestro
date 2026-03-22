@@ -85,8 +85,12 @@ export function TeamOrchestrationModal({
 		containerRef.current?.focus();
 	}, []);
 
+	// Track tab transitions for fade animation
+	const [tabKey, setTabKey] = useState(0);
+
 	const switchTab = useCallback((tab: TabId) => {
 		setActiveTab(tab);
+		setTabKey((k) => k + 1);
 	}, []);
 
 	// Handle Cmd+Shift+[ and Cmd+Shift+] for tab navigation
@@ -276,38 +280,40 @@ export function TeamOrchestrationModal({
 					aria-labelledby={`tab-${activeTab}`}
 					id={`tabpanel-${activeTab}`}
 				>
-					{activeTab === 'overview' ? (
-						<OverviewTab
-							theme={theme}
-							data={stats.data}
-							loading={stats.loading}
-							colorBlindMode={colorBlindMode}
-						/>
-					) : activeTab === 'templates' ? (
-						<TemplatesTab theme={theme} data={stats.data} />
-					) : activeTab === 'configuration' ? (
-						<ConfigurationTab theme={theme} />
-					) : activeTab === 'analytics' ? (
-						<AnalyticsTab
-							theme={theme}
-							data={stats.data}
-							loading={stats.loading}
-							timeRange={timeRange}
-							onTimeRangeChange={setTimeRange}
-							colorBlindMode={colorBlindMode}
-						/>
-					) : activeTab === 'history' ? (
-						<HistoryTab theme={theme} />
-					) : (
-						<div
-							className="flex items-center justify-center h-full min-h-[200px]"
-							style={{ color: theme.colors.textDim }}
-						>
-							<p className="text-sm">
-								{TABS.find((t) => t.value === activeTab)?.label} — coming soon
-							</p>
-						</div>
-					)}
+					<div key={tabKey} className="animate-in fade-in" style={{ animationDuration: '150ms' }}>
+						{activeTab === 'overview' ? (
+							<OverviewTab
+								theme={theme}
+								data={stats.data}
+								loading={stats.loading}
+								colorBlindMode={colorBlindMode}
+							/>
+						) : activeTab === 'templates' ? (
+							<TemplatesTab theme={theme} data={stats.data} />
+						) : activeTab === 'configuration' ? (
+							<ConfigurationTab theme={theme} />
+						) : activeTab === 'analytics' ? (
+							<AnalyticsTab
+								theme={theme}
+								data={stats.data}
+								loading={stats.loading}
+								timeRange={timeRange}
+								onTimeRangeChange={setTimeRange}
+								colorBlindMode={colorBlindMode}
+							/>
+						) : activeTab === 'history' ? (
+							<HistoryTab theme={theme} />
+						) : (
+							<div
+								className="flex items-center justify-center h-full min-h-[200px]"
+								style={{ color: theme.colors.textDim }}
+							>
+								<p className="text-sm">
+									{TABS.find((t) => t.value === activeTab)?.label} — coming soon
+								</p>
+							</div>
+						)}
+					</div>
 				</div>
 			</div>
 		</div>

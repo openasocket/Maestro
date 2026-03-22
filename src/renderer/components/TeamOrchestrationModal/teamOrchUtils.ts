@@ -75,6 +75,20 @@ export function topologyDisplayName(pattern: string): string {
 /**
  * Map a workflow status to an appropriate theme color.
  */
+/**
+ * Adjust tooltip position to prevent clipping at viewport edges.
+ * Assumes a tooltip roughly 200px wide and 100px tall.
+ */
+export function clampTooltipPosition(pos: { x: number; y: number }): { x: number; y: number } {
+	const margin = 8;
+	const tooltipWidth = 200;
+	const tooltipHeight = 100;
+	return {
+		x: Math.min(pos.x, window.innerWidth - tooltipWidth - margin),
+		y: Math.max(margin + tooltipHeight, Math.min(pos.y, window.innerHeight - margin)),
+	};
+}
+
 export function statusColor(status: string, theme: Theme): string {
 	switch (status) {
 		case 'completed':

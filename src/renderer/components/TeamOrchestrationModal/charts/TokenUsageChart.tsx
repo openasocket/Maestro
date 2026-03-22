@@ -17,7 +17,7 @@ import React, { memo, useState, useMemo, useCallback } from 'react';
 import { format, parseISO } from 'date-fns';
 import type { Theme } from '../../../types';
 import type { TeamOrchAggregation } from '../../../../shared/team-orch-stats-types';
-import { formatTokenCount, formatDuration } from '../teamOrchUtils';
+import { formatTokenCount, formatDuration, clampTooltipPosition } from '../teamOrchUtils';
 import { COLORBLIND_AGENT_PALETTE } from '../../../constants/colorblindPalettes';
 
 // 10 distinct colors for agents
@@ -220,10 +220,12 @@ export const TokenUsageChart = memo(function TokenUsageChart({
 		(dayIndex: number, agent: string, event: React.MouseEvent<SVGCircleElement>) => {
 			setHoveredDay({ dayIndex, agent });
 			const rect = event.currentTarget.getBoundingClientRect();
-			setTooltipPos({
-				x: rect.left + rect.width / 2,
-				y: rect.top,
-			});
+			setTooltipPos(
+				clampTooltipPosition({
+					x: rect.left + rect.width / 2,
+					y: rect.top,
+				})
+			);
 		},
 		[]
 	);
