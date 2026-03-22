@@ -45,6 +45,10 @@ export function createDialogApi() {
 			filters?: Array<{ name: string; extensions: string[] }>;
 			title?: string;
 		}) => ipcRenderer.invoke('dialog:saveFile', options),
+		openFile: (options: {
+			filters?: Array<{ name: string; extensions: string[] }>;
+			title?: string;
+		}) => ipcRenderer.invoke('dialog:openFile', options),
 	};
 }
 

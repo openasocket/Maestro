@@ -114,6 +114,38 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 		}
 	);
 
+	// File open dialog
+	ipcMain.handle(
+		'dialog:openFile',
+		async (
+			_event,
+			options: {
+				filters?: Array<{ name: string; extensions: string[] }>;
+				title?: string;
+			}
+		) => {
+			try {
+				const mainWindow = getMainWindow();
+				if (!mainWindow || mainWindow.isDestroyed()) return null;
+
+				const result = await dialog.showOpenDialog(mainWindow, {
+					properties: ['openFile'],
+					filters: options.filters,
+					title: options.title ?? 'Open File',
+				});
+
+				if (result.canceled || result.filePaths.length === 0) {
+					return null;
+				}
+
+				return result.filePaths[0];
+			} catch (error) {
+				logger.error('dialog:openFile failed', 'Dialog', { error });
+				return null;
+			}
+		}
+	);
+
 	// ============ Font Detection Handlers ============
 
 	// Font detection

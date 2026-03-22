@@ -989,6 +989,10 @@ interface MaestroAPI {
 			filters?: Array<{ name: string; extensions: string[] }>;
 			title?: string;
 		}) => Promise<string | null>;
+		openFile: (options: {
+			filters?: Array<{ name: string; extensions: string[] }>;
+			title?: string;
+		}) => Promise<string | null>;
 	};
 	fonts: {
 		detect: () => Promise<string[]>;

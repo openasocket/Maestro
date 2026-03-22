@@ -12,16 +12,31 @@
  * - Per-template usage stats from TeamOrchAggregation.byTemplate
  * - Compact WorkflowGraph preview for topology templates
  * - Responsive layout (2-col grid → 1-col on narrow)
+ * - CRUD: Create, Edit, Duplicate, Delete templates
+ * - Import/Export: JSON file import via file dialog, export via save dialog
  */
 
 import { memo, useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search } from 'lucide-react';
+import {
+	Search,
+	Plus,
+	Upload,
+	Download,
+	Copy,
+	Pencil,
+	Trash2,
+	X,
+	GripVertical,
+} from 'lucide-react';
 import type { Theme } from '../../types';
 import type { TeamOrchAggregation } from '../../../shared/team-orch-stats-types';
-import type { TeamTemplate } from '../../../shared/group-chat-types';
+import type { TeamTemplate, TeamTemplateRole } from '../../../shared/group-chat-types';
+import { AGENT_IDS } from '../../../shared/agentIds';
 import { WorkflowGraph } from '../GroupChat/WorkflowGraph';
 import { TeamOrchEmptyState } from './TeamOrchEmptyState';
 import { topologyDisplayName, formatPercentage } from './teamOrchUtils';
+import { notifyToast } from '../../stores/notificationStore';
+import { safeClipboardWrite } from '../../utils/clipboard';
 
 type CategoryFilter = 'all' | 'builtin' | 'user' | 'exchange';
 
@@ -32,9 +47,39 @@ const CATEGORY_PILLS: { value: CategoryFilter; label: string }[] = [
 	{ value: 'exchange', label: 'Exchange' },
 ];
 
+/** Agent IDs available for role assignment (exclude terminal) */
+const ROLE_AGENT_IDS = AGENT_IDS.filter((id) => id !== 'terminal');
+
 interface TemplatesTabProps {
 	theme: Theme;
 	data: TeamOrchAggregation | null;
+}
+
+/**
+ * Generate a UUID v4 string
+ */
+function generateUUID(): string {
+	return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+		const r = (Math.random() * 16) | 0;
+		const v = c === 'x' ? r : (r & 0x3) | 0x8;
+		return v.toString(16);
+	});
+}
+
+/**
+ * Create a blank role for the inline form
+ */
+function createBlankRole(): TeamTemplateRole {
+	return { name: '', agentId: 'claude-code', description: '' };
+}
+
+/**
+ * Validate that an object has the required TeamTemplate fields
+ */
+function isValidTemplateShape(obj: unknown): obj is Partial<TeamTemplate> {
+	if (!obj || typeof obj !== 'object') return false;
+	const t = obj as Record<string, unknown>;
+	return typeof t.name === 'string' && typeof t.description === 'string' && Array.isArray(t.roles);
 }
 
 export const TemplatesTab = memo(function TemplatesTab({ theme, data }: TemplatesTabProps) {
@@ -44,6 +89,7 @@ export const TemplatesTab = memo(function TemplatesTab({ theme, data }: Template
 	const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
 	const [searchQuery, setSearchQuery] = useState('');
 	const [debouncedSearch, setDebouncedSearch] = useState('');
+	const [showCreateForm, setShowCreateForm] = useState(false);
 	const mountedRef = useRef(true);
 
 	// Debounce search input (300ms)
@@ -101,6 +147,160 @@ export const TemplatesTab = memo(function TemplatesTab({ theme, data }: Template
 		[templates, selectedTemplateId]
 	);
 
+	// CRUD handlers
+	const handleCreateSave = useCallback(
+		async (name: string, description: string, roles: TeamTemplateRole[]) => {
+			const now = Date.now();
+			const template: TeamTemplate = {
+				id: generateUUID(),
+				name: name.trim(),
+				description: description.trim(),
+				category: 'user',
+				createdAt: now,
+				updatedAt: now,
+				moderatorAgentId: 'claude-code',
+				roles,
+			};
+			await window.maestro.teamTemplates.save(template);
+			setShowCreateForm(false);
+			await fetchTemplates();
+			notifyToast({
+				type: 'success',
+				title: 'Template created',
+				message: `"${template.name}" created.`,
+			});
+		},
+		[fetchTemplates]
+	);
+
+	const handleEditSave = useCallback(
+		async (updated: TeamTemplate) => {
+			await window.maestro.teamTemplates.save({ ...updated, updatedAt: Date.now() });
+			await fetchTemplates();
+			notifyToast({
+				type: 'success',
+				title: 'Template updated',
+				message: `"${updated.name}" saved.`,
+			});
+		},
+		[fetchTemplates]
+	);
+
+	const handleDuplicate = useCallback(
+		async (templateId: string) => {
+			const original = templates.find((t) => t.id === templateId);
+			const newName = original ? `${original.name} (Copy)` : 'Copy';
+			await window.maestro.teamTemplates.duplicate(templateId, newName);
+			await fetchTemplates();
+			notifyToast({
+				type: 'success',
+				title: 'Template duplicated',
+				message: `"${newName}" created.`,
+			});
+		},
+		[fetchTemplates, templates]
+	);
+
+	const handleDelete = useCallback(
+		async (templateId: string) => {
+			const template = templates.find((t) => t.id === templateId);
+			const confirmed = window.confirm(
+				`Delete "${template?.name ?? 'template'}"? This cannot be undone.`
+			);
+			if (!confirmed) return;
+
+			await window.maestro.teamTemplates.delete(templateId);
+			if (selectedTemplateId === templateId) {
+				setSelectedTemplateId(null);
+			}
+			await fetchTemplates();
+			notifyToast({ type: 'success', title: 'Template deleted', message: `Template removed.` });
+		},
+		[fetchTemplates, templates, selectedTemplateId]
+	);
+
+	const handleExport = useCallback(async (template: TeamTemplate) => {
+		const json = JSON.stringify(template, null, 2);
+		try {
+			const filePath = await window.maestro.dialog.saveFile({
+				defaultPath: `${template.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`,
+				filters: [{ name: 'JSON Files', extensions: ['json'] }],
+				title: 'Export Template',
+			});
+			if (filePath) {
+				await window.maestro.fs.writeFile(filePath, json);
+				notifyToast({
+					type: 'success',
+					title: 'Template exported',
+					message: `Saved to ${filePath}`,
+				});
+			}
+		} catch {
+			// Fallback: copy to clipboard
+			const ok = await safeClipboardWrite(json);
+			notifyToast({
+				type: ok ? 'info' : 'error',
+				title: ok ? 'Copied to clipboard' : 'Export failed',
+				message: ok ? 'Template JSON copied to clipboard.' : 'Could not export template.',
+			});
+		}
+	}, []);
+
+	const handleImport = useCallback(async () => {
+		try {
+			const filePath = await window.maestro.dialog.openFile({
+				filters: [{ name: 'JSON Files', extensions: ['json'] }],
+				title: 'Import Template',
+			});
+			if (!filePath) return;
+
+			const content = await window.maestro.fs.readFile(filePath);
+			if (!content) {
+				notifyToast({ type: 'error', title: 'Import failed', message: 'Could not read file.' });
+				return;
+			}
+
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(content);
+			} catch {
+				notifyToast({ type: 'error', title: 'Import failed', message: 'Invalid JSON file.' });
+				return;
+			}
+
+			if (!isValidTemplateShape(parsed)) {
+				notifyToast({
+					type: 'error',
+					title: 'Import failed',
+					message: 'JSON does not match template format (requires name, description, roles).',
+				});
+				return;
+			}
+
+			const now = Date.now();
+			const imported: TeamTemplate = {
+				...(parsed as TeamTemplate),
+				id: generateUUID(),
+				category: 'user',
+				createdAt: now,
+				updatedAt: now,
+			};
+			await window.maestro.teamTemplates.save(imported);
+			await fetchTemplates();
+			notifyToast({
+				type: 'success',
+				title: 'Template imported',
+				message: `"${imported.name}" added.`,
+			});
+		} catch (err) {
+			notifyToast({
+				type: 'error',
+				title: 'Import failed',
+				message: err instanceof Error ? err.message : 'An unexpected error occurred.',
+			});
+		}
+	}, [fetchTemplates]);
+
 	if (loading) {
 		return (
 			<div className="space-y-3">
@@ -124,6 +324,41 @@ export const TemplatesTab = memo(function TemplatesTab({ theme, data }: Template
 		<div className="flex gap-4" style={{ minHeight: 400 }}>
 			{/* Left panel: filters + grid */}
 			<div className={selectedTemplate ? 'flex-1 min-w-0' : 'w-full'}>
+				{/* Action buttons row */}
+				<div className="flex items-center gap-2 mb-3">
+					<button
+						onClick={() => setShowCreateForm((v) => !v)}
+						className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+						style={{
+							backgroundColor: theme.colors.accent,
+							color: '#fff',
+						}}
+					>
+						<Plus className="w-3.5 h-3.5" />
+						Create Template
+					</button>
+					<button
+						onClick={handleImport}
+						className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+						style={{
+							backgroundColor: theme.colors.bgActivity,
+							color: theme.colors.textDim,
+						}}
+					>
+						<Upload className="w-3.5 h-3.5" />
+						Import
+					</button>
+				</div>
+
+				{/* Inline create form */}
+				{showCreateForm && (
+					<CreateTemplateForm
+						theme={theme}
+						onSave={handleCreateSave}
+						onCancel={() => setShowCreateForm(false)}
+					/>
+				)}
+
 				{/* Category filter pills */}
 				<div className="flex items-center gap-2 mb-3">
 					{CATEGORY_PILLS.map((pill) => (
@@ -197,7 +432,242 @@ export const TemplatesTab = memo(function TemplatesTab({ theme, data }: Template
 					theme={theme}
 					stats={data?.byTemplate?.[selectedTemplate.id] ?? null}
 					onClose={() => setSelectedTemplateId(null)}
+					onEditSave={handleEditSave}
+					onDuplicate={handleDuplicate}
+					onDelete={handleDelete}
+					onExport={handleExport}
 				/>
+			)}
+		</div>
+	);
+});
+
+/**
+ * Inline form for creating a new template.
+ */
+const CreateTemplateForm = memo(function CreateTemplateForm({
+	theme,
+	onSave,
+	onCancel,
+}: {
+	theme: Theme;
+	onSave: (name: string, description: string, roles: TeamTemplateRole[]) => Promise<void>;
+	onCancel: () => void;
+}) {
+	const [name, setName] = useState('');
+	const [description, setDescription] = useState('');
+	const [roles, setRoles] = useState<TeamTemplateRole[]>([createBlankRole()]);
+	const [saving, setSaving] = useState(false);
+	const nameRef = useRef<HTMLInputElement>(null);
+
+	useEffect(() => {
+		nameRef.current?.focus();
+	}, []);
+
+	const canSave = name.trim().length > 0 && roles.some((r) => r.name.trim().length > 0) && !saving;
+
+	const handleSave = useCallback(async () => {
+		if (!canSave) return;
+		setSaving(true);
+		try {
+			const validRoles = roles.filter((r) => r.name.trim().length > 0);
+			await onSave(name, description, validRoles);
+		} catch (err) {
+			notifyToast({
+				type: 'error',
+				title: 'Failed to create template',
+				message: err instanceof Error ? err.message : 'An unexpected error occurred.',
+			});
+			setSaving(false);
+		}
+	}, [canSave, name, description, roles, onSave]);
+
+	const updateRole = useCallback((idx: number, field: keyof TeamTemplateRole, value: string) => {
+		setRoles((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+	}, []);
+
+	const removeRole = useCallback((idx: number) => {
+		setRoles((prev) => prev.filter((_, i) => i !== idx));
+	}, []);
+
+	const addRole = useCallback(() => {
+		setRoles((prev) => [...prev, createBlankRole()]);
+	}, []);
+
+	return (
+		<div
+			className="mb-4 p-4 rounded-lg border"
+			style={{ borderColor: theme.colors.accent, backgroundColor: theme.colors.bgActivity }}
+		>
+			<div className="flex items-center justify-between mb-3">
+				<h4 className="text-sm font-semibold" style={{ color: theme.colors.textMain }}>
+					New Template
+				</h4>
+				<button
+					onClick={onCancel}
+					className="p-1 rounded hover:opacity-80"
+					style={{ color: theme.colors.textDim }}
+				>
+					<X className="w-4 h-4" />
+				</button>
+			</div>
+
+			<input
+				ref={nameRef}
+				type="text"
+				placeholder="Template name"
+				value={name}
+				onChange={(e) => setName(e.target.value)}
+				className="w-full px-3 py-2 rounded-lg text-sm border outline-none mb-2"
+				style={{
+					backgroundColor: theme.colors.bgMain,
+					borderColor: theme.colors.border,
+					color: theme.colors.textMain,
+				}}
+			/>
+			<textarea
+				placeholder="Description"
+				value={description}
+				onChange={(e) => setDescription(e.target.value)}
+				rows={2}
+				className="w-full px-3 py-2 rounded-lg text-sm border outline-none resize-none mb-3"
+				style={{
+					backgroundColor: theme.colors.bgMain,
+					borderColor: theme.colors.border,
+					color: theme.colors.textMain,
+				}}
+			/>
+
+			{/* Roles */}
+			<div className="mb-3">
+				<div className="flex items-center justify-between mb-2">
+					<span
+						className="text-xs font-semibold uppercase tracking-wide"
+						style={{ color: theme.colors.textDim }}
+					>
+						Roles
+					</span>
+					<button
+						onClick={addRole}
+						className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded"
+						style={{ color: theme.colors.accent }}
+					>
+						<Plus className="w-3 h-3" /> Add Role
+					</button>
+				</div>
+				<div className="space-y-2">
+					{roles.map((role, idx) => (
+						<RoleEditor
+							key={idx}
+							role={role}
+							theme={theme}
+							onChange={(field, value) => updateRole(idx, field, value)}
+							onRemove={roles.length > 1 ? () => removeRole(idx) : undefined}
+						/>
+					))}
+				</div>
+			</div>
+
+			<div className="flex justify-end gap-2">
+				<button
+					onClick={onCancel}
+					className="px-3 py-1.5 rounded text-xs"
+					style={{ color: theme.colors.textDim }}
+				>
+					Cancel
+				</button>
+				<button
+					onClick={handleSave}
+					disabled={!canSave}
+					className="px-3 py-1.5 rounded text-xs font-medium"
+					style={{
+						backgroundColor: canSave ? theme.colors.accent : theme.colors.border,
+						color: '#fff',
+						opacity: canSave ? 1 : 0.5,
+					}}
+				>
+					{saving ? 'Saving...' : 'Create'}
+				</button>
+			</div>
+		</div>
+	);
+});
+
+/**
+ * Inline editor for a single role (used in create and edit forms).
+ */
+const RoleEditor = memo(function RoleEditor({
+	role,
+	theme,
+	onChange,
+	onRemove,
+}: {
+	role: TeamTemplateRole;
+	theme: Theme;
+	onChange: (field: keyof TeamTemplateRole, value: string) => void;
+	onRemove?: () => void;
+}) {
+	return (
+		<div
+			className="flex items-start gap-2 p-2 rounded border"
+			style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
+		>
+			<GripVertical
+				className="w-3.5 h-3.5 mt-2 flex-shrink-0"
+				style={{ color: theme.colors.textDim, opacity: 0.4 }}
+			/>
+			<div className="flex-1 min-w-0 space-y-1">
+				<div className="flex gap-2">
+					<input
+						type="text"
+						placeholder="Role name"
+						value={role.name}
+						onChange={(e) => onChange('name', e.target.value)}
+						className="flex-1 px-2 py-1 rounded text-xs border outline-none"
+						style={{
+							backgroundColor: theme.colors.bgActivity,
+							borderColor: theme.colors.border,
+							color: theme.colors.textMain,
+						}}
+					/>
+					<select
+						value={role.agentId}
+						onChange={(e) => onChange('agentId', e.target.value)}
+						className="px-2 py-1 rounded text-xs border outline-none"
+						style={{
+							backgroundColor: theme.colors.bgActivity,
+							borderColor: theme.colors.border,
+							color: theme.colors.textMain,
+						}}
+					>
+						{ROLE_AGENT_IDS.map((id) => (
+							<option key={id} value={id}>
+								{id}
+							</option>
+						))}
+					</select>
+				</div>
+				<input
+					type="text"
+					placeholder="Description"
+					value={role.description}
+					onChange={(e) => onChange('description', e.target.value)}
+					className="w-full px-2 py-1 rounded text-xs border outline-none"
+					style={{
+						backgroundColor: theme.colors.bgActivity,
+						borderColor: theme.colors.border,
+						color: theme.colors.textMain,
+					}}
+				/>
+			</div>
+			{onRemove && (
+				<button
+					onClick={onRemove}
+					className="p-1 mt-1 rounded hover:opacity-80 flex-shrink-0"
+					style={{ color: theme.colors.textDim }}
+				>
+					<X className="w-3.5 h-3.5" />
+				</button>
 			)}
 		</div>
 	);
@@ -299,18 +769,100 @@ const TemplateCard = memo(function TemplateCard({
 
 /**
  * Detail panel shown when a template is selected.
+ * Supports inline editing for user templates.
  */
 const TemplateDetailPanel = memo(function TemplateDetailPanel({
 	template,
 	theme,
 	stats,
 	onClose,
+	onEditSave,
+	onDuplicate,
+	onDelete,
+	onExport,
 }: {
 	template: TeamTemplate;
 	theme: Theme;
 	stats: { count: number; successRate: number; avgIterations: number } | null;
 	onClose: () => void;
+	onEditSave: (updated: TeamTemplate) => Promise<void>;
+	onDuplicate: (templateId: string) => Promise<void>;
+	onDelete: (templateId: string) => Promise<void>;
+	onExport: (template: TeamTemplate) => Promise<void>;
 }) {
+	const [editing, setEditing] = useState(false);
+	const [editName, setEditName] = useState(template.name);
+	const [editDescription, setEditDescription] = useState(template.description);
+	const [editRoles, setEditRoles] = useState<TeamTemplateRole[]>(template.roles);
+	const [saving, setSaving] = useState(false);
+
+	const isUserTemplate = template.category === 'user';
+
+	// Reset edit state when template changes
+	useEffect(() => {
+		setEditing(false);
+		setEditName(template.name);
+		setEditDescription(template.description);
+		setEditRoles(template.roles);
+	}, [template.id, template.name, template.description, template.roles]);
+
+	const startEditing = useCallback(() => {
+		setEditName(template.name);
+		setEditDescription(template.description);
+		setEditRoles([...template.roles]);
+		setEditing(true);
+	}, [template]);
+
+	const cancelEditing = useCallback(() => {
+		setEditing(false);
+		setEditName(template.name);
+		setEditDescription(template.description);
+		setEditRoles(template.roles);
+	}, [template]);
+
+	const handleEditSave = useCallback(async () => {
+		if (!editName.trim()) return;
+		setSaving(true);
+		try {
+			const validRoles = editRoles.filter((r) => r.name.trim().length > 0);
+			await onEditSave({
+				...template,
+				name: editName.trim(),
+				description: editDescription.trim(),
+				roles: validRoles,
+			});
+			setEditing(false);
+		} catch (err) {
+			notifyToast({
+				type: 'error',
+				title: 'Failed to save',
+				message: err instanceof Error ? err.message : 'An unexpected error occurred.',
+			});
+		} finally {
+			setSaving(false);
+		}
+	}, [editName, editDescription, editRoles, template, onEditSave]);
+
+	const updateEditRole = useCallback(
+		(idx: number, field: keyof TeamTemplateRole, value: string) => {
+			setEditRoles((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+		},
+		[]
+	);
+
+	const removeEditRole = useCallback((idx: number) => {
+		setEditRoles((prev) => prev.filter((_, i) => i !== idx));
+	}, []);
+
+	const addEditRole = useCallback(() => {
+		setEditRoles((prev) => [...prev, createBlankRole()]);
+	}, []);
+
+	const actionBtnStyle = {
+		backgroundColor: theme.colors.bgActivity,
+		color: theme.colors.textDim,
+	};
+
 	return (
 		<div
 			className="w-[40%] min-w-[280px] max-w-[400px] rounded-lg border p-4 overflow-y-auto flex-shrink-0"
@@ -322,12 +874,41 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 			{/* Header */}
 			<div className="flex items-start justify-between mb-4">
 				<div className="min-w-0 flex-1">
-					<h3 className="text-base font-semibold" style={{ color: theme.colors.textMain }}>
-						{template.name}
-					</h3>
-					<p className="text-xs mt-1" style={{ color: theme.colors.textDim }}>
-						{template.description}
-					</p>
+					{editing ? (
+						<>
+							<input
+								type="text"
+								value={editName}
+								onChange={(e) => setEditName(e.target.value)}
+								className="w-full text-base font-semibold px-2 py-1 rounded border outline-none mb-1"
+								style={{
+									backgroundColor: theme.colors.bgActivity,
+									borderColor: theme.colors.border,
+									color: theme.colors.textMain,
+								}}
+							/>
+							<textarea
+								value={editDescription}
+								onChange={(e) => setEditDescription(e.target.value)}
+								rows={2}
+								className="w-full text-xs px-2 py-1 rounded border outline-none resize-none"
+								style={{
+									backgroundColor: theme.colors.bgActivity,
+									borderColor: theme.colors.border,
+									color: theme.colors.textMain,
+								}}
+							/>
+						</>
+					) : (
+						<>
+							<h3 className="text-base font-semibold" style={{ color: theme.colors.textMain }}>
+								{template.name}
+							</h3>
+							<p className="text-xs mt-1" style={{ color: theme.colors.textDim }}>
+								{template.description}
+							</p>
+						</>
+					)}
 				</div>
 				<button
 					onClick={onClose}
@@ -349,6 +930,70 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 				>
 					{template.category}
 				</span>
+			</div>
+
+			{/* Action buttons */}
+			<div className="flex items-center gap-2 mb-4 flex-wrap">
+				{isUserTemplate && !editing && (
+					<button
+						onClick={startEditing}
+						className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs transition-colors hover:opacity-80"
+						style={actionBtnStyle}
+					>
+						<Pencil className="w-3 h-3" /> Edit
+					</button>
+				)}
+				{editing && (
+					<>
+						<button
+							onClick={handleEditSave}
+							disabled={saving || !editName.trim()}
+							className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-colors"
+							style={{
+								backgroundColor:
+									editName.trim() && !saving ? theme.colors.accent : theme.colors.border,
+								color: '#fff',
+								opacity: editName.trim() && !saving ? 1 : 0.5,
+							}}
+						>
+							{saving ? 'Saving...' : 'Save'}
+						</button>
+						<button
+							onClick={cancelEditing}
+							className="px-2.5 py-1.5 rounded text-xs transition-colors hover:opacity-80"
+							style={actionBtnStyle}
+						>
+							Cancel
+						</button>
+					</>
+				)}
+				{!editing && (
+					<>
+						<button
+							onClick={() => onDuplicate(template.id)}
+							className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs transition-colors hover:opacity-80"
+							style={actionBtnStyle}
+						>
+							<Copy className="w-3 h-3" /> Duplicate
+						</button>
+						<button
+							onClick={() => onExport(template)}
+							className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs transition-colors hover:opacity-80"
+							style={actionBtnStyle}
+						>
+							<Download className="w-3 h-3" /> Export
+						</button>
+						{isUserTemplate && (
+							<button
+								onClick={() => onDelete(template.id)}
+								className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs transition-colors hover:opacity-80"
+								style={{ backgroundColor: theme.colors.bgActivity, color: theme.colors.error }}
+							>
+								<Trash2 className="w-3 h-3" /> Delete
+							</button>
+						)}
+					</>
+				)}
 			</div>
 
 			{/* Usage stats */}
@@ -376,40 +1021,65 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 
 			{/* Roles list */}
 			<div className="mb-4">
-				<h4
-					className="text-xs font-semibold mb-2 uppercase tracking-wide"
-					style={{ color: theme.colors.textDim }}
-				>
-					Roles ({template.roles.length})
-				</h4>
-				<div className="space-y-2">
-					{template.roles.map((role, idx) => (
-						<div
-							key={idx}
-							className="p-2 rounded border text-xs"
-							style={{
-								borderColor: theme.colors.border,
-								backgroundColor: theme.colors.bgActivity,
-							}}
+				<div className="flex items-center justify-between mb-2">
+					<h4
+						className="text-xs font-semibold uppercase tracking-wide"
+						style={{ color: theme.colors.textDim }}
+					>
+						Roles ({editing ? editRoles.length : template.roles.length})
+					</h4>
+					{editing && (
+						<button
+							onClick={addEditRole}
+							className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded"
+							style={{ color: theme.colors.accent }}
 						>
-							<div className="flex items-center gap-2 mb-0.5">
-								<span className="font-medium" style={{ color: theme.colors.textMain }}>
-									{role.name}
-								</span>
-								<span
-									className="text-[10px] px-1.5 py-0.5 rounded"
-									style={{
-										backgroundColor: `${theme.colors.border}80`,
-										color: theme.colors.textDim,
-									}}
-								>
-									{role.agentId}
-								</span>
-							</div>
-							<p style={{ color: theme.colors.textDim }}>{role.description}</p>
-						</div>
-					))}
+							<Plus className="w-3 h-3" /> Add
+						</button>
+					)}
 				</div>
+				{editing ? (
+					<div className="space-y-2">
+						{editRoles.map((role, idx) => (
+							<RoleEditor
+								key={idx}
+								role={role}
+								theme={theme}
+								onChange={(field, value) => updateEditRole(idx, field, value)}
+								onRemove={editRoles.length > 1 ? () => removeEditRole(idx) : undefined}
+							/>
+						))}
+					</div>
+				) : (
+					<div className="space-y-2">
+						{template.roles.map((role, idx) => (
+							<div
+								key={idx}
+								className="p-2 rounded border text-xs"
+								style={{
+									borderColor: theme.colors.border,
+									backgroundColor: theme.colors.bgActivity,
+								}}
+							>
+								<div className="flex items-center gap-2 mb-0.5">
+									<span className="font-medium" style={{ color: theme.colors.textMain }}>
+										{role.name}
+									</span>
+									<span
+										className="text-[10px] px-1.5 py-0.5 rounded"
+										style={{
+											backgroundColor: `${theme.colors.border}80`,
+											color: theme.colors.textDim,
+										}}
+									>
+										{role.agentId}
+									</span>
+								</div>
+								<p style={{ color: theme.colors.textDim }}>{role.description}</p>
+							</div>
+						))}
+					</div>
+				)}
 			</div>
 
 			{/* Topology preview */}
