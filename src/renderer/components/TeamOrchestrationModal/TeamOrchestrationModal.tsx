@@ -21,6 +21,7 @@ import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
 import { useTeamOrchStats } from '../../hooks/teamOrch/useTeamOrchStats';
 import { OverviewTab } from './OverviewTab';
 import { TemplatesTab } from './TemplatesTab';
+import { ConfigurationTab } from './ConfigurationTab';
 
 type TabId = 'overview' | 'templates' | 'configuration' | 'analytics' | 'history';
 
@@ -275,6 +276,8 @@ export function TeamOrchestrationModal({
 						/>
 					) : activeTab === 'templates' ? (
 						<TemplatesTab theme={theme} data={stats.data} />
+					) : activeTab === 'configuration' ? (
+						<ConfigurationTab theme={theme} />
 					) : (
 						<div
 							className="flex items-center justify-center h-full min-h-[200px]"

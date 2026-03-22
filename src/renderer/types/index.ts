@@ -972,6 +972,19 @@ export interface TeamOrchestrationSettings {
 	maxIterations: number;
 	/** How the system decides when a workflow is complete */
 	defaultTerminationMode: TerminationMode;
+	/** Default topology when creating new group chats */
+	defaultTopologyPattern?:
+		| 'hub-spoke'
+		| 'pipeline'
+		| 'parallel-then-merge'
+		| 'review-loop'
+		| 'custom';
+	/** Threshold (0-100) for quality gate termination mode */
+	qualityGateThreshold?: number;
+	/** Automatically save completed group chats as user templates */
+	autoSaveTemplates?: boolean;
+	/** Per-topology-pattern max iteration overrides */
+	perPatternMaxIterations?: Record<string, number>;
 }
 
 // Context management settings for merge and transfer operations

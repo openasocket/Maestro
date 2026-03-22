@@ -6,3 +6,4 @@
  */
 
 export { TeamOrchestrationModal } from './TeamOrchestrationModal';
+export { ConfigurationTab } from './ConfigurationTab';

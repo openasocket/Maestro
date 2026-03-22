@@ -134,6 +134,10 @@ export const DEFAULT_TEAM_ORCHESTRATION_SETTINGS: TeamOrchestrationSettings = {
 	enableVisualization: false,
 	maxIterations: 5,
 	defaultTerminationMode: 'moderator-decides',
+	defaultTopologyPattern: undefined,
+	qualityGateThreshold: 80,
+	autoSaveTemplates: false,
+	perPatternMaxIterations: {},
 };
 
 export const DEFAULT_AI_COMMANDS: CustomAICommand[] = [
