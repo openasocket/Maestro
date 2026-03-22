@@ -20,6 +20,7 @@ import { useLayerStack } from '../../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
 import { useTeamOrchStats } from '../../hooks/teamOrch/useTeamOrchStats';
 import { OverviewTab } from './OverviewTab';
+import { TemplatesTab } from './TemplatesTab';
 
 type TabId = 'overview' | 'templates' | 'configuration' | 'analytics' | 'history';
 
@@ -272,6 +273,8 @@ export function TeamOrchestrationModal({
 							loading={stats.loading}
 							colorBlindMode={colorBlindMode}
 						/>
+					) : activeTab === 'templates' ? (
+						<TemplatesTab theme={theme} data={stats.data} />
 					) : (
 						<div
 							className="flex items-center justify-center h-full min-h-[200px]"
