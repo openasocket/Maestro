@@ -1,0 +1,245 @@
+{
+	"modal": {
+		"title": "Team Orchestration",
+		"tabs": {
+			"overview": "Overview",
+			"templates": "Templates",
+			"configuration": "Configuration",
+			"analytics": "Analytics",
+			"history": "History"
+		},
+		"close": "Close team orchestration",
+		"comingSoon": "coming soon"
+	},
+	"overview": {
+		"summaryCards": {
+			"totalRuns": "Total Runs",
+			"activeWorkflows": "Active Workflows",
+			"avgIterations": "Avg Iterations",
+			"successRate": "Success Rate",
+			"totalTokens": "Total Tokens",
+			"avgCompletionTime": "Avg Completion",
+			"ariaLabel": "Team orchestration summary metrics"
+		},
+		"activeWorkflows": {
+			"title": "Active Workflows",
+			"empty": "No active workflows",
+			"iteration": "Iteration {{current}} of {{max}}",
+			"iterShort": "{{count}} iter"
+		},
+		"recentCompletions": {
+			"title": "Recent Completions",
+			"empty": "No completed workflows yet"
+		}
+	},
+	"templates": {
+		"categories": {
+			"all": "All",
+			"builtin": "Built-in",
+			"user": "User",
+			"exchange": "Exchange"
+		},
+		"search": "Search templates...",
+		"create": "New Template",
+		"edit": "Edit",
+		"duplicate": "Duplicate",
+		"delete": "Delete",
+		"import": "Import Template",
+		"export": "Export Template",
+		"details": {
+			"roles": "Roles",
+			"rolesCount": "{{count}} roles",
+			"rolesSingular": "1 role",
+			"topology": "Topology",
+			"moderator": "Moderator",
+			"avgIterations": "Avg iterations",
+			"usageStats": "{{count}} runs · {{rate}}% success"
+		},
+		"empty": "No templates found",
+		"confirmDelete": "Delete \"{{name}}\"? This cannot be undone.",
+		"form": {
+			"name": "Template name",
+			"description": "Description",
+			"roleName": "Role name",
+			"saving": "Saving...",
+			"createButton": "Create"
+		},
+		"notifications": {
+			"created": "Template created",
+			"updated": "Template updated",
+			"duplicated": "Template duplicated",
+			"deleted": "Template deleted",
+			"removedMessage": "Template removed.",
+			"exported": "Template exported",
+			"savedTo": "Saved to {{path}}",
+			"copiedToClipboard": "Copied to clipboard",
+			"jsonCopied": "Template JSON copied to clipboard.",
+			"imported": "Template imported"
+		},
+		"errors": {
+			"exportFailed": "Export failed",
+			"couldNotExport": "Could not export template.",
+			"importFailed": "Import failed",
+			"couldNotRead": "Could not read file.",
+			"invalidJson": "Invalid JSON file.",
+			"invalidFormat": "JSON does not match template format (requires name, description, roles).",
+			"unexpectedError": "An unexpected error occurred.",
+			"createFailed": "Failed to create template",
+			"saveFailed": "Failed to save"
+		},
+		"fileFilter": "JSON Files"
+	},
+	"configuration": {
+		"title": "Team Orchestration Settings",
+		"coreSettings": "Core Settings",
+		"advanced": "Advanced Settings",
+		"enableTemplates": "Team Templates",
+		"enableTemplatesDesc": "Reusable team configurations with predefined roles",
+		"enableTopology": "Workflow Topology",
+		"enableTopologyDesc": "Graph-based routing with pipeline, parallel, and loop patterns",
+		"enableVisualization": "Workflow Visualization",
+		"enableVisualizationDesc": "Real-time workflow graph in Group Chat",
+		"maxIterations": "Max Iterations: {{count}}",
+		"terminationMode": "Default Termination Mode",
+		"terminationModes": {
+			"moderatorDecides": "Moderator Decides",
+			"maxIterations": "Max Iterations",
+			"qualityGate": "Quality Gate"
+		},
+		"defaultTopology": "Default Topology Pattern",
+		"defaultTopologyHint": "New group chats will pre-select this topology",
+		"noDefault": "(No default)",
+		"qualityGateThreshold": "Quality Threshold: {{value}}%",
+		"autoSaveTemplates": "Auto-save Templates",
+		"autoSaveDesc": "Automatically save completed group chats as user templates",
+		"perPatternDefaults": "Per-Pattern Max Iterations",
+		"perPatternHint": "Override max iterations for specific topology patterns",
+		"addOverride": "Add Override",
+		"removeOverride": "Remove override",
+		"beta": "Beta"
+	},
+	"analytics": {
+		"tokenUsage": "Token Usage Over Time",
+		"completionRates": "Completion Rates by Topology",
+		"iterationDistribution": "Iteration Distribution",
+		"agentPerformance": "Agent Performance",
+		"costEstimation": "Cost Estimation",
+		"totalCost": "Total Cost",
+		"avgCostPerRun": "Avg Cost per Run",
+		"costByTopology": "Cost by Topology (estimated)",
+		"noData": "Run some team workflows to see analytics",
+		"noDataYet": "No data yet",
+		"timeRange": {
+			"day": "Day",
+			"week": "Week",
+			"month": "Month",
+			"quarter": "Quarter",
+			"year": "Year",
+			"all": "All"
+		},
+		"timeRangeDisplay": {
+			"day": "Today",
+			"week": "This Week",
+			"month": "This Month",
+			"quarter": "This Quarter",
+			"year": "This Year",
+			"all": "All Time"
+		},
+		"metrics": {
+			"tokens": "Tokens",
+			"duration": "Duration",
+			"messages": "Messages",
+			"time": "Time"
+		},
+		"charts": {
+			"show": "Show:",
+			"noTopologyData": "No topology data available",
+			"noAgentData": "No agent data available",
+			"completed": "Completed",
+			"failedTerminated": "Failed / Terminated",
+			"successRate": "success rate",
+			"runs": "runs",
+			"run": "run",
+			"iterations": "Iterations",
+			"workflows": "Workflows",
+			"iteration": "iteration",
+			"iterationPlural": "iterations",
+			"workflow": "workflow",
+			"workflowPlural": "workflows",
+			"performanceSelector": "Performance metric selector",
+			"agentPerformanceData": "Agent performance data",
+			"tokAbbrev": "tok",
+			"msgAbbrev": "msg",
+			"tokensLabel": "tokens",
+			"messagesLabel": "messages",
+			"processingLabel": "processing",
+			"runsLabel": "runs",
+			"showingTopAgents": "Showing top {{count}} of {{total}} agents"
+		},
+		"table": {
+			"topology": "Topology",
+			"runs": "Runs",
+			"estCost": "Est. Cost"
+		}
+	},
+	"history": {
+		"search": "Search past workflows...",
+		"allTopologies": "All Topologies",
+		"allStatuses": "All Statuses",
+		"columns": {
+			"date": "Date",
+			"name": "Group Chat",
+			"topology": "Topology",
+			"iterations": "Iterations",
+			"duration": "Duration",
+			"tokens": "Tokens",
+			"status": "Status"
+		},
+		"detail": {
+			"participants": "Participant Breakdown",
+			"executionLog": "Execution Log",
+			"executionSummary": "Execution Summary",
+			"tokenBreakdown": "Token Breakdown",
+			"logUnavailable": "Execution log unavailable",
+			"logLoading": "Loading execution log...",
+			"noLogEntries": "No log entries available",
+			"template": "Template",
+			"moderator": "Moderator",
+			"termination": "Termination",
+			"started": "Start",
+			"ended": "End",
+			"totalCost": "Total Cost",
+			"participantColumns": {
+				"name": "Name",
+				"agent": "Agent",
+				"messages": "Messages",
+				"tokens": "Tokens",
+				"time": "Time",
+				"cost": "Cost"
+			}
+		},
+		"export": {
+			"json": "Export JSON",
+			"csv": "Export CSV"
+		},
+		"empty": "No workflow history yet",
+		"noResults": "No results match your filters",
+		"showing": "Showing {{from}}–{{to}} of {{total}}",
+		"previous": "Previous",
+		"next": "Next",
+		"expand": "Expand"
+	},
+	"status": {
+		"completed": "Completed",
+		"failed": "Failed",
+		"terminated": "Terminated",
+		"running": "Running"
+	},
+	"topology": {
+		"hubSpoke": "Hub & Spoke",
+		"pipeline": "Pipeline",
+		"parallelMerge": "Parallel Merge",
+		"reviewLoop": "Review Loop",
+		"custom": "Custom"
+	}
+}
