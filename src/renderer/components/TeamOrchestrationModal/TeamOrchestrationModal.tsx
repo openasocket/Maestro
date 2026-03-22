@@ -22,6 +22,7 @@ import { useTeamOrchStats } from '../../hooks/teamOrch/useTeamOrchStats';
 import { OverviewTab } from './OverviewTab';
 import { TemplatesTab } from './TemplatesTab';
 import { ConfigurationTab } from './ConfigurationTab';
+import { AnalyticsTab } from './AnalyticsTab';
 
 type TabId = 'overview' | 'templates' | 'configuration' | 'analytics' | 'history';
 
@@ -278,6 +279,15 @@ export function TeamOrchestrationModal({
 						<TemplatesTab theme={theme} data={stats.data} />
 					) : activeTab === 'configuration' ? (
 						<ConfigurationTab theme={theme} />
+					) : activeTab === 'analytics' ? (
+						<AnalyticsTab
+							theme={theme}
+							data={stats.data}
+							loading={stats.loading}
+							timeRange={timeRange}
+							onTimeRangeChange={setTimeRange}
+							colorBlindMode={colorBlindMode}
+						/>
 					) : (
 						<div
 							className="flex items-center justify-center h-full min-h-[200px]"
