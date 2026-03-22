@@ -37,6 +37,7 @@ import { TeamOrchEmptyState } from './TeamOrchEmptyState';
 import { topologyDisplayName, formatPercentage } from './teamOrchUtils';
 import { notifyToast } from '../../stores/notificationStore';
 import { safeClipboardWrite } from '../../utils/clipboard';
+import { PipelineBuilder } from './PipelineBuilder/PipelineBuilder';
 
 type CategoryFilter = 'all' | 'builtin' | 'user' | 'exchange';
 
@@ -90,6 +91,8 @@ export const TemplatesTab = memo(function TemplatesTab({ theme, data }: Template
 	const [searchQuery, setSearchQuery] = useState('');
 	const [debouncedSearch, setDebouncedSearch] = useState('');
 	const [showCreateForm, setShowCreateForm] = useState(false);
+	const [builderOpen, setBuilderOpen] = useState(false);
+	const [editingTemplate, setEditingTemplate] = useState<TeamTemplate | null>(null);
 	const mountedRef = useRef(true);
 
 	// Debounce search input (300ms)
@@ -301,6 +304,46 @@ export const TemplatesTab = memo(function TemplatesTab({ theme, data }: Template
 		}
 	}, [fetchTemplates]);
 
+	// Pipeline Builder handlers
+	const handleBuilderSave = useCallback(
+		async (template: TeamTemplate) => {
+			await window.maestro.teamTemplates.save(template);
+			setBuilderOpen(false);
+			setEditingTemplate(null);
+			await fetchTemplates();
+			notifyToast({
+				type: 'success',
+				title: 'Template saved',
+				message: `"${template.name}" saved via Pipeline Builder.`,
+			});
+		},
+		[fetchTemplates]
+	);
+
+	const handleBuilderCancel = useCallback(() => {
+		setBuilderOpen(false);
+		setEditingTemplate(null);
+	}, []);
+
+	const handleOpenBuilderForEdit = useCallback((template: TeamTemplate) => {
+		setEditingTemplate(template);
+		setBuilderOpen(true);
+	}, []);
+
+	// When builder is open, render it instead of the template list
+	if (builderOpen) {
+		return (
+			<div style={{ height: 500 }}>
+				<PipelineBuilder
+					template={editingTemplate ?? undefined}
+					onSave={handleBuilderSave}
+					onCancel={handleBuilderCancel}
+					theme={theme}
+				/>
+			</div>
+		);
+	}
+
 	if (loading) {
 		return (
 			<div className="space-y-3">
@@ -327,7 +370,10 @@ export const TemplatesTab = memo(function TemplatesTab({ theme, data }: Template
 				{/* Action buttons row */}
 				<div className="flex items-center gap-2 mb-3">
 					<button
-						onClick={() => setShowCreateForm((v) => !v)}
+						onClick={() => {
+							setBuilderOpen(true);
+							setEditingTemplate(null);
+						}}
 						className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
 						style={{
 							backgroundColor: theme.colors.accent,
@@ -336,6 +382,17 @@ export const TemplatesTab = memo(function TemplatesTab({ theme, data }: Template
 					>
 						<Plus className="w-3.5 h-3.5" />
 						Create Template
+					</button>
+					<button
+						onClick={() => setShowCreateForm((v) => !v)}
+						className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+						style={{
+							backgroundColor: theme.colors.bgActivity,
+							color: theme.colors.textDim,
+						}}
+					>
+						<Plus className="w-3.5 h-3.5" />
+						Quick Create
 					</button>
 					<button
 						onClick={handleImport}
@@ -443,6 +500,7 @@ export const TemplatesTab = memo(function TemplatesTab({ theme, data }: Template
 					onDuplicate={handleDuplicate}
 					onDelete={handleDelete}
 					onExport={handleExport}
+					onOpenBuilder={handleOpenBuilderForEdit}
 				/>
 			)}
 		</div>
@@ -791,6 +849,7 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 	onDuplicate,
 	onDelete,
 	onExport,
+	onOpenBuilder,
 }: {
 	template: TeamTemplate;
 	theme: Theme;
@@ -800,6 +859,7 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 	onDuplicate: (templateId: string) => Promise<void>;
 	onDelete: (templateId: string) => Promise<void>;
 	onExport: (template: TeamTemplate) => Promise<void>;
+	onOpenBuilder: (template: TeamTemplate) => void;
 }) {
 	const [editing, setEditing] = useState(false);
 	const [editName, setEditName] = useState(template.name);
@@ -947,13 +1007,22 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 			{/* Action buttons */}
 			<div className="flex items-center gap-2 mb-4 flex-wrap">
 				{isUserTemplate && !editing && (
-					<button
-						onClick={startEditing}
-						className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs transition-colors hover:opacity-80"
-						style={actionBtnStyle}
-					>
-						<Pencil className="w-3 h-3" /> Edit
-					</button>
+					<>
+						<button
+							onClick={() => onOpenBuilder(template)}
+							className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs transition-colors hover:opacity-80"
+							style={actionBtnStyle}
+						>
+							<Pencil className="w-3 h-3" /> Open in Builder
+						</button>
+						<button
+							onClick={startEditing}
+							className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs transition-colors hover:opacity-80"
+							style={actionBtnStyle}
+						>
+							<Pencil className="w-3 h-3" /> Quick Edit
+						</button>
+					</>
 				)}
 				{editing && (
 					<>

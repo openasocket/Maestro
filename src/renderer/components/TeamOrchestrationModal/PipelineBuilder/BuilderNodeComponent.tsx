@@ -1,0 +1,179 @@
+/**
+ * BuilderNodeComponent — SVG <g> element rendering a single draggable node.
+ *
+ * Features:
+ * - Rounded rect with role name centered
+ * - Color-coded by type (role=accent, entry=green, exit=border)
+ * - Input port (left) and output port (right)
+ * - Selected state: thicker border + glow
+ * - Draggable with snap-to-grid
+ */
+
+import { useCallback, useRef } from 'react';
+import type { Theme } from '../../../types';
+import type { BuilderNode, BuilderAction } from './builderTypes';
+import { NODE_WIDTH, NODE_HEIGHT, PORT_RADIUS, snapToGrid } from './builderTypes';
+
+interface BuilderNodeComponentProps {
+	node: BuilderNode;
+	roleName: string;
+	theme: Theme;
+	selected: boolean;
+	dispatch: React.Dispatch<BuilderAction>;
+	viewportZoom: number;
+}
+
+function getNodeColor(type: BuilderNode['type'], theme: Theme): string {
+	switch (type) {
+		case 'entry':
+			return theme.colors.success;
+		case 'exit':
+			return theme.colors.border;
+		case 'role':
+		default:
+			return theme.colors.accent;
+	}
+}
+
+export function BuilderNodeComponent({
+	node,
+	roleName,
+	theme,
+	selected,
+	dispatch,
+	viewportZoom,
+}: BuilderNodeComponentProps): JSX.Element {
+	const dragRef = useRef<{
+		startX: number;
+		startY: number;
+		nodeStartX: number;
+		nodeStartY: number;
+	} | null>(null);
+
+	const color = getNodeColor(node.type, theme);
+	const borderWidth = selected ? 3 : 1.5;
+
+	const handleMouseDown = useCallback(
+		(e: React.MouseEvent) => {
+			// Only left click
+			if (e.button !== 0) return;
+			e.stopPropagation();
+
+			dispatch({ type: 'SELECT_NODE', nodeId: node.id });
+
+			dragRef.current = {
+				startX: e.clientX,
+				startY: e.clientY,
+				nodeStartX: node.x,
+				nodeStartY: node.y,
+			};
+
+			const handleMouseMove = (me: MouseEvent) => {
+				if (!dragRef.current) return;
+				const dx = (me.clientX - dragRef.current.startX) / viewportZoom;
+				const dy = (me.clientY - dragRef.current.startY) / viewportZoom;
+				const newX = snapToGrid(dragRef.current.nodeStartX + dx);
+				const newY = snapToGrid(dragRef.current.nodeStartY + dy);
+				dispatch({ type: 'MOVE_NODE', nodeId: node.id, x: newX, y: newY });
+			};
+
+			const handleMouseUp = () => {
+				dragRef.current = null;
+				window.removeEventListener('mousemove', handleMouseMove);
+				window.removeEventListener('mouseup', handleMouseUp);
+			};
+
+			window.addEventListener('mousemove', handleMouseMove);
+			window.addEventListener('mouseup', handleMouseUp);
+		},
+		[node.id, node.x, node.y, dispatch, viewportZoom]
+	);
+
+	const cx = node.x + NODE_WIDTH / 2;
+	const cy = node.y + NODE_HEIGHT / 2;
+	const inputPortX = node.x;
+	const inputPortY = cy;
+	const outputPortX = node.x + NODE_WIDTH;
+	const outputPortY = cy;
+
+	return (
+		<g onMouseDown={handleMouseDown} style={{ cursor: 'grab' }}>
+			{/* Glow effect for selected */}
+			{selected && (
+				<rect
+					x={node.x - 4}
+					y={node.y - 4}
+					width={NODE_WIDTH + 8}
+					height={NODE_HEIGHT + 8}
+					rx={12}
+					ry={12}
+					fill="none"
+					stroke={color}
+					strokeWidth={1}
+					opacity={0.3}
+				/>
+			)}
+
+			{/* Node body */}
+			<rect
+				x={node.x}
+				y={node.y}
+				width={NODE_WIDTH}
+				height={NODE_HEIGHT}
+				rx={8}
+				ry={8}
+				fill={`${color}15`}
+				stroke={color}
+				strokeWidth={borderWidth}
+			/>
+
+			{/* Type label (entry/exit) */}
+			{node.type !== 'role' && (
+				<text
+					x={cx}
+					y={node.y - 6}
+					textAnchor="middle"
+					fill={theme.colors.textDim}
+					fontSize={9}
+					fontWeight={500}
+				>
+					{node.type === 'entry' ? 'Start' : 'End'}
+				</text>
+			)}
+
+			{/* Role name */}
+			<text
+				x={cx}
+				y={cy + 1}
+				textAnchor="middle"
+				dominantBaseline="central"
+				fill={theme.colors.textMain}
+				fontSize={12}
+				fontWeight={600}
+				style={{ pointerEvents: 'none', userSelect: 'none' }}
+			>
+				{roleName.length > 18 ? roleName.slice(0, 16) + '...' : roleName}
+			</text>
+
+			{/* Input port (left center) */}
+			<circle
+				cx={inputPortX}
+				cy={inputPortY}
+				r={PORT_RADIUS}
+				fill={theme.colors.bgMain}
+				stroke={color}
+				strokeWidth={1.5}
+			/>
+
+			{/* Output port (right center) */}
+			<circle
+				cx={outputPortX}
+				cy={outputPortY}
+				r={PORT_RADIUS}
+				fill={theme.colors.bgMain}
+				stroke={color}
+				strokeWidth={1.5}
+			/>
+		</g>
+	);
+}
