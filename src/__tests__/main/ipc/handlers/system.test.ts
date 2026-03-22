@@ -208,6 +208,7 @@ describe('system IPC handlers', () => {
 				// Dialog handlers
 				'dialog:selectFolder',
 				'dialog:saveFile',
+				'dialog:openFile',
 				// Font handlers
 				'fonts:detect',
 				// Shell handlers
@@ -377,6 +378,78 @@ describe('system IPC handlers', () => {
 
 			expect(result).toBeNull();
 			expect(dialog.showSaveDialog).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('dialog:openFile', () => {
+		it('should open file dialog and return selected path', async () => {
+			vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+				canceled: false,
+				filePaths: ['/path/to/template.json'],
+			});
+
+			const handler = handlers.get('dialog:openFile');
+			const options = {
+				filters: [{ name: 'JSON Files', extensions: ['json'] }],
+				title: 'Import Template',
+			};
+			const result = await handler!({} as any, options);
+
+			expect(dialog.showOpenDialog).toHaveBeenCalledWith(mockMainWindow, {
+				properties: ['openFile'],
+				filters: [{ name: 'JSON Files', extensions: ['json'] }],
+				title: 'Import Template',
+			});
+			expect(result).toBe('/path/to/template.json');
+		});
+
+		it('should return null when dialog is cancelled', async () => {
+			vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+				canceled: true,
+				filePaths: [],
+			});
+
+			const handler = handlers.get('dialog:openFile');
+			const result = await handler!({} as any, { filters: [] });
+
+			expect(result).toBeNull();
+		});
+
+		it('should use default title when not provided', async () => {
+			vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+				canceled: false,
+				filePaths: ['/path/to/file.json'],
+			});
+
+			const handler = handlers.get('dialog:openFile');
+			await handler!({} as any, { filters: [] });
+
+			expect(dialog.showOpenDialog).toHaveBeenCalledWith(mockMainWindow, {
+				properties: ['openFile'],
+				filters: [],
+				title: 'Open File',
+			});
+		});
+
+		it('should return null when no main window available', async () => {
+			deps.getMainWindow = () => null;
+			handlers.clear();
+			registerSystemHandlers(deps);
+
+			const handler = handlers.get('dialog:openFile');
+			const result = await handler!({} as any, { filters: [] });
+
+			expect(result).toBeNull();
+			expect(dialog.showOpenDialog).not.toHaveBeenCalled();
+		});
+
+		it('should return null when main window is destroyed', async () => {
+			mockMainWindow.isDestroyed.mockReturnValue(true);
+
+			const handler = handlers.get('dialog:openFile');
+			const result = await handler!({} as any, { filters: [] });
+
+			expect(result).toBeNull();
 		});
 	});
 
