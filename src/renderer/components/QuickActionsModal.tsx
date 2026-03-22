@@ -124,6 +124,8 @@ interface QuickActionsModalProps {
 	// Maestro Cue
 	onOpenMaestroCue?: () => void;
 	onConfigureCue?: (session: Session) => void;
+	// Team Orchestration
+	onOpenTeamOrchestration?: () => void;
 	// Auto-scroll
 	autoScrollAiMode?: boolean;
 	setAutoScrollAiMode?: (value: boolean) => void;
@@ -214,6 +216,7 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 		onOpenDirectorNotes,
 		onOpenMaestroCue,
 		onConfigureCue,
+		onOpenTeamOrchestration,
 		autoScrollAiMode,
 		setAutoScrollAiMode,
 	} = props;
@@ -1092,6 +1095,21 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 						subtext: 'Open YAML editor for event-driven automation',
 						action: () => {
 							onConfigureCue(activeSession);
+							setQuickActionOpen(false);
+						},
+					},
+				]
+			: []),
+		// Team Orchestration - manage team templates, analytics, history
+		...(onOpenTeamOrchestration
+			? [
+					{
+						id: 'team-orchestration',
+						label: 'Team Orchestration',
+						shortcut: shortcuts.teamOrchestration,
+						subtext: 'Manage team templates, view analytics and execution history',
+						action: () => {
+							onOpenTeamOrchestration();
 							setQuickActionOpen(false);
 						},
 					},

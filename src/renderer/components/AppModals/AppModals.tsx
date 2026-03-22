@@ -273,6 +273,8 @@ export interface AppModalsProps {
 	// Maestro Cue
 	onOpenMaestroCue?: () => void;
 	onConfigureCue?: (session: Session) => void;
+	// Team Orchestration
+	onOpenTeamOrchestration?: () => void;
 	// Auto-scroll
 	autoScrollAiMode?: boolean;
 	setAutoScrollAiMode?: (value: boolean) => void;
@@ -646,6 +648,8 @@ export const AppModals = memo(function AppModals(props: AppModalsProps) {
 		// Maestro Cue
 		onOpenMaestroCue,
 		onConfigureCue,
+		// Team Orchestration
+		onOpenTeamOrchestration,
 		// Auto-scroll
 		autoScrollAiMode,
 		setAutoScrollAiMode,
@@ -932,6 +936,7 @@ export const AppModals = memo(function AppModals(props: AppModalsProps) {
 				onOpenDirectorNotes={onOpenDirectorNotes}
 				onOpenMaestroCue={onOpenMaestroCue}
 				onConfigureCue={onConfigureCue}
+				onOpenTeamOrchestration={onOpenTeamOrchestration}
 				autoScrollAiMode={autoScrollAiMode}
 				setAutoScrollAiMode={setAutoScrollAiMode}
 				lightboxImage={lightboxImage}

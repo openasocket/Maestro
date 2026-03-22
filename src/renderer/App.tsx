@@ -2979,6 +2979,11 @@ function MaestroConsoleInner() {
 					}
 					onOpenMaestroCue={encoreFeatures.maestroCue ? () => setCueModalOpen(true) : undefined}
 					onConfigureCue={encoreFeatures.maestroCue ? handleConfigureCue : undefined}
+					onOpenTeamOrchestration={
+						encoreFeatures.teamOrchestration
+							? () => useModalStore.getState().openModal('teamOrchestration')
+							: undefined
+					}
 					autoScrollAiMode={autoScrollAiMode}
 					setAutoScrollAiMode={setAutoScrollAiMode}
 					onCloseTabSwitcher={handleCloseTabSwitcher}
