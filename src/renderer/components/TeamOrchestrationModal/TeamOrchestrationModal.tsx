@@ -23,6 +23,7 @@ import { OverviewTab } from './OverviewTab';
 import { TemplatesTab } from './TemplatesTab';
 import { ConfigurationTab } from './ConfigurationTab';
 import { AnalyticsTab } from './AnalyticsTab';
+import { HistoryTab } from './HistoryTab';
 
 type TabId = 'overview' | 'templates' | 'configuration' | 'analytics' | 'history';
 
@@ -288,6 +289,8 @@ export function TeamOrchestrationModal({
 							onTimeRangeChange={setTimeRange}
 							colorBlindMode={colorBlindMode}
 						/>
+					) : activeTab === 'history' ? (
+						<HistoryTab theme={theme} />
 					) : (
 						<div
 							className="flex items-center justify-center h-full min-h-[200px]"

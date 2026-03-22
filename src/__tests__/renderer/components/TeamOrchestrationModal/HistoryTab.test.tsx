@@ -41,6 +41,26 @@ vi.mock('../../../../renderer/hooks/teamOrch/useTeamOrchHistory', () => ({
 	useTeamOrchHistory: () => mockHistoryReturn,
 }));
 
+// Mock window.maestro APIs
+const mockGroupChatList = vi.fn().mockResolvedValue([]);
+const mockGroupChatGetHistory = vi.fn().mockResolvedValue([]);
+const mockExportJson = vi.fn().mockResolvedValue({ saved: true, path: '/tmp/export.json' });
+const mockExportCsv = vi.fn().mockResolvedValue({ saved: true, path: '/tmp/export.csv' });
+
+Object.defineProperty(window, 'maestro', {
+	value: {
+		groupChat: {
+			list: mockGroupChatList,
+			getHistory: mockGroupChatGetHistory,
+		},
+		teamOrchStats: {
+			exportJson: mockExportJson,
+			exportCsv: mockExportCsv,
+		},
+	},
+	writable: true,
+});
+
 // Import after mock
 import { HistoryTab } from '../../../../renderer/components/TeamOrchestrationModal/HistoryTab';
 
@@ -434,6 +454,157 @@ describe('HistoryTab', () => {
 				backgroundColor: theme.colors.bgActivity,
 				borderColor: theme.colors.border,
 			});
+		});
+	});
+
+	describe('Export Buttons', () => {
+		it('renders export JSON and CSV buttons', () => {
+			render(<HistoryTab theme={theme} />);
+			expect(screen.getByTestId('export-json-btn')).toBeInTheDocument();
+			expect(screen.getByTestId('export-csv-btn')).toBeInTheDocument();
+		});
+
+		it('calls exportJson IPC when JSON button clicked', async () => {
+			render(<HistoryTab theme={theme} />);
+			fireEvent.click(screen.getByTestId('export-json-btn'));
+			expect(mockExportJson).toHaveBeenCalledWith('all');
+		});
+
+		it('calls exportCsv IPC when CSV button clicked', async () => {
+			render(<HistoryTab theme={theme} />);
+			fireEvent.click(screen.getByTestId('export-csv-btn'));
+			expect(mockExportCsv).toHaveBeenCalledWith('all');
+		});
+	});
+
+	describe('Expanded Detail', () => {
+		it('shows participant breakdown when row is expanded', async () => {
+			const event = createEvent({
+				id: 'evt-detail',
+				participantBreakdown: [
+					{
+						name: 'Agent Alpha',
+						agentId: 'claude-code',
+						tokenCount: 5000,
+						messageCount: 10,
+						processingTimeMs: 30000,
+						cost: 0.15,
+					},
+					{
+						name: 'Agent Beta',
+						agentId: 'codex',
+						tokenCount: 3000,
+						messageCount: 5,
+						processingTimeMs: 20000,
+						cost: 0.1,
+					},
+				],
+			});
+			mockHistoryReturn.events = [event];
+			mockHistoryReturn.total = 1;
+			mockHistoryReturn.totalPages = 1;
+			mockGroupChatList.mockResolvedValue([]);
+
+			render(<HistoryTab theme={theme} />);
+			fireEvent.click(screen.getByTestId('history-row-evt-detail'));
+
+			expect(screen.getByText('Participant Breakdown')).toBeInTheDocument();
+			expect(screen.getByText('Agent Alpha')).toBeInTheDocument();
+			expect(screen.getByText('Agent Beta')).toBeInTheDocument();
+		});
+
+		it('shows execution summary with moderator and topology', async () => {
+			const event = createEvent({
+				id: 'evt-summary',
+				moderatorAgentId: 'claude-code',
+				topologyPattern: 'pipeline',
+				terminationMode: 'max-iterations',
+			});
+			mockHistoryReturn.events = [event];
+			mockHistoryReturn.total = 1;
+			mockHistoryReturn.totalPages = 1;
+			mockGroupChatList.mockResolvedValue([]);
+
+			render(<HistoryTab theme={theme} />);
+			fireEvent.click(screen.getByTestId('history-row-evt-summary'));
+
+			expect(screen.getByText('Execution Summary')).toBeInTheDocument();
+			expect(screen.getByText('claude-code')).toBeInTheDocument();
+			expect(screen.getByText('max-iterations')).toBeInTheDocument();
+		});
+
+		it('sorts participants by tokens descending', async () => {
+			const event = createEvent({
+				id: 'evt-sort',
+				participantBreakdown: [
+					{
+						name: 'Low Tokens',
+						agentId: 'codex',
+						tokenCount: 1000,
+						messageCount: 2,
+						processingTimeMs: 5000,
+						cost: 0.05,
+					},
+					{
+						name: 'High Tokens',
+						agentId: 'claude-code',
+						tokenCount: 9000,
+						messageCount: 15,
+						processingTimeMs: 45000,
+						cost: 0.3,
+					},
+				],
+			});
+			mockHistoryReturn.events = [event];
+			mockHistoryReturn.total = 1;
+			mockHistoryReturn.totalPages = 1;
+			mockGroupChatList.mockResolvedValue([]);
+
+			render(<HistoryTab theme={theme} />);
+			fireEvent.click(screen.getByTestId('history-row-evt-sort'));
+
+			// "High Tokens" should appear before "Low Tokens" in the DOM
+			// The participant breakdown has a thead + tbody; select only tbody rows
+			const detailEl = screen.getByTestId('history-detail-evt-sort');
+			const tbody = detailEl.querySelector('tbody');
+			const rows = tbody!.querySelectorAll('tr');
+			expect(rows[0]).toHaveTextContent('High Tokens');
+			expect(rows[1]).toHaveTextContent('Low Tokens');
+		});
+
+		it('shows execution log unavailable when chat does not exist', async () => {
+			const event = createEvent({ id: 'evt-nolog', groupChatId: 'gc-gone' });
+			mockHistoryReturn.events = [event];
+			mockHistoryReturn.total = 1;
+			mockHistoryReturn.totalPages = 1;
+			mockGroupChatList.mockResolvedValue([{ id: 'gc-other' }]);
+
+			render(<HistoryTab theme={theme} />);
+			fireEvent.click(screen.getByTestId('history-row-evt-nolog'));
+
+			// Wait for the async effect to complete
+			const unavailable = await screen.findByText('Execution log unavailable');
+			expect(unavailable).toBeInTheDocument();
+		});
+
+		it('accordion behavior — expanding one row collapses another', () => {
+			const event1 = createEvent({ id: 'evt-a', groupChatName: 'Chat A' });
+			const event2 = createEvent({ id: 'evt-b', groupChatName: 'Chat B' });
+			mockHistoryReturn.events = [event1, event2];
+			mockHistoryReturn.total = 2;
+			mockHistoryReturn.totalPages = 1;
+			mockGroupChatList.mockResolvedValue([]);
+
+			render(<HistoryTab theme={theme} />);
+
+			// Expand first row
+			fireEvent.click(screen.getByTestId('history-row-evt-a'));
+			expect(screen.getByTestId('history-detail-evt-a')).toBeInTheDocument();
+
+			// Expand second row — first should collapse
+			fireEvent.click(screen.getByTestId('history-row-evt-b'));
+			expect(screen.queryByTestId('history-detail-evt-a')).not.toBeInTheDocument();
+			expect(screen.getByTestId('history-detail-evt-b')).toBeInTheDocument();
 		});
 	});
 });
