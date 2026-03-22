@@ -70,6 +70,7 @@ vi.mock('../../../../main/group-chat/group-chat-agent', () => ({
 // Mock group-chat-router
 vi.mock('../../../../main/group-chat/group-chat-router', () => ({
 	routeUserMessage: vi.fn(),
+	recordTeamOrchCompletion: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock topology-router
@@ -1212,6 +1213,17 @@ describe('groupChat IPC handlers', () => {
 				expect.objectContaining({
 					from: 'system',
 					content: 'Workflow force-completed by user.',
+				})
+			);
+
+			// Should record team orch completion event
+			expect(groupChatRouter.recordTeamOrchCompletion).toHaveBeenCalledWith(
+				'gc-force',
+				'terminated',
+				expect.objectContaining({
+					status: 'terminated',
+					activeNodes: [],
+					pendingNodes: [],
 				})
 			);
 		});

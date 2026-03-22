@@ -209,6 +209,9 @@ export const MODAL_PRIORITIES = {
 	/** Document Graph modal */
 	DOCUMENT_GRAPH: 545,
 
+	/** Team Orchestration Management modal */
+	TEAM_ORCHESTRATION_MODAL: 543,
+
 	/** Usage Dashboard modal */
 	USAGE_DASHBOARD: 540,
 

@@ -231,7 +231,9 @@ export type ModalId =
 	| 'directorNotes'
 	// Maestro Cue
 	| 'cueModal'
-	| 'cueYamlEditor';
+	| 'cueYamlEditor'
+	// Team Orchestration
+	| 'teamOrchestration';
 
 /**
  * Type mapping from ModalId to its data type.

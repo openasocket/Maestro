@@ -69,7 +69,7 @@ import {
 } from '../../group-chat/group-chat-agent';
 
 // Group chat router imports
-import { routeUserMessage } from '../../group-chat/group-chat-router';
+import { routeUserMessage, recordTeamOrchCompletion } from '../../group-chat/group-chat-router';
 
 // Agent detector import
 import { AgentDetector } from '../../agents';
@@ -109,6 +109,7 @@ export const groupChatEmitters: {
 	) => void;
 	emitModeratorSessionIdChanged?: (groupChatId: string, sessionId: string) => void;
 	emitExecutionStateChanged?: (groupChatId: string, state: WorkflowExecutionState) => void;
+	emitTeamOrchStatsUpdate?: () => void;
 } = {};
 
 // Helper to create handler options with consistent context
@@ -854,6 +855,9 @@ Respond with ONLY the summary text, no additional commentary.`;
 				content: 'Workflow force-completed by user.',
 			});
 
+			// Record team orchestration analytics event
+			await recordTeamOrchCompletion(id, 'terminated', finalState);
+
 			logger.info(`Force-completed workflow for group chat: ${id}`, LOG_CONTEXT);
 		})
 	);
@@ -1014,6 +1018,17 @@ Respond with ONLY the summary text, no additional commentary.`;
 		const mainWindow = getMainWindow();
 		if (isWebContentsAvailable(mainWindow)) {
 			mainWindow.webContents.send('groupChat:executionStateChanged', groupChatId, state);
+		}
+	};
+
+	/**
+	 * Broadcast a team orchestration stats update to the renderer.
+	 * Called after recording a workflow completion event.
+	 */
+	groupChatEmitters.emitTeamOrchStatsUpdate = (): void => {
+		const mainWindow = getMainWindow();
+		if (isWebContentsAvailable(mainWindow)) {
+			mainWindow.webContents.send('teamOrchStats:updated');
 		}
 	};
 

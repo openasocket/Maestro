@@ -61,6 +61,9 @@ import { groupChatParticipantRequestPrompt } from '../../prompts';
 import { wrapSpawnWithSsh } from '../utils/ssh-spawn-wrapper';
 import type { SshRemoteSettingsStore } from '../utils/ssh-remote-resolver';
 import { setGetCustomShellPathCallback, getWindowsSpawnConfig } from './group-chat-config';
+import { v4 as uuidv4 } from 'uuid';
+import { getStatsDB } from '../stats';
+import type { TeamOrchEvent, TeamOrchParticipantStats } from '../../shared/team-orch-stats-types';
 
 // Import emitters from IPC handlers (will be populated after handlers are registered)
 import { groupChatEmitters } from '../ipc/handlers/groupChat';
@@ -1164,6 +1167,81 @@ function buildModeratorSystemPrompt(
 }
 
 /**
+ * Record a team orchestration workflow completion event to the stats database.
+ * Called at every point where a workflow reaches a terminal state.
+ */
+export async function recordTeamOrchCompletion(
+	groupChatId: string,
+	status: 'completed' | 'failed' | 'terminated',
+	finalState: WorkflowExecutionState
+): Promise<void> {
+	try {
+		const chat = await loadGroupChat(groupChatId);
+		if (!chat) {
+			logger.warn(
+				`Cannot record team orch event: group chat ${groupChatId} not found`,
+				LOG_CONTEXT
+			);
+			return;
+		}
+
+		const settings = getTopologySettingsCallback?.() ?? {
+			teamOrchestrationEnabled: false,
+			workflowTopologyEnabled: false,
+			maxIterations: 5,
+			terminationMode: 'moderator-decides' as const,
+		};
+
+		const endTime = Date.now();
+		const startTime = chat.createdAt;
+
+		const participantBreakdown: TeamOrchParticipantStats[] = chat.participants.map((p) => ({
+			name: p.name,
+			agentId: p.agentId,
+			tokenCount: p.tokenCount ?? 0,
+			messageCount: p.messageCount ?? 0,
+			processingTimeMs: p.processingTimeMs ?? 0,
+			cost: p.totalCost ?? 0,
+		}));
+
+		const totalTokens = participantBreakdown.reduce((sum, p) => sum + p.tokenCount, 0);
+		const totalCost = participantBreakdown.reduce((sum, p) => sum + p.cost, 0);
+
+		const event: TeamOrchEvent = {
+			id: uuidv4(),
+			groupChatId: chat.id,
+			groupChatName: chat.name,
+			topologyPattern: chat.topology?.pattern || 'hub-spoke',
+			terminationMode: settings.terminationMode,
+			status,
+			iterationCount: finalState.iterationCount,
+			maxIterations: settings.maxIterations,
+			startTime,
+			endTime,
+			duration: endTime - startTime,
+			participantCount: chat.participants.length,
+			participantBreakdown,
+			totalTokens,
+			totalCost,
+			moderatorAgentId: chat.moderatorAgentId,
+		};
+
+		const db = getStatsDB();
+		db.insertTeamOrchEvent(event);
+		groupChatEmitters.emitTeamOrchStatsUpdate?.();
+
+		logger.info(
+			`Recorded team orch event ${event.id} for group chat ${groupChatId}: ${status}`,
+			LOG_CONTEXT
+		);
+	} catch (err) {
+		// Don't let recording failures disrupt the workflow
+		logger.error(`Failed to record team orch event for ${groupChatId}: ${err}`, LOG_CONTEXT);
+		captureException(err as Error, { groupChatId, status });
+	}
+}
+
+/**
  * Route a message via the workflow topology instead of @mention-based hub-spoke routing.
  *
  * Called from routeModeratorResponse() when a topology is active. Handles:
@@ -1245,6 +1323,7 @@ async function routeViaTopology(
 		groupChatEmitters.emitExecutionStateChanged?.(groupChatId, finalState);
 		groupChatEmitters.emitStateChange?.(groupChatId, 'idle');
 		powerManager.removeBlockReason(`groupchat:${groupChatId}`);
+		await recordTeamOrchCompletion(groupChatId, 'completed', finalState);
 		return;
 	}
 
@@ -1303,6 +1382,7 @@ async function routeViaTopology(
 				});
 				groupChatEmitters.emitStateChange?.(groupChatId, 'idle');
 				powerManager.removeBlockReason(`groupchat:${groupChatId}`);
+				await recordTeamOrchCompletion(groupChatId, 'completed', finalState);
 				return;
 			}
 
@@ -1324,6 +1404,7 @@ async function routeViaTopology(
 				});
 				groupChatEmitters.emitStateChange?.(groupChatId, 'idle');
 				powerManager.removeBlockReason(`groupchat:${groupChatId}`);
+				await recordTeamOrchCompletion(groupChatId, 'terminated', finalState);
 				return;
 			}
 
@@ -1429,6 +1510,7 @@ async function routeViaTopology(
 
 		groupChatEmitters.emitStateChange?.(groupChatId, 'idle');
 		powerManager.removeBlockReason(`groupchat:${groupChatId}`);
+		await recordTeamOrchCompletion(groupChatId, terminationReason, finalState);
 		return;
 	}
 
