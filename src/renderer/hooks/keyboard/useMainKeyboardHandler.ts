@@ -487,6 +487,10 @@ export function useMainKeyboardHandler(): UseMainKeyboardHandlerReturn {
 				e.preventDefault();
 				useModalStore.getState().openModal('teamBuilderWizard');
 				trackShortcut('teamBuilder');
+			} else if (ctx.isShortcut(e, 'teamOrchestration') && ctx.encoreFeatures?.teamOrchestration) {
+				e.preventDefault();
+				useModalStore.getState().openModal('teamOrchestration');
+				trackShortcut('teamOrchestration');
 			} else if (ctx.isShortcut(e, 'filterUnreadAgents')) {
 				e.preventDefault();
 				ctx.toggleShowUnreadAgentsOnly();

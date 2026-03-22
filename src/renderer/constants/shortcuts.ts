@@ -94,6 +94,11 @@ export const DEFAULT_SHORTCUTS: Record<string, Shortcut> = {
 		label: 'Team Builder',
 		keys: ['Meta', 'Shift', 't'],
 	},
+	teamOrchestration: {
+		id: 'teamOrchestration',
+		label: 'Team Orchestration',
+		keys: ['Alt', 't'],
+	},
 	jumpToTerminal: {
 		id: 'jumpToTerminal',
 		label: 'Jump to Terminal Tab',
