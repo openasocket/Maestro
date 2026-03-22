@@ -10,6 +10,7 @@ import { useState } from 'react';
 import {
 	Clapperboard,
 	ChevronDown,
+	ExternalLink,
 	Settings,
 	Check,
 	Database,
@@ -27,6 +28,7 @@ import { AgentConfigPanel } from '../../shared/AgentConfigPanel';
 import { AGENT_TILES } from '../../Wizard/screens/AgentSelectionScreen';
 import { isBetaAgent } from '../../../../shared/agentMetadata';
 import { SYMPHONY_REGISTRY_URL } from '../../../../shared/symphony-constants';
+import { useModalStore } from '../../../stores/modalStore';
 
 export interface EncoreTabProps {
 	theme: Theme;
@@ -818,10 +820,23 @@ export function EncoreTab({ theme, isOpen }: EncoreTabProps) {
 						className="px-4 pb-4 space-y-4 border-t"
 						style={{ borderColor: theme.colors.border }}
 					>
-						<p className="text-xs pt-3" style={{ color: theme.colors.textDim }}>
-							Enhances Group Chat with reusable team templates, graph-based agent workflows, and
-							visual orchestration controls
-						</p>
+						<div className="flex items-center justify-between pt-3">
+							<p className="text-xs" style={{ color: theme.colors.textDim }}>
+								Enhances Group Chat with reusable team templates, graph-based agent workflows, and
+								visual orchestration controls
+							</p>
+							<button
+								className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors hover:opacity-80 flex-shrink-0 ml-3"
+								style={{ color: theme.colors.accent }}
+								onClick={() => {
+									useModalStore.getState().openModal('teamOrchestration');
+									useModalStore.getState().closeModal('settings');
+								}}
+							>
+								Open Dashboard
+								<ExternalLink className="w-3 h-3" />
+							</button>
+						</div>
 
 						{/* Team Templates Toggle */}
 						<div className="flex items-center justify-between">

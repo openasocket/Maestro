@@ -887,6 +887,7 @@ export function useModalActions() {
 	const cueModalOpen = useModalStore(selectModalOpen('cueModal'));
 	const cueYamlEditorOpen = useModalStore(selectModalOpen('cueYamlEditor'));
 	const cueYamlEditorData = useModalStore(selectModalData('cueYamlEditor'));
+	const teamOrchestrationOpen = useModalStore(selectModalOpen('teamOrchestration'));
 
 	// Get stable actions
 	const actions = getModalActions();
@@ -1062,6 +1063,9 @@ export function useModalActions() {
 		cueYamlEditorOpen,
 		cueYamlEditorSessionId: cueYamlEditorData?.sessionId ?? null,
 		cueYamlEditorProjectRoot: cueYamlEditorData?.projectRoot ?? null,
+
+		// Team Orchestration Modal
+		teamOrchestrationOpen,
 
 		// Lightbox ref replacements (now stored as data)
 		lightboxIsGroupChat: lightboxData?.isGroupChat ?? false,

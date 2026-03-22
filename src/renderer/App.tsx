@@ -51,6 +51,9 @@ const CueModal = lazy(() => import('./components/CueModal').then((m) => ({ defau
 const CueYamlEditor = lazy(() =>
 	import('./components/CueYamlEditor').then((m) => ({ default: m.CueYamlEditor }))
 );
+const TeamOrchestrationModal = lazy(() =>
+	import('./components/TeamOrchestrationModal').then((m) => ({ default: m.TeamOrchestrationModal }))
+);
 
 import { captureException } from './utils/sentry';
 
@@ -349,6 +352,8 @@ function MaestroConsoleInner() {
 		cueYamlEditorSessionId,
 		cueYamlEditorProjectRoot,
 		closeCueYamlEditor,
+		// Team Orchestration Modal
+		teamOrchestrationOpen,
 	} = useModalActions();
 
 	// --- MOBILE LANDSCAPE MODE (reading-only view) ---
@@ -475,6 +480,10 @@ function MaestroConsoleInner() {
 	useEffect(() => {
 		if (!encoreFeatures.usageStats) setUsageDashboardOpen(false);
 	}, [encoreFeatures.usageStats, setUsageDashboardOpen]);
+
+	useEffect(() => {
+		if (!encoreFeatures.teamOrchestration) useModalStore.getState().closeModal('teamOrchestration');
+	}, [encoreFeatures.teamOrchestration]);
 
 	// --- KEYBOARD SHORTCUT HELPERS ---
 	const { isShortcut, isTabShortcut } = useKeyboardShortcutHelpers({
@@ -3203,6 +3212,17 @@ function MaestroConsoleInner() {
 							/>
 						</Suspense>
 					)}
+
+				{/* --- TEAM ORCHESTRATION MODAL (lazy-loaded, Encore Feature) --- */}
+				{encoreFeatures.teamOrchestration && teamOrchestrationOpen && (
+					<Suspense fallback={null}>
+						<TeamOrchestrationModal
+							theme={theme}
+							onClose={() => useModalStore.getState().closeModal('teamOrchestration')}
+							colorBlindMode={colorBlindMode}
+						/>
+					</Suspense>
+				)}
 
 				{/* --- GIST PUBLISH MODAL --- */}
 				{/* Supports both file preview tabs and tab context gist publishing */}
