@@ -138,7 +138,13 @@ export const AnalyticsTab = memo(function AnalyticsTab({
 			</div>
 
 			{/* Row 1: Token Usage Chart (full width) */}
-			<section ref={tokenChartRef} tabIndex={0} className="outline-none">
+			<section
+				ref={tokenChartRef}
+				tabIndex={0}
+				className="outline-none"
+				role="region"
+				aria-label="Token usage chart"
+			>
 				<ChartErrorBoundary theme={theme} chartName="Token Usage">
 					<TokenUsageChart theme={theme} data={data} colorBlindMode={colorBlindMode} />
 				</ChartErrorBoundary>
@@ -152,13 +158,25 @@ export const AnalyticsTab = memo(function AnalyticsTab({
 					gridTemplateColumns: isNarrow ? '1fr' : '1fr 1fr',
 				}}
 			>
-				<section ref={completionChartRef} tabIndex={0} className="outline-none">
+				<section
+					ref={completionChartRef}
+					tabIndex={0}
+					className="outline-none"
+					role="region"
+					aria-label="Completion rates chart"
+				>
 					<ChartErrorBoundary theme={theme} chartName="Completion Rates">
 						<CompletionRatesChart theme={theme} data={data} colorBlindMode={colorBlindMode} />
 					</ChartErrorBoundary>
 				</section>
 
-				<section ref={iterationChartRef} tabIndex={0} className="outline-none">
+				<section
+					ref={iterationChartRef}
+					tabIndex={0}
+					className="outline-none"
+					role="region"
+					aria-label="Iteration distribution chart"
+				>
 					<ChartErrorBoundary theme={theme} chartName="Iteration Distribution">
 						<IterationDistributionChart theme={theme} data={data} colorBlindMode={colorBlindMode} />
 					</ChartErrorBoundary>
@@ -166,7 +184,13 @@ export const AnalyticsTab = memo(function AnalyticsTab({
 			</div>
 
 			{/* Row 3: Agent Performance Chart (full width) */}
-			<section ref={agentChartRef} tabIndex={0} className="outline-none">
+			<section
+				ref={agentChartRef}
+				tabIndex={0}
+				className="outline-none"
+				role="region"
+				aria-label="Agent performance chart"
+			>
 				<ChartErrorBoundary theme={theme} chartName="Agent Performance">
 					<AgentPerformanceChart theme={theme} data={data} colorBlindMode={colorBlindMode} />
 				</ChartErrorBoundary>
@@ -220,9 +244,15 @@ export const AnalyticsTab = memo(function AnalyticsTab({
 											borderBottom: `1px solid ${theme.colors.border}`,
 										}}
 									>
-										<th className="text-left py-1.5 font-medium">Topology</th>
-										<th className="text-right py-1.5 font-medium">Runs</th>
-										<th className="text-right py-1.5 font-medium">Est. Cost</th>
+										<th className="text-left py-1.5 font-medium" scope="col">
+											Topology
+										</th>
+										<th className="text-right py-1.5 font-medium" scope="col">
+											Runs
+										</th>
+										<th className="text-right py-1.5 font-medium" scope="col">
+											Est. Cost
+										</th>
 									</tr>
 								</thead>
 								<tbody>

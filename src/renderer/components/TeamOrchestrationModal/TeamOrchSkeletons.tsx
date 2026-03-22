@@ -48,6 +48,7 @@ const SummaryCardsSkeleton = memo(function SummaryCardsSkeleton({ theme }: Skele
 				gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
 			}}
 			data-testid="team-orch-summary-skeleton"
+			aria-busy="true"
 		>
 			{Array.from({ length: 6 }).map((_, i) => (
 				<div
@@ -112,7 +113,7 @@ const ListItemsSkeleton = memo(function ListItemsSkeleton({ theme }: SkeletonPro
  */
 export const TeamOrchSkeleton = memo(function TeamOrchSkeleton({ theme }: SkeletonProps) {
 	return (
-		<div className="space-y-6" data-testid="team-orch-skeleton">
+		<div className="space-y-6" data-testid="team-orch-skeleton" aria-busy="true" aria-live="polite">
 			<SummaryCardsSkeleton theme={theme} />
 
 			{/* Active Workflows section skeleton */}

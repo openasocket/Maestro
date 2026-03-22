@@ -187,6 +187,7 @@ export function TeamOrchestrationModal({
 										borderColor: theme.colors.border,
 										color: theme.colors.textMain,
 									}}
+									aria-label="Select time range"
 								>
 									{TIME_RANGE_OPTIONS.map((option) => (
 										<option key={option.value} value={option.value}>
@@ -198,7 +199,13 @@ export function TeamOrchestrationModal({
 									className="absolute right-1.5 pointer-events-none"
 									style={{ color: theme.colors.textDim }}
 								>
-									<svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor">
+									<svg
+										width="10"
+										height="6"
+										viewBox="0 0 10 6"
+										fill="currentColor"
+										aria-hidden="true"
+									>
 										<path d="M0 0l5 6 5-6z" />
 									</svg>
 								</div>
@@ -213,9 +220,9 @@ export function TeamOrchestrationModal({
 								(e.currentTarget.style.backgroundColor = `${theme.colors.accent}20`)
 							}
 							onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-							title="Close (Esc)"
+							aria-label="Close (Esc)"
 						>
-							<X className="w-4 h-4" />
+							<X className="w-4 h-4" aria-hidden="true" />
 						</button>
 					</div>
 				</div>

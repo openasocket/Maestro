@@ -260,6 +260,7 @@ export const TokenUsageChart = memo(function TokenUsageChart({
 								backgroundColor: metricMode === 'tokens' ? theme.colors.accent : 'transparent',
 								color: metricMode === 'tokens' ? theme.colors.bgMain : theme.colors.textDim,
 							}}
+							aria-pressed={metricMode === 'tokens'}
 						>
 							Tokens
 						</button>
@@ -270,6 +271,7 @@ export const TokenUsageChart = memo(function TokenUsageChart({
 								backgroundColor: metricMode === 'duration' ? theme.colors.accent : 'transparent',
 								color: metricMode === 'duration' ? theme.colors.bgMain : theme.colors.textDim,
 							}}
+							aria-pressed={metricMode === 'duration'}
 						>
 							Duration
 						</button>

@@ -111,6 +111,9 @@ export const ConfigurationTab = memo(function ConfigurationTab({ theme }: Config
 						onClick={() =>
 							updateSetting('enableTemplates', !teamOrchestrationSettings.enableTemplates)
 						}
+						role="switch"
+						aria-checked={teamOrchestrationSettings.enableTemplates}
+						aria-label="Toggle team templates"
 					>
 						<div
 							className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform"
@@ -158,6 +161,9 @@ export const ConfigurationTab = memo(function ConfigurationTab({ theme }: Config
 								!teamOrchestrationSettings.enableWorkflowTopology
 							)
 						}
+						role="switch"
+						aria-checked={teamOrchestrationSettings.enableWorkflowTopology}
+						aria-label="Toggle workflow topology"
 					>
 						<div
 							className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform"
@@ -202,6 +208,9 @@ export const ConfigurationTab = memo(function ConfigurationTab({ theme }: Config
 						onClick={() =>
 							updateSetting('enableVisualization', !teamOrchestrationSettings.enableVisualization)
 						}
+						role="switch"
+						aria-checked={teamOrchestrationSettings.enableVisualization}
+						aria-label="Toggle workflow visualization"
 					>
 						<div
 							className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform"
@@ -282,6 +291,8 @@ export const ConfigurationTab = memo(function ConfigurationTab({ theme }: Config
 					className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium transition-colors"
 					style={{ color: theme.colors.textMain }}
 					onClick={() => setAdvancedOpen((prev) => !prev)}
+					aria-expanded={advancedOpen}
+					aria-label="Toggle advanced settings"
 					onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = `${theme.colors.accent}10`)}
 					onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
 				>
@@ -400,6 +411,9 @@ export const ConfigurationTab = memo(function ConfigurationTab({ theme }: Config
 								onClick={() =>
 									updateSetting('autoSaveTemplates', !teamOrchestrationSettings.autoSaveTemplates)
 								}
+								role="switch"
+								aria-checked={teamOrchestrationSettings.autoSaveTemplates}
+								aria-label="Toggle auto-save templates"
 							>
 								<div
 									className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform"

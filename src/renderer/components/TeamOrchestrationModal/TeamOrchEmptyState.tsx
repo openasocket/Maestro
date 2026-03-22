@@ -32,11 +32,12 @@ export const TeamOrchEmptyState = memo(function TeamOrchEmptyState({
 			data-testid="team-orch-empty"
 		>
 			<div className="relative" style={{ opacity: 0.3 }}>
-				<Users className="w-16 h-16" />
+				<Users className="w-16 h-16" aria-hidden="true" />
 				<svg
 					className="absolute -bottom-1 -right-2 w-6 h-6"
 					viewBox="0 0 24 24"
 					fill="none"
+					aria-hidden="true"
 					style={{ opacity: 0.5 }}
 				>
 					<rect x="4" y="12" width="4" height="8" rx="1" fill={theme.colors.textDim} />

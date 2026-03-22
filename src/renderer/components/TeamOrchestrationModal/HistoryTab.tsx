@@ -270,11 +270,11 @@ function ExpandedDetail({ event, theme }: { event: TeamOrchEvent; theme: Theme }
 					Execution Log
 				</h4>
 				{logLoading ? (
-					<div className="ml-2 text-xs" style={{ color: theme.colors.textDim }}>
+					<div className="ml-2 text-xs" style={{ color: theme.colors.textDim }} aria-live="polite">
 						Loading execution log...
 					</div>
 				) : logError ? (
-					<div className="ml-2 text-xs" style={{ color: theme.colors.textDim }}>
+					<div className="ml-2 text-xs" style={{ color: theme.colors.textDim }} aria-live="polite">
 						{logError}
 					</div>
 				) : executionLog && executionLog.length > 0 ? (
@@ -393,6 +393,7 @@ export const HistoryTab = memo(function HistoryTab({ theme }: HistoryTabProps) {
 					<input
 						type="text"
 						placeholder="Search past workflows..."
+						aria-label="Search past workflows"
 						value={history.searchQuery}
 						onChange={(e) => history.setSearchQuery(e.target.value)}
 						className="w-full pl-10 pr-4 py-2 rounded-lg text-sm border outline-none"
@@ -418,6 +419,7 @@ export const HistoryTab = memo(function HistoryTab({ theme }: HistoryTabProps) {
 						cursor: exporting ? 'not-allowed' : 'pointer',
 					}}
 					data-testid="export-json-btn"
+					aria-label="Export workflow history as JSON"
 				>
 					<Download className={`w-3.5 h-3.5 ${exporting === 'json' ? 'animate-pulse' : ''}`} />
 					Export JSON
@@ -434,6 +436,7 @@ export const HistoryTab = memo(function HistoryTab({ theme }: HistoryTabProps) {
 						cursor: exporting ? 'not-allowed' : 'pointer',
 					}}
 					data-testid="export-csv-btn"
+					aria-label="Export workflow history as CSV"
 				>
 					<FileText className={`w-3.5 h-3.5 ${exporting === 'csv' ? 'animate-pulse' : ''}`} />
 					Export CSV
@@ -452,6 +455,7 @@ export const HistoryTab = memo(function HistoryTab({ theme }: HistoryTabProps) {
 						color: theme.colors.textMain,
 					}}
 					data-testid="topology-filter"
+					aria-label="Filter by topology"
 				>
 					{TOPOLOGY_OPTIONS.map((opt) => (
 						<option key={opt.value} value={opt.value}>
@@ -470,6 +474,7 @@ export const HistoryTab = memo(function HistoryTab({ theme }: HistoryTabProps) {
 						color: theme.colors.textMain,
 					}}
 					data-testid="status-filter"
+					aria-label="Filter by status"
 				>
 					{STATUS_OPTIONS.map((opt) => (
 						<option key={opt.value} value={opt.value}>
@@ -485,7 +490,7 @@ export const HistoryTab = memo(function HistoryTab({ theme }: HistoryTabProps) {
 					className="overflow-x-auto rounded-lg border"
 					style={{ borderColor: theme.colors.border }}
 				>
-					<table className="w-full text-sm" data-testid="history-skeleton">
+					<table className="w-full text-sm" data-testid="history-skeleton" aria-busy="true">
 						<thead>
 							<tr style={{ borderBottom: `1px solid ${theme.colors.border}` }}>
 								{[
@@ -565,6 +570,15 @@ export const HistoryTab = memo(function HistoryTab({ theme }: HistoryTabProps) {
 														index % 2 === 0 ? theme.colors.bgMain : theme.colors.bgActivity,
 												}}
 												onClick={() => handleRowClick(event.id)}
+												onKeyDown={(e) => {
+													if (e.key === 'Enter' || e.key === ' ') {
+														e.preventDefault();
+														handleRowClick(event.id);
+													}
+												}}
+												tabIndex={0}
+												aria-expanded={isExpanded}
+												aria-label={`${event.groupChatName} - ${statusLabel(event.status)} - ${formatDate(event.startTime)}`}
 												onMouseEnter={(e) => {
 													e.currentTarget.style.backgroundColor = `${theme.colors.accent}10`;
 												}}
@@ -576,9 +590,9 @@ export const HistoryTab = memo(function HistoryTab({ theme }: HistoryTabProps) {
 											>
 												<td className="px-2 py-2.5" style={{ color: theme.colors.textDim }}>
 													{isExpanded ? (
-														<ChevronDown className="w-3.5 h-3.5" />
+														<ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
 													) : (
-														<ChevronRight className="w-3.5 h-3.5" />
+														<ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
 													)}
 												</td>
 												<td
@@ -658,6 +672,8 @@ export const HistoryTab = memo(function HistoryTab({ theme }: HistoryTabProps) {
 						<div
 							className="flex items-center justify-between text-sm"
 							data-testid="history-pagination"
+							role="navigation"
+							aria-label="Workflow history pagination"
 						>
 							<span style={{ color: theme.colors.textDim }}>
 								Showing {startItem}–{endItem} of {history.total}
@@ -675,6 +691,7 @@ export const HistoryTab = memo(function HistoryTab({ theme }: HistoryTabProps) {
 										cursor: isFirstPage ? 'not-allowed' : 'pointer',
 										backgroundColor: 'transparent',
 									}}
+									aria-label="Previous page"
 								>
 									Previous
 								</button>
@@ -684,6 +701,8 @@ export const HistoryTab = memo(function HistoryTab({ theme }: HistoryTabProps) {
 										key={i}
 										onClick={() => history.setPage(i)}
 										className="w-8 h-8 rounded text-xs font-medium transition-colors"
+										aria-label={`Page ${i + 1}`}
+										aria-current={i === history.page ? 'page' : undefined}
 										style={{
 											backgroundColor:
 												i === history.page ? `${theme.colors.accent}20` : 'transparent',
@@ -705,6 +724,7 @@ export const HistoryTab = memo(function HistoryTab({ theme }: HistoryTabProps) {
 										cursor: isLastPage ? 'not-allowed' : 'pointer',
 										backgroundColor: 'transparent',
 									}}
+									aria-label="Next page"
 								>
 									Next
 								</button>

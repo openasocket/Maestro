@@ -198,7 +198,7 @@ export const OverviewTab = memo(function OverviewTab({
 						No active workflows
 					</p>
 				) : (
-					<div className="space-y-3">
+					<div className="space-y-3" role="list" aria-label="Active workflows">
 						{activeWorkflowList.map((wf) => (
 							<ActiveWorkflowCard key={wf.groupChatId} workflow={wf} theme={theme} />
 						))}
@@ -212,7 +212,7 @@ export const OverviewTab = memo(function OverviewTab({
 					Recent Completions
 				</h3>
 				{recentLoading ? (
-					<div className="space-y-2">
+					<div className="space-y-2" aria-live="polite" aria-busy="true">
 						{Array.from({ length: 3 }).map((_, i) => (
 							<div
 								key={i}
@@ -229,7 +229,7 @@ export const OverviewTab = memo(function OverviewTab({
 				) : recentCompletions.length === 0 ? (
 					<TeamOrchEmptyState theme={theme} message="No completed workflows yet" />
 				) : (
-					<div className="space-y-2">
+					<div className="space-y-2" role="list" aria-label="Recent completions">
 						{recentCompletions.map((event) => (
 							<CompletionRow key={event.id} event={event} theme={theme} />
 						))}
@@ -265,6 +265,8 @@ const ActiveWorkflowCard = memo(function ActiveWorkflowCard({
 				backgroundColor: theme.colors.bgMain,
 				borderColor: theme.colors.border,
 			}}
+			role="listitem"
+			aria-label={`${workflow.chatName} - ${topologyDisplayName(topology.pattern)} - Iteration ${state.iterationCount}`}
 		>
 			{/* Pulsing status dot */}
 			<div className="flex-shrink-0 mt-1">
@@ -325,6 +327,8 @@ const CompletionRow = memo(function CompletionRow({
 				backgroundColor: theme.colors.bgMain,
 				borderColor: theme.colors.border,
 			}}
+			role="listitem"
+			aria-label={`${event.groupChatName} - ${event.status} - ${formatDuration(event.duration)}`}
 		>
 			{/* Status dot */}
 			<div

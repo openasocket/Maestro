@@ -360,11 +360,17 @@ export const TemplatesTab = memo(function TemplatesTab({ theme, data }: Template
 				)}
 
 				{/* Category filter pills */}
-				<div className="flex items-center gap-2 mb-3">
+				<div
+					className="flex items-center gap-2 mb-3"
+					role="radiogroup"
+					aria-label="Filter by category"
+				>
 					{CATEGORY_PILLS.map((pill) => (
 						<button
 							key={pill.value}
 							onClick={() => setCategoryFilter(pill.value)}
+							role="radio"
+							aria-checked={categoryFilter === pill.value}
 							className="px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
 							style={{
 								backgroundColor:
@@ -386,6 +392,7 @@ export const TemplatesTab = memo(function TemplatesTab({ theme, data }: Template
 					<input
 						type="text"
 						placeholder="Search templates..."
+						aria-label="Search templates"
 						value={searchQuery}
 						onChange={(e) => setSearchQuery(e.target.value)}
 						className="w-full pl-9 pr-3 py-2 rounded-lg text-sm border outline-none"
@@ -507,8 +514,9 @@ const CreateTemplateForm = memo(function CreateTemplateForm({
 					onClick={onCancel}
 					className="p-1 rounded hover:opacity-80"
 					style={{ color: theme.colors.textDim }}
+					aria-label="Cancel creating template"
 				>
-					<X className="w-4 h-4" />
+					<X className="w-4 h-4" aria-hidden="true" />
 				</button>
 			</div>
 
@@ -665,8 +673,9 @@ const RoleEditor = memo(function RoleEditor({
 					onClick={onRemove}
 					className="p-1 mt-1 rounded hover:opacity-80 flex-shrink-0"
 					style={{ color: theme.colors.textDim }}
+					aria-label="Remove role"
 				>
-					<X className="w-3.5 h-3.5" />
+					<X className="w-3.5 h-3.5" aria-hidden="true" />
 				</button>
 			)}
 		</div>
@@ -698,6 +707,8 @@ const TemplateCard = memo(function TemplateCard({
 			onMouseEnter={() => setHovered(true)}
 			onMouseLeave={() => setHovered(false)}
 			className="text-left p-4 rounded-lg border transition-colors outline-none"
+			role="listitem"
+			aria-selected={selected}
 			style={{
 				backgroundColor: hovered ? theme.colors.bgActivity : theme.colors.bgMain,
 				borderColor: selected ? theme.colors.accent : theme.colors.border,
@@ -914,6 +925,7 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 					onClick={onClose}
 					className="flex-shrink-0 ml-2 text-xs px-2 py-1 rounded hover:opacity-80"
 					style={{ color: theme.colors.textDim }}
+					aria-label="Close template details"
 				>
 					✕
 				</button>
@@ -989,7 +1001,7 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 								className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs transition-colors hover:opacity-80"
 								style={{ backgroundColor: theme.colors.bgActivity, color: theme.colors.error }}
 							>
-								<Trash2 className="w-3 h-3" /> Delete
+								<Trash2 className="w-3 h-3" aria-hidden="true" /> Delete
 							</button>
 						)}
 					</>
@@ -1051,7 +1063,7 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 						))}
 					</div>
 				) : (
-					<div className="space-y-2">
+					<div className="space-y-2" role="list" aria-label="Template roles">
 						{template.roles.map((role, idx) => (
 							<div
 								key={idx}
