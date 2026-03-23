@@ -17,6 +17,7 @@ import type { Theme } from '../../../types';
 import type { BuilderState, BuilderAction, BuilderNode } from './builderTypes';
 import { GRID_SIZE, NODE_WIDTH, NODE_HEIGHT, PORT_RADIUS } from './builderTypes';
 import { BuilderNodeComponent } from './BuilderNodeComponent';
+import { BuilderEdgeComponent } from './BuilderEdgeComponent';
 
 interface BuilderCanvasProps {
 	state: BuilderState;
@@ -328,49 +329,16 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 					const target = nodeById.get(edge.targetNodeId);
 					if (!source || !target) return null;
 
-					const sx = source.x + NODE_WIDTH;
-					const sy = source.y + NODE_HEIGHT / 2;
-					const tx = target.x;
-					const ty = target.y + NODE_HEIGHT / 2;
-
-					// Cubic bezier for smooth edge
-					const midX = (sx + tx) / 2;
-					const d = `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
-					const edgeColor = getEdgeColor(edge.edgeType, theme);
-					const isSelected = edge.id === state.selectedEdgeId;
-
 					return (
-						<g
+						<BuilderEdgeComponent
 							key={edge.id}
-							onClick={(e) => {
-								e.stopPropagation();
-								dispatch({ type: 'SELECT_EDGE', edgeId: edge.id });
-							}}
-							style={{ cursor: 'pointer' }}
-						>
-							{/* Invisible wider path for easier click target */}
-							<path d={d} fill="none" stroke="transparent" strokeWidth={12} />
-							<path
-								d={d}
-								fill="none"
-								stroke={edgeColor}
-								strokeWidth={isSelected ? 3 : 1.5}
-								strokeDasharray={edge.edgeType === 'conditional' ? '6 3' : undefined}
-								markerEnd={`url(#arrow-${edge.edgeType})`}
-							/>
-							{edge.condition && (
-								<text
-									x={midX}
-									y={(sy + ty) / 2 - 8}
-									textAnchor="middle"
-									fill={theme.colors.textDim}
-									fontSize={9}
-									fontStyle="italic"
-								>
-									{edge.condition}
-								</text>
-							)}
-						</g>
+							edge={edge}
+							sourceNode={source}
+							targetNode={target}
+							theme={theme}
+							selected={edge.id === state.selectedEdgeId}
+							dispatch={dispatch}
+						/>
 					);
 				})}
 
@@ -398,12 +366,12 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 						);
 					})()}
 
-				{/* Arrow markers */}
+				{/* Arrow markers for edge components */}
 				<defs>
 					{['sequential', 'parallel', 'conditional'].map((et) => (
 						<marker
 							key={et}
-							id={`arrow-${et}`}
+							id={`builder-arrow-${et}`}
 							markerWidth={8}
 							markerHeight={8}
 							refX={PORT_RADIUS + 6}
