@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MarkdownRenderer } from '../../../renderer/components/MarkdownRenderer';
 
 // Mock react-syntax-highlighter
@@ -19,6 +19,8 @@ vi.mock('lucide-react', () => ({
 	Clipboard: () => <span data-testid="clipboard-icon">Clipboard</span>,
 	Loader2: () => <span data-testid="loader-icon">Loader</span>,
 	ImageOff: () => <span data-testid="image-off-icon">ImageOff</span>,
+	Copy: () => <span data-testid="copy-icon">Copy</span>,
+	ExternalLink: () => <span data-testid="external-link-icon">ExternalLink</span>,
 }));
 
 const mockTheme = {
@@ -129,6 +131,35 @@ describe('MarkdownRenderer', () => {
 				<MarkdownRenderer {...defaultProps} content={maliciousContent} allowRawHtml={true} />
 			);
 			expect(container.innerHTML).not.toContain('javascript:');
+		});
+	});
+
+	describe('link context menu', () => {
+		it('renders a context menu with Copy Link and Open in Browser on right-click', () => {
+			const { container } = render(
+				<MarkdownRenderer
+					{...defaultProps}
+					content="Visit [Example](https://example.com) for details"
+				/>
+			);
+			const link = container.querySelector('a[href="https://example.com"]');
+			expect(link).not.toBeNull();
+
+			fireEvent.contextMenu(link!, { clientX: 100, clientY: 200 });
+
+			expect(screen.getByText('Copy Link')).toBeInTheDocument();
+			expect(screen.getByText('Open in Browser')).toBeInTheDocument();
+		});
+
+		it('does not show context menu for links without href', () => {
+			const { container } = render(
+				<MarkdownRenderer {...defaultProps} content="Just **bold** text, no links" />
+			);
+
+			// Right-click on the container itself — no link, no menu
+			fireEvent.contextMenu(container.firstElementChild!, { clientX: 100, clientY: 200 });
+
+			expect(screen.queryByText('Copy Link')).toBeNull();
 		});
 	});
 });

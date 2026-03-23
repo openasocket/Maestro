@@ -1,13 +1,14 @@
-import { useEffect, useRef, useImperativeHandle, forwardRef, useCallback } from 'react';
+import { useEffect, useRef, useImperativeHandle, forwardRef, useCallback, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SearchAddon } from '@xterm/addon-search';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import type { ISearchOptions } from '@xterm/addon-search';
+import type { ILink } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import type { Theme } from '../../shared/theme-types';
 import type { ITheme } from '@xterm/xterm';
+import { LinkContextMenu, type LinkContextMenuState } from './LinkContextMenu';
 
 // ============================================================================
 // Custom key event handler logic
@@ -164,6 +165,13 @@ export function mapThemeToXterm(theme: Theme): ITheme {
 }
 
 // ============================================================================
+// Link detection
+// ============================================================================
+
+/** URL regex matching HTTP/HTTPS URLs, trimming trailing punctuation */
+const URL_PATTERN = /https?:\/\/[^\s<>[\]"'{}|\\^`\x00-\x1f]+[^\s<>[\]"'{}|\\^`.,;:!?)\x00-\x1f]/g;
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -211,6 +219,10 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
 	// Deferred WebGL load: resolved when the async import completes but the container was hidden.
 	// Applied on the next visible resize or explicit refresh() call.
 	const pendingWebglLoadRef = useRef<(() => void) | null>(null);
+
+	// Link context menu state
+	const [linkMenu, setLinkMenu] = useState<LinkContextMenuState | null>(null);
+	const hoveredLinkRef = useRef<string | null>(null);
 
 	// Expose handle to parent
 	useImperativeHandle(
@@ -319,15 +331,49 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
 		});
 
 		const fitAddon = new FitAddon();
-		const webLinksAddon = new WebLinksAddon();
 		const searchAddon = new SearchAddon();
 		const unicode11Addon = new Unicode11Addon();
 
 		term.loadAddon(fitAddon);
-		term.loadAddon(webLinksAddon);
 		term.loadAddon(searchAddon);
 		term.loadAddon(unicode11Addon);
 		term.unicode.activeVersion = '11';
+
+		// Custom link provider: detects URLs, tracks hover for right-click context menu
+		const linkProviderDisposable = term.registerLinkProvider({
+			provideLinks(lineNumber, callback) {
+				const line = term.buffer.active.getLine(lineNumber - 1);
+				if (!line) {
+					callback(undefined);
+					return;
+				}
+				const text = line.translateToString();
+				const links: ILink[] = [];
+				let match: RegExpExecArray | null;
+				const re = new RegExp(URL_PATTERN.source, 'g');
+				while ((match = re.exec(text)) !== null) {
+					const url = match[0];
+					const startCol = match.index + 1; // 1-based
+					links.push({
+						range: {
+							start: { x: startCol, y: lineNumber },
+							end: { x: startCol + url.length - 1, y: lineNumber },
+						},
+						text: url,
+						activate(_event, linkText) {
+							window.maestro.shell.openExternal(linkText);
+						},
+						hover(_event, linkText) {
+							hoveredLinkRef.current = linkText;
+						},
+						leave() {
+							hoveredLinkRef.current = null;
+						},
+					});
+				}
+				callback(links.length > 0 ? links : undefined);
+			},
+		});
 
 		// Attempt WebGL renderer with canvas fallback.
 		// The WebGL addon must be loaded AFTER term.open() because xterm's internal link layer
@@ -394,6 +440,18 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
 			fitAddon.fit();
 		}
 
+		// Right-click context menu for links
+		const termElement = containerRef.current;
+		const handleContextMenu = (e: MouseEvent) => {
+			const url = hoveredLinkRef.current;
+			if (url) {
+				e.preventDefault();
+				e.stopPropagation();
+				setLinkMenu({ x: e.clientX, y: e.clientY, url });
+			}
+		};
+		termElement.addEventListener('contextmenu', handleContextMenu);
+
 		// Load WebGL addon after open() so xterm's internal link layer is initialised.
 		import('@xterm/addon-webgl')
 			.then(({ WebglAddon }) => {
@@ -417,6 +475,8 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
 		resizeObserverRef.current = resizeObserver;
 
 		return () => {
+			termElement.removeEventListener('contextmenu', handleContextMenu);
+			linkProviderDisposable.dispose();
 			resizeObserver.disconnect();
 			if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
 			webglAddon?.dispose();
@@ -474,6 +534,8 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
 		}
 	}, [fontFamily, fontSize]);
 
+	const dismissLinkMenu = useCallback(() => setLinkMenu(null), []);
+
 	return (
 		<div
 			style={{
@@ -485,6 +547,7 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
 			}}
 		>
 			<div ref={containerRef} style={{ width: '100%', height: '100%', overflow: 'hidden' }} />
+			{linkMenu && <LinkContextMenu menu={linkMenu} theme={theme} onDismiss={dismissLinkMenu} />}
 		</div>
 	);
 });

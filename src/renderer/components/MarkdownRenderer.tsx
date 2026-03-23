@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useState, useEffect } from 'react';
+import React, { memo, useMemo, useState, useCallback, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import DOMPurify from 'dompurify';
@@ -11,6 +11,7 @@ import { remarkFileLinks, buildFileTreeIndices } from '../utils/remarkFileLinks'
 import remarkFrontmatter from 'remark-frontmatter';
 import { remarkFrontmatterTable } from '../utils/remarkFrontmatterTable';
 import { REMARK_GFM_PLUGINS } from '../utils/markdownConfig';
+import { LinkContextMenu, type LinkContextMenuState } from './LinkContextMenu';
 
 // ============================================================================
 // LocalImage - Loads local images via IPC
@@ -288,6 +289,10 @@ export const MarkdownRenderer = memo(
 			return content;
 		}, [content, allowRawHtml]);
 
+		// Right-click context menu for links
+		const [linkMenu, setLinkMenu] = useState<LinkContextMenuState | null>(null);
+		const dismissLinkMenu = useCallback(() => setLinkMenu(null), []);
+
 		return (
 			<div
 				className={`prose prose-sm max-w-none text-sm ${className}`}
@@ -336,6 +341,13 @@ export const MarkdownRenderer = memo(
 													// Silently ignore unparseable URLs
 												}
 											}
+										}
+									}}
+									onContextMenu={(e) => {
+										if (href) {
+											e.preventDefault();
+											e.stopPropagation();
+											setLinkMenu({ x: e.clientX, y: e.clientY, url: href });
 										}
 									}}
 									style={{
@@ -446,6 +458,7 @@ export const MarkdownRenderer = memo(
 				>
 					{sanitizedContent}
 				</ReactMarkdown>
+				{linkMenu && <LinkContextMenu menu={linkMenu} theme={theme} onDismiss={dismissLinkMenu} />}
 			</div>
 		);
 	}
