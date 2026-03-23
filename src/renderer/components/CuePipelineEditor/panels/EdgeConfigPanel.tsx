@@ -15,12 +15,18 @@ interface EdgeConfigPanelProps {
 	pipelineColor: string;
 	onUpdateEdge: (edgeId: string, updates: Partial<PipelineEdge>) => void;
 	onDeleteEdge: (edgeId: string) => void;
+	triggerDrawerOpen?: boolean;
+	agentDrawerOpen?: boolean;
+	teamDrawerOpen?: boolean;
 }
 
 function getNodeLabel(node: PipelineNode | null): string {
 	if (!node) return '?';
 	if (node.type === 'trigger') {
 		return (node.data as { label: string }).label;
+	}
+	if (node.type === 'team') {
+		return (node.data as { templateName: string }).templateName;
 	}
 	return (node.data as { sessionName: string }).sessionName;
 }
@@ -61,6 +67,9 @@ export function EdgeConfigPanel({
 	pipelineColor,
 	onUpdateEdge,
 	onDeleteEdge,
+	triggerDrawerOpen,
+	agentDrawerOpen,
+	teamDrawerOpen,
 }: EdgeConfigPanelProps) {
 	if (!selectedEdge) return null;
 
@@ -71,8 +80,8 @@ export function EdgeConfigPanel({
 			style={{
 				position: 'absolute',
 				bottom: 0,
-				left: 220,
-				right: 240,
+				left: triggerDrawerOpen ? 220 : 0,
+				right: agentDrawerOpen || teamDrawerOpen ? 240 : 0,
 				height: 200,
 				backgroundColor: '#1a1a2e',
 				borderTop: '1px solid #333',

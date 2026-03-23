@@ -11,6 +11,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
 	ReactFlowProvider,
 	useReactFlow,
+	applyNodeChanges,
 	type Node,
 	type OnNodesChange,
 	type OnEdgesChange,
@@ -194,8 +195,16 @@ function CuePipelineEditorInner({
 
 	// ─── ReactFlow nodes/edges ───────────────────────────────────────────────
 
-	const nodes = useMemo(
-		() =>
+	// Derive nodes from pipeline state. This is the "canonical" version.
+	// During drag, ReactFlow's applyNodeChanges handles interim positions
+	// so we don't cascade re-renders through pipelineState on every frame.
+	const [nodes, setNodes] = useState<Node[]>([]);
+	const isDraggingRef = useRef(false);
+
+	// Sync nodes from pipeline state when it changes (but not during drag)
+	useEffect(() => {
+		if (isDraggingRef.current) return;
+		setNodes(
 			convertToReactFlowNodes(
 				pipelineState.pipelines,
 				pipelineState.selectedPipelineId,
@@ -205,16 +214,16 @@ function CuePipelineEditorInner({
 					isSaved: !isDirty,
 					runningPipelineIds,
 				}
-			),
-		[
-			pipelineState.pipelines,
-			pipelineState.selectedPipelineId,
-			handleConfigureNode,
-			onTriggerPipeline,
-			isDirty,
-			runningPipelineIds,
-		]
-	);
+			)
+		);
+	}, [
+		pipelineState.pipelines,
+		pipelineState.selectedPipelineId,
+		handleConfigureNode,
+		onTriggerPipeline,
+		isDirty,
+		runningPipelineIds,
+	]);
 
 	const edges = useMemo(
 		() =>
@@ -231,23 +240,28 @@ function CuePipelineEditorInner({
 
 	const onNodesChange: OnNodesChange = useCallback(
 		(changes) => {
-			const positionUpdates = new Map<string, { x: number; y: number }>();
-			let hasPositionChange = false;
+			// Let ReactFlow handle all change types (position, dimensions, select, etc.)
+			// during drag for smooth visual updates without cascading state re-renders.
+			setNodes((nds) => applyNodeChanges(changes, nds));
+
+			// Track drag state so we don't overwrite ReactFlow's interim positions
+			const isDragging = changes.some((c) => c.type === 'position' && c.dragging);
+			isDraggingRef.current = isDragging;
+
+			// When drag ends, sync final positions back to pipeline state
+			const finalPositions = new Map<string, { x: number; y: number }>();
 			for (const change of changes) {
-				if (change.type === 'position' && change.position) {
-					positionUpdates.set(change.id, change.position);
-					if (!change.dragging) {
-						hasPositionChange = true;
-					}
+				if (change.type === 'position' && change.position && !change.dragging) {
+					finalPositions.set(change.id, change.position);
 				}
 			}
 
-			if (positionUpdates.size > 0) {
+			if (finalPositions.size > 0) {
 				setPipelineState((prev) => {
 					const newPipelines = prev.pipelines.map((pipeline) => ({
 						...pipeline,
 						nodes: pipeline.nodes.map((pNode) => {
-							const newPos = positionUpdates.get(`${pipeline.id}:${pNode.id}`);
+							const newPos = finalPositions.get(`${pipeline.id}:${pNode.id}`);
 							if (newPos) {
 								return { ...pNode, position: newPos };
 							}
@@ -256,9 +270,6 @@ function CuePipelineEditorInner({
 					}));
 					return { ...prev, pipelines: newPipelines };
 				});
-			}
-
-			if (hasPositionChange) {
 				persistLayout();
 			}
 		},
@@ -656,6 +667,7 @@ function CuePipelineEditorInner({
 				onSwitchToSession={onSwitchToSession}
 				triggerDrawerOpenForConfig={triggerDrawerOpen}
 				agentDrawerOpenForConfig={agentDrawerOpen}
+				teamDrawerOpenForConfig={teamDrawerOpen}
 				edgeSourceNode={edgeSourceNode}
 				edgeTargetNode={edgeTargetNode}
 				selectedEdgePipelineColor={selectedEdgePipelineColor}

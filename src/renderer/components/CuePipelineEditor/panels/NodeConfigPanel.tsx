@@ -40,6 +40,7 @@ interface NodeConfigPanelProps {
 	onSwitchToAgent?: (sessionId: string) => void;
 	triggerDrawerOpen?: boolean;
 	agentDrawerOpen?: boolean;
+	teamDrawerOpen?: boolean;
 	/** Pipeline color for styling config panel elements */
 	pipelineColor?: string;
 	/** Callback to manually trigger the pipeline this trigger belongs to */
@@ -64,6 +65,7 @@ export function NodeConfigPanel({
 	onSwitchToAgent,
 	triggerDrawerOpen,
 	agentDrawerOpen,
+	teamDrawerOpen,
 	onTriggerPipeline,
 	pipelineName,
 	isSaved,
@@ -94,7 +96,7 @@ export function NodeConfigPanel({
 				position: 'absolute',
 				bottom: 0,
 				left: triggerDrawerOpen ? 220 : 0,
-				right: agentDrawerOpen ? 240 : 0,
+				right: agentDrawerOpen || teamDrawerOpen ? 240 : 0,
 				height: expanded ? '80%' : collapsedHeight,
 				backgroundColor: '#1a1a2e',
 				borderTop: '1px solid #333',
