@@ -23,9 +23,46 @@ import type { ITheme } from '@xterm/xterm';
  *   to the PTY directly, then return false to xterm to avoid double-send.
  * - 'handle': xterm should handle this key normally (return true to xterm).
  */
-export type XtermKeyAction = 'passthrough' | 'escape' | 'handle';
+export type XtermKeyAction =
+	| 'passthrough'
+	| 'escape'
+	| 'handle'
+	| { action: 'write'; data: string };
+
+/**
+ * Return the escape sequence for a terminal-navigation key combo, or null
+ * if the event is not a navigation shortcut.
+ *
+ * macOS conventions:
+ *   Option+Left/Right  → word backward/forward  (ESC b / ESC f)
+ *   Cmd+Left/Right     → beginning/end of line   (Ctrl-A / Ctrl-E)
+ *   Option+Backspace   → delete word backward     (ESC DEL)
+ */
+function getTerminalNavSequence(e: KeyboardEvent): string | null {
+	if (e.type !== 'keydown') return null;
+
+	// Option (Alt) + Arrow → word navigation
+	if (e.altKey && !e.metaKey && !e.ctrlKey) {
+		if (e.key === 'ArrowLeft') return '\x1bb'; // ESC b — backward word
+		if (e.key === 'ArrowRight') return '\x1bf'; // ESC f — forward word
+		if (e.key === 'Backspace') return '\x1b\x7f'; // ESC DEL — backward kill word
+	}
+
+	// Cmd (Meta) + Arrow → line navigation
+	if (e.metaKey && !e.altKey && !e.ctrlKey) {
+		if (e.key === 'ArrowLeft') return '\x01'; // Ctrl-A — beginning of line
+		if (e.key === 'ArrowRight') return '\x05'; // Ctrl-E — end of line
+	}
+
+	return null;
+}
 
 export function evaluateCustomKeyEvent(e: KeyboardEvent): XtermKeyAction {
+	// Terminal navigation shortcuts (word jump, line jump, word delete)
+	// must be checked before the blanket Alt/Meta passthrough rules.
+	const navSeq = getTerminalNavSequence(e);
+	if (navSeq) return { action: 'write', data: navSeq };
+
 	// Let Ctrl+Shift+` through for new-terminal-tab shortcut
 	if (e.ctrlKey && e.shiftKey && e.code === 'Backquote') return 'passthrough';
 	// Let all Meta (Cmd) key combos through so app shortcuts work
@@ -337,6 +374,10 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
 		// at the NSMenu level before it reaches the renderer.
 		term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
 			const action = evaluateCustomKeyEvent(e);
+			if (typeof action === 'object' && action.action === 'write') {
+				window.maestro.process.write(sessionId, action.data);
+				return false;
+			}
 			if (action === 'escape') {
 				window.maestro.process.write(sessionId, '\x1b');
 				return false;

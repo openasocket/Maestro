@@ -164,8 +164,46 @@ describe('evaluateCustomKeyEvent', () => {
 		expect(evaluateCustomKeyEvent(e)).toBe('passthrough');
 	});
 
-	it('returns "passthrough" for Alt combos', () => {
+	it('returns "passthrough" for Alt combos (non-navigation)', () => {
 		const e = makeKeyEvent({ key: 'q', altKey: true });
+		expect(evaluateCustomKeyEvent(e)).toBe('passthrough');
+	});
+
+	// Terminal navigation: Option+Arrow → word jump
+	it('returns write action with ESC b for Option+Left (word back)', () => {
+		const e = makeKeyEvent({ key: 'ArrowLeft', altKey: true, type: 'keydown' });
+		expect(evaluateCustomKeyEvent(e)).toEqual({ action: 'write', data: '\x1bb' });
+	});
+
+	it('returns write action with ESC f for Option+Right (word forward)', () => {
+		const e = makeKeyEvent({ key: 'ArrowRight', altKey: true, type: 'keydown' });
+		expect(evaluateCustomKeyEvent(e)).toEqual({ action: 'write', data: '\x1bf' });
+	});
+
+	it('returns write action with ESC DEL for Option+Backspace (kill word)', () => {
+		const e = makeKeyEvent({ key: 'Backspace', altKey: true, type: 'keydown' });
+		expect(evaluateCustomKeyEvent(e)).toEqual({ action: 'write', data: '\x1b\x7f' });
+	});
+
+	// Terminal navigation: Cmd+Arrow → line jump
+	it('returns write action with Ctrl-A for Cmd+Left (beginning of line)', () => {
+		const e = makeKeyEvent({ key: 'ArrowLeft', metaKey: true, type: 'keydown' });
+		expect(evaluateCustomKeyEvent(e)).toEqual({ action: 'write', data: '\x01' });
+	});
+
+	it('returns write action with Ctrl-E for Cmd+Right (end of line)', () => {
+		const e = makeKeyEvent({ key: 'ArrowRight', metaKey: true, type: 'keydown' });
+		expect(evaluateCustomKeyEvent(e)).toEqual({ action: 'write', data: '\x05' });
+	});
+
+	// Navigation keys on keyup should not fire (only keydown)
+	it('returns passthrough for Option+Arrow on keyup', () => {
+		const e = makeKeyEvent({ key: 'ArrowLeft', altKey: true, type: 'keyup' });
+		expect(evaluateCustomKeyEvent(e)).toBe('passthrough');
+	});
+
+	it('returns passthrough for Cmd+Arrow on keyup', () => {
+		const e = makeKeyEvent({ key: 'ArrowLeft', metaKey: true, type: 'keyup' });
 		expect(evaluateCustomKeyEvent(e)).toBe('passthrough');
 	});
 
