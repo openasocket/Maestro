@@ -76,12 +76,6 @@ function getActionNodeName(node: PipelineNode): string {
 	return (node.data as AgentNodeData).sessionName;
 }
 
-/** Returns the ID used for agent_id / team_template binding. */
-function getActionNodeId(node: PipelineNode): string {
-	if (node.type === 'team') return (node.data as TeamNodeData).templateId;
-	return (node.data as AgentNodeData).sessionId;
-}
-
 function getEdgeModeComment(edge: PipelineEdge): string | null {
 	if (edge.mode === 'debate') {
 		const rounds = edge.debateConfig?.maxRounds ?? 3;
