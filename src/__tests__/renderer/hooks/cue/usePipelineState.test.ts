@@ -109,6 +109,26 @@ function makeAgentNode(
 	};
 }
 
+function makeTeamNode(
+	id: string,
+	templateId: string,
+	templateName: string,
+	opts?: { inputPrompt?: string; outputPrompt?: string; roleCount?: number }
+): PipelineNode {
+	return {
+		id,
+		type: 'team',
+		position: { x: 200, y: 0 },
+		data: {
+			templateId,
+			templateName,
+			roleCount: opts?.roleCount ?? 3,
+			inputPrompt: opts?.inputPrompt,
+			outputPrompt: opts?.outputPrompt,
+		},
+	};
+}
+
 function makeEdge(id: string, source: string, target: string, prompt?: string): PipelineEdge {
 	return {
 		id,
@@ -215,6 +235,62 @@ describe('validatePipelines', () => {
 		});
 		const errors = validatePipelines([pipeline]);
 		expect(errors).toEqual([]);
+	});
+
+	it('errors on team node with empty templateId', () => {
+		const pipeline = makePipeline({
+			nodes: [
+				makeTriggerNode('t1'),
+				makeAgentNode('a1', 'Agent 1', { inputPrompt: 'do stuff' }),
+				makeTeamNode('team1', '', 'My Team'),
+			],
+			edges: [makeEdge('e1', 't1', 'a1')],
+		});
+		const errors = validatePipelines([pipeline]);
+		expect(errors).toContainEqual(
+			expect.stringContaining('team node "My Team" has no template selected')
+		);
+	});
+
+	it('errors on team node with whitespace-only templateId', () => {
+		const pipeline = makePipeline({
+			nodes: [
+				makeTriggerNode('t1'),
+				makeAgentNode('a1', 'Agent 1', { inputPrompt: 'do stuff' }),
+				makeTeamNode('team1', '   ', 'Whitespace Team'),
+			],
+			edges: [makeEdge('e1', 't1', 'a1')],
+		});
+		const errors = validatePipelines([pipeline]);
+		expect(errors).toContainEqual(expect.stringContaining('has no template selected'));
+	});
+
+	it('passes for team node with valid templateId', () => {
+		const pipeline = makePipeline({
+			nodes: [
+				makeTriggerNode('t1'),
+				makeAgentNode('a1', 'Agent 1', { inputPrompt: 'do stuff' }),
+				makeTeamNode('team1', 'template-123', 'Valid Team'),
+			],
+			edges: [makeEdge('e1', 't1', 'a1'), makeEdge('e2', 't1', 'team1')],
+		});
+		const errors = validatePipelines([pipeline]);
+		expect(errors).toEqual([]);
+	});
+
+	it('falls back to node id in error when templateName is empty', () => {
+		const pipeline = makePipeline({
+			nodes: [
+				makeTriggerNode('t1'),
+				makeAgentNode('a1', 'Agent 1', { inputPrompt: 'do stuff' }),
+				makeTeamNode('team1', '', ''),
+			],
+			edges: [makeEdge('e1', 't1', 'a1')],
+		});
+		const errors = validatePipelines([pipeline]);
+		expect(errors).toContainEqual(
+			expect.stringContaining('team node "team1" has no template selected')
+		);
 	});
 
 	it('detects cycles', () => {
@@ -474,6 +550,39 @@ describe('usePipelineState', () => {
 		expect((node.data as any).inputPrompt).toBe('new prompt');
 		// Other fields preserved
 		expect((node.data as any).sessionName).toBe('Agent 1');
+	});
+
+	it('onUpdateNode updates team node data fields', () => {
+		const pipelineId = 'p1';
+		const { result } = renderHook(() =>
+			usePipelineState(createDefaultParams({ selectedNodePipelineId: pipelineId }))
+		);
+
+		act(() => {
+			result.current.setPipelineState({
+				pipelines: [
+					makePipeline({
+						id: pipelineId,
+						nodes: [makeTeamNode('team1', 'tmpl-1', 'Old Name', { inputPrompt: 'old' })],
+					}),
+				],
+				selectedPipelineId: pipelineId,
+			});
+		});
+
+		act(() => {
+			result.current.onUpdateNode('team1', {
+				inputPrompt: 'new team prompt',
+				templateName: 'New Name',
+			});
+		});
+
+		const node = result.current.pipelineState.pipelines[0].nodes[0];
+		expect((node.data as any).inputPrompt).toBe('new team prompt');
+		expect((node.data as any).templateName).toBe('New Name');
+		// Other fields preserved
+		expect((node.data as any).templateId).toBe('tmpl-1');
+		expect((node.data as any).roleCount).toBe(3);
 	});
 
 	it('onUpdateNode is a no-op when selectedNodePipelineId is null', () => {

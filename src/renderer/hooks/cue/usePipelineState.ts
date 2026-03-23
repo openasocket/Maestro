@@ -15,6 +15,7 @@ import type {
 	PipelineEdge as PipelineEdgeType,
 	TriggerNodeData,
 	AgentNodeData,
+	TeamNodeData,
 	CueEventType,
 } from '../../../shared/cue-pipeline-types';
 import { getNextPipelineColor } from '../../components/CuePipelineEditor/pipelineColors';
@@ -102,6 +103,16 @@ export function validatePipelines(pipelines: CuePipeline[]): string[] {
 			}
 		}
 
+		// Check team nodes have a template selected
+		const teams = pipeline.nodes.filter((n) => n.type === 'team');
+		for (const team of teams) {
+			const teamData = team.data as TeamNodeData;
+			if (!teamData.templateId?.trim()) {
+				const name = teamData.templateName || team.id;
+				errors.push(`"${pipeline.name}": team node "${name}" has no template selected`);
+			}
+		}
+
 		// Check for cycles via topological sort
 		const adjList = new Map<string, string[]>();
 		const inDegree = new Map<string, number>();
@@ -172,7 +183,10 @@ export interface UsePipelineStateReturn {
 	renamePipeline: (id: string, name: string) => void;
 	selectPipeline: (id: string | null) => void;
 	changePipelineColor: (id: string, color: string) => void;
-	onUpdateNode: (nodeId: string, data: Partial<TriggerNodeData | AgentNodeData>) => void;
+	onUpdateNode: (
+		nodeId: string,
+		data: Partial<TriggerNodeData | AgentNodeData | TeamNodeData>
+	) => void;
 	onUpdateEdgePrompt: (edgeId: string, prompt: string) => void;
 	onDeleteNode: (nodeId: string) => void;
 	onUpdateEdge: (edgeId: string, updates: Partial<PipelineEdgeType>) => void;
@@ -427,7 +441,7 @@ export function usePipelineState({
 	// ─── Node/edge mutation callbacks ────────────────────────────────────────
 
 	const onUpdateNode = useCallback(
-		(nodeId: string, data: Partial<TriggerNodeData | AgentNodeData>) => {
+		(nodeId: string, data: Partial<TriggerNodeData | AgentNodeData | TeamNodeData>) => {
 			if (!selectedNodePipelineId) return;
 			setPipelineState((prev) => ({
 				...prev,
