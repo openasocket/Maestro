@@ -15,6 +15,7 @@ import {
 	stopCueRun,
 	getCueProcessList,
 } from './cue/cue-executor';
+import { executeCueTeamPrompt, stopCueTeamRun } from './cue/cue-team-executor';
 import { logger } from './utils/logger';
 import { tunnelManager } from './tunnel-manager';
 import { powerManager } from './power-manager';
@@ -469,7 +470,86 @@ app.whenReady().then(async () => {
 			historyManager.addEntry(storedSession.id, projectRoot, historyEntry);
 			return result;
 		},
-		onStopCueRun: (runId) => stopCueRun(runId),
+		onCueTeamRun: async ({
+			runId,
+			sessionId,
+			prompt,
+			subscriptionName,
+			event,
+			timeoutMs,
+			teamTemplateId,
+		}) => {
+			const storedSessions = sessionsStore.get('sessions', []) as Array<Record<string, any>>;
+			const storedSession = storedSessions.find((s) => s.id === sessionId);
+			if (!storedSession) {
+				throw new Error(`Cue target session not found: ${sessionId}`);
+			}
+
+			const projectRoot =
+				storedSession.projectRoot || storedSession.cwd || storedSession.fullPath || os.homedir();
+			const templateContext: TemplateContext = {
+				session: {
+					id: storedSession.id,
+					name: storedSession.name,
+					toolType: storedSession.toolType,
+					cwd: projectRoot,
+					projectRoot,
+					fullPath: storedSession.fullPath,
+					autoRunFolderPath: storedSession.autoRunFolderPath,
+				},
+				conductorProfile: (store.get('conductorProfile', '') as string) || undefined,
+			};
+
+			const result = await executeCueTeamPrompt({
+				runId,
+				session: {
+					id: storedSession.id,
+					name: storedSession.name,
+					toolType: storedSession.toolType,
+					cwd: projectRoot,
+					projectRoot,
+					autoRunFolderPath: storedSession.autoRunFolderPath,
+				},
+				subscription: {
+					name: subscriptionName,
+					event: event.type,
+					enabled: true,
+					prompt,
+					team_template: teamTemplateId,
+				},
+				event,
+				promptPath: prompt,
+				teamTemplateId,
+				projectRoot,
+				templateContext,
+				timeoutMs,
+				processManager: processManager!,
+				agentDetector: agentDetector!,
+				onLog: (level, message) => {
+					if (level === 'error') {
+						logger.error(message, 'Cue');
+					} else if (level === 'warn') {
+						logger.warn(message, 'Cue');
+					} else if (level === 'debug') {
+						logger.debug(message, 'Cue');
+					} else {
+						logger.cue(message, 'Cue');
+					}
+				},
+			});
+
+			const historyEntry = recordCueHistoryEntry(result, {
+				id: storedSession.id,
+				name: storedSession.name,
+				toolType: storedSession.toolType,
+				cwd: projectRoot,
+				projectRoot,
+				autoRunFolderPath: storedSession.autoRunFolderPath,
+			});
+			historyManager.addEntry(storedSession.id, projectRoot, historyEntry);
+			return result;
+		},
+		onStopCueRun: (runId) => stopCueRun(runId) || stopCueTeamRun(runId),
 		onLog: (_level, message, data) => {
 			logger.cue(message, 'Cue', data);
 			// Push activity updates to renderer

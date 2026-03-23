@@ -61,6 +61,16 @@ export interface CueEngineDeps {
 		event: CueEvent;
 		timeoutMs: number;
 	}) => Promise<CueRunResult>;
+	/** Execute a team-based Cue run (headless group chat via team template) */
+	onCueTeamRun?: (request: {
+		runId: string;
+		sessionId: string;
+		prompt: string;
+		subscriptionName: string;
+		event: CueEvent;
+		timeoutMs: number;
+		teamTemplateId: string;
+	}) => Promise<CueRunResult>;
 	onStopCueRun?: (runId: string) => boolean;
 	onLog: (level: MainLogLevel, message: string, data?: unknown) => void;
 	/** Called to prevent system sleep (e.g., when Cue has active scheduled subscriptions or runs) */
@@ -97,6 +107,7 @@ export class CueEngine {
 			getSessions: deps.getSessions,
 			getSessionSettings: (sessionId) => this.sessions.get(sessionId)?.config.settings,
 			onCueRun: deps.onCueRun,
+			onCueTeamRun: deps.onCueTeamRun,
 			onStopCueRun: deps.onStopCueRun,
 			onLog: deps.onLog,
 			onRunCompleted: (sessionId, result, subscriptionName, chainDepth) => {
@@ -587,7 +598,8 @@ export class CueEngine {
 					fanOutEvent,
 					sub.name,
 					sub.output_prompt,
-					chainDepth
+					chainDepth,
+					sub.team_template
 				);
 			}
 		} else {
@@ -597,7 +609,8 @@ export class CueEngine {
 				event,
 				sub.name,
 				sub.output_prompt,
-				chainDepth
+				chainDepth,
+				sub.team_template
 			);
 		}
 	}

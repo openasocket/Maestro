@@ -31,6 +31,8 @@ export interface QueuedEvent {
 	subscriptionName: string;
 	queuedAt: number;
 	chainDepth?: number;
+	/** When set, this queued event is a team run and should use onCueTeamRun */
+	teamTemplateId?: string;
 }
 
 export interface CueRunManagerDeps {
@@ -45,6 +47,16 @@ export interface CueRunManagerDeps {
 		timeoutMs: number;
 	}) => Promise<CueRunResult>;
 	onStopCueRun?: (runId: string) => boolean;
+	/** Execute a team-based Cue run (headless group chat via team template) */
+	onCueTeamRun?: (request: {
+		runId: string;
+		sessionId: string;
+		prompt: string;
+		subscriptionName: string;
+		event: CueEvent;
+		timeoutMs: number;
+		teamTemplateId: string;
+	}) => Promise<CueRunResult>;
 	onLog: (level: MainLogLevel, message: string, data?: unknown) => void;
 	/** Called when a run finishes naturally (completed/failed/timeout) — pushes to activity log AND triggers chain propagation */
 	onRunCompleted: (
@@ -68,7 +80,8 @@ export interface CueRunManager {
 		event: CueEvent,
 		subscriptionName: string,
 		outputPrompt?: string,
-		chainDepth?: number
+		chainDepth?: number,
+		teamTemplateId?: string
 	): void;
 	stopRun(runId: string): boolean;
 	stopAll(): void;
@@ -124,7 +137,8 @@ export function createCueRunManager(deps: CueRunManagerDeps): CueRunManager {
 				entry.event,
 				entry.subscriptionName,
 				entry.outputPrompt,
-				entry.chainDepth
+				entry.chainDepth,
+				entry.teamTemplateId
 			);
 		}
 
@@ -140,7 +154,8 @@ export function createCueRunManager(deps: CueRunManagerDeps): CueRunManager {
 		event: CueEvent,
 		subscriptionName: string,
 		outputPrompt?: string,
-		chainDepth?: number
+		chainDepth?: number,
+		teamTemplateId?: string
 	): Promise<void> {
 		const sessionName = getSessionName(sessionId);
 		const settings = deps.getSessionSettings(sessionId);
@@ -186,14 +201,26 @@ export function createCueRunManager(deps: CueRunManagerDeps): CueRunManager {
 		});
 
 		try {
-			const runResult = await deps.onCueRun({
-				runId,
-				sessionId,
-				prompt,
-				subscriptionName,
-				event,
-				timeoutMs,
-			});
+			// Branch: team runs use onCueTeamRun, single-agent runs use onCueRun
+			const runResult =
+				teamTemplateId && deps.onCueTeamRun
+					? await deps.onCueTeamRun({
+							runId,
+							sessionId,
+							prompt,
+							subscriptionName,
+							event,
+							timeoutMs,
+							teamTemplateId,
+						})
+					: await deps.onCueRun({
+							runId,
+							sessionId,
+							prompt,
+							subscriptionName,
+							event,
+							timeoutMs,
+						});
 			if (manuallyStoppedRuns.has(runId)) {
 				return;
 			}
@@ -322,7 +349,8 @@ export function createCueRunManager(deps: CueRunManagerDeps): CueRunManager {
 			event: CueEvent,
 			subscriptionName: string,
 			outputPrompt?: string,
-			chainDepth?: number
+			chainDepth?: number,
+			teamTemplateId?: string
 		): void {
 			const settings = deps.getSessionSettings(sessionId);
 			const maxConcurrent = settings?.max_concurrent ?? 1;
@@ -351,6 +379,7 @@ export function createCueRunManager(deps: CueRunManagerDeps): CueRunManager {
 					subscriptionName,
 					queuedAt: Date.now(),
 					chainDepth,
+					teamTemplateId,
 				});
 
 				deps.onLog(
@@ -362,7 +391,15 @@ export function createCueRunManager(deps: CueRunManagerDeps): CueRunManager {
 
 			// Slot available — dispatch immediately
 			activeRunCount.set(sessionId, currentCount + 1);
-			doExecuteCueRun(sessionId, prompt, event, subscriptionName, outputPrompt, chainDepth);
+			doExecuteCueRun(
+				sessionId,
+				prompt,
+				event,
+				subscriptionName,
+				outputPrompt,
+				chainDepth,
+				teamTemplateId
+			);
 		},
 
 		stopRun(runId: string): boolean {
