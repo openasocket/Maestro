@@ -15,6 +15,7 @@ import type {
 	CuePipeline,
 	TriggerNodeData,
 	AgentNodeData,
+	TeamNodeData,
 } from '../../../../../shared/cue-pipeline-types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -50,6 +51,26 @@ function makeAgent(
 			toolType: 'claude-code',
 			...overrides,
 		} satisfies AgentNodeData,
+	};
+}
+
+function makeTeam(
+	id: string,
+	templateId: string,
+	templateName: string,
+	overrides: Partial<TeamNodeData> = {},
+	position = { x: 400, y: 0 }
+) {
+	return {
+		id,
+		type: 'team' as const,
+		position,
+		data: {
+			templateId,
+			templateName,
+			roleCount: 3,
+			...overrides,
+		} satisfies TeamNodeData,
 	};
 }
 
@@ -510,6 +531,147 @@ describe('convertToReactFlowNodes', () => {
 		for (const node of nodes) {
 			expect(node.dragHandle).toBe('.drag-handle');
 		}
+	});
+});
+
+// ─── Team node tests ──────────────────────────────────────────────────────────
+
+describe('convertToReactFlowNodes – team nodes', () => {
+	it('renders team node with correct composite id and type', () => {
+		const pipeline = makePipeline('p1', {
+			nodes: [makeTeam('tm1', 'tpl-1', 'Review Squad')],
+		});
+		const nodes = convertToReactFlowNodes([pipeline], 'p1');
+		expect(nodes).toHaveLength(1);
+		expect(nodes[0].id).toBe('p1:tm1');
+		expect(nodes[0].type).toBe('team');
+	});
+
+	it('populates team node data with template fields', () => {
+		const pipeline = makePipeline('p1', {
+			color: '#8b5cf6',
+			nodes: [
+				makeTeam('tm1', 'tpl-1', 'Review Squad', {
+					roleCount: 4,
+					topologyPattern: 'hub-spoke',
+				}),
+			],
+		});
+		const nodes = convertToReactFlowNodes([pipeline], 'p1');
+		const data = nodes[0].data as any;
+		expect(data.templateId).toBe('tpl-1');
+		expect(data.templateName).toBe('Review Squad');
+		expect(data.roleCount).toBe(4);
+		expect(data.topologyPattern).toBe('hub-spoke');
+		expect(data.pipelineColor).toBe('#8b5cf6');
+	});
+
+	it('hasPrompt is true when team has inputPrompt', () => {
+		const pipeline = makePipeline('p1', {
+			nodes: [makeTeam('tm1', 'tpl-1', 'Squad', { inputPrompt: 'Start review' })],
+		});
+		const nodes = convertToReactFlowNodes([pipeline], 'p1');
+		expect((nodes[0].data as any).hasPrompt).toBe(true);
+	});
+
+	it('hasPrompt is true when team has outputPrompt', () => {
+		const pipeline = makePipeline('p1', {
+			nodes: [makeTeam('tm1', 'tpl-1', 'Squad', { outputPrompt: 'Summarise' })],
+		});
+		const nodes = convertToReactFlowNodes([pipeline], 'p1');
+		expect((nodes[0].data as any).hasPrompt).toBe(true);
+	});
+
+	it('hasPrompt is true when an incoming edge has a prompt', () => {
+		const trigger = makeTrigger('t1', 'time.heartbeat');
+		const team = makeTeam('tm1', 'tpl-1', 'Squad');
+		const pipeline = makePipeline('p1', {
+			nodes: [trigger, team],
+			edges: [{ ...makeEdge('e1', 't1', 'tm1'), prompt: 'edge prompt' }],
+		});
+		const nodes = convertToReactFlowNodes([pipeline], 'p1');
+		const teamNode = nodes.find((n) => n.id === 'p1:tm1')!;
+		expect((teamNode.data as any).hasPrompt).toBe(true);
+	});
+
+	it('hasPrompt is false when no prompt anywhere', () => {
+		const pipeline = makePipeline('p1', {
+			nodes: [makeTeam('tm1', 'tpl-1', 'Squad')],
+		});
+		const nodes = convertToReactFlowNodes([pipeline], 'p1');
+		expect((nodes[0].data as any).hasPrompt).toBe(false);
+	});
+
+	it('hasOutgoingEdge is true when team has an outgoing edge', () => {
+		const team = makeTeam('tm1', 'tpl-1', 'Squad');
+		const agent = makeAgent('a1', 'sess-1', 'Alice', {}, { x: 600, y: 0 });
+		const pipeline = makePipeline('p1', {
+			nodes: [team, agent],
+			edges: [makeEdge('e1', 'tm1', 'a1')],
+		});
+		const nodes = convertToReactFlowNodes([pipeline], 'p1');
+		const tmNode = nodes.find((n) => n.id === 'p1:tm1')!;
+		expect((tmNode.data as any).hasOutgoingEdge).toBe(true);
+	});
+
+	it('team in single pipeline has pipelineCount=1 and single color', () => {
+		const pipeline = makePipeline('p1', {
+			color: '#06b6d4',
+			nodes: [makeTeam('tm1', 'tpl-1', 'Squad')],
+		});
+		const nodes = convertToReactFlowNodes([pipeline], 'p1');
+		const data = nodes[0].data as any;
+		expect(data.pipelineCount).toBe(1);
+		expect(data.pipelineColors).toEqual(['#06b6d4']);
+	});
+
+	it('shared team template carries multi-pipeline color metadata', () => {
+		const p1 = makePipeline('p1', {
+			color: '#06b6d4',
+			nodes: [makeTeam('tm1', 'tpl-shared', 'Squad')],
+		});
+		const p2 = makePipeline('p2', {
+			color: '#8b5cf6',
+			nodes: [makeTeam('tm2', 'tpl-shared', 'Squad')],
+		});
+		const nodes = convertToReactFlowNodes([p1, p2], 'p2');
+		const teamNode = nodes.find((n) => n.id === 'p2:tm2')!;
+		const data = teamNode.data as any;
+		expect(data.pipelineCount).toBe(2);
+		expect(data.pipelineColors).toContain('#06b6d4');
+		expect(data.pipelineColors).toContain('#8b5cf6');
+	});
+
+	it('team node has dragHandle set', () => {
+		const pipeline = makePipeline('p1', {
+			nodes: [makeTeam('tm1', 'tpl-1', 'Squad')],
+		});
+		const nodes = convertToReactFlowNodes([pipeline], 'p1');
+		expect(nodes[0].dragHandle).toBe('.drag-handle');
+	});
+
+	it('passes onConfigureNode to team node data', () => {
+		const callback = vi.fn();
+		const pipeline = makePipeline('p1', {
+			nodes: [makeTeam('tm1', 'tpl-1', 'Squad')],
+		});
+		const nodes = convertToReactFlowNodes([pipeline], 'p1', callback);
+		expect((nodes[0].data as any).onConfigure).toBe(callback);
+	});
+
+	it('mixed pipeline with trigger, agent, and team renders all three', () => {
+		const pipeline = makePipeline('p1', {
+			nodes: [
+				makeTrigger('t1', 'time.heartbeat'),
+				makeAgent('a1', 'sess-1', 'Alice'),
+				makeTeam('tm1', 'tpl-1', 'Squad'),
+			],
+		});
+		const nodes = convertToReactFlowNodes([pipeline], 'p1');
+		expect(nodes).toHaveLength(3);
+		expect(nodes.map((n) => n.type)).toContain('trigger');
+		expect(nodes.map((n) => n.type)).toContain('agent');
+		expect(nodes.map((n) => n.type)).toContain('team');
 	});
 });
 

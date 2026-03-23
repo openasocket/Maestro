@@ -10,9 +10,11 @@ import type {
 	CuePipelineState,
 	TriggerNodeData,
 	AgentNodeData,
+	TeamNodeData,
 } from '../../../../shared/cue-pipeline-types';
 import type { TriggerNodeDataProps } from '../nodes/TriggerNode';
 import type { AgentNodeDataProps } from '../nodes/AgentNode';
+import type { TeamNodeDataProps } from '../nodes/TeamNode';
 import type { PipelineEdgeData } from '../edges/PipelineEdge';
 
 // ─── Trigger config summary ──────────────────────────────────────────────────
@@ -122,6 +124,35 @@ export function convertToReactFlowNodes(
 		}
 	}
 
+	// First pass for team nodes: compute pipeline colors per template
+	const teamPipelineMap = new Map<string, string[]>();
+	for (const pipeline of pipelines) {
+		for (const pNode of pipeline.nodes) {
+			if (pNode.type === 'team') {
+				const teamData = pNode.data as TeamNodeData;
+				const existing = teamPipelineMap.get(teamData.templateId) ?? [];
+				if (!existing.includes(pipeline.color)) {
+					existing.push(pipeline.color);
+				}
+				teamPipelineMap.set(teamData.templateId, existing);
+			}
+		}
+	}
+
+	// Count how many pipelines each team template appears in
+	const teamPipelineCount = new Map<string, number>();
+	for (const pipeline of pipelines) {
+		for (const pNode of pipeline.nodes) {
+			if (pNode.type === 'team') {
+				const teamData = pNode.data as TeamNodeData;
+				teamPipelineCount.set(
+					teamData.templateId,
+					(teamPipelineCount.get(teamData.templateId) ?? 0) + 1
+				);
+			}
+		}
+	}
+
 	for (const pipeline of pipelines) {
 		const isActive = selectedPipelineId === null || pipeline.id === selectedPipelineId;
 
@@ -152,6 +183,31 @@ export function convertToReactFlowNodes(
 				nodes.push({
 					id: compositeId,
 					type: 'trigger',
+					position: { x: pNode.position.x, y: pNode.position.y + yOffset },
+					data: nodeData,
+					dragHandle: '.drag-handle',
+				});
+			} else if (pNode.type === 'team') {
+				const teamData = pNode.data as TeamNodeData;
+				const pipelineColors = teamPipelineMap.get(teamData.templateId) ?? [pipeline.color];
+				const hasOutgoingEdge = pipeline.edges.some((e) => e.source === pNode.id);
+				const hasEdgePrompt = pipeline.edges.some((e) => e.target === pNode.id && !!e.prompt);
+				const nodeData: TeamNodeDataProps = {
+					compositeId,
+					templateId: teamData.templateId,
+					templateName: teamData.templateName,
+					roleCount: teamData.roleCount,
+					topologyPattern: teamData.topologyPattern,
+					hasPrompt: !!(teamData.inputPrompt || teamData.outputPrompt || hasEdgePrompt),
+					hasOutgoingEdge,
+					pipelineColor: pipeline.color,
+					pipelineCount: teamPipelineCount.get(teamData.templateId) ?? 1,
+					pipelineColors,
+					onConfigure: onConfigureNode,
+				};
+				nodes.push({
+					id: compositeId,
+					type: 'team',
 					position: { x: pNode.position.x, y: pNode.position.y + yOffset },
 					data: nodeData,
 					dragHandle: '.drag-handle',
