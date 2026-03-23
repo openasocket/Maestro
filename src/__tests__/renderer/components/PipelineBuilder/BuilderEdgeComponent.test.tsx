@@ -58,7 +58,8 @@ function renderEdge(
 	sourceNode: BuilderNode,
 	targetNode: BuilderNode,
 	selected = false,
-	dispatch = vi.fn()
+	dispatch = vi.fn(),
+	isBackEdge = false
 ) {
 	const theme = createMockTheme();
 	return render(
@@ -69,6 +70,7 @@ function renderEdge(
 				targetNode={targetNode}
 				theme={theme}
 				selected={selected}
+				isBackEdge={isBackEdge}
 				dispatch={dispatch}
 			/>
 		</svg>
@@ -255,5 +257,44 @@ describe('BuilderEdgeComponent', () => {
 			const visiblePath = paths[1];
 			expect(visiblePath.getAttribute('marker-end')).toBe(`url(#builder-arrow-${edgeType})`);
 		}
+	});
+
+	it('renders "loop" label when isBackEdge is true', () => {
+		const source = makeNode('a', 0, 0);
+		const target = makeNode('b', 300, 0);
+		const edge = makeEdge('e1', 'a', 'b', 'conditional');
+
+		const { container } = renderEdge(edge, source, target, false, vi.fn(), true);
+
+		const texts = container.querySelectorAll('text');
+		const loopLabel = Array.from(texts).find((t) => t.textContent === 'loop');
+		expect(loopLabel).toBeTruthy();
+	});
+
+	it('does not render "loop" label when isBackEdge is false', () => {
+		const source = makeNode('a', 0, 0);
+		const target = makeNode('b', 300, 0);
+		const edge = makeEdge('e1', 'a', 'b', 'sequential');
+
+		const { container } = renderEdge(edge, source, target, false, vi.fn(), false);
+
+		const texts = container.querySelectorAll('text');
+		const loopLabel = Array.from(texts).find((t) => t.textContent === 'loop');
+		expect(loopLabel).toBeFalsy();
+	});
+
+	it('renders loop-back path with distinct curve for back-edges', () => {
+		const source = makeNode('a', 300, 0);
+		const target = makeNode('b', 0, 0);
+		const edge = makeEdge('e1', 'a', 'b', 'sequential');
+
+		const { container: normalContainer } = renderEdge(edge, source, target, false, vi.fn(), false);
+		const { container: backContainer } = renderEdge(edge, source, target, false, vi.fn(), true);
+
+		const normalPath = normalContainer.querySelectorAll('path')[1];
+		const backPath = backContainer.querySelectorAll('path')[1];
+
+		// Back-edge path should differ from the normal path
+		expect(normalPath.getAttribute('d')).not.toBe(backPath.getAttribute('d'));
 	});
 });

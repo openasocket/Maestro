@@ -12,7 +12,7 @@
  * - Edge rendering between connected nodes
  */
 
-import { useCallback, useRef, useState, useEffect } from 'react';
+import { useCallback, useRef, useState, useEffect, useMemo } from 'react';
 import type { Theme } from '../../../types';
 import type { BuilderState, BuilderAction, BuilderNode } from './builderTypes';
 import { GRID_SIZE, NODE_WIDTH, NODE_HEIGHT, PORT_RADIUS } from './builderTypes';
@@ -279,6 +279,95 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 		[state.edges, dispatch]
 	);
 
+	// Compute validation info for visual highlighting
+	const validationInfo = useMemo(() => {
+		const connectedNodes = new Set<string>();
+		const inDegree = new Map<string, number>();
+
+		for (const edge of state.edges) {
+			connectedNodes.add(edge.sourceNodeId);
+			connectedNodes.add(edge.targetNodeId);
+			inDegree.set(edge.targetNodeId, (inDegree.get(edge.targetNodeId) ?? 0) + 1);
+		}
+
+		// Orphaned nodes: have no edges at all (only relevant when there are other connected nodes)
+		const orphanedNodes = new Set<string>();
+		if (state.nodes.length > 1 && state.edges.length > 0) {
+			for (const node of state.nodes) {
+				if (!connectedNodes.has(node.id)) {
+					orphanedNodes.add(node.id);
+				}
+			}
+		}
+
+		// Entry point warnings
+		const explicitEntryNodes = state.nodes.filter((n) => n.type === 'entry');
+		const warningNodes = new Set<string>();
+
+		// Multiple entry points
+		if (explicitEntryNodes.length > 1) {
+			for (const n of explicitEntryNodes) warningNodes.add(n.id);
+		}
+
+		// No explicit entry but there are connected nodes — warn implicit entry points
+		if (explicitEntryNodes.length === 0 && state.edges.length > 0) {
+			for (const node of state.nodes) {
+				if (!orphanedNodes.has(node.id) && (inDegree.get(node.id) ?? 0) === 0) {
+					warningNodes.add(node.id);
+				}
+			}
+		}
+
+		// Back-edges via topological ordering (Kahn's algorithm)
+		const topoOrder = new Map<string, number>();
+		const adjList = new Map<string, string[]>();
+		const inDeg = new Map<string, number>();
+
+		for (const n of state.nodes) {
+			adjList.set(n.id, []);
+			inDeg.set(n.id, 0);
+		}
+		for (const e of state.edges) {
+			adjList.get(e.sourceNodeId)?.push(e.targetNodeId);
+			inDeg.set(e.targetNodeId, (inDeg.get(e.targetNodeId) ?? 0) + 1);
+		}
+
+		let order = 0;
+		const entryIds = state.nodes.filter((n) => n.type === 'entry').map((n) => n.id);
+		const zeroInDeg = state.nodes
+			.filter((n) => (inDeg.get(n.id) ?? 0) === 0 && !entryIds.includes(n.id))
+			.map((n) => n.id);
+		let queue = [...entryIds, ...zeroInDeg];
+		const visited = new Set<string>();
+
+		while (queue.length > 0) {
+			const nextQueue: string[] = [];
+			for (const id of queue) {
+				if (visited.has(id)) continue;
+				visited.add(id);
+				topoOrder.set(id, order++);
+				for (const next of adjList.get(id) ?? []) {
+					const deg = (inDeg.get(next) ?? 1) - 1;
+					inDeg.set(next, deg);
+					if (deg <= 0 && !visited.has(next)) nextQueue.push(next);
+				}
+			}
+			queue = nextQueue;
+		}
+		for (const n of state.nodes) {
+			if (!visited.has(n.id)) topoOrder.set(n.id, order++);
+		}
+
+		const backEdges = new Set<string>();
+		for (const edge of state.edges) {
+			const si = topoOrder.get(edge.sourceNodeId) ?? 0;
+			const ti = topoOrder.get(edge.targetNodeId) ?? 0;
+			if (ti < si) backEdges.add(edge.id);
+		}
+
+		return { orphanedNodes, warningNodes, backEdges };
+	}, [state.nodes, state.edges]);
+
 	// Build a lookup for nodes by ID
 	const nodeById = new Map<string, BuilderNode>();
 	for (const n of state.nodes) {
@@ -337,6 +426,7 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 							targetNode={target}
 							theme={theme}
 							selected={edge.id === state.selectedEdgeId}
+							isBackEdge={validationInfo.backEdges.has(edge.id)}
 							dispatch={dispatch}
 						/>
 					);
@@ -391,6 +481,8 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 						roleName={state.roles[node.roleId]?.name ?? node.roleId}
 						theme={theme}
 						selected={node.id === state.selectedNodeId}
+						isOrphaned={validationInfo.orphanedNodes.has(node.id)}
+						hasWarning={validationInfo.warningNodes.has(node.id)}
 						dispatch={dispatch}
 						viewportZoom={vp.zoom}
 						onOutputPortMouseDown={handleOutputPortMouseDown}

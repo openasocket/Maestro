@@ -21,6 +21,7 @@ interface BuilderEdgeComponentProps {
 	targetNode: BuilderNode;
 	theme: Theme;
 	selected: boolean;
+	isBackEdge?: boolean;
 	dispatch: React.Dispatch<BuilderAction>;
 }
 
@@ -43,24 +44,33 @@ function getEdgeColor(edgeType: BuilderEdge['edgeType'], theme: Theme): string {
 }
 
 /** Compute the SVG path and midpoint for an edge between two nodes */
-function computeEdgePath(sourceNode: BuilderNode, targetNode: BuilderNode) {
+function computeEdgePath(sourceNode: BuilderNode, targetNode: BuilderNode, isBackEdge?: boolean) {
 	const sx = sourceNode.x + NODE_WIDTH;
 	const sy = sourceNode.y + NODE_HEIGHT / 2;
 	const tx = targetNode.x;
 	const ty = targetNode.y + NODE_HEIGHT / 2;
 
-	// Control points offset horizontally from ports
-	const c1x = sx + CONTROL_POINT_OFFSET;
-	const c1y = sy;
-	const c2x = tx - CONTROL_POINT_OFFSET;
-	const c2y = ty;
+	let d: string;
+	let midX: number;
+	let midY: number;
 
-	const d = `M ${sx} ${sy} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${tx} ${ty}`;
-
-	// Midpoint of cubic bezier at t=0.5:
-	// B(0.5) = 0.125*P0 + 0.375*P1 + 0.375*P2 + 0.125*P3
-	const midX = 0.125 * sx + 0.375 * c1x + 0.375 * c2x + 0.125 * tx;
-	const midY = 0.125 * sy + 0.375 * c1y + 0.375 * c2y + 0.125 * ty;
+	if (isBackEdge) {
+		// Loop-back curve: route below both nodes then back up to target
+		const loopOffset = 80;
+		const bottomY = Math.max(sy, ty) + loopOffset;
+		d = `M ${sx} ${sy} C ${sx + CONTROL_POINT_OFFSET} ${sy}, ${sx + CONTROL_POINT_OFFSET} ${bottomY}, ${(sx + tx) / 2} ${bottomY} C ${tx - CONTROL_POINT_OFFSET} ${bottomY}, ${tx - CONTROL_POINT_OFFSET} ${ty}, ${tx} ${ty}`;
+		midX = (sx + tx) / 2;
+		midY = bottomY;
+	} else {
+		// Normal forward curve
+		const c1x = sx + CONTROL_POINT_OFFSET;
+		const c1y = sy;
+		const c2x = tx - CONTROL_POINT_OFFSET;
+		const c2y = ty;
+		d = `M ${sx} ${sy} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${tx} ${ty}`;
+		midX = 0.125 * sx + 0.375 * c1x + 0.375 * c2x + 0.125 * tx;
+		midY = 0.125 * sy + 0.375 * c1y + 0.375 * c2y + 0.125 * ty;
+	}
 
 	return { d, sx, sy, tx, ty, midX, midY };
 }
@@ -71,13 +81,14 @@ export function BuilderEdgeComponent({
 	targetNode,
 	theme,
 	selected,
+	isBackEdge,
 	dispatch,
 }: BuilderEdgeComponentProps): JSX.Element {
 	const [hovered, setHovered] = useState(false);
 
 	const { d, midX, midY } = useMemo(
-		() => computeEdgePath(sourceNode, targetNode),
-		[sourceNode, targetNode]
+		() => computeEdgePath(sourceNode, targetNode, isBackEdge),
+		[sourceNode, targetNode, isBackEdge]
 	);
 
 	const color = getEdgeColor(edge.edgeType, theme);
@@ -198,6 +209,34 @@ export function BuilderEdgeComponent({
 				>
 					{edge.condition}
 				</text>
+			)}
+
+			{/* Back-edge loop label */}
+			{isBackEdge && (
+				<g style={{ pointerEvents: 'none' }}>
+					<rect
+						x={midX - 18}
+						y={midY - 8}
+						width={36}
+						height={16}
+						rx={4}
+						fill={theme.colors.bgMain}
+						stroke={theme.colors.warning}
+						strokeWidth={1}
+					/>
+					<text
+						x={midX}
+						y={midY + 1}
+						textAnchor="middle"
+						dominantBaseline="central"
+						fill={theme.colors.warning}
+						fontSize={9}
+						fontWeight={600}
+						fontFamily="monospace"
+					>
+						loop
+					</text>
+				</g>
 			)}
 
 			{/* Delete button on hover */}

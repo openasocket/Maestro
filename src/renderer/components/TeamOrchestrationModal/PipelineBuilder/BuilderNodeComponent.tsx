@@ -19,6 +19,8 @@ interface BuilderNodeComponentProps {
 	roleName: string;
 	theme: Theme;
 	selected: boolean;
+	isOrphaned?: boolean;
+	hasWarning?: boolean;
 	dispatch: React.Dispatch<BuilderAction>;
 	viewportZoom: number;
 	onOutputPortMouseDown?: (nodeId: string) => void;
@@ -42,6 +44,8 @@ export function BuilderNodeComponent({
 	roleName,
 	theme,
 	selected,
+	isOrphaned,
+	hasWarning,
 	dispatch,
 	viewportZoom,
 	onOutputPortMouseDown,
@@ -55,7 +59,7 @@ export function BuilderNodeComponent({
 	} | null>(null);
 	const [hoveredPort, setHoveredPort] = useState<'input' | 'output' | null>(null);
 
-	const color = getNodeColor(node.type, theme);
+	const color = isOrphaned ? theme.colors.error : getNodeColor(node.type, theme);
 	const borderWidth = selected ? 3 : 1.5;
 
 	const handleMouseDown = useCallback(
@@ -130,6 +134,7 @@ export function BuilderNodeComponent({
 				fill={`${color}15`}
 				stroke={color}
 				strokeWidth={borderWidth}
+				strokeDasharray={isOrphaned ? '6 3' : undefined}
 			/>
 
 			{/* Type label (entry/exit) */}
@@ -190,6 +195,27 @@ export function BuilderNodeComponent({
 				onMouseEnter={() => setHoveredPort('output')}
 				onMouseLeave={() => setHoveredPort(null)}
 			/>
+
+			{/* Warning icon for entry point issues */}
+			{hasWarning && (
+				<g style={{ pointerEvents: 'none' }}>
+					<polygon
+						points={`${node.x + NODE_WIDTH - 8},${node.y - 2} ${node.x + NODE_WIDTH + 2},${node.y - 2} ${node.x + NODE_WIDTH - 3},${node.y - 12}`}
+						fill={theme.colors.warning}
+					/>
+					<text
+						x={node.x + NODE_WIDTH - 3}
+						y={node.y - 3}
+						textAnchor="middle"
+						dominantBaseline="auto"
+						fill={theme.colors.bgMain}
+						fontSize={8}
+						fontWeight={700}
+					>
+						!
+					</text>
+				</g>
+			)}
 		</g>
 	);
 }
