@@ -9,7 +9,7 @@
  * - Draggable with snap-to-grid
  */
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { Theme } from '../../../types';
 import type { BuilderNode, BuilderAction } from './builderTypes';
 import { NODE_WIDTH, NODE_HEIGHT, PORT_RADIUS, snapToGrid } from './builderTypes';
@@ -21,6 +21,8 @@ interface BuilderNodeComponentProps {
 	selected: boolean;
 	dispatch: React.Dispatch<BuilderAction>;
 	viewportZoom: number;
+	onOutputPortMouseDown?: (nodeId: string) => void;
+	onInputPortMouseUp?: (nodeId: string) => void;
 }
 
 function getNodeColor(type: BuilderNode['type'], theme: Theme): string {
@@ -42,6 +44,8 @@ export function BuilderNodeComponent({
 	selected,
 	dispatch,
 	viewportZoom,
+	onOutputPortMouseDown,
+	onInputPortMouseUp,
 }: BuilderNodeComponentProps): JSX.Element {
 	const dragRef = useRef<{
 		startX: number;
@@ -49,6 +53,7 @@ export function BuilderNodeComponent({
 		nodeStartX: number;
 		nodeStartY: number;
 	} | null>(null);
+	const [hoveredPort, setHoveredPort] = useState<'input' | 'output' | null>(null);
 
 	const color = getNodeColor(node.type, theme);
 	const borderWidth = selected ? 3 : 1.5;
@@ -159,20 +164,31 @@ export function BuilderNodeComponent({
 			<circle
 				cx={inputPortX}
 				cy={inputPortY}
-				r={PORT_RADIUS}
-				fill={theme.colors.bgMain}
+				r={hoveredPort === 'input' ? PORT_RADIUS + 2 : PORT_RADIUS}
+				fill={hoveredPort === 'input' ? color : theme.colors.bgMain}
 				stroke={color}
 				strokeWidth={1.5}
+				style={{ cursor: 'crosshair' }}
+				onMouseUp={() => onInputPortMouseUp?.(node.id)}
+				onMouseEnter={() => setHoveredPort('input')}
+				onMouseLeave={() => setHoveredPort(null)}
 			/>
 
 			{/* Output port (right center) */}
 			<circle
 				cx={outputPortX}
 				cy={outputPortY}
-				r={PORT_RADIUS}
-				fill={theme.colors.bgMain}
+				r={hoveredPort === 'output' ? PORT_RADIUS + 2 : PORT_RADIUS}
+				fill={hoveredPort === 'output' ? color : theme.colors.bgMain}
 				stroke={color}
 				strokeWidth={1.5}
+				style={{ cursor: 'crosshair' }}
+				onMouseDown={(e) => {
+					e.stopPropagation();
+					onOutputPortMouseDown?.(node.id);
+				}}
+				onMouseEnter={() => setHoveredPort('output')}
+				onMouseLeave={() => setHoveredPort(null)}
 			/>
 		</g>
 	);

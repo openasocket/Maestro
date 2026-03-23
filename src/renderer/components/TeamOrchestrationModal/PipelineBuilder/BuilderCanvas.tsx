@@ -56,6 +56,17 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 	const [spaceHeld, setSpaceHeld] = useState(false);
 	const panRef = useRef<{ startX: number; startY: number; vpX: number; vpY: number } | null>(null);
 
+	// Edge drawing interaction state
+	const [drawingEdge, setDrawingEdge] = useState<{
+		sourceNodeId: string;
+		mouseX: number;
+		mouseY: number;
+	} | null>(null);
+	const viewportRef = useRef(state.viewport);
+	viewportRef.current = state.viewport;
+	const drawingEdgeRef = useRef(drawingEdge);
+	drawingEdgeRef.current = drawingEdge;
+
 	// Track space key for pan mode
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
@@ -199,6 +210,74 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 		e.dataTransfer.dropEffect = 'copy';
 	}, []);
 
+	// Edge drawing: start from output port
+	const handleOutputPortMouseDown = useCallback(
+		(nodeId: string) => {
+			const sourceNode = state.nodes.find((n) => n.id === nodeId);
+			if (!sourceNode) return;
+
+			const outputX = sourceNode.x + NODE_WIDTH;
+			const outputY = sourceNode.y + NODE_HEIGHT / 2;
+			setDrawingEdge({ sourceNodeId: nodeId, mouseX: outputX, mouseY: outputY });
+
+			const handleMouseMove = (me: MouseEvent) => {
+				if (!svgRef.current) return;
+				const rect = svgRef.current.getBoundingClientRect();
+				const { x, y } = clientToCanvas(me.clientX, me.clientY, rect, viewportRef.current);
+				setDrawingEdge((prev) => (prev ? { ...prev, mouseX: x, mouseY: y } : null));
+			};
+
+			const handleMouseUp = () => {
+				setDrawingEdge(null);
+				window.removeEventListener('mousemove', handleMouseMove);
+				window.removeEventListener('mouseup', handleMouseUp);
+			};
+
+			window.addEventListener('mousemove', handleMouseMove);
+			window.addEventListener('mouseup', handleMouseUp);
+		},
+		[state.nodes]
+	);
+
+	// Edge drawing: complete on input port
+	const handleInputPortMouseUp = useCallback(
+		(targetNodeId: string) => {
+			const de = drawingEdgeRef.current;
+			if (!de) return;
+
+			const { sourceNodeId } = de;
+
+			// Prevent self-connections
+			if (sourceNodeId === targetNodeId) {
+				setDrawingEdge(null);
+				return;
+			}
+
+			// Prevent duplicate edges
+			const exists = state.edges.some(
+				(e) => e.sourceNodeId === sourceNodeId && e.targetNodeId === targetNodeId
+			);
+			if (exists) {
+				setDrawingEdge(null);
+				return;
+			}
+
+			const edgeId = `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+			dispatch({
+				type: 'ADD_EDGE',
+				edge: {
+					id: edgeId,
+					sourceNodeId,
+					targetNodeId,
+					edgeType: 'sequential',
+				},
+			});
+
+			setDrawingEdge(null);
+		},
+		[state.edges, dispatch]
+	);
+
 	// Build a lookup for nodes by ID
 	const nodeById = new Map<string, BuilderNode>();
 	for (const n of state.nodes) {
@@ -295,6 +374,30 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 					);
 				})}
 
+				{/* Temporary drawing edge */}
+				{drawingEdge &&
+					(() => {
+						const sourceNode = nodeById.get(drawingEdge.sourceNodeId);
+						if (!sourceNode) return null;
+						const sx = sourceNode.x + NODE_WIDTH;
+						const sy = sourceNode.y + NODE_HEIGHT / 2;
+						const tx = drawingEdge.mouseX;
+						const ty = drawingEdge.mouseY;
+						const midX = (sx + tx) / 2;
+						const d = `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
+						return (
+							<path
+								d={d}
+								fill="none"
+								stroke={theme.colors.accent}
+								strokeWidth={2}
+								strokeDasharray="6 3"
+								opacity={0.5}
+								style={{ pointerEvents: 'none' }}
+							/>
+						);
+					})()}
+
 				{/* Arrow markers */}
 				<defs>
 					{['sequential', 'parallel', 'conditional'].map((et) => (
@@ -322,6 +425,8 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 						selected={node.id === state.selectedNodeId}
 						dispatch={dispatch}
 						viewportZoom={vp.zoom}
+						onOutputPortMouseDown={handleOutputPortMouseDown}
+						onInputPortMouseUp={handleInputPortMouseUp}
 					/>
 				))}
 			</g>
