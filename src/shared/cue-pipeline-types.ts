@@ -1,7 +1,8 @@
 /**
  * Type definitions for the visual pipeline editor.
  *
- * Pipelines are named chains: trigger -> agent1 -> agent2 -> ...
+ * Pipelines are named chains of triggers, agents, and teams:
+ * trigger -> agent1 -> team1 -> agent2 -> ...
  * with fan-out/fan-in support. Each pipeline has a unique color
  * for visual differentiation on the React Flow canvas.
  */
@@ -18,6 +19,9 @@ export type CueEventType =
 
 /** Cue brand color — single source of truth for all Cue UI */
 export const CUE_COLOR = '#06b6d4';
+
+/** Default accent color for team nodes (amber) when they don't inherit a pipeline color */
+export const TEAM_NODE_COLOR = '#f59e0b';
 
 /** 12 visually distinct colors suitable for dark backgrounds */
 export const PIPELINE_COLORS: string[] = [
@@ -73,13 +77,34 @@ export interface AgentNodeData {
 	includeUpstreamOutput?: boolean;
 }
 
-export type PipelineNodeType = 'trigger' | 'agent';
+/**
+ * Data for a team orchestration node that delegates work to a multi-agent team
+ * defined by a TeamTemplate. References the template by ID rather than inlining
+ * the full configuration, keeping pipeline data lean and leveraging the existing
+ * template CRUD system.
+ */
+export interface TeamNodeData {
+	/** Reference to TeamTemplate.id */
+	templateId: string;
+	/** Cached display name for rendering */
+	templateName: string;
+	/** Cached role count for badge display */
+	roleCount: number;
+	/** Cached topology pattern name (e.g. 'pipeline', 'hub-spoke') for subtitle display */
+	topologyPattern?: string;
+	/** Prompt sent to kick off the team workflow */
+	inputPrompt?: string;
+	/** Prompt to extract/transform team output for downstream chaining */
+	outputPrompt?: string;
+}
+
+export type PipelineNodeType = 'trigger' | 'agent' | 'team';
 
 export interface PipelineNode {
 	id: string;
 	type: PipelineNodeType;
 	position: PipelineNodePosition;
-	data: TriggerNodeData | AgentNodeData;
+	data: TriggerNodeData | AgentNodeData | TeamNodeData;
 }
 
 export interface PipelineEdge {
@@ -165,6 +190,14 @@ export interface CuePipelineSessionInfo {
 	name: string;
 	toolType: string;
 	projectRoot?: string;
+}
+
+/** Lightweight team descriptor for the pipeline editor's team drawer (avoids importing full TeamTemplate). */
+export interface CuePipelineTeamInfo {
+	id: string;
+	name: string;
+	roleCount: number;
+	topologyPattern?: string;
 }
 
 /** Info about an incoming trigger edge for per-edge prompt editing. */
