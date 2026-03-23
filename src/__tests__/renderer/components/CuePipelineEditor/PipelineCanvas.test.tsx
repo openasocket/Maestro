@@ -23,6 +23,9 @@ vi.mock('../../../../renderer/components/CuePipelineEditor/nodes/TriggerNode', (
 vi.mock('../../../../renderer/components/CuePipelineEditor/nodes/AgentNode', () => ({
 	AgentNode: () => <div />,
 }));
+vi.mock('../../../../renderer/components/CuePipelineEditor/nodes/TeamNode', () => ({
+	TeamNode: () => <div />,
+}));
 vi.mock('../../../../renderer/components/CuePipelineEditor/edges/PipelineEdge', () => ({
 	edgeTypes: {},
 }));
@@ -33,6 +36,10 @@ vi.mock('../../../../renderer/components/CuePipelineEditor/drawers/TriggerDrawer
 vi.mock('../../../../renderer/components/CuePipelineEditor/drawers/AgentDrawer', () => ({
 	AgentDrawer: ({ isOpen }: any) =>
 		isOpen ? <div data-testid="agent-drawer">AgentDrawer</div> : null,
+}));
+vi.mock('../../../../renderer/components/CuePipelineEditor/drawers/TeamDrawer', () => ({
+	TeamDrawer: ({ isOpen }: any) =>
+		isOpen ? <div data-testid="team-drawer">TeamDrawer</div> : null,
 }));
 vi.mock('../../../../renderer/components/CuePipelineEditor/panels/NodeConfigPanel', () => ({
 	NodeConfigPanel: () => <div data-testid="node-config-panel" />,
@@ -75,9 +82,13 @@ function buildProps(overrides: Partial<PipelineCanvasProps> = {}): PipelineCanva
 		setTriggerDrawerOpen: vi.fn(),
 		agentDrawerOpen: false,
 		setAgentDrawerOpen: vi.fn(),
+		teamDrawerOpen: false,
+		setTeamDrawerOpen: vi.fn(),
 		sessions: [],
 		groups: [],
 		onCanvasSessionIds: new Set<string>(),
+		teams: [],
+		onCanvasTemplateIds: new Set<string>(),
 		pipelineCount: 1,
 		createPipeline: vi.fn(),
 		selectedPipelineId: 'p1',

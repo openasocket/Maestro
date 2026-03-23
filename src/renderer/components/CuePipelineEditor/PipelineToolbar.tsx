@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Zap, Bot, Save, RotateCcw, Check, AlertTriangle, Settings } from 'lucide-react';
+import { Zap, Bot, Users, Save, RotateCcw, Check, AlertTriangle, Settings } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { CuePipeline } from '../../../shared/cue-pipeline-types';
 import { PipelineSelector } from './PipelineSelector';
@@ -16,6 +16,8 @@ export interface PipelineToolbarProps {
 	setTriggerDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
 	agentDrawerOpen: boolean;
 	setAgentDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
+	teamDrawerOpen: boolean;
+	onToggleTeamDrawer: () => void;
 	showSettings: boolean;
 	setShowSettings: React.Dispatch<React.SetStateAction<boolean>>;
 	// PipelineSelector props
@@ -41,6 +43,8 @@ export const PipelineToolbar = React.memo(function PipelineToolbar({
 	setTriggerDrawerOpen,
 	agentDrawerOpen,
 	setAgentDrawerOpen,
+	teamDrawerOpen,
+	onToggleTeamDrawer,
 	showSettings,
 	setShowSettings,
 	pipelines,
@@ -112,6 +116,24 @@ export const PipelineToolbar = React.memo(function PipelineToolbar({
 					>
 						<Bot size={12} />
 						Agents
+					</button>
+
+					<button
+						onClick={onToggleTeamDrawer}
+						disabled={isAllPipelinesView}
+						className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium"
+						style={{
+							backgroundColor: teamDrawerOpen ? `${theme.colors.accent}20` : 'transparent',
+							color: teamDrawerOpen ? theme.colors.accent : theme.colors.textDim,
+							border: `1px solid ${teamDrawerOpen ? theme.colors.accent : theme.colors.border}`,
+							cursor: isAllPipelinesView ? 'not-allowed' : 'pointer',
+							opacity: isAllPipelinesView ? 0.4 : 1,
+							transition: 'all 0.15s',
+						}}
+						title={isAllPipelinesView ? 'Select a pipeline to add teams' : undefined}
+					>
+						<Users size={12} />
+						Teams
 					</button>
 
 					{/* Settings toggle */}

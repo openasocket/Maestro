@@ -26,14 +26,18 @@ import type {
 	PipelineEdge as PipelineEdgeType,
 	TriggerNodeData,
 	AgentNodeData,
+	TeamNodeData,
 	CuePipelineSessionInfo as SessionInfo,
 } from '../../../shared/cue-pipeline-types';
 import type { CueSettings } from '../../../main/cue/cue-types';
+import type { CuePipelineTeamInfo } from '../../../shared/cue-pipeline-types';
 import { TriggerNode, type TriggerNodeDataProps } from './nodes/TriggerNode';
 import { AgentNode, type AgentNodeDataProps } from './nodes/AgentNode';
+import { TeamNode } from './nodes/TeamNode';
 import { edgeTypes } from './edges/PipelineEdge';
 import { TriggerDrawer } from './drawers/TriggerDrawer';
 import { AgentDrawer } from './drawers/AgentDrawer';
+import { TeamDrawer } from './drawers/TeamDrawer';
 import { NodeConfigPanel, type IncomingTriggerEdgeInfo } from './panels/NodeConfigPanel';
 import { EdgeConfigPanel } from './panels/EdgeConfigPanel';
 import { CueSettingsPanel } from './panels/CueSettingsPanel';
@@ -42,6 +46,7 @@ import { EVENT_COLORS } from './cueEventConstants';
 const nodeTypes = {
 	trigger: TriggerNode,
 	agent: AgentNode,
+	team: TeamNode,
 };
 
 export interface PipelineCanvasProps {
@@ -64,9 +69,13 @@ export interface PipelineCanvasProps {
 	setTriggerDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
 	agentDrawerOpen: boolean;
 	setAgentDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
+	teamDrawerOpen: boolean;
+	setTeamDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
 	sessions: SessionInfo[];
 	groups?: { id: string; name: string; emoji: string }[];
 	onCanvasSessionIds: Set<string>;
+	teams: CuePipelineTeamInfo[];
+	onCanvasTemplateIds: Set<string>;
 	// Empty state
 	pipelineCount: number;
 	createPipeline: () => void;
@@ -86,7 +95,10 @@ export interface PipelineCanvasProps {
 	selectedNodeHasOutgoingEdge: boolean;
 	hasIncomingAgentEdges: boolean;
 	incomingTriggerEdges: IncomingTriggerEdgeInfo[];
-	onUpdateNode: (nodeId: string, data: Partial<TriggerNodeData | AgentNodeData>) => void;
+	onUpdateNode: (
+		nodeId: string,
+		data: Partial<TriggerNodeData | AgentNodeData | TeamNodeData>
+	) => void;
 	onUpdateEdgePrompt: (edgeId: string, prompt: string) => void;
 	onDeleteNode: (nodeId: string) => void;
 	onSwitchToSession: (id: string) => void;
@@ -123,9 +135,13 @@ export const PipelineCanvas = React.memo(function PipelineCanvas({
 	setTriggerDrawerOpen,
 	agentDrawerOpen,
 	setAgentDrawerOpen,
+	teamDrawerOpen,
+	setTeamDrawerOpen,
 	sessions,
 	groups,
 	onCanvasSessionIds,
+	teams,
+	onCanvasTemplateIds,
 	pipelineCount,
 	createPipeline,
 	selectedPipelineId,
@@ -285,6 +301,15 @@ export const PipelineCanvas = React.memo(function PipelineCanvas({
 				sessions={sessions}
 				groups={groups}
 				onCanvasSessionIds={onCanvasSessionIds}
+				theme={theme}
+			/>
+
+			{/* Team drawer (right, below agent drawer) */}
+			<TeamDrawer
+				isOpen={teamDrawerOpen}
+				onClose={() => setTeamDrawerOpen(false)}
+				teams={teams}
+				onCanvasTemplateIds={onCanvasTemplateIds}
 				theme={theme}
 			/>
 

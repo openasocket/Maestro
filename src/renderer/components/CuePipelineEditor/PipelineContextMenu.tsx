@@ -11,7 +11,7 @@ export interface ContextMenuState {
 	y: number;
 	nodeId: string;
 	pipelineId: string;
-	nodeType: 'trigger' | 'agent';
+	nodeType: 'trigger' | 'agent' | 'team';
 }
 
 export interface PipelineContextMenuProps {

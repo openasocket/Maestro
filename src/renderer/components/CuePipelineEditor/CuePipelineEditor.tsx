@@ -21,9 +21,11 @@ import type {
 	CueGraphSession,
 	TriggerNodeData,
 	AgentNodeData,
+	TeamNodeData,
 	CueEventType,
 	PipelineNode,
 	CuePipeline,
+	CuePipelineTeamInfo,
 } from '../../../shared/cue-pipeline-types';
 import { getNextPipelineColor } from './pipelineColors';
 import { convertToReactFlowNodes, convertToReactFlowEdges } from './utils/pipelineGraph';
@@ -75,7 +77,11 @@ function CuePipelineEditorInner({
 	// Local drawer/context-menu state
 	const [triggerDrawerOpen, setTriggerDrawerOpen] = useState(false);
 	const [agentDrawerOpen, setAgentDrawerOpen] = useState(false);
+	const [teamDrawerOpen, setTeamDrawerOpen] = useState(false);
 	const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+
+	// Team templates for the team drawer
+	const [teams, setTeams] = useState<CuePipelineTeamInfo[]>([]);
 
 	// Bridge ref: usePipelineState needs selection IDs, but usePipelineSelection
 	// needs pipelineState. We use a ref so state hook reads latest selection values
@@ -157,6 +163,34 @@ function CuePipelineEditorInner({
 		onPaneClick,
 		handleConfigureNode,
 	} = selectionHook;
+
+	// ─── Fetch team templates on mount ──────────────────────────────────────
+
+	useEffect(() => {
+		window.maestro.teamTemplates.list().then((templates) => {
+			setTeams(
+				templates.map((t) => ({
+					id: t.id,
+					name: t.name,
+					roleCount: t.roles.length,
+					topologyPattern: t.topology?.pattern,
+				}))
+			);
+		});
+	}, []);
+
+	// Compute set of template IDs already on the canvas
+	const onCanvasTemplateIds = useMemo(() => {
+		const ids = new Set<string>();
+		for (const pipeline of pipelineState.pipelines) {
+			for (const node of pipeline.nodes) {
+				if (node.type === 'team') {
+					ids.add((node.data as TeamNodeData).templateId);
+				}
+			}
+		}
+		return ids;
+	}, [pipelineState.pipelines]);
 
 	// ─── ReactFlow nodes/edges ───────────────────────────────────────────────
 
@@ -313,6 +347,10 @@ function CuePipelineEditorInner({
 				sessionId?: string;
 				sessionName?: string;
 				toolType?: string;
+				templateId?: string;
+				templateName?: string;
+				roleCount?: number;
+				topologyPattern?: string;
 			};
 			try {
 				dropData = JSON.parse(raw);
@@ -377,6 +415,21 @@ function CuePipelineEditorInner({
 						position,
 						data: agentData,
 					};
+				} else if (dropData.type === 'team' && dropData.templateId) {
+					const teamData: TeamNodeData = {
+						templateId: dropData.templateId,
+						templateName: dropData.templateName ?? 'Team',
+						roleCount: dropData.roleCount ?? 0,
+						topologyPattern: dropData.topologyPattern,
+						inputPrompt: '',
+						outputPrompt: '',
+					};
+					newNode = {
+						id: `team-${dropData.templateId}-${Date.now()}`,
+						type: 'team',
+						position,
+						data: teamData,
+					};
 				} else {
 					return prev;
 				}
@@ -430,6 +483,8 @@ function CuePipelineEditorInner({
 					setTriggerDrawerOpen(false);
 				} else if (agentDrawerOpen) {
 					setAgentDrawerOpen(false);
+				} else if (teamDrawerOpen) {
+					setTeamDrawerOpen(false);
 				} else if (selectedNodeId || selectedEdgeId) {
 					setSelectedNodeId(null);
 					setSelectedEdgeId(null);
@@ -453,6 +508,7 @@ function CuePipelineEditorInner({
 		onDeleteEdge,
 		triggerDrawerOpen,
 		agentDrawerOpen,
+		teamDrawerOpen,
 		handleSave,
 		setSelectedNodeId,
 		setSelectedEdgeId,
@@ -471,7 +527,7 @@ function CuePipelineEditorInner({
 			y: event.clientY,
 			nodeId,
 			pipelineId,
-			nodeType: node.type as 'trigger' | 'agent',
+			nodeType: node.type as 'trigger' | 'agent' | 'team',
 		});
 	}, []);
 
@@ -536,6 +592,8 @@ function CuePipelineEditorInner({
 				setTriggerDrawerOpen={setTriggerDrawerOpen}
 				agentDrawerOpen={agentDrawerOpen}
 				setAgentDrawerOpen={setAgentDrawerOpen}
+				teamDrawerOpen={teamDrawerOpen}
+				onToggleTeamDrawer={() => !isAllPipelinesView && setTeamDrawerOpen((v) => !v)}
 				showSettings={showSettings}
 				setShowSettings={setShowSettings}
 				pipelines={pipelineState.pipelines}
@@ -570,9 +628,13 @@ function CuePipelineEditorInner({
 				setTriggerDrawerOpen={setTriggerDrawerOpen}
 				agentDrawerOpen={agentDrawerOpen}
 				setAgentDrawerOpen={setAgentDrawerOpen}
+				teamDrawerOpen={teamDrawerOpen}
+				setTeamDrawerOpen={setTeamDrawerOpen}
 				sessions={sessions}
 				groups={groups}
 				onCanvasSessionIds={onCanvasSessionIds}
+				teams={teams}
+				onCanvasTemplateIds={onCanvasTemplateIds}
 				pipelineCount={pipelineState.pipelines.length}
 				createPipeline={createPipeline}
 				selectedPipelineId={pipelineState.selectedPipelineId}
