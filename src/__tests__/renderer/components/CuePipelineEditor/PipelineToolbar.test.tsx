@@ -30,6 +30,8 @@ function buildProps(overrides: Partial<PipelineToolbarProps> = {}): PipelineTool
 		setTriggerDrawerOpen: vi.fn(),
 		agentDrawerOpen: false,
 		setAgentDrawerOpen: vi.fn(),
+		teamDrawerOpen: false,
+		onToggleTeamDrawer: vi.fn(),
 		showSettings: false,
 		setShowSettings: vi.fn(),
 		pipelines: [],
@@ -80,6 +82,29 @@ describe('PipelineToolbar', () => {
 		fireEvent.click(screen.getByRole('button', { name: /agents/i }));
 		expect(setAgentDrawerOpen).toHaveBeenCalledTimes(1);
 		expect(typeof setAgentDrawerOpen.mock.calls[0][0]).toBe('function');
+	});
+
+	it('disables the Teams button when isAllPipelinesView is true', () => {
+		const props = buildProps({ isAllPipelinesView: true });
+		render(<PipelineToolbar {...props} />);
+		const teamsBtn = screen.getByRole('button', { name: /teams/i });
+		expect(teamsBtn).toBeDisabled();
+	});
+
+	it('calls onToggleTeamDrawer when Teams button is clicked and not disabled', () => {
+		const onToggleTeamDrawer = vi.fn();
+		const props = buildProps({ isAllPipelinesView: false, onToggleTeamDrawer });
+		render(<PipelineToolbar {...props} />);
+		fireEvent.click(screen.getByRole('button', { name: /teams/i }));
+		expect(onToggleTeamDrawer).toHaveBeenCalledTimes(1);
+	});
+
+	it('highlights Teams button when teamDrawerOpen is true', () => {
+		const props = buildProps({ teamDrawerOpen: true });
+		render(<PipelineToolbar {...props} />);
+		const teamsBtn = screen.getByRole('button', { name: /teams/i });
+		// jsdom converts hex #06b6d4 to rgb(6, 182, 212)
+		expect(teamsBtn.style.color).toMatch(/06b6d4|rgb\(6, 182, 212\)/);
 	});
 
 	it('calls setShowSettings when Settings button is clicked', () => {
