@@ -410,6 +410,7 @@ export const PipelineCanvas = React.memo(function PipelineCanvas({
 							pipelineName={selectedPipeline?.name}
 							isSaved={!isDirty}
 							isRunning={selectedPipeline ? runningPipelineIds?.has(selectedPipeline.id) : false}
+							pipelineColor={selectedPipeline?.color}
 						/>
 					);
 				})()}

@@ -1,22 +1,25 @@
 /**
- * NodeConfigPanel — Bottom panel for configuring selected trigger or agent nodes.
+ * NodeConfigPanel — Bottom panel for configuring selected pipeline nodes.
  *
- * Thin dispatcher shell: routes to TriggerConfig or AgentConfigPanel based on
- * node type, and provides header chrome (expand/collapse, delete).
+ * Thin dispatcher shell: routes to TriggerConfig, AgentConfigPanel, or
+ * TeamConfigPanel based on node type, and provides header chrome
+ * (expand/collapse, delete).
  */
 
 import { useState } from 'react';
-import { Trash2, Zap, ChevronsUp, ChevronsDown, Play, Loader2 } from 'lucide-react';
+import { Trash2, Zap, Users, ChevronsUp, ChevronsDown, Play, Loader2 } from 'lucide-react';
 import type {
 	PipelineNode,
 	TriggerNodeData,
 	AgentNodeData,
+	TeamNodeData,
 	CuePipeline,
 	IncomingTriggerEdgeInfo,
 } from '../../../../shared/cue-pipeline-types';
 import { EVENT_ICONS, EVENT_LABELS } from '../cueEventConstants';
 import { TriggerConfig } from './triggers';
 import { AgentConfigPanel } from './AgentConfigPanel';
+import { TeamConfigPanel } from './TeamConfigPanel';
 
 export type { IncomingTriggerEdgeInfo } from '../../../../shared/cue-pipeline-types';
 
@@ -28,12 +31,17 @@ interface NodeConfigPanelProps {
 	hasIncomingAgentEdges?: boolean;
 	/** Incoming trigger edges for the selected agent node (for per-edge prompts) */
 	incomingTriggerEdges?: IncomingTriggerEdgeInfo[];
-	onUpdateNode: (nodeId: string, data: Partial<TriggerNodeData | AgentNodeData>) => void;
+	onUpdateNode: (
+		nodeId: string,
+		data: Partial<TriggerNodeData | AgentNodeData | TeamNodeData>
+	) => void;
 	onUpdateEdgePrompt?: (edgeId: string, prompt: string) => void;
 	onDeleteNode: (nodeId: string) => void;
 	onSwitchToAgent?: (sessionId: string) => void;
 	triggerDrawerOpen?: boolean;
 	agentDrawerOpen?: boolean;
+	/** Pipeline color for styling config panel elements */
+	pipelineColor?: string;
 	/** Callback to manually trigger the pipeline this trigger belongs to */
 	onTriggerPipeline?: (pipelineName: string) => void;
 	/** Pipeline name for the selected trigger's pipeline */
@@ -60,15 +68,20 @@ export function NodeConfigPanel({
 	pipelineName,
 	isSaved,
 	isRunning,
+	pipelineColor,
 }: NodeConfigPanelProps) {
 	const [expanded, setExpanded] = useState(false);
 	const isVisible = selectedNode !== null;
 
 	if (!isVisible) return null;
 
-	const isTrigger = selectedNode.type === 'trigger';
+	const nodeType = selectedNode.type;
+	const isTrigger = nodeType === 'trigger';
+	const isTeam = nodeType === 'team';
+	const isAgent = nodeType === 'agent';
 	const triggerData = isTrigger ? (selectedNode.data as TriggerNodeData) : null;
-	const agentData = !isTrigger ? (selectedNode.data as AgentNodeData) : null;
+	const agentData = isAgent ? (selectedNode.data as AgentNodeData) : null;
+	const teamData = isTeam ? (selectedNode.data as TeamNodeData) : null;
 
 	const Icon = triggerData ? (EVENT_ICONS[triggerData.eventType] ?? Zap) : null;
 	const ExpandIcon = expanded ? ChevronsDown : ChevronsUp;
@@ -134,7 +147,7 @@ export function NodeConfigPanel({
 							</span>
 						</>
 					)}
-					{!isTrigger && agentData && (
+					{isAgent && agentData && (
 						<>
 							<span style={{ color: '#e4e4e7', fontSize: 13, fontWeight: 600 }}>
 								{agentData.sessionName}
@@ -149,6 +162,25 @@ export function NodeConfigPanel({
 								}}
 							>
 								{agentData.toolType}
+							</span>
+						</>
+					)}
+					{isTeam && teamData && (
+						<>
+							<Users size={14} style={{ color: pipelineColor ?? '#f59e0b' }} />
+							<span style={{ color: '#e4e4e7', fontSize: 13, fontWeight: 600 }}>
+								Configure Team
+							</span>
+							<span
+								style={{
+									fontSize: 10,
+									color: '#9ca3af',
+									backgroundColor: '#2a2a3e',
+									padding: '1px 6px',
+									borderRadius: 4,
+								}}
+							>
+								{teamData.templateName}
 							</span>
 						</>
 					)}
@@ -179,7 +211,7 @@ export function NodeConfigPanel({
 							{isRunning ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
 						</button>
 					)}
-					{!isTrigger && (
+					{(isAgent || isTeam) && (
 						<button
 							onClick={() => setExpanded((v) => !v)}
 							style={{
@@ -232,7 +264,7 @@ export function NodeConfigPanel({
 				}}
 			>
 				{isTrigger && <TriggerConfig node={selectedNode} onUpdateNode={onUpdateNode} />}
-				{!isTrigger && (
+				{isAgent && (
 					<AgentConfigPanel
 						node={selectedNode}
 						pipelines={pipelines}
@@ -243,6 +275,21 @@ export function NodeConfigPanel({
 						onUpdateEdgePrompt={onUpdateEdgePrompt}
 						onSwitchToAgent={onSwitchToAgent}
 						expanded={expanded}
+					/>
+				)}
+				{isTeam && teamData && (
+					<TeamConfigPanel
+						templateId={teamData.templateId}
+						templateName={teamData.templateName}
+						roleCount={teamData.roleCount}
+						topologyPattern={teamData.topologyPattern}
+						inputPrompt={teamData.inputPrompt ?? ''}
+						outputPrompt={teamData.outputPrompt ?? ''}
+						onUpdateInputPrompt={(prompt) => onUpdateNode(selectedNode.id, { inputPrompt: prompt })}
+						onUpdateOutputPrompt={(prompt) =>
+							onUpdateNode(selectedNode.id, { outputPrompt: prompt })
+						}
+						pipelineColor={pipelineColor ?? '#f59e0b'}
 					/>
 				)}
 			</div>
