@@ -772,3 +772,107 @@ describe('auto-injected source output prefix stripping', () => {
 		expect((testerNode!.data as { inputPrompt?: string }).inputPrompt).toBeUndefined();
 	});
 });
+
+describe('team node deserialization', () => {
+	it('creates team node when subscription has team_template', () => {
+		const subs: CueSubscription[] = [
+			{
+				name: 'review-pipeline',
+				event: 'time.heartbeat',
+				enabled: true,
+				prompt: 'Review the code',
+				interval_minutes: 10,
+				team_template: 'tmpl-abc',
+			},
+		];
+		const sessions = makeSessions('worker');
+		const teams = [
+			{ id: 'tmpl-abc', name: 'Review Team', roleCount: 3, topologyPattern: 'pipeline' },
+		];
+
+		const pipelines = subscriptionsToPipelines(subs, sessions, teams);
+		expect(pipelines).toHaveLength(1);
+
+		const teamNode = pipelines[0].nodes.find((n) => n.type === 'team');
+		expect(teamNode).toBeDefined();
+		const teamData = teamNode!.data as {
+			templateId: string;
+			templateName: string;
+			roleCount: number;
+			topologyPattern?: string;
+			inputPrompt?: string;
+		};
+		expect(teamData.templateId).toBe('tmpl-abc');
+		expect(teamData.templateName).toBe('Review Team');
+		expect(teamData.roleCount).toBe(3);
+		expect(teamData.topologyPattern).toBe('pipeline');
+		expect(teamData.inputPrompt).toBe('Review the code');
+	});
+
+	it('uses fallback values when team template is not found', () => {
+		const subs: CueSubscription[] = [
+			{
+				name: 'unknown-pipeline',
+				event: 'time.heartbeat',
+				enabled: true,
+				prompt: 'Do something',
+				interval_minutes: 5,
+				team_template: 'tmpl-missing',
+			},
+		];
+		const sessions = makeSessions('worker');
+
+		const pipelines = subscriptionsToPipelines(subs, sessions, []);
+		const teamNode = pipelines[0].nodes.find((n) => n.type === 'team');
+		expect(teamNode).toBeDefined();
+		const teamData = teamNode!.data as {
+			templateId: string;
+			templateName: string;
+			roleCount: number;
+		};
+		expect(teamData.templateId).toBe('tmpl-missing');
+		expect(teamData.templateName).toBe('Unknown Team');
+		expect(teamData.roleCount).toBe(0);
+	});
+
+	it('reconstructs team -> agent chain from subscriptions', () => {
+		const subs: CueSubscription[] = [
+			{
+				name: 'review-pipeline',
+				event: 'file.changed',
+				enabled: true,
+				prompt: 'Review changes',
+				watch: '**/*.ts',
+				team_template: 'tmpl-abc',
+			},
+			{
+				name: 'review-pipeline-chain-1',
+				event: 'agent.completed',
+				enabled: true,
+				prompt: '{{CUE_SOURCE_OUTPUT}}\n\nMerge if approved',
+				source_session: 'Review Team',
+			},
+		];
+		const sessions = makeSessions('merger');
+		const teams = [{ id: 'tmpl-abc', name: 'Review Team', roleCount: 2 }];
+
+		const pipelines = subscriptionsToPipelines(subs, sessions, teams);
+		expect(pipelines).toHaveLength(1);
+
+		const teamNode = pipelines[0].nodes.find((n) => n.type === 'team');
+		const agentNode = pipelines[0].nodes.find((n) => n.type === 'agent');
+		expect(teamNode).toBeDefined();
+		expect(agentNode).toBeDefined();
+
+		// Should have edge from trigger to team, and team to agent
+		const triggerNode = pipelines[0].nodes.find((n) => n.type === 'trigger');
+		const triggerToTeam = pipelines[0].edges.find(
+			(e) => e.source === triggerNode!.id && e.target === teamNode!.id
+		);
+		const teamToAgent = pipelines[0].edges.find(
+			(e) => e.source === teamNode!.id && e.target === agentNode!.id
+		);
+		expect(triggerToTeam).toBeDefined();
+		expect(teamToAgent).toBeDefined();
+	});
+});

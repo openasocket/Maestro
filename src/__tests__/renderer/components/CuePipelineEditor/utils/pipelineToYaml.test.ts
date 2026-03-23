@@ -884,3 +884,131 @@ describe('ensureSourceOutputVariable', () => {
 		expect(ensureSourceOutputVariable(prompt)).toBe(prompt);
 	});
 });
+
+describe('team node serialization', () => {
+	it('converts trigger -> team with team_template instead of agent_id', () => {
+		const pipeline = makePipeline({
+			nodes: [
+				{
+					id: 't1',
+					type: 'trigger',
+					position: { x: 0, y: 0 },
+					data: {
+						eventType: 'time.heartbeat',
+						label: 'Heartbeat',
+						config: { interval_minutes: 5 },
+					},
+				},
+				{
+					id: 'team-1',
+					type: 'team',
+					position: { x: 300, y: 0 },
+					data: {
+						templateId: 'tmpl-abc',
+						templateName: 'Review Team',
+						roleCount: 3,
+						topologyPattern: 'pipeline',
+						inputPrompt: 'Review the code',
+						outputPrompt: 'Summarize findings',
+					},
+				},
+			],
+			edges: [{ id: 'e1', source: 't1', target: 'team-1', mode: 'pass' }],
+		});
+
+		const subs = pipelineToYamlSubscriptions(pipeline);
+		expect(subs).toHaveLength(1);
+		expect(subs[0].team_template).toBe('tmpl-abc');
+		expect(subs[0].prompt).toBe('Review the code');
+		expect(subs[0].output_prompt).toBe('Summarize findings');
+		expect(subs[0].event).toBe('time.heartbeat');
+	});
+
+	it('converts trigger -> team -> agent chain with source_session referencing team name', () => {
+		const pipeline = makePipeline({
+			nodes: [
+				{
+					id: 't1',
+					type: 'trigger',
+					position: { x: 0, y: 0 },
+					data: {
+						eventType: 'file.changed',
+						label: 'File Change',
+						config: { watch: '**/*.ts' },
+					},
+				},
+				{
+					id: 'team-1',
+					type: 'team',
+					position: { x: 300, y: 0 },
+					data: {
+						templateId: 'tmpl-abc',
+						templateName: 'Review Team',
+						roleCount: 2,
+						inputPrompt: 'Review changes',
+					},
+				},
+				{
+					id: 'a1',
+					type: 'agent',
+					position: { x: 600, y: 0 },
+					data: {
+						sessionId: 's1',
+						sessionName: 'merger',
+						toolType: 'claude-code',
+						inputPrompt: 'Merge if approved',
+					},
+				},
+			],
+			edges: [
+				{ id: 'e1', source: 't1', target: 'team-1', mode: 'pass' },
+				{ id: 'e2', source: 'team-1', target: 'a1', mode: 'pass' },
+			],
+		});
+
+		const subs = pipelineToYamlSubscriptions(pipeline);
+		expect(subs).toHaveLength(2);
+
+		// First sub targets the team
+		expect(subs[0].team_template).toBe('tmpl-abc');
+		expect(subs[0].prompt).toBe('Review changes');
+
+		// Second sub chains from team -> agent
+		expect(subs[1].event).toBe('agent.completed');
+		expect(subs[1].source_session).toBe('Review Team');
+		expect(subs[1].team_template).toBeUndefined();
+	});
+
+	it('pipelinesToYaml emits team_template instead of agent_id for team subscriptions', () => {
+		const pipeline = makePipeline({
+			nodes: [
+				{
+					id: 't1',
+					type: 'trigger',
+					position: { x: 0, y: 0 },
+					data: {
+						eventType: 'time.heartbeat',
+						label: 'Heartbeat',
+						config: { interval_minutes: 10 },
+					},
+				},
+				{
+					id: 'team-1',
+					type: 'team',
+					position: { x: 300, y: 0 },
+					data: {
+						templateId: 'tmpl-xyz',
+						templateName: 'Build Team',
+						roleCount: 2,
+						inputPrompt: 'Build it',
+					},
+				},
+			],
+			edges: [{ id: 'e1', source: 't1', target: 'team-1', mode: 'pass' }],
+		});
+
+		const result = pipelinesToYaml([pipeline]);
+		expect(result.yaml).toContain('team_template: tmpl-xyz');
+		expect(result.yaml).not.toContain('agent_id');
+	});
+});

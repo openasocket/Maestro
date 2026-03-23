@@ -166,6 +166,8 @@ export interface CueGraphSession {
 		poll_minutes?: number;
 		gh_state?: string;
 		agent_id?: string;
+		/** TeamTemplate ID — when set, Cue spawns a group chat session instead of a single agent */
+		team_template?: string;
 		label?: string;
 	}>;
 }

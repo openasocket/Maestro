@@ -14,6 +14,7 @@ import type {
 	PipelineEdge,
 	TriggerNodeData,
 	AgentNodeData,
+	TeamNodeData,
 } from '../../../../shared/cue-pipeline-types';
 import type { CueSubscription, CueSettings } from '../../../../main/cue/cue-types';
 import { cuePromptFilePath } from '../../../../shared/maestro-paths';
@@ -64,6 +65,23 @@ function findTriggerNodes(pipeline: CuePipeline): PipelineNode[] {
 	return pipeline.nodes.filter((n) => n.type === 'trigger');
 }
 
+/** Returns true for nodes that represent executable actions (agents or teams). */
+function isActionNode(node: PipelineNode): boolean {
+	return node.type === 'agent' || node.type === 'team';
+}
+
+/** Returns the name used for source_session chaining and prompt file paths. */
+function getActionNodeName(node: PipelineNode): string {
+	if (node.type === 'team') return (node.data as TeamNodeData).templateName;
+	return (node.data as AgentNodeData).sessionName;
+}
+
+/** Returns the ID used for agent_id / team_template binding. */
+function getActionNodeId(node: PipelineNode): string {
+	if (node.type === 'team') return (node.data as TeamNodeData).templateId;
+	return (node.data as AgentNodeData).sessionId;
+}
+
 function getEdgeModeComment(edge: PipelineEdge): string | null {
 	if (edge.mode === 'debate') {
 		const rounds = edge.debateConfig?.maxRounds ?? 3;
@@ -99,9 +117,9 @@ export function pipelineToYamlSubscriptions(pipeline: CuePipeline): CueSubscript
 		const directTargets = triggerOutgoing
 			.map((e) => nodeMap.get(e.target))
 			.filter(Boolean) as PipelineNode[];
-		const agentTargets = directTargets.filter((n) => n.type === 'agent');
+		const actionTargets = directTargets.filter(isActionNode);
 
-		if (agentTargets.length === 0) continue;
+		if (actionTargets.length === 0) continue;
 
 		const subName = chainIndex === 0 ? pipeline.name : `${pipeline.name}-chain-${chainIndex}`;
 		chainIndex++;
@@ -152,33 +170,42 @@ export function pipelineToYamlSubscriptions(pipeline: CuePipeline): CueSubscript
 				break;
 		}
 
-		if (agentTargets.length === 1) {
-			// Single target
-			const agent = agentTargets[0];
-			const agentData = agent.data as AgentNodeData;
-			// Use edge prompt if available (per-trigger prompt), fallback to agent node prompt
-			const triggerEdge = triggerOutgoing.find((e) => e.target === agent.id);
-			sub.prompt = triggerEdge?.prompt ?? agentData.inputPrompt ?? '';
-			if (agentData.outputPrompt) sub.output_prompt = agentData.outputPrompt;
-			subscriptions.push(sub);
-			visited.add(agent.id);
+		if (actionTargets.length === 1) {
+			// Single target (agent or team)
+			const target = actionTargets[0];
+			const triggerEdge = triggerOutgoing.find((e) => e.target === target.id);
 
-			// Follow the chain from this agent
-			buildChain(agent, pipeline.name, subscriptions, outgoing, incoming, nodeMap, visited);
+			if (target.type === 'team') {
+				const teamData = target.data as TeamNodeData;
+				sub.team_template = teamData.templateId;
+				sub.prompt = triggerEdge?.prompt ?? teamData.inputPrompt ?? '';
+				if (teamData.outputPrompt) sub.output_prompt = teamData.outputPrompt;
+			} else {
+				const agentData = target.data as AgentNodeData;
+				sub.prompt = triggerEdge?.prompt ?? agentData.inputPrompt ?? '';
+				if (agentData.outputPrompt) sub.output_prompt = agentData.outputPrompt;
+			}
+
+			subscriptions.push(sub);
+			visited.add(target.id);
+
+			// Follow the chain from this node
+			buildChain(target, pipeline.name, subscriptions, outgoing, incoming, nodeMap, visited);
 			chainIndex = subscriptions.length;
 		} else {
 			// Fan-out: multiple targets from trigger
-			sub.fan_out = agentTargets.map((a) => (a.data as AgentNodeData).sessionName);
-			sub.prompt = (agentTargets[0].data as AgentNodeData).inputPrompt ?? '';
+			sub.fan_out = actionTargets.map((a) => getActionNodeName(a));
+			const firstData = actionTargets[0].data as AgentNodeData | TeamNodeData;
+			sub.prompt = firstData.inputPrompt ?? '';
 			subscriptions.push(sub);
 
-			for (const agent of agentTargets) {
-				visited.add(agent.id);
+			for (const target of actionTargets) {
+				visited.add(target.id);
 			}
 
 			// Follow chains from each fan-out target
-			for (const agent of agentTargets) {
-				buildChain(agent, pipeline.name, subscriptions, outgoing, incoming, nodeMap, visited);
+			for (const target of actionTargets) {
+				buildChain(target, pipeline.name, subscriptions, outgoing, incoming, nodeMap, visited);
 			}
 			chainIndex = subscriptions.length;
 		}
@@ -201,48 +228,63 @@ function buildChain(
 
 	const targets = fromOutgoing
 		.map((e) => nodeMap.get(e.target))
-		.filter((n): n is PipelineNode => n != null && n.type === 'agent');
+		.filter((n): n is PipelineNode => n != null && isActionNode(n));
 
 	if (targets.length === 0) return;
 
-	const fromAgentData = fromNode.data as AgentNodeData;
+	const fromSourceName = getActionNodeName(fromNode);
 
 	for (const target of targets) {
 		if (visited.has(target.id)) continue;
 		visited.add(target.id);
 
-		const targetData = target.data as AgentNodeData;
+		const inputPrompt =
+			target.type === 'team'
+				? (target.data as TeamNodeData).inputPrompt
+				: (target.data as AgentNodeData).inputPrompt;
+		const outputPrompt =
+			target.type === 'team'
+				? (target.data as TeamNodeData).outputPrompt
+				: (target.data as AgentNodeData).outputPrompt;
 
-		// Check for fan-in: does this target have multiple incoming agent edges?
+		// Check for fan-in: does this target have multiple incoming action edges?
 		const targetIncoming = incoming.get(target.id) ?? [];
-		const incomingAgentEdges = targetIncoming.filter((e) => {
+		const incomingActionEdges = targetIncoming.filter((e) => {
 			const sourceNode = nodeMap.get(e.source);
-			return sourceNode?.type === 'agent';
+			return sourceNode != null && isActionNode(sourceNode);
 		});
 
 		const subName = `${pipelineName}-chain-${subscriptions.length}`;
 
-		const shouldInjectSource = targetData.includeUpstreamOutput !== false;
+		const shouldInjectSource =
+			target.type === 'agent'
+				? (target.data as AgentNodeData).includeUpstreamOutput !== false
+				: true;
 		const sub: CueSubscription = {
 			name: subName,
 			event: 'agent.completed',
 			enabled: true,
 			prompt: shouldInjectSource
-				? ensureSourceOutputVariable(targetData.inputPrompt ?? '')
-				: (targetData.inputPrompt ?? ''),
-			output_prompt: targetData.outputPrompt || undefined,
+				? ensureSourceOutputVariable(inputPrompt ?? '')
+				: (inputPrompt ?? ''),
+			output_prompt: outputPrompt || undefined,
 		};
 
-		if (incomingAgentEdges.length > 1) {
+		// Set team_template for team targets
+		if (target.type === 'team') {
+			sub.team_template = (target.data as TeamNodeData).templateId;
+		}
+
+		if (incomingActionEdges.length > 1) {
 			// Fan-in: multiple source sessions
-			sub.source_session = incomingAgentEdges
+			sub.source_session = incomingActionEdges
 				.map((e) => {
 					const src = nodeMap.get(e.source);
-					return src ? (src.data as AgentNodeData).sessionName : '';
+					return src ? getActionNodeName(src) : '';
 				})
 				.filter(Boolean);
 		} else {
-			sub.source_session = fromAgentData.sessionName;
+			sub.source_session = fromSourceName;
 		}
 
 		subscriptions.push(sub);
@@ -280,9 +322,13 @@ export function pipelinesToYaml(
 				event: sub.event,
 			};
 
-			// Bind subscription to its owning agent by session ID
-			const agentId = subAgentIdMap.get(sub.name);
-			if (agentId) record.agent_id = agentId;
+			// Bind subscription to its owning agent/team
+			if (sub.team_template) {
+				record.team_template = sub.team_template;
+			} else {
+				const agentId = subAgentIdMap.get(sub.name);
+				if (agentId) record.agent_id = agentId;
+			}
 
 			if (sub.label) record.label = sub.label;
 			if (sub.interval_minutes != null) record.interval_minutes = sub.interval_minutes;
@@ -326,8 +372,8 @@ export function pipelinesToYaml(
 					const sourceName =
 						sourceNode.type === 'trigger'
 							? (sourceNode.data as TriggerNodeData).label
-							: (sourceNode.data as AgentNodeData).sessionName;
-					const targetName = (targetNode.data as AgentNodeData).sessionName;
+							: getActionNodeName(sourceNode);
+					const targetName = getActionNodeName(targetNode);
 					comments.push(`# Edge ${sourceName} -> ${targetName}: ${comment.replace('# ', '')}`);
 				}
 			}
@@ -356,8 +402,8 @@ export function pipelinesToYaml(
 }
 
 /**
- * Builds a map from subscription name to the agent session name that owns it.
- * Used for generating prompt file paths with the agent name.
+ * Builds a map from subscription name to the action node name (session name or template name).
+ * Used for generating prompt file paths.
  */
 function buildSubAgentMap(pipeline: CuePipeline): Map<string, string> {
 	const result = new Map<string, string>();
@@ -375,23 +421,23 @@ function buildSubAgentMap(pipeline: CuePipeline): Map<string, string> {
 		const directTargets = triggerOutgoing
 			.map((e) => nodeMap.get(e.target))
 			.filter(Boolean) as PipelineNode[];
-		const agentTargets = directTargets.filter((n) => n.type === 'agent');
-		if (agentTargets.length === 0) continue;
+		const actionTargets = directTargets.filter(isActionNode);
+		if (actionTargets.length === 0) continue;
 
 		const subName = chainIndex === 0 ? pipeline.name : `${pipeline.name}-chain-${chainIndex}`;
 		chainIndex++;
 
-		if (agentTargets.length === 1) {
-			result.set(subName, (agentTargets[0].data as AgentNodeData).sessionName);
-			visited.add(agentTargets[0].id);
-			buildSubAgentMapChain(agentTargets[0], pipeline.name, result, outgoing, nodeMap, visited);
+		if (actionTargets.length === 1) {
+			result.set(subName, getActionNodeName(actionTargets[0]));
+			visited.add(actionTargets[0].id);
+			buildSubAgentMapChain(actionTargets[0], pipeline.name, result, outgoing, nodeMap, visited);
 			chainIndex = result.size;
 		} else {
-			// Fan-out: use first agent name for the subscription
-			result.set(subName, (agentTargets[0].data as AgentNodeData).sessionName);
-			for (const agent of agentTargets) visited.add(agent.id);
-			for (const agent of agentTargets) {
-				buildSubAgentMapChain(agent, pipeline.name, result, outgoing, nodeMap, visited);
+			// Fan-out: use first target's name for the subscription
+			result.set(subName, getActionNodeName(actionTargets[0]));
+			for (const target of actionTargets) visited.add(target.id);
+			for (const target of actionTargets) {
+				buildSubAgentMapChain(target, pipeline.name, result, outgoing, nodeMap, visited);
 			}
 			chainIndex = result.size;
 		}
@@ -403,6 +449,7 @@ function buildSubAgentMap(pipeline: CuePipeline): Map<string, string> {
 /**
  * Builds a map from subscription name to the agent session ID that owns it.
  * Used for setting the agent_id field in YAML so subscriptions are bound to specific agents.
+ * Team nodes are excluded — they use team_template instead of agent_id.
  */
 function buildSubAgentIdMap(pipeline: CuePipeline): Map<string, string> {
 	const result = new Map<string, string>();
@@ -420,25 +467,30 @@ function buildSubAgentIdMap(pipeline: CuePipeline): Map<string, string> {
 		const directTargets = triggerOutgoing
 			.map((e) => nodeMap.get(e.target))
 			.filter(Boolean) as PipelineNode[];
-		const agentTargets = directTargets.filter((n) => n.type === 'agent');
-		if (agentTargets.length === 0) continue;
+		const actionTargets = directTargets.filter(isActionNode);
+		if (actionTargets.length === 0) continue;
 
 		const subName = chainIndex === 0 ? pipeline.name : `${pipeline.name}-chain-${chainIndex}`;
 		chainIndex++;
 
-		if (agentTargets.length === 1) {
-			result.set(subName, (agentTargets[0].data as AgentNodeData).sessionId);
-			visited.add(agentTargets[0].id);
-			buildSubAgentIdMapChain(agentTargets[0], pipeline.name, result, outgoing, nodeMap, visited);
-			chainIndex = result.size;
-		} else {
-			// Fan-out: use first agent's ID for the subscription
-			result.set(subName, (agentTargets[0].data as AgentNodeData).sessionId);
-			for (const agent of agentTargets) visited.add(agent.id);
-			for (const agent of agentTargets) {
-				buildSubAgentIdMapChain(agent, pipeline.name, result, outgoing, nodeMap, visited);
+		if (actionTargets.length === 1) {
+			// Only set agent_id for agent nodes, not team nodes
+			if (actionTargets[0].type === 'agent') {
+				result.set(subName, (actionTargets[0].data as AgentNodeData).sessionId);
 			}
-			chainIndex = result.size;
+			visited.add(actionTargets[0].id);
+			buildSubAgentIdMapChain(actionTargets[0], pipeline.name, result, outgoing, nodeMap, visited);
+			chainIndex = Math.max(result.size, chainIndex);
+		} else {
+			// Fan-out: use first agent's ID for the subscription (if it's an agent)
+			if (actionTargets[0].type === 'agent') {
+				result.set(subName, (actionTargets[0].data as AgentNodeData).sessionId);
+			}
+			for (const target of actionTargets) visited.add(target.id);
+			for (const target of actionTargets) {
+				buildSubAgentIdMapChain(target, pipeline.name, result, outgoing, nodeMap, visited);
+			}
+			chainIndex = Math.max(result.size, chainIndex);
 		}
 	}
 
@@ -456,14 +508,17 @@ function buildSubAgentIdMapChain(
 	const fromOutgoing = outgoing.get(fromNode.id) ?? [];
 	const targets = fromOutgoing
 		.map((e) => nodeMap.get(e.target))
-		.filter((n): n is PipelineNode => n != null && n.type === 'agent');
+		.filter((n): n is PipelineNode => n != null && isActionNode(n));
 
 	for (const target of targets) {
 		if (visited.has(target.id)) continue;
 		visited.add(target.id);
 
-		const subName = `${pipelineName}-chain-${result.size}`;
-		result.set(subName, (target.data as AgentNodeData).sessionId);
+		// Only map agent nodes — team nodes use team_template (set on CueSubscription directly)
+		if (target.type === 'agent') {
+			const subName = `${pipelineName}-chain-${result.size}`;
+			result.set(subName, (target.data as AgentNodeData).sessionId);
+		}
 		buildSubAgentIdMapChain(target, pipelineName, result, outgoing, nodeMap, visited);
 	}
 }
@@ -479,14 +534,14 @@ function buildSubAgentMapChain(
 	const fromOutgoing = outgoing.get(fromNode.id) ?? [];
 	const targets = fromOutgoing
 		.map((e) => nodeMap.get(e.target))
-		.filter((n): n is PipelineNode => n != null && n.type === 'agent');
+		.filter((n): n is PipelineNode => n != null && isActionNode(n));
 
 	for (const target of targets) {
 		if (visited.has(target.id)) continue;
 		visited.add(target.id);
 
 		const subName = `${pipelineName}-chain-${result.size}`;
-		result.set(subName, (target.data as AgentNodeData).sessionName);
+		result.set(subName, getActionNodeName(target));
 		buildSubAgentMapChain(target, pipelineName, result, outgoing, nodeMap, visited);
 	}
 }

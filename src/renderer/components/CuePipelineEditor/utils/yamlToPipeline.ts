@@ -2,7 +2,7 @@
  * Converts existing YAML/subscriptions back into visual pipeline graph state.
  *
  * Reverses the pipelineToYaml conversion: groups subscriptions by pipeline name,
- * reconstructs trigger/agent nodes and edges, and auto-layouts the graph.
+ * reconstructs trigger/agent/team nodes and edges, and auto-layouts the graph.
  */
 
 import type {
@@ -11,7 +11,9 @@ import type {
 	PipelineEdge,
 	TriggerNodeData,
 	AgentNodeData,
+	TeamNodeData,
 	CueEventType,
+	CuePipelineTeamInfo,
 	EdgeMode,
 } from '../../../../shared/cue-pipeline-types';
 import { getNextPipelineColor } from '../../../../shared/cue-pipeline-types';
@@ -38,6 +40,7 @@ interface GraphSessionInput {
 		repo?: string;
 		poll_minutes?: number;
 		agent_id?: string;
+		team_template?: string;
 		label?: string;
 	}>;
 }
@@ -185,14 +188,94 @@ function getOrCreateAgentNode(
 }
 
 /**
+ * Finds or creates a team node, deduplicating by template ID.
+ */
+function getOrCreateTeamNode(
+	templateId: string,
+	teams: CuePipelineTeamInfo[],
+	nodeMap: Map<string, PipelineNode>,
+	position: { x: number; y: number }
+): PipelineNode {
+	// Check if we already have a node for this template
+	for (const [, node] of nodeMap) {
+		if (node.type === 'team' && (node.data as TeamNodeData).templateId === templateId) {
+			return node;
+		}
+	}
+
+	const team = teams.find((t) => t.id === templateId);
+	const nodeId = `team-${templateId}-${nodeMap.size}`;
+
+	const node: PipelineNode = {
+		id: nodeId,
+		type: 'team',
+		position,
+		data: {
+			templateId,
+			templateName: team?.name ?? 'Unknown Team',
+			roleCount: team?.roleCount ?? 0,
+			topologyPattern: team?.topologyPattern,
+		} as TeamNodeData,
+	};
+
+	nodeMap.set(nodeId, node);
+	return node;
+}
+
+/**
+ * Creates the appropriate action node (agent or team) for a subscription.
+ * Returns the node and its tracking name for the sessionToNode map.
+ */
+function getOrCreateActionNode(
+	sub: CueSubscription,
+	sessions: PipelineSessionInfo[],
+	teams: CuePipelineTeamInfo[],
+	nodeMap: Map<string, PipelineNode>,
+	position: { x: number; y: number },
+	allSubs: CueSubscription[]
+): { node: PipelineNode; trackingName: string } | null {
+	if (sub.team_template) {
+		const node = getOrCreateTeamNode(sub.team_template, teams, nodeMap, position);
+		const team = teams.find((t) => t.id === sub.team_template);
+		return { node, trackingName: team?.name ?? sub.team_template };
+	}
+
+	const targetSessionName = findTargetSession(sub, allSubs, sessions);
+	if (!targetSessionName) return null;
+
+	const node = getOrCreateAgentNode(targetSessionName, sessions, nodeMap, position);
+	return { node, trackingName: targetSessionName };
+}
+
+/**
+ * Sets input/output prompts on a target node, abstracting over agent vs team data types.
+ */
+function setNodePrompts(
+	node: PipelineNode,
+	inputPrompt: string | undefined,
+	outputPrompt: string | undefined
+): void {
+	if (node.type === 'team') {
+		const data = node.data as TeamNodeData;
+		if (inputPrompt !== undefined) data.inputPrompt = inputPrompt;
+		if (outputPrompt !== undefined) data.outputPrompt = outputPrompt;
+	} else {
+		const data = node.data as AgentNodeData;
+		if (inputPrompt !== undefined) data.inputPrompt = inputPrompt;
+		if (outputPrompt !== undefined) data.outputPrompt = outputPrompt;
+	}
+}
+
+/**
  * Converts CueSubscription objects back into visual CuePipeline structures.
  *
- * Groups subscriptions by name prefix, reconstructs trigger and agent nodes,
+ * Groups subscriptions by name prefix, reconstructs trigger, agent, and team nodes,
  * creates edges for chains/fan-out/fan-in, and auto-layouts the graph.
  */
 export function subscriptionsToPipelines(
 	subscriptions: CueSubscription[],
-	sessions: PipelineSessionInfo[]
+	sessions: PipelineSessionInfo[],
+	teams: CuePipelineTeamInfo[] = []
 ): CuePipeline[] {
 	const groups = groupSubscriptionsByPipeline(subscriptions);
 	const pipelines: CuePipeline[] = [];
@@ -210,12 +293,12 @@ export function subscriptionsToPipelines(
 
 		let triggerCount = 0;
 		let columnIndex = 0;
-		// Track which column each session name appears in for layout
+		// Track which column each session/team name appears in for layout
 		const sessionColumn = new Map<string, number>();
 		const sessionRow = new Map<string, number>();
 		let edgeCount = 0;
 
-		// Track the agent node for each session name for deduplication
+		// Track the action node for each session/team name for deduplication
 		const sessionToNode = new Map<string, PipelineNode>();
 
 		for (const sub of sorted) {
@@ -271,49 +354,52 @@ export function subscriptionsToPipelines(
 						});
 					}
 				} else {
-					// Single target - infer target from subscription context
-					const targetSessionName = findTargetSession(sub, subs, sessions);
-					if (targetSessionName) {
-						const pos = {
-							x: LAYOUT.firstAgentX,
-							y: LAYOUT.baseY + (triggerCount - 1) * LAYOUT.verticalSpacing,
-						};
+					// Single target — create team or agent node based on subscription type
+					const pos = {
+						x: LAYOUT.firstAgentX,
+						y: LAYOUT.baseY + (triggerCount - 1) * LAYOUT.verticalSpacing,
+					};
 
-						const agentNode = getOrCreateAgentNode(targetSessionName, sessions, nodeMap, pos);
-						const isReusedAgent = sessionToNode.has(targetSessionName);
-						sessionToNode.set(targetSessionName, agentNode);
-						sessionColumn.set(targetSessionName, 1);
-						sessionRow.set(targetSessionName, triggerCount - 1);
+					const result = getOrCreateActionNode(sub, sessions, teams, nodeMap, pos, subs);
+					if (result) {
+						const { node: targetNode, trackingName } = result;
+						const isReused = sessionToNode.has(trackingName);
+						sessionToNode.set(trackingName, targetNode);
+						sessionColumn.set(trackingName, 1);
+						sessionRow.set(trackingName, triggerCount - 1);
 
-						if (sub.output_prompt) {
-							(agentNode.data as AgentNodeData).outputPrompt = sub.output_prompt;
+						if (targetNode.type === 'team') {
+							setNodePrompts(targetNode, sub.prompt, sub.output_prompt);
+						} else {
+							if (sub.output_prompt) {
+								(targetNode.data as AgentNodeData).outputPrompt = sub.output_prompt;
+							}
+
+							// Store prompt on edge when agent has multiple incoming triggers,
+							// otherwise set it on the agent node for backward compat.
+							if (!isReused && sub.prompt) {
+								(targetNode.data as AgentNodeData).inputPrompt = sub.prompt;
+							}
 						}
 
-						// Store prompt on edge when agent has multiple incoming triggers,
-						// otherwise set it on the agent node for backward compat.
-						const edgePrompt = isReusedAgent ? sub.prompt || undefined : undefined;
-						if (!isReusedAgent && sub.prompt) {
-							(agentNode.data as AgentNodeData).inputPrompt = sub.prompt;
-						}
-
+						const edgePrompt =
+							isReused && targetNode.type === 'agent' ? sub.prompt || undefined : undefined;
 						edges.push({
 							id: `edge-${edgeCount++}`,
 							source: triggerId,
-							target: agentNode.id,
+							target: targetNode.id,
 							mode: 'pass' as EdgeMode,
 							prompt: edgePrompt,
 						});
 
 						// If this agent was previously added with a node-level prompt and
 						// now has a second trigger, migrate the first edge's prompt too.
-						if (isReusedAgent && sub.prompt) {
-							const firstEdge = edges.find((e) => e.target === agentNode.id && !e.prompt);
+						if (isReused && targetNode.type === 'agent' && sub.prompt) {
+							const firstEdge = edges.find((e) => e.target === targetNode.id && !e.prompt);
 							if (firstEdge) {
-								firstEdge.prompt = (agentNode.data as AgentNodeData).inputPrompt || undefined;
-								// Clear node-level prompt since we're now using per-edge prompts
-								(agentNode.data as AgentNodeData).inputPrompt = undefined;
+								firstEdge.prompt = (targetNode.data as AgentNodeData).inputPrompt || undefined;
+								(targetNode.data as AgentNodeData).inputPrompt = undefined;
 							}
-							// Set this edge's prompt
 							edges[edges.length - 1].prompt = sub.prompt;
 						}
 					}
@@ -327,11 +413,6 @@ export function subscriptionsToPipelines(
 						? [sub.source_session]
 						: [];
 
-				// Find or create target agent node
-				// Target is inferred from the next chain subscription or from session matching
-				const targetSessionName = findTargetSession(sub, subs, sessions);
-				if (!targetSessionName) continue;
-
 				const targetCol = columnIndex;
 				const existingRows = [...sessionColumn.entries()].filter(
 					([, col]) => col === targetCol
@@ -342,10 +423,14 @@ export function subscriptionsToPipelines(
 					y: LAYOUT.baseY + existingRows * LAYOUT.verticalSpacing,
 				};
 
-				const targetNode = getOrCreateAgentNode(targetSessionName, sessions, nodeMap, pos);
-				sessionToNode.set(targetSessionName, targetNode);
-				sessionColumn.set(targetSessionName, targetCol);
-				sessionRow.set(targetSessionName, existingRows);
+				// Create team or agent node based on subscription type
+				const result = getOrCreateActionNode(sub, sessions, teams, nodeMap, pos, subs);
+				if (!result) continue;
+
+				const { node: targetNode, trackingName } = result;
+				sessionToNode.set(trackingName, targetNode);
+				sessionColumn.set(trackingName, targetCol);
+				sessionRow.set(trackingName, existingRows);
 
 				if (sub.prompt) {
 					// Strip auto-injected {{CUE_SOURCE_OUTPUT}} prefix to prevent accumulation on round-trip
@@ -357,10 +442,10 @@ export function subscriptionsToPipelines(
 					} else if (strippedPrompt === BARE_TOKEN) {
 						strippedPrompt = '';
 					}
-					(targetNode.data as AgentNodeData).inputPrompt = strippedPrompt || undefined;
+					setNodePrompts(targetNode, strippedPrompt || undefined, undefined);
 				}
 				if (sub.output_prompt) {
-					(targetNode.data as AgentNodeData).outputPrompt = sub.output_prompt;
+					setNodePrompts(targetNode, undefined, sub.output_prompt);
 				}
 
 				// Create edges from source(s) to target
@@ -523,7 +608,8 @@ function getChainIndex(name: string): number {
  */
 export function graphSessionsToPipelines(
 	graphSessions: GraphSessionInput[],
-	allSessions: PipelineSessionInfo[]
+	allSessions: PipelineSessionInfo[],
+	teams: CuePipelineTeamInfo[] = []
 ): CuePipeline[] {
 	// Collect all subscriptions across all graph sessions, deduplicating by name.
 	// Multiple sessions sharing the same project root load the same cue.yaml,
@@ -557,5 +643,5 @@ export function graphSessionsToPipelines(
 		}
 	}
 
-	return subscriptionsToPipelines(allSubscriptions, allSessions);
+	return subscriptionsToPipelines(allSubscriptions, allSessions, teams);
 }

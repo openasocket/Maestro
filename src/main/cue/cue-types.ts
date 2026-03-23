@@ -76,6 +76,8 @@ export interface CueSubscription {
 	gh_state?: CueGitHubState;
 	/** Session ID of the agent that owns this subscription. When set, only that agent activates it. */
 	agent_id?: string;
+	/** TeamTemplate ID — when set, Cue spawns a group chat session instead of a single agent */
+	team_template?: string;
 	/** Human-readable label for the trigger (e.g. "Morning Check"). Editor metadata, ignored by engine. */
 	label?: string;
 }
