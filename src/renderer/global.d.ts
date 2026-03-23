@@ -2853,6 +2853,10 @@ interface MaestroAPI {
 			};
 			error?: string;
 		}>;
+		/** Subscribe to synopsis generation progress updates. Returns cleanup function. */
+		onSynopsisProgress: (
+			callback: (update: { chunkCount: number; bytesReceived: number; elapsedMs: number }) => void
+		) => () => void;
 		/** Subscribe to new history entries as they are added in real-time. Returns cleanup function. */
 		onHistoryEntryAdded: (
 			callback: (
