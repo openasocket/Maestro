@@ -9,21 +9,16 @@
  */
 
 import { useReducer, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Save, X, Plus, ArrowRight, GitBranch, Circle } from 'lucide-react';
+import { Save, X } from 'lucide-react';
 import type { Theme } from '../../../types';
 import type { TeamTemplate, TeamTemplateRole } from '../../../../shared/group-chat-types';
 import { AGENT_IDS } from '../../../../shared/agentIds';
-import type {
-	BuilderAction,
-	BuilderNodeType,
-	BuilderNode,
-	BuilderEdge,
-	BuilderState,
-} from './builderTypes';
-import { NODE_WIDTH, NODE_HEIGHT } from './builderTypes';
+import type { BuilderAction, BuilderNode, BuilderEdge, BuilderState } from './builderTypes';
 import { builderReducer, INITIAL_BUILDER_STATE } from './builderReducer';
 import { templateToBuilderState, builderStateToTemplate } from './builderSerializer';
 import { BuilderCanvas } from './BuilderCanvas';
+import { BuilderPalette } from './BuilderPalette';
+import type { PresetType } from './BuilderPalette';
 
 /** Agent IDs available for role assignment (exclude terminal) */
 const ROLE_AGENT_IDS = AGENT_IDS.filter((id) => id !== 'terminal');
@@ -34,24 +29,6 @@ interface PipelineBuilderProps {
 	onCancel: () => void;
 	theme: Theme;
 }
-
-interface PaletteItem {
-	label: string;
-	nodeType: BuilderNodeType;
-	icon: typeof Circle;
-	description: string;
-}
-
-const PALETTE_ITEMS: PaletteItem[] = [
-	{ label: 'Role Node', nodeType: 'role', icon: Circle, description: 'A participant role' },
-	{
-		label: 'Entry Point',
-		nodeType: 'entry',
-		icon: ArrowRight,
-		description: 'Workflow start node',
-	},
-	{ label: 'Exit Point', nodeType: 'exit', icon: GitBranch, description: 'Workflow end node' },
-];
 
 export function PipelineBuilder({
 	template,
@@ -99,6 +76,11 @@ export function PipelineBuilder({
 		}
 		onCancel();
 	}, [state.dirty, onCancel]);
+
+	// Load a preset pattern (stub until builderPresets.ts is implemented)
+	const handleLoadPreset = useCallback((_presetType: PresetType) => {
+		// Will be wired to builderPresets.ts generators + LOAD_PRESET action in Phase 03 tasks 2-3
+	}, []);
 
 	// Selected node/edge info
 	const selectedNode = useMemo(
@@ -181,61 +163,7 @@ export function PipelineBuilder({
 			{/* Main area: palette + canvas + inspector */}
 			<div className="flex flex-1 min-h-0">
 				{/* Left palette */}
-				<div
-					className="w-48 flex-shrink-0 border-r p-3 overflow-y-auto"
-					style={{
-						borderColor: theme.colors.border,
-						backgroundColor: theme.colors.bgSidebar,
-					}}
-				>
-					<h4
-						className="text-[10px] font-semibold uppercase tracking-wide mb-2"
-						style={{ color: theme.colors.textDim }}
-					>
-						Nodes
-					</h4>
-					<div className="space-y-2">
-						{PALETTE_ITEMS.map((item) => (
-							<PaletteItemCard key={item.nodeType} item={item} theme={theme} />
-						))}
-					</div>
-
-					<h4
-						className="text-[10px] font-semibold uppercase tracking-wide mt-4 mb-2"
-						style={{ color: theme.colors.textDim }}
-					>
-						Quick Add
-					</h4>
-					<button
-						onClick={() => {
-							const id = `node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-							dispatch({
-								type: 'ADD_NODE',
-								node: {
-									id,
-									roleId: id,
-									x: 100,
-									y: 100 + state.nodes.length * 100,
-									width: NODE_WIDTH,
-									height: NODE_HEIGHT,
-									type: 'role',
-								},
-								role: {
-									name: `Role ${state.nodes.filter((n) => n.type === 'role').length + 1}`,
-									agentId: 'claude-code',
-									description: '',
-								},
-							});
-						}}
-						className="flex items-center gap-1.5 w-full px-2 py-1.5 rounded text-xs transition-colors hover:opacity-80"
-						style={{
-							backgroundColor: theme.colors.bgActivity,
-							color: theme.colors.textDim,
-						}}
-					>
-						<Plus className="w-3 h-3" /> Add Role
-					</button>
-				</div>
+				<BuilderPalette state={state} theme={theme} onLoadPreset={handleLoadPreset} />
 
 				{/* Canvas */}
 				<div className="flex-1 min-w-0 relative">
@@ -263,7 +191,7 @@ export function PipelineBuilder({
 								}}
 							>
 								<p className="text-sm font-medium mb-1">Drag nodes from the palette</p>
-								<p className="text-xs">or use Quick Add to get started</p>
+								<p className="text-xs">or use a Quick Start Pattern to get started</p>
 							</div>
 						</div>
 					)}
@@ -280,52 +208,6 @@ export function PipelineBuilder({
 						theme={theme}
 					/>
 				)}
-			</div>
-		</div>
-	);
-}
-
-// ============================================================================
-// Palette item (draggable)
-// ============================================================================
-
-function PaletteItemCard({ item, theme }: { item: PaletteItem; theme: Theme }): JSX.Element {
-	const handleDragStart = useCallback(
-		(e: React.DragEvent) => {
-			e.dataTransfer.setData(
-				'application/pipeline-builder-node',
-				JSON.stringify({
-					nodeType: item.nodeType,
-					roleName: item.label,
-					agentId: 'claude-code',
-					description: item.description,
-				})
-			);
-			e.dataTransfer.effectAllowed = 'copy';
-		},
-		[item]
-	);
-
-	const Icon = item.icon;
-
-	return (
-		<div
-			draggable
-			onDragStart={handleDragStart}
-			className="flex items-center gap-2 px-2 py-2 rounded border cursor-grab transition-colors hover:opacity-80"
-			style={{
-				borderColor: theme.colors.border,
-				backgroundColor: theme.colors.bgMain,
-			}}
-		>
-			<Icon className="w-3.5 h-3.5 flex-shrink-0" style={{ color: theme.colors.accent }} />
-			<div>
-				<div className="text-xs font-medium" style={{ color: theme.colors.textMain }}>
-					{item.label}
-				</div>
-				<div className="text-[10px]" style={{ color: theme.colors.textDim }}>
-					{item.description}
-				</div>
 			</div>
 		</div>
 	);
