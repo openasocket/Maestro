@@ -178,7 +178,10 @@ export function builderStateToTemplate(state: BuilderState, existingId?: string)
 /**
  * Auto-detect workflow pattern from graph shape.
  */
-function detectPattern(nodes: BuilderNode[], edges: BuilderEdge[]): WorkflowTopology['pattern'] {
+export function detectPattern(
+	nodes: BuilderNode[],
+	edges: BuilderEdge[]
+): WorkflowTopology['pattern'] {
 	// Check for back-edges (review-loop)
 	const nodeOrder = new Map<string, number>();
 	nodes.forEach((n, i) => nodeOrder.set(n.id, i));

@@ -12,22 +12,19 @@ import { useReducer, useCallback, useEffect, useMemo, useRef, useState } from 'r
 import { Save, X } from 'lucide-react';
 import type { Theme } from '../../../types';
 import type { TeamTemplate, TeamTemplateRole } from '../../../../shared/group-chat-types';
-import { AGENT_IDS } from '../../../../shared/agentIds';
-import type { BuilderAction, BuilderNode, BuilderEdge, BuilderState } from './builderTypes';
+import type { BuilderNode, BuilderEdge } from './builderTypes';
 import { builderReducer, INITIAL_BUILDER_STATE } from './builderReducer';
 import { templateToBuilderState, builderStateToTemplate } from './builderSerializer';
 import { BuilderCanvas } from './BuilderCanvas';
 import { BuilderPalette } from './BuilderPalette';
 import type { PresetType } from './BuilderPalette';
+import { BuilderInspector } from './BuilderInspector';
 import {
 	createPipelinePreset,
 	createParallelMergePreset,
 	createReviewLoopPreset,
 	createHubSpokePreset,
 } from './builderPresets';
-
-/** Agent IDs available for role assignment (exclude terminal) */
-const ROLE_AGENT_IDS = AGENT_IDS.filter((id) => id !== 'terminal');
 
 interface PipelineBuilderProps {
 	template?: TeamTemplate;
@@ -222,248 +219,16 @@ export function PipelineBuilder({
 					)}
 				</div>
 
-				{/* Right inspector */}
-				{(selectedNode || selectedEdge) && (
-					<InspectorPanel
-						selectedNode={selectedNode}
-						selectedEdge={selectedEdge}
-						selectedRole={selectedRole}
-						state={state}
-						dispatch={dispatch}
-						theme={theme}
-					/>
-				)}
+				{/* Right inspector — always visible */}
+				<BuilderInspector
+					state={state}
+					dispatch={dispatch}
+					theme={theme}
+					selectedNode={selectedNode}
+					selectedEdge={selectedEdge}
+					selectedRole={selectedRole}
+				/>
 			</div>
 		</div>
 	);
-}
-
-// ============================================================================
-// Inspector panel
-// ============================================================================
-
-function InspectorPanel({
-	selectedNode,
-	selectedEdge,
-	selectedRole,
-	state,
-	dispatch,
-	theme,
-}: {
-	selectedNode: BuilderNode | null;
-	selectedEdge: BuilderEdge | null;
-	selectedRole: TeamTemplateRole | null;
-	state: BuilderState;
-	dispatch: React.Dispatch<BuilderAction>;
-	theme: Theme;
-}): JSX.Element {
-	if (selectedNode && selectedRole) {
-		return (
-			<div
-				className="w-56 flex-shrink-0 border-l p-3 overflow-y-auto"
-				style={{
-					borderColor: theme.colors.border,
-					backgroundColor: theme.colors.bgSidebar,
-				}}
-			>
-				<h4
-					className="text-[10px] font-semibold uppercase tracking-wide mb-3"
-					style={{ color: theme.colors.textDim }}
-				>
-					Node Properties
-				</h4>
-
-				<label className="block mb-2">
-					<span className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
-						Name
-					</span>
-					<input
-						type="text"
-						value={selectedRole.name}
-						onChange={(e) =>
-							dispatch({
-								type: 'UPDATE_ROLE',
-								roleId: selectedNode.roleId,
-								role: { ...selectedRole, name: e.target.value },
-							})
-						}
-						className="w-full mt-0.5 px-2 py-1 rounded text-xs border outline-none"
-						style={{
-							backgroundColor: theme.colors.bgMain,
-							borderColor: theme.colors.border,
-							color: theme.colors.textMain,
-						}}
-					/>
-				</label>
-
-				<label className="block mb-2">
-					<span className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
-						Agent
-					</span>
-					<select
-						value={selectedRole.agentId}
-						onChange={(e) =>
-							dispatch({
-								type: 'UPDATE_ROLE',
-								roleId: selectedNode.roleId,
-								role: { ...selectedRole, agentId: e.target.value },
-							})
-						}
-						className="w-full mt-0.5 px-2 py-1 rounded text-xs border outline-none"
-						style={{
-							backgroundColor: theme.colors.bgMain,
-							borderColor: theme.colors.border,
-							color: theme.colors.textMain,
-						}}
-					>
-						{ROLE_AGENT_IDS.map((id) => (
-							<option key={id} value={id}>
-								{id}
-							</option>
-						))}
-					</select>
-				</label>
-
-				<label className="block mb-3">
-					<span className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
-						Description
-					</span>
-					<textarea
-						value={selectedRole.description}
-						onChange={(e) =>
-							dispatch({
-								type: 'UPDATE_ROLE',
-								roleId: selectedNode.roleId,
-								role: { ...selectedRole, description: e.target.value },
-							})
-						}
-						rows={3}
-						className="w-full mt-0.5 px-2 py-1 rounded text-xs border outline-none resize-none"
-						style={{
-							backgroundColor: theme.colors.bgMain,
-							borderColor: theme.colors.border,
-							color: theme.colors.textMain,
-						}}
-					/>
-				</label>
-
-				<div className="text-[10px] space-y-1" style={{ color: theme.colors.textDim }}>
-					<div>Type: {selectedNode.type}</div>
-					<div>
-						Position: ({selectedNode.x}, {selectedNode.y})
-					</div>
-				</div>
-
-				<button
-					onClick={() => dispatch({ type: 'DELETE_NODE', nodeId: selectedNode.id })}
-					className="mt-3 w-full px-2 py-1.5 rounded text-xs text-center transition-colors hover:opacity-80"
-					style={{
-						backgroundColor: `${theme.colors.error}15`,
-						color: theme.colors.error,
-					}}
-				>
-					Delete Node
-				</button>
-			</div>
-		);
-	}
-
-	if (selectedEdge) {
-		return (
-			<div
-				className="w-56 flex-shrink-0 border-l p-3 overflow-y-auto"
-				style={{
-					borderColor: theme.colors.border,
-					backgroundColor: theme.colors.bgSidebar,
-				}}
-			>
-				<h4
-					className="text-[10px] font-semibold uppercase tracking-wide mb-3"
-					style={{ color: theme.colors.textDim }}
-				>
-					Edge Properties
-				</h4>
-
-				<label className="block mb-2">
-					<span className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
-						Type
-					</span>
-					<select
-						value={selectedEdge.edgeType}
-						onChange={(e) =>
-							dispatch({
-								type: 'UPDATE_EDGE',
-								edgeId: selectedEdge.id,
-								edgeType: e.target.value as 'sequential' | 'parallel' | 'conditional',
-								condition: selectedEdge.condition,
-							})
-						}
-						className="w-full mt-0.5 px-2 py-1 rounded text-xs border outline-none"
-						style={{
-							backgroundColor: theme.colors.bgMain,
-							borderColor: theme.colors.border,
-							color: theme.colors.textMain,
-						}}
-					>
-						<option value="sequential">Sequential</option>
-						<option value="parallel">Parallel</option>
-						<option value="conditional">Conditional</option>
-					</select>
-				</label>
-
-				{selectedEdge.edgeType === 'conditional' && (
-					<label className="block mb-2">
-						<span className="text-[10px] font-medium" style={{ color: theme.colors.textDim }}>
-							Condition
-						</span>
-						<input
-							type="text"
-							value={selectedEdge.condition ?? ''}
-							onChange={(e) =>
-								dispatch({
-									type: 'UPDATE_EDGE',
-									edgeId: selectedEdge.id,
-									edgeType: selectedEdge.edgeType,
-									condition: e.target.value || undefined,
-								})
-							}
-							placeholder="e.g., needs revision"
-							className="w-full mt-0.5 px-2 py-1 rounded text-xs border outline-none"
-							style={{
-								backgroundColor: theme.colors.bgMain,
-								borderColor: theme.colors.border,
-								color: theme.colors.textMain,
-							}}
-						/>
-					</label>
-				)}
-
-				<div className="text-[10px] space-y-1 mb-3" style={{ color: theme.colors.textDim }}>
-					<div>
-						From:{' '}
-						{state.roles[state.nodes.find((n) => n.id === selectedEdge.sourceNodeId)?.roleId ?? '']
-							?.name ?? 'Unknown'}
-					</div>
-					<div>
-						To:{' '}
-						{state.roles[state.nodes.find((n) => n.id === selectedEdge.targetNodeId)?.roleId ?? '']
-							?.name ?? 'Unknown'}
-					</div>
-				</div>
-
-				<button
-					onClick={() => dispatch({ type: 'DELETE_EDGE', edgeId: selectedEdge.id })}
-					className="w-full px-2 py-1.5 rounded text-xs text-center transition-colors hover:opacity-80"
-					style={{
-						backgroundColor: `${theme.colors.error}15`,
-						color: theme.colors.error,
-					}}
-				>
-					Delete Edge
-				</button>
-			</div>
-		);
-	}
-
-	return <></>;
 }
