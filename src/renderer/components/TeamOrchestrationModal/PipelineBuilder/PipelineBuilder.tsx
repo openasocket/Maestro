@@ -23,6 +23,7 @@ import {
 	builderStateToTemplate,
 	autoLayoutNodes,
 } from './builderSerializer';
+import { validateBuilderState, getErrorNodeIds } from './builderValidation';
 import { useBuilderHistory } from './useBuilderHistory';
 import { BuilderCanvas } from './BuilderCanvas';
 import { BuilderPalette } from './BuilderPalette';
@@ -36,6 +37,7 @@ import {
 	createReviewLoopPreset,
 	createHubSpokePreset,
 } from './builderPresets';
+import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface PipelineBuilderProps {
 	template?: TeamTemplate;
@@ -59,6 +61,11 @@ export function PipelineBuilder({
 	const [saving, setSaving] = useState(false);
 	const [showPreview, setShowPreview] = useState(false);
 	const canvasContainerRef = useRef<HTMLDivElement>(null);
+	const [errorsExpanded, setErrorsExpanded] = useState(true);
+
+	// Validation
+	const validation = useMemo(() => validateBuilderState(state), [state]);
+	const errorNodeIds = useMemo(() => getErrorNodeIds(validation.errors), [validation.errors]);
 
 	// Initialize state from template (or blank)
 	useEffect(() => {
@@ -82,8 +89,7 @@ export function PipelineBuilder({
 
 	// Save handler
 	const handleSave = useCallback(() => {
-		if (!state.templateMeta.name.trim()) return;
-		if (state.nodes.length === 0) return;
+		if (!validation.valid) return;
 		setSaving(true);
 		try {
 			const result = builderStateToTemplate(state, template?.id);
@@ -91,7 +97,7 @@ export function PipelineBuilder({
 		} finally {
 			setSaving(false);
 		}
-	}, [state, template, onSave]);
+	}, [state, template, onSave, validation.valid]);
 
 	// Cancel with dirty check
 	const handleCancel = useCallback(() => {
@@ -250,7 +256,7 @@ export function PipelineBuilder({
 	);
 	const selectedRole = selectedNode ? (state.roles[selectedNode.roleId] ?? null) : null;
 
-	const canSave = state.templateMeta.name.trim().length > 0 && state.nodes.length > 0;
+	const canSave = validation.valid;
 
 	return (
 		<div className="flex flex-col w-full h-full" style={{ backgroundColor: theme.colors.bgMain }}>
@@ -276,6 +282,47 @@ export function PipelineBuilder({
 				onTogglePreview={handleTogglePreview}
 				hasNodes={state.nodes.length > 0}
 			/>
+
+			{/* Validation warning banner */}
+			{validation.errors.length > 0 && state.nodes.length > 0 && (
+				<div
+					className="flex-shrink-0 border-b"
+					style={{
+						borderColor: theme.colors.border,
+						backgroundColor: `${theme.colors.error ?? '#ef4444'}10`,
+					}}
+				>
+					<button
+						onClick={() => setErrorsExpanded((p) => !p)}
+						className="flex items-center gap-2 w-full px-3 py-1.5 text-xs"
+						style={{ color: theme.colors.error ?? '#ef4444' }}
+					>
+						<AlertTriangle className="w-3 h-3 flex-shrink-0" />
+						<span className="font-medium">
+							{validation.errors.length} validation{' '}
+							{validation.errors.length === 1 ? 'issue' : 'issues'}
+						</span>
+						{errorsExpanded ? (
+							<ChevronUp className="w-3 h-3 ml-auto flex-shrink-0" />
+						) : (
+							<ChevronDown className="w-3 h-3 ml-auto flex-shrink-0" />
+						)}
+					</button>
+					{errorsExpanded && (
+						<div className="px-3 pb-2 flex flex-col gap-0.5">
+							{validation.errors.map((err, i) => (
+								<span
+									key={i}
+									className="text-xs pl-5"
+									style={{ color: theme.colors.error ?? '#ef4444' }}
+								>
+									{err.message}
+								</span>
+							))}
+						</div>
+					)}
+				</div>
+			)}
 
 			{/* Main area: palette + canvas + inspector */}
 			<div className="flex flex-1 min-h-0">
@@ -311,7 +358,12 @@ export function PipelineBuilder({
 						</div>
 					) : (
 						<>
-							<BuilderCanvas state={state} dispatch={dispatch} theme={theme} />
+							<BuilderCanvas
+								state={state}
+								dispatch={dispatch}
+								theme={theme}
+								errorNodeIds={errorNodeIds}
+							/>
 
 							{/* Empty state hint */}
 							{state.nodes.length === 0 && (

@@ -24,6 +24,7 @@ interface BuilderCanvasProps {
 	state: BuilderState;
 	dispatch: React.Dispatch<BuilderAction>;
 	theme: Theme;
+	errorNodeIds?: Set<string>;
 }
 
 /** Convert client mouse coords to SVG canvas coords accounting for viewport */
@@ -53,7 +54,12 @@ function getEdgeColor(edgeType: string, theme: Theme): string {
 	}
 }
 
-export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): JSX.Element {
+export function BuilderCanvas({
+	state,
+	dispatch,
+	theme,
+	errorNodeIds,
+}: BuilderCanvasProps): JSX.Element {
 	const svgRef = useRef<SVGSVGElement>(null);
 	const [spaceHeld, setSpaceHeld] = useState(false);
 	const panRef = useRef<{ startX: number; startY: number; vpX: number; vpY: number } | null>(null);
@@ -505,7 +511,9 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 						theme={theme}
 						selected={node.id === state.selectedNodeId}
 						isOrphaned={validationInfo.orphanedNodes.has(node.id)}
-						hasWarning={validationInfo.warningNodes.has(node.id)}
+						hasWarning={
+							validationInfo.warningNodes.has(node.id) || (errorNodeIds?.has(node.id) ?? false)
+						}
 						dispatch={dispatch}
 						viewportZoom={vp.zoom}
 						onOutputPortMouseDown={handleOutputPortMouseDown}
