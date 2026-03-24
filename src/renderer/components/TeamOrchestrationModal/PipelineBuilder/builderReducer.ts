@@ -167,6 +167,19 @@ export function builderReducer(state: BuilderState, action: BuilderAction): Buil
 			return action.state;
 		}
 
+		case 'LOAD_PRESET': {
+			return {
+				...state,
+				nodes: action.nodes,
+				edges: action.edges,
+				roles: action.roles,
+				selectedNodeId: null,
+				selectedEdgeId: null,
+				viewport: { x: 0, y: 0, zoom: 1 },
+				dirty: true,
+			};
+		}
+
 		case 'CLEAR_SELECTION': {
 			return {
 				...state,

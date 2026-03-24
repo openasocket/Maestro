@@ -100,6 +100,12 @@ export type BuilderAction =
 	| { type: 'ZOOM_VIEWPORT'; zoom: number; centerX: number; centerY: number }
 	| { type: 'SET_TEMPLATE_META'; meta: Partial<TemplateMeta> }
 	| { type: 'LOAD_STATE'; state: BuilderState }
+	| {
+			type: 'LOAD_PRESET';
+			nodes: BuilderNode[];
+			edges: BuilderEdge[];
+			roles: Record<string, TeamTemplateRole>;
+	  }
 	| { type: 'CLEAR_SELECTION' };
 
 // ============================================================================

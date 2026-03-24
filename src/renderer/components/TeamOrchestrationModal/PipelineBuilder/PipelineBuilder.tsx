@@ -19,6 +19,12 @@ import { templateToBuilderState, builderStateToTemplate } from './builderSeriali
 import { BuilderCanvas } from './BuilderCanvas';
 import { BuilderPalette } from './BuilderPalette';
 import type { PresetType } from './BuilderPalette';
+import {
+	createPipelinePreset,
+	createParallelMergePreset,
+	createReviewLoopPreset,
+	createHubSpokePreset,
+} from './builderPresets';
 
 /** Agent IDs available for role assignment (exclude terminal) */
 const ROLE_AGENT_IDS = AGENT_IDS.filter((id) => id !== 'terminal');
@@ -77,10 +83,29 @@ export function PipelineBuilder({
 		onCancel();
 	}, [state.dirty, onCancel]);
 
-	// Load a preset pattern (stub until builderPresets.ts is implemented)
-	const handleLoadPreset = useCallback((_presetType: PresetType) => {
-		// Will be wired to builderPresets.ts generators + LOAD_PRESET action in Phase 03 tasks 2-3
-	}, []);
+	// Load a preset pattern onto the canvas
+	const handleLoadPreset = useCallback(
+		(presetType: PresetType) => {
+			const generators: Record<
+				PresetType,
+				() => {
+					nodes: BuilderNode[];
+					edges: BuilderEdge[];
+					roles: Record<string, TeamTemplateRole>;
+				}
+			> = {
+				pipeline: createPipelinePreset,
+				'parallel-merge': createParallelMergePreset,
+				'review-loop': createReviewLoopPreset,
+				'hub-spoke': createHubSpokePreset,
+			};
+			const generator = generators[presetType];
+			if (!generator) return;
+			const preset = generator();
+			dispatch({ type: 'LOAD_PRESET', ...preset });
+		},
+		[dispatch]
+	);
 
 	// Selected node/edge info
 	const selectedNode = useMemo(
