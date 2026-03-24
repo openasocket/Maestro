@@ -66,6 +66,9 @@ export function PipelineBuilder({
 	const [errorsExpanded, setErrorsExpanded] = useState(true);
 	const [showShortcutHelp, setShowShortcutHelp] = useState(false);
 	const [highlightedNodeIds, setHighlightedNodeIds] = useState<Set<string>>(new Set());
+	const [announcement, setAnnouncement] = useState('');
+	const prevNodeCountRef = useRef(0);
+	const prevEdgeCountRef = useRef(0);
 
 	// Validation
 	const validation = useMemo(() => validateBuilderState(state), [state]);
@@ -98,6 +101,7 @@ export function PipelineBuilder({
 		try {
 			const result = builderStateToTemplate(state, template?.id);
 			onSave(result);
+			setAnnouncement('Template saved');
 		} finally {
 			setSaving(false);
 		}
@@ -401,6 +405,29 @@ export function PipelineBuilder({
 		return () => window.removeEventListener('keydown', handler);
 	}, []);
 
+	// Announce state changes for screen readers
+	useEffect(() => {
+		const nodeCount = state.nodes.length;
+		const edgeCount = state.edges.length;
+		const prevNodes = prevNodeCountRef.current;
+		const prevEdges = prevEdgeCountRef.current;
+
+		if (prevNodes !== 0 || prevEdges !== 0) {
+			if (nodeCount > prevNodes) {
+				setAnnouncement('Node added');
+			} else if (nodeCount < prevNodes) {
+				setAnnouncement('Node deleted');
+			} else if (edgeCount > prevEdges) {
+				setAnnouncement('Edge created');
+			} else if (edgeCount < prevEdges) {
+				setAnnouncement('Edge deleted');
+			}
+		}
+
+		prevNodeCountRef.current = nodeCount;
+		prevEdgeCountRef.current = edgeCount;
+	}, [state.nodes.length, state.edges.length]);
+
 	// Clear highlights on selection change
 	useEffect(() => {
 		if (state.selectedNodeId || state.selectedEdgeId) {
@@ -436,7 +463,32 @@ export function PipelineBuilder({
 	const canSave = validation.valid;
 
 	return (
-		<div className="flex flex-col w-full h-full" style={{ backgroundColor: theme.colors.bgMain }}>
+		<div
+			className="flex flex-col w-full h-full"
+			style={{ backgroundColor: theme.colors.bgMain }}
+			role="region"
+			aria-label="Pipeline Builder"
+		>
+			{/* Screen reader announcements */}
+			<div
+				aria-live="polite"
+				aria-atomic="true"
+				className="sr-only"
+				style={{
+					position: 'absolute',
+					width: 1,
+					height: 1,
+					padding: 0,
+					margin: -1,
+					overflow: 'hidden',
+					clip: 'rect(0, 0, 0, 0)',
+					whiteSpace: 'nowrap',
+					border: 0,
+				}}
+			>
+				{announcement}
+			</div>
+
 			{/* Top toolbar */}
 			<BuilderToolbar
 				theme={theme}

@@ -66,6 +66,8 @@ export function BuilderInspector({
 	return (
 		<div
 			className="flex-shrink-0 border-l overflow-y-auto"
+			role="complementary"
+			aria-label="Inspector panel"
 			style={{ ...containerStyle, width: 280 }}
 		>
 			<div key={viewKey} className="p-3" style={{ animation: 'inspectorFadeIn 150ms ease-out' }}>
@@ -372,8 +374,11 @@ function RoleInspector({
 
 					{/* Input Contract */}
 					<div className="mb-2">
-						<SectionLabel theme={theme}>Input Contract</SectionLabel>
+						<label htmlFor="builder-input-contract">
+							<SectionLabel theme={theme}>Input Contract</SectionLabel>
+						</label>
 						<TagInput
+							id="builder-input-contract"
 							tags={role.inputContract ?? []}
 							onChange={(tags) => updateRole({ inputContract: tags })}
 							theme={theme}
@@ -383,8 +388,11 @@ function RoleInspector({
 
 					{/* Output Contract */}
 					<div className="mb-2">
-						<SectionLabel theme={theme}>Output Contract</SectionLabel>
+						<label htmlFor="builder-output-contract">
+							<SectionLabel theme={theme}>Output Contract</SectionLabel>
+						</label>
 						<TagInput
+							id="builder-output-contract"
 							tags={role.outputContract ?? []}
 							onChange={(tags) => updateRole({ outputContract: tags })}
 							theme={theme}
@@ -431,6 +439,7 @@ function RoleInspector({
 			{/* Delete */}
 			<button
 				onClick={handleDelete}
+				aria-label={deleteConfirm ? 'Click again to confirm deletion' : 'Delete Node'}
 				className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-xs transition-colors hover:opacity-80"
 				style={{
 					backgroundColor: deleteConfirm ? theme.colors.error : `${theme.colors.error}15`,
@@ -518,6 +527,8 @@ function EdgeInspector({
 									color: active ? '#fff' : theme.colors.textDim,
 								}}
 								title={label}
+								aria-label={`${label} edge type`}
+								aria-pressed={active}
 							>
 								<Icon className="w-3 h-3" />
 								<span className="hidden sm:inline">{label}</span>
@@ -562,6 +573,7 @@ function EdgeInspector({
 			{/* Delete */}
 			<button
 				onClick={() => dispatch({ type: 'DELETE_EDGE', edgeId: edge.id })}
+				aria-label="Delete Connection"
 				className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-xs transition-colors hover:opacity-80"
 				style={{
 					backgroundColor: `${theme.colors.error}15`,
@@ -644,11 +656,13 @@ function EdgePreview({ edgeType, theme }: { edgeType: BuilderEdge['edgeType']; t
 // ============================================================================
 
 function TagInput({
+	id,
 	tags,
 	onChange,
 	theme,
 	placeholder,
 }: {
+	id?: string;
 	tags: string[];
 	onChange: (tags: string[]) => void;
 	theme: Theme;
@@ -707,6 +721,7 @@ function TagInput({
 							e.stopPropagation();
 							removeTag(i);
 						}}
+						aria-label={`Remove ${tag}`}
 						className="ml-0.5 hover:opacity-70 leading-none"
 						style={{ color: theme.colors.accent }}
 					>
@@ -716,6 +731,7 @@ function TagInput({
 			))}
 			<input
 				ref={inputRef}
+				id={id}
 				type="text"
 				value={inputValue}
 				onChange={(e) => setInputValue(e.target.value)}

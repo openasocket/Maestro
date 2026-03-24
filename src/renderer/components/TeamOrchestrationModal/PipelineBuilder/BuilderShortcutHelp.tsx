@@ -71,6 +71,9 @@ export function BuilderShortcutHelp({ theme, onClose }: BuilderShortcutHelpProps
 	return (
 		<div
 			ref={panelRef}
+			role="dialog"
+			aria-label="Keyboard shortcuts"
+			aria-modal="false"
 			className="absolute bottom-4 right-4 z-50 rounded-lg border shadow-xl overflow-hidden"
 			style={{
 				backgroundColor: theme.colors.bgSidebar,

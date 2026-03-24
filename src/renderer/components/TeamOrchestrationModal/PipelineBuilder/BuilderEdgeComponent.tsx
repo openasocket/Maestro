@@ -19,6 +19,8 @@ interface BuilderEdgeComponentProps {
 	edge: BuilderEdge;
 	sourceNode: BuilderNode;
 	targetNode: BuilderNode;
+	sourceName: string;
+	targetName: string;
 	theme: Theme;
 	selected: boolean;
 	isBackEdge?: boolean;
@@ -79,6 +81,8 @@ export function BuilderEdgeComponent({
 	edge,
 	sourceNode,
 	targetNode,
+	sourceName,
+	targetName,
 	theme,
 	selected,
 	isBackEdge,
@@ -118,6 +122,9 @@ export function BuilderEdgeComponent({
 			onMouseLeave={() => setHovered(false)}
 			style={{ cursor: 'pointer' }}
 			data-edge-id={edge.id}
+			role="button"
+			aria-label={`Connection from ${sourceName} to ${targetName}`}
+			tabIndex={-1}
 		>
 			{/* Invisible wider path for easier click target */}
 			<path d={d} fill="none" stroke="transparent" strokeWidth={14} />

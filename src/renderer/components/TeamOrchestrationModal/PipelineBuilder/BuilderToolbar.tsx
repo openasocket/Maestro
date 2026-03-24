@@ -131,6 +131,8 @@ export function BuilderToolbar({
 	return (
 		<div
 			className="flex items-center justify-between px-3 border-b flex-shrink-0"
+			role="toolbar"
+			aria-label="Builder toolbar"
 			style={{
 				height: 48,
 				borderColor: theme.colors.border,
@@ -167,6 +169,7 @@ export function BuilderToolbar({
 						className="px-2 py-0.5 text-sm font-semibold rounded truncate cursor-text hover:opacity-80 transition-opacity"
 						style={{ color: theme.colors.textMain, maxWidth: 220 }}
 						title="Click to edit template name"
+						aria-label={`Template name: ${templateName}. Click to edit`}
 					>
 						{templateName || 'Untitled'}
 					</button>
@@ -246,6 +249,8 @@ export function BuilderToolbar({
 					disabled={!canSave || saving}
 					className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors"
 					title={`Save Template (${modKey}S)`}
+					aria-label={`Save Template (${modKey}S)`}
+					aria-disabled={!canSave || saving || undefined}
 					style={{
 						backgroundColor: canSave && !saving ? theme.colors.accent : theme.colors.border,
 						color: '#fff',
@@ -280,6 +285,8 @@ function ToolbarButton({ theme, onClick, icon, tooltip, disabled, active }: Tool
 			onClick={onClick}
 			disabled={disabled}
 			title={tooltip}
+			aria-label={tooltip}
+			aria-disabled={disabled || undefined}
 			className="flex items-center justify-center w-7 h-7 rounded transition-colors"
 			style={{
 				color: active

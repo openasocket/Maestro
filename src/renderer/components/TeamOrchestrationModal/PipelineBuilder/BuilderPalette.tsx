@@ -84,6 +84,8 @@ export function BuilderPalette({ state, theme, onLoadPreset }: BuilderPalettePro
 	return (
 		<div
 			className="flex-shrink-0 border-r overflow-y-auto flex flex-col"
+			role="complementary"
+			aria-label="Node palette"
 			style={{
 				width: 220,
 				borderColor: theme.colors.border,
@@ -98,7 +100,7 @@ export function BuilderPalette({ state, theme, onLoadPreset }: BuilderPalettePro
 				>
 					Nodes
 				</h4>
-				<div className="space-y-2">
+				<div className="space-y-2" role="list" aria-label="Draggable node types">
 					{NODE_ITEMS.map((item) => {
 						const disabled =
 							(item.nodeType === 'entry' && hasEntry) || (item.nodeType === 'exit' && hasExit);
@@ -174,6 +176,9 @@ function PaletteNodeCard({
 		<div
 			draggable={!disabled}
 			onDragStart={handleDragStart}
+			role="listitem"
+			aria-label={`Drag to add ${item.label} node`}
+			aria-disabled={disabled || undefined}
 			className="flex items-center gap-2 px-2.5 py-2 rounded border transition-colors"
 			style={{
 				borderColor: theme.colors.border,

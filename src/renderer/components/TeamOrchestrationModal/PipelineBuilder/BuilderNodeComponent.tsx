@@ -108,7 +108,14 @@ export function BuilderNodeComponent({
 	const outputPortY = cy;
 
 	return (
-		<g onMouseDown={handleMouseDown} style={{ cursor: 'grab' }}>
+		<g
+			onMouseDown={handleMouseDown}
+			style={{ cursor: 'grab' }}
+			role="button"
+			aria-label={`${roleName} node`}
+			aria-selected={selected}
+			tabIndex={-1}
+		>
 			{/* Glow effect for selected or highlighted (Cmd+A) */}
 			{(selected || highlighted) && (
 				<rect

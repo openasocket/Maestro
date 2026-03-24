@@ -406,9 +406,13 @@ export function BuilderCanvas({
 			ref={svgRef}
 			width="100%"
 			height="100%"
+			role="application"
+			aria-label="Pipeline builder canvas"
+			tabIndex={0}
 			style={{
 				cursor: spaceHeld ? 'grab' : 'default',
 				backgroundColor: theme.colors.bgMain,
+				outline: 'none',
 			}}
 			onWheel={handleWheel}
 			onMouseDown={handleMouseDown}
@@ -448,6 +452,8 @@ export function BuilderCanvas({
 							edge={edge}
 							sourceNode={source}
 							targetNode={target}
+							sourceName={state.roles[source.roleId]?.name ?? source.roleId}
+							targetName={state.roles[target.roleId]?.name ?? target.roleId}
 							theme={theme}
 							selected={edge.id === state.selectedEdgeId}
 							isBackEdge={validationInfo.backEdges.has(edge.id)}
