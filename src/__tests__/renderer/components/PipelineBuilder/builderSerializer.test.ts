@@ -465,6 +465,77 @@ describe('autoLayoutNodes', () => {
 		expect(result).toHaveLength(2);
 	});
 
+	it('should handle review-loop back-edges by removing them during layout', () => {
+		// Coder -> Reviewer (forward), Reviewer -> Coder (back-edge/review loop)
+		const nodes = [makeBuilderNode('coder', 'entry'), makeBuilderNode('reviewer', 'exit')];
+		const edges = [
+			makeBuilderEdge('coder', 'reviewer', 'sequential'),
+			makeBuilderEdge('reviewer', 'coder', 'conditional'),
+		];
+		const result = autoLayoutNodes(nodes, edges);
+
+		const coder = result.find((n) => n.id === 'coder')!;
+		const reviewer = result.find((n) => n.id === 'reviewer')!;
+		// Entry (coder) should still be above exit (reviewer) despite the back-edge
+		expect(coder.y).toBeLessThan(reviewer.y);
+	});
+
+	it('should place exit node at the final layer', () => {
+		// entry -> A -> B -> C, entry -> exit (exit has short path but should be last)
+		const nodes = [
+			makeBuilderNode('entry', 'entry'),
+			makeBuilderNode('a', 'role'),
+			makeBuilderNode('b', 'role'),
+			makeBuilderNode('c', 'role'),
+			makeBuilderNode('exit', 'exit'),
+		];
+		const edges = [
+			makeBuilderEdge('entry', 'a'),
+			makeBuilderEdge('a', 'b'),
+			makeBuilderEdge('b', 'c'),
+			makeBuilderEdge('c', 'exit'),
+			makeBuilderEdge('entry', 'exit'), // shortcut edge
+		];
+		const result = autoLayoutNodes(nodes, edges);
+
+		const exitNode = result.find((n) => n.id === 'exit')!;
+		// Exit should be at the deepest layer (same y as or below node c)
+		const cNode = result.find((n) => n.id === 'c')!;
+		expect(exitNode.y).toBeGreaterThanOrEqual(cNode.y);
+	});
+
+	it('should order nodes within a layer to minimize edge crossings', () => {
+		// Diamond: entry -> w1, entry -> w2, w1 -> end, w2 -> end
+		// But w1 connects to the left side and w2 to the right side of entry
+		// The barycenter heuristic should keep them ordered by parent position
+		const nodes = [
+			makeBuilderNode('entry', 'entry'),
+			makeBuilderNode('w1', 'role'),
+			makeBuilderNode('w2', 'role'),
+			makeBuilderNode('w3', 'role'),
+			makeBuilderNode('end', 'exit'),
+		];
+		const edges = [
+			makeBuilderEdge('entry', 'w1'),
+			makeBuilderEdge('entry', 'w2'),
+			makeBuilderEdge('entry', 'w3'),
+			makeBuilderEdge('w1', 'end'),
+			makeBuilderEdge('w2', 'end'),
+			makeBuilderEdge('w3', 'end'),
+		];
+		const result = autoLayoutNodes(nodes, edges);
+
+		const w1 = result.find((n) => n.id === 'w1')!;
+		const w2 = result.find((n) => n.id === 'w2')!;
+		const w3 = result.find((n) => n.id === 'w3')!;
+		// All workers should be on the same layer
+		expect(w1.y).toBe(w2.y);
+		expect(w2.y).toBe(w3.y);
+		// Should have distinct x positions
+		const xs = [w1.x, w2.x, w3.x];
+		expect(new Set(xs).size).toBe(3);
+	});
+
 	it('should handle disconnected nodes', () => {
 		const nodes = [makeBuilderNode('a'), makeBuilderNode('b'), makeBuilderNode('c')];
 		// No edges — all disconnected

@@ -22,8 +22,8 @@ export const NODE_HEIGHT = 60;
 export const PORT_RADIUS = 6;
 
 /** Spacing for auto-layout */
-export const LAYOUT_VERTICAL_SPACING = 200;
-export const LAYOUT_HORIZONTAL_SPACING = 220;
+export const LAYOUT_VERTICAL_SPACING = 160;
+export const LAYOUT_HORIZONTAL_SPACING = 200;
 
 // ============================================================================
 // Node & Edge types
