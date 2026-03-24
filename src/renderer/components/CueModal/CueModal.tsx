@@ -15,6 +15,7 @@ import {
 	GitFork,
 	ArrowLeft,
 	AlertTriangle,
+	Users,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import { useLayerStack } from '../../contexts/LayerStackContext';
@@ -31,8 +32,9 @@ import { SessionsTable } from './SessionsTable';
 import { ActiveRunsList } from './ActiveRunsList';
 import { ActivityLog } from './ActivityLog';
 import { buildSubscriptionPipelineMap } from './cueModalUtils';
+import { CueTeamsTab } from './CueTeamsTab';
 
-type CueModalTab = 'dashboard' | 'pipeline';
+type CueModalTab = 'dashboard' | 'pipeline' | 'teams';
 
 export interface CueModalProps {
 	theme: Theme;
@@ -233,10 +235,13 @@ export function CueModal({ theme, onClose, cueShortcutKeys }: CueModalProps) {
 					<div
 						className="relative rounded-xl shadow-2xl flex flex-col"
 						style={{
-							width: '80vw',
-							maxWidth: 1400,
-							height: '85vh',
-							maxHeight: 900,
+							width:
+								activeTab === 'pipeline' || activeTab === 'teams' ? 'calc(100vw - 32px)' : '80vw',
+							maxWidth: activeTab === 'pipeline' || activeTab === 'teams' ? undefined : 1400,
+							height:
+								activeTab === 'pipeline' || activeTab === 'teams' ? 'calc(100vh - 32px)' : '85vh',
+							minWidth: activeTab === 'pipeline' || activeTab === 'teams' ? 700 : undefined,
+							minHeight: activeTab === 'pipeline' || activeTab === 'teams' ? 400 : undefined,
 							backgroundColor: theme.colors.bgMain,
 							border: `1px solid ${theme.colors.border}`,
 						}}
@@ -301,6 +306,19 @@ export function CueModal({ theme, onClose, cueShortcutKeys }: CueModalProps) {
 											>
 												<GitFork className="w-3.5 h-3.5" />
 												Pipeline Editor
+											</button>
+											<button
+												onClick={() => setActiveTab('teams')}
+												className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors"
+												style={{
+													backgroundColor:
+														activeTab === 'teams' ? theme.colors.bgMain : 'transparent',
+													color:
+														activeTab === 'teams' ? theme.colors.textMain : theme.colors.textDim,
+												}}
+											>
+												<Users className="w-3.5 h-3.5" />
+												Teams
 											</button>
 										</div>
 									</>
@@ -485,6 +503,8 @@ export function CueModal({ theme, onClose, cueShortcutKeys }: CueModalProps) {
 									</>
 								)}
 							</div>
+						) : activeTab === 'teams' ? (
+							<CueTeamsTab theme={theme} />
 						) : (
 							<CuePipelineEditor
 								sessions={sessionInfoList}
