@@ -8,7 +8,7 @@
  * - Right inspector panel for selected node/edge properties
  */
 
-import { useReducer, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Theme } from '../../../types';
 import type {
 	TeamTemplate,
@@ -17,12 +17,13 @@ import type {
 } from '../../../../shared/group-chat-types';
 import type { BuilderNode, BuilderEdge } from './builderTypes';
 import { NODE_WIDTH, NODE_HEIGHT } from './builderTypes';
-import { builderReducer, INITIAL_BUILDER_STATE } from './builderReducer';
+import { INITIAL_BUILDER_STATE } from './builderReducer';
 import {
 	templateToBuilderState,
 	builderStateToTemplate,
 	autoLayoutNodes,
 } from './builderSerializer';
+import { useBuilderHistory } from './useBuilderHistory';
 import { BuilderCanvas } from './BuilderCanvas';
 import { BuilderPalette } from './BuilderPalette';
 import type { PresetType } from './BuilderPalette';
@@ -53,7 +54,7 @@ export function PipelineBuilder({
 	onCancel,
 	theme,
 }: PipelineBuilderProps): JSX.Element {
-	const [state, dispatch] = useReducer(builderReducer, INITIAL_BUILDER_STATE);
+	const [state, dispatch, history] = useBuilderHistory();
 	const initializedRef = useRef(false);
 	const [saving, setSaving] = useState(false);
 	const [showPreview, setShowPreview] = useState(false);
@@ -68,9 +69,13 @@ export function PipelineBuilder({
 			const loaded = templateToBuilderState(template);
 			dispatch({ type: 'LOAD_STATE', state: loaded });
 		} else {
+			// Use LOAD_STATE for initialization so it doesn't push onto undo history
 			dispatch({
-				type: 'SET_TEMPLATE_META',
-				meta: { name: 'New Template', description: '', category: 'user' },
+				type: 'LOAD_STATE',
+				state: {
+					...INITIAL_BUILDER_STATE,
+					templateMeta: { name: 'New Template', description: '', category: 'user' },
+				},
 			});
 		}
 	}, [template]);
@@ -90,12 +95,12 @@ export function PipelineBuilder({
 
 	// Cancel with dirty check
 	const handleCancel = useCallback(() => {
-		if (state.dirty) {
+		if (history.isDirty) {
 			const confirmed = window.confirm('You have unsaved changes. Discard and close the builder?');
 			if (!confirmed) return;
 		}
 		onCancel();
-	}, [state.dirty, onCancel]);
+	}, [history.isDirty, onCancel]);
 
 	// Template name change
 	const handleNameChange = useCallback(
@@ -191,6 +196,35 @@ export function PipelineBuilder({
 		setShowPreview((prev) => !prev);
 	}, []);
 
+	// Keyboard shortcuts: Undo, Redo, Escape
+	useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			const mod = e.metaKey || e.ctrlKey;
+
+			// Cmd/Ctrl+Shift+Z → Redo
+			if (mod && e.shiftKey && e.key === 'z') {
+				e.preventDefault();
+				history.redo();
+				return;
+			}
+
+			// Cmd/Ctrl+Z → Undo
+			if (mod && e.key === 'z') {
+				e.preventDefault();
+				history.undo();
+				return;
+			}
+
+			// Escape → deselect all
+			if (e.key === 'Escape') {
+				dispatch({ type: 'CLEAR_SELECTION' });
+			}
+		};
+
+		window.addEventListener('keydown', handleKeyDown);
+		return () => window.removeEventListener('keydown', handleKeyDown);
+	}, [history, dispatch]);
+
 	// Build preview data from current state
 	const previewData = useMemo(() => {
 		if (!showPreview || state.nodes.length === 0) return null;
@@ -229,10 +263,10 @@ export function PipelineBuilder({
 				onSave={handleSave}
 				canSave={canSave}
 				saving={saving}
-				canUndo={false}
-				canRedo={false}
-				onUndo={() => {}}
-				onRedo={() => {}}
+				canUndo={history.canUndo}
+				canRedo={history.canRedo}
+				onUndo={history.undo}
+				onRedo={history.redo}
 				onAutoLayout={handleAutoLayout}
 				zoom={state.viewport.zoom}
 				onZoomIn={handleZoomIn}
