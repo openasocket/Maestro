@@ -1,24 +1,34 @@
 /**
- * PipelineBuilder — Main component composing Canvas + Palette + Inspector.
+ * PipelineBuilder — Main component composing Toolbar + Canvas + Palette + Inspector.
  *
  * Manages builder state via useReducer. Provides:
+ * - Top toolbar with back/name, undo/redo, zoom, preview, save
  * - Left palette for dragging new nodes onto the canvas
- * - Center SVG canvas with pan/zoom/grid
- * - Top toolbar for template name/description and save/cancel
+ * - Center SVG canvas with pan/zoom/grid (or WorkflowGraph preview)
  * - Right inspector panel for selected node/edge properties
  */
 
 import { useReducer, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Save, X } from 'lucide-react';
 import type { Theme } from '../../../types';
-import type { TeamTemplate, TeamTemplateRole } from '../../../../shared/group-chat-types';
+import type {
+	TeamTemplate,
+	TeamTemplateRole,
+	GroupChatParticipant,
+} from '../../../../shared/group-chat-types';
 import type { BuilderNode, BuilderEdge } from './builderTypes';
+import { NODE_WIDTH, NODE_HEIGHT } from './builderTypes';
 import { builderReducer, INITIAL_BUILDER_STATE } from './builderReducer';
-import { templateToBuilderState, builderStateToTemplate } from './builderSerializer';
+import {
+	templateToBuilderState,
+	builderStateToTemplate,
+	autoLayoutNodes,
+} from './builderSerializer';
 import { BuilderCanvas } from './BuilderCanvas';
 import { BuilderPalette } from './BuilderPalette';
 import type { PresetType } from './BuilderPalette';
 import { BuilderInspector } from './BuilderInspector';
+import { BuilderToolbar } from './BuilderToolbar';
+import { WorkflowGraph } from '../../GroupChat/WorkflowGraph';
 import {
 	createPipelinePreset,
 	createParallelMergePreset,
@@ -33,6 +43,10 @@ interface PipelineBuilderProps {
 	theme: Theme;
 }
 
+const ZOOM_STEP = 0.25;
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 2.0;
+
 export function PipelineBuilder({
 	template,
 	onSave,
@@ -42,6 +56,8 @@ export function PipelineBuilder({
 	const [state, dispatch] = useReducer(builderReducer, INITIAL_BUILDER_STATE);
 	const initializedRef = useRef(false);
 	const [saving, setSaving] = useState(false);
+	const [showPreview, setShowPreview] = useState(false);
+	const canvasContainerRef = useRef<HTMLDivElement>(null);
 
 	// Initialize state from template (or blank)
 	useEffect(() => {
@@ -62,6 +78,7 @@ export function PipelineBuilder({
 	// Save handler
 	const handleSave = useCallback(() => {
 		if (!state.templateMeta.name.trim()) return;
+		if (state.nodes.length === 0) return;
 		setSaving(true);
 		try {
 			const result = builderStateToTemplate(state, template?.id);
@@ -79,6 +96,14 @@ export function PipelineBuilder({
 		}
 		onCancel();
 	}, [state.dirty, onCancel]);
+
+	// Template name change
+	const handleNameChange = useCallback(
+		(name: string) => {
+			dispatch({ type: 'SET_TEMPLATE_META', meta: { name } });
+		},
+		[dispatch]
+	);
 
 	// Load a preset pattern onto the canvas
 	const handleLoadPreset = useCallback(
@@ -104,6 +129,82 @@ export function PipelineBuilder({
 		[dispatch]
 	);
 
+	// Auto-layout
+	const handleAutoLayout = useCallback(() => {
+		if (state.nodes.length === 0) return;
+		const layouted = autoLayoutNodes(state.nodes, state.edges);
+		dispatch({ type: 'LAYOUT_NODES', nodes: layouted });
+	}, [state.nodes, state.edges]);
+
+	// Zoom controls
+	const handleZoomIn = useCallback(() => {
+		const newZoom = Math.min(MAX_ZOOM, state.viewport.zoom + ZOOM_STEP);
+		const rect = canvasContainerRef.current?.getBoundingClientRect();
+		const cx = rect ? rect.width / 2 : 400;
+		const cy = rect ? rect.height / 2 : 300;
+		dispatch({ type: 'ZOOM_VIEWPORT', zoom: newZoom, centerX: cx, centerY: cy });
+	}, [state.viewport.zoom]);
+
+	const handleZoomOut = useCallback(() => {
+		const newZoom = Math.max(MIN_ZOOM, state.viewport.zoom - ZOOM_STEP);
+		const rect = canvasContainerRef.current?.getBoundingClientRect();
+		const cx = rect ? rect.width / 2 : 400;
+		const cy = rect ? rect.height / 2 : 300;
+		dispatch({ type: 'ZOOM_VIEWPORT', zoom: newZoom, centerX: cx, centerY: cy });
+	}, [state.viewport.zoom]);
+
+	const handleFitToView = useCallback(() => {
+		if (state.nodes.length === 0) return;
+		const rect = canvasContainerRef.current?.getBoundingClientRect();
+		if (!rect) return;
+
+		// Compute bounding box of all nodes
+		let minX = Infinity,
+			minY = Infinity,
+			maxX = -Infinity,
+			maxY = -Infinity;
+		for (const n of state.nodes) {
+			minX = Math.min(minX, n.x);
+			minY = Math.min(minY, n.y);
+			maxX = Math.max(maxX, n.x + (n.width || NODE_WIDTH));
+			maxY = Math.max(maxY, n.y + (n.height || NODE_HEIGHT));
+		}
+
+		const padding = 60;
+		const graphW = maxX - minX + padding * 2;
+		const graphH = maxY - minY + padding * 2;
+		const scaleX = rect.width / graphW;
+		const scaleY = rect.height / graphH;
+		const zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.min(scaleX, scaleY)));
+
+		// Center the graph in the viewport
+		const vpX = (rect.width - graphW * zoom) / 2 - (minX - padding) * zoom;
+		const vpY = (rect.height - graphH * zoom) / 2 - (minY - padding) * zoom;
+
+		dispatch({ type: 'ZOOM_VIEWPORT', zoom, centerX: 0, centerY: 0 });
+		// Override with exact pan position after zoom
+		dispatch({ type: 'LOAD_STATE', state: { ...state, viewport: { x: vpX, y: vpY, zoom } } });
+	}, [state]);
+
+	// Preview toggle
+	const handleTogglePreview = useCallback(() => {
+		setShowPreview((prev) => !prev);
+	}, []);
+
+	// Build preview data from current state
+	const previewData = useMemo(() => {
+		if (!showPreview || state.nodes.length === 0) return null;
+		const tpl = builderStateToTemplate(state, template?.id);
+		if (!tpl.topology) return null;
+		const participants: GroupChatParticipant[] = tpl.roles.map((r) => ({
+			name: r.name,
+			agentId: r.agentId,
+			sessionId: `preview-${r.name}`,
+			addedAt: Date.now(),
+		}));
+		return { topology: tpl.topology, participants };
+	}, [showPreview, state, template?.id]);
+
 	// Selected node/edge info
 	const selectedNode = useMemo(
 		() => state.nodes.find((n) => n.id === state.selectedNodeId) ?? null,
@@ -120,102 +221,80 @@ export function PipelineBuilder({
 	return (
 		<div className="flex flex-col w-full h-full" style={{ backgroundColor: theme.colors.bgMain }}>
 			{/* Top toolbar */}
-			<div
-				className="flex items-center gap-3 px-4 py-2 border-b flex-shrink-0"
-				style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgSidebar }}
-			>
-				<input
-					type="text"
-					value={state.templateMeta.name}
-					onChange={(e) => dispatch({ type: 'SET_TEMPLATE_META', meta: { name: e.target.value } })}
-					placeholder="Template name"
-					className="flex-1 px-2 py-1 text-sm font-semibold rounded border outline-none"
-					style={{
-						backgroundColor: theme.colors.bgMain,
-						borderColor: theme.colors.border,
-						color: theme.colors.textMain,
-						maxWidth: 300,
-					}}
-				/>
-				<input
-					type="text"
-					value={state.templateMeta.description}
-					onChange={(e) =>
-						dispatch({
-							type: 'SET_TEMPLATE_META',
-							meta: { description: e.target.value },
-						})
-					}
-					placeholder="Description"
-					className="flex-1 px-2 py-1 text-xs rounded border outline-none"
-					style={{
-						backgroundColor: theme.colors.bgMain,
-						borderColor: theme.colors.border,
-						color: theme.colors.textMain,
-					}}
-				/>
-				<div className="flex items-center gap-2 flex-shrink-0">
-					<button
-						onClick={handleCancel}
-						className="flex items-center gap-1 px-3 py-1.5 rounded text-xs transition-colors hover:opacity-80"
-						style={{
-							backgroundColor: theme.colors.bgActivity,
-							color: theme.colors.textDim,
-						}}
-					>
-						<X className="w-3.5 h-3.5" />
-						Cancel
-					</button>
-					<button
-						onClick={handleSave}
-						disabled={!canSave || saving}
-						className="flex items-center gap-1 px-3 py-1.5 rounded text-xs font-medium transition-colors"
-						style={{
-							backgroundColor: canSave && !saving ? theme.colors.accent : theme.colors.border,
-							color: '#fff',
-							opacity: canSave && !saving ? 1 : 0.5,
-						}}
-					>
-						<Save className="w-3.5 h-3.5" />
-						{saving ? 'Saving...' : 'Save Template'}
-					</button>
-				</div>
-			</div>
+			<BuilderToolbar
+				theme={theme}
+				templateName={state.templateMeta.name}
+				onNameChange={handleNameChange}
+				onCancel={handleCancel}
+				onSave={handleSave}
+				canSave={canSave}
+				saving={saving}
+				canUndo={false}
+				canRedo={false}
+				onUndo={() => {}}
+				onRedo={() => {}}
+				onAutoLayout={handleAutoLayout}
+				zoom={state.viewport.zoom}
+				onZoomIn={handleZoomIn}
+				onZoomOut={handleZoomOut}
+				onFitToView={handleFitToView}
+				showPreview={showPreview}
+				onTogglePreview={handleTogglePreview}
+				hasNodes={state.nodes.length > 0}
+			/>
 
 			{/* Main area: palette + canvas + inspector */}
 			<div className="flex flex-1 min-h-0">
 				{/* Left palette */}
 				<BuilderPalette state={state} theme={theme} onLoadPreset={handleLoadPreset} />
 
-				{/* Canvas */}
-				<div className="flex-1 min-w-0 relative">
-					<BuilderCanvas state={state} dispatch={dispatch} theme={theme} />
-
-					{/* Zoom indicator */}
-					<div
-						className="absolute bottom-3 right-3 px-2 py-1 rounded text-[10px] font-mono"
-						style={{
-							backgroundColor: `${theme.colors.bgSidebar}cc`,
-							color: theme.colors.textDim,
-						}}
-					>
-						{Math.round(state.viewport.zoom * 100)}%
-					</div>
-
-					{/* Empty state hint */}
-					{state.nodes.length === 0 && (
-						<div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+				{/* Canvas or Preview */}
+				<div className="flex-1 min-w-0 relative" ref={canvasContainerRef}>
+					{showPreview && previewData ? (
+						<div
+							className="absolute inset-0 overflow-auto p-6"
+							style={{ backgroundColor: theme.colors.bgMain }}
+						>
 							<div
-								className="text-center px-6 py-4 rounded-lg"
+								className="rounded-lg border p-4"
 								style={{
-									backgroundColor: `${theme.colors.bgSidebar}cc`,
-									color: theme.colors.textDim,
+									borderColor: theme.colors.border,
+									backgroundColor: theme.colors.bgSidebar,
 								}}
 							>
-								<p className="text-sm font-medium mb-1">Drag nodes from the palette</p>
-								<p className="text-xs">or use a Quick Start Pattern to get started</p>
+								<p
+									className="text-xs font-medium mb-3 uppercase tracking-wider"
+									style={{ color: theme.colors.textDim }}
+								>
+									Template Preview
+								</p>
+								<WorkflowGraph
+									topology={previewData.topology}
+									participants={previewData.participants}
+									theme={theme}
+								/>
 							</div>
 						</div>
+					) : (
+						<>
+							<BuilderCanvas state={state} dispatch={dispatch} theme={theme} />
+
+							{/* Empty state hint */}
+							{state.nodes.length === 0 && (
+								<div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+									<div
+										className="text-center px-6 py-4 rounded-lg"
+										style={{
+											backgroundColor: `${theme.colors.bgSidebar}cc`,
+											color: theme.colors.textDim,
+										}}
+									>
+										<p className="text-sm font-medium mb-1">Drag nodes from the palette</p>
+										<p className="text-xs">or use a Quick Start Pattern to get started</p>
+									</div>
+								</div>
+							)}
+						</>
 					)}
 				</div>
 

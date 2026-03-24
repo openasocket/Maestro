@@ -106,6 +106,7 @@ export type BuilderAction =
 			edges: BuilderEdge[];
 			roles: Record<string, TeamTemplateRole>;
 	  }
+	| { type: 'LAYOUT_NODES'; nodes: BuilderNode[] }
 	| { type: 'CLEAR_SELECTION' };
 
 // ============================================================================

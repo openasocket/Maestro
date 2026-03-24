@@ -180,6 +180,19 @@ export function builderReducer(state: BuilderState, action: BuilderAction): Buil
 			};
 		}
 
+		case 'LAYOUT_NODES': {
+			// Replace node positions from auto-layout while preserving everything else
+			const posMap = new Map(action.nodes.map((n) => [n.id, { x: n.x, y: n.y }]));
+			return {
+				...state,
+				nodes: state.nodes.map((n) => {
+					const pos = posMap.get(n.id);
+					return pos ? { ...n, x: pos.x, y: pos.y } : n;
+				}),
+				dirty: true,
+			};
+		}
+
 		case 'CLEAR_SELECTION': {
 			return {
 				...state,
