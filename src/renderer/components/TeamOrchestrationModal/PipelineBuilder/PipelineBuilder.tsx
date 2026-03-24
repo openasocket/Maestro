@@ -38,6 +38,8 @@ import {
 	createHubSpokePreset,
 } from './builderPresets';
 import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
+import { generateId } from '../../../utils/ids';
+import { BuilderShortcutHelp } from './BuilderShortcutHelp';
 
 interface PipelineBuilderProps {
 	template?: TeamTemplate;
@@ -62,6 +64,8 @@ export function PipelineBuilder({
 	const [showPreview, setShowPreview] = useState(false);
 	const canvasContainerRef = useRef<HTMLDivElement>(null);
 	const [errorsExpanded, setErrorsExpanded] = useState(true);
+	const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+	const [highlightedNodeIds, setHighlightedNodeIds] = useState<Set<string>>(new Set());
 
 	// Validation
 	const validation = useMemo(() => validateBuilderState(state), [state]);
@@ -197,39 +201,212 @@ export function PipelineBuilder({
 		dispatch({ type: 'LOAD_STATE', state: { ...state, viewport: { x: vpX, y: vpY, zoom } } });
 	}, [state]);
 
+	// Reset zoom to 100%
+	const handleResetZoom = useCallback(() => {
+		const rect = canvasContainerRef.current?.getBoundingClientRect();
+		const cx = rect ? rect.width / 2 : 400;
+		const cy = rect ? rect.height / 2 : 300;
+		dispatch({ type: 'ZOOM_VIEWPORT', zoom: 1, centerX: cx, centerY: cy });
+	}, [dispatch]);
+
 	// Preview toggle
 	const handleTogglePreview = useCallback(() => {
 		setShowPreview((prev) => !prev);
 	}, []);
 
-	// Keyboard shortcuts: Undo, Redo, Escape
-	useEffect(() => {
-		const handleKeyDown = (e: KeyboardEvent) => {
-			const mod = e.metaKey || e.ctrlKey;
+	// Comprehensive keyboard shortcuts (ref pattern for stable listener)
+	const handleKeyDownRef = useRef<(e: KeyboardEvent) => void>(() => {});
+	handleKeyDownRef.current = (e: KeyboardEvent) => {
+		// Skip if focused on input/textarea
+		const target = e.target as HTMLElement;
+		if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+			return;
+		}
 
-			// Cmd/Ctrl+Shift+Z → Redo
-			if (mod && e.shiftKey && e.key === 'z') {
-				e.preventDefault();
-				history.redo();
-				return;
+		const mod = e.metaKey || e.ctrlKey;
+
+		// ── Modifier shortcuts ──
+
+		// Cmd/Ctrl+Shift+Z → Redo
+		if (mod && e.shiftKey && e.key === 'z') {
+			e.preventDefault();
+			history.redo();
+			return;
+		}
+
+		// Cmd/Ctrl+Z → Undo
+		if (mod && e.key === 'z' && !e.shiftKey) {
+			e.preventDefault();
+			history.undo();
+			return;
+		}
+
+		// Cmd/Ctrl+S → Save
+		if (mod && e.key === 's') {
+			e.preventDefault();
+			handleSave();
+			return;
+		}
+
+		// Cmd/Ctrl+D → Duplicate selected node
+		if (mod && e.key === 'd') {
+			e.preventDefault();
+			if (!state.selectedNodeId) return;
+			const node = state.nodes.find((n) => n.id === state.selectedNodeId);
+			if (!node) return;
+			const role = state.roles[node.roleId];
+			if (!role) return;
+			const newNodeId = generateId();
+			const newRoleId = generateId();
+			dispatch({
+				type: 'ADD_NODE',
+				node: {
+					id: newNodeId,
+					roleId: newRoleId,
+					x: node.x + 40,
+					y: node.y + 40,
+					width: node.width,
+					height: node.height,
+					type: node.type,
+				},
+				role: { ...role, name: `${role.name} (copy)` },
+			});
+			setHighlightedNodeIds(new Set());
+			return;
+		}
+
+		// Cmd/Ctrl+A → Highlight all nodes
+		if (mod && e.key === 'a') {
+			e.preventDefault();
+			if (state.nodes.length > 0) {
+				setHighlightedNodeIds(new Set(state.nodes.map((n) => n.id)));
 			}
+			return;
+		}
 
-			// Cmd/Ctrl+Z → Undo
-			if (mod && e.key === 'z') {
-				e.preventDefault();
-				history.undo();
-				return;
-			}
+		// Cmd/Ctrl+L → Auto-layout
+		if (mod && e.key === 'l') {
+			e.preventDefault();
+			handleAutoLayout();
+			return;
+		}
 
-			// Escape → deselect all
-			if (e.key === 'Escape') {
+		// Cmd/Ctrl+0 → Fit to view
+		if (mod && e.key === '0') {
+			e.preventDefault();
+			handleFitToView();
+			return;
+		}
+
+		// ── Non-modifier shortcuts ──
+
+		// ? → Toggle shortcut help
+		if (e.key === '?') {
+			setShowShortcutHelp((prev) => !prev);
+			return;
+		}
+
+		// Escape
+		if (e.key === 'Escape') {
+			if (showShortcutHelp) {
+				setShowShortcutHelp(false);
+			} else if (state.selectedNodeId || state.selectedEdgeId) {
 				dispatch({ type: 'CLEAR_SELECTION' });
+				setHighlightedNodeIds(new Set());
+			} else {
+				handleCancel();
 			}
-		};
+			return;
+		}
 
-		window.addEventListener('keydown', handleKeyDown);
-		return () => window.removeEventListener('keydown', handleKeyDown);
-	}, [history, dispatch]);
+		// Delete / Backspace → Delete selected (with confirmation for connected nodes)
+		if (e.code === 'Delete' || e.code === 'Backspace') {
+			if (state.selectedNodeId) {
+				const hasConnections = state.edges.some(
+					(edge) =>
+						edge.sourceNodeId === state.selectedNodeId || edge.targetNodeId === state.selectedNodeId
+				);
+				if (hasConnections) {
+					const confirmed = window.confirm(
+						'This node has connections that will also be removed. Continue?'
+					);
+					if (!confirmed) return;
+				}
+				dispatch({ type: 'DELETE_NODE', nodeId: state.selectedNodeId });
+			} else if (state.selectedEdgeId) {
+				dispatch({ type: 'DELETE_EDGE', edgeId: state.selectedEdgeId });
+			}
+			setHighlightedNodeIds(new Set());
+			return;
+		}
+
+		// Tab / Shift+Tab → Cycle node selection
+		if (e.key === 'Tab') {
+			e.preventDefault();
+			if (state.nodes.length === 0) return;
+			const currentIdx = state.selectedNodeId
+				? state.nodes.findIndex((n) => n.id === state.selectedNodeId)
+				: -1;
+			let nextIdx: number;
+			if (e.shiftKey) {
+				nextIdx = currentIdx <= 0 ? state.nodes.length - 1 : currentIdx - 1;
+			} else {
+				nextIdx = currentIdx >= state.nodes.length - 1 ? 0 : currentIdx + 1;
+			}
+			dispatch({ type: 'SELECT_NODE', nodeId: state.nodes[nextIdx].id });
+			setHighlightedNodeIds(new Set());
+			return;
+		}
+
+		// Arrow keys → Pan canvas by 40px in pressed direction
+		if (
+			e.key === 'ArrowLeft' ||
+			e.key === 'ArrowRight' ||
+			e.key === 'ArrowUp' ||
+			e.key === 'ArrowDown'
+		) {
+			e.preventDefault();
+			const PAN_STEP = 40;
+			const dx = e.key === 'ArrowLeft' ? PAN_STEP : e.key === 'ArrowRight' ? -PAN_STEP : 0;
+			const dy = e.key === 'ArrowUp' ? PAN_STEP : e.key === 'ArrowDown' ? -PAN_STEP : 0;
+			dispatch({ type: 'PAN_VIEWPORT', dx, dy });
+			return;
+		}
+
+		// + or = → Zoom in
+		if ((e.key === '+' || e.key === '=') && !mod) {
+			e.preventDefault();
+			handleZoomIn();
+			return;
+		}
+
+		// - → Zoom out
+		if (e.key === '-' && !mod) {
+			e.preventDefault();
+			handleZoomOut();
+			return;
+		}
+
+		// 0 → Reset zoom to 100%
+		if (e.key === '0' && !mod) {
+			e.preventDefault();
+			handleResetZoom();
+			return;
+		}
+	};
+
+	useEffect(() => {
+		const handler = (e: KeyboardEvent) => handleKeyDownRef.current(e);
+		window.addEventListener('keydown', handler);
+		return () => window.removeEventListener('keydown', handler);
+	}, []);
+
+	// Clear highlights on selection change
+	useEffect(() => {
+		if (state.selectedNodeId || state.selectedEdgeId) {
+			setHighlightedNodeIds(new Set());
+		}
+	}, [state.selectedNodeId, state.selectedEdgeId]);
 
 	// Build preview data from current state
 	const previewData = useMemo(() => {
@@ -363,6 +540,7 @@ export function PipelineBuilder({
 								dispatch={dispatch}
 								theme={theme}
 								errorNodeIds={errorNodeIds}
+								highlightedNodeIds={highlightedNodeIds}
 							/>
 
 							{/* Empty state hint */}
@@ -381,6 +559,11 @@ export function PipelineBuilder({
 								</div>
 							)}
 						</>
+					)}
+
+					{/* Keyboard shortcut help overlay */}
+					{showShortcutHelp && (
+						<BuilderShortcutHelp theme={theme} onClose={() => setShowShortcutHelp(false)} />
 					)}
 				</div>
 

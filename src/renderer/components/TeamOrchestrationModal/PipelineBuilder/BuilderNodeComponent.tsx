@@ -19,6 +19,7 @@ interface BuilderNodeComponentProps {
 	roleName: string;
 	theme: Theme;
 	selected: boolean;
+	highlighted?: boolean;
 	isOrphaned?: boolean;
 	hasWarning?: boolean;
 	dispatch: React.Dispatch<BuilderAction>;
@@ -44,6 +45,7 @@ export function BuilderNodeComponent({
 	roleName,
 	theme,
 	selected,
+	highlighted,
 	isOrphaned,
 	hasWarning,
 	dispatch,
@@ -60,7 +62,7 @@ export function BuilderNodeComponent({
 	const [hoveredPort, setHoveredPort] = useState<'input' | 'output' | null>(null);
 
 	const color = isOrphaned ? theme.colors.error : getNodeColor(node.type, theme);
-	const borderWidth = selected ? 3 : 1.5;
+	const borderWidth = selected ? 3 : highlighted ? 2.5 : 1.5;
 
 	const handleMouseDown = useCallback(
 		(e: React.MouseEvent) => {
@@ -107,8 +109,8 @@ export function BuilderNodeComponent({
 
 	return (
 		<g onMouseDown={handleMouseDown} style={{ cursor: 'grab' }}>
-			{/* Glow effect for selected */}
-			{selected && (
+			{/* Glow effect for selected or highlighted (Cmd+A) */}
+			{(selected || highlighted) && (
 				<rect
 					x={node.x - 4}
 					y={node.y - 4}
@@ -119,7 +121,7 @@ export function BuilderNodeComponent({
 					fill="none"
 					stroke={color}
 					strokeWidth={1}
-					opacity={0.3}
+					opacity={selected ? 0.3 : 0.2}
 				/>
 			)}
 

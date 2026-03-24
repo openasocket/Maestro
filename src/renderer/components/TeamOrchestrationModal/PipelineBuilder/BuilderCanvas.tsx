@@ -25,6 +25,7 @@ interface BuilderCanvasProps {
 	dispatch: React.Dispatch<BuilderAction>;
 	theme: Theme;
 	errorNodeIds?: Set<string>;
+	highlightedNodeIds?: Set<string>;
 }
 
 /** Convert client mouse coords to SVG canvas coords accounting for viewport */
@@ -59,6 +60,7 @@ export function BuilderCanvas({
 	dispatch,
 	theme,
 	errorNodeIds,
+	highlightedNodeIds,
 }: BuilderCanvasProps): JSX.Element {
 	const svgRef = useRef<SVGSVGElement>(null);
 	const [spaceHeld, setSpaceHeld] = useState(false);
@@ -78,19 +80,12 @@ export function BuilderCanvas({
 	const drawingEdgeRef = useRef(drawingEdge);
 	drawingEdgeRef.current = drawingEdge;
 
-	// Track space key for pan mode
+	// Track space key for pan mode (Delete/Backspace handled in PipelineBuilder)
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
 			if (e.code === 'Space' && !e.repeat) {
 				e.preventDefault();
 				setSpaceHeld(true);
-			}
-			if (e.code === 'Delete' || e.code === 'Backspace') {
-				if (state.selectedNodeId) {
-					dispatch({ type: 'DELETE_NODE', nodeId: state.selectedNodeId });
-				} else if (state.selectedEdgeId) {
-					dispatch({ type: 'DELETE_EDGE', edgeId: state.selectedEdgeId });
-				}
 			}
 		};
 		const handleKeyUp = (e: KeyboardEvent) => {
@@ -104,7 +99,7 @@ export function BuilderCanvas({
 			window.removeEventListener('keydown', handleKeyDown);
 			window.removeEventListener('keyup', handleKeyUp);
 		};
-	}, [state.selectedNodeId, state.selectedEdgeId, dispatch]);
+	}, []);
 
 	// Wheel zoom
 	const handleWheel = useCallback(
@@ -510,6 +505,7 @@ export function BuilderCanvas({
 						roleName={state.roles[node.roleId]?.name ?? node.roleId}
 						theme={theme}
 						selected={node.id === state.selectedNodeId}
+						highlighted={highlightedNodeIds?.has(node.id) ?? false}
 						isOrphaned={validationInfo.orphanedNodes.has(node.id)}
 						hasWarning={
 							validationInfo.warningNodes.has(node.id) || (errorNodeIds?.has(node.id) ?? false)
