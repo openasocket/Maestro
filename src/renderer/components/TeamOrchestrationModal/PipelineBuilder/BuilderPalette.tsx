@@ -6,7 +6,7 @@
  * - Quick Start Patterns: Click to load preset layouts (Pipeline, Parallel+Merge, Review Loop, Hub & Spoke)
  */
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { User, Play, Flag, ArrowDown, GitBranch, RefreshCw, Network } from 'lucide-react';
 import type { Theme } from '../../../types';
 import type { BuilderState, BuilderNodeType } from './builderTypes';
@@ -150,12 +150,15 @@ function PaletteNodeCard({
 	disabled: boolean;
 	theme: Theme;
 }): JSX.Element {
+	const [dragging, setDragging] = useState(false);
+
 	const handleDragStart = useCallback(
 		(e: React.DragEvent) => {
 			if (disabled) {
 				e.preventDefault();
 				return;
 			}
+			setDragging(true);
 			e.dataTransfer.setData(
 				'application/pipeline-builder-node',
 				JSON.stringify({
@@ -170,21 +173,28 @@ function PaletteNodeCard({
 		[item, disabled]
 	);
 
+	const handleDragEnd = useCallback(() => {
+		setDragging(false);
+	}, []);
+
 	const Icon = item.icon;
 
 	return (
 		<div
 			draggable={!disabled}
 			onDragStart={handleDragStart}
+			onDragEnd={handleDragEnd}
 			role="listitem"
 			aria-label={`Drag to add ${item.label} node`}
 			aria-disabled={disabled || undefined}
-			className="flex items-center gap-2 px-2.5 py-2 rounded border transition-colors"
+			className="flex items-center gap-2 px-2.5 py-2 rounded border transition-colors builder-palette-animated"
 			style={{
 				borderColor: theme.colors.border,
 				backgroundColor: theme.colors.bgMain,
 				cursor: disabled ? 'not-allowed' : 'grab',
-				opacity: disabled ? 0.4 : 1,
+				opacity: disabled ? 0.4 : dragging ? 0.7 : 1,
+				transform: dragging ? 'scale(0.95)' : undefined,
+				transition: 'transform 150ms ease-out, opacity 150ms ease-out',
 			}}
 		>
 			<Icon

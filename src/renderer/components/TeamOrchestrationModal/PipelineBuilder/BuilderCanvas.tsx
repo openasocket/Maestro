@@ -421,7 +421,7 @@ export function BuilderCanvas({
 			onDragLeave={handleDragLeave}
 		>
 			<g transform={`translate(${vp.x},${vp.y}) scale(${vp.zoom})`}>
-				{/* Grid pattern */}
+				{/* Dot grid pattern */}
 				<defs>
 					<pattern
 						id="builder-grid"
@@ -429,13 +429,7 @@ export function BuilderCanvas({
 						height={GRID_SIZE}
 						patternUnits="userSpaceOnUse"
 					>
-						<path
-							d={`M ${GRID_SIZE} 0 L 0 0 0 ${GRID_SIZE}`}
-							fill="none"
-							stroke={gridColor}
-							strokeWidth={0.3}
-							opacity={0.3}
-						/>
+						<circle cx={GRID_SIZE / 2} cy={GRID_SIZE / 2} r={0.8} fill={gridColor} opacity={0.15} />
 					</pattern>
 				</defs>
 				<rect x={-5000} y={-5000} width={10000} height={10000} fill="url(#builder-grid)" />
@@ -481,6 +475,7 @@ export function BuilderCanvas({
 								strokeWidth={2}
 								strokeDasharray="6 3"
 								opacity={0.5}
+								className="builder-marching-ants"
 								style={{ pointerEvents: 'none' }}
 							/>
 						);

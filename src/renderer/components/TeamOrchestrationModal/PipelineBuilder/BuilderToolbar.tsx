@@ -19,6 +19,7 @@ import {
 	Eye,
 	EyeOff,
 	Save,
+	Check,
 } from 'lucide-react';
 import type { Theme } from '../../../types';
 
@@ -34,6 +35,7 @@ export interface BuilderToolbarProps {
 	onSave: () => void;
 	canSave: boolean;
 	saving: boolean;
+	saveSuccess?: boolean;
 	canUndo: boolean;
 	canRedo: boolean;
 	onUndo: () => void;
@@ -68,6 +70,7 @@ export function BuilderToolbar({
 	onSave,
 	canSave,
 	saving,
+	saveSuccess,
 	canUndo,
 	canRedo,
 	onUndo,
@@ -252,14 +255,22 @@ export function BuilderToolbar({
 					aria-label={`Save Template (${modKey}S)`}
 					aria-disabled={!canSave || saving || undefined}
 					style={{
-						backgroundColor: canSave && !saving ? theme.colors.accent : theme.colors.border,
+						backgroundColor: saveSuccess
+							? theme.colors.success
+							: canSave && !saving
+								? theme.colors.accent
+								: theme.colors.border,
 						color: '#fff',
 						opacity: canSave && !saving ? 1 : 0.5,
 						cursor: canSave && !saving ? 'pointer' : 'default',
 					}}
 				>
-					<Save className="w-3.5 h-3.5" />
-					{saving ? 'Saving...' : 'Save'}
+					{saveSuccess ? (
+						<Check className="w-3.5 h-3.5 builder-save-check" />
+					) : (
+						<Save className="w-3.5 h-3.5" />
+					)}
+					{saving ? 'Saving...' : saveSuccess ? 'Saved!' : 'Save'}
 				</button>
 			</div>
 		</div>

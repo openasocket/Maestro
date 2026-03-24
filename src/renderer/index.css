@@ -311,6 +311,63 @@ textarea::placeholder {
 	animation: progress-stripe 1s linear infinite;
 }
 
+/* Pipeline Builder - Marching ants for edge drawing */
+@keyframes builder-marching-ants {
+	to {
+		stroke-dashoffset: -9;
+	}
+}
+
+.builder-marching-ants {
+	animation: builder-marching-ants 0.5s linear infinite;
+}
+
+/* Pipeline Builder - Selection pulse on newly-selected node */
+@keyframes builder-selection-pulse {
+	0% {
+		opacity: 0.5;
+	}
+	100% {
+		opacity: 0;
+	}
+}
+
+.builder-selection-pulse {
+	animation: builder-selection-pulse 0.4s ease-out forwards;
+}
+
+/* Pipeline Builder - Error/validation pulse on node border */
+@keyframes builder-error-pulse {
+	0%,
+	100% {
+		stroke-opacity: 1;
+	}
+	50% {
+		stroke-opacity: 0.4;
+	}
+}
+
+.builder-error-pulse {
+	animation: builder-error-pulse 2s ease-in-out infinite;
+}
+
+/* Pipeline Builder - Save checkmark pop */
+@keyframes builder-save-check {
+	0% {
+		transform: scale(0);
+	}
+	50% {
+		transform: scale(1.2);
+	}
+	100% {
+		transform: scale(1);
+	}
+}
+
+.builder-save-check {
+	animation: builder-save-check 0.3s ease-out;
+}
+
 /* Shimmer effect for drag-and-drop */
 @keyframes shimmer {
 	0% {
@@ -710,5 +767,24 @@ svg.wand-sparkle-active path:nth-child(8) {
 	/* Disable Document Graph search highlight animations */
 	.search-highlight {
 		animation: none !important;
+	}
+
+	/* Disable Pipeline Builder animations */
+	.builder-marching-ants,
+	.builder-selection-pulse,
+	.builder-error-pulse,
+	.builder-save-check {
+		animation: none !important;
+	}
+
+	.builder-node-animated {
+		transition: none !important;
+		transform: none !important;
+		filter: none !important;
+	}
+
+	.builder-palette-animated {
+		transition: none !important;
+		transform: none !important;
 	}
 }

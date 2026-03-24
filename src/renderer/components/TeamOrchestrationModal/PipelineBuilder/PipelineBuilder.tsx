@@ -61,6 +61,7 @@ export function PipelineBuilder({
 	const [state, dispatch, history] = useBuilderHistory();
 	const initializedRef = useRef(false);
 	const [saving, setSaving] = useState(false);
+	const [saveSuccess, setSaveSuccess] = useState(false);
 	const [showPreview, setShowPreview] = useState(false);
 	const canvasContainerRef = useRef<HTMLDivElement>(null);
 	const [errorsExpanded, setErrorsExpanded] = useState(true);
@@ -102,6 +103,8 @@ export function PipelineBuilder({
 			const result = builderStateToTemplate(state, template?.id);
 			onSave(result);
 			setAnnouncement('Template saved');
+			setSaveSuccess(true);
+			setTimeout(() => setSaveSuccess(false), 1500);
 		} finally {
 			setSaving(false);
 		}
@@ -498,6 +501,7 @@ export function PipelineBuilder({
 				onSave={handleSave}
 				canSave={canSave}
 				saving={saving}
+				saveSuccess={saveSuccess}
 				canUndo={history.canUndo}
 				canRedo={history.canRedo}
 				onUndo={history.undo}

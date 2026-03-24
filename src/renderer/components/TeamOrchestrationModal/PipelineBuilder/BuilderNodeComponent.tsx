@@ -7,6 +7,8 @@
  * - Input port (left) and output port (right)
  * - Selected state: thicker border + glow
  * - Draggable with snap-to-grid
+ * - Hover: subtle scale + shadow, Drag: reduced opacity + shadow
+ * - Selection pulse, error pulse, port grow animations
  */
 
 import { useCallback, useRef, useState } from 'react';
@@ -60,9 +62,12 @@ export function BuilderNodeComponent({
 		nodeStartY: number;
 	} | null>(null);
 	const [hoveredPort, setHoveredPort] = useState<'input' | 'output' | null>(null);
+	const [hovered, setHovered] = useState(false);
+	const [isDragging, setIsDragging] = useState(false);
 
 	const color = isOrphaned ? theme.colors.error : getNodeColor(node.type, theme);
 	const borderWidth = selected ? 3 : highlighted ? 2.5 : 1.5;
+	const hasError = isOrphaned || (hasWarning && (isOrphaned || false));
 
 	const handleMouseDown = useCallback(
 		(e: React.MouseEvent) => {
@@ -71,6 +76,7 @@ export function BuilderNodeComponent({
 			e.stopPropagation();
 
 			dispatch({ type: 'SELECT_NODE', nodeId: node.id });
+			setIsDragging(true);
 
 			dragRef.current = {
 				startX: e.clientX,
@@ -90,6 +96,7 @@ export function BuilderNodeComponent({
 
 			const handleMouseUp = () => {
 				dragRef.current = null;
+				setIsDragging(false);
 				window.removeEventListener('mousemove', handleMouseMove);
 				window.removeEventListener('mouseup', handleMouseUp);
 			};
@@ -107,15 +114,57 @@ export function BuilderNodeComponent({
 	const outputPortX = node.x + NODE_WIDTH;
 	const outputPortY = cy;
 
+	// Port hover: grow from 6px to 10px radius
+	const inputPortR = hoveredPort === 'input' ? PORT_RADIUS + 4 : PORT_RADIUS;
+	const outputPortR = hoveredPort === 'output' ? PORT_RADIUS + 4 : PORT_RADIUS;
+
+	// Compute inline styles for hover/drag animations
+	const groupStyle: React.CSSProperties = {
+		cursor: isDragging ? 'grabbing' : 'grab',
+		transformOrigin: `${cx}px ${cy}px`,
+		transition: 'transform 150ms ease-out, opacity 150ms ease-out, filter 150ms ease-out',
+	};
+
+	if (isDragging) {
+		groupStyle.opacity = 0.85;
+		groupStyle.filter = 'drop-shadow(0 4px 8px rgba(0,0,0,0.3))';
+	} else if (hovered) {
+		groupStyle.transform = 'scale(1.02)';
+		groupStyle.filter = 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))';
+	}
+
 	return (
 		<g
 			onMouseDown={handleMouseDown}
-			style={{ cursor: 'grab' }}
+			onMouseEnter={() => setHovered(true)}
+			onMouseLeave={() => {
+				setHovered(false);
+				setHoveredPort(null);
+			}}
+			className="builder-node-animated"
+			style={groupStyle}
 			role="button"
 			aria-label={`${roleName} node`}
 			aria-selected={selected}
 			tabIndex={-1}
 		>
+			{/* Selection pulse — plays once when node becomes selected */}
+			{selected && (
+				<rect
+					x={node.x - 8}
+					y={node.y - 8}
+					width={NODE_WIDTH + 16}
+					height={NODE_HEIGHT + 16}
+					rx={16}
+					ry={16}
+					fill="none"
+					stroke={color}
+					strokeWidth={2}
+					className="builder-selection-pulse"
+					style={{ pointerEvents: 'none' }}
+				/>
+			)}
+
 			{/* Glow effect for selected or highlighted (Cmd+A) */}
 			{(selected || highlighted) && (
 				<rect
@@ -144,6 +193,7 @@ export function BuilderNodeComponent({
 				stroke={color}
 				strokeWidth={borderWidth}
 				strokeDasharray={isOrphaned ? '6 3' : undefined}
+				className={hasError ? 'builder-error-pulse' : undefined}
 			/>
 
 			{/* Type label (entry/exit) */}
@@ -178,11 +228,11 @@ export function BuilderNodeComponent({
 			<circle
 				cx={inputPortX}
 				cy={inputPortY}
-				r={hoveredPort === 'input' ? PORT_RADIUS + 2 : PORT_RADIUS}
+				r={inputPortR}
 				fill={hoveredPort === 'input' ? color : theme.colors.bgMain}
 				stroke={color}
 				strokeWidth={1.5}
-				style={{ cursor: 'crosshair' }}
+				style={{ cursor: 'crosshair', transition: 'r 100ms ease-out, fill 100ms ease-out' }}
 				onMouseUp={() => onInputPortMouseUp?.(node.id)}
 				onMouseEnter={() => setHoveredPort('input')}
 				onMouseLeave={() => setHoveredPort(null)}
@@ -192,11 +242,11 @@ export function BuilderNodeComponent({
 			<circle
 				cx={outputPortX}
 				cy={outputPortY}
-				r={hoveredPort === 'output' ? PORT_RADIUS + 2 : PORT_RADIUS}
+				r={outputPortR}
 				fill={hoveredPort === 'output' ? color : theme.colors.bgMain}
 				stroke={color}
 				strokeWidth={1.5}
-				style={{ cursor: 'crosshair' }}
+				style={{ cursor: 'crosshair', transition: 'r 100ms ease-out, fill 100ms ease-out' }}
 				onMouseDown={(e) => {
 					e.stopPropagation();
 					onOutputPortMouseDown?.(node.id);
