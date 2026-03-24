@@ -37,7 +37,16 @@ import {
 	createReviewLoopPreset,
 	createHubSpokePreset,
 } from './builderPresets';
-import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
+import {
+	AlertTriangle,
+	ChevronDown,
+	ChevronUp,
+	ArrowLeft,
+	ArrowDown,
+	GitBranch,
+	RefreshCw,
+	Network,
+} from 'lucide-react';
 import { generateId } from '../../../utils/ids';
 import { BuilderShortcutHelp } from './BuilderShortcutHelp';
 
@@ -603,14 +612,106 @@ export function PipelineBuilder({
 							{state.nodes.length === 0 && (
 								<div className="absolute inset-0 flex items-center justify-center pointer-events-none">
 									<div
-										className="text-center px-6 py-4 rounded-lg"
+										className="text-center px-6 py-5 rounded-xl max-w-sm"
 										style={{
-											backgroundColor: `${theme.colors.bgSidebar}cc`,
+											backgroundColor: `${theme.colors.bgSidebar}ee`,
 											color: theme.colors.textDim,
+											border: `1px solid ${theme.colors.border}`,
+											boxShadow: '0 4px 24px rgba(0,0,0,0.12)',
 										}}
 									>
-										<p className="text-sm font-medium mb-1">Drag nodes from the palette</p>
-										<p className="text-xs">or use a Quick Start Pattern to get started</p>
+										{/* Drag hint with arrow pointing toward palette */}
+										<div className="flex items-center justify-center gap-2 mb-3">
+											<ArrowLeft
+												className="w-4 h-4 flex-shrink-0"
+												style={{ color: theme.colors.accent }}
+											/>
+											<p className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
+												Drag nodes from the palette to start building
+											</p>
+										</div>
+
+										{/* Divider with "or" */}
+										<div className="flex items-center gap-3 mb-3">
+											<div
+												className="flex-1"
+												style={{ height: 1, backgroundColor: theme.colors.border }}
+											/>
+											<span
+												className="text-[10px] uppercase tracking-wide"
+												style={{ color: theme.colors.textDim }}
+											>
+												or
+											</span>
+											<div
+												className="flex-1"
+												style={{ height: 1, backgroundColor: theme.colors.border }}
+											/>
+										</div>
+
+										{/* Inline preset pattern buttons */}
+										<p className="text-xs mb-2.5" style={{ color: theme.colors.textDim }}>
+											Choose a pattern to get started
+										</p>
+										<div className="grid grid-cols-2 gap-2 pointer-events-auto">
+											{(
+												[
+													{
+														type: 'pipeline' as const,
+														label: 'Pipeline',
+														icon: ArrowDown,
+														description: '3 sequential steps',
+													},
+													{
+														type: 'parallel-merge' as const,
+														label: 'Parallel + Merge',
+														icon: GitBranch,
+														description: 'Fan-out then merge',
+													},
+													{
+														type: 'review-loop' as const,
+														label: 'Review Loop',
+														icon: RefreshCw,
+														description: 'Implement & review cycle',
+													},
+													{
+														type: 'hub-spoke' as const,
+														label: 'Hub & Spoke',
+														icon: Network,
+														description: 'Central moderator pattern',
+													},
+												] as const
+											).map((pattern) => {
+												const Icon = pattern.icon;
+												return (
+													<button
+														key={pattern.type}
+														onClick={() => handleLoadPreset(pattern.type)}
+														className="flex items-center gap-2 px-2.5 py-2 rounded border text-left transition-colors hover:opacity-80"
+														style={{
+															borderColor: theme.colors.border,
+															backgroundColor: theme.colors.bgActivity,
+														}}
+													>
+														<Icon
+															className="w-3.5 h-3.5 flex-shrink-0"
+															style={{ color: theme.colors.accent }}
+														/>
+														<div>
+															<div
+																className="text-[11px] font-medium"
+																style={{ color: theme.colors.textMain }}
+															>
+																{pattern.label}
+															</div>
+															<div className="text-[9px]" style={{ color: theme.colors.textDim }}>
+																{pattern.description}
+															</div>
+														</div>
+													</button>
+												);
+											})}
+										</div>
 									</div>
 								</div>
 							)}
