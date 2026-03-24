@@ -15,9 +15,10 @@
 import { useCallback, useRef, useState, useEffect, useMemo } from 'react';
 import type { Theme } from '../../../types';
 import type { BuilderState, BuilderAction, BuilderNode } from './builderTypes';
-import { GRID_SIZE, NODE_WIDTH, NODE_HEIGHT, PORT_RADIUS } from './builderTypes';
+import { GRID_SIZE, NODE_WIDTH, NODE_HEIGHT, PORT_RADIUS, snapToGrid } from './builderTypes';
 import { BuilderNodeComponent } from './BuilderNodeComponent';
 import { BuilderEdgeComponent } from './BuilderEdgeComponent';
+import { generateId } from '../../../utils/ids';
 
 interface BuilderCanvasProps {
 	state: BuilderState;
@@ -56,6 +57,9 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 	const svgRef = useRef<SVGSVGElement>(null);
 	const [spaceHeld, setSpaceHeld] = useState(false);
 	const panRef = useRef<{ startX: number; startY: number; vpX: number; vpY: number } | null>(null);
+
+	// Drop indicator state for drag-over preview
+	const [dropIndicator, setDropIndicator] = useState<{ x: number; y: number } | null>(null);
 
 	// Edge drawing interaction state
 	const [drawingEdge, setDrawingEdge] = useState<{
@@ -167,6 +171,7 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 	const handleDrop = useCallback(
 		(e: React.DragEvent) => {
 			e.preventDefault();
+			setDropIndicator(null);
 			const data = e.dataTransfer.getData('application/pipeline-builder-node');
 			if (!data || !svgRef.current) return;
 
@@ -175,12 +180,12 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 				const rect = svgRef.current.getBoundingClientRect();
 				const { x, y } = clientToCanvas(e.clientX, e.clientY, rect, state.viewport);
 
-				// Center the node on drop point
-				const snappedX = Math.round((x - NODE_WIDTH / 2) / GRID_SIZE) * GRID_SIZE;
-				const snappedY = Math.round((y - NODE_HEIGHT / 2) / GRID_SIZE) * GRID_SIZE;
+				// Center the node on drop point, snap to grid
+				const snappedX = snapToGrid(x - NODE_WIDTH / 2);
+				const snappedY = snapToGrid(y - NODE_HEIGHT / 2);
 
-				const nodeId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-				const roleId = parsed.roleId || nodeId;
+				const nodeId = generateId();
+				const roleId = parsed.roleId || generateId();
 
 				dispatch({
 					type: 'ADD_NODE',
@@ -206,9 +211,26 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 		[state.viewport, dispatch]
 	);
 
-	const handleDragOver = useCallback((e: React.DragEvent) => {
-		e.preventDefault();
-		e.dataTransfer.dropEffect = 'copy';
+	const handleDragOver = useCallback(
+		(e: React.DragEvent) => {
+			e.preventDefault();
+			if (e.dataTransfer) {
+				e.dataTransfer.dropEffect = 'copy';
+			}
+
+			if (!svgRef.current) return;
+			const rect = svgRef.current.getBoundingClientRect();
+			const { x, y } = clientToCanvas(e.clientX, e.clientY, rect, state.viewport);
+			setDropIndicator({
+				x: snapToGrid(x - NODE_WIDTH / 2),
+				y: snapToGrid(y - NODE_HEIGHT / 2),
+			});
+		},
+		[state.viewport]
+	);
+
+	const handleDragLeave = useCallback(() => {
+		setDropIndicator(null);
 	}, []);
 
 	// Edge drawing: start from output port
@@ -263,7 +285,7 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 				return;
 			}
 
-			const edgeId = `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+			const edgeId = generateId();
 			dispatch({
 				type: 'ADD_EDGE',
 				edge: {
@@ -391,6 +413,7 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 			onMouseDown={handleMouseDown}
 			onDrop={handleDrop}
 			onDragOver={handleDragOver}
+			onDragLeave={handleDragLeave}
 		>
 			<g transform={`translate(${vp.x},${vp.y}) scale(${vp.zoom})`}>
 				{/* Grid pattern */}
@@ -489,6 +512,23 @@ export function BuilderCanvas({ state, dispatch, theme }: BuilderCanvasProps): J
 						onInputPortMouseUp={handleInputPortMouseUp}
 					/>
 				))}
+
+				{/* Drop indicator — ghost rectangle showing where node will land */}
+				{dropIndicator && (
+					<rect
+						x={dropIndicator.x}
+						y={dropIndicator.y}
+						width={NODE_WIDTH}
+						height={NODE_HEIGHT}
+						rx={6}
+						fill={theme.colors.accent}
+						fillOpacity={0.1}
+						stroke={theme.colors.accent}
+						strokeWidth={1.5}
+						strokeDasharray="6 3"
+						style={{ pointerEvents: 'none' }}
+					/>
+				)}
 			</g>
 		</svg>
 	);
