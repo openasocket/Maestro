@@ -595,7 +595,15 @@ function CuePipelineEditorInner({
 	// ─── Render ──────────────────────────────────────────────────────────────
 
 	return (
-		<div className="flex-1 flex flex-col" style={{ width: '100%', height: '100%' }}>
+		<div
+			style={{
+				flex: 1,
+				display: 'flex',
+				flexDirection: 'column',
+				minHeight: 0,
+				overflow: 'hidden',
+			}}
+		>
 			<PipelineToolbar
 				theme={theme}
 				isAllPipelinesView={isAllPipelinesView}
