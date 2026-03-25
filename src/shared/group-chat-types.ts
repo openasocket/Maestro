@@ -38,6 +38,18 @@ export function mentionMatches(mentionedName: string, actualName: string): boole
 // ============================================================================
 
 /**
+ * Organizational tier for a role in a team hierarchy.
+ * Executives approve, managers coordinate, workers execute.
+ */
+export type RoleTier = 'executive' | 'manager' | 'worker';
+
+/**
+ * Tier authority ordering. Higher number = higher authority.
+ * Used for connection validation and topology generation.
+ */
+export const ROLE_TIER_ORDER: Record<RoleTier, number> = { executive: 3, manager: 2, worker: 1 };
+
+/**
  * A role definition within a team template.
  * Roles represent abstract positions (not bound to specific sessions).
  */
@@ -50,6 +62,8 @@ export interface TeamTemplateRole {
 	description: string;
 	/** Additional context injected into participant prompt */
 	systemPromptSuffix?: string;
+	/** Organizational tier: executive (approves), manager (coordinates), worker (executes). Defaults to 'worker'. */
+	tier?: RoleTier;
 	/** What this role expects (for TEAM-ORCH-05) */
 	inputContract?: string[];
 	/** What this role produces (for TEAM-ORCH-05) */
