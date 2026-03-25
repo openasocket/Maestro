@@ -35,6 +35,7 @@ import type {
 } from '../../../shared/group-chat-types';
 import { RoleBuilderNode, TIER_COLORS, type RoleBuilderNodeData } from './nodes/RoleBuilderNode';
 import { TeamBuilderEdge, type TeamBuilderEdgeData } from './edges/TeamBuilderEdge';
+import { RoleConfigPanel } from './panels/RoleConfigPanel';
 
 // Re-export for consumers that import from this file
 export type { RoleBuilderNodeData } from './nodes/RoleBuilderNode';
@@ -198,6 +199,20 @@ function TeamBuilderCanvasInner({
 	// Configure handler for node gear icon
 	const handleConfigure = useCallback((nodeId: string) => {
 		setSelectedNodeId(nodeId);
+	}, []);
+
+	// Update a node's data fields (used by RoleConfigPanel)
+	const handleUpdateNode = useCallback((nodeId: string, data: Partial<RoleBuilderNodeData>) => {
+		setNodes((nds) =>
+			nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...data } } : n))
+		);
+	}, []);
+
+	// Delete a node and its connected edges
+	const handleDeleteNode = useCallback((nodeId: string) => {
+		setNodes((nds) => nds.filter((n) => n.id !== nodeId));
+		setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
+		setSelectedNodeId(null);
 	}, []);
 
 	// Initialize from editing template
@@ -570,6 +585,22 @@ function TeamBuilderCanvasInner({
 						</div>
 					</div>
 				)}
+
+				{/* Role config panel (bottom panel when node selected) */}
+				{selectedNodeId &&
+					(() => {
+						const selectedNode = nodes.find((n) => n.id === selectedNodeId);
+						if (!selectedNode) return null;
+						return (
+							<RoleConfigPanel
+								nodeId={selectedNodeId}
+								nodeData={selectedNode.data}
+								roleDrawerOpen={_roleDrawerOpen}
+								onUpdateNode={handleUpdateNode}
+								onDeleteNode={handleDeleteNode}
+							/>
+						);
+					})()}
 			</div>
 		</div>
 	);
