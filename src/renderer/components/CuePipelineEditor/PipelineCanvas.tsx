@@ -104,6 +104,7 @@ export interface PipelineCanvasProps {
 	onSwitchToSession: (id: string) => void;
 	triggerDrawerOpenForConfig: boolean;
 	agentDrawerOpenForConfig: boolean;
+	teamDrawerOpenForConfig: boolean;
 	edgeSourceNode: PipelineNode | null;
 	edgeTargetNode: PipelineNode | null;
 	selectedEdgePipelineColor: string;
@@ -115,6 +116,10 @@ export interface PipelineCanvasProps {
 	isDirty?: boolean;
 	/** Set of pipeline IDs that are currently running */
 	runningPipelineIds?: Set<string>;
+	/** Navigate to the Teams tab for full template management */
+	onManageTeams?: () => void;
+	/** Navigate to the Teams tab to edit a specific template */
+	onEditTeamTemplate?: (templateId?: string) => void;
 }
 
 export const PipelineCanvas = React.memo(function PipelineCanvas({
@@ -163,6 +168,7 @@ export const PipelineCanvas = React.memo(function PipelineCanvas({
 	onSwitchToSession,
 	triggerDrawerOpenForConfig,
 	agentDrawerOpenForConfig,
+	teamDrawerOpenForConfig,
 	edgeSourceNode,
 	edgeTargetNode,
 	selectedEdgePipelineColor,
@@ -171,16 +177,11 @@ export const PipelineCanvas = React.memo(function PipelineCanvas({
 	onTriggerPipeline,
 	isDirty,
 	runningPipelineIds,
+	onManageTeams,
+	onEditTeamTemplate,
 }: PipelineCanvasProps) {
 	return (
-		<div className="flex-1 relative overflow-hidden">
-			{/* Trigger drawer (left) */}
-			<TriggerDrawer
-				isOpen={triggerDrawerOpen}
-				onClose={() => setTriggerDrawerOpen(false)}
-				theme={theme}
-			/>
-
+		<div style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
 			{/* Empty state overlay */}
 			{nodes.length === 0 && (
 				<div
@@ -294,7 +295,14 @@ export const PipelineCanvas = React.memo(function PipelineCanvas({
 				/>
 			</ReactFlow>
 
-			{/* Agent drawer (right) */}
+			{/* Trigger drawer (left) — rendered after ReactFlow to ensure proper stacking */}
+			<TriggerDrawer
+				isOpen={triggerDrawerOpen}
+				onClose={() => setTriggerDrawerOpen(false)}
+				theme={theme}
+			/>
+
+			{/* Agent drawer (right — top half when team drawer also open) */}
 			<AgentDrawer
 				isOpen={agentDrawerOpen}
 				onClose={() => setAgentDrawerOpen(false)}
@@ -302,15 +310,18 @@ export const PipelineCanvas = React.memo(function PipelineCanvas({
 				groups={groups}
 				onCanvasSessionIds={onCanvasSessionIds}
 				theme={theme}
+				shareRight={agentDrawerOpen && teamDrawerOpen}
 			/>
 
-			{/* Team drawer (right, below agent drawer) */}
+			{/* Team drawer (right — bottom half when agent drawer also open) */}
 			<TeamDrawer
 				isOpen={teamDrawerOpen}
 				onClose={() => setTeamDrawerOpen(false)}
 				teams={teams}
 				onCanvasTemplateIds={onCanvasTemplateIds}
 				theme={theme}
+				shareRight={agentDrawerOpen && teamDrawerOpen}
+				onManageTeams={onManageTeams}
 			/>
 
 			{/* Pipeline legend (shown in All Pipelines view) */}
@@ -406,11 +417,13 @@ export const PipelineCanvas = React.memo(function PipelineCanvas({
 							onSwitchToAgent={onSwitchToSession}
 							triggerDrawerOpen={triggerDrawerOpenForConfig}
 							agentDrawerOpen={agentDrawerOpenForConfig}
+							teamDrawerOpen={teamDrawerOpenForConfig}
 							onTriggerPipeline={onTriggerPipeline}
 							pipelineName={selectedPipeline?.name}
 							isSaved={!isDirty}
 							isRunning={selectedPipeline ? runningPipelineIds?.has(selectedPipeline.id) : false}
 							pipelineColor={selectedPipeline?.color}
+							onEditTeamTemplate={onEditTeamTemplate}
 						/>
 					);
 				})()}
@@ -422,6 +435,9 @@ export const PipelineCanvas = React.memo(function PipelineCanvas({
 					pipelineColor={selectedEdgePipelineColor}
 					onUpdateEdge={onUpdateEdge}
 					onDeleteEdge={onDeleteEdge}
+					triggerDrawerOpen={triggerDrawerOpen}
+					agentDrawerOpen={agentDrawerOpen}
+					teamDrawerOpen={teamDrawerOpen}
 				/>
 			)}
 		</div>

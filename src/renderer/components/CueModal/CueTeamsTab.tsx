@@ -182,9 +182,17 @@ const CATEGORY_PILLS: { value: CategoryFilter; label: string }[] = [
 
 export interface CueTeamsTabProps {
 	theme: Theme;
+	/** Called after any CRUD operation so Pipeline Editor can re-fetch teams */
+	onTeamTemplatesChanged?: () => void;
+	/** If provided, auto-select this template on mount/change */
+	initialSelectedTemplateId?: string;
 }
 
-export function CueTeamsTab({ theme }: CueTeamsTabProps) {
+export function CueTeamsTab({
+	theme,
+	onTeamTemplatesChanged,
+	initialSelectedTemplateId,
+}: CueTeamsTabProps) {
 	const [templates, setTemplates] = useState<TeamTemplate[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
@@ -225,6 +233,13 @@ export function CueTeamsTab({ theme }: CueTeamsTabProps) {
 			mountedRef.current = false;
 		};
 	}, [fetchTemplates]);
+
+	// Auto-select template when navigated to from Pipeline Editor
+	useEffect(() => {
+		if (initialSelectedTemplateId) {
+			setSelectedTemplateId(initialSelectedTemplateId);
+		}
+	}, [initialSelectedTemplateId]);
 
 	// Filter templates by category and search
 	const filteredTemplates = useMemo(() => {
@@ -271,8 +286,9 @@ export function CueTeamsTab({ theme }: CueTeamsTabProps) {
 				title: 'Template created',
 				message: `"${template.name}" created.`,
 			});
+			onTeamTemplatesChanged?.();
 		},
-		[fetchTemplates]
+		[fetchTemplates, onTeamTemplatesChanged]
 	);
 
 	const handleEditSave = useCallback(
@@ -284,8 +300,9 @@ export function CueTeamsTab({ theme }: CueTeamsTabProps) {
 				title: 'Template updated',
 				message: `"${updated.name}" saved.`,
 			});
+			onTeamTemplatesChanged?.();
 		},
-		[fetchTemplates]
+		[fetchTemplates, onTeamTemplatesChanged]
 	);
 
 	const handleDuplicate = useCallback(
@@ -299,8 +316,9 @@ export function CueTeamsTab({ theme }: CueTeamsTabProps) {
 				title: 'Template duplicated',
 				message: `"${newName}" created.`,
 			});
+			onTeamTemplatesChanged?.();
 		},
-		[fetchTemplates, templates]
+		[fetchTemplates, templates, onTeamTemplatesChanged]
 	);
 
 	const handleDelete = useCallback(
@@ -317,8 +335,9 @@ export function CueTeamsTab({ theme }: CueTeamsTabProps) {
 			}
 			await fetchTemplates();
 			notifyToast({ type: 'success', title: 'Template deleted', message: 'Template removed.' });
+			onTeamTemplatesChanged?.();
 		},
-		[fetchTemplates, templates, selectedTemplateId]
+		[fetchTemplates, templates, selectedTemplateId, onTeamTemplatesChanged]
 	);
 
 	const handleExport = useCallback(async (template: TeamTemplate) => {
@@ -394,6 +413,7 @@ export function CueTeamsTab({ theme }: CueTeamsTabProps) {
 				title: 'Template imported',
 				message: `"${imported.name}" added.`,
 			});
+			onTeamTemplatesChanged?.();
 		} catch (err) {
 			notifyToast({
 				type: 'error',
@@ -401,7 +421,7 @@ export function CueTeamsTab({ theme }: CueTeamsTabProps) {
 				message: err instanceof Error ? err.message : 'An unexpected error occurred.',
 			});
 		}
-	}, [fetchTemplates]);
+	}, [fetchTemplates, onTeamTemplatesChanged]);
 
 	// Loading state
 	if (loading) {

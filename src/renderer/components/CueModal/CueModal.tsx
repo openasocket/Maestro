@@ -140,6 +140,17 @@ export function CueModal({ theme, onClose, cueShortcutKeys }: CueModalProps) {
 	// Tab state
 	const [activeTab, setActiveTab] = useState<CueModalTab>('pipeline');
 
+	// Cross-tab communication: Teams ↔ Pipeline Editor
+	const [teamTemplatesVersion, setTeamTemplatesVersion] = useState(0);
+	const [teamsTabSelectedTemplateId, setTeamsTabSelectedTemplateId] = useState<
+		string | undefined
+	>();
+
+	const handleSwitchToTeamsTab = useCallback((templateId?: string) => {
+		setTeamsTabSelectedTemplateId(templateId);
+		setActiveTab('teams');
+	}, []);
+
 	// Graph data fetch error state
 	const [graphError, setGraphError] = useState<string | null>(null);
 
@@ -504,7 +515,11 @@ export function CueModal({ theme, onClose, cueShortcutKeys }: CueModalProps) {
 								)}
 							</div>
 						) : activeTab === 'teams' ? (
-							<CueTeamsTab theme={theme} />
+							<CueTeamsTab
+								theme={theme}
+								onTeamTemplatesChanged={() => setTeamTemplatesVersion((v) => v + 1)}
+								initialSelectedTemplateId={teamsTabSelectedTemplateId}
+							/>
 						) : (
 							<CuePipelineEditor
 								sessions={sessionInfoList}
@@ -516,6 +531,8 @@ export function CueModal({ theme, onClose, cueShortcutKeys }: CueModalProps) {
 								theme={theme}
 								activeRuns={activeRuns}
 								onTriggerPipeline={triggerSubscription}
+								teamTemplatesVersion={teamTemplatesVersion}
+								onSwitchToTeamsTab={handleSwitchToTeamsTab}
 							/>
 						)}
 					</div>

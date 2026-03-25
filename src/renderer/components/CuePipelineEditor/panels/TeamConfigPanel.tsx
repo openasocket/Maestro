@@ -19,6 +19,8 @@ export interface TeamConfigPanelProps {
 	onUpdateOutputPrompt: (prompt: string) => void;
 	onSwitchTemplate?: () => void;
 	pipelineColor: string;
+	/** Navigate to the Teams tab to edit this template */
+	onEditTemplate?: (templateId: string) => void;
 }
 
 const textareaStyle: React.CSSProperties = {
@@ -36,6 +38,7 @@ const textareaStyle: React.CSSProperties = {
 };
 
 export function TeamConfigPanel({
+	templateId,
 	templateName,
 	roleCount,
 	topologyPattern,
@@ -44,6 +47,7 @@ export function TeamConfigPanel({
 	onUpdateInputPrompt,
 	onUpdateOutputPrompt,
 	pipelineColor,
+	onEditTemplate,
 }: TeamConfigPanelProps) {
 	const [localInputPrompt, setLocalInputPrompt] = useState(inputPrompt);
 	const [localOutputPrompt, setLocalOutputPrompt] = useState(outputPrompt);
@@ -112,6 +116,31 @@ export function TeamConfigPanel({
 					>
 						{topologyPattern}
 					</span>
+				)}
+				{onEditTemplate && (
+					<button
+						onClick={() => onEditTemplate(templateId)}
+						style={{
+							marginLeft: 'auto',
+							fontSize: 11,
+							fontWeight: 500,
+							color: pipelineColor,
+							backgroundColor: pipelineColor + '18',
+							border: `1px solid ${pipelineColor}40`,
+							borderRadius: 4,
+							padding: '2px 10px',
+							cursor: 'pointer',
+							transition: 'filter 0.15s',
+						}}
+						onMouseEnter={(e) => {
+							e.currentTarget.style.filter = 'brightness(1.2)';
+						}}
+						onMouseLeave={(e) => {
+							e.currentTarget.style.filter = 'brightness(1)';
+						}}
+					>
+						Edit Template →
+					</button>
 				)}
 			</div>
 

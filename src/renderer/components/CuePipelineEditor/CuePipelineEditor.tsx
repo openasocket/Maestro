@@ -51,6 +51,10 @@ export interface CuePipelineEditorProps {
 	activeRuns?: ActiveRunInfo[];
 	/** Callback to manually trigger a pipeline by name */
 	onTriggerPipeline?: (pipelineName: string) => void;
+	/** Bumped when Teams tab creates/edits/deletes a template — triggers team list re-fetch */
+	teamTemplatesVersion?: number;
+	/** Switch to the Teams tab, optionally pre-selecting a template for editing */
+	onSwitchToTeamsTab?: (templateId?: string) => void;
 }
 
 /** Bridges the circular dependency between usePipelineState and usePipelineSelection. */
@@ -72,6 +76,8 @@ function CuePipelineEditorInner({
 	theme,
 	activeRuns: activeRunsProp,
 	onTriggerPipeline,
+	teamTemplatesVersion,
+	onSwitchToTeamsTab,
 }: CuePipelineEditorProps) {
 	const reactFlowInstance = useReactFlow();
 
@@ -178,7 +184,7 @@ function CuePipelineEditorInner({
 				}))
 			);
 		});
-	}, []);
+	}, [teamTemplatesVersion]);
 
 	// Compute set of template IDs already on the canvas
 	const onCanvasTemplateIds = useMemo(() => {
@@ -684,6 +690,8 @@ function CuePipelineEditorInner({
 				onTriggerPipeline={onTriggerPipeline}
 				isDirty={isDirty}
 				runningPipelineIds={runningPipelineIds}
+				onManageTeams={onSwitchToTeamsTab ? () => onSwitchToTeamsTab() : undefined}
+				onEditTeamTemplate={onSwitchToTeamsTab}
 			/>
 
 			{contextMenu && (

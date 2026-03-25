@@ -51,6 +51,8 @@ interface NodeConfigPanelProps {
 	isSaved?: boolean;
 	/** Whether this pipeline is currently running */
 	isRunning?: boolean;
+	/** Navigate to the Teams tab to edit a specific template */
+	onEditTeamTemplate?: (templateId?: string) => void;
 }
 
 export function NodeConfigPanel({
@@ -71,6 +73,7 @@ export function NodeConfigPanel({
 	isSaved,
 	isRunning,
 	pipelineColor,
+	onEditTeamTemplate,
 }: NodeConfigPanelProps) {
 	const [expanded, setExpanded] = useState(false);
 	const isVisible = selectedNode !== null;
@@ -95,8 +98,8 @@ export function NodeConfigPanel({
 			style={{
 				position: 'absolute',
 				bottom: 0,
-				left: triggerDrawerOpen ? 220 : 0,
-				right: agentDrawerOpen || teamDrawerOpen ? 240 : 0,
+				left: triggerDrawerOpen ? 'min(220px, 28vw)' : 0,
+				right: agentDrawerOpen || teamDrawerOpen ? 'min(240px, 28vw)' : 0,
 				height: expanded ? '80%' : collapsedHeight,
 				backgroundColor: '#1a1a2e',
 				borderTop: '1px solid #333',
@@ -292,6 +295,7 @@ export function NodeConfigPanel({
 							onUpdateNode(selectedNode.id, { outputPrompt: prompt })
 						}
 						pipelineColor={pipelineColor ?? '#f59e0b'}
+						onEditTemplate={onEditTeamTemplate ? (id) => onEditTeamTemplate(id) : undefined}
 					/>
 				)}
 			</div>

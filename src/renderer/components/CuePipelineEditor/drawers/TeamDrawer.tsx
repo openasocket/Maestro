@@ -9,6 +9,10 @@ export interface TeamDrawerProps {
 	teams: CuePipelineTeamInfo[];
 	onCanvasTemplateIds?: Set<string>;
 	theme: Theme;
+	/** When true, another drawer shares the right side — this drawer takes the bottom half */
+	shareRight?: boolean;
+	/** Navigate to the Teams tab for full template management */
+	onManageTeams?: () => void;
 }
 
 function handleDragStart(e: React.DragEvent, team: CuePipelineTeamInfo) {
@@ -31,6 +35,8 @@ export const TeamDrawer = memo(function TeamDrawer({
 	teams,
 	onCanvasTemplateIds,
 	theme,
+	shareRight,
+	onManageTeams,
 }: TeamDrawerProps) {
 	const [search, setSearch] = useState('');
 	const searchInputRef = useRef<HTMLInputElement>(null);
@@ -54,14 +60,14 @@ export const TeamDrawer = memo(function TeamDrawer({
 			style={{
 				position: 'absolute',
 				right: 0,
-				top: 0,
+				top: shareRight ? '50%' : 0,
 				bottom: 0,
-				width: 240,
+				width: 'min(240px, 28vw)',
 				zIndex: 20,
 				backgroundColor: theme.colors.bgMain,
 				borderLeft: `1px solid ${theme.colors.border}`,
 				transform: isOpen ? 'translateX(0)' : 'translateX(100%)',
-				transition: 'transform 200ms ease',
+				transition: 'transform 200ms ease, top 200ms ease',
 				display: 'flex',
 				flexDirection: 'column',
 				overflow: 'hidden',
@@ -201,6 +207,34 @@ export const TeamDrawer = memo(function TeamDrawer({
 					</div>
 				)}
 			</div>
+
+			{/* Manage Teams link */}
+			{onManageTeams && (
+				<div
+					style={{
+						padding: '8px 12px',
+						borderTop: `1px solid ${theme.colors.border}`,
+						flexShrink: 0,
+					}}
+				>
+					<button
+						onClick={onManageTeams}
+						style={{
+							width: '100%',
+							padding: '6px 0',
+							fontSize: 11,
+							fontWeight: 500,
+							color: theme.colors.accent,
+							backgroundColor: 'transparent',
+							border: 'none',
+							cursor: 'pointer',
+							textAlign: 'center',
+						}}
+					>
+						Manage Teams →
+					</button>
+				</div>
+			)}
 		</div>
 	);
 });
