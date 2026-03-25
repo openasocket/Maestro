@@ -9,7 +9,7 @@
  * (reports-to / delegates-to) based on role tiers.
  */
 
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactFlow, {
 	ReactFlowProvider,
 	useReactFlow,
@@ -19,15 +19,11 @@ import ReactFlow, {
 	Controls,
 	MiniMap,
 	ConnectionMode,
-	BaseEdge,
-	EdgeLabelRenderer,
-	getBezierPath,
 	type Node,
 	type Edge,
 	type OnNodesChange,
 	type OnEdgesChange,
 	type Connection,
-	type EdgeProps,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Save, X, Plus } from 'lucide-react';
@@ -38,97 +34,11 @@ import type {
 	WorkflowEdge,
 } from '../../../shared/group-chat-types';
 import { RoleBuilderNode, TIER_COLORS, type RoleBuilderNodeData } from './nodes/RoleBuilderNode';
+import { TeamBuilderEdge, type TeamBuilderEdgeData } from './edges/TeamBuilderEdge';
 
 // Re-export for consumers that import from this file
 export type { RoleBuilderNodeData } from './nodes/RoleBuilderNode';
-
-// ============================================================================
-// Edge data interface
-// ============================================================================
-
-export interface TeamBuilderEdgeData {
-	connectionType: 'reports-to' | 'delegates-to';
-	tierColor: string;
-}
-
-// ============================================================================
-// TeamBuilderEdge — Placeholder (full version in CUE-TEAMS-TAB-04 task 4)
-// ============================================================================
-
-const TeamBuilderEdge = memo(function TeamBuilderEdge({
-	id,
-	sourceX,
-	sourceY,
-	targetX,
-	targetY,
-	sourcePosition,
-	targetPosition,
-	data,
-	selected,
-}: EdgeProps<TeamBuilderEdgeData>) {
-	const connectionType = data?.connectionType ?? 'reports-to';
-	const color = data?.tierColor ?? TIER_COLORS.worker;
-
-	const [edgePath, labelX, labelY] = getBezierPath({
-		sourceX,
-		sourceY,
-		targetX,
-		targetY,
-		sourcePosition,
-		targetPosition,
-	});
-
-	return (
-		<>
-			{selected && (
-				<BaseEdge
-					id={`${id}-glow`}
-					path={edgePath}
-					style={{
-						stroke: color,
-						strokeWidth: 8,
-						opacity: 0.3,
-						filter: `drop-shadow(0 0 4px ${color})`,
-						strokeLinecap: 'round',
-					}}
-				/>
-			)}
-			<BaseEdge
-				id={id}
-				path={edgePath}
-				markerEnd="url(#team-arrow)"
-				style={{
-					stroke: color,
-					strokeWidth: selected ? 3 : 1.5,
-					strokeDasharray: connectionType === 'delegates-to' ? '6 3' : undefined,
-				}}
-			/>
-			{(selected || false) && (
-				<EdgeLabelRenderer>
-					<div
-						style={{
-							position: 'absolute',
-							transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-							pointerEvents: 'all',
-							display: 'flex',
-							alignItems: 'center',
-							gap: 4,
-							backgroundColor: '#1e1e2e',
-							border: `1px solid ${color}60`,
-							borderRadius: 10,
-							padding: '2px 8px',
-							fontSize: 10,
-							color,
-							fontWeight: 500,
-						}}
-					>
-						{connectionType === 'reports-to' ? 'Reports to' : 'Delegates to'}
-					</div>
-				</EdgeLabelRenderer>
-			)}
-		</>
-	);
-});
+export type { TeamBuilderEdgeData } from './edges/TeamBuilderEdge';
 
 // ============================================================================
 // Tier order for connection inference
