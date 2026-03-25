@@ -3034,6 +3034,28 @@ interface MaestroAPI {
 		) => Promise<import('../shared/group-chat-types').TeamTemplate>;
 	};
 
+	// Team Generation API (AI-powered team structure generation)
+	teamGeneration: {
+		generate: (request: {
+			description: string;
+			teamSize?: 'small' | 'medium' | 'large' | 'auto';
+			rigor?: 'light' | 'standard' | 'strict';
+			domain?: string;
+			specializations?: string[];
+		}) => Promise<{
+			name: string;
+			description: string;
+			roles: Array<{
+				name: string;
+				tier: import('../shared/group-chat-types').RoleTier;
+				agentId: string;
+				description: string;
+				prompt: string;
+				reportsTo?: string;
+			}>;
+		}>;
+	};
+
 	// WakaTime API (CLI check, API key validation)
 	wakatime: {
 		checkCli: () => Promise<{ available: boolean; version?: string }>;
