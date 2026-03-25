@@ -46,6 +46,12 @@ export function useTeamOrchStats(
 		async (isRefresh = false) => {
 			if (!enabled) return;
 
+			if (!window.maestro?.teamOrchStats) {
+				setError(new Error('Team orchestration stats API not available'));
+				setLoading(false);
+				return;
+			}
+
 			if (isRefresh) {
 				setRefreshing(true);
 			} else {
@@ -94,7 +100,9 @@ export function useTeamOrchStats(
 		let unsubscribe: (() => void) | undefined;
 		if (enabled) {
 			fetchStats();
-			unsubscribe = window.maestro.teamOrchStats.onStatsUpdate(debouncedUpdate);
+			if (window.maestro?.teamOrchStats?.onStatsUpdate) {
+				unsubscribe = window.maestro.teamOrchStats.onStatsUpdate(debouncedUpdate);
+			}
 		} else {
 			setData(null);
 			setLoading(false);

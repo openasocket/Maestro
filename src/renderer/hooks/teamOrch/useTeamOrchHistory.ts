@@ -85,6 +85,11 @@ export function useTeamOrchHistory(enabled: boolean): UseTeamOrchHistoryReturn {
 	const fetchHistory = useCallback(async () => {
 		if (!enabled) return;
 
+		if (!window.maestro?.teamOrchStats) {
+			setError(new Error('Team orchestration stats API not available'));
+			return;
+		}
+
 		setLoading(true);
 		setError(null);
 

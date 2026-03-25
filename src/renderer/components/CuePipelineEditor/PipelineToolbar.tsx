@@ -64,9 +64,10 @@ export const PipelineToolbar = React.memo(function PipelineToolbar({
 		<>
 			{/* Toolbar */}
 			<div
-				className="flex items-center justify-between px-4 py-2 border-b shrink-0"
-				style={{ borderColor: theme.colors.border }}
+				className="flex items-center justify-between px-4 py-2 border-b"
+				style={{ borderColor: theme.colors.border, flexShrink: 0 }}
 			>
+				{/* Left: Drawer toggle buttons */}
 				<div className="flex items-center gap-2">
 					<button
 						onClick={() => !isAllPipelinesView && setTriggerDrawerOpen((v) => !v)}
@@ -80,26 +81,12 @@ export const PipelineToolbar = React.memo(function PipelineToolbar({
 							opacity: isAllPipelinesView ? 0.4 : 1,
 							transition: 'all 0.15s',
 						}}
-						title={isAllPipelinesView ? 'Select a pipeline to add triggers' : undefined}
+						title={isAllPipelinesView ? 'Select a pipeline first' : 'Toggle triggers drawer'}
 					>
 						<Zap size={12} />
 						Triggers
 					</button>
-				</div>
-				<div className="flex items-center gap-2">
-					<PipelineSelector
-						pipelines={pipelines}
-						selectedPipelineId={selectedPipelineId}
-						onSelect={selectPipeline}
-						onCreatePipeline={createPipeline}
-						onDeletePipeline={deletePipeline}
-						onRenamePipeline={renamePipeline}
-						onChangePipelineColor={changePipelineColor}
-						textColor={theme.colors.textMain}
-						borderColor={theme.colors.border}
-					/>
-				</div>
-				<div className="flex items-center gap-2">
+
 					<button
 						onClick={() => !isAllPipelinesView && setAgentDrawerOpen((v) => !v)}
 						disabled={isAllPipelinesView}
@@ -112,7 +99,7 @@ export const PipelineToolbar = React.memo(function PipelineToolbar({
 							opacity: isAllPipelinesView ? 0.4 : 1,
 							transition: 'all 0.15s',
 						}}
-						title={isAllPipelinesView ? 'Select a pipeline to add agents' : undefined}
+						title={isAllPipelinesView ? 'Select a pipeline first' : 'Toggle agents drawer'}
 					>
 						<Bot size={12} />
 						Agents
@@ -130,12 +117,30 @@ export const PipelineToolbar = React.memo(function PipelineToolbar({
 							opacity: isAllPipelinesView ? 0.4 : 1,
 							transition: 'all 0.15s',
 						}}
-						title={isAllPipelinesView ? 'Select a pipeline to add teams' : undefined}
+						title={isAllPipelinesView ? 'Select a pipeline first' : 'Toggle teams drawer'}
 					>
 						<Users size={12} />
 						Teams
 					</button>
+				</div>
 
+				{/* Center: Pipeline selector */}
+				<div className="flex items-center gap-2">
+					<PipelineSelector
+						pipelines={pipelines}
+						selectedPipelineId={selectedPipelineId}
+						onSelect={selectPipeline}
+						onCreatePipeline={createPipeline}
+						onDeletePipeline={deletePipeline}
+						onRenamePipeline={renamePipeline}
+						onChangePipelineColor={changePipelineColor}
+						textColor={theme.colors.textMain}
+						borderColor={theme.colors.border}
+					/>
+				</div>
+
+				{/* Right: Settings + Save/Discard */}
+				<div className="flex items-center gap-2">
 					{/* Settings toggle */}
 					<button
 						onClick={() => setShowSettings((v) => !v)}

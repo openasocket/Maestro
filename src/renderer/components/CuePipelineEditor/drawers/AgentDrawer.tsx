@@ -16,6 +16,8 @@ export interface AgentDrawerProps {
 	groups?: { id: string; name: string; emoji: string }[];
 	onCanvasSessionIds?: Set<string>;
 	theme: Theme;
+	/** When true, another drawer shares the right side — this drawer takes the top half */
+	shareRight?: boolean;
 }
 
 function handleDragStart(e: React.DragEvent, session: AgentSessionInfo) {
@@ -38,6 +40,7 @@ export const AgentDrawer = memo(function AgentDrawer({
 	groups,
 	onCanvasSessionIds,
 	theme,
+	shareRight,
 }: AgentDrawerProps) {
 	const [search, setSearch] = useState('');
 	const searchInputRef = useRef<HTMLInputElement>(null);
@@ -105,13 +108,14 @@ export const AgentDrawer = memo(function AgentDrawer({
 				position: 'absolute',
 				right: 0,
 				top: 0,
-				bottom: 0,
-				width: 240,
+				bottom: shareRight ? '50%' : 0,
+				width: 'min(240px, 28vw)',
 				zIndex: 20,
 				backgroundColor: theme.colors.bgMain,
 				borderLeft: `1px solid ${theme.colors.border}`,
+				borderBottom: shareRight ? `1px solid ${theme.colors.border}` : undefined,
 				transform: isOpen ? 'translateX(0)' : 'translateX(100%)',
-				transition: 'transform 200ms ease',
+				transition: 'transform 200ms ease, bottom 200ms ease',
 				display: 'flex',
 				flexDirection: 'column',
 				overflow: 'hidden',

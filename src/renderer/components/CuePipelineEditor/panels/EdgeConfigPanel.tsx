@@ -80,8 +80,8 @@ export function EdgeConfigPanel({
 			style={{
 				position: 'absolute',
 				bottom: 0,
-				left: triggerDrawerOpen ? 220 : 0,
-				right: agentDrawerOpen || teamDrawerOpen ? 240 : 0,
+				left: triggerDrawerOpen ? 'min(220px, 28vw)' : 0,
+				right: agentDrawerOpen || teamDrawerOpen ? 'min(240px, 28vw)' : 0,
 				height: 200,
 				backgroundColor: '#1a1a2e',
 				borderTop: '1px solid #333',

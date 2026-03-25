@@ -96,7 +96,7 @@ export const TriggerDrawer = memo(function TriggerDrawer({
 				left: 0,
 				top: 0,
 				bottom: 0,
-				width: 220,
+				width: 'min(220px, 28vw)',
 				zIndex: 20,
 				backgroundColor: theme.colors.bgMain,
 				borderRight: `1px solid ${theme.colors.border}`,
