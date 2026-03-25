@@ -54,4 +54,7 @@ export {
 	teamBuilderRoleAssignmentPrompt,
 	teamBuilderTopologyPrompt,
 	teamBuilderCompletionPrompt,
+
+	// Team Generation
+	teamGenerationPrompt,
 } from '../generated/prompts';

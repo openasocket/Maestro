@@ -55,6 +55,10 @@ import { registerDirectorNotesHandlers, DirectorNotesHandlerDependencies } from 
 import { registerCueHandlers, CueHandlerDependencies } from './cue';
 import { registerTeamTemplateHandlers } from './teamTemplates';
 import { registerWakatimeHandlers } from './wakatime';
+import {
+	registerTeamGenerationHandlers,
+	TeamGenerationHandlerDependencies,
+} from './teamGeneration';
 import { registerTeamOrchStatsHandlers, TeamOrchStatsHandlerDependencies } from './teamOrchStats';
 import { AgentDetector } from '../../agents';
 import { ProcessManager } from '../../process-manager';
@@ -104,6 +108,8 @@ export type { DirectorNotesHandlerDependencies };
 export { registerCueHandlers };
 export type { CueHandlerDependencies };
 export { registerTeamTemplateHandlers };
+export { registerTeamGenerationHandlers };
+export type { TeamGenerationHandlerDependencies };
 export { registerWakatimeHandlers };
 export { registerTeamOrchStatsHandlers };
 export type { TeamOrchStatsHandlerDependencies };
@@ -291,6 +297,12 @@ export function registerAllHandlers(deps: HandlerDependencies): void {
 	});
 	// Register Team Template handlers (team template CRUD for group chat presets)
 	registerTeamTemplateHandlers();
+	// Register Team Generation handlers (AI-powered team structure generation)
+	registerTeamGenerationHandlers({
+		getProcessManager: deps.getProcessManager,
+		getAgentDetector: deps.getAgentDetector,
+		agentConfigsStore: deps.agentConfigsStore,
+	});
 	// Register Director's Notes handlers (unified history + synopsis)
 	registerDirectorNotesHandlers({
 		getProcessManager: deps.getProcessManager,

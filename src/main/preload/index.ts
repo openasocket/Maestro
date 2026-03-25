@@ -52,6 +52,7 @@ import { createDirectorNotesApi } from './directorNotes';
 import { createCueApi } from './cue';
 import { createTeamTemplatesApi } from './teamTemplates';
 import { createWakatimeApi } from './wakatime';
+import { createTeamGenerationApi } from './teamGeneration';
 import { createTeamOrchStatsApi } from './teamOrchStats';
 
 // Expose protected methods that allow the renderer process to use
@@ -201,6 +202,9 @@ contextBridge.exposeInMainWorld('maestro', {
 	// WakaTime API (CLI check, API key validation)
 	wakatime: createWakatimeApi(),
 
+	// Team Generation API (AI-powered team structure generation)
+	teamGeneration: createTeamGenerationApi(),
+
 	// Team Orchestration Stats API (workflow analytics dashboard)
 	teamOrchStats: createTeamOrchStatsApi(),
 });
@@ -280,6 +284,8 @@ export {
 	createTeamTemplatesApi,
 	// WakaTime
 	createWakatimeApi,
+	// Team Generation
+	createTeamGenerationApi,
 	// Team Orchestration Stats
 	createTeamOrchStatsApi,
 };
@@ -504,6 +510,12 @@ export type {
 	// From wakatime
 	WakatimeApi,
 } from './wakatime';
+export type {
+	// From teamGeneration
+	TeamGenerationApi,
+	TeamGenerationRequest,
+	TeamGenerationResult,
+} from './teamGeneration';
 export type {
 	// From teamOrchStats
 	TeamOrchStatsApi,
