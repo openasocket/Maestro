@@ -588,9 +588,12 @@ const CreateTemplateForm = memo(function CreateTemplateForm({
 		}
 	}, [canSave, name, description, roles, onSave]);
 
-	const updateRole = useCallback((idx: number, field: keyof TeamTemplateRole, value: string) => {
-		setRoles((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
-	}, []);
+	const updateRole = useCallback(
+		(idx: number, field: keyof TeamTemplateRole, value: string | string[]) => {
+			setRoles((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+		},
+		[]
+	);
 
 	const removeRole = useCallback((idx: number) => {
 		setRoles((prev) => prev.filter((_, i) => i !== idx));
@@ -712,71 +715,174 @@ const RoleRow = memo(function RoleRow({
 }: {
 	role: TeamTemplateRole;
 	theme: Theme;
-	onChange: (field: keyof TeamTemplateRole, value: string) => void;
+	onChange: (field: keyof TeamTemplateRole, value: string | string[]) => void;
 	onRemove?: () => void;
 }) {
+	const [expanded, setExpanded] = useState(false);
+
 	return (
 		<div
-			className="flex items-start gap-2 p-2 rounded border"
+			className="rounded border"
 			style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
 		>
-			<GripVertical
-				className="w-3.5 h-3.5 mt-2 flex-shrink-0"
-				style={{ color: theme.colors.textDim, opacity: 0.4 }}
-			/>
-			<div className="flex-1 min-w-0 space-y-1">
-				<div className="flex gap-2">
+			<div className="flex items-start gap-2 p-2">
+				<GripVertical
+					className="w-3.5 h-3.5 mt-2 flex-shrink-0"
+					style={{ color: theme.colors.textDim, opacity: 0.4 }}
+				/>
+				<div className="flex-1 min-w-0 space-y-1">
+					<div className="flex gap-2">
+						<input
+							type="text"
+							placeholder="Role name"
+							value={role.name}
+							onChange={(e) => onChange('name', e.target.value)}
+							className="flex-1 px-2 py-1 rounded text-xs border outline-none"
+							style={{
+								backgroundColor: theme.colors.bgActivity,
+								borderColor: theme.colors.border,
+								color: theme.colors.textMain,
+							}}
+						/>
+						<select
+							value={role.agentId}
+							onChange={(e) => onChange('agentId', e.target.value)}
+							className="px-2 py-1 rounded text-xs border outline-none"
+							style={{
+								backgroundColor: theme.colors.bgActivity,
+								borderColor: theme.colors.border,
+								color: theme.colors.textMain,
+							}}
+						>
+							{ROLE_AGENT_IDS.map((id) => (
+								<option key={id} value={id}>
+									{id}
+								</option>
+							))}
+						</select>
+					</div>
 					<input
 						type="text"
-						placeholder="Role name"
-						value={role.name}
-						onChange={(e) => onChange('name', e.target.value)}
-						className="flex-1 px-2 py-1 rounded text-xs border outline-none"
+						placeholder="Description"
+						value={role.description}
+						onChange={(e) => onChange('description', e.target.value)}
+						className="w-full px-2 py-1 rounded text-xs border outline-none"
 						style={{
 							backgroundColor: theme.colors.bgActivity,
 							borderColor: theme.colors.border,
 							color: theme.colors.textMain,
 						}}
 					/>
-					<select
-						value={role.agentId}
-						onChange={(e) => onChange('agentId', e.target.value)}
-						className="px-2 py-1 rounded text-xs border outline-none"
-						style={{
-							backgroundColor: theme.colors.bgActivity,
-							borderColor: theme.colors.border,
-							color: theme.colors.textMain,
-						}}
-					>
-						{ROLE_AGENT_IDS.map((id) => (
-							<option key={id} value={id}>
-								{id}
-							</option>
-						))}
-					</select>
 				</div>
-				<input
-					type="text"
-					placeholder="Description"
-					value={role.description}
-					onChange={(e) => onChange('description', e.target.value)}
-					className="w-full px-2 py-1 rounded text-xs border outline-none"
-					style={{
-						backgroundColor: theme.colors.bgActivity,
-						borderColor: theme.colors.border,
-						color: theme.colors.textMain,
-					}}
-				/>
-			</div>
-			{onRemove && (
 				<button
-					onClick={onRemove}
+					onClick={() => setExpanded((v) => !v)}
 					className="p-1 mt-1 rounded hover:opacity-80 flex-shrink-0"
 					style={{ color: theme.colors.textDim }}
-					aria-label="Remove role"
+					aria-label={expanded ? 'Collapse role details' : 'Expand role details'}
 				>
-					<X className="w-3.5 h-3.5" aria-hidden="true" />
+					<ChevronDown
+						className="w-3.5 h-3.5 transition-transform"
+						style={{ transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)' }}
+						aria-hidden="true"
+					/>
 				</button>
+				{onRemove && (
+					<button
+						onClick={onRemove}
+						className="p-1 mt-1 rounded hover:opacity-80 flex-shrink-0"
+						style={{ color: theme.colors.textDim }}
+						aria-label="Remove role"
+					>
+						<X className="w-3.5 h-3.5" aria-hidden="true" />
+					</button>
+				)}
+			</div>
+			{expanded && (
+				<div
+					className="px-2 pb-2 pt-1 space-y-2"
+					style={{ borderTop: `1px solid ${theme.colors.border}`, marginLeft: 20 }}
+				>
+					<div>
+						<label
+							className="block text-[10px] font-medium mb-1"
+							style={{ color: theme.colors.textDim }}
+						>
+							System Prompt Suffix
+						</label>
+						<textarea
+							rows={2}
+							placeholder="Additional context injected into this role's prompt..."
+							value={role.systemPromptSuffix ?? ''}
+							onChange={(e) => onChange('systemPromptSuffix', e.target.value)}
+							className="w-full px-2 py-1 rounded text-xs border outline-none resize-none"
+							style={{
+								backgroundColor: theme.colors.bgActivity,
+								borderColor: theme.colors.border,
+								color: theme.colors.textMain,
+							}}
+						/>
+					</div>
+					<div className="flex gap-2">
+						<div className="flex-1">
+							<label
+								className="block text-[10px] font-medium mb-1"
+								style={{ color: theme.colors.textDim }}
+							>
+								Expects (input)
+							</label>
+							<input
+								type="text"
+								placeholder="comma-separated inputs"
+								value={(role.inputContract ?? []).join(', ')}
+								onChange={(e) => {
+									const val = e.target.value;
+									const arr = val
+										? val
+												.split(',')
+												.map((s) => s.trim())
+												.filter(Boolean)
+										: [];
+									onChange('inputContract', arr);
+								}}
+								className="w-full px-2 py-1 rounded text-xs border outline-none"
+								style={{
+									backgroundColor: theme.colors.bgActivity,
+									borderColor: theme.colors.border,
+									color: theme.colors.textMain,
+								}}
+							/>
+						</div>
+						<div className="flex-1">
+							<label
+								className="block text-[10px] font-medium mb-1"
+								style={{ color: theme.colors.textDim }}
+							>
+								Produces (output)
+							</label>
+							<input
+								type="text"
+								placeholder="comma-separated outputs"
+								value={(role.outputContract ?? []).join(', ')}
+								onChange={(e) => {
+									const val = e.target.value;
+									const arr = val
+										? val
+												.split(',')
+												.map((s) => s.trim())
+												.filter(Boolean)
+										: [];
+									onChange('outputContract', arr);
+								}}
+								className="w-full px-2 py-1 rounded text-xs border outline-none"
+								style={{
+									backgroundColor: theme.colors.bgActivity,
+									borderColor: theme.colors.border,
+									color: theme.colors.textMain,
+								}}
+							/>
+						</div>
+					</div>
+				</div>
 			)}
 		</div>
 	);
@@ -1299,7 +1405,7 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 	]);
 
 	const updateEditRole = useCallback(
-		(idx: number, field: keyof TeamTemplateRole, value: string) => {
+		(idx: number, field: keyof TeamTemplateRole, value: string | string[]) => {
 			setEditRoles((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
 		},
 		[]
