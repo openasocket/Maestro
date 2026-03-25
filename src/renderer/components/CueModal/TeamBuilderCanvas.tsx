@@ -28,10 +28,12 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import { Save, X, Plus } from 'lucide-react';
 import type { Theme } from '../../types';
-import type {
-	TeamTemplate,
-	TeamTemplateRole,
-	WorkflowEdge,
+import {
+	ROLE_TIER_ORDER,
+	type RoleTier,
+	type TeamTemplate,
+	type TeamTemplateRole,
+	type WorkflowEdge,
 } from '../../../shared/group-chat-types';
 import { RoleBuilderNode, TIER_COLORS, type RoleBuilderNodeData } from './nodes/RoleBuilderNode';
 import { TeamBuilderEdge, type TeamBuilderEdgeData } from './edges/TeamBuilderEdge';
@@ -42,14 +44,32 @@ export type { RoleBuilderNodeData } from './nodes/RoleBuilderNode';
 export type { TeamBuilderEdgeData } from './edges/TeamBuilderEdge';
 
 // ============================================================================
-// Tier order for connection inference
+// Tier validation for connections
 // ============================================================================
 
-const TIER_ORDER: Record<string, number> = {
-	executive: 0,
-	manager: 1,
-	worker: 2,
-};
+/**
+ * Validate whether a connection between two tiers is allowed.
+ * Rules:
+ *   - Workers report to Managers or Executives (not other Workers)
+ *   - Managers report to Executives or coordinate with other Managers
+ *   - Executives report to other Executives (multi-level hierarchy)
+ *   - Higher tier cannot report to lower tier
+ */
+export function validateTierConnection(
+	sourceTier: RoleTier,
+	targetTier: RoleTier
+): { valid: boolean; reason?: string } {
+	if (sourceTier === 'worker' && targetTier === 'worker') {
+		return { valid: false, reason: 'Workers can only report to Managers or Executives' };
+	}
+	const sourceOrder = ROLE_TIER_ORDER[sourceTier];
+	const targetOrder = ROLE_TIER_ORDER[targetTier];
+	if (sourceOrder > targetOrder) {
+		const label = (s: string) => s.charAt(0).toUpperCase() + s.slice(1) + 's';
+		return { valid: false, reason: `${label(sourceTier)} cannot report to ${label(targetTier)}` };
+	}
+	return { valid: true };
+}
 
 function generateId(): string {
 	return `role-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -194,7 +214,11 @@ function TeamBuilderCanvasInner({
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 	const [_roleDrawerOpen, _setRoleDrawerOpen] = useState(false);
 	const [saving, setSaving] = useState(false);
+	const [connectionToast, setConnectionToast] = useState<string | null>(null);
 	const initializedRef = useRef(false);
+	const connectionToastTimerRef = useRef<ReturnType<typeof setTimeout>>();
+	const connectionMadeRef = useRef(false);
+	const lastInvalidReasonRef = useRef<string | null>(null);
 
 	// Configure handler for node gear icon
 	const handleConfigure = useCallback((nodeId: string) => {
@@ -235,6 +259,54 @@ function TeamBuilderCanvasInner({
 		setEdges((eds) => applyEdgeChanges(changes, eds));
 	}, []);
 
+	const showConnectionToast = useCallback((message: string) => {
+		if (connectionToastTimerRef.current) clearTimeout(connectionToastTimerRef.current);
+		setConnectionToast(message);
+		connectionToastTimerRef.current = setTimeout(() => setConnectionToast(null), 2500);
+	}, []);
+
+	const isValidConnection = useCallback(
+		(connection: Connection) => {
+			lastInvalidReasonRef.current = null;
+			if (!connection.source || !connection.target) return false;
+			if (connection.source === connection.target) return false;
+
+			const exists = edges.some(
+				(e) => e.source === connection.source && e.target === connection.target
+			);
+			if (exists) {
+				lastInvalidReasonRef.current = 'Connection already exists';
+				return false;
+			}
+
+			const sourceNode = nodes.find((n) => n.id === connection.source);
+			const targetNode = nodes.find((n) => n.id === connection.target);
+			const sourceTier = (sourceNode?.data.tier ?? 'worker') as RoleTier;
+			const targetTier = (targetNode?.data.tier ?? 'worker') as RoleTier;
+
+			const validation = validateTierConnection(sourceTier, targetTier);
+			if (!validation.valid) {
+				lastInvalidReasonRef.current = validation.reason!;
+				return false;
+			}
+			return true;
+		},
+		[nodes, edges]
+	);
+
+	const onConnectStart = useCallback(() => {
+		connectionMadeRef.current = false;
+		lastInvalidReasonRef.current = null;
+	}, []);
+
+	const onConnectEnd = useCallback(() => {
+		if (!connectionMadeRef.current && lastInvalidReasonRef.current) {
+			showConnectionToast(lastInvalidReasonRef.current);
+		}
+		connectionMadeRef.current = false;
+		lastInvalidReasonRef.current = null;
+	}, [showConnectionToast]);
+
 	const onConnect = useCallback(
 		(connection: Connection) => {
 			if (!connection.source || !connection.target) return;
@@ -246,16 +318,25 @@ function TeamBuilderCanvasInner({
 			);
 			if (exists) return;
 
-			// Infer connection type from tier order
+			// Validate tier-aware connection rules
 			const sourceNode = nodes.find((n) => n.id === connection.source);
 			const targetNode = nodes.find((n) => n.id === connection.target);
-			const sourceTier = TIER_ORDER[sourceNode?.data.tier ?? 'worker'] ?? 2;
-			const targetTier = TIER_ORDER[targetNode?.data.tier ?? 'worker'] ?? 2;
+			const sourceTier = (sourceNode?.data.tier ?? 'worker') as RoleTier;
+			const targetTier = (targetNode?.data.tier ?? 'worker') as RoleTier;
 
+			const validation = validateTierConnection(sourceTier, targetTier);
+			if (!validation.valid) {
+				showConnectionToast(validation.reason!);
+				return;
+			}
+
+			// Infer connection type from tier hierarchy
+			const sourceOrder = ROLE_TIER_ORDER[sourceTier];
+			const targetOrder = ROLE_TIER_ORDER[targetTier];
 			const connectionType: 'reports-to' | 'delegates-to' =
-				sourceTier >= targetTier ? 'reports-to' : 'delegates-to';
+				sourceOrder <= targetOrder ? 'reports-to' : 'delegates-to';
 
-			const tierColor = TIER_COLORS[sourceNode?.data.tier ?? 'worker'] ?? TIER_COLORS.worker;
+			const tierColor = TIER_COLORS[sourceTier] ?? TIER_COLORS.worker;
 
 			const newEdge: Edge<TeamBuilderEdgeData> = {
 				id: `edge-${Date.now()}`,
@@ -265,9 +346,10 @@ function TeamBuilderCanvasInner({
 				data: { connectionType, tierColor },
 			};
 
+			connectionMadeRef.current = true;
 			setEdges((eds) => [...eds, newEdge]);
 		},
-		[nodes, edges]
+		[nodes, edges, showConnectionToast]
 	);
 
 	// ─── Drag-and-drop ────────────────────────────────────────────────────
@@ -517,6 +599,9 @@ function TeamBuilderCanvasInner({
 					onNodesChange={onNodesChange}
 					onEdgesChange={onEdgesChange}
 					onConnect={onConnect}
+					onConnectStart={onConnectStart}
+					onConnectEnd={onConnectEnd}
+					isValidConnection={isValidConnection}
 					onDrop={onDrop}
 					onDragOver={onDragOver}
 					connectionMode={ConnectionMode.Loose}
@@ -583,6 +668,30 @@ function TeamBuilderCanvasInner({
 						<div style={{ color: theme.colors.textDim, fontSize: 12, opacity: 0.6 }}>
 							Connect roles to define reporting structures
 						</div>
+					</div>
+				)}
+
+				{/* Connection validation toast */}
+				{connectionToast && (
+					<div
+						style={{
+							position: 'absolute',
+							bottom: 16,
+							left: '50%',
+							transform: 'translateX(-50%)',
+							backgroundColor: '#1e1e2e',
+							border: '1px solid #ef444480',
+							borderRadius: 8,
+							padding: '6px 14px',
+							fontSize: 12,
+							color: '#ef4444',
+							fontWeight: 500,
+							zIndex: 20,
+							pointerEvents: 'none',
+							boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+						}}
+					>
+						{connectionToast}
 					</div>
 				)}
 
