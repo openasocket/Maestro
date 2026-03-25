@@ -34,6 +34,7 @@ import {
 	type TeamTemplate,
 	type TeamTemplateRole,
 	type WorkflowEdge,
+	type WorkflowTopology,
 } from '../../../shared/group-chat-types';
 import { RoleBuilderNode, TIER_COLORS, type RoleBuilderNodeData } from './nodes/RoleBuilderNode';
 import { TeamBuilderEdge, type TeamBuilderEdgeData } from './edges/TeamBuilderEdge';
@@ -42,6 +43,15 @@ import { RoleConfigPanel } from './panels/RoleConfigPanel';
 // Re-export for consumers that import from this file
 export type { RoleBuilderNodeData } from './nodes/RoleBuilderNode';
 export type { TeamBuilderEdgeData } from './edges/TeamBuilderEdge';
+
+// ============================================================================
+// Tier-based prompt suffixes for approval flow
+// ============================================================================
+
+const EXECUTIVE_PROMPT_SUFFIX =
+	'You are the final approver. Review all work submitted to you. If the quality is acceptable, produce the final output. If not, provide specific feedback and delegate corrections back down the chain.';
+const MANAGER_PROMPT_SUFFIX =
+	'You coordinate work from your team members. Summarize results, identify gaps, and escalate to your reporting executive when ready for final review.';
 
 // ============================================================================
 // Tier validation for connections
@@ -69,6 +79,100 @@ export function validateTierConnection(
 		return { valid: false, reason: `${label(sourceTier)} cannot report to ${label(targetTier)}` };
 	}
 	return { valid: true };
+}
+
+/**
+ * Build the systemPromptSuffix for a role based on its tier.
+ * Appends tier-based approval flow instructions after any user-provided suffix.
+ */
+export function buildTierPromptSuffix(tier: RoleTier, userSuffix?: string): string | undefined {
+	let tierSuffix: string | undefined;
+	if (tier === 'executive') tierSuffix = EXECUTIVE_PROMPT_SUFFIX;
+	else if (tier === 'manager') tierSuffix = MANAGER_PROMPT_SUFFIX;
+
+	if (!tierSuffix && !userSuffix) return undefined;
+	if (!tierSuffix) return userSuffix;
+	if (!userSuffix) return tierSuffix;
+	return `${userSuffix}\n\n${tierSuffix}`;
+}
+
+/**
+ * Generate a WorkflowTopology from canvas nodes and edges.
+ * Determines entry/exit points and edge types based on tier hierarchy.
+ *
+ * Algorithm:
+ *   1. Entry points = nodes with no incoming edges (typically workers).
+ *   2. Exit points = nodes with no outgoing edges (typically top executive).
+ *   3. Edge type: source tier < target tier → sequential; same tier → conditional (peer-review).
+ *   4. Pattern is always 'custom' for visual-builder topologies.
+ */
+export function generateTopologyFromCanvas(
+	nodes: Node<RoleBuilderNodeData>[],
+	edges: Edge<TeamBuilderEdgeData>[]
+): WorkflowTopology | undefined {
+	if (nodes.length < 2 || edges.length === 0) return undefined;
+
+	// Build lookup from node ID → role name and tier
+	const nodeMap = new Map<string, { name: string; tier: RoleTier }>();
+	for (const n of nodes) {
+		nodeMap.set(n.id, { name: n.data.name, tier: n.data.tier ?? 'worker' });
+	}
+
+	// Find entry points: nodes with no incoming edges
+	const nodesWithIncoming = new Set(edges.map((e) => e.target));
+	const entryPoints = nodes.filter((n) => !nodesWithIncoming.has(n.id));
+
+	// Find exit points: nodes with no outgoing edges
+	const nodesWithOutgoing = new Set(edges.map((e) => e.source));
+	const exitPoints = nodes.filter((n) => !nodesWithOutgoing.has(n.id));
+
+	// Generate workflow edges with tier-based edge types
+	const workflowEdges: WorkflowEdge[] = edges.map((e) => {
+		const sourceInfo = nodeMap.get(e.source);
+		const targetInfo = nodeMap.get(e.target);
+		const sourceTier = sourceInfo?.tier ?? 'worker';
+		const targetTier = targetInfo?.tier ?? 'worker';
+		const sourceOrder = ROLE_TIER_ORDER[sourceTier];
+		const targetOrder = ROLE_TIER_ORDER[targetTier];
+
+		if (sourceOrder === targetOrder) {
+			return {
+				source: sourceInfo?.name ?? e.source,
+				target: targetInfo?.name ?? e.target,
+				edgeType: 'conditional' as const,
+				condition: 'peer-review',
+			};
+		}
+		return {
+			source: sourceInfo?.name ?? e.source,
+			target: targetInfo?.name ?? e.target,
+			edgeType: 'sequential' as const,
+		};
+	});
+
+	// Pick entry/exit by tier: lowest tier for entry, highest for exit
+	const pickByTier = (
+		candidates: Node<RoleBuilderNodeData>[],
+		prefer: 'lowest' | 'highest'
+	): Node<RoleBuilderNodeData> => {
+		if (candidates.length === 0) return nodes[0];
+		return candidates.reduce((best, n) => {
+			const bestOrder = ROLE_TIER_ORDER[(best.data.tier ?? 'worker') as RoleTier];
+			const nOrder = ROLE_TIER_ORDER[(n.data.tier ?? 'worker') as RoleTier];
+			if (prefer === 'lowest') return nOrder < bestOrder ? n : best;
+			return nOrder > bestOrder ? n : best;
+		});
+	};
+
+	const entryNode = pickByTier(entryPoints, 'lowest');
+	const exitNode = pickByTier(exitPoints, 'highest');
+
+	return {
+		pattern: 'custom',
+		edges: workflowEdges,
+		entryPoint: entryNode.data.name,
+		exitPoint: exitNode.data.name,
+	};
 }
 
 function generateId(): string {
@@ -109,22 +213,32 @@ function templateToEdges(template: TeamTemplate): Edge<TeamBuilderEdgeData>[] {
 	if (!template.topology?.edges) return [];
 
 	const roleIndexMap = new Map<string, number>();
-	template.roles.forEach((r, i) => roleIndexMap.set(r.name, i));
+	const roleTierMap = new Map<string, RoleTier>();
+	template.roles.forEach((r, i) => {
+		roleIndexMap.set(r.name, i);
+		roleTierMap.set(r.name, r.tier ?? 'worker');
+	});
 
 	return template.topology.edges
 		.filter((e) => roleIndexMap.has(e.source) && roleIndexMap.has(e.target))
-		.map((e, idx) => ({
-			id: `edge-${idx}`,
-			source: `role-${roleIndexMap.get(e.source)!}`,
-			target: `role-${roleIndexMap.get(e.target)!}`,
-			type: 'team-edge',
-			data: {
-				connectionType: (e.edgeType === 'conditional' ? 'delegates-to' : 'reports-to') as
-					| 'reports-to'
-					| 'delegates-to',
-				tierColor: TIER_COLORS.worker,
-			},
-		}));
+		.map((e, idx) => {
+			const sourceTier = roleTierMap.get(e.source) ?? 'worker';
+			const targetTier = roleTierMap.get(e.target) ?? 'worker';
+			return {
+				id: `edge-${idx}`,
+				source: `role-${roleIndexMap.get(e.source)!}`,
+				target: `role-${roleIndexMap.get(e.target)!}`,
+				type: 'team-edge',
+				data: {
+					connectionType: (e.edgeType === 'conditional' ? 'delegates-to' : 'reports-to') as
+						| 'reports-to'
+						| 'delegates-to',
+					tierColor: TIER_COLORS[sourceTier] ?? TIER_COLORS.worker,
+					sourceTier,
+					targetTier,
+				},
+			};
+		});
 }
 
 // ============================================================================
@@ -138,27 +252,20 @@ function canvasToTemplate(
 	teamDescription: string,
 	existingTemplate?: TeamTemplate
 ): TeamTemplate {
-	const roles: TeamTemplateRole[] = nodes.map((n) => ({
-		name: n.data.name,
-		agentId: n.data.agentId,
-		description: n.data.description,
-		systemPromptSuffix: n.data.systemPromptSuffix,
-	}));
+	// Build roles with tier and tier-aware prompt suffixes
+	const roles: TeamTemplateRole[] = nodes.map((n) => {
+		const tier = (n.data.tier ?? 'worker') as RoleTier;
+		return {
+			name: n.data.name,
+			agentId: n.data.agentId,
+			description: n.data.description,
+			tier,
+			systemPromptSuffix: buildTierPromptSuffix(tier, n.data.systemPromptSuffix),
+		};
+	});
 
-	// Build a lookup from node ID → role name
-	const nodeIdToRoleName = new Map<string, string>();
-	for (const n of nodes) {
-		nodeIdToRoleName.set(n.id, n.data.name);
-	}
-
-	const workflowEdges: WorkflowEdge[] = edges.map((e) => ({
-		source: nodeIdToRoleName.get(e.source) ?? e.source,
-		target: nodeIdToRoleName.get(e.target) ?? e.target,
-		edgeType:
-			e.data?.connectionType === 'delegates-to'
-				? ('conditional' as const)
-				: ('sequential' as const),
-	}));
+	// Generate topology from canvas structure
+	const topology = generateTopologyFromCanvas(nodes, edges);
 
 	const now = Date.now();
 
@@ -172,15 +279,7 @@ function canvasToTemplate(
 		moderatorAgentId: existingTemplate?.moderatorAgentId ?? 'claude-code',
 		moderatorConfig: existingTemplate?.moderatorConfig,
 		roles,
-		topology:
-			workflowEdges.length > 0 && roles.length >= 2
-				? {
-						pattern: 'custom',
-						edges: workflowEdges,
-						entryPoint: roles[0]?.name ?? '',
-						exitPoint: roles[roles.length - 1]?.name ?? '',
-					}
-				: existingTemplate?.topology,
+		topology: topology ?? existingTemplate?.topology,
 	};
 }
 
@@ -230,6 +329,21 @@ function TeamBuilderCanvasInner({
 		setNodes((nds) =>
 			nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...data } } : n))
 		);
+		// When tier changes, update connected edges so their tier data stays in sync
+		if ('tier' in data && data.tier) {
+			setEdges((eds) =>
+				eds.map((e) => {
+					if (!e.data) return e;
+					if (e.source === nodeId) {
+						return { ...e, data: { ...e.data, sourceTier: data.tier as RoleTier } };
+					}
+					if (e.target === nodeId) {
+						return { ...e, data: { ...e.data, targetTier: data.tier as RoleTier } };
+					}
+					return e;
+				})
+			);
+		}
 	}, []);
 
 	// Delete a node and its connected edges
@@ -248,6 +362,47 @@ function TeamBuilderCanvasInner({
 			setEdges(templateToEdges(editingTemplate));
 		}
 	}, [editingTemplate, handleConfigure]);
+
+	// Recompute hierarchy indicators (incomingCount, hasOutgoingToHigherTier) when edges change
+	useEffect(() => {
+		setNodes((currentNodes) => {
+			// Build incoming count map in a single pass
+			const incomingCounts = new Map<string, number>();
+			for (const edge of edges) {
+				incomingCounts.set(edge.target, (incomingCounts.get(edge.target) ?? 0) + 1);
+			}
+
+			// Build tier lookup for outgoing-to-higher check
+			const tierLookup = new Map<string, RoleTier>();
+			for (const node of currentNodes) {
+				tierLookup.set(node.id, (node.data.tier ?? 'worker') as RoleTier);
+			}
+
+			let anyChanged = false;
+			const updated = currentNodes.map((node) => {
+				const incomingCount = incomingCounts.get(node.id) ?? 0;
+				const nodeTier = tierLookup.get(node.id) ?? 'worker';
+				const hasOutgoingToHigherTier = edges.some(
+					(e) =>
+						e.source === node.id &&
+						ROLE_TIER_ORDER[tierLookup.get(e.target) ?? 'worker'] > ROLE_TIER_ORDER[nodeTier]
+				);
+
+				if (
+					node.data.incomingCount === incomingCount &&
+					node.data.hasOutgoingToHigherTier === hasOutgoingToHigherTier
+				) {
+					return node;
+				}
+				anyChanged = true;
+				return {
+					...node,
+					data: { ...node.data, incomingCount, hasOutgoingToHigherTier },
+				};
+			});
+			return anyChanged ? updated : currentNodes;
+		});
+	}, [edges]);
 
 	// ─── ReactFlow callbacks ──────────────────────────────────────────────
 
@@ -343,7 +498,7 @@ function TeamBuilderCanvasInner({
 				source: connection.source,
 				target: connection.target,
 				type: 'team-edge',
-				data: { connectionType, tierColor },
+				data: { connectionType, tierColor, sourceTier, targetTier },
 			};
 
 			connectionMadeRef.current = true;
