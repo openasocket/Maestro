@@ -19,9 +19,16 @@ import {
 	X,
 	GripVertical,
 	Users,
+	ChevronDown,
 } from 'lucide-react';
 import type { Theme } from '../../types';
-import type { TeamTemplate, TeamTemplateRole } from '../../../shared/group-chat-types';
+import type {
+	TeamTemplate,
+	TeamTemplateRole,
+	WorkflowTopology,
+	WorkflowEdge,
+} from '../../../shared/group-chat-types';
+import { WorkflowGraph } from '../GroupChat/WorkflowGraph';
 import { AGENT_IDS } from '../../../shared/agentIds';
 import { notifyToast } from '../../stores/notificationStore';
 import { safeClipboardWrite } from '../../utils/clipboard';
@@ -50,6 +57,116 @@ function isValidTemplateShape(obj: unknown): obj is Partial<TeamTemplate> {
 
 /** Agent IDs available for role assignment (exclude terminal) */
 const ROLE_AGENT_IDS = AGENT_IDS.filter((id) => id !== 'terminal');
+
+// ============================================================================
+// Topology helpers
+// ============================================================================
+
+const TOPOLOGY_PATTERNS: {
+	value: WorkflowTopology['pattern'];
+	label: string;
+}[] = [
+	{ value: 'hub-spoke', label: 'Hub-Spoke' },
+	{ value: 'pipeline', label: 'Pipeline' },
+	{ value: 'parallel-then-merge', label: 'Parallel-then-Merge' },
+	{ value: 'review-loop', label: 'Review-Loop' },
+	{ value: 'custom', label: 'Custom' },
+];
+
+/**
+ * Generate a WorkflowTopology with auto-generated edges based on the selected
+ * pattern and the current roles list.
+ */
+function generateTopologyEdges(
+	pattern: WorkflowTopology['pattern'],
+	roles: TeamTemplateRole[]
+): WorkflowTopology | undefined {
+	if (roles.length < 2) return undefined;
+
+	switch (pattern) {
+		case 'hub-spoke':
+			return {
+				pattern: 'hub-spoke',
+				edges: [],
+				entryPoint: roles[0].name,
+				exitPoint: roles[roles.length - 1].name,
+			};
+
+		case 'pipeline': {
+			const edges: WorkflowEdge[] = [];
+			for (let i = 0; i < roles.length - 1; i++) {
+				edges.push({
+					source: roles[i].name,
+					target: roles[i + 1].name,
+					edgeType: 'sequential',
+				});
+			}
+			return {
+				pattern: 'pipeline',
+				edges,
+				entryPoint: roles[0].name,
+				exitPoint: roles[roles.length - 1].name,
+			};
+		}
+
+		case 'parallel-then-merge': {
+			const edges: WorkflowEdge[] = [];
+			const entry = roles[0];
+			const exit = roles[roles.length - 1];
+			const middle = roles.slice(1, -1);
+
+			// Entry → each middle role (parallel)
+			for (const m of middle) {
+				edges.push({ source: entry.name, target: m.name, edgeType: 'parallel' });
+			}
+			// Each middle role → exit
+			for (const m of middle) {
+				edges.push({ source: m.name, target: exit.name, edgeType: 'sequential' });
+			}
+
+			// If only 2 roles, treat second as both parallel and merge target
+			if (middle.length === 0) {
+				edges.push({ source: entry.name, target: exit.name, edgeType: 'parallel' });
+			}
+
+			return {
+				pattern: 'parallel-then-merge',
+				edges,
+				entryPoint: entry.name,
+				exitPoint: exit.name,
+			};
+		}
+
+		case 'review-loop': {
+			const edges: WorkflowEdge[] = [
+				{ source: roles[0].name, target: roles[1].name, edgeType: 'sequential' },
+				{
+					source: roles[1].name,
+					target: roles[0].name,
+					edgeType: 'conditional',
+					condition: 'needs revision',
+				},
+			];
+			return {
+				pattern: 'review-loop',
+				edges,
+				entryPoint: roles[0].name,
+				exitPoint: roles[1].name,
+			};
+		}
+
+		case 'custom':
+			return {
+				pattern: 'custom',
+				edges: [],
+				entryPoint: roles[0].name,
+				exitPoint: roles[roles.length - 1].name,
+			};
+
+		default:
+			return undefined;
+	}
+}
 
 type CategoryFilter = 'all' | 'builtin' | 'user';
 
@@ -758,6 +875,283 @@ const TemplateCard = memo(function TemplateCard({
 });
 
 // ============================================================================
+// TopologyEditor
+// ============================================================================
+
+const TopologyEditor = memo(function TopologyEditor({
+	topology,
+	roles,
+	theme,
+	onChange,
+}: {
+	topology: WorkflowTopology | undefined;
+	roles: TeamTemplateRole[];
+	theme: Theme;
+	onChange: (topology: WorkflowTopology | undefined) => void;
+}) {
+	const validRoles = roles.filter((r) => r.name.trim().length > 0);
+	const hasEnoughRoles = validRoles.length >= 2;
+	const selectedPattern = topology?.pattern ?? null;
+
+	const handlePatternSelect = useCallback(
+		(pattern: WorkflowTopology['pattern']) => {
+			if (!hasEnoughRoles) return;
+			// Deselect if already selected
+			if (selectedPattern === pattern) {
+				onChange(undefined);
+				return;
+			}
+			const newTopology = generateTopologyEdges(pattern, validRoles);
+			onChange(newTopology);
+		},
+		[hasEnoughRoles, selectedPattern, validRoles, onChange]
+	);
+
+	const handleCustomEdgeAdd = useCallback(() => {
+		if (!topology || topology.pattern !== 'custom') return;
+		const newEdge: WorkflowEdge = {
+			source: validRoles[0]?.name ?? '',
+			target: validRoles[1]?.name ?? validRoles[0]?.name ?? '',
+			edgeType: 'sequential',
+		};
+		onChange({ ...topology, edges: [...topology.edges, newEdge] });
+	}, [topology, validRoles, onChange]);
+
+	const handleCustomEdgeRemove = useCallback(
+		(idx: number) => {
+			if (!topology || topology.pattern !== 'custom') return;
+			onChange({ ...topology, edges: topology.edges.filter((_, i) => i !== idx) });
+		},
+		[topology, onChange]
+	);
+
+	const handleCustomEdgeUpdate = useCallback(
+		(idx: number, field: keyof WorkflowEdge, value: string) => {
+			if (!topology || topology.pattern !== 'custom') return;
+			const updatedEdges = topology.edges.map((e, i) => (i === idx ? { ...e, [field]: value } : e));
+			onChange({ ...topology, edges: updatedEdges });
+		},
+		[topology, onChange]
+	);
+
+	const handleEntryPointChange = useCallback(
+		(value: string) => {
+			if (!topology) return;
+			onChange({ ...topology, entryPoint: value });
+		},
+		[topology, onChange]
+	);
+
+	const handleExitPointChange = useCallback(
+		(value: string) => {
+			if (!topology) return;
+			onChange({ ...topology, exitPoint: value });
+		},
+		[topology, onChange]
+	);
+
+	return (
+		<div className="mb-4">
+			<h4
+				className="text-xs font-semibold mb-2 uppercase tracking-wide"
+				style={{ color: theme.colors.textDim }}
+			>
+				Topology
+			</h4>
+
+			{!hasEnoughRoles && (
+				<p className="text-[10px] mb-2" style={{ color: theme.colors.textDim }}>
+					Add at least 2 roles to configure topology.
+				</p>
+			)}
+
+			{/* Pattern selector pills */}
+			<div className="flex flex-wrap gap-1.5 mb-3">
+				{TOPOLOGY_PATTERNS.map((p) => (
+					<button
+						key={p.value}
+						onClick={() => handlePatternSelect(p.value)}
+						disabled={!hasEnoughRoles}
+						className="px-2.5 py-1 rounded-full text-[10px] font-medium transition-colors"
+						style={{
+							backgroundColor:
+								selectedPattern === p.value ? theme.colors.accent : theme.colors.bgActivity,
+							color: selectedPattern === p.value ? '#fff' : theme.colors.textDim,
+							opacity: hasEnoughRoles ? 1 : 0.4,
+							cursor: hasEnoughRoles ? 'pointer' : 'not-allowed',
+						}}
+					>
+						{p.label}
+					</button>
+				))}
+			</div>
+
+			{/* Topology preview */}
+			{topology && (
+				<div
+					className="mb-3 p-3 rounded-lg border"
+					style={{
+						borderColor: theme.colors.border,
+						backgroundColor: theme.colors.bgActivity,
+					}}
+				>
+					<WorkflowGraph topology={topology} participants={[]} theme={theme} compact={true} />
+				</div>
+			)}
+
+			{/* Custom Edge Editor */}
+			{topology?.pattern === 'custom' && (
+				<div className="space-y-2">
+					{/* Entry/Exit point selectors */}
+					<div className="flex gap-2">
+						<div className="flex-1">
+							<label
+								className="text-[10px] font-medium mb-0.5 block"
+								style={{ color: theme.colors.textDim }}
+							>
+								Entry Point
+							</label>
+							<select
+								value={topology.entryPoint}
+								onChange={(e) => handleEntryPointChange(e.target.value)}
+								className="w-full px-2 py-1 rounded text-xs border outline-none"
+								style={{
+									backgroundColor: theme.colors.bgActivity,
+									borderColor: theme.colors.border,
+									color: theme.colors.textMain,
+								}}
+							>
+								{validRoles.map((r) => (
+									<option key={r.name} value={r.name}>
+										{r.name}
+									</option>
+								))}
+							</select>
+						</div>
+						<div className="flex-1">
+							<label
+								className="text-[10px] font-medium mb-0.5 block"
+								style={{ color: theme.colors.textDim }}
+							>
+								Exit Point
+							</label>
+							<select
+								value={topology.exitPoint}
+								onChange={(e) => handleExitPointChange(e.target.value)}
+								className="w-full px-2 py-1 rounded text-xs border outline-none"
+								style={{
+									backgroundColor: theme.colors.bgActivity,
+									borderColor: theme.colors.border,
+									color: theme.colors.textMain,
+								}}
+							>
+								{validRoles.map((r) => (
+									<option key={r.name} value={r.name}>
+										{r.name}
+									</option>
+								))}
+							</select>
+						</div>
+					</div>
+
+					{/* Edge list */}
+					{topology.edges.map((edge, idx) => (
+						<div
+							key={idx}
+							className="flex items-center gap-1.5 p-2 rounded border"
+							style={{
+								borderColor: theme.colors.border,
+								backgroundColor: theme.colors.bgMain,
+							}}
+						>
+							<select
+								value={edge.source}
+								onChange={(e) => handleCustomEdgeUpdate(idx, 'source', e.target.value)}
+								className="flex-1 px-1.5 py-1 rounded text-[10px] border outline-none"
+								style={{
+									backgroundColor: theme.colors.bgActivity,
+									borderColor: theme.colors.border,
+									color: theme.colors.textMain,
+								}}
+							>
+								{validRoles.map((r) => (
+									<option key={r.name} value={r.name}>
+										{r.name}
+									</option>
+								))}
+							</select>
+							<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
+								→
+							</span>
+							<select
+								value={edge.target}
+								onChange={(e) => handleCustomEdgeUpdate(idx, 'target', e.target.value)}
+								className="flex-1 px-1.5 py-1 rounded text-[10px] border outline-none"
+								style={{
+									backgroundColor: theme.colors.bgActivity,
+									borderColor: theme.colors.border,
+									color: theme.colors.textMain,
+								}}
+							>
+								{validRoles.map((r) => (
+									<option key={r.name} value={r.name}>
+										{r.name}
+									</option>
+								))}
+							</select>
+							<select
+								value={edge.edgeType}
+								onChange={(e) => handleCustomEdgeUpdate(idx, 'edgeType', e.target.value)}
+								className="px-1.5 py-1 rounded text-[10px] border outline-none"
+								style={{
+									backgroundColor: theme.colors.bgActivity,
+									borderColor: theme.colors.border,
+									color: theme.colors.textMain,
+								}}
+							>
+								<option value="sequential">sequential</option>
+								<option value="parallel">parallel</option>
+								<option value="conditional">conditional</option>
+							</select>
+							{edge.edgeType === 'conditional' && (
+								<input
+									type="text"
+									placeholder="Condition..."
+									value={edge.condition ?? ''}
+									onChange={(e) => handleCustomEdgeUpdate(idx, 'condition', e.target.value)}
+									className="flex-1 px-1.5 py-1 rounded text-[10px] border outline-none"
+									style={{
+										backgroundColor: theme.colors.bgActivity,
+										borderColor: theme.colors.border,
+										color: theme.colors.textMain,
+									}}
+								/>
+							)}
+							<button
+								onClick={() => handleCustomEdgeRemove(idx)}
+								className="p-0.5 rounded hover:opacity-80 flex-shrink-0"
+								style={{ color: theme.colors.textDim }}
+								aria-label="Remove edge"
+							>
+								<X className="w-3 h-3" />
+							</button>
+						</div>
+					))}
+
+					<button
+						onClick={handleCustomEdgeAdd}
+						className="flex items-center gap-1 text-[10px] px-2 py-1 rounded"
+						style={{ color: theme.colors.accent }}
+					>
+						<Plus className="w-3 h-3" /> Add Edge
+					</button>
+				</div>
+			)}
+		</div>
+	);
+});
+
+// ============================================================================
 // TemplateDetailPanel
 // ============================================================================
 
@@ -783,6 +1177,16 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 	const [editDescription, setEditDescription] = useState(template.description);
 	const [editRoles, setEditRoles] = useState<TeamTemplateRole[]>(template.roles);
 	const [editModeratorAgentId, setEditModeratorAgentId] = useState(template.moderatorAgentId);
+	const [editTopology, setEditTopology] = useState<WorkflowTopology | undefined>(template.topology);
+	const [editCustomArgs, setEditCustomArgs] = useState(template.moderatorConfig?.customArgs ?? '');
+	const [editEnvVarEntries, setEditEnvVarEntries] = useState<Array<{ key: string; value: string }>>(
+		Object.entries(template.moderatorConfig?.customEnvVars ?? {}).map(([key, value]) => ({
+			key,
+			value,
+		}))
+	);
+	const [customArgsOpen, setCustomArgsOpen] = useState(false);
+	const [envVarsOpen, setEnvVarsOpen] = useState(false);
 	const [saving, setSaving] = useState(false);
 
 	const isUserTemplate = template.category === 'user';
@@ -794,13 +1198,37 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 		setEditDescription(template.description);
 		setEditRoles(template.roles);
 		setEditModeratorAgentId(template.moderatorAgentId);
-	}, [template.id, template.name, template.description, template.roles, template.moderatorAgentId]);
+		setEditTopology(template.topology);
+		setEditCustomArgs(template.moderatorConfig?.customArgs ?? '');
+		setEditEnvVarEntries(
+			Object.entries(template.moderatorConfig?.customEnvVars ?? {}).map(([key, value]) => ({
+				key,
+				value,
+			}))
+		);
+	}, [
+		template.id,
+		template.name,
+		template.description,
+		template.roles,
+		template.moderatorAgentId,
+		template.topology,
+		template.moderatorConfig,
+	]);
 
 	const startEditing = useCallback(() => {
 		setEditName(template.name);
 		setEditDescription(template.description);
 		setEditRoles([...template.roles]);
 		setEditModeratorAgentId(template.moderatorAgentId);
+		setEditTopology(template.topology ? { ...template.topology } : undefined);
+		setEditCustomArgs(template.moderatorConfig?.customArgs ?? '');
+		setEditEnvVarEntries(
+			Object.entries(template.moderatorConfig?.customEnvVars ?? {}).map(([key, value]) => ({
+				key,
+				value,
+			}))
+		);
 		setEditing(true);
 	}, [template]);
 
@@ -810,6 +1238,14 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 		setEditDescription(template.description);
 		setEditRoles(template.roles);
 		setEditModeratorAgentId(template.moderatorAgentId);
+		setEditTopology(template.topology);
+		setEditCustomArgs(template.moderatorConfig?.customArgs ?? '');
+		setEditEnvVarEntries(
+			Object.entries(template.moderatorConfig?.customEnvVars ?? {}).map(([key, value]) => ({
+				key,
+				value,
+			}))
+		);
 	}, [template]);
 
 	const handleEditSave = useCallback(async () => {
@@ -817,12 +1253,28 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 		setSaving(true);
 		try {
 			const validRoles = editRoles.filter((r) => r.name.trim().length > 0);
+
+			// Build moderatorConfig from edit state
+			const envVars: Record<string, string> = {};
+			for (const entry of editEnvVarEntries) {
+				if (entry.key.trim()) envVars[entry.key.trim()] = entry.value;
+			}
+			const hasConfig = editCustomArgs.trim() || Object.keys(envVars).length > 0;
+			const moderatorConfig = hasConfig
+				? {
+						customArgs: editCustomArgs.trim() || undefined,
+						customEnvVars: Object.keys(envVars).length > 0 ? envVars : undefined,
+					}
+				: undefined;
+
 			await onEditSave({
 				...template,
 				name: editName.trim(),
 				description: editDescription.trim(),
 				moderatorAgentId: editModeratorAgentId,
+				moderatorConfig,
 				roles: validRoles,
+				topology: editTopology,
 			});
 			setEditing(false);
 		} catch (err) {
@@ -834,7 +1286,17 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 		} finally {
 			setSaving(false);
 		}
-	}, [editName, editDescription, editRoles, editModeratorAgentId, template, onEditSave]);
+	}, [
+		editName,
+		editDescription,
+		editRoles,
+		editModeratorAgentId,
+		editTopology,
+		editCustomArgs,
+		editEnvVarEntries,
+		template,
+		onEditSave,
+	]);
 
 	const updateEditRole = useCallback(
 		(idx: number, field: keyof TeamTemplateRole, value: string) => {
@@ -996,38 +1458,6 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 				)}
 			</div>
 
-			{/* Moderator agent selector */}
-			<div className="mb-4">
-				<h4
-					className="text-xs font-semibold mb-1 uppercase tracking-wide"
-					style={{ color: theme.colors.textDim }}
-				>
-					Moderator
-				</h4>
-				{editing ? (
-					<select
-						value={editModeratorAgentId}
-						onChange={(e) => setEditModeratorAgentId(e.target.value)}
-						className="px-2 py-1 rounded text-xs border outline-none"
-						style={{
-							backgroundColor: theme.colors.bgActivity,
-							borderColor: theme.colors.border,
-							color: theme.colors.textMain,
-						}}
-					>
-						{ROLE_AGENT_IDS.map((id) => (
-							<option key={id} value={id}>
-								{id}
-							</option>
-						))}
-					</select>
-				) : (
-					<span className="text-xs" style={{ color: theme.colors.textMain }}>
-						{template.moderatorAgentId}
-					</span>
-				)}
-			</div>
-
 			{/* Roles list */}
 			<div className="mb-4">
 				<div className="flex items-center justify-between mb-2">
@@ -1091,26 +1521,235 @@ const TemplateDetailPanel = memo(function TemplateDetailPanel({
 				)}
 			</div>
 
-			{/* Topology display */}
-			{template.topology && (
-				<div className="mb-4">
-					<h4
-						className="text-xs font-semibold mb-1 uppercase tracking-wide"
+			{/* Topology section */}
+			{editing ? (
+				<TopologyEditor
+					topology={editTopology}
+					roles={editRoles}
+					theme={theme}
+					onChange={setEditTopology}
+				/>
+			) : (
+				template.topology && (
+					<div className="mb-4">
+						<h4
+							className="text-xs font-semibold mb-2 uppercase tracking-wide"
+							style={{ color: theme.colors.textDim }}
+						>
+							Topology
+						</h4>
+						<span
+							className="text-[10px] px-2 py-0.5 rounded-full"
+							style={{
+								backgroundColor: `${theme.colors.accent}15`,
+								color: theme.colors.accent,
+							}}
+						>
+							{template.topology.pattern}
+						</span>
+						{/* Preview */}
+						<div
+							className="mt-2 p-3 rounded-lg border"
+							style={{
+								borderColor: theme.colors.border,
+								backgroundColor: theme.colors.bgActivity,
+							}}
+						>
+							<WorkflowGraph
+								topology={template.topology}
+								participants={[]}
+								theme={theme}
+								compact={true}
+							/>
+						</div>
+					</div>
+				)
+			)}
+
+			{/* Moderator Settings */}
+			<div className="mb-4">
+				<h4
+					className="text-xs font-semibold mb-2 uppercase tracking-wide"
+					style={{ color: theme.colors.textDim }}
+				>
+					Moderator Settings
+				</h4>
+
+				{/* Moderator Agent */}
+				<div className="mb-3">
+					<label
+						className="text-[10px] font-medium mb-0.5 block"
 						style={{ color: theme.colors.textDim }}
 					>
-						Topology
-					</h4>
-					<span
-						className="text-[10px] px-2 py-0.5 rounded-full"
-						style={{
-							backgroundColor: `${theme.colors.accent}15`,
-							color: theme.colors.accent,
-						}}
-					>
-						{template.topology.pattern}
-					</span>
+						Moderator Agent
+					</label>
+					{editing ? (
+						<select
+							value={editModeratorAgentId}
+							onChange={(e) => setEditModeratorAgentId(e.target.value)}
+							className="w-full px-2 py-1 rounded text-xs border outline-none"
+							style={{
+								backgroundColor: theme.colors.bgActivity,
+								borderColor: theme.colors.border,
+								color: theme.colors.textMain,
+							}}
+						>
+							{ROLE_AGENT_IDS.map((id) => (
+								<option key={id} value={id}>
+									{id}
+								</option>
+							))}
+						</select>
+					) : (
+						<span className="text-xs" style={{ color: theme.colors.textMain }}>
+							{template.moderatorAgentId}
+						</span>
+					)}
 				</div>
-			)}
+
+				{/* Custom Args (collapsible) */}
+				<div className="mb-2">
+					<button
+						onClick={() => setCustomArgsOpen((v) => !v)}
+						className="flex items-center gap-1 text-[10px] font-medium mb-1"
+						style={{ color: theme.colors.textDim }}
+					>
+						<ChevronDown
+							className="w-3 h-3 transition-transform"
+							style={{
+								transform: customArgsOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
+							}}
+						/>
+						Custom Args
+					</button>
+					{customArgsOpen && (
+						<div>
+							{editing ? (
+								<input
+									type="text"
+									placeholder="Additional CLI arguments..."
+									value={editCustomArgs}
+									onChange={(e) => setEditCustomArgs(e.target.value)}
+									className="w-full px-2 py-1 rounded text-xs border outline-none"
+									style={{
+										backgroundColor: theme.colors.bgActivity,
+										borderColor: theme.colors.border,
+										color: theme.colors.textMain,
+									}}
+								/>
+							) : (
+								<span className="text-xs" style={{ color: theme.colors.textMain }}>
+									{template.moderatorConfig?.customArgs || '—'}
+								</span>
+							)}
+						</div>
+					)}
+				</div>
+
+				{/* Custom Environment Variables (collapsible) */}
+				<div>
+					<button
+						onClick={() => setEnvVarsOpen((v) => !v)}
+						className="flex items-center gap-1 text-[10px] font-medium mb-1"
+						style={{ color: theme.colors.textDim }}
+					>
+						<ChevronDown
+							className="w-3 h-3 transition-transform"
+							style={{
+								transform: envVarsOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
+							}}
+						/>
+						Custom Environment Variables
+					</button>
+					{envVarsOpen && (
+						<div className="space-y-1.5">
+							{editing ? (
+								<>
+									{editEnvVarEntries.map((entry, idx) => (
+										<div key={idx} className="flex items-center gap-1.5">
+											<input
+												type="text"
+												placeholder="KEY"
+												value={entry.key}
+												onChange={(e) => {
+													const updated = [...editEnvVarEntries];
+													updated[idx] = {
+														...entry,
+														key: e.target.value,
+													};
+													setEditEnvVarEntries(updated);
+												}}
+												className="flex-1 px-2 py-1 rounded text-[10px] border outline-none font-mono"
+												style={{
+													backgroundColor: theme.colors.bgActivity,
+													borderColor: theme.colors.border,
+													color: theme.colors.textMain,
+												}}
+											/>
+											<input
+												type="text"
+												placeholder="value"
+												value={entry.value}
+												onChange={(e) => {
+													const updated = [...editEnvVarEntries];
+													updated[idx] = {
+														...entry,
+														value: e.target.value,
+													};
+													setEditEnvVarEntries(updated);
+												}}
+												className="flex-1 px-2 py-1 rounded text-[10px] border outline-none font-mono"
+												style={{
+													backgroundColor: theme.colors.bgActivity,
+													borderColor: theme.colors.border,
+													color: theme.colors.textMain,
+												}}
+											/>
+											<button
+												onClick={() => {
+													setEditEnvVarEntries((prev) => prev.filter((_, i) => i !== idx));
+												}}
+												className="p-0.5 rounded hover:opacity-80 flex-shrink-0"
+												style={{ color: theme.colors.textDim }}
+												aria-label="Remove variable"
+											>
+												<X className="w-3 h-3" />
+											</button>
+										</div>
+									))}
+									<button
+										onClick={() =>
+											setEditEnvVarEntries((prev) => [...prev, { key: '', value: '' }])
+										}
+										className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded"
+										style={{ color: theme.colors.accent }}
+									>
+										<Plus className="w-3 h-3" /> Add Variable
+									</button>
+								</>
+							) : (
+								<div className="space-y-1">
+									{Object.entries(template.moderatorConfig?.customEnvVars ?? {}).length > 0 ? (
+										Object.entries(template.moderatorConfig?.customEnvVars ?? {}).map(
+											([key, value]) => (
+												<div key={key} className="flex gap-2 text-xs font-mono">
+													<span style={{ color: theme.colors.accent }}>{key}</span>
+													<span style={{ color: theme.colors.textDim }}>=</span>
+													<span style={{ color: theme.colors.textMain }}>{value}</span>
+												</div>
+											)
+										)
+									) : (
+										<span className="text-xs" style={{ color: theme.colors.textDim }}>
+											—
+										</span>
+									)}
+								</div>
+							)}
+						</div>
+					)}
+				</div>
+			</div>
 
 			{/* Timestamps */}
 			<div className="text-[10px] space-y-1" style={{ color: theme.colors.textDim }}>
