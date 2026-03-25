@@ -20,6 +20,8 @@ import {
 	GripVertical,
 	Users,
 	ChevronDown,
+	List,
+	GitFork,
 } from 'lucide-react';
 import type { Theme } from '../../types';
 import type {
@@ -32,6 +34,7 @@ import { WorkflowGraph } from '../GroupChat/WorkflowGraph';
 import { AGENT_IDS } from '../../../shared/agentIds';
 import { notifyToast } from '../../stores/notificationStore';
 import { safeClipboardWrite } from '../../utils/clipboard';
+import { TeamBuilderCanvas } from './TeamBuilderCanvas';
 
 // ============================================================================
 // Utility functions (duplicated from TemplatesTab per spec — not imported)
@@ -201,6 +204,10 @@ export function CueTeamsTab({
 	const [debouncedSearch, setDebouncedSearch] = useState('');
 	const [showCreateForm, setShowCreateForm] = useState(false);
 	const mountedRef = useRef(true);
+
+	// Sub-view toggle: Library (list/CRUD) or Builder (ReactFlow canvas)
+	const [view, setView] = useState<'library' | 'builder'>('library');
+	const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
 
 	// Debounce search input (300ms)
 	useEffect(() => {
@@ -423,6 +430,41 @@ export function CueTeamsTab({
 		}
 	}, [fetchTemplates, onTeamTemplatesChanged]);
 
+	// When switching to Builder, sync the selected template for editing
+	const editingTemplate = useMemo(
+		() => templates.find((t) => t.id === editingTemplateId) ?? undefined,
+		[templates, editingTemplateId]
+	);
+
+	const handleSwitchToBuilder = useCallback(
+		(templateId?: string) => {
+			setEditingTemplateId(templateId ?? selectedTemplateId);
+			setView('builder');
+		},
+		[selectedTemplateId]
+	);
+
+	const handleBuilderSave = useCallback(
+		async (template: TeamTemplate) => {
+			await window.maestro.teamTemplates.save({ ...template, updatedAt: Date.now() });
+			await fetchTemplates();
+			notifyToast({
+				type: 'success',
+				title: 'Template saved',
+				message: `"${template.name}" saved from builder.`,
+			});
+			onTeamTemplatesChanged?.();
+			setView('library');
+			setEditingTemplateId(null);
+		},
+		[fetchTemplates, onTeamTemplatesChanged]
+	);
+
+	const handleBuilderCancel = useCallback(() => {
+		setView('library');
+		setEditingTemplateId(null);
+	}, []);
+
 	// Loading state
 	if (loading) {
 		return (
@@ -435,133 +477,185 @@ export function CueTeamsTab({
 	}
 
 	return (
-		<div style={{ display: 'flex', gap: 16, padding: 20, height: '100%', overflow: 'hidden' }}>
-			{/* Left: template list */}
-			<div style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
-				{/* Action row: Create + Import buttons */}
-				<div className="flex items-center gap-2 mb-3">
-					<button
-						onClick={() => setShowCreateForm((v) => !v)}
-						className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-						style={{
-							backgroundColor: theme.colors.accent,
-							color: '#fff',
-						}}
-					>
-						<Plus className="w-3.5 h-3.5" />
-						Create Template
-					</button>
-					<button
-						onClick={handleImport}
-						className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-						style={{
-							backgroundColor: theme.colors.bgActivity,
-							color: theme.colors.textDim,
-						}}
-					>
-						<Upload className="w-3.5 h-3.5" />
-						Import
-					</button>
-				</div>
-
-				{/* Category filter pills */}
+		<div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+			{/* Sub-view toggle bar */}
+			<div style={{ padding: '12px 20px 0 20px', flexShrink: 0 }}>
 				<div
-					className="flex items-center gap-2 mb-3"
-					role="radiogroup"
-					aria-label="Filter by category"
+					className="flex items-center gap-1 rounded-md p-0.5"
+					style={{ backgroundColor: theme.colors.bgActivity, display: 'inline-flex' }}
 				>
-					{CATEGORY_PILLS.map((pill) => (
-						<button
-							key={pill.value}
-							onClick={() => setCategoryFilter(pill.value)}
-							role="radio"
-							aria-checked={categoryFilter === pill.value}
-							className="px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
-							style={{
-								backgroundColor:
-									categoryFilter === pill.value ? theme.colors.accent : theme.colors.bgActivity,
-								color: categoryFilter === pill.value ? '#fff' : theme.colors.textDim,
-							}}
-						>
-							{pill.label}
-						</button>
-					))}
-				</div>
-
-				{/* Search bar */}
-				<div className="relative mb-4">
-					<Search
-						className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"
-						style={{ color: theme.colors.textDim }}
-					/>
-					<input
-						type="text"
-						placeholder="Search templates..."
-						aria-label="Search templates"
-						value={searchQuery}
-						onChange={(e) => setSearchQuery(e.target.value)}
-						className="w-full pl-9 pr-3 py-2 rounded-lg text-sm border outline-none"
+					<button
+						onClick={() => setView('library')}
+						className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors"
 						style={{
-							backgroundColor: theme.colors.bgActivity,
-							borderColor: theme.colors.border,
-							color: theme.colors.textMain,
-						}}
-					/>
-				</div>
-
-				{/* Inline create form */}
-				{showCreateForm && (
-					<CreateTemplateForm
-						theme={theme}
-						onSave={handleCreateSave}
-						onCancel={() => setShowCreateForm(false)}
-					/>
-				)}
-
-				{/* Template card list */}
-				{filteredTemplates.length === 0 ? (
-					<div
-						className="flex flex-col items-center justify-center py-12 text-center"
-						style={{ color: theme.colors.textDim }}
-					>
-						<Users className="w-8 h-8 mb-2" style={{ opacity: 0.4 }} />
-						<p className="text-sm">No templates found</p>
-					</div>
-				) : (
-					<div
-						className="grid gap-3"
-						style={{
-							gridTemplateColumns: selectedTemplate
-								? '1fr'
-								: 'repeat(auto-fill, minmax(280px, 1fr))',
+							backgroundColor: view === 'library' ? theme.colors.bgMain : 'transparent',
+							color: view === 'library' ? theme.colors.textMain : theme.colors.textDim,
 						}}
 					>
-						{filteredTemplates.map((template) => (
-							<TemplateCard
-								key={template.id}
-								template={template}
-								theme={theme}
-								selected={template.id === selectedTemplateId}
-								onClick={() =>
-									setSelectedTemplateId(template.id === selectedTemplateId ? null : template.id)
-								}
-							/>
-						))}
-					</div>
-				)}
+						<List className="w-3.5 h-3.5" />
+						Library
+					</button>
+					<button
+						onClick={() => handleSwitchToBuilder()}
+						className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors"
+						style={{
+							backgroundColor: view === 'builder' ? theme.colors.bgMain : 'transparent',
+							color: view === 'builder' ? theme.colors.textMain : theme.colors.textDim,
+						}}
+					>
+						<GitFork className="w-3.5 h-3.5" />
+						Builder
+					</button>
+				</div>
 			</div>
 
-			{/* Right: detail/edit panel (when selected) */}
-			{selectedTemplate && (
-				<TemplateDetailPanel
-					template={selectedTemplate}
+			{/* Content */}
+			{view === 'builder' ? (
+				<TeamBuilderCanvas
 					theme={theme}
-					onClose={() => setSelectedTemplateId(null)}
-					onEditSave={handleEditSave}
-					onDuplicate={handleDuplicate}
-					onDelete={handleDelete}
-					onExport={handleExport}
+					editingTemplate={editingTemplate}
+					onSave={handleBuilderSave}
+					onCancel={handleBuilderCancel}
 				/>
+			) : (
+				<div
+					style={{
+						display: 'flex',
+						gap: 16,
+						padding: 20,
+						flex: 1,
+						minHeight: 0,
+						overflow: 'hidden',
+					}}
+				>
+					{/* Left: template list */}
+					<div style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
+						{/* Action row: Create + Import buttons */}
+						<div className="flex items-center gap-2 mb-3">
+							<button
+								onClick={() => setShowCreateForm((v) => !v)}
+								className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+								style={{
+									backgroundColor: theme.colors.accent,
+									color: '#fff',
+								}}
+							>
+								<Plus className="w-3.5 h-3.5" />
+								Create Template
+							</button>
+							<button
+								onClick={handleImport}
+								className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+								style={{
+									backgroundColor: theme.colors.bgActivity,
+									color: theme.colors.textDim,
+								}}
+							>
+								<Upload className="w-3.5 h-3.5" />
+								Import
+							</button>
+						</div>
+
+						{/* Category filter pills */}
+						<div
+							className="flex items-center gap-2 mb-3"
+							role="radiogroup"
+							aria-label="Filter by category"
+						>
+							{CATEGORY_PILLS.map((pill) => (
+								<button
+									key={pill.value}
+									onClick={() => setCategoryFilter(pill.value)}
+									role="radio"
+									aria-checked={categoryFilter === pill.value}
+									className="px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
+									style={{
+										backgroundColor:
+											categoryFilter === pill.value ? theme.colors.accent : theme.colors.bgActivity,
+										color: categoryFilter === pill.value ? '#fff' : theme.colors.textDim,
+									}}
+								>
+									{pill.label}
+								</button>
+							))}
+						</div>
+
+						{/* Search bar */}
+						<div className="relative mb-4">
+							<Search
+								className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"
+								style={{ color: theme.colors.textDim }}
+							/>
+							<input
+								type="text"
+								placeholder="Search templates..."
+								aria-label="Search templates"
+								value={searchQuery}
+								onChange={(e) => setSearchQuery(e.target.value)}
+								className="w-full pl-9 pr-3 py-2 rounded-lg text-sm border outline-none"
+								style={{
+									backgroundColor: theme.colors.bgActivity,
+									borderColor: theme.colors.border,
+									color: theme.colors.textMain,
+								}}
+							/>
+						</div>
+
+						{/* Inline create form */}
+						{showCreateForm && (
+							<CreateTemplateForm
+								theme={theme}
+								onSave={handleCreateSave}
+								onCancel={() => setShowCreateForm(false)}
+							/>
+						)}
+
+						{/* Template card list */}
+						{filteredTemplates.length === 0 ? (
+							<div
+								className="flex flex-col items-center justify-center py-12 text-center"
+								style={{ color: theme.colors.textDim }}
+							>
+								<Users className="w-8 h-8 mb-2" style={{ opacity: 0.4 }} />
+								<p className="text-sm">No templates found</p>
+							</div>
+						) : (
+							<div
+								className="grid gap-3"
+								style={{
+									gridTemplateColumns: selectedTemplate
+										? '1fr'
+										: 'repeat(auto-fill, minmax(280px, 1fr))',
+								}}
+							>
+								{filteredTemplates.map((template) => (
+									<TemplateCard
+										key={template.id}
+										template={template}
+										theme={theme}
+										selected={template.id === selectedTemplateId}
+										onClick={() =>
+											setSelectedTemplateId(template.id === selectedTemplateId ? null : template.id)
+										}
+									/>
+								))}
+							</div>
+						)}
+					</div>
+
+					{/* Right: detail/edit panel (when selected) */}
+					{selectedTemplate && (
+						<TemplateDetailPanel
+							template={selectedTemplate}
+							theme={theme}
+							onClose={() => setSelectedTemplateId(null)}
+							onEditSave={handleEditSave}
+							onDuplicate={handleDuplicate}
+							onDelete={handleDelete}
+							onExport={handleExport}
+						/>
+					)}
+				</div>
 			)}
 		</div>
 	);
