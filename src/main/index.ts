@@ -63,12 +63,20 @@ import {
 	registerAgentErrorHandlers,
 	registerDirectorNotesHandlers,
 	registerCueHandlers,
+	registerMemoryHandlers,
+	registerEmbeddingHandlers,
 	registerWakatimeHandlers,
 	registerFeedbackHandlers,
 	setupLoggerEventForwarding,
 	cleanupAllGroomingSessions,
 	getActiveGroomingSessionCount,
 } from './ipc/handlers';
+import { getMemoryStore } from './memory/memory-store';
+import { embeddingRegistry } from './grpo/embedding-registry';
+import { TransformersJsProvider } from './grpo/providers/transformers-js-provider';
+import { OllamaEmbeddingProvider } from './grpo/providers/ollama-provider';
+import { OpenAIEmbeddingProvider } from './grpo/providers/openai-provider';
+import type { EmbeddingProviderConfig } from '../shared/memory-types';
 import { initializeStatsDB, closeStatsDB, getStatsDB } from './stats';
 import { groupChatEmitters } from './ipc/handlers/groupChat';
 import {
@@ -907,6 +915,18 @@ function setupIpcHandlers() {
 		settingsStore: store,
 	});
 
+	// Register memory handlers (Agent Experiences system)
+	registerMemoryHandlers({
+		memoryStore: getMemoryStore(),
+		settingsStore: store,
+	});
+
+	// Register embedding provider handlers (status, switching, detection)
+	registerEmbeddingHandlers(store);
+
+	// Initialize embedding registry from saved config
+	initializeEmbeddingProvider(store);
+
 	// Register WakaTime handlers (CLI check, API key validation)
 	registerWakatimeHandlers(wakatimeManager);
 
@@ -923,6 +943,86 @@ function setupIpcHandlers() {
 			bootstrapStore,
 		},
 	});
+}
+
+/**
+ * Initialize the embedding provider from saved config.
+ * Non-blocking — logs errors but doesn't prevent startup.
+ */
+function initializeEmbeddingProvider(settingsStore: {
+	get: (key: string) => unknown;
+	set: (key: string, value: unknown) => void;
+}) {
+	// Register built-in providers
+	embeddingRegistry.register(new TransformersJsProvider());
+	embeddingRegistry.register(new OllamaEmbeddingProvider());
+	embeddingRegistry.register(new OpenAIEmbeddingProvider());
+
+	// Usage tracking listener is registered in registerEmbeddingHandlers() (embedding.ts)
+
+	try {
+		const memoryConfig = settingsStore.get('memoryConfig') as
+			| { embeddingProvider?: EmbeddingProviderConfig; [k: string]: unknown }
+			| undefined;
+		const config = memoryConfig?.embeddingProvider;
+		if (config?.enabled) {
+			// Ensure persistent cache directory for Electron
+			const activationConfig = { ...config };
+			if (
+				activationConfig.providerId === 'transformers-js' &&
+				!activationConfig.transformersJs?.cacheDir
+			) {
+				const cacheDir = `${app.getPath('userData')}/models/transformers-js/`;
+				activationConfig.transformersJs = {
+					...activationConfig.transformersJs,
+					modelId: activationConfig.transformersJs?.modelId ?? 'Xenova/gte-small',
+					cacheDir,
+				};
+			}
+			embeddingRegistry.activate(activationConfig).catch((err) => {
+				logger.warn(`Embedding provider activation failed at startup: ${err}`, '[Embedding]');
+			});
+		} else {
+			// No provider explicitly enabled — try to auto-detect and activate Ollama
+			logger.debug('No embedding provider enabled, attempting auto-detection...', '[Embedding]');
+			embeddingRegistry
+				.detectAvailable()
+				.then(async (available) => {
+					if (available.includes('ollama')) {
+						// Pick the first available embedding model from Ollama
+						const models = await embeddingRegistry.getOllamaModels();
+						const model = models[0] ?? 'nomic-embed-text-v2-moe';
+						logger.info(
+							`Ollama detected with model "${model}" — auto-enabling embedding provider`,
+							'[Embedding]'
+						);
+						const ollamaConfig: EmbeddingProviderConfig = {
+							...(config ?? {}),
+							providerId: 'ollama',
+							enabled: true,
+							ollama: {
+								baseUrl: config?.ollama?.baseUrl ?? 'http://localhost:11434',
+								model,
+							},
+						};
+						await embeddingRegistry.activate(ollamaConfig);
+						// Persist so we don't re-detect on every startup
+						settingsStore.set('memoryConfig', {
+							...(memoryConfig ?? {}),
+							embeddingProvider: ollamaConfig,
+						});
+						logger.info('Ollama embedding provider auto-enabled and persisted', '[Embedding]');
+					} else {
+						logger.debug('No local embedding providers detected', '[Embedding]');
+					}
+				})
+				.catch((err) => {
+					logger.warn(`Embedding auto-detection failed: ${err}`, '[Embedding]');
+				});
+		}
+	} catch (err) {
+		logger.warn(`Failed to read embedding config at startup: ${err}`, '[Embedding]');
+	}
 }
 
 // Handle process output streaming (set up after initialization)
@@ -985,5 +1085,13 @@ function setupProcessListeners() {
 
 		// WakaTime heartbeat listener (query-complete → heartbeat, exit → cleanup)
 		setupWakaTimeListener(processManager, wakatimeManager, store);
+
+		// Wire LiveContextBroadcaster process manager accessor (EXP-LIVE-04)
+		// Must be set after processManager is created so broadcasts can find running sessions.
+		import('./memory/live-context-broadcaster')
+			.then(({ getLiveBroadcaster }) => {
+				getLiveBroadcaster().setProcessManagerGetter(() => processManager!);
+			})
+			.catch(() => {});
 	}
 }

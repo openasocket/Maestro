@@ -2,12 +2,15 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Folder, RefreshCw, ChevronRight, AlertTriangle, Copy, Check, X } from 'lucide-react';
 import type { AgentConfig, Session, ToolType } from '../types';
 import type { SshRemoteConfig, AgentSshRemoteConfig } from '../../shared/types';
+import type { Persona } from '../../shared/memory-types';
+import type { MatchedPersona } from '../hooks/memory/usePersonaSelection';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { validateNewSession, validateEditSession } from '../utils/sessionValidation';
 import { FormInput } from './ui/FormInput';
 import { Modal, ModalFooter } from './ui/Modal';
 import { AgentConfigPanel } from './shared/AgentConfigPanel';
 import { SshRemoteSelector } from './shared/SshRemoteSelector';
+import { PersonaPicker } from './PersonaPicker';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
 import { safeClipboardWrite } from '../utils/clipboard';
 import { isBetaAgent, getAgentDisplayName } from '../../shared/agentMetadata';
@@ -46,7 +49,8 @@ interface NewInstanceModalProps {
 			enabled: boolean;
 			remoteId: string | null;
 			workingDirOverride?: string;
-		}
+		},
+		selectedPersonaIds?: string[]
 	) => void;
 	theme: any;
 	existingSessions: Session[];
@@ -70,7 +74,8 @@ interface EditAgentModalProps {
 			enabled: boolean;
 			remoteId: string | null;
 			workingDirOverride?: string;
-		}
+		},
+		selectedPersonaIds?: string[]
 	) => void;
 	theme: any;
 	session: Session | null;
@@ -121,6 +126,15 @@ export function NewInstanceModal({
 	}>({ checking: false, valid: false, isDirectory: false });
 	// SSH connection error state - shown when we can't connect to the selected remote
 	const [sshConnectionError, setSshConnectionError] = useState<string | null>(null);
+
+	// Persona selection state
+	const [selectedPersonaIds, setSelectedPersonaIds] = useState<string[]>([]);
+	const [matchedPersonas, setMatchedPersonas] = useState<MatchedPersona[]>([]);
+	const [allPersonas, setAllPersonas] = useState<Persona[]>([]);
+	const [personaLoading, setPersonaLoading] = useState(false);
+	const [personaSectionExpanded, setPersonaSectionExpanded] = useState(false);
+	const [useCaseDescription, setUseCaseDescription] = useState('');
+	const [isMemoryEnabled, setIsMemoryEnabled] = useState(true);
 
 	const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -479,7 +493,8 @@ export function NewInstanceModal({
 			agentCustomModel,
 			agentCustomContextWindow,
 			agentCustomProviderPath,
-			sessionSshRemoteConfig
+			sessionSshRemoteConfig,
+			selectedPersonaIds.length > 0 ? selectedPersonaIds : undefined
 		);
 		onClose();
 
@@ -496,6 +511,11 @@ export function NewInstanceModal({
 			delete newConfigs[selectedAgent];
 			return newConfigs;
 		});
+		// Reset persona state
+		setSelectedPersonaIds([]);
+		setMatchedPersonas([]);
+		setUseCaseDescription('');
+		setPersonaSectionExpanded(false);
 	}, [
 		instanceName,
 		selectedAgent,
@@ -506,6 +526,7 @@ export function NewInstanceModal({
 		customAgentEnvVars,
 		agentConfigs,
 		agentSshRemoteConfigs,
+		selectedPersonaIds,
 		onCreate,
 		onClose,
 		expandTilde,
@@ -610,6 +631,66 @@ export function NewInstanceModal({
 			loadSshConfigs();
 		}
 	}, [isOpen]);
+
+	// Load all personas when the modal opens
+	useEffect(() => {
+		if (!isOpen) return;
+
+		const loadPersonas = async () => {
+			try {
+				const result = await window.maestro.memory.persona.list();
+				if (result.success && result.data) {
+					setAllPersonas(result.data);
+					setIsMemoryEnabled(true);
+				} else {
+					setIsMemoryEnabled(false);
+				}
+			} catch {
+				setIsMemoryEnabled(false);
+			}
+		};
+
+		loadPersonas();
+	}, [isOpen]);
+
+	// Debounced persona matching when use-case description changes
+	useEffect(() => {
+		if (!useCaseDescription.trim() || !selectedAgent) return;
+
+		const timer = setTimeout(async () => {
+			setPersonaLoading(true);
+			try {
+				const expandedDir = expandTilde(workingDir.trim());
+				const result = await window.maestro.memory.matchPersonas(
+					useCaseDescription,
+					selectedAgent,
+					expandedDir || undefined
+				);
+				if (result.success && result.data) {
+					setMatchedPersonas(result.data);
+					// Auto-select personas with similarity >= 0.50
+					const autoSelected = result.data
+						.filter((p: MatchedPersona) => p.similarity >= 0.5)
+						.map((p: MatchedPersona) => p.personaId);
+					setSelectedPersonaIds(autoSelected);
+				}
+			} catch {
+				// Non-critical
+			} finally {
+				setPersonaLoading(false);
+			}
+		}, 1000); // 1 second debounce
+
+		return () => clearTimeout(timer);
+	}, [useCaseDescription, selectedAgent, workingDir]);
+
+	// Pre-populate persona selection when duplicating a session
+	useEffect(() => {
+		if (sourceSession?.selectedPersonaIds) {
+			setSelectedPersonaIds([...sourceSession.selectedPersonaIds]);
+			setPersonaSectionExpanded(true);
+		}
+	}, [sourceSession]);
 
 	// Transfer pending SSH config to selected agent automatically
 	// This ensures SSH config is preserved when agent is auto-selected or manually clicked
@@ -1205,6 +1286,78 @@ export function NewInstanceModal({
 							every message you send to the agent (not visible in chat).
 						</p>
 					</div>
+
+					{/* Persona Selection Section */}
+					<div
+						style={{ borderTop: `1px solid ${theme.colors.border}`, marginTop: 12, paddingTop: 12 }}
+					>
+						<button
+							onClick={() => setPersonaSectionExpanded(!personaSectionExpanded)}
+							style={{
+								display: 'flex',
+								alignItems: 'center',
+								gap: 8,
+								background: 'none',
+								border: 'none',
+								cursor: 'pointer',
+								color: theme.colors.textMain,
+								fontSize: 13,
+								fontWeight: 600,
+								width: '100%',
+								padding: '4px 0',
+							}}
+						>
+							<ChevronRight
+								size={14}
+								style={{
+									transform: personaSectionExpanded ? 'rotate(90deg)' : 'none',
+									transition: 'transform 150ms',
+								}}
+							/>
+							Personas
+							{selectedPersonaIds.length > 0 && (
+								<span style={{ fontWeight: 400, color: theme.colors.textDim }}>
+									({selectedPersonaIds.length} selected)
+								</span>
+							)}
+						</button>
+
+						{personaSectionExpanded && (
+							<div style={{ marginTop: 8 }}>
+								{/* Use case description */}
+								<textarea
+									value={useCaseDescription}
+									onChange={(e) => setUseCaseDescription(e.target.value.slice(0, 500))}
+									placeholder="Describe what this agent will work on... (optional, helps suggest relevant personas)"
+									maxLength={500}
+									rows={2}
+									className="w-full p-2 rounded border bg-transparent outline-none resize-vertical text-xs"
+									style={{
+										borderColor: theme.colors.border,
+										color: theme.colors.textMain,
+										fontFamily: 'inherit',
+										marginBottom: 8,
+									}}
+								/>
+
+								<PersonaPicker
+									theme={theme}
+									matchedPersonas={matchedPersonas}
+									allPersonas={allPersonas}
+									selectedIds={new Set(selectedPersonaIds)}
+									onToggle={(id) => {
+										setSelectedPersonaIds((prev) =>
+											prev.includes(id) ? prev.filter((pid) => pid !== id) : [...prev, id]
+										);
+									}}
+									isLoading={personaLoading}
+									isMemoryEnabled={isMemoryEnabled}
+									mode="manual"
+									compact
+								/>
+							</div>
+						)}
+					</div>
 				</div>
 			</Modal>
 		</div>
@@ -1258,6 +1411,15 @@ export function EditAgentModal({
 		isDirectory: boolean;
 		error?: string;
 	}>({ checking: false, valid: false, isDirectory: false });
+
+	// Persona selection state
+	const [selectedPersonaIds, setSelectedPersonaIds] = useState<string[]>([]);
+	const [matchedPersonas, setMatchedPersonas] = useState<MatchedPersona[]>([]);
+	const [allPersonas, setAllPersonas] = useState<Persona[]>([]);
+	const [personaLoading, setPersonaLoading] = useState(false);
+	const [personaSectionExpanded, setPersonaSectionExpanded] = useState(false);
+	const [useCaseDescription, setUseCaseDescription] = useState('');
+	const [isMemoryEnabled, setIsMemoryEnabled] = useState(true);
 
 	const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -1356,6 +1518,67 @@ export function EditAgentModal({
 			setSelectedToolType(session.toolType);
 		}
 	}, [isOpen, session]);
+
+	// Load existing selectedPersonaIds from session on mount
+	useEffect(() => {
+		if (session?.selectedPersonaIds) {
+			setSelectedPersonaIds([...session.selectedPersonaIds]);
+			setPersonaSectionExpanded(true);
+		} else {
+			setSelectedPersonaIds([]);
+		}
+	}, [session]);
+
+	// Load all personas when the modal opens
+	useEffect(() => {
+		if (!isOpen) return;
+
+		const loadPersonas = async () => {
+			try {
+				let result = await window.maestro.memory.persona.list();
+				if (result.success && result.data && result.data.length === 0) {
+					// Auto-seed default personas
+					await window.maestro.memory.seedDefaults();
+					result = await window.maestro.memory.persona.list();
+				}
+				if (result.success && result.data) {
+					setAllPersonas(result.data);
+					setIsMemoryEnabled(true);
+				} else {
+					setIsMemoryEnabled(false);
+				}
+			} catch {
+				setIsMemoryEnabled(false);
+			}
+		};
+
+		loadPersonas();
+	}, [isOpen]);
+
+	// Debounced persona matching when use-case description changes
+	useEffect(() => {
+		if (!useCaseDescription.trim() || !session) return;
+
+		const timer = setTimeout(async () => {
+			setPersonaLoading(true);
+			try {
+				const result = await window.maestro.memory.matchPersonas(
+					useCaseDescription,
+					session.toolType,
+					session.projectRoot || undefined
+				);
+				if (result.success && result.data) {
+					setMatchedPersonas(result.data);
+				}
+			} catch {
+				// Non-critical
+			} finally {
+				setPersonaLoading(false);
+			}
+		}, 1000);
+
+		return () => clearTimeout(timer);
+	}, [useCaseDescription, session]);
 
 	// Validate session name uniqueness (excluding current session)
 	const validation = useMemo(() => {
@@ -1467,7 +1690,7 @@ export function EditAgentModal({
 					}
 				: { enabled: false, remoteId: null };
 
-		// Save with per-session config fields including model, contextWindow, and SSH config
+		// Save with per-session config fields including model, contextWindow, SSH config, and personas
 		onSave(
 			session.id,
 			name,
@@ -1478,7 +1701,8 @@ export function EditAgentModal({
 			Object.keys(customEnvVars).length > 0 ? customEnvVars : undefined,
 			modelValue,
 			contextWindowValue,
-			sessionSshRemoteConfig
+			sessionSshRemoteConfig,
+			selectedPersonaIds
 		);
 		onClose();
 	}, [
@@ -1490,6 +1714,7 @@ export function EditAgentModal({
 		customEnvVars,
 		agentConfig,
 		sshRemoteConfig,
+		selectedPersonaIds,
 		selectedToolType,
 		providerChanged,
 		onSave,
@@ -1838,6 +2063,95 @@ export function EditAgentModal({
 							onSshRemoteConfigChange={setSshRemoteConfig}
 						/>
 					)}
+
+					{/* Persona Selection Section */}
+					<div
+						style={{ borderTop: `1px solid ${theme.colors.border}`, marginTop: 12, paddingTop: 12 }}
+					>
+						<button
+							onClick={() => setPersonaSectionExpanded(!personaSectionExpanded)}
+							style={{
+								display: 'flex',
+								alignItems: 'center',
+								gap: 8,
+								background: 'none',
+								border: 'none',
+								cursor: 'pointer',
+								color: theme.colors.textMain,
+								fontSize: 13,
+								fontWeight: 600,
+								width: '100%',
+								padding: '4px 0',
+							}}
+						>
+							<ChevronRight
+								size={14}
+								style={{
+									transform: personaSectionExpanded ? 'rotate(90deg)' : 'none',
+									transition: 'transform 150ms',
+								}}
+							/>
+							Personas
+							{selectedPersonaIds.length > 0 && (
+								<span style={{ fontWeight: 400, color: theme.colors.textDim }}>
+									({selectedPersonaIds.length} selected)
+								</span>
+							)}
+						</button>
+
+						{personaSectionExpanded && (
+							<div style={{ marginTop: 8 }}>
+								{/* Use case description */}
+								<textarea
+									value={useCaseDescription}
+									onChange={(e) => setUseCaseDescription(e.target.value.slice(0, 500))}
+									placeholder="Describe what this agent will work on... (optional, helps suggest relevant personas)"
+									maxLength={500}
+									rows={2}
+									className="w-full p-2 rounded border bg-transparent outline-none resize-vertical text-xs"
+									style={{
+										borderColor: theme.colors.border,
+										color: theme.colors.textMain,
+										fontFamily: 'inherit',
+										marginBottom: 8,
+									}}
+								/>
+
+								<PersonaPicker
+									theme={theme}
+									matchedPersonas={matchedPersonas}
+									allPersonas={allPersonas}
+									selectedIds={new Set(selectedPersonaIds)}
+									onToggle={(id) => {
+										setSelectedPersonaIds((prev) =>
+											prev.includes(id) ? prev.filter((pid) => pid !== id) : [...prev, id]
+										);
+									}}
+									isLoading={personaLoading}
+									isMemoryEnabled={isMemoryEnabled}
+									mode="manual"
+									compact
+								/>
+
+								{selectedPersonaIds.length > 0 && (
+									<button
+										onClick={() => setSelectedPersonaIds([])}
+										style={{
+											background: 'none',
+											border: 'none',
+											cursor: 'pointer',
+											color: theme.colors.textDim,
+											fontSize: 11,
+											textDecoration: 'underline',
+											marginTop: 4,
+										}}
+									>
+										Clear selection (use automatic matching)
+									</button>
+								)}
+							</div>
+						)}
+					</div>
 				</div>
 			</Modal>
 		</div>

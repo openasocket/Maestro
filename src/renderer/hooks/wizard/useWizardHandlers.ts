@@ -1061,6 +1061,7 @@ export function useWizardHandlers(deps: UseWizardHandlersDeps): UseWizardHandler
 				customEnvVars,
 				sessionSshRemoteConfig,
 				runAllDocuments,
+				selectedPersonaIds,
 			} = wizardState;
 
 			if (!selectedAgent || !directoryPath) {
@@ -1181,6 +1182,7 @@ export function useWizardHandlers(deps: UseWizardHandlersDeps): UseWizardHandler
 				customArgs,
 				customEnvVars,
 				sessionSshRemoteConfig,
+				selectedPersonaIds: selectedPersonaIds?.length ? selectedPersonaIds : undefined,
 			};
 
 			setSessions((prev) => [...prev, newSession]);

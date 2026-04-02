@@ -778,12 +778,12 @@ describe('Wizard Keyboard Navigation', () => {
 			renderWithProviders(<TestWrapper />);
 
 			await waitFor(() => {
-				expect(screen.getByText('Step 2 of 5')).toBeInTheDocument();
+				expect(screen.getByText('Step 2 of 6')).toBeInTheDocument();
 			});
 
-			// Should show 5 progress dots
+			// Should show 6 progress dots
 			const progressDots = screen.getAllByLabelText(/step \d+/i);
-			expect(progressDots).toHaveLength(5);
+			expect(progressDots).toHaveLength(6);
 
 			// Step 1 should be completed, step 2 should be current
 			expect(progressDots[0]).toHaveAttribute(

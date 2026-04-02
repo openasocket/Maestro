@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, memo } from 'react';
+import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import {
 	X,
 	Key,
@@ -11,6 +11,7 @@ import {
 	Server,
 	Monitor,
 	Globe,
+	Brain,
 } from 'lucide-react';
 import { useSettings } from '../../hooks';
 import type { Theme, LLMProvider } from '../../types';
@@ -29,6 +30,7 @@ import { EncoreTab } from './tabs/EncoreTab';
 import { ShortcutsTab } from './tabs/ShortcutsTab';
 import { ThemeTab } from './tabs/ThemeTab';
 import { EnvironmentTab } from './tabs/EnvironmentTab';
+import { MemoryTab } from './tabs/MemoryTab';
 
 // Feature flags - set to true to enable dormant features
 const FEATURE_FLAGS = {
@@ -50,10 +52,19 @@ interface SettingsModalProps {
 		| 'aicommands'
 		| 'ssh'
 		| 'environment'
+		| 'memory'
 		| 'encore';
 	hasNoAgents?: boolean;
 	onThemeImportError?: (message: string) => void;
 	onThemeImportSuccess?: (message: string) => void;
+	/** When opening to the memory tab, optionally specify which sub-tab to show */
+	initialMemorySubTab?: string;
+	/** Active session's working directory for project-scoped memories */
+	activeProjectPath?: string | null;
+	/** Active agent session ID for per-agent analysis */
+	activeAgentId?: string | null;
+	/** Active agent type (e.g. 'claude-code') */
+	activeAgentType?: string | null;
 }
 
 export const SettingsModal = memo(function SettingsModal(props: SettingsModalProps) {
@@ -108,6 +119,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 		| 'aicommands'
 		| 'ssh'
 		| 'environment'
+		| 'memory'
 		| 'encore'
 	>('general');
 	const [testingLLM, setTestingLLM] = useState(false);
@@ -119,6 +131,65 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 	const { registerLayer, unregisterLayer } = useLayerStack();
 	const layerIdRef = useRef<string>();
 	const isRecordingShortcutRef = useRef(false);
+
+	// Resizable modal dimensions
+	const [modalSize, setModalSize] = useState<{ width: number; height: number }>({
+		width: 780,
+		height: 720,
+	});
+
+	// Resize handler for drag handles
+	const handleResize = useCallback(
+		(e: React.PointerEvent, direction: 'right' | 'bottom' | 'corner') => {
+			e.preventDefault();
+			e.stopPropagation();
+			const startX = e.clientX;
+			const startY = e.clientY;
+			const startW = modalSize.width;
+			const startH = modalSize.height;
+
+			const onMove = (ev: PointerEvent) => {
+				const dx = ev.clientX - startX;
+				const dy = ev.clientY - startY;
+				const maxW = window.innerWidth - 80;
+				const maxH = window.innerHeight - 80;
+
+				setModalSize((prev) => ({
+					width: direction === 'bottom' ? prev.width : Math.max(640, Math.min(startW + dx, maxW)),
+					height: direction === 'right' ? prev.height : Math.max(480, Math.min(startH + dy, maxH)),
+				}));
+			};
+
+			const onUp = () => {
+				document.removeEventListener('pointermove', onMove);
+				document.removeEventListener('pointerup', onUp);
+				// Persist on drag end
+				setModalSize((current) => {
+					window.maestro.settings.set('settingsModalSize', current);
+					return current;
+				});
+			};
+
+			document.addEventListener('pointermove', onMove);
+			document.addEventListener('pointerup', onUp);
+		},
+		[modalSize]
+	);
+
+	// Load persisted size on open
+	useEffect(() => {
+		const loadSize = async () => {
+			const saved = await window.maestro.settings.get('settingsModalSize');
+			if (saved && typeof saved === 'object' && 'width' in saved && 'height' in saved) {
+				const s = saved as { width: number; height: number };
+				setModalSize({
+					width: Math.max(640, Math.min(s.width, window.innerWidth - 80)),
+					height: Math.max(480, Math.min(s.height, window.innerHeight - 80)),
+				});
+			}
+		};
+		if (isOpen) loadSize();
+	}, [isOpen]);
 
 	useEffect(() => {
 		if (isOpen) {
@@ -173,6 +244,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 				| 'aicommands'
 				| 'ssh'
 				| 'environment'
+				| 'memory'
 				| 'encore'
 			> = FEATURE_FLAGS.LLM_SETTINGS
 				? [
@@ -185,6 +257,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 						'aicommands',
 						'ssh',
 						'environment',
+						'memory',
 						'encore',
 					]
 				: [
@@ -196,6 +269,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 						'aicommands',
 						'ssh',
 						'environment',
+						'memory',
 						'encore',
 					];
 			const currentIndex = tabs.indexOf(activeTab);
@@ -338,10 +412,27 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 			aria-label="Settings"
 		>
 			<div
-				className="w-[780px] h-[720px] rounded-xl border shadow-2xl overflow-hidden flex flex-col"
-				style={{ backgroundColor: theme.colors.bgSidebar, borderColor: theme.colors.border }}
+				className="relative rounded-xl border shadow-2xl overflow-hidden flex flex-col"
+				style={{
+					backgroundColor: theme.colors.bgSidebar,
+					borderColor: theme.colors.border,
+					width: modalSize.width,
+					height: modalSize.height,
+					minWidth: 640,
+					minHeight: 480,
+					maxWidth: 'calc(100vw - 80px)',
+					maxHeight: 'calc(100vh - 80px)',
+				}}
 			>
-				<div className="flex border-b" style={{ borderColor: theme.colors.border }}>
+				<div
+					className="flex border-b"
+					style={{ borderColor: theme.colors.border }}
+					onDoubleClick={() => {
+						const defaultSize = { width: 780, height: 720 };
+						setModalSize(defaultSize);
+						window.maestro.settings.set('settingsModalSize', defaultSize);
+					}}
+				>
 					<button
 						onClick={() => setActiveTab('general')}
 						className={`px-4 py-4 text-sm font-bold border-b-2 cursor-pointer ${activeTab === 'general' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
@@ -414,6 +505,15 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					>
 						<Globe className="w-4 h-4" />
 						{activeTab === 'environment' && <span>Environment</span>}
+					</button>
+					<button
+						onClick={() => setActiveTab('memory')}
+						className={`px-4 py-4 text-sm font-bold border-b-2 ${activeTab === 'memory' ? 'border-indigo-500' : 'border-transparent'} flex items-center gap-2`}
+						tabIndex={-1}
+						title="Memory"
+					>
+						<Brain className="w-4 h-4" />
+						{activeTab === 'memory' && <span>Memory</span>}
 					</button>
 					<button
 						onClick={() => setActiveTab('encore')}
@@ -605,8 +705,32 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 
 					{activeTab === 'environment' && <EnvironmentTab theme={theme} />}
 
+					{activeTab === 'memory' && (
+						<MemoryTab
+							theme={theme}
+							activeProjectPath={props.activeProjectPath}
+							activeAgentId={props.activeAgentId}
+							activeAgentType={props.activeAgentType}
+							initialSubTab={props.initialMemorySubTab}
+						/>
+					)}
+
 					{activeTab === 'encore' && <EncoreTab theme={theme} isOpen={isOpen} />}
 				</div>
+
+				{/* Resize handles */}
+				<div
+					className="absolute top-0 right-0 w-1.5 h-full cursor-ew-resize hover:bg-white/10 transition-colors"
+					onPointerDown={(e) => handleResize(e, 'right')}
+				/>
+				<div
+					className="absolute bottom-0 left-0 h-1.5 w-full cursor-ns-resize hover:bg-white/10 transition-colors"
+					onPointerDown={(e) => handleResize(e, 'bottom')}
+				/>
+				<div
+					className="absolute bottom-0 right-0 w-3 h-3 cursor-nwse-resize hover:bg-white/10 transition-colors"
+					onPointerDown={(e) => handleResize(e, 'corner')}
+				/>
 			</div>
 		</div>
 	);

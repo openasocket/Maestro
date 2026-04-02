@@ -3108,6 +3108,788 @@ interface MaestroAPI {
 		) => () => void;
 	};
 
+	// Agent Experiences Memory API (roles, personas, skills, memories)
+	memory: {
+		getConfig: () => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryConfig }
+			| { success: false; error: string }
+		>;
+		setConfig: (
+			config: Partial<import('../shared/memory-types').MemoryConfig>
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryConfig }
+			| { success: false; error: string }
+		>;
+		role: {
+			list: () => Promise<
+				| { success: true; data: import('../shared/memory-types').Role[] }
+				| { success: false; error: string }
+			>;
+			get: (
+				id: string
+			) => Promise<
+				| { success: true; data: import('../shared/memory-types').Role | null }
+				| { success: false; error: string }
+			>;
+			create: (
+				name: string,
+				description: string,
+				systemPrompt?: string
+			) => Promise<
+				| { success: true; data: import('../shared/memory-types').Role }
+				| { success: false; error: string }
+			>;
+			update: (
+				id: string,
+				updates: { name?: string; description?: string; systemPrompt?: string }
+			) => Promise<
+				| { success: true; data: import('../shared/memory-types').Role | null }
+				| { success: false; error: string }
+			>;
+			delete: (
+				id: string
+			) => Promise<{ success: true; data: boolean } | { success: false; error: string }>;
+		};
+		persona: {
+			list: (
+				roleId?: string
+			) => Promise<
+				| { success: true; data: import('../shared/memory-types').Persona[] }
+				| { success: false; error: string }
+			>;
+			get: (
+				id: string
+			) => Promise<
+				| { success: true; data: import('../shared/memory-types').Persona | null }
+				| { success: false; error: string }
+			>;
+			create: (
+				roleId: string,
+				name: string,
+				description: string,
+				assignedAgents?: string[],
+				assignedProjects?: string[],
+				systemPrompt?: string
+			) => Promise<
+				| { success: true; data: import('../shared/memory-types').Persona }
+				| { success: false; error: string }
+			>;
+			update: (
+				id: string,
+				updates: {
+					name?: string;
+					description?: string;
+					systemPrompt?: string;
+					assignedAgents?: string[];
+					assignedProjects?: string[];
+					active?: boolean;
+				}
+			) => Promise<
+				| { success: true; data: import('../shared/memory-types').Persona | null }
+				| { success: false; error: string }
+			>;
+			delete: (
+				id: string
+			) => Promise<{ success: true; data: boolean } | { success: false; error: string }>;
+		};
+		matchPersonas: (
+			query: string,
+			agentType: string,
+			projectPath?: string
+		) => Promise<
+			| {
+					success: true;
+					data: Array<{
+						personaId: string;
+						personaName: string;
+						roleName: string;
+						description: string;
+						systemPrompt: string;
+						similarity: number;
+					}>;
+			  }
+			| { success: false; error: string }
+		>;
+		resetSeedDefaults: () => Promise<
+			| {
+					success: true;
+					data: {
+						rolesReset: number;
+						personasReset: number;
+						personasCreated?: number;
+						skillsCreated?: number;
+					};
+			  }
+			| { success: false; error: string }
+		>;
+		skill: {
+			list: (
+				personaId?: string
+			) => Promise<
+				| { success: true; data: import('../shared/memory-types').SkillArea[] }
+				| { success: false; error: string }
+			>;
+			get: (
+				id: string
+			) => Promise<
+				| { success: true; data: import('../shared/memory-types').SkillArea | null }
+				| { success: false; error: string }
+			>;
+			create: (
+				personaId: string,
+				name: string,
+				description: string
+			) => Promise<
+				| { success: true; data: import('../shared/memory-types').SkillArea }
+				| { success: false; error: string }
+			>;
+			update: (
+				id: string,
+				updates: { name?: string; description?: string; active?: boolean }
+			) => Promise<
+				| { success: true; data: import('../shared/memory-types').SkillArea | null }
+				| { success: false; error: string }
+			>;
+			delete: (
+				id: string
+			) => Promise<{ success: true; data: boolean } | { success: false; error: string }>;
+		};
+		list: (
+			scope: import('../shared/memory-types').MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string,
+			includeInactive?: boolean
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry[] }
+			| { success: false; error: string }
+		>;
+		add: (
+			entry: {
+				content: string;
+				type?: import('../shared/memory-types').MemoryType;
+				scope: import('../shared/memory-types').MemoryScope;
+				skillAreaId?: string;
+				personaId?: string;
+				roleId?: string;
+				tags?: string[];
+				source?: import('../shared/memory-types').MemorySource;
+				confidence?: number;
+				pinned?: boolean;
+				experienceContext?: import('../shared/memory-types').ExperienceContext;
+			},
+			projectPath?: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry }
+			| { success: false; error: string }
+		>;
+		update: (
+			id: string,
+			updates: Partial<
+				Pick<
+					import('../shared/memory-types').MemoryEntry,
+					'content' | 'type' | 'tags' | 'confidence' | 'pinned' | 'active' | 'experienceContext'
+				>
+			>,
+			scope: import('../shared/memory-types').MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry | null }
+			| { success: false; error: string }
+		>;
+		delete: (
+			id: string,
+			scope: import('../shared/memory-types').MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<{ success: true; data: boolean } | { success: false; error: string }>;
+		listAllExperiences: (projectPath?: string) => Promise<
+			| {
+					success: true;
+					data: Array<
+						import('../shared/memory-types').MemoryEntry & {
+							scopeLabel: string;
+							skillAreaName?: string;
+							personaName?: string;
+						}
+					>;
+			  }
+			| { success: false; error: string }
+		>;
+		findById: (
+			id: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry | null }
+			| { success: false; error: string }
+		>;
+		moveScope: (
+			memoryId: string,
+			fromScope: import('../shared/memory-types').MemoryScope,
+			fromSkillAreaId: string | undefined,
+			fromProjectPath: string | undefined,
+			toScope: import('../shared/memory-types').MemoryScope,
+			toSkillAreaId: string | undefined,
+			toProjectPath: string | undefined
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry }
+			| { success: false; error: string }
+		>;
+		listArchived: (
+			scope: import('../shared/memory-types').MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry[] }
+			| { success: false; error: string }
+		>;
+		restore: (
+			id: string,
+			scope: import('../shared/memory-types').MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry | null }
+			| { success: false; error: string }
+		>;
+		search: (
+			query: string,
+			agentType: string,
+			projectPath?: string,
+			strategy?: 'cascading' | 'keyword' | 'tag'
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemorySearchResult[] }
+			| { success: false; error: string }
+		>;
+		getStats: () => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryStats }
+			| { success: false; error: string }
+		>;
+		getAnalytics: () => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryStats }
+			| { success: false; error: string }
+		>;
+		getChangeLog: (
+			since?: number,
+			limit?: number
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryChangeEvent[] }
+			| { success: false; error: string }
+		>;
+		getRecentInjections: (
+			limit?: number
+		) => Promise<{ success: true; data: unknown[] } | { success: false; error: string }>;
+		debugInjection: () => Promise<
+			| { success: true; data: Array<{ label: string; ok: boolean; detail?: string }> }
+			| { success: false; error: string }
+		>;
+		getPersonaShifts: (limit?: number) => Promise<
+			| {
+					success: true;
+					data: Array<{
+						timestamp: number;
+						sessionId: string;
+						fromPersona: { id: string; name: string; score: number };
+						toPersona: { id: string; name: string; score: number };
+						triggerContext: string;
+					}>;
+			  }
+			| { success: false; error: string }
+		>;
+		getPersonaActivations: (limit?: number) => Promise<
+			| {
+					success: true;
+					data: Array<{
+						timestamp: number;
+						sessionId: string;
+						persona: { id: string; name: string; score: number };
+						triggerContext: string;
+						type: 'activation' | 'shift';
+					}>;
+			  }
+			| { success: false; error: string }
+		>;
+		export: (
+			scope: import('../shared/memory-types').MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<
+			| {
+					success: true;
+					data: {
+						memories: import('../shared/memory-types').MemoryEntry[];
+						exportedAt: number;
+						scope: import('../shared/memory-types').MemoryScope;
+						skillAreaId?: string;
+						projectPath?: string;
+					};
+			  }
+			| { success: false; error: string }
+		>;
+		import: (
+			json: {
+				memories: Array<{
+					content: string;
+					type?: import('../shared/memory-types').MemoryType;
+					tags?: string[];
+					confidence?: number;
+					pinned?: boolean;
+					experienceContext?: import('../shared/memory-types').ExperienceContext;
+				}>;
+			},
+			scope: import('../shared/memory-types').MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<{ success: true; data: { imported: number } } | { success: false; error: string }>;
+		consolidate: (
+			scope: import('../shared/memory-types').MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<
+			| { success: true; data: { consolidated: number; message: string } }
+			| { success: false; error: string }
+		>;
+		ensureEmbeddings: (
+			scope: import('../shared/memory-types').MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<
+			| { success: true; data: { memoriesUpdated: number; hierarchyUpdated: number } }
+			| { success: false; error: string }
+		>;
+		computeAllEmbeddings: () => Promise<
+			| { success: true; data: { memoriesUpdated: number; hierarchyUpdated: number } }
+			| { success: false; error: string }
+		>;
+		onEmbeddingComputeProgress: (
+			callback: (event: { current: number; total: number; detail?: string }) => void
+		) => () => void;
+		reEmbedAll: (options?: {
+			scope?: import('../shared/memory-types').MemoryScope;
+			batchSize?: number;
+		}) => Promise<
+			| {
+					success: true;
+					data: { total: number; succeeded: number; failed: number; durationMs: number };
+			  }
+			| { success: false; error: string }
+		>;
+		seedDefaults: () => Promise<
+			| { success: true; data: { roles: number; personas: number; skills: number } }
+			| { success: false; error: string }
+		>;
+		getPromotionCandidates: () => Promise<
+			| { success: true; data: import('../shared/memory-types').PromotionCandidate[] }
+			| { success: false; error: string }
+		>;
+		promote: (
+			id: string,
+			ruleText: string,
+			scope: string,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry | null }
+			| { success: false; error: string }
+		>;
+		dismissPromotion: (
+			id: string,
+			scope: string,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry | null }
+			| { success: false; error: string }
+		>;
+		promoteCrossProject: (
+			id: string,
+			ruleText: string,
+			sourceProjectDirHash: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry | null }
+			| { success: false; error: string }
+		>;
+		suggestHierarchy: (
+			projectPath: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').HierarchySuggestionResult }
+			| { success: false; error: string }
+		>;
+		link: (
+			idA: string,
+			scopeA: import('../shared/memory-types').MemoryScope,
+			idB: string,
+			scopeB: import('../shared/memory-types').MemoryScope,
+			skillAreaIdA?: string,
+			projectPathA?: string,
+			skillAreaIdB?: string,
+			projectPathB?: string
+		) => Promise<{ success: true; data: { linked: boolean } } | { success: false; error: string }>;
+		unlink: (
+			idA: string,
+			scopeA: import('../shared/memory-types').MemoryScope,
+			idB: string,
+			scopeB: import('../shared/memory-types').MemoryScope,
+			skillAreaIdA?: string,
+			projectPathA?: string,
+			skillAreaIdB?: string,
+			projectPathB?: string
+		) => Promise<
+			{ success: true; data: { unlinked: boolean } } | { success: false; error: string }
+		>;
+		getLinked: (
+			id: string,
+			scope: import('../shared/memory-types').MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string
+		) => Promise<
+			| { success: true; data: import('../shared/memory-types').MemoryEntry[] }
+			| { success: false; error: string }
+		>;
+		getJobQueueStatus: () => Promise<
+			| { success: true; data: import('../shared/memory-types').JobQueueStatus }
+			| { success: false; error: string }
+		>;
+		getTokenUsage: () => Promise<
+			| { success: true; data: import('../shared/memory-types').TokenUsage }
+			| { success: false; error: string }
+		>;
+		getStoreSize: () => Promise<
+			| { success: true; data: { totalBytes: number; fileCount: number } }
+			| { success: false; error: string }
+		>;
+		analyzeHistoricalSessions: () => Promise<
+			| { success: true; data: { total: number; queued: number; skipped: number } }
+			| { success: false; error: string }
+		>;
+		getAnalysisStats: () => Promise<
+			| {
+					success: true;
+					data: {
+						totalSessions: number;
+						analyzedSessions: number;
+						unanalyzedSessions: number;
+					};
+			  }
+			| { success: false; error: string }
+		>;
+		analyzeAgentSessions: (
+			agentId: string,
+			agentType: string,
+			projectPath?: string
+		) => Promise<
+			| {
+					success: true;
+					data: {
+						total: number;
+						queued: number;
+						skipped: number;
+						alreadyAnalyzed: number;
+					};
+			  }
+			| { success: false; error: string }
+		>;
+		getAgentAnalysisStats: (agentId: string) => Promise<
+			| {
+					success: true;
+					data: {
+						totalSessions: number;
+						analyzedSessions: number;
+						unanalyzedSessions: number;
+					};
+			  }
+			| { success: false; error: string }
+		>;
+		onJobQueueUpdate: (
+			callback: (status: import('../shared/memory-types').JobQueueStatus) => void
+		) => () => void;
+		onFirstInjection: (
+			callback: (data: { count: number; tokenCount: number; personaName?: string }) => void
+		) => () => void;
+		onMilestone: (
+			callback: (data: {
+				id: number;
+				title: string;
+				message: string;
+				type: 'success' | 'info';
+				duration: number;
+			}) => void
+		) => () => void;
+		onPersonaChanged: (
+			callback: (event: {
+				type: 'shift' | 'activation';
+				sessionId: string;
+				fromPersona?: { id: string; name: string; score: number };
+				toPersona?: { id: string; name: string; score: number };
+				persona?: { id: string; name: string; score: number };
+				timestamp: number;
+			}) => void
+		) => () => void;
+		getSessionPersona: (
+			sessionId: string
+		) => Promise<
+			| { success: true; data: { id: string; name: string; score: number } | null }
+			| { success: false; error: string }
+		>;
+
+		// ─── Experience Repository (programmatic API) ─────────────────────
+		repository: {
+			importFromFile: (filePath: string) => Promise<
+				| {
+						success: true;
+						data: {
+							success: boolean;
+							signatureStatus?: string;
+							result?: import('../shared/experience-bundle-types').BundleImportResult;
+							errors?: string[];
+						};
+				  }
+				| { success: false; error: string }
+			>;
+			export: (
+				name: string,
+				description: string,
+				author: string,
+				memoryIds: string[],
+				version?: string
+			) => Promise<
+				| {
+						success: true;
+						data: import('../shared/experience-bundle-types').ExperienceBundle;
+				  }
+				| { success: false; error: string }
+			>;
+			verifySignature: (filePath: string) => Promise<
+				| {
+						success: true;
+						data: {
+							signed: boolean;
+							valid?: boolean;
+							trusted?: boolean;
+							signerKey?: string;
+						};
+				  }
+				| { success: false; error: string }
+			>;
+			getImportedBundles: () => Promise<
+				| {
+						success: true;
+						data: import('../shared/experience-bundle-types').ImportedBundleRecord[];
+				  }
+				| { success: false; error: string }
+			>;
+			uninstall: (
+				bundleId: string
+			) => Promise<
+				{ success: true; data: { removed: number } } | { success: false; error: string }
+			>;
+			getTrustedKeys: () => Promise<
+				| {
+						success: true;
+						data: import('../shared/experience-bundle-types').TrustedKeyEntry[];
+				  }
+				| { success: false; error: string }
+			>;
+			addTrustedKey: (
+				publicKey: string,
+				label: string
+			) => Promise<{ success: true; data: { added: boolean } } | { success: false; error: string }>;
+			removeTrustedKey: (
+				publicKey: string
+			) => Promise<
+				{ success: true; data: { removed: boolean } } | { success: false; error: string }
+			>;
+			browseCatalog: (
+				query?: string,
+				page?: number,
+				pageSize?: number
+			) => Promise<
+				| {
+						success: true;
+						data: import('../shared/experience-bundle-types').RepositoryCatalogResponse;
+				  }
+				| { success: false; error: string }
+			>;
+			download: (
+				bundleId: string
+			) => Promise<
+				| { success: true; data: { success: boolean; error?: string } }
+				| { success: false; error: string }
+			>;
+			submit: (
+				name: string,
+				description: string,
+				author: string,
+				memoryIds: string[],
+				submitterName?: string,
+				submitterEmail?: string,
+				reviewNotes?: string
+			) => Promise<
+				| {
+						success: true;
+						data: import('../shared/experience-bundle-types').SubmissionResponse;
+				  }
+				| { success: false; error: string }
+			>;
+		};
+	};
+
+	// Experience Repository API (bundle import/export, signing, catalog)
+	experienceRepository: {
+		getCatalog: (
+			page?: number,
+			pageSize?: number,
+			category?: string,
+			search?: string
+		) => Promise<
+			| {
+					success: true;
+					data: import('../shared/experience-bundle-types').RepositoryCatalogResponse;
+			  }
+			| { success: false; error: string }
+		>;
+		downloadBundle: (bundleId: string) => Promise<
+			| {
+					success: true;
+					data: import('../shared/experience-bundle-types').RepositoryDownloadResponse;
+			  }
+			| { success: false; error: string }
+		>;
+		importFromFile: () => Promise<
+			| {
+					success: true;
+					data: import('../shared/experience-bundle-types').BundleImportResult;
+			  }
+			| { success: false; error: string }
+		>;
+		exportToFile: (
+			memoryIds: string[],
+			scope: import('../shared/memory-types').MemoryScope,
+			skillAreaId?: string,
+			projectPath?: string,
+			metadata?: Partial<import('../shared/experience-bundle-types').ExperienceBundle>
+		) => Promise<{ success: true; data: { filePath: string } } | { success: false; error: string }>;
+		submitExperiences: (
+			submission: import('../shared/experience-bundle-types').ExperienceSubmission
+		) => Promise<
+			| {
+					success: true;
+					data: import('../shared/experience-bundle-types').SubmissionResponse;
+			  }
+			| { success: false; error: string }
+		>;
+		getImported: () => Promise<
+			| {
+					success: true;
+					data: import('../shared/experience-bundle-types').ImportedBundleRecord[];
+			  }
+			| { success: false; error: string }
+		>;
+		uninstall: (
+			bundleId: string
+		) => Promise<{ success: true; data: { removed: number } } | { success: false; error: string }>;
+		verifySignature: (
+			signed: import('../shared/experience-bundle-types').SignedExperienceBundle
+		) => Promise<
+			| { success: true; data: { valid: boolean; trusted: boolean } }
+			| { success: false; error: string }
+		>;
+		getTrustedKeys: () => Promise<
+			| {
+					success: true;
+					data: import('../shared/experience-bundle-types').TrustedKeyEntry[];
+			  }
+			| { success: false; error: string }
+		>;
+		addTrustedKey: (
+			key: import('../shared/experience-bundle-types').TrustedKeyEntry
+		) => Promise<{ success: true; data: void } | { success: false; error: string }>;
+		removeTrustedKey: (
+			publicKey: string
+		) => Promise<{ success: true; data: void } | { success: false; error: string }>;
+	};
+
+	// Embedding Provider API (model status, switching, progress)
+	embedding: {
+		getStatus: () => Promise<
+			| {
+					success: true;
+					data: {
+						activeProviderId: import('../shared/memory-types').EmbeddingProviderId | null;
+						statuses: Record<string, { ready: boolean; modelName: string; error?: string }>;
+					};
+			  }
+			| { success: false; error: string }
+		>;
+		switchProvider: (
+			providerId: import('../shared/memory-types').EmbeddingProviderId,
+			config: import('../shared/memory-types').EmbeddingProviderConfig
+		) => Promise<
+			| {
+					success: true;
+					data: { activeProviderId: import('../shared/memory-types').EmbeddingProviderId | null };
+			  }
+			| { success: false; error: string }
+		>;
+		detectAvailable: () => Promise<
+			| {
+					success: true;
+					data: { available: import('../shared/memory-types').EmbeddingProviderId[] };
+			  }
+			| { success: false; error: string }
+		>;
+		onProgress: (
+			callback: (event: {
+				providerId: import('../shared/memory-types').EmbeddingProviderId;
+				modelId: string;
+				progress: number;
+				status: 'downloading' | 'loading' | 'ready' | 'error';
+				message?: string;
+			}) => void
+		) => () => void;
+		getOllamaModels: (
+			baseUrl?: string
+		) => Promise<{ success: true; data: { models: string[] } } | { success: false; error: string }>;
+		checkOllamaConnection: (
+			baseUrl?: string
+		) => Promise<
+			| { success: true; data: { connected: boolean; modelCount: number } }
+			| { success: false; error: string }
+		>;
+		pullOllamaModel: (
+			model: string,
+			baseUrl?: string
+		) => Promise<{ success: true; data: { success: boolean } } | { success: false; error: string }>;
+		hasOpenAIKey: () => Promise<
+			{ success: true; data: boolean } | { success: false; error: string }
+		>;
+		setOpenAIKey: (
+			key: string
+		) => Promise<{ success: true; data: void } | { success: false; error: string }>;
+		clearOpenAIKey: () => Promise<
+			{ success: true; data: void } | { success: false; error: string }
+		>;
+		getUsageSummary: (since: number) => Promise<
+			| {
+					success: true;
+					data: {
+						totalTokens: number;
+						totalCostUsd: number;
+						totalTexts: number;
+						avgDurationMs: number;
+						byProvider: Record<string, { tokens: number; cost: number; texts: number }>;
+					};
+			  }
+			| { success: false; error: string }
+		>;
+		getUsageTimeline: (
+			since: number,
+			bucketMs: number
+		) => Promise<
+			| { success: true; data: Array<{ bucket: number; tokens: number; cost: number }> }
+			| { success: false; error: string }
+		>;
+	};
+
 	// WakaTime API (CLI check, API key validation)
 	wakatime: {
 		checkCli: () => Promise<{ available: boolean; version?: string }>;

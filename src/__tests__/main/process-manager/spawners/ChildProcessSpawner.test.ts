@@ -414,8 +414,9 @@ describe('ChildProcessSpawner', () => {
 	});
 
 	describe('promptViaStdin detection', () => {
-		// Ensures --output-format stream-json (present in Claude Code default args)
-		// does NOT trigger promptViaStdin, while --input-format stream-json does.
+		// --output-format stream-json (present in Claude Code default args) triggers
+		// promptViaStdin when no images are present to avoid E2BIG on large prompts.
+		// --input-format stream-json always triggers promptViaStdin.
 
 		const CLAUDE_DEFAULT_ARGS = [
 			'--print',
@@ -425,7 +426,7 @@ describe('ChildProcessSpawner', () => {
 			'--dangerously-skip-permissions',
 		];
 
-		it('should NOT treat --output-format stream-json as promptViaStdin', () => {
+		it('should send prompt via stdin when --output-format stream-json is present (no images)', () => {
 			const { spawner } = createTestContext();
 
 			spawner.spawn(
@@ -435,10 +436,28 @@ describe('ChildProcessSpawner', () => {
 				})
 			);
 
-			// When promptViaStdin is false, prompt should be appended to args (with --)
+			// With --output-format stream-json and no images, prompt goes via stdin to avoid E2BIG
 			const spawnArgs = mockSpawn.mock.calls[0][1] as string[];
-			expect(spawnArgs).toContain('--');
-			expect(spawnArgs).toContain('hello');
+			expect(spawnArgs).not.toContain('--');
+			expect(spawnArgs).not.toContain('hello');
+		});
+
+		it('should NOT send prompt via stdin for --output-format stream-json when images are present', () => {
+			const { spawner } = createTestContext();
+
+			spawner.spawn(
+				createBaseConfig({
+					args: CLAUDE_DEFAULT_ARGS,
+					prompt: 'hello',
+					images: ['base64imagedata'],
+				})
+			);
+
+			// With images, --output-format stream-json should NOT trigger promptViaStdin
+			// so images can be handled via --input-format stream-json path (line 100-108)
+			const spawnArgs = mockSpawn.mock.calls[0][1] as string[];
+			// The image path adds --input-format stream-json and sends prompt+images via stdin
+			expect(spawnArgs).toContain('--input-format');
 		});
 
 		it('should treat --input-format stream-json as promptViaStdin', () => {

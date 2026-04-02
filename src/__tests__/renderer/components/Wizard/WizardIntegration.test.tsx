@@ -335,7 +335,7 @@ describe('Wizard Integration Tests', () => {
 
 			await waitFor(() => {
 				expect(screen.getByText('Create a Maestro Agent')).toBeInTheDocument();
-				expect(screen.getByText('Step 1 of 5')).toBeInTheDocument();
+				expect(screen.getByText('Step 1 of 6')).toBeInTheDocument();
 			});
 		});
 
@@ -427,14 +427,14 @@ describe('Wizard Integration Tests', () => {
 			renderWithProviders(<TestWrapper />);
 
 			await waitFor(() => {
-				expect(screen.getByText('Step 1 of 5')).toBeInTheDocument();
+				expect(screen.getByText('Step 1 of 6')).toBeInTheDocument();
 			});
 
 			// Navigate to step 2
 			fireEvent.click(screen.getByTestId('go-step-2'));
 
 			await waitFor(() => {
-				expect(screen.getByText('Step 2 of 5')).toBeInTheDocument();
+				expect(screen.getByText('Step 2 of 6')).toBeInTheDocument();
 				expect(screen.getByText('Choose Project Directory')).toBeInTheDocument();
 			});
 
@@ -442,7 +442,7 @@ describe('Wizard Integration Tests', () => {
 			fireEvent.click(screen.getByTestId('go-step-3'));
 
 			await waitFor(() => {
-				expect(screen.getByText('Step 3 of 5')).toBeInTheDocument();
+				expect(screen.getByText('Step 3 of 6')).toBeInTheDocument();
 				expect(screen.getByText('Project Discovery')).toBeInTheDocument();
 			});
 
@@ -450,7 +450,7 @@ describe('Wizard Integration Tests', () => {
 			fireEvent.click(screen.getByTestId('go-step-4'));
 
 			await waitFor(() => {
-				expect(screen.getByText('Step 5 of 5')).toBeInTheDocument();
+				expect(screen.getByText('Step 6 of 6')).toBeInTheDocument();
 				expect(screen.getByText('Review Your Playbooks')).toBeInTheDocument();
 			});
 		});
@@ -479,7 +479,7 @@ describe('Wizard Integration Tests', () => {
 
 			await waitFor(() => {
 				const progressDots = screen.getAllByLabelText(/step \d+/i);
-				expect(progressDots).toHaveLength(5);
+				expect(progressDots).toHaveLength(6);
 
 				// Steps 1 and 2 should be completed, step 3 should be current
 				expect(progressDots[0]).toHaveAttribute(
@@ -769,7 +769,7 @@ describe('Wizard Integration Tests', () => {
 			// Should show saved state info
 			await waitFor(() => {
 				expect(screen.getByText('Resume Setup?')).toBeInTheDocument();
-				expect(screen.getByText('Step 3 of 5')).toBeInTheDocument();
+				expect(screen.getByText('Step 3 of 6')).toBeInTheDocument();
 				expect(screen.getByText('Test Project')).toBeInTheDocument();
 				expect(screen.getByText('/saved/project/path')).toBeInTheDocument();
 				// The modal shows "X messages exchanged (Y% confidence)"

@@ -23,7 +23,7 @@ import { getModalActions } from '../../stores/modalStore';
 import { notifyToast } from '../../stores/notificationStore';
 import { substituteTemplateVariables } from '../../utils/templateVariables';
 import { gitService } from '../../services/git';
-import { maestroSystemPrompt } from '../../../prompts';
+import { maestroSystemPrompt, memoryAwarenessDirectivesPrompt } from '../../../prompts';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useMergeSessionWithSessions } from './useMergeSession';
 import { useSendToAgentWithSessions } from './useSendToAgent';
@@ -490,6 +490,7 @@ You are taking over this conversation. Based on the context above, provide a bri
 							groupId: targetSession.groupId,
 							activeTabId: newTabId,
 							conductorProfile,
+							memoryAwarenessDirectives: memoryAwarenessDirectivesPrompt,
 						});
 					}
 

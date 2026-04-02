@@ -53,7 +53,13 @@ import type { AgentError } from '../../shared/types';
 export type SessionState = 'idle' | 'busy' | 'waiting_input' | 'connecting' | 'error';
 export type FileChangeType = 'modified' | 'added' | 'deleted';
 export type RightPanelTab = 'files' | 'history' | 'autorun';
-export type SettingsTab = 'general' | 'shortcuts' | 'theme' | 'notifications' | 'aicommands';
+export type SettingsTab =
+	| 'general'
+	| 'shortcuts'
+	| 'theme'
+	| 'notifications'
+	| 'aicommands'
+	| 'memory';
 // Note: ScratchPadMode was removed as part of the Scratchpad → Auto Run migration
 export type FocusArea = 'sidebar' | 'main' | 'right';
 export type LLMProvider = 'openrouter' | 'anthropic' | 'ollama';
@@ -733,6 +739,18 @@ export interface Session {
 
 	// Symphony contribution metadata (only set for Symphony sessions)
 	symphonyMetadata?: SymphonySessionMetadata;
+
+	// Agent Experiences / Memory System
+	/** Memory system version active when this session was spawned */
+	memoryVersion?: number;
+	/** IDs of memories injected into this session's prompt */
+	injectedMemoryIds?: string[];
+	/** Active role IDs resolved for this session */
+	activeRoleIds?: string[];
+	/** Persona IDs explicitly selected by the user (wizard or new agent modal) */
+	selectedPersonaIds?: string[];
+	/** Active persona for this session (runtime-only, not persisted) */
+	activePersona?: { id: string; name: string; roleName?: string; score: number };
 }
 
 export interface AgentConfigOption {

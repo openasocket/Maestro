@@ -308,6 +308,35 @@ export function useAppInitialization(): AppInitializationReturn {
 			.catch(console.error);
 	}, []);
 
+	// --- Memory first-injection notification (MEM-EVOLVE-01) ---
+	useEffect(() => {
+		const cleanup = window.maestro?.memory?.onFirstInjection?.((data) => {
+			const persona = data.personaName ? ` from "${data.personaName}" persona` : '';
+			notifyToast({
+				type: 'info',
+				title: 'Memory System Active',
+				message: `Injected ${data.count} relevant memories${persona}. Your agents are now learning from your coding sessions.`,
+				duration: 10000,
+				actionLabel: 'View Details',
+				actionUrl: 'settings:memory',
+			});
+		});
+		return () => cleanup?.();
+	}, []);
+
+	// --- Memory milestone notifications (MEM-EVOLVE-08) ---
+	useEffect(() => {
+		const cleanup = window.maestro?.memory?.onMilestone?.((data) => {
+			notifyToast({
+				type: data.type,
+				title: data.title,
+				message: data.message,
+				duration: data.duration,
+			});
+		});
+		return () => cleanup?.();
+	}, []);
+
 	// --- Notification settings sync ---
 	useEffect(() => {
 		useNotificationStore.getState().setDefaultDuration(toastDuration);

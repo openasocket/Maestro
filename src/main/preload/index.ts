@@ -51,7 +51,10 @@ import { createSymphonyApi } from './symphony';
 import { createTabNamingApi } from './tabNaming';
 import { createDirectorNotesApi } from './directorNotes';
 import { createCueApi } from './cue';
+import { createMemoryApi } from './memory';
+import { createExperienceRepositoryApi } from './experience-repository';
 import { createWakatimeApi } from './wakatime';
+import { createEmbeddingApi } from './embedding';
 
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
@@ -198,6 +201,15 @@ contextBridge.exposeInMainWorld('maestro', {
 	// Cue API (event-driven automation)
 	cue: createCueApi(),
 
+	// Agent Experiences Memory API (roles, personas, skills, memories)
+	memory: createMemoryApi(),
+
+	// Embedding Provider API (status, switching, detection)
+	embedding: createEmbeddingApi(),
+
+	// Experience Repository API (bundle import/export, signing, catalog)
+	experienceRepository: createExperienceRepositoryApi(),
+
 	// WakaTime API (CLI check, API key validation)
 	wakatime: createWakatimeApi(),
 });
@@ -276,6 +288,10 @@ export {
 	createDirectorNotesApi,
 	// Cue
 	createCueApi,
+	// Memory (Agent Experiences)
+	createMemoryApi,
+	// Experience Repository
+	createExperienceRepositoryApi,
 	// WakaTime
 	createWakatimeApi,
 };
@@ -498,6 +514,18 @@ export type {
 	CueEventType,
 	CueRunStatus,
 } from './cue';
+export type {
+	// From memory
+	MemoryApi,
+} from './memory';
+export type {
+	// From embedding
+	EmbeddingApi,
+} from './embedding';
+export type {
+	// From experience repository
+	ExperienceRepositoryApi,
+} from './experience-repository';
 export type {
 	// From wakatime
 	WakatimeApi,

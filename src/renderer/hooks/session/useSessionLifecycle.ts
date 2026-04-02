@@ -50,7 +50,7 @@ export interface SessionLifecycleDeps {
 // ============================================================================
 
 export interface SessionLifecycleReturn {
-	/** Save agent configuration changes (name, nudge, custom path/args/env, SSH config) */
+	/** Save agent configuration changes (name, nudge, custom path/args/env, SSH config, personas) */
 	handleSaveEditAgent: (
 		sessionId: string,
 		name: string,
@@ -65,7 +65,8 @@ export interface SessionLifecycleReturn {
 			enabled: boolean;
 			remoteId: string | null;
 			workingDirOverride?: string;
-		}
+		},
+		selectedPersonaIds?: string[]
 	) => void;
 	/** Rename the currently-selected tab (persists to agent session storage + history) */
 	handleRenameTab: (newName: string) => void;
@@ -125,7 +126,8 @@ export function useSessionLifecycle(deps: SessionLifecycleDeps): SessionLifecycl
 				enabled: boolean;
 				remoteId: string | null;
 				workingDirOverride?: string;
-			}
+			},
+			selectedPersonaIds?: string[]
 		) => {
 			useSessionStore.getState().setSessions((prev) =>
 				prev.map((s) => {
@@ -140,6 +142,7 @@ export function useSessionLifecycle(deps: SessionLifecycleDeps): SessionLifecycl
 						customModel,
 						customContextWindow,
 						sessionSshRemoteConfig,
+						selectedPersonaIds,
 					};
 
 					// If provider changed, reset tabs and provider-specific config

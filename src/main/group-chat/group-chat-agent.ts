@@ -151,7 +151,29 @@ export async function addParticipant(
 		args = [...agentConfig.args];
 	}
 
-	const prompt = getParticipantSystemPrompt(name, chat.name, chat.logPath);
+	let prompt = getParticipantSystemPrompt(name, chat.name, chat.logPath);
+
+	// Build a persona-relevant query for memory/persona matching.
+	// The system prompt is too generic for embedding similarity — use the
+	// chat topic + participant name + agent type instead.
+	const personaQuery = [
+		`Group chat: ${chat.name}`,
+		`Participant: ${name}`,
+		`Agent type: ${agentId}`,
+	]
+		.filter(Boolean)
+		.join('. ');
+
+	// Memory injection for group chat participant — inject relevant knowledge from the hierarchy
+	try {
+		const { tryInjectMemories } = await import('../memory/memory-injector');
+		const memResult = await tryInjectMemories(prompt, cwd, agentId, personaQuery);
+		prompt = memResult.injectedPrompt;
+		// Note: recordSessionInjection deferred to after sessionId generation below
+	} catch {
+		// Non-critical — proceed without injection
+	}
+
 	// Note: Don't pass modelId to buildAgentArgs - it will be handled by applyAgentConfigOverrides
 	// via sessionCustomModel to avoid duplicate --model args
 	const baseArgs = buildAgentArgs(agentConfig, {

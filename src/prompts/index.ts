@@ -51,4 +51,11 @@ export {
 
 	// Feedback
 	feedbackPrompt,
+
+	// Experience extraction
+	experienceExtractionPrompt,
+	experienceExtractionTurnPrompt,
+
+	// Memory awareness directives
+	memoryAwarenessDirectivesPrompt,
 } from '../generated/prompts';

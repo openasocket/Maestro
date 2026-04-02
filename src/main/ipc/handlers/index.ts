@@ -54,8 +54,12 @@ import { registerAgentErrorHandlers } from './agent-error';
 import { registerTabNamingHandlers, TabNamingHandlerDependencies } from './tabNaming';
 import { registerDirectorNotesHandlers, DirectorNotesHandlerDependencies } from './director-notes';
 import { registerCueHandlers, CueHandlerDependencies } from './cue';
+import { registerMemoryHandlers, MemoryHandlerDependencies } from './memory-handlers';
+import { registerExperienceRepositoryHandlers } from './experience-repository';
 import { registerWakatimeHandlers } from './wakatime';
 import { registerFeedbackHandlers } from './feedback';
+import { registerEmbeddingHandlers } from './embedding';
+import { getMemoryStore } from '../../memory/memory-store';
 import { AgentDetector } from '../../agents';
 import { ProcessManager } from '../../process-manager';
 import { WebServer } from '../../web-server';
@@ -105,8 +109,11 @@ export { registerDirectorNotesHandlers };
 export type { DirectorNotesHandlerDependencies };
 export { registerCueHandlers };
 export type { CueHandlerDependencies };
+export { registerMemoryHandlers };
+export type { MemoryHandlerDependencies };
 export { registerWakatimeHandlers };
 export { registerFeedbackHandlers };
+export { registerEmbeddingHandlers };
 export type { AgentsHandlerDependencies };
 export type { ProcessHandlerDependencies };
 export type { PersistenceHandlerDependencies };
@@ -303,6 +310,15 @@ export function registerAllHandlers(deps: HandlerDependencies): void {
 	registerFeedbackHandlers({
 		getProcessManager: deps.getProcessManager,
 	});
+	// Register memory handlers (Agent Experiences system)
+	registerMemoryHandlers({
+		memoryStore: getMemoryStore(),
+		settingsStore: deps.settingsStore,
+	});
+	// Register experience repository handlers (bundle import/export/signing)
+	registerExperienceRepositoryHandlers();
+	// Register embedding provider handlers (status, switching, detection)
+	registerEmbeddingHandlers();
 	// Setup logger event forwarding to renderer
 	setupLoggerEventForwarding(deps.getMainWindow);
 }

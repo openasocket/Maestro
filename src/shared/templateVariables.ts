@@ -159,6 +159,8 @@ export interface TemplateContext {
 		ghAssignees?: string;
 		ghMergedAt?: string;
 	};
+	/** Memory system self-evaluation directives (EXP-LIVE-03) */
+	memoryAwarenessDirectives?: string;
 }
 
 // List of all available template variables for documentation (alphabetically sorted)
@@ -257,6 +259,10 @@ export const TEMPLATE_VARIABLES = [
 		description: 'Loop iteration (00001, 00002...)',
 		autoRunOnly: true,
 	},
+	{
+		variable: '{{MEMORY_AWARENESS_DIRECTIVES}}',
+		description: 'Memory system self-evaluation directives (auto-populated)',
+	},
 	{ variable: '{{MONTH}}', description: 'Month (01-12)' },
 	{ variable: '{{TAB_DEEP_LINK}}', description: 'Deep link to agent + active tab (maestro://)' },
 	{ variable: '{{TIME}}', description: 'Time (HH:MM:SS)' },
@@ -288,6 +294,7 @@ export function substituteTemplateVariables(template: string, context: TemplateC
 		documentPath,
 		historyFilePath,
 		conductorProfile,
+		memoryAwarenessDirectives,
 	} = context;
 	const now = new Date();
 
@@ -347,6 +354,9 @@ export function substituteTemplateVariables(template: string, context: TemplateC
 		AGENT_DEEP_LINK: buildSessionDeepLink(session.id),
 		TAB_DEEP_LINK: buildSessionDeepLink(session.id, activeTabId),
 		GROUP_DEEP_LINK: groupId ? buildGroupDeepLink(groupId) : '',
+
+		// Memory awareness directives
+		MEMORY_AWARENESS_DIRECTIVES: memoryAwarenessDirectives || '',
 
 		// Context variables
 		CONTEXT_USAGE: String(session.contextUsage || 0),

@@ -24,6 +24,7 @@ import {
 	Settings2,
 	Server,
 	Bookmark,
+	Sparkles,
 } from 'lucide-react';
 import { LogViewer } from './LogViewer';
 import { TerminalOutput } from './TerminalOutput';
@@ -637,6 +638,29 @@ export const MainPanel = React.memo(
 			activeSession?.sessionSshRemoteConfig?.enabled,
 			activeSession?.sessionSshRemoteConfig?.remoteId,
 		]);
+
+		// Fetch active persona from main process when switching to a session that
+		// doesn't have it populated yet (e.g., persona was set before renderer subscribed).
+		useEffect(() => {
+			if (!activeSession?.id || activeSession.activePersona) return;
+			let cancelled = false;
+			window.maestro.memory
+				.getSessionPersona?.(activeSession.id)
+				.then((result) => {
+					if (cancelled) return;
+					if (result && 'success' in result && result.success && result.data) {
+						useSessionStore.getState().updateSession(activeSession.id, {
+							activePersona: result.data,
+						});
+					}
+				})
+				.catch(() => {
+					/* memory system may be disabled */
+				});
+			return () => {
+				cancelled = true;
+			};
+		}, [activeSession?.id]);
 
 		const activeTabContextWindow = useMemo(() => {
 			const configured = configuredContextWindow;
@@ -1272,6 +1296,26 @@ export const MainPanel = React.memo(
 											</span>
 										)}
 									</button>
+								)}
+
+								{/* Active Persona Pill - shows when memory system has activated a persona for this session */}
+								{activeSession.activePersona && (
+									<div
+										className="flex items-center gap-1.5 px-2 py-0.5 rounded-full cursor-pointer"
+										style={{
+											backgroundColor: theme.colors.accent + '20',
+											border: `1px solid ${theme.colors.accent}40`,
+										}}
+										title={`Persona: ${activeSession.activePersona.name}${activeSession.activePersona.roleName ? ` (${activeSession.activePersona.roleName})` : ''} — ${(activeSession.activePersona.score * 100).toFixed(0)}% match`}
+									>
+										<Sparkles className="w-3 h-3" style={{ color: theme.colors.accent }} />
+										<span
+											className="text-[10px] font-medium truncate"
+											style={{ color: theme.colors.accent, maxWidth: '120px' }}
+										>
+											{activeSession.activePersona.name}
+										</span>
+									</div>
 								)}
 
 								<div className="flex items-center gap-3 justify-end shrink-0">

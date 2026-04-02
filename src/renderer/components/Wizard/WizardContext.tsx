@@ -25,13 +25,14 @@ export type WizardStep =
 	| 'agent-selection'
 	| 'directory-selection'
 	| 'conversation'
+	| 'persona-selection'
 	| 'preparing-plan'
 	| 'phase-review';
 
 /**
  * Total number of steps in the wizard
  */
-export const WIZARD_TOTAL_STEPS = 5;
+export const WIZARD_TOTAL_STEPS = 6;
 
 /**
  * Map step names to their numeric index (1-based for display)
@@ -40,8 +41,9 @@ export const STEP_INDEX: Record<WizardStep, number> = {
 	'agent-selection': 1,
 	'directory-selection': 2,
 	conversation: 3,
-	'preparing-plan': 4,
-	'phase-review': 5,
+	'persona-selection': 4,
+	'preparing-plan': 5,
+	'phase-review': 6,
 };
 
 /**
@@ -51,8 +53,9 @@ export const INDEX_TO_STEP: Record<number, WizardStep> = {
 	1: 'agent-selection',
 	2: 'directory-selection',
 	3: 'conversation',
-	4: 'preparing-plan',
-	5: 'phase-review',
+	4: 'persona-selection',
+	5: 'preparing-plan',
+	6: 'phase-review',
 };
 
 /**
@@ -138,6 +141,21 @@ export interface WizardState {
 	/** Error message if conversation fails */
 	conversationError: string | null;
 
+	// Persona Selection (within Conversation step)
+	/** Personas suggested by embedding match during conversation */
+	suggestedPersonas: Array<{
+		personaId: string;
+		personaName: string;
+		roleName: string;
+		description: string;
+		systemPrompt: string;
+		similarity: number;
+	}>;
+	/** Persona IDs selected by the user (initially auto-selected above threshold) */
+	selectedPersonaIds: string[];
+	/** Whether persona suggestion has been attempted (prevents re-firing) */
+	personaSuggestionsLoaded: boolean;
+
 	// Phase Review (Step 4)
 	/** Generated Auto Run documents */
 	generatedDocuments: GeneratedDocument[];
@@ -197,6 +215,11 @@ const initialState: WizardState = {
 	isConversationLoading: false,
 	conversationError: null,
 
+	// Persona Selection
+	suggestedPersonas: [],
+	selectedPersonaIds: [],
+	personaSuggestionsLoaded: false,
+
 	// Phase Review
 	generatedDocuments: [],
 	currentDocumentIndex: 0,
@@ -249,6 +272,15 @@ type WizardAction =
 	| { type: 'SET_IS_READY_TO_PROCEED'; ready: boolean }
 	| { type: 'SET_CONVERSATION_LOADING'; loading: boolean }
 	| { type: 'SET_CONVERSATION_ERROR'; error: string | null }
+	| {
+			type: 'SET_SUGGESTED_PERSONAS';
+			payload: {
+				personas: WizardState['suggestedPersonas'];
+				selectedIds: string[];
+			};
+	  }
+	| { type: 'TOGGLE_WIZARD_PERSONA'; payload: string }
+	| { type: 'SET_WIZARD_SELECTED_PERSONAS'; payload: string[] }
 	| { type: 'SET_GENERATED_DOCUMENTS'; documents: GeneratedDocument[] }
 	| { type: 'SET_CURRENT_DOCUMENT_INDEX'; index: number }
 	| { type: 'SET_GENERATING_DOCUMENTS'; generating: boolean }
@@ -368,6 +400,22 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
 		case 'SET_CONVERSATION_ERROR':
 			return { ...state, conversationError: action.error };
 
+		case 'SET_SUGGESTED_PERSONAS':
+			return {
+				...state,
+				suggestedPersonas: action.payload.personas,
+				selectedPersonaIds: action.payload.selectedIds,
+				personaSuggestionsLoaded: true,
+			};
+		case 'TOGGLE_WIZARD_PERSONA': {
+			const id = action.payload;
+			const current = state.selectedPersonaIds;
+			const next = current.includes(id) ? current.filter((pid) => pid !== id) : [...current, id];
+			return { ...state, selectedPersonaIds: next };
+		}
+		case 'SET_WIZARD_SELECTED_PERSONAS':
+			return { ...state, selectedPersonaIds: action.payload };
+
 		case 'SET_GENERATED_DOCUMENTS':
 			return { ...state, generatedDocuments: action.documents };
 
@@ -421,6 +469,8 @@ export interface SerializableWizardState {
 	editedPhase1Content: string | null;
 	runAllDocuments: boolean;
 	wantsTour: boolean;
+	/** Persona IDs explicitly selected during wizard conversation */
+	selectedPersonaIds?: string[];
 	/** Per-session SSH remote configuration (for remote execution) */
 	sessionSshRemoteConfig?: {
 		enabled: boolean;
@@ -501,6 +551,12 @@ export interface WizardContextAPI {
 	setConversationLoading: (loading: boolean) => void;
 	/** Set conversation error */
 	setConversationError: (error: string | null) => void;
+
+	// Persona Selection
+	/** Set suggested personas and auto-selected IDs */
+	setSuggestedPersonas: (personas: WizardState['suggestedPersonas'], selectedIds: string[]) => void;
+	/** Toggle a single persona ID in the selection */
+	toggleWizardPersona: (id: string) => void;
 
 	// Phase Review
 	/** Set generated documents */
@@ -610,6 +666,10 @@ export function WizardProvider({ children }: WizardProviderProps) {
 			case 'conversation':
 				// Must have confidence > 80 and ready=true from agent
 				return state.isReadyToProceed;
+
+			case 'persona-selection':
+				// Always valid — personas are optional
+				return true;
 
 			case 'phase-review':
 				// Must have at least one generated document
@@ -721,6 +781,17 @@ export function WizardProvider({ children }: WizardProviderProps) {
 		dispatch({ type: 'SET_CONVERSATION_ERROR', error });
 	}, []);
 
+	const setSuggestedPersonas = useCallback(
+		(personas: WizardState['suggestedPersonas'], selectedIds: string[]) => {
+			dispatch({ type: 'SET_SUGGESTED_PERSONAS', payload: { personas, selectedIds } });
+		},
+		[]
+	);
+
+	const toggleWizardPersona = useCallback((id: string) => {
+		dispatch({ type: 'TOGGLE_WIZARD_PERSONA', payload: id });
+	}, []);
+
 	// Phase Review
 	const setGeneratedDocuments = useCallback((documents: GeneratedDocument[]) => {
 		dispatch({ type: 'SET_GENERATED_DOCUMENTS', documents });
@@ -783,6 +854,8 @@ export function WizardProvider({ children }: WizardProviderProps) {
 			editedPhase1Content: state.editedPhase1Content,
 			runAllDocuments: state.runAllDocuments,
 			wantsTour: state.wantsTour,
+			selectedPersonaIds:
+				state.selectedPersonaIds.length > 0 ? state.selectedPersonaIds : undefined,
 			sessionSshRemoteConfig: state.sessionSshRemoteConfig,
 		};
 	}, [
@@ -798,6 +871,7 @@ export function WizardProvider({ children }: WizardProviderProps) {
 		state.editedPhase1Content,
 		state.runAllDocuments,
 		state.wantsTour,
+		state.selectedPersonaIds,
 		state.sessionSshRemoteConfig,
 	]);
 
@@ -914,6 +988,10 @@ export function WizardProvider({ children }: WizardProviderProps) {
 			setConversationLoading,
 			setConversationError,
 
+			// Persona Selection
+			setSuggestedPersonas,
+			toggleWizardPersona,
+
 			// Phase Review
 			setGeneratedDocuments,
 			setCurrentDocumentIndex,
@@ -968,6 +1046,8 @@ export function WizardProvider({ children }: WizardProviderProps) {
 			setIsReadyToProceed,
 			setConversationLoading,
 			setConversationError,
+			setSuggestedPersonas,
+			toggleWizardPersona,
 			setGeneratedDocuments,
 			setCurrentDocumentIndex,
 			setGeneratingDocuments,

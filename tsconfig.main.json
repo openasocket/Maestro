@@ -14,5 +14,12 @@
 		"noFallthroughCasesInSwitch": true
 	},
 	"include": ["src/main/**/*", "src/shared/**/*", "src/types/**/*"],
-	"exclude": ["node_modules", "dist", "release"]
+	"exclude": [
+		"node_modules",
+		"dist",
+		"release",
+		"src/main/**/__tests__/**",
+		"src/main/**/*.test.ts",
+		"src/main/**/*.spec.ts"
+	]
 }

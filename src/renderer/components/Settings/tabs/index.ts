@@ -18,3 +18,5 @@ export type { ShortcutsTabProps } from './ShortcutsTab';
 
 export { ThemeTab } from './ThemeTab';
 export type { ThemeTabProps } from './ThemeTab';
+
+export { MemoryTab } from './MemoryTab';

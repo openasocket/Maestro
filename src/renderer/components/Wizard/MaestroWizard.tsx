@@ -43,6 +43,7 @@ import {
 	AgentSelectionScreen,
 	DirectorySelectionScreen,
 	ConversationScreen,
+	PersonaSelectionScreen,
 	PreparingPlanScreen,
 	PhaseReviewScreen,
 } from './screens';
@@ -77,6 +78,8 @@ function getStepTitle(step: WizardStep): string {
 			return 'Choose Project Directory';
 		case 'conversation':
 			return 'Project Discovery';
+		case 'persona-selection':
+			return 'Select Personas';
 		case 'preparing-plan':
 			return 'Preparing Playbooks';
 		case 'phase-review':
@@ -412,6 +415,8 @@ export function MaestroWizard({
 						setShowThinking={setShowThinking}
 					/>
 				);
+			case 'persona-selection':
+				return <PersonaSelectionScreen theme={theme} />;
 			case 'preparing-plan':
 				return <PreparingPlanScreen theme={theme} />;
 			case 'phase-review':

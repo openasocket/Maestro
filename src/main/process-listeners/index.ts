@@ -17,6 +17,7 @@ import { setupSessionIdListener } from './session-id-listener';
 import { setupErrorListener } from './error-listener';
 import { setupStatsListener } from './stats-listener';
 import { setupExitListener } from './exit-listener';
+import { setupMemoryMonitorListener } from './memory-monitor-listener';
 
 // Re-export types for consumers
 export type { ProcessListenerDependencies, ParticipantInfo } from './types';
@@ -52,4 +53,7 @@ export function setupProcessListeners(
 
 	// Exit listener (with group chat routing, recovery, and synthesis)
 	setupExitListener(processManager, deps);
+
+	// Memory monitor for mid-session injection triggers (EXP-LIVE-02)
+	setupMemoryMonitorListener(processManager, deps);
 }

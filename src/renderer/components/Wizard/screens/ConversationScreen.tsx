@@ -348,6 +348,7 @@ export function ConversationScreen({
 		setIsReadyToProceed,
 		setConversationLoading,
 		setConversationError,
+		setSuggestedPersonas,
 		previousStep,
 		nextStep,
 	} = useWizard();
@@ -418,6 +419,53 @@ export function ConversationScreen({
 	useEffect(() => {
 		inputRef.current?.focus();
 	}, []);
+
+	// Pre-match personas in background when confidence builds (so data is ready for persona step)
+	useEffect(() => {
+		if (state.personaSuggestionsLoaded) return;
+		if (state.confidenceLevel < 60) return;
+		if (!state.selectedAgent || !state.directoryPath) return;
+
+		let cancelled = false;
+		(async () => {
+			try {
+				const userMessages = state.conversationHistory
+					.filter((m) => m.role === 'user')
+					.map((m) => m.content)
+					.join(' ');
+				const matchQuery = [state.agentName || '', state.directoryPath || '', userMessages]
+					.filter(Boolean)
+					.join(' ')
+					.slice(0, 2000);
+
+				const result = await window.maestro.memory.matchPersonas(
+					matchQuery,
+					state.selectedAgent!,
+					state.directoryPath
+				);
+
+				if (!cancelled && result.success && result.data) {
+					const autoSelected = result.data
+						.filter((p) => p.similarity >= 0.5)
+						.map((p) => p.personaId);
+					setSuggestedPersonas(result.data, autoSelected);
+				}
+			} catch {
+				// Non-critical — PersonaSelectionScreen will retry
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [
+		state.personaSuggestionsLoaded,
+		state.confidenceLevel,
+		state.selectedAgent,
+		state.directoryPath,
+		state.conversationHistory,
+		state.agentName,
+		setSuggestedPersonas,
+	]);
 
 	// Handle pending auto-continue (when AI says "let me research this")
 	// We set the input and call handleSendMessage after a delay
@@ -685,30 +733,27 @@ export function ConversationScreen({
 					// Use ref to check current showThinking state inside callback
 					// Skip JSON-looking content (the structured response) to avoid brief flash of JSON
 					onThinkingChunk: (content) => {
-						if (showThinkingRef.current) {
-							// Don't accumulate JSON responses - they're the final answer, not thinking
-							const trimmed = content.trim();
-							if (
-								trimmed.startsWith('{"') &&
-								(trimmed.includes('"confidence"') || trimmed.includes('"message"'))
-							) {
-								return; // Skip structured response JSON
-							}
-							setThinkingContent((prev) => prev + content);
+						// Always capture thinking content regardless of toggle state
+						// so toggling showThinking on mid-response shows accumulated content
+						const trimmed = content.trim();
+						if (
+							trimmed.startsWith('{"') &&
+							(trimmed.includes('"confidence"') || trimmed.includes('"message"'))
+						) {
+							return; // Skip structured response JSON
 						}
+						setThinkingContent((prev) => prev + content);
 					},
 					// Tool execution events show what the agent is doing (Read, Write, etc.)
-					// These are crucial for showThinking mode since batch mode doesn't stream assistant messages
+					// Always capture so toggling showThinking mid-response works
 					onToolExecution: (toolEvent) => {
-						if (showThinkingRef.current) {
-							setToolExecutions((prev) => [...prev, toolEvent]);
-						}
+						setToolExecutions((prev) => [...prev, toolEvent]);
 					},
 					onComplete: (sendResult) => {
-						// Clear streaming text, thinking content, and tool executions when response is complete
+						// Clear streaming text immediately (response now appears in history)
 						setStreamingText('');
-						setThinkingContent('');
-						setToolExecutions([]);
+						// Keep thinking content and tool executions visible until next message
+						// so the user can review what the agent did
 
 						console.log('[ConversationScreen] onComplete:', {
 							success: sendResult.success,
@@ -1165,30 +1210,36 @@ export function ConversationScreen({
 								</div>
 							</div>
 						</div>
-					) : showThinking && (thinkingContent || toolExecutions.length > 0) ? (
-						// Show thinking content and/or tool executions when enabled and we have content
+					) : showThinking ? (
+						// Show thinking content and/or tool executions when enabled
 						<ThinkingDisplay
 							theme={theme}
 							agentName={state.agentName || 'Agent'}
 							thinkingContent={thinkingContent}
 							toolExecutions={toolExecutions}
 						/>
-					) : showThinking ? (
-						// Show minimal thinking display when enabled but no content yet
-						<ThinkingDisplay
-							theme={theme}
-							agentName={state.agentName || 'Agent'}
-							thinkingContent=""
-							toolExecutions={[]}
-						/>
 					) : (
-						// Show filler phrase typing indicator
-						<TypingIndicator
-							theme={theme}
-							agentName={state.agentName || 'Agent'}
-							fillerPhrase={fillerPhrase}
-							onRequestNewPhrase={handleRequestNewPhrase}
-						/>
+						// Show filler phrase typing indicator with optional tool activity
+						<>
+							<TypingIndicator
+								theme={theme}
+								agentName={state.agentName || 'Agent'}
+								fillerPhrase={fillerPhrase}
+								onRequestNewPhrase={handleRequestNewPhrase}
+							/>
+							{toolExecutions.length > 0 && (
+								<div
+									className="flex items-center gap-2 ml-4 mb-2 text-xs"
+									style={{ color: theme.colors.textDim }}
+								>
+									<span
+										className="w-1.5 h-1.5 rounded-full animate-pulse"
+										style={{ backgroundColor: theme.colors.accent }}
+									/>
+									{toolExecutions[toolExecutions.length - 1].toolName}
+								</div>
+							)}
+						</>
 					))}
 
 				{/* Error Message */}
@@ -1277,6 +1328,7 @@ export function ConversationScreen({
 						<p className="text-sm font-medium mb-3" style={{ color: theme.colors.success }}>
 							I think I have a good understanding of your project. Ready to create your Playbook?
 						</p>
+
 						<button
 							onClick={handleLetsGo}
 							className="px-6 py-2.5 rounded-lg text-sm font-bold transition-all hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2"

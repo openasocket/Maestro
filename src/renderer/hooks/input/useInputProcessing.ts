@@ -14,7 +14,11 @@ import { substituteTemplateVariables } from '../../utils/templateVariables';
 import { filterYoloArgs } from '../../utils/agentArgs';
 import { hasCapabilityCached } from '../agent/useAgentCapabilities';
 import { gitService } from '../../services/git';
-import { imageOnlyDefaultPrompt, maestroSystemPrompt } from '../../../prompts';
+import {
+	imageOnlyDefaultPrompt,
+	maestroSystemPrompt,
+	memoryAwarenessDirectivesPrompt,
+} from '../../../prompts';
 
 /**
  * Default prompt used when user sends only an image without text.
@@ -986,6 +990,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 								activeTabId: freshSession.activeTabId,
 								historyFilePath,
 								conductorProfile,
+								memoryAwarenessDirectives: memoryAwarenessDirectivesPrompt,
 							});
 						}
 

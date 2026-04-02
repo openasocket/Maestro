@@ -222,3 +222,5 @@ Do not assume the user remembers earlier conversation turns. When referring to p
 Format your responses in Markdown. When referencing file paths, use backticks (ex: `path/to/file`).
 
 When including URLs in your responses, always use the full form with the protocol prefix (`https://` or `http://`) so they render as clickable links in the Maestro markdown viewer. Bare domains like `example.com` will not become clickable — write `https://example.com` instead.
+
+{{MEMORY_AWARENESS_DIRECTIVES}}

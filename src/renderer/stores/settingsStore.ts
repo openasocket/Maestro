@@ -261,6 +261,7 @@ export interface SettingsStoreState {
 	wakatimeDetailedTracking: boolean;
 	useNativeTitleBar: boolean;
 	autoHideMenuBar: boolean;
+	lastMemoryTabVisitAt: number;
 }
 
 export interface SettingsStoreActions {
@@ -336,6 +337,7 @@ export interface SettingsStoreActions {
 	setWakatimeDetailedTracking: (value: boolean) => void;
 	setUseNativeTitleBar: (value: boolean) => void;
 	setAutoHideMenuBar: (value: boolean) => void;
+	setLastMemoryTabVisitAt: (value: number) => void;
 
 	// Async setters
 	setLogLevel: (value: string) => Promise<void>;
@@ -491,6 +493,7 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => {
 		wakatimeDetailedTracking: false,
 		useNativeTitleBar: isWindowsPlatform(),
 		autoHideMenuBar: false,
+		lastMemoryTabVisitAt: 0,
 
 		// ============================================================================
 		// Simple Setters
@@ -916,6 +919,11 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => {
 		setAutoHideMenuBar: (value) => {
 			set({ autoHideMenuBar: value });
 			window.maestro.settings.set('autoHideMenuBar', value);
+		},
+
+		setLastMemoryTabVisitAt: (value) => {
+			set({ lastMemoryTabVisitAt: value });
+			window.maestro.settings.set('lastMemoryTabVisitAt', value);
 		},
 
 		// ============================================================================
@@ -1843,6 +1851,9 @@ export async function loadAllSettings(): Promise<void> {
 
 		if (allSettings['autoHideMenuBar'] !== undefined)
 			patch.autoHideMenuBar = allSettings['autoHideMenuBar'] as boolean;
+
+		if (allSettings['lastMemoryTabVisitAt'] !== undefined)
+			patch.lastMemoryTabVisitAt = allSettings['lastMemoryTabVisitAt'] as number;
 
 		// Apply the entire patch in one setState call
 		patch.settingsLoaded = true;

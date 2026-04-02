@@ -196,6 +196,11 @@ export function registerHistoryHandlers(deps: HistoryHandlerDependencies): void 
 				// Broadcast to renderer for real-time Director's Notes streaming
 				deps.safeSend('history:entryAdded', entry, sessionId);
 
+				// Emit turn-complete event for per-turn extraction (EXP-TURN-02)
+				import('../../memory/turn-tracker')
+					.then(({ getTurnTracker }) => getTurnTracker().onTurnComplete(sessionId, entry))
+					.catch(() => {});
+
 				return true;
 			}
 		)

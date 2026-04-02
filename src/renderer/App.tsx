@@ -3935,6 +3935,9 @@ function MaestroConsoleInner() {
 							hasNoAgents={hasNoAgents}
 							onThemeImportError={(msg) => setFlashNotification(msg)}
 							onThemeImportSuccess={(msg) => setFlashNotification(msg)}
+							activeProjectPath={activeSession?.cwd}
+							activeAgentId={activeSession?.id}
+							activeAgentType={activeSession?.toolType}
 						/>
 					</Suspense>
 				)}

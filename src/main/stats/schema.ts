@@ -138,6 +138,28 @@ export const CREATE_COMPOUND_INDEXES_SQL = `
 `;
 
 // ============================================================================
+// Embedding Usage (Migration v5)
+// ============================================================================
+
+export const CREATE_EMBEDDING_USAGE_SQL = `
+  CREATE TABLE IF NOT EXISTS embedding_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider_id TEXT NOT NULL,
+    token_count INTEGER NOT NULL,
+    text_count INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    cost_usd REAL,
+    timestamp INTEGER NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  )
+`;
+
+export const CREATE_EMBEDDING_USAGE_INDEXES_SQL = `
+  CREATE INDEX IF NOT EXISTS idx_embedding_usage_timestamp ON embedding_usage(timestamp);
+  CREATE INDEX IF NOT EXISTS idx_embedding_usage_provider ON embedding_usage(provider_id)
+`;
+
+// ============================================================================
 // Utilities
 // ============================================================================
 
