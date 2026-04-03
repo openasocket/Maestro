@@ -127,6 +127,12 @@ export interface ExtractedExperience {
 	rationale?: string;
 	/** Specific technical keywords for retrieval (function names, error codes, etc.) */
 	keywords?: string[];
+	/** Why this approach worked or failed — the causal mechanism */
+	causalHypothesis?: string;
+	/** Concrete plan for what to try differently or build upon next time */
+	nextStepPlan?: string;
+	/** If this learning supersedes a previous one, describe the old approach for dedup matching */
+	supersedesContent?: string;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -1820,6 +1826,13 @@ export class ExperienceAnalyzer {
 					keywords: Array.isArray(e.keywords)
 						? e.keywords.filter((k: unknown) => typeof k === 'string')
 						: [],
+					...(typeof e.causal_hypothesis === 'string'
+						? { causalHypothesis: e.causal_hypothesis }
+						: {}),
+					...(typeof e.next_step_plan === 'string' ? { nextStepPlan: e.next_step_plan } : {}),
+					...(typeof e.supersedes_content === 'string'
+						? { supersedesContent: e.supersedes_content }
+						: {}),
 				};
 			});
 		} catch (err) {
@@ -1977,6 +1990,8 @@ export class ExperienceAnalyzer {
 							...(input.contextUtilizationAtEnd !== undefined
 								? { contextUtilizationAtEnd: input.contextUtilizationAtEnd }
 								: {}),
+							...(exp.causalHypothesis ? { causalHypothesis: exp.causalHypothesis } : {}),
+							...(exp.nextStepPlan ? { nextStepPlan: exp.nextStepPlan } : {}),
 						},
 					},
 					scope === 'project' ? input.projectPath : undefined
@@ -2001,6 +2016,56 @@ export class ExperienceAnalyzer {
 						);
 					} catch {
 						// Linking failed — non-critical, continue
+					}
+				}
+
+				// Supersedes linking: if this experience replaces a previous one, find and link it
+				if (exp.supersedesContent) {
+					try {
+						const supersededResults = await store.cascadingSearch(
+							exp.supersedesContent,
+							config,
+							input.agentType,
+							input.projectPath,
+							5
+						);
+						const supersededMatch = supersededResults.find(
+							(r) => r.similarity > 0.85 && r.entry.id !== newMemory.id
+						);
+						if (supersededMatch) {
+							// Set supersedes on the new memory
+							await store.updateMemory(
+								newMemory.id,
+								{
+									experienceContext: {
+										...newMemory.experienceContext!,
+										supersedes: supersededMatch.entry.id,
+									},
+								},
+								scope,
+								skillAreaId,
+								projectPath
+							);
+							// Set supersededBy on the old memory
+							const oldCtx = supersededMatch.entry.experienceContext ?? {
+								situation: '',
+								learning: '',
+							};
+							await store.updateMemory(
+								supersededMatch.entry.id,
+								{
+									experienceContext: {
+										...oldCtx,
+										supersededBy: newMemory.id,
+									},
+								},
+								supersededMatch.entry.scope,
+								supersededMatch.entry.skillAreaId,
+								supersededMatch.entry.scope === 'project' ? input.projectPath : undefined
+							);
+						}
+					} catch {
+						// Supersedes linking failed — non-critical, continue
 					}
 				}
 
