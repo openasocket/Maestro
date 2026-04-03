@@ -114,7 +114,8 @@ export class StaticRoutes {
 		}
 
 		const indexPath = path.join(this.webAssetsPath, 'index.html');
-		if (!existsSync(indexPath)) {
+		const cachedHtml = getCachedFile(indexPath);
+		if (cachedHtml === null) {
 			reply.code(404).send({
 				error: 'Not Found',
 				message: 'Web interface index.html not found.',
@@ -123,8 +124,8 @@ export class StaticRoutes {
 		}
 
 		try {
-			// Read index.html fresh so rebuilt asset hashes are reflected immediately.
-			let html = readFileSync(indexPath, 'utf-8');
+			// Use cached HTML and transform asset paths
+			let html = cachedHtml;
 
 			// Transform relative paths to use the token-prefixed absolute paths
 			html = html.replace(/\.\/assets\//g, `/${this.securityToken}/assets/`);
@@ -167,7 +168,7 @@ export class StaticRoutes {
 
 		// Root path - redirect to GitHub (no access without token)
 		server.get('/', async (_request, reply) => {
-			return reply.redirect(302, REDIRECT_URL);
+			return reply.code(302).redirect(REDIRECT_URL);
 		});
 
 		// Health check (no auth required)
@@ -224,7 +225,7 @@ export class StaticRoutes {
 		server.get('/:token', async (request, reply) => {
 			const { token: reqToken } = request.params as { token: string };
 			if (!this.validateToken(reqToken)) {
-				return reply.redirect(302, REDIRECT_URL);
+				return reply.code(302).redirect(REDIRECT_URL);
 			}
 			// Valid token but no specific route - serve dashboard
 			this.serveIndexHtml(reply);

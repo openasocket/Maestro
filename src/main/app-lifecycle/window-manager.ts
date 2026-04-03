@@ -261,10 +261,17 @@ export function createWindowManager(deps: WindowManagerDependencies): WindowMana
 				logger.info('Window became responsive again', 'Window');
 			});
 
-			// Handle page crashes (less severe than render-process-gone)
-			mainWindow.webContents.on('crashed', (_event, killed) => {
-				logger.error('WebContents crashed', 'Window', { killed });
-				reportCrashToSentry('WebContents crashed', killed ? 'warning' : 'error', { killed });
+			// Handle render process termination (crash, oom, etc.)
+			mainWindow.webContents.on('render-process-gone', (_event, details) => {
+				logger.error('WebContents crashed', 'Window', {
+					reason: details.reason,
+					exitCode: details.exitCode,
+				});
+				reportCrashToSentry(
+					'WebContents crashed',
+					details.reason === 'killed' ? 'warning' : 'error',
+					{ reason: details.reason, exitCode: details.exitCode }
+				);
 			});
 
 			// Handle page load failures (network issues, invalid URLs, etc.)

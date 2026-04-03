@@ -27,7 +27,6 @@ import type {
 	UsageStats,
 } from '../../types';
 import { notifyToast } from '../../stores/notificationStore';
-import { useSettingsStore } from '../../stores/settingsStore';
 import type { HistoryEntryInput } from './useAgentSessionManagement';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useModalStore } from '../../stores/modalStore';
@@ -289,11 +288,6 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 		// ================================================================
 		const unsubscribeExit = window.maestro.process.onExit(
 			async (sessionId: string, code: number) => {
-				// Terminal tab exits ({id}-terminal-{tabId}) are handled by TerminalView — skip here
-				if (sessionId.includes('-terminal-')) {
-					return;
-				}
-
 				console.log('[onExit] Process exit event received:', {
 					rawSessionId: sessionId,
 					exitCode: code,
@@ -677,8 +671,7 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 							...s,
 							state: anyAiTabBusy ? s.state : ('idle' as SessionState),
 							busySource: anyAiTabBusy ? s.busySource : undefined,
-							// TODO: Remove shellLogs once terminal tabs migration is complete
-							...(!s.terminalTabs?.length && { shellLogs: [...s.shellLogs, exitLog] }),
+							shellLogs: [...s.shellLogs, exitLog],
 						};
 					})
 				);
@@ -885,17 +878,6 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 									skipCustomNotification: true,
 								});
 
-								// Speak synopsis via TTS if audio feedback is enabled
-								// (mirrors the batch processor pattern in useBatchProcessor.ts)
-								const { audioFeedbackEnabled, audioFeedbackCommand } = useSettingsStore.getState();
-								if (audioFeedbackEnabled && audioFeedbackCommand && parsed.shortSummary) {
-									window.maestro.notification
-										.speak(parsed.shortSummary, audioFeedbackCommand)
-										.catch((err) => {
-											console.error('[onProcessExit] Failed to speak synopsis:', err);
-										});
-								}
-
 								if (deps.rightPanelRef.current) {
 									deps.rightPanelRef.current.refreshHistoryPanel();
 								}
@@ -992,22 +974,15 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 			(sessionId: string, slashCommands: string[]) => {
 				const actualSessionId = parseSessionId(sessionId).baseSessionId;
 
+				const commands = slashCommands.map((cmd) => ({
+					command: cmd.startsWith('/') ? cmd : `/${cmd}`,
+					description: getSlashCommandDescription(cmd),
+				}));
+
 				setSessions((prev) =>
 					prev.map((s) => {
 						if (s.id !== actualSessionId) return s;
-						const newCommands = slashCommands.map((cmd) => ({
-							command: cmd.startsWith('/') ? cmd : `/${cmd}`,
-							description: getSlashCommandDescription(cmd, s.toolType),
-						}));
-						// Merge with existing commands, preserving prompt data from
-						// disk-discovered commands (e.g., OpenCode .md files)
-						const existingByName = new Map((s.agentCommands || []).map((c) => [c.command, c]));
-						for (const cmd of newCommands) {
-							if (!existingByName.has(cmd.command)) {
-								existingByName.set(cmd.command, cmd);
-							}
-						}
-						return { ...s, agentCommands: Array.from(existingByName.values()) };
+						return { ...s, agentCommands: commands };
 					})
 				);
 			}
@@ -1068,8 +1043,7 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 								...s,
 								state: newState,
 								busySource: newBusySource,
-								// TODO: Remove shellLogs once terminal tabs migration is complete
-								...(!s.terminalTabs?.length && { shellLogs: [...s.shellLogs, exitLog] }),
+								shellLogs: [...s.shellLogs, exitLog],
 							};
 						}
 
@@ -1104,10 +1078,10 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 					const effectiveWindow =
 						usageStats.contextWindow > 0
 							? usageStats.contextWindow
-							: agentToolType
+							: agentToolType && agentToolType in DEFAULT_CONTEXT_WINDOWS
 								? (DEFAULT_CONTEXT_WINDOWS[agentToolType as keyof typeof DEFAULT_CONTEXT_WINDOWS] ??
-									0)
-								: 0;
+									200000)
+								: 200000;
 					const estimated = estimateAccumulatedGrowth(
 						currentUsage,
 						usageStats.outputTokens,
@@ -1567,7 +1541,7 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 		// ================================================================
 		// Persona changed — update activePersona on the session
 		// ================================================================
-		const unsubscribePersonaChanged = window.maestro.memory.onPersonaChanged?.((event) => {
+		const unsubscribePersonaChanged = window.maestro.memory?.onPersonaChanged?.((event) => {
 			const persona = event.type === 'shift' ? event.toPersona : event.persona;
 			if (!persona) return;
 			useSessionStore.getState().updateSession(event.sessionId, {
