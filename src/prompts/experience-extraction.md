@@ -106,6 +106,10 @@ For `decision-made` experiences, you MUST include `alternativesConsidered` and `
 
 If the session was routine with no novel learnings, return an empty array.
 
+## Causal Reasoning
+
+For each experience, think about **WHY** it worked or failed (`causal_hypothesis`) and what the agent should try **NEXT TIME** (`next_step_plan`). These forward-looking fields are critical for compounding improvement — they turn isolated observations into an active learning system.
+
 Respond with ONLY a JSON array:
 
 ```json
@@ -120,7 +124,10 @@ Respond with ONLY a JSON array:
     "noveltyScore": 0.0-1.0,
     "keywords": ["useCallback", "React.memo", "re-render"],
     "alternativesConsidered": "Optional: what other approaches were possible (required for decision-made)",
-    "rationale": "Optional: why this approach was chosen (required for decision-made)"
+    "rationale": "Optional: why this approach was chosen (required for decision-made)",
+    "causal_hypothesis": "WHY this worked or failed — the causal mechanism, not just what happened. E.g., 'Aggressive caching caused stale data because the invalidation window exceeded the write frequency'",
+    "next_step_plan": "What to try differently or build upon next time this situation arises. E.g., 'Use event-driven invalidation instead of TTL-based caching, with a 30s fallback TTL'",
+    "supersedes_content": "Optional: if this learning replaces a previous approach, describe the old approach so deduplication can link them. E.g., 'Previously used 60s TTL caching for all endpoints'"
   }
 ]
 ```

@@ -68,6 +68,10 @@ Each experience must be:
 
 If this turn was routine with no novel learnings, return an empty array.
 
+## Causal Reasoning
+
+For each experience, think about **WHY** it worked or failed (`causal_hypothesis`) and what the agent should try **NEXT TIME** (`next_step_plan`). These forward-looking fields are critical for compounding improvement.
+
 Respond with ONLY a JSON array:
 
 ```json
@@ -82,7 +86,10 @@ Respond with ONLY a JSON array:
     "noveltyScore": 0.0-1.0,
     "keywords": ["specific-function", "library-name", "error-code"],
     "alternativesConsidered": "Optional: other approaches (required for decision-made)",
-    "rationale": "Optional: why this approach (required for decision-made)"
+    "rationale": "Optional: why this approach (required for decision-made)",
+    "causal_hypothesis": "WHY this worked or failed — the causal mechanism, not just what happened",
+    "next_step_plan": "What to try differently or build upon next time this situation arises",
+    "supersedes_content": "Optional: if this replaces a previous approach, describe the old approach"
   }
 ]
 ```
