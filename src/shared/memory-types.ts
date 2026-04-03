@@ -149,6 +149,14 @@ export interface ExperienceContext {
 		memoryId: string;
 		similarity: number;
 	}[];
+	/** Why this approach worked or failed — the causal mechanism, not just what happened */
+	causalHypothesis?: string;
+	/** Concrete plan for what to try differently or build upon next time this situation arises */
+	nextStepPlan?: string;
+	/** Link to the memory that improved on this one — enables lineage tracking */
+	supersededBy?: MemoryId;
+	/** Link to the memory this one supersedes — enables forward lineage tracing */
+	supersedes?: MemoryId;
 }
 
 /** A single memory entry — explicit declarative knowledge or empirical experience */
