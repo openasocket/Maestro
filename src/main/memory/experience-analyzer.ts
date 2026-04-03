@@ -138,6 +138,28 @@ export interface ExtractedExperience {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**
+ * Apply a deviation-aware novelty boost to extracted experiences.
+ * When the session had deviations, experiences categorised as 'problem-solved'
+ * or 'anti-pattern-identified' receive a configurable multiplier (capped at 1.0).
+ */
+function applyDeviationNoveltyBoost(
+	experiences: ExtractedExperience[],
+	deviations: DeviationSignal[] | undefined,
+	boost: number
+): void {
+	if (!deviations?.length || boost <= 1) return;
+	const boostCategories = new Set<ExperienceCategory>([
+		'problem-solved',
+		'anti-pattern-identified',
+	]);
+	for (const exp of experiences) {
+		if (boostCategories.has(exp.category)) {
+			exp.noveltyScore = Math.min(1.0, exp.noveltyScore * boost);
+		}
+	}
+}
+
+/**
  * Extract the text content from a raw VIBES manifest entry.
  * VIBES entries are a tagged union with type-specific text fields
  * (e.g. `prompt_text`, `command_text`, `reasoning_text`).
@@ -389,6 +411,13 @@ export class ExperienceAnalyzer {
 			return 0;
 		}
 
+		// Boost novelty for deviation-sourced experiences (HYPERAGENT-04)
+		applyDeviationNoveltyBoost(
+			experiences,
+			input.detectedDeviations,
+			config.deviationNoveltyBoost ?? 1.5
+		);
+
 		// Filter by novelty score
 		emitProgress('parsing', `Filtering ${experiences.length} experiences...`, {
 			providerUsed: this.lastDiagnostic?.providerUsed,
@@ -549,6 +578,13 @@ export class ExperienceAnalyzer {
 			}
 			return 0;
 		}
+
+		// Boost novelty for deviation-sourced experiences (HYPERAGENT-04)
+		applyDeviationNoveltyBoost(
+			experiences,
+			input.detectedDeviations,
+			config.deviationNoveltyBoost ?? 1.5
+		);
 
 		// Filter by novelty
 		const minNovelty = config.minNoveltyScore ?? 0.4;
@@ -1957,6 +1993,26 @@ export class ExperienceAnalyzer {
 								? { attemptCount: matchedDeviation.attemptCount }
 								: {}),
 						};
+					} else {
+						// Categorical fallback (HYPERAGENT-04): map category → deviation type
+						// 'problem-solved' ↔ 'error-fix', 'approach-change'/'anti-pattern-identified' ↔ 'backtrack'
+						const categoryDeviationMap: Record<string, DeviationSignal['type']> = {
+							'problem-solved': 'error-fix',
+							'anti-pattern-identified': 'backtrack',
+						};
+						const mappedType = categoryDeviationMap[exp.category];
+						if (mappedType) {
+							const categoryDeviation = input.detectedDeviations.find((d) => d.type === mappedType);
+							if (categoryDeviation) {
+								deviationFields = {
+									isDeviation: true as const,
+									deviationType: categoryDeviation.type,
+									...(categoryDeviation.attemptCount != null
+										? { attemptCount: categoryDeviation.attemptCount }
+										: {}),
+								};
+							}
+						}
 					}
 				}
 

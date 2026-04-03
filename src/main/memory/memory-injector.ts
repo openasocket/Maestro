@@ -97,6 +97,90 @@ function computeScopeBudgets(config: MemoryConfig): ScopeBudgets {
 	};
 }
 
+// ─── Performance Context (HYPERAGENT-03) ───────────────────────────────────
+
+/**
+ * Build a compact XML block summarizing the agent's performance trajectory.
+ * Returns empty string when disabled, or when fewer than 3 sessions of history exist.
+ */
+export async function buildPerformanceContext(
+	projectPath?: string,
+	personaId?: string
+): Promise<string> {
+	const config = getConfig();
+	if (!config.enablePerformanceContextInjection) return '';
+
+	const store = getMemoryStore();
+	const performanceDir = path.join(store.getMemoriesDir(), 'performance');
+
+	const { getSessionPerformanceTracker } = await import('./session-performance-tracker');
+	const tracker = getSessionPerformanceTracker(performanceDir);
+
+	// Need at least 3 sessions for meaningful trends
+	const history = await tracker.getHistory({ personaId, projectPath, limit: 10 });
+	if (history.length < 3) return '';
+
+	const trend = await tracker.getTrend({ personaId, projectPath });
+	const regressions = await tracker.identifyRegressions();
+
+	// Get summary for memory correlation data
+	const summary = await tracker.getSummary({ personaId, projectPath });
+
+	const budget = config.performanceContextTokenBudget;
+	const charBudget = budget * 4; // ~4 chars per token estimate
+
+	const parts: string[] = [];
+
+	// Recent scores and trend
+	const recentScores = history
+		.slice(0, 5)
+		.map((e) => e.outcomeScore.toFixed(2))
+		.join(', ');
+	if (trend) {
+		const sign = trend.delta >= 0 ? '+' : '';
+		parts.push(
+			`Recent sessions: [${recentScores}] (trend: ${trend.direction} ${sign}${trend.delta.toFixed(2)})`
+		);
+	} else {
+		parts.push(`Recent sessions: [${recentScores}]`);
+	}
+
+	// Regression warnings
+	if (regressions.length > 0) {
+		const details = regressions
+			.slice(0, 3)
+			.map((r) => `${r.type}:${r.name ?? r.id} (${r.delta.toFixed(2)})`)
+			.join(', ');
+		parts.push(`WARNING: Declining performance detected in ${details}`);
+	}
+
+	// Top correlated memories
+	if (summary.topMemories.length > 0) {
+		const top = summary.topMemories
+			.slice(0, 3)
+			.map((m) => m.memoryId)
+			.join(', ');
+		parts.push(`Effective memories: ${top}`);
+	}
+
+	// Declining memories
+	if (summary.decliningMemories.length > 0) {
+		const declining = summary.decliningMemories
+			.slice(0, 3)
+			.map((m) => m.memoryId)
+			.join(', ');
+		parts.push(`Review needed: ${declining}`);
+	}
+
+	let content = parts.join('\n  ');
+	// Truncate to stay within token budget
+	if (content.length > charBudget) {
+		content = content.slice(0, charBudget - 3) + '...';
+	}
+
+	return `<performance-context>\n  ${content}\n</performance-context>`;
+}
+
 // ─── Formatting ─────────────────────────────────────────────────────────────
 
 interface GroupedMemories {
@@ -137,6 +221,30 @@ function formatMemoryLine(result: MemorySearchResult, tone: InjectionTone): stri
 	if (effectiveTone === 'observational') {
 		const ctx = result.entry.experienceContext;
 		if (ctx?.situation && ctx?.learning) {
+			// Deviation-sourced memories get distinct formatting (HYPERAGENT-04)
+			if (ctx.isDeviation) {
+				const deviationDescriptions: Record<string, string> = {
+					'error-fix': 'encountered an error',
+					backtrack: 'had to backtrack',
+					retry: 'required multiple attempts',
+					'approach-change': 'changed approach mid-task',
+				};
+				const deviationDesc = ctx.deviationType
+					? (deviationDescriptions[ctx.deviationType] ?? 'encountered a deviation')
+					: 'encountered a deviation';
+				let line = `- LEARNED FROM ERROR: When ${ctx.situation}, initially ${deviationDesc}, but ultimately ${ctx.learning}`;
+				if (ctx.causalHypothesis) {
+					line += ` ROOT CAUSE: ${ctx.causalHypothesis}`;
+				}
+				if (ctx.nextStepPlan) {
+					line += ` NEXT TIME: ${ctx.nextStepPlan}`;
+				}
+				if (ctx.supersedes) {
+					line += ` (Supersedes earlier approach: see memory ${ctx.supersedes})`;
+				}
+				return line;
+			}
+
 			let line = `- OBSERVATION: In a previous session (${ctx.situation}), it was found that: ${ctx.learning}`;
 			if (ctx.causalHypothesis) {
 				line += ` BECAUSE: ${ctx.causalHypothesis}`;
@@ -469,6 +577,34 @@ export async function injectMemories(
 
 	const store = getMemoryStore();
 	const budgets = computeScopeBudgets(config);
+
+	// Build performance context block (HYPERAGENT-03)
+	// Generate before memory retrieval so we can subtract its token cost from the budget.
+	const perfContextPersonaId = selectedPersonaIds?.[0];
+	let performanceContextBlock = '';
+	try {
+		performanceContextBlock = await buildPerformanceContext(projectPath, perfContextPersonaId);
+	} catch (err) {
+		console.warn('[memory-inject] Failed to build performance context:', err);
+	}
+	const perfContextTokens = performanceContextBlock
+		? Math.ceil(performanceContextBlock.length / 4)
+		: 0;
+	// Subtract performance context tokens from the overall budget so memories + context stay within maxTokenBudget
+	if (perfContextTokens > 0) {
+		const reduction = Math.min(perfContextTokens, budgets.total - WRAPPER_OVERHEAD_TOKENS);
+		budgets.total -= reduction;
+		// Proportionally reduce scope budgets
+		const factor =
+			budgets.total > 0
+				? (budgets.total - WRAPPER_OVERHEAD_TOKENS) /
+					(budgets.total - WRAPPER_OVERHEAD_TOKENS + reduction)
+				: 0;
+		budgets.skill = Math.floor(budgets.skill * factor);
+		budgets.project = Math.floor(budgets.project * factor);
+		budgets.global = Math.floor(budgets.global * factor);
+	}
+
 	const effectiveQuery = query(searchQuery ?? prompt);
 
 	// Optionally adjust config for rich mode (lower similarity threshold)
@@ -934,9 +1070,12 @@ export async function injectMemories(
 			});
 	}
 
-	// Prepend XML to prompt
-	const injectedPrompt = `${xmlBlock}\n\n${prompt}`;
-	const tokenCount = totalTokens + WRAPPER_OVERHEAD_TOKENS;
+	// Prepend performance context + XML to prompt (HYPERAGENT-03)
+	// Performance context goes before agent-memories so the agent sees its trajectory first.
+	const injectedPrompt = performanceContextBlock
+		? `${performanceContextBlock}\n${xmlBlock}\n\n${prompt}`
+		: `${xmlBlock}\n\n${prompt}`;
+	const tokenCount = totalTokens + WRAPPER_OVERHEAD_TOKENS + perfContextTokens;
 
 	// Extract persona/skill match data from skill-scope results for analytics
 	const personaMatchMap = new Map<string, PersonaMatch>();

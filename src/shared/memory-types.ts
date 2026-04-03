@@ -332,6 +332,10 @@ export interface MemoryConfig {
 	minConfidenceThreshold: number;
 	/** How much session data to include in extraction analysis — default 'standard' */
 	extractionDepth: 'minimal' | 'standard' | 'rich';
+	/** Enable performance context injection at the top of agent memories — default true */
+	enablePerformanceContextInjection: boolean;
+	/** Maximum tokens allocated to the performance context block — default 200 */
+	performanceContextTokenBudget: number;
 	/** Enable checkpoint-style injection at natural pause points — default true */
 	enableCheckpointInjection: boolean;
 	/** Enable live persona shifting — re-evaluates and injects new persona memories mid-session
@@ -375,6 +379,8 @@ export interface MemoryConfig {
 	 * e.g. ['no-embeddings', 'no-injection-7d', 'extraction-failures', 'config-mismatch']
 	 */
 	dismissedDiagnostics?: string[];
+	/** Multiplier applied to novelty scores for deviation-sourced experiences — default 1.5 */
+	deviationNoveltyBoost: number;
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -413,6 +419,8 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	confidenceDecayRate: 0.02,
 	minConfidenceThreshold: 0.1,
 	extractionDepth: 'standard',
+	enablePerformanceContextInjection: true,
+	performanceContextTokenBudget: 200,
 	enableCheckpointInjection: true,
 	enableLivePersonaShift: true,
 	checkpointMaxPerSession: 5,
@@ -426,6 +434,7 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	gettingStartedDismissed: false,
 	memoryTourCompleted: false,
 	dismissedDiagnostics: [],
+	deviationNoveltyBoost: 1.5,
 };
 
 // ─── Checkpoint Injection Types ────────────────────────────────────────────

@@ -104,12 +104,39 @@ describe('EffectivenessEvaluator', () => {
 			expect(score).toBeCloseTo(0.0);
 		});
 
-		it('does not penalize when all errors resolved', () => {
+		it('does not penalize when all errors resolved and awards bonus', () => {
 			const score = evaluator.computeOutcomeScore(
 				makeSignals({ errorCount: 3, resolvedErrorCount: 3 })
 			);
-			// No +0.3 (has errors), +0.2 (completed), +0.1 (low ctx) = 0.3
-			expect(score).toBeCloseTo(0.3);
+			// No +0.3 (has errors), +0.2 (completed), +0.1 (low ctx), +0.1 (error→resolution bonus) = 0.4
+			expect(score).toBeCloseTo(0.4);
+		});
+
+		it('gives +0.1 error→resolution bonus for sessions that resolved all errors', () => {
+			const allResolved = evaluator.computeOutcomeScore(
+				makeSignals({ errorCount: 2, resolvedErrorCount: 2 })
+			);
+			const noErrors = evaluator.computeOutcomeScore(makeSignals({ errorCount: 0 }));
+			// allResolved: +0.2 (completed) +0.1 (low ctx) +0.1 (bonus) = 0.4
+			// noErrors: +0.3 (no errors) +0.2 (completed) +0.1 (low ctx) = 0.6
+			expect(allResolved).toBeCloseTo(0.4);
+			expect(noErrors).toBeGreaterThan(allResolved);
+		});
+
+		it('does not give error→resolution bonus when errors are unresolved', () => {
+			const partiallyResolved = evaluator.computeOutcomeScore(
+				makeSignals({ errorCount: 3, resolvedErrorCount: 1 })
+			);
+			// +0.2 (completed) +0.1 (low ctx) -0.3 (unresolved) = 0.0
+			expect(partiallyResolved).toBeCloseTo(0.0);
+		});
+
+		it('does not give error→resolution bonus when no errors occurred', () => {
+			const clean = evaluator.computeOutcomeScore(
+				makeSignals({ errorCount: 0, resolvedErrorCount: 0 })
+			);
+			// +0.3 (no errors) +0.2 (completed) +0.1 (low ctx) = 0.6 (no bonus)
+			expect(clean).toBeCloseTo(0.6);
 		});
 
 		it('gives -0.1 for cancelled session', () => {

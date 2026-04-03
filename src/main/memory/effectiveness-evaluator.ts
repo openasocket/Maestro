@@ -158,6 +158,16 @@ export class EffectivenessEvaluator {
 			score += 0.2;
 		}
 
+		// Error → resolution bonus (HYPERAGENT-04): sessions that hit errors AND
+		// resolved them all are higher-signal learning opportunities than clean runs
+		if (
+			signals.errorCount > 0 &&
+			signals.resolvedErrorCount > 0 &&
+			signals.resolvedErrorCount >= signals.errorCount
+		) {
+			score += 0.1;
+		}
+
 		// ── Negative signals ──
 
 		// Repeated errors that weren't resolved
