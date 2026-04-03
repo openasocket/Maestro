@@ -137,7 +137,17 @@ function formatMemoryLine(result: MemorySearchResult, tone: InjectionTone): stri
 	if (effectiveTone === 'observational') {
 		const ctx = result.entry.experienceContext;
 		if (ctx?.situation && ctx?.learning) {
-			return `- OBSERVATION: In a previous session (${ctx.situation}), it was found that: ${ctx.learning}`;
+			let line = `- OBSERVATION: In a previous session (${ctx.situation}), it was found that: ${ctx.learning}`;
+			if (ctx.causalHypothesis) {
+				line += ` BECAUSE: ${ctx.causalHypothesis}`;
+			}
+			if (ctx.nextStepPlan) {
+				line += ` NEXT TIME: ${ctx.nextStepPlan}`;
+			}
+			if (ctx.supersedes) {
+				line += ` (Supersedes earlier approach: see memory ${ctx.supersedes})`;
+			}
+			return line;
 		}
 		return `- OBSERVATION: In past work, ${result.entry.content}`;
 	}
