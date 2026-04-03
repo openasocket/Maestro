@@ -1,5 +1,14 @@
 import React, { memo, useEffect, useRef } from 'react';
-import { Activity, GitBranch, Bot, Bookmark, AlertCircle, Server, Zap, Sparkles } from 'lucide-react';
+import {
+	Activity,
+	GitBranch,
+	Bot,
+	Bookmark,
+	AlertCircle,
+	Server,
+	Zap,
+	Sparkles,
+} from 'lucide-react';
 import type { Session, Group, Theme } from '../types';
 import { getStatusColor } from '../utils/theme';
 

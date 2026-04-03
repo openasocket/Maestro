@@ -18,12 +18,7 @@ interface PersonaSelectionScreenProps {
 }
 
 export function PersonaSelectionScreen({ theme }: PersonaSelectionScreenProps): React.ReactElement {
-	const {
-		state,
-		nextStep,
-		setSuggestedPersonas,
-		toggleWizardPersona,
-	} = useWizard();
+	const { state, nextStep, setSuggestedPersonas, toggleWizardPersona } = useWizard();
 
 	const [allPersonas, setAllPersonas] = useState<Persona[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
@@ -75,8 +70,10 @@ export function PersonaSelectionScreen({ theme }: PersonaSelectionScreenProps): 
 		};
 
 		loadAndMatch();
-		return () => { cancelled = true; };
-	}, []);  
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
 	const handleContinue = useCallback(() => {
 		nextStep();
@@ -90,14 +87,8 @@ export function PersonaSelectionScreen({ theme }: PersonaSelectionScreenProps): 
 			{/* Header */}
 			<div style={{ marginBottom: 24 }}>
 				<div className="flex items-center gap-3 mb-2">
-					<Users
-						className="w-6 h-6"
-						style={{ color: theme.colors.accent }}
-					/>
-					<h2
-						className="text-xl font-bold"
-						style={{ color: theme.colors.textMain }}
-					>
+					<Users className="w-6 h-6" style={{ color: theme.colors.accent }} />
+					<h2 className="text-xl font-bold" style={{ color: theme.colors.textMain }}>
 						Select Personas
 					</h2>
 				</div>
