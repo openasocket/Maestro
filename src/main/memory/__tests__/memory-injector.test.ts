@@ -1431,6 +1431,77 @@ describe('MemoryInjector', () => {
 			);
 		});
 
+		it('deviation-sourced experience uses LEARNED FROM ERROR prefix (HYPERAGENT-04)', async () => {
+			setMemorySettingsStore(() => ({
+				enabled: true,
+				injectionStrategy: 'balanced',
+				injectionTone: 'adaptive',
+			}));
+
+			const results = [
+				makeResult({
+					entry: {
+						content: 'Error handling lesson',
+						type: 'experience',
+						experienceContext: {
+							situation: 'deploying new auth middleware',
+							learning: 'always run integration tests before deploy',
+							isDeviation: true,
+							deviationType: 'error-fix',
+							causalHypothesis: 'missing database migration for new schema',
+						},
+					},
+					personaName: 'Dev',
+					skillAreaName: 'DevOps',
+				}),
+			];
+			setupMockResults(results);
+
+			const result = await injectMemories('prompt', '/project', 'claude-code');
+
+			expect(result.injectedPrompt).toContain('- LEARNED FROM ERROR:');
+			expect(result.injectedPrompt).toContain('initially encountered an error');
+			expect(result.injectedPrompt).toContain(
+				'but ultimately always run integration tests before deploy'
+			);
+			expect(result.injectedPrompt).toContain(
+				'ROOT CAUSE: missing database migration for new schema'
+			);
+			expect(result.injectedPrompt).not.toContain('- OBSERVATION:');
+		});
+
+		it('deviation with backtrack type uses correct description (HYPERAGENT-04)', async () => {
+			setMemorySettingsStore(() => ({
+				enabled: true,
+				injectionStrategy: 'balanced',
+				injectionTone: 'adaptive',
+			}));
+
+			const results = [
+				makeResult({
+					entry: {
+						content: 'Approach change lesson',
+						type: 'experience',
+						experienceContext: {
+							situation: 'refactoring state management',
+							learning: 'Redux was overkill for this use case',
+							isDeviation: true,
+							deviationType: 'backtrack',
+						},
+					},
+					personaName: 'Dev',
+					skillAreaName: 'React',
+				}),
+			];
+			setupMockResults(results);
+
+			const result = await injectMemories('prompt', '/project', 'claude-code');
+
+			expect(result.injectedPrompt).toContain('- LEARNED FROM ERROR:');
+			expect(result.injectedPrompt).toContain('initially had to backtrack');
+			expect(result.injectedPrompt).not.toContain('ROOT CAUSE:');
+		});
+
 		it('experience without forward-looking fields does not include BECAUSE/NEXT TIME/supersedes', async () => {
 			setMemorySettingsStore(() => ({
 				enabled: true,
