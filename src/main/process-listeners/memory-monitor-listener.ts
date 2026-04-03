@@ -21,6 +21,7 @@
  * - SSH remote sessions (handled by LiveContextQueue drain)
  */
 
+import * as path from 'path';
 import { BrowserWindow } from 'electron';
 import type { ProcessManager } from '../process-manager';
 import type { ProcessListenerDependencies } from './types';
@@ -436,6 +437,37 @@ async function evaluateEffectivenessOnExit(
 				},
 			}
 		);
+
+		// Record session performance for aggregate trend tracking (HYPERAGENT-01)
+		try {
+			const { getSessionPerformanceTracker } =
+				await import('../memory/session-performance-tracker');
+			const performanceDir = path.join(store.getMemoriesDir(), 'performance');
+			const tracker = getSessionPerformanceTracker(performanceDir);
+
+			// Extract unique skill area IDs from injection scope groups
+			const skillAreaIds = record.scopeGroups
+				.filter((g) => g.skillAreaId)
+				.map((g) => g.skillAreaId!)
+				.filter((id, i, arr) => arr.indexOf(id) === i);
+
+			await tracker.recordSession({
+				sessionId: state.sessionId,
+				timestamp: Date.now(),
+				outcomeScore: evaluator.computeOutcomeScore(signals),
+				personaId: state.initialPersonaMatch?.id,
+				personaName: state.initialPersonaMatch?.name,
+				skillAreaIds,
+				projectPath: state.projectPath,
+				agentType: state.agentType,
+				injectedMemoryIds: [...record.ids],
+				turnCount: signals.turnCount,
+				errorCount: signals.errorCount,
+				durationMs: signals.durationMs,
+			});
+		} catch {
+			// Non-critical — performance tracking is best-effort
+		}
 
 		// Clean up injection record now that effectiveness has been evaluated
 		clearSessionInjection(state.sessionId);

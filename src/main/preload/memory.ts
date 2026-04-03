@@ -27,6 +27,9 @@ import type {
 	PromotionCandidate,
 	JobQueueStatus,
 	TokenUsage,
+	SessionPerformanceEntry,
+	PerformanceTrend,
+	PerformanceSummary,
 } from '../../shared/memory-types';
 import type { MemoryChangeEvent } from '../memory/memory-changelog';
 import type {
@@ -613,6 +616,42 @@ export function createMemoryApi() {
 			sessionId: string
 		): Promise<IpcResponse<{ id: string; name: string; score: number } | null>> =>
 			ipcRenderer.invoke('memory:getSessionPersona', sessionId),
+
+		// ─── Performance Tracking (HYPERAGENT-01) ────────────────────────
+		performance: {
+			getHistory: (options?: {
+				personaId?: string;
+				projectPath?: string;
+				limit?: number;
+			}): Promise<IpcResponse<SessionPerformanceEntry[]>> =>
+				ipcRenderer.invoke('memory:performance:getHistory', options),
+
+			getTrend: (options?: {
+				personaId?: string;
+				projectPath?: string;
+				window?: number;
+			}): Promise<IpcResponse<PerformanceTrend | null>> =>
+				ipcRenderer.invoke('memory:performance:getTrend', options),
+
+			getSummary: (options?: {
+				personaId?: string;
+				projectPath?: string;
+			}): Promise<IpcResponse<PerformanceSummary>> =>
+				ipcRenderer.invoke('memory:performance:getSummary', options),
+
+			getRegressions: (
+				window?: number
+			): Promise<
+				IpcResponse<
+					Array<{
+						type: 'persona' | 'project' | 'memory';
+						id: string;
+						name?: string;
+						delta: number;
+					}>
+				>
+			> => ipcRenderer.invoke('memory:performance:getRegressions', window),
+		},
 
 		// ─── Experience Repository ───────────────────────────────────────
 		repository: {

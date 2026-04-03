@@ -788,6 +788,65 @@ export interface EffectivenessUpdate {
 	skillAreaId?: SkillAreaId;
 }
 
+// ─── Session Performance Tracking (HYPERAGENT-01) ────────────────────────────
+
+/**
+ * A single session's performance record, stored in the performance history.
+ * Mirrors HyperAgents paper's PerformanceTracker data model.
+ */
+export interface SessionPerformanceEntry {
+	sessionId: string;
+	timestamp: number;
+	/** Outcome score (0.0-1.0), same scale as EffectivenessEvaluator */
+	outcomeScore: number;
+	personaId?: string;
+	personaName?: string;
+	/** Skill areas that had memories injected during this session */
+	skillAreaIds: string[];
+	projectPath?: string;
+	agentType: string;
+	/** Which memories were active (injected) during this session */
+	injectedMemoryIds: string[];
+	turnCount: number;
+	errorCount: number;
+	durationMs?: number;
+	costUsd?: number;
+}
+
+/**
+ * Windowed moving-average trend, following the HyperAgents paper algorithm.
+ * Compares recent N sessions against previous N sessions.
+ */
+export interface PerformanceTrend {
+	/** Number of sessions in each half of the trend window */
+	window: number;
+	/** Average score of the most recent `window` sessions */
+	recentAvg: number;
+	/** Average score of the `window` sessions before that */
+	olderAvg: number;
+	/** recentAvg - olderAvg; positive = improving */
+	delta: number;
+	direction: 'improving' | 'declining' | 'stable';
+}
+
+/**
+ * Aggregate performance summary with per-persona, per-project breakdowns
+ * and memory correlation analysis.
+ */
+export interface PerformanceSummary {
+	totalSessions: number;
+	overallAvg: number;
+	bestScore: number;
+	worstScore: number;
+	trend: PerformanceTrend | null;
+	byPersona: Record<string, { count: number; avg: number; trend: PerformanceTrend | null }>;
+	byProject: Record<string, { count: number; avg: number; trend: PerformanceTrend | null }>;
+	/** Memories that correlate with high session scores */
+	topMemories: Array<{ memoryId: string; correlationScore: number }>;
+	/** Memories that correlate with declining scores */
+	decliningMemories: Array<{ memoryId: string; correlationScore: number }>;
+}
+
 export interface MemoryInjectionResult {
 	injectedPrompt: string;
 	injectedIds: MemoryId[];

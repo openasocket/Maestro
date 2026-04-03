@@ -1373,6 +1373,56 @@ export function registerMemoryHandlers(deps: MemoryHandlerDependencies): void {
 			return getSessionLastPersona(sessionId) ?? null;
 		})
 	);
+
+	// ─── Performance Tracking (HYPERAGENT-01) ────────────────────────────
+
+	const getTracker = async () => {
+		const { getSessionPerformanceTracker } =
+			await import('../../memory/session-performance-tracker');
+		const performanceDir = path.join(memoryStore.getMemoriesDir(), 'performance');
+		return getSessionPerformanceTracker(performanceDir);
+	};
+
+	ipcMain.handle(
+		'memory:performance:getHistory',
+		createIpcDataHandler(
+			handlerOpts('performance:getHistory'),
+			async (options?: { personaId?: string; projectPath?: string; limit?: number }) => {
+				const tracker = await getTracker();
+				return tracker.getHistory(options);
+			}
+		)
+	);
+
+	ipcMain.handle(
+		'memory:performance:getTrend',
+		createIpcDataHandler(
+			handlerOpts('performance:getTrend'),
+			async (options?: { personaId?: string; projectPath?: string; window?: number }) => {
+				const tracker = await getTracker();
+				return tracker.getTrend(options);
+			}
+		)
+	);
+
+	ipcMain.handle(
+		'memory:performance:getSummary',
+		createIpcDataHandler(
+			handlerOpts('performance:getSummary'),
+			async (options?: { personaId?: string; projectPath?: string }) => {
+				const tracker = await getTracker();
+				return tracker.getSummary(options);
+			}
+		)
+	);
+
+	ipcMain.handle(
+		'memory:performance:getRegressions',
+		createIpcDataHandler(handlerOpts('performance:getRegressions'), async (window?: number) => {
+			const tracker = await getTracker();
+			return tracker.identifyRegressions(window);
+		})
+	);
 }
 
 /**
