@@ -41,6 +41,22 @@ vi.mock('fs/promises', () => ({
 	mkdir: (...args: any[]) => mockMkdir(...args),
 }));
 
+// ─── Mock session-performance-tracker ───────────────────────────────────────
+
+const mockGetHistory = vi.fn<(...args: any[]) => Promise<any[]>>();
+const mockGetTrend = vi.fn<(...args: any[]) => Promise<any>>();
+const mockIdentifyRegressions = vi.fn<(...args: any[]) => Promise<any[]>>();
+const mockGetSummary = vi.fn<(...args: any[]) => Promise<any>>();
+
+vi.mock('../../memory/session-performance-tracker', () => ({
+	getSessionPerformanceTracker: () => ({
+		getHistory: (...args: any[]) => mockGetHistory(...args),
+		getTrend: (...args: any[]) => mockGetTrend(...args),
+		identifyRegressions: (...args: any[]) => mockIdentifyRegressions(...args),
+		getSummary: (...args: any[]) => mockGetSummary(...args),
+	}),
+}));
+
 import {
 	injectMemories,
 	tryInjectMemories,
@@ -65,6 +81,7 @@ import {
 	getPersistedLastSessionInjection,
 	getPersistedInjectionStore,
 	resetPersistedInjectionRecords,
+	buildPerformanceContext,
 } from '../../memory/memory-injector';
 import type {
 	PersonaShiftEvent,
@@ -1995,6 +2012,174 @@ describe('MemoryInjector', () => {
 
 				clearSessionInjection('in-memory-sess');
 			});
+		});
+	});
+
+	// ─── Performance Context (HYPERAGENT-03) ─────────────────────────────────
+
+	describe('buildPerformanceContext', () => {
+		beforeEach(() => {
+			mockGetHistory.mockReset();
+			mockGetTrend.mockReset();
+			mockIdentifyRegressions.mockReset();
+			mockGetSummary.mockReset();
+		});
+
+		it('returns empty string when enablePerformanceContextInjection is false', async () => {
+			setMemorySettingsStore(() => ({ enablePerformanceContextInjection: false }));
+			const result = await buildPerformanceContext('/project', 'persona-1');
+			expect(result).toBe('');
+			// Should not call tracker at all
+			expect(mockGetHistory).not.toHaveBeenCalled();
+		});
+
+		it('returns empty string when fewer than 3 sessions of history', async () => {
+			setMemorySettingsStore(() => ({ enablePerformanceContextInjection: true }));
+			mockGetHistory.mockResolvedValue([{ outcomeScore: 0.7 }, { outcomeScore: 0.8 }]);
+			const result = await buildPerformanceContext('/project', 'persona-1');
+			expect(result).toBe('');
+		});
+
+		it('produces performance-context XML when sufficient history exists', async () => {
+			setMemorySettingsStore(() => ({ enablePerformanceContextInjection: true }));
+			mockGetHistory.mockResolvedValue([
+				{ outcomeScore: 0.9 },
+				{ outcomeScore: 0.85 },
+				{ outcomeScore: 0.8 },
+				{ outcomeScore: 0.75 },
+				{ outcomeScore: 0.7 },
+			]);
+			mockGetTrend.mockResolvedValue({ direction: 'improving', delta: 0.1 });
+			mockIdentifyRegressions.mockResolvedValue([]);
+			mockGetSummary.mockResolvedValue({ topMemories: [], decliningMemories: [] });
+
+			const result = await buildPerformanceContext('/project', 'persona-1');
+			expect(result).toContain('<performance-context>');
+			expect(result).toContain('</performance-context>');
+			expect(result).toContain('trend: improving +0.10');
+			expect(result).toContain('0.90, 0.85, 0.80, 0.75, 0.70');
+		});
+
+		it('includes regression warnings when regressions exist', async () => {
+			setMemorySettingsStore(() => ({ enablePerformanceContextInjection: true }));
+			mockGetHistory.mockResolvedValue([
+				{ outcomeScore: 0.5 },
+				{ outcomeScore: 0.6 },
+				{ outcomeScore: 0.7 },
+			]);
+			mockGetTrend.mockResolvedValue({ direction: 'declining', delta: -0.15 });
+			mockIdentifyRegressions.mockResolvedValue([
+				{ type: 'persona', id: 'p1', name: 'Rust Dev', delta: -0.12 },
+			]);
+			mockGetSummary.mockResolvedValue({ topMemories: [], decliningMemories: [] });
+
+			const result = await buildPerformanceContext('/project');
+			expect(result).toContain('WARNING: Declining performance detected in');
+			expect(result).toContain('persona:Rust Dev');
+		});
+
+		it('includes top and declining memories when present', async () => {
+			setMemorySettingsStore(() => ({ enablePerformanceContextInjection: true }));
+			mockGetHistory.mockResolvedValue([
+				{ outcomeScore: 0.8 },
+				{ outcomeScore: 0.75 },
+				{ outcomeScore: 0.7 },
+			]);
+			mockGetTrend.mockResolvedValue({ direction: 'stable', delta: 0.02 });
+			mockIdentifyRegressions.mockResolvedValue([]);
+			mockGetSummary.mockResolvedValue({
+				topMemories: [{ memoryId: 'mem-top-1' }, { memoryId: 'mem-top-2' }],
+				decliningMemories: [{ memoryId: 'mem-decline-1' }],
+			});
+
+			const result = await buildPerformanceContext('/project');
+			expect(result).toContain('Effective memories: mem-top-1, mem-top-2');
+			expect(result).toContain('Review needed: mem-decline-1');
+		});
+
+		it('truncates output to stay within performanceContextTokenBudget', async () => {
+			setMemorySettingsStore(() => ({
+				enablePerformanceContextInjection: true,
+				performanceContextTokenBudget: 20, // very small budget = 80 chars
+			}));
+			mockGetHistory.mockResolvedValue([
+				{ outcomeScore: 0.9 },
+				{ outcomeScore: 0.85 },
+				{ outcomeScore: 0.8 },
+			]);
+			mockGetTrend.mockResolvedValue({ direction: 'improving', delta: 0.1 });
+			mockIdentifyRegressions.mockResolvedValue([
+				{ type: 'persona', id: 'p1', name: 'Very Long Persona Name', delta: -0.2 },
+				{ type: 'project', id: 'proj1', name: 'Big Project', delta: -0.15 },
+			]);
+			mockGetSummary.mockResolvedValue({
+				topMemories: [{ memoryId: 'mem-1' }, { memoryId: 'mem-2' }],
+				decliningMemories: [{ memoryId: 'mem-3' }],
+			});
+
+			const result = await buildPerformanceContext('/project');
+			// The content inside should be truncated (ends with ...)
+			// The total result should still be wrapped in tags
+			expect(result).toContain('<performance-context>');
+			expect(result).toContain('</performance-context>');
+		});
+	});
+
+	describe('Performance context integration in injectMemories', () => {
+		beforeEach(() => {
+			mockGetHistory.mockReset();
+			mockGetTrend.mockReset();
+			mockIdentifyRegressions.mockReset();
+			mockGetSummary.mockReset();
+			mockCascadingSearch.mockResolvedValue([]);
+			mockSearchFlatScope.mockResolvedValue([]);
+			mockHybridSearch.mockResolvedValue([]);
+			mockSelectMatchingPersonas.mockResolvedValue([]);
+		});
+
+		it('prepends performance-context before agent-memories when data exists', async () => {
+			setMemorySettingsStore(() => ({ enablePerformanceContextInjection: true }));
+			mockGetHistory.mockResolvedValue([
+				{ outcomeScore: 0.9 },
+				{ outcomeScore: 0.85 },
+				{ outcomeScore: 0.8 },
+			]);
+			mockGetTrend.mockResolvedValue({ direction: 'improving', delta: 0.1 });
+			mockIdentifyRegressions.mockResolvedValue([]);
+			mockGetSummary.mockResolvedValue({ topMemories: [], decliningMemories: [] });
+
+			// Provide at least one memory result so the injection doesn't take the
+			// "no match" early-return path (which skips performance context prepend).
+			// hybridSearch is called for project & global scopes; return a global memory.
+			const globalMem = makeResult({
+				entry: { scope: 'global', content: 'Always write tests' },
+			});
+			mockHybridSearch.mockImplementation(async (_q: string, scope: string) => {
+				if (scope === 'global') return [globalMem];
+				return [];
+			});
+
+			const result = await injectMemories('test prompt', '/project', 'claude-code');
+			const perfIdx = result.injectedPrompt.indexOf('<performance-context>');
+			const memIdx = result.injectedPrompt.indexOf('<agent-memories>');
+			// Performance context should come before agent-memories
+			expect(perfIdx).toBeGreaterThanOrEqual(0);
+			expect(memIdx).toBeGreaterThan(perfIdx);
+		});
+
+		it('omits performance-context when disabled', async () => {
+			setMemorySettingsStore(() => ({ enablePerformanceContextInjection: false }));
+
+			const result = await injectMemories('test prompt', '/project', 'claude-code');
+			expect(result.injectedPrompt).not.toContain('<performance-context>');
+		});
+
+		it('omits performance-context when insufficient history', async () => {
+			setMemorySettingsStore(() => ({ enablePerformanceContextInjection: true }));
+			mockGetHistory.mockResolvedValue([{ outcomeScore: 0.8 }]);
+
+			const result = await injectMemories('test prompt', '/project', 'claude-code');
+			expect(result.injectedPrompt).not.toContain('<performance-context>');
 		});
 	});
 });
