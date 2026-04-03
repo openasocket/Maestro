@@ -1286,6 +1286,164 @@ describe('MemoryInjector', () => {
 			);
 		});
 
+		it('experience with causalHypothesis appends BECAUSE clause', async () => {
+			setMemorySettingsStore(() => ({
+				enabled: true,
+				injectionStrategy: 'balanced',
+				injectionTone: 'adaptive',
+			}));
+
+			const results = [
+				makeResult({
+					entry: {
+						content: 'Caching caused stale data',
+						type: 'experience',
+						experienceContext: {
+							situation: 'multi-user caching scenario',
+							learning: 'aggressive caching caused stale data',
+							causalHypothesis: 'invalidation window was too long for concurrent writes',
+						},
+					},
+					personaName: 'Dev',
+					skillAreaName: 'Backend',
+				}),
+			];
+			setupMockResults(results);
+
+			const result = await injectMemories('prompt', '/project', 'claude-code');
+
+			expect(result.injectedPrompt).toContain(
+				'BECAUSE: invalidation window was too long for concurrent writes'
+			);
+		});
+
+		it('experience with nextStepPlan appends NEXT TIME clause', async () => {
+			setMemorySettingsStore(() => ({
+				enabled: true,
+				injectionStrategy: 'balanced',
+				injectionTone: 'adaptive',
+			}));
+
+			const results = [
+				makeResult({
+					entry: {
+						content: 'Use event-driven invalidation',
+						type: 'experience',
+						experienceContext: {
+							situation: 'caching architecture review',
+							learning: 'TTL-based caching is unreliable under load',
+							nextStepPlan: 'Use event-driven invalidation with 30s fallback TTL',
+						},
+					},
+					personaName: 'Dev',
+					skillAreaName: 'Backend',
+				}),
+			];
+			setupMockResults(results);
+
+			const result = await injectMemories('prompt', '/project', 'claude-code');
+
+			expect(result.injectedPrompt).toContain(
+				'NEXT TIME: Use event-driven invalidation with 30s fallback TTL'
+			);
+		});
+
+		it('experience with supersedes appends lineage note', async () => {
+			setMemorySettingsStore(() => ({
+				enabled: true,
+				injectionStrategy: 'balanced',
+				injectionTone: 'adaptive',
+			}));
+
+			const results = [
+				makeResult({
+					entry: {
+						content: 'Improved approach to caching',
+						type: 'experience',
+						experienceContext: {
+							situation: 'second iteration on caching',
+							learning: 'event-driven invalidation works better',
+							supersedes: 'mem-old-caching-001',
+						},
+					},
+					personaName: 'Dev',
+					skillAreaName: 'Backend',
+				}),
+			];
+			setupMockResults(results);
+
+			const result = await injectMemories('prompt', '/project', 'claude-code');
+
+			expect(result.injectedPrompt).toContain(
+				'(Supersedes earlier approach: see memory mem-old-caching-001)'
+			);
+		});
+
+		it('experience with all forward-looking fields includes BECAUSE, NEXT TIME, and supersedes', async () => {
+			setMemorySettingsStore(() => ({
+				enabled: true,
+				injectionStrategy: 'balanced',
+				injectionTone: 'adaptive',
+			}));
+
+			const results = [
+				makeResult({
+					entry: {
+						content: 'Full forward-looking experience',
+						type: 'experience',
+						experienceContext: {
+							situation: 'complete experience test',
+							learning: 'all fields should render',
+							causalHypothesis: 'the root cause was X',
+							nextStepPlan: 'try approach Y next',
+							supersedes: 'mem-prev-123',
+						},
+					},
+					personaName: 'Dev',
+					skillAreaName: 'Testing',
+				}),
+			];
+			setupMockResults(results);
+
+			const result = await injectMemories('prompt', '/project', 'claude-code');
+
+			expect(result.injectedPrompt).toContain('BECAUSE: the root cause was X');
+			expect(result.injectedPrompt).toContain('NEXT TIME: try approach Y next');
+			expect(result.injectedPrompt).toContain(
+				'(Supersedes earlier approach: see memory mem-prev-123)'
+			);
+		});
+
+		it('experience without forward-looking fields does not include BECAUSE/NEXT TIME/supersedes', async () => {
+			setMemorySettingsStore(() => ({
+				enabled: true,
+				injectionStrategy: 'balanced',
+				injectionTone: 'adaptive',
+			}));
+
+			const results = [
+				makeResult({
+					entry: {
+						content: 'Basic experience',
+						type: 'experience',
+						experienceContext: {
+							situation: 'basic scenario',
+							learning: 'basic learning',
+						},
+					},
+					personaName: 'Dev',
+					skillAreaName: 'General',
+				}),
+			];
+			setupMockResults(results);
+
+			const result = await injectMemories('prompt', '/project', 'claude-code');
+
+			expect(result.injectedPrompt).not.toContain('BECAUSE:');
+			expect(result.injectedPrompt).not.toContain('NEXT TIME:');
+			expect(result.injectedPrompt).not.toContain('Supersedes earlier approach');
+		});
+
 		it('per-entry toneOverride takes precedence over global tone', async () => {
 			setMemorySettingsStore(() => ({
 				enabled: true,

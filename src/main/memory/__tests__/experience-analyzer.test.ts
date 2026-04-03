@@ -283,6 +283,119 @@ describe('ExperienceAnalyzer', () => {
 		it('should return empty for no JSON', () => {
 			expect(analyzer.parseExperiences('no json here')).toEqual([]);
 		});
+
+		it('should parse causal_hypothesis into causalHypothesis', () => {
+			const json = JSON.stringify([
+				{
+					content: 'Test',
+					situation: 'Caching scenario',
+					learning: 'TTL too long',
+					category: 'problem-solved',
+					tags: [],
+					noveltyScore: 0.8,
+					causal_hypothesis: 'invalidation window exceeded concurrent write threshold',
+				},
+			]);
+			const result = analyzer.parseExperiences(json);
+			expect(result).toHaveLength(1);
+			expect(result[0].causalHypothesis).toBe(
+				'invalidation window exceeded concurrent write threshold'
+			);
+		});
+
+		it('should parse next_step_plan into nextStepPlan', () => {
+			const json = JSON.stringify([
+				{
+					content: 'Test',
+					situation: 'Architecture review',
+					learning: 'Need better approach',
+					category: 'pattern-established',
+					tags: [],
+					noveltyScore: 0.7,
+					next_step_plan: 'Use event-driven invalidation with 30s fallback',
+				},
+			]);
+			const result = analyzer.parseExperiences(json);
+			expect(result).toHaveLength(1);
+			expect(result[0].nextStepPlan).toBe('Use event-driven invalidation with 30s fallback');
+		});
+
+		it('should parse supersedes_content into supersedesContent', () => {
+			const json = JSON.stringify([
+				{
+					content: 'Test',
+					situation: 'Improved caching',
+					learning: 'Event-driven is better',
+					category: 'problem-solved',
+					tags: [],
+					noveltyScore: 0.9,
+					supersedes_content: 'previous TTL-based caching approach',
+				},
+			]);
+			const result = analyzer.parseExperiences(json);
+			expect(result).toHaveLength(1);
+			expect(result[0].supersedesContent).toBe('previous TTL-based caching approach');
+		});
+
+		it('should parse all forward-looking fields together', () => {
+			const json = JSON.stringify([
+				{
+					content: 'Full experience',
+					situation: 'Complex scenario',
+					learning: 'Multi-field learning',
+					category: 'problem-solved',
+					tags: ['caching'],
+					noveltyScore: 0.95,
+					causal_hypothesis: 'root cause was X',
+					next_step_plan: 'try Y next time',
+					supersedes_content: 'old approach Z',
+				},
+			]);
+			const result = analyzer.parseExperiences(json);
+			expect(result).toHaveLength(1);
+			expect(result[0].causalHypothesis).toBe('root cause was X');
+			expect(result[0].nextStepPlan).toBe('try Y next time');
+			expect(result[0].supersedesContent).toBe('old approach Z');
+		});
+
+		it('should omit forward-looking fields when not present in LLM output', () => {
+			const json = JSON.stringify([
+				{
+					content: 'Basic experience',
+					situation: 'Simple case',
+					learning: 'Basic learning',
+					category: 'pattern-established',
+					tags: [],
+					noveltyScore: 0.6,
+				},
+			]);
+			const result = analyzer.parseExperiences(json);
+			expect(result).toHaveLength(1);
+			expect(result[0].causalHypothesis).toBeUndefined();
+			expect(result[0].nextStepPlan).toBeUndefined();
+			expect(result[0].supersedesContent).toBeUndefined();
+		});
+
+		it('should ignore non-string forward-looking fields', () => {
+			const json = JSON.stringify([
+				{
+					content: 'Test',
+					situation: 'Sit',
+					learning: 'Learn',
+					category: 'problem-solved',
+					tags: [],
+					noveltyScore: 0.7,
+					causal_hypothesis: 123,
+					next_step_plan: { plan: 'wrong type' },
+					supersedes_content: true,
+				},
+			]);
+			const result = analyzer.parseExperiences(json);
+			expect(result).toHaveLength(1);
+			expect(result[0].causalHypothesis).toBeUndefined();
+			expect(result[0].nextStepPlan).toBeUndefined();
+			expect(result[0].supersedesContent).toBeUndefined();
+		});
 	});
 
 	// ─── detectDeviations ───────────────────────────────────────────────
