@@ -157,6 +157,8 @@ export interface ExperienceContext {
 	supersededBy?: MemoryId;
 	/** Link to the memory this one supersedes — enables forward lineage tracing */
 	supersedes?: MemoryId;
+	/** Which extraction prompt version produced this memory (HYPERAGENT-05) */
+	promptVersionId?: string;
 }
 
 /** A single memory entry — explicit declarative knowledge or empirical experience */
@@ -261,6 +263,34 @@ export const DEFAULT_EMBEDDING_CONFIG: EmbeddingProviderConfig = {
 		modelId: 'Xenova/gte-small',
 	},
 };
+
+// ─── Extraction Prompt Versioning (HYPERAGENT-05) ─────────────────────────
+
+/** A versioned extraction prompt — tracks performance of different prompt variants */
+export interface ExtractionPromptVersion {
+	/** Unique identifier (UUID) */
+	id: string;
+	/** The full extraction prompt text */
+	prompt: string;
+	/** When this version was created (ms timestamp) */
+	createdAt: number;
+	/** How many sessions this version has analyzed */
+	sessionsUsed: number;
+	/** Average effectiveness of memories extracted using this prompt (0.0-1.0) */
+	avgExtractionQuality: number;
+	/** Total memories extracted with this version */
+	memoriesProduced: number;
+	/** Average novelty score of extracted memories (0.0-1.0) */
+	avgNoveltyScore: number;
+	/** Whether this version is currently in use */
+	isActive: boolean;
+	/** Whether this is the shipped default — cannot be deleted */
+	isDefault: boolean;
+	/** Which version this was derived from */
+	parentId?: string;
+	/** User annotation */
+	notes?: string;
+}
 
 // ─── Configuration ─────────────────────────────────────────────────────────
 
@@ -381,6 +411,12 @@ export interface MemoryConfig {
 	dismissedDiagnostics?: string[];
 	/** Multiplier applied to novelty scores for deviation-sourced experiences — default 1.5 */
 	deviationNoveltyBoost: number;
+	/** Enable extraction prompt evolution / A-B testing (HYPERAGENT-05) — default false */
+	enablePromptEvolution: boolean;
+	/** User-provided override prompt — takes priority over evolved versions */
+	extractionPromptOverride?: string;
+	/** Maximum prompt versions to keep in the archive — default 10 */
+	maxPromptVersions: number;
 }
 
 export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
@@ -435,6 +471,9 @@ export const MEMORY_CONFIG_DEFAULTS: MemoryConfig = {
 	memoryTourCompleted: false,
 	dismissedDiagnostics: [],
 	deviationNoveltyBoost: 1.5,
+	enablePromptEvolution: false,
+	extractionPromptOverride: undefined,
+	maxPromptVersions: 10,
 };
 
 // ─── Checkpoint Injection Types ────────────────────────────────────────────
