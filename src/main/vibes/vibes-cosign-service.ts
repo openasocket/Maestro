@@ -12,6 +12,11 @@
 import { createHash } from 'crypto';
 import { logger } from '../utils/logger';
 import { verifyPAESignature } from './vibes-key-manager';
+import {
+	checkProviderKeyUpdate,
+	getProviderKeyById,
+	loadProviderKeyStore,
+} from './vibes-provider-keystore';
 
 const LOG_CONTEXT = '[VIBES-COSIGN]';
 
@@ -22,13 +27,7 @@ const LOG_CONTEXT = '[VIBES-COSIGN]';
 /** Maestro cosigning endpoint. */
 const COSIGN_ENDPOINT = 'https://api.maestro.sh/vibes/cosign';
 
-/** Published key bundle URL for verification. */
-const PROVIDER_KEYS_URL = 'https://maestro.sh/vibes/vibes-signing-keys.json';
-
-/** Cache TTL for the provider key bundle (24 hours). */
-const KEY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-
-/** Request timeout for cosigning and key fetch operations (10 seconds). */
+/** Request timeout for cosigning operations (10 seconds). */
 const REQUEST_TIMEOUT_MS = 10_000;
 
 // ============================================================================
@@ -64,79 +63,44 @@ export interface CosignResponse {
 }
 
 // ============================================================================
-// Key Cache
+// Provider Keys (static-file distribution — see vibes-provider-keystore.ts)
 // ============================================================================
 
-let cachedKeyBundle: ProviderKeyBundle | null = null;
-let cacheTimestamp = 0;
-
 /**
- * Clear the cached provider key bundle. Useful for testing or forced refresh.
+ * Clear cached provider key state. The persistent store on disk is the source
+ * of truth; this only forces the next check to hit the network.
  */
 export function clearProviderKeyCache(): void {
-	cachedKeyBundle = null;
-	cacheTimestamp = 0;
+	// The keystore throttles by last_checked; nothing in-memory to clear.
+	// Kept for API compatibility with existing callers/tests.
 }
 
-// ============================================================================
-// Provider Key Fetching
-// ============================================================================
-
 /**
- * Fetch and cache the Maestro tool provider public keys.
- * Returns null if offline or endpoint unavailable. Never throws.
+ * Fetch the provider's published keys, shaped as the legacy bundle for
+ * existing consumers. Backed by the static key FILE on the website: the
+ * file's content hash (keyId) is the version, historical keys are retained
+ * locally, and offline calls serve the persisted store.
  */
 export async function fetchProviderKeys(): Promise<ProviderKeyBundle | null> {
-	// Return cached bundle if still valid
-	if (cachedKeyBundle && Date.now() - cacheTimestamp < KEY_CACHE_TTL_MS) {
-		return cachedKeyBundle;
-	}
+	await checkProviderKeyUpdate();
+	const store = await loadProviderKeyStore();
+	if (store.keys.length === 0) return null;
 
-	try {
-		const controller = new AbortController();
-		const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-		const response = await fetch(PROVIDER_KEYS_URL, {
-			method: 'GET',
-			headers: {
-				Accept: 'application/json',
-				'User-Agent': 'Maestro-VIBES-Cosign',
-			},
-			signal: controller.signal,
-		});
-
-		clearTimeout(timeout);
-
-		if (!response.ok) {
-			logger.warn(`Provider keys fetch failed: HTTP ${response.status}`, LOG_CONTEXT);
-			return cachedKeyBundle; // Return stale cache if available
-		}
-
-		const bundle = (await response.json()) as ProviderKeyBundle;
-
-		// Basic validation
-		if (!bundle.keys || !Array.isArray(bundle.keys)) {
-			logger.warn('Provider keys response has invalid shape', LOG_CONTEXT);
-			return cachedKeyBundle;
-		}
-
-		cachedKeyBundle = bundle;
-		cacheTimestamp = Date.now();
-
-		logger.info(
-			`Fetched ${bundle.keys.length} provider key(s) from ${bundle.provider}`,
-			LOG_CONTEXT
-		);
-
-		return bundle;
-	} catch (error) {
-		// Network errors, timeouts, AbortError — all acceptable offline scenarios
-		logger.debug(
-			`Provider keys fetch unavailable: ${error instanceof Error ? error.message : String(error)}`,
-			LOG_CONTEXT
-		);
-		return cachedKeyBundle; // Return stale cache if available
-	}
+	return {
+		provider: 'Maestro',
+		tool_name: 'Maestro',
+		rotation_policy: 'static-file; content-hash (keyId) is the key version',
+		keys: store.keys.map((k) => ({
+			keyid: k.keyid,
+			algorithm: 'Ed25519' as const,
+			public_key_pem: k.public_key_pem,
+			valid_from: k.first_seen,
+			// Historical keys stay valid for VERIFYING old attestations forever;
+			// only the current key is used for new cosignatures.
+			valid_until: '9999-12-31T23:59:59Z',
+			status: 'active' as const,
+		})),
+	};
 }
 
 // ============================================================================
@@ -225,16 +189,7 @@ export async function requestCosignature(
  * Returns the PEM public key or null if not found/revoked/expired.
  */
 export async function findProviderKey(keyid: string): Promise<string | null> {
-	const bundle = await fetchProviderKeys();
-	if (!bundle) return null;
-
-	const now = new Date().toISOString();
-
-	const entry = bundle.keys.find(
-		(k) => k.keyid === keyid && k.status === 'active' && k.valid_from <= now && k.valid_until >= now
-	);
-
-	return entry?.public_key_pem ?? null;
+	return getProviderKeyById(keyid);
 }
 
 /**

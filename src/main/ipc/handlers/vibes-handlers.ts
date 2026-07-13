@@ -62,6 +62,7 @@ import {
 } from '../../vibes/vibes-key-manager';
 import type { DSSEEnvelope } from '../../vibes/vibes-key-manager';
 import { fetchProviderKeys } from '../../vibes/vibes-cosign-service';
+import { checkProviderKeyUpdate } from '../../vibes/vibes-provider-keystore';
 import { createAttestation } from '../../vibes/vibes-attestation';
 import { verifyAttestation } from '../../vibes/vibes-verify-attestation';
 
@@ -533,6 +534,19 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 			return { success: true, data: keys };
 		} catch (error) {
 			logger.error('getProviderKeys error', LOG_CONTEXT, { error: String(error) });
+			return { success: false, error: String(error) };
+		}
+	});
+
+	// Check the published static key file for a new provider key version.
+	// The key's content hash (keyId) is the version; ETag/Last-Modified make
+	// the check cheap. force=true bypasses the hourly throttle.
+	ipcMain.handle('vibes:checkProviderKeyUpdate', async (_event, force?: boolean) => {
+		try {
+			const result = await checkProviderKeyUpdate({ force });
+			return { success: true, data: result };
+		} catch (error) {
+			logger.error('checkProviderKeyUpdate error', LOG_CONTEXT, { error: String(error) });
 			return { success: false, error: String(error) };
 		}
 	});

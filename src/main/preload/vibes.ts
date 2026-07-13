@@ -210,6 +210,13 @@ export function createVibesApi() {
 
 			getProviderKeys: (): Promise<VibesAttestationResult> =>
 				ipcRenderer.invoke('vibes:getProviderKeys'),
+
+			/**
+			 * Check the published static key file for a new provider key version.
+			 * The keyId (content hash of the key) doubles as its version.
+			 */
+			checkProviderKeyUpdate: (force?: boolean): Promise<VibesAttestationResult> =>
+				ipcRenderer.invoke('vibes:checkProviderKeyUpdate', force),
 		},
 	};
 }

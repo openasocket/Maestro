@@ -65,7 +65,7 @@ describe('vibes preload API', () => {
 			expect(Object.keys(api)).toHaveLength(21);
 		});
 
-		it('should have attestation sub-namespace with 7 methods', () => {
+		it('should have attestation sub-namespace with 8 methods', () => {
 			const attestation = (api as any).attestation;
 			expect(attestation).toHaveProperty('keygen');
 			expect(attestation).toHaveProperty('getKeyInfo');
@@ -74,7 +74,8 @@ describe('vibes preload API', () => {
 			expect(attestation).toHaveProperty('attest');
 			expect(attestation).toHaveProperty('verifyAttestation');
 			expect(attestation).toHaveProperty('getProviderKeys');
-			expect(Object.keys(attestation)).toHaveLength(7);
+			expect(attestation).toHaveProperty('checkProviderKeyUpdate');
+			expect(Object.keys(attestation)).toHaveLength(8);
 		});
 	});
 

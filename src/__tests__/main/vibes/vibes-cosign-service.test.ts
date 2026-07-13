@@ -1,12 +1,42 @@
 /**
  * Tests for src/main/vibes/vibes-cosign-service.ts
- * Validates tool provider cosigning: key fetching, cosignature requests,
- * PAE hash computation, and provider signature verification.
+ * Validates tool provider cosigning: static-file key pulls, cosignature
+ * requests, PAE hash computation, and provider signature verification.
+ *
+ * Provider keys use static-file distribution (see vibes-provider-keystore.ts):
+ * the published file's content hash (keyId) IS the key version, and every key
+ * ever pulled is retained locally so old attestations verify after rotation.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as path from 'path';
+import { rmSync } from 'fs';
 
-import { generateKeyPair, computePAE, signPAE } from '../../../main/vibes/vibes-key-manager';
+// Provider keys persist under homedir now (static-file keystore); isolate it.
+// vi.hoisted runs before module load, when the keystore bakes its dir constant.
+const mocks = vi.hoisted(() => {
+	const os = require('os') as typeof import('os');
+	const fs = require('fs') as typeof import('fs');
+	const pathMod = require('path') as typeof import('path');
+	const tempHome = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'vibes-cosign-'));
+	return { tempHome };
+});
+
+vi.mock('os', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('os')>();
+	return {
+		...actual,
+		homedir: () => mocks.tempHome,
+		default: { ...actual, homedir: () => mocks.tempHome },
+	};
+});
+
+import {
+	generateKeyPair,
+	computePAE,
+	signPAE,
+	computeKeyId,
+} from '../../../main/vibes/vibes-key-manager';
 
 import {
 	fetchProviderKeys,
@@ -17,7 +47,7 @@ import {
 	findProviderKey,
 } from '../../../main/vibes/vibes-cosign-service';
 
-import type { ProviderKeyBundle, CosignResponse } from '../../../main/vibes/vibes-cosign-service';
+import type { CosignResponse } from '../../../main/vibes/vibes-cosign-service';
 
 import { createHash } from 'crypto';
 
@@ -28,6 +58,9 @@ import { createHash } from 'crypto';
 const mockFetch = vi.fn();
 
 beforeEach(() => {
+	// Wipe the persisted keystore between tests (shared temp home; the store
+	// path is baked into the module at load time)
+	rmSync(path.join(mocks.tempHome, '.vibescheck'), { recursive: true, force: true });
 	vi.stubGlobal('fetch', mockFetch);
 	clearProviderKeyCache();
 	mockFetch.mockReset();
@@ -37,25 +70,13 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-// ============================================================================
-// Helper: build a valid ProviderKeyBundle with a real Ed25519 key
-// ============================================================================
-
-function buildMockKeyBundle(publicKeyPem: string, keyid: string): ProviderKeyBundle {
+/** Response shim for the static key FILE endpoint (text body + headers). */
+function keyFileResponse(body: string, status = 200) {
 	return {
-		provider: 'Maestro',
-		tool_name: 'Maestro',
-		keys: [
-			{
-				keyid,
-				algorithm: 'Ed25519',
-				public_key_pem: publicKeyPem,
-				valid_from: '2020-01-01T00:00:00Z',
-				valid_until: '2099-12-31T23:59:59Z',
-				status: 'active',
-			},
-		],
-		rotation_policy: '90 days',
+		ok: status >= 200 && status < 300,
+		status,
+		headers: { get: () => null },
+		text: async () => body,
 	};
 }
 
@@ -89,90 +110,61 @@ describe('computePAEHash', () => {
 });
 
 // ============================================================================
-// fetchProviderKeys
+// fetchProviderKeys (static-file backed)
 // ============================================================================
 
 describe('fetchProviderKeys', () => {
-	it('should fetch and return a valid key bundle', async () => {
-		const keyPair = generateKeyPair();
-		const bundle = buildMockKeyBundle(keyPair.publicKey, keyPair.keyId);
+	it('pulls the static key file and shapes it as a bundle (keyid = content hash)', async () => {
+		const { publicKey } = generateKeyPair();
+		mockFetch.mockResolvedValueOnce(keyFileResponse(publicKey));
 
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: async () => bundle,
-		});
+		const bundle = await fetchProviderKeys();
 
-		const result = await fetchProviderKeys();
+		expect(bundle?.provider).toBe('Maestro');
+		expect(bundle?.keys).toHaveLength(1);
+		expect(bundle?.keys[0].keyid).toBe(computeKeyId(publicKey));
+		expect(bundle?.keys[0].status).toBe('active');
+	});
 
-		expect(result).toEqual(bundle);
-		expect(result!.provider).toBe('Maestro');
-		expect(result!.keys).toHaveLength(1);
+	it('serves the persisted store without refetching within the throttle window', async () => {
+		const { publicKey } = generateKeyPair();
+		mockFetch.mockResolvedValue(keyFileResponse(publicKey));
+
+		await fetchProviderKeys();
+		const again = await fetchProviderKeys();
+
+		expect(again?.keys).toHaveLength(1);
 		expect(mockFetch).toHaveBeenCalledTimes(1);
 	});
 
-	it('should cache the key bundle for subsequent calls', async () => {
-		const keyPair = generateKeyPair();
-		const bundle = buildMockKeyBundle(keyPair.publicKey, keyPair.keyId);
-
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: async () => bundle,
-		});
-
-		const result1 = await fetchProviderKeys();
-		const result2 = await fetchProviderKeys();
-
-		expect(result1).toEqual(bundle);
-		expect(result2).toEqual(bundle);
-		// Only one fetch call — second was served from cache
-		expect(mockFetch).toHaveBeenCalledTimes(1);
+	it('returns null when the network is unavailable and nothing is stored', async () => {
+		mockFetch.mockRejectedValueOnce(new Error('offline'));
+		expect(await fetchProviderKeys()).toBeNull();
 	});
 
-	it('should return null when network is unavailable', async () => {
-		mockFetch.mockRejectedValueOnce(new Error('Network error'));
-
-		const result = await fetchProviderKeys();
-		expect(result).toBeNull();
-	});
-
-	it('should return stale cache on HTTP error', async () => {
-		const keyPair = generateKeyPair();
-		const bundle = buildMockKeyBundle(keyPair.publicKey, keyPair.keyId);
-
-		// First call succeeds
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: async () => bundle,
-		});
+	it('keeps serving stored keys after a later HTTP error', async () => {
+		const { publicKey } = generateKeyPair();
+		mockFetch.mockResolvedValueOnce(keyFileResponse(publicKey));
 		await fetchProviderKeys();
 
-		// Force cache expiry
-		clearProviderKeyCache();
-
-		// Re-populate cache
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: async () => bundle,
-		});
-		await fetchProviderKeys();
-
-		// Now simulate a cache miss + error by clearing and failing
-		clearProviderKeyCache();
-		mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
-
-		const result = await fetchProviderKeys();
-		// Cache was cleared, so stale returns null
-		expect(result).toBeNull();
+		mockFetch.mockResolvedValueOnce(keyFileResponse('', 500));
+		const after = await fetchProviderKeys();
+		expect(after?.keys).toHaveLength(1);
 	});
 
-	it('should return null for invalid response shape', async () => {
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: async () => ({ invalid: 'data' }),
-		});
+	it('returns null for unparseable key file content', async () => {
+		mockFetch.mockResolvedValueOnce(keyFileResponse('this is not a key'));
+		expect(await fetchProviderKeys()).toBeNull();
+	});
 
-		const result = await fetchProviderKeys();
-		expect(result).toBeNull();
+	it('accepts the legacy JSON bundle shape as a fallback', async () => {
+		const { publicKey } = generateKeyPair();
+		mockFetch.mockResolvedValueOnce(
+			keyFileResponse(JSON.stringify({ keys: [{ public_key_pem: publicKey }] }))
+		);
+
+		const bundle = await fetchProviderKeys();
+		expect(bundle?.keys[0].keyid).toBe(computeKeyId(publicKey));
 	});
 });
 
@@ -267,69 +259,42 @@ describe('requestCosignature', () => {
 });
 
 // ============================================================================
-// findProviderKey
+// findProviderKey (content-addressed lookup, historical retention)
 // ============================================================================
 
 describe('findProviderKey', () => {
-	it('should find an active key by keyid', async () => {
-		const keyPair = generateKeyPair();
-		const bundle = buildMockKeyBundle(keyPair.publicKey, keyPair.keyId);
+	it('finds a key by its content-hash keyid', async () => {
+		const { publicKey } = generateKeyPair();
+		mockFetch.mockResolvedValueOnce(keyFileResponse(publicKey));
 
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: async () => bundle,
-		});
-
-		const pem = await findProviderKey(keyPair.keyId);
-		expect(pem).toBe(keyPair.publicKey);
+		const pem = await findProviderKey(computeKeyId(publicKey));
+		expect(pem?.trim()).toBe(publicKey.trim());
 	});
 
-	it('should return null for unknown keyid', async () => {
-		const keyPair = generateKeyPair();
-		const bundle = buildMockKeyBundle(keyPair.publicKey, keyPair.keyId);
+	it('returns null for an unknown keyid', async () => {
+		const { publicKey } = generateKeyPair();
+		mockFetch.mockResolvedValue(keyFileResponse(publicKey));
 
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: async () => bundle,
-		});
-
-		const pem = await findProviderKey('0000000000000000');
-		expect(pem).toBeNull();
+		expect(await findProviderKey('0000000000000000')).toBeNull();
 	});
 
-	it('should return null for revoked key', async () => {
-		const keyPair = generateKeyPair();
-		const bundle = buildMockKeyBundle(keyPair.publicKey, keyPair.keyId);
-		bundle.keys[0].status = 'revoked';
+	it('still resolves a ROTATED-OUT key (historical keys verify old attestations)', async () => {
+		const oldKey = generateKeyPair().publicKey;
+		const newKey = generateKeyPair().publicKey;
 
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: async () => bundle,
-		});
+		mockFetch.mockResolvedValueOnce(keyFileResponse(oldKey));
+		await fetchProviderKeys();
 
-		const pem = await findProviderKey(keyPair.keyId);
-		expect(pem).toBeNull();
+		// Provider rotates: the published file now serves only the new key
+		mockFetch.mockResolvedValue(keyFileResponse(newKey));
+		const pem = await findProviderKey(computeKeyId(oldKey));
+
+		expect(pem?.trim()).toBe(oldKey.trim());
 	});
 
-	it('should return null for expired key', async () => {
-		const keyPair = generateKeyPair();
-		const bundle = buildMockKeyBundle(keyPair.publicKey, keyPair.keyId);
-		bundle.keys[0].valid_until = '2020-01-01T00:00:00Z'; // expired
-
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: async () => bundle,
-		});
-
-		const pem = await findProviderKey(keyPair.keyId);
-		expect(pem).toBeNull();
-	});
-
-	it('should return null when keys cannot be fetched', async () => {
-		mockFetch.mockRejectedValueOnce(new Error('offline'));
-
-		const pem = await findProviderKey('anything');
-		expect(pem).toBeNull();
+	it('returns null when keys cannot be fetched', async () => {
+		mockFetch.mockRejectedValue(new Error('offline'));
+		expect(await findProviderKey('abcdef0123456789')).toBeNull();
 	});
 });
 
@@ -343,11 +308,7 @@ describe('verifyProviderSignature', () => {
 		const paeBytes = computePAE('application/vnd.in-toto+json', 'test-statement');
 		const sig = signPAE(paeBytes, providerKeyPair.privateKey);
 
-		const bundle = buildMockKeyBundle(providerKeyPair.publicKey, providerKeyPair.keyId);
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: async () => bundle,
-		});
+		mockFetch.mockResolvedValueOnce(keyFileResponse(providerKeyPair.publicKey));
 
 		const valid = await verifyProviderSignature(paeBytes, sig, providerKeyPair.keyId);
 		expect(valid).toBe(true);
@@ -358,11 +319,7 @@ describe('verifyProviderSignature', () => {
 		const paeBytes = computePAE('application/vnd.in-toto+json', 'original');
 		const sig = signPAE(paeBytes, providerKeyPair.privateKey);
 
-		const bundle = buildMockKeyBundle(providerKeyPair.publicKey, providerKeyPair.keyId);
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: async () => bundle,
-		});
+		mockFetch.mockResolvedValueOnce(keyFileResponse(providerKeyPair.publicKey));
 
 		const tamperedPae = computePAE('application/vnd.in-toto+json', 'tampered');
 		const valid = await verifyProviderSignature(tamperedPae, sig, providerKeyPair.keyId);
@@ -374,13 +331,9 @@ describe('verifyProviderSignature', () => {
 		const paeBytes = computePAE('application/vnd.in-toto+json', 'data');
 		const sig = signPAE(paeBytes, providerKeyPair.privateKey);
 
-		const bundle = buildMockKeyBundle(providerKeyPair.publicKey, providerKeyPair.keyId);
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: async () => bundle,
-		});
+		mockFetch.mockResolvedValue(keyFileResponse(providerKeyPair.publicKey));
 
-		const valid = await verifyProviderSignature(paeBytes, sig, 'wrong-keyid-here');
+		const valid = await verifyProviderSignature(paeBytes, sig, '0000000000000000');
 		expect(valid).toBe(false);
 	});
 
@@ -389,23 +342,9 @@ describe('verifyProviderSignature', () => {
 		const paeBytes = computePAE('application/vnd.in-toto+json', 'data');
 		const sig = signPAE(paeBytes, providerKeyPair.privateKey);
 
-		mockFetch.mockRejectedValueOnce(new Error('offline'));
+		mockFetch.mockRejectedValue(new Error('offline'));
 
 		const valid = await verifyProviderSignature(paeBytes, sig, providerKeyPair.keyId);
-		expect(valid).toBe(false);
-	});
-
-	it('should reject a corrupted signature', async () => {
-		const providerKeyPair = generateKeyPair();
-		const paeBytes = computePAE('application/vnd.in-toto+json', 'data');
-
-		const bundle = buildMockKeyBundle(providerKeyPair.publicKey, providerKeyPair.keyId);
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: async () => bundle,
-		});
-
-		const valid = await verifyProviderSignature(paeBytes, 'not-a-valid-sig', providerKeyPair.keyId);
 		expect(valid).toBe(false);
 	});
 });

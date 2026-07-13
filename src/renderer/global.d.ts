@@ -3754,6 +3754,9 @@ interface MaestroAPI {
 				envelope?: unknown
 			) => Promise<{ success: boolean; data?: unknown; error?: string }>;
 			getProviderKeys: () => Promise<{ success: boolean; data?: unknown; error?: string }>;
+			checkProviderKeyUpdate: (
+				force?: boolean
+			) => Promise<{ success: boolean; data?: unknown; error?: string }>;
 		};
 	};
 
