@@ -1,8 +1,10 @@
 // VERIFY v1.0 Provider Key Store — static-file key distribution.
 //
 // The provider publishes its CURRENT public key as a plain static file on the
-// website (a bare PEM at PROVIDER_KEY_FILE_URL). No API, no bundle service:
-// pulling the file IS the protocol.
+// website at the VIBES-standard path https://{toolDomain}/vibes/{toolName}.pub
+// (a bare SPKI PEM). No API, no bundle service: pulling the file IS the
+// protocol, and any verifier can derive any tool's key URL from its domain
+// and name alone.
 //
 // Versioning is content-addressed: the VERIFY key ID (SHA-256 of the DER
 // public key, first 16 hex chars) doubles as the key's version. A new file
@@ -28,10 +30,27 @@ const LOG_CONTEXT = '[VIBES-PROVIDER-KEYS]';
 // ============================================================================
 
 /**
- * Static file containing the provider's current public key (bare SPKI PEM).
- * This is a plain file on the website — fetched with a simple GET.
+ * VIBES-standard location for a tool provider's published public key:
+ *
+ *     https://{toolDomain}/vibes/{toolName}.pub
+ *
+ * where toolDomain is the tool's website domain and toolName is the
+ * lowercase tool name. The file contains the tool's CURRENT public key as a
+ * bare SPKI PEM — a plain static file fetched with a simple GET. Any
+ * VIBES-verifying client can derive the key URL for any tool from just its
+ * domain and name; no registry or discovery API is needed.
  */
-export const PROVIDER_KEY_FILE_URL = 'https://maestro.sh/vibes/vibescheck.pub';
+export function buildProviderKeyUrl(toolDomain: string, toolName: string): string {
+	const domain = toolDomain.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+	return `https://${domain}/vibes/${toolName.toLowerCase()}.pub`;
+}
+
+/** Maestro's own tool identity for the VIBES-standard key path. */
+export const MAESTRO_TOOL_DOMAIN = 'maestro.sh';
+export const MAESTRO_TOOL_NAME = 'maestro';
+
+/** Maestro's published key file per the standard path convention. */
+export const PROVIDER_KEY_FILE_URL = buildProviderKeyUrl(MAESTRO_TOOL_DOMAIN, MAESTRO_TOOL_NAME);
 
 /** Directory holding the persisted provider key store. */
 const PROVIDER_KEYS_DIR = path.join(os.homedir(), '.vibescheck', 'keys', 'providers');
@@ -182,16 +201,24 @@ export function parsePublishedKeyFile(content: string): string[] {
  *
  * Offline/network errors never throw: the persisted store keeps serving.
  *
- * @param options.force  Skip the KEY_CHECK_INTERVAL_MS throttle.
- * @param options.url    Override the published key URL (tests, self-hosting).
+ * @param options.force       Skip the KEY_CHECK_INTERVAL_MS throttle.
+ * @param options.url         Override the published key URL directly (tests).
+ * @param options.toolDomain  Derive the URL from a tool identity per the
+ * @param options.toolName    standard path: https://{domain}/vibes/{name}.pub.
  */
 export async function checkProviderKeyUpdate(options?: {
 	force?: boolean;
 	url?: string;
+	toolDomain?: string;
+	toolName?: string;
 }): Promise<ProviderKeyUpdateResult> {
 	const store = await loadProviderKeyStore();
 	const previousKeyId = store.current_keyid;
-	const url = options?.url ?? PROVIDER_KEY_FILE_URL;
+	const url =
+		options?.url ??
+		(options?.toolDomain && options?.toolName
+			? buildProviderKeyUrl(options.toolDomain, options.toolName)
+			: PROVIDER_KEY_FILE_URL);
 
 	// Throttle: skip the network when checked recently (unless forced)
 	if (!options?.force && store.last_checked) {

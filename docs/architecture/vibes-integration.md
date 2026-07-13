@@ -275,6 +275,31 @@ The `VibesSettings` component (`src/renderer/components/Settings/VibesSettings.t
 - Custom vibescheck binary path
 - Advanced section: compression and blob thresholds
 
+## Provider Key Distribution (VERIFY standard path)
+
+Tool providers publish their attestation public key as a plain static file at a standard, derivable location on their own website:
+
+```
+https://{toolDomain}/vibes/{toolName}.pub
+```
+
+- **toolDomain** - the tool's website domain (e.g. `maestro.sh`)
+- **toolName** - the lowercase tool name (e.g. `maestro`)
+- The file contains the tool's CURRENT public key as a bare SPKI PEM. During a rotation overlap window it MAY contain two concatenated PEM blocks; the first block is the current key.
+
+Maestro's own key lives at `https://maestro.sh/vibes/maestro.pub`.
+
+Design properties:
+
+- **Derivable, registry-free.** Any VIBES verifier can construct the key URL for any tool from just its domain and name. There is no discovery API, key server, or registry dependency.
+- **The key is its own version.** The VERIFY key ID (SHA-256 of the DER-encoded public key, first 16 hex chars) doubles as the version identifier: new file content means a new keyId means a new key version. No version field or manifest is needed.
+- **Cheap freshness checks.** Clients use HTTP conditional GETs (`If-None-Match` / `If-Modified-Since`); a `304 Not Modified` means no new key. Static hosts and CDNs provide `ETag`/`Last-Modified` for free.
+- **Rotation never breaks history.** Clients retain every key version they have ever pulled (Maestro persists them at `~/.vibescheck/keys/providers/index.json`) so attestations cosigned under a rotated-out key verify offline indefinitely. Publishing a new key file only changes which key signs FUTURE cosignatures.
+
+Implementation: `buildProviderKeyUrl()` and the persistent keystore in `src/main/vibes/vibes-provider-keystore.ts`; consumed by `vibes-cosign-service.ts` for cosignature verification. The renderer can force a version check via `window.maestro.vibes.attestation.checkProviderKeyUpdate(force, { domain, name })`.
+
+This convention should be proposed upstream into the VIBES/VERIFY specification so all conforming tools publish keys at the same derivable path.
+
 ## Design Decisions
 
 ### Why instrumentation lives in Maestro

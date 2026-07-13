@@ -541,13 +541,20 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 	// Check the published static key file for a new provider key version.
 	// The key's content hash (keyId) is the version; ETag/Last-Modified make
 	// the check cheap. force=true bypasses the hourly throttle.
-	ipcMain.handle('vibes:checkProviderKeyUpdate', async (_event, force?: boolean) => {
-		try {
-			const result = await checkProviderKeyUpdate({ force });
-			return { success: true, data: result };
-		} catch (error) {
-			logger.error('checkProviderKeyUpdate error', LOG_CONTEXT, { error: String(error) });
-			return { success: false, error: String(error) };
+	ipcMain.handle(
+		'vibes:checkProviderKeyUpdate',
+		async (_event, force?: boolean, tool?: { domain: string; name: string }) => {
+			try {
+				const result = await checkProviderKeyUpdate({
+					force,
+					toolDomain: tool?.domain,
+					toolName: tool?.name,
+				});
+				return { success: true, data: result };
+			} catch (error) {
+				logger.error('checkProviderKeyUpdate error', LOG_CONTEXT, { error: String(error) });
+				return { success: false, error: String(error) };
+			}
 		}
-	});
+	);
 }

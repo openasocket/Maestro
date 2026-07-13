@@ -36,6 +36,10 @@ import {
 	getProviderKeyById,
 	getCurrentProviderKey,
 	loadProviderKeyStore,
+	buildProviderKeyUrl,
+	PROVIDER_KEY_FILE_URL,
+	MAESTRO_TOOL_DOMAIN,
+	MAESTRO_TOOL_NAME,
 } from '../../../main/vibes/vibes-provider-keystore';
 
 const mockFetch = vi.fn();
@@ -66,6 +70,38 @@ function pemResponse(
 		text: async () => body,
 	};
 }
+
+describe('buildProviderKeyUrl (VIBES-standard key path)', () => {
+	it('builds https://{toolDomain}/vibes/{toolName}.pub', () => {
+		expect(buildProviderKeyUrl('example.com', 'mytool')).toBe(
+			'https://example.com/vibes/mytool.pub'
+		);
+	});
+
+	it('lowercases the tool name and strips scheme/trailing slash from the domain', () => {
+		expect(buildProviderKeyUrl('https://Example.com/', 'MyTool')).toBe(
+			'https://Example.com/vibes/mytool.pub'
+		);
+	});
+
+	it("Maestro's own key URL follows the standard path", () => {
+		expect(PROVIDER_KEY_FILE_URL).toBe(buildProviderKeyUrl(MAESTRO_TOOL_DOMAIN, MAESTRO_TOOL_NAME));
+		expect(PROVIDER_KEY_FILE_URL).toBe('https://maestro.sh/vibes/maestro.pub');
+	});
+
+	it('checkProviderKeyUpdate derives the URL from a tool identity', async () => {
+		const { publicKey } = generateKeyPair();
+		mockFetch.mockResolvedValueOnce(pemResponse(publicKey));
+
+		await checkProviderKeyUpdate({
+			force: true,
+			toolDomain: 'other-tool.dev',
+			toolName: 'OtherTool',
+		});
+
+		expect(mockFetch.mock.calls[0][0]).toBe('https://other-tool.dev/vibes/othertool.pub');
+	});
+});
 
 describe('parsePublishedKeyFile', () => {
 	it('parses a bare SPKI PEM (the primary static-file format)', () => {
