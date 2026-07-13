@@ -76,6 +76,7 @@ describe('ClaudeOutputParser', () => {
 			expect(event?.text).toBe('Partial response...');
 			expect(event?.sessionId).toBe('sess-abc123');
 			expect(event?.isPartial).toBe(true);
+			expect(event?.isReasoning).toBeUndefined();
 		});
 
 		it('should handle assistant messages with content array', () => {
@@ -425,6 +426,7 @@ describe('ClaudeOutputParser', () => {
 			expect(event?.type).toBe('text');
 			expect(event?.text).toBe('Let me analyze this codebase...');
 			expect(event?.isPartial).toBe(true);
+			expect(event?.isReasoning).toBe(true);
 		});
 
 		it('should prioritize thinking content over text content', () => {
@@ -441,6 +443,7 @@ describe('ClaudeOutputParser', () => {
 			const event = parser.parseJsonLine(line);
 			// Thinking content should be emitted for thinking-chunk events
 			expect(event?.text).toBe('Analyzing the problem...');
+			expect(event?.isReasoning).toBe(true);
 		});
 
 		it('should extract multiple thinking blocks', () => {
@@ -456,6 +459,7 @@ describe('ClaudeOutputParser', () => {
 
 			const event = parser.parseJsonLine(line);
 			expect(event?.text).toBe('First I will analyze the code structure.');
+			expect(event?.isReasoning).toBe(true);
 		});
 
 		it('should fall back to text content when no thinking blocks', () => {
@@ -468,6 +472,7 @@ describe('ClaudeOutputParser', () => {
 
 			const event = parser.parseJsonLine(line);
 			expect(event?.text).toBe('Here is my response.');
+			expect(event?.isReasoning).toBeUndefined();
 		});
 
 		it('should ignore redacted_thinking blocks', () => {
@@ -484,6 +489,7 @@ describe('ClaudeOutputParser', () => {
 			const event = parser.parseJsonLine(line);
 			// Should fall back to text since redacted_thinking is ignored
 			expect(event?.text).toBe('Response after redacted thinking');
+			expect(event?.isReasoning).toBeUndefined();
 		});
 
 		it('should handle thinking blocks alongside tool_use blocks', () => {
@@ -499,6 +505,7 @@ describe('ClaudeOutputParser', () => {
 
 			const event = parser.parseJsonLine(line);
 			expect(event?.text).toBe('I need to read the file.');
+			expect(event?.isReasoning).toBe(true);
 			expect(event?.toolUseBlocks).toHaveLength(1);
 			expect(event?.toolUseBlocks?.[0].name).toBe('Read');
 		});
@@ -621,6 +628,53 @@ describe('ClaudeOutputParser', () => {
 			const line = JSON.stringify({ type: 'error', message: 'Invalid API key' });
 			const error = parser.detectErrorFromLine(line);
 			expect(error?.raw?.errorLine).toBe(line);
+		});
+
+		it('should return unknown error for unrecognized structured JSON errors', () => {
+			const line = JSON.stringify({
+				type: 'turn.failed',
+				error: { message: 'some novel error we have never seen before' },
+			});
+			const error = parser.detectErrorFromLine(line);
+			expect(error).not.toBeNull();
+			expect(error?.type).toBe('unknown');
+			expect(error?.message).toBe('some novel error we have never seen before');
+			expect(error?.agentId).toBe('claude-code');
+			expect(error?.recoverable).toBe(true);
+			expect(error?.parsedJson).toBeDefined();
+		});
+
+		it('should include parsedJson on matched pattern errors', () => {
+			const line = JSON.stringify({ type: 'error', message: 'Invalid API key' });
+			const error = parser.detectErrorFromLine(line);
+			expect(error?.parsedJson).toBeDefined();
+		});
+
+		it('should NOT treat system api_retry events as errors', () => {
+			// Claude Code emits these when retrying HTTP 429/529; the turn ultimately
+			// succeeds. The `error` field here is a retry-category tag, not a failure.
+			const line = JSON.stringify({
+				type: 'system',
+				subtype: 'api_retry',
+				attempt: 1,
+				max_retries: 10,
+				retry_delay_ms: 549.5,
+				error_status: 529,
+				error: 'rate_limit',
+				session_id: 'b63e648d-360f-44b7-a9b0-6dc63b609241',
+				uuid: '1b397bb3-2e6f-4821-8547-e026d8d11817',
+			});
+			expect(parser.detectErrorFromLine(line)).toBeNull();
+		});
+
+		it('should NOT treat system init events as errors even if they carry an error field', () => {
+			const line = JSON.stringify({
+				type: 'system',
+				subtype: 'init',
+				session_id: 'abc',
+				error: 'something',
+			});
+			expect(parser.detectErrorFromLine(line)).toBeNull();
 		});
 	});
 

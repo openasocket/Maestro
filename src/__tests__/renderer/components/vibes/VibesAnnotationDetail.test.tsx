@@ -61,7 +61,7 @@ describe('VibesAnnotationDetail', () => {
 				manifest={null}
 				isLoadingManifest={false}
 				onClose={vi.fn()}
-			/>,
+			/>
 		);
 
 		expect(screen.getByTestId('annotation-detail-panel')).toBeTruthy();
@@ -81,7 +81,7 @@ describe('VibesAnnotationDetail', () => {
 				manifest={null}
 				isLoadingManifest={false}
 				onClose={vi.fn()}
-			/>,
+			/>
 		);
 
 		// Should render the detail panel (not bail out)
@@ -103,7 +103,7 @@ describe('VibesAnnotationDetail', () => {
 				manifest={null}
 				isLoadingManifest={false}
 				onClose={vi.fn()}
-			/>,
+			/>
 		);
 
 		expect(screen.getByText(/Annotation data is incomplete/)).toBeTruthy();
@@ -130,7 +130,7 @@ describe('VibesAnnotationDetail', () => {
 				manifest={manifest}
 				isLoadingManifest={false}
 				onClose={vi.fn()}
-			/>,
+			/>
 		);
 
 		expect(screen.getByText('claude-code 1.0.0')).toBeTruthy();
@@ -158,7 +158,7 @@ describe('VibesAnnotationDetail', () => {
 				manifest={manifest}
 				isLoadingManifest={false}
 				onClose={vi.fn()}
-			/>,
+			/>
 		);
 
 		// Should render tool_name without trailing space (trimmed)
@@ -174,7 +174,7 @@ describe('VibesAnnotationDetail', () => {
 				manifest={null}
 				isLoadingManifest={true}
 				onClose={vi.fn()}
-			/>,
+			/>
 		);
 
 		expect(screen.getByText('Loading manifest...')).toBeTruthy();
@@ -188,7 +188,7 @@ describe('VibesAnnotationDetail', () => {
 				manifest={null}
 				isLoadingManifest={false}
 				onClose={vi.fn()}
-			/>,
+			/>
 		);
 
 		// environment_hash 'abc123def456ghi789jkl012' sliced to 16 chars = 'abc123def456ghi7'

@@ -73,7 +73,12 @@ const mockLocData = {
 	coveragePercent: 40,
 	files: [
 		{ file_path: 'src/main.ts', total_lines: 150, annotated_lines: 120, coverage_percent: 80 },
-		{ file_path: 'src/utils/helpers.ts', total_lines: 100, annotated_lines: 50, coverage_percent: 50 },
+		{
+			file_path: 'src/utils/helpers.ts',
+			total_lines: 100,
+			annotated_lines: 50,
+			coverage_percent: 50,
+		},
 		{ file_path: 'src/config.ts', total_lines: 200, annotated_lines: 30, coverage_percent: 15 },
 		{ file_path: 'src/index.ts', total_lines: 50, annotated_lines: 0, coverage_percent: 0 },
 	],
@@ -116,23 +121,13 @@ describe('VibeCoverageView', () => {
 	it('renders loading state while fetching coverage data', () => {
 		mockGetCoverage.mockReturnValue(new Promise(() => {}));
 
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		expect(screen.getByText('Loading coverage data...')).toBeTruthy();
 	});
 
 	it('fetches coverage data on mount', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(mockGetCoverage).toHaveBeenCalledWith('/test/project');
@@ -140,12 +135,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('renders file list after loading', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -161,12 +151,7 @@ describe('VibeCoverageView', () => {
 	// ========================================================================
 
 	it('displays coverage percentage', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			// 2 full + 0.5 * 1 partial = 2.5 / 4 = 62.5% → 63%
@@ -175,12 +160,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('displays file count stats', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('4 total files')).toBeTruthy();
@@ -192,12 +172,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('displays total annotation count', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('25 annotations')).toBeTruthy();
@@ -209,12 +184,7 @@ describe('VibeCoverageView', () => {
 	// ========================================================================
 
 	it('shows correct status badges for each file', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -237,12 +207,7 @@ describe('VibeCoverageView', () => {
 	// ========================================================================
 
 	it('renders filter buttons', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('All')).toBeTruthy();
@@ -254,12 +219,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('filters to show only covered files', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -280,12 +240,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('filters to show only uncovered files', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -311,12 +266,7 @@ describe('VibeCoverageView', () => {
 			]),
 		});
 
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -333,12 +283,7 @@ describe('VibeCoverageView', () => {
 	// ========================================================================
 
 	it('renders sort buttons', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('Status')).toBeTruthy();
@@ -358,12 +303,7 @@ describe('VibeCoverageView', () => {
 			data: JSON.stringify([]),
 		});
 
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('No tracked files')).toBeTruthy();
@@ -383,12 +323,7 @@ describe('VibeCoverageView', () => {
 			error: 'audit.db not found. Run build first.',
 		});
 
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('Build Required')).toBeTruthy();
@@ -403,12 +338,7 @@ describe('VibeCoverageView', () => {
 			error: 'audit.db not found. Run build first.',
 		});
 
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('Build Now')).toBeTruthy();
@@ -437,12 +367,7 @@ describe('VibeCoverageView', () => {
 			error: 'Something went wrong',
 		});
 
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('Something went wrong')).toBeTruthy();
@@ -452,12 +377,7 @@ describe('VibeCoverageView', () => {
 	it('shows error state on exception', async () => {
 		mockGetCoverage.mockRejectedValue(new Error('Network error'));
 
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('Network error')).toBeTruthy();
@@ -469,12 +389,7 @@ describe('VibeCoverageView', () => {
 	// ========================================================================
 
 	it('displays footer with file count and annotation total', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('4 of 4 files')).toBeTruthy();
@@ -491,18 +406,11 @@ describe('VibeCoverageView', () => {
 		mockGetCoverage.mockResolvedValue({
 			success: true,
 			data: JSON.stringify({
-				files: [
-					{ file_path: 'src/nested.ts', coverage_status: 'full', annotation_count: 3 },
-				],
+				files: [{ file_path: 'src/nested.ts', coverage_status: 'full', annotation_count: 3 }],
 			}),
 		});
 
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/nested.ts')).toBeTruthy();
@@ -510,12 +418,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('does not fetch when projectPath is undefined', () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath={undefined}
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath={undefined} />);
 
 		expect(mockGetCoverage).not.toHaveBeenCalled();
 	});
@@ -525,12 +428,7 @@ describe('VibeCoverageView', () => {
 	// ========================================================================
 
 	it('renders donut chart with correct segment proportions', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByTestId('coverage-donut')).toBeTruthy();
@@ -551,12 +449,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('shows percentage label in donut center', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByTestId('donut-percentage')).toBeTruthy();
@@ -568,12 +461,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('renders legend with correct counts', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByTestId('coverage-legend')).toBeTruthy();
@@ -594,12 +482,7 @@ describe('VibeCoverageView', () => {
 			]),
 		});
 
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByTestId('coverage-donut')).toBeTruthy();
@@ -620,12 +503,7 @@ describe('VibeCoverageView', () => {
 			]),
 		});
 
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByTestId('coverage-donut')).toBeTruthy();
@@ -643,12 +521,7 @@ describe('VibeCoverageView', () => {
 	// ========================================================================
 
 	it('renders directory view when toggle is active', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -665,12 +538,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('groups files by parent directory', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -694,12 +562,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('shows directory-level coverage percentage', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -716,12 +579,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('expands directory to show child files', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -747,12 +605,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('collapses directory on click', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -778,12 +631,7 @@ describe('VibeCoverageView', () => {
 	// ========================================================================
 
 	it('renders extension distribution section', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByTestId('extension-distribution')).toBeTruthy();
@@ -793,12 +641,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('shows extension labels with file counts', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByTestId('extension-distribution')).toBeTruthy();
@@ -821,12 +664,7 @@ describe('VibeCoverageView', () => {
 			]),
 		});
 
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByTestId('extension-distribution')).toBeTruthy();
@@ -844,12 +682,7 @@ describe('VibeCoverageView', () => {
 			data: JSON.stringify([]),
 		});
 
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('No tracked files')).toBeTruthy();
@@ -863,12 +696,7 @@ describe('VibeCoverageView', () => {
 	// ========================================================================
 
 	it('renders Lines toggle button', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByTestId('view-lines-btn')).toBeTruthy();
@@ -878,12 +706,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('fetches LOC coverage data on mount', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(mockGetLocCoverage).toHaveBeenCalledWith('/test/project');
@@ -891,12 +714,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('shows LOC view when Lines toggle is clicked', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -915,12 +733,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('displays LOC summary with annotated/total lines', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -936,12 +749,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('shows per-file LOC breakdown with percentages', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -967,12 +775,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('shows LOC footer with line counts', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -993,12 +796,7 @@ describe('VibeCoverageView', () => {
 	// ========================================================================
 
 	it('renders KLOC toggle button', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByTestId('view-kloc-btn')).toBeTruthy();
@@ -1008,12 +806,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('shows KLOC view when KLOC toggle is clicked', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -1031,12 +824,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('displays KLOC summary with annotated/total in K', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -1055,12 +843,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('shows directory-level KLOC breakdown', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -1084,12 +867,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('hides donut/stats/legend for KLOC view', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -1111,12 +889,7 @@ describe('VibeCoverageView', () => {
 	});
 
 	it('shows KLOC footer with line counts', async () => {
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();
@@ -1139,12 +912,7 @@ describe('VibeCoverageView', () => {
 			error: 'no data',
 		});
 
-		render(
-			<VibeCoverageView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibeCoverageView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('src/main.ts')).toBeTruthy();

@@ -15,6 +15,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
+import { isWindows } from './platformDetection';
 
 /**
  * Expand tilde (~) to home directory in paths.
@@ -54,6 +55,15 @@ export function expandTilde(filePath: string, homeDir?: string): string {
 }
 
 /**
+ * Encode a project path the same way Claude Code does.
+ * Claude replaces all non-alphanumeric characters with '-'.
+ * See: https://github.com/RunMaestro/Maestro/issues/348
+ */
+export function encodeClaudeProjectPath(projectPath: string): string {
+	return projectPath.replace(/[^a-zA-Z0-9]/g, '-');
+}
+
+/**
  * Split a version string into its numeric part and optional pre-release suffix.
  *
  * @param version - Cleaned version string (no 'v' prefix), e.g., "0.15.0-rc.1"
@@ -69,26 +79,6 @@ function splitVersionParts(version: string): [string, string | undefined] {
 	const dashIndex = version.indexOf('-');
 	if (dashIndex === -1) return [version, undefined];
 	return [version.substring(0, dashIndex), version.substring(dashIndex + 1)];
-}
-
-/**
- * Parse version string to comparable array of numbers.
- * Pre-release suffixes (e.g., -rc.1, -beta.2) are stripped before parsing.
- *
- * @param version - Version string (e.g., "v22.10.0" or "0.14.0" or "0.15.0-rc.1")
- * @returns Array of version numbers (e.g., [22, 10, 0])
- *
- * @example
- * ```typescript
- * parseVersion('v22.10.0')      // [22, 10, 0]
- * parseVersion('0.14.0')        // [0, 14, 0]
- * parseVersion('0.15.0-rc.1')   // [0, 15, 0]
- * ```
- */
-export function parseVersion(version: string): number[] {
-	const cleaned = version.replace(/^v/, '');
-	const [numericPart] = splitVersionParts(cleaned);
-	return numericPart.split('.').map((n) => parseInt(n, 10) || 0);
 }
 
 /**
@@ -170,7 +160,7 @@ export function compareVersions(a: string, b: string): number {
  * ```
  */
 export function detectNodeVersionManagerBinPaths(): string[] {
-	if (process.platform === 'win32') {
+	if (isWindows()) {
 		return []; // Windows has different version manager paths handled elsewhere
 	}
 
@@ -290,9 +280,9 @@ export function detectNodeVersionManagerBinPaths(): string[] {
  * ```
  */
 export function buildExpandedPath(customPaths?: string[]): string {
-	const isWindows = process.platform === 'win32';
 	const delimiter = path.delimiter;
 	const home = os.homedir();
+	const versionManagerPaths = detectNodeVersionManagerBinPaths();
 
 	// Start with current PATH
 	const currentPath = process.env.PATH || '';
@@ -301,7 +291,7 @@ export function buildExpandedPath(customPaths?: string[]): string {
 	// Platform-specific additional paths
 	let additionalPaths: string[];
 
-	if (isWindows) {
+	if (isWindows()) {
 		const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
 		const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
 		const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
@@ -352,6 +342,8 @@ export function buildExpandedPath(customPaths?: string[]): string {
 			path.join(process.env.ChocolateyInstall || 'C:\\ProgramData\\chocolatey', 'bin'),
 			// Go binaries
 			path.join(home, 'go', 'bin'),
+			// GitHub CLI (official MSI installer)
+			path.join(programFiles, 'GitHub CLI'),
 			// Windows system paths
 			path.join(systemRoot, 'System32'),
 			path.join(systemRoot),
@@ -361,15 +353,18 @@ export function buildExpandedPath(customPaths?: string[]): string {
 	} else {
 		// Unix-like paths (macOS/Linux)
 		additionalPaths = [
+			...versionManagerPaths,
 			'/opt/homebrew/bin', // Homebrew on Apple Silicon
 			'/opt/homebrew/sbin',
 			'/usr/local/bin', // Homebrew on Intel, common install location
 			'/usr/local/sbin',
 			`${home}/.local/bin`, // User local installs (pip, etc.)
 			`${home}/.npm-global/bin`, // npm global with custom prefix
+			`${home}/.bun/bin`, // Bun runtime and package manager
 			`${home}/bin`, // User bin directory
 			`${home}/.claude/local`, // Claude local install location
 			`${home}/.opencode/bin`, // OpenCode installer default location
+			'/home/linuxbrew/.linuxbrew/bin', // Linuxbrew
 			'/usr/bin',
 			'/bin',
 			'/usr/sbin',
@@ -377,17 +372,20 @@ export function buildExpandedPath(customPaths?: string[]): string {
 		];
 	}
 
-	// Add custom paths first (if provided)
+	// Iterate in reverse because each entry is prepended with unshift().
+	// This preserves the caller's intended left-to-right path precedence.
 	if (customPaths && customPaths.length > 0) {
-		for (const p of customPaths) {
+		for (let i = customPaths.length - 1; i >= 0; i--) {
+			const p = customPaths[i];
 			if (!pathParts.includes(p)) {
 				pathParts.unshift(p);
 			}
 		}
 	}
 
-	// Add standard additional paths
-	for (const p of additionalPaths) {
+	// Prepend standard paths (version manager bins first, then system paths)
+	for (let i = additionalPaths.length - 1; i >= 0; i--) {
+		const p = additionalPaths[i];
 		if (!pathParts.includes(p)) {
 			pathParts.unshift(p);
 		}

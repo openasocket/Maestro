@@ -19,10 +19,16 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { logger } from '../../../renderer/utils/logger';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { HistoryPanel, HistoryPanelHandle } from '../../../renderer/components/HistoryPanel';
-import type { Theme, Session, HistoryEntry, HistoryEntryType } from '../../../renderer/types';
+import type { Session, HistoryEntry, HistoryEntryType } from '../../../renderer/types';
+import { createMockSession as baseCreateMockSession } from '../../helpers/mockSession';
+import { useUIStore } from '../../../renderer/stores/uiStore';
+import { useSettingsStore } from '../../../renderer/stores/settingsStore';
 
+import { mockTheme } from '../../helpers/mockTheme';
+import { installLocalStorageMock } from '../../helpers/mockLocalStorage';
 // Mock child components
 vi.mock('../../../renderer/components/HistoryDetailModal', () => ({
 	HistoryDetailModal: ({
@@ -104,45 +110,14 @@ vi.mock('../../../renderer/components/HistoryHelpModal', () => ({
 }));
 
 // Create mock theme
-const mockTheme: Theme = {
-	id: 'test-theme',
-	name: 'Test Theme',
-	mode: 'dark',
-	colors: {
-		bgMain: '#1e1e1e',
-		bgSidebar: '#252526',
-		bgActivity: '#333333',
-		textMain: '#ffffff',
-		textDim: '#808080',
-		accent: '#007acc',
-		border: '#404040',
-		success: '#4ec9b0',
-		warning: '#dcdcaa',
-		error: '#f14c4c',
-		buttonBg: '#0e639c',
-		buttonText: '#ffffff',
-	},
-};
 
-// Create mock session
-const createMockSession = (overrides: Partial<Session> = {}): Session => ({
-	id: 'session-1',
-	name: 'Test Session',
-	toolType: 'claude-code',
-	state: 'idle',
-	inputMode: 'ai',
-	cwd: '/test/project',
-	projectRoot: '/test/project',
-	aiPid: 1234,
-	terminalPid: 5678,
-	aiLogs: [],
-	shellLogs: [],
-	isGitRepo: true,
-	fileTree: [],
-	fileExplorerExpanded: [],
-	messageQueue: [],
-	...overrides,
-});
+const createMockSession = (overrides: Partial<Session> = {}): Session =>
+	baseCreateMockSession({
+		aiPid: 1234,
+		terminalPid: 5678,
+		isGitRepo: true,
+		...overrides,
+	});
 
 // Create mock history entry factory
 const createMockEntry = (overrides: Partial<HistoryEntry> = {}): HistoryEntry => ({
@@ -163,6 +138,27 @@ describe('HistoryPanel', () => {
 	beforeEach(() => {
 		vi.useFakeTimers({ shouldAdvanceTime: true });
 
+		// Install a fresh in-memory localStorage mock between tests. Filter
+		// toggles persist under HISTORY_PANEL_FILTERS_KEY; without a reset, a test
+		// that deselects a type leaks the restrictive filter into every later
+		// test, hiding their entries and failing all entry-render assertions.
+		// jsdom here provides no working Storage, so a mock is required. This
+		// installs a fresh in-memory store, which also serves as the per-test reset.
+		installLocalStorageMock();
+
+		// Reset uiStore state used by HistoryPanel
+		useUIStore.setState({ historySearchFilterOpen: false });
+
+		// Default: maestroCue disabled
+		useSettingsStore.setState({
+			encoreFeatures: {
+				directorNotes: false,
+				usageStats: false,
+				symphony: false,
+				maestroCue: false,
+			},
+		});
+
 		// Mock scrollIntoView for jsdom
 		Element.prototype.scrollIntoView = vi.fn();
 
@@ -171,24 +167,91 @@ describe('HistoryPanel', () => {
 		mockHistoryDelete = vi.fn().mockResolvedValue(true);
 		mockHistoryUpdate = vi.fn().mockResolvedValue(true);
 
-		// Add history mock to window.maestro
+		// Add history, settings, and directorNotes mocks to window.maestro.
+		// `getAll` is no longer called by HistoryPanel (replaced by paginated
+		// loading), but tests still drive the entry set through
+		// `mockHistoryGetAll.mockResolvedValue([...])`. We bridge that via an
+		// adapter on `getAllPaginated` that slices the mocked array per the
+		// page request — keeps the existing test surface intact.
+		const getAllPaginatedAdapter = vi.fn(
+			async (options?: {
+				pagination?: { offset?: number; limit?: number };
+				lookbackHours?: number | null;
+			}) => {
+				const all = await mockHistoryGetAll();
+				const arr = Array.isArray(all) ? all : [];
+				// Mirror the server: apply lookback filter before paging.
+				const lookback = options?.lookbackHours ?? null;
+				const cutoff =
+					lookback !== null && lookback > 0 ? Date.now() - lookback * 60 * 60 * 1000 : 0;
+				const filtered =
+					cutoff > 0
+						? arr.filter((e: { timestamp?: number }) => (e.timestamp ?? 0) >= cutoff)
+						: arr;
+				const offset = options?.pagination?.offset ?? 0;
+				const limit = options?.pagination?.limit ?? 100;
+				const slice = filtered.slice(offset, offset + limit);
+				return {
+					entries: slice,
+					total: filtered.length,
+					limit,
+					offset,
+					hasMore: offset + limit < filtered.length,
+				};
+			}
+		);
 		(
 			window as unknown as {
 				maestro: {
 					history: {
 						getAll: typeof mockHistoryGetAll;
+						getAllPaginated: typeof getAllPaginatedAdapter;
 						delete: typeof mockHistoryDelete;
 						update: typeof mockHistoryUpdate;
+						getGraphData: ReturnType<typeof vi.fn>;
+						getOffsetForTimestamp: ReturnType<typeof vi.fn>;
+					};
+					settings: {
+						get: ReturnType<typeof vi.fn>;
+						set: ReturnType<typeof vi.fn>;
+					};
+					directorNotes: {
+						onHistoryEntryAdded: ReturnType<typeof vi.fn>;
 					};
 				};
 			}
-		).maestro.history = {
-			getAll: mockHistoryGetAll,
-			delete: mockHistoryDelete,
-			update: mockHistoryUpdate,
+		).maestro = {
+			history: {
+				getAll: mockHistoryGetAll,
+				getAllPaginated: getAllPaginatedAdapter,
+				delete: mockHistoryDelete,
+				update: mockHistoryUpdate,
+				// Accepts (sessionId, bucketCount, lookbackHours, sharedContext)
+				// — the lookback is keyed into the cache server-side.
+				getGraphData: vi.fn().mockResolvedValue({
+					buckets: Array.from({ length: 24 }, () => ({ auto: 0, user: 0, cue: 0 })),
+					bucketCount: 24,
+					earliestTimestamp: Date.now() - 24 * 60 * 60 * 1000,
+					latestTimestamp: Date.now(),
+					totalCount: 0,
+					autoCount: 0,
+					userCount: 0,
+					cueCount: 0,
+					hostCounts: {},
+					cached: false,
+				}),
+				getOffsetForTimestamp: vi.fn().mockResolvedValue(0),
+			},
+			settings: {
+				get: vi.fn().mockResolvedValue(undefined),
+				set: vi.fn().mockResolvedValue(undefined),
+			},
+			directorNotes: {
+				onHistoryEntryAdded: vi.fn().mockReturnValue(() => {}),
+			},
 		};
 
-		consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+		consoleErrorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
 	});
 
 	afterEach(() => {
@@ -392,8 +455,12 @@ describe('HistoryPanel', () => {
 			const autoFilter = screen.getByRole('button', { name: /AUTO/i });
 			fireEvent.click(autoFilter);
 
+			// Empty-state copy now references the loaded window since the
+			// list is paginated.
 			await waitFor(() => {
-				expect(screen.getByText('No entries match the selected filters.')).toBeInTheDocument();
+				expect(
+					screen.getByText('No entries match the selected filters in the loaded window.')
+				).toBeInTheDocument();
 			});
 		});
 
@@ -423,6 +490,8 @@ describe('HistoryPanel', () => {
 			const searchInput = screen.getByPlaceholderText('Filter history...');
 			fireEvent.change(searchInput, { target: { value: 'nonexistent' } });
 
+			// Empty-state copy references the loaded window since search
+			// only filters loaded pages client-side.
 			await waitFor(() => {
 				expect(screen.getByText(/No entries match "nonexistent"/)).toBeInTheDocument();
 			});
@@ -433,8 +502,14 @@ describe('HistoryPanel', () => {
 
 			render(<HistoryPanel session={createMockSession()} theme={mockTheme} />);
 
+			// Error originates inside the shared pagination hook now —
+			// `Initial page load failed` is its standard log.
 			await waitFor(() => {
-				expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load history:', expect.any(Error));
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					'Initial page load failed',
+					'useHistoryPagination',
+					expect.any(Error)
+				);
 				expect(screen.getByText(/No history yet/)).toBeInTheDocument();
 			});
 		});
@@ -491,6 +566,80 @@ describe('HistoryPanel', () => {
 				expect(screen.getByText('Auto task')).toBeInTheDocument();
 				expect(screen.queryByText('User task')).not.toBeInTheDocument();
 			});
+		});
+
+		it('should toggle CUE filter', async () => {
+			// Enable maestroCue so CUE filter button is visible
+			useSettingsStore.setState({
+				encoreFeatures: {
+					directorNotes: false,
+					usageStats: false,
+					symphony: false,
+					maestroCue: true,
+				},
+			});
+
+			const autoEntry = createMockEntry({ type: 'AUTO', summary: 'Auto task' });
+			const cueEntry = createMockEntry({
+				id: 'cue-1',
+				type: 'CUE',
+				summary: 'Cue triggered task',
+				cueTriggerName: 'lint-on-save',
+				cueEventType: 'file_change',
+			});
+			mockHistoryGetAll.mockResolvedValue([autoEntry, cueEntry]);
+
+			render(<HistoryPanel session={createMockSession()} theme={mockTheme} />);
+
+			await waitFor(() => {
+				expect(screen.getByText('Auto task')).toBeInTheDocument();
+				expect(screen.getByText('Cue triggered task')).toBeInTheDocument();
+			});
+
+			// Toggle off CUE
+			const cueFilter = screen.getByRole('button', { name: /CUE/i });
+			fireEvent.click(cueFilter);
+
+			await waitFor(() => {
+				expect(screen.getByText('Auto task')).toBeInTheDocument();
+				expect(screen.queryByText('Cue triggered task')).not.toBeInTheDocument();
+			});
+
+			// Toggle CUE back on
+			fireEvent.click(cueFilter);
+
+			await waitFor(() => {
+				expect(screen.getByText('Cue triggered task')).toBeInTheDocument();
+			});
+		});
+
+		it('should hide CUE filter button when maestroCue is disabled', async () => {
+			useSettingsStore.setState({
+				encoreFeatures: {
+					directorNotes: false,
+					usageStats: false,
+					symphony: false,
+					maestroCue: false,
+				},
+			});
+
+			const cueEntry = createMockEntry({
+				type: 'CUE',
+				summary: 'Cue triggered task',
+			});
+			mockHistoryGetAll.mockResolvedValue([cueEntry]);
+
+			render(<HistoryPanel session={createMockSession()} theme={mockTheme} />);
+
+			await waitFor(() => {
+				expect(screen.getByRole('button', { name: /AUTO/i })).toBeInTheDocument();
+				expect(screen.getByRole('button', { name: /USER/i })).toBeInTheDocument();
+			});
+
+			// CUE button should not be rendered
+			expect(screen.queryByRole('button', { name: /CUE/i })).not.toBeInTheDocument();
+			// CUE entries should be filtered out (not in activeFilters)
+			expect(screen.queryByText('Cue triggered task')).not.toBeInTheDocument();
 		});
 
 		it('should filter by search text in summary', async () => {
@@ -580,6 +729,92 @@ describe('HistoryPanel', () => {
 			});
 		});
 
+		it('should filter by hostname', async () => {
+			const entry1 = createMockEntry({
+				id: 'e1',
+				summary: 'Local machine task',
+				hostname: 'macbook-local',
+			});
+			const entry2 = createMockEntry({
+				id: 'e2',
+				summary: 'Remote server task',
+				hostname: 'prod-server-01',
+			});
+			mockHistoryGetAll.mockResolvedValue([entry1, entry2]);
+
+			const { container } = render(
+				<HistoryPanel session={createMockSession()} theme={mockTheme} />
+			);
+
+			await waitFor(() => {
+				expect(screen.getByText('Local machine task')).toBeInTheDocument();
+				expect(screen.getByText('Remote server task')).toBeInTheDocument();
+			});
+
+			// Open search
+			const listContainer = container.querySelector('[tabIndex="0"]');
+			if (listContainer) {
+				fireEvent.keyDown(listContainer, { key: 'f', metaKey: true });
+			}
+
+			const searchInput = await screen.findByPlaceholderText('Filter history...');
+			fireEvent.change(searchInput, { target: { value: 'prod-server' } });
+
+			await waitFor(() => {
+				expect(screen.queryByText('Local machine task')).not.toBeInTheDocument();
+				expect(screen.getByText('Remote server task')).toBeInTheDocument();
+			});
+		});
+
+		it('should hide source picker when only one host is present', async () => {
+			const entry = createMockEntry({ id: 'e1', summary: 'Local only' });
+			mockHistoryGetAll.mockResolvedValue([entry]);
+
+			render(<HistoryPanel session={createMockSession()} theme={mockTheme} />);
+
+			await waitFor(() => {
+				expect(screen.getByText('Local only')).toBeInTheDocument();
+			});
+
+			expect(screen.queryByText('All Sources')).not.toBeInTheDocument();
+		});
+
+		it('should show source picker and narrow list when a host is selected', async () => {
+			const localEntry = createMockEntry({
+				id: 'e1',
+				summary: 'Local task',
+			});
+			const remoteEntry = createMockEntry({
+				id: 'e2',
+				summary: 'Remote task',
+				hostname: 'pedopswat',
+			});
+			mockHistoryGetAll.mockResolvedValue([localEntry, remoteEntry]);
+
+			render(<HistoryPanel session={createMockSession()} theme={mockTheme} />);
+
+			await waitFor(() => {
+				expect(screen.getByText('Local task')).toBeInTheDocument();
+				expect(screen.getByText('Remote task')).toBeInTheDocument();
+			});
+
+			// Default trigger label
+			const trigger = await screen.findByText('All Sources');
+			fireEvent.click(trigger);
+
+			// Popover renders host names with a parenthesized count, e.g.
+			// "pedopswat (1)". The entry's hostname pill in the footer
+			// renders just the bare host name, so this matcher is unique
+			// to the popover row.
+			const remoteOption = await screen.findByText(/pedopswat \(\d+\)/);
+			fireEvent.click(remoteOption);
+
+			await waitFor(() => {
+				expect(screen.queryByText('Local task')).not.toBeInTheDocument();
+				expect(screen.getByText('Remote task')).toBeInTheDocument();
+			});
+		});
+
 		it('should be case-insensitive in search', async () => {
 			const entry = createMockEntry({ summary: 'UPPERCASE Summary' });
 			mockHistoryGetAll.mockResolvedValue([entry]);
@@ -603,6 +838,52 @@ describe('HistoryPanel', () => {
 
 			await waitFor(() => {
 				expect(screen.getByText('UPPERCASE Summary')).toBeInTheDocument();
+			});
+		});
+
+		it('should filter entries by graph lookback period', async () => {
+			const now = Date.now();
+			const recentEntry = createMockEntry({
+				id: 'recent',
+				summary: 'Recent task',
+				timestamp: now - 2 * 60 * 60 * 1000, // 2 hours ago
+			});
+			const oldEntry = createMockEntry({
+				id: 'old',
+				summary: 'Old task',
+				timestamp: now - 48 * 60 * 60 * 1000, // 48 hours ago
+			});
+			mockHistoryGetAll.mockResolvedValue([recentEntry, oldEntry]);
+
+			const { container } = render(
+				<HistoryPanel session={createMockSession()} theme={mockTheme} />
+			);
+
+			// Both entries visible initially (all time)
+			await waitFor(() => {
+				expect(screen.getByText('Recent task')).toBeInTheDocument();
+				expect(screen.getByText('Old task')).toBeInTheDocument();
+			});
+
+			// Right-click the graph to open context menu
+			const graphContainer = container.querySelector(
+				'[class*="flex-1"][class*="min-w-0"][class*="flex-col"]'
+			);
+			if (graphContainer) {
+				fireEvent.contextMenu(graphContainer);
+			}
+
+			// Select "24 hours" from the context menu
+			await waitFor(() => {
+				const option24h = screen.getByText('24 hours');
+				expect(option24h).toBeInTheDocument();
+				fireEvent.click(option24h);
+			});
+
+			// Old entry (48h ago) should be filtered out
+			await waitFor(() => {
+				expect(screen.getByText('Recent task')).toBeInTheDocument();
+				expect(screen.queryByText('Old task')).not.toBeInTheDocument();
 			});
 		});
 
@@ -910,6 +1191,7 @@ describe('HistoryPanel', () => {
 			await waitFor(() => {
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
 					'Failed to delete history entry:',
+					undefined,
 					expect.any(Error)
 				);
 			});
@@ -1075,7 +1357,7 @@ describe('HistoryPanel', () => {
 
 			fireEvent.click(screen.getByText('ABC12345'));
 
-			expect(onOpenSessionAsTab).toHaveBeenCalledWith('abc12345-def-789');
+			expect(onOpenSessionAsTab).toHaveBeenCalledWith('abc12345-def-789', '/test/project');
 		});
 
 		it('should render summary with truncation', async () => {
@@ -1260,17 +1542,19 @@ describe('HistoryPanel', () => {
 
 			const { rerender } = render(<HistoryPanel session={session1} theme={mockTheme} />);
 
+			// Pagination is keyed on sessionId via the hook's loader-identity
+			// reset; the rendered entry confirms the load fired correctly.
 			await waitFor(() => {
-				expect(mockHistoryGetAll).toHaveBeenCalledWith('/project1', 'session-1');
+				expect(screen.getByText('Entry from session 1')).toBeInTheDocument();
 			});
 
-			// Change session
+			// Change session — new loadPage identity triggers a fresh fetch.
 			mockHistoryGetAll.mockResolvedValue([createMockEntry({ summary: 'Entry from session 2' })]);
 
 			rerender(<HistoryPanel session={session2} theme={mockTheme} />);
 
 			await waitFor(() => {
-				expect(mockHistoryGetAll).toHaveBeenCalledWith('/project2', 'session-2');
+				expect(screen.getByText('Entry from session 2')).toBeInTheDocument();
 			});
 		});
 	});
@@ -1357,8 +1641,11 @@ describe('HistoryPanel', () => {
 			});
 		});
 
-		it('should limit entries to MAX_HISTORY_IN_MEMORY', async () => {
-			// Create 600 entries (more than 500 limit)
+		it('should render all entries returned by getAll without an in-memory cap', async () => {
+			// The renderer no longer caps entries — the per-session disk file
+			// already bounds the dataset (MAX_ENTRIES_PER_SESSION=5000), and
+			// the activity graph data is fetched separately from a cached
+			// server endpoint that covers the full history.
 			const entries = Array.from({ length: 600 }, (_, i) =>
 				createMockEntry({ id: `entry-${i}`, summary: `Entry ${i}` })
 			);
@@ -1366,8 +1653,6 @@ describe('HistoryPanel', () => {
 
 			render(<HistoryPanel session={createMockSession()} theme={mockTheme} />);
 
-			// Should display entries (virtualized) with the first one visible
-			// The MAX_HISTORY_IN_MEMORY limit (500) is applied when storing entries
 			await waitFor(() => {
 				expect(screen.getByText('Entry 0')).toBeInTheDocument();
 			});
@@ -1600,16 +1885,26 @@ describe('HistoryPanel', () => {
 	describe('filter button styling', () => {
 		it('should apply active styling to selected filters', async () => {
 			mockHistoryGetAll.mockResolvedValue([]);
+			useSettingsStore.setState({
+				encoreFeatures: {
+					directorNotes: false,
+					usageStats: false,
+					symphony: false,
+					maestroCue: true,
+				},
+			});
 
 			render(<HistoryPanel session={createMockSession()} theme={mockTheme} />);
 
 			await waitFor(() => {
 				const autoFilter = screen.getByRole('button', { name: /AUTO/i });
 				const userFilter = screen.getByRole('button', { name: /USER/i });
+				const cueFilter = screen.getByRole('button', { name: /CUE/i });
 
-				// Both should be active by default
+				// All should be active by default
 				expect(autoFilter).toHaveClass('opacity-100');
 				expect(userFilter).toHaveClass('opacity-100');
+				expect(cueFilter).toHaveClass('opacity-100');
 			});
 		});
 

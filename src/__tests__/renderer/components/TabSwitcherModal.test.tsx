@@ -13,8 +13,10 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { logger } from '../../../renderer/utils/logger';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { TabSwitcherModal } from '../../../renderer/components/TabSwitcherModal';
+import { formatShortcutKeys } from '../../../renderer/utils/shortcutFormatter';
 import { LayerStackProvider } from '../../../renderer/contexts/LayerStackContext';
 import type { Theme, AITab } from '../../../renderer/types';
 
@@ -23,6 +25,8 @@ vi.mock('lucide-react', () => ({
 	Search: () => <svg data-testid="search-icon" />,
 	Star: () => <svg data-testid="star-icon" />,
 	FileText: () => <svg data-testid="file-text-icon" />,
+	Terminal: () => <svg data-testid="terminal-icon" />,
+	Globe: () => <svg data-testid="globe-icon" />,
 }));
 
 // Create a test theme
@@ -425,7 +429,7 @@ describe('TabSwitcherModal', () => {
 				expect(screen.getByText('ABC12345')).toBeInTheDocument();
 			});
 
-			it('returns "New Session" if no name or UUID', () => {
+			it('returns tab UUID marker if no name or agentSessionId', () => {
 				const tab = createTestTab({ name: '', agentSessionId: undefined });
 
 				renderWithLayerStack(
@@ -440,6 +444,7 @@ describe('TabSwitcherModal', () => {
 					/>
 				);
 
+				// No name or agentSessionId yet — shows "New Session"
 				expect(screen.getByText('New Session')).toBeInTheDocument();
 			});
 		});
@@ -567,12 +572,47 @@ describe('TabSwitcherModal', () => {
 				expect(screen.getByText('20%')).toBeInTheDocument();
 			});
 
-			it('caps at 100%', () => {
+			it('caps at 100% when tokens fill the window exactly', () => {
+				// Use values that fill the window without overflowing so we exercise
+				// the Math.min(100, …) cap rather than the overflow branch (which now
+				// returns untrustworthy zeros — see issue #762).
+				const tab = createTestTab({
+					usageStats: {
+						inputTokens: 199500,
+						outputTokens: 0,
+						cacheReadInputTokens: 0,
+						cacheCreationInputTokens: 500,
+						totalCostUsd: 5.0,
+						contextWindow: 200000,
+					},
+				});
+
+				renderWithLayerStack(
+					<TabSwitcherModal
+						theme={theme}
+						tabs={[tab]}
+						activeTabId={tab.id}
+						projectRoot="/test"
+						onTabSelect={vi.fn()}
+						onNamedSessionSelect={vi.fn()}
+						onClose={vi.fn()}
+					/>
+				);
+
+				// 200000 / 200000 = 100%
+				expect(screen.getByText('100%')).toBeInTheDocument();
+			});
+
+			it('hides the gauge when accumulated tokens overflow without a fallback', () => {
+				// Issue #762: an accumulated multi-tool turn can blow past the configured
+				// window before any session-level percentage has been preserved. We must
+				// not surface that as "0%" — hide the gauge instead so users don't read
+				// untrustworthy data.
 				const tab = createTestTab({
 					usageStats: {
 						inputTokens: 150000,
 						outputTokens: 0,
-						cacheReadInputTokens: 100000, // Excluded from calculation (cumulative)
+						cacheReadInputTokens: 100000,
 						cacheCreationInputTokens: 100000,
 						totalCostUsd: 5.0,
 						contextWindow: 200000,
@@ -591,8 +631,8 @@ describe('TabSwitcherModal', () => {
 					/>
 				);
 
-				// (150000 + 100000) / 200000 = 125% -> capped at 100% (cacheRead excluded)
-				expect(screen.getByText('100%')).toBeInTheDocument();
+				// No percentage badge should render (raw=350000 > window=200000, no fallback).
+				expect(screen.queryByText(/^\d+%$/)).not.toBeInTheDocument();
 			});
 		});
 	});
@@ -675,7 +715,9 @@ describe('TabSwitcherModal', () => {
 
 			expect(screen.getByText('2 tabs')).toBeInTheDocument();
 			expect(
-				screen.getByText('↑↓ navigate • Enter select • ⌘1-9 quick select')
+				screen.getByText(
+					`↑↓ navigate • Enter select • ${formatShortcutKeys(['Meta'])}1-9 quick select`
+				)
 			).toBeInTheDocument();
 		});
 
@@ -695,9 +737,7 @@ describe('TabSwitcherModal', () => {
 				/>
 			);
 
-			// In jsdom environment, navigator.userAgent doesn't contain 'Mac'
-			// so shortcut formatter uses Ctrl+T format instead of ⌘T
-			expect(screen.getByText('Ctrl+T')).toBeInTheDocument();
+			expect(screen.getByText(formatShortcutKeys(['Meta', 'T']))).toBeInTheDocument();
 		});
 
 		it('renders empty state for no tabs', () => {
@@ -1173,14 +1213,67 @@ describe('TabSwitcherModal', () => {
 			fireEvent.keyDown(input, { key: 'Tab' });
 			expect(screen.getByPlaceholderText('Search open tabs...')).toBeInTheDocument();
 		});
+
+		it('cycles modes forward with Cmd+Shift+]', () => {
+			renderWithLayerStack(
+				<TabSwitcherModal
+					theme={theme}
+					tabs={[createTestTab({ name: 'Test Tab' })]}
+					activeTabId=""
+					projectRoot="/test"
+					onTabSelect={vi.fn()}
+					onNamedSessionSelect={vi.fn()}
+					onClose={vi.fn()}
+				/>
+			);
+
+			const input = screen.getByPlaceholderText('Search open tabs...');
+
+			// open -> all-named
+			fireEvent.keyDown(input, { key: ']', code: 'BracketRight', metaKey: true, shiftKey: true });
+			expect(screen.getByPlaceholderText('Search named sessions...')).toBeInTheDocument();
+
+			// all-named -> starred
+			fireEvent.keyDown(input, { key: ']', code: 'BracketRight', metaKey: true, shiftKey: true });
+			expect(screen.getByPlaceholderText('Search starred sessions...')).toBeInTheDocument();
+		});
+
+		it('cycles modes backward with Cmd+Shift+[', () => {
+			renderWithLayerStack(
+				<TabSwitcherModal
+					theme={theme}
+					tabs={[createTestTab({ name: 'Test Tab' })]}
+					activeTabId=""
+					projectRoot="/test"
+					onTabSelect={vi.fn()}
+					onNamedSessionSelect={vi.fn()}
+					onClose={vi.fn()}
+				/>
+			);
+
+			const input = screen.getByPlaceholderText('Search open tabs...');
+
+			// open -> starred (reverse)
+			fireEvent.keyDown(input, { key: '[', code: 'BracketLeft', metaKey: true, shiftKey: true });
+			expect(screen.getByPlaceholderText('Search starred sessions...')).toBeInTheDocument();
+		});
 	});
 
 	describe('search functionality', () => {
 		it('filters tabs by name', () => {
 			const tabs = [
-				createTestTab({ name: 'Alpha Session' }),
-				createTestTab({ name: 'Beta Session' }),
-				createTestTab({ name: 'Gamma Session' }),
+				createTestTab({
+					name: 'Alpha Session',
+					agentSessionId: 'aaaa1111-0000-0000-0000-000000000001',
+				}),
+				createTestTab({
+					name: 'Beta Session',
+					agentSessionId: 'aaaa2222-0000-0000-0000-000000000002',
+				}),
+				createTestTab({
+					name: 'Gamma Session',
+					agentSessionId: 'aaaa3333-0000-0000-0000-000000000003',
+				}),
 			];
 
 			renderWithLayerStack(
@@ -1657,7 +1750,7 @@ describe('TabSwitcherModal', () => {
 		});
 
 		it('handles sync errors gracefully', async () => {
-			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+			const consoleSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
 
 			// For claude-code sessions (default), it uses window.maestro.claude.updateSessionName
 			vi.mocked(window.maestro.claude.updateSessionName).mockRejectedValue(
@@ -1681,6 +1774,7 @@ describe('TabSwitcherModal', () => {
 			await waitFor(() => {
 				expect(consoleSpy).toHaveBeenCalledWith(
 					'[TabSwitcher] Failed to sync tab name:',
+					undefined,
 					expect.any(Error)
 				);
 			});
@@ -1843,7 +1937,7 @@ describe('TabSwitcherModal', () => {
 				/>
 			);
 
-			const modalContent = container.querySelector('.w-\\[600px\\]');
+			const modalContent = container.querySelector('[data-modal-resize-key="tab-switcher"]');
 			expect(modalContent).toHaveStyle({
 				backgroundColor: theme.colors.bgActivity,
 				borderColor: theme.colors.border,
@@ -1871,7 +1965,7 @@ describe('TabSwitcherModal', () => {
 				/>
 			);
 
-			const modalContent = container.querySelector('.w-\\[600px\\]');
+			const modalContent = container.querySelector('[data-modal-resize-key="tab-switcher"]');
 			expect(modalContent).toHaveStyle({ backgroundColor: lightTheme.colors.bgActivity });
 		});
 	});
@@ -2108,7 +2202,9 @@ describe('TabSwitcherModal', () => {
 
 	describe('file tab support', () => {
 		// Helper to create a test file tab
-		const createTestFileTab = (overrides: Partial<import('../../../renderer/types').FilePreviewTab> = {}) => ({
+		const createTestFileTab = (
+			overrides: Partial<import('../../../renderer/types').FilePreviewTab> = {}
+		) => ({
 			id: `file-tab-${Math.random().toString(36).substr(2, 9)}`,
 			path: '/test/project/src/example.ts',
 			name: 'example',
@@ -2220,9 +2316,7 @@ describe('TabSwitcherModal', () => {
 		});
 
 		it('shows unsaved indicator for file tabs with edits', () => {
-			const fileTabs = [
-				createTestFileTab({ name: 'unsaved', editContent: 'some edited content' }),
-			];
+			const fileTabs = [createTestFileTab({ name: 'unsaved', editContent: 'some edited content' })];
 
 			renderWithLayerStack(
 				<TabSwitcherModal
@@ -2269,10 +2363,7 @@ describe('TabSwitcherModal', () => {
 
 		it('sorts file tabs alphabetically with AI tabs', () => {
 			const aiTabs = [createTestTab({ name: 'Beta AI' })];
-			const fileTabs = [
-				createTestFileTab({ name: 'Zeta' }),
-				createTestFileTab({ name: 'Alpha' }),
-			];
+			const fileTabs = [createTestFileTab({ name: 'Zeta' }), createTestFileTab({ name: 'Alpha' })];
 
 			renderWithLayerStack(
 				<TabSwitcherModal
@@ -2360,6 +2451,357 @@ describe('TabSwitcherModal', () => {
 			);
 
 			expect(screen.getByText('/project/src/components/example.ts')).toBeInTheDocument();
+		});
+		describe('terminal tab support', () => {
+			// Helper to create a test terminal tab
+			const createTestTerminalTab = (
+				overrides: Partial<import('../../../renderer/types').TerminalTab> = {}
+			) => ({
+				id: `terminal-tab-${Math.random().toString(36).substr(2, 9)}`,
+				name: null,
+				shellType: 'zsh',
+				pid: 1234,
+				cwd: '/Users/pedram/Projects',
+				state: 'idle' as const,
+				exitCode: undefined,
+				...overrides,
+			});
+
+			it('includes terminal tabs in Open Tabs count', () => {
+				const aiTabs = [createTestTab({ name: 'AI Tab' })];
+				const terminalTabs = [createTestTerminalTab(), createTestTerminalTab()];
+
+				renderWithLayerStack(
+					<TabSwitcherModal
+						theme={theme}
+						tabs={aiTabs}
+						terminalTabs={terminalTabs}
+						activeTabId={aiTabs[0].id}
+						projectRoot="/test"
+						onTabSelect={vi.fn()}
+						onNamedSessionSelect={vi.fn()}
+						onClose={vi.fn()}
+					/>
+				);
+
+				// Should show 3 total tabs (1 AI + 2 terminal)
+				expect(screen.getByText('Open Tabs (3)')).toBeInTheDocument();
+			});
+
+			it('renders terminal tabs with shell type badge and Terminal label', () => {
+				const terminalTabs = [createTestTerminalTab({ shellType: 'zsh', cwd: '/home/user' })];
+
+				renderWithLayerStack(
+					<TabSwitcherModal
+						theme={theme}
+						tabs={[]}
+						terminalTabs={terminalTabs}
+						activeTabId=""
+						projectRoot="/test"
+						onTabSelect={vi.fn()}
+						onNamedSessionSelect={vi.fn()}
+						onClose={vi.fn()}
+					/>
+				);
+
+				// 'Terminal' appears twice: as the display name fallback and as the right-side type badge
+				expect(screen.getAllByText('Terminal')).toHaveLength(2);
+				expect(screen.getByText('zsh')).toBeInTheDocument(); // shell type badge (uppercase via CSS, text is lowercase)
+				expect(screen.getByText('/home/user')).toBeInTheDocument(); // cwd shown
+			});
+
+			it('uses custom name when set', () => {
+				const terminalTabs = [createTestTerminalTab({ name: 'My Shell' })];
+
+				renderWithLayerStack(
+					<TabSwitcherModal
+						theme={theme}
+						tabs={[]}
+						terminalTabs={terminalTabs}
+						activeTabId=""
+						projectRoot="/test"
+						onTabSelect={vi.fn()}
+						onNamedSessionSelect={vi.fn()}
+						onClose={vi.fn()}
+					/>
+				);
+
+				expect(screen.getByText('My Shell')).toBeInTheDocument();
+			});
+
+			it('calls onTerminalTabSelect when clicking a terminal tab', () => {
+				const terminalTabs = [createTestTerminalTab({ name: 'Dev Shell' })];
+				const onTerminalTabSelect = vi.fn();
+				const onClose = vi.fn();
+
+				renderWithLayerStack(
+					<TabSwitcherModal
+						theme={theme}
+						tabs={[]}
+						terminalTabs={terminalTabs}
+						activeTabId=""
+						projectRoot="/test"
+						onTabSelect={vi.fn()}
+						onTerminalTabSelect={onTerminalTabSelect}
+						onNamedSessionSelect={vi.fn()}
+						onClose={onClose}
+					/>
+				);
+
+				fireEvent.click(screen.getByText('Dev Shell'));
+
+				expect(onTerminalTabSelect).toHaveBeenCalledWith(terminalTabs[0].id);
+				expect(onClose).toHaveBeenCalled();
+			});
+
+			it('filters terminal tabs by search query', () => {
+				const terminalTabs = [
+					createTestTerminalTab({ name: 'build-server', shellType: 'bash' }),
+					createTestTerminalTab({ name: 'dev-shell', shellType: 'zsh' }),
+				];
+
+				renderWithLayerStack(
+					<TabSwitcherModal
+						theme={theme}
+						tabs={[]}
+						terminalTabs={terminalTabs}
+						activeTabId=""
+						projectRoot="/test"
+						onTabSelect={vi.fn()}
+						onNamedSessionSelect={vi.fn()}
+						onClose={vi.fn()}
+					/>
+				);
+
+				const input = screen.getByPlaceholderText('Search open tabs...');
+				fireEvent.change(input, { target: { value: 'build' } });
+
+				expect(screen.getByText('build-server')).toBeInTheDocument();
+				expect(screen.queryByText('dev-shell')).not.toBeInTheDocument();
+			});
+
+			it('shows active indicator for the active terminal tab', () => {
+				const terminalTabs = [
+					createTestTerminalTab({ id: 'active-term-tab', name: 'Active Term' }),
+				];
+
+				renderWithLayerStack(
+					<TabSwitcherModal
+						theme={theme}
+						tabs={[]}
+						terminalTabs={terminalTabs}
+						activeTabId=""
+						activeTerminalTabId="active-term-tab"
+						projectRoot="/test"
+						onTabSelect={vi.fn()}
+						onNamedSessionSelect={vi.fn()}
+						onClose={vi.fn()}
+					/>
+				);
+
+				// Active terminal tab shows a green dot instead of the terminal icon
+				expect(screen.queryByTestId('terminal-icon')).not.toBeInTheDocument();
+			});
+
+			it('shows terminal icon for inactive terminal tab', () => {
+				const terminalTabs = [
+					createTestTerminalTab({ id: 'inactive-term', name: 'Inactive Term' }),
+				];
+
+				renderWithLayerStack(
+					<TabSwitcherModal
+						theme={theme}
+						tabs={[]}
+						terminalTabs={terminalTabs}
+						activeTabId=""
+						activeTerminalTabId="other-tab"
+						projectRoot="/test"
+						onTabSelect={vi.fn()}
+						onNamedSessionSelect={vi.fn()}
+						onClose={vi.fn()}
+					/>
+				);
+
+				expect(screen.getByTestId('terminal-icon')).toBeInTheDocument();
+			});
+		});
+
+		describe('browser tab support', () => {
+			// Helper to create a test browser tab
+			const createTestBrowserTab = (
+				overrides: Partial<import('../../../renderer/types').BrowserTab> = {}
+			) => ({
+				id: `browser-tab-${Math.random().toString(36).substr(2, 9)}`,
+				url: 'https://example.com',
+				title: 'Example',
+				createdAt: Date.now(),
+				canGoBack: false,
+				canGoForward: false,
+				isLoading: false,
+				...overrides,
+			});
+
+			it('includes browser tabs in Open Tabs count', () => {
+				const aiTabs = [createTestTab({ name: 'AI Tab' })];
+				const browserTabs = [createTestBrowserTab(), createTestBrowserTab()];
+
+				renderWithLayerStack(
+					<TabSwitcherModal
+						theme={theme}
+						tabs={aiTabs}
+						browserTabs={browserTabs}
+						activeTabId={aiTabs[0].id}
+						projectRoot="/test"
+						onTabSelect={vi.fn()}
+						onNamedSessionSelect={vi.fn()}
+						onClose={vi.fn()}
+					/>
+				);
+
+				// Should show 3 total tabs (1 AI + 2 browser)
+				expect(screen.getByText('Open Tabs (3)')).toBeInTheDocument();
+			});
+
+			it('renders browser tabs with title, URL, and Browser label', () => {
+				const browserTabs = [
+					createTestBrowserTab({ title: 'My Page', url: 'https://mypage.com/path' }),
+				];
+
+				renderWithLayerStack(
+					<TabSwitcherModal
+						theme={theme}
+						tabs={[]}
+						browserTabs={browserTabs}
+						activeTabId=""
+						projectRoot="/test"
+						onTabSelect={vi.fn()}
+						onNamedSessionSelect={vi.fn()}
+						onClose={vi.fn()}
+					/>
+				);
+
+				expect(screen.getByText('My Page')).toBeInTheDocument();
+				expect(screen.getByText('https://mypage.com/path')).toBeInTheDocument();
+				expect(screen.getByText('Browser')).toBeInTheDocument();
+			});
+
+			it('falls back to host when title is empty', () => {
+				const browserTabs = [createTestBrowserTab({ title: '', url: 'https://fallback.com' })];
+
+				renderWithLayerStack(
+					<TabSwitcherModal
+						theme={theme}
+						tabs={[]}
+						browserTabs={browserTabs}
+						activeTabId=""
+						projectRoot="/test"
+						onTabSelect={vi.fn()}
+						onNamedSessionSelect={vi.fn()}
+						onClose={vi.fn()}
+					/>
+				);
+
+				// With no title, the display name falls back to the URL host
+				// (getBrowserTabLabel), while the full URL remains the subtitle.
+				expect(screen.getByText('fallback.com')).toBeInTheDocument();
+				expect(screen.getByText('https://fallback.com')).toBeInTheDocument();
+			});
+
+			it('calls onBrowserTabSelect when clicking a browser tab', () => {
+				const browserTabs = [createTestBrowserTab({ title: 'Click Me' })];
+				const onBrowserTabSelect = vi.fn();
+				const onClose = vi.fn();
+
+				renderWithLayerStack(
+					<TabSwitcherModal
+						theme={theme}
+						tabs={[]}
+						browserTabs={browserTabs}
+						activeTabId=""
+						projectRoot="/test"
+						onTabSelect={vi.fn()}
+						onBrowserTabSelect={onBrowserTabSelect}
+						onNamedSessionSelect={vi.fn()}
+						onClose={onClose}
+					/>
+				);
+
+				fireEvent.click(screen.getByText('Click Me'));
+
+				expect(onBrowserTabSelect).toHaveBeenCalledWith(browserTabs[0].id);
+				expect(onClose).toHaveBeenCalled();
+			});
+
+			it('filters browser tabs by search query', () => {
+				const browserTabs = [
+					createTestBrowserTab({ title: 'GitHub', url: 'https://github.com' }),
+					createTestBrowserTab({ title: 'Google', url: 'https://google.com' }),
+				];
+
+				renderWithLayerStack(
+					<TabSwitcherModal
+						theme={theme}
+						tabs={[]}
+						browserTabs={browserTabs}
+						activeTabId=""
+						projectRoot="/test"
+						onTabSelect={vi.fn()}
+						onNamedSessionSelect={vi.fn()}
+						onClose={vi.fn()}
+					/>
+				);
+
+				const input = screen.getByPlaceholderText('Search open tabs...');
+				fireEvent.change(input, { target: { value: 'github' } });
+
+				expect(screen.getByText('GitHub')).toBeInTheDocument();
+				expect(screen.queryByText('Google')).not.toBeInTheDocument();
+			});
+
+			it('shows active indicator for the active browser tab', () => {
+				const browserTabs = [
+					createTestBrowserTab({ id: 'active-browser-tab', title: 'Active Page' }),
+				];
+
+				renderWithLayerStack(
+					<TabSwitcherModal
+						theme={theme}
+						tabs={[]}
+						browserTabs={browserTabs}
+						activeTabId=""
+						activeBrowserTabId="active-browser-tab"
+						projectRoot="/test"
+						onTabSelect={vi.fn()}
+						onNamedSessionSelect={vi.fn()}
+						onClose={vi.fn()}
+					/>
+				);
+
+				// Active browser tab shows a green dot instead of the globe icon
+				expect(screen.queryByTestId('globe-icon')).not.toBeInTheDocument();
+			});
+
+			it('shows globe icon for inactive browser tab', () => {
+				const browserTabs = [
+					createTestBrowserTab({ id: 'inactive-browser', title: 'Inactive Page' }),
+				];
+
+				renderWithLayerStack(
+					<TabSwitcherModal
+						theme={theme}
+						tabs={[]}
+						browserTabs={browserTabs}
+						activeTabId=""
+						activeBrowserTabId="other-tab"
+						projectRoot="/test"
+						onTabSelect={vi.fn()}
+						onNamedSessionSelect={vi.fn()}
+						onClose={vi.fn()}
+					/>
+				);
+
+				expect(screen.getByTestId('globe-icon')).toBeInTheDocument();
+			});
 		});
 	});
 });

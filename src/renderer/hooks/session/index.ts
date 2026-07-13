@@ -39,3 +39,33 @@ export type { UseActivityTrackerReturn } from './useActivityTracker';
 
 // Global hands-on time tracking (persists to settings)
 export { useHandsOnTimeTracker } from './useHandsOnTimeTracker';
+
+// Session restoration, migration, and corruption recovery
+export { useSessionRestoration } from './useSessionRestoration';
+export type { SessionRestorationReturn } from './useSessionRestoration';
+
+// Session lifecycle operations (rename, delete, star, unread, groups persistence)
+export { useSessionLifecycle } from './useSessionLifecycle';
+export type { SessionLifecycleDeps, SessionLifecycleReturn } from './useSessionLifecycle';
+
+// Session CRUD (create, delete, rename, bookmark, drag-drop, group-move)
+export { useSessionCrud } from './useSessionCrud';
+export type { UseSessionCrudDeps, UseSessionCrudReturn } from './useSessionCrud';
+
+// Session cycling (Cmd+Shift+[/])
+export { useCycleSession } from './useCycleSession';
+export type { UseCycleSessionDeps, UseCycleSessionReturn } from './useCycleSession';
+
+// Starred Sessions list + activation (Left Bar section, shared with cycling)
+export { useStarredItems } from './useStarredItems';
+export type { StarredItem, UseStarredItemsDeps, UseStarredItemsReturn } from './useStarredItems';
+
+// Multi-window: keep a window's active agent to one it owns (no false empty state)
+export { useWindowScopedActiveSession } from './useWindowScopedActiveSession';
+
+// Session switching callbacks (navigate to session/tab from various UI surfaces)
+export { useSessionSwitchCallbacks } from './useSessionSwitchCallbacks';
+export type {
+	UseSessionSwitchCallbacksDeps,
+	UseSessionSwitchCallbacksReturn,
+} from './useSessionSwitchCallbacks';

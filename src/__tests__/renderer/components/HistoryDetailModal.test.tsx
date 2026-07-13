@@ -2,7 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { HistoryDetailModal } from '../../../renderer/components/HistoryDetailModal';
 import type { Theme, HistoryEntry } from '../../../renderer/types';
+import { useSettingsStore } from '../../../renderer/stores/settingsStore';
 
+import { mockTheme } from '../../helpers/mockTheme';
+import { spyOnListeners, expectAllListenersRemoved } from '../../helpers/listenerLeakAssertions';
 // Mock LayerStackContext
 const mockRegisterLayer = vi.fn(() => 'layer-id-1');
 const mockUnregisterLayer = vi.fn();
@@ -31,26 +34,6 @@ Object.defineProperty(navigator, 'clipboard', {
 });
 
 // Create a mock theme
-const mockTheme: Theme = {
-	id: 'dracula',
-	name: 'Dracula',
-	mode: 'dark',
-	colors: {
-		bgMain: '#282a36',
-		bgSidebar: '#21222c',
-		bgActivity: '#343746',
-		textMain: '#f8f8f2',
-		textDim: '#6272a4',
-		accent: '#bd93f9',
-		accentForeground: '#f8f8f2',
-		border: '#44475a',
-		success: '#50fa7b',
-		warning: '#ffb86c',
-		error: '#ff5555',
-		scrollbar: '#44475a',
-		scrollbarHover: '#6272a4',
-	},
-};
 
 // Create a base history entry for testing
 const createMockEntry = (overrides: Partial<HistoryEntry> = {}): HistoryEntry => ({
@@ -81,6 +64,7 @@ describe('HistoryDetailModal', () => {
 		mockUnregisterLayer.mockClear();
 		mockUpdateLayerHandler.mockClear();
 		mockWriteText.mockClear();
+		useSettingsStore.setState({ bionifyReadingMode: false });
 	});
 
 	afterEach(() => {
@@ -105,12 +89,25 @@ describe('HistoryDetailModal', () => {
 			expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
 		});
 
-		it('should render Delete button', () => {
+		it('should render Delete button when onDelete is provided', () => {
+			render(
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={createMockEntry()}
+					onClose={mockOnClose}
+					onDelete={mockOnDelete}
+				/>
+			);
+
+			expect(screen.getByRole('button', { name: /Delete/i })).toBeInTheDocument();
+		});
+
+		it('should not render Delete button when onDelete is not provided', () => {
 			render(
 				<HistoryDetailModal theme={mockTheme} entry={createMockEntry()} onClose={mockOnClose} />
 			);
 
-			expect(screen.getByRole('button', { name: /Delete/i })).toBeInTheDocument();
+			expect(screen.queryByTitle('Delete this history entry')).not.toBeInTheDocument();
 		});
 
 		it('should display timestamp in formatted format', () => {
@@ -194,6 +191,75 @@ describe('HistoryDetailModal', () => {
 			);
 			expect(validatedIndicator).toBeInTheDocument();
 		});
+
+		it('should render CUE type with correct pill and teal color', () => {
+			render(
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={createMockEntry({ type: 'CUE' })}
+					onClose={mockOnClose}
+				/>
+			);
+
+			const cuePill = screen.getByText('CUE');
+			expect(cuePill).toBeInTheDocument();
+			expect(cuePill.closest('span')).toHaveStyle({ color: '#06b6d4' });
+		});
+
+		it('should show success indicator for CUE entries with success=true', () => {
+			render(
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={createMockEntry({ type: 'CUE', success: true })}
+					onClose={mockOnClose}
+				/>
+			);
+
+			const successIndicator = screen.getByTitle('Task completed successfully');
+			expect(successIndicator).toBeInTheDocument();
+		});
+
+		it('should show failure indicator for CUE entries with success=false', () => {
+			render(
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={createMockEntry({ type: 'CUE', success: false })}
+					onClose={mockOnClose}
+				/>
+			);
+
+			const failureIndicator = screen.getByTitle('Task failed');
+			expect(failureIndicator).toBeInTheDocument();
+		});
+
+		it('should display CUE trigger metadata when available', () => {
+			render(
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={createMockEntry({
+						type: 'CUE',
+						cueTriggerName: 'lint-on-save',
+						cueEventType: 'file.changed',
+					})}
+					onClose={mockOnClose}
+				/>
+			);
+
+			// Title carries the raw event type; the visible label is humanized.
+			expect(screen.getByTitle('Trigger: lint-on-save (file.changed)')).toBeInTheDocument();
+		});
+
+		it('should not display CUE trigger metadata for non-CUE entries', () => {
+			render(
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={createMockEntry({ type: 'AUTO' })}
+					onClose={mockOnClose}
+				/>
+			);
+
+			expect(screen.queryByTitle(/Trigger:/)).not.toBeInTheDocument();
+		});
 	});
 
 	describe('Content Display', () => {
@@ -244,6 +310,26 @@ describe('HistoryDetailModal', () => {
 
 			// Should render without error
 			expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+		});
+
+		it('applies reading mode to prose while preserving code and link text when enabled', () => {
+			useSettingsStore.setState({ bionifyReadingMode: true });
+
+			render(
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={createMockEntry({
+						fullResponse: 'Hello `code sample` [example link](https://example.com) world',
+					})}
+					onClose={mockOnClose}
+				/>
+			);
+
+			expect(document.querySelectorAll('.bionify-word').length).toBeGreaterThan(0);
+			expect(screen.getByText('code sample')).toBeInTheDocument();
+			expect(screen.getByRole('link', { name: 'example link' })).toBeInTheDocument();
+			expect(document.querySelector('code .bionify-word')).not.toBeInTheDocument();
+			expect(document.querySelector('a .bionify-word')).not.toBeInTheDocument();
 		});
 	});
 
@@ -600,7 +686,9 @@ describe('HistoryDetailModal', () => {
 
 	describe('Context Color', () => {
 		it('should show success color for usage < 70%', () => {
-			const { container } = render(
+			// The modal renders through a body portal (it escapes the transformed
+			// right-panel drawer), so query via baseElement, not container.
+			const { baseElement } = render(
 				<HistoryDetailModal
 					theme={mockTheme}
 					entry={createMockEntry({
@@ -618,12 +706,14 @@ describe('HistoryDetailModal', () => {
 			);
 
 			// 5% usage should show success color
-			const progressBar = container.querySelector('[class*="transition-all"]');
+			const progressBar = baseElement.querySelector('[class*="transition-all"]');
 			expect(progressBar).toHaveStyle({ backgroundColor: mockTheme.colors.success });
 		});
 
 		it('should show warning color for usage 70-89%', () => {
-			const { container } = render(
+			// The modal renders through a body portal (it escapes the transformed
+			// right-panel drawer), so query via baseElement, not container.
+			const { baseElement } = render(
 				<HistoryDetailModal
 					theme={mockTheme}
 					entry={createMockEntry({
@@ -671,6 +761,12 @@ describe('HistoryDetailModal', () => {
 				<HistoryDetailModal
 					theme={mockTheme}
 					entry={createMockEntry({
+						// Accumulated multi-tool entry: raw tokens overflow the window,
+						// but the preserved per-entry contextUsage is the last known good
+						// percentage. The display must clamp at 100% rather than render
+						// 0% (issue #762: previously the overflow path silently surfaced
+						// the capacity as the used-token count).
+						contextUsage: 100,
 						usageStats: {
 							inputTokens: 150000,
 							outputTokens: 1000,
@@ -684,8 +780,30 @@ describe('HistoryDetailModal', () => {
 				/>
 			);
 
-			// Should cap at 100%
 			expect(screen.getByText('100%')).toBeInTheDocument();
+		});
+
+		it('should handle usageStats with undefined token values without crashing', () => {
+			render(
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={createMockEntry({
+						usageStats: {
+							inputTokens: undefined as any,
+							outputTokens: undefined as any,
+							cacheReadInputTokens: 0,
+							cacheCreationInputTokens: 0,
+							contextWindow: 100000,
+							totalCostUsd: 0,
+						},
+					})}
+					onClose={mockOnClose}
+				/>
+			);
+
+			// Should render 0 for undefined token values instead of crashing
+			const inLabels = screen.getAllByText('In:');
+			expect(inLabels.length).toBeGreaterThan(0);
 		});
 	});
 
@@ -701,12 +819,14 @@ describe('HistoryDetailModal', () => {
 		});
 
 		it('should call onClose when X button in header is clicked', () => {
-			const { container } = render(
+			// The modal renders through a body portal (it escapes the transformed
+			// right-panel drawer), so query via baseElement, not container.
+			const { baseElement } = render(
 				<HistoryDetailModal theme={mockTheme} entry={createMockEntry()} onClose={mockOnClose} />
 			);
 
 			// Find the X button in the header (first button with hover:bg-white/10)
-			const xButton = container.querySelector('button.hover\\:bg-white\\/10');
+			const xButton = baseElement.querySelector('button.hover\\:bg-white\\/10');
 			if (xButton) {
 				fireEvent.click(xButton);
 				expect(mockOnClose).toHaveBeenCalled();
@@ -714,12 +834,14 @@ describe('HistoryDetailModal', () => {
 		});
 
 		it('should call onClose when backdrop is clicked', () => {
-			const { container } = render(
+			// The modal renders through a body portal (it escapes the transformed
+			// right-panel drawer), so query via baseElement, not container.
+			const { baseElement } = render(
 				<HistoryDetailModal theme={mockTheme} entry={createMockEntry()} onClose={mockOnClose} />
 			);
 
 			// Find the backdrop (absolute inset-0 bg-black/60)
-			const backdrop = container.querySelector('.bg-black\\/60');
+			const backdrop = baseElement.querySelector('.bg-black\\/60');
 			if (backdrop) {
 				fireEvent.click(backdrop);
 				expect(mockOnClose).toHaveBeenCalled();
@@ -772,6 +894,21 @@ describe('HistoryDetailModal', () => {
 			fireEvent.click(screen.getByTitle('Delete this history entry'));
 
 			expect(screen.getByText(/auto history entry/)).toBeInTheDocument();
+		});
+
+		it('should show correct type in delete confirmation for CUE entry', () => {
+			render(
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={createMockEntry({ type: 'CUE' })}
+					onClose={mockOnClose}
+					onDelete={mockOnDelete}
+				/>
+			);
+
+			fireEvent.click(screen.getByTitle('Delete this history entry'));
+
+			expect(screen.getByText(/cue history entry/)).toBeInTheDocument();
 		});
 
 		it('should cancel delete when Cancel button is clicked', () => {
@@ -855,7 +992,7 @@ describe('HistoryDetailModal', () => {
 			expect(confirmDeleteButton).toHaveAttribute('tabIndex', '0');
 		});
 
-		it('should not call onDelete if callback is not provided', () => {
+		it('should not render delete button when onDelete is not provided', () => {
 			render(
 				<HistoryDetailModal
 					theme={mockTheme}
@@ -865,12 +1002,8 @@ describe('HistoryDetailModal', () => {
 				/>
 			);
 
-			fireEvent.click(screen.getByTitle('Delete this history entry'));
-			const deleteButtons = screen.getAllByRole('button', { name: 'Delete' });
-			fireEvent.click(deleteButtons[deleteButtons.length - 1]);
-
-			// Should still close without error
-			expect(mockOnClose).toHaveBeenCalled();
+			// Delete button should not be present when onDelete is not provided
+			expect(screen.queryByTitle('Delete this history entry')).not.toBeInTheDocument();
 		});
 	});
 
@@ -1060,6 +1193,40 @@ describe('HistoryDetailModal', () => {
 
 			expect(mockOnNavigate).not.toHaveBeenCalled();
 		});
+
+		it('should not call onNavigate after unmount', () => {
+			const { unmount } = render(
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={mockEntries[1]}
+					onClose={mockOnClose}
+					filteredEntries={mockEntries}
+					currentIndex={1}
+					onNavigate={mockOnNavigate}
+				/>
+			);
+			unmount();
+			fireEvent.keyDown(window, { key: 'ArrowLeft' });
+			fireEvent.keyDown(window, { key: 'ArrowRight' });
+			expect(mockOnNavigate).not.toHaveBeenCalled();
+		});
+
+		it('should remove its keydown listener on unmount (no leak)', () => {
+			const spies = spyOnListeners(window);
+			const { unmount } = render(
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={mockEntries[1]}
+					onClose={mockOnClose}
+					filteredEntries={mockEntries}
+					currentIndex={1}
+					onNavigate={mockOnNavigate}
+				/>
+			);
+			unmount();
+			expectAllListenersRemoved(spies.addSpy, spies.removeSpy);
+			spies.restore();
+		});
 	});
 
 	describe('Layer Stack Integration', () => {
@@ -1248,7 +1415,9 @@ describe('HistoryDetailModal', () => {
 		});
 
 		it('should prevent event propagation on modal content click', () => {
-			const { container } = render(
+			// The modal renders through a body portal (it escapes the transformed
+			// right-panel drawer), so query via baseElement, not container.
+			const { baseElement } = render(
 				<HistoryDetailModal
 					theme={mockTheme}
 					entry={createMockEntry()}
@@ -1261,7 +1430,7 @@ describe('HistoryDetailModal', () => {
 			fireEvent.click(screen.getByTitle('Delete this history entry'));
 
 			// Find the confirmation modal content
-			const modalContent = container.querySelector('.w-\\[400px\\]');
+			const modalContent = baseElement.querySelector('.modal-w-xs');
 			if (modalContent) {
 				fireEvent.click(modalContent);
 				// Modal should still be open
@@ -1273,7 +1442,12 @@ describe('HistoryDetailModal', () => {
 	describe('Accessibility', () => {
 		it('should have proper button roles', () => {
 			render(
-				<HistoryDetailModal theme={mockTheme} entry={createMockEntry()} onClose={mockOnClose} />
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={createMockEntry()}
+					onClose={mockOnClose}
+					onDelete={mockOnDelete}
+				/>
 			);
 
 			expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
@@ -1286,6 +1460,7 @@ describe('HistoryDetailModal', () => {
 					theme={mockTheme}
 					entry={createMockEntry({ agentSessionId: 'test-session-id' })}
 					onClose={mockOnClose}
+					onDelete={mockOnDelete}
 				/>
 			);
 
@@ -1316,13 +1491,155 @@ describe('HistoryDetailModal', () => {
 		});
 	});
 
+	describe('Sessionless Context (Director Notes)', () => {
+		// Director's Notes uses HistoryDetailModal without session-specific callbacks
+		// (no onResumeSession, onDelete, onUpdate, onJumpToAgentSession).
+		// The modal must render gracefully with only required props + navigation.
+
+		it('should render with only required props (no session callbacks)', () => {
+			const entry = createMockEntry({
+				type: 'AUTO',
+				summary: 'Unified history entry',
+				agentSessionId: 'abc12345-def6-7890-ghij-klmnopqrstuv',
+				success: true,
+			});
+			render(<HistoryDetailModal theme={mockTheme} entry={entry} onClose={mockOnClose} />);
+
+			// Core content renders
+			expect(screen.getByText('AUTO')).toBeInTheDocument();
+			expect(screen.getByText('Unified history entry')).toBeInTheDocument();
+			expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+
+			// Session-specific actions are hidden
+			expect(screen.queryByText('Resume')).not.toBeInTheDocument();
+			expect(screen.queryByTitle('Delete this history entry')).not.toBeInTheDocument();
+			expect(screen.queryByText('Validated')).not.toBeInTheDocument();
+		});
+
+		it('should support navigation without session callbacks', () => {
+			const mockEntries: HistoryEntry[] = [
+				createMockEntry({ id: 'unified-0', summary: 'Entry 0' }),
+				createMockEntry({ id: 'unified-1', summary: 'Entry 1' }),
+				createMockEntry({ id: 'unified-2', summary: 'Entry 2' }),
+			];
+
+			render(
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={mockEntries[1]}
+					onClose={mockOnClose}
+					filteredEntries={mockEntries}
+					currentIndex={1}
+					onNavigate={mockOnNavigate}
+				/>
+			);
+
+			// Navigation works without session context
+			expect(screen.getByText('Prev')).toBeInTheDocument();
+			expect(screen.getByText('Next')).toBeInTheDocument();
+
+			fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+			expect(mockOnNavigate).toHaveBeenCalledWith(mockEntries[2], 2);
+		});
+
+		it('should display session ID octet without resume button when onResumeSession is absent', () => {
+			render(
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={createMockEntry({
+						agentSessionId: 'abc12345-def6-7890-ghij-klmnopqrstuv',
+					})}
+					onClose={mockOnClose}
+					// No onResumeSession provided
+				/>
+			);
+
+			// Session ID octet is still visible (copyable)
+			expect(screen.getByText('ABC12345')).toBeInTheDocument();
+			// But Resume button is not shown
+			expect(screen.queryByText('Resume')).not.toBeInTheDocument();
+		});
+
+		it('should render file linking props without session callbacks', () => {
+			render(
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={createMockEntry({ summary: 'Check `src/index.ts` for details' })}
+					onClose={mockOnClose}
+					fileTree={[]}
+					onFileClick={vi.fn()}
+					// No session callbacks
+				/>
+			);
+
+			// Should render without error
+			expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+		});
+
+		it('should display agentName as prominent header when present', () => {
+			const entryWithAgent = {
+				...createMockEntry({ summary: 'Did some work' }),
+				agentName: 'My Project Session',
+			} as HistoryEntry;
+
+			render(<HistoryDetailModal theme={mockTheme} entry={entryWithAgent} onClose={mockOnClose} />);
+
+			// Both the h2 header and the inline pill share the same title
+			const elements = screen.getAllByTitle('My Project Session');
+			const agentHeader = elements.find((el) => el.tagName === 'H2');
+			expect(agentHeader).toBeDefined();
+			expect(agentHeader).toBeInTheDocument();
+			expect(agentHeader).toHaveClass('text-lg', 'font-bold');
+		});
+
+		it('should show sessionName as subheading when both agentName and sessionName exist', () => {
+			const entryWithBoth = {
+				...createMockEntry({ sessionName: 'Tab Name' }),
+				agentName: 'Session Name',
+			} as HistoryEntry;
+
+			render(<HistoryDetailModal theme={mockTheme} entry={entryWithBoth} onClose={mockOnClose} />);
+
+			// agentName is the prominent header
+			const agentHeader = screen.getByTitle('Session Name');
+			expect(agentHeader).toHaveClass('text-lg', 'font-bold');
+
+			// sessionName is the smaller subheading
+			const sessionHeader = screen.getByTitle('Tab Name');
+			expect(sessionHeader).toHaveClass('text-sm', 'font-medium');
+		});
+
+		it('should show agentName pill inline when agentName exists but sessionName does not', () => {
+			const entryWithAgentOnly = {
+				...createMockEntry({ summary: 'Work done' }),
+				agentName: 'Pill Agent',
+			} as HistoryEntry;
+			// Ensure no sessionName
+			delete (entryWithAgentOnly as any).sessionName;
+
+			render(
+				<HistoryDetailModal theme={mockTheme} entry={entryWithAgentOnly} onClose={mockOnClose} />
+			);
+
+			// Agent name pill should be in the metadata row
+			const pills = screen.getAllByTitle('Pill Agent');
+			// One is the header h2, the other is the pill in metadata row
+			expect(pills.length).toBe(2);
+			const pillElement = pills.find((el) => el.tagName === 'SPAN');
+			expect(pillElement).toBeDefined();
+			expect(pillElement).toHaveClass('rounded-full', 'text-[10px]', 'font-bold');
+		});
+	});
+
 	describe('Theme Styling', () => {
 		it('should apply theme colors to modal', () => {
-			const { container } = render(
+			// The modal renders through a body portal (it escapes the transformed
+			// right-panel drawer), so query via baseElement, not container.
+			const { baseElement } = render(
 				<HistoryDetailModal theme={mockTheme} entry={createMockEntry()} onClose={mockOnClose} />
 			);
 
-			const modal = container.querySelector('.w-full.max-w-3xl');
+			const modal = baseElement.querySelector('[data-modal-resize-key="history-detail"]');
 			expect(modal).toHaveStyle({ backgroundColor: mockTheme.colors.bgSidebar });
 		});
 
@@ -1363,6 +1680,39 @@ describe('HistoryDetailModal', () => {
 
 			const closeButton = screen.getByRole('button', { name: 'Close' });
 			expect(closeButton).toHaveStyle({ backgroundColor: mockTheme.colors.accent });
+		});
+	});
+
+	describe('phone layout class hooks (xs full-screen rules in index.css)', () => {
+		// index.css expands `.history-detail-modal` to full-screen at data-bp='xs',
+		// tightens `.hdm-footer`, and hides `.hdm-btn-label`. Guard the hooks so a
+		// markup refactor cannot silently detach the phone layout.
+		it('modal root carries history-detail-modal and the footer carries hdm-footer', () => {
+			// The modal renders through a body portal (it escapes the transformed
+			// right-panel drawer), so query via baseElement, not container.
+			const { baseElement } = render(
+				<HistoryDetailModal theme={mockTheme} entry={createMockEntry()} onClose={mockOnClose} />
+			);
+			expect(baseElement.querySelector('.history-detail-modal')).not.toBeNull();
+			expect(baseElement.querySelector('.hdm-footer')).not.toBeNull();
+		});
+
+		it('Delete, Prev, and Next button labels carry hdm-btn-label', () => {
+			const entries = [createMockEntry({ id: 'a' }), createMockEntry({ id: 'b' })];
+			render(
+				<HistoryDetailModal
+					theme={mockTheme}
+					entry={entries[0]}
+					onClose={mockOnClose}
+					onDelete={mockOnDelete}
+					filteredEntries={entries}
+					currentIndex={0}
+					onNavigate={mockOnNavigate}
+				/>
+			);
+			expect(screen.getByText('Delete')).toHaveClass('hdm-btn-label');
+			expect(screen.getByText('Prev')).toHaveClass('hdm-btn-label');
+			expect(screen.getByText('Next')).toHaveClass('hdm-btn-label');
 		});
 	});
 });

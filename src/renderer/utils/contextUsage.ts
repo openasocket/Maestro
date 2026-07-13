@@ -6,25 +6,13 @@
  */
 
 import type { ToolType } from '../types';
+import { COMBINED_CONTEXT_AGENTS, getContextWindowForAgent } from '../../shared/agentConstants';
+import { useAgentStore } from '../stores/agentStore';
 
-/**
- * Default context window sizes for different agents.
- * Used as fallback when the agent doesn't report its context window size.
- */
-export const DEFAULT_CONTEXT_WINDOWS: Record<ToolType, number> = {
-	'claude-code': 200000, // Claude 3.5 Sonnet/Claude 4 default context
-	codex: 200000, // OpenAI o3/o4-mini context window
-	opencode: 128000, // OpenCode (depends on model, 128k is conservative default)
-	'factory-droid': 200000, // Factory Droid (varies by model, defaults to Claude Opus)
-	terminal: 0, // Terminal has no context window
-};
-
-/**
- * Agents that use combined input+output context windows.
- * OpenAI models (Codex, o3, o4-mini) have a single context window that includes
- * both input and output tokens, unlike Claude which has separate limits.
- */
-const COMBINED_CONTEXT_AGENTS: Set<ToolType> = new Set(['codex']);
+// Re-export for consumers that import from this module. The local import
+// was dropped on migration to `getContextWindowForAgent` — the re-export
+// resolves directly from the source module without needing a binding.
+export { DEFAULT_CONTEXT_WINDOWS } from '../../shared/agentConstants';
 
 /** Minimum growth percentage per accumulated turn */
 const MIN_GROWTH_PERCENT = 1;
@@ -35,6 +23,52 @@ const MAX_GROWTH_PERCENT = 3;
  * Prevents inflated call-count estimates when currentUsage is very low (e.g., 1%).
  */
 const MIN_PREV_CONTEXT_FRACTION = 0.05;
+
+/**
+ * Calculate total input tokens for display on a single history entry or tab header.
+ *
+ * Agents partition their input-token accounting differently:
+ *
+ * - **Claude models** report `inputTokens` as the UNCACHED input delta only.
+ *   `cacheReadInputTokens` and `cacheCreationInputTokens` are tracked separately
+ *   and must be ADDED back to reflect the full size of the input that the model
+ *   actually processed. On a resumed session almost all input lands in
+ *   `cacheReadInputTokens`, leaving `inputTokens` at single-digit values that
+ *   look absurd to users (see issue #844).
+ *
+ * - **OpenAI/Codex models** report `inputTokens` inclusive of cached input.
+ *   `cacheReadInputTokens` is reported separately for display only and must
+ *   NOT be double-counted (see codex-output-parser.ts).
+ *
+ * Use this for per-entry / per-tab "input tokens" displays. For the context
+ * window percentage gauge, use `calculateContextTokens` / `calculateContextDisplay`
+ * — those also add `outputTokens` for OpenAI-style combined-limit models.
+ *
+ * @param stats - The usage statistics containing token counts
+ * @param agentId - The agent identifier; defaults to the Claude formula
+ * @returns Total input tokens to show the user
+ */
+export function calculateDisplayInputTokens(
+	stats: {
+		inputTokens?: number;
+		cacheReadInputTokens?: number;
+		cacheCreationInputTokens?: number;
+	},
+	agentId?: ToolType | string
+): number {
+	// OpenAI/Codex: inputTokens already includes cached input, do not add cache fields.
+	if (agentId && COMBINED_CONTEXT_AGENTS.has(agentId as ToolType)) {
+		return stats.inputTokens || 0;
+	}
+
+	// Claude (and unknown agents, as a safe default): inputTokens is uncached only,
+	// add the cache partitions to reflect the real input size.
+	return (
+		(stats.inputTokens || 0) +
+		(stats.cacheReadInputTokens || 0) +
+		(stats.cacheCreationInputTokens || 0)
+	);
+}
 
 /**
  * Calculate total context tokens based on agent-specific semantics.
@@ -106,17 +140,29 @@ export function estimateContextUsage(
 		cacheCreationInputTokens?: number;
 		contextWindow?: number;
 	},
-	agentId?: ToolType | string
+	agentId?: ToolType | string,
+	/**
+	 * SSH remote UUID when the session is running against a remote host.
+	 * Lets the snapshot lookup pick the per-remote `agentId:remoteId`
+	 * key — otherwise SSH sessions fall back to the local snapshot and
+	 * then the static table, which can be wrong when remote models differ.
+	 */
+	sshRemoteId?: string
 ): number | null {
 	// Calculate total context using agent-specific semantics
 	const totalContextTokens = calculateContextTokens(stats, agentId);
 
-	// Determine effective context window
+	// Determine effective context window: runtime-reported stats win, then
+	// the agent's persisted capability snapshot for this environment
+	// (local OR specific remote), then the static table.
 	const effectiveContextWindow =
 		stats.contextWindow && stats.contextWindow > 0
 			? stats.contextWindow
 			: agentId && agentId !== 'terminal'
-				? DEFAULT_CONTEXT_WINDOWS[agentId as ToolType] || 0
+				? getContextWindowForAgent(
+						agentId,
+						useAgentStore.getState().getCapabilitySnapshot(agentId, sshRemoteId)
+					)
 				: 0;
 
 	if (!effectiveContextWindow || effectiveContextWindow <= 0) {
@@ -136,6 +182,82 @@ export function estimateContextUsage(
 	}
 
 	return Math.round((totalContextTokens / effectiveContextWindow) * 100);
+}
+
+/**
+ * Result of a context display calculation.
+ * Contains everything needed to render a context gauge in any UI component.
+ */
+export interface ContextDisplayResult {
+	/** Context tokens to display (capped to window when accumulated) */
+	tokens: number;
+	/** Context usage percentage (0-100) */
+	percentage: number;
+	/** Effective context window size used for the calculation */
+	contextWindow: number;
+	/**
+	 * True when the result is computed from real usage data; false when the
+	 * function had to fall back (overflow with no trustworthy fallback %, or
+	 * missing window size). Callers should hold their previous good values
+	 * when this is false instead of displaying the fallback as if it were a
+	 * real measurement (see issue #762).
+	 */
+	trustworthy: boolean;
+}
+
+/**
+ * Calculate context tokens and percentage for display, handling accumulated-token overflow.
+ *
+ * This is the single source of truth for context gauge rendering. When raw token counts
+ * exceed the context window (accumulated multi-tool turns), falls back to the preserved
+ * contextUsage percentage to derive a sane token count.
+ *
+ * @param usageStats - Token counts from the agent
+ * @param contextWindow - Effective context window size (0 = unknown)
+ * @param agentId - Agent type for agent-specific calculation
+ * @param fallbackPercentage - Preserved contextUsage % to use when tokens overflow
+ * @returns Display-ready tokens, percentage, and window size, plus a `trustworthy` flag
+ */
+export function calculateContextDisplay(
+	usageStats: {
+		inputTokens?: number;
+		outputTokens?: number;
+		cacheReadInputTokens?: number;
+		cacheCreationInputTokens?: number;
+	},
+	contextWindow: number,
+	agentId?: ToolType | string,
+	fallbackPercentage?: number | null
+): ContextDisplayResult {
+	if (!contextWindow || contextWindow <= 0) {
+		return { tokens: 0, percentage: 0, contextWindow: 0, trustworthy: false };
+	}
+
+	const raw = calculateContextTokens(usageStats, agentId);
+
+	let tokens = raw;
+	const trustworthy = true;
+	if (raw > contextWindow) {
+		if (
+			fallbackPercentage != null &&
+			Number.isFinite(fallbackPercentage) &&
+			fallbackPercentage >= 0
+		) {
+			// Accumulated multi-tool turn: derive tokens from preserved percentage.
+			const boundedFallback = Math.min(100, fallbackPercentage);
+			tokens = Math.round((boundedFallback / 100) * contextWindow);
+		} else {
+			// No trustworthy fallback. Return zeros and flag the result as untrustworthy
+			// so the caller can hold its previous values (issue #762: previously this
+			// branch displayed `contextWindow` itself, surfacing the capacity as if it
+			// were the used-token count).
+			return { tokens: 0, percentage: 0, contextWindow, trustworthy: false };
+		}
+	}
+
+	const percentage = tokens <= 0 ? 0 : Math.min(100, Math.round((tokens / contextWindow) * 100));
+
+	return { tokens, percentage, contextWindow, trustworthy };
 }
 
 /**

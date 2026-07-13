@@ -165,23 +165,10 @@ describe('Debug Package Collectors', () => {
 		});
 	});
 
-	describe('sanitizeText', () => {
-		it('should replace home directory in free-text strings', async () => {
-			const { sanitizeText } = await import('../../../main/debug-package/collectors/sanitize');
-
-			const homeDir = os.homedir();
-			const text = `Error loading file ${homeDir}/Projects/secret-project/config.json`;
-
-			const sanitized = sanitizeText(text);
-
-			expect(sanitized).not.toContain(homeDir);
-			expect(sanitized).toContain('~/Projects/secret-project/config.json');
-		});
-	});
-
 	describe('sanitizeLogMessage', () => {
 		it('should truncate messages over 500 chars', async () => {
-			const { sanitizeLogMessage } = await import('../../../main/debug-package/collectors/sanitize');
+			const { sanitizeLogMessage } =
+				await import('../../../main/debug-package/collectors/sanitize');
 
 			const longMessage = 'A'.repeat(600);
 			const sanitized = sanitizeLogMessage(longMessage);
@@ -191,7 +178,8 @@ describe('Debug Package Collectors', () => {
 		});
 
 		it('should sanitize paths in messages', async () => {
-			const { sanitizeLogMessage } = await import('../../../main/debug-package/collectors/sanitize');
+			const { sanitizeLogMessage } =
+				await import('../../../main/debug-package/collectors/sanitize');
 
 			const homeDir = os.homedir();
 			const message = `Process started in ${homeDir}/Projects/test`;

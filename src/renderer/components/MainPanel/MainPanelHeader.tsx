@@ -1,0 +1,888 @@
+import React, { useRef } from 'react';
+import {
+	Wand2,
+	ExternalLink,
+	Columns,
+	Copy,
+	GitBranch,
+	ArrowUp,
+	ArrowDown,
+	FileEdit,
+	List,
+	GitPullRequest,
+	Settings2,
+	Server,
+	Bookmark,
+	Brain,
+	Menu,
+	Command,
+} from 'lucide-react';
+import { GhostIconButton } from '../ui/GhostIconButton';
+import { Spinner } from '../ui/Spinner';
+import { formatShortcutKeys } from '../../utils/shortcutFormatter';
+import { remoteUrlToBrowserUrl } from '../../../shared/gitUtils';
+import { GitStatusWidget } from '../GitStatusWidget';
+import { useHoverTooltip } from '../../hooks';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { useUIStore } from '../../stores/uiStore';
+import { getModalActions } from '../../stores/modalStore';
+import { useViewportBreakpoint } from '../../hooks/ui/useViewportBreakpoint';
+import { isWebDesktop } from '../../utils/runtimeContext';
+import { useContextTimelineStore } from '../../stores/contextTimelineStore';
+import type { Session, Theme, BatchRunState, AITab } from '../../types';
+import type { AgentCapabilities } from '../../hooks/agent/useAgentCapabilities';
+import { openUrl } from '../../utils/openUrl';
+import { calculateDisplayInputTokens } from '../../utils/contextUsage';
+import { flashCopiedToClipboard } from '../../utils/flashCopiedToClipboard';
+import { safeClipboardWrite } from '../../utils/clipboard';
+import {
+	useClaudeUsageSnapshot,
+	useResolvedClaudeConfigDirKey,
+} from '../../stores/claudeUsageStore';
+import { formatFutureTime } from '../../../shared/formatters';
+import { PluginUiItemsSlot } from '../plugins/PluginUiItemsSlot';
+
+export interface MainPanelHeaderProps {
+	activeSession: Session;
+	activeTab: AITab | null;
+	theme: Theme;
+	gitInfo: {
+		branch: string;
+		remote: string;
+		ahead: number;
+		behind: number;
+		uncommittedChanges: number;
+	} | null;
+	sshRemoteName: string | null;
+	activeTabContextWindow: number;
+	activeTabContextTokens: number;
+	activeTabContextUsage: number;
+	isCurrentSessionAutoMode: boolean;
+	isCurrentSessionStopping: boolean;
+	currentSessionBatchState: BatchRunState | null | undefined;
+	isWorktreeChild: boolean | undefined;
+	activeFileTabId: string | null | undefined;
+	refreshGitStatus: () => Promise<void>;
+	handleViewGitDiff: () => Promise<void>;
+	getContextColor: (usage: number, theme: Theme) => string;
+	setGitLogOpen?: (open: boolean) => void;
+	setAgentSessionsOpen: (open: boolean) => void;
+	setMemoryViewerOpen: (open: boolean) => void;
+	setActiveAgentSessionId: (id: string | null) => void;
+	onStopBatchRun?: (sessionId?: string) => void;
+	onOpenWorktreeConfig?: () => void;
+	onOpenCreatePR?: () => void;
+	hasCapability: (cap: keyof AgentCapabilities) => boolean;
+}
+
+export const MainPanelHeader = React.memo(function MainPanelHeader({
+	activeSession,
+	activeTab,
+	theme,
+	gitInfo,
+	sshRemoteName,
+	activeTabContextWindow,
+	activeTabContextTokens,
+	activeTabContextUsage,
+	isCurrentSessionAutoMode,
+	isCurrentSessionStopping,
+	currentSessionBatchState,
+	isWorktreeChild,
+	activeFileTabId,
+	refreshGitStatus,
+	handleViewGitDiff,
+	getContextColor,
+	setGitLogOpen,
+	setAgentSessionsOpen,
+	setMemoryViewerOpen,
+	setActiveAgentSessionId,
+	onStopBatchRun,
+	onOpenWorktreeConfig,
+	onOpenCreatePR,
+	hasCapability,
+}: MainPanelHeaderProps) {
+	const shortcuts = useSettingsStore((s) => s.shortcuts);
+	const showAgentName = useSettingsStore((s) => s.showAgentName);
+	const showSessionIdPill = useSettingsStore((s) => s.showSessionIdPill);
+	const showSessionCostPill = useSettingsStore((s) => s.showSessionCostPill);
+	const rightPanelOpen = useUIStore((s) => s.rightPanelOpen);
+	const leftSidebarHidden = useUIStore((s) => s.leftSidebarHidden);
+	const leftSidebarOpen = useUIStore((s) => s.leftSidebarOpen);
+	const { isXs, isNarrow } = useViewportBreakpoint();
+	// On web-desktop phones the collapsed 64px strip is hidden entirely (see
+	// index.css), so the collapsed sidebar has no visible affordance to reopen
+	// it. Surface the inline hamburger in that case too - not just when the
+	// sidebar is fully hidden. On the Electron desktop app isWebDesktop() is
+	// false, so this reduces to the original leftSidebarHidden-only behavior.
+	const showSidebarOpener = leftSidebarHidden || (isWebDesktop() && isXs && !leftSidebarOpen);
+
+	// Claude Max plan usage (5-hour / weekly windows). Shown for any Claude
+	// Code session — the source account is always derivable from session env
+	// vars (override > agent default > implicit ~/.claude), so the popover
+	// doesn't need a separate account picker. The snapshot is keyed by
+	// canonical CLAUDE_CONFIG_DIR. When the spawner has already stamped
+	// `claudeInteractive.lastUsageSnapshotKey` (Adaptive Mode / interactive
+	// path), we prefer that exact key; otherwise we derive it from session +
+	// agent env + home dir.
+	const resolvedConfigDirKey = useResolvedClaudeConfigDirKey(activeSession);
+	const batchUsageSnapshot = useClaudeUsageSnapshot(resolvedConfigDirKey);
+	const showBatchUsage = activeSession?.toolType === 'claude-code';
+
+	const headerRef = useRef<HTMLDivElement>(null);
+	const gitTooltip = useHoverTooltip(150);
+	const contextTooltip = useHoverTooltip(150);
+
+	return (
+		<div
+			ref={headerRef}
+			className={`header-container h-16 border-b flex items-center justify-between px-6 shrink-0 relative z-20 ${isCurrentSessionAutoMode ? 'header-auto-mode' : ''}`}
+			style={{
+				borderColor: theme.colors.border,
+				backgroundColor: theme.colors.bgSidebar,
+			}}
+			data-tour="header-controls"
+		>
+			<div className="flex items-center gap-4 min-w-0 overflow-hidden">
+				{/* Inline hamburger - appears when the left sidebar is fully hidden,
+				    or (on web-desktop phones) when it is collapsed, since the 64px
+				    collapsed strip is hidden there. Renders INSIDE the header row
+				    so it shifts content rightward instead of floating over the
+				    session name. */}
+				{showSidebarOpener && (
+					<button
+						type="button"
+						onClick={() => {
+							useUIStore.getState().setLeftSidebarHidden(false);
+							useUIStore.getState().setLeftSidebarOpen(true);
+						}}
+						className="shrink-0 p-1 rounded hover:bg-white/5 transition-colors"
+						style={{ color: theme.colors.textDim }}
+						aria-label="Show agents sidebar"
+						title="Show sidebar"
+					>
+						<Menu className="w-4 h-4" />
+					</button>
+				)}
+				<div className="flex items-center gap-2 text-sm font-medium min-w-0 overflow-hidden">
+					{/* Session name - hidden at narrow widths via CSS container query */}
+					{showAgentName && (
+						<span className="header-session-name truncate">{activeSession.name}</span>
+					)}
+					{activeSession.bookmarked && (
+						<Bookmark
+							className="w-3.5 h-3.5 shrink-0"
+							style={{ color: theme.colors.accent }}
+							fill={theme.colors.accent}
+							data-testid="bookmark-icon"
+						/>
+					)}
+					<div
+						className="relative shrink-0 flex items-center gap-2"
+						onMouseEnter={
+							activeSession.isGitRepo ? gitTooltip.triggerHandlers.onMouseEnter : undefined
+						}
+						onMouseLeave={gitTooltip.triggerHandlers.onMouseLeave}
+						onFocus={activeSession.isGitRepo ? gitTooltip.triggerHandlers.onMouseEnter : undefined}
+						onBlur={gitTooltip.triggerHandlers.onMouseLeave}
+					>
+						{/* SSH Host Pill - show SSH remote name when running remotely (replaces the
+						    GIT/LOCAL badge). For git repos the branch name is rendered in a separate
+						    badge just after this pill (see below) so SSH/container agents still surface
+						    the branch the same way local agents do. */}
+						{activeSession.sessionSshRemoteConfig?.enabled && sshRemoteName ? (
+							<button
+								className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border border-purple-500/30 text-purple-500 bg-purple-500/10 max-w-[120px] outline-none ${
+									activeSession.isGitRepo ? 'cursor-pointer hover:bg-purple-500/20' : ''
+								}`}
+								title={`SSH Remote: ${sshRemoteName}${activeSession.isGitRepo && gitInfo?.branch ? ` (${gitInfo.branch})` : ''}`}
+								onClick={(e) => {
+									e.stopPropagation();
+									if (activeSession.isGitRepo) {
+										refreshGitStatus(); // Refresh git info immediately on click
+										setGitLogOpen?.(true);
+									}
+								}}
+							>
+								<Server className="w-3 h-3 shrink-0" />
+								<span className="truncate uppercase">{sshRemoteName}</span>
+							</button>
+						) : (
+							<button
+								className={`flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border cursor-pointer outline-none ${
+									activeSession.isGitRepo
+										? 'border-orange-500/30 text-orange-500 bg-orange-500/10 hover:bg-orange-500/20'
+										: 'border-blue-500/30 text-blue-500 bg-blue-500/10'
+								}`}
+								onClick={(e) => {
+									e.stopPropagation();
+									if (activeSession.isGitRepo) {
+										refreshGitStatus(); // Refresh git info immediately on click
+										setGitLogOpen?.(true);
+									}
+								}}
+								title={activeSession.isGitRepo && gitInfo?.branch ? gitInfo.branch : undefined}
+							>
+								{activeSession.isGitRepo ? (
+									<>
+										<GitBranch className="w-3 h-3 shrink-0" />
+										{/* Hide branch name text at narrow widths via CSS container query */}
+										<span className="header-git-branch-text truncate">
+											{gitInfo?.branch || 'GIT'}
+										</span>
+									</>
+								) : (
+									'LOCAL'
+								)}
+							</button>
+						)}
+						{/* Branch badge for SSH/container git agents. The SSH host pill above
+						    replaces the GIT/branch badge, so without this remote agents lose the
+						    branch name that local agents show. Render it alongside the host pill,
+						    styled like the local git badge, reusing the same git-log click. */}
+						{activeSession.sessionSshRemoteConfig?.enabled &&
+							sshRemoteName &&
+							activeSession.isGitRepo && (
+								<button
+									className="flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border border-orange-500/30 text-orange-500 bg-orange-500/10 hover:bg-orange-500/20 cursor-pointer outline-none"
+									title={gitInfo?.branch || undefined}
+									onClick={(e) => {
+										e.stopPropagation();
+										refreshGitStatus(); // Refresh git info immediately on click
+										setGitLogOpen?.(true);
+									}}
+								>
+									<GitBranch className="w-3 h-3 shrink-0" />
+									{/* Hide branch name text at narrow widths via CSS container query */}
+									<span className="header-git-branch-text truncate">
+										{gitInfo?.branch || 'GIT'}
+									</span>
+								</button>
+							)}
+						{activeSession.isGitRepo && gitTooltip.isOpen && gitInfo && (
+							<>
+								{/* Invisible bridge to prevent hover gap */}
+								<div
+									className="absolute left-0 right-0 h-3 pointer-events-auto"
+									style={{ top: '100%' }}
+									{...gitTooltip.contentHandlers}
+								/>
+								<div
+									className="absolute top-full left-0 pt-2 w-96 z-50 pointer-events-auto"
+									{...gitTooltip.contentHandlers}
+								>
+									<div
+										className="rounded shadow-xl"
+										style={{
+											backgroundColor: theme.colors.bgSidebar,
+											border: `1px solid ${theme.colors.border}`,
+										}}
+									>
+										{/* Branch / Origin / Status */}
+										<div
+											className="p-3 space-y-2 border-b"
+											style={{ borderColor: theme.colors.border }}
+										>
+											{/* Branch row */}
+											<div className="flex items-center gap-2">
+												<span
+													className="text-[10px] uppercase font-bold w-14 shrink-0"
+													style={{ color: theme.colors.textDim }}
+												>
+													Branch
+												</span>
+												<GitBranch className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+												<span
+													className="text-xs font-mono font-medium truncate"
+													style={{ color: theme.colors.textMain }}
+												>
+													{gitInfo.branch}
+												</span>
+												<div className="flex items-center gap-1.5 ml-auto shrink-0">
+													{gitInfo.ahead > 0 && (
+														<span className="flex items-center gap-0.5 text-xs text-green-500">
+															<ArrowUp className="w-3 h-3" />
+															{gitInfo.ahead}
+														</span>
+													)}
+													{gitInfo.behind > 0 && (
+														<span className="flex items-center gap-0.5 text-xs text-red-500">
+															<ArrowDown className="w-3 h-3" />
+															{gitInfo.behind}
+														</span>
+													)}
+													<GhostIconButton
+														onClick={async (e) => {
+															e.stopPropagation();
+															if (await safeClipboardWrite(gitInfo.branch)) {
+																flashCopiedToClipboard(gitInfo.branch, 'Branch Name Copied');
+															}
+														}}
+														title="Copy branch name"
+														ariaLabel="Copy branch name"
+													>
+														<Copy className="w-3 h-3" style={{ color: theme.colors.textDim }} />
+													</GhostIconButton>
+												</div>
+											</div>
+
+											{/* Origin row */}
+											{gitInfo.remote && (
+												<div className="flex items-center gap-2">
+													<span
+														className="text-[10px] uppercase font-bold w-14 shrink-0"
+														style={{ color: theme.colors.textDim }}
+													>
+														Origin
+													</span>
+													<ExternalLink
+														className="w-3 h-3 shrink-0"
+														style={{ color: theme.colors.textDim }}
+													/>
+													<button
+														onClick={(e) => {
+															e.stopPropagation();
+															const url = remoteUrlToBrowserUrl(gitInfo.remote);
+															if (url) openUrl(url);
+														}}
+														className="text-xs font-mono truncate hover:underline text-left"
+														style={{ color: theme.colors.textMain }}
+														title={`Open ${gitInfo.remote}`}
+													>
+														{gitInfo.remote.replace(/^https?:\/\//, '').replace(/\.git$/, '')}
+													</button>
+													<button
+														onClick={async (e) => {
+															e.stopPropagation();
+															if (await safeClipboardWrite(gitInfo.remote)) {
+																flashCopiedToClipboard(gitInfo.remote);
+															}
+														}}
+														className="p-1 rounded hover:bg-white/10 transition-colors ml-auto shrink-0"
+														title="Copy remote URL"
+													>
+														<Copy className="w-3 h-3" style={{ color: theme.colors.textDim }} />
+													</button>
+												</div>
+											)}
+
+											{/* Status row */}
+											<div className="flex items-center gap-2">
+												<span
+													className="text-[10px] uppercase font-bold w-14 shrink-0"
+													style={{ color: theme.colors.textDim }}
+												>
+													Status
+												</span>
+												{gitInfo.uncommittedChanges > 0 ? (
+													<span
+														className="flex items-center gap-1.5 text-xs"
+														style={{ color: theme.colors.textMain }}
+													>
+														<FileEdit className="w-3 h-3 text-orange-500" />
+														{gitInfo.uncommittedChanges} uncommitted{' '}
+														{gitInfo.uncommittedChanges === 1 ? 'change' : 'changes'}
+													</span>
+												) : (
+													<span className="flex items-center gap-1.5 text-xs text-green-500">
+														Working tree clean
+													</span>
+												)}
+											</div>
+										</div>
+
+										{/* Worktree Actions */}
+										<div className="p-2 space-y-1">
+											{/* Configure Worktrees - only for parent sessions (not worktree children) */}
+											{!isWorktreeChild && onOpenWorktreeConfig && (
+												<button
+													onClick={(e) => {
+														e.stopPropagation();
+														onOpenWorktreeConfig();
+														gitTooltip.close();
+													}}
+													className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded text-xs hover:bg-white/10 transition-colors"
+													style={{ color: theme.colors.textDim }}
+												>
+													<Settings2
+														className="w-3.5 h-3.5"
+														style={{ color: theme.colors.textDim }}
+													/>
+													Configure Worktrees
+												</button>
+											)}
+											{/* Create PR - only for worktree children */}
+											{isWorktreeChild && onOpenCreatePR && (
+												<button
+													onClick={(e) => {
+														e.stopPropagation();
+														onOpenCreatePR();
+														gitTooltip.close();
+													}}
+													className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded text-xs hover:bg-white/10 transition-colors"
+													style={{ color: theme.colors.textDim }}
+												>
+													<GitPullRequest
+														className="w-3.5 h-3.5"
+														style={{ color: theme.colors.textDim }}
+													/>
+													Create Pull Request
+												</button>
+											)}
+										</div>
+									</div>
+								</div>
+							</>
+						)}
+					</div>
+				</div>
+
+				{/* Git Status Widget - compact mode handled via CSS container queries */}
+				<GitStatusWidget
+					sessionId={activeSession.id}
+					isGitRepo={activeSession.isGitRepo}
+					theme={theme}
+					onViewDiff={handleViewGitDiff}
+					onViewLog={() => setGitLogOpen?.(true)}
+				/>
+			</div>
+
+			{/* Center: AUTO Mode Indicator - only show for current session */}
+			{isCurrentSessionAutoMode && (
+				<button
+					onClick={() => {
+						if (isCurrentSessionStopping) return;
+						// Call onStopBatchRun with the active session's ID to stop THIS session's batch
+						onStopBatchRun?.(activeSession.id);
+					}}
+					disabled={isCurrentSessionStopping}
+					className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-bold text-xs transition-all shrink-0 ${isCurrentSessionStopping ? 'cursor-not-allowed' : 'hover:opacity-90 cursor-pointer'}`}
+					style={{
+						backgroundColor: isCurrentSessionStopping ? theme.colors.warning : theme.colors.error,
+						color: isCurrentSessionStopping ? theme.colors.bgMain : 'white',
+						pointerEvents: isCurrentSessionStopping ? 'none' : 'auto',
+					}}
+					title={
+						isCurrentSessionStopping ? 'Stopping after current task...' : 'Click to stop auto-run'
+					}
+				>
+					{isCurrentSessionStopping ? <Spinner size={16} /> : <Wand2 className="w-4 h-4" />}
+					<span className="uppercase tracking-wider">
+						{isCurrentSessionStopping ? 'Stopping' : 'Auto'}
+					</span>
+					{/* Hide progress count when stopping - spinner is sufficient.
+					    Goal-Driven runs have no task list, so show the self-reported
+					    percent instead of an X/Y task count. */}
+					{currentSessionBatchState && !isCurrentSessionStopping && (
+						<span className="text-[10px] opacity-80">
+							{currentSessionBatchState.goalMode
+								? `${currentSessionBatchState.goalProgress ?? 0}%`
+								: `${currentSessionBatchState.completedTasks}/${currentSessionBatchState.totalTasks}`}
+						</span>
+					)}
+					{currentSessionBatchState?.worktreeActive && (
+						<span title={`Worktree: ${currentSessionBatchState.worktreeBranch || 'active'}`}>
+							<GitBranch className="w-3.5 h-3.5 ml-0.5" />
+						</span>
+					)}
+				</button>
+			)}
+
+			<div className="flex items-center gap-3 justify-end shrink-0">
+				{/* Session UUID Pill - click to copy full UUID, hidden at narrow widths via CSS container query */}
+				{/* Hide when file preview tab is focused - session stats are only relevant for AI tabs */}
+				{showSessionIdPill &&
+					activeSession.inputMode === 'ai' &&
+					!activeFileTabId &&
+					activeTab?.agentSessionId &&
+					hasCapability('supportsSessionId') && (
+						<button
+							className="header-uuid-pill text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border transition-colors hover:opacity-80"
+							style={{
+								backgroundColor: theme.colors.accent + '20',
+								color: theme.colors.accent,
+								borderColor: theme.colors.accent + '30',
+							}}
+							title={
+								activeTab.name
+									? `${activeTab.name}\nClick to copy: ${activeTab.agentSessionId}`
+									: `Click to copy: ${activeTab.agentSessionId}`
+							}
+							onClick={async (e) => {
+								e.stopPropagation();
+								if (await safeClipboardWrite(activeTab.agentSessionId!)) {
+									flashCopiedToClipboard(activeTab.agentSessionId!, 'Session ID Copied');
+								}
+							}}
+						>
+							{activeTab.agentSessionId.split('-')[0].toUpperCase().slice(0, 8)}
+						</button>
+					)}
+
+				{/* Cost Tracker - styled as pill, hidden at narrow widths via CSS container query */}
+				{/* Hide when file preview tab is focused - cost tracking is only relevant for AI tabs */}
+				{showSessionCostPill &&
+					activeSession.inputMode === 'ai' &&
+					!activeFileTabId &&
+					(activeTab?.agentSessionId || activeTab?.usageStats) &&
+					hasCapability('supportsCostTracking') && (
+						<span className="header-cost-widget text-xs font-mono font-bold px-2 py-0.5 rounded-full border border-green-500/30 text-green-500 bg-green-500/10">
+							${(activeTab?.usageStats?.totalCostUsd ?? 0).toFixed(2)}
+						</span>
+					)}
+
+				{/* Context Window Widget with Tooltip - only show when context window is configured and agent supports usage stats */}
+				{/* Hide when file preview tab is focused - context usage is only relevant for AI tabs */}
+				{activeSession.inputMode === 'ai' &&
+					!activeFileTabId &&
+					(activeTab?.agentSessionId || activeTab?.usageStats) &&
+					hasCapability('supportsUsageStats') &&
+					activeTabContextWindow > 0 && (
+						<div
+							className="header-context-widget flex items-center mr-2 relative cursor-pointer rounded outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1"
+							data-testid="header-context-widget"
+							role="button"
+							tabIndex={0}
+							aria-label="Open context timeline"
+							{...contextTooltip.triggerHandlers}
+							onClick={() => useContextTimelineStore.getState().openPanel(activeSession.id)}
+							onKeyDown={(e) => {
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									useContextTimelineStore.getState().openPanel(activeSession.id);
+								}
+							}}
+						>
+							{/* Plain-text readout: "X% context remaining" — clearer than a
+							    gauge bar at narrow widths and avoids redundant label+bar. */}
+							<span
+								className="text-xs font-mono font-medium tabular-nums whitespace-nowrap"
+								style={{
+									color: getContextColor(activeTabContextUsage, theme),
+								}}
+							>
+								{Math.round(activeTabContextUsage)}%
+							</span>
+
+							{/* Context Window Tooltip */}
+							{contextTooltip.isOpen && activeSession.inputMode === 'ai' && (
+								<>
+									{/* Invisible bridge to prevent hover gap */}
+									<div
+										className="absolute left-0 right-0 h-3 pointer-events-auto"
+										style={{ top: '100%' }}
+										{...contextTooltip.contentHandlers}
+									/>
+									<div
+										className={`absolute top-full right-0 pt-2 z-50 pointer-events-auto ${
+											showBatchUsage && batchUsageSnapshot ? 'w-72' : 'w-64'
+										}`}
+										{...contextTooltip.contentHandlers}
+									>
+										<div
+											className="border rounded-lg p-3 shadow-xl"
+											style={{
+												backgroundColor: theme.colors.bgSidebar,
+												borderColor: theme.colors.border,
+											}}
+										>
+											<div
+												className="text-[10px] uppercase font-bold mb-3"
+												style={{ color: theme.colors.textDim }}
+											>
+												Context Details
+											</div>
+
+											<div className="space-y-2">
+												<div className="flex justify-between items-center">
+													<span className="text-xs" style={{ color: theme.colors.textDim }}>
+														Input Tokens
+													</span>
+													<span
+														className="text-xs font-mono"
+														style={{ color: theme.colors.textMain }}
+													>
+														{calculateDisplayInputTokens(
+															activeTab?.usageStats ?? {},
+															activeSession.toolType
+														).toLocaleString('en-US')}
+													</span>
+												</div>
+												<div className="flex justify-between items-center">
+													<span className="text-xs" style={{ color: theme.colors.textDim }}>
+														Output Tokens
+													</span>
+													<span
+														className="text-xs font-mono"
+														style={{ color: theme.colors.textMain }}
+													>
+														{(activeTab?.usageStats?.outputTokens ?? 0).toLocaleString('en-US')}
+													</span>
+												</div>
+												{/* Reasoning tokens - only shown for agents that report them (e.g., Codex o3/o4-mini) */}
+												{(activeTab?.usageStats?.reasoningTokens ?? 0) > 0 && (
+													<div className="flex justify-between items-center">
+														<span className="text-xs" style={{ color: theme.colors.textDim }}>
+															Reasoning Tokens
+															<span className="ml-1 text-[10px] opacity-60">(in output)</span>
+														</span>
+														<span
+															className="text-xs font-mono"
+															style={{ color: theme.colors.textMain }}
+														>
+															{(activeTab?.usageStats?.reasoningTokens ?? 0).toLocaleString(
+																'en-US'
+															)}
+														</span>
+													</div>
+												)}
+												<div className="flex justify-between items-center">
+													<span className="text-xs" style={{ color: theme.colors.textDim }}>
+														Cache Read
+													</span>
+													<span
+														className="text-xs font-mono"
+														style={{ color: theme.colors.textMain }}
+													>
+														{(activeTab?.usageStats?.cacheReadInputTokens ?? 0).toLocaleString(
+															'en-US'
+														)}
+													</span>
+												</div>
+												<div className="flex justify-between items-center">
+													<span className="text-xs" style={{ color: theme.colors.textDim }}>
+														Cache Write
+													</span>
+													<span
+														className="text-xs font-mono"
+														style={{ color: theme.colors.textMain }}
+													>
+														{(activeTab?.usageStats?.cacheCreationInputTokens ?? 0).toLocaleString(
+															'en-US'
+														)}
+													</span>
+												</div>
+
+												{/* Context usage section - only shown when contextWindow is configured */}
+												{activeTabContextWindow > 0 && (
+													<div
+														className="border-t pt-2 mt-2"
+														style={{ borderColor: theme.colors.border }}
+													>
+														<div className="flex justify-between items-center">
+															<span
+																className="text-xs font-bold"
+																style={{ color: theme.colors.textDim }}
+															>
+																Context Tokens
+															</span>
+															<span
+																className="text-xs font-mono font-bold"
+																style={{ color: theme.colors.accent }}
+															>
+																{activeTabContextTokens.toLocaleString('en-US')}
+															</span>
+														</div>
+														<div className="flex justify-between items-center mt-1">
+															<span
+																className="text-xs font-bold"
+																style={{ color: theme.colors.textDim }}
+															>
+																Context Size
+															</span>
+															<span
+																className="text-xs font-mono font-bold"
+																style={{ color: theme.colors.textMain }}
+															>
+																{activeTabContextWindow.toLocaleString('en-US')}
+															</span>
+														</div>
+														<div className="flex justify-between items-center mt-1">
+															<span
+																className="text-xs font-bold"
+																style={{ color: theme.colors.textDim }}
+															>
+																Usage
+															</span>
+															<span
+																className="text-xs font-mono font-bold"
+																style={{
+																	color: getContextColor(activeTabContextUsage, theme),
+																}}
+															>
+																{activeTabContextUsage}%
+															</span>
+														</div>
+													</div>
+												)}
+
+												{/* TUI usage limits — shown for Claude Code tabs driving the TUI
+												    (Adaptive Mode toggle OR static maestro-p Path) when a usage
+												    snapshot is cached. Bar color rules match the Usage Dashboard
+												    so the same percent reads the same way in both places:
+												    accent at low, warning at 75%, error at 99%. */}
+												{showBatchUsage && batchUsageSnapshot && (
+													<div
+														className="border-t pt-2 mt-2"
+														style={{ borderColor: theme.colors.border }}
+													>
+														<div
+															className="text-[10px] uppercase font-bold mb-2"
+															style={{ color: theme.colors.textDim }}
+														>
+															Max Plan Usage
+														</div>
+														<div className="flex justify-between items-center mb-2">
+															<span className="text-xs" style={{ color: theme.colors.textDim }}>
+																Mode
+															</span>
+															<span
+																className="text-xs font-mono font-bold"
+																style={{
+																	color:
+																		activeSession?.claudeInteractive?.mode === 'interactive'
+																			? theme.colors.accent
+																			: (theme.colors.warning ?? theme.colors.accent),
+																}}
+															>
+																{activeSession?.claudeInteractive?.mode === 'interactive'
+																	? 'Time Limits'
+																	: 'API Limits'}
+															</span>
+														</div>
+														{batchUsageSnapshot.authState === 'unauthenticated' ? (
+															<div
+																className="flex items-center gap-2 px-2 py-1.5 rounded text-[11px]"
+																style={{
+																	backgroundColor: `${theme.colors.warning ?? theme.colors.accent}15`,
+																	color: theme.colors.textMain,
+																	border: `1px solid ${theme.colors.warning ?? theme.colors.accent}40`,
+																}}
+															>
+																<span
+																	style={{
+																		color: theme.colors.warning ?? theme.colors.accent,
+																	}}
+																>
+																	●
+																</span>
+																<span>
+																	Not logged in — run{' '}
+																	<code style={{ color: theme.colors.accent }}>/login</code>.
+																</span>
+															</div>
+														) : (
+															(['session', 'weekAllModels'] as const).map((key) => {
+																const window = batchUsageSnapshot[key];
+																const label = key === 'session' ? '5-hour' : 'Weekly';
+																const pct = Math.max(0, Math.min(100, window.percent));
+																const barColor =
+																	pct >= 99
+																		? (theme.colors.error ?? theme.colors.warning)
+																		: pct >= 75
+																			? theme.colors.warning
+																			: theme.colors.accent;
+																return (
+																	<div key={key} className="mb-2 last:mb-0">
+																		<div className="flex justify-between items-center mb-1">
+																			<span
+																				className="text-xs"
+																				style={{ color: theme.colors.textDim }}
+																			>
+																				{label}
+																			</span>
+																			<span
+																				className="text-xs font-mono"
+																				style={{ color: theme.colors.textMain }}
+																			>
+																				{pct.toFixed(0)}%
+																			</span>
+																		</div>
+																		<div
+																			className="h-1.5 rounded-full overflow-hidden"
+																			style={{ backgroundColor: theme.colors.border }}
+																		>
+																			<div
+																				className="h-full transition-all"
+																				style={{
+																					width: `${pct}%`,
+																					backgroundColor: barColor,
+																					opacity: 0.9,
+																				}}
+																			/>
+																		</div>
+																		<div
+																			className="text-[10px] mt-0.5 text-right"
+																			style={{ color: theme.colors.textDim, opacity: 0.7 }}
+																		>
+																			Resets {formatFutureTime(window.resetsAt)}
+																		</div>
+																	</div>
+																);
+															})
+														)}
+													</div>
+												)}
+											</div>
+										</div>
+									</div>
+								</>
+							)}
+						</div>
+					)}
+
+				<PluginUiItemsSlot surface="toolbar" />
+
+				{/* Memory Viewer Button - only show if agent maintains per-project memory */}
+				{hasCapability('supportsProjectMemory') && (
+					<button
+						onClick={() => setMemoryViewerOpen(true)}
+						className="header-secondary-btn p-2 rounded hover:bg-white/5"
+						title={`Memory Viewer (${shortcuts.openMemoryViewer ? formatShortcutKeys(shortcuts.openMemoryViewer.keys) : formatShortcutKeys(['Meta', 'Shift', 'm'])})`}
+						data-tour="memory-viewer-button"
+					>
+						<Brain className="w-4 h-4" style={{ color: theme.colors.textDim }} />
+					</button>
+				)}
+
+				{/* Agent Sessions Button - only show if agent supports session storage */}
+				{hasCapability('supportsSessionStorage') && (
+					<button
+						onClick={() => {
+							setActiveAgentSessionId(null);
+							setAgentSessionsOpen(true);
+						}}
+						className="header-secondary-btn p-2 rounded hover:bg-white/5"
+						title={`Agent Sessions (${shortcuts.agentSessions ? formatShortcutKeys(shortcuts.agentSessions.keys) : formatShortcutKeys(['Meta', 'Shift', 'l'])})`}
+						data-tour="agent-sessions-button"
+					>
+						<List className="w-4 h-4" style={{ color: theme.colors.textDim }} />
+					</button>
+				)}
+
+				{/* Quick Actions / command palette opener. Cmd+K is keyboard-only, so
+				    surface a tap target on narrow (phone / small tablet) viewports where
+				    there is no keyboard. Hidden on wide layouts, where Cmd+K suffices. */}
+				{isNarrow && (
+					<button
+						onClick={() => getModalActions().setQuickActionOpen(true)}
+						className="p-2 rounded hover:bg-white/5"
+						aria-label="Quick Actions"
+						title={`Quick Actions (${formatShortcutKeys(shortcuts.quickAction.keys)})`}
+					>
+						<Command className="w-4 h-4" style={{ color: theme.colors.textDim }} />
+					</button>
+				)}
+
+				{!rightPanelOpen && (
+					<button
+						onClick={() => useUIStore.getState().setRightPanelOpen(true)}
+						className="p-2 rounded hover:bg-white/5"
+						title={`Show right panel (${formatShortcutKeys(shortcuts.toggleRightPanel.keys)})`}
+					>
+						<Columns className="w-4 h-4" />
+					</button>
+				)}
+			</div>
+		</div>
+	);
+});

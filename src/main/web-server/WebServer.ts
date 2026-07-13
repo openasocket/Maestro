@@ -3,19 +3,19 @@
  *
  * Architecture:
  * - Single server on random port
- * - Security token (UUID) generated at startup, required in all URLs
+ * - Security token (UUID) per startup or persistent across restarts, required in all URLs
  * - Routes: /$TOKEN/ (dashboard), /$TOKEN/session/:id (session view)
  * - Live sessions: Only sessions marked as "live" appear in dashboard
  * - WebSocket: Real-time updates for session state, logs, theme
  *
  * URL Structure:
- *   http://localhost:PORT/$TOKEN/                  → Dashboard (all live sessions)
- *   http://localhost:PORT/$TOKEN/session/$UUID     → Single session view
- *   http://localhost:PORT/$TOKEN/api/*             → REST API
- *   http://localhost:PORT/$TOKEN/ws                → WebSocket
+ *   http://LAN_IP:PORT/$TOKEN/                  → Dashboard (all live sessions)
+ *   http://LAN_IP:PORT/$TOKEN/session/$UUID     → Single session view
+ *   http://LAN_IP:PORT/$TOKEN/api/*             → REST API
+ *   http://LAN_IP:PORT/$TOKEN/ws                → WebSocket
  *
  * Security:
- * - Token regenerated on each app restart
+ * - Token regenerated on each app restart (unless Persistent Web Link is enabled)
  * - Invalid/missing token redirects to website
  * - No access without knowing the token
  */
@@ -29,8 +29,9 @@ import { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomUUID } from 'crypto';
 import path from 'path';
 import { existsSync } from 'fs';
-import { getLocalIpAddressSync } from '../utils/networkUtils';
 import { logger } from '../utils/logger';
+import { getLocalIpAddress } from '../utils/networkUtils';
+import { captureException } from '../utils/sentry';
 import { WebSocketMessageHandler } from './handlers';
 import { BroadcastService } from './services';
 import { ApiRoutes, StaticRoutes, WsRoute } from './routes';
@@ -44,10 +45,13 @@ import type {
 	AITabData,
 	CustomAICommand,
 	AutoRunState,
+	AutoRunDocument,
 	CliActivity,
+	NotificationEvent,
 	SessionBroadcastData,
 	WebClient,
 	WebClientMessage,
+	WebSettings,
 	GetSessionsCallback,
 	GetSessionDetailCallback,
 	WriteToSessionCallback,
@@ -59,9 +63,84 @@ import type {
 	NewTabCallback,
 	CloseTabCallback,
 	RenameTabCallback,
+	StarTabCallback,
+	ReorderTabCallback,
+	ToggleBookmarkCallback,
+	OpenFileTabCallback,
+	RefreshFileTreeCallback,
+	OpenBrowserTabCallback,
+	OpenTerminalTabCallback,
+	NewAITabWithPromptCallback,
+	RefreshAutoRunDocsCallback,
+	ConfigureAutoRunCallback,
+	SetSessionAutoRunFolderCallback,
 	GetThemeCallback,
+	GetBionifyReadingModeCallback,
 	GetCustomCommandsCallback,
 	GetHistoryCallback,
+	GetAutoRunDocsCallback,
+	GetAutoRunDocContentCallback,
+	SaveAutoRunDocCallback,
+	StopAutoRunCallback,
+	ResetAutoRunDocTasksCallback,
+	ResumeAutoRunErrorCallback,
+	SkipAutoRunDocumentCallback,
+	AbortAutoRunErrorCallback,
+	ListPlaybooksCallback,
+	CreatePlaybookCallback,
+	UpdatePlaybookCallback,
+	DeletePlaybookCallback,
+	GetSettingsCallback,
+	SetSettingCallback,
+	GetGroupsCallback,
+	CreateGroupCallback,
+	RenameGroupCallback,
+	DeleteGroupCallback,
+	MoveSessionToGroupCallback,
+	CreateSessionCallback,
+	CreateWorktreeSessionCallback,
+	CreateSessionConfig,
+	DeleteSessionCallback,
+	RenameSessionCallback,
+	UpdateSessionCwdCallback,
+	UpdateSessionSshCallback,
+	UpdateSessionConfigCallback,
+	GetGitStatusCallback,
+	GetGitDiffCallback,
+	GetGitBranchesForSessionCallback,
+	ListWorktreesForSessionCallback,
+	GroupData,
+	GetGroupChatsCallback,
+	StartGroupChatCallback,
+	GetGroupChatStateCallback,
+	StopGroupChatCallback,
+	SendGroupChatMessageCallback,
+	GroupChatMessage,
+	GroupChatState,
+	MergeContextCallback,
+	TransferContextCallback,
+	SummarizeContextCallback,
+	CreateGistCallback,
+	GetCueSubscriptionsCallback,
+	ToggleCueSubscriptionCallback,
+	TriggerCueSubscriptionCallback,
+	GetCueActivityCallback,
+	CueActivityEntry,
+	CueSubscriptionInfo,
+	GetUsageDashboardCallback,
+	GetAchievementsCallback,
+	GenerateDirectorNotesSynopsisCallback,
+	NotifyToastCallback,
+	CadenzaViewCallback,
+	MovementViewCallback,
+	GetMovementStateCallback,
+	NotifyCenterFlashCallback,
+	GetMarketplaceManifestCallback,
+	GetMarketplaceDocumentCallback,
+	GetMarketplaceReadmeCallback,
+	ImportMarketplacePlaybookCallback,
+	ListDesktopSessionsCallback,
+	GetSessionHistoryCallback,
 } from './types';
 
 // Logger context for all web server logs
@@ -81,9 +160,21 @@ export class WebServer {
 	private isRunning: boolean = false;
 	private webClients: Map<string, WebClient> = new Map();
 	private rateLimitConfig: RateLimitConfig = { ...DEFAULT_RATE_LIMIT_CONFIG };
+	// Directory that ships the PWA assets (manifest.json, service worker, icons/).
+	// These are copied into the web-desktop bundle by its vite `publicDir`, so
+	// they live alongside the bundle's index.html. Null until the bundle is built.
 	private webAssetsPath: string | null = null;
+	// Cached on first hit so we don't existsSync 3 candidate paths on every
+	// desktop page load. The HTML itself is intentionally NOT cached: Vite
+	// changes the asset hash on every rebuild, so a long-lived cache would
+	// keep serving stale `<script src="assets/main-OLD.js">` references that
+	// 404 against the new bundle.
+	private webDesktopPathCache: string | null = null;
+	// Resolved web-desktop bundle root (or null if not built). Set once in the
+	// constructor; shared by StaticRoutes (index.html) and the asset mount.
+	private webDesktopPath: string | null = null;
 
-	// Security token - regenerated on each app startup
+	// Security token - persistent or regenerated per startup
 	private securityToken: string;
 
 	// Local IP address for generating URLs (detected at startup)
@@ -104,7 +195,7 @@ export class WebServer {
 	private staticRoutes: StaticRoutes;
 	private wsRoute: WsRoute;
 
-	constructor(port: number = 0) {
+	constructor(port: number = 0, securityToken?: string) {
 		// Use port 0 to let OS assign a random available port
 		this.port = port;
 		this.server = Fastify({
@@ -113,12 +204,21 @@ export class WebServer {
 			},
 		});
 
-		// Generate a new security token (UUID v4)
-		this.securityToken = randomUUID();
-		logger.debug('Security token generated', LOG_CONTEXT);
+		// Use provided token (persistent mode) or generate a new one (ephemeral mode)
+		if (securityToken) {
+			this.securityToken = securityToken;
+			logger.debug('Using persistent security token', LOG_CONTEXT);
+		} else {
+			this.securityToken = randomUUID();
+			logger.debug('Security token generated', LOG_CONTEXT);
+		}
 
 		// Determine web assets path (production vs development)
 		this.webAssetsPath = this.resolveWebAssetsPath();
+		// Resolve the web-desktop bundle once. It is now the default interface
+		// served at the token root, so StaticRoutes needs the path to serve its
+		// index.html and the asset mount needs it to expose /<token>/desktop/assets/.
+		this.webDesktopPath = this.resolveWebDesktopAssetsPath();
 
 		// Initialize managers
 		this.liveSessionManager = new LiveSessionManager();
@@ -143,37 +243,42 @@ export class WebServer {
 
 		// Initialize route handlers
 		this.apiRoutes = new ApiRoutes(this.securityToken, this.rateLimitConfig);
-		this.staticRoutes = new StaticRoutes(this.securityToken, this.webAssetsPath);
+		this.staticRoutes = new StaticRoutes(
+			this.securityToken,
+			this.webAssetsPath,
+			this.webDesktopPath
+		);
 		this.wsRoute = new WsRoute(this.securityToken);
 
 		// Note: setupMiddleware and setupRoutes are called in start() to handle async properly
 	}
 
 	/**
-	 * Resolve the path to web assets
-	 * In production: dist/web relative to app root
-	 * In development: same location but might not exist until built
+	 * Resolve the directory that ships the PWA assets (manifest.json, service
+	 * worker, icons/). The web-desktop bundle's vite `publicDir` copies
+	 * `src/web/public/*` into the bundle output, so the assets live alongside the
+	 * bundle's index.html. `manifest.json` is the marker file we probe for.
+	 * Returns null when the bundle has not been built.
 	 */
 	private resolveWebAssetsPath(): string | null {
-		// Try multiple locations for the web assets
 		const possiblePaths = [
-			// Production: relative to the compiled main process
-			path.join(__dirname, '..', '..', 'web'),
 			// Development: from project root
-			path.join(process.cwd(), 'dist', 'web'),
+			path.join(process.cwd(), 'dist', 'web-desktop'),
+			// Production: relative to the compiled main process
+			path.join(__dirname, '..', '..', 'web-desktop'),
 			// Alternative: relative to __dirname going up to dist
-			path.join(__dirname, '..', 'web'),
+			path.join(__dirname, '..', 'web-desktop'),
 		];
 
 		for (const p of possiblePaths) {
-			if (existsSync(path.join(p, 'index.html'))) {
-				logger.debug(`Web assets found at: ${p}`, LOG_CONTEXT);
+			if (existsSync(path.join(p, 'manifest.json'))) {
+				logger.debug(`Web PWA assets found at: ${p}`, LOG_CONTEXT);
 				return p;
 			}
 		}
 
 		logger.warn(
-			'Web assets not found. Web interface will not be served. Run "npm run build:web" to build web assets.',
+			'Web PWA assets not found. Manifest/service worker/icons will not be served. Run "npm run build:web-desktop" to build the web interface.',
 			LOG_CONTEXT
 		);
 		return null;
@@ -218,7 +323,6 @@ export class WebServer {
 
 	/**
 	 * Get the full secure URL (with token)
-	 * Uses the detected local IP address for LAN accessibility
 	 */
 	getSecureUrl(): string {
 		return `http://${this.localIpAddress}:${this.port}/${this.securityToken}`;
@@ -226,7 +330,6 @@ export class WebServer {
 
 	/**
 	 * Get URL for a specific session
-	 * Uses the detected local IP address for LAN accessibility
 	 */
 	getSessionUrl(sessionId: string): string {
 		return `http://${this.localIpAddress}:${this.port}/${this.securityToken}/session/${sessionId}`;
@@ -246,12 +349,51 @@ export class WebServer {
 		this.callbackRegistry.setGetThemeCallback(callback);
 	}
 
+	setGetBionifyReadingModeCallback(callback: GetBionifyReadingModeCallback): void {
+		this.callbackRegistry.setGetBionifyReadingModeCallback(callback);
+	}
+
 	setGetCustomCommandsCallback(callback: GetCustomCommandsCallback): void {
 		this.callbackRegistry.setGetCustomCommandsCallback(callback);
 	}
 
 	setWriteToSessionCallback(callback: WriteToSessionCallback): void {
 		this.callbackRegistry.setWriteToSessionCallback(callback);
+	}
+
+	private writeToTerminalCallback: ((sessionId: string, data: string) => boolean) | null = null;
+	private resizeTerminalCallback:
+		| ((sessionId: string, cols: number, rows: number) => boolean)
+		| null = null;
+	private spawnTerminalForWebCallback:
+		| ((
+				sessionId: string,
+				config: { cwd: string; cols?: number; rows?: number }
+		  ) => Promise<{ success: boolean; pid: number }>)
+		| null = null;
+	private killTerminalForWebCallback: ((sessionId: string) => boolean) | null = null;
+
+	setWriteToTerminalCallback(callback: (sessionId: string, data: string) => boolean): void {
+		this.writeToTerminalCallback = callback;
+	}
+
+	setResizeTerminalCallback(
+		callback: (sessionId: string, cols: number, rows: number) => boolean
+	): void {
+		this.resizeTerminalCallback = callback;
+	}
+
+	setSpawnTerminalForWebCallback(
+		callback: (
+			sessionId: string,
+			config: { cwd: string; cols?: number; rows?: number }
+		) => Promise<{ success: boolean; pid: number }>
+	): void {
+		this.spawnTerminalForWebCallback = callback;
+	}
+
+	setKillTerminalForWebCallback(callback: (sessionId: string) => boolean): void {
+		this.killTerminalForWebCallback = callback;
 	}
 
 	setExecuteCommandCallback(callback: ExecuteCommandCallback): void {
@@ -286,8 +428,284 @@ export class WebServer {
 		this.callbackRegistry.setRenameTabCallback(callback);
 	}
 
+	setStarTabCallback(callback: StarTabCallback): void {
+		this.callbackRegistry.setStarTabCallback(callback);
+	}
+
+	setReorderTabCallback(callback: ReorderTabCallback): void {
+		this.callbackRegistry.setReorderTabCallback(callback);
+	}
+
+	setToggleBookmarkCallback(callback: ToggleBookmarkCallback): void {
+		this.callbackRegistry.setToggleBookmarkCallback(callback);
+	}
+
+	setOpenFileTabCallback(callback: OpenFileTabCallback): void {
+		this.callbackRegistry.setOpenFileTabCallback(callback);
+	}
+
+	setRefreshFileTreeCallback(callback: RefreshFileTreeCallback): void {
+		this.callbackRegistry.setRefreshFileTreeCallback(callback);
+	}
+
+	setOpenBrowserTabCallback(callback: OpenBrowserTabCallback): void {
+		this.callbackRegistry.setOpenBrowserTabCallback(callback);
+	}
+
+	setOpenTerminalTabCallback(callback: OpenTerminalTabCallback): void {
+		this.callbackRegistry.setOpenTerminalTabCallback(callback);
+	}
+
+	setNewAITabWithPromptCallback(callback: NewAITabWithPromptCallback): void {
+		this.callbackRegistry.setNewAITabWithPromptCallback(callback);
+	}
+
+	setRefreshAutoRunDocsCallback(callback: RefreshAutoRunDocsCallback): void {
+		this.callbackRegistry.setRefreshAutoRunDocsCallback(callback);
+	}
+
+	setConfigureAutoRunCallback(callback: ConfigureAutoRunCallback): void {
+		this.callbackRegistry.setConfigureAutoRunCallback(callback);
+	}
+
+	setSessionAutoRunFolderCallback(callback: SetSessionAutoRunFolderCallback): void {
+		this.callbackRegistry.setSessionAutoRunFolderCallback(callback);
+	}
+
 	setGetHistoryCallback(callback: GetHistoryCallback): void {
 		this.callbackRegistry.setGetHistoryCallback(callback);
+	}
+
+	setGetAutoRunDocsCallback(callback: GetAutoRunDocsCallback): void {
+		this.callbackRegistry.setGetAutoRunDocsCallback(callback);
+	}
+
+	setGetAutoRunDocContentCallback(callback: GetAutoRunDocContentCallback): void {
+		this.callbackRegistry.setGetAutoRunDocContentCallback(callback);
+	}
+
+	setSaveAutoRunDocCallback(callback: SaveAutoRunDocCallback): void {
+		this.callbackRegistry.setSaveAutoRunDocCallback(callback);
+	}
+
+	setStopAutoRunCallback(callback: StopAutoRunCallback): void {
+		this.callbackRegistry.setStopAutoRunCallback(callback);
+	}
+
+	setResetAutoRunDocTasksCallback(callback: ResetAutoRunDocTasksCallback): void {
+		this.callbackRegistry.setResetAutoRunDocTasksCallback(callback);
+	}
+
+	setResumeAutoRunErrorCallback(callback: ResumeAutoRunErrorCallback): void {
+		this.callbackRegistry.setResumeAutoRunErrorCallback(callback);
+	}
+
+	setSkipAutoRunDocumentCallback(callback: SkipAutoRunDocumentCallback): void {
+		this.callbackRegistry.setSkipAutoRunDocumentCallback(callback);
+	}
+
+	setAbortAutoRunErrorCallback(callback: AbortAutoRunErrorCallback): void {
+		this.callbackRegistry.setAbortAutoRunErrorCallback(callback);
+	}
+
+	setListPlaybooksCallback(callback: ListPlaybooksCallback): void {
+		this.callbackRegistry.setListPlaybooksCallback(callback);
+	}
+
+	setCreatePlaybookCallback(callback: CreatePlaybookCallback): void {
+		this.callbackRegistry.setCreatePlaybookCallback(callback);
+	}
+
+	setUpdatePlaybookCallback(callback: UpdatePlaybookCallback): void {
+		this.callbackRegistry.setUpdatePlaybookCallback(callback);
+	}
+
+	setDeletePlaybookCallback(callback: DeletePlaybookCallback): void {
+		this.callbackRegistry.setDeletePlaybookCallback(callback);
+	}
+
+	setGetSettingsCallback(callback: GetSettingsCallback): void {
+		this.callbackRegistry.setGetSettingsCallback(callback);
+	}
+
+	setSetSettingCallback(callback: SetSettingCallback): void {
+		this.callbackRegistry.setSetSettingCallback(callback);
+	}
+
+	setGetGroupsCallback(callback: GetGroupsCallback): void {
+		this.callbackRegistry.setGetGroupsCallback(callback);
+	}
+
+	setCreateGroupCallback(callback: CreateGroupCallback): void {
+		this.callbackRegistry.setCreateGroupCallback(callback);
+	}
+
+	setRenameGroupCallback(callback: RenameGroupCallback): void {
+		this.callbackRegistry.setRenameGroupCallback(callback);
+	}
+
+	setDeleteGroupCallback(callback: DeleteGroupCallback): void {
+		this.callbackRegistry.setDeleteGroupCallback(callback);
+	}
+
+	setMoveSessionToGroupCallback(callback: MoveSessionToGroupCallback): void {
+		this.callbackRegistry.setMoveSessionToGroupCallback(callback);
+	}
+
+	setCreateSessionCallback(callback: CreateSessionCallback): void {
+		this.callbackRegistry.setCreateSessionCallback(callback);
+	}
+
+	setCreateWorktreeSessionCallback(callback: CreateWorktreeSessionCallback): void {
+		this.callbackRegistry.setCreateWorktreeSessionCallback(callback);
+	}
+
+	setDeleteSessionCallback(callback: DeleteSessionCallback): void {
+		this.callbackRegistry.setDeleteSessionCallback(callback);
+	}
+
+	setRenameSessionCallback(callback: RenameSessionCallback): void {
+		this.callbackRegistry.setRenameSessionCallback(callback);
+	}
+
+	setUpdateSessionCwdCallback(callback: UpdateSessionCwdCallback): void {
+		this.callbackRegistry.setUpdateSessionCwdCallback(callback);
+	}
+
+	setUpdateSessionSshCallback(callback: UpdateSessionSshCallback): void {
+		this.callbackRegistry.setUpdateSessionSshCallback(callback);
+	}
+
+	setUpdateSessionConfigCallback(callback: UpdateSessionConfigCallback): void {
+		this.callbackRegistry.setUpdateSessionConfigCallback(callback);
+	}
+
+	setGetGitStatusCallback(callback: GetGitStatusCallback): void {
+		this.callbackRegistry.setGetGitStatusCallback(callback);
+	}
+
+	setGetGitDiffCallback(callback: GetGitDiffCallback): void {
+		this.callbackRegistry.setGetGitDiffCallback(callback);
+	}
+
+	setGetGitBranchesForSessionCallback(callback: GetGitBranchesForSessionCallback): void {
+		this.callbackRegistry.setGetGitBranchesForSessionCallback(callback);
+	}
+
+	setListWorktreesForSessionCallback(callback: ListWorktreesForSessionCallback): void {
+		this.callbackRegistry.setListWorktreesForSessionCallback(callback);
+	}
+
+	setGetGroupChatsCallback(callback: GetGroupChatsCallback): void {
+		this.callbackRegistry.setGetGroupChatsCallback(callback);
+	}
+
+	setStartGroupChatCallback(callback: StartGroupChatCallback): void {
+		this.callbackRegistry.setStartGroupChatCallback(callback);
+	}
+
+	setGetGroupChatStateCallback(callback: GetGroupChatStateCallback): void {
+		this.callbackRegistry.setGetGroupChatStateCallback(callback);
+	}
+
+	setStopGroupChatCallback(callback: StopGroupChatCallback): void {
+		this.callbackRegistry.setStopGroupChatCallback(callback);
+	}
+
+	setSendGroupChatMessageCallback(callback: SendGroupChatMessageCallback): void {
+		this.callbackRegistry.setSendGroupChatMessageCallback(callback);
+	}
+
+	setMergeContextCallback(callback: MergeContextCallback): void {
+		this.callbackRegistry.setMergeContextCallback(callback);
+	}
+
+	setTransferContextCallback(callback: TransferContextCallback): void {
+		this.callbackRegistry.setTransferContextCallback(callback);
+	}
+
+	setSummarizeContextCallback(callback: SummarizeContextCallback): void {
+		this.callbackRegistry.setSummarizeContextCallback(callback);
+	}
+
+	setCreateGistCallback(callback: CreateGistCallback): void {
+		this.callbackRegistry.setCreateGistCallback(callback);
+	}
+
+	setGetCueSubscriptionsCallback(callback: GetCueSubscriptionsCallback): void {
+		this.callbackRegistry.setGetCueSubscriptionsCallback(callback);
+	}
+
+	setToggleCueSubscriptionCallback(callback: ToggleCueSubscriptionCallback): void {
+		this.callbackRegistry.setToggleCueSubscriptionCallback(callback);
+	}
+
+	setTriggerCueSubscriptionCallback(callback: TriggerCueSubscriptionCallback): void {
+		this.callbackRegistry.setTriggerCueSubscriptionCallback(callback);
+	}
+
+	setGetCueActivityCallback(callback: GetCueActivityCallback): void {
+		this.callbackRegistry.setGetCueActivityCallback(callback);
+	}
+
+	setGetUsageDashboardCallback(callback: GetUsageDashboardCallback): void {
+		this.callbackRegistry.setGetUsageDashboardCallback(callback);
+	}
+
+	setGetAchievementsCallback(callback: GetAchievementsCallback): void {
+		this.callbackRegistry.setGetAchievementsCallback(callback);
+	}
+
+	setGenerateDirectorNotesSynopsisCallback(callback: GenerateDirectorNotesSynopsisCallback): void {
+		this.callbackRegistry.setGenerateDirectorNotesSynopsisCallback(callback);
+	}
+
+	setNotifyToastCallback(callback: NotifyToastCallback): void {
+		this.callbackRegistry.setNotifyToastCallback(callback);
+	}
+
+	setCadenzaViewCallback(callback: CadenzaViewCallback): void {
+		this.callbackRegistry.setCadenzaViewCallback(callback);
+	}
+
+	setMovementViewCallback(callback: MovementViewCallback): void {
+		this.callbackRegistry.setMovementViewCallback(callback);
+	}
+
+	setGetMovementStateCallback(callback: GetMovementStateCallback): void {
+		this.callbackRegistry.setGetMovementStateCallback(callback);
+	}
+
+	setNotifyCenterFlashCallback(callback: NotifyCenterFlashCallback): void {
+		this.callbackRegistry.setNotifyCenterFlashCallback(callback);
+	}
+
+	setGetMarketplaceManifestCallback(callback: GetMarketplaceManifestCallback): void {
+		this.callbackRegistry.setGetMarketplaceManifestCallback(callback);
+	}
+
+	setGetMarketplaceDocumentCallback(callback: GetMarketplaceDocumentCallback): void {
+		this.callbackRegistry.setGetMarketplaceDocumentCallback(callback);
+	}
+
+	setGetMarketplaceReadmeCallback(callback: GetMarketplaceReadmeCallback): void {
+		this.callbackRegistry.setGetMarketplaceReadmeCallback(callback);
+	}
+
+	setImportMarketplacePlaybookCallback(callback: ImportMarketplacePlaybookCallback): void {
+		this.callbackRegistry.setImportMarketplacePlaybookCallback(callback);
+	}
+
+	setListDesktopSessionsCallback(callback: ListDesktopSessionsCallback): void {
+		this.callbackRegistry.setListDesktopSessionsCallback(callback);
+	}
+
+	setGetSessionHistoryCallback(callback: GetSessionHistoryCallback): void {
+		this.callbackRegistry.setGetSessionHistoryCallback(callback);
+	}
+
+	broadcastGroupsChanged(groups: GroupData[]): void {
+		this.broadcastService.broadcastGroupsChanged(groups);
 	}
 
 	// ============ Rate Limiting ============
@@ -338,18 +756,11 @@ export class WebServer {
 			},
 		});
 
-		// Register static file serving for web assets
+		// Register the PWA icons directory. The icons ship inside the web-desktop
+		// bundle (copied there by its vite publicDir), so webAssetsPath points at
+		// that bundle root. The bundle's own JS/CSS assets are served separately
+		// at /<token>/desktop/assets/ (see below).
 		if (this.webAssetsPath) {
-			const assetsPath = path.join(this.webAssetsPath, 'assets');
-			if (existsSync(assetsPath)) {
-				await this.server.register(fastifyStatic, {
-					root: assetsPath,
-					prefix: `/${this.securityToken}/assets/`,
-					decorateReply: false,
-				});
-			}
-
-			// Register icons directory
 			const iconsPath = path.join(this.webAssetsPath, 'icons');
 			if (existsSync(iconsPath)) {
 				await this.server.register(fastifyStatic, {
@@ -359,10 +770,43 @@ export class WebServer {
 				});
 			}
 		}
+
+		// Web-Desktop bundle assets — the default interface. Served at
+		// /<token>/desktop/assets/ to match the absolute asset references the
+		// desktop index.html is rewritten to use, regardless of the URL the HTML
+		// itself was served from. Mounted whenever the bundle has been built.
+		if (this.webDesktopPath) {
+			const wdAssets = path.join(this.webDesktopPath, 'assets');
+			if (existsSync(wdAssets)) {
+				await this.server.register(fastifyStatic, {
+					root: wdAssets,
+					prefix: `/${this.securityToken}/desktop/assets/`,
+					decorateReply: false,
+				});
+			}
+		}
+	}
+
+	private resolveWebDesktopAssetsPath(): string | null {
+		if (this.webDesktopPathCache) return this.webDesktopPathCache;
+		const candidates = [
+			path.join(process.cwd(), 'dist', 'web-desktop'),
+			path.join(__dirname, '..', '..', 'web-desktop'),
+			path.join(__dirname, '..', 'web-desktop'),
+		];
+		for (const p of candidates) {
+			if (existsSync(path.join(p, 'index.html'))) {
+				this.webDesktopPathCache = p;
+				return p;
+			}
+		}
+		return null;
 	}
 
 	private setupRoutes(): void {
-		// Setup static routes (dashboard, PWA files, health check)
+		// Setup static routes (web-desktop SPA, PWA files, health check). The
+		// desktop bundle is served at the token root and at /<token>/desktop —
+		// see StaticRoutes.registerRoutes.
 		this.staticRoutes.registerRoutes(this.server);
 
 		// Setup API routes callbacks and register routes
@@ -384,6 +828,7 @@ export class WebServer {
 		this.wsRoute.setCallbacks({
 			getSessions: () => this.callbackRegistry.getSessions(),
 			getTheme: () => this.callbackRegistry.getTheme(),
+			getBionifyReadingMode: () => this.callbackRegistry.getBionifyReadingMode(),
 			getCustomCommands: () => this.callbackRegistry.getCustomCommands(),
 			getAutoRunStates: () => this.liveSessionManager.getAutoRunStates(),
 			getLiveSessionInfo: (sessionId) => this.liveSessionManager.getLiveSessionInfo(sessionId),
@@ -393,6 +838,17 @@ export class WebServer {
 				logger.info(`Client connected: ${client.id} (total: ${this.webClients.size})`, LOG_CONTEXT);
 			},
 			onClientDisconnect: (clientId) => {
+				const client = this.webClients.get(clientId);
+				if (client?.subscribedSessionId) {
+					// Kill any terminal PTY spawned for this web client's session
+					const killed = this.killTerminalForWebCallback?.(client.subscribedSessionId);
+					if (killed) {
+						logger.info(
+							`Killed terminal PTY for disconnected client ${clientId} (session: ${client.subscribedSessionId})`,
+							LOG_CONTEXT
+						);
+					}
+				}
 				this.webClients.delete(clientId);
 				logger.info(
 					`Client disconnected: ${clientId} (total: ${this.webClients.size})`,
@@ -418,12 +874,19 @@ export class WebServer {
 	private setupMessageHandlerCallbacks(): void {
 		this.messageHandler.setCallbacks({
 			getSessionDetail: (sessionId: string) => this.callbackRegistry.getSessionDetail(sessionId),
-			executeCommand: async (sessionId: string, command: string, inputMode?: 'ai' | 'terminal') =>
-				this.callbackRegistry.executeCommand(sessionId, command, inputMode),
+			executeCommand: async (
+				sessionId: string,
+				command: string,
+				inputMode?: 'ai' | 'terminal',
+				tabId?: string,
+				force?: boolean,
+				images?: string[]
+			) =>
+				this.callbackRegistry.executeCommand(sessionId, command, inputMode, tabId, force, images),
 			switchMode: async (sessionId: string, mode: 'ai' | 'terminal') =>
 				this.callbackRegistry.switchMode(sessionId, mode),
-			selectSession: async (sessionId: string, tabId?: string) =>
-				this.callbackRegistry.selectSession(sessionId, tabId),
+			selectSession: async (sessionId: string, tabId?: string, focus?: boolean) =>
+				this.callbackRegistry.selectSession(sessionId, tabId, focus),
 			selectTab: async (sessionId: string, tabId: string) =>
 				this.callbackRegistry.selectTab(sessionId, tabId),
 			newTab: async (sessionId: string) => this.callbackRegistry.newTab(sessionId),
@@ -431,10 +894,183 @@ export class WebServer {
 				this.callbackRegistry.closeTab(sessionId, tabId),
 			renameTab: async (sessionId: string, tabId: string, newName: string) =>
 				this.callbackRegistry.renameTab(sessionId, tabId, newName),
+			starTab: async (sessionId: string, tabId: string, starred: boolean) =>
+				this.callbackRegistry.starTab(sessionId, tabId, starred),
+			reorderTab: async (sessionId: string, fromIndex: number, toIndex: number) =>
+				this.callbackRegistry.reorderTab(sessionId, fromIndex, toIndex),
+			toggleBookmark: async (sessionId: string) => this.callbackRegistry.toggleBookmark(sessionId),
+			openFileTab: async (sessionId: string, filePath: string, switchToAgent: boolean) =>
+				this.callbackRegistry.openFileTab(sessionId, filePath, switchToAgent),
+			refreshFileTree: async (sessionId: string) =>
+				this.callbackRegistry.refreshFileTree(sessionId),
+			openBrowserTab: async (sessionId: string, url: string) =>
+				this.callbackRegistry.openBrowserTab(sessionId, url),
+			openTerminalTab: async (
+				sessionId: string,
+				config: { cwd?: string; shell?: string; name?: string | null }
+			) => this.callbackRegistry.openTerminalTab(sessionId, config),
+			newAITabWithPrompt: async (sessionId: string, prompt: string) =>
+				this.callbackRegistry.newAITabWithPrompt(sessionId, prompt),
+			refreshAutoRunDocs: async (sessionId: string) =>
+				this.callbackRegistry.refreshAutoRunDocs(sessionId),
+			configureAutoRun: async (
+				sessionId: string,
+				config: Parameters<CallbackRegistry['configureAutoRun']>[1]
+			) => this.callbackRegistry.configureAutoRun(sessionId, config),
+			setSessionAutoRunFolder: async (sessionId: string, folderPath: string) =>
+				this.callbackRegistry.setSessionAutoRunFolder(sessionId, folderPath),
 			getSessions: () => this.callbackRegistry.getSessions(),
 			getLiveSessionInfo: (sessionId: string) =>
 				this.liveSessionManager.getLiveSessionInfo(sessionId),
 			isSessionLive: (sessionId: string) => this.liveSessionManager.isSessionLive(sessionId),
+			getAutoRunDocs: async (sessionId: string) => this.callbackRegistry.getAutoRunDocs(sessionId),
+			getAutoRunDocContent: async (sessionId: string, filename: string) =>
+				this.callbackRegistry.getAutoRunDocContent(sessionId, filename),
+			saveAutoRunDoc: async (sessionId: string, filename: string, content: string) =>
+				this.callbackRegistry.saveAutoRunDoc(sessionId, filename, content),
+			stopAutoRun: async (sessionId: string) => this.callbackRegistry.stopAutoRun(sessionId),
+			resetAutoRunDocTasks: async (sessionId: string, filename: string) =>
+				this.callbackRegistry.resetAutoRunDocTasks(sessionId, filename),
+			resumeAutoRunError: async (sessionId: string) =>
+				this.callbackRegistry.resumeAutoRunError(sessionId),
+			skipAutoRunDocument: async (sessionId: string) =>
+				this.callbackRegistry.skipAutoRunDocument(sessionId),
+			abortAutoRunError: async (sessionId: string) =>
+				this.callbackRegistry.abortAutoRunError(sessionId),
+			listPlaybooks: async (sessionId: string) => this.callbackRegistry.listPlaybooks(sessionId),
+			createPlaybook: async (
+				sessionId: string,
+				playbook: Parameters<CallbackRegistry['createPlaybook']>[1]
+			) => this.callbackRegistry.createPlaybook(sessionId, playbook),
+			updatePlaybook: async (
+				sessionId: string,
+				playbookId: string,
+				updates: Parameters<CallbackRegistry['updatePlaybook']>[2]
+			) => this.callbackRegistry.updatePlaybook(sessionId, playbookId, updates),
+			deletePlaybook: async (sessionId: string, playbookId: string) =>
+				this.callbackRegistry.deletePlaybook(sessionId, playbookId),
+			getSettings: () => this.callbackRegistry.getSettings(),
+			setSetting: async (key: string, value: any) => this.callbackRegistry.setSetting(key, value),
+			getGroups: () => this.callbackRegistry.getGroups(),
+			createGroup: async (name: string, emoji?: string, parentGroupId?: string) =>
+				this.callbackRegistry.createGroup(name, emoji, parentGroupId),
+			renameGroup: async (groupId: string, name: string) =>
+				this.callbackRegistry.renameGroup(groupId, name),
+			deleteGroup: async (groupId: string) => this.callbackRegistry.deleteGroup(groupId),
+			moveSessionToGroup: async (sessionId: string, groupId: string | null) =>
+				this.callbackRegistry.moveSessionToGroup(sessionId, groupId),
+			createSession: async (
+				name: string,
+				toolType: string,
+				cwd: string,
+				groupId?: string,
+				config?: CreateSessionConfig
+			) => this.callbackRegistry.createSession(name, toolType, cwd, groupId, config),
+			createWorktreeSession: async (
+				parentSessionId: string,
+				config: Parameters<CallbackRegistry['createWorktreeSession']>[1]
+			) => this.callbackRegistry.createWorktreeSession(parentSessionId, config),
+			deleteSession: async (sessionId: string) => this.callbackRegistry.deleteSession(sessionId),
+			renameSession: async (sessionId: string, newName: string) =>
+				this.callbackRegistry.renameSession(sessionId, newName),
+			updateSessionCwd: async (sessionId: string, newCwd: string) =>
+				this.callbackRegistry.updateSessionCwd(sessionId, newCwd),
+			updateSessionSsh: async (sessionId: string, sshPatch: Record<string, unknown>) =>
+				this.callbackRegistry.updateSessionSsh(sessionId, sshPatch),
+			updateSessionConfig: async (sessionId: string, configPatch: Record<string, unknown>) =>
+				this.callbackRegistry.updateSessionConfig(sessionId, configPatch),
+			getGitStatus: async (sessionId: string) => this.callbackRegistry.getGitStatus(sessionId),
+			getGitDiff: async (sessionId: string, filePath?: string) =>
+				this.callbackRegistry.getGitDiff(sessionId, filePath),
+			getGitBranchesForSession: async (sessionId: string) =>
+				this.callbackRegistry.getGitBranchesForSession(sessionId),
+			listWorktreesForSession: async (sessionId: string) =>
+				this.callbackRegistry.listWorktreesForSession(sessionId),
+			getGroupChats: async () => this.callbackRegistry.getGroupChats(),
+			startGroupChat: async (topic: string, participantIds: string[]) =>
+				this.callbackRegistry.startGroupChat(topic, participantIds),
+			getGroupChatState: async (chatId: string) => this.callbackRegistry.getGroupChatState(chatId),
+			stopGroupChat: async (chatId: string) => this.callbackRegistry.stopGroupChat(chatId),
+			sendGroupChatMessage: async (chatId: string, message: string) =>
+				this.callbackRegistry.sendGroupChatMessage(chatId, message),
+			mergeContext: async (sourceSessionId: string, targetSessionId: string) =>
+				this.callbackRegistry.mergeContext(sourceSessionId, targetSessionId),
+			transferContext: async (sourceSessionId: string, targetSessionId: string) =>
+				this.callbackRegistry.transferContext(sourceSessionId, targetSessionId),
+			summarizeContext: async (sessionId: string) =>
+				this.callbackRegistry.summarizeContext(sessionId),
+			createGist: async (sessionId: string, description: string, isPublic: boolean) =>
+				this.callbackRegistry.createGist(sessionId, description, isPublic),
+			getCueSubscriptions: async (sessionId?: string) =>
+				this.callbackRegistry.getCueSubscriptions(sessionId),
+			toggleCueSubscription: async (subscriptionId: string, enabled: boolean) =>
+				this.callbackRegistry.toggleCueSubscription(subscriptionId, enabled),
+			getCueActivity: async (sessionId?: string, limit?: number) =>
+				this.callbackRegistry.getCueActivity(sessionId, limit),
+			triggerCueSubscription: async (
+				subscriptionName: string,
+				prompt?: string,
+				sourceAgentId?: string
+			) => this.callbackRegistry.triggerCueSubscription(subscriptionName, prompt, sourceAgentId),
+			// Cue pipeline-layout mutations operate directly on the
+			// main-process layout file via the mutation primitives — no
+			// renderer round-trip needed. The Pipeline Editor (when open)
+			// keeps its own in-memory state, so CLI edits made while the
+			// editor is open will be overwritten on the editor's next
+			// save. The CLI surface documents this; we don't gate here.
+			listCuePipelines: async () => {
+				const { listPipelinesFromDisk } = await import('../cue/pipeline-layout-mutations');
+				const result = listPipelinesFromDisk();
+				return { pipelines: result.pipelines as unknown[] };
+			},
+			getCuePipeline: async (identifier: string) => {
+				const { getPipelineFromDisk } = await import('../cue/pipeline-layout-mutations');
+				return getPipelineFromDisk(identifier);
+			},
+			setCuePipeline: async (identifier: string, pipeline: unknown, policy: 'add' | 'replace') => {
+				const { setPipelineOnDisk } = await import('../cue/pipeline-layout-mutations');
+				return setPipelineOnDisk(pipeline, policy, identifier);
+			},
+			removeCuePipeline: async (identifier: string) => {
+				const { removePipelineOnDisk } = await import('../cue/pipeline-layout-mutations');
+				return removePipelineOnDisk(identifier);
+			},
+			getUsageDashboard: async (timeRange: 'day' | 'week' | 'month' | 'all') =>
+				this.callbackRegistry.getUsageDashboard(timeRange),
+			getAchievements: async () => this.callbackRegistry.getAchievements(),
+			generateDirectorNotesSynopsis: async (lookbackDays: number, provider: string) =>
+				this.callbackRegistry.generateDirectorNotesSynopsis(lookbackDays, provider),
+			writeToTerminal: (sessionId: string, data: string) =>
+				this.writeToTerminalCallback?.(sessionId, data) ?? false,
+			resizeTerminal: (sessionId: string, cols: number, rows: number) =>
+				this.resizeTerminalCallback?.(sessionId, cols, rows) ?? false,
+			spawnTerminalForWeb: (
+				sessionId: string,
+				config: { cwd: string; cols?: number; rows?: number }
+			) =>
+				this.spawnTerminalForWebCallback?.(sessionId, config) ??
+				Promise.resolve({ success: false, pid: 0 }),
+			killTerminalForWeb: (sessionId: string) =>
+				this.killTerminalForWebCallback?.(sessionId) ?? false,
+			notifyToast: async (params) => this.callbackRegistry.notifyToast(params),
+			cadenzaView: async (params) => this.callbackRegistry.cadenzaView(params),
+			movementView: async (params) => this.callbackRegistry.movementView(params),
+			getMovementState: async () => this.callbackRegistry.getMovementState(),
+			notifyCenterFlash: async (params) => this.callbackRegistry.notifyCenterFlash(params),
+			getMarketplaceManifest: async (options) =>
+				this.callbackRegistry.getMarketplaceManifest(options),
+			getMarketplaceDocument: async (playbookPath: string, filename: string) =>
+				this.callbackRegistry.getMarketplaceDocument(playbookPath, filename),
+			getMarketplaceReadme: async (playbookPath: string) =>
+				this.callbackRegistry.getMarketplaceReadme(playbookPath),
+			importMarketplacePlaybook: async (
+				sessionId: string,
+				playbookId: string,
+				targetFolderName: string
+			) => this.callbackRegistry.importMarketplacePlaybook(sessionId, playbookId, targetFolderName),
+			listDesktopSessions: () => this.callbackRegistry.listDesktopSessions(),
+			getSessionHistory: (tabId, options) =>
+				this.callbackRegistry.getSessionHistory(tabId, options),
 		});
 	}
 
@@ -444,8 +1080,16 @@ export class WebServer {
 		this.broadcastService.broadcastToAll(message);
 	}
 
+	broadcastNotificationEvent(event: NotificationEvent): void {
+		this.broadcastService.broadcastNotificationEvent(event);
+	}
+
 	broadcastToSessionClients(sessionId: string, message: object): void {
 		this.broadcastService.broadcastToSession(sessionId, message);
+	}
+
+	broadcastToAll(message: object): void {
+		this.broadcastService.broadcastToAll(message);
 	}
 
 	broadcastSessionStateChange(
@@ -486,16 +1130,72 @@ export class WebServer {
 		this.broadcastService.broadcastThemeChange(theme);
 	}
 
+	broadcastBionifyReadingModeChange(enabled: boolean): void {
+		this.broadcastService.broadcastBionifyReadingModeChange(enabled);
+	}
+
 	broadcastCustomCommands(commands: CustomAICommand[]): void {
 		this.broadcastService.broadcastCustomCommands(commands);
+	}
+
+	broadcastSettingsChanged(settings: WebSettings): void {
+		this.broadcastService.broadcastSettingsChanged(settings);
 	}
 
 	broadcastAutoRunState(sessionId: string, state: AutoRunState | null): void {
 		this.liveSessionManager.setAutoRunState(sessionId, state);
 	}
 
+	broadcastAutoRunDocsChanged(sessionId: string, documents: AutoRunDocument[]): void {
+		this.broadcastService.broadcastAutoRunDocsChanged(sessionId, documents);
+	}
+
 	broadcastUserInput(sessionId: string, command: string, inputMode: 'ai' | 'terminal'): void {
 		this.broadcastService.broadcastUserInput(sessionId, command, inputMode);
+	}
+
+	broadcastGroupChatMessage(chatId: string, message: GroupChatMessage): void {
+		this.broadcastService.broadcastGroupChatMessage(chatId, message);
+	}
+
+	broadcastGroupChatStateChange(chatId: string, state: Partial<GroupChatState>): void {
+		this.broadcastService.broadcastGroupChatStateChange(chatId, state);
+	}
+
+	broadcastContextOperationProgress(sessionId: string, operation: string, progress: number): void {
+		this.broadcastService.broadcastContextOperationProgress(sessionId, operation, progress);
+	}
+
+	broadcastContextOperationComplete(sessionId: string, operation: string, success: boolean): void {
+		this.broadcastService.broadcastContextOperationComplete(sessionId, operation, success);
+	}
+
+	broadcastCueActivity(entry: CueActivityEntry): void {
+		this.broadcastService.broadcastCueActivity(entry);
+	}
+
+	broadcastCueSubscriptionsChanged(subscriptions: CueSubscriptionInfo[]): void {
+		this.broadcastService.broadcastCueSubscriptionsChanged(subscriptions);
+	}
+
+	broadcastToolEvent(
+		sessionId: string,
+		tabId: string,
+		toolLog: {
+			id: string;
+			timestamp: number;
+			source: 'tool';
+			text: string;
+			metadata?: {
+				toolState?: {
+					name: string;
+					status: 'running' | 'completed' | 'error';
+					input?: Record<string, unknown>;
+				};
+			};
+		}
+	): void {
+		this.broadcastService.broadcastToolEvent(sessionId, tabId, toolLog);
 	}
 
 	// ============ Server Lifecycle ============
@@ -514,8 +1214,9 @@ export class WebServer {
 		}
 
 		try {
-			// Detect local IP address for LAN accessibility (sync - no network delay)
-			this.localIpAddress = getLocalIpAddressSync();
+			// Detect LAN IP for display URLs, bind to 0.0.0.0 for LAN accessibility
+			// Security token (UUID) prevents unauthorized access
+			this.localIpAddress = await getLocalIpAddress();
 			logger.info(`Using IP address: ${this.localIpAddress}`, LOG_CONTEXT);
 
 			// Setup middleware and routes (must be done before listen)
@@ -524,6 +1225,13 @@ export class WebServer {
 
 			// Wire up message handler callbacks
 			this.setupMessageHandlerCallbacks();
+
+			// Install IPC-bridge fanout so every webContents.send is also
+			// broadcast to web clients as a bridge.event. The web-desktop bundle
+			// is the default interface and relies on this fanout to mirror the
+			// desktop renderer 1:1.
+			const { installWebContentsBridgeHook } = await import('./handlers/bridgeHandlers');
+			installWebContentsBridgeHook(this.broadcastService);
 
 			await this.server.listen({ port: this.port, host: '0.0.0.0' });
 
@@ -554,11 +1262,21 @@ export class WebServer {
 		// Clear all session state (handles live sessions and autorun states)
 		this.liveSessionManager.clearAll();
 
+		// Restore WebContents.prototype.send so the now-defunct BroadcastService
+		// isn't called the next time main pushes a renderer event.
+		try {
+			const { uninstallWebContentsBridgeHook } = await import('./handlers/bridgeHandlers');
+			uninstallWebContentsBridgeHook();
+		} catch (err) {
+			logger.warn(`Failed to uninstall bridge hook: ${(err as Error).message}`, LOG_CONTEXT);
+		}
+
 		try {
 			await this.server.close();
 			this.isRunning = false;
 			logger.info('Server stopped', LOG_CONTEXT);
 		} catch (error) {
+			void captureException(error);
 			logger.error('Failed to stop server', LOG_CONTEXT, error);
 		}
 	}

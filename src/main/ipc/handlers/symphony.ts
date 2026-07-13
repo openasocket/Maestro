@@ -15,15 +15,19 @@ import type Store from 'electron-store';
 import fs from 'fs/promises';
 import path from 'path';
 import { logger } from '../../utils/logger';
-import { isWebContentsAvailable } from '../../utils/safe-send';
-import type { SessionsData, StoredSession } from '../../stores/types';
+import { createSafeSend, SafeSendFn } from '../../utils/safe-send';
+import type { SessionsData, StoredSession, MaestroSettings } from '../../stores/types';
 import { createIpcHandler, CreateHandlerOptions } from '../../utils/ipcHandler';
 import { execFileNoThrow } from '../../utils/execFile';
 import { getExpandedEnv } from '../../agents/path-prober';
+import { resolveGhPath } from '../../utils/cliDetection';
+import { ensureForkSetup } from '../../utils/symphony-fork';
 import {
 	SYMPHONY_REGISTRY_URL,
 	REGISTRY_CACHE_TTL_MS,
 	ISSUES_CACHE_TTL_MS,
+	STARS_CACHE_TTL_MS,
+	ISSUE_COUNTS_CACHE_TTL_MS,
 	SYMPHONY_STATE_PATH,
 	SYMPHONY_CACHE_PATH,
 	SYMPHONY_REPOS_DIR,
@@ -44,12 +48,14 @@ import type {
 	ContributionStatus,
 	GetRegistryResponse,
 	GetIssuesResponse,
+	GetIssueCountsResponse,
 	StartContributionResponse,
 	CompleteContributionResponse,
 	IssueStatus,
 	DocumentReference,
 } from '../../../shared/symphony-types';
 import { SymphonyError } from '../../../shared/symphony-types';
+import { captureException } from '../../utils/sentry';
 
 // ============================================================================
 // Constants
@@ -197,6 +203,7 @@ export interface SymphonyHandlerDependencies {
 	app: App;
 	getMainWindow: () => BrowserWindow | null;
 	sessionsStore: Store<SessionsData>;
+	settingsStore: Store<MaestroSettings>;
 }
 
 // ============================================================================
@@ -378,37 +385,124 @@ function parseDocumentPaths(body: string): DocumentReference[] {
 // ============================================================================
 
 /**
- * Fetch the symphony registry from GitHub.
+ * Fetch a single symphony registry from a URL.
+ * Returns null on failure instead of throwing (isolated error handling per URL).
  */
-async function fetchRegistry(): Promise<SymphonyRegistry> {
-	logger.info('Fetching Symphony registry', LOG_CONTEXT);
-
+/**
+ * Redact a URL for safe logging — strips credentials, query params, and fragments.
+ */
+function redactUrlForLog(rawUrl: string): string {
 	try {
-		const response = await fetch(SYMPHONY_REGISTRY_URL);
+		const parsed = new URL(rawUrl);
+		parsed.username = '';
+		parsed.password = '';
+		parsed.search = '';
+		parsed.hash = '';
+		return parsed.toString();
+	} catch {
+		return '[invalid-url]';
+	}
+}
 
+async function fetchSingleRegistry(url: string): Promise<SymphonyRegistry | null> {
+	const safeUrl = redactUrlForLog(url);
+	try {
+		const response = await fetch(url);
 		if (!response.ok) {
-			throw new SymphonyError(
-				`Failed to fetch registry: ${response.status} ${response.statusText}`,
-				'network'
-			);
+			logger.warn(`Failed to fetch registry from ${safeUrl}: ${response.status}`, LOG_CONTEXT);
+			return null;
 		}
-
 		const data = (await response.json()) as SymphonyRegistry;
-
 		if (!data.repositories || !Array.isArray(data.repositories)) {
-			throw new SymphonyError('Invalid registry structure', 'parse');
+			logger.warn(`Invalid registry structure from ${safeUrl}`, LOG_CONTEXT);
+			return null;
 		}
-
-		logger.info(`Fetched registry with ${data.repositories.length} repos`, LOG_CONTEXT);
+		logger.info(`Fetched ${data.repositories.length} repos from ${safeUrl}`, LOG_CONTEXT);
 		return data;
 	} catch (error) {
-		if (error instanceof SymphonyError) throw error;
-		throw new SymphonyError(
-			`Network error: ${error instanceof Error ? error.message : String(error)}`,
-			'network',
-			error
+		logger.warn(
+			`Network error fetching registry from ${safeUrl}: ${error instanceof Error ? error.message : String(error)}`,
+			LOG_CONTEXT
 		);
+		return null;
 	}
+}
+
+/**
+ * Fetch and merge symphony registries from all configured URLs.
+ * Default URL always fetched first (wins on slug conflicts).
+ * Custom URL failures are isolated — other registries still load.
+ */
+async function fetchRegistries(customUrls: string[]): Promise<SymphonyRegistry> {
+	logger.info(
+		`Fetching Symphony registries (1 default + ${customUrls.length} custom)`,
+		LOG_CONTEXT
+	);
+
+	const allUrls = [SYMPHONY_REGISTRY_URL, ...customUrls];
+	const results = await Promise.allSettled(allUrls.map(fetchSingleRegistry));
+
+	const seenSlugs = new Set<string>();
+	const mergedRepos: SymphonyRegistry['repositories'] = [];
+
+	for (const result of results) {
+		if (result.status === 'fulfilled' && result.value) {
+			for (const repo of result.value.repositories) {
+				if (!seenSlugs.has(repo.slug)) {
+					seenSlugs.add(repo.slug);
+					mergedRepos.push(repo);
+				}
+			}
+		}
+	}
+
+	if (mergedRepos.length === 0) {
+		throw new SymphonyError('Failed to fetch registry from all configured URLs', 'network');
+	}
+
+	logger.info(
+		`Merged registry: ${mergedRepos.length} repos from ${allUrls.length} sources`,
+		LOG_CONTEXT
+	);
+
+	return {
+		schemaVersion: '1.0',
+		lastUpdated: new Date().toISOString(),
+		repositories: mergedRepos,
+	};
+}
+
+/**
+ * Fetch GitHub star counts for multiple repositories.
+ * Uses concurrent requests with a concurrency limit to stay within rate limits.
+ */
+async function fetchStarCounts(repoSlugs: string[]): Promise<Record<string, number>> {
+	const CONCURRENCY = 5;
+	const counts: Record<string, number> = {};
+
+	for (let i = 0; i < repoSlugs.length; i += CONCURRENCY) {
+		const batch = repoSlugs.slice(i, i + CONCURRENCY);
+		const results = await Promise.allSettled(
+			batch.map(async (slug) => {
+				const response = await fetch(`${GITHUB_API_BASE}/repos/${slug}`, {
+					headers: {
+						Accept: 'application/vnd.github.v3+json',
+						'User-Agent': 'Maestro-Symphony',
+					},
+				});
+				if (!response.ok) return { slug, stars: 0 };
+				const data = (await response.json()) as { stargazers_count?: number };
+				return { slug, stars: data.stargazers_count ?? 0 };
+			})
+		);
+		for (const result of results) {
+			if (result.status === 'fulfilled') {
+				counts[result.value.slug] = result.value.stars;
+			}
+		}
+	}
+
+	return counts;
 }
 
 /**
@@ -439,6 +533,7 @@ async function fetchIssues(repoSlug: string): Promise<SymphonyIssue[]> {
 			user: { login: string };
 			created_at: string;
 			updated_at: string;
+			labels: Array<{ name: string; color: string }>;
 		}>;
 
 		// Transform to SymphonyIssue format (initially all as available)
@@ -452,6 +547,9 @@ async function fetchIssues(repoSlug: string): Promise<SymphonyIssue[]> {
 			createdAt: issue.created_at,
 			updatedAt: issue.updated_at,
 			documentPaths: parseDocumentPaths(issue.body || ''),
+			labels: (issue.labels || [])
+				.filter((l) => l.name !== SYMPHONY_ISSUE_LABEL)
+				.map((l) => ({ name: l.name, color: l.color })),
 			status: 'available' as IssueStatus,
 		}));
 
@@ -469,6 +567,61 @@ async function fetchIssues(repoSlug: string): Promise<SymphonyIssue[]> {
 			error
 		);
 	}
+}
+
+/**
+ * Fetch issue counts for all repos in a single GitHub Search API call.
+ * Uses the search/issues endpoint with multiple repo: qualifiers (OR'd together).
+ * Returns a map of slug -> open issue count with the runmaestro.ai label.
+ */
+async function fetchIssueCounts(repoSlugs: string[]): Promise<Record<string, number>> {
+	if (repoSlugs.length === 0) return {};
+
+	logger.info(`Fetching issue counts for ${repoSlugs.length} repos via Search API`, LOG_CONTEXT);
+
+	// Build query: label:runmaestro.ai state:open repo:A repo:B repo:C ...
+	const repoQualifiers = repoSlugs.map((s) => `repo:${s}`).join('+');
+	const query = `label:${encodeURIComponent(SYMPHONY_ISSUE_LABEL)}+state:open+${repoQualifiers}`;
+	// Initialize all slugs to 0, then count from paginated results
+	const counts: Record<string, number> = {};
+	for (const slug of repoSlugs) {
+		counts[slug] = 0;
+	}
+
+	let page = 1;
+	while (true) {
+		const url = `${GITHUB_API_BASE}/search/issues?q=${query}&per_page=100&page=${page}`;
+		const response = await fetch(url, {
+			headers: {
+				Accept: 'application/vnd.github.v3+json',
+				'User-Agent': 'Maestro-Symphony',
+			},
+		});
+
+		if (!response.ok) {
+			throw new SymphonyError(`Search API failed: ${response.status}`, 'github_api');
+		}
+
+		const data = (await response.json()) as {
+			total_count: number;
+			items: Array<{ repository_url: string }>;
+		};
+
+		for (const item of data.items) {
+			// repository_url looks like https://api.github.com/repos/RunMaestro/Maestro
+			const slug = item.repository_url.replace(`${GITHUB_API_BASE}/repos/`, '');
+			if (slug in counts) {
+				counts[slug]++;
+			}
+		}
+
+		// Stop if we got fewer than a full page or hit GitHub's 1,000-result cap
+		if (data.items.length < 100 || page >= 10) break;
+		page++;
+	}
+
+	logger.info(`Issue counts fetched: ${JSON.stringify(counts)}`, LOG_CONTEXT);
+	return counts;
 }
 
 /**
@@ -579,7 +732,8 @@ async function createBranch(
  * Check if gh CLI is authenticated.
  */
 async function checkGhAuthentication(): Promise<{ authenticated: boolean; error?: string }> {
-	const result = await execFileNoThrow('gh', ['auth', 'status'], undefined, getExpandedEnv());
+	const ghCommand = await resolveGhPath();
+	const result = await execFileNoThrow(ghCommand, ['auth', 'status'], undefined, getExpandedEnv());
 	if (result.exitCode !== 0) {
 		// gh auth status outputs to stderr even on success for some info
 		const output = result.stderr + result.stdout;
@@ -647,7 +801,9 @@ async function createDraftPR(
 	repoPath: string,
 	baseBranch: string,
 	title: string,
-	body: string
+	body: string,
+	upstreamSlug?: string,
+	forkOwner?: string
 ): Promise<{ success: boolean; prUrl?: string; prNumber?: number; error?: string }> {
 	// Check gh authentication first
 	const authCheck = await checkGhAuthentication();
@@ -674,27 +830,33 @@ async function createDraftPR(
 	}
 
 	// Create draft PR using gh CLI (use --head to explicitly specify the branch)
-	const prResult = await execFileNoThrow(
-		'gh',
-		[
-			'pr',
-			'create',
-			'--draft',
-			'--base',
-			baseBranch,
-			'--head',
-			branchName,
-			'--title',
-			title,
-			'--body',
-			body,
-		],
-		repoPath,
-		getExpandedEnv()
-	);
+	const prArgs = [
+		'pr',
+		'create',
+		'--draft',
+		'--base',
+		baseBranch,
+		'--head',
+		// For fork contributions, use "forkOwner:branchName" to specify the fork's branch
+		upstreamSlug && forkOwner ? `${forkOwner}:${branchName}` : branchName,
+		'--title',
+		title,
+		'--body',
+		body,
+	];
+
+	// For fork contributions, target the upstream repo
+	if (upstreamSlug) {
+		prArgs.push('--repo', upstreamSlug);
+	}
+
+	const ghCommand = await resolveGhPath();
+	const prResult = await execFileNoThrow(ghCommand, prArgs, repoPath, getExpandedEnv());
 
 	if (prResult.exitCode !== 0) {
-		// If PR creation failed after push, try to delete the remote branch
+		// If PR creation failed after push, try to delete the remote branch.
+		// Note: In fork mode, `origin` points to the user's fork (set by ensureForkSetup),
+		// so this correctly deletes the branch from the fork, not the upstream repo.
 		logger.warn('PR creation failed, attempting to clean up remote branch', LOG_CONTEXT);
 		await execFileNoThrow('git', ['push', 'origin', '--delete', branchName], repoPath);
 		return { success: false, error: `Failed to create PR: ${prResult.stderr}` };
@@ -713,14 +875,15 @@ async function createDraftPR(
  */
 async function markPRReady(
 	repoPath: string,
-	prNumber: number
+	prNumber: number,
+	upstreamSlug?: string
 ): Promise<{ success: boolean; error?: string }> {
-	const result = await execFileNoThrow(
-		'gh',
-		['pr', 'ready', String(prNumber)],
-		repoPath,
-		getExpandedEnv()
-	);
+	const ghCommand = await resolveGhPath();
+	const args = ['pr', 'ready', String(prNumber)];
+	if (upstreamSlug) {
+		args.push('--repo', upstreamSlug);
+	}
+	const result = await execFileNoThrow(ghCommand, args, repoPath, getExpandedEnv());
 
 	if (result.exitCode !== 0) {
 		return { success: false, error: result.stderr };
@@ -736,13 +899,15 @@ async function markPRReady(
  */
 async function discoverPRByBranch(
 	repoSlug: string,
-	branchName: string
+	branchName: string,
+	headOwner?: string
 ): Promise<{ prNumber?: number; prUrl?: string }> {
 	try {
 		// Query GitHub API for PRs with this head branch
 		// API: GET /repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=all
+		// For cross-fork PRs, headOwner is the fork owner (branch lives on fork, PR targets upstream)
 		const [owner] = repoSlug.split('/');
-		const headRef = `${owner}:${branchName}`;
+		const headRef = `${headOwner || owner}:${branchName}`;
 		const apiUrl = `${GITHUB_API_BASE}/repos/${repoSlug}/pulls?head=${encodeURIComponent(headRef)}&state=all&per_page=1`;
 
 		const response = await fetch(apiUrl, {
@@ -805,7 +970,8 @@ async function postPRComment(
 		timeSpentMs: number;
 		documentsProcessed: number;
 		tasksCompleted: number;
-	}
+	},
+	upstreamSlug?: string
 ): Promise<{ success: boolean; error?: string }> {
 	// Format time spent
 	const hours = Math.floor(stats.timeSpentMs / 3600000);
@@ -840,12 +1006,12 @@ This pull request was created using [Maestro Symphony](https://runmaestro.ai/sym
 ---
 *Powered by [Maestro](https://runmaestro.ai) • [Learn about Symphony](https://docs.runmaestro.ai/symphony)*`;
 
-	const result = await execFileNoThrow(
-		'gh',
-		['pr', 'comment', String(prNumber), '--body', commentBody],
-		repoPath,
-		getExpandedEnv()
-	);
+	const ghCommand = await resolveGhPath();
+	const commentArgs = ['pr', 'comment', String(prNumber), '--body', commentBody];
+	if (upstreamSlug) {
+		commentArgs.push('--repo', upstreamSlug);
+	}
+	const result = await execFileNoThrow(ghCommand, commentArgs, repoPath, getExpandedEnv());
 
 	if (result.exitCode !== 0) {
 		return { success: false, error: result.stderr };
@@ -861,11 +1027,8 @@ This pull request was created using [Maestro Symphony](https://runmaestro.ai/sym
 /**
  * Broadcast symphony state updates to renderer.
  */
-function broadcastSymphonyUpdate(getMainWindow: () => BrowserWindow | null): void {
-	const mainWindow = getMainWindow?.();
-	if (isWebContentsAvailable(mainWindow)) {
-		mainWindow.webContents.send('symphony:updated');
-	}
+function broadcastSymphonyUpdate(safeSend: SafeSendFn): void {
+	safeSend('symphony:updated');
 }
 
 /**
@@ -919,10 +1082,73 @@ export function registerSymphonyHandlers({
 	app,
 	getMainWindow,
 	sessionsStore,
+	settingsStore,
 }: SymphonyHandlerDependencies): void {
+	const safeSend = createSafeSend(getMainWindow);
+
 	// ─────────────────────────────────────────────────────────────────────────
 	// Registry Operations
 	// ─────────────────────────────────────────────────────────────────────────
+
+	/**
+	 * Enrich registry repositories with star counts.
+	 * Uses a 24-hour cache; fetches fresh counts only when cache is expired.
+	 */
+	async function enrichWithStars(
+		registry: SymphonyRegistry,
+		cache: SymphonyCache | null,
+		forceRefresh: boolean
+	): Promise<SymphonyRegistry> {
+		const slugs = registry.repositories.filter((r) => r.isActive).map((r) => r.slug);
+		if (slugs.length === 0) return registry;
+
+		// Use cached star counts if valid
+		if (!forceRefresh && cache?.stars && isCacheValid(cache.stars.fetchedAt, STARS_CACHE_TTL_MS)) {
+			return {
+				...registry,
+				repositories: registry.repositories.map((r) => ({
+					...r,
+					stars: cache.stars!.data[r.slug],
+				})),
+			};
+		}
+
+		// Fetch fresh star counts (non-critical — fall back to stale cache or undefined)
+		try {
+			const counts = await fetchStarCounts(slugs);
+
+			// Persist to cache
+			const updatedCache: SymphonyCache = {
+				...cache,
+				issues: cache?.issues ?? {},
+				stars: { data: counts, fetchedAt: Date.now() },
+			};
+			await writeCache(app, updatedCache);
+
+			return {
+				...registry,
+				repositories: registry.repositories.map((r) => ({
+					...r,
+					stars: counts[r.slug],
+				})),
+			};
+		} catch (error) {
+			void captureException(error);
+			logger.warn('Failed to fetch star counts', LOG_CONTEXT, { error });
+
+			// Fall back to stale cache if available
+			if (cache?.stars) {
+				return {
+					...registry,
+					repositories: registry.repositories.map((r) => ({
+						...r,
+						stars: cache.stars!.data[r.slug],
+					})),
+				};
+			}
+			return registry;
+		}
+	}
 
 	/**
 	 * Get the symphony registry (with caching).
@@ -934,28 +1160,42 @@ export function registerSymphonyHandlers({
 			async (forceRefresh?: boolean): Promise<Omit<GetRegistryResponse, 'success'>> => {
 				const cache = await readCache(app);
 
+				// Runtime-validate custom URLs from settings
+				const rawCustomUrls = settingsStore.get('symphonyRegistryUrls');
+				const customUrls = Array.isArray(rawCustomUrls)
+					? rawCustomUrls.filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+					: [];
+
+				// Skip cache when custom sources are configured — cache doesn't track
+				// which source URLs produced it, so URL changes would serve stale data.
+				const hasCustomSources = customUrls.length > 0;
+
 				// Check cache validity
 				if (
 					!forceRefresh &&
+					!hasCustomSources &&
 					cache?.registry &&
 					isCacheValid(cache.registry.fetchedAt, REGISTRY_CACHE_TTL_MS)
 				) {
+					const enriched = await enrichWithStars(cache.registry.data, cache, false);
 					return {
-						registry: cache.registry.data,
+						registry: enriched,
 						fromCache: true,
 						cacheAge: Date.now() - cache.registry.fetchedAt,
 					};
 				}
 
-				// Fetch fresh data
+				// Fetch fresh data from all configured registries
 				try {
-					const registry = await fetchRegistry();
+					const registry = await fetchRegistries(customUrls);
+					const enriched = await enrichWithStars(registry, cache, !!forceRefresh);
 
-					// Update cache
+					// Update cache (enriched registry includes stars on repo objects,
+					// but the canonical star data lives in cache.stars)
 					const newCache: SymphonyCache = {
-						...cache,
+						...(await readCache(app)), // Re-read to get stars written by enrichWithStars
 						registry: {
-							data: registry,
+							data: registry, // Store unenriched registry (stars are in cache.stars)
 							fetchedAt: Date.now(),
 						},
 						issues: cache?.issues ?? {},
@@ -963,7 +1203,7 @@ export function registerSymphonyHandlers({
 					await writeCache(app, newCache);
 
 					return {
-						registry,
+						registry: enriched,
 						fromCache: false,
 					};
 				} catch (error) {
@@ -976,8 +1216,9 @@ export function registerSymphonyHandlers({
 							`Using expired cache as fallback (age: ${Math.round(cacheAge / 1000)}s)`,
 							LOG_CONTEXT
 						);
+						const enriched = await enrichWithStars(cache.registry.data, cache, false);
 						return {
-							registry: cache.registry.data,
+							registry: enriched,
 							fromCache: true,
 							cacheAge,
 						};
@@ -1056,6 +1297,78 @@ export function registerSymphonyHandlers({
 					}
 
 					// No cache available - re-throw to show error to user
+					throw error;
+				}
+			}
+		)
+	);
+
+	/**
+	 * Get issue counts for all active repos via GitHub Search API (single call).
+	 */
+	ipcMain.handle(
+		'symphony:getIssueCounts',
+		createIpcHandler(
+			handlerOpts('getIssueCounts'),
+			async (
+				repoSlugs: string[],
+				forceRefresh?: boolean
+			): Promise<Omit<GetIssueCountsResponse, 'success'>> => {
+				const cache = await readCache(app);
+				const requestedSlugs = [...new Set(repoSlugs)].sort();
+
+				// Check cache (must match requested slugs AND be within TTL)
+				if (
+					!forceRefresh &&
+					cache?.issueCounts &&
+					isCacheValid(cache.issueCounts.fetchedAt, ISSUE_COUNTS_CACHE_TTL_MS) &&
+					cache.issueCounts.repoSlugs &&
+					requestedSlugs.length === cache.issueCounts.repoSlugs.length &&
+					requestedSlugs.every((s) => cache.issueCounts!.repoSlugs.includes(s))
+				) {
+					return {
+						counts: cache.issueCounts.data,
+						fromCache: true,
+						cacheAge: Date.now() - cache.issueCounts.fetchedAt,
+					};
+				}
+
+				// Fetch fresh via Search API
+				try {
+					const counts = await fetchIssueCounts(repoSlugs);
+
+					// Update cache
+					const newCache: SymphonyCache = {
+						...cache,
+						registry: cache?.registry,
+						issues: cache?.issues ?? {},
+						issueCounts: {
+							data: counts,
+							fetchedAt: Date.now(),
+							repoSlugs: requestedSlugs,
+						},
+					};
+					await writeCache(app, newCache);
+
+					return {
+						counts,
+						fromCache: false,
+					};
+				} catch (error) {
+					logger.warn('Failed to fetch issue counts from GitHub Search API', LOG_CONTEXT, {
+						error,
+					});
+
+					// Fallback to expired cache if available
+					if (cache?.issueCounts?.data) {
+						const cacheAge = Date.now() - cache.issueCounts.fetchedAt;
+						return {
+							counts: cache.issueCounts.data,
+							fromCache: true,
+							cacheAge,
+						};
+					}
+
 					throw error;
 				}
 			}
@@ -1252,15 +1565,41 @@ export function registerSymphonyHandlers({
 				const branchResult = await createBranch(localPath, branchName);
 				if (!branchResult.success) {
 					// Cleanup
-					await fs.rm(localPath, { recursive: true, force: true }).catch(() => {});
+					await fs
+						.rm(localPath, { recursive: true, force: true })
+						.catch((err) =>
+							logger.warn(`Failed to clean up directory ${localPath}: ${err}`, LOG_CONTEXT)
+						);
 					return { error: `Branch creation failed: ${branchResult.error}` };
+				}
+
+				// Set up fork if user doesn't have push access
+				logger.info('Checking fork requirements', LOG_CONTEXT, { repoSlug });
+				const forkResult = await ensureForkSetup(localPath, repoSlug);
+				if (forkResult.error) {
+					await fs
+						.rm(localPath, { recursive: true, force: true })
+						.catch((err) =>
+							logger.warn(`Failed to clean up directory ${localPath}: ${err}`, LOG_CONTEXT)
+						);
+					return { error: `Fork setup failed: ${forkResult.error}` };
+				}
+				if (forkResult.isFork) {
+					logger.info('Using fork for contribution', LOG_CONTEXT, {
+						forkSlug: forkResult.forkSlug,
+						upstreamSlug: repoSlug,
+					});
+				} else {
+					logger.info('User has push access, no fork needed', LOG_CONTEXT, { repoSlug });
 				}
 
 				// Create draft PR to claim the issue
 				const prTitle = `[WIP] Symphony: ${issueTitle} (#${issueNumber})`;
 				const prBody = `## Maestro Symphony Contribution
 
-Working on #${issueNumber} via [Maestro Symphony](https://runmaestro.ai).
+Closes #${issueNumber}
+
+Contributed via [Maestro Symphony](https://runmaestro.ai).
 
 **Status:** In Progress
 **Started:** ${new Date().toISOString()}
@@ -1269,10 +1608,29 @@ Working on #${issueNumber} via [Maestro Symphony](https://runmaestro.ai).
 
 This PR will be updated automatically when the Auto Run completes.`;
 
-				const prResult = await createDraftPR(localPath, baseBranch, prTitle, prBody);
+				const forkOwner = forkResult.isFork ? forkResult.forkSlug?.split('/')[0] : undefined;
+				if (forkResult.isFork) {
+					logger.info('Creating cross-fork draft PR', LOG_CONTEXT, {
+						upstreamSlug: repoSlug,
+						forkSlug: forkResult.forkSlug,
+						branchName,
+					});
+				}
+				const prResult = await createDraftPR(
+					localPath,
+					baseBranch,
+					prTitle,
+					prBody,
+					forkResult.isFork ? repoSlug : undefined,
+					forkOwner
+				);
 				if (!prResult.success) {
 					// Cleanup
-					await fs.rm(localPath, { recursive: true, force: true }).catch(() => {});
+					await fs
+						.rm(localPath, { recursive: true, force: true })
+						.catch((err) =>
+							logger.warn(`Failed to clean up directory ${localPath}: ${err}`, LOG_CONTEXT)
+						);
 					return { error: `PR creation failed: ${prResult.error}` };
 				}
 
@@ -1303,6 +1661,11 @@ This PR will be updated automatically when the Auto Run completes.`;
 					timeSpent: 0,
 					sessionId,
 					agentType,
+					isFork: forkResult.isFork,
+					...(forkResult.isFork && {
+						forkSlug: forkResult.forkSlug,
+						upstreamSlug: repoSlug,
+					}),
 				};
 
 				// Save state
@@ -1316,7 +1679,7 @@ This PR will be updated automatically when the Auto Run completes.`;
 					prNumber: prResult.prNumber,
 				});
 
-				broadcastSymphonyUpdate(getMainWindow);
+				broadcastSymphonyUpdate(safeSend);
 
 				return {
 					contributionId,
@@ -1346,6 +1709,8 @@ This PR will be updated automatically when the Auto Run completes.`;
 				branchName: string;
 				totalDocuments: number;
 				agentType: string;
+				draftPrNumber?: number;
+				draftPrUrl?: string;
 			}): Promise<{ success: boolean; error?: string }> => {
 				const {
 					contributionId,
@@ -1358,6 +1723,8 @@ This PR will be updated automatically when the Auto Run completes.`;
 					branchName,
 					totalDocuments,
 					agentType,
+					draftPrNumber,
+					draftPrUrl,
 				} = params;
 
 				const state = await readState(app);
@@ -1369,7 +1736,7 @@ This PR will be updated automatically when the Auto Run completes.`;
 					return { success: true };
 				}
 
-				// Create active contribution entry (without PR info initially)
+				// Create active contribution entry
 				const contribution: ActiveContribution = {
 					id: contributionId,
 					repoSlug,
@@ -1378,9 +1745,8 @@ This PR will be updated automatically when the Auto Run completes.`;
 					issueTitle,
 					localPath,
 					branchName,
-					// PR info will be set later when first commit creates the draft PR
-					draftPrNumber: undefined,
-					draftPrUrl: undefined,
+					draftPrNumber,
+					draftPrUrl,
 					startedAt: new Date().toISOString(),
 					status: 'running',
 					progress: {
@@ -1409,7 +1775,7 @@ This PR will be updated automatically when the Auto Run completes.`;
 					issueNumber,
 				});
 
-				broadcastSymphonyUpdate(getMainWindow);
+				broadcastSymphonyUpdate(safeSend);
 				return { success: true };
 			}
 		)
@@ -1458,7 +1824,7 @@ This PR will be updated automatically when the Auto Run completes.`;
 				if (error) contribution.error = error;
 
 				await writeState(app, state);
-				broadcastSymphonyUpdate(getMainWindow);
+				broadcastSymphonyUpdate(safeSend);
 				return { updated: true };
 			}
 		)
@@ -1502,8 +1868,14 @@ This PR will be updated automatically when the Auto Run completes.`;
 				contribution.status = 'completing';
 				await writeState(app, state);
 
-				// Mark PR as ready
-				const readyResult = await markPRReady(contribution.localPath, contribution.draftPrNumber);
+				// Mark PR as ready (use upstreamSlug for fork contributions)
+				const upstreamSlug =
+					contribution.isFork && contribution.upstreamSlug ? contribution.upstreamSlug : undefined;
+				const readyResult = await markPRReady(
+					contribution.localPath,
+					contribution.draftPrNumber,
+					upstreamSlug
+				);
 				if (!readyResult.success) {
 					contribution.status = 'failed';
 					contribution.error = readyResult.error;
@@ -1524,7 +1896,8 @@ This PR will be updated automatically when the Auto Run completes.`;
 				const commentResult = await postPRComment(
 					contribution.localPath,
 					contribution.draftPrNumber,
-					commentStats
+					commentStats,
+					upstreamSlug
 				);
 
 				if (!commentResult.success) {
@@ -1627,7 +2000,7 @@ This PR will be updated automatically when the Auto Run completes.`;
 					prUrl: completed.prUrl,
 				});
 
-				broadcastSymphonyUpdate(getMainWindow);
+				broadcastSymphonyUpdate(safeSend);
 
 				return {
 					prUrl: completed.prUrl,
@@ -1659,6 +2032,7 @@ This PR will be updated automatically when the Auto Run completes.`;
 					try {
 						await fs.rm(contribution.localPath, { recursive: true, force: true });
 					} catch (e) {
+						void captureException(e);
 						logger.warn('Failed to cleanup contribution directory', LOG_CONTEXT, { error: e });
 					}
 				}
@@ -1669,7 +2043,7 @@ This PR will be updated automatically when the Auto Run completes.`;
 
 				logger.info('Contribution cancelled', LOG_CONTEXT, { contributionId });
 
-				broadcastSymphonyUpdate(getMainWindow);
+				broadcastSymphonyUpdate(safeSend);
 
 				return { cancelled: true };
 			}
@@ -1754,37 +2128,53 @@ This PR will be updated automatically when the Auto Run completes.`;
 					}
 				}
 
-				// First, sync PR info from metadata.json for any active contributions missing it
+				// First, sync PR info and fork info from metadata.json for active contributions
 				// This handles cases where PR was created but state.json wasn't updated (migration)
 				let prInfoSynced = false;
 				for (const contribution of state.active) {
-					if (!contribution.draftPrNumber) {
-						try {
-							const metadataPath = path.join(
-								getSymphonyDir(app),
-								'contributions',
-								contribution.id,
-								'metadata.json'
-							);
-							const metadataContent = await fs.readFile(metadataPath, 'utf-8');
-							const metadata = JSON.parse(metadataContent) as {
-								prCreated?: boolean;
-								draftPrNumber?: number;
-								draftPrUrl?: string;
-							};
-							if (metadata.prCreated && metadata.draftPrNumber) {
-								// Sync PR info from metadata to state
-								contribution.draftPrNumber = metadata.draftPrNumber;
-								contribution.draftPrUrl = metadata.draftPrUrl;
-								prInfoSynced = true;
-								logger.info('Synced PR info from metadata to state', LOG_CONTEXT, {
-									contributionId: contribution.id,
-									draftPrNumber: metadata.draftPrNumber,
-								});
-							}
-						} catch {
-							// Metadata file might not exist - that's okay
+					// Skip if both PR info and fork info are already synced
+					if (contribution.draftPrNumber && contribution.isFork !== undefined) {
+						continue;
+					}
+					try {
+						const metadataPath = path.join(
+							getSymphonyDir(app),
+							'contributions',
+							contribution.id,
+							'metadata.json'
+						);
+						const metadataContent = await fs.readFile(metadataPath, 'utf-8');
+						const metadata = JSON.parse(metadataContent) as {
+							prCreated?: boolean;
+							draftPrNumber?: number;
+							draftPrUrl?: string;
+							isFork?: boolean;
+							forkSlug?: string;
+							upstreamSlug?: string;
+						};
+						if (!contribution.draftPrNumber && metadata.prCreated && metadata.draftPrNumber) {
+							// Sync PR info from metadata to state
+							contribution.draftPrNumber = metadata.draftPrNumber;
+							contribution.draftPrUrl = metadata.draftPrUrl;
+							prInfoSynced = true;
+							logger.info('Synced PR info from metadata to state', LOG_CONTEXT, {
+								contributionId: contribution.id,
+								draftPrNumber: metadata.draftPrNumber,
+							});
 						}
+						// Sync fork info from metadata to state (independent of PR info)
+						if (
+							metadata.isFork &&
+							metadata.forkSlug &&
+							metadata.upstreamSlug &&
+							!contribution.isFork
+						) {
+							contribution.isFork = metadata.isFork;
+							contribution.forkSlug = metadata.forkSlug;
+							contribution.upstreamSlug = metadata.upstreamSlug;
+						}
+					} catch {
+						// Metadata file might not exist - that's okay
 					}
 				}
 
@@ -1792,9 +2182,13 @@ This PR will be updated automatically when the Auto Run completes.`;
 				// This handles PRs created manually via gh CLI or GitHub UI
 				for (const contribution of state.active) {
 					if (!contribution.draftPrNumber && contribution.branchName && contribution.repoSlug) {
+						const forkHeadOwner = contribution.isFork
+							? contribution.forkSlug?.split('/')[0]
+							: undefined;
 						const discovered = await discoverPRByBranch(
 							contribution.repoSlug,
-							contribution.branchName
+							contribution.branchName,
+							forkHeadOwner
 						);
 						if (discovered.prNumber) {
 							contribution.draftPrNumber = discovered.prNumber;
@@ -1896,7 +2290,7 @@ This PR will be updated automatically when the Auto Run completes.`;
 				await writeState(app, state);
 
 				if (results.merged > 0 || results.closed > 0 || prInfoSynced) {
-					broadcastSymphonyUpdate(getMainWindow);
+					broadcastSymphonyUpdate(safeSend);
 				}
 
 				logger.info('PR status check complete', LOG_CONTEXT, { ...results, prInfoSynced });
@@ -1937,8 +2331,8 @@ This PR will be updated automatically when the Auto Run completes.`;
 				let prClosed = false;
 
 				try {
-					// Step 1: Check if we have PR info in metadata but not in state
-					if (!contribution.draftPrNumber) {
+					// Step 1: Check if we have PR info or fork info in metadata but not in state
+					if (!contribution.draftPrNumber || !contribution.isFork) {
 						const metadataPath = path.join(
 							getSymphonyDir(app),
 							'contributions',
@@ -1951,8 +2345,11 @@ This PR will be updated automatically when the Auto Run completes.`;
 								prCreated?: boolean;
 								draftPrNumber?: number;
 								draftPrUrl?: string;
+								isFork?: boolean;
+								forkSlug?: string;
+								upstreamSlug?: string;
 							};
-							if (metadata.prCreated && metadata.draftPrNumber) {
+							if (!contribution.draftPrNumber && metadata.prCreated && metadata.draftPrNumber) {
 								contribution.draftPrNumber = metadata.draftPrNumber;
 								contribution.draftPrUrl = metadata.draftPrUrl;
 								prCreated = true;
@@ -1962,6 +2359,17 @@ This PR will be updated automatically when the Auto Run completes.`;
 									draftPrNumber: metadata.draftPrNumber,
 								});
 							}
+							// Sync fork info from metadata to state (independent of PR info)
+							if (
+								metadata.isFork &&
+								metadata.forkSlug &&
+								metadata.upstreamSlug &&
+								!contribution.isFork
+							) {
+								contribution.isFork = metadata.isFork;
+								contribution.forkSlug = metadata.forkSlug;
+								contribution.upstreamSlug = metadata.upstreamSlug;
+							}
 						} catch {
 							// Metadata file might not exist - that's okay, we'll try to create PR
 						}
@@ -1970,9 +2378,13 @@ This PR will be updated automatically when the Auto Run completes.`;
 					// Step 2: If still no PR, try to discover it from GitHub by branch name
 					// This handles PRs created manually via gh CLI or GitHub UI
 					if (!contribution.draftPrNumber && contribution.branchName && contribution.repoSlug) {
+						const forkHeadOwner = contribution.isFork
+							? contribution.forkSlug?.split('/')[0]
+							: undefined;
 						const discovered = await discoverPRByBranch(
 							contribution.repoSlug,
-							contribution.branchName
+							contribution.branchName,
+							forkHeadOwner
 						);
 						if (discovered.prNumber) {
 							contribution.draftPrNumber = discovered.prNumber;
@@ -2112,7 +2524,7 @@ This PR will be updated automatically when the Auto Run completes.`;
 
 					// Save updated state
 					await writeState(app, state);
-					broadcastSymphonyUpdate(getMainWindow);
+					broadcastSymphonyUpdate(safeSend);
 
 					return {
 						success: true,
@@ -2288,6 +2700,24 @@ This PR will be updated automatically when the Auto Run completes.`;
 						return { success: false, error: `Failed to create branch: ${branchResult.error}` };
 					}
 
+					// 1b. Capture upstream default branch before fork setup rewrites origin
+					const upstreamDefaultBranch = await getDefaultBranch(localPath);
+
+					// 1c. Set up fork if user doesn't have push access
+					logger.info('Checking fork requirements', LOG_CONTEXT, { repoSlug });
+					const forkResult = await ensureForkSetup(localPath, repoSlug);
+					if (forkResult.error) {
+						return { success: false, error: `Fork setup failed: ${forkResult.error}` };
+					}
+					if (forkResult.isFork) {
+						logger.info('Using fork for contribution', LOG_CONTEXT, {
+							forkSlug: forkResult.forkSlug,
+							upstreamSlug: repoSlug,
+						});
+					} else {
+						logger.info('User has push access, no fork needed', LOG_CONTEXT, { repoSlug });
+					}
+
 					// 2. Set up Auto Run documents directory
 					// External docs (GitHub attachments) go to cache dir to avoid polluting the repo
 					// Repo-internal docs are referenced in place
@@ -2373,6 +2803,12 @@ This PR will be updated automatically when the Auto Run completes.`;
 								resolvedDocs,
 								startedAt: new Date().toISOString(),
 								prCreated: false,
+								upstreamDefaultBranch,
+								isFork: forkResult.isFork,
+								...(forkResult.isFork && {
+									forkSlug: forkResult.forkSlug,
+									upstreamSlug: repoSlug,
+								}),
 							},
 							null,
 							2
@@ -2387,17 +2823,81 @@ This PR will be updated automatically when the Auto Run completes.`;
 							? path.dirname(resolvedDocs[0].path)
 							: localPath;
 
-					// 5. Broadcast status update (no PR yet - will be created on first commit)
-					const mainWindow = getMainWindow?.();
-					if (isWebContentsAvailable(mainWindow)) {
-						mainWindow.webContents.send('symphony:contributionStarted', {
+					// 5. Create empty commit, push branch, and open draft PR to claim the issue
+					let draftPrNumber: number | undefined;
+					let draftPrUrl: string | undefined;
+
+					const baseBranch = upstreamDefaultBranch;
+					const commitMsg = `[Symphony] Start contribution for #${issueNumber}`;
+					const emptyCommitResult = await execFileNoThrow(
+						'git',
+						['commit', '--allow-empty', '-m', commitMsg],
+						localPath
+					);
+
+					if (emptyCommitResult.exitCode === 0) {
+						const prTitle = `[WIP] Symphony: ${issueTitle} (#${issueNumber})`;
+						const prBody = `## Maestro Symphony Contribution
+
+Closes #${issueNumber}
+
+Contributed via [Maestro Symphony](https://runmaestro.ai).
+
+**Status:** In Progress
+**Started:** ${new Date().toISOString()}
+
+---
+
+This PR will be updated automatically when the Auto Run completes.`;
+
+						const forkOwner = forkResult.isFork ? forkResult.forkSlug?.split('/')[0] : undefined;
+						if (forkResult.isFork) {
+							logger.info('Creating cross-fork draft PR', LOG_CONTEXT, {
+								upstreamSlug: repoSlug,
+								forkSlug: forkResult.forkSlug,
+								branchName,
+							});
+						}
+						const prResult = await createDraftPR(
+							localPath,
+							baseBranch,
+							prTitle,
+							prBody,
+							forkResult.isFork ? repoSlug : undefined,
+							forkOwner
+						);
+						if (prResult.success) {
+							draftPrNumber = prResult.prNumber;
+							draftPrUrl = prResult.prUrl;
+
+							// Update metadata with PR info
+							const metaContent = JSON.parse(await fs.readFile(metadataPath, 'utf-8'));
+							metaContent.prCreated = true;
+							metaContent.draftPrNumber = draftPrNumber;
+							metaContent.draftPrUrl = draftPrUrl;
+							await fs.writeFile(metadataPath, JSON.stringify(metaContent, null, 2));
+						} else {
+							logger.warn('Failed to create draft PR, continuing without claim', LOG_CONTEXT, {
+								contributionId,
+								error: prResult.error,
+							});
+						}
+					} else {
+						logger.warn('Empty commit failed, continuing without draft PR', LOG_CONTEXT, {
 							contributionId,
-							sessionId,
-							branchName,
-							autoRunPath,
-							// No PR yet - will be created on first commit
+							error: emptyCommitResult.stderr,
 						});
 					}
+
+					// 6. Broadcast status update
+					safeSend('symphony:contributionStarted', {
+						contributionId,
+						sessionId,
+						branchName,
+						autoRunPath,
+						draftPrNumber,
+						draftPrUrl,
+					});
 
 					logger.info('Symphony contribution started', LOG_CONTEXT, {
 						contributionId,
@@ -2405,13 +2905,15 @@ This PR will be updated automatically when the Auto Run completes.`;
 						branchName,
 						documentCount: resolvedDocs.length,
 						hasExternalDocs,
+						draftPrNumber,
 					});
 
 					return {
 						success: true,
 						branchName,
 						autoRunPath,
-						// draftPrNumber and draftPrUrl will be set when PR is created on first commit
+						draftPrNumber,
+						draftPrUrl,
 					};
 				} catch (error) {
 					logger.error('Symphony contribution failed', LOG_CONTEXT, { error });
@@ -2460,12 +2962,17 @@ This PR will be updated automatically when the Auto Run completes.`;
 					prCreated: boolean;
 					draftPrNumber?: number;
 					draftPrUrl?: string;
+					upstreamDefaultBranch?: string;
+					isFork?: boolean;
+					forkSlug?: string;
+					upstreamSlug?: string;
 				};
 
 				try {
 					const content = await fs.readFile(metadataPath, 'utf-8');
 					metadata = JSON.parse(content);
 				} catch (e) {
+					void captureException(e);
 					logger.error('Failed to read contribution metadata', LOG_CONTEXT, {
 						contributionId,
 						error: e,
@@ -2496,7 +3003,8 @@ This PR will be updated automatically when the Auto Run completes.`;
 
 				// Check if there are any commits on this branch
 				// Use rev-list to count commits not in the default branch
-				const baseBranch = await getDefaultBranch(localPath);
+				// Prefer persisted upstream default branch (fork setup may have reconfigured origin)
+				const baseBranch = metadata.upstreamDefaultBranch ?? (await getDefaultBranch(localPath));
 				const commitCheckResult = await execFileNoThrow(
 					'git',
 					['rev-list', '--count', `${baseBranch}..HEAD`],
@@ -2522,7 +3030,9 @@ This PR will be updated automatically when the Auto Run completes.`;
 				const prTitle = `[WIP] Symphony: ${issueTitle} (#${issueNumber})`;
 				const prBody = `## Maestro Symphony Contribution
 
-Working on #${issueNumber} via [Maestro Symphony](https://runmaestro.ai).
+Closes #${issueNumber}
+
+Contributed via [Maestro Symphony](https://runmaestro.ai).
 
 **Status:** In Progress
 **Started:** ${new Date().toISOString()}
@@ -2532,7 +3042,22 @@ Working on #${issueNumber} via [Maestro Symphony](https://runmaestro.ai).
 This PR will be updated automatically when the Auto Run completes.`;
 
 				// Create draft PR (this also pushes the branch)
-				const prResult = await createDraftPR(localPath, baseBranch, prTitle, prBody);
+				const metaForkOwner = metadata.isFork ? metadata.forkSlug?.split('/')[0] : undefined;
+				if (metadata.isFork || metadata.upstreamSlug) {
+					logger.info('Creating cross-fork draft PR', LOG_CONTEXT, {
+						upstreamSlug: metadata.upstreamSlug,
+						forkSlug: metadata.forkSlug,
+						branchName: metadata.branchName,
+					});
+				}
+				const prResult = await createDraftPR(
+					localPath,
+					baseBranch,
+					prTitle,
+					prBody,
+					metadata.upstreamSlug,
+					metaForkOwner
+				);
 				if (!prResult.success) {
 					logger.error('Failed to create draft PR', LOG_CONTEXT, {
 						contributionId,
@@ -2558,15 +3083,12 @@ This PR will be updated automatically when the Auto Run completes.`;
 				}
 
 				// Broadcast PR creation event
-				const mainWindow = getMainWindow?.();
-				if (isWebContentsAvailable(mainWindow)) {
-					mainWindow.webContents.send('symphony:prCreated', {
-						contributionId,
-						sessionId,
-						draftPrNumber: prResult.prNumber,
-						draftPrUrl: prResult.prUrl,
-					});
-				}
+				safeSend('symphony:prCreated', {
+					contributionId,
+					sessionId,
+					draftPrNumber: prResult.prNumber,
+					draftPrUrl: prResult.prUrl,
+				});
 
 				logger.info('Draft PR created for Symphony contribution', LOG_CONTEXT, {
 					contributionId,
@@ -2676,7 +3198,9 @@ This PR will be updated automatically when the Auto Run completes.`;
 
 				// Validate required fields
 				if (!repoSlug || !repoName || !issueNumber || !prNumber || !prUrl) {
-					return { error: 'Missing required fields: repoSlug, repoName, issueNumber, prNumber, prUrl' };
+					return {
+						error: 'Missing required fields: repoSlug, repoName, issueNumber, prNumber, prUrl',
+					};
 				}
 
 				const state = await readState(app);
@@ -2686,7 +3210,9 @@ This PR will be updated automatically when the Auto Run completes.`;
 					(c) => c.repoSlug === repoSlug && c.prNumber === prNumber
 				);
 				if (existingContribution) {
-					return { error: `PR #${prNumber} is already credited (contribution: ${existingContribution.id})` };
+					return {
+						error: `PR #${prNumber} is already credited (contribution: ${existingContribution.id})`,
+					};
 				}
 
 				const now = new Date().toISOString();
@@ -2778,7 +3304,7 @@ This PR will be updated automatically when the Auto Run completes.`;
 					prUrl,
 				});
 
-				broadcastSymphonyUpdate(getMainWindow);
+				broadcastSymphonyUpdate(safeSend);
 
 				return { contributionId };
 			}

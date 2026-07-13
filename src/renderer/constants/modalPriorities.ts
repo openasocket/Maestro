@@ -29,6 +29,12 @@ export const MODAL_PRIORITIES = {
 	/** Agent error modal - critical, shows recovery options */
 	AGENT_ERROR: 1010,
 
+	/** Claude Code standard-mode permission prompt - blocks until the user decides */
+	PERMISSION_PROMPT: 1008,
+
+	/** Forced parallel execution warning - one-time acknowledgment */
+	FORCED_PARALLEL_WARNING: 1005,
+
 	/** Confirmation dialogs - highest priority, always on top */
 	CONFIRM: 1000,
 
@@ -46,6 +52,12 @@ export const MODAL_PRIORITIES = {
 
 	/** Rename tab modal */
 	RENAME_TAB: 875,
+
+	/** Terminal tab startup command configuration modal */
+	TERMINAL_STARTUP_COMMAND: 873,
+
+	/** Director's Notes modal - unified history and AI overview */
+	DIRECTOR_NOTES: 848,
 
 	/** Rename group modal */
 	RENAME_GROUP: 850,
@@ -87,7 +99,7 @@ export const MODAL_PRIORITIES = {
 	INLINE_WIZARD_EXIT_CONFIRM: 775,
 
 	/** VIBES keygen wizard - key generation walkthrough */
-	KEYGEN_WIZARD: 756,
+	KEYGEN_WIZARD: 757,
 
 	/** VIBES attestation progress modal - shows 7-step pipeline progress */
 	ATTESTATION_PROGRESS: 754,
@@ -100,6 +112,9 @@ export const MODAL_PRIORITIES = {
 
 	/** Worktree configuration modal */
 	WORKTREE_CONFIG: 752,
+
+	/** New agent choice modal (Manual vs Wizard) */
+	NEW_AGENT_CHOICE: 756,
 
 	/** New instance creation modal */
 	NEW_INSTANCE: 750,
@@ -130,6 +145,10 @@ export const MODAL_PRIORITIES = {
 
 	/** Auto Run search bar (within expanded modal) */
 	AUTORUN_SEARCH: 706,
+
+	/** Auto Run document selector dropdown (above expanded modal so Esc closes
+	 * the dropdown first, leaving the modal open for a second Esc). */
+	AUTORUN_DOC_SELECTOR: 707,
 
 	/** Playbook Exchange modal - browse and import community playbooks (opens from BatchRunner or AutoRunExpanded, so needs higher priority than both) */
 	MARKETPLACE: 735,
@@ -173,6 +192,9 @@ export const MODAL_PRIORITIES = {
 	/** Agent sessions browser (Cmd+Shift+L) */
 	AGENT_SESSIONS: 680,
 
+	/** New memory filename modal (appears above Memory Viewer) */
+	MEMORY_CREATE: 695,
+
 	/** Execution queue browser modal */
 	EXECUTION_QUEUE_BROWSER: 670,
 
@@ -185,6 +207,18 @@ export const MODAL_PRIORITIES = {
 	/** Debug package generation modal */
 	DEBUG_PACKAGE: 605,
 
+	/** Debug: View Application Stats modal */
+	DEBUG_APPLICATION_STATS: 604,
+
+	/** Debug: Re-Probe Agents modal */
+	DEBUG_AGENT_PROBE: 603,
+
+	/** Debug: Widget Gallery (shared widget-library preview) */
+	DEBUG_WIDGET_GALLERY: 602,
+
+	/** Debug: Performance-profiling capture progress modal */
+	DEBUG_PROFILING_CAPTURE: 606,
+
 	/** Windows warning modal - shown on startup for Windows users */
 	WINDOWS_WARNING: 615,
 
@@ -193,6 +227,9 @@ export const MODAL_PRIORITIES = {
 
 	/** Update check modal */
 	UPDATE_CHECK: 610,
+
+	/** Feedback modal */
+	FEEDBACK: 595,
 
 	/** Process monitor modal */
 	PROCESS_MONITOR: 550,
@@ -203,14 +240,55 @@ export const MODAL_PRIORITIES = {
 	/** Usage Dashboard modal */
 	USAGE_DASHBOARD: 540,
 
+	/** AgentRun ledger dashboard modal */
+	AGENT_RUN_DASHBOARD: 542,
+
+	/** Per-agent detail sub-modal opened from the Usage Dashboard's Agents tab */
+	USAGE_DASHBOARD_AGENT_DETAIL: 541,
+
 	/** System log viewer overlay */
 	LOG_VIEWER: 500,
 
+	/** Maestro Cue backup diff viewer (above Cue modal + help) */
+	CUE_BACKUP_DIFF: 470,
+
+	/** Maestro Cue help modal (above Cue modal) */
+	CUE_HELP: 465,
+
+	/** Maestro Cue pattern preview modal (above YAML editor) */
+	CUE_PATTERN_PREVIEW: 464,
+
+	/** Maestro Cue YAML editor modal (above Cue modal, below help) */
+	CUE_YAML_EDITOR: 463,
+
+	/** Maestro Cue dashboard modal */
+	CUE_MODAL: 460,
+
+	/** Pianola dashboard modal (autonomous manager: rules + decision log) */
+	PIANOLA_MODAL: 459,
+
+	/** Pianola rule editor (above the Pianola dashboard so Escape closes it first) */
+	PIANOLA_RULE_EDITOR: 461,
+
 	/** SSH Remote configuration modal (above settings) */
-	SSH_REMOTE: 460,
+	SSH_REMOTE: 458,
+
+	/** Reserved band for community-plugin panels/modals. Plugin UI is allocated
+	 * sequentially from PLUGIN_PANEL_BASE up to (but not reaching) SSH_REMOTE/
+	 * Settings, so plugins always sit below first-party settings-level modals and
+	 * never above critical/confirmation modals. Use pluginPanelPriority(index). */
+	PLUGIN_PANEL_BASE: 420,
+
+	/** Custom theme base-theme picker dropdown (above settings so Escape closes
+	 * the dropdown first, leaving the Settings modal open for a second Esc). */
+	CUSTOM_THEME_BASE_SELECTOR: 451,
 
 	/** Settings modal */
 	SETTINGS: 450,
+
+	/** Thought Stream introspection panel - floating, non-blocking; sits below
+	 * real modals so they take Escape/focus first, above git overlays. */
+	THOUGHT_STREAM: 210,
 
 	/** Git diff preview overlay */
 	GIT_DIFF: 200,
@@ -221,8 +299,19 @@ export const MODAL_PRIORITIES = {
 	/** Save markdown modal */
 	SAVE_MARKDOWN: 160,
 
+	/** Image save destination modal (overwrite vs save-as) - above the annotator
+	 * so it layers correctly if the annotator is still settling closed. */
+	IMAGE_SAVE: 168,
+
+	/** Image annotator modal - above lightbox so Escape closes annotator first */
+	IMAGE_ANNOTATOR: 165,
+
 	/** Image lightbox overlay */
 	LIGHTBOX: 150,
+
+	/** Edit-queued-item modal (below lightbox/annotator so those open on top of it
+	 * and Escape closes them first while editing a queued message's images). */
+	QUEUED_ITEM_EDIT: 145,
 
 	/** File preview overlay */
 	FILE_PREVIEW: 100,
@@ -233,6 +322,21 @@ export const MODAL_PRIORITIES = {
 	/** File tree filter input */
 	FILE_TREE_FILTER: 30,
 } as const;
+
+/** Top of the reserved plugin band (exclusive). Plugin priorities are clamped
+ * below this so a plugin can never outrank SSH_REMOTE (458) / Settings (450). */
+const PLUGIN_PANEL_BAND_TOP = 449;
+
+/**
+ * Allocate a modal priority for the Nth open plugin panel within the reserved
+ * plugin band. Later panels sit above earlier ones, but the whole band stays
+ * below first-party settings-level modals. Clamped so it cannot escape the band.
+ */
+export function pluginPanelPriority(index: number): number {
+	const base = MODAL_PRIORITIES.PLUGIN_PANEL_BASE;
+	const safeIndex = Number.isFinite(index) && index > 0 ? Math.floor(index) : 0;
+	return Math.min(base + safeIndex, PLUGIN_PANEL_BAND_TOP);
+}
 
 /**
  * Type for modal priority keys

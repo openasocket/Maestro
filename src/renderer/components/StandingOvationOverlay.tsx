@@ -3,7 +3,7 @@ import { ExternalLink, Trophy, Clock, Star, Share2, Copy, Download, Check } from
 import confetti from 'canvas-confetti';
 import type { Theme, ThemeMode } from '../types';
 import type { ConductorBadge } from '../constants/conductorBadges';
-import { useLayerStack } from '../contexts/LayerStackContext';
+import { useModalLayer } from '../hooks/ui/useModalLayer';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { AnimatedMaestro } from './MaestroSilhouette';
 import {
@@ -11,6 +11,9 @@ import {
 	formatTimeRemaining,
 	getNextBadge,
 } from '../constants/conductorBadges';
+import { safeClipboardWriteBlob } from '../utils/clipboard';
+import { openUrl } from '../utils/openUrl';
+import { logger } from '../utils/logger';
 
 interface StandingOvationOverlayProps {
 	theme: Theme;
@@ -42,8 +45,6 @@ export function StandingOvationOverlay({
 	isLeaderboardRegistered,
 	disableConfetti = false,
 }: StandingOvationOverlayProps) {
-	const { registerLayer, unregisterLayer, updateLayerHandler } = useLayerStack();
-	const layerIdRef = useRef<string>();
 	const containerRef = useRef<HTMLDivElement>(null);
 	const onCloseRef = useRef(onClose);
 	onCloseRef.current = onClose;
@@ -142,37 +143,19 @@ export function StandingOvationOverlay({
 	}, [isClosing, onClose, fireConfetti]);
 
 	// Register with layer stack
+	useModalLayer(MODAL_PRIORITIES.STANDING_OVATION, 'Standing Ovation Achievement', () =>
+		handleCloseRef.current()
+	);
+
+	// Focus container on mount
 	useEffect(() => {
-		const id = registerLayer({
-			type: 'modal',
-			priority: MODAL_PRIORITIES.STANDING_OVATION,
-			blocksLowerLayers: true,
-			capturesFocus: true,
-			focusTrap: 'strict',
-			ariaLabel: 'Standing Ovation Achievement',
-			onEscape: () => handleCloseRef.current(),
-		});
-		layerIdRef.current = id;
-
 		containerRef.current?.focus();
-
-		return () => {
-			if (layerIdRef.current) {
-				unregisterLayer(layerIdRef.current);
-			}
-		};
-	}, [registerLayer, unregisterLayer]);
+	}, []);
 
 	// Update close handler ref when handleTakeABow changes
 	useEffect(() => {
 		handleCloseRef.current = handleTakeABow;
 	}, [handleTakeABow]);
-
-	useEffect(() => {
-		if (layerIdRef.current) {
-			updateLayerHandler(layerIdRef.current, () => handleCloseRef.current());
-		}
-	}, [updateLayerHandler]);
 
 	// Generate shareable achievement card as canvas using theme colors
 	const generateShareImage = useCallback(async (): Promise<HTMLCanvasElement> => {
@@ -333,15 +316,19 @@ export function StandingOvationOverlay({
 	const copyToClipboard = useCallback(async () => {
 		try {
 			const canvas = await generateShareImage();
-			canvas.toBlob(async (blob) => {
-				if (blob) {
-					await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+			const blob = await new Promise<Blob | null>((resolve) => {
+				canvas.toBlob((b) => resolve(b), 'image/png');
+			});
+			if (blob) {
+				const ok = await safeClipboardWriteBlob([new ClipboardItem({ 'image/png': blob })]);
+				if (ok) {
 					setCopySuccess(true);
 					setTimeout(() => setCopySuccess(false), 2000);
 				}
-			}, 'image/png');
+			}
 		} catch (error) {
-			console.error('Failed to copy to clipboard:', error);
+			// Canvas/image generation errors — not clipboard
+			logger.error('Failed to generate share image:', undefined, error);
 		}
 	}, [generateShareImage]);
 
@@ -354,7 +341,7 @@ export function StandingOvationOverlay({
 			link.href = canvas.toDataURL('image/png');
 			link.click();
 		} catch (error) {
-			console.error('Failed to download image:', error);
+			logger.error('Failed to download image:', undefined, error);
 		}
 	}, [generateShareImage, badge.level]);
 
@@ -489,9 +476,7 @@ export function StandingOvationOverlay({
 								{badge.exampleConductor.achievement}
 							</p>
 							<button
-								onClick={() =>
-									window.maestro.shell.openExternal(badge.exampleConductor.wikipediaUrl)
-								}
+								onClick={() => openUrl(badge.exampleConductor.wikipediaUrl)}
 								className="inline-flex items-center gap-1 text-xs mt-2 hover:underline"
 								style={{ color: purpleAccent }}
 							>
@@ -592,9 +577,9 @@ export function StandingOvationOverlay({
 									}}
 								>
 									<button
-										onClick={() => {
-											copyToClipboard();
-											setShareMenuOpen(false);
+										onClick={async () => {
+											await copyToClipboard();
+											setTimeout(() => setShareMenuOpen(false), 1000);
 										}}
 										className="w-full flex items-center gap-3 px-3 py-2 rounded hover:bg-white/10 transition-colors"
 									>

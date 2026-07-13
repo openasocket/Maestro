@@ -2,7 +2,7 @@
 description: Convert OpenSpec tasks to Maestro Auto Run documents for automated implementation.
 ---
 
-You are an expert at converting OpenSpec change proposals into actionable Maestro Auto Run documents (also known as **Playbooks** — a Playbook is a collection of Auto Run documents, and the terms are synonymous). Maestro also has a **Playbook Exchange** where users can browse and import community-curated playbooks.
+You are an expert at converting OpenSpec change proposals into actionable Maestro Auto Run documents (also known as **Playbooks** - a Playbook is a collection of Auto Run documents, and the terms are synonymous). Maestro also has a **Playbook Exchange** where users can browse and import community-curated playbooks.
 
 ## User Input
 
@@ -11,6 +11,7 @@ $ARGUMENTS
 ```
 
 The user input may contain:
+
 - A change ID (e.g., `001-add-auth`, `feature-search`)
 - A path to an OpenSpec change directory
 - Empty (you should scan for changes in `openspec/changes/`)
@@ -20,7 +21,7 @@ The user input may contain:
 1. **Locate the OpenSpec change** in `openspec/changes/<change-id>/`
 2. **Read the `tasks.md`** file (and optionally `proposal.md` for context)
 3. **Generate Auto Run documents** using the format below
-4. **Save to `Auto Run Docs/`** folder
+4. **Save to `{{AUTORUN_FOLDER}}/`** folder
 
 ## Critical Requirements
 
@@ -64,6 +65,7 @@ Each Auto Run document MUST follow this exact format:
 ## Task Writing Guidelines
 
 Each task should be:
+
 - **Specific**: Not "set up the feature" but "Create UserAuthService class with login/logout methods"
 - **Actionable**: Clear what needs to be done
 - **Verifiable**: You can tell when it's complete
@@ -71,6 +73,7 @@ Each task should be:
 - **Reuse-aware**: Search for existing utilities, patterns, or services in the codebase before creating new implementations to avoid duplication
 
 Preserve any markers from the original tasks.md:
+
 - `[P]` = Parallelizable (can run with other `[P]` tasks)
 - Task IDs (T001, T002, etc.) for traceability
 
@@ -84,11 +87,11 @@ Preserve any markers from the original tasks.md:
 
 ## Output Format
 
-Create each document as a file in the `Auto Run Docs/` folder with this naming pattern:
+Create each document as a file in the `{{AUTORUN_FOLDER}}/` folder with this naming pattern:
 
 ```
-Auto Run Docs/OpenSpec-<change-id>-Phase-01-[Description].md
-Auto Run Docs/OpenSpec-<change-id>-Phase-02-[Description].md
+{{AUTORUN_FOLDER}}/OpenSpec-<change-id>-Phase-01-[Description].md
+{{AUTORUN_FOLDER}}/OpenSpec-<change-id>-Phase-02-[Description].md
 ```
 
 ## Execution Steps
@@ -113,7 +116,7 @@ Auto Run Docs/OpenSpec-<change-id>-Phase-02-[Description].md
    - Include OpenSpec context in each document
 
 5. **Save the documents**:
-   - Files go to `Auto Run Docs/` folder
+   - Files go to `{{AUTORUN_FOLDER}}/` folder
    - Filename pattern: `OpenSpec-<change-id>-Phase-XX-[Description].md`
 
 ## Now Execute

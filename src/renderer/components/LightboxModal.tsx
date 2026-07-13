@@ -1,9 +1,13 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Copy, Check, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { Copy, Check, PenLine, Trash2 } from 'lucide-react';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { ConfirmModal } from './ConfirmModal';
+import { useImageAnnotatorStore } from './ImageAnnotator/imageAnnotatorStore';
 import type { Theme } from '../types';
+import { formatShortcutKeys } from '../utils/shortcutFormatter';
+import { safeClipboardWriteImage } from '../utils/clipboard';
+import { logger } from '../utils/logger';
 
 interface LightboxModalProps {
 	image: string;
@@ -12,6 +16,8 @@ interface LightboxModalProps {
 	onNavigate: (image: string) => void;
 	/** Callback to delete the current image from staged images */
 	onDelete?: (image: string) => void;
+	/** Callback to replace the current image with an annotated version */
+	onUpdateImage?: (oldImage: string, newDataUrl: string) => void;
 	/** Theme for ConfirmModal styling */
 	theme?: Theme;
 }
@@ -22,34 +28,29 @@ export function LightboxModal({
 	onClose,
 	onNavigate,
 	onDelete,
+	onUpdateImage,
 	theme,
 }: LightboxModalProps) {
 	const lightboxRef = useRef<HTMLDivElement>(null);
 	const currentIndex = stagedImages.indexOf(image);
 	const canNavigate = stagedImages.length > 1;
 	const canDelete = Boolean(onDelete);
+	const canAnnotate = Boolean(onUpdateImage);
 	const layerIdRef = useRef<string>();
-	const { registerLayer, unregisterLayer, updateLayerHandler } = useLayerStack();
+	const { registerLayer, unregisterLayer, updateLayerHandler, getTopLayer } = useLayerStack();
+	const openAnnotator = useImageAnnotatorStore((state) => state.openAnnotator);
 	const [copied, setCopied] = useState(false);
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
 	const copyImageToClipboard = async () => {
 		try {
-			// Convert data URL to blob
-			const response = await fetch(image);
-			const blob = await response.blob();
-
-			// Write to clipboard
-			await navigator.clipboard.write([
-				new ClipboardItem({
-					[blob.type]: blob,
-				}),
-			]);
-
-			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
+			const ok = await safeClipboardWriteImage(image);
+			if (ok) {
+				setCopied(true);
+				setTimeout(() => setCopied(false), 2000);
+			}
 		} catch (err) {
-			console.error('Failed to copy image to clipboard:', err);
+			logger.error('Failed to copy image to clipboard:', undefined, err);
 		}
 	};
 
@@ -100,11 +101,75 @@ export function LightboxModal({
 		}
 	};
 
+	const openAnnotatorFromLightbox = useCallback(() => {
+		if (!image || !onUpdateImage) return;
+		const oldImage = image;
+		openAnnotator(oldImage, (newDataUrl) => {
+			onUpdateImage(oldImage, newDataUrl);
+			onClose();
+		});
+	}, [image, onUpdateImage, openAnnotator, onClose]);
+
 	// Show delete confirmation modal
 	const promptDelete = useCallback(() => {
 		if (!onDelete) return;
 		setShowDeleteConfirm(true);
 	}, [onDelete]);
+
+	const goToPrevRef = useRef(goToPrev);
+	const goToNextRef = useRef(goToNext);
+	const promptDeleteRef = useRef(promptDelete);
+	const copyImageRef = useRef(copyImageToClipboard);
+	const openAnnotatorRef = useRef(openAnnotatorFromLightbox);
+	goToPrevRef.current = goToPrev;
+	goToNextRef.current = goToNext;
+	promptDeleteRef.current = promptDelete;
+	copyImageRef.current = copyImageToClipboard;
+	openAnnotatorRef.current = openAnnotatorFromLightbox;
+
+	// Window-level keyboard handler. The div-level approach only fires when the
+	// lightbox div has focus, which is lost when the annotator (or any other
+	// transient modal layered above) closes — that leaked Cmd+E to the chat
+	// behind. Capturing on `window` is focus-independent. Guarded by
+	// `getTopLayer` so the lightbox doesn't react while a higher-priority
+	// layer (annotator, etc.) is on top.
+	useEffect(() => {
+		const handler = (e: KeyboardEvent) => {
+			if (showDeleteConfirm) return;
+			const top = getTopLayer();
+			if (!top || top.id !== layerIdRef.current) return;
+
+			let handled = false;
+			if (e.key === 'ArrowLeft') {
+				if (canNavigate) {
+					goToPrevRef.current();
+					handled = true;
+				}
+			} else if (e.key === 'ArrowRight') {
+				if (canNavigate) {
+					goToNextRef.current();
+					handled = true;
+				}
+			} else if ((e.key === 'Delete' || e.key === 'Backspace') && canDelete) {
+				promptDeleteRef.current();
+				handled = true;
+			} else if (e.key === 'c' && (e.metaKey || e.ctrlKey)) {
+				void copyImageRef.current();
+				handled = true;
+			} else if ((e.key === 'e' || e.key === 'E') && (e.metaKey || e.ctrlKey) && canAnnotate) {
+				openAnnotatorRef.current();
+				handled = true;
+			}
+
+			if (handled) {
+				e.preventDefault();
+				e.stopPropagation();
+			}
+		};
+
+		window.addEventListener('keydown', handler, { capture: true });
+		return () => window.removeEventListener('keydown', handler, { capture: true });
+	}, [canNavigate, canDelete, canAnnotate, showDeleteConfirm, getTopLayer]);
 
 	// Handle confirmed deletion
 	const handleDeleteConfirmed = useCallback(() => {
@@ -159,22 +224,6 @@ export function LightboxModal({
 			ref={lightboxRef}
 			className="absolute inset-0 z-[100] bg-black/90 flex items-center justify-center"
 			onClick={onClose}
-			onKeyDown={(e) => {
-				e.stopPropagation();
-				if (e.key === 'ArrowLeft') {
-					e.preventDefault();
-					goToPrev();
-				} else if (e.key === 'ArrowRight') {
-					e.preventDefault();
-					goToNext();
-				} else if ((e.key === 'Delete' || e.key === 'Backspace') && canDelete) {
-					e.preventDefault();
-					promptDelete();
-				} else if (e.key === 'c' && (e.metaKey || e.ctrlKey)) {
-					e.preventDefault();
-					copyImageToClipboard();
-				}
-			}}
 			tabIndex={-1}
 			role="dialog"
 			aria-modal="true"
@@ -193,12 +242,34 @@ export function LightboxModal({
 			)}
 			<img
 				src={image}
+				alt="Expanded image preview"
 				className="max-w-[90%] max-h-[90%] rounded shadow-2xl"
+				onMouseDown={(e) => e.stopPropagation()}
 				onClick={(e) => e.stopPropagation()}
 			/>
 
-			{/* Top right buttons: Copy, Delete (if available) */}
+			{/* Top right buttons: Annotate, Copy, Delete (if available) */}
 			<div className="absolute top-4 right-4 flex gap-2">
+				{/* Annotate button - only if onUpdateImage is provided */}
+				{canAnnotate && (
+					<button
+						onClick={(e) => {
+							e.stopPropagation();
+							if (image && onUpdateImage) {
+								const oldImage = image;
+								openAnnotator(oldImage, (newDataUrl) => {
+									onUpdateImage(oldImage, newDataUrl);
+									onClose();
+								});
+							}
+						}}
+						className="bg-white/10 hover:bg-white/20 text-white rounded-full p-3 backdrop-blur-sm transition-colors"
+						title={`Annotate image (${formatShortcutKeys(['Meta', 'e'])})`}
+					>
+						<PenLine className="w-5 h-5" />
+					</button>
+				)}
+
 				{/* Copy to clipboard button */}
 				<button
 					onClick={(e) => {
@@ -206,7 +277,7 @@ export function LightboxModal({
 						copyImageToClipboard();
 					}}
 					className="bg-white/10 hover:bg-white/20 text-white rounded-full p-3 backdrop-blur-sm transition-colors flex items-center gap-2"
-					title="Copy image to clipboard (⌘C)"
+					title={`Copy image to clipboard (${formatShortcutKeys(['Meta', 'c'])})`}
 				>
 					{copied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
 					{copied && <span className="text-sm">Copied!</span>}

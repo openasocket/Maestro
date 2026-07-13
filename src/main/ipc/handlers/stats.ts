@@ -12,10 +12,15 @@
  * - CSV export for data analysis
  */
 
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, app } from 'electron';
 import { logger } from '../../utils/logger';
+import { captureException } from '../../utils/sentry';
 import { withIpcErrorLogging, CreateHandlerOptions } from '../../utils/ipcHandler';
+import { createSafeSend, SafeSendFn } from '../../utils/safe-send';
 import { getStatsDB } from '../../stats';
+import { isStatsCollectionEnabled } from '../../stats/utils';
+import { flushTelemetry } from '../../cue/cue-telemetry';
+import { enqueueQueryEvent, flushQueryEventsSync } from '../../stats/query-events-buffer';
 import {
 	QueryEvent,
 	AutoRunSession,
@@ -24,6 +29,8 @@ import {
 	StatsTimeRange,
 	StatsFilters,
 } from '../../../shared/stats-types';
+import type { TokenUsageQuery } from '../../../shared/tokenUsage';
+import { getTokenUsageAggregate } from '../../stats/token-usage/token-usage-accessor';
 
 const LOG_CONTEXT = '[Stats]';
 
@@ -44,23 +51,10 @@ export interface StatsHandlerDependencies {
 }
 
 /**
- * Check if stats collection is enabled
+ * Broadcast stats update to renderer and web-desktop bridge clients.
  */
-function isStatsCollectionEnabled(settingsStore?: { get: (key: string) => unknown }): boolean {
-	if (!settingsStore) return true; // Default to enabled if no settings store
-	const enabled = settingsStore.get('statsCollectionEnabled');
-	// Default to true if not explicitly set to false
-	return enabled !== false;
-}
-
-/**
- * Broadcast stats update to renderer
- */
-function broadcastStatsUpdate(getMainWindow: () => BrowserWindow | null): void {
-	const mainWindow = getMainWindow();
-	if (mainWindow && !mainWindow.isDestroyed()) {
-		mainWindow.webContents.send('stats:updated');
-	}
+function broadcastStatsUpdate(safeSend: SafeSendFn): void {
+	safeSend('stats:updated');
 }
 
 /**
@@ -76,26 +70,53 @@ function broadcastStatsUpdate(getMainWindow: () => BrowserWindow | null): void {
  */
 export function registerStatsHandlers(deps: StatsHandlerDependencies): void {
 	const { getMainWindow, settingsStore } = deps;
+	const safeSend = createSafeSend(getMainWindow);
 
-	// Record a query event (interactive conversation turn)
+	// PR-B 1.5: flush any buffered query events synchronously before the app
+	// exits so we don't drop them. The handler is fire-and-forget — if it
+	// throws (e.g. DB already closed) the buffer module logs it; we don't
+	// want to block quit on stats persistence.
+	app.on('before-quit', () => {
+		try {
+			flushQueryEventsSync();
+		} catch (err) {
+			logger.warn('Failed to flush query event buffer on quit', LOG_CONTEXT, err);
+			// Surface to Sentry so we get a real signal in production —
+			// quit-time data loss is the worst time to lose telemetry, since
+			// we can't retry. Per CLAUDE.md §"Error Handling & Sentry".
+			void captureException(err instanceof Error ? err : new Error(String(err)), {
+				operation: 'stats:beforeQuitFlush',
+			});
+		}
+	});
+
+	// Record a query event (interactive conversation turn).
+	//
+	// PR-B 1.5: events are buffered and flushed in a single transaction every
+	// 500ms or every 50 events (whichever first). This collapses many
+	// per-turn fsyncs into one, on the streaming hot path. The buffered
+	// id is generated synchronously and returned — callers don't need to
+	// wait for the actual write.
 	ipcMain.handle(
 		'stats:record-query',
 		withIpcErrorLogging(handlerOpts('recordQuery'), async (event: Omit<QueryEvent, 'id'>) => {
-			// Check if stats collection is enabled
 			if (!isStatsCollectionEnabled(settingsStore)) {
 				logger.debug('Stats collection disabled, skipping query event', LOG_CONTEXT);
 				return null;
 			}
 
 			const db = getStatsDB();
-			const id = db.insertQueryEvent(event);
-			logger.debug(`Recorded query event: ${id}`, LOG_CONTEXT, {
+			const id = enqueueQueryEvent(db.database, event);
+			logger.debug(`Buffered query event: ${id}`, LOG_CONTEXT, {
 				sessionId: event.sessionId,
 				agentType: event.agentType,
 				source: event.source,
 				duration: event.duration,
 			});
-			broadcastStatsUpdate(getMainWindow);
+			// Notify renderer that stats may have changed soon. The actual
+			// write happens asynchronously; the dashboard is best-effort
+			// realtime, so a small lag (≤500ms) is acceptable.
+			broadcastStatsUpdate(safeSend);
 			return id;
 		})
 	);
@@ -122,7 +143,7 @@ export function registerStatsHandlers(deps: StatsHandlerDependencies): void {
 					sessionId: session.sessionId,
 					documentPath: session.documentPath,
 				});
-				broadcastStatsUpdate(getMainWindow);
+				broadcastStatsUpdate(safeSend);
 				return id;
 			}
 		)
@@ -144,7 +165,19 @@ export function registerStatsHandlers(deps: StatsHandlerDependencies): void {
 				} else {
 					logger.warn(`Auto Run session not found: ${id}`, LOG_CONTEXT);
 				}
-				broadcastStatsUpdate(getMainWindow);
+				broadcastStatsUpdate(safeSend);
+
+				// Cue telemetry — autorun completion is the user's natural quiet
+				// window, so we flush the outbox here. Fire-and-forget: a failed
+				// flush leaves rows in the outbox for the next attempt and must
+				// not delay the IPC return. The submitter checks Encore flags
+				// internally; nothing happens if Cue/usageStats are off.
+				flushTelemetry({ reason: 'autorun' }).catch((error) => {
+					void captureException(error, {
+						operation: 'stats:end-autorun.flushTelemetry',
+					});
+				});
+
 				return updated;
 			}
 		)
@@ -167,7 +200,7 @@ export function registerStatsHandlers(deps: StatsHandlerDependencies): void {
 				taskIndex: task.taskIndex,
 				success: task.success,
 			});
-			broadcastStatsUpdate(getMainWindow);
+			broadcastStatsUpdate(safeSend);
 			return id;
 		})
 	);
@@ -211,6 +244,19 @@ export function registerStatsHandlers(deps: StatsHandlerDependencies): void {
 		})
 	);
 
+	// Token & cost usage aggregate for the Cost & Tokens dashboard. Reads each
+	// agent's on-disk session storage (not the stats DB), served through a
+	// per-session incremental cache. `force` bypasses the in-memory memo.
+	ipcMain.handle(
+		'stats:get-token-usage',
+		withIpcErrorLogging(
+			handlerOpts('getTokenUsage'),
+			async (query: TokenUsageQuery = {}, force = false) => {
+				return getTokenUsageAggregate(query, force);
+			}
+		)
+	);
+
 	// Export query events to CSV
 	ipcMain.handle(
 		'stats:export-csv',
@@ -228,7 +274,7 @@ export function registerStatsHandlers(deps: StatsHandlerDependencies): void {
 			const result = db.clearOldData(olderThanDays);
 			if (result.success) {
 				// Broadcast update so any open dashboards refresh
-				broadcastStatsUpdate(getMainWindow);
+				broadcastStatsUpdate(safeSend);
 			}
 			return result;
 		})
@@ -261,7 +307,7 @@ export function registerStatsHandlers(deps: StatsHandlerDependencies): void {
 					agentType: event.agentType,
 					projectPath: event.projectPath,
 				});
-				broadcastStatsUpdate(getMainWindow);
+				broadcastStatsUpdate(safeSend);
 				return id;
 			}
 		)
@@ -278,7 +324,7 @@ export function registerStatsHandlers(deps: StatsHandlerDependencies): void {
 				if (updated) {
 					logger.debug(`Recorded session closed: ${sessionId}`, LOG_CONTEXT);
 				}
-				broadcastStatsUpdate(getMainWindow);
+				broadcastStatsUpdate(safeSend);
 				return updated;
 			}
 		)
@@ -290,6 +336,66 @@ export function registerStatsHandlers(deps: StatsHandlerDependencies): void {
 		withIpcErrorLogging(handlerOpts('getSessionLifecycle'), async (range: StatsTimeRange) => {
 			const db = getStatsDB();
 			return db.getSessionLifecycleEvents(range);
+		})
+	);
+
+	// Record a keyboard shortcut firing. Buckets the event into the local-time
+	// day that contains `firedAt`. Idempotent at the call-site level only —
+	// every invocation increments the daily counter by 1.
+	ipcMain.handle(
+		'stats:record-shortcut-usage',
+		withIpcErrorLogging(handlerOpts('recordShortcutUsage'), async (firedAt: number) => {
+			if (!isStatsCollectionEnabled(settingsStore)) {
+				return null;
+			}
+
+			const db = getStatsDB();
+			// Shortcut usage is fire-and-forget analytics. A shortcut can fire
+			// during early startup before the stats DB has finished initializing;
+			// skip silently in that window rather than throwing "Database not
+			// initialized" - an unactionable error that otherwise propagates
+			// across the IPC bridge and into Sentry. (MAESTRO-SP)
+			if (!db.isReady()) {
+				return null;
+			}
+			const date = db.incrementShortcutUsage(firedAt);
+			broadcastStatsUpdate(safeSend);
+			return date;
+		})
+	);
+
+	// Get per-day shortcut usage counts within a time range
+	ipcMain.handle(
+		'stats:get-shortcut-usage-by-day',
+		withIpcErrorLogging(handlerOpts('getShortcutUsageByDay'), async (range: StatsTimeRange) => {
+			const db = getStatsDB();
+			return db.getShortcutUsageByDay(range);
+		})
+	);
+
+	// Get total shortcut firings within a time range (summary card)
+	ipcMain.handle(
+		'stats:get-shortcut-usage-total',
+		withIpcErrorLogging(handlerOpts('getShortcutUsageTotal'), async (range: StatsTimeRange) => {
+			const db = getStatsDB();
+			return db.getShortcutUsageTotal(range);
+		})
+	);
+
+	// Record an image annotation save event
+	ipcMain.handle(
+		'stats:record-image-annotation',
+		withIpcErrorLogging(handlerOpts('recordImageAnnotation'), async (createdAt: number) => {
+			if (!isStatsCollectionEnabled(settingsStore)) {
+				logger.debug('Stats collection disabled, skipping image annotation', LOG_CONTEXT);
+				return null;
+			}
+
+			const db = getStatsDB();
+			const id = db.insertImageAnnotation(createdAt);
+			logger.debug(`Recorded image annotation: ${id}`, LOG_CONTEXT);
+			broadcastStatsUpdate(safeSend);
+			return id;
 		})
 	);
 

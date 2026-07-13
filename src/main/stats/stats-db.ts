@@ -54,6 +54,24 @@ import {
 } from './session-lifecycle';
 import { getAggregatedStats } from './aggregations';
 import { clearOldData, exportToCsv } from './data-management';
+import {
+	insertImageAnnotation,
+	clearImageAnnotationCache,
+	countImageAnnotations,
+} from './image-annotations';
+import {
+	incrementShortcutUsage,
+	getShortcutUsageByDay,
+	getShortcutUsageTotal,
+	clearShortcutUsageCache,
+} from './shortcut-usage';
+import {
+	recordWindowOpened,
+	getMultiWindowUsage,
+	clearMultiWindowUsageCache,
+} from './multi-window-usage';
+import type { ShortcutUsageDay, MultiWindowUsage } from '../../shared/stats-types';
+import { captureException } from '../utils/sentry';
 
 /**
  * StatsDB manages the SQLite database for usage statistics.
@@ -151,6 +169,9 @@ export class StatsDB {
 			clearQueryEventCache();
 			clearAutoRunCache();
 			clearSessionLifecycleCache();
+			clearImageAnnotationCache();
+			clearShortcutUsageCache();
+			clearMultiWindowUsageCache();
 
 			logger.info('Stats database closed', LOG_CONTEXT);
 		}
@@ -289,6 +310,7 @@ export class StatsDB {
 				logger.info('Updated VACUUM timestamp in _meta table', LOG_CONTEXT);
 			}
 		} catch (error) {
+			void captureException(error);
 			// Non-fatal - log and continue
 			logger.warn(`Failed to check/update VACUUM schedule: ${error}`, LOG_CONTEXT);
 		}
@@ -390,6 +412,7 @@ export class StatsDB {
 			// Rotate old backups (keep last 7 days)
 			this.rotateOldBackups(7);
 		} catch (error) {
+			void captureException(error);
 			logger.warn(`Failed to create daily backup: ${error}`, LOG_CONTEXT);
 		}
 	}
@@ -426,6 +449,7 @@ export class StatsDB {
 				logger.info(`Rotated ${removedCount} old daily backup(s)`, LOG_CONTEXT);
 			}
 		} catch (error) {
+			void captureException(error);
 			logger.warn(`Failed to rotate old backups: ${error}`, LOG_CONTEXT);
 		}
 	}
@@ -471,6 +495,7 @@ export class StatsDB {
 			// Sort by date descending (newest first)
 			return backups.sort((a, b) => b.date.localeCompare(a.date));
 		} catch (error) {
+			void captureException(error);
 			logger.warn(`Failed to list backups: ${error}`, LOG_CONTEXT);
 			return [];
 		}
@@ -515,6 +540,7 @@ export class StatsDB {
 
 			return true;
 		} catch (error) {
+			void captureException(error);
 			logger.error(`Failed to restore from backup: ${error}`, LOG_CONTEXT);
 			return false;
 		}
@@ -596,6 +622,7 @@ export class StatsDB {
 						);
 					}
 				} catch (error) {
+					void captureException(error);
 					logger.warn(`Backup ${backup.date} is unreadable: ${error}, trying next...`, LOG_CONTEXT);
 				}
 			}
@@ -633,6 +660,7 @@ export class StatsDB {
 				logger.debug(`Removed stale SHM file: ${shmPath}`, LOG_CONTEXT);
 			}
 		} catch (error) {
+			void captureException(error);
 			logger.warn(`Failed to remove stale WAL/SHM files for ${dbFilePath}: ${error}`, LOG_CONTEXT);
 		}
 	}
@@ -660,6 +688,7 @@ export class StatsDB {
 
 			db.close();
 		} catch (error) {
+			void captureException(error);
 			logger.error(`Failed to open database: ${error}`, LOG_CONTEXT);
 		}
 
@@ -680,6 +709,7 @@ export class StatsDB {
 			logger.info('Database opened after corruption recovery', LOG_CONTEXT);
 			return db;
 		} catch (error) {
+			void captureException(error);
 			logger.error(`Failed to create database after recovery: ${error}`, LOG_CONTEXT);
 			return null;
 		}
@@ -766,6 +796,46 @@ export class StatsDB {
 	}
 
 	// ============================================================================
+	// Image Annotations (delegated)
+	// ============================================================================
+
+	insertImageAnnotation(createdAt: number): string {
+		return insertImageAnnotation(this.database, createdAt);
+	}
+
+	countImageAnnotations(range: StatsTimeRange): number {
+		return countImageAnnotations(this.database, range);
+	}
+
+	// ============================================================================
+	// Shortcut Usage (delegated)
+	// ============================================================================
+
+	incrementShortcutUsage(firedAt: number): string {
+		return incrementShortcutUsage(this.database, firedAt);
+	}
+
+	getShortcutUsageByDay(range: StatsTimeRange): ShortcutUsageDay[] {
+		return getShortcutUsageByDay(this.database, range);
+	}
+
+	getShortcutUsageTotal(range: StatsTimeRange): number {
+		return getShortcutUsageTotal(this.database, range);
+	}
+
+	// ============================================================================
+	// Multi-Window Usage (delegated)
+	// ============================================================================
+
+	recordWindowOpened(openedAt: number, concurrentWindowCount: number): string {
+		return recordWindowOpened(this.database, openedAt, concurrentWindowCount);
+	}
+
+	getMultiWindowUsage(range: StatsTimeRange): MultiWindowUsage {
+		return getMultiWindowUsage(this.database, range);
+	}
+
+	// ============================================================================
 	// Data Management (delegated)
 	// ============================================================================
 
@@ -797,19 +867,16 @@ export class StatsDB {
 	 */
 	getEarliestTimestamp(): number | null {
 		try {
-			// Query the minimum startTime from query_events table
 			const queryResult = this.database
-				.prepare('SELECT MIN(startTime) as earliest FROM query_events')
+				.prepare('SELECT MIN(start_time) as earliest FROM query_events')
 				.get() as { earliest: number | null } | undefined;
 
-			// Query the minimum startTime from auto_run_sessions table
 			const autoRunResult = this.database
-				.prepare('SELECT MIN(startTime) as earliest FROM auto_run_sessions')
+				.prepare('SELECT MIN(start_time) as earliest FROM auto_run_sessions')
 				.get() as { earliest: number | null } | undefined;
 
-			// Query the minimum createdAt from session_lifecycle table
 			const lifecycleResult = this.database
-				.prepare('SELECT MIN(createdAt) as earliest FROM session_lifecycle')
+				.prepare('SELECT MIN(created_at) as earliest FROM session_lifecycle')
 				.get() as { earliest: number | null } | undefined;
 
 			// Find the minimum across all tables
@@ -825,6 +892,7 @@ export class StatsDB {
 
 			return Math.min(...timestamps);
 		} catch (error) {
+			void captureException(error);
 			logger.error(`Failed to get earliest timestamp: ${error}`, LOG_CONTEXT);
 			return null;
 		}

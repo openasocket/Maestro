@@ -10,27 +10,7 @@ import { ShortcutsHelpModal } from '../../../renderer/components/ShortcutsHelpMo
 import { LayerStackProvider } from '../../../renderer/contexts/LayerStackContext';
 import type { Theme, Shortcut, KeyboardMasteryStats } from '../../../renderer/types';
 
-// Create a mock theme for testing
-const createMockTheme = (): Theme => ({
-	id: 'test-theme',
-	name: 'Test Theme',
-	mode: 'dark',
-	colors: {
-		bgMain: '#1a1a1a',
-		bgPanel: '#252525',
-		bgSidebar: '#202020',
-		bgActivity: '#2d2d2d',
-		textMain: '#ffffff',
-		textDim: '#888888',
-		accent: '#0066ff',
-		accentForeground: '#ffffff',
-		border: '#333333',
-		highlight: '#0066ff33',
-		success: '#00aa00',
-		warning: '#ffaa00',
-		error: '#ff0000',
-	},
-});
+import { createMockTheme } from '../../helpers/mockTheme';
 
 // Create mock shortcuts for testing
 const createMockShortcuts = (): Record<string, Shortcut> => ({
@@ -115,7 +95,7 @@ describe('ShortcutsHelpModal', () => {
 				</TestWrapper>
 			);
 
-			const closeButton = screen.getByRole('button');
+			const closeButton = screen.getAllByRole('button')[0];
 			expect(closeButton).toBeInTheDocument();
 		});
 
@@ -162,7 +142,7 @@ describe('ShortcutsHelpModal', () => {
 				</TestWrapper>
 			);
 
-			const closeButton = screen.getByRole('button');
+			const closeButton = screen.getAllByRole('button')[0];
 			fireEvent.click(closeButton);
 
 			expect(mockOnClose).toHaveBeenCalledTimes(1);
@@ -291,7 +271,7 @@ describe('ShortcutsHelpModal', () => {
 					<ShortcutsHelpModal theme={mockTheme} shortcuts={mockShortcuts} onClose={mockOnClose} />
 				</TestWrapper>
 			);
-			const modalContent = container.querySelector('[style*="width: 400px"]');
+			const modalContent = container.querySelector('[style*="width: min(calc(400px"]');
 			expect(modalContent).toHaveStyle({
 				backgroundColor: mockTheme.colors.bgSidebar,
 				borderColor: mockTheme.colors.border,
@@ -368,7 +348,7 @@ describe('ShortcutsHelpModal', () => {
 			expect(backdrop).toBeInTheDocument();
 
 			// Check dialog width (Modal component uses inline style instead of Tailwind class)
-			const dialogBox = container.querySelector('[style*="width: 400px"]');
+			const dialogBox = container.querySelector('[style*="width: min(calc(400px"]');
 			expect(dialogBox).toBeInTheDocument();
 		});
 
@@ -428,6 +408,89 @@ describe('ShortcutsHelpModal', () => {
 
 			expect(screen.getByText('New Session')).toBeInTheDocument();
 			expect(screen.getByText('Close Session')).toBeInTheDocument();
+		});
+	});
+
+	describe('Window Scope (multi-window)', () => {
+		const windowScopedShortcuts: Record<string, Shortcut> = {
+			cycleNext: {
+				id: 'cycleNext',
+				label: 'Next Agent',
+				keys: ['Meta', ']'],
+				windowScoped: true,
+			},
+			settings: {
+				id: 'settings',
+				label: 'Open Settings',
+				keys: ['Meta', ','],
+			},
+		};
+
+		it('renders a "Window" badge for window-scoped shortcuts', () => {
+			render(
+				<TestWrapper>
+					<ShortcutsHelpModal
+						theme={mockTheme}
+						shortcuts={windowScopedShortcuts}
+						tabShortcuts={{}}
+						onClose={mockOnClose}
+					/>
+				</TestWrapper>
+			);
+
+			// The window-scoped row carries a badge; the inline footer reference
+			// uses the same label, so there should be at least one (badge + note).
+			expect(screen.getAllByText('Window').length).toBeGreaterThan(0);
+		});
+
+		it('does not render a badge in the row for a non-window-scoped shortcut', () => {
+			render(
+				<TestWrapper>
+					<ShortcutsHelpModal
+						theme={mockTheme}
+						shortcuts={{ settings: windowScopedShortcuts.settings }}
+						tabShortcuts={{}}
+						onClose={mockOnClose}
+					/>
+				</TestWrapper>
+			);
+
+			// "Open Settings" is not window-scoped. The only "Window" text present is
+			// the footer explanation badge - i.e. exactly one, never two.
+			expect(screen.getAllByText('Window')).toHaveLength(1);
+		});
+
+		it('documents the agent-level Move to Window action', () => {
+			render(
+				<TestWrapper>
+					<ShortcutsHelpModal
+						theme={mockTheme}
+						shortcuts={windowScopedShortcuts}
+						tabShortcuts={{}}
+						onClose={mockOnClose}
+					/>
+				</TestWrapper>
+			);
+
+			expect(screen.getByText(/right-click it in the sidebar/)).toBeInTheDocument();
+			expect(screen.getByText(/Move to Window/)).toBeInTheDocument();
+		});
+
+		it('explains that window-scoped shortcuts focus the owning window', () => {
+			render(
+				<TestWrapper>
+					<ShortcutsHelpModal
+						theme={mockTheme}
+						shortcuts={windowScopedShortcuts}
+						tabShortcuts={{}}
+						onClose={mockOnClose}
+					/>
+				</TestWrapper>
+			);
+
+			expect(
+				screen.getByText(/focuses that window instead of moving the agent/)
+			).toBeInTheDocument();
 		});
 	});
 

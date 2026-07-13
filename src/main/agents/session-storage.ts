@@ -15,14 +15,11 @@
  */
 
 import type { ToolType, SshRemoteConfig } from '../../shared/types';
+import type { ModelTokenUsage } from '../../shared/tokenUsage';
+import { isValidAgentId } from '../../shared/agentIds';
 import { logger } from '../utils/logger';
 
 const LOG_CONTEXT = '[AgentSessionStorage]';
-
-/**
- * Known agent IDs that have session storage support
- */
-const KNOWN_AGENT_IDS: ToolType[] = ['claude-code', 'codex', 'opencode', 'factory-droid'];
 
 /**
  * Session origin types - indicates how the session was created
@@ -40,6 +37,13 @@ export interface SessionMessage {
 	timestamp: string;
 	uuid: string;
 	toolUse?: unknown;
+	/**
+	 * Base64 data URLs for any image content blocks attached to the message
+	 * (e.g. user-pasted screenshots). Reconstructed from the transcript so a
+	 * resumed/reopened tab can re-render images instead of falling back to the
+	 * agent's synthetic `[Image: ...]` text placeholder.
+	 */
+	images?: string[];
 }
 
 /**
@@ -60,6 +64,14 @@ export interface AgentSessionInfo {
 	outputTokens: number;
 	cacheReadTokens: number;
 	cacheCreationTokens: number;
+	/**
+	 * Per-model token/cost split summing to the session totals above. Optional
+	 * because most callers only need the totals; populated by storages that can
+	 * recover the model id from their transcript (claude/opencode/copilot inline,
+	 * codex/factory as a single session-model bucket) for the Cost & Tokens
+	 * dashboard. Absent means "not computed", not "no models".
+	 */
+	byModel?: ModelTokenUsage[];
 	durationSeconds: number;
 	origin?: AgentSessionOrigin;
 	sessionName?: string;
@@ -251,7 +263,7 @@ export function getSessionStorage(agentId: ToolType | string): AgentSessionStora
 
 	if (!storage) {
 		// Warn if this is an unrecognized agent ID (not one of our known agents)
-		if (!KNOWN_AGENT_IDS.includes(agentId as ToolType) && agentId !== 'terminal') {
+		if (!isValidAgentId(agentId)) {
 			logger.warn(`Unrecognized agent ID requested for session storage: "${agentId}"`, LOG_CONTEXT);
 		}
 	}

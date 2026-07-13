@@ -14,22 +14,26 @@ import * as path from 'path';
 import { app } from 'electron';
 import Store from 'electron-store';
 import { v4 as uuidv4 } from 'uuid';
-import type { ToolType } from '../../shared/types';
 import type { ModeratorConfig, GroupChatHistoryEntry } from '../../shared/group-chat-types';
+import { hasCapability } from '../agents/capabilities';
+import { logger } from '../utils/logger';
+import { atomicWriteJson, createKeyedWriteQueue } from '../utils/atomic-json-store';
+
+// ---------------------------------------------------------------------------
+// Write serialization & atomic file I/O
+// ---------------------------------------------------------------------------
 
 /**
- * Valid agent IDs that can be used as moderators.
- * Must match available agents from agent-detector.
+ * Per-chat write queue. Serializes all metadata writes for a given group chat
+ * ID so concurrent callers (usage-listener, session-id-listener, router) don't
+ * race on the same metadata.json file. Backed by the shared keyed-write-queue
+ * utility; `atomicWriteJson` provides the partial-read-safe file write.
  */
-const VALID_MODERATOR_AGENT_IDS: ToolType[] = ['claude-code', 'codex', 'opencode', 'factory-droid'];
+const groupChatWriteQueue = createKeyedWriteQueue();
+const enqueueWrite = <T>(chatId: string, fn: () => Promise<T>): Promise<T> =>
+	groupChatWriteQueue.enqueue(chatId, fn);
 
-/**
- * Bootstrap settings store for custom storage location.
- * This is the same store used in main/index.ts for settings sync.
- */
-interface BootstrapSettings {
-	customSyncPath?: string;
-}
+import type { BootstrapSettings } from '../stores/types';
 
 const bootstrapStore = new Store<BootstrapSettings>({
 	name: 'maestro-bootstrap',
@@ -81,6 +85,7 @@ export interface GroupChat {
 	participants: GroupChatParticipant[];
 	logPath: string;
 	imagesDir: string;
+	archived?: boolean;
 }
 
 /**
@@ -96,8 +101,14 @@ export type GroupChatUpdate = Partial<
 		| 'moderatorConfig'
 		| 'participants'
 		| 'updatedAt'
+		| 'archived'
 	>
 >;
+
+export interface ParticipantRemovalResult {
+	chat: GroupChat;
+	removed: boolean;
+}
 
 /**
  * Get the Maestro config directory path.
@@ -112,7 +123,7 @@ function getConfigDir(): string {
 /**
  * Get the group chats directory path
  */
-export function getGroupChatsDir(): string {
+function getGroupChatsDir(): string {
 	return path.join(getConfigDir(), 'group-chats');
 }
 
@@ -145,15 +156,18 @@ function getImagesDir(id: string): string {
 }
 
 /**
- * Sanitizes a chat name by removing invalid filesystem characters.
+ * Normalizes a chat display name. The on-disk directory is keyed by UUID, not
+ * the name (see getGroupChatDir), so filesystem-invalid characters like `/` are
+ * allowed here - the same as regular agent names. We only strip control
+ * characters, trim, cap the length, and fall back when empty.
  *
  * @param name - Raw chat name
- * @returns Sanitized chat name
+ * @returns Normalized chat name
  */
 function sanitizeChatName(name: string): string {
 	return (
 		name
-			.replace(/[<>:"/\\|?*\x00-\x1f]/g, '') // Remove filesystem-invalid chars
+			.replace(/[\x00-\x1f]/g, '') // Strip control chars only; keep printable special chars
 			.trim()
 			.slice(0, 255) || 'Untitled Chat'
 	); // Limit length, fallback if empty
@@ -173,10 +187,10 @@ export async function createGroupChat(
 	moderatorAgentId: string,
 	moderatorConfig?: ModeratorConfig
 ): Promise<GroupChat> {
-	// Validate agent ID against whitelist
-	if (!VALID_MODERATOR_AGENT_IDS.includes(moderatorAgentId as ToolType)) {
+	// Validate agent ID supports group chat moderation
+	if (!hasCapability(moderatorAgentId, 'supportsGroupChatModeration')) {
 		throw new Error(
-			`Invalid moderator agent ID: ${moderatorAgentId}. Must be one of: ${VALID_MODERATOR_AGENT_IDS.join(', ')}`
+			`Invalid moderator agent ID: ${moderatorAgentId}. Agent does not support group chat moderation.`
 		);
 	}
 
@@ -210,9 +224,9 @@ export async function createGroupChat(
 		imagesDir,
 	};
 
-	// Write metadata
+	// Write metadata (atomic: write tmp then rename)
 	const metadataPath = getMetadataPath(id);
-	await fs.writeFile(metadataPath, JSON.stringify(groupChat, null, 2), 'utf-8');
+	await atomicWriteJson(metadataPath, groupChat);
 
 	return groupChat;
 }
@@ -276,27 +290,33 @@ export async function listGroupChats(): Promise<GroupChat[]> {
 
 /**
  * Deletes a group chat and all its data.
+ * Serialized through the write queue to prevent delete-during-write races.
  * Retries on EPERM/EBUSY errors (common on Windows with OneDrive/antivirus file locks).
  *
  * @param id - The group chat ID to delete
  */
-export async function deleteGroupChat(id: string): Promise<void> {
-	const chatDir = getGroupChatDir(id);
-	const maxRetries = 3;
-	for (let attempt = 0; attempt <= maxRetries; attempt++) {
-		try {
-			await fs.rm(chatDir, { recursive: true, force: true });
-			return;
-		} catch (err) {
-			const code = (err as NodeJS.ErrnoException).code;
-			if ((code === 'EPERM' || code === 'EBUSY') && attempt < maxRetries) {
-				// Wait before retrying - file locks from OneDrive/antivirus may release
-				await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
-				continue;
+export function deleteGroupChat(id: string): Promise<void> {
+	return enqueueWrite(id, async () => {
+		const chatDir = getGroupChatDir(id);
+		const maxRetries = 5;
+		for (let attempt = 0; attempt <= maxRetries; attempt++) {
+			try {
+				await fs.rm(chatDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+				return;
+			} catch (err) {
+				const code = (err as NodeJS.ErrnoException).code;
+				if (
+					(code === 'EPERM' || code === 'EBUSY' || code === 'ENOTEMPTY') &&
+					attempt < maxRetries
+				) {
+					// Exponential backoff — file locks from OneDrive/antivirus may need time to release
+					await new Promise((resolve) => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
+					continue;
+				}
+				throw err;
 			}
-			throw err;
 		}
-	}
+	});
 }
 
 /**
@@ -307,22 +327,26 @@ export async function deleteGroupChat(id: string): Promise<void> {
  * @returns The updated GroupChat object
  * @throws Error if the group chat doesn't exist
  */
-export async function updateGroupChat(id: string, updates: GroupChatUpdate): Promise<GroupChat> {
-	const chat = await loadGroupChat(id);
-	if (!chat) {
-		throw new Error(`Group chat not found: ${id}`);
-	}
+export function updateGroupChat(id: string, updates: GroupChatUpdate): Promise<GroupChat> {
+	return enqueueWrite(id, async () => {
+		const chat = await loadGroupChat(id);
+		if (!chat) {
+			throw new Error(`Group chat not found: ${id}`);
+		}
 
-	const updated: GroupChat = {
-		...chat,
-		...updates,
-		updatedAt: Date.now(),
-	};
+		const updated: GroupChat = {
+			...chat,
+			...updates,
+			// Keep renames consistent with creation: normalize the display name.
+			...(updates.name !== undefined ? { name: sanitizeChatName(updates.name) } : {}),
+			updatedAt: Date.now(),
+		};
 
-	const metadataPath = getMetadataPath(id);
-	await fs.writeFile(metadataPath, JSON.stringify(updated, null, 2), 'utf-8');
+		const metadataPath = getMetadataPath(id);
+		await atomicWriteJson(metadataPath, updated);
 
-	return updated;
+		return updated;
+	});
 }
 
 /**
@@ -332,25 +356,32 @@ export async function updateGroupChat(id: string, updates: GroupChatUpdate): Pro
  * @param participant - The participant to add
  * @returns The updated GroupChat object
  */
-export async function addParticipantToChat(
+export function addParticipantToChat(
 	id: string,
 	participant: GroupChatParticipant
 ): Promise<GroupChat> {
-	const chat = await loadGroupChat(id);
-	if (!chat) {
-		throw new Error(`Group chat not found: ${id}`);
-	}
+	return enqueueWrite(id, async () => {
+		const chat = await loadGroupChat(id);
+		if (!chat) {
+			throw new Error(`Group chat not found: ${id}`);
+		}
 
-	// Check for duplicate names
-	if (chat.participants.some((p) => p.name === participant.name)) {
-		throw new Error(`Participant with name '${participant.name}' already exists`);
-	}
+		// Idempotent: if participant already exists, return current state
+		if (chat.participants.some((p) => p.name === participant.name)) {
+			return chat;
+		}
 
-	const updated = await updateGroupChat(id, {
-		participants: [...chat.participants, participant],
+		const updated: GroupChat = {
+			...chat,
+			participants: [...chat.participants, participant],
+			updatedAt: Date.now(),
+		};
+
+		const metadataPath = getMetadataPath(id);
+		await atomicWriteJson(metadataPath, updated);
+
+		return updated;
 	});
-
-	return updated;
 }
 
 /**
@@ -360,20 +391,44 @@ export async function addParticipantToChat(
  * @param participantName - The name of the participant to remove
  * @returns The updated GroupChat object
  */
-export async function removeParticipantFromChat(
+export function removeParticipantFromChat(id: string, participantName: string): Promise<GroupChat> {
+	return removeParticipantFromChatWithResult(id, participantName).then((result) => result.chat);
+}
+
+/**
+ * Remove a participant from a group chat by name and report whether storage changed.
+ *
+ * @param id - The group chat ID
+ * @param participantName - The name of the participant to remove
+ * @returns The updated group chat and whether a participant was removed
+ */
+export function removeParticipantFromChatWithResult(
 	id: string,
 	participantName: string
-): Promise<GroupChat> {
-	const chat = await loadGroupChat(id);
-	if (!chat) {
-		throw new Error(`Group chat not found: ${id}`);
-	}
+): Promise<ParticipantRemovalResult> {
+	return enqueueWrite(id, async () => {
+		const chat = await loadGroupChat(id);
+		if (!chat) {
+			throw new Error(`Group chat not found: ${id}`);
+		}
 
-	const updated = await updateGroupChat(id, {
-		participants: chat.participants.filter((p) => p.name !== participantName),
+		const participants = chat.participants.filter((p) => p.name !== participantName);
+		const removed = participants.length !== chat.participants.length;
+		if (!removed) {
+			return { chat, removed };
+		}
+
+		const updated: GroupChat = {
+			...chat,
+			participants,
+			updatedAt: Date.now(),
+		};
+
+		const metadataPath = getMetadataPath(id);
+		await atomicWriteJson(metadataPath, updated);
+
+		return { chat: updated, removed };
 	});
-
-	return updated;
 }
 
 /**
@@ -420,29 +475,40 @@ export type ParticipantUpdate = Partial<
  * @param updates - Partial update object for stats
  * @returns The updated GroupChat object
  */
-export async function updateParticipant(
+export function updateParticipant(
 	id: string,
 	participantName: string,
 	updates: ParticipantUpdate
 ): Promise<GroupChat> {
-	const chat = await loadGroupChat(id);
-	if (!chat) {
-		throw new Error(`Group chat not found: ${id}`);
-	}
+	return enqueueWrite(id, async () => {
+		const chat = await loadGroupChat(id);
+		if (!chat) {
+			throw new Error(`Group chat not found: ${id}`);
+		}
 
-	const participantIndex = chat.participants.findIndex((p) => p.name === participantName);
-	if (participantIndex === -1) {
-		throw new Error(`Participant '${participantName}' not found in group chat`);
-	}
+		const participantIndex = chat.participants.findIndex((p) => p.name === participantName);
+		if (participantIndex === -1) {
+			throw new Error(`Participant '${participantName}' not found in group chat`);
+		}
 
-	// Update the participant with new stats
-	const updatedParticipants = [...chat.participants];
-	updatedParticipants[participantIndex] = {
-		...updatedParticipants[participantIndex],
-		...updates,
-	};
+		// Update the participant with new stats
+		const updatedParticipants = [...chat.participants];
+		updatedParticipants[participantIndex] = {
+			...updatedParticipants[participantIndex],
+			...updates,
+		};
 
-	return updateGroupChat(id, { participants: updatedParticipants });
+		const updated: GroupChat = {
+			...chat,
+			participants: updatedParticipants,
+			updatedAt: Date.now(),
+		};
+
+		const metadataPath = getMetadataPath(id);
+		await atomicWriteJson(metadataPath, updated);
+
+		return updated;
+	});
 }
 
 // ============================================================================
@@ -510,7 +576,7 @@ export async function getGroupChatHistory(groupChatId: string): Promise<GroupCha
 					entries.push(JSON.parse(line));
 				} catch {
 					// Skip malformed lines
-					console.warn(`[GroupChatHistory] Skipping malformed line: ${line.substring(0, 50)}...`);
+					logger.warn(`[GroupChatHistory] Skipping malformed line: ${line.substring(0, 50)}...`);
 				}
 			}
 		}

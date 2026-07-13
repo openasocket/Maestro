@@ -16,34 +16,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, waitFor } from '@testing-library/react';
 import { WizardConversationView } from '../../../../renderer/components/InlineWizard/WizardConversationView';
 import type { WizardMessageBubbleMessage } from '../../../../renderer/components/InlineWizard/WizardMessageBubble';
-import type { Theme } from '../../../../renderer/types';
 
+import { mockTheme } from '../../../helpers/mockTheme';
 // Mock theme for testing
-const mockTheme: Theme = {
-	id: 'test-theme',
-	name: 'Test Theme',
-	mode: 'dark',
-	colors: {
-		background: '#1a1a1a',
-		backgroundDim: '#0d0d0d',
-		backgroundBright: '#2a2a2a',
-		bgMain: '#1a1a1a',
-		bgSidebar: '#141414',
-		bgActivity: '#333333',
-		textMain: '#ffffff',
-		textDim: '#888888',
-		textMuted: '#666666',
-		textBright: '#ffffff',
-		border: '#333333',
-		borderBright: '#444444',
-		success: '#00ff00',
-		warning: '#ffff00',
-		error: '#ff0000',
-		accent: '#007bff',
-		accentForeground: '#ffffff',
-		accentText: '#66b2ff',
-	},
-};
 
 // Helper to create test messages
 function createMessage(
@@ -58,9 +33,9 @@ function createMessage(
 	};
 }
 
-// Mock scrollIntoView
-const mockScrollIntoView = vi.fn();
-Element.prototype.scrollIntoView = mockScrollIntoView;
+// Mock scrollTo on the container (used instead of scrollIntoView)
+const mockScrollTo = vi.fn();
+Element.prototype.scrollTo = mockScrollTo;
 
 // Mock filler phrases
 vi.mock('../../../../renderer/components/Wizard/services/fillerPhrases', () => ({
@@ -350,9 +325,9 @@ describe('WizardConversationView', () => {
 	});
 
 	describe('auto-scroll', () => {
-		it('calls scrollIntoView on initial render with messages', () => {
+		it('calls scrollTo on initial render with messages', () => {
 			render(<WizardConversationView theme={mockTheme} conversationHistory={[createMessage()]} />);
-			expect(mockScrollIntoView).toHaveBeenCalled();
+			expect(mockScrollTo).toHaveBeenCalled();
 		});
 
 		it('has scroll anchor element', () => {
@@ -368,7 +343,7 @@ describe('WizardConversationView', () => {
 				/>
 			);
 
-			const initialCallCount = mockScrollIntoView.mock.calls.length;
+			const initialCallCount = mockScrollTo.mock.calls.length;
 
 			rerender(
 				<WizardConversationView
@@ -377,7 +352,7 @@ describe('WizardConversationView', () => {
 				/>
 			);
 
-			expect(mockScrollIntoView.mock.calls.length).toBeGreaterThan(initialCallCount);
+			expect(mockScrollTo.mock.calls.length).toBeGreaterThan(initialCallCount);
 		});
 
 		it('scrolls when loading state changes', () => {
@@ -385,13 +360,90 @@ describe('WizardConversationView', () => {
 				<WizardConversationView theme={mockTheme} conversationHistory={[]} isLoading={false} />
 			);
 
-			const initialCallCount = mockScrollIntoView.mock.calls.length;
+			const initialCallCount = mockScrollTo.mock.calls.length;
 
 			rerender(
 				<WizardConversationView theme={mockTheme} conversationHistory={[]} isLoading={true} />
 			);
 
-			expect(mockScrollIntoView.mock.calls.length).toBeGreaterThan(initialCallCount);
+			expect(mockScrollTo.mock.calls.length).toBeGreaterThan(initialCallCount);
+		});
+
+		it('does not auto-scroll when user has scrolled up', () => {
+			const { rerender } = render(
+				<WizardConversationView
+					theme={mockTheme}
+					conversationHistory={[createMessage({ id: 'msg-1', role: 'assistant' })]}
+				/>
+			);
+
+			// Flush the rAF callback from the initial programmatic scroll so the
+			// isProgrammaticScrollRef guard is reset before we simulate a user scroll
+			act(() => {
+				vi.advanceTimersByTime(16);
+			});
+
+			const container = screen.getByTestId('wizard-conversation-view');
+
+			// Let the initial programmatic scroll guard reset before simulating user scroll
+			act(() => {
+				vi.advanceTimersByTime(20);
+			});
+
+			// Simulate user scrolling up (not near bottom)
+			Object.defineProperty(container, 'scrollHeight', { value: 1000, configurable: true });
+			Object.defineProperty(container, 'clientHeight', { value: 400, configurable: true });
+			Object.defineProperty(container, 'scrollTop', { value: 200, configurable: true });
+			container.dispatchEvent(new Event('scroll'));
+
+			mockScrollTo.mockClear();
+
+			// Add a new assistant message
+			rerender(
+				<WizardConversationView
+					theme={mockTheme}
+					conversationHistory={[
+						createMessage({ id: 'msg-1', role: 'assistant' }),
+						createMessage({ id: 'msg-2', role: 'assistant', content: 'New message' }),
+					]}
+				/>
+			);
+
+			// Should NOT have scrolled because user scrolled up
+			expect(mockScrollTo).not.toHaveBeenCalled();
+		});
+
+		it('force-scrolls when user sends a new message', () => {
+			const { rerender } = render(
+				<WizardConversationView
+					theme={mockTheme}
+					conversationHistory={[createMessage({ id: 'msg-1', role: 'assistant' })]}
+				/>
+			);
+
+			const container = screen.getByTestId('wizard-conversation-view');
+
+			// Simulate user scrolled up
+			Object.defineProperty(container, 'scrollHeight', { value: 1000, configurable: true });
+			Object.defineProperty(container, 'clientHeight', { value: 400, configurable: true });
+			Object.defineProperty(container, 'scrollTop', { value: 200, configurable: true });
+			container.dispatchEvent(new Event('scroll'));
+
+			mockScrollTo.mockClear();
+
+			// Add a new USER message (sent by user)
+			rerender(
+				<WizardConversationView
+					theme={mockTheme}
+					conversationHistory={[
+						createMessage({ id: 'msg-1', role: 'assistant' }),
+						createMessage({ id: 'msg-2', role: 'user', content: 'My message' }),
+					]}
+				/>
+			);
+
+			// Should scroll because user sent a message
+			expect(mockScrollTo).toHaveBeenCalled();
 		});
 	});
 

@@ -1,4 +1,6 @@
+import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen } from '@testing-library/react';
 
 // Mock react-syntax-highlighter before importing the module under test
 vi.mock('react-syntax-highlighter', () => ({
@@ -6,16 +8,35 @@ vi.mock('react-syntax-highlighter', () => ({
 }));
 vi.mock('react-syntax-highlighter/dist/esm/styles/prism', () => ({
 	vscDarkPlus: {},
+	vs: {},
+}));
+
+// Mock openUrl so link-click tests can assert the exact options passed through
+// (specifically the translated `ctrlKey` modifier) without depending on the
+// settings store's useSystemBrowser default or whether an active session
+// exists. See bug #1060: cmd-click (metaKey) on macOS must translate to the
+// same ctrlKey:true inversion as ctrl-click.
+const { mockOpenUrl } = vi.hoisted(() => ({ mockOpenUrl: vi.fn() }));
+vi.mock('../../../renderer/utils/openUrl', () => ({
+	openUrl: mockOpenUrl,
+	openInSystemBrowser: vi.fn(),
+	openInMaestroBrowser: vi.fn(),
 }));
 
 import {
 	generateProseStyles,
 	generateAutoRunProseStyles,
 	generateTerminalProseStyles,
+	generateInlineWizardPreviewProseStyles,
 	generateDiffViewStyles,
+	createWizardBubbleMarkdownComponents,
+	createReleaseNotesMarkdownComponents,
+	createMarkdownComponents,
+	REMARK_GFM_PLUGINS,
 } from '../../../renderer/utils/markdownConfig';
 import type { Theme } from '../../../shared/theme-types';
 
+import { mockTheme } from '../../helpers/mockTheme';
 /**
  * Tests for markdown configuration utilities.
  *
@@ -29,27 +50,6 @@ import type { Theme } from '../../../shared/theme-types';
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
-
-const mockTheme: Theme = {
-	id: 'dracula',
-	name: 'Dracula',
-	mode: 'dark',
-	colors: {
-		textMain: '#ffffff',
-		textDim: '#888888',
-		accent: '#0066ff',
-		accentDim: 'rgba(0, 102, 255, 0.2)',
-		accentText: '#0066ff',
-		accentForeground: '#ffffff',
-		success: '#00cc00',
-		warning: '#ffaa00',
-		error: '#ff0000',
-		bgMain: '#1a1a1a',
-		bgSidebar: '#2a2a2a',
-		bgActivity: '#333333',
-		border: '#444444',
-	},
-};
 
 // ---------------------------------------------------------------------------
 // generateProseStyles
@@ -93,6 +93,12 @@ describe('generateProseStyles', () => {
 			expect(css).toContain('.prose td');
 		});
 
+		it('should allow inline code to wrap when it cannot break cleanly', () => {
+			const css = generateProseStyles({ theme: mockTheme });
+			const codeRule = css.match(/\.prose code \{[^}]*\}/)?.[0] ?? '';
+			expect(codeRule).toContain('overflow-wrap: anywhere');
+		});
+
 		it('should include blockquote, link, and hr rules', () => {
 			const css = generateProseStyles({ theme: mockTheme });
 			expect(css).toContain('.prose blockquote');
@@ -123,7 +129,9 @@ describe('generateProseStyles', () => {
 			// Standard heading margin is 0.67em 0
 			expect(css).toContain('margin: 0.67em 0 !important');
 			// Standard paragraph margin is 0.5em 0
-			expect(css).toContain(`.prose p { color: ${mockTheme.colors.textMain}; margin: 0.5em 0 !important`);
+			expect(css).toContain(
+				`.prose p { color: ${mockTheme.colors.textMain}; margin: 0.5em 0 !important`
+			);
 		});
 
 		it('should not include first-child/last-child overrides by default (compactSpacing defaults to false)', () => {
@@ -180,7 +188,9 @@ describe('generateProseStyles', () => {
 		it('should use smaller heading margins when true', () => {
 			const css = generateProseStyles({ theme: mockTheme, compactSpacing: true });
 			// Compact heading margin is 0.25em 0
-			expect(css).toContain(`.prose h1 { color: ${mockTheme.colors.textMain}; font-size: 2em; font-weight: bold; margin: 0.25em 0 !important`);
+			expect(css).toContain(
+				`.prose h1 { color: ${mockTheme.colors.textMain}; font-size: 2em; font-weight: bold; margin: 0.25em 0 !important`
+			);
 		});
 
 		it('should use zero paragraph margin when true', () => {
@@ -211,6 +221,23 @@ describe('generateProseStyles', () => {
 		it('should include nested list margin override when true', () => {
 			const css = generateProseStyles({ theme: mockTheme, compactSpacing: true });
 			expect(css).toContain('.prose li ul, .prose li ol { margin: 0 !important');
+		});
+
+		it('should include baseline alignment selectors for styled first-child content inside list-item paragraphs', () => {
+			const css = generateProseStyles({ theme: mockTheme, compactSpacing: true });
+			expect(css).toContain(
+				'.prose li > p:first-child > strong:first-child, .prose li > p:first-child > b:first-child, .prose li > p:first-child > em:first-child, .prose li > p:first-child > code:first-child, .prose li > p:first-child > a:first-child { vertical-align: baseline; line-height: inherit; }'
+			);
+		});
+
+		it('should normalize only first list-item paragraph inline and keep subsequent paragraphs block-level', () => {
+			const css = generateProseStyles({ theme: mockTheme, compactSpacing: false });
+			expect(css).toContain(
+				'.prose li > p:first-child { margin: 0 !important; display: inline; vertical-align: baseline; line-height: inherit; }'
+			);
+			expect(css).toContain(
+				'.prose li > p:not(:first-child) { display: block; margin: 0.5em 0 0 !important; }'
+			);
 		});
 
 		it('should use 3px border-left on blockquote when compact', () => {
@@ -320,9 +347,9 @@ describe('generateProseStyles', () => {
 			expect(css).toContain(`color: ${mockTheme.colors.textDim}`);
 		});
 
-		it('should inject accent into link color', () => {
+		it('should inject accentText into link color', () => {
 			const css = generateProseStyles({ theme: mockTheme });
-			expect(css).toContain(`.prose a { color: ${mockTheme.colors.accent}`);
+			expect(css).toContain(`.prose a { color: ${mockTheme.colors.accentText}`);
 		});
 
 		it('should inject bgActivity into code background', () => {
@@ -432,7 +459,9 @@ describe('generateAutoRunProseStyles', () => {
 		expect(css).toContain('margin: 0.67em 0 !important');
 		// Should not have compact first-child/last-child overrides
 		// (the raw string check: compact adds " > *:first-child" but standard does not)
-		expect(css).not.toContain('.autorun-panel .prose > *:first-child { margin-top: 0 !important; }');
+		expect(css).not.toContain(
+			'.autorun-panel .prose > *:first-child { margin-top: 0 !important; }'
+		);
 	});
 
 	it('should produce identical output to generateProseStyles with matching options', () => {
@@ -490,7 +519,9 @@ describe('generateTerminalProseStyles', () => {
 
 	it('should use bgSidebar for th background', () => {
 		const css = generateTerminalProseStyles(mockTheme, scopeSelector);
-		expect(css).toContain(`${scopeSelector} .prose th { background-color: ${mockTheme.colors.bgSidebar}`);
+		expect(css).toContain(
+			`${scopeSelector} .prose th { background-color: ${mockTheme.colors.bgSidebar}`
+		);
 	});
 
 	it('should include compact spacing (first-child/last-child overrides)', () => {
@@ -512,7 +543,12 @@ describe('generateTerminalProseStyles', () => {
 
 	it('should include li inline styling rules', () => {
 		const css = generateTerminalProseStyles(mockTheme, scopeSelector);
-		expect(css).toContain(`${scopeSelector} .prose li > p { margin: 0 !important; display: inline; }`);
+		expect(css).toContain(
+			`${scopeSelector} .prose li > p:first-child { margin: 0 !important; display: inline; vertical-align: baseline; line-height: inherit; }`
+		);
+		expect(css).toContain(
+			`${scopeSelector} .prose li > p:not(:first-child) { display: block; margin: 0.5em 0 0 !important; }`
+		);
 	});
 
 	it('should include marker styling for list items', () => {
@@ -520,9 +556,10 @@ describe('generateTerminalProseStyles', () => {
 		expect(css).toContain(`${scopeSelector} .prose li::marker { font-weight: normal; }`);
 	});
 
-	it('should include extra vertical-align rule for first-child strong/b/em/code/a in li', () => {
+	it('should include extra vertical-align rule for styled first-child content in list items', () => {
 		const css = generateTerminalProseStyles(mockTheme, scopeSelector);
 		expect(css).toContain(`${scopeSelector} .prose li > strong:first-child`);
+		expect(css).toContain(`${scopeSelector} .prose li > p:first-child > strong:first-child`);
 		expect(css).toContain('vertical-align: baseline');
 	});
 
@@ -620,5 +657,361 @@ describe('generateDiffViewStyles', () => {
 		expect(css).toContain('background-color: #aabbcc !important');
 		expect(css).toContain('color: #ddeeff !important');
 		expect(css).toContain('color: #ff00ff !important');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// generateInlineWizardPreviewProseStyles
+// ---------------------------------------------------------------------------
+
+describe('generateInlineWizardPreviewProseStyles', () => {
+	it('should support both same-element and descendant scoped prose selectors', () => {
+		const css = generateInlineWizardPreviewProseStyles(mockTheme, '.doc-gen-view', 'document');
+		expect(css).toContain('.doc-gen-view.prose, .doc-gen-view .prose');
+	});
+
+	it('should scope Bionify selectors to descendant prose blocks only', () => {
+		const css = generateInlineWizardPreviewProseStyles(mockTheme, '.doc-gen-view', 'document');
+		expect(css).toContain('.doc-gen-view .prose .bionify-word');
+		expect(css).not.toContain('.doc-gen-view.prose, .doc-gen-view .prose .bionify-word');
+	});
+
+	it('should normalize list item first paragraph inline and preserve subsequent paragraphs as blocks', () => {
+		const css = generateInlineWizardPreviewProseStyles(mockTheme, '.doc-gen-view', 'document');
+		expect(css).toContain(
+			'.doc-gen-view.prose, .doc-gen-view .prose li > p:first-child { margin: 0 !important; display: inline; vertical-align: baseline; line-height: inherit; }'
+		);
+		expect(css).toContain(
+			'.doc-gen-view.prose, .doc-gen-view .prose li > p:not(:first-child) { display: block; margin: 0.5em 0 0 !important; }'
+		);
+	});
+
+	it('should include list marker alignment rules for styled first-child content', () => {
+		const css = generateInlineWizardPreviewProseStyles(mockTheme, '.doc-gen-view', 'document');
+		expect(css).toContain('.doc-gen-view.prose, .doc-gen-view .prose li > strong:first-child');
+		expect(css).toContain(
+			'.doc-gen-view.prose, .doc-gen-view .prose li > p:first-child > strong:first-child'
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Shared Markdown Presets
+// ---------------------------------------------------------------------------
+
+describe('shared markdown presets', () => {
+	it('should export a shared remark-gfm plugin array', () => {
+		expect(Array.isArray(REMARK_GFM_PLUGINS)).toBe(true);
+		expect(REMARK_GFM_PLUGINS.length).toBeGreaterThan(0);
+	});
+
+	it('should create wizard bubble markdown components', () => {
+		const components = createWizardBubbleMarkdownComponents(mockTheme);
+		expect(components.p).toBeDefined();
+		expect(components.ul).toBeDefined();
+		expect(components.ol).toBeDefined();
+		expect(components.li).toBeDefined();
+		expect(components.code).toBeDefined();
+		expect(components.pre).toBeDefined();
+		expect(components.a).toBeDefined();
+		expect(components.h1).toBeDefined();
+		expect(components.h2).toBeDefined();
+		expect(components.h3).toBeDefined();
+		expect(components.blockquote).toBeDefined();
+	});
+
+	it('should create release notes markdown components', () => {
+		const components = createReleaseNotesMarkdownComponents(mockTheme);
+		expect(components.h1).toBeDefined();
+		expect(components.h2).toBeDefined();
+		expect(components.h3).toBeDefined();
+		expect(components.p).toBeDefined();
+		expect(components.ul).toBeDefined();
+		expect(components.ol).toBeDefined();
+		expect(components.li).toBeDefined();
+		expect(components.code).toBeDefined();
+		expect(components.a).toBeDefined();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// createMarkdownComponents — link handling (Fixes MAESTRO-F4, MAESTRO-E5, etc.)
+// ---------------------------------------------------------------------------
+
+describe('createMarkdownComponents link handling', () => {
+	it('should call onExternalLinkClick for http/https URLs', () => {
+		const onExternalLinkClick = vi.fn();
+		const components = createMarkdownComponents({
+			theme: mockTheme,
+			onExternalLinkClick,
+		});
+		const aComponent = components.a as any;
+		expect(aComponent).toBeDefined();
+
+		// Simulate rendering and clicking an https link
+		const element = aComponent({ node: null, href: 'https://example.com', children: 'link' });
+		const clickEvent = { preventDefault: vi.fn() } as any;
+		element.props.onClick(clickEvent);
+		expect(onExternalLinkClick).toHaveBeenCalledWith('https://example.com', { ctrlKey: undefined });
+	});
+
+	it('should call onExternalLinkClick for mailto URLs', () => {
+		const onExternalLinkClick = vi.fn();
+		const components = createMarkdownComponents({
+			theme: mockTheme,
+			onExternalLinkClick,
+		});
+		const aComponent = components.a as any;
+
+		const element = aComponent({ node: null, href: 'mailto:test@example.com', children: 'email' });
+		const clickEvent = { preventDefault: vi.fn() } as any;
+		element.props.onClick(clickEvent);
+		expect(onExternalLinkClick).toHaveBeenCalledWith('mailto:test@example.com', {
+			ctrlKey: undefined,
+		});
+	});
+
+	// Bug #1060: on macOS a Cmd+click sets metaKey (not ctrlKey). The handler
+	// must translate `metaKey || ctrlKey` into the ctrlKey option so the
+	// open-in-browser inversion still fires. Under the old `{ ctrlKey: e.ctrlKey }`
+	// code a metaKey-only click yielded ctrlKey:false, so this would fail.
+	it('should translate Cmd-click (metaKey) into ctrlKey:true for onExternalLinkClick', () => {
+		const onExternalLinkClick = vi.fn();
+		const components = createMarkdownComponents({
+			theme: mockTheme,
+			onExternalLinkClick,
+		});
+		const aComponent = components.a as any;
+
+		const element = aComponent({ node: null, href: 'https://example.com', children: 'link' });
+		const clickEvent = { preventDefault: vi.fn(), metaKey: true, ctrlKey: false } as any;
+		element.props.onClick(clickEvent);
+		expect(onExternalLinkClick).toHaveBeenCalledWith('https://example.com', { ctrlKey: true });
+	});
+
+	it('should pass ctrlKey:false to onExternalLinkClick on a plain click', () => {
+		const onExternalLinkClick = vi.fn();
+		const components = createMarkdownComponents({
+			theme: mockTheme,
+			onExternalLinkClick,
+		});
+		const aComponent = components.a as any;
+
+		const element = aComponent({ node: null, href: 'https://example.com', children: 'link' });
+		const clickEvent = { preventDefault: vi.fn(), metaKey: false, ctrlKey: false } as any;
+		element.props.onClick(clickEvent);
+		expect(onExternalLinkClick).toHaveBeenCalledWith('https://example.com', { ctrlKey: false });
+	});
+
+	it('should NOT call onExternalLinkClick for relative paths', () => {
+		const onExternalLinkClick = vi.fn();
+		const components = createMarkdownComponents({
+			theme: mockTheme,
+			onExternalLinkClick,
+		});
+		const aComponent = components.a as any;
+
+		// Relative paths like LICENSE, ./README.md should not trigger openExternal
+		for (const href of [
+			'LICENSE',
+			'./README.md',
+			'../docs/spec.md',
+			'constitution/specs/SPEC.md',
+		]) {
+			onExternalLinkClick.mockClear();
+			const element = aComponent({ node: null, href, children: 'link' });
+			const clickEvent = { preventDefault: vi.fn() } as any;
+			element.props.onClick(clickEvent);
+			expect(onExternalLinkClick).not.toHaveBeenCalled();
+		}
+	});
+
+	it('should forward id and other props through heading components (rehype-slug support)', () => {
+		const components = createMarkdownComponents({
+			theme: mockTheme,
+			searchHighlight: { query: '', currentMatchIndex: 0 },
+		});
+
+		// rehype-slug adds an id prop to headings; the component overrides must forward it
+		for (const tag of ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const) {
+			const Component = components[tag] as any;
+			expect(Component).toBeDefined();
+			const element = Component({ node: null, id: 'my-heading', children: 'Title' });
+			expect(element.props.id).toBe('my-heading');
+		}
+	});
+
+	it('should route relative paths to onFileClick when available', () => {
+		const onExternalLinkClick = vi.fn();
+		const onFileClick = vi.fn();
+		const components = createMarkdownComponents({
+			theme: mockTheme,
+			onExternalLinkClick,
+			onFileClick,
+		});
+		const aComponent = components.a as any;
+
+		const element = aComponent({ node: null, href: 'LICENSE', children: 'license' });
+		const clickEvent = { preventDefault: vi.fn(), metaKey: false, ctrlKey: false } as any;
+		element.props.onClick(clickEvent);
+		expect(onFileClick).toHaveBeenCalledWith('LICENSE', { openInNewTab: false });
+		expect(onExternalLinkClick).not.toHaveBeenCalled();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// createWizardBubbleMarkdownComponents - link handling (#1060)
+// ---------------------------------------------------------------------------
+
+describe('createWizardBubbleMarkdownComponents link handling', () => {
+	beforeEach(() => {
+		mockOpenUrl.mockClear();
+	});
+
+	// Under the old `{ ctrlKey: e.ctrlKey }` code a metaKey-only click yielded
+	// ctrlKey:false, so this guard would fail. See bug #1060.
+	it('should translate Cmd-click (metaKey) into ctrlKey:true for openUrl', () => {
+		const components = createWizardBubbleMarkdownComponents(mockTheme);
+		const aComponent = components.a as any;
+
+		const element = aComponent({ href: 'https://example.com', children: 'link' });
+		const clickEvent = { preventDefault: vi.fn(), metaKey: true, ctrlKey: false } as any;
+		element.props.onClick(clickEvent);
+		expect(mockOpenUrl).toHaveBeenCalledWith('https://example.com', { ctrlKey: true });
+	});
+
+	it('should pass ctrlKey:false to openUrl on a plain click', () => {
+		const components = createWizardBubbleMarkdownComponents(mockTheme);
+		const aComponent = components.a as any;
+
+		const element = aComponent({ href: 'https://example.com', children: 'link' });
+		const clickEvent = { preventDefault: vi.fn(), metaKey: false, ctrlKey: false } as any;
+		element.props.onClick(clickEvent);
+		expect(mockOpenUrl).toHaveBeenCalledWith('https://example.com', { ctrlKey: false });
+	});
+});
+
+// ---------------------------------------------------------------------------
+// createReleaseNotesMarkdownComponents - link handling (#1060)
+// ---------------------------------------------------------------------------
+
+describe('createReleaseNotesMarkdownComponents link handling', () => {
+	beforeEach(() => {
+		mockOpenUrl.mockClear();
+	});
+
+	// Under the old `{ ctrlKey: e.ctrlKey }` code a metaKey-only click yielded
+	// ctrlKey:false, so this guard would fail. See bug #1060.
+	it('should translate Cmd-click (metaKey) into ctrlKey:true for openUrl', () => {
+		const components = createReleaseNotesMarkdownComponents(mockTheme);
+		const aComponent = components.a as any;
+
+		const element = aComponent({ href: 'https://example.com', children: 'link' });
+		const clickEvent = { preventDefault: vi.fn(), metaKey: true, ctrlKey: false } as any;
+		element.props.onClick(clickEvent);
+		expect(mockOpenUrl).toHaveBeenCalledWith('https://example.com', { ctrlKey: true });
+	});
+
+	it('should pass ctrlKey:false to openUrl on a plain click', () => {
+		const components = createReleaseNotesMarkdownComponents(mockTheme);
+		const aComponent = components.a as any;
+
+		const element = aComponent({ href: 'https://example.com', children: 'link' });
+		const clickEvent = { preventDefault: vi.fn(), metaKey: false, ctrlKey: false } as any;
+		element.props.onClick(clickEvent);
+		expect(mockOpenUrl).toHaveBeenCalledWith('https://example.com', { ctrlKey: false });
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Hex color swatch in inline code
+// ---------------------------------------------------------------------------
+
+describe('hex color swatch in inline code', () => {
+	it('should render a color swatch span before hex color in createMarkdownComponents', () => {
+		const components = createMarkdownComponents({ theme: mockTheme });
+		const codeComponent = components.code as any;
+		// Inline code now renders through the shared InlineCode leaf; render it to
+		// inspect the swatch in the DOM.
+		const { container } = render(codeComponent({ children: '#FF0000' }));
+		const code = container.querySelector('code');
+		expect(code).toBeInTheDocument();
+		const swatch = code!.querySelector('span');
+		expect(swatch).toBeInTheDocument();
+		expect(swatch!.getAttribute('style')).toContain('background-color');
+		expect(code!.textContent).toContain('#FF0000');
+	});
+
+	it('should not render swatch for non-hex inline code', () => {
+		const components = createMarkdownComponents({ theme: mockTheme });
+		const codeComponent = components.code as any;
+		const { container } = render(codeComponent({ children: 'console.log' }));
+		const code = container.querySelector('code');
+		expect(code!.querySelector('span')).toBeNull();
+		expect(code!.textContent).toBe('console.log');
+	});
+
+	it('should render swatch in wizard bubble inline code', () => {
+		const components = createWizardBubbleMarkdownComponents(mockTheme);
+		const codeComponent = components.code as any;
+		const element = codeComponent({ children: '#8B3FFC' });
+		const children = React.Children.toArray(element.props.children);
+		// swatch (or null filtered) + text
+		const swatch = children.find(
+			(c: any) => c?.type === 'span' && c?.props?.style?.backgroundColor
+		) as React.ReactElement | undefined;
+		expect(swatch).toBeDefined();
+		expect(swatch!.props.style.backgroundColor).toBe('#8B3FFC');
+	});
+
+	it('should render swatch in release notes inline code', () => {
+		const components = createReleaseNotesMarkdownComponents(mockTheme);
+		const codeComponent = components.code as any;
+		const element = codeComponent({ children: '#00CC00' });
+		const children = React.Children.toArray(element.props.children);
+		const swatch = children.find(
+			(c: any) => c?.type === 'span' && c?.props?.style?.backgroundColor
+		) as React.ReactElement | undefined;
+		expect(swatch).toBeDefined();
+		expect(swatch!.props.style.backgroundColor).toBe('#00CC00');
+	});
+});
+
+describe('createMarkdownComponents reading mode', () => {
+	it('wraps paragraph prose in Bionify spans when enabled', () => {
+		const components = createMarkdownComponents({
+			theme: mockTheme,
+			enableBionifyReadingMode: true,
+		});
+		const Paragraph = components.p as any;
+
+		const { container } = render(Paragraph({ children: 'Readable prose only' }));
+
+		expect(document.querySelectorAll('.bionify-word').length).toBeGreaterThan(0);
+		expect(container.textContent).toBe('Readable prose only');
+	});
+
+	it('leaves inline code untouched while transforming surrounding emphasis content', () => {
+		const components = createMarkdownComponents({
+			theme: mockTheme,
+			enableBionifyReadingMode: true,
+		});
+		const Strong = components.strong as any;
+
+		render(
+			Strong({
+				children: React.createElement(
+					React.Fragment,
+					null,
+					'Before ',
+					React.createElement('code', null, 'const value = 1'),
+					' after'
+				),
+			})
+		);
+
+		expect(screen.getByText('const value = 1')).toBeInTheDocument();
+		expect(document.querySelector('code .bionify-word')).not.toBeInTheDocument();
+		expect(document.querySelectorAll('.bionify-word').length).toBeGreaterThan(0);
 	});
 });

@@ -12,7 +12,13 @@ import * as os from 'os';
 
 import { CodexInstrumenter } from '../../../main/vibes/instrumenters/codex-instrumenter';
 import { VibesSessionManager } from '../../../main/vibes/vibes-session';
-import { readAnnotations, readVibesManifest, ensureAuditDir, flushAll, resetAllBuffers } from '../../../main/vibes/vibes-io';
+import {
+	readAnnotations,
+	readVibesManifest,
+	ensureAuditDir,
+	flushAll,
+	resetAllBuffers,
+} from '../../../main/vibes/vibes-io';
 import type {
 	VibesLineAnnotation,
 	VibesCommandEntry,
@@ -48,7 +54,7 @@ describe('codex-instrumenter', () => {
 	 */
 	async function setupSession(
 		sessionId: string,
-		assuranceLevel: 'low' | 'medium' | 'high' = 'medium',
+		assuranceLevel: 'low' | 'medium' | 'high' = 'medium'
 	) {
 		const state = await manager.startSession(sessionId, tmpDir, 'codex', assuranceLevel);
 		state.environmentHash = 'e'.repeat(64);
@@ -124,9 +130,7 @@ describe('codex-instrumenter', () => {
 			expect(cmdEntries[0].command_text).toBe('write_file: src/index.ts');
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].file_path).toBe('src/index.ts');
 			expect(lineAnnotations[0].action).toBe('modify');
@@ -147,9 +151,7 @@ describe('codex-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].file_path).toBe('src/new-file.ts');
 			expect(lineAnnotations[0].action).toBe('create');
@@ -169,9 +171,7 @@ describe('codex-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].action).toBe('modify');
 		});
@@ -358,9 +358,7 @@ describe('codex-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].file_path).toBe('src/patched.ts');
 		});
@@ -409,9 +407,7 @@ describe('codex-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].prompt_hash).toBeDefined();
 			expect(typeof lineAnnotations[0].prompt_hash).toBe('string');
@@ -434,9 +430,7 @@ describe('codex-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].prompt_hash).toBeDefined();
 			expect(typeof lineAnnotations[0].prompt_hash).toBe('string');
@@ -461,9 +455,7 @@ describe('codex-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].prompt_hash).toBeNull();
 		});
@@ -493,7 +485,7 @@ describe('codex-instrumenter', () => {
 
 			const annotations = await readAnnotations(tmpDir);
 			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line' && (a as VibesLineAnnotation).file_path === 'src/after-cleanup.ts',
+				(a) => a.type === 'line' && (a as VibesLineAnnotation).file_path === 'src/after-cleanup.ts'
 			) as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].prompt_hash).toBeNull();
@@ -521,9 +513,7 @@ describe('codex-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].reasoning_hash).toBeDefined();
 			expect(typeof lineAnnotations[0].reasoning_hash).toBe('string');
@@ -547,9 +537,7 @@ describe('codex-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].reasoning_hash).toBeNull();
 		});
@@ -570,9 +558,7 @@ describe('codex-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].reasoning_hash).toBeNull();
 		});
@@ -603,9 +589,7 @@ describe('codex-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(2);
 
 			// Both should have reasoning_hash
@@ -638,7 +622,7 @@ describe('codex-instrumenter', () => {
 			const manifest = await readVibesManifest(tmpDir);
 			const entries = Object.values(manifest.entries);
 			const reasoningEntries = entries.filter(
-				(e) => e.type === 'reasoning',
+				(e) => e.type === 'reasoning'
 			) as VibesReasoningEntry[];
 			expect(reasoningEntries).toHaveLength(1);
 			expect(reasoningEntries[0].reasoning_text).toBe('First thought. Second thought.');
@@ -709,7 +693,7 @@ describe('codex-instrumenter', () => {
 			const manifest = await readVibesManifest(tmpDir);
 			const entries = Object.values(manifest.entries);
 			const reasoningEntries = entries.filter(
-				(e) => e.type === 'reasoning',
+				(e) => e.type === 'reasoning'
 			) as VibesReasoningEntry[];
 			expect(reasoningEntries).toHaveLength(1);
 			expect(reasoningEntries[0].reasoning_text).toBe('Thinking about the file...');
@@ -741,7 +725,7 @@ describe('codex-instrumenter', () => {
 			const manifest = await readVibesManifest(tmpDir);
 			const entries = Object.values(manifest.entries);
 			const reasoningEntries = entries.filter(
-				(e) => e.type === 'reasoning',
+				(e) => e.type === 'reasoning'
 			) as VibesReasoningEntry[];
 			expect(reasoningEntries).toHaveLength(1);
 			expect(reasoningEntries[0].reasoning_token_count).toBe(30);
@@ -773,7 +757,7 @@ describe('codex-instrumenter', () => {
 			const manifest = await readVibesManifest(tmpDir);
 			const entries = Object.values(manifest.entries);
 			const reasoningEntries = entries.filter(
-				(e) => e.type === 'reasoning',
+				(e) => e.type === 'reasoning'
 			) as VibesReasoningEntry[];
 			expect(reasoningEntries).toHaveLength(1);
 			expect(reasoningEntries[0].reasoning_token_count).toBe(30);
@@ -867,9 +851,7 @@ describe('codex-instrumenter', () => {
 			await flushAll();
 			const manifest = await readVibesManifest(tmpDir);
 			const entries = Object.values(manifest.entries);
-			const promptEntries = entries.filter(
-				(e) => e.type === 'prompt',
-			) as VibesPromptEntry[];
+			const promptEntries = entries.filter((e) => e.type === 'prompt') as VibesPromptEntry[];
 			expect(promptEntries).toHaveLength(1);
 			expect(promptEntries[0].prompt_text).toBe('Fix the bug in login.ts');
 			expect(promptEntries[0].prompt_type).toBe('user_instruction');
@@ -922,13 +904,8 @@ describe('codex-instrumenter', () => {
 			await flushAll();
 			const manifest = await readVibesManifest(tmpDir);
 			const entries = Object.values(manifest.entries);
-			const promptEntries = entries.filter(
-				(e) => e.type === 'prompt',
-			) as VibesPromptEntry[];
-			expect(promptEntries[0].prompt_context_files).toEqual([
-				'src/auth.ts',
-				'src/login.ts',
-			]);
+			const promptEntries = entries.filter((e) => e.type === 'prompt') as VibesPromptEntry[];
+			expect(promptEntries[0].prompt_context_files).toEqual(['src/auth.ts', 'src/login.ts']);
 		});
 
 		it('should be a no-op for unknown session IDs', async () => {
@@ -1167,9 +1144,7 @@ describe('codex-instrumenter', () => {
 			});
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].file_path).toBe('src/output.ts');
 		});

@@ -14,6 +14,15 @@ const { mockExecFile, mockAccess } = vi.hoisted(() => ({
 }));
 
 // Mock child_process
+// rc's path-prober returns the machine's real expanded PATH, which would
+// override the deterministic process.env.PATH these tests set. Make it
+// unavailable so findVibesCheckBinary falls back to process.env.PATH.
+vi.mock('../../../main/agents/path-prober', () => ({
+	getExpandedEnv: () => {
+		throw new Error('path-prober unavailable in test');
+	},
+}));
+
 vi.mock('child_process', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('child_process')>();
 	return {
@@ -76,7 +85,7 @@ describe('vibes-bridge', () => {
 					callback(null, stdout, stderr);
 				}
 				return {} as any;
-			},
+			}
 		);
 	}
 
@@ -92,7 +101,7 @@ describe('vibes-bridge', () => {
 					callback(err, '', stderr);
 				}
 				return {} as any;
-			},
+			}
 		);
 	}
 
@@ -125,7 +134,7 @@ describe('vibes-bridge', () => {
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // ~/.local/bin/vibecheck
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // /usr/local/bin/vibecheck
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // /usr/bin/vibecheck
-			mockAccess.mockResolvedValueOnce(undefined);           // /opt/bin/vibecheck
+			mockAccess.mockResolvedValueOnce(undefined); // /opt/bin/vibecheck
 
 			const { findVibesCheckBinary } = await import('../../../main/vibes/vibes-bridge');
 			const result = await findVibesCheckBinary();
@@ -156,7 +165,7 @@ describe('vibes-bridge', () => {
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // ~/.cargo/bin
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // ~/.local/bin
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // /usr/local/bin
-			mockAccess.mockResolvedValueOnce(undefined);            // node_modules/.bin
+			mockAccess.mockResolvedValueOnce(undefined); // node_modules/.bin
 
 			const { findVibesCheckBinary } = await import('../../../main/vibes/vibes-bridge');
 			const result = await findVibesCheckBinary(undefined, '/my/project');
@@ -199,7 +208,7 @@ describe('vibes-bridge', () => {
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // ~/.cargo/bin
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // ~/.local/bin
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // /usr/local/bin
-			mockAccess.mockResolvedValueOnce(undefined);            // /usr/bin
+			mockAccess.mockResolvedValueOnce(undefined); // /usr/bin
 
 			const mod = await import('../../../main/vibes/vibes-bridge');
 			const result1 = await mod.findVibesCheckBinary();
@@ -221,7 +230,7 @@ describe('vibes-bridge', () => {
 
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // ~/.cargo/bin
 			mockAccess.mockRejectedValueOnce(new Error('ENOENT')); // /usr/local/bin
-			mockAccess.mockResolvedValueOnce(undefined);            // /usr/bin
+			mockAccess.mockResolvedValueOnce(undefined); // /usr/bin
 
 			const mod = await import('../../../main/vibes/vibes-bridge');
 			await mod.findVibesCheckBinary();
@@ -304,7 +313,7 @@ describe('vibes-bridge', () => {
 			const result = await vibesInit(
 				'/my/project',
 				{ projectName: 'test-proj', assuranceLevel: 'medium' },
-				'/usr/local/bin/vibecheck',
+				'/usr/local/bin/vibecheck'
 			);
 
 			expect(result).toEqual({ success: true });
@@ -329,7 +338,7 @@ describe('vibes-bridge', () => {
 					assuranceLevel: 'high',
 					extensions: ['.ts', '.py'],
 				},
-				'/usr/local/bin/vibecheck',
+				'/usr/local/bin/vibecheck'
 			);
 
 			expect(mockExecFile).toHaveBeenCalled();
@@ -346,7 +355,7 @@ describe('vibes-bridge', () => {
 			const result = await vibesInit(
 				'/my/project',
 				{ projectName: 'test-proj', assuranceLevel: 'low' },
-				'/usr/local/bin/vibecheck',
+				'/usr/local/bin/vibecheck'
 			);
 
 			expect(result.success).toBe(false);
@@ -361,7 +370,7 @@ describe('vibes-bridge', () => {
 				vibesInit('/my/project', {
 					projectName: 'test-proj',
 					assuranceLevel: 'low',
-				}),
+				})
 			).rejects.toThrow('vibecheck binary not found');
 		});
 	});
@@ -472,7 +481,7 @@ describe('vibes-bridge', () => {
 					limit: 10,
 					json: true,
 				},
-				'/usr/local/bin/vibecheck',
+				'/usr/local/bin/vibecheck'
 			);
 
 			const execArgs = mockExecFile.mock.calls[0][1] as string[];
@@ -599,7 +608,9 @@ describe('vibes-bridge', () => {
 			const mod = await import('../../../main/vibes/vibes-bridge');
 			await expect(mod.vibesBuild('/my/project')).rejects.toThrow('vibecheck binary not found');
 			await expect(mod.vibesStats('/my/project')).rejects.toThrow('vibecheck binary not found');
-			await expect(mod.vibesBlame('/my/project', 'file.ts')).rejects.toThrow('vibecheck binary not found');
+			await expect(mod.vibesBlame('/my/project', 'file.ts')).rejects.toThrow(
+				'vibecheck binary not found'
+			);
 			await expect(mod.vibesLog('/my/project')).rejects.toThrow('vibecheck binary not found');
 			await expect(mod.vibesCoverage('/my/project')).rejects.toThrow('vibecheck binary not found');
 			await expect(mod.vibesReport('/my/project')).rejects.toThrow('vibecheck binary not found');

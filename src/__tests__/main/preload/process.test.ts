@@ -78,6 +78,28 @@ describe('Process Preload API', () => {
 		});
 	});
 
+	describe('broadcastUserInput', () => {
+		it('should invoke process:broadcast-user-input with payload', async () => {
+			const payload = {
+				originId: 'origin-1',
+				sessionId: 'session-123',
+				tabId: 'tab-1',
+				inputMode: 'ai' as const,
+				entry: {
+					id: 'entry-1',
+					timestamp: 123,
+					source: 'user' as const,
+					text: 'Hello',
+				},
+			};
+			mockInvoke.mockResolvedValue(undefined);
+
+			await api.broadcastUserInput(payload);
+
+			expect(mockInvoke).toHaveBeenCalledWith('process:broadcast-user-input', payload);
+		});
+	});
+
 	describe('interrupt', () => {
 		it('should invoke process:interrupt with sessionId', async () => {
 			mockInvoke.mockResolvedValue(true);
@@ -165,6 +187,17 @@ describe('Process Preload API', () => {
 
 			expect(mockInvoke).toHaveBeenCalledWith('process:getActiveProcesses');
 			expect(result).toEqual(mockProcesses);
+		});
+	});
+
+	describe('isTerminalBusy', () => {
+		it('should invoke process:isTerminalBusy with the session id', async () => {
+			mockInvoke.mockResolvedValue(true);
+
+			const result = await api.isTerminalBusy('session-1-terminal-tab-1');
+
+			expect(mockInvoke).toHaveBeenCalledWith('process:isTerminalBusy', 'session-1-terminal-tab-1');
+			expect(result).toBe(true);
 		});
 	});
 
@@ -274,13 +307,48 @@ describe('Process Preload API', () => {
 	});
 
 	describe('onRemoteCommand', () => {
-		it('should register listener and invoke callback with all parameters', () => {
+		it('should register listener and invoke callback with all parameters including tabId, force, and images', () => {
 			const callback = vi.fn();
 			let registeredHandler: (
 				event: unknown,
 				sessionId: string,
 				command: string,
-				inputMode?: 'ai' | 'terminal'
+				inputMode?: 'ai' | 'terminal',
+				tabId?: string,
+				force?: boolean,
+				images?: string[]
+			) => void;
+
+			mockOn.mockImplementation((channel: string, handler: typeof registeredHandler) => {
+				if (channel === 'remote:executeCommand') {
+					registeredHandler = handler;
+				}
+			});
+
+			api.onRemoteCommand(callback);
+			const images = ['data:image/png;base64,abc'];
+			registeredHandler!({}, 'session-123', 'test command', 'ai', 'tab-7', true, images);
+
+			expect(callback).toHaveBeenCalledWith(
+				'session-123',
+				'test command',
+				'ai',
+				'tab-7',
+				true,
+				images
+			);
+		});
+
+		it('forwards undefined tabId/force/images when the IPC sender omits them (legacy callers)', () => {
+			const callback = vi.fn();
+			let registeredHandler: (
+				event: unknown,
+				sessionId: string,
+				command: string,
+				inputMode?: 'ai' | 'terminal',
+				tabId?: string,
+				force?: boolean,
+				images?: string[]
 			) => void;
 
 			mockOn.mockImplementation((channel: string, handler: typeof registeredHandler) => {
@@ -292,7 +360,38 @@ describe('Process Preload API', () => {
 			api.onRemoteCommand(callback);
 			registeredHandler!({}, 'session-123', 'test command', 'ai');
 
-			expect(callback).toHaveBeenCalledWith('session-123', 'test command', 'ai');
+			expect(callback).toHaveBeenCalledWith(
+				'session-123',
+				'test command',
+				'ai',
+				undefined,
+				undefined,
+				undefined
+			);
+		});
+	});
+
+	describe('onRemoteCreateGroup', () => {
+		it('forwards a parent group ID in its fixed IPC argument position', () => {
+			const callback = vi.fn();
+			let registeredHandler: (
+				event: unknown,
+				name: string,
+				emoji: string | undefined,
+				parentGroupId: string | undefined,
+				responseChannel: string
+			) => void;
+
+			mockOn.mockImplementation((channel: string, handler: typeof registeredHandler) => {
+				if (channel === 'remote:createGroup') {
+					registeredHandler = handler;
+				}
+			});
+
+			api.onRemoteCreateGroup(callback);
+			registeredHandler!({}, 'Project', '📁', 'company', 'response-channel');
+
+			expect(callback).toHaveBeenCalledWith('Project', '📁', 'company', 'response-channel');
 		});
 	});
 });

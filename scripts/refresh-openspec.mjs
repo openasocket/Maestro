@@ -2,13 +2,15 @@
 /**
  * Refresh OpenSpec Prompts
  *
- * Fetches the latest OpenSpec prompts from GitHub by parsing AGENTS.md
- * and extracts the three workflow stages (proposal, apply, archive).
+ * OpenSpec was rearchitected in the 1.x line: the old single
+ * `openspec/AGENTS.md` with `Stage 1/2/3` sections is gone. The workflow
+ * prompts now live as TypeScript template literals in
+ * `src/core/templates/workflows/<name>.ts`, exposed under the new `opsx:`
+ * command surface. We keep our existing command surface
+ * (proposal/apply/archive) and map each onto the upstream workflow that
+ * matches, extracting the `instructions:` template literal as the prompt body.
  *
- * Unlike spec-kit which uses ZIP releases, OpenSpec bundles all workflow
- * instructions in a single AGENTS.md file that we parse into sections.
- *
- * Usage: npm run refresh-openspec
+ * Usage: bun run refresh-openspec
  */
 
 import fs from 'fs';
@@ -21,195 +23,154 @@ const OPENSPEC_DIR = path.join(__dirname, '..', 'src', 'prompts', 'openspec');
 const METADATA_PATH = path.join(OPENSPEC_DIR, 'metadata.json');
 
 // GitHub OpenSpec repository info
-const GITHUB_API = 'https://api.github.com';
 const REPO_OWNER = 'Fission-AI';
 const REPO_NAME = 'OpenSpec';
-const AGENTS_MD_URL = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/openspec/AGENTS.md`;
+const RAW_GITHUB = 'https://raw.githubusercontent.com';
+const GITHUB_API = 'https://api.github.com';
+const WORKFLOWS_BASE_PATH = 'src/core/templates/workflows';
 
-// Commands to extract from AGENTS.md (we skip custom commands like 'help' and 'implement')
-const UPSTREAM_COMMANDS = ['proposal', 'apply', 'archive'];
-
-// Section markers for parsing AGENTS.md
-// Stage headers are formatted as: ### Stage N: Title
-const SECTION_MARKERS = {
-  proposal: {
-    start: /^###\s*Stage\s*1[:\s]+Creating\s+Changes/i,
-    end: /^###\s*Stage\s*2[:\s]+/i,
-  },
-  apply: {
-    start: /^###\s*Stage\s*2[:\s]+Implementing\s+Changes/i,
-    end: /^###\s*Stage\s*3[:\s]+/i,
-  },
-  archive: {
-    start: /^###\s*Stage\s*3[:\s]+Archiving\s+Changes/i,
-    end: /^##[^#]/,  // End at next level-2 heading or end of file
-  },
-};
+// Mapping of our command id → upstream workflow module file.
+// We skip custom commands like 'help' and 'implement'.
+const UPSTREAM_COMMANDS = [
+	{ id: 'proposal', sourceFile: 'propose.ts' },
+	{ id: 'apply', sourceFile: 'apply-change.ts' },
+	{ id: 'archive', sourceFile: 'archive-change.ts' },
+];
 
 /**
  * Make an HTTPS GET request
  */
 function httpsGet(url, options = {}) {
-  return new Promise((resolve, reject) => {
-    const headers = {
-      'User-Agent': 'Maestro-OpenSpec-Refresher',
-      ...options.headers,
-    };
+	return new Promise((resolve, reject) => {
+		const headers = {
+			'User-Agent': 'Maestro-OpenSpec-Refresher',
+			...options.headers,
+		};
 
-    https.get(url, { headers }, (res) => {
-      // Handle redirects
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        return resolve(httpsGet(res.headers.location, options));
-      }
+		https
+			.get(url, { headers }, (res) => {
+				if (res.statusCode === 301 || res.statusCode === 302) {
+					return resolve(httpsGet(res.headers.location, options));
+				}
 
-      if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode}: ${url}`));
-        return;
-      }
+				if (res.statusCode !== 200) {
+					reject(new Error(`HTTP ${res.statusCode}: ${url}`));
+					return;
+				}
 
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve({ data, headers: res.headers }));
-      res.on('error', reject);
-    }).on('error', reject);
-  });
+				let data = '';
+				res.on('data', (chunk) => (data += chunk));
+				res.on('end', () => resolve({ data, headers: res.headers }));
+				res.on('error', reject);
+			})
+			.on('error', reject);
+	});
 }
 
 /**
- * Parse AGENTS.md and extract workflow sections as prompts
+ * Extract the `instructions:` template-literal string from a workflow module's
+ * TypeScript source. The literals are plain markdown with no `${}`
+ * interpolation, so we walk the backtick-delimited string, honoring escapes.
  */
-function parseAgentsMd(content) {
-  const result = {};
-  const lines = content.split('\n');
+function extractInstructions(tsSource) {
+	const marker = tsSource.indexOf('instructions:');
+	if (marker < 0) return null;
+	const start = tsSource.indexOf('`', marker);
+	if (start < 0) return null;
 
-  for (const [sectionId, markers] of Object.entries(SECTION_MARKERS)) {
-    let inSection = false;
-    let sectionLines = [];
-
-    for (const line of lines) {
-      if (!inSection && markers.start.test(line)) {
-        inSection = true;
-        sectionLines.push(line);
-        continue;
-      }
-
-      if (inSection) {
-        // Check if we've hit the end marker (next stage or next major section)
-        if (markers.end.test(line) && line.trim() !== '') {
-          // Don't include the end marker line, it belongs to the next section
-          break;
-        }
-        sectionLines.push(line);
-      }
-    }
-
-    if (sectionLines.length > 0) {
-      // Clean up trailing empty lines
-      while (sectionLines.length > 0 && sectionLines[sectionLines.length - 1].trim() === '') {
-        sectionLines.pop();
-      }
-      result[sectionId] = sectionLines.join('\n').trim();
-    }
-  }
-
-  return result;
+	let result = '';
+	for (let i = start + 1; i < tsSource.length; i++) {
+		const char = tsSource[i];
+		if (char === '\\') {
+			const next = tsSource[i + 1];
+			if (next === '`' || next === '\\' || next === '$') {
+				result += next;
+				i++;
+				continue;
+			}
+			result += char;
+			continue;
+		}
+		if (char === '`') break;
+		result += char;
+	}
+	return result.trim();
 }
 
 /**
- * Get the latest commit SHA from the main branch
+ * Get the latest release tag from GitHub (falls back to "main").
  */
-async function getLatestCommitSha() {
-  try {
-    const url = `${GITHUB_API}/repos/${REPO_OWNER}/${REPO_NAME}/commits/main`;
-    const { data } = await httpsGet(url);
-    const commit = JSON.parse(data);
-    return commit.sha.substring(0, 7);
-  } catch (error) {
-    console.warn('   Warning: Could not fetch commit SHA, using "main"');
-    return 'main';
-  }
+async function getLatestVersion() {
+	try {
+		const { data } = await httpsGet(
+			`${GITHUB_API}/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`
+		);
+		return JSON.parse(data).tag_name;
+	} catch {
+		console.warn('   Warning: Could not fetch release info, using "main"');
+		return 'main';
+	}
 }
 
 /**
  * Main refresh function
  */
 async function refreshOpenSpec() {
-  console.log('🔄 Refreshing OpenSpec prompts from GitHub...\n');
+	console.log('🔄 Refreshing OpenSpec prompts from GitHub...\n');
 
-  // Ensure openspec directory exists
-  if (!fs.existsSync(OPENSPEC_DIR)) {
-    console.error('❌ OpenSpec directory not found:', OPENSPEC_DIR);
-    process.exit(1);
-  }
+	if (!fs.existsSync(OPENSPEC_DIR)) {
+		console.error('❌ OpenSpec directory not found:', OPENSPEC_DIR);
+		process.exit(1);
+	}
 
-  try {
-    // Fetch AGENTS.md
-    console.log('📡 Fetching AGENTS.md from OpenSpec repository...');
-    const { data: agentsMdContent } = await httpsGet(AGENTS_MD_URL);
-    console.log(`   Downloaded AGENTS.md (${agentsMdContent.length} bytes)`);
+	try {
+		console.log('📡 Getting latest release...');
+		const version = await getLatestVersion();
+		console.log(`   Version: ${version}`);
 
-    // Parse sections
-    console.log('\n📦 Parsing workflow sections...');
-    const extractedPrompts = parseAgentsMd(agentsMdContent);
-    const extractedCount = Object.keys(extractedPrompts).length;
-    console.log(`   Extracted ${extractedCount} sections from AGENTS.md`);
+		console.log('\n✏️  Fetching and extracting workflow prompts...');
+		let updatedCount = 0;
+		for (const { id, sourceFile } of UPSTREAM_COMMANDS) {
+			const url = `${RAW_GITHUB}/${REPO_OWNER}/${REPO_NAME}/${version}/${WORKFLOWS_BASE_PATH}/${sourceFile}`;
+			const { data: tsSource } = await httpsGet(url);
+			const content = extractInstructions(tsSource);
 
-    if (extractedCount === 0) {
-      console.error('❌ Failed to extract any sections from AGENTS.md');
-      console.error('   Check that the section markers match the current format');
-      process.exit(1);
-    }
+			if (!content) {
+				console.log(`   ⚠ Missing: openspec.${id}.md (could not extract from ${sourceFile})`);
+				continue;
+			}
 
-    // Get commit SHA for version tracking
-    console.log('\n📋 Getting version info...');
-    const commitSha = await getLatestCommitSha();
-    console.log(`   Commit: ${commitSha}`);
+			const promptFile = path.join(OPENSPEC_DIR, `openspec.${id}.md`);
+			const existingContent = fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : '';
 
-    // Update prompt files
-    console.log('\n✏️  Updating prompt files...');
-    let updatedCount = 0;
-    for (const commandName of UPSTREAM_COMMANDS) {
-      const content = extractedPrompts[commandName];
-      if (!content) {
-        console.log(`   ⚠ Missing: openspec.${commandName}.md (section not found)`);
-        continue;
-      }
+			if (content !== existingContent) {
+				fs.writeFileSync(promptFile, content);
+				console.log(`   ✓ Updated: openspec.${id}.md`);
+				updatedCount++;
+			} else {
+				console.log(`   - Unchanged: openspec.${id}.md`);
+			}
+		}
 
-      const promptFile = path.join(OPENSPEC_DIR, `openspec.${commandName}.md`);
-      const existingContent = fs.existsSync(promptFile)
-        ? fs.readFileSync(promptFile, 'utf8')
-        : '';
+		// Update metadata
+		const metadata = {
+			lastRefreshed: new Date().toISOString(),
+			commitSha: version,
+			sourceVersion: version.replace(/^v/, ''),
+			sourceUrl: `https://github.com/${REPO_OWNER}/${REPO_NAME}`,
+		};
 
-      if (content !== existingContent) {
-        fs.writeFileSync(promptFile, content);
-        console.log(`   ✓ Updated: openspec.${commandName}.md`);
-        updatedCount++;
-      } else {
-        console.log(`   - Unchanged: openspec.${commandName}.md`);
-      }
-    }
+		fs.writeFileSync(METADATA_PATH, JSON.stringify(metadata, null, 2));
+		console.log('\n📄 Updated metadata.json');
 
-    // Update metadata
-    const metadata = {
-      lastRefreshed: new Date().toISOString(),
-      commitSha,
-      sourceVersion: '0.1.0',
-      sourceUrl: `https://github.com/${REPO_OWNER}/${REPO_NAME}`,
-    };
-
-    fs.writeFileSync(METADATA_PATH, JSON.stringify(metadata, null, 2));
-    console.log('\n📄 Updated metadata.json');
-
-    // Summary
-    console.log('\n✅ Refresh complete!');
-    console.log(`   Commit: ${commitSha}`);
-    console.log(`   Updated: ${updatedCount} files`);
-    console.log(`   Skipped: help, implement (custom Maestro prompts)`);
-
-  } catch (error) {
-    console.error('\n❌ Refresh failed:', error.message);
-    process.exit(1);
-  }
+		console.log('\n✅ Refresh complete!');
+		console.log(`   Version: ${version.replace(/^v/, '')}`);
+		console.log(`   Updated: ${updatedCount} files`);
+		console.log(`   Skipped: help, implement (custom Maestro prompts)`);
+	} catch (error) {
+		console.error('\n❌ Refresh failed:', error.message);
+		process.exit(1);
+	}
 }
 
 // Run

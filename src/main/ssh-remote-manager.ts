@@ -5,10 +5,11 @@
  * Used to execute AI agent commands on remote hosts via SSH.
  */
 
-import * as fs from 'fs';
 import { SshRemoteConfig, SshRemoteTestResult } from '../shared/types';
 import { execFileNoThrow, ExecResult } from './utils/execFile';
 import { expandTilde } from '../shared/pathUtils';
+import { captureException } from './utils/sentry';
+import { getPathAccessCache, defaultReadableProbe } from './utils/path-access-cache';
 
 /**
  * Validation result for SSH remote configuration.
@@ -31,16 +32,14 @@ export interface SshRemoteManagerDeps {
 }
 
 /**
- * Default dependencies using real implementations.
+ * Default dependencies using real implementations. `checkFileAccess` is
+ * wrapped behind {@link PathAccessCache} so rapid re-validation (e.g.
+ * consecutive Test Connection clicks) skips the duplicate stat. Test
+ * deps mock `checkFileAccess` directly and bypass the cache entirely.
  */
 const defaultDeps: SshRemoteManagerDeps = {
 	checkFileAccess: (filePath: string): boolean => {
-		try {
-			fs.accessSync(filePath, fs.constants.R_OK);
-			return true;
-		} catch {
-			return false;
-		}
+		return getPathAccessCache().check(filePath, defaultReadableProbe);
 	},
 	execSsh: (command: string, args: string[]): Promise<ExecResult> => {
 		return execFileNoThrow(command, args);
@@ -68,9 +67,6 @@ export class SshRemoteManager {
 		ConnectTimeout: '10', // Connection timeout in seconds
 		ClearAllForwardings: 'yes', // Disable port forwarding from SSH config (avoids "Address already in use" errors)
 		RequestTTY: 'no', // Don't request a TTY for command execution (avoids shell rc issues)
-		ControlMaster: 'no', // Disable connection multiplexing to prevent "UNKNOWN port -1" errors when multiple agents connect to same server
-		ControlPath: 'none', // Ensure no ControlPath is used from ~/.ssh/config
-		ControlPersist: 'no', // Don't persist control connections
 	};
 
 	/**
@@ -99,10 +95,10 @@ export class SshRemoteManager {
 	validateConfig(config: SshRemoteConfig): SshRemoteValidation {
 		const errors: string[] = [];
 
-		// Required field checks (always required)
-		if (!config.id || config.id.trim() === '') {
-			errors.push('Configuration ID is required');
-		}
+		// Note: id is intentionally NOT validated here. It is a storage concern,
+		// not a connection concern, and the save handler always assigns one
+		// (crypto.randomUUID) before persisting. Requiring it here would break
+		// "Test Connection" before saving a brand-new remote, which has no id yet.
 
 		if (!config.name || config.name.trim() === '') {
 			errors.push('Name is required');
@@ -208,6 +204,7 @@ export class SshRemoteManager {
 				},
 			};
 		} catch (err) {
+			void captureException(err);
 			return {
 				success: false,
 				error: `Connection test failed: ${String(err)}`,

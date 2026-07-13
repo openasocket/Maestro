@@ -1,6 +1,7 @@
 import { execFileNoThrow } from './execFile';
 import * as path from 'path';
 import { buildExpandedEnv } from '../../shared/pathUtils';
+import { isWindows, getWhichCommand } from '../../shared/platformDetection';
 
 let cloudflaredInstalledCache: boolean | null = null;
 let cloudflaredPathCache: string | null = null;
@@ -26,7 +27,7 @@ export async function isCloudflaredInstalled(): Promise<boolean> {
 	}
 
 	// Use 'which' on macOS/Linux, 'where' on Windows
-	const command = process.platform === 'win32' ? 'where' : 'which';
+	const command = getWhichCommand();
 	const env = getExpandedEnv();
 	const result = await execFileNoThrow(command, ['cloudflared'], undefined, env);
 
@@ -62,7 +63,7 @@ export async function isGhInstalled(): Promise<boolean> {
 	}
 
 	// Use 'which' on macOS/Linux, 'where' on Windows
-	const command = process.platform === 'win32' ? 'where' : 'which';
+	const command = getWhichCommand();
 	const env = getExpandedEnv();
 	const result = await execFileNoThrow(command, ['gh'], undefined, env);
 
@@ -77,14 +78,6 @@ export async function isGhInstalled(): Promise<boolean> {
 	}
 
 	return ghInstalledCache;
-}
-
-/**
- * Get the cached path to the gh CLI binary.
- * Returns null if gh is not installed or detection hasn't run yet.
- */
-export function getGhPath(): string | null {
-	return ghPathCache;
 }
 
 /**
@@ -103,13 +96,6 @@ export async function resolveGhPath(customPath?: string): Promise<string> {
 
 	// Return cached path or fallback to 'gh'
 	return ghPathCache || 'gh';
-}
-
-export function clearGhCache(): void {
-	ghInstalledCache = null;
-	ghPathCache = null;
-	ghAuthenticatedCache = null;
-	ghStatusCacheTime = null;
 }
 
 /**
@@ -160,7 +146,7 @@ export async function detectSshPath(): Promise<string | null> {
 		return sshPathCache;
 	}
 
-	const command = process.platform === 'win32' ? 'where' : 'which';
+	const command = getWhichCommand();
 	const env = getExpandedEnv();
 	const result = await execFileNoThrow(command, ['ssh'], undefined, env);
 
@@ -169,7 +155,7 @@ export async function detectSshPath(): Promise<string | null> {
 		// On Windows, 'where' returns paths with \r\n, so we need to split on \r?\n
 		const lines = result.stdout.trim().split(/\r?\n/);
 		sshPathCache = lines[0]?.trim() || null;
-	} else if (process.platform === 'win32') {
+	} else if (isWindows()) {
 		// Fallback for Windows: Check the built-in OpenSSH location directly
 		// This is the standard location for Windows 10/11 OpenSSH
 		const fs = await import('fs');
@@ -197,20 +183,4 @@ export async function detectSshPath(): Promise<string | null> {
 export async function resolveSshPath(): Promise<string> {
 	await detectSshPath();
 	return sshPathCache || 'ssh';
-}
-
-/**
- * Get the cached SSH path synchronously (returns null if detection hasn't run).
- * Use resolveSshPath() for async detection with fallback.
- */
-export function getSshPath(): string | null {
-	return sshPathCache;
-}
-
-/**
- * Clear SSH path cache (for testing or re-detection).
- */
-export function clearSshCache(): void {
-	sshPathCache = null;
-	sshDetectionDone = false;
 }

@@ -12,7 +12,9 @@ vi.mock('lucide-react', () => ({
 	GitBranch: () => <span data-testid="icon-gitbranch">GitBranch</span>,
 	Bot: () => <span data-testid="icon-bot">Bot</span>,
 	Bookmark: ({ fill }: { fill?: string }) => (
-		<span data-testid="icon-bookmark" data-fill={fill}>Bookmark</span>
+		<span data-testid="icon-bookmark" data-fill={fill}>
+			Bookmark
+		</span>
 	),
 	AlertCircle: () => <span data-testid="icon-alert">AlertCircle</span>,
 	Server: () => <span data-testid="icon-server">Server</span>,

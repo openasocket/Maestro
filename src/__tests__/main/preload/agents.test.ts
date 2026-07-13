@@ -91,7 +91,7 @@ describe('Agents Preload API', () => {
 
 			const result = await api.get('claude-code');
 
-			expect(mockInvoke).toHaveBeenCalledWith('agents:get', 'claude-code');
+			expect(mockInvoke).toHaveBeenCalledWith('agents:get', 'claude-code', undefined);
 			expect(result).toEqual(mockAgent);
 		});
 
@@ -101,6 +101,14 @@ describe('Agents Preload API', () => {
 			const result = await api.get('nonexistent');
 
 			expect(result).toBeNull();
+		});
+
+		it('should invoke agents:get with SSH remote ID', async () => {
+			mockInvoke.mockResolvedValue({ id: 'claude-code', available: true });
+
+			await api.get('claude-code', 'remote-1');
+
+			expect(mockInvoke).toHaveBeenCalledWith('agents:get', 'claude-code', 'remote-1');
 		});
 	});
 
@@ -326,7 +334,7 @@ describe('Agents Preload API', () => {
 
 			const result = await api.getModels('opencode');
 
-			expect(mockInvoke).toHaveBeenCalledWith('agents:getModels', 'opencode', undefined);
+			expect(mockInvoke).toHaveBeenCalledWith('agents:getModels', 'opencode', undefined, undefined);
 			expect(result).toEqual(models);
 		});
 
@@ -335,7 +343,7 @@ describe('Agents Preload API', () => {
 
 			await api.getModels('opencode', true);
 
-			expect(mockInvoke).toHaveBeenCalledWith('agents:getModels', 'opencode', true);
+			expect(mockInvoke).toHaveBeenCalledWith('agents:getModels', 'opencode', true, undefined);
 		});
 	});
 
@@ -350,6 +358,7 @@ describe('Agents Preload API', () => {
 				'agents:discoverSlashCommands',
 				'claude-code',
 				'/home/user/project',
+				undefined,
 				undefined
 			);
 			expect(result).toEqual(commands);
@@ -364,7 +373,22 @@ describe('Agents Preload API', () => {
 				'agents:discoverSlashCommands',
 				'claude-code',
 				'/home/user/project',
-				'/custom/claude'
+				'/custom/claude',
+				undefined
+			);
+		});
+
+		it('should invoke agents:discoverSlashCommands with sshRemoteId', async () => {
+			mockInvoke.mockResolvedValue(['review']);
+
+			await api.discoverSlashCommands('opencode', '/home/user/project', undefined, 'remote-1');
+
+			expect(mockInvoke).toHaveBeenCalledWith(
+				'agents:discoverSlashCommands',
+				'opencode',
+				'/home/user/project',
+				undefined,
+				'remote-1'
 			);
 		});
 
@@ -374,6 +398,41 @@ describe('Agents Preload API', () => {
 			const result = await api.discoverSlashCommands('unknown-agent', '/home/user/project');
 
 			expect(result).toBeNull();
+		});
+	});
+
+	describe('usage quota APIs', () => {
+		it('should invoke agents:getClaudeUsageAccountKeys', async () => {
+			const keys = ['/Users/me/.claude-work'];
+			mockInvoke.mockResolvedValue(keys);
+
+			const result = await api.getClaudeUsageAccountKeys();
+
+			expect(mockInvoke).toHaveBeenCalledWith('agents:getClaudeUsageAccountKeys');
+			expect(result).toEqual(keys);
+		});
+
+		it('should invoke agents:getCodexUsageAccountKeys', async () => {
+			const keys = ['/Users/me/.codex-work'];
+			mockInvoke.mockResolvedValue(keys);
+
+			const result = await api.getCodexUsageAccountKeys();
+
+			expect(mockInvoke).toHaveBeenCalledWith('agents:getCodexUsageAccountKeys');
+			expect(result).toEqual(keys);
+		});
+
+		it('should invoke agents:getKnownAuthDirs', async () => {
+			const dirs = {
+				claudeConfigDirs: ['/Users/me/.claude-work'],
+				codexHomes: ['/Users/me/.codex-work'],
+			};
+			mockInvoke.mockResolvedValue(dirs);
+
+			const result = await api.getKnownAuthDirs();
+
+			expect(mockInvoke).toHaveBeenCalledWith('agents:getKnownAuthDirs');
+			expect(result).toEqual(dirs);
 		});
 	});
 });

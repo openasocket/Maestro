@@ -24,6 +24,11 @@ import {
 	CREATE_AUTO_RUN_TASKS_INDEXES_SQL,
 	CREATE_SESSION_LIFECYCLE_SQL,
 	CREATE_SESSION_LIFECYCLE_INDEXES_SQL,
+	CREATE_COMPOUND_INDEXES_SQL,
+	CREATE_IMAGE_ANNOTATIONS_SQL,
+	CREATE_IMAGE_ANNOTATIONS_INDEXES_SQL,
+	CREATE_SHORTCUT_USAGE_DAILY_SQL,
+	CREATE_MULTI_WINDOW_USAGE_DAILY_SQL,
 	runStatements,
 } from './schema';
 import { LOG_CONTEXT } from './utils';
@@ -37,7 +42,7 @@ import { logger } from '../utils/logger';
  * Registry of all database migrations.
  * Migrations must be sequential starting from version 1.
  */
-export function getMigrations(): Migration[] {
+function getMigrations(): Migration[] {
 	return [
 		{
 			version: 1,
@@ -53,6 +58,33 @@ export function getMigrations(): Migration[] {
 			version: 3,
 			description: 'Add session_lifecycle table for tracking session creation and closure',
 			up: (db) => migrateV3(db),
+		},
+		{
+			version: 4,
+			description: 'Add compound indexes on query_events for dashboard query performance',
+			up: (db) => migrateV4(db),
+		},
+		{
+			version: 5,
+			description:
+				'Add is_worktree column to query_events and session_lifecycle for worktree analytics',
+			up: (db) => migrateV5(db),
+		},
+		{
+			version: 6,
+			description: 'Add image_annotations table for tracking image annotation events',
+			up: (db) => migrateV6(db),
+		},
+		{
+			version: 7,
+			description: 'Add shortcut_usage_daily table for tracking keyboard shortcut firings per day',
+			up: (db) => migrateV7(db),
+		},
+		{
+			version: 8,
+			description:
+				'Add multi_window_usage_daily table for tracking windows opened and peak concurrent windows per day',
+			up: (db) => migrateV8(db),
 		},
 	];
 }
@@ -231,4 +263,81 @@ function migrateV3(db: Database.Database): void {
 	runStatements(db, CREATE_SESSION_LIFECYCLE_INDEXES_SQL);
 
 	logger.debug('Created session_lifecycle table', LOG_CONTEXT);
+}
+
+/**
+ * Migration v4: Add compound indexes for dashboard query performance
+ */
+function migrateV4(db: Database.Database): void {
+	runStatements(db, CREATE_COMPOUND_INDEXES_SQL);
+
+	logger.debug('Added compound indexes on query_events', LOG_CONTEXT);
+}
+
+/**
+ * Migration v5: Add is_worktree column to query_events and session_lifecycle.
+ *
+ * Uses PRAGMA table_info to check whether the column already exists before
+ * issuing ALTER TABLE — this lets the migration be safely re-applied if a
+ * previous run partially completed before being recorded.
+ */
+function migrateV5(db: Database.Database): void {
+	if (!hasColumn(db, 'query_events', 'is_worktree')) {
+		db.prepare('ALTER TABLE query_events ADD COLUMN is_worktree INTEGER DEFAULT 0').run();
+	}
+	db.prepare('CREATE INDEX IF NOT EXISTS idx_query_is_worktree ON query_events(is_worktree)').run();
+
+	if (!hasColumn(db, 'session_lifecycle', 'is_worktree')) {
+		db.prepare('ALTER TABLE session_lifecycle ADD COLUMN is_worktree INTEGER DEFAULT 0').run();
+	}
+
+	logger.debug(
+		'Added is_worktree column to query_events and session_lifecycle tables',
+		LOG_CONTEXT
+	);
+}
+
+/**
+ * Migration v6: Add image_annotations table for tracking annotation events.
+ */
+function migrateV6(db: Database.Database): void {
+	db.prepare(CREATE_IMAGE_ANNOTATIONS_SQL).run();
+	runStatements(db, CREATE_IMAGE_ANNOTATIONS_INDEXES_SQL);
+
+	logger.debug('Created image_annotations table', LOG_CONTEXT);
+}
+
+/**
+ * Migration v7: Add shortcut_usage_daily table.
+ *
+ * Per-day rolled-up counter — one row per local-date with the total number of
+ * keyboard shortcuts fired. The renderer increments via UPSERT so the table
+ * stays bounded (one row per day across the lifetime of the app).
+ */
+function migrateV7(db: Database.Database): void {
+	db.prepare(CREATE_SHORTCUT_USAGE_DAILY_SQL).run();
+
+	logger.debug('Created shortcut_usage_daily table', LOG_CONTEXT);
+}
+
+/**
+ * Migration v8: Add multi_window_usage_daily table.
+ *
+ * Per-day rolled-up counters for multi-window usage telemetry - one row per
+ * local-date with the number of secondary windows opened and the peak number of
+ * windows open concurrently that day. The main process UPSERTs on each window
+ * open so the table stays bounded (one row per day). Aggregate counters only.
+ */
+function migrateV8(db: Database.Database): void {
+	db.prepare(CREATE_MULTI_WINDOW_USAGE_DAILY_SQL).run();
+
+	logger.debug('Created multi_window_usage_daily table', LOG_CONTEXT);
+}
+
+/**
+ * Check whether a column exists on a table using SQLite's PRAGMA table_info.
+ */
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+	const rows = db.pragma(`table_info(${table})`) as Array<{ name: string }> | undefined;
+	return Array.isArray(rows) && rows.some((row) => row.name === column);
 }

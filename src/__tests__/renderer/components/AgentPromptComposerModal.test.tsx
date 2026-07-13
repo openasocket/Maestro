@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { AgentPromptComposerModal } from '../../../renderer/components/AgentPromptComposerModal';
 import { LayerStackProvider } from '../../../renderer/contexts/LayerStackContext';
+import { useSettingsStore } from '../../../renderer/stores/settingsStore';
 import type { Theme } from '../../../renderer/types';
 
 // Mock lucide-react
@@ -110,6 +111,7 @@ describe('AgentPromptComposerModal', () => {
 		theme = createTestTheme();
 		vi.clearAllMocks();
 		mockAutocompleteState.isOpen = false;
+		useSettingsStore.setState({ bionifyReadingMode: false });
 	});
 
 	afterEach(() => {
@@ -176,6 +178,27 @@ describe('AgentPromptComposerModal', () => {
 			);
 
 			expect(screen.getByText('~2,500 tokens')).toBeInTheDocument();
+		});
+	});
+
+	describe('reading-mode exclusions', () => {
+		it('keeps the prompt textarea out of bionify reading mode', () => {
+			useSettingsStore.setState({ bionifyReadingMode: true });
+
+			renderWithLayerStack(
+				<AgentPromptComposerModal
+					isOpen={true}
+					onClose={vi.fn()}
+					theme={theme}
+					initialValue="Editor text should remain raw and selectable."
+					onSubmit={vi.fn()}
+				/>
+			);
+
+			expect(screen.getByRole('textbox')).toHaveValue(
+				'Editor text should remain raw and selectable.'
+			);
+			expect(document.querySelector('.bionify-word')).not.toBeInTheDocument();
 		});
 	});
 
@@ -328,8 +351,9 @@ describe('AgentPromptComposerModal', () => {
 				/>
 			);
 
-			// The modal container has w-[90vw] class
-			const modalContainer = document.querySelector('.w-\\[90vw\\]');
+			const modalContainer = document.querySelector(
+				'[data-modal-resize-key="agent-prompt-composer"]'
+			);
 			expect(modalContainer).toHaveStyle({ backgroundColor: theme.colors.bgMain });
 		});
 
@@ -793,7 +817,11 @@ describe('AgentPromptComposerModal', () => {
 			const backdrop = document.querySelector('.fixed.inset-0');
 			expect(backdrop).toBeInTheDocument();
 
+			// Backdrop close requires both mousedown AND click to originate on the
+			// backdrop element itself — guards against drag-overshoot from text
+			// selection inside the modal accidentally closing it.
 			await act(async () => {
+				fireEvent.mouseDown(backdrop!);
 				fireEvent.click(backdrop!);
 			});
 
@@ -1366,8 +1394,10 @@ describe('AgentPromptComposerModal', () => {
 				/>
 			);
 
-			const modalContent = screen.getByText('Agent Prompt Editor').closest('.w-\\[90vw\\]');
-			expect(modalContent).toHaveClass('h-[85vh]', 'max-w-5xl');
+			const modalContent = screen
+				.getByText('Agent Prompt Editor')
+				.closest('[data-modal-resize-key="agent-prompt-composer"]');
+			expect(modalContent).toHaveStyle({ maxWidth: '90vw', maxHeight: '90vh' });
 		});
 
 		it('has fixed position backdrop', () => {

@@ -14,7 +14,7 @@
  * Extracted from main/index.ts to improve code organization.
  */
 
-import { ipcMain, dialog, shell, BrowserWindow, App } from 'electron';
+import { ipcMain, dialog, shell, clipboard, nativeImage, BrowserWindow, App } from 'electron';
 import * as path from 'path';
 import * as fsSync from 'fs';
 import Store from 'electron-store';
@@ -24,21 +24,17 @@ import { detectShells } from '../../utils/shellDetector';
 import { isCloudflaredInstalled } from '../../utils/cliDetection';
 import { tunnelManager as tunnelManagerInstance } from '../../tunnel-manager';
 import { checkForUpdates } from '../../update-checker';
+import { sendCheckin } from '../../checkin';
 import { setAllowPrerelease } from '../../auto-updater';
 import { WebServer } from '../../web-server';
 import { powerManager } from '../../power-manager';
 import { MaestroSettings } from './persistence';
+import { captureException } from '../../utils/sentry';
+import { createSafeSend } from '../../utils/safe-send';
+import type { BootstrapSettings } from '../../stores/types';
 
 // Type for tunnel manager instance
 type TunnelManagerType = typeof tunnelManagerInstance;
-
-/**
- * Interface for bootstrap settings (custom storage location)
- */
-interface BootstrapSettings {
-	customSyncPath?: string;
-	iCloudSyncEnabled?: boolean; // Legacy - kept for backwards compatibility
-}
 
 /**
  * Dependencies required for system handlers
@@ -80,6 +76,7 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 
 			return result.filePaths[0];
 		} catch (error) {
+			void captureException(error);
 			// Log the error but return null to ensure IPC reply is sent
 			logger.error('dialog:selectFolder failed', 'Dialog', { error });
 			return null;
@@ -147,7 +144,8 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 				'JetBrains Mono',
 			];
 		} catch (error) {
-			console.error('Font detection error:', error);
+			void captureException(error);
+			logger.error('Font detection error:', undefined, error);
 			// Return common monospace fonts as fallback
 			return [
 				'Monaco',
@@ -177,6 +175,7 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 			);
 			return shells;
 		} catch (error) {
+			void captureException(error);
 			logger.error('Shell detection error', 'ShellDetector', error);
 			// Return default shell list with all marked as unavailable
 			return [
@@ -190,17 +189,57 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 	});
 
 	// Shell operations - open external URLs
+	const ALLOWED_PROTOCOLS = ['http:', 'https:', 'mailto:'];
 	ipcMain.handle('shell:openExternal', async (_event, url: string) => {
 		// Validate URL before opening - Fixes MAESTRO-1S
 		if (!url || typeof url !== 'string') {
 			throw new Error('Invalid URL: URL must be a non-empty string');
 		}
+		let parsed: URL;
 		try {
-			new URL(url);
+			parsed = new URL(url);
 		} catch {
-			throw new Error(`Invalid URL: ${url}`);
+			// Detect absolute file paths and redirect to openPath — Fixes MAESTRO-FN/FA/F4
+			if (path.isAbsolute(url)) {
+				if (fsSync.existsSync(url)) {
+					const errorMessage = await shell.openPath(url);
+					if (errorMessage) {
+						throw new Error(errorMessage);
+					}
+					return;
+				}
+				throw new Error(`Path does not exist: ${url}`);
+			}
+			// Relative paths (LICENSE, ./README.md, vscode/**) are not actionable — log and return
+			logger.warn(`Ignored non-URL string passed to openExternal: "${url}"`, 'Shell');
+			return;
 		}
-		await shell.openExternal(url);
+		// Redirect file:// URLs to shell.openPath instead of rejecting — Fixes MAESTRO-9M
+		if (parsed.protocol === 'file:') {
+			const filePath = decodeURIComponent(parsed.pathname);
+			if (!fsSync.existsSync(filePath)) {
+				throw new Error(`Path does not exist: ${filePath}`);
+			}
+			const errorMessage = await shell.openPath(filePath);
+			if (errorMessage) {
+				throw new Error(errorMessage);
+			}
+			return;
+		}
+		if (!ALLOWED_PROTOCOLS.includes(parsed.protocol)) {
+			throw new Error(`Protocol not allowed: ${parsed.protocol}`);
+		}
+		try {
+			await shell.openExternal(url);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			if (message.includes('Launch Services') || message.includes('No application')) {
+				// Fixes MAESTRO-3Q: macOS has no handler for this URL scheme/file type.
+				logger.warn(`No application found to open "${url}"`, 'Shell', { error: message });
+				return;
+			}
+			throw err;
+		}
 	});
 
 	// Shell operations - move item to system trash
@@ -210,10 +249,29 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 		}
 		// Resolve to absolute path and verify it exists
 		const absolutePath = path.resolve(itemPath);
+		// Path missing → user's intent (delete) is already satisfied; no-op gracefully
+		// rather than rejecting the IPC promise, which surfaces as an unhandled
+		// rejection in the renderer. Fixes MAESTRO-JD/JC.
 		if (!fsSync.existsSync(absolutePath)) {
-			throw new Error(`Path does not exist: ${absolutePath}`);
+			logger.warn(`shell:trashItem - path does not exist: ${absolutePath}`, 'Shell');
+			return;
 		}
-		await shell.trashItem(absolutePath);
+		try {
+			await shell.trashItem(absolutePath);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			// User or system cancelled the trash operation — not a real error
+			// Fixes MAESTRO-A4
+			if (
+				message.includes('aborted') ||
+				message.includes('cancelled') ||
+				message.includes('canceled')
+			) {
+				logger.debug(`Trash operation cancelled for ${absolutePath}`, 'Shell');
+				return;
+			}
+			throw error;
+		}
 	});
 
 	// Shell operations - reveal item in system file manager (Finder on macOS, Explorer on Windows)
@@ -223,10 +281,59 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 		}
 		// Resolve to absolute path and verify it exists
 		const absolutePath = path.resolve(itemPath);
+		// Stale path → log + return rather than rejecting the IPC, which produces
+		// noisy unhandled rejections from fire-and-forget callers in the renderer.
+		// Mirrors the shell:openPath fix (MAESTRO-B3). Fixes MAESTRO-K1/HN/HS.
 		if (!fsSync.existsSync(absolutePath)) {
-			throw new Error(`Path does not exist: ${absolutePath}`);
+			logger.warn(`shell:showItemInFolder - path does not exist: ${absolutePath}`, 'Shell');
+			return;
 		}
 		shell.showItemInFolder(absolutePath);
+	});
+
+	// Shell operations - open file/folder in default application
+	ipcMain.handle('shell:openPath', async (_event, itemPath: string) => {
+		if (!itemPath || typeof itemPath !== 'string') {
+			throw new Error('Invalid path: path must be a non-empty string');
+		}
+		const absolutePath = path.resolve(itemPath);
+		if (!fsSync.existsSync(absolutePath)) {
+			// Path doesn't exist — log and return gracefully since many callers
+			// fire-and-forget without catching. Fixes MAESTRO-B3
+			logger.warn(`shell:openPath - path does not exist: ${absolutePath}`, 'Shell');
+			return;
+		}
+		const errorMessage = await shell.openPath(absolutePath);
+		if (errorMessage) {
+			logger.warn(`shell:openPath failed for ${absolutePath}: ${errorMessage}`, 'Shell');
+		}
+	});
+
+	// Clipboard operations - copy text/image to system clipboard via Electron native API
+	ipcMain.handle('clipboard:writeText', async (_event, text: string) => {
+		if (typeof text !== 'string') {
+			throw new Error('Invalid clipboard text: must be a string');
+		}
+		clipboard.writeText(text);
+	});
+
+	ipcMain.handle('clipboard:writeImage', async (_event, dataUrl: string) => {
+		if (!dataUrl || typeof dataUrl !== 'string') {
+			throw new Error('Invalid data URL: must be a non-empty string');
+		}
+		const img = nativeImage.createFromDataURL(dataUrl);
+		if (img.isEmpty()) {
+			throw new Error('Failed to create image from data URL');
+		}
+		clipboard.writeImage(img);
+	});
+
+	// Read image from system clipboard. Returns a PNG data URL, or null when
+	// the clipboard does not currently hold an image.
+	ipcMain.handle('clipboard:readImage', async (): Promise<string | null> => {
+		const img = clipboard.readImage();
+		if (img.isEmpty()) return null;
+		return img.toDataURL();
 	});
 
 	// ============ Tunnel Handlers (Cloudflare) ============
@@ -266,7 +373,25 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 	});
 
 	ipcMain.handle('tunnel:getStatus', async () => {
-		return tunnelManager.getStatus();
+		const status = tunnelManager.getStatus();
+		if (!status.isRunning || !status.url) return status;
+
+		// Append the web server's token path so the URL stays usable.
+		// tunnelManager itself is token-agnostic — composition happens here,
+		// matching tunnel:start above.
+		const webServer = getWebServer();
+		const serverUrl = webServer?.getSecureUrl();
+		if (!serverUrl) return status;
+
+		try {
+			const tokenPath = new URL(serverUrl).pathname;
+			if (tokenPath && tokenPath !== '/' && !status.url.endsWith(tokenPath)) {
+				return { ...status, url: status.url + tokenPath };
+			}
+		} catch {
+			// Malformed server URL — fall back to bare tunnel URL
+		}
+		return status;
 	});
 
 	// ============ DevTools Handlers ============
@@ -301,6 +426,24 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 	ipcMain.handle('updates:check', async (_event, includePrerelease: boolean = false) => {
 		const currentVersion = app.getVersion();
 		return checkForUpdates(currentVersion, includePrerelease);
+	});
+
+	// Anonymous DAU/MAU check-in ping. Fired by the renderer alongside the update
+	// check, gated by the same "check for updates" preference. Fire-and-forget:
+	// we kick it off and return immediately so it never blocks the update check,
+	// and sendCheckin swallows all failures internally.
+	ipcMain.handle('updates:checkin', async () => {
+		// Resolve the active theme id best-effort so we can measure theme
+		// popularity. The store is seeded with the default ('dracula'), so this
+		// returns a value for every user. Never let it block or throw the ping.
+		let theme: string | undefined;
+		try {
+			const value = settingsStore.get('activeThemeId' as keyof MaestroSettings);
+			if (typeof value === 'string') theme = value;
+		} catch {
+			theme = undefined;
+		}
+		void sendCheckin(app, theme);
 	});
 
 	// Set whether to allow prerelease updates (for electron-updater)
@@ -577,24 +720,52 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 }
 
 /**
+ * How long to coalesce log entries before forwarding them to the renderer.
+ * Each `webContents.send` carries fixed serialization overhead, so buffering
+ * burst output (debug mode, noisy components) materially reduces IPC pressure.
+ */
+const LOGGER_FORWARD_FLUSH_INTERVAL_MS = 50;
+/** Hard cap on buffered entries — flush early if we exceed this size. */
+const LOGGER_FORWARD_FLUSH_SIZE = 100;
+
+/**
  * Setup logger event forwarding to renderer.
  * This should be called after the main window is created.
+ *
+ * Entries are buffered and dispatched in batches via `logger:newLogBatch`
+ * to amortize IPC serialization overhead. The preload layer fans batches
+ * out to per-entry consumers so the public API stays single-entry.
  */
 export function setupLoggerEventForwarding(getMainWindow: () => BrowserWindow | null): void {
+	const safeSend = createSafeSend(getMainWindow);
+	let buffer: unknown[] = [];
+	let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const flush = () => {
+		if (flushTimer) {
+			clearTimeout(flushTimer);
+			flushTimer = null;
+		}
+		if (buffer.length === 0) return;
+
+		const batch = buffer;
+		buffer = [];
+
+		// safeSend handles null/destroyed windows and fans the batch out to
+		// web-desktop bridge clients so remote log viewers stay in sync.
+		safeSend('logger:newLogBatch', batch);
+	};
+
 	logger.on('newLog', (entry) => {
-		const mainWindow = getMainWindow();
-		// Safely send - handle cases where renderer is disposed (GPU crash, window closing)
-		try {
-			if (
-				mainWindow &&
-				!mainWindow.isDestroyed() &&
-				mainWindow.webContents &&
-				!mainWindow.webContents.isDestroyed()
-			) {
-				mainWindow.webContents.send('logger:newLog', entry);
-			}
-		} catch {
-			// Silently ignore - renderer not available
+		buffer.push(entry);
+
+		if (buffer.length >= LOGGER_FORWARD_FLUSH_SIZE) {
+			flush();
+			return;
+		}
+
+		if (!flushTimer) {
+			flushTimer = setTimeout(flush, LOGGER_FORWARD_FLUSH_INTERVAL_MS);
 		}
 	});
 }

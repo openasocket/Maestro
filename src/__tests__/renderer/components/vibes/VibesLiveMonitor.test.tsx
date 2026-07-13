@@ -106,12 +106,7 @@ afterEach(() => {
 
 describe('VibesLiveMonitor', () => {
 	it('renders the Live Monitor header', async () => {
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		expect(screen.getByText('Live Monitor')).toBeTruthy();
 	});
@@ -120,23 +115,13 @@ describe('VibesLiveMonitor', () => {
 		// Make getLog hang
 		mockGetLog.mockReturnValue(new Promise(() => {}));
 
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		expect(screen.getByText('Waiting for annotations...')).toBeTruthy();
 	});
 
 	it('displays annotation count after data loads', async () => {
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('42 annotations')).toBeTruthy();
@@ -144,12 +129,7 @@ describe('VibesLiveMonitor', () => {
 	});
 
 	it('renders annotation feed entries', async () => {
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('.../components/App.tsx')).toBeTruthy();
@@ -160,12 +140,7 @@ describe('VibesLiveMonitor', () => {
 	});
 
 	it('shows action badges for each entry', async () => {
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('create')).toBeTruthy();
@@ -176,12 +151,7 @@ describe('VibesLiveMonitor', () => {
 	});
 
 	it('shows agent types for each entry', async () => {
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getAllByText('Claude Code').length).toBeGreaterThanOrEqual(1);
@@ -191,12 +161,7 @@ describe('VibesLiveMonitor', () => {
 	});
 
 	it('polls for new data at regular intervals', async () => {
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		// Initial fetch
 		await waitFor(() => {
@@ -223,12 +188,7 @@ describe('VibesLiveMonitor', () => {
 	});
 
 	it('calls getLog with correct parameters', async () => {
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(mockGetLog).toHaveBeenCalledWith('/test/project', {
@@ -244,12 +204,7 @@ describe('VibesLiveMonitor', () => {
 			error: 'Connection failed',
 		});
 
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('Connection failed')).toBeTruthy();
@@ -262,12 +217,7 @@ describe('VibesLiveMonitor', () => {
 			error: 'audit.db not found. Run build first.',
 		});
 
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		// Wait a tick to let the fetch resolve
 		await waitFor(() => {
@@ -280,23 +230,13 @@ describe('VibesLiveMonitor', () => {
 	});
 
 	it('does not fetch when projectPath is undefined', () => {
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath={undefined}
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath={undefined} />);
 
 		expect(mockGetLog).not.toHaveBeenCalled();
 	});
 
 	it('stops polling on unmount', async () => {
-		const { unmount } = render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		const { unmount } = render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(mockGetLog).toHaveBeenCalledTimes(1);
@@ -318,12 +258,7 @@ describe('VibesLiveMonitor', () => {
 			data: JSON.stringify({ total_annotations: 1 }),
 		});
 
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('1 annotation')).toBeTruthy();
@@ -331,12 +266,7 @@ describe('VibesLiveMonitor', () => {
 	});
 
 	it('shows pulse indicator when polling is active', async () => {
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(mockGetLog).toHaveBeenCalled();
@@ -354,12 +284,7 @@ describe('VibesLiveMonitor', () => {
 			data: JSON.stringify({ annotations: mockAnnotations }),
 		});
 
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('.../components/App.tsx')).toBeTruthy();
@@ -367,12 +292,7 @@ describe('VibesLiveMonitor', () => {
 	});
 
 	it('shows "Updated" footer after first successful fetch', async () => {
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText(/Updated/)).toBeTruthy();
@@ -393,12 +313,7 @@ describe('VibesLiveMonitor', () => {
 			]),
 		});
 
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(screen.getByText('.../deep/File.tsx')).toBeTruthy();
@@ -418,12 +333,7 @@ describe('VibesLiveMonitor', () => {
 			]),
 		});
 
-		render(
-			<VibesLiveMonitor
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesLiveMonitor theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			const dash = screen.getByText('—');

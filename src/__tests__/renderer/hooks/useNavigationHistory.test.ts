@@ -144,6 +144,28 @@ describe('useNavigationHistory', () => {
 			expect(result.current.canGoBack()).toBe(true);
 		});
 
+		it('should not ignore entry with same sessionId and tabId but different tabKind', () => {
+			const { result } = renderHook(() => useNavigationHistory());
+
+			act(() => {
+				result.current.pushNavigation({ sessionId: 'session1', tabId: 'tab1', tabKind: 'ai' });
+				result.current.pushNavigation({ sessionId: 'session1', tabId: 'tab1', tabKind: 'file' });
+			});
+
+			expect(result.current.canGoBack()).toBe(true);
+		});
+
+		it('should ignore duplicate entry with same sessionId, tabId, and tabKind', () => {
+			const { result } = renderHook(() => useNavigationHistory());
+
+			act(() => {
+				result.current.pushNavigation({ sessionId: 'session1', tabId: 'b1', tabKind: 'browser' });
+				result.current.pushNavigation({ sessionId: 'session1', tabId: 'b1', tabKind: 'browser' });
+			});
+
+			expect(result.current.canGoBack()).toBe(false);
+		});
+
 		it('should clear forward stack on new push', () => {
 			const { result } = renderHook(() => useNavigationHistory());
 
@@ -1016,6 +1038,103 @@ describe('useNavigationHistory', () => {
 			});
 
 			expect(entry).toEqual({ sessionId: 'session1' });
+		});
+	});
+
+	describe('group chat navigation', () => {
+		it('should support groupChatId entries', () => {
+			const { result } = renderHook(() => useNavigationHistory());
+
+			act(() => {
+				result.current.pushNavigation({ sessionId: 'session1' });
+				result.current.pushNavigation({ groupChatId: 'gc1' });
+			});
+
+			expect(result.current.canGoBack()).toBe(true);
+
+			let entry: NavHistoryEntry | null = null;
+			act(() => {
+				entry = result.current.navigateBack();
+				vi.runAllTimers();
+			});
+
+			expect(entry).toEqual({ sessionId: 'session1' });
+		});
+
+		it('should deduplicate groupChatId entries', () => {
+			const { result } = renderHook(() => useNavigationHistory());
+
+			act(() => {
+				result.current.pushNavigation({ groupChatId: 'gc1' });
+				result.current.pushNavigation({ groupChatId: 'gc1' }); // duplicate
+			});
+
+			expect(result.current.canGoBack()).toBe(false);
+		});
+
+		it('should distinguish different groupChatId entries', () => {
+			const { result } = renderHook(() => useNavigationHistory());
+
+			act(() => {
+				result.current.pushNavigation({ groupChatId: 'gc1' });
+				result.current.pushNavigation({ groupChatId: 'gc2' });
+			});
+
+			expect(result.current.canGoBack()).toBe(true);
+
+			let entry: NavHistoryEntry | null = null;
+			act(() => {
+				entry = result.current.navigateBack();
+				vi.runAllTimers();
+			});
+
+			expect(entry).toEqual({ groupChatId: 'gc1' });
+		});
+
+		it('should handle mixed session and group chat entries', () => {
+			const { result } = renderHook(() => useNavigationHistory());
+
+			act(() => {
+				result.current.pushNavigation({ sessionId: 'session1' });
+				result.current.pushNavigation({ groupChatId: 'gc1' });
+				result.current.pushNavigation({ sessionId: 'session2' });
+			});
+
+			let entry: NavHistoryEntry | null = null;
+
+			act(() => {
+				entry = result.current.navigateBack();
+				vi.runAllTimers();
+			});
+			expect(entry).toEqual({ groupChatId: 'gc1' });
+
+			act(() => {
+				entry = result.current.navigateBack();
+				vi.runAllTimers();
+			});
+			expect(entry).toEqual({ sessionId: 'session1' });
+		});
+
+		it('should handle back/forward with group chat entries', () => {
+			const { result } = renderHook(() => useNavigationHistory());
+
+			act(() => {
+				result.current.pushNavigation({ sessionId: 'session1' });
+				result.current.pushNavigation({ groupChatId: 'gc1' });
+			});
+
+			act(() => {
+				result.current.navigateBack();
+				vi.runAllTimers();
+			});
+
+			let entry: NavHistoryEntry | null = null;
+			act(() => {
+				entry = result.current.navigateForward();
+				vi.runAllTimers();
+			});
+
+			expect(entry).toEqual({ groupChatId: 'gc1' });
 		});
 	});
 });

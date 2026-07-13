@@ -83,6 +83,98 @@ describe('Debug Preload API', () => {
 				expect(result).toEqual(preview);
 			});
 		});
+
+		describe('getAppStats', () => {
+			it('should invoke debug:getAppStats and pass through the snapshot', async () => {
+				const snapshot = {
+					timestamp: 1234,
+					platform: 'darwin' as NodeJS.Platform,
+					main: { rss: 1, heapTotal: 2, heapUsed: 3, external: 4, arrayBuffers: 5 },
+					electronProcesses: [],
+					managedProcesses: [],
+				};
+				mockInvoke.mockResolvedValue(snapshot);
+
+				const result = await api.getAppStats();
+
+				expect(mockInvoke).toHaveBeenCalledWith('debug:getAppStats');
+				expect(result).toEqual(snapshot);
+			});
+		});
+
+		describe('profiling', () => {
+			it('should invoke debug:getProfilingStatus and pass through the status', async () => {
+				const status = {
+					success: true,
+					active: true,
+					startedAt: 1000,
+					elapsedMs: 4200,
+					categories: ['toplevel', 'v8'],
+				};
+				mockInvoke.mockResolvedValue(status);
+
+				const result = await api.getProfilingStatus();
+
+				expect(mockInvoke).toHaveBeenCalledWith('debug:getProfilingStatus');
+				expect(result).toEqual(status);
+			});
+
+			it('should invoke debug:startProfiling', async () => {
+				mockInvoke.mockResolvedValue({
+					success: true,
+					active: true,
+					startedAt: 1000,
+					elapsedMs: 0,
+					categories: ['toplevel'],
+				});
+
+				const result = await api.startProfiling();
+
+				expect(mockInvoke).toHaveBeenCalledWith('debug:startProfiling');
+				expect(result.active).toBe(true);
+			});
+
+			it('should invoke debug:stopProfiling and pass through the bundle result', async () => {
+				const stopResult = {
+					success: true,
+					path: '/Users/me/Desktop/maestro-profile.zip',
+					cancelled: false,
+					bundleSizeBytes: 2048,
+					traceSizeBytes: 20480,
+					durationMs: 5000,
+				};
+				mockInvoke.mockResolvedValue(stopResult);
+
+				const result = await api.stopProfiling();
+
+				expect(mockInvoke).toHaveBeenCalledWith('debug:stopProfiling');
+				expect(result).toEqual(stopResult);
+			});
+
+			it('should subscribe to debug:profilingProgress and forward events', () => {
+				const callback = vi.fn();
+				let registered: ((event: unknown, data: unknown) => void) | undefined;
+				mockOn.mockImplementation((_channel: string, handler: typeof registered) => {
+					registered = handler;
+				});
+
+				const cleanup = api.onProfilingProgress(callback);
+
+				expect(mockOn).toHaveBeenCalledWith('debug:profilingProgress', expect.any(Function));
+
+				// The wrapped handler should strip the IpcRendererEvent and pass data only.
+				const payload = { phase: 'compressing', percent: 42 };
+				registered?.({}, payload);
+				expect(callback).toHaveBeenCalledWith(payload);
+
+				// Cleanup removes the listener.
+				cleanup();
+				expect(mockRemoveListener).toHaveBeenCalledWith(
+					'debug:profilingProgress',
+					expect.any(Function)
+				);
+			});
+		});
 	});
 
 	describe('createDocumentGraphApi', () => {

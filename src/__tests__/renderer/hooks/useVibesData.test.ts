@@ -110,7 +110,7 @@ describe('parseStats', () => {
 		expect(warnSpy).toHaveBeenCalledWith(
 			'useVibesData: parseStats failed',
 			expect.any(SyntaxError),
-			'not valid json',
+			'not valid json'
 		);
 	});
 });
@@ -287,7 +287,7 @@ describe('parseSessions', () => {
 		expect(warnSpy).toHaveBeenCalledWith(
 			'useVibesData: parseSessions failed',
 			expect.any(SyntaxError),
-			'not valid json',
+			'not valid json'
 		);
 	});
 });
@@ -344,9 +344,7 @@ describe('parseModels', () => {
 
 	it('handles wrapped { models: [...] } format', () => {
 		const raw = JSON.stringify({
-			models: [
-				{ model_name: 'llama-3', annotation_count: 5 },
-			],
+			models: [{ model_name: 'llama-3', annotation_count: 5 }],
 		});
 		const result = parseModels(raw);
 		expect(result).toHaveLength(1);
@@ -380,9 +378,7 @@ describe('parseModels', () => {
 	});
 
 	it('does not overwrite existing non-zero percentages', () => {
-		const raw = JSON.stringify([
-			{ model_name: 'model-a', annotation_count: 5, percentage: 42 },
-		]);
+		const raw = JSON.stringify([{ model_name: 'model-a', annotation_count: 5, percentage: 42 }]);
 		const result = parseModels(raw);
 		expect(result[0].percentage).toBe(42);
 	});
@@ -412,7 +408,7 @@ describe('parseModels', () => {
 		expect(warnSpy).toHaveBeenCalledWith(
 			'useVibesData: parseModels failed',
 			expect.any(SyntaxError),
-			'not valid json',
+			'not valid json'
 		);
 	});
 });

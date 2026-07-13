@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as path from 'path';
 import { ipcMain, dialog, shell, BrowserWindow, App } from 'electron';
 import Store from 'electron-store';
 import {
@@ -32,7 +33,9 @@ vi.mock('electron', () => ({
 	},
 	shell: {
 		openExternal: vi.fn(),
+		openPath: vi.fn(),
 		showItemInFolder: vi.fn(),
+		trashItem: vi.fn(),
 	},
 	BrowserWindow: {
 		getFocusedWindow: vi.fn(),
@@ -210,6 +213,7 @@ describe('system IPC handlers', () => {
 				// Shell handlers
 				'shells:detect',
 				'shell:openExternal',
+				'shell:openPath',
 				'shell:trashItem',
 				'shell:showItemInFolder',
 				// Tunnel handlers
@@ -223,6 +227,7 @@ describe('system IPC handlers', () => {
 				'devtools:toggle',
 				// Update handlers
 				'updates:check',
+				'updates:checkin',
 				'updates:setAllowPrerelease',
 				// Logger handlers
 				'logger:log',
@@ -247,6 +252,10 @@ describe('system IPC handlers', () => {
 				'power:getStatus',
 				'power:addReason',
 				'power:removeReason',
+				// Clipboard handlers
+				'clipboard:writeText',
+				'clipboard:writeImage',
+				'clipboard:readImage',
 			];
 
 			for (const channel of expectedChannels) {
@@ -505,13 +514,120 @@ describe('system IPC handlers', () => {
 			expect(shell.openExternal).toHaveBeenCalledWith('https://example.com');
 		});
 
-		it('should handle different URL types', async () => {
+		it('should allow http URLs', async () => {
+			vi.mocked(shell.openExternal).mockResolvedValue(undefined);
+
+			const handler = handlers.get('shell:openExternal');
+			await handler!({} as any, 'http://example.com');
+
+			expect(shell.openExternal).toHaveBeenCalledWith('http://example.com');
+		});
+
+		it('should allow mailto URLs', async () => {
 			vi.mocked(shell.openExternal).mockResolvedValue(undefined);
 
 			const handler = handlers.get('shell:openExternal');
 			await handler!({} as any, 'mailto:test@example.com');
 
 			expect(shell.openExternal).toHaveBeenCalledWith('mailto:test@example.com');
+		});
+
+		it('should redirect file:// URLs to shell.openPath', async () => {
+			vi.mocked(fsSync.existsSync).mockReturnValue(true);
+			vi.mocked(shell.openPath).mockResolvedValue('');
+
+			const handler = handlers.get('shell:openExternal');
+			await handler!({} as any, 'file:///Users/test/document.pdf');
+
+			expect(shell.openExternal).not.toHaveBeenCalled();
+			expect(shell.openPath).toHaveBeenCalledWith('/Users/test/document.pdf');
+		});
+
+		it('should reject file:// URLs when path does not exist', async () => {
+			vi.mocked(fsSync.existsSync).mockReturnValue(false);
+
+			const handler = handlers.get('shell:openExternal');
+			await expect(handler!({} as any, 'file:///nonexistent/path')).rejects.toThrow(
+				'Path does not exist'
+			);
+			expect(shell.openExternal).not.toHaveBeenCalled();
+		});
+
+		it('should reject javascript: URLs', async () => {
+			const handler = handlers.get('shell:openExternal');
+			await expect(handler!({} as any, 'javascript:alert(1)')).rejects.toThrow(
+				'Protocol not allowed: javascript:'
+			);
+			expect(shell.openExternal).not.toHaveBeenCalled();
+		});
+
+		it('should reject data: URLs', async () => {
+			const handler = handlers.get('shell:openExternal');
+			await expect(handler!({} as any, 'data:text/html,<h1>hi</h1>')).rejects.toThrow(
+				'Protocol not allowed: data:'
+			);
+			expect(shell.openExternal).not.toHaveBeenCalled();
+		});
+
+		it('should silently ignore non-URL strings like relative file paths', async () => {
+			const handler = handlers.get('shell:openExternal');
+			// These should return gracefully instead of throwing — Fixes MAESTRO-F4/E5
+			await expect(handler!({} as any, 'LICENSE')).resolves.toBeUndefined();
+			await expect(handler!({} as any, './README.md')).resolves.toBeUndefined();
+			await expect(handler!({} as any, '../docs/guide.md')).resolves.toBeUndefined();
+			await expect(handler!({} as any, 'vscode/')).resolves.toBeUndefined();
+			expect(shell.openExternal).not.toHaveBeenCalled();
+		});
+
+		it('should gracefully handle Launch Services errors', async () => {
+			vi.mocked(shell.openExternal).mockRejectedValue(
+				new Error('No application in the Launch Services database matches the input criteria.')
+			);
+
+			const handler = handlers.get('shell:openExternal');
+			// Should not throw - known recoverable error is caught and logged
+			await expect(handler!({} as any, 'https://example.com/some/path')).resolves.toBeUndefined();
+		});
+
+		it('should re-throw unexpected openExternal errors', async () => {
+			vi.mocked(shell.openExternal).mockRejectedValue(
+				new Error('Unexpected Electron internal failure')
+			);
+
+			const handler = handlers.get('shell:openExternal');
+			await expect(handler!({} as any, 'https://example.com')).rejects.toThrow(
+				'Unexpected Electron internal failure'
+			);
+		});
+
+		it('should redirect absolute file paths to openPath', async () => {
+			vi.mocked(fsSync.existsSync).mockReturnValue(true);
+			vi.mocked(shell.openPath).mockResolvedValue('');
+
+			const handler = handlers.get('shell:openExternal');
+			await handler!({} as any, '/Users/test/workspace/src/app.tsx');
+
+			expect(shell.openExternal).not.toHaveBeenCalled();
+			expect(shell.openPath).toHaveBeenCalledWith('/Users/test/workspace/src/app.tsx');
+		});
+
+		it('should throw for non-existent absolute file paths', async () => {
+			vi.mocked(fsSync.existsSync).mockReturnValue(false);
+
+			const handler = handlers.get('shell:openExternal');
+			await expect(handler!({} as any, '/nonexistent/path.tsx')).rejects.toThrow(
+				'Path does not exist'
+			);
+		});
+
+		it('should silently ignore relative paths like LICENSE or ./README.md', async () => {
+			const handler = handlers.get('shell:openExternal');
+
+			await expect(handler!({} as any, 'LICENSE')).resolves.toBeUndefined();
+			await expect(handler!({} as any, './README.md')).resolves.toBeUndefined();
+			await expect(handler!({} as any, 'vscode/**')).resolves.toBeUndefined();
+			expect(shell.openExternal).not.toHaveBeenCalled();
+			expect(shell.openPath).not.toHaveBeenCalled();
 		});
 	});
 
@@ -523,7 +639,7 @@ describe('system IPC handlers', () => {
 			const handler = handlers.get('shell:showItemInFolder');
 			await handler!({} as any, '/path/to/file.txt');
 
-			expect(shell.showItemInFolder).toHaveBeenCalledWith('/path/to/file.txt');
+			expect(shell.showItemInFolder).toHaveBeenCalledWith(path.resolve('/path/to/file.txt'));
 		});
 
 		it('should throw error for empty path', async () => {
@@ -532,12 +648,94 @@ describe('system IPC handlers', () => {
 			await expect(handler!({} as any, '')).rejects.toThrow('Invalid path');
 		});
 
-		it('should throw error for non-existent path', async () => {
+		it('should resolve gracefully (no throw) for non-existent path', async () => {
+			// Stale paths are user-caused (file deleted between display and click);
+			// handler should log + return rather than reject the IPC. Fixes
+			// MAESTRO-K1/HN/HS.
 			vi.mocked(fsSync.existsSync).mockReturnValue(false);
 
 			const handler = handlers.get('shell:showItemInFolder');
 
-			await expect(handler!({} as any, '/non/existent/path')).rejects.toThrow('Path does not exist');
+			await expect(handler!({} as any, '/non/existent/path')).resolves.toBeUndefined();
+			expect(shell.showItemInFolder).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('shell:trashItem', () => {
+		it('should trash item successfully', async () => {
+			vi.mocked(fsSync.existsSync).mockReturnValue(true);
+			vi.mocked(shell.trashItem).mockResolvedValue();
+
+			const handler = handlers.get('shell:trashItem');
+			await handler!({} as any, '/path/to/file.txt');
+
+			expect(shell.trashItem).toHaveBeenCalledWith(path.resolve('/path/to/file.txt'));
+		});
+
+		it('should throw error for empty path', async () => {
+			const handler = handlers.get('shell:trashItem');
+			await expect(handler!({} as any, '')).rejects.toThrow('Invalid path');
+		});
+
+		it('should resolve gracefully (no throw) for non-existent path', async () => {
+			// File already gone → user's intent is satisfied; treat as no-op
+			// instead of rejecting the IPC. Fixes MAESTRO-JD/JC.
+			vi.mocked(fsSync.existsSync).mockReturnValue(false);
+			const handler = handlers.get('shell:trashItem');
+			await expect(handler!({} as any, '/non/existent/path')).resolves.toBeUndefined();
+			expect(shell.trashItem).not.toHaveBeenCalled();
+		});
+
+		it('should handle aborted operation gracefully', async () => {
+			vi.mocked(fsSync.existsSync).mockReturnValue(true);
+			vi.mocked(shell.trashItem).mockRejectedValue(new Error('Operation was aborted'));
+
+			const handler = handlers.get('shell:trashItem');
+			// Should not throw — aborted operations are expected
+			await expect(handler!({} as any, '/path/to/file.txt')).resolves.toBeUndefined();
+		});
+
+		it('should rethrow unexpected errors', async () => {
+			vi.mocked(fsSync.existsSync).mockReturnValue(true);
+			vi.mocked(shell.trashItem).mockRejectedValue(new Error('Permission denied'));
+
+			const handler = handlers.get('shell:trashItem');
+			await expect(handler!({} as any, '/path/to/file.txt')).rejects.toThrow('Permission denied');
+		});
+	});
+
+	describe('shell:openPath', () => {
+		it('should open file in default application', async () => {
+			vi.mocked(fsSync.existsSync).mockReturnValue(true);
+			vi.mocked(shell.openPath).mockResolvedValue('');
+
+			const handler = handlers.get('shell:openPath');
+			await handler!({} as any, '/path/to/file.txt');
+
+			expect(shell.openPath).toHaveBeenCalledWith(path.resolve('/path/to/file.txt'));
+		});
+
+		it('should throw error for empty path', async () => {
+			const handler = handlers.get('shell:openPath');
+
+			await expect(handler!({} as any, '')).rejects.toThrow('Invalid path');
+		});
+
+		it('should return gracefully for non-existent path', async () => {
+			vi.mocked(fsSync.existsSync).mockReturnValue(false);
+
+			const handler = handlers.get('shell:openPath');
+			// Should not throw — logs warning and returns gracefully
+			await expect(handler!({} as any, '/non/existent/path')).resolves.toBeUndefined();
+		});
+
+		it('should log warning when shell.openPath returns error message', async () => {
+			vi.mocked(fsSync.existsSync).mockReturnValue(true);
+			vi.mocked(shell.openPath).mockResolvedValue('No application found');
+
+			const handler = handlers.get('shell:openPath');
+			// Should not throw — logs warning instead
+			await expect(handler!({} as any, '/path/to/file.xyz')).resolves.toBeUndefined();
 		});
 	});
 
@@ -635,11 +833,40 @@ describe('system IPC handlers', () => {
 	});
 
 	describe('tunnel:getStatus', () => {
-		it('should return tunnel status', async () => {
-			const mockStatus = {
-				running: true,
+		it('should append web server token path to running tunnel URL', async () => {
+			mockWebServer.getSecureUrl.mockReturnValue('http://localhost:3000/secret-token');
+			vi.mocked(mockTunnelManager.getStatus).mockReturnValue({
+				isRunning: true,
 				url: 'https://abc.trycloudflare.com',
-			};
+				error: null,
+			});
+
+			const handler = handlers.get('tunnel:getStatus');
+			const result = await handler!({} as any);
+
+			expect(result).toEqual({
+				isRunning: true,
+				url: 'https://abc.trycloudflare.com/secret-token',
+				error: null,
+			});
+		});
+
+		it('should not double-append token when URL already contains it', async () => {
+			mockWebServer.getSecureUrl.mockReturnValue('http://localhost:3000/secret-token');
+			vi.mocked(mockTunnelManager.getStatus).mockReturnValue({
+				isRunning: true,
+				url: 'https://abc.trycloudflare.com/secret-token',
+				error: null,
+			});
+
+			const handler = handlers.get('tunnel:getStatus');
+			const result = await handler!({} as any);
+
+			expect(result.url).toBe('https://abc.trycloudflare.com/secret-token');
+		});
+
+		it('should return bare status when tunnel is not running', async () => {
+			const mockStatus = { isRunning: false, url: null, error: null };
 			vi.mocked(mockTunnelManager.getStatus).mockReturnValue(mockStatus);
 
 			const handler = handlers.get('tunnel:getStatus');
@@ -648,17 +875,102 @@ describe('system IPC handlers', () => {
 			expect(result).toEqual(mockStatus);
 		});
 
-		it('should return stopped status', async () => {
-			const mockStatus = {
-				running: false,
-				url: null,
-			};
-			vi.mocked(mockTunnelManager.getStatus).mockReturnValue(mockStatus);
+		it('should return bare tunnel URL when web server is unavailable', async () => {
+			deps.getWebServer = () => null;
+			vi.mocked(ipcMain.handle).mockClear();
+			handlers.clear();
+			vi.mocked(ipcMain.handle).mockImplementation((channel: string, handler: Function) => {
+				handlers.set(channel, handler);
+			});
+			registerSystemHandlers(deps);
+
+			vi.mocked(mockTunnelManager.getStatus).mockReturnValue({
+				isRunning: true,
+				url: 'https://abc.trycloudflare.com',
+				error: null,
+			});
 
 			const handler = handlers.get('tunnel:getStatus');
 			const result = await handler!({} as any);
 
-			expect(result).toEqual(mockStatus);
+			expect(result.url).toBe('https://abc.trycloudflare.com');
+		});
+	});
+
+	// Regression guard: a previous bug had tunnel:start returning a tokenized
+	// URL while tunnel:getStatus returned a bare one. The renderer polls
+	// getStatus every 500-2000ms, so the bare URL overwrote the good one
+	// within seconds, breaking the QR code and remote access. These tests
+	// lock in the invariant that both channels agree on the URL.
+	describe('tunnel URL consistency between start and getStatus', () => {
+		it('tunnel:start and tunnel:getStatus must return the same URL for the same session', async () => {
+			mockWebServer.getSecureUrl.mockReturnValue('http://localhost:3000/abc-123-token');
+			const bareTunnelUrl = 'https://raise-skins-flickr-wagner.trycloudflare.com';
+
+			vi.mocked(mockTunnelManager.start).mockResolvedValue({
+				success: true,
+				url: bareTunnelUrl,
+			});
+			vi.mocked(mockTunnelManager.getStatus).mockReturnValue({
+				isRunning: true,
+				url: bareTunnelUrl,
+				error: null,
+			});
+
+			const startHandler = handlers.get('tunnel:start');
+			const statusHandler = handlers.get('tunnel:getStatus');
+
+			const startResult = await startHandler!({} as any);
+			const statusResult = await statusHandler!({} as any);
+
+			expect(startResult.url).toBe(statusResult.url);
+			expect(startResult.url).toBe(`${bareTunnelUrl}/abc-123-token`);
+		});
+
+		it('repeated polling of tunnel:getStatus must not drop the token', async () => {
+			mockWebServer.getSecureUrl.mockReturnValue('http://localhost:3000/persistent-token');
+			const bareTunnelUrl = 'https://xyz.trycloudflare.com';
+
+			vi.mocked(mockTunnelManager.start).mockResolvedValue({
+				success: true,
+				url: bareTunnelUrl,
+			});
+			vi.mocked(mockTunnelManager.getStatus).mockReturnValue({
+				isRunning: true,
+				url: bareTunnelUrl,
+				error: null,
+			});
+
+			const startHandler = handlers.get('tunnel:start');
+			const statusHandler = handlers.get('tunnel:getStatus');
+
+			const startResult = await startHandler!({} as any);
+			const expectedUrl = `${bareTunnelUrl}/persistent-token`;
+			expect(startResult.url).toBe(expectedUrl);
+
+			// Simulate the renderer's polling loop (useLiveOverlay.ts:131-136).
+			// Every call must return the tokenized URL — never the bare one.
+			for (let i = 0; i < 5; i++) {
+				const pollResult = await statusHandler!({} as any);
+				expect(pollResult.url).toBe(expectedUrl);
+				expect(pollResult.url).not.toBe(bareTunnelUrl);
+			}
+		});
+
+		it('tunnel:getStatus URL must always contain the web server security token path', async () => {
+			mockWebServer.getSecureUrl.mockReturnValue('http://localhost:3000/mandatory-token');
+			vi.mocked(mockTunnelManager.getStatus).mockReturnValue({
+				isRunning: true,
+				url: 'https://tunnel.trycloudflare.com',
+				error: null,
+			});
+
+			const handler = handlers.get('tunnel:getStatus');
+			const result = await handler!({} as any);
+
+			// The token path is required for the web server to accept the request.
+			// Without it, the remote tunnel URL 404s.
+			expect(result.url).toMatch(/\/mandatory-token$/);
 		});
 	});
 

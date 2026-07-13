@@ -1,4 +1,5 @@
 import { useCallback, useRef } from 'react';
+import { getClaudeTokenSourceFields } from '../../../shared/claudeTokenMode';
 import type {
 	Session,
 	SessionState,
@@ -7,16 +8,44 @@ import type {
 	CustomAICommand,
 	BatchRunState,
 } from '../../types';
-import { getActiveTab } from '../../utils/tabHelpers';
-import { generateId } from '../../utils/ids';
+import { getActiveTab, getBusyTabs, extractQuickTabName } from '../../utils/tabHelpers';
+import { getStdinFlags, prepareMaestroSystemPrompt } from '../../utils/spawnHelpers';
+import { generateId, getInputBroadcastOriginId } from '../../utils/ids';
 import { substituteTemplateVariables } from '../../utils/templateVariables';
+import { prependNewSessionMessage } from '../../../shared/newSessionMessage';
+import { resolveTabPermissionMode } from '../../../shared/agentMetadata';
+import { filterYoloArgs } from '../../utils/agentArgs';
+import { hasCapabilityCached } from '../agent/useAgentCapabilities';
 import { gitService } from '../../services/git';
-import { imageOnlyDefaultPrompt, maestroSystemPrompt } from '../../../prompts';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { logger } from '../../utils/logger';
+
+let cachedImageOnlyPrompt: string = '';
+let inputProcessingPromptsLoaded = false;
+
+export async function loadInputProcessingPrompts(force = false): Promise<void> {
+	if (inputProcessingPromptsLoaded && !force) return;
+
+	const imageResult = await window.maestro.prompts.get('image-only-default');
+
+	if (!imageResult.success) {
+		throw new Error(`Failed to load image-only-default prompt: ${imageResult.error}`);
+	}
+	cachedImageOnlyPrompt = imageResult.content!;
+	inputProcessingPromptsLoaded = true;
+	// Update the exported binding so consumers see the loaded value
+	DEFAULT_IMAGE_ONLY_PROMPT = cachedImageOnlyPrompt;
+}
+
+function getImageOnlyPrompt(): string {
+	return cachedImageOnlyPrompt;
+}
 
 /**
  * Default prompt used when user sends only an image without text.
+ * Uses `let` so the binding updates after loadInputProcessingPrompts() populates the cache.
  */
-export const DEFAULT_IMAGE_ONLY_PROMPT = imageOnlyDefaultPrompt;
+export let DEFAULT_IMAGE_ONLY_PROMPT: string = getImageOnlyPrompt();
 
 /**
  * Dependencies for the useInputProcessing hook.
@@ -28,8 +57,8 @@ export interface UseInputProcessingDeps {
 	activeSessionId: string;
 	/** Session state setter */
 	setSessions: React.Dispatch<React.SetStateAction<Session[]>>;
-	/** Current input value */
-	inputValue: string;
+	/** Read the current input value at call time (non-reactive; reads the store) */
+	getInputValue: () => string;
 	/** Input value setter */
 	setInputValue: (value: string) => void;
 	/** Staged images for the current message */
@@ -65,7 +94,7 @@ export interface UseInputProcessingDeps {
 	/** Handler for the /wizard built-in command (starts the inline wizard for Auto Run documents) */
 	onWizardCommand?: (args: string) => void;
 	/** Handler for sending messages to the wizard (when wizard is active) */
-	onWizardSendMessage?: (content: string) => Promise<void>;
+	onWizardSendMessage?: (content: string, images?: string[]) => Promise<void>;
 	/** Whether the wizard is currently active for the active tab */
 	isWizardActive?: boolean;
 	/** Handler for the /skills built-in command (lists Claude Code skills) */
@@ -74,6 +103,18 @@ export interface UseInputProcessingDeps {
 	automaticTabNamingEnabled?: boolean;
 	/** Conductor profile (user's About Me from settings) */
 	conductorProfile?: string;
+	/**
+	 * Cross-agent `@mention` dispatch (Phase 03). Called at user-submit time for
+	 * a regular AI message; resolves any `@target` mentions and fires a
+	 * non-blocking consultation to each. No-op when the message has no mentions.
+	 * Only invoked for direct input-box submits (not queued replays / force-sends).
+	 *
+	 * Returns `true` when the source agent's own send should be SUPPRESSED - the
+	 * message leads with an `@agent` mention, so it is addressed only at the
+	 * consulted agent(s). The caller then records the user's bubble but does not
+	 * dispatch to the source agent.
+	 */
+	onCrossAgentMentions?: (message: string, sourceSession: Session, sourceTabId: string) => boolean;
 }
 
 /**
@@ -86,9 +127,18 @@ export type BatchState = BatchRunState;
  */
 export interface UseInputProcessingReturn {
 	/** Process the current input (send message or execute command) */
-	processInput: (overrideInputValue?: string) => Promise<void>;
+	processInput: (
+		overrideInputValue?: string,
+		options?: { forceParallel?: boolean; images?: string[] }
+	) => Promise<void>;
 	/** Ref to processInput for use in callbacks that need latest version */
-	processInputRef: React.MutableRefObject<((overrideInputValue?: string) => Promise<void>) | null>;
+	processInputRef: React.MutableRefObject<
+		| ((
+				overrideInputValue?: string,
+				options?: { forceParallel?: boolean; images?: string[] }
+		  ) => Promise<void>)
+		| null
+	>;
 }
 
 /**
@@ -109,7 +159,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 		activeSession,
 		activeSessionId,
 		setSessions,
-		inputValue,
+		getInputValue,
 		setInputValue,
 		stagedImages,
 		setStagedImages,
@@ -131,22 +181,49 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 		onSkillsCommand,
 		automaticTabNamingEnabled,
 		conductorProfile,
+		onCrossAgentMentions,
 	} = deps;
 
 	// Ref for the processInput function so external code can access the latest version
-	const processInputRef = useRef<((overrideInputValue?: string) => Promise<void>) | null>(null);
+	const processInputRef = useRef<
+		| ((
+				overrideInputValue?: string,
+				options?: { forceParallel?: boolean; images?: string[] }
+		  ) => Promise<void>)
+		| null
+	>(null);
 
 	/**
 	 * Process user input - handles slash commands, queuing, and message sending.
 	 */
 	const processInput = useCallback(
-		async (overrideInputValue?: string) => {
+		async (
+			overrideInputValue?: string,
+			options?: { forceParallel?: boolean; images?: string[] }
+		) => {
 			// Flush any pending batched updates before processing user input
 			// This ensures AI output appears before the user's new message
 			flushBatchedUpdates?.();
 
-			const effectiveInputValue = overrideInputValue ?? inputValue;
-			if (!activeSession || (!effectiveInputValue.trim() && stagedImages.length === 0)) {
+			const effectiveInputValue = overrideInputValue ?? getInputValue();
+			// When the caller passes explicit images (e.g. Force Send button replaying a
+			// queued item), use those instead of the active tab's stagedImages. This avoids
+			// the stale-closure race when the caller does setStagedImages() right before
+			// invoking processInput(), and prevents wiping the user's in-progress draft.
+			const effectiveImages = options?.images ?? stagedImages;
+			const usingOverrideImages = options?.images !== undefined;
+			if (options?.forceParallel) {
+				logger.info('[ForcedParallel] processInput called:', undefined, {
+					hasActiveSession: !!activeSession,
+					inputValue: effectiveInputValue.substring(0, 50),
+					inputMode: activeSession?.inputMode,
+					sessionState: activeSession?.state,
+				});
+			}
+			if (!activeSession || (!effectiveInputValue.trim() && effectiveImages.length === 0)) {
+				if (options?.forceParallel) {
+					logger.info('[ForcedParallel] Early return: no session or empty input');
+				}
 				return;
 			}
 
@@ -167,7 +244,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 
 					// Execute the history command handler asynchronously
 					onHistoryCommand().catch((error) => {
-						console.error('[processInput] /history command failed:', error);
+						logger.error('[processInput] /history command failed:', undefined, error);
 					});
 					return;
 				}
@@ -206,7 +283,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 
 					// Execute the skills command handler asynchronously
 					onSkillsCommand().catch((error) => {
-						console.error('[processInput] /skills command failed:', error);
+						logger.error('[processInput] /skills command failed:', undefined, error);
 					});
 					return;
 				}
@@ -220,7 +297,19 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 					const commandArgs =
 						firstSpaceIndex === -1 ? '' : commandText.substring(firstSpaceIndex + 1).trim();
 
-					const matchingCustomCommand = customAICommands.find((cmd) => cmd.command === baseCommand);
+					// Check custom AI commands first, then agent-discovered commands with prompts
+					const matchingAgentCommand = activeSession.agentCommands?.find(
+						(cmd) => cmd.command === baseCommand && cmd.prompt
+					);
+					const matchingCustomCommand =
+						customAICommands.find((cmd) => cmd.command === baseCommand) ||
+						(matchingAgentCommand
+							? {
+									command: matchingAgentCommand.command,
+									description: matchingAgentCommand.description,
+									prompt: matchingAgentCommand.prompt!,
+								}
+							: undefined);
 					if (matchingCustomCommand) {
 						// Execute the custom AI command by sending its prompt
 						setInputValue('');
@@ -242,6 +331,8 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 							substituteTemplateVariables(matchingCustomCommand.prompt, {
 								session: activeSession,
 								gitBranch,
+								groupId: activeSession.groupId,
+								activeTabId: activeSession.activeTabId,
 								conductorProfile,
 							});
 
@@ -252,7 +343,15 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 							// Check both session busy state AND AutoRun state
 							// AutoRun runs in isolation and doesn't set session to busy, so we check it explicitly
 							const isAutoRunActive = getBatchState(activeSession.id).isRunning;
-							const sessionIsIdle = activeSession.state !== 'busy' && !isAutoRunActive;
+							// Forced parallel: explicit user override (Cmd+Shift+Enter / Force Send button).
+							// Mirrors the regular message path — only THIS tab's state matters; cross-tab
+							// busyness and AutoRun are intentionally bypassed.
+							const forceParallel =
+								options?.forceParallel === true &&
+								useSettingsStore.getState().forcedParallelExecution;
+							const sessionIsIdle = forceParallel
+								? activeTab?.state !== 'busy'
+								: activeSession.state !== 'busy' && !isAutoRunActive;
 
 							const queuedItem: QueuedItem = {
 								id: generateId(),
@@ -268,6 +367,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 										? activeTab.agentSessionId.split('-')[0].toUpperCase()
 										: 'New'),
 								readOnlyMode: isReadOnlyMode,
+								...(forceParallel && { forceParallel: true }),
 							};
 
 							// If session is idle, we need to set up state and process immediately
@@ -342,24 +442,105 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 					!effectiveInputValue.trim().startsWith('/wizard')
 				) {
 					// Ignore slash commands in wizard mode
-					console.log(
+					logger.info(
 						'[processInput] Ignoring slash command in wizard mode:',
+						undefined,
 						effectiveInputValue.trim()
 					);
 					return;
 				}
 
+				// Capture staged images before clearing
+				const imagesToSend = effectiveImages.length > 0 ? [...effectiveImages] : undefined;
+
 				// Clear input
 				setInputValue('');
-				setStagedImages([]);
+				if (!usingOverrideImages) setStagedImages([]);
 				syncAiInputToSession('');
 				if (inputRef.current) inputRef.current.style.height = 'auto';
 
-				// Send to wizard
-				onWizardSendMessage(effectiveInputValue).catch((error) => {
-					console.error('[processInput] Wizard message failed:', error);
+				// Send to wizard (with images if any were staged)
+				onWizardSendMessage(effectiveInputValue, imagesToSend).catch((error) => {
+					logger.error('[processInput] Wizard message failed:', undefined, error);
 				});
 				return;
+			}
+
+			// Cross-agent @mention dispatch (Phase 03). Fire-and-forget: resolves any
+			// `@target` mentions in this message and consults each target agent
+			// without blocking the source chat. The original message still posts to
+			// the source agent below (the `@target` text stays in it, so the source
+			// agent sees the user pinged another agent). Gated on `overrideInputValue
+			// === undefined` so it fires exactly once, on a real input-box submit -
+			// not on queued replays / force-sends, which pass an override value.
+			if (currentMode === 'ai' && overrideInputValue === undefined && onCrossAgentMentions) {
+				const sourceTab = getActiveTab(activeSession);
+				const suppressLocal = onCrossAgentMentions(
+					effectiveInputValue,
+					activeSession,
+					sourceTab?.id || activeSession.activeTabId
+				);
+
+				// The message leads with an `@agent` mention, so it is addressed only at
+				// the consulted agent(s). Record the user's bubble (so the streamed
+				// cross-agent replies have an anchor and the user sees what they asked),
+				// then STOP: do not queue or dispatch to the source agent, do not mark it
+				// busy. The consult already fired above.
+				if (suppressLocal) {
+					const mentionOnlyEntry = {
+						id: generateId(),
+						timestamp: Date.now(),
+						source: 'user',
+						text: effectiveInputValue,
+						images: [...effectiveImages],
+					} satisfies LogEntry;
+
+					setSessions((prev) =>
+						prev.map((s) => {
+							if (s.id !== activeSessionId) return s;
+							const tab = getActiveTab(s);
+							if (!tab) return s;
+							const trimmed = effectiveInputValue.trim();
+							const priorHistory = s.aiCommandHistory || [];
+							const aiCommandHistory =
+								trimmed && priorHistory[priorHistory.length - 1] !== trimmed
+									? [...priorHistory, trimmed].slice(-50)
+									: priorHistory;
+							return {
+								...s,
+								aiCommandHistory,
+								aiTabs: s.aiTabs.map((t) =>
+									t.id === tab.id ? { ...t, logs: [...t.logs, mentionOnlyEntry] } : t
+								),
+							};
+						})
+					);
+
+					// Mirror the bubble to other windows, matching the normal user-entry
+					// broadcast below (best-effort; a failed mirror must not block send).
+					window.maestro.process
+						.broadcastUserInput({
+							originId: getInputBroadcastOriginId(),
+							sessionId: activeSession.id,
+							tabId: sourceTab?.id,
+							inputMode: 'ai',
+							entry: mentionOnlyEntry,
+						})
+						.catch((error) => {
+							logger.error(
+								'[processInput] Failed to broadcast mention-only user input:',
+								undefined,
+								error
+							);
+						});
+
+					// Clear the composer.
+					setInputValue('');
+					if (!usingOverrideImages) setStagedImages([]);
+					syncAiInputToSession('');
+					if (inputRef.current) inputRef.current.style.height = 'auto';
+					return;
+				}
 			}
 
 			// Queue messages when AI is busy (only in AI mode)
@@ -376,8 +557,12 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 					if (isReadOnlyMode) return false; // Only applies to write commands
 					if (activeSession.state !== 'busy') return false; // Nothing to bypass
 
-					// Check all busy tabs are in read-only mode
-					const busyTabs = activeSession.aiTabs.filter((tab) => tab.state === 'busy');
+					// Check all busy tabs are in read-only mode. Include orphaned
+					// (closed-but-still-thinking) tabs: they keep writing in the background
+					// and hold the single-writer slot just like a visible busy tab. Omitting
+					// them lets a new write spawn concurrently with an orphan (single-writer
+					// violation when a tab is closed mid-send).
+					const busyTabs = getBusyTabs(activeSession, { includeOrphans: true });
 					const allBusyTabsReadOnly = busyTabs.every((tab) => tab.readOnlyMode === true);
 					if (!allBusyTabsReadOnly) return false;
 
@@ -395,22 +580,31 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 				// so we need to explicitly check the batch state to prevent write conflicts
 				const isAutoRunActive = getBatchState(activeSession.id).isRunning;
 
+				// Forced parallel: user explicitly chose to bypass queue via modifier shortcut
+				const forceParallel =
+					options?.forceParallel === true && useSettingsStore.getState().forcedParallelExecution;
+
 				// Determine if we should queue this message
 				// Read-only tabs can run in parallel - only queue if this specific tab is busy
 				// Write mode tabs must wait for any busy tab to finish
 				// EXCEPTION: Write commands bypass queue when all running/queued items are read-only
 				// ALSO: Always queue write commands when AutoRun is active (to prevent file conflicts)
-				const shouldQueue = isReadOnlyMode
-					? activeTab?.state === 'busy' // Read-only: only queue if THIS tab is busy
-					: (activeSession.state === 'busy' && !canWriteBypassQueue()) || isAutoRunActive; // Write mode: queue if busy OR AutoRun active
+				// FORCE PARALLEL: queues only when THIS tab is busy (skips cross-tab and AutoRun wait).
+				// When the tab finishes, the queued item dispatches immediately without waiting for other tabs.
+				const shouldQueue = forceParallel
+					? activeTab?.state === 'busy' // Force parallel: only queue if THIS tab is busy
+					: isReadOnlyMode
+						? activeTab?.state === 'busy' // Read-only: only queue if THIS tab is busy
+						: (activeSession.state === 'busy' && !canWriteBypassQueue()) || isAutoRunActive; // Write mode: queue if busy OR AutoRun active
 
 				// Debug logging to diagnose queue issues
-				console.log('[processInput] Queue decision:', {
+				logger.info('[processInput] Queue decision:', undefined, {
 					sessionId: activeSession.id.substring(0, 8),
 					sessionState: activeSession.state,
 					tabState: activeTab?.state,
 					isReadOnlyMode,
 					isAutoRunActive,
+					forceParallel,
 					shouldQueue,
 					queueLength: activeSession.executionQueue.length,
 				});
@@ -422,13 +616,14 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 						tabId: activeTab?.id || activeSession.activeTabId,
 						type: 'message',
 						text: effectiveInputValue,
-						images: [...stagedImages],
+						images: [...effectiveImages],
 						tabName:
 							activeTab?.name ||
 							(activeTab?.agentSessionId
 								? activeTab.agentSessionId.split('-')[0].toUpperCase()
 								: 'New'),
 						readOnlyMode: isReadOnlyMode,
+						...(forceParallel && { forceParallel: true }),
 					};
 
 					// Add to queue - will be processed when:
@@ -449,26 +644,39 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 
 					// Clear input
 					setInputValue('');
-					setStagedImages([]);
+					if (!usingOverrideImages) setStagedImages([]);
 					syncAiInputToSession(''); // Sync empty value to session state
 					if (inputRef.current) inputRef.current.style.height = 'auto';
 					return;
 				}
 			}
 
-			// Check if we're in read-only mode for the log entry (tab setting OR Auto Run without worktree)
+			// Check if we're in read-only mode for the log entry (tab setting OR Auto Run without worktree).
+			// Force Send (Cmd+Shift+Enter / the Force Send button on a queued item) is an explicit user
+			// override — skip the Auto Run gate, but still honor the tab's own readOnlyMode setting.
 			const activeTabForEntry = currentMode === 'ai' ? getActiveTab(activeSession) : null;
 			const currentBatchState = getBatchState(activeSession.id);
-			const isAutoRunReadOnly = currentBatchState.isRunning && !currentBatchState.worktreeActive;
+			const isForceParallelEntry =
+				options?.forceParallel === true && useSettingsStore.getState().forcedParallelExecution;
+			const isAutoRunReadOnly =
+				currentBatchState.isRunning && !currentBatchState.worktreeActive && !isForceParallelEntry;
 			const isReadOnlyEntry = activeTabForEntry?.readOnlyMode === true || isAutoRunReadOnly;
 
-			const newEntry: LogEntry = {
+			const newEntry = {
 				id: generateId(),
 				timestamp: Date.now(),
 				source: 'user',
 				text: effectiveInputValue,
-				images: [...stagedImages],
+				images: [...effectiveImages],
 				...(isReadOnlyEntry && { readOnly: true }),
+				...(isForceParallelEntry && { forceParallel: true }),
+			} satisfies LogEntry;
+			const userInputBroadcast = {
+				originId: getInputBroadcastOriginId(),
+				sessionId: activeSession.id,
+				tabId: activeTabForEntry?.id,
+				inputMode: currentMode,
+				entry: newEntry,
 			};
 
 			// Track shell CWD changes when in terminal mode
@@ -592,11 +800,12 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 						newHistory.push(effectiveInputValue.trim());
 					}
 
-					// For terminal mode, add to shellLogs
+					// For terminal mode (legacy), add to shellLogs
 					if (currentMode !== 'ai') {
 						return {
 							...s,
-							shellLogs: [...s.shellLogs, newEntry],
+							// TODO: Remove shellLogs once terminal tabs migration is complete
+							...(!s.terminalTabs?.length && { shellLogs: [...s.shellLogs, newEntry] }),
 							state: 'busy',
 							busySource: currentMode,
 							shellCwd: newShellCwd,
@@ -610,7 +819,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 					const activeTab = getActiveTab(s);
 					if (!activeTab) {
 						// No tabs exist - this is a bug, sessions must have aiTabs
-						console.error(
+						logger.error(
 							'[processInput] No active tab found - session has no aiTabs, this should not happen'
 						);
 						return s;
@@ -630,6 +839,10 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 									// Mark this tab as awaiting session ID so we can assign it correctly
 									// when the session ID comes back (prevents cross-tab assignment)
 									awaitingSessionId: isNewSession ? true : tab.awaitingSessionId,
+									// Clear any prior tab-level agent error so a late onAgentError
+									// event for the dead PID can't keep the session pinned to 'error'
+									// and hide the thinking pill on retry
+									agentError: undefined,
 								}
 							: tab
 					);
@@ -645,86 +858,194 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 						shellCwd: newShellCwd,
 						[historyKey]: newHistory,
 						aiTabs: updatedAiTabs,
+						// Clear session-level error fields so `state === 'error' && agentError`
+						// branches (useAgentListeners onExit/onAgentError) can't override the
+						// fresh busy transition and suppress the thinking pill on retry
+						agentError: undefined,
+						agentErrorTabId: undefined,
+						agentErrorPaused: false,
 					};
 				})
 			);
 
-			// Trigger automatic tab naming for new AI sessions immediately after sending the first message
-			// This runs in parallel with the agent request (no need to wait for session ID)
+			// Trigger automatic tab naming. Retries on every send until the tab has a name,
+			// so a failed/timed-out first attempt doesn't leave the tab permanently unnamed.
+			// Skip while a previous attempt is still in flight to avoid duplicate spawns.
 			const activeTabForNaming = getActiveTab(activeSession);
-			const isNewAiSession =
-				currentMode === 'ai' && activeTabForNaming && !activeTabForNaming.agentSessionId;
+			const isAiTab = currentMode === 'ai' && !!activeTabForNaming;
 			const hasTextMessage = effectiveInputValue.trim().length > 0;
 			const hasNoCustomName = !activeTabForNaming?.name;
+			const namingNotInFlight = !activeTabForNaming?.isGeneratingName;
 
-			if (automaticTabNamingEnabled && isNewAiSession && hasTextMessage && hasNoCustomName) {
-				// Set isGeneratingName to show spinner in tab
-				setSessions((prev) =>
-					prev.map((s) => {
-						if (s.id !== activeSessionId) return s;
-						return {
-							...s,
-							aiTabs: s.aiTabs.map((t) =>
-								t.id === activeTabForNaming.id ? { ...t, isGeneratingName: true } : t
-							),
-						};
-					})
-				);
+			if (
+				automaticTabNamingEnabled &&
+				isAiTab &&
+				hasTextMessage &&
+				hasNoCustomName &&
+				namingNotInFlight
+			) {
+				// Build the naming prompt from accumulated user messages plus the current one,
+				// capped at 2000 chars. Mirrors the manual Auto handler — richer context produces
+				// more reliable LLM output that survives extractTabName's filters.
+				const MAX_PROMPT_CHARS = 2000;
+				const priorUserMessages: string[] = [];
+				let totalLength = 0;
+				for (const entry of activeTabForNaming.logs) {
+					if (entry.source !== 'user') continue;
+					const text = entry.text.trim();
+					if (!text) continue;
+					if (totalLength + text.length > MAX_PROMPT_CHARS) {
+						priorUserMessages.push(text.substring(0, MAX_PROMPT_CHARS - totalLength));
+						totalLength = MAX_PROMPT_CHARS;
+						break;
+					}
+					priorUserMessages.push(text);
+					totalLength += text.length;
+				}
+				let namingPrompt = effectiveInputValue;
+				if (priorUserMessages.length > 0 && totalLength < MAX_PROMPT_CHARS) {
+					const remaining = MAX_PROMPT_CHARS - totalLength;
+					const currentTrimmed = effectiveInputValue.trim().substring(0, remaining);
+					namingPrompt = [...priorUserMessages, currentTrimmed].join('\n\n');
+				} else if (priorUserMessages.length > 0) {
+					namingPrompt = priorUserMessages.join('\n\n');
+				}
 
-				// Call the tab naming API (async, fire and forget)
-				window.maestro.tabNaming
-					.generateTabName({
-						userMessage: effectiveInputValue,
-						agentType: activeSession.toolType,
-						cwd: activeSession.cwd,
-						sessionSshRemoteConfig: activeSession.sessionSshRemoteConfig,
-					})
-					.then((generatedName) => {
-						// Clear the generating indicator
-						setSessions((prev) =>
-							prev.map((s) => {
-								if (s.id !== activeSessionId) return s;
-								return {
-									...s,
-									aiTabs: s.aiTabs.map((t) =>
-										t.id === activeTabForNaming.id ? { ...t, isGeneratingName: false } : t
-									),
-								};
-							})
-						);
-
-						if (!generatedName) return;
-
-						// Update the tab name only if it's still null (user hasn't manually renamed it)
-						setSessions((prev) =>
-							prev.map((s) => {
-								if (s.id !== activeSessionId) return s;
-								const tab = s.aiTabs.find((t) => t.id === activeTabForNaming.id);
-								if (!tab || tab.name !== null) return s;
-								return {
-									...s,
-									aiTabs: s.aiTabs.map((t) =>
-										t.id === activeTabForNaming.id ? { ...t, name: generatedName } : t
-									),
-								};
-							})
-						);
-					})
-					.catch((error) => {
-						console.error('[processInput] Tab naming failed:', error);
-						// Clear the generating indicator on error
-						setSessions((prev) =>
-							prev.map((s) => {
-								if (s.id !== activeSessionId) return s;
-								return {
-									...s,
-									aiTabs: s.aiTabs.map((t) =>
-										t.id === activeTabForNaming.id ? { ...t, isGeneratingName: false } : t
-									),
-								};
-							})
-						);
+				// Fast-path: extract tab name from known patterns (GitHub URLs, PR/issue refs, Jira tickets)
+				// This avoids spawning an ephemeral agent for messages with obvious identifiers
+				const quickName = extractQuickTabName(namingPrompt);
+				if (quickName) {
+					window.maestro.logger.log('info', `Quick tab named: "${quickName}"`, 'TabNaming', {
+						tabId: activeTabForNaming.id,
+						sessionId: activeSessionId,
+						quickName,
 					});
+					setSessions((prev) =>
+						prev.map((s) => {
+							if (s.id !== activeSessionId) return s;
+							return {
+								...s,
+								aiTabs: s.aiTabs.map((t) =>
+									t.id === activeTabForNaming.id ? { ...t, name: quickName } : t
+								),
+							};
+						})
+					);
+				} else {
+					// Set isGeneratingName to show spinner in tab
+					setSessions((prev) =>
+						prev.map((s) => {
+							if (s.id !== activeSessionId) return s;
+							return {
+								...s,
+								aiTabs: s.aiTabs.map((t) =>
+									t.id === activeTabForNaming.id ? { ...t, isGeneratingName: true } : t
+								),
+							};
+						})
+					);
+
+					window.maestro.logger.log('info', 'Auto tab naming started', 'TabNaming', {
+						tabId: activeTabForNaming.id,
+						sessionId: activeSessionId,
+						agentType: activeSession.toolType,
+						messageLength: namingPrompt.length,
+						priorMessageCount: priorUserMessages.length,
+					});
+
+					// Call the tab naming API (async, fire and forget)
+					window.maestro.tabNaming
+						.generateTabName({
+							userMessage: namingPrompt,
+							agentType: activeSession.toolType,
+							cwd: activeSession.cwd,
+							sessionSshRemoteConfig: activeSession.sessionSshRemoteConfig,
+							// Forward session env so naming uses the same provider auth as the chat.
+							sessionCustomEnvVars: activeSession.customEnvVars,
+							// Honor the agent's Claude token source for the naming spawn.
+							// Shared extractor guarantees the SAME complete triple the chat
+							// spawn forwards - no partial/drifting forward possible.
+							...getClaudeTokenSourceFields(activeSession),
+						})
+						.then((generatedName) => {
+							// Clear the generating indicator
+							setSessions((prev) =>
+								prev.map((s) => {
+									if (s.id !== activeSessionId) return s;
+									return {
+										...s,
+										aiTabs: s.aiTabs.map((t) =>
+											t.id === activeTabForNaming.id ? { ...t, isGeneratingName: false } : t
+										),
+									};
+								})
+							);
+
+							if (!generatedName) {
+								window.maestro.logger.log('warn', 'Auto tab naming returned null', 'TabNaming', {
+									tabId: activeTabForNaming.id,
+									sessionId: activeSessionId,
+								});
+								return;
+							}
+
+							// Update the tab name only if it's still null (user hasn't manually renamed it)
+							setSessions((prev) =>
+								prev.map((s) => {
+									if (s.id !== activeSessionId) return s;
+									const tab = s.aiTabs.find((t) => t.id === activeTabForNaming.id);
+									if (!tab || tab.name !== null) {
+										window.maestro.logger.log(
+											'info',
+											'Auto tab naming skipped (tab already named)',
+											'TabNaming',
+											{
+												tabId: activeTabForNaming.id,
+												generatedName,
+												existingName: tab?.name,
+											}
+										);
+										return s;
+									}
+									window.maestro.logger.log(
+										'info',
+										`Auto tab named: "${generatedName}"`,
+										'TabNaming',
+										{
+											tabId: activeTabForNaming.id,
+											sessionId: activeSessionId,
+											generatedName,
+										}
+									);
+									return {
+										...s,
+										aiTabs: s.aiTabs.map((t) =>
+											t.id === activeTabForNaming.id ? { ...t, name: generatedName } : t
+										),
+									};
+								})
+							);
+						})
+						.catch((error) => {
+							window.maestro.logger.log('error', 'Auto tab naming failed', 'TabNaming', {
+								tabId: activeTabForNaming.id,
+								sessionId: activeSessionId,
+								error: String(error),
+							});
+							// Clear the generating indicator on error
+							setSessions((prev) =>
+								prev.map((s) => {
+									if (s.id !== activeSessionId) return s;
+									return {
+										...s,
+										aiTabs: s.aiTabs.map((t) =>
+											t.id === activeTabForNaming.id ? { ...t, isGeneratingName: false } : t
+										),
+									};
+								})
+							);
+						});
+				}
 			}
 
 			// If directory changed, check if new directory is a Git repository
@@ -752,14 +1073,17 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 				nudgeMessage && currentMode === 'ai'
 					? `${effectiveInputValue}\n\n---\n\n${nudgeMessage}`
 					: effectiveInputValue;
-			const capturedImages = [...stagedImages];
+			const capturedImages = [...effectiveImages];
 
 			// Broadcast user input to web clients so they stay in sync
 			// Use effectiveInputValue (without nudge) since nudge should be hidden from UI
+			window.maestro.process.broadcastUserInput(userInputBroadcast).catch((error) => {
+				logger.error('[processInput] Failed to broadcast user input:', undefined, error);
+			});
 			window.maestro.web.broadcastUserInput(activeSession.id, effectiveInputValue, currentMode);
 
 			setInputValue('');
-			setStagedImages([]);
+			if (!usingOverrideImages) setStagedImages([]);
 
 			// Sync empty value to session state (prevents stale input restoration on blur)
 			if (isAiMode) {
@@ -777,19 +1101,25 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 			// For batch mode (Claude), include tab ID in session ID to prevent process collision
 			// This ensures each tab's process has a unique identifier
 			const activeTabForSpawn = getActiveTab(activeSession);
+			const isForceParallel =
+				options?.forceParallel === true && useSettingsStore.getState().forcedParallelExecution;
 			const targetSessionId =
 				currentMode === 'ai'
 					? `${activeSession.id}-ai-${activeTabForSpawn?.id || 'default'}`
 					: `${activeSession.id}-terminal`;
 
-			// Check if this is an AI agent in batch mode (e.g., Claude Code, OpenCode, Codex, Factory Droid)
+			// Check if this is an AI agent in batch mode
 			// Batch mode agents spawn a new process per message rather than writing to stdin
 			const isBatchModeAgent =
-				currentMode === 'ai' &&
-				(activeSession.toolType === 'claude-code' ||
-					activeSession.toolType === 'opencode' ||
-					activeSession.toolType === 'codex' ||
-					activeSession.toolType === 'factory-droid');
+				currentMode === 'ai' && hasCapabilityCached(activeSession.toolType, 'supportsBatchMode');
+
+			if (isForceParallel) {
+				logger.info('[ForcedParallel] Reached spawn path:', undefined, {
+					targetSessionId,
+					isBatchModeAgent,
+					toolType: activeSession.toolType,
+				});
+			}
 
 			if (isBatchModeAgent) {
 				// Batch mode: Spawn new agent process with prompt
@@ -807,33 +1137,59 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 						// Use the ACTIVE TAB's agentSessionId (not the deprecated session-level one)
 						const freshActiveTab = getActiveTab(freshSession);
 						const tabAgentSessionId = freshActiveTab?.agentSessionId;
-						// Check CURRENT session's Auto Run state (not any session's) and respect worktree bypass
+
+						if (!tabAgentSessionId && freshActiveTab?.logs && freshActiveTab.logs.length > 0) {
+							console.warn(
+								'[InputProcessing] Spawning batch agent without agentSessionId for tab with existing logs',
+								{
+									tabId: freshActiveTab.id,
+									logCount: freshActiveTab.logs.length,
+									sessionId: activeSessionId,
+								}
+							);
+						}
+
+						// Check CURRENT session's Auto Run state (not any session's) and respect worktree bypass.
+						// Force Send (Cmd+Shift+Enter / the Force Send button on a queued item) is an
+						// explicit override — skip the Auto Run gate, but still honor the tab's own
+						// readOnlyMode setting.
 						const currentSessionBatchState = getBatchState(activeSessionId);
 						const isAutoRunReadOnly =
-							currentSessionBatchState.isRunning && !currentSessionBatchState.worktreeActive;
-						const isReadOnly = isAutoRunReadOnly || freshActiveTab?.readOnlyMode;
+							currentSessionBatchState.isRunning &&
+							!currentSessionBatchState.worktreeActive &&
+							!isForceParallel;
+						const isReadOnly =
+							isAutoRunReadOnly ||
+							freshActiveTab?.readOnlyMode === true ||
+							freshActiveTab?.permissionMode === 'readonly';
+						const effectivePermissionMode = isReadOnly
+							? 'readonly'
+							: resolveTabPermissionMode(freshActiveTab);
 
 						// For read-only mode, filter out any YOLO/skip-permissions flags from base args
 						// (they would override the read-only mode we're requesting)
-						// - Claude Code: --dangerously-skip-permissions
-						// - Codex: --dangerously-bypass-approvals-and-sandbox
 						const baseArgs = agent.args ?? [];
-						const spawnArgs = isReadOnly
-							? baseArgs.filter(
-									(arg) =>
-										arg !== '--dangerously-skip-permissions' &&
-										arg !== '--dangerously-bypass-approvals-and-sandbox'
-								)
-							: [...baseArgs];
+						const spawnArgs = isReadOnly ? filterYoloArgs(baseArgs, agent) : [...baseArgs];
 
 						// Use agent.path (full path) if available, otherwise fall back to agent.command
 						const commandToUse = agent.path || agent.command;
+						if (!commandToUse) {
+							throw new Error(`${activeSession.toolType} agent has no command configured`);
+						}
 
 						// If user sends only an image without text, inject the default image-only prompt
 						const hasImages = capturedImages.length > 0;
 						const hasNoText = !capturedInputValue.trim();
 						let effectivePrompt =
 							hasImages && hasNoText ? DEFAULT_IMAGE_ONLY_PROMPT : capturedInputValue;
+
+						// Prefix new session message if present (only for the first message in a new session)
+						if (!tabAgentSessionId) {
+							effectivePrompt = prependNewSessionMessage(
+								effectivePrompt,
+								freshSession.newSessionMessage
+							);
+						}
 
 						// For read-only mode, append instruction to return plan in response instead of writing files
 						if (isReadOnly) {
@@ -863,70 +1219,29 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 								})
 							);
 
-							console.log('[InputProcessing] Injected merged context into message:', {
+							logger.info('[InputProcessing] Injected merged context into message:', undefined, {
 								contextLength: pendingMergedContext.length,
 								promptLength: effectivePrompt.length,
 							});
 						}
 
-						// For NEW sessions (no agentSessionId), prepend Maestro system prompt
-						// This introduces Maestro and sets directory restrictions for the agent
-						const isNewSession = !tabAgentSessionId;
-						if (isNewSession && maestroSystemPrompt) {
-							// Get git branch for template substitution
-							let gitBranch: string | undefined;
-							if (freshSession.isGitRepo) {
-								try {
-									const status = await gitService.getStatus(freshSession.cwd);
-									gitBranch = status.branch;
-								} catch {
-									// Ignore git errors
-								}
-							}
+						// Prepare Maestro system prompt. Always send it; the main-process handler
+						// decides how to deliver it based on agent capabilities:
+						//  - Native --append-system-prompt agents (e.g. Claude Code): re-send every
+						//    invocation — the flag isn't persisted into the session transcript.
+						//  - Fallback-embed agents (e.g. Copilot-CLI, Codex): embed only on first
+						//    turn; on resume the prompt is already in the transcript.
+						const appendSystemPrompt = await prepareMaestroSystemPrompt({
+							session: freshSession,
+							activeTabId: freshSession.activeTabId,
+						});
 
-							// Get history file path for task recall
-							// Skip for SSH sessions — the local path is unreachable from the remote host
-							let historyFilePath: string | undefined;
-							const isSSH = freshSession.sshRemoteId || freshSession.sessionSshRemoteConfig?.enabled;
-							if (!isSSH) {
-								try {
-									historyFilePath =
-										(await window.maestro.history.getFilePath(freshSession.id)) || undefined;
-								} catch {
-									// Ignore history errors
-								}
-							}
-
-							// Substitute template variables in the system prompt
-							console.log('[useInputProcessing] Template substitution context:', {
-								sessionId: freshSession.id,
-								sessionName: freshSession.name,
-								autoRunFolderPath: freshSession.autoRunFolderPath,
-								fullPath: freshSession.fullPath,
-								cwd: freshSession.cwd,
-								parentSessionId: freshSession.parentSessionId,
-								historyFilePath,
-							});
-							const substitutedSystemPrompt = substituteTemplateVariables(maestroSystemPrompt, {
-								session: freshSession,
-								gitBranch,
-								historyFilePath,
-								conductorProfile,
-							});
-
-							// Prepend system prompt to user's message
-							effectivePrompt = `${substitutedSystemPrompt}\n\n---\n\n# User Request\n\n${effectivePrompt}`;
-						}
-
-						// On Windows, use stdin to bypass cmd.exe ~8KB command line length limit
-						// and avoid shell escaping issues with special characters like "-"
-						const isWindows = navigator.platform.toLowerCase().includes('win');
-						// Use agent capabilities to determine stdin mode
-						// Agents that support --input-format stream-json use sendPromptViaStdin (JSON format)
-						// Agents that don't support stream-json use sendPromptViaStdinRaw (raw text)
-						const supportsStreamJson = agent.capabilities?.supportsStreamJsonInput ?? false;
-						const sendPromptViaStdin = isWindows && supportsStreamJson;
-						const sendPromptViaStdinRaw = isWindows && !supportsStreamJson;
+						const { sendPromptViaStdin, sendPromptViaStdinRaw } = getStdinFlags({
+							isSshSession:
+								!!freshSession.sshRemoteId || !!freshSession.sessionSshRemoteConfig?.enabled,
+							supportsStreamJsonInput: agent.capabilities?.supportsStreamJsonInput ?? false,
+							hasImages: hasImages ?? false,
+						});
 
 						// Spawn agent with generic config - the main process will use agent-specific
 						// argument builders (resumeArgs, readOnlyArgs, etc.) to construct the final args
@@ -938,25 +1253,28 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 							args: spawnArgs,
 							prompt: effectivePrompt,
 							images: hasImages ? capturedImages : undefined,
+							appendSystemPrompt,
 							// Generic spawn options - main process builds agent-specific args
 							agentSessionId: tabAgentSessionId ?? undefined,
 							readOnlyMode: isReadOnly,
+							permissionMode: effectivePermissionMode,
 							// Per-session config overrides (if set)
 							sessionCustomPath: freshSession.customPath,
 							sessionCustomArgs: freshSession.customArgs,
 							sessionCustomEnvVars: freshSession.customEnvVars,
-							sessionCustomModel: freshSession.customModel,
+							sessionCustomModel: freshActiveTab?.customModel ?? freshSession.customModel,
+							sessionCustomEffort: freshActiveTab?.customEffort ?? freshSession.customEffort,
 							sessionCustomContextWindow: freshSession.customContextWindow,
 							// Per-session SSH remote config (takes precedence over agent-level SSH config)
 							sessionSshRemoteConfig: freshSession.sessionSshRemoteConfig,
 							// Windows stdin handling - send prompt via stdin to avoid shell escaping issues
-							// For stream-json agents (Claude Code, Codex): use JSON format via stdin
-							// For other agents (OpenCode, etc.): use raw text via stdin
+							// For stream-json agents with images: use JSON format via stdin
+							// For text-only or non-stream-json agents: use raw text via stdin
 							sendPromptViaStdin,
 							sendPromptViaStdinRaw,
 						});
 					} catch (error) {
-						console.error('Failed to spawn agent batch process:', error);
+						logger.error('Failed to spawn agent batch process:', undefined, error);
 						const errorLog: LogEntry = {
 							id: generateId(),
 							timestamp: Date.now(),
@@ -1030,7 +1348,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 						sessionSshRemoteConfig: activeSession.sessionSshRemoteConfig,
 					})
 					.catch((error) => {
-						console.error('Failed to run command:', error);
+						logger.error('Failed to run command:', undefined, error);
 						setSessions((prev) =>
 							prev.map((s) => {
 								if (s.id !== activeSessionId) return s;
@@ -1039,15 +1357,18 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 									state: 'idle',
 									busySource: undefined,
 									thinkingStartTime: undefined,
-									shellLogs: [
-										...s.shellLogs,
-										{
-											id: generateId(),
-											timestamp: Date.now(),
-											source: 'system',
-											text: `Error: Failed to run command - ${(error as Error).message}`,
-										},
-									],
+									// TODO: Remove shellLogs once terminal tabs migration is complete
+									...(!s.terminalTabs?.length && {
+										shellLogs: [
+											...s.shellLogs,
+											{
+												id: generateId(),
+												timestamp: Date.now(),
+												source: 'system',
+												text: `Error: Failed to run command - ${(error as Error).message}`,
+											},
+										],
+									}),
 								};
 							})
 						);
@@ -1055,7 +1376,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 			} else if (targetPid > 0) {
 				// AI mode: Write to stdin
 				window.maestro.process.write(targetSessionId, capturedInputValue).catch((error) => {
-					console.error('Failed to write to process:', error);
+					logger.error('Failed to write to process:', undefined, error);
 					const errorLog: LogEntry = {
 						id: generateId(),
 						timestamp: Date.now(),
@@ -1094,7 +1415,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 		[
 			activeSession,
 			activeSessionId,
-			inputValue,
+			getInputValue,
 			stagedImages,
 			customAICommands,
 			setInputValue,
@@ -1111,6 +1432,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 			flushBatchedUpdates,
 			onHistoryCommand,
 			onWizardCommand,
+			onCrossAgentMentions,
 		]
 	);
 

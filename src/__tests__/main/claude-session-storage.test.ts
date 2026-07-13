@@ -16,20 +16,44 @@ vi.mock('../../main/constants', () => ({
 	},
 }));
 
-vi.mock('../../main/utils/pricing', () => ({
-	calculateClaudeCost: vi.fn((input: number, output: number, cacheRead: number, cacheCreation: number) => {
-		return (input * 3 + output * 15 + cacheRead * 0.3 + cacheCreation * 3.75) / 1_000_000;
-	}),
-}));
+vi.mock('../../main/utils/pricing', () => {
+	const flatCost = (input: number, output: number, cacheRead: number, cacheCreation: number) =>
+		(input * 3 + output * 15 + cacheRead * 0.3 + cacheCreation * 3.75) / 1_000_000;
+	const sumMatches = (content: string, key: string) => {
+		let total = 0;
+		for (const m of content.matchAll(new RegExp(`"${key}"\\s*:\\s*(\\d+)`, 'g'))) {
+			total += parseInt(m[1], 10);
+		}
+		return total;
+	};
+	return {
+		calculateClaudeCost: vi.fn(flatCost),
+		computeClaudeUsageCost: vi.fn((content: string) => {
+			const inputTokens = sumMatches(content, 'input_tokens');
+			const outputTokens = sumMatches(content, 'output_tokens');
+			const cacheReadTokens = sumMatches(content, 'cache_read_input_tokens');
+			const cacheCreationTokens = sumMatches(content, 'cache_creation_input_tokens');
+			return {
+				inputTokens,
+				outputTokens,
+				cacheReadTokens,
+				cacheCreationTokens,
+				costUsd: flatCost(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens),
+				// Per-model split the storage now maps via `claudeModelUsage`; this
+				// simplified mock doesn't track models, so an empty split is honest.
+				byModel: [],
+			};
+		}),
+	};
+});
 
 vi.mock('../../main/utils/statsCache', () => ({
-	encodeClaudeProjectPath: vi.fn((p: string) => p.replace(/\//g, '-')),
+	encodeClaudeProjectPath: vi.fn((p: string) => p.replace(/[^a-zA-Z0-9]/g, '-')),
 }));
 
 vi.mock('../../main/utils/remote-fs', () => ({
-	readDirRemote: vi.fn(),
 	readFileRemote: vi.fn(),
-	statRemote: vi.fn(),
+	listDirWithStatsRemote: vi.fn(),
 }));
 
 // Mock electron-store: each instantiation gets its own isolated in-memory store
@@ -59,7 +83,7 @@ vi.mock('fs/promises', () => ({
 // ============================================================================
 
 import { ClaudeSessionStorage } from '../../main/storage/claude-session-storage';
-import { calculateClaudeCost } from '../../main/utils/pricing';
+import { computeClaudeUsageCost } from '../../main/utils/pricing';
 import Store from 'electron-store';
 import fs from 'fs/promises';
 
@@ -129,8 +153,14 @@ describe('ClaudeSessionStorage', () => {
 			);
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-1.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 1024, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-1.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 1024,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -153,8 +183,14 @@ describe('ClaudeSessionStorage', () => {
 			);
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-2.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 512, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-2.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 512,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -166,13 +202,29 @@ describe('ClaudeSessionStorage', () => {
 		it('should return empty string for non-string, non-array content', async () => {
 			// Content that is neither string nor array (e.g., number, null, object) should yield ''
 			const content = jsonl(
-				{ type: 'user', timestamp: '2025-06-01T10:00:00Z', uuid: 'u1', message: { role: 'user', content: 12345 } },
-				{ type: 'assistant', timestamp: '2025-06-01T10:01:00Z', uuid: 'a1', message: { role: 'assistant', content: null } }
+				{
+					type: 'user',
+					timestamp: '2025-06-01T10:00:00Z',
+					uuid: 'u1',
+					message: { role: 'user', content: 12345 },
+				},
+				{
+					type: 'assistant',
+					timestamp: '2025-06-01T10:01:00Z',
+					uuid: 'a1',
+					message: { role: 'assistant', content: null },
+				}
 			);
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-3.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 200, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-3.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 200,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -191,8 +243,14 @@ describe('ClaudeSessionStorage', () => {
 			);
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-4.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 300, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-4.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 300,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -217,8 +275,14 @@ describe('ClaudeSessionStorage', () => {
 			);
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-count.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 2048, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-count.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 2048,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -234,8 +298,14 @@ describe('ClaudeSessionStorage', () => {
 			);
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-preview.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 500, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-preview.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 500,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -246,8 +316,14 @@ describe('ClaudeSessionStorage', () => {
 			const content = jsonl(userMsg('Only user message here'));
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-fallback.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 300, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-fallback.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 300,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -263,8 +339,14 @@ describe('ClaudeSessionStorage', () => {
 			);
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-tokens.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 1024, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-tokens.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 1024,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -275,7 +357,7 @@ describe('ClaudeSessionStorage', () => {
 			expect(sessions[0].cacheCreationTokens).toBe(25); // 10 + 15
 		});
 
-		it('should calculate cost via calculateClaudeCost', async () => {
+		it('should calculate cost via computeClaudeUsageCost', async () => {
 			const content = jsonl(
 				userMsg('Hello'),
 				assistantMsg('World'),
@@ -283,12 +365,18 @@ describe('ClaudeSessionStorage', () => {
 			);
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-cost.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 1024, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-cost.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 1024,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
-			expect(calculateClaudeCost).toHaveBeenCalledWith(1000, 500, 200, 100);
+			expect(computeClaudeUsageCost).toHaveBeenCalledWith(content);
 			expect(sessions[0].costUsd).toBeDefined();
 			// Using mock formula: (1000*3 + 500*15 + 200*0.3 + 100*3.75) / 1000000
 			const expectedCost = (1000 * 3 + 500 * 15 + 200 * 0.3 + 100 * 3.75) / 1_000_000;
@@ -303,8 +391,14 @@ describe('ClaudeSessionStorage', () => {
 			);
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-dur.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 800, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-dur.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 800,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -319,8 +413,14 @@ describe('ClaudeSessionStorage', () => {
 			const content = jsonl(assistantMsg(longMessage));
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-trunc.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 500, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-trunc.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 500,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -332,8 +432,14 @@ describe('ClaudeSessionStorage', () => {
 			const mtimeMs = new Date('2025-07-15T08:30:00Z').getTime();
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-meta.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 4096, mtimeMs, mtime: new Date(mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-meta.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 4096,
+				mtimeMs,
+				mtime: new Date(mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -349,8 +455,14 @@ describe('ClaudeSessionStorage', () => {
 			].join('\n');
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-malformed.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 512, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-malformed.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 512,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -368,8 +480,14 @@ describe('ClaudeSessionStorage', () => {
 			].join('\n');
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-empty.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 400, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-empty.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 400,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -379,13 +497,23 @@ describe('ClaudeSessionStorage', () => {
 
 		it('should filter out zero-byte sessions', async () => {
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['empty.jsonl', 'valid.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['empty.jsonl', 'valid.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
 			vi.mocked(fs.stat).mockImplementation((filePath: unknown) => {
 				const fp = filePath as string;
 				if (fp.includes('empty')) {
-					return Promise.resolve({ size: 0, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) }) as unknown as ReturnType<typeof fs.stat>;
+					return Promise.resolve({
+						size: 0,
+						mtimeMs: DEFAULT_STATS.mtimeMs,
+						mtime: new Date(DEFAULT_STATS.mtimeMs),
+					}) as unknown as ReturnType<typeof fs.stat>;
 				}
-				return Promise.resolve({ size: 512, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) }) as unknown as ReturnType<typeof fs.stat>;
+				return Promise.resolve({
+					size: 512,
+					mtimeMs: DEFAULT_STATS.mtimeMs,
+					mtime: new Date(DEFAULT_STATS.mtimeMs),
+				}) as unknown as ReturnType<typeof fs.stat>;
 			});
 			vi.mocked(fs.readFile).mockResolvedValue(jsonl(userMsg('Content')));
 
@@ -396,14 +524,17 @@ describe('ClaudeSessionStorage', () => {
 		});
 
 		it('should handle session with zero tokens', async () => {
-			const content = jsonl(
-				userMsg('Question'),
-				assistantMsg('Answer')
-			);
+			const content = jsonl(userMsg('Question'), assistantMsg('Answer'));
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-notokens.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 256, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-notokens.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 256,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -751,7 +882,11 @@ describe('ClaudeSessionStorage', () => {
 				'session-2.jsonl',
 				'.hidden',
 			] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 512, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 512,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(jsonl(userMsg('Test')));
 
 			const sessions = await storage.listSessions('/test/project');
@@ -764,10 +899,9 @@ describe('ClaudeSessionStorage', () => {
 
 		it('should sort sessions by modified date descending', async () => {
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue([
-				'old.jsonl',
-				'new.jsonl',
-			] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['old.jsonl', 'new.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
 			vi.mocked(fs.stat).mockImplementation((filePath: unknown) => {
 				const fp = filePath as string;
 				if (fp.includes('old')) {
@@ -795,8 +929,14 @@ describe('ClaudeSessionStorage', () => {
 			storage.updateSessionStarred('/test/project', 'sess-with-origin', true);
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-with-origin.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 512, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-with-origin.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 512,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(jsonl(userMsg('Hello')));
 
 			const sessions = await storage.listSessions('/test/project');
@@ -807,8 +947,14 @@ describe('ClaudeSessionStorage', () => {
 
 		it('should set sessionId from filename without extension', async () => {
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['abc-123-def.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 256, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['abc-123-def.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 256,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(jsonl(userMsg('Test')));
 
 			const sessions = await storage.listSessions('/test/project');
@@ -817,8 +963,14 @@ describe('ClaudeSessionStorage', () => {
 
 		it('should set projectPath on each session', async () => {
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['s1.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 256, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['s1.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 256,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(jsonl(userMsg('Test')));
 
 			const sessions = await storage.listSessions('/my/special/project');
@@ -834,16 +986,34 @@ describe('ClaudeSessionStorage', () => {
 		it('should handle multiple token entries scattered throughout content', async () => {
 			const content = jsonl(
 				userMsg('Hello'),
-				{ type: 'result', timestamp: '2025-06-01T10:01:00Z', usage: { input_tokens: 50, output_tokens: 25 } },
+				{
+					type: 'result',
+					timestamp: '2025-06-01T10:01:00Z',
+					usage: { input_tokens: 50, output_tokens: 25 },
+				},
 				assistantMsg('Reply'),
-				{ type: 'result', timestamp: '2025-06-01T10:02:00Z', usage: { input_tokens: 75, output_tokens: 50, cache_read_input_tokens: 10 } },
+				{
+					type: 'result',
+					timestamp: '2025-06-01T10:02:00Z',
+					usage: { input_tokens: 75, output_tokens: 50, cache_read_input_tokens: 10 },
+				},
 				userMsg('Follow up', '2025-06-01T10:03:00Z', 'u2'),
-				{ type: 'result', timestamp: '2025-06-01T10:04:00Z', usage: { input_tokens: 100, output_tokens: 30, cache_creation_input_tokens: 5 } }
+				{
+					type: 'result',
+					timestamp: '2025-06-01T10:04:00Z',
+					usage: { input_tokens: 100, output_tokens: 30, cache_creation_input_tokens: 5 },
+				}
 			);
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-multi.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 2048, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-multi.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 2048,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -854,14 +1024,17 @@ describe('ClaudeSessionStorage', () => {
 		});
 
 		it('should handle content with no token information at all', async () => {
-			const content = jsonl(
-				userMsg('Just a message'),
-				assistantMsg('Just a reply')
-			);
+			const content = jsonl(userMsg('Just a message'), assistantMsg('Just a reply'));
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-notoken.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 256, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-notoken.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 256,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -876,13 +1049,17 @@ describe('ClaudeSessionStorage', () => {
 
 	describe('duration calculation', () => {
 		it('should return 0 duration when only one timestamp exists', async () => {
-			const content = jsonl(
-				userMsg('Single message', '2025-06-01T10:00:00Z')
-			);
+			const content = jsonl(userMsg('Single message', '2025-06-01T10:00:00Z'));
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-single.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 128, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-single.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 128,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -898,8 +1075,14 @@ describe('ClaudeSessionStorage', () => {
 			);
 
 			vi.mocked(fs.access).mockResolvedValue(undefined);
-			vi.mocked(fs.readdir).mockResolvedValue(['sess-neg.jsonl'] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-			vi.mocked(fs.stat).mockResolvedValue({ size: 256, mtimeMs: DEFAULT_STATS.mtimeMs, mtime: new Date(DEFAULT_STATS.mtimeMs) } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+			vi.mocked(fs.readdir).mockResolvedValue(['sess-neg.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.readdir>
+			>);
+			vi.mocked(fs.stat).mockResolvedValue({
+				size: 256,
+				mtimeMs: DEFAULT_STATS.mtimeMs,
+				mtime: new Date(DEFAULT_STATS.mtimeMs),
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>);
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
@@ -955,6 +1138,203 @@ describe('ClaudeSessionStorage', () => {
 			expect(originsB['sess-1'].starred).toBeUndefined();
 			expect(originsA['sess-1'].origin).toBe('user');
 			expect(originsB['sess-1'].origin).toBe('auto');
+		});
+	});
+
+	describe('readSessionMessages', () => {
+		let storage: ClaudeSessionStorage;
+
+		beforeEach(() => {
+			vi.clearAllMocks();
+			storage = new ClaudeSessionStorage();
+		});
+
+		it('should include messages with only tool_use blocks and no text content', async () => {
+			const content = jsonl(
+				userMsg('What files are in this directory?'),
+				assistantMsg([
+					{ type: 'tool_use', id: 'tool-1', name: 'list_directory', input: { path: '.' } },
+				])
+			);
+
+			vi.mocked(fs.readFile).mockResolvedValue(content);
+
+			const result = await storage.readSessionMessages('/test/project', 'sess-1');
+			expect(result.messages).toHaveLength(2);
+			expect(result.total).toBe(2);
+			// The tool-only message should have toolUse set and empty content
+			const toolMsg = result.messages.find((m) => m.toolUse)!;
+			expect(toolMsg).toBeDefined();
+			const toolUseBlocks = toolMsg.toolUse as Array<{ name: string }>;
+			expect(toolUseBlocks).toHaveLength(1);
+			expect(toolUseBlocks[0].name).toBe('list_directory');
+		});
+
+		it('should include messages with both text and tool_use blocks', async () => {
+			const content = jsonl(
+				userMsg('Read the config file'),
+				assistantMsg([
+					{ type: 'text', text: 'Let me read that file for you.' },
+					{ type: 'tool_use', id: 'tool-1', name: 'read_file', input: { path: 'config.json' } },
+				])
+			);
+
+			vi.mocked(fs.readFile).mockResolvedValue(content);
+
+			const result = await storage.readSessionMessages('/test/project', 'sess-1');
+			expect(result.messages).toHaveLength(2);
+			const assistantMessage = result.messages.find((m) => m.type === 'assistant');
+			expect(assistantMessage!.content).toBe('Let me read that file for you.');
+			expect(assistantMessage!.toolUse).toHaveLength(1);
+		});
+
+		it('should skip messages with no text and no tool_use', async () => {
+			const content = jsonl(
+				userMsg('Hello'),
+				// An assistant message with only an image block (no text, no tool_use)
+				assistantMsg([{ type: 'image', source: { type: 'base64', data: 'abc' } }])
+			);
+
+			vi.mocked(fs.readFile).mockResolvedValue(content);
+
+			const result = await storage.readSessionMessages('/test/project', 'sess-1');
+			// Only the user message should survive
+			expect(result.messages).toHaveLength(1);
+			expect(result.messages[0].type).toBe('user');
+		});
+	});
+
+	// ==========================================================================
+	// Remote SSH listing (regression: bulk stat, bounded read concurrency)
+	// ==========================================================================
+
+	describe('remote SSH listing', () => {
+		// Build a minimal session file whose content is enough for parseSessionContent
+		// to produce a non-null result with the given preview message.
+		function buildSessionContent(preview: string): string {
+			return jsonl(userMsg('hi'), assistantMsg(preview));
+		}
+
+		it('returns every session when the remote dir has hundreds of files', async () => {
+			// Regression for the bug where listing over SSH dropped sessions past
+			// OpenSSH MaxStartups (~29 visible out of 239). The bulk stat helper
+			// must emit one entry per file and all of them must reach the result.
+			const remoteFs = await import('../../main/utils/remote-fs');
+			const entries = Array.from({ length: 239 }, (_, i) => ({
+				name: `sess-${i}.jsonl`,
+				size: 2048,
+				mtime: 1_776_000_000_000 + i * 1000,
+			}));
+
+			vi.mocked(remoteFs.listDirWithStatsRemote).mockResolvedValue({
+				success: true,
+				data: entries,
+			});
+			vi.mocked(remoteFs.readFileRemote).mockResolvedValue({
+				success: true,
+				data: buildSessionContent('remote preview'),
+			});
+
+			const sshConfig = {
+				id: 'r1',
+				name: 'r1',
+				host: 'h',
+				port: 22,
+				username: 'u',
+				privateKeyPath: '~/.ssh/id_ed25519',
+				enabled: true,
+			} as const;
+
+			const storageForRemote = new ClaudeSessionStorage();
+			const sessions = await storageForRemote.listSessions('/remote/project', sshConfig);
+
+			expect(sessions).toHaveLength(239);
+			// Bulk stat must be a single SSH round-trip, not one-per-file.
+			expect(vi.mocked(remoteFs.listDirWithStatsRemote)).toHaveBeenCalledTimes(1);
+		});
+
+		it('paginates the remote listing while keeping the total count accurate', async () => {
+			const remoteFs = await import('../../main/utils/remote-fs');
+			const entries = Array.from({ length: 239 }, (_, i) => ({
+				name: `sess-${i}.jsonl`,
+				size: 1024,
+				mtime: 1_776_000_000_000 + i * 1000,
+			}));
+
+			vi.mocked(remoteFs.listDirWithStatsRemote).mockResolvedValue({
+				success: true,
+				data: entries,
+			});
+			vi.mocked(remoteFs.readFileRemote).mockResolvedValue({
+				success: true,
+				data: buildSessionContent('p'),
+			});
+
+			const sshConfig = {
+				id: 'r1',
+				name: 'r1',
+				host: 'h',
+				port: 22,
+				username: 'u',
+				privateKeyPath: '~/.ssh/id_ed25519',
+				enabled: true,
+			} as const;
+
+			const storageForRemote = new ClaudeSessionStorage();
+			const result = await storageForRemote.listSessionsPaginated(
+				'/remote/project',
+				{ limit: 100 },
+				sshConfig
+			);
+
+			expect(result.totalCount).toBe(239);
+			expect(result.sessions).toHaveLength(100);
+			expect(result.hasMore).toBe(true);
+			expect(result.nextCursor).toBeTruthy();
+		});
+
+		it('caps parallel remote file reads to the concurrency limit', async () => {
+			// If concurrency were unbounded, all 30 readFileRemote calls would be
+			// in flight at once. The cap is 6, so at any instant in-flight must
+			// be <= 6.
+			const remoteFs = await import('../../main/utils/remote-fs');
+			const entries = Array.from({ length: 30 }, (_, i) => ({
+				name: `sess-${i}.jsonl`,
+				size: 512,
+				mtime: 1_776_000_000_000 + i,
+			}));
+
+			vi.mocked(remoteFs.listDirWithStatsRemote).mockResolvedValue({
+				success: true,
+				data: entries,
+			});
+
+			let inFlight = 0;
+			let peakInFlight = 0;
+			vi.mocked(remoteFs.readFileRemote).mockImplementation(async () => {
+				inFlight++;
+				peakInFlight = Math.max(peakInFlight, inFlight);
+				await new Promise((r) => setTimeout(r, 5));
+				inFlight--;
+				return { success: true, data: buildSessionContent('x') };
+			});
+
+			const sshConfig = {
+				id: 'r1',
+				name: 'r1',
+				host: 'h',
+				port: 22,
+				username: 'u',
+				privateKeyPath: '~/.ssh/id_ed25519',
+				enabled: true,
+			} as const;
+
+			const storageForRemote = new ClaudeSessionStorage();
+			await storageForRemote.listSessions('/remote/project', sshConfig);
+
+			expect(peakInFlight).toBeLessThanOrEqual(6);
+			// And we actually exercised the parallelism, not just serialized.
+			expect(peakInFlight).toBeGreaterThan(1);
 		});
 	});
 });

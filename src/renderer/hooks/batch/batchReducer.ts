@@ -12,6 +12,7 @@
  */
 
 import type { BatchRunState, AgentError } from '../../types';
+import type { GoalExitReason } from '../../../shared/goalDriven/types';
 import {
 	transition,
 	canTransition,
@@ -34,9 +35,9 @@ function logTransition(
 	// Uncomment for debugging state transitions:
 	// const stateFrom = _fromState ?? 'IDLE';
 	// if (_valid) {
-	//   console.log(`[BatchStateMachine] ${_sessionId}: ${stateFrom} -> ${_toState} (${_event})`);
+	//   logger.info(`[BatchStateMachine] ${_sessionId}: ${stateFrom} -> ${_toState} (${_event})`);
 	// } else {
-	//   console.warn(`[BatchStateMachine] ${_sessionId}: INVALID transition ${stateFrom} + ${_event} (staying in ${stateFrom})`);
+	//   logger.warn(`[BatchStateMachine] ${_sessionId}: INVALID transition ${stateFrom} + ${_event} (staying in ${stateFrom})`);
 	// }
 }
 
@@ -144,6 +145,10 @@ export const DEFAULT_BATCH_STATE: BatchRunState = {
 	errorPaused: false,
 	errorDocumentIndex: undefined,
 	errorTaskDescription: undefined,
+	// Goal-Driven mode (only meaningful when goalMode is true)
+	goalMode: false,
+	goalProgress: 0,
+	goalIteration: 0,
 };
 
 /**
@@ -158,6 +163,7 @@ export interface StartBatchPayload {
 	documents: string[];
 	lockedDocuments: string[];
 	totalTasksAcrossAllDocs: number;
+	completedTasksAcrossAllDocs?: number;
 	loopEnabled: boolean;
 	maxLoops?: number | null;
 	folderPath: string;
@@ -191,6 +197,12 @@ export interface UpdateProgressPayload {
 	lastActiveTimestamp?: number;
 	// Loop mode
 	loopIteration?: number;
+	// Goal-Driven mode (only set by the goal runner; absent in document mode)
+	goalMode?: boolean;
+	goalProgress?: number;
+	goalRationale?: string;
+	goalIteration?: number;
+	goalExitReason?: GoalExitReason;
 }
 
 /**
@@ -265,7 +277,7 @@ export function batchReducer(state: BatchState, action: BatchAction): BatchState
 					currentDocTasksTotal: 0,
 					currentDocTasksCompleted: 0,
 					totalTasksAcrossAllDocs: payload.totalTasksAcrossAllDocs,
-					completedTasksAcrossAllDocs: 0,
+					completedTasksAcrossAllDocs: payload.completedTasksAcrossAllDocs ?? 0,
 					// Loop mode
 					loopEnabled: payload.loopEnabled,
 					loopIteration: 0,
@@ -359,6 +371,12 @@ export function batchReducer(state: BatchState, action: BatchAction): BatchState
 					}),
 					// Loop iteration
 					...(payload.loopIteration !== undefined && { loopIteration: payload.loopIteration }),
+					// Goal-Driven mode fields (only set by the goal runner)
+					...(payload.goalMode !== undefined && { goalMode: payload.goalMode }),
+					...(payload.goalProgress !== undefined && { goalProgress: payload.goalProgress }),
+					...(payload.goalRationale !== undefined && { goalRationale: payload.goalRationale }),
+					...(payload.goalIteration !== undefined && { goalIteration: payload.goalIteration }),
+					...(payload.goalExitReason !== undefined && { goalExitReason: payload.goalExitReason }),
 				},
 			};
 		}

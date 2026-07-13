@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 
 import {
 	getDefaultShell,
@@ -148,6 +148,18 @@ describe('stores/defaults', () => {
 
 		it('should have null installationId by default', () => {
 			expect(SETTINGS_DEFAULTS.installationId).toBeNull();
+		});
+
+		it('should enable autoResumeOnLimit by default', () => {
+			expect(SETTINGS_DEFAULTS.autoResumeOnLimit).toBe(true);
+		});
+
+		it('should default autoResumeCheckIntervalHours to 2', () => {
+			expect(SETTINGS_DEFAULTS.autoResumeCheckIntervalHours).toBe(2);
+		});
+
+		it('should default autoResumeGiveUpDays to 7', () => {
+			expect(SETTINGS_DEFAULTS.autoResumeGiveUpDays).toBe(7);
 		});
 	});
 

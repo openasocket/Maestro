@@ -13,6 +13,81 @@ Maestro can update itself automatically! This feature was introduced in **v0.8.7
 
 ---
 
+## v0.17.x - Maestro Cue
+
+**Latest: v0.17.3** | Released July 4, 2026
+
+# Major 0.17.x Additions
+
+🔐 Claude Token Source control keeps Claude running on your Max/Pro subscription quota by driving Claude's interactive session instead of the headless API path. A three-way Interactive / API / Dynamic selector is available everywhere agents run (new and existing agents, Cue runs, Group Chat, and background tasks). Dynamic mode uses your subscription quota automatically and only falls back to API billing when that quota is exhausted.
+
+🪄 Maestro Cue is a new trigger-based cross-agent orchestration capability that lets heartbeats, GitHub issues/PRs, file system monitors, and other data sources bring your agents to life and pass work between one another.
+
+💻 Full-featured xterm.js terminal tabs sit alongside your AI and file preview tabs, with support for opening and renaming multiple terminals.
+
+🧑‍✈️ GitHub Copilot-CLI joins Maestro as a first-class agent with end-to-end integration for both local and remote (over SSH) execution.
+
+🛠️ A vastly expanded `maestro-cli` now drives the whole running desktop app, and your agents know how to use it. You can just talk to an agent in plain language to create and run Auto Run playbooks, change settings, set up Maestro Cue pipelines, and manage groups, agents, tabs, and themes, instead of clicking through menus yourself.
+
+## 0.17.3 Highlights
+
+⌨️ Typing in the AI and terminal composer no longer lags, and the transcript no longer reflows on every keystroke, so the app stays smooth under heavy load.
+
+🔁 Maestro now automatically retries a prompt when an agent hits a recoverable error such as an overloaded API, a rate limit, or exhausted quota, showing an inline outage card with a live countdown instead of dropping the run.
+
+🎨 Agent replies now render rich markdown, including GitHub-style `[!NOTE]`/`[!WARNING]` callouts, LaTeX math, and sanitized inline SVG diagrams, so answers can be formatted and illustrated instead of landing as plain text.
+
+🖼️ Pasted screenshots now live in a content-addressed store outside the main sessions file, so a workspace full of images no longer bloats that file or freezes the UI.
+
+⭐ Maestro now keeps its own copy of every starred conversation's transcript, so a starred session survives even after the provider rotates or deletes its file and still resumes natively on restore.
+
+### Previous Releases in this Series
+
+- **v0.17.2** (June 27, 2026) - Maestro Cue
+- **v0.17.1** (June 20, 2026) - Maestro Cue
+- **v0.17.0** (June 15, 2026) - Maestro Cue
+
+---
+
+## v0.15.x - Maestro Symphony
+
+**Latest: v0.15.3** | Released April 5, 2026
+
+# Major 0.15.x Additions
+
+🎶 **Maestro Symphony** — Contribute to open source with AI assistance! Browse curated issues from projects with the `runmaestro.ai` label, clone repos with one click, and automatically process the relevant Auto Run playbooks. Track your contributions, streaks, and stats. You're contributing CPU and tokens towards your favorite open source projects and features.
+
+🎬 **Director's Notes** — Aggregates history across all agents into a unified timeline with search, filters, and an activity graph. Includes an AI Overview tab that generates a structured synopsis of recent work. Off by default, gated behind a new "Encore Features" panel under settings. This is a precursor to an eventual plugin system, allowing for extensions and customizations without bloating the core app.
+
+🏷️ **Conductor Profile** — Available under Settings > General. Provide a short description on how Maestro agents should interface with you.
+
+🧠 **Three-State Thinking Toggle** — The thinking toggle now cycles through three modes: off, on, and sticky. Sticky mode keeps thinking content visible after the response completes. Cycle with CMD/CTRL+SHIFT+K.
+
+🤖 **Factory.ai Droid Support** — Added support for the [Factory.ai](https://factory.ai/product/cli) droid agent. Full session management and output parsing integration.
+
+## Changes in v0.15.3
+
+- **CLI settings management:** Full `maestro-cli settings` command suite — list, get, set, and reset any Maestro setting from the command line. Includes per-agent configuration (custom paths, args, env vars, model overrides). Supports category filtering, verbose descriptions, and machine-readable JSON output for scripting
+- **Live settings reload:** Settings changes made via the CLI are automatically detected by the running desktop app — no restart required
+- **Plan-Mode toggle:** Claude Code and OpenCode agents now show "Plan-Mode" instead of "Read-Only" for the read-only toggle, matching their native terminology
+- **Solarized Dark theme:** New Solarized Dark color theme with tuned contrast for tags, code blocks, and pill labels
+- **Files pane icon theme:** Choose between default and rich icon themes in the files pane — rich theme adds colorful, language-specific icons for 70+ file types and folder categories. Toggle under Settings > Display
+- **Persistent web link:** The web/mobile interface link now persists across app restarts — no need to re-enable it each session
+- **OpenCode v1.2+ session support:** Automatically reads OpenCode's new SQLite session storage format alongside the legacy JSONL format
+- **Group chat @mentions:** Use `@agent-name` syntax in the prompt composer to direct messages to specific agents in group chat
+- **Group chat over SSH:** Group chat synthesis and moderation now run correctly on SSH remote agents instead of always spawning locally
+- **Group chat participant management:** Remove button on participant cards lets you remove stale or unwanted participants from a group chat
+- **Batch resume/abort:** New controls in the right panel for resuming or aborting batch operations
+- **Default worktree directory:** Worktree configuration now defaults to the parent of the agent's working directory instead of blank
+- **Drawfinity in Symphony:** Added Drawfinity to the Symphony project registry
+
+### Previous Releases in this Series
+
+- **v0.15.2** (March 12, 2026) - Maestro Symphony
+- **v0.15.1** (March 3, 2026) - Maestro Symphony
+
+---
+
 ## v0.14.x - Doc Graphs, SSH Agents, Inline Wizard
 
 **Latest: v0.14.5** | Released January 24, 2026
@@ -431,7 +506,7 @@ Plus the pre-release ALPHA...
 
 ## Downloading Releases
 
-All releases are available on the [GitHub Releases page](https://github.com/pedramamini/Maestro/releases).
+All releases are available on the [GitHub Releases page](https://github.com/RunMaestro/Maestro/releases).
 
 Maestro is available for:
 - **macOS** - Apple Silicon (arm64) and Intel (x64)

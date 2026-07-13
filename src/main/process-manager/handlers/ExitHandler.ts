@@ -7,6 +7,16 @@ import { aggregateModelUsage } from '../../parsers/usage-aggregator';
 import { cleanupTempFiles } from '../utils/imageUtils';
 import type { ManagedProcess, AgentError } from '../types';
 import type { DataBufferManager } from './DataBufferManager';
+import type { SshRemoteConfig } from '../../../shared/types';
+import { captureException } from '../../utils/sentry';
+import { getSshRemoteById } from '../../stores/getters';
+import {
+	waitForCopilotShutdown,
+	readCopilotFinalAnswer,
+	readCopilotShutdownUsage,
+	type CopilotShutdownWaitResult,
+} from '../CopilotShutdownWaiter';
+import { FALLBACK_CONTEXT_WINDOW } from '../../../shared/agentConstants';
 
 interface ExitHandlerDependencies {
 	processes: Map<string, ManagedProcess>;
@@ -30,9 +40,14 @@ export class ExitHandler {
 	}
 
 	/**
-	 * Handle process exit event
+	 * Handle process exit event.
+	 *
+	 * Async because some agents need post-exit reconciliation against
+	 * on-disk session state before the renderer is told the agent is
+	 * done (currently: Copilot CLI — see `awaitCopilotShutdown`).
+	 * Callers fire-and-forget, so errors are caught internally.
 	 */
-	handleExit(sessionId: string, code: number): void {
+	async handleExit(sessionId: string, code: number): Promise<void> {
 		const managedProcess = this.processes.get(sessionId);
 		if (!managedProcess) {
 			this.emitter.emit('exit', sessionId, code);
@@ -53,29 +68,6 @@ export class ExitHandler {
 			jsonBufferPreview: managedProcess.jsonBuffer?.substring(0, 200),
 		});
 
-		// Debug: Log exit details for group chat sessions
-		if (sessionId.includes('group-chat-')) {
-			console.log(`[GroupChat:Debug:ProcessManager] EXIT for session ${sessionId}`);
-			console.log(`[GroupChat:Debug:ProcessManager] Exit code: ${code}`);
-			console.log(`[GroupChat:Debug:ProcessManager] isStreamJsonMode: ${isStreamJsonMode}`);
-			console.log(`[GroupChat:Debug:ProcessManager] isBatchMode: ${isBatchMode}`);
-			console.log(
-				`[GroupChat:Debug:ProcessManager] resultEmitted: ${managedProcess.resultEmitted}`
-			);
-			console.log(
-				`[GroupChat:Debug:ProcessManager] streamedText length: ${managedProcess.streamedText?.length || 0}`
-			);
-			console.log(
-				`[GroupChat:Debug:ProcessManager] jsonBuffer length: ${managedProcess.jsonBuffer?.length || 0}`
-			);
-			console.log(
-				`[GroupChat:Debug:ProcessManager] stderrBuffer length: ${managedProcess.stderrBuffer?.length || 0}`
-			);
-			console.log(
-				`[GroupChat:Debug:ProcessManager] stderrBuffer preview: "${(managedProcess.stderrBuffer || '').substring(0, 500)}"`
-			);
-		}
-
 		// Debug: Log exit details for synopsis sessions
 		if (sessionId.includes('-synopsis-')) {
 			logger.info('[ProcessManager] Synopsis session exit', 'ProcessManager', {
@@ -90,19 +82,62 @@ export class ExitHandler {
 			});
 		}
 
+		// Copilot CLI: wait for the on-disk shutdown marker before emitting
+		// `exit`. Copilot can keep working in subagent processes after our
+		// parent process closes, and `session.shutdown` is only ever
+		// written to `events.jsonl` — never to stdout in batch mode. If
+		// we emit `exit` immediately, the renderer flips to idle while
+		// Copilot is still doing real work; the user has to manually poke
+		// the tab to discover work is ongoing. When the shutdown marker
+		// is found, we also re-derive the authoritative final answer from
+		// disk so the rendered text matches what Copilot truly finished
+		// with (not the stale planning narration our parent saw last).
+		await this.awaitCopilotShutdown(sessionId, managedProcess);
+
 		// Handle regular batch mode (not stream-json)
 		if (isBatchMode && !isStreamJsonMode && managedProcess.jsonBuffer) {
 			this.handleBatchModeExit(sessionId, managedProcess);
+		}
+
+		// Handle stream-json mode: process any remaining jsonBuffer content
+		// The jsonBuffer may contain the last line if it didn't end with \n.
+		// Without this, short-lived processes (tab-naming, batch ops) can lose
+		// their result message if it's the last line without a trailing newline.
+		if (isStreamJsonMode && managedProcess.jsonBuffer?.trim() && outputParser) {
+			const remainingLine = managedProcess.jsonBuffer.trim();
+			managedProcess.jsonBuffer = '';
+			logger.debug('[ProcessManager] Processing remaining jsonBuffer at exit', 'ProcessManager', {
+				sessionId,
+				remainingLineLength: remainingLine.length,
+				remainingLinePreview: remainingLine.substring(0, 200),
+			});
+			try {
+				const event = outputParser.parseJsonLine(remainingLine);
+				if (event && outputParser.isResultMessage(event) && !managedProcess.resultEmitted) {
+					managedProcess.resultEmitted = true;
+					const resultText = event.text || managedProcess.streamedText || '';
+					if (resultText) {
+						this.bufferManager.emitDataBuffered(sessionId, resultText);
+					}
+				}
+			} catch {
+				// If parsing fails, emit the raw line as data
+				this.bufferManager.emitDataBuffered(sessionId, remainingLine);
+			}
 		}
 
 		// Handle stream-json mode: emit accumulated streamed text if no result was emitted
 		// Some agents (like Factory Droid) don't send explicit "done" events, they just exit
 		if (isStreamJsonMode && !managedProcess.resultEmitted && managedProcess.streamedText) {
 			managedProcess.resultEmitted = true;
-			logger.debug('[ProcessManager] Emitting streamed text at exit (no result event)', 'ProcessManager', {
-				sessionId,
-				streamedTextLength: managedProcess.streamedText.length,
-			});
+			logger.debug(
+				'[ProcessManager] Emitting streamed text at exit (no result event)',
+				'ProcessManager',
+				{
+					sessionId,
+					streamedTextLength: managedProcess.streamedText.length,
+				}
+			);
 			this.bufferManager.emitDataBuffered(sessionId, managedProcess.streamedText);
 		}
 
@@ -116,6 +151,9 @@ export class ExitHandler {
 			if (agentError) {
 				managedProcess.errorEmitted = true;
 				agentError.sessionId = sessionId;
+				if (managedProcess.sshRemoteId) {
+					agentError.sshRemoteId = managedProcess.sshRemoteId;
+				}
 				logger.debug('[ProcessManager] Error detected from exit', 'ProcessManager', {
 					sessionId,
 					exitCode: code,
@@ -132,10 +170,12 @@ export class ExitHandler {
 			managedProcess.sshRemoteId &&
 			(code !== 0 || managedProcess.stderrBuffer)
 		) {
-			// SSH errors can appear in stdout OR stderr, so check both
+			// Only check stderr for SSH errors — NOT stdout.
+			// Stdout contains structured JSONL agent output whose text content (e.g.,
+			// assistant messages quoting shell commands) can false-positive match SSH
+			// error patterns like "command not found". Real SSH transport errors appear
+			// on stderr (shell init failures, connection drops, missing binaries).
 			const stderrToCheck = managedProcess.stderrBuffer || '';
-			const stdoutToCheck = managedProcess.stdoutBuffer || managedProcess.streamedText || '';
-			const combinedOutput = `${stdoutToCheck}\n${stderrToCheck}`;
 
 			// Log detailed info before SSH error check to help debug shell parse errors
 			logger.info('[ProcessManager] Checking for SSH errors at exit', 'ProcessManager', {
@@ -144,11 +184,9 @@ export class ExitHandler {
 				sshRemoteId: managedProcess.sshRemoteId,
 				stderrLength: stderrToCheck.length,
 				stderrPreview: stderrToCheck.substring(0, 300),
-				stdoutLength: stdoutToCheck.length,
-				combinedLength: combinedOutput.length,
 			});
 
-			const sshError = matchSshErrorPattern(combinedOutput);
+			const sshError = matchSshErrorPattern(stderrToCheck);
 			if (sshError) {
 				managedProcess.errorEmitted = true;
 				const agentError: AgentError = {
@@ -157,11 +195,11 @@ export class ExitHandler {
 					recoverable: sshError.recoverable,
 					agentId: toolType,
 					sessionId,
+					sshRemoteId: managedProcess.sshRemoteId,
 					timestamp: Date.now(),
 					raw: {
 						exitCode: code,
 						stderr: stderrToCheck,
-						stdout: stdoutToCheck.substring(0, 1000), // Truncate for log size
 					},
 				};
 				// Log at INFO level so it's visible in system logs
@@ -170,19 +208,21 @@ export class ExitHandler {
 					exitCode: code,
 					errorType: sshError.type,
 					errorMessage: sshError.message,
-					stdoutPreview: stdoutToCheck.substring(0, 500),
 					stderrPreview: stderrToCheck.substring(0, 500),
 				});
 				this.emitter.emit('agent-error', sessionId, agentError);
 			} else if (code !== 0) {
 				// Log SSH failures even if no pattern matched, to help debug
-				logger.warn('[ProcessManager] SSH command failed without matching error pattern', 'ProcessManager', {
-					sessionId,
-					exitCode: code,
-					sshRemoteId: managedProcess.sshRemoteId,
-					stdoutPreview: stdoutToCheck.substring(0, 500),
-					stderrPreview: stderrToCheck.substring(0, 500),
-				});
+				logger.warn(
+					'[ProcessManager] SSH command failed without matching error pattern',
+					'ProcessManager',
+					{
+						sessionId,
+						exitCode: code,
+						sshRemoteId: managedProcess.sshRemoteId,
+						stderrPreview: stderrToCheck.substring(0, 500),
+					}
+				);
 			}
 		}
 
@@ -210,8 +250,117 @@ export class ExitHandler {
 			});
 		}
 
+		// Final flush: ensure any data buffered during exit processing
+		// (e.g., from jsonBuffer remainder or streamedText fallback) is emitted
+		// before the exit event, so listeners see all data before exit fires.
+		this.bufferManager.flushDataBuffer(sessionId);
+
 		this.emitter.emit('exit', sessionId, code);
 		this.processes.delete(sessionId);
+	}
+
+	/**
+	 * For Copilot CLI batch sessions, block emitting `exit` until the
+	 * authoritative `session.shutdown` event has been written to the
+	 * on-disk events.jsonl, or activity has clearly stopped. On success
+	 * also override `streamedText` with the disk-derived final answer
+	 * so the downstream flush emits Copilot's real conclusion, not the
+	 * possibly-stale text our parent process captured before it died.
+	 *
+	 * No-op for non-Copilot agents. For SSH-remote Copilot sessions the
+	 * events file lives on the remote host, so the reads below go over SSH
+	 * (resolved from `sshRemoteId`); without this the remote context gauge
+	 * would stay stuck at 0% since `currentTokens` never appears on stdout.
+	 */
+	private async awaitCopilotShutdown(
+		sessionId: string,
+		managedProcess: ManagedProcess
+	): Promise<void> {
+		if (managedProcess.toolType !== 'copilot-cli') return;
+		const agentSessionId = managedProcess.agentSessionId;
+		if (!agentSessionId) return;
+
+		// Resolve the full SSH config for remote sessions. If the agent was
+		// configured for SSH but the remote can't be resolved, skip rather than
+		// reading a non-existent local file (which would never match).
+		let sshRemote: SshRemoteConfig | null = null;
+		if (managedProcess.sshRemoteId) {
+			sshRemote = getSshRemoteById(managedProcess.sshRemoteId) ?? null;
+			if (!sshRemote) {
+				logger.warn(
+					'[ProcessManager] Copilot SSH remote unresolved; skipping disk reconciliation',
+					'ProcessManager',
+					{ sessionId, agentSessionId, sshRemoteId: managedProcess.sshRemoteId }
+				);
+				return;
+			}
+		}
+
+		let result: CopilotShutdownWaitResult;
+		try {
+			result = await waitForCopilotShutdown(agentSessionId, { sshRemote });
+		} catch (err) {
+			logger.warn('[ProcessManager] Copilot shutdown wait threw', 'ProcessManager', {
+				sessionId,
+				agentSessionId,
+				error: String(err),
+			});
+			return;
+		}
+
+		logger.info('[ProcessManager] Copilot shutdown wait completed', 'ProcessManager', {
+			sessionId,
+			agentSessionId,
+			result,
+		});
+
+		if (result !== 'observed') return;
+
+		try {
+			const finalAnswer = await readCopilotFinalAnswer(agentSessionId, undefined, sshRemote);
+			if (finalAnswer && finalAnswer.content) {
+				managedProcess.streamedText = finalAnswer.content;
+			}
+		} catch (err) {
+			logger.warn('[ProcessManager] Failed to read Copilot final answer', 'ProcessManager', {
+				sessionId,
+				agentSessionId,
+				error: String(err),
+			});
+		}
+
+		// Disk-derived usage snapshot. Copilot writes per-turn token counts and
+		// the live `currentTokens` context-window state ONLY into the on-disk
+		// `session.shutdown` event in batch mode; the stdout stream never
+		// carries them, so the streaming usage path emits nothing and the
+		// context gauge stays at 0% for every tab. Read it now and emit a
+		// `usage` event with the same shape the parser would have produced if
+		// session.shutdown had appeared on stdout. See the docstring on
+		// `readCopilotShutdownUsage` for the field-mapping rationale.
+		try {
+			const usage = await readCopilotShutdownUsage(agentSessionId, undefined, sshRemote);
+			if (usage) {
+				const contextWindow =
+					managedProcess.contextWindow && managedProcess.contextWindow > 0
+						? managedProcess.contextWindow
+						: FALLBACK_CONTEXT_WINDOW;
+				this.emitter.emit('usage', sessionId, {
+					inputTokens: usage.inputTokens,
+					outputTokens: usage.outputTokens,
+					cacheReadInputTokens: usage.cacheReadInputTokens,
+					cacheCreationInputTokens: usage.cacheCreationInputTokens,
+					totalCostUsd: 0,
+					contextWindow,
+					reasoningTokens: usage.reasoningTokens,
+				});
+			}
+		} catch (err) {
+			logger.warn('[ProcessManager] Failed to read Copilot disk-derived usage', 'ProcessManager', {
+				sessionId,
+				agentSessionId,
+				error: String(err),
+			});
+		}
 	}
 
 	/**
@@ -247,6 +396,7 @@ export class ExitHandler {
 				this.emitter.emit('usage', sessionId, usageStats);
 			}
 		} catch (error) {
+			void captureException(error);
 			logger.error('[ProcessManager] Failed to parse JSON response', 'ProcessManager', {
 				sessionId,
 				error: String(error),
@@ -276,6 +426,7 @@ export class ExitHandler {
 				recoverable: true,
 				agentId: managedProcess.toolType,
 				sessionId,
+				sshRemoteId: managedProcess.sshRemoteId,
 				timestamp: Date.now(),
 				raw: {
 					stderr: error.message,

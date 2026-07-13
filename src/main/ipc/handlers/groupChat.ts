@@ -10,10 +10,12 @@
  */
 
 import * as os from 'os';
+import * as path from 'path';
+import * as fs from 'fs/promises';
 import { ipcMain, BrowserWindow } from 'electron';
 import { withIpcErrorLogging, CreateHandlerOptions } from '../../utils/ipcHandler';
 import { logger } from '../../utils/logger';
-import { isWebContentsAvailable } from '../../utils/safe-send';
+import { createSafeSend } from '../../utils/safe-send';
 
 // Group chat storage imports
 import {
@@ -45,6 +47,7 @@ import {
 	sendToModerator as _sendToModerator,
 	killModerator,
 	getModeratorSessionId,
+	isModeratorActive,
 	type IProcessManager as _IProcessManager,
 } from '../../group-chat/group-chat-moderator';
 
@@ -61,12 +64,19 @@ import {
 } from '../../group-chat/group-chat-agent';
 
 // Group chat router imports
-import { routeUserMessage } from '../../group-chat/group-chat-router';
+import {
+	routeUserMessage,
+	clearPendingParticipants,
+	routeAgentResponse,
+	markParticipantResponded,
+	spawnModeratorSynthesis,
+} from '../../group-chat/group-chat-router';
 
 // Agent detector import
 import { AgentDetector } from '../../agents';
 import { groomContext } from '../../utils/context-groomer';
 import { v4 as uuidv4 } from 'uuid';
+import { captureException } from '../../utils/sentry';
 
 const LOG_CONTEXT = '[GroupChat]';
 
@@ -100,6 +110,10 @@ export const groupChatEmitters: {
 		state: ParticipantState
 	) => void;
 	emitModeratorSessionIdChanged?: (groupChatId: string, sessionId: string) => void;
+	emitParticipantLiveOutput?: (groupChatId: string, participantName: string, chunk: string) => void;
+	emitAutoRunTriggered?: (groupChatId: string, participantName: string, filename?: string) => void;
+	/** Tells the renderer to force-complete the batch run for a participant (clears stuck AUTO badge). */
+	emitAutoRunBatchComplete?: (groupChatId: string, participantName: string) => void;
 } = {};
 
 // Helper to create handler options with consistent context
@@ -126,8 +140,15 @@ interface GenericProcessManager {
 		readOnlyMode?: boolean;
 		prompt?: string;
 		customEnvVars?: Record<string, string>;
+		/** Global shell env vars from Settings → Shell Configuration (merged by envBuilder). */
+		shellEnvVars?: Record<string, string>;
 		contextWindow?: number;
+		promptArgs?: (prompt: string) => string[];
 		noPromptSeparator?: boolean;
+		shell?: string;
+		runInShell?: boolean;
+		sendPromptViaStdin?: boolean;
+		sendPromptViaStdinRaw?: boolean;
 	}): { pid: number; success: boolean };
 	write(sessionId: string, data: string): boolean;
 	kill(sessionId: string): boolean;
@@ -158,6 +179,7 @@ export interface GroupChatHandlerDependencies {
 export function registerGroupChatHandlers(deps: GroupChatHandlerDependencies): void {
 	const { getMainWindow, getProcessManager, getAgentDetector, getCustomEnvVars, getAgentConfig } =
 		deps;
+	const safeSend = createSafeSend(getMainWindow);
 
 	// ========== Storage Handlers ==========
 
@@ -173,6 +195,9 @@ export function registerGroupChatHandlers(deps: GroupChatHandlerDependencies): v
 					customPath?: string;
 					customArgs?: string;
 					customEnvVars?: Record<string, string>;
+					enableMaestroP?: boolean;
+					maestroPMode?: 'interactive' | 'dynamic';
+					maestroPPath?: string;
 				}
 			): Promise<GroupChat> => {
 				logger.info(`Creating group chat: ${name}`, LOG_CONTEXT, {
@@ -239,6 +264,28 @@ export function registerGroupChatHandlers(deps: GroupChatHandlerDependencies): v
 		})
 	);
 
+	// Archive or unarchive a group chat
+	ipcMain.handle(
+		'groupChat:archive',
+		withIpcErrorLogging(
+			handlerOpts('archive'),
+			async (id: string, archived: boolean): Promise<GroupChat> => {
+				logger.info(`${archived ? 'Archiving' : 'Unarchiving'} group chat: ${id}`, LOG_CONTEXT);
+
+				// When archiving, stop the moderator and all participants
+				if (archived) {
+					const processManager = getProcessManager();
+					await killModerator(id, processManager ?? undefined);
+					await clearAllParticipantSessions(id, processManager ?? undefined);
+				}
+
+				const updated = await updateGroupChat(id, { archived });
+				logger.info(`${archived ? 'Archived' : 'Unarchived'} group chat: ${id}`, LOG_CONTEXT);
+				return updated;
+			}
+		)
+	);
+
 	// Rename a group chat
 	ipcMain.handle(
 		'groupChat:rename',
@@ -266,6 +313,9 @@ export function registerGroupChatHandlers(deps: GroupChatHandlerDependencies): v
 						customPath?: string;
 						customArgs?: string;
 						customEnvVars?: Record<string, string>;
+						enableMaestroP?: boolean;
+						maestroPMode?: 'interactive' | 'dynamic';
+						maestroPPath?: string;
 					};
 				}
 			): Promise<GroupChat> => {
@@ -344,6 +394,27 @@ export function registerGroupChatHandlers(deps: GroupChatHandlerDependencies): v
 					throw new Error(`Group chat not found: ${id}`);
 				}
 				const messages = await readLog(chat.logPath);
+
+				// Convert stored image filenames to base64 data URLs for display
+				for (const msg of messages) {
+					if (msg.images && msg.images.length > 0) {
+						const dataUrls: string[] = [];
+						for (const filename of msg.images) {
+							try {
+								const filePath = path.join(chat.imagesDir, filename);
+								const buffer = await fs.readFile(filePath);
+								const ext = path.extname(filename).slice(1).toLowerCase();
+								const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+								dataUrls.push(`data:${mimeType};base64,${buffer.toString('base64')}`);
+							} catch {
+								// Skip images that can't be read (deleted, etc.)
+								logger.warn(`Failed to read image ${filename} for group chat ${id}`, LOG_CONTEXT);
+							}
+						}
+						msg.images = dataUrls.length > 0 ? dataUrls : undefined;
+					}
+				}
+
 				logger.debug(`Read ${messages.length} messages from ${id}`, LOG_CONTEXT);
 				return messages;
 			}
@@ -397,19 +468,30 @@ export function registerGroupChatHandlers(deps: GroupChatHandlerDependencies): v
 		withIpcErrorLogging(
 			handlerOpts('sendToModerator'),
 			async (id: string, message: string, images?: string[], readOnly?: boolean): Promise<void> => {
-				console.log(`[GroupChat:Debug] ========== USER MESSAGE RECEIVED ==========`);
-				console.log(`[GroupChat:Debug] Group Chat ID: ${id}`);
-				console.log(
+				logger.info(`[GroupChat:Debug] ========== USER MESSAGE RECEIVED ==========`);
+				logger.info(`[GroupChat:Debug] Group Chat ID: ${id}`);
+				logger.info(
 					`[GroupChat:Debug] Message: "${message.substring(0, 200)}${message.length > 200 ? '...' : ''}"`
 				);
-				console.log(`[GroupChat:Debug] Read-only: ${readOnly ?? false}`);
-				console.log(`[GroupChat:Debug] Images: ${images?.length ?? 0}`);
+				logger.info(`[GroupChat:Debug] Read-only: ${readOnly ?? false}`);
+				logger.info(`[GroupChat:Debug] Images: ${images?.length ?? 0}`);
 
 				const processManager = getProcessManager();
 				const agentDetector = getAgentDetector();
 
-				console.log(`[GroupChat:Debug] Process manager available: ${!!processManager}`);
-				console.log(`[GroupChat:Debug] Agent detector available: ${!!agentDetector}`);
+				logger.info(`[GroupChat:Debug] Process manager available: ${!!processManager}`);
+				logger.info(`[GroupChat:Debug] Agent detector available: ${!!agentDetector}`);
+
+				// Auto-restart moderator if it exited (e.g., after completing a turn)
+				if (!isModeratorActive(id) && processManager) {
+					logger.info(`[GroupChat:Debug] Moderator not active, auto-restarting...`);
+					const chat = await loadGroupChat(id);
+					if (!chat) {
+						throw new Error(`Group chat not found: ${id}`);
+					}
+					await spawnModerator(chat, processManager);
+					logger.info(`[GroupChat:Debug] Moderator auto-restarted`);
+				}
 
 				// Route through the user message router which handles logging and forwarding
 				await routeUserMessage(
@@ -417,11 +499,12 @@ export function registerGroupChatHandlers(deps: GroupChatHandlerDependencies): v
 					message,
 					processManager ?? undefined,
 					agentDetector ?? undefined,
-					readOnly
+					readOnly,
+					images
 				);
 
-				console.log(`[GroupChat:Debug] User message routed to moderator`);
-				console.log(`[GroupChat:Debug] ===========================================`);
+				logger.info(`[GroupChat:Debug] User message routed to moderator`);
+				logger.info(`[GroupChat:Debug] ===========================================`);
 
 				logger.debug(`Sent message to moderator in ${id}`, LOG_CONTEXT, {
 					messageLength: message.length,
@@ -440,6 +523,87 @@ export function registerGroupChatHandlers(deps: GroupChatHandlerDependencies): v
 			await killModerator(id, processManager ?? undefined);
 			logger.info(`Stopped moderator for group chat: ${id}`, LOG_CONTEXT);
 		})
+	);
+
+	// Stop all activity in a group chat (moderator + all participants)
+	ipcMain.handle(
+		'groupChat:stopAll',
+		withIpcErrorLogging(handlerOpts('stopAll'), async (id: string): Promise<void> => {
+			const processManager = getProcessManager();
+			logger.info(`Stopping all activity in group chat: ${id}`, LOG_CONTEXT);
+
+			// Kill moderator and all participant sessions
+			await killModerator(id, processManager ?? undefined);
+			await clearAllParticipantSessions(id, processManager ?? undefined);
+
+			// Clear pending participant tracking so next round starts clean.
+			// Without this, a subsequent user message would inherit the old pending Set
+			// and trigger synthesis prematurely when those (now-dead) processes "respond".
+			clearPendingParticipants(id);
+
+			// Load participants to emit idle states for each
+			const chat = await loadGroupChat(id);
+			if (chat) {
+				for (const participant of chat.participants) {
+					groupChatEmitters.emitParticipantState?.(id, participant.name, 'idle');
+				}
+			}
+
+			// Emit idle state for the group chat
+			groupChatEmitters.emitStateChange?.(id, 'idle');
+
+			logger.info(`Stopped all activity in group chat: ${id}`, LOG_CONTEXT);
+		})
+	);
+
+	// Report that an Auto Run batch triggered by !autorun has completed
+	// Called by the renderer's batch processor onComplete handler to notify the
+	// group chat router so it can trigger the synthesis round.
+	ipcMain.handle(
+		'groupChat:reportAutoRunComplete',
+		withIpcErrorLogging(
+			handlerOpts('reportAutoRunComplete'),
+			async (groupChatId: string, participantName: string, summary: string): Promise<void> => {
+				logger.info(
+					`Auto Run complete for participant ${participantName} in ${groupChatId}`,
+					LOG_CONTEXT
+				);
+				const processManager = getProcessManager();
+
+				// Log the autorun summary as the participant's response
+				await routeAgentResponse(
+					groupChatId,
+					participantName,
+					summary,
+					processManager ?? undefined
+				);
+
+				// Reset participant state to idle (mirrors what exit-listener does for regular participants).
+				// Without this the participant card stays "Working" because no process exit fires for
+				// autorun participants (the batch runs in a separate Maestro session, not a group-chat session).
+				groupChatEmitters.emitParticipantState?.(groupChatId, participantName, 'idle');
+
+				// Signal the renderer to definitively complete the batch run for this participant.
+				// In the happy path this is a no-op (COMPLETE_BATCH was already dispatched by startBatchRun).
+				// In edge cases (synthesis re-triggered a second batch, or the process was slow to exit)
+				// this ensures the AUTO badge and progress bar are always cleared.
+				groupChatEmitters.emitAutoRunBatchComplete?.(groupChatId, participantName);
+
+				// Mark participant as done and trigger synthesis if all participants have responded.
+				// Unlike regular participants (whose process exit triggers this via exit-listener),
+				// autorun participants never exit a group-chat process — the batch runs as a separate
+				// Maestro session — so we must call markParticipantResponded here.
+				const agentDetector = getAgentDetector();
+				const isLast = markParticipantResponded(groupChatId, participantName);
+				if (isLast && processManager && agentDetector) {
+					logger.info(
+						`All participants responded after autorun, spawning synthesis for ${groupChatId}`,
+						LOG_CONTEXT
+					);
+					await spawnModeratorSynthesis(groupChatId, processManager, agentDetector);
+				}
+			}
+		)
 	);
 
 	// Get the moderator session ID (for checking if active)
@@ -514,10 +678,28 @@ export function registerGroupChatHandlers(deps: GroupChatHandlerDependencies): v
 		'groupChat:removeParticipant',
 		withIpcErrorLogging(
 			handlerOpts('removeParticipant'),
-			async (id: string, name: string): Promise<void> => {
+			async (id: string, name: string): Promise<GroupChat | null> => {
 				const processManager = getProcessManager();
-				await removeParticipant(id, name, processManager ?? undefined);
-				logger.info(`Removed participant ${name} from ${id}`, LOG_CONTEXT);
+				const removal = await removeParticipant(id, name, processManager ?? undefined);
+				if (removal) {
+					if (removal.removed) {
+						groupChatEmitters.emitParticipantsChanged?.(id, removal.chat.participants);
+					}
+					logger.info(
+						removal.removed
+							? `Removed participant ${name} from ${id}`
+							: `Remove participant no-op for ${name} in ${id}`,
+						LOG_CONTEXT,
+						{
+							participantCount: removal.chat.participants.length,
+						}
+					);
+				} else {
+					logger.info(`Remove participant skipped for missing group chat ${id}`, LOG_CONTEXT, {
+						participant: name,
+					});
+				}
+				return removal?.chat ?? null;
 			}
 		)
 	);
@@ -597,6 +779,15 @@ Respond with ONLY the summary text, no additional commentary.`;
 						durationMs: result.durationMs,
 					});
 				} catch (error) {
+					// A summary that fails because the participant's session was already
+					// deleted ("Session not found ...") is an expected, fully-recovered
+					// condition - we fall back to a fresh session just below. Don't
+					// report that to Sentry (MAESTRO-JB); only surface unexpected
+					// grooming failures.
+					const message = error instanceof Error ? error.message : String(error);
+					if (!/Session not found/i.test(message)) {
+						void captureException(error);
+					}
 					logger.warn(`Summary generation failed for ${participantName}: ${error}`, LOG_CONTEXT);
 					summaryResponse = 'No summary available - starting fresh session.';
 				}
@@ -752,10 +943,7 @@ Respond with ONLY the summary text, no additional commentary.`;
 	 * Called when a new message is added to any group chat.
 	 */
 	groupChatEmitters.emitMessage = (groupChatId: string, message: GroupChatMessage): void => {
-		const mainWindow = getMainWindow();
-		if (isWebContentsAvailable(mainWindow)) {
-			mainWindow.webContents.send('groupChat:message', groupChatId, message);
-		}
+		safeSend('groupChat:message', groupChatId, message);
 	};
 
 	/**
@@ -763,10 +951,7 @@ Respond with ONLY the summary text, no additional commentary.`;
 	 * Called when the group chat state changes (idle, moderator-thinking, agent-working).
 	 */
 	groupChatEmitters.emitStateChange = (groupChatId: string, state: GroupChatState): void => {
-		const mainWindow = getMainWindow();
-		if (isWebContentsAvailable(mainWindow)) {
-			mainWindow.webContents.send('groupChat:stateChange', groupChatId, state);
-		}
+		safeSend('groupChat:stateChange', groupChatId, state);
 	};
 
 	/**
@@ -777,10 +962,7 @@ Respond with ONLY the summary text, no additional commentary.`;
 		groupChatId: string,
 		participants: GroupChatParticipant[]
 	): void => {
-		const mainWindow = getMainWindow();
-		if (isWebContentsAvailable(mainWindow)) {
-			mainWindow.webContents.send('groupChat:participantsChanged', groupChatId, participants);
-		}
+		safeSend('groupChat:participantsChanged', groupChatId, participants);
 	};
 
 	/**
@@ -788,10 +970,7 @@ Respond with ONLY the summary text, no additional commentary.`;
 	 * Called when the moderator process reports usage statistics.
 	 */
 	groupChatEmitters.emitModeratorUsage = (groupChatId: string, usage: ModeratorUsage): void => {
-		const mainWindow = getMainWindow();
-		if (isWebContentsAvailable(mainWindow)) {
-			mainWindow.webContents.send('groupChat:moderatorUsage', groupChatId, usage);
-		}
+		safeSend('groupChat:moderatorUsage', groupChatId, usage);
 	};
 
 	/**
@@ -802,10 +981,7 @@ Respond with ONLY the summary text, no additional commentary.`;
 		groupChatId: string,
 		entry: GroupChatHistoryEntry
 	): void => {
-		const mainWindow = getMainWindow();
-		if (isWebContentsAvailable(mainWindow)) {
-			mainWindow.webContents.send('groupChat:historyEntry', groupChatId, entry);
-		}
+		safeSend('groupChat:historyEntry', groupChatId, entry);
 	};
 
 	/**
@@ -817,23 +993,11 @@ Respond with ONLY the summary text, no additional commentary.`;
 		participantName: string,
 		state: ParticipantState
 	): void => {
-		console.log(
+		logger.info(
 			`[GroupChat:IPC] emitParticipantState: chatId=${groupChatId}, participant=${participantName}, state=${state}`
 		);
-		const mainWindow = getMainWindow();
-		if (isWebContentsAvailable(mainWindow)) {
-			mainWindow.webContents.send(
-				'groupChat:participantState',
-				groupChatId,
-				participantName,
-				state
-			);
-			console.log(`[GroupChat:IPC] Sent 'groupChat:participantState' event`);
-		} else {
-			console.warn(
-				`[GroupChat:IPC] WARNING: mainWindow not available, cannot send participant state`
-			);
-		}
+		safeSend('groupChat:participantState', groupChatId, participantName, state);
+		logger.info(`[GroupChat:IPC] Sent 'groupChat:participantState' event`);
 	};
 
 	/**
@@ -844,10 +1008,45 @@ Respond with ONLY the summary text, no additional commentary.`;
 		groupChatId: string,
 		sessionId: string
 	): void => {
-		const mainWindow = getMainWindow();
-		if (isWebContentsAvailable(mainWindow)) {
-			mainWindow.webContents.send('groupChat:moderatorSessionIdChanged', groupChatId, sessionId);
-		}
+		safeSend('groupChat:moderatorSessionIdChanged', groupChatId, sessionId);
+	};
+
+	/**
+	 * Emit an Auto Run trigger event to the renderer.
+	 * Called when the moderator issues !autorun @AgentName so the renderer can
+	 * start a proper batch run through useBatchProcessor for full UI feedback.
+	 */
+	groupChatEmitters.emitAutoRunTriggered = (
+		groupChatId: string,
+		participantName: string,
+		filename?: string
+	): void => {
+		safeSend('groupChat:autoRunTriggered', groupChatId, participantName, filename);
+	};
+
+	/**
+	 * Tell the renderer to force-complete the batch run for an autorun participant.
+	 * Fired on both normal completion (reportAutoRunComplete) and on the timeout path,
+	 * so the AUTO badge and progress bar are always cleaned up regardless of how the
+	 * participant's involvement ends.
+	 */
+	groupChatEmitters.emitAutoRunBatchComplete = (
+		groupChatId: string,
+		participantName: string
+	): void => {
+		safeSend('groupChat:autoRunBatchComplete', groupChatId, participantName);
+	};
+
+	/**
+	 * Emit live output chunks from a participant to the renderer.
+	 * Called as data streams in from participant processes.
+	 */
+	groupChatEmitters.emitParticipantLiveOutput = (
+		groupChatId: string,
+		participantName: string,
+		chunk: string
+	): void => {
+		safeSend('groupChat:participantLiveOutput', groupChatId, participantName, chunk);
 	};
 
 	logger.info('Registered Group Chat IPC handlers', LOG_CONTEXT);

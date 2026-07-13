@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, RefObject } from 'react';
 import { useClickOutside } from '../ui';
+import { logger } from '../../utils/logger';
 
 /**
  * Tunnel status states for remote access via Cloudflare tunnel
@@ -50,6 +51,8 @@ export interface UseLiveOverlayReturn {
 	// Handlers
 	/** Toggle the tunnel on/off */
 	handleTunnelToggle: () => Promise<void>;
+	/** Restart the tunnel (stop + start) if currently connected; no-op otherwise */
+	restartTunnel: () => Promise<void>;
 }
 
 /**
@@ -117,6 +120,118 @@ export function useLiveOverlay(isLiveMode: boolean): UseLiveOverlayReturn {
 		}
 	}, [isLiveMode]);
 
+	// Keep tunnel UI aligned with the actual cloudflared process state.
+	//
+	// Polling is a one-way confirmer, not the authoritative driver of state.
+	// `handleTunnelToggle` owns the `starting → connected/error` transition via
+	// the `tunnel.start()` promise (which has its own 30s timeout). If we let a
+	// poll demote `starting → off` based on a transient "process spawned but URL
+	// not yet parsed" snapshot from `getStatus()`, the spinner vanishes within
+	// 500ms and the user thinks their click didn't register — then double-taps,
+	// which kills the in-flight cloudflared and starts a fresh one.
+	useEffect(() => {
+		if (
+			!isLiveMode ||
+			(tunnelStatus !== 'starting' && tunnelStatus !== 'connected' && tunnelStatus !== 'error')
+		) {
+			return;
+		}
+
+		let cancelled = false;
+		const syncStatus = async () => {
+			try {
+				const status = await window.maestro.tunnel.getStatus();
+				if (cancelled) return;
+
+				if (status.isRunning && status.url) {
+					setTunnelStatus('connected');
+					setTunnelUrl(status.url);
+					setTunnelError(null);
+					return;
+				}
+
+				// While 'starting', defer to the tunnel.start() promise. Only
+				// surface a poll-observed error early so the user doesn't keep
+				// staring at a spinner if cloudflared blew up.
+				if (tunnelStatus === 'starting') {
+					if (status.error) {
+						setTunnelStatus('error');
+						setTunnelError(status.error);
+						setTunnelUrl(null);
+						setActiveUrlTab('local');
+					}
+					return;
+				}
+
+				// tunnelStatus is 'connected' or 'error' here. If the main-process
+				// supervisor has since restored the tunnel, the isRunning check
+				// above already flipped us back to 'connected'. Otherwise reflect
+				// that it's still down (the supervisor may be mid-backoff).
+				if (status.error) {
+					setTunnelStatus('error');
+					setTunnelError(status.error);
+				} else {
+					setTunnelStatus('off');
+				}
+				setTunnelUrl(null);
+				setActiveUrlTab('local');
+			} catch (error) {
+				if (cancelled) return;
+				setTunnelStatus('error');
+				setTunnelError(error instanceof Error ? error.message : 'Failed to read tunnel status');
+				setTunnelUrl(null);
+				setActiveUrlTab('local');
+			}
+		};
+
+		void syncStatus();
+		const intervalId = window.setInterval(
+			() => {
+				void syncStatus();
+			},
+			tunnelStatus === 'starting' ? 500 : 2000
+		);
+
+		return () => {
+			cancelled = true;
+			window.clearInterval(intervalId);
+		};
+	}, [isLiveMode, tunnelStatus]);
+
+	// Restart the tunnel by tearing down any existing (or half-dead) cloudflared
+	// process and starting fresh. Used both when the underlying web server changes
+	// (e.g. port change) and to recover from an 'error' state. Runs from either
+	// 'connected' or 'error' - the latter is the recovery path when a supervised
+	// tunnel gave up or the user wants to force a reconnect.
+	const restartTunnel = useCallback(async () => {
+		if (tunnelStatus !== 'connected' && tunnelStatus !== 'error') return;
+
+		setTunnelStatus('starting');
+		setTunnelError(null);
+
+		try {
+			await window.maestro.tunnel.stop();
+		} catch (error) {
+			logger.error('[restartTunnel] Failed to stop tunnel:', undefined, error);
+		}
+
+		try {
+			const result = await window.maestro.tunnel.start();
+			if (result.success && result.url) {
+				setTunnelStatus('connected');
+				setTunnelUrl(result.url);
+				setActiveUrlTab('remote'); // Land on the remote tab with the fresh URL
+			} else {
+				setTunnelStatus('error');
+				setTunnelError(result.error || 'Failed to restart tunnel');
+			}
+		} catch (error) {
+			logger.error('[restartTunnel] Failed to restart tunnel:', undefined, error);
+			setTunnelStatus('error');
+			setTunnelError(error instanceof Error ? error.message : 'Failed to restart tunnel');
+		}
+	}, [tunnelStatus]);
+
 	// Handle tunnel toggle (start/stop remote access)
 	const handleTunnelToggle = useCallback(async () => {
 		if (tunnelStatus === 'connected') {
@@ -124,13 +239,18 @@ export function useLiveOverlay(isLiveMode: boolean): UseLiveOverlayReturn {
 			try {
 				await window.maestro.tunnel.stop();
 			} catch (error) {
-				console.error('[handleTunnelToggle] Failed to stop tunnel:', error);
+				logger.error('[handleTunnelToggle] Failed to stop tunnel:', undefined, error);
 				// Continue anyway - we still want to update UI state
 			}
 			setTunnelStatus('off');
 			setTunnelUrl(null);
 			setTunnelError(null);
 			setActiveUrlTab('local'); // Switch back to local tab
+		} else if (tunnelStatus === 'error') {
+			// Recover from a dead/errored tunnel: tear down and start fresh. Without
+			// this branch the toggle was a no-op in 'error', leaving no way to
+			// revive a tunnel that Cloudflare had dropped.
+			await restartTunnel();
 		} else if (tunnelStatus === 'off') {
 			// Turn on tunnel
 			setTunnelStatus('starting');
@@ -147,12 +267,12 @@ export function useLiveOverlay(isLiveMode: boolean): UseLiveOverlayReturn {
 					setTunnelError(result.error || 'Failed to start tunnel');
 				}
 			} catch (error) {
-				console.error('[handleTunnelToggle] Failed to start tunnel:', error);
+				logger.error('[handleTunnelToggle] Failed to start tunnel:', undefined, error);
 				setTunnelStatus('error');
 				setTunnelError(error instanceof Error ? error.message : 'Failed to start tunnel');
 			}
 		}
-	}, [tunnelStatus]);
+	}, [tunnelStatus, restartTunnel]);
 
 	return {
 		// Overlay state
@@ -177,5 +297,6 @@ export function useLiveOverlay(isLiveMode: boolean): UseLiveOverlayReturn {
 
 		// Handlers
 		handleTunnelToggle,
+		restartTunnel,
 	};
 }

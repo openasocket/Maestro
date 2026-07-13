@@ -1,13 +1,25 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useSettings } from '../../../renderer/hooks';
-import type {
-	GlobalStats,
-	AutoRunStats,
-	OnboardingStats,
-	CustomAICommand,
-} from '../../../renderer/types';
+import type { AutoRunStats, OnboardingStats, CustomAICommand } from '../../../renderer/types';
 import { DEFAULT_SHORTCUTS } from '../../../renderer/constants/shortcuts';
+import { useSettingsStore } from '../../../renderer/stores/settingsStore';
+
+// Deep-cloned defaults captured from a fresh store so mutations in tests can't
+// leak back into the reference. The store no longer exports these defaults.
+const _INITIAL_STATE = useSettingsStore.getState();
+const DEFAULT_CONTEXT_MANAGEMENT_SETTINGS = JSON.parse(
+	JSON.stringify(_INITIAL_STATE.contextManagementSettings)
+);
+const DEFAULT_AUTO_RUN_STATS = JSON.parse(JSON.stringify(_INITIAL_STATE.autoRunStats));
+const DEFAULT_USAGE_STATS = JSON.parse(JSON.stringify(_INITIAL_STATE.usageStats));
+const DEFAULT_KEYBOARD_MASTERY_STATS = JSON.parse(
+	JSON.stringify(_INITIAL_STATE.keyboardMasteryStats)
+);
+const DEFAULT_ONBOARDING_STATS = JSON.parse(JSON.stringify(_INITIAL_STATE.onboardingStats));
+const DEFAULT_AI_COMMANDS = JSON.parse(JSON.stringify(_INITIAL_STATE.customAICommands));
+import { TAB_SHORTCUTS } from '../../../renderer/constants/shortcuts';
+import { DEFAULT_CUSTOM_THEME_COLORS } from '../../../renderer/constants/themes';
 import { VIBES_SETTINGS_DEFAULTS } from '../../../shared/vibes-settings';
 
 // Helper to wait for settings to load
@@ -22,6 +34,91 @@ describe('useSettings', () => {
 	let originalFontSize: string;
 
 	beforeEach(() => {
+		// Reset Zustand store to defaults (singleton persists across tests)
+		useSettingsStore.setState({
+			settingsLoaded: false,
+			vibesEnabled: VIBES_SETTINGS_DEFAULTS.vibesEnabled,
+			vibesAssuranceLevel: VIBES_SETTINGS_DEFAULTS.vibesAssuranceLevel,
+			vibesTrackedExtensions: VIBES_SETTINGS_DEFAULTS.vibesTrackedExtensions,
+			vibesExcludePatterns: VIBES_SETTINGS_DEFAULTS.vibesExcludePatterns,
+			vibesPerAgentConfig: VIBES_SETTINGS_DEFAULTS.vibesPerAgentConfig,
+			vibesMaestroOrchestrationEnabled: VIBES_SETTINGS_DEFAULTS.vibesMaestroOrchestrationEnabled,
+			vibesAutoInit: VIBES_SETTINGS_DEFAULTS.vibesAutoInit,
+			vibesCheckBinaryPath: VIBES_SETTINGS_DEFAULTS.vibesCheckBinaryPath,
+			vibesCompressReasoningThreshold: VIBES_SETTINGS_DEFAULTS.vibesCompressReasoningThreshold,
+			vibesExternalBlobThreshold: VIBES_SETTINGS_DEFAULTS.vibesExternalBlobThreshold,
+			vibesAttestationCosign: VIBES_SETTINGS_DEFAULTS.vibesAttestationCosign,
+			vibesAttestationSubmit: VIBES_SETTINGS_DEFAULTS.vibesAttestationSubmit,
+			vibesInsightsEnabled: VIBES_SETTINGS_DEFAULTS.vibesInsightsEnabled,
+			conductorProfile: '',
+			globalShowHotkey: [],
+			llmProvider: 'openrouter',
+			modelSlug: 'anthropic/claude-3.5-sonnet',
+			apiKey: '',
+			defaultShell: 'zsh',
+			customShellPath: '',
+			shellArgs: '',
+			shellEnvVars: {},
+			ghPath: '',
+			fontFamily: 'Roboto Mono, Menlo, "Courier New", monospace',
+			fontSize: 14,
+			activeThemeId: 'dracula',
+			customThemeColors: DEFAULT_CUSTOM_THEME_COLORS,
+			customThemeBaseId: 'dracula',
+			enterToSendAI: false,
+			defaultSaveToHistory: true,
+			defaultShowThinking: 'off',
+			leftSidebarWidth: 256,
+			rightPanelWidth: 384,
+			markdownEditMode: false,
+			chatRawTextMode: false,
+			showHiddenFiles: true,
+			fileExplorerIconTheme: 'default',
+			terminalWidth: 100,
+			logLevel: 'info',
+			maxLogBuffer: 5000,
+			maxOutputLines: Infinity,
+			osNotificationsEnabled: true,
+			audioFeedbackEnabled: false,
+			audioFeedbackCommand: 'say',
+			toastDuration: 20,
+			checkForUpdatesOnStartup: true,
+			enableBetaUpdates: false,
+			crashReportingEnabled: true,
+			logViewerSelectedLevels: ['debug', 'info', 'warn', 'error', 'toast'],
+			shortcuts: DEFAULT_SHORTCUTS,
+			tabShortcuts: TAB_SHORTCUTS,
+			customAICommands: DEFAULT_AI_COMMANDS,
+			totalActiveTimeMs: 0,
+			autoRunStats: DEFAULT_AUTO_RUN_STATS,
+			usageStats: DEFAULT_USAGE_STATS,
+			ungroupedCollapsed: false,
+			groupChatsExpanded: true,
+			tourCompleted: false,
+			firstAutoRunCompleted: false,
+			onboardingStats: DEFAULT_ONBOARDING_STATS,
+			leaderboardRegistration: null,
+			webInterfaceUseCustomPort: false,
+			webInterfaceCustomPort: 8080,
+			contextManagementSettings: DEFAULT_CONTEXT_MANAGEMENT_SETTINGS,
+			keyboardMasteryStats: DEFAULT_KEYBOARD_MASTERY_STATS,
+			colorBlindMode: false,
+			documentGraphShowExternalLinks: false,
+			documentGraphMaxNodes: 50,
+			documentGraphPreviewCharLimit: 100,
+			documentGraphLayoutType: 'hierarchical',
+			statsCollectionEnabled: true,
+			defaultStatsTimeRange: 'week',
+			preventSleepEnabled: false,
+			disableGpuAcceleration: false,
+			disableConfetti: false,
+			sshRemoteIgnorePatterns: ['.git', '*cache*'],
+			sshRemoteHonorGitignore: true,
+			automaticTabNamingEnabled: true,
+			fileTabAutoRefreshEnabled: false,
+			suppressWindowsWarning: false,
+		});
+
 		vi.clearAllMocks();
 		originalFontSize = document.documentElement.style.fontSize;
 		// Reset all mocks to return empty/default (default behavior)
@@ -79,18 +176,11 @@ describe('useSettings', () => {
 
 			expect(result.current.activeThemeId).toBe('dracula');
 			expect(result.current.enterToSendAI).toBe(false);
-			expect(result.current.enterToSendTerminal).toBe(true);
 			expect(result.current.defaultSaveToHistory).toBe(true);
 			expect(result.current.leftSidebarWidth).toBe(256);
 			expect(result.current.rightPanelWidth).toBe(384);
 			expect(result.current.markdownEditMode).toBe(false);
-		});
-
-		it('should have correct default values for terminal settings', async () => {
-			const { result } = renderHook(() => useSettings());
-			await waitForSettingsLoaded(result);
-
-			expect(result.current.terminalWidth).toBe(100);
+			expect(result.current.fileExplorerIconTheme).toBe('default');
 		});
 
 		it('should have correct default values for logging settings', async () => {
@@ -105,7 +195,7 @@ describe('useSettings', () => {
 			const { result } = renderHook(() => useSettings());
 			await waitForSettingsLoaded(result);
 
-			expect(result.current.maxOutputLines).toBe(25);
+			expect(result.current.maxOutputLines).toBe(Infinity);
 		});
 
 		it('should have correct default values for notification settings', async () => {
@@ -163,20 +253,11 @@ describe('useSettings', () => {
 			expect(result.current.customAICommands[0].isBuiltIn).toBe(true);
 		});
 
-		it('should have default global stats (all zeros)', async () => {
+		it('should have default totalActiveTimeMs of 0', async () => {
 			const { result } = renderHook(() => useSettings());
 			await waitForSettingsLoaded(result);
 
-			expect(result.current.globalStats).toEqual({
-				totalSessions: 0,
-				totalMessages: 0,
-				totalInputTokens: 0,
-				totalOutputTokens: 0,
-				totalCacheReadTokens: 0,
-				totalCacheCreationTokens: 0,
-				totalCostUsd: 0,
-				totalActiveTimeMs: 0,
-			});
+			expect(result.current.totalActiveTimeMs).toBe(0);
 		});
 
 		it('should have default auto-run stats (all zeros)', async () => {
@@ -216,7 +297,6 @@ describe('useSettings', () => {
 			vi.mocked(window.maestro.settings.getAll).mockResolvedValue({
 				activeThemeId: 'gruvbox',
 				enterToSendAI: true,
-				enterToSendTerminal: false,
 				defaultSaveToHistory: true,
 				leftSidebarWidth: 300,
 				rightPanelWidth: 400,
@@ -228,7 +308,6 @@ describe('useSettings', () => {
 
 			expect(result.current.activeThemeId).toBe('gruvbox');
 			expect(result.current.enterToSendAI).toBe(true);
-			expect(result.current.enterToSendTerminal).toBe(false);
 			expect(result.current.defaultSaveToHistory).toBe(true);
 			expect(result.current.leftSidebarWidth).toBe(300);
 			expect(result.current.rightPanelWidth).toBe(400);
@@ -336,23 +415,15 @@ describe('useSettings', () => {
 			expect(commitCmd).toBeDefined();
 		});
 
-		it('should merge saved global stats with defaults', async () => {
-			const savedStats: Partial<GlobalStats> = {
-				totalSessions: 100,
-				totalMessages: 500,
-			};
-
+		it('should load saved totalActiveTimeMs', async () => {
 			vi.mocked(window.maestro.settings.getAll).mockResolvedValue({
-				globalStats: savedStats,
+				totalActiveTimeMs: 60000,
 			});
 
 			const { result } = renderHook(() => useSettings());
 			await waitForSettingsLoaded(result);
 
-			expect(result.current.globalStats.totalSessions).toBe(100);
-			expect(result.current.globalStats.totalMessages).toBe(500);
-			// Other fields should have default values
-			expect(result.current.globalStats.totalInputTokens).toBe(0);
+			expect(result.current.totalActiveTimeMs).toBe(60000);
 		});
 
 		it('should merge saved auto-run stats with defaults', async () => {
@@ -501,6 +572,18 @@ describe('useSettings', () => {
 			expect(result.current.fontSize).toBe(16);
 			expect(window.maestro.settings.set).toHaveBeenCalledWith('fontSize', 16);
 		});
+
+		it('should update fileExplorerIconTheme and persist to settings', async () => {
+			const { result } = renderHook(() => useSettings());
+			await waitForSettingsLoaded(result);
+
+			act(() => {
+				result.current.setFileExplorerIconTheme('rich');
+			});
+
+			expect(result.current.fileExplorerIconTheme).toBe('rich');
+			expect(window.maestro.settings.set).toHaveBeenCalledWith('fileExplorerIconTheme', 'rich');
+		});
 	});
 
 	describe('setter functions - UI settings', () => {
@@ -526,18 +609,6 @@ describe('useSettings', () => {
 
 			expect(result.current.enterToSendAI).toBe(true);
 			expect(window.maestro.settings.set).toHaveBeenCalledWith('enterToSendAI', true);
-		});
-
-		it('should update enterToSendTerminal and persist to settings', async () => {
-			const { result } = renderHook(() => useSettings());
-			await waitForSettingsLoaded(result);
-
-			act(() => {
-				result.current.setEnterToSendTerminal(false);
-			});
-
-			expect(result.current.enterToSendTerminal).toBe(false);
-			expect(window.maestro.settings.set).toHaveBeenCalledWith('enterToSendTerminal', false);
 		});
 
 		it('should update defaultSaveToHistory and persist to settings', async () => {
@@ -586,20 +657,6 @@ describe('useSettings', () => {
 
 			expect(result.current.markdownEditMode).toBe(true);
 			expect(window.maestro.settings.set).toHaveBeenCalledWith('markdownEditMode', true);
-		});
-	});
-
-	describe('setter functions - terminal settings', () => {
-		it('should update terminalWidth and persist to settings', async () => {
-			const { result } = renderHook(() => useSettings());
-			await waitForSettingsLoaded(result);
-
-			act(() => {
-				result.current.setTerminalWidth(120);
-			});
-
-			expect(result.current.terminalWidth).toBe(120);
-			expect(window.maestro.settings.set).toHaveBeenCalledWith('terminalWidth', 120);
 		});
 	});
 
@@ -655,13 +712,13 @@ describe('useSettings', () => {
 			expect(result.current.maxOutputLines).toBe(Infinity);
 		});
 
-		it('should keep default (25) when maxOutputLines is undefined', async () => {
+		it('should keep default (Infinity) when maxOutputLines is undefined', async () => {
 			vi.mocked(window.maestro.settings.getAll).mockResolvedValue({});
 
 			const { result } = renderHook(() => useSettings());
 			await waitForSettingsLoaded(result);
 
-			expect(result.current.maxOutputLines).toBe(25);
+			expect(result.current.maxOutputLines).toBe(Infinity);
 		});
 	});
 
@@ -828,76 +885,48 @@ describe('useSettings', () => {
 		});
 	});
 
-	describe('global stats', () => {
-		it('should update globalStats with setGlobalStats', async () => {
+	describe('totalActiveTimeMs', () => {
+		it('should set totalActiveTimeMs with setTotalActiveTimeMs', async () => {
 			const { result } = renderHook(() => useSettings());
 			await waitForSettingsLoaded(result);
 
-			const newStats: GlobalStats = {
-				totalSessions: 10,
-				totalMessages: 100,
-				totalInputTokens: 5000,
-				totalOutputTokens: 3000,
-				totalCacheReadTokens: 1000,
-				totalCacheCreationTokens: 500,
-				totalCostUsd: 1.5,
-				totalActiveTimeMs: 3600000,
-			};
 			act(() => {
-				result.current.setGlobalStats(newStats);
+				result.current.setTotalActiveTimeMs(3600000);
 			});
 
-			expect(result.current.globalStats).toEqual(newStats);
-			expect(window.maestro.settings.set).toHaveBeenCalledWith('globalStats', newStats);
+			expect(result.current.totalActiveTimeMs).toBe(3600000);
+			expect(window.maestro.settings.set).toHaveBeenCalledWith('totalActiveTimeMs', 3600000);
 		});
 
-		it('should update globalStats incrementally with updateGlobalStats', async () => {
+		it('should increment totalActiveTimeMs with addTotalActiveTimeMs', async () => {
 			const { result } = renderHook(() => useSettings());
 			await waitForSettingsLoaded(result);
 
-			// First update
 			act(() => {
-				result.current.updateGlobalStats({
-					totalSessions: 5,
-					totalMessages: 20,
-				});
+				result.current.addTotalActiveTimeMs(30000);
 			});
 
-			expect(result.current.globalStats.totalSessions).toBe(5);
-			expect(result.current.globalStats.totalMessages).toBe(20);
-			expect(result.current.globalStats.totalInputTokens).toBe(0); // unchanged
+			expect(result.current.totalActiveTimeMs).toBe(30000);
+			expect(window.maestro.settings.set).toHaveBeenCalledWith('totalActiveTimeMs', 30000);
 
-			// Second update
+			// Second increment
 			act(() => {
-				result.current.updateGlobalStats({
-					totalSessions: 3,
-					totalInputTokens: 1000,
-				});
+				result.current.addTotalActiveTimeMs(15000);
 			});
 
-			expect(result.current.globalStats.totalSessions).toBe(8); // 5 + 3
-			expect(result.current.globalStats.totalMessages).toBe(20); // unchanged
-			expect(result.current.globalStats.totalInputTokens).toBe(1000);
+			expect(result.current.totalActiveTimeMs).toBe(45000);
+			expect(window.maestro.settings.set).toHaveBeenCalledWith('totalActiveTimeMs', 45000);
 		});
 
-		it('should persist updated globalStats', async () => {
+		it('should persist totalActiveTimeMs after set', async () => {
 			const { result } = renderHook(() => useSettings());
 			await waitForSettingsLoaded(result);
 
 			act(() => {
-				result.current.updateGlobalStats({
-					totalSessions: 1,
-					totalCostUsd: 0.5,
-				});
+				result.current.setTotalActiveTimeMs(120000);
 			});
 
-			expect(window.maestro.settings.set).toHaveBeenCalledWith(
-				'globalStats',
-				expect.objectContaining({
-					totalSessions: 1,
-					totalCostUsd: 0.5,
-				})
-			);
+			expect(window.maestro.settings.set).toHaveBeenCalledWith('totalActiveTimeMs', 120000);
 		});
 	});
 
@@ -1819,6 +1848,69 @@ describe('useSettings', () => {
 		});
 	});
 
+	describe('WakaTime integration settings', () => {
+		it('should have correct default values for WakaTime settings', async () => {
+			const { result } = renderHook(() => useSettings());
+			await waitForSettingsLoaded(result);
+
+			expect(result.current.wakatimeApiKey).toBe('');
+			expect(result.current.wakatimeEnabled).toBe(false);
+		});
+
+		it('should update wakatimeApiKey and persist to settings', async () => {
+			const { result } = renderHook(() => useSettings());
+			await waitForSettingsLoaded(result);
+
+			act(() => {
+				result.current.setWakatimeApiKey('waka_test_12345');
+			});
+
+			expect(result.current.wakatimeApiKey).toBe('waka_test_12345');
+			expect(window.maestro.settings.set).toHaveBeenCalledWith('wakatimeApiKey', 'waka_test_12345');
+		});
+
+		it('should update wakatimeEnabled and persist to settings', async () => {
+			const { result } = renderHook(() => useSettings());
+			await waitForSettingsLoaded(result);
+
+			act(() => {
+				result.current.setWakatimeEnabled(true);
+			});
+
+			expect(result.current.wakatimeEnabled).toBe(true);
+			expect(window.maestro.settings.set).toHaveBeenCalledWith('wakatimeEnabled', true);
+		});
+
+		it('should load saved WakaTime settings from store', async () => {
+			vi.mocked(window.maestro.settings.getAll).mockResolvedValue({
+				wakatimeApiKey: 'waka_saved_key',
+				wakatimeEnabled: true,
+			});
+
+			const { result } = renderHook(() => useSettings());
+			await waitForSettingsLoaded(result);
+
+			expect(result.current.wakatimeApiKey).toBe('waka_saved_key');
+			expect(result.current.wakatimeEnabled).toBe(true);
+		});
+
+		it('should clear wakatimeApiKey when set to empty string', async () => {
+			const { result } = renderHook(() => useSettings());
+			await waitForSettingsLoaded(result);
+
+			act(() => {
+				result.current.setWakatimeApiKey('waka_test_key');
+			});
+			expect(result.current.wakatimeApiKey).toBe('waka_test_key');
+
+			act(() => {
+				result.current.setWakatimeApiKey('');
+			});
+			expect(result.current.wakatimeApiKey).toBe('');
+			expect(window.maestro.settings.set).toHaveBeenCalledWith('wakatimeApiKey', '');
+		});
+	});
+
 	describe('VIBES Metadata settings', () => {
 		describe('default values', () => {
 			it('should have correct default values for all VIBES settings', async () => {
@@ -1827,11 +1919,15 @@ describe('useSettings', () => {
 
 				expect(result.current.vibesEnabled).toBe(false);
 				expect(result.current.vibesAssuranceLevel).toBe('medium');
-				expect(result.current.vibesTrackedExtensions).toEqual(VIBES_SETTINGS_DEFAULTS.vibesTrackedExtensions);
-				expect(result.current.vibesExcludePatterns).toEqual(VIBES_SETTINGS_DEFAULTS.vibesExcludePatterns);
+				expect(result.current.vibesTrackedExtensions).toEqual(
+					VIBES_SETTINGS_DEFAULTS.vibesTrackedExtensions
+				);
+				expect(result.current.vibesExcludePatterns).toEqual(
+					VIBES_SETTINGS_DEFAULTS.vibesExcludePatterns
+				);
 				expect(result.current.vibesPerAgentConfig).toEqual({
 					'claude-code': { enabled: true },
-					'codex': { enabled: true },
+					codex: { enabled: true },
 				});
 				expect(result.current.vibesMaestroOrchestrationEnabled).toBe(true);
 				expect(result.current.vibesAutoInit).toBe(true);
@@ -1884,9 +1980,15 @@ describe('useSettings', () => {
 				expect(result.current.vibesEnabled).toBe(true);
 				expect(result.current.vibesAssuranceLevel).toBe('low');
 				// Unset values should use defaults
-				expect(result.current.vibesTrackedExtensions).toEqual(VIBES_SETTINGS_DEFAULTS.vibesTrackedExtensions);
-				expect(result.current.vibesExcludePatterns).toEqual(VIBES_SETTINGS_DEFAULTS.vibesExcludePatterns);
-				expect(result.current.vibesPerAgentConfig).toEqual(VIBES_SETTINGS_DEFAULTS.vibesPerAgentConfig);
+				expect(result.current.vibesTrackedExtensions).toEqual(
+					VIBES_SETTINGS_DEFAULTS.vibesTrackedExtensions
+				);
+				expect(result.current.vibesExcludePatterns).toEqual(
+					VIBES_SETTINGS_DEFAULTS.vibesExcludePatterns
+				);
+				expect(result.current.vibesPerAgentConfig).toEqual(
+					VIBES_SETTINGS_DEFAULTS.vibesPerAgentConfig
+				);
 				expect(result.current.vibesMaestroOrchestrationEnabled).toBe(true);
 				expect(result.current.vibesAutoInit).toBe(true);
 				expect(result.current.vibesCheckBinaryPath).toBe('');
@@ -1930,7 +2032,10 @@ describe('useSettings', () => {
 				});
 
 				expect(result.current.vibesTrackedExtensions).toEqual(newExtensions);
-				expect(window.maestro.settings.set).toHaveBeenCalledWith('vibesTrackedExtensions', newExtensions);
+				expect(window.maestro.settings.set).toHaveBeenCalledWith(
+					'vibesTrackedExtensions',
+					newExtensions
+				);
 			});
 
 			it('should update vibesExcludePatterns and persist to settings', async () => {
@@ -1943,14 +2048,17 @@ describe('useSettings', () => {
 				});
 
 				expect(result.current.vibesExcludePatterns).toEqual(newPatterns);
-				expect(window.maestro.settings.set).toHaveBeenCalledWith('vibesExcludePatterns', newPatterns);
+				expect(window.maestro.settings.set).toHaveBeenCalledWith(
+					'vibesExcludePatterns',
+					newPatterns
+				);
 			});
 
 			it('should update vibesPerAgentConfig and persist to settings', async () => {
 				const { result } = renderHook(() => useSettings());
 				await waitForSettingsLoaded(result);
 
-				const newConfig = { 'claude-code': { enabled: false }, 'codex': { enabled: true } };
+				const newConfig = { 'claude-code': { enabled: false }, codex: { enabled: true } };
 				act(() => {
 					result.current.setVibesPerAgentConfig(newConfig);
 				});
@@ -1968,7 +2076,10 @@ describe('useSettings', () => {
 				});
 
 				expect(result.current.vibesMaestroOrchestrationEnabled).toBe(false);
-				expect(window.maestro.settings.set).toHaveBeenCalledWith('vibesMaestroOrchestrationEnabled', false);
+				expect(window.maestro.settings.set).toHaveBeenCalledWith(
+					'vibesMaestroOrchestrationEnabled',
+					false
+				);
 			});
 
 			it('should update vibesAutoInit and persist to settings', async () => {
@@ -1992,7 +2103,10 @@ describe('useSettings', () => {
 				});
 
 				expect(result.current.vibesCheckBinaryPath).toBe('/opt/bin/vibecheck');
-				expect(window.maestro.settings.set).toHaveBeenCalledWith('vibesCheckBinaryPath', '/opt/bin/vibecheck');
+				expect(window.maestro.settings.set).toHaveBeenCalledWith(
+					'vibesCheckBinaryPath',
+					'/opt/bin/vibecheck'
+				);
 			});
 
 			it('should update vibesCompressReasoningThreshold and persist to settings', async () => {
@@ -2004,7 +2118,10 @@ describe('useSettings', () => {
 				});
 
 				expect(result.current.vibesCompressReasoningThreshold).toBe(20480);
-				expect(window.maestro.settings.set).toHaveBeenCalledWith('vibesCompressReasoningThreshold', 20480);
+				expect(window.maestro.settings.set).toHaveBeenCalledWith(
+					'vibesCompressReasoningThreshold',
+					20480
+				);
 			});
 
 			it('should update vibesExternalBlobThreshold and persist to settings', async () => {
@@ -2016,7 +2133,10 @@ describe('useSettings', () => {
 				});
 
 				expect(result.current.vibesExternalBlobThreshold).toBe(204800);
-				expect(window.maestro.settings.set).toHaveBeenCalledWith('vibesExternalBlobThreshold', 204800);
+				expect(window.maestro.settings.set).toHaveBeenCalledWith(
+					'vibesExternalBlobThreshold',
+					204800
+				);
 			});
 		});
 	});

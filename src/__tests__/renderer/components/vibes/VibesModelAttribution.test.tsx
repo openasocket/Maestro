@@ -60,36 +60,18 @@ const mockModels: VibesModelInfo[] = [
 
 describe('VibesModelAttribution', () => {
 	it('renders loading state', () => {
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={[]}
-				isLoading={true}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={[]} isLoading={true} />);
 		expect(screen.getByText('Loading model data...')).toBeTruthy();
 	});
 
 	it('renders empty state when no models', () => {
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={[]}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={[]} isLoading={false} />);
 		expect(screen.getByText('No models recorded')).toBeTruthy();
 		expect(screen.getByText(/Model attribution data will appear/)).toBeTruthy();
 	});
 
 	it('renders model list with all models', () => {
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={mockModels}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={mockModels} isLoading={false} />);
 
 		// Primary model appears in summary card + model list, others appear once
 		const sonnetElements = screen.getAllByText('claude-sonnet-4-5-20250929');
@@ -99,39 +81,21 @@ describe('VibesModelAttribution', () => {
 	});
 
 	it('shows total models count in summary', () => {
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={mockModels}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={mockModels} isLoading={false} />);
 
 		expect(screen.getByText('Total Models')).toBeTruthy();
 		expect(screen.getByText('3')).toBeTruthy();
 	});
 
 	it('shows total annotations in summary', () => {
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={mockModels}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={mockModels} isLoading={false} />);
 
 		expect(screen.getByText('Total Annotations')).toBeTruthy();
 		expect(screen.getByText('250')).toBeTruthy();
 	});
 
 	it('shows primary model with highest annotation count', () => {
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={mockModels}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={mockModels} isLoading={false} />);
 
 		expect(screen.getByText('Primary Model')).toBeTruthy();
 		// Primary model percentage shown in summary card + model row
@@ -140,13 +104,7 @@ describe('VibesModelAttribution', () => {
 	});
 
 	it('shows model version when available', () => {
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={mockModels}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={mockModels} isLoading={false} />);
 
 		// v1.0 appears in primary model card + model row for the top model
 		const v10 = screen.getAllByText('v1.0');
@@ -155,13 +113,7 @@ describe('VibesModelAttribution', () => {
 	});
 
 	it('formats tool names correctly', () => {
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={mockModels}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={mockModels} isLoading={false} />);
 
 		expect(screen.getByText('Claude Code')).toBeTruthy();
 		expect(screen.getByText('Codex')).toBeTruthy();
@@ -169,13 +121,7 @@ describe('VibesModelAttribution', () => {
 	});
 
 	it('shows annotation counts for each model', () => {
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={mockModels}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={mockModels} isLoading={false} />);
 
 		expect(screen.getByText('150 ann')).toBeTruthy();
 		expect(screen.getByText('75 ann')).toBeTruthy();
@@ -183,13 +129,7 @@ describe('VibesModelAttribution', () => {
 	});
 
 	it('shows percentages for each model', () => {
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={mockModels}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={mockModels} isLoading={false} />);
 
 		// The primary model card has "60.0%" and the model row also has "60.0%"
 		const sixtyPercent = screen.getAllByText('60.0%');
@@ -199,13 +139,7 @@ describe('VibesModelAttribution', () => {
 	});
 
 	it('shows model contributions header with count', () => {
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={mockModels}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={mockModels} isLoading={false} />);
 
 		expect(screen.getByText('Model Contributions')).toBeTruthy();
 		expect(screen.getByText('(3)')).toBeTruthy();
@@ -225,13 +159,7 @@ describe('VibesModelAttribution', () => {
 			},
 		];
 
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={unsortedModels}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={unsortedModels} isLoading={false} />);
 
 		// Primary model should be the one with most annotations
 		expect(screen.getByText('Primary Model')).toBeTruthy();
@@ -251,13 +179,7 @@ describe('VibesModelAttribution', () => {
 			},
 		];
 
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={singleModel}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={singleModel} isLoading={false} />);
 
 		// Model name appears in primary card + list row
 		const modelElements = screen.getAllByText('only-model');
@@ -280,13 +202,7 @@ describe('VibesModelAttribution', () => {
 			},
 		];
 
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={noToolModel}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={noToolModel} isLoading={false} />);
 
 		expect(screen.getByText('Unknown')).toBeTruthy();
 	});
@@ -296,13 +212,7 @@ describe('VibesModelAttribution', () => {
 	// ========================================================================
 
 	it('renders search bar when multiple models exist', () => {
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={mockModels}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={mockModels} isLoading={false} />);
 
 		expect(screen.getByTestId('model-search-bar')).toBeTruthy();
 		expect(screen.getByTestId('model-search-input')).toBeTruthy();
@@ -314,20 +224,14 @@ describe('VibesModelAttribution', () => {
 				theme={mockTheme}
 				models={[{ modelName: 'only-model', annotationCount: 10, percentage: 100 }]}
 				isLoading={false}
-			/>,
+			/>
 		);
 
 		expect(screen.queryByTestId('model-search-bar')).toBeNull();
 	});
 
 	it('filters models by search query', () => {
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={mockModels}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={mockModels} isLoading={false} />);
 
 		const input = screen.getByTestId('model-search-input');
 		fireEvent.change(input, { target: { value: 'gpt' } });
@@ -339,13 +243,7 @@ describe('VibesModelAttribution', () => {
 	});
 
 	it('shows no-match message when search has no results', () => {
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={mockModels}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={mockModels} isLoading={false} />);
 
 		const input = screen.getByTestId('model-search-input');
 		fireEvent.change(input, { target: { value: 'nonexistent-model' } });
@@ -354,13 +252,7 @@ describe('VibesModelAttribution', () => {
 	});
 
 	it('cycles sort mode when sort toggle clicked', () => {
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={mockModels}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={mockModels} isLoading={false} />);
 
 		const sortBtn = screen.getByTestId('model-sort-toggle');
 		// Default: count (#)
@@ -386,13 +278,7 @@ describe('VibesModelAttribution', () => {
 			percentage: (100 - i * 10) / 4.6,
 		}));
 
-		render(
-			<VibesModelAttribution
-				theme={mockTheme}
-				models={manyModels}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesModelAttribution theme={mockTheme} models={manyModels} isLoading={false} />);
 
 		const toggle = screen.getByTestId('model-show-toggle');
 		expect(toggle.textContent).toContain('Show all (7)');

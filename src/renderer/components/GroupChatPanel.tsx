@@ -11,6 +11,7 @@ import type {
 	GroupChat,
 	GroupChatMessage,
 	GroupChatState,
+	Group,
 	Shortcut,
 	Session,
 	QueuedItem,
@@ -29,15 +30,17 @@ interface GroupChatPanelProps {
 	/** True if one or more participants don't have cost data (makes total incomplete) */
 	costIncomplete?: boolean;
 	onSendMessage: (content: string, images?: string[], readOnly?: boolean) => void;
-	onClose: () => void;
+	onStopAll: () => void;
 	onRename: () => void;
 	onShowInfo: () => void;
 	rightPanelOpen: boolean;
 	onToggleRightPanel: () => void;
 	shortcuts: Record<string, Shortcut>;
 	sessions: Session[];
-	onDraftChange?: (draft: string) => void;
+	groups?: Group[];
+	onDraftChange?: (draft: string, groupChatId: string) => void;
 	onOpenPromptComposer?: () => void;
+	draftFlushRef?: React.MutableRefObject<(() => void) | null>;
 	// Lifted state for sync with PromptComposer
 	stagedImages?: string[];
 	setStagedImages?: React.Dispatch<React.SetStateAction<string[]>>;
@@ -69,6 +72,10 @@ interface GroupChatPanelProps {
 	participantColors?: Record<string, string>;
 	/** Ref to expose scrollToMessage on the messages component */
 	messagesRef?: React.RefObject<GroupChatMessagesHandle>;
+	/** Whether gh CLI is available for gist publishing */
+	ghCliAvailable?: boolean;
+	/** Callback to publish a message as a GitHub Gist */
+	onPublishMessageGist?: (text: string, messageId?: string) => void;
 }
 
 export function GroupChatPanel({
@@ -79,15 +86,17 @@ export function GroupChatPanel({
 	totalCost,
 	costIncomplete,
 	onSendMessage,
-	onClose,
+	onStopAll,
 	onRename,
 	onShowInfo,
 	rightPanelOpen,
 	onToggleRightPanel,
 	shortcuts,
 	sessions,
+	groups,
 	onDraftChange,
 	onOpenPromptComposer,
+	draftFlushRef,
 	stagedImages,
 	setStagedImages,
 	readOnlyMode,
@@ -107,6 +116,8 @@ export function GroupChatPanel({
 	showFlashNotification,
 	participantColors,
 	messagesRef,
+	ghCliAvailable,
+	onPublishMessageGist,
 }: GroupChatPanelProps): JSX.Element {
 	return (
 		<div className="flex flex-col h-full" style={{ backgroundColor: theme.colors.bgMain }}>
@@ -116,7 +127,8 @@ export function GroupChatPanel({
 				participantCount={groupChat.participants.length}
 				totalCost={totalCost}
 				costIncomplete={costIncomplete}
-				onClose={onClose}
+				state={state}
+				onStopAll={onStopAll}
 				onRename={onRename}
 				onShowInfo={onShowInfo}
 				rightPanelOpen={rightPanelOpen}
@@ -128,12 +140,16 @@ export function GroupChatPanel({
 				ref={messagesRef}
 				theme={theme}
 				messages={messages}
+				chatId={groupChat.id}
 				participants={groupChat.participants}
 				state={state}
 				markdownEditMode={markdownEditMode}
 				onToggleMarkdownEditMode={onToggleMarkdownEditMode}
 				maxOutputLines={maxOutputLines}
 				participantColors={participantColors}
+				onOpenLightbox={onOpenLightbox}
+				ghCliAvailable={ghCliAvailable}
+				onPublishGist={onPublishMessageGist}
 			/>
 
 			<GroupChatInput
@@ -142,10 +158,12 @@ export function GroupChatPanel({
 				onSend={onSendMessage}
 				participants={groupChat.participants}
 				sessions={sessions}
+				groups={groups}
 				groupChatId={groupChat.id}
 				draftMessage={groupChat.draftMessage}
 				onDraftChange={onDraftChange}
 				onOpenPromptComposer={onOpenPromptComposer}
+				draftFlushRef={draftFlushRef}
 				stagedImages={stagedImages}
 				setStagedImages={setStagedImages}
 				readOnlyMode={readOnlyMode}

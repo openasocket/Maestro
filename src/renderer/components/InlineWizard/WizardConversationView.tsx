@@ -15,6 +15,8 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import type { Theme } from '../../types';
 import { WizardMessageBubble, type WizardMessageBubbleMessage } from './WizardMessageBubble';
 import { getNextFillerPhrase } from '../Wizard/services/fillerPhrases';
+import { TypingIndicator } from '../Wizard/shared/TypingIndicator';
+import { formatAgentName, getToolDetail } from '../Wizard/shared/wizardHelpers';
 
 /**
  * Ready confidence threshold for "Let's Go" button (matches READY_CONFIDENCE_THRESHOLD)
@@ -59,167 +61,12 @@ export interface WizardConversationViewProps {
 	toolExecutions?: Array<{ toolName: string; state?: unknown; timestamp: number }>;
 	/** Whether document generation has started (to hide Let's Go button once generation begins) */
 	hasStartedGenerating?: boolean;
-}
-
-/**
- * Check if a string contains an emoji
- */
-function containsEmoji(str: string): boolean {
-	const emojiRegex =
-		/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]/u;
-	return emojiRegex.test(str);
-}
-
-/**
- * Format agent name with robot emoji prefix if no emoji present
- */
-function formatAgentName(name: string): string {
-	if (!name) return '🤖 Agent';
-	return containsEmoji(name) ? name : `🤖 ${name}`;
-}
-
-/**
- * TypingIndicator - Shows when agent is "thinking" with a typewriter effect filler phrase.
- * Rotates to a new phrase every 5 seconds after typing completes.
- */
-function TypingIndicator({
-	theme,
-	agentName,
-	fillerPhrase,
-	onRequestNewPhrase,
-}: {
-	theme: Theme;
-	agentName: string;
-	fillerPhrase: string;
-	onRequestNewPhrase: () => void;
-}): JSX.Element {
-	const [displayedText, setDisplayedText] = useState('');
-	const [isTypingComplete, setIsTypingComplete] = useState(false);
-
-	// Typewriter effect using requestAnimationFrame for smoother animation
-	useEffect(() => {
-		const text = fillerPhrase || 'Thinking...';
-		let currentIndex = 0;
-		let lastTime = 0;
-		const charDelay = 30; // 30ms per character for a natural typing speed
-		let rafId: number;
-
-		setDisplayedText('');
-		setIsTypingComplete(false);
-
-		function tick(timestamp: number) {
-			if (!lastTime) lastTime = timestamp;
-			const elapsed = timestamp - lastTime;
-
-			if (elapsed >= charDelay) {
-				if (currentIndex < text.length) {
-					currentIndex++;
-					setDisplayedText(text.slice(0, currentIndex));
-					lastTime = timestamp;
-					rafId = requestAnimationFrame(tick);
-				} else {
-					setIsTypingComplete(true);
-				}
-			} else {
-				rafId = requestAnimationFrame(tick);
-			}
-		}
-
-		rafId = requestAnimationFrame(tick);
-
-		return () => cancelAnimationFrame(rafId);
-	}, [fillerPhrase]);
-
-	// Rotate to new phrase 5 seconds after typing completes
-	useEffect(() => {
-		if (!isTypingComplete) return;
-
-		const rotateTimer = setTimeout(() => {
-			onRequestNewPhrase();
-		}, 5000);
-
-		return () => clearTimeout(rotateTimer);
-	}, [isTypingComplete, onRequestNewPhrase]);
-
-	return (
-		<div className="flex justify-start mb-4" data-testid="wizard-typing-indicator">
-			<div
-				className="max-w-[80%] rounded-lg rounded-bl-none px-4 py-3"
-				style={{ backgroundColor: theme.colors.bgActivity }}
-			>
-				<div className="text-xs font-medium mb-2" style={{ color: theme.colors.accent }}>
-					{formatAgentName(agentName)}
-				</div>
-				<div className="text-sm" style={{ color: theme.colors.textMain }}>
-					<span
-						className="italic"
-						style={{ color: theme.colors.textDim }}
-						data-testid="typing-indicator-text"
-					>
-						{displayedText}
-					</span>
-					<span
-						className={`ml-1 inline-flex items-center gap-0.5 ${isTypingComplete ? 'opacity-100' : 'opacity-50'}`}
-						data-testid="typing-indicator-dots"
-					>
-						<span
-							className="w-1.5 h-1.5 rounded-full inline-block"
-							style={{
-								backgroundColor: theme.colors.accent,
-								animation: 'wizard-typing-bounce 0.6s infinite',
-								animationDelay: '0ms',
-							}}
-						/>
-						<span
-							className="w-1.5 h-1.5 rounded-full inline-block"
-							style={{
-								backgroundColor: theme.colors.accent,
-								animation: 'wizard-typing-bounce 0.6s infinite',
-								animationDelay: '150ms',
-							}}
-						/>
-						<span
-							className="w-1.5 h-1.5 rounded-full inline-block"
-							style={{
-								backgroundColor: theme.colors.accent,
-								animation: 'wizard-typing-bounce 0.6s infinite',
-								animationDelay: '300ms',
-							}}
-						/>
-					</span>
-				</div>
-			</div>
-		</div>
-	);
-}
-
-/**
- * Safely convert a value to a string for rendering.
- * Returns the string if it's already a string, otherwise null.
- * This prevents objects from being passed to React as children.
- */
-function safeString(value: unknown): string | null {
-	return typeof value === 'string' ? value : null;
-}
-
-/**
- * Extract a descriptive detail string from tool input.
- * Looks for common properties like command, pattern, file_path, query.
- * Only returns actual strings - objects are safely ignored to prevent React errors.
- */
-function getToolDetail(input: unknown): string | null {
-	if (!input || typeof input !== 'object') return null;
-	const inputObj = input as Record<string, unknown>;
-	// Check common tool input properties in order of preference
-	// Use safeString to ensure we only return actual strings, not objects
-	return (
-		safeString(inputObj.command) ||
-		safeString(inputObj.pattern) ||
-		safeString(inputObj.file_path) ||
-		safeString(inputObj.query) ||
-		safeString(inputObj.path) ||
-		null
-	);
+	/** Callback to open the lightbox for an image */
+	setLightboxImage?: (
+		image: string | null,
+		contextImages?: string[],
+		source?: 'staged' | 'history'
+	) => void;
 }
 
 /**
@@ -388,7 +235,7 @@ function getUserFriendlyErrorMessage(error: string): { title: string; descriptio
 		return {
 			title: 'Response Timeout',
 			description:
-				'The AI agent took too long to respond. This can happen with complex requests or network issues.',
+				'The agent stopped producing output for an extended period. This usually means the agent process crashed or lost its connection to the AI provider. Try again — if the issue persists, check your API key and network connection.',
 		};
 	}
 
@@ -571,14 +418,53 @@ export function WizardConversationView({
 	thinkingContent = '',
 	toolExecutions = [],
 	hasStartedGenerating = false,
+	setLightboxImage,
 }: WizardConversationViewProps): JSX.Element {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const messagesEndRef = useRef<HTMLDivElement>(null);
 	const [fillerPhrase, setFillerPhrase] = useState(() => getNextFillerPhrase());
 
-	// Auto-scroll to bottom on new messages or when loading state changes
+	// Track whether user has scrolled away from the bottom.
+	// When true, we suppress auto-scroll so the user can read history.
+	const userScrolledUpRef = useRef(false);
+	// Guard to distinguish programmatic scrolls from user scrolls
+	const isProgrammaticScrollRef = useRef(false);
+
+	// Detect user scroll to decide whether to auto-scroll
+	useEffect(() => {
+		const container = containerRef.current;
+		if (!container) return;
+
+		const handleScroll = () => {
+			// Ignore programmatic scrolls
+			if (isProgrammaticScrollRef.current) return;
+
+			const { scrollTop, scrollHeight, clientHeight } = container;
+			// Consider "near bottom" if within 80px of the bottom
+			const isNearBottom = scrollHeight - scrollTop - clientHeight < 80;
+			userScrolledUpRef.current = !isNearBottom;
+		};
+
+		container.addEventListener('scroll', handleScroll, { passive: true });
+		return () => container.removeEventListener('scroll', handleScroll);
+	}, []);
+
+	// Auto-scroll to bottom on new messages or when loading state changes,
+	// but only if the user hasn't scrolled up to read history.
 	const scrollToBottom = useCallback(() => {
-		messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+		if (userScrolledUpRef.current) return;
+		const container = containerRef.current;
+		if (!container) return;
+
+		isProgrammaticScrollRef.current = true;
+		container.scrollTo({
+			top: container.scrollHeight,
+			behavior: 'auto',
+		});
+		// Reset guard after browser paints
+		requestAnimationFrame(() => {
+			isProgrammaticScrollRef.current = false;
+		});
 	}, []);
 
 	useEffect(() => {
@@ -592,6 +478,29 @@ export function WizardConversationView({
 		error,
 		scrollToBottom,
 	]);
+
+	// Always scroll to bottom when a new user message is added (they just sent it)
+	const prevHistoryLenRef = useRef(conversationHistory.length);
+	useEffect(() => {
+		const prevLen = prevHistoryLenRef.current;
+		prevHistoryLenRef.current = conversationHistory.length;
+
+		if (conversationHistory.length > prevLen) {
+			const lastMsg = conversationHistory[conversationHistory.length - 1];
+			if (lastMsg?.role === 'user') {
+				// User just sent a message - scroll to bottom regardless of scroll position
+				userScrolledUpRef.current = false;
+				const container = containerRef.current;
+				if (container) {
+					isProgrammaticScrollRef.current = true;
+					container.scrollTo({ top: container.scrollHeight, behavior: 'auto' });
+					requestAnimationFrame(() => {
+						isProgrammaticScrollRef.current = false;
+					});
+				}
+			}
+		}
+	}, [conversationHistory]);
 
 	// Get a new filler phrase when requested by the TypingIndicator
 	const handleRequestNewPhrase = useCallback(() => {
@@ -696,6 +605,7 @@ export function WizardConversationView({
 					theme={theme}
 					agentName={agentName}
 					providerName={providerName}
+					setLightboxImage={setLightboxImage}
 				/>
 			))}
 
@@ -772,18 +682,6 @@ export function WizardConversationView({
 
 			{/* Scroll anchor */}
 			<div ref={messagesEndRef} data-testid="wizard-scroll-anchor" />
-
-			{/* Bounce animation for typing indicator dots */}
-			<style>{`
-        @keyframes wizard-typing-bounce {
-          0%, 100% {
-            transform: translateY(0);
-          }
-          50% {
-            transform: translateY(-4px);
-          }
-        }
-      `}</style>
 		</div>
 	);
 }

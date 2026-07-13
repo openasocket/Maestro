@@ -1,6 +1,8 @@
 // Human-readable output formatter for CLI
 // Provides beautiful, colored terminal output
 
+import { formatDurationDecimal } from '../../shared/formatters';
+
 // ANSI color codes
 const colors = {
 	reset: '\x1b[0m',
@@ -34,6 +36,15 @@ const supportsColor = process.stdout.isTTY;
 function c(color: keyof typeof colors, text: string): string {
 	if (!supportsColor) return text;
 	return `${colors[color]}${text}${colors.reset}`;
+}
+
+/**
+ * Public color helper for callers that build their own lines (e.g. the doctor
+ * checklist) and need a colored glyph without the `formatSuccess`/`formatError`
+ * prefix decorations. Respects the same `supportsColor` gate as everything else.
+ */
+export function colorize(color: keyof typeof colors, text: string): string {
+	return c(color, text);
 }
 
 function bold(text: string): string {
@@ -418,6 +429,34 @@ export function formatRunEvent(event: RunEvent, options?: { debug?: boolean }): 
 			return `${separator}\n${header}\n${separator}\n${prompt}\n${separator}`;
 		}
 
+		case 'goal_start':
+			return `${timeStr} ${c('cyan', '🎯')} ${bold('Starting Goal-Driven Auto Run')} ${dim(
+				truncate((event.goal as string) || '', 60)
+			)}`;
+
+		case 'goal_iteration_start': {
+			const iteration = event.iteration as number;
+			return `${timeStr} ${c('yellow', '⏳')} Iteration ${iteration}`;
+		}
+
+		case 'goal_iteration_complete': {
+			const iteration = event.iteration as number;
+			const progress = event.progress as number;
+			const summary = truncate((event.summary as string) || '', 70);
+			return `${timeStr}    ${c('green', '✓')} Iteration ${iteration} ${bold(`${progress}%`)} ${dim(summary)}`;
+		}
+
+		case 'goal_complete': {
+			const success = event.success as boolean;
+			const finalProgress = event.finalProgress as number;
+			const iterations = event.iterations as number;
+			const reason = event.exitReason as string;
+			const icon = success ? c('green', '✓') : c('yellow', '■');
+			return `${timeStr} ${icon} ${bold('Goal run finished')} ${dim(
+				`(${reason}, ${finalProgress}%, ${iterations} iteration${iterations === 1 ? '' : 's'})`
+			)}`;
+		}
+
 		default:
 			return `${timeStr} ${dim(event.type)}`;
 	}
@@ -433,6 +472,16 @@ export interface AgentDetailDisplay {
 	groupId?: string;
 	groupName?: string;
 	autoRunFolderPath?: string;
+	// Editable per-agent settings (the Edit Agent modal fields). `null` = unset.
+	nudgeMessage?: string | null;
+	newSessionMessage?: string | null;
+	customPath?: string | null;
+	customArgs?: string | null;
+	customEnvVars?: Record<string, string> | null;
+	customModel?: string | null;
+	customEffort?: string | null;
+	customContextWindow?: number | null;
+	tokenSource?: string | null;
 	stats: {
 		historyEntries: number;
 		successCount: number;
@@ -469,18 +518,7 @@ function formatTokens(count: number): string {
 	return count.toString();
 }
 
-/**
- * Format duration for CLI display (decimal format with ms/s/m/h suffixes).
- * Note: This differs from shared/formatters.ts formatElapsedTime which
- * shows combined units like "5m 12s". This version uses single decimals
- * like "5.2m" for compact CLI output.
- */
-function formatDuration(ms: number): string {
-	if (ms < 1000) return `${ms}ms`;
-	if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-	if (ms < 3600_000) return `${(ms / 60_000).toFixed(1)}m`;
-	return `${(ms / 3600_000).toFixed(1)}h`;
-}
+const formatDuration = formatDurationDecimal;
 
 export function formatAgentDetail(agent: AgentDetailDisplay): string {
 	const lines: string[] = [];
@@ -501,6 +539,41 @@ export function formatAgentDetail(agent: AgentDetailDisplay): string {
 
 	if (agent.autoRunFolderPath) {
 		lines.push(`  ${c('white', 'Auto Run:')}   ${dim(agent.autoRunFolderPath)}`);
+	}
+
+	// Configuration (the Edit Agent modal settings). Only render the rows that
+	// are actually set so an unconfigured agent stays terse.
+	const configRows: string[] = [];
+	const addConfig = (label: string, value: string | null | undefined) => {
+		if (value === null || value === undefined || value === '') return;
+		configRows.push(
+			`  ${c('white', `${label}:`)}${' '.repeat(Math.max(1, 20 - label.length))}${value}`
+		);
+	};
+	addConfig('Nudge', agent.nudgeMessage ? truncate(agent.nudgeMessage, 60) : undefined);
+	addConfig(
+		'New session msg',
+		agent.newSessionMessage ? truncate(agent.newSessionMessage, 60) : undefined
+	);
+	addConfig('Model', agent.customModel);
+	addConfig('Effort', agent.customEffort);
+	addConfig(
+		'Context window',
+		typeof agent.customContextWindow === 'number' ? String(agent.customContextWindow) : undefined
+	);
+	addConfig('Binary path', agent.customPath ? dim(agent.customPath) : undefined);
+	addConfig('Custom args', agent.customArgs);
+	if (agent.customEnvVars && Object.keys(agent.customEnvVars).length > 0) {
+		addConfig('Env vars', Object.keys(agent.customEnvVars).join(', '));
+	}
+	if (agent.toolType === 'claude-code' && agent.tokenSource) {
+		addConfig('Token source', agent.tokenSource);
+	}
+	if (configRows.length > 0) {
+		lines.push('');
+		lines.push(bold(c('cyan', 'CONFIGURATION')));
+		lines.push('');
+		lines.push(...configRows);
 	}
 
 	lines.push('');
@@ -586,9 +659,7 @@ export function formatSessions(
 	const countInfo = searchQuery
 		? `${filteredCount} matching of ${totalCount} total`
 		: `showing ${sessions.length} of ${totalCount}`;
-	lines.push(
-		bold(c('cyan', 'SESSIONS')) + dim(` for ${agentName} (${countInfo})`)
-	);
+	lines.push(bold(c('cyan', 'SESSIONS')) + dim(` for ${agentName} (${countInfo})`));
 	lines.push('');
 
 	for (const session of sessions) {
@@ -596,14 +667,11 @@ export function formatSessions(
 		const dateStr = date.toLocaleDateString();
 		const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 		const star = session.starred ? c('yellow', '★ ') : '  ';
-		const name = session.sessionName
-			? c('white', session.sessionName)
-			: dim('(unnamed)');
+		const name = session.sessionName ? c('white', session.sessionName) : dim('(unnamed)');
 		const cost = session.costUsd > 0 ? c('yellow', `$${session.costUsd.toFixed(4)}`) : dim('$0');
 		const msgs = dim(`${session.messageCount} msgs`);
-		const dur = session.durationSeconds > 0
-			? dim(formatDurationSeconds(session.durationSeconds))
-			: '';
+		const dur =
+			session.durationSeconds > 0 ? dim(formatDurationSeconds(session.durationSeconds)) : '';
 		const preview = session.firstMessage
 			? dim(truncate(session.firstMessage.replace(/\n/g, ' '), 70))
 			: '';
@@ -624,6 +692,227 @@ function formatDurationSeconds(seconds: number): string {
 	if (seconds < 60) return `${seconds}s`;
 	if (seconds < 3600) return `${(seconds / 60).toFixed(1)}m`;
 	return `${(seconds / 3600).toFixed(1)}h`;
+}
+
+// Settings formatting
+export interface SettingDisplay {
+	key: string;
+	value: unknown;
+	type: string;
+	category: string;
+	description?: string;
+	defaultValue?: unknown;
+	isDefault?: boolean;
+	sensitive?: boolean;
+}
+
+function formatSettingValue(value: unknown, sensitive?: boolean): string {
+	if (sensitive) return c('red', '***');
+	if (value === null) return dim('null');
+	if (value === undefined) return dim('undefined');
+	if (typeof value === 'boolean') return c(value ? 'green' : 'red', String(value));
+	if (typeof value === 'number') return c('yellow', String(value));
+	if (typeof value === 'string') {
+		if (value === '') return dim('""');
+		return c('white', value.length > 60 ? truncate(value, 60) : value);
+	}
+	if (Array.isArray(value)) {
+		if (value.length === 0) return dim('[]');
+		const compact = JSON.stringify(value);
+		return dim(compact.length > 60 ? truncate(compact, 60) : compact);
+	}
+	if (typeof value === 'object') {
+		const compact = JSON.stringify(value);
+		return dim(compact.length > 60 ? truncate(compact, 60) : compact);
+	}
+	return String(value);
+}
+
+export function formatSettingsList(
+	settings: SettingDisplay[],
+	options?: { verbose?: boolean; keysOnly?: boolean; showDefaults?: boolean }
+): string {
+	if (settings.length === 0) {
+		return dim('No settings found.');
+	}
+
+	const verbose = options?.verbose ?? false;
+	const keysOnly = options?.keysOnly ?? false;
+	const showDefaults = options?.showDefaults ?? false;
+
+	const lines: string[] = [];
+	lines.push(bold(c('cyan', 'SETTINGS')) + dim(` (${settings.length})`));
+	lines.push('');
+
+	let currentCategory = '';
+	for (const setting of settings) {
+		// Category header
+		if (setting.category !== currentCategory) {
+			if (currentCategory !== '') lines.push('');
+			lines.push(`  ${bold(c('blue', setting.category))}`);
+			currentCategory = setting.category;
+		}
+
+		if (keysOnly) {
+			lines.push(`    ${c('white', setting.key)}`);
+			continue;
+		}
+
+		const valueStr = formatSettingValue(setting.value, setting.sensitive);
+		const defaultMarker = setting.isDefault ? dim(' (default)') : '';
+		lines.push(`    ${c('white', setting.key)} = ${valueStr}${defaultMarker}`);
+
+		if (showDefaults && !setting.isDefault) {
+			const defStr = formatSettingValue(setting.defaultValue);
+			lines.push(`      ${dim('default:')} ${defStr}`);
+		}
+
+		if (verbose && setting.description) {
+			lines.push(`      ${dim(setting.description)}`);
+		}
+	}
+
+	return lines.join('\n');
+}
+
+export function formatSettingDetail(setting: SettingDisplay): string {
+	const lines: string[] = [];
+	lines.push(bold(c('cyan', 'SETTING')));
+	lines.push('');
+	lines.push(`  ${c('white', 'Key:')}       ${setting.key}`);
+	lines.push(
+		`  ${c('white', 'Value:')}     ${formatSettingValue(setting.value, setting.sensitive)}`
+	);
+	lines.push(`  ${c('white', 'Type:')}      ${dim(setting.type)}`);
+	lines.push(`  ${c('white', 'Default:')}   ${formatSettingValue(setting.defaultValue)}`);
+	lines.push(`  ${c('white', 'Category:')}  ${setting.category}`);
+	if (setting.description) {
+		lines.push('');
+		lines.push(`  ${dim(setting.description)}`);
+	}
+	return lines.join('\n');
+}
+
+// SSH Remote formatting
+export interface SshRemoteDisplay {
+	id: string;
+	name: string;
+	host: string;
+	port: number;
+	username: string;
+	enabled: boolean;
+	useSshConfig?: boolean;
+	isDefault?: boolean;
+}
+
+export function formatSshRemotes(remotes: SshRemoteDisplay[]): string {
+	if (remotes.length === 0) {
+		return dim('No SSH remotes configured.');
+	}
+
+	const lines: string[] = [];
+	lines.push(bold(c('cyan', 'SSH REMOTES')) + dim(` (${remotes.length})`));
+	lines.push('');
+
+	for (const remote of remotes) {
+		const name = c('white', remote.name);
+		const status = remote.enabled ? c('green', 'enabled') : c('red', 'disabled');
+		const defaultTag = remote.isDefault ? c('yellow', ' [default]') : '';
+		const sshConfig = remote.useSshConfig ? c('blue', ' [ssh-config]') : '';
+		const hostInfo = remote.username ? `${remote.username}@${remote.host}` : remote.host;
+		const portInfo = remote.port !== 22 ? `:${remote.port}` : '';
+		const id = dim(remote.id);
+
+		lines.push(`  ${name} ${status}${defaultTag}${sshConfig}`);
+		lines.push(`      ${dim(hostInfo + portInfo)}`);
+		lines.push(`      ${id}`);
+	}
+
+	return lines.join('\n');
+}
+
+// Director's Notes History formatting
+export interface DirectorNotesHistoryDisplay {
+	stats: {
+		agentCount: number;
+		autoCount: number;
+		userCount: number;
+		cueCount: number;
+		totalCount: number;
+		lookbackDays: number;
+	};
+	total: number;
+	showing: number;
+	entries: Array<{
+		id: string;
+		type: string;
+		timestamp: number;
+		summary: string;
+		agentName?: string;
+		sourceSessionId: string;
+		success?: boolean;
+		elapsedTimeMs?: number;
+		usageStats?: { totalCostUsd?: number };
+	}>;
+}
+
+export function formatDirectorNotesHistory(
+	data: DirectorNotesHistoryDisplay,
+	lookbackDays: number
+): string {
+	const lines: string[] = [];
+
+	// Header
+	const period =
+		lookbackDays > 0 ? `last ${lookbackDays} day${lookbackDays !== 1 ? 's' : ''}` : 'all time';
+	lines.push(bold(c('cyan', "DIRECTOR'S NOTES — HISTORY")) + dim(` (${period})`));
+	lines.push('');
+
+	// Stats
+	const { stats } = data;
+	lines.push(
+		`  ${c('white', 'Agents:')}   ${stats.agentCount}    ${c('white', 'Entries:')} ${stats.totalCount} ${dim(`(${stats.autoCount} auto, ${stats.userCount} user, ${stats.cueCount} cue)`)}`
+	);
+	lines.push(`  ${c('white', 'Showing:')}  ${data.showing} of ${data.total}`);
+	lines.push('');
+
+	if (data.entries.length === 0) {
+		lines.push(dim('  No entries found for the specified period.'));
+		return lines.join('\n');
+	}
+
+	for (const entry of data.entries) {
+		const date = new Date(entry.timestamp);
+		const dateStr = date.toLocaleDateString();
+		const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+		const icon =
+			entry.success === true
+				? c('green', '✓')
+				: entry.success === false
+					? c('red', '✗')
+					: c('gray', '•');
+		const typeLabel =
+			entry.type === 'AUTO'
+				? c('blue', '[AUTO]')
+				: entry.type === 'CUE'
+					? c('magenta', '[CUE]')
+					: c('yellow', '[USER]');
+		const agent = entry.agentName
+			? c('white', truncate(entry.agentName, 20))
+			: dim(entry.sourceSessionId.slice(0, 8));
+		const summary = truncate(entry.summary || '', 50);
+		const costStr =
+			entry.usageStats?.totalCostUsd !== undefined
+				? dim(` $${entry.usageStats.totalCostUsd.toFixed(4)}`)
+				: '';
+		const timeElapsed = entry.elapsedTimeMs ? dim(` ${formatDuration(entry.elapsedTimeMs)}`) : '';
+
+		lines.push(
+			`  ${icon} ${dim(`${dateStr} ${timeStr}`)} ${typeLabel} ${agent}  ${summary}${costStr}${timeElapsed}`
+		);
+	}
+
+	return lines.join('\n');
 }
 
 // Error formatting

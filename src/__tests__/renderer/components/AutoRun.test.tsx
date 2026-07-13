@@ -8,7 +8,22 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import React from 'react';
 import { AutoRun, AutoRunHandle } from '../../../renderer/components/AutoRun';
 import { LayerStackProvider } from '../../../renderer/contexts/LayerStackContext';
+import { formatShortcutKeys } from '../../../renderer/utils/shortcutFormatter';
 import type { Theme, BatchRunState, SessionState } from '../../../renderer/types';
+import { useBatchStore } from '../../../renderer/stores/batchStore';
+import { useSettingsStore } from '../../../renderer/stores/settingsStore';
+
+const createMarkdownComponentsCalls = vi.hoisted(() => [] as Array<Record<string, unknown>>);
+
+// Helper to seed the Zustand batch store so the component's direct store reads
+// (isErrorPaused, batchError) see the expected state for a given session.
+const seedBatchStore = (sessionId: string, state: Partial<BatchRunState>) => {
+	useBatchStore.setState({
+		batchRunStates: {
+			[sessionId]: state as BatchRunState,
+		},
+	});
+};
 
 // Helper to render with LayerStackProvider (required by AutoRunSearchBar)
 const renderWithProvider = (ui: React.ReactElement) => {
@@ -35,6 +50,11 @@ const getByNormalizedText = (text: RegExp) => {
 	};
 };
 
+beforeEach(() => {
+	useSettingsStore.setState({ bionifyReadingMode: false });
+	createMarkdownComponentsCalls.length = 0;
+});
+
 // Mock the external dependencies
 vi.mock('react-markdown', () => ({
 	default: ({ children }: { children: string }) => (
@@ -46,6 +66,17 @@ vi.mock('remark-gfm', () => ({
 	default: {},
 }));
 
+vi.mock('../../../renderer/utils/markdownConfig', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../../../renderer/utils/markdownConfig')>();
+	return {
+		...actual,
+		createMarkdownComponents: (options: Record<string, unknown>) => {
+			createMarkdownComponentsCalls.push(options);
+			return actual.createMarkdownComponents(options as any);
+		},
+	};
+});
+
 vi.mock('react-syntax-highlighter', () => ({
 	Prism: ({ children }: { children: string }) => (
 		<code data-testid="syntax-highlighter">{children}</code>
@@ -54,9 +85,10 @@ vi.mock('react-syntax-highlighter', () => ({
 
 vi.mock('react-syntax-highlighter/dist/esm/styles/prism', () => ({
 	vscDarkPlus: {},
+	vs: {},
 }));
 
-vi.mock('../../../renderer/components/AutoRunnerHelpModal', () => ({
+vi.mock('../../../renderer/components/AutoRun/AutoRunnerHelpModal', () => ({
 	AutoRunnerHelpModal: ({ onClose }: { onClose: () => void }) => (
 		<div data-testid="help-modal">
 			<button onClick={onClose}>Close</button>
@@ -70,15 +102,13 @@ vi.mock('../../../renderer/components/MermaidRenderer', () => ({
 	),
 }));
 
-vi.mock('../../../renderer/components/AutoRunDocumentSelector', () => ({
+vi.mock('../../../renderer/components/AutoRun/AutoRunDocumentSelector', () => ({
 	AutoRunDocumentSelector: ({
-		theme,
 		documents,
 		selectedDocument,
 		onSelectDocument,
 		onRefresh,
 		onChangeFolder,
-		onCreateDocument,
 		isLoading,
 	}: any) => (
 		<div data-testid="document-selector">
@@ -253,6 +283,16 @@ describe('AutoRun', () => {
 			expect(screen.getByTestId('react-markdown')).toBeInTheDocument();
 		});
 
+		it('reflects global bionifyReadingMode in preview markdown components', () => {
+			useSettingsStore.setState({ bionifyReadingMode: true });
+			const props = createDefaultProps({ mode: 'preview', content: 'hello world' });
+			renderWithProvider(<AutoRun {...props} />);
+
+			expect(
+				createMarkdownComponentsCalls.some((call) => call.enableBionifyReadingMode === true)
+			).toBe(true);
+		});
+
 		it('shows "Select Auto Run Folder" button when no folder is configured', () => {
 			const props = createDefaultProps({ folderPath: null });
 			renderWithProvider(<AutoRun {...props} />);
@@ -272,12 +312,12 @@ describe('AutoRun', () => {
 			expect(screen.getByTestId('document-selector')).toBeInTheDocument();
 		});
 
-		it('displays Edit and Preview toggle buttons', () => {
+		it('displays Edit/Preview toggle button', () => {
 			const props = createDefaultProps();
 			renderWithProvider(<AutoRun {...props} />);
 
-			expect(screen.getByTitle('Edit document')).toBeInTheDocument();
-			expect(screen.getByTitle('Preview document')).toBeInTheDocument();
+			// In edit mode, toggle shows "Switch to preview"
+			expect(screen.getByTitle('Switch to preview')).toBeInTheDocument();
 		});
 
 		it('displays Run button when not locked', () => {
@@ -297,25 +337,25 @@ describe('AutoRun', () => {
 	});
 
 	describe('Mode Toggling', () => {
-		it('calls onModeChange when clicking Edit button', async () => {
+		it('calls onModeChange when clicking toggle to edit', async () => {
 			const props = createDefaultProps({ mode: 'preview' });
 			renderWithProvider(<AutoRun {...props} />);
 
-			fireEvent.click(screen.getByTitle('Edit document'));
+			fireEvent.click(screen.getByTitle('Switch to edit'));
 			expect(props.onModeChange).toHaveBeenCalledWith('edit');
 		});
 
-		it('calls onModeChange when clicking Preview button', async () => {
+		it('calls onModeChange when clicking toggle to preview', async () => {
 			const props = createDefaultProps({ mode: 'edit' });
 			renderWithProvider(<AutoRun {...props} />);
 
-			fireEvent.click(screen.getByTitle('Preview document'));
+			fireEvent.click(screen.getByTitle('Switch to preview'));
 			expect(props.onModeChange).toHaveBeenCalledWith('preview');
 		});
 
-		it('disables Edit button when batch run is active', () => {
+		it('disables Edit toggle when batch run is active', () => {
 			const batchRunState = createBatchRunState();
-			const props = createDefaultProps({ batchRunState });
+			const props = createDefaultProps({ batchRunState, mode: 'preview' });
 			renderWithProvider(<AutoRun {...props} />);
 
 			expect(screen.getByTitle('Editing disabled while Auto Run active')).toBeDisabled();
@@ -757,21 +797,26 @@ describe('AutoRun', () => {
 				'new content',
 				undefined // sshRemoteId (undefined for local sessions)
 			);
-			expect(onOpenBatchRunner).toHaveBeenCalled();
+			// onOpenBatchRunner is called after await onSave() resolves
+			await waitFor(() => {
+				expect(onOpenBatchRunner).toHaveBeenCalled();
+			});
 		});
 
-		it('disables Run button when agent is busy', () => {
+		it('shows "Agent is thinking" tooltip on Run when agent is busy but keeps Run clickable', () => {
 			const props = createDefaultProps({ sessionState: 'busy' as SessionState });
 			renderWithProvider(<AutoRun {...props} />);
 
-			expect(screen.getByText('Run').closest('button')).toBeDisabled();
+			expect(screen.getByText('Run').closest('button')).not.toBeDisabled();
+			expect(screen.getByTitle(/Agent is thinking/)).toBeDefined();
 		});
 
-		it('disables Run button when agent is connecting', () => {
+		it('shows "Agent is thinking" tooltip on Run when agent is connecting but keeps Run clickable', () => {
 			const props = createDefaultProps({ sessionState: 'connecting' as SessionState });
 			renderWithProvider(<AutoRun {...props} />);
 
-			expect(screen.getByText('Run').closest('button')).toBeDisabled();
+			expect(screen.getByText('Run').closest('button')).not.toBeDisabled();
+			expect(screen.getByTitle(/Agent is thinking/)).toBeDefined();
 		});
 
 		it('calls onStopBatchRun when clicking Stop', async () => {
@@ -785,12 +830,12 @@ describe('AutoRun', () => {
 			expect(onStopBatchRun).toHaveBeenCalled();
 		});
 
-		it('shows Stopping... when isStopping is true', () => {
+		it('shows Stopping when isStopping is true', () => {
 			const batchRunState = createBatchRunState({ isStopping: true });
 			const props = createDefaultProps({ batchRunState });
 			renderWithProvider(<AutoRun {...props} />);
 
-			expect(screen.getByText('Stopping...')).toBeInTheDocument();
+			expect(screen.getByText('Stopping')).toBeInTheDocument();
 		});
 	});
 
@@ -1077,11 +1122,14 @@ describe('AutoRun', () => {
 			const textarea = screen.getByRole('textbox');
 			fireEvent.keyDown(textarea, { key: 'e', metaKey: true });
 
-			expect(onStateChange).toHaveBeenCalledWith(
-				expect.objectContaining({
-					mode: 'preview',
-				})
-			);
+			// onStateChange fires inside requestAnimationFrame after scroll sync
+			await waitFor(() => {
+				expect(onStateChange).toHaveBeenCalledWith(
+					expect.objectContaining({
+						mode: 'preview',
+					})
+				);
+			});
 		});
 	});
 
@@ -1745,14 +1793,18 @@ describe('Lightbox Functionality', () => {
 		});
 
 		// Verify copy button is present
-		const copyButton = screen.getByTitle('Copy image to clipboard (⌘C)');
+		const copyButton = screen.getByTitle(
+			`Copy image to clipboard (${formatShortcutKeys(['Meta', 'c'])})`
+		);
 		expect(copyButton).toBeInTheDocument();
 
 		// Click it - the actual clipboard copy may fail but we're testing the button renders/clicks
 		fireEvent.click(copyButton);
 
 		// The button should still be there
-		expect(screen.getByTitle('Copy image to clipboard (⌘C)')).toBeInTheDocument();
+		expect(
+			screen.getByTitle(`Copy image to clipboard (${formatShortcutKeys(['Meta', 'c'])})`)
+		).toBeInTheDocument();
 	});
 
 	it('closes lightbox when clicking overlay background', async () => {
@@ -2243,6 +2295,31 @@ describe('Preview Mode with Search', () => {
 		});
 	});
 
+	it('passes bionify=false to preview markdown components while search is active', async () => {
+		useSettingsStore.setState({ bionifyReadingMode: true });
+		const props = createDefaultProps({ mode: 'preview', content: 'information information' });
+		renderWithProvider(<AutoRun {...props} />);
+
+		const preview = screen.getByTestId('react-markdown').parentElement!;
+		fireEvent.keyDown(preview, { key: 'f', metaKey: true });
+
+		const searchInput = await screen.findByPlaceholderText(/Search/);
+		fireEvent.change(searchInput, { target: { value: 'information' } });
+
+		await waitFor(() => {
+			expect(screen.getByText('1/2')).toBeInTheDocument();
+		});
+
+		expect(
+			createMarkdownComponentsCalls.some(
+				(call) =>
+					call.searchHighlight &&
+					call.enableBionifyReadingMode === false &&
+					(call.searchHighlight as { query?: string }).query === 'information'
+			)
+		).toBe(true);
+	});
+
 	it('toggles mode with Cmd+E from preview', async () => {
 		const props = createDefaultProps({ mode: 'preview' });
 		renderWithProvider(<AutoRun {...props} />);
@@ -2269,13 +2346,14 @@ describe('Batch Run State UI', () => {
 
 	it('shows task progress in batch run state', () => {
 		const batchRunState = createBatchRunState();
-		const props = createDefaultProps({ batchRunState });
+		const props = createDefaultProps({ batchRunState, mode: 'preview' });
 		renderWithProvider(<AutoRun {...props} />);
 
 		// Stop button should be visible
 		expect(screen.getByText('Stop')).toBeInTheDocument();
-		// Edit button should be disabled (title changes when locked)
-		expect(screen.getByTitle('Editing disabled while Auto Run active')).toBeDisabled();
+		// Edit/Preview toggle should be disabled when locked in preview mode
+		const toggle = screen.getByTitle('Editing disabled while Auto Run active');
+		expect(toggle).toBeDisabled();
 	});
 
 	it('shows textarea as readonly when locked', () => {
@@ -2608,22 +2686,22 @@ describe('hideTopControls Prop Behavior', () => {
 		const props = createDefaultProps({ hideTopControls: false });
 		renderWithProvider(<AutoRun {...props} />);
 
-		// All control buttons should be visible (Edit/Preview use title since they're icon-only)
-		expect(screen.getByTitle('Edit document')).toBeInTheDocument();
-		expect(screen.getByTitle('Preview document')).toBeInTheDocument();
+		// Top toolbar buttons should be visible
 		expect(screen.getByText('Run')).toBeInTheDocument();
 		expect(screen.getByTitle('Learn about Auto Runner')).toBeInTheDocument();
+		// Bottom bar Edit/Preview toggle should be visible
+		expect(screen.getByTitle('Switch to preview')).toBeInTheDocument();
 	});
 
 	it('hides top control buttons when hideTopControls is true', () => {
 		const props = createDefaultProps({ hideTopControls: true });
 		renderWithProvider(<AutoRun {...props} />);
 
-		// Top control bar buttons should be hidden (Edit/Preview use title since they're icon-only)
-		expect(screen.queryByTitle('Edit document')).not.toBeInTheDocument();
-		expect(screen.queryByTitle('Preview document')).not.toBeInTheDocument();
+		// Top toolbar buttons should be hidden
 		expect(screen.queryByText('Run')).not.toBeInTheDocument();
 		expect(screen.queryByTitle('Learn about Auto Runner')).not.toBeInTheDocument();
+		// Bottom bar Edit/Preview toggle should still be visible
+		expect(screen.getByTitle('Switch to preview')).toBeInTheDocument();
 	});
 
 	it('still shows document selector when hideTopControls is true', () => {
@@ -3294,7 +3372,7 @@ describe('Responsive Bottom Panel', () => {
 		fireEvent.change(textarea, { target: { value: 'Modified content' } });
 
 		// In non-compact mode, Save should show text label
-		const saveButton = screen.getByTitle('Save changes (⌘S)');
+		const saveButton = screen.getByTitle(`Save changes (${formatShortcutKeys(['Meta', 's'])})`);
 		expect(saveButton).toBeInTheDocument();
 		expect(saveButton).toHaveTextContent('Save');
 	});
@@ -3400,5 +3478,189 @@ describe('Reset Tasks Flash Notification', () => {
 		renderWithProvider(<AutoRun ref={ref} {...props} />);
 
 		expect(ref.current?.getCompletedTaskCount()).toBe(0);
+	});
+
+	describe('Error Banner (Phase 5.10)', () => {
+		it('should show Resume button for recoverable errors', () => {
+			const onResumeAfterError = vi.fn();
+			const onAbortBatchOnError = vi.fn();
+			const batchRunState = createBatchRunState({
+				errorPaused: true,
+				error: {
+					type: 'rate_limited',
+					message: 'Rate limit exceeded',
+					recoverable: true,
+					timestamp: Date.now(),
+					agentId: 'test',
+				},
+				errorDocumentIndex: 0,
+			});
+			seedBatchStore('test-session-1', batchRunState);
+			const props = createDefaultProps({
+				batchRunState,
+				onResumeAfterError,
+				onAbortBatchOnError,
+			});
+			renderWithProvider(<AutoRun {...props} />);
+
+			expect(screen.getByText('Auto Run Paused')).toBeInTheDocument();
+			expect(screen.getByTitle('Retry and resume Auto Run')).toBeInTheDocument();
+			expect(screen.getByTitle('Stop Auto Run completely')).toBeInTheDocument();
+		});
+
+		it('should hide Resume button for non-recoverable errors', () => {
+			const onResumeAfterError = vi.fn();
+			const onAbortBatchOnError = vi.fn();
+			const batchRunState = createBatchRunState({
+				errorPaused: true,
+				error: {
+					type: 'auth_expired',
+					message: 'Authentication expired',
+					recoverable: false,
+					timestamp: Date.now(),
+					agentId: 'test',
+				},
+				errorDocumentIndex: 0,
+			});
+			seedBatchStore('test-session-1', batchRunState);
+			const props = createDefaultProps({
+				batchRunState,
+				onResumeAfterError,
+				onAbortBatchOnError,
+			});
+			renderWithProvider(<AutoRun {...props} />);
+
+			// Error banner should show
+			expect(screen.getByText('Auto Run Paused')).toBeInTheDocument();
+			expect(screen.getByText('Authentication expired')).toBeInTheDocument();
+			// Resume should NOT be present for non-recoverable errors
+			expect(screen.queryByTitle('Retry and resume Auto Run')).not.toBeInTheDocument();
+			// Abort should still be visible
+			expect(screen.getByTitle('Stop Auto Run completely')).toBeInTheDocument();
+		});
+
+		it('should call onAbortBatchOnError when Abort Run is clicked', () => {
+			const onAbortBatchOnError = vi.fn();
+			const batchRunState = createBatchRunState({
+				errorPaused: true,
+				error: {
+					type: 'token_exhaustion',
+					message: 'Prompt is too long',
+					recoverable: true,
+					timestamp: Date.now(),
+					agentId: 'test',
+				},
+				errorDocumentIndex: 0,
+			});
+			seedBatchStore('test-session-1', batchRunState);
+			const props = createDefaultProps({
+				batchRunState,
+				onAbortBatchOnError,
+			});
+			renderWithProvider(<AutoRun {...props} />);
+
+			fireEvent.click(screen.getByTitle('Stop Auto Run completely'));
+			expect(onAbortBatchOnError).toHaveBeenCalledTimes(1);
+		});
+
+		it('should call onResumeAfterError when Resume is clicked', () => {
+			const onResumeAfterError = vi.fn();
+			const batchRunState = createBatchRunState({
+				errorPaused: true,
+				error: {
+					type: 'rate_limited',
+					message: 'Rate limited',
+					recoverable: true,
+					timestamp: Date.now(),
+					agentId: 'test',
+				},
+				errorDocumentIndex: 0,
+			});
+			seedBatchStore('test-session-1', batchRunState);
+			const props = createDefaultProps({
+				batchRunState,
+				onResumeAfterError,
+			});
+			renderWithProvider(<AutoRun {...props} />);
+
+			fireEvent.click(screen.getByTitle('Retry and resume Auto Run'));
+			expect(onResumeAfterError).toHaveBeenCalledTimes(1);
+		});
+	});
+});
+
+describe('Document Selector Task Count Sync', () => {
+	beforeEach(() => {
+		setupMaestroMock();
+		useBatchStore.setState({ documentTaskCounts: new Map() });
+	});
+
+	afterEach(() => {
+		vi.clearAllMocks();
+		useBatchStore.setState({ documentTaskCounts: new Map() });
+	});
+
+	it('pushes savedContent-derived task counts into batchStore for the selected document', async () => {
+		const content = ['# Tasks', '- [x] Done one', '- [x] Done two', '- [ ] Still pending'].join(
+			'\n'
+		);
+		const props = createDefaultProps({ selectedFile: 'my-doc', content });
+		renderWithProvider(<AutoRun {...props} />);
+
+		await waitFor(() => {
+			const entry = useBatchStore.getState().documentTaskCounts.get('my-doc');
+			expect(entry).toEqual({ completed: 2, total: 3 });
+		});
+	});
+
+	it('refreshes the store entry when savedContent changes via contentVersion bump', async () => {
+		const initial = '- [ ] one\n- [ ] two';
+		const props = createDefaultProps({
+			selectedFile: 'my-doc',
+			content: initial,
+			contentVersion: 1,
+		});
+		const { rerender } = renderWithProvider(<AutoRun {...props} />);
+
+		await waitFor(() => {
+			expect(useBatchStore.getState().documentTaskCounts.get('my-doc')).toEqual({
+				completed: 0,
+				total: 2,
+			});
+		});
+
+		const updated = '- [x] one\n- [x] two';
+		rerender(
+			<AutoRun
+				{...createDefaultProps({
+					selectedFile: 'my-doc',
+					content: updated,
+					contentVersion: 2,
+				})}
+			/>
+		);
+
+		await waitFor(() => {
+			expect(useBatchStore.getState().documentTaskCounts.get('my-doc')).toEqual({
+				completed: 2,
+				total: 2,
+			});
+		});
+	});
+
+	it('does not write a stale zero entry while savedContent is empty', async () => {
+		vi.useFakeTimers();
+		try {
+			const props = createDefaultProps({ selectedFile: 'my-doc', content: '' });
+			renderWithProvider(<AutoRun {...props} />);
+
+			await act(async () => {
+				vi.advanceTimersByTime(100);
+			});
+
+			expect(useBatchStore.getState().documentTaskCounts.has('my-doc')).toBe(false);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

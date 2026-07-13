@@ -3,10 +3,12 @@ import './wdyr';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import * as Sentry from '@sentry/electron/renderer';
+import { shouldDropSentryEvent } from '../shared/sentryFilters';
 import MaestroConsole from './App';
+import { CadenzaHudRoot } from './cadenzaHud';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LayerStackProvider } from './contexts/LayerStackContext';
-import { ToastProvider } from './contexts/ToastContext';
+// ToastProvider removed - notification state now managed by notificationStore (Zustand)
 // ModalProvider removed - modal state now managed by modalStore (Zustand)
 import { WizardProvider } from './components/Wizard';
 import { logger } from './utils/logger';
@@ -25,10 +27,25 @@ const initSentry = async () => {
 			(await window.maestro?.settings?.get('crashReportingEnabled')) ?? true;
 		if (crashReportingEnabled && !isDevelopment) {
 			Sentry.init({
+				// Set release version for filtering errors by app version
+				release: __APP_VERSION__,
 				// Only send errors, not performance data
 				tracesSampleRate: 0,
-				// Filter out sensitive data
+				// PERF: drop console breadcrumbs. Sentry's default Breadcrumbs
+				// integration wraps every console.* to capture a breadcrumb, and a
+				// field trace showed that wrapper (addConsoleBreadcrumb) as the single
+				// largest JS CPU consumer. We already retain console output via our own
+				// logger, file logs, and the LogViewer, so nothing diagnostic is lost;
+				// exception/crash reporting is unaffected.
+				beforeBreadcrumb(breadcrumb) {
+					return breadcrumb.category === 'console' ? null : breadcrumb;
+				},
+				// Filter out sensitive data + unfixable OS / Chromium / user-env noise.
+				// See src/shared/sentryFilters.ts for the full classification.
 				beforeSend(event) {
+					if (shouldDropSentryEvent(event)) {
+						return null;
+					}
 					if (event.user) {
 						delete event.user.ip_address;
 						delete event.user.email;
@@ -36,6 +53,8 @@ const initSentry = async () => {
 					return event;
 				},
 			});
+			// Tag release channel (rc vs stable) based on version string
+			Sentry.setTag('channel', __APP_VERSION__.includes('-RC') ? 'rc' : 'stable');
 		}
 	} catch {
 		// Settings not available yet, Sentry will be initialized by main process
@@ -84,16 +103,34 @@ window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => 
 	event.preventDefault();
 });
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-	<React.StrictMode>
-		<ErrorBoundary>
-			<ToastProvider>
+// HUD mode: the main process loads this same bundle into a transparent,
+// always-on-top child window with `?cadenzaHud`. Render just the floating
+// cadenza cards - no app chrome, no providers the cards don't need.
+const isCadenzaHud = new URLSearchParams(window.location.search).has('cadenzaHud');
+
+if (isCadenzaHud) {
+	document.documentElement.classList.add('cadenza-hud');
+	document.body.classList.add('cadenza-hud');
+	// The static loading splash (index.html) is hidden by the full App on ready,
+	// which never mounts in HUD mode - remove it so the window is transparent.
+	document.getElementById('initial-splash')?.remove();
+	ReactDOM.createRoot(document.getElementById('root')!).render(
+		<React.StrictMode>
+			<ErrorBoundary>
+				<CadenzaHudRoot />
+			</ErrorBoundary>
+		</React.StrictMode>
+	);
+} else {
+	ReactDOM.createRoot(document.getElementById('root')!).render(
+		<React.StrictMode>
+			<ErrorBoundary>
 				<LayerStackProvider>
 					<WizardProvider>
 						<MaestroConsole />
 					</WizardProvider>
 				</LayerStackProvider>
-			</ToastProvider>
-		</ErrorBoundary>
-	</React.StrictMode>
-);
+			</ErrorBoundary>
+		</React.StrictMode>
+	);
+}

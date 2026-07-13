@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
 	X,
 	Bot,
@@ -15,34 +16,28 @@ import {
 	ChevronLeft,
 	ChevronRight,
 	AlertTriangle,
+	Server,
 } from 'lucide-react';
-import type { Theme, HistoryEntry } from '../types';
+import type { Theme, HistoryEntry, ToolType } from '../types';
 import type { FileNode } from '../types/fileTree';
-import { useLayerStack } from '../contexts/LayerStackContext';
+import { useEventListener } from '../hooks/utils/useEventListener';
+import { useModalLayer } from '../hooks/ui/useModalLayer';
+import { useResizableModal } from '../hooks/ui/useResizableModal';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { formatElapsedTime } from '../utils/formatters';
+import { formatTimestamp } from '../../shared/formatters';
+import { humanizeCueEventType } from '../../shared/cue/cue-summary';
+import { getTokenSourcePill } from '../../shared/claudeTokenModeLabel';
 import { stripAnsiCodes } from '../../shared/stringUtils';
+import { stripMaestroMarkers } from '../../shared/goalDriven/goalMarkers';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { generateTerminalProseStyles } from '../utils/markdownConfig';
-import { calculateContextTokens } from '../utils/contextUsage';
+import { calculateContextDisplay, calculateDisplayInputTokens } from '../utils/contextUsage';
 import { getContextColor } from '../utils/theme';
-
-// Double checkmark SVG component for validated entries
-const DoubleCheck = ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
-	<svg
-		className={className}
-		style={style}
-		viewBox="0 0 24 24"
-		fill="none"
-		stroke="currentColor"
-		strokeWidth="2.5"
-		strokeLinecap="round"
-		strokeLinejoin="round"
-	>
-		<polyline points="15 6 6 17 1 12" />
-		<polyline points="23 6 14 17 11 14" />
-	</svg>
-);
+import { DoubleCheck } from './History';
+import { safeClipboardWrite } from '../utils/clipboard';
+import { useSettingsStore } from '../stores/settingsStore';
+import { ResizeHandles } from './ui/ResizeHandles';
 
 interface HistoryDetailModalProps {
 	theme: Theme;
@@ -61,8 +56,13 @@ interface HistoryDetailModalProps {
 	cwd?: string;
 	projectRoot?: string;
 	onFileClick?: (path: string) => void;
+	/**
+	 * Agent identifier (session.toolType) used to display input tokens correctly.
+	 * Claude reports `inputTokens` as the uncached delta only, so we add the cache
+	 * partitions to show the real input size — see calculateDisplayInputTokens.
+	 */
+	agentId?: ToolType;
 }
-
 
 export function HistoryDetailModal({
 	theme,
@@ -79,9 +79,9 @@ export function HistoryDetailModal({
 	cwd,
 	projectRoot,
 	onFileClick,
+	agentId,
 }: HistoryDetailModalProps) {
-	const { registerLayer, unregisterLayer, updateLayerHandler } = useLayerStack();
-	const layerIdRef = useRef<string>();
+	const bionifyReadingMode = useSettingsStore((s) => s.bionifyReadingMode);
 	const onCloseRef = useRef(onClose);
 	onCloseRef.current = onClose;
 	const [copiedSessionId, setCopiedSessionId] = useState(false);
@@ -114,35 +114,13 @@ export function HistoryDetailModal({
 		}
 	}, [hasNext, filteredEntries, currentIndex, onNavigate]);
 
-	// Register layer on mount
-	useEffect(() => {
-		const id = registerLayer({
-			type: 'modal',
-			priority: MODAL_PRIORITIES.CONFIRM, // Use same priority as confirm modal
-			blocksLowerLayers: true,
-			capturesFocus: true,
-			focusTrap: 'strict',
-			onEscape: () => {
-				onCloseRef.current();
-			},
-		});
-		layerIdRef.current = id;
-
-		return () => {
-			if (layerIdRef.current) {
-				unregisterLayer(layerIdRef.current);
-			}
-		};
-	}, [registerLayer, unregisterLayer]);
-
-	// Keep escape handler up to date
-	useEffect(() => {
-		if (layerIdRef.current) {
-			updateLayerHandler(layerIdRef.current, () => {
-				onCloseRef.current();
-			});
+	useModalLayer(MODAL_PRIORITIES.CONFIRM, undefined, () => {
+		if (showDeleteConfirm) {
+			setShowDeleteConfirm(false);
+			return;
 		}
-	}, [onClose, updateLayerHandler]);
+		onCloseRef.current();
+	});
 
 	// Focus delete button when confirmation modal appears
 	useEffect(() => {
@@ -151,35 +129,22 @@ export function HistoryDetailModal({
 		}
 	}, [showDeleteConfirm]);
 
-	// Keyboard navigation for prev/next with arrow keys
-	useEffect(() => {
-		const handleKeyDown = (e: KeyboardEvent) => {
-			// Don't handle if delete confirmation is showing
-			if (showDeleteConfirm) return;
+	// Keyboard navigation for prev/next with arrow keys.
+	useEventListener('keydown', (e) => {
+		// Don't handle if delete confirmation is showing
+		if (showDeleteConfirm) return;
 
-			if (e.key === 'ArrowLeft') {
-				e.preventDefault();
-				goToPrev();
-			} else if (e.key === 'ArrowRight') {
-				e.preventDefault();
-				goToNext();
-			}
-		};
+		const ke = e as KeyboardEvent;
+		if (ke.key === 'ArrowLeft') {
+			ke.preventDefault();
+			goToPrev();
+		} else if (ke.key === 'ArrowRight') {
+			ke.preventDefault();
+			goToNext();
+		}
+	});
 
-		window.addEventListener('keydown', handleKeyDown);
-		return () => window.removeEventListener('keydown', handleKeyDown);
-	}, [goToPrev, goToNext, showDeleteConfirm]);
-
-	// Format timestamp
-	const formatTime = (timestamp: number) => {
-		const date = new Date(timestamp);
-		return date.toLocaleString([], {
-			month: 'short',
-			day: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit',
-		});
-	};
+	const formatTime = (timestamp: number) => formatTimestamp(timestamp, 'datetime');
 
 	// Get pill color based on type
 	const getPillColor = () => {
@@ -190,6 +155,13 @@ export function HistoryDetailModal({
 				border: theme.colors.warning + '40',
 			};
 		}
+		if (entry.type === 'CUE') {
+			return {
+				bg: '#06b6d420',
+				text: '#06b6d4',
+				border: '#06b6d440',
+			};
+		}
 		return {
 			bg: theme.colors.accent + '20',
 			text: theme.colors.accent,
@@ -198,7 +170,22 @@ export function HistoryDetailModal({
 	};
 
 	const colors = getPillColor();
-	const Icon = entry.type === 'AUTO' ? Bot : User;
+	const Icon = entry.type === 'AUTO' ? Bot : entry.type === 'CUE' ? Zap : User;
+
+	// Claude-only per-turn token source pill (TUI = maestro-p / Max plan, API =
+	// claude --print). Absent on non-Claude and older entries. Shares its label and
+	// tooltip with the live chat pill so the two can never drift.
+	const tokenPill = entry.tokenSource
+		? getTokenSourcePill({ mode: entry.tokenSource, reason: entry.tokenSourceReason })
+		: null;
+	const tokenPillColor = tokenPill
+		? tokenPill.isTui
+			? theme.colors.accent
+			: (theme.colors.warning ?? theme.colors.accent)
+		: theme.colors.accent;
+
+	// Access agentName from unified history entries (Director's Notes)
+	const agentName = (entry as HistoryEntry & { agentName?: string }).agentName;
 
 	// For AUTO entries:
 	//   - summary = short 1-2 sentence synopsis (shown in list view and toast)
@@ -207,21 +194,45 @@ export function HistoryDetailModal({
 	//   - summary = the synopsis text
 	//   - fullResponse = may contain more context
 	const rawResponse = entry.fullResponse || entry.summary || '';
-	const cleanResponse = stripAnsiCodes(rawResponse);
+	// Strip ANSI, then the internal `<!-- maestro:... -->` control markers the Auto
+	// Run engine reads (progress/goal-complete/deadlock/halt) - users shouldn't see them.
+	const cleanResponse = stripMaestroMarkers(stripAnsiCodes(rawResponse));
+	const resizableModal = useResizableModal({
+		resizeKey: 'history-detail',
+		defaultSize: { width: 960, height: 720 },
+		minSize: { width: 640, height: 420 },
+	});
 
-	return (
+	// Body portal: this modal mounts inside the right-panel drawer, which is
+	// CSS-transformed on narrow viewports. A transformed ancestor becomes the
+	// containing block for position:fixed, so without the portal the overlay
+	// (and the xs full-screen layout from index.css) gets trapped inside the
+	// ~320px drawer instead of covering the screen.
+	return createPortal(
 		<div className="fixed inset-0 flex items-center justify-center z-[9999]">
 			{/* Backdrop */}
 			<div className="absolute inset-0 bg-black/60" onClick={onClose} />
 
-			{/* Modal */}
+			{/* Modal. `history-detail-modal` lets index.css expand it to full-screen at the
+			    xs breakpoint (phones) where the centered dialog is too cramped. */}
 			<div
-				className="relative w-full max-w-3xl max-h-[80vh] overflow-hidden rounded-lg border shadow-2xl flex flex-col"
+				ref={resizableModal.modalRef}
+				role="dialog"
+				aria-modal="true"
+				aria-label="History Detail"
+				className="history-detail-modal relative overflow-hidden rounded-lg border shadow-2xl flex flex-col select-text"
 				style={{
+					...resizableModal.style,
 					backgroundColor: theme.colors.bgSidebar,
 					borderColor: theme.colors.border,
 				}}
+				data-modal-resize-key="history-detail"
 			>
+				<ResizeHandles
+					onResizeStart={resizableModal.onResizeStart}
+					accentColor={theme.colors.accent}
+				/>
+
 				{/* Header */}
 				<div
 					className="relative px-6 py-4 border-b shrink-0"
@@ -236,11 +247,22 @@ export function HistoryDetailModal({
 					</button>
 
 					<div className="flex flex-col gap-3 pr-8">
-						{/* Session Name - prominent header when available */}
-						{entry.sessionName && (
+						{/* Agent Name - shown as prominent header when available (from Director's Notes) */}
+						{agentName && (
 							<h2
 								className="text-lg font-bold truncate"
 								style={{ color: theme.colors.textMain }}
+								title={agentName}
+							>
+								{agentName}
+							</h2>
+						)}
+
+						{/* Session Name - shown as header if no agent name, or as subheading if agent name is present */}
+						{entry.sessionName && (
+							<h2
+								className={`truncate ${agentName ? 'text-sm font-medium' : 'text-lg font-bold'}`}
+								style={{ color: agentName ? theme.colors.textDim : theme.colors.textMain }}
 								title={entry.sessionName}
 							>
 								{entry.sessionName}
@@ -248,8 +270,8 @@ export function HistoryDetailModal({
 						)}
 
 						<div className="flex items-center gap-3 flex-wrap">
-							{/* Success/Failure Indicator for AUTO entries */}
-							{entry.type === 'AUTO' && entry.success !== undefined && (
+							{/* Success/Failure Indicator for AUTO and CUE entries */}
+							{(entry.type === 'AUTO' || entry.type === 'CUE') && entry.success !== undefined && (
 								<span
 									className="flex items-center justify-center w-6 h-6 rounded-full"
 									style={{
@@ -299,13 +321,44 @@ export function HistoryDetailModal({
 								{entry.type}
 							</span>
 
+							{/* Remote hostname pill - shown for entries from other hosts */}
+							{entry.hostname && (
+								<span
+									className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold"
+									style={{
+										backgroundColor: theme.colors.bgActivity,
+										color: theme.colors.textDim,
+										border: `1px solid ${theme.colors.border}`,
+									}}
+									title={`Origin: ${entry.hostname}`}
+								>
+									<Server className="w-2.5 h-2.5" />
+									{entry.hostname}
+								</span>
+							)}
+
+							{/* Agent Name Pill - shown inline when agentName exists but isn't already in the header */}
+							{agentName && !entry.sessionName && (
+								<span
+									className="px-2 py-0.5 rounded-full text-[10px] font-bold truncate max-w-[200px]"
+									style={{
+										backgroundColor: theme.colors.bgActivity,
+										color: theme.colors.textMain,
+										border: `1px solid ${theme.colors.border}`,
+									}}
+									title={agentName}
+								>
+									{agentName}
+								</span>
+							)}
+
 							{/* Session ID Octet - copyable */}
 							{entry.agentSessionId && (
 								<div className="flex items-center gap-2">
 									{/* Copy button */}
 									<button
 										onClick={async () => {
-											await navigator.clipboard.writeText(entry.agentSessionId!);
+											await safeClipboardWrite(entry.agentSessionId!);
 											setCopiedSessionId(true);
 											setTimeout(() => setCopiedSessionId(false), 2000);
 										}}
@@ -346,13 +399,42 @@ export function HistoryDetailModal({
 								</div>
 							)}
 
-							{/* Timestamp */}
-							<span className="text-xs" style={{ color: theme.colors.textDim }}>
-								{formatTime(entry.timestamp)}
-							</span>
+							{/* Token Source Pill (Claude-only): TUI vs API for this turn.
+							    Sits right after the Resume button, before the timestamp. */}
+							{tokenPill && (
+								<span
+									className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold"
+									style={{
+										backgroundColor: tokenPillColor + '20',
+										color: tokenPillColor,
+										border: `1px solid ${tokenPillColor}40`,
+									}}
+									title={tokenPill.title}
+								>
+									{tokenPill.label}
+								</span>
+							)}
 
-							{/* Validated toggle for AUTO entries */}
-							{entry.type === 'AUTO' && entry.success && onUpdate && (
+							{/* CUE metadata */}
+							{entry.type === 'CUE' && entry.cueTriggerName && (
+								<span
+									className="px-2 py-0.5 rounded-full text-[10px] font-bold"
+									style={{
+										backgroundColor: '#06b6d420',
+										color: '#06b6d4',
+										border: '1px solid #06b6d440',
+									}}
+									title={`Trigger: ${entry.cueTriggerName}${
+										entry.cueEventType ? ` (${entry.cueEventType})` : ''
+									}`}
+								>
+									{entry.cueTriggerName}
+									{entry.cueEventType && ` \u2022 ${humanizeCueEventType(entry.cueEventType)}`}
+								</span>
+							)}
+
+							{/* Validated toggle for AUTO and CUE entries */}
+							{(entry.type === 'AUTO' || entry.type === 'CUE') && entry.success && onUpdate && (
 								<button
 									onClick={() => onUpdate(entry.id, { validated: !entry.validated })}
 									className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase transition-colors hover:opacity-80"
@@ -373,6 +455,11 @@ export function HistoryDetailModal({
 									Validated
 								</button>
 							)}
+
+							{/* Timestamp - right-justified (last element pushes to the right edge) */}
+							<span className="text-xs ml-auto" style={{ color: theme.colors.textDim }}>
+								{formatTime(entry.timestamp)}
+							</span>
 						</div>
 					</div>
 				</div>
@@ -400,20 +487,18 @@ export function HistoryDetailModal({
 										</span>
 									</div>
 									{(() => {
-										// Context usage using agent-specific calculation
-										// Note: History entries don't store agent type, defaults to Claude behavior
-										// SYNC: Uses calculateContextTokens() from shared/contextUsage.ts
-										// See that file for the canonical formula and all locations that must stay in sync.
-										const contextTokens = calculateContextTokens({
-											inputTokens: entry.usageStats!.inputTokens,
-											outputTokens: entry.usageStats!.outputTokens,
-											cacheCreationInputTokens: entry.usageStats!.cacheCreationInputTokens ?? 0,
-											cacheReadInputTokens: entry.usageStats!.cacheReadInputTokens ?? 0,
-										});
-										const contextUsage = Math.min(
-											100,
-											Math.round((contextTokens / entry.usageStats!.contextWindow) * 100)
-										);
+										const { tokens: contextTokens, percentage: contextUsage } =
+											calculateContextDisplay(
+												{
+													inputTokens: entry.usageStats!.inputTokens,
+													outputTokens: entry.usageStats!.outputTokens,
+													cacheCreationInputTokens: entry.usageStats!.cacheCreationInputTokens ?? 0,
+													cacheReadInputTokens: entry.usageStats!.cacheReadInputTokens ?? 0,
+												},
+												entry.usageStats!.contextWindow,
+												undefined,
+												entry.contextUsage
+											);
 										return (
 											<div className="flex flex-col gap-1">
 												<div className="flex items-center gap-2">
@@ -464,11 +549,13 @@ export function HistoryDetailModal({
 									<div className="flex items-center gap-3 text-xs font-mono">
 										<span style={{ color: theme.colors.accent }}>
 											<span style={{ color: theme.colors.textDim }}>In:</span>{' '}
-											{entry.usageStats.inputTokens.toLocaleString('en-US')}
+											{calculateDisplayInputTokens(entry.usageStats, agentId).toLocaleString(
+												'en-US'
+											)}
 										</span>
 										<span style={{ color: theme.colors.success }}>
 											<span style={{ color: theme.colors.textDim }}>Out:</span>{' '}
-											{entry.usageStats.outputTokens.toLocaleString('en-US')}
+											{(entry.usageStats.outputTokens ?? 0).toLocaleString('en-US')}
 										</span>
 									</div>
 								</div>
@@ -503,37 +590,50 @@ export function HistoryDetailModal({
 					style={{ color: theme.colors.textMain }}
 				>
 					<style>{proseStyles}</style>
-					<MarkdownRenderer
-						content={cleanResponse}
-						theme={theme}
-						onCopy={(text) => navigator.clipboard.writeText(text)}
-						fileTree={fileTree}
-						cwd={cwd}
-						projectRoot={projectRoot}
-						onFileClick={onFileClick}
-						allowRawHtml
-					/>
+					{entry.type === 'CUE' && !entry.fullResponse ? (
+						<p className="text-sm italic" style={{ color: theme.colors.textDim }}>
+							This run produced no captured output.
+						</p>
+					) : (
+						<MarkdownRenderer
+							content={cleanResponse}
+							theme={theme}
+							onCopy={(text) => safeClipboardWrite(text)}
+							fileTree={fileTree}
+							cwd={cwd}
+							projectRoot={projectRoot}
+							onFileClick={onFileClick}
+							enableBionifyReadingMode={bionifyReadingMode}
+							chatLineBreaks
+							chatMath
+						/>
+					)}
 				</div>
 
-				{/* Footer */}
+				{/* Footer. `hdm-footer` tightens padding at the xs breakpoint and the
+				    `hdm-btn-label` words collapse to icons so all controls stay on-screen. */}
 				<div
-					className="flex items-center justify-between px-6 py-4 border-t shrink-0"
+					className="hdm-footer flex items-center justify-between gap-2 px-6 py-4 border-t shrink-0"
 					style={{ borderColor: theme.colors.border }}
 				>
-					{/* Delete button */}
-					<button
-						onClick={() => setShowDeleteConfirm(true)}
-						className="flex items-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors hover:opacity-90"
-						style={{
-							backgroundColor: theme.colors.error + '20',
-							color: theme.colors.error,
-							border: `1px solid ${theme.colors.error}40`,
-						}}
-						title="Delete this history entry"
-					>
-						<Trash2 className="w-4 h-4" />
-						Delete
-					</button>
+					{/* Delete button - only shown when onDelete handler is provided */}
+					{onDelete ? (
+						<button
+							onClick={() => setShowDeleteConfirm(true)}
+							className="flex items-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors hover:opacity-90"
+							style={{
+								backgroundColor: theme.colors.error + '20',
+								color: theme.colors.error,
+								border: `1px solid ${theme.colors.error}40`,
+							}}
+							title="Delete this history entry"
+						>
+							<Trash2 className="w-4 h-4" />
+							<span className="hdm-btn-label">Delete</span>
+						</button>
+					) : (
+						<div />
+					)}
 
 					{/* Prev/Next navigation buttons - centered */}
 					{canNavigate && (
@@ -552,7 +652,7 @@ export function HistoryDetailModal({
 								title={hasPrev ? 'Previous entry (←)' : 'No previous entry'}
 							>
 								<ChevronLeft className="w-4 h-4" />
-								Prev
+								<span className="hdm-btn-label">Prev</span>
 							</button>
 							<button
 								onClick={goToNext}
@@ -567,7 +667,7 @@ export function HistoryDetailModal({
 								}}
 								title={hasNext ? 'Next entry (→)' : 'No next entry'}
 							>
-								Next
+								<span className="hdm-btn-label">Next</span>
 								<ChevronRight className="w-4 h-4" />
 							</button>
 						</div>
@@ -594,7 +694,7 @@ export function HistoryDetailModal({
 				>
 					<div className="absolute inset-0 bg-black/60" />
 					<div
-						className="relative w-[400px] border rounded-lg shadow-2xl overflow-hidden"
+						className="relative modal-w-xs border rounded-lg shadow-2xl overflow-hidden"
 						style={{
 							backgroundColor: theme.colors.bgSidebar,
 							borderColor: theme.colors.border,
@@ -627,8 +727,9 @@ export function HistoryDetailModal({
 									<AlertTriangle className="w-5 h-5" style={{ color: theme.colors.error }} />
 								</div>
 								<p className="leading-relaxed" style={{ color: theme.colors.textMain }}>
-									Are you sure you want to delete this {entry.type === 'AUTO' ? 'auto' : 'user'}{' '}
-									history entry? This action cannot be undone.
+									Are you sure you want to delete this{' '}
+									{entry.type === 'AUTO' ? 'auto' : entry.type === 'CUE' ? 'cue' : 'user'} history
+									entry? This action cannot be undone.
 								</p>
 							</div>
 							<div className="mt-6 flex justify-end gap-2">
@@ -675,6 +776,7 @@ export function HistoryDetailModal({
 					</div>
 				</div>
 			)}
-		</div>
+		</div>,
+		document.body
 	);
 }

@@ -8,12 +8,15 @@
  * - Generate the package with a progress indicator
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Package, Check, Loader2, FolderOpen, AlertCircle, Copy } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Package, Check, FolderOpen, AlertCircle, Copy } from 'lucide-react';
+import { Spinner } from './ui/Spinner';
 import type { Theme } from '../types';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { Modal, ModalFooter } from './ui/Modal';
-import { useToast } from '../contexts/ToastContext';
+import { notifyToast } from '../stores/notificationStore';
+import { flashCopiedToClipboard } from '../utils/flashCopiedToClipboard';
+import { logger } from '../utils/logger';
 
 interface DebugPackageModalProps {
 	theme: Theme;
@@ -31,7 +34,6 @@ interface PreviewCategory {
 type GenerationState = 'idle' | 'generating' | 'success' | 'error';
 
 export function DebugPackageModal({ theme, isOpen, onClose }: DebugPackageModalProps) {
-	const { addToast } = useToast();
 	const generateButtonRef = useRef<HTMLButtonElement>(null);
 
 	// Category selection state
@@ -58,7 +60,7 @@ export function DebugPackageModal({ theme, isOpen, onClose }: DebugPackageModalP
 					setLoading(false);
 				})
 				.catch((err) => {
-					console.error('[DebugPackageModal] Failed to load preview:', err);
+					logger.error('[DebugPackageModal] Failed to load preview:', undefined, err);
 					// Use fallback categories if preview fails
 					setCategories([
 						{ id: 'system', name: 'System Information', included: true, sizeEstimate: '< 1 KB' },
@@ -112,7 +114,7 @@ export function DebugPackageModal({ theme, isOpen, onClose }: DebugPackageModalP
 			if (result.success && result.path) {
 				setGenerationState('success');
 				setResultPath(result.path);
-				addToast({
+				notifyToast({
 					type: 'success',
 					title: 'Debug Package Created',
 					message: `Package saved to ${result.path}`,
@@ -120,23 +122,23 @@ export function DebugPackageModal({ theme, isOpen, onClose }: DebugPackageModalP
 			} else {
 				setGenerationState('error');
 				setErrorMessage(result.error || 'Unknown error occurred');
-				addToast({
+				notifyToast({
 					type: 'error',
 					title: 'Debug Package Failed',
 					message: result.error || 'Failed to create debug package',
 				});
 			}
 		} catch (err) {
-			console.error('[DebugPackageModal] Generation failed:', err);
+			logger.error('[DebugPackageModal] Generation failed:', undefined, err);
 			setGenerationState('error');
 			setErrorMessage(err instanceof Error ? err.message : 'Unknown error');
-			addToast({
+			notifyToast({
 				type: 'error',
 				title: 'Debug Package Failed',
 				message: err instanceof Error ? err.message : 'Failed to create debug package',
 			});
 		}
-	}, [categories, addToast]);
+	}, [categories]);
 
 	// Reveal the generated file in Finder
 	const handleRevealInFinder = useCallback(() => {
@@ -159,15 +161,11 @@ export function DebugPackageModal({ theme, isOpen, onClose }: DebugPackageModalP
 			navigator.clipboard
 				.writeText(resultPath)
 				.then(() => {
-					addToast({
-						type: 'success',
-						title: 'Copied',
-						message: 'File path copied to clipboard',
-					});
+					flashCopiedToClipboard(resultPath, 'File Path Copied');
 				})
 				.catch(console.error);
 		}
-	}, [resultPath, addToast]);
+	}, [resultPath]);
 
 	if (!isOpen) return null;
 
@@ -240,11 +238,11 @@ export function DebugPackageModal({ theme, isOpen, onClose }: DebugPackageModalP
 
 			{loading ? (
 				<div className="flex items-center justify-center py-8">
-					<Loader2 className="w-6 h-6 animate-spin" style={{ color: theme.colors.accent }} />
+					<Spinner size={24} color={theme.colors.accent} />
 				</div>
 			) : generationState === 'generating' ? (
 				<div className="flex flex-col items-center justify-center py-8 gap-4">
-					<Loader2 className="w-8 h-8 animate-spin" style={{ color: theme.colors.accent }} />
+					<Spinner size={32} color={theme.colors.accent} />
 					<p className="text-sm" style={{ color: theme.colors.textDim }}>
 						Collecting diagnostic information...
 					</p>
@@ -362,7 +360,7 @@ export function DebugPackageModal({ theme, isOpen, onClose }: DebugPackageModalP
 							<strong style={{ color: theme.colors.textMain }}>To submit:</strong>
 						</p>
 						<ol className="list-decimal list-inside space-y-1">
-							<li>Open a GitHub issue at github.com/pedramamini/Maestro/issues</li>
+							<li>Open a GitHub issue at github.com/RunMaestro/Maestro/issues</li>
 							<li>Describe the problem you encountered</li>
 							<li>Attach the generated zip file</li>
 						</ol>

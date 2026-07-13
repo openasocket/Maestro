@@ -14,14 +14,20 @@
  * - Month labels above the grid for navigation
  */
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { memo, useState, useMemo, useCallback } from 'react';
 import { format, subDays, startOfWeek, addDays, getDay } from 'date-fns';
 import type { Theme } from '../../types';
-import type { StatsTimeRange, StatsAggregation } from '../../hooks/useStats';
-import { COLORBLIND_HEATMAP_SCALE } from '../../constants/colorblindPalettes';
-
-// Metric display mode
-type MetricMode = 'count' | 'duration';
+import type { StatsTimeRange, StatsAggregation } from '../../hooks/stats/useStats';
+import { formatDurationHuman as formatDuration } from '../../../shared/formatters';
+import {
+	calculateIntensity,
+	getDaysForRange,
+	getIntensityColor,
+	shouldUse4HourBlockMode,
+	shouldUseSingleDayMode,
+	TIME_BLOCK_LABELS,
+	type MetricMode,
+} from './activityHeatmapUtils';
 
 interface HourData {
 	date: Date;
@@ -93,47 +99,6 @@ interface ActivityHeatmapProps {
 }
 
 /**
- * Get the number of days to display based on time range
- */
-function getDaysForRange(timeRange: StatsTimeRange): number {
-	switch (timeRange) {
-		case 'day':
-			return 1;
-		case 'week':
-			return 7;
-		case 'month':
-			return 30;
-		case 'quarter':
-			return 90;
-		case 'year':
-			return 365;
-		case 'all':
-			return 365; // Show last year for "all time"
-		default:
-			return 7;
-	}
-}
-
-/**
- * Check if we should use single-day mode (one pixel per day, no hour breakdown)
- * Used for year/all time ranges where time-of-day breakdown would be too cramped
- */
-function shouldUseSingleDayMode(timeRange: StatsTimeRange): boolean {
-	return timeRange === 'year' || timeRange === 'all';
-}
-
-/**
- * Check if we should use 4-hour block mode (6 blocks per day)
- * Used for month and quarter views to show time-of-day patterns with more granularity
- */
-function shouldUse4HourBlockMode(timeRange: StatsTimeRange): boolean {
-	return timeRange === 'month' || timeRange === 'quarter';
-}
-
-// Time block labels for 4-hour chunks
-const TIME_BLOCK_LABELS = ['12a-4a', '4a-8a', '8a-12p', '12p-4p', '4p-8p', '8p-12a'];
-
-/**
  * Build day columns with 4-hour time blocks for month view
  */
 function build4HourBlockGrid(
@@ -198,39 +163,6 @@ function build4HourBlockGrid(
 	});
 
 	return { dayColumns: columns, maxCount, maxDuration };
-}
-
-/**
- * Format duration in milliseconds to human-readable string
- */
-function formatDuration(ms: number): string {
-	const totalSeconds = Math.floor(ms / 1000);
-	const hours = Math.floor(totalSeconds / 3600);
-	const minutes = Math.floor((totalSeconds % 3600) / 60);
-	const seconds = totalSeconds % 60;
-
-	if (hours > 0) {
-		return `${hours}h ${minutes}m`;
-	}
-	if (minutes > 0) {
-		return `${minutes}m ${seconds}s`;
-	}
-	return `${seconds}s`;
-}
-
-/**
- * Calculate intensity level (0-4) from a value and max value
- * Level 0 = no activity, 1-4 = increasing activity
- */
-function calculateIntensity(value: number, maxValue: number): number {
-	if (value === 0) return 0;
-	if (maxValue === 0) return 0;
-
-	const ratio = value / maxValue;
-	if (ratio <= 0.25) return 1;
-	if (ratio <= 0.5) return 2;
-	if (ratio <= 0.75) return 3;
-	return 4;
 }
 
 /**
@@ -360,66 +292,7 @@ function buildGitHubGrid(
 	return { weeks, monthLabels, maxCount, maxDuration };
 }
 
-/**
- * Get color for a given intensity level
- */
-function getIntensityColor(intensity: number, theme: Theme, colorBlindMode?: boolean): string {
-	// Use colorblind-safe palette when colorblind mode is enabled
-	if (colorBlindMode) {
-		const clampedIntensity = Math.max(0, Math.min(4, Math.round(intensity)));
-		return COLORBLIND_HEATMAP_SCALE[clampedIntensity];
-	}
-
-	const accent = theme.colors.accent;
-	const bgSecondary = theme.colors.bgActivity;
-
-	// Parse the accent color to get RGB values for interpolation
-	let accentRgb: { r: number; g: number; b: number } | null = null;
-
-	if (accent.startsWith('#')) {
-		const hex = accent.slice(1);
-		accentRgb = {
-			r: parseInt(hex.slice(0, 2), 16),
-			g: parseInt(hex.slice(2, 4), 16),
-			b: parseInt(hex.slice(4, 6), 16),
-		};
-	} else if (accent.startsWith('rgb')) {
-		const match = accent.match(/\d+/g);
-		if (match && match.length >= 3) {
-			accentRgb = {
-				r: parseInt(match[0]),
-				g: parseInt(match[1]),
-				b: parseInt(match[2]),
-			};
-		}
-	}
-
-	// Fallback to accent with varying opacity if parsing fails
-	if (!accentRgb) {
-		const opacities = [0.1, 0.3, 0.5, 0.7, 1.0];
-		return `${accent}${Math.round(opacities[intensity] * 255)
-			.toString(16)
-			.padStart(2, '0')}`;
-	}
-
-	// Generate colors for each intensity level
-	switch (intensity) {
-		case 0:
-			return bgSecondary;
-		case 1:
-			return `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.2)`;
-		case 2:
-			return `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.4)`;
-		case 3:
-			return `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.6)`;
-		case 4:
-			return `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.9)`;
-		default:
-			return bgSecondary;
-	}
-}
-
-export function ActivityHeatmap({
+export const ActivityHeatmap = memo(function ActivityHeatmap({
 	data,
 	timeRange,
 	theme,
@@ -596,7 +469,7 @@ export function ActivityHeatmap({
 		>
 			{/* Header with title and metric toggle */}
 			<div className="flex items-center justify-between mb-4">
-				<h3 className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
+				<h3 className="text-sm font-medium card-enter" style={{ color: theme.colors.textMain }}>
 					Activity Heatmap
 				</h3>
 				<div className="flex items-center gap-2">
@@ -638,7 +511,9 @@ export function ActivityHeatmap({
 				</div>
 			</div>
 
-			{/* GitHub-style heatmap for year/all views */}
+			{/* GitHub-style heatmap for year/all views. Week columns stretch to
+			    fill the container instead of using a fixed 13px cell width, so
+			    the heatmap fills the modal regardless of viewport width. */}
 			{useGitHubLayout && gitHubGrid && (
 				<div className="flex gap-2">
 					{/* Day of week labels (Y-axis) */}
@@ -659,18 +534,19 @@ export function ActivityHeatmap({
 					</div>
 
 					{/* Grid container */}
-					<div className="flex-1 overflow-x-auto">
-						{/* Month labels row */}
-						<div className="flex" style={{ marginBottom: 6, height: 18 }}>
+					<div className="flex-1 min-w-0">
+						{/* Month labels row. Column widths derived from the same flex
+						    distribution as the cells (each week column = 1 unit). */}
+						<div className="flex gap-[2px]" style={{ marginBottom: 6, height: 18 }}>
 							{gitHubGrid.monthLabels.map((monthLabel, idx) => (
 								<div
 									key={`${monthLabel.month}-${idx}`}
-									className="text-xs"
+									className="text-xs min-w-0"
 									style={{
 										color: theme.colors.textDim,
-										width: monthLabel.colSpan * 15, // 13px cell + 2px gap
+										flexGrow: monthLabel.colSpan,
+										flexBasis: 0,
 										paddingLeft: 2,
-										flexShrink: 0,
 									}}
 								>
 									{monthLabel.colSpan >= 3 ? monthLabel.month : ''}
@@ -683,16 +559,15 @@ export function ActivityHeatmap({
 							{gitHubGrid.weeks.map((week, weekIdx) => (
 								<div
 									key={weekIdx}
-									className="flex flex-col gap-[2px]"
-									style={{ width: 13, flexShrink: 0 }}
+									className="flex flex-col gap-[2px] min-w-0"
+									style={{ flex: '1 1 0' }}
 								>
 									{week.days.map((day) => (
 										<div
 											key={day.dateString}
-											className="rounded-sm cursor-default"
+											className="rounded-sm cursor-default w-full"
 											style={{
-												width: 13,
-												height: 13,
+												aspectRatio: '1 / 1',
 												backgroundColor: day.isPlaceholder
 													? 'transparent'
 													: getIntensityColor(day.intensity, theme, colorBlindMode),
@@ -724,15 +599,17 @@ export function ActivityHeatmap({
 				</div>
 			)}
 
-			{/* 4-hour block heatmap for month/quarter views */}
+			{/* 4-hour block heatmap for month/quarter views. Day columns are
+			    flex 1/0/0 so the grid stretches to fill the modal instead of
+			    fixing every column at 14px and forcing horizontal scroll. */}
 			{use4HourBlockLayout && blockGrid && (
 				<div className="flex gap-2">
 					{/* Time block labels (Y-axis) */}
-					<div className="flex flex-col flex-shrink-0" style={{ width: 52, paddingTop: 22 }}>
+					<div className="flex flex-col flex-shrink-0" style={{ width: 60, paddingTop: 22 }}>
 						{TIME_BLOCK_LABELS.map((label, idx) => (
 							<div
 								key={idx}
-								className="text-xs text-right flex items-center justify-end pr-2"
+								className="text-xs text-right flex items-center justify-end pr-2 whitespace-nowrap"
 								style={{
 									color: theme.colors.textDim,
 									height: 20,
@@ -743,9 +620,9 @@ export function ActivityHeatmap({
 						))}
 					</div>
 
-					{/* Grid of cells with scrolling */}
-					<div className="flex-1 overflow-x-auto">
-						<div className="flex gap-[3px]" style={{ minWidth: blockGrid.dayColumns.length * 17 }}>
+					{/* Grid of cells fills the available width */}
+					<div className="flex-1 min-w-0">
+						<div className="flex gap-[3px]">
 							{blockGrid.dayColumns.map((col, colIdx) => {
 								// Show day number for all days, but only show month on 1st of month
 								const isFirstOfMonth = col.date.getDate() === 1;
@@ -753,30 +630,26 @@ export function ActivityHeatmap({
 								return (
 									<div
 										key={col.dateString}
-										className="flex flex-col gap-[3px]"
-										style={{ width: 14, flexShrink: 0 }}
+										className="flex flex-col gap-[3px] min-w-0"
+										style={{ flex: '1 1 0' }}
 									>
 										{/* Day label with month indicator */}
 										<div
 											className="text-xs text-center truncate h-[18px] flex items-center justify-center"
 											style={{
-												color: isFirstOfMonth
-													? theme.colors.accent
-													: theme.colors.textDim,
+												color: isFirstOfMonth ? theme.colors.accent : theme.colors.textDim,
 												fontSize: 10,
 												fontWeight: isFirstOfMonth ? 600 : 400,
 											}}
 											title={format(col.date, 'EEEE, MMM d')}
 										>
-											{showMonthLabel && isFirstOfMonth
-												? format(col.date, 'MMM')
-												: col.dayLabel}
+											{showMonthLabel && isFirstOfMonth ? format(col.date, 'MMM') : col.dayLabel}
 										</div>
 										{/* Time block cells */}
 										{col.blocks.map((block) => (
 											<div
 												key={`${col.dateString}-${block.blockIndex}`}
-												className="rounded-sm cursor-default"
+												className="rounded-sm cursor-default w-full"
 												style={{
 													height: 17,
 													backgroundColor: block.isPlaceholder
@@ -974,6 +847,6 @@ export function ActivityHeatmap({
 				})()}
 		</div>
 	);
-}
+});
 
 export default ActivityHeatmap;

@@ -10,13 +10,15 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { CreateGroupModal } from '../../../renderer/components/CreateGroupModal';
 import { LayerStackProvider } from '../../../renderer/contexts/LayerStackContext';
 import type { Theme, Group } from '../../../renderer/types';
+import { useSettingsStore } from '../../../renderer/stores/settingsStore';
 
 // Mock lucide-react
-vi.mock('lucide-react', () => ({
+vi.mock('lucide-react', async (importOriginal) => ({
+	...(await importOriginal()),
 	X: () => <svg data-testid="x-icon" />,
 }));
 
@@ -84,6 +86,11 @@ const renderWithLayerStack = (ui: React.ReactElement) => {
 	return render(<LayerStackProvider>{ui}</LayerStackProvider>);
 };
 
+const setGroupsPlusEnabled = (enabled: boolean) =>
+	useSettingsStore.setState({
+		encoreFeatures: { ...useSettingsStore.getState().encoreFeatures, groupsPlus: enabled },
+	});
+
 describe('CreateGroupModal', () => {
 	let theme: Theme;
 	let groups: Group[];
@@ -96,6 +103,7 @@ describe('CreateGroupModal', () => {
 		setGroups = vi.fn();
 		onClose = vi.fn();
 		vi.useFakeTimers();
+		setGroupsPlusEnabled(false);
 	});
 
 	afterEach(() => {
@@ -135,16 +143,22 @@ describe('CreateGroupModal', () => {
 			expect(screen.getByTestId('x-icon')).toBeInTheDocument();
 		});
 
-		it('renders Icon label', () => {
+		it('renders emoji label', () => {
 			renderModal();
 
-			expect(screen.getByText('Icon')).toBeInTheDocument();
+			expect(screen.getByText('Emoji')).toBeInTheDocument();
 		});
 
 		it('renders Group Name label', () => {
 			renderModal();
 
 			expect(screen.getByText('Group Name')).toBeInTheDocument();
+		});
+
+		it('hides the folder hierarchy control while Groups+ is disabled', () => {
+			renderModal({ initialParentGroupId: 'group-1' });
+
+			expect(screen.queryByLabelText('Inside folder')).not.toBeInTheDocument();
 		});
 
 		it('renders emoji button with default emoji 📂', () => {
@@ -175,7 +189,7 @@ describe('CreateGroupModal', () => {
 			const { container } = renderModal();
 
 			// Modal uses inline width style instead of Tailwind class
-			const modalContent = container.querySelector('[style*="width: 400px"]');
+			const modalContent = container.querySelector('[style*="width: min(calc(400px"]');
 			expect(modalContent).toHaveStyle({ backgroundColor: theme.colors.bgSidebar });
 		});
 
@@ -183,7 +197,7 @@ describe('CreateGroupModal', () => {
 			const { container } = renderModal();
 
 			// Modal uses inline width style instead of Tailwind class
-			const modalContent = container.querySelector('[style*="width: 400px"]');
+			const modalContent = container.querySelector('[style*="width: min(calc(400px"]');
 			expect(modalContent).toHaveStyle({ borderColor: theme.colors.border });
 		});
 
@@ -486,6 +500,57 @@ describe('CreateGroupModal', () => {
 			]);
 		});
 
+		it('creates a user group', () => {
+			renderModal();
+
+			const input = screen.getByPlaceholderText('Enter group name...');
+			fireEvent.change(input, { target: { value: 'Test' } });
+			fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+			expect(setGroups).toHaveBeenCalledWith([
+				...groups,
+				expect.objectContaining({
+					kind: 'user',
+				}),
+			]);
+		});
+
+		it('offers only root groups as folder parents', () => {
+			setGroupsPlusEnabled(true);
+			renderModal({
+				groups: [
+					{ id: 'company', name: 'COMPANY', emoji: '📁', collapsed: false },
+					{
+						id: 'project',
+						name: 'PROJECT',
+						emoji: '📁',
+						collapsed: false,
+						parentGroupId: 'company',
+					},
+				],
+			});
+
+			const parentSelect = screen.getByLabelText('Inside folder');
+			expect(parentSelect).toHaveTextContent('Top level');
+			expect(parentSelect).toHaveTextContent('COMPANY');
+			expect(parentSelect).not.toHaveTextContent('PROJECT');
+		});
+
+		it('creates a group inside the selected root folder', () => {
+			setGroupsPlusEnabled(true);
+			renderModal({ initialParentGroupId: 'group-1' });
+
+			fireEvent.change(screen.getByPlaceholderText('Enter group name...'), {
+				target: { value: 'Project' },
+			});
+			fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+			expect(setGroups).toHaveBeenCalledWith([
+				...groups,
+				expect.objectContaining({ parentGroupId: 'group-1' }),
+			]);
+		});
+
 		it('resets state after creation', () => {
 			renderModal();
 
@@ -777,7 +842,7 @@ describe('CreateGroupModal', () => {
 			const { container } = renderModal({ theme: lightTheme });
 
 			// Modal uses inline width style instead of Tailwind class
-			const modalContent = container.querySelector('[style*="width: 400px"]');
+			const modalContent = container.querySelector('[style*="width: min(calc(400px"]');
 			expect(modalContent).toHaveStyle({ backgroundColor: lightTheme.colors.bgSidebar });
 		});
 

@@ -11,13 +11,19 @@ import { registerStatsHandlers } from '../../../../main/ipc/handlers/stats';
 import * as statsDbModule from '../../../../main/stats';
 import type { StatsDB } from '../../../../main/stats';
 
-// Mock electron's ipcMain and BrowserWindow
+// Mock electron's ipcMain, BrowserWindow, and app
 vi.mock('electron', () => ({
 	ipcMain: {
 		handle: vi.fn(),
 		removeHandler: vi.fn(),
 	},
 	BrowserWindow: vi.fn(),
+	app: {
+		// Stats handler now registers a before-quit hook to flush the
+		// query-events buffer; tests don't exercise the hook so a noop is fine.
+		on: vi.fn(),
+		getPath: vi.fn().mockReturnValue('/mock/user/data'),
+	},
 }));
 
 // Mock the stats-db module
@@ -25,6 +31,16 @@ vi.mock('../../../../main/stats', () => ({
 	getStatsDB: vi.fn(),
 	getInitializationResult: vi.fn(),
 	clearInitializationResult: vi.fn(),
+}));
+
+// Mock the query-events buffer so tests can verify it's called without
+// needing a real SQLite DB. PR-B 1.5: the IPC handler now enqueues into
+// this buffer instead of calling db.insertQueryEvent directly.
+const mockEnqueueQueryEvent = vi.fn(() => 'buffered-query-event-id');
+const mockFlushQueryEventsSync = vi.fn();
+vi.mock('../../../../main/stats/query-events-buffer', () => ({
+	enqueueQueryEvent: (...args: unknown[]) => mockEnqueueQueryEvent(...args),
+	flushQueryEventsSync: () => mockFlushQueryEventsSync(),
 }));
 
 // Mock the logger
@@ -36,6 +52,15 @@ vi.mock('../../../../main/utils/logger', () => ({
 		debug: vi.fn(),
 	},
 }));
+
+// Mock the web-desktop bridge fanout. stats:updated now routes through
+// safeSend, which always broadcasts to bridge clients regardless of the
+// desktop renderer's liveness. Mocking it lets us assert web clients receive
+// the event even when the Electron window is null or destroyed.
+vi.mock('../../../../main/web-server/handlers/bridgeHandlers', () => ({
+	broadcastBridgeEvent: vi.fn(),
+}));
+import { broadcastBridgeEvent } from '../../../../main/web-server/handlers/bridgeHandlers';
 
 describe('stats IPC handlers', () => {
 	let handlers: Map<string, Function>;
@@ -52,6 +77,10 @@ describe('stats IPC handlers', () => {
 
 		// Create mock stats database
 		mockStatsDB = {
+			// PR-B 1.5: the record-query handler no longer calls insertQueryEvent;
+			// it enqueues into query-events-buffer instead. Other paths (auto-run,
+			// session-lifecycle) still call the direct DB methods.
+			database: {} as never,
 			insertQueryEvent: vi.fn().mockReturnValue('query-event-id'),
 			insertAutoRunSession: vi.fn().mockReturnValue('autorun-session-id'),
 			updateAutoRunSession: vi.fn().mockReturnValue(true),
@@ -74,6 +103,7 @@ describe('stats IPC handlers', () => {
 				avgSessionDuration: 0,
 				byAgentByDay: {},
 				bySessionByDay: {},
+				bySessionSource: {},
 			}),
 			exportToCsv: vi.fn().mockReturnValue('id,sessionId,...'),
 			clearOldData: vi.fn().mockReturnValue({ success: true, deletedCount: 0 }),
@@ -81,6 +111,8 @@ describe('stats IPC handlers', () => {
 			recordSessionCreated: vi.fn().mockReturnValue('session-lifecycle-id'),
 			recordSessionClosed: vi.fn().mockReturnValue(true),
 			getSessionLifecycleEvents: vi.fn().mockReturnValue([]),
+			incrementShortcutUsage: vi.fn().mockReturnValue('2026-06-21'),
+			isReady: vi.fn().mockReturnValue(true),
 		};
 
 		vi.mocked(statsDbModule.getStatsDB).mockReturnValue(mockStatsDB as unknown as StatsDB);
@@ -133,6 +165,38 @@ describe('stats IPC handlers', () => {
 				expect(handlers.has(channel)).toBe(true);
 			}
 		});
+
+		// PR-B 1.5: registerStatsHandlers must wire flushQueryEventsSync to
+		// app:before-quit so buffered events aren't lost on quit.
+		it('registers a before-quit handler that flushes the query event buffer', async () => {
+			const { app } = await import('electron');
+			const beforeQuitCalls = vi.mocked(app.on).mock.calls.filter((c) => c[0] === 'before-quit');
+			expect(beforeQuitCalls.length).toBeGreaterThanOrEqual(1);
+
+			// Capture the most-recently-registered before-quit handler — the
+			// stats handler is one of several modules that may register on
+			// this event, so we don't assume length === 1.
+			const handler = beforeQuitCalls[beforeQuitCalls.length - 1][1] as () => void;
+			mockFlushQueryEventsSync.mockClear();
+
+			handler();
+
+			expect(mockFlushQueryEventsSync).toHaveBeenCalledTimes(1);
+		});
+
+		it('before-quit handler swallows flush errors (does not block shutdown)', async () => {
+			const { app } = await import('electron');
+			const beforeQuitCalls = vi.mocked(app.on).mock.calls.filter((c) => c[0] === 'before-quit');
+			const handler = beforeQuitCalls[beforeQuitCalls.length - 1][1] as () => void;
+
+			mockFlushQueryEventsSync.mockImplementationOnce(() => {
+				throw new Error('disk full');
+			});
+
+			// Should NOT propagate — failing to flush stats must not block
+			// app shutdown. Sentry capture is fire-and-forget inside the catch.
+			expect(() => handler()).not.toThrow();
+		});
 	});
 
 	describe('stats:updated broadcast verification', () => {
@@ -151,9 +215,12 @@ describe('stats IPC handlers', () => {
 
 				await handler!({} as any, queryEvent);
 
-				expect(mockStatsDB.insertQueryEvent).toHaveBeenCalledWith(queryEvent);
+				// PR-B 1.5: enqueueQueryEvent is called instead of insertQueryEvent
+				expect(mockEnqueueQueryEvent).toHaveBeenCalledWith(mockStatsDB.database, queryEvent);
 				expect(mockMainWindow.webContents.send).toHaveBeenCalledWith('stats:updated');
 				expect(mockMainWindow.webContents.send).toHaveBeenCalledTimes(1);
+				// The same event fans out to web-desktop bridge clients.
+				expect(broadcastBridgeEvent).toHaveBeenCalledWith('stats:updated', []);
 			});
 
 			it('should not broadcast when main window is null', async () => {
@@ -176,7 +243,7 @@ describe('stats IPC handlers', () => {
 				await handler!({} as any, queryEvent);
 
 				// No error should be thrown, and no send should happen
-				expect(mockStatsDB.insertQueryEvent).toHaveBeenCalled();
+				expect(mockEnqueueQueryEvent).toHaveBeenCalled();
 				expect(mockMainWindow.webContents.send).not.toHaveBeenCalled();
 			});
 
@@ -194,8 +261,48 @@ describe('stats IPC handlers', () => {
 
 				await handler!({} as any, queryEvent);
 
-				expect(mockStatsDB.insertQueryEvent).toHaveBeenCalled();
+				expect(mockEnqueueQueryEvent).toHaveBeenCalled();
 				expect(mockMainWindow.webContents.send).not.toHaveBeenCalled();
+			});
+		});
+
+		describe('web-desktop bridge fanout', () => {
+			it('should still reach bridge clients when the main window is null', async () => {
+				const nullWindowGetMainWindow = () => null;
+				handlers.clear();
+				vi.mocked(ipcMain.handle).mockImplementation((channel, handler) => {
+					handlers.set(channel, handler);
+				});
+				registerStatsHandlers({ getMainWindow: nullWindowGetMainWindow });
+
+				const handler = handlers.get('stats:record-query');
+				await handler!({} as any, {
+					sessionId: 'session-1',
+					agentType: 'claude-code',
+					source: 'user' as const,
+					startTime: Date.now(),
+					duration: 5000,
+				});
+
+				// Desktop renderer skipped (no window), but web clients still get it.
+				expect(mockMainWindow.webContents.send).not.toHaveBeenCalled();
+				expect(broadcastBridgeEvent).toHaveBeenCalledWith('stats:updated', []);
+			});
+
+			it('should still reach bridge clients when the main window is destroyed', async () => {
+				mockMainWindow.isDestroyed.mockReturnValue(true);
+
+				const handler = handlers.get('stats:record-query');
+				await handler!({} as any, {
+					sessionId: 'session-1',
+					agentType: 'claude-code',
+					source: 'user' as const,
+					startTime: Date.now(),
+					duration: 5000,
+				});
+
+				expect(mockMainWindow.webContents.send).not.toHaveBeenCalled();
+				expect(broadcastBridgeEvent).toHaveBeenCalledWith('stats:updated', []);
 			});
 		});
 
@@ -269,6 +376,34 @@ describe('stats IPC handlers', () => {
 				expect(mockMainWindow.webContents.send).toHaveBeenCalledTimes(1);
 			});
 		});
+
+		describe('stats:record-shortcut-usage', () => {
+			it('records usage and broadcasts when the stats DB is ready', async () => {
+				const handler = handlers.get('stats:record-shortcut-usage');
+				const firedAt = Date.UTC(2026, 5, 21, 12, 0, 0);
+
+				const result = await handler!({} as any, firedAt);
+
+				expect(result).toBe('2026-06-21');
+				expect(mockStatsDB.incrementShortcutUsage).toHaveBeenCalledWith(firedAt);
+				expect(mockMainWindow.webContents.send).toHaveBeenCalledWith('stats:updated');
+			});
+
+			// MAESTRO-SP: a shortcut can fire before the stats DB finishes
+			// initializing. The handler must skip silently rather than throw
+			// "Database not initialized" (which would otherwise propagate across
+			// the IPC bridge into the renderer and Sentry).
+			it('skips silently without throwing when the stats DB is not yet ready', async () => {
+				vi.mocked(mockStatsDB.isReady!).mockReturnValue(false);
+				const handler = handlers.get('stats:record-shortcut-usage');
+
+				const result = await handler!({} as any, Date.now());
+
+				expect(result).toBeNull();
+				expect(mockStatsDB.incrementShortcutUsage).not.toHaveBeenCalled();
+				expect(mockMainWindow.webContents.send).not.toHaveBeenCalled();
+			});
+		});
 	});
 
 	describe('read-only operations should not broadcast', () => {
@@ -331,12 +466,12 @@ describe('stats IPC handlers', () => {
 	});
 
 	describe('broadcast timing', () => {
-		it('should broadcast after database write completes', async () => {
+		it('should broadcast after enqueueing the query event', async () => {
 			const executionOrder: string[] = [];
 
-			vi.mocked(mockStatsDB.insertQueryEvent).mockImplementation(() => {
-				executionOrder.push('db-write');
-				return 'query-event-id';
+			mockEnqueueQueryEvent.mockImplementation(() => {
+				executionOrder.push('enqueue');
+				return 'buffered-id';
 			});
 
 			mockMainWindow.webContents.send = vi.fn().mockImplementation(() => {
@@ -352,7 +487,8 @@ describe('stats IPC handlers', () => {
 				duration: 5000,
 			});
 
-			expect(executionOrder).toEqual(['db-write', 'broadcast']);
+			// PR-B 1.5: enqueue is sync (no DB write yet); broadcast follows.
+			expect(executionOrder).toEqual(['enqueue', 'broadcast']);
 		});
 	});
 
@@ -506,5 +642,4 @@ describe('stats IPC handlers', () => {
 			});
 		});
 	});
-
 });

@@ -58,21 +58,24 @@ const POLL_INTERVAL_MS = 15_000;
 export function useVibesSessionIndicators(
 	sessions: Session[],
 	enabled: boolean,
-	liveUpdates?: Map<string, VibesAnnotationUpdate>,
+	liveUpdates?: Map<string, VibesAnnotationUpdate>
 ): UseVibesSessionIndicatorsReturn {
 	const [indicators, setIndicators] = useState<Map<string, VibesIndicatorData>>(new Map());
 	const [isLoading, setIsLoading] = useState(false);
 	const mountedRef = useRef(true);
 
-	// Deduplicate project paths across all sessions.
-	const uniquePaths = useMemo(() => {
+	// Deduplicate project paths across all sessions. Keyed by the joined path
+	// string (not the sessions array identity) so a parent re-render that
+	// recreates the array does not restart the effect/polling loop below.
+	const pathsKey = useMemo(() => {
 		const paths = new Set<string>();
 		for (const session of sessions) {
 			const path = session.projectRoot || session.cwd;
 			if (path) paths.add(path);
 		}
-		return Array.from(paths);
+		return Array.from(paths).sort().join('\n');
 	}, [sessions]);
+	const uniquePaths = useMemo(() => (pathsKey ? pathsKey.split('\n') : []), [pathsKey]);
 
 	// Fetch indicator data for all unique project paths.
 	const fetchIndicators = useCallback(async () => {
@@ -92,10 +95,8 @@ export function useVibesSessionIndicators(
 						if (statsResult.success && statsResult.data) {
 							try {
 								const data = JSON.parse(statsResult.data);
-								annotationCount =
-									data.total_annotations ?? data.totalAnnotations ?? 0;
-								assuranceLevel =
-									data.assurance_level ?? data.assuranceLevel ?? null;
+								annotationCount = data.total_annotations ?? data.totalAnnotations ?? 0;
+								assuranceLevel = data.assurance_level ?? data.assuranceLevel ?? null;
 							} catch {
 								// Ignore parse errors
 							}
@@ -116,7 +117,7 @@ export function useVibesSessionIndicators(
 							assuranceLevel: null as VibesAssuranceLevel | null,
 						};
 					}
-				}),
+				})
 			);
 
 			if (!mountedRef.current) return;
@@ -180,10 +181,7 @@ export function useVibesSessionIndicators(
 			const liveData = liveUpdates.get(session.id);
 			if (liveData) {
 				const existing = liveCountByProject.get(projectPath) ?? 0;
-				liveCountByProject.set(
-					projectPath,
-					Math.max(existing, liveData.annotationCount),
-				);
+				liveCountByProject.set(projectPath, Math.max(existing, liveData.annotationCount));
 			}
 		}
 
@@ -207,6 +205,6 @@ export function useVibesSessionIndicators(
 
 	return useMemo(
 		() => ({ indicators: mergedIndicators, isLoading }),
-		[mergedIndicators, isLoading],
+		[mergedIndicators, isLoading]
 	);
 }

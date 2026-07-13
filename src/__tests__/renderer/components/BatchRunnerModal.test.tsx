@@ -1,6 +1,26 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { logger } from '../../../renderer/utils/logger';
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import React from 'react';
+
+// Mock batchUtils to provide loaded DEFAULT_BATCH_PROMPT and real validation functions
+vi.mock('../../../renderer/hooks/batch/batchUtils', async () => {
+	const actual = await vi.importActual('../../../renderer/hooks/batch/batchUtils');
+	const fs = await import('fs');
+	const path = await import('path');
+	const content = fs.readFileSync(
+		path.resolve(__dirname, '..', '..', '..', '..', 'src', 'prompts', 'autorun-default.md'),
+		'utf-8'
+	);
+	return {
+		...actual,
+		// Normalize CRLF -> LF: a Windows git checkout may give the fixture CRLF
+		// terminators, but the DOM `<textarea>` reflects its value with LF-only
+		// endings, so the comparison would otherwise mismatch. No-op on LF.
+		DEFAULT_BATCH_PROMPT: content.replace(/\r\n/g, '\n'),
+	};
+});
+
 import {
 	BatchRunnerModal,
 	DEFAULT_BATCH_PROMPT,
@@ -130,7 +150,7 @@ function createDefaultProps() {
 		onSave: vi.fn(),
 		showConfirmation: vi.fn((message: string, onConfirm: () => void) => onConfirm()),
 		folderPath: '/path/to/folder',
-		currentDocument: 'test-doc',
+		presetDocuments: ['test-doc'],
 		allDocuments: ['test-doc', 'doc1', 'doc2', 'doc3'],
 		getDocumentTaskCount: vi.fn().mockResolvedValue(5),
 		onRefreshDocuments: vi.fn().mockResolvedValue(undefined),
@@ -187,16 +207,34 @@ describe('BatchRunnerModal', () => {
 			const dialog = screen.getByRole('dialog');
 			expect(dialog).toBeInTheDocument();
 			expect(dialog).toHaveAttribute('aria-modal', 'true');
-			expect(dialog).toHaveAttribute('aria-label', 'Auto Run Configuration');
+			expect(dialog).toHaveAttribute('aria-label', 'Maestro Auto Run');
 		});
 
 		it('displays header with title and close button', async () => {
 			render(<BatchRunnerModal {...createDefaultProps()} />);
 
-			expect(screen.getByText('Auto Run Configuration')).toBeInTheDocument();
+			expect(screen.getByText('Maestro Auto Run')).toBeInTheDocument();
 			// X button is present
 			const closeButtons = screen.getAllByRole('button');
 			expect(closeButtons.some((btn) => btn.querySelector('svg'))).toBe(true);
+		});
+
+		it('opens the Auto Run help guide from the header and returns to config on close', async () => {
+			render(<BatchRunnerModal {...createDefaultProps()} />);
+
+			// Guide is not shown initially
+			expect(screen.queryByText('Auto Run Guide')).not.toBeInTheDocument();
+
+			// Click the (?) help button in the header
+			fireEvent.click(screen.getByRole('button', { name: 'Open help' }));
+			expect(screen.getByText('Auto Run Guide')).toBeInTheDocument();
+
+			// Clicking "Got it" closes the guide; the config modal stays open underneath
+			fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+			await waitFor(() => {
+				expect(screen.queryByText('Auto Run Guide')).not.toBeInTheDocument();
+			});
+			expect(screen.getByText('Maestro Auto Run')).toBeInTheDocument();
 		});
 
 		it('displays task count badge in header', async () => {
@@ -230,7 +268,7 @@ describe('BatchRunnerModal', () => {
 
 			expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
 			expect(screen.getByRole('button', { name: /Save/ })).toBeInTheDocument();
-			expect(screen.getByRole('button', { name: /Go/ })).toBeInTheDocument();
+			expect(screen.getByRole('button', { name: 'Go' })).toBeInTheDocument();
 		});
 	});
 
@@ -380,7 +418,7 @@ describe('BatchRunnerModal', () => {
 
 		it('shows empty state when no documents are selected', async () => {
 			const props = createDefaultProps();
-			props.currentDocument = '';
+			props.presetDocuments = [];
 			render(<BatchRunnerModal {...props} />);
 
 			expect(screen.getByText('No documents selected')).toBeInTheDocument();
@@ -851,9 +889,48 @@ describe('BatchRunnerModal', () => {
 
 			render(<BatchRunnerModal {...createDefaultProps()} />);
 
-			await waitFor(() => screen.getByText('Load Playbook'));
-			fireEvent.click(screen.getByRole('button', { name: 'Load Playbook' }));
+			// Import Playbook is a top-level button — no need to open the
+			// Load Playbook dropdown first.
+			await waitFor(() => screen.getByRole('button', { name: 'Import Playbook' }));
 			fireEvent.click(screen.getByRole('button', { name: 'Import Playbook' }));
+
+			await waitFor(() => {
+				expect(mockImport).toHaveBeenCalledWith('session-123', '/path/to/folder');
+			});
+		});
+
+		// Regression test for the bug where Import Playbook was buried inside
+		// the Load Playbook dropdown — which only renders when
+		// `playbooks.length > 0 || loadedPlaybook`. First-time users (fresh
+		// worktree, never created a playbook) had no entry point to import a
+		// .maestro-playbook.zip and the button appeared to do nothing because
+		// it wasn't rendered. Import must always be reachable.
+		it('renders Import Playbook button with zero existing playbooks', async () => {
+			const mockImport = vi.fn().mockResolvedValue({ success: false, error: 'Import cancelled' });
+			(window.maestro as Record<string, unknown>).playbooks = {
+				list: vi.fn().mockResolvedValue({ success: true, playbooks: [] }),
+				create: vi.fn(),
+				update: vi.fn(),
+				delete: vi.fn(),
+				export: vi.fn(),
+				import: mockImport,
+			};
+
+			render(<BatchRunnerModal {...createDefaultProps()} />);
+
+			// Wait for the initial playbooks list fetch to settle (loading -> empty).
+			await waitFor(() => {
+				expect(window.maestro.playbooks.list).toHaveBeenCalled();
+			});
+
+			// The Load Playbook dropdown should NOT render (no playbooks exist),
+			// but Import Playbook must still be visible and clickable.
+			expect(screen.queryByRole('button', { name: 'Load Playbook' })).not.toBeInTheDocument();
+
+			const importBtn = screen.getByRole('button', { name: 'Import Playbook' });
+			expect(importBtn).toBeInTheDocument();
+
+			fireEvent.click(importBtn);
 
 			await waitFor(() => {
 				expect(mockImport).toHaveBeenCalledWith('session-123', '/path/to/folder');
@@ -889,9 +966,6 @@ describe('BatchRunnerModal', () => {
 		});
 	});
 
-	// NOTE: Git Worktree tests were removed - worktree configuration has moved to WorktreeConfigModal
-	// See src/__tests__/renderer/components/GitWorktreeSection.test.tsx for worktree-specific tests
-
 	describe('Go/Run Functionality', () => {
 		it('calls onGo with correct config when Go is clicked', async () => {
 			const props = createDefaultProps();
@@ -902,7 +976,7 @@ describe('BatchRunnerModal', () => {
 				expect(screen.getByText('tasks')).toBeInTheDocument();
 			});
 
-			fireEvent.click(screen.getByRole('button', { name: /Go/ }));
+			fireEvent.click(screen.getByRole('button', { name: 'Go' }));
 
 			expect(props.onGo).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -928,19 +1002,298 @@ describe('BatchRunnerModal', () => {
 				expect(screen.getByText('0')).toBeInTheDocument();
 			});
 
-			const goButton = screen.getByRole('button', { name: /Go/ });
+			const goButton = screen.getByRole('button', { name: 'Go' });
 			expect(goButton).toBeDisabled();
 		});
 
 		it('disables Go button when no documents', async () => {
 			const props = createDefaultProps();
-			props.currentDocument = '';
+			props.presetDocuments = [];
 			render(<BatchRunnerModal {...props} />);
 
-			const goButton = screen.getByRole('button', { name: /Go/ });
+			const goButton = screen.getByRole('button', { name: 'Go' });
 			expect(goButton).toBeDisabled();
 		});
 		// NOTE: 'includes worktree config when worktree is enabled' test removed - worktree is now in WorktreeConfigModal
+	});
+
+	describe('Goal-Driven Mode', () => {
+		// Goal textarea is identified by its placeholder (stable, user-facing copy).
+		const GOAL_PLACEHOLDER = /Migrate the settings store/;
+		const EXIT_PLACEHOLDER = /Done when no Redux imports remain/;
+
+		it('renders the header as "Maestro Auto Run", not "Auto Run Configuration"', async () => {
+			render(<BatchRunnerModal {...createDefaultProps()} />);
+
+			expect(screen.getByRole('heading', { name: 'Maestro Auto Run' })).toBeInTheDocument();
+			expect(screen.queryByText('Auto Run Configuration')).not.toBeInTheDocument();
+		});
+
+		it('shows Spec-Driven / Goal-Driven tabs', async () => {
+			render(<BatchRunnerModal {...createDefaultProps()} />);
+
+			expect(screen.getByRole('button', { name: 'Spec-Driven' })).toBeInTheDocument();
+			expect(screen.getByRole('button', { name: 'Goal-Driven' })).toBeInTheDocument();
+		});
+
+		it('hides the documents panel and shows goal inputs when Goal-Driven is selected', async () => {
+			render(<BatchRunnerModal {...createDefaultProps()} />);
+
+			// Spec mode by default — documents panel is visible.
+			expect(screen.getByText('test-doc.md')).toBeInTheDocument();
+			expect(screen.getByRole('button', { name: 'Add Docs' })).toBeInTheDocument();
+
+			// Switch to Goal-Driven.
+			fireEvent.click(screen.getByRole('button', { name: 'Goal-Driven' }));
+
+			// Documents panel gone; goal inputs present.
+			await waitFor(() => {
+				expect(screen.queryByText('test-doc.md')).not.toBeInTheDocument();
+			});
+			expect(screen.queryByRole('button', { name: 'Add Docs' })).not.toBeInTheDocument();
+			expect(screen.getByPlaceholderText(GOAL_PLACEHOLDER)).toBeInTheDocument();
+			expect(screen.getByPlaceholderText(EXIT_PLACEHOLDER)).toBeInTheDocument();
+			expect(screen.getByText('Iteration Limit')).toBeInTheDocument();
+		});
+
+		it('restores the documents panel when switching back to Spec-Driven', async () => {
+			render(<BatchRunnerModal {...createDefaultProps()} />);
+
+			fireEvent.click(screen.getByRole('button', { name: 'Goal-Driven' }));
+			await waitFor(() => {
+				expect(screen.getByPlaceholderText(GOAL_PLACEHOLDER)).toBeInTheDocument();
+			});
+
+			fireEvent.click(screen.getByRole('button', { name: 'Spec-Driven' }));
+			await waitFor(() => {
+				expect(screen.getByText('test-doc.md')).toBeInTheDocument();
+			});
+			expect(screen.queryByPlaceholderText(GOAL_PLACEHOLDER)).not.toBeInTheDocument();
+		});
+
+		it('hides Spec-Driven-only chrome (Playbook actions + Follow active task) in Goal-Driven mode', async () => {
+			render(<BatchRunnerModal {...createDefaultProps()} />);
+
+			// Spec mode by default: the Playbook import action and the
+			// document-centric follow-active-task toggle + drag hint are present.
+			expect(screen.getByRole('button', { name: 'Import Playbook' })).toBeInTheDocument();
+			expect(screen.getByText('Follow active task')).toBeInTheDocument();
+			expect(screen.getByText('to copy document')).toBeInTheDocument();
+			expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+
+			// Switch to Goal-Driven — none of these apply without checklist documents.
+			fireEvent.click(screen.getByRole('button', { name: 'Goal-Driven' }));
+
+			await waitFor(() => {
+				expect(screen.queryByRole('button', { name: 'Import Playbook' })).not.toBeInTheDocument();
+			});
+			expect(screen.queryByText('Follow active task')).not.toBeInTheDocument();
+			expect(screen.queryByText('to copy document')).not.toBeInTheDocument();
+			// Save persists the spec-mode prompt; it has no place in goal mode.
+			expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+
+			// Switching back restores them.
+			fireEvent.click(screen.getByRole('button', { name: 'Spec-Driven' }));
+			await waitFor(() => {
+				expect(screen.getByRole('button', { name: 'Import Playbook' })).toBeInTheDocument();
+			});
+			expect(screen.getByText('Follow active task')).toBeInTheDocument();
+			expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+		});
+
+		it('disables Go with an empty goal and enables it once a goal is typed', async () => {
+			render(<BatchRunnerModal {...createDefaultProps()} />);
+
+			fireEvent.click(screen.getByRole('button', { name: 'Goal-Driven' }));
+
+			const goButton = screen.getByRole('button', { name: 'Go' });
+			expect(goButton).toBeDisabled();
+
+			const goalInput = screen.getByPlaceholderText(GOAL_PLACEHOLDER);
+			fireEvent.change(goalInput, { target: { value: 'Refactor the auth module' } });
+
+			await waitFor(() => {
+				expect(screen.getByRole('button', { name: 'Go' })).not.toBeDisabled();
+			});
+		});
+
+		it('exposes an expand editor on both the goal and exit-criteria fields', async () => {
+			render(<BatchRunnerModal {...createDefaultProps()} />);
+			fireEvent.click(screen.getByRole('button', { name: 'Goal-Driven' }));
+
+			await waitFor(() => {
+				expect(screen.getByPlaceholderText(GOAL_PLACEHOLDER)).toBeInTheDocument();
+			});
+			// Goal + Exit Criteria each get an Expand editor button.
+			expect(screen.getAllByTitle('Expand editor')).toHaveLength(2);
+		});
+
+		it('opens the full-screen editor and writes back to the goal field', async () => {
+			render(<BatchRunnerModal {...createDefaultProps()} />);
+			fireEvent.click(screen.getByRole('button', { name: 'Goal-Driven' }));
+
+			await waitFor(() => {
+				expect(screen.getByPlaceholderText(GOAL_PLACEHOLDER)).toBeInTheDocument();
+			});
+
+			// First expand button = Goal field.
+			fireEvent.click(screen.getAllByTitle('Expand editor')[0]);
+			expect(screen.getByTestId('prompt-composer-modal')).toBeInTheDocument();
+
+			fireEvent.click(screen.getByText('Submit'));
+			await waitFor(() => {
+				expect(screen.getByPlaceholderText(GOAL_PLACEHOLDER)).toHaveValue(
+					'Updated prompt from composer'
+				);
+			});
+		});
+
+		it('opens the full-screen editor and writes back to the exit-criteria field', async () => {
+			render(<BatchRunnerModal {...createDefaultProps()} />);
+			fireEvent.click(screen.getByRole('button', { name: 'Goal-Driven' }));
+
+			await waitFor(() => {
+				expect(screen.getByPlaceholderText(EXIT_PLACEHOLDER)).toBeInTheDocument();
+			});
+
+			// Second expand button = Exit Criteria field.
+			fireEvent.click(screen.getAllByTitle('Expand editor')[1]);
+			expect(screen.getByTestId('prompt-composer-modal')).toBeInTheDocument();
+
+			fireEvent.click(screen.getByText('Submit'));
+			await waitFor(() => {
+				expect(screen.getByPlaceholderText(EXIT_PLACEHOLDER)).toHaveValue(
+					'Updated prompt from composer'
+				);
+			});
+		});
+
+		// One Auto Run per agent: an active run for this session must block Go in
+		// BOTH modes, even when the rest of the config is valid. Previously only
+		// the spec path was incidentally blocked (via "no documents"); a goal with
+		// text would slip through and launch a second concurrent run.
+		describe('blocks launching a second run while one is active', () => {
+			let batchStore: typeof import('../../../renderer/stores/batchStore');
+
+			beforeEach(async () => {
+				batchStore = await import('../../../renderer/stores/batchStore');
+				const { DEFAULT_BATCH_STATE } = await import('../../../renderer/hooks/batch/batchReducer');
+				batchStore.useBatchStore.setState({
+					batchRunStates: {
+						'session-123': { ...DEFAULT_BATCH_STATE, isRunning: true },
+					},
+				});
+			});
+
+			afterEach(() => {
+				batchStore.useBatchStore.setState({ batchRunStates: {} });
+			});
+
+			it('disables Go in Goal-Driven mode even with a valid goal', async () => {
+				render(<BatchRunnerModal {...createDefaultProps()} />);
+
+				fireEvent.click(screen.getByRole('button', { name: 'Goal-Driven' }));
+				fireEvent.change(screen.getByPlaceholderText(GOAL_PLACEHOLDER), {
+					target: { value: 'Refactor the auth module' },
+				});
+
+				// Goal is non-empty, so the only thing keeping Go disabled is the active run.
+				await waitFor(() => {
+					expect(screen.getByRole('button', { name: 'Go' })).toBeDisabled();
+				});
+				expect(screen.getByText('Auto Run active')).toBeInTheDocument();
+			});
+
+			it('disables Go in Spec-Driven mode while a run is active', async () => {
+				const props = createDefaultProps();
+				props.getDocumentTaskCount = vi.fn().mockResolvedValue(3);
+				render(<BatchRunnerModal {...props} />);
+
+				const goButton = screen.getByRole('button', { name: 'Go' });
+				expect(goButton).toBeDisabled();
+				expect(screen.getByText('Auto Run active')).toBeInTheDocument();
+			});
+		});
+
+		it('calls onGo with a goalConfig (not the spec-mode document config) when Go is clicked', async () => {
+			const props = createDefaultProps();
+			render(<BatchRunnerModal {...props} />);
+
+			fireEvent.click(screen.getByRole('button', { name: 'Goal-Driven' }));
+
+			fireEvent.change(screen.getByPlaceholderText(GOAL_PLACEHOLDER), {
+				target: { value: 'Refactor the auth module' },
+			});
+			fireEvent.change(screen.getByPlaceholderText(EXIT_PLACEHOLDER), {
+				target: { value: 'Done when all auth tests pass' },
+			});
+
+			fireEvent.click(screen.getByRole('button', { name: 'Go' }));
+
+			expect(props.onGo).toHaveBeenCalledWith(
+				expect.objectContaining({
+					documents: [],
+					goalConfig: {
+						goal: 'Refactor the auth module',
+						exitCriteria: 'Done when all auth tests pass',
+						maxIterations: null,
+					},
+				})
+			);
+			// Goal mode must NOT carry the spec-mode task-selection field.
+			const config = (props.onGo as ReturnType<typeof vi.fn>).mock.calls[0][0];
+			expect(config.taskSelectionMode).toBeUndefined();
+			expect(props.onClose).toHaveBeenCalled();
+		});
+
+		it('Infinite toggle sets maxIterations to null in the launched config', async () => {
+			const props = createDefaultProps();
+			render(<BatchRunnerModal {...props} />);
+
+			fireEvent.click(screen.getByRole('button', { name: 'Goal-Driven' }));
+			fireEvent.change(screen.getByPlaceholderText(GOAL_PLACEHOLDER), {
+				target: { value: 'Some goal' },
+			});
+
+			// Switch to a finite limit (numeric input appears), then back to Infinite.
+			fireEvent.click(screen.getByRole('button', { name: 'Limit' }));
+			expect(screen.getByLabelText('Maximum iterations')).toBeInTheDocument();
+
+			fireEvent.click(screen.getByRole('button', { name: 'Infinite' }));
+			await waitFor(() => {
+				expect(screen.queryByLabelText('Maximum iterations')).not.toBeInTheDocument();
+			});
+
+			fireEvent.click(screen.getByRole('button', { name: 'Go' }));
+
+			expect(props.onGo).toHaveBeenCalledWith(
+				expect.objectContaining({
+					goalConfig: expect.objectContaining({ maxIterations: null }),
+				})
+			);
+		});
+
+		it('carries a finite maxIterations through to the launched config', async () => {
+			const props = createDefaultProps();
+			render(<BatchRunnerModal {...props} />);
+
+			fireEvent.click(screen.getByRole('button', { name: 'Goal-Driven' }));
+			fireEvent.change(screen.getByPlaceholderText(GOAL_PLACEHOLDER), {
+				target: { value: 'Some goal' },
+			});
+
+			fireEvent.click(screen.getByRole('button', { name: 'Limit' }));
+			const iterInput = screen.getByLabelText('Maximum iterations');
+			fireEvent.change(iterInput, { target: { value: '7' } });
+
+			fireEvent.click(screen.getByRole('button', { name: 'Go' }));
+
+			expect(props.onGo).toHaveBeenCalledWith(
+				expect.objectContaining({
+					goalConfig: expect.objectContaining({ maxIterations: 7 }),
+				})
+			);
+		});
 	});
 
 	describe('Save Functionality', () => {
@@ -978,13 +1331,29 @@ describe('BatchRunnerModal', () => {
 			const props = createDefaultProps();
 			render(<BatchRunnerModal {...props} />);
 
-			// Find the X button in the header
-			const header = screen.getByText('Auto Run Configuration').closest('div');
-			const closeButton = header?.querySelector('button');
-			if (closeButton) {
-				fireEvent.click(closeButton);
-				expect(props.onClose).toHaveBeenCalled();
-			}
+			// Click the labeled X button in the header
+			fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+			expect(props.onClose).toHaveBeenCalled();
+		});
+
+		it('closes without confirmation after saving a modified prompt', async () => {
+			const props = createDefaultProps();
+			// Override so showConfirmation does NOT auto-invoke onConfirm
+			props.showConfirmation = vi.fn();
+			render(<BatchRunnerModal {...props} />);
+
+			// Modify the prompt
+			const textarea = screen.getByPlaceholderText('Enter the system prompt for auto-run...');
+			fireEvent.change(textarea, { target: { value: 'Modified prompt text' } });
+
+			// Save
+			fireEvent.click(screen.getByRole('button', { name: /Save/ }));
+			expect(props.onSave).toHaveBeenCalledWith('Modified prompt text');
+
+			// Cancel should close directly without showConfirmation
+			fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+			expect(props.onClose).toHaveBeenCalled();
+			expect(props.showConfirmation).not.toHaveBeenCalled();
 		});
 	});
 
@@ -992,7 +1361,7 @@ describe('BatchRunnerModal', () => {
 		it('handles empty allDocuments gracefully', async () => {
 			const props = createDefaultProps();
 			props.allDocuments = [];
-			props.currentDocument = '';
+			props.presetDocuments = [];
 			render(<BatchRunnerModal {...props} />);
 
 			fireEvent.click(screen.getByRole('button', { name: 'Add Docs' }));
@@ -1044,7 +1413,7 @@ describe('BatchRunnerModal', () => {
 		it('handles special characters in document names', async () => {
 			const props = createDefaultProps();
 			props.allDocuments = ['doc<script>', "doc'quote", 'doc"double'];
-			props.currentDocument = 'doc<script>';
+			props.presetDocuments = ['doc<script>'];
 			render(<BatchRunnerModal {...props} />);
 
 			expect(screen.getByText('doc<script>.md')).toBeInTheDocument();
@@ -1053,7 +1422,7 @@ describe('BatchRunnerModal', () => {
 		it('handles unicode in document names', async () => {
 			const props = createDefaultProps();
 			props.allDocuments = ['文档', 'документ', '📄doc'];
-			props.currentDocument = '文档';
+			props.presetDocuments = ['文档'];
 			render(<BatchRunnerModal {...props} />);
 
 			expect(screen.getByText('文档.md')).toBeInTheDocument();
@@ -1145,15 +1514,21 @@ describe('validateAgentPromptHasTaskReference', () => {
 	});
 
 	it('returns true for prompt containing "markdown task"', () => {
-		expect(validateAgentPromptHasTaskReference('Process each markdown task in the document.')).toBe(true);
+		expect(validateAgentPromptHasTaskReference('Process each markdown task in the document.')).toBe(
+			true
+		);
 	});
 
 	it('returns true for prompt containing "Markdown Tasks" (case-insensitive)', () => {
-		expect(validateAgentPromptHasTaskReference('Complete all Markdown Tasks listed below.')).toBe(true);
+		expect(validateAgentPromptHasTaskReference('Complete all Markdown Tasks listed below.')).toBe(
+			true
+		);
 	});
 
 	it('returns true for prompt containing checkbox syntax "- [ ]"', () => {
-		expect(validateAgentPromptHasTaskReference('Look for items marked as - [ ] and complete them.')).toBe(true);
+		expect(
+			validateAgentPromptHasTaskReference('Look for items marked as - [ ] and complete them.')
+		).toBe(true);
 	});
 
 	it('returns true for prompt containing checked checkbox "- [x]"', () => {
@@ -1169,7 +1544,9 @@ describe('validateAgentPromptHasTaskReference', () => {
 	});
 
 	it('returns true for prompt containing "check off task"', () => {
-		expect(validateAgentPromptHasTaskReference('Check off task items as you complete them.')).toBe(true);
+		expect(validateAgentPromptHasTaskReference('Check off task items as you complete them.')).toBe(
+			true
+		);
 	});
 
 	it('returns true for the DEFAULT_BATCH_PROMPT', () => {
@@ -1181,7 +1558,7 @@ describe('Agent Prompt Validation in UI', () => {
 	it('disables Go button when prompt is empty', async () => {
 		const props = createDefaultProps();
 		props.initialPrompt = '';
-		// Override currentDocument to have tasks (so it's not disabled for other reasons)
+		// Default preset seeds a document with tasks (so it's not disabled for other reasons)
 		render(<BatchRunnerModal {...props} />);
 
 		// Clear the prompt textarea
@@ -1189,7 +1566,7 @@ describe('Agent Prompt Validation in UI', () => {
 		fireEvent.change(textarea, { target: { value: '' } });
 
 		await waitFor(() => {
-			const goButton = screen.getByRole('button', { name: /Go/ });
+			const goButton = screen.getByRole('button', { name: 'Go' });
 			expect(goButton).toBeDisabled();
 		});
 	});
@@ -1203,7 +1580,7 @@ describe('Agent Prompt Validation in UI', () => {
 		fireEvent.change(textarea, { target: { value: 'Just do some coding please.' } });
 
 		await waitFor(() => {
-			const goButton = screen.getByRole('button', { name: /Go/ });
+			const goButton = screen.getByRole('button', { name: 'Go' });
 			expect(goButton).toBeDisabled();
 		});
 	});
@@ -1242,7 +1619,7 @@ describe('Agent Prompt Validation in UI', () => {
 		});
 
 		// Default prompt should be valid — Go should be enabled
-		const goButton = screen.getByRole('button', { name: /Go/ });
+		const goButton = screen.getByRole('button', { name: 'Go' });
 		expect(goButton).not.toBeDisabled();
 	});
 });
@@ -1331,7 +1708,7 @@ describe('Loop Mode Additional Controls', () => {
 
 		// Wait for task counts to load (total shows combined count: 10 tasks from 2 docs)
 		await waitFor(() => expect(screen.getByText('10')).toBeInTheDocument());
-		fireEvent.click(screen.getByRole('button', { name: /Go/ }));
+		fireEvent.click(screen.getByRole('button', { name: 'Go' }));
 
 		expect(props.onGo).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -1356,7 +1733,7 @@ describe('Loop Mode Additional Controls', () => {
 
 		// Wait for task counts to load (total shows combined count: 10 tasks from 2 docs)
 		await waitFor(() => expect(screen.getByText('10')).toBeInTheDocument());
-		fireEvent.click(screen.getByRole('button', { name: /Go/ }));
+		fireEvent.click(screen.getByRole('button', { name: 'Go' }));
 
 		expect(props.onGo).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -1507,7 +1884,7 @@ describe('Playbook Update Functionality', () => {
 	it('handles update error gracefully', async () => {
 		const mockPlaybook = createMockPlaybook();
 		const mockPlaybooks: Playbook[] = [mockPlaybook];
-		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const consoleError = vi.spyOn(logger, 'error').mockImplementation(() => {});
 		const mockUpdate = vi.fn().mockRejectedValue(new Error('Network error'));
 		(window.maestro as Record<string, unknown>).playbooks = {
 			list: vi.fn().mockResolvedValue({ success: true, playbooks: mockPlaybooks }),
@@ -1532,7 +1909,11 @@ describe('Playbook Update Functionality', () => {
 		fireEvent.click(screen.getByText('Save Update'));
 
 		await waitFor(() => {
-			expect(consoleError).toHaveBeenCalledWith('Failed to update playbook:', expect.any(Error));
+			expect(consoleError).toHaveBeenCalledWith(
+				'Failed to update playbook:',
+				undefined,
+				expect.any(Error)
+			);
 		});
 
 		consoleError.mockRestore();
@@ -1627,7 +2008,7 @@ describe('Delete Playbook Edge Cases', () => {
 	it('handles delete error gracefully', async () => {
 		const mockPlaybook = createMockPlaybook();
 		const mockPlaybooks: Playbook[] = [mockPlaybook];
-		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const consoleError = vi.spyOn(logger, 'error').mockImplementation(() => {});
 		const mockDelete = vi.fn().mockRejectedValue(new Error('Delete failed'));
 		(window.maestro as Record<string, unknown>).playbooks = {
 			list: vi.fn().mockResolvedValue({ success: true, playbooks: mockPlaybooks }),
@@ -1648,7 +2029,11 @@ describe('Delete Playbook Edge Cases', () => {
 		fireEvent.click(screen.getByRole('button', { name: 'Confirm Delete' }));
 
 		await waitFor(() => {
-			expect(consoleError).toHaveBeenCalledWith('Failed to delete playbook:', expect.any(Error));
+			expect(consoleError).toHaveBeenCalledWith(
+				'Failed to delete playbook:',
+				undefined,
+				expect.any(Error)
+			);
 		});
 
 		consoleError.mockRestore();
@@ -1692,7 +2077,7 @@ describe('Export Playbook Edge Cases', () => {
 	it('handles export failure gracefully', async () => {
 		const mockPlaybook = createMockPlaybook();
 		const mockPlaybooks: Playbook[] = [mockPlaybook];
-		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const consoleError = vi.spyOn(logger, 'error').mockImplementation(() => {});
 		const mockExport = vi.fn().mockResolvedValue({ success: false, error: 'Export failed' });
 		(window.maestro as Record<string, unknown>).playbooks = {
 			list: vi.fn().mockResolvedValue({ success: true, playbooks: mockPlaybooks }),
@@ -1712,7 +2097,11 @@ describe('Export Playbook Edge Cases', () => {
 		fireEvent.click(exportButton);
 
 		await waitFor(() => {
-			expect(consoleError).toHaveBeenCalledWith('Failed to export playbook:', 'Export failed');
+			expect(consoleError).toHaveBeenCalledWith(
+				'Failed to export playbook:',
+				undefined,
+				'Export failed'
+			);
 		});
 
 		consoleError.mockRestore();
@@ -1721,7 +2110,7 @@ describe('Export Playbook Edge Cases', () => {
 	it('silently ignores export cancelled error', async () => {
 		const mockPlaybook = createMockPlaybook();
 		const mockPlaybooks: Playbook[] = [mockPlaybook];
-		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const consoleError = vi.spyOn(logger, 'error').mockImplementation(() => {});
 		const mockExport = vi.fn().mockResolvedValue({ success: false, error: 'Export cancelled' });
 		(window.maestro as Record<string, unknown>).playbooks = {
 			list: vi.fn().mockResolvedValue({ success: true, playbooks: mockPlaybooks }),
@@ -1753,7 +2142,7 @@ describe('Export Playbook Edge Cases', () => {
 	it('handles export exception gracefully', async () => {
 		const mockPlaybook = createMockPlaybook();
 		const mockPlaybooks: Playbook[] = [mockPlaybook];
-		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const consoleError = vi.spyOn(logger, 'error').mockImplementation(() => {});
 		const mockExport = vi.fn().mockRejectedValue(new Error('Network error'));
 		(window.maestro as Record<string, unknown>).playbooks = {
 			list: vi.fn().mockResolvedValue({ success: true, playbooks: mockPlaybooks }),
@@ -1773,7 +2162,11 @@ describe('Export Playbook Edge Cases', () => {
 		fireEvent.click(exportButton);
 
 		await waitFor(() => {
-			expect(consoleError).toHaveBeenCalledWith('Failed to export playbook:', expect.any(Error));
+			expect(consoleError).toHaveBeenCalledWith(
+				'Failed to export playbook:',
+				undefined,
+				expect.any(Error)
+			);
 		});
 
 		consoleError.mockRestore();
@@ -1784,7 +2177,7 @@ describe('Import Playbook Edge Cases', () => {
 	it('handles import failure gracefully', async () => {
 		const mockPlaybook = createMockPlaybook();
 		const mockPlaybooks: Playbook[] = [mockPlaybook];
-		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const consoleError = vi.spyOn(logger, 'error').mockImplementation(() => {});
 		const mockImport = vi.fn().mockResolvedValue({ success: false, error: 'Invalid format' });
 		(window.maestro as Record<string, unknown>).playbooks = {
 			list: vi.fn().mockResolvedValue({ success: true, playbooks: mockPlaybooks }),
@@ -1797,12 +2190,15 @@ describe('Import Playbook Edge Cases', () => {
 
 		render(<BatchRunnerModal {...createDefaultProps()} />);
 
-		await waitFor(() => screen.getByText('Load Playbook'));
-		fireEvent.click(screen.getByRole('button', { name: 'Load Playbook' }));
+		await waitFor(() => screen.getByRole('button', { name: 'Import Playbook' }));
 		fireEvent.click(screen.getByRole('button', { name: 'Import Playbook' }));
 
 		await waitFor(() => {
-			expect(consoleError).toHaveBeenCalledWith('Failed to import playbook:', 'Invalid format');
+			expect(consoleError).toHaveBeenCalledWith(
+				'Failed to import playbook:',
+				undefined,
+				'Invalid format'
+			);
 		});
 
 		consoleError.mockRestore();
@@ -1811,7 +2207,7 @@ describe('Import Playbook Edge Cases', () => {
 	it('silently ignores import cancelled error', async () => {
 		const mockPlaybook = createMockPlaybook();
 		const mockPlaybooks: Playbook[] = [mockPlaybook];
-		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const consoleError = vi.spyOn(logger, 'error').mockImplementation(() => {});
 		const mockImport = vi.fn().mockResolvedValue({ success: false, error: 'Import cancelled' });
 		(window.maestro as Record<string, unknown>).playbooks = {
 			list: vi.fn().mockResolvedValue({ success: true, playbooks: mockPlaybooks }),
@@ -1824,8 +2220,7 @@ describe('Import Playbook Edge Cases', () => {
 
 		render(<BatchRunnerModal {...createDefaultProps()} />);
 
-		await waitFor(() => screen.getByText('Load Playbook'));
-		fireEvent.click(screen.getByRole('button', { name: 'Load Playbook' }));
+		await waitFor(() => screen.getByRole('button', { name: 'Import Playbook' }));
 		fireEvent.click(screen.getByRole('button', { name: 'Import Playbook' }));
 
 		await waitFor(() => {
@@ -1841,7 +2236,7 @@ describe('Import Playbook Edge Cases', () => {
 	it('handles import exception gracefully', async () => {
 		const mockPlaybook = createMockPlaybook();
 		const mockPlaybooks: Playbook[] = [mockPlaybook];
-		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const consoleError = vi.spyOn(logger, 'error').mockImplementation(() => {});
 		const mockImport = vi.fn().mockRejectedValue(new Error('Network error'));
 		(window.maestro as Record<string, unknown>).playbooks = {
 			list: vi.fn().mockResolvedValue({ success: true, playbooks: mockPlaybooks }),
@@ -1854,12 +2249,15 @@ describe('Import Playbook Edge Cases', () => {
 
 		render(<BatchRunnerModal {...createDefaultProps()} />);
 
-		await waitFor(() => screen.getByText('Load Playbook'));
-		fireEvent.click(screen.getByRole('button', { name: 'Load Playbook' }));
+		await waitFor(() => screen.getByRole('button', { name: 'Import Playbook' }));
 		fireEvent.click(screen.getByRole('button', { name: 'Import Playbook' }));
 
 		await waitFor(() => {
-			expect(consoleError).toHaveBeenCalledWith('Failed to import playbook:', expect.any(Error));
+			expect(consoleError).toHaveBeenCalledWith(
+				'Failed to import playbook:',
+				undefined,
+				expect.any(Error)
+			);
 		});
 
 		consoleError.mockRestore();
@@ -1891,8 +2289,10 @@ describe('Click Outside Dropdown Handlers', () => {
 		fireEvent.mouseDown(document.body);
 
 		await waitFor(() => {
-			// Dropdown should be closed - only the "Load Playbook" button remains
-			expect(screen.queryByText('Import Playbook')).not.toBeInTheDocument();
+			// Dropdown should be closed — the playbook list item disappears.
+			// (Import Playbook is now a top-level button outside the
+			// dropdown, so it remains visible regardless of dropdown state.)
+			expect(screen.queryByText('Test Playbook')).not.toBeInTheDocument();
 		});
 	});
 
@@ -2130,7 +2530,7 @@ describe.skip('Worktree Validation Edge Cases', () => {
 	});
 
 	it('handles validation exception gracefully', async () => {
-		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const consoleError = vi.spyOn(logger, 'error').mockImplementation(() => {});
 		(window.maestro.git as Record<string, unknown>).isRepo = vi.fn().mockResolvedValue(true);
 		(window.maestro.git as Record<string, unknown>).branches = vi
 			.fn()
@@ -2164,6 +2564,7 @@ describe.skip('Worktree Validation Edge Cases', () => {
 			() => {
 				expect(consoleError).toHaveBeenCalledWith(
 					'Failed to validate worktree path:',
+					undefined,
 					expect.any(Error)
 				);
 			},
@@ -2337,7 +2738,7 @@ describe('Escape Handler Priority', () => {
 		});
 
 		// Main modal still open
-		expect(screen.getByText('Auto Run Configuration')).toBeInTheDocument();
+		expect(screen.getByText('Maestro Auto Run')).toBeInTheDocument();
 	});
 
 	it('closes save playbook modal on escape', async () => {
@@ -2364,5 +2765,381 @@ describe('Escape Handler Priority', () => {
 		await waitFor(() => {
 			expect(screen.queryByTestId('playbook-name-modal')).not.toBeInTheDocument();
 		});
+	});
+});
+
+describe('Worktree Loading State', () => {
+	afterEach(async () => {
+		const { useSessionStore } = await import('../../../renderer/stores/sessionStore');
+		useSessionStore.setState({ sessions: [], activeSessionId: '' });
+	});
+
+	it('shows Preparing Worktree text when onGo is async and worktree mode is active', async () => {
+		// Setup session store with a session that has worktreeConfig
+		const { useSessionStore } = await import('../../../renderer/stores/sessionStore');
+		const sessionWithWorktreeConfig = {
+			id: 'session-123',
+			name: 'Test Agent',
+			toolType: 'claude-code',
+			cwd: '/project',
+			fullPath: '/project',
+			projectRoot: '/project',
+			state: 'idle',
+			tabs: [],
+			aiTabs: [],
+			activeTabIndex: 0,
+			isGitRepo: true,
+			isLive: false,
+			changedFiles: [],
+			fileTree: [],
+			fileExplorerExpanded: [],
+			fileExplorerScrollPos: 0,
+			worktreeConfig: {
+				basePath: '/project/worktrees',
+				watchEnabled: false,
+			},
+		};
+
+		useSessionStore.setState({
+			sessions: [sessionWithWorktreeConfig as never],
+			activeSessionId: 'session-123',
+		});
+
+		// Mock scanWorktreeDirectory
+		(window.maestro.git as Record<string, unknown>).scanWorktreeDirectory = vi
+			.fn()
+			.mockResolvedValue({ gitSubdirs: [] });
+
+		// Create a slow async onGo that we can control
+		let resolveOnGo: () => void;
+		const onGoPromise = new Promise<void>((resolve) => {
+			resolveOnGo = resolve;
+		});
+		const props = createDefaultProps();
+		props.onGo = vi.fn().mockReturnValue(onGoPromise);
+
+		render(<BatchRunnerModal {...props} />);
+
+		// Wait for tasks to load
+		await waitFor(() => {
+			expect(screen.getByText('5')).toBeInTheDocument();
+		});
+
+		// Enable worktree toggle (should be visible since session has worktreeConfig)
+		const toggleButton = screen.getByText('Dispatch to a separate worktree');
+		fireEvent.click(toggleButton);
+
+		// The select should now be visible with "Create New Worktree" as default
+		await waitFor(() => {
+			expect(screen.getByText('Create New Worktree')).toBeInTheDocument();
+		});
+
+		// Click Go — should show "Preparing Worktree..." since mode is create-new
+		const goButton = screen.getByRole('button', { name: 'Go' });
+		await act(async () => {
+			fireEvent.click(goButton);
+		});
+
+		// The button should now show "Preparing Worktree..." text
+		await waitFor(() => {
+			expect(screen.getByText('Preparing Worktree...')).toBeInTheDocument();
+		});
+
+		// The button should be disabled during preparation
+		const preparingButton = screen.getByRole('button', { name: /Preparing Worktree/ });
+		expect(preparingButton).toBeDisabled();
+
+		// Resolve the promise to complete the async operation
+		await act(async () => {
+			resolveOnGo!();
+		});
+
+		// onGo should have been called
+		expect(props.onGo).toHaveBeenCalled();
+	});
+
+	it('does not show loading state for non-worktree Go clicks', async () => {
+		const props = createDefaultProps();
+		props.onGo = vi.fn();
+
+		render(<BatchRunnerModal {...props} />);
+
+		await waitFor(() => {
+			expect(screen.getByText('5')).toBeInTheDocument();
+		});
+
+		// Click Go without worktree enabled — should call onGo and onClose immediately
+		fireEvent.click(screen.getByRole('button', { name: 'Go' }));
+
+		expect(props.onGo).toHaveBeenCalled();
+		expect(props.onClose).toHaveBeenCalled();
+
+		// Should NOT show "Preparing Worktree..." text
+		expect(screen.queryByText('Preparing Worktree...')).not.toBeInTheDocument();
+	});
+});
+
+describe('Auto Run Fresh-Context Mode Auto-Selection', () => {
+	afterEach(async () => {
+		const { useSessionStore } = await import('../../../renderer/stores/sessionStore');
+		useSessionStore.setState({ sessions: [], activeSessionId: '' });
+	});
+
+	// Build a session whose context window is forced via customContextWindow.
+	// customContextWindow short-circuits resolveEffectiveContextWindow, so the
+	// auto-mode picker resolves deterministically without depending on the
+	// agents.getConfig IPC mock.
+	async function setupSessionWithContextWindow(customContextWindow: number) {
+		const { useSessionStore } = await import('../../../renderer/stores/sessionStore');
+		const session = {
+			id: 'session-123',
+			name: 'Test Agent',
+			toolType: 'claude-code',
+			cwd: '/project',
+			fullPath: '/project',
+			projectRoot: '/project',
+			state: 'idle',
+			tabs: [],
+			aiTabs: [],
+			activeTabIndex: 0,
+			isGitRepo: true,
+			isLive: false,
+			changedFiles: [],
+			fileTree: [],
+			fileExplorerExpanded: [],
+			fileExplorerScrollPos: 0,
+			customContextWindow,
+		};
+		useSessionStore.setState({
+			sessions: [session as never],
+			activeSessionId: 'session-123',
+		});
+	}
+
+	it('defaults to Document mode for very large context windows (>= 1M tokens)', async () => {
+		await setupSessionWithContextWindow(1_000_000);
+
+		render(<BatchRunnerModal {...createDefaultProps()} />);
+
+		// Wait for documents/tasks to load so the fresh-context selector renders.
+		await waitFor(() => {
+			expect(screen.getByText('5')).toBeInTheDocument();
+		});
+
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: 'Document' })).toHaveClass('ring-2');
+		});
+		expect(screen.getByRole('button', { name: 'Task' })).not.toHaveClass('ring-2');
+	});
+
+	it('defaults to Task mode for smaller context windows (< 1M tokens)', async () => {
+		await setupSessionWithContextWindow(200_000);
+
+		// Use a task count >= 20 so the task-count-based recommendation
+		// agrees with the small-context-window default of Task. (Below 20
+		// tasks/doc the recommendation flips to Document — covered separately.)
+		const props = createDefaultProps();
+		props.getDocumentTaskCount = vi.fn().mockResolvedValue(25);
+
+		render(<BatchRunnerModal {...props} />);
+
+		await waitFor(() => {
+			expect(screen.getByText('25')).toBeInTheDocument();
+		});
+
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: 'Task' })).toHaveClass('ring-2');
+		});
+		expect(screen.getByRole('button', { name: 'Document' })).not.toHaveClass('ring-2');
+	});
+
+	it('auto-applies Document mode when avg tasks/doc is below the recommendation threshold', async () => {
+		// 200K window → tasks/doc threshold = 5. 3 tasks/doc is below it.
+		// Small window would normally lean Task; task-count flips to Document.
+		await setupSessionWithContextWindow(200_000);
+
+		const props = createDefaultProps();
+		props.getDocumentTaskCount = vi.fn().mockResolvedValue(3);
+
+		render(<BatchRunnerModal {...props} />);
+
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: 'Document' })).toHaveClass('ring-2');
+		});
+		expect(screen.getByRole('button', { name: 'Task' })).not.toHaveClass('ring-2');
+	});
+
+	it('auto-applies Task mode when avg tasks/doc meets the recommendation threshold', async () => {
+		// 1M window → tasks/doc threshold = 20. 25 tasks/doc is at/above it.
+		// Large window would normally lean Document; task-count flips to Task.
+		await setupSessionWithContextWindow(1_000_000);
+
+		const props = createDefaultProps();
+		props.getDocumentTaskCount = vi.fn().mockResolvedValue(25);
+
+		render(<BatchRunnerModal {...props} />);
+
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: 'Task' })).toHaveClass('ring-2');
+		});
+		expect(screen.getByRole('button', { name: 'Document' })).not.toHaveClass('ring-2');
+	});
+
+	it('scales the tasks/doc threshold with the context window', async () => {
+		// 10 tasks/doc straddles the threshold:
+		//   - At 200K (threshold 5) → 10 ≥ 5 → Task
+		//   - At 1M   (threshold 20) → 10 < 20 → Document
+		// Verifies the threshold actually scales rather than being fixed.
+		await setupSessionWithContextWindow(1_000_000);
+
+		const props = createDefaultProps();
+		props.getDocumentTaskCount = vi.fn().mockResolvedValue(10);
+
+		render(<BatchRunnerModal {...props} />);
+
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: 'Document' })).toHaveClass('ring-2');
+		});
+	});
+
+	it('shows a recommendation warning when the user manually picks the non-recommended mode', async () => {
+		await setupSessionWithContextWindow(200_000);
+
+		const props = createDefaultProps();
+		props.getDocumentTaskCount = vi.fn().mockResolvedValue(3);
+
+		render(<BatchRunnerModal {...props} />);
+
+		// Wait for the auto-applied Document recommendation to settle.
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: 'Document' })).toHaveClass('ring-2');
+		});
+
+		// User overrides to Task — recommendation now disagrees, warning shows.
+		fireEvent.click(screen.getByRole('button', { name: 'Task' }));
+
+		await waitFor(() => {
+			expect(screen.getByText(/Heads up/)).toBeInTheDocument();
+		});
+		expect(screen.getByText(/better fit/)).toBeInTheDocument();
+	});
+
+	it('hides the recommendation warning when the user agrees with the recommendation', async () => {
+		await setupSessionWithContextWindow(200_000);
+
+		const props = createDefaultProps();
+		props.getDocumentTaskCount = vi.fn().mockResolvedValue(3);
+
+		render(<BatchRunnerModal {...props} />);
+
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: 'Document' })).toHaveClass('ring-2');
+		});
+
+		// Clicking the already-selected recommended option flips the override
+		// flag but the mode still matches the recommendation, so no warning.
+		fireEvent.click(screen.getByRole('button', { name: 'Document' }));
+
+		expect(screen.queryByText(/Heads up/)).not.toBeInTheDocument();
+	});
+
+	it('hides the Fresh context per section until documents are selected', async () => {
+		await setupSessionWithContextWindow(1_000_000);
+
+		// No preset documents → the run list starts empty.
+		const props = createDefaultProps();
+		props.presetDocuments = [];
+
+		render(<BatchRunnerModal {...props} />);
+
+		expect(screen.queryByText('Fresh context per:')).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Task' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Document' })).not.toBeInTheDocument();
+	});
+
+	it('explains the chosen mode with the average task count and context window', async () => {
+		await setupSessionWithContextWindow(1_000_000);
+
+		const props = createDefaultProps();
+		props.getDocumentTaskCount = vi.fn().mockResolvedValue(5);
+
+		render(<BatchRunnerModal {...props} />);
+
+		// 5 tasks/doc is under the 1M threshold (20), so Document is chosen and
+		// the explanation cites both the task average and the window size.
+		await waitFor(() => {
+			expect(screen.getByText(/average 5 tasks each/)).toBeInTheDocument();
+		});
+		const explanation = screen.getByText(/average 5 tasks each/);
+		expect(explanation).toHaveTextContent(/1M/);
+		expect(explanation).toHaveTextContent(/Defaulted to Document/);
+	});
+
+	it('detects the 1M window from a [1m] model before any usage is reported', async () => {
+		// No customContextWindow and no usage stats: the only 1M signal is the
+		// selected `[1m]` model. Resolving it correctly keeps the explanation from
+		// mis-citing the 200K default (the reported inaccuracy).
+		const { useSessionStore } = await import('../../../renderer/stores/sessionStore');
+		const session = {
+			id: 'session-123',
+			name: 'Test Agent',
+			toolType: 'claude-code',
+			cwd: '/project',
+			fullPath: '/project',
+			projectRoot: '/project',
+			state: 'idle',
+			tabs: [],
+			aiTabs: [],
+			activeTabIndex: 0,
+			isGitRepo: true,
+			isLive: false,
+			changedFiles: [],
+			fileTree: [],
+			fileExplorerExpanded: [],
+			fileExplorerScrollPos: 0,
+			customModel: 'opus[1m]',
+		};
+		useSessionStore.setState({ sessions: [session as never], activeSessionId: 'session-123' });
+
+		const props = createDefaultProps();
+		props.getDocumentTaskCount = vi.fn().mockResolvedValue(5);
+
+		render(<BatchRunnerModal {...props} />);
+
+		await waitFor(() => {
+			expect(screen.getByText(/average 5 tasks each/)).toBeInTheDocument();
+		});
+		const explanation = screen.getByText(/average 5 tasks each/);
+		expect(explanation).toHaveTextContent(/1M/);
+		expect(explanation).not.toHaveTextContent(/200K/);
+		// 5 tasks/doc is under the 1M threshold (20) → Document.
+		expect(screen.getByRole('button', { name: 'Document' })).toHaveClass('ring-2');
+	});
+
+	it('shows the reworded per-mode hint labels', async () => {
+		await setupSessionWithContextWindow(1_000_000);
+
+		const props = createDefaultProps();
+		props.getDocumentTaskCount = vi.fn().mockResolvedValue(5);
+
+		render(<BatchRunnerModal {...props} />);
+
+		// Auto-selected Document → document hint label.
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: 'Document' })).toHaveClass('ring-2');
+		});
+		expect(
+			screen.getByText(
+				'A new agent session is spawned for each document, processing all tasks together.'
+			)
+		).toBeInTheDocument();
+
+		// Switching to Task swaps in the task hint label.
+		fireEvent.click(screen.getByRole('button', { name: 'Task' }));
+		expect(
+			screen.getByText(
+				'A new agent session is spawned for each unchecked task, clean context per work in the document.'
+			)
+		).toBeInTheDocument();
 	});
 });

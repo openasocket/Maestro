@@ -1,3 +1,9 @@
+---
+title: Local Manifest
+description: Extend the Playbook Exchange with custom or work-in-progress playbooks stored locally.
+icon: folder-open
+---
+
 # Local Manifest for Custom Playbooks
 
 The local manifest feature allows you to extend the Playbook Exchange with custom or work-in-progress playbooks that are stored locally instead of in the public GitHub repository.
@@ -12,14 +18,18 @@ The local manifest feature allows you to extend the Playbook Exchange with custo
 ## Use Cases
 
 ### 1. Bespoke Playbooks
+
 Create organization-specific playbooks that aren't suitable for public sharing:
+
 - Internal tools and workflows
 - Proprietary processes
 - Environment-specific automation
 - Company-specific security policies
 
 ### 2. Playbook Development
-Iterate on new playbooks locally before submitting them to the [Maestro-Playbooks repository](https://github.com/pedramamini/Maestro-Playbooks):
+
+Iterate on new playbooks locally before submitting them to the [Maestro-Playbooks repository](https://github.com/RunMaestro/Maestro-Playbooks):
+
 - Test playbook structure and documents
 - Refine prompts and loop behavior
 - Validate asset bundling
@@ -36,6 +46,7 @@ When both official and local manifests exist, they are merged by `id`:
 3. **Source Tagging:** All playbooks are tagged with `source: 'official' | 'local'` for UI distinction
 
 **Example:**
+
 ```
 Official playbooks: [A, B, C]
 Local playbooks:    [B_custom, D]
@@ -103,26 +114,26 @@ On macOS: `~/Library/Application Support/Maestro/local-manifest.json`
 
 ```json
 {
-  "lastUpdated": "2026-01-17",
-  "playbooks": [
-    {
-      "id": "security-audit-internal",
-      "title": "Internal Security Audit",
-      "description": "Custom security audit for our infrastructure",
-      "category": "Security",
-      "author": "Security Team",
-      "lastUpdated": "2026-01-17",
-      "path": "~/my-playbooks/security-audit",
-      "documents": [
-        { "filename": "1_SCAN", "resetOnCompletion": false },
-        { "filename": "2_ANALYZE", "resetOnCompletion": true },
-        { "filename": "3_REPORT", "resetOnCompletion": false }
-      ],
-      "loopEnabled": false,
-      "prompt": null,
-      "assets": ["config.yaml", "rules.json"]
-    }
-  ]
+	"lastUpdated": "2026-01-17",
+	"playbooks": [
+		{
+			"id": "security-audit-internal",
+			"title": "Internal Security Audit",
+			"description": "Custom security audit for our infrastructure",
+			"category": "Security",
+			"author": "Security Team",
+			"lastUpdated": "2026-01-17",
+			"path": "~/my-playbooks/security-audit",
+			"documents": [
+				{ "filename": "1_SCAN", "resetOnCompletion": false },
+				{ "filename": "2_ANALYZE", "resetOnCompletion": true },
+				{ "filename": "3_REPORT", "resetOnCompletion": false }
+			],
+			"loopEnabled": false,
+			"prompt": null,
+			"assets": ["config.yaml", "rules.json"]
+		}
+	]
 }
 ```
 
@@ -148,21 +159,25 @@ This enables rapid iteration during playbook development.
 ## Error Handling
 
 ### Invalid JSON
+
 **Behavior:** Warning logged, empty array used, Maestro continues with official playbooks only
 
 **Fix:** Validate JSON syntax using a JSON validator
 
 ### Missing Required Fields
+
 **Behavior:** Invalid entries are skipped with warnings, valid entries are loaded
 
 **Fix:** Ensure all playbooks have `id`, `title`, `path`, and `documents`
 
 ### Local Path Doesn't Exist
+
 **Behavior:** Clear error message during import, playbook listing works normally
 
 **Fix:** Verify the `path` field points to an existing directory
 
 ### File Watch Errors
+
 **Behavior:** Warning logged, hot reload disabled, normal operation continues
 
 **Effect:** You'll need to restart Maestro to see manifest changes
@@ -186,7 +201,7 @@ Local playbooks are visually distinguished in the Playbook Exchange with a blue 
 2. Add to `local-manifest.json`
 3. Test import and execution in Maestro
 4. Refine documents and prompts
-5. When ready, submit a PR to [Maestro-Playbooks](https://github.com/pedramamini/Maestro-Playbooks)
+5. When ready, submit a PR to [Maestro-Playbooks](https://github.com/RunMaestro/Maestro-Playbooks)
 6. Remove from local manifest once published
 
 ### Overriding Official Playbooks
@@ -203,6 +218,7 @@ Use the same `id` as the official playbook to test modifications:
 ```
 
 This allows you to:
+
 - Add custom documents
 - Modify prompts
 - Change loop behavior

@@ -11,16 +11,32 @@ export const DEFAULT_SHORTCUTS: Record<string, Shortcut> = {
 		label: 'Toggle Right Panel',
 		keys: ['Alt', 'Meta', 'ArrowRight'],
 	},
-	cyclePrev: { id: 'cyclePrev', label: 'Previous Agent', keys: ['Meta', '['] },
-	cycleNext: { id: 'cycleNext', label: 'Next Agent', keys: ['Meta', ']'] },
+	cyclePrev: { id: 'cyclePrev', label: 'Previous Agent', keys: ['Meta', '['], windowScoped: true },
+	cycleNext: { id: 'cycleNext', label: 'Next Agent', keys: ['Meta', ']'], windowScoped: true },
 	navBack: { id: 'navBack', label: 'Navigate Back', keys: ['Meta', 'Shift', ','] },
 	navForward: { id: 'navForward', label: 'Navigate Forward', keys: ['Meta', 'Shift', '.'] },
 	newInstance: { id: 'newInstance', label: 'New Agent', keys: ['Meta', 'n'] },
 	newGroupChat: { id: 'newGroupChat', label: 'New Group Chat', keys: ['Alt', 'Meta', 'c'] },
 	killInstance: { id: 'killInstance', label: 'Remove', keys: ['Meta', 'Shift', 'Backspace'] },
-	moveToGroup: { id: 'moveToGroup', label: 'Move Session to Group', keys: ['Meta', 'Shift', 'm'] },
+	moveToGroup: { id: 'moveToGroup', label: 'Move Session to Group', keys: ['Alt', 'Meta', 'm'] },
+	openMemoryViewer: {
+		id: 'openMemoryViewer',
+		label: 'Open Memory Viewer',
+		keys: ['Meta', 'Shift', 'm'],
+	},
 	toggleMode: { id: 'toggleMode', label: 'Switch AI/Shell Mode', keys: ['Meta', 'j'] },
-	quickAction: { id: 'quickAction', label: 'Quick Actions', keys: ['Meta', 'k'] },
+	quickAction: {
+		id: 'quickAction',
+		label: 'Quick Actions',
+		keys: ['Meta', 'k'],
+		windowScoped: true,
+	},
+	agentSwitcher: {
+		id: 'agentSwitcher',
+		label: 'Switch Agent',
+		keys: ['Meta', 'o'],
+		windowScoped: true,
+	},
 	help: { id: 'help', label: 'Show Shortcuts', keys: ['Meta', '/'] },
 	settings: { id: 'settings', label: 'Open Settings', keys: ['Meta', ','] },
 	agentSettings: { id: 'agentSettings', label: 'Open Agent Settings', keys: ['Alt', 'Meta', ','] },
@@ -28,6 +44,11 @@ export const DEFAULT_SHORTCUTS: Record<string, Shortcut> = {
 	goToHistory: { id: 'goToHistory', label: 'Go to History Tab', keys: ['Meta', 'Shift', 'h'] },
 	goToAutoRun: { id: 'goToAutoRun', label: 'Go to Auto Run Tab', keys: ['Meta', 'Shift', '1'] },
 	copyFilePath: { id: 'copyFilePath', label: 'Copy File Path (in Preview)', keys: ['Meta', 'p'] },
+	toggleFilePreviewToc: {
+		id: 'toggleFilePreviewToc',
+		label: 'Toggle Table of Contents (Markdown Preview)',
+		keys: ['Meta', '\\'],
+	},
 	toggleMarkdownMode: {
 		id: 'toggleMarkdownMode',
 		label: 'Toggle Edit/Preview',
@@ -35,8 +56,13 @@ export const DEFAULT_SHORTCUTS: Record<string, Shortcut> = {
 	},
 	toggleAutoRunExpanded: {
 		id: 'toggleAutoRunExpanded',
-		label: 'Toggle Auto Run Expanded',
+		label: 'Auto Run Expanded Preview',
 		keys: ['Meta', 'Shift', 'e'],
+	},
+	openBatchRunner: {
+		id: 'openBatchRunner',
+		label: 'Run Auto Run',
+		keys: ['Meta', 'Shift', '2'],
 	},
 	focusInput: { id: 'focusInput', label: 'Toggle Input/Output Focus', keys: ['Meta', '.'] },
 	focusSidebar: { id: 'focusSidebar', label: 'Focus Left Panel', keys: ['Meta', 'Shift', 'a'] },
@@ -54,7 +80,12 @@ export const DEFAULT_SHORTCUTS: Record<string, Shortcut> = {
 		keys: ['Alt', 'Meta', 'p'],
 	},
 	usageDashboard: { id: 'usageDashboard', label: 'Usage Dashboard', keys: ['Alt', 'Meta', 'u'] },
-	jumpToBottom: { id: 'jumpToBottom', label: 'Jump to Bottom', keys: ['Meta', 'Shift', 'j'] },
+	executionQueue: {
+		id: 'executionQueue',
+		label: 'View Execution Queue',
+		keys: ['Meta', 'Shift', 'x'],
+	},
+	jumpToBottom: { id: 'jumpToBottom', label: 'Jump to Bottom', keys: ['Alt', 'j'] },
 	prevTab: { id: 'prevTab', label: 'Previous Tab', keys: ['Meta', 'Shift', '['] },
 	nextTab: { id: 'nextTab', label: 'Next Tab', keys: ['Meta', 'Shift', ']'] },
 	openImageCarousel: { id: 'openImageCarousel', label: 'Open Image Carousel', keys: ['Meta', 'y'] },
@@ -68,6 +99,133 @@ export const DEFAULT_SHORTCUTS: Record<string, Shortcut> = {
 	fuzzyFileSearch: { id: 'fuzzyFileSearch', label: 'Fuzzy File Search', keys: ['Meta', 'g'] },
 	toggleBookmark: { id: 'toggleBookmark', label: 'Toggle Bookmark', keys: ['Meta', 'Shift', 'b'] },
 	openSymphony: { id: 'openSymphony', label: 'Maestro Symphony', keys: ['Meta', 'Shift', 'y'] },
+	directorNotes: {
+		id: 'directorNotes',
+		label: "Director's Notes",
+		keys: ['Meta', 'Shift', 'o'],
+	},
+	openCue: {
+		id: 'openCue',
+		label: 'Maestro Cue',
+		keys: ['Alt', 'q'],
+	},
+	filterUnreadAgents: {
+		id: 'filterUnreadAgents',
+		label: 'Filter Unread Agents',
+		keys: ['Alt', 'u'],
+	},
+	nextUnreadTab: {
+		id: 'nextUnreadTab',
+		label: 'Next Unread / Draft Tab',
+		keys: ['Alt', 'Meta', 'ArrowDown'],
+	},
+	jumpToTerminal: {
+		id: 'jumpToTerminal',
+		label: 'Jump to Nearest Terminal',
+		keys: ['Alt', 'Meta', 'j'],
+	},
+	fontSizeReset: {
+		id: 'fontSizeReset',
+		label: 'Reset Font Size',
+		keys: ['Meta', 'Shift', '0'],
+	},
+	forcedParallelSend: {
+		id: 'forcedParallelSend',
+		label: 'Forced Parallel Send',
+		keys: ['Meta', 'Shift', 'Enter'],
+	},
+	clearTerminal: {
+		id: 'clearTerminal',
+		label: 'Clear Terminal',
+		keys: ['Meta', 'Shift', 'k'],
+	},
+	focusActiveTab: {
+		id: 'focusActiveTab',
+		label: 'Focus Active Tab',
+		keys: ['Alt', 'Meta', 'f'],
+	},
+	editClipboardImage: {
+		id: 'editClipboardImage',
+		label: 'Edit Image from Clipboard',
+		keys: ['Alt', 'Meta', 'e'],
+	},
+
+	// Tab tiling (split panes) - the whole family lives on Ctrl+Cmd, the one
+	// modifier combo unused by every other shortcut (Alt+Cmd+Arrow* is already the
+	// sidebar/panel toggles). All are window-scoped: they act only on the active
+	// window's active tab group. Matched by isPaneShortcut (which requires BOTH
+	// Ctrl and Cmd), not the general isShortcut, so they never collide with the
+	// plain-Cmd equivalents (Cmd+W close tab, Cmd+= font size, etc.).
+	paneFocusLeft: {
+		id: 'paneFocusLeft',
+		label: 'Focus Pane Left',
+		keys: ['Control', 'Meta', 'ArrowLeft'],
+		windowScoped: true,
+	},
+	paneFocusRight: {
+		id: 'paneFocusRight',
+		label: 'Focus Pane Right',
+		keys: ['Control', 'Meta', 'ArrowRight'],
+		windowScoped: true,
+	},
+	paneFocusUp: {
+		id: 'paneFocusUp',
+		label: 'Focus Pane Up',
+		keys: ['Control', 'Meta', 'ArrowUp'],
+		windowScoped: true,
+	},
+	paneFocusDown: {
+		id: 'paneFocusDown',
+		label: 'Focus Pane Down',
+		keys: ['Control', 'Meta', 'ArrowDown'],
+		windowScoped: true,
+	},
+	paneSplitRow: {
+		id: 'paneSplitRow',
+		label: 'Split Pane (Side by Side)',
+		keys: ['Control', 'Meta', 'd'],
+		windowScoped: true,
+	},
+	paneSplitColumn: {
+		id: 'paneSplitColumn',
+		label: 'Split Pane (Stacked)',
+		keys: ['Control', 'Meta', 'Shift', 'd'],
+		windowScoped: true,
+	},
+	paneClose: {
+		id: 'paneClose',
+		label: 'Close Focused Pane',
+		keys: ['Control', 'Meta', 'w'],
+		windowScoped: true,
+	},
+	paneZoom: {
+		id: 'paneZoom',
+		label: 'Maximize / Restore Pane',
+		keys: ['Control', 'Meta', 'z'],
+		windowScoped: true,
+	},
+	paneRebalance: {
+		id: 'paneRebalance',
+		label: 'Rebalance Panes',
+		keys: ['Control', 'Meta', '='],
+		windowScoped: true,
+	},
+	// Cycle focus through the active group's panes in document order (prev/next with
+	// wrap). Unlike the rest of the family these live on Alt+[ / Alt+] (matched by the
+	// general isShortcut via its Alt+bracket e.code fallback, not isPaneShortcut) to
+	// mirror the plain Cmd+[ / Cmd+] "cycle agent" and Cmd+Shift+[ / ] "cycle tab" pair.
+	paneCyclePrev: {
+		id: 'paneCyclePrev',
+		label: 'Focus Previous Pane',
+		keys: ['Alt', '['],
+		windowScoped: true,
+	},
+	paneCycleNext: {
+		id: 'paneCycleNext',
+		label: 'Focus Next Pane',
+		keys: ['Alt', ']'],
+		windowScoped: true,
+	},
 };
 
 // Non-editable shortcuts (displayed in help but not configurable)
@@ -94,6 +252,11 @@ export const FIXED_SHORTCUTS: Record<string, Shortcut> = {
 		label: 'Search Output (in Main Window)',
 		keys: ['Meta', 'f'],
 	},
+	searchDirectorNotes: {
+		id: 'searchDirectorNotes',
+		label: "Search Director's Notes",
+		keys: ['Meta', 'f'],
+	},
 	filePreviewBack: {
 		id: 'filePreviewBack',
 		label: 'File Preview: Go Back',
@@ -104,12 +267,29 @@ export const FIXED_SHORTCUTS: Record<string, Shortcut> = {
 		label: 'File Preview: Go Forward',
 		keys: ['Meta', 'ArrowRight'],
 	},
+	fontSizeIncrease: {
+		id: 'fontSizeIncrease',
+		label: 'Increase Font Size',
+		keys: ['Meta', '='],
+	},
+	fontSizeDecrease: {
+		id: 'fontSizeDecrease',
+		label: 'Decrease Font Size',
+		keys: ['Meta', '-'],
+	},
 };
 
 // Tab navigation shortcuts (AI mode only)
 export const TAB_SHORTCUTS: Record<string, Shortcut> = {
 	tabSwitcher: { id: 'tabSwitcher', label: 'Tab Switcher', keys: ['Alt', 'Meta', 't'] },
 	newTab: { id: 'newTab', label: 'New Tab', keys: ['Meta', 't'] },
+	newBrowserTab: { id: 'newBrowserTab', label: 'New Browser', keys: ['Meta', 'b'] },
+	newFileTab: { id: 'newFileTab', label: 'New File', keys: ['Alt', 'n'] },
+	focusBrowserAddress: {
+		id: 'focusBrowserAddress',
+		label: 'Focus Browser Address Bar',
+		keys: ['Meta', 'l'],
+	},
 	closeTab: { id: 'closeTab', label: 'Close Tab', keys: ['Meta', 'w'] },
 	closeAllTabs: { id: 'closeAllTabs', label: 'Close All Tabs', keys: ['Meta', 'Shift', 'w'] },
 	closeOtherTabs: { id: 'closeOtherTabs', label: 'Close Other Tabs', keys: ['Alt', 'Meta', 'w'] },
@@ -129,6 +309,16 @@ export const TAB_SHORTCUTS: Record<string, Shortcut> = {
 		keys: ['Meta', 'Shift', 't'],
 	},
 	renameTab: { id: 'renameTab', label: 'Rename Tab', keys: ['Meta', 'Shift', 'r'] },
+	moveTabToStart: {
+		id: 'moveTabToStart',
+		label: 'Move Tab to First',
+		keys: ['Meta', 'Alt', '['],
+	},
+	moveTabToEnd: {
+		id: 'moveTabToEnd',
+		label: 'Move Tab to Last',
+		keys: ['Meta', 'Alt', ']'],
+	},
 	toggleReadOnlyMode: {
 		id: 'toggleReadOnlyMode',
 		label: 'Toggle Read-Only Mode',

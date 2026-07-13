@@ -51,7 +51,7 @@ vi.mock('../../../../main/utils/logger', () => ({
 }));
 
 vi.mock('../../../../main/parsers', () => ({
-	getOutputParser: vi.fn(() => ({
+	createOutputParser: vi.fn(() => ({
 		agentId: 'claude-code',
 		parseJsonLine: vi.fn(),
 		extractUsage: vi.fn(),
@@ -70,10 +70,15 @@ vi.mock('../../../../main/agents', () => ({
 
 vi.mock('../../../../main/process-manager/utils/envBuilder', () => ({
 	buildChildProcessEnv: vi.fn(() => ({ PATH: '/usr/bin' })),
+	collectMaestroEnvVars: vi.fn(() => ({})),
 }));
 
 vi.mock('../../../../main/process-manager/utils/imageUtils', () => ({
 	saveImageToTempFile: vi.fn(),
+	buildImagePromptPrefix: vi.fn((paths: string[]) => {
+		if (paths.length === 0) return '';
+		return `[Attached images: ${paths.join(', ')}]\n\n`;
+	}),
 }));
 
 vi.mock('../../../../main/process-manager/utils/streamJsonBuilder', () => ({
@@ -85,13 +90,23 @@ vi.mock('../../../../main/process-manager/utils/shellEscape', () => ({
 	isPowerShellShell: vi.fn(() => false),
 }));
 
+// Default to non-Windows; individual tests opt into Windows via mockReturnValue(true).
+vi.mock('../../../../shared/platformDetection', () => ({
+	isWindows: vi.fn(() => false),
+	isMacOS: vi.fn(() => false),
+	isLinux: vi.fn(() => false),
+}));
+
 // ── Imports (after mocks) ──────────────────────────────────────────────────
 
 import { ChildProcessSpawner } from '../../../../main/process-manager/spawners/ChildProcessSpawner';
 import type { ManagedProcess, ProcessConfig } from '../../../../main/process-manager/types';
 import { getAgentCapabilities } from '../../../../main/agents';
+import { buildChildProcessEnv } from '../../../../main/process-manager/utils/envBuilder';
 import { buildStreamJsonMessage } from '../../../../main/process-manager/utils/streamJsonBuilder';
 import { saveImageToTempFile } from '../../../../main/process-manager/utils/imageUtils';
+import { createOutputParser } from '../../../../main/parsers';
+import { isWindows } from '../../../../shared/platformDetection';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -171,6 +186,38 @@ describe('ChildProcessSpawner', () => {
 			expect(proc?.isStreamJsonMode).toBe(true);
 		});
 
+		it('should enable stream-json mode when args contain "--output-format" and "json"', () => {
+			const { processes, spawner } = createTestContext();
+
+			spawner.spawn(
+				createBaseConfig({
+					toolType: 'copilot-cli',
+					command: 'copilot',
+					args: ['--output-format', 'json'],
+					prompt: 'test prompt',
+				})
+			);
+
+			const proc = processes.get('test-session');
+			expect(proc?.isStreamJsonMode).toBe(true);
+			expect(proc?.isBatchMode).toBe(true);
+		});
+
+		it('treats --resume=<id> as a resumed session when building env', () => {
+			const { spawner } = createTestContext();
+
+			spawner.spawn(
+				createBaseConfig({
+					toolType: 'copilot-cli',
+					command: 'copilot',
+					args: ['--output-format', 'json', '--resume=session-123'],
+					prompt: 'continue',
+				})
+			);
+
+			expect(buildChildProcessEnv).toHaveBeenCalledWith(undefined, true, undefined, undefined);
+		});
+
 		it('should enable stream-json mode when sendPromptViaStdin is true', () => {
 			const { processes, spawner } = createTestContext();
 
@@ -186,14 +233,19 @@ describe('ChildProcessSpawner', () => {
 			expect(proc?.isStreamJsonMode).toBe(true);
 		});
 
-		it('should NOT enable stream-json mode when sendPromptViaStdinRaw is true', () => {
+		it('should NOT enable stream-json mode when sendPromptViaStdinRaw is true (no parser)', () => {
 			const { processes, spawner } = createTestContext();
 
 			// sendPromptViaStdinRaw sends RAW text via stdin, not JSON
-			// So it should NOT set isStreamJsonMode (which is for JSON streaming)
+			// So it should NOT set isStreamJsonMode (which is for JSON streaming).
+			// Override the parser mock to simulate an agent without a parser.
+			vi.mocked(createOutputParser).mockReturnValueOnce(null);
+
 			spawner.spawn(
 				createBaseConfig({
-					args: ['--print'],
+					toolType: 'terminal',
+					command: 'bash',
+					args: [],
 					sendPromptViaStdinRaw: true,
 					prompt: 'test prompt',
 				})
@@ -219,12 +271,18 @@ describe('ChildProcessSpawner', () => {
 			expect(proc?.isStreamJsonMode).toBe(true);
 		});
 
-		it('should NOT enable stream-json mode for plain args without JSON flags', () => {
+		it('should NOT enable stream-json mode for plain args without JSON flags (no parser)', () => {
 			const { processes, spawner } = createTestContext();
+
+			// An agent with a parser (e.g. claude-code) now enables stream-json mode
+			// by parser presence alone. Override the mock to simulate no parser.
+			vi.mocked(createOutputParser).mockReturnValueOnce(null);
 
 			spawner.spawn(
 				createBaseConfig({
-					args: ['--print', '--verbose'],
+					toolType: 'terminal',
+					command: 'bash',
+					args: ['-l'],
 				})
 			);
 
@@ -481,6 +539,65 @@ describe('ChildProcessSpawner', () => {
 		});
 	});
 
+	describe('stdin write guard for non-stream-json-input agents', () => {
+		it('should NOT write stream-json to stdin when prompt is already in CLI args (Codex --json)', () => {
+			// Codex uses --json for JSON *output*, not input. The prompt goes as a CLI arg.
+			// Without the promptViaStdin guard, isStreamJsonMode (true from --json) would
+			// cause the prompt to be double-sent: once in CLI args and once via stdin.
+			vi.mocked(getAgentCapabilities).mockReturnValueOnce({
+				supportsStreamJsonInput: false,
+			} as any);
+
+			const { spawner } = createTestContext();
+
+			spawner.spawn(
+				createBaseConfig({
+					toolType: 'codex',
+					command: 'codex',
+					args: ['exec', '--json', '--dangerously-bypass-approvals-and-sandbox'],
+					prompt: 'test prompt',
+				})
+			);
+
+			// Prompt should be in CLI args
+			const spawnArgs = mockSpawn.mock.calls[0][1] as string[];
+			expect(spawnArgs).toContain('--');
+			expect(spawnArgs).toContain('test prompt');
+
+			// stdin should NOT have received the prompt as stream-json
+			// buildStreamJsonMessage should NOT have been called
+			expect(buildStreamJsonMessage).not.toHaveBeenCalled();
+			// stdin.write should only be called for actual stdin delivery, not here
+			// stdin.end should be called (to close stdin for batch mode)
+			expect(mockChildProcess.stdin.end).toHaveBeenCalled();
+		});
+	});
+
+	describe('child process event handling', () => {
+		it('should listen on "close" event (not "exit") to ensure all stdio data is drained', () => {
+			const { spawner } = createTestContext();
+
+			spawner.spawn(createBaseConfig({ prompt: 'test' }));
+
+			// Verify 'close' is registered (ensures all stdout/stderr data is consumed
+			// before exit handler runs — fixes data loss for short-lived processes)
+			const onCalls = mockChildProcess.on.mock.calls as [string, Function][];
+			const eventNames = onCalls.map(([event]) => event);
+			expect(eventNames).toContain('close');
+			expect(eventNames).not.toContain('exit');
+		});
+
+		it('should listen for "error" events on the child process', () => {
+			const { spawner } = createTestContext();
+
+			spawner.spawn(createBaseConfig({ prompt: 'test' }));
+
+			const onCalls = mockChildProcess.on.mock.calls as [string, Function][];
+			const eventNames = onCalls.map(([event]) => event);
+			expect(eventNames).toContain('error');
+		});
+	});
+
 	describe('image handling with non-stream-json agents', () => {
 		it('should use file-based image args for agents without stream-json support', () => {
 			// Override capabilities for this test
@@ -507,6 +624,296 @@ describe('ChildProcessSpawner', () => {
 			expect(spawnArgs).toContain('/tmp/maestro-image-0.png');
 			// Should NOT have --input-format since this agent doesn't support it
 			expect(spawnArgs).not.toContain('--input-format');
+		});
+
+		it('should embed Copilot image paths into the prompt when imagePromptBuilder is provided', () => {
+			vi.mocked(getAgentCapabilities).mockReturnValueOnce({
+				supportsStreamJsonInput: false,
+			} as any);
+			vi.mocked(saveImageToTempFile).mockReturnValueOnce('/tmp/maestro-image-0.png');
+
+			const { spawner } = createTestContext();
+
+			spawner.spawn(
+				createBaseConfig({
+					toolType: 'copilot-cli',
+					command: 'copilot',
+					args: ['--output-format', 'json'],
+					images: ['data:image/png;base64,abc123'],
+					prompt: 'describe this image',
+					imagePromptBuilder: (paths: string[]) =>
+						`Use these attached images as context:\n${paths.map((imagePath) => `@${imagePath}`).join('\n')}\n\n`,
+					promptArgs: (prompt: string) => ['-p', prompt],
+				})
+			);
+
+			const spawnArgs = mockSpawn.mock.calls[0][1] as string[];
+			expect(spawnArgs).toContain('-p');
+			const promptArg = spawnArgs[spawnArgs.indexOf('-p') + 1];
+			expect(promptArg).toContain('@/tmp/maestro-image-0.png');
+			expect(promptArg).toContain('describe this image');
+		});
+	});
+
+	describe('resume mode with prompt-embed image handling', () => {
+		it('should embed image paths in prompt when resuming with imageResumeMode=prompt-embed', () => {
+			vi.mocked(getAgentCapabilities).mockReturnValueOnce({
+				supportsStreamJsonInput: false,
+				imageResumeMode: 'prompt-embed',
+			} as any);
+			vi.mocked(saveImageToTempFile).mockReturnValueOnce('/tmp/maestro-image-0.png');
+
+			const { spawner } = createTestContext();
+
+			spawner.spawn(
+				createBaseConfig({
+					toolType: 'codex',
+					command: 'codex',
+					args: ['exec', 'resume', 'thread-123', '--json'],
+					images: ['data:image/png;base64,abc123'],
+					prompt: 'describe this image',
+					imageArgs: (path: string) => ['-i', path],
+				})
+			);
+
+			const spawnArgs = mockSpawn.mock.calls[0][1] as string[];
+			// Should NOT have -i flag (resume mode skips it)
+			expect(spawnArgs).not.toContain('-i');
+			// Should have the modified prompt with image paths embedded
+			expect(spawnArgs).toContain('--');
+			const promptArg = spawnArgs[spawnArgs.indexOf('--') + 1];
+			expect(promptArg).toContain('[Attached images:');
+			expect(promptArg).toContain('/tmp/maestro-image-0.png');
+			expect(promptArg).toContain('describe this image');
+		});
+
+		it('should use -i flag for initial spawn even when imageResumeMode=prompt-embed', () => {
+			vi.mocked(getAgentCapabilities).mockReturnValueOnce({
+				supportsStreamJsonInput: false,
+				imageResumeMode: 'prompt-embed',
+			} as any);
+			vi.mocked(saveImageToTempFile).mockReturnValueOnce('/tmp/maestro-image-0.png');
+
+			const { spawner } = createTestContext();
+
+			// Args do NOT contain 'resume' — this is an initial spawn
+			spawner.spawn(
+				createBaseConfig({
+					toolType: 'codex',
+					command: 'codex',
+					args: ['exec', '--json'],
+					images: ['data:image/png;base64,abc123'],
+					prompt: 'describe this image',
+					imageArgs: (path: string) => ['-i', path],
+				})
+			);
+
+			const spawnArgs = mockSpawn.mock.calls[0][1] as string[];
+			// Should have -i flag (initial spawn uses it)
+			expect(spawnArgs).toContain('-i');
+			expect(spawnArgs).toContain('/tmp/maestro-image-0.png');
+		});
+
+		it('should send modified prompt via stdin in resume mode when promptViaStdin is true', () => {
+			vi.mocked(getAgentCapabilities).mockReturnValueOnce({
+				supportsStreamJsonInput: false,
+				imageResumeMode: 'prompt-embed',
+			} as any);
+			vi.mocked(saveImageToTempFile).mockReturnValueOnce('/tmp/maestro-image-0.png');
+
+			const { spawner } = createTestContext();
+
+			spawner.spawn(
+				createBaseConfig({
+					toolType: 'codex',
+					command: 'codex',
+					args: ['exec', 'resume', 'thread-123', '--json'],
+					images: ['data:image/png;base64,abc123'],
+					prompt: 'describe this image',
+					imageArgs: (path: string) => ['-i', path],
+					sendPromptViaStdinRaw: true,
+				})
+			);
+
+			const spawnArgs = mockSpawn.mock.calls[0][1] as string[];
+			// Should NOT have -i flag
+			expect(spawnArgs).not.toContain('-i');
+			// Prompt should NOT be in args (sent via stdin instead)
+			expect(spawnArgs).not.toContain('--');
+
+			// The modified prompt with image prefix should be sent via stdin
+			const writtenData = mockChildProcess.stdin.write.mock.calls[0][0];
+			expect(writtenData).toContain('[Attached images:');
+			expect(writtenData).toContain('/tmp/maestro-image-0.png');
+			expect(writtenData).toContain('describe this image');
+		});
+
+		it('should handle multiple images in resume mode', () => {
+			vi.mocked(getAgentCapabilities).mockReturnValueOnce({
+				supportsStreamJsonInput: false,
+				imageResumeMode: 'prompt-embed',
+			} as any);
+			vi.mocked(saveImageToTempFile)
+				.mockReturnValueOnce('/tmp/maestro-image-0.png')
+				.mockReturnValueOnce('/tmp/maestro-image-1.jpg');
+
+			const { spawner } = createTestContext();
+
+			spawner.spawn(
+				createBaseConfig({
+					toolType: 'codex',
+					command: 'codex',
+					args: ['exec', 'resume', 'thread-123', '--json'],
+					images: ['data:image/png;base64,abc123', 'data:image/jpeg;base64,def456'],
+					prompt: 'compare these images',
+					imageArgs: (path: string) => ['-i', path],
+				})
+			);
+
+			const spawnArgs = mockSpawn.mock.calls[0][1] as string[];
+			expect(spawnArgs).not.toContain('-i');
+			const promptArg = spawnArgs[spawnArgs.indexOf('--') + 1];
+			expect(promptArg).toContain('/tmp/maestro-image-0.png');
+			expect(promptArg).toContain('/tmp/maestro-image-1.jpg');
+			expect(promptArg).toContain('compare these images');
+		});
+
+		it('should NOT use prompt-embed when imageResumeMode is undefined', () => {
+			vi.mocked(getAgentCapabilities).mockReturnValueOnce({
+				supportsStreamJsonInput: false,
+				imageResumeMode: undefined,
+			} as any);
+			vi.mocked(saveImageToTempFile).mockReturnValueOnce('/tmp/maestro-image-0.png');
+
+			const { spawner } = createTestContext();
+
+			// Even with 'resume' in args, if imageResumeMode is undefined, use -i flag
+			spawner.spawn(
+				createBaseConfig({
+					toolType: 'opencode',
+					command: 'opencode',
+					args: ['run', '--session', 'sess-123', '--format', 'json'],
+					images: ['data:image/png;base64,abc123'],
+					prompt: 'describe this image',
+					imageArgs: (path: string) => ['-f', path],
+				})
+			);
+
+			const spawnArgs = mockSpawn.mock.calls[0][1] as string[];
+			// Should have -f flag (uses default file-based args)
+			expect(spawnArgs).toContain('-f');
+			expect(spawnArgs).toContain('/tmp/maestro-image-0.png');
+		});
+	});
+
+	// ----------------------------------------------------------------
+	// Windows batch-file spawning (MAESTRO-Q8)
+	//
+	// Node.js throws "spawn EINVAL" when asked to spawn a .cmd/.bat file
+	// without a shell. npm-installed agent CLIs resolve to such shims on
+	// Windows, so the spawner must auto-enable shell for them.
+	// ----------------------------------------------------------------
+	describe('Windows batch-file handling (MAESTRO-Q8)', () => {
+		beforeEach(() => {
+			vi.mocked(isWindows).mockReturnValue(true);
+		});
+		afterEach(() => {
+			vi.mocked(isWindows).mockReturnValue(false);
+		});
+
+		it('auto-enables shell for a .cmd command on Windows', () => {
+			const { spawner } = createTestContext();
+
+			spawner.spawn(createBaseConfig({ command: 'claude.cmd' }));
+
+			const options = mockSpawn.mock.calls[0][2] as { shell?: boolean | string };
+			expect(options.shell).toBe(true);
+		});
+
+		it('auto-enables shell for a .bat command on Windows', () => {
+			const { spawner } = createTestContext();
+
+			spawner.spawn(createBaseConfig({ command: 'agent.bat' }));
+
+			const options = mockSpawn.mock.calls[0][2] as { shell?: boolean | string };
+			expect(options.shell).toBe(true);
+		});
+
+		it('quotes a batch-file command path that contains spaces', () => {
+			const { spawner } = createTestContext();
+			const cmdPath = 'C:\\Users\\First Last\\AppData\\Roaming\\npm\\claude.cmd';
+
+			spawner.spawn(createBaseConfig({ command: cmdPath }));
+
+			const spawnCommand = mockSpawn.mock.calls[0][0] as string;
+			const options = mockSpawn.mock.calls[0][2] as { shell?: boolean | string };
+			expect(options.shell).toBe(true);
+			expect(spawnCommand).toBe(`"${cmdPath}"`);
+		});
+
+		it('does not quote a batch-file command path without spaces', () => {
+			const { spawner } = createTestContext();
+			const cmdPath = 'C:\\npm\\claude.cmd';
+
+			spawner.spawn(createBaseConfig({ command: cmdPath }));
+
+			const spawnCommand = mockSpawn.mock.calls[0][0] as string;
+			const options = mockSpawn.mock.calls[0][2] as { shell?: boolean | string };
+			expect(options.shell).toBe(true);
+			expect(spawnCommand).toBe(cmdPath);
+		});
+
+		it('does not auto-enable shell for a .cmd command off Windows', () => {
+			vi.mocked(isWindows).mockReturnValue(false);
+			const { spawner } = createTestContext();
+
+			spawner.spawn(createBaseConfig({ command: 'claude.cmd' }));
+
+			const options = mockSpawn.mock.calls[0][2] as { shell?: boolean | string };
+			expect(options.shell).toBe(false);
+		});
+	});
+
+	describe('agentSessionId seeding (for resumed sessions)', () => {
+		// Regression: Copilot CLI emits `session.resume` (no sessionId) instead of
+		// `session.start` when resuming a session, so StdoutHandler.emitSessionIdIfNeeded
+		// can never populate managedProcess.agentSessionId from the stream. Without the
+		// config-time seed, ExitHandler.awaitCopilotShutdown bails at its
+		// `if (!agentSessionId) return` guard, the disk-derived final answer and the
+		// context window snapshot never reach the renderer, and the UI surfaces the
+		// streamed commentary deltas instead of the authoritative task_complete.summary.
+		it('seeds managedProcess.agentSessionId from config when provided (Copilot resume)', () => {
+			const { processes, spawner } = createTestContext();
+
+			spawner.spawn(
+				createBaseConfig({
+					toolType: 'copilot-cli',
+					command: 'copilot',
+					args: ['--output-format', 'json', '--resume=cp-resumed-1'],
+					prompt: 'follow-up question',
+					agentSessionId: 'cp-resumed-1',
+				})
+			);
+
+			const proc = processes.get('test-session');
+			expect(proc?.agentSessionId).toBe('cp-resumed-1');
+		});
+
+		it('leaves managedProcess.agentSessionId undefined for fresh sessions (will be set from stdout later)', () => {
+			const { processes, spawner } = createTestContext();
+
+			spawner.spawn(
+				createBaseConfig({
+					toolType: 'copilot-cli',
+					command: 'copilot',
+					args: ['--output-format', 'json'],
+					prompt: 'first message',
+					// No agentSessionId — fresh session, sessionId will arrive via session.start
+				})
+			);
+
+			const proc = processes.get('test-session');
+			expect(proc?.agentSessionId).toBeUndefined();
 		});
 	});
 });

@@ -2,7 +2,8 @@ import { ipcMain, BrowserWindow, App } from 'electron';
 import chokidar, { FSWatcher } from 'chokidar';
 import { logger } from '../../utils/logger';
 import { createIpcHandler, CreateHandlerOptions } from '../../utils/ipcHandler';
-import { isWebContentsAvailable } from '../../utils/safe-send';
+import { createSafeSend } from '../../utils/safe-send';
+import { WINDOWS_LOCKED_SYSTEM_FILES } from '../../utils/watcher-ignore';
 
 const LOG_CONTEXT = '[DocumentGraph]';
 
@@ -60,6 +61,7 @@ export interface DocumentGraphHandlerDependencies {
  */
 export function registerDocumentGraphHandlers(deps: DocumentGraphHandlerDependencies): void {
 	const { getMainWindow, app } = deps;
+	const safeSend = createSafeSend(getMainWindow);
 
 	/**
 	 * Process pending events for a root path and send to renderer
@@ -68,20 +70,14 @@ export function registerDocumentGraphHandlers(deps: DocumentGraphHandlerDependen
 		const events = pendingEvents.get(rootPath);
 		if (!events || events.size === 0) return;
 
-		const mainWindow = getMainWindow();
-		if (!isWebContentsAvailable(mainWindow)) {
-			events.clear();
-			return;
-		}
-
 		// Convert Map to array of file change events
 		const changes: Array<{ filePath: string; eventType: 'add' | 'change' | 'unlink' }> = [];
 		for (const [filePath, eventType] of events) {
 			changes.push({ filePath, eventType });
 		}
 
-		// Send batched changes to renderer
-		mainWindow.webContents.send('documentGraph:filesChanged', {
+		// Send batched changes to the renderer and web-desktop bridge clients
+		safeSend('documentGraph:filesChanged', {
 			rootPath,
 			changes,
 		});
@@ -153,6 +149,7 @@ export function registerDocumentGraphHandlers(deps: DocumentGraphHandlerDependen
 					/dist/,
 					/build/,
 					/\.git/,
+					WINDOWS_LOCKED_SYSTEM_FILES,
 				],
 				persistent: true,
 				ignoreInitial: true, // Don't emit events for existing files on startup
@@ -224,11 +221,4 @@ export function registerDocumentGraphHandlers(deps: DocumentGraphHandlerDependen
 	});
 
 	logger.debug(`${LOG_CONTEXT} Document Graph IPC handlers registered`);
-}
-
-/**
- * Get the current number of active watchers (for testing/debugging)
- */
-export function getDocumentGraphWatcherCount(): number {
-	return documentGraphWatchers.size;
 }

@@ -82,7 +82,7 @@ describe('vibes-provenance-chain', () => {
 			tmpDir,
 			'claude-code',
 			assuranceLevel,
-			envHash,
+			envHash
 		);
 
 		const instrumenter = new ClaudeCodeInstrumenter({
@@ -130,7 +130,7 @@ describe('vibes-provenance-chain', () => {
 
 			const annotations = await readAnnotations(tmpDir);
 			const sessionAnnotations = annotations.filter(
-				(a) => a.type === 'session',
+				(a) => a.type === 'session'
 			) as VibesSessionRecord[];
 			const startRecord = sessionAnnotations.find((a) => a.event === 'start');
 
@@ -239,7 +239,7 @@ describe('vibes-provenance-chain', () => {
 			const manifest = await readVibesManifest(tmpDir);
 			const entries = Object.values(manifest.entries);
 			const reasoningEntries = entries.filter(
-				(e) => e.type === 'reasoning',
+				(e) => e.type === 'reasoning'
 			) as VibesReasoningEntry[];
 
 			expect(reasoningEntries).toHaveLength(1);
@@ -319,9 +319,7 @@ describe('vibes-provenance-chain', () => {
 
 			// Verify line annotation with all hash references
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 
 			const line = lineAnnotations[0];
@@ -355,9 +353,7 @@ describe('vibes-provenance-chain', () => {
 			await flushAll();
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 
 			const line = lineAnnotations[0];
@@ -390,9 +386,7 @@ describe('vibes-provenance-chain', () => {
 			await flushAll();
 
 			const annotations = await readAnnotations(tmpDir);
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 
 			const line = lineAnnotations[0];
@@ -423,7 +417,7 @@ describe('vibes-provenance-chain', () => {
 
 			const annotations = await readAnnotations(tmpDir);
 			const sessionAnnotations = annotations.filter(
-				(a) => a.type === 'session',
+				(a) => a.type === 'session'
 			) as VibesSessionRecord[];
 			const endRecord = sessionAnnotations.find((a) => a.event === 'end');
 
@@ -453,14 +447,12 @@ describe('vibes-provenance-chain', () => {
 
 			// Annotations should have: session start, line annotation, session end
 			const sessionRecords = annotations.filter(
-				(a) => a.type === 'session',
+				(a) => a.type === 'session'
 			) as VibesSessionRecord[];
 			expect(sessionRecords.filter((a) => a.event === 'start')).toHaveLength(1);
 			expect(sessionRecords.filter((a) => a.event === 'end')).toHaveLength(1);
 
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 
 			// Line annotation should have all hashes at high assurance
@@ -484,9 +476,7 @@ describe('vibes-provenance-chain', () => {
 			expect(entries.some((e) => e.type === 'prompt')).toBe(true);
 			expect(entries.some((e) => e.type === 'reasoning')).toBe(false);
 
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].prompt_hash).toBeDefined();
 			expect(lineAnnotations[0].reasoning_hash).toBeNull();
@@ -505,9 +495,7 @@ describe('vibes-provenance-chain', () => {
 			expect(entries.some((e) => e.type === 'prompt')).toBe(false);
 			expect(entries.some((e) => e.type === 'reasoning')).toBe(false);
 
-			const lineAnnotations = annotations.filter(
-				(a) => a.type === 'line',
-			) as VibesLineAnnotation[];
+			const lineAnnotations = annotations.filter((a) => a.type === 'line') as VibesLineAnnotation[];
 			expect(lineAnnotations).toHaveLength(1);
 			expect(lineAnnotations[0].prompt_hash).toBeNull();
 			expect(lineAnnotations[0].reasoning_hash).toBeNull();

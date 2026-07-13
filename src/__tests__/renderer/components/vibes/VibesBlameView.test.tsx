@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { VibesBlameView } from '../../../../renderer/components/vibes/VibesBlameView';
 import type { Theme } from '../../../../renderer/types';
+import { loadFileTree } from '../../../../renderer/utils/fileExplorer';
 
 // Mock lucide-react
 vi.mock('lucide-react', () => ({
@@ -64,11 +65,27 @@ const mockBlameData = [
 
 const mockCoverageData = {
 	files: [
-		{ file_path: 'src/main.ts' },
-		{ file_path: 'src/utils/helpers.ts' },
-		{ file_path: 'src/components/App.tsx' },
+		// annotation_count > 0 so the tree auto-expands annotated directories
+		{ file_path: 'src/main.ts', annotation_count: 2 },
+		{ file_path: 'src/utils/helpers.ts', annotation_count: 1 },
+		{ file_path: 'src/components/App.tsx', annotation_count: 3 },
 	],
 };
+
+// Mock the file explorer tree loader: rc's loadFileTree returns a
+// FileTreeLoadResult and requires window.maestro.fs, which this test doesn't
+// provide. An empty tree keeps the blame pane in its coverage-driven mode.
+vi.mock('../../../../renderer/utils/fileExplorer', async (importOriginal) => {
+	const actual = await importOriginal<any>();
+	return {
+		...actual,
+		// Throw synchronously (like the real loader does without window.maestro.fs)
+		// so the component takes its coverage-only fallback path in the same frame.
+		loadFileTree: vi.fn(() => {
+			throw new Error('fs unavailable in test');
+		}),
+	};
+});
 
 // Setup window.maestro mock
 const mockGetBlame = vi.fn();
@@ -101,23 +118,13 @@ beforeEach(() => {
 
 describe('VibesBlameView', () => {
 	it('renders empty state when no file selected', () => {
-		render(
-			<VibesBlameView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesBlameView theme={mockTheme} projectPath="/test/project" />);
 		expect(screen.getByText('No tracked files')).toBeTruthy();
 		expect(screen.getByText(/No files with AI annotations found/)).toBeTruthy();
 	});
 
 	it('renders file search input', () => {
-		render(
-			<VibesBlameView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesBlameView theme={mockTheme} projectPath="/test/project" />);
 		expect(screen.getByPlaceholderText('Search files...')).toBeTruthy();
 	});
 
@@ -126,11 +133,7 @@ describe('VibesBlameView', () => {
 		mockGetBlame.mockReturnValue(new Promise(() => {}));
 
 		render(
-			<VibesBlameView
-				theme={mockTheme}
-				projectPath="/test/project"
-				initialFilePath="src/main.ts"
-			/>,
+			<VibesBlameView theme={mockTheme} projectPath="/test/project" initialFilePath="src/main.ts" />
 		);
 
 		await waitFor(() => {
@@ -140,11 +143,7 @@ describe('VibesBlameView', () => {
 
 	it('renders blame entries after loading', async () => {
 		render(
-			<VibesBlameView
-				theme={mockTheme}
-				projectPath="/test/project"
-				initialFilePath="src/main.ts"
-			/>,
+			<VibesBlameView theme={mockTheme} projectPath="/test/project" initialFilePath="src/main.ts" />
 		);
 
 		await waitFor(() => {
@@ -158,11 +157,7 @@ describe('VibesBlameView', () => {
 
 	it('shows agent type badges', async () => {
 		render(
-			<VibesBlameView
-				theme={mockTheme}
-				projectPath="/test/project"
-				initialFilePath="src/main.ts"
-			/>,
+			<VibesBlameView theme={mockTheme} projectPath="/test/project" initialFilePath="src/main.ts" />
 		);
 
 		await waitFor(() => {
@@ -173,11 +168,7 @@ describe('VibesBlameView', () => {
 
 	it('shows action badges', async () => {
 		render(
-			<VibesBlameView
-				theme={mockTheme}
-				projectPath="/test/project"
-				initialFilePath="src/main.ts"
-			/>,
+			<VibesBlameView theme={mockTheme} projectPath="/test/project" initialFilePath="src/main.ts" />
 		);
 
 		await waitFor(() => {
@@ -188,11 +179,7 @@ describe('VibesBlameView', () => {
 
 	it('shows shortened session IDs', async () => {
 		render(
-			<VibesBlameView
-				theme={mockTheme}
-				projectPath="/test/project"
-				initialFilePath="src/main.ts"
-			/>,
+			<VibesBlameView theme={mockTheme} projectPath="/test/project" initialFilePath="src/main.ts" />
 		);
 
 		await waitFor(() => {
@@ -203,11 +190,7 @@ describe('VibesBlameView', () => {
 
 	it('shows model versions', async () => {
 		render(
-			<VibesBlameView
-				theme={mockTheme}
-				projectPath="/test/project"
-				initialFilePath="src/main.ts"
-			/>,
+			<VibesBlameView theme={mockTheme} projectPath="/test/project" initialFilePath="src/main.ts" />
 		);
 
 		await waitFor(() => {
@@ -218,11 +201,7 @@ describe('VibesBlameView', () => {
 
 	it('shows footer with entry count and model count', async () => {
 		render(
-			<VibesBlameView
-				theme={mockTheme}
-				projectPath="/test/project"
-				initialFilePath="src/main.ts"
-			/>,
+			<VibesBlameView theme={mockTheme} projectPath="/test/project" initialFilePath="src/main.ts" />
 		);
 
 		await waitFor(() => {
@@ -242,7 +221,7 @@ describe('VibesBlameView', () => {
 				theme={mockTheme}
 				projectPath="/test/project"
 				initialFilePath="src/empty.ts"
-			/>,
+			/>
 		);
 
 		await waitFor(() => {
@@ -257,11 +236,7 @@ describe('VibesBlameView', () => {
 		});
 
 		render(
-			<VibesBlameView
-				theme={mockTheme}
-				projectPath="/test/project"
-				initialFilePath="src/main.ts"
-			/>,
+			<VibesBlameView theme={mockTheme} projectPath="/test/project" initialFilePath="src/main.ts" />
 		);
 
 		await waitFor(() => {
@@ -277,11 +252,7 @@ describe('VibesBlameView', () => {
 		});
 
 		render(
-			<VibesBlameView
-				theme={mockTheme}
-				projectPath="/test/project"
-				initialFilePath="src/main.ts"
-			/>,
+			<VibesBlameView theme={mockTheme} projectPath="/test/project" initialFilePath="src/main.ts" />
 		);
 
 		await waitFor(() => {
@@ -308,11 +279,7 @@ describe('VibesBlameView', () => {
 		});
 
 		render(
-			<VibesBlameView
-				theme={mockTheme}
-				projectPath="/test/project"
-				initialFilePath="src/main.ts"
-			/>,
+			<VibesBlameView theme={mockTheme} projectPath="/test/project" initialFilePath="src/main.ts" />
 		);
 
 		await waitFor(() => {
@@ -321,12 +288,7 @@ describe('VibesBlameView', () => {
 	});
 
 	it('fetches coverage files on mount', async () => {
-		render(
-			<VibesBlameView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesBlameView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(mockGetCoverage).toHaveBeenCalledWith('/test/project');
@@ -334,12 +296,14 @@ describe('VibesBlameView', () => {
 	});
 
 	it('shows file tree after coverage loads', async () => {
-		render(
-			<VibesBlameView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		// Resolve (rather than throw) so coverage parsing completes and the
+		// coverage-only fallback tree renders the tracked files.
+		vi.mocked(loadFileTree).mockImplementationOnce(async () => ({
+			tree: [],
+			truncated: false,
+			filesFound: 0,
+		}));
+		render(<VibesBlameView theme={mockTheme} projectPath="/test/project" />);
 
 		// Wait for coverage files to load — tree should show file names
 		await waitFor(() => {
@@ -355,12 +319,14 @@ describe('VibesBlameView', () => {
 	});
 
 	it('filters file dropdown based on search input', async () => {
-		render(
-			<VibesBlameView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		// Resolve (rather than throw) so coverage parsing completes and the
+		// coverage-only fallback tree renders the tracked files.
+		vi.mocked(loadFileTree).mockImplementationOnce(async () => ({
+			tree: [],
+			truncated: false,
+			filesFound: 0,
+		}));
+		render(<VibesBlameView theme={mockTheme} projectPath="/test/project" />);
 
 		await waitFor(() => {
 			expect(mockGetCoverage).toHaveBeenCalled();
@@ -394,7 +360,7 @@ describe('VibesBlameView', () => {
 				theme={mockTheme}
 				projectPath="/test/project"
 				initialFilePath="src/single.ts"
-			/>,
+			/>
 		);
 
 		await waitFor(() => {

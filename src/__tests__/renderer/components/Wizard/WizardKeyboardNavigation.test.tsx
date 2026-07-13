@@ -17,7 +17,9 @@ import { PhaseReviewScreen } from '../../../../renderer/components/Wizard/screen
 import { WizardExitConfirmModal } from '../../../../renderer/components/Wizard/WizardExitConfirmModal';
 import { LayerStackProvider } from '../../../../renderer/contexts/LayerStackContext';
 import type { Theme, AgentConfig } from '../../../../renderer/types';
+import { formatShortcutKeys } from '../../../../renderer/utils/shortcutFormatter';
 
+import { mockTheme } from '../../../helpers/mockTheme';
 // Mock lucide-react icons
 vi.mock('lucide-react', () => ({
 	X: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
@@ -102,6 +104,7 @@ vi.mock('react-syntax-highlighter', () => ({
 
 vi.mock('react-syntax-highlighter/dist/esm/styles/prism', () => ({
 	vscDarkPlus: {},
+	vs: {},
 }));
 
 // Mock remark-gfm
@@ -116,8 +119,12 @@ vi.mock('rehype-slug', () => ({
 
 // Mock markdownConfig utilities
 vi.mock('../../../../renderer/utils/markdownConfig', () => ({
+	REMARK_GFM_PLUGINS: [],
 	generateProseStyles: () => '',
+	generateInlineWizardPreviewProseStyles: () => '',
 	createMarkdownComponents: () => ({}),
+	createWizardBubbleMarkdownComponents: () => ({}),
+	createReleaseNotesMarkdownComponents: () => ({}),
 }));
 
 // Mock MermaidRenderer
@@ -130,6 +137,7 @@ const mockMaestro = {
 	agents: {
 		detect: vi.fn(),
 		get: vi.fn(),
+		getMaestroPDetectedPath: vi.fn().mockResolvedValue(null),
 	},
 	git: {
 		isRepo: vi.fn(),
@@ -163,30 +171,6 @@ const mockMaestro = {
 };
 
 // Mock theme
-const mockTheme: Theme = {
-	id: 'test-dark',
-	name: 'Test Dark',
-	mode: 'dark',
-	colors: {
-		bgMain: '#1a1a1a',
-		bgSidebar: '#252525',
-		bgActivity: '#2a2a2a',
-		border: '#333333',
-		textMain: '#ffffff',
-		textDim: '#888888',
-		textFaint: '#555555',
-		accent: '#4a9eff',
-		accentForeground: '#ffffff',
-		buttonBg: '#333333',
-		buttonHover: '#444444',
-		headerBg: '#202020',
-		scrollbarTrack: '#1a1a1a',
-		scrollbarThumb: '#444444',
-		success: '#22c55e',
-		warning: '#f59e0b',
-		error: '#ef4444',
-	},
-};
 
 // Mock available agents
 const mockAgents: AgentConfig[] = [
@@ -583,7 +567,7 @@ describe('Wizard Keyboard Navigation', () => {
 			renderWithProviders(<ConversationScreenWrapper theme={mockTheme} />);
 
 			// Find the keyboard shortcut label
-			const shortcutLabel = screen.getByText('⌘⇧K');
+			const shortcutLabel = screen.getByText(formatShortcutKeys(['Meta', 'Shift', 'k']));
 			expect(shortcutLabel).toBeInTheDocument();
 			expect(shortcutLabel.tagName.toLowerCase()).toBe('kbd');
 		});
@@ -908,7 +892,7 @@ describe('Wizard Keyboard Navigation', () => {
 			});
 
 			// Verify keyboard hints are visible
-			expect(screen.getByText('⌘E')).toBeInTheDocument();
+			expect(screen.getByText(formatShortcutKeys(['Meta', 'e']))).toBeInTheDocument();
 			expect(screen.getByText(/toggle edit\/preview/i)).toBeInTheDocument();
 			expect(screen.getByText('Tab')).toBeInTheDocument();
 			expect(screen.getByText('Enter')).toBeInTheDocument();

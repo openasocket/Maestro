@@ -42,6 +42,16 @@ vi.mock('../../../../main/utils/execFile', () => ({
 	execFileNoThrow: vi.fn(),
 }));
 
+// Mock symphony-fork
+vi.mock('../../../../main/utils/symphony-fork', () => ({
+	ensureForkSetup: vi.fn(),
+}));
+
+// Mock cliDetection — resolveGhPath returns 'gh' so existing assertions still match
+vi.mock('../../../../main/utils/cliDetection', () => ({
+	resolveGhPath: vi.fn().mockResolvedValue('gh'),
+}));
+
 // Mock the logger
 vi.mock('../../../../main/utils/logger', () => ({
 	logger: {
@@ -58,6 +68,7 @@ global.fetch = mockFetch;
 
 // Import mocked functions
 import { execFileNoThrow } from '../../../../main/utils/execFile';
+import { ensureForkSetup } from '../../../../main/utils/symphony-fork';
 
 describe('Symphony IPC handlers', () => {
 	let handlers: Map<string, Function>;
@@ -95,16 +106,26 @@ describe('Symphony IPC handlers', () => {
 			set: vi.fn(),
 		};
 
+		// Setup mock settings store
+		const mockSettingsStore = {
+			get: vi.fn().mockReturnValue([]),
+			set: vi.fn(),
+		};
+
 		// Setup dependencies
 		mockDeps = {
 			app: mockApp,
 			getMainWindow: () => mockMainWindow,
 			sessionsStore: mockSessionsStore as any,
+			settingsStore: mockSettingsStore as any,
 		};
 
 		// Default mock for fs operations
 		vi.mocked(fs.mkdir).mockResolvedValue(undefined);
 		vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+
+		// Default: no fork needed (user has push access)
+		vi.mocked(ensureForkSetup).mockResolvedValue({ isFork: false });
 
 		// Register handlers
 		registerSymphonyHandlers(mockDeps);
@@ -247,7 +268,17 @@ describe('Symphony IPC handlers', () => {
 		const getStartContributionHandler = () => handlers.get('symphony:startContribution');
 
 		it('should accept valid owner/repo format', async () => {
-			vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({
+					contributionId: 'contrib_123',
+					repoSlug: 'owner/repo',
+					issueNumber: 42,
+					issueTitle: 'Test Issue',
+					branchName: 'symphony/issue-42-abc',
+					localPath: '/tmp/test-repo',
+					prCreated: false,
+				})
+			);
 			vi.mocked(fs.mkdir).mockResolvedValue(undefined);
 			vi.mocked(execFileNoThrow).mockResolvedValue({
 				stdout: 'main',
@@ -355,8 +386,19 @@ describe('Symphony IPC handlers', () => {
 		const getStartContributionHandler = () => handlers.get('symphony:startContribution');
 
 		it('should pass with all valid parameters', async () => {
-			vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({
+					contributionId: 'contrib_123',
+					repoSlug: 'owner/repo',
+					issueNumber: 42,
+					issueTitle: 'Test Issue',
+					branchName: 'symphony/issue-42-abc',
+					localPath: '/tmp/test-repo',
+					prCreated: false,
+				})
+			);
 			vi.mocked(fs.mkdir).mockResolvedValue(undefined);
+			vi.mocked(fs.access).mockResolvedValue(undefined);
 			vi.mocked(execFileNoThrow).mockResolvedValue({
 				stdout: 'main',
 				stderr: '',
@@ -425,7 +467,17 @@ describe('Symphony IPC handlers', () => {
 		});
 
 		it('should skip validation for external document URLs', async () => {
-			vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({
+					contributionId: 'contrib_123',
+					repoSlug: 'owner/repo',
+					issueNumber: 42,
+					issueTitle: 'Test Issue',
+					branchName: 'symphony/issue-42-abc',
+					localPath: '/tmp/test-repo',
+					prCreated: false,
+				})
+			);
 			vi.mocked(fs.mkdir).mockResolvedValue(undefined);
 			vi.mocked(execFileNoThrow).mockResolvedValue({
 				stdout: 'main',
@@ -861,7 +913,17 @@ describe('Symphony IPC handlers', () => {
 
 	describe('generateBranchName', () => {
 		it('should include issue number in output', async () => {
-			vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({
+					contributionId: 'contrib_123',
+					repoSlug: 'owner/repo',
+					issueNumber: 42,
+					issueTitle: 'Test Issue',
+					branchName: 'symphony/issue-42-abc',
+					localPath: '/tmp/test-repo',
+					prCreated: false,
+				})
+			);
 			vi.mocked(fs.mkdir).mockResolvedValue(undefined);
 			vi.mocked(execFileNoThrow).mockResolvedValue({
 				stdout: 'main',
@@ -885,7 +947,17 @@ describe('Symphony IPC handlers', () => {
 		});
 
 		it('should match BRANCH_TEMPLATE pattern', async () => {
-			vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({
+					contributionId: 'contrib_123',
+					repoSlug: 'owner/repo',
+					issueNumber: 99,
+					issueTitle: 'Test Issue',
+					branchName: 'symphony/issue-99-abc',
+					localPath: '/tmp/test-repo',
+					prCreated: false,
+				})
+			);
 			vi.mocked(fs.mkdir).mockResolvedValue(undefined);
 			vi.mocked(execFileNoThrow).mockResolvedValue({
 				stdout: 'main',
@@ -918,6 +990,7 @@ describe('Symphony IPC handlers', () => {
 			const expectedChannels = [
 				'symphony:getRegistry',
 				'symphony:getIssues',
+				'symphony:getIssueCounts',
 				'symphony:getState',
 				'symphony:getActive',
 				'symphony:getCompleted',
@@ -1014,7 +1087,9 @@ describe('Symphony IPC handlers', () => {
 			const result = await handler!({} as any, false);
 
 			expect(result.fromCache).toBe(false);
-			expect(result.registry).toEqual(freshRegistry);
+			expect(result.registry).toEqual(
+				expect.objectContaining({ repositories: freshRegistry.repositories })
+			);
 		});
 
 		it('should fetch fresh data when forceRefresh is true', async () => {
@@ -1037,7 +1112,9 @@ describe('Symphony IPC handlers', () => {
 			const result = await handler!({} as any, true); // forceRefresh = true
 
 			expect(result.fromCache).toBe(false);
-			expect(result.registry).toEqual(freshRegistry);
+			expect(result.registry).toEqual(
+				expect.objectContaining({ repositories: freshRegistry.repositories })
+			);
 		});
 
 		it('should update cache after fresh fetch', async () => {
@@ -1055,7 +1132,9 @@ describe('Symphony IPC handlers', () => {
 			expect(fs.writeFile).toHaveBeenCalled();
 			const writeCall = vi.mocked(fs.writeFile).mock.calls[0];
 			const writtenData = JSON.parse(writeCall[1] as string);
-			expect(writtenData.registry.data).toEqual(freshRegistry);
+			expect(writtenData.registry.data).toEqual(
+				expect.objectContaining({ repositories: freshRegistry.repositories })
+			);
 		});
 
 		it('should handle network errors gracefully', async () => {
@@ -1068,7 +1147,7 @@ describe('Symphony IPC handlers', () => {
 
 			// The IPC handler wrapper catches errors and returns success: false
 			expect(result.success).toBe(false);
-			expect(result.error).toContain('Network error');
+			expect(result.error).toContain('Failed to fetch registry');
 		});
 	});
 
@@ -1710,7 +1789,12 @@ describe('Symphony IPC handlers', () => {
 				await handler!({} as any, validStartParams);
 
 				// First call should be gh auth status (with optional cwd and env args)
-				expect(execFileNoThrow).toHaveBeenCalledWith('gh', ['auth', 'status'], undefined, expect.any(Object));
+				expect(execFileNoThrow).toHaveBeenCalledWith(
+					'gh',
+					['auth', 'status'],
+					undefined,
+					expect.any(Object)
+				);
 			});
 
 			it('should fail early if not authenticated', async () => {
@@ -2058,6 +2142,145 @@ describe('Symphony IPC handlers', () => {
 				expect(result.contributionId).toMatch(/^contrib_/);
 				expect(result.draftPrUrl).toBe('https://github.com/owner/repo/pull/123');
 				expect(result.draftPrNumber).toBe(123);
+			});
+		});
+
+		describe('fork setup', () => {
+			it('should call ensureForkSetup after branch creation', async () => {
+				vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+				vi.mocked(ensureForkSetup).mockResolvedValue({ isFork: false });
+				vi.mocked(execFileNoThrow).mockImplementation(async (cmd, args) => {
+					if (cmd === 'gh' && args?.[0] === 'auth')
+						return { stdout: 'Logged in', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'clone')
+						return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'symbolic-ref')
+						return { stdout: 'refs/remotes/origin/main', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'checkout')
+						return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'rev-parse')
+						return { stdout: 'symphony/issue-42-abc', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'push') return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'gh' && args?.[0] === 'pr')
+						return { stdout: 'https://github.com/owner/repo/pull/1', stderr: '', exitCode: 0 };
+					return { stdout: '', stderr: '', exitCode: 0 };
+				});
+
+				const handler = getStartHandler();
+				await handler!({} as any, validStartParams);
+
+				expect(ensureForkSetup).toHaveBeenCalledWith(expect.stringContaining('repo'), 'owner/repo');
+
+				// Verify fork setup runs after branch creation (checkout -b)
+				const checkoutIdx = vi
+					.mocked(execFileNoThrow)
+					.mock.calls.findIndex(
+						(call) => call[0] === 'git' && (call[1] as string[])?.[0] === 'checkout'
+					);
+				const checkoutCallOrder = vi.mocked(execFileNoThrow).mock.invocationCallOrder[checkoutIdx];
+				const forkSetupCallOrder = vi.mocked(ensureForkSetup).mock.invocationCallOrder[0];
+				expect(checkoutCallOrder).toBeDefined();
+				expect(forkSetupCallOrder).toBeDefined();
+				expect(checkoutCallOrder).toBeLessThan(forkSetupCallOrder!);
+			});
+
+			it('should return error when fork setup fails', async () => {
+				vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+				vi.mocked(ensureForkSetup).mockResolvedValue({ isFork: false, error: 'permission denied' });
+				vi.mocked(execFileNoThrow).mockImplementation(async (cmd, args) => {
+					if (cmd === 'gh' && args?.[0] === 'auth')
+						return { stdout: 'Logged in', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'clone')
+						return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'symbolic-ref')
+						return { stdout: 'refs/remotes/origin/main', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'checkout')
+						return { stdout: '', stderr: '', exitCode: 0 };
+					return { stdout: '', stderr: '', exitCode: 0 };
+				});
+
+				const handler = getStartHandler();
+				const result = await handler!({} as any, validStartParams);
+
+				expect(result.error).toContain('Fork setup failed');
+			});
+
+			it('should persist fork info in contribution when fork is needed', async () => {
+				vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+				vi.mocked(ensureForkSetup).mockResolvedValue({ isFork: true, forkSlug: 'chris/repo' });
+				vi.mocked(execFileNoThrow).mockImplementation(async (cmd, args) => {
+					if (cmd === 'gh' && args?.[0] === 'auth')
+						return { stdout: 'Logged in', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'clone')
+						return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'symbolic-ref')
+						return { stdout: 'refs/remotes/origin/main', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'checkout')
+						return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'rev-parse')
+						return { stdout: 'symphony/issue-42-abc', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'push') return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'gh' && args?.[0] === 'pr')
+						return { stdout: 'https://github.com/owner/repo/pull/1', stderr: '', exitCode: 0 };
+					return { stdout: '', stderr: '', exitCode: 0 };
+				});
+
+				const handler = getStartHandler();
+				await handler!({} as any, validStartParams);
+
+				// Verify the state was written with fork info
+				const writeStateCall = vi
+					.mocked(fs.writeFile)
+					.mock.calls.find(
+						(call) => typeof call[0] === 'string' && call[0].includes('symphony-state.json')
+					);
+				expect(writeStateCall).toBeDefined();
+				const savedState = JSON.parse(writeStateCall![1] as string);
+				const savedContrib = savedState.active[0];
+				expect(savedContrib.isFork).toBe(true);
+				expect(savedContrib.forkSlug).toBe('chris/repo');
+				expect(savedContrib.upstreamSlug).toBe('owner/repo');
+			});
+
+			it('should pass fork info to createDraftPR for cross-fork PRs', async () => {
+				vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+				vi.mocked(ensureForkSetup).mockResolvedValue({ isFork: true, forkSlug: 'chris/repo' });
+				vi.mocked(execFileNoThrow).mockImplementation(async (cmd, args) => {
+					if (cmd === 'gh' && args?.[0] === 'auth')
+						return { stdout: 'Logged in', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'clone')
+						return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'symbolic-ref')
+						return { stdout: 'refs/remotes/origin/main', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'checkout')
+						return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'rev-parse')
+						return { stdout: 'symphony/issue-42-abc', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'push') return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'gh' && args?.[0] === 'pr')
+						return { stdout: 'https://github.com/owner/repo/pull/1', stderr: '', exitCode: 0 };
+					return { stdout: '', stderr: '', exitCode: 0 };
+				});
+
+				const handler = getStartHandler();
+				await handler!({} as any, validStartParams);
+
+				// Verify gh pr create was called with --head chris:branchName and --repo owner/repo
+				const prCall = vi
+					.mocked(execFileNoThrow)
+					.mock.calls.find(
+						(call) => call[0] === 'gh' && call[1]?.[0] === 'pr' && call[1]?.[1] === 'create'
+					);
+				expect(prCall).toBeDefined();
+				const prArgs = prCall![1] as string[];
+				// Should have --head chris:branchName
+				const headIdx = prArgs.indexOf('--head');
+				expect(headIdx).toBeGreaterThanOrEqual(0);
+				expect(prArgs[headIdx + 1]).toMatch(/^chris:/);
+				// Should have --repo owner/repo
+				const repoIdx = prArgs.indexOf('--repo');
+				expect(repoIdx).toBeGreaterThanOrEqual(0);
+				expect(prArgs[repoIdx + 1]).toBe('owner/repo');
 			});
 		});
 	});
@@ -4098,7 +4321,12 @@ describe('Symphony IPC handlers', () => {
 				await handler!({} as any, validStartContributionParams);
 
 				// First call should be gh auth status (with optional cwd and env args)
-				expect(execFileNoThrow).toHaveBeenCalledWith('gh', ['auth', 'status'], undefined, expect.any(Object));
+				expect(execFileNoThrow).toHaveBeenCalledWith(
+					'gh',
+					['auth', 'status'],
+					undefined,
+					expect.any(Object)
+				);
 			});
 
 			it('should fail early if not authenticated', async () => {
@@ -4440,6 +4668,104 @@ describe('Symphony IPC handlers', () => {
 				expect(result.branchName).toBeUndefined();
 			});
 		});
+
+		describe('fork setup', () => {
+			it('should call ensureForkSetup after branch creation', async () => {
+				vi.mocked(ensureForkSetup).mockResolvedValue({ isFork: false });
+				vi.mocked(execFileNoThrow).mockImplementation(async (cmd, args) => {
+					if (cmd === 'gh' && args?.[0] === 'auth')
+						return { stdout: 'Logged in', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'checkout')
+						return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'commit')
+						return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'symbolic-ref')
+						return { stdout: 'refs/remotes/origin/main', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'ls-remote')
+						return { stdout: 'abc123\trefs/heads/main', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'rev-parse')
+						return { stdout: 'symphony/issue-42-abc', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'push') return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'gh' && args?.[0] === 'pr')
+						return { stdout: 'https://github.com/owner/repo/pull/1', stderr: '', exitCode: 0 };
+					return { stdout: '', stderr: '', exitCode: 0 };
+				});
+
+				const handler = getStartContributionHandler();
+				await handler!({} as any, validStartContributionParams);
+
+				expect(ensureForkSetup).toHaveBeenCalledWith(
+					validStartContributionParams.localPath,
+					'owner/repo'
+				);
+
+				// Verify ensureForkSetup ran after the checkout
+				const checkoutCallIdx = vi
+					.mocked(execFileNoThrow)
+					.mock.invocationCallOrder.find((order, i) => {
+						const call = vi.mocked(execFileNoThrow).mock.calls[i];
+						return call[0] === 'git' && call[1]?.[0] === 'checkout';
+					});
+				const forkSetupCallIdx = vi.mocked(ensureForkSetup).mock.invocationCallOrder[0];
+				expect(checkoutCallIdx).toBeDefined();
+				expect(forkSetupCallIdx).toBeGreaterThan(checkoutCallIdx!);
+			});
+
+			it('should return error when fork setup fails', async () => {
+				vi.mocked(ensureForkSetup).mockResolvedValue({ isFork: false, error: 'permission denied' });
+				vi.mocked(execFileNoThrow).mockImplementation(async (cmd, args) => {
+					if (cmd === 'gh' && args?.[0] === 'auth')
+						return { stdout: 'Logged in', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'checkout')
+						return { stdout: '', stderr: '', exitCode: 0 };
+					return { stdout: '', stderr: '', exitCode: 0 };
+				});
+
+				const handler = getStartContributionHandler();
+				const result = await handler!({} as any, validStartContributionParams);
+
+				expect(result.success).toBe(false);
+				expect(result.error).toContain('Fork setup failed');
+			});
+
+			it('should write fork info to metadata when fork is needed', async () => {
+				vi.mocked(ensureForkSetup).mockResolvedValue({ isFork: true, forkSlug: 'chris/repo' });
+				vi.mocked(execFileNoThrow).mockImplementation(async (cmd, args) => {
+					if (cmd === 'gh' && args?.[0] === 'auth')
+						return { stdout: 'Logged in', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'checkout')
+						return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'commit')
+						return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'symbolic-ref')
+						return { stdout: 'refs/remotes/origin/main', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'ls-remote')
+						return { stdout: 'abc123\trefs/heads/main', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'rev-parse')
+						return { stdout: 'symphony/issue-42-abc', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'push') return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'gh' && args?.[0] === 'pr')
+						return { stdout: 'https://github.com/owner/repo/pull/1', stderr: '', exitCode: 0 };
+					return { stdout: '', stderr: '', exitCode: 0 };
+				});
+
+				const handler = getStartContributionHandler();
+				await handler!({} as any, validStartContributionParams);
+
+				// Verify metadata was written with fork info
+				const metadataCall = vi
+					.mocked(fs.writeFile)
+					.mock.calls.find(
+						(call) => typeof call[0] === 'string' && call[0].includes('metadata.json')
+					);
+				expect(metadataCall).toBeDefined();
+				const metadata = JSON.parse(metadataCall![1] as string);
+				expect(metadata.isFork).toBe(true);
+				expect(metadata.forkSlug).toBe('chris/repo');
+				expect(metadata.upstreamSlug).toBe('owner/repo');
+				expect(metadata.upstreamDefaultBranch).toBe('main');
+			});
+		});
 	});
 
 	// ============================================================================
@@ -4461,6 +4787,10 @@ describe('Symphony IPC handlers', () => {
 				prCreated: boolean;
 				draftPrNumber?: number;
 				draftPrUrl?: string;
+				isFork?: boolean;
+				forkSlug?: string;
+				upstreamSlug?: string;
+				upstreamDefaultBranch?: string;
 			}>
 		) => ({
 			contributionId: 'contrib_draft_test',
@@ -4560,7 +4890,12 @@ describe('Symphony IPC handlers', () => {
 				expect(result.success).toBe(false);
 				expect(result.error).toContain('not authenticated');
 				// execFileNoThrow is called with optional cwd and env args
-				expect(execFileNoThrow).toHaveBeenCalledWith('gh', ['auth', 'status'], undefined, expect.any(Object));
+				expect(execFileNoThrow).toHaveBeenCalledWith(
+					'gh',
+					['auth', 'status'],
+					undefined,
+					expect.any(Object)
+				);
 			});
 		});
 
@@ -4927,6 +5262,199 @@ describe('Symphony IPC handlers', () => {
 				expect(result.draftPrNumber).toBe(101);
 				expect(result.draftPrUrl).toBe('https://github.com/owner/repo/pull/101');
 				expect(result.error).toBeUndefined();
+			});
+		});
+
+		describe('fork support', () => {
+			it('should pass fork info to gh pr create when metadata has fork info', async () => {
+				const metadata = createValidMetadata({
+					isFork: true,
+					forkSlug: 'chris/repo',
+					upstreamSlug: 'owner/repo',
+					upstreamDefaultBranch: 'develop',
+				});
+				const stateWithActiveContrib = {
+					active: [
+						{
+							id: 'contrib_draft_test',
+							repoSlug: 'owner/repo',
+							issueNumber: 42,
+							status: 'running',
+						},
+					],
+					history: [],
+					stats: {},
+				};
+				vi.mocked(fs.readFile).mockImplementation(async (filePath) => {
+					if ((filePath as string).includes('metadata.json')) {
+						return JSON.stringify(metadata);
+					}
+					if ((filePath as string).includes('state.json')) {
+						return JSON.stringify(stateWithActiveContrib);
+					}
+					throw new Error('ENOENT');
+				});
+				vi.mocked(execFileNoThrow).mockImplementation(async (cmd, args) => {
+					if (cmd === 'gh' && args?.[0] === 'auth')
+						return { stdout: 'Logged in', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'symbolic-ref')
+						return { stdout: 'refs/remotes/origin/main', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'rev-list')
+						return { stdout: '1', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'rev-parse')
+						return { stdout: 'symphony/issue-42-abc123', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'push') return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'gh' && args?.[0] === 'pr')
+						return { stdout: 'https://github.com/owner/repo/pull/50', stderr: '', exitCode: 0 };
+					return { stdout: '', stderr: '', exitCode: 0 };
+				});
+
+				const handler = getCreateDraftPRHandler();
+				const result = await handler!({} as any, { contributionId: 'contrib_draft_test' });
+
+				expect(result.success).toBe(true);
+
+				// Verify gh pr create was called with fork args
+				const prCall = vi
+					.mocked(execFileNoThrow)
+					.mock.calls.find(
+						(call) => call[0] === 'gh' && call[1]?.[0] === 'pr' && call[1]?.[1] === 'create'
+					);
+				expect(prCall).toBeDefined();
+				const prArgs = prCall![1] as string[];
+				// Should have --head chris:branchName
+				const headIdx = prArgs.indexOf('--head');
+				expect(headIdx).toBeGreaterThanOrEqual(0);
+				expect(prArgs[headIdx + 1]).toMatch(/^chris:/);
+				// Should have --repo owner/repo
+				const repoIdx = prArgs.indexOf('--repo');
+				expect(repoIdx).toBeGreaterThanOrEqual(0);
+				expect(prArgs[repoIdx + 1]).toBe('owner/repo');
+				// Should use upstreamDefaultBranch from metadata as --base
+				const baseIdx = prArgs.indexOf('--base');
+				expect(baseIdx).toBeGreaterThanOrEqual(0);
+				expect(prArgs[baseIdx + 1]).toBe('develop');
+			});
+
+			it('should not pass fork args when metadata has no fork info', async () => {
+				const metadata = createValidMetadata();
+				const stateWithActiveContrib = {
+					active: [
+						{
+							id: 'contrib_draft_test',
+							repoSlug: 'owner/repo',
+							issueNumber: 42,
+							status: 'running',
+						},
+					],
+					history: [],
+					stats: {},
+				};
+				vi.mocked(fs.readFile).mockImplementation(async (filePath) => {
+					if ((filePath as string).includes('metadata.json')) {
+						return JSON.stringify(metadata);
+					}
+					if ((filePath as string).includes('state.json')) {
+						return JSON.stringify(stateWithActiveContrib);
+					}
+					throw new Error('ENOENT');
+				});
+				vi.mocked(execFileNoThrow).mockImplementation(async (cmd, args) => {
+					if (cmd === 'gh' && args?.[0] === 'auth')
+						return { stdout: 'Logged in', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'symbolic-ref')
+						return { stdout: 'refs/remotes/origin/main', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'rev-list')
+						return { stdout: '1', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'rev-parse')
+						return { stdout: 'symphony/issue-42-abc123', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'push') return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'gh' && args?.[0] === 'pr')
+						return { stdout: 'https://github.com/owner/repo/pull/50', stderr: '', exitCode: 0 };
+					return { stdout: '', stderr: '', exitCode: 0 };
+				});
+
+				const handler = getCreateDraftPRHandler();
+				const result = await handler!({} as any, { contributionId: 'contrib_draft_test' });
+
+				expect(result.success).toBe(true);
+
+				// Verify gh pr create was called WITHOUT --repo flag
+				const prCall = vi
+					.mocked(execFileNoThrow)
+					.mock.calls.find(
+						(call) => call[0] === 'gh' && call[1]?.[0] === 'pr' && call[1]?.[1] === 'create'
+					);
+				expect(prCall).toBeDefined();
+				const prArgs = prCall![1] as string[];
+				expect(prArgs).not.toContain('--repo');
+				// --head should be just the branch name, not prefixed
+				const headIdx = prArgs.indexOf('--head');
+				expect(headIdx).toBeGreaterThanOrEqual(0);
+				expect(prArgs[headIdx + 1]).not.toContain(':');
+			});
+
+			it('should pass --repo but not fork-prefixed --head when metadata has upstreamSlug only', async () => {
+				const metadata = createValidMetadata({
+					upstreamSlug: 'owner/repo',
+				});
+				const stateWithActiveContrib = {
+					active: [
+						{
+							id: 'contrib_draft_test',
+							repoSlug: 'owner/repo',
+							issueNumber: 42,
+							status: 'running',
+						},
+					],
+					history: [],
+					stats: {},
+				};
+				vi.mocked(fs.readFile).mockImplementation(async (filePath) => {
+					if ((filePath as string).includes('metadata.json')) {
+						return JSON.stringify(metadata);
+					}
+					if ((filePath as string).includes('state.json')) {
+						return JSON.stringify(stateWithActiveContrib);
+					}
+					throw new Error('ENOENT');
+				});
+				vi.mocked(execFileNoThrow).mockImplementation(async (cmd, args) => {
+					if (cmd === 'gh' && args?.[0] === 'auth')
+						return { stdout: 'Logged in', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'symbolic-ref')
+						return { stdout: 'refs/remotes/origin/main', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'rev-list')
+						return { stdout: '1', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'rev-parse')
+						return { stdout: 'symphony/issue-42-abc123', stderr: '', exitCode: 0 };
+					if (cmd === 'git' && args?.[0] === 'push') return { stdout: '', stderr: '', exitCode: 0 };
+					if (cmd === 'gh' && args?.[0] === 'pr')
+						return { stdout: 'https://github.com/owner/repo/pull/50', stderr: '', exitCode: 0 };
+					return { stdout: '', stderr: '', exitCode: 0 };
+				});
+
+				const handler = getCreateDraftPRHandler();
+				const result = await handler!({} as any, { contributionId: 'contrib_draft_test' });
+
+				expect(result.success).toBe(true);
+
+				// Verify gh pr create was called with --repo but no fork-prefixed --head
+				const prCall = vi
+					.mocked(execFileNoThrow)
+					.mock.calls.find(
+						(call) => call[0] === 'gh' && call[1]?.[0] === 'pr' && call[1]?.[1] === 'create'
+					);
+				expect(prCall).toBeDefined();
+				const prArgs = prCall![1] as string[];
+				// Should have --repo owner/repo (upstream slug from metadata)
+				const repoIdx = prArgs.indexOf('--repo');
+				expect(repoIdx).toBeGreaterThan(-1);
+				expect(prArgs[repoIdx + 1]).toBe('owner/repo');
+				// --head should be just the branch name (no fork owner prefix since no forkSlug)
+				const headIdx = prArgs.indexOf('--head');
+				expect(headIdx).toBeGreaterThanOrEqual(0);
+				expect(prArgs[headIdx + 1]).not.toContain(':');
 			});
 		});
 	});
@@ -5517,6 +6045,164 @@ This is a Symphony task document.
 				expect(writtenState.stats.firstContributionAt).toBeDefined();
 				expect(writtenState.stats.lastContributionAt).toBeDefined();
 			});
+		});
+	});
+
+	// ==========================================================================
+	// Label Capture and Blocking Label Tests
+	// ==========================================================================
+
+	describe('GitHub label capture (via symphony:getIssues)', () => {
+		const getIssuesHandler = () => handlers.get('symphony:getIssues');
+
+		beforeEach(() => {
+			vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+		});
+
+		it('should capture labels from GitHub API response', async () => {
+			mockFetch
+				.mockResolvedValueOnce({
+					ok: true,
+					json: () =>
+						Promise.resolve([
+							{
+								number: 1,
+								title: 'Test Issue',
+								body: 'docs/task.md',
+								url: 'https://api.github.com/repos/owner/repo/issues/1',
+								html_url: 'https://github.com/owner/repo/issues/1',
+								user: { login: 'user' },
+								created_at: '2024-01-01',
+								updated_at: '2024-01-01',
+								labels: [
+									{ name: 'runmaestro.ai', color: '0075ca' },
+									{ name: 'enhancement', color: 'a2eeef' },
+									{ name: 'good first issue', color: '7057ff' },
+								],
+							},
+						]),
+				})
+				.mockResolvedValueOnce({
+					ok: true,
+					json: () => Promise.resolve([]),
+				});
+
+			const handler = getIssuesHandler();
+			const result = await handler!({} as any, 'owner/repo');
+
+			// Should exclude the runmaestro.ai label
+			expect(result.issues[0].labels).toHaveLength(2);
+			expect(result.issues[0].labels).toContainEqual({ name: 'enhancement', color: 'a2eeef' });
+			expect(result.issues[0].labels).toContainEqual({ name: 'good first issue', color: '7057ff' });
+		});
+
+		it('should filter out the runmaestro.ai label from the labels list', async () => {
+			mockFetch
+				.mockResolvedValueOnce({
+					ok: true,
+					json: () =>
+						Promise.resolve([
+							{
+								number: 1,
+								title: 'Test',
+								body: 'task.md',
+								url: 'https://api.github.com/repos/owner/repo/issues/1',
+								html_url: 'https://github.com/owner/repo/issues/1',
+								user: { login: 'user' },
+								created_at: '2024-01-01',
+								updated_at: '2024-01-01',
+								labels: [{ name: 'runmaestro.ai', color: '0075ca' }],
+							},
+						]),
+				})
+				.mockResolvedValueOnce({
+					ok: true,
+					json: () => Promise.resolve([]),
+				});
+
+			const handler = getIssuesHandler();
+			const result = await handler!({} as any, 'owner/repo');
+
+			expect(result.issues[0].labels).toHaveLength(0);
+		});
+
+		it('should handle issues with no labels array gracefully', async () => {
+			mockFetch
+				.mockResolvedValueOnce({
+					ok: true,
+					json: () =>
+						Promise.resolve([
+							{
+								number: 1,
+								title: 'Test',
+								body: 'task.md',
+								url: 'https://api.github.com/repos/owner/repo/issues/1',
+								html_url: 'https://github.com/owner/repo/issues/1',
+								user: { login: 'user' },
+								created_at: '2024-01-01',
+								updated_at: '2024-01-01',
+							},
+						]),
+				})
+				.mockResolvedValueOnce({
+					ok: true,
+					json: () => Promise.resolve([]),
+				});
+
+			const handler = getIssuesHandler();
+			const result = await handler!({} as any, 'owner/repo');
+
+			expect(result.issues[0].labels).toEqual([]);
+		});
+
+		it('should capture blocking label on issues', async () => {
+			mockFetch
+				.mockResolvedValueOnce({
+					ok: true,
+					json: () =>
+						Promise.resolve([
+							{
+								number: 1,
+								title: 'Blocked Issue',
+								body: 'task.md',
+								url: 'https://api.github.com/repos/owner/repo/issues/1',
+								html_url: 'https://github.com/owner/repo/issues/1',
+								user: { login: 'user' },
+								created_at: '2024-01-01',
+								updated_at: '2024-01-01',
+								labels: [
+									{ name: 'runmaestro.ai', color: '0075ca' },
+									{ name: 'blocking', color: 'e4e669' },
+								],
+							},
+							{
+								number: 2,
+								title: 'Available Issue',
+								body: 'task2.md',
+								url: 'https://api.github.com/repos/owner/repo/issues/2',
+								html_url: 'https://github.com/owner/repo/issues/2',
+								user: { login: 'user' },
+								created_at: '2024-01-01',
+								updated_at: '2024-01-01',
+								labels: [{ name: 'runmaestro.ai', color: '0075ca' }],
+							},
+						]),
+				})
+				.mockResolvedValueOnce({
+					ok: true,
+					json: () => Promise.resolve([]),
+				});
+
+			const handler = getIssuesHandler();
+			const result = await handler!({} as any, 'owner/repo');
+
+			// Issue 1 should have the blocking label
+			const blockedIssue = result.issues.find((i: any) => i.number === 1);
+			expect(blockedIssue.labels).toContainEqual({ name: 'blocking', color: 'e4e669' });
+
+			// Issue 2 should have no labels (runmaestro.ai filtered out)
+			const availableIssue = result.issues.find((i: any) => i.number === 2);
+			expect(availableIssue.labels).toHaveLength(0);
 		});
 	});
 });

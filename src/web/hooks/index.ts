@@ -22,6 +22,8 @@ export type {
 	SessionRemovedMessage,
 	ThemeMessage,
 	ErrorMessage,
+	GroupData,
+	GroupsChangedMessage,
 	TypedServerMessage,
 	WebSocketEventHandlers,
 	UseWebSocketOptions,
@@ -75,14 +77,6 @@ export {
 
 export type { UseUnreadBadgeOptions, UseUnreadBadgeReturn } from './useUnreadBadge';
 
-export { useSwipeGestures, default as useSwipeGesturesDefault } from './useSwipeGestures';
-
-export type {
-	SwipeDirection,
-	UseSwipeGesturesOptions,
-	UseSwipeGesturesReturn,
-} from './useSwipeGestures';
-
 export { useOfflineQueue, default as useOfflineQueueDefault } from './useOfflineQueue';
 
 export type {
@@ -98,32 +92,6 @@ export {
 } from './useDeviceColorScheme';
 
 export type { ColorSchemePreference, UseDeviceColorSchemeReturn } from './useDeviceColorScheme';
-
-export {
-	useVoiceInput,
-	default as useVoiceInputDefault,
-	isSpeechRecognitionSupported,
-	getSpeechRecognition,
-} from './useVoiceInput';
-
-export type {
-	SpeechRecognitionEvent,
-	SpeechRecognitionResultList,
-	SpeechRecognitionResult,
-	SpeechRecognitionAlternative,
-	SpeechRecognitionErrorEvent,
-	SpeechRecognition,
-	SpeechRecognitionConstructor,
-	UseVoiceInputOptions,
-	UseVoiceInputReturn,
-} from './useVoiceInput';
-
-export {
-	useKeyboardVisibility,
-	default as useKeyboardVisibilityDefault,
-} from './useKeyboardVisibility';
-
-export type { UseKeyboardVisibilityReturn } from './useKeyboardVisibility';
 
 export {
 	useSlashCommandAutocomplete,
@@ -146,7 +114,7 @@ export {
 
 export type {
 	MobileKeyboardSession,
-	MobileInputMode,
+	MobileShortcutActions,
 	UseMobileKeyboardHandlerDeps,
 } from './useMobileKeyboardHandler';
 
@@ -182,3 +150,27 @@ export type {
 	UseMobileAutoReconnectDeps,
 	UseMobileAutoReconnectReturn,
 } from './useMobileAutoReconnect';
+
+export { useAgentManagement, default as useAgentManagementDefault } from './useAgentManagement';
+
+export type { UseAgentManagementReturn } from './useAgentManagement';
+
+export { useGitStatus, default as useGitStatusDefault } from './useGitStatus';
+
+export type {
+	GitStatusFile,
+	GitStatusResult,
+	GitDiffResult,
+	UseGitStatusReturn,
+} from './useGitStatus';
+
+export { useGroupChat, default as useGroupChatDefault } from './useGroupChat';
+
+export type { UseGroupChatReturn } from './useGroupChat';
+
+export type {
+	GroupChatMessage,
+	GroupChatState,
+	GroupChatMessageBroadcast,
+	GroupChatStateChangeBroadcast,
+} from './useWebSocket';

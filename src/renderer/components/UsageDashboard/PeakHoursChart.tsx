@@ -12,9 +12,10 @@
  * - Hover tooltips
  */
 
-import React, { useState, useMemo } from 'react';
+import { memo, useState, useMemo } from 'react';
 import type { Theme } from '../../types';
-import type { StatsAggregation } from '../../hooks/useStats';
+import type { StatsAggregation } from '../../hooks/stats/useStats';
+import { formatDurationCompact as formatDuration } from '../../../shared/formatters';
 
 type MetricMode = 'count' | 'duration';
 
@@ -37,24 +38,7 @@ function formatHour(hour: number): string {
 	return `${hour - 12}pm`;
 }
 
-/**
- * Format duration in milliseconds to human-readable string
- */
-function formatDuration(ms: number): string {
-	const totalSeconds = Math.floor(ms / 1000);
-	const hours = Math.floor(totalSeconds / 3600);
-	const minutes = Math.floor((totalSeconds % 3600) / 60);
-
-	if (hours > 0) {
-		return `${hours}h ${minutes}m`;
-	}
-	if (minutes > 0) {
-		return `${minutes}m`;
-	}
-	return `${totalSeconds}s`;
-}
-
-export function PeakHoursChart({
+export const PeakHoursChart = memo(function PeakHoursChart({
 	data,
 	theme,
 	colorBlindMode: _colorBlindMode = false,
@@ -103,7 +87,7 @@ export function PeakHoursChart({
 	}, [hourlyData, metricMode]);
 
 	// Check if there's any data
-	const hasData = hourlyData.some((h) => h.count > 0);
+	const hasData = useMemo(() => hourlyData.some((h) => h.count > 0), [hourlyData]);
 
 	// Chart dimensions
 	const chartHeight = 120;
@@ -118,7 +102,10 @@ export function PeakHoursChart({
 		>
 			{/* Header */}
 			<div className="flex items-center justify-between mb-3">
-				<h3 className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
+				<h3
+					className="text-sm font-medium"
+					style={{ color: theme.colors.textMain, animation: 'card-enter 0.4s ease both' }}
+				>
 					Peak Hours
 				</h3>
 				<div className="flex items-center gap-2">
@@ -253,6 +240,6 @@ export function PeakHoursChart({
 			)}
 		</div>
 	);
-}
+});
 
 export default PeakHoursChart;

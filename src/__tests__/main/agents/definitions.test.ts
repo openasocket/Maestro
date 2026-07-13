@@ -25,7 +25,23 @@ describe('agent-definitions', () => {
 			expect(agentIds).toContain('opencode');
 			expect(agentIds).toContain('gemini-cli');
 			expect(agentIds).toContain('qwen3-coder');
-			expect(agentIds).toContain('aider');
+			expect(agentIds).toContain('copilot-cli');
+			expect(agentIds).toContain('hermes');
+			expect(agentIds).toContain('pi');
+			expect(agentIds).toContain('omp');
+		});
+
+		it('should have omp with batch mode and json output configuration', () => {
+			const omp = AGENT_DEFINITIONS.find((def) => def.id === 'omp');
+			expect(omp).toBeDefined();
+			expect(omp?.name).toBe('Oh My Pi');
+			expect(omp?.command).toBe('omp');
+			expect(omp?.binaryName).toBe('omp');
+			expect(omp?.batchModePrefix).toEqual(['-p']);
+			expect(omp?.jsonOutputArgs).toEqual(['--mode', 'json']);
+			expect(omp?.resumeArgs?.('abc')).toEqual(['--resume', 'abc']);
+			expect(omp?.modelArgs?.('opus')).toEqual(['--model', 'opus']);
+			expect(omp?.hidden).toBeFalsy();
 		});
 
 		it('should have required properties on all definitions', () => {
@@ -51,7 +67,10 @@ describe('agent-definitions', () => {
 			expect(claudeCode?.args).toContain('--verbose');
 			expect(claudeCode?.args).toContain('--output-format');
 			expect(claudeCode?.args).toContain('stream-json');
-			expect(claudeCode?.args).toContain('--dangerously-skip-permissions');
+			// Base args are the standard-permission default; --dangerously-skip-permissions
+			// only applies in full permission mode via fullAccessArgs.
+			expect(claudeCode?.args).not.toContain('--dangerously-skip-permissions');
+			expect(claudeCode?.fullAccessArgs).toContain('--dangerously-skip-permissions');
 		});
 
 		it('should have codex with batch mode configuration', () => {
@@ -67,7 +86,46 @@ describe('agent-definitions', () => {
 			expect(opencode).toBeDefined();
 			expect(opencode?.batchModePrefix).toEqual(['run']);
 			expect(opencode?.jsonOutputArgs).toEqual(['--format', 'json']);
-			expect(opencode?.noPromptSeparator).toBe(true);
+			// noPromptSeparator removed: '--' separator prevents yargs from misinterpreting prompt content (#527)
+			expect(opencode?.noPromptSeparator).toBeUndefined();
+		});
+
+		it('should have copilot configured to use a PTY for interactive sessions', () => {
+			const copilot = AGENT_DEFINITIONS.find((def) => def.id === 'copilot-cli');
+			expect(copilot).toBeDefined();
+			expect(copilot?.requiresPty).toBe(true);
+			expect(copilot?.jsonOutputArgs).toEqual(['--output-format', 'json']);
+			expect(copilot?.readOnlyArgs).toEqual([
+				'--allow-tool=read,url',
+				'--deny-tool=write,shell,memory,github',
+				'--no-ask-user',
+			]);
+			expect(copilot?.readOnlyCliEnforced).toBe(true);
+		});
+
+		it('should configure Pi for documented JSONL batch output', () => {
+			const pi = AGENT_DEFINITIONS.find((def) => def.id === 'pi');
+			expect(pi?.batchModePrefix).toEqual(['-p']);
+			expect(pi?.jsonOutputArgs).toEqual(['--mode', 'json']);
+			expect(pi?.noPromptSeparator).toBe(true);
+			expect(pi?.resumeArgs?.('pi-session-1')).toEqual(['--session', 'pi-session-1']);
+			expect(pi?.readOnlyArgs).toEqual(['--tools', 'read,grep,find,ls']);
+			expect(pi?.readOnlyCliEnforced).toBe(true);
+			expect(pi?.noToolsArgs).toEqual(['--no-tools']);
+			expect(pi?.modelArgs?.('anthropic/claude-sonnet-4')).toEqual([
+				'--model',
+				'anthropic/claude-sonnet-4',
+			]);
+			expect(pi?.imageArgs?.('/tmp/image.png')).toEqual(['@/tmp/image.png']);
+		});
+
+		it('should keep Hermes on the documented plain-text batch path', () => {
+			const hermes = AGENT_DEFINITIONS.find((def) => def.id === 'hermes');
+			expect(hermes?.batchModePrefix).toEqual(['chat']);
+			expect(hermes?.batchModeArgs).toEqual(['-Q', '--yolo']);
+			expect(hermes?.jsonOutputArgs).toBeUndefined();
+			expect(hermes?.resumeArgs).toBeUndefined();
+			expect(hermes?.promptArgs?.('hello')).toEqual(['-q', 'hello']);
 		});
 
 		it('should have opencode with default env vars for YOLO mode and disabled question tool', () => {
@@ -89,6 +147,16 @@ describe('agent-definitions', () => {
 			expect(config.tools).toBeDefined();
 			expect(config.tools.question).toBe(false);
 		});
+
+		it('should have claude-code with defaultEnvVars disabling background tasks', () => {
+			// Background tasks are disabled across every spawn path (desktop UI, CLI batch, --live, SSH).
+			// Two motivations: short-lived batch sessions exit before background tasks finish (#861), and
+			// the run_in_background + Monitor poll wrapper deadlocks on a self-matching `pgrep -f` when
+			// the watched regex appears in the wrapper's own argv — observed in long-running desktop tabs.
+			const claudeCode = AGENT_DEFINITIONS.find((def) => def.id === 'claude-code');
+			expect(claudeCode?.defaultEnvVars).toBeDefined();
+			expect(claudeCode?.defaultEnvVars?.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBe('1');
+		});
 	});
 
 	describe('getAgentDefinition', () => {
@@ -105,7 +173,16 @@ describe('agent-definitions', () => {
 		});
 
 		it('should return definition for all known agents', () => {
-			const knownAgents = ['terminal', 'claude-code', 'codex', 'opencode', 'gemini-cli', 'aider'];
+			const knownAgents = [
+				'terminal',
+				'claude-code',
+				'codex',
+				'opencode',
+				'gemini-cli',
+				'copilot-cli',
+				'omp',
+				'qwen3-coder',
+			];
 			for (const agentId of knownAgents) {
 				const def = getAgentDefinition(agentId);
 				expect(def).toBeDefined();
@@ -195,6 +272,14 @@ describe('agent-definitions', () => {
 			expect(args).toEqual(['-C', '/path/to/project']);
 		});
 
+		it('should use = syntax for Copilot resume args', () => {
+			const copilot = getAgentDefinition('copilot-cli');
+			expect(copilot?.resumeArgs).toBeDefined();
+
+			const args = copilot?.resumeArgs?.('session-789');
+			expect(args).toEqual(['--resume=session-789']);
+		});
+
 		it('should have imageArgs function for codex', () => {
 			const codex = getAgentDefinition('codex');
 			expect(codex?.imageArgs).toBeDefined();
@@ -210,6 +295,18 @@ describe('agent-definitions', () => {
 			const args = opencode?.imageArgs?.('/path/to/image.png');
 			expect(args).toEqual(['-f', '/path/to/image.png']);
 		});
+
+		it('should embed Copilot images into prompts using @mentions', () => {
+			const copilot = getAgentDefinition('copilot-cli');
+			expect(copilot?.imagePromptBuilder).toBeDefined();
+
+			const promptPrefix = copilot?.imagePromptBuilder?.([
+				'/tmp/screenshot-1.png',
+				'/tmp/screenshot-2.jpg',
+			]);
+			expect(promptPrefix).toContain('@/tmp/screenshot-1.png');
+			expect(promptPrefix).toContain('@/tmp/screenshot-2.jpg');
+		});
 	});
 
 	describe('Agent config options', () => {
@@ -218,10 +315,14 @@ describe('agent-definitions', () => {
 			expect(codex?.configOptions).toBeDefined();
 			expect(Array.isArray(codex?.configOptions)).toBe(true);
 
-			const contextWindowOption = codex?.configOptions?.find((opt) => opt.key === 'contextWindow');
-			expect(contextWindowOption).toBeDefined();
-			expect(contextWindowOption?.type).toBe('number');
-			expect(contextWindowOption?.default).toBe(400000);
+			const modelOption = codex?.configOptions?.find((opt) => opt.key === 'model');
+			expect(modelOption).toBeDefined();
+			expect(modelOption?.type).toBe('text');
+
+			const reasoningOption = codex?.configOptions?.find((opt) => opt.key === 'reasoningEffort');
+			expect(reasoningOption).toBeDefined();
+			expect(reasoningOption?.type).toBe('select');
+			expect((reasoningOption as any)?.dynamic).toBe(true);
 		});
 
 		it('should have configOptions for opencode', () => {
@@ -238,6 +339,74 @@ describe('agent-definitions', () => {
 			expect(modelOption?.argBuilder?.('ollama/qwen3:8b')).toEqual(['--model', 'ollama/qwen3:8b']);
 			expect(modelOption?.argBuilder?.('')).toEqual([]);
 			expect(modelOption?.argBuilder?.('  ')).toEqual([]);
+		});
+
+		it('should expose only the batch-meaningful Copilot config knobs', () => {
+			const copilot = getAgentDefinition('copilot-cli');
+			expect(copilot?.configOptions).toBeDefined();
+
+			// The only user-facing knobs we expose are model, contextWindow, and
+			// reasoningEffort. The autopilot / allow-all-paths / allow-all-urls /
+			// experimental / screen-reader flags are intentionally omitted: batch
+			// mode already runs with --allow-all, and the rest are either
+			// interactive-only or general user preferences (see definitions.ts).
+			const keys = (copilot?.configOptions || []).map((opt) => opt.key).sort();
+			expect(keys).toEqual(['contextWindow', 'model', 'reasoningEffort']);
+
+			const reasoningEffort = copilot?.configOptions?.find((opt) => opt.key === 'reasoningEffort');
+			expect(reasoningEffort?.type).toBe('select');
+			expect(reasoningEffort?.argBuilder?.('high')).toEqual(['--reasoning-effort', 'high']);
+			expect(reasoningEffort?.argBuilder?.('')).toEqual([]);
+		});
+
+		it('should run Copilot batch with --allow-all (no --silent, no per-flag toggles)', () => {
+			const copilot = getAgentDefinition('copilot-cli');
+			expect(copilot?.batchModeArgs).toEqual(['--allow-all']);
+			expect(copilot?.batchModeArgs).not.toContain('--silent');
+			expect(copilot?.yoloModeArgs).toEqual(['--allow-all']);
+		});
+	});
+
+	describe('Qwen3 Coder agent', () => {
+		it('should be a visible, real agent (not hidden)', () => {
+			const qwen = getAgentDefinition('qwen3-coder');
+			expect(qwen).toBeDefined();
+			expect(qwen?.hidden).toBeFalsy();
+			expect(qwen?.binaryName).toBe('qwen');
+			expect(qwen?.command).toBe('qwen');
+		});
+
+		it('should build modelArgs and stream-json output args', () => {
+			const qwen = getAgentDefinition('qwen3-coder');
+			expect(qwen?.modelArgs?.('qwen3-coder-plus')).toEqual(['-m', 'qwen3-coder-plus']);
+			expect(qwen?.jsonOutputArgs).toEqual(['--output-format', 'stream-json']);
+			expect(qwen?.promptArgs?.('hello')).toEqual(['-p', 'hello']);
+		});
+
+		it('should expose a free-text model config option with trimming argBuilder', () => {
+			const qwen = getAgentDefinition('qwen3-coder');
+			const modelOption = qwen?.configOptions?.find((opt) => opt.key === 'model');
+			expect(modelOption).toBeDefined();
+			expect(modelOption?.type).toBe('text');
+			expect(modelOption?.default).toBe('');
+			expect(modelOption?.argBuilder?.('qwen3-coder-plus')).toEqual(['-m', 'qwen3-coder-plus']);
+			expect(modelOption?.argBuilder?.('')).toEqual([]);
+			expect(modelOption?.argBuilder?.('  ')).toEqual([]);
+		});
+
+		it('should use --approval-mode plan for CLI-enforced read-only (never -y)', () => {
+			const qwen = getAgentDefinition('qwen3-coder');
+			expect(qwen?.readOnlyArgs).toEqual(['--approval-mode', 'plan']);
+			expect(qwen?.readOnlyCliEnforced).toBe(true);
+			expect(qwen?.readOnlyArgs).not.toContain('-y');
+		});
+	});
+
+	describe('Oh My Pi agent', () => {
+		it('should restrict to read-only tools for CLI-enforced read-only', () => {
+			const omp = getAgentDefinition('omp');
+			expect(omp?.readOnlyArgs).toEqual(['--tools', 'read,grep,glob']);
+			expect(omp?.readOnlyCliEnforced).toBe(true);
 		});
 	});
 

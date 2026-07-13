@@ -14,9 +14,10 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { AutoRunLightbox } from '../../../renderer/components/AutoRunLightbox';
+import { AutoRunLightbox } from '../../../renderer/components/AutoRun/AutoRunLightbox';
 import { LayerStackProvider } from '../../../renderer/contexts/LayerStackContext';
-import type { Theme } from '../../../renderer/types';
+import { formatShortcutKeys } from '../../../renderer/utils/shortcutFormatter';
+import { createMockTheme } from '../../helpers/mockTheme';
 
 // Helper to wrap component in LayerStackProvider
 const renderWithProviders = (component: React.ReactElement) => {
@@ -67,28 +68,6 @@ global.ClipboardItem = MockClipboardItem as unknown as typeof ClipboardItem;
 
 // Mock fetch at module level for clipboard tests
 global.fetch = vi.fn();
-
-// Create a mock theme for testing
-const createMockTheme = (): Theme => ({
-	id: 'test-theme',
-	name: 'Test Theme',
-	mode: 'dark',
-	colors: {
-		bgMain: '#1a1a1a',
-		bgSidebar: '#252525',
-		bgPanel: '#2d2d2d',
-		bgActivity: '#333333',
-		textMain: '#ffffff',
-		textDim: '#888888',
-		accent: '#0066ff',
-		accentForeground: '#ffffff',
-		border: '#333333',
-		highlight: '#0066ff33',
-		success: '#00aa00',
-		warning: '#ffaa00',
-		error: '#ff0000',
-	},
-});
 
 // Create a mock attachment previews map
 const createMockPreviews = (filenames: string[]): Map<string, string> => {
@@ -184,7 +163,9 @@ describe('AutoRunLightbox', () => {
 			const props = createDefaultProps();
 			renderWithProviders(<AutoRunLightbox {...props} />);
 
-			expect(screen.getByTitle('Copy image to clipboard (⌘C)')).toBeInTheDocument();
+			expect(
+				screen.getByTitle(`Copy image to clipboard (${formatShortcutKeys(['Meta', 'c'])})`)
+			).toBeInTheDocument();
 			expect(screen.getByTestId('copy-icon')).toBeInTheDocument();
 		});
 
@@ -635,7 +616,9 @@ describe('AutoRunLightbox', () => {
 			const props = createDefaultProps();
 			renderWithProviders(<AutoRunLightbox {...props} />);
 
-			fireEvent.click(screen.getByTitle('Copy image to clipboard (⌘C)'));
+			fireEvent.click(
+				screen.getByTitle(`Copy image to clipboard (${formatShortcutKeys(['Meta', 'c'])})`)
+			);
 
 			await waitFor(() => {
 				expect(global.fetch).toHaveBeenCalledWith('data:image/png;base64,mock-data-image1.png');
@@ -676,7 +659,9 @@ describe('AutoRunLightbox', () => {
 			// Initially shows copy icon
 			expect(screen.getByTestId('copy-icon')).toBeInTheDocument();
 
-			fireEvent.click(screen.getByTitle('Copy image to clipboard (⌘C)'));
+			fireEvent.click(
+				screen.getByTitle(`Copy image to clipboard (${formatShortcutKeys(['Meta', 'c'])})`)
+			);
 
 			await waitFor(() => {
 				expect(screen.getByTestId('check-icon')).toBeInTheDocument();
@@ -690,7 +675,9 @@ describe('AutoRunLightbox', () => {
 			const props = createDefaultProps();
 			renderWithProviders(<AutoRunLightbox {...props} />);
 
-			const copyButton = screen.getByTitle('Copy image to clipboard (⌘C)');
+			const copyButton = screen.getByTitle(
+				`Copy image to clipboard (${formatShortcutKeys(['Meta', 'c'])})`
+			);
 
 			// Trigger copy and immediately resolve the promise chain
 			await act(async () => {
@@ -717,32 +704,29 @@ describe('AutoRunLightbox', () => {
 			const props = createDefaultProps({ onClose });
 			renderWithProviders(<AutoRunLightbox {...props} />);
 
-			fireEvent.click(screen.getByTitle('Copy image to clipboard (⌘C)'));
+			fireEvent.click(
+				screen.getByTitle(`Copy image to clipboard (${formatShortcutKeys(['Meta', 'c'])})`)
+			);
 
 			// onClose should NOT be called because stopPropagation prevents backdrop click
 			expect(onClose).not.toHaveBeenCalled();
 		});
 
 		it('should handle copy failure gracefully', async () => {
-			const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 			mockClipboardWrite.mockRejectedValueOnce(new Error('Clipboard error'));
 
 			const props = createDefaultProps();
 			renderWithProviders(<AutoRunLightbox {...props} />);
 
-			fireEvent.click(screen.getByTitle('Copy image to clipboard (⌘C)'));
+			fireEvent.click(
+				screen.getByTitle(`Copy image to clipboard (${formatShortcutKeys(['Meta', 'c'])})`)
+			);
 
+			// safeClipboardWriteBlob swallows the error and returns false,
+			// so the copy-success indicator should NOT appear
 			await waitFor(() => {
-				expect(consoleSpy).toHaveBeenCalledWith(
-					'Failed to copy image to clipboard:',
-					expect.any(Error)
-				);
+				expect(screen.getByTestId('copy-icon')).toBeInTheDocument();
 			});
-
-			// Should still show copy icon (not check)
-			expect(screen.getByTestId('copy-icon')).toBeInTheDocument();
-
-			consoleSpy.mockRestore();
 		});
 
 		it('should copy external URL when viewing external image', async () => {
@@ -751,7 +735,9 @@ describe('AutoRunLightbox', () => {
 			});
 			renderWithProviders(<AutoRunLightbox {...props} />);
 
-			fireEvent.click(screen.getByTitle('Copy image to clipboard (⌘C)'));
+			fireEvent.click(
+				screen.getByTitle(`Copy image to clipboard (${formatShortcutKeys(['Meta', 'c'])})`)
+			);
 
 			await waitFor(() => {
 				expect(global.fetch).toHaveBeenCalledWith('https://example.com/image.png');
@@ -1120,7 +1106,9 @@ describe('AutoRunLightbox', () => {
 
 			expect(screen.getByTitle('Previous image (←)')).toBeInTheDocument();
 			expect(screen.getByTitle('Next image (→)')).toBeInTheDocument();
-			expect(screen.getByTitle('Copy image to clipboard (⌘C)')).toBeInTheDocument();
+			expect(
+				screen.getByTitle(`Copy image to clipboard (${formatShortcutKeys(['Meta', 'c'])})`)
+			).toBeInTheDocument();
 			expect(screen.getByTitle('Delete image (Delete key)')).toBeInTheDocument();
 			expect(screen.getByTitle('Close (ESC)')).toBeInTheDocument();
 		});

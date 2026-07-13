@@ -1,3 +1,5 @@
+import { buildSessionDeepLink, buildGroupDeepLink } from './deep-link-urls';
+
 /**
  * Template Variable System for Auto Run and Custom AI Commands
  *
@@ -7,11 +9,13 @@
  *   {{CONDUCTOR_PROFILE}} - User's About Me profile (from Settings → General)
  *
  * Agent Variables:
+ *   {{AGENT_ID}}          - Agent UUID (Maestro agent identifier, for CLI commands)
  *   {{AGENT_NAME}}        - Agent name
  *   {{AGENT_PATH}}        - Agent home directory path (full path to project)
  *   {{AGENT_GROUP}}       - Agent's group name (if grouped)
  *   {{AGENT_SESSION_ID}}  - Agent session ID (for conversation continuity)
  *   {{AGENT_HISTORY_PATH}} - Path to agent's history JSON file (for task recall)
+ *   {{TAB_ID}}            - This conversation's AI tab ID (for CLI targeting; empty on headless spawns)
  *   {{TAB_NAME}}          - Custom tab name (alias: SESSION_NAME)
  *   {{TOOL_TYPE}}         - Agent type (claude-code, codex, opencode, factory-droid)
  *
@@ -23,6 +27,8 @@
  *   {{DOCUMENT_NAME}}     - Current Auto Run document name (without .md)
  *   {{DOCUMENT_PATH}}     - Full path to current Auto Run document
  *   {{LOOP_NUMBER}}       - Current loop iteration (5-digit padded, e.g., 00001)
+ *   {{GOAL}}              - Goal-Driven Auto Run: the free-text objective the agent pursues
+ *   {{GOAL_EXIT_CRITERIA}} - Goal-Driven Auto Run: free-text description of what "done" looks like
  *
  * Date/Time Variables:
  *   {{DATE}}              - Current date (YYYY-MM-DD)
@@ -40,9 +46,118 @@
  *   {{GIT_BRANCH}}        - Current git branch name (requires git repo)
  *   {{IS_GIT_REPO}}       - "true" or "false"
  *
+ * Deep Link Variables:
+ *   {{AGENT_DEEP_LINK}}   - maestro:// deep link to this agent
+ *   {{TAB_DEEP_LINK}}     - maestro:// deep link to this agent + active tab
+ *   {{GROUP_DEEP_LINK}}   - maestro:// deep link to this agent's group (if grouped)
+ *
  * Context Variables:
  *   {{CONTEXT_USAGE}}     - Current context window usage percentage
+ *
+ * Maestro Variables:
+ *   {{MAESTRO_CLI_PATH}}  - Platform-appropriate path to maestro-cli
+ *
+ * Cue Variables (Cue automation only):
+ *   {{CUE_EVENT_TYPE}}      - Cue event type (app.startup, time.heartbeat, time.scheduled, file.changed, agent.completed, github.*, task.pending, cli.trigger)
+ *   {{CUE_EVENT_TIMESTAMP}} - Cue event timestamp
+ *   {{CUE_TRIGGER_NAME}}   - Cue trigger/subscription name
+ *   {{CUE_RUN_ID}}         - Cue run UUID
+ *   {{CUE_FILE_PATH}}      - Changed file path (file.changed events)
+ *   {{CUE_FILE_NAME}}      - Changed file name
+ *   {{CUE_FILE_DIR}}       - Changed file directory
+ *   {{CUE_FILE_EXT}}       - Changed file extension
+ *   {{CUE_FILE_CHANGE_TYPE}} - Change type: add, change, or unlink (file.changed events)
+ *   {{CUE_SOURCE_SESSION}} - Source session name (agent.completed events)
+ *   {{CUE_SOURCE_OUTPUT}}  - Source session output (agent.completed events)
+ *   {{CUE_SOURCE_STATUS}}  - Source run status: completed, failed, timeout (agent.completed events)
+ *   {{CUE_SOURCE_EXIT_CODE}} - Source process exit code (agent.completed events)
+ *   {{CUE_SOURCE_DURATION}} - Source run duration in ms (agent.completed events)
+ *   {{CUE_SOURCE_TRIGGERED_BY}} - Subscription that triggered the source (agent.completed events)
+ *
+ *   {{CUE_TASK_FILE}}        - File path with pending tasks (task.pending events)
+ *   {{CUE_TASK_FILE_NAME}}   - File name with pending tasks (task.pending events)
+ *   {{CUE_TASK_FILE_DIR}}    - Directory of file with pending tasks (task.pending events)
+ *   {{CUE_TASK_COUNT}}       - Number of pending tasks found (task.pending events)
+ *   {{CUE_TASK_LIST}}        - Formatted list of pending tasks (task.pending events)
+ *   {{CUE_TASK_CONTENT}}     - Full file content, truncated to 10K chars (task.pending events)
+ *
+ *   {{CUE_GH_TYPE}}         - GitHub item type: "pull_request" or "issue" (github.* events)
+ *   {{CUE_GH_NUMBER}}       - PR/issue number (github.* events)
+ *   {{CUE_GH_TITLE}}        - PR/issue title (github.* events)
+ *   {{CUE_GH_AUTHOR}}       - PR/issue author login (github.* events)
+ *   {{CUE_GH_URL}}          - PR/issue HTML URL (github.* events)
+ *   {{CUE_GH_BODY}}         - PR/issue body text, truncated (github.* events)
+ *   {{CUE_GH_LABELS}}       - Comma-separated labels (github.* events)
+ *   {{CUE_GH_STATE}}        - State: "open" or "closed" (github.* events)
+ *   {{CUE_GH_REPO}}         - GitHub repo (owner/repo) (github.* events)
+ *   {{CUE_GH_BRANCH}}       - Head branch (github.pull_request events)
+ *   {{CUE_GH_BASE_BRANCH}}  - Base branch (github.pull_request events)
+ *   {{CUE_GH_ASSIGNEES}}    - Comma-separated assignees (github.issue events)
+ *
+ *   {{CUE_CLI_PROMPT}}      - Prompt text passed via --prompt flag (cli.trigger events)
+ *   {{CUE_SOURCE_AGENT_ID}} - Source agent ID passed via --source-agent-id (cli.trigger events)
+ *   {{CUE_FROM_AGENT}}      - Triggering upstream agent ID or session ID — populated from sourceSessionId (agent.completed) or sourceAgentId (cli.trigger)
+ *
+ *   {{CUE_FIRE_AT}}         - Originally-scheduled fire timestamp (ISO-8601 with timezone) for time.once events
  */
+
+/**
+ * Detect the current platform in both Node.js (main process / CLI) and
+ * renderer (browser) contexts.  The renderer has no `process` global —
+ * platform is exposed via the preload bridge at `window.maestro.platform`.
+ */
+function getCurrentPlatform(): string {
+	// Renderer FIRST: the real OS platform arrives via the preload bridge. This
+	// must win over `process.platform`, because the renderer's `process` polyfill
+	// (process-shim.js) reports platform `'browser'`, which would otherwise mask
+	// the real OS and send agents a wrong (Linux) maestro-cli path on Windows/mac.
+	if (typeof globalThis !== 'undefined' && (globalThis as any).maestro?.platform) {
+		return (globalThis as any).maestro.platform;
+	}
+
+	// Node (main process / CLI): the genuine process.platform. Guard against the
+	// shim's 'browser' value in case this ever runs in a polyfilled context.
+	if (
+		typeof process !== 'undefined' &&
+		process.platform &&
+		(process.platform as string) !== 'browser'
+	) {
+		return process.platform;
+	}
+	return 'linux'; // safe fallback
+}
+
+/**
+ * Returns the platform-appropriate command to run maestro-cli.
+ * The CLI is bundled as a JS file inside the Maestro application package,
+ * so the returned value includes the `node` invocation with the full path.
+ */
+export function getMaestroCLIPath(): string {
+	// Prefer the real, on-disk path the main process resolved and handed to the
+	// renderer via preload (`window.maestro.maestroCliPath`). This is correct in
+	// both dev (`dist/cli/maestro-cli.js`) and packaged builds, so it beats the
+	// platform-default guesses below. Absent in pure Node contexts (CLI), which
+	// fall through to the platform default.
+	const resolved =
+		typeof globalThis !== 'undefined' ? (globalThis as any).maestro?.maestroCliPath : undefined;
+	if (typeof resolved === 'string' && resolved) {
+		return `node "${resolved}"`;
+	}
+
+	const platform = getCurrentPlatform();
+	switch (platform) {
+		case 'darwin':
+			return 'node "/Applications/Maestro.app/Contents/Resources/maestro-cli.js"';
+		case 'win32': {
+			const programFiles =
+				(typeof process !== 'undefined' && process.env?.ProgramFiles) || 'C:\\Program Files';
+			return `node "${programFiles}\\Maestro\\resources\\maestro-cli.js"`;
+		}
+		default:
+			// Linux (deb/rpm installs to /opt)
+			return 'node "/opt/Maestro/resources/maestro-cli.js"';
+	}
+}
 
 /**
  * Minimal session interface that works for both CLI (SessionInfo) and renderer (Session)
@@ -64,29 +179,204 @@ export interface TemplateContext {
 	session: TemplateSessionInfo;
 	gitBranch?: string;
 	groupName?: string;
+	groupId?: string;
+	activeTabId?: string;
 	autoRunFolder?: string;
 	loopNumber?: number;
 	// Auto Run document context
 	documentName?: string;
 	documentPath?: string;
+	// Goal-Driven Auto Run context (only set for goal-driven runs)
+	goal?: string;
+	goalExitCriteria?: string;
+	/**
+	 * Pre-formatted handoff block from the previous goal iteration (see
+	 * src/shared/goalDriven/goalHandoff.ts). Empty on the first iteration.
+	 */
+	predecessorHandoff?: string;
 	// History file path for task recall
 	historyFilePath?: string;
 	// Conductor profile (user's About Me from settings)
 	conductorProfile?: string;
+	// Cue event context (for Cue automation prompts)
+	cue?: {
+		eventType?: string;
+		eventTimestamp?: string;
+		triggerName?: string;
+		runId?: string;
+		filePath?: string;
+		fileName?: string;
+		fileDir?: string;
+		fileExt?: string;
+		fileChangeType?: string;
+		sourceSession?: string;
+		sourceOutput?: string;
+		sourceStatus?: string;
+		sourceExitCode?: string;
+		sourceDuration?: string;
+		sourceTriggeredBy?: string;
+		// Task pending fields (task.pending)
+		taskFile?: string;
+		taskFileName?: string;
+		taskFileDir?: string;
+		taskCount?: string;
+		taskList?: string;
+		taskContent?: string;
+		// GitHub event fields (github.pull_request, github.issue)
+		ghType?: string;
+		ghNumber?: string;
+		ghTitle?: string;
+		ghAuthor?: string;
+		ghUrl?: string;
+		ghBody?: string;
+		ghLabels?: string;
+		ghState?: string;
+		ghRepo?: string;
+		ghBranch?: string;
+		ghBaseBranch?: string;
+		ghAssignees?: string;
+		ghMergedAt?: string;
+		/**
+		 * Comments posted to this PR/issue since the previous Cue fire,
+		 * formatted as a single human-readable block. Empty on the initial
+		 * discovery fire; only populated for re-trigger fires when
+		 * `retrigger_on_comments` is enabled. Surfaced as {{CUE_NEW_COMMENTS}}.
+		 */
+		ghNewComments?: string;
+		/** "true" when this fire is a re-trigger (vs. initial discovery). */
+		ghIsRetrigger?: string;
+		/** Re-trigger fire count for this PR/issue (1-based; 0 on initial). */
+		ghRetriggerCount?: string;
+		// CLI trigger fields (cli.trigger)
+		cliPrompt?: string;
+		sourceAgentId?: string;
+		// Unified upstream-agent session ID — `sourceSessionId` for agent.completed,
+		// `sourceAgentId` for cli.trigger. Surfaced as {{CUE_FROM_AGENT}}.
+		fromAgent?: string;
+		// time.once fields — originally-scheduled fire timestamp (ISO-8601 with TZ).
+		fireAt?: string;
+	};
 }
 
 // List of all available template variables for documentation (alphabetically sorted)
 // Variables marked as autoRunOnly are only shown in Auto Run contexts, not in AI Commands settings
+// Variables marked as cueOnly are only shown in Cue automation contexts
 export const TEMPLATE_VARIABLES = [
+	{ variable: '{{AGENT_DEEP_LINK}}', description: 'Deep link to this agent (maestro://)' },
 	{ variable: '{{AGENT_GROUP}}', description: 'Agent group name' },
+	{ variable: '{{AGENT_ID}}', description: 'Agent UUID (for CLI targeting)' },
 	{ variable: '{{CONDUCTOR_PROFILE}}', description: "Conductor's About Me profile" },
 	{ variable: '{{AGENT_HISTORY_PATH}}', description: 'History file path (task recall)' },
 	{ variable: '{{AGENT_NAME}}', description: 'Agent name' },
 	{ variable: '{{AGENT_PATH}}', description: 'Agent home directory path' },
 	{ variable: '{{AGENT_SESSION_ID}}', description: 'Agent session ID' },
 	{ variable: '{{AUTORUN_FOLDER}}', description: 'Auto Run folder path', autoRunOnly: true },
+	{ variable: '{{TAB_ID}}', description: "This conversation's tab ID (for CLI targeting)" },
 	{ variable: '{{TAB_NAME}}', description: 'Custom tab name' },
 	{ variable: '{{CONTEXT_USAGE}}', description: 'Context usage %' },
+	{
+		variable: '{{CUE_CLI_PROMPT}}',
+		description: 'CLI prompt override (cli.trigger events)',
+		cueOnly: true,
+	},
+	{
+		variable: '{{CUE_SOURCE_AGENT_ID}}',
+		description: 'Source agent ID passed via --source-agent-id (cli.trigger events)',
+		cueOnly: true,
+	},
+	{
+		variable: '{{CUE_FROM_AGENT}}',
+		description:
+			'Upstream agent/session ID — populated from sourceSessionId (agent.completed) or sourceAgentId (cli.trigger)',
+		cueOnly: true,
+	},
+	{ variable: '{{CUE_EVENT_TIMESTAMP}}', description: 'Cue event timestamp', cueOnly: true },
+	{ variable: '{{CUE_EVENT_TYPE}}', description: 'Cue event type', cueOnly: true },
+	{
+		variable: '{{CUE_GH_ASSIGNEES}}',
+		description: 'Issue assignees (comma-separated)',
+		cueOnly: true,
+	},
+	{ variable: '{{CUE_GH_AUTHOR}}', description: 'PR/issue author login', cueOnly: true },
+	{ variable: '{{CUE_GH_BASE_BRANCH}}', description: 'PR base branch', cueOnly: true },
+	{ variable: '{{CUE_GH_BODY}}', description: 'PR/issue body (truncated)', cueOnly: true },
+	{ variable: '{{CUE_GH_BRANCH}}', description: 'PR head branch', cueOnly: true },
+	{
+		variable: '{{CUE_GH_IS_RETRIGGER}}',
+		description: '"true" if this fire is a re-trigger (vs. initial discovery)',
+		cueOnly: true,
+	},
+	{ variable: '{{CUE_GH_LABELS}}', description: 'Labels (comma-separated)', cueOnly: true },
+	{ variable: '{{CUE_GH_MERGED_AT}}', description: 'PR merge timestamp', cueOnly: true },
+	{
+		variable: '{{CUE_GH_RETRIGGER_COUNT}}',
+		description: 'Re-trigger fire count for this PR/issue (1-based; 0 on initial)',
+		cueOnly: true,
+	},
+	{
+		variable: '{{CUE_NEW_COMMENTS}}',
+		description:
+			'Comments posted since the previous fire (github.* events with retrigger_on_comments)',
+		cueOnly: true,
+	},
+	{ variable: '{{CUE_GH_NUMBER}}', description: 'PR/issue number', cueOnly: true },
+	{ variable: '{{CUE_GH_REPO}}', description: 'GitHub repo (owner/repo)', cueOnly: true },
+	{ variable: '{{CUE_GH_STATE}}', description: 'PR/issue state', cueOnly: true },
+	{ variable: '{{CUE_GH_TITLE}}', description: 'PR/issue title', cueOnly: true },
+	{ variable: '{{CUE_GH_TYPE}}', description: 'Item type (pull_request/issue)', cueOnly: true },
+	{ variable: '{{CUE_GH_URL}}', description: 'PR/issue HTML URL', cueOnly: true },
+	{ variable: '{{CUE_TASK_CONTENT}}', description: 'Task file content (truncated)', cueOnly: true },
+	{ variable: '{{CUE_TASK_COUNT}}', description: 'Number of pending tasks', cueOnly: true },
+	{ variable: '{{CUE_TASK_FILE}}', description: 'File path with pending tasks', cueOnly: true },
+	{
+		variable: '{{CUE_TASK_FILE_DIR}}',
+		description: 'Directory of task file',
+		cueOnly: true,
+	},
+	{
+		variable: '{{CUE_TASK_FILE_NAME}}',
+		description: 'Name of file with pending tasks',
+		cueOnly: true,
+	},
+	{ variable: '{{CUE_TASK_LIST}}', description: 'Formatted list of pending tasks', cueOnly: true },
+	{
+		variable: '{{CUE_FILE_CHANGE_TYPE}}',
+		description: 'Change type (add/change/unlink)',
+		cueOnly: true,
+	},
+	{ variable: '{{CUE_FILE_DIR}}', description: 'Changed file directory', cueOnly: true },
+	{ variable: '{{CUE_FILE_EXT}}', description: 'Changed file extension', cueOnly: true },
+	{ variable: '{{CUE_FILE_NAME}}', description: 'Changed file name', cueOnly: true },
+	{ variable: '{{CUE_FILE_PATH}}', description: 'Changed file path', cueOnly: true },
+	{
+		variable: '{{CUE_FIRE_AT}}',
+		description: 'Originally-scheduled fire timestamp (time.once events)',
+		cueOnly: true,
+	},
+	{ variable: '{{CUE_RUN_ID}}', description: 'Cue run UUID', cueOnly: true },
+	{
+		variable: '{{CUE_SOURCE_DURATION}}',
+		description: 'Source run duration (ms)',
+		cueOnly: true,
+	},
+	{
+		variable: '{{CUE_SOURCE_EXIT_CODE}}',
+		description: 'Source process exit code',
+		cueOnly: true,
+	},
+	{ variable: '{{CUE_SOURCE_OUTPUT}}', description: 'Source session output', cueOnly: true },
+	{ variable: '{{CUE_SOURCE_SESSION}}', description: 'Source session name', cueOnly: true },
+	{
+		variable: '{{CUE_SOURCE_STATUS}}',
+		description: 'Source run status (completed/failed/timeout)',
+		cueOnly: true,
+	},
+	{
+		variable: '{{CUE_SOURCE_TRIGGERED_BY}}',
+		description: 'Subscription that triggered the source',
+		cueOnly: true,
+	},
+	{ variable: '{{CUE_TRIGGER_NAME}}', description: 'Cue trigger name', cueOnly: true },
 	{ variable: '{{CWD}}', description: 'Working directory' },
 	{ variable: '{{DATE}}', description: 'Date (YYYY-MM-DD)' },
 	{ variable: '{{DATETIME}}', description: 'Full datetime' },
@@ -95,13 +385,37 @@ export const TEMPLATE_VARIABLES = [
 	{ variable: '{{DOCUMENT_NAME}}', description: 'Current document name', autoRunOnly: true },
 	{ variable: '{{DOCUMENT_PATH}}', description: 'Current document path', autoRunOnly: true },
 	{ variable: '{{GIT_BRANCH}}', description: 'Git branch name' },
+	{
+		variable: '{{GOAL}}',
+		description: 'Goal-Driven Auto Run objective',
+		autoRunOnly: true,
+	},
+	{
+		variable: '{{GOAL_EXIT_CRITERIA}}',
+		description: 'Goal-Driven Auto Run exit criteria',
+		autoRunOnly: true,
+	},
+	{
+		variable: '{{PREDECESSOR_HANDOFF}}',
+		description: "Goal-Driven Auto Run: previous iteration's handoff note (empty on the first)",
+		autoRunOnly: true,
+	},
+	{ variable: '{{GROUP_DEEP_LINK}}', description: 'Deep link to agent group (maestro://)' },
 	{ variable: '{{IS_GIT_REPO}}', description: 'Is git repo (true/false)' },
+	{ variable: '{{MAESTRO_CLI_PATH}}', description: 'Path to maestro-cli' },
 	{
 		variable: '{{LOOP_NUMBER}}',
 		description: 'Loop iteration (00001, 00002...)',
 		autoRunOnly: true,
 	},
+	{
+		variable: '{{LOOP_NUMBER_HUMAN}}',
+		description: 'Loop iteration, unpadded (1, 2, 3...)',
+		autoRunOnly: true,
+	},
 	{ variable: '{{MONTH}}', description: 'Month (01-12)' },
+	{ variable: '{{MAESTRO_CLI_PATH}}', description: 'Path to maestro-cli' },
+	{ variable: '{{TAB_DEEP_LINK}}', description: 'Deep link to agent + active tab (maestro://)' },
 	{ variable: '{{TIME}}', description: 'Time (HH:MM:SS)' },
 	{ variable: '{{TIMESTAMP}}', description: 'Unix timestamp (ms)' },
 	{ variable: '{{TIME_SHORT}}', description: 'Time (HH:MM)' },
@@ -111,7 +425,9 @@ export const TEMPLATE_VARIABLES = [
 ];
 
 // Filtered list excluding Auto Run-only variables (for AI Commands panel)
-export const TEMPLATE_VARIABLES_GENERAL = TEMPLATE_VARIABLES.filter((v) => !v.autoRunOnly);
+export const TEMPLATE_VARIABLES_GENERAL = TEMPLATE_VARIABLES.filter(
+	(v) => !v.autoRunOnly && !v.cueOnly
+);
 
 /**
  * Substitute template variables in a string with actual values
@@ -121,10 +437,15 @@ export function substituteTemplateVariables(template: string, context: TemplateC
 		session,
 		gitBranch,
 		groupName,
+		groupId,
+		activeTabId,
 		autoRunFolder,
 		loopNumber,
 		documentName,
 		documentPath,
+		goal,
+		goalExitCriteria,
+		predecessorHandoff,
 		historyFilePath,
 		conductorProfile,
 	} = context;
@@ -136,17 +457,24 @@ export function substituteTemplateVariables(template: string, context: TemplateC
 		CONDUCTOR_PROFILE: conductorProfile || '',
 
 		// Agent variables
+		AGENT_ID: session.id,
 		AGENT_NAME: session.name,
 		AGENT_PATH: session.fullPath || session.projectRoot || session.cwd,
 		AGENT_GROUP: groupName || '',
 		AGENT_SESSION_ID: session.agentSessionId || '',
 		AGENT_HISTORY_PATH: historyFilePath || '',
+		// The AI tab this spawn belongs to. Empty for headless spawns (CLI send,
+		// playbooks, Cue) that have no desktop tab of their own.
+		TAB_ID: activeTabId || '',
 		TAB_NAME: session.name,
 		TOOL_TYPE: session.toolType,
 
 		// Path variables
 		CWD: session.cwd,
-		AUTORUN_FOLDER: autoRunFolder || session.autoRunFolderPath || '',
+		AUTORUN_FOLDER:
+			autoRunFolder ||
+			session.autoRunFolderPath ||
+			`${session.fullPath || session.projectRoot || session.cwd}/.maestro/playbooks`,
 
 		// Aliases (not documented in TEMPLATE_VARIABLES but still supported for internal use and backwards compatibility)
 		SESSION_ID: session.id,
@@ -162,8 +490,17 @@ export function substituteTemplateVariables(template: string, context: TemplateC
 		DOCUMENT_NAME: documentName || '',
 		DOCUMENT_PATH: documentPath || '',
 
+		// Goal-Driven Auto Run variables
+		GOAL: goal || '',
+		GOAL_EXIT_CRITERIA: goalExitCriteria || '',
+		// Pre-formatted handoff from the prior iteration; empty when there is none.
+		PREDECESSOR_HANDOFF: predecessorHandoff || '',
+
 		// Loop tracking (1-indexed, defaults to 1 if not in loop mode, 5-digit padded)
 		LOOP_NUMBER: String(loopNumber ?? 1).padStart(5, '0'),
+		// Same iteration counter without zero-padding, for human-readable display
+		// (e.g. the Goal-Driven prompt's "Iteration: 3").
+		LOOP_NUMBER_HUMAN: String(loopNumber ?? 1),
 
 		// Date/Time variables
 		DATE: now.toISOString().split('T')[0],
@@ -181,9 +518,80 @@ export function substituteTemplateVariables(template: string, context: TemplateC
 		GIT_BRANCH: gitBranch || '',
 		IS_GIT_REPO: String(session.isGitRepo ?? false),
 
+		// Deep link variables
+		AGENT_DEEP_LINK: buildSessionDeepLink(session.id),
+		TAB_DEEP_LINK: buildSessionDeepLink(session.id, activeTabId),
+		GROUP_DEEP_LINK: groupId ? buildGroupDeepLink(groupId) : '',
+
 		// Context variables
 		CONTEXT_USAGE: String(session.contextUsage || 0),
+
+		// Maestro variables
+		MAESTRO_CLI_PATH: getMaestroCLIPath(),
+
+		// Cue variables
+		CUE_EVENT_TYPE: context.cue?.eventType || '',
+		CUE_EVENT_TIMESTAMP: context.cue?.eventTimestamp || '',
+		CUE_TRIGGER_NAME: context.cue?.triggerName || '',
+		CUE_RUN_ID: context.cue?.runId || '',
+		CUE_FILE_PATH: context.cue?.filePath || '',
+		CUE_FILE_NAME: context.cue?.fileName || '',
+		CUE_FILE_DIR: context.cue?.fileDir || '',
+		CUE_FILE_EXT: context.cue?.fileExt || '',
+		CUE_FILE_CHANGE_TYPE: context.cue?.fileChangeType || '',
+		CUE_SOURCE_SESSION: context.cue?.sourceSession || '',
+		CUE_SOURCE_OUTPUT: context.cue?.sourceOutput || '',
+		CUE_SOURCE_STATUS: context.cue?.sourceStatus || '',
+		CUE_SOURCE_EXIT_CODE: context.cue?.sourceExitCode || '',
+		CUE_SOURCE_DURATION: context.cue?.sourceDuration || '',
+		CUE_SOURCE_TRIGGERED_BY: context.cue?.sourceTriggeredBy || '',
+
+		// Cue task variables
+		CUE_TASK_FILE: context.cue?.taskFile || '',
+		CUE_TASK_FILE_NAME: context.cue?.taskFileName || '',
+		CUE_TASK_FILE_DIR: context.cue?.taskFileDir || '',
+		CUE_TASK_COUNT: context.cue?.taskCount || '',
+		CUE_TASK_LIST: context.cue?.taskList || '',
+		CUE_TASK_CONTENT: context.cue?.taskContent || '',
+
+		// Cue GitHub variables
+		CUE_GH_TYPE: context.cue?.ghType || '',
+		CUE_GH_NUMBER: context.cue?.ghNumber || '',
+		CUE_GH_TITLE: context.cue?.ghTitle || '',
+		CUE_GH_AUTHOR: context.cue?.ghAuthor || '',
+		CUE_GH_URL: context.cue?.ghUrl || '',
+		CUE_GH_BODY: context.cue?.ghBody || '',
+		CUE_GH_LABELS: context.cue?.ghLabels || '',
+		CUE_GH_STATE: context.cue?.ghState || '',
+		CUE_GH_REPO: context.cue?.ghRepo || '',
+		CUE_GH_BRANCH: context.cue?.ghBranch || '',
+		CUE_GH_BASE_BRANCH: context.cue?.ghBaseBranch || '',
+		CUE_GH_ASSIGNEES: context.cue?.ghAssignees || '',
+		CUE_GH_MERGED_AT: context.cue?.ghMergedAt || '',
+		CUE_NEW_COMMENTS: context.cue?.ghNewComments || '',
+		CUE_GH_IS_RETRIGGER: context.cue?.ghIsRetrigger || '',
+		CUE_GH_RETRIGGER_COUNT: context.cue?.ghRetriggerCount || '',
+		CUE_CLI_PROMPT: context.cue?.cliPrompt || '',
+		CUE_SOURCE_AGENT_ID: context.cue?.sourceAgentId || '',
+		CUE_FROM_AGENT: context.cue?.fromAgent || '',
+
+		// Cue time.once variables
+		CUE_FIRE_AT: context.cue?.fireAt || '',
 	};
+
+	// Add dynamic per-source output variables from the Cue context.
+	// The context builder populates `output_<NAME>` and `forwarded_<NAME>`
+	// keys from the event payload's perSourceOutputs / forwardedOutputs maps.
+	// We expose them as {{CUE_OUTPUT_<NAME>}} and {{CUE_FORWARDED_<NAME>}}.
+	if (context.cue) {
+		for (const [key, value] of Object.entries(context.cue)) {
+			if (key.startsWith('output_') && typeof value === 'string') {
+				replacements[`CUE_${key.toUpperCase()}`] = value;
+			} else if (key.startsWith('forwarded_') && typeof value === 'string') {
+				replacements[`CUE_${key.toUpperCase()}`] = value;
+			}
+		}
+	}
 
 	// Perform case-insensitive replacement
 	let result = template;

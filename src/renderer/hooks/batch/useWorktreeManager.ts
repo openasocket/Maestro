@@ -9,6 +9,8 @@
 
 import { useCallback } from 'react';
 import type { BatchDocumentEntry } from '../../types';
+import { captureException } from '../../utils/sentry';
+import { logger } from '../../utils/logger';
 
 /**
  * Configuration for worktree operations
@@ -20,6 +22,12 @@ export interface WorktreeConfig {
 	path?: string;
 	/** Branch name to use for the worktree */
 	branchName?: string;
+	/**
+	 * Base ref the new branch should be created from when it doesn't yet exist.
+	 * Forwarded to `git worktree add -b <new> <path> <base>`. If omitted, the
+	 * new branch is created from the main repo's current HEAD (legacy behavior).
+	 */
+	baseBranch?: string;
 	/** Whether to create a PR on batch completion */
 	createPROnCompletion?: boolean;
 	/** Target branch for the PR (falls back to default branch) */
@@ -58,6 +66,8 @@ export interface PRCreationResult {
 	prUrl?: string;
 	/** Error message if creation failed */
 	error?: string;
+	/** The resolved target branch (user-specified or auto-detected) */
+	targetBranch?: string;
 }
 
 /**
@@ -87,8 +97,18 @@ export interface UseWorktreeManagerReturn {
 	) => Promise<WorktreeSetupResult>;
 	/** Create a pull request after batch completion */
 	createPR: (options: CreatePROptions) => Promise<PRCreationResult>;
-	/** Generate PR body from document list and task count */
-	generatePRBody: (documents: BatchDocumentEntry[], totalTasksCompleted: number) => string;
+	/** Generate PR title from branch name and document names */
+	generatePRTitle: (
+		branchName: string | undefined,
+		documents: BatchDocumentEntry[],
+		totalTasksCompleted: number
+	) => string;
+	/** Generate PR body from document list, task count, and commit history */
+	generatePRBody: (
+		documents: BatchDocumentEntry[],
+		totalTasksCompleted: number,
+		commitSubjects?: string[]
+	) => string;
 }
 
 /**
@@ -96,20 +116,68 @@ export interface UseWorktreeManagerReturn {
  */
 export function useWorktreeManager(): UseWorktreeManagerReturn {
 	/**
-	 * Generate PR body from completed tasks
+	 * Generate PR title from branch name and document names.
+	 * Produces a concise, descriptive title like:
+	 *   "feature/auth: 12 tasks across login-flow, signup"
+	 */
+	const generatePRTitle = useCallback(
+		(
+			branchName: string | undefined,
+			documents: BatchDocumentEntry[],
+			totalTasksCompleted: number
+		): string => {
+			const prefix = branchName || 'Auto Run';
+			const taskWord = totalTasksCompleted === 1 ? 'task' : 'tasks';
+
+			if (documents.length === 1) {
+				return `${prefix}: ${totalTasksCompleted} ${taskWord} completed in ${documents[0].filename}`;
+			}
+
+			const docNames = documents.map((d) => d.filename);
+			if (docNames.length <= 2) {
+				return `${prefix}: ${totalTasksCompleted} ${taskWord} across ${docNames.join(', ')}`;
+			}
+
+			return `${prefix}: ${totalTasksCompleted} ${taskWord} across ${docNames[0]}, ${docNames[1]} +${docNames.length - 2} more`;
+		},
+		[]
+	);
+
+	/**
+	 * Generate PR body from completed tasks and commit history.
+	 * Includes document list, task count, and git commit log.
 	 */
 	const generatePRBody = useCallback(
-		(documents: BatchDocumentEntry[], totalTasksCompleted: number): string => {
+		(
+			documents: BatchDocumentEntry[],
+			totalTasksCompleted: number,
+			commitSubjects?: string[]
+		): string => {
 			const docList = documents.map((d) => `- ${d.filename}`).join('\n');
-			return `## Auto Run Summary
 
-**Documents processed:**
-${docList}
+			const sections: string[] = [
+				`## Auto Run Summary`,
+				'',
+				`**Documents processed:**`,
+				docList,
+				'',
+				`**Total tasks completed:** ${totalTasksCompleted}`,
+			];
 
-**Total tasks completed:** ${totalTasksCompleted}
+			if (commitSubjects && commitSubjects.length > 0) {
+				sections.push('', `## Changes`, '');
+				for (const subject of commitSubjects) {
+					sections.push(`- ${subject}`);
+				}
+			}
 
----
-*This PR was automatically created by Maestro Auto Run.*`;
+			sections.push(
+				'',
+				'---',
+				'*This PR was automatically created by [Maestro](https://runmaestro.ai) Auto Run.*'
+			);
+
+			return sections.join('\n');
 		},
 		[]
 	);
@@ -152,12 +220,11 @@ ${docList}
 				return defaultResult;
 			}
 
-			console.log(
-				'[WorktreeManager] Setting up worktree at',
+			logger.info('[WorktreeManager] Setting up worktree at', undefined, [
 				worktree.path,
 				'with branch',
-				worktree.branchName
-			);
+				worktree.branchName,
+			]);
 			window.maestro.logger.log('info', 'Setting up worktree', 'WorktreeManager', {
 				worktreePath: worktree.path,
 				branchName: worktree.branchName,
@@ -170,7 +237,8 @@ ${docList}
 					sessionCwd,
 					worktree.path,
 					worktree.branchName,
-					worktree.sshRemoteId
+					worktree.sshRemoteId,
+					worktree.baseBranch
 				);
 
 				window.maestro.logger.log('info', 'worktreeSetup result', 'WorktreeManager', {
@@ -180,7 +248,11 @@ ${docList}
 				});
 
 				if (!setupResult.success) {
-					console.error('[WorktreeManager] Failed to set up worktree:', setupResult.error);
+					logger.error(
+						'[WorktreeManager] Failed to set up worktree:',
+						undefined,
+						setupResult.error
+					);
 					window.maestro.logger.log('error', 'Failed to set up worktree', 'WorktreeManager', {
 						error: setupResult.error,
 					});
@@ -194,8 +266,9 @@ ${docList}
 
 				// If worktree exists but on different branch, checkout the requested branch
 				if (setupResult.branchMismatch) {
-					console.log(
+					logger.info(
 						'[WorktreeManager] Worktree exists with different branch, checking out',
+						undefined,
 						worktree.branchName
 					);
 					window.maestro.logger.log(
@@ -220,7 +293,7 @@ ${docList}
 
 					if (!checkoutResult.success) {
 						if (checkoutResult.hasUncommittedChanges) {
-							console.error('[WorktreeManager] Cannot checkout: worktree has uncommitted changes');
+							logger.error('[WorktreeManager] Cannot checkout: worktree has uncommitted changes');
 							window.maestro.logger.log(
 								'error',
 								'Cannot checkout: worktree has uncommitted changes',
@@ -234,7 +307,11 @@ ${docList}
 								error: 'Worktree has uncommitted changes - cannot checkout branch',
 							};
 						} else {
-							console.error('[WorktreeManager] Failed to checkout branch:', checkoutResult.error);
+							logger.error(
+								'[WorktreeManager] Failed to checkout branch:',
+								undefined,
+								checkoutResult.error
+							);
 							window.maestro.logger.log('error', 'Failed to checkout branch', 'WorktreeManager', {
 								error: checkoutResult.error,
 							});
@@ -249,7 +326,7 @@ ${docList}
 				}
 
 				// Worktree is ready - return the worktree path as effective CWD
-				console.log('[WorktreeManager] Worktree ready at', worktree.path);
+				logger.info('[WorktreeManager] Worktree ready at', undefined, worktree.path);
 				window.maestro.logger.log('info', 'Worktree ready', 'WorktreeManager', {
 					effectiveCwd: worktree.path,
 					worktreeBranch: worktree.branchName,
@@ -263,7 +340,7 @@ ${docList}
 					worktreeBranch: worktree.branchName,
 				};
 			} catch (error) {
-				console.error('[WorktreeManager] Error setting up worktree:', error);
+				logger.error('[WorktreeManager] Error setting up worktree:', undefined, error);
 				window.maestro.logger.log('error', 'Exception setting up worktree', 'WorktreeManager', {
 					error: String(error),
 				});
@@ -282,18 +359,23 @@ ${docList}
 	 * Create a pull request after batch completion
 	 *
 	 * - Gets default branch if prTargetBranch not specified
-	 * - Generates PR body with document list and task count
+	 * - Fetches git commit log for the PR body
+	 * - Generates intelligent PR title from branch name and documents
 	 * - Creates the PR using gh CLI
 	 */
 	const createPR = useCallback(
 		async (options: CreatePROptions): Promise<PRCreationResult> => {
 			const { worktreePath, mainRepoCwd, worktree, documents, totalCompletedTasks } = options;
 
-			console.log('[WorktreeManager] Creating PR from worktree branch', worktree.branchName);
+			logger.info(
+				'[WorktreeManager] Creating PR from worktree branch',
+				undefined,
+				worktree.branchName
+			);
 
+			let baseBranch: string | undefined = worktree.prTargetBranch;
 			try {
 				// Use the user-selected target branch, or fall back to default branch detection
-				let baseBranch = worktree.prTargetBranch;
 				if (!baseBranch) {
 					const defaultBranchResult = await window.maestro.git.getDefaultBranch(mainRepoCwd);
 					baseBranch =
@@ -302,9 +384,21 @@ ${docList}
 							: 'main';
 				}
 
-				// Generate PR title and body
-				const prTitle = `Auto Run: ${documents.length} document(s) processed`;
-				const prBody = generatePRBody(documents, totalCompletedTasks);
+				// Fetch recent commit log from the worktree for the PR body
+				let commitSubjects: string[] = [];
+				try {
+					const logResult = await window.maestro.git.log(worktreePath, { limit: 50 });
+					if (logResult.entries && logResult.entries.length > 0) {
+						commitSubjects = logResult.entries.map((e) => e.subject);
+					}
+				} catch (err) {
+					// Non-fatal — commit log is nice-to-have
+					captureException(err, { extra: { worktreePath, operation: 'git.log' } });
+				}
+
+				// Generate intelligent PR title and body
+				const prTitle = generatePRTitle(worktree.branchName, documents, totalCompletedTasks);
+				const prBody = generatePRBody(documents, totalCompletedTasks, commitSubjects);
 
 				// Create the PR (pass ghPath if configured)
 				const prResult = await window.maestro.git.createPR(
@@ -316,32 +410,36 @@ ${docList}
 				);
 
 				if (prResult.success) {
-					console.log('[WorktreeManager] PR created successfully:', prResult.prUrl);
+					logger.info('[WorktreeManager] PR created successfully:', undefined, prResult.prUrl);
 					return {
 						success: true,
 						prUrl: prResult.prUrl,
+						targetBranch: baseBranch,
 					};
 				} else {
-					console.warn('[WorktreeManager] PR creation failed:', prResult.error);
+					logger.warn('[WorktreeManager] PR creation failed:', undefined, prResult.error);
 					return {
 						success: false,
 						error: prResult.error,
+						targetBranch: baseBranch,
 					};
 				}
 			} catch (error) {
-				console.error('[WorktreeManager] Error creating PR:', error);
+				logger.error('[WorktreeManager] Error creating PR:', undefined, error);
 				return {
 					success: false,
 					error: error instanceof Error ? error.message : 'Unknown error',
+					targetBranch: baseBranch,
 				};
 			}
 		},
-		[generatePRBody]
+		[generatePRTitle, generatePRBody]
 	);
 
 	return {
 		setupWorktree,
 		createPR,
+		generatePRTitle,
 		generatePRBody,
 	};
 }

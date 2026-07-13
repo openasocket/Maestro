@@ -115,35 +115,17 @@ const allAnnotations: VibesAnnotation[] = [
 
 describe('VibesAnnotationLog', () => {
 	it('renders loading state', () => {
-		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={[]}
-				isLoading={true}
-			/>,
-		);
+		render(<VibesAnnotationLog theme={mockTheme} annotations={[]} isLoading={true} />);
 		expect(screen.getByText('Loading annotations...')).toBeTruthy();
 	});
 
 	it('renders empty state when no annotations', () => {
-		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={[]}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesAnnotationLog theme={mockTheme} annotations={[]} isLoading={false} />);
 		expect(screen.getByText('No annotations recorded yet')).toBeTruthy();
 	});
 
 	it('renders annotation list with all types', () => {
-		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={allAnnotations}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesAnnotationLog theme={mockTheme} annotations={allAnnotations} isLoading={false} />);
 
 		// Session annotations
 		expect(screen.getByText('Session Started')).toBeTruthy();
@@ -165,11 +147,7 @@ describe('VibesAnnotationLog', () => {
 
 	it('shows line range for line annotations', () => {
 		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={[mockLineAnnotation]}
-				isLoading={false}
-			/>,
+			<VibesAnnotationLog theme={mockTheme} annotations={[mockLineAnnotation]} isLoading={false} />
 		);
 		expect(screen.getByText(':10-25')).toBeTruthy();
 	});
@@ -180,30 +158,20 @@ describe('VibesAnnotationLog', () => {
 				theme={mockTheme}
 				annotations={[mockFunctionAnnotation]}
 				isLoading={false}
-			/>,
+			/>
 		);
 		expect(screen.getByText(':processData')).toBeTruthy();
 	});
 
 	it('shows session description when available', () => {
 		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={[mockSessionStart]}
-				isLoading={false}
-			/>,
+			<VibesAnnotationLog theme={mockTheme} annotations={[mockSessionStart]} isLoading={false} />
 		);
 		expect(screen.getByText(/Auto Run started/)).toBeTruthy();
 	});
 
 	it('filters by action type', () => {
-		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={allAnnotations}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesAnnotationLog theme={mockTheme} annotations={allAnnotations} isLoading={false} />);
 
 		// Find the action dropdown and change it to 'delete'
 		const selects = screen.getAllByRole('combobox');
@@ -217,13 +185,7 @@ describe('VibesAnnotationLog', () => {
 	});
 
 	it('filters by file path search', () => {
-		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={allAnnotations}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesAnnotationLog theme={mockTheme} annotations={allAnnotations} isLoading={false} />);
 
 		const searchInput = screen.getByPlaceholderText('Filter by file path...');
 		fireEvent.change(searchInput, { target: { value: 'engine' } });
@@ -234,13 +196,7 @@ describe('VibesAnnotationLog', () => {
 	});
 
 	it('clears filters when clear button is clicked', () => {
-		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={allAnnotations}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesAnnotationLog theme={mockTheme} annotations={allAnnotations} isLoading={false} />);
 
 		// Apply a filter
 		const searchInput = screen.getByPlaceholderText('Filter by file path...');
@@ -256,11 +212,7 @@ describe('VibesAnnotationLog', () => {
 
 	it('expands annotation detail on click', () => {
 		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={[mockLineAnnotation]}
-				isLoading={false}
-			/>,
+			<VibesAnnotationLog theme={mockTheme} annotations={[mockLineAnnotation]} isLoading={false} />
 		);
 
 		// Click the annotation row to expand
@@ -275,11 +227,7 @@ describe('VibesAnnotationLog', () => {
 
 	it('shows command hash in expanded detail', () => {
 		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={[mockLineAnnotation]}
-				isLoading={false}
-			/>,
+			<VibesAnnotationLog theme={mockTheme} annotations={[mockLineAnnotation]} isLoading={false} />
 		);
 
 		const row = screen.getByText(/src\/utils\/helpers\.ts/).closest('button');
@@ -294,7 +242,7 @@ describe('VibesAnnotationLog', () => {
 				theme={mockTheme}
 				annotations={[mockFunctionAnnotation]}
 				isLoading={false}
-			/>,
+			/>
 		);
 
 		const row = screen.getByText(/src\/core\/engine\.ts/).closest('button');
@@ -310,7 +258,7 @@ describe('VibesAnnotationLog', () => {
 				theme={mockTheme}
 				annotations={[mockFunctionAnnotation]}
 				isLoading={false}
-			/>,
+			/>
 		);
 
 		const row = screen.getByText(/src\/core\/engine\.ts/).closest('button');
@@ -321,11 +269,7 @@ describe('VibesAnnotationLog', () => {
 
 	it('collapses expanded annotation on second click', () => {
 		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={[mockLineAnnotation]}
-				isLoading={false}
-			/>,
+			<VibesAnnotationLog theme={mockTheme} annotations={[mockLineAnnotation]} isLoading={false} />
 		);
 
 		const row = screen.getByText(/src\/utils\/helpers\.ts/).closest('button');
@@ -340,13 +284,7 @@ describe('VibesAnnotationLog', () => {
 	});
 
 	it('shows "no match" empty state when filters exclude all annotations', () => {
-		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={allAnnotations}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesAnnotationLog theme={mockTheme} annotations={allAnnotations} isLoading={false} />);
 
 		const searchInput = screen.getByPlaceholderText('Filter by file path...');
 		fireEvent.change(searchInput, { target: { value: 'nonexistent-file' } });
@@ -355,13 +293,7 @@ describe('VibesAnnotationLog', () => {
 	});
 
 	it('shows filter count in footer when filters active', () => {
-		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={allAnnotations}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesAnnotationLog theme={mockTheme} annotations={allAnnotations} isLoading={false} />);
 
 		const searchInput = screen.getByPlaceholderText('Filter by file path...');
 		fireEvent.change(searchInput, { target: { value: 'helpers' } });
@@ -375,7 +307,7 @@ describe('VibesAnnotationLog', () => {
 				theme={mockTheme}
 				annotations={[mockSessionStart, mockSessionEnd]}
 				isLoading={false}
-			/>,
+			/>
 		);
 
 		expect(screen.getByTestId('icon-play')).toBeTruthy();
@@ -384,11 +316,7 @@ describe('VibesAnnotationLog', () => {
 
 	it('displays truncated session id for session annotations', () => {
 		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={[mockSessionStart]}
-				isLoading={false}
-			/>,
+			<VibesAnnotationLog theme={mockTheme} annotations={[mockSessionStart]} isLoading={false} />
 		);
 
 		// session_id 'session-001' sliced to first 8 chars = 'session-'
@@ -407,7 +335,7 @@ describe('VibesAnnotationLog', () => {
 				theme={mockTheme}
 				annotations={[mockLineAnnotation, malformed]}
 				isLoading={false}
-			/>,
+			/>
 		);
 
 		expect(screen.getByText(/1 annotation skipped due to malformed data/)).toBeTruthy();
@@ -422,20 +350,14 @@ describe('VibesAnnotationLog', () => {
 				theme={mockTheme}
 				annotations={[mockLineAnnotation, malformed1, malformed2]}
 				isLoading={false}
-			/>,
+			/>
 		);
 
 		expect(screen.getByText(/2 annotations skipped due to malformed data/)).toBeTruthy();
 	});
 
 	it('does not show parse error warning when all annotations are valid', () => {
-		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={allAnnotations}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesAnnotationLog theme={mockTheme} annotations={allAnnotations} isLoading={false} />);
 
 		expect(screen.queryByText(/skipped due to malformed data/)).toBeNull();
 	});
@@ -448,7 +370,7 @@ describe('VibesAnnotationLog', () => {
 				theme={mockTheme}
 				annotations={[mockLineAnnotation, mockSessionStart, malformed]}
 				isLoading={false}
-			/>,
+			/>
 		);
 
 		expect(screen.getByText(/2 of 2 annotations/)).toBeTruthy();
@@ -467,13 +389,7 @@ describe('VibesAnnotationLog', () => {
 			// no environment_hash — this is normal for vibecheck CLI JSON output
 		} as unknown as VibesAnnotation;
 
-		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={[missingHash]}
-				isLoading={false}
-			/>,
-		);
+		render(<VibesAnnotationLog theme={mockTheme} annotations={[missingHash]} isLoading={false} />);
 
 		// Should render the annotation, not skip it
 		expect(screen.queryByText(/skipped due to malformed data/)).toBeNull();
@@ -494,11 +410,7 @@ describe('VibesAnnotationLog', () => {
 		} as unknown as VibesAnnotation;
 
 		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={[missingTimestamp]}
-				isLoading={false}
-			/>,
+			<VibesAnnotationLog theme={mockTheme} annotations={[missingTimestamp]} isLoading={false} />
 		);
 
 		expect(screen.getByText(/1 annotation skipped due to malformed data/)).toBeTruthy();
@@ -517,11 +429,7 @@ describe('VibesAnnotationLog', () => {
 		} as unknown as VibesAnnotation;
 
 		render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={[missingAssurance]}
-				isLoading={false}
-			/>,
+			<VibesAnnotationLog theme={mockTheme} annotations={[missingAssurance]} isLoading={false} />
 		);
 
 		expect(screen.getByText(/1 annotation skipped due to malformed data/)).toBeTruthy();
@@ -533,11 +441,7 @@ describe('VibesAnnotationLog', () => {
 
 	it('renders skeleton rows in loading state', () => {
 		const { container } = render(
-			<VibesAnnotationLog
-				theme={mockTheme}
-				annotations={[]}
-				isLoading={true}
-			/>,
+			<VibesAnnotationLog theme={mockTheme} annotations={[]} isLoading={true} />
 		);
 
 		// Should have multiple skeleton placeholder rows with animate-pulse

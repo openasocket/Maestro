@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Session } from '../../types';
+import { logger } from '../../utils/logger';
 
 /**
  * Dependencies for the useCliActivityMonitoring hook.
@@ -38,9 +39,15 @@ export function useCliActivityMonitoring(
 	// Listen for CLI activity changes (when CLI is running playbooks)
 	// Update session states to show busy when CLI is active
 	useEffect(() => {
+		// Guard: cli API may not be available in all environments
+		if (!window.maestro?.cli) {
+			return;
+		}
+
 		const checkCliActivity = async () => {
 			try {
 				const activities = await window.maestro.cli.getActivity();
+				if (!Array.isArray(activities)) return;
 				setSessions((prev) =>
 					prev.map((session) => {
 						const cliActivity = activities.find((a) => a.sessionId === session.id);
@@ -72,7 +79,7 @@ export function useCliActivityMonitoring(
 					})
 				);
 			} catch (error) {
-				console.error('[CLI Activity] Error checking activity:', error);
+				logger.error('[CLI Activity] Error checking activity:', undefined, error);
 			}
 		};
 

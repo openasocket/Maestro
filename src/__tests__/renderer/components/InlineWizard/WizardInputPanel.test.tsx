@@ -13,8 +13,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { WizardInputPanel } from '../../../../renderer/components/InlineWizard/WizardInputPanel';
-import type { Session, Theme } from '../../../../renderer/types';
+import {
+	formatShortcutKeys,
+	formatEnterToSend,
+} from '../../../../renderer/utils/shortcutFormatter';
+import type { Session } from '../../../../renderer/types';
+import { createMockSession as baseCreateMockSession } from '../../../helpers/mockSession';
 
+import { mockTheme } from '../../../helpers/mockTheme';
 // Mock useLayerStack for the WizardExitConfirmDialog
 vi.mock('../../../../renderer/contexts/LayerStackContext', () => ({
 	useLayerStack: () => ({
@@ -24,63 +30,34 @@ vi.mock('../../../../renderer/contexts/LayerStackContext', () => ({
 	}),
 }));
 
-// Mock theme for testing
-const mockTheme: Theme = {
-	id: 'test-theme',
-	name: 'Test Theme',
-	mode: 'dark',
-	colors: {
-		background: '#1a1a1a',
-		backgroundDim: '#0d0d0d',
-		backgroundBright: '#2a2a2a',
-		bgActivity: '#333333',
-		bgMain: '#1a1a1a',
-		bgSidebar: '#141414',
-		textMain: '#ffffff',
-		textDim: '#888888',
-		textMuted: '#666666',
-		textBright: '#ffffff',
-		border: '#333333',
-		borderBright: '#444444',
-		success: '#00ff00',
-		warning: '#ffff00',
-		error: '#ff0000',
-		accent: '#007bff',
-		accentForeground: '#ffffff',
-		accentText: '#66b2ff',
+// Mock sessionStore for tab close on Escape
+const mockSetSessions = vi.fn();
+vi.mock('../../../../renderer/stores/sessionStore', () => ({
+	useSessionStore: {
+		getState: () => ({
+			setSessions: mockSetSessions,
+		}),
 	},
-};
+}));
 
-// Mock session for testing
+// Mock theme for testing
+
+// Thin wrapper: seeds an active wizard state on the session so the
+// input panel renders the wizard chrome.
 const createMockSession = (overrides?: Partial<Session>): Session =>
-	({
+	baseCreateMockSession({
 		id: 'test-session',
-		name: 'Test Session',
 		cwd: '/test',
 		fullPath: '/test',
 		projectRoot: '/test',
-		toolType: 'claude-code',
-		state: 'idle',
-		inputMode: 'ai',
-		isGitRepo: false,
-		shellLogs: [],
-		fileTree: [],
-		changedFiles: [],
-		workLog: [],
 		aiTabs: [
 			{
 				id: 'tab-1',
 				name: 'Main',
 				logs: [],
 			},
-		],
+		] as any,
 		activeTabId: 'tab-1',
-		closedTabHistory: [],
-		executionQueue: [],
-		contextUsage: 0,
-		fileExplorerExpanded: [],
-		fileExplorerScrollPos: 0,
-		isLive: false,
 		aiPid: 1234,
 		port: 3000,
 		wizardState: {
@@ -93,9 +70,9 @@ const createMockSession = (overrides?: Partial<Session>): Session =>
 				saveToHistory: true,
 				showThinking: 'off',
 			},
-		},
+		} as any,
 		...overrides,
-	}) as Session;
+	});
 
 describe('WizardInputPanel', () => {
 	const defaultProps = {
@@ -198,14 +175,16 @@ describe('WizardInputPanel', () => {
 	describe('mode toggle', () => {
 		it('renders the mode toggle button', () => {
 			render(<WizardInputPanel {...defaultProps} />);
-			expect(screen.getByTitle('Toggle Mode (Cmd+J)')).toBeInTheDocument();
+			expect(
+				screen.getByTitle(`Toggle Mode (${formatShortcutKeys(['Meta', 'j'])})`)
+			).toBeInTheDocument();
 		});
 
 		it('calls toggleInputMode when clicked', () => {
 			const toggleInputMode = vi.fn();
 			render(<WizardInputPanel {...defaultProps} toggleInputMode={toggleInputMode} />);
 
-			fireEvent.click(screen.getByTitle('Toggle Mode (Cmd+J)'));
+			fireEvent.click(screen.getByTitle(`Toggle Mode (${formatShortcutKeys(['Meta', 'j'])})`));
 
 			expect(toggleInputMode).toHaveBeenCalled();
 		});
@@ -235,7 +214,7 @@ describe('WizardInputPanel', () => {
 			);
 
 			// Terminal icon should be present (not the Wand icon)
-			const modeButton = screen.getByTitle('Toggle Mode (Cmd+J)');
+			const modeButton = screen.getByTitle(`Toggle Mode (${formatShortcutKeys(['Meta', 'j'])})`);
 			const svgIcon = modeButton.querySelector('svg');
 			expect(svgIcon).toBeInTheDocument();
 		});
@@ -335,8 +314,7 @@ describe('WizardInputPanel', () => {
 
 		it('shows "⌘ + Enter" (or "Ctrl + Enter" on non-Mac) when enterToSend is false', () => {
 			render(<WizardInputPanel {...defaultProps} enterToSend={false} />);
-			// Test environment doesn't have Mac user agent, so it shows Ctrl + Enter
-			expect(screen.getByText(/⌘ \+ Enter|Ctrl \+ Enter/)).toBeInTheDocument();
+			expect(screen.getByText(formatEnterToSend(false))).toBeInTheDocument();
 		});
 
 		it('calls setEnterToSend when clicked', () => {
@@ -456,8 +434,31 @@ describe('WizardInputPanel', () => {
 	});
 
 	describe('escape key handling', () => {
-		it('shows exit confirmation dialog when Escape is pressed in textarea', () => {
-			render(<WizardInputPanel {...defaultProps} />);
+		it('exits wizard directly when Escape is pressed with no user interaction', () => {
+			const onExitWizard = vi.fn();
+			render(<WizardInputPanel {...defaultProps} onExitWizard={onExitWizard} />);
+
+			const textarea = screen.getByPlaceholderText('Tell the wizard about your project...');
+			fireEvent.keyDown(textarea, { key: 'Escape' });
+
+			// No dialog — exits directly (only 1 tab, so falls back to onExitWizard)
+			expect(screen.queryByText('Exit Wizard?')).not.toBeInTheDocument();
+			expect(onExitWizard).toHaveBeenCalledTimes(1);
+		});
+
+		it('shows exit confirmation dialog when Escape is pressed with user interaction', () => {
+			const sessionWithHistory = createMockSession({
+				wizardState: {
+					isActive: true,
+					mode: 'new',
+					confidence: 50,
+					conversationHistory: [
+						{ id: 'msg-1', role: 'user', content: 'Hello', timestamp: Date.now() },
+					],
+					previousUIState: { readOnlyMode: false, saveToHistory: true, showThinking: 'off' },
+				},
+			});
+			render(<WizardInputPanel {...defaultProps} session={sessionWithHistory} />);
 
 			const textarea = screen.getByPlaceholderText('Tell the wizard about your project...');
 			fireEvent.keyDown(textarea, { key: 'Escape' });
@@ -467,6 +468,24 @@ describe('WizardInputPanel', () => {
 			expect(
 				screen.getByText('Progress will be lost. Are you sure you want to exit the wizard?')
 			).toBeInTheDocument();
+		});
+
+		it('shows exit confirmation dialog when Escape is pressed with typed input', () => {
+			render(<WizardInputPanel {...defaultProps} inputValue="some text" />);
+
+			const textarea = screen.getByPlaceholderText('Tell the wizard about your project...');
+			fireEvent.keyDown(textarea, { key: 'Escape' });
+
+			expect(screen.getByText('Exit Wizard?')).toBeInTheDocument();
+		});
+
+		it('shows exit confirmation dialog when Escape is pressed with staged images', () => {
+			render(<WizardInputPanel {...defaultProps} stagedImages={['data:image/png;base64,abc']} />);
+
+			const textarea = screen.getByPlaceholderText('Tell the wizard about your project...');
+			fireEvent.keyDown(textarea, { key: 'Escape' });
+
+			expect(screen.getByText('Exit Wizard?')).toBeInTheDocument();
 		});
 
 		it('forwards non-Escape key events to handleInputKeyDown', () => {
@@ -491,7 +510,24 @@ describe('WizardInputPanel', () => {
 
 		it('calls onExitWizard when Exit is clicked in dialog', () => {
 			const onExitWizard = vi.fn();
-			render(<WizardInputPanel {...defaultProps} onExitWizard={onExitWizard} />);
+			const sessionWithHistory = createMockSession({
+				wizardState: {
+					isActive: true,
+					mode: 'new',
+					confidence: 50,
+					conversationHistory: [
+						{ id: 'msg-1', role: 'user', content: 'Hello', timestamp: Date.now() },
+					],
+					previousUIState: { readOnlyMode: false, saveToHistory: true, showThinking: 'off' },
+				},
+			});
+			render(
+				<WizardInputPanel
+					{...defaultProps}
+					session={sessionWithHistory}
+					onExitWizard={onExitWizard}
+				/>
+			);
 
 			// Show the dialog
 			const textarea = screen.getByPlaceholderText('Tell the wizard about your project...');
@@ -504,7 +540,18 @@ describe('WizardInputPanel', () => {
 		});
 
 		it('closes dialog when Cancel is clicked', () => {
-			render(<WizardInputPanel {...defaultProps} />);
+			const sessionWithHistory = createMockSession({
+				wizardState: {
+					isActive: true,
+					mode: 'new',
+					confidence: 50,
+					conversationHistory: [
+						{ id: 'msg-1', role: 'user', content: 'Hello', timestamp: Date.now() },
+					],
+					previousUIState: { readOnlyMode: false, saveToHistory: true, showThinking: 'off' },
+				},
+			});
+			render(<WizardInputPanel {...defaultProps} session={sessionWithHistory} />);
 
 			// Show the dialog
 			const textarea = screen.getByPlaceholderText('Tell the wizard about your project...');

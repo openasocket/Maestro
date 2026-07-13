@@ -14,7 +14,17 @@
  */
 
 import { create } from 'zustand';
-import type { Session, Group } from '../types';
+import type { Session, Group, LogEntry, AITab } from '../types';
+import { generateId } from '../utils/ids';
+import { getActiveTab } from '../utils/tabHelpers';
+import { logger } from '../utils/logger';
+import { useUIStore } from './uiStore';
+import {
+	normalizeGroupHierarchy,
+	removeGroupAndPromoteChildren,
+	setGroupParent as updateGroupParent,
+} from '../../shared/groupHierarchy';
+import { useContextTimelineStore } from './contextTimelineStore';
 
 // ============================================================================
 // Store Types
@@ -31,6 +41,7 @@ export interface SessionStoreState {
 	// Initialization
 	sessionsLoaded: boolean;
 	initialLoadComplete: boolean;
+	initialFileTreeReady: boolean;
 
 	// Worktree tracking (prevents re-discovery of manually removed worktrees)
 	removedWorktreePaths: Set<string>;
@@ -69,6 +80,12 @@ export interface SessionStoreActions {
 	setActiveSessionId: (id: string) => void;
 
 	/**
+	 * Set the active session ID from persisted state on startup.
+	 * Updates local state only — does not write back to disk.
+	 */
+	hydrateActiveSessionId: (id: string) => void;
+
+	/**
 	 * Set the active session ID without resetting cycle position.
 	 * Used internally by session cycling (Cmd+J/K).
 	 */
@@ -90,6 +107,9 @@ export interface SessionStoreActions {
 	/** Update a group by ID with a partial update. */
 	updateGroup: (id: string, updates: Partial<Group>) => void;
 
+	/** Move a group to the top level or below a valid root group. */
+	setGroupParent: (groupId: string, parentGroupId: string | undefined) => void;
+
 	/** Toggle a group's collapsed state. */
 	toggleGroupCollapsed: (id: string) => void;
 
@@ -97,6 +117,7 @@ export interface SessionStoreActions {
 
 	setSessionsLoaded: (loaded: boolean | ((prev: boolean) => boolean)) => void;
 	setInitialLoadComplete: (complete: boolean | ((prev: boolean) => boolean)) => void;
+	setInitialFileTreeReady: (ready: boolean | ((prev: boolean) => boolean)) => void;
 
 	// === Bookmarks ===
 
@@ -115,6 +136,18 @@ export interface SessionStoreActions {
 
 	setCyclePosition: (pos: number) => void;
 	resetCyclePosition: () => void;
+
+	// === Log management ===
+
+	/**
+	 * Add a log entry to a specific tab's logs (or active tab if no tabId provided).
+	 * Used for slash commands, system messages, queued items, etc.
+	 */
+	addLogToTab: (
+		sessionId: string,
+		logEntry: Omit<LogEntry, 'id' | 'timestamp'> & { id?: string; timestamp?: number },
+		tabId?: string
+	) => void;
 }
 
 export type SessionStore = SessionStoreState & SessionStoreActions;
@@ -141,6 +174,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
 	activeSessionId: '',
 	sessionsLoaded: false,
 	initialLoadComplete: false,
+	initialFileTreeReady: false,
 	removedWorktreePaths: new Set(),
 	cyclePosition: -1,
 
@@ -152,6 +186,18 @@ export const useSessionStore = create<SessionStore>()((set) => ({
 			const newSessions = resolve(v, s.sessions);
 			// Skip if same reference (no-op update)
 			if (newSessions === s.sessions) return s;
+			// Most delete flows (single-agent, group delete) filter the array and
+			// call setSessions directly rather than removeSession, so prune the
+			// context-timeline buffers of any agent that disappeared here. Guard on
+			// length so the common update path (same count) pays nothing.
+			if (newSessions.length < s.sessions.length) {
+				const liveIds = new Set(newSessions.map((sess) => sess.id));
+				for (const sess of s.sessions) {
+					if (!liveIds.has(sess.id)) {
+						useContextTimelineStore.getState().removeSession(sess.id);
+					}
+				}
+			}
 			return { sessions: newSessions };
 		}),
 
@@ -162,6 +208,8 @@ export const useSessionStore = create<SessionStore>()((set) => ({
 			const filtered = s.sessions.filter((session) => session.id !== id);
 			// Skip if nothing was removed
 			if (filtered.length === s.sessions.length) return s;
+			// Drop the deleted agent's context-timeline buffer so it doesn't leak.
+			useContextTimelineStore.getState().removeSession(id);
 			return { sessions: filtered };
 		}),
 
@@ -181,7 +229,21 @@ export const useSessionStore = create<SessionStore>()((set) => ({
 		}),
 
 	// Active session
-	setActiveSessionId: (id) => set({ activeSessionId: id, cyclePosition: -1 }),
+	setActiveSessionId: (id) => {
+		set({ activeSessionId: id, cyclePosition: -1 });
+		// Activating an agent through the public setter (clicks, external jumps)
+		// clears the Starred/Group-Chat keyboard cursor so a stale non-agent
+		// highlight never lingers. The cycle re-sets it afterward when it lands on
+		// a starred row (see useCycleSession.activateVisualItem).
+		useUIStore.getState().setSidebarExtraSelection(null);
+		// Fire-and-forget: persist to disk for restore on next launch.
+		// Not awaited — UI state must update synchronously; if the write
+		// fails the only consequence is the session won't be pre-selected
+		// on next launch (falls back to first session).
+		window.maestro?.sessions?.setActiveSessionId(id);
+	},
+
+	hydrateActiveSessionId: (id) => set({ activeSessionId: id, cyclePosition: -1 }),
 
 	setActiveSessionIdInternal: (v) =>
 		set((s) => ({ activeSessionId: resolve(v, s.activeSessionId) })),
@@ -189,32 +251,51 @@ export const useSessionStore = create<SessionStore>()((set) => ({
 	// Groups
 	setGroups: (v) =>
 		set((s) => {
-			const newGroups = resolve(v, s.groups);
+			const newGroups = normalizeGroupHierarchy(resolve(v, s.groups));
 			if (newGroups === s.groups) return s;
 			return { groups: newGroups };
 		}),
 
-	addGroup: (group) => set((s) => ({ groups: [...s.groups, group] })),
+	addGroup: (group) =>
+		set((s) => ({
+			groups: normalizeGroupHierarchy([...s.groups, group]),
+		})),
 
 	removeGroup: (id) =>
 		set((s) => {
-			const filtered = s.groups.filter((g) => g.id !== id);
-			if (filtered.length === s.groups.length) return s;
-			return { groups: filtered };
+			const groups = removeGroupAndPromoteChildren(s.groups, id);
+			if (groups.length === s.groups.length) return s;
+			return { groups };
 		}),
 
 	updateGroup: (id, updates) =>
 		set((s) => {
+			const hasParentGroupUpdate = Object.prototype.hasOwnProperty.call(updates, 'parentGroupId');
+			const { parentGroupId, ...otherUpdates } = updates;
+			const groupsWithParentUpdate = hasParentGroupUpdate
+				? updateGroupParent(s.groups, id, parentGroupId)
+				: s.groups;
+
+			if (Object.keys(otherUpdates).length === 0) {
+				return groupsWithParentUpdate === s.groups ? s : { groups: groupsWithParentUpdate };
+			}
+
 			let found = false;
-			const newGroups = s.groups.map((g) => {
-				if (g.id === id) {
+			const groups = groupsWithParentUpdate.map((group) => {
+				if (group.id === id) {
 					found = true;
-					return { ...g, ...updates };
+					return { ...group, ...otherUpdates };
 				}
-				return g;
+				return group;
 			});
 			if (!found) return s;
-			return { groups: newGroups };
+			return { groups };
+		}),
+
+	setGroupParent: (groupId, parentGroupId) =>
+		set((s) => {
+			const groups = updateGroupParent(s.groups, groupId, parentGroupId);
+			return groups === s.groups ? s : { groups };
 		}),
 
 	toggleGroupCollapsed: (id) =>
@@ -226,6 +307,8 @@ export const useSessionStore = create<SessionStore>()((set) => ({
 	setSessionsLoaded: (v) => set((s) => ({ sessionsLoaded: resolve(v, s.sessionsLoaded) })),
 	setInitialLoadComplete: (v) =>
 		set((s) => ({ initialLoadComplete: resolve(v, s.initialLoadComplete) })),
+	setInitialFileTreeReady: (v) =>
+		set((s) => ({ initialFileTreeReady: resolve(v, s.initialFileTreeReady) })),
 
 	// Bookmarks
 	toggleBookmark: (sessionId) =>
@@ -251,6 +334,44 @@ export const useSessionStore = create<SessionStore>()((set) => ({
 	// Navigation
 	setCyclePosition: (pos) => set({ cyclePosition: pos }),
 	resetCyclePosition: () => set({ cyclePosition: -1 }),
+
+	// Log management
+	addLogToTab: (sessionId, logEntry, tabId?) =>
+		set((s) => {
+			const entry: LogEntry = {
+				id: logEntry.id || generateId(),
+				timestamp: logEntry.timestamp || Date.now(),
+				source: logEntry.source,
+				text: logEntry.text,
+				...(logEntry.images && { images: logEntry.images }),
+				...(logEntry.delivered !== undefined && { delivered: logEntry.delivered }),
+				...('aiCommand' in logEntry && logEntry.aiCommand && { aiCommand: logEntry.aiCommand }),
+			};
+
+			const newSessions = s.sessions.map((session) => {
+				if (session.id !== sessionId) return session;
+
+				const targetTab = tabId
+					? session.aiTabs.find((tab) => tab.id === tabId)
+					: getActiveTab(session);
+
+				if (!targetTab) {
+					logger.error(
+						'[addLogToTab] No target tab found - session has no aiTabs, this should not happen'
+					);
+					return session;
+				}
+
+				return {
+					...session,
+					aiTabs: session.aiTabs.map((tab) =>
+						tab.id === targetTab.id ? { ...tab, logs: [...tab.logs, entry] } : tab
+					),
+				};
+			});
+
+			return { sessions: newSessions };
+		}),
 }));
 
 // ============================================================================
@@ -278,105 +399,50 @@ export const selectSessionById =
 	(state: SessionStore): Session | undefined =>
 		state.sessions.find((s) => s.id === id);
 
-/**
- * Select all bookmarked sessions.
- *
- * @example
- * const bookmarked = useSessionStore(selectBookmarkedSessions);
- */
-export const selectBookmarkedSessions = (state: SessionStore): Session[] =>
-	state.sessions.filter((s) => s.bookmarked);
-
-/**
- * Select sessions belonging to a specific group.
- *
- * @example
- * const groupSessions = useSessionStore(selectSessionsByGroup('group-1'));
- */
-export const selectSessionsByGroup =
-	(groupId: string) =>
-	(state: SessionStore): Session[] =>
-		state.sessions.filter((s) => s.groupId === groupId);
-
-/**
- * Select ungrouped sessions (no groupId set).
- *
- * @example
- * const ungrouped = useSessionStore(selectUngroupedSessions);
- */
-export const selectUngroupedSessions = (state: SessionStore): Session[] =>
-	state.sessions.filter((s) => !s.groupId && !s.parentSessionId);
-
-/**
- * Select a group by ID.
- *
- * @example
- * const group = useSessionStore(selectGroupById('group-1'));
- */
-export const selectGroupById =
-	(id: string) =>
-	(state: SessionStore): Group | undefined =>
-		state.groups.find((g) => g.id === id);
-
-/**
- * Select session count.
- *
- * @example
- * const count = useSessionStore(selectSessionCount);
- */
-export const selectSessionCount = (state: SessionStore): number => state.sessions.length;
-
-/**
- * Select whether initial load is complete (sessions loaded from disk).
- *
- * @example
- * const ready = useSessionStore(selectIsReady);
- */
-export const selectIsReady = (state: SessionStore): boolean =>
-	state.sessionsLoaded && state.initialLoadComplete;
+export const selectIsAnySessionBusy = (state: SessionStore): boolean =>
+	state.sessions.some((s) => s.state === 'busy');
 
 // ============================================================================
 // Non-React Access
 // ============================================================================
 
 /**
- * Get current session store state outside React.
- * Replaces sessionsRef.current, groupsRef.current, activeSessionIdRef.current.
+ * Update a session by ID using a mapper function.
+ * Convenience helper for call sites that need a full session → session transform
+ * rather than just a Partial<Session> update.
+ *
+ * Operates directly on the store outside of React — safe to call from callbacks.
  *
  * @example
- * const { sessions, activeSessionId } = getSessionState();
+ * updateSessionWith(activeSession.id, (s) => ({ ...s, batchRunnerPrompt: prompt }));
  */
-export function getSessionState() {
-	return useSessionStore.getState();
+export function updateSessionWith(sessionId: string, updater: (session: Session) => Session): void {
+	useSessionStore
+		.getState()
+		.setSessions((prev: Session[]) => prev.map((s) => (s.id === sessionId ? updater(s) : s)));
 }
 
 /**
- * Get stable action references outside React.
- * These never change, so they're safe to call from anywhere.
+ * Update a specific AI tab within a session using a mapper function.
+ * Convenience helper for tab-level updates that need a full tab → tab transform.
+ *
+ * Operates directly on the store outside of React — safe to call from callbacks.
  *
  * @example
- * const { setSessions, setActiveSessionId } = getSessionActions();
+ * updateAiTab(sessionId, tabId, (tab) => ({ ...tab, autoSendOnActivate: false }));
  */
-export function getSessionActions() {
-	const state = useSessionStore.getState();
-	return {
-		setSessions: state.setSessions,
-		addSession: state.addSession,
-		removeSession: state.removeSession,
-		updateSession: state.updateSession,
-		setActiveSessionId: state.setActiveSessionId,
-		setActiveSessionIdInternal: state.setActiveSessionIdInternal,
-		setGroups: state.setGroups,
-		addGroup: state.addGroup,
-		removeGroup: state.removeGroup,
-		updateGroup: state.updateGroup,
-		toggleGroupCollapsed: state.toggleGroupCollapsed,
-		setSessionsLoaded: state.setSessionsLoaded,
-		setInitialLoadComplete: state.setInitialLoadComplete,
-		toggleBookmark: state.toggleBookmark,
-		addRemovedWorktreePath: state.addRemovedWorktreePath,
-		setRemovedWorktreePaths: state.setRemovedWorktreePaths,
-		setCyclePosition: state.setCyclePosition,
-		resetCyclePosition: state.resetCyclePosition,
-	};
+export function updateAiTab(
+	sessionId: string,
+	tabId: string,
+	updater: (tab: AITab) => AITab
+): void {
+	useSessionStore.getState().setSessions((prev: Session[]) =>
+		prev.map((s) => {
+			if (s.id !== sessionId) return s;
+			return {
+				...s,
+				aiTabs: s.aiTabs.map((t) => (t.id === tabId ? updater(t) : t)),
+			};
+		})
+	);
 }

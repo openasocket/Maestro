@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
 	initializeOutputParsers,
-	ensureParsersInitialized,
 	getOutputParser,
 	hasOutputParser,
 	getAllOutputParsers,
@@ -9,6 +8,10 @@ import {
 	ClaudeOutputParser,
 	OpenCodeOutputParser,
 	CodexOutputParser,
+	CopilotOutputParser,
+	PiOutputParser,
+	OmpOutputParser,
+	QwenOutputParser,
 } from '../../../main/parsers';
 
 describe('parsers/index', () => {
@@ -49,41 +52,53 @@ describe('parsers/index', () => {
 			expect(hasOutputParser('factory-droid')).toBe(true);
 		});
 
-		it('should register exactly 4 parsers', () => {
+		it('should register Copilot parser', () => {
+			expect(hasOutputParser('copilot-cli')).toBe(false);
+
+			initializeOutputParsers();
+
+			expect(hasOutputParser('copilot-cli')).toBe(true);
+		});
+
+		it('should register Pi parser', () => {
+			expect(hasOutputParser('pi')).toBe(false);
+
+			initializeOutputParsers();
+
+			expect(hasOutputParser('pi')).toBe(true);
+		});
+
+		it('should register Qwen parser', () => {
+			expect(hasOutputParser('qwen3-coder')).toBe(false);
+
+			initializeOutputParsers();
+
+			expect(hasOutputParser('qwen3-coder')).toBe(true);
+		});
+
+		it('should register Omp parser', () => {
+			expect(hasOutputParser('omp')).toBe(false);
+
+			initializeOutputParsers();
+
+			expect(hasOutputParser('omp')).toBe(true);
+		});
+
+		it('should register exactly 8 parsers', () => {
 			initializeOutputParsers();
 
 			const parsers = getAllOutputParsers();
-			expect(parsers.length).toBe(4); // Claude, OpenCode, Codex, Factory Droid
+			expect(parsers.length).toBe(8);
 		});
 
 		it('should clear existing parsers before registering', () => {
 			// First initialization
 			initializeOutputParsers();
-			expect(getAllOutputParsers().length).toBe(4);
+			expect(getAllOutputParsers().length).toBe(8);
 
-			// Second initialization should still have exactly 4
+			// Second initialization should still have exactly 8
 			initializeOutputParsers();
-			expect(getAllOutputParsers().length).toBe(4);
-		});
-	});
-
-	describe('ensureParsersInitialized', () => {
-		it('should initialize parsers on first call', () => {
-			expect(getAllOutputParsers().length).toBe(0);
-
-			ensureParsersInitialized();
-
-			expect(getAllOutputParsers().length).toBe(4);
-		});
-
-		it('should be idempotent after first call', () => {
-			ensureParsersInitialized();
-			const first = getAllOutputParsers();
-
-			ensureParsersInitialized();
-			const second = getAllOutputParsers();
-
-			expect(first.length).toBe(second.length);
+			expect(getAllOutputParsers().length).toBe(8);
 		});
 	});
 
@@ -119,6 +134,29 @@ describe('parsers/index', () => {
 			const parser = getOutputParser('unknown');
 			expect(parser).toBeNull();
 		});
+
+		it('should return CopilotOutputParser for copilot', () => {
+			const parser = getOutputParser('copilot-cli');
+			expect(parser).not.toBeNull();
+			expect(parser).toBeInstanceOf(CopilotOutputParser);
+		});
+
+		it('should return PiOutputParser for pi', () => {
+			const parser = getOutputParser('pi');
+			expect(parser).not.toBeNull();
+			expect(parser).toBeInstanceOf(PiOutputParser);
+		});
+
+		it('should return OmpOutputParser for omp', () => {
+			const parser = getOutputParser('omp');
+			expect(parser).not.toBeNull();
+			expect(parser).toBeInstanceOf(OmpOutputParser);
+		});
+		it('should return QwenOutputParser for qwen3-coder', () => {
+			const parser = getOutputParser('qwen3-coder');
+			expect(parser).not.toBeNull();
+			expect(parser).toBeInstanceOf(QwenOutputParser);
+		});
 	});
 
 	describe('parser exports', () => {
@@ -135,6 +173,25 @@ describe('parsers/index', () => {
 		it('should export CodexOutputParser class', () => {
 			const parser = new CodexOutputParser();
 			expect(parser.agentId).toBe('codex');
+		});
+
+		it('should export CopilotOutputParser class', () => {
+			const parser = new CopilotOutputParser();
+			expect(parser.agentId).toBe('copilot-cli');
+		});
+
+		it('should export PiOutputParser class', () => {
+			const parser = new PiOutputParser();
+			expect(parser.agentId).toBe('pi');
+		});
+
+		it('should export OmpOutputParser class', () => {
+			const parser = new OmpOutputParser();
+			expect(parser.agentId).toBe('omp');
+		});
+		it('should export QwenOutputParser class', () => {
+			const parser = new QwenOutputParser();
+			expect(parser.agentId).toBe('qwen3-coder');
 		});
 	});
 
@@ -156,12 +213,12 @@ describe('parsers/index', () => {
 			initializeOutputParsers();
 
 			const parser = getOutputParser('opencode');
-			// OpenCode step_finish format uses part.reason to determine result vs system
+			// step_finish always emits 'system' (usage stats only); result text comes from 'text' events
 			const event = parser?.parseJsonLine(
 				JSON.stringify({ type: 'step_finish', sessionID: 'oc-123', part: { reason: 'stop' } })
 			);
 
-			expect(event?.type).toBe('result');
+			expect(event?.type).toBe('system');
 			expect(event?.sessionId).toBe('oc-123');
 		});
 

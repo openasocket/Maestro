@@ -31,14 +31,11 @@ import fs from 'fs/promises';
 import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
 import { readDirRemote, readFileRemote, statRemote } from '../utils/remote-fs';
+import { BaseSessionStorage, type SearchableMessage } from './base-session-storage';
+import { ModelUsageAccumulator } from '../../shared/modelUsage';
 import type {
-	AgentSessionStorage,
 	AgentSessionInfo,
-	PaginatedSessionsResult,
 	SessionMessagesResult,
-	SessionSearchResult,
-	SessionSearchMode,
-	SessionListOptions,
 	SessionReadOptions,
 	SessionMessage,
 } from '../agents';
@@ -160,7 +157,7 @@ function extractTextFromContent(content: FactoryContentItem[] | string): string 
  *
  * Provides access to Factory Droid's local session storage at ~/.factory/sessions/
  */
-export class FactoryDroidSessionStorage implements AgentSessionStorage {
+export class FactoryDroidSessionStorage extends BaseSessionStorage {
 	readonly agentId: ToolType = 'factory-droid';
 
 	/**
@@ -367,6 +364,7 @@ export class FactoryDroidSessionStorage implements AgentSessionStorage {
 					durationSeconds,
 				});
 			} catch (e) {
+				void captureException(e);
 				logger.warn(`Error reading remote Factory Droid session ${sessionId}`, LOG_CONTEXT, {
 					error: e,
 				});
@@ -452,6 +450,23 @@ export class FactoryDroidSessionStorage implements AgentSessionStorage {
 				const modifiedAt =
 					messages[messages.length - 1]?.timestamp || jsonlStat.mtime.toISOString();
 
+				// Factory Droid is single-model per session with a flat, pre-aggregated
+				// tokenUsage; attribute the whole bucket to settings.model.
+				const modelAcc = new ModelUsageAccumulator();
+				if (
+					settings?.tokenUsage?.inputTokens ||
+					settings?.tokenUsage?.outputTokens ||
+					settings?.tokenUsage?.cacheReadTokens ||
+					settings?.tokenUsage?.cacheCreationTokens
+				) {
+					modelAcc.add(settings.model, {
+						inputTokens: settings.tokenUsage?.inputTokens || 0,
+						outputTokens: settings.tokenUsage?.outputTokens || 0,
+						cacheReadTokens: settings.tokenUsage?.cacheReadTokens || 0,
+						cacheCreationTokens: settings.tokenUsage?.cacheCreationTokens || 0,
+					});
+				}
+
 				sessions.push({
 					sessionId,
 					projectPath,
@@ -465,9 +480,11 @@ export class FactoryDroidSessionStorage implements AgentSessionStorage {
 					cacheReadTokens: settings?.tokenUsage?.cacheReadTokens || 0,
 					cacheCreationTokens: settings?.tokenUsage?.cacheCreationTokens || 0,
 					durationSeconds,
+					byModel: modelAcc.isEmpty ? undefined : modelAcc.finalize(),
 					// Factory Droid doesn't provide cost in settings.json
 				});
 			} catch (e) {
+				void captureException(e);
 				logger.warn(`Error reading Factory Droid session ${sessionId}`, LOG_CONTEXT, { error: e });
 			}
 		}
@@ -480,32 +497,6 @@ export class FactoryDroidSessionStorage implements AgentSessionStorage {
 			LOG_CONTEXT
 		);
 		return sessions;
-	}
-
-	async listSessionsPaginated(
-		projectPath: string,
-		options?: SessionListOptions,
-		sshConfig?: SshRemoteConfig
-	): Promise<PaginatedSessionsResult> {
-		const allSessions = await this.listSessions(projectPath, sshConfig);
-		const { cursor, limit = 100 } = options || {};
-
-		let startIndex = 0;
-		if (cursor) {
-			const cursorIndex = allSessions.findIndex((s) => s.sessionId === cursor);
-			startIndex = cursorIndex >= 0 ? cursorIndex + 1 : 0;
-		}
-
-		const pageSessions = allSessions.slice(startIndex, startIndex + limit);
-		const hasMore = startIndex + limit < allSessions.length;
-		const nextCursor = hasMore ? pageSessions[pageSessions.length - 1]?.sessionId : null;
-
-		return {
-			sessions: pageSessions,
-			hasMore,
-			totalCount: allSessions.length,
-			nextCursor,
-		};
 	}
 
 	async readSessionMessages(
@@ -557,128 +548,31 @@ export class FactoryDroidSessionStorage implements AgentSessionStorage {
 			}
 		}
 
-		// Apply offset and limit for lazy loading
-		const offset = options?.offset ?? 0;
-		const limit = options?.limit ?? 20;
-
-		const startIndex = Math.max(0, sessionMessages.length - offset - limit);
-		const endIndex = sessionMessages.length - offset;
-		const slice = sessionMessages.slice(startIndex, endIndex);
-
-		return {
-			messages: slice,
-			total: sessionMessages.length,
-			hasMore: startIndex > 0,
-		};
+		return BaseSessionStorage.applyMessagePagination(sessionMessages, options);
 	}
 
-	async searchSessions(
+	protected async getSearchableMessages(
+		sessionId: string,
 		projectPath: string,
-		query: string,
-		searchMode: SessionSearchMode,
 		sshConfig?: SshRemoteConfig
-	): Promise<SessionSearchResult[]> {
-		if (!query.trim()) {
-			return [];
+	): Promise<SearchableMessage[]> {
+		let factoryMessages: FactoryMessage[];
+		if (sshConfig) {
+			const projectDir = this.getRemoteProjectSessionDir(projectPath);
+			const sessionPath = `${projectDir}/${sessionId}.jsonl`;
+			factoryMessages = await this.loadSessionMessagesRemote(sessionPath, sshConfig);
+		} else {
+			const sessionPath = path.join(this.getProjectSessionDir(projectPath), `${sessionId}.jsonl`);
+			factoryMessages = await this.loadSessionMessages(sessionPath);
 		}
 
-		const sessions = await this.listSessions(projectPath, sshConfig);
-		const searchLower = query.toLowerCase();
-		const results: SessionSearchResult[] = [];
-
-		// Determine paths based on SSH config
-		const projectDir = sshConfig
-			? this.getRemoteProjectSessionDir(projectPath)
-			: this.getProjectSessionDir(projectPath);
-
-		for (const session of sessions) {
-			// Get session path based on local vs remote
-			const sessionPath = sshConfig
-				? `${projectDir}/${session.sessionId}.jsonl`
-				: path.join(projectDir, `${session.sessionId}.jsonl`);
-
-			// Load messages either locally or via SSH
-			const messages = sshConfig
-				? await this.loadSessionMessagesRemote(sessionPath, sshConfig)
-				: await this.loadSessionMessages(sessionPath);
-
-			let titleMatch = false;
-			let userMatches = 0;
-			let assistantMatches = 0;
-			let matchPreview = '';
-
-			for (const msg of messages) {
-				const textContent = extractTextFromContent(msg.message.content);
-				const textLower = textContent.toLowerCase();
-
-				if (msg.message.role === 'user' && textLower.includes(searchLower)) {
-					if (!titleMatch) {
-						titleMatch = true;
-						if (!matchPreview) {
-							const idx = textLower.indexOf(searchLower);
-							const start = Math.max(0, idx - 60);
-							const end = Math.min(textContent.length, idx + query.length + 60);
-							matchPreview =
-								(start > 0 ? '...' : '') +
-								textContent.slice(start, end) +
-								(end < textContent.length ? '...' : '');
-						}
-					}
-					userMatches++;
-				}
-
-				if (msg.message.role === 'assistant' && textLower.includes(searchLower)) {
-					assistantMatches++;
-					if (!matchPreview && (searchMode === 'assistant' || searchMode === 'all')) {
-						const idx = textLower.indexOf(searchLower);
-						const start = Math.max(0, idx - 60);
-						const end = Math.min(textContent.length, idx + query.length + 60);
-						matchPreview =
-							(start > 0 ? '...' : '') +
-							textContent.slice(start, end) +
-							(end < textContent.length ? '...' : '');
-					}
-				}
-			}
-
-			let matches = false;
-			let matchType: 'title' | 'user' | 'assistant' = 'title';
-			let matchCount = 0;
-
-			switch (searchMode) {
-				case 'title':
-					matches = titleMatch;
-					matchType = 'title';
-					matchCount = titleMatch ? 1 : 0;
-					break;
-				case 'user':
-					matches = userMatches > 0;
-					matchType = 'user';
-					matchCount = userMatches;
-					break;
-				case 'assistant':
-					matches = assistantMatches > 0;
-					matchType = 'assistant';
-					matchCount = assistantMatches;
-					break;
-				case 'all':
-					matches = titleMatch || userMatches > 0 || assistantMatches > 0;
-					matchType = titleMatch ? 'title' : userMatches > 0 ? 'user' : 'assistant';
-					matchCount = userMatches + assistantMatches;
-					break;
-			}
-
-			if (matches) {
-				results.push({
-					sessionId: session.sessionId,
-					matchType,
-					matchPreview,
-					matchCount,
-				});
-			}
-		}
-
-		return results;
+		return factoryMessages
+			.filter((msg) => msg.message.role === 'user' || msg.message.role === 'assistant')
+			.map((msg) => ({
+				role: msg.message.role as 'user' | 'assistant',
+				textContent: extractTextFromContent(msg.message.content),
+			}))
+			.filter((msg) => msg.textContent.length > 0);
 	}
 
 	getSessionPath(

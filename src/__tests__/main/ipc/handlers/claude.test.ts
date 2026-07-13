@@ -41,6 +41,15 @@ vi.mock('../../../../main/utils/logger', () => ({
 	},
 }));
 
+// Mock the web-desktop bridge fanout. Stats updates now route through
+// safeSend, which always broadcasts to bridge clients even when the desktop
+// window is unavailable. Mocking it lets us assert web clients receive the
+// event without a live Electron renderer.
+vi.mock('../../../../main/web-server/handlers/bridgeHandlers', () => ({
+	broadcastBridgeEvent: vi.fn(),
+}));
+import { broadcastBridgeEvent } from '../../../../main/web-server/handlers/bridgeHandlers';
+
 // Mock fs/promises
 vi.mock('fs/promises', () => ({
 	default: {
@@ -74,7 +83,7 @@ vi.mock('os', () => ({
 
 // Mock statsCache module
 vi.mock('../../../../main/utils/statsCache', () => ({
-	encodeClaudeProjectPath: vi.fn((p: string) => p.replace(/\//g, '-').replace(/^-/, '')),
+	encodeClaudeProjectPath: vi.fn((p: string) => p.replace(/[^a-zA-Z0-9]/g, '-')),
 	loadStatsCache: vi.fn(),
 	saveStatsCache: vi.fn(),
 	STATS_CACHE_VERSION: 1,
@@ -90,18 +99,53 @@ vi.mock('../../../../main/constants', () => ({
 	},
 }));
 
-// Mock pricing utility
-vi.mock('../../../../main/utils/pricing', () => ({
-	calculateClaudeCost: vi.fn(
-		(input: number, output: number, cacheRead: number, cacheCreation: number) => {
-			const inputCost = (input / 1_000_000) * 3;
-			const outputCost = (output / 1_000_000) * 15;
-			const cacheReadCost = (cacheRead / 1_000_000) * 0.3;
-			const cacheCreationCost = (cacheCreation / 1_000_000) * 3.75;
-			return inputCost + outputCost + cacheReadCost + cacheCreationCost;
+// Mock pricing utility. Flat Sonnet-tier rates keep the cost assertions in these
+// fixtures stable; the real per-model logic is exercised in modelPricing.test.ts.
+// Helpers live inside the factory because vi.mock is hoisted above top-level vars.
+vi.mock('../../../../main/utils/pricing', () => {
+	const flatCost = (input: number, output: number, cacheRead: number, cacheCreation: number) =>
+		(input / 1_000_000) * 3 +
+		(output / 1_000_000) * 15 +
+		(cacheRead / 1_000_000) * 0.3 +
+		(cacheCreation / 1_000_000) * 3.75;
+	const sumMatches = (content: string, key: string) => {
+		let total = 0;
+		for (const m of content.matchAll(new RegExp(`"${key}"\\s*:\\s*(\\d+)`, 'g'))) {
+			total += parseInt(m[1], 10);
 		}
-	),
-}));
+		return total;
+	};
+	return {
+		calculateClaudeCost: vi.fn(flatCost),
+		calculateModelCost: vi.fn(
+			(tokens: {
+				inputTokens: number;
+				outputTokens: number;
+				cacheReadTokens?: number;
+				cacheCreationTokens?: number;
+			}) =>
+				flatCost(
+					tokens.inputTokens,
+					tokens.outputTokens,
+					tokens.cacheReadTokens ?? 0,
+					tokens.cacheCreationTokens ?? 0
+				)
+		),
+		computeClaudeUsageCost: vi.fn((content: string) => {
+			const inputTokens = sumMatches(content, 'input_tokens');
+			const outputTokens = sumMatches(content, 'output_tokens');
+			const cacheReadTokens = sumMatches(content, 'cache_read_input_tokens');
+			const cacheCreationTokens = sumMatches(content, 'cache_creation_input_tokens');
+			return {
+				inputTokens,
+				outputTokens,
+				cacheReadTokens,
+				cacheCreationTokens,
+				costUsd: flatCost(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens),
+			};
+		}),
+	};
+});
 
 describe('Claude IPC handlers', () => {
 	let handlers: Map<string, Function>;
@@ -188,6 +232,59 @@ describe('Claude IPC handlers', () => {
 
 			// Verify total count matches - ensures no handlers are added without updating this test
 			expect(handlers.size).toBe(expectedChannels.length);
+		});
+	});
+
+	describe('web-desktop bridge fanout', () => {
+		it('should route claude:projectStatsUpdate to bridge clients even with no desktop window', async () => {
+			// mockGetMainWindow returns null in this suite, so only the bridge
+			// path can deliver the progressive stats update. Before the safeSend
+			// migration a null window starved web-desktop clients entirely.
+			const fs = await import('fs/promises');
+			const { loadStatsCache } = await import('../../../../main/utils/statsCache');
+
+			vi.mocked(fs.default.access).mockResolvedValue(undefined);
+			vi.mocked(fs.default.readdir).mockResolvedValue(['sess1.jsonl'] as unknown as Awaited<
+				ReturnType<typeof fs.default.readdir>
+			>);
+			vi.mocked(fs.default.stat).mockResolvedValue({
+				size: 100,
+				mtimeMs: 1000,
+				mtime: new Date('2024-01-15T10:00:00Z'),
+			} as unknown as Awaited<ReturnType<typeof fs.default.stat>>);
+			// A cached, unchanged session keeps the reparse list empty so the
+			// handler emits a single immediate progressive update from cache.
+			vi.mocked(loadStatsCache).mockResolvedValue({
+				version: 1,
+				sessions: {
+					sess1: {
+						messages: 5,
+						inputTokens: 100,
+						outputTokens: 100,
+						costUsd: 0.1,
+						sizeBytes: 100,
+						tokens: 200,
+						oldestTimestamp: '2024-01-01T00:00:00Z',
+						fileMtimeMs: 1000,
+						archived: false,
+					},
+				},
+				totals: {
+					totalSessions: 1,
+					totalMessages: 5,
+					totalCostUsd: 0.1,
+					totalSizeBytes: 100,
+					totalTokens: 200,
+					oldestTimestamp: '2024-01-01T00:00:00Z',
+				},
+				lastUpdated: 0,
+			} as never);
+
+			const handler = handlers.get('claude:getProjectStats');
+			await handler!({} as any, '/test/project');
+
+			const channels = vi.mocked(broadcastBridgeEvent).mock.calls.map((c) => c[0]);
+			expect(channels).toContain('claude:projectStatsUpdate');
 		});
 	});
 
@@ -2097,6 +2194,108 @@ not valid json at all
 				// Should only include sessions where stat succeeded
 				expect(result.totalCount).toBe(2);
 				expect(result.sessions).toHaveLength(2);
+			});
+		});
+	});
+
+	describe('claude:getSkills', () => {
+		it('finds skills via SKILL.md on case-sensitive filesystems (Linux/WSL)', async () => {
+			const fs = await import('fs/promises');
+
+			// Simulate a case-sensitive filesystem: SKILL.md exists, skill.md does not.
+			// Only the project-level skills directory has entries; user dir is empty.
+			vi.mocked(fs.default.readdir).mockImplementation(async (dir: any) => {
+				if (String(dir) === '/test/project/.claude/skills') {
+					return [{ name: 'Research', isDirectory: () => true }] as any;
+				}
+				return [] as any;
+			});
+			vi.mocked(fs.default.readFile).mockImplementation(async (filePath: any) => {
+				const p = String(filePath);
+				if (p === '/test/project/.claude/skills/Research/SKILL.md') {
+					return '---\nname: Research\ndescription: Deep literature review\n---\n\nBody';
+				}
+				const enoent: NodeJS.ErrnoException = Object.assign(new Error('ENOENT'), {
+					code: 'ENOENT',
+				});
+				throw enoent;
+			});
+
+			const handler = handlers.get('claude:getSkills');
+			const result = await handler!({} as any, '/test/project');
+
+			expect(result).toHaveLength(1);
+			expect(result[0]).toMatchObject({
+				name: 'Research',
+				description: 'Deep literature review',
+				source: 'project',
+			});
+		});
+
+		it('propagates non-ENOENT filesystem errors from scanSkillsDir', async () => {
+			const fs = await import('fs/promises');
+
+			// A permission error on the skills directory must NOT be silently
+			// swallowed — it should propagate so Sentry captures it.
+			vi.mocked(fs.default.readdir).mockImplementation(async () => {
+				throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+			});
+
+			const handler = handlers.get('claude:getSkills');
+			await expect(handler!({} as any, '/test/project')).rejects.toMatchObject({
+				code: 'EACCES',
+			});
+		});
+
+		it('propagates non-ENOENT filesystem errors from parseSkillFile', async () => {
+			const fs = await import('fs/promises');
+
+			vi.mocked(fs.default.readdir).mockImplementation(async (dir: any) => {
+				if (String(dir) === '/test/project/.claude/skills') {
+					return [{ name: 'Locked', isDirectory: () => true }] as any;
+				}
+				return [] as any;
+			});
+			// The skill dir lists fine but SKILL.md is locked — this must
+			// surface, not be silently dropped as "skill not found".
+			vi.mocked(fs.default.readFile).mockImplementation(async () => {
+				throw Object.assign(new Error('IO error'), { code: 'EIO' });
+			});
+
+			const handler = handlers.get('claude:getSkills');
+			await expect(handler!({} as any, '/test/project')).rejects.toMatchObject({
+				code: 'EIO',
+			});
+		});
+
+		it('falls back to lowercase skill.md for legacy layouts', async () => {
+			const fs = await import('fs/promises');
+
+			vi.mocked(fs.default.readdir).mockImplementation(async (dir: any) => {
+				if (String(dir) === '/test/project/.claude/skills') {
+					return [{ name: 'Legacy', isDirectory: () => true }] as any;
+				}
+				return [] as any;
+			});
+			vi.mocked(fs.default.readFile).mockImplementation(async (filePath: any) => {
+				const p = String(filePath);
+				// Only lowercase skill.md exists
+				if (p === '/test/project/.claude/skills/Legacy/skill.md') {
+					return '---\ndescription: Legacy skill\n---\n\nBody';
+				}
+				const enoent: NodeJS.ErrnoException = Object.assign(new Error('ENOENT'), {
+					code: 'ENOENT',
+				});
+				throw enoent;
+			});
+
+			const handler = handlers.get('claude:getSkills');
+			const result = await handler!({} as any, '/test/project');
+
+			expect(result).toHaveLength(1);
+			expect(result[0]).toMatchObject({
+				name: 'Legacy',
+				description: 'Legacy skill',
 			});
 		});
 	});

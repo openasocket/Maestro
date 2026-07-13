@@ -18,34 +18,9 @@ import {
 	WizardMessageBubble,
 	type WizardMessageBubbleMessage,
 } from '../../../../renderer/components/InlineWizard/WizardMessageBubble';
-import type { Theme } from '../../../../renderer/types';
 
+import { mockTheme } from '../../../helpers/mockTheme';
 // Mock theme for testing
-const mockTheme: Theme = {
-	id: 'test-theme',
-	name: 'Test Theme',
-	mode: 'dark',
-	colors: {
-		background: '#1a1a1a',
-		backgroundDim: '#0d0d0d',
-		backgroundBright: '#2a2a2a',
-		bgMain: '#1a1a1a',
-		bgSidebar: '#141414',
-		bgActivity: '#333333',
-		textMain: '#ffffff',
-		textDim: '#888888',
-		textMuted: '#666666',
-		textBright: '#ffffff',
-		border: '#333333',
-		borderBright: '#444444',
-		success: '#00ff00',
-		warning: '#ffff00',
-		error: '#ff0000',
-		accent: '#007bff',
-		accentForeground: '#ffffff',
-		accentText: '#66b2ff',
-	},
-};
 
 // Helper to create test messages
 function createMessage(
@@ -399,6 +374,62 @@ describe('WizardMessageBubble', () => {
 			render(<WizardMessageBubble message={message} theme={mockTheme} />);
 			// Should render as plain text with asterisks
 			expect(screen.getByText('This is **not bold**')).toBeInTheDocument();
+		});
+	});
+
+	describe('image rendering', () => {
+		it('renders attached images in user messages', () => {
+			const images = ['data:image/png;base64,abc123', 'data:image/png;base64,def456'];
+			const message = createMessage({ role: 'user', images });
+			render(<WizardMessageBubble message={message} theme={mockTheme} />);
+
+			const imagesContainer = screen.getByTestId('message-images');
+			expect(imagesContainer).toBeInTheDocument();
+			const imgs = imagesContainer.querySelectorAll('img');
+			expect(imgs.length).toBe(2);
+			expect(imgs[0]).toHaveAttribute('src', 'data:image/png;base64,abc123');
+			expect(imgs[1]).toHaveAttribute('src', 'data:image/png;base64,def456');
+		});
+
+		it('does not render images section when no images', () => {
+			const message = createMessage({ role: 'user' });
+			render(<WizardMessageBubble message={message} theme={mockTheme} />);
+			expect(screen.queryByTestId('message-images')).not.toBeInTheDocument();
+		});
+
+		it('does not render images section for empty images array', () => {
+			const message = createMessage({ role: 'user', images: [] });
+			render(<WizardMessageBubble message={message} theme={mockTheme} />);
+			expect(screen.queryByTestId('message-images')).not.toBeInTheDocument();
+		});
+
+		it('calls setLightboxImage when image is clicked', () => {
+			const setLightboxImage = vi.fn();
+			const images = ['data:image/png;base64,abc123'];
+			const message = createMessage({ role: 'user', images });
+			render(
+				<WizardMessageBubble
+					message={message}
+					theme={mockTheme}
+					setLightboxImage={setLightboxImage}
+				/>
+			);
+
+			const img = screen.getByTestId('message-images').querySelector('img')!;
+			fireEvent.click(img);
+			expect(setLightboxImage).toHaveBeenCalledWith(
+				'data:image/png;base64,abc123',
+				images,
+				'history'
+			);
+		});
+
+		it('renders images in assistant messages too', () => {
+			const images = ['data:image/png;base64,test'];
+			const message = createMessage({ role: 'assistant', content: 'Here is the image', images });
+			render(<WizardMessageBubble message={message} theme={mockTheme} />);
+
+			expect(screen.getByTestId('message-images')).toBeInTheDocument();
 		});
 	});
 

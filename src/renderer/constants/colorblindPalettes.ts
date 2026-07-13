@@ -85,6 +85,38 @@ export const COLORBLIND_LINE_COLORS = {
 };
 
 /**
+ * Status indicator colors for colorblind mode.
+ * Replaces the green/yellow/red/orange semantic palette used for agent state
+ * dots, diff add/remove, and git status (added/modified/deleted) with
+ * Wong-derived hues that hold up under protanopia, deuteranopia, and
+ * tritanopia. Hue + luminance carry the signal so the swap survives grayscale.
+ *
+ * - success → teal (replaces green)
+ * - warning → orange (replaces yellow; yellow is ambiguous in tritanopia)
+ * - error   → vermillion (replaces red)
+ * - connecting → strong blue (replaces hardcoded #ff8800)
+ */
+export const COLORBLIND_STATUS_COLORS = {
+	success: '#009988', // Teal
+	warning: '#EE7733', // Orange
+	error: '#CC3311', // Vermillion
+	connecting: '#0077BB', // Strong Blue
+} as const;
+
+/**
+ * Diff view background tints for colorblind mode.
+ * Mirrors the gutter/code split used by `generateDiffViewStyles()` so the
+ * added/removed rows keep a faint tinted gutter plus a stronger code-line
+ * background, but with hues that survive red-green color vision deficiencies.
+ */
+export const COLORBLIND_DIFF_COLORS = {
+	insertGutter: 'rgba(0, 153, 136, 0.12)', // Teal, gutter tint
+	insertCode: 'rgba(0, 153, 136, 0.2)', // Teal, code background
+	deleteGutter: 'rgba(204, 51, 17, 0.12)', // Vermillion, gutter tint
+	deleteCode: 'rgba(204, 51, 17, 0.2)', // Vermillion, code background
+} as const;
+
+/**
  * Helper to determine if colorblind mode should use pattern fills
  * in addition to colors for maximum accessibility
  */
@@ -173,7 +205,37 @@ export const COLORBLIND_EXTENSION_PALETTE = {
 		light: { bg: 'rgba(120, 120, 120, 0.18)', text: 'rgba(80, 80, 80, 0.95)' },
 		dark: { bg: 'rgba(150, 150, 150, 0.35)', text: 'rgba(200, 200, 200, 0.95)' },
 	},
-	// Default/Unknown - uses theme colors (handled in getExtensionColor)
+	// Images - Magenta (#EE3377)
+	image: {
+		light: { bg: 'rgba(238, 51, 119, 0.18)', text: 'rgba(180, 35, 85, 0.95)' },
+		dark: { bg: 'rgba(238, 51, 119, 0.35)', text: 'rgba(255, 140, 175, 0.95)' },
+	},
+	// Java/JVM - Vermillion (#CC3311)
+	java: {
+		light: { bg: 'rgba(204, 51, 17, 0.18)', text: 'rgba(160, 40, 15, 0.95)' },
+		dark: { bg: 'rgba(204, 51, 17, 0.35)', text: 'rgba(255, 130, 100, 0.95)' },
+	},
+	// C/C++ - Strong Blue lighter (#3388CC)
+	cpp: {
+		light: { bg: 'rgba(51, 136, 204, 0.18)', text: 'rgba(30, 100, 165, 0.95)' },
+		dark: { bg: 'rgba(51, 136, 204, 0.35)', text: 'rgba(130, 190, 240, 0.95)' },
+	},
+	// Ruby - Orange variant (#EE7733)
+	ruby: {
+		light: { bg: 'rgba(238, 119, 51, 0.18)', text: 'rgba(180, 85, 30, 0.95)' },
+		dark: { bg: 'rgba(238, 119, 51, 0.35)', text: 'rgba(255, 170, 120, 0.95)' },
+	},
+	// SQL/Data - Purple (#AA4499)
+	data: {
+		light: { bg: 'rgba(170, 68, 153, 0.18)', text: 'rgba(130, 50, 115, 0.95)' },
+		dark: { bg: 'rgba(170, 68, 153, 0.35)', text: 'rgba(210, 140, 195, 0.95)' },
+	},
+	// PDF/Office - Blue-Green (#44AA99)
+	document: {
+		light: { bg: 'rgba(68, 170, 153, 0.18)', text: 'rgba(45, 130, 115, 0.95)' },
+		dark: { bg: 'rgba(68, 170, 153, 0.35)', text: 'rgba(130, 210, 195, 0.95)' },
+	},
+	// Default/Unknown - uses theme accent (handled in getExtensionColor)
 };
 
 /**
@@ -227,7 +289,31 @@ export function getColorBlindExtensionColor(
 	if (['.sh', '.bash', '.zsh', '.fish'].includes(ext)) {
 		return COLORBLIND_EXTENSION_PALETTE.shell[mode];
 	}
+	// Images
+	if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.tiff', '.avif'].includes(ext)) {
+		return COLORBLIND_EXTENSION_PALETTE.image[mode];
+	}
+	// Java/JVM
+	if (['.java', '.kt', '.scala', '.groovy', '.clj'].includes(ext)) {
+		return COLORBLIND_EXTENSION_PALETTE.java[mode];
+	}
+	// C/C++
+	if (['.c', '.cpp', '.cc', '.h', '.hpp', '.hh', '.cs', '.swift'].includes(ext)) {
+		return COLORBLIND_EXTENSION_PALETTE.cpp[mode];
+	}
+	// Ruby
+	if (['.rb', '.erb', '.rake'].includes(ext)) {
+		return COLORBLIND_EXTENSION_PALETTE.ruby[mode];
+	}
+	// SQL/Data
+	if (['.sql', '.db', '.sqlite', '.csv', '.tsv'].includes(ext)) {
+		return COLORBLIND_EXTENSION_PALETTE.data[mode];
+	}
+	// PDF/Office documents
+	if (['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'].includes(ext)) {
+		return COLORBLIND_EXTENSION_PALETTE.document[mode];
+	}
 
-	// Return null for unknown extensions (caller should use theme defaults)
+	// Return null for unknown extensions (caller uses theme accent)
 	return null;
 }

@@ -108,10 +108,18 @@ describe('useVibesSessionIndicators', () => {
 			});
 
 			const indicatorA = result.current.indicators.get('/project/a');
-			expect(indicatorA).toEqual({ isInitialized: true, annotationCount: 42, assuranceLevel: null });
+			expect(indicatorA).toEqual({
+				isInitialized: true,
+				annotationCount: 42,
+				assuranceLevel: null,
+			});
 
 			const indicatorB = result.current.indicators.get('/project/b');
-			expect(indicatorB).toEqual({ isInitialized: true, annotationCount: 42, assuranceLevel: null });
+			expect(indicatorB).toEqual({
+				isInitialized: true,
+				annotationCount: 42,
+				assuranceLevel: null,
+			});
 		});
 
 		it('should deduplicate sessions with the same project path', async () => {
@@ -144,9 +152,7 @@ describe('useVibesSessionIndicators', () => {
 				data: JSON.stringify({ total_annotations: 5 }),
 			});
 
-			const sessions = [
-				makeSession({ id: '1', cwd: '/project/a/sub', projectRoot: '/project/a' }),
-			];
+			const sessions = [makeSession({ id: '1', cwd: '/project/a/sub', projectRoot: '/project/a' })];
 
 			renderHook(() => useVibesSessionIndicators(sessions, true));
 

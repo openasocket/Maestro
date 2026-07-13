@@ -18,14 +18,15 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 
 // Import hook and components under test
-import { useInlineWizard, type InlineWizardMode } from '../../renderer/hooks/useInlineWizard';
+import { useInlineWizard, type InlineWizardMode } from '../../renderer/hooks/batch/useInlineWizard';
 import {
 	InlineWizardProvider,
 	useInlineWizardContext,
 } from '../../renderer/contexts/InlineWizardContext';
 import { WizardConversationView } from '../../renderer/components/InlineWizard/WizardConversationView';
 import { parseWizardIntent } from '../../renderer/services/wizardIntentParser';
-import type { Theme } from '../../renderer/types';
+
+import { createMockTheme } from '../helpers/mockTheme';
 
 // Mock the maestro API
 const mockMaestro = {
@@ -56,26 +57,6 @@ afterEach(() => {
 });
 
 // Create a mock theme
-const createMockTheme = (): Theme => ({
-	id: 'test-theme',
-	name: 'Test Theme',
-	mode: 'dark',
-	colors: {
-		bgMain: '#1a1a1a',
-		bgPanel: '#252525',
-		bgActivity: '#2d2d2d',
-		bgSidebar: '#1e1e1e',
-		textMain: '#ffffff',
-		textDim: '#888888',
-		accent: '#0066ff',
-		accentForeground: '#ffffff',
-		border: '#333333',
-		highlight: '#0066ff33',
-		success: '#00aa00',
-		warning: '#ffaa00',
-		error: '#ff0000',
-	},
-});
 
 /**
  * Helper to create a wrapper component with InlineWizardProvider

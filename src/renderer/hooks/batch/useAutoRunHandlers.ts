@@ -1,5 +1,10 @@
 import { useCallback } from 'react';
 import type { Session, BatchRunConfig, RightPanelTab } from '../../types';
+import { useSessionStore, selectSessionById } from '../../stores/sessionStore';
+import { notifyToast } from '../../stores/notificationStore';
+import { spawnWorktreeAgentAndDispatch } from '../../utils/worktreeSpawn';
+import { countMarkdownTasks } from './batchUtils';
+import { logger } from '../../utils/logger';
 
 /**
  * Tree node structure for Auto Run document tree
@@ -41,7 +46,7 @@ export interface UseAutoRunHandlersReturn {
 	/** Handle folder selection from Auto Run setup modal */
 	handleAutoRunFolderSelected: (folderPath: string) => Promise<void>;
 	/** Start a batch run with the given configuration */
-	handleStartBatchRun: (config: BatchRunConfig) => void;
+	handleStartBatchRun: (config: BatchRunConfig) => Promise<void>;
 	/** Get the number of unchecked tasks in a document */
 	getDocumentTaskCount: (filename: string) => Promise<number>;
 	/** Handle content changes in the Auto Run editor */
@@ -187,7 +192,7 @@ export function useAutoRunHandlers(
 
 	// Handler to start batch run from modal with multi-document support
 	const handleStartBatchRun = useCallback(
-		(config: BatchRunConfig) => {
+		async (config: BatchRunConfig) => {
 			window.maestro.logger.log('info', 'handleStartBatchRun called', 'AutoRunHandlers', {
 				hasActiveSession: !!activeSession,
 				sessionId: activeSession?.id,
@@ -195,6 +200,7 @@ export function useAutoRunHandlers(
 				worktreeEnabled: config.worktree?.enabled,
 				worktreePath: config.worktree?.path,
 				worktreeBranch: config.worktree?.branchName,
+				worktreeTargetMode: config.worktreeTarget?.mode,
 			});
 			if (!activeSession || !activeSession.autoRunFolderPath) {
 				window.maestro.logger.log(
@@ -204,12 +210,99 @@ export function useAutoRunHandlers(
 				);
 				return;
 			}
+
+			// Determine target session ID — may differ from activeSession when running in a worktree
+			let targetSessionId = activeSession.id;
+			if (config.worktreeTarget?.mode === 'existing-open' && config.worktreeTarget.sessionId) {
+				// Verify the target session still exists (could have been removed while modal was open)
+				const targetSession = selectSessionById(config.worktreeTarget!.sessionId)(
+					useSessionStore.getState()
+				);
+				if (!targetSession) {
+					window.maestro.logger.log(
+						'warn',
+						`Target worktree session no longer exists: ${config.worktreeTarget.sessionId}. Falling back to active session.`,
+						'AutoRunHandlers'
+					);
+					notifyToast({
+						type: 'warning',
+						title: 'Worktree Agent Not Found',
+						message:
+							'The selected worktree agent was removed. Running on the active agent instead.',
+					});
+					// Fall back to active session
+					targetSessionId = activeSession.id;
+				} else if (targetSession.state === 'busy' || targetSession.state === 'connecting') {
+					// Race condition: agent became busy after user selected it
+					window.maestro.logger.log(
+						'warn',
+						`Target worktree session is busy: ${config.worktreeTarget.sessionId}`,
+						'AutoRunHandlers'
+					);
+					notifyToast({
+						type: 'warning',
+						title: 'Target Agent Busy',
+						message: 'Target agent is busy. Please try again.',
+					});
+					return;
+				} else {
+					targetSessionId = config.worktreeTarget.sessionId;
+
+					// Populate config.worktree for PR creation when using existing-open worktree.
+					// spawnWorktreeAgentAndDispatch does this for create-new/existing-closed,
+					// but existing-open skips that function entirely.
+					if (config.worktreeTarget.createPROnCompletion) {
+						config.worktree = {
+							enabled: true,
+							path: targetSession.cwd,
+							branchName:
+								targetSession.worktreeBranch || targetSession.cwd.split('/').pop() || 'worktree',
+							createPROnCompletion: true,
+							prTargetBranch: config.worktreeTarget.baseBranch || 'main',
+						};
+					}
+				}
+			} else if (
+				config.worktreeTarget?.mode === 'create-new' ||
+				config.worktreeTarget?.mode === 'existing-closed'
+			) {
+				// If the active session is itself a worktree child, resolve to its parent so
+				// basePath/cwd used for worktree creation come from the main repo, not the child.
+				let parentForSpawn = activeSession;
+				if (activeSession.parentSessionId) {
+					const parent = selectSessionById(activeSession.parentSessionId)(
+						useSessionStore.getState()
+					);
+					if (parent) parentForSpawn = parent;
+				}
+				// Spawn a worktree agent and dispatch to it
+				try {
+					const newSessionId = await spawnWorktreeAgentAndDispatch(parentForSpawn, config);
+					if (!newSessionId) return; // Error already shown via toast
+					targetSessionId = newSessionId;
+				} catch (err) {
+					window.maestro.logger.log(
+						'error',
+						`Failed to spawn worktree agent: ${err instanceof Error ? err.message : String(err)}`,
+						'AutoRunHandlers'
+					);
+					notifyToast({
+						type: 'error',
+						title: 'Worktree Error',
+						message: err instanceof Error ? err.message : String(err),
+					});
+					return;
+				}
+			}
+
 			window.maestro.logger.log('info', 'Starting batch run', 'AutoRunHandlers', {
-				sessionId: activeSession.id,
+				sessionId: targetSessionId,
 				folderPath: activeSession.autoRunFolderPath,
+				isWorktreeTarget: targetSessionId !== activeSession.id,
 			});
 			setBatchRunnerModalOpen(false);
-			startBatchRun(activeSession.id, config, activeSession.autoRunFolderPath);
+			// Documents stay with the parent session's autoRunFolderPath; execution targets the worktree agent
+			startBatchRun(targetSessionId, config, activeSession.autoRunFolderPath);
 		},
 		[activeSession, startBatchRun, setBatchRunnerModalOpen]
 	);
@@ -225,9 +318,7 @@ export function useAutoRunHandlers(
 				sshRemoteId
 			);
 			if (!result.success || !result.content) return 0;
-			// Count unchecked tasks: - [ ] pattern
-			const matches = result.content.match(/^[\s]*-\s*\[\s*\]\s*.+$/gm);
-			return matches ? matches.length : 0;
+			return countMarkdownTasks(result.content).unchecked;
 			// Note: Use primitive values (remoteId) not object refs (sessionSshRemoteConfig) to avoid infinite re-render loops
 		},
 		[
@@ -437,7 +528,7 @@ export function useAutoRunHandlers(
 				}
 				return false;
 			} catch (error) {
-				console.error('Failed to create document:', error);
+				logger.error('Failed to create document:', undefined, error);
 				return false;
 			}
 		},

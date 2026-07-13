@@ -84,35 +84,20 @@ beforeEach(() => {
 
 describe('VibesReportView', () => {
 	it('renders empty state before generating a report', () => {
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 		expect(screen.getByText('Generate a provenance report')).toBeTruthy();
 		expect(screen.getByText(/Select a format and click Generate/)).toBeTruthy();
 	});
 
 	it('renders format selector with three options', () => {
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 		expect(screen.getByText('Markdown')).toBeTruthy();
 		expect(screen.getByText('HTML')).toBeTruthy();
 		expect(screen.getByText('JSON')).toBeTruthy();
 	});
 
 	it('renders generate button', () => {
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 		expect(screen.getByText('Generate Report')).toBeTruthy();
 	});
 
@@ -120,12 +105,7 @@ describe('VibesReportView', () => {
 		// Make getReport hang
 		mockGetReport.mockReturnValue(new Promise(() => {}));
 
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 
 		fireEvent.click(screen.getByText('Generate Report'));
 
@@ -136,12 +116,7 @@ describe('VibesReportView', () => {
 	});
 
 	it('generates and displays a markdown report', async () => {
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 
 		fireEvent.click(screen.getByText('Generate Report'));
 
@@ -159,12 +134,7 @@ describe('VibesReportView', () => {
 			data: mockReportHtml,
 		});
 
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 
 		// Select HTML format
 		fireEvent.click(screen.getByText('HTML'));
@@ -183,12 +153,7 @@ describe('VibesReportView', () => {
 			data: mockReportJson,
 		});
 
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 
 		// Select JSON format
 		fireEvent.click(screen.getByText('JSON'));
@@ -203,12 +168,7 @@ describe('VibesReportView', () => {
 	});
 
 	it('shows copy and export buttons after report is generated', async () => {
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 
 		// Before generation — no copy/export buttons
 		expect(screen.queryByRole('button', { name: /Copy/ })).toBeNull();
@@ -223,12 +183,7 @@ describe('VibesReportView', () => {
 	});
 
 	it('copies report to clipboard when copy button is clicked', async () => {
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 
 		fireEvent.click(screen.getByText('Generate Report'));
 
@@ -244,12 +199,7 @@ describe('VibesReportView', () => {
 	});
 
 	it('exports report to file when export button is clicked', async () => {
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 
 		fireEvent.click(screen.getByText('Generate Report'));
 
@@ -281,12 +231,7 @@ describe('VibesReportView', () => {
 			error: 'Something went wrong',
 		});
 
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 
 		fireEvent.click(screen.getByText('Generate Report'));
 
@@ -301,12 +246,7 @@ describe('VibesReportView', () => {
 			error: 'audit.db not found. Run build first.',
 		});
 
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 
 		fireEvent.click(screen.getByText('Generate Report'));
 
@@ -322,12 +262,7 @@ describe('VibesReportView', () => {
 			error: 'audit.db not found. Run build first.',
 		});
 
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 
 		fireEvent.click(screen.getByText('Generate Report'));
 
@@ -351,12 +286,7 @@ describe('VibesReportView', () => {
 	it('shows binary not found error when vibecheck is missing', async () => {
 		mockGetReport.mockRejectedValue(new Error('binary not found'));
 
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 
 		fireEvent.click(screen.getByText('Generate Report'));
 
@@ -366,12 +296,7 @@ describe('VibesReportView', () => {
 	});
 
 	it('disables generate button when no project path', () => {
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath={undefined}
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath={undefined} />);
 
 		const button = screen.getByText('Generate Report').closest('button');
 		expect(button?.disabled).toBe(true);
@@ -381,12 +306,7 @@ describe('VibesReportView', () => {
 		// saveFile returns null when user cancels
 		mockSaveFile.mockResolvedValue(null);
 
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 
 		fireEvent.click(screen.getByText('Generate Report'));
 
@@ -414,12 +334,7 @@ describe('VibesReportView', () => {
 			error: 'Command timed out after 30000ms',
 		});
 
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 
 		fireEvent.click(screen.getByText('Generate Report'));
 
@@ -431,12 +346,7 @@ describe('VibesReportView', () => {
 	it('shows timeout error on exception with timeout message', async () => {
 		mockGetReport.mockRejectedValue(new Error('ETIMEDOUT: operation timed out'));
 
-		render(
-			<VibesReportView
-				theme={mockTheme}
-				projectPath="/test/project"
-			/>,
-		);
+		render(<VibesReportView theme={mockTheme} projectPath="/test/project" />);
 
 		fireEvent.click(screen.getByText('Generate Report'));
 

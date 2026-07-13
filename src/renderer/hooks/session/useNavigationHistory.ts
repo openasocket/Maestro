@@ -1,9 +1,14 @@
 import { useRef, useCallback } from 'react';
 
-// Navigation history entry - tracks session and AI tab position
+// Kind of tab a navigation entry points at. Mirrors UnifiedTabRef['type'].
+export type NavTabKind = 'ai' | 'file' | 'terminal' | 'browser';
+
+// Navigation history entry - tracks session/tab position or group chat
 export interface NavHistoryEntry {
-	sessionId: string;
-	tabId?: string; // Optional AI tab ID (only for AI mode with tabs)
+	sessionId?: string;
+	tabId?: string; // ID of the active tab within the session (any kind)
+	tabKind?: NavTabKind; // Kind of the active tab; absent/legacy entries are treated as 'ai'
+	groupChatId?: string; // Set when navigating to a group chat
 }
 
 const MAX_HISTORY = 50;
@@ -39,7 +44,9 @@ export function useNavigationHistory() {
 		if (
 			currentRef.current &&
 			currentRef.current.sessionId === entry.sessionId &&
-			currentRef.current.tabId === entry.tabId
+			currentRef.current.tabId === entry.tabId &&
+			currentRef.current.tabKind === entry.tabKind &&
+			currentRef.current.groupChatId === entry.groupChatId
 		) {
 			return;
 		}

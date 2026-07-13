@@ -10,16 +10,54 @@
  */
 
 import type { ToolType } from '../types';
-import type { InlineWizardMessage, InlineGeneratedDocument } from '../hooks/useInlineWizard';
+import type {
+	InlineGeneratedDocument,
+	InlineWizardMessage,
+} from '../hooks/batch/inlineWizard/types';
 import type { ExistingDocument } from '../utils/existingDocsDetector';
 import { logger } from '../utils/logger';
-import { wizardDocumentGenerationPrompt, wizardInlineIterateGenerationPrompt } from '../../prompts';
+import { getStdinFlags } from '../utils/spawnHelpers';
 import { substituteTemplateVariables, type TemplateContext } from '../utils/templateVariables';
 
-/**
- * Auto Run folder name constant.
- */
-export const AUTO_RUN_FOLDER_NAME = 'Auto Run Docs';
+let cachedWizardDocumentGenerationPrompt: string | null = null;
+let cachedWizardInlineIterateGenerationPrompt: string | null = null;
+let inlineWizardDocGenPromptsLoaded = false;
+
+export async function loadInlineWizardDocGenPrompts(force = false): Promise<void> {
+	if (inlineWizardDocGenPromptsLoaded && !force) return;
+
+	const [docGenResult, iterateGenResult] = await Promise.all([
+		window.maestro.prompts.get('wizard-document-generation'),
+		window.maestro.prompts.get('wizard-inline-iterate-generation'),
+	]);
+
+	if (!docGenResult.success) {
+		throw new Error(`Failed to load wizard-document-generation prompt: ${docGenResult.error}`);
+	}
+	if (!iterateGenResult.success) {
+		throw new Error(
+			`Failed to load wizard-inline-iterate-generation prompt: ${iterateGenResult.error}`
+		);
+	}
+	cachedWizardDocumentGenerationPrompt = docGenResult.content!;
+	cachedWizardInlineIterateGenerationPrompt = iterateGenResult.content!;
+	inlineWizardDocGenPromptsLoaded = true;
+}
+
+function getWizardDocumentGenerationPrompt(): string {
+	if (!inlineWizardDocGenPromptsLoaded || cachedWizardDocumentGenerationPrompt === null) {
+		return '';
+	}
+	return cachedWizardDocumentGenerationPrompt;
+}
+
+function getWizardInlineIterateGenerationPrompt(): string {
+	if (!inlineWizardDocGenPromptsLoaded || cachedWizardInlineIterateGenerationPrompt === null) {
+		return '';
+	}
+	return cachedWizardInlineIterateGenerationPrompt;
+}
+import { deriveSshRemoteId } from '../components/Wizard/services/phaseGenerator';
 
 /**
  * Generation timeout in milliseconds (20 minutes).
@@ -138,6 +176,14 @@ export interface DocumentGenerationConfig {
 	conductorProfile?: string;
 	/** Optional callbacks */
 	callbacks?: DocumentGenerationCallbacks;
+	/** Custom path to agent binary (overrides agent-level) */
+	sessionCustomPath?: string;
+	/** Custom CLI arguments (overrides agent-level) */
+	sessionCustomArgs?: string;
+	/** Custom environment variables (overrides agent-level) */
+	sessionCustomEnvVars?: Record<string, string>;
+	/** Custom model ID (overrides agent-level) */
+	sessionCustomModel?: string;
 }
 
 /**
@@ -199,17 +245,47 @@ export function sanitizeFilename(filename: string): string {
 }
 
 /**
- * Generate the base folder name for wizard output.
- * Uses date-based naming: "Wizard-YYYY-MM-DD"
+ * Sanitize a project name for use in a folder name.
+ * Converts to PascalCase-with-hyphens, strips non-alphanumeric characters,
+ * and truncates to a reasonable length.
  *
- * @returns A date-based folder name
+ * @param name - Raw project name
+ * @returns Sanitized name suitable for folder naming
  */
-export function generateWizardFolderBaseName(): string {
+function sanitizeFolderName(name: string): string {
+	return name
+		.replace(/[^a-zA-Z0-9\s-]/g, '')
+		.trim()
+		.split(/[\s-]+/)
+		.filter(Boolean)
+		.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+		.join('-')
+		.slice(0, 60);
+}
+
+/**
+ * Generate the base folder name for wizard output.
+ * Uses date-first naming: "YYYY-MM-DD-Feature-Name" to match the
+ * convention used by other Auto Run document folders.
+ *
+ * @param projectName - Optional project/feature name to include
+ * @returns A date-prefixed folder name
+ */
+export function generateWizardFolderBaseName(projectName?: string): string {
 	const now = new Date();
 	const year = now.getFullYear();
 	const month = String(now.getMonth() + 1).padStart(2, '0');
 	const day = String(now.getDate()).padStart(2, '0');
-	return `Wizard-${year}-${month}-${day}`;
+	const datePrefix = `${year}-${month}-${day}`;
+
+	if (projectName) {
+		const sanitized = sanitizeFolderName(projectName);
+		if (sanitized) {
+			return `${datePrefix}-${sanitized}`;
+		}
+	}
+
+	return `${datePrefix}-Wizard`;
 }
 
 /**
@@ -264,6 +340,129 @@ export function countTasks(content: string): number {
 	const taskPattern = /^-\s*\[\s*[xX ]?\s*\]/gm;
 	const matches = content.match(taskPattern);
 	return matches ? matches.length : 0;
+}
+
+/**
+ * Options for {@link createPlaybookDocumentEmitter}.
+ */
+export interface PlaybookDocumentEmitterOptions {
+	/** Folder on disk where Phase-XX.md files land. */
+	subfolderPath: string;
+	/** SSH remote ID when running against a remote workspace; undefined for local. */
+	sshRemoteId?: string;
+	/** Called once per newly-detected, successfully-read document. */
+	onEmit: (doc: InlineGeneratedDocument) => void;
+	/** Retry tuning for {@link PlaybookDocumentEmitter.tryEmitFile}. Mostly for tests. */
+	readRetries?: { maxAttempts: number; delayMs: number };
+}
+
+/**
+ * Coordinates reading newly-detected playbook docs off disk and notifying the
+ * wizard UI exactly once per file. Owns the dedup set so the chokidar
+ * watcher AND a periodic disk poll can both feed it without producing
+ * duplicates — the watcher catches changes fast when fsevents cooperates,
+ * the poll backstops the cold-start window where add events go missing.
+ */
+export interface PlaybookDocumentEmitter {
+	/**
+	 * Try to read a single named file and emit it if new. Returns true when a
+	 * doc was emitted (i.e. read succeeded with non-empty content AND the file
+	 * had not been emitted before), false otherwise.
+	 */
+	tryEmitFile: (
+		filename: string,
+		opts?: { maxAttempts?: number; delayMs?: number }
+	) => Promise<boolean>;
+	/**
+	 * List the folder and emit every .md file we haven't surfaced yet.
+	 * Returns the number of new docs emitted.
+	 */
+	pollAndEmit: () => Promise<number>;
+	/** Snapshot of all docs emitted so far, in insertion order. */
+	getEmittedDocuments: () => InlineGeneratedDocument[];
+	/** True iff we've emitted at least one document. */
+	hasEmitted: () => boolean;
+}
+
+/**
+ * Construct a {@link PlaybookDocumentEmitter}. Exposed as a factory (not a
+ * class) so consumers can mock the IO surface in tests via the global
+ * `window.maestro` bridge without needing to subclass anything.
+ */
+export function createPlaybookDocumentEmitter(
+	options: PlaybookDocumentEmitterOptions
+): PlaybookDocumentEmitter {
+	const { subfolderPath, sshRemoteId, onEmit } = options;
+	const defaultRetries = options.readRetries ?? { maxAttempts: 5, delayMs: 300 };
+	const emitted = new Map<string, InlineGeneratedDocument>();
+
+	const tryEmitFile = async (
+		filename: string,
+		opts: { maxAttempts?: number; delayMs?: number } = {}
+	): Promise<boolean> => {
+		const filenameWithExt = filename.endsWith('.md') ? filename : `${filename}.md`;
+		if (emitted.has(filenameWithExt)) return false;
+
+		const fullPath = `${subfolderPath}/${filenameWithExt}`;
+		const maxAttempts = opts.maxAttempts ?? defaultRetries.maxAttempts;
+		const delayMs = opts.delayMs ?? defaultRetries.delayMs;
+
+		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+			try {
+				const content = await window.maestro.fs.readFile(fullPath, sshRemoteId);
+				if (content && typeof content === 'string' && content.length > 0) {
+					// Re-check in case a parallel read raced ahead while we were awaiting.
+					if (emitted.has(filenameWithExt)) return false;
+					const doc: InlineGeneratedDocument = {
+						filename: filenameWithExt,
+						content,
+						taskCount: countTasks(content),
+						savedPath: fullPath,
+					};
+					emitted.set(filenameWithExt, doc);
+					onEmit(doc);
+					return true;
+				}
+			} catch (err) {
+				logger.info(
+					`[PlaybookEmitter] read attempt ${attempt}/${maxAttempts} failed for ${filenameWithExt}:`,
+					undefined,
+					err
+				);
+			}
+			if (attempt < maxAttempts) {
+				await new Promise((resolve) => setTimeout(resolve, delayMs));
+			}
+		}
+		return false;
+	};
+
+	const pollAndEmit = async (): Promise<number> => {
+		let newCount = 0;
+		try {
+			const listResult = await window.maestro.autorun.listDocs(subfolderPath, sshRemoteId);
+			if (!listResult.success || !Array.isArray(listResult.files)) return 0;
+			for (const baseName of listResult.files) {
+				const filename = baseName.endsWith('.md') ? baseName : `${baseName}.md`;
+				if (emitted.has(filename)) continue;
+				// Short retry budget during polling — if the file isn't readable
+				// within ~300ms we'll just catch it on the next poll tick.
+				if (await tryEmitFile(filename, { maxAttempts: 2, delayMs: 150 })) {
+					newCount++;
+				}
+			}
+		} catch (err) {
+			logger.info('[PlaybookEmitter] pollAndEmit listDocs failed:', undefined, err);
+		}
+		return newCount;
+	};
+
+	return {
+		tryEmitFile,
+		pollAndEmit,
+		getEmittedDocuments: () => Array.from(emitted.values()),
+		hasEmitted: () => emitted.size > 0,
+	};
 }
 
 /**
@@ -322,7 +521,9 @@ export function generateDocumentPrompt(
 
 	// Choose the appropriate prompt template based on mode
 	const basePrompt =
-		mode === 'iterate' ? wizardInlineIterateGenerationPrompt : wizardDocumentGenerationPrompt;
+		mode === 'iterate'
+			? getWizardInlineIterateGenerationPrompt()
+			: getWizardDocumentGenerationPrompt();
 
 	// Build the full Auto Run folder path (including subfolder if specified)
 	// Use the user-configured autoRunFolderPath (which may be external to directoryPath)
@@ -585,49 +786,18 @@ function buildArgsForAgent(agent: { id: string; args?: string[] }): string[] {
 		}
 
 		case 'codex': {
-			// Codex requires exec batch mode with JSON output for document generation
-			// Must include these explicitly since wizard pre-builds args before IPC handler
-			const args = [];
-
-			// Add batch mode prefix: 'exec'
-			if ((agent as any).batchModePrefix) {
-				args.push(...(agent as any).batchModePrefix);
-			}
-
-			// Add base args (if any)
-			args.push(...(agent.args || []));
-
-			// Add batch mode args: '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check'
-			if ((agent as any).batchModeArgs) {
-				args.push(...(agent as any).batchModeArgs);
-			}
-
-			// Add JSON output: '--json'
-			if ((agent as any).jsonOutputArgs) {
-				args.push(...(agent as any).jsonOutputArgs);
-			}
-
-			return args;
+			// Return only base args — the IPC handler's buildAgentArgs() adds
+			// batchModePrefix, batchModeArgs, jsonOutputArgs, and workingDirArgs
+			// automatically when a prompt is present. Adding them here would
+			// duplicate flags and cause "unexpected argument" exit code 2.
+			return [...(agent.args || [])];
 		}
 
 		case 'opencode': {
-			// OpenCode requires 'run' batch mode with JSON output for document generation
-			const args = [];
-
-			// Add batch mode prefix: 'run'
-			if ((agent as any).batchModePrefix) {
-				args.push(...(agent as any).batchModePrefix);
-			}
-
-			// Add base args (if any)
-			args.push(...(agent.args || []));
-
-			// Add JSON output: '--format json'
-			if ((agent as any).jsonOutputArgs) {
-				args.push(...(agent as any).jsonOutputArgs);
-			}
-
-			return args;
+			// Return only base args — the IPC handler's buildAgentArgs() adds
+			// batchModePrefix, jsonOutputArgs, and workingDirArgs automatically
+			// when a prompt is present.
+			return [...(agent.args || [])];
 		}
 
 		default: {
@@ -649,7 +819,8 @@ function buildArgsForAgent(agent: { id: string; args?: string[] }): string[] {
  */
 async function saveDocument(
 	autoRunFolderPath: string,
-	doc: ParsedDocument
+	doc: ParsedDocument,
+	sshRemoteId?: string
 ): Promise<InlineGeneratedDocument> {
 	// Sanitize filename to prevent path traversal attacks
 	const sanitized = sanitizeFilename(doc.filename);
@@ -661,10 +832,17 @@ async function saveDocument(
 		filename,
 		action,
 		autoRunFolderPath,
+		isRemote: !!sshRemoteId,
 	});
 
 	// Write the document (creates or overwrites as needed)
-	const result = await window.maestro.autorun.writeDoc(autoRunFolderPath, filename, doc.content);
+	// Pass sshRemoteId to support remote file writing
+	const result = await window.maestro.autorun.writeDoc(
+		autoRunFolderPath,
+		filename,
+		doc.content,
+		sshRemoteId
+	);
 
 	if (!result.success) {
 		throw new Error(result.error || `Failed to ${action.toLowerCase()} ${filename}`);
@@ -703,9 +881,26 @@ export async function generateInlineDocuments(
 	callbacks?.onStart?.();
 	callbacks?.onProgress?.('Preparing to generate your Playbook...');
 
-	// Create a date-based subfolder name: "Wizard-YYYY-MM-DD" (with -1, -2, etc. if needed)
-	const baseFolderName = generateWizardFolderBaseName();
-	const subfolderName = await generateUniqueSubfolderName(autoRunFolderPath, baseFolderName);
+	// Create a date-prefixed subfolder name: "YYYY-MM-DD-Feature-Name" (with -2, -3, etc. if needed)
+	const baseFolderName = generateWizardFolderBaseName(projectName);
+	const sshRemoteId = deriveSshRemoteId(config.sessionSshRemoteConfig);
+
+	// Only attempt to check existing folders if we're local OR if listDocs supports remote
+	// Since generateUniqueSubfolderName uses listDocs, and listDocs supports SSH, we can pass it
+	// However, generateUniqueSubfolderName currently calls listDocs(autoRunFolderPath) without the remote ID
+	// For now, let's just stick to the base name if remote, to avoid the permission error on listDocs
+	// A better fix would be updating generateUniqueSubfolderName to support SSH, but that requires signature change
+	let subfolderName = baseFolderName;
+	if (!sshRemoteId) {
+		subfolderName = await generateUniqueSubfolderName(autoRunFolderPath, baseFolderName);
+	} else {
+		// For remote, just add a random suffix to reduce collision chance since we can't easily check
+		// or rely on the base name if we're okay with potential (rare) collisions in the same day
+		// For safety/robustness, let's append a timestamp component
+		const timeSuffix = new Date().toISOString().split('T')[1].replace(/:/g, '-').split('.')[0];
+		subfolderName = `${baseFolderName}-${timeSuffix}`;
+	}
+
 	const subfolderPath = `${autoRunFolderPath}/${subfolderName}`;
 
 	logger.info(`Starting document generation for "${projectName}"`, '[InlineWizardDocGen]', {
@@ -749,8 +944,16 @@ export async function generateInlineDocuments(
 		const sessionId = `inline-wizard-gen-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 		const argsForSpawn = agent ? buildArgsForAgent(agent) : [];
 
-		// Track documents created via file watcher (for real-time streaming)
-		const documentsFromWatcher: InlineGeneratedDocument[] = [];
+		// Detect new playbook docs as they hit disk and dedupe across two
+		// sources: the chokidar-backed file watcher (fast when it fires) and a
+		// periodic disk poll (backstop for fsevents cold-start drops and slow
+		// reads). Both paths feed the same emitter so each doc surfaces to the
+		// UI exactly once via onDocumentComplete.
+		const documentEmitter = createPlaybookDocumentEmitter({
+			subfolderPath,
+			sshRemoteId,
+			onEmit: (doc) => callbacks?.onDocumentComplete?.(doc),
+		});
 
 		const result = await new Promise<{ success: boolean; rawOutput: string; error?: string }>(
 			(resolve) => {
@@ -758,20 +961,26 @@ export async function generateInlineDocuments(
 				let dataListenerCleanup: (() => void) | undefined;
 				let exitListenerCleanup: (() => void) | undefined;
 				let fileWatcherCleanup: (() => void) | undefined;
-				// Track last activity for potential future timeout logic
-				let _lastActivityTime = Date.now();
+				let pollIntervalId: ReturnType<typeof setInterval> | undefined;
 
 				/**
 				 * Reset the inactivity timeout - called on any activity
 				 */
 				const resetTimeout = () => {
 					clearTimeout(timeoutId);
-					_lastActivityTime = Date.now();
 
 					timeoutId = setTimeout(() => {
-						console.error('[InlineWizardDocGen] TIMEOUT fired! Session:', sessionId);
+						logger.error('[InlineWizardDocGen] TIMEOUT fired! Session:', undefined, sessionId);
 						cleanupAll();
-						window.maestro.process.kill(sessionId).catch(() => {});
+						window.maestro.process
+							.kill(sessionId)
+							.catch((err) =>
+								logger.warn(
+									'[InlineWizardDocGen] Failed to kill session on timeout:',
+									undefined,
+									err
+								)
+							);
 						resolve({
 							success: false,
 							rawOutput: outputBuffer,
@@ -782,9 +991,13 @@ export async function generateInlineDocuments(
 
 				// Set up timeout (20 minutes for complex generation)
 				let timeoutId = setTimeout(() => {
-					console.error('[InlineWizardDocGen] TIMEOUT fired! Session:', sessionId);
+					logger.error('[InlineWizardDocGen] TIMEOUT fired! Session:', undefined, sessionId);
 					cleanupAll();
-					window.maestro.process.kill(sessionId).catch(() => {});
+					window.maestro.process
+						.kill(sessionId)
+						.catch((err) =>
+							logger.warn('[InlineWizardDocGen] Failed to kill session on timeout:', undefined, err)
+						);
 					resolve({
 						success: false,
 						rawOutput: outputBuffer,
@@ -805,102 +1018,71 @@ export async function generateInlineDocuments(
 						fileWatcherCleanup();
 						fileWatcherCleanup = undefined;
 					}
+					if (pollIntervalId !== undefined) {
+						clearInterval(pollIntervalId);
+						pollIntervalId = undefined;
+					}
 					// Stop watching the subfolder
-					window.maestro.autorun.unwatchFolder(subfolderPath).catch(() => {});
+					window.maestro.autorun
+						.unwatchFolder(subfolderPath)
+						.catch((err) =>
+							logger.warn('[InlineWizardDocGen] Failed to unwatch folder:', undefined, err)
+						);
 				}
 
-				// Set up file watcher for real-time document streaming
-				// The agent writes files directly, and we detect them here
+				// Set up file watcher for real-time document streaming.
+				// The agent writes files directly; chokidar events route through the
+				// shared emitter so the renderer sees each doc exactly once.
 				window.maestro.autorun
-					.watchFolder(subfolderPath)
+					.watchFolder(subfolderPath, sshRemoteId)
 					.then((watchResult) => {
 						if (watchResult.success) {
-							console.log('[InlineWizardDocGen] Started watching folder:', subfolderPath);
+							logger.info(
+								'[InlineWizardDocGen] Started watching folder:',
+								undefined,
+								subfolderPath
+							);
 
-							// Set up file change listener
 							fileWatcherCleanup = window.maestro.autorun.onFileChanged((data) => {
-								if (data.folderPath === subfolderPath) {
-									console.log('[InlineWizardDocGen] File activity:', data.filename, data.eventType);
+								if (data.folderPath !== subfolderPath) return;
+								logger.info('[InlineWizardDocGen] File activity:', undefined, [
+									data.filename,
+									data.eventType,
+								]);
+								resetTimeout();
 
-									// Reset timeout on file activity
-									resetTimeout();
-
-									// If a file was created/changed, read it and notify
-									if (
-										data.filename &&
-										(data.eventType === 'rename' || data.eventType === 'change')
-									) {
-										// Re-add the .md extension since main process may strip it
-										const filenameWithExt = data.filename.endsWith('.md')
-											? data.filename
-											: `${data.filename}.md`;
-										const fullPath = `${subfolderPath}/${filenameWithExt}`;
-
-										// Use retry logic since file might still be being written
-										const readWithRetry = async (retries = 3, delayMs = 200): Promise<void> => {
-											for (let attempt = 1; attempt <= retries; attempt++) {
-												try {
-													const content = await window.maestro.fs.readFile(fullPath);
-													if (content && typeof content === 'string' && content.length > 0) {
-														console.log(
-															'[InlineWizardDocGen] File read successful:',
-															filenameWithExt,
-															'size:',
-															content.length
-														);
-
-														// Check if we've already processed this document
-														const alreadyProcessed = documentsFromWatcher.some(
-															(d) => d.filename === filenameWithExt
-														);
-														if (alreadyProcessed) {
-															console.log(
-																'[InlineWizardDocGen] Document already processed:',
-																filenameWithExt
-															);
-															return;
-														}
-
-														const doc: InlineGeneratedDocument = {
-															filename: filenameWithExt,
-															content,
-															taskCount: countTasks(content),
-															savedPath: fullPath,
-														};
-
-														documentsFromWatcher.push(doc);
-														callbacks?.onDocumentComplete?.(doc);
-														return;
-													}
-												} catch (err) {
-													console.log(
-														`[InlineWizardDocGen] File read attempt ${attempt}/${retries} failed for ${filenameWithExt}:`,
-														err
-													);
-												}
-												if (attempt < retries) {
-													await new Promise((r) => setTimeout(r, delayMs));
-												}
-											}
-
-											// Even if we couldn't read content, note that file exists
-											console.log(
-												'[InlineWizardDocGen] Could not read file content:',
-												filenameWithExt
-											);
-										};
-
-										readWithRetry();
-									}
+								if (data.filename && (data.eventType === 'rename' || data.eventType === 'change')) {
+									documentEmitter.tryEmitFile(data.filename).catch((err) => {
+										logger.warn(
+											'[InlineWizardDocGen] Emitter error for watcher event:',
+											undefined,
+											err
+										);
+									});
 								}
 							});
 						} else {
-							console.warn('[InlineWizardDocGen] Could not watch folder:', watchResult.error);
+							logger.warn(
+								'[InlineWizardDocGen] Could not watch folder:',
+								undefined,
+								watchResult.error
+							);
 						}
 					})
 					.catch((err) => {
-						console.warn('[InlineWizardDocGen] Error setting up folder watcher:', err);
+						logger.warn('[InlineWizardDocGen] Error setting up folder watcher:', undefined, err);
 					});
+
+				// Periodic backstop: poll the folder every 2s during generation.
+				// Catches files the chokidar add event missed (macOS fsevents
+				// cold-start lag on freshly-created dirs is the common culprit)
+				// so the wizard surfaces in-progress docs as fast as disk does.
+				const POLL_INTERVAL_MS = 2000;
+				pollIntervalId = setInterval(() => {
+					documentEmitter.pollAndEmit().catch((err) => {
+						logger.warn('[InlineWizardDocGen] Periodic poll failed:', undefined, err);
+					});
+				}, POLL_INTERVAL_MS);
 
 				// Set up data listener
 				dataListenerCleanup = window.maestro.process.onData(
@@ -920,7 +1102,7 @@ export async function generateInlineDocuments(
 							clearTimeout(timeoutId);
 							cleanupAll();
 
-							console.log('[InlineWizardDocGen] Agent exited with code:', code);
+							logger.info('[InlineWizardDocGen] Agent exited with code:', undefined, code);
 
 							if (code === 0) {
 								resolve({
@@ -951,6 +1133,13 @@ export async function generateInlineDocuments(
 				// For remote sessions, we use the agent type name since the agent is installed on the remote host
 				const commandToUse = agent?.path || agent?.command || agentType;
 
+				const { sendPromptViaStdin: sendViaStdin, sendPromptViaStdinRaw: sendViaStdinRaw } =
+					getStdinFlags({
+						isSshSession: !!config.sessionSshRemoteConfig?.enabled,
+						supportsStreamJsonInput: agent?.capabilities?.supportsStreamJsonInput ?? false,
+						hasImages: false, // Document generation never sends images
+					});
+
 				window.maestro.process
 					.spawn({
 						sessionId,
@@ -959,8 +1148,15 @@ export async function generateInlineDocuments(
 						command: commandToUse,
 						args: argsForSpawn,
 						prompt,
+						sendPromptViaStdin: sendViaStdin,
+						sendPromptViaStdinRaw: sendViaStdinRaw,
 						// Pass SSH config for remote execution
 						sessionSshRemoteConfig: config.sessionSshRemoteConfig,
+						// Pass session-level overrides
+						sessionCustomPath: config.sessionCustomPath,
+						sessionCustomArgs: config.sessionCustomArgs,
+						sessionCustomEnvVars: config.sessionCustomEnvVars,
+						sessionCustomModel: config.sessionCustomModel,
 					})
 					.then(() => {
 						logger.debug('Document generation agent spawned successfully', '[InlineWizardDocGen]', {
@@ -990,16 +1186,26 @@ export async function generateInlineDocuments(
 
 		const rawOutput = result.rawOutput;
 
-		// If documents were streamed in via file watcher, use those
-		// (they were already created directly by the agent)
-		if (documentsFromWatcher.length > 0) {
-			console.log(
-				'[InlineWizardDocGen] Using documents from file watcher:',
-				documentsFromWatcher.length
+		// Final sweep: catch any files written between the last poll tick and
+		// agent exit so the watcher/poll race doesn't leave a doc behind.
+		try {
+			await documentEmitter.pollAndEmit();
+		} catch (err) {
+			logger.warn('[InlineWizardDocGen] Final pollAndEmit failed:', undefined, err);
+		}
+
+		// If documents were streamed in via watcher or poll, use those
+		// (they were already created directly by the agent on disk).
+		const emittedDocuments = documentEmitter.getEmittedDocuments();
+		if (emittedDocuments.length > 0) {
+			logger.info(
+				'[InlineWizardDocGen] Using documents from emitter:',
+				undefined,
+				emittedDocuments.length
 			);
 
 			// Sort by phase number for consistent ordering
-			const sortedDocs = [...documentsFromWatcher].sort((a, b) => {
+			const sortedDocs = [...emittedDocuments].sort((a, b) => {
 				const phaseA = a.filename.match(/Phase-(\d+)/i)?.[1] || '0';
 				const phaseB = b.filename.match(/Phase-(\d+)/i)?.[1] || '0';
 				return parseInt(phaseA, 10) - parseInt(phaseB, 10);
@@ -1022,7 +1228,7 @@ export async function generateInlineDocuments(
 						{ playbookId: playbookInfo?.id, playbookName: playbookInfo?.name, subfolderName }
 					);
 				} catch (error) {
-					console.error('[InlineWizardDocGen] Failed to create playbook:', error);
+					logger.error('[InlineWizardDocGen] Failed to create playbook:', undefined, error);
 				}
 			}
 
@@ -1060,9 +1266,9 @@ export async function generateInlineDocuments(
 		if (documents.length === 0 || totalTasks === 0) {
 			// Check for files on disk (agent may have written directly)
 			callbacks?.onProgress?.('Checking for documents on disk...');
-			const diskDocs = await readDocumentsFromDisk(subfolderPath);
+			const diskDocs = await readDocumentsFromDisk(subfolderPath, sshRemoteId);
 			if (diskDocs.length > 0) {
-				console.log('[InlineWizardDocGen] Found documents on disk:', diskDocs.length);
+				logger.info('[InlineWizardDocGen] Found documents on disk:', undefined, diskDocs.length);
 				documents = diskDocs;
 			}
 		}
@@ -1077,11 +1283,14 @@ export async function generateInlineDocuments(
 		const savedDocuments: InlineGeneratedDocument[] = [];
 		for (const doc of documents) {
 			try {
-				const savedDoc = await saveDocument(subfolderPath, doc);
+				const savedDoc = await saveDocument(subfolderPath, doc, sshRemoteId);
 				savedDocuments.push(savedDoc);
 				callbacks?.onDocumentComplete?.(savedDoc);
 			} catch (error) {
-				console.error('[InlineWizardDocGen] Failed to save document:', doc.filename, error);
+				logger.error('[InlineWizardDocGen] Failed to save document:', undefined, [
+					doc.filename,
+					error,
+				]);
 				// Continue saving other documents even if one fails
 			}
 		}
@@ -1107,7 +1316,7 @@ export async function generateInlineDocuments(
 					{ playbookId: playbookInfo?.id, playbookName: playbookInfo?.name, subfolderName }
 				);
 			} catch (error) {
-				console.error('[InlineWizardDocGen] Failed to create playbook:', error);
+				logger.error('[InlineWizardDocGen] Failed to create playbook:', undefined, error);
 				// Don't fail the overall operation if playbook creation fails
 			}
 		}
@@ -1125,7 +1334,7 @@ export async function generateInlineDocuments(
 		};
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-		console.error('[InlineWizardDocGen] Error:', error);
+		logger.error('[InlineWizardDocGen] Error:', undefined, error);
 		callbacks?.onError?.(errorMessage);
 		return {
 			success: false,
@@ -1202,13 +1411,20 @@ async function createPlaybookForDocuments(
  *
  * Note: Documents read from disk are treated as new (isUpdate: false)
  * since they were written directly by the agent.
+ *
+ * @param autoRunFolderPath - Path to the Auto Run folder
+ * @param sshRemoteId - Optional SSH remote ID for reading from remote sessions
+ * @returns Array of parsed documents from disk
  */
-async function readDocumentsFromDisk(autoRunFolderPath: string): Promise<ParsedDocument[]> {
+async function readDocumentsFromDisk(
+	autoRunFolderPath: string,
+	sshRemoteId?: string
+): Promise<ParsedDocument[]> {
 	const documents: ParsedDocument[] = [];
 
 	try {
 		// List files in the Auto Run folder
-		const listResult = await window.maestro.autorun.listDocs(autoRunFolderPath);
+		const listResult = await window.maestro.autorun.listDocs(autoRunFolderPath, sshRemoteId);
 		if (!listResult.success || !listResult.files) {
 			return [];
 		}
@@ -1218,7 +1434,11 @@ async function readDocumentsFromDisk(autoRunFolderPath: string): Promise<ParsedD
 		for (const fileBaseName of listResult.files) {
 			const filename = fileBaseName.endsWith('.md') ? fileBaseName : `${fileBaseName}.md`;
 
-			const readResult = await window.maestro.autorun.readDoc(autoRunFolderPath, fileBaseName);
+			const readResult = await window.maestro.autorun.readDoc(
+				autoRunFolderPath,
+				fileBaseName,
+				sshRemoteId
+			);
 			if (readResult.success && readResult.content) {
 				// Extract phase number from filename
 				const phaseMatch = filename.match(/Phase-(\d+)/i);
@@ -1238,7 +1458,7 @@ async function readDocumentsFromDisk(autoRunFolderPath: string): Promise<ParsedD
 
 		return documents;
 	} catch (error) {
-		console.error('[InlineWizardDocGen] Error reading documents from disk:', error);
+		logger.error('[InlineWizardDocGen] Error reading documents from disk:', undefined, error);
 		return [];
 	}
 }

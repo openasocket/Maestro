@@ -280,25 +280,182 @@ describe('inlineWizardConversation', () => {
 
 			await messagePromise;
 		});
+
+		it('should apply Copilot read-only wizard args and parse final_answer responses', async () => {
+			const mockAgent = {
+				id: 'copilot-cli',
+				available: true,
+				command: 'copilot',
+				args: [],
+				readOnlyArgs: [
+					'--allow-tool=read,url',
+					'--deny-tool=write,shell,memory,github',
+					'--no-ask-user',
+				],
+			};
+			mockMaestro.agents.get.mockResolvedValue(mockAgent);
+			mockMaestro.process.spawn.mockResolvedValue(undefined);
+
+			const session = await startInlineWizardConversation({
+				agentType: 'copilot-cli',
+				directoryPath: '/test/project',
+				projectName: 'Test Project',
+				mode: 'ask',
+			});
+
+			const messagePromise = sendWizardMessage(session, 'Hello', []);
+			await new Promise((resolve) => setTimeout(resolve, 10));
+
+			const spawnCall = mockMaestro.process.spawn.mock.calls[0][0];
+			expect(spawnCall.args).toEqual(
+				expect.arrayContaining([
+					'--allow-tool=read,url',
+					'--deny-tool=write,shell,memory,github',
+					'--no-ask-user',
+				])
+			);
+
+			const dataCallback = mockMaestro.process.onData.mock.calls[0][0];
+			dataCallback(
+				session.sessionId,
+				'{"type":"assistant.message","data":{"phase":"final_answer","content":"{\\"confidence\\":91,\\"ready\\":true,\\"message\\":\\"Ready to proceed\\"}"}}\n'
+			);
+			dataCallback(
+				session.sessionId,
+				'{"type":"result","sessionId":"copilot-session-123","exitCode":0,"usage":{"sessionDurationMs":1200}}\n'
+			);
+
+			const exitCallback = mockMaestro.process.onExit.mock.calls[0][0];
+			exitCallback(session.sessionId, 0);
+
+			await expect(messagePromise).resolves.toEqual(
+				expect.objectContaining({
+					success: true,
+					agentSessionId: 'copilot-session-123',
+					response: expect.objectContaining({
+						confidence: 91,
+						ready: true,
+						message: 'Ready to proceed',
+					}),
+				})
+			);
+		});
+	});
+
+	describe('activity-based timeout', () => {
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it('should reset timeout when data is received, preventing false timeouts on active agents', async () => {
+			vi.useFakeTimers();
+
+			const mockAgent = {
+				id: 'claude-code',
+				available: true,
+				command: 'claude',
+				args: [],
+			};
+			mockMaestro.agents.get.mockResolvedValue(mockAgent);
+			mockMaestro.process.spawn.mockResolvedValue(undefined);
+			const mockKill = vi.fn().mockResolvedValue(undefined);
+			mockMaestro.process.kill = mockKill;
+
+			const session = await startInlineWizardConversation({
+				agentType: 'claude-code',
+				directoryPath: '/test/project',
+				projectName: 'Test Project',
+				mode: 'ask',
+			});
+
+			const messagePromise = sendWizardMessage(session, 'Analyze this codebase', []);
+			await vi.advanceTimersByTimeAsync(10);
+
+			const dataCallback = mockMaestro.process.onData.mock.calls[0][0];
+
+			// Simulate data arriving at 15 minutes (before the 20-min timeout)
+			await vi.advanceTimersByTimeAsync(900000); // 15 minutes
+			dataCallback(session.sessionId, '{"type":"assistant"}');
+
+			// Advance another 15 minutes — would have timed out at 20 min without the reset
+			await vi.advanceTimersByTimeAsync(900000); // now 30 minutes total
+			expect(mockKill).not.toHaveBeenCalled();
+
+			// Advance past the 20-min inactivity window (no data since 15-min mark)
+			await vi.advanceTimersByTimeAsync(600000); // 40 minutes total, 25+ min since last data
+
+			// Now it should have timed out due to inactivity
+			expect(mockKill).toHaveBeenCalledWith(session.sessionId);
+
+			const result = await messagePromise;
+			expect(result.success).toBe(false);
+			expect(result.error).toContain('timeout');
+		});
+
+		it('should not timeout when agent continuously produces output', async () => {
+			vi.useFakeTimers();
+
+			const mockAgent = {
+				id: 'claude-code',
+				available: true,
+				command: 'claude',
+				args: [],
+			};
+			mockMaestro.agents.get.mockResolvedValue(mockAgent);
+			mockMaestro.process.spawn.mockResolvedValue(undefined);
+			const mockKill = vi.fn().mockResolvedValue(undefined);
+			mockMaestro.process.kill = mockKill;
+
+			const session = await startInlineWizardConversation({
+				agentType: 'claude-code',
+				directoryPath: '/test/project',
+				projectName: 'Test Project',
+				mode: 'ask',
+			});
+
+			const messagePromise = sendWizardMessage(session, 'Complex analysis', []);
+			await vi.advanceTimersByTimeAsync(10);
+
+			const dataCallback = mockMaestro.process.onData.mock.calls[0][0];
+
+			// Send data every 10 minutes for 70 minutes — well past the 20-min timeout
+			for (let i = 0; i < 7; i++) {
+				await vi.advanceTimersByTimeAsync(600000);
+				dataCallback(session.sessionId, `{"type":"chunk_${i}"}`);
+			}
+
+			// Agent should still be alive — never went 20 min without activity
+			expect(mockKill).not.toHaveBeenCalled();
+
+			// Complete normally
+			const exitCallback = mockMaestro.process.onExit.mock.calls[0][0];
+			exitCallback(session.sessionId, 0);
+
+			await vi.advanceTimersByTimeAsync(0); // flush microtasks
+
+			const result = await messagePromise;
+			// The agent should have completed without a timeout error.
+			// result.error may be undefined (success) or a parse error — either is fine.
+			if (result.error) {
+				expect(result.error).not.toContain('timeout');
+			}
+		});
 	});
 
 	describe('Windows stdin handling', () => {
 		// Save original platform
-		const originalPlatform = Object.getOwnPropertyDescriptor(navigator, 'platform');
+		const originalMaestroPlatform = (window as any).maestro?.platform;
 
 		afterEach(() => {
 			// Restore original platform
-			if (originalPlatform) {
-				Object.defineProperty(navigator, 'platform', originalPlatform);
+			if ((window as any).maestro) {
+				(window as any).maestro.platform = originalMaestroPlatform;
 			}
 		});
 
-		it('should use sendPromptViaStdin for claude-code on Windows', async () => {
+		it('should use sendPromptViaStdinRaw for claude-code on Windows (text-only, no images)', async () => {
 			// Mock Windows platform
-			Object.defineProperty(navigator, 'platform', {
-				value: 'Win32',
-				configurable: true,
-			});
+			(window as any).maestro = { ...((window as any).maestro || {}), platform: 'win32' };
 
 			const mockAgent = {
 				id: 'claude-code',
@@ -324,9 +481,9 @@ describe('inlineWizardConversation', () => {
 
 			const spawnCall = mockMaestro.process.spawn.mock.calls[0][0];
 
-			// Claude Code supports stream-json, so should use sendPromptViaStdin
-			expect(spawnCall.sendPromptViaStdin).toBe(true);
-			expect(spawnCall.sendPromptViaStdinRaw).toBe(false);
+			// Inline wizard never sends images, so text-only uses raw stdin (not stream-json)
+			expect(spawnCall.sendPromptViaStdin).toBe(false);
+			expect(spawnCall.sendPromptViaStdinRaw).toBe(true);
 
 			// Clean up
 			const exitCallback = mockMaestro.process.onExit.mock.calls[0][0];
@@ -336,10 +493,7 @@ describe('inlineWizardConversation', () => {
 
 		it('should use sendPromptViaStdinRaw for opencode on Windows', async () => {
 			// Mock Windows platform
-			Object.defineProperty(navigator, 'platform', {
-				value: 'Win32',
-				configurable: true,
-			});
+			(window as any).maestro = { ...((window as any).maestro || {}), platform: 'win32' };
 
 			const mockAgent = {
 				id: 'opencode',
@@ -377,10 +531,7 @@ describe('inlineWizardConversation', () => {
 
 		it('should not use stdin flags on non-Windows platforms', async () => {
 			// Mock macOS platform
-			Object.defineProperty(navigator, 'platform', {
-				value: 'MacIntel',
-				configurable: true,
-			});
+			(window as any).maestro = { ...((window as any).maestro || {}), platform: 'darwin' };
 
 			const mockAgent = {
 				id: 'opencode',
@@ -416,12 +567,9 @@ describe('inlineWizardConversation', () => {
 			await messagePromise;
 		});
 
-		it('should add --input-format stream-json for claude-code on Windows', async () => {
+		it('should NOT add --input-format stream-json for claude-code on Windows (text-only)', async () => {
 			// Mock Windows platform
-			Object.defineProperty(navigator, 'platform', {
-				value: 'Win32',
-				configurable: true,
-			});
+			(window as any).maestro = { ...((window as any).maestro || {}), platform: 'win32' };
 
 			const mockAgent = {
 				id: 'claude-code',
@@ -447,10 +595,8 @@ describe('inlineWizardConversation', () => {
 
 			const spawnCall = mockMaestro.process.spawn.mock.calls[0][0];
 
-			// Should have --input-format stream-json in args
-			expect(spawnCall.args).toContain('--input-format');
-			const inputFormatIndex = spawnCall.args.indexOf('--input-format');
-			expect(spawnCall.args[inputFormatIndex + 1]).toBe('stream-json');
+			// Text-only messages should NOT have --input-format stream-json (only needed for images)
+			expect(spawnCall.args).not.toContain('--input-format');
 
 			// Clean up
 			const exitCallback = mockMaestro.process.onExit.mock.calls[0][0];

@@ -11,24 +11,17 @@
  * - Theme-aware styling
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { memo, useState, useEffect, useMemo, useCallback } from 'react';
 import type { Theme } from '../../types';
-import type { StatsTimeRange } from '../../hooks/useStats';
-
-/**
- * Auto Run task data shape from the API
- */
-interface AutoRunTask {
-	id: string;
-	autoRunSessionId: string;
-	sessionId: string;
-	agentType: string;
-	taskIndex: number;
-	taskContent?: string;
-	startTime: number;
-	duration: number;
-	success: boolean;
-}
+import type { StatsTimeRange, AutoRunTask } from '../../../shared/stats-types';
+import { captureException } from '../../utils/sentry';
+import {
+	buildHourlyTaskData,
+	formatHourFull,
+	formatHourShort,
+	getMaxHourlyTaskCount,
+	getPeakHours,
+} from './tasksByHourUtils';
 
 interface TasksByHourChartProps {
 	/** Current time range for filtering */
@@ -37,26 +30,10 @@ interface TasksByHourChartProps {
 	theme: Theme;
 }
 
-/**
- * Format hour number (0-23) to short format
- */
-function formatHourShort(hour: number): string {
-	if (hour === 0) return '12a';
-	if (hour === 12) return '12p';
-	if (hour < 12) return `${hour}a`;
-	return `${hour - 12}p`;
-}
-
-/**
- * Format hour number (0-23) to full format
- */
-function formatHourFull(hour: number): string {
-	const suffix = hour >= 12 ? 'PM' : 'AM';
-	const displayHour = hour % 12 || 12;
-	return `${displayHour}:00 ${suffix}`;
-}
-
-export function TasksByHourChart({ timeRange, theme }: TasksByHourChartProps) {
+export const TasksByHourChart = memo(function TasksByHourChart({
+	timeRange,
+	theme,
+}: TasksByHourChartProps) {
 	const [tasks, setTasks] = useState<AutoRunTask[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -78,7 +55,7 @@ export function TasksByHourChart({ timeRange, theme }: TasksByHourChartProps) {
 			const taskResults = await Promise.all(taskPromises);
 			setTasks(taskResults.flat());
 		} catch (err) {
-			console.error('Failed to fetch Auto Run tasks:', err);
+			captureException(err);
 			setError(err instanceof Error ? err.message : 'Failed to load tasks');
 		} finally {
 			setLoading(false);
@@ -98,36 +75,17 @@ export function TasksByHourChart({ timeRange, theme }: TasksByHourChartProps) {
 
 	// Group tasks by hour
 	const hourlyData = useMemo(() => {
-		const hours: Array<{ hour: number; count: number; successCount: number }> = [];
-
-		// Initialize all 24 hours
-		for (let i = 0; i < 24; i++) {
-			hours.push({ hour: i, count: 0, successCount: 0 });
-		}
-
-		// Count tasks per hour
-		tasks.forEach((task) => {
-			const hour = new Date(task.startTime).getHours();
-			hours[hour].count++;
-			if (task.success) {
-				hours[hour].successCount++;
-			}
-		});
-
-		return hours;
+		return buildHourlyTaskData(tasks);
 	}, [tasks]);
 
 	// Find max count for scaling
 	const maxCount = useMemo(() => {
-		return Math.max(...hourlyData.map((h) => h.count), 1);
+		return getMaxHourlyTaskCount(hourlyData);
 	}, [hourlyData]);
 
 	// Find peak hours (top 3)
 	const peakHours = useMemo(() => {
-		return [...hourlyData]
-			.sort((a, b) => b.count - a.count)
-			.slice(0, 3)
-			.map((h) => h.hour);
+		return getPeakHours(hourlyData);
 	}, [hourlyData]);
 
 	// Total tasks
@@ -136,7 +94,10 @@ export function TasksByHourChart({ timeRange, theme }: TasksByHourChartProps) {
 	if (loading) {
 		return (
 			<div className="p-4 rounded-lg" style={{ backgroundColor: theme.colors.bgMain }}>
-				<h3 className="text-sm font-medium mb-4" style={{ color: theme.colors.textMain }}>
+				<h3
+					className="text-sm font-medium mb-4"
+					style={{ color: theme.colors.textMain, animation: 'card-enter 0.4s ease both' }}
+				>
 					Tasks by Time of Day
 				</h3>
 				<div
@@ -152,7 +113,10 @@ export function TasksByHourChart({ timeRange, theme }: TasksByHourChartProps) {
 	if (error) {
 		return (
 			<div className="p-4 rounded-lg" style={{ backgroundColor: theme.colors.bgMain }}>
-				<h3 className="text-sm font-medium mb-4" style={{ color: theme.colors.textMain }}>
+				<h3
+					className="text-sm font-medium mb-4"
+					style={{ color: theme.colors.textMain, animation: 'card-enter 0.4s ease both' }}
+				>
 					Tasks by Time of Day
 				</h3>
 				<div
@@ -178,7 +142,10 @@ export function TasksByHourChart({ timeRange, theme }: TasksByHourChartProps) {
 	if (totalTasks === 0) {
 		return (
 			<div className="p-4 rounded-lg" style={{ backgroundColor: theme.colors.bgMain }}>
-				<h3 className="text-sm font-medium mb-4" style={{ color: theme.colors.textMain }}>
+				<h3
+					className="text-sm font-medium mb-4"
+					style={{ color: theme.colors.textMain, animation: 'card-enter 0.4s ease both' }}
+				>
 					Tasks by Time of Day
 				</h3>
 				<div
@@ -232,11 +199,7 @@ export function TasksByHourChart({ timeRange, theme }: TasksByHourChartProps) {
 				)}
 
 				{/* Bars */}
-				<div
-					className="flex items-end gap-0.5 h-24"
-					role="img"
-					aria-label="Tasks by hour of day"
-				>
+				<div className="flex items-end gap-0.5 h-24" role="img" aria-label="Tasks by hour of day">
 					{hourlyData.map((hourData) => {
 						const height = maxCount > 0 ? (hourData.count / maxCount) * 100 : 0;
 						const isPeak = peakHours.includes(hourData.hour);
@@ -297,6 +260,6 @@ export function TasksByHourChart({ timeRange, theme }: TasksByHourChartProps) {
 			)}
 		</div>
 	);
-}
+});
 
 export default TasksByHourChart;

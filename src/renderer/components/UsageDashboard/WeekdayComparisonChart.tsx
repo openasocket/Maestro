@@ -11,10 +11,11 @@
  * - Colorblind-friendly palette option
  */
 
-import React, { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { Briefcase, Coffee } from 'lucide-react';
 import type { Theme } from '../../types';
-import type { StatsAggregation } from '../../hooks/useStats';
+import type { StatsAggregation } from '../../hooks/stats/useStats';
+import { formatDurationHuman as formatDuration } from '../../../shared/formatters';
 
 interface WeekdayComparisonChartProps {
 	/** Aggregated stats data from the API */
@@ -25,27 +26,7 @@ interface WeekdayComparisonChartProps {
 	colorBlindMode?: boolean;
 }
 
-/**
- * Format duration in milliseconds to human-readable string
- */
-function formatDuration(ms: number): string {
-	if (ms === 0) return '0s';
-
-	const totalSeconds = Math.floor(ms / 1000);
-	const hours = Math.floor(totalSeconds / 3600);
-	const minutes = Math.floor((totalSeconds % 3600) / 60);
-	const seconds = totalSeconds % 60;
-
-	if (hours > 0) {
-		return `${hours}h ${minutes}m`;
-	}
-	if (minutes > 0) {
-		return `${minutes}m ${seconds}s`;
-	}
-	return `${seconds}s`;
-}
-
-export function WeekdayComparisonChart({
+export const WeekdayComparisonChart = memo(function WeekdayComparisonChart({
 	data,
 	theme,
 	colorBlindMode = false,
@@ -117,7 +98,10 @@ export function WeekdayComparisonChart({
 	if (!hasData) {
 		return (
 			<div className="p-4 rounded-lg" style={{ backgroundColor: theme.colors.bgMain }}>
-				<h3 className="text-sm font-medium mb-4" style={{ color: theme.colors.textMain }}>
+				<h3
+					className="text-sm font-medium mb-4"
+					style={{ color: theme.colors.textMain, animation: 'card-enter 0.4s ease both' }}
+				>
 					Weekday vs Weekend
 				</h3>
 				<div
@@ -147,15 +131,9 @@ export function WeekdayComparisonChart({
 
 			<div className="grid grid-cols-2 gap-6">
 				{/* Weekday Card */}
-				<div
-					className="p-4 rounded-lg"
-					style={{ backgroundColor: theme.colors.bgActivity }}
-				>
+				<div className="p-4 rounded-lg" style={{ backgroundColor: theme.colors.bgActivity }}>
 					<div className="flex items-center gap-2 mb-3">
-						<div
-							className="p-2 rounded-md"
-							style={{ backgroundColor: `${weekdayColor}20` }}
-						>
+						<div className="p-2 rounded-md" style={{ backgroundColor: `${weekdayColor}20` }}>
 							<Briefcase className="w-4 h-4" style={{ color: weekdayColor }} />
 						</div>
 						<div>
@@ -211,15 +189,9 @@ export function WeekdayComparisonChart({
 				</div>
 
 				{/* Weekend Card */}
-				<div
-					className="p-4 rounded-lg"
-					style={{ backgroundColor: theme.colors.bgActivity }}
-				>
+				<div className="p-4 rounded-lg" style={{ backgroundColor: theme.colors.bgActivity }}>
 					<div className="flex items-center gap-2 mb-3">
-						<div
-							className="p-2 rounded-md"
-							style={{ backgroundColor: `${weekendColor}20` }}
-						>
+						<div className="p-2 rounded-md" style={{ backgroundColor: `${weekendColor}20` }}>
 							<Coffee className="w-4 h-4" style={{ color: weekendColor }} />
 						</div>
 						<div>
@@ -281,7 +253,8 @@ export function WeekdayComparisonChart({
 					className="mt-4 pt-3 border-t text-xs"
 					style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
 				>
-					{comparisonData.weekday.avgQueriesPerDay > comparisonData.weekend.avgQueriesPerDay ? (
+					{comparisonData.weekend.avgQueriesPerDay > 0 &&
+					comparisonData.weekday.avgQueriesPerDay > comparisonData.weekend.avgQueriesPerDay ? (
 						<span>
 							You're{' '}
 							<strong style={{ color: theme.colors.textMain }}>
@@ -316,6 +289,6 @@ export function WeekdayComparisonChart({
 			)}
 		</div>
 	);
-}
+});
 
 export default WeekdayComparisonChart;

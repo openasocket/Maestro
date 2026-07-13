@@ -10,7 +10,10 @@ import * as path from 'path';
 import * as os from 'os';
 
 import { VibesCoordinator } from '../../../main/vibes/vibes-coordinator';
-import type { VibesSettingsStore, VibesAnnotationUpdatePayload } from '../../../main/vibes/vibes-coordinator';
+import type {
+	VibesSettingsStore,
+	VibesAnnotationUpdatePayload,
+} from '../../../main/vibes/vibes-coordinator';
 import { ensureAuditDir, flushAll, resetAllBuffers } from '../../../main/vibes/vibes-io';
 import type { ProcessConfig } from '../../../main/process-manager/types';
 
@@ -18,15 +21,13 @@ import type { ProcessConfig } from '../../../main/process-manager/types';
 // Helpers
 // ============================================================================
 
-function createMockSettingsStore(
-	overrides: Record<string, unknown> = {},
-): VibesSettingsStore {
+function createMockSettingsStore(overrides: Record<string, unknown> = {}): VibesSettingsStore {
 	const settings: Record<string, unknown> = {
 		vibesEnabled: true,
 		vibesAssuranceLevel: 'medium',
 		vibesPerAgentConfig: {
 			'claude-code': { enabled: true },
-			'codex': { enabled: true },
+			codex: { enabled: true },
 		},
 		...overrides,
 	};
@@ -39,9 +40,7 @@ function createMockSettingsStore(
 	};
 }
 
-function createProcessConfig(
-	overrides: Partial<ProcessConfig> = {},
-): ProcessConfig {
+function createProcessConfig(overrides: Partial<ProcessConfig> = {}): ProcessConfig {
 	return {
 		sessionId: 'sess-1',
 		toolType: 'claude-code',
@@ -88,7 +87,7 @@ describe('vibes:annotation-update emission', () => {
 		// The callback is fired for the session start annotation
 		expect(mockSafeSend).toHaveBeenCalled();
 		const calls = mockSafeSend.mock.calls.filter(
-			(call: unknown[]) => call[0] === 'vibes:annotation-update',
+			(call: unknown[]) => call[0] === 'vibes:annotation-update'
 		);
 		expect(calls.length).toBeGreaterThanOrEqual(1);
 
@@ -123,7 +122,7 @@ describe('vibes:annotation-update emission', () => {
 
 		// Tool execution should trigger annotation-update events
 		const calls = mockSafeSend.mock.calls.filter(
-			(call: unknown[]) => call[0] === 'vibes:annotation-update',
+			(call: unknown[]) => call[0] === 'vibes:annotation-update'
 		);
 		// May or may not produce annotations depending on instrumenter behavior
 		// But if it does, the payload should be correct
@@ -166,7 +165,7 @@ describe('vibes:annotation-update emission', () => {
 		await coordinator.handleProcessExit('sess-1', 0);
 
 		const calls = mockSafeSend.mock.calls.filter(
-			(call: unknown[]) => call[0] === 'vibes:annotation-update',
+			(call: unknown[]) => call[0] === 'vibes:annotation-update'
 		);
 		expect(calls.length).toBeGreaterThanOrEqual(1);
 
@@ -188,7 +187,7 @@ describe('vibes:annotation-update emission', () => {
 
 		// Collect all annotation-update calls
 		const calls = mockSafeSend.mock.calls.filter(
-			(call: unknown[]) => call[0] === 'vibes:annotation-update',
+			(call: unknown[]) => call[0] === 'vibes:annotation-update'
 		);
 
 		// Annotation counts should be monotonically increasing

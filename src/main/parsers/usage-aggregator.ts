@@ -6,7 +6,19 @@
  * and allow parsers to use it without importing node-pty dependencies.
  */
 
-import type { ToolType } from '../../shared/types';
+import type { ToolType, UsageStats } from '../../shared/types';
+export type { UsageStats } from '../../shared/types';
+import {
+	COMBINED_CONTEXT_AGENTS,
+	FALLBACK_CONTEXT_WINDOW,
+	getContextWindowForAgent,
+} from '../../shared/agentConstants';
+import { capabilitySnapshots } from '../agents/capability-snapshot';
+
+// Re-export for consumers that import from this module. The local import
+// was dropped on migration to `getContextWindowForAgent` — the re-export
+// resolves directly from the source module without needing a binding.
+export { DEFAULT_CONTEXT_WINDOWS } from '../../shared/agentConstants';
 
 /**
  * Model statistics from Claude Code modelUsage response
@@ -19,47 +31,7 @@ export interface ModelStats {
 	contextWindow?: number;
 }
 
-/**
- * Usage statistics extracted from model usage data
- */
-export interface UsageStats {
-	inputTokens: number;
-	outputTokens: number;
-	cacheReadInputTokens: number;
-	cacheCreationInputTokens: number;
-	totalCostUsd: number;
-	contextWindow: number;
-	/**
-	 * Reasoning/thinking tokens (separate from outputTokens)
-	 * Some models like OpenAI o3/o4-mini report reasoning tokens separately.
-	 * These are already included in outputTokens but tracked separately for UI display.
-	 */
-	reasoningTokens?: number;
-	/**
-	 * Model name extracted from modelUsage keys (e.g. "claude-sonnet-4-5-20250929").
-	 * Used by VIBES to populate the environment entry's model_name field.
-	 */
-	modelName?: string;
-}
-
-/**
- * Default context window sizes for different agents.
- * Used as fallback when the agent doesn't report its context window size.
- */
-export const DEFAULT_CONTEXT_WINDOWS: Record<ToolType, number> = {
-	'claude-code': 200000, // Claude 3.5 Sonnet/Claude 4 default context
-	codex: 200000, // OpenAI o3/o4-mini context window
-	opencode: 128000, // OpenCode (depends on model, 128k is conservative default)
-	'factory-droid': 200000, // Factory Droid (varies by model, defaults to Claude Opus)
-	terminal: 0, // Terminal has no context window
-};
-
-/**
- * Agents that use combined input+output context windows.
- * OpenAI models (Codex, o3, o4-mini) have a single context window that includes
- * both input and output tokens, unlike Claude which has separate limits.
- */
-const COMBINED_CONTEXT_AGENTS: Set<ToolType> = new Set(['codex']);
+// UsageStats imported and re-exported from shared/types above
 
 /**
  * Calculate total context tokens based on agent-specific semantics.
@@ -126,17 +98,27 @@ export function estimateContextUsage(
 		| 'cacheCreationInputTokens'
 		| 'contextWindow'
 	>,
-	agentId?: ToolType
+	agentId?: ToolType,
+	/**
+	 * SSH remote UUID when the session is running against a remote host.
+	 * Lets the snapshot lookup hit the `agentId:remoteId` key — otherwise
+	 * remote sessions fall back to the local snapshot and then the static
+	 * table, which can mis-size the context window when the remote runs
+	 * a different model.
+	 */
+	sshRemoteId?: string
 ): number | null {
 	// Calculate total context using agent-specific semantics
 	const totalContextTokens = calculateContextTokens(stats, agentId);
 
-	// Determine effective context window
+	// Determine effective context window: runtime-reported stats win, then
+	// the agent's persisted capability snapshot for this environment
+	// (local OR specific remote), then the static table.
 	const effectiveContextWindow =
 		stats.contextWindow && stats.contextWindow > 0
 			? stats.contextWindow
 			: agentId && agentId !== 'terminal'
-				? DEFAULT_CONTEXT_WINDOWS[agentId] || 0
+				? getContextWindowForAgent(agentId, capabilitySnapshots.get(agentId, sshRemoteId))
 				: 0;
 
 	if (!effectiveContextWindow || effectiveContextWindow <= 0) {
@@ -187,7 +169,7 @@ export function aggregateModelUsage(
 	let maxOutputTokens = 0;
 	let maxCacheReadTokens = 0;
 	let maxCacheCreationTokens = 0;
-	let contextWindow = 200000; // Default for Claude
+	let contextWindow = FALLBACK_CONTEXT_WINDOW; // Default for Claude
 	let modelName: string | undefined;
 
 	if (modelUsage) {

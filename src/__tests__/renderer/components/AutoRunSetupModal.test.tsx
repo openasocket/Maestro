@@ -13,12 +13,14 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { AutoRunSetupModal } from '../../../renderer/components/AutoRunSetupModal';
+import { AutoRunSetupModal } from '../../../renderer/components/AutoRun/AutoRunSetupModal';
 import { LayerStackProvider } from '../../../renderer/contexts/LayerStackContext';
 import type { Theme } from '../../../renderer/types';
+import { formatShortcutKeys } from '../../../renderer/utils/shortcutFormatter';
 
 // Mock lucide-react
-vi.mock('lucide-react', () => ({
+vi.mock('lucide-react', async (importOriginal) => ({
+	...(await importOriginal()),
 	X: () => <svg data-testid="x-icon" />,
 	Folder: () => <svg data-testid="folder-icon" />,
 	FileText: () => <svg data-testid="file-text-icon" />,
@@ -226,7 +228,7 @@ describe('AutoRunSetupModal', () => {
 			});
 
 			// Modal uses inline width style instead of Tailwind class
-			const modalContent = container.querySelector('[style*="width: 520px"]');
+			const modalContent = container.querySelector('[style*="width: min(calc(520px"]');
 			expect(modalContent).toHaveStyle({ backgroundColor: theme.colors.bgSidebar });
 		});
 	});
@@ -1204,7 +1206,7 @@ describe('AutoRunSetupModal', () => {
 			});
 
 			// Modal uses inline width style instead of Tailwind class
-			const modalContent = container.querySelector('[style*="width: 520px"]');
+			const modalContent = container.querySelector('[style*="width: min(calc(520px"]');
 			expect(modalContent).toHaveStyle({ backgroundColor: lightTheme.colors.bgSidebar });
 		});
 
@@ -1500,7 +1502,10 @@ describe('AutoRunSetupModal', () => {
 			});
 
 			const browseButton = screen.getByTestId('folder-icon').closest('button');
-			expect(browseButton).toHaveAttribute('title', 'Browse folders (Cmd+O)');
+			expect(browseButton).toHaveAttribute(
+				'title',
+				`Browse folders (${formatShortcutKeys(['Meta', 'o'])})`
+			);
 		});
 	});
 });

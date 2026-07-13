@@ -14,7 +14,9 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import React from 'react';
 import { AutoRun, AutoRunHandle } from '../../../renderer/components/AutoRun';
 import { LayerStackProvider } from '../../../renderer/contexts/LayerStackContext';
-import type { Theme, BatchRunState } from '../../../renderer/types';
+import type { BatchRunState } from '../../../renderer/types';
+
+import { createMockTheme } from '../../helpers/mockTheme';
 
 // Helper to wrap component in LayerStackProvider with custom rerender
 const renderWithProviders = (ui: React.ReactElement) => {
@@ -45,6 +47,7 @@ vi.mock('react-syntax-highlighter', () => ({
 
 vi.mock('react-syntax-highlighter/dist/esm/styles/prism', () => ({
 	vscDarkPlus: {},
+	vs: {},
 }));
 
 vi.mock('../../../renderer/components/AutoRunnerHelpModal', () => ({
@@ -125,27 +128,6 @@ vi.mock('../../../renderer/components/TemplateAutocompleteDropdown', () => ({
 	TemplateAutocompleteDropdown: React.forwardRef(() => null),
 }));
 
-// Create a mock theme for testing
-const createMockTheme = (): Theme => ({
-	id: 'test-theme',
-	name: 'Test Theme',
-	mode: 'dark',
-	colors: {
-		bgMain: '#1a1a1a',
-		bgPanel: '#252525',
-		bgActivity: '#2d2d2d',
-		textMain: '#ffffff',
-		textDim: '#888888',
-		accent: '#0066ff',
-		accentForeground: '#ffffff',
-		border: '#333333',
-		highlight: '#0066ff33',
-		success: '#00aa00',
-		warning: '#ffaa00',
-		error: '#ff0000',
-	},
-});
-
 // Setup window.maestro mock
 const setupMaestroMock = () => {
 	const mockMaestro = {
@@ -208,7 +190,7 @@ describe('AutoRun Session Isolation', () => {
 
 			const propsA = createDefaultProps({
 				sessionId: 'session-a',
-				folderPath: '/projects/session-a/Auto Run Docs',
+				folderPath: '/projects/session-a/.maestro/playbooks',
 				selectedFile: 'Phase 1',
 				content: sessionAContent,
 			});
@@ -225,7 +207,7 @@ describe('AutoRun Session Isolation', () => {
 			// Now switch to Session B - the content should reset to Session B's content
 			const propsB = createDefaultProps({
 				sessionId: 'session-b',
-				folderPath: '/projects/session-b/Auto Run Docs',
+				folderPath: '/projects/session-b/.maestro/playbooks',
 				selectedFile: 'Phase 1',
 				content: sessionBContent,
 			});
@@ -649,7 +631,7 @@ describe('AutoRun Folder Path Isolation', () => {
 	it('different sessions can have different folder paths', async () => {
 		const propsA = createDefaultProps({
 			sessionId: 'session-a',
-			folderPath: '/projects/alpha/Auto Run Docs',
+			folderPath: '/projects/alpha/.maestro/playbooks',
 			selectedFile: 'Phase 1',
 			content: 'Alpha project content',
 		});
@@ -662,7 +644,7 @@ describe('AutoRun Folder Path Isolation', () => {
 		// Switch to session B with different folder
 		const propsB = createDefaultProps({
 			sessionId: 'session-b',
-			folderPath: '/projects/beta/Auto Run Docs',
+			folderPath: '/projects/beta/.maestro/playbooks',
 			selectedFile: 'Phase 1',
 			content: 'Beta project content',
 		});

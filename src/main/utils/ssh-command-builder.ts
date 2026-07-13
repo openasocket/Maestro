@@ -12,7 +12,130 @@ import { shellEscape, buildShellCommand } from './shell-escape';
 import { expandTilde } from '../../shared/pathUtils';
 import { logger } from './logger';
 import { resolveSshPath } from './cliDetection';
-import { parseDataUrl } from '../process-manager/utils/imageUtils';
+import { parseDataUrl, buildImagePromptPrefix } from '../process-manager/utils/imageUtils';
+
+/**
+ * Base PATH directories that are always added to the remote PATH.
+ * These cover common binary locations that don't require dynamic detection.
+ */
+const BASE_SSH_PATH_DIRS = [
+	'$HOME/.local/bin',
+	'$HOME/.opencode/bin',
+	'$HOME/.claude/local',
+	'$HOME/bin',
+	'/usr/local/bin',
+	'/opt/homebrew/bin',
+	'$HOME/.cargo/bin',
+	'$HOME/go/bin',
+	'$HOME/.bun/bin',
+	'$HOME/.deno/bin',
+	'$HOME/.nix-profile/bin',
+	'/snap/bin',
+];
+
+/**
+ * Build a multi-line shell snippet that dynamically detects Node version manager
+ * bin paths on the remote host and prepends them to PATH.
+ *
+ * This handles nvm, fnm, volta, mise, asdf, and n installations where binaries like
+ * `codex`, `claude`, etc. may be installed via npm/npx into version-specific dirs.
+ *
+ * The snippet runs on the remote host and:
+ * 1. Checks for nvm (current symlink + all installed versions, newest first)
+ * 2. Checks for fnm (aliases/default + all installed versions)
+ * 3. Checks for volta (~/.volta/bin)
+ * 4. Checks for mise (~/.local/share/mise/shims)
+ * 5. Checks for asdf (~/.asdf/shims)
+ * 6. Checks for n (N_PREFIX/bin or /usr/local/bin)
+ *
+ * Used by buildSshCommandWithStdin() which sends a multi-line script via stdin.
+ *
+ * @returns Array of shell script lines (one statement per line)
+ */
+function buildNodeVersionManagerPathLines(): string[] {
+	// This mirrors the logic in pathUtils.ts detectNodeVersionManagerBinPaths() but
+	// runs as shell commands on the remote host rather than Node.js filesystem calls.
+	return [
+		// nvm: check for current symlink, then iterate installed versions (newest first)
+		'_nvm_dir="${NVM_DIR:-$HOME/.nvm}"',
+		'if [ -d "$_nvm_dir" ]; then',
+		'  [ -d "$_nvm_dir/current/bin" ] && PATH="$_nvm_dir/current/bin:$PATH"',
+		'  if [ -d "$_nvm_dir/versions/node" ]; then',
+		'    for _v in $(ls "$_nvm_dir/versions/node/" 2>/dev/null | sort -rV); do',
+		'      [ -d "$_nvm_dir/versions/node/$_v/bin" ] && PATH="$_nvm_dir/versions/node/$_v/bin:$PATH"',
+		'    done',
+		'  fi',
+		'fi',
+		// fnm: check aliases/default, then iterate node-versions
+		'for _fnm_dir in "$HOME/Library/Application Support/fnm" "$HOME/.local/share/fnm" "$HOME/.fnm"; do',
+		'  if [ -d "$_fnm_dir" ]; then',
+		'    [ -d "$_fnm_dir/aliases/default/bin" ] && PATH="$_fnm_dir/aliases/default/bin:$PATH"',
+		'    if [ -d "$_fnm_dir/node-versions" ]; then',
+		'      for _v in $(ls "$_fnm_dir/node-versions/" 2>/dev/null | sort -rV); do',
+		'        [ -d "$_fnm_dir/node-versions/$_v/installation/bin" ] && PATH="$_fnm_dir/node-versions/$_v/installation/bin:$PATH"',
+		'      done',
+		'    fi',
+		'    break',
+		'  fi',
+		'done',
+		// volta
+		'[ -d "$HOME/.volta/bin" ] && PATH="$HOME/.volta/bin:$PATH"',
+		// mise
+		'[ -d "$HOME/.local/share/mise/shims" ] && PATH="$HOME/.local/share/mise/shims:$PATH"',
+		// asdf
+		'[ -d "$HOME/.asdf/shims" ] && PATH="$HOME/.asdf/shims:$PATH"',
+		// n: check for N_PREFIX or default /usr/local
+		'_n_prefix="${N_PREFIX:-/usr/local}"',
+		'[ -d "$_n_prefix/n/versions" ] && [ -d "$_n_prefix/bin" ] && PATH="$_n_prefix/bin:$PATH"',
+	];
+}
+
+/**
+ * Build a compact single-line shell snippet that detects Node version manager
+ * bin paths on the remote host.
+ *
+ * This is the single-line equivalent of buildNodeVersionManagerPathLines(),
+ * designed for use with `bash -c '...'` where newlines aren't available.
+ *
+ * Used by buildSshCommand() which passes the command as a single `-c` argument.
+ *
+ * @returns A single shell string with semicolons separating statements
+ */
+function buildNodeVersionManagerPathSnippet(): string {
+	// Same logic as the multi-line version, but formatted for single-line execution.
+	// Shell control structures use semicolons: if ...; then ...; fi
+	const parts: string[] = [
+		// nvm
+		'_nvm_dir="${NVM_DIR:-$HOME/.nvm}"',
+		'if [ -d "$_nvm_dir" ]; then ' +
+			'[ -d "$_nvm_dir/current/bin" ] && PATH="$_nvm_dir/current/bin:$PATH"; ' +
+			'if [ -d "$_nvm_dir/versions/node" ]; then ' +
+			'for _v in $(ls "$_nvm_dir/versions/node/" 2>/dev/null | sort -rV); do ' +
+			'[ -d "$_nvm_dir/versions/node/$_v/bin" ] && PATH="$_nvm_dir/versions/node/$_v/bin:$PATH"; ' +
+			'done; ' +
+			'fi; ' +
+			'fi',
+		// fnm
+		'for _fnm_dir in "$HOME/Library/Application Support/fnm" "$HOME/.local/share/fnm" "$HOME/.fnm"; do ' +
+			'if [ -d "$_fnm_dir" ]; then ' +
+			'[ -d "$_fnm_dir/aliases/default/bin" ] && PATH="$_fnm_dir/aliases/default/bin:$PATH"; ' +
+			'if [ -d "$_fnm_dir/node-versions" ]; then ' +
+			'for _v in $(ls "$_fnm_dir/node-versions/" 2>/dev/null | sort -rV); do ' +
+			'[ -d "$_fnm_dir/node-versions/$_v/installation/bin" ] && PATH="$_fnm_dir/node-versions/$_v/installation/bin:$PATH"; ' +
+			'done; ' +
+			'fi; ' +
+			'break; ' +
+			'fi; ' +
+			'done',
+		// volta, mise, asdf
+		'[ -d "$HOME/.volta/bin" ] && PATH="$HOME/.volta/bin:$PATH"',
+		'[ -d "$HOME/.local/share/mise/shims" ] && PATH="$HOME/.local/share/mise/shims:$PATH"',
+		'[ -d "$HOME/.asdf/shims" ] && PATH="$HOME/.asdf/shims:$PATH"',
+		// n
+		'_n_prefix="${N_PREFIX:-/usr/local}"; [ -d "$_n_prefix/n/versions" ] && [ -d "$_n_prefix/bin" ] && PATH="$_n_prefix/bin:$PATH"',
+	];
+	return parts.join('; ');
+}
 
 /**
  * Result of building an SSH command.
@@ -25,6 +148,12 @@ export interface SshCommandResult {
 	args: string[];
 	/** Script to send via stdin (for stdin-based execution) */
 	stdinScript?: string;
+	/** Remote temp file paths created during image decoding (for informational/logging purposes) */
+	remoteTempImagePaths?: string[];
+	/** Human-readable remote command line (the actual agent invocation that runs on the
+	 *  remote host, without the PATH/version-manager bootstrap or the `exec` wrapper).
+	 *  Surfaced in the Process Details modal above the local SSH command. */
+	remoteCommandLine?: string;
 }
 
 /**
@@ -181,6 +310,11 @@ export async function buildSshCommandWithStdin(
 		images?: string[];
 		/** Function to build CLI args for each image path (e.g., (path) => ['-i', path]) */
 		imageArgs?: (imagePath: string) => string[];
+		/** Function to embed image references into the prompt/stdinInput (e.g., Copilot @mentions). */
+		imagePromptBuilder?: (imagePaths: string[]) => string;
+		/** When set to 'prompt-embed', embed image paths in the prompt/stdinInput instead of adding -i CLI args.
+		 * Used for resumed Codex sessions where the resume command doesn't support -i flag. */
+		imageResumeMode?: 'prompt-embed';
 	}
 ): Promise<SshCommandResult> {
 	const args: string[] = [];
@@ -213,16 +347,17 @@ export async function buildSshCommandWithStdin(
 		args.push(config.host);
 	}
 
-	// The remote command is just /bin/bash - it will read the script from stdin
-	args.push('/bin/bash');
+	// Run bash without rc/profile files so remote shell init can't inject control
+	// sequences into the agent stream before the script executes.
+	args.push('/bin/bash', '--norc', '--noprofile', '-s');
 
 	// Build the script to send via stdin
 	const scriptLines: string[] = [];
 
-	// PATH setup - same directories as before
-	scriptLines.push(
-		'export PATH="$HOME/.local/bin:$HOME/bin:/usr/local/bin:/opt/homebrew/bin:$HOME/.cargo/bin:$PATH"'
-	);
+	// PATH setup - base directories + dynamic Node version manager detection
+	scriptLines.push(`export PATH="${BASE_SSH_PATH_DIRS.join(':')}:$PATH"`);
+	// Dynamically detect Node version manager paths (nvm, fnm, volta, etc.)
+	scriptLines.push(...buildNodeVersionManagerPathLines());
 
 	// Change directory if specified
 	if (remoteOptions.cwd) {
@@ -244,28 +379,64 @@ export async function buildSshCommandWithStdin(
 	}
 
 	// Decode images into remote temp files for file-based agents (Codex, OpenCode)
-	// This creates temp files on the remote host from base64 data, then adds
-	// the appropriate CLI args (e.g., -i /tmp/image.png for Codex)
+	// This creates temp files on the remote host from base64 data, then either:
+	// - Adds CLI args (e.g., -i /tmp/image.png) for initial spawns
+	// - Embeds paths in the prompt/stdinInput for resumed sessions (imageResumeMode === 'prompt-embed')
 	const imageArgParts: string[] = [];
-	if (remoteOptions.images && remoteOptions.images.length > 0 && remoteOptions.imageArgs) {
+	const remoteImagePaths: string[] = [];
+	/** All remote temp file paths created during image decoding (for cleanup) */
+	const allRemoteTempPaths: string[] = [];
+	if (
+		remoteOptions.images &&
+		remoteOptions.images.length > 0 &&
+		(remoteOptions.imageArgs || remoteOptions.imagePromptBuilder)
+	) {
 		const timestamp = Date.now();
 		for (let i = 0; i < remoteOptions.images.length; i++) {
 			const parsed = parseDataUrl(remoteOptions.images[i]);
 			if (!parsed) continue;
 			const ext = parsed.mediaType.split('/')[1] || 'png';
 			const remoteTempPath = `/tmp/maestro-image-${timestamp}-${i}.${ext}`;
+			allRemoteTempPaths.push(remoteTempPath);
 			// Use heredoc + base64 decode to create the file on the remote host
 			// Heredoc avoids shell argument length limits for large images
 			// Base64 alphabet (A-Za-z0-9+/=) is safe in heredocs
 			scriptLines.push(`base64 -d > ${shellEscape(remoteTempPath)} <<'MAESTRO_IMG_${i}_EOF'`);
 			scriptLines.push(parsed.base64);
 			scriptLines.push(`MAESTRO_IMG_${i}_EOF`);
-			imageArgParts.push(...remoteOptions.imageArgs(remoteTempPath).map((arg) => shellEscape(arg)));
+			if (remoteOptions.imagePromptBuilder || remoteOptions.imageResumeMode === 'prompt-embed') {
+				// Resume mode: collect paths for prompt embedding instead of CLI args
+				remoteImagePaths.push(remoteTempPath);
+			} else {
+				if (!remoteOptions.imageArgs) {
+					continue;
+				}
+				// Normal mode: add -i (or equivalent) CLI args
+				imageArgParts.push(
+					...remoteOptions.imageArgs(remoteTempPath).map((arg) => shellEscape(arg))
+				);
+			}
 		}
 		logger.info('SSH: embedded remote image decode commands', '[ssh-command-builder]', {
 			imageCount: remoteOptions.images.length,
-			decodedCount: imageArgParts.length / 2,
+			decodedCount:
+				remoteOptions.imageResumeMode === 'prompt-embed'
+					? remoteImagePaths.length
+					: imageArgParts.length / 2,
+			imageResumeMode: remoteOptions.imageResumeMode || 'default',
 		});
+	}
+
+	// For prompt-embed mode (resumed sessions), prepend image paths to stdinInput/prompt
+	if (remoteImagePaths.length > 0) {
+		const imagePrefix = remoteOptions.imagePromptBuilder
+			? remoteOptions.imagePromptBuilder(remoteImagePaths)
+			: buildImagePromptPrefix(remoteImagePaths);
+		if (remoteOptions.stdinInput !== undefined) {
+			remoteOptions.stdinInput = imagePrefix + remoteOptions.stdinInput;
+		} else if (remoteOptions.prompt) {
+			remoteOptions.prompt = imagePrefix + remoteOptions.prompt;
+		}
 	}
 
 	// Build the command line
@@ -283,10 +454,20 @@ export async function buildSshCommandWithStdin(
 		cmdParts.push(shellEscape(remoteOptions.prompt));
 	}
 
-	// Use exec to replace the shell with the command (cleaner process tree)
-	// When stdinInput is provided, the prompt will be appended after the script
-	// and passed through to the exec'd command via stdin inheritance
-	scriptLines.push(`exec ${cmdParts.join(' ')}`);
+	// Capture the bare agent invocation (command + args) for display in Process Details.
+	// This excludes the PATH bootstrap, the `exec` wrapper, and any temp-file cleanup.
+	const remoteCommandLine = cmdParts.join(' ');
+
+	// When remote temp files exist, don't use exec (which replaces the shell) so that
+	// cleanup commands can run after the agent exits. When no temp files, use exec for
+	// a cleaner process tree. When stdinInput is provided, the prompt will be appended
+	// after the script and passed through to the command via stdin inheritance.
+	if (allRemoteTempPaths.length > 0) {
+		const rmPaths = allRemoteTempPaths.map((p) => shellEscape(p)).join(' ');
+		scriptLines.push(`${cmdParts.join(' ')}; rm -f ${rmPaths}`);
+	} else {
+		scriptLines.push(`exec ${cmdParts.join(' ')}`);
+	}
 
 	// Build the final stdin content: script + optional prompt passthrough
 	// The script ends with exec, which replaces bash with the target command
@@ -317,6 +498,8 @@ export async function buildSshCommandWithStdin(
 		command: sshPath,
 		args,
 		stdinScript,
+		remoteTempImagePaths: allRemoteTempPaths.length > 0 ? allRemoteTempPaths : undefined,
+		remoteCommandLine,
 	};
 }
 
@@ -468,12 +651,19 @@ export async function buildSshCommand(
 	//
 	// We prepend common binary locations to PATH:
 	// - ~/.local/bin: Claude Code, pip --user installs
+	// - ~/.opencode/bin: OpenCode installer default location
+	// - ~/.claude/local: Claude Code local-install layout (auto-update bundle)
 	// - ~/bin: User scripts
 	// - /usr/local/bin: Homebrew on Intel Mac, manual installs
 	// - /opt/homebrew/bin: Homebrew on Apple Silicon
 	// - ~/.cargo/bin: Rust tools
-	//
-	// This approach avoids all profile sourcing issues while ensuring agent binaries are found.
+	// - ~/go/bin: Go default GOBIN (Factory Droid and other Go-based CLIs)
+	// - ~/.bun/bin: Bun runtime + bunx-installed CLIs
+	// - ~/.deno/bin: Deno-installed CLIs
+	// - ~/.nix-profile/bin: Nix user profile binaries
+	// - /snap/bin: Linux snap-installed binaries
+	// Plus dynamic detection of Node version managers (nvm, fnm, volta, mise, asdf, n)
+	// to find npm-installed CLIs like codex, claude, etc.
 	//
 	// CRITICAL: Use single quotes for the -c argument to prevent the remote shell (often zsh)
 	// from parsing the command content. SSH passes the command to the remote's login shell,
@@ -481,9 +671,9 @@ export async function buildSshCommand(
 	// Single quotes are parsed literally by zsh - it just passes the content to bash as-is.
 	//
 	// The inner command uses shellEscape() which handles embedded single quotes via '\'' pattern.
-	const pathSetup =
-		'export PATH="$HOME/.local/bin:$HOME/bin:/usr/local/bin:/opt/homebrew/bin:$HOME/.cargo/bin:$PATH"';
-	const fullBashCommand = `${pathSetup} && ${remoteCommand}`;
+	const pathSetup = `export PATH="${BASE_SSH_PATH_DIRS.join(':')}:$PATH"`;
+	const versionManagerSetup = buildNodeVersionManagerPathSnippet();
+	const fullBashCommand = `${pathSetup}; ${versionManagerSetup}; ${remoteCommand}`;
 	const wrappedCommand = `/bin/bash --norc --noprofile -c ${shellEscape(fullBashCommand)}`;
 	args.push(wrappedCommand);
 
@@ -505,5 +695,8 @@ export async function buildSshCommand(
 	return {
 		command: sshPath,
 		args,
+		// Bare agent invocation (command + args) for display in Process Details,
+		// without the cd/env prefix or the bash PATH bootstrap wrapper.
+		remoteCommandLine: buildShellCommand(remoteOptions.command, remoteOptions.args),
 	};
 }

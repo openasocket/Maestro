@@ -15,9 +15,38 @@
  */
 
 import { create } from 'zustand';
-import type { Session, SettingsTab } from '../types';
+import type { Session, SettingsTab, AgentError } from '../types';
 import type { SerializableWizardState } from '../components/Wizard';
 import type { ConductorBadge } from '../constants/conductorBadges';
+import { logger } from '../utils/logger';
+
+// ============================================================================
+// Prompt Composer full-screen preference (persisted)
+// ============================================================================
+// The Prompt Composer remembers whether the user last left it windowed or
+// full-screen ("expanded-expanded"). The open-composer hotkey cycles between
+// the two while the modal is open, so this lives in the store (shared by the
+// keyboard handler and the modal) rather than as component-local state.
+
+const PROMPT_COMPOSER_FULLSCREEN_KEY = 'maestro.promptComposer.fullscreen';
+
+function readStoredPromptComposerFullscreen(): boolean {
+	if (typeof window === 'undefined') return false;
+	try {
+		return window.localStorage.getItem(PROMPT_COMPOSER_FULLSCREEN_KEY) === 'true';
+	} catch {
+		return false;
+	}
+}
+
+function writeStoredPromptComposerFullscreen(value: boolean): void {
+	if (typeof window === 'undefined') return;
+	try {
+		window.localStorage.setItem(PROMPT_COMPOSER_FULLSCREEN_KEY, String(value));
+	} catch {
+		// Ignore quota / privacy-mode errors — preference just won't persist.
+	}
+}
 
 // ============================================================================
 // Modal Data Types
@@ -48,12 +77,17 @@ export interface LightboxData {
 
 /** Settings modal data */
 export interface SettingsModalData {
-	tab: SettingsTab;
+	/** When omitted, SettingsModal restores the last in-session tab and falls
+	 *  back to 'general' on first open. Set to a specific tab to deep-link. */
+	tab?: SettingsTab;
+	promptId?: string;
 }
 
 /** New instance modal data */
 export interface NewInstanceModalData {
 	duplicatingSessionId: string | null;
+	/** When set, the new agent is created inside this group (ignored if duplicatingSessionId is set — duplicates inherit the source's group). */
+	presetGroupId?: string | null;
 }
 
 /** Edit agent modal data */
@@ -63,7 +97,7 @@ export interface EditAgentModalData {
 
 /** Quick action modal data */
 export interface QuickActionModalData {
-	initialMode: 'main' | 'move-to-group';
+	initialMode: 'main' | 'move-to-group' | 'agents';
 }
 
 /** Confirmation modal data */
@@ -86,11 +120,22 @@ export interface RenameTabModalData {
 	initialName: string;
 }
 
+/** Terminal tab startup command modal data */
+export interface TerminalStartupCommandModalData {
+	sessionId: string;
+	tabId: string;
+	initialCommand: string;
+	initialCwd: string;
+	defaultCwd: string;
+}
+
 /** Rename group modal data */
 export interface RenameGroupModalData {
 	groupId: string;
 	value: string;
 	emoji: string;
+	icon?: string;
+	color?: string;
 }
 
 /** Agent sessions browser data */
@@ -106,6 +151,36 @@ export interface WizardResumeModalData {
 /** Agent error modal data */
 export interface AgentErrorModalData {
 	sessionId: string;
+	/** Direct error for displaying historical errors from chat log entries */
+	historicalError?: AgentError;
+}
+
+/** Delete agent modal data */
+export interface DeleteAgentModalData {
+	session: Session;
+}
+
+/** Director's Notes modal data */
+export interface DirectorNotesData {
+	initialTab?: 'overview' | 'history' | 'ai-overview';
+}
+
+/** Quit confirmation modal data */
+export interface QuitConfirmModalData {
+	activeTerminalTasks?: string[];
+	activeCueRunCount?: number;
+	activeGroupChatCount?: number;
+	hasFeedbackDraft?: boolean;
+}
+
+export interface CueModalData {
+	initialTab?: 'dashboard' | 'pipeline';
+}
+
+/** Cue YAML editor data */
+export interface CueYamlEditorData {
+	sessionId: string;
+	projectRoot: string;
 }
 
 /** Worktree modal data (create/delete/PR) */
@@ -133,6 +208,12 @@ export interface KeyboardMasteryData {
 	level: number;
 }
 
+/** Batch Runner modal data — used to pre-seed the doc list when opened programmatically (e.g. from the inline wizard's "Start Auto Run" button). */
+export interface BatchRunnerModalData {
+	/** Document filenames (without `.md`) to pre-populate the run list with. When omitted, the run list opens empty. */
+	presetDocuments?: string[];
+}
+
 // ============================================================================
 // Modal ID Registry
 // ============================================================================
@@ -149,10 +230,13 @@ export type ModalId =
 	| 'settings'
 	| 'shortcutsHelp'
 	| 'about'
+	| 'feedback'
 	| 'updateCheck'
 	// Instance Management
+	| 'newAgentChoice'
 	| 'newInstance'
 	| 'editAgent'
+	| 'deleteAgent'
 	| 'renameInstance'
 	| 'agentError'
 	// Quick Actions
@@ -162,6 +246,7 @@ export type ModalId =
 	| 'promptComposer'
 	// Tab Management
 	| 'renameTab'
+	| 'terminalStartupCommand'
 	// Group Management
 	| 'renameGroup'
 	// Session Operations
@@ -169,6 +254,7 @@ export type ModalId =
 	| 'sendToAgent'
 	| 'agentSessions'
 	// Batch & Auto Run
+	| 'memoryViewer'
 	| 'queueBrowser'
 	| 'batchRunner'
 	| 'autoRunSetup'
@@ -191,12 +277,16 @@ export type ModalId =
 	| 'wizardResume'
 	| 'tour'
 	// Debug & Dev
-	| 'debugWizard'
 	| 'debugPackage'
+	| 'debugApplicationStats'
+	| 'debugAgentProbe'
+	| 'widgetGallery'
+	| 'profilingCapture'
 	| 'playground'
 	| 'logViewer'
 	| 'processMonitor'
 	| 'usageDashboard'
+	| 'agentRunDashboard'
 	// Confirmations
 	| 'confirm'
 	| 'quitConfirm'
@@ -210,7 +300,14 @@ export type ModalId =
 	// Symphony
 	| 'symphony'
 	// Platform Warnings
-	| 'windowsWarning';
+	| 'windowsWarning'
+	// Director's Notes
+	| 'directorNotes'
+	// Maestro Cue
+	| 'cueModal'
+	| 'cueYamlEditor'
+	// Pianola (autonomous manager)
+	| 'pianolaModal';
 
 /**
  * Type mapping from ModalId to its data type.
@@ -224,10 +321,13 @@ export interface ModalDataMap {
 	confirm: ConfirmModalData;
 	renameInstance: RenameInstanceModalData;
 	renameTab: RenameTabModalData;
+	terminalStartupCommand: TerminalStartupCommandModalData;
 	renameGroup: RenameGroupModalData;
 	agentSessions: AgentSessionsModalData;
+	batchRunner: BatchRunnerModalData;
 	wizardResume: WizardResumeModalData;
 	agentError: AgentErrorModalData;
+	deleteAgent: DeleteAgentModalData;
 	createWorktree: WorktreeModalData;
 	createPR: WorktreeModalData;
 	deleteWorktree: WorktreeModalData;
@@ -240,6 +340,10 @@ export interface ModalDataMap {
 	firstRunCelebration: FirstRunCelebrationData;
 	keyboardMastery: KeyboardMasteryData;
 	lightbox: LightboxData;
+	directorNotes: DirectorNotesData;
+	cueModal: CueModalData;
+	cueYamlEditor: CueYamlEditorData;
+	quitConfirm: QuitConfirmModalData;
 }
 
 // Helper type to get data type for a modal ID
@@ -256,6 +360,8 @@ interface ModalEntry<T = unknown> {
 
 interface ModalStoreState {
 	modals: Map<ModalId, ModalEntry>;
+	/** Whether the Prompt Composer is in full-screen ("expanded-expanded") mode. */
+	promptComposerFullscreen: boolean;
 }
 
 interface ModalStoreActions {
@@ -295,6 +401,19 @@ interface ModalStoreActions {
 	 * Close all open modals.
 	 */
 	closeAll: () => void;
+
+	/**
+	 * Toggle the Prompt Composer between full-screen and windowed mode.
+	 * Persists the preference so the next open restores the same size.
+	 */
+	togglePromptComposerFullscreen: () => void;
+
+	/**
+	 * Keyboard entry point for the open-composer hotkey. Opens the Prompt
+	 * Composer when it's closed, otherwise cycles it between windowed and
+	 * full-screen — so repeated presses switch sizes instead of doing nothing.
+	 */
+	cyclePromptComposer: () => void;
 }
 
 export type ModalStore = ModalStoreState & ModalStoreActions;
@@ -305,6 +424,7 @@ export type ModalStore = ModalStoreState & ModalStoreActions;
 
 export const useModalStore = create<ModalStore>()((set, get) => ({
 	modals: new Map(),
+	promptComposerFullscreen: readStoredPromptComposerFullscreen(),
 
 	openModal: (id, data) => {
 		set((state) => {
@@ -313,6 +433,14 @@ export const useModalStore = create<ModalStore>()((set, get) => ({
 			if (current?.open && current.data === data) return state;
 			const newModals = new Map(state.modals);
 			newModals.set(id, { open: true, data });
+			// DEBUG: Trace rename modal open/close
+			if (id === 'renameTab') {
+				logger.info('[DEBUG renameTab] openModal called', undefined, {
+					data,
+					wasOpen: current?.open,
+					hadData: !!current?.data,
+				});
+			}
 			return { modals: newModals };
 		});
 	},
@@ -324,6 +452,10 @@ export const useModalStore = create<ModalStore>()((set, get) => ({
 			if (!current?.open) return state;
 			const newModals = new Map(state.modals);
 			newModals.set(id, { open: false, data: undefined });
+			// DEBUG: Trace rename modal close
+			if (id === 'renameTab') {
+				logger.info('[DEBUG renameTab] closeModal called', undefined, new Error().stack);
+			}
 			return { modals: newModals };
 		});
 	},
@@ -381,6 +513,23 @@ export const useModalStore = create<ModalStore>()((set, get) => ({
 			return { modals: newModals };
 		});
 	},
+
+	togglePromptComposerFullscreen: () => {
+		set((state) => {
+			const next = !state.promptComposerFullscreen;
+			writeStoredPromptComposerFullscreen(next);
+			return { promptComposerFullscreen: next };
+		});
+	},
+
+	cyclePromptComposer: () => {
+		const state = get();
+		if (state.modals.get('promptComposer')?.open) {
+			state.togglePromptComposerFullscreen();
+		} else {
+			state.openModal('promptComposer');
+		}
+	},
 }));
 
 // ============================================================================
@@ -410,18 +559,6 @@ export const selectModalData =
 	(state: ModalStore): ModalDataFor<T> | undefined =>
 		state.modals.get(id)?.data as ModalDataFor<T> | undefined;
 
-/**
- * Create a selector for a specific modal's full entry (open + data).
- *
- * @example
- * const settings = useModalStore(selectModal('settings'));
- * if (settings?.open) { ... }
- */
-export const selectModal =
-	<T extends ModalId>(id: T) =>
-	(state: ModalStore): ModalEntry<ModalDataFor<T>> | undefined =>
-		state.modals.get(id) as ModalEntry<ModalDataFor<T>> | undefined;
-
 // ============================================================================
 // ModalContext Compatibility Layer
 // ============================================================================
@@ -437,10 +574,13 @@ export function getModalActions() {
 
 	return {
 		// Settings Modal
+		// Pass `tab: undefined` (not a default of 'general') when no tab is
+		// requested — the modal restores the last tab the user viewed in this
+		// session and falls back to General internally.
 		setSettingsModalOpen: (open: boolean) =>
-			open ? openModal('settings', { tab: 'general' }) : closeModal('settings'),
+			open ? openModal('settings', { tab: undefined }) : closeModal('settings'),
 		setSettingsTab: (tab: SettingsTab) => updateModalData('settings', { tab }),
-		openSettings: (tab?: SettingsTab) => openModal('settings', { tab: tab ?? 'general' }),
+		openSettings: (tab?: SettingsTab) => openModal('settings', { tab }),
 		closeSettings: () => closeModal('settings'),
 
 		// New Instance Modal
@@ -455,6 +595,12 @@ export function getModalActions() {
 		setEditAgentSession: (session: Session | null) =>
 			session ? openModal('editAgent', { session }) : closeModal('editAgent'),
 
+		// Delete Agent Modal
+		setDeleteAgentModalOpen: (open: boolean) =>
+			open ? openModal('deleteAgent') : closeModal('deleteAgent'),
+		setDeleteAgentSession: (session: Session | null) =>
+			session ? openModal('deleteAgent', { session }) : closeModal('deleteAgent'),
+
 		// Shortcuts Help Modal
 		setShortcutsHelpOpen: (open: boolean) =>
 			open ? openModal('shortcutsHelp') : closeModal('shortcutsHelp'),
@@ -463,9 +609,9 @@ export function getModalActions() {
 		},
 
 		// Quick Actions Modal
-		setQuickActionOpen: (open: boolean) =>
-			open ? openModal('quickAction', { initialMode: 'main' }) : closeModal('quickAction'),
-		setQuickActionInitialMode: (mode: 'main' | 'move-to-group') =>
+		setQuickActionOpen: (open: boolean, mode?: 'main' | 'move-to-group' | 'agents') =>
+			open ? openModal('quickAction', { initialMode: mode ?? 'main' }) : closeModal('quickAction'),
+		setQuickActionInitialMode: (mode: 'main' | 'move-to-group' | 'agents') =>
 			updateModalData('quickAction', { initialMode: mode }),
 
 		// Lightbox Modal
@@ -499,6 +645,10 @@ export function getModalActions() {
 		// About Modal
 		setAboutModalOpen: (open: boolean) => (open ? openModal('about') : closeModal('about')),
 
+		// Feedback Modal
+		setFeedbackModalOpen: (open: boolean) =>
+			open ? openModal('feedback') : closeModal('feedback'),
+
 		// Update Check Modal
 		setUpdateCheckModalOpen: (open: boolean) =>
 			open ? openModal('updateCheck') : closeModal('updateCheck'),
@@ -526,6 +676,10 @@ export function getModalActions() {
 		setUsageDashboardOpen: (open: boolean) =>
 			open ? openModal('usageDashboard') : closeModal('usageDashboard'),
 
+		// AgentRun Dashboard
+		setAgentRunDashboardOpen: (open: boolean) =>
+			open ? openModal('agentRunDashboard') : closeModal('agentRunDashboard'),
+
 		// Keyboard Mastery Celebration
 		setPendingKeyboardMasteryLevel: (level: number | null) =>
 			level !== null ? openModal('keyboardMastery', { level }) : closeModal('keyboardMastery'),
@@ -534,13 +688,21 @@ export function getModalActions() {
 		setPlaygroundOpen: (open: boolean) =>
 			open ? openModal('playground') : closeModal('playground'),
 
-		// Debug Wizard Modal
-		setDebugWizardModalOpen: (open: boolean) =>
-			open ? openModal('debugWizard') : closeModal('debugWizard'),
-
 		// Debug Package Modal
 		setDebugPackageModalOpen: (open: boolean) =>
 			open ? openModal('debugPackage') : closeModal('debugPackage'),
+
+		// Debug Application Stats Modal
+		setDebugApplicationStatsOpen: (open: boolean) =>
+			open ? openModal('debugApplicationStats') : closeModal('debugApplicationStats'),
+
+		// Debug Agent Probe Modal
+		setDebugAgentProbeOpen: (open: boolean) =>
+			open ? openModal('debugAgentProbe') : closeModal('debugAgentProbe'),
+
+		// Profiling Capture (stop + bundle progress) Modal
+		setProfilingCaptureOpen: (open: boolean) =>
+			open ? openModal('profilingCapture') : closeModal('profilingCapture'),
 
 		// Confirmation Modal
 		setConfirmModalOpen: (open: boolean) => (open ? openModal('confirm') : closeModal('confirm')),
@@ -552,12 +714,15 @@ export function getModalActions() {
 		closeConfirmation: () => closeModal('confirm'),
 
 		// Quit Confirmation Modal
-		setQuitConfirmModalOpen: (open: boolean) =>
-			open ? openModal('quitConfirm') : closeModal('quitConfirm'),
+		setQuitConfirmModalOpen: (open: boolean, data?: QuitConfirmModalData) =>
+			open ? openModal('quitConfirm', data) : closeModal('quitConfirm'),
 
 		// Rename Instance Modal
 		setRenameInstanceModalOpen: (open: boolean) => {
-			if (!open) { closeModal('renameInstance'); return; }
+			if (!open) {
+				closeModal('renameInstance');
+				return;
+			}
 			const current = useModalStore.getState().getData('renameInstance');
 			openModal('renameInstance', current ?? { sessionId: '', value: '' });
 		},
@@ -577,7 +742,10 @@ export function getModalActions() {
 
 		// Rename Tab Modal
 		setRenameTabModalOpen: (open: boolean) => {
-			if (!open) { closeModal('renameTab'); return; }
+			if (!open) {
+				closeModal('renameTab');
+				return;
+			}
 			const current = useModalStore.getState().getData('renameTab');
 			openModal('renameTab', current ?? { tabId: '', initialName: '' });
 		},
@@ -595,16 +763,30 @@ export function getModalActions() {
 			}
 		},
 
+		// Terminal Tab Startup Command Modal
+		openTerminalStartupCommandModal: (data: TerminalStartupCommandModalData) =>
+			openModal('terminalStartupCommand', data),
+		closeTerminalStartupCommandModal: () => closeModal('terminalStartupCommand'),
+
 		// Rename Group Modal
 		setRenameGroupModalOpen: (open: boolean) => {
-			if (!open) { closeModal('renameGroup'); return; }
+			if (!open) {
+				closeModal('renameGroup');
+				return;
+			}
 			const current = useModalStore.getState().getData('renameGroup');
 			openModal('renameGroup', current ?? { groupId: '', value: '', emoji: '📂' });
 		},
 		setRenameGroupId: (groupId: string | null) => {
 			if (!groupId) return;
 			const current = useModalStore.getState().getData('renameGroup');
-			openModal('renameGroup', { groupId, value: current?.value ?? '', emoji: current?.emoji ?? '📂' });
+			openModal('renameGroup', {
+				groupId,
+				value: current?.value ?? '',
+				emoji: current?.emoji ?? '📂',
+				icon: current?.icon,
+				color: current?.color,
+			});
 		},
 		setRenameGroupValue: (value: string) => {
 			const current = useModalStore.getState().getData('renameGroup');
@@ -622,6 +804,22 @@ export function getModalActions() {
 				openModal('renameGroup', { groupId: '', value: '', emoji });
 			}
 		},
+		setRenameGroupIcon: (icon: string | undefined) => {
+			const current = useModalStore.getState().getData('renameGroup');
+			if (current) {
+				updateModalData('renameGroup', { icon });
+			} else {
+				openModal('renameGroup', { groupId: '', value: '', emoji: '📂', icon });
+			}
+		},
+		setRenameGroupColor: (color: string | undefined) => {
+			const current = useModalStore.getState().getData('renameGroup');
+			if (current) {
+				updateModalData('renameGroup', { color });
+			} else {
+				openModal('renameGroup', { groupId: '', value: '', emoji: '📂', color });
+			}
+		},
 
 		// Agent Sessions Browser
 		setAgentSessionsOpen: (open: boolean) =>
@@ -631,13 +829,19 @@ export function getModalActions() {
 		setActiveAgentSessionId: (activeAgentSessionId: string | null) =>
 			updateModalData('agentSessions', { activeAgentSessionId }),
 
+		// Memory Viewer (Claude Code per-project memory)
+		setMemoryViewerOpen: (open: boolean) =>
+			open ? openModal('memoryViewer') : closeModal('memoryViewer'),
+
 		// Execution Queue Browser Modal
 		setQueueBrowserOpen: (open: boolean) =>
 			open ? openModal('queueBrowser') : closeModal('queueBrowser'),
 
 		// Batch Runner Modal
 		setBatchRunnerModalOpen: (open: boolean) =>
-			open ? openModal('batchRunner') : closeModal('batchRunner'),
+			open ? openModal('batchRunner', {}) : closeModal('batchRunner'),
+		openBatchRunnerWithPresets: (presetDocuments: string[]) =>
+			openModal('batchRunner', { presetDocuments }),
 
 		// Auto Run Setup Modal
 		setAutoRunSetupModalOpen: (open: boolean) =>
@@ -656,6 +860,8 @@ export function getModalActions() {
 		// Agent Error Modal
 		setAgentErrorModalSessionId: (sessionId: string | null) =>
 			sessionId ? openModal('agentError', { sessionId }) : closeModal('agentError'),
+		showHistoricalAgentError: (sessionId: string, error: AgentError) =>
+			openModal('agentError', { sessionId, historicalError: error }),
 
 		// Worktree Modals
 		setWorktreeConfigModalOpen: (open: boolean) =>
@@ -725,6 +931,24 @@ export function getModalActions() {
 		setWindowsWarningModalOpen: (open: boolean) =>
 			open ? openModal('windowsWarning') : closeModal('windowsWarning'),
 
+		// Director's Notes Modal
+		setDirectorNotesOpen: (open: boolean) =>
+			open ? openModal('directorNotes') : closeModal('directorNotes'),
+
+		// Maestro Cue Modal
+		setCueModalOpen: (open: boolean) => (open ? openModal('cueModal') : closeModal('cueModal')),
+		openCueModalWithTab: (tab: 'dashboard' | 'pipeline') =>
+			openModal('cueModal', { initialTab: tab }),
+
+		// Maestro Cue YAML Editor (standalone, bypasses CueModal dashboard)
+		openCueYamlEditor: (sessionId: string, projectRoot: string) =>
+			openModal('cueYamlEditor', { sessionId, projectRoot }),
+		closeCueYamlEditor: () => closeModal('cueYamlEditor'),
+
+		// Pianola Modal (autonomous manager: rules + decision log)
+		setPianolaModalOpen: (open: boolean) =>
+			open ? openModal('pianolaModal') : closeModal('pianolaModal'),
+
 		// Lightbox refs replacement - use updateModalData instead
 		setLightboxIsGroupChat: (isGroupChat: boolean) => updateModalData('lightbox', { isGroupChat }),
 		setLightboxAllowDelete: (allowDelete: boolean) => updateModalData('lightbox', { allowDelete }),
@@ -754,11 +978,14 @@ export function useModalActions() {
 	const newInstanceData = useModalStore(selectModalData('newInstance'));
 	const editAgentModalOpen = useModalStore(selectModalOpen('editAgent'));
 	const editAgentData = useModalStore(selectModalData('editAgent'));
+	const deleteAgentModalOpen = useModalStore(selectModalOpen('deleteAgent'));
+	const deleteAgentData = useModalStore(selectModalData('deleteAgent'));
 	const shortcutsHelpOpen = useModalStore(selectModalOpen('shortcutsHelp'));
 	const quickActionOpen = useModalStore(selectModalOpen('quickAction'));
 	const quickActionData = useModalStore(selectModalData('quickAction'));
 	const lightboxData = useModalStore(selectModalData('lightbox'));
 	const aboutModalOpen = useModalStore(selectModalOpen('about'));
+	const feedbackModalOpen = useModalStore(selectModalOpen('feedback'));
 	const updateCheckModalOpen = useModalStore(selectModalOpen('updateCheck'));
 	const leaderboardRegistrationOpen = useModalStore(selectModalOpen('leaderboard'));
 	const standingOvationData = useModalStore(selectModalData('standingOvation'));
@@ -766,13 +993,17 @@ export function useModalActions() {
 	const logViewerOpen = useModalStore(selectModalOpen('logViewer'));
 	const processMonitorOpen = useModalStore(selectModalOpen('processMonitor'));
 	const usageDashboardOpen = useModalStore(selectModalOpen('usageDashboard'));
+	const agentRunDashboardOpen = useModalStore(selectModalOpen('agentRunDashboard'));
 	const keyboardMasteryData = useModalStore(selectModalData('keyboardMastery'));
 	const playgroundOpen = useModalStore(selectModalOpen('playground'));
-	const debugWizardModalOpen = useModalStore(selectModalOpen('debugWizard'));
 	const debugPackageModalOpen = useModalStore(selectModalOpen('debugPackage'));
+	const debugApplicationStatsOpen = useModalStore(selectModalOpen('debugApplicationStats'));
+	const debugAgentProbeOpen = useModalStore(selectModalOpen('debugAgentProbe'));
+	const profilingCaptureOpen = useModalStore(selectModalOpen('profilingCapture'));
 	const confirmModalOpen = useModalStore(selectModalOpen('confirm'));
 	const confirmData = useModalStore(selectModalData('confirm'));
 	const quitConfirmModalOpen = useModalStore(selectModalOpen('quitConfirm'));
+	const quitConfirmData = useModalStore(selectModalData('quitConfirm'));
 	const renameInstanceModalOpen = useModalStore(selectModalOpen('renameInstance'));
 	const renameInstanceData = useModalStore(selectModalData('renameInstance'));
 	const renameTabModalOpen = useModalStore(selectModalOpen('renameTab'));
@@ -781,6 +1012,7 @@ export function useModalActions() {
 	const renameGroupData = useModalStore(selectModalData('renameGroup'));
 	const agentSessionsOpen = useModalStore(selectModalOpen('agentSessions'));
 	const agentSessionsData = useModalStore(selectModalData('agentSessions'));
+	const memoryViewerOpen = useModalStore(selectModalOpen('memoryViewer'));
 	const queueBrowserOpen = useModalStore(selectModalOpen('queueBrowser'));
 	const batchRunnerModalOpen = useModalStore(selectModalOpen('batchRunner'));
 	const autoRunSetupModalOpen = useModalStore(selectModalOpen('autoRunSetup'));
@@ -811,6 +1043,11 @@ export function useModalActions() {
 	const tourData = useModalStore(selectModalData('tour'));
 	const symphonyModalOpen = useModalStore(selectModalOpen('symphony'));
 	const windowsWarningModalOpen = useModalStore(selectModalOpen('windowsWarning'));
+	const directorNotesOpen = useModalStore(selectModalOpen('directorNotes'));
+	const cueModalOpen = useModalStore(selectModalOpen('cueModal'));
+	const cueYamlEditorOpen = useModalStore(selectModalOpen('cueYamlEditor'));
+	const cueYamlEditorData = useModalStore(selectModalData('cueYamlEditor'));
+	const pianolaModalOpen = useModalStore(selectModalOpen('pianolaModal'));
 
 	// Get stable actions
 	const actions = getModalActions();
@@ -818,16 +1055,24 @@ export function useModalActions() {
 	return {
 		// Settings Modal
 		settingsModalOpen,
-		settingsTab: settingsData?.tab ?? 'general',
+		// `undefined` means "no explicit tab requested" — SettingsModal restores
+		// the last in-session tab, falling back to 'general' on first open.
+		settingsTab: settingsData?.tab,
+		settingsPromptId: settingsData?.promptId,
 		...actions,
 
 		// New Instance Modal
 		newInstanceModalOpen,
 		duplicatingSessionId: newInstanceData?.duplicatingSessionId ?? null,
+		newInstancePresetGroupId: newInstanceData?.presetGroupId ?? null,
 
 		// Edit Agent Modal
 		editAgentModalOpen,
 		editAgentSession: editAgentData?.session ?? null,
+
+		// Delete Agent Modal
+		deleteAgentModalOpen,
+		deleteAgentSession: deleteAgentData?.session ?? null,
 
 		// Shortcuts Help Modal
 		shortcutsHelpOpen,
@@ -842,6 +1087,7 @@ export function useModalActions() {
 
 		// About Modal
 		aboutModalOpen,
+		feedbackModalOpen,
 
 		// Update Check Modal
 		updateCheckModalOpen,
@@ -864,17 +1110,26 @@ export function useModalActions() {
 		// Usage Dashboard
 		usageDashboardOpen,
 
+		// AgentRun Dashboard
+		agentRunDashboardOpen,
+
 		// Keyboard Mastery Celebration
 		pendingKeyboardMasteryLevel: keyboardMasteryData?.level ?? null,
 
 		// Playground Panel
 		playgroundOpen,
 
-		// Debug Wizard Modal
-		debugWizardModalOpen,
-
 		// Debug Package Modal
 		debugPackageModalOpen,
+
+		// Debug Application Stats Modal
+		debugApplicationStatsOpen,
+
+		// Debug Agent Probe Modal
+		debugAgentProbeOpen,
+
+		// Profiling Capture Modal
+		profilingCaptureOpen,
 
 		// Confirmation Modal
 		confirmModalOpen,
@@ -885,6 +1140,8 @@ export function useModalActions() {
 
 		// Quit Confirmation Modal
 		quitConfirmModalOpen,
+		activeTerminalTasks: (quitConfirmData?.activeTerminalTasks as string[]) ?? [],
+		hasFeedbackDraft: quitConfirmData?.hasFeedbackDraft ?? false,
 
 		// Rename Instance Modal
 		renameInstanceModalOpen,
@@ -901,10 +1158,15 @@ export function useModalActions() {
 		renameGroupId: renameGroupData?.groupId ?? null,
 		renameGroupValue: renameGroupData?.value ?? '',
 		renameGroupEmoji: renameGroupData?.emoji ?? '📂',
+		renameGroupIcon: renameGroupData?.icon,
+		renameGroupColor: renameGroupData?.color,
 
 		// Agent Sessions Browser
 		agentSessionsOpen,
 		activeAgentSessionId: agentSessionsData?.activeAgentSessionId ?? null,
+
+		// Memory Viewer (Claude Code per-project memory)
+		memoryViewerOpen,
 
 		// Execution Queue Browser Modal
 		queueBrowserOpen,
@@ -971,6 +1233,20 @@ export function useModalActions() {
 
 		// Windows Warning Modal
 		windowsWarningModalOpen,
+
+		// Director's Notes Modal
+		directorNotesOpen,
+
+		// Maestro Cue Modal
+		cueModalOpen,
+
+		// Maestro Cue YAML Editor (standalone)
+		cueYamlEditorOpen,
+		cueYamlEditorSessionId: cueYamlEditorData?.sessionId ?? null,
+		cueYamlEditorProjectRoot: cueYamlEditorData?.projectRoot ?? null,
+
+		// Pianola Modal (autonomous manager)
+		pianolaModalOpen,
 
 		// Lightbox ref replacements (now stored as data)
 		lightboxIsGroupChat: lightboxData?.isGroupChat ?? false,

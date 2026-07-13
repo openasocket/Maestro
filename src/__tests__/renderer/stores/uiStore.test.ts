@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useUIStore } from '../../../renderer/stores/uiStore';
 
@@ -13,21 +13,18 @@ function resetStore() {
 		activeFocus: 'main',
 		activeRightTab: 'files',
 		bookmarksCollapsed: false,
-		groupChatsExpanded: true,
 		showUnreadOnly: false,
+		showUnreadAgentsOnly: false,
 		preFilterActiveTabId: null,
 		preTerminalFileTabId: null,
 		selectedSidebarIndex: 0,
-		selectedFileIndex: 0,
-		fileTreeFilter: '',
-		fileTreeFilterOpen: false,
-		flashNotification: null,
-		successFlashNotification: null,
-		outputSearchOpen: false,
-		outputSearchQuery: '',
+		outputSearchByKey: {},
+		sessionFilterOpen: false,
+		historySearchFilterOpen: false,
 		draggingSessionId: null,
 		editingGroupId: null,
 		editingSessionId: null,
+		usageDashboardViewMode: 'overview',
 	});
 }
 
@@ -45,21 +42,17 @@ describe('uiStore', () => {
 			expect(state.activeFocus).toBe('main');
 			expect(state.activeRightTab).toBe('files');
 			expect(state.bookmarksCollapsed).toBe(false);
-			expect(state.groupChatsExpanded).toBe(true);
 			expect(state.showUnreadOnly).toBe(false);
 			expect(state.preFilterActiveTabId).toBeNull();
 			expect(state.preTerminalFileTabId).toBeNull();
 			expect(state.selectedSidebarIndex).toBe(0);
-			expect(state.selectedFileIndex).toBe(0);
-			expect(state.fileTreeFilter).toBe('');
-			expect(state.fileTreeFilterOpen).toBe(false);
-			expect(state.flashNotification).toBeNull();
-			expect(state.successFlashNotification).toBeNull();
-			expect(state.outputSearchOpen).toBe(false);
-			expect(state.outputSearchQuery).toBe('');
+			expect(state.outputSearchByKey).toEqual({});
+			expect(state.sessionFilterOpen).toBe(false);
+			expect(state.historySearchFilterOpen).toBe(false);
 			expect(state.draggingSessionId).toBeNull();
 			expect(state.editingGroupId).toBeNull();
 			expect(state.editingSessionId).toBeNull();
+			expect(state.usageDashboardViewMode).toBe('overview');
 		});
 	});
 
@@ -135,17 +128,15 @@ describe('uiStore', () => {
 			expect(useUIStore.getState().bookmarksCollapsed).toBe(false);
 		});
 
-		it('sets group chats expanded', () => {
-			useUIStore.getState().setGroupChatsExpanded(false);
-			expect(useUIStore.getState().groupChatsExpanded).toBe(false);
-		});
+		it('persists bookmarks collapse state so it survives restarts', () => {
+			const setSetting = (window as any).maestro.settings.set as ReturnType<typeof vi.fn>;
+			setSetting.mockClear();
 
-		it('toggles group chats expanded', () => {
-			expect(useUIStore.getState().groupChatsExpanded).toBe(true);
-			useUIStore.getState().toggleGroupChatsExpanded();
-			expect(useUIStore.getState().groupChatsExpanded).toBe(false);
-			useUIStore.getState().toggleGroupChatsExpanded();
-			expect(useUIStore.getState().groupChatsExpanded).toBe(true);
+			useUIStore.getState().setBookmarksCollapsed(true);
+			expect(setSetting).toHaveBeenCalledWith('bookmarksCollapsed', true);
+
+			useUIStore.getState().toggleBookmarksCollapsed();
+			expect(setSetting).toHaveBeenLastCalledWith('bookmarksCollapsed', false);
 		});
 	});
 
@@ -166,6 +157,19 @@ describe('uiStore', () => {
 			expect(useUIStore.getState().showUnreadOnly).toBe(true);
 			useUIStore.getState().toggleShowUnreadOnly();
 			expect(useUIStore.getState().showUnreadOnly).toBe(false);
+		});
+
+		it('sets show unread agents only', () => {
+			useUIStore.getState().setShowUnreadAgentsOnly(true);
+			expect(useUIStore.getState().showUnreadAgentsOnly).toBe(true);
+		});
+
+		it('toggles show unread agents only', () => {
+			expect(useUIStore.getState().showUnreadAgentsOnly).toBe(false);
+			useUIStore.getState().toggleShowUnreadAgentsOnly();
+			expect(useUIStore.getState().showUnreadAgentsOnly).toBe(true);
+			useUIStore.getState().toggleShowUnreadAgentsOnly();
+			expect(useUIStore.getState().showUnreadAgentsOnly).toBe(false);
 		});
 
 		it('sets pre-filter active tab id', () => {
@@ -198,56 +202,82 @@ describe('uiStore', () => {
 		});
 	});
 
-	describe('file explorer state', () => {
-		it('sets selected file index', () => {
-			useUIStore.getState().setSelectedFileIndex(10);
-			expect(useUIStore.getState().selectedFileIndex).toBe(10);
-		});
+	describe('flash notification setters (compatibility shims → centerFlashStore)', () => {
+		it('setFlashNotification fires a yellow center flash', async () => {
+			const { useCenterFlashStore } = await import('../../../renderer/stores/centerFlashStore');
+			useCenterFlashStore.getState().setActive(null);
 
-		it('sets selected file index with an updater', () => {
-			useUIStore.getState().setSelectedFileIndex(5);
-			useUIStore.getState().setSelectedFileIndex((prev) => Math.max(0, prev - 3));
-			expect(useUIStore.getState().selectedFileIndex).toBe(2);
-		});
-
-		it('sets file tree filter', () => {
-			useUIStore.getState().setFileTreeFilter('test');
-			expect(useUIStore.getState().fileTreeFilter).toBe('test');
-		});
-
-		it('sets file tree filter open', () => {
-			useUIStore.getState().setFileTreeFilterOpen(true);
-			expect(useUIStore.getState().fileTreeFilterOpen).toBe(true);
-		});
-	});
-
-	describe('flash notification state', () => {
-		it('sets flash notification', () => {
 			useUIStore.getState().setFlashNotification('Commands disabled');
-			expect(useUIStore.getState().flashNotification).toBe('Commands disabled');
+			const active = useCenterFlashStore.getState().active;
+			expect(active?.message).toBe('Commands disabled');
+			expect(active?.color).toBe('yellow');
 
+			// Passing null is a no-op (auto-dismiss handles clearing)
 			useUIStore.getState().setFlashNotification(null);
-			expect(useUIStore.getState().flashNotification).toBeNull();
+			expect(useCenterFlashStore.getState().active?.message).toBe('Commands disabled');
 		});
 
-		it('sets success flash notification', () => {
+		it('setSuccessFlashNotification fires a themed center flash', async () => {
+			const { useCenterFlashStore } = await import('../../../renderer/stores/centerFlashStore');
+			useCenterFlashStore.getState().setActive(null);
+
 			useUIStore.getState().setSuccessFlashNotification('Refresh complete');
-			expect(useUIStore.getState().successFlashNotification).toBe('Refresh complete');
+			const active = useCenterFlashStore.getState().active;
+			expect(active?.message).toBe('Refresh complete');
+			expect(active?.color).toBe('theme');
 
 			useUIStore.getState().setSuccessFlashNotification(null);
-			expect(useUIStore.getState().successFlashNotification).toBeNull();
+			expect(useCenterFlashStore.getState().active?.message).toBe('Refresh complete');
 		});
 	});
 
-	describe('output search state', () => {
-		it('sets output search open', () => {
-			useUIStore.getState().setOutputSearchOpen(true);
-			expect(useUIStore.getState().outputSearchOpen).toBe(true);
+	describe('output search state (scoped per agent+tab key)', () => {
+		const KEY = 'agent-1::tab-1';
+
+		it('sets output search open for a key', () => {
+			useUIStore.getState().setOutputSearchOpen(KEY, true);
+			expect(useUIStore.getState().outputSearchByKey[KEY]?.open).toBe(true);
 		});
 
-		it('sets output search query', () => {
-			useUIStore.getState().setOutputSearchQuery('find this');
-			expect(useUIStore.getState().outputSearchQuery).toBe('find this');
+		it('sets output search query for a key', () => {
+			useUIStore.getState().setOutputSearchQuery(KEY, 'find this');
+			expect(useUIStore.getState().outputSearchByKey[KEY]?.query).toBe('find this');
+		});
+
+		it('keeps each key independent', () => {
+			useUIStore.getState().setOutputSearchOpen('a::1', true);
+			useUIStore.getState().setOutputSearchQuery('a::1', 'alpha');
+			expect(useUIStore.getState().outputSearchByKey['b::1']).toBeUndefined();
+		});
+
+		it('prunes a slot when closed with an empty query', () => {
+			useUIStore.getState().setOutputSearchOpen(KEY, true);
+			useUIStore.getState().setOutputSearchOpen(KEY, false);
+			expect(useUIStore.getState().outputSearchByKey[KEY]).toBeUndefined();
+		});
+	});
+
+	describe('session filter state', () => {
+		it('sets session filter open', () => {
+			useUIStore.getState().setSessionFilterOpen(true);
+			expect(useUIStore.getState().sessionFilterOpen).toBe(true);
+		});
+
+		it('sets session filter open with an updater', () => {
+			useUIStore.getState().setSessionFilterOpen((prev) => !prev);
+			expect(useUIStore.getState().sessionFilterOpen).toBe(true);
+		});
+	});
+
+	describe('history search filter state', () => {
+		it('sets history search filter open', () => {
+			useUIStore.getState().setHistorySearchFilterOpen(true);
+			expect(useUIStore.getState().historySearchFilterOpen).toBe(true);
+		});
+
+		it('sets history search filter open with an updater', () => {
+			useUIStore.getState().setHistorySearchFilterOpen((prev) => !prev);
+			expect(useUIStore.getState().historySearchFilterOpen).toBe(true);
 		});
 	});
 
@@ -279,6 +309,21 @@ describe('uiStore', () => {
 		});
 	});
 
+	describe('usage dashboard view mode', () => {
+		it('sets the last-selected tab with a value', () => {
+			useUIStore.getState().setUsageDashboardViewMode('cue');
+			expect(useUIStore.getState().usageDashboardViewMode).toBe('cue');
+		});
+
+		it('sets the last-selected tab with an updater', () => {
+			useUIStore.getState().setUsageDashboardViewMode('autorun');
+			useUIStore
+				.getState()
+				.setUsageDashboardViewMode((prev) => (prev === 'autorun' ? 'activity' : 'overview'));
+			expect(useUIStore.getState().usageDashboardViewMode).toBe('activity');
+		});
+	});
+
 	describe('React hook integration', () => {
 		it('provides state to React components via selectors', () => {
 			const { result } = renderHook(() => useUIStore((s) => s.leftSidebarOpen));
@@ -307,7 +352,7 @@ describe('uiStore', () => {
 
 			// Change unrelated state
 			act(() => {
-				useUIStore.getState().setFileTreeFilter('test');
+				useUIStore.getState().setOutputSearchQuery('k::1', 'test');
 			});
 
 			// Should not have re-rendered (selector isolation)
@@ -337,7 +382,7 @@ describe('uiStore', () => {
 		it('returns stable action references across state changes', () => {
 			const actionsBefore = useUIStore.getState();
 			useUIStore.getState().setLeftSidebarOpen(false);
-			useUIStore.getState().setFileTreeFilter('changed');
+			useUIStore.getState().setOutputSearchQuery('k::1', 'changed');
 			const actionsAfter = useUIStore.getState();
 
 			// Actions must be the same function references after state mutations.
@@ -346,33 +391,29 @@ describe('uiStore', () => {
 			expect(actionsAfter.setLeftSidebarOpen).toBe(actionsBefore.setLeftSidebarOpen);
 			expect(actionsAfter.toggleLeftSidebar).toBe(actionsBefore.toggleLeftSidebar);
 			expect(actionsAfter.setActiveFocus).toBe(actionsBefore.setActiveFocus);
-			expect(actionsAfter.setFileTreeFilter).toBe(actionsBefore.setFileTreeFilter);
 			expect(actionsAfter.setFlashNotification).toBe(actionsBefore.setFlashNotification);
 			expect(actionsAfter.setSelectedSidebarIndex).toBe(actionsBefore.setSelectedSidebarIndex);
 		});
 
 		it('extracted actions still mutate state correctly', () => {
 			// Grab actions once, then call them — mirrors the App.tsx pattern
-			const { setLeftSidebarOpen, setFileTreeFilter, setActiveFocus } = useUIStore.getState();
+			const { setLeftSidebarOpen, setActiveFocus } = useUIStore.getState();
 
 			setLeftSidebarOpen(false);
 			expect(useUIStore.getState().leftSidebarOpen).toBe(false);
-
-			setFileTreeFilter('hello');
-			expect(useUIStore.getState().fileTreeFilter).toBe('hello');
 
 			setActiveFocus('sidebar');
 			expect(useUIStore.getState().activeFocus).toBe('sidebar');
 		});
 
 		it('extracted actions work with updater functions', () => {
-			const { setSelectedFileIndex } = useUIStore.getState();
+			const { setSelectedSidebarIndex } = useUIStore.getState();
 
-			setSelectedFileIndex(10);
-			expect(useUIStore.getState().selectedFileIndex).toBe(10);
+			setSelectedSidebarIndex(10);
+			expect(useUIStore.getState().selectedSidebarIndex).toBe(10);
 
-			setSelectedFileIndex((prev) => prev - 3);
-			expect(useUIStore.getState().selectedFileIndex).toBe(7);
+			setSelectedSidebarIndex((prev) => prev - 3);
+			expect(useUIStore.getState().selectedSidebarIndex).toBe(7);
 		});
 	});
 

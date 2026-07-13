@@ -1,8 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, GitBranch, FolderOpen, Plus, Loader2, AlertTriangle, Server } from 'lucide-react';
+import { X, GitBranch, FolderOpen, Plus, AlertTriangle, Server } from 'lucide-react';
+import { GhostIconButton } from './ui/GhostIconButton';
+import { Spinner } from './ui/Spinner';
 import type { Theme, Session, GhCliStatus } from '../types';
 import { useLayerStack } from '../contexts/LayerStackContext';
+import { useResizableModal } from '../hooks/ui/useResizableModal';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
+import { getParentDir } from '../../shared/formatters';
+import { openUrl } from '../utils/openUrl';
+import { ResizeHandles } from './ui/ResizeHandles';
 
 interface WorktreeConfigModalProps {
 	isOpen: boolean;
@@ -49,14 +55,16 @@ export function WorktreeConfigModal({
 	const onCloseRef = useRef(onClose);
 	onCloseRef.current = onClose;
 
-	// Form state
-	const [basePath, setBasePath] = useState(session.worktreeConfig?.basePath || '');
+	// Form state — default base path to parent directory of the agent's cwd
+	const [basePath, setBasePath] = useState(
+		session.worktreeConfig?.basePath || getParentDir(session.cwd)
+	);
 	const [watchEnabled, setWatchEnabled] = useState(session.worktreeConfig?.watchEnabled ?? true);
 	const [newBranchName, setNewBranchName] = useState('');
 	const [isCreating, setIsCreating] = useState(false);
 	const [isValidating, setIsValidating] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const canDisable = !!(session.worktreeConfig?.basePath || basePath.trim());
+	const canDisable = !!session.worktreeConfig?.basePath;
 
 	// gh CLI status
 	const [ghCliStatus, setGhCliStatus] = useState<GhCliStatus | null>(null);
@@ -86,12 +94,12 @@ export function WorktreeConfigModal({
 	useEffect(() => {
 		if (isOpen) {
 			checkGhCli();
-			setBasePath(session.worktreeConfig?.basePath || '');
+			setBasePath(session.worktreeConfig?.basePath || getParentDir(session.cwd));
 			setWatchEnabled(session.worktreeConfig?.watchEnabled ?? true);
 			setNewBranchName('');
 			setError(null);
 		}
-	}, [isOpen, session.worktreeConfig]);
+	}, [isOpen, session.worktreeConfig, session.cwd]);
 
 	const checkGhCli = async () => {
 		try {
@@ -173,22 +181,39 @@ export function WorktreeConfigModal({
 		onDisableConfig();
 		onClose();
 	};
+	const resizableModal = useResizableModal({
+		resizeKey: 'worktree-config',
+		defaultSize: { width: 560, height: 620 },
+		minSize: { width: 420, height: 360 },
+		enabled: isOpen,
+	});
 
 	if (!isOpen) return null;
 
 	return (
-		<div className="fixed inset-0 z-50 flex items-center justify-center">
+		<div className="fixed inset-0 z-[10000] flex items-center justify-center">
 			{/* Backdrop */}
 			<div className="absolute inset-0 bg-black/60" onClick={onClose} />
 
 			{/* Modal */}
 			<div
-				className="relative w-full max-w-lg rounded-lg shadow-2xl border max-h-[80vh] flex flex-col"
+				ref={resizableModal.modalRef}
+				role="dialog"
+				aria-modal="true"
+				aria-label="Worktree Configuration"
+				className="relative rounded-lg shadow-2xl border flex flex-col overflow-hidden select-none"
 				style={{
+					...resizableModal.style,
 					backgroundColor: theme.colors.bgSidebar,
 					borderColor: theme.colors.border,
 				}}
+				data-modal-resize-key="worktree-config"
 			>
+				<ResizeHandles
+					onResizeStart={resizableModal.onResizeStart}
+					accentColor={theme.colors.accent}
+				/>
+
 				{/* Header */}
 				<div
 					className="flex items-center justify-between px-4 py-3 border-b shrink-0"
@@ -200,9 +225,9 @@ export function WorktreeConfigModal({
 							Worktree Configuration
 						</h2>
 					</div>
-					<button onClick={onClose} className="p-1 rounded hover:bg-white/10 transition-colors">
+					<GhostIconButton onClick={onClose} ariaLabel="Close">
 						<X className="w-4 h-4" style={{ color: theme.colors.textDim }} />
-					</button>
+					</GhostIconButton>
 				</div>
 
 				{/* Content */}
@@ -228,7 +253,7 @@ export function WorktreeConfigModal({
 										type="button"
 										className="underline hover:opacity-80"
 										style={{ color: theme.colors.accent }}
-										onClick={() => window.maestro.shell.openExternal('https://cli.github.com')}
+										onClick={() => openUrl('https://cli.github.com')}
 									>
 										GitHub CLI
 									</button>{' '}
@@ -364,11 +389,7 @@ export function WorktreeConfigModal({
 									color: theme.colors.accentForeground,
 								}}
 							>
-								{isCreating ? (
-									<Loader2 className="w-4 h-4 animate-spin" />
-								) : (
-									<Plus className="w-4 h-4" />
-								)}
+								{isCreating ? <Spinner size={16} /> : <Plus className="w-4 h-4" />}
 								Create
 							</button>
 						</div>
@@ -432,7 +453,7 @@ export function WorktreeConfigModal({
 							color: theme.colors.accentForeground,
 						}}
 					>
-						{isValidating && <Loader2 className="w-4 h-4 animate-spin" />}
+						{isValidating && <Spinner size={16} />}
 						{isValidating ? 'Validating...' : 'Save Configuration'}
 					</button>
 				</div>

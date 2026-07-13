@@ -71,6 +71,11 @@ export type {
 
 // Main batch processor hook
 export { useBatchProcessor } from './useBatchProcessor';
+export type { BatchCompleteInfo, PRResultInfo } from './useBatchProcessor';
+
+// Batch handler orchestration (Phase 2I)
+export { useBatchHandlers } from './useBatchHandlers';
+export type { UseBatchHandlersDeps, UseBatchHandlersReturn } from './useBatchHandlers';
 
 // Auto Run event handlers
 export { useAutoRunHandlers } from './useAutoRunHandlers';
@@ -119,7 +124,7 @@ export { useMarketplace } from './useMarketplace';
 export type { UseMarketplaceReturn } from './useMarketplace';
 
 // Inline wizard for creating/iterating Auto Run documents
-export { useInlineWizard } from '../useInlineWizard';
+export { useInlineWizard } from './useInlineWizard';
 export type {
 	InlineWizardMode,
 	InlineWizardMessage,
@@ -127,7 +132,45 @@ export type {
 	InlineGeneratedDocument,
 	InlineWizardState,
 	UseInlineWizardReturn,
-} from '../useInlineWizard';
+} from './useInlineWizard';
+
+// Auto Run achievements tracking (progress intervals, peak stats)
+export { useAutoRunAchievements } from './useAutoRunAchievements';
+export type { UseAutoRunAchievementsDeps } from './useAutoRunAchievements';
+
+// Auto Run document loader (list, tree, task counts, file watching)
+export { useAutoRunDocumentLoader } from './useAutoRunDocumentLoader';
+export type { UseAutoRunDocumentLoaderReturn } from './useAutoRunDocumentLoader';
+
+// Auto Run auto-follow (document tracking during batch runs)
+export { useAutoRunAutoFollow } from './useAutoRunAutoFollow';
+export type { UseAutoRunAutoFollowDeps, UseAutoRunAutoFollowReturn } from './useAutoRunAutoFollow';
+
+// Auto Run content sync (local/saved content, dirty state, save/revert)
+export { useAutoRunContentSync } from './useAutoRunContentSync';
+export type {
+	UseAutoRunContentSyncParams,
+	UseAutoRunContentSyncReturn,
+} from './useAutoRunContentSync';
+
+// Auto Run textarea keyboard handler
+export { useAutoRunKeyboard } from './useAutoRunKeyboard';
+export type { UseAutoRunKeyboardParams } from './useAutoRunKeyboard';
+
+// Auto Run search (find-in-document with match navigation)
+export { useAutoRunSearch } from './useAutoRunSearch';
+export type { UseAutoRunSearchParams, UseAutoRunSearchReturn } from './useAutoRunSearch';
+
+// Auto Run markdown rendering (prose styles, task counts, token count, remark plugins, components)
+export { useAutoRunMarkdown } from './useAutoRunMarkdown';
+export type { UseAutoRunMarkdownParams, UseAutoRunMarkdownReturn } from './useAutoRunMarkdown';
+
+// Auto Run scroll sync (mode switching with scroll position preservation)
+export { useAutoRunScrollSync } from './useAutoRunScrollSync';
+export type {
+	UseAutoRunScrollSyncParams,
+	UseAutoRunScrollSyncReturn,
+} from './useAutoRunScrollSync';
 
 // Re-export ExistingDocument type from existingDocsDetector for convenience
 export type { ExistingDocument } from '../../utils/existingDocsDetector';

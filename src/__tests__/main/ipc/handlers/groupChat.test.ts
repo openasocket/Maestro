@@ -57,6 +57,7 @@ vi.mock('../../../../main/group-chat/group-chat-moderator', () => ({
 	sendToModerator: vi.fn(),
 	killModerator: vi.fn(),
 	getModeratorSessionId: vi.fn(),
+	isModeratorActive: vi.fn().mockReturnValue(true),
 }));
 
 // Mock group-chat-agent
@@ -70,6 +71,10 @@ vi.mock('../../../../main/group-chat/group-chat-agent', () => ({
 // Mock group-chat-router
 vi.mock('../../../../main/group-chat/group-chat-router', () => ({
 	routeUserMessage: vi.fn(),
+	clearPendingParticipants: vi.fn(),
+	routeAgentResponse: vi.fn(),
+	markParticipantResponded: vi.fn(),
+	spawnModeratorSynthesis: vi.fn(),
 }));
 
 // Mock agent-detector
@@ -87,12 +92,19 @@ vi.mock('../../../../main/utils/logger', () => ({
 	},
 }));
 
+// Mock the web-desktop bridge fan-out so we can assert push events reach web
+// clients through safeSend, independently of the Electron renderer's liveness.
+vi.mock('../../../../main/web-server/handlers/bridgeHandlers', () => ({
+	broadcastBridgeEvent: vi.fn(),
+}));
+
 // Import mocked modules for test setup
 import * as groupChatStorage from '../../../../main/group-chat/group-chat-storage';
 import * as groupChatLog from '../../../../main/group-chat/group-chat-log';
 import * as groupChatModerator from '../../../../main/group-chat/group-chat-moderator';
 import * as groupChatAgent from '../../../../main/group-chat/group-chat-agent';
 import * as groupChatRouter from '../../../../main/group-chat/group-chat-router';
+import { broadcastBridgeEvent } from '../../../../main/web-server/handlers/bridgeHandlers';
 
 describe('groupChat IPC handlers', () => {
 	let handlers: Map<string, Function>;
@@ -158,6 +170,7 @@ describe('groupChat IPC handlers', () => {
 				'groupChat:list',
 				'groupChat:load',
 				'groupChat:delete',
+				'groupChat:archive',
 				'groupChat:rename',
 				'groupChat:update',
 				// Chat log handlers
@@ -168,6 +181,8 @@ describe('groupChat IPC handlers', () => {
 				'groupChat:startModerator',
 				'groupChat:sendToModerator',
 				'groupChat:stopModerator',
+				'groupChat:stopAll',
+				'groupChat:reportAutoRunComplete',
 				'groupChat:getModeratorSessionId',
 				// Participant handlers
 				'groupChat:addParticipant',
@@ -687,7 +702,8 @@ describe('groupChat IPC handlers', () => {
 				'Hello moderator',
 				mockProcessManager,
 				mockAgentDetector,
-				false
+				false,
+				undefined
 			);
 		});
 
@@ -702,8 +718,33 @@ describe('groupChat IPC handlers', () => {
 				'Analyze this',
 				mockProcessManager,
 				mockAgentDetector,
-				true
+				true,
+				undefined
 			);
+		});
+
+		it('should auto-restart moderator when not active', async () => {
+			vi.mocked(groupChatModerator.isModeratorActive).mockReturnValue(false);
+			vi.mocked(groupChatModerator.spawnModerator).mockResolvedValue('new-session');
+			vi.mocked(groupChatRouter.routeUserMessage).mockResolvedValue(undefined);
+			const mockChat = {
+				id: 'gc-restart',
+				name: 'Test Chat',
+				moderatorAgentId: 'claude-code' as any,
+				participants: [],
+				logPath: '/path/to/log',
+				imagesDir: '/images/restart',
+			};
+			vi.mocked(groupChatStorage.loadGroupChat).mockResolvedValue(mockChat);
+
+			const handler = handlers.get('groupChat:sendToModerator');
+			await handler!({} as any, 'gc-restart', 'Hello', undefined, false);
+
+			expect(groupChatModerator.spawnModerator).toHaveBeenCalledWith(mockChat, mockProcessManager);
+			expect(groupChatRouter.routeUserMessage).toHaveBeenCalled();
+
+			// Reset mock
+			vi.mocked(groupChatModerator.isModeratorActive).mockReturnValue(true);
 		});
 	});
 
@@ -831,16 +872,90 @@ describe('groupChat IPC handlers', () => {
 	});
 
 	describe('groupChat:removeParticipant', () => {
-		it('should remove participant from group chat', async () => {
-			vi.mocked(groupChatAgent.removeParticipant).mockResolvedValue(undefined);
+		it('should remove participant from group chat and emit persisted participants', async () => {
+			const remainingParticipant: GroupChatParticipant = {
+				name: 'Worker 2',
+				agentId: 'opencode',
+				sessionId: 'session-2',
+				addedAt: Date.now(),
+			};
+			const updatedChat: GroupChat = {
+				id: 'gc-remove',
+				name: 'Remove Chat',
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+				moderatorAgentId: 'claude-code',
+				moderatorSessionId: 'moderator-session',
+				participants: [remainingParticipant],
+				logPath: '/path/to/chat.log',
+				imagesDir: '/path/to/images',
+			};
+			vi.mocked(groupChatAgent.removeParticipant).mockResolvedValue({
+				chat: updatedChat,
+				removed: true,
+			});
 
 			const handler = handlers.get('groupChat:removeParticipant');
-			await handler!({} as any, 'gc-remove', 'Worker 1');
+			const result = await handler!({} as any, 'gc-remove', 'Worker 1');
 
 			expect(groupChatAgent.removeParticipant).toHaveBeenCalledWith(
 				'gc-remove',
 				'Worker 1',
 				mockProcessManager
+			);
+			expect(mockMainWindow.webContents.send).toHaveBeenCalledWith(
+				'groupChat:participantsChanged',
+				'gc-remove',
+				[remainingParticipant]
+			);
+			expect(result).toBe(updatedChat);
+		});
+
+		it('should return current chat without emitting when removal is a no-op', async () => {
+			const existingParticipant: GroupChatParticipant = {
+				name: 'Worker 2',
+				agentId: 'opencode',
+				sessionId: 'session-2',
+				addedAt: Date.now(),
+			};
+			const currentChat: GroupChat = {
+				id: 'gc-remove-noop',
+				name: 'Remove NoOp Chat',
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+				moderatorAgentId: 'claude-code',
+				moderatorSessionId: 'moderator-session',
+				participants: [existingParticipant],
+				logPath: '/path/to/chat.log',
+				imagesDir: '/path/to/images',
+			};
+			vi.mocked(groupChatAgent.removeParticipant).mockResolvedValue({
+				chat: currentChat,
+				removed: false,
+			});
+
+			const handler = handlers.get('groupChat:removeParticipant');
+			const result = await handler!({} as any, 'gc-remove-noop', 'Worker 1');
+
+			expect(result).toBe(currentChat);
+			expect(mockMainWindow.webContents.send).not.toHaveBeenCalledWith(
+				'groupChat:participantsChanged',
+				expect.anything(),
+				expect.anything()
+			);
+		});
+
+		it('should return null without emitting when chat is missing', async () => {
+			vi.mocked(groupChatAgent.removeParticipant).mockResolvedValue(null);
+
+			const handler = handlers.get('groupChat:removeParticipant');
+			const result = await handler!({} as any, 'missing-chat', 'Worker 1');
+
+			expect(result).toBeNull();
+			expect(mockMainWindow.webContents.send).not.toHaveBeenCalledWith(
+				'groupChat:participantsChanged',
+				expect.anything(),
+				expect.anything()
 			);
 		});
 	});
@@ -986,6 +1101,107 @@ describe('groupChat IPC handlers', () => {
 		});
 	});
 
+	describe('groupChat:stopAll', () => {
+		it('should kill moderator, clear participant sessions, and emit idle states', async () => {
+			const mockChat: GroupChat = {
+				id: 'gc-stop-all',
+				name: 'Stop All Chat',
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+				moderatorAgentId: 'claude-code',
+				moderatorSessionId: 'session-stop',
+				participants: [
+					{
+						name: 'Worker 1',
+						agentId: 'claude-code',
+						sessionId: 'p-1',
+						addedAt: Date.now(),
+					},
+					{
+						name: 'Worker 2',
+						agentId: 'claude-code',
+						sessionId: 'p-2',
+						addedAt: Date.now(),
+					},
+				],
+				logPath: '/path/stop',
+				imagesDir: '/images/stop',
+			};
+
+			vi.mocked(groupChatModerator.killModerator).mockResolvedValue(undefined);
+			vi.mocked(groupChatAgent.clearAllParticipantSessions).mockResolvedValue(undefined);
+			vi.mocked(groupChatStorage.loadGroupChat).mockResolvedValue(mockChat);
+
+			const handler = handlers.get('groupChat:stopAll');
+			await handler!({} as any, 'gc-stop-all');
+
+			expect(groupChatModerator.killModerator).toHaveBeenCalledWith(
+				'gc-stop-all',
+				mockProcessManager
+			);
+			expect(groupChatAgent.clearAllParticipantSessions).toHaveBeenCalledWith(
+				'gc-stop-all',
+				mockProcessManager
+			);
+			expect(groupChatRouter.clearPendingParticipants).toHaveBeenCalledWith('gc-stop-all');
+		});
+
+		it('should handle null process manager', async () => {
+			const depsNoProcessManager: GroupChatHandlerDependencies = {
+				...mockDeps,
+				getProcessManager: () => null,
+			};
+
+			handlers.clear();
+			registerGroupChatHandlers(depsNoProcessManager);
+
+			vi.mocked(groupChatModerator.killModerator).mockResolvedValue(undefined);
+			vi.mocked(groupChatAgent.clearAllParticipantSessions).mockResolvedValue(undefined);
+			vi.mocked(groupChatStorage.loadGroupChat).mockResolvedValue(null);
+
+			const handler = handlers.get('groupChat:stopAll');
+			await handler!({} as any, 'gc-stop-null');
+
+			expect(groupChatModerator.killModerator).toHaveBeenCalledWith('gc-stop-null', undefined);
+			expect(groupChatAgent.clearAllParticipantSessions).toHaveBeenCalledWith(
+				'gc-stop-null',
+				undefined
+			);
+		});
+	});
+
+	describe('groupChat:reportAutoRunComplete', () => {
+		it('should route agent response and mark participant as responded', async () => {
+			vi.mocked(groupChatRouter.routeAgentResponse).mockResolvedValue(undefined);
+			vi.mocked(groupChatRouter.markParticipantResponded).mockReturnValue(false);
+
+			const handler = handlers.get('groupChat:reportAutoRunComplete');
+			await handler!({} as any, 'gc-autorun', 'Worker 1', 'Task completed successfully');
+
+			expect(groupChatRouter.routeAgentResponse).toHaveBeenCalledWith(
+				'gc-autorun',
+				'Worker 1',
+				'Task completed successfully',
+				mockProcessManager
+			);
+		});
+
+		it('should trigger synthesis when all participants have responded', async () => {
+			vi.mocked(groupChatRouter.routeAgentResponse).mockResolvedValue(undefined);
+			vi.mocked(groupChatRouter.markParticipantResponded).mockReturnValue(true);
+			vi.mocked(groupChatRouter.spawnModeratorSynthesis).mockResolvedValue(undefined);
+
+			const handler = handlers.get('groupChat:reportAutoRunComplete');
+			await handler!({} as any, 'gc-autorun-done', 'Worker 1', 'All done');
+
+			expect(groupChatRouter.routeAgentResponse).toHaveBeenCalled();
+			expect(groupChatRouter.markParticipantResponded).toHaveBeenCalledWith(
+				'gc-autorun-done',
+				'Worker 1'
+			);
+		});
+	});
+
 	describe('event emitters', () => {
 		it('should set up emitMessage emitter', () => {
 			expect(groupChatEmitters.emitMessage).toBeDefined();
@@ -1038,6 +1254,21 @@ describe('groupChat IPC handlers', () => {
 			);
 		});
 
+		it('emitMessage should fan out to web-desktop bridge clients', () => {
+			const mockMessage: GroupChatMessage = {
+				timestamp: '2024-01-01T00:00:00.000Z',
+				from: 'user',
+				content: 'Test message',
+			};
+
+			groupChatEmitters.emitMessage!('gc-emit', mockMessage);
+
+			expect(broadcastBridgeEvent).toHaveBeenCalledWith('groupChat:message', [
+				'gc-emit',
+				mockMessage,
+			]);
+		});
+
 		it('emitStateChange should send to main window', () => {
 			groupChatEmitters.emitStateChange!('gc-emit', 'moderator-thinking');
 
@@ -1048,7 +1279,7 @@ describe('groupChat IPC handlers', () => {
 			);
 		});
 
-		it('emitters should not send when window is destroyed', () => {
+		it('emitters should not send to a destroyed window but still reach the bridge', () => {
 			vi.mocked(mockMainWindow.isDestroyed).mockReturnValue(true);
 
 			groupChatEmitters.emitMessage!('gc-destroyed', {
@@ -1057,7 +1288,13 @@ describe('groupChat IPC handlers', () => {
 				content: 'Test',
 			});
 
+			// The Electron renderer is gone, so no direct send...
 			expect(mockMainWindow.webContents.send).not.toHaveBeenCalled();
+			// ...but web-desktop clients still receive the event via the bridge.
+			expect(broadcastBridgeEvent).toHaveBeenCalledWith(
+				'groupChat:message',
+				expect.arrayContaining(['gc-destroyed'])
+			);
 		});
 
 		it('emitters should handle null main window', () => {

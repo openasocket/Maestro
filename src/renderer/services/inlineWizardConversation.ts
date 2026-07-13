@@ -10,14 +10,51 @@
  */
 
 import type { ToolType, ProcessConfig } from '../types';
-import type { InlineWizardMessage } from '../hooks/useInlineWizard';
+import type { InlineWizardMessage } from '../hooks/batch/inlineWizard/types';
 import type { ExistingDocument as BaseExistingDocument } from '../utils/existingDocsDetector';
 import { logger } from '../utils/logger';
-import { wizardInlineIteratePrompt, wizardInlineNewPrompt } from '../../prompts';
+import { getStdinFlags } from '../utils/spawnHelpers';
 import {
 	parseStructuredOutput,
 	getConfidenceColor,
 } from '../components/Wizard/services/wizardPrompts';
+
+let cachedWizardInlineIteratePrompt: string | null = null;
+let cachedWizardInlineNewPrompt: string | null = null;
+let inlineWizardConversationPromptsLoaded = false;
+
+export async function loadInlineWizardConversationPrompts(force = false): Promise<void> {
+	if (inlineWizardConversationPromptsLoaded && !force) return;
+
+	const [iterateResult, newResult] = await Promise.all([
+		window.maestro.prompts.get('wizard-inline-iterate'),
+		window.maestro.prompts.get('wizard-inline-new'),
+	]);
+
+	if (!iterateResult.success) {
+		throw new Error(`Failed to load wizard-inline-iterate prompt: ${iterateResult.error}`);
+	}
+	if (!newResult.success) {
+		throw new Error(`Failed to load wizard-inline-new prompt: ${newResult.error}`);
+	}
+	cachedWizardInlineIteratePrompt = iterateResult.content!;
+	cachedWizardInlineNewPrompt = newResult.content!;
+	inlineWizardConversationPromptsLoaded = true;
+}
+
+function getWizardInlineIteratePrompt(): string {
+	if (!inlineWizardConversationPromptsLoaded || cachedWizardInlineIteratePrompt === null) {
+		return '';
+	}
+	return cachedWizardInlineIteratePrompt;
+}
+
+function getWizardInlineNewPrompt(): string {
+	if (!inlineWizardConversationPromptsLoaded || cachedWizardInlineNewPrompt === null) {
+		return '';
+	}
+	return cachedWizardInlineNewPrompt;
+}
 
 /**
  * Extended ExistingDocument interface that includes loaded content.
@@ -54,6 +91,12 @@ export interface WizardResponse {
 	ready: boolean;
 	/** The agent's message to display to the user */
 	message: string;
+	/**
+	 * Short human-readable name for the playbook (e.g. "HTML Chat Interface"),
+	 * extracted from the agent's JSON. Optional — older prompts may omit it,
+	 * and the wizard falls back to the session name when absent.
+	 */
+	projectName?: string;
 }
 
 /**
@@ -100,6 +143,14 @@ export interface InlineWizardConversationConfig {
 	conductorProfile?: string;
 	/** History file path for task recall (optional, enables AI to recall recent work) */
 	historyFilePath?: string;
+	/** Custom path to agent binary (overrides agent-level) */
+	sessionCustomPath?: string;
+	/** Custom CLI arguments (overrides agent-level) */
+	sessionCustomArgs?: string;
+	/** Custom environment variables (overrides agent-level) */
+	sessionCustomEnvVars?: Record<string, string>;
+	/** Custom model ID (overrides agent-level) */
+	sessionCustomModel?: string;
 }
 
 /**
@@ -124,6 +175,14 @@ export interface InlineWizardConversationSession {
 		remoteId: string | null;
 		workingDirOverride?: string;
 	};
+	/** Custom path to agent binary */
+	sessionCustomPath?: string;
+	/** Custom CLI arguments */
+	sessionCustomArgs?: string;
+	/** Custom environment variables */
+	sessionCustomEnvVars?: Record<string, string>;
+	/** Custom model ID */
+	sessionCustomModel?: string;
 }
 
 /**
@@ -184,10 +243,10 @@ export function generateInlineWizardPrompt(config: InlineWizardConversationConfi
 	// Select the base prompt based on mode
 	let basePrompt: string;
 	if (mode === 'iterate') {
-		basePrompt = wizardInlineIteratePrompt;
+		basePrompt = getWizardInlineIteratePrompt();
 	} else {
 		// 'new' mode uses the new plan prompt
-		basePrompt = wizardInlineNewPrompt;
+		basePrompt = getWizardInlineNewPrompt();
 	}
 
 	// Handle wizard-specific variables that have different semantics from the central template system
@@ -273,6 +332,10 @@ export function startInlineWizardConversation(
 		sessionSshRemoteConfig: config.sessionSshRemoteConfig?.enabled
 			? config.sessionSshRemoteConfig
 			: undefined,
+		sessionCustomPath: config.sessionCustomPath,
+		sessionCustomArgs: config.sessionCustomArgs,
+		sessionCustomEnvVars: config.sessionCustomEnvVars,
+		sessionCustomModel: config.sessionCustomModel,
 	};
 }
 
@@ -328,6 +391,7 @@ export function parseWizardResponse(response: string): WizardResponse | null {
 			confidence: result.structured.confidence,
 			ready: result.structured.ready && result.structured.confidence >= READY_CONFIDENCE_THRESHOLD,
 			message: result.structured.message,
+			projectName: result.structured.projectName,
 		};
 	}
 
@@ -337,6 +401,7 @@ export function parseWizardResponse(response: string): WizardResponse | null {
 			confidence: result.structured.confidence,
 			ready: result.structured.ready && result.structured.confidence >= READY_CONFIDENCE_THRESHOLD,
 			message: result.structured.message,
+			projectName: result.structured.projectName,
 		};
 	}
 
@@ -344,9 +409,8 @@ export function parseWizardResponse(response: string): WizardResponse | null {
 }
 
 /**
- * Extract the agent session ID (session_id) from Claude Code JSON output.
- * This is the Claude-side session ID that can be used to resume the session.
- * Returns the first session_id found in init or result messages.
+ * Extract the provider session ID from agent JSON output.
+ * Returns the first session identifier found in init or result-style messages.
  */
 function extractAgentSessionIdFromOutput(output: string): string | null {
 	try {
@@ -355,9 +419,14 @@ function extractAgentSessionIdFromOutput(output: string): string | null {
 			if (!line.trim()) continue;
 			try {
 				const msg = JSON.parse(line);
-				// session_id appears in init and result messages
 				if (msg.session_id) {
 					return msg.session_id;
+				}
+				if (msg.sessionId) {
+					return msg.sessionId;
+				}
+				if (msg.data?.sessionId) {
+					return msg.data.sessionId;
 				}
 			} catch {
 				// Ignore non-JSON lines
@@ -371,7 +440,7 @@ function extractAgentSessionIdFromOutput(output: string): string | null {
 
 /**
  * Extract the result text from agent JSON output.
- * Handles different agent output formats (Claude Code stream-json, etc.)
+ * Handles different agent output formats (Claude Code, Copilot, OpenCode, Codex).
  */
 function extractResultFromStreamJson(output: string, agentType: ToolType): string | null {
 	try {
@@ -422,6 +491,21 @@ function extractResultFromStreamJson(output: string, agentType: ToolType): strin
 			}
 		}
 
+		// For Copilot: final answers arrive as assistant.message with phase=final_answer
+		if (agentType === 'copilot-cli') {
+			for (const line of lines) {
+				if (!line.trim()) continue;
+				try {
+					const msg = JSON.parse(line);
+					if (msg.type === 'assistant.message' && msg.data?.phase === 'final_answer') {
+						return typeof msg.data?.content === 'string' ? msg.data.content : null;
+					}
+				} catch {
+					// Ignore non-JSON lines
+				}
+			}
+		}
+
 		// For Claude Code: look for result message
 		for (const line of lines) {
 			if (!line.trim()) continue;
@@ -469,53 +553,32 @@ function buildArgsForAgent(agent: any): string[] {
 		}
 
 		case 'codex': {
-			// Codex requires exec batch mode with JSON output for wizard conversations
-			// Must include these explicitly since wizard pre-builds args before IPC handler
-			const args = [];
-
-			// Add batch mode prefix: 'exec'
-			if (agent.batchModePrefix) {
-				args.push(...agent.batchModePrefix);
-			}
-
-			// Add base args (if any)
-			args.push(...(agent.args || []));
-
-			// Add batch mode args: '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check'
-			if (agent.batchModeArgs) {
-				args.push(...agent.batchModeArgs);
-			}
-
-			// Add JSON output: '--json'
-			if (agent.jsonOutputArgs) {
-				args.push(...agent.jsonOutputArgs);
-			}
-
-			return args;
+			// Return only base args — the IPC handler's buildAgentArgs() adds
+			// batchModePrefix, batchModeArgs, jsonOutputArgs, and workingDirArgs
+			// automatically when a prompt is present. Adding them here would
+			// duplicate flags and cause "unexpected argument" exit code 2.
+			return [...(agent.args || [])];
 		}
 
 		case 'opencode': {
-			// OpenCode requires 'run' batch mode with JSON output for wizard conversations
-			const args = [];
-
-			// Add batch mode prefix: 'run'
-			if (agent.batchModePrefix) {
-				args.push(...agent.batchModePrefix);
-			}
-
-			// Add base args (if any)
-			args.push(...(agent.args || []));
+			// Return base args plus read-only restriction for wizard conversations.
+			// The IPC handler's buildAgentArgs() adds batchModePrefix, jsonOutputArgs,
+			// and workingDirArgs automatically when a prompt is present.
+			const args = [...(agent.args || [])];
 
 			// Add read-only mode: '--agent plan'
 			if (agent.readOnlyArgs) {
 				args.push(...agent.readOnlyArgs);
 			}
 
-			// Add JSON output: '--format json'
-			if (agent.jsonOutputArgs) {
-				args.push(...agent.jsonOutputArgs);
-			}
+			return args;
+		}
 
+		case 'copilot-cli': {
+			const args = [...(agent.args || [])];
+			if (agent.readOnlyArgs) {
+				args.push(...agent.readOnlyArgs);
+			}
 			return args;
 		}
 
@@ -588,27 +651,18 @@ export async function sendWizardMessage(
 		// Build args for the agent
 		const argsForSpawn = agent ? buildArgsForAgent(agent) : [];
 
-		// On Windows, use stdin to bypass cmd.exe ~8KB command line length limit
-		// Note: Use navigator.platform in renderer (process.platform is not available in browser context)
-		const isWindows = navigator.platform.toLowerCase().includes('win');
-		// Use agent capabilities to determine stdin mode
-		// Agents that support --input-format stream-json use sendPromptViaStdin (JSON format)
-		// Agents that don't support stream-json use sendPromptViaStdinRaw (raw text)
-		const supportsStreamJson = agent?.capabilities?.supportsStreamJsonInput ?? false;
-		const sendViaStdin = isWindows && supportsStreamJson;
-		const sendViaStdinRaw = isWindows && !supportsStreamJson;
-		if (sendViaStdin && !argsForSpawn.includes('--input-format')) {
-			// Add --input-format stream-json when using stdin with stream-json compatible agents
-			argsForSpawn.push('--input-format', 'stream-json');
-		}
-
+		const { sendPromptViaStdin: sendViaStdin, sendPromptViaStdinRaw: sendViaStdinRaw } =
+			getStdinFlags({
+				isSshSession: !!session.sessionSshRemoteConfig?.enabled,
+				supportsStreamJsonInput: agent?.capabilities?.supportsStreamJsonInput ?? false,
+				hasImages: false, // Inline wizard never sends images
+			});
 		logger.info(`Using stdin for Windows`, '[InlineWizardConversation]', {
 			sessionId: session.sessionId,
 			platform: navigator.platform,
 			promptLength: fullPrompt.length,
 			sendViaStdin,
 			sendViaStdinRaw,
-			supportsStreamJson,
 		});
 
 		// Spawn agent and collect output
@@ -617,30 +671,46 @@ export async function sendWizardMessage(
 			let dataListenerCleanup: (() => void) | undefined;
 			let exitListenerCleanup: (() => void) | undefined;
 
-			// Set up timeout (5 minutes for complex prompts)
-			const timeoutId = setTimeout(() => {
-				logger.warn('Inline wizard response timeout', '[InlineWizardConversation]', {
-					sessionId: session.sessionId,
-					timeoutMs: 300000,
-				});
-				cleanupListeners();
-				// Kill the orphaned agent process to prevent resource leaks
-				window.maestro.process.kill(session.sessionId).catch((err) => {
-					logger.warn(
-						'Failed to kill timed-out inline wizard process',
-						'[InlineWizardConversation]',
-						{
-							sessionId: session.sessionId,
-							error: (err as Error)?.message || 'Unknown error',
-						}
-					);
-				});
-				resolve({
-					success: false,
-					error: 'Response timeout - agent did not complete in time',
-					rawOutput: outputBuffer,
-				});
-			}, 300000);
+			// Activity-based timeout: resets whenever the agent produces output.
+			// This prevents false timeouts on complex prompts where the agent is
+			// actively reading files or thinking, while still catching true stalls.
+			const INACTIVITY_TIMEOUT_MS = 1200000; // 20 minutes of inactivity
+			let lastActivityTime = Date.now();
+			let timeoutId: ReturnType<typeof setTimeout>;
+
+			const resetTimeout = () => {
+				clearTimeout(timeoutId);
+				lastActivityTime = Date.now();
+				timeoutId = setTimeout(() => {
+					const timeSinceLastActivity = Date.now() - lastActivityTime;
+					logger.warn('Inline wizard inactivity timeout', '[InlineWizardConversation]', {
+						sessionId: session.sessionId,
+						timeoutMs: INACTIVITY_TIMEOUT_MS,
+						timeSinceLastActivityMs: timeSinceLastActivity,
+						outputBufferLength: outputBuffer.length,
+					});
+					cleanupListeners();
+					// Kill the orphaned agent process to prevent resource leaks
+					window.maestro.process.kill(session.sessionId).catch((err) => {
+						logger.warn(
+							'Failed to kill timed-out inline wizard process',
+							'[InlineWizardConversation]',
+							{
+								sessionId: session.sessionId,
+								error: (err as Error)?.message || 'Unknown error',
+							}
+						);
+					});
+					resolve({
+						success: false,
+						error: 'Response timeout - agent did not complete in time',
+						rawOutput: outputBuffer,
+					});
+				}, INACTIVITY_TIMEOUT_MS);
+			};
+
+			// Start the initial timeout
+			resetTimeout();
 
 			let thinkingListenerCleanup: (() => void) | undefined;
 			let toolExecutionListenerCleanup: (() => void) | undefined;
@@ -669,6 +739,7 @@ export async function sendWizardMessage(
 				(receivedSessionId: string, data: string) => {
 					if (receivedSessionId === session.sessionId) {
 						outputBuffer += data;
+						resetTimeout();
 						callbacks?.onChunk?.(data);
 					}
 				}
@@ -680,6 +751,7 @@ export async function sendWizardMessage(
 				thinkingListenerCleanup = window.maestro.process.onThinkingChunk(
 					(receivedSessionId: string, content: string) => {
 						if (receivedSessionId === session.sessionId && content) {
+							resetTimeout();
 							try {
 								callbacks.onThinkingChunk!(content);
 							} catch (err) {
@@ -703,6 +775,7 @@ export async function sendWizardMessage(
 						toolEvent: { toolName: string; state?: unknown; timestamp: number }
 					) => {
 						if (receivedSessionId === session.sessionId) {
+							resetTimeout();
 							try {
 								callbacks.onToolExecution!(toolEvent);
 							} catch (err) {
@@ -795,6 +868,11 @@ export async function sendWizardMessage(
 					sendPromptViaStdinRaw: sendViaStdinRaw,
 					// Pass SSH config for remote execution
 					sessionSshRemoteConfig: session.sessionSshRemoteConfig,
+					// Pass session-level overrides
+					sessionCustomPath: session.sessionCustomPath,
+					sessionCustomArgs: session.sessionCustomArgs,
+					sessionCustomEnvVars: session.sessionCustomEnvVars,
+					sessionCustomModel: session.sessionCustomModel,
 				} as ProcessConfig)
 				.then(() => {
 					callbacks?.onReceiving?.();

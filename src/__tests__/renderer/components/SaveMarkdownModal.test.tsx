@@ -315,7 +315,11 @@ describe('SaveMarkdownModal', () => {
 				fireEvent.click(saveButton);
 			});
 
-			expect(mockWriteFile).toHaveBeenCalledWith('/test/folder/test.md', expect.any(String), undefined);
+			expect(mockWriteFile).toHaveBeenCalledWith(
+				'/test/folder/test.md',
+				expect.any(String),
+				undefined
+			);
 		});
 
 		it('does not duplicate .md extension', async () => {
@@ -330,7 +334,11 @@ describe('SaveMarkdownModal', () => {
 				fireEvent.click(saveButton);
 			});
 
-			expect(mockWriteFile).toHaveBeenCalledWith('/test/folder/test.md', expect.any(String), undefined);
+			expect(mockWriteFile).toHaveBeenCalledWith(
+				'/test/folder/test.md',
+				expect.any(String),
+				undefined
+			);
 		});
 
 		it('handles .MD extension case-insensitively', async () => {
@@ -346,7 +354,11 @@ describe('SaveMarkdownModal', () => {
 			});
 
 			// Should not add another .md
-			expect(mockWriteFile).toHaveBeenCalledWith('/test/folder/test.MD', expect.any(String), undefined);
+			expect(mockWriteFile).toHaveBeenCalledWith(
+				'/test/folder/test.MD',
+				expect.any(String),
+				undefined
+			);
 		});
 
 		it('calls onClose after successful save', async () => {
@@ -437,7 +449,11 @@ describe('SaveMarkdownModal', () => {
 			});
 
 			// Should not have double slash
-			expect(mockWriteFile).toHaveBeenCalledWith('/test/folder/test.md', expect.any(String), undefined);
+			expect(mockWriteFile).toHaveBeenCalledWith(
+				'/test/folder/test.md',
+				expect.any(String),
+				undefined
+			);
 		});
 
 		it('handles Windows-style paths', async () => {
@@ -455,7 +471,11 @@ describe('SaveMarkdownModal', () => {
 			});
 
 			// Should use backslash for Windows paths
-			expect(mockWriteFile).toHaveBeenCalledWith(`${windowsPath}\\test.md`, expect.any(String), undefined);
+			expect(mockWriteFile).toHaveBeenCalledWith(
+				`${windowsPath}\\test.md`,
+				expect.any(String),
+				undefined
+			);
 		});
 	});
 
@@ -585,13 +605,7 @@ describe('SaveMarkdownModal', () => {
 			mockWriteFile.mockResolvedValue({ success: true });
 			const onFileSaved = vi.fn();
 			const onClose = vi.fn();
-			render(
-				<SaveMarkdownModal
-					{...defaultProps}
-					onClose={onClose}
-					onFileSaved={onFileSaved}
-				/>
-			);
+			render(<SaveMarkdownModal {...defaultProps} onClose={onClose} onFileSaved={onFileSaved} />);
 
 			const filenameInput = screen.getByPlaceholderText('document.md');
 			fireEvent.change(filenameInput, { target: { value: 'test.md' } });
@@ -612,13 +626,7 @@ describe('SaveMarkdownModal', () => {
 			const callOrder: string[] = [];
 			const onFileSaved = vi.fn(() => callOrder.push('onFileSaved'));
 			const onClose = vi.fn(() => callOrder.push('onClose'));
-			render(
-				<SaveMarkdownModal
-					{...defaultProps}
-					onClose={onClose}
-					onFileSaved={onFileSaved}
-				/>
-			);
+			render(<SaveMarkdownModal {...defaultProps} onClose={onClose} onFileSaved={onFileSaved} />);
 
 			const filenameInput = screen.getByPlaceholderText('document.md');
 			fireEvent.change(filenameInput, { target: { value: 'test.md' } });
@@ -697,6 +705,134 @@ describe('SaveMarkdownModal', () => {
 			await waitFor(() => {
 				expect(onClose).toHaveBeenCalled();
 			});
+		});
+	});
+
+	describe('Open in Tab checkbox', () => {
+		it('does not render checkbox when onOpenInTab is not provided', () => {
+			render(<SaveMarkdownModal {...defaultProps} />);
+			expect(screen.queryByText('Open in Tab')).not.toBeInTheDocument();
+		});
+
+		it('renders unchecked checkbox when onOpenInTab is provided', () => {
+			const onOpenInTab = vi.fn();
+			render(<SaveMarkdownModal {...defaultProps} onOpenInTab={onOpenInTab} />);
+			const checkbox = screen.getByRole('checkbox');
+			expect(checkbox).toBeInTheDocument();
+			expect(checkbox).not.toBeChecked();
+			expect(screen.getByText('Open in Tab')).toBeInTheDocument();
+		});
+
+		it('toggles checkbox when clicked', () => {
+			const onOpenInTab = vi.fn();
+			render(<SaveMarkdownModal {...defaultProps} onOpenInTab={onOpenInTab} />);
+			const checkbox = screen.getByRole('checkbox');
+			fireEvent.click(checkbox);
+			expect(checkbox).toBeChecked();
+			fireEvent.click(checkbox);
+			expect(checkbox).not.toBeChecked();
+		});
+
+		it('does not call onOpenInTab when checkbox is unchecked', async () => {
+			mockWriteFile.mockResolvedValue({ success: true });
+			const onOpenInTab = vi.fn();
+			render(<SaveMarkdownModal {...defaultProps} onOpenInTab={onOpenInTab} />);
+
+			const filenameInput = screen.getByPlaceholderText('document.md');
+			fireEvent.change(filenameInput, { target: { value: 'test.md' } });
+
+			const saveButton = screen.getByRole('button', { name: 'Save' });
+			await act(async () => {
+				fireEvent.click(saveButton);
+			});
+
+			await waitFor(() => {
+				expect(defaultProps.onClose).toHaveBeenCalled();
+			});
+			expect(onOpenInTab).not.toHaveBeenCalled();
+		});
+
+		it('calls onOpenInTab with file details when checkbox is checked', async () => {
+			mockWriteFile.mockResolvedValue({ success: true });
+			const onOpenInTab = vi.fn();
+			render(<SaveMarkdownModal {...defaultProps} onOpenInTab={onOpenInTab} />);
+
+			// Check the checkbox
+			const checkbox = screen.getByRole('checkbox');
+			fireEvent.click(checkbox);
+
+			const filenameInput = screen.getByPlaceholderText('document.md');
+			fireEvent.change(filenameInput, { target: { value: 'test.md' } });
+
+			const saveButton = screen.getByRole('button', { name: 'Save' });
+			await act(async () => {
+				fireEvent.click(saveButton);
+			});
+
+			await waitFor(() => {
+				expect(onOpenInTab).toHaveBeenCalledWith({
+					path: '/test/folder/test.md',
+					name: 'test.md',
+					content: '# Test Markdown\n\nThis is test content.',
+					sshRemoteId: undefined,
+				});
+			});
+		});
+
+		it('passes sshRemoteId to onOpenInTab for remote sessions', async () => {
+			mockWriteFile.mockResolvedValue({ success: true });
+			const onOpenInTab = vi.fn();
+			render(
+				<SaveMarkdownModal
+					{...defaultProps}
+					onOpenInTab={onOpenInTab}
+					isRemoteSession={true}
+					sshRemoteId="ssh-remote-456"
+				/>
+			);
+
+			// Check the checkbox
+			const checkbox = screen.getByRole('checkbox');
+			fireEvent.click(checkbox);
+
+			const filenameInput = screen.getByPlaceholderText('document.md');
+			fireEvent.change(filenameInput, { target: { value: 'remote-doc' } });
+
+			const saveButton = screen.getByRole('button', { name: 'Save' });
+			await act(async () => {
+				fireEvent.click(saveButton);
+			});
+
+			await waitFor(() => {
+				expect(onOpenInTab).toHaveBeenCalledWith({
+					path: '/test/folder/remote-doc.md',
+					name: 'remote-doc.md',
+					content: '# Test Markdown\n\nThis is test content.',
+					sshRemoteId: 'ssh-remote-456',
+				});
+			});
+		});
+
+		it('does not call onOpenInTab when save fails', async () => {
+			mockWriteFile.mockResolvedValue({ success: false });
+			const onOpenInTab = vi.fn();
+			render(<SaveMarkdownModal {...defaultProps} onOpenInTab={onOpenInTab} />);
+
+			const checkbox = screen.getByRole('checkbox');
+			fireEvent.click(checkbox);
+
+			const filenameInput = screen.getByPlaceholderText('document.md');
+			fireEvent.change(filenameInput, { target: { value: 'test.md' } });
+
+			const saveButton = screen.getByRole('button', { name: 'Save' });
+			await act(async () => {
+				fireEvent.click(saveButton);
+			});
+
+			await waitFor(() => {
+				expect(screen.getByText('Failed to save file')).toBeInTheDocument();
+			});
+			expect(onOpenInTab).not.toHaveBeenCalled();
 		});
 	});
 });

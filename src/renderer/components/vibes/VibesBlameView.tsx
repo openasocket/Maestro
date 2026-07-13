@@ -496,7 +496,7 @@ export const VibesBlameView: React.FC<VibesBlameViewProps> = ({
 				setTrackedFiles(parsedFiles);
 
 				// Convert explorer tree to blame-view format with coverage data merged in
-				const converted = convertExplorerTree(explorerTree, '', coverageMap);
+				const converted = convertExplorerTree(explorerTree.tree, '', coverageMap);
 				for (const node of converted) {
 					computeTreeStats(node);
 				}

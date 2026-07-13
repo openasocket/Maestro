@@ -12,10 +12,11 @@
  * - Tooltip on hover with exact values
  */
 
-import React, { useState, useMemo } from 'react';
+import { memo, useState, useMemo } from 'react';
 import type { Theme } from '../../types';
-import type { StatsAggregation } from '../../hooks/useStats';
+import type { StatsAggregation } from '../../hooks/stats/useStats';
 import { COLORBLIND_BINARY_PALETTE } from '../../constants/colorblindPalettes';
+import { formatNumber } from '../../../shared/formatters';
 
 interface LocationData {
 	location: 'local' | 'remote';
@@ -32,19 +33,6 @@ interface LocationDistributionChartProps {
 	theme: Theme;
 	/** Enable colorblind-friendly colors */
 	colorBlindMode?: boolean;
-}
-
-/**
- * Format large numbers with K/M suffixes
- */
-function formatNumber(num: number): string {
-	if (num >= 1000000) {
-		return `${(num / 1000000).toFixed(1)}M`;
-	}
-	if (num >= 1000) {
-		return `${(num / 1000).toFixed(1)}K`;
-	}
-	return num.toString();
 }
 
 /**
@@ -131,7 +119,7 @@ function describeArc(
   `;
 }
 
-export function LocationDistributionChart({
+export const LocationDistributionChart = memo(function LocationDistributionChart({
 	data,
 	theme,
 	colorBlindMode = false,
@@ -215,7 +203,10 @@ export function LocationDistributionChart({
 		>
 			{/* Header with title */}
 			<div className="flex items-center justify-between mb-4">
-				<h3 className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
+				<h3
+					className="text-sm font-medium"
+					style={{ color: theme.colors.textMain, animation: 'card-enter 0.4s ease both' }}
+				>
 					Session Location
 				</h3>
 			</div>
@@ -316,6 +307,6 @@ export function LocationDistributionChart({
 			</div>
 		</div>
 	);
-}
+});
 
 export default LocationDistributionChart;

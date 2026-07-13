@@ -1,8 +1,10 @@
 # Maestro
 
-[![Made with Maestro](docs/assets/made-with-maestro.svg)](https://github.com/pedramamini/Maestro)
+[![Made with Maestro](docs/assets/made-with-maestro.svg)](https://github.com/RunMaestro/Maestro)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Us-5865F2?logo=discord&logoColor=white)](https://runmaestro.ai/discord)
 [![User Docs](https://img.shields.io/badge/Docs-Usage%20%26%20Documentation-blue?logo=readthedocs&logoColor=white)](https://docs.runmaestro.ai/)
+
+<a href="https://trendshift.io/repositories/21112" target="_blank"><img src="https://trendshift.io/api/badge/repositories/21112" alt="RunMaestro%2FMaestro | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
 > Maestro hones fractured attention into focused intent.
 
@@ -10,7 +12,7 @@ Maestro is a cross-platform desktop app for orchestrating your fleet of AI agent
 
 Collaborate with AI to create detailed specification documents, then let Auto Run execute them automatically, each task in a fresh session with clean context. Allowing for long-running unattended sessions, my current record is nearly 24 hours of continuous runtime.
 
-Run multiple agents in parallel with a Linear/Superhuman-level responsive interface. Currently supporting **Claude Code**, **OpenAI Codex**, **OpenCode**, and **Factory Droid** with plans for additional agentic coding tools (Gemini CLI, Qwen3 Coder) based on user demand.
+Run multiple agents in parallel with a Linear/Superhuman-level responsive interface. Currently supporting **Claude Code**, **OpenAI Codex**, **OpenCode**, **Factory Droid**, **Copilot-CLI** (beta), **Qwen3 Coder** (beta), and **Oh My Pi** (beta) with plans for additional agentic coding tools (Gemini CLI) based on user demand.
 
 > **How It Works:** Maestro is a pass-through to your AI provider. Whatever MCP tools, skills, permissions, or authentication you have configured in Claude Code, Codex, or OpenCode works identically in Maestro. The only difference is we're not running interactively—each task gets a prompt and returns a response, whether it's a new session or resuming a prior one.
 
@@ -33,7 +35,7 @@ Run multiple agents in parallel with a Linear/Superhuman-level responsive interf
 ### Power Features
 
 - 🌳 **[Git Worktrees](https://docs.runmaestro.ai/git-worktrees)** - Run AI agents in parallel on isolated branches. Create worktree sub-agents from the git branch menu, each operating in their own directory. Work interactively in the main repo while sub-agents process tasks independently—then create PRs with one click. True parallel development without conflicts.
-- 🤖 **[Auto Run & Playbooks](https://docs.runmaestro.ai/autorun-playbooks)** - File-system-based task runner that batch-processes markdown checklists through AI agents. Create playbooks for repeatable workflows, run in loops, and track progress with full history. Each task gets its own AI session for clean conversation context.
+- 🤖 **[Auto Run & Playbooks](https://docs.runmaestro.ai/autorun-playbooks)** - File-system-based task runner that batch-processes markdown checklists (Spec-Driven) or pursues a free-text objective (Goal-Driven) through AI agents. Create playbooks for repeatable workflows, run in loops, and track progress with full history. Each task gets its own AI session for clean conversation context, and you can open the live Thought Stream to watch the agent's reasoning as it works.
 - 💬 **[Group Chat](https://docs.runmaestro.ai/group-chat)** - Coordinate multiple AI agents in a single conversation. A moderator AI orchestrates discussions, routing questions to the right agents and synthesizing their responses for cross-project questions and architecture discussions.
 - 🌐 **[Mobile Remote Control](https://docs.runmaestro.ai/remote-access)** - Built-in web server with QR code access. Monitor and control all your agents from your phone. Supports local network access and remote tunneling via Cloudflare for access from anywhere.
 - 💻 **[Command Line Interface](https://docs.runmaestro.ai/cli)** - Full CLI (`maestro-cli`) for headless operation. List agents/groups, run playbooks from cron jobs or CI/CD pipelines, with human-readable or JSONL output for scripting.
@@ -81,18 +83,18 @@ Run multiple agents in parallel with a Linear/Superhuman-level responsive interf
 
 Additional interactions: Drag nodes to reposition, scroll to zoom, use mini-map for overview.
 
-> **Note**: Maestro supports Claude Code, OpenAI Codex, OpenCode, and Factory Droid. Support for additional agents (Gemini CLI, Qwen3 Coder) may be added in future releases based on community demand.
+> **Note**: Maestro supports Claude Code, OpenAI Codex, OpenCode, Factory Droid, Copilot-CLI (beta), Qwen3 Coder (beta), and Oh My Pi (beta). Support for additional agents (Gemini CLI) may be added in future releases based on community demand.
 
 ## Quick Start
 
 ### Installation
 
-Download the latest release for your platform from the [Releases page](https://github.com/pedramamini/Maestro/releases).
+Download the latest release for your platform from the [Releases page](https://github.com/RunMaestro/Maestro/releases).
 
 Or build from source:
 
 ```bash
-git clone https://github.com/pedramamini/Maestro.git
+git clone https://github.com/RunMaestro/Maestro.git
 cd Maestro
 npm install
 npm run dev
@@ -104,20 +106,23 @@ npm run dev
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) - Anthropic's AI coding assistant
   - [OpenAI Codex](https://github.com/openai/codex) - OpenAI's coding agent
   - [OpenCode](https://github.com/sst/opencode) - Open-source AI coding assistant
+  - [Copilot-CLI](https://docs.github.com/copilot/how-tos/copilot-cli) - GitHub's terminal coding agent (beta, multi-model via [models.dev](https://models.dev))
+  - [Qwen3 Coder](https://github.com/QwenLM/qwen-code) - Alibaba's Qwen Code agent, a Gemini CLI fork (beta)
+  - [Oh My Pi](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent) - Multi-model coding agent (beta, `omp` CLI)
 - Git (optional, for git-aware features)
 
 ### Essential Keyboard Shortcuts
 
-| Action | macOS | Windows/Linux |
-|--------|-------|---------------|
-| Quick Actions | `Cmd+K` | `Ctrl+K` |
-| New Agent | `Cmd+N` | `Ctrl+N` |
-| Switch AI/Terminal | `Cmd+J` | `Ctrl+J` |
+| Action              | macOS             | Windows/Linux       |
+| ------------------- | ----------------- | ------------------- |
+| Quick Actions       | `Cmd+K`           | `Ctrl+K`            |
+| New Agent           | `Cmd+N`           | `Ctrl+N`            |
+| Switch AI/Terminal  | `Cmd+J`           | `Ctrl+J`            |
 | Previous/Next Agent | `Cmd+[` / `Cmd+]` | `Ctrl+[` / `Ctrl+]` |
-| Toggle Sidebar | `Cmd+B` | `Ctrl+B` |
-| New Tab | `Cmd+T` | `Ctrl+T` |
-| Usage Dashboard | `Opt+Cmd+U` | `Alt+Ctrl+U` |
-| All Shortcuts | `Cmd+/` | `Ctrl+/` |
+| Toggle Sidebar      | `Cmd+B`           | `Ctrl+B`            |
+| New Tab             | `Cmd+T`           | `Ctrl+T`            |
+| Usage Dashboard     | `Opt+Cmd+U`       | `Alt+Ctrl+U`        |
+| All Shortcuts       | `Cmd+/`           | `Ctrl+/`            |
 
 [Full keyboard shortcut reference](https://docs.runmaestro.ai/keyboard-shortcuts)
 
@@ -127,25 +132,25 @@ npm run dev
   <img src="docs/screenshots/main-screen.png" alt="Maestro Main Screen" width="800">
 </p>
 
-*Main screen with multiple agents and conversation*
+_Main screen with multiple agents and conversation_
 
 <p align="center">
   <img src="docs/screenshots/group-chat.png" alt="Group Chat" width="800">
 </p>
 
-*Group Chat coordinates multiple AI agents in a single conversation*
+_Group Chat coordinates multiple AI agents in a single conversation_
 
 <p align="center">
   <img src="docs/screenshots/cmd-k-1.png" alt="Command Palette" width="800">
 </p>
 
-*Quick Actions palette for rapid navigation (CTRL/CMD + K)*
+_Quick Actions palette for rapid navigation (CTRL/CMD + K)_
 
 <p align="center">
   <img src="docs/screenshots/git-diff.png" alt="Git Diff Viewer" width="800">
 </p>
 
-*Git diff viewer with syntax highlighting*
+_Git diff viewer with syntax highlighting_
 
 [See more...](docs/screenshots/)
 
@@ -166,17 +171,26 @@ Full documentation and usage guide available at **[docs.runmaestro.ai](https://d
 ## Community
 
 - **Discord**: [Join Us](https://runmaestro.ai/discord)
-- **GitHub Issues**: [Report bugs & request features](https://github.com/pedramamini/Maestro/issues)
+- **GitHub Issues**: [Report bugs & request features](https://github.com/RunMaestro/Maestro/issues)
 
-## Contributors
+## Team
 
-- [@pedramamini](https://github.com/pedramamini) - Creator and Benevolent Dictator
-- [@mattjay](https://github.com/mattjay) - Contributor and tester
-- [@chr1syy](https://github.com/chr1syy) - Windows Contributor and tester
+Meet the team behind Maestro at [runmaestro.ai/team](https://runmaestro.ai/team/).
 
 ### Contributing
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, architecture details, and contribution guidelines.
 
 ## License
 
 [AGPL-3.0 License](LICENSE)
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=runmaestro%2Fmaestro&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=runmaestro/maestro&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=runmaestro/maestro&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=runmaestro/maestro&type=date&legend=top-left" />
+ </picture>
+</a>

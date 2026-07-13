@@ -1,6 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
+
+// Mock hasCapabilityCached — batch mode agents should return true for supportsBatchMode
+vi.mock('../../../renderer/hooks/agent/useAgentCapabilities', async () => {
+	const actual = await vi.importActual('../../../renderer/hooks/agent/useAgentCapabilities');
+	return {
+		...actual,
+		hasCapabilityCached: vi.fn((agentId: string, capability: string) => {
+			// Default batch mode agents: claude-code, codex, opencode, factory-droid
+			if (capability === 'supportsBatchMode') {
+				return ['claude-code', 'codex', 'opencode', 'factory-droid'].includes(agentId);
+			}
+			return false;
+		}),
+	};
+});
+
 import { useInputProcessing } from '../../../renderer/hooks/input/useInputProcessing';
+import { useSettingsStore } from '../../../renderer/stores/settingsStore';
 import type {
 	Session,
 	AITab,
@@ -8,55 +25,28 @@ import type {
 	BatchRunState,
 	QueuedItem,
 } from '../../../renderer/types';
+import { createMockAITab } from '../../helpers/mockTab';
+import { createMockSession as baseCreateMockSession } from '../../helpers/mockSession';
 
 // Create a mock AITab
-const createMockTab = (overrides: Partial<AITab> = {}): AITab => ({
-	id: 'tab-1',
-	agentSessionId: null,
-	name: null,
-	starred: false,
-	logs: [],
-	inputValue: '',
-	stagedImages: [],
-	createdAt: 1700000000000,
-	state: 'idle',
-	saveToHistory: true,
-	...overrides,
-});
+const createMockTab = (overrides: Partial<AITab> = {}): AITab =>
+	createMockAITab({
+		createdAt: 1700000000000,
+		saveToHistory: true,
+		...overrides,
+	});
 
-// Create a mock Session
+// Thin wrapper: pre-populates an AI tab so input processing has a tab
+// to route messages to.
 const createMockSession = (overrides: Partial<Session> = {}): Session => {
 	const baseTab = createMockTab();
-
-	return {
-		id: 'session-1',
-		name: 'Test Session',
-		toolType: 'claude-code',
-		state: 'idle',
-		cwd: '/test/project',
-		fullPath: '/test/project',
-		projectRoot: '/test/project',
-		aiLogs: [],
-		shellLogs: [],
-		workLog: [],
-		contextUsage: 0,
-		inputMode: 'ai',
+	return baseCreateMockSession({
 		aiPid: 1234,
 		terminalPid: 5678,
-		port: 0,
-		isLive: false,
-		changedFiles: [],
-		isGitRepo: false,
-		fileTree: [],
-		fileExplorerExpanded: [],
-		fileExplorerScrollPos: 0,
 		aiTabs: [baseTab],
 		activeTabId: baseTab.id,
-		closedTabHistory: [],
-		executionQueue: [],
-		activeTimeMs: 0,
 		...overrides,
-	} as Session;
+	});
 };
 
 // Default batch state (not running)
@@ -104,6 +94,8 @@ describe('useInputProcessing', () => {
 				spawn: vi.fn().mockResolvedValue(undefined),
 				write: vi.fn().mockResolvedValue(undefined),
 				runCommand: vi.fn().mockResolvedValue(undefined),
+				broadcastUserInput: vi.fn().mockResolvedValue(undefined),
+				onUserInput: vi.fn().mockReturnValue(() => {}),
 			},
 			agents: {
 				...window.maestro?.agents,
@@ -125,8 +117,14 @@ describe('useInputProcessing', () => {
 		Object.assign(window.maestro, originalMaestro);
 	});
 
-	// Helper to create hook dependencies
-	const createDeps = (overrides: Partial<Parameters<typeof useInputProcessing>[0]> = {}) => {
+	// Helper to create hook dependencies.
+	// `inputValue` is a test convenience: the hook now reads the live value via
+	// getInputValue() (the draft moved to useComposerInputStore for perf), so we
+	// translate the override into a getter and keep call sites unchanged.
+	const createDeps = (
+		overrides: Partial<Parameters<typeof useInputProcessing>[0]> & { inputValue?: string } = {}
+	) => {
+		const { inputValue = '', ...rest } = overrides;
 		const session = createMockSession();
 		const sessionsRef = { current: [session] };
 
@@ -134,7 +132,7 @@ describe('useInputProcessing', () => {
 			activeSession: session,
 			activeSessionId: session.id,
 			setSessions: mockSetSessions,
-			inputValue: '',
+			getInputValue: () => inputValue,
 			setInputValue: mockSetInputValue,
 			stagedImages: [],
 			setStagedImages: mockSetStagedImages,
@@ -150,7 +148,7 @@ describe('useInputProcessing', () => {
 			processQueuedItemRef: mockProcessQueuedItemRef,
 			flushBatchedUpdates: mockFlushBatchedUpdates,
 			onHistoryCommand: mockOnHistoryCommand,
-			...overrides,
+			...rest,
 		};
 	};
 
@@ -338,6 +336,7 @@ describe('useInputProcessing', () => {
 		];
 
 		it('matches and processes custom AI command', async () => {
+			vi.useFakeTimers();
 			const deps = createDeps({
 				inputValue: '/commit',
 				customAICommands: customCommands,
@@ -352,6 +351,7 @@ describe('useInputProcessing', () => {
 			expect(mockSetInputValue).toHaveBeenCalledWith('');
 			expect(mockSetSlashCommandOpen).toHaveBeenCalledWith(false);
 			expect(mockSyncAiInputToSession).toHaveBeenCalledWith('');
+			vi.useRealTimers();
 		});
 
 		it('does not match unknown slash command as custom command', async () => {
@@ -419,6 +419,108 @@ describe('useInputProcessing', () => {
 			expect(updatedSessions[0].executionQueue[0].type).toBe('command');
 			expect(updatedSessions[0].executionQueue[0].command).toBe('/test');
 		});
+
+		describe('forced parallel for slash commands', () => {
+			afterEach(() => {
+				useSettingsStore.setState({ forcedParallelExecution: false } as any);
+			});
+
+			it('processes slash command immediately when this tab is idle but another tab is busy', async () => {
+				vi.useFakeTimers();
+				useSettingsStore.setState({ forcedParallelExecution: true } as any);
+
+				// Session busy because tab-2 is running, but the active tab-1 is idle.
+				const session = createMockSession({
+					state: 'busy',
+					aiTabs: [
+						createMockTab({ id: 'tab-1', state: 'idle' }),
+						createMockTab({ id: 'tab-2', state: 'busy' }),
+					],
+					activeTabId: 'tab-1',
+				});
+				const deps = createDeps({
+					activeSession: session,
+					sessionsRef: { current: [session] },
+					inputValue: '/test',
+					customAICommands: customCommands,
+				});
+				const { result } = renderHook(() => useInputProcessing(deps));
+
+				await act(async () => {
+					await result.current.processInput(undefined, { forceParallel: true });
+				});
+
+				await act(async () => {
+					vi.advanceTimersByTime(100);
+				});
+
+				// Should dispatch via processQueuedItem, NOT just enqueue
+				expect(mockProcessQueuedItemRef.current).toHaveBeenCalled();
+				vi.useRealTimers();
+			});
+
+			it('tags queued slash command with forceParallel when this tab is busy', async () => {
+				useSettingsStore.setState({ forcedParallelExecution: true } as any);
+
+				const busyTab = createMockTab({ state: 'busy' });
+				const session = createMockSession({
+					state: 'busy',
+					aiTabs: [busyTab],
+					activeTabId: busyTab.id,
+				});
+				const deps = createDeps({
+					activeSession: session,
+					sessionsRef: { current: [session] },
+					inputValue: '/test',
+					customAICommands: customCommands,
+				});
+				const { result } = renderHook(() => useInputProcessing(deps));
+
+				await act(async () => {
+					await result.current.processInput(undefined, { forceParallel: true });
+				});
+
+				expect(mockSetSessions).toHaveBeenCalled();
+				const setSessionsCall = mockSetSessions.mock.calls[0][0];
+				const updatedSessions = setSessionsCall([session]);
+				expect(updatedSessions[0].executionQueue.length).toBe(1);
+				expect(updatedSessions[0].executionQueue[0].command).toBe('/test');
+				expect(updatedSessions[0].executionQueue[0].forceParallel).toBe(true);
+			});
+
+			it('queues slash command normally when forcedParallelExecution setting is disabled', async () => {
+				useSettingsStore.setState({ forcedParallelExecution: false } as any);
+
+				// Session busy via another tab; active tab idle. Without the setting on,
+				// this should fall through the original sessionIsIdle check (false) and queue.
+				const session = createMockSession({
+					state: 'busy',
+					aiTabs: [
+						createMockTab({ id: 'tab-1', state: 'idle' }),
+						createMockTab({ id: 'tab-2', state: 'busy' }),
+					],
+					activeTabId: 'tab-1',
+				});
+				const deps = createDeps({
+					activeSession: session,
+					sessionsRef: { current: [session] },
+					inputValue: '/test',
+					customAICommands: customCommands,
+				});
+				const { result } = renderHook(() => useInputProcessing(deps));
+
+				await act(async () => {
+					await result.current.processInput(undefined, { forceParallel: true });
+				});
+
+				// Should enqueue, not dispatch — setting gate prevents the override.
+				expect(mockSetSessions).toHaveBeenCalled();
+				const setSessionsCall = mockSetSessions.mock.calls[0][0];
+				const updatedSessions = setSessionsCall([session]);
+				expect(updatedSessions[0].executionQueue.length).toBe(1);
+				expect(updatedSessions[0].executionQueue[0].forceParallel).toBeUndefined();
+			});
+		});
 	});
 
 	describe('speckit commands (via customAICommands)', () => {
@@ -441,6 +543,7 @@ describe('useInputProcessing', () => {
 		];
 
 		it('matches and processes speckit command', async () => {
+			vi.useFakeTimers();
 			const deps = createDeps({
 				inputValue: '/speckit.help',
 				customAICommands: speckitCommands,
@@ -454,9 +557,11 @@ describe('useInputProcessing', () => {
 			// Should clear input (indicates command was matched)
 			expect(mockSetInputValue).toHaveBeenCalledWith('');
 			expect(mockSetSlashCommandOpen).toHaveBeenCalledWith(false);
+			vi.useRealTimers();
 		});
 
 		it('matches speckit.constitution command', async () => {
+			vi.useFakeTimers();
 			const deps = createDeps({
 				inputValue: '/speckit.constitution',
 				customAICommands: speckitCommands,
@@ -468,6 +573,7 @@ describe('useInputProcessing', () => {
 			});
 
 			expect(mockSetInputValue).toHaveBeenCalledWith('');
+			vi.useRealTimers();
 		});
 
 		it('does not match partial speckit command', async () => {
@@ -508,6 +614,7 @@ describe('useInputProcessing', () => {
 		];
 
 		it('matches custom command when both types present', async () => {
+			vi.useFakeTimers();
 			const deps = createDeps({
 				inputValue: '/commit',
 				customAICommands: combinedCommands,
@@ -519,9 +626,11 @@ describe('useInputProcessing', () => {
 			});
 
 			expect(mockSetInputValue).toHaveBeenCalledWith('');
+			vi.useRealTimers();
 		});
 
 		it('matches speckit command when both types present', async () => {
+			vi.useFakeTimers();
 			const deps = createDeps({
 				inputValue: '/speckit.help',
 				customAICommands: combinedCommands,
@@ -533,6 +642,7 @@ describe('useInputProcessing', () => {
 			});
 
 			expect(mockSetInputValue).toHaveBeenCalledWith('');
+			vi.useRealTimers();
 		});
 	});
 
@@ -769,6 +879,7 @@ describe('useInputProcessing', () => {
 
 	describe('override input value', () => {
 		it('uses overrideInputValue when provided', async () => {
+			vi.useFakeTimers();
 			const customCommands: CustomAICommand[] = [
 				{ id: 'commit', command: '/commit', description: 'Commit', prompt: 'Commit.' },
 			];
@@ -784,6 +895,7 @@ describe('useInputProcessing', () => {
 
 			// Should match the override value, not the inputValue
 			expect(mockSetInputValue).toHaveBeenCalledWith('');
+			vi.useRealTimers();
 		});
 	});
 
@@ -845,6 +957,344 @@ describe('useInputProcessing', () => {
 			expect(updatedSessions[0].state).toBe('idle'); // Session stays idle
 			expect(updatedSessions[0].executionQueue.length).toBe(1); // Message is queued
 			expect(updatedSessions[0].executionQueue[0].text).toBe('regular message');
+		});
+	});
+
+	describe('single-writer with orphaned (closed) tabs', () => {
+		// Regression: Cmd+W on a running write tab parks it in orphanedThinkingTabs
+		// and leaves a fresh idle aiTab while keeping the session busy. A new write
+		// message must QUEUE (drain in the background when the orphan finishes), not
+		// bypass the queue and spawn concurrently with the orphan. The bypass gate
+		// previously scanned only aiTabs, so the invisible orphan writer let the new
+		// message run immediately - two writers on one agent.
+		it('queues a write message instead of bypassing while a busy orphan is still writing', async () => {
+			const freshTab = createMockTab({ id: 'fresh', state: 'idle', readOnlyMode: false });
+			const orphan = createMockTab({ id: 'orphan-1', state: 'busy', readOnlyMode: false });
+			const session = createMockSession({
+				state: 'busy',
+				aiTabs: [freshTab],
+				activeTabId: 'fresh',
+				orphanedThinkingTabs: [orphan],
+			});
+			const deps = createDeps({
+				activeSession: session,
+				sessionsRef: { current: [session] },
+				inputValue: 'regular write message',
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
+			// Must queue, not spawn a concurrent writer.
+			expect(window.maestro.process.spawn).not.toHaveBeenCalled();
+			expect(mockSetSessions).toHaveBeenCalled();
+			const setSessionsCall = mockSetSessions.mock.calls[0][0];
+			const updatedSessions = setSessionsCall([session]);
+			expect(updatedSessions[0].executionQueue.length).toBe(1);
+			expect(updatedSessions[0].executionQueue[0].text).toBe('regular write message');
+		});
+
+		it('still bypasses the queue when the only busy orphan is read-only', async () => {
+			// Read-only orphans don't hold the write slot, so a new write may run in
+			// parallel (matches the existing all-busy-tabs-read-only bypass rule).
+			const freshTab = createMockTab({ id: 'fresh', state: 'idle', readOnlyMode: false });
+			const orphan = createMockTab({ id: 'orphan-ro', state: 'busy', readOnlyMode: true });
+			const session = createMockSession({
+				state: 'busy',
+				aiTabs: [freshTab],
+				activeTabId: 'fresh',
+				orphanedThinkingTabs: [orphan],
+			});
+			const deps = createDeps({
+				activeSession: session,
+				sessionsRef: { current: [session] },
+				inputValue: 'regular write message',
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
+			// Bypass allowed: the write spawns immediately, nothing queued.
+			expect(window.maestro.process.spawn).toHaveBeenCalled();
+		});
+	});
+
+	describe('forced parallel execution', () => {
+		it('queues with forceParallel flag when tab is busy', async () => {
+			useSettingsStore.setState({ forcedParallelExecution: true } as any);
+
+			const busySession = createMockSession({
+				state: 'busy',
+				aiTabs: [createMockTab({ state: 'busy' })],
+			});
+			const deps = createDeps({
+				activeSession: busySession,
+				sessionsRef: { current: [busySession] },
+				inputValue: 'forced message',
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput(undefined, { forceParallel: true });
+			});
+
+			// Should queue (tab is busy) but with forceParallel flag
+			expect(mockSetSessions).toHaveBeenCalled();
+			const setSessionsCall = mockSetSessions.mock.calls[0][0];
+			const updatedSessions = setSessionsCall([busySession]);
+			expect(updatedSessions[0].executionQueue.length).toBe(1);
+			expect(updatedSessions[0].executionQueue[0].forceParallel).toBe(true);
+		});
+
+		it('sends immediately when tab is idle even if session is busy', async () => {
+			useSettingsStore.setState({ forcedParallelExecution: true } as any);
+
+			// Session busy (another tab running), but active tab is idle
+			const busySession = createMockSession({
+				state: 'busy',
+				aiTabs: [
+					createMockTab({ id: 'tab-1', state: 'idle' }),
+					createMockTab({ id: 'tab-2', state: 'busy' }),
+				],
+				activeTabId: 'tab-1',
+			});
+			const deps = createDeps({
+				activeSession: busySession,
+				sessionsRef: { current: [busySession] },
+				inputValue: 'forced message',
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput(undefined, { forceParallel: true });
+			});
+
+			// Tab is idle — should send immediately, skipping cross-tab wait
+			expect(window.maestro.process.spawn).toHaveBeenCalled();
+		});
+
+		it('sends immediately when forceParallel and AutoRun is active but tab is idle', async () => {
+			useSettingsStore.setState({ forcedParallelExecution: true } as any);
+
+			const runningBatchState: BatchRunState = {
+				...defaultBatchState,
+				isRunning: true,
+			};
+			mockGetBatchState.mockReturnValue(runningBatchState);
+
+			const session = createMockSession({ state: 'busy' });
+			const deps = createDeps({
+				activeSession: session,
+				sessionsRef: { current: [session] },
+				inputValue: 'forced during autorun',
+				activeBatchRunState: runningBatchState,
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput(undefined, { forceParallel: true });
+			});
+
+			// Tab is idle — should send immediately, skipping AutoRun wait
+			expect(window.maestro.process.spawn).toHaveBeenCalled();
+		});
+
+		it('still queues when forceParallel is true but setting is disabled', async () => {
+			useSettingsStore.setState({ forcedParallelExecution: false } as any);
+
+			const busySession = createMockSession({
+				state: 'busy',
+				aiTabs: [createMockTab({ state: 'busy' })],
+			});
+			const deps = createDeps({
+				activeSession: busySession,
+				inputValue: 'should be queued',
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput(undefined, { forceParallel: true });
+			});
+
+			// Should add to execution queue because setting is off
+			expect(mockSetSessions).toHaveBeenCalled();
+			const setSessionsCall = mockSetSessions.mock.calls[0][0];
+			const updatedSessions = setSessionsCall([busySession]);
+			expect(updatedSessions[0].executionQueue.length).toBe(1);
+		});
+
+		it('queues normally when forceParallel is absent and session is busy', async () => {
+			useSettingsStore.setState({ forcedParallelExecution: true } as any);
+
+			const busySession = createMockSession({
+				state: 'busy',
+				aiTabs: [createMockTab({ state: 'busy' })],
+			});
+			const deps = createDeps({
+				activeSession: busySession,
+				inputValue: 'regular message',
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput(); // No forceParallel option
+			});
+
+			// Should queue normally
+			expect(mockSetSessions).toHaveBeenCalled();
+			const setSessionsCall = mockSetSessions.mock.calls[0][0];
+			const updatedSessions = setSessionsCall([busySession]);
+			expect(updatedSessions[0].executionQueue.length).toBe(1);
+		});
+
+		// Force Send replays a queued item by passing its images via options.images
+		// (avoids a stale-closure race with stagedImages). These tests pin that
+		// contract so the spawn payload actually carries the images.
+		describe('options.images override (Force Send path)', () => {
+			it('spawn payload includes images from options when text + image', async () => {
+				useSettingsStore.setState({ forcedParallelExecution: true } as any);
+
+				// Active tab idle, another tab busy — Force Send dispatches now.
+				const session = createMockSession({
+					state: 'busy',
+					aiTabs: [
+						createMockTab({ id: 'tab-1', state: 'idle' }),
+						createMockTab({ id: 'tab-2', state: 'busy' }),
+					],
+					activeTabId: 'tab-1',
+				});
+				const deps = createDeps({
+					activeSession: session,
+					sessionsRef: { current: [session] },
+					inputValue: '', // input is empty — staged images must come from options
+					stagedImages: [], // active tab has no staged images at click time
+				});
+				const { result } = renderHook(() => useInputProcessing(deps));
+
+				const queuedImage = 'data:image/png;base64,AAAA';
+
+				await act(async () => {
+					await result.current.processInput('look at this', {
+						forceParallel: true,
+						images: [queuedImage],
+					});
+				});
+
+				expect(window.maestro.process.spawn).toHaveBeenCalled();
+				const spawnArg = (window.maestro.process.spawn as ReturnType<typeof vi.fn>).mock
+					.calls[0][0];
+				expect(spawnArg.images).toEqual([queuedImage]);
+				expect(spawnArg.prompt).toBe('look at this');
+			});
+
+			it('spawn payload includes images for image-only message (empty text)', async () => {
+				useSettingsStore.setState({ forcedParallelExecution: true } as any);
+
+				const session = createMockSession({
+					state: 'busy',
+					aiTabs: [
+						createMockTab({ id: 'tab-1', state: 'idle' }),
+						createMockTab({ id: 'tab-2', state: 'busy' }),
+					],
+					activeTabId: 'tab-1',
+				});
+				const deps = createDeps({
+					activeSession: session,
+					sessionsRef: { current: [session] },
+					inputValue: '',
+					stagedImages: [],
+				});
+				const { result } = renderHook(() => useInputProcessing(deps));
+
+				const queuedImage = 'data:image/png;base64,BBBB';
+
+				// Empty text + image-only — must not bail, must still spawn with images.
+				await act(async () => {
+					await result.current.processInput('', {
+						forceParallel: true,
+						images: [queuedImage],
+					});
+				});
+
+				expect(window.maestro.process.spawn).toHaveBeenCalled();
+				const spawnArg = (window.maestro.process.spawn as ReturnType<typeof vi.fn>).mock
+					.calls[0][0];
+				expect(spawnArg.images).toEqual([queuedImage]);
+			});
+
+			it('options.images takes precedence over stagedImages', async () => {
+				useSettingsStore.setState({ forcedParallelExecution: true } as any);
+
+				const session = createMockSession({
+					state: 'busy',
+					aiTabs: [
+						createMockTab({ id: 'tab-1', state: 'idle' }),
+						createMockTab({ id: 'tab-2', state: 'busy' }),
+					],
+					activeTabId: 'tab-1',
+				});
+				const deps = createDeps({
+					activeSession: session,
+					sessionsRef: { current: [session] },
+					inputValue: 'hello',
+					// Tab has a different staged image — Force Send should use the
+					// queued item's images, not whatever's currently staged on the tab.
+					stagedImages: ['data:image/png;base64,STAGED'],
+				});
+				const { result } = renderHook(() => useInputProcessing(deps));
+
+				const queuedImage = 'data:image/png;base64,QUEUED';
+
+				await act(async () => {
+					await result.current.processInput('hello', {
+						forceParallel: true,
+						images: [queuedImage],
+					});
+				});
+
+				const spawnArg = (window.maestro.process.spawn as ReturnType<typeof vi.fn>).mock
+					.calls[0][0];
+				expect(spawnArg.images).toEqual([queuedImage]);
+				expect(spawnArg.images).not.toContain('data:image/png;base64,STAGED');
+			});
+
+			it('does not clear stagedImages when caller passes options.images', async () => {
+				useSettingsStore.setState({ forcedParallelExecution: true } as any);
+
+				const session = createMockSession({
+					state: 'busy',
+					aiTabs: [
+						createMockTab({ id: 'tab-1', state: 'idle' }),
+						createMockTab({ id: 'tab-2', state: 'busy' }),
+					],
+					activeTabId: 'tab-1',
+				});
+				const deps = createDeps({
+					activeSession: session,
+					sessionsRef: { current: [session] },
+					inputValue: 'hi',
+					stagedImages: ['data:image/png;base64,DRAFT'],
+				});
+				const { result } = renderHook(() => useInputProcessing(deps));
+
+				await act(async () => {
+					await result.current.processInput('hi', {
+						forceParallel: true,
+						images: ['data:image/png;base64,QUEUED'],
+					});
+				});
+
+				// User's draft staged image must NOT be cleared by Force Send.
+				expect(mockSetStagedImages).not.toHaveBeenCalledWith([]);
+			});
+		});
+
+		afterEach(() => {
+			useSettingsStore.setState({ forcedParallelExecution: false } as any);
 		});
 	});
 
@@ -923,6 +1373,168 @@ describe('useInputProcessing', () => {
 			expect(spawnCall.readOnlyMode).toBe(true);
 		});
 
+		it('does NOT force read-only when Auto Run is active AND user force-sends (Cmd+Shift+Enter / Force Send)', async () => {
+			useSettingsStore.setState({ forcedParallelExecution: true } as any);
+
+			const runningBatchState: BatchRunState = {
+				...defaultBatchState,
+				isRunning: true,
+				worktreeActive: false,
+			};
+			mockGetBatchState.mockReturnValue(runningBatchState);
+
+			// Idle write tab with an existing agent session so the prompt is sent verbatim.
+			const writeTab = createMockTab({
+				readOnlyMode: false,
+				agentSessionId: 'existing-session-456',
+				state: 'idle',
+			});
+			const session = createMockSession({
+				aiTabs: [writeTab],
+				activeTabId: writeTab.id,
+				state: 'idle',
+			});
+			const deps = createDeps({
+				activeSession: session,
+				sessionsRef: { current: [session] },
+				inputValue: 'fix the migration',
+				activeBatchRunState: runningBatchState,
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput(undefined, { forceParallel: true });
+			});
+
+			// Auto Run normally forces read-only; Force Send must override that.
+			expect(window.maestro.process.spawn).toHaveBeenCalled();
+			const spawnCall = (window.maestro.process.spawn as ReturnType<typeof vi.fn>).mock.calls[0][0];
+			expect(spawnCall.prompt).toBe('fix the migration');
+			expect(spawnCall.prompt).not.toContain('read-only/plan mode');
+			expect(spawnCall.readOnlyMode).toBeFalsy();
+
+			useSettingsStore.setState({ forcedParallelExecution: false } as any);
+			mockGetBatchState.mockReturnValue(defaultBatchState);
+		});
+
+		it('sends permissionMode "readonly" when Auto Run forces read-only despite tab permissionMode "full"', async () => {
+			const runningBatchState: BatchRunState = {
+				...defaultBatchState,
+				isRunning: true,
+				worktreeActive: false,
+			};
+			mockGetBatchState.mockReturnValue(runningBatchState);
+
+			// Tab explicitly opts into full permissions, but Auto Run without a
+			// worktree must still force the spawn config to readonly.
+			const fullPermissionTab = createMockTab({ readOnlyMode: true, permissionMode: 'full' });
+			const session = createMockSession({
+				aiTabs: [fullPermissionTab],
+				activeTabId: fullPermissionTab.id,
+			});
+			const deps = createDeps({
+				activeSession: session,
+				sessionsRef: { current: [session] },
+				inputValue: 'what does this function do',
+				activeBatchRunState: runningBatchState,
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
+			expect(window.maestro.process.spawn).toHaveBeenCalled();
+			const spawnCall = (window.maestro.process.spawn as ReturnType<typeof vi.fn>).mock.calls[0][0];
+			expect(spawnCall.readOnlyMode).toBe(true);
+			expect(spawnCall.permissionMode).toBe('readonly');
+		});
+
+		it('sends permissionMode "full" when tab permissionMode is "full" and Auto Run is not forcing read-only', async () => {
+			// Use a tab WITH agentSessionId so the message sends immediately (not queued)
+			const fullPermissionTab = createMockTab({
+				readOnlyMode: false,
+				permissionMode: 'full',
+				agentSessionId: 'existing-session-789',
+			});
+			const session = createMockSession({
+				aiTabs: [fullPermissionTab],
+				activeTabId: fullPermissionTab.id,
+			});
+			const deps = createDeps({
+				activeSession: session,
+				sessionsRef: { current: [session] },
+				inputValue: 'refactor this module',
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
+			expect(window.maestro.process.spawn).toHaveBeenCalled();
+			const spawnCall = (window.maestro.process.spawn as ReturnType<typeof vi.fn>).mock.calls[0][0];
+			expect(spawnCall.permissionMode).toBe('full');
+		});
+
+		it('sends permissionMode "full" for a tab whose permissionMode was never set (matches the pill)', async () => {
+			// The core drift bug: an unset permissionMode rendered "Full Access" in
+			// the toolbar but previously spawned with an undefined permissionMode, so
+			// buildAgentArgs withheld the bypass and the agent was silently denied.
+			// resolveTabPermissionMode now maps unset -> 'full' on the spawn path too.
+			const unsetTab = createMockTab({
+				agentSessionId: 'existing-session-unset',
+			});
+			expect(unsetTab.permissionMode).toBeUndefined();
+			const session = createMockSession({
+				aiTabs: [unsetTab],
+				activeTabId: unsetTab.id,
+			});
+			const deps = createDeps({
+				activeSession: session,
+				sessionsRef: { current: [session] },
+				inputValue: 'run the build',
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
+			expect(window.maestro.process.spawn).toHaveBeenCalled();
+			const spawnCall = vi.mocked(window.maestro.process.spawn).mock.calls[0][0];
+			expect(spawnCall.permissionMode).toBe('full');
+			expect(spawnCall.readOnlyMode).toBeFalsy();
+		});
+
+		it('sends permissionMode "standard" when tab permissionMode is "standard"', async () => {
+			// standard mode must propagate to the spawn config so the main process
+			// can wire up the permission relay (rather than defaulting to full).
+			const standardTab = createMockTab({
+				readOnlyMode: false,
+				permissionMode: 'standard',
+				agentSessionId: 'existing-session-standard',
+			});
+			const session = createMockSession({
+				aiTabs: [standardTab],
+				activeTabId: standardTab.id,
+			});
+			const deps = createDeps({
+				activeSession: session,
+				sessionsRef: { current: [session] },
+				inputValue: 'refactor this module',
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
+			expect(window.maestro.process.spawn).toHaveBeenCalled();
+			const spawnCall = (window.maestro.process.spawn as ReturnType<typeof vi.fn>).mock.calls[0][0];
+			expect(spawnCall.permissionMode).toBe('standard');
+		});
+
 		it('does not append read-only suffix when in normal write mode', async () => {
 			// Use a tab WITH agentSessionId to skip system prompt prepending
 			const writeTab = createMockTab({
@@ -955,6 +1567,7 @@ describe('useInputProcessing', () => {
 
 	describe('command history tracking', () => {
 		it('adds slash command to aiCommandHistory', async () => {
+			vi.useFakeTimers();
 			const customCommands: CustomAICommand[] = [
 				{ id: 'test', command: '/test', description: 'Test', prompt: 'Test prompt.' },
 			];
@@ -975,6 +1588,7 @@ describe('useInputProcessing', () => {
 			const setSessionsCall = mockSetSessions.mock.calls[0][0];
 			const updatedSessions = setSessionsCall([session]);
 			expect(updatedSessions[0].aiCommandHistory).toContain('/test');
+			vi.useRealTimers();
 		});
 	});
 
@@ -1051,7 +1665,10 @@ describe('useInputProcessing', () => {
 			expect(mockGenerateTabName).not.toHaveBeenCalled();
 		});
 
-		it('does not trigger tab naming for existing session (has agentSessionId)', async () => {
+		it('retries tab naming for existing session that still has no name', async () => {
+			// An existing session whose first naming attempt failed/timed out: agentSessionId is
+			// set but name is still null. Subsequent sends should keep retrying so the tab
+			// isn't permanently stuck unnamed.
 			const existingTab = createMockTab({
 				agentSessionId: 'existing-session-123',
 				name: null,
@@ -1072,7 +1689,31 @@ describe('useInputProcessing', () => {
 				await result.current.processInput();
 			});
 
-			// Should NOT call generateTabName for existing sessions
+			expect(mockGenerateTabName).toHaveBeenCalledTimes(1);
+		});
+
+		it('does not trigger tab naming when a previous attempt is still in flight', async () => {
+			const inFlightTab = createMockTab({
+				agentSessionId: 'session-456',
+				name: null,
+				isGeneratingName: true,
+			});
+			const session = createMockSession({
+				aiTabs: [inFlightTab],
+				activeTabId: inFlightTab.id,
+			});
+			const deps = createDeps({
+				activeSession: session,
+				sessionsRef: { current: [session] },
+				inputValue: 'Another message',
+				automaticTabNamingEnabled: true,
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
 			expect(mockGenerateTabName).not.toHaveBeenCalled();
 		});
 
@@ -1191,6 +1832,59 @@ describe('useInputProcessing', () => {
 			});
 		});
 
+		it('uses quick-path naming for GitHub PR URLs without spawning agent', async () => {
+			const newTab = createMockTab({
+				agentSessionId: null,
+				name: null,
+			});
+			const session = createMockSession({
+				aiTabs: [newTab],
+				activeTabId: newTab.id,
+			});
+			const deps = createDeps({
+				activeSession: session,
+				sessionsRef: { current: [session] },
+				inputValue: 'https://github.com/RunMaestro/Maestro/pull/380 review this PR',
+				automaticTabNamingEnabled: true,
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
+			// Should NOT call generateTabName (quick-path handles it)
+			expect(mockGenerateTabName).not.toHaveBeenCalled();
+
+			// Should have called setSessions to set the name directly
+			expect(mockSetSessions).toHaveBeenCalled();
+		});
+
+		it('uses quick-path naming for GitHub issue URLs without spawning agent', async () => {
+			const newTab = createMockTab({
+				agentSessionId: null,
+				name: null,
+			});
+			const session = createMockSession({
+				aiTabs: [newTab],
+				activeTabId: newTab.id,
+			});
+			const deps = createDeps({
+				activeSession: session,
+				sessionsRef: { current: [session] },
+				inputValue: 'thoughts on this issue? https://github.com/RunMaestro/Maestro/issues/381',
+				automaticTabNamingEnabled: true,
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
+			// Should NOT call generateTabName (quick-path handles it)
+			expect(mockGenerateTabName).not.toHaveBeenCalled();
+		});
+
 		it('handles tab naming failure gracefully', async () => {
 			mockGenerateTabName.mockRejectedValue(new Error('Tab naming failed'));
 
@@ -1217,6 +1911,164 @@ describe('useInputProcessing', () => {
 
 			// Tab naming was attempted
 			expect(mockGenerateTabName).toHaveBeenCalled();
+		});
+	});
+
+	describe('retry after agent error', () => {
+		// Regression: on retry, thinking pill stayed hidden because session-level
+		// agentError was still set. That pinned session.state to 'error' via the
+		// `state === 'error' && agentError` branch in useAgentListeners (onExit:703,
+		// onData:548), even though processInput flipped state to 'busy'.
+		it('clears session and tab agent error state on AI retry', async () => {
+			const priorError = {
+				type: 'unknown' as const,
+				message: 'Agent exited with code 143',
+				timestamp: Date.now(),
+				raw: 'Agent exited with code 143',
+			};
+			const erroredTab = createMockTab({
+				state: 'idle',
+				agentError: priorError,
+			});
+			const erroredSession = createMockSession({
+				state: 'error',
+				busySource: undefined,
+				agentError: priorError,
+				agentErrorTabId: erroredTab.id,
+				agentErrorPaused: true,
+				aiTabs: [erroredTab],
+				activeTabId: erroredTab.id,
+			});
+
+			const deps = createDeps({
+				activeSession: erroredSession,
+				sessionsRef: { current: [erroredSession] },
+				inputValue: 'retry after crash',
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
+			expect(mockSetSessions).toHaveBeenCalled();
+			const updater = mockSetSessions.mock.calls[0][0];
+			const [updated] = updater([erroredSession]);
+
+			// Session transitions to busy with AI source — required by thinking pill
+			expect(updated.state).toBe('busy');
+			expect(updated.busySource).toBe('ai');
+			// Prior error fields are wiped so late onAgentError/onExit branches
+			// can't re-enter the 'error' state path
+			expect(updated.agentError).toBeUndefined();
+			expect(updated.agentErrorTabId).toBeUndefined();
+			expect(updated.agentErrorPaused).toBe(false);
+			// Active tab transitions to busy and its banner error is cleared too
+			expect(updated.aiTabs[0].state).toBe('busy');
+			expect(updated.aiTabs[0].agentError).toBeUndefined();
+		});
+	});
+
+	// Cross-agent @mention dispatch. `onCrossAgentMentions` fires the consult and
+	// returns whether the SOURCE agent's own send should be suppressed (true when
+	// the message leads with an `@agent` mention, so only the consulted agent(s)
+	// answer). When suppressed the hook records the user's bubble but must not
+	// dispatch/spawn locally; otherwise the normal send proceeds unchanged.
+	describe('cross-agent @mention dispatch', () => {
+		it('suppresses the local send when the mention handler returns true', async () => {
+			const onCrossAgentMentions = vi.fn().mockReturnValue(true);
+			const session = createMockSession({ state: 'idle' });
+			const deps = createDeps({
+				activeSession: session,
+				activeSessionId: session.id,
+				sessionsRef: { current: [session] },
+				inputValue: '@Backend does this look right?',
+				onCrossAgentMentions,
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
+			// The consult fired with the message, source session, and its active tab.
+			expect(onCrossAgentMentions).toHaveBeenCalledTimes(1);
+			expect(onCrossAgentMentions).toHaveBeenCalledWith(
+				'@Backend does this look right?',
+				session,
+				session.activeTabId
+			);
+
+			// Local dispatch is suppressed: no spawn/write to the source agent.
+			expect(window.maestro.process.spawn).not.toHaveBeenCalled();
+			expect(window.maestro.process.write).not.toHaveBeenCalled();
+
+			// The user's bubble is still recorded (anchor for the streamed replies).
+			expect(mockSetSessions).toHaveBeenCalled();
+			const [updated] = mockSetSessions.mock.calls[0][0]([session]);
+			const logs = updated.aiTabs[0].logs;
+			const lastEntry = logs[logs.length - 1];
+			expect(lastEntry.source).toBe('user');
+			expect(lastEntry.text).toBe('@Backend does this look right?');
+			// And appended to command history for arrow-up recall.
+			expect(updated.aiCommandHistory).toContain('@Backend does this look right?');
+
+			// The bubble is mirrored to other windows.
+			expect(window.maestro.process.broadcastUserInput).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId: session.id,
+					inputMode: 'ai',
+					entry: expect.objectContaining({ text: '@Backend does this look right?' }),
+				})
+			);
+
+			// The composer is cleared.
+			expect(mockSetInputValue).toHaveBeenCalledWith('');
+		});
+
+		it('proceeds with the local send when the mention handler returns false', async () => {
+			// A trailing mention (`... to @Backend?`) does not suppress: the source
+			// agent answers too, so the normal spawn path must run.
+			const onCrossAgentMentions = vi.fn().mockReturnValue(false);
+			const session = createMockSession({ state: 'idle' });
+			const deps = createDeps({
+				activeSession: session,
+				activeSessionId: session.id,
+				sessionsRef: { current: [session] },
+				inputValue: 'does this look right to @Backend?',
+				onCrossAgentMentions,
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
+			expect(onCrossAgentMentions).toHaveBeenCalledTimes(1);
+			// Not suppressed: the message dispatches to the source agent as usual.
+			expect(window.maestro.process.spawn).toHaveBeenCalled();
+		});
+
+		it('does not fire the consult on an override send (queued replay / force-send)', async () => {
+			// Cross-agent dispatch is gated on a real input-box submit
+			// (`overrideInputValue === undefined`) so a queued replay never re-consults.
+			const onCrossAgentMentions = vi.fn().mockReturnValue(true);
+			const session = createMockSession({ state: 'idle' });
+			const deps = createDeps({
+				activeSession: session,
+				activeSessionId: session.id,
+				sessionsRef: { current: [session] },
+				onCrossAgentMentions,
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput('@Backend replayed message');
+			});
+
+			expect(onCrossAgentMentions).not.toHaveBeenCalled();
+			// The override message dispatches normally (not suppressed).
+			expect(window.maestro.process.spawn).toHaveBeenCalled();
 		});
 	});
 });

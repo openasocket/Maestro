@@ -39,6 +39,42 @@ export { useHoverTooltip } from './useHoverTooltip';
 export { useThemeStyles } from './useThemeStyles';
 export type { UseThemeStylesDeps, UseThemeStylesReturn, ThemeColors } from './useThemeStyles';
 
+// Context menu viewport positioning
+export { useContextMenuPosition } from './useContextMenuPosition';
+
+// Resizable panel drag behavior
+export { useResizablePanel } from './useResizablePanel';
+export type { UseResizablePanelOptions, UseResizablePanelReturn } from './useResizablePanel';
+
+// Resizable modal drag behavior
+export { useResizableModal } from './useResizableModal';
+export type {
+	ModalResizeDirection,
+	UseResizableModalOptions,
+	UseResizableModalReturn,
+} from './useResizableModal';
+
 // App-level handlers (drag, file, folder operations)
 export { useAppHandlers } from './useAppHandlers';
 export type { UseAppHandlersDeps, UseAppHandlersReturn } from './useAppHandlers';
+
+// App initialization effects (startup, splash screen, platform checks, command loading)
+export { useAppInitialization } from './useAppInitialization';
+export type { AppInitializationReturn } from './useAppInitialization';
+
+// Tour actions listener (right panel control from tour overlay)
+export { useTourActions } from './useTourActions';
+
+// Idle notification (fires command when all agents/batches finish)
+export { useIdleNotification } from './useIdleNotification';
+
+// Deferred update-restart (installs downloaded update on idle transition)
+export { useRestartWhenIdle } from './useRestartWhenIdle';
+
+// Responsive viewport breakpoint (drives drawer-mode sidebars on narrow widths)
+export { useViewportBreakpoint } from './useViewportBreakpoint';
+export type { Breakpoint } from './useViewportBreakpoint';
+
+// Per-window panel-collapse state (reads/persists left/right panel collapse
+// through window.maestro.windows.*, keyed per-window not as a global setting)
+export { useWindowState } from './useWindowState';

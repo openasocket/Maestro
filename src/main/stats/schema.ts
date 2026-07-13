@@ -55,7 +55,9 @@ export const CREATE_QUERY_EVENTS_INDEXES_SQL = `
   CREATE INDEX IF NOT EXISTS idx_query_source ON query_events(source);
   CREATE INDEX IF NOT EXISTS idx_query_session ON query_events(session_id);
   CREATE INDEX IF NOT EXISTS idx_query_project_path ON query_events(project_path);
-  CREATE INDEX IF NOT EXISTS idx_query_agent_time ON query_events(agent_type, start_time)
+  CREATE INDEX IF NOT EXISTS idx_query_time_agent ON query_events(start_time, agent_type);
+  CREATE INDEX IF NOT EXISTS idx_query_time_project ON query_events(start_time, project_path);
+  CREATE INDEX IF NOT EXISTS idx_query_time_source ON query_events(start_time, source)
 `;
 
 // ============================================================================
@@ -123,6 +125,54 @@ export const CREATE_SESSION_LIFECYCLE_SQL = `
 export const CREATE_SESSION_LIFECYCLE_INDEXES_SQL = `
   CREATE INDEX IF NOT EXISTS idx_session_created_at ON session_lifecycle(created_at);
   CREATE INDEX IF NOT EXISTS idx_session_agent_type ON session_lifecycle(agent_type)
+`;
+
+// ============================================================================
+// Image Annotations (Migration v6)
+// ============================================================================
+
+export const CREATE_IMAGE_ANNOTATIONS_SQL = `
+  CREATE TABLE IF NOT EXISTS image_annotations (
+    id TEXT PRIMARY KEY,
+    created_at INTEGER NOT NULL
+  )
+`;
+
+export const CREATE_IMAGE_ANNOTATIONS_INDEXES_SQL = `
+  CREATE INDEX IF NOT EXISTS idx_image_annotations_created_at ON image_annotations(created_at)
+`;
+
+// ============================================================================
+// Shortcut Usage Daily (Migration v7)
+// ============================================================================
+
+export const CREATE_SHORTCUT_USAGE_DAILY_SQL = `
+  CREATE TABLE IF NOT EXISTS shortcut_usage_daily (
+    date TEXT PRIMARY KEY,
+    count INTEGER NOT NULL
+  )
+`;
+
+// ============================================================================
+// Multi-Window Usage Daily (Migration v8)
+// ============================================================================
+
+export const CREATE_MULTI_WINDOW_USAGE_DAILY_SQL = `
+  CREATE TABLE IF NOT EXISTS multi_window_usage_daily (
+    date TEXT PRIMARY KEY,
+    windows_opened INTEGER NOT NULL DEFAULT 0,
+    peak_concurrent INTEGER NOT NULL DEFAULT 0
+  )
+`;
+
+// ============================================================================
+// Compound Indexes (Migration v4)
+// ============================================================================
+
+export const CREATE_COMPOUND_INDEXES_SQL = `
+  CREATE INDEX IF NOT EXISTS idx_query_time_agent ON query_events(start_time, agent_type);
+  CREATE INDEX IF NOT EXISTS idx_query_time_project ON query_events(start_time, project_path);
+  CREATE INDEX IF NOT EXISTS idx_query_time_source ON query_events(start_time, source)
 `;
 
 // ============================================================================

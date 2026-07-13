@@ -42,8 +42,8 @@ describe('Data Listener', () => {
 		mockPatterns = {
 			REGEX_MODERATOR_SESSION: /^group-chat-(.+)-moderator-/,
 			REGEX_MODERATOR_SESSION_TIMESTAMP: /^group-chat-(.+)-moderator-\d+$/,
-			REGEX_AI_SUFFIX: /-ai-[^-]+$/,
-			REGEX_AI_TAB_ID: /-ai-([^-]+)$/,
+			REGEX_AI_SUFFIX: /-ai-.+$/,
+			REGEX_AI_TAB_ID: /-ai-(.+?)(?:-fp-\d+)?$/,
 			REGEX_BATCH_SESSION: /-batch-\d+$/,
 			REGEX_SYNOPSIS_SESSION: /-synopsis-\d+$/,
 		};
@@ -79,6 +79,8 @@ describe('Data Listener', () => {
 			const handler = eventHandlers.get('data');
 
 			handler?.('regular-session-123', 'test output');
+			// process:data is coalesced (~16ms); flush via the exit boundary.
+			eventHandlers.get('exit')?.('regular-session-123');
 
 			expect(mockSafeSend).toHaveBeenCalledWith(
 				'process:data',
@@ -87,35 +89,41 @@ describe('Data Listener', () => {
 			);
 		});
 
-		it('should broadcast to web clients for AI sessions', () => {
+		it('should broadcast to web clients for AI sessions with UUID tab IDs', () => {
 			setupListener();
 			const handler = eventHandlers.get('data');
 
-			handler?.('session-123-ai-tab1', 'test output');
+			handler?.(
+				'51cee651-6629-4de8-abdd-1c1540555f2d-ai-73aaeb23-6673-45a4-8fdf-c769802f79bb',
+				'test output'
+			);
 
 			expect(mockWebServer.broadcastToSessionClients).toHaveBeenCalledWith(
-				'session-123',
+				'51cee651-6629-4de8-abdd-1c1540555f2d',
 				expect.objectContaining({
 					type: 'session_output',
-					sessionId: 'session-123',
-					tabId: 'tab1',
+					sessionId: '51cee651-6629-4de8-abdd-1c1540555f2d',
+					tabId: '73aaeb23-6673-45a4-8fdf-c769802f79bb',
 					data: 'test output',
 					source: 'ai',
 				})
 			);
 		});
 
-		it('should extract base session ID correctly', () => {
+		it('should extract base session ID correctly from UUID format', () => {
 			setupListener();
 			const handler = eventHandlers.get('data');
 
-			handler?.('my-session-ai-mytab', 'test output');
+			handler?.(
+				'a053b4b3-95af-46cc-aaa4-3d37785038be-ai-66fc905c-3062-4192-9a84-d239af5fc826',
+				'test output'
+			);
 
 			expect(mockWebServer.broadcastToSessionClients).toHaveBeenCalledWith(
-				'my-session',
+				'a053b4b3-95af-46cc-aaa4-3d37785038be',
 				expect.objectContaining({
-					sessionId: 'my-session',
-					tabId: 'mytab',
+					sessionId: 'a053b4b3-95af-46cc-aaa4-3d37785038be',
+					tabId: '66fc905c-3062-4192-9a84-d239af5fc826',
 				})
 			);
 		});
@@ -201,15 +209,69 @@ describe('Data Listener', () => {
 		});
 	});
 
+	describe('Group Chat Cross-Domain Containment', () => {
+		// Regression: if a sessionId starts with GROUP_CHAT_PREFIX but does NOT
+		// match any recognized moderator/participant shape (e.g. malformed ID,
+		// unknown variant, or a regex tightening rejecting a legacy format),
+		// the data MUST be dropped, NOT forwarded to the regular process:data
+		// channel or the web broadcast path. Otherwise group-chat transcript
+		// bytes leak into the renderer/web-client stream — the suspected root
+		// cause of "group chat bled into cue pipeline output".
+		it('drops unrecognized group-chat session data instead of forwarding', () => {
+			// Moderator regex won't match (no "-moderator-" anywhere).
+			// parseParticipantSessionId mock returns null for anything below.
+			mockOutputParser.parseParticipantSessionId = vi.fn().mockReturnValue(null);
+			setupListener();
+			const handler = eventHandlers.get('data');
+
+			// Shape starts with group-chat- but matches neither moderator nor
+			// the participant parser (mocked to null).
+			handler?.('group-chat-something-weird-shape', 'secret transcript bytes');
+
+			expect(mockSafeSend).not.toHaveBeenCalled();
+			expect(mockWebServer.broadcastToSessionClients).not.toHaveBeenCalled();
+			expect(mockOutputBuffer.appendToGroupChatBuffer).not.toHaveBeenCalled();
+			expect(mockDebugLog).toHaveBeenCalledWith(
+				'GroupChat:Debug',
+				expect.stringContaining('unrecognized group-chat sessionId shape')
+			);
+		});
+
+		it('still forwards non-group-chat data normally', () => {
+			mockOutputParser.parseParticipantSessionId = vi.fn().mockReturnValue(null);
+			setupListener();
+			const handler = eventHandlers.get('data');
+
+			handler?.('plain-session', 'plain data');
+			eventHandlers.get('exit')?.('plain-session');
+
+			expect(mockSafeSend).toHaveBeenCalledWith('process:data', 'plain-session', 'plain data');
+		});
+	});
+
 	describe('Web Broadcast Filtering', () => {
-		it('should skip PTY terminal output', () => {
+		it('should broadcast PTY terminal output as terminal_data', () => {
 			setupListener();
 			const handler = eventHandlers.get('data');
 
 			handler?.('session-123-terminal', 'terminal output');
+			eventHandlers.get('exit')?.('session-123-terminal');
 
-			expect(mockWebServer.broadcastToSessionClients).not.toHaveBeenCalled();
-			// But should still forward to renderer
+			// Should broadcast as terminal_data (for xterm.js in web client)
+			expect(mockWebServer.broadcastToSessionClients).toHaveBeenCalledWith(
+				'session-123',
+				expect.objectContaining({
+					type: 'terminal_data',
+					sessionId: 'session-123',
+					data: 'terminal output',
+				})
+			);
+			// Should NOT broadcast as session_output
+			expect(mockWebServer.broadcastToSessionClients).not.toHaveBeenCalledWith(
+				expect.anything(),
+				expect.objectContaining({ type: 'session_output' })
+			);
+			// Should still forward to renderer
 			expect(mockSafeSend).toHaveBeenCalledWith(
 				'process:data',
 				'session-123-terminal',
@@ -240,7 +302,7 @@ describe('Data Listener', () => {
 			const handler = eventHandlers.get('data');
 
 			// Session ID with "batch" in the UUID but not matching the pattern -batch-{digits}
-			handler?.('session-batch-uuid-ai-tab1', 'output');
+			handler?.('session-batch-uuid-ai-a1b2c3d4-e5f6-7890-abcd-ef1234567890', 'output');
 
 			// Should broadcast because it doesn't match the -batch-\d+$ pattern
 			expect(mockWebServer.broadcastToSessionClients).toHaveBeenCalled();
@@ -251,12 +313,13 @@ describe('Data Listener', () => {
 			setupListener();
 			const handler = eventHandlers.get('data');
 
-			handler?.('session-123-ai-tab1', 'test output');
+			handler?.('session-123-ai-a1b2c3d4-e5f6-7890-abcd-ef1234567890', 'test output');
+			eventHandlers.get('exit')?.('session-123-ai-a1b2c3d4-e5f6-7890-abcd-ef1234567890');
 
 			// Should still forward to renderer
 			expect(mockSafeSend).toHaveBeenCalledWith(
 				'process:data',
-				'session-123-ai-tab1',
+				'session-123-ai-a1b2c3d4-e5f6-7890-abcd-ef1234567890',
 				'test output'
 			);
 			// But not broadcast (no web server)
@@ -269,8 +332,8 @@ describe('Data Listener', () => {
 			setupListener();
 			const handler = eventHandlers.get('data');
 
-			handler?.('session-123-ai-tab1', 'output 1');
-			handler?.('session-123-ai-tab1', 'output 2');
+			handler?.('session-123-ai-a1b2c3d4-e5f6-7890-abcd-ef1234567890', 'output 1');
+			handler?.('session-123-ai-a1b2c3d4-e5f6-7890-abcd-ef1234567890', 'output 2');
 
 			const calls = mockWebServer.broadcastToSessionClients.mock.calls;
 			const msgId1 = calls[0][1].msgId;
@@ -286,7 +349,7 @@ describe('Data Listener', () => {
 			setupListener();
 			const handler = eventHandlers.get('data');
 
-			handler?.('session-123-ai-tab1', 'test output');
+			handler?.('session-123-ai-a1b2c3d4-e5f6-7890-abcd-ef1234567890', 'test output');
 
 			const msgId = mockWebServer.broadcastToSessionClients.mock.calls[0][1].msgId;
 			const timestamp = parseInt(msgId.split('-')[0], 10);
@@ -301,7 +364,7 @@ describe('Data Listener', () => {
 			setupListener();
 			const handler = eventHandlers.get('data');
 
-			handler?.('session-123-ai-tab1', 'ai output');
+			handler?.('session-123-ai-a1b2c3d4-e5f6-7890-abcd-ef1234567890', 'ai output');
 
 			expect(mockWebServer.broadcastToSessionClients).toHaveBeenCalledWith(
 				expect.anything(),

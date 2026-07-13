@@ -2,7 +2,37 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { RightPanel, RightPanelHandle } from '../../../renderer/components/RightPanel';
 import { createRef } from 'react';
-import type { Session, Theme, Shortcut, BatchRunState } from '../../../renderer/types';
+import type { Session, Shortcut, BatchRunState } from '../../../renderer/types';
+import { useUIStore } from '../../../renderer/stores/uiStore';
+import { useSettingsStore } from '../../../renderer/stores/settingsStore';
+import { useFileExplorerStore } from '../../../renderer/stores/fileExplorerStore';
+import { useBatchStore } from '../../../renderer/stores/batchStore';
+import { useSessionStore } from '../../../renderer/stores/sessionStore';
+import { WindowProvider } from '../../../renderer/contexts/WindowContext';
+import type { WindowState } from '../../../shared/window-types';
+import { mockTheme } from '../../helpers/mockTheme';
+
+/** Set the renderer URL so WindowProvider reads the desired `?windowId=` param. */
+function setWindowUrl(search: string): void {
+	window.history.replaceState({}, '', search || '/');
+}
+
+/** Build a full WindowState, overriding only the fields a test cares about. */
+function makeWindowState(partial: Partial<WindowState> & Pick<WindowState, 'id'>): WindowState {
+	return {
+		x: 0,
+		y: 0,
+		width: 1200,
+		height: 800,
+		isMaximized: false,
+		isFullScreen: false,
+		sessionIds: [],
+		activeSessionId: null,
+		leftPanelCollapsed: false,
+		rightPanelCollapsed: false,
+		...partial,
+	};
+}
 
 // Mock child components
 vi.mock('../../../renderer/components/FileExplorerPanel', () => ({
@@ -32,18 +62,50 @@ vi.mock('../../../renderer/utils/shortcutFormatter', () => ({
 	isMacOS: vi.fn(() => false),
 }));
 
-// Mock hooks to control vibesEnabled and vibesLive state
-let mockVibesEnabled = false;
-let mockVibesLiveUpdates = new Map<string, { sessionId: string; annotationCount: number; lastAnnotation: { type: string; timestamp: string } }>();
-
-vi.mock('../../../renderer/hooks', () => ({
-	useSettings: () => ({ vibesEnabled: mockVibesEnabled }),
-	useVibesLive: () => ({
-		updates: mockVibesLiveUpdates,
-		getCount: (sessionId: string) => mockVibesLiveUpdates.get(sessionId)?.annotationCount ?? 0,
-		getLastAnnotation: (sessionId: string) => mockVibesLiveUpdates.get(sessionId)?.lastAnnotation ?? null,
-	}),
+vi.mock('../../../renderer/components/ConfirmModal', () => ({
+	ConfirmModal: vi.fn(({ title, message, onConfirm, onClose, confirmLabel }) => (
+		<div data-testid="confirm-modal">
+			<span data-testid="confirm-modal-title">{title}</span>
+			<span data-testid="confirm-modal-message">{message}</span>
+			<button
+				data-testid="confirm-modal-confirm"
+				onClick={() => {
+					onConfirm?.();
+					onClose();
+				}}
+			>
+				{confirmLabel || 'Confirm'}
+			</button>
+			<button data-testid="confirm-modal-cancel" onClick={onClose}>
+				Cancel
+			</button>
+		</div>
+	)),
 }));
+
+// Mock the VIBES live hook to control feed state (vibesEnabled now comes from
+// the settings store, seeded per-test via useSettingsStore.setState).
+let mockVibesLiveUpdates = new Map<
+	string,
+	{
+		sessionId: string;
+		annotationCount: number;
+		lastAnnotation: { type: string; timestamp: string };
+	}
+>();
+
+vi.mock('../../../renderer/hooks', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../../../renderer/hooks')>();
+	return {
+		...actual,
+		useVibesLive: () => ({
+			updates: mockVibesLiveUpdates,
+			getCount: (sessionId: string) => mockVibesLiveUpdates.get(sessionId)?.annotationCount ?? 0,
+			getLastAnnotation: (sessionId: string) =>
+				mockVibesLiveUpdates.get(sessionId)?.lastAnnotation ?? null,
+		}),
+	};
+});
 
 // Mock lucide-react
 vi.mock('lucide-react', () => ({
@@ -59,30 +121,44 @@ vi.mock('lucide-react', () => ({
 			GitBranch
 		</span>
 	),
+	Skull: ({ className }: { className?: string }) => (
+		<span data-testid="skull" className={className}>
+			Skull
+		</span>
+	),
+	AlertTriangle: ({ className }: { className?: string }) => (
+		<span data-testid="alert-triangle" className={className}>
+			AlertTriangle
+		</span>
+	),
+	Play: ({ className }: { className?: string }) => (
+		<span data-testid="play" className={className}>
+			Play
+		</span>
+	),
+	XCircle: ({ className }: { className?: string }) => (
+		<span data-testid="x-circle" className={className}>
+			XCircle
+		</span>
+	),
+	Square: ({ className }: { className?: string }) => (
+		<span data-testid="square" className={className}>
+			Square
+		</span>
+	),
+	Brain: ({ className }: { className?: string }) => (
+		<span data-testid="brain" className={className}>
+			Brain
+		</span>
+	),
+	ScrollText: ({ className }: { className?: string }) => (
+		<span data-testid="scroll-text" className={className}>
+			ScrollText
+		</span>
+	),
 }));
 
 describe('RightPanel', () => {
-	const mockTheme: Theme = {
-		id: 'dracula',
-		name: 'Dracula',
-		mode: 'dark',
-		colors: {
-			bgMain: '#282a36',
-			bgSidebar: '#21222c',
-			bgActivity: '#1e1f29',
-			border: '#44475a',
-			textMain: '#f8f8f2',
-			textDim: '#6272a4',
-			accent: '#bd93f9',
-			accentDim: 'rgba(189, 147, 249, 0.2)',
-			accentText: '#bd93f9',
-			accentForeground: '#f8f8f2',
-			success: '#50fa7b',
-			warning: '#f1fa8c',
-			error: '#ff5555',
-		},
-	};
-
 	const mockSession: Session = {
 		id: 'session-1',
 		name: 'Test Session',
@@ -117,40 +193,23 @@ describe('RightPanel', () => {
 		},
 	};
 
-	const createDefaultProps = (overrides: Partial<ReturnType<typeof createDefaultProps>> = {}) => ({
-		session: mockSession,
+	// Props that remain as actual props (domain-logic handlers + theme + batch state + refs).
+	// State/store props are now read directly from Zustand stores inside RightPanel.
+	const createDefaultProps = (overrides: Record<string, any> = {}) => ({
 		theme: mockTheme,
-		shortcuts: mockShortcuts,
-		rightPanelOpen: true,
-		setRightPanelOpen: vi.fn(),
-		rightPanelWidth: 400,
-		setRightPanelWidthState: vi.fn(),
-		activeRightTab: 'files' as const,
 		setActiveRightTab: vi.fn(),
-		activeFocus: 'right',
-		setActiveFocus: vi.fn(),
-		fileTreeFilter: '',
-		setFileTreeFilter: vi.fn(),
-		fileTreeFilterOpen: false,
-		setFileTreeFilterOpen: vi.fn(),
-		filteredFileTree: [],
-		selectedFileIndex: 0,
-		setSelectedFileIndex: vi.fn(),
 		fileTreeContainerRef: { current: null } as React.RefObject<HTMLDivElement>,
 		fileTreeFilterInputRef: { current: null } as React.RefObject<HTMLInputElement>,
 		toggleFolder: vi.fn(),
+		toggleFolderRecursive: vi.fn(),
 		handleFileClick: vi.fn(),
 		expandAllFolders: vi.fn(),
 		collapseAllFolders: vi.fn(),
 		updateSessionWorkingDirectory: vi.fn(),
 		refreshFileTree: vi.fn(),
-		setSessions: vi.fn(),
+		cancelFileTreeLoad: vi.fn(),
 		onAutoRefreshChange: vi.fn(),
 		onShowFlash: vi.fn(),
-		autoRunDocumentList: ['doc1', 'doc2'],
-		autoRunDocumentTree: [],
-		autoRunContent: '',
-		autoRunIsLoadingDocuments: false,
 		onAutoRunContentChange: vi.fn(),
 		onAutoRunModeChange: vi.fn(),
 		onAutoRunStateChange: vi.fn(),
@@ -158,10 +217,10 @@ describe('RightPanel', () => {
 		onAutoRunCreateDocument: vi.fn(),
 		onAutoRunRefresh: vi.fn(),
 		onAutoRunOpenSetup: vi.fn(),
-		batchRunState: undefined,
-		currentSessionBatchState: undefined, // For session-specific progress display
+		currentSessionBatchState: undefined as BatchRunState | undefined,
 		onOpenBatchRunner: vi.fn(),
 		onStopBatchRun: vi.fn(),
+		onKillBatchRun: vi.fn(),
 		onJumpToAgentSession: vi.fn(),
 		onResumeSession: vi.fn(),
 		onOpenSessionAsTab: vi.fn(),
@@ -172,12 +231,37 @@ describe('RightPanel', () => {
 		vi.clearAllMocks();
 		vi.useFakeTimers();
 		// Reset vibes mock state
-		mockVibesEnabled = false;
+		useSettingsStore.setState({ vibesEnabled: false });
 		mockVibesLiveUpdates = new Map();
 		// Mock requestAnimationFrame
 		vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
 			cb(0);
 			return 0;
+		});
+
+		// Initialize stores to default state for each test.
+		// State props formerly passed as RightPanel props are now read from stores directly.
+		useSessionStore.setState({ sessions: [mockSession], activeSessionId: 'session-1' });
+		useUIStore.setState({ rightPanelOpen: true, activeRightTab: 'files', activeFocus: 'right' });
+		useSettingsStore.setState({
+			rightPanelWidth: 400,
+			shortcuts: mockShortcuts,
+			showHiddenFiles: false,
+			autoRunDisabled: false,
+		});
+		useFileExplorerStore.setState({
+			fileTreeFilter: '',
+			fileTreeFilterOpen: false,
+			flatFileList: [],
+			selectedFileIndex: 0,
+			lastGraphFocusFilePath: undefined,
+		});
+		useBatchStore.setState({
+			documentList: ['doc1', 'doc2'],
+			documentTree: [] as any,
+			isLoadingDocuments: false,
+			documentTaskCounts: undefined as any,
+			batchRunStates: {},
 		});
 	});
 
@@ -188,7 +272,8 @@ describe('RightPanel', () => {
 
 	describe('Render conditions', () => {
 		it('should return null when session is null', () => {
-			const props = createDefaultProps({ session: null });
+			useSessionStore.setState({ sessions: [], activeSessionId: null });
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 			expect(container.firstChild).toBeNull();
 		});
@@ -201,7 +286,8 @@ describe('RightPanel', () => {
 		});
 
 		it('should hide content when panel is closed', () => {
-			const props = createDefaultProps({ rightPanelOpen: false });
+			useUIStore.setState({ rightPanelOpen: false });
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 			const panel = container.firstChild as HTMLElement;
 			expect(panel.style.width).toBe('0px');
@@ -209,7 +295,8 @@ describe('RightPanel', () => {
 		});
 
 		it('should show content when panel is open', () => {
-			const props = createDefaultProps({ rightPanelOpen: true });
+			useUIStore.setState({ rightPanelOpen: true });
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 			const panel = container.firstChild as HTMLElement;
 			expect(panel.style.width).toBe('400px');
@@ -218,30 +305,34 @@ describe('RightPanel', () => {
 
 	describe('Panel toggle', () => {
 		it('should show PanelRightClose icon when open', () => {
-			const props = createDefaultProps({ rightPanelOpen: true });
+			useUIStore.setState({ rightPanelOpen: true });
+			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 			expect(screen.getByTestId('panel-right-close')).toBeInTheDocument();
 		});
 
 		it('should show PanelRightOpen icon when closed', () => {
-			const props = createDefaultProps({ rightPanelOpen: false });
+			useUIStore.setState({ rightPanelOpen: false });
+			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 			expect(screen.getByTestId('panel-right-open')).toBeInTheDocument();
 		});
 
 		it('should call setRightPanelOpen when toggle button clicked', () => {
-			const setRightPanelOpen = vi.fn();
-			const props = createDefaultProps({ setRightPanelOpen, rightPanelOpen: true });
+			useUIStore.setState({ rightPanelOpen: true });
+			const spy = vi.spyOn(useUIStore.getState(), 'setRightPanelOpen');
+			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
 			const toggleButton = screen.getByTitle(/collapse right panel/i);
 			fireEvent.click(toggleButton);
 
-			expect(setRightPanelOpen).toHaveBeenCalledWith(false);
+			expect(spy).toHaveBeenCalledWith(false);
 		});
 
 		it('should have correct tooltip with keyboard shortcut', () => {
-			const props = createDefaultProps({ rightPanelOpen: true });
+			useUIStore.setState({ rightPanelOpen: true });
+			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
 			const toggleButton = screen.getByTitle(/collapse right panel/i);
@@ -260,7 +351,8 @@ describe('RightPanel', () => {
 		});
 
 		it('should highlight active tab with accent color', () => {
-			const props = createDefaultProps({ activeRightTab: 'files' });
+			useUIStore.setState({ activeRightTab: 'files' });
+			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
 			const filesTab = screen.getByRole('button', { name: 'Files' });
@@ -269,7 +361,8 @@ describe('RightPanel', () => {
 		});
 
 		it('should show transparent border for inactive tabs', () => {
-			const props = createDefaultProps({ activeRightTab: 'files' });
+			useUIStore.setState({ activeRightTab: 'files' });
+			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
 			const historyTab = screen.getByRole('button', { name: 'History' });
@@ -290,39 +383,62 @@ describe('RightPanel', () => {
 			fireEvent.click(screen.getByRole('button', { name: 'Files' }));
 			expect(setActiveRightTab).toHaveBeenCalledWith('files');
 		});
+
+		it('should hide Auto Run tab when autoRunDisabled is true', () => {
+			useSettingsStore.setState({ autoRunDisabled: true });
+			const props = createDefaultProps();
+			render(<RightPanel {...props} />);
+
+			expect(screen.getByRole('button', { name: 'Files' })).toBeInTheDocument();
+			expect(screen.getByRole('button', { name: 'History' })).toBeInTheDocument();
+			expect(screen.queryByRole('button', { name: 'Auto Run' })).not.toBeInTheDocument();
+		});
 	});
 
 	describe('Tab content', () => {
 		it('should show FileExplorerPanel when files tab is active', () => {
-			const props = createDefaultProps({ activeRightTab: 'files' });
+			useUIStore.setState({ activeRightTab: 'files' });
+			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
-			expect(screen.getByTestId('file-explorer-panel')).toBeInTheDocument();
+			// FileExplorerPanel stays mounted (for auto-refresh timer) but is visible only on files tab
+			const fileExplorer = screen.getByTestId('file-explorer-panel');
+			expect(fileExplorer).toBeInTheDocument();
+			expect(fileExplorer.closest('[data-tour="files-panel"]')).not.toHaveStyle({
+				display: 'none',
+			});
 			expect(screen.queryByTestId('history-panel')).not.toBeInTheDocument();
 			expect(screen.queryByTestId('auto-run')).not.toBeInTheDocument();
 		});
 
 		it('should show HistoryPanel when history tab is active', () => {
-			const props = createDefaultProps({ activeRightTab: 'history' });
+			useUIStore.setState({ activeRightTab: 'history' });
+			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
-			expect(screen.queryByTestId('file-explorer-panel')).not.toBeInTheDocument();
+			// FileExplorerPanel stays mounted but hidden (for auto-refresh timer persistence)
+			const fileExplorer = screen.getByTestId('file-explorer-panel');
+			expect(fileExplorer.closest('[data-tour="files-panel"]')).toHaveStyle({ display: 'none' });
 			expect(screen.getByTestId('history-panel')).toBeInTheDocument();
 			expect(screen.queryByTestId('auto-run')).not.toBeInTheDocument();
 		});
 
 		it('should show AutoRun when autorun tab is active', () => {
-			const props = createDefaultProps({ activeRightTab: 'autorun' });
+			useUIStore.setState({ activeRightTab: 'autorun' });
+			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
-			expect(screen.queryByTestId('file-explorer-panel')).not.toBeInTheDocument();
+			// FileExplorerPanel stays mounted but hidden (for auto-refresh timer persistence)
+			const fileExplorer = screen.getByTestId('file-explorer-panel');
+			expect(fileExplorer.closest('[data-tour="files-panel"]')).toHaveStyle({ display: 'none' });
 			expect(screen.queryByTestId('history-panel')).not.toBeInTheDocument();
 			expect(screen.getByTestId('auto-run')).toBeInTheDocument();
 		});
 
 		it('should show VibesPanel when vibes tab is active', () => {
-			mockVibesEnabled = true;
-			const props = createDefaultProps({ activeRightTab: 'vibes' });
+			useSettingsStore.setState({ vibesEnabled: true });
+			useUIStore.setState({ activeRightTab: 'vibes' });
+			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
 			expect(screen.getByTestId('vibes-panel')).toBeInTheDocument();
@@ -331,9 +447,16 @@ describe('RightPanel', () => {
 
 	describe('VIBES annotation count badge', () => {
 		it('shows annotation count badge on VIBES tab when annotations exist', () => {
-			mockVibesEnabled = true;
+			useSettingsStore.setState({ vibesEnabled: true });
 			mockVibesLiveUpdates = new Map([
-				['session-1', { sessionId: 'session-1', annotationCount: 5, lastAnnotation: { type: 'line', timestamp: '2026-01-01T00:00:00Z' } }],
+				[
+					'session-1',
+					{
+						sessionId: 'session-1',
+						annotationCount: 5,
+						lastAnnotation: { type: 'line', timestamp: '2026-01-01T00:00:00Z' },
+					},
+				],
 			]);
 			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
@@ -344,7 +467,7 @@ describe('RightPanel', () => {
 		});
 
 		it('hides badge when count is 0', () => {
-			mockVibesEnabled = true;
+			useSettingsStore.setState({ vibesEnabled: true });
 			mockVibesLiveUpdates = new Map();
 			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
@@ -353,7 +476,7 @@ describe('RightPanel', () => {
 		});
 
 		it('hides badge when vibes is disabled', () => {
-			mockVibesEnabled = false;
+			useSettingsStore.setState({ vibesEnabled: false });
 			mockVibesLiveUpdates = new Map();
 			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
@@ -362,9 +485,16 @@ describe('RightPanel', () => {
 		});
 
 		it('displays 99+ when count exceeds 99', () => {
-			mockVibesEnabled = true;
+			useSettingsStore.setState({ vibesEnabled: true });
 			mockVibesLiveUpdates = new Map([
-				['session-1', { sessionId: 'session-1', annotationCount: 150, lastAnnotation: { type: 'line', timestamp: '2026-01-01T00:00:00Z' } }],
+				[
+					'session-1',
+					{
+						sessionId: 'session-1',
+						annotationCount: 150,
+						lastAnnotation: { type: 'line', timestamp: '2026-01-01T00:00:00Z' },
+					},
+				],
 			]);
 			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
@@ -374,10 +504,24 @@ describe('RightPanel', () => {
 		});
 
 		it('aggregates counts across multiple sessions', () => {
-			mockVibesEnabled = true;
+			useSettingsStore.setState({ vibesEnabled: true });
 			mockVibesLiveUpdates = new Map([
-				['session-1', { sessionId: 'session-1', annotationCount: 3, lastAnnotation: { type: 'line', timestamp: '2026-01-01T00:00:00Z' } }],
-				['session-2', { sessionId: 'session-2', annotationCount: 7, lastAnnotation: { type: 'function', timestamp: '2026-01-01T00:00:00Z' } }],
+				[
+					'session-1',
+					{
+						sessionId: 'session-1',
+						annotationCount: 3,
+						lastAnnotation: { type: 'line', timestamp: '2026-01-01T00:00:00Z' },
+					},
+				],
+				[
+					'session-2',
+					{
+						sessionId: 'session-2',
+						annotationCount: 7,
+						lastAnnotation: { type: 'function', timestamp: '2026-01-01T00:00:00Z' },
+					},
+				],
 			]);
 			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
@@ -387,9 +531,16 @@ describe('RightPanel', () => {
 		});
 
 		it('badge has green background from theme success color', () => {
-			mockVibesEnabled = true;
+			useSettingsStore.setState({ vibesEnabled: true });
 			mockVibesLiveUpdates = new Map([
-				['session-1', { sessionId: 'session-1', annotationCount: 1, lastAnnotation: { type: 'line', timestamp: '2026-01-01T00:00:00Z' } }],
+				[
+					'session-1',
+					{
+						sessionId: 'session-1',
+						annotationCount: 1,
+						lastAnnotation: { type: 'line', timestamp: '2026-01-01T00:00:00Z' },
+					},
+				],
 			]);
 			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
@@ -403,34 +554,36 @@ describe('RightPanel', () => {
 
 	describe('Focus management', () => {
 		it('should call setActiveFocus when panel is clicked', () => {
-			const setActiveFocus = vi.fn();
-			const props = createDefaultProps({ setActiveFocus });
+			const spy = vi.spyOn(useUIStore.getState(), 'setActiveFocus');
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			fireEvent.click(container.firstChild as Element);
-			expect(setActiveFocus).toHaveBeenCalledWith('right');
+			expect(spy).toHaveBeenCalledWith('right');
 		});
 
 		it('should call setActiveFocus when panel is focused', () => {
-			const setActiveFocus = vi.fn();
-			const props = createDefaultProps({ setActiveFocus });
+			const spy = vi.spyOn(useUIStore.getState(), 'setActiveFocus');
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			fireEvent.focus(container.firstChild as Element);
-			expect(setActiveFocus).toHaveBeenCalledWith('right');
+			expect(spy).toHaveBeenCalledWith('right');
 		});
 
 		it('should show focus ring when activeFocus is right', () => {
-			const props = createDefaultProps({ activeFocus: 'right' });
+			useUIStore.setState({ activeFocus: 'right' });
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			const panel = container.firstChild as HTMLElement;
-			expect(panel.classList.contains('ring-1')).toBe(true);
-			expect(panel.classList.contains('ring-inset')).toBe(true);
+			// Focus ring is applied via boxShadow inline style instead of ring-1/ring-inset classes
+			expect(panel.style.boxShadow).toBeTruthy();
 		});
 
 		it('should not show focus ring when activeFocus is not right', () => {
-			const props = createDefaultProps({ activeFocus: 'main' });
+			useUIStore.setState({ activeFocus: 'main' });
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			const panel = container.firstChild as HTMLElement;
@@ -440,7 +593,8 @@ describe('RightPanel', () => {
 
 	describe('Resize handle', () => {
 		it('should render resize handle when panel is open', () => {
-			const props = createDefaultProps({ rightPanelOpen: true });
+			useUIStore.setState({ rightPanelOpen: true });
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			const resizeHandle = container.querySelector('.cursor-col-resize');
@@ -448,7 +602,8 @@ describe('RightPanel', () => {
 		});
 
 		it('should not render resize handle when panel is closed', () => {
-			const props = createDefaultProps({ rightPanelOpen: false });
+			useUIStore.setState({ rightPanelOpen: false });
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			const resizeHandle = container.querySelector('.cursor-col-resize');
@@ -456,63 +611,65 @@ describe('RightPanel', () => {
 		});
 
 		it('should handle mouse down on resize handle', () => {
-			const setRightPanelWidthState = vi.fn();
-			const props = createDefaultProps({ setRightPanelWidthState, rightPanelWidth: 400 });
+			useSettingsStore.setState({ rightPanelWidth: 400 });
+			const spy = vi.spyOn(useSettingsStore.getState(), 'setRightPanelWidth');
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			const resizeHandle = container.querySelector('.cursor-col-resize') as HTMLElement;
 
-			// Start resize
-			fireEvent.mouseDown(resizeHandle, { clientX: 500 });
+			// Start resize (pointer captured on the handle; move / up route to it)
+			fireEvent.pointerDown(resizeHandle, { clientX: 500, pointerId: 1 });
 
-			// Simulate mouse move (direct DOM update for performance, no state call yet)
-			fireEvent.mouseMove(document, { clientX: 450 }); // 50px to the left (makes panel wider since reversed)
+			// Simulate pointer move (direct DOM update for performance, no state call yet)
+			fireEvent.pointerMove(resizeHandle, { clientX: 450 }); // 50px to the left (makes panel wider since reversed)
 
-			// State is only updated on mouseUp for performance (avoids ~60 re-renders/sec)
-			expect(setRightPanelWidthState).not.toHaveBeenCalled();
+			// State is only updated on pointer up for performance (avoids ~60 re-renders/sec)
+			expect(spy).not.toHaveBeenCalled();
 
 			// End resize - state is updated
-			fireEvent.mouseUp(document);
-			expect(setRightPanelWidthState).toHaveBeenCalled();
+			fireEvent.pointerUp(resizeHandle);
+			expect(spy).toHaveBeenCalled();
 		});
 
 		it('should respect min/max width constraints during resize', () => {
-			const setRightPanelWidthState = vi.fn();
-			const props = createDefaultProps({ setRightPanelWidthState, rightPanelWidth: 400 });
+			useSettingsStore.setState({ rightPanelWidth: 400 });
+			const spy = vi.spyOn(useSettingsStore.getState(), 'setRightPanelWidth');
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			const resizeHandle = container.querySelector('.cursor-col-resize') as HTMLElement;
 
 			// Start resize
-			fireEvent.mouseDown(resizeHandle, { clientX: 500 });
+			fireEvent.pointerDown(resizeHandle, { clientX: 500, pointerId: 1 });
 
 			// Try to make it very wide (delta = 500 - (-500) = 1000)
-			fireEvent.mouseMove(document, { clientX: -500 });
+			fireEvent.pointerMove(resizeHandle, { clientX: -500 });
 
-			// End resize - state is updated on mouseUp
-			fireEvent.mouseUp(document);
+			// End resize - state is updated on pointer up
+			fireEvent.pointerUp(resizeHandle);
 
 			// Should be clamped to max 800
-			const calls = setRightPanelWidthState.mock.calls;
+			const calls = spy.mock.calls;
 			const lastCall = calls[calls.length - 1][0];
 			expect(lastCall).toBeLessThanOrEqual(800);
 		});
 
 		it('should save width on mouse up', () => {
-			const setRightPanelWidthState = vi.fn();
-			const props = createDefaultProps({ setRightPanelWidthState, rightPanelWidth: 400 });
+			useSettingsStore.setState({ rightPanelWidth: 400 });
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			const resizeHandle = container.querySelector('.cursor-col-resize') as HTMLElement;
 
 			// Start resize
-			fireEvent.mouseDown(resizeHandle, { clientX: 500 });
+			fireEvent.pointerDown(resizeHandle, { clientX: 500, pointerId: 1 });
 
 			// Move
-			fireEvent.mouseMove(document, { clientX: 450 });
+			fireEvent.pointerMove(resizeHandle, { clientX: 450 });
 
 			// End resize
-			fireEvent.mouseUp(document);
+			fireEvent.pointerUp(resizeHandle);
 
 			expect(window.maestro.settings.set).toHaveBeenCalledWith(
 				'rightPanelWidth',
@@ -523,8 +680,9 @@ describe('RightPanel', () => {
 
 	describe('Scroll position tracking', () => {
 		it('should update session scroll position on scroll for files tab', () => {
-			const setSessions = vi.fn();
-			const props = createDefaultProps({ activeRightTab: 'files', setSessions });
+			useUIStore.setState({ activeRightTab: 'files' });
+			const spy = vi.spyOn(useSessionStore.getState(), 'setSessions');
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			const scrollContainer = container.querySelector('.overflow-y-auto') as HTMLElement;
@@ -534,12 +692,13 @@ describe('RightPanel', () => {
 
 			fireEvent.scroll(scrollContainer);
 
-			expect(setSessions).toHaveBeenCalled();
+			expect(spy).toHaveBeenCalled();
 		});
 
 		it('should not update scroll position for non-files tabs', () => {
-			const setSessions = vi.fn();
-			const props = createDefaultProps({ activeRightTab: 'history', setSessions });
+			useUIStore.setState({ activeRightTab: 'history' });
+			const spy = vi.spyOn(useSessionStore.getState(), 'setSessions');
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			const scrollContainer = container.querySelector('.overflow-y-auto') as HTMLElement;
@@ -547,11 +706,8 @@ describe('RightPanel', () => {
 
 			fireEvent.scroll(scrollContainer);
 
-			// setSessions may be called for other reasons, but not for scroll tracking
-			// The implementation checks activeRightTab === 'files'
-			const calls = setSessions.mock.calls;
-			// Should not be called for scroll tracking
-			expect(calls.length).toBe(0);
+			// setSessions should not be called for scroll tracking on non-files tabs
+			expect(spy).not.toHaveBeenCalled();
 		});
 	});
 
@@ -605,7 +761,7 @@ describe('RightPanel', () => {
 			expect(screen.getByText('Auto Run Active')).toBeInTheDocument();
 		});
 
-		it('should show "Stopping..." when isStopping is true', () => {
+		it('should show "Stopping" when isStopping is true', () => {
 			const currentSessionBatchState: BatchRunState = {
 				isRunning: true,
 				isStopping: true,
@@ -623,8 +779,206 @@ describe('RightPanel', () => {
 			const props = createDefaultProps({ currentSessionBatchState });
 			render(<RightPanel {...props} />);
 
-			expect(screen.getByText('Stopping...')).toBeInTheDocument();
+			expect(screen.getByText('Stopping')).toBeInTheDocument();
 			expect(screen.getByText(/waiting for current task/i)).toBeInTheDocument();
+		});
+
+		it('should show Kill pill when isStopping is true', () => {
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: true,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 5,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 5,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 5,
+				loopEnabled: false,
+				loopIteration: 0,
+			};
+			const props = createDefaultProps({ currentSessionBatchState });
+			render(<RightPanel {...props} />);
+
+			const killButton = screen.getByTitle('Force kill the running process');
+			expect(killButton).toBeInTheDocument();
+			expect(killButton.textContent).toContain('Kill');
+		});
+
+		it('should not show Kill pill when not stopping', () => {
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: false,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 5,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 5,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 5,
+				loopEnabled: false,
+				loopIteration: 0,
+			};
+			const props = createDefaultProps({ currentSessionBatchState });
+			render(<RightPanel {...props} />);
+
+			expect(screen.queryByTitle('Force kill the running process')).not.toBeInTheDocument();
+		});
+
+		it('should show Stop button when running and not stopping or error-paused', () => {
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: false,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 5,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 5,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 5,
+				loopEnabled: false,
+				loopIteration: 0,
+			};
+			const props = createDefaultProps({ currentSessionBatchState });
+			render(<RightPanel {...props} />);
+
+			expect(
+				screen.getByTitle('Stop auto-run after the current task finishes')
+			).toBeInTheDocument();
+		});
+
+		it('should hide Stop button when isStopping is true', () => {
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: true,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 5,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 5,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 5,
+				loopEnabled: false,
+				loopIteration: 0,
+			};
+			const props = createDefaultProps({ currentSessionBatchState });
+			render(<RightPanel {...props} />);
+
+			expect(
+				screen.queryByTitle('Stop auto-run after the current task finishes')
+			).not.toBeInTheDocument();
+		});
+
+		it('should call onStopBatchRun with session id when Stop button is clicked', () => {
+			const onStopBatchRun = vi.fn();
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: false,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 5,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 5,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 5,
+				loopEnabled: false,
+				loopIteration: 0,
+			};
+			const props = createDefaultProps({ currentSessionBatchState, onStopBatchRun });
+			render(<RightPanel {...props} />);
+
+			fireEvent.click(screen.getByTitle('Stop auto-run after the current task finishes'));
+			expect(onStopBatchRun).toHaveBeenCalledWith('session-1');
+		});
+
+		it('should show confirmation modal when Kill pill is clicked', () => {
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: true,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 5,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 5,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 5,
+				loopEnabled: false,
+				loopIteration: 0,
+			};
+			const props = createDefaultProps({ currentSessionBatchState });
+			render(<RightPanel {...props} />);
+
+			// Click the Kill pill
+			fireEvent.click(screen.getByTitle('Force kill the running process'));
+
+			// Confirmation modal should appear
+			expect(screen.getByTestId('confirm-modal')).toBeInTheDocument();
+			expect(screen.getByTestId('confirm-modal-title')).toHaveTextContent('Force Kill Process');
+		});
+
+		it('should call onKillBatchRun when kill is confirmed', () => {
+			const onKillBatchRun = vi.fn();
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: true,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 5,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 5,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 5,
+				loopEnabled: false,
+				loopIteration: 0,
+			};
+			const props = createDefaultProps({ currentSessionBatchState, onKillBatchRun });
+			render(<RightPanel {...props} />);
+
+			// Click Kill pill to open modal
+			fireEvent.click(screen.getByTitle('Force kill the running process'));
+
+			// Click confirm button in modal
+			fireEvent.click(screen.getByTestId('confirm-modal-confirm'));
+
+			expect(onKillBatchRun).toHaveBeenCalledWith('session-1');
+		});
+
+		it('should dismiss modal without killing when cancel is clicked', () => {
+			const onKillBatchRun = vi.fn();
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: true,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 5,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 5,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 5,
+				loopEnabled: false,
+				loopIteration: 0,
+			};
+			const props = createDefaultProps({ currentSessionBatchState, onKillBatchRun });
+			render(<RightPanel {...props} />);
+
+			// Click Kill pill to open modal
+			fireEvent.click(screen.getByTitle('Force kill the running process'));
+			expect(screen.getByTestId('confirm-modal')).toBeInTheDocument();
+
+			// Click cancel
+			fireEvent.click(screen.getByTestId('confirm-modal-cancel'));
+
+			// Modal should be dismissed, kill should not be called
+			expect(screen.queryByTestId('confirm-modal')).not.toBeInTheDocument();
+			expect(onKillBatchRun).not.toHaveBeenCalled();
 		});
 
 		it('should show loop iteration indicator when loopEnabled', () => {
@@ -646,13 +1000,12 @@ describe('RightPanel', () => {
 			const props = createDefaultProps({ currentSessionBatchState });
 			render(<RightPanel {...props} />);
 
-			// There are two indicators with the same text - one in the header and one at the bottom
+			// There may be multiple elements matching the text (header + bottom wrapper)
 			// Text is split across multiple elements, so use a function matcher
-			expect(
-				screen.getByText((content, element) => {
-					return element?.textContent === 'Loop 3 of 5';
-				})
-			).toBeInTheDocument();
+			const matches = screen.getAllByText((_content, element) => {
+				return element?.tagName === 'SPAN' && element?.textContent === 'Loop 3 of 5';
+			});
+			expect(matches.length).toBeGreaterThan(0);
 		});
 
 		it('should show infinity symbol when maxLoops is undefined', () => {
@@ -785,6 +1138,302 @@ describe('RightPanel', () => {
 
 			expect(screen.getByTestId('loader')).toBeInTheDocument();
 		});
+
+		it('should show "Auto Run Paused" when errorPaused is true', () => {
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: false,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 9,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 9,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 9,
+				loopEnabled: false,
+				loopIteration: 0,
+				errorPaused: true,
+				error: {
+					type: 'token_exhaustion',
+					message: 'Prompt is too long',
+					recoverable: true,
+					timestamp: Date.now(),
+					agentId: 'test',
+				},
+			};
+			useBatchStore.setState({
+				batchRunStates: { 'session-1': currentSessionBatchState },
+			});
+			const props = createDefaultProps({ currentSessionBatchState });
+			render(<RightPanel {...props} />);
+
+			expect(screen.getByText('Auto Run Paused')).toBeInTheDocument();
+			expect(screen.queryByText('Auto Run Active')).not.toBeInTheDocument();
+			expect(screen.getByTestId('alert-triangle')).toBeInTheDocument();
+			expect(screen.queryByTestId('loader')).not.toBeInTheDocument();
+		});
+
+		it('should show error message in status text when paused', () => {
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: false,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 9,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 9,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 9,
+				loopEnabled: false,
+				loopIteration: 0,
+				errorPaused: true,
+				error: {
+					type: 'token_exhaustion',
+					message: 'Prompt is too long',
+					recoverable: true,
+					timestamp: Date.now(),
+					agentId: 'test',
+				},
+			};
+			useBatchStore.setState({
+				batchRunStates: { 'session-1': currentSessionBatchState },
+			});
+			const props = createDefaultProps({ currentSessionBatchState });
+			render(<RightPanel {...props} />);
+
+			expect(screen.getByText('Prompt is too long')).toBeInTheDocument();
+			expect(screen.queryByText(/tasks completed/)).not.toBeInTheDocument();
+		});
+
+		it('should switch to Auto Run tab when paused badge is clicked', () => {
+			const setActiveRightTab = vi.fn();
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: false,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 9,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 9,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 9,
+				loopEnabled: false,
+				loopIteration: 0,
+				errorPaused: true,
+				error: {
+					type: 'token_exhaustion',
+					message: 'Prompt is too long',
+					recoverable: true,
+					timestamp: Date.now(),
+					agentId: 'test',
+				},
+			};
+			useBatchStore.setState({
+				batchRunStates: { 'session-1': currentSessionBatchState },
+			});
+			const props = createDefaultProps({ currentSessionBatchState, setActiveRightTab });
+			render(<RightPanel {...props} />);
+
+			fireEvent.click(screen.getByText('Auto Run Paused'));
+			expect(setActiveRightTab).toHaveBeenCalledWith('autorun');
+		});
+
+		it('should show Resume and Abort buttons when error-paused with recoverable error', () => {
+			const onResumeAfterError = vi.fn();
+			const onAbortBatchOnError = vi.fn();
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: false,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 5,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 5,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 5,
+				loopEnabled: false,
+				loopIteration: 0,
+				errorPaused: true,
+				error: {
+					type: 'auth_expired',
+					message: 'Authentication failed. Please run "claude login" to re-authenticate.',
+					recoverable: true,
+					timestamp: Date.now(),
+					agentId: 'test',
+				},
+			};
+			useBatchStore.setState({
+				batchRunStates: { 'session-1': currentSessionBatchState },
+			});
+			const props = createDefaultProps({
+				currentSessionBatchState,
+				onResumeAfterError,
+				onAbortBatchOnError,
+			});
+			render(<RightPanel {...props} />);
+
+			const resumeButton = screen.getByTitle('Resume Auto Run after re-authenticating');
+			expect(resumeButton).toBeInTheDocument();
+			fireEvent.click(resumeButton);
+			expect(onResumeAfterError).toHaveBeenCalledTimes(1);
+
+			const abortButton = screen.getByTitle('Stop Auto Run completely');
+			expect(abortButton).toBeInTheDocument();
+			fireEvent.click(abortButton);
+			expect(onAbortBatchOnError).toHaveBeenCalledTimes(1);
+		});
+
+		it('should hide Resume button when error is not recoverable', () => {
+			const onResumeAfterError = vi.fn();
+			const onAbortBatchOnError = vi.fn();
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: false,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 5,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 5,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 5,
+				loopEnabled: false,
+				loopIteration: 0,
+				errorPaused: true,
+				error: {
+					type: 'agent_crashed',
+					message: 'Agent process exited unexpectedly',
+					recoverable: false,
+					timestamp: Date.now(),
+					agentId: 'test',
+				},
+			};
+			useBatchStore.setState({
+				batchRunStates: { 'session-1': currentSessionBatchState },
+			});
+			const props = createDefaultProps({
+				currentSessionBatchState,
+				onResumeAfterError,
+				onAbortBatchOnError,
+			});
+			render(<RightPanel {...props} />);
+
+			expect(
+				screen.queryByTitle('Resume Auto Run after re-authenticating')
+			).not.toBeInTheDocument();
+			expect(screen.getByTitle('Stop Auto Run completely')).toBeInTheDocument();
+		});
+
+		it('should not show Resume/Abort buttons when not error-paused', () => {
+			const onResumeAfterError = vi.fn();
+			const onAbortBatchOnError = vi.fn();
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: false,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 5,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 5,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 5,
+				loopEnabled: false,
+				loopIteration: 0,
+			};
+			useBatchStore.setState({
+				batchRunStates: { 'session-1': currentSessionBatchState },
+			});
+			const props = createDefaultProps({
+				currentSessionBatchState,
+				onResumeAfterError,
+				onAbortBatchOnError,
+			});
+			render(<RightPanel {...props} />);
+
+			expect(
+				screen.queryByTitle('Resume Auto Run after re-authenticating')
+			).not.toBeInTheDocument();
+			expect(screen.queryByTitle('Stop Auto Run completely')).not.toBeInTheDocument();
+		});
+
+		it('should show "View history" link when on autorun tab during batch run', () => {
+			useUIStore.setState({ activeRightTab: 'autorun' });
+			const setActiveRightTab = vi.fn();
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: false,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 5,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 5,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 5,
+				loopEnabled: false,
+				loopIteration: 0,
+			};
+			const props = createDefaultProps({ currentSessionBatchState, setActiveRightTab });
+			render(<RightPanel {...props} />);
+
+			const link = screen.getByText('View History');
+			expect(link).toBeInTheDocument();
+			fireEvent.click(link);
+			expect(setActiveRightTab).toHaveBeenCalledWith('history');
+		});
+
+		it('should show "View history" link when on files tab during batch run', () => {
+			useUIStore.setState({ activeRightTab: 'files' });
+			const setActiveRightTab = vi.fn();
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: false,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 5,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 5,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 5,
+				loopEnabled: false,
+				loopIteration: 0,
+			};
+			const props = createDefaultProps({ currentSessionBatchState, setActiveRightTab });
+			render(<RightPanel {...props} />);
+
+			const link = screen.getByText('View History');
+			expect(link).toBeInTheDocument();
+			fireEvent.click(link);
+			expect(setActiveRightTab).toHaveBeenCalledWith('history');
+		});
+
+		it('should not show "View history" link when on history tab during batch run', () => {
+			useUIStore.setState({ activeRightTab: 'history' });
+			const currentSessionBatchState: BatchRunState = {
+				isRunning: true,
+				isStopping: false,
+				documents: ['doc1'],
+				currentDocumentIndex: 0,
+				totalTasks: 10,
+				completedTasks: 5,
+				currentDocTasksTotal: 10,
+				currentDocTasksCompleted: 5,
+				totalTasksAcrossAllDocs: 10,
+				completedTasksAcrossAllDocs: 5,
+				loopEnabled: false,
+				loopIteration: 0,
+			};
+			const props = createDefaultProps({ currentSessionBatchState });
+			render(<RightPanel {...props} />);
+
+			expect(screen.queryByText('View History')).not.toBeInTheDocument();
+		});
 	});
 
 	describe('Imperative handle', () => {
@@ -825,11 +1474,8 @@ describe('RightPanel', () => {
 
 	describe('Focus effects', () => {
 		it('should not focus history panel when tab is not history', () => {
-			const props = createDefaultProps({
-				activeRightTab: 'files',
-				rightPanelOpen: true,
-				activeFocus: 'right',
-			});
+			useUIStore.setState({ activeRightTab: 'files', rightPanelOpen: true, activeFocus: 'right' });
+			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
 			// requestAnimationFrame should not trigger focus for non-history tab
@@ -839,11 +1485,8 @@ describe('RightPanel', () => {
 		});
 
 		it('should not focus autorun panel when tab is not autorun', () => {
-			const props = createDefaultProps({
-				activeRightTab: 'files',
-				rightPanelOpen: true,
-				activeFocus: 'right',
-			});
+			useUIStore.setState({ activeRightTab: 'files', rightPanelOpen: true, activeFocus: 'right' });
+			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
 			expect(screen.queryByTestId('auto-run')).not.toBeInTheDocument();
@@ -852,18 +1495,19 @@ describe('RightPanel', () => {
 
 	describe('Content container click behavior', () => {
 		it('should set active focus when content area is clicked', () => {
-			const setActiveFocus = vi.fn();
-			const props = createDefaultProps({ setActiveFocus });
+			const spy = vi.spyOn(useUIStore.getState(), 'setActiveFocus');
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			const contentArea = container.querySelector('.overflow-y-auto') as HTMLElement;
 			fireEvent.click(contentArea);
 
-			expect(setActiveFocus).toHaveBeenCalledWith('right');
+			expect(spy).toHaveBeenCalledWith('right');
 		});
 
 		it('should have content container with tabIndex -1 for programmatic focus', () => {
-			const props = createDefaultProps({ activeRightTab: 'files' });
+			useUIStore.setState({ activeRightTab: 'files' });
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			const contentArea = container.querySelector('.overflow-y-auto') as HTMLElement;
@@ -871,14 +1515,16 @@ describe('RightPanel', () => {
 		});
 
 		it('should render files content when files tab is active', () => {
-			const props = createDefaultProps({ activeRightTab: 'files' });
+			useUIStore.setState({ activeRightTab: 'files' });
+			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
 			expect(screen.getByTestId('file-explorer-panel')).toBeInTheDocument();
 		});
 
 		it('should render autorun content when autorun tab is active', () => {
-			const props = createDefaultProps({ activeRightTab: 'autorun' });
+			useUIStore.setState({ activeRightTab: 'autorun' });
+			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
 			expect(screen.getByTestId('auto-run')).toBeInTheDocument();
@@ -905,16 +1551,18 @@ describe('RightPanel', () => {
 		});
 
 		it('should apply theme accent color to focus ring', () => {
-			const props = createDefaultProps({ activeFocus: 'right' });
+			useUIStore.setState({ activeFocus: 'right' });
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			const panel = container.firstChild as HTMLElement;
-			// --tw-ring-color is a CSS custom property for Tailwind ring utility
-			expect(panel.style.getPropertyValue('--tw-ring-color')).toBe('#bd93f9');
+			// Focus ring is applied via boxShadow using the theme accent color
+			expect(panel.style.boxShadow).toContain('#bd93f9');
 		});
 
 		it('should apply correct width based on rightPanelWidth', () => {
-			const props = createDefaultProps({ rightPanelWidth: 500 });
+			useSettingsStore.setState({ rightPanelWidth: 500 });
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			const panel = container.firstChild as HTMLElement;
@@ -933,26 +1581,29 @@ describe('RightPanel', () => {
 				autoRunEditScrollPos: undefined,
 				autoRunPreviewScrollPos: undefined,
 			};
-			const props = createDefaultProps({
-				session: sessionWithoutOptional,
-				activeRightTab: 'autorun',
+			useSessionStore.setState({
+				sessions: [sessionWithoutOptional],
+				activeSessionId: 'session-1',
 			});
+			useUIStore.setState({ activeRightTab: 'autorun' });
+			const props = createDefaultProps();
 
 			expect(() => render(<RightPanel {...props} />)).not.toThrow();
 		});
 
 		it('should handle empty autoRunDocumentList', () => {
-			const props = createDefaultProps({ autoRunDocumentList: [], activeRightTab: 'autorun' });
+			useBatchStore.setState({ documentList: [] });
+			useUIStore.setState({ activeRightTab: 'autorun' });
+			const props = createDefaultProps();
 
 			expect(() => render(<RightPanel {...props} />)).not.toThrow();
 			expect(screen.getByTestId('auto-run')).toBeInTheDocument();
 		});
 
 		it('should handle undefined autoRunDocumentTree', () => {
-			const props = createDefaultProps({
-				autoRunDocumentTree: undefined,
-				activeRightTab: 'autorun',
-			});
+			useBatchStore.setState({ documentTree: undefined as any });
+			useUIStore.setState({ activeRightTab: 'autorun' });
+			const props = createDefaultProps();
 
 			expect(() => render(<RightPanel {...props} />)).not.toThrow();
 		});
@@ -1079,12 +1730,15 @@ describe('RightPanel', () => {
 				loopEnabled: false,
 				loopIteration: 0,
 			};
+			useBatchStore.setState({
+				batchRunStates: { 'session-1': currentSessionBatchState },
+			});
 			const props = createDefaultProps({ currentSessionBatchState });
 			const { container } = render(<RightPanel {...props} />);
 
 			// Find the progress bar inner div with warning color (browser normalizes hex to rgb)
 			const progressInner = container.querySelector('.h-1\\.5 > div') as HTMLElement;
-			expect(progressInner?.style.backgroundColor).toBe('rgb(241, 250, 140)');
+			expect(progressInner?.style.backgroundColor).toBe('rgb(255, 184, 108)');
 		});
 	});
 
@@ -1106,6 +1760,8 @@ describe('RightPanel', () => {
 		});
 
 		it('should have proper button roles for tabs', () => {
+			// VIBES tab only renders while vibesEnabled is on
+			useSettingsStore.setState({ vibesEnabled: true });
 			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 
@@ -1277,6 +1933,8 @@ describe('RightPanel', () => {
 
 	describe('Scroll position tracking with callback execution', () => {
 		it('should execute setSessions callback to update fileExplorerScrollPos', () => {
+			useUIStore.setState({ activeRightTab: 'files' });
+
 			const setSessions = vi.fn((callback) => {
 				// Execute the callback with a mock sessions array
 				if (typeof callback === 'function') {
@@ -1290,7 +1948,10 @@ describe('RightPanel', () => {
 					expect(result[1].fileExplorerScrollPos).toBeUndefined();
 				}
 			});
-			const props = createDefaultProps({ activeRightTab: 'files', setSessions });
+			// Replace the store's setSessions with our mock so the component calls it
+			vi.spyOn(useSessionStore.getState(), 'setSessions').mockImplementation(setSessions as any);
+
+			const props = createDefaultProps();
 			const { container } = render(<RightPanel {...props} />);
 
 			const scrollContainer = container.querySelector('.overflow-y-auto') as HTMLElement;
@@ -1299,6 +1960,47 @@ describe('RightPanel', () => {
 			fireEvent.scroll(scrollContainer);
 
 			expect(setSessions).toHaveBeenCalled();
+		});
+	});
+
+	describe('Multi-window scoping', () => {
+		afterEach(() => {
+			setWindowUrl('/');
+		});
+
+		const renderInWindow = (props: ReturnType<typeof createDefaultProps>) =>
+			render(
+				<WindowProvider>
+					<RightPanel {...props} />
+				</WindowProvider>
+			);
+
+		it('renders null when the active agent is owned by another window', () => {
+			// Secondary window (?windowId set) that owns no agents - the store's active
+			// agent (session-1) lives in the primary, so this window must show nothing
+			// rather than a stale Files/History/Auto Run view.
+			setWindowUrl('/?windowId=win-2');
+			vi.mocked(window.maestro.windows.getState).mockResolvedValue(
+				makeWindowState({ id: 'win-2', sessionIds: [], activeSessionId: null })
+			);
+
+			const { container } = renderInWindow(createDefaultProps());
+
+			expect(container.firstChild).toBeNull();
+		});
+
+		it('renders normally in the primary window (catch-all owner)', () => {
+			// Primary window (no ?windowId) is the catch-all owner of every agent no
+			// secondary has claimed, so it surfaces session-1 exactly as today.
+			setWindowUrl('/');
+			vi.mocked(window.maestro.windows.getState).mockResolvedValue(
+				makeWindowState({ id: 'primary-1', sessionIds: [], activeSessionId: null })
+			);
+			vi.mocked(window.maestro.windows.list).mockResolvedValue([]);
+
+			renderInWindow(createDefaultProps());
+
+			expect(screen.getByTitle(/collapse right panel/i)).toBeInTheDocument();
 		});
 	});
 });

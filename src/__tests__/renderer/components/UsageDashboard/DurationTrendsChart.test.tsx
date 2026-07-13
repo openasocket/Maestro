@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { DurationTrendsChart } from '../../../../renderer/components/UsageDashboard/DurationTrendsChart';
-import type { StatsAggregation } from '../../../../renderer/hooks/useStats';
+import type { StatsAggregation } from '../../../../renderer/hooks/stats/useStats';
 import { THEMES } from '../../../../shared/themes';
 
 // Test theme
@@ -311,7 +311,8 @@ describe('DurationTrendsChart', () => {
 				fireEvent.mouseEnter(circles[0]);
 
 				// Tooltip should appear with date
-				const tooltip = container.querySelector('.fixed.z-50');
+				// Tooltip portals to document.body and uses inline zIndex (no .z-50 class).
+				const tooltip = document.body.querySelector('div.fixed.shadow-lg');
 				expect(tooltip).toBeInTheDocument();
 			}
 		});
@@ -327,7 +328,8 @@ describe('DurationTrendsChart', () => {
 				fireEvent.mouseEnter(circles[0]);
 				fireEvent.mouseLeave(circles[0]);
 
-				const tooltip = container.querySelector('.fixed.z-50');
+				// Tooltip portals to document.body and uses inline zIndex (no .z-50 class).
+				const tooltip = document.body.querySelector('div.fixed.shadow-lg');
 				expect(tooltip).not.toBeInTheDocument();
 			}
 		});

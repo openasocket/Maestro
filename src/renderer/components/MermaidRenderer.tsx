@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import mermaid from 'mermaid';
 import DOMPurify from 'dompurify';
 import type { Theme } from '../types';
+import { logger } from '../utils/logger';
 
 // Track theme for mermaid initialization
 let lastThemeId: string | null = null;
@@ -268,6 +269,7 @@ const initMermaid = (theme: Theme) => {
 		theme: 'base', // Use 'base' theme to fully customize with themeVariables
 		themeVariables,
 		securityLevel: 'strict',
+		suppressErrorRendering: true,
 		fontFamily:
 			'ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace',
 		flowchart: {
@@ -340,11 +342,22 @@ export function MermaidRenderer({ chart, theme }: MermaidRendererProps) {
 			}
 
 			try {
+				// Pre-validate chart syntax before render to prevent DOM pollution.
+				const trimmed = chart.trim();
+				try {
+					await mermaid.parse(trimmed);
+				} catch (parseErr) {
+					if (cancelled) return;
+					const detail = parseErr instanceof Error ? parseErr.message : 'Invalid mermaid syntax';
+					setError(detail);
+					return;
+				}
+
 				// Generate a unique ID for this diagram
 				const id = `mermaid-${Math.random().toString(36).substring(2, 11)}`;
 
 				// Render the diagram - mermaid.render returns { svg: string }
-				const result = await mermaid.render(id, chart.trim());
+				const result = await mermaid.render(id, trimmed);
 
 				if (cancelled) return;
 
@@ -362,8 +375,11 @@ export function MermaidRenderer({ chart, theme }: MermaidRendererProps) {
 				}
 			} catch (err) {
 				if (cancelled) return;
-				console.error('Mermaid rendering error:', err);
+				logger.error('Mermaid rendering error:', undefined, err);
 				setError(err instanceof Error ? err.message : 'Failed to render diagram');
+
+				// Clean up any orphaned mermaid error elements injected into the DOM
+				document.querySelectorAll('[id^="dmermaid-"]').forEach((el) => el.remove());
 			} finally {
 				if (!cancelled) {
 					setIsLoading(false);
@@ -383,10 +399,14 @@ export function MermaidRenderer({ chart, theme }: MermaidRendererProps) {
 	// We depend on isLoading to ensure we re-run once the container div is actually rendered
 	useLayoutEffect(() => {
 		if (containerRef.current && svgContent) {
-			// Parse sanitized SVG and append to container
-			const parser = new DOMParser();
-			const doc = parser.parseFromString(svgContent, 'image/svg+xml');
-			const svgElement = doc.documentElement;
+			// Parse the sanitized SVG as HTML rather than image/svg+xml. Mermaid's
+			// output targets the browser's lenient HTML parser: some diagrams (e.g.
+			// C4) emit <image xlink:href> without declaring the xmlns:xlink
+			// namespace on the root <svg>, which a strict XML parse rejects,
+			// leaving the diagram blank. The DOMPurify pass above is the security
+			// boundary; parsing here only needs to reconstruct the DOM.
+			const doc = new DOMParser().parseFromString(svgContent, 'text/html');
+			const svgElement = doc.body.querySelector('svg');
 
 			// Clear existing content
 			while (containerRef.current.firstChild) {
@@ -394,7 +414,7 @@ export function MermaidRenderer({ chart, theme }: MermaidRendererProps) {
 			}
 
 			// Append new SVG
-			if (svgElement && svgElement.tagName === 'svg') {
+			if (svgElement) {
 				containerRef.current.appendChild(document.importNode(svgElement, true));
 			}
 		}

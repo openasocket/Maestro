@@ -1,41 +1,29 @@
-import React, { useEffect, useState } from 'react';
+import React, { memo, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Theme } from '../types';
-import { useToast, Toast as ToastType } from '../contexts/ToastContext';
+import { useNotificationStore, type Toast as ToastType } from '../stores/notificationStore';
+import { useSettingsStore } from '../stores/settingsStore';
+import { openUrl } from '../utils/openUrl';
+import { formatDurationParts as formatDuration } from '../../shared/formatters';
+import { getToastWidthDimensions } from '../../shared/toastWidth';
 
 interface ToastContainerProps {
 	theme: Theme;
 	onSessionClick?: (sessionId: string, tabId?: string) => void;
 }
 
-function formatDuration(ms: number): string {
-	if (ms < 1000) return `${ms}ms`;
-	const totalSeconds = Math.floor(ms / 1000);
-	if (totalSeconds < 60) return `${totalSeconds}s`;
-
-	const days = Math.floor(totalSeconds / 86400);
-	const hours = Math.floor((totalSeconds % 86400) / 3600);
-	const minutes = Math.floor((totalSeconds % 3600) / 60);
-	const seconds = totalSeconds % 60;
-
-	const parts: string[] = [];
-	if (days > 0) parts.push(`${days}d`);
-	if (hours > 0) parts.push(`${hours}h`);
-	if (minutes > 0) parts.push(`${minutes}m`);
-	if (seconds > 0 && days === 0) parts.push(`${seconds}s`); // Skip seconds when showing days
-
-	return parts.join(' ') || '0s';
-}
-
-function ToastItem({
+const ToastItem = memo(function ToastItem({
 	toast,
 	theme,
 	onRemove,
 	onSessionClick,
+	widthDimensions,
 }: {
 	toast: ToastType;
 	theme: Theme;
-	onRemove: () => void;
+	onRemove: (toastId: string) => void;
 	onSessionClick?: (sessionId: string, tabId?: string) => void;
+	widthDimensions: { minWidth: number; maxWidth: number };
 }) {
 	const [isExiting, setIsExiting] = useState(false);
 	const [isEntering, setIsEntering] = useState(true);
@@ -59,52 +47,73 @@ function ToastItem({
 	const handleClose = (e?: React.MouseEvent) => {
 		e?.stopPropagation();
 		setIsExiting(true);
-		setTimeout(onRemove, 300);
+		setTimeout(() => onRemove(toast.id), 300);
 	};
 
-	// Handle click on toast to navigate to session
+	// Handle click on toast to navigate to session or trigger custom action.
+	// Order: onClick (renderer-only callback) → clickAction (data-driven, survives
+	// the IPC bridge from CLI/web) → legacy sessionId fallback.
 	const handleToastClick = () => {
+		if (toast.onClick) {
+			toast.onClick();
+			handleClose();
+			return;
+		}
+		if (toast.clickAction) {
+			const action = toast.clickAction;
+			switch (action.kind) {
+				case 'jump-session':
+					onSessionClick?.(action.sessionId, action.tabId);
+					break;
+				case 'open-file':
+					// Reuse the existing CLI/remote file-open path. The listener
+					// (useAppRemoteEventListeners) switches to the target session
+					// and opens the file in a preview tab.
+					window.dispatchEvent(
+						new CustomEvent('maestro:openFileTab', {
+							detail: { sessionId: action.sessionId, filePath: action.path },
+						})
+					);
+					break;
+				case 'open-url':
+					openUrl(action.url);
+					break;
+			}
+			handleClose();
+			return;
+		}
 		if (toast.sessionId && onSessionClick) {
 			onSessionClick(toast.sessionId, toast.tabId);
 			handleClose();
 		}
 	};
 
-	// Check if toast is clickable (has session navigation)
-	const isClickable = toast.sessionId && onSessionClick;
+	// Check if toast is clickable (has session navigation or custom action)
+	const isClickable = toast.onClick || toast.clickAction || (toast.sessionId && onSessionClick);
 
-	// Icon based on type
+	// Icon based on the toast color (5-color design language).
 	const getIcon = () => {
-		switch (toast.type) {
-			case 'success':
+		switch (toast.color) {
+			case 'green':
 				return (
 					<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 						<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
 					</svg>
 				);
-			case 'error':
+			case 'red':
+				// XCircle — error. Circled so it's not mistaken for the bare close (X) button.
 				return (
 					<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 						<path
 							strokeLinecap="round"
 							strokeLinejoin="round"
 							strokeWidth={2}
-							d="M6 18L18 6M6 6l12 12"
+							d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
 						/>
 					</svg>
 				);
-			case 'warning':
-				return (
-					<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-						<path
-							strokeLinecap="round"
-							strokeLinejoin="round"
-							strokeWidth={2}
-							d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-						/>
-					</svg>
-				);
-			default:
+			case 'yellow':
+				// Info-style "i" — yellow is a soft heads-up.
 				return (
 					<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 						<path
@@ -115,17 +124,48 @@ function ToastItem({
 						/>
 					</svg>
 				);
+			case 'orange':
+				// AlertTriangle — more emphatic warning than yellow.
+				return (
+					<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							strokeWidth={2}
+							d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+						/>
+					</svg>
+				);
+			case 'theme':
+			default:
+				// Sparkles — themed default, no semantic.
+				return (
+					<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							strokeWidth={2}
+							d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"
+						/>
+					</svg>
+				);
 		}
 	};
 
+	/** Fixed orange — no theme defines this slot. Matches CenterFlash. */
+	const ORANGE_HEX = '#f97316';
+
 	const getTypeColor = () => {
-		switch (toast.type) {
-			case 'success':
+		switch (toast.color) {
+			case 'green':
 				return theme.colors.success;
-			case 'error':
+			case 'red':
 				return theme.colors.error;
-			case 'warning':
+			case 'yellow':
 				return theme.colors.warning;
+			case 'orange':
+				return ORANGE_HEX;
+			case 'theme':
 			default:
 				return theme.colors.accent;
 		}
@@ -149,8 +189,8 @@ function ToastItem({
 				style={{
 					backgroundColor: theme.colors.bgSidebar,
 					border: `1px solid ${theme.colors.border}`,
-					minWidth: '320px',
-					maxWidth: '400px',
+					minWidth: `${widthDimensions.minWidth}px`,
+					maxWidth: `${widthDimensions.maxWidth}px`,
 				}}
 				onClick={isClickable ? handleToastClick : undefined}
 			>
@@ -225,7 +265,7 @@ function ToastItem({
 							style={{ color: theme.colors.accent }}
 							onClick={(e) => {
 								e.stopPropagation();
-								window.maestro.shell.openExternal(toast.actionUrl!);
+								openUrl(toast.actionUrl!);
 							}}
 						>
 							<svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -259,11 +299,21 @@ function ToastItem({
 					)}
 				</div>
 
-				{/* Close button */}
+				{/* Close button — emphasized when toast is dismissible (sticky) */}
 				<button
 					onClick={handleClose}
-					className="flex-shrink-0 p-1 rounded hover:bg-opacity-10 transition-colors"
-					style={{ color: theme.colors.textDim }}
+					className="flex-shrink-0 p-1 rounded transition-colors"
+					style={
+						toast.dismissible
+							? {
+									color: getTypeColor(),
+									backgroundColor: `${getTypeColor()}1F`,
+									boxShadow: `0 0 0 1px ${getTypeColor()}40 inset`,
+								}
+							: { color: theme.colors.textDim }
+					}
+					title={toast.dismissible ? 'Dismiss' : undefined}
+					aria-label={toast.dismissible ? 'Dismiss notification' : 'Close'}
 				>
 					<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 						<path
@@ -276,8 +326,8 @@ function ToastItem({
 				</button>
 			</div>
 
-			{/* Progress bar */}
-			{toast.duration && toast.duration > 0 && (
+			{/* Progress bar — hidden for dismissible (sticky) toasts */}
+			{!toast.dismissible && toast.duration && toast.duration > 0 && (
 				<div
 					className="absolute bottom-0 left-0 h-1 rounded-b-lg transition-all ease-linear"
 					style={{
@@ -296,17 +346,26 @@ function ToastItem({
       `}</style>
 		</div>
 	);
-}
+});
 
-export function ToastContainer({ theme, onSessionClick }: ToastContainerProps) {
-	const { toasts, removeToast } = useToast();
+export const ToastContainer = memo(function ToastContainer({
+	theme,
+	onSessionClick,
+}: ToastContainerProps) {
+	const toasts = useNotificationStore((s) => s.toasts);
+	const removeToast = useNotificationStore((s) => s.removeToast);
+	const toastWidth = useSettingsStore((s) => s.toastWidth);
+	// Subscribed so 'dynamic' toasts re-render (and re-resize) live as the user
+	// drags the Right Bar; ignored by the fixed presets.
+	const rightPanelWidth = useSettingsStore((s) => s.rightPanelWidth);
+	const widthDimensions = getToastWidthDimensions(toastWidth, rightPanelWidth);
 
 	if (toasts.length === 0) return null;
 
-	return (
+	return createPortal(
 		<div
-			className="fixed bottom-4 right-4 z-50 flex flex-col-reverse"
-			style={{ pointerEvents: 'none' }}
+			className="fixed bottom-0 right-4 flex flex-col-reverse"
+			style={{ pointerEvents: 'none', zIndex: 100000 }}
 		>
 			<div style={{ pointerEvents: 'auto' }}>
 				{toasts.map((toast) => (
@@ -314,11 +373,13 @@ export function ToastContainer({ theme, onSessionClick }: ToastContainerProps) {
 						key={toast.id}
 						toast={toast}
 						theme={theme}
-						onRemove={() => removeToast(toast.id)}
+						onRemove={removeToast}
 						onSessionClick={onSessionClick}
+						widthDimensions={widthDimensions}
 					/>
 				))}
 			</div>
-		</div>
+		</div>,
+		document.body
 	);
-}
+});

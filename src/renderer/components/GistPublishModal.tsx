@@ -1,8 +1,12 @@
-import React, { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useMemo } from 'react';
 import { Share2, Copy, Check, ExternalLink } from 'lucide-react';
-import type { Theme } from '../types';
+import { GhostIconButton } from './ui/GhostIconButton';
+import type { LogEntry, Theme } from '../types';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { Modal } from './ui/Modal';
+import { safeClipboardWrite } from '../utils/clipboard';
+import { openUrl } from '../utils/openUrl';
+import { formatLogsForClipboard, hasThinkingEntries } from '../utils/contextExtractor';
 
 export interface GistInfo {
 	gistUrl: string;
@@ -18,6 +22,12 @@ interface GistPublishModalProps {
 	onSuccess: (gistUrl: string, isPublic: boolean) => void;
 	/** Existing gist info if the file was previously published */
 	existingGist?: GistInfo;
+	/**
+	 * Raw log entries that produced `content`. When provided and the logs
+	 * contain reasoning/thinking blocks, the modal shows an "Include
+	 * reasoning" toggle that re-formats the body before publishing.
+	 */
+	sourceLogs?: LogEntry[];
 }
 
 /**
@@ -32,6 +42,7 @@ export function GistPublishModal({
 	onClose,
 	onSuccess,
 	existingGist,
+	sourceLogs,
 }: GistPublishModalProps) {
 	const secretButtonRef = useRef<HTMLButtonElement>(null);
 	const copyButtonRef = useRef<HTMLButtonElement>(null);
@@ -39,6 +50,16 @@ export function GistPublishModal({
 	const [error, setError] = useState<string | null>(null);
 	const [copied, setCopied] = useState(false);
 	const [showRepublishOptions, setShowRepublishOptions] = useState(false);
+	const [includeThinking, setIncludeThinking] = useState(false);
+
+	const canToggleThinking = useMemo(() => hasThinkingEntries(sourceLogs), [sourceLogs]);
+
+	const effectiveContent = useMemo(() => {
+		if (canToggleThinking && includeThinking && sourceLogs) {
+			return formatLogsForClipboard(sourceLogs, { includeThinking: true });
+		}
+		return content;
+	}, [canToggleThinking, includeThinking, sourceLogs, content]);
 
 	const handlePublish = useCallback(
 		async (isPublic: boolean) => {
@@ -48,7 +69,7 @@ export function GistPublishModal({
 			try {
 				const result = await window.maestro.git.createGist(
 					filename,
-					content,
+					effectiveContent,
 					'', // No description - file name serves as context
 					isPublic
 				);
@@ -65,7 +86,7 @@ export function GistPublishModal({
 				setIsPublishing(false);
 			}
 		},
-		[filename, content, onSuccess, onClose]
+		[filename, effectiveContent, onSuccess, onClose]
 	);
 
 	const handlePublishSecret = useCallback(() => {
@@ -76,17 +97,19 @@ export function GistPublishModal({
 		handlePublish(true);
 	}, [handlePublish]);
 
-	const handleCopyUrl = useCallback(() => {
+	const handleCopyUrl = useCallback(async () => {
 		if (existingGist?.gistUrl) {
-			navigator.clipboard.writeText(existingGist.gistUrl);
-			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
+			const ok = await safeClipboardWrite(existingGist.gistUrl);
+			if (ok) {
+				setCopied(true);
+				setTimeout(() => setCopied(false), 2000);
+			}
 		}
 	}, [existingGist?.gistUrl]);
 
 	const handleOpenGist = useCallback(() => {
 		if (existingGist?.gistUrl) {
-			window.maestro.shell.openExternal(existingGist.gistUrl);
+			openUrl(existingGist.gistUrl);
 		}
 	}, [existingGist?.gistUrl]);
 
@@ -176,24 +199,22 @@ export function GistPublishModal({
 							style={{ color: theme.colors.textMain }}
 							onClick={(e) => (e.target as HTMLInputElement).select()}
 						/>
-						<button
-							type="button"
+						<GhostIconButton
 							onClick={handleCopyUrl}
-							className="p-1.5 rounded hover:bg-white/10 transition-colors"
-							style={{ color: copied ? theme.colors.success : theme.colors.textDim }}
+							padding="p-1.5"
 							title="Copy URL"
+							color={copied ? theme.colors.success : theme.colors.textDim}
 						>
 							{copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-						</button>
-						<button
-							type="button"
+						</GhostIconButton>
+						<GhostIconButton
 							onClick={handleOpenGist}
-							className="p-1.5 rounded hover:bg-white/10 transition-colors"
-							style={{ color: theme.colors.textDim }}
+							padding="p-1.5"
 							title="Open in browser"
+							color={theme.colors.textDim}
 						>
 							<ExternalLink className="w-4 h-4" />
-						</button>
+						</GhostIconButton>
 					</div>
 
 					<p className="text-xs" style={{ color: theme.colors.textDim }}>
@@ -212,7 +233,7 @@ export function GistPublishModal({
 			headerIcon={<Share2 className="w-4 h-4" style={{ color: theme.colors.accent }} />}
 			priority={MODAL_PRIORITIES.GIST_PUBLISH}
 			onClose={onClose}
-			width={450}
+			width={520}
 			zIndex={10000}
 			initialFocusRef={secretButtonRef}
 			footer={
@@ -275,6 +296,27 @@ export function GistPublishModal({
 					<p className="text-xs" style={{ color: theme.colors.warning }}>
 						This will create a new gist. The existing gist URL will be replaced.
 					</p>
+				)}
+
+				{canToggleThinking && (
+					<label
+						className="flex items-start gap-2 text-xs cursor-pointer select-none"
+						style={{ color: theme.colors.textMain }}
+					>
+						<input
+							type="checkbox"
+							checked={includeThinking}
+							onChange={(e) => setIncludeThinking(e.target.checked)}
+							disabled={isPublishing}
+							className="mt-0.5"
+						/>
+						<span>
+							Include reasoning/thinking logs
+							<span className="block text-xs" style={{ color: theme.colors.textDim }}>
+								Adds the agent's reasoning blocks alongside the user/assistant turns.
+							</span>
+						</span>
+					</label>
 				)}
 
 				<div className="text-xs space-y-2" style={{ color: theme.colors.textDim }}>

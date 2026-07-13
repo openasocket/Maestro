@@ -18,6 +18,23 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import { render, screen } from '@testing-library/react';
 import { useSettings } from '../../renderer/hooks';
 import React from 'react';
+import { useSettingsStore } from '../../renderer/stores/settingsStore';
+
+// Deep-cloned defaults captured from a fresh store so mutations in tests can't
+// leak back into the reference. The store no longer exports these defaults.
+const _INITIAL_STATE = useSettingsStore.getState();
+const DEFAULT_CONTEXT_MANAGEMENT_SETTINGS = JSON.parse(
+	JSON.stringify(_INITIAL_STATE.contextManagementSettings)
+);
+const DEFAULT_AUTO_RUN_STATS = JSON.parse(JSON.stringify(_INITIAL_STATE.autoRunStats));
+const DEFAULT_USAGE_STATS = JSON.parse(JSON.stringify(_INITIAL_STATE.usageStats));
+const DEFAULT_KEYBOARD_MASTERY_STATS = JSON.parse(
+	JSON.stringify(_INITIAL_STATE.keyboardMasteryStats)
+);
+const DEFAULT_ONBOARDING_STATS = JSON.parse(JSON.stringify(_INITIAL_STATE.onboardingStats));
+const DEFAULT_AI_COMMANDS = JSON.parse(JSON.stringify(_INITIAL_STATE.customAICommands));
+import { DEFAULT_SHORTCUTS, TAB_SHORTCUTS } from '../../renderer/constants/shortcuts';
+import { DEFAULT_CUSTOM_THEME_COLORS } from '../../renderer/constants/themes';
 
 // Mock the FontConfigurationPanel's common monospace fonts list
 const COMMON_MONOSPACE_FONTS = [
@@ -52,6 +69,74 @@ describe('Cross-platform Fonts and Sizing', () => {
 	let originalProcessPlatform: PropertyDescriptor | undefined;
 
 	beforeEach(() => {
+		// Reset Zustand store to defaults (singleton persists across tests)
+		useSettingsStore.setState({
+			settingsLoaded: false,
+			conductorProfile: '',
+			llmProvider: 'openrouter',
+			modelSlug: 'anthropic/claude-3.5-sonnet',
+			apiKey: '',
+			defaultShell: 'zsh',
+			customShellPath: '',
+			shellArgs: '',
+			shellEnvVars: {},
+			ghPath: '',
+			fontFamily: 'Roboto Mono, Menlo, "Courier New", monospace',
+			fontSize: 14,
+			activeThemeId: 'dracula',
+			customThemeColors: DEFAULT_CUSTOM_THEME_COLORS,
+			customThemeBaseId: 'dracula',
+			enterToSendAI: false,
+			defaultSaveToHistory: true,
+			defaultShowThinking: 'off',
+			leftSidebarWidth: 256,
+			rightPanelWidth: 384,
+			markdownEditMode: false,
+			chatRawTextMode: false,
+			showHiddenFiles: true,
+			logLevel: 'info',
+			maxLogBuffer: 5000,
+			maxOutputLines: 25,
+			osNotificationsEnabled: true,
+			audioFeedbackEnabled: false,
+			audioFeedbackCommand: 'say',
+			toastDuration: 20,
+			checkForUpdatesOnStartup: true,
+			enableBetaUpdates: false,
+			crashReportingEnabled: true,
+			logViewerSelectedLevels: ['debug', 'info', 'warn', 'error', 'toast'],
+			shortcuts: DEFAULT_SHORTCUTS,
+			tabShortcuts: TAB_SHORTCUTS,
+			customAICommands: DEFAULT_AI_COMMANDS,
+			totalActiveTimeMs: 0,
+			autoRunStats: DEFAULT_AUTO_RUN_STATS,
+			usageStats: DEFAULT_USAGE_STATS,
+			ungroupedCollapsed: false,
+			groupChatsExpanded: true,
+			tourCompleted: false,
+			firstAutoRunCompleted: false,
+			onboardingStats: DEFAULT_ONBOARDING_STATS,
+			leaderboardRegistration: null,
+			webInterfaceUseCustomPort: false,
+			webInterfaceCustomPort: 8080,
+			contextManagementSettings: DEFAULT_CONTEXT_MANAGEMENT_SETTINGS,
+			keyboardMasteryStats: DEFAULT_KEYBOARD_MASTERY_STATS,
+			colorBlindMode: false,
+			documentGraphShowExternalLinks: false,
+			documentGraphMaxNodes: 50,
+			documentGraphPreviewCharLimit: 100,
+			statsCollectionEnabled: true,
+			defaultStatsTimeRange: 'week',
+			preventSleepEnabled: false,
+			disableGpuAcceleration: false,
+			disableConfetti: false,
+			sshRemoteIgnorePatterns: ['.git', '*cache*'],
+			sshRemoteHonorGitignore: true,
+			automaticTabNamingEnabled: true,
+			fileTabAutoRefreshEnabled: false,
+			suppressWindowsWarning: false,
+		});
+
 		vi.clearAllMocks();
 		originalFontSize = document.documentElement.style.fontSize;
 		originalProcessPlatform = Object.getOwnPropertyDescriptor(process, 'platform');

@@ -1,19 +1,82 @@
 import { useState, useMemo, useEffect, useRef, memo } from 'react';
 import { Diff, Hunk } from 'react-diff-view';
-import { Plus, Minus, ImageIcon } from 'lucide-react';
+import { Plus, Minus, ImageIcon, Columns2, AlignJustify } from 'lucide-react';
 import type { Theme } from '../types';
 import { parseGitDiff, getFileName, getDiffStats } from '../utils/gitDiffParser';
-import { useLayerStack } from '../contexts/LayerStackContext';
+import { getBasename } from '../../shared/formatters';
+import { useModalLayer } from '../hooks/ui/useModalLayer';
+import { useResizableModal } from '../hooks/ui/useResizableModal';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { ImageDiffViewer } from './ImageDiffViewer';
+import { GitFilePathHeader } from './GitFilePathHeader';
 import { generateDiffViewStyles } from '../utils/markdownConfig';
+import { useSettingsStore } from '../stores/settingsStore';
+import { ResizeHandles } from './ui/ResizeHandles';
 import 'react-diff-view/style/index.css';
+
+export type GitDiffViewType = 'unified' | 'split';
+
+const VIEW_TYPE_STORAGE_KEY = 'maestro.gitDiffViewer.viewType';
+
+function readStoredViewType(): GitDiffViewType | null {
+	if (typeof window === 'undefined') return null;
+	try {
+		const raw = window.localStorage.getItem(VIEW_TYPE_STORAGE_KEY);
+		return raw === 'unified' || raw === 'split' ? raw : null;
+	} catch {
+		return null;
+	}
+}
+
+function writeStoredViewType(value: GitDiffViewType): void {
+	if (typeof window === 'undefined') return;
+	try {
+		window.localStorage.setItem(VIEW_TYPE_STORAGE_KEY, value);
+	} catch {
+		// Ignore quota / privacy-mode errors — preference just won't persist.
+	}
+}
+
+function isFormControl(target: EventTarget | null): boolean {
+	if (!(target instanceof HTMLElement)) return false;
+	const tag = target.tagName;
+	if (
+		tag === 'BUTTON' ||
+		tag === 'INPUT' ||
+		tag === 'TEXTAREA' ||
+		tag === 'SELECT' ||
+		tag === 'A'
+	) {
+		return true;
+	}
+	return target.isContentEditable;
+}
 
 interface GitDiffViewerProps {
 	diffText: string;
 	cwd: string;
 	theme: Theme;
 	onClose: () => void;
+	/**
+	 * Default view type when the user has no persisted preference yet. Once the
+	 * user toggles the header button, the chosen value is saved to localStorage
+	 * and applied to all future GitDiffViewer instances regardless of this prop.
+	 */
+	initialViewType?: GitDiffViewType;
+	/** Optional title shown in the header instead of the default "Git Diff". */
+	title?: string;
+	/**
+	 * Open a file as a preview tab. Given an absolute path and the display name.
+	 * When provided, file-path headers become clickable; the viewer dismisses
+	 * itself via `onClose` first, then calls this to open the file.
+	 */
+	onOpenFile?: (absolutePath: string, fileName: string) => void;
+	/**
+	 * Optional modal-layer priority override. Defaults to GIT_DIFF (200).
+	 * Use a higher priority when opening this viewer from inside another
+	 * modal so it captures Escape and focus correctly.
+	 */
+	priority?: number;
 }
 
 export const GitDiffViewer = memo(function GitDiffViewer({
@@ -21,11 +84,23 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 	cwd,
 	theme,
 	onClose,
+	initialViewType = 'unified',
+	title = 'Git Diff',
+	priority,
+	onOpenFile,
 }: GitDiffViewerProps) {
 	const [activeTab, setActiveTab] = useState(0);
+	const [viewType, setViewType] = useState<GitDiffViewType>(
+		() => readStoredViewType() ?? initialViewType
+	);
 	const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
-	const { registerLayer, unregisterLayer, updateLayerHandler } = useLayerStack();
-	const layerIdRef = useRef<string>();
+	const dialogRef = useRef<HTMLDivElement>(null);
+	const colorBlindMode = useSettingsStore((s) => s.colorBlindMode);
+
+	// Persist the user's chosen view type so it sticks across all diff views and app restarts.
+	useEffect(() => {
+		writeStoredViewType(viewType);
+	}, [viewType]);
 
 	// Store onClose in ref to avoid re-registering layer on every parent re-render
 	const onCloseRef = useRef(onClose);
@@ -34,33 +109,24 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 	// Parse the diff into separate files
 	const parsedFiles = useMemo(() => parseGitDiff(diffText), [diffText]);
 
+	// Dismiss the viewer and open the given repo-relative file as a preview tab.
+	const openFileInPreview = (relPath: string) => {
+		if (!onOpenFile) return;
+		onClose();
+		onOpenFile(`${cwd}/${relPath}`, getBasename(relPath));
+	};
+
 	// Register layer on mount
 	// Note: Using 'modal' type so App.tsx blocks all shortcuts and lets this component
 	// handle its own Cmd+Shift+[] for tab navigation
-	useEffect(() => {
-		layerIdRef.current = registerLayer({
-			type: 'modal',
-			priority: MODAL_PRIORITIES.GIT_DIFF,
-			blocksLowerLayers: true,
-			capturesFocus: true,
+	useModalLayer(
+		priority ?? MODAL_PRIORITIES.GIT_DIFF,
+		'Git Diff Preview',
+		() => onCloseRef.current(),
+		{
 			focusTrap: 'lenient',
-			ariaLabel: 'Git Diff Preview',
-			onEscape: () => onCloseRef.current(),
-		});
-
-		return () => {
-			if (layerIdRef.current) {
-				unregisterLayer(layerIdRef.current);
-			}
-		};
-	}, [registerLayer, unregisterLayer]); // Removed onClose from deps
-
-	// Update handler when dependencies change (not really needed since onClose uses ref)
-	useEffect(() => {
-		if (layerIdRef.current) {
-			updateLayerHandler(layerIdRef.current, () => onCloseRef.current());
 		}
-	}, [updateLayerHandler]);
+	);
 
 	// Auto-scroll to active tab when it changes
 	useEffect(() => {
@@ -74,7 +140,7 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 		}
 	}, [activeTab]);
 
-	// Handle keyboard shortcuts (tab navigation only)
+	// Handle keyboard shortcuts (tab navigation + view toggle)
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
 			// Cmd+[ or Cmd+Shift+[ - Previous tab
@@ -87,11 +153,35 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 				e.preventDefault();
 				setActiveTab((prev) => (prev + 1) % parsedFiles.length);
 			}
+			// Enter - Toggle unified / side-by-side. Skip when a focused control
+			// (button, link, input, etc.) would otherwise consume Enter, so the
+			// toggle button and tab buttons keep their native activation behavior.
+			else if (
+				e.key === 'Enter' &&
+				!e.metaKey &&
+				!e.ctrlKey &&
+				!e.altKey &&
+				!e.shiftKey &&
+				!isFormControl(e.target)
+			) {
+				e.preventDefault();
+				setViewType((v) => (v === 'unified' ? 'split' : 'unified'));
+			}
 		};
 
 		window.addEventListener('keydown', handleKeyDown);
 		return () => window.removeEventListener('keydown', handleKeyDown);
 	}, [parsedFiles.length]);
+	const resizableModal = useResizableModal({
+		resizeKey: 'git-diff',
+		defaultSize: { width: 1200, height: 760 },
+		minSize: { width: 720, height: 480 },
+		externalRef: dialogRef,
+	});
+
+	useEffect(() => {
+		dialogRef.current?.focus();
+	}, []);
 
 	if (parsedFiles.length === 0) {
 		return (
@@ -100,31 +190,40 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 				onClick={onClose}
 			>
 				<div
-					className="w-[85%] max-w-[1400px] h-[90%] rounded-lg shadow-2xl flex flex-col overflow-hidden"
+					ref={dialogRef}
+					className="relative rounded-lg shadow-2xl flex flex-col overflow-hidden"
 					style={{
+						...resizableModal.style,
 						backgroundColor: theme.colors.bgMain,
 						border: `1px solid ${theme.colors.border}`,
 					}}
+					data-modal-resize-key="git-diff"
 					onClick={(e) => e.stopPropagation()}
 					role="dialog"
 					aria-modal="true"
 					aria-label="Git Diff Preview"
 					tabIndex={-1}
-					ref={(el) => el?.focus()}
 				>
+					<ResizeHandles
+						onResizeStart={resizableModal.onResizeStart}
+						accentColor={theme.colors.accent}
+					/>
+
 					<div
 						className="flex items-center justify-between px-6 py-4 border-b"
 						style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgSidebar }}
 					>
 						<span className="text-lg font-semibold" style={{ color: theme.colors.textMain }}>
-							Git Diff
+							{title}
 						</span>
 						<button
 							onClick={onClose}
 							className="px-3 py-1 rounded text-sm hover:bg-white/10 transition-colors"
 							style={{ color: theme.colors.textDim }}
+							aria-label="Close diff viewer"
 						>
-							Close (Esc)
+							<span className="hidden md:inline">Close (Esc)</span>
+							<span className="md:hidden text-base leading-none">×</span>
 						</button>
 					</div>
 					<div className="flex-1 flex items-center justify-center">
@@ -146,45 +245,87 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 			onClick={onClose}
 		>
 			<div
-				className="w-[85%] max-w-[1400px] h-[90%] rounded-lg shadow-2xl flex flex-col overflow-hidden"
+				ref={dialogRef}
+				className="relative rounded-lg shadow-2xl flex flex-col overflow-hidden"
 				style={{
+					...resizableModal.style,
 					backgroundColor: theme.colors.bgMain,
-					borderColor: theme.colors.border,
-					border: '1px solid',
+					border: `1px solid ${theme.colors.border}`,
 				}}
+				data-modal-resize-key="git-diff"
 				onClick={(e) => e.stopPropagation()}
 				role="dialog"
 				aria-modal="true"
 				aria-label="Git Diff Preview"
 				tabIndex={-1}
-				ref={(el) => el?.focus()}
 			>
+				<ResizeHandles
+					onResizeStart={resizableModal.onResizeStart}
+					accentColor={theme.colors.accent}
+				/>
+
 				{/* Header */}
 				<div
-					className="flex items-center justify-between px-6 py-4 border-b"
+					className="flex items-center justify-between gap-2 px-3 sm:px-6 py-3 sm:py-4 border-b"
 					style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgSidebar }}
 				>
-					<div className="flex items-center gap-3">
-						<span className="text-lg font-semibold" style={{ color: theme.colors.textMain }}>
-							Git Diff
+					<div className="flex items-center gap-3 min-w-0">
+						<span
+							className="text-lg font-semibold shrink-0"
+							style={{ color: theme.colors.textMain }}
+						>
+							{title}
 						</span>
 						<span
-							className="text-xs px-2 py-1 rounded"
+							className="text-xs px-2 py-1 rounded truncate min-w-0"
 							style={{ backgroundColor: theme.colors.bgActivity, color: theme.colors.textDim }}
 						>
 							{cwd}
 						</span>
-						<span className="text-xs" style={{ color: theme.colors.textDim }}>
-							{parsedFiles.length} {parsedFiles.length === 1 ? 'file' : 'files'} changed
+						{/* File counter hidden on narrow viewports — the per-file tab bar
+						    below already shows which file is active and the total count. */}
+						<span
+							className="hidden md:inline text-xs shrink-0"
+							style={{ color: theme.colors.textDim }}
+						>
+							File {activeTab + 1} of {parsedFiles.length}
 						</span>
 					</div>
-					<button
-						onClick={onClose}
-						className="px-3 py-1 rounded text-sm hover:bg-white/10 transition-colors"
-						style={{ color: theme.colors.textDim }}
-					>
-						Close (Esc)
-					</button>
+					<div className="flex items-center gap-2 shrink-0">
+						{/* Layout toggle hidden on narrow viewports — unified is the only
+						    practical view at small widths. */}
+						<button
+							onClick={() => setViewType((v) => (v === 'unified' ? 'split' : 'unified'))}
+							className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded text-xs hover:bg-white/10 transition-colors"
+							style={{
+								color: theme.colors.textDim,
+								border: `1px solid ${theme.colors.border}`,
+							}}
+							aria-label={viewType === 'unified' ? 'Switch to side-by-side' : 'Switch to unified'}
+							title={viewType === 'unified' ? 'Switch to side-by-side' : 'Switch to unified'}
+						>
+							{viewType === 'unified' ? (
+								<>
+									<Columns2 className="w-3.5 h-3.5" />
+									Side-by-side
+								</>
+							) : (
+								<>
+									<AlignJustify className="w-3.5 h-3.5" />
+									Unified
+								</>
+							)}
+						</button>
+						<button
+							onClick={onClose}
+							className="px-3 py-1 rounded text-sm hover:bg-white/10 transition-colors"
+							style={{ color: theme.colors.textDim }}
+							aria-label="Close diff viewer"
+						>
+							<span className="hidden md:inline">Close (Esc)</span>
+							<span className="md:hidden text-base leading-none">×</span>
+						</button>
+					</div>
 				</div>
 
 				{/* Tabs */}
@@ -196,7 +337,7 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 						const fileStats = getDiffStats(file.parsedDiff);
 						return (
 							<button
-								key={index}
+								key={file.newPath || file.oldPath || `file-${index}`}
 								ref={(el) => (tabRefs.current[index] = el)}
 								onClick={() => setActiveTab(index)}
 								className={`px-4 py-3 text-sm whitespace-nowrap transition-colors ${
@@ -219,13 +360,19 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 										) : (
 											<>
 												{fileStats.additions > 0 && (
-													<span className="text-green-500 flex items-center gap-0.5">
+													<span
+														className="flex items-center gap-0.5"
+														style={{ color: colorBlindMode ? '#009988' : '#22c55e' }}
+													>
 														<Plus className="w-3 h-3" />
 														{fileStats.additions}
 													</span>
 												)}
 												{fileStats.deletions > 0 && (
-													<span className="text-red-500 flex items-center gap-0.5">
+													<span
+														className="flex items-center gap-0.5"
+														style={{ color: colorBlindMode ? '#CC3311' : '#ef4444' }}
+													>
 														<Minus className="w-3 h-3" />
 														{fileStats.deletions}
 													</span>
@@ -263,22 +410,29 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 						</div>
 					) : activeFile && activeFile.parsedDiff.length > 0 ? (
 						<div className="font-mono text-sm">
-							<style>{generateDiffViewStyles(theme)}</style>
+							<style>{generateDiffViewStyles(theme, colorBlindMode)}</style>
 							{activeFile.parsedDiff.map((file, fileIndex) => (
 								<div key={fileIndex}>
-									{/* File header */}
-									<div
-										className="mb-4 p-2 rounded font-semibold text-xs"
-										style={{
-											backgroundColor: theme.colors.bgActivity,
-											color: theme.colors.textMain,
-										}}
+									{/* File header (click to open the file as a preview tab) */}
+									<GitFilePathHeader
+										theme={theme}
+										className="mb-4"
+										onOpen={
+											onOpenFile && !activeFile.isDeletedFile
+												? () => openFileInPreview(activeFile.newPath)
+												: undefined
+										}
+										title={
+											activeFile.isDeletedFile
+												? undefined
+												: `Open ${activeFile.newPath} in a preview tab`
+										}
 									>
 										{file.oldPath} → {file.newPath}
-									</div>
+									</GitFilePathHeader>
 
 									{/* Render each hunk */}
-									<Diff viewType="unified" diffType={file.type} hunks={file.hunks}>
+									<Diff viewType={viewType} diffType={file.type} hunks={file.hunks}>
 										{(hunks) => hunks.map((hunk) => <Hunk key={hunk.content} hunk={hunk} />)}
 									</Diff>
 								</div>
@@ -311,11 +465,17 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 							</span>
 						) : (
 							<div className="flex items-center gap-2">
-								<span className="text-green-500 flex items-center gap-1">
+								<span
+									className="flex items-center gap-1"
+									style={{ color: colorBlindMode ? '#009988' : '#22c55e' }}
+								>
 									<Plus className="w-3 h-3" />
 									{stats.additions} additions
 								</span>
-								<span className="text-red-500 flex items-center gap-1">
+								<span
+									className="flex items-center gap-1"
+									style={{ color: colorBlindMode ? '#CC3311' : '#ef4444' }}
+								>
 									<Minus className="w-3 h-3" />
 									{stats.deletions} deletions
 								</span>
@@ -323,7 +483,18 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 						)}
 					</div>
 					<span style={{ color: theme.colors.textDim }}>
-						File {activeTab + 1} of {parsedFiles.length}
+						Press{' '}
+						<kbd
+							className="px-1.5 py-0.5 rounded font-mono text-[10px] mx-0.5"
+							style={{
+								backgroundColor: theme.colors.bgActivity,
+								color: theme.colors.textMain,
+								border: `1px solid ${theme.colors.border}`,
+							}}
+						>
+							Enter
+						</kbd>{' '}
+						to toggle {viewType === 'unified' ? 'side-by-side' : 'unified'} view
 					</span>
 				</div>
 			</div>

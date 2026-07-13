@@ -15,14 +15,21 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Search, ArrowRight, X, Loader2, Circle } from 'lucide-react';
-import type { Theme, Session, AITab, ToolType } from '../types';
+import { GhostIconButton } from './ui/GhostIconButton';
+import { Spinner } from './ui/Spinner';
+import type { Theme, Session, ToolType } from '../types';
 import type { MergeResult } from '../types/contextMerge';
 import { fuzzyMatchWithScore } from '../utils/search';
-import { useLayerStack } from '../contexts/LayerStackContext';
+import { useModalLayer } from '../hooks/ui/useModalLayer';
+import { useResizableModal } from '../hooks/ui/useResizableModal';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { formatTokensCompact } from '../utils/formatters';
+import { estimateTokensFromLogs } from '../../shared/formatters';
 import { getAgentIcon } from '../constants/agentIcons';
 import { ScreenReaderAnnouncement, useAnnouncement } from './Wizard/ScreenReaderAnnouncement';
+import { getTabDisplayName } from '../utils/tabHelpers';
+import { logger } from '../utils/logger';
+import { ResizeHandles } from './ui/ResizeHandles';
 
 /**
  * Session availability status for display in the selection list
@@ -106,25 +113,7 @@ function getSessionDisplayName(session: Session): string {
 	return session.name || session.projectRoot.split('/').pop() || 'Unnamed Session';
 }
 
-/**
- * Estimate token count from log entries
- * Uses a simple heuristic: ~4 characters per token (average for English text)
- */
-function estimateTokens(logs: { text: string }[]): number {
-	const totalChars = logs.reduce((sum, log) => sum + (log.text?.length || 0), 0);
-	return Math.round(totalChars / 4);
-}
-
-/**
- * Get display name for a tab
- */
-function getTabDisplayName(tab: AITab): string {
-	if (tab.name) return tab.name;
-	if (tab.agentSessionId) {
-		return tab.agentSessionId.split('-')[0].toUpperCase();
-	}
-	return 'New Tab';
-}
+const estimateTokens = estimateTokensFromLogs;
 
 /**
  * SendToAgentModal Component
@@ -158,7 +147,6 @@ export function SendToAgentModal({
 
 	// Refs
 	const inputRef = useRef<HTMLInputElement>(null);
-	const layerIdRef = useRef<string>();
 	const onCloseRef = useRef(onClose);
 	const selectedItemRef = useRef<HTMLButtonElement>(null);
 
@@ -167,35 +155,18 @@ export function SendToAgentModal({
 		onCloseRef.current = onClose;
 	});
 
-	const { registerLayer, unregisterLayer, updateLayerHandler } = useLayerStack();
+	const handleSearchQueryChange = useCallback((value: string) => {
+		setSearchQuery(value);
+		setSelectedIndex(0);
+	}, []);
 
 	// Register layer on mount
-	useEffect(() => {
-		if (!isOpen) return;
-
-		layerIdRef.current = registerLayer({
-			type: 'modal',
-			priority: MODAL_PRIORITIES.SEND_TO_AGENT,
-			blocksLowerLayers: true,
-			capturesFocus: true,
-			focusTrap: 'strict',
-			ariaLabel: 'Send Context to Agent',
-			onEscape: () => onCloseRef.current(),
-		});
-
-		return () => {
-			if (layerIdRef.current) {
-				unregisterLayer(layerIdRef.current);
-			}
-		};
-	}, [isOpen, registerLayer, unregisterLayer]);
-
-	// Update handler when onClose changes
-	useEffect(() => {
-		if (layerIdRef.current) {
-			updateLayerHandler(layerIdRef.current, () => onCloseRef.current());
-		}
-	}, [updateLayerHandler]);
+	useModalLayer(
+		MODAL_PRIORITIES.SEND_TO_AGENT,
+		'Send Context to Agent',
+		() => onCloseRef.current(),
+		{ enabled: isOpen }
+	);
 
 	// Focus input on mount
 	useEffect(() => {
@@ -281,11 +252,6 @@ export function SendToAgentModal({
 		selectedItemRef.current?.scrollIntoView({ block: 'nearest' });
 	}, [selectedIndex]);
 
-	// Reset selection when filter changes
-	useEffect(() => {
-		setSelectedIndex(0);
-	}, [searchQuery]);
-
 	// Announce search results to screen readers
 	useEffect(() => {
 		if (isOpen) {
@@ -342,7 +308,7 @@ export function SendToAgentModal({
 			});
 			onClose();
 		} catch (error) {
-			console.error('Send to session failed:', error);
+			logger.error('Send to session failed:', undefined, error);
 		} finally {
 			setIsSending(false);
 		}
@@ -427,12 +393,18 @@ export function SendToAgentModal({
 		const session = sessionOptions.find((s) => s.id === selectedSessionId);
 		return session && session.status !== 'current';
 	}, [selectedSessionId, sessionOptions, isSending]);
+	const resizableModal = useResizableModal({
+		resizeKey: 'send-to-agent',
+		defaultSize: { width: 640, height: 720 },
+		minSize: { width: 480, height: 360 },
+		enabled: isOpen,
+	});
 
 	if (!isOpen) return null;
 
 	return (
 		<div
-			className="fixed inset-0 modal-overlay flex items-start justify-center pt-16 z-[9999] animate-in"
+			className="fixed inset-0 modal-overlay flex items-center justify-center p-8 z-[9999] animate-in"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="send-to-agent-title"
@@ -444,14 +416,20 @@ export function SendToAgentModal({
 			<ScreenReaderAnnouncement {...announcementProps} />
 
 			<div
-				className="w-[600px] rounded-xl shadow-2xl border outline-none flex flex-col animate-slide-up"
+				ref={resizableModal.modalRef}
+				className="relative rounded-xl shadow-2xl border outline-none flex flex-col animate-slide-up select-none"
 				style={{
+					...resizableModal.style,
 					backgroundColor: theme.colors.bgSidebar,
 					borderColor: theme.colors.border,
-					maxHeight: 'calc(100vh - 128px)',
 				}}
-				onClick={(e) => e.stopPropagation()}
+				data-modal-resize-key="send-to-agent"
 			>
+				<ResizeHandles
+					onResizeStart={resizableModal.onResizeStart}
+					accentColor={theme.colors.accent}
+				/>
+
 				{/* Header */}
 				<div
 					className="p-4 border-b flex items-center justify-between shrink-0"
@@ -471,15 +449,9 @@ export function SendToAgentModal({
 							Send Context to Agent
 						</h2>
 					</div>
-					<button
-						type="button"
-						onClick={onClose}
-						className="p-1 rounded hover:bg-white/10 transition-colors"
-						style={{ color: theme.colors.textDim }}
-						aria-label="Close dialog"
-					>
+					<GhostIconButton onClick={onClose} ariaLabel="Close dialog" color={theme.colors.textDim}>
 						<X className="w-4 h-4" aria-hidden="true" />
-					</button>
+					</GhostIconButton>
 				</div>
 
 				{/* Description for screen readers */}
@@ -507,7 +479,7 @@ export function SendToAgentModal({
 								type="text"
 								placeholder="Search sessions..."
 								value={searchQuery}
-								onChange={(e) => setSearchQuery(e.target.value)}
+								onChange={(e) => handleSearchQueryChange(e.target.value)}
 								aria-controls="session-list"
 								className="w-full pl-9 pr-3 py-2 rounded-lg border text-sm outline-none"
 								style={{
@@ -613,7 +585,7 @@ export function SendToAgentModal({
 												aria-hidden="true"
 											>
 												{session.status === 'idle' && <Circle className="w-2 h-2 fill-current" />}
-												{session.status === 'busy' && <Loader2 className="w-3 h-3 animate-spin" />}
+												{session.status === 'busy' && <Spinner size={12} />}
 												{getStatusLabel(session.status)}
 											</div>
 

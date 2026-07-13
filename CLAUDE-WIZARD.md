@@ -4,7 +4,7 @@ Wizard documentation for the Maestro codebase. For the main guide, see [[CLAUDE.
 
 ## Onboarding Wizard
 
-The wizard (`src/renderer/components/Wizard/`) guides new users through first-run setup, creating AI sessions with Auto Run documents.
+The wizard (`src/renderer/components/Wizard/`) guides new users through first-run setup, creating AI agents with Auto Run documents.
 
 ### Wizard Architecture
 
@@ -38,7 +38,7 @@ src/renderer/components/Wizard/
 3. **Conversation** → AI asks clarifying questions, builds confidence score (0-100)
 4. **Phase Review** → View/edit generated Phase 1 document, choose to start tour
 
-When confidence reaches 80+ and agent signals "ready", user proceeds to Phase Review where Auto Run documents are generated and saved to `Auto Run Docs/Initiation/`. The `Initiation/` subfolder keeps wizard-generated documents separate from user-created playbooks.
+When confidence reaches 80+ and agent signals "ready", user proceeds to Phase Review where Auto Run documents are generated and saved to `.maestro/playbooks/initiation/`. The `initiation/` subfolder keeps wizard-generated documents separate from user-created playbooks.
 
 ### Triggering the Wizard
 
@@ -48,7 +48,7 @@ const { openWizard } = useWizard();
 openWizard();
 
 // Keyboard shortcut (default)
-Cmd+Shift+N  // Opens wizard
+Cmd + Shift + N; // Opens wizard
 
 // Also available in:
 // - Command K menu: "New Agent Wizard"
@@ -87,25 +87,29 @@ The Wizard maintains two types of state:
    - Cleared on completion or when user chooses "Just Quit"
 
 **State Save Triggers:**
+
 - Auto-save: When `currentStep` changes (step > 1) - `WizardContext.tsx` useEffect with `saveResumeState()`
 - Manual save: User clicks "Save & Exit" - `MaestroWizard.tsx` `handleConfirmExit()`
 
 **State Clear Triggers:**
+
 - Wizard completion: `App.tsx` wizard completion handler + `WizardContext.tsx` `COMPLETE_WIZARD` action
 - User quits: "Quit without saving" button - `MaestroWizard.tsx` `handleQuitWithoutSaving()`
 - User starts fresh: "Start Fresh" in resume modal - `App.tsx` resume handlers
 
 **Opening Wizard Logic:**
 The `openWizard()` function in `WizardContext.tsx` handles state initialization:
+
 ```typescript
 // If previous wizard was completed, reset in-memory state first
 if (state.isComplete === true) {
-  dispatch({ type: 'RESET_WIZARD' });  // Clear stale state
+	dispatch({ type: 'RESET_WIZARD' }); // Clear stale state
 }
-dispatch({ type: 'OPEN_WIZARD' });  // Show wizard UI
+dispatch({ type: 'OPEN_WIZARD' }); // Show wizard UI
 ```
 
 This ensures:
+
 - **Fresh starts**: Completed wizards don't contaminate new runs
 - **Resume works**: Abandoned wizards (isComplete: false) preserve state
 - **No race conditions**: Persisted state is checked after wizard opens
@@ -135,33 +139,33 @@ The tour highlights UI elements with spotlight cutouts:
 
 ### Customization Points
 
-| What | Where |
-|------|-------|
-| Add wizard step | `WizardContext.tsx` (WIZARD_TOTAL_STEPS, WizardStep type, STEP_INDEX) |
-| Modify wizard prompts | `src/prompts/wizard-*.md` (content), `services/wizardPrompts.ts` (logic) |
-| Change confidence threshold | `READY_CONFIDENCE_THRESHOLD` in wizardPrompts.ts (default: 80) |
-| Add tour step | `tour/tourSteps.ts` array |
-| Modify Auto Run document format | `src/prompts/wizard-document-generation.md` |
-| Change wizard keyboard shortcut | `shortcuts.ts` → `openWizard` |
+| What                            | Where                                                                    |
+| ------------------------------- | ------------------------------------------------------------------------ |
+| Add wizard step                 | `WizardContext.tsx` (WIZARD_TOTAL_STEPS, WizardStep type, STEP_INDEX)    |
+| Modify wizard prompts           | `src/prompts/wizard-*.md` (content), `services/wizardPrompts.ts` (logic) |
+| Change confidence threshold     | `READY_CONFIDENCE_THRESHOLD` in wizardPrompts.ts (default: 80)           |
+| Add tour step                   | `tour/tourSteps.ts` array                                                |
+| Modify Auto Run document format | `src/prompts/wizard-document-generation.md`                              |
+| Change wizard keyboard shortcut | `shortcuts.ts` → `openWizard`                                            |
 
 ### Related Settings
 
 ```typescript
 // In useSettings.ts
-wizardCompleted: boolean    // First wizard completion
-tourCompleted: boolean      // First tour completion
-firstAutoRunCompleted: boolean  // Triggers celebration modal
+wizardCompleted: boolean; // First wizard completion
+tourCompleted: boolean; // First tour completion
+firstAutoRunCompleted: boolean; // Triggers celebration modal
 ```
 
 ---
 
 ## Inline Wizard (`/wizard`)
 
-The Inline Wizard creates Auto Run Playbook documents from within an existing agent session. Unlike the full-screen Onboarding Wizard above, it runs inside a single tab.
+The Inline Wizard creates Auto Run Playbook documents from within an existing agent. Unlike the full-screen Onboarding Wizard above, it runs inside a single tab.
 
 ### Prerequisites
 
-- Auto Run document folder must be configured for the session
+- Auto Run document folder must be configured for the agent
 - If not set, `/wizard` errors with instructions to configure it
 
 ### User Flow
@@ -174,8 +178,8 @@ The Inline Wizard creates Auto Run Playbook documents from within an existing ag
 ### Key Behaviors
 
 - Multiple wizards can run in different tabs simultaneously
-- Wizard state is **per-tab** (`AITab.wizardState`), not per-session
-- Documents written to unique subfolder under Auto Run folder (e.g., `Auto Run Docs/Project-Name/`)
+- Wizard state is **per-tab** (`AITab.wizardState`), not per-agent
+- Documents written to unique subfolder under playbooks folder (e.g., `.maestro/playbooks/project-name/`)
 - On completion, tab renamed to "Project: {SubfolderName}"
 - Final AI message summarizes generated docs and next steps
 - Same `agentSessionId` preserved for context continuity
@@ -195,8 +199,8 @@ src/renderer/contexts/InlineWizardContext.tsx  # State provider
 
 ### Customization Points
 
-| What | Where |
-|------|-------|
-| Modify inline wizard prompts | `src/prompts/wizard-*.md` |
-| Change confidence threshold | `READY_CONFIDENCE_THRESHOLD` in wizardPrompts.ts |
-| Modify generation UI | `DocumentGenerationView.tsx`, `AustinFactsDisplay.tsx` |
+| What                         | Where                                                  |
+| ---------------------------- | ------------------------------------------------------ |
+| Modify inline wizard prompts | `src/prompts/wizard-*.md`                              |
+| Change confidence threshold  | `READY_CONFIDENCE_THRESHOLD` in wizardPrompts.ts       |
+| Modify generation UI         | `DocumentGenerationView.tsx`, `AustinFactsDisplay.tsx` |

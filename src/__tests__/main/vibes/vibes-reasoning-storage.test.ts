@@ -73,17 +73,12 @@ describe('vibes-reasoning-storage', () => {
 		opts?: {
 			compressThresholdBytes?: number;
 			externalBlobThresholdBytes?: number;
-		},
+		}
 	) {
 		const manager = new VibesSessionManager();
 		const sessionId = 'sess-reasoning';
 
-		const state = await manager.startSession(
-			sessionId,
-			tmpDir,
-			'claude-code',
-			'high',
-		);
+		const state = await manager.startSession(sessionId, tmpDir, 'claude-code', 'high');
 		state.environmentHash = 'e'.repeat(64);
 
 		const instrumenter = new ClaudeCodeInstrumenter({
@@ -107,9 +102,7 @@ describe('vibes-reasoning-storage', () => {
 
 		const manifest = await readVibesManifest(tmpDir);
 		const entries = Object.values(manifest.entries);
-		const reasoningEntries = entries.filter(
-			(e) => e.type === 'reasoning',
-		) as VibesReasoningEntry[];
+		const reasoningEntries = entries.filter((e) => e.type === 'reasoning') as VibesReasoningEntry[];
 
 		return { manifest, reasoningEntries };
 	}

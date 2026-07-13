@@ -1,12 +1,17 @@
 import { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
 import { GitCommit, GitBranch, Tag } from 'lucide-react';
 import type { Theme } from '../types';
-import { useLayerStack } from '../contexts/LayerStackContext';
+import { useModalLayer } from '../hooks/ui/useModalLayer';
+import { useResizableModal } from '../hooks/ui/useResizableModal';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { Diff, Hunk } from 'react-diff-view';
 import { parseGitDiff } from '../utils/gitDiffParser';
+import { getBasename } from '../../shared/formatters';
+import { GitFilePathHeader } from './GitFilePathHeader';
 import { useListNavigation } from '../hooks';
 import { generateDiffViewStyles } from '../utils/markdownConfig';
+import { useSettingsStore } from '../stores/settingsStore';
+import { ResizeHandles } from './ui/ResizeHandles';
 import 'react-diff-view/style/index.css';
 
 interface GitLogEntry {
@@ -24,9 +29,22 @@ interface GitLogViewerProps {
 	cwd: string;
 	theme: Theme;
 	onClose: () => void;
+	sshRemoteId?: string;
+	/**
+	 * Open a file as a preview tab. Given an absolute path and the display name.
+	 * When provided, the per-file diff headers become clickable; the viewer
+	 * dismisses itself via `onClose` first, then calls this to open the file.
+	 */
+	onOpenFile?: (absolutePath: string, fileName: string) => void;
 }
 
-export const GitLogViewer = memo(function GitLogViewer({ cwd, theme, onClose }: GitLogViewerProps) {
+export const GitLogViewer = memo(function GitLogViewer({
+	cwd,
+	theme,
+	onClose,
+	sshRemoteId,
+	onOpenFile,
+}: GitLogViewerProps) {
 	const [entries, setEntries] = useState<GitLogEntry[]>([]);
 	const [totalCommits, setTotalCommits] = useState<number | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -35,7 +53,9 @@ export const GitLogViewer = memo(function GitLogViewer({ cwd, theme, onClose }: 
 	const [loadingDiff, setLoadingDiff] = useState(false);
 
 	const listRef = useRef<HTMLDivElement>(null);
+	const dialogRef = useRef<HTMLDivElement>(null);
 	const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
+	const colorBlindMode = useSettingsStore((s) => s.colorBlindMode);
 
 	// Keyboard navigation via shared hook
 	const { selectedIndex, setSelectedIndex, handleKeyDown } = useListNavigation({
@@ -46,11 +66,15 @@ export const GitLogViewer = memo(function GitLogViewer({ cwd, theme, onClose }: 
 		pageSize: 10,
 	});
 
-	const { registerLayer, unregisterLayer, updateLayerHandler } = useLayerStack();
-	const layerIdRef = useRef<string>();
-
 	const onCloseRef = useRef(onClose);
 	onCloseRef.current = onClose;
+
+	// Dismiss the viewer and open the given repo-relative file as a preview tab.
+	const openFileInPreview = (relPath: string) => {
+		if (!onOpenFile) return;
+		onClose();
+		onOpenFile(`${cwd}/${relPath}`, getBasename(relPath));
+	};
 
 	// Load git log on mount
 	useEffect(() => {
@@ -60,8 +84,8 @@ export const GitLogViewer = memo(function GitLogViewer({ cwd, theme, onClose }: 
 			try {
 				// Fetch log entries and total count in parallel
 				const [logResult, countResult] = await Promise.all([
-					window.maestro.git.log(cwd, { limit: 200 }),
-					window.maestro.git.commitCount(cwd),
+					window.maestro.git.log(cwd, { limit: 200 }, sshRemoteId),
+					window.maestro.git.commitCount(cwd, sshRemoteId),
 				]);
 
 				if (logResult.error) {
@@ -87,7 +111,7 @@ export const GitLogViewer = memo(function GitLogViewer({ cwd, theme, onClose }: 
 		async (hash: string) => {
 			setLoadingDiff(true);
 			try {
-				const result = await window.maestro.git.show(cwd, hash);
+				const result = await window.maestro.git.show(cwd, hash, sshRemoteId);
 				setSelectedCommitDiff(result.stdout);
 			} catch {
 				setSelectedCommitDiff(null);
@@ -105,31 +129,9 @@ export const GitLogViewer = memo(function GitLogViewer({ cwd, theme, onClose }: 
 		}
 	}, [selectedIndex, entries, loadCommitDiff]);
 
-	// Register with layer stack
-	useEffect(() => {
-		layerIdRef.current = registerLayer({
-			type: 'modal',
-			priority: MODAL_PRIORITIES.GIT_LOG,
-			blocksLowerLayers: true,
-			capturesFocus: true,
-			focusTrap: 'lenient',
-			ariaLabel: 'Git Log Viewer',
-			onEscape: () => onCloseRef.current(),
-		});
-
-		return () => {
-			if (layerIdRef.current) {
-				unregisterLayer(layerIdRef.current);
-			}
-		};
-	}, [registerLayer, unregisterLayer]);
-
-	// Update handler when dependencies change
-	useEffect(() => {
-		if (layerIdRef.current) {
-			updateLayerHandler(layerIdRef.current, () => onCloseRef.current());
-		}
-	}, [updateLayerHandler]);
+	useModalLayer(MODAL_PRIORITIES.GIT_LOG, 'Git Log Viewer', () => onCloseRef.current(), {
+		focusTrap: 'lenient',
+	});
 
 	// Scroll selected item into view
 	useEffect(() => {
@@ -276,6 +278,16 @@ export const GitLogViewer = memo(function GitLogViewer({ cwd, theme, onClose }: 
 
 		return stats.length > 0 ? stats : null;
 	}, [selectedCommitDiff]);
+	const resizableModal = useResizableModal({
+		resizeKey: 'git-log',
+		defaultSize: { width: 1200, height: 760 },
+		minSize: { width: 720, height: 480 },
+		externalRef: dialogRef,
+	});
+
+	useEffect(() => {
+		dialogRef.current?.focus();
+	}, []);
 
 	return (
 		<div
@@ -283,19 +295,25 @@ export const GitLogViewer = memo(function GitLogViewer({ cwd, theme, onClose }: 
 			onClick={onClose}
 		>
 			<div
-				className="w-[90%] max-w-[1600px] h-[90%] rounded-lg shadow-2xl flex flex-col overflow-hidden"
+				ref={dialogRef}
+				className="relative rounded-lg shadow-2xl flex flex-col overflow-hidden"
 				style={{
+					...resizableModal.style,
 					backgroundColor: theme.colors.bgMain,
-					borderColor: theme.colors.border,
-					border: '1px solid',
+					border: `1px solid ${theme.colors.border}`,
 				}}
+				data-modal-resize-key="git-log"
 				onClick={(e) => e.stopPropagation()}
 				role="dialog"
 				aria-modal="true"
 				aria-label="Git Log Viewer"
 				tabIndex={-1}
-				ref={(el) => el?.focus()}
 			>
+				<ResizeHandles
+					onResizeStart={resizableModal.onResizeStart}
+					accentColor={theme.colors.accent}
+				/>
+
 				{/* Header */}
 				<div
 					className="flex items-center justify-between px-6 py-4 border-b"
@@ -505,19 +523,24 @@ export const GitLogViewer = memo(function GitLogViewer({ cwd, theme, onClose }: 
 									</div>
 								) : parsedDiff && parsedDiff.length > 0 ? (
 									<div className="font-mono text-sm">
-										<style>{generateDiffViewStyles(theme)}</style>
+										<style>{generateDiffViewStyles(theme, colorBlindMode)}</style>
 										{parsedDiff.map((file, fileIndex) => (
 											<div key={fileIndex} className="mb-6">
-												{/* File header */}
-												<div
-													className="mb-2 p-2 rounded font-semibold text-xs"
-													style={{
-														backgroundColor: theme.colors.bgActivity,
-														color: theme.colors.textMain,
-													}}
+												{/* File header (click to open the file as a preview tab) */}
+												<GitFilePathHeader
+													theme={theme}
+													className="mb-2"
+													onOpen={
+														onOpenFile && !file.isDeletedFile
+															? () => openFileInPreview(file.newPath)
+															: undefined
+													}
+													title={
+														file.isDeletedFile ? undefined : `Open ${file.newPath} in a preview tab`
+													}
 												>
 													{file.newPath}
-												</div>
+												</GitFilePathHeader>
 
 												{/* Render hunks */}
 												{file.parsedDiff.map((parsedFile, pIndex) => (

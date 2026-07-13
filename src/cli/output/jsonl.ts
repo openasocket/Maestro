@@ -46,6 +46,8 @@ export interface TaskCompleteEvent extends JsonlEvent {
 	fullResponse?: string;
 	elapsedMs: number;
 	usageStats?: UsageStats;
+	synopsisUsageStats?: UsageStats;
+	synopsisSkipped?: boolean;
 	agentSessionId?: string;
 }
 
@@ -69,6 +71,17 @@ export interface CompleteEvent extends JsonlEvent {
 	totalTasksCompleted: number;
 	totalElapsedMs: number;
 	totalCost?: number;
+	// Set when the run ended because an agent emitted a `<!-- maestro:halt -->`
+	// marker. `success` is `false` in this case.
+	halted?: boolean;
+	haltReason?: string;
+}
+
+export interface HaltEvent extends JsonlEvent {
+	type: 'halt';
+	document: string;
+	taskIndex: number;
+	reason: string;
 }
 
 export interface ErrorEvent extends JsonlEvent {
@@ -106,6 +119,32 @@ export interface PlaybookEvent extends JsonlEvent {
 	maxLoops?: number | null;
 }
 
+// Settings command events
+export interface SettingEvent extends JsonlEvent {
+	type: 'setting';
+	key: string;
+	value: unknown;
+	valueType: string;
+	category: string;
+	description?: string;
+	defaultValue?: unknown;
+	isDefault?: boolean;
+}
+
+export interface SettingSetEvent extends JsonlEvent {
+	type: 'setting_set';
+	key: string;
+	oldValue: unknown;
+	newValue: unknown;
+}
+
+export interface SettingResetEvent extends JsonlEvent {
+	type: 'setting_reset';
+	key: string;
+	oldValue: unknown;
+	defaultValue: unknown;
+}
+
 // Union type of all events
 export type CliEvent =
 	| StartEvent
@@ -115,10 +154,14 @@ export type CliEvent =
 	| DocumentCompleteEvent
 	| LoopCompleteEvent
 	| CompleteEvent
+	| HaltEvent
 	| ErrorEvent
 	| GroupEvent
 	| AgentEvent
-	| PlaybookEvent;
+	| PlaybookEvent
+	| SettingEvent
+	| SettingSetEvent
+	| SettingResetEvent;
 
 /**
  * Emit a JSONL event to stdout

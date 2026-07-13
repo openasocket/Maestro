@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useGroupManagement, type UseGroupManagementDeps } from '../../../renderer/hooks';
 import type { Group, Session } from '../../../renderer/types';
+import { createMockSession } from '../../helpers/mockSession';
 
 // ============================================================================
 // Test Helpers
@@ -26,35 +27,7 @@ const createMockGroup = (overrides: Partial<Group> = {}): Group => ({
 	...overrides,
 });
 
-const createMockSession = (overrides: Partial<Session> = {}): Session => ({
-	id: 'session-1',
-	name: 'Test Session',
-	toolType: 'claude-code',
-	state: 'idle',
-	cwd: '/test/project',
-	fullPath: '/test/project',
-	projectRoot: '/test/project',
-	aiLogs: [],
-	shellLogs: [],
-	workLog: [],
-	contextUsage: 0,
-	inputMode: 'ai',
-	aiPid: 0,
-	terminalPid: 0,
-	port: 0,
-	isLive: false,
-	changedFiles: [],
-	isGitRepo: false,
-	fileTree: [],
-	fileExplorerExpanded: [],
-	fileExplorerScrollPos: 0,
-	executionQueue: [],
-	activeTimeMs: 0,
-	aiTabs: [],
-	activeTabId: 'tab-1',
-	closedTabHistory: [],
-	...overrides,
-});
+// createMockSession imported from shared helper
 
 const createDeps = (overrides: Partial<UseGroupManagementDeps> = {}): UseGroupManagementDeps => ({
 	groups: [createMockGroup()],
@@ -141,6 +114,29 @@ describe('useGroupManagement', () => {
 		expect(result.current.modalState.createGroupModalOpen).toBe(true);
 	});
 
+	it('preselects and clears the parent for a nested group creation', () => {
+		const deps = createDeps();
+		const { result } = renderHook(() => useGroupManagement(deps));
+
+		act(() => {
+			result.current.createNewGroup('parent');
+		});
+
+		expect(result.current.modalState).toMatchObject({
+			createGroupModalOpen: true,
+			createGroupParentId: 'parent',
+		});
+
+		act(() => {
+			result.current.handleCloseCreateGroupModal();
+		});
+
+		expect(result.current.modalState).toMatchObject({
+			createGroupModalOpen: false,
+			createGroupParentId: undefined,
+		});
+	});
+
 	it('assigns dragged session to group on drop', () => {
 		const session = createMockSession({ id: 'session-1' });
 		const deps = createDeps({
@@ -190,5 +186,34 @@ describe('useGroupManagement', () => {
 
 		expect(deps.setSessions).not.toHaveBeenCalled();
 		expect(deps.setDraggingSessionId).not.toHaveBeenCalled();
+	});
+
+	it('sets a root group parent', () => {
+		const parent = createMockGroup({ id: 'parent' });
+		const child = createMockGroup({ id: 'child' });
+		const deps = createDeps({ groups: [parent, child] });
+		const { result } = renderHook(() => useGroupManagement(deps));
+
+		act(() => {
+			result.current.setGroupParent('child', 'parent');
+		});
+
+		const updater = deps.setGroups.mock.calls[0][0];
+		expect(updater(deps.groups)).toEqual([parent, { ...child, parentGroupId: 'parent' }]);
+	});
+
+	it('rejects a move that would exceed the depth cap', () => {
+		const parent = createMockGroup({ id: 'parent' });
+		const child = createMockGroup({ id: 'child', parentGroupId: 'parent' });
+		const grandchild = createMockGroup({ id: 'grandchild' });
+		const deps = createDeps({ groups: [parent, child, grandchild] });
+		const { result } = renderHook(() => useGroupManagement(deps));
+
+		act(() => {
+			result.current.setGroupParent('grandchild', 'child');
+		});
+
+		const updater = deps.setGroups.mock.calls[0][0];
+		expect(updater(deps.groups)).toBe(deps.groups);
 	});
 });

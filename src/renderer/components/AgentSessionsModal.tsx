@@ -9,12 +9,18 @@ import {
 	Loader2,
 	Star,
 } from 'lucide-react';
+import { GhostIconButton } from './ui/GhostIconButton';
+import { Spinner } from './ui/Spinner';
+import { EmptyStatePlaceholder } from './ui/EmptyStatePlaceholder';
+import { EscCloseHint } from './ui/EscCloseHint';
 import type { Theme, Session } from '../types';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { useListNavigation } from '../hooks';
+import { useResizableModal } from '../hooks/ui/useResizableModal';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { formatSize, formatRelativeTime } from '../utils/formatters';
 import { ToolCallCard } from './ToolCallCard';
+import { ResizeHandles } from './ui/ResizeHandles';
 
 interface AgentSession {
 	sessionId: string;
@@ -73,6 +79,7 @@ export function AgentSessionsModal({
 	const selectedItemRef = useRef<HTMLButtonElement>(null);
 	const messagesContainerRef = useRef<HTMLDivElement>(null);
 	const sessionsContainerRef = useRef<HTMLDivElement>(null);
+	const modalRef = useRef<HTMLDivElement>(null);
 	const layerIdRef = useRef<string>();
 	const onCloseRef = useRef(onClose);
 	onCloseRef.current = onClose;
@@ -169,9 +176,12 @@ export function AgentSessionsModal({
 				setStarredSessions(starredFromOrigins);
 
 				// Use generic agentSessions API for session listing
-				const result = await window.maestro.agentSessions.listPaginated(agentId, projectPath, {
-					limit: 100,
-				});
+				const result = await window.maestro.agentSessions.listPaginated(
+					agentId,
+					projectPath,
+					{ limit: 100 },
+					activeSession.sshRemoteId
+				);
 				console.log(
 					'AgentSessionsModal: Got sessions:',
 					result.sessions.length,
@@ -190,7 +200,7 @@ export function AgentSessionsModal({
 		};
 
 		loadSessions();
-	}, [activeSession?.projectRoot, activeSession?.toolType]);
+	}, [activeSession?.projectRoot, activeSession?.toolType, activeSession?.sshRemoteId]);
 
 	// Load more sessions when scrolling near bottom
 	const loadMoreSessions = useCallback(async () => {
@@ -212,7 +222,8 @@ export function AgentSessionsModal({
 				{
 					cursor: nextCursorRef.current,
 					limit: 100,
-				}
+				},
+				activeSession.sshRemoteId
 			);
 
 			// Append new sessions, avoiding duplicates
@@ -228,7 +239,13 @@ export function AgentSessionsModal({
 		} finally {
 			setIsLoadingMoreSessions(false);
 		}
-	}, [activeSession?.projectRoot, activeSession?.toolType, hasMoreSessions, isLoadingMoreSessions]);
+	}, [
+		activeSession?.projectRoot,
+		activeSession?.toolType,
+		activeSession?.sshRemoteId,
+		hasMoreSessions,
+		isLoadingMoreSessions,
+	]);
 
 	// Handle scroll for sessions list pagination - load more at 70% scroll
 	const handleSessionsScroll = useCallback(() => {
@@ -291,16 +308,17 @@ export function AgentSessionsModal({
 	// Load messages when viewing a session
 	const loadMessages = useCallback(
 		async (session: AgentSession, offset: number = 0) => {
-			if (!activeSession?.cwd) return;
+			if (!activeSession?.projectRoot) return;
 
 			const agentId = activeSession.toolType || 'claude-code';
 			setMessagesLoading(true);
 			try {
 				const result = await window.maestro.agentSessions.read(
 					agentId,
-					activeSession.cwd,
+					activeSession.projectRoot,
 					session.sessionId,
-					{ offset, limit: 20 }
+					{ offset, limit: 20 },
+					activeSession.sshRemoteId
 				);
 
 				if (offset === 0) {
@@ -311,14 +329,16 @@ export function AgentSessionsModal({
 				}
 				setTotalMessages(result.total);
 				setHasMoreMessages(result.hasMore);
-				setMessagesOffset(offset + result.messages.length);
+				setMessagesOffset((prev) =>
+					offset === 0 ? result.messages.length : prev + result.messages.length
+				);
 			} catch (error) {
 				console.error('Failed to load messages:', error);
 			} finally {
 				setMessagesLoading(false);
 			}
 		},
-		[activeSession?.cwd, activeSession?.toolType]
+		[activeSession?.projectRoot, activeSession?.toolType, activeSession?.sshRemoteId]
 	);
 
 	// Handle viewing a session
@@ -425,17 +445,34 @@ export function AgentSessionsModal({
 	}, [viewingSession, onResumeSession, onClose]);
 
 	// formatSize and formatRelativeTime imported from ../utils/formatters
+	const resizableModal = useResizableModal({
+		resizeKey: 'agent-sessions',
+		defaultSize: { width: 720, height: 600 },
+		minSize: { width: 520, height: 360 },
+		externalRef: modalRef,
+	});
 
 	return (
-		<div className="fixed inset-0 modal-overlay flex items-start justify-center pt-24 z-[9999] animate-in fade-in duration-100">
+		<div className="fixed inset-0 modal-overlay flex items-center justify-center p-8 z-[9999] animate-in fade-in duration-100">
 			<div
+				ref={modalRef}
 				role="dialog"
 				aria-modal="true"
 				aria-label="Agent Sessions"
 				tabIndex={-1}
-				className="w-[700px] rounded-xl shadow-2xl border overflow-hidden flex flex-col max-h-[600px] outline-none"
-				style={{ backgroundColor: theme.colors.bgActivity, borderColor: theme.colors.border }}
+				className="relative rounded-xl shadow-2xl border overflow-hidden flex flex-col outline-none select-none"
+				style={{
+					...resizableModal.style,
+					backgroundColor: theme.colors.bgActivity,
+					borderColor: theme.colors.border,
+				}}
+				data-modal-resize-key="agent-sessions"
 			>
+				<ResizeHandles
+					onResizeStart={resizableModal.onResizeStart}
+					accentColor={theme.colors.accent}
+				/>
+
 				{/* Header */}
 				<div
 					className="p-4 border-b flex items-center gap-3"
@@ -443,16 +480,16 @@ export function AgentSessionsModal({
 				>
 					{viewingSession ? (
 						<>
-							<button
+							<GhostIconButton
 								onClick={() => {
 									setViewingSession(null);
 									setMessages([]);
 								}}
-								className="p-1 rounded hover:bg-white/10 transition-colors"
-								style={{ color: theme.colors.textDim }}
+								color={theme.colors.textDim}
+								ariaLabel="Go back"
 							>
 								<ChevronLeft className="w-5 h-5" />
-							</button>
+							</GhostIconButton>
 							<div className="flex-1 min-w-0">
 								<div
 									className="text-sm font-medium truncate"
@@ -488,12 +525,7 @@ export function AgentSessionsModal({
 								onChange={(e) => setSearch(e.target.value)}
 								onKeyDown={handleKeyDown}
 							/>
-							<div
-								className="px-2 py-0.5 rounded text-xs font-bold"
-								style={{ backgroundColor: theme.colors.bgMain, color: theme.colors.textDim }}
-							>
-								ESC
-							</div>
+							<EscCloseHint theme={theme} onClose={onClose} />
 						</>
 					)}
 				</div>
@@ -502,7 +534,7 @@ export function AgentSessionsModal({
 				{viewingSession ? (
 					<div
 						ref={messagesContainerRef}
-						className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin"
+						className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin select-text"
 						onScroll={handleMessagesScroll}
 					>
 						{/* Load more indicator */}
@@ -579,7 +611,7 @@ export function AgentSessionsModal({
 
 						{messagesLoading && messages.length === 0 && (
 							<div className="flex items-center justify-center py-8">
-								<Loader2 className="w-6 h-6 animate-spin" style={{ color: theme.colors.textDim }} />
+								<Spinner size={24} color={theme.colors.textDim} />
 							</div>
 						)}
 					</div>
@@ -591,14 +623,18 @@ export function AgentSessionsModal({
 					>
 						{loading ? (
 							<div className="flex items-center justify-center py-8">
-								<Loader2 className="w-6 h-6 animate-spin" style={{ color: theme.colors.textDim }} />
+								<Spinner size={24} color={theme.colors.textDim} />
 							</div>
 						) : filteredSessions.length === 0 ? (
-							<div className="px-4 py-8 text-center" style={{ color: theme.colors.textDim }}>
-								{sessions.length === 0
-									? 'No Claude sessions found for this project'
-									: 'No sessions match your search'}
-							</div>
+							<EmptyStatePlaceholder
+								theme={theme}
+								title={
+									sessions.length === 0
+										? 'No sessions found for this project'
+										: 'No sessions match your search'
+								}
+								verticalPadding="py-8"
+							/>
 						) : (
 							<>
 								{filteredSessions.map((session, i) => {
@@ -660,10 +696,7 @@ export function AgentSessionsModal({
 									<div className="py-3 flex justify-center items-center">
 										{isLoadingMoreSessions ? (
 											<div className="flex items-center gap-2">
-												<Loader2
-													className="w-4 h-4 animate-spin"
-													style={{ color: theme.colors.accent }}
-												/>
+												<Spinner size={16} color={theme.colors.accent} />
 												<span className="text-xs" style={{ color: theme.colors.textDim }}>
 													Loading more sessions...
 												</span>

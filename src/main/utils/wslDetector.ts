@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import { logger } from './logger';
+import { isLinux } from '../../shared/platformDetection';
 
 /**
  * WSL (Windows Subsystem for Linux) environment detection utilities.
@@ -20,7 +21,7 @@ export function isWsl(): boolean {
 		return wslDetectionCache;
 	}
 
-	if (process.platform !== 'linux') {
+	if (!isLinux()) {
 		wslDetectionCache = false;
 		return false;
 	}
@@ -43,7 +44,7 @@ export function isWsl(): boolean {
  * Check if a path is on a Windows-mounted filesystem in WSL.
  * Windows mounts are typically at /mnt/c, /mnt/d, etc.
  */
-export function isWindowsMountPath(filepath: string): boolean {
+function isWindowsMountPath(filepath: string): boolean {
 	return /^\/mnt\/[a-zA-Z](\/|$)/.test(filepath);
 }
 
@@ -72,22 +73,4 @@ export function checkWslEnvironment(cwd: string): boolean {
 
 	logger.debug('[WSL] Running from Linux filesystem - OK', 'WSLDetector', { cwd });
 	return false;
-}
-
-/**
- * Get a user-friendly warning message for WSL + Windows mount issues.
- */
-export function getWslWarningMessage(): string {
-	return (
-		'You appear to be running Maestro from a Windows-mounted path in WSL2. ' +
-		'This configuration causes critical issues including:\n\n' +
-		"• Socket binding failures (dev server won't start)\n" +
-		'• Electron sandbox crashes\n' +
-		'• npm install failures\n' +
-		'• Git index corruption\n\n' +
-		'Please move your project to the Linux filesystem:\n' +
-		'  mv /mnt/c/projects/maestro ~/maestro\n' +
-		'  cd ~/maestro && npm install\n\n' +
-		'See: https://docs.runmaestro.ai/installation#wsl2-users-windows-subsystem-for-linux'
-	);
 }

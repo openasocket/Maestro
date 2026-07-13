@@ -15,35 +15,11 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { ToastContainer } from '../../../renderer/components/Toast';
-import type { Theme } from '../../../renderer/types';
-import * as ToastContext from '../../../renderer/contexts/ToastContext';
+import { useNotificationStore } from '../../../renderer/stores/notificationStore';
+import type { Toast } from '../../../renderer/stores/notificationStore';
+import { mockTheme } from '../../helpers/mockTheme';
 
-// Mock the ToastContext
-vi.mock('../../../renderer/contexts/ToastContext', () => ({
-	useToast: vi.fn(),
-}));
-
-const mockTheme: Theme = {
-	id: 'dracula',
-	name: 'Dracula',
-	mode: 'dark',
-	colors: {
-		bgMain: '#282a36',
-		bgSidebar: '#21222c',
-		bgActivity: '#343746',
-		border: '#44475a',
-		textMain: '#f8f8f2',
-		textDim: '#6272a4',
-		accent: '#bd93f9',
-		accentDim: '#bd93f920',
-		accentText: '#f8f8f2',
-		success: '#50fa7b',
-		warning: '#ffb86c',
-		error: '#ff5555',
-	},
-};
-
-const createMockToast = (overrides = {}): ToastContext.Toast => ({
+const createMockToast = (overrides = {}): Toast => ({
 	id: 'toast-1',
 	type: 'info',
 	title: 'Test Toast',
@@ -53,22 +29,22 @@ const createMockToast = (overrides = {}): ToastContext.Toast => ({
 	...overrides,
 });
 
-describe('Toast', () => {
-	let mockUseToast: ReturnType<typeof vi.fn>;
-	let mockRemoveToast: ReturnType<typeof vi.fn>;
+/** Helper to set toasts in the store before rendering */
+function setStoreToasts(toasts: Toast[]) {
+	useNotificationStore.setState({ toasts });
+}
 
+describe('Toast', () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
-		mockRemoveToast = vi.fn();
-		mockUseToast = vi.mocked(ToastContext.useToast);
-		mockUseToast.mockReturnValue({
+		useNotificationStore.setState({
 			toasts: [],
-			addToast: vi.fn(),
-			removeToast: mockRemoveToast,
-			clearToasts: vi.fn(),
-			setDefaultDuration: vi.fn(),
-			setAudioFeedback: vi.fn(),
-			setOsNotifications: vi.fn(),
+			config: {
+				defaultDuration: 20,
+				audioFeedbackEnabled: false,
+				audioFeedbackCommand: '',
+				osNotificationsEnabled: true,
+			},
 		});
 	});
 
@@ -79,22 +55,15 @@ describe('Toast', () => {
 
 	describe('empty state', () => {
 		it('returns null when no toasts', () => {
-			const { container } = render(<ToastContainer theme={mockTheme} />);
-			expect(container.firstChild).toBeNull();
+			render(<ToastContainer theme={mockTheme} />);
+			// Portal renders to document.body, so no toast elements should exist
+			expect(document.body.querySelector('.fixed.bottom-4')).toBeNull();
 		});
 	});
 
 	describe('rendering toasts', () => {
 		it('renders toast with title and message', () => {
-			mockUseToast.mockReturnValue({
-				toasts: [createMockToast()],
-				addToast: vi.fn(),
-				removeToast: mockRemoveToast,
-				clearToasts: vi.fn(),
-				setDefaultDuration: vi.fn(),
-				setAudioFeedback: vi.fn(),
-				setOsNotifications: vi.fn(),
-			});
+			setStoreToasts([createMockToast()]);
 
 			render(<ToastContainer theme={mockTheme} />);
 			expect(screen.getByText('Test Toast')).toBeInTheDocument();
@@ -102,18 +71,10 @@ describe('Toast', () => {
 		});
 
 		it('renders multiple toasts', () => {
-			mockUseToast.mockReturnValue({
-				toasts: [
-					createMockToast({ id: 'toast-1', title: 'First' }),
-					createMockToast({ id: 'toast-2', title: 'Second' }),
-				],
-				addToast: vi.fn(),
-				removeToast: mockRemoveToast,
-				clearToasts: vi.fn(),
-				setDefaultDuration: vi.fn(),
-				setAudioFeedback: vi.fn(),
-				setOsNotifications: vi.fn(),
-			});
+			setStoreToasts([
+				createMockToast({ id: 'toast-1', title: 'First' }),
+				createMockToast({ id: 'toast-2', title: 'Second' }),
+			]);
 
 			render(<ToastContainer theme={mockTheme} />);
 			expect(screen.getByText('First')).toBeInTheDocument();
@@ -125,15 +86,7 @@ describe('Toast', () => {
 		it('renders all toast types without error', () => {
 			const types = ['success', 'error', 'warning', 'info'] as const;
 			types.forEach((type) => {
-				mockUseToast.mockReturnValue({
-					toasts: [createMockToast({ type, title: `${type} toast` })],
-					addToast: vi.fn(),
-					removeToast: mockRemoveToast,
-					clearToasts: vi.fn(),
-					setDefaultDuration: vi.fn(),
-					setAudioFeedback: vi.fn(),
-					setOsNotifications: vi.fn(),
-				});
+				setStoreToasts([createMockToast({ type, title: `${type} toast` })]);
 
 				const { unmount } = render(<ToastContainer theme={mockTheme} />);
 				expect(screen.getByText(`${type} toast`)).toBeInTheDocument();
@@ -144,21 +97,13 @@ describe('Toast', () => {
 
 	describe('metadata display', () => {
 		it('displays group, project, and tab when provided', () => {
-			mockUseToast.mockReturnValue({
-				toasts: [
-					createMockToast({
-						group: 'Test Group',
-						project: 'My Project',
-						tabName: 'Tab 1',
-					}),
-				],
-				addToast: vi.fn(),
-				removeToast: mockRemoveToast,
-				clearToasts: vi.fn(),
-				setDefaultDuration: vi.fn(),
-				setAudioFeedback: vi.fn(),
-				setOsNotifications: vi.fn(),
-			});
+			setStoreToasts([
+				createMockToast({
+					group: 'Test Group',
+					project: 'My Project',
+					tabName: 'Tab 1',
+				}),
+			]);
 
 			render(<ToastContainer theme={mockTheme} />);
 			expect(screen.getByText('Test Group')).toBeInTheDocument();
@@ -167,20 +112,12 @@ describe('Toast', () => {
 		});
 
 		it('shows agentSessionId as title attribute on tab name', () => {
-			mockUseToast.mockReturnValue({
-				toasts: [
-					createMockToast({
-						tabName: 'Tab 1',
-						agentSessionId: 'abc-123',
-					}),
-				],
-				addToast: vi.fn(),
-				removeToast: mockRemoveToast,
-				clearToasts: vi.fn(),
-				setDefaultDuration: vi.fn(),
-				setAudioFeedback: vi.fn(),
-				setOsNotifications: vi.fn(),
-			});
+			setStoreToasts([
+				createMockToast({
+					tabName: 'Tab 1',
+					agentSessionId: 'abc-123',
+				}),
+			]);
 
 			render(<ToastContainer theme={mockTheme} />);
 			expect(screen.getByText('Tab 1')).toHaveAttribute('title', 'Claude Session: abc-123');
@@ -197,15 +134,7 @@ describe('Toast', () => {
 			];
 
 			testCases.forEach(({ duration, expected }) => {
-				mockUseToast.mockReturnValue({
-					toasts: [createMockToast({ taskDuration: duration })],
-					addToast: vi.fn(),
-					removeToast: mockRemoveToast,
-					clearToasts: vi.fn(),
-					setDefaultDuration: vi.fn(),
-					setAudioFeedback: vi.fn(),
-					setOsNotifications: vi.fn(),
-				});
+				setStoreToasts([createMockToast({ taskDuration: duration })]);
 
 				const { unmount } = render(<ToastContainer theme={mockTheme} />);
 				expect(screen.getByText(new RegExp(`Completed in ${expected}`))).toBeInTheDocument();
@@ -214,15 +143,7 @@ describe('Toast', () => {
 		});
 
 		it('does not display when taskDuration is 0 or undefined', () => {
-			mockUseToast.mockReturnValue({
-				toasts: [createMockToast({ taskDuration: 0 })],
-				addToast: vi.fn(),
-				removeToast: mockRemoveToast,
-				clearToasts: vi.fn(),
-				setDefaultDuration: vi.fn(),
-				setAudioFeedback: vi.fn(),
-				setOsNotifications: vi.fn(),
-			});
+			setStoreToasts([createMockToast({ taskDuration: 0 })]);
 
 			render(<ToastContainer theme={mockTheme} />);
 			expect(screen.queryByText(/Completed in/)).not.toBeInTheDocument();
@@ -231,15 +152,7 @@ describe('Toast', () => {
 
 	describe('close button', () => {
 		it('calls removeToast when clicked', async () => {
-			mockUseToast.mockReturnValue({
-				toasts: [createMockToast()],
-				addToast: vi.fn(),
-				removeToast: mockRemoveToast,
-				clearToasts: vi.fn(),
-				setDefaultDuration: vi.fn(),
-				setAudioFeedback: vi.fn(),
-				setOsNotifications: vi.fn(),
-			});
+			setStoreToasts([createMockToast()]);
 
 			render(<ToastContainer theme={mockTheme} />);
 			const closeButton = screen.getAllByRole('button')[0];
@@ -249,27 +162,18 @@ describe('Toast', () => {
 				vi.advanceTimersByTime(300);
 			});
 
-			expect(mockRemoveToast).toHaveBeenCalledWith('toast-1');
+			// Toast should be removed from the store
+			expect(useNotificationStore.getState().toasts).toHaveLength(0);
 		});
 	});
 
 	describe('session navigation', () => {
 		it('calls onSessionClick with sessionId when toast is clicked', () => {
 			const onSessionClick = vi.fn();
-			mockUseToast.mockReturnValue({
-				toasts: [createMockToast({ sessionId: 'session-1' })],
-				addToast: vi.fn(),
-				removeToast: mockRemoveToast,
-				clearToasts: vi.fn(),
-				setDefaultDuration: vi.fn(),
-				setAudioFeedback: vi.fn(),
-				setOsNotifications: vi.fn(),
-			});
+			setStoreToasts([createMockToast({ sessionId: 'session-1' })]);
 
-			const { container } = render(
-				<ToastContainer theme={mockTheme} onSessionClick={onSessionClick} />
-			);
-			const clickableToast = container.querySelector('.cursor-pointer');
+			render(<ToastContainer theme={mockTheme} onSessionClick={onSessionClick} />);
+			const clickableToast = document.body.querySelector('.cursor-pointer');
 			fireEvent.click(clickableToast!);
 
 			expect(onSessionClick).toHaveBeenCalledWith('session-1', undefined);
@@ -277,20 +181,10 @@ describe('Toast', () => {
 
 		it('includes tabId when provided', () => {
 			const onSessionClick = vi.fn();
-			mockUseToast.mockReturnValue({
-				toasts: [createMockToast({ sessionId: 'session-1', tabId: 'tab-1' })],
-				addToast: vi.fn(),
-				removeToast: mockRemoveToast,
-				clearToasts: vi.fn(),
-				setDefaultDuration: vi.fn(),
-				setAudioFeedback: vi.fn(),
-				setOsNotifications: vi.fn(),
-			});
+			setStoreToasts([createMockToast({ sessionId: 'session-1', tabId: 'tab-1' })]);
 
-			const { container } = render(
-				<ToastContainer theme={mockTheme} onSessionClick={onSessionClick} />
-			);
-			const clickableToast = container.querySelector('.cursor-pointer');
+			render(<ToastContainer theme={mockTheme} onSessionClick={onSessionClick} />);
+			const clickableToast = document.body.querySelector('.cursor-pointer');
 			fireEvent.click(clickableToast!);
 
 			expect(onSessionClick).toHaveBeenCalledWith('session-1', 'tab-1');
@@ -298,37 +192,101 @@ describe('Toast', () => {
 
 		it('is not clickable without sessionId', () => {
 			const onSessionClick = vi.fn();
-			mockUseToast.mockReturnValue({
-				toasts: [createMockToast()],
-				addToast: vi.fn(),
-				removeToast: mockRemoveToast,
-				clearToasts: vi.fn(),
-				setDefaultDuration: vi.fn(),
-				setAudioFeedback: vi.fn(),
-				setOsNotifications: vi.fn(),
-			});
+			setStoreToasts([createMockToast()]);
 
-			const { container } = render(
-				<ToastContainer theme={mockTheme} onSessionClick={onSessionClick} />
+			render(<ToastContainer theme={mockTheme} onSessionClick={onSessionClick} />);
+			expect(document.body.querySelector('.cursor-pointer')).not.toBeInTheDocument();
+		});
+	});
+
+	describe('clickAction', () => {
+		it('jump-session: dispatches onSessionClick with the action sessionId/tabId', () => {
+			const onSessionClick = vi.fn();
+			setStoreToasts([
+				createMockToast({
+					clickAction: { kind: 'jump-session', sessionId: 'sess-9', tabId: 'tab-3' },
+				}),
+			]);
+
+			render(<ToastContainer theme={mockTheme} onSessionClick={onSessionClick} />);
+			const clickableToast = document.body.querySelector('.cursor-pointer');
+			fireEvent.click(clickableToast!);
+
+			expect(onSessionClick).toHaveBeenCalledWith('sess-9', 'tab-3');
+		});
+
+		it('clickAction takes precedence over legacy sessionId/tabId fields', () => {
+			const onSessionClick = vi.fn();
+			setStoreToasts([
+				createMockToast({
+					sessionId: 'legacy-session',
+					tabId: 'legacy-tab',
+					clickAction: { kind: 'jump-session', sessionId: 'sess-9' },
+				}),
+			]);
+
+			render(<ToastContainer theme={mockTheme} onSessionClick={onSessionClick} />);
+			const clickableToast = document.body.querySelector('.cursor-pointer');
+			fireEvent.click(clickableToast!);
+
+			// Should pick the clickAction's sessionId, not the legacy one
+			expect(onSessionClick).toHaveBeenCalledWith('sess-9', undefined);
+			expect(onSessionClick).not.toHaveBeenCalledWith('legacy-session', 'legacy-tab');
+		});
+
+		it('open-file: dispatches the maestro:openFileTab CustomEvent', () => {
+			const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+			setStoreToasts([
+				createMockToast({
+					clickAction: { kind: 'open-file', sessionId: 'sess-9', path: '/tmp/foo.ts' },
+				}),
+			]);
+
+			render(<ToastContainer theme={mockTheme} />);
+			const clickableToast = document.body.querySelector('.cursor-pointer');
+			fireEvent.click(clickableToast!);
+
+			const matched = dispatchSpy.mock.calls.find(
+				([e]) => e instanceof CustomEvent && e.type === 'maestro:openFileTab'
 			);
-			expect(container.querySelector('.cursor-pointer')).not.toBeInTheDocument();
+			expect(matched).toBeTruthy();
+			const evt = matched![0] as CustomEvent;
+			expect(evt.detail).toEqual({ sessionId: 'sess-9', filePath: '/tmp/foo.ts' });
+			dispatchSpy.mockRestore();
+		});
+
+		it('open-url: opens the URL via the shell helper', () => {
+			setStoreToasts([
+				createMockToast({
+					clickAction: { kind: 'open-url', url: 'https://example.com/logs' },
+				}),
+			]);
+
+			render(<ToastContainer theme={mockTheme} />);
+			const clickableToast = document.body.querySelector('.cursor-pointer');
+			fireEvent.click(clickableToast!);
+
+			expect(window.maestro.shell.openExternal).toHaveBeenCalledWith('https://example.com/logs');
+		});
+
+		it('makes a toast clickable even without a sessionId', () => {
+			setStoreToasts([
+				createMockToast({
+					clickAction: { kind: 'open-url', url: 'https://example.com' },
+				}),
+			]);
+
+			render(<ToastContainer theme={mockTheme} />);
+			expect(document.body.querySelector('.cursor-pointer')).toBeInTheDocument();
 		});
 	});
 
 	describe('animation states', () => {
 		it('starts with entering animation then transitions to normal', () => {
-			mockUseToast.mockReturnValue({
-				toasts: [createMockToast()],
-				addToast: vi.fn(),
-				removeToast: mockRemoveToast,
-				clearToasts: vi.fn(),
-				setDefaultDuration: vi.fn(),
-				setAudioFeedback: vi.fn(),
-				setOsNotifications: vi.fn(),
-			});
+			setStoreToasts([createMockToast()]);
 
-			const { container } = render(<ToastContainer theme={mockTheme} />);
-			const toastOuter = container.querySelector('.relative.overflow-hidden');
+			render(<ToastContainer theme={mockTheme} />);
+			const toastOuter = document.body.querySelector('.relative.overflow-hidden');
 
 			// Initially entering
 			expect(toastOuter).toHaveStyle({ transform: 'translateX(100%)' });
@@ -343,33 +301,152 @@ describe('Toast', () => {
 
 	describe('progress bar', () => {
 		it('renders when duration is provided', () => {
-			mockUseToast.mockReturnValue({
-				toasts: [createMockToast({ duration: 5000 })],
-				addToast: vi.fn(),
-				removeToast: mockRemoveToast,
-				clearToasts: vi.fn(),
-				setDefaultDuration: vi.fn(),
-				setAudioFeedback: vi.fn(),
-				setOsNotifications: vi.fn(),
-			});
+			setStoreToasts([createMockToast({ duration: 5000 })]);
 
-			const { container } = render(<ToastContainer theme={mockTheme} />);
-			expect(container.querySelector('.h-1.rounded-b-lg')).toBeInTheDocument();
+			render(<ToastContainer theme={mockTheme} />);
+			expect(document.body.querySelector('.h-1.rounded-b-lg')).toBeInTheDocument();
 		});
 
 		it('does not render when duration is 0', () => {
-			mockUseToast.mockReturnValue({
-				toasts: [createMockToast({ duration: 0 })],
-				addToast: vi.fn(),
-				removeToast: mockRemoveToast,
-				clearToasts: vi.fn(),
-				setDefaultDuration: vi.fn(),
-				setAudioFeedback: vi.fn(),
-				setOsNotifications: vi.fn(),
+			setStoreToasts([createMockToast({ duration: 0 })]);
+
+			render(<ToastContainer theme={mockTheme} />);
+			expect(document.body.querySelector('.h-1.rounded-b-lg')).not.toBeInTheDocument();
+		});
+	});
+
+	describe('action URL link', () => {
+		it('renders action link when actionUrl is provided', () => {
+			setStoreToasts([
+				createMockToast({
+					actionUrl: 'https://github.com/org/repo/pull/1',
+					actionLabel: 'View PR',
+				}),
+			]);
+
+			render(<ToastContainer theme={mockTheme} />);
+			expect(screen.getByText('View PR')).toBeInTheDocument();
+		});
+
+		it('uses actionUrl as label when actionLabel is not provided', () => {
+			setStoreToasts([
+				createMockToast({
+					actionUrl: 'https://github.com/org/repo/pull/1',
+				}),
+			]);
+
+			render(<ToastContainer theme={mockTheme} />);
+			expect(screen.getByText('https://github.com/org/repo/pull/1')).toBeInTheDocument();
+		});
+
+		it('opens external URL when action link is clicked', () => {
+			setStoreToasts([
+				createMockToast({
+					actionUrl: 'https://github.com/org/repo/pull/1',
+					actionLabel: 'View PR',
+				}),
+			]);
+
+			render(<ToastContainer theme={mockTheme} />);
+			fireEvent.click(screen.getByText('View PR'));
+			expect(window.maestro.shell.openExternal).toHaveBeenCalledWith(
+				'https://github.com/org/repo/pull/1'
+			);
+		});
+
+		it('does not render action link when actionUrl is not provided', () => {
+			setStoreToasts([createMockToast()]);
+
+			render(<ToastContainer theme={mockTheme} />);
+			// No anchor/button with link behavior beyond the close button
+			const buttons = screen.getAllByRole('button');
+			expect(buttons).toHaveLength(1); // only the close button
+		});
+	});
+
+	describe('close button does not trigger navigation', () => {
+		it('close click does not call onSessionClick', () => {
+			const onSessionClick = vi.fn();
+			setStoreToasts([createMockToast({ sessionId: 'session-1' })]);
+
+			render(<ToastContainer theme={mockTheme} onSessionClick={onSessionClick} />);
+			// Close button is the last button (the X icon)
+			const buttons = screen.getAllByRole('button');
+			const closeButton = buttons[buttons.length - 1];
+			fireEvent.click(closeButton);
+
+			// onSessionClick should NOT be called from close
+			// (onSessionClick triggers from the toast body click)
+			expect(onSessionClick).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('no metadata row', () => {
+		it('does not render metadata section when no group/project/tabName', () => {
+			setStoreToasts([createMockToast()]);
+
+			render(<ToastContainer theme={mockTheme} />);
+			// The metadata row has accentDim styled spans - should not exist
+			const accentSpans = document.body.querySelectorAll('.px-1\\.5.py-0\\.5.rounded');
+			expect(accentSpans).toHaveLength(0);
+		});
+	});
+
+	describe('store reactivity', () => {
+		it('re-renders when toasts are added to the store after mount', () => {
+			render(<ToastContainer theme={mockTheme} />);
+			expect(screen.queryByText('Dynamic Toast')).not.toBeInTheDocument();
+
+			// Add toast to store after render
+			act(() => {
+				useNotificationStore
+					.getState()
+					.addToast(createMockToast({ id: 'dynamic-1', title: 'Dynamic Toast' }));
 			});
 
-			const { container } = render(<ToastContainer theme={mockTheme} />);
-			expect(container.querySelector('.h-1.rounded-b-lg')).not.toBeInTheDocument();
+			expect(screen.getByText('Dynamic Toast')).toBeInTheDocument();
+		});
+
+		it('re-renders when toasts are removed from the store', () => {
+			setStoreToasts([createMockToast({ id: 'removable', title: 'Will Vanish' })]);
+
+			render(<ToastContainer theme={mockTheme} />);
+			expect(screen.getByText('Will Vanish')).toBeInTheDocument();
+
+			act(() => {
+				useNotificationStore.getState().removeToast('removable');
+			});
+
+			expect(screen.queryByText('Will Vanish')).not.toBeInTheDocument();
+		});
+	});
+
+	describe('duration formatting edge cases', () => {
+		it('formats hours correctly', () => {
+			setStoreToasts([createMockToast({ taskDuration: 3661000 })]);
+
+			const { unmount } = render(<ToastContainer theme={mockTheme} />);
+			expect(screen.getByText(/Completed in 1h 1m 1s/)).toBeInTheDocument();
+			unmount();
+		});
+
+		it('formats days correctly', () => {
+			// 1 day, 2 hours, 3 minutes (seconds omitted when days present)
+			setStoreToasts([createMockToast({ taskDuration: 93780000 })]);
+
+			const { unmount } = render(<ToastContainer theme={mockTheme} />);
+			expect(screen.getByText(/Completed in 1d 2h 3m/)).toBeInTheDocument();
+			unmount();
+		});
+
+		it('shows 0s for exactly 0ms edge (not rendered due to guard)', () => {
+			// taskDuration of 0 is guarded — "does not display" already tested
+			// But let's verify sub-second with exact 1000ms boundary
+			setStoreToasts([createMockToast({ taskDuration: 1000 })]);
+
+			const { unmount } = render(<ToastContainer theme={mockTheme} />);
+			expect(screen.getByText(/Completed in 1s/)).toBeInTheDocument();
+			unmount();
 		});
 	});
 });

@@ -12,10 +12,12 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import type { ToolType, Session } from '../../types';
 import type { AgentCapabilities } from './useAgentCapabilities';
 import { DEFAULT_CAPABILITIES } from './useAgentCapabilities';
+import { getAgentIcon } from '../../constants/agentIcons';
 
 // Use AgentConfig from types - it has optional capabilities fields
 // The detect API may not return all capability fields
 import type { AgentConfig } from '../../types';
+import { logger } from '../../utils/logger';
 
 /**
  * Agent availability status for display in selection UIs
@@ -56,28 +58,6 @@ export interface UseAvailableAgentsReturn {
 	refresh: () => Promise<void>;
 	/** Get a specific agent by ID */
 	getAgent: (id: ToolType) => AvailableAgent | undefined;
-}
-
-/**
- * Get display icon for an agent
- */
-function getAgentIcon(agentId: string): string {
-	switch (agentId) {
-		case 'claude-code':
-			return '🤖';
-		case 'codex':
-			return '◇';
-		case 'gemini-cli':
-			return '🔷';
-		case 'qwen3-coder':
-			return '⬡';
-		case 'opencode':
-			return '📟';
-		case 'factory-droid':
-			return '🏭';
-		default:
-			return '🔧';
-	}
 }
 
 /**
@@ -125,7 +105,7 @@ export function useAvailableAgents(
 			const detectedAgents = await window.maestro.agents.detect();
 			setRawAgents(detectedAgents);
 		} catch (err) {
-			console.error('Failed to detect agents:', err);
+			logger.error('Failed to detect agents:', undefined, err);
 			setError(err instanceof Error ? err.message : 'Failed to detect agents');
 			setRawAgents([]);
 		} finally {

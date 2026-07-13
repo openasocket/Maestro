@@ -1,15 +1,20 @@
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
+import { isWindows } from '../../shared/platformDetection';
 
 const execFileAsync = promisify(execFile);
 
 export interface ExecOptions {
 	input?: string; // Content to write to stdin
+	/** Timeout in milliseconds. If the process exceeds this, it is killed and an error is returned. */
+	timeout?: number;
 }
 
-// Maximum buffer size for command output (10MB)
-const EXEC_MAX_BUFFER = 10 * 1024 * 1024;
+// Maximum buffer size for command output (100MB).
+// Sized to comfortably hold large remote-fs reads (e.g., multi-MB session
+// transcripts streamed back over SSH via `cat`) without truncating mid-file.
+const EXEC_MAX_BUFFER = 100 * 1024 * 1024;
 
 export interface ExecResult {
 	stdout: string;
@@ -47,7 +52,19 @@ export function needsWindowsShell(command: string): boolean {
 	// This prevents issues like % being interpreted as environment variables on Windows
 	// Extract basename to handle full paths like 'C:\Program Files\Git\bin\git'
 	// Use regex to handle both Unix (/) and Windows (\) path separators
-	const knownExeCommands = new Set(['git', 'node', 'npm', 'npx', 'yarn', 'pnpm', 'python', 'python3', 'pip', 'pip3']);
+	const knownExeCommands = new Set([
+		'git',
+		'gh',
+		'node',
+		'npm',
+		'npx',
+		'yarn',
+		'pnpm',
+		'python',
+		'python3',
+		'pip',
+		'pip3',
+	]);
 	const commandBaseName = lowerCommand.split(/[\\/]/).pop() || lowerCommand;
 	if (knownExeCommands.has(commandBaseName)) {
 		return false;
@@ -79,11 +96,14 @@ export async function execFileNoThrow(
 	// Handle backward compatibility: options can be env (old signature) or ExecOptions (new)
 	let env: NodeJS.ProcessEnv | undefined;
 	let input: string | undefined;
+	let timeout: number | undefined;
 
 	if (options) {
-		if ('input' in options) {
+		if ('input' in options || 'timeout' in options) {
 			// New signature with ExecOptions
-			input = options.input;
+			const execOpts = options as ExecOptions;
+			input = execOpts.input;
+			timeout = execOpts.timeout;
 		} else {
 			// Old signature with just env
 			env = options as NodeJS.ProcessEnv;
@@ -92,14 +112,13 @@ export async function execFileNoThrow(
 
 	// If input is provided, use spawn instead of execFile to write to stdin
 	if (input !== undefined) {
-		return execFileWithInput(command, args, cwd, input);
+		return execFileWithInput(command, args, cwd, input, timeout);
 	}
 
 	try {
 		// On Windows, some commands need shell execution
 		// This is safe because we're executing a specific file path, not user input
-		const isWindows = process.platform === 'win32';
-		const useShell = isWindows && needsWindowsShell(command);
+		const useShell = isWindows() && needsWindowsShell(command);
 
 		const { stdout, stderr } = await execFileAsync(command, args, {
 			cwd,
@@ -107,6 +126,7 @@ export async function execFileNoThrow(
 			encoding: 'utf8',
 			maxBuffer: EXEC_MAX_BUFFER,
 			shell: useShell,
+			timeout,
 		});
 
 		return {
@@ -117,9 +137,67 @@ export async function execFileNoThrow(
 	} catch (error: any) {
 		// execFile throws on non-zero exit codes
 		// Use ?? instead of || to correctly handle exit code 0 (which is falsy but valid)
+
+		// When execFile kills a process due to timeout, error.killed is true and
+		// error.code is undefined (process didn't exit normally). We surface this
+		// as 'ETIMEDOUT' so callers (e.g., remote-fs retry logic) can detect it.
+		// Note: maxBuffer kills also set error.killed, but those have
+		// error.code = 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', so we exclude them.
+		const isTimeout = timeout && error.killed && !error.code;
+
 		return {
 			stdout: error.stdout || '',
-			stderr: error.stderr || error.message || '',
+			stderr: isTimeout
+				? `${error.stderr || ''}\nETIMEDOUT: process timed out after ${timeout}ms`
+				: error.stderr || error.message || '',
+			exitCode: isTimeout ? 'ETIMEDOUT' : (error.code ?? 1),
+		};
+	}
+}
+
+export interface ExecBufferResult {
+	/** Raw stdout bytes, binary-safe (not decoded to a string). */
+	stdout: Buffer;
+	stderr: string;
+	exitCode: number | string;
+}
+
+/**
+ * Binary-safe sibling of `execFileNoThrow`: captures stdout as a raw Buffer
+ * instead of a utf8 string. Use this for reading binary blobs (e.g. `git show`
+ * of an image at a ref) where decoding to a string would corrupt the data.
+ *
+ * Crucially this is async (promisified `execFile`), so it does NOT block the
+ * Electron main-process event loop the way `spawnSync` does - a large blob or a
+ * slow git object lookup no longer freezes the whole UI.
+ */
+export async function execFileBufferNoThrow(
+	command: string,
+	args: string[] = [],
+	cwd?: string,
+	maxBuffer: number = EXEC_MAX_BUFFER
+): Promise<ExecBufferResult> {
+	try {
+		const useShell = isWindows() && needsWindowsShell(command);
+
+		const { stdout, stderr } = await execFileAsync(command, args, {
+			cwd,
+			encoding: 'buffer',
+			maxBuffer,
+			shell: useShell,
+		});
+
+		return {
+			// With `encoding: 'buffer'` Node returns Buffers at runtime even though
+			// the promisified type signature still says string.
+			stdout: stdout as unknown as Buffer,
+			stderr: (stderr as unknown as Buffer)?.toString() ?? '',
+			exitCode: 0,
+		};
+	} catch (error: any) {
+		return {
+			stdout: Buffer.isBuffer(error.stdout) ? error.stdout : Buffer.alloc(0),
+			stderr: error.stderr?.toString() || error.message || '',
 			exitCode: error.code ?? 1,
 		};
 	}
@@ -133,11 +211,11 @@ async function execFileWithInput(
 	command: string,
 	args: string[],
 	cwd: string | undefined,
-	input: string
+	input: string,
+	timeout?: number
 ): Promise<ExecResult> {
 	return new Promise((resolve) => {
-		const isWindows = process.platform === 'win32';
-		const useShell = isWindows && needsWindowsShell(command);
+		const useShell = isWindows() && needsWindowsShell(command);
 
 		const child = spawn(command, args, {
 			cwd,
@@ -147,6 +225,16 @@ async function execFileWithInput(
 
 		let stdout = '';
 		let stderr = '';
+		let killed = false;
+
+		// spawn() doesn't support timeout natively, so implement it manually
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		if (timeout && timeout > 0) {
+			timer = setTimeout(() => {
+				killed = true;
+				child.kill();
+			}, timeout);
+		}
 
 		child.stdout?.on('data', (data) => {
 			stdout += data.toString();
@@ -157,14 +245,16 @@ async function execFileWithInput(
 		});
 
 		child.on('close', (code) => {
+			if (timer) clearTimeout(timer);
 			resolve({
 				stdout,
-				stderr,
-				exitCode: code ?? 1,
+				stderr: killed ? `${stderr}\nETIMEDOUT: process timed out after ${timeout}ms` : stderr,
+				exitCode: killed ? 'ETIMEDOUT' : (code ?? 1),
 			});
 		});
 
 		child.on('error', (err) => {
+			if (timer) clearTimeout(timer);
 			resolve({
 				stdout: '',
 				stderr: err.message,

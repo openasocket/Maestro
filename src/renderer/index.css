@@ -3,337 +3,689 @@
 @tailwind utilities;
 
 * {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
 }
 
 html,
 body,
 #root {
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
 }
 
 body {
-  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+	font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+/* HUD mode: the cadenza overlay window is transparent so the desktop and
+   other apps show through the gaps between floating cards. */
+html.cadenza-hud,
+html.cadenza-hud body,
+html.cadenza-hud #root {
+	background: transparent !important;
 }
 
 /* Placeholder text styling - ensure clear distinction from actual input values */
 /* Uses lower opacity and italic to clearly indicate placeholder state */
 input::placeholder,
 textarea::placeholder {
-  opacity: 0.35;
-  font-style: italic;
+	opacity: 0.35;
+	font-style: italic;
 }
 
-/* Custom scrollbar styles - subtle by default, brighter on hover */
+/* ==========================================================================
+   App-wide themed scrollbars
+   ==========================================================================
+
+   Theme tokens (set on :root by useThemeStyles in src/renderer/hooks/ui/
+   useThemeStyles.ts):
+
+     --scrollbar-thumb        — idle thumb color (theme `border`)
+     --scrollbar-thumb-hover  — hover thumb color (theme `textDim`)
+     --scrollbar-thumb-active — actively-scrolling thumb (theme `accent`)
+     --scrollbar-track        — track tint (theme `bgActivity`)
+
+   Three layers, in order of specificity:
+
+   1) Global default (`*::-webkit-scrollbar`) — themes EVERY scrollable
+      element in the app, including the ~200 inline `overflow: auto`
+      containers that don't carry an explicit class. Width 10px, soft theme
+      colors. Works on light and dark themes.
+
+   2) `.scrollbar-thin` — slim 6px variant for tight UI areas (sidebars,
+      autocomplete dropdowns, command palettes, the right rail). Used in
+      ~50 components. Reuses the same CSS variables.
+
+   3) `.scrollbar-thin.scrolling` / `.scrollbar-thin.fading` — stateful
+      classes toggled by useThemeStyles to brighten the thumb during active
+      scrolling and fade it out after 1s of idle. Only fires for elements
+      with `.scrollbar-thin` (managed in JS to avoid wiring scroll listeners
+      to every element in the app).
+
+   Firefox: native `scrollbar-color` is set on `*` so non-WebKit Electron
+   builds and Firefox-based dev tools also get themed thumbs. Falls back
+   gracefully when CSS vars aren't set yet (initial paint before
+   useThemeStyles runs).
+*/
+
+/* (1) Global default scrollbar — themes every scrollable element */
+*::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+	background-color: var(--scrollbar-track, transparent);
+}
+
+*::-webkit-scrollbar-thumb {
+	background-color: var(--scrollbar-thumb, rgba(255, 255, 255, 0.15));
+	border-radius: 6px;
+	/* Inset border via background-clip creates a small gap between the thumb
+	   and the track edges so the thumb looks floated rather than glued to the
+	   gutter. Border is transparent so it doesn't pick up theme bleed. */
+	border: 2px solid transparent;
+	background-clip: padding-box;
+	transition: background-color 0.2s ease;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+	background-color: var(--scrollbar-thumb-hover, rgba(255, 255, 255, 0.3));
+}
+
+*::-webkit-scrollbar-corner {
+	background-color: var(--scrollbar-track, transparent);
+}
+
+/* Firefox / non-WebKit fallback */
+* {
+	scrollbar-color: var(--scrollbar-thumb, rgba(255, 255, 255, 0.15))
+		var(--scrollbar-track, transparent);
+	scrollbar-width: thin;
+}
+
+/* (2) Slim variant for tight UI areas — opt-in via .scrollbar-thin */
 .scrollbar-thin::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+	width: 6px;
+	height: 6px;
 }
 
 .scrollbar-thin::-webkit-scrollbar-track {
-  background: transparent;
+	background-color: var(--scrollbar-track, transparent);
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 3px;
-  transition: background-color 0.2s ease;
+	background-color: var(--scrollbar-thumb, rgba(255, 255, 255, 0.15));
+	border-radius: 3px;
+	border: none;
+	background-clip: border-box;
+	transition: background-color 0.2s ease;
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+	background-color: var(--scrollbar-thumb-hover, rgba(255, 255, 255, 0.3));
 }
 
-/* Scrollbar with highlight color when actively scrolling */
+/* (3) Stateful: brighten when actively scrolling (managed by useThemeStyles) */
 .scrollbar-thin.scrolling::-webkit-scrollbar-thumb {
-  background: var(--highlight-color, var(--accent-color, rgba(99, 102, 241, 0.8)));
-  transition: background-color 0.15s ease;
+	background-color: var(
+		--scrollbar-thumb-active,
+		var(--highlight-color, var(--accent-color, rgba(99, 102, 241, 0.8)))
+	);
+	transition: background-color 0.15s ease;
 }
 
 .scrollbar-thin.scrolling::-webkit-scrollbar-thumb:hover {
-  background: var(--highlight-color, var(--accent-color, rgba(99, 102, 241, 1)));
+	background-color: var(
+		--scrollbar-thumb-active,
+		var(--highlight-color, var(--accent-color, rgba(99, 102, 241, 1)))
+	);
 }
 
-/* Scrollbar fading out state - gradual transition to transparent */
+/* (3) Stateful: fade out after scroll idle */
 .scrollbar-thin.fading::-webkit-scrollbar-thumb {
-  background: transparent;
-  transition: background-color 0.5s ease;
+	background-color: transparent;
+	transition: background-color 0.5s ease;
 }
 
+/* Hide scrollbars completely (cross-browser) */
 .no-scrollbar::-webkit-scrollbar {
-  display: none;
+	display: none;
 }
 
 .no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+	-ms-overflow-style: none;
+	scrollbar-width: none;
+}
+
+/* Hide xterm scrollbar when terminal container is not visible — prevents
+   the xterm-viewport scrollbar from bleeding through behind the AI tab.
+   Both overflow and scrollbar-width are needed because Chromium's compositor
+   can paint native scrollbars even on visibility:hidden elements. */
+.terminal-hidden .xterm-viewport {
+	overflow-y: hidden !important;
+	scrollbar-width: none !important;
+}
+
+.terminal-hidden .xterm-viewport::-webkit-scrollbar {
+	display: none !important;
+}
+
+/* xterm.js viewport scrollbar — match Maestro's thin scrollbar style */
+.xterm-viewport::-webkit-scrollbar {
+	width: 6px;
+	height: 6px;
+}
+
+.xterm-viewport::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.xterm-viewport::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.15);
+	border-radius: 3px;
+}
+
+.xterm-viewport::-webkit-scrollbar-thumb:hover {
+	background: rgba(255, 255, 255, 0.3);
 }
 
 /* Animations */
 @keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
 }
 
 @keyframes slide-up {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+	from {
+		opacity: 0;
+		transform: translateY(20px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
 }
 
 @keyframes slide-down {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+	from {
+		opacity: 0;
+		transform: translateY(-10px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
 }
 
 @keyframes scale-in {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+	from {
+		opacity: 0;
+		transform: scale(0.95);
+	}
+	to {
+		opacity: 1;
+		transform: scale(1);
+	}
 }
 
 @keyframes highlight-pulse {
-  0% {
-    box-shadow: 0 0 0 0 var(--pulse-color, rgba(99, 102, 241, 0.4));
-  }
-  70% {
-    box-shadow: 0 0 0 6px var(--pulse-color, rgba(99, 102, 241, 0));
-  }
-  100% {
-    box-shadow: 0 0 0 0 var(--pulse-color, rgba(99, 102, 241, 0));
-  }
+	0% {
+		box-shadow: 0 0 0 0 var(--pulse-color, rgba(99, 102, 241, 0.4));
+	}
+	70% {
+		box-shadow: 0 0 0 6px var(--pulse-color, rgba(99, 102, 241, 0));
+	}
+	100% {
+		box-shadow: 0 0 0 0 var(--pulse-color, rgba(99, 102, 241, 0));
+	}
+}
+
+@keyframes settings-search-flash {
+	0% {
+		outline-color: var(--settings-search-jump-color, rgba(99, 102, 241, 0.8));
+		outline-width: 2px;
+	}
+	85% {
+		outline-color: var(--settings-search-jump-color, rgba(99, 102, 241, 0.8));
+		outline-width: 2px;
+	}
+	100% {
+		outline-color: transparent;
+		outline-width: 2px;
+	}
+}
+
+@keyframes settings-search-arrow {
+	0% {
+		opacity: 0;
+		transform: translate(-12px, -50%);
+	}
+	15%,
+	35%,
+	55% {
+		opacity: 1;
+		transform: translate(0, -50%);
+	}
+	25%,
+	45% {
+		opacity: 1;
+		transform: translate(6px, -50%);
+	}
+	85% {
+		opacity: 1;
+		transform: translate(0, -50%);
+	}
+	100% {
+		opacity: 0;
+		transform: translate(0, -50%);
+	}
+}
+
+.settings-search-highlight {
+	position: relative;
+	animation: settings-search-flash 3s ease-out;
+	outline: 2px solid transparent;
+	outline-offset: 4px;
+	border-radius: 8px;
+}
+
+.settings-search-highlight::before {
+	content: '';
+	position: absolute;
+	left: -22px;
+	top: 50%;
+	width: 0;
+	height: 0;
+	border-top: 9px solid transparent;
+	border-bottom: 9px solid transparent;
+	border-left: 12px solid var(--settings-search-jump-color, #6366f1);
+	filter: drop-shadow(0 0 6px var(--settings-search-jump-color, #6366f1));
+	transform: translate(-12px, -50%);
+	opacity: 0;
+	animation: settings-search-arrow 3s ease-out;
+	pointer-events: none;
+}
+
+/*
+ * Theme-aware, keyboard-only focus ring.
+ *
+ * Pairs with the CLAUDE.md focus pattern ("outline-none + custom ring"): the
+ * default `:focus` outline is suppressed so mouse clicks stay quiet, while
+ * keyboard `:focus-visible` paints an accent-colored ring. Color resolves from
+ * a local `--focus-ring-color` override (set inline when an element needs a
+ * higher-contrast ring on a filled background) and otherwise falls back to the
+ * app accent (`--accent-color`, kept in sync with the active theme by
+ * useThemeStyles). Use `.focus-ring` for standalone controls and
+ * `.focus-ring-inset` for controls inside an `overflow-hidden` / rounded
+ * container that would clip an outset ring (e.g. a segmented toggle).
+ */
+.focus-ring:focus,
+.focus-ring-inset:focus {
+	outline: none;
+}
+
+.focus-ring:focus-visible {
+	outline: 2px solid var(--focus-ring-color, var(--accent-color, rgba(99, 102, 241, 0.9)));
+	outline-offset: 2px;
+}
+
+.focus-ring-inset:focus-visible {
+	outline: 2px solid var(--focus-ring-color, var(--accent-color, rgba(99, 102, 241, 0.9)));
+	outline-offset: -2px;
 }
 
 @keyframes check-pop {
-  0% {
-    transform: scale(0);
-    opacity: 0;
-  }
-  50% {
-    transform: scale(1.2);
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
+	0% {
+		transform: scale(0);
+		opacity: 0;
+	}
+	50% {
+		transform: scale(1.2);
+	}
+	100% {
+		transform: scale(1);
+		opacity: 1;
+	}
 }
 
 @keyframes token-update {
-  0% {
-    color: var(--token-highlight, rgba(99, 102, 241, 1));
-    transform: scale(1.1);
-  }
-  100% {
-    color: inherit;
-    transform: scale(1);
-  }
+	0% {
+		color: var(--token-highlight, rgba(99, 102, 241, 1));
+		transform: scale(1.1);
+	}
+	100% {
+		color: inherit;
+		transform: scale(1);
+	}
 }
 
 @keyframes progress-stripe {
-  0% {
-    background-position: 0 0;
-  }
-  100% {
-    background-position: 40px 0;
-  }
+	0% {
+		background-position: 0 0;
+	}
+	100% {
+		background-position: 40px 0;
+	}
 }
 
 /* Usage Dashboard - New data indicator animations */
 @keyframes pulse-fade {
-  0% {
-    opacity: 1;
-  }
-  80% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
+	0% {
+		opacity: 1;
+	}
+	80% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+	}
 }
 
 @keyframes pulse-dot {
-  0% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.5);
-    opacity: 0.5;
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
+	0% {
+		transform: scale(1);
+		opacity: 1;
+	}
+	50% {
+		transform: scale(1.5);
+		opacity: 0.5;
+	}
+	100% {
+		transform: scale(1);
+		opacity: 1;
+	}
+}
+
+/* Claude Plan Usage - in-flight refresh sweep (indeterminate progress).
+   Wider than the button so the gradient enters from offscreen on the left,
+   passes through, and exits offscreen on the right — reads as a recurring
+   light sweep rather than a strobing flash. */
+@keyframes claude-plan-refresh-sweep {
+	0% {
+		transform: translateX(-100%);
+	}
+	100% {
+		transform: translateX(100%);
+	}
+}
+
+.claude-plan-refresh-sweep,
+.codex-plan-refresh-sweep {
+	animation: claude-plan-refresh-sweep 1.2s ease-in-out infinite;
 }
 
 /* Usage Dashboard - Skeleton loading animation */
 @keyframes skeleton-shimmer {
-  0% {
-    opacity: 0.3;
-  }
-  50% {
-    opacity: 0.5;
-  }
-  100% {
-    opacity: 0.3;
-  }
+	0% {
+		opacity: 0.3;
+	}
+	50% {
+		opacity: 0.5;
+	}
+	100% {
+		opacity: 0.3;
+	}
 }
 
 /* Usage Dashboard - View mode transition animations */
 @keyframes dashboard-content-enter {
-  0% {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
+	0% {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	100% {
+		opacity: 1;
+		transform: none;
+	}
 }
 
 @keyframes dashboard-content-exit {
-  0% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(-8px);
-  }
+	0% {
+		opacity: 1;
+		transform: translateY(0);
+	}
+	100% {
+		opacity: 0;
+		transform: translateY(-8px);
+	}
 }
 
-/* Usage Dashboard - Staggered card entrance animation */
-@keyframes dashboard-card-enter {
-  0% {
-    opacity: 0;
-    transform: translateY(12px) scale(0.98);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+/* Usage Dashboard - Staggered card entrance animation.
+   Final keyframe must use `transform: none` (not translateY(0) scale(1)) so
+   the resting state doesn't leave a non-none transform behind — that would
+   create a stacking context per card and trap sibling chart tooltips
+   (z-50, fixed) underneath later sections. */
+@keyframes card-enter {
+	0% {
+		opacity: 0;
+		transform: translateY(12px) scale(0.96);
+	}
+	100% {
+		opacity: 1;
+		transform: none;
+	}
 }
 
-/* Usage Dashboard - Chart section enter animation */
+/* Usage Dashboard - Accent glow on hover for elevated cards */
+@keyframes card-glow {
+	0% {
+		box-shadow: 0 0 0px transparent;
+	}
+	100% {
+		box-shadow: 0 0 12px var(--glow-color, rgba(189, 147, 249, 0.15));
+	}
+}
+
+/* Bouncing dots loading indicator (for thinking / loading states) */
+@keyframes bounce-dot {
+	0%,
+	80%,
+	100% {
+		transform: scale(0.6);
+		opacity: 0.4;
+	}
+	40% {
+		transform: scale(1);
+		opacity: 1;
+	}
+}
+
+/* Usage Dashboard - Chart section enter animation.
+   Final keyframe uses `transform: none` (not translateY(0)) so the resting
+   state doesn't create a per-section stacking context — otherwise chart
+   tooltips (fixed, z-50) inside the first section get trapped underneath
+   later sections like SummaryCards. */
 @keyframes dashboard-section-enter {
-  0% {
-    opacity: 0;
-    transform: translateY(16px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
+	0% {
+		opacity: 0;
+		transform: translateY(16px);
+	}
+	100% {
+		opacity: 1;
+		transform: none;
+	}
 }
 
 /* Usage Dashboard animation utility classes */
 .dashboard-content-enter {
-  animation: dashboard-content-enter 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+	animation: dashboard-content-enter 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
-.dashboard-card-enter {
-  animation: dashboard-card-enter 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-  opacity: 0;
+.card-enter {
+	animation: card-enter 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+	opacity: 0;
+}
+
+/* Bouncing dots — three dots that bounce in sequence for loading / thinking */
+.bounce-dots {
+	display: inline-flex;
+	align-items: center;
+}
+
+.bounce-dots span {
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	border-radius: 9999px;
+	margin: 0 2px;
+	background-color: currentcolor;
+	animation: bounce-dot 1.4s ease-in-out infinite;
+}
+
+.bounce-dots span:nth-child(1) {
+	animation-delay: 0ms;
+}
+
+.bounce-dots span:nth-child(2) {
+	animation-delay: 160ms;
+}
+
+.bounce-dots span:nth-child(3) {
+	animation-delay: 320ms;
 }
 
 .dashboard-section-enter {
-  animation: dashboard-section-enter 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-  opacity: 0;
+	animation: dashboard-section-enter 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+	opacity: 0;
+}
+
+.chart-clickable {
+	cursor: pointer;
+	transition: opacity 0.15s ease;
+}
+
+.chart-clickable:hover {
+	opacity: 0.8;
 }
 
 .animate-in {
-  animation: fade-in 0.2s ease-in;
+	animation: fade-in 0.2s ease-in;
 }
 
 .animate-slide-up {
-  animation: slide-up 0.25s ease-out;
+	animation: slide-up 0.25s ease-out;
 }
 
 .animate-slide-down {
-  animation: slide-down 0.2s ease-out;
+	animation: slide-down 0.2s ease-out;
 }
 
 .animate-scale-in {
-  animation: scale-in 0.2s ease-out;
+	animation: scale-in 0.2s ease-out;
 }
 
 .animate-highlight-pulse {
-  animation: highlight-pulse 0.6s ease-out;
+	animation: highlight-pulse 0.6s ease-out;
 }
 
 .animate-check-pop {
-  animation: check-pop 0.3s ease-out;
+	animation: check-pop 0.3s ease-out;
 }
 
 .animate-token-update {
-  animation: token-update 0.4s ease-out;
+	animation: token-update 0.4s ease-out;
 }
 
 /* Animated progress bar with stripes for indeterminate state */
 .progress-bar-animated {
-  background-image: linear-gradient(
-    45deg,
-    rgba(255, 255, 255, 0.15) 25%,
-    transparent 25%,
-    transparent 50%,
-    rgba(255, 255, 255, 0.15) 50%,
-    rgba(255, 255, 255, 0.15) 75%,
-    transparent 75%,
-    transparent
-  );
-  background-size: 40px 40px;
-  animation: progress-stripe 1s linear infinite;
+	background-image: linear-gradient(
+		45deg,
+		rgba(255, 255, 255, 0.15) 25%,
+		transparent 25%,
+		transparent 50%,
+		rgba(255, 255, 255, 0.15) 50%,
+		rgba(255, 255, 255, 0.15) 75%,
+		transparent 75%,
+		transparent
+	);
+	background-size: 40px 40px;
+	animation: progress-stripe 1s linear infinite;
 }
 
 /* Shimmer effect for drag-and-drop */
 @keyframes shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
+	0% {
+		transform: translateX(-100%);
+	}
+	100% {
+		transform: translateX(100%);
+	}
+}
+
+/* Status indicator pulse - gentler alternative to Tailwind's animate-ping.
+   Used by the AUTO badge and any status dot that wants a softer breathing effect. */
+@keyframes status-pulse {
+	0%,
+	100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+	50% {
+		opacity: 0.7;
+		transform: scale(1.3);
+	}
+}
+
+/* Status indicator glow - subtle box-shadow expansion paired with a colored dot.
+   Set --status-glow-color on the element to control the hue. */
+@keyframes status-glow {
+	0%,
+	100% {
+		box-shadow: 0 0 4px var(--status-glow-color, currentColor);
+	}
+	50% {
+		box-shadow: 0 0 8px var(--status-glow-color, currentColor);
+	}
+}
+
+.animate-status-pulse {
+	animation: status-pulse 2s ease-in-out infinite;
+}
+
+.animate-status-glow {
+	animation: status-glow 2s ease-in-out infinite;
 }
 
 /* Restore list styling for markdown preview prose containers */
 .prose ul {
-  list-style-type: disc !important;
-  list-style-position: outside !important;
+	list-style-type: disc !important;
+	list-style-position: outside !important;
 }
 
 .prose ol {
-  list-style-type: decimal !important;
-  list-style-position: outside !important;
+	list-style-type: decimal !important;
+	list-style-position: outside !important;
 }
 
 .prose li {
-  display: list-item !important;
+	display: list-item !important;
+}
+
+.prose li > p:first-child {
+	display: inline !important;
+	margin: 0 !important;
+	vertical-align: baseline;
+	line-height: inherit;
+}
+
+.prose li > p:not(:first-child) {
+	display: block !important;
+	margin: 0.5em 0 0 !important;
+}
+
+.prose li > p:first-child + ul,
+.prose li > p:first-child + ol {
+	margin-top: 0 !important;
 }
 
 /* Fix bullet alignment when first element is bold/styled */
@@ -341,30 +693,75 @@ textarea::placeholder {
 .prose li > b:first-child,
 .prose li > em:first-child,
 .prose li > code:first-child,
-.prose li > a:first-child {
-  vertical-align: baseline;
-  line-height: inherit;
+.prose li > a:first-child,
+.prose li > p:first-child > strong:first-child,
+.prose li > p:first-child > b:first-child,
+.prose li > p:first-child > em:first-child,
+.prose li > p:first-child > code:first-child,
+.prose li > p:first-child > a:first-child {
+	vertical-align: baseline;
+	line-height: inherit;
 }
 
 .prose li::marker {
-  font-weight: normal;
+	font-weight: normal;
+}
+
+/* Wizard markdown lists render <li><p><strong>...</strong></p><ul>...</ul></li> */
+.wizard-markdown ol,
+.wizard-markdown ul {
+	list-style-position: outside;
+}
+
+.wizard-markdown li {
+	display: list-item;
+}
+
+.wizard-markdown li > p:first-child {
+	display: inline;
+	margin: 0;
+	vertical-align: baseline;
+	line-height: inherit;
+}
+
+.wizard-markdown li > p:not(:first-child) {
+	display: block;
+	margin: 0.5em 0 0;
+}
+
+.wizard-markdown li > p:first-child + ul,
+.wizard-markdown li > p:first-child + ol {
+	margin-top: 0;
+}
+
+.wizard-markdown li > p:first-child > strong:first-child,
+.wizard-markdown li > p:first-child > b:first-child,
+.wizard-markdown li > p:first-child > em:first-child,
+.wizard-markdown li > p:first-child > code:first-child,
+.wizard-markdown li > p:first-child > a:first-child {
+	vertical-align: baseline;
+	line-height: inherit;
+}
+
+.wizard-markdown li::marker {
+	font-weight: normal;
 }
 
 /* Nested lists */
 .prose ul ul {
-  list-style-type: circle !important;
+	list-style-type: circle !important;
 }
 
 .prose ul ul ul {
-  list-style-type: square !important;
+	list-style-type: square !important;
 }
 
 .prose ol ol {
-  list-style-type: lower-alpha !important;
+	list-style-type: lower-alpha !important;
 }
 
 .prose ol ol ol {
-  list-style-type: lower-roman !important;
+	list-style-type: lower-roman !important;
 }
 
 /* Modal overlay - solid background without GPU-intensive blur */
@@ -372,90 +769,963 @@ textarea::placeholder {
 /* Old: bg-black/60 backdrop-blur-sm or bg-black/70 backdrop-blur-sm */
 /* New: bg-black/85 (solid, no blur) */
 .modal-overlay {
-  background-color: rgba(0, 0, 0, 0.85);
+	background-color: rgba(0, 0, 0, 0.85);
+}
+
+/* Modal width utilities — scale with the Cmd+= font-size setting via --font-scale
+ * (set in useSettings.ts; 14px is the design baseline → scale = 1). Use these
+ * instead of w-[Npx] on modal containers so contents that grow with rem
+ * (pills, headers, buttons) don't wrap into a fixed-width shell. The 95vw
+ * clamp keeps modals usable on narrow windows and at max font size. */
+.modal-w-xs {
+	width: min(calc(400px * var(--font-scale, 1)), 95vw);
+}
+.modal-w-sm {
+	width: min(calc(480px * var(--font-scale, 1)), 95vw);
+}
+.modal-w-md {
+	width: min(calc(600px * var(--font-scale, 1)), 95vw);
+}
+.modal-w-lg {
+	width: min(calc(720px * var(--font-scale, 1)), 95vw);
+}
+.modal-w-xl {
+	width: min(calc(960px * var(--font-scale, 1)), 95vw);
+}
+.modal-w-2xl {
+	width: min(calc(1200px * var(--font-scale, 1)), 95vw);
 }
 
 /* Document Graph - Search highlight animation for matching nodes */
 @keyframes search-highlight-glow {
-  0% {
-    box-shadow: 0 0 0 3px var(--search-highlight-color, rgba(99, 102, 241, 0.4)), 0 4px 12px var(--search-shadow-color, rgba(99, 102, 241, 0.2));
-  }
-  50% {
-    box-shadow: 0 0 0 5px var(--search-highlight-color, rgba(99, 102, 241, 0.25)), 0 4px 16px var(--search-shadow-color, rgba(99, 102, 241, 0.3));
-  }
-  100% {
-    box-shadow: 0 0 0 3px var(--search-highlight-color, rgba(99, 102, 241, 0.4)), 0 4px 12px var(--search-shadow-color, rgba(99, 102, 241, 0.2));
-  }
+	0% {
+		box-shadow:
+			0 0 0 3px var(--search-highlight-color, rgba(99, 102, 241, 0.4)),
+			0 4px 12px var(--search-shadow-color, rgba(99, 102, 241, 0.2));
+	}
+	50% {
+		box-shadow:
+			0 0 0 5px var(--search-highlight-color, rgba(99, 102, 241, 0.25)),
+			0 4px 16px var(--search-shadow-color, rgba(99, 102, 241, 0.3));
+	}
+	100% {
+		box-shadow:
+			0 0 0 3px var(--search-highlight-color, rgba(99, 102, 241, 0.4)),
+			0 4px 12px var(--search-shadow-color, rgba(99, 102, 241, 0.2));
+	}
 }
 
 .search-highlight {
-  animation: search-highlight-glow 2s ease-in-out infinite;
+	animation: search-highlight-glow 2s ease-in-out infinite;
+}
+
+/* Wand sparkle animation — opacity-only. Earlier versions translated the SVG
+   <path> elements by 0.5px for jitter, but Chrome doesn't composite transforms
+   on SVG sub-elements, so every animated frame triggered a full layout
+   (~720 layouts/sec when any agent was busy). The half-pixel motion was
+   imperceptible at typical retina DPR; opacity-only gives the same vanish/
+   reappear feel without driving the layout pipeline. */
+@keyframes wand-sparkle {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	35% {
+		opacity: 0;
+	}
+	65% {
+		opacity: 0;
+	}
+}
+
+/* Target sparkle paths (3rd-8th children in Lucide Wand2 SVG) */
+svg.wand-sparkle-active path:nth-child(n + 3) {
+	animation: wand-sparkle 3s ease-in-out infinite;
+}
+
+/* Stagger each sparkle for organic feel (non-uniform delays) */
+svg.wand-sparkle-active path:nth-child(3) {
+	animation-delay: 0s;
+}
+svg.wand-sparkle-active path:nth-child(4) {
+	animation-delay: 0.5s;
+}
+svg.wand-sparkle-active path:nth-child(5) {
+	animation-delay: 1s;
+}
+svg.wand-sparkle-active path:nth-child(6) {
+	animation-delay: 1.5s;
+}
+svg.wand-sparkle-active path:nth-child(7) {
+	animation-delay: 0.7s;
+}
+svg.wand-sparkle-active path:nth-child(8) {
+	animation-delay: 1.2s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	svg.wand-sparkle-active path:nth-child(n + 3) {
+		animation: none;
+	}
+}
+
+/* Performance-profiling indicator: while a trace is being captured the wand
+   glows recording-red so it's unmistakable that profiling is on. The red is
+   forced over the inline theme accent for this debug-only state. A slow (1.5s)
+   pulse is deliberate - it keeps the indicator's own paint cost low and out of
+   the trace it is helping to capture. */
+@keyframes wand-profiling-pulse {
+	0%,
+	100% {
+		filter: drop-shadow(0 0 1px rgba(239, 68, 68, 0.6));
+	}
+	50% {
+		filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.95));
+	}
+}
+
+svg.wand-profiling-active {
+	color: #ef4444 !important;
+	animation: wand-profiling-pulse 1.5s ease-in-out infinite;
+}
+
+/* Keep the sparkles dancing during profiling even when nothing else is busy */
+svg.wand-profiling-active path:nth-child(n + 3) {
+	animation: wand-sparkle 1.6s ease-in-out infinite;
+}
+svg.wand-profiling-active path:nth-child(3) {
+	animation-delay: 0s;
+}
+svg.wand-profiling-active path:nth-child(4) {
+	animation-delay: 0.25s;
+}
+svg.wand-profiling-active path:nth-child(5) {
+	animation-delay: 0.5s;
+}
+svg.wand-profiling-active path:nth-child(6) {
+	animation-delay: 0.75s;
+}
+svg.wand-profiling-active path:nth-child(7) {
+	animation-delay: 0.35s;
+}
+svg.wand-profiling-active path:nth-child(8) {
+	animation-delay: 0.6s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	svg.wand-profiling-active {
+		animation: none;
+		filter: drop-shadow(0 0 3px rgba(239, 68, 68, 0.9));
+	}
+	svg.wand-profiling-active path:nth-child(n + 3) {
+		animation: none;
+	}
+}
+
+/* Indeterminate progress bar for the profiling-capture modal: a segment slides
+   across the track while we wait on an unmeasurable phase (flushing the trace,
+   the native save dialog). Determinate compression progress uses a width %. */
+@keyframes profiling-progress-indeterminate {
+	0% {
+		transform: translateX(-100%);
+	}
+	100% {
+		transform: translateX(400%);
+	}
+}
+
+.profiling-progress-indeterminate {
+	width: 25%;
+	animation: profiling-progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.profiling-progress-indeterminate {
+		animation: none;
+		width: 100%;
+		opacity: 0.6;
+	}
 }
 
 /* React Flow - Document Graph edge hover styling */
 /* Subtle glow effect on edge hover */
 .react-flow__edge-path {
-  transition: stroke 0.2s ease, stroke-width 0.2s ease, filter 0.2s ease;
+	transition:
+		stroke 0.2s ease,
+		stroke-width 0.2s ease,
+		filter 0.2s ease;
 }
 
 .react-flow__edge:hover .react-flow__edge-path {
-  filter: drop-shadow(0 0 3px var(--edge-hover-color, currentColor));
-  stroke-width: 2.5;
+	filter: drop-shadow(0 0 3px var(--edge-hover-color, currentColor));
+	stroke-width: 2.5;
 }
 
 /* Edge path styling for better visibility */
 .react-flow__edge.selected .react-flow__edge-path {
-  stroke-width: 3;
+	stroke-width: 3;
 }
 
 /* Smooth step edge marker hover effect */
 .react-flow__edge:hover .react-flow__edge-textwrapper {
-  opacity: 1;
+	opacity: 1;
+}
+
+/*
+ * Cue pipeline drag-preview line (connecting nodes).
+ *
+ * The Cue PipelineCanvas passes a custom <PipelineConnectionLine> component
+ * via `connectionLineComponent` so we render the path ourselves with full
+ * control. This rule is a belt-and-suspenders safety net for any ReactFlow
+ * surface that falls back to the default ConnectionLine — without it, the
+ * default `stroke: #b1b1b7` is invisible against the dark theme.
+ *
+ * If the inline style on a custom component sets stroke explicitly, that
+ * style has higher specificity than this class rule and wins. This rule
+ * only kicks in when nothing else has styled the path.
+ */
+.react-flow__connection-path {
+	stroke: #06b6d4; /* CUE_COLOR — keep in sync with shared/cue-pipeline-types.ts */
+	stroke-width: 2;
+	stroke-dasharray: 6 3;
+	fill: none;
 }
 
 /* Reduced motion preference - accessibility best practice */
+/* ==========================================
+   Header Bar Container Queries
+   ==========================================
+   CSS-only responsive behavior for the main panel header.
+   Uses container queries to show/hide elements based on header width.
+   This replaces JavaScript-based panelWidth detection for reliability.
+*/
+
+/* Define the header as a container query context */
+.header-container {
+	container-type: inline-size;
+	container-name: header;
+}
+
+/* Default: all elements visible */
+.header-session-name,
+.header-cost-widget,
+.header-uuid-pill,
+.header-context-widget,
+.header-git-branch-text,
+.header-git-status-full {
+	display: flex;
+}
+
+/* Git status compact mode hidden by default (shown at narrow widths) */
+.header-git-status-compact {
+	display: none;
+}
+
+/* At narrower widths, progressively hide elements */
+/* Below 700px: Use compact context display (handled by compact class) */
+@container header (max-width: 700px) {
+	.header-context-label-full {
+		display: none;
+	}
+	.header-context-label-compact {
+		display: block;
+	}
+	.header-context-gauge {
+		width: 4rem; /* w-16 */
+	}
+}
+
+/* Below 550px: Show compact git status (file count only), hide full breakdown */
+@container header (max-width: 550px) {
+	.header-git-status-full {
+		display: none;
+	}
+	.header-git-status-compact {
+		display: flex;
+	}
+}
+
+/* Below 500px: Hide git branch text, show icon only */
+@container header (max-width: 500px) {
+	.header-git-branch-text {
+		display: none;
+	}
+}
+
+/* Below 400px: Hide UUID pill */
+@container header (max-width: 400px) {
+	.header-uuid-pill {
+		display: none;
+	}
+}
+
+/* Below 350px: Hide cost widget */
+@container header (max-width: 350px) {
+	.header-cost-widget {
+		display: none;
+	}
+}
+
+/* Below 300px: Hide session name */
+@container header (max-width: 480px) {
+	/* Drop secondary header buttons (Memory Viewer + Agent Sessions) so the
+	 * right group fits — both are still reachable via the Menu drawer. */
+	.header-secondary-btn {
+		display: none !important;
+	}
+}
+
+/*
+ * Tighten the MainPanel header padding on narrow viewports. The container
+ * query above can't restyle its own container, so we drive padding off the
+ * `data-bp` attribute that useViewportBreakpoint writes on <html>.
+ */
+:root[data-bp='xs'] .header-container,
+:root[data-bp='sm'] .header-container {
+	padding-left: 0.5rem !important;
+	padding-right: 0.5rem !important;
+}
+
+@container header (max-width: 300px) {
+	.header-session-name {
+		display: none;
+	}
+}
+
+/* ==========================================
+   Group Chats Header Container Queries
+   ==========================================
+   CSS-only progressive disclosure for the Group Chats section header in the
+   left sidebar. As the sidebar narrows, drop non-essential bits in order so the
+   header always stays on ONE line and never wraps:
+     1. group chat count badge (the active-chat count)
+     2. archived count number (keep the archive button/icon)
+     3. "New Chat" label (collapse the button to just "+")
+   Thresholds are sized so that at the minimum sidebar width (280px -> ~256px
+   container) all three have dropped and the row still fits without wrapping. */
+.gc-header-container {
+	container-type: inline-size;
+	container-name: gcheader;
+}
+
+/* Default: label + counts visible */
+.gc-newchat-label {
+	display: inline;
+}
+
+/* Below 340px: drop the group chat count badge */
+@container gcheader (max-width: 340px) {
+	.gc-count-badge {
+		display: none;
+	}
+}
+
+/* Below 305px: drop the archived count number (archive button stays) */
+@container gcheader (max-width: 305px) {
+	.gc-archived-count {
+		display: none;
+	}
+}
+
+/* Below 275px: collapse the New Chat button to just a plus sign */
+@container gcheader (max-width: 275px) {
+	.gc-newchat-label {
+		display: none;
+	}
+}
+
+/* When AUTO mode button is visible, we need earlier breakpoints.
+   Use a modifier class on the container to shift thresholds. */
+.header-container.header-auto-mode .header-context-label-full {
+	display: none;
+}
+.header-container.header-auto-mode .header-context-label-compact {
+	display: block;
+}
+
+@container header (max-width: 880px) {
+	.header-container.header-auto-mode .header-context-gauge {
+		width: 4rem;
+	}
+}
+
+/* Below 730px in auto-mode: Show compact git status */
+@container header (max-width: 730px) {
+	.header-container.header-auto-mode .header-git-status-full {
+		display: none;
+	}
+	.header-container.header-auto-mode .header-git-status-compact {
+		display: flex;
+	}
+}
+
+@container header (max-width: 680px) {
+	.header-container.header-auto-mode .header-git-branch-text {
+		display: none;
+	}
+}
+
+@container header (max-width: 580px) {
+	.header-container.header-auto-mode .header-uuid-pill {
+		display: none;
+	}
+}
+
+@container header (max-width: 530px) {
+	.header-container.header-auto-mode .header-cost-widget {
+		display: none;
+	}
+}
+
+@container header (max-width: 480px) {
+	.header-container.header-auto-mode .header-session-name {
+		display: none;
+	}
+}
+
+/* ==========================================
+   End Header Bar Container Queries
+   ========================================== */
+
+/* ==========================================
+   Status Pill Container Queries
+   ==========================================
+   Progressive disclosure for the status pills docked above the input area
+   (ThinkingStatusPill, AutoRunPill). On narrow widths (phone viewports in the
+   web-desktop build, or a very narrow desktop window) the pill's fixed
+   segments can exceed the row and push the Stop button off-screen. Drop
+   non-essential segments in order so the pill stays on ONE line and Stop is
+   always reachable:
+     1. Claude session ID / tab name link (still in the tooltip)
+     2. Tokens / "Thinking..." segment (the pulsing dot already conveys busy)
+     3. label words ("Elapsed:", "Tasks:", "Goal:", iteration counter)
+   Each segment carries its own leading divider, so hiding one never leaves a
+   double divider behind. */
+.status-pill-container {
+	container-type: inline-size;
+	container-name: statuspill;
+}
+
+@container statuspill (max-width: 480px) {
+	.pill-seg-claude-id {
+		display: none;
+	}
+}
+
+@container statuspill (max-width: 400px) {
+	.pill-seg-tokens {
+		display: none;
+	}
+}
+
+@container statuspill (max-width: 340px) {
+	.pill-label {
+		display: none;
+	}
+}
+
+/* ==========================================
+   End Status Pill Container Queries
+   ========================================== */
+
+/* ==========================================
+   File Explorer Stats Bar Container Queries
+   ==========================================
+   The stats bar at the bottom of the Files panel ("3,356 files, 398 folders /
+   Size: 111 MB") must never wrap to a second line. When the panel is narrow
+   (phone drawer, or a slim desktop Right Bar) swap the label words for icons:
+   the numbers keep their meaning via the leading FileText/Folder/HardDrive
+   icon and each segment's title tooltip. */
+.file-stats-container {
+	container-type: inline-size;
+	container-name: filestats;
+}
+
+/* Icons are hidden while the text labels fit */
+.file-stats-icon {
+	display: none;
+}
+
+@container filestats (max-width: 340px) {
+	.file-stats-label {
+		display: none;
+	}
+	.file-stats-icon {
+		display: inline-block;
+	}
+}
+
+/* ==========================================
+   History Detail Modal - phone layout
+   ==========================================
+   At the xs breakpoint the centered dialog is too cramped: consume the whole
+   viewport instead (no border/rounding, full dvh so the virtual keyboard and
+   browser chrome are respected), tighten footer padding, and collapse the
+   Delete/Prev/Next button labels to their icons so every control stays
+   on-screen. data-bp is set by useViewportBreakpoint on <html>. */
+:root[data-bp='xs'] .history-detail-modal {
+	/* !important: the modal is resizable and sets width/height/max-width/
+	   max-height inline (higher specificity than any class selector), which
+	   would otherwise silently defeat this phone breakpoint override. */
+	width: 100vw !important;
+	max-width: 100vw !important;
+	height: 100dvh !important;
+	max-height: 100dvh !important;
+	border-radius: 0;
+	border-width: 0;
+}
+
+:root[data-bp='xs'] .history-detail-modal .hdm-footer {
+	padding-left: 0.75rem;
+	padding-right: 0.75rem;
+}
+
+:root[data-bp='xs'] .history-detail-modal .hdm-btn-label {
+	display: none;
+}
+
+/* ==========================================
+   Sidebar Parent-Child Tree Connectors
+   ==========================================
+   Visually links a parent agent in the sidebar to its expanded worktree
+   children with a vertical line and per-child horizontal branch.
+
+   --tree-line-color: stroke color for the connecting lines (set inline
+                      from the active theme accent)
+   --tree-bg-color:   sidebar background, used to mask the vertical line
+                      below the last child so it terminates cleanly
+*/
+
+.tree-children {
+	position: relative;
+}
+
+.tree-children::before {
+	content: '';
+	position: absolute;
+	left: 20px;
+	top: 0;
+	bottom: 12px;
+	width: 1px;
+	background-color: var(--tree-line-color, rgba(255, 255, 255, 0.15));
+	pointer-events: none;
+}
+
+.tree-child {
+	position: relative;
+}
+
+.tree-child::before {
+	content: '';
+	position: absolute;
+	left: 20px;
+	top: 50%;
+	width: 12px;
+	height: 1px;
+	background-color: var(--tree-line-color, rgba(255, 255, 255, 0.15));
+	pointer-events: none;
+}
+
+/* Cap the vertical line below the last child so it doesn't overshoot */
+.tree-child:last-child::after {
+	content: '';
+	position: absolute;
+	left: 20px;
+	top: 50%;
+	bottom: 0;
+	width: 1px;
+	background-color: var(--tree-bg-color, transparent);
+	pointer-events: none;
+}
+
+/* ==========================================
+   End Sidebar Parent-Child Tree Connectors
+   ========================================== */
+
 @media (prefers-reduced-motion: reduce) {
-  .animate-pulse,
-  .animate-spin,
-  .animate-bounce {
-    animation: none !important;
-  }
+	.animate-pulse,
+	.animate-spin,
+	.animate-bounce {
+		animation: none !important;
+	}
 
-  .transition-all,
-  .transition-colors,
-  .transition-opacity,
-  .transition-transform {
-    transition: none !important;
-  }
+	.transition-all,
+	.transition-colors,
+	.transition-opacity,
+	.transition-transform {
+		transition: none !important;
+	}
 
-  /* Disable React Flow edge animations */
-  .react-flow__edge-path {
-    transition: none !important;
-  }
+	/* Disable React Flow edge animations */
+	.react-flow__edge-path {
+		transition: none !important;
+	}
 
-  /* Disable new data indicator animations */
-  [data-testid="new-data-indicator"],
-  [data-testid="new-data-indicator"] span {
-    animation: none !important;
-  }
+	/* Disable new data indicator animations */
+	[data-testid='new-data-indicator'],
+	[data-testid='new-data-indicator'] span {
+		animation: none !important;
+	}
 
-  /* Disable skeleton loading animations */
-  [data-testid="skeleton-box"],
-  [data-testid="skeleton-circle"] {
-    animation: none !important;
-  }
+	/* Disable skeleton loading animations */
+	[data-testid='skeleton-box'],
+	[data-testid='skeleton-circle'] {
+		animation: none !important;
+	}
 
-  /* Disable Usage Dashboard state transition animations */
-  .dashboard-content-enter,
-  .dashboard-card-enter,
-  .dashboard-section-enter {
-    animation: none !important;
-    opacity: 1 !important;
-    transform: none !important;
-  }
+	/* Disable Usage Dashboard state transition animations */
+	.dashboard-content-enter,
+	.card-enter,
+	.dashboard-section-enter {
+		animation: none !important;
+		opacity: 1 !important;
+		transform: none !important;
+	}
 
-  /* Disable Document Graph search highlight animations */
-  .search-highlight {
-    animation: none !important;
-  }
+	/* Disable chart-clickable hover transition for reduced motion */
+	.chart-clickable {
+		transition: none !important;
+	}
+
+	/* Disable bouncing dots animation for reduced motion users */
+	.bounce-dots span {
+		animation: none !important;
+	}
+
+	/* Disable Document Graph search highlight animations */
+	.search-highlight {
+		animation: none !important;
+	}
+
+	/* Disable status indicator animations */
+	.animate-status-pulse,
+	.animate-status-glow {
+		animation: none !important;
+	}
+}
+
+/* Shiki-highlighted code fences. The highlighter emits its own <pre class="shiki">
+ * with a theme-driven background and inline token styles. We override padding /
+ * radius / overflow to match the surrounding chat bubble, and force `color:
+ * unset` on the structural elements so prose styles (e.g. `.terminal-output
+ * code { color: ... }` in markdownConfig) don't cascade past Shiki's per-token
+ * inline colors via the `<code>` element. */
+/* `.code-fence` scope raises specificity above the runtime-injected prose
+ * styles (`.prose pre { padding: 1em }` in markdownConfig.ts). Those <style>
+ * tags load after this file, so an equal-specificity selector would lose the
+ * cascade tie and the extra padding below would be clobbered back to 1em. */
+.code-fence .shiki-host pre.shiki {
+	margin: 0;
+	/* Extra top padding reserves room for the language picker (top-left) and
+	 * copy button (top-right) overlaid by CodeFence so the first line never
+	 * renders underneath them. Kept in sync with the plain-<pre> fallback
+	 * (fallbackPreStyle in CodeFence.tsx). */
+	padding: 2.75em 1em 1em !important;
+	border-radius: 0;
+	overflow-x: auto;
+	white-space: pre;
+	font-family: inherit;
+}
+
+.code-fence .shiki-host pre.shiki code {
+	font-family: inherit;
+	background: transparent !important;
+	color: unset !important;
+	padding: 0 !important;
+}
+
+.code-fence .shiki-host pre.shiki .line {
+	color: unset;
+}
+
+/*
+ * Narrow-viewport (xs / sm) overlay behavior.
+ *
+ * The desktop layout assumes a 3-column flex row. Below 768px the inline
+ * widths squeeze MainPanel to nothing. These rules turn the left and right
+ * sidebars into fixed-position drawers (full height, fixed width, transform
+ * to hide). data-bp is set by useViewportBreakpoint on <html>. data-panel
+ * is set by SessionList / RightPanel root divs. Inline width is overridden
+ * with !important because the components set it via the style prop.
+ */
+/*
+ * App shell height: use dynamic viewport so iOS Safari's collapsible URL bar
+ * and bottom toolbar don't occlude the input area. Falls back to 100vh on
+ * older browsers. The bottom safe-area inset (iPhone home indicator + Safari
+ * bottom bar where it overlays) is reserved as padding so toolbar pills stay
+ * tappable.
+ */
+.maestro-app-shell {
+	height: 100vh;
+	height: 100dvh;
+	padding-bottom: env(safe-area-inset-bottom);
+}
+
+/*
+ * Tri-state left sidebar.
+ *
+ * Closed (data-collapsed='true') keeps the inline 64px status-dot strip so
+ * users can see all sessions at a glance. Hidden (data-hidden='true') drops
+ * the panel entirely — used when the user wants maximum room for the main
+ * content. Hidden state applies at every breakpoint, including desktop.
+ */
+[data-panel='left'][data-hidden='true'] {
+	display: none !important;
+}
+
+/*
+ * Left sidebar on narrow viewports: only the OPEN state floats as a drawer.
+ * Closed state stays inline at its natural 64px width so the collapsed-mode
+ * status-dot strip is always visible.
+ */
+:root[data-bp='xs'] [data-panel='left'][data-collapsed='false'][data-hidden='false'],
+:root[data-bp='sm'] [data-panel='left'][data-collapsed='false'][data-hidden='false'] {
+	position: fixed !important;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	width: min(85vw, 320px) !important;
+	max-width: 85vw;
+	z-index: 50;
+	transform: translateX(0);
+	transition: transform 200ms ease;
+	box-shadow: 4px 0 20px rgba(0, 0, 0, 0.4);
+}
+
+/*
+ * Left sidebar collapsed strip on phones (web-desktop only): the 64px
+ * status-dot strip would permanently eat a sixth of a 390px viewport, so hide
+ * it entirely at xs. The hamburger in MainPanelHeader still reopens the sidebar
+ * (it flips data-collapsed to 'false', which floats the drawer via the rule
+ * above). Scoped to web-desktop so a narrow Electron desktop window keeps its
+ * strip; scoped to xs so the sm breakpoint keeps the inline strip too.
+ */
+html[data-runtime='web-desktop'][data-bp='xs']
+	[data-panel='left'][data-collapsed='true'][data-hidden='false'] {
+	display: none !important;
+}
+
+:root[data-bp='xs'] [data-panel='right'],
+:root[data-bp='sm'] [data-panel='right'] {
+	position: fixed !important;
+	top: 0;
+	bottom: 0;
+	right: 0;
+	width: min(85vw, 320px) !important;
+	max-width: 85vw;
+	z-index: 50;
+	transform: translateX(0);
+	transition: transform 200ms ease;
+	box-shadow: -4px 0 20px rgba(0, 0, 0, 0.4);
+	opacity: 1 !important;
+}
+
+:root[data-bp='xs'] [data-panel='right'][data-open='false'],
+:root[data-bp='sm'] [data-panel='right'][data-open='false'] {
+	transform: translateX(100%);
+	box-shadow: none;
+	pointer-events: none;
+}
+
+.maestro-mobile-backdrop {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.55);
+	z-index: 40;
+	animation: maestro-fade-in 150ms ease;
+}
+
+/*
+ * Edge-swipe opener zones. Thin (24px) invisible strips pinned to the left and
+ * right screen edges that host the drawer-opening swipe handlers (App.tsx). They
+ * only exist while no drawer is open. `touch-action: pan-y` lets vertical page
+ * scrolling that starts in the strip still happen natively while horizontal
+ * swipes are handled (and preventDefault'd) by useSwipeGestures. Sitting only at
+ * the edges is what keeps center-content horizontal scrolling (terminal, tab
+ * bar, tables) free of drawer gestures.
+ *
+ * They start below the 4rem header (`top: 4rem`) rather than the very top so the
+ * strip never overlaps the header hamburger / panel toggle - at xs/sm the header
+ * padding shrinks to 0.5rem, so those controls sit inside the outer 24px, and a
+ * full-height strip (which paints above the z-20 header) would swallow their
+ * taps. Edge swipes start in the body, which is the whole point.
+ */
+.maestro-edge-swipe-zone {
+	position: fixed;
+	top: 4rem;
+	bottom: 0;
+	width: 24px;
+	z-index: 35;
+	touch-action: pan-y;
+}
+.maestro-edge-swipe-zone--left {
+	left: 0;
+}
+.maestro-edge-swipe-zone--right {
+	right: 0;
+}
+
+@keyframes maestro-fade-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+/*
+ * ============================================================================
+ * Web-desktop mobile groundwork
+ * ============================================================================
+ * Touch/PWA hardening ported from the legacy mobile app (src/web/index.css
+ * ~lines 147-260). Every rule below is scoped under
+ * html[data-runtime='web-desktop'] (the attribute set by
+ * src/web-desktop/bootstrap.ts) so the native Electron desktop app - which
+ * loads this same stylesheet but never sets data-runtime - is unaffected.
+ * Additive only; no existing rule is modified.
+ */
+
+/*
+ * Kill the iOS Safari 300ms double-tap zoom on tappable surfaces. Harmless on
+ * desktop browsers (no double-tap gesture there).
+ */
+html[data-runtime='web-desktop'] body,
+html[data-runtime='web-desktop'] button,
+html[data-runtime='web-desktop'] a {
+	touch-action: manipulation;
+}
+
+/*
+ * Prevent accidental browser pull-to-refresh / overscroll chaining on the
+ * scroll root. `contain` stops the gesture at the app boundary without
+ * disabling normal scrolling inside it.
+ */
+html[data-runtime='web-desktop'] body,
+html[data-runtime='web-desktop'] .maestro-app-shell {
+	overscroll-behavior-y: contain;
+}
+
+/*
+ * Lift the app shell above the on-screen keyboard. App.tsx sets
+ * `--keyboard-offset` (from useKeyboardVisibility, Visual Viewport API) to the
+ * pixel height the virtual keyboard eats. Because the shell is box-sizing:
+ * border-box with height:100dvh, adding that to the bottom padding shrinks the
+ * content box so the flex column re-lays with the AI input and send controls
+ * sitting just above the keyboard. Defaults to 0px (no keyboard visible, or the
+ * Visual Viewport API is unavailable), so this is inert until a keyboard
+ * appears. Scoped to web-desktop so the native Electron app keeps its plain
+ * safe-area padding.
+ */
+html[data-runtime='web-desktop'] .maestro-app-shell {
+	padding-bottom: calc(env(safe-area-inset-bottom) + var(--keyboard-offset, 0px));
+}
+
+/*
+ * Smooth momentum scrolling on scrollable containers (Tailwind overflow
+ * utilities). `-webkit-overflow-scrolling` is an iOS-only property and is
+ * silently ignored everywhere else.
+ */
+html[data-runtime='web-desktop'] .overflow-auto,
+html[data-runtime='web-desktop'] .overflow-y-auto,
+html[data-runtime='web-desktop'] .overflow-scroll,
+html[data-runtime='web-desktop'] .overflow-y-scroll {
+	-webkit-overflow-scrolling: touch;
+}
+
+/*
+ * iOS rubber-band fix. `@supports (-webkit-touch-callout: none)` matches iOS
+ * Safari only (desktop Safari and other browsers do not support the property),
+ * so this never fires on a laptop web-desktop client. Pin the body so the page
+ * itself cannot rubber-band, and hand scrolling to the app shell as the scroll
+ * container. Mirrors src/web/index.css ~lines 194-208.
+ */
+@supports (-webkit-touch-callout: none) {
+	html[data-runtime='web-desktop'] body {
+		position: fixed;
+		width: 100%;
+		height: 100%;
+		overflow: hidden;
+	}
+
+	html[data-runtime='web-desktop'] .maestro-app-shell {
+		overflow: auto;
+		-webkit-overflow-scrolling: touch;
+	}
+}
+
+/*
+ * Prevent iOS Safari auto-zoom on input focus at phone breakpoints. iOS zooms
+ * the page whenever a focused form control has font-size < 16px; the renderer's
+ * inputs are text-sm (14px). Force 16px only at xs/sm inside web-desktop so the
+ * zoom never triggers, without touching the components' Tailwind classes or the
+ * native desktop app. `!important` guarantees the 16px floor regardless of
+ * utility-class specificity; line-height keeps the taller text readable. The
+ * AI composer has a decorative mention overlay beneath its transparent textarea,
+ * so that overlay receives the same font size or its visible glyphs drift from
+ * the native caret on iOS.
+ */
+html[data-runtime='web-desktop'][data-bp='xs'] textarea,
+html[data-runtime='web-desktop'][data-bp='xs'] input[type='text'],
+html[data-runtime='web-desktop'][data-bp='xs'] input[type='search'],
+html[data-runtime='web-desktop'][data-bp='xs'] input:not([type]),
+html[data-runtime='web-desktop'][data-bp='xs'] select,
+html[data-runtime='web-desktop'][data-bp='sm'] textarea,
+html[data-runtime='web-desktop'][data-bp='sm'] input[type='text'],
+html[data-runtime='web-desktop'][data-bp='sm'] input[type='search'],
+html[data-runtime='web-desktop'][data-bp='sm'] input:not([type]),
+html[data-runtime='web-desktop'][data-bp='sm'] select {
+	font-size: 16px !important;
+	line-height: 1.4;
+}
+
+html[data-runtime='web-desktop'][data-bp='xs'] .maestro-input-text-overlay,
+html[data-runtime='web-desktop'][data-bp='sm'] .maestro-input-text-overlay {
+	font-size: 16px !important;
+}
+
+/*
+ * Reveal hover-only row actions on coarse (touch) pointers.
+ *
+ * ~17 components hide their row / header controls behind Tailwind's
+ * `opacity-0 group-hover:opacity-100` pattern. There is no hover on touch, so
+ * those controls (delete, copy, worktree, etc.) are invisible and unreachable
+ * on a phone. Tailwind emits the variant name verbatim in the class attribute,
+ * so an attribute-contains selector matches every one of them at once.
+ *
+ * This is a DELIBERATE blanket rule: rather than touch 17 files, force the
+ * revealed state whenever the primary pointer is coarse. It is gated on
+ * `(pointer: coarse)` (not the web-desktop runtime) so a touchscreen laptop
+ * running the native app benefits too, while mouse users are unaffected.
+ * `!important` guarantees the reveal regardless of utility-class source order.
+ * A component that later wants a bespoke touch affordance can override this
+ * with a more specific rule.
+ */
+@media (pointer: coarse) {
+	[class*='group-hover:opacity-100'] {
+		opacity: 1 !important;
+	}
+}
+
+/*
+ * Panel resize handles (left sidebar, right panel, group-chat panel).
+ *
+ * `touch-action: none` tells the browser NOT to treat a drag on the handle as a
+ * scroll / pan, so the pointer-events drag in useResizablePanel gets the whole
+ * gesture on touch. On coarse pointers the visible handle (a thin ~12px line)
+ * is too small to grab with a finger, so a transparent ::before extends the hit
+ * area outward on both sides without changing the handle's appearance.
+ */
+.resize-handle {
+	touch-action: none;
+}
+@media (pointer: coarse) {
+	.resize-handle::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: -10px;
+		right: -10px;
+	}
 }

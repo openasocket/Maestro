@@ -10,11 +10,12 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import { GitStatusWidget } from '../../../renderer/components/GitStatusWidget';
 import type { Theme } from '../../../renderer/types';
 import type { GitStatusData, GitFileChange } from '../../../renderer/contexts/GitStatusContext';
 
+import { mockTheme } from '../../helpers/mockTheme';
 // Mock the GitStatusContext hooks (focused contexts)
 const mockGetFileCount = vi.fn<[string], number>();
 const mockGetFileDetails = vi.fn<
@@ -34,7 +35,6 @@ vi.mock('../../../renderer/contexts/GitStatusContext', () => ({
 	useGitFileStatus: () => ({
 		getFileCount: mockGetFileCount,
 		hasChanges: (sessionId: string) => mockGetFileCount(sessionId) > 0,
-		isLoading: false,
 	}),
 	useGitDetail: () => ({
 		getFileDetails: mockGetFileDetails,
@@ -93,25 +93,6 @@ const mockGetStatus = {
 };
 
 // Create a mock theme
-const mockTheme: Theme = {
-	id: 'test-theme',
-	name: 'Test Theme',
-	colors: {
-		bgMain: '#1a1a2e',
-		bgSidebar: '#16213e',
-		bgInput: '#0f3460',
-		textMain: '#eaeaea',
-		textDim: '#a0a0a0',
-		border: '#2a2a4a',
-		accent: '#e94560',
-		scrollbarThumb: '#444',
-		scrollbarTrack: '#222',
-		syntax1: '#ff6b6b',
-		syntax2: '#4ecdc4',
-		syntax3: '#45b7d1',
-		syntax4: '#96ceb4',
-	},
-};
 
 describe('GitStatusWidget', () => {
 	const mockOnViewDiff = vi.fn();
@@ -228,8 +209,10 @@ describe('GitStatusWidget', () => {
 				})
 			);
 			render(<GitStatusWidget {...defaultProps} />);
-			// Component displays modifiedCount with FileEdit icon
-			expect(screen.getByText('2')).toBeInTheDocument();
+			// Component displays modifiedCount in full mode (orange text) and fileCount in compact mode
+			// When values match, multiple elements exist — scope to the full-mode span
+			const fullMode = document.querySelector('.header-git-status-full')!;
+			expect(within(fullMode).getByText('2')).toBeInTheDocument();
 		});
 
 		it('should calculate totals from multiple files', () => {
@@ -260,7 +243,9 @@ describe('GitStatusWidget', () => {
 				})
 			);
 			render(<GitStatusWidget {...defaultProps} />);
-			expect(screen.getByText('1')).toBeInTheDocument();
+			// fileCount (compact) and modifiedCount (full) are both 1 — scope to compact span
+			const compact = document.querySelector('.header-git-status-compact')!;
+			expect(within(compact).getByText('1')).toBeInTheDocument();
 		});
 
 		it('should handle untracked files (?)', () => {
@@ -721,10 +706,11 @@ describe('GitStatusWidget', () => {
 				})
 			);
 			render(<GitStatusWidget {...defaultProps} />);
-			// Check that additions/deletions/modifiedCount are displayed
-			expect(screen.getByText('190')).toBeInTheDocument();
-			expect(screen.getByText('27')).toBeInTheDocument();
-			expect(screen.getByText('20')).toBeInTheDocument();
+			// fileCount (compact) and modifiedCount (full) are both 20 — scope queries
+			const fullMode = document.querySelector('.header-git-status-full')!;
+			expect(within(fullMode).getByText('190')).toBeInTheDocument();
+			expect(within(fullMode).getByText('27')).toBeInTheDocument();
+			expect(within(fullMode).getByText('20')).toBeInTheDocument();
 		});
 
 		it('should handle very large numbers', () => {

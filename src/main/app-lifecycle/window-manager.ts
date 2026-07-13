@@ -1,47 +1,42 @@
 /**
- * Window manager for creating and managing the main BrowserWindow.
+ * Window manager for creating and managing BrowserWindows.
  * Handles window state persistence, DevTools, crash detection, and auto-updater initialization.
+ *
+ * Every window (the primary and any secondary windows) is built by the shared
+ * `createBrowserWindow` factory so the navigation guards, webview security
+ * hardening, permission handling, crash detection, and off-screen placement
+ * guarding are identical for all of them. Registry registration and the
+ * auto-updater (primary-only) are wired by the `createWindow` /
+ * `createSecondaryWindow` callers around that factory.
  */
 
-import { BrowserWindow, ipcMain } from 'electron';
+import { BrowserWindow } from 'electron';
 import type Store from 'electron-store';
-import type { WindowState } from '../stores/types';
+import type { SettingsStoreInterface, WindowState } from '../stores/types';
+import type { WindowState as SharedWindowState } from '../../shared/window-types';
+import { WINDOW_STATE_DEFAULTS } from '../stores/defaults';
 import { logger } from '../utils/logger';
 import { initAutoUpdater } from '../auto-updater';
+import { generateUUID } from '../../shared/uuid';
+import type { WindowRegistry } from '../window-registry';
+import { saveWindowState, WINDOW_STATE_SAVE_DEBOUNCE_MS } from '../window-state-persistence';
+import { debounce } from '../utils/debounce';
+import { isWebContentsAvailable } from '../utils/safe-send';
+import { attachGuestWebviewSecurity } from './guest-webview-security';
+import { attachMainWindowNavigationGuards } from './main-window-navigation';
+import { attachSpellCheckContextMenu } from './spell-check-menu';
+import { attachWindowCrashHandlers } from './window-crash-handlers';
+import { registerDevAutoUpdaterStubs } from './dev-auto-updater-stubs';
+import { resolveVisibleWindowPosition } from './window-position';
 
-/** Sentry severity levels */
-type SentrySeverityLevel = 'fatal' | 'error' | 'warning' | 'log' | 'info' | 'debug';
-
-/** Sentry module type for crash reporting */
-interface SentryModule {
-	captureMessage: (
-		message: string,
-		captureContext?: { level?: SentrySeverityLevel; extra?: Record<string, unknown> }
-	) => string;
-}
-
-/** Cached Sentry module reference */
-let sentryModule: SentryModule | null = null;
-
-/**
- * Reports a crash event to Sentry from the main process.
- * Lazily loads Sentry to avoid module initialization issues.
- */
-async function reportCrashToSentry(
-	message: string,
-	level: SentrySeverityLevel,
-	extra?: Record<string, unknown>
-): Promise<void> {
-	try {
-		if (!sentryModule) {
-			const sentry = await import('@sentry/electron/main');
-			sentryModule = sentry;
-		}
-		sentryModule.captureMessage(message, { level, extra });
-	} catch {
-		// Sentry not available (development mode or initialization failed)
-		logger.debug('Sentry not available for crash reporting', 'Window');
-	}
+/** Bounds/state used to size and position a window at creation time. */
+interface WindowCreationBounds {
+	x?: number;
+	y?: number;
+	width?: number;
+	height?: number;
+	isMaximized?: boolean;
+	isFullScreen?: boolean;
 }
 
 /** Dependencies for window manager */
@@ -52,75 +47,173 @@ export interface WindowManagerDependencies {
 	isDevelopment: boolean;
 	/** Path to the preload script */
 	preloadPath: string;
-	/** Path to the renderer HTML file (production) */
-	rendererPath: string;
+	/** Custom-protocol URL used to load the production renderer. */
+	rendererProductionUrl: string;
 	/** Development server URL */
 	devServerUrl: string;
+	/** Whether to use the native OS title bar instead of custom title bar */
+	useNativeTitleBar: boolean;
+	/** Whether to auto-hide the menu bar (Linux/Windows) */
+	autoHideMenuBar: boolean;
+	/**
+	 * Lazy getter for the quit handler's confirmQuit function. Used by the
+	 * auto-updater install path to bypass the busy-agent quit confirmation
+	 * gate. Lazy because the quit handler is constructed after the window.
+	 */
+	getConfirmQuit?: () => (() => void) | null | undefined;
+	/**
+	 * Registry that tracks every window and which agents (sessions) it owns.
+	 * Injected (rather than reached for as a module global) so window creation
+	 * registers the primary as `isMain` and every secondary window it builds.
+	 * Optional during the phased rollout: the primary is only registered when a
+	 * registry is provided.
+	 */
+	windowRegistry?: WindowRegistry;
+	/**
+	 * Runtime settings store. Injected (rather than reached for as a module
+	 * global) for window-related preferences read by later multi-window phases
+	 * (per-window panel/session persistence).
+	 */
+	settingsStore?: SettingsStoreInterface;
+	/**
+	 * Lazy "is the app quitting" signal. When true, a closing secondary window
+	 * skips registry cleanup since the registry is discarded with the process.
+	 */
+	getIsQuitting?: () => boolean;
 }
 
 /** Window manager instance */
 export interface WindowManager {
-	/** Create and show the main window */
-	createWindow: () => BrowserWindow;
+	/**
+	 * Create and show the main (primary) window. With no options the window
+	 * restores from the legacy single-window store (backward compatible). On a
+	 * multi-window restore the caller passes the saved primary's `bounds` and the
+	 * `sessionIds` it owns so the primary comes back exactly where it was.
+	 */
+	createWindow: (options?: {
+		sessionIds?: string[];
+		bounds?: Partial<SharedWindowState>;
+	}) => BrowserWindow;
+	/**
+	 * Create a secondary window owning `sessionIds`, registered with the window
+	 * registry. The window self-identifies via a `?windowId=<id>` query appended
+	 * to the renderer URL (read by the renderer in a later phase).
+	 */
+	createSecondaryWindow: (
+		sessionIds: string[],
+		bounds?: Partial<SharedWindowState>
+	) => BrowserWindow;
 }
 
 /**
- * Creates a window manager for handling the main BrowserWindow.
+ * Creates a window manager for handling BrowserWindows.
  *
  * @param deps - Dependencies for window creation
  * @returns WindowManager instance
  */
 export function createWindowManager(deps: WindowManagerDependencies): WindowManager {
-	const { windowStateStore, isDevelopment, preloadPath, rendererPath, devServerUrl } = deps;
+	const {
+		windowStateStore,
+		isDevelopment,
+		preloadPath,
+		rendererProductionUrl,
+		devServerUrl,
+		useNativeTitleBar,
+		autoHideMenuBar,
+		getConfirmQuit,
+		windowRegistry,
+		getIsQuitting,
+	} = deps;
 
-	return {
-		createWindow: (): BrowserWindow => {
-			// Restore saved window state
-			const savedState = windowStateStore.store;
+	/**
+	 * Builds the renderer URL for a window. Secondary windows get a
+	 * `?windowId=<id>` query so the renderer can self-identify; the primary
+	 * loads the bare URL unchanged.
+	 */
+	const buildEntryUrl = (windowId: string, isMain: boolean): string => {
+		const base = isDevelopment ? devServerUrl : rendererProductionUrl;
+		if (isMain) return base;
+		const separator = base.includes('?') ? '&' : '?';
+		return `${base}${separator}windowId=${encodeURIComponent(windowId)}`;
+	};
 
-			const mainWindow = new BrowserWindow({
-				x: savedState.x,
-				y: savedState.y,
-				width: savedState.width,
-				height: savedState.height,
-				minWidth: 1000,
-				minHeight: 600,
-				backgroundColor: '#0b0b0d',
-				titleBarStyle: 'hiddenInset',
-				webPreferences: {
-					preload: preloadPath,
-					contextIsolation: true,
-					nodeIntegration: false,
-				},
-			});
+	/**
+	 * Shared factory that builds and fully hardens a BrowserWindow. EVERY window
+	 * (primary and secondary) goes through here so the security hardening,
+	 * navigation guards, permission handling, crash detection, and off-screen
+	 * placement guarding are identical. Registry registration and the
+	 * auto-updater (primary-only) are wired by the callers below.
+	 */
+	const createBrowserWindow = (options: {
+		windowId: string;
+		sessionIds: string[];
+		bounds?: WindowCreationBounds;
+		isMain: boolean;
+	}): BrowserWindow => {
+		const { windowId, bounds, isMain } = options;
 
-			// Restore maximized/fullscreen state after window is created
-			if (savedState.isFullScreen) {
-				mainWindow.setFullScreen(true);
-			} else if (savedState.isMaximized) {
-				mainWindow.maximize();
-			}
+		// Restore saved window state, discarding off-screen coordinates so the
+		// window can never spawn invisible (saved while minimized -> -32000 on
+		// Windows, or on an unplugged monitor); fall back to a centered window.
+		const width = bounds?.width ?? WINDOW_STATE_DEFAULTS.width;
+		const height = bounds?.height ?? WINDOW_STATE_DEFAULTS.height;
+		const position = resolveVisibleWindowPosition({ x: bounds?.x, y: bounds?.y, width, height });
 
-			logger.info('Browser window created', 'Window', {
-				size: `${savedState.width}x${savedState.height}`,
-				maximized: savedState.isMaximized,
-				fullScreen: savedState.isFullScreen,
-				mode: isDevelopment ? 'development' : 'production',
-			});
+		const browserWindow = new BrowserWindow({
+			x: position.x,
+			y: position.y,
+			width,
+			height,
+			minWidth: 1000,
+			minHeight: 600,
+			backgroundColor: '#0b0b0d',
+			...(useNativeTitleBar ? {} : { titleBarStyle: 'hiddenInset' as const }),
+			...(autoHideMenuBar ? { autoHideMenuBar: true } : {}),
+			webPreferences: {
+				preload: preloadPath,
+				contextIsolation: true,
+				nodeIntegration: false,
+				sandbox: true,
+				spellcheck: true,
+				// Embedded browser tabs use Electron's guest webview surface in the renderer.
+				webviewTag: true,
+			},
+		});
 
-			// Save window state before closing
-			const saveWindowState = () => {
+		// Restore maximized/fullscreen state after window is created
+		if (bounds?.isFullScreen) {
+			browserWindow.setFullScreen(true);
+		} else if (bounds?.isMaximized) {
+			browserWindow.maximize();
+		}
+
+		logger.info('Browser window created', 'Window', {
+			size: `${width}x${height}`,
+			maximized: bounds?.isMaximized ?? false,
+			fullScreen: bounds?.isFullScreen ?? false,
+			mode: isDevelopment ? 'development' : 'production',
+			isMain,
+		});
+
+		// Save window state before closing. Only the primary window backs the
+		// legacy single-window store; secondary-window persistence rides on the
+		// multi-window state wired below.
+		if (isMain) {
+			const saveLegacySingleWindowState = () => {
 				try {
-					const isMaximized = mainWindow.isMaximized();
-					const isFullScreen = mainWindow.isFullScreen();
-					const bounds = mainWindow.getBounds();
+					const isMaximized = browserWindow.isMaximized();
+					const isFullScreen = browserWindow.isFullScreen();
+					const isMinimized = browserWindow.isMinimized();
+					const savedBounds = browserWindow.getBounds();
 
-					// Only save bounds if not maximized/fullscreen (to restore proper size later)
-					if (!isMaximized && !isFullScreen) {
-						windowStateStore.set('x', bounds.x);
-						windowStateStore.set('y', bounds.y);
-						windowStateStore.set('width', bounds.width);
-						windowStateStore.set('height', bounds.height);
+					// Only save bounds when the window is in its normal state. While
+					// minimized, Windows reports bounds of (-32000, -32000), which would
+					// otherwise persist and make the window spawn off-screen next launch.
+					if (!isMaximized && !isFullScreen && !isMinimized) {
+						windowStateStore.set('x', savedBounds.x);
+						windowStateStore.set('y', savedBounds.y);
+						windowStateStore.set('width', savedBounds.width);
+						windowStateStore.set('height', savedBounds.height);
 					}
 					windowStateStore.set('isMaximized', isMaximized);
 					windowStateStore.set('isFullScreen', isFullScreen);
@@ -129,11 +222,50 @@ export function createWindowManager(deps: WindowManagerDependencies): WindowMana
 				}
 			};
 
-			mainWindow.on('close', saveWindowState);
+			browserWindow.on('close', saveLegacySingleWindowState);
+		}
 
-			// Load the app
-			if (isDevelopment) {
-				// Install React DevTools extension in development mode
+		// Multi-window persistence: keep this window's entry in the persisted
+		// MultiWindowState current as the user drags, resizes, or toggles
+		// maximize/fullscreen. Debounced so a live drag/resize (which fires a
+		// flood of move/resize events) collapses into one store write once the
+		// user settles. Each window gets its own debounced closure, so one
+		// window's activity never delays another's save. Only wired when a
+		// registry is present (the window-state blob is keyed off registered
+		// windows); the quit handler still takes the authoritative final snapshot.
+		if (windowRegistry) {
+			const persistWindowState = debounce(() => {
+				saveWindowState(windowStateStore, windowRegistry, windowId);
+			}, WINDOW_STATE_SAVE_DEBOUNCE_MS);
+
+			const PERSIST_EVENTS = [
+				'move',
+				'resize',
+				'maximize',
+				'unmaximize',
+				'enter-full-screen',
+				'leave-full-screen',
+			] as const;
+			// Electron types `.on` with a distinct overload per event name, so a
+			// union loop variable matches none of them. The cast is safe: every
+			// listed event delivers a listener compatible with our `() => void`.
+			for (const eventName of PERSIST_EVENTS) {
+				browserWindow.on(eventName as 'resize', persistWindowState);
+			}
+
+			// Drop any queued save when the window goes away. The quit handler and
+			// later removal-driven saves own the post-close layout; a debounced
+			// callback firing after the window left the registry would just no-op.
+			browserWindow.on('closed', () => persistWindowState.cancel());
+		}
+
+		// Load the app
+		const entryUrl = buildEntryUrl(windowId, isMain);
+		if (isDevelopment) {
+			// Install React DevTools extension in development mode. The extension
+			// installs into the shared session, so doing it once for the primary
+			// window covers every window.
+			if (isMain) {
 				import('electron-devtools-installer')
 					.then(({ default: installExtension, REACT_DEVELOPER_TOOLS }) => {
 						installExtension(REACT_DEVELOPER_TOOLS)
@@ -145,135 +277,54 @@ export function createWindowManager(deps: WindowManagerDependencies): WindowMana
 					.catch((err: Error) =>
 						logger.warn(`Failed to load electron-devtools-installer: ${err.message}`, 'Window')
 					);
-
-				mainWindow.loadURL(devServerUrl);
-				// DevTools can be opened via Command-K menu instead of automatically on startup
-				logger.info('Loading development server', 'Window');
-			} else {
-				mainWindow.loadFile(rendererPath);
-				logger.info('Loading production build', 'Window');
-				// Open DevTools in production if DEBUG env var is set
-				if (process.env.DEBUG === 'true') {
-					mainWindow.webContents.openDevTools();
-				}
 			}
 
-			mainWindow.on('closed', () => {
-				logger.info('Browser window closed', 'Window');
-			});
+			browserWindow.loadURL(entryUrl);
+			// DevTools can be opened via Command-K menu instead of automatically on startup
+			logger.info('Loading development server', 'Window');
+		} else {
+			browserWindow.loadURL(entryUrl);
+			logger.info('Loading production build', 'Window');
+			// Open DevTools in production if DEBUG env var is set
+			if (process.env.DEBUG === 'true') {
+				browserWindow.webContents.openDevTools();
+			}
+		}
 
-			// ================================================================
-			// Renderer Process Crash Detection
-			// ================================================================
-			// These handlers capture crashes that Sentry in the renderer cannot
-			// report (because the renderer process is dead or broken).
+		// ================================================================
+		// Navigation & Window Security Hardening
+		// ================================================================
 
-			// Handle renderer process termination (crash, kill, OOM, etc.)
-			mainWindow.webContents.on('render-process-gone', (_event, details) => {
-				logger.error('Renderer process gone', 'Window', {
-					reason: details.reason,
-					exitCode: details.exitCode,
-				});
+		attachGuestWebviewSecurity(browserWindow, preloadPath);
+		attachMainWindowNavigationGuards(browserWindow, {
+			isDevelopment,
+			devServerUrl,
+			rendererProductionUrl,
+			entryUrl,
+		});
+		attachSpellCheckContextMenu(browserWindow);
 
-				// Report to Sentry from main process (always available)
-				reportCrashToSentry(`Renderer process gone: ${details.reason}`, 'fatal', {
-					reason: details.reason,
-					exitCode: details.exitCode,
-				});
+		browserWindow.on('closed', () => {
+			logger.info('Browser window closed', 'Window');
+		});
 
-				// Auto-reload unless the process was intentionally killed
-				if (details.reason !== 'killed' && details.reason !== 'clean-exit') {
-					logger.info('Attempting to reload renderer after crash', 'Window');
-					setTimeout(() => {
-						if (!mainWindow.isDestroyed()) {
-							mainWindow.webContents.reload();
-						}
-					}, 1000);
-				}
-			});
+		// ================================================================
+		// Renderer Process Crash Detection
+		// ================================================================
+		// These handlers capture crashes that Sentry in the renderer cannot
+		// report (because the renderer process is dead or broken).
 
-			// Handle window becoming unresponsive (frozen renderer)
-			mainWindow.on('unresponsive', () => {
-				logger.warn('Window became unresponsive', 'Window');
-				reportCrashToSentry('Window unresponsive', 'warning', {
-					memoryUsage: process.memoryUsage(),
-				});
-			});
-
-			// Log when window recovers from unresponsive state
-			mainWindow.on('responsive', () => {
-				logger.info('Window became responsive again', 'Window');
-			});
-
-			// Handle page crashes (less severe than render-process-gone)
-			mainWindow.webContents.on('crashed', (_event, killed) => {
-				logger.error('WebContents crashed', 'Window', { killed });
-				reportCrashToSentry('WebContents crashed', killed ? 'warning' : 'error', { killed });
-			});
-
-			// Handle page load failures (network issues, invalid URLs, etc.)
-			mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
-				// Ignore aborted loads (user navigated away)
-				if (errorCode === -3) return;
-
-				logger.error('Page failed to load', 'Window', {
-					errorCode,
-					errorDescription,
-					url: validatedURL,
-				});
-				reportCrashToSentry(`Page failed to load: ${errorDescription}`, 'error', {
-					errorCode,
-					errorDescription,
-					url: validatedURL,
-				});
-			});
-
-			// Handle preload script errors
-			mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
-				logger.error('Preload script error', 'Window', {
-					preloadPath,
-					error: error.message,
-					stack: error.stack,
-				});
-				reportCrashToSentry('Preload script error', 'fatal', {
-					preloadPath,
-					error: error.message,
-					stack: error.stack,
-				});
-			});
-
-			// Forward renderer console errors to main process logger and Sentry
-			// This catches errors that happen before or outside React's error boundary
-			mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
-				// Level 2 = error (0=verbose, 1=info, 2=warning, 3=error)
-				if (level === 3) {
-					logger.error(`Renderer console error: ${message}`, 'Window', {
-						line,
-						source: sourceId,
-					});
-
-					// Report critical errors to Sentry
-					// Filter out common noise (React dev warnings, etc.)
-					const isCritical =
-						message.includes('Uncaught') ||
-						message.includes('TypeError') ||
-						message.includes('ReferenceError') ||
-						message.includes('Cannot read') ||
-						message.includes('is not defined') ||
-						message.includes('is not a function');
-
-					if (isCritical) {
-						reportCrashToSentry(`Renderer error: ${message}`, 'error', {
-							line,
-							source: sourceId,
-						});
-					}
-				}
-			});
-
-			// Initialize auto-updater (only in production)
+		attachWindowCrashHandlers(browserWindow);
+		// Initialize auto-updater (only in production, and only for the primary
+		// window - update checks/installs are a single app-wide concern).
+		if (isMain) {
 			if (!isDevelopment) {
-				initAutoUpdater(mainWindow);
+				initAutoUpdater(browserWindow, {
+					onBeforeQuitAndInstall: () => {
+						const confirmQuit = getConfirmQuit?.();
+						confirmQuit?.();
+					},
+				});
 				logger.info('Auto-updater initialized', 'Window');
 			} else {
 				// Register stub handlers in development mode so users get a helpful error
@@ -283,45 +334,116 @@ export function createWindowManager(deps: WindowManagerDependencies): WindowMana
 					'Window'
 				);
 			}
+		}
 
-			return mainWindow;
+		return browserWindow;
+	};
+
+	return {
+		createWindow: (options?: {
+			sessionIds?: string[];
+			bounds?: Partial<SharedWindowState>;
+		}): BrowserWindow => {
+			const sessionIds = options?.sessionIds ?? [];
+			// Restore from the saved multi-window primary bounds when restoring a
+			// layout; otherwise fall back to the legacy single-window store.
+			const bounds = options?.bounds ?? windowStateStore.store;
+			// Adopt the saved window id (multi-window restore) so ids stay STABLE
+			// across restart and id-keyed state (e.g. a custom window name) reconnects;
+			// mint a fresh one for a first-ever launch with no saved layout.
+			const windowId = options?.bounds?.id ?? generateUUID();
+			const browserWindow = createBrowserWindow({
+				windowId,
+				sessionIds,
+				bounds,
+				isMain: true,
+			});
+
+			if (windowRegistry) {
+				windowRegistry.create({
+					windowId,
+					browserWindow,
+					sessionIds,
+					isMain: true,
+					name: options?.bounds?.name,
+					// Restore the saved per-window panel-collapse state (undefined on a
+					// fresh launch -> registry defaults to expanded).
+					leftPanelCollapsed: options?.bounds?.leftPanelCollapsed,
+					rightPanelCollapsed: options?.bounds?.rightPanelCollapsed,
+				});
+				// Keep the registry consistent if the primary closes. On macOS the
+				// app stays alive after all windows close and a later `activate`
+				// rebuilds a fresh primary, so the stale entry must not linger.
+				browserWindow.on('closed', () => {
+					windowRegistry.remove(windowId);
+				});
+			}
+
+			return browserWindow;
+		},
+
+		createSecondaryWindow: (
+			sessionIds: string[],
+			bounds?: Partial<SharedWindowState>
+		): BrowserWindow => {
+			// Adopt the saved id on restore so ids stay stable across restart and a
+			// custom window name (keyed by id) reconnects; mint fresh otherwise.
+			const windowId = bounds?.id ?? generateUUID();
+			const browserWindow = createBrowserWindow({
+				windowId,
+				sessionIds,
+				bounds,
+				isMain: false,
+			});
+
+			windowRegistry?.create({
+				windowId,
+				browserWindow,
+				sessionIds,
+				isMain: false,
+				name: bounds?.name,
+				// Restore the saved per-window panel-collapse state on layout restore.
+				leftPanelCollapsed: bounds?.leftPanelCollapsed,
+				rightPanelCollapsed: bounds?.rightPanelCollapsed,
+			});
+
+			browserWindow.on('closed', () => {
+				// Skip registry work while the app is quitting - the registry is
+				// discarded with the process, so reclaiming ownership or emitting a
+				// change then is pointless.
+				if (getIsQuitting?.() || !windowRegistry) return;
+
+				// Reclaim any agents still owned by this window into the primary so
+				// none are ever orphaned, THEN drop the closed window. The reclaim
+				// moves broadcast `session-moved` to every live renderer (Phase 5),
+				// so the primary's tab strip picks the agents up; a brief toast tells
+				// the user where they went.
+				const reclaimed = windowRegistry.reclaimSessionsToPrimary(windowId);
+				windowRegistry.remove(windowId);
+				if (reclaimed && reclaimed.movedSessionIds.length > 0) {
+					notifySessionsReclaimedToPrimary(windowRegistry, reclaimed.movedSessionIds.length);
+				}
+			});
+
+			return browserWindow;
 		},
 	};
 }
 
-// Track if stub handlers have been registered (module-level to persist across createWindow calls)
-let devStubsRegistered = false;
-
 /**
- * Registers stub IPC handlers for auto-updater in development mode.
- * These provide helpful error messages instead of silent failures.
- * Uses a module-level flag to ensure handlers are only registered once.
+ * Toast the primary window's renderer that agents from a just-closed secondary
+ * window were reclaimed into it. Reuses the existing `remote:notifyToast`
+ * pipeline (preload `onRemoteNotifyToast` -> renderer `notifyToast`) rather than
+ * a bespoke channel. Advisory only: a missing or destroyed primary renderer is
+ * a silent no-op.
  */
-function registerDevAutoUpdaterStubs(): void {
-	// Only register once - prevents duplicate handler errors if createWindow is called multiple times
-	if (devStubsRegistered) {
-		logger.debug('Auto-updater stub handlers already registered, skipping', 'Window');
-		return;
-	}
-
-	ipcMain.handle('updates:download', async () => {
-		return {
-			success: false,
-			error: 'Auto-update is disabled in development mode. Please check update first.',
-		};
+function notifySessionsReclaimedToPrimary(registry: WindowRegistry, count: number): void {
+	const primary = registry.getPrimary();
+	if (!primary || !isWebContentsAvailable(primary.browserWindow)) return;
+	const noun = count === 1 ? 'agent' : 'agents';
+	primary.browserWindow.webContents.send('remote:notifyToast', {
+		title: 'Window closed',
+		message: `${count} ${noun} moved to main window`,
+		color: 'theme' as const,
 	});
-
-	ipcMain.handle('updates:install', async () => {
-		logger.warn('Auto-update install called in development mode', 'AutoUpdater');
-	});
-
-	ipcMain.handle('updates:getStatus', async () => {
-		return { status: 'idle' as const };
-	});
-
-	ipcMain.handle('updates:checkAutoUpdater', async () => {
-		return { success: false, error: 'Auto-update is disabled in development mode' };
-	});
-
-	devStubsRegistered = true;
 }

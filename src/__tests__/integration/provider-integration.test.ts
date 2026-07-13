@@ -372,20 +372,21 @@ const PROVIDERS: ProviderConfig[] = [
 		 */
 		buildInitialArgs: (prompt: string, options?: { images?: string[] }) => {
 			// Codex arg order from process.ts IPC handler:
-			// 1. batchModePrefix: ['exec']
-			// 2. base args: [] (empty for Codex)
-			// 3. batchModeArgs: ['--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check']
-			// 4. jsonOutputArgs: ['--json']
-			// 5. workingDirArgs: ['-C', dir]
+			// 1. workingDirArgs: ['-C', dir] (must precede the `exec` subcommand
+			//    because Codex treats `-C` as a root-level global flag — see #959)
+			// 2. batchModePrefix: ['exec']
+			// 3. base args: [] (empty for Codex)
+			// 4. batchModeArgs: ['--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check']
+			// 5. jsonOutputArgs: ['--json']
 			// 6. prompt via '--' separator (process-manager.ts)
 
 			const args = [
+				'-C',
+				TEST_CWD,
 				'exec',
 				'--dangerously-bypass-approvals-and-sandbox',
 				'--skip-git-repo-check',
 				'--json',
-				'-C',
-				TEST_CWD,
 			];
 
 			// IMPORTANT: This mirrors process-manager.ts logic
@@ -404,12 +405,12 @@ const PROVIDERS: ProviderConfig[] = [
 			return [...args, '--', prompt];
 		},
 		buildResumeArgs: (sessionId: string, prompt: string) => [
+			'-C',
+			TEST_CWD,
 			'exec',
 			'--dangerously-bypass-approvals-and-sandbox',
 			'--skip-git-repo-check',
 			'--json',
-			'-C',
-			TEST_CWD,
 			'resume',
 			sessionId,
 			'--',
@@ -420,20 +421,20 @@ const PROVIDERS: ProviderConfig[] = [
 		 * Codex uses file-based image args (-i) - images decoded on remote via script.
 		 */
 		buildSshArgs: () => [
+			'-C',
+			TEST_CWD,
 			'exec',
 			'--dangerously-bypass-approvals-and-sandbox',
 			'--skip-git-repo-check',
 			'--json',
-			'-C',
-			TEST_CWD,
 		],
 		buildSshResumeArgs: (sessionId: string) => [
+			'-C',
+			TEST_CWD,
 			'exec',
 			'--dangerously-bypass-approvals-and-sandbox',
 			'--skip-git-repo-check',
 			'--json',
-			'-C',
-			TEST_CWD,
 			'resume',
 			sessionId,
 		],
@@ -487,12 +488,12 @@ const PROVIDERS: ProviderConfig[] = [
 		 * Mirrors agent-detector.ts: imageArgs: (imagePath) => ['-i', imagePath]
 		 */
 		buildImageArgs: (prompt: string, imagePath: string) => [
+			'-C',
+			TEST_CWD,
 			'exec',
 			'--dangerously-bypass-approvals-and-sandbox',
 			'--skip-git-repo-check',
 			'--json',
-			'-C',
-			TEST_CWD,
 			'-i',
 			imagePath,
 			'--',
@@ -759,6 +760,150 @@ const PROVIDERS: ProviderConfig[] = [
 			return executions;
 		},
 	},
+	{
+		name: 'Copilot-CLI',
+		agentId: 'copilot-cli',
+		command: 'copilot',
+		checkCommand: 'copilot --version',
+		/**
+		 * Mirrors the copilot-cli definition in src/main/agents/definitions.ts:
+		 *   args: []                       (no base args; interactive default)
+		 *   batchModeArgs: ['--allow-all'] (full permissions for unattended runs)
+		 *   jsonOutputArgs: ['--output-format', 'json']
+		 *   promptArgs: (prompt) => ['-p', prompt]
+		 *
+		 * Final assembly (process.ts IPC handler):
+		 *   copilot --allow-all --output-format json -p "<prompt>"
+		 *
+		 * Copilot does not support --input-format stream-json
+		 * (supportsStreamJsonInput: false). Images are embedded into the prompt
+		 * as @file mentions via imagePromptBuilder, not via a CLI flag.
+		 */
+		buildInitialArgs: (prompt: string, options?: { images?: string[] }) => {
+			const capabilities = getAgentCapabilities('copilot-cli');
+			if (options?.images && options.images.length > 0 && capabilities.supportsStreamJsonInput) {
+				throw new Error(
+					'Copilot-CLI should not support stream-json input — capability misconfigured'
+				);
+			}
+			return ['--allow-all', '--output-format', 'json', '-p', prompt];
+		},
+		buildResumeArgs: (sessionId: string, prompt: string) => [
+			'--allow-all',
+			'--output-format',
+			'json',
+			`--resume=${sessionId}`,
+			'-p',
+			prompt,
+		],
+		buildSshArgs: () => ['--allow-all', '--output-format', 'json'],
+		buildSshResumeArgs: (sessionId: string) => [
+			'--allow-all',
+			'--output-format',
+			'json',
+			`--resume=${sessionId}`,
+		],
+		parseSessionId: (output: string) => {
+			// Copilot emits the session ID on the top-level `result` event at
+			// completion: {"type":"result","sessionId":"...","exitCode":0,"usage":{...}}
+			for (const line of output.split('\n')) {
+				try {
+					const json = JSON.parse(line);
+					if (json.type === 'result' && typeof json.sessionId === 'string') {
+						return json.sessionId;
+					}
+				} catch {
+					/* ignore non-JSON lines */
+				}
+			}
+			return null;
+		},
+		parseResponse: (output: string) => {
+			// Modern Copilot's final answer lives in an `assistant.message` event
+			// with non-empty content and empty toolRequests, no `phase` field.
+			// Legacy `phase: 'final_answer'` is also accepted.
+			for (const line of output.split('\n')) {
+				try {
+					const json = JSON.parse(line);
+					if (json.type !== 'assistant.message') continue;
+					const data = json.data || {};
+					const content = typeof data.content === 'string' ? data.content : '';
+					const toolRequests = Array.isArray(data.toolRequests) ? data.toolRequests : [];
+					const phase = data.phase;
+					const isFinal =
+						phase === 'final_answer' ||
+						(phase === undefined && content.length > 0 && toolRequests.length === 0);
+					if (isFinal) return content;
+				} catch {
+					/* ignore non-JSON lines */
+				}
+			}
+			return null;
+		},
+		isSuccessful: (output: string, exitCode: number) => {
+			if (exitCode !== 0) return false;
+			// Require a final result event — bare exit 0 with no result means
+			// the session was interrupted before completion.
+			return output.includes('"type":"result"');
+		},
+		parseTools: (output: string) => {
+			// Copilot emits session.tools_updated with model metadata; tool list
+			// is not directly exposed in JSONL (it's an interactive-mode concept).
+			// Surface tool names actually used in toolRequests on assistant.messages.
+			const toolNames = new Set<string>();
+			for (const line of output.split('\n')) {
+				try {
+					const json = JSON.parse(line);
+					const toolRequests = json?.data?.toolRequests;
+					if (Array.isArray(toolRequests)) {
+						for (const tool of toolRequests) {
+							if (tool?.name) toolNames.add(tool.name);
+						}
+					}
+				} catch {
+					/* ignore non-JSON lines */
+				}
+			}
+			return toolNames.size > 0 ? [...toolNames] : null;
+		},
+		parseToolExecutions: (output: string) => {
+			const executions: Array<{
+				name: string;
+				status?: string;
+				input?: unknown;
+				output?: unknown;
+			}> = [];
+			const byCallId = new Map<string, { name: string; input?: unknown }>();
+
+			for (const line of output.split('\n')) {
+				try {
+					const json = JSON.parse(line);
+					if (json.type === 'tool.execution_start' && json.data?.toolCallId) {
+						byCallId.set(json.data.toolCallId, {
+							name: json.data.toolName || 'unknown',
+							input: json.data.arguments,
+						});
+						executions.push({
+							name: json.data.toolName || 'unknown',
+							status: 'running',
+							input: json.data.arguments,
+						});
+					} else if (json.type === 'tool.execution_complete' && json.data?.toolCallId) {
+						const start = byCallId.get(json.data.toolCallId);
+						executions.push({
+							name: start?.name || 'unknown',
+							status: json.data.success === false ? 'failed' : 'completed',
+							input: start?.input,
+							output: json.data.result?.content ?? json.data.result,
+						});
+					}
+				} catch {
+					/* ignore non-JSON lines */
+				}
+			}
+			return executions;
+		},
+	},
 ];
 
 /**
@@ -940,9 +1085,11 @@ async function runProviderViaSshStdin(
 	console.log(`🌐 SSH Stdin Command: ${sshCommand.command} ${sshCommand.args.join(' ')}`);
 	if (sshCommand.stdinScript) {
 		// Show script preview (truncate large base64 data)
-		const preview = sshCommand.stdinScript.length > 500
-			? sshCommand.stdinScript.substring(0, 500) + `... (${sshCommand.stdinScript.length} total bytes)`
-			: sshCommand.stdinScript;
+		const preview =
+			sshCommand.stdinScript.length > 500
+				? sshCommand.stdinScript.substring(0, 500) +
+					`... (${sshCommand.stdinScript.length} total bytes)`
+				: sshCommand.stdinScript;
 		console.log(`📜 Stdin script preview:\n${preview}`);
 	}
 
@@ -1464,16 +1611,14 @@ describe.skipIf(SKIP_INTEGRATION)('Provider Integration Tests', () => {
 					console.log(`📋 Session ID: ${sessionId}`);
 					expect(sessionId, `${provider.name} should return session ID`).toBeTruthy();
 
-					// Now request a synopsis (this is what happens when a task completes)
-					const synopsisPrompt = `Provide a brief synopsis of what you just accomplished in this task using this exact format:
-
-**Summary:** [1-2 sentences describing the key outcome]
-
-**Details:** [A paragraph with more specifics about what was done]
-
-Rules:
-- Be specific about what was actually accomplished.
-- Focus only on meaningful work that was done.`;
+					// Now request a synopsis (this is what happens when a task completes).
+					// Use the real, live prompt rather than a hand-copied literal so this
+					// test never drifts from the actual prompt - edit the .md freely and
+					// this test follows automatically.
+					const synopsisPrompt = fs.readFileSync(
+						path.join(__dirname, '../../prompts/autorun-synopsis.md'),
+						'utf-8'
+					);
 
 					const synopsisArgs = provider.buildResumeArgs(sessionId!, synopsisPrompt);
 
@@ -1500,13 +1645,13 @@ Rules:
 					console.log(`   - shortSummary: ${parsed.shortSummary.substring(0, 100)}`);
 					console.log(`   - fullSynopsis length: ${parsed.fullSynopsis.length}`);
 
-					// Verify the summary is NOT a template placeholder
-					const templatePlaceholders = [
-						'[1-2 sentences',
-						'[A paragraph',
-						'... (1-2 sentences)',
-						'... then blank line',
-					];
+					// Verify the summary is NOT a verbatim echo of the template. Derive
+					// the placeholder signatures from the loaded prompt (the leading text
+					// of each `**Summary:**/**Details:** [...]` block) so this check tracks
+					// the prompt instead of hard-coding literals that go stale.
+					const templatePlaceholders = Array.from(
+						synopsisPrompt.matchAll(/\*\*(?:Summary|Details):\*\*\s*(\[[^\].]{5,})/g)
+					).map((m) => m[1].trim().slice(0, 20));
 
 					for (const placeholder of templatePlaceholders) {
 						expect(
@@ -2002,9 +2147,7 @@ Rules:
 						if (hasReadTool) {
 							console.log(`   ✓ Found file read tool in executions`);
 						} else {
-							console.log(
-								`   ⚠️  No obvious file read tool found - tool names may differ`
-							);
+							console.log(`   ⚠️  No obvious file read tool found - tool names may differ`);
 						}
 					} else {
 						// For other providers, tool event parsing is informational only
@@ -2276,8 +2419,12 @@ describe.skipIf(SKIP_SSH_INTEGRATION)('SSH Provider Integration Tests', () => {
 						console.log(
 							`⚠️  Path/environment error on remote - local working directory may not exist on ${sshConfig!.host}`
 						);
-						console.log(`   SSH communication is working correctly - the remote environment differs from local.`);
-						console.log(`   This is expected when the local project path doesn't exist on the remote machine.`);
+						console.log(
+							`   SSH communication is working correctly - the remote environment differs from local.`
+						);
+						console.log(
+							`   This is expected when the local project path doesn't exist on the remote machine.`
+						);
 						return; // Don't fail the test for path/environment issues
 					}
 
@@ -2333,7 +2480,9 @@ describe.skipIf(SKIP_SSH_INTEGRATION)('SSH Provider Integration Tests', () => {
 						"What is 2 + 2? Say just the number. Don't explain. $PATH should be ignored.";
 					const args = provider.buildSshArgs();
 
-					console.log(`\n🌐 Testing special characters via SSH for ${provider.name} (stdin passthrough)`);
+					console.log(
+						`\n🌐 Testing special characters via SSH for ${provider.name} (stdin passthrough)`
+					);
 
 					const result = await runProviderViaSshStdin(provider, sshConfig, args, {
 						stdinInput: prompt,
@@ -2398,7 +2547,9 @@ describe.skipIf(SKIP_SSH_INTEGRATION)('SSH Provider Integration Tests', () => {
 Reply with just the two numbers separated by a comma.`;
 					const args = provider.buildSshArgs();
 
-					console.log(`\n🌐 Testing multi-line prompt via SSH for ${provider.name} (stdin passthrough)`);
+					console.log(
+						`\n🌐 Testing multi-line prompt via SSH for ${provider.name} (stdin passthrough)`
+					);
 
 					const result = await runProviderViaSshStdin(provider, sshConfig, args, {
 						stdinInput: prompt,
@@ -2456,7 +2607,9 @@ Reply with just the two numbers separated by a comma.`;
 					const prompt = 'Say "test" briefly.';
 					const args = provider.buildSshArgs();
 
-					console.log(`\n🌐 Testing session ID parsing for ${provider.name} via SSH (stdin passthrough)`);
+					console.log(
+						`\n🌐 Testing session ID parsing for ${provider.name} via SSH (stdin passthrough)`
+					);
 
 					const result = await runProviderViaSshStdin(provider, sshConfig, args, {
 						stdinInput: prompt,
@@ -2506,7 +2659,9 @@ Reply with just the two numbers separated by a comma.`;
 					const initialPrompt = 'Remember the word "BANANA". Say only "Got it."';
 					const initialArgs = provider.buildSshArgs();
 
-					console.log(`\n🌐 Testing session resume via SSH for ${provider.name} (stdin passthrough)`);
+					console.log(
+						`\n🌐 Testing session resume via SSH for ${provider.name} (stdin passthrough)`
+					);
 					console.log(`📤 Initial message...`);
 
 					const initialResult = await runProviderViaSshStdin(provider, sshConfig, initialArgs, {
@@ -2518,7 +2673,9 @@ Reply with just the two numbers separated by a comma.`;
 						console.log(
 							`⚠️  Path error on remote - local working directory may not exist on ${sshConfig!.host}`
 						);
-						console.log(`   SSH communication is working correctly - the path needs to exist on remote.`);
+						console.log(
+							`   SSH communication is working correctly - the path needs to exist on remote.`
+						);
 						return;
 					}
 
@@ -2618,7 +2775,9 @@ Reply with just the two numbers separated by a comma.`;
 					const prompt =
 						'What word is shown in this image? Reply with ONLY the single word shown, nothing else.';
 
-					console.log(`\n🖼️  Testing image processing via SSH for ${provider.name} (production path)`);
+					console.log(
+						`\n🖼️  Testing image processing via SSH for ${provider.name} (production path)`
+					);
 					console.log(`📁 Local image path: ${TEST_IMAGE_PATH}`);
 					console.log(`📥 Image size: ${imageBase64.length} base64 bytes`);
 
@@ -2646,7 +2805,9 @@ Reply with just the two numbers separated by a comma.`;
 
 						const args = provider.buildSshArgs();
 
-						console.log(`🚀 Running via SSH (file-based images): ${provider.command} ${args.join(' ')}`);
+						console.log(
+							`🚀 Running via SSH (file-based images): ${provider.command} ${args.join(' ')}`
+						);
 						console.log(`📦 Images decoded on remote via heredoc + base64 -d in SSH script`);
 
 						result = await runProviderViaSshStdin(provider, sshConfig, args, {
@@ -2667,7 +2828,9 @@ Reply with just the two numbers separated by a comma.`;
 						console.log(
 							`⚠️  Authentication error on remote - agent needs re-authentication on ${sshConfig!.host}`
 						);
-						console.log(`   SSH communication is working correctly - the error is from the remote agent.`);
+						console.log(
+							`   SSH communication is working correctly - the error is from the remote agent.`
+						);
 						return;
 					}
 
@@ -2676,7 +2839,9 @@ Reply with just the two numbers separated by a comma.`;
 						console.log(
 							`⚠️  Model/provider configuration error on remote - vision model may not be available on ${sshConfig!.host}`
 						);
-						console.log(`   SSH communication is working correctly - the agent config needs attention.`);
+						console.log(
+							`   SSH communication is working correctly - the agent config needs attention.`
+						);
 						return;
 					}
 

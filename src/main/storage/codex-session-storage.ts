@@ -28,19 +28,18 @@ import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
 import { readFileRemote, readDirRemote, statRemote } from '../utils/remote-fs';
 import type {
-	AgentSessionStorage,
 	AgentSessionInfo,
-	PaginatedSessionsResult,
 	SessionMessagesResult,
-	SessionSearchResult,
-	SessionSearchMode,
-	SessionListOptions,
 	SessionReadOptions,
 	SessionMessage,
 } from '../agents';
 import type { ToolType, SshRemoteConfig } from '../../shared/types';
+import { BaseSessionStorage } from './base-session-storage';
+import type { SearchableMessage } from './base-session-storage';
+import { ModelUsageAccumulator } from '../../shared/modelUsage';
 
 const LOG_CONTEXT = '[CodexSessionStorage]';
+const MAX_SESSION_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
 
 /**
  * Get Codex sessions base directory (platform-specific)
@@ -105,6 +104,21 @@ interface CodexMessageContent {
 	tool?: string;
 	args?: unknown;
 	output?: string;
+}
+
+/**
+ * Tool use entry shape used when building SessionMessage.toolUse arrays.
+ * Provides type safety for the tool call / tool output merge logic.
+ */
+interface CodexToolUseEntry {
+	tool?: string;
+	name?: string;
+	args?: unknown;
+	state: {
+		status: string;
+		input?: unknown;
+		output?: string;
+	};
 }
 
 /**
@@ -222,6 +236,7 @@ async function saveCodexSessionCache(cache: CodexSessionCache): Promise<void> {
 		await fs.mkdir(cacheDir, { recursive: true });
 		await fs.writeFile(cachePath, JSON.stringify(cache), 'utf-8');
 	} catch (error) {
+		void captureException(error);
 		logger.warn('Failed to save Codex session cache', LOG_CONTEXT, { error });
 	}
 }
@@ -235,6 +250,14 @@ async function parseSessionFile(
 	stats: { size: number; mtimeMs: number }
 ): Promise<AgentSessionInfo | null> {
 	try {
+		if (stats.size > MAX_SESSION_FILE_SIZE) {
+			logger.warn('Skipping oversized Codex session file', LOG_CONTEXT, {
+				filePath,
+				size: stats.size,
+			});
+			return null;
+		}
+
 		const content = await fs.readFile(filePath, 'utf-8');
 		const lines = content.split('\n').filter((l) => l.trim());
 
@@ -277,10 +300,22 @@ async function parseSessionFile(
 		let totalCachedTokens = 0;
 		let firstTimestamp = timestamp;
 		let lastTimestamp = timestamp;
+		// Codex is single-model per session; the model id lives on turn_context /
+		// session_meta entries rather than on the usage events. Capture the last
+		// seen one so per-model token attribution has a real model to key on.
+		let capturedModel: string | undefined =
+			metadata?.payload && 'model' in metadata.payload
+				? (metadata.payload as { model?: string }).model
+				: undefined;
 
 		for (let i = 0; i < lines.length; i++) {
 			try {
 				const entry = JSON.parse(lines[i]);
+
+				// Capture the model id from turn_context entries (current Codex format)
+				if (entry.type === 'turn_context' && entry.payload?.model) {
+					capturedModel = entry.payload.model;
+				}
 
 				// Handle turn.completed for usage stats
 				if (entry.type === 'turn.completed' && entry.usage) {
@@ -404,6 +439,16 @@ async function parseSessionFile(
 		// Extract session ID from metadata (new format uses payload.id, legacy uses id)
 		const metadataSessionId = metadata?.payload?.id || metadata?.id || sessionId;
 
+		const modelAcc = new ModelUsageAccumulator();
+		if (totalInputTokens || totalOutputTokens || totalCachedTokens) {
+			modelAcc.add(capturedModel, {
+				inputTokens: totalInputTokens,
+				outputTokens: totalOutputTokens,
+				cacheReadTokens: totalCachedTokens,
+				cacheCreationTokens: 0,
+			});
+		}
+
 		return {
 			sessionId: metadataSessionId,
 			projectPath: sessionProjectPath ? normalizeProjectPath(sessionProjectPath) : '',
@@ -421,8 +466,16 @@ async function parseSessionFile(
 			cacheReadTokens: totalCachedTokens,
 			cacheCreationTokens: 0, // Codex doesn't report cache creation separately
 			durationSeconds,
+			byModel: modelAcc.isEmpty ? undefined : modelAcc.finalize(),
 		};
 	} catch (error) {
+		// RangeError: Invalid string length occurs when the file is too large for V8
+		// string allocation (e.g., under MAX_SESSION_FILE_SIZE but system memory is low).
+		// This is expected and not worth reporting to Sentry.
+		if (error instanceof RangeError) {
+			logger.warn('Codex session file too large to parse', LOG_CONTEXT, { filePath });
+			return null;
+		}
 		logger.error(`Error reading Codex session file: ${filePath}`, LOG_CONTEXT, error);
 		captureException(error, { operation: 'codexStorage:readSessionFile', filePath });
 		return null;
@@ -434,7 +487,7 @@ async function parseSessionFile(
  *
  * Provides access to Codex CLI's local session storage at ~/.codex/sessions/
  */
-export class CodexSessionStorage implements AgentSessionStorage {
+export class CodexSessionStorage extends BaseSessionStorage {
 	readonly agentId: ToolType = 'codex';
 
 	/**
@@ -589,9 +642,20 @@ export class CodexSessionStorage implements AgentSessionStorage {
 		sshConfig: SshRemoteConfig
 	): Promise<AgentSessionInfo | null> {
 		try {
+			if (stats.size > MAX_SESSION_FILE_SIZE) {
+				logger.warn('Skipping oversized remote Codex session file', LOG_CONTEXT, {
+					filePath,
+					size: stats.size,
+				});
+				return null;
+			}
+
 			const result = await readFileRemote(filePath, sshConfig);
 			if (!result.success || !result.data) {
-				logger.error(`Failed to read remote Codex session file: ${filePath} - ${result.error}`, LOG_CONTEXT);
+				logger.error(
+					`Failed to read remote Codex session file: ${filePath} - ${result.error}`,
+					LOG_CONTEXT
+				);
 				return null;
 			}
 
@@ -913,32 +977,6 @@ export class CodexSessionStorage implements AgentSessionStorage {
 		return sessions;
 	}
 
-	async listSessionsPaginated(
-		projectPath: string,
-		options?: SessionListOptions,
-		sshConfig?: SshRemoteConfig
-	): Promise<PaginatedSessionsResult> {
-		const allSessions = await this.listSessions(projectPath, sshConfig);
-		const { cursor, limit = 100 } = options || {};
-
-		let startIndex = 0;
-		if (cursor) {
-			const cursorIndex = allSessions.findIndex((s) => s.sessionId === cursor);
-			startIndex = cursorIndex >= 0 ? cursorIndex + 1 : 0;
-		}
-
-		const pageSessions = allSessions.slice(startIndex, startIndex + limit);
-		const hasMore = startIndex + limit < allSessions.length;
-		const nextCursor = hasMore ? pageSessions[pageSessions.length - 1]?.sessionId : null;
-
-		return {
-			sessions: pageSessions,
-			hasMore,
-			totalCount: allSessions.length,
-			nextCursor,
-		};
-	}
-
 	async readSessionMessages(
 		_projectPath: string,
 		sessionId: string,
@@ -957,7 +995,10 @@ export class CodexSessionStorage implements AgentSessionStorage {
 			}
 			const result = await readFileRemote(sessionFilePath, sshConfig);
 			if (!result.success || !result.data) {
-				logger.error(`Failed to read remote Codex session: ${sessionId} - ${result.error}`, LOG_CONTEXT);
+				logger.error(
+					`Failed to read remote Codex session: ${sessionId} - ${result.error}`,
+					LOG_CONTEXT
+				);
 				return { messages: [], total: 0, hasMore: false };
 			}
 			content = result.data;
@@ -1017,23 +1058,29 @@ export class CodexSessionStorage implements AgentSessionStorage {
 						}
 					}
 
-					// Handle response_item function_call (current Codex format)
-					if (entry.type === 'response_item' && entry.payload?.type === 'function_call') {
-						let argsStr = '';
+					// Handle response_item function_call / custom_tool_call (current Codex format)
+					if (
+						entry.type === 'response_item' &&
+						(entry.payload?.type === 'function_call' || entry.payload?.type === 'custom_tool_call')
+					) {
+						let parsedInput: unknown;
 						try {
-							const args = JSON.parse(entry.payload.arguments || '{}');
-							argsStr = JSON.stringify(args, null, 2);
+							parsedInput = JSON.parse(entry.payload.arguments || '{}');
 						} catch {
-							argsStr = entry.payload.arguments || '';
+							parsedInput = entry.payload.arguments || {};
 						}
-						const toolInfo = {
+						const toolInfo: CodexToolUseEntry = {
 							tool: entry.payload.name,
 							args: entry.payload.arguments,
+							state: {
+								status: 'running',
+								input: parsedInput,
+							},
 						};
 						messages.push({
 							type: 'assistant',
 							role: 'assistant',
-							content: `Tool: ${entry.payload.name}\n${argsStr}`,
+							content: `Tool: ${entry.payload.name}`,
 							timestamp: entry.timestamp || '',
 							uuid: entry.payload.call_id || `codex-msg-${messageIndex}`,
 							toolUse: [toolInfo],
@@ -1041,16 +1088,49 @@ export class CodexSessionStorage implements AgentSessionStorage {
 						messageIndex++;
 					}
 
-					// Handle response_item function_call_output (current Codex format)
-					if (entry.type === 'response_item' && entry.payload?.type === 'function_call_output') {
-						messages.push({
-							type: 'assistant',
-							role: 'assistant',
-							content: entry.payload.output || '[Tool result]',
-							timestamp: entry.timestamp || '',
-							uuid: entry.payload.call_id || `codex-msg-${messageIndex}`,
-						});
-						messageIndex++;
+					// Handle response_item function_call_output / custom_tool_call_output (current Codex format)
+					// Merge output into the preceding tool call message instead of creating a new message
+					if (
+						entry.type === 'response_item' &&
+						(entry.payload?.type === 'function_call_output' ||
+							entry.payload?.type === 'custom_tool_call_output')
+					) {
+						const callId = entry.payload.call_id;
+						const outputText = entry.payload.output || '';
+						// Find the matching tool call message by call_id and merge the output
+						const matchingIdx = callId
+							? messages.findIndex((m) => m.uuid === callId && m.toolUse)
+							: -1;
+						if (matchingIdx >= 0) {
+							const matchingMsg = messages[matchingIdx];
+							const toolEntries = matchingMsg.toolUse as CodexToolUseEntry[] | undefined;
+							const firstEntry = toolEntries?.[0];
+							if (firstEntry?.state) {
+								// Replace the message immutably with updated tool state
+								const updatedEntry: CodexToolUseEntry = {
+									...firstEntry,
+									state: {
+										...firstEntry.state,
+										status: 'completed',
+										output: outputText,
+									},
+								};
+								messages[matchingIdx] = {
+									...matchingMsg,
+									toolUse: [updatedEntry, ...(toolEntries?.slice(1) || [])],
+								};
+							}
+						} else {
+							// No matching tool call found - create a standalone message
+							messages.push({
+								type: 'assistant',
+								role: 'assistant',
+								content: outputText || '[Tool result]',
+								timestamp: entry.timestamp || '',
+								uuid: callId || `codex-msg-${messageIndex}`,
+							});
+							messageIndex++;
+						}
 					}
 
 					// Handle item.completed agent_message events (legacy format)
@@ -1108,19 +1188,7 @@ export class CodexSessionStorage implements AgentSessionStorage {
 				}
 			}
 
-			// Apply offset and limit for lazy loading
-			const offset = options?.offset ?? 0;
-			const limit = options?.limit ?? 20;
-
-			const startIndex = Math.max(0, messages.length - offset - limit);
-			const endIndex = messages.length - offset;
-			const slice = messages.slice(startIndex, endIndex);
-
-			return {
-				messages: slice,
-				total: messages.length,
-				hasMore: startIndex > 0,
-			};
+			return BaseSessionStorage.applyMessagePagination(messages, options);
 		} catch (error) {
 			logger.error(`Error reading Codex session: ${sessionId}`, LOG_CONTEXT, error);
 			captureException(error, { operation: 'codexStorage:readSessionMessages', sessionId });
@@ -1128,137 +1196,66 @@ export class CodexSessionStorage implements AgentSessionStorage {
 		}
 	}
 
-	async searchSessions(
-		projectPath: string,
-		query: string,
-		searchMode: SessionSearchMode,
+	protected async getSearchableMessages(
+		sessionId: string,
+		_projectPath: string,
 		sshConfig?: SshRemoteConfig
-	): Promise<SessionSearchResult[]> {
-		if (!query.trim()) {
+	): Promise<SearchableMessage[]> {
+		let content: string;
+
+		try {
+			if (sshConfig) {
+				const sessionFilePath = await this.findSessionFileRemote(sessionId, sshConfig);
+				if (!sessionFilePath) return [];
+				const result = await readFileRemote(sessionFilePath, sshConfig);
+				if (!result.success || !result.data) return [];
+				content = result.data;
+			} else {
+				const sessionFilePath = await this.findSessionFile(sessionId);
+				if (!sessionFilePath) return [];
+				content = await fs.readFile(sessionFilePath, 'utf-8');
+			}
+		} catch {
 			return [];
 		}
 
-		const sessions = await this.listSessions(projectPath, sshConfig);
-		const searchLower = query.toLowerCase();
-		const results: SessionSearchResult[] = [];
+		const lines = content.split('\n').filter((l) => l.trim());
+		const searchableMessages: SearchableMessage[] = [];
 
-		for (const session of sessions) {
-			let content: string;
-
+		for (const line of lines) {
 			try {
-				if (sshConfig) {
-					const sessionFilePath = await this.findSessionFileRemote(session.sessionId, sshConfig);
-					if (!sessionFilePath) continue;
-					const result = await readFileRemote(sessionFilePath, sshConfig);
-					if (!result.success || !result.data) continue;
-					content = result.data;
-				} else {
-					const sessionFilePath = await this.findSessionFile(session.sessionId);
-					if (!sessionFilePath) continue;
-					content = await fs.readFile(sessionFilePath, 'utf-8');
-				}
-				const lines = content.split('\n').filter((l) => l.trim());
+				const entry = JSON.parse(line);
 
-				let titleMatch = false;
-				let userMatches = 0;
-				let assistantMatches = 0;
-				let matchPreview = '';
+				let textContent = '';
+				let role: 'user' | 'assistant' | null = null;
 
-				for (const line of lines) {
-					try {
-						const entry = JSON.parse(line);
-
-						let textContent = '';
-						let role: 'user' | 'assistant' | null = null;
-
-						// Handle message entries
-						if (entry.type === 'message') {
-							role = entry.role;
-							textContent = extractTextFromContent(entry.content);
-						}
-
-						// Handle item.completed agent_message
-						if (entry.type === 'item.completed' && entry.item?.type === 'agent_message') {
-							role = 'assistant';
-							textContent = entry.item.text || '';
-						}
-
-						const textLower = textContent.toLowerCase();
-
-						if (role === 'user' && textLower.includes(searchLower)) {
-							if (!titleMatch) {
-								titleMatch = true;
-								if (!matchPreview) {
-									const idx = textLower.indexOf(searchLower);
-									const start = Math.max(0, idx - 60);
-									const end = Math.min(textContent.length, idx + query.length + 60);
-									matchPreview =
-										(start > 0 ? '...' : '') +
-										textContent.slice(start, end) +
-										(end < textContent.length ? '...' : '');
-								}
-							}
-							userMatches++;
-						}
-
-						if (role === 'assistant' && textLower.includes(searchLower)) {
-							assistantMatches++;
-							if (!matchPreview && (searchMode === 'assistant' || searchMode === 'all')) {
-								const idx = textLower.indexOf(searchLower);
-								const start = Math.max(0, idx - 60);
-								const end = Math.min(textContent.length, idx + query.length + 60);
-								matchPreview =
-									(start > 0 ? '...' : '') +
-									textContent.slice(start, end) +
-									(end < textContent.length ? '...' : '');
-							}
-						}
-					} catch {
-						// Skip malformed lines
-					}
+				// Handle message entries (legacy format)
+				if (entry.type === 'message') {
+					role = entry.role;
+					textContent = extractTextFromContent(entry.content);
 				}
 
-				let matches = false;
-				let matchType: 'title' | 'user' | 'assistant' = 'title';
-				let matchCount = 0;
-
-				switch (searchMode) {
-					case 'title':
-						matches = titleMatch;
-						matchType = 'title';
-						matchCount = titleMatch ? 1 : 0;
-						break;
-					case 'user':
-						matches = userMatches > 0;
-						matchType = 'user';
-						matchCount = userMatches;
-						break;
-					case 'assistant':
-						matches = assistantMatches > 0;
-						matchType = 'assistant';
-						matchCount = assistantMatches;
-						break;
-					case 'all':
-						matches = titleMatch || userMatches > 0 || assistantMatches > 0;
-						matchType = titleMatch ? 'title' : userMatches > 0 ? 'user' : 'assistant';
-						matchCount = userMatches + assistantMatches;
-						break;
+				// Handle response_item messages (current Codex format)
+				if (entry.type === 'response_item' && entry.payload?.type === 'message') {
+					role = entry.payload.role;
+					textContent = extractTextFromContent(entry.payload.content);
 				}
 
-				if (matches) {
-					results.push({
-						sessionId: session.sessionId,
-						matchType,
-						matchPreview,
-						matchCount,
-					});
+				// Handle item.completed agent_message
+				if (entry.type === 'item.completed' && entry.item?.type === 'agent_message') {
+					role = 'assistant';
+					textContent = entry.item.text || '';
+				}
+
+				if (role && (role === 'user' || role === 'assistant') && textContent.trim()) {
+					searchableMessages.push({ role, textContent });
 				}
 			} catch {
-				// Skip files that can't be read
+				// Skip malformed lines
 			}
 		}
 
-		return results;
+		return searchableMessages;
 	}
 
 	getSessionPath(
@@ -1290,7 +1287,8 @@ export class CodexSessionStorage implements AgentSessionStorage {
 				const firstLine = content.split('\n')[0];
 				if (firstLine) {
 					const metadata = JSON.parse(firstLine) as CodexSessionMetadata;
-					if (metadata.id === sessionId) {
+					const metadataId = metadata?.payload?.id || metadata.id;
+					if (metadataId === sessionId) {
 						return filePath;
 					}
 				}
@@ -1324,7 +1322,8 @@ export class CodexSessionStorage implements AgentSessionStorage {
 					const firstLine = result.data.split('\n')[0];
 					if (firstLine) {
 						const metadata = JSON.parse(firstLine) as CodexSessionMetadata;
-						if (metadata.id === sessionId) {
+						const metadataId = metadata?.payload?.id || metadata.id;
+						if (metadataId === sessionId) {
 							return filePath;
 						}
 					}
@@ -1366,6 +1365,14 @@ export class CodexSessionStorage implements AgentSessionStorage {
 					type?: string;
 					role?: string;
 					content?: CodexMessageContent[];
+					payload?: {
+						id?: string;
+						type?: string;
+						role?: string;
+						content?: CodexMessageContent[];
+						call_id?: string;
+						name?: string;
+					};
 					item?: {
 						id?: string;
 						type?: string;
@@ -1376,8 +1383,50 @@ export class CodexSessionStorage implements AgentSessionStorage {
 				remove?: boolean;
 			}
 
+			/**
+			 * Check if an entry is a user message in either format:
+			 * - Legacy: { type: 'message', role: 'user' }
+			 * - v0.111.0: { type: 'response_item', payload: { type: 'message', role: 'user' } }
+			 */
+			function isUserMessage(entry: ParsedLine['entry']): boolean {
+				if (!entry) return false;
+				if (entry.type === 'message' && entry.role === 'user') return true;
+				if (
+					entry.type === 'response_item' &&
+					entry.payload?.type === 'message' &&
+					entry.payload?.role === 'user'
+				) {
+					return true;
+				}
+				return false;
+			}
+
+			/**
+			 * Extract text content from a user message entry (either format)
+			 */
+			function getUserMessageContent(entry: ParsedLine['entry']): string {
+				if (!entry) return '';
+				if (entry.type === 'message' && entry.role === 'user' && entry.content) {
+					return extractTextFromContent(entry.content);
+				}
+				if (
+					entry.type === 'response_item' &&
+					entry.payload?.type === 'message' &&
+					entry.payload?.role === 'user' &&
+					entry.payload?.content
+				) {
+					return extractTextFromContent(entry.payload.content);
+				}
+				return '';
+			}
+
 			const parsedLines: ParsedLine[] = [];
 			let userMessageIndex = -1;
+
+			// Build a message-index counter that mirrors readSessionMessages logic.
+			// readSessionMessages increments messageIndex only for actual displayable messages,
+			// so we must do the same here to match UUIDs like "codex-msg-N".
+			let messageIndex = 0;
 
 			// Parse all lines and find the target user message
 			for (let i = 0; i < lines.length; i++) {
@@ -1385,11 +1434,82 @@ export class CodexSessionStorage implements AgentSessionStorage {
 					const entry = JSON.parse(lines[i]);
 					parsedLines.push({ line: lines[i], entry });
 
-					// Match by UUID (format: codex-msg-N)
-					if (entry.type === 'message' && entry.role === 'user') {
-						const msgIndex = parsedLines.length - 1;
-						if (userMessageUuid === `codex-msg-${msgIndex}`) {
-							userMessageIndex = msgIndex;
+					// Match user messages in both legacy and v0.111.0 formats
+					if (isUserMessage(entry)) {
+						// Check payload.id first (v0.111.0 format uses real IDs)
+						if (
+							entry.type === 'response_item' &&
+							entry.payload?.id &&
+							userMessageUuid === entry.payload.id
+						) {
+							userMessageIndex = parsedLines.length - 1;
+						}
+						const text = getUserMessageContent(entry);
+						if (text) {
+							// Fallback: match by sequential message UUID (codex-msg-N)
+							if (
+								userMessageIndex !== parsedLines.length - 1 &&
+								userMessageUuid === `codex-msg-${messageIndex}`
+							) {
+								userMessageIndex = parsedLines.length - 1;
+							}
+							messageIndex++;
+						}
+					}
+					// Match by payload.id for non-user v0.111.0 entries (e.g. tool calls referenced by id)
+					else if (
+						entry.type === 'response_item' &&
+						entry.payload?.id &&
+						userMessageUuid === entry.payload.id
+					) {
+						userMessageIndex = parsedLines.length - 1;
+					}
+
+					// Count assistant messages to keep messageIndex in sync with readSessionMessages
+					if (entry.type === 'message' && entry.role === 'assistant') {
+						const text = extractTextFromContent(entry.content);
+						if (text) messageIndex++;
+					} else if (
+						entry.type === 'response_item' &&
+						entry.payload?.type === 'message' &&
+						entry.payload?.role === 'assistant'
+					) {
+						const text = extractTextFromContent(entry.payload?.content);
+						if (text) messageIndex++;
+					} else if (entry.type === 'item.completed' && entry.item?.type === 'agent_message') {
+						messageIndex++;
+					} else if (entry.type === 'item.completed' && entry.item?.type === 'tool_call') {
+						messageIndex++;
+					} else if (entry.type === 'item.completed' && entry.item?.type === 'tool_result') {
+						messageIndex++;
+					} else if (
+						entry.type === 'response_item' &&
+						(entry.payload?.type === 'function_call' || entry.payload?.type === 'custom_tool_call')
+					) {
+						messageIndex++;
+					}
+					// function_call_output / custom_tool_call_output normally merges into a preceding tool call
+					// in readSessionMessages. But when no matching call_id is found, readSessionMessages creates
+					// a standalone assistant message and increments messageIndex. Mirror that here.
+					if (
+						entry.type === 'response_item' &&
+						(entry.payload?.type === 'function_call_output' ||
+							entry.payload?.type === 'custom_tool_call_output')
+					) {
+						const callId = entry.payload.call_id;
+						// Check if any prior parsed line has a matching call_id
+						const hasMatchingCall = callId
+							? parsedLines.some(
+									(p) =>
+										p.entry &&
+										p.entry.type === 'response_item' &&
+										(p.entry.payload?.type === 'function_call' ||
+											p.entry.payload?.type === 'custom_tool_call') &&
+										p.entry.payload?.call_id === callId
+								)
+							: false;
+						if (!hasMatchingCall) {
+							messageIndex++;
 						}
 					}
 				} catch {
@@ -1403,8 +1523,8 @@ export class CodexSessionStorage implements AgentSessionStorage {
 
 				for (let i = parsedLines.length - 1; i >= 0; i--) {
 					const entry = parsedLines[i].entry;
-					if (entry?.type === 'message' && entry?.role === 'user' && entry.content) {
-						const textContent = extractTextFromContent(entry.content);
+					if (isUserMessage(entry)) {
+						const textContent = getUserMessageContent(entry);
 						if (textContent.trim().toLowerCase() === normalizedFallback) {
 							userMessageIndex = i;
 							logger.info('Found Codex message by content match', LOG_CONTEXT, {
@@ -1429,17 +1549,18 @@ export class CodexSessionStorage implements AgentSessionStorage {
 			// Find the end of the response (next user message) and collect tool_call IDs being deleted
 			let endIndex = parsedLines.length;
 			const deletedToolCallIds = new Set<string>();
+			const deletedCallIds = new Set<string>();
 
 			for (let i = userMessageIndex + 1; i < parsedLines.length; i++) {
 				const entry = parsedLines[i].entry;
 
-				// Stop at the next user message
-				if (entry?.type === 'message' && entry?.role === 'user') {
+				// Stop at the next user message (either format)
+				if (isUserMessage(entry)) {
 					endIndex = i;
 					break;
 				}
 
-				// Collect tool_call IDs from item.completed events being deleted
+				// Collect tool_call IDs from item.completed events being deleted (legacy)
 				if (
 					entry?.type === 'item.completed' &&
 					entry?.item?.type === 'tool_call' &&
@@ -1447,17 +1568,27 @@ export class CodexSessionStorage implements AgentSessionStorage {
 				) {
 					deletedToolCallIds.add(entry.item.id);
 				}
+
+				// Collect call_ids from response_item function_call events being deleted (v0.111.0)
+				if (
+					entry?.type === 'response_item' &&
+					(entry?.payload?.type === 'function_call' ||
+						entry?.payload?.type === 'custom_tool_call') &&
+					entry?.payload?.call_id
+				) {
+					deletedCallIds.add(entry.payload.call_id);
+				}
 			}
 
 			// Remove the message pair
 			let linesToKeep = [...parsedLines.slice(0, userMessageIndex), ...parsedLines.slice(endIndex)];
 
-			// If we deleted any tool_call blocks, clean up orphaned tool_result blocks
-			if (deletedToolCallIds.size > 0) {
+			// If we deleted any tool_call blocks, clean up orphaned tool_result/output blocks
+			if (deletedToolCallIds.size > 0 || deletedCallIds.size > 0) {
 				linesToKeep = linesToKeep.filter((item) => {
 					const entry = item.entry;
 
-					// Remove tool_result events that reference deleted tool_call IDs
+					// Remove tool_result events that reference deleted tool_call IDs (legacy)
 					if (entry?.type === 'item.completed' && entry?.item?.type === 'tool_result') {
 						// tool_result items reference tool_call via tool_call_id or the item.id pattern
 						const toolCallId = entry.item.tool_call_id || entry.item.id;
@@ -1466,12 +1597,24 @@ export class CodexSessionStorage implements AgentSessionStorage {
 						}
 					}
 
+					// Remove function_call_output events that reference deleted call_ids (v0.111.0)
+					if (
+						entry?.type === 'response_item' &&
+						(entry?.payload?.type === 'function_call_output' ||
+							entry?.payload?.type === 'custom_tool_call_output') &&
+						entry?.payload?.call_id &&
+						deletedCallIds.has(entry.payload.call_id)
+					) {
+						return false;
+					}
+
 					return true;
 				});
 
-				logger.info('Cleaned up orphaned tool_result blocks in Codex session', LOG_CONTEXT, {
+				const allDeletedIds = [...Array.from(deletedToolCallIds), ...Array.from(deletedCallIds)];
+				logger.info('Cleaned up orphaned tool output blocks in Codex session', LOG_CONTEXT, {
 					sessionId,
-					deletedToolCallIds: Array.from(deletedToolCallIds),
+					deletedToolCallIds: allDeletedIds,
 				});
 			}
 

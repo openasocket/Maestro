@@ -17,9 +17,12 @@
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getShellPath } from '../runtime/getShellPath';
 import { execFileNoThrow } from '../utils/execFile';
 import { logger } from '../utils/logger';
 import { expandTilde, detectNodeVersionManagerBinPaths } from '../../shared/pathUtils';
+import { isWindows, getWhichCommand } from '../../shared/platformDetection';
+import { captureException } from '../utils/sentry';
 
 const LOG_CONTEXT = 'PathProber';
 
@@ -39,12 +42,11 @@ export interface BinaryDetectionResult {
 export function getExpandedEnv(): NodeJS.ProcessEnv {
 	const home = os.homedir();
 	const env = { ...process.env };
-	const isWindows = process.platform === 'win32';
 
 	// Platform-specific paths
 	let additionalPaths: string[];
 
-	if (isWindows) {
+	if (isWindows()) {
 		// Windows-specific paths
 		const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
 		const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
@@ -96,6 +98,8 @@ export function getExpandedEnv(): NodeJS.ProcessEnv {
 			path.join(process.env.ChocolateyInstall || 'C:\\ProgramData\\chocolatey', 'bin'),
 			// Go binaries (some tools installed via 'go install')
 			path.join(home, 'go', 'bin'),
+			// GitHub CLI (official MSI installer)
+			path.join(programFiles, 'GitHub CLI'),
 			// Windows system paths
 			path.join(process.env.SystemRoot || 'C:\\Windows', 'System32'),
 			path.join(process.env.SystemRoot || 'C:\\Windows'),
@@ -134,6 +138,53 @@ export function getExpandedEnv(): NodeJS.ProcessEnv {
 	return env;
 }
 
+/**
+ * Merge shell-provided PATH entries (when available) into an env object.
+ * Shell PATH entries are prioritized (prepended) but de-duplicated.
+ */
+export async function getExpandedEnvWithShell(): Promise<NodeJS.ProcessEnv> {
+	const env = getExpandedEnv();
+	try {
+		const shellPath = await getShellPath();
+		if (!shellPath) return env;
+
+		const delim = path.delimiter;
+		const shellParts = shellPath.split(delim).filter(Boolean);
+		const currentParts = (env.PATH || '').split(delim).filter(Boolean);
+
+		const merged: string[] = [];
+		// Start with shell parts to prioritize them
+		for (const p of shellParts) {
+			if (!merged.includes(p)) merged.push(p);
+		}
+		for (const p of currentParts) {
+			if (!merged.includes(p)) merged.push(p);
+		}
+
+		env.PATH = merged.join(delim);
+		return env;
+	} catch (err) {
+		// Shell PATH probe failures (timeouts, exit-non-zero) are recoverable —
+		// callers fall back to the base expanded env. Reporting these to Sentry
+		// produces high-volume noise from slow shell init scripts; only escalate
+		// for unexpected error shapes.
+		const message = err instanceof Error ? err.message : String(err);
+		const isExpected =
+			message.includes('Timed out reading shell PATH') ||
+			message.startsWith('Shell exited with code');
+		if (!isExpected) {
+			void captureException(err);
+		}
+		try {
+			logger.debug('Shell PATH probe failed; using base expanded env', LOG_CONTEXT, { err });
+		} catch {
+			// Safe fallback if logger is not available
+			logger.debug('Shell PATH probe failed; using base expanded env', undefined, err);
+		}
+		return env;
+	}
+}
+
 // ============ Custom Path Validation ============
 
 /**
@@ -141,8 +192,6 @@ export function getExpandedEnv(): NodeJS.ProcessEnv {
  * On Windows, also tries .cmd and .exe extensions if the path doesn't exist as-is
  */
 export async function checkCustomPath(customPath: string): Promise<BinaryDetectionResult> {
-	const isWindows = process.platform === 'win32';
-
 	// Expand tilde to home directory (Node.js fs doesn't understand ~)
 	const expandedPath = expandTilde(customPath);
 
@@ -160,7 +209,7 @@ export async function checkCustomPath(customPath: string): Promise<BinaryDetecti
 		// First, try the exact path provided (with tilde expanded)
 		if (await checkPath(expandedPath)) {
 			// Check if file is executable (on Unix systems)
-			if (!isWindows) {
+			if (!isWindows()) {
 				try {
 					await fs.promises.access(expandedPath, fs.constants.X_OK);
 				} catch {
@@ -173,7 +222,7 @@ export async function checkCustomPath(customPath: string): Promise<BinaryDetecti
 		}
 
 		// On Windows, if the exact path doesn't exist, try with .cmd and .exe extensions
-		if (isWindows) {
+		if (isWindows()) {
 			const lowerPath = expandedPath.toLowerCase();
 			// Only try extensions if the path doesn't already have one
 			if (!lowerPath.endsWith('.cmd') && !lowerPath.endsWith('.exe')) {
@@ -200,6 +249,7 @@ export async function checkCustomPath(customPath: string): Promise<BinaryDetecti
 
 		return { exists: false };
 	} catch (error) {
+		void captureException(error);
 		logger.debug(`Error checking custom path: ${customPath}`, LOG_CONTEXT, { error });
 		return { exists: false };
 	}
@@ -227,12 +277,6 @@ function getWindowsKnownPaths(binaryName: string): string[] {
 		path.join(programFiles, 'WinGet', 'Links', `${bin}.exe`),
 	];
 	const goBin = (bin: string) => [path.join(home, 'go', 'bin', `${bin}.exe`)];
-	const pythonScripts = (bin: string) => [
-		path.join(appData, 'Python', 'Scripts', `${bin}.exe`),
-		path.join(localAppData, 'Programs', 'Python', 'Python312', 'Scripts', `${bin}.exe`),
-		path.join(localAppData, 'Programs', 'Python', 'Python311', 'Scripts', `${bin}.exe`),
-		path.join(localAppData, 'Programs', 'Python', 'Python310', 'Scripts', `${bin}.exe`),
-	];
 
 	// Define known installation paths for each binary, in priority order
 	// Prefer .exe (standalone installers) over .cmd (npm wrappers)
@@ -271,13 +315,59 @@ function getWindowsKnownPaths(binaryName: string): string[] {
 			// npm (has known issues on Windows, but check anyway)
 			...npmGlobal('opencode'),
 		],
+		'copilot-cli': [
+			// WinGet installation (primary method on Windows)
+			path.join(programFiles, 'GitHub Copilot CLI', 'copilot.exe'),
+			// npm global installation
+			...npmGlobal('copilot'),
+			// Scoop installation
+			path.join(home, 'scoop', 'shims', 'copilot.exe'),
+			path.join(home, 'scoop', 'apps', 'copilot', 'current', 'copilot.exe'),
+			// Chocolatey installation
+			path.join(
+				process.env.ChocolateyInstall || 'C:\\ProgramData\\chocolatey',
+				'bin',
+				'copilot.exe'
+			),
+			// Standalone installation
+			...localBin('copilot'),
+			// Winget
+			...wingetLinks('copilot'),
+		],
 		gemini: [
 			// npm global installation
 			...npmGlobal('gemini'),
 		],
-		aider: [
-			// pip installation
-			...pythonScripts('aider'),
+		hermes: [
+			// Python/pipx and standalone installations
+			...localBin('hermes'),
+			path.join(home, 'AppData', 'Roaming', 'Python', 'Scripts', 'hermes.exe'),
+			...npmGlobal('hermes'),
+		],
+		pi: [
+			// npm global installation
+			...npmGlobal('pi'),
+			...localBin('pi'),
+		],
+		omp: [
+			// Bun global installation (primary method for Oh My Pi)
+			path.join(home, '.bun', 'bin', 'omp.exe'),
+			// npm global installation
+			...npmGlobal('omp'),
+			...localBin('omp'),
+		],
+		gh: [
+			// GitHub CLI official installer (MSI)
+			path.join(programFiles, 'GitHub CLI', 'gh.exe'),
+			// Winget installation
+			...wingetLinks('gh'),
+			// Scoop installation
+			path.join(home, 'scoop', 'shims', 'gh.exe'),
+			path.join(home, 'scoop', 'apps', 'gh', 'current', 'bin', 'gh.exe'),
+			// Chocolatey installation
+			path.join(process.env.ChocolateyInstall || 'C:\\ProgramData\\chocolatey', 'bin', 'gh.exe'),
+			// User local bin
+			...localBin('gh'),
 		],
 	};
 
@@ -373,6 +463,19 @@ function getUnixKnownPaths(binaryName: string): string[] {
 			// Node version managers (nvm, fnm, volta, etc.)
 			...nodeVersionManagers('opencode'),
 		],
+		'copilot-cli': [
+			// Homebrew installation (primary method on macOS)
+			...homebrew('copilot'),
+			// GitHub CLI installation
+			'/usr/local/bin/copilot',
+			path.join(home, '.local', 'bin', 'copilot'),
+			// npm global
+			...npmGlobal('copilot'),
+			// User bin
+			path.join(home, 'bin', 'copilot'),
+			// Node version managers
+			...nodeVersionManagers('copilot'),
+		],
 		gemini: [
 			// npm global paths
 			...npmGlobal('gemini'),
@@ -381,13 +484,38 @@ function getUnixKnownPaths(binaryName: string): string[] {
 			// Node version managers (nvm, fnm, volta, etc.)
 			...nodeVersionManagers('gemini'),
 		],
-		aider: [
-			// pip installation
-			...localBin('aider'),
-			// Homebrew paths
-			...homebrew('aider'),
-			// Node version managers (in case installed via npm)
-			...nodeVersionManagers('aider'),
+		hermes: [
+			// Python/pipx and standalone installations
+			...localBin('hermes'),
+			...homebrew('hermes'),
+			path.join(home, 'bin', 'hermes'),
+		],
+		pi: [
+			// npm global and Node version manager installations
+			...localBin('pi'),
+			...homebrew('pi'),
+			...npmGlobal('pi'),
+			path.join(home, 'bin', 'pi'),
+			...nodeVersionManagers('pi'),
+		],
+		omp: [
+			// Bun global installation (primary method for Oh My Pi)
+			path.join(home, '.bun', 'bin', 'omp'),
+			...localBin('omp'),
+			...homebrew('omp'),
+			...npmGlobal('omp'),
+			path.join(home, 'bin', 'omp'),
+			...nodeVersionManagers('omp'),
+		],
+		gh: [
+			// Homebrew (Apple Silicon + Intel)
+			...homebrew('gh'),
+			// User local bin (manual install, pipx, etc.)
+			...localBin('gh'),
+			// User bin directory
+			path.join(home, 'bin', 'gh'),
+			// Linuxbrew
+			'/home/linuxbrew/.linuxbrew/bin/gh',
 		],
 	};
 
@@ -441,11 +569,9 @@ export async function probeUnixPaths(binaryName: string): Promise<string | null>
  * 2. Fall back to which/where command with expanded PATH
  */
 export async function checkBinaryExists(binaryName: string): Promise<BinaryDetectionResult> {
-	const isWindows = process.platform === 'win32';
-
 	// First try direct file probing of known installation paths
 	// This is more reliable than which/where in packaged Electron apps
-	if (isWindows) {
+	if (isWindows()) {
 		const probedPath = await probeWindowsPaths(binaryName);
 		if (probedPath) {
 			return { exists: true, path: probedPath };
@@ -462,11 +588,12 @@ export async function checkBinaryExists(binaryName: string): Promise<BinaryDetec
 
 	try {
 		// Use 'which' on Unix-like systems, 'where' on Windows
-		const command = isWindows ? 'where' : 'which';
+		const command = getWhichCommand();
 
-		// Use expanded PATH to find binaries in common installation locations
-		// This is critical for packaged Electron apps which don't inherit shell env
-		const env = getExpandedEnv();
+		// Use expanded PATH to find binaries in common installation locations.
+		// Prefer shell-provided PATH entries when available (they should be
+		// prioritized). This helps packaged apps locate user-installed tools.
+		const env = await getExpandedEnvWithShell();
 		const result = await execFileNoThrow(command, [binaryName], undefined, env);
 
 		if (result.exitCode === 0 && result.stdout.trim()) {
@@ -478,7 +605,7 @@ export async function checkBinaryExists(binaryName: string): Promise<BinaryDetec
 				.map((p) => p.trim())
 				.filter((p) => p);
 
-			if (process.platform === 'win32' && matches.length > 0) {
+			if (isWindows() && matches.length > 0) {
 				// On Windows, prefer .exe > extensionless (shell scripts) > .cmd
 				// This helps avoid cmd.exe limitations and supports PowerShell/bash scripts
 				const exeMatch = matches.find((p) => p.toLowerCase().endsWith('.exe'));

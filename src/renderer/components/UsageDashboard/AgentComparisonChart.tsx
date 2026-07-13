@@ -12,18 +12,12 @@
  * - Tooltip on hover with exact values
  */
 
-import React, { useMemo, useCallback, useState } from 'react';
-import type { Theme } from '../../types';
-import type { StatsAggregation } from '../../hooks/useStats';
-import { COLORBLIND_AGENT_PALETTE } from '../../constants/colorblindPalettes';
-
-interface AgentData {
-	agent: string;
-	count: number;
-	duration: number;
-	durationPercentage: number;
-	color: string;
-}
+import { memo, useMemo, useCallback, useState, type MouseEvent } from 'react';
+import type { Theme, Session } from '../../types';
+import type { StatsAggregation } from '../../hooks/stats/useStats';
+import { formatDurationHuman as formatDuration, formatNumber } from '../../../shared/formatters';
+import { ChartTooltip } from './ChartTooltip';
+import { buildAgentComparisonData, buildAgentSplitAggregation } from './agentComparisonUtils';
 
 interface AgentComparisonChartProps {
 	/** Aggregated stats data from the API */
@@ -32,101 +26,45 @@ interface AgentComparisonChartProps {
 	theme: Theme;
 	/** Enable colorblind-friendly colors */
 	colorBlindMode?: boolean;
+	/** Current sessions list. When provided, worktree agents are split into separate bars. */
+	sessions?: Session[];
+	/** Drill-down click handler, fires with the bar's `key`/`label` on click. */
+	onAgentClick?: (key: string, displayName: string) => void;
+	/**
+	 * Active drill-down filter key. When set, the matching bar gets an accent
+	 * outline; non-matching bars dim to 30% opacity. `null` (or undefined) means
+	 * no filter is active and bars render normally.
+	 */
+	activeFilterKey?: string | null;
 }
 
-/**
- * Generate a color for an agent
- * Uses the theme's accent color as primary, with additional colors for multiple agents
- */
-function getAgentColor(
-	agentName: string,
-	index: number,
-	theme: Theme,
-	colorBlindMode?: boolean
-): string {
-	// Use colorblind-safe palette when colorblind mode is enabled
-	if (colorBlindMode) {
-		return COLORBLIND_AGENT_PALETTE[index % COLORBLIND_AGENT_PALETTE.length];
-	}
-
-	// For the first (primary) agent, use the theme's accent color
-	if (index === 0) {
-		return theme.colors.accent;
-	}
-
-	// For additional agents, use a palette that complements the accent
-	const additionalColors = [
-		'#10b981', // emerald
-		'#8b5cf6', // violet
-		'#ef4444', // red
-		'#06b6d4', // cyan
-		'#ec4899', // pink
-		'#f59e0b', // amber
-		'#84cc16', // lime
-		'#6366f1', // indigo
-	];
-
-	return additionalColors[(index - 1) % additionalColors.length];
-}
-
-/**
- * Format duration in milliseconds to human-readable string
- */
-function formatDuration(ms: number): string {
-	const totalSeconds = Math.floor(ms / 1000);
-	const hours = Math.floor(totalSeconds / 3600);
-	const minutes = Math.floor((totalSeconds % 3600) / 60);
-	const seconds = totalSeconds % 60;
-
-	if (hours > 0) {
-		return `${hours}h ${minutes}m`;
-	}
-	if (minutes > 0) {
-		return `${minutes}m ${seconds}s`;
-	}
-	return `${seconds}s`;
-}
-
-/**
- * Format large numbers with K/M suffixes
- */
-function formatNumber(num: number): string {
-	if (num >= 1000000) {
-		return `${(num / 1000000).toFixed(1)}M`;
-	}
-	if (num >= 1000) {
-		return `${(num / 1000).toFixed(1)}K`;
-	}
-	return num.toString();
-}
-
-export function AgentComparisonChart({
+export const AgentComparisonChart = memo(function AgentComparisonChart({
 	data,
 	theme,
 	colorBlindMode = false,
+	sessions,
+	onAgentClick,
+	activeFilterKey = null,
 }: AgentComparisonChartProps) {
 	const [hoveredAgent, setHoveredAgent] = useState<string | null>(null);
 	const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
 
+	const splitAggregation = useMemo(() => {
+		return buildAgentSplitAggregation(data, sessions);
+	}, [data.bySessionByDay, data.byAgent, sessions]);
+
 	// Process and sort agent data
-	const agentData = useMemo((): AgentData[] => {
-		const entries = Object.entries(data.byAgent);
-		if (entries.length === 0) return [];
+	const agentData = useMemo(() => {
+		return buildAgentComparisonData({
+			data,
+			splitAggregation,
+			theme,
+			colorBlindMode,
+			sessions,
+		});
+	}, [data.byAgent, splitAggregation, theme, colorBlindMode, sessions]);
 
-		// Calculate total duration for percentage
-		const totalDuration = entries.reduce((sum, [, stats]) => sum + stats.duration, 0);
-
-		// Map and sort by duration descending
-		return entries
-			.map(([agent, stats], index) => ({
-				agent,
-				count: stats.count,
-				duration: stats.duration,
-				durationPercentage: totalDuration > 0 ? (stats.duration / totalDuration) * 100 : 0,
-				color: getAgentColor(agent, index, theme, colorBlindMode),
-			}))
-			.sort((a, b) => b.duration - a.duration);
-	}, [data.byAgent, theme, colorBlindMode]);
+	const hasWorktreeBars = useMemo(() => agentData.some((d) => d.isWorktree), [agentData]);
 
 	// Get max duration for bar width calculation
 	const maxDuration = useMemo(() => {
@@ -134,14 +72,14 @@ export function AgentComparisonChart({
 		return Math.max(...agentData.map((d) => d.duration));
 	}, [agentData]);
 
-	// Handle mouse events for tooltip
-	const handleMouseEnter = useCallback((agent: string, event: React.MouseEvent<HTMLDivElement>) => {
+	// Anchor the tooltip to the cursor (not the bar's bounding rect) so it
+	// stays close to the user's pointer regardless of which bar they hover.
+	const handleMouseEnter = useCallback((agent: string, event: MouseEvent<HTMLDivElement>) => {
 		setHoveredAgent(agent);
-		const rect = event.currentTarget.getBoundingClientRect();
-		setTooltipPos({
-			x: rect.right + 8,
-			y: rect.top + rect.height / 2,
-		});
+		setTooltipPos({ x: event.clientX, y: event.clientY });
+	}, []);
+	const handleMouseMove = useCallback((event: MouseEvent<HTMLDivElement>) => {
+		setTooltipPos({ x: event.clientX, y: event.clientY });
 	}, []);
 
 	const handleMouseLeave = useCallback(() => {
@@ -149,10 +87,22 @@ export function AgentComparisonChart({
 		setTooltipPos(null);
 	}, []);
 
-	// Get hovered agent data for tooltip
+	// Forward bar clicks to the dashboard's drill-down handler. The dashboard
+	// owns toggle behavior (clicking the active bar clears the filter); this
+	// component just reports which row was clicked.
+	const handleAgentClick = useCallback(
+		(key: string, label: string) => {
+			if (!onAgentClick) return;
+			onAgentClick(key, label);
+		},
+		[onAgentClick]
+	);
+
+	// Get hovered agent data for tooltip (matched by row key, since the same
+	// provider can appear twice, once as regular and once as worktree).
 	const hoveredAgentData = useMemo(() => {
 		if (!hoveredAgent) return null;
-		return agentData.find((d) => d.agent === hoveredAgent) || null;
+		return agentData.find((d) => d.key === hoveredAgent) || null;
 	}, [hoveredAgent, agentData]);
 
 	// Bar height
@@ -167,7 +117,10 @@ export function AgentComparisonChart({
 		>
 			{/* Header */}
 			<div className="flex items-center justify-between mb-4">
-				<h3 className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
+				<h3
+					className="text-sm font-medium"
+					style={{ color: theme.colors.textMain, animation: 'card-enter 0.4s ease both' }}
+				>
 					Provider Comparison
 				</h3>
 			</div>
@@ -185,17 +138,40 @@ export function AgentComparisonChart({
 					<div className="space-y-2" role="list" aria-label="Agent usage data">
 						{agentData.map((agent) => {
 							const barWidth = maxDuration > 0 ? (agent.duration / maxDuration) * 100 : 0;
-							const isHovered = hoveredAgent === agent.agent;
+							const isHovered = hoveredAgent === agent.key;
+							const isClickable = !!onAgentClick;
+							const isFiltered = activeFilterKey != null;
+							const isSelected = isFiltered && activeFilterKey === agent.key;
+							const isDimmed = isFiltered && !isSelected;
 
 							return (
 								<div
-									key={agent.agent}
+									key={agent.key}
 									className="flex items-center gap-3"
-									style={{ height: barHeight }}
-									onMouseEnter={(e) => handleMouseEnter(agent.agent, e)}
+									style={{
+										height: barHeight,
+										cursor: isClickable ? 'pointer' : undefined,
+										opacity: isDimmed ? 0.3 : 1,
+										transition: 'opacity 0.2s ease',
+									}}
+									onMouseEnter={(e) => handleMouseEnter(agent.key, e)}
+									onMouseMove={handleMouseMove}
 									onMouseLeave={handleMouseLeave}
+									onClick={isClickable ? () => handleAgentClick(agent.key, agent.label) : undefined}
+									onKeyDown={
+										isClickable
+											? (e) => {
+													if (e.key === 'Enter' || e.key === ' ') {
+														e.preventDefault();
+														handleAgentClick(agent.key, agent.label);
+													}
+												}
+											: undefined
+									}
 									role="listitem"
-									aria-label={`${agent.agent}: ${agent.count} queries, ${formatDuration(agent.duration)}`}
+									tabIndex={isClickable ? 0 : undefined}
+									aria-pressed={isClickable ? isSelected : undefined}
+									aria-label={`${agent.label}: ${agent.count} queries, ${formatDuration(agent.duration)}${isClickable ? '. Click to filter dashboard.' : ''}`}
 								>
 									{/* Agent name label */}
 									<div
@@ -203,9 +179,9 @@ export function AgentComparisonChart({
 										style={{
 											color: isHovered ? theme.colors.textMain : theme.colors.textDim,
 										}}
-										title={agent.agent}
+										title={agent.label}
 									>
-										{agent.agent}
+										{agent.label}
 									</div>
 
 									{/* Bar container */}
@@ -213,12 +189,17 @@ export function AgentComparisonChart({
 										className="flex-1 h-full rounded overflow-hidden relative"
 										style={{
 											backgroundColor: `${theme.colors.border}30`,
+											// Selected bar gets an accent outline (analogue of recharts
+											// `<Cell>` stroke + strokeWidth). `boxShadow` is used over
+											// `border` so the bar geometry doesn't shift on selection.
+											boxShadow: isSelected ? `inset 0 0 0 2px ${theme.colors.accent}` : undefined,
+											transition: 'box-shadow 0.2s ease',
 										}}
 										role="meter"
 										aria-valuenow={agent.durationPercentage}
 										aria-valuemin={0}
 										aria-valuemax={100}
-										aria-label={`${agent.agent} usage percentage`}
+										aria-label={`${agent.label} usage percentage`}
 									>
 										{/* Bar fill */}
 										<div
@@ -226,7 +207,18 @@ export function AgentComparisonChart({
 											style={{
 												width: `${Math.max(barWidth, 2)}%`,
 												backgroundColor: agent.color,
-												opacity: isHovered ? 1 : 0.85,
+												// Worktree bars render at reduced opacity with a diagonal stripe
+												// overlay so they're visually distinct from regular agent bars.
+												opacity: isHovered
+													? agent.isWorktree
+														? 0.75
+														: 1
+													: agent.isWorktree
+														? 0.55
+														: 0.85,
+												backgroundImage: agent.isWorktree
+													? 'repeating-linear-gradient(45deg, rgba(255,255,255,0.18) 0 4px, transparent 4px 8px)'
+													: undefined,
 												transition: 'width 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease',
 											}}
 											aria-hidden="true"
@@ -269,9 +261,9 @@ export function AgentComparisonChart({
 											{formatNumber(agent.count)} {agent.count === 1 ? 'query' : 'queries'}
 										</div>
 										<div
-											className="w-14 text-xs text-right font-medium"
+											className="text-xs text-right font-medium whitespace-nowrap"
 											title="Total duration"
-											style={{ color: theme.colors.textMain }}
+											style={{ color: theme.colors.textMain, minWidth: 80 }}
 										>
 											{formatDuration(agent.duration)}
 										</div>
@@ -282,25 +274,14 @@ export function AgentComparisonChart({
 					</div>
 				)}
 
-				{/* Tooltip */}
-				{hoveredAgentData && tooltipPos && (
-					<div
-						className="fixed z-50 px-3 py-2 rounded text-xs whitespace-nowrap pointer-events-none shadow-lg"
-						style={{
-							left: tooltipPos.x,
-							top: tooltipPos.y,
-							transform: 'translateY(-50%)',
-							backgroundColor: theme.colors.bgActivity,
-							color: theme.colors.textMain,
-							border: `1px solid ${theme.colors.border}`,
-						}}
-					>
+				{hoveredAgentData && (
+					<ChartTooltip anchor={tooltipPos} theme={theme} width={200} height={64}>
 						<div className="font-medium mb-1 flex items-center gap-2">
 							<div
 								className="w-2 h-2 rounded-full"
 								style={{ backgroundColor: hoveredAgentData.color }}
 							/>
-							{hoveredAgentData.agent}
+							{hoveredAgentData.label}
 						</div>
 						<div style={{ color: theme.colors.textDim }}>
 							<div>
@@ -308,23 +289,32 @@ export function AgentComparisonChart({
 							</div>
 							<div>{formatDuration(hoveredAgentData.duration)} total</div>
 						</div>
-					</div>
+					</ChartTooltip>
 				)}
 			</div>
 
 			{/* Legend */}
 			{agentData.length > 0 && (
 				<div
-					className="flex flex-wrap gap-3 mt-4 pt-3 border-t"
+					className="flex flex-wrap items-center gap-3 mt-4 pt-3 border-t"
 					style={{ borderColor: theme.colors.border }}
 					role="list"
 					aria-label="Chart legend"
 				>
 					{agentData.slice(0, 6).map((agent) => (
-						<div key={agent.agent} className="flex items-center gap-1.5" role="listitem">
-							<div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: agent.color }} />
+						<div key={agent.key} className="flex items-center gap-1.5" role="listitem">
+							<div
+								className="w-2.5 h-2.5 rounded-sm"
+								style={{
+									backgroundColor: agent.color,
+									opacity: agent.isWorktree ? 0.55 : 1,
+									backgroundImage: agent.isWorktree
+										? 'repeating-linear-gradient(45deg, rgba(255,255,255,0.18) 0 2px, transparent 2px 4px)'
+										: undefined,
+								}}
+							/>
 							<span className="text-xs" style={{ color: theme.colors.textDim }}>
-								{agent.agent}
+								{agent.label}
 							</span>
 						</div>
 					))}
@@ -333,10 +323,41 @@ export function AgentComparisonChart({
 							+{agentData.length - 6} more
 						</span>
 					)}
+					{hasWorktreeBars && (
+						<div
+							className="ml-auto flex items-center gap-3"
+							role="listitem"
+							aria-label="Worktree differentiation legend"
+						>
+							<div className="flex items-center gap-1.5">
+								<div
+									className="w-2.5 h-2.5 rounded-sm"
+									style={{ backgroundColor: theme.colors.textDim, opacity: 0.85 }}
+								/>
+								<span className="text-xs" style={{ color: theme.colors.textDim }}>
+									Agent
+								</span>
+							</div>
+							<div className="flex items-center gap-1.5">
+								<div
+									className="w-2.5 h-2.5 rounded-sm"
+									style={{
+										backgroundColor: theme.colors.textDim,
+										opacity: 0.55,
+										backgroundImage:
+											'repeating-linear-gradient(45deg, rgba(255,255,255,0.18) 0 2px, transparent 2px 4px)',
+									}}
+								/>
+								<span className="text-xs" style={{ color: theme.colors.textDim }}>
+									Worktree Agent
+								</span>
+							</div>
+						</div>
+					)}
 				</div>
 			)}
 		</div>
 	);
-}
+});
 
 export default AgentComparisonChart;

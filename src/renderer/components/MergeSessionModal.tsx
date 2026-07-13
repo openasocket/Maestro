@@ -16,14 +16,20 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { Search, ChevronRight, ChevronDown, GitMerge, Clipboard, Check, X } from 'lucide-react';
-import type { Theme, Session, AITab } from '../types';
+import { GhostIconButton } from './ui/GhostIconButton';
+import type { Theme, Session } from '../types';
 import type { MergeResult } from '../types/contextMerge';
 import { fuzzyMatchWithScore } from '../utils/search';
-import { useLayerStack } from '../contexts/LayerStackContext';
+import { useModalLayer } from '../hooks/ui/useModalLayer';
+import { useResizableModal } from '../hooks/ui/useResizableModal';
 import { useListNavigation } from '../hooks';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { formatTokensCompact } from '../utils/formatters';
+import { estimateTokensFromLogs } from '../../shared/formatters';
 import { ScreenReaderAnnouncement, useAnnouncement } from './Wizard/ScreenReaderAnnouncement';
+import { getTabDisplayName } from '../utils/tabHelpers';
+import { logger } from '../utils/logger';
+import { ResizeHandles } from './ui/ResizeHandles';
 
 /**
  * View modes for the modal
@@ -75,14 +81,7 @@ export interface MergeSessionModalProps {
 	) => Promise<MergeResult>;
 }
 
-/**
- * Estimate token count from log entries
- * Uses a simple heuristic: ~4 characters per token (average for English text)
- */
-function estimateTokens(logs: { text: string }[]): number {
-	const totalChars = logs.reduce((sum, log) => sum + (log.text?.length || 0), 0);
-	return Math.round(totalChars / 4);
-}
+const estimateTokens = estimateTokensFromLogs;
 
 /**
  * Animated token display component that highlights when value changes
@@ -138,17 +137,6 @@ function getSessionDisplayName(session: Session): string {
 }
 
 /**
- * Get display name for a tab
- */
-function getTabDisplayName(tab: AITab): string {
-	if (tab.name) return tab.name;
-	if (tab.agentSessionId) {
-		return tab.agentSessionId.split('-')[0].toUpperCase();
-	}
-	return 'New Tab';
-}
-
-/**
  * MergeSessionModal Component
  */
 export function MergeSessionModal({
@@ -192,7 +180,6 @@ export function MergeSessionModal({
 
 	// Refs
 	const inputRef = useRef<HTMLInputElement>(null);
-	const layerIdRef = useRef<string>();
 	const onCloseRef = useRef(onClose);
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	const selectedItemRef = useRef<HTMLButtonElement>(null);
@@ -202,35 +189,13 @@ export function MergeSessionModal({
 		onCloseRef.current = onClose;
 	});
 
-	const { registerLayer, unregisterLayer, updateLayerHandler } = useLayerStack();
-
 	// Register layer on mount
-	useEffect(() => {
-		if (!isOpen) return;
-
-		layerIdRef.current = registerLayer({
-			type: 'modal',
-			priority: MODAL_PRIORITIES.MERGE_SESSION,
-			blocksLowerLayers: true,
-			capturesFocus: true,
-			focusTrap: 'strict',
-			ariaLabel: 'Merge Session Contexts',
-			onEscape: () => onCloseRef.current(),
-		});
-
-		return () => {
-			if (layerIdRef.current) {
-				unregisterLayer(layerIdRef.current);
-			}
-		};
-	}, [isOpen, registerLayer, unregisterLayer]);
-
-	// Update handler when onClose changes
-	useEffect(() => {
-		if (layerIdRef.current) {
-			updateLayerHandler(layerIdRef.current, () => onCloseRef.current());
-		}
-	}, [updateLayerHandler]);
+	useModalLayer(
+		MODAL_PRIORITIES.MERGE_SESSION,
+		'Merge Session Contexts',
+		() => onCloseRef.current(),
+		{ enabled: isOpen }
+	);
 
 	// Focus input on mount
 	useEffect(() => {
@@ -389,15 +354,26 @@ export function MergeSessionModal({
 		enableNumberHotkeys: false,
 	});
 
+	const handleViewModeChange = useCallback(
+		(mode: ViewMode) => {
+			setViewMode(mode);
+			setSelectedIndex(0);
+		},
+		[setSelectedIndex]
+	);
+
+	const handleSearchChange = useCallback(
+		(value: string) => {
+			setSearchQuery(value);
+			setSelectedIndex(0);
+		},
+		[setSelectedIndex]
+	);
+
 	// Scroll selected item into view
 	useEffect(() => {
 		selectedItemRef.current?.scrollIntoView({ block: 'nearest' });
 	}, [selectedIndex]);
-
-	// Reset selection when filter changes
-	useEffect(() => {
-		setSelectedIndex(0);
-	}, [searchQuery, viewMode, setSelectedIndex]);
 
 	// Announce search results to screen readers
 	useEffect(() => {
@@ -455,7 +431,7 @@ export function MergeSessionModal({
 			await onMerge(target.sessionId, target.tabId, options);
 			onClose();
 		} catch (error) {
-			console.error('Merge failed:', error);
+			logger.error('Merge failed:', undefined, error);
 		} finally {
 			setIsMerging(false);
 		}
@@ -469,7 +445,7 @@ export function MergeSessionModal({
 				e.preventDefault();
 				const modes: ViewMode[] = ['paste', 'search'];
 				const currentIndex = modes.indexOf(viewMode);
-				setViewMode(modes[(currentIndex + 1) % modes.length]);
+				handleViewModeChange(modes[(currentIndex + 1) % modes.length]);
 				return;
 			}
 
@@ -478,13 +454,13 @@ export function MergeSessionModal({
 				e.preventDefault();
 				const modes: ViewMode[] = ['paste', 'search'];
 				const currentIndex = modes.indexOf(viewMode);
-				setViewMode(modes[(currentIndex - 1 + modes.length) % modes.length]);
+				handleViewModeChange(modes[(currentIndex - 1 + modes.length) % modes.length]);
 				return;
 			}
 
 			// Cmd+V to switch to paste mode
 			if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
-				setViewMode('paste');
+				handleViewModeChange('paste');
 				return;
 			}
 
@@ -539,6 +515,7 @@ export function MergeSessionModal({
 			pastedIdMatch,
 			handleMerge,
 			handleSelectItem,
+			handleViewModeChange,
 			listKeyDown,
 		]
 	);
@@ -562,12 +539,18 @@ export function MergeSessionModal({
 		if (viewMode === 'paste') return pastedIdValid && pastedIdMatch !== null;
 		return selectedTarget !== null;
 	}, [viewMode, pastedIdValid, pastedIdMatch, selectedTarget, isMerging]);
+	const resizableModal = useResizableModal({
+		resizeKey: 'merge-session',
+		defaultSize: { width: 680, height: 720 },
+		minSize: { width: 500, height: 360 },
+		enabled: isOpen,
+	});
 
 	if (!isOpen) return null;
 
 	return (
 		<div
-			className="fixed inset-0 modal-overlay flex items-start justify-center pt-16 z-[9999] animate-in"
+			className="fixed inset-0 modal-overlay flex items-center justify-center p-8 z-[9999] animate-in"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="merge-modal-title"
@@ -579,14 +562,20 @@ export function MergeSessionModal({
 			<ScreenReaderAnnouncement {...announcementProps} />
 
 			<div
-				className="w-[600px] rounded-xl shadow-2xl border outline-none flex flex-col animate-slide-up"
+				ref={resizableModal.modalRef}
+				className="relative rounded-xl shadow-2xl border outline-none flex flex-col animate-slide-up select-none"
 				style={{
+					...resizableModal.style,
 					backgroundColor: theme.colors.bgSidebar,
 					borderColor: theme.colors.border,
-					maxHeight: 'calc(100vh - 128px)',
 				}}
-				onClick={(e) => e.stopPropagation()}
+				data-modal-resize-key="merge-session"
 			>
+				<ResizeHandles
+					onResizeStart={resizableModal.onResizeStart}
+					accentColor={theme.colors.accent}
+				/>
+
 				{/* Header */}
 				<div
 					className="p-4 border-b flex items-center justify-between shrink-0"
@@ -606,15 +595,13 @@ export function MergeSessionModal({
 							Merge "{sourceTab ? getTabDisplayName(sourceTab) : 'Context'}" Into
 						</h2>
 					</div>
-					<button
-						type="button"
+					<GhostIconButton
 						onClick={onClose}
-						className="p-1 rounded hover:bg-white/10 transition-colors"
-						style={{ color: theme.colors.textDim }}
-						aria-label="Close merge dialog"
+						ariaLabel="Close merge dialog"
+						color={theme.colors.textDim}
 					>
 						<X className="w-4 h-4" aria-hidden="true" />
-					</button>
+					</GhostIconButton>
 				</div>
 
 				{/* Description for screen readers */}
@@ -636,10 +623,11 @@ export function MergeSessionModal({
 					].map(({ mode, label, icon: Icon }) => (
 						<button
 							key={mode}
+							id={`merge-tab-${mode}`}
 							role="tab"
 							aria-selected={viewMode === mode}
 							aria-controls={`merge-tabpanel-${mode}`}
-							onClick={() => setViewMode(mode)}
+							onClick={() => handleViewModeChange(mode)}
 							className="px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors"
 							style={{
 								backgroundColor: viewMode === mode ? theme.colors.accent : 'transparent',
@@ -770,7 +758,7 @@ export function MergeSessionModal({
 										type="text"
 										placeholder="Search open tabs across all agents..."
 										value={searchQuery}
-										onChange={(e) => setSearchQuery(e.target.value)}
+										onChange={(e) => handleSearchChange(e.target.value)}
 										aria-controls="session-list"
 										className="w-full pl-9 pr-3 py-2 rounded-lg border text-sm outline-none"
 										style={{

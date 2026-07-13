@@ -103,6 +103,12 @@ vi.mock('lucide-react', () => ({
 	Search: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
 		<svg data-testid="search-icon" className={className} style={style} />
 	),
+	Sparkles: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
+		<svg data-testid="sparkles-icon" className={className} style={style} />
+	),
+	Gauge: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
+		<svg data-testid="gauge-icon" className={className} style={style} />
+	),
 	Info: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
 		<svg data-testid="info-icon" className={className} style={style} />
 	),
@@ -125,6 +131,7 @@ vi.mock('react-syntax-highlighter', () => ({
 
 vi.mock('react-syntax-highlighter/dist/esm/styles/prism', () => ({
 	vscDarkPlus: {},
+	vs: {},
 }));
 
 // Mock remark-gfm
@@ -142,6 +149,7 @@ const mockMaestro = {
 	agents: {
 		detect: vi.fn(),
 		get: vi.fn(),
+		getMaestroPDetectedPath: vi.fn().mockResolvedValue(null),
 	},
 	git: {
 		isRepo: vi.fn(),

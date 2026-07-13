@@ -13,7 +13,11 @@
 import { ipcMain, Notification, BrowserWindow } from 'electron';
 import { spawn, type ChildProcess } from 'child_process';
 import { logger } from '../../utils/logger';
-import { isWebContentsAvailable } from '../../utils/safe-send';
+import { createSafeSend, type SafeSendFn } from '../../utils/safe-send';
+import { parseDeepLink, dispatchDeepLink } from '../../deep-links';
+import { buildSessionDeepLink } from '../../../shared/deep-link-urls';
+import { captureException } from '../../utils/sentry';
+import type { WindowRegistry } from '../../window-registry';
 
 // ==========================================================================
 // Constants
@@ -65,11 +69,29 @@ export interface NotificationCommandResponse {
 }
 
 /**
+ * Optional Maestro context forwarded to the custom notification command as
+ * environment variables (MAESTRO_NOTIFY_*). Passing metadata via env instead of
+ * string interpolation keeps it safe from shell injection; unset fields are
+ * simply absent from the child's environment.
+ */
+export interface NotificationCommandVars {
+	/** Agent name (Left Bar entity / session name) -> MAESTRO_NOTIFY_AGENT */
+	agent?: string;
+	/** AI tab name within the agent -> MAESTRO_NOTIFY_TAB */
+	tab?: string;
+	/** Group the agent belongs to -> MAESTRO_NOTIFY_GROUP */
+	group?: string;
+	/** Originating task/prompt title -> MAESTRO_NOTIFY_TASK */
+	task?: string;
+}
+
+/**
  * Item in the notification command queue
  */
 interface NotificationQueueItem {
 	text: string;
 	command?: string;
+	vars?: NotificationCommandVars;
 	resolve: (result: NotificationCommandResponse) => void;
 }
 
@@ -88,6 +110,13 @@ interface ActiveNotificationProcess {
 /** Track active notification command processes by ID for stopping */
 const activeNotificationProcesses = new Map<number, ActiveNotificationProcess>();
 
+/**
+ * Keep OS Notification objects alive until clicked or closed.
+ * Without this, GC can collect the notification before the user
+ * interacts with it, silently dropping the click handler.
+ */
+const activeNotifications = new Set<Notification>();
+
 /** Counter for generating unique notification process IDs */
 let notificationProcessIdCounter = 0;
 
@@ -99,6 +128,18 @@ const notificationQueue: NotificationQueueItem[] = [];
 
 /** Flag indicating if notification command is currently being processed */
 let isNotificationProcessing = false;
+
+/**
+ * safeSend used to push `notification:commandCompleted` to the renderer.
+ *
+ * The command-completion sends fire from the module-level queue helpers, which
+ * run outside `registerNotificationsHandlers`' closure, so the window getter is
+ * captured here and reassigned during registration. safeSend always fans out to
+ * web-desktop bridge clients (and to the desktop renderer when it is alive), so
+ * web/mobile users see the Stop button clear even with no desktop window. The
+ * default is a bridge-only sender for the pre-registration window.
+ */
+let commandCompletedSafeSend: SafeSendFn = createSafeSend(() => null);
 
 // ==========================================================================
 // Helper Functions
@@ -123,13 +164,42 @@ export function parseNotificationCommand(command?: string): string {
 }
 
 /**
- * Execute notification command - the actual implementation
- * Returns a Promise that resolves when the process completes (not just when it starts)
+ * Build the child-process environment for a notification command.
+ *
+ * Always inherits the parent environment (so PATH etc. stay intact) and layers
+ * on MAESTRO_NOTIFY_* variables for any context the caller provided. Empty or
+ * missing fields are omitted so commands can test for their presence.
  */
-async function executeNotificationCommand(
+export function buildNotificationEnv(vars?: NotificationCommandVars): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = { ...process.env };
+	if (vars?.agent) env.MAESTRO_NOTIFY_AGENT = vars.agent;
+	if (vars?.tab) env.MAESTRO_NOTIFY_TAB = vars.tab;
+	if (vars?.group) env.MAESTRO_NOTIFY_GROUP = vars.group;
+	if (vars?.task) env.MAESTRO_NOTIFY_TASK = vars.task;
+	return env;
+}
+
+/**
+ * Result from executeNotificationCommand.
+ * `response` is returned to the renderer immediately (contains the notificationId).
+ * `completed` resolves when the process exits (used by the queue for spacing).
+ */
+interface ExecuteResult {
+	response: NotificationCommandResponse;
+	completed: Promise<void>;
+}
+
+/**
+ * Execute notification command - the actual implementation.
+ * Returns immediately after spawning with the notificationId so the renderer
+ * can show a Stop button. The `completed` promise resolves when the process
+ * exits, allowing the queue to enforce spacing between notifications.
+ */
+function executeNotificationCommand(
 	text: string,
-	command?: string
-): Promise<NotificationCommandResponse> {
+	command?: string,
+	vars?: NotificationCommandVars
+): ExecuteResult {
 	const fullCommand = parseNotificationCommand(command);
 	const textLength = text?.length || 0;
 	const textPreview = text
@@ -153,56 +223,57 @@ async function executeNotificationCommand(
 		});
 
 		// Spawn the process with shell mode to support pipes and command chains
-		// The text is passed via stdin, not as command arguments
+		// The text is passed via stdin, not as command arguments. Maestro context
+		// (agent/tab/group/task) rides along as MAESTRO_NOTIFY_* env vars so the
+		// command can reference it without any shell-injection risk.
 		const child = spawn(fullCommand, [], {
 			stdio: ['pipe', 'ignore', 'pipe'], // stdin: pipe, stdout: ignore, stderr: pipe for errors
 			shell: true, // Enable shell mode to support pipes (e.g., "cmd1 | cmd2")
+			env: buildNotificationEnv(vars),
 		});
 
 		// Generate a unique ID for this notification process
 		const notificationId = ++notificationProcessIdCounter;
 		activeNotificationProcesses.set(notificationId, { process: child, command: fullCommand });
 
-		// Return a Promise that resolves when the process completes
-		return new Promise((resolve) => {
-			let resolved = false;
+		// Write the text to stdin and close it
+		if (child.stdin) {
+			// Handle stdin errors (EPIPE if process terminates before write completes)
+			child.stdin.on('error', (err: unknown) => {
+				const errorCode =
+					err && typeof err === 'object' && 'code' in err
+						? (err as NodeJS.ErrnoException).code
+						: undefined;
+
+				if (errorCode === 'EPIPE') {
+					logger.debug(
+						'Notification stdin EPIPE - process closed before write completed',
+						'Notification'
+					);
+				} else {
+					logger.error('Notification stdin error', 'Notification', {
+						error: String(err),
+						code: errorCode,
+					});
+				}
+			});
+
+			logger.debug('Notification writing to stdin', 'Notification', { textLength });
+			child.stdin.write(text, 'utf8', (err) => {
+				if (err) {
+					logger.error('Notification stdin write error', 'Notification', { error: String(err) });
+				} else {
+					logger.debug('Notification stdin write completed', 'Notification');
+				}
+				child.stdin!.end();
+			});
+		} else {
+			logger.error('Notification no stdin available on child process', 'Notification');
+		}
+
+		// Track process completion for queue spacing
+		const completed = new Promise<void>((resolveCompleted) => {
 			let stderrOutput = '';
-
-			// Write the text to stdin and close it
-			if (child.stdin) {
-				// Handle stdin errors (EPIPE if process terminates before write completes)
-				child.stdin.on('error', (err: unknown) => {
-					// Type-safe error code extraction
-					const errorCode =
-						err && typeof err === 'object' && 'code' in err
-							? (err as NodeJS.ErrnoException).code
-							: undefined;
-
-					if (errorCode === 'EPIPE') {
-						logger.debug(
-							'Notification stdin EPIPE - process closed before write completed',
-							'Notification'
-						);
-					} else {
-						logger.error('Notification stdin error', 'Notification', {
-							error: String(err),
-							code: errorCode,
-						});
-					}
-				});
-
-				logger.debug('Notification writing to stdin', 'Notification', { textLength });
-				child.stdin.write(text, 'utf8', (err) => {
-					if (err) {
-						logger.error('Notification stdin write error', 'Notification', { error: String(err) });
-					} else {
-						logger.debug('Notification stdin write completed', 'Notification');
-					}
-					child.stdin!.end();
-				});
-			} else {
-				logger.error('Notification no stdin available on child process', 'Notification');
-			}
 
 			child.on('error', (err) => {
 				logger.error('Notification spawn error', 'Notification', {
@@ -215,10 +286,9 @@ async function executeNotificationCommand(
 						: '(no text)',
 				});
 				activeNotificationProcesses.delete(notificationId);
-				if (!resolved) {
-					resolved = true;
-					resolve({ success: false, notificationId, error: String(err) });
-				}
+				// Notify renderer of completion even on error
+				commandCompletedSafeSend('notification:commandCompleted', notificationId);
+				resolveCompleted();
 			});
 
 			// Capture stderr for debugging
@@ -249,32 +319,34 @@ async function executeNotificationCommand(
 				activeNotificationProcesses.delete(notificationId);
 
 				// Notify renderer that notification command has completed
-				BrowserWindow.getAllWindows().forEach((win) => {
-					if (isWebContentsAvailable(win)) {
-						win.webContents.send('notification:commandCompleted', notificationId);
-					}
-				});
+				commandCompletedSafeSend('notification:commandCompleted', notificationId);
 
-				// Resolve the promise now that process has completed
-				if (!resolved) {
-					resolved = true;
-					resolve({ success: code === 0, notificationId });
-				}
-			});
-
-			logger.info('Notification process spawned successfully', 'Notification', {
-				notificationId,
-				command: fullCommand,
-				textLength,
+				resolveCompleted();
 			});
 		});
+
+		logger.info('Notification process spawned successfully', 'Notification', {
+			notificationId,
+			command: fullCommand,
+			textLength,
+		});
+
+		// Return immediately with notificationId; completed resolves when process exits
+		return {
+			response: { success: true, notificationId },
+			completed,
+		};
 	} catch (error) {
+		void captureException(error);
 		logger.error('Notification error starting command', 'Notification', {
 			error: String(error),
 			command: fullCommand,
 			textPreview,
 		});
-		return { success: false, error: String(error) };
+		return {
+			response: { success: false, error: String(error) },
+			completed: Promise.resolve(),
+		};
 	}
 }
 
@@ -313,9 +385,11 @@ async function processNextNotification(): Promise<void> {
 		await new Promise((resolve) => setTimeout(resolve, delayNeeded));
 	}
 
-	// Execute the notification command
-	const result = await executeNotificationCommand(item.text, item.command);
-	item.resolve(result);
+	// Execute the notification command — resolve the IPC call immediately
+	// with the notificationId, then await completion for queue spacing
+	const { response, completed } = executeNotificationCommand(item.text, item.command, item.vars);
+	item.resolve(response);
+	await completed;
 
 	// Record when this notification ended
 	lastNotificationEndTime = Date.now();
@@ -330,13 +404,69 @@ async function processNextNotification(): Promise<void> {
 // ==========================================================================
 
 /**
+ * Dependencies for notification handlers
+ */
+export interface NotificationsHandlerDependencies {
+	getMainWindow: () => BrowserWindow | null;
+	/**
+	 * Multi-window registry getter. When wired, a notification's click handler
+	 * resolves the window that currently owns the agent (via
+	 * {@link WindowRegistry.getWindowForSession}) and focuses THAT window instead
+	 * of always the primary. Optional: single-window builds, the web interface,
+	 * and tests omit it and fall back to {@link getMainWindow}.
+	 */
+	getWindowRegistry?: () => WindowRegistry | null;
+}
+
+/**
+ * Resolve the window a notification click should focus.
+ *
+ * When a session (agent) id is present and the multi-window registry is wired,
+ * look up the window that currently owns that agent and return its
+ * `BrowserWindow`, so clicking the notification focuses the right window in a
+ * multi-window layout instead of always the primary. Resolution happens at
+ * click-time (not when the notification is shown) so an agent that was moved to
+ * another window after the notification fired still lands in the correct place.
+ *
+ * Falls back to the primary/main window when there is no session context, the
+ * registry is not wired (single-window build, web), the agent is untracked, or
+ * the owning window was destroyed.
+ */
+export function resolveNotificationClickWindow(
+	sessionId: string | undefined,
+	deps?: NotificationsHandlerDependencies
+): BrowserWindow | null {
+	const registry = deps?.getWindowRegistry?.();
+	if (sessionId && registry) {
+		const windowId = registry.getWindowForSession(sessionId);
+		if (windowId) {
+			const entry = registry.get(windowId);
+			if (entry && !entry.browserWindow.isDestroyed()) {
+				return entry.browserWindow;
+			}
+		}
+	}
+	return deps?.getMainWindow?.() ?? null;
+}
+
+/**
  * Register all notification-related IPC handlers
  */
-export function registerNotificationsHandlers(): void {
-	// Show OS notification
+export function registerNotificationsHandlers(deps?: NotificationsHandlerDependencies): void {
+	// Capture the window getter for the module-level queue helpers so completion
+	// events reach both the desktop renderer and web-desktop bridge clients.
+	commandCompletedSafeSend = createSafeSend(deps?.getMainWindow ?? (() => null));
+
+	// Show OS notification (with optional click-to-navigate support)
 	ipcMain.handle(
 		'notification:show',
-		async (_event, title: string, body: string): Promise<NotificationShowResponse> => {
+		async (
+			_event,
+			title: string,
+			body: string,
+			sessionId?: string,
+			tabId?: string
+		): Promise<NotificationShowResponse> => {
 			try {
 				if (Notification.isSupported()) {
 					const notification = new Notification({
@@ -344,14 +474,41 @@ export function registerNotificationsHandlers(): void {
 						body,
 						silent: true, // Don't play system sound - we have our own audio feedback option
 					});
+
+					// Prevent GC from collecting the notification before user interaction
+					activeNotifications.add(notification);
+					const releaseNotification = () => {
+						activeNotifications.delete(notification);
+					};
+					notification.on('close', releaseNotification);
+
+					// Wire click handler for navigation if session context is provided.
+					// Route the click to the window that currently owns the agent
+					// (resolved via the window registry) so a multi-window layout
+					// focuses the correct window instead of always the primary;
+					// resolveNotificationClickWindow falls back to the main window when
+					// there is no registry / owning window.
+					if (sessionId && deps?.getMainWindow) {
+						const deepLinkUrl = buildSessionDeepLink(sessionId, tabId);
+
+						notification.on('click', () => {
+							const parsed = parseDeepLink(deepLinkUrl);
+							if (parsed) {
+								dispatchDeepLink(parsed, () => resolveNotificationClickWindow(sessionId, deps));
+							}
+							releaseNotification();
+						});
+					}
+
 					notification.show();
-					logger.debug('Showed OS notification', 'Notification', { title, body });
+					logger.debug('Showed OS notification', 'Notification', { title, body, sessionId, tabId });
 					return { success: true };
 				} else {
 					logger.warn('OS notifications not supported on this platform', 'Notification');
 					return { success: false, error: 'Notifications not supported' };
 				}
 			} catch (error) {
+				void captureException(error);
 				logger.error('Error showing notification', 'Notification', error);
 				return { success: false, error: String(error) };
 			}
@@ -361,7 +518,12 @@ export function registerNotificationsHandlers(): void {
 	// Custom notification command - queued to prevent overlap
 	ipcMain.handle(
 		'notification:speak',
-		async (_event, text: string, command?: string): Promise<NotificationCommandResponse> => {
+		async (
+			_event,
+			text: string,
+			command?: string,
+			vars?: NotificationCommandVars
+		): Promise<NotificationCommandResponse> => {
 			// Skip if there's no content to send
 			if (!text || text.trim().length === 0) {
 				logger.info('Notification skipped - empty or whitespace-only content', 'Notification', {
@@ -385,7 +547,7 @@ export function registerNotificationsHandlers(): void {
 
 			// Add to queue and return a promise that resolves when this notification completes
 			return new Promise<NotificationCommandResponse>((resolve) => {
-				notificationQueue.push({ text, command, resolve });
+				notificationQueue.push({ text, command, vars, resolve });
 				logger.debug(
 					`Notification queued, queue length: ${notificationQueue.length}`,
 					'Notification'
@@ -419,6 +581,7 @@ export function registerNotificationsHandlers(): void {
 
 				return { success: true };
 			} catch (error) {
+				void captureException(error);
 				logger.error('Notification error stopping process', 'Notification', {
 					notificationId,
 					error: String(error),
@@ -460,6 +623,7 @@ export function clearNotificationQueue(): void {
 export function resetNotificationState(): void {
 	notificationQueue.length = 0;
 	activeNotificationProcesses.clear();
+	activeNotifications.clear();
 	notificationProcessIdCounter = 0;
 	lastNotificationEndTime = 0;
 	isNotificationProcessing = false;

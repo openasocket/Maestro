@@ -13,6 +13,7 @@
  */
 
 import type { ToolType } from '../../shared/types';
+import { getAgentDisplayName as getDisplayName } from '../../shared/agentMetadata';
 import type { ContextSource, MergeRequest, GroomingProgress } from '../types/contextMerge';
 import type { LogEntry } from '../types';
 import {
@@ -21,14 +22,49 @@ import {
 	estimateTokenCount,
 	calculateTotalTokens,
 } from '../utils/contextExtractor';
-import { contextGroomingPrompt, contextTransferPrompt } from '../../prompts';
+let cachedContextGroomingPrompt: string | null = null;
+let cachedContextTransferPrompt: string | null = null;
+let contextGroomerPromptsLoaded = false;
+
+export async function loadContextGroomerPrompts(force = false): Promise<void> {
+	if (contextGroomerPromptsLoaded && !force) return;
+
+	const [groomingResult, transferResult] = await Promise.all([
+		window.maestro.prompts.get('context-grooming'),
+		window.maestro.prompts.get('context-transfer'),
+	]);
+
+	if (!groomingResult.success) {
+		throw new Error(`Failed to load context-grooming prompt: ${groomingResult.error}`);
+	}
+	if (!transferResult.success) {
+		throw new Error(`Failed to load context-transfer prompt: ${transferResult.error}`);
+	}
+	cachedContextGroomingPrompt = groomingResult.content!;
+	cachedContextTransferPrompt = transferResult.content!;
+	contextGroomerPromptsLoaded = true;
+}
+
+function getContextGroomingPrompt(): string {
+	if (!contextGroomerPromptsLoaded || cachedContextGroomingPrompt === null) {
+		return '';
+	}
+	return cachedContextGroomingPrompt;
+}
+
+function getContextTransferPrompt(): string {
+	if (!contextGroomerPromptsLoaded || cachedContextTransferPrompt === null) {
+		return '';
+	}
+	return cachedContextTransferPrompt;
+}
 
 /**
  * Agent-specific artifacts that should be removed when transferring context.
  * Each array contains patterns (commands, terms, references) that are specific
  * to that agent and should be removed or converted when sending to a different agent.
  */
-export const AGENT_ARTIFACTS: Record<ToolType, string[]> = {
+export const AGENT_ARTIFACTS: Partial<Record<ToolType, string[]>> = {
 	'claude-code': [
 		// Slash commands
 		'/clear',
@@ -109,7 +145,7 @@ export const AGENT_ARTIFACTS: Record<ToolType, string[]> = {
  * Notes about target agent capabilities that should be included in the transfer prompt.
  * Helps the grooming agent understand what the target can and cannot do.
  */
-export const AGENT_TARGET_NOTES: Record<ToolType, string> = {
+export const AGENT_TARGET_NOTES: Partial<Record<ToolType, string>> = {
 	'claude-code': `
     Claude Code is an AI coding assistant by Anthropic.
     It can read and edit files, run terminal commands, search code, and interact with git.
@@ -143,14 +179,7 @@ export const AGENT_TARGET_NOTES: Record<ToolType, string> = {
  * Get the human-readable name for an agent type.
  */
 export function getAgentDisplayName(agentType: ToolType): string {
-	const names: Record<ToolType, string> = {
-		'claude-code': 'Claude Code',
-		opencode: 'OpenCode',
-		codex: 'OpenAI Codex',
-		'factory-droid': 'Factory Droid',
-		terminal: 'Terminal',
-	};
-	return names[agentType] || agentType;
+	return getDisplayName(agentType);
 }
 
 /**
@@ -171,7 +200,7 @@ export function buildContextTransferPrompt(sourceAgent: ToolType, targetAgent: T
 			: '- No specific artifacts to remove';
 
 	// Replace template variables in the transfer prompt
-	return contextTransferPrompt
+	return getContextTransferPrompt()
 		.replace('{{sourceAgent}}', getAgentDisplayName(sourceAgent))
 		.replace('{{targetAgent}}', getAgentDisplayName(targetAgent))
 		.replace('{{sourceAgentArtifacts}}', artifactList)
@@ -203,14 +232,6 @@ export interface GroomingConfig {
 }
 
 /**
- * Default configuration for grooming operations.
- */
-const DEFAULT_CONFIG: Required<GroomingConfig> = {
-	timeoutMs: 120000, // 2 minutes
-	defaultAgentType: 'claude-code',
-};
-
-/**
  * Service for grooming and consolidating multiple conversation contexts.
  *
  * @example
@@ -221,11 +242,10 @@ const DEFAULT_CONFIG: Required<GroomingConfig> = {
  * );
  */
 export class ContextGroomingService {
-	private config: Required<GroomingConfig>;
 	private activeGroomingSessionId: string | null = null;
 
-	constructor(config: GroomingConfig = {}) {
-		this.config = { ...DEFAULT_CONFIG, ...config };
+	constructor(_config: GroomingConfig = {}) {
+		// Config reserved for future use (e.g., custom grooming parameters)
 	}
 
 	/**
@@ -249,7 +269,7 @@ export class ContextGroomingService {
 	 *     targetAgent: 'claude-code',
 	 *     targetProjectRoot: '/my/project',
 	 *   },
-	 *   (progress) => console.log(`${progress.progress}%: ${progress.message}`)
+	 *   (progress) => logger.info(`${progress.progress}%: ${progress.message}`)
 	 * );
 	 */
 	async groomContexts(
@@ -375,7 +395,7 @@ ${formatLogsForGrooming(source.logs)}
 	 * @returns Complete prompt to send to the grooming agent
 	 */
 	private buildGroomingPrompt(formattedContexts: string, customPrompt?: string): string {
-		const systemPrompt = customPrompt || contextGroomingPrompt;
+		const systemPrompt = customPrompt || getContextGroomingPrompt();
 
 		return `${systemPrompt}
 
@@ -399,62 +419,6 @@ Please consolidate the above contexts into a single, coherent summary following 
 		}
 		// Use same 4 chars per token heuristic as contextExtractor
 		return Math.ceil(totalChars / 4);
-	}
-
-	/**
-	 * Create a temporary session for the grooming process.
-	 * This session will be used to send the combined contexts and receive
-	 * the consolidated output.
-	 *
-	 * @param projectRoot - The project root path for the grooming session
-	 * @returns Promise resolving to the temporary session ID
-	 */
-	private async createGroomingSession(projectRoot: string): Promise<string> {
-		// Generate a unique session ID for grooming
-		const groomingSessionId = `grooming-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-		// Store the active session ID for cleanup purposes
-		this.activeGroomingSessionId = groomingSessionId;
-
-		// Call the IPC handler to create the grooming session
-		// This will spawn a headless agent process for context processing
-		try {
-			const result = await window.maestro.context.createGroomingSession(
-				projectRoot,
-				this.config.defaultAgentType
-			);
-
-			if (result) {
-				this.activeGroomingSessionId = result;
-				return result;
-			}
-
-			return groomingSessionId;
-		} catch {
-			// If IPC is not available, return the generated ID
-			// This allows the service to be tested without full IPC integration
-			return groomingSessionId;
-		}
-	}
-
-	/**
-	 * Send the grooming prompt to the temporary session and receive the response.
-	 *
-	 * @param sessionId - The grooming session ID
-	 * @param prompt - The complete grooming prompt
-	 * @returns Promise resolving to the groomed output text
-	 */
-	private async sendGroomingPrompt(sessionId: string, prompt: string): Promise<string> {
-		try {
-			// Call the IPC handler to send the prompt and get the response
-			const response = await window.maestro.context.sendGroomingPrompt(sessionId, prompt);
-			return response || '';
-		} catch {
-			// If IPC is not available, return an empty result
-			// This allows the service to be tested without full IPC integration
-			// In production, this would trigger the error handling path
-			throw new Error('Context grooming IPC not available. IPC handlers must be configured.');
-		}
 	}
 
 	/**

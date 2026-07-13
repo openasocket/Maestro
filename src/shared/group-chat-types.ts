@@ -10,13 +10,103 @@
 
 /**
  * Normalize a name for use in @mentions.
- * Replaces spaces with hyphens so names can be referenced without quotes.
+ * Replaces spaces with hyphens and drops bracket punctuation so names can be
+ * referenced without quotes.
  *
  * @param name - Original name (may contain spaces)
- * @returns Normalized name with hyphens instead of spaces
+ * @returns Normalized mention-safe name
  */
 export function normalizeMentionName(name: string): string {
-	return name.replace(/\s+/g, '-');
+	return name
+		.normalize('NFKC')
+		.replace(/[()[\]{}]/g, '')
+		.replace(/\s+/g, '-');
+}
+
+/**
+ * Legacy group-chat aliases only replaced whitespace. Keep accepting them so
+ * saved moderator prompts and older chat history can still target agents whose
+ * names contain parentheses.
+ */
+export function normalizeLegacyMentionName(name: string): string {
+	return name.normalize('NFKC').replace(/\s+/g, '-');
+}
+
+const CLOSING_BRACKET_PAIRS: Record<string, string> = {
+	')': '(',
+	']': '[',
+	'}': '{',
+};
+
+const OPENING_BRACKET_PAIRS: Record<string, string> = {
+	'(': ')',
+	'[': ']',
+	'{': '}',
+};
+
+export function stripUnmatchedTrailingClosers(name: string): string {
+	// Determine which brackets are matched by scanning left-to-right with a
+	// per-type opener stack, then drop only trailing closers that have no
+	// matching opener. A positional scan (not global counts) is required so an
+	// unmatched closer earlier in the string can't make a balanced trailing
+	// group look unmatched, e.g. "foo)-bar(1))" must yield "foo)-bar(1)".
+	const matched = new Array<boolean>(name.length).fill(false);
+	const openStacks: Record<string, number[]> = { ')': [], ']': [], '}': [] };
+	for (let i = 0; i < name.length; i++) {
+		const char = name[i];
+		const expectedCloser = OPENING_BRACKET_PAIRS[char];
+		if (expectedCloser) {
+			openStacks[expectedCloser].push(i);
+			continue;
+		}
+		const stack = openStacks[char];
+		if (stack && stack.length > 0) {
+			const openIndex = stack.pop()!;
+			matched[openIndex] = true;
+			matched[i] = true;
+		}
+	}
+
+	let end = name.length;
+	while (end > 0 && CLOSING_BRACKET_PAIRS[name[end - 1]] && !matched[end - 1]) {
+		end--;
+	}
+	return name.slice(0, end);
+}
+
+/**
+ * Drops a trailing Markdown link tail so a mention used as link text resolves.
+ * `[@Client](https://example.com)` is captured as `Client](https` by the mention
+ * scanner (brackets and `(` are allowed for legacy bracketed names); everything
+ * from the `](` link syntax onward can never be part of a real name, so cut it.
+ */
+function stripMarkdownLinkTail(name: string): string {
+	const linkSyntaxIndex = name.indexOf('](');
+	return linkSyntaxIndex === -1 ? name : name.slice(0, linkSyntaxIndex);
+}
+
+export function cleanMentionName(name: string): string {
+	const withoutMarkdown = name.normalize('NFKC').replace(/^[*_`~]+|[*_`~.,;:!?]+$/g, '');
+	return stripUnmatchedTrailingClosers(stripMarkdownLinkTail(withoutMarkdown));
+}
+
+function foldMentionName(name: string): string {
+	return name.toLowerCase();
+}
+
+export function getMentionMatchPriority(mentionedName: string, actualName: string): number {
+	const cleanedMention = cleanMentionName(mentionedName);
+	const foldedMention = foldMentionName(cleanedMention);
+	const foldedActual = foldMentionName(actualName.normalize('NFKC'));
+	const foldedLegacyActual = foldMentionName(normalizeLegacyMentionName(actualName));
+	const foldedSafeActual = foldMentionName(normalizeMentionName(actualName));
+	const foldedSafeMention = foldMentionName(normalizeMentionName(cleanedMention));
+
+	if (foldedMention === foldedActual) return 4;
+	if (foldedMention === foldedLegacyActual) return 3;
+	if (foldedMention === foldedSafeActual) return 2;
+	if (foldedSafeMention === foldedSafeActual) return 1;
+	return 0;
 }
 
 /**
@@ -27,10 +117,53 @@ export function normalizeMentionName(name: string): string {
  * @returns True if they match
  */
 export function mentionMatches(mentionedName: string, actualName: string): boolean {
-	return (
-		mentionedName.toLowerCase() === actualName.toLowerCase() ||
-		mentionedName.toLowerCase() === normalizeMentionName(actualName).toLowerCase()
-	);
+	return getMentionMatchPriority(mentionedName, actualName) > 0;
+}
+
+export function findUniqueMentionMatch<T>(
+	mentionedName: string,
+	items: readonly T[],
+	getName: (item: T) => string
+): T | undefined {
+	let bestPriority = 0;
+	let bestMatches: T[] = [];
+
+	for (const item of items) {
+		const priority = getMentionMatchPriority(mentionedName, getName(item));
+		if (priority === 0) continue;
+
+		if (priority > bestPriority) {
+			bestPriority = priority;
+			bestMatches = [item];
+			continue;
+		}
+
+		if (priority === bestPriority) {
+			bestMatches.push(item);
+		}
+	}
+
+	return bestMatches.length === 1 ? bestMatches[0] : undefined;
+}
+
+/**
+ * Pick the highest-fidelity @mention alias that resolves *uniquely back to this
+ * exact name* among the given peers. Normalized collisions (e.g. "Review Bot
+ * [Linux]" vs "Review Bot (Linux)", which both safe-normalize to
+ * "Review-Bot-Linux") would otherwise advertise an ambiguous alias that
+ * findUniqueMentionMatch refuses to route. Falls back to the safe name when no
+ * single-token alias disambiguates, so the mention safely no-ops instead of
+ * targeting the wrong peer.
+ */
+export function getMentionNameForContext(name: string, peerNames: readonly string[]): string {
+	const candidates = [normalizeMentionName(name), normalizeLegacyMentionName(name)];
+	for (const candidate of candidates) {
+		if (!candidate) continue;
+		if (findUniqueMentionMatch(candidate, peerNames, (peer) => peer) === name) {
+			return candidate;
+		}
+	}
+	return normalizeMentionName(name);
 }
 
 // ============================================================================
@@ -81,6 +214,12 @@ export interface ModeratorConfig {
 		remoteId: string | null;
 		workingDirOverride?: string;
 	};
+	/** Claude token-source opt-in (Claude Code moderator only). See getClaudeTokenMode. */
+	enableMaestroP?: boolean;
+	/** Refines enableMaestroP: 'interactive' (always TUI) vs 'dynamic' (auto-switch). */
+	maestroPMode?: 'interactive' | 'dynamic';
+	/** Optional maestro-p script override. */
+	maestroPPath?: string;
 }
 
 /**
@@ -102,6 +241,7 @@ export interface GroupChat {
 	logPath: string;
 	imagesDir: string;
 	draftMessage?: string;
+	archived?: boolean;
 }
 
 /**
@@ -112,6 +252,8 @@ export interface GroupChatMessage {
 	from: string;
 	content: string;
 	readOnly?: boolean;
+	/** Base64 data URLs of images attached to this message */
+	images?: string[];
 }
 
 /**

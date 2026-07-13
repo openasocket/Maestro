@@ -15,29 +15,13 @@ import {
 	getStatusColor,
 	formatActiveTime,
 	getFileIcon,
+	getExplorerFileIcon,
+	getExplorerFolderIcon,
 } from '../../../renderer/utils/theme';
 import type { Theme, SessionState, FileChangeType } from '../../../renderer/types';
 
+import { mockTheme } from '../../helpers/mockTheme';
 // Mock theme with known colors for testing
-const mockTheme: Theme = {
-	id: 'test-theme',
-	name: 'Test Theme',
-	mode: 'dark',
-	colors: {
-		background: '#1a1a1a',
-		backgroundDim: '#0d0d0d',
-		backgroundBright: '#2a2a2a',
-		textMain: '#ffffff',
-		textDim: '#888888',
-		textMuted: '#666666',
-		textBright: '#ffffff',
-		border: '#333333',
-		borderBright: '#444444',
-		success: '#00ff00',
-		warning: '#ffff00',
-		error: '#ff0000',
-	},
-};
 
 // Alternative theme for testing that theme colors are used correctly
 const alternativeTheme: Theme = {
@@ -57,6 +41,7 @@ const alternativeTheme: Theme = {
 		success: '#22c55e',
 		warning: '#f59e0b',
 		error: '#ef4444',
+		accent: '#8b5cf6',
 	},
 };
 
@@ -432,18 +417,18 @@ describe('theme utilities', () => {
 				expect(svg).toBeInTheDocument();
 			});
 
-			it('applies textDim color to undefined file type icon', () => {
+			it('applies accent color to undefined file type icon', () => {
 				const icon = getFileIcon(undefined, mockTheme);
 				const { container } = render(icon);
 				const svg = container.querySelector('svg');
-				expect(svg).toHaveStyle({ color: mockTheme.colors.textDim });
+				expect(svg).toHaveStyle({ color: mockTheme.colors.accent });
 			});
 
-			it('uses alternative theme textDim color', () => {
+			it('uses alternative theme accent color', () => {
 				const icon = getFileIcon(undefined, alternativeTheme);
 				const { container } = render(icon);
 				const svg = container.querySelector('svg');
-				expect(svg).toHaveStyle({ color: alternativeTheme.colors.textDim });
+				expect(svg).toHaveStyle({ color: alternativeTheme.colors.accent });
 			});
 		});
 
@@ -461,14 +446,69 @@ describe('theme utilities', () => {
 		});
 
 		describe('unknown file type', () => {
-			it('treats unknown file type as default (textDim color)', () => {
+			it('treats unknown file type as default (accent color)', () => {
 				// Cast to test the default case with an invalid type
 				const unknownType = 'unknown' as FileChangeType;
 				const icon = getFileIcon(unknownType, mockTheme);
 				const { container } = render(icon);
 				const svg = container.querySelector('svg');
-				expect(svg).toHaveStyle({ color: mockTheme.colors.textDim });
+				expect(svg).toHaveStyle({ color: mockTheme.colors.accent });
 			});
+		});
+	});
+
+	describe('explorer icon themes', () => {
+		it('returns the existing default Files pane icon theme by default', () => {
+			const { container } = render(getExplorerFileIcon('index.ts', mockTheme));
+			const icon = container.querySelector('svg');
+
+			expect(icon).toBeTruthy();
+			expect(container.querySelector('img')).toBeNull();
+		});
+
+		it('returns rich file icons when the rich theme is selected', () => {
+			const { container } = render(getExplorerFileIcon('index.ts', mockTheme, undefined, 'rich'));
+			const icon = container.querySelector('img[data-file-explorer-icon-theme="rich"]');
+
+			expect(icon).toBeTruthy();
+			expect(icon?.getAttribute('data-file-explorer-icon-key')).toBe('typescript');
+		});
+
+		it('returns rich README icons for rich theme special files', () => {
+			const { container } = render(getExplorerFileIcon('README.md', mockTheme, undefined, 'rich'));
+			const icon = container.querySelector('img[data-file-explorer-icon-theme="rich"]');
+
+			expect(icon?.getAttribute('data-file-explorer-icon-key')).toBe('readme');
+		});
+
+		it('returns the JSON icon for rich JSON files', () => {
+			const { container } = render(
+				getExplorerFileIcon('package.json', mockTheme, undefined, 'rich')
+			);
+			const icon = container.querySelector('img[data-file-explorer-icon-theme="rich"]');
+
+			expect(icon?.getAttribute('data-file-explorer-icon-key')).toBe('package');
+		});
+
+		it('returns the YAML icon for rich YAML files', () => {
+			const { container } = render(
+				getExplorerFileIcon('config.yaml', mockTheme, undefined, 'rich')
+			);
+			const icon = container.querySelector('img[data-file-explorer-icon-theme="rich"]');
+
+			expect(icon?.getAttribute('data-file-explorer-icon-key')).toBe('yaml');
+		});
+
+		it('returns rich folder icons with open and closed states', () => {
+			const closed = render(getExplorerFolderIcon('src', false, mockTheme, 'rich'));
+			const open = render(getExplorerFolderIcon('src', true, mockTheme, 'rich'));
+
+			const closedIcon = closed.container.querySelector('img[data-file-explorer-icon-key="src"]');
+			const openIcon = open.container.querySelector('img[data-file-explorer-icon-key="src"]');
+
+			expect(closedIcon).toBeTruthy();
+			expect(openIcon).toBeTruthy();
+			expect(closedIcon?.getAttribute('src')).not.toBe(openIcon?.getAttribute('src'));
 		});
 	});
 });

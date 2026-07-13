@@ -17,18 +17,21 @@ export type ThemeId =
 	| 'monokai'
 	| 'github-light'
 	| 'solarized-light'
+	| 'solarized-dark'
 	| 'nord'
 	| 'tokyo-night'
 	| 'one-light'
 	| 'gruvbox-light'
 	| 'catppuccin-mocha'
 	| 'gruvbox-dark'
+	| 'olive-nights'
 	| 'catppuccin-latte'
 	| 'ayu-light'
 	| 'pedurple'
 	| 'maestros-choice'
 	| 'dre-synth'
 	| 'inquest'
+	| 'winamp'
 	| 'custom';
 
 /**
@@ -47,6 +50,14 @@ export interface ThemeColors {
 	bgSidebar: string;
 	/** Background for interactive/activity elements */
 	bgActivity: string;
+	/**
+	 * Background for the draggable window title bar (the top strip that holds
+	 * the traffic-light buttons and the centered agent title). Optional: when
+	 * unset the title bar renders transparent and shows `bgMain` behind it,
+	 * which is the historical behavior. Built-in themes set it explicitly to
+	 * their `bgMain` so existing themes look unchanged.
+	 */
+	bgTitleBar?: string;
 	/** Border color for dividers and outlines */
 	border: string;
 	/** Primary text color */
@@ -61,12 +72,55 @@ export interface ThemeColors {
 	accentText: string;
 	/** Text color for use ON accent backgrounds (contrasting color) */
 	accentForeground: string;
+	/**
+	 * Background tint for a cross-agent (@mention) response bubble - a subtle
+	 * wash of the theme accent that flags "this reply came from another agent."
+	 * Optional: when unset the renderer derives a subtle accent tint via
+	 * color-mix, so every theme (custom included) gets a correct tint for free.
+	 */
+	crossAgentBubbleBg?: string;
+	/** Border color for a cross-agent response bubble. Optional; derived from the accent when unset. */
+	crossAgentBubbleBorder?: string;
+	/**
+	 * `@file` / `@agent` mention-chip tokens. Chips appear frequently in dense
+	 * input, so these are deliberately subtle: `Bg` a faint tint a touch off the
+	 * input background, `Border` a slightly higher-contrast edge, `Text`
+	 * contrast-safe against `Bg`. All optional - when unset the renderer derives
+	 * them from the accent/border/text tokens via `getMentionChipColors`, so
+	 * every theme (custom included) gets legible chips for free.
+	 */
+	mentionChipBg?: string;
+	mentionChipBorder?: string;
+	mentionChipText?: string;
 	/** Success state color (green tones) */
 	success: string;
 	/** Warning state color (yellow/orange tones) */
 	warning: string;
 	/** Error state color (red tones) */
 	error: string;
+
+	/**
+	 * ANSI 16-color palette for terminal emulation.
+	 * Optional — XTerminal uses theme-appropriate defaults if not provided.
+	 */
+	ansiBlack?: string;
+	ansiRed?: string;
+	ansiGreen?: string;
+	ansiYellow?: string;
+	ansiBlue?: string;
+	ansiMagenta?: string;
+	ansiCyan?: string;
+	ansiWhite?: string;
+	ansiBrightBlack?: string;
+	ansiBrightRed?: string;
+	ansiBrightGreen?: string;
+	ansiBrightYellow?: string;
+	ansiBrightBlue?: string;
+	ansiBrightMagenta?: string;
+	ansiBrightCyan?: string;
+	ansiBrightWhite?: string;
+	/** Selection background color for terminal text selection */
+	selection?: string;
 }
 
 /**
@@ -92,18 +146,21 @@ export function isValidThemeId(id: string): id is ThemeId {
 		'monokai',
 		'github-light',
 		'solarized-light',
+		'solarized-dark',
 		'nord',
 		'tokyo-night',
 		'one-light',
 		'gruvbox-light',
 		'catppuccin-mocha',
 		'gruvbox-dark',
+		'olive-nights',
 		'catppuccin-latte',
 		'ayu-light',
 		'pedurple',
 		'maestros-choice',
 		'dre-synth',
 		'inquest',
+		'winamp',
 		'custom',
 	];
 	return validIds.includes(id as ThemeId);

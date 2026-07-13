@@ -39,9 +39,7 @@ function createMockVibesCoordinator() {
 /**
  * Create minimal exit-listener dependencies with a VIBES coordinator mock.
  */
-function createExitListenerDeps(
-	overrides: Partial<Parameters<typeof setupExitListener>[1]> = {},
-) {
+function createExitListenerDeps(overrides: Partial<Parameters<typeof setupExitListener>[1]> = {}) {
 	return {
 		safeSend: vi.fn(),
 		powerManager: {
@@ -53,6 +51,7 @@ function createExitListenerDeps(
 			emitParticipantState: vi.fn(),
 		},
 		groupChatRouter: {
+			clearModeratorResponseTimeout: vi.fn(),
 			routeModeratorResponse: vi.fn().mockResolvedValue(undefined),
 			routeAgentResponse: vi.fn().mockResolvedValue(undefined),
 			markParticipantResponded: vi.fn().mockReturnValue(false),
@@ -165,7 +164,7 @@ describe('VIBES startup integration', () => {
 
 			// Should not throw
 			handler?.('test-session-789', 0);
-			expect(deps.safeSend).toHaveBeenCalledWith('process:exit', 'test-session-789', 0);
+			expect(deps.safeSend).toHaveBeenCalledWith('process:exit', 'test-session-789', 0, undefined);
 		});
 
 		it('should not crash if getVibesCoordinator is undefined', () => {
@@ -178,7 +177,7 @@ describe('VIBES startup integration', () => {
 
 			// Should not throw
 			handler?.('test-session-abc', 0);
-			expect(deps.safeSend).toHaveBeenCalledWith('process:exit', 'test-session-abc', 0);
+			expect(deps.safeSend).toHaveBeenCalledWith('process:exit', 'test-session-abc', 0, undefined);
 		});
 
 		it('should gracefully handle coordinator errors', async () => {
@@ -198,7 +197,7 @@ describe('VIBES startup integration', () => {
 				expect(deps.logger.warn).toHaveBeenCalledWith(
 					'[VIBES] Failed to handle process exit',
 					'ProcessListener',
-					expect.objectContaining({ sessionId: 'test-session-err' }),
+					expect.objectContaining({ sessionId: 'test-session-err' })
 				);
 			});
 		});
@@ -215,9 +214,14 @@ describe('VIBES startup integration', () => {
 			handler?.('regular-session-123', 0);
 
 			// Regular exit handling should still work
-			expect(deps.safeSend).toHaveBeenCalledWith('process:exit', 'regular-session-123', 0);
+			expect(deps.safeSend).toHaveBeenCalledWith(
+				'process:exit',
+				'regular-session-123',
+				0,
+				undefined
+			);
 			expect(deps.powerManager.removeBlockReason).toHaveBeenCalledWith(
-				'session:regular-session-123',
+				'session:regular-session-123'
 			);
 		});
 
@@ -236,7 +240,7 @@ describe('VIBES startup integration', () => {
 			await vi.waitFor(() => {
 				expect(mockCoordinator.handleProcessExit).toHaveBeenCalledWith(
 					'group-chat-abc-moderator-uuid123',
-					0,
+					0
 				);
 			});
 		});

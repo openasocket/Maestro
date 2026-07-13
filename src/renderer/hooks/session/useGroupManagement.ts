@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { Session, Group } from '../../types';
+import { setGroupParent as updateGroupParent } from '../../../shared/groupHierarchy';
 
 /**
  * State returned from useGroupManagement for modal management
@@ -7,6 +8,8 @@ import type { Session, Group } from '../../types';
 export interface GroupModalState {
 	/** Whether the create group modal is open */
 	createGroupModalOpen: boolean;
+	/** Parent pre-selected for a newly created group, if any. */
+	createGroupParentId: string | undefined;
 	/** Setters for modal state */
 	setCreateGroupModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }
@@ -41,8 +44,12 @@ export interface UseGroupManagementReturn {
 	startRenamingGroup: (groupId: string) => void;
 	/** Finish renaming a group */
 	finishRenamingGroup: (groupId: string, newName: string) => void;
-	/** Open the create group modal */
-	createNewGroup: () => void;
+	/** Open the create group modal, optionally inside a root group. */
+	createNewGroup: (parentGroupId?: string) => void;
+	/** Defensively move a group to a root group or valid direct parent. */
+	setGroupParent: (groupId: string, parentGroupId: string | undefined) => void;
+	/** Close the create group modal */
+	handleCloseCreateGroupModal: () => void;
 	/** Drop a session on a group */
 	handleDropOnGroup: (groupId: string) => void;
 	/** Drop a session on ungrouped area */
@@ -75,6 +82,7 @@ export function useGroupManagement(deps: UseGroupManagementDeps): UseGroupManage
 
 	// Modal state for create group dialog
 	const [createGroupModalOpen, setCreateGroupModalOpen] = useState(false);
+	const [createGroupParentId, setCreateGroupParentId] = useState<string | undefined>(undefined);
 
 	/**
 	 * Toggle group collapse/expand state
@@ -117,11 +125,24 @@ export function useGroupManagement(deps: UseGroupManagementDeps): UseGroupManage
 	);
 
 	/**
-	 * Open the create group modal
+	 * Open the create group modal.
 	 */
-	const createNewGroup = useCallback(() => {
+	const createNewGroup = useCallback((parentGroupId?: string) => {
+		setCreateGroupParentId(parentGroupId);
 		setCreateGroupModalOpen(true);
 	}, []);
+
+	const handleCloseCreateGroupModal = useCallback(() => {
+		setCreateGroupModalOpen(false);
+		setCreateGroupParentId(undefined);
+	}, []);
+
+	const setGroupParent = useCallback(
+		(groupId: string, parentGroupId: string | undefined) => {
+			setGroups((prev) => updateGroupParent(prev, groupId, parentGroupId));
+		},
+		[setGroups]
+	);
 
 	/**
 	 * Drop a session on a group
@@ -130,7 +151,12 @@ export function useGroupManagement(deps: UseGroupManagementDeps): UseGroupManage
 		(groupId: string) => {
 			if (draggingSessionId) {
 				setSessions((prev) =>
-					prev.map((s) => (s.id === draggingSessionId ? { ...s, groupId } : s))
+					prev.map((s) => {
+						if (s.id === draggingSessionId) return { ...s, groupId };
+						// Also update worktree children to keep groupId in sync
+						if (s.parentSessionId === draggingSessionId) return { ...s, groupId };
+						return s;
+					})
 				);
 				setDraggingSessionId(null);
 			}
@@ -144,7 +170,12 @@ export function useGroupManagement(deps: UseGroupManagementDeps): UseGroupManage
 	const handleDropOnUngrouped = useCallback(() => {
 		if (draggingSessionId) {
 			setSessions((prev) =>
-				prev.map((s) => (s.id === draggingSessionId ? { ...s, groupId: undefined } : s))
+				prev.map((s) => {
+					if (s.id === draggingSessionId) return { ...s, groupId: undefined };
+					// Also update worktree children to keep groupId in sync
+					if (s.parentSessionId === draggingSessionId) return { ...s, groupId: undefined };
+					return s;
+				})
 			);
 			setDraggingSessionId(null);
 		}
@@ -153,6 +184,7 @@ export function useGroupManagement(deps: UseGroupManagementDeps): UseGroupManage
 	// Modal state bundle for external access
 	const modalState: GroupModalState = {
 		createGroupModalOpen,
+		createGroupParentId,
 		setCreateGroupModalOpen,
 	};
 
@@ -161,6 +193,8 @@ export function useGroupManagement(deps: UseGroupManagementDeps): UseGroupManage
 		startRenamingGroup,
 		finishRenamingGroup,
 		createNewGroup,
+		setGroupParent,
+		handleCloseCreateGroupModal,
 		handleDropOnGroup,
 		handleDropOnUngrouped,
 		modalState,

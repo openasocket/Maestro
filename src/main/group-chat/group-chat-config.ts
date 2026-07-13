@@ -8,6 +8,7 @@
 
 import { getAgentCapabilities } from '../agents';
 import { getWindowsShellForAgentExecution } from '../process-manager/utils/shellEscape';
+import { isWindows } from '../../shared/platformDetection';
 
 // Module-level callback for getting custom shell path from settings
 let getCustomShellPathCallback: (() => string | undefined) | null = null;
@@ -25,13 +26,13 @@ export function setGetCustomShellPathCallback(callback: () => string | undefined
  * Gets the custom shell path using the registered callback.
  * Returns undefined if no callback is registered or if the callback returns undefined.
  */
-export function getCustomShellPath(): string | undefined {
+function getCustomShellPath(): string | undefined {
 	return getCustomShellPathCallback?.();
 }
 
 /**
  * SSH remote configuration type for spawn config.
- * Matches the pattern used in SessionInfo.sshRemoteConfig.
+ * Matches the pattern used in GroupChatSessionInfo.sshRemoteConfig.
  */
 export interface SpawnSshConfig {
 	enabled: boolean;
@@ -67,9 +68,12 @@ export interface WindowsSpawnConfig {
  * @param sshConfig - Optional SSH configuration; if enabled, returns no-op config
  * @returns Shell and stdin configuration for Windows, or no-op config for non-Windows/SSH
  */
-export function getWindowsSpawnConfig(agentId: string, sshConfig?: SpawnSshConfig): WindowsSpawnConfig {
+export function getWindowsSpawnConfig(
+	agentId: string,
+	sshConfig?: SpawnSshConfig
+): WindowsSpawnConfig {
 	// Don't apply Windows shell config when using SSH (remote may be Linux)
-	if (process.platform !== 'win32' || sshConfig?.enabled) {
+	if (!isWindows() || sshConfig?.enabled) {
 		return {
 			shell: undefined,
 			runInShell: false,

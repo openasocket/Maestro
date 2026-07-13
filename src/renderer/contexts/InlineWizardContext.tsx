@@ -23,7 +23,7 @@
  * 2. Access wizard state via useInlineWizardContext() hook
  */
 
-import React, { createContext, useContext, useMemo, ReactNode } from 'react';
+import { createContext, useContext, useMemo, ReactNode } from 'react';
 import {
 	useInlineWizard,
 	type UseInlineWizardReturn,
@@ -32,7 +32,7 @@ import {
 	type InlineWizardMessage,
 	type InlineGeneratedDocument,
 	type PreviousUIState,
-} from '../hooks/useInlineWizard';
+} from '../hooks/batch/useInlineWizard';
 
 /**
  * Context value type - exposes the full useInlineWizard return value
@@ -115,6 +115,9 @@ export function InlineWizardProvider({ children }: InlineWizardProviderProps) {
 			wizardState.streamingContent,
 			wizardState.generationProgress,
 			wizardState.wizardTabId,
+			wizardState.selectWizardTab,
+			wizardState.isWizardActiveForTab,
+			wizardState.wizardActiveSessions,
 		]
 	);
 

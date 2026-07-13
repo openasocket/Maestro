@@ -47,7 +47,18 @@ export interface LogEntry {
 	id: string;
 	timestamp: number;
 	text: string;
-	source: 'user' | 'stdout' | 'stderr';
+	source: 'user' | 'stdout' | 'stderr' | 'thinking' | 'tool';
+	/** Base64 data URLs attached to a user message (e.g. pasted images).
+	 *  Mirrors the renderer-side LogEntry.images so optimistic chat history
+	 *  shows the same attachments the agent receives. */
+	images?: string[];
+	metadata?: {
+		toolState?: {
+			name?: string;
+			status?: 'running' | 'completed' | 'error';
+			input?: Record<string, unknown>;
+		};
+	};
 }
 
 /**
@@ -83,6 +94,8 @@ export interface UseMobileSessionManagementDeps {
 	onResponseComplete?: (session: Session, response?: unknown) => void;
 	/** Callback when theme updates from server */
 	onThemeUpdate?: (theme: Theme) => void;
+	/** Callback when the global Bionify reading-mode setting updates from the server */
+	onBionifyReadingModeUpdate?: (enabled: boolean) => void;
 	/** Callback when custom commands are received */
 	onCustomCommands?: (commands: CustomCommand[]) => void;
 	/** Callback when AutoRun state changes */
@@ -105,6 +118,23 @@ export interface MobileSessionHandlers {
 	onSessionAdded: (session: Session) => void;
 	onSessionRemoved: (sessionId: string) => void;
 	onActiveSessionChanged: (sessionId: string) => void;
+	onToolEvent: (
+		sessionId: string,
+		tabId: string,
+		toolLog: {
+			id: string;
+			timestamp: number;
+			source: 'tool';
+			text: string;
+			metadata?: {
+				toolState?: {
+					name: string;
+					status: 'running' | 'completed' | 'error';
+					input?: Record<string, unknown>;
+				};
+			};
+		}
+	) => void;
 	onSessionOutput: (
 		sessionId: string,
 		data: string,
@@ -114,6 +144,7 @@ export interface MobileSessionHandlers {
 	onSessionExit: (sessionId: string, exitCode: number) => void;
 	onUserInput: (sessionId: string, command: string, inputMode: 'ai' | 'terminal') => void;
 	onThemeUpdate: (theme: Theme) => void;
+	onBionifyReadingModeUpdate: (enabled: boolean) => void;
 	onCustomCommands: (commands: CustomCommand[]) => void;
 	onAutoRunStateChange: (sessionId: string, state: AutoRunState | null) => void;
 	onTabsChanged: (sessionId: string, aiTabs: AITabData[], newActiveTabId: string) => void;
@@ -151,8 +182,16 @@ export interface UseMobileSessionManagementReturn {
 	handleNewTab: () => void;
 	/** Handler to close a tab in the active session */
 	handleCloseTab: (tabId: string) => void;
+	/** Handler to rename a tab in the active session */
+	handleRenameTab: (tabId: string, newName: string) => void;
+	/** Handler to star/unstar a tab in the active session */
+	handleStarTab: (tabId: string, starred: boolean) => void;
+	/** Handler to reorder a tab in the active session */
+	handleReorderTab: (fromIndex: number, toIndex: number) => void;
+	/** Handler to toggle bookmark on a session */
+	handleToggleBookmark: (sessionId: string) => void;
 	/** Add a user input log entry to session logs */
-	addUserLogEntry: (text: string, inputMode: 'ai' | 'terminal') => void;
+	addUserLogEntry: (text: string, inputMode: 'ai' | 'terminal', images?: string[]) => void;
 	/** WebSocket handlers for session state updates */
 	sessionsHandlers: MobileSessionHandlers;
 }
@@ -182,6 +221,7 @@ export function useMobileSessionManagement(
 		hapticTapPattern,
 		onResponseComplete,
 		onThemeUpdate,
+		onBionifyReadingModeUpdate,
 		onCustomCommands,
 		onAutoRunStateChange,
 	} = deps;
@@ -214,6 +254,8 @@ export function useMobileSessionManagement(
 	const activeSessionIdRef = useRef<string | null>(urlSessionId || savedActiveSessionId);
 	// Ref to track activeTabId for use in callbacks (avoids stale closure issues)
 	const activeTabIdRef = useRef<string | null>(urlTabId || savedActiveTabId);
+	// Timestamp of last local session selection — used to ignore server echoes
+	const lastLocalSelectionRef = useRef<number>(0);
 
 	// Keep activeSessionIdRef in sync with state
 	useEffect(() => {
@@ -245,13 +287,15 @@ export function useMobileSessionManagement(
 			return;
 		}
 
+		const controller = new AbortController();
+
 		const fetchSessionLogs = async () => {
 			setIsLoadingLogs(true);
 			try {
 				// Pass tabId explicitly to avoid race conditions with activeTabId sync
 				const tabParam = activeTabId ? `?tabId=${activeTabId}` : '';
 				const apiUrl = buildApiUrl(`/session/${activeSessionId}${tabParam}`);
-				const response = await fetch(apiUrl);
+				const response = await fetch(apiUrl, { signal: controller.signal });
 				if (response.ok) {
 					const data = await response.json();
 					const session = data.session;
@@ -267,6 +311,7 @@ export function useMobileSessionManagement(
 					});
 				}
 			} catch (err) {
+				if ((err as Error).name === 'AbortError') return;
 				webLogger.error('Failed to fetch session logs', 'Mobile', err);
 			} finally {
 				setIsLoadingLogs(false);
@@ -274,6 +319,7 @@ export function useMobileSessionManagement(
 		};
 
 		fetchSessionLogs();
+		return () => controller.abort();
 	}, [activeSessionId, activeTabId, isOffline]);
 
 	// Handle session selection - also notifies desktop to switch
@@ -283,11 +329,25 @@ export function useMobileSessionManagement(
 			const session = sessions.find((s) => s.id === sessionId);
 			// Update refs synchronously BEFORE state updates to avoid race conditions
 			// with WebSocket messages arriving during the render cycle
+			lastLocalSelectionRef.current = Date.now();
 			activeSessionIdRef.current = sessionId;
 			activeTabIdRef.current = session?.activeTabId || null;
 			setActiveSessionId(sessionId);
 			setActiveTabId(session?.activeTabId || null);
 			triggerHaptic(hapticTapPattern);
+			// Clear unread flags when switching to this session
+			setSessions((prev) =>
+				prev.map((s) => {
+					if (s.id !== sessionId) return s;
+					return {
+						...s,
+						aiTabs: s.aiTabs?.map((tab) => ({
+							...tab,
+							hasUnread: false,
+						})),
+					};
+				})
+			);
 			// Notify desktop to switch to this session (include activeTabId if available)
 			sendRef.current?.({
 				type: 'select_session',
@@ -336,19 +396,85 @@ export function useMobileSessionManagement(
 		[activeSessionId, sendRef, triggerHaptic, hapticTapPattern]
 	);
 
+	// Handle renaming a tab
+	const handleRenameTab = useCallback(
+		(tabId: string, newName: string) => {
+			if (!activeSessionId) return;
+			sendRef.current?.({ type: 'rename_tab', sessionId: activeSessionId, tabId, newName });
+		},
+		[activeSessionId, sendRef]
+	);
+
+	// Handle starring/unstarring a tab
+	const handleStarTab = useCallback(
+		(tabId: string, starred: boolean) => {
+			if (!activeSessionId) return;
+			sendRef.current?.({ type: 'star_tab', sessionId: activeSessionId, tabId, starred });
+			// Optimistically update local state
+			setSessions((prev) =>
+				prev.map((s) => {
+					if (s.id !== activeSessionId) return s;
+					return {
+						...s,
+						aiTabs: s.aiTabs?.map((t: any) => (t.id === tabId ? { ...t, starred } : t)),
+					};
+				})
+			);
+		},
+		[activeSessionId, sendRef, setSessions]
+	);
+
+	// Handle reordering a tab
+	const handleReorderTab = useCallback(
+		(fromIndex: number, toIndex: number) => {
+			if (!activeSessionId) return;
+			sendRef.current?.({ type: 'reorder_tab', sessionId: activeSessionId, fromIndex, toIndex });
+			// Optimistically update local state
+			setSessions((prev) =>
+				prev.map((s) => {
+					if (s.id !== activeSessionId || !s.aiTabs) return s;
+					const tabs = [...s.aiTabs];
+					const [movedTab] = tabs.splice(fromIndex, 1);
+					tabs.splice(toIndex, 0, movedTab);
+					return { ...s, aiTabs: tabs };
+				})
+			);
+		},
+		[activeSessionId, sendRef, setSessions]
+	);
+
+	// Handle toggling bookmark on a session
+	const handleToggleBookmark = useCallback(
+		(sessionId: string) => {
+			sendRef.current?.({ type: 'toggle_bookmark', sessionId });
+			// Optimistically update local state
+			setSessions((prev) =>
+				prev.map((s) => {
+					if (s.id !== sessionId) return s;
+					return { ...s, bookmarked: !s.bookmarked };
+				})
+			);
+		},
+		[sendRef, setSessions]
+	);
+
 	// Add a user input log entry to session logs
-	const addUserLogEntry = useCallback((text: string, inputMode: 'ai' | 'terminal') => {
-		const userLogEntry: LogEntry = {
-			id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-			timestamp: Date.now(),
-			text,
-			source: 'user',
-		};
-		setSessionLogs((prev) => {
-			const logKey = inputMode === 'ai' ? 'aiLogs' : 'shellLogs';
-			return { ...prev, [logKey]: [...prev[logKey], userLogEntry] };
-		});
-	}, []);
+	const addUserLogEntry = useCallback(
+		(text: string, inputMode: 'ai' | 'terminal', images?: string[]) => {
+			const userLogEntry: LogEntry = {
+				id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+				timestamp: Date.now(),
+				text,
+				source: 'user',
+				...(images && images.length > 0 ? { images } : {}),
+			};
+			setSessionLogs((prev) => {
+				const logKey = inputMode === 'ai' ? 'aiLogs' : 'shellLogs';
+				return { ...prev, [logKey]: [...prev[logKey], userLogEntry] };
+			});
+		},
+		[]
+	);
 
 	// WebSocket handlers for session updates
 	const sessionsHandlers = useMemo(
@@ -399,8 +525,13 @@ export function useMobileSessionManagement(
 				previousSessionStatesRef.current.set(sessionId, state);
 
 				setSessions((prev) => {
+					// Exclude inputMode from server broadcasts to prevent race conditions
+					// with optimistic mode switches. The web client manages its own inputMode
+					// via handleModeToggle — server state_change broadcasts may carry stale
+					// inputMode values during the IPC round-trip (web → server → desktop → broadcast).
+					const { inputMode: _serverInputMode, ...safeAdditionalData } = additionalData || {};
 					const updatedSessions = prev.map((s) =>
-						s.id === sessionId ? { ...s, state, ...additionalData } : s
+						s.id === sessionId ? { ...s, state, ...safeAdditionalData } : s
 					);
 
 					// Show notification if response completed and app is backgrounded
@@ -441,6 +572,17 @@ export function useMobileSessionManagement(
 				}
 			},
 			onActiveSessionChanged: (sessionId: string) => {
+				// Ignore server echoes that arrive shortly after a local selection
+				// (user selected a session in web, server echoed it back — but user may
+				// have already clicked another session by the time the echo arrives)
+				const timeSinceLocalSelect = Date.now() - lastLocalSelectionRef.current;
+				if (timeSinceLocalSelect < 2000 && sessionId === activeSessionIdRef.current) {
+					webLogger.debug(
+						`Ignoring server echo for ${sessionId} (${timeSinceLocalSelect}ms after local select)`,
+						'Mobile'
+					);
+					return;
+				}
 				// Desktop app switched to a different session - sync with web
 				webLogger.debug(`Desktop active session changed: ${sessionId}`, 'Mobile');
 				// Update refs synchronously BEFORE state updates to avoid race conditions
@@ -448,6 +590,43 @@ export function useMobileSessionManagement(
 				activeTabIdRef.current = null;
 				setActiveSessionId(sessionId);
 				setActiveTabId(null);
+			},
+			onToolEvent: (
+				sessionId: string,
+				tabId: string,
+				toolLog: {
+					id: string;
+					timestamp: number;
+					source: 'tool';
+					text: string;
+					metadata?: {
+						toolState?: {
+							name: string;
+							status: 'running' | 'completed' | 'error';
+							input?: Record<string, unknown>;
+						};
+					};
+				}
+			) => {
+				// Tool execution event - append to session AI logs for thinking stream
+				const currentActiveId = activeSessionIdRef.current;
+				if (currentActiveId !== sessionId) return;
+
+				// For tabbed sessions, only show tool events for the active tab
+				const currentActiveTabId = activeTabIdRef.current;
+				if (tabId && currentActiveTabId && tabId !== currentActiveTabId) return;
+
+				setSessionLogs((prev) => {
+					const existingLogs = prev.aiLogs || [];
+					const newEntry: LogEntry = {
+						id: toolLog.id,
+						timestamp: toolLog.timestamp,
+						source: 'tool',
+						text: toolLog.text,
+						metadata: toolLog.metadata,
+					};
+					return { ...prev, aiLogs: [...existingLogs, newEntry] };
+				});
 			},
 			onSessionOutput: (
 				sessionId: string,
@@ -468,12 +647,25 @@ export function useMobileSessionManagement(
 					dataLen: data?.length || 0,
 				});
 
-				// Only update if this is the active session
+				// Mark as unread if output is for a non-active session
 				if (currentActiveId !== sessionId) {
-					webLogger.debug('Skipping output - not active session', 'Mobile', {
+					webLogger.debug('Marking session as unread - not active session', 'Mobile', {
 						sessionId,
 						activeSessionId: currentActiveId,
 					});
+					setSessions((prev) =>
+						prev.map((s) => {
+							if (s.id !== sessionId) return s;
+							return {
+								...s,
+								aiTabs: s.aiTabs?.map((tab) => ({
+									...tab,
+									// Only mark the specific tab that received output as unread
+									hasUnread: tab.hasUnread || !tabId || tab.id === tabId,
+								})),
+							};
+						})
+					);
 					return;
 				}
 
@@ -572,6 +764,10 @@ export function useMobileSessionManagement(
 				webLogger.debug(`Theme update received: ${theme.name} (${theme.mode})`, 'Mobile');
 				onThemeUpdate?.(theme);
 			},
+			onBionifyReadingModeUpdate: (enabled: boolean) => {
+				webLogger.debug(`Bionify reading mode update received: ${enabled}`, 'Mobile');
+				onBionifyReadingModeUpdate?.(enabled);
+			},
 			onCustomCommands: (commands: CustomCommand[]) => {
 				// Custom slash commands from desktop app
 				webLogger.debug(`Custom commands received: ${commands.length}`, 'Mobile');
@@ -602,7 +798,13 @@ export function useMobileSessionManagement(
 				}
 			},
 		}),
-		[onResponseComplete, onThemeUpdate, onCustomCommands, onAutoRunStateChange]
+		[
+			onResponseComplete,
+			onThemeUpdate,
+			onBionifyReadingModeUpdate,
+			onCustomCommands,
+			onAutoRunStateChange,
+		]
 	);
 
 	return {
@@ -622,6 +824,10 @@ export function useMobileSessionManagement(
 		handleSelectTab,
 		handleNewTab,
 		handleCloseTab,
+		handleRenameTab,
+		handleStarTab,
+		handleReorderTab,
+		handleToggleBookmark,
 		addUserLogEntry,
 		sessionsHandlers,
 	};

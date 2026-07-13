@@ -6,8 +6,12 @@
  * uses readable text (Ctrl, Alt, Shift).
  */
 
-// Detect if running on macOS
-const isMac = typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac');
+import { isMacOSPlatform } from './platformUtils';
+
+// Detect if running on macOS — uses window.maestro.platform (Electron preload bridge)
+function isMac(): boolean {
+	return isMacOSPlatform();
+}
 
 // macOS key symbol mappings
 const MAC_KEY_MAP: Record<string, string> = {
@@ -53,7 +57,7 @@ const OTHER_KEY_MAP: Record<string, string> = {
  * Format a single key for display based on platform.
  */
 export function formatKey(key: string): string {
-	const keyMap = isMac ? MAC_KEY_MAP : OTHER_KEY_MAP;
+	const keyMap = isMac() ? MAC_KEY_MAP : OTHER_KEY_MAP;
 
 	// Check if there's a mapping for this key
 	if (keyMap[key]) {
@@ -86,10 +90,43 @@ export function formatKey(key: string): string {
  * formatShortcutKeys(['Alt', 'Meta', 'ArrowRight']) // 'Alt+Ctrl+→'
  */
 export function formatShortcutKeys(keys: string[], separator?: string): string {
-	const defaultSeparator = isMac ? ' ' : '+';
+	const defaultSeparator = isMac() ? ' ' : '+';
 	const sep = separator ?? defaultSeparator;
 
 	return keys.map(formatKey).join(sep);
+}
+
+/**
+ * Format the platform-appropriate meta/command key.
+ * Returns '⌘' on macOS, 'Ctrl' on Windows/Linux.
+ */
+export function formatMetaKey(): string {
+	return isMac() ? '⌘' : 'Ctrl';
+}
+
+/**
+ * Format the enter-to-send display text.
+ * Used by input areas that toggle between Enter and Cmd+Enter to send.
+ *
+ * @param enterToSend - Whether Enter sends (true) or Cmd/Ctrl+Enter sends (false)
+ * @returns Display string like 'Enter' or '⌘ + Enter' / 'Ctrl + Enter'
+ */
+export function formatEnterToSend(enterToSend: boolean): string {
+	if (enterToSend) return 'Enter';
+	return isMac() ? '⌘ + Enter' : 'Ctrl + Enter';
+}
+
+/**
+ * Format the enter-to-send tooltip text for the toggle button.
+ *
+ * @param enterToSend - Whether Enter sends (true) or Cmd/Ctrl+Enter sends (false)
+ * @returns Tooltip like 'Switch to Cmd+Enter to send' or 'Switch to Enter to send'
+ */
+export function formatEnterToSendTooltip(enterToSend: boolean): string {
+	if (enterToSend) {
+		return `Switch to ${isMac() ? 'Cmd' : 'Ctrl'}+Enter to send`;
+	}
+	return 'Switch to Enter to send';
 }
 
 /**
@@ -97,5 +134,5 @@ export function formatShortcutKeys(keys: string[], separator?: string): string {
  * Useful for conditional rendering.
  */
 export function isMacOS(): boolean {
-	return isMac;
+	return isMac();
 }

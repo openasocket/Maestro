@@ -29,7 +29,7 @@ describe('OpenCodeOutputParser', () => {
 			expect(event?.sessionId).toBe('oc-sess-123');
 		});
 
-		it('should parse text messages as partial text', () => {
+		it('should parse text messages as result (final response, not streaming)', () => {
 			const line = JSON.stringify({
 				type: 'text',
 				sessionID: 'oc-sess-123',
@@ -40,10 +40,10 @@ describe('OpenCodeOutputParser', () => {
 
 			const event = parser.parseJsonLine(line);
 			expect(event).not.toBeNull();
-			expect(event?.type).toBe('text');
+			expect(event?.type).toBe('result');
 			expect(event?.text).toBe('Analyzing your code...');
 			expect(event?.sessionId).toBe('oc-sess-123');
-			expect(event?.isPartial).toBe(true);
+			expect(event?.isPartial).toBeUndefined();
 		});
 
 		it('should parse tool_use messages', () => {
@@ -73,8 +73,9 @@ describe('OpenCodeOutputParser', () => {
 			expect(event?.sessionId).toBe('oc-sess-123');
 		});
 
-		it('should parse step_finish messages with reason "stop" as result', () => {
+		it('should parse step_finish messages with reason "stop" as system (usage only)', () => {
 			// Actual OpenCode format: reason and tokens in part
+			// step_finish is now always system — result text comes from the preceding text event
 			const line = JSON.stringify({
 				type: 'step_finish',
 				sessionID: 'oc-sess-123',
@@ -92,7 +93,7 @@ describe('OpenCodeOutputParser', () => {
 
 			const event = parser.parseJsonLine(line);
 			expect(event).not.toBeNull();
-			expect(event?.type).toBe('result');
+			expect(event?.type).toBe('system');
 			expect(event?.sessionId).toBe('oc-sess-123');
 			expect(event?.usage?.inputTokens).toBe(500);
 			expect(event?.usage?.outputTokens).toBe(200);
@@ -163,15 +164,21 @@ describe('OpenCodeOutputParser', () => {
 	});
 
 	describe('isResultMessage', () => {
-		it('should return true for step_finish events with reason "stop"', () => {
-			const resultEvent = parser.parseJsonLine(
-				JSON.stringify({ type: 'step_finish', part: { reason: 'stop' } })
+		it('should return true for text events (final response)', () => {
+			const textEvent = parser.parseJsonLine(
+				JSON.stringify({ type: 'text', part: { text: 'Here is the answer' } })
 			);
-			expect(resultEvent).not.toBeNull();
-			expect(parser.isResultMessage(resultEvent!)).toBe(true);
+			expect(textEvent).not.toBeNull();
+			expect(parser.isResultMessage(textEvent!)).toBe(true);
 		});
 
-		it('should return false for step_finish events with reason "tool-calls"', () => {
+		it('should return false for step_finish events (usage-only, not result)', () => {
+			const stopEvent = parser.parseJsonLine(
+				JSON.stringify({ type: 'step_finish', part: { reason: 'stop' } })
+			);
+			expect(stopEvent).not.toBeNull();
+			expect(parser.isResultMessage(stopEvent!)).toBe(false);
+
 			const toolCallsEvent = parser.parseJsonLine(
 				JSON.stringify({ type: 'step_finish', part: { reason: 'tool-calls' } })
 			);
@@ -186,11 +193,11 @@ describe('OpenCodeOutputParser', () => {
 			expect(initEvent).not.toBeNull();
 			expect(parser.isResultMessage(initEvent!)).toBe(false);
 
-			const textEvent = parser.parseJsonLine(
-				JSON.stringify({ type: 'text', part: { text: 'hi' } })
+			const toolEvent = parser.parseJsonLine(
+				JSON.stringify({ type: 'tool_use', part: { tool: 'bash' } })
 			);
-			expect(textEvent).not.toBeNull();
-			expect(parser.isResultMessage(textEvent!)).toBe(false);
+			expect(toolEvent).not.toBeNull();
+			expect(parser.isResultMessage(toolEvent!)).toBe(false);
 		});
 	});
 
@@ -282,23 +289,23 @@ describe('OpenCodeOutputParser', () => {
 			expect(event?.sessionId).toBe('sess-123');
 		});
 
-		it('should handle step_finish with reason "stop"', () => {
+		it('should handle step_finish with reason "stop" as system', () => {
 			const event = parser.parseJsonLine(
 				JSON.stringify({ type: 'step_finish', sessionID: 'sess-123', part: { reason: 'stop' } })
 			);
-			expect(event?.type).toBe('result');
+			expect(event?.type).toBe('system');
 			expect(event?.sessionId).toBe('sess-123');
 		});
 
 		it('should handle missing part.text', () => {
 			const event = parser.parseJsonLine(JSON.stringify({ type: 'text', part: {} }));
-			expect(event?.type).toBe('text');
+			expect(event?.type).toBe('result');
 			expect(event?.text).toBe('');
 		});
 
 		it('should handle missing part entirely', () => {
 			const event = parser.parseJsonLine(JSON.stringify({ type: 'text' }));
-			expect(event?.type).toBe('text');
+			expect(event?.type).toBe('result');
 			expect(event?.text).toBe('');
 		});
 

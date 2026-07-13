@@ -13,12 +13,15 @@ import {
 	getSshErrorPatterns,
 	registerErrorPatterns,
 	clearPatternRegistry,
-	CLAUDE_ERROR_PATTERNS,
-	OPENCODE_ERROR_PATTERNS,
-	CODEX_ERROR_PATTERNS,
+	ERROR_PATTERN_DEFAULT_MIN_CHUNK_LENGTH,
 	SSH_ERROR_PATTERNS,
 	type AgentErrorPatterns,
 } from '../../../main/parsers/error-patterns';
+
+// Access per-agent patterns via the registry (single public API)
+const CLAUDE_ERROR_PATTERNS = getErrorPatterns('claude-code');
+const OPENCODE_ERROR_PATTERNS = getErrorPatterns('opencode');
+const CODEX_ERROR_PATTERNS = getErrorPatterns('codex');
 
 describe('error-patterns', () => {
 	describe('CLAUDE_ERROR_PATTERNS', () => {
@@ -326,11 +329,11 @@ describe('error-patterns', () => {
 				expect(result?.type).toBe('rate_limited');
 			});
 
-			it('should mark quota exceeded as not recoverable', () => {
+			it('should mark quota exceeded as recoverable', () => {
 				const result = matchErrorPattern(CLAUDE_ERROR_PATTERNS, 'quota exceeded');
 				expect(result).not.toBeNull();
 				expect(result?.type).toBe('rate_limited');
-				expect(result?.recoverable).toBe(false);
+				expect(result?.recoverable).toBe(true);
 			});
 		});
 
@@ -421,6 +424,19 @@ describe('error-patterns', () => {
 				const result = matchErrorPattern({}, 'rate limit exceeded');
 				expect(result).toBeNull();
 			});
+
+			it('should return null for non-string line input', () => {
+				// Runtime guard: obj.message may be an object instead of string
+				const result = matchErrorPattern(CLAUDE_ERROR_PATTERNS, {
+					type: 'error',
+				} as unknown as string);
+				expect(result).toBeNull();
+			});
+
+			it('should return null for null/undefined line input', () => {
+				expect(matchErrorPattern(CLAUDE_ERROR_PATTERNS, null as unknown as string)).toBeNull();
+				expect(matchErrorPattern(CLAUDE_ERROR_PATTERNS, undefined as unknown as string)).toBeNull();
+			});
 		});
 
 		describe('Codex-specific patterns', () => {
@@ -467,7 +483,7 @@ describe('error-patterns', () => {
 					const result = matchErrorPattern(CODEX_ERROR_PATTERNS, 'quota exceeded');
 					expect(result).not.toBeNull();
 					expect(result?.type).toBe('rate_limited');
-					expect(result?.recoverable).toBe(false);
+					expect(result?.recoverable).toBe(true);
 				});
 			});
 
@@ -543,6 +559,30 @@ describe('error-patterns', () => {
 					const result = matchErrorPattern(CODEX_ERROR_PATTERNS, 'fatal error occurred');
 					expect(result).not.toBeNull();
 					expect(result?.type).toBe('agent_crashed');
+				});
+			});
+
+			describe('session_not_found patterns', () => {
+				// Real stderr emitted by `codex exec resume <id>` (codex-cli 0.130.0)
+				// when the rollout file backing the thread is missing. Regression
+				// guard for #1042 — must NOT fall through to agent_crashed.
+				it('should match Codex "no rollout found for thread id" resume failure', () => {
+					const stderr =
+						'Error: thread/resume: thread/resume failed: no rollout found for thread id 019e4aa3-5e01-73e1-9f61-d3961386dafd (code -32600)';
+					const result = matchErrorPattern(CODEX_ERROR_PATTERNS, stderr);
+					expect(result).not.toBeNull();
+					expect(result?.type).toBe('session_not_found');
+					expect(result?.recoverable).toBe(true);
+				});
+
+				it('should match "rollout not found"', () => {
+					const result = matchErrorPattern(CODEX_ERROR_PATTERNS, 'rollout not found');
+					expect(result?.type).toBe('session_not_found');
+				});
+
+				it('should match generic "session not found"', () => {
+					const result = matchErrorPattern(CODEX_ERROR_PATTERNS, 'session not found');
+					expect(result?.type).toBe('session_not_found');
 				});
 			});
 		});
@@ -743,6 +783,59 @@ describe('error-patterns', () => {
 			});
 		});
 
+		describe('Windows remote host (issue #995)', () => {
+			// Maestro builds the remote command for a POSIX shell
+			// (/bin/bash --norc --noprofile). On a Windows SSH remote the default
+			// shell (cmd.exe or PowerShell) cannot run it and the agent dies with a
+			// bare exit 1. These cases prove the cryptic crash now maps to a clear,
+			// actionable message. Full Windows-remote support is deferred (needs a
+			// live Windows SSH host to verify the generated command).
+			it('should map cmd.exe "is not recognized as an internal or external command" to the actionable message', () => {
+				const result = matchSshErrorPattern(
+					"'/bin/bash' is not recognized as an internal or external command, operable program or batch file."
+				);
+				expect(result).not.toBeNull();
+				expect(result?.type).toBe('agent_crashed');
+				expect(result?.recoverable).toBe(false);
+				expect(result?.message).toContain('Windows remote');
+				expect(result?.message).toContain('not yet supported');
+				expect(result?.message).toContain('#995');
+			});
+
+			it('should map PowerShell "is not recognized as the name of a cmdlet" to the actionable message', () => {
+				const result = matchSshErrorPattern(
+					"/bin/bash : The term '/bin/bash' is not recognized as the name of a cmdlet, function, script file, or operable program."
+				);
+				expect(result).not.toBeNull();
+				expect(result?.type).toBe('agent_crashed');
+				expect(result?.message).toContain('Windows remote');
+				expect(result?.message).toContain('#995');
+			});
+
+			it('should map Windows "The system cannot find the path specified" to the actionable message', () => {
+				const result = matchSshErrorPattern('The system cannot find the path specified.');
+				expect(result).not.toBeNull();
+				expect(result?.type).toBe('agent_crashed');
+				expect(result?.message).toContain('Windows remote');
+				expect(result?.message).toContain('#995');
+			});
+
+			it('should NOT apply the Windows message to a POSIX remote failure (POSIX remotes unaffected)', () => {
+				// A real POSIX-remote "command not found" still maps to its own
+				// agent-specific message, never the Windows-remote message.
+				const result = matchSshErrorPattern('bash: claude: command not found');
+				expect(result).not.toBeNull();
+				expect(result?.type).toBe('agent_crashed');
+				expect(result?.message).toContain('Claude command not found');
+				expect(result?.message).not.toContain('Windows remote');
+			});
+
+			it('should return null for normal POSIX output mentioning bash (no false positive)', () => {
+				const result = matchSshErrorPattern('Running /bin/bash to set up the environment');
+				expect(result).toBeNull();
+			});
+		});
+
 		describe('non-matching lines', () => {
 			it('should return null for normal SSH output', () => {
 				const result = matchSshErrorPattern('Connected to example.com');
@@ -859,6 +952,57 @@ describe('error-patterns', () => {
 			clearPatternRegistry();
 			expect(getErrorPatterns('claude-code')).toEqual({});
 			expect(getErrorPatterns('opencode')).toEqual({});
+		});
+	});
+
+	// PR-D 1.8: streaming-path optimizations
+	describe('matchErrorPattern length guard + priority ordering', () => {
+		it('exposes a default minimum chunk length', () => {
+			expect(ERROR_PATTERN_DEFAULT_MIN_CHUNK_LENGTH).toBeGreaterThan(0);
+			// Real error strings (timeout=7) should not be skipped by default.
+			expect(ERROR_PATTERN_DEFAULT_MIN_CHUNK_LENGTH).toBeLessThanOrEqual(7);
+		});
+
+		it('skips the regex bank for chunks shorter than the threshold', () => {
+			// "abc" is 3 chars — below threshold. Even if the patterns somehow
+			// matched, the length guard short-circuits before any regex runs.
+			const result = matchErrorPattern(CLAUDE_ERROR_PATTERNS, 'abc');
+			expect(result).toBeNull();
+		});
+
+		it('honors a caller-supplied minLength override (0 disables the guard)', () => {
+			// "rate limit" — would match rate_limited under the default guard
+			// because it's 10 chars. With minLength: 0 the same behavior holds;
+			// just verifying the option is wired.
+			const noGuard = matchErrorPattern(CLAUDE_ERROR_PATTERNS, 'rate limit exceeded', {
+				minLength: 0,
+			});
+			expect(noGuard).not.toBeNull();
+			expect(noGuard?.type).toBe('rate_limited');
+		});
+
+		it('honors a caller-supplied minLength that is higher than default', () => {
+			// "rate limit exceeded" is 19 chars — well above default. Pass a
+			// minLength of 100 to force the guard to short-circuit.
+			const guarded = matchErrorPattern(CLAUDE_ERROR_PATTERNS, 'rate limit exceeded', {
+				minLength: 100,
+			});
+			expect(guarded).toBeNull();
+		});
+
+		it('returns null for empty string regardless of guard', () => {
+			expect(matchErrorPattern(CLAUDE_ERROR_PATTERNS, '')).toBeNull();
+			expect(matchErrorPattern(CLAUDE_ERROR_PATTERNS, '', { minLength: 0 })).toBeNull();
+		});
+
+		it('priority ordering keeps first-match early-return contract', () => {
+			// Multiple patterns can match overlapping strings; the function
+			// must return the first hit it finds, ordered by error type.
+			// The new hit-frequency order puts rate_limited first; verify
+			// that a rate-limit-only string returns rate_limited (not
+			// something else if patterns happen to overlap).
+			const result = matchErrorPattern(CLAUDE_ERROR_PATTERNS, 'rate limit exceeded');
+			expect(result?.type).toBe('rate_limited');
 		});
 	});
 });

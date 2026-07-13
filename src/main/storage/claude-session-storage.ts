@@ -18,16 +18,15 @@ import Store from 'electron-store';
 import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
 import { CLAUDE_SESSION_PARSE_LIMITS } from '../constants';
-import { calculateClaudeCost } from '../utils/pricing';
+import { computeClaudeUsageCost } from '../utils/pricing';
+import { claudeModelUsage } from '../../shared/modelUsage';
 import { encodeClaudeProjectPath } from '../utils/statsCache';
-import { readDirRemote, readFileRemote, statRemote } from '../utils/remote-fs';
+import { readFileRemote, listDirWithStatsRemote } from '../utils/remote-fs';
+import { mapWithConcurrency, REMOTE_SESSION_READ_CONCURRENCY } from '../utils/concurrency';
 import type {
-	AgentSessionStorage,
 	AgentSessionInfo,
 	PaginatedSessionsResult,
 	SessionMessagesResult,
-	SessionSearchResult,
-	SessionSearchMode,
 	SessionListOptions,
 	SessionReadOptions,
 	AgentSessionOrigin,
@@ -35,23 +34,46 @@ import type {
 	SessionMessage,
 } from '../agents';
 import type { ToolType, SshRemoteConfig } from '../../shared/types';
-
-const LOG_CONTEXT = '[ClaudeSessionStorage]';
+import type {
+	ClaudeSessionOrigin,
+	ClaudeSessionOriginInfo,
+	ClaudeSessionOriginsData,
+} from '../stores/types';
+import { BaseSessionStorage } from './base-session-storage';
+import type { SearchableMessage } from './base-session-storage';
+export type { ClaudeSessionOriginsData } from '../stores/types';
 
 /**
  * Origin data structure stored in electron-store
  */
-type StoredOriginData =
-	| AgentSessionOrigin
-	| {
-			origin: AgentSessionOrigin;
-			sessionName?: string;
-			starred?: boolean;
-			contextUsage?: number;
-	  };
+type StoredOriginData = ClaudeSessionOrigin | ClaudeSessionOriginInfo;
 
-export interface ClaudeSessionOriginsData {
-	origins: Record<string, Record<string, StoredOriginData>>;
+const LOG_CONTEXT = '[ClaudeSessionStorage]';
+const MAX_SESSION_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
+
+/**
+ * Matches the synthetic placeholder text the harness writes alongside an image
+ * content block, e.g. "[Image: original 2808x1566, displayed at 2000x1115.
+ * Multiply coordinates by 1.40 to map to original image.]". When we recover the
+ * real image we drop this text so the restored bubble isn't a duplicate.
+ */
+const IMAGE_PLACEHOLDER_PATTERN = /^\s*\[Image:[^\]]*to map to original image\.?\]\s*$/;
+
+function isImagePlaceholderText(text: string | undefined): boolean {
+	return typeof text === 'string' && IMAGE_PLACEHOLDER_PATTERN.test(text);
+}
+
+/**
+ * Remove any synthetic `[Image: ...]` placeholder lines from a text blob,
+ * returning the trimmed remainder. A message that is nothing but placeholder
+ * lines collapses to an empty string so callers can drop it entirely.
+ */
+function stripImagePlaceholderLines(text: string): string {
+	return text
+		.split('\n')
+		.filter((line) => !isImagePlaceholderText(line))
+		.join('\n')
+		.trim();
 }
 
 /**
@@ -128,30 +150,15 @@ function parseSessionContent(
 		// Use assistant response as preview if available, otherwise fall back to user message
 		const previewMessage = firstAssistantMessage || firstUserMessage;
 
-		// Fast regex-based token extraction
-		let totalInputTokens = 0;
-		let totalOutputTokens = 0;
-		let totalCacheReadTokens = 0;
-		let totalCacheCreationTokens = 0;
-
-		const inputMatches = content.matchAll(/"input_tokens"\s*:\s*(\d+)/g);
-		for (const m of inputMatches) totalInputTokens += parseInt(m[1], 10);
-
-		const outputMatches = content.matchAll(/"output_tokens"\s*:\s*(\d+)/g);
-		for (const m of outputMatches) totalOutputTokens += parseInt(m[1], 10);
-
-		const cacheReadMatches = content.matchAll(/"cache_read_input_tokens"\s*:\s*(\d+)/g);
-		for (const m of cacheReadMatches) totalCacheReadTokens += parseInt(m[1], 10);
-
-		const cacheCreationMatches = content.matchAll(/"cache_creation_input_tokens"\s*:\s*(\d+)/g);
-		for (const m of cacheCreationMatches) totalCacheCreationTokens += parseInt(m[1], 10);
-
-		const costUsd = calculateClaudeCost(
-			totalInputTokens,
-			totalOutputTokens,
-			totalCacheReadTokens,
-			totalCacheCreationTokens
-		);
+		// Per-model token + cost extraction (a session may mix models).
+		const {
+			inputTokens: totalInputTokens,
+			outputTokens: totalOutputTokens,
+			cacheReadTokens: totalCacheReadTokens,
+			cacheCreationTokens: totalCacheCreationTokens,
+			costUsd,
+			byModel,
+		} = computeClaudeUsageCost(content);
 
 		// Extract last timestamp for duration
 		let lastTimestamp = timestamp;
@@ -191,6 +198,7 @@ function parseSessionContent(
 			outputTokens: totalOutputTokens,
 			cacheReadTokens: totalCacheReadTokens,
 			cacheCreationTokens: totalCacheCreationTokens,
+			byModel: claudeModelUsage(byModel),
 			durationSeconds,
 		};
 	} catch (error) {
@@ -210,9 +218,20 @@ async function parseSessionFile(
 	stats: { size: number; mtimeMs: number }
 ): Promise<AgentSessionInfo | null> {
 	try {
+		if (stats.size > MAX_SESSION_FILE_SIZE) {
+			logger.warn(`Skipping oversized session file: ${filePath}`, LOG_CONTEXT, {
+				size: stats.size,
+			});
+			return null;
+		}
+
 		const content = await fs.readFile(filePath, 'utf-8');
 		return parseSessionContent(content, sessionId, projectPath, stats);
 	} catch (error) {
+		if (error instanceof RangeError) {
+			logger.warn('Session file too large to parse', LOG_CONTEXT, { filePath });
+			return null;
+		}
 		logger.error(`Error reading session file: ${filePath}`, LOG_CONTEXT, error);
 		captureException(error, { operation: 'claudeStorage:readSessionFile', filePath });
 		return null;
@@ -230,6 +249,13 @@ async function parseSessionFileRemote(
 	sshConfig: SshRemoteConfig
 ): Promise<AgentSessionInfo | null> {
 	try {
+		if (stats.size > MAX_SESSION_FILE_SIZE) {
+			logger.warn(`Skipping oversized remote session file: ${filePath}`, LOG_CONTEXT, {
+				size: stats.size,
+			});
+			return null;
+		}
+
 		const result = await readFileRemote(filePath, sshConfig);
 		if (!result.success || !result.data) {
 			logger.error(
@@ -252,12 +278,13 @@ async function parseSessionFileRemote(
  * Provides access to Claude Code's local session storage at ~/.claude/projects/
  * Supports both local filesystem access and remote access via SSH.
  */
-export class ClaudeSessionStorage implements AgentSessionStorage {
+export class ClaudeSessionStorage extends BaseSessionStorage {
 	readonly agentId: ToolType = 'claude-code';
 
 	private originsStore: Store<ClaudeSessionOriginsData>;
 
 	constructor(originsStore?: Store<ClaudeSessionOriginsData>) {
+		super();
 		// Use provided store or create a new one
 		this.originsStore =
 			originsStore ||
@@ -390,7 +417,11 @@ export class ClaudeSessionStorage implements AgentSessionStorage {
 	}
 
 	/**
-	 * List sessions from remote host via SSH
+	 * List sessions from remote host via SSH.
+	 *
+	 * Uses one SSH round-trip to enumerate and stat every `.jsonl` in the
+	 * project's session directory, then reads per-session content with bounded
+	 * concurrency to stay under sshd's MaxStartups limit.
 	 */
 	private async listSessionsRemote(
 		projectPath: string,
@@ -398,60 +429,46 @@ export class ClaudeSessionStorage implements AgentSessionStorage {
 	): Promise<AgentSessionInfo[]> {
 		const projectDir = this.getRemoteEncodedProjectDir(projectPath);
 
-		// List directory via SSH
-		const dirResult = await readDirRemote(projectDir, sshConfig);
-		if (!dirResult.success || !dirResult.data) {
+		const dirResult = await listDirWithStatsRemote(projectDir, sshConfig, { nameSuffix: '.jsonl' });
+		if (!dirResult.success) {
 			logger.info(
-				`No Claude sessions directory found on remote for project: ${projectPath}`,
+				`No Claude sessions directory found on remote for project: ${projectPath} (${dirResult.error})`,
 				LOG_CONTEXT
 			);
 			return [];
 		}
 
-		// Filter for .jsonl files
-		const sessionFiles = dirResult.data.filter(
-			(entry) => !entry.isDirectory && entry.name.endsWith('.jsonl')
-		);
+		const sessionFiles = (dirResult.data || []).filter((entry) => entry.size > 0);
 
-		// Get metadata for each session
-		const sessions = await Promise.all(
-			sessionFiles.map(async (entry) => {
+		const sessions = await mapWithConcurrency(
+			sessionFiles,
+			REMOTE_SESSION_READ_CONCURRENCY,
+			async (entry) => {
 				const sessionId = entry.name.replace('.jsonl', '');
 				const filePath = `${projectDir}/${entry.name}`;
-
 				try {
-					// Get file stats via SSH
-					const statResult = await statRemote(filePath, sshConfig);
-					if (!statResult.success || !statResult.data) {
-						logger.error(`Failed to stat remote file: ${filePath}`, LOG_CONTEXT);
-						return null;
-					}
-
 					return await parseSessionFileRemote(
 						filePath,
 						sessionId,
 						projectPath,
-						{
-							size: statResult.data.size,
-							mtimeMs: statResult.data.mtime,
-						},
+						{ size: entry.size, mtimeMs: entry.mtime },
 						sshConfig
 					);
 				} catch (error) {
 					logger.error(`Error processing remote session file: ${entry.name}`, LOG_CONTEXT, error);
-					captureException(error, { operation: 'claudeStorage:processRemoteSessionFile', filename: entry.name });
+					captureException(error, {
+						operation: 'claudeStorage:processRemoteSessionFile',
+						filename: entry.name,
+					});
 					return null;
 				}
-			})
+			}
 		);
 
-		// Filter out nulls, 0-byte sessions, and sort by modified date
 		const validSessions = sessions
 			.filter((s): s is NonNullable<typeof s> => s !== null)
-			.filter((s) => s.sizeBytes > 0)
 			.sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());
 
-		// Attach origin info (origins are stored locally, not on remote)
 		const projectOrigins = this.getProjectOrigins(projectPath);
 		const sessionsWithOrigins = validSessions.map((session) =>
 			this.attachOriginInfo(session, projectOrigins)
@@ -559,7 +576,11 @@ export class ClaudeSessionStorage implements AgentSessionStorage {
 	}
 
 	/**
-	 * List sessions with pagination from remote host via SSH
+	 * List sessions with pagination from remote host via SSH.
+	 *
+	 * Uses one SSH round-trip to enumerate and stat every `.jsonl` in the
+	 * project's session directory, then reads the current page's contents with
+	 * bounded concurrency to stay under sshd's MaxStartups limit.
 	 */
 	private async listSessionsPaginatedRemote(
 		projectPath: string,
@@ -569,48 +590,24 @@ export class ClaudeSessionStorage implements AgentSessionStorage {
 		const { cursor, limit = 100 } = options || {};
 		const projectDir = this.getRemoteEncodedProjectDir(projectPath);
 
-		// List directory via SSH
-		const dirResult = await readDirRemote(projectDir, sshConfig);
-		if (!dirResult.success || !dirResult.data) {
+		const dirResult = await listDirWithStatsRemote(projectDir, sshConfig, { nameSuffix: '.jsonl' });
+		if (!dirResult.success) {
 			return { sessions: [], hasMore: false, totalCount: 0, nextCursor: null };
 		}
 
-		// Filter for .jsonl files
-		const sessionFiles = dirResult.data.filter(
-			(entry) => !entry.isDirectory && entry.name.endsWith('.jsonl')
-		);
-
-		// Get file stats for all session files
-		const fileStats = await Promise.all(
-			sessionFiles.map(async (entry) => {
-				const sessionId = entry.name.replace('.jsonl', '');
-				const filePath = `${projectDir}/${entry.name}`;
-				try {
-					const statResult = await statRemote(filePath, sshConfig);
-					if (!statResult.success || !statResult.data) {
-						return null;
-					}
-					return {
-						sessionId,
-						filename: entry.name,
-						filePath,
-						modifiedAt: statResult.data.mtime,
-						sizeBytes: statResult.data.size,
-					};
-				} catch {
-					return null;
-				}
-			})
-		);
-
-		const sortedFiles = fileStats
-			.filter((s): s is NonNullable<typeof s> => s !== null)
-			.filter((s) => s.sizeBytes > 0)
+		const sortedFiles = (dirResult.data || [])
+			.filter((entry) => entry.size > 0)
+			.map((entry) => ({
+				sessionId: entry.name.replace('.jsonl', ''),
+				filename: entry.name,
+				filePath: `${projectDir}/${entry.name}`,
+				modifiedAt: entry.mtime,
+				sizeBytes: entry.size,
+			}))
 			.sort((a, b) => b.modifiedAt - a.modifiedAt);
 
 		const totalCount = sortedFiles.length;
 
-		// Find cursor position
 		let startIndex = 0;
 		if (cursor) {
 			const cursorIndex = sortedFiles.findIndex((f) => f.sessionId === cursor);
@@ -621,12 +618,12 @@ export class ClaudeSessionStorage implements AgentSessionStorage {
 		const hasMore = startIndex + limit < totalCount;
 		const nextCursor = hasMore ? pageFiles[pageFiles.length - 1]?.sessionId : null;
 
-		// Get project origins (stored locally)
 		const projectOrigins = this.getProjectOrigins(projectPath);
 
-		// Read full content for sessions in this page
-		const sessions = await Promise.all(
-			pageFiles.map(async (fileInfo) => {
+		const sessions = await mapWithConcurrency(
+			pageFiles,
+			REMOTE_SESSION_READ_CONCURRENCY,
+			async (fileInfo) => {
 				const session = await parseSessionFileRemote(
 					fileInfo.filePath,
 					fileInfo.sessionId,
@@ -638,7 +635,7 @@ export class ClaudeSessionStorage implements AgentSessionStorage {
 					return this.attachOriginInfo(session, projectOrigins);
 				}
 				return null;
-			})
+			}
 		);
 
 		const validSessions = sessions.filter((s): s is NonNullable<typeof s> => s !== null);
@@ -693,6 +690,7 @@ export class ClaudeSessionStorage implements AgentSessionStorage {
 				if (entry.type === 'user' || entry.type === 'assistant') {
 					let msgContent = '';
 					let toolUse = undefined;
+					let images: string[] | undefined;
 
 					if (entry.message?.content) {
 						if (typeof entry.message.content === 'string') {
@@ -704,15 +702,45 @@ export class ClaudeSessionStorage implements AgentSessionStorage {
 							const toolBlocks = entry.message.content.filter(
 								(b: { type?: string }) => b.type === 'tool_use'
 							);
+							const imageBlocks = entry.message.content.filter(
+								(b: { type?: string }) => b.type === 'image'
+							);
 
-							msgContent = textBlocks.map((b: { text?: string }) => b.text).join('\n');
+							// Reconstruct base64 data URLs from image content blocks so a
+							// resumed tab re-renders the original images instead of falling
+							// back to the harness's synthetic `[Image: ...]` placeholder text.
+							if (imageBlocks.length > 0) {
+								const urls = imageBlocks
+									.map((b: { source?: { type?: string; media_type?: string; data?: string } }) => {
+										const src = b.source;
+										if (src?.type === 'base64' && src.media_type && src.data) {
+											return `data:${src.media_type};base64,${src.data}`;
+										}
+										return null;
+									})
+									.filter((url: string | null): url is string => url !== null);
+								if (urls.length > 0) {
+									images = urls;
+								}
+							}
+
+							// Always drop the synthetic `[Image: ... Multiply coordinates by
+							// ...]` placeholder lines. They are redundant either way: when the
+							// image is in this same message we render the recovered image, and
+							// when the placeholder arrives as its own follow-up message it is a
+							// text echo of an image already shown in a prior message. Filtering
+							// line-by-line lets a placeholder-only message collapse to empty so
+							// it is dropped entirely below.
+							msgContent = stripImagePlaceholderLines(
+								textBlocks.map((b: { text?: string }) => b.text || '').join('\n')
+							);
 							if (toolBlocks.length > 0) {
 								toolUse = toolBlocks;
 							}
 						}
 					}
 
-					if (msgContent && msgContent.trim()) {
+					if ((msgContent && msgContent.trim()) || toolUse || images) {
 						messages.push({
 							type: entry.type,
 							role: entry.message?.role,
@@ -720,6 +748,7 @@ export class ClaudeSessionStorage implements AgentSessionStorage {
 							timestamp: entry.timestamp,
 							uuid: entry.uuid,
 							toolUse,
+							...(images && { images }),
 						});
 					}
 				}
@@ -728,187 +757,53 @@ export class ClaudeSessionStorage implements AgentSessionStorage {
 			}
 		}
 
-		// Apply offset and limit for lazy loading
-		const offset = options?.offset ?? 0;
-		const limit = options?.limit ?? 20;
-
-		const startIndex = Math.max(0, messages.length - offset - limit);
-		const endIndex = messages.length - offset;
-		const slice = messages.slice(startIndex, endIndex);
-
-		return {
-			messages: slice,
-			total: messages.length,
-			hasMore: startIndex > 0,
-		};
+		return BaseSessionStorage.applyMessagePagination(messages, options);
 	}
 
-	async searchSessions(
+	protected async getSearchableMessages(
+		sessionId: string,
 		projectPath: string,
-		query: string,
-		searchMode: SessionSearchMode,
 		sshConfig?: SshRemoteConfig
-	): Promise<SessionSearchResult[]> {
-		if (!query.trim()) {
+	): Promise<SearchableMessage[]> {
+		let content: string;
+
+		try {
+			if (sshConfig) {
+				const projectDir = this.getRemoteEncodedProjectDir(projectPath);
+				const sessionFile = `${projectDir}/${sessionId}.jsonl`;
+				const result = await readFileRemote(sessionFile, sshConfig);
+				if (!result.success || !result.data) return [];
+				content = result.data;
+			} else {
+				const projectDir = this.getEncodedProjectDir(projectPath);
+				const sessionFile = path.join(projectDir, `${sessionId}.jsonl`);
+				content = await fs.readFile(sessionFile, 'utf-8');
+			}
+		} catch {
 			return [];
 		}
 
-		// Get list of session files
-		let sessionFiles: string[];
+		const lines = content.split('\n').filter((l) => l.trim());
+		const searchableMessages: SearchableMessage[] = [];
 
-		if (sshConfig) {
-			const projectDir = this.getRemoteEncodedProjectDir(projectPath);
-			const dirResult = await readDirRemote(projectDir, sshConfig);
-			if (!dirResult.success || !dirResult.data) {
-				return [];
-			}
-			sessionFiles = dirResult.data
-				.filter((entry) => !entry.isDirectory && entry.name.endsWith('.jsonl'))
-				.map((entry) => entry.name);
-		} else {
-			const localProjectDir = this.getEncodedProjectDir(projectPath);
+		for (const line of lines) {
 			try {
-				await fs.access(localProjectDir);
-			} catch {
-				return [];
-			}
-			const files = await fs.readdir(localProjectDir);
-			sessionFiles = files.filter((f) => f.endsWith('.jsonl'));
-		}
-
-		const searchLower = query.toLowerCase();
-		const matchingSessions: SessionSearchResult[] = [];
-
-		// Get the appropriate project directory for path construction
-		const projectDir = sshConfig
-			? this.getRemoteEncodedProjectDir(projectPath)
-			: this.getEncodedProjectDir(projectPath);
-
-		for (const filename of sessionFiles) {
-			const sessionId = filename.replace('.jsonl', '');
-			const filePath = sshConfig ? `${projectDir}/${filename}` : path.join(projectDir, filename);
-
-			try {
-				// Get content either locally or via SSH
-				let content: string;
-				if (sshConfig) {
-					const result = await readFileRemote(filePath, sshConfig);
-					if (!result.success || !result.data) {
-						continue; // Skip files we can't read
-					}
-					content = result.data;
-				} else {
-					content = await fs.readFile(filePath, 'utf-8');
-				}
-				const lines = content.split('\n').filter((l) => l.trim());
-
-				let titleMatch = false;
-				let userMatches = 0;
-				let assistantMatches = 0;
-				let matchPreview = '';
-
-				for (const line of lines) {
-					try {
-						const entry = JSON.parse(line);
-
-						let textContent = '';
-						if (entry.message?.content) {
-							if (typeof entry.message.content === 'string') {
-								textContent = entry.message.content;
-							} else if (Array.isArray(entry.message.content)) {
-								textContent = entry.message.content
-									.filter((b: { type?: string }) => b.type === 'text')
-									.map((b: { text?: string }) => b.text)
-									.join('\n');
-							}
-						}
-
-						const textLower = textContent.toLowerCase();
-
-						if (entry.type === 'user' && !titleMatch && textLower.includes(searchLower)) {
-							titleMatch = true;
-							if (!matchPreview) {
-								const idx = textLower.indexOf(searchLower);
-								const start = Math.max(0, idx - 60);
-								const end = Math.min(textContent.length, idx + query.length + 60);
-								matchPreview =
-									(start > 0 ? '...' : '') +
-									textContent.slice(start, end) +
-									(end < textContent.length ? '...' : '');
-							}
-						}
-
-						if (entry.type === 'user' && textLower.includes(searchLower)) {
-							userMatches++;
-							if (!matchPreview && (searchMode === 'user' || searchMode === 'all')) {
-								const idx = textLower.indexOf(searchLower);
-								const start = Math.max(0, idx - 60);
-								const end = Math.min(textContent.length, idx + query.length + 60);
-								matchPreview =
-									(start > 0 ? '...' : '') +
-									textContent.slice(start, end) +
-									(end < textContent.length ? '...' : '');
-							}
-						}
-
-						if (entry.type === 'assistant' && textLower.includes(searchLower)) {
-							assistantMatches++;
-							if (!matchPreview && (searchMode === 'assistant' || searchMode === 'all')) {
-								const idx = textLower.indexOf(searchLower);
-								const start = Math.max(0, idx - 60);
-								const end = Math.min(textContent.length, idx + query.length + 60);
-								matchPreview =
-									(start > 0 ? '...' : '') +
-									textContent.slice(start, end) +
-									(end < textContent.length ? '...' : '');
-							}
-						}
-					} catch {
-						// Skip malformed lines
+				const entry = JSON.parse(line);
+				if (entry.type === 'user' || entry.type === 'assistant') {
+					const textContent = extractTextFromContent(entry.message?.content);
+					if (textContent.trim()) {
+						searchableMessages.push({
+							role: entry.type as 'user' | 'assistant',
+							textContent,
+						});
 					}
 				}
-
-				let matches = false;
-				let matchType: 'title' | 'user' | 'assistant' = 'title';
-				let matchCount = 0;
-
-				switch (searchMode) {
-					case 'title':
-						matches = titleMatch;
-						matchType = 'title';
-						matchCount = titleMatch ? 1 : 0;
-						break;
-					case 'user':
-						matches = userMatches > 0;
-						matchType = 'user';
-						matchCount = userMatches;
-						break;
-					case 'assistant':
-						matches = assistantMatches > 0;
-						matchType = 'assistant';
-						matchCount = assistantMatches;
-						break;
-					case 'all':
-						matches = titleMatch || userMatches > 0 || assistantMatches > 0;
-						matchType = titleMatch ? 'title' : userMatches > 0 ? 'user' : 'assistant';
-						matchCount = userMatches + assistantMatches;
-						break;
-				}
-
-				if (matches) {
-					matchingSessions.push({
-						sessionId,
-						matchType,
-						matchPreview,
-						matchCount,
-					});
-				}
 			} catch {
-				// Skip files that can't be read
+				// Skip malformed lines
 			}
 		}
 
-		return matchingSessions;
+		return searchableMessages;
 	}
 
 	getSessionPath(
@@ -1249,11 +1144,17 @@ export class ClaudeSessionStorage implements AgentSessionStorage {
 							const stats = await fs.stat(sessionFile);
 							lastActivityAt = stats.mtime.getTime();
 						} else {
-							// No session file path found, skip this stale entry
+							logger.debug(
+								`Skipping named session ${agentSessionId}: no session file path for project ${projectPath}`,
+								LOG_CONTEXT
+							);
 							continue;
 						}
 					} catch {
-						// Session file doesn't exist or is inaccessible, skip stale entry
+						logger.debug(
+							`Skipping named session ${agentSessionId}: file not found at expected path for project ${projectPath}`,
+							LOG_CONTEXT
+						);
 						continue;
 					}
 

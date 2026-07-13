@@ -6,455 +6,47 @@ import React, {
 	useImperativeHandle,
 	forwardRef,
 	useMemo,
-	memo,
 } from 'react';
-import { Bot, User, ExternalLink, Check, X, Clock, HelpCircle, Award } from 'lucide-react';
+import { HelpCircle, Search } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Session, Theme, HistoryEntry, HistoryEntryType } from '../types';
+import type { FileNode } from '../types/fileTree';
 import { HistoryDetailModal } from './HistoryDetailModal';
 import { HistoryHelpModal } from './HistoryHelpModal';
 import { useThrottledCallback, useListNavigation } from '../hooks';
-import { formatElapsedTime } from '../utils/formatters';
-import { stripMarkdown } from '../utils/textProcessing';
-
-// Double checkmark SVG component for validated entries
-const DoubleCheck = ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
-	<svg
-		className={className}
-		style={style}
-		viewBox="0 0 24 24"
-		fill="none"
-		stroke="currentColor"
-		strokeWidth="2.5"
-		strokeLinecap="round"
-		strokeLinejoin="round"
-	>
-		<polyline points="15 6 6 17 1 12" />
-		<polyline points="23 6 14 17 11 14" />
-	</svg>
-);
-
-// Lookback period options for the activity graph
-type LookbackPeriod = {
-	label: string;
-	hours: number | null; // null = all time
-	bucketCount: number;
-};
-
-const LOOKBACK_OPTIONS: LookbackPeriod[] = [
-	{ label: '24 hours', hours: 24, bucketCount: 24 },
-	{ label: '72 hours', hours: 72, bucketCount: 24 },
-	{ label: '1 week', hours: 168, bucketCount: 28 },
-	{ label: '2 weeks', hours: 336, bucketCount: 28 },
-	{ label: '1 month', hours: 720, bucketCount: 30 },
-	{ label: '6 months', hours: 4320, bucketCount: 24 },
-	{ label: '1 year', hours: 8760, bucketCount: 24 },
-	{ label: 'All time', hours: null, bucketCount: 24 },
-];
-
-// Activity bar graph component with configurable lookback window
-interface ActivityGraphProps {
-	entries: HistoryEntry[];
-	theme: Theme;
-	referenceTime?: number; // The "end" of the window (defaults to now)
-	onBarClick?: (bucketStartTime: number, bucketEndTime: number) => void;
-	lookbackHours: number | null; // null = all time
-	onLookbackChange: (hours: number | null) => void;
-}
-
-const ActivityGraph: React.FC<ActivityGraphProps> = ({
-	entries,
-	theme,
-	referenceTime,
-	onBarClick,
-	lookbackHours,
-	onLookbackChange,
-}) => {
-	const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-	const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-	const graphRef = useRef<HTMLDivElement>(null);
-
-	// Get the current lookback config
-	const lookbackConfig = useMemo(
-		() => LOOKBACK_OPTIONS.find((o) => o.hours === lookbackHours) || LOOKBACK_OPTIONS[0],
-		[lookbackHours]
-	);
-
-	// Use referenceTime as the end of our window, or current time if not provided
-	const endTime = referenceTime || Date.now();
-
-	// Calculate time range based on lookback setting
-	const { startTime, msPerBucket, bucketCount } = useMemo(() => {
-		if (lookbackHours === null) {
-			// All time: find earliest entry
-			const earliest =
-				entries.length > 0
-					? Math.min(...entries.map((e) => e.timestamp))
-					: endTime - 24 * 60 * 60 * 1000;
-			const totalMs = endTime - earliest;
-			const count = lookbackConfig.bucketCount;
-			return {
-				startTime: earliest,
-				msPerBucket: totalMs / count,
-				bucketCount: count,
-			};
-		} else {
-			const totalMs = lookbackHours * 60 * 60 * 1000;
-			return {
-				startTime: endTime - totalMs,
-				msPerBucket: totalMs / lookbackConfig.bucketCount,
-				bucketCount: lookbackConfig.bucketCount,
-			};
-		}
-	}, [entries, endTime, lookbackHours, lookbackConfig.bucketCount]);
-
-	// Group entries into buckets
-	const bucketData = useMemo(() => {
-		const buckets: { auto: number; user: number }[] = Array.from({ length: bucketCount }, () => ({
-			auto: 0,
-			user: 0,
-		}));
-
-		entries.forEach((entry) => {
-			if (entry.timestamp >= startTime && entry.timestamp <= endTime) {
-				const bucketIndex = Math.min(
-					bucketCount - 1,
-					Math.floor((entry.timestamp - startTime) / msPerBucket)
-				);
-				if (bucketIndex >= 0 && bucketIndex < bucketCount) {
-					if (entry.type === 'AUTO') {
-						buckets[bucketIndex].auto++;
-					} else if (entry.type === 'USER') {
-						buckets[bucketIndex].user++;
-					}
-				}
-			}
-		});
-
-		return buckets;
-	}, [entries, startTime, endTime, msPerBucket, bucketCount]);
-
-	// Find max value for scaling
-	const maxValue = useMemo(() => {
-		return Math.max(1, ...bucketData.map((h) => h.auto + h.user));
-	}, [bucketData]);
-
-	// Total counts for summary tooltip
-	const totalAuto = useMemo(() => bucketData.reduce((sum, h) => sum + h.auto, 0), [bucketData]);
-	const totalUser = useMemo(() => bucketData.reduce((sum, h) => sum + h.user, 0), [bucketData]);
-
-	// Get time range label for tooltip
-	const getTimeRangeLabel = (index: number) => {
-		const bucketStart = new Date(startTime + index * msPerBucket);
-		const bucketEnd = new Date(startTime + (index + 1) * msPerBucket);
-
-		// Format based on lookback period
-		if (lookbackHours !== null && lookbackHours <= 72) {
-			// For short periods, show time of day
-			const formatHour = (date: Date) => {
-				const hour = date.getHours();
-				const ampm = hour >= 12 ? 'PM' : 'AM';
-				const hour12 = hour % 12 || 12;
-				return `${hour12}${ampm}`;
-			};
-			return `${formatHour(bucketStart)} - ${formatHour(bucketEnd)}`;
-		} else {
-			// For longer periods, show dates
-			const formatDate = (date: Date) => {
-				return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-			};
-			if (formatDate(bucketStart) === formatDate(bucketEnd)) {
-				return formatDate(bucketStart);
-			}
-			return `${formatDate(bucketStart)} - ${formatDate(bucketEnd)}`;
-		}
-	};
-
-	// Get bucket time range as timestamps for click handling
-	const getBucketTimeRange = (index: number): { start: number; end: number } => {
-		return {
-			start: startTime + index * msPerBucket,
-			end: startTime + (index + 1) * msPerBucket,
-		};
-	};
-
-	// Handle bar click
-	const handleBarClick = (index: number) => {
-		const total = bucketData[index].auto + bucketData[index].user;
-		if (total > 0 && onBarClick) {
-			const { start, end } = getBucketTimeRange(index);
-			onBarClick(start, end);
-		}
-	};
-
-	// Handle right-click context menu
-	const handleContextMenu = (e: React.MouseEvent) => {
-		e.preventDefault();
-		setContextMenu({ x: e.clientX, y: e.clientY });
-	};
-
-	// Close context menu when clicking elsewhere
-	useEffect(() => {
-		const handleClick = () => setContextMenu(null);
-		if (contextMenu) {
-			document.addEventListener('click', handleClick);
-			return () => document.removeEventListener('click', handleClick);
-		}
-	}, [contextMenu]);
-
-	// Format the reference time for display (shows what time point we're viewing)
-	const formatReferenceTime = () => {
-		const now = Date.now();
-		const diffMs = now - endTime;
-		const diffMins = Math.floor(diffMs / 60000);
-		const diffHours = Math.floor(diffMins / 60);
-
-		if (diffMins < 1) return 'Now';
-		if (diffMins < 60) return `${diffMins}m ago`;
-		if (diffHours < 24) return `${diffHours}h ago`;
-		return new Date(endTime).toLocaleDateString([], { month: 'short', day: 'numeric' });
-	};
-
-	// Check if we're viewing historical data (not "now")
-	const isHistorical = referenceTime && Date.now() - referenceTime > 60000;
-
-	// Generate labels for the x-axis
-	const getAxisLabels = () => {
-		if (lookbackHours === null) {
-			// All time - show start and end dates
-			return [
-				{
-					label: new Date(startTime).toLocaleDateString([], { month: 'short', day: 'numeric' }),
-					index: 0,
-				},
-				{ label: 'Now', index: bucketCount - 1 },
-			];
-		} else if (lookbackHours <= 24) {
-			return [
-				{ label: `${lookbackHours}h`, index: 0 },
-				{ label: `${Math.floor((lookbackHours * 2) / 3)}h`, index: Math.floor(bucketCount / 3) },
-				{ label: `${Math.floor(lookbackHours / 3)}h`, index: Math.floor((bucketCount * 2) / 3) },
-				{ label: '0h', index: bucketCount - 1 },
-			];
-		} else if (lookbackHours <= 168) {
-			// Up to 1 week - show days
-			const days = Math.floor(lookbackHours / 24);
-			return [
-				{ label: `${days}d`, index: 0 },
-				{ label: `${Math.floor(days / 2)}d`, index: Math.floor(bucketCount / 2) },
-				{ label: 'Now', index: bucketCount - 1 },
-			];
-		} else {
-			// Longer periods - show start/end
-			const startLabel = new Date(startTime).toLocaleDateString([], {
-				month: 'short',
-				day: 'numeric',
-			});
-			return [
-				{ label: startLabel, index: 0 },
-				{ label: 'Now', index: bucketCount - 1 },
-			];
-		}
-	};
-
-	const axisLabels = getAxisLabels();
-
-	return (
-		<div
-			ref={graphRef}
-			className="flex-1 min-w-0 flex flex-col relative mt-0.5"
-			title={
-				hoveredIndex === null
-					? `${isHistorical ? `Viewing: ${formatReferenceTime()} • ` : ''}${lookbackConfig.label}: ${totalAuto} auto, ${totalUser} user (right-click to change)`
-					: undefined
-			}
-			onContextMenu={handleContextMenu}
-		>
-			{/* Context menu for lookback options */}
-			{contextMenu && (
-				<div
-					className="fixed z-50 py-1 rounded border shadow-lg"
-					style={{
-						left: contextMenu.x,
-						top: contextMenu.y,
-						backgroundColor: theme.colors.bgSidebar,
-						borderColor: theme.colors.border,
-						minWidth: '120px',
-					}}
-				>
-					<div
-						className="px-3 py-1 text-[10px] font-bold uppercase"
-						style={{ color: theme.colors.textDim }}
-					>
-						Lookback Period
-					</div>
-					{LOOKBACK_OPTIONS.map((option) => (
-						<button
-							key={option.label}
-							className="w-full px-3 py-1.5 text-left text-xs hover:bg-white/10 transition-colors flex items-center justify-between"
-							style={{
-								color: option.hours === lookbackHours ? theme.colors.accent : theme.colors.textMain,
-							}}
-							onClick={() => {
-								onLookbackChange(option.hours);
-								setContextMenu(null);
-							}}
-						>
-							{option.label}
-							{option.hours === lookbackHours && (
-								<Check className="w-3 h-3" style={{ color: theme.colors.accent }} />
-							)}
-						</button>
-					))}
-				</div>
-			)}
-
-			{/* Hover tooltip - positioned below the graph */}
-			{hoveredIndex !== null && (
-				<div
-					className="absolute top-full mt-1 px-2 py-1.5 rounded text-[10px] font-mono whitespace-nowrap z-20 pointer-events-none"
-					style={{
-						backgroundColor: theme.colors.bgSidebar,
-						border: `1px solid ${theme.colors.border}`,
-						color: theme.colors.textMain,
-						left: `${(hoveredIndex / (bucketCount - 1)) * 100}%`,
-						transform:
-							hoveredIndex < bucketCount * 0.17
-								? 'translateX(0)'
-								: hoveredIndex > bucketCount * 0.83
-									? 'translateX(-100%)'
-									: 'translateX(-50%)',
-					}}
-				>
-					<div className="font-bold mb-1" style={{ color: theme.colors.textMain }}>
-						{getTimeRangeLabel(hoveredIndex)}
-						{isHistorical && (
-							<span className="ml-2 font-normal" style={{ color: theme.colors.accent }}>
-								{formatReferenceTime()}
-							</span>
-						)}
-					</div>
-					<div className="flex flex-col gap-0.5">
-						<div className="flex items-center justify-between gap-3">
-							<span style={{ color: theme.colors.warning }}>Auto</span>
-							<span className="font-bold" style={{ color: theme.colors.warning }}>
-								{bucketData[hoveredIndex].auto}
-							</span>
-						</div>
-						<div className="flex items-center justify-between gap-3">
-							<span style={{ color: theme.colors.accent }}>User</span>
-							<span className="font-bold" style={{ color: theme.colors.accent }}>
-								{bucketData[hoveredIndex].user}
-							</span>
-						</div>
-					</div>
-				</div>
-			)}
-
-			{/* Graph container with border */}
-			<div
-				className="flex items-end gap-px h-6 rounded border px-1 pt-1"
-				style={{ borderColor: theme.colors.border }}
-			>
-				{bucketData.map((bucket, index) => {
-					const total = bucket.auto + bucket.user;
-					const heightPercent = total > 0 ? (total / maxValue) * 100 : 0;
-					const autoPercent = total > 0 ? (bucket.auto / total) * 100 : 0;
-					const userPercent = total > 0 ? (bucket.user / total) * 100 : 0;
-					const isHovered = hoveredIndex === index;
-
-					return (
-						<div
-							key={index}
-							className="flex-1 min-w-0 flex flex-col justify-end rounded-t-sm overflow-visible cursor-pointer"
-							style={{
-								height: '100%',
-								opacity: total > 0 ? 1 : 0.15,
-								transform: isHovered ? 'scaleX(1.5)' : 'scaleX(1)',
-								zIndex: isHovered ? 10 : 1,
-								transition: 'transform 0.1s ease-out',
-								cursor: total > 0 ? 'pointer' : 'default',
-							}}
-							onMouseEnter={() => setHoveredIndex(index)}
-							onMouseLeave={() => setHoveredIndex(null)}
-							onClick={() => handleBarClick(index)}
-						>
-							<div
-								className="w-full rounded-t-sm overflow-hidden flex flex-col justify-end"
-								style={{
-									height: `${Math.max(heightPercent, total > 0 ? 15 : 8)}%`,
-									minHeight: total > 0 ? '3px' : '1px',
-								}}
-							>
-								{/* Auto portion (bottom) - warning color */}
-								{bucket.auto > 0 && (
-									<div
-										style={{
-											height: `${autoPercent}%`,
-											backgroundColor: theme.colors.warning,
-											minHeight: '1px',
-										}}
-									/>
-								)}
-								{/* User portion (top) - accent color */}
-								{bucket.user > 0 && (
-									<div
-										style={{
-											height: `${userPercent}%`,
-											backgroundColor: theme.colors.accent,
-											minHeight: '1px',
-										}}
-									/>
-								)}
-								{/* Empty bar placeholder */}
-								{total === 0 && (
-									<div
-										style={{
-											height: '100%',
-											backgroundColor: theme.colors.border,
-										}}
-									/>
-								)}
-							</div>
-						</div>
-					);
-				})}
-			</div>
-			{/* Axis labels below */}
-			<div className="relative h-3 mt-0.5">
-				{axisLabels.map(({ label, index }) => (
-					<span
-						key={`${label}-${index}`}
-						className="absolute text-[8px] font-mono"
-						style={{
-							color: theme.colors.textDim,
-							left:
-								index === 0
-									? '0'
-									: index === bucketCount - 1
-										? 'auto'
-										: `${(index / (bucketCount - 1)) * 100}%`,
-							right: index === bucketCount - 1 ? '0' : 'auto',
-							transform: index > 0 && index < bucketCount - 1 ? 'translateX(-50%)' : 'none',
-						}}
-					>
-						{label}
-					</span>
-				))}
-			</div>
-		</div>
-	);
-};
+import { useHistoryPagination } from '../hooks/history/useHistoryPagination';
+import type { PaginatedPage } from '../hooks/history/useHistoryPagination';
+import {
+	ActivityGraph,
+	HistoryEntryItem,
+	HistoryFilterToggle,
+	HostSourceFilter,
+	LOCAL_HOST_KEY,
+	ESTIMATED_ROW_HEIGHT,
+	estimateHistoryRowHeight,
+	LOOKBACK_OPTIONS,
+	HISTORY_PANEL_FILTERS_KEY,
+	historyPanelFilterKeyForAgent,
+	resolveInitialHistoryFilters,
+	savePersistedHistoryFilters,
+} from './History';
+import type { GraphBucket } from './History/ActivityGraph';
+import { useUIStore } from '../stores/uiStore';
+import { useSettingsStore } from '../stores/settingsStore';
+import { formatShortcutKeys } from '../utils/shortcutFormatter';
+import { buildSharedHistoryContext } from '../utils/sessionHelpers';
+import { logger } from '../utils/logger';
+import { RIGHT_PANEL_COMPACT_THRESHOLD } from '../constants/rightPanel';
 
 interface HistoryPanelProps {
 	session: Session;
 	theme: Theme;
 	onJumpToAgentSession?: (agentSessionId: string) => void;
 	onResumeSession?: (agentSessionId: string) => void;
-	onOpenSessionAsTab?: (agentSessionId: string) => void;
+	onOpenSessionAsTab?: (agentSessionId: string, projectPath?: string) => void;
 	onOpenAboutModal?: () => void; // For opening About/achievements panel from history entries
 	// File linking props for history detail modal
-	fileTree?: any[];
+	fileTree?: FileNode[];
 	onFileClick?: (path: string) => void;
 }
 
@@ -463,260 +55,25 @@ export interface HistoryPanelHandle {
 	refreshHistory: () => void;
 }
 
-// Constants for history pagination
-const MAX_HISTORY_IN_MEMORY = 500; // Maximum entries to keep in memory
-// Note: With virtualization, display count is managed by the virtualizer
-const _INITIAL_DISPLAY_COUNT = 50; // Kept for reference, prefixed to satisfy linter
-
-// Estimated row heights for virtualization
-// Entry breakdown: p-3 (24px padding) + header (~24px) + mb-2 (8px) + summary (~48px for 3 lines)
-// Footer adds: mt-2 pt-2 border-t (~20px)
-const ESTIMATED_ROW_HEIGHT = 124; // Height for entry with footer
-const ESTIMATED_ROW_HEIGHT_SIMPLE = 104; // Height for entry without footer
-
 // Module-level storage for scroll positions (persists across session switches)
 const scrollPositionCache = new Map<string, number>();
 
-// ============================================================================
-// HistoryEntryItem - Memoized component for individual history entries
-// ============================================================================
+/** Page size for the entry list. Matches UnifiedHistoryTab. */
+const PAGE_SIZE = 100;
 
-interface HistoryEntryItemProps {
-	entry: HistoryEntry;
-	index: number;
-	isSelected: boolean;
-	theme: Theme;
-	onOpenDetailModal: (entry: HistoryEntry, index: number) => void;
-	onOpenSessionAsTab?: (agentSessionId: string) => void;
-	onOpenAboutModal?: () => void;
+/** Distance from bottom (px) at which to trigger loading the next page. */
+const SCROLL_LOAD_THRESHOLD = 500;
+
+/**
+ * Resolve the bucket count for a given lookback selection. The bucket
+ * counts come from `LOOKBACK_OPTIONS` so each window gets an appropriate
+ * resolution (e.g. 24 buckets for "24 hours" and "All time", 28 for "1
+ * week", etc.).
+ */
+function bucketCountForLookback(hours: number | null): number {
+	const config = LOOKBACK_OPTIONS.find((o) => o.hours === hours);
+	return config?.bucketCount ?? 24;
 }
-
-const HistoryEntryItem = memo(function HistoryEntryItem({
-	entry,
-	index,
-	isSelected,
-	theme,
-	onOpenDetailModal,
-	onOpenSessionAsTab,
-	onOpenAboutModal,
-}: HistoryEntryItemProps) {
-	// Get pill color based on type
-	const getPillColor = (type: HistoryEntryType) => {
-		switch (type) {
-			case 'AUTO':
-				return {
-					bg: theme.colors.warning + '20',
-					text: theme.colors.warning,
-					border: theme.colors.warning + '40',
-				};
-			case 'USER':
-				return {
-					bg: theme.colors.accent + '20',
-					text: theme.colors.accent,
-					border: theme.colors.accent + '40',
-				};
-			default:
-				return {
-					bg: theme.colors.bgActivity,
-					text: theme.colors.textDim,
-					border: theme.colors.border,
-				};
-		}
-	};
-
-	// Get icon for entry type
-	const getEntryIcon = (type: HistoryEntryType) => {
-		switch (type) {
-			case 'AUTO':
-				return Bot;
-			case 'USER':
-				return User;
-			default:
-				return Bot;
-		}
-	};
-
-	// Format timestamp
-	const formatTime = (timestamp: number) => {
-		const date = new Date(timestamp);
-		const now = new Date();
-		const isToday = date.toDateString() === now.toDateString();
-
-		if (isToday) {
-			return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-		} else {
-			return (
-				date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
-				' ' +
-				date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-			);
-		}
-	};
-
-	const colors = getPillColor(entry.type);
-	const Icon = getEntryIcon(entry.type);
-
-	return (
-		<div
-			onClick={() => onOpenDetailModal(entry, index)}
-			className="p-3 rounded border transition-colors cursor-pointer hover:bg-white/5"
-			style={{
-				borderColor: isSelected ? theme.colors.accent : theme.colors.border,
-				backgroundColor: isSelected ? theme.colors.accent + '10' : 'transparent',
-				outline: isSelected ? `2px solid ${theme.colors.accent}` : 'none',
-				outlineOffset: '1px',
-			}}
-		>
-			{/* Header Row */}
-			<div className="flex items-center justify-between mb-2 gap-2">
-				<div className="flex items-center gap-2 min-w-0 flex-1">
-					{/* Success/Failure Indicator for AUTO entries */}
-					{entry.type === 'AUTO' && entry.success !== undefined && (
-						<span
-							className="flex items-center justify-center w-5 h-5 rounded-full flex-shrink-0"
-							style={{
-								backgroundColor: entry.success
-									? entry.validated
-										? theme.colors.success
-										: theme.colors.success + '20'
-									: theme.colors.error + '20',
-								border: `1px solid ${
-									entry.success
-										? entry.validated
-											? theme.colors.success
-											: theme.colors.success + '40'
-										: theme.colors.error + '40'
-								}`,
-							}}
-							title={
-								entry.success
-									? entry.validated
-										? 'Task completed successfully and human-validated'
-										: 'Task completed successfully'
-									: 'Task failed'
-							}
-						>
-							{entry.success ? (
-								entry.validated ? (
-									<DoubleCheck className="w-3 h-3" style={{ color: '#ffffff' }} />
-								) : (
-									<Check className="w-3 h-3" style={{ color: theme.colors.success }} />
-								)
-							) : (
-								<X className="w-3 h-3" style={{ color: theme.colors.error }} />
-							)}
-						</span>
-					)}
-
-					{/* Type Pill */}
-					<span
-						className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase flex-shrink-0"
-						style={{
-							backgroundColor: colors.bg,
-							color: colors.text,
-							border: `1px solid ${colors.border}`,
-						}}
-					>
-						<Icon className="w-2.5 h-2.5" />
-						{entry.type}
-					</span>
-
-					{/* Session Name or ID Octet (clickable) - opens session as new tab */}
-					{entry.agentSessionId && (
-						<button
-							onClick={(e) => {
-								e.stopPropagation();
-								onOpenSessionAsTab?.(entry.agentSessionId!);
-							}}
-							className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold transition-colors hover:opacity-80 min-w-0 max-w-[200px] ${entry.sessionName ? '' : 'font-mono uppercase'}`}
-							style={{
-								backgroundColor: theme.colors.accent + '20',
-								color: theme.colors.accent,
-								border: `1px solid ${theme.colors.accent}40`,
-							}}
-							title={entry.sessionName || entry.agentSessionId}
-						>
-							<span className="truncate">
-								{entry.sessionName || entry.agentSessionId.split('-')[0].toUpperCase()}
-							</span>
-							<ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
-						</button>
-					)}
-				</div>
-
-				{/* Timestamp */}
-				<span className="text-[10px] flex-shrink-0" style={{ color: theme.colors.textDim }}>
-					{formatTime(entry.timestamp)}
-				</span>
-			</div>
-
-			{/* Summary - 3 lines max, strip markdown for list view */}
-			<p
-				className="text-xs leading-relaxed overflow-hidden"
-				style={{
-					color: theme.colors.textMain,
-					display: '-webkit-box',
-					WebkitLineClamp: 3,
-					WebkitBoxOrient: 'vertical' as const,
-				}}
-			>
-				{entry.summary ? stripMarkdown(entry.summary) : 'No summary available'}
-			</p>
-
-			{/* Footer Row - Time, Cost, and Achievement Action */}
-			{(entry.elapsedTimeMs !== undefined ||
-				(entry.usageStats && entry.usageStats.totalCostUsd > 0) ||
-				entry.achievementAction) && (
-				<div
-					className="flex items-center gap-3 mt-2 pt-2 border-t"
-					style={{ borderColor: theme.colors.border }}
-				>
-					{/* Elapsed Time */}
-					{entry.elapsedTimeMs !== undefined && (
-						<div className="flex items-center gap-1">
-							<Clock className="w-3 h-3" style={{ color: theme.colors.textDim }} />
-							<span className="text-[10px] font-mono" style={{ color: theme.colors.textDim }}>
-								{formatElapsedTime(entry.elapsedTimeMs)}
-							</span>
-						</div>
-					)}
-					{/* Cost */}
-					{entry.usageStats && entry.usageStats.totalCostUsd > 0 && (
-						<span
-							className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full"
-							style={{
-								backgroundColor: theme.colors.success + '15',
-								color: theme.colors.success,
-								border: `1px solid ${theme.colors.success}30`,
-							}}
-						>
-							${entry.usageStats.totalCostUsd.toFixed(2)}
-						</span>
-					)}
-					{/* Achievement Action Button */}
-					{entry.achievementAction === 'openAbout' && onOpenAboutModal && (
-						<button
-							onClick={(e) => {
-								e.stopPropagation();
-								onOpenAboutModal();
-							}}
-							className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold transition-colors hover:opacity-80 ml-auto"
-							style={{
-								backgroundColor: theme.colors.warning + '20',
-								color: theme.colors.warning,
-								border: `1px solid ${theme.colors.warning}40`,
-							}}
-							title="View achievements"
-						>
-							<Award className="w-3 h-3" />
-							View Achievements
-						</button>
-					)}
-				</div>
-			)}
-		</div>
-	);
-});
 
 export const HistoryPanel = React.memo(
 	forwardRef<HistoryPanelHandle, HistoryPanelProps>(function HistoryPanel(
@@ -732,66 +89,198 @@ export const HistoryPanel = React.memo(
 		},
 		ref
 	) {
-		const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
-		const [activeFilters, setActiveFilters] = useState<Set<HistoryEntryType>>(
-			new Set(['AUTO', 'USER'])
+		const maestroCueEnabled = useSettingsStore((s) => s.encoreFeatures.maestroCue);
+		const shortcuts = useSettingsStore((s) => s.shortcuts);
+		const rightPanelWidth = useSettingsStore((s) => s.rightPanelWidth);
+		const compact = rightPanelWidth < RIGHT_PANEL_COMPACT_THRESHOLD;
+		const visibleTypes: HistoryEntryType[] = maestroCueEnabled
+			? ['USER', 'AUTO', 'CUE']
+			: ['USER', 'AUTO'];
+
+		// History source-type filters (USER/AUTO/CUE) are persisted per-agent so
+		// each agent keeps its own selection across switches and app restarts.
+		// The legacy global key is passed as a fallback so an existing selection
+		// carries over the first time an agent is resolved.
+		const [activeFilters, setActiveFilters] = useState<Set<HistoryEntryType>>(() =>
+			resolveInitialHistoryFilters(
+				historyPanelFilterKeyForAgent(session.id),
+				maestroCueEnabled,
+				HISTORY_PANEL_FILTERS_KEY
+			)
 		);
-		const [isLoading, setIsLoading] = useState(true);
+		// Tracks which agent `activeFilters` currently belongs to, so switching
+		// agents reloads that agent's stored selection (and the mount run is
+		// skipped, since useState already initialized from the right key).
+		const activeFiltersAgentIdRef = useRef(session.id);
 		const [detailModalEntry, setDetailModalEntry] = useState<HistoryEntry | null>(null);
 		const [searchFilter, setSearchFilter] = useState('');
-		const [searchFilterOpen, setSearchFilterOpen] = useState(false);
-		const [graphReferenceTime, setGraphReferenceTime] = useState<number | undefined>(undefined);
+		// Source/host filter — null means "All Sources". When set, both the
+		// entry list and the activity graph narrow to entries from that host.
+		const [selectedHost, setSelectedHost] = useState<string | null>(null);
+		const searchFilterOpen = useUIStore((s) => s.historySearchFilterOpen);
+		const setSearchFilterOpen = useUIStore((s) => s.setHistorySearchFilterOpen);
+		const [graphViewportRange, setGraphViewportRange] = useState<
+			{ start: number; end: number } | undefined
+		>(undefined);
 		const [helpModalOpen, setHelpModalOpen] = useState(false);
-		const [graphLookbackHours, setGraphLookbackHours] = useState<number | null>(null); // default to "All time"
+		// Lookback selector — drives both the paginated entry list (server-side)
+		// and the graph window. The graph data is server-cached per lookback,
+		// so flipping between windows is cheap once each has been computed.
+		const [graphLookbackHours, setGraphLookbackHours] = useState<number | null>(null);
+		// Server-cached graph buckets for the current lookback.
+		const [graphBuckets, setGraphBuckets] = useState<GraphBucket[] | undefined>(undefined);
+		const [graphRange, setGraphRange] = useState<{ start: number; end: number } | undefined>(
+			undefined
+		);
+		// Per-host counts from the server-side aggregate. Lookback-aware:
+		// flipping the lookback selector triggers a refetch, which updates
+		// these. Used by the source picker so the parenthesized counts next
+		// to each host name reflect the current window.
+		const [graphHostCounts, setGraphHostCounts] = useState<Record<string, number> | undefined>(
+			undefined
+		);
+		const graphRefreshScheduled = useRef(false);
 
 		const listRef = useRef<HTMLDivElement>(null);
 		const searchInputRef = useRef<HTMLInputElement>(null);
 		const hasRestoredScroll = useRef<boolean>(false);
 
-		// Load history entries function - reusable for initial load and refresh
-		// When isRefresh=true, preserve scroll position
-		const loadHistory = useCallback(
-			async (isRefresh = false) => {
-				// Save current scroll position before loading
-				const currentScrollTop = listRef.current?.scrollTop ?? 0;
+		// Reset search filter state when unmounting (e.g., tab switch) to prevent stale store state
+		useEffect(() => {
+			return () => setSearchFilterOpen(false);
+		}, [setSearchFilterOpen]);
 
-				if (!isRefresh) {
-					setIsLoading(true);
-				}
-
-				try {
-					// Only show entries from this session or legacy entries without sessionId
-					const entries = await window.maestro.history.getAll(session.cwd, session.id);
-					// Ensure entries is an array, limit to MAX_HISTORY_IN_MEMORY
-					const validEntries = Array.isArray(entries) ? entries : [];
-					setHistoryEntries(validEntries.slice(0, MAX_HISTORY_IN_MEMORY));
-
-					if (isRefresh) {
-						// On refresh, restore scroll position
-						// Use RAF to ensure DOM has updated before restoring scroll
-						requestAnimationFrame(() => {
-							if (listRef.current) {
-								listRef.current.scrollTop = currentScrollTop;
-							}
-						});
-					}
-					// Note: With virtualization, display count is managed automatically
-				} catch (error) {
-					console.error('Failed to load history:', error);
-					setHistoryEntries([]);
-				} finally {
-					if (!isRefresh) {
-						setIsLoading(false);
-					}
-				}
+		// Page loader for the shared pagination hook. Memoized on
+		// `(session.id, session.cwd, graphLookbackHours)` so any of those
+		// changes resets the window via the hook's loader-identity reset.
+		// Stable shared-context snapshot — only changes when the relevant
+		// SSH bits or cwd change. Keeps `loadPage` identity stable across
+		// unrelated session field updates so the pagination hook doesn't
+		// reset on every render.
+		const sharedContextSnapshot = useMemo(
+			() => buildSharedHistoryContext(session),
+			[
+				session.id,
+				session.cwd,
+				session.sessionSshRemoteConfig?.enabled,
+				session.sessionSshRemoteConfig?.remoteId,
+				session.sessionSshRemoteConfig?.syncHistory,
+			]
+		);
+		// `projectPath` is what lets the handler merge a non-SSH session's
+		// `<projectPath>/.maestro/history/*.jsonl` files (entries written
+		// by other Maestro instances pointed at the same project — typically
+		// a peer SSH'd into this machine, or vice-versa). Without it, a
+		// machine running the agent locally never sees foreign-host entries
+		// even when the JSONL files are sitting right there on disk.
+		const projectPathForHistory = session.projectRoot || session.cwd || undefined;
+		const loadPage = useCallback(
+			async (offset: number, limit: number): Promise<PaginatedPage<HistoryEntry>> => {
+				const result = await window.maestro.history.getAllPaginated({
+					sessionId: session.id,
+					projectPath: projectPathForHistory,
+					sharedContext: sharedContextSnapshot,
+					lookbackHours: graphLookbackHours,
+					// Type filter runs server-side so the window holds the newest
+					// N entries of the selected types. Toggling a filter changes
+					// this callback's identity, which the pagination hook treats
+					// as a window reset (re-fetches page 0). Without it, a
+					// Cue-heavy agent fills the window with CUE and toggling CUE
+					// off shows nothing despite USER/AUTO history existing.
+					types: [...activeFilters],
+					// Host filter also runs server-side, for the same reason as
+					// types: the picker counts come from the full-source graph
+					// aggregate, so a host whose entries fall outside the loaded
+					// page would show "(120)" yet render nothing if filtered only
+					// client-side. Changing the host changes this callback's
+					// identity, resetting the window to the newest N of that host.
+					hostKey: selectedHost,
+					pagination: { offset, limit },
+				});
+				return {
+					entries: result.entries as HistoryEntry[],
+					hasMore: result.hasMore,
+					total: result.total,
+				};
 			},
-			[session.cwd, session.id]
+			[
+				session.id,
+				projectPathForHistory,
+				sharedContextSnapshot,
+				graphLookbackHours,
+				activeFilters,
+				selectedHost,
+			]
 		);
 
-		// Load history entries on mount and when session changes
+		const getEntryId = useCallback((entry: HistoryEntry) => entry.id, []);
+
+		const {
+			entries: historyEntries,
+			totalCount,
+			isLoading,
+			isLoadingMore,
+			isJumping,
+			loadMoreOlder,
+			jumpToOffset,
+			jumpToTop,
+			prependLiveEntry,
+			mutateEntries,
+		} = useHistoryPagination<HistoryEntry>({
+			pageSize: PAGE_SIZE,
+			loadPage,
+			getEntryId,
+		});
+
+		// Fetch graph aggregate for the current lookback. Cached server-side
+		// per (sessionId, bucketCount, lookback, source mtime+size).
+		const refreshGraphData = useCallback(async () => {
+			try {
+				const data = await window.maestro.history.getGraphData(
+					session.id,
+					bucketCountForLookback(graphLookbackHours),
+					graphLookbackHours,
+					buildSharedHistoryContext(session),
+					projectPathForHistory
+				);
+				setGraphBuckets(data.buckets);
+				setGraphRange({ start: data.earliestTimestamp, end: data.latestTimestamp });
+				setGraphHostCounts(data.hostCounts);
+			} catch (error) {
+				logger.error('Failed to load history graph data:', undefined, error);
+				setGraphBuckets(undefined);
+				setGraphRange(undefined);
+				setGraphHostCounts(undefined);
+			}
+		}, [session.id, session, graphLookbackHours, projectPathForHistory]);
+
 		useEffect(() => {
-			loadHistory();
-		}, [loadHistory]);
+			refreshGraphData();
+		}, [refreshGraphData]);
+
+		// Subscribe to real-time history entry additions. Entries are only
+		// inserted when the loaded window is at the top — when jumped, they're
+		// silently dropped (the next pagination call will pick them up).
+		useEffect(() => {
+			const cleanup = window.maestro.directorNotes.onHistoryEntryAdded((entry, sourceSessionId) => {
+				if (sourceSessionId !== session.id) return;
+
+				const inserted = prependLiveEntry(entry);
+
+				// Coalesce graph refreshes — a burst of streamed entries
+				// shouldn't trigger a refetch per entry. Only refresh when
+				// the entry actually landed in view.
+				if (inserted && !graphRefreshScheduled.current) {
+					graphRefreshScheduled.current = true;
+					requestAnimationFrame(() => {
+						graphRefreshScheduled.current = false;
+						refreshGraphData();
+					});
+				}
+			});
+
+			return cleanup;
+		}, [session.id, refreshGraphData, prependLiveEntry]);
 
 		// Load persisted graph lookback preference for this session
 		useEffect(() => {
@@ -816,6 +305,54 @@ export const HistoryPanel = React.memo(
 			[session.id]
 		);
 
+		// Sync activeFilters when the Cue Encore feature is toggled. Only a
+		// genuine off->on transition auto-enables the CUE filter (the feature
+		// just became available). We must NOT force CUE on at mount, otherwise
+		// a persisted "CUE deselected" choice would be clobbered on every open.
+		const prevCueEnabledRef = useRef(maestroCueEnabled);
+		useEffect(() => {
+			const wasEnabled = prevCueEnabledRef.current;
+			prevCueEnabledRef.current = maestroCueEnabled;
+			setActiveFilters((prev) => {
+				if (!maestroCueEnabled && prev.has('CUE')) {
+					const next = new Set(prev);
+					next.delete('CUE');
+					return next;
+				}
+				if (maestroCueEnabled && !wasEnabled && !prev.has('CUE')) {
+					return new Set([...prev, 'CUE']);
+				}
+				return prev;
+			});
+		}, [maestroCueEnabled]);
+
+		// Reload the persisted selection when switching agents. Guarded on the
+		// agent id so a Cue feature toggle (handled by the effect above) doesn't
+		// trigger a reload that would clobber the in-memory selection.
+		useEffect(() => {
+			if (activeFiltersAgentIdRef.current === session.id) return;
+			activeFiltersAgentIdRef.current = session.id;
+			setActiveFilters(
+				resolveInitialHistoryFilters(
+					historyPanelFilterKeyForAgent(session.id),
+					maestroCueEnabled,
+					HISTORY_PANEL_FILTERS_KEY
+				)
+			);
+		}, [session.id, maestroCueEnabled]);
+
+		// Persist the selection per-agent so it survives view switches and app
+		// restart. Keyed off the ref (not session.id) so it writes under the
+		// agent `activeFilters` actually belongs to: on an agent switch the
+		// reload effect above updates the ref and reloads before this fires,
+		// so we never write the previous agent's selection under the new key.
+		useEffect(() => {
+			savePersistedHistoryFilters(
+				historyPanelFilterKeyForAgent(activeFiltersAgentIdRef.current),
+				activeFilters
+			);
+		}, [activeFilters]);
+
 		// Toggle a filter
 		const toggleFilter = (type: HistoryEntryType) => {
 			setActiveFilters((prev) => {
@@ -829,29 +366,73 @@ export const HistoryPanel = React.memo(
 			});
 		};
 
-		// Filter entries based on active filters and search text
-		const allFilteredEntries = useMemo(
-			() =>
-				historyEntries.filter((entry) => {
-					if (!entry || !entry.type) return false;
-					if (!activeFilters.has(entry.type)) return false;
+		// Client-side filters applied to the loaded window. Lookback is
+		// now server-side (part of the page loader), so it doesn't appear
+		// here — entries arriving from the IPC are already inside the
+		// window. Type + search + host all stay client-side over loaded pages.
+		const allFilteredEntries = useMemo(() => {
+			return historyEntries.filter((entry) => {
+				if (!entry || !entry.type) return false;
+				if (!activeFilters.has(entry.type)) return false;
 
-					// Apply text search filter
-					if (searchFilter) {
-						const searchLower = searchFilter.toLowerCase();
-						const summaryMatch = entry.summary?.toLowerCase().includes(searchLower);
-						const responseMatch = entry.fullResponse?.toLowerCase().includes(searchLower);
-						// Search by session ID (full ID or short octet form)
-						const sessionIdMatch = entry.agentSessionId?.toLowerCase().includes(searchLower);
-						const sessionNameMatch = entry.sessionName?.toLowerCase().includes(searchLower);
-						if (!summaryMatch && !responseMatch && !sessionIdMatch && !sessionNameMatch)
-							return false;
-					}
+				if (selectedHost !== null) {
+					const entryHost = entry.hostname ?? LOCAL_HOST_KEY;
+					if (entryHost !== selectedHost) return false;
+				}
 
-					return true;
-				}),
-			[historyEntries, activeFilters, searchFilter]
-		);
+				if (searchFilter) {
+					const searchLower = searchFilter.toLowerCase();
+					const summaryMatch = entry.summary?.toLowerCase().includes(searchLower);
+					const responseMatch = entry.fullResponse?.toLowerCase().includes(searchLower);
+					const sessionIdMatch = entry.agentSessionId?.toLowerCase().includes(searchLower);
+					const sessionNameMatch = entry.sessionName?.toLowerCase().includes(searchLower);
+					const hostnameMatch = entry.hostname?.toLowerCase().includes(searchLower);
+					if (
+						!summaryMatch &&
+						!responseMatch &&
+						!sessionIdMatch &&
+						!sessionNameMatch &&
+						!hostnameMatch
+					)
+						return false;
+				}
+
+				return true;
+			});
+		}, [historyEntries, activeFilters, searchFilter, selectedHost]);
+
+		// Tally hosts. Prefers the server-side aggregate from `getGraphData`
+		// (already filtered by the active lookback window and covers the
+		// full source, not just the loaded pagination window) and falls
+		// back to client-side counting from the loaded window when the
+		// server response hasn't arrived yet. Sorted with `LOCAL_HOST_KEY`
+		// first, then remote hostnames alphabetically for stable display.
+		const hostCounts = useMemo(() => {
+			const raw = new Map<string, number>();
+			const serverEntries = graphHostCounts ? Object.entries(graphHostCounts) : [];
+			if (serverEntries.length > 0) {
+				for (const [k, v] of serverEntries) raw.set(k, v);
+			} else {
+				for (const entry of historyEntries) {
+					const key = entry?.hostname ?? LOCAL_HOST_KEY;
+					raw.set(key, (raw.get(key) ?? 0) + 1);
+				}
+			}
+			const sorted = new Map<string, number>();
+			if (raw.has(LOCAL_HOST_KEY)) sorted.set(LOCAL_HOST_KEY, raw.get(LOCAL_HOST_KEY)!);
+			for (const key of [...raw.keys()].filter((k) => k !== LOCAL_HOST_KEY).sort()) {
+				sorted.set(key, raw.get(key)!);
+			}
+			return sorted;
+		}, [graphHostCounts, historyEntries]);
+
+		// Clear the host filter if the selected host falls out of the
+		// loaded window (e.g. session switch, lookback narrowed).
+		useEffect(() => {
+			if (selectedHost !== null && !hostCounts.has(selectedHost)) {
+				setSelectedHost(null);
+			}
+		}, [hostCounts, selectedHost]);
 
 		// Note: With virtualization, we no longer need to slice entries
 		// The virtualizer handles rendering only visible items efficiently
@@ -862,17 +443,15 @@ export const HistoryPanel = React.memo(
 		// Virtualization Setup (must be before handlers that use it)
 		// ============================================================================
 
-		// Estimate row height based on entry content
+		// Estimate row height based on entry content. The estimate is the
+		// upper bound (assumes the line-clamp ceiling) so measureElement's
+		// correction only ever shrinks the row — preventing adjacent rows
+		// from overlapping in the gap between initial paint and ResizeObserver.
 		const estimateSize = useCallback(
 			(index: number) => {
 				const entry = allFilteredEntries[index];
 				if (!entry) return ESTIMATED_ROW_HEIGHT;
-				// Entries with footer (elapsed time, cost, or achievement) are taller
-				const hasFooter =
-					entry.elapsedTimeMs !== undefined ||
-					(entry.usageStats && entry.usageStats.totalCostUsd > 0) ||
-					entry.achievementAction;
-				return hasFooter ? ESTIMATED_ROW_HEIGHT : ESTIMATED_ROW_HEIGHT_SIMPLE;
+				return estimateHistoryRowHeight(entry);
 			},
 			[allFilteredEntries]
 		);
@@ -913,66 +492,78 @@ export const HistoryPanel = React.memo(
 			initialIndex: -1,
 		});
 
-		// Expose focus and refreshHistory methods to parent
-		// Note: Must be after useListNavigation since it uses selectedIndex/setSelectedIndex
+		// Expose focus and refreshHistory methods to parent. Refresh now
+		// goes through the hook's `jumpToTop` since the entry list is
+		// paginated — there's no full-table reload to preserve scroll for.
 		useImperativeHandle(
 			ref,
 			() => ({
 				focus: () => {
 					listRef.current?.focus();
-					// Select first item if none selected
 					if (selectedIndex < 0 && historyEntries.length > 0) {
 						setSelectedIndex(0);
 					}
 				},
 				refreshHistory: () => {
-					// Pass true to indicate this is a refresh, not initial load
-					// This preserves scroll position
-					loadHistory(true);
+					void jumpToTop();
 				},
 			}),
-			[selectedIndex, setSelectedIndex, historyEntries.length, loadHistory]
+			[selectedIndex, setSelectedIndex, historyEntries.length, jumpToTop]
 		);
 
-		// Update graph bar click handler to use virtualizer for scrolling
+		/**
+		 * Click-to-jump on the activity graph.
+		 *
+		 * Fast path: target bucket is in the loaded window → scroll to it.
+		 *
+		 * Slow path: ask the server for the offset of the first entry at
+		 * (or just before) the bucket's end, then `jumpToOffset` to load
+		 * a single page anchored at that target. No fill-in between —
+		 * memory stays bounded.
+		 */
 		const handleGraphBarClickVirtualized = useCallback(
-			(bucketStart: number, bucketEnd: number) => {
-				// Find entries within this time bucket (entries are sorted newest first)
-				const entriesInBucket = historyEntries.filter(
-					(entry) => entry.timestamp >= bucketStart && entry.timestamp < bucketEnd
-				);
+			async (bucketStart: number, bucketEnd: number) => {
+				const findIdx = (list: HistoryEntry[]) =>
+					list.findIndex((e) => e.timestamp >= bucketStart && e.timestamp < bucketEnd);
 
-				if (entriesInBucket.length === 0) return;
+				const idx = findIdx(allFilteredEntries);
+				if (idx >= 0) {
+					setSelectedIndex(idx);
+					virtualizer.scrollToIndex(idx, { align: 'center', behavior: 'smooth' });
+					return;
+				}
 
-				// Get the most recent entry in the bucket (first one since sorted by timestamp desc)
-				const targetEntry = entriesInBucket[0];
-
-				// Find its index in the filtered list
-				const indexInAllFiltered = allFilteredEntries.findIndex((e) => e.id === targetEntry.id);
-
-				if (indexInAllFiltered === -1) {
-					// Entry exists but is filtered out - try finding any entry from the bucket
-					const anyMatch = allFilteredEntries.findIndex(
-						(e) => e.timestamp >= bucketStart && e.timestamp < bucketEnd
+				try {
+					const targetOffset = await window.maestro.history.getOffsetForTimestamp(
+						session.id,
+						bucketEnd - 1,
+						graphLookbackHours,
+						[...activeFilters]
 					);
-					if (anyMatch === -1) return;
-
-					setSelectedIndex(anyMatch);
-					virtualizer.scrollToIndex(anyMatch, { align: 'center', behavior: 'smooth' });
-				} else {
-					setSelectedIndex(indexInAllFiltered);
-					virtualizer.scrollToIndex(indexInAllFiltered, { align: 'center', behavior: 'smooth' });
+					await jumpToOffset(targetOffset);
+					requestAnimationFrame(() => {
+						virtualizer.scrollToIndex(0, { align: 'start', behavior: 'auto' });
+					});
+				} catch (error) {
+					logger.error('Failed to jump to graph bucket:', undefined, error);
 				}
 			},
-			[historyEntries, allFilteredEntries, setSelectedIndex, virtualizer]
+			[
+				allFilteredEntries,
+				session.id,
+				graphLookbackHours,
+				activeFilters,
+				jumpToOffset,
+				setSelectedIndex,
+				virtualizer,
+			]
 		);
 
 		// PERF: Store scroll target ref for throttled handler
 		const scrollTargetRef = useRef<HTMLDivElement | null>(null);
 
-		// Handle scroll to update graph reference time
+		// Handle scroll: pagination + graph viewport indicator.
 		// PERF: Inner handler contains the actual logic
-		// Note: With virtualization, we no longer need to load more entries on scroll
 		const handleScrollInner = useCallback(() => {
 			const target = scrollTargetRef.current;
 			if (!target) return;
@@ -980,21 +571,40 @@ export const HistoryPanel = React.memo(
 			// Save scroll position to module-level cache (persists across session switches)
 			scrollPositionCache.set(session.id, target.scrollTop);
 
-			// Find the topmost visible entry to update the graph's reference time
-			// This creates the "sliding window" effect as you scroll through history
-			// With virtualization, we use the virtualizer's visible range
-			const visibleItems = virtualizer.getVirtualItems();
-			const firstVisibleIndex = visibleItems[0]?.index ?? 0;
-			const topmostVisibleEntry = allFilteredEntries[firstVisibleIndex];
-
-			// Update the graph reference time to the topmost visible entry's timestamp
-			// If at the very top (no scrolling), use undefined to show "now"
-			if (target.scrollTop < 10) {
-				setGraphReferenceTime(undefined);
-			} else if (topmostVisibleEntry) {
-				setGraphReferenceTime(topmostVisibleEntry.timestamp);
+			// Pagination: load next older page when near bottom. The hook
+			// guards against concurrent calls and no-ops when there's
+			// nothing more to load.
+			if (!isLoading) {
+				const nearBottom =
+					target.scrollHeight - target.scrollTop - target.clientHeight < SCROLL_LOAD_THRESHOLD;
+				if (nearBottom) {
+					void loadMoreOlder();
+				}
 			}
-		}, [session.id, allFilteredEntries, virtualizer]);
+
+			// Track which entries are visible to show a viewport indicator on the graph
+			const visibleItems = virtualizer.getVirtualItems();
+			if (visibleItems.length === 0) {
+				setGraphViewportRange(undefined);
+				return;
+			}
+
+			const firstVisibleIndex = visibleItems[0]?.index ?? 0;
+			const lastVisibleIndex = visibleItems[visibleItems.length - 1]?.index ?? 0;
+			const topEntry = allFilteredEntries[firstVisibleIndex];
+			const bottomEntry = allFilteredEntries[lastVisibleIndex];
+
+			if (target.scrollTop < 10 && lastVisibleIndex >= allFilteredEntries.length - 1) {
+				// All entries visible — no indicator needed
+				setGraphViewportRange(undefined);
+			} else if (topEntry && bottomEntry) {
+				// Entries are newest-first, so topEntry.timestamp > bottomEntry.timestamp
+				setGraphViewportRange({
+					start: bottomEntry.timestamp,
+					end: topEntry.timestamp,
+				});
+			}
+		}, [session.id, allFilteredEntries, virtualizer, isLoading, loadMoreOlder]);
 
 		// PERF: Throttle scroll handler to 4ms (~240fps) for smooth scrollbar
 		const throttledScrollHandler = useThrottledCallback(handleScrollInner, 4);
@@ -1029,15 +639,15 @@ export const HistoryPanel = React.memo(
 			hasRestoredScroll.current = false;
 		}, [session.id]);
 
-		// Reset selected index and graph reference time when filters change
+		// Reset selected index and viewport indicator when filters or lookback change
 		useEffect(() => {
 			setSelectedIndex(-1);
-			setGraphReferenceTime(undefined); // Reset to "now" when filters change
+			setGraphViewportRange(undefined); // Reset viewport indicator when filters change
 			// Scroll to top when filters change
 			if (listRef.current) {
 				listRef.current.scrollTop = 0;
 			}
-		}, [activeFilters, searchFilter, setSelectedIndex]);
+		}, [activeFilters, searchFilter, graphLookbackHours, setSelectedIndex]);
 
 		// Scroll selected item into view when selectedIndex changes (keyboard navigation)
 		useEffect(() => {
@@ -1049,12 +659,19 @@ export const HistoryPanel = React.memo(
 		// Keyboard navigation handler - combines hook handler with custom Escape/Cmd+F logic
 		const handleKeyDown = useCallback(
 			(e: React.KeyboardEvent) => {
-				// Open search filter with Cmd+F
-				if (e.key === 'f' && (e.metaKey || e.ctrlKey) && !searchFilterOpen) {
+				// Open (or re-focus) search filter with Cmd+F. When already open we
+				// still want to pull focus back to the input so the user can keep
+				// typing after using arrow keys to scroll the list.
+				if (e.key === 'f' && (e.metaKey || e.ctrlKey)) {
 					e.preventDefault();
-					setSearchFilterOpen(true);
-					// Focus the search input after state update
-					setTimeout(() => searchInputRef.current?.focus(), 0);
+					if (!searchFilterOpen) setSearchFilterOpen(true);
+					setTimeout(() => {
+						const input = searchInputRef.current;
+						if (!input) return;
+						input.focus();
+						const len = input.value.length;
+						input.setSelectionRange(len, len);
+					}, 0);
 					return;
 				}
 
@@ -1093,144 +710,151 @@ export const HistoryPanel = React.memo(
 				try {
 					const success = await window.maestro.history.delete(entryId, session.id);
 					if (success) {
-						// Remove from local state
-						setHistoryEntries((prev) => prev.filter((entry) => entry.id !== entryId));
-						// Reset selection if needed
+						mutateEntries((prev) => prev.filter((entry) => entry.id !== entryId));
 						setSelectedIndex(-1);
 					}
 				} catch (error) {
-					console.error('Failed to delete history entry:', error);
+					logger.error('Failed to delete history entry:', undefined, error);
 				}
 			},
-			[session.id, setSelectedIndex]
+			[session.id, setSelectedIndex, mutateEntries]
 		);
-
-		// Get pill color based on type (used by filter buttons in header)
-		const getPillColor = (type: HistoryEntryType) => {
-			switch (type) {
-				case 'AUTO':
-					return {
-						bg: theme.colors.warning + '20',
-						text: theme.colors.warning,
-						border: theme.colors.warning + '40',
-					};
-				case 'USER':
-					return {
-						bg: theme.colors.accent + '20',
-						text: theme.colors.accent,
-						border: theme.colors.accent + '40',
-					};
-				default:
-					return {
-						bg: theme.colors.bgActivity,
-						text: theme.colors.textDim,
-						border: theme.colors.border,
-					};
-			}
-		};
-
-		// Get icon for entry type (used by filter buttons in header)
-		const getEntryIcon = (type: HistoryEntryType) => {
-			switch (type) {
-				case 'AUTO':
-					return Bot;
-				case 'USER':
-					return User;
-				default:
-					return Bot;
-			}
-		};
 
 		return (
 			<div className="flex flex-col h-full">
 				{/* Filter Pills + Activity Graph + Help Button */}
-				<div className="flex items-start gap-3 mb-4 pt-2">
-					{/* Left-justified filter pills */}
-					<div className="flex gap-2 flex-shrink-0">
-						{(['AUTO', 'USER'] as HistoryEntryType[]).map((type) => {
-							const isActive = activeFilters.has(type);
-							const colors = getPillColor(type);
-							const Icon = getEntryIcon(type);
-
-							return (
-								<button
-									key={type}
-									onClick={() => toggleFilter(type)}
-									className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold uppercase transition-all ${
-										isActive ? 'opacity-100' : 'opacity-40'
-									}`}
+				<div className="flex flex-col gap-2 mb-4 pt-2">
+					{/* Search Filter — above buttons when open */}
+					{searchFilterOpen && (
+						<div>
+							<div className="relative">
+								<input
+									ref={searchInputRef}
+									autoFocus
+									type="text"
+									placeholder="Filter history..."
+									value={searchFilter}
+									onChange={(e) => setSearchFilter(e.target.value)}
+									onKeyDown={(e) => {
+										if (e.key === 'Escape') {
+											setSearchFilterOpen(false);
+											setSearchFilter('');
+											// Return focus to the list
+											listRef.current?.focus();
+										} else if (e.key === 'ArrowDown') {
+											e.preventDefault();
+											// Move focus to list and select first item
+											listRef.current?.focus();
+											if (filteredEntries.length > 0) {
+												setSelectedIndex(0);
+											}
+										}
+									}}
+									className="w-full pl-3 pr-14 py-2 rounded border bg-transparent outline-none text-sm"
+									style={{ borderColor: theme.colors.accent, color: theme.colors.textMain }}
+								/>
+								<div
+									className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded text-xs font-bold pointer-events-none"
 									style={{
-										backgroundColor: isActive ? colors.bg : 'transparent',
-										color: isActive ? colors.text : theme.colors.textDim,
-										border: `1px solid ${isActive ? colors.border : theme.colors.border}`,
+										backgroundColor: theme.colors.bgMain,
+										color: theme.colors.textDim,
 									}}
 								>
-									<Icon className="w-3 h-3" />
-									{type}
-								</button>
-							);
-						})}
-					</div>
+									ESC
+								</div>
+							</div>
+							{searchFilter && (
+								<div
+									className="text-[10px] mt-1 text-right"
+									style={{ color: theme.colors.textDim }}
+								>
+									{allFilteredEntries.length} result{allFilteredEntries.length !== 1 ? 's' : ''}
+								</div>
+							)}
+						</div>
+					)}
 
-					{/* 24-hour activity bar graph */}
-					<ActivityGraph
-						entries={historyEntries}
-						theme={theme}
-						referenceTime={graphReferenceTime}
-						onBarClick={handleGraphBarClickVirtualized}
-						lookbackHours={graphLookbackHours}
-						onLookbackChange={handleLookbackChange}
-					/>
-
-					{/* Help button */}
-					<button
-						onClick={() => setHelpModalOpen(true)}
-						className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded transition-colors hover:bg-white/10"
-						style={{
-							color: theme.colors.textDim,
-							border: `1px solid ${theme.colors.border}`,
-						}}
-						title="History panel help"
+					<div
+						className={`flex items-start gap-3${visibleTypes.length > 2 ? ' justify-center' : ''}`}
 					>
-						<HelpCircle className="w-3.5 h-3.5" />
-					</button>
-				</div>
-
-				{/* Search Filter */}
-				{searchFilterOpen && (
-					<div className="mb-3">
-						<input
-							ref={searchInputRef}
-							autoFocus
-							type="text"
-							placeholder="Filter history..."
-							value={searchFilter}
-							onChange={(e) => setSearchFilter(e.target.value)}
-							onKeyDown={(e) => {
-								if (e.key === 'Escape') {
-									setSearchFilterOpen(false);
-									setSearchFilter('');
-									// Return focus to the list
-									listRef.current?.focus();
-								} else if (e.key === 'ArrowDown') {
-									e.preventDefault();
-									// Move focus to list and select first item
-									listRef.current?.focus();
-									if (filteredEntries.length > 0) {
-										setSelectedIndex(0);
-									}
+						{/* Search button — left of filter pills */}
+						<button
+							onClick={() => {
+								if (searchFilterOpen) {
+									searchInputRef.current?.focus();
+								} else {
+									setSearchFilterOpen(true);
+									setTimeout(() => searchInputRef.current?.focus(), 0);
 								}
 							}}
-							className="w-full px-3 py-2 rounded border bg-transparent outline-none text-sm"
-							style={{ borderColor: theme.colors.accent, color: theme.colors.textMain }}
+							className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded transition-colors hover:bg-white/10"
+							style={{
+								color: searchFilterOpen ? theme.colors.accent : theme.colors.textDim,
+								border: `1px solid ${theme.colors.border}`,
+							}}
+							title={`Search History (${formatShortcutKeys(shortcuts.filterHistory?.keys ?? ['Meta', 'f'])})`}
+						>
+							<Search className="w-3.5 h-3.5" />
+						</button>
+
+						{/* Filter pills — centered when graph is on its own row */}
+						<HistoryFilterToggle
+							activeFilters={activeFilters}
+							onToggleFilter={toggleFilter}
+							theme={theme}
+							visibleTypes={visibleTypes}
+							compact={compact}
 						/>
-						{searchFilter && (
-							<div className="text-[10px] mt-1 text-right" style={{ color: theme.colors.textDim }}>
-								{allFilteredEntries.length} result{allFilteredEntries.length !== 1 ? 's' : ''}
-							</div>
+
+						{/* Activity graph inline when only 2 types (no CUE).
+						    When a host filter is active we omit the server-cached
+						    aggregate so the graph re-buckets client-side from the
+						    filtered loaded window — keeps it visually consistent
+						    with the list below. */}
+						{visibleTypes.length <= 2 && (
+							<ActivityGraph
+								entries={selectedHost ? allFilteredEntries : historyEntries}
+								theme={theme}
+								viewportRange={graphViewportRange}
+								onBarClick={handleGraphBarClickVirtualized}
+								lookbackHours={graphLookbackHours}
+								onLookbackChange={handleLookbackChange}
+								activeFilters={activeFilters}
+							/>
 						)}
+
+						{/* Help button — right of filter pills */}
+						<button
+							onClick={() => setHelpModalOpen(true)}
+							className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded transition-colors hover:bg-white/10"
+							style={{
+								color: theme.colors.textDim,
+								border: `1px solid ${theme.colors.border}`,
+							}}
+							title="History panel help"
+						>
+							<HelpCircle className="w-3.5 h-3.5" />
+						</button>
 					</div>
-				)}
+
+					{/* Activity graph on its own row when 3 types (CUE enabled).
+					    Same precomputed-bypass as the inline variant — host filter
+					    forces client-side bucketing from the filtered window. */}
+					{visibleTypes.length > 2 && (
+						<ActivityGraph
+							entries={selectedHost ? allFilteredEntries : historyEntries}
+							theme={theme}
+							viewportRange={graphViewportRange}
+							onBarClick={handleGraphBarClickVirtualized}
+							lookbackHours={graphLookbackHours}
+							onLookbackChange={handleLookbackChange}
+							precomputedBuckets={selectedHost ? undefined : graphBuckets}
+							precomputedRange={selectedHost ? undefined : graphRange}
+							alwaysShowViewportLabel
+							activeFilters={activeFilters}
+						/>
+					)}
+				</div>
 
 				{/* History List - Virtualized */}
 				<div
@@ -1244,11 +868,33 @@ export const HistoryPanel = React.memo(
 						<div className="text-center py-8 text-xs opacity-50">Loading history...</div>
 					) : allFilteredEntries.length === 0 ? (
 						<div className="text-center py-8 text-xs opacity-50">
-							{historyEntries.length === 0
-								? 'No history yet. Run batch tasks or use /history to add entries.'
-								: searchFilter
-									? `No entries match "${searchFilter}"`
-									: 'No entries match the selected filters.'}
+							{totalCount === 0 ? (
+								graphLookbackHours !== null ? (
+									<>
+										No entries in the last{' '}
+										{graphLookbackHours <= 24
+											? `${graphLookbackHours}h`
+											: graphLookbackHours <= 168
+												? `${Math.round(graphLookbackHours / 24)}d`
+												: `${Math.round(graphLookbackHours / 720)}mo`}
+										.
+										<br />
+										<button
+											onClick={() => handleLookbackChange(null)}
+											className="mt-2 underline hover:no-underline"
+											style={{ color: theme.colors.accent }}
+										>
+											Show all time
+										</button>
+									</>
+								) : (
+									'No history yet. Run batch tasks or use /history to add entries.'
+								)
+							) : searchFilter ? (
+								`No entries match "${searchFilter}" in the loaded window.`
+							) : (
+								'No entries match the selected filters in the loaded window.'
+							)}
 						</div>
 					) : (
 						<div
@@ -1289,13 +935,38 @@ export const HistoryPanel = React.memo(
 							})}
 						</div>
 					)}
+
+					{/* Loading-more / jump indicator */}
+					{(isLoadingMore || isJumping) && (
+						<div
+							className="text-center py-3 text-[10px] opacity-60"
+							style={{ color: theme.colors.textDim }}
+						>
+							{isJumping ? 'Jumping to selected period...' : 'Loading more...'}
+						</div>
+					)}
 				</div>
+
+				{/* Source/host picker — only shown when the loaded window
+				    contains more than one host. Selecting a host narrows
+				    both the list above and the activity graph at top. */}
+				{hostCounts.size > 1 && (
+					<div className="mt-2 flex-shrink-0">
+						<HostSourceFilter
+							hostCounts={hostCounts}
+							selectedHost={selectedHost}
+							onSelect={setSelectedHost}
+							theme={theme}
+						/>
+					</div>
+				)}
 
 				{/* Detail Modal */}
 				{detailModalEntry && (
 					<HistoryDetailModal
 						theme={theme}
 						entry={detailModalEntry}
+						agentId={session.toolType}
 						onClose={closeDetailModal}
 						onJumpToAgentSession={onJumpToAgentSession}
 						onResumeSession={onResumeSession}
@@ -1304,11 +975,9 @@ export const HistoryPanel = React.memo(
 							// Pass sessionId for efficient lookup in per-session storage
 							const success = await window.maestro.history.update(entryId, updates, session.id);
 							if (success) {
-								// Update local state
-								setHistoryEntries((prev) =>
+								mutateEntries((prev) =>
 									prev.map((e) => (e.id === entryId ? { ...e, ...updates } : e))
 								);
-								// Update the modal entry state
 								setDetailModalEntry((prev) => (prev ? { ...prev, ...updates } : null));
 							}
 							return success;

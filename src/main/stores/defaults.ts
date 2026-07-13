@@ -6,12 +6,14 @@
  */
 
 import path from 'path';
+import { isWindows } from '../../shared/platformDetection';
 
 import type {
 	MaestroSettings,
 	SessionsData,
 	GroupsData,
 	AgentConfigsData,
+	AgentCapabilitiesData,
 	WindowState,
 	ClaudeSessionOriginsData,
 	AgentSessionOriginsData,
@@ -26,7 +28,7 @@ import type {
  */
 export function getDefaultShell(): string {
 	// Windows: $SHELL doesn't exist; default to PowerShell
-	if (process.platform === 'win32') {
+	if (isWindows()) {
 		return 'powershell';
 	}
 	// Unix: Respect user's configured login shell from $SHELL
@@ -38,8 +40,8 @@ export function getDefaultShell(): string {
 			return shellName;
 		}
 	}
-	// Fallback to bash (more portable than zsh on older Unix systems)
-	return 'bash';
+	// Fallback to the platform's default shell
+	return process.platform === 'darwin' ? 'zsh' : 'bash';
 }
 
 // ============================================================================
@@ -59,6 +61,7 @@ export const SETTINGS_DEFAULTS: MaestroSettings = {
 	defaultShell: getDefaultShell(),
 	webAuthEnabled: false,
 	webAuthToken: null,
+	persistentWebLink: false,
 	webInterfaceUseCustomPort: false,
 	webInterfaceCustomPort: 8080,
 	sshRemotes: [],
@@ -66,6 +69,37 @@ export const SETTINGS_DEFAULTS: MaestroSettings = {
 	sshRemoteIgnorePatterns: ['.git', '.*cache*'],
 	sshRemoteHonorGitignore: false,
 	installationId: null,
+	wakatimeEnabled: false,
+	wakatimeApiKey: '',
+	wakatimeDetailedTracking: false,
+	totalActiveTimeMs: 0,
+	lastSelectedPromptId: null,
+	modalSizes: {},
+	spellCheck: false,
+	usageRefreshIntervals: {},
+	annotatorPenColor: '#9146FF',
+	annotatorPenSize: 10,
+	annotatorThinning: 0.5,
+	annotatorSmoothing: 0.5,
+	annotatorStreamline: 0.5,
+	annotatorTaperStart: 0,
+	annotatorTaperEnd: 0,
+	annotatorTextColor: '#9146FF',
+	annotatorTextSize: 24,
+	annotatorTextFont: 'sans-serif',
+	annotatorTextBgColor: '',
+	globalShowHotkey: [],
+	// Coworking: agent ids allowed to use browser interaction tools (empty = all off)
+	coworkingBrowserInteraction: [],
+	// Coworking: per-agent browser-interaction per-call confirm policy (off|dangerous|all; default dangerous)
+	coworkingBrowserInteractionConfirm: {},
+	// Coworking: opt-in background webview host for cross-session browser access + LRU cap
+	coworkingBackgroundBrowsers: false,
+	coworkingBackgroundBrowsersLimit: 2,
+	// Auto-resume agents that paused on a token/API/credit limit
+	autoResumeOnLimit: true,
+	autoResumeCheckIntervalHours: 2,
+	autoResumeGiveUpDays: 7,
 };
 
 export const SESSIONS_DEFAULTS: SessionsData = {
@@ -78,6 +112,10 @@ export const GROUPS_DEFAULTS: GroupsData = {
 
 export const AGENT_CONFIGS_DEFAULTS: AgentConfigsData = {
 	configs: {},
+};
+
+export const AGENT_CAPABILITIES_DEFAULTS: AgentCapabilitiesData = {
+	snapshots: {},
 };
 
 export const WINDOW_STATE_DEFAULTS: WindowState = {

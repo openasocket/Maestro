@@ -6,6 +6,7 @@
 import type { ProcessManager } from '../process-manager';
 import type { QueryCompleteData } from '../process-manager/types';
 import type { ProcessListenerDependencies } from './types';
+import { captureException } from '../utils/sentry';
 
 /**
  * Maximum number of retry attempts for transient database failures.
@@ -16,6 +17,17 @@ const MAX_RETRY_ATTEMPTS = 3;
  * Base delay in milliseconds for exponential backoff (doubles each retry).
  */
 const RETRY_BASE_DELAY_MS = 100;
+
+/**
+ * Coalescing window for the `stats:updated` broadcast. During active agent work
+ * (especially Auto Run and group chat) query-complete events can fire many times
+ * per second; each one used to emit its own `stats:updated`, spamming the main ->
+ * renderer IPC channel and triggering redundant dashboard refetches. `stats:updated`
+ * carries no payload (it's a "something changed, refetch when you care" nudge), so
+ * collapsing a burst into a single trailing broadcast is behavior-preserving: a
+ * consumer that refetches once at the end of the window sees the same final state.
+ */
+const STATS_UPDATE_COALESCE_MS = 500;
 
 /**
  * Attempts to insert a query event with retry logic for transient failures.
@@ -39,6 +51,7 @@ async function insertQueryEventWithRetry(
 			});
 			return id;
 		} catch (error) {
+			void captureException(error);
 			const isLastAttempt = attempt === MAX_RETRY_ATTEMPTS;
 
 			if (isLastAttempt) {
@@ -78,6 +91,19 @@ export function setupStatsListener(
 ): void {
 	const { safeSend, getStatsDB, logger } = deps;
 
+	// Trailing-coalesced `stats:updated` broadcast. While a timer is pending we
+	// absorb further updates; when it fires we emit exactly one broadcast for the
+	// whole burst. At most one send per STATS_UPDATE_COALESCE_MS window, always
+	// with a trailing send so the latest state is never missed.
+	let statsUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+	const broadcastStatsUpdated = () => {
+		if (statsUpdateTimer) return;
+		statsUpdateTimer = setTimeout(() => {
+			statsUpdateTimer = null;
+			safeSend('stats:updated');
+		}, STATS_UPDATE_COALESCE_MS);
+	};
+
 	// Handle query-complete events for stats tracking
 	// This is emitted when a batch mode AI query completes (user or auto)
 	processManager.on('query-complete', (_sessionId: string, queryData: QueryCompleteData) => {
@@ -98,7 +124,8 @@ export function setupStatsListener(
 					duration: queryData.duration,
 				});
 				// Broadcast stats update to renderer for real-time dashboard refresh
-				safeSend('stats:updated');
+				// (coalesced: bursts collapse into one trailing send).
+				broadcastStatsUpdated();
 			}
 		})();
 	});

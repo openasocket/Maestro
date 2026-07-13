@@ -50,21 +50,9 @@ vi.mock('../../../renderer/contexts/LayerStackContext', () => ({
 // Import component after mocks
 import { UpdateCheckModal } from '../../../renderer/components/UpdateCheckModal';
 
+import { createMockTheme } from '../../helpers/mockTheme';
+
 // Helper to create mock theme
-const createMockTheme = () => ({
-	colors: {
-		bgMain: '#1e1e1e',
-		bgSidebar: '#252526',
-		bgActivity: '#333333',
-		textMain: '#ffffff',
-		textDim: '#888888',
-		accent: '#007acc',
-		border: '#404040',
-		error: '#f44336',
-		success: '#4caf50',
-		warning: '#ff9800',
-	},
-});
 
 // Helper to create mock release
 const createMockRelease = (
@@ -79,7 +67,7 @@ const createMockRelease = (
 	tag_name: 'v1.1.0',
 	name: 'Version 1.1.0',
 	body: '## New Features\n- Added feature X\n- Fixed bug Y',
-	html_url: 'https://github.com/pedramamini/Maestro/releases/tag/v1.1.0',
+	html_url: 'https://github.com/RunMaestro/Maestro/releases/tag/v1.1.0',
 	published_at: '2024-01-15T12:00:00Z',
 	...overrides,
 });
@@ -103,7 +91,7 @@ const createMockUpdateResult = (
 	assetsReady: true,
 	versionsBehind: 1,
 	releases: [createMockRelease()],
-	releasesUrl: 'https://github.com/pedramamini/Maestro/releases',
+	releasesUrl: 'https://github.com/RunMaestro/Maestro/releases',
 	...overrides,
 });
 
@@ -487,7 +475,7 @@ describe('UpdateCheckModal', () => {
 			fireEvent.click(screen.getByText('View all releases'));
 
 			expect(window.maestro.shell.openExternal).toHaveBeenCalledWith(
-				'https://github.com/pedramamini/Maestro/releases'
+				'https://github.com/RunMaestro/Maestro/releases'
 			);
 		});
 	});
@@ -529,7 +517,7 @@ describe('UpdateCheckModal', () => {
 			fireEvent.click(screen.getByText('Check releases manually'));
 
 			expect(window.maestro.shell.openExternal).toHaveBeenCalledWith(
-				'https://github.com/pedramamini/Maestro/releases'
+				'https://github.com/RunMaestro/Maestro/releases'
 			);
 		});
 
@@ -921,7 +909,7 @@ describe('UpdateCheckModal', () => {
 			fireEvent.click(screen.getByText('Download manually from GitHub'));
 
 			expect(window.maestro.shell.openExternal).toHaveBeenCalledWith(
-				'https://github.com/pedramamini/Maestro/releases'
+				'https://github.com/RunMaestro/Maestro/releases'
 			);
 		});
 
@@ -1175,7 +1163,7 @@ describe('UpdateCheckModal', () => {
 			fireEvent.click(screen.getByText('Or download manually from GitHub'));
 
 			expect(window.maestro.shell.openExternal).toHaveBeenCalledWith(
-				'https://github.com/pedramamini/Maestro/releases'
+				'https://github.com/RunMaestro/Maestro/releases'
 			);
 		});
 

@@ -3,7 +3,6 @@
  *
  * Right panel component for group chats with tabbed interface.
  * Contains "Participants" and "History" tabs.
- * Replaces direct use of GroupChatParticipants when group chat is active.
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -19,6 +18,9 @@ import {
 	saveColorPreferences,
 	type ParticipantColorInfo,
 } from '../utils/participantColors';
+import { useResizablePanel } from '../hooks';
+import { useGroupChatStore } from '../stores/groupChatStore';
+import { logger } from '../utils/logger';
 
 export type GroupChatRightTab = 'participants' | 'history';
 
@@ -79,8 +81,18 @@ export function GroupChatRightPanel({
 	onJumpToMessage,
 	onColorsComputed,
 }: GroupChatRightPanelProps): JSX.Element | null {
+	const participantLiveOutput = useGroupChatStore((s) => s.participantLiveOutput);
+
 	// Color preferences state
 	const [colorPreferences, setColorPreferences] = useState<Record<string, number>>({});
+	const { panelRef, onResizeStart, transitionClass } = useResizablePanel({
+		width,
+		minWidth: 200,
+		maxWidth: 600,
+		settingsKey: 'rightPanelWidth',
+		setWidth: setWidthState,
+		side: 'right',
+	});
 
 	// Load color preferences on mount
 	useEffect(() => {
@@ -174,8 +186,70 @@ export function GroupChatRightPanel({
 			try {
 				await window.maestro.groupChat.resetParticipantContext(groupChatId, participantName);
 			} catch (error) {
-				console.error(`Failed to reset context for ${participantName}:`, error);
+				logger.error(`Failed to reset context for ${participantName}:`, undefined, error);
 			}
+		},
+		[groupChatId]
+	);
+
+	// Handle removing a participant from the group chat
+	const handleRemoveParticipant = useCallback(
+		async (participantName: string): Promise<boolean> => {
+			const updatedChat = await window.maestro.groupChat.removeParticipant(
+				groupChatId,
+				participantName
+			);
+			if (!updatedChat) {
+				throw new Error(`Group chat not found: ${groupChatId}`);
+			}
+
+			const store = useGroupChatStore.getState();
+			store.setGroupChats((prev) =>
+				prev.map((chat) => {
+					if (chat.id !== groupChatId) return chat;
+					// Merge only the removed participant out of the current store
+					// state. A concurrent participantsChanged event (for example a
+					// participant added while this removal IPC was in flight) may
+					// have already written a newer participant list; replacing the
+					// whole chat with the older removal snapshot would drop that
+					// addition until the chat is reloaded.
+					return {
+						...chat,
+						participants: chat.participants.filter(
+							(participant) => participant.name !== participantName
+						),
+					};
+				})
+			);
+
+			const removed = !updatedChat.participants.some(
+				(participant) => participant.name === participantName
+			);
+			if (removed) {
+				// Proactively clear the removed participant's transient state. The
+				// participantsChanged event also clears it, but if this optimistic
+				// local update lands first the event sees the participant already
+				// gone, computes no removedNames, and skips cleanup, leaving a
+				// removed working participant stuck marked busy in the sidebar.
+				store.setAllGroupChatParticipantStates((prev) => {
+					const chatStates = prev.get(groupChatId);
+					if (!chatStates) return prev;
+					const nextChatStates = new Map(chatStates);
+					nextChatStates.delete(participantName);
+					const next = new Map(prev);
+					next.set(groupChatId, nextChatStates);
+					return next;
+				});
+				if (groupChatId === store.activeGroupChatId) {
+					store.setParticipantStates((prev) => {
+						const next = new Map(prev);
+						next.delete(participantName);
+						return next;
+					});
+				}
+				store.clearParticipantLiveOutput(`${groupChatId}:${participantName}`);
+			}
+			return removed;
 		},
 		[groupChatId]
 	);
@@ -190,7 +264,7 @@ export function GroupChatRightPanel({
 
 		// Safety check in case preload hasn't been updated yet
 		if (typeof window.maestro.groupChat.getHistory !== 'function') {
-			console.warn('groupChat.getHistory not available - restart dev server to update preload');
+			logger.warn('groupChat.getHistory not available - restart dev server to update preload');
 			setHistoryEntries([]);
 			setIsLoadingHistory(false);
 			return;
@@ -202,7 +276,7 @@ export function GroupChatRightPanel({
 				const entries = await window.maestro.groupChat.getHistory(groupChatId);
 				setHistoryEntries(entries);
 			} catch (error) {
-				console.error('Failed to load group chat history:', error);
+				logger.error('Failed to load group chat history:', undefined, error);
 				setHistoryEntries([]);
 			} finally {
 				setIsLoadingHistory(false);
@@ -218,7 +292,7 @@ export function GroupChatRightPanel({
 
 		// Safety check in case preload hasn't been updated yet
 		if (typeof window.maestro.groupChat.onHistoryEntry !== 'function') {
-			console.warn('groupChat.onHistoryEntry not available - restart dev server to update preload');
+			logger.warn('groupChat.onHistoryEntry not available - restart dev server to update preload');
 			return;
 		}
 
@@ -235,7 +309,8 @@ export function GroupChatRightPanel({
 
 	return (
 		<div
-			className="relative border-l flex flex-col transition-all duration-300"
+			ref={panelRef}
+			className={`relative border-l flex flex-col ${transitionClass}`}
 			style={{
 				width: `${width}px`,
 				backgroundColor: theme.colors.bgSidebar,
@@ -244,28 +319,8 @@ export function GroupChatRightPanel({
 		>
 			{/* Resize Handle */}
 			<div
-				className="absolute top-0 left-0 w-1 h-full cursor-col-resize hover:bg-blue-500 transition-colors z-20"
-				onMouseDown={(e) => {
-					e.preventDefault();
-					const startX = e.clientX;
-					const startWidth = width;
-					let currentWidth = startWidth;
-
-					const handleMouseMove = (moveEvent: MouseEvent) => {
-						const delta = startX - moveEvent.clientX; // Reversed for right panel
-						currentWidth = Math.max(200, Math.min(600, startWidth + delta));
-						setWidthState(currentWidth);
-					};
-
-					const handleMouseUp = () => {
-						window.maestro.settings.set('rightPanelWidth', currentWidth);
-						document.removeEventListener('mousemove', handleMouseMove);
-						document.removeEventListener('mouseup', handleMouseUp);
-					};
-
-					document.addEventListener('mousemove', handleMouseMove);
-					document.addEventListener('mouseup', handleMouseUp);
-				}}
+				className="resize-handle absolute top-0 left-0 w-3 h-full cursor-col-resize border-l-4 border-transparent hover:border-blue-500 transition-colors z-20"
+				onPointerDown={onResizeStart}
 			/>
 
 			{/* Tab Header - matches RightPanel styling */}
@@ -332,6 +387,8 @@ export function GroupChatRightPanel({
 									color={participantColors[participant.name]}
 									groupChatId={groupChatId}
 									onContextReset={handleContextReset}
+									onRemove={handleRemoveParticipant}
+									liveOutput={participantLiveOutput.get(`${groupChatId}:${participant.name}`)}
 								/>
 							);
 						})

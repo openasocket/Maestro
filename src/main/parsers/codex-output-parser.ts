@@ -2,27 +2,30 @@
  * Codex CLI Output Parser
  *
  * Parses JSON output from OpenAI Codex CLI (`codex exec --json`).
- * Codex outputs JSONL with the following message types:
  *
- * - thread.started: Thread initialization (contains thread_id for resume)
- * - turn.started: Beginning of a turn (agent is processing)
- * - item.completed: Completed item (reasoning, agent_message, tool_call, tool_result)
- * - turn.completed: End of turn (contains usage stats)
+ * Codex v0.111.0+ uses two JSONL formats:
+ *
+ * 1. Stdout `--json` output (current format):
+ *    - session_meta: Session initialization (contains payload.id for resume)
+ *    - event_msg: Events (agent_message commentary, task_started, token_count, user_message)
+ *    - response_item: Structured items (message, function_call, function_call_output, reasoning, custom_tool_call)
+ *    - turn_context: Turn metadata (model, context window, etc.)
+ *
+ * 2. Legacy stdout format (older Codex versions):
+ *    - thread.started, turn.started, item.started, item.completed, turn.completed
  *
  * Key schema details:
- * - Session IDs are called thread_id (not session_id like Claude)
- * - Text content is in item.text for reasoning and agent_message items
- * - Token stats are in usage: { input_tokens, output_tokens, cached_input_tokens }
- * - reasoning_output_tokens tracked separately from output_tokens
- * - Tool calls have item.type: "tool_call" with tool name and args
- * - Tool results have item.type: "tool_result" with output
+ * - Session IDs are in session_meta payload.id (current) or thread_id (legacy)
+ * - Text content is in response_item payload.content (current) or item.text (legacy)
+ * - Token stats are in event_msg payload.info.total_token_usage (current) or usage (legacy)
+ * - Tool use is response_item payload.type "function_call"/"custom_tool_call" (current) or item.type "command_execution" (legacy)
  *
- * Verified against Codex CLI v0.73.0+ output schema
  * @see https://github.com/openai/codex
  */
 
 import type { ToolType, AgentError } from '../../shared/types';
 import type { AgentOutputParser, ParsedEvent } from './agent-output-parser';
+import { captureException } from '../utils/sentry';
 import { getErrorPatterns, matchErrorPattern } from './error-patterns';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -56,18 +59,40 @@ const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
 	// GPT-5 family (Codex default)
 	'gpt-5': 200000,
 	'gpt-5.1': 200000,
+	'gpt-5.1-codex': 200000,
 	'gpt-5.1-codex-max': 200000,
 	'gpt-5.2': 400000,
+	'gpt-5.2-codex': 400000,
 	'gpt-5.2-codex-max': 400000,
+	'gpt-5.3': 400000,
+	'gpt-5.3-codex': 400000,
+	'gpt-5.3-codex-max': 400000,
 	// Default fallback (Codex defaults to GPT-5.2)
 	default: 400000,
 };
 
 /**
- * Get the context window size for a given model
+ * Get the context window size for a given model.
+ * Checks ~/.codex/models_cache.json first (dynamic), falls back to hardcoded table.
  */
 function getModelContextWindow(model: string): number {
-	// Try exact match first
+	// Try dynamic lookup from Codex CLI's models cache
+	try {
+		const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+		const cachePath = path.join(codexHome, 'models_cache.json');
+		const cacheContent = fs.readFileSync(cachePath, 'utf8');
+		const cache = JSON.parse(cacheContent);
+		if (Array.isArray(cache.models)) {
+			const found = cache.models.find((m: { slug?: string }) => m.slug === model);
+			if (found?.context_window && typeof found.context_window === 'number') {
+				return found.context_window;
+			}
+		}
+	} catch {
+		// Fall through to hardcoded table
+	}
+
+	// Try exact match from hardcoded table
 	if (MODEL_CONTEXT_WINDOWS[model]) {
 		return MODEL_CONTEXT_WINDOWS[model];
 	}
@@ -118,26 +143,97 @@ function readCodexConfig(): { model?: string; contextWindow?: number } {
 
 /**
  * Raw message structure from Codex JSON output
- * Based on verified Codex CLI v0.73.0+ output
+ * Supports both current (response_item/event_msg) and legacy (item.completed) formats
  */
 interface CodexRawMessage {
-	type?: 'thread.started' | 'turn.started' | 'item.completed' | 'turn.completed' | 'error';
+	type?: // Current format (v0.111.0+)
+		| 'session_meta'
+		| 'response_item'
+		| 'event_msg'
+		| 'turn_context'
+		// Legacy format
+		| 'thread.started'
+		| 'turn.started'
+		| 'item.started'
+		| 'item.completed'
+		| 'turn.completed'
+		| 'turn.failed'
+		| 'error';
+	// Current format fields
+	timestamp?: string;
+	payload?: CodexPayload;
+	// Legacy format fields
 	thread_id?: string;
 	item?: CodexItem;
 	usage?: CodexUsage;
-	error?: string;
+	error?: string | { message?: string; type?: string };
 }
 
 /**
- * Item structure for item.completed events
+ * Payload structure for current Codex format (response_item, event_msg, session_meta, turn_context)
+ */
+interface CodexPayload {
+	// Common
+	id?: string;
+	type?: string;
+
+	// session_meta payload
+	cwd?: string;
+	cli_version?: string;
+	model_provider?: string;
+
+	// response_item message payload
+	role?: string;
+	content?: Array<{ type: string; text?: string }>;
+	phase?: string; // 'commentary' | 'final'
+
+	// response_item function_call / custom_tool_call payload
+	name?: string;
+	arguments?: string;
+	call_id?: string;
+
+	// response_item function_call_output / custom_tool_call_output payload
+	output?: string;
+
+	// response_item reasoning payload
+	summary?: unknown[];
+	encrypted_content?: string;
+
+	// event_msg payload
+	message?: string;
+	info?: {
+		total_token_usage?: {
+			input_tokens?: number;
+			cached_input_tokens?: number;
+			output_tokens?: number;
+			reasoning_output_tokens?: number;
+			total_tokens?: number;
+		};
+		model_context_window?: number;
+	};
+
+	// turn_context payload
+	model?: string;
+	model_context_window?: number;
+	turn_id?: string;
+}
+
+/**
+ * Item structure for item.started and item.completed events
  */
 interface CodexItem {
 	id?: string;
-	type?: 'reasoning' | 'agent_message' | 'tool_call' | 'tool_result';
+	type?: 'reasoning' | 'agent_message' | 'tool_call' | 'tool_result' | 'command_execution';
 	text?: string;
+	// Legacy tool_call/tool_result fields (Codex < v0.111.0)
 	tool?: string;
 	args?: Record<string, unknown>;
 	output?: string | number[];
+	// command_execution fields (Codex v0.111.0+)
+	command?: string;
+	aggregated_output?: string;
+	exit_code?: number | null;
+	status?: 'in_progress' | 'completed' | 'failed';
 }
 
 /**
@@ -151,10 +247,48 @@ interface CodexUsage {
 }
 
 /**
+ * Extract a human-readable error message from Codex's polymorphic error field.
+ * Codex sends errors as either a plain string or { message?, type? } object.
+ */
+function extractErrorText(error: CodexRawMessage['error'], fallback = 'Unknown error'): string {
+	if (typeof error === 'object' && error?.message) return error.message;
+	if (typeof error === 'string') return error;
+	return fallback;
+}
+
+/**
+ * Extract the human-readable reasoning text from a `response_item` reasoning payload.
+ *
+ * Codex emits `summary` in two shapes depending on the CLI version:
+ *  - string[]                                                       (older app-server)
+ *  - Array<{ type: 'summary_text'; text: string }>                  (newer Responses API)
+ *
+ * If `summary` is absent, empty, or only contains blank strings, returns '' so the
+ * caller can fall back to a non-displayable `system` event (encrypted_content only).
+ */
+function extractReasoningSummaryText(summary: unknown): string {
+	if (!Array.isArray(summary) || summary.length === 0) {
+		return '';
+	}
+	const parts: string[] = [];
+	for (const entry of summary) {
+		if (typeof entry === 'string') {
+			if (entry.trim()) parts.push(entry);
+		} else if (entry && typeof entry === 'object') {
+			const obj = entry as { type?: unknown; text?: unknown };
+			if (obj.type === 'summary_text' && typeof obj.text === 'string' && obj.text.trim()) {
+				parts.push(obj.text);
+			}
+		}
+	}
+	return parts.join('\n').trim();
+}
+
+/**
  * Codex CLI Output Parser Implementation
  *
  * Transforms Codex's JSON format into normalized ParsedEvents.
- * Verified against Codex CLI v0.73.0+ output schema.
+ * Verified against Codex CLI v0.111.0 output schema.
  */
 export class CodexOutputParser implements AgentOutputParser {
 	readonly agentId: ToolType = 'codex';
@@ -162,6 +296,11 @@ export class CodexOutputParser implements AgentOutputParser {
 	// Cached context window - read once from config
 	private contextWindow: number;
 	private model: string;
+
+	// Track tool name from tool_call to carry over to tool_result
+	// (Codex emits tool_call and tool_result as separate item.completed events,
+	// but tool_result doesn't include the tool name)
+	private lastToolName: string | null = null;
 
 	constructor() {
 		// Read config once at initialization
@@ -173,13 +312,22 @@ export class CodexOutputParser implements AgentOutputParser {
 	}
 
 	/**
-	 * Parse a single JSON line from Codex output
+	 * Parse a single JSON line from Codex output.
+	 * Delegates to parseJsonObject after JSON.parse.
 	 *
-	 * Codex message types (verified v0.73.0+):
-	 * - { type: 'thread.started', thread_id: 'uuid' }
-	 * - { type: 'turn.started' }
-	 * - { type: 'item.completed', item: { id, type, text|tool|args|output } }
-	 * - { type: 'turn.completed', usage: { input_tokens, output_tokens, cached_input_tokens } }
+	 * Current format (v0.111.0+):
+	 * - { type: 'session_meta', payload: { id, cwd, cli_version } }
+	 * - { type: 'event_msg', payload: { type: 'agent_message', message, phase } }
+	 * - { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage } } }
+	 * - { type: 'response_item', payload: { type: 'message', role, content } }
+	 * - { type: 'response_item', payload: { type: 'function_call', name, arguments, call_id } }
+	 * - { type: 'response_item', payload: { type: 'function_call_output', call_id, output } }
+	 * - { type: 'turn_context', payload: { model, model_context_window } }
+	 *
+	 * Legacy format (older versions):
+	 * - { type: 'thread.started', thread_id }
+	 * - { type: 'item.completed', item: { type, ... } }
+	 * - { type: 'turn.completed', usage: { ... } }
 	 */
 	parseJsonLine(line: string): ParsedEvent | null {
 		if (!line.trim()) {
@@ -187,8 +335,7 @@ export class CodexOutputParser implements AgentOutputParser {
 		}
 
 		try {
-			const msg: CodexRawMessage = JSON.parse(line);
-			return this.transformMessage(msg);
+			return this.parseJsonObject(JSON.parse(line));
 		} catch {
 			// Not valid JSON - return as raw text event
 			return {
@@ -200,9 +347,62 @@ export class CodexOutputParser implements AgentOutputParser {
 	}
 
 	/**
+	 * Parse a pre-parsed JSON object into a normalized event.
+	 * Core logic extracted from parseJsonLine to avoid redundant JSON.parse calls.
+	 */
+	parseJsonObject(parsed: unknown): ParsedEvent | null {
+		if (!parsed || typeof parsed !== 'object') {
+			return null;
+		}
+
+		return this.transformMessage(parsed as CodexRawMessage);
+	}
+
+	/**
 	 * Transform a parsed Codex message into a normalized ParsedEvent
 	 */
 	private transformMessage(msg: CodexRawMessage): ParsedEvent {
+		// ================================================================
+		// Current format (Codex v0.111.0+ with --json)
+		// ================================================================
+
+		// Handle session_meta (session initialization with payload.id)
+		if (msg.type === 'session_meta' && msg.payload) {
+			return {
+				type: 'init',
+				sessionId: msg.payload.id,
+				raw: msg,
+			};
+		}
+
+		// Handle turn_context (contains model and context window info)
+		if (msg.type === 'turn_context' && msg.payload) {
+			if (msg.payload.model_context_window) {
+				this.contextWindow = msg.payload.model_context_window;
+			}
+			if (msg.payload.model) {
+				this.model = msg.payload.model;
+			}
+			return {
+				type: 'system',
+				raw: msg,
+			};
+		}
+
+		// Handle event_msg (agent_message commentary, token_count, task_started, user_message)
+		if (msg.type === 'event_msg' && msg.payload) {
+			return this.transformEventMsg(msg.payload, msg);
+		}
+
+		// Handle response_item (message, function_call, function_call_output, reasoning, custom_tool_call)
+		if (msg.type === 'response_item' && msg.payload) {
+			return this.transformResponseItem(msg.payload, msg);
+		}
+
+		// ================================================================
+		// Legacy format (older Codex versions)
+		// ================================================================
+
 		// Handle thread.started (session initialization with thread_id)
 		if (msg.type === 'thread.started') {
 			return {
@@ -220,39 +420,249 @@ export class CodexOutputParser implements AgentOutputParser {
 			};
 		}
 
-		// Handle item.completed events (reasoning, agent_message, tool_call, tool_result)
+		// Handle item.started events (command_execution in progress)
+		if (msg.type === 'item.started' && msg.item) {
+			return this.transformItemStarted(msg.item, msg);
+		}
+
+		// Handle item.completed events (reasoning, agent_message, tool_call, tool_result, command_execution)
 		if (msg.type === 'item.completed' && msg.item) {
 			return this.transformItemCompleted(msg.item, msg);
 		}
 
 		// Handle turn.completed (end of turn with usage stats)
-		// Note: This is NOT the result message - actual text comes from agent_message items
-		// This event only contains usage statistics
 		if (msg.type === 'turn.completed') {
 			const event: ParsedEvent = {
-				type: 'usage', // Mark as 'usage' type, not 'result'
+				type: 'usage',
 				raw: msg,
 			};
-
-			// Extract usage stats if present
 			const usage = this.extractUsageFromRaw(msg);
 			if (usage) {
 				event.usage = usage;
 			}
-
 			return event;
+		}
+
+		// Handle turn.failed (API errors, model not found, stream disconnections)
+		if (msg.type === 'turn.failed') {
+			return {
+				type: 'error',
+				text: extractErrorText(msg.error, 'Turn failed'),
+				raw: msg,
+			};
 		}
 
 		// Handle error messages
 		if (msg.type === 'error' || msg.error) {
 			return {
 				type: 'error',
-				text: msg.error || 'Unknown error',
+				text: extractErrorText(msg.error),
 				raw: msg,
 			};
 		}
 
 		// Default: preserve as system event
+		return {
+			type: 'system',
+			raw: msg,
+		};
+	}
+
+	/**
+	 * Transform an event_msg payload (current format)
+	 * Types: agent_message, task_started, token_count, user_message
+	 */
+	private transformEventMsg(payload: CodexPayload, msg: CodexRawMessage): ParsedEvent {
+		// agent_message: commentary or final response text shown to user
+		if (payload.type === 'agent_message' && payload.message) {
+			const isCommentary = payload.phase === 'commentary';
+			if (isCommentary) {
+				// Commentary is intermediate progress text — emit as partial text
+				return {
+					type: 'text',
+					text: payload.message,
+					isPartial: true,
+					raw: msg,
+				};
+			}
+			// Final response
+			return {
+				type: 'result',
+				text: payload.message,
+				isPartial: false,
+				raw: msg,
+			};
+		}
+
+		// token_count: usage statistics
+		if (payload.type === 'token_count' && payload.info?.total_token_usage) {
+			const tokenUsage = payload.info.total_token_usage;
+			const inputTokens = tokenUsage.input_tokens || 0;
+			const outputTokens = tokenUsage.output_tokens || 0;
+			const cachedInputTokens = tokenUsage.cached_input_tokens || 0;
+			const reasoningOutputTokens = tokenUsage.reasoning_output_tokens || 0;
+			const totalOutputTokens = outputTokens + reasoningOutputTokens;
+
+			return {
+				type: 'usage',
+				usage: {
+					inputTokens,
+					outputTokens: totalOutputTokens,
+					cacheReadTokens: cachedInputTokens,
+					cacheCreationTokens: 0,
+					contextWindow: payload.info.model_context_window || this.contextWindow,
+					reasoningTokens: reasoningOutputTokens,
+				},
+				raw: msg,
+			};
+		}
+
+		// task_started, user_message, and other event types — system events
+		return {
+			type: 'system',
+			raw: msg,
+		};
+	}
+
+	/**
+	 * Transform a response_item payload (current format)
+	 * Types: message, function_call, function_call_output, reasoning, custom_tool_call, custom_tool_call_output
+	 */
+	private transformResponseItem(payload: CodexPayload, msg: CodexRawMessage): ParsedEvent {
+		// message: user or assistant text content
+		if (payload.type === 'message') {
+			const textContent = this.extractTextFromContent(payload.content);
+
+			if (payload.role === 'assistant') {
+				const isCommentary = payload.phase === 'commentary';
+				if (isCommentary) {
+					return {
+						type: 'text',
+						text: textContent,
+						isPartial: true,
+						raw: msg,
+					};
+				}
+				// Final assistant message
+				return {
+					type: 'result',
+					text: textContent,
+					isPartial: false,
+					raw: msg,
+				};
+			}
+
+			// User/developer/system messages — skip (system events)
+			return {
+				type: 'system',
+				raw: msg,
+			};
+		}
+
+		// reasoning: model's thinking process.
+		// Codex emits reasoning in two shapes depending on version:
+		//   - summary: string[]                              (older app-server shape)
+		//   - summary: Array<{ type: 'summary_text', text }> (newer Responses API shape)
+		// If only `encrypted_content` is present (no plain-text summary), there is
+		// nothing to show, so fall through to a system event so the line is preserved
+		// in the raw buffer for debugging.
+		if (payload.type === 'reasoning') {
+			const summaryText = extractReasoningSummaryText(payload.summary);
+			if (summaryText) {
+				return {
+					type: 'text',
+					text: this.formatReasoningText(summaryText),
+					isPartial: true,
+					isReasoning: true,
+					raw: msg,
+				};
+			}
+			return {
+				type: 'system',
+				raw: msg,
+			};
+		}
+
+		// function_call: tool invocation starting
+		if (payload.type === 'function_call' || payload.type === 'custom_tool_call') {
+			const toolName = payload.name || 'unknown';
+			this.lastToolName = toolName;
+			let parsedArgs: unknown;
+			try {
+				parsedArgs = JSON.parse(payload.arguments || '{}');
+			} catch {
+				parsedArgs = payload.arguments || {};
+			}
+			return {
+				type: 'tool_use',
+				toolName,
+				toolState: {
+					status: 'running',
+					input: parsedArgs,
+				},
+				raw: msg,
+			};
+		}
+
+		// function_call_output: tool execution completed
+		if (payload.type === 'function_call_output' || payload.type === 'custom_tool_call_output') {
+			const toolName = this.lastToolName || undefined;
+			this.lastToolName = null;
+			return {
+				type: 'tool_use',
+				toolName,
+				toolState: {
+					status: 'completed',
+					output: this.decodeToolOutput(payload.output),
+				},
+				raw: msg,
+			};
+		}
+
+		// Unknown response_item type — system event
+		return {
+			type: 'system',
+			raw: msg,
+		};
+	}
+
+	/**
+	 * Extract text from a content array (current format)
+	 * Content arrays have entries like { type: 'output_text', text: '...' }
+	 */
+	private extractTextFromContent(
+		content: Array<{ type: string; text?: string }> | undefined
+	): string {
+		if (!content || !Array.isArray(content)) {
+			return '';
+		}
+		return content
+			.filter(
+				(part) => part.type === 'input_text' || part.type === 'text' || part.type === 'output_text'
+			)
+			.map((part) => part.text || '')
+			.filter((text) => text.trim())
+			.join(' ');
+	}
+
+	/**
+	 * Transform an item.started event
+	 * Codex v0.111.0+ emits item.started for command_execution when a tool begins running
+	 */
+	private transformItemStarted(item: CodexItem, msg: CodexRawMessage): ParsedEvent {
+		if (item.type === 'command_execution') {
+			return {
+				type: 'tool_use',
+				toolName: 'shell',
+				toolState: {
+					status: 'running',
+					input: { command: item.command },
+				},
+				raw: msg,
+			};
+		}
+
+		// Unknown item.started type - preserve as system event
 		return {
 			type: 'system',
 			raw: msg,
@@ -286,8 +696,24 @@ export class CodexOutputParser implements AgentOutputParser {
 					raw: msg,
 				};
 
+			case 'command_execution':
+				// Codex v0.111.0+ unified command execution (replaces tool_call/tool_result)
+				// status: "completed" or "failed" means execution finished
+				return {
+					type: 'tool_use',
+					toolName: 'shell',
+					toolState: {
+						status: item.status === 'in_progress' ? 'running' : 'completed',
+						input: { command: item.command },
+						output: this.decodeToolOutput(item.aggregated_output),
+						exitCode: item.exit_code,
+					},
+					raw: msg,
+				};
+
 			case 'tool_call':
-				// Agent is using a tool
+				// Legacy: Agent is using a tool — store tool name for the subsequent tool_result
+				this.lastToolName = item.tool || null;
 				return {
 					type: 'tool_use',
 					toolName: item.tool,
@@ -298,16 +724,20 @@ export class CodexOutputParser implements AgentOutputParser {
 					raw: msg,
 				};
 
-			case 'tool_result':
-				// Tool execution completed
+			case 'tool_result': {
+				// Legacy: Tool execution completed — carry over tool name from preceding tool_call
+				const toolName = this.lastToolName || undefined;
+				this.lastToolName = null;
 				return {
 					type: 'tool_use',
+					toolName,
 					toolState: {
 						status: 'completed',
 						output: this.decodeToolOutput(item.output),
 					},
 					raw: msg,
 				};
+			}
 
 			default:
 				// Unknown item type - preserve as system event
@@ -332,31 +762,47 @@ export class CodexOutputParser implements AgentOutputParser {
 		return text.replace(/(\*\*[^*]+\*\*)/g, '\n\n$1');
 	}
 
+	// Maximum length for tool output to prevent oversized log entries
+	private static readonly MAX_TOOL_OUTPUT_LENGTH = 10000;
+
 	/**
 	 * Decode tool output which may be a string or byte array
 	 * Codex sometimes returns command output as byte arrays
+	 * Large outputs are truncated to MAX_TOOL_OUTPUT_LENGTH
 	 */
 	private decodeToolOutput(output: string | number[] | undefined): string {
+		let decoded: string;
+
 		if (output === undefined) {
 			return '';
-		}
-
-		if (typeof output === 'string') {
-			return output;
-		}
-
-		// Byte array - decode to string
-		// Note: Using Buffer.from instead of String.fromCharCode(...output) to avoid
-		// stack overflow on large arrays (spread operator has argument limit ~10K)
-		if (Array.isArray(output)) {
+		} else if (typeof output === 'string') {
+			decoded = output;
+		} else if (Array.isArray(output)) {
+			// Byte array - decode to string
+			// Note: Using Buffer.from instead of String.fromCharCode(...output) to avoid
+			// stack overflow on large arrays (spread operator has argument limit ~10K)
 			try {
-				return Buffer.from(output).toString('utf-8');
-			} catch {
-				return output.toString();
+				decoded = Buffer.from(output).toString('utf-8');
+			} catch (err) {
+				captureException(err, {
+					operation: 'codexParser:decodeToolOutput',
+					outputType: typeof output,
+					outputLength: output.length,
+				});
+				decoded = output.toString();
 			}
+		} else {
+			decoded = String(output);
 		}
 
-		return String(output);
+		if (decoded.length > CodexOutputParser.MAX_TOOL_OUTPUT_LENGTH) {
+			const originalLength = decoded.length;
+			decoded =
+				decoded.substring(0, CodexOutputParser.MAX_TOOL_OUTPUT_LENGTH) +
+				`\n... [output truncated, ${originalLength} chars total]`;
+		}
+
+		return decoded;
 	}
 
 	/**
@@ -431,47 +877,49 @@ export class CodexOutputParser implements AgentOutputParser {
 	}
 
 	/**
-	 * Detect an error from a line of agent output
-	 *
-	 * IMPORTANT: Only detect errors from structured JSON error events, not from
-	 * arbitrary text content. Pattern matching on conversational text leads to
-	 * false positives (e.g., AI discussing "timeout" triggers timeout error).
-	 *
-	 * Error detection sources (in order of reliability):
-	 * 1. Structured JSON: { type: "error", error: "..." } or { error: "..." }
-	 * 2. stderr output (handled separately by process-manager)
-	 * 3. Non-zero exit code (handled by detectErrorFromExit)
+	 * Detect an error from a line of agent output.
+	 * Delegates to detectErrorFromParsed after JSON.parse.
 	 */
 	detectErrorFromLine(line: string): AgentError | null {
-		// Skip empty lines
 		if (!line.trim()) {
 			return null;
 		}
 
-		// Only detect errors from structured JSON error events
-		// Do NOT pattern match on arbitrary text - it causes false positives
-		let errorText: string | null = null;
 		try {
-			const parsed = JSON.parse(line);
-			// Check for error type messages
-			if (parsed.type === 'error' && parsed.error) {
-				errorText = parsed.error;
-			} else if (parsed.error) {
-				errorText = typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error);
+			const error = this.detectErrorFromParsed(JSON.parse(line));
+			if (error) {
+				error.raw = { ...(error.raw as Record<string, unknown>), errorLine: line };
 			}
-			// If no error field in JSON, this is normal output - don't check it
+			return error;
 		} catch {
 			// Not JSON - skip pattern matching entirely
-			// Errors should come through structured JSON, stderr, or exit codes
-			// Pattern matching on arbitrary text causes false positives
+			return null;
+		}
+	}
+
+	/**
+	 * Detect an error from a pre-parsed JSON object.
+	 * Core logic extracted from detectErrorFromLine to avoid redundant JSON.parse calls.
+	 */
+	detectErrorFromParsed(parsed: unknown): AgentError | null {
+		if (!parsed || typeof parsed !== 'object') {
+			return null;
 		}
 
-		// If no error text was extracted, no error to detect
+		const obj = parsed as Record<string, unknown>;
+		let errorText: string | null = null;
+		let parsedJson: unknown = null;
+
+		if (obj.type === 'error' || obj.type === 'turn.failed' || obj.error) {
+			parsedJson = parsed;
+			errorText = extractErrorText(obj.error as CodexRawMessage['error']);
+			if (errorText === 'Unknown error') errorText = null;
+		}
+
 		if (!errorText) {
 			return null;
 		}
 
-		// Match against error patterns
 		const patterns = getErrorPatterns(this.agentId);
 		const match = matchErrorPattern(patterns, errorText);
 
@@ -482,9 +930,18 @@ export class CodexOutputParser implements AgentOutputParser {
 				recoverable: match.recoverable,
 				agentId: this.agentId,
 				timestamp: Date.now(),
-				raw: {
-					errorLine: line,
-				},
+				parsedJson,
+			};
+		}
+
+		if (parsedJson) {
+			return {
+				type: 'unknown',
+				message: errorText,
+				recoverable: true,
+				agentId: this.agentId,
+				timestamp: Date.now(),
+				parsedJson,
 			};
 		}
 

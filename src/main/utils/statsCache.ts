@@ -12,6 +12,11 @@ import { app } from 'electron';
 import path from 'path';
 import fs from 'fs/promises';
 import { logger } from './logger';
+import { encodeClaudeProjectPath } from '../../shared/pathUtils';
+import { captureException } from './sentry';
+
+// Re-export so existing consumers don't need import changes
+export { encodeClaudeProjectPath };
 
 // ============================================================================
 // Per-Project Stats Cache
@@ -87,19 +92,11 @@ export interface SessionStatsCache {
 export const STATS_CACHE_VERSION = 2;
 
 /**
- * Encode a project path the same way Claude Code does.
- * Claude replaces both '/' and '.' with '-' in the path encoding.
- */
-export function encodeClaudeProjectPath(projectPath: string): string {
-	return projectPath.replace(/[/.]/g, '-');
-}
-
-/**
  * Get the cache file path for a project's stats.
  * @param projectPath - The project directory path
  * @returns Absolute path to the cache JSON file
  */
-export function getStatsCachePath(projectPath: string): string {
+function getStatsCachePath(projectPath: string): string {
 	const encodedPath = encodeClaudeProjectPath(projectPath);
 	return path.join(app.getPath('userData'), 'stats-cache', `${encodedPath}.json`);
 }
@@ -137,6 +134,7 @@ export async function saveStatsCache(projectPath: string, cache: SessionStatsCac
 		await fs.mkdir(cacheDir, { recursive: true });
 		await fs.writeFile(cachePath, JSON.stringify(cache), 'utf-8');
 	} catch (error) {
+		void captureException(error);
 		logger.warn('Failed to save stats cache', 'ClaudeSessions', { projectPath, error });
 	}
 }
@@ -156,6 +154,12 @@ export interface CachedSessionStats {
 	cacheCreationTokens: number;
 	cachedInputTokens: number;
 	sizeBytes: number;
+	/**
+	 * Per-model cost (USD) computed at parse time. Optional for backward
+	 * compatibility with cache entries written before per-model pricing; absent
+	 * entries fall back to flat-rate pricing derived from the token counts.
+	 */
+	costUsd?: number;
 	/** File modification time to detect external changes */
 	fileMtimeMs: number;
 	/**
@@ -190,7 +194,7 @@ export const GLOBAL_STATS_CACHE_VERSION = 3;
  * Get the cache file path for global stats.
  * @returns Absolute path to the global stats cache JSON file
  */
-export function getGlobalStatsCachePath(): string {
+function getGlobalStatsCachePath(): string {
 	return path.join(app.getPath('userData'), 'stats-cache', 'global-stats.json');
 }
 
@@ -224,6 +228,7 @@ export async function saveGlobalStatsCache(cache: GlobalStatsCache): Promise<voi
 		await fs.mkdir(cacheDir, { recursive: true });
 		await fs.writeFile(cachePath, JSON.stringify(cache), 'utf-8');
 	} catch (error) {
+		void captureException(error);
 		logger.warn('Failed to save global stats cache', 'ClaudeSessions', { error });
 	}
 }

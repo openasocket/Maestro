@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import { memo, useMemo, useState, useCallback } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
 import type { Theme } from '../types';
 
@@ -23,8 +23,8 @@ export interface ContextWarningSashProps {
  * - "Summarize & Continue" button for quick action
  * - Dismiss button that hides the warning until usage increases 10%+ or crosses threshold
  */
-export function ContextWarningSash({
-	theme: _theme,
+export const ContextWarningSash = memo(function ContextWarningSash({
+	theme,
 	contextUsage,
 	yellowThreshold,
 	redThreshold,
@@ -32,9 +32,11 @@ export function ContextWarningSash({
 	onSummarizeClick,
 	tabId,
 }: ContextWarningSashProps) {
-	// Track dismissal state per-tab
-	const [dismissedAtUsage, setDismissedAtUsage] = useState<number | null>(null);
-	const [dismissedLevel, setDismissedLevel] = useState<'yellow' | 'red' | null>(null);
+	const isLight = theme.mode === 'light';
+	const tabKey = tabId ?? '__default__';
+	const [dismissedByTab, setDismissedByTab] = useState<
+		Record<string, { usage: number; level: 'yellow' | 'red' }>
+	>({});
 
 	// Determine warning level
 	const warningLevel = useMemo(() => {
@@ -43,11 +45,7 @@ export function ContextWarningSash({
 		return null;
 	}, [contextUsage, yellowThreshold, redThreshold]);
 
-	// Reset dismissal when tab changes
-	useEffect(() => {
-		setDismissedAtUsage(null);
-		setDismissedLevel(null);
-	}, [tabId]);
+	const currentDismissal = dismissedByTab[tabKey];
 
 	// Check if warning should be shown based on dismissal rules
 	const shouldShowWarning = useMemo(() => {
@@ -55,40 +53,51 @@ export function ContextWarningSash({
 		if (!enabled || !warningLevel) return false;
 
 		// Show if never dismissed for this tab
-		if (dismissedAtUsage === null) return true;
+		if (!currentDismissal) return true;
 
 		// Show again if usage has increased by 10% or more since dismissal
-		if (contextUsage >= dismissedAtUsage + 10) return true;
+		if (contextUsage >= currentDismissal.usage + 10) return true;
 
 		// Show again if crossed from yellow to red threshold
-		if (dismissedLevel === 'yellow' && warningLevel === 'red') return true;
+		if (currentDismissal.level === 'yellow' && warningLevel === 'red') return true;
 
 		return false;
-	}, [enabled, warningLevel, dismissedAtUsage, dismissedLevel, contextUsage]);
+	}, [enabled, warningLevel, currentDismissal, contextUsage]);
 
 	// Handle dismiss action
 	const handleDismiss = useCallback(() => {
-		setDismissedAtUsage(contextUsage);
-		setDismissedLevel(warningLevel);
-	}, [contextUsage, warningLevel]);
+		if (!warningLevel) return;
+		setDismissedByTab((prev) => ({
+			...prev,
+			[tabKey]: { usage: contextUsage, level: warningLevel },
+		}));
+	}, [contextUsage, warningLevel, tabKey]);
 
 	// Don't render if warning shouldn't be shown
 	if (!shouldShowWarning) return null;
 
 	const isRed = warningLevel === 'red';
 
-	// Color values from spec
+	// Color values — light mode needs darker text/icon colors for contrast
 	const backgroundColor = isRed
-		? 'rgba(239, 68, 68, 0.15)' // red-500 with low opacity
-		: 'rgba(234, 179, 8, 0.15)'; // yellow-500 with low opacity
+		? isLight
+			? 'rgba(239, 68, 68, 0.12)'
+			: 'rgba(239, 68, 68, 0.15)'
+		: isLight
+			? 'rgba(234, 179, 8, 0.12)'
+			: 'rgba(234, 179, 8, 0.15)';
 
 	const borderColor = isRed ? 'rgba(239, 68, 68, 0.5)' : 'rgba(234, 179, 8, 0.5)';
 
 	const textColor = isRed
-		? '#fca5a5' // red-300
-		: '#fde047'; // yellow-300
+		? isLight
+			? '#991b1b' // red-800
+			: '#fca5a5' // red-300
+		: isLight
+			? '#854d0e' // yellow-800
+			: '#fde047'; // yellow-300
 
-	const iconColor = isRed ? '#ef4444' : '#eab308';
+	const iconColor = isRed ? (isLight ? '#dc2626' : '#ef4444') : isLight ? '#ca8a04' : '#eab308';
 	const buttonBgColor = isRed ? '#ef4444' : '#eab308';
 
 	return (
@@ -179,6 +188,6 @@ export function ContextWarningSash({
       `}</style>
 		</div>
 	);
-}
+});
 
 export default ContextWarningSash;

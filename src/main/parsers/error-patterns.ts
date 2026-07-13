@@ -17,19 +17,8 @@
  */
 
 import type { AgentErrorType, ToolType } from '../../shared/types';
+import { isValidAgentId } from '../../shared/agentIds';
 import { logger } from '../utils/logger';
-
-/**
- * Valid ToolType values that have error patterns registered.
- * Used to validate input to getErrorPatterns and log warnings for unknown agents.
- */
-const VALID_TOOL_TYPES = new Set<string>([
-	'claude-code',
-	'opencode',
-	'codex',
-	'terminal',
-	'factory-droid',
-]);
 
 /**
  * Error pattern definition with regex and user-friendly message
@@ -58,7 +47,7 @@ export type AgentErrorPatterns = {
 // Claude Code Error Patterns
 // ============================================================================
 
-export const CLAUDE_ERROR_PATTERNS: AgentErrorPatterns = {
+const CLAUDE_ERROR_PATTERNS: AgentErrorPatterns = {
 	auth_expired: [
 		{
 			pattern: /invalid api key/i,
@@ -189,14 +178,14 @@ export const CLAUDE_ERROR_PATTERNS: AgentErrorPatterns = {
 		},
 		{
 			pattern: /quota exceeded/i,
-			message: 'Your API quota has been exceeded.',
-			recoverable: false,
+			message: 'Your API quota has been exceeded. Resume when quota resets.',
+			recoverable: true,
 		},
 		{
 			// Matches: "usage limit" or "hit your limit"
 			pattern: /usage.?limit|hit your.*limit/i,
 			message: 'Usage limit reached. Check your plan for available quota.',
-			recoverable: false,
+			recoverable: true,
 		},
 	],
 
@@ -282,7 +271,7 @@ export const CLAUDE_ERROR_PATTERNS: AgentErrorPatterns = {
 // OpenCode Error Patterns
 // ============================================================================
 
-export const OPENCODE_ERROR_PATTERNS: AgentErrorPatterns = {
+const OPENCODE_ERROR_PATTERNS: AgentErrorPatterns = {
 	auth_expired: [
 		{
 			pattern: /invalid.*key/i,
@@ -393,7 +382,7 @@ export const OPENCODE_ERROR_PATTERNS: AgentErrorPatterns = {
 // Codex Error Patterns
 // ============================================================================
 
-export const CODEX_ERROR_PATTERNS: AgentErrorPatterns = {
+const CODEX_ERROR_PATTERNS: AgentErrorPatterns = {
 	auth_expired: [
 		{
 			pattern: /invalid.*api.*key/i,
@@ -448,8 +437,8 @@ export const CODEX_ERROR_PATTERNS: AgentErrorPatterns = {
 		},
 		{
 			pattern: /quota.*exceeded/i,
-			message: 'Your API quota has been exceeded.',
-			recoverable: false,
+			message: 'Your API quota has been exceeded. Resume when quota resets.',
+			recoverable: true,
 		},
 		{
 			// HTTP 429 - Rate limited. Word boundary prevents false positives from ports/versions
@@ -461,7 +450,7 @@ export const CODEX_ERROR_PATTERNS: AgentErrorPatterns = {
 			// Matches: "You've hit your usage limit" or "usage limit reached/exceeded"
 			pattern: /usage.?limit|hit your.*limit/i,
 			message: 'Usage limit reached. Please wait or check your plan quota.',
-			recoverable: false,
+			recoverable: true,
 		},
 	],
 
@@ -530,6 +519,18 @@ export const CODEX_ERROR_PATTERNS: AgentErrorPatterns = {
 
 	session_not_found: [
 		{
+			// `codex exec resume <id>` when the rollout file backing the thread is
+			// gone (e.g. pruned, or written by a different/older Codex version).
+			// The CLI exits 1 with stderr like:
+			//   "thread/resume: thread/resume failed: no rollout found for thread id <uuid>"
+			// Without this pattern it fell through to a dead-end "Agent exited with
+			// code 1" crash instead of Maestro's in-place fresh-session recovery
+			// (which re-seeds the prior conversation from the tab transcript). See #1042.
+			pattern: /no rollout found|rollout not found/i,
+			message: 'Previous Codex session could not be found. Starting fresh conversation.',
+			recoverable: true,
+		},
+		{
 			pattern: /session.*not found/i,
 			message: 'Session not found. Starting fresh conversation.',
 			recoverable: true,
@@ -546,7 +547,7 @@ export const CODEX_ERROR_PATTERNS: AgentErrorPatterns = {
 // Factory Droid Error Patterns
 // ============================================================================
 
-export const FACTORY_DROID_ERROR_PATTERNS: AgentErrorPatterns = {
+const FACTORY_DROID_ERROR_PATTERNS: AgentErrorPatterns = {
 	auth_expired: [
 		{
 			pattern: /invalid.*api.*key/i,
@@ -611,8 +612,8 @@ export const FACTORY_DROID_ERROR_PATTERNS: AgentErrorPatterns = {
 		},
 		{
 			pattern: /quota.*exceeded/i,
-			message: 'Your API quota has been exceeded.',
-			recoverable: false,
+			message: 'Your API quota has been exceeded. Resume when quota resets.',
+			recoverable: true,
 		},
 		{
 			pattern: /\b429\b/,
@@ -687,6 +688,15 @@ export const FACTORY_DROID_ERROR_PATTERNS: AgentErrorPatterns = {
 // ============================================================================
 // SSH Error Patterns
 // ============================================================================
+
+/**
+ * Actionable message shown when an SSH remote host appears to be Windows.
+ * Maestro currently builds the remote command for a POSIX shell only
+ * (see ssh-command-builder.ts: /bin/bash --norc --noprofile + single-quote
+ * escaping), so Windows remotes are not yet supported. Tracked by issue #995.
+ */
+const WINDOWS_REMOTE_UNSUPPORTED_MESSAGE =
+	'SSH execution to Windows remote hosts is not yet supported (Maestro builds the remote command for a POSIX shell). See issue #995.';
 
 /**
  * Error patterns for SSH remote execution errors.
@@ -792,6 +802,30 @@ export const SSH_ERROR_PATTERNS: AgentErrorPatterns = {
 	],
 
 	agent_crashed: [
+		// Windows remote host detection (issue #995).
+		// Maestro builds the remote command for a POSIX shell. When the SSH
+		// remote is Windows, its default shell (cmd.exe or PowerShell) cannot
+		// run /bin/bash and the process dies with a bare exit 1. The phrases
+		// below are emitted ONLY by Windows shells, never by a POSIX shell, so
+		// POSIX remotes are never affected by these patterns.
+		{
+			// cmd.exe: "'/bin/bash' is not recognized as an internal or external command"
+			pattern: /is not recognized as an internal or external command/i,
+			message: WINDOWS_REMOTE_UNSUPPORTED_MESSAGE,
+			recoverable: false,
+		},
+		{
+			// PowerShell: "The term '/bin/bash' is not recognized as the name of a cmdlet"
+			pattern: /is not recognized as the name of a cmdlet/i,
+			message: WINDOWS_REMOTE_UNSUPPORTED_MESSAGE,
+			recoverable: false,
+		},
+		{
+			// cmd.exe / Windows API: "The system cannot find the path specified"
+			pattern: /the system cannot find the path specified/i,
+			message: WINDOWS_REMOTE_UNSUPPORTED_MESSAGE,
+			recoverable: false,
+		},
 		{
 			// Agent command not found (shell reports command not found)
 			// bash/sh format: "bash: claude: command not found"
@@ -867,6 +901,254 @@ export const SSH_ERROR_PATTERNS: AgentErrorPatterns = {
 };
 
 // ============================================================================
+// GitHub Copilot CLI Error Patterns
+// ============================================================================
+
+const COPILOT_ERROR_PATTERNS: AgentErrorPatterns = {
+	auth_expired: [
+		{
+			pattern: /authentication failed/i,
+			message: 'Authentication failed. Please run "gh auth login" to re-authenticate.',
+			recoverable: true,
+		},
+		{
+			pattern: /not authenticated/i,
+			message: 'Not authenticated. Please run "gh auth login" to authenticate.',
+			recoverable: true,
+		},
+		{
+			pattern: /unauthorized/i,
+			message: 'Unauthorized. Please check your GitHub authentication.',
+			recoverable: true,
+		},
+		{
+			pattern: /invalid.*token/i,
+			message: 'Invalid GitHub token. Please re-authenticate with "gh auth login".',
+			recoverable: true,
+		},
+	],
+
+	rate_limited: [
+		{
+			pattern: /rate limit exceeded/i,
+			message: 'GitHub API rate limit exceeded. Please wait and try again.',
+			recoverable: true,
+		},
+		{
+			pattern: /quota.*exceeded/i,
+			message: 'API quota exceeded. Resume when quota resets.',
+			recoverable: true,
+		},
+	],
+
+	network_error: [
+		{
+			pattern: /connection failed/i,
+			message: 'Connection failed. Check your internet connection.',
+			recoverable: true,
+		},
+		{
+			pattern: /network error/i,
+			message: 'Network error. Please check your connection.',
+			recoverable: true,
+		},
+		{
+			pattern: /timeout/i,
+			message: 'Request timed out. Please try again.',
+			recoverable: true,
+		},
+	],
+
+	permission_denied: [
+		{
+			pattern: /permission denied/i,
+			message: 'Permission denied. Check file and directory permissions.',
+			recoverable: false,
+		},
+	],
+
+	session_not_found: [
+		{
+			pattern: /session.*not found/i,
+			message: 'Session not found. Starting fresh conversation.',
+			recoverable: true,
+		},
+	],
+
+	token_exhaustion: [
+		{
+			pattern: /prompt.*too\s+long/i,
+			message: 'Prompt is too long. Try a shorter message or start a new session.',
+			recoverable: true,
+		},
+		{
+			pattern: /context.*exceeded/i,
+			message: 'Context limit exceeded. Start a new session.',
+			recoverable: true,
+		},
+		{
+			pattern: /context.*too long/i,
+			message: 'The conversation has exceeded the context limit. Start a new session.',
+			recoverable: true,
+		},
+		{
+			pattern: /maximum.*tokens/i,
+			message: 'Maximum token limit reached. Start a new session to continue.',
+			recoverable: true,
+		},
+		{
+			pattern: /context window/i,
+			message: 'Context window exceeded. Please start a new session.',
+			recoverable: true,
+		},
+		{
+			pattern: /token limit/i,
+			message: 'Token limit reached. Consider starting a fresh conversation.',
+			recoverable: true,
+		},
+		{
+			pattern: /input.*too large/i,
+			message: 'Input is too large for the context window.',
+			recoverable: true,
+		},
+	],
+
+	agent_crashed: [
+		{
+			pattern: /no prompt provided.*interactive terminal/i,
+			message:
+				'GitHub Copilot was launched without a terminal. Interactive Copilot sessions require PTY mode.',
+			recoverable: true,
+		},
+		{
+			pattern: /unexpected error/i,
+			message: 'An unexpected error occurred in the agent.',
+			recoverable: true,
+		},
+	],
+};
+
+const PI_ERROR_PATTERNS: AgentErrorPatterns = {
+	auth_expired: [
+		{
+			pattern: /invalid api key|authentication failed|unauthorized|not authenticated/i,
+			message: 'Pi authentication failed. Check the selected provider credentials.',
+			recoverable: true,
+		},
+	],
+	rate_limited: [
+		{
+			pattern: /rate limit|too many requests|\b429\b|quota exceeded/i,
+			message: 'Pi provider rate limit exceeded. Please wait and try again.',
+			recoverable: true,
+		},
+	],
+	token_exhaustion: [
+		{
+			pattern: /context.*(exceeded|too long)|maximum.*tokens|prompt.*too long/i,
+			message: 'Pi context limit exceeded. Start a new session.',
+			recoverable: true,
+		},
+	],
+	network_error: [
+		{
+			pattern: /connection (failed|refused|reset)|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND/i,
+			message: 'Pi could not reach the selected provider. Check your network connection.',
+			recoverable: true,
+		},
+	],
+};
+
+const QWEN_ERROR_PATTERNS: AgentErrorPatterns = {
+	auth_expired: [
+		{
+			pattern: /invalid api key|authentication failed|unauthorized|not authenticated|401/i,
+			message: 'Qwen Code authentication failed. Re-authenticate your Qwen account or API key.',
+			recoverable: true,
+		},
+	],
+	rate_limited: [
+		{
+			pattern: /rate limit|too many requests|\b429\b|quota exceeded/i,
+			message: 'Qwen Code rate limit exceeded. Please wait and try again.',
+			recoverable: true,
+		},
+	],
+	token_exhaustion: [
+		{
+			pattern: /context.*(exceeded|too long)|maximum.*tokens|prompt.*too long/i,
+			message: 'Qwen Code context limit exceeded. Start a new session.',
+			recoverable: true,
+		},
+	],
+	network_error: [
+		{
+			pattern: /connection (failed|refused|reset)|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND/i,
+			message: 'Qwen Code could not reach the model provider. Check your network connection.',
+			recoverable: true,
+		},
+	],
+	agent_crashed: [
+		{
+			pattern: /\b(fatal|unexpected|internal|unhandled)\s+error\b/i,
+			message: 'An unexpected error occurred in the agent.',
+			recoverable: false,
+		},
+	],
+	session_not_found: [
+		{
+			pattern: /session.*not found|no conversation found with session id/i,
+			message: 'Session not found. Starting fresh conversation.',
+			recoverable: true,
+		},
+		{
+			pattern: /invalid.*session/i,
+			message: 'Invalid session. Starting fresh conversation.',
+			recoverable: true,
+		},
+	],
+};
+
+const OMP_ERROR_PATTERNS: AgentErrorPatterns = {
+	auth_expired: [
+		{
+			pattern:
+				/invalid api key|authentication failed|unauthorized|not authenticated|missing api key/i,
+			message: 'Oh My Pi authentication failed. Check the selected provider credentials.',
+			recoverable: true,
+		},
+	],
+	rate_limited: [
+		{
+			pattern: /rate limit|too many requests|\b429\b|quota exceeded/i,
+			message: 'Oh My Pi provider rate limit exceeded. Please wait and try again.',
+			recoverable: true,
+		},
+	],
+	token_exhaustion: [
+		{
+			pattern: /context.*(exceeded|too long)|maximum.*tokens|prompt.*too long/i,
+			message: 'Oh My Pi context limit exceeded. Start a new session.',
+			recoverable: true,
+		},
+	],
+	network_error: [
+		{
+			pattern: /connection (failed|refused|reset)|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND/i,
+			message: 'Oh My Pi could not reach the selected provider. Check your network connection.',
+			recoverable: true,
+		},
+	],
+	agent_crashed: [
+		{
+			pattern: /panic|fatal error|unhandled exception|segmentation fault/i,
+			message: 'Oh My Pi crashed unexpectedly. Check the logs and try again.',
+			recoverable: true,
+		},
+	],
+};
+
+// ============================================================================
 // Pattern Registry
 // ============================================================================
 
@@ -875,6 +1157,10 @@ const patternRegistry = new Map<ToolType, AgentErrorPatterns>([
 	['opencode', OPENCODE_ERROR_PATTERNS],
 	['codex', CODEX_ERROR_PATTERNS],
 	['factory-droid', FACTORY_DROID_ERROR_PATTERNS],
+	['copilot-cli', COPILOT_ERROR_PATTERNS],
+	['pi', PI_ERROR_PATTERNS],
+	['qwen3-coder', QWEN_ERROR_PATTERNS],
+	['omp', OMP_ERROR_PATTERNS],
 ]);
 
 /**
@@ -888,17 +1174,15 @@ const patternRegistry = new Map<ToolType, AgentErrorPatterns>([
  * @returns Error patterns for the agent, or empty object if not found
  */
 export function getErrorPatterns(agentId: ToolType | string): AgentErrorPatterns {
-	// Validate the agent ID against known ToolTypes
-	if (!VALID_TOOL_TYPES.has(agentId)) {
-		logger.warn(
-			`getErrorPatterns: Unknown agent ID "${agentId}". Valid IDs: ${Array.from(VALID_TOOL_TYPES).join(', ')}`
-		);
+	// Validate the agent ID against the single source of truth
+	if (!isValidAgentId(agentId)) {
+		logger.warn(`getErrorPatterns: Unknown agent ID "${agentId}".`);
 	}
 
 	const patterns = patternRegistry.get(agentId as ToolType);
 
 	// Log debug info when no patterns are found for a valid-looking agent
-	if (!patterns && VALID_TOOL_TYPES.has(agentId)) {
+	if (!patterns && isValidAgentId(agentId)) {
 		logger.debug(
 			`getErrorPatterns: No patterns registered for agent "${agentId}". This agent may not have error pattern support.`
 		);
@@ -908,27 +1192,77 @@ export function getErrorPatterns(agentId: ToolType | string): AgentErrorPatterns
 }
 
 /**
+ * Default minimum chunk length for the streaming-path length guard.
+ *
+ * During agent streaming, the vast majority of stdout/stderr chunks are
+ * single-token noise ("the", "a", punctuation) that can never match an
+ * error pattern. The shortest real error string we observe in
+ * production is "timeout" (7 chars), which always arrives within a
+ * larger log line. Skipping the regex bank for chunks under this
+ * threshold is the bulk of the PR-D 1.8 win.
+ *
+ * Callers that test individual error strings in isolation (unit tests,
+ * one-shot probes) can pass `minLength: 0` to opt out.
+ *
+ * See CLAUDE-PERFORMANCE.md§"Error-pattern regex bank".
+ */
+export const ERROR_PATTERN_DEFAULT_MIN_CHUNK_LENGTH = 7;
+
+/**
+ * Error types ordered by historical hit frequency (most-likely first).
+ * Production telemetry shows rate_limited and network_error account for
+ * ~70% of all matches; the auth/permission tail is rare. Iterating in
+ * hit-frequency order means most matches succeed in the first 1-2
+ * pattern types instead of the last 1-2.
+ *
+ * If telemetry shifts (new agent provider, new error class), reorder
+ * here. Behavior is identical — first-match early-return is preserved.
+ */
+const ERROR_TYPES_BY_HIT_FREQUENCY: AgentErrorType[] = [
+	'rate_limited',
+	'network_error',
+	'token_exhaustion',
+	'auth_expired',
+	'agent_crashed',
+	'session_not_found',
+	'permission_denied',
+];
+
+export interface MatchErrorPatternOptions {
+	/**
+	 * Skip the regex bank entirely for chunks shorter than this. Pass `0`
+	 * to disable (unit tests checking individual error strings should do
+	 * this). Defaults to {@link ERROR_PATTERN_DEFAULT_MIN_CHUNK_LENGTH}.
+	 */
+	minLength?: number;
+}
+
+/**
  * Match a line against error patterns and return the error type
  * @param patterns - Error patterns to match against
  * @param line - The line to check
+ * @param options - Tuning knobs (length guard threshold)
  * @returns Matched error info or null if no match
  */
 export function matchErrorPattern(
 	patterns: AgentErrorPatterns,
-	line: string
+	line: string,
+	options?: MatchErrorPatternOptions
 ): { type: AgentErrorType; message: string; recoverable: boolean } | null {
-	// Check each error type's patterns
-	const errorTypes: AgentErrorType[] = [
-		'auth_expired',
-		'token_exhaustion',
-		'rate_limited',
-		'network_error',
-		'permission_denied',
-		'session_not_found',
-		'agent_crashed',
-	];
+	// Guard against non-string input (e.g. when obj.message is an object)
+	if (typeof line !== 'string') {
+		return null;
+	}
 
-	for (const errorType of errorTypes) {
+	// Length guard: token noise during streaming dominates by volume but
+	// never contains an error pattern. Skipping the regex bank here is
+	// the largest single CPU saving on the streaming path.
+	const minLength = options?.minLength ?? ERROR_PATTERN_DEFAULT_MIN_CHUNK_LENGTH;
+	if (line.length < minLength) {
+		return null;
+	}
+
+	for (const errorType of ERROR_TYPES_BY_HIT_FREQUENCY) {
 		const typePatterns = patterns[errorType];
 		if (!typePatterns) continue;
 
@@ -940,7 +1274,10 @@ export function matchErrorPattern(
 					typeof pattern.message === 'function' ? pattern.message(match) : pattern.message;
 
 				// Log detailed info for SSH shell parse errors to help debug
-				if (pattern.pattern.source.includes('parse error') || pattern.pattern.source.includes('syntax error')) {
+				if (
+					pattern.pattern.source.includes('parse error') ||
+					pattern.pattern.source.includes('syntax error')
+				) {
 					logger.info('[ErrorPatterns] Shell parse error detected', 'error-patterns', {
 						errorType,
 						patternSource: pattern.pattern.source,
