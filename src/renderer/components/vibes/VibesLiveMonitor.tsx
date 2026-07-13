@@ -1,13 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import {
-	Radio,
-	FileEdit,
-	FilePlus,
-	FileX,
-	Eye,
-	Clock,
-	AlertCircle,
-} from 'lucide-react';
+import { Radio, FileEdit, FilePlus, FileX, Eye, Clock, AlertCircle } from 'lucide-react';
 import type { Theme } from '../../types';
 
 // ============================================================================
@@ -93,7 +85,7 @@ function parseAnnotations(raw: string | undefined): LiveAnnotation[] {
 	if (!raw) return [];
 	try {
 		const data = JSON.parse(raw);
-		const list = Array.isArray(data) ? data : data.annotations ?? [];
+		const list = Array.isArray(data) ? data : (data.annotations ?? []);
 		return list.map((entry: Record<string, unknown>, idx: number) => ({
 			id: (entry.id ?? `${entry.timestamp ?? ''}-${idx}`) as string,
 			timestamp: (entry.timestamp ?? entry.start_time ?? '') as string,
@@ -196,7 +188,11 @@ export const VibesLiveMonitor: React.FC<VibesLiveMonitorProps> = ({
 			} else if (result.error) {
 				// Only set error if it's not a "build required" scenario
 				const errMsg = result.error.toLowerCase();
-				if (errMsg.includes('build') || errMsg.includes('database') || errMsg.includes('audit.db')) {
+				if (
+					errMsg.includes('build') ||
+					errMsg.includes('database') ||
+					errMsg.includes('audit.db')
+				) {
 					setAnnotations([]);
 					setTotalCount(0);
 					setError(null);
@@ -279,10 +275,7 @@ export const VibesLiveMonitor: React.FC<VibesLiveMonitorProps> = ({
 		>
 			{/* Header */}
 			<div className="flex items-center gap-2 px-3 py-2">
-				<Radio
-					className="w-3.5 h-3.5 shrink-0"
-					style={{ color: pulseColor }}
-				/>
+				<Radio className="w-3.5 h-3.5 shrink-0" style={{ color: pulseColor }} />
 				<span
 					className="text-[11px] font-semibold uppercase tracking-wider"
 					style={{ color: theme.colors.textDim }}
@@ -295,10 +288,7 @@ export const VibesLiveMonitor: React.FC<VibesLiveMonitorProps> = ({
 						style={{ backgroundColor: theme.colors.success }}
 					/>
 				)}
-				<span
-					className="text-[10px] ml-auto tabular-nums"
-					style={{ color: theme.colors.textDim }}
-				>
+				<span className="text-[10px] ml-auto tabular-nums" style={{ color: theme.colors.textDim }}>
 					{displayCount} annotation{displayCount !== 1 ? 's' : ''}
 				</span>
 			</div>
@@ -328,52 +318,50 @@ export const VibesLiveMonitor: React.FC<VibesLiveMonitorProps> = ({
 						</div>
 					)}
 
-					{hasAnnotations && annotations.map((entry) => (
-						<div
-							key={entry.id}
-							className="flex items-center gap-2 px-3 py-1.5 border-t text-[10px]"
-							style={{ borderColor: theme.colors.border }}
-						>
-							{/* Action icon */}
-							<ActionIcon action={entry.action} />
-
-							{/* File path */}
-							<span
-								className="font-mono truncate min-w-0 flex-1"
-								style={{ color: theme.colors.textMain }}
-								title={entry.file}
+					{hasAnnotations &&
+						annotations.map((entry) => (
+							<div
+								key={entry.id}
+								className="flex items-center gap-2 px-3 py-1.5 border-t text-[10px]"
+								style={{ borderColor: theme.colors.border }}
 							>
-								{entry.file ? shortFileName(entry.file) : '—'}
-							</span>
+								{/* Action icon */}
+								<ActionIcon action={entry.action} />
 
-							{/* Action badge */}
-							<span
-								className="px-1 py-0.5 rounded text-[9px] font-semibold uppercase shrink-0"
-								style={{
-								backgroundColor: (ACTION_STYLES[entry.action] ?? ACTION_STYLES.modify).bg,
-								color: (ACTION_STYLES[entry.action] ?? ACTION_STYLES.modify).text,
-							}}
-							>
-								{entry.action}
-							</span>
+								{/* File path */}
+								<span
+									className="font-mono truncate min-w-0 flex-1"
+									style={{ color: theme.colors.textMain }}
+									title={entry.file}
+								>
+									{entry.file ? shortFileName(entry.file) : '—'}
+								</span>
 
-							{/* Agent type */}
-							<span
-								className="shrink-0 text-[9px]"
-								style={{ color: theme.colors.textDim }}
-							>
-								{formatToolName(entry.tool_name)}
-							</span>
+								{/* Action badge */}
+								<span
+									className="px-1 py-0.5 rounded text-[9px] font-semibold uppercase shrink-0"
+									style={{
+										backgroundColor: (ACTION_STYLES[entry.action] ?? ACTION_STYLES.modify).bg,
+										color: (ACTION_STYLES[entry.action] ?? ACTION_STYLES.modify).text,
+									}}
+								>
+									{entry.action}
+								</span>
 
-							{/* Timestamp */}
-							<span
-								className="shrink-0 tabular-nums text-[9px]"
-								style={{ color: theme.colors.textDim }}
-							>
-								{formatTime(entry.timestamp)}
-							</span>
-						</div>
-					))}
+								{/* Agent type */}
+								<span className="shrink-0 text-[9px]" style={{ color: theme.colors.textDim }}>
+									{formatToolName(entry.tool_name)}
+								</span>
+
+								{/* Timestamp */}
+								<span
+									className="shrink-0 tabular-nums text-[9px]"
+									style={{ color: theme.colors.textDim }}
+								>
+									{formatTime(entry.timestamp)}
+								</span>
+							</div>
+						))}
 				</div>
 			)}
 

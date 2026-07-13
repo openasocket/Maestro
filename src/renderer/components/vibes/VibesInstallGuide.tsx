@@ -20,13 +20,16 @@ interface VibesInstallGuideProps {
 const INSTALL_OPTIONS = [
 	{
 		label: 'Install from source (Rust)',
-		command: 'git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo install --path .',
+		command:
+			'git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo install --path .',
 		description: 'Preferred method — requires Rust toolchain (1.91.0+)',
 	},
 	{
 		label: 'Build manually',
-		command: 'git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo build --release',
-		description: 'Binary at target/release/vibecheck — copy to a directory in PATH (e.g. /usr/local/bin/)',
+		command:
+			'git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo build --release',
+		description:
+			'Binary at target/release/vibecheck — copy to a directory in PATH (e.g. /usr/local/bin/)',
 	},
 ];
 
@@ -74,10 +77,7 @@ export const VibesInstallGuide: React.FC<VibesInstallGuideProps> = ({
 		>
 			{/* Header */}
 			<div className="flex items-center justify-between">
-				<span
-					className="text-xs font-semibold"
-					style={{ color: theme.colors.textMain }}
-				>
+				<span className="text-xs font-semibold" style={{ color: theme.colors.textMain }}>
 					Install vibecheck
 				</span>
 				<button
@@ -93,16 +93,10 @@ export const VibesInstallGuide: React.FC<VibesInstallGuideProps> = ({
 			{/* Install options */}
 			{INSTALL_OPTIONS.map((option, idx) => (
 				<div key={option.label} className="flex flex-col gap-1">
-					<span
-						className="text-[11px] font-medium"
-						style={{ color: theme.colors.textMain }}
-					>
+					<span className="text-[11px] font-medium" style={{ color: theme.colors.textMain }}>
 						{option.label}
 					</span>
-					<span
-						className="text-[10px]"
-						style={{ color: theme.colors.textDim }}
-					>
+					<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
 						{option.description}
 					</span>
 					{option.command && (
@@ -136,11 +130,11 @@ export const VibesInstallGuide: React.FC<VibesInstallGuideProps> = ({
 			))}
 
 			{/* Custom path hint */}
-			<div className="flex flex-col gap-1 pt-1 border-t" style={{ borderColor: theme.colors.border }}>
-				<span
-					className="text-[10px]"
-					style={{ color: theme.colors.textDim }}
-				>
+			<div
+				className="flex flex-col gap-1 pt-1 border-t"
+				style={{ borderColor: theme.colors.border }}
+			>
+				<span className="text-[10px]" style={{ color: theme.colors.textDim }}>
 					Already installed? Set the path in Settings &gt; VIBES
 				</span>
 				<button

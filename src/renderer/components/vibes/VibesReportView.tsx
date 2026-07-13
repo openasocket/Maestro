@@ -106,24 +106,27 @@ export const VibesReportView: React.FC<VibesReportViewProps> = ({
 					errMsg.toLowerCase().includes('timed out') ||
 					errMsg.toLowerCase().includes('etimedout')
 				) {
-					setError('Report generation timed out. This project may be too large. Try generating a JSON report for faster results, or run vibecheck from the command line.');
+					setError(
+						'Report generation timed out. This project may be too large. Try generating a JSON report for faster results, or run vibecheck from the command line.'
+					);
 				} else {
 					setError(errMsg);
 				}
 			}
 		} catch (err) {
 			const errMsg = err instanceof Error ? err.message : 'Failed to generate report';
-			if (
-				errMsg.toLowerCase().includes('binary') ||
-				errMsg.toLowerCase().includes('not found')
-			) {
-				setError('vibecheck binary not found. Please install vibecheck or configure its path in Settings.');
+			if (errMsg.toLowerCase().includes('binary') || errMsg.toLowerCase().includes('not found')) {
+				setError(
+					'vibecheck binary not found. Please install vibecheck or configure its path in Settings.'
+				);
 			} else if (
 				errMsg.toLowerCase().includes('timeout') ||
 				errMsg.toLowerCase().includes('timed out') ||
 				errMsg.toLowerCase().includes('etimedout')
 			) {
-				setError('Report generation timed out. This project may be too large. Try generating a JSON report for faster results, or run vibecheck from the command line.');
+				setError(
+					'Report generation timed out. This project may be too large. Try generating a JSON report for faster results, or run vibecheck from the command line.'
+				);
 			} else {
 				setError(errMsg);
 			}
@@ -320,17 +323,12 @@ export const VibesReportView: React.FC<VibesReportViewProps> = ({
 				{!reportContent && !isLoading && !error && !needsBuild && (
 					<div className="flex flex-col items-center justify-center gap-3 py-12 px-4 text-center">
 						<FileText className="w-6 h-6 opacity-40" style={{ color: theme.colors.textDim }} />
-						<span
-							className="text-sm font-medium"
-							style={{ color: theme.colors.textMain }}
-						>
+						<span className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
 							Generate a provenance report
 						</span>
-						<span
-							className="text-xs max-w-xs"
-							style={{ color: theme.colors.textDim }}
-						>
-							Select a format and click Generate to create a VIBES provenance report for this project.
+						<span className="text-xs max-w-xs" style={{ color: theme.colors.textDim }}>
+							Select a format and click Generate to create a VIBES provenance report for this
+							project.
 						</span>
 					</div>
 				)}
@@ -357,16 +355,10 @@ export const VibesReportView: React.FC<VibesReportViewProps> = ({
 				{!isLoading && needsBuild && (
 					<div className="flex flex-col items-center justify-center gap-3 py-12 px-4 text-center">
 						<Database className="w-6 h-6 opacity-60" style={{ color: theme.colors.warning }} />
-						<span
-							className="text-sm font-medium"
-							style={{ color: theme.colors.textMain }}
-						>
+						<span className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
 							Build Required
 						</span>
-						<span
-							className="text-xs max-w-xs"
-							style={{ color: theme.colors.textDim }}
-						>
+						<span className="text-xs max-w-xs" style={{ color: theme.colors.textDim }}>
 							The audit database needs to be built before generating a report.
 						</span>
 						<button
@@ -397,11 +389,7 @@ export const VibesReportView: React.FC<VibesReportViewProps> = ({
 
 				{/* Report preview */}
 				{!isLoading && !error && !needsBuild && reportContent && (
-					<ReportPreview
-						theme={theme}
-						content={reportContent}
-						format={format}
-					/>
+					<ReportPreview theme={theme} content={reportContent} format={format} />
 				)}
 			</div>
 		</div>

@@ -7,7 +7,7 @@ tags:
   - instrumentation
   - architecture
 related:
-  - "[[VIBES-Data-Model]]"
+  - '[[VIBES-Data-Model]]'
 ---
 
 # VIBES Integration Architecture
@@ -27,12 +27,12 @@ Both layers write to the same `.ai-audit/` directory using the VIBES v1.0 standa
 
 Maestro captures orchestration-level events that represent the "big picture" of an AI-assisted development session:
 
-| Event | What is Captured |
-|---|---|
-| Agent spawn | Command, arguments, prompt text, project path |
-| Agent complete | Exit code, output summary |
-| Batch run start | Number of agents, batch configuration |
-| Batch run complete | Success/failure counts, total duration |
+| Event              | What is Captured                              |
+| ------------------ | --------------------------------------------- |
+| Agent spawn        | Command, arguments, prompt text, project path |
+| Agent complete     | Exit code, output summary                     |
+| Batch run start    | Number of agents, batch configuration         |
+| Batch run complete | Success/failure counts, total duration        |
 
 These events are recorded as command and prompt manifest entries with `tool_name: "Maestro"`, linking to line annotations only when file modifications are detected at the orchestration level.
 
@@ -46,13 +46,13 @@ These events are recorded as command and prompt manifest entries with `tool_name
 
 Maps Claude Code tool executions to VIBES action types:
 
-| Claude Code Tool | VIBES Command Type | VIBES Action |
-|---|---|---|
-| Write, Edit, MultiEdit, NotebookEdit | `file_write` | `create` or `modify` |
-| Read | `file_read` | `review` |
-| Bash | `shell` | varies |
-| Glob, Grep, TodoRead, TodoWrite, Task | `tool_use` | varies |
-| WebFetch, WebSearch | `api_call` | varies |
+| Claude Code Tool                      | VIBES Command Type | VIBES Action         |
+| ------------------------------------- | ------------------ | -------------------- |
+| Write, Edit, MultiEdit, NotebookEdit  | `file_write`       | `create` or `modify` |
+| Read                                  | `file_read`        | `review`             |
+| Bash                                  | `shell`            | varies               |
+| Glob, Grep, TodoRead, TodoWrite, Task | `tool_use`         | varies               |
+| WebFetch, WebSearch                   | `api_call`         | varies               |
 
 ### Codex Instrumenter
 
@@ -60,12 +60,12 @@ Maps Claude Code tool executions to VIBES action types:
 
 Maps Codex tool executions to VIBES action types:
 
-| Codex Tool | VIBES Command Type | VIBES Action |
-|---|---|---|
-| shell, container_shell | `shell` | varies |
-| write_file, apply_patch, create_file | `file_write` | `modify` or `create` |
-| read_file, list_directory | `file_read` | `review` |
-| file_search, grep_search, codebase_search | `tool_use` | varies |
+| Codex Tool                                | VIBES Command Type | VIBES Action         |
+| ----------------------------------------- | ------------------ | -------------------- |
+| shell, container_shell                    | `shell`            | varies               |
+| write_file, apply_patch, create_file      | `file_write`       | `modify` or `create` |
+| read_file, list_directory                 | `file_read`        | `review`             |
+| file_search, grep_search, codebase_search | `tool_use`         | varies               |
 
 ### Reasoning Capture
 
@@ -130,63 +130,63 @@ Token usage statistics from `usage` events are attached to reasoning entries, in
 
 ### Core VIBES Modules (`src/main/vibes/`)
 
-| File | Responsibility |
-|---|---|
-| `vibes-coordinator.ts` | Central orchestrator; subscribes to ProcessManager events, routes to instrumenters, manages lifecycle |
-| `vibes-session.ts` | Per-session state management; tracks active sessions, annotation counts, start/end lifecycle |
-| `vibes-io.ts` | All file I/O to `.ai-audit/`; config, manifest, annotations JSONL, directory creation |
-| `vibes-hash.ts` | SHA-256 content-addressed hashing; canonical JSON serialization, short hash generation |
-| `vibes-annotations.ts` | Builder functions for all annotation and manifest entry types |
-| `vibes-bridge.ts` | CLI bridge to `vibescheck` binary; wraps init, build, stats, blame, log, coverage, report, sessions, models |
+| File                   | Responsibility                                                                                              |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `vibes-coordinator.ts` | Central orchestrator; subscribes to ProcessManager events, routes to instrumenters, manages lifecycle       |
+| `vibes-session.ts`     | Per-session state management; tracks active sessions, annotation counts, start/end lifecycle                |
+| `vibes-io.ts`          | All file I/O to `.ai-audit/`; config, manifest, annotations JSONL, directory creation                       |
+| `vibes-hash.ts`        | SHA-256 content-addressed hashing; canonical JSON serialization, short hash generation                      |
+| `vibes-annotations.ts` | Builder functions for all annotation and manifest entry types                                               |
+| `vibes-bridge.ts`      | CLI bridge to `vibescheck` binary; wraps init, build, stats, blame, log, coverage, report, sessions, models |
 
 ### Instrumenters (`src/main/vibes/instrumenters/`)
 
-| File | Responsibility |
-|---|---|
-| `claude-code-instrumenter.ts` | Translates Claude Code tool events to VIBES annotations |
-| `codex-instrumenter.ts` | Translates Codex tool events to VIBES annotations |
-| `maestro-instrumenter.ts` | Captures Maestro orchestration events (agent spawn/complete, batch start/complete) |
+| File                          | Responsibility                                                                     |
+| ----------------------------- | ---------------------------------------------------------------------------------- |
+| `claude-code-instrumenter.ts` | Translates Claude Code tool events to VIBES annotations                            |
+| `codex-instrumenter.ts`       | Translates Codex tool events to VIBES annotations                                  |
+| `maestro-instrumenter.ts`     | Captures Maestro orchestration events (agent spawn/complete, batch start/complete) |
 
 ### Shared Types (`src/shared/`)
 
-| File | Responsibility |
-|---|---|
-| `vibes-types.ts` | TypeScript interfaces and type aliases for the VIBES v1.0 standard |
-| `vibes-settings.ts` | Settings schema, defaults, and validation for VIBES configuration |
+| File                | Responsibility                                                     |
+| ------------------- | ------------------------------------------------------------------ |
+| `vibes-types.ts`    | TypeScript interfaces and type aliases for the VIBES v1.0 standard |
+| `vibes-settings.ts` | Settings schema, defaults, and validation for VIBES configuration  |
 
 ### IPC & Preload
 
-| File | Responsibility |
-|---|---|
+| File                                      | Responsibility                                                        |
+| ----------------------------------------- | --------------------------------------------------------------------- |
 | `src/main/ipc/handlers/vibes-handlers.ts` | Registers IPC handlers (`vibes:*`) for renderer-to-main communication |
-| `src/main/preload/vibes.ts` | Exposes `window.maestro.vibes` API to renderer process |
+| `src/main/preload/vibes.ts`               | Exposes `window.maestro.vibes` API to renderer process                |
 
 ### UI Components
 
-| File | Responsibility |
-|---|---|
-| `src/renderer/components/vibes/VibesPanel.tsx` | Main VIBES panel with sub-tab navigation (Overview, Log, Models) |
-| `src/renderer/components/vibes/VibesDashboard.tsx` | Overview dashboard with stats and coverage |
-| `src/renderer/components/vibes/VibesAnnotationLog.tsx` | Annotation log viewer with filtering |
-| `src/renderer/components/vibes/VibesModelAttribution.tsx` | Model attribution breakdown |
-| `src/renderer/components/Settings/VibesSettings.tsx` | Settings panel for VIBES configuration |
+| File                                                      | Responsibility                                                   |
+| --------------------------------------------------------- | ---------------------------------------------------------------- |
+| `src/renderer/components/vibes/VibesPanel.tsx`            | Main VIBES panel with sub-tab navigation (Overview, Log, Models) |
+| `src/renderer/components/vibes/VibesDashboard.tsx`        | Overview dashboard with stats and coverage                       |
+| `src/renderer/components/vibes/VibesAnnotationLog.tsx`    | Annotation log viewer with filtering                             |
+| `src/renderer/components/vibes/VibesModelAttribution.tsx` | Model attribution breakdown                                      |
+| `src/renderer/components/Settings/VibesSettings.tsx`      | Settings panel for VIBES configuration                           |
 
 ## Settings Schema
 
 All VIBES settings are stored in Maestro's `electron-store` and defined in `src/shared/vibes-settings.ts`.
 
-| Setting | Type | Default | Description |
-|---|---|---|---|
-| `vibesEnabled` | `boolean` | `false` | Master toggle for all VIBES instrumentation |
-| `vibesAssuranceLevel` | `'low' \| 'medium' \| 'high'` | `'medium'` | Controls metadata detail level |
-| `vibesTrackedExtensions` | `string[]` | `.ts, .tsx, .js, .jsx, .py, .rs, .go, .java, .c, .cpp, .rb, .swift, .kt` | File extensions to instrument |
-| `vibesExcludePatterns` | `string[]` | `**/node_modules/**, **/vendor/**, **/.venv/**, **/dist/**, **/target/**, **/.git/**, **/build/**` | Glob patterns to exclude |
-| `vibesPerAgentConfig` | `Record<string, { enabled: boolean }>` | `{ 'claude-code': { enabled: true }, 'codex': { enabled: true } }` | Per-agent enable/disable toggles |
-| `vibesMaestroOrchestrationEnabled` | `boolean` | `true` | Capture Maestro-level orchestration events |
-| `vibesAutoInit` | `boolean` | `true` | Automatically run `vibescheck init` on new projects |
-| `vibesCheckBinaryPath` | `string` | `''` (empty = search `$PATH`) | Custom path to vibescheck binary |
-| `vibesCompressReasoningThreshold` | `number` | `10240` (10 KB) | Byte threshold for compressing reasoning text |
-| `vibesExternalBlobThreshold` | `number` | `102400` (100 KB) | Byte threshold for storing data as external blobs |
+| Setting                            | Type                                   | Default                                                                                            | Description                                         |
+| ---------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `vibesEnabled`                     | `boolean`                              | `false`                                                                                            | Master toggle for all VIBES instrumentation         |
+| `vibesAssuranceLevel`              | `'low' \| 'medium' \| 'high'`          | `'medium'`                                                                                         | Controls metadata detail level                      |
+| `vibesTrackedExtensions`           | `string[]`                             | `.ts, .tsx, .js, .jsx, .py, .rs, .go, .java, .c, .cpp, .rb, .swift, .kt`                           | File extensions to instrument                       |
+| `vibesExcludePatterns`             | `string[]`                             | `**/node_modules/**, **/vendor/**, **/.venv/**, **/dist/**, **/target/**, **/.git/**, **/build/**` | Glob patterns to exclude                            |
+| `vibesPerAgentConfig`              | `Record<string, { enabled: boolean }>` | `{ 'claude-code': { enabled: true }, 'codex': { enabled: true } }`                                 | Per-agent enable/disable toggles                    |
+| `vibesMaestroOrchestrationEnabled` | `boolean`                              | `true`                                                                                             | Capture Maestro-level orchestration events          |
+| `vibesAutoInit`                    | `boolean`                              | `true`                                                                                             | Automatically run `vibescheck init` on new projects |
+| `vibesCheckBinaryPath`             | `string`                               | `''` (empty = search `$PATH`)                                                                      | Custom path to vibescheck binary                    |
+| `vibesCompressReasoningThreshold`  | `number`                               | `10240` (10 KB)                                                                                    | Byte threshold for compressing reasoning text       |
+| `vibesExternalBlobThreshold`       | `number`                               | `102400` (100 KB)                                                                                  | Byte threshold for storing data as external blobs   |
 
 ## VibesCheck Bridge
 
@@ -199,17 +199,17 @@ Maestro delegates all querying, reporting, and database operations to the `vibes
 
 ### Available Commands
 
-| Bridge Function | CLI Command | Purpose |
-|---|---|---|
-| `vibesInit` | `vibescheck init` | Initialize `.ai-audit/` in a project |
-| `vibesBuild` | `vibescheck build` | Rebuild the annotation database |
-| `vibesStats` | `vibescheck stats [file]` | Get statistics for project or file |
-| `vibesBlame` | `vibescheck blame --json <file>` | Get per-line AI attribution |
-| `vibesLog` | `vibescheck log [--session --model --limit]` | Query annotation history |
-| `vibesCoverage` | `vibescheck coverage [--json]` | Get AI coverage percentage |
-| `vibesReport` | `vibescheck report [--format]` | Generate formatted report |
-| `vibesSessions` | `vibescheck sessions --json` | List all recorded sessions |
-| `vibesModels` | `vibescheck models --json` | List all models used |
+| Bridge Function | CLI Command                                  | Purpose                              |
+| --------------- | -------------------------------------------- | ------------------------------------ |
+| `vibesInit`     | `vibescheck init`                            | Initialize `.ai-audit/` in a project |
+| `vibesBuild`    | `vibescheck build`                           | Rebuild the annotation database      |
+| `vibesStats`    | `vibescheck stats [file]`                    | Get statistics for project or file   |
+| `vibesBlame`    | `vibescheck blame --json <file>`             | Get per-line AI attribution          |
+| `vibesLog`      | `vibescheck log [--session --model --limit]` | Query annotation history             |
+| `vibesCoverage` | `vibescheck coverage [--json]`               | Get AI coverage percentage           |
+| `vibesReport`   | `vibescheck report [--format]`               | Generate formatted report            |
+| `vibesSessions` | `vibescheck sessions --json`                 | List all recorded sessions           |
+| `vibesModels`   | `vibescheck models --json`                   | List all models used                 |
 
 ### IPC Integration
 

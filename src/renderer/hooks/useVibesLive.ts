@@ -89,18 +89,18 @@ export function useVibesLive(enabled: boolean = true): UseVibesLiveReturn {
 		(sessionId: string): number => {
 			return updates.get(sessionId)?.annotationCount ?? 0;
 		},
-		[updates],
+		[updates]
 	);
 
 	const getLastAnnotation = useCallback(
 		(sessionId: string): VibesAnnotationUpdate['lastAnnotation'] | null => {
 			return updates.get(sessionId)?.lastAnnotation ?? null;
 		},
-		[updates],
+		[updates]
 	);
 
 	return useMemo(
 		() => ({ updates, getCount, getLastAnnotation }),
-		[updates, getCount, getLastAnnotation],
+		[updates, getCount, getLastAnnotation]
 	);
 }

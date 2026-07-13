@@ -53,7 +53,7 @@ export const VibesModelAttribution: React.FC<VibesModelAttributionProps> = ({
 	// Trigger lazy load on first mount
 	useEffect(() => {
 		onMount?.();
-	}, []);  
+	}, []);
 	const [searchQuery, setSearchQuery] = useState('');
 	const [sortBy, setSortBy] = useState<SortField>('count');
 	const [showAll, setShowAll] = useState(false);

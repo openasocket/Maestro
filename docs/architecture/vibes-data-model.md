@@ -7,7 +7,7 @@ tags:
   - data-model
   - reference
 related:
-  - "[[VIBES-Integration]]"
+  - '[[VIBES-Integration]]'
 ---
 
 # VIBES Data Model Reference
@@ -18,11 +18,11 @@ This document provides a complete reference for the VIBES (Verified Instrumental
 
 Assurance levels control the granularity of metadata captured during AI-assisted development sessions. The level is set globally via Maestro settings and applies to all instrumenters.
 
-| Level | Description | Data Captured |
-|---|---|---|
-| **Low** | Minimal metadata; session boundaries only | Environment entries, session start/end records |
-| **Medium** (default) | Balanced detail; suitable for most workflows | All from Low, plus: prompts with context files, command entries with output summaries, line/function annotations |
-| **High** | Complete capture; full traceability | All from Medium, plus: reasoning/thinking chains, token counts per reasoning block, model identification on reasoning entries |
+| Level                | Description                                  | Data Captured                                                                                                                 |
+| -------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Low**              | Minimal metadata; session boundaries only    | Environment entries, session start/end records                                                                                |
+| **Medium** (default) | Balanced detail; suitable for most workflows | All from Low, plus: prompts with context files, command entries with output summaries, line/function annotations              |
+| **High**             | Complete capture; full traceability          | All from Medium, plus: reasoning/thinking chains, token counts per reasoning block, model identification on reasoning entries |
 
 ### Assurance Level Type
 
@@ -43,10 +43,7 @@ Annotations are the primary output of VIBES instrumentation. They are appended t
 ```typescript
 type VibesAnnotationType = 'line' | 'function' | 'session';
 
-type VibesAnnotation =
-  | VibesLineAnnotation
-  | VibeFunctionAnnotation
-  | VibesSessionRecord;
+type VibesAnnotation = VibesLineAnnotation | VibeFunctionAnnotation | VibesSessionRecord;
 ```
 
 ### Line Annotation
@@ -55,19 +52,19 @@ Links a range of lines in a source file to provenance metadata. This is the most
 
 ```typescript
 interface VibesLineAnnotation {
-  type: 'line';
-  file_path: string;               // Relative or absolute path to the file
-  line_start: number;              // Starting line number (1-based)
-  line_end: number;                // Ending line number (inclusive)
-  environment_hash: string;        // SHA-256 of the environment entry (64 hex chars)
-  command_hash?: string;           // SHA-256 of the command entry
-  prompt_hash?: string;            // SHA-256 of the prompt entry (medium+ assurance)
-  reasoning_hash?: string;         // SHA-256 of the reasoning entry (high assurance)
-  action: VibesAction;             // What operation was performed
-  timestamp: string;               // ISO 8601 when the annotation was created
-  commit_hash?: string;            // Git commit hash if available
-  session_id?: string;             // Maestro session ID
-  assurance_level: VibesAssuranceLevel;
+	type: 'line';
+	file_path: string; // Relative or absolute path to the file
+	line_start: number; // Starting line number (1-based)
+	line_end: number; // Ending line number (inclusive)
+	environment_hash: string; // SHA-256 of the environment entry (64 hex chars)
+	command_hash?: string; // SHA-256 of the command entry
+	prompt_hash?: string; // SHA-256 of the prompt entry (medium+ assurance)
+	reasoning_hash?: string; // SHA-256 of the reasoning entry (high assurance)
+	action: VibesAction; // What operation was performed
+	timestamp: string; // ISO 8601 when the annotation was created
+	commit_hash?: string; // Git commit hash if available
+	session_id?: string; // Maestro session ID
+	assurance_level: VibesAssuranceLevel;
 }
 ```
 
@@ -77,19 +74,19 @@ Links a named function to provenance metadata. Used when function-level granular
 
 ```typescript
 interface VibeFunctionAnnotation {
-  type: 'function';
-  file_path: string;               // Path to the file containing the function
-  function_name: string;           // Function/method name
-  function_signature?: string;     // Full signature, e.g. "function foo(x: number): string"
-  environment_hash: string;        // SHA-256 of the environment entry
-  command_hash?: string;           // SHA-256 of the command entry
-  prompt_hash?: string;            // SHA-256 of the prompt entry
-  reasoning_hash?: string;         // SHA-256 of the reasoning entry
-  action: VibesAction;             // What operation was performed
-  timestamp: string;               // ISO 8601 timestamp
-  commit_hash?: string;            // Git commit hash if available
-  session_id?: string;             // Maestro session ID
-  assurance_level: VibesAssuranceLevel;
+	type: 'function';
+	file_path: string; // Path to the file containing the function
+	function_name: string; // Function/method name
+	function_signature?: string; // Full signature, e.g. "function foo(x: number): string"
+	environment_hash: string; // SHA-256 of the environment entry
+	command_hash?: string; // SHA-256 of the command entry
+	prompt_hash?: string; // SHA-256 of the prompt entry
+	reasoning_hash?: string; // SHA-256 of the reasoning entry
+	action: VibesAction; // What operation was performed
+	timestamp: string; // ISO 8601 timestamp
+	commit_hash?: string; // Git commit hash if available
+	session_id?: string; // Maestro session ID
+	assurance_level: VibesAssuranceLevel;
 }
 ```
 
@@ -99,13 +96,13 @@ Marks the start or end of an AI agent session. Session records bracket the annot
 
 ```typescript
 interface VibesSessionRecord {
-  type: 'session';
-  event: 'start' | 'end';
-  session_id: string;              // UUID generated by Maestro
-  timestamp: string;               // ISO 8601 timestamp
-  environment_hash?: string;       // Set on 'start'; optional on 'end'
-  assurance_level?: VibesAssuranceLevel;  // Set on 'start'
-  description?: string;            // e.g. "claude-code agent session"
+	type: 'session';
+	event: 'start' | 'end';
+	session_id: string; // UUID generated by Maestro
+	timestamp: string; // ISO 8601 timestamp
+	environment_hash?: string; // Set on 'start'; optional on 'end'
+	assurance_level?: VibesAssuranceLevel; // Set on 'start'
+	description?: string; // e.g. "claude-code agent session"
 }
 ```
 
@@ -117,12 +114,12 @@ The `action` field on line and function annotations describes what the AI agent 
 type VibesAction = 'create' | 'modify' | 'delete' | 'review';
 ```
 
-| Action | Meaning |
-|---|---|
-| `create` | New file or code block created by the agent |
+| Action   | Meaning                                      |
+| -------- | -------------------------------------------- |
+| `create` | New file or code block created by the agent  |
 | `modify` | Existing code edited or patched by the agent |
-| `delete` | Code or file removed by the agent |
-| `review` | Code read or inspected without modification |
+| `delete` | Code or file removed by the agent            |
+| `review` | Code read or inspected without modification  |
 
 ## Manifest Entry Types
 
@@ -130,10 +127,10 @@ Manifest entries are content-addressed records stored in `manifest.json`. Each e
 
 ```typescript
 type VibesManifestEntry =
-  | VibesEnvironmentEntry
-  | VibesCommandEntry
-  | VibesPromptEntry
-  | VibesReasoningEntry;
+	| VibesEnvironmentEntry
+	| VibesCommandEntry
+	| VibesPromptEntry
+	| VibesReasoningEntry;
 ```
 
 ### Environment Entry
@@ -142,14 +139,14 @@ Records the tool and model environment that produced annotations. Every session 
 
 ```typescript
 interface VibesEnvironmentEntry {
-  type: 'environment';
-  tool_name: string;                          // e.g. "Claude Code", "Codex", "Maestro"
-  tool_version: string;                       // e.g. "1.2.3"
-  model_name: string;                         // e.g. "claude-4", "o3"
-  model_version: string;                      // e.g. "opus"
-  model_parameters?: Record<string, unknown>; // e.g. { temperature: 0.7, top_p: 0.9 }
-  tool_extensions?: string[];                 // e.g. ["mcp-server", "memory"]
-  created_at: string;                         // ISO 8601 timestamp
+	type: 'environment';
+	tool_name: string; // e.g. "Claude Code", "Codex", "Maestro"
+	tool_version: string; // e.g. "1.2.3"
+	model_name: string; // e.g. "claude-4", "o3"
+	model_version: string; // e.g. "opus"
+	model_parameters?: Record<string, unknown>; // e.g. { temperature: 0.7, top_p: 0.9 }
+	tool_extensions?: string[]; // e.g. ["mcp-server", "memory"]
+	created_at: string; // ISO 8601 timestamp
 }
 ```
 
@@ -159,13 +156,13 @@ Records a command executed by the AI agent. Captured at all assurance levels, wi
 
 ```typescript
 interface VibesCommandEntry {
-  type: 'command';
-  command_text: string;                    // The command text (truncated to 200 chars)
-  command_type: VibesCommandType;          // Classification of the command
-  command_exit_code?: number;              // Process exit code if available
-  command_output_summary?: string;         // Truncated output (max 200 chars)
-  working_directory?: string;              // Working directory when executed
-  created_at: string;                      // ISO 8601 timestamp
+	type: 'command';
+	command_text: string; // The command text (truncated to 200 chars)
+	command_type: VibesCommandType; // Classification of the command
+	command_exit_code?: number; // Process exit code if available
+	command_output_summary?: string; // Truncated output (max 200 chars)
+	working_directory?: string; // Working directory when executed
+	created_at: string; // ISO 8601 timestamp
 }
 ```
 
@@ -173,13 +170,13 @@ interface VibesCommandEntry {
 
 ```typescript
 type VibesCommandType =
-  | 'shell'        // Shell/bash commands
-  | 'file_write'   // File write or edit operations
-  | 'file_read'    // File read operations
-  | 'file_delete'  // File deletion
-  | 'api_call'     // API calls (WebFetch, WebSearch)
-  | 'tool_use'     // Generic tool use (search, todo, etc.)
-  | 'other';       // Uncategorized
+	| 'shell' // Shell/bash commands
+	| 'file_write' // File write or edit operations
+	| 'file_read' // File read operations
+	| 'file_delete' // File deletion
+	| 'api_call' // API calls (WebFetch, WebSearch)
+	| 'tool_use' // Generic tool use (search, todo, etc.)
+	| 'other'; // Uncategorized
 ```
 
 ### Prompt Entry
@@ -188,11 +185,11 @@ Records a prompt that triggered agent activity. Only captured at medium and high
 
 ```typescript
 interface VibesPromptEntry {
-  type: 'prompt';
-  prompt_text: string;                     // Full prompt text
-  prompt_type?: VibesPromptType;           // Classification of the prompt
-  prompt_context_files?: string[];         // Files referenced in the prompt context
-  created_at: string;                      // ISO 8601 timestamp
+	type: 'prompt';
+	prompt_text: string; // Full prompt text
+	prompt_type?: VibesPromptType; // Classification of the prompt
+	prompt_context_files?: string[]; // Files referenced in the prompt context
+	created_at: string; // ISO 8601 timestamp
 }
 ```
 
@@ -200,13 +197,13 @@ interface VibesPromptEntry {
 
 ```typescript
 type VibesPromptType =
-  | 'user_instruction'     // Direct user instruction
-  | 'edit_command'         // Edit/modify directive
-  | 'chat_message'        // Conversational message
-  | 'inline_completion'   // Code completion request
-  | 'review_request'      // Code review request
-  | 'refactor_request'    // Refactoring request
-  | 'other';              // Uncategorized
+	| 'user_instruction' // Direct user instruction
+	| 'edit_command' // Edit/modify directive
+	| 'chat_message' // Conversational message
+	| 'inline_completion' // Code completion request
+	| 'review_request' // Code review request
+	| 'refactor_request' // Refactoring request
+	| 'other'; // Uncategorized
 ```
 
 ### Reasoning Entry
@@ -215,15 +212,15 @@ Records chain-of-thought output from the model. Only captured at high assurance 
 
 ```typescript
 interface VibesReasoningEntry {
-  type: 'reasoning';
-  reasoning_text?: string;                 // Full text (if not compressed/externalized)
-  reasoning_text_compressed?: string;      // Compressed text (if > compress threshold)
-  compressed?: boolean;                    // Whether gzip compression was applied
-  external?: boolean;                      // Whether stored in external blob
-  blob_path?: string;                      // Path to blob file (e.g. "blobs/<hash>.bin")
-  reasoning_token_count?: number;          // Token count from model usage event
-  reasoning_model?: string;               // Model that generated the reasoning
-  created_at: string;                      // ISO 8601 timestamp
+	type: 'reasoning';
+	reasoning_text?: string; // Full text (if not compressed/externalized)
+	reasoning_text_compressed?: string; // Compressed text (if > compress threshold)
+	compressed?: boolean; // Whether gzip compression was applied
+	external?: boolean; // Whether stored in external blob
+	blob_path?: string; // Path to blob file (e.g. "blobs/<hash>.bin")
+	reasoning_token_count?: number; // Token count from model usage event
+	reasoning_model?: string; // Model that generated the reasoning
+	created_at: string; // ISO 8601 timestamp
 }
 ```
 
@@ -261,25 +258,25 @@ VIBES uses SHA-256 content-addressed hashing to deduplicate manifest entries and
 import { createHash } from 'node:crypto';
 
 export function computeVibesHash(context: Record<string, unknown>): string {
-  const { created_at: _, ...rest } = context;
-  const serialized = JSON.stringify(rest, Object.keys(rest).sort());
-  return createHash('sha256').update(serialized, 'utf8').digest('hex');
+	const { created_at: _, ...rest } = context;
+	const serialized = JSON.stringify(rest, Object.keys(rest).sort());
+	return createHash('sha256').update(serialized, 'utf8').digest('hex');
 }
 
 export function shortHash(hash: string): string {
-  return hash.slice(0, 16);
+	return hash.slice(0, 16);
 }
 ```
 
 ### Properties
 
-| Property | Description |
-|---|---|
-| **Deterministic** | Same content always produces the same hash |
-| **Time-independent** | `created_at` is excluded, so timestamps don't affect the hash |
-| **Key-order-independent** | Keys are sorted before serialization |
-| **Deduplicating** | Identical entries produce the same hash and are stored once in the manifest |
-| **Tamper-evident** | Any modification to an entry invalidates its hash |
+| Property                  | Description                                                                 |
+| ------------------------- | --------------------------------------------------------------------------- |
+| **Deterministic**         | Same content always produces the same hash                                  |
+| **Time-independent**      | `created_at` is excluded, so timestamps don't affect the hash               |
+| **Key-order-independent** | Keys are sorted before serialization                                        |
+| **Deduplicating**         | Identical entries produce the same hash and are stored once in the manifest |
+| **Tamper-evident**        | Any modification to an entry invalidates its hash                           |
 
 ### Format
 
@@ -291,7 +288,12 @@ export function shortHash(hash: string): string {
 Input (canonical JSON, sorted keys, `created_at` removed):
 
 ```json
-{"model_name":"claude-opus-4-5","tool_name":"Claude Code","tool_version":"1.0","type":"environment"}
+{
+	"model_name": "claude-opus-4-5",
+	"tool_name": "Claude Code",
+	"tool_version": "1.0",
+	"type": "environment"
+}
 ```
 
 SHA-256 result:
@@ -319,14 +321,14 @@ Project-level VIBES configuration. Written as pretty-printed JSON (2-space inden
 
 ```json
 {
-  "standard": "VIBES",
-  "standard_version": "1.0",
-  "assurance_level": "medium",
-  "project_name": "my-project",
-  "tracked_extensions": [".ts", ".tsx", ".js", ".jsx", ".py"],
-  "exclude_patterns": ["**/node_modules/**", "**/.git/**"],
-  "compress_reasoning_threshold_bytes": 10240,
-  "external_blob_threshold_bytes": 102400
+	"standard": "VIBES",
+	"standard_version": "1.0",
+	"assurance_level": "medium",
+	"project_name": "my-project",
+	"tracked_extensions": [".ts", ".tsx", ".js", ".jsx", ".py"],
+	"exclude_patterns": ["**/node_modules/**", "**/.git/**"],
+	"compress_reasoning_threshold_bytes": 10240,
+	"external_blob_threshold_bytes": 102400
 }
 ```
 
@@ -334,14 +336,14 @@ Project-level VIBES configuration. Written as pretty-printed JSON (2-space inden
 
 ```typescript
 interface VibesConfig {
-  standard: 'VIBES';
-  standard_version: '1.0';
-  assurance_level: VibesAssuranceLevel;
-  project_name: string;
-  tracked_extensions: string[];
-  exclude_patterns: string[];
-  compress_reasoning_threshold_bytes: number;
-  external_blob_threshold_bytes: number;
+	standard: 'VIBES';
+	standard_version: '1.0';
+	assurance_level: VibesAssuranceLevel;
+	project_name: string;
+	tracked_extensions: string[];
+	exclude_patterns: string[];
+	compress_reasoning_threshold_bytes: number;
+	external_blob_threshold_bytes: number;
 }
 ```
 
@@ -351,26 +353,26 @@ Content-addressed manifest storing all provenance entries. Written as pretty-pri
 
 ```json
 {
-  "standard": "VIBES",
-  "version": "1.0",
-  "entries": {
-    "a8b293149a7c71409a38f036ebeeea25942bb92531fb8d74bbf3e48098c537ed": {
-      "type": "environment",
-      "tool_name": "Claude Code",
-      "tool_version": "1.0",
-      "model_name": "claude-opus-4-5",
-      "model_version": "opus",
-      "created_at": "2026-02-10T12:00:00.000Z"
-    },
-    "fc29a1b3...": {
-      "type": "command",
-      "command_text": "npm test",
-      "command_type": "shell",
-      "command_exit_code": 0,
-      "command_output_summary": "All tests passed",
-      "created_at": "2026-02-10T12:01:00.000Z"
-    }
-  }
+	"standard": "VIBES",
+	"version": "1.0",
+	"entries": {
+		"a8b293149a7c71409a38f036ebeeea25942bb92531fb8d74bbf3e48098c537ed": {
+			"type": "environment",
+			"tool_name": "Claude Code",
+			"tool_version": "1.0",
+			"model_name": "claude-opus-4-5",
+			"model_version": "opus",
+			"created_at": "2026-02-10T12:00:00.000Z"
+		},
+		"fc29a1b3...": {
+			"type": "command",
+			"command_text": "npm test",
+			"command_type": "shell",
+			"command_exit_code": 0,
+			"command_output_summary": "All tests passed",
+			"created_at": "2026-02-10T12:01:00.000Z"
+		}
+	}
 }
 ```
 
@@ -378,9 +380,9 @@ Content-addressed manifest storing all provenance entries. Written as pretty-pri
 
 ```typescript
 interface VibesManifest {
-  standard: 'VIBES';
-  version: '1.0';
-  entries: Record<string, VibesManifestEntry>;
+	standard: 'VIBES';
+	version: '1.0';
+	entries: Record<string, VibesManifestEntry>;
 }
 ```
 
@@ -421,10 +423,10 @@ Maestro extends the base VIBES v1.0 standard with a two-layer instrumentation ar
 
 ### Two-Layer Instrumentation
 
-| Layer | Tool Name | What It Captures |
-|---|---|---|
-| **Layer 1 — Orchestration** | `"Maestro"` | Agent spawn events, batch run lifecycle, high-level prompt dispatch, completion status |
-| **Layer 2 — Tool Execution** | `"Claude Code"`, `"Codex"` | Individual tool executions, file modifications, shell commands, reasoning chains |
+| Layer                        | Tool Name                  | What It Captures                                                                       |
+| ---------------------------- | -------------------------- | -------------------------------------------------------------------------------------- |
+| **Layer 1 — Orchestration**  | `"Maestro"`                | Agent spawn events, batch run lifecycle, high-level prompt dispatch, completion status |
+| **Layer 2 — Tool Execution** | `"Claude Code"`, `"Codex"` | Individual tool executions, file modifications, shell commands, reasoning chains       |
 
 **Layer 1** answers: "What agents were dispatched, with what prompts, and what were the outcomes?"
 
@@ -436,26 +438,26 @@ Both layers write to the same `.ai-audit/` directory, and annotations from both 
 
 Maestro's ProcessManager emits events that the VibesCoordinator routes to the appropriate instrumenter:
 
-| ProcessManager Event | Instrumenter | VIBES Output |
-|---|---|---|
-| `tool-execution` (Claude Code tools) | Claude Code Instrumenter | Command entry + line/function annotation |
-| `tool-execution` (Codex tools) | Codex Instrumenter | Command entry + line/function annotation |
-| `thinking-chunk` | Active instrumenter | Buffered; flushed as reasoning entry on next tool execution |
-| `usage` | Active instrumenter | Token counts and model info attached to reasoning entry |
-| `exit` | VibesCoordinator | Session end record |
-| Agent spawn (Maestro-level) | Maestro Instrumenter | Command + prompt entries |
-| Agent complete (Maestro-level) | Maestro Instrumenter | Command entry with exit code |
+| ProcessManager Event                 | Instrumenter             | VIBES Output                                                |
+| ------------------------------------ | ------------------------ | ----------------------------------------------------------- |
+| `tool-execution` (Claude Code tools) | Claude Code Instrumenter | Command entry + line/function annotation                    |
+| `tool-execution` (Codex tools)       | Codex Instrumenter       | Command entry + line/function annotation                    |
+| `thinking-chunk`                     | Active instrumenter      | Buffered; flushed as reasoning entry on next tool execution |
+| `usage`                              | Active instrumenter      | Token counts and model info attached to reasoning entry     |
+| `exit`                               | VibesCoordinator         | Session end record                                          |
+| Agent spawn (Maestro-level)          | Maestro Instrumenter     | Command + prompt entries                                    |
+| Agent complete (Maestro-level)       | Maestro Instrumenter     | Command entry with exit code                                |
 
 ### Claude Code Tool Mapping
 
-| Claude Code Tool | VIBES Command Type | VIBES Action |
-|---|---|---|
-| Write | `file_write` | `create` |
-| Edit, MultiEdit, NotebookEdit | `file_write` | `modify` |
-| Read | `file_read` | `review` |
-| Bash | `shell` | varies |
-| Glob, Grep, TodoRead, TodoWrite, Task | `tool_use` | varies |
-| WebFetch, WebSearch | `api_call` | varies |
+| Claude Code Tool                      | VIBES Command Type | VIBES Action |
+| ------------------------------------- | ------------------ | ------------ |
+| Write                                 | `file_write`       | `create`     |
+| Edit, MultiEdit, NotebookEdit         | `file_write`       | `modify`     |
+| Read                                  | `file_read`        | `review`     |
+| Bash                                  | `shell`            | varies       |
+| Glob, Grep, TodoRead, TodoWrite, Task | `tool_use`         | varies       |
+| WebFetch, WebSearch                   | `api_call`         | varies       |
 
 **File path extraction**: Reads `file_path`, `path`, or `notebook_path` from tool parameters.
 **Line range extraction**: Reads `offset`/`limit` or `cell_number` fields.
@@ -463,13 +465,13 @@ Maestro's ProcessManager emits events that the VibesCoordinator routes to the ap
 
 ### Codex Tool Mapping
 
-| Codex Tool | VIBES Command Type | VIBES Action |
-|---|---|---|
-| shell, container_shell | `shell` | varies |
-| write_file, apply_patch | `file_write` | `modify` |
-| create_file | `file_write` | `create` |
-| read_file, list_directory | `file_read` | `review` |
-| file_search, grep_search, codebase_search | `tool_use` | varies |
+| Codex Tool                                | VIBES Command Type | VIBES Action |
+| ----------------------------------------- | ------------------ | ------------ |
+| shell, container_shell                    | `shell`            | varies       |
+| write_file, apply_patch                   | `file_write`       | `modify`     |
+| create_file                               | `file_write`       | `create`     |
+| read_file, list_directory                 | `file_read`        | `review`     |
+| file_search, grep_search, codebase_search | `tool_use`         | varies       |
 
 **File path extraction**: Reads `file_path`, `path`, `filename`, or `target_file` from tool parameters.
 **Shell command extraction**: Reads `command` or `cmd` fields.
@@ -480,15 +482,15 @@ Maestro maintains per-session state internally to track active instrumentation s
 
 ```typescript
 interface VibesSessionState {
-  sessionId: string;                      // Maestro session ID
-  vibesSessionId: string;                 // UUID for VIBES session record
-  projectPath: string;                    // Absolute path to the project
-  agentType: string;                      // 'claude-code', 'codex', etc.
-  assuranceLevel: VibesAssuranceLevel;    // Inherited from config
-  environmentHash: string | null;         // Set after environment entry is created
-  annotationCount: number;                // Running count of annotations in this session
-  startedAt: string;                      // ISO 8601 timestamp
-  isActive: boolean;                      // Session lifecycle flag
+	sessionId: string; // Maestro session ID
+	vibesSessionId: string; // UUID for VIBES session record
+	projectPath: string; // Absolute path to the project
+	agentType: string; // 'claude-code', 'codex', etc.
+	assuranceLevel: VibesAssuranceLevel; // Inherited from config
+	environmentHash: string | null; // Set after environment entry is created
+	annotationCount: number; // Running count of annotations in this session
+	startedAt: string; // ISO 8601 timestamp
+	isActive: boolean; // Session lifecycle flag
 }
 ```
 
