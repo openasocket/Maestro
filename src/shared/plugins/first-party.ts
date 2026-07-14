@@ -39,7 +39,8 @@ export type FirstPartyEncoreFlag =
 	| 'coworking'
 	| 'opencodeServer'
 	| 'concerto'
-	| 'groupsPlus';
+	| 'groupsPlus'
+	| 'vibes';
 
 /** A supervised background service a first-party plugin runs. */
 export interface FirstPartyBackgroundService {
@@ -583,6 +584,59 @@ export const GROUPS_PLUS_FIRST_PARTY_PLUGIN: FirstPartyPluginDefinition = {
 	backgroundServices: [],
 };
 
+/** Stable first-party plugin identity for the VIBES audit-metadata surface. */
+export const VIBES_FIRST_PARTY_PLUGIN_ID = 'com.maestro.vibes';
+
+/** Broker capabilities the VIBES instrumentation flow actually touches.
+ * Grepped from src/main/vibes/: the coordinator observes agent processes and
+ * writes .ai-audit/ under project roots (vibes-io.ts); the provider keystore
+ * and cosign/attestation clients fetch published keys and submit attestation
+ * hashes (vibes-provider-keystore.ts, vibes-cosign-service.ts,
+ * vibes-attestation.ts); settings drive capture behavior. */
+export const VIBES_FIRST_PARTY_PLUGIN_PERMISSIONS: readonly PermissionRequest[] = [
+	{
+		capability: 'settings:read',
+		reason:
+			'Read VIBES capture configuration (assurance level, tracked extensions, per-agent toggles) before instrumenting sessions.',
+	},
+	{
+		capability: 'fs:write',
+		reason:
+			'Write VIBES audit metadata (.ai-audit/ manifest, annotations, reasoning blobs) under instrumented project roots.',
+	},
+	{
+		capability: 'fs:read',
+		reason:
+			'Read .ai-audit/ data back for the blame pane, coverage views, and attestation subject hashing.',
+	},
+	{
+		capability: 'net:fetch',
+		reason:
+			'Pull tool provider public keys from their published static key files and submit attestation hashes for cosigning/registry.',
+	},
+	{
+		capability: 'events:subscribe',
+		reason:
+			'Observe agent process lifecycle events (spawn, output, exit) to capture annotations without modifying the agents.',
+	},
+] as const;
+
+export const VIBES_FIRST_PARTY_PLUGIN: FirstPartyPluginDefinition = {
+	id: VIBES_FIRST_PARTY_PLUGIN_ID,
+	name: 'VIBES',
+	description:
+		'AI audit metadata: capture per-session annotations of AI-written code, browse AI blame and coverage, and sign attestations of the audit trail.',
+	firstParty: true,
+	category: 'insights',
+	permissions: VIBES_FIRST_PARTY_PLUGIN_PERMISSIONS,
+	settingsNamespace: 'vibes',
+	encoreFlag: 'vibes',
+	// Instrumentation rides existing ProcessManager events in the host; there is
+	// no separately supervised service. Disable stops capture and hides all
+	// surfaces while leaving .ai-audit/ data on disk untouched.
+	backgroundServices: [],
+};
+
 /**
  * Every first-party plugin definition, in marketplace display order (matches
  * the pre-lift BUILTIN_FEATURES tile order).
@@ -597,6 +651,7 @@ export const FIRST_PARTY_PLUGIN_DEFINITIONS: readonly FirstPartyPluginDefinition
 	OPENCODE_SERVER_FIRST_PARTY_PLUGIN,
 	CONCERTO_FIRST_PARTY_PLUGIN,
 	GROUPS_PLUS_FIRST_PARTY_PLUGIN,
+	VIBES_FIRST_PARTY_PLUGIN,
 ];
 
 /**
@@ -617,4 +672,5 @@ export const FIRST_PARTY_PLUGINS: Readonly<
 	opencodeServer: OPENCODE_SERVER_FIRST_PARTY_PLUGIN,
 	concerto: CONCERTO_FIRST_PARTY_PLUGIN,
 	groupsPlus: GROUPS_PLUS_FIRST_PARTY_PLUGIN,
+	vibes: VIBES_FIRST_PARTY_PLUGIN,
 };

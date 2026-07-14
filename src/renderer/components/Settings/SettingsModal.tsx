@@ -13,7 +13,6 @@ import {
 	Globe,
 	Wand2,
 	Info,
-	ShieldCheck,
 } from 'lucide-react';
 import { useSettings } from '../../hooks';
 import type { Theme, LLMProvider } from '../../types';
@@ -30,7 +29,6 @@ import { BmadCommandsPanel } from '../BmadCommandsPanel';
 import { NotificationsPanel } from '../NotificationsPanel';
 import { SshRemotesSection } from './SshRemotesSection';
 import { SshRemoteIgnoreSection } from './SshRemoteIgnoreSection';
-import { VibesSettings } from './VibesSettings';
 import { GeneralTab } from './tabs/GeneralTab';
 import { DisplayTab } from './tabs/DisplayTab';
 import { EncoreTab } from './tabs/EncoreTab';
@@ -58,8 +56,7 @@ type SettingsTabId =
 	| 'ssh'
 	| 'environment'
 	| 'encore'
-	| 'prompts'
-	| 'vibes';
+	| 'prompts';
 
 // Alphabetized by label (case-insensitive) so the sidebar reads predictably
 // regardless of which tabs ship. Mount-time default is still 'general' —
@@ -83,7 +80,6 @@ const TAB_ITEMS: Array<{
 	{ id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
 	{ id: 'ssh', label: 'SSH Hosts', icon: Server },
 	{ id: 'theme', label: 'Themes', icon: Palette },
-	{ id: 'vibes', label: 'VIBES', icon: ShieldCheck },
 ];
 
 // Single source of truth for a settings-tab button so the vertical sidebar
@@ -220,10 +216,6 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 		sshRemoteHonorGitignore,
 		setSshRemoteHonorGitignore,
 	} = useSettings();
-
-	// VIBES settings are passed through wholesale; keep the object reference so
-	// the panel block below reads settings.vibes* without a 26-name destructure.
-	const settings = useSettings();
 
 	// Lazy init reads the remembered tab on mount. Doing this in useState (rather
 	// than a restore effect) avoids racing with the persist effect below — under
@@ -834,42 +826,6 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 										onIgnorePatternsChange={setSshRemoteIgnorePatterns}
 										honorGitignore={sshRemoteHonorGitignore}
 										onHonorGitignoreChange={setSshRemoteHonorGitignore}
-									/>
-								</div>
-							</div>
-						)}
-
-						{activeTab === 'vibes' && (
-							<div className="space-y-5">
-								<div data-setting-id="vibes-settings">
-									<VibesSettings
-										theme={theme}
-										vibesEnabled={settings.vibesEnabled}
-										setVibesEnabled={settings.setVibesEnabled}
-										vibesAssuranceLevel={settings.vibesAssuranceLevel}
-										setVibesAssuranceLevel={settings.setVibesAssuranceLevel}
-										vibesTrackedExtensions={settings.vibesTrackedExtensions}
-										setVibesTrackedExtensions={settings.setVibesTrackedExtensions}
-										vibesExcludePatterns={settings.vibesExcludePatterns}
-										setVibesExcludePatterns={settings.setVibesExcludePatterns}
-										vibesPerAgentConfig={settings.vibesPerAgentConfig}
-										setVibesPerAgentConfig={settings.setVibesPerAgentConfig}
-										vibesMaestroOrchestrationEnabled={settings.vibesMaestroOrchestrationEnabled}
-										setVibesMaestroOrchestrationEnabled={
-											settings.setVibesMaestroOrchestrationEnabled
-										}
-										vibesAutoInit={settings.vibesAutoInit}
-										setVibesAutoInit={settings.setVibesAutoInit}
-										vibesCheckBinaryPath={settings.vibesCheckBinaryPath}
-										setVibesCheckBinaryPath={settings.setVibesCheckBinaryPath}
-										vibesCompressReasoningThreshold={settings.vibesCompressReasoningThreshold}
-										setVibesCompressReasoningThreshold={settings.setVibesCompressReasoningThreshold}
-										vibesExternalBlobThreshold={settings.vibesExternalBlobThreshold}
-										setVibesExternalBlobThreshold={settings.setVibesExternalBlobThreshold}
-										vibesAttestationCosign={settings.vibesAttestationCosign}
-										setVibesAttestationCosign={settings.setVibesAttestationCosign}
-										vibesAttestationSubmit={settings.vibesAttestationSubmit}
-										setVibesAttestationSubmit={settings.setVibesAttestationSubmit}
 									/>
 								</div>
 							</div>

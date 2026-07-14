@@ -3,6 +3,7 @@ import { useSettings } from '../../../../hooks';
 import type { EncoreFeatureFlags } from '../../../../types';
 import { ExtensionsView } from '../../Extensions/ExtensionsView';
 import { CoworkingSetup } from '../../CoworkingSetup';
+import { VibesSettings } from '../../VibesSettings';
 import {
 	CueSettingsSection,
 	DirectorNotesSection,
@@ -87,6 +88,37 @@ export function EncoreTab({ theme, isOpen }: EncoreTabProps) {
 		coworking: (
 			<div data-setting-id="encore-coworking">
 				<CoworkingSetup theme={theme} />
+			</div>
+		),
+		vibes: (
+			<div data-setting-id="vibes-settings">
+				<VibesSettings
+					theme={theme}
+					vibesEnabled={settings.vibesEnabled}
+					setVibesEnabled={settings.setVibesEnabled}
+					vibesAssuranceLevel={settings.vibesAssuranceLevel}
+					setVibesAssuranceLevel={settings.setVibesAssuranceLevel}
+					vibesTrackedExtensions={settings.vibesTrackedExtensions}
+					setVibesTrackedExtensions={settings.setVibesTrackedExtensions}
+					vibesExcludePatterns={settings.vibesExcludePatterns}
+					setVibesExcludePatterns={settings.setVibesExcludePatterns}
+					vibesPerAgentConfig={settings.vibesPerAgentConfig}
+					setVibesPerAgentConfig={settings.setVibesPerAgentConfig}
+					vibesMaestroOrchestrationEnabled={settings.vibesMaestroOrchestrationEnabled}
+					setVibesMaestroOrchestrationEnabled={settings.setVibesMaestroOrchestrationEnabled}
+					vibesAutoInit={settings.vibesAutoInit}
+					setVibesAutoInit={settings.setVibesAutoInit}
+					vibesCheckBinaryPath={settings.vibesCheckBinaryPath}
+					setVibesCheckBinaryPath={settings.setVibesCheckBinaryPath}
+					vibesCompressReasoningThreshold={settings.vibesCompressReasoningThreshold}
+					setVibesCompressReasoningThreshold={settings.setVibesCompressReasoningThreshold}
+					vibesExternalBlobThreshold={settings.vibesExternalBlobThreshold}
+					setVibesExternalBlobThreshold={settings.setVibesExternalBlobThreshold}
+					vibesAttestationCosign={settings.vibesAttestationCosign}
+					setVibesAttestationCosign={settings.setVibesAttestationCosign}
+					vibesAttestationSubmit={settings.vibesAttestationSubmit}
+					setVibesAttestationSubmit={settings.setVibesAttestationSubmit}
+				/>
 			</div>
 		),
 	};

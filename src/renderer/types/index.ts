@@ -1248,6 +1248,10 @@ export interface EncoreFeatureFlags {
 	// Groups+ - nested groups, standard folder icons, and label colors.
 	// Off by default. Optional so older fixtures and persisted settings remain valid.
 	groupsPlus?: boolean;
+	// VIBES - AI audit metadata capture, blame/coverage views, and signed
+	// attestations. Off by default. Optional so existing literals (older test
+	// fixtures, persisted settings without the key) continue to type-check.
+	vibes?: boolean;
 }
 
 // Director's Notes settings for synopsis generation

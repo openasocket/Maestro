@@ -763,14 +763,14 @@ describe('SettingsModal', () => {
 		});
 
 		it('should wrap around when navigating past last tab', async () => {
-			render(<SettingsModal {...createDefaultProps({ initialTab: 'vibes' })} />);
+			render(<SettingsModal {...createDefaultProps({ initialTab: 'theme' })} />);
 
 			await act(async () => {
 				await vi.advanceTimersByTimeAsync(50);
 			});
 
-			// Start on VIBES tab (last tab)
-			expect(screen.getByTestId('vibes-settings-panel')).toBeInTheDocument();
+			// Start on Themes tab (last tab alphabetically)
+			expect(screen.getByTitle('Themes')).toHaveClass('font-bold');
 
 			// Press Cmd+Shift+] to wrap to About (first tab alphabetically)
 			fireEvent.keyDown(window, { key: ']', metaKey: true, shiftKey: true });
@@ -792,14 +792,14 @@ describe('SettingsModal', () => {
 			// About is the first tab alphabetically
 			expect(screen.getByTitle('About')).toHaveClass('font-bold');
 
-			// Press Cmd+Shift+[ to wrap to VIBES (last tab)
+			// Press Cmd+Shift+[ to wrap to Themes (last tab)
 			fireEvent.keyDown(window, { key: '[', metaKey: true, shiftKey: true });
 
 			await act(async () => {
 				await vi.advanceTimersByTimeAsync(100);
 			});
 
-			expect(screen.getByTestId('vibes-settings-panel')).toBeInTheDocument();
+			expect(screen.getByTitle('Themes')).toHaveClass('font-bold');
 		});
 	});
 
@@ -2219,60 +2219,6 @@ describe('SettingsModal', () => {
 			// JetBrains Mono is in the list, so it should be available
 			const options = fontSelect.querySelectorAll('option');
 			expect(options.length).toBeGreaterThan(0);
-		});
-	});
-
-	describe('VIBES tab', () => {
-		it('should switch to VIBES tab when clicked', async () => {
-			render(<SettingsModal {...createDefaultProps()} />);
-
-			await act(async () => {
-				await vi.advanceTimersByTimeAsync(50);
-			});
-
-			fireEvent.click(screen.getByTitle('VIBES'));
-
-			await act(async () => {
-				await vi.advanceTimersByTimeAsync(100);
-			});
-
-			expect(screen.getByTestId('vibes-settings-panel')).toBeInTheDocument();
-			expect(screen.getByText('VIBES Metadata Settings')).toBeInTheDocument();
-		});
-
-		it('should render VIBES tab via initialTab prop', async () => {
-			render(<SettingsModal {...createDefaultProps({ initialTab: 'vibes' })} />);
-
-			await act(async () => {
-				await vi.advanceTimersByTimeAsync(100);
-			});
-
-			expect(screen.getByTestId('vibes-settings-panel')).toBeInTheDocument();
-		});
-
-		it('should pass correct props to VibesSettings component', async () => {
-			render(<SettingsModal {...createDefaultProps({ initialTab: 'vibes' })} />);
-
-			await act(async () => {
-				await vi.advanceTimersByTimeAsync(100);
-			});
-
-			// Verify props are passed through from useSettings hook mock
-			expect(screen.getByTestId('vibes-enabled')).toHaveTextContent('false');
-			expect(screen.getByTestId('vibes-assurance-level')).toHaveTextContent('medium');
-		});
-
-		it('should show VIBES label when tab is active', async () => {
-			render(<SettingsModal {...createDefaultProps({ initialTab: 'vibes' })} />);
-
-			await act(async () => {
-				await vi.advanceTimersByTimeAsync(50);
-			});
-
-			// The VIBES tab button should show the "VIBES" label when active
-			const vibesTab = screen.getByTitle('VIBES');
-			expect(vibesTab).toBeInTheDocument();
-			expect(screen.getByText('VIBES')).toBeInTheDocument();
 		});
 	});
 

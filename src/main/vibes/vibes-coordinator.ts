@@ -621,6 +621,13 @@ export class VibesCoordinator {
 	 * Check whether VIBES instrumentation is enabled in settings.
 	 */
 	isEnabled(): boolean {
+		// The VIBES plugin (Encore flag) is the master gate: with it off the
+		// feature behaves as if it does not exist. The vibesEnabled capture
+		// toggle inside the plugin's settings additionally pauses instrumentation.
+		const features = this.settingsStore.get('encoreFeatures', {}) as
+			| Record<string, boolean>
+			| undefined;
+		if (features?.vibes !== true) return false;
 		const enabled = this.settingsStore.get('vibesEnabled', VIBES_SETTINGS_DEFAULTS.vibesEnabled);
 		return !!enabled;
 	}

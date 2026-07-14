@@ -231,7 +231,10 @@ describe('RightPanel', () => {
 		vi.clearAllMocks();
 		vi.useFakeTimers();
 		// Reset vibes mock state
-		useSettingsStore.setState({ vibesEnabled: false });
+		useSettingsStore.setState((st) => ({
+			vibesEnabled: false,
+			encoreFeatures: { ...st.encoreFeatures, vibes: false },
+		}));
 		mockVibesLiveUpdates = new Map();
 		// Mock requestAnimationFrame
 		vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
@@ -436,7 +439,10 @@ describe('RightPanel', () => {
 		});
 
 		it('should show VibesPanel when vibes tab is active', () => {
-			useSettingsStore.setState({ vibesEnabled: true });
+			useSettingsStore.setState((st) => ({
+				vibesEnabled: true,
+				encoreFeatures: { ...st.encoreFeatures, vibes: true },
+			}));
 			useUIStore.setState({ activeRightTab: 'vibes' });
 			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
@@ -447,7 +453,10 @@ describe('RightPanel', () => {
 
 	describe('VIBES annotation count badge', () => {
 		it('shows annotation count badge on VIBES tab when annotations exist', () => {
-			useSettingsStore.setState({ vibesEnabled: true });
+			useSettingsStore.setState((st) => ({
+				vibesEnabled: true,
+				encoreFeatures: { ...st.encoreFeatures, vibes: true },
+			}));
 			mockVibesLiveUpdates = new Map([
 				[
 					'session-1',
@@ -467,7 +476,10 @@ describe('RightPanel', () => {
 		});
 
 		it('hides badge when count is 0', () => {
-			useSettingsStore.setState({ vibesEnabled: true });
+			useSettingsStore.setState((st) => ({
+				vibesEnabled: true,
+				encoreFeatures: { ...st.encoreFeatures, vibes: true },
+			}));
 			mockVibesLiveUpdates = new Map();
 			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
@@ -476,7 +488,10 @@ describe('RightPanel', () => {
 		});
 
 		it('hides badge when vibes is disabled', () => {
-			useSettingsStore.setState({ vibesEnabled: false });
+			useSettingsStore.setState((st) => ({
+				vibesEnabled: false,
+				encoreFeatures: { ...st.encoreFeatures, vibes: false },
+			}));
 			mockVibesLiveUpdates = new Map();
 			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
@@ -485,7 +500,10 @@ describe('RightPanel', () => {
 		});
 
 		it('displays 99+ when count exceeds 99', () => {
-			useSettingsStore.setState({ vibesEnabled: true });
+			useSettingsStore.setState((st) => ({
+				vibesEnabled: true,
+				encoreFeatures: { ...st.encoreFeatures, vibes: true },
+			}));
 			mockVibesLiveUpdates = new Map([
 				[
 					'session-1',
@@ -504,7 +522,10 @@ describe('RightPanel', () => {
 		});
 
 		it('aggregates counts across multiple sessions', () => {
-			useSettingsStore.setState({ vibesEnabled: true });
+			useSettingsStore.setState((st) => ({
+				vibesEnabled: true,
+				encoreFeatures: { ...st.encoreFeatures, vibes: true },
+			}));
 			mockVibesLiveUpdates = new Map([
 				[
 					'session-1',
@@ -531,7 +552,10 @@ describe('RightPanel', () => {
 		});
 
 		it('badge has green background from theme success color', () => {
-			useSettingsStore.setState({ vibesEnabled: true });
+			useSettingsStore.setState((st) => ({
+				vibesEnabled: true,
+				encoreFeatures: { ...st.encoreFeatures, vibes: true },
+			}));
 			mockVibesLiveUpdates = new Map([
 				[
 					'session-1',
@@ -1761,7 +1785,10 @@ describe('RightPanel', () => {
 
 		it('should have proper button roles for tabs', () => {
 			// VIBES tab only renders while vibesEnabled is on
-			useSettingsStore.setState({ vibesEnabled: true });
+			useSettingsStore.setState((st) => ({
+				vibesEnabled: true,
+				encoreFeatures: { ...st.encoreFeatures, vibes: true },
+			}));
 			const props = createDefaultProps();
 			render(<RightPanel {...props} />);
 

@@ -52,6 +52,9 @@ vi.mock('../../../main/vibes/vibes-key-manager', () => ({
  */
 function createMockSettingsStore(overrides: Record<string, unknown> = {}): VibesSettingsStore {
 	const settings: Record<string, unknown> = {
+		// The VIBES plugin (Encore flag) gates everything; on by default in
+		// tests so the vibesEnabled-focused cases keep their meaning.
+		encoreFeatures: { vibes: true },
 		vibesEnabled: true,
 		vibesAssuranceLevel: 'medium',
 		vibesPerAgentConfig: {
@@ -118,6 +121,15 @@ describe('vibes-coordinator', () => {
 
 		it('should return false when vibesEnabled is false in settings', () => {
 			const store = createMockSettingsStore({ vibesEnabled: false });
+			const coordinator = new VibesCoordinator({ settingsStore: store });
+			expect(coordinator.isEnabled()).toBe(false);
+		});
+
+		it('should return false when the VIBES plugin (Encore flag) is off, even with vibesEnabled on', () => {
+			const store = createMockSettingsStore({
+				encoreFeatures: {},
+				vibesEnabled: true,
+			});
 			const coordinator = new VibesCoordinator({ settingsStore: store });
 			expect(coordinator.isEnabled()).toBe(false);
 		});

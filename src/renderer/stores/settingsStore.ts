@@ -221,6 +221,7 @@ const DEFAULT_ENCORE_FEATURES: EncoreFeatureFlags = {
 	plugins: false,
 	concerto: false,
 	groupsPlus: false,
+	vibes: false,
 };
 
 // File Preview / Edit toolbar buttons. Each key maps to a visibility toggle in

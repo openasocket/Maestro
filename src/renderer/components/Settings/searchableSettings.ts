@@ -27,8 +27,7 @@ export interface SearchableSetting {
 		| 'ssh'
 		| 'environment'
 		| 'encore'
-		| 'prompts'
-		| 'vibes';
+		| 'prompts';
 	/** Human-readable tab label */
 	tabLabel: string;
 	/** The setting's visible title */
@@ -1134,8 +1133,8 @@ export const SSH_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'vibes-settings',
-		tab: 'vibes',
-		tabLabel: 'VIBES',
+		tab: 'encore',
+		tabLabel: 'Plugins',
 		label: 'VIBES Metadata',
 		description:
 			'AI audit metadata capture: assurance level, tracked extensions, attestation, insights feed',

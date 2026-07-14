@@ -2865,7 +2865,7 @@ function MaestroConsoleInner() {
 		onOpenSavedFileInTab: handleOpenFileTab,
 
 		// VIBES Insights
-		vibesEnabled: settings.vibesEnabled,
+		vibesEnabled: encoreFeatures.vibes === true && settings.vibesEnabled,
 		vibesInsightsEnabled: settings.vibesInsightsEnabled,
 		onToggleVibesInsights: handleToggleVibesInsights,
 
@@ -2933,7 +2933,7 @@ function MaestroConsoleInner() {
 		handleDeleteAllArchivedGroupChats,
 
 		// VIBES session indicators
-		vibesEnabled: settings.vibesEnabled,
+		vibesEnabled: encoreFeatures.vibes === true && settings.vibesEnabled,
 		vibesAssuranceLevel: settings.vibesAssuranceLevel,
 	});
 

@@ -250,7 +250,11 @@ export const RightPanel = memo(
 		});
 
 		// VIBES blame view state — tracks file path to pre-select in blame view
-		const vibesEnabled = useSettingsStore((s) => s.vibesEnabled);
+		// VIBES surfaces exist only while the plugin (Encore flag) is enabled AND
+		// the capture toggle inside the plugin's settings is on.
+		const vibesPluginOn = useSettingsStore((s) => s.encoreFeatures.vibes === true);
+		const vibesCaptureOn = useSettingsStore((s) => s.vibesEnabled);
+		const vibesEnabled = vibesPluginOn && vibesCaptureOn;
 		const vibesLive = useVibesLive(vibesEnabled);
 		const vibesAnnotationCount = React.useMemo(() => {
 			let total = 0;
