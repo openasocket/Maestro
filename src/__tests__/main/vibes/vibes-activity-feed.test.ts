@@ -22,6 +22,7 @@ import type { ProcessConfig } from '../../../main/process-manager/types';
 
 function createMockSettingsStore(overrides: Record<string, unknown> = {}): VibesSettingsStore {
 	const settings: Record<string, unknown> = {
+		encoreFeatures: { vibes: true },
 		vibesEnabled: true,
 		vibesAssuranceLevel: 'medium',
 		vibesInsightsEnabled: true,
