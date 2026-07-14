@@ -34,6 +34,8 @@ export interface UseVibesSessionIndicatorsReturn {
 	indicators: Map<string, VibesIndicatorData>;
 	/** Whether data is currently being fetched. */
 	isLoading: boolean;
+	/** Re-fetch indicators immediately (e.g. after changing a project's level). */
+	refresh: () => Promise<void>;
 }
 
 // ============================================================================
@@ -204,7 +206,7 @@ export function useVibesSessionIndicators(
 	}, [indicators, liveUpdates, sessions]);
 
 	return useMemo(
-		() => ({ indicators: mergedIndicators, isLoading }),
-		[mergedIndicators, isLoading]
+		() => ({ indicators: mergedIndicators, isLoading, refresh: fetchIndicators }),
+		[mergedIndicators, isLoading, fetchIndicators]
 	);
 }

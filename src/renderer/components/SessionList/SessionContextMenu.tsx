@@ -17,8 +17,10 @@ import {
 	Plus,
 	Pencil,
 	Check,
+	Shield,
 } from 'lucide-react';
 import type { Group, Session, Theme } from '../../types';
+import type { VibesAssuranceLevel } from '../../../shared/vibes-types';
 import { useClickOutside, useContextMenuPosition } from '../../hooks';
 import { safeClipboardWrite } from '../../utils/clipboard';
 import { flashCopiedToClipboard } from '../../utils/flashCopiedToClipboard';
@@ -63,6 +65,14 @@ interface SessionContextMenuProps {
 	 * Window submenu. Omitted in a single-window app.
 	 */
 	onRenameWindow?: (windowId: string, name: string) => void;
+	/**
+	 * Set the VIBES assurance level for this agent's project. Present only
+	 * while the VIBES plugin + capture toggle are enabled; initializes the
+	 * project's audit dir when it is not yet VIBES-tracked.
+	 */
+	onSetVibesLevel?: (level: VibesAssuranceLevel) => void;
+	/** Current assurance level of the agent's project (null = uninitialized). */
+	vibesCurrentLevel?: VibesAssuranceLevel | null;
 }
 
 /**
@@ -148,6 +158,8 @@ export function SessionContextMenu({
 	onMoveToNewWindow,
 	onMoveToWindow,
 	onRenameWindow,
+	onSetVibesLevel,
+	vibesCurrentLevel,
 }: SessionContextMenuProps) {
 	const menuRef = useRef<HTMLDivElement>(null);
 
@@ -174,6 +186,7 @@ export function SessionContextMenu({
 
 	const { left, top, ready } = useContextMenuPosition(menuRef, x, y);
 
+	const vibesLevels = useFlyoutSubmenu(3);
 	// One flyout state machine per submenu (Move to Group, Move to Window). Item
 	// count feeds the above/below flip decision. Extracted so the two flyouts do
 	// not duplicate the hover/timeout/positioning logic.
@@ -601,6 +614,92 @@ export function SessionContextMenu({
 						Configure Maestro Cue
 					</button>
 				</>
+			)}
+
+			{/* VIBES Level - set the assurance level of this agent's project.
+			    Rendered only while the VIBES plugin + capture toggle are on. */}
+			{onSetVibesLevel && (
+				<div
+					ref={vibesLevels.containerRef}
+					className="relative"
+					onMouseEnter={vibesLevels.open}
+					onMouseLeave={vibesLevels.scheduleClose}
+					onFocus={vibesLevels.open}
+					onBlur={(e) => {
+						if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+							e.stopPropagation();
+							vibesLevels.close();
+						}
+					}}
+				>
+					<button
+						type="button"
+						className="w-full text-left px-3 py-1.5 text-xs hover:bg-white/5 transition-colors flex items-center justify-between"
+						style={{ color: theme.colors.textMain }}
+					>
+						<span className="flex items-center gap-2">
+							<Shield className="w-3.5 h-3.5" />
+							VIBES Level
+							{vibesCurrentLevel && (
+								<span className="text-[10px] uppercase opacity-50">{vibesCurrentLevel}</span>
+							)}
+						</span>
+						<ChevronRight className="w-3 h-3" />
+					</button>
+
+					{vibesLevels.show && (
+						<div
+							className="absolute py-1 rounded-md shadow-xl border whitespace-nowrap"
+							style={{
+								backgroundColor: theme.colors.bgSidebar,
+								borderColor: theme.colors.border,
+								minWidth: '8.75rem',
+								...(vibesLevels.position.vertical === 'above' ? { bottom: 0 } : { top: 0 }),
+								...(vibesLevels.position.horizontal === 'left'
+									? { right: '100%', marginRight: 4 }
+									: { left: '100%', marginLeft: 4 }),
+							}}
+						>
+							{(['low', 'medium', 'high'] as VibesAssuranceLevel[]).map((level) => (
+								<button
+									type="button"
+									key={level}
+									onClick={() => {
+										onSetVibesLevel(level);
+										onDismiss();
+									}}
+									className={`w-full text-left px-3 py-1.5 text-xs hover:bg-white/5 transition-colors flex items-center gap-2 ${vibesCurrentLevel === level ? 'opacity-50' : ''}`}
+									style={{ color: theme.colors.textMain }}
+									disabled={vibesCurrentLevel === level}
+								>
+									<Shield
+										className="w-3.5 h-3.5"
+										style={{
+											color:
+												level === 'high'
+													? theme.colors.success
+													: level === 'low'
+														? theme.colors.warning
+														: theme.colors.accent,
+										}}
+									/>
+									{level.charAt(0).toUpperCase() + level.slice(1)}
+									{vibesCurrentLevel === level && (
+										<span className="text-[10px] opacity-50">(current)</span>
+									)}
+								</button>
+							))}
+							{!vibesCurrentLevel && (
+								<div
+									className="px-3 py-1 text-[10px] border-t mt-1"
+									style={{ color: theme.colors.textDim, borderColor: theme.colors.border }}
+								>
+									Project not tracked yet; picking a level initializes it
+								</div>
+							)}
+						</div>
+					)}
+				</div>
 			)}
 
 			{showWorktreeChildSection && (

@@ -32,6 +32,7 @@ import { SafeSvgIcon } from '../ui/SafeSvgIcon';
 import { getBadgeForTime } from '../../constants/conductorBadges';
 import { SessionItem } from '../SessionItem';
 import { useVibesSessionIndicators } from '../../hooks';
+import { notifyToast } from '../../stores/notificationStore';
 import { LongPressable, longPressMouseEvent } from '../shared/LongPressable';
 import { GroupChatList } from '../GroupChatList';
 import { useLiveOverlay, useResizablePanel, useViewportBreakpoint } from '../../hooks';
@@ -459,7 +460,8 @@ function SessionListInner(props: SessionListProps) {
 	);
 
 	// VIBES session indicators (lightweight polling for annotation counts per project path)
-	const { indicators: vibesIndicators } = useVibesSessionIndicators(sortedSessions, vibesEnabled);
+	const { indicators: vibesIndicators, refresh: refreshVibesIndicators } =
+		useVibesSessionIndicators(sortedSessions, vibesEnabled);
 
 	// Derive whether any session is busy or in auto-run (for wand sparkle animation)
 	const isAnyBusy = useMemo(
@@ -2172,6 +2174,46 @@ function SessionListInner(props: SessionListProps) {
 					onToggleBookmark={() => toggleBookmark(contextMenuSession.id)}
 					showGroupActions={!activeVirtualGrouping}
 					onMoveToGroup={(groupId) => handleMoveToGroup(contextMenuSession.id, groupId)}
+					vibesCurrentLevel={
+						vibesEnabled
+							? (vibesIndicators.get(contextMenuSession.projectRoot || contextMenuSession.cwd)
+									?.assuranceLevel ?? null)
+							: null
+					}
+					onSetVibesLevel={
+						vibesEnabled
+							? async (level) => {
+									const projectPath = contextMenuSession.projectRoot || contextMenuSession.cwd;
+									if (!projectPath) return;
+									const initialized = vibesIndicators.get(projectPath)?.isInitialized ?? false;
+									try {
+										const result = initialized
+											? await window.maestro.vibes.updateConfig(projectPath, {
+													assurance_level: level,
+												})
+											: await window.maestro.vibes.init(projectPath, {
+													projectName: projectPath.split(/[\\/]/).pop() || projectPath,
+													assuranceLevel: level,
+												});
+										if (result?.success === false) {
+											throw new Error(result.error || 'VIBES rejected the change');
+										}
+										notifyToast({
+											type: 'success',
+											title: 'VIBES Level Updated',
+											message: `${contextMenuSession.name}: assurance level set to ${level.toUpperCase()}${initialized ? '' : ' (project initialized)'}`,
+										});
+										refreshVibesIndicators();
+									} catch (err) {
+										notifyToast({
+											type: 'error',
+											title: 'VIBES Level Change Failed',
+											message: err instanceof Error ? err.message : String(err),
+										});
+									}
+								}
+							: undefined
+					}
 					onDelete={() => handleDeleteSession(contextMenuSession.id)}
 					onDismiss={() => setContextMenu(null)}
 					onCreatePR={
