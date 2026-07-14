@@ -20,6 +20,12 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+import {
+	createPrivateKey,
+	createPublicKey,
+	sign as cryptoSign,
+	verify as cryptoVerify,
+} from 'crypto';
 import { computeKeyId } from './vibes-key-manager';
 import { logger } from '../utils/logger';
 
@@ -45,6 +51,25 @@ export function buildProviderKeyUrl(toolDomain: string, toolName: string): strin
 	return `https://${domain}/vibes/${toolName.toLowerCase()}.pub`;
 }
 
+/**
+ * Sibling endorsement file for the published key (VIBES key endorsement):
+ * {toolName}.pub.sig — JSON `{ version: 1, endorsements: [...] }` where each
+ * endorsement signs the endorsed key's SPKI DER bytes with a PREVIOUS
+ * operational key (rotation chaining) or the developer ROOT key.
+ */
+export function buildProviderKeySigUrl(toolDomain: string, toolName: string): string {
+	return `${buildProviderKeyUrl(toolDomain, toolName)}.sig`;
+}
+
+/**
+ * Developer root key location: {toolName}.root.pub — an OFFLINE key that
+ * endorses operational keys. Kept separate from the operational key so a
+ * website compromise cannot mint trusted keys.
+ */
+export function buildProviderRootKeyUrl(toolDomain: string, toolName: string): string {
+	return buildProviderKeyUrl(toolDomain, toolName).replace(/\.pub$/, '.root.pub');
+}
+
 /** Maestro's own tool identity for the VIBES-standard key path. */
 export const MAESTRO_TOOL_DOMAIN = 'maestro.sh';
 export const MAESTRO_TOOL_NAME = 'maestro';
@@ -68,6 +93,29 @@ const REQUEST_TIMEOUT_MS = 10_000;
 // Types
 // ============================================================================
 
+/**
+ * Trust level recorded when a key version was ingested.
+ * - 'endorsed-root': endorsement verified against the developer root key
+ * - 'endorsed-chain': endorsement verified against a previously-held key
+ * - 'unendorsed': no endorsement file was published (trust-on-first-use via
+ *   HTTPS/domain control only)
+ * Keys whose PUBLISHED endorsement fails verification are REJECTED and never
+ * enter the store.
+ */
+export type ProviderKeyTrust = 'endorsed-root' | 'endorsed-chain' | 'unendorsed';
+
+/** One entry in the published {toolName}.pub.sig endorsement file. */
+export interface ProviderKeyEndorsement {
+	/** keyId (content-hash version) of the ENDORSED key. */
+	keyid: string;
+	/** keyId of the signer: a previous operational key or the root key. */
+	signed_by: string;
+	/** base64url Ed25519 signature over the endorsed key's SPKI DER bytes. */
+	sig: string;
+	/** Optional ISO timestamp of when the endorsement was created. */
+	signed_at?: string;
+}
+
 /** One provider key as persisted locally. keyid is the content-hash version. */
 export interface StoredProviderKey {
 	/** VERIFY key ID — SHA-256(DER)[0:16]. Doubles as the key version. */
@@ -80,6 +128,10 @@ export interface StoredProviderKey {
 	last_fetched: string;
 	/** URL the key was pulled from. */
 	source_url: string;
+	/** Trust level at ingestion time (absent on keys stored before endorsement support). */
+	trust?: ProviderKeyTrust;
+	/** keyId that endorsed this key (when trust is endorsed-root / endorsed-chain). */
+	endorsed_by?: string;
 }
 
 /** The on-disk provider key store. */
@@ -95,6 +147,8 @@ export interface ProviderKeyStore {
 	last_modified: string | null;
 	/** ISO timestamp of the last network check (successful or 304). */
 	last_checked: string | null;
+	/** Developer root key, once fetched from {toolName}.root.pub. */
+	root_key?: { keyid: string; public_key_pem: string; first_seen: string } | null;
 }
 
 /** Result of a freshness check against the published key file. */
@@ -183,6 +237,168 @@ export function parsePublishedKeyFile(content: string): string[] {
 	}
 
 	return [];
+}
+
+// ============================================================================
+// Key Endorsement (signed keys)
+// ============================================================================
+
+/**
+ * Verify an endorsement signature: Ed25519 over the endorsed key's SPKI DER
+ * bytes, checked against the signer's public key.
+ */
+export function verifyKeyEndorsement(
+	endorsedPublicKeyPem: string,
+	sigBase64Url: string,
+	signerPublicKeyPem: string
+): boolean {
+	try {
+		const der = createPublicKey(endorsedPublicKeyPem).export({
+			type: 'spki',
+			format: 'der',
+		}) as Buffer;
+		return cryptoVerify(
+			null,
+			der,
+			createPublicKey(signerPublicKeyPem),
+			Buffer.from(sigBase64Url, 'base64url')
+		);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Create an endorsement for a key (ops/tooling helper): signs the endorsed
+ * key's SPKI DER with the signer's private key. Used when rotating (old key
+ * signs new key) or endorsing with the developer root key.
+ */
+export function createKeyEndorsement(
+	endorsedPublicKeyPem: string,
+	signerPrivateKeyPem: string,
+	signerKeyId: string
+): ProviderKeyEndorsement {
+	const der = createPublicKey(endorsedPublicKeyPem).export({
+		type: 'spki',
+		format: 'der',
+	}) as Buffer;
+	const sig = cryptoSign(null, der, createPrivateKey(signerPrivateKeyPem));
+	return {
+		keyid: computeKeyId(endorsedPublicKeyPem),
+		signed_by: signerKeyId,
+		sig: sig.toString('base64url'),
+		signed_at: new Date().toISOString(),
+	};
+}
+
+/** Best-effort fetch of the published endorsement file. null = absent/offline. */
+async function fetchEndorsementsFile(keyFileUrl: string): Promise<ProviderKeyEndorsement[] | null> {
+	try {
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+		const response = await fetch(`${keyFileUrl}.sig`, {
+			method: 'GET',
+			headers: { Accept: 'application/json', 'User-Agent': 'Maestro-VIBES-Cosign' },
+			signal: controller.signal,
+		});
+		clearTimeout(timeout);
+		if (!response.ok) return null;
+		const parsed = JSON.parse(await response.text()) as
+			| { endorsements?: ProviderKeyEndorsement[] }
+			| ProviderKeyEndorsement[];
+		const list = Array.isArray(parsed) ? parsed : parsed.endorsements;
+		if (!Array.isArray(list)) return null;
+		return list.filter(
+			(e) =>
+				!!e &&
+				typeof e.keyid === 'string' &&
+				typeof e.signed_by === 'string' &&
+				typeof e.sig === 'string'
+		);
+	} catch {
+		return null;
+	}
+}
+
+/** Best-effort fetch of the developer root key ({toolName}.root.pub). */
+async function fetchRootKey(
+	keyFileUrl: string
+): Promise<{ keyid: string; public_key_pem: string } | null> {
+	try {
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+		const response = await fetch(keyFileUrl.replace(/\.pub$/, '.root.pub'), {
+			method: 'GET',
+			headers: {
+				Accept: 'text/plain, application/x-pem-file',
+				'User-Agent': 'Maestro-VIBES-Cosign',
+			},
+			signal: controller.signal,
+		});
+		clearTimeout(timeout);
+		if (!response.ok) return null;
+		const pems = parsePublishedKeyFile(await response.text());
+		if (pems.length === 0) return null;
+		return { keyid: computeKeyId(pems[0]), public_key_pem: pems[0] };
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Decide the trust level for a NEW key version.
+ * Rules (see docs/architecture/vibes-integration.md):
+ * - No endorsement file published → 'unendorsed' (TOFU via HTTPS only).
+ * - File published: the key MUST have at least one endorsement that verifies
+ *   against a known signer (a previously-held key = chain, or the developer
+ *   root key = root). Any published-but-unverifiable state → null (REJECT).
+ */
+async function evaluateNewKeyTrust(
+	pem: string,
+	keyid: string,
+	endorsements: ProviderKeyEndorsement[] | null,
+	knownPems: Map<string, string>,
+	store: ProviderKeyStore,
+	keyFileUrl: string
+): Promise<{ trust: ProviderKeyTrust; endorsedBy?: string } | null> {
+	if (endorsements === null) return { trust: 'unendorsed' };
+
+	const matches = endorsements.filter((e) => e.keyid === keyid);
+	if (matches.length === 0) {
+		logger.warn(`Published endorsement file has no entry for key ${keyid}; rejecting`, LOG_CONTEXT);
+		return null;
+	}
+
+	// Lazily resolve the root key only when an endorsement references it
+	let root: { keyid: string; public_key_pem: string } | null = store.root_key ?? null;
+	for (const match of matches) {
+		let signerPem = knownPems.get(match.signed_by) ?? null;
+		let viaRoot = false;
+
+		if (!signerPem) {
+			if (!root) {
+				const fetched = await fetchRootKey(keyFileUrl);
+				if (fetched) {
+					store.root_key = { ...fetched, first_seen: new Date().toISOString() };
+					root = store.root_key;
+				}
+			}
+			if (root && root.keyid === match.signed_by) {
+				signerPem = root.public_key_pem;
+				viaRoot = true;
+			}
+		}
+
+		if (signerPem && verifyKeyEndorsement(pem, match.sig, signerPem)) {
+			return { trust: viaRoot ? 'endorsed-root' : 'endorsed-chain', endorsedBy: match.signed_by };
+		}
+	}
+
+	logger.warn(
+		`No endorsement for key ${keyid} verified against a trusted signer; rejecting`,
+		LOG_CONTEXT
+	);
+	return null;
 }
 
 // ============================================================================
@@ -290,6 +506,21 @@ export async function checkProviderKeyUpdate(options?: {
 		// blocks are still ingested so verification covers overlap windows.
 		let updated = false;
 		let currentKeyId = previousKeyId;
+		let anyRejected = false;
+		let newTrustDetail = '';
+
+		// Signed-keys support: when NEW key versions appear, pull the sibling
+		// endorsement file once and verify each new key's endorsement (rotation
+		// chain via previously-held keys, or the developer root key).
+		const knownPems = new Map(store.keys.map((k) => [k.keyid, k.public_key_pem] as const));
+		const hasNewKey = pems.some((pem) => {
+			try {
+				return !knownPems.has(computeKeyId(pem));
+			} catch {
+				return false;
+			}
+		});
+		const endorsements = hasNewKey ? await fetchEndorsementsFile(url) : null;
 
 		for (let i = 0; i < pems.length; i++) {
 			const pem = pems[i];
@@ -305,23 +536,63 @@ export async function checkProviderKeyUpdate(options?: {
 			if (existing) {
 				existing.last_fetched = now;
 			} else {
+				const evaluated = await evaluateNewKeyTrust(
+					pem,
+					keyid,
+					endorsements,
+					knownPems,
+					store,
+					url
+				);
+				if (!evaluated) {
+					// Published endorsement failed verification: the key does NOT
+					// enter the store and cannot become current.
+					anyRejected = true;
+					continue;
+				}
 				store.keys.unshift({
 					keyid,
 					public_key_pem: pem,
 					first_seen: now,
 					last_fetched: now,
 					source_url: url,
+					trust: evaluated.trust,
+					...(evaluated.endorsedBy ? { endorsed_by: evaluated.endorsedBy } : {}),
 				});
+				knownPems.set(keyid, pem);
 				updated = true;
-				logger.info(`Pulled down new provider key version ${keyid}`, LOG_CONTEXT);
+				newTrustDetail = ` (${evaluated.trust})`;
+				logger.info(
+					`Pulled down new provider key version ${keyid} [${evaluated.trust}]`,
+					LOG_CONTEXT
+				);
 			}
+		}
 
-			if (i === 0) currentKeyId = keyid;
+		// Current = the first published key that made it into the store (a
+		// rejected first key leaves the previous current in place).
+		for (const pem of pems) {
+			try {
+				const kid = computeKeyId(pem);
+				if (store.keys.some((k) => k.keyid === kid)) {
+					currentKeyId = kid;
+					break;
+				}
+			} catch {
+				// skip malformed
+			}
 		}
 
 		store.current_keyid = currentKeyId;
-		store.etag = response.headers.get('etag');
-		store.last_modified = response.headers.get('last-modified');
+		// Skip storing HTTP validators when a key was rejected so the next check
+		// re-fetches instead of 304-ing into a permanently unverified state.
+		if (!anyRejected) {
+			store.etag = response.headers.get('etag');
+			store.last_modified = response.headers.get('last-modified');
+		} else {
+			store.etag = null;
+			store.last_modified = null;
+		}
 		store.last_checked = now;
 		await saveProviderKeyStore(store);
 
@@ -331,8 +602,10 @@ export async function checkProviderKeyUpdate(options?: {
 			currentKeyId,
 			previousKeyId,
 			detail: updated
-				? `New key version ${currentKeyId} pulled down`
-				: 'Key file re-fetched; version unchanged',
+				? `New key version ${currentKeyId} pulled down${newTrustDetail}`
+				: anyRejected
+					? 'Published key REJECTED: endorsement failed verification; keeping stored key'
+					: 'Key file re-fetched; version unchanged',
 		};
 	} catch (error) {
 		// Offline / DNS / timeout — the persisted store keeps working

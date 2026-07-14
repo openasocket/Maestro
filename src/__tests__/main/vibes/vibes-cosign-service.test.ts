@@ -134,7 +134,8 @@ describe('fetchProviderKeys', () => {
 		const again = await fetchProviderKeys();
 
 		expect(again?.keys).toHaveLength(1);
-		expect(mockFetch).toHaveBeenCalledTimes(1);
+		// key file + endorsement file for the new key; throttled re-check adds none
+		expect(mockFetch).toHaveBeenCalledTimes(2);
 	});
 
 	it('returns null when the network is unavailable and nothing is stored', async () => {

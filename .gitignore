@@ -69,3 +69,6 @@ yarn-error.log*
 
 # SlopTimize CLI local cache
 .sloptimize/
+
+# Local VIBES provider signing key (private half NEVER commits; deploy to the cosign server)
+.maestro-provider-key/

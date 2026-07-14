@@ -300,6 +300,47 @@ Implementation: `buildProviderKeyUrl()` and the persistent keystore in `src/main
 
 This convention should be proposed upstream into the VIBES/VERIFY specification so all conforming tools publish keys at the same derivable path.
 
+### Key Endorsement (signed keys)
+
+Domain control alone is a single point of failure: a compromised website/CDN could publish a rogue key that clients would ingest as a legitimate new version. Key endorsement closes that gap with two static sibling files:
+
+```
+https://{toolDomain}/vibes/{toolName}.pub.sig    (endorsement file, JSON)
+https://{toolDomain}/vibes/{toolName}.root.pub   (developer root key, bare PEM)
+```
+
+The endorsement file contains signatures over the published key:
+
+```json
+{
+	"version": 1,
+	"endorsements": [
+		{
+			"keyid": "<keyId of the ENDORSED key>",
+			"signed_by": "<keyId of the signer: a previous operational key or the root key>",
+			"sig": "<base64url Ed25519 signature over the endorsed key's SPKI DER bytes>",
+			"signed_at": "<ISO timestamp, optional>"
+		}
+	]
+}
+```
+
+Two endorsement mechanisms compose:
+
+- **Rotation chaining.** When rotating, the OLD operational key signs the NEW public key. A client that already holds key N cryptographically verifies key N+1 was authorized by the previous keyholder; a website compromise cannot forge the chain.
+- **Developer root key.** An OFFLINE root key (never on the web server beyond its public half) endorses each operational key. This covers first-time pulls and late-joining clients, and survives loss of an operational key. Providers SHOULD always include a root endorsement for the current key in addition to the chain endorsement.
+
+Client trust rules (implemented in `vibes-provider-keystore.ts`):
+
+| Published state                                                        | Client behavior                                                                                                                              | Recorded trust   |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| No `.pub.sig` file                                                     | Accept (HTTPS/domain trust only)                                                                                                             | `unendorsed`     |
+| Endorsement verifies against a previously-held key                     | Accept                                                                                                                                       | `endorsed-chain` |
+| Endorsement verifies against the root key                              | Accept                                                                                                                                       | `endorsed-root`  |
+| `.pub.sig` exists but the key has no entry, or no endorsement verifies | **REJECT** - the key never enters the store, the previous current key stays active, HTTP validators are dropped so the next check re-fetches | (rejected)       |
+
+Rotation ops flow for a provider: generate the new operational keypair, sign its public key with the outgoing operational key AND the root key (`createKeyEndorsement()` here; `vibecheck key endorse` in the CLI), publish the new `.pub`, `.pub.sig`, and unchanged `.root.pub` together. The root private key stays offline; compromise of the web host alone can no longer mint trusted keys.
+
 ## Design Decisions
 
 ### Why instrumentation lives in Maestro

@@ -37,6 +37,10 @@ import {
 	getCurrentProviderKey,
 	loadProviderKeyStore,
 	buildProviderKeyUrl,
+	buildProviderKeySigUrl,
+	buildProviderRootKeyUrl,
+	createKeyEndorsement,
+	verifyKeyEndorsement,
 	PROVIDER_KEY_FILE_URL,
 	MAESTRO_TOOL_DOMAIN,
 	MAESTRO_TOOL_NAME,
@@ -68,6 +72,24 @@ function pemResponse(
 		status: init?.status ?? 200,
 		headers: { get: (k: string) => headers.get(k.toLowerCase()) ?? null },
 		text: async () => body,
+	};
+}
+
+function jsonResponse(body: unknown, status = 200) {
+	return {
+		ok: status >= 200 && status < 300,
+		status,
+		headers: { get: () => null },
+		text: async () => JSON.stringify(body),
+	};
+}
+
+function notFoundResponse() {
+	return {
+		ok: false,
+		status: 404,
+		headers: { get: () => null },
+		text: async () => 'not found',
 	};
 }
 
@@ -163,7 +185,8 @@ describe('checkProviderKeyUpdate', () => {
 		expect(second.checked).toBe(true);
 		expect(second.updated).toBe(false);
 
-		const secondCallHeaders = mockFetch.mock.calls[1][1].headers as Record<string, string>;
+		// calls: [0] key file, [1] endorsement file (new key), [2] the 304 re-check
+		const secondCallHeaders = mockFetch.mock.calls[2][1].headers as Record<string, string>;
 		expect(secondCallHeaders['If-None-Match']).toBe('"v1"');
 		expect(secondCallHeaders['If-Modified-Since']).toBe('Mon, 01 Jan 2026 00:00:00 GMT');
 	});
@@ -208,7 +231,8 @@ describe('checkProviderKeyUpdate', () => {
 		const throttled = await checkProviderKeyUpdate();
 
 		expect(throttled.checked).toBe(false);
-		expect(mockFetch).toHaveBeenCalledTimes(1);
+		// key file + endorsement file for the new key; throttled check adds none
+		expect(mockFetch).toHaveBeenCalledTimes(2);
 	});
 
 	it('serves the persisted store when offline', async () => {
@@ -267,7 +291,8 @@ describe('getProviderKeyById', () => {
 
 		const pem = await getProviderKeyById(computeKeyId(publicKey));
 		expect(pem?.trim()).toBe(publicKey.trim());
-		expect(mockFetch).toHaveBeenCalledTimes(1);
+		// key file + endorsement file
+		expect(mockFetch).toHaveBeenCalledTimes(2);
 	});
 
 	it('returns null when the keyid is unknown and the network is down', async () => {
@@ -289,5 +314,129 @@ describe('getCurrentProviderKey', () => {
 	it('returns null when empty and offline', async () => {
 		mockFetch.mockRejectedValue(new Error('offline'));
 		expect(await getCurrentProviderKey()).toBeNull();
+	});
+});
+
+describe('key endorsement (signed keys: rotation chaining + developer root)', () => {
+	it('builds the sibling endorsement and root key URLs', () => {
+		expect(buildProviderKeySigUrl('example.com', 'mytool')).toBe(
+			'https://example.com/vibes/mytool.pub.sig'
+		);
+		expect(buildProviderRootKeyUrl('example.com', 'mytool')).toBe(
+			'https://example.com/vibes/mytool.root.pub'
+		);
+	});
+
+	it('createKeyEndorsement/verifyKeyEndorsement roundtrip; tampered key fails', () => {
+		const signer = generateKeyPair();
+		const endorsed = generateKeyPair();
+		const other = generateKeyPair();
+
+		const e = createKeyEndorsement(endorsed.publicKey, signer.privateKey, signer.keyId);
+		expect(e.keyid).toBe(computeKeyId(endorsed.publicKey));
+		expect(e.signed_by).toBe(signer.keyId);
+		expect(verifyKeyEndorsement(endorsed.publicKey, e.sig, signer.publicKey)).toBe(true);
+		// endorsement does not transfer to a different key
+		expect(verifyKeyEndorsement(other.publicKey, e.sig, signer.publicKey)).toBe(false);
+	});
+
+	it('accepts a rotation endorsed by the previously-held key (endorsed-chain)', async () => {
+		const keyA = generateKeyPair();
+		const keyB = generateKeyPair();
+
+		// First pull: key A, no endorsement file published yet -> unendorsed
+		mockFetch.mockResolvedValueOnce(pemResponse(keyA.publicKey));
+		mockFetch.mockResolvedValueOnce(notFoundResponse());
+		await checkProviderKeyUpdate({ force: true });
+
+		// Rotation: key B published, endorsed by key A
+		const endorsement = createKeyEndorsement(keyB.publicKey, keyA.privateKey, keyA.keyId);
+		mockFetch.mockResolvedValueOnce(pemResponse(keyB.publicKey));
+		mockFetch.mockResolvedValueOnce(jsonResponse({ version: 1, endorsements: [endorsement] }));
+
+		const result = await checkProviderKeyUpdate({ force: true });
+		expect(result.updated).toBe(true);
+		expect(result.currentKeyId).toBe(keyB.keyId);
+		expect(result.detail).toContain('endorsed-chain');
+
+		const store = await loadProviderKeyStore();
+		const stored = store.keys.find((k) => k.keyid === keyB.keyId);
+		expect(stored?.trust).toBe('endorsed-chain');
+		expect(stored?.endorsed_by).toBe(keyA.keyId);
+	});
+
+	it('REJECTS a rotated key whose published endorsement does not verify', async () => {
+		const keyA = generateKeyPair();
+		const keyB = generateKeyPair();
+		const attacker = generateKeyPair();
+
+		mockFetch.mockResolvedValueOnce(pemResponse(keyA.publicKey));
+		mockFetch.mockResolvedValueOnce(notFoundResponse());
+		await checkProviderKeyUpdate({ force: true });
+
+		// Attacker publishes key B with an endorsement signed by an UNKNOWN key
+		const bogus = createKeyEndorsement(keyB.publicKey, attacker.privateKey, attacker.keyId);
+		mockFetch.mockResolvedValueOnce(pemResponse(keyB.publicKey));
+		mockFetch.mockResolvedValueOnce(jsonResponse({ version: 1, endorsements: [bogus] }));
+		// root key fetch attempt (signer unknown) -> not published
+		mockFetch.mockResolvedValueOnce(notFoundResponse());
+
+		const result = await checkProviderKeyUpdate({ force: true });
+		expect(result.updated).toBe(false);
+		expect(result.currentKeyId).toBe(keyA.keyId);
+		expect(result.detail).toContain('REJECTED');
+
+		const store = await loadProviderKeyStore();
+		expect(store.keys).toHaveLength(1);
+		expect(store.current_keyid).toBe(keyA.keyId);
+	});
+
+	it('REJECTS a new key when the endorsement file omits it', async () => {
+		const keyA = generateKeyPair();
+		const keyB = generateKeyPair();
+
+		mockFetch.mockResolvedValueOnce(pemResponse(keyA.publicKey));
+		mockFetch.mockResolvedValueOnce(notFoundResponse());
+		await checkProviderKeyUpdate({ force: true });
+
+		// Endorsement file exists but has no entry for key B
+		const unrelated = createKeyEndorsement(keyA.publicKey, keyA.privateKey, keyA.keyId);
+		mockFetch.mockResolvedValueOnce(pemResponse(keyB.publicKey));
+		mockFetch.mockResolvedValueOnce(jsonResponse({ version: 1, endorsements: [unrelated] }));
+
+		const result = await checkProviderKeyUpdate({ force: true });
+		expect(result.updated).toBe(false);
+		expect(result.currentKeyId).toBe(keyA.keyId);
+	});
+
+	it('accepts a first pull endorsed by the developer root key (endorsed-root)', async () => {
+		const root = generateKeyPair();
+		const operational = generateKeyPair();
+		const endorsement = createKeyEndorsement(operational.publicKey, root.privateKey, root.keyId);
+
+		mockFetch.mockResolvedValueOnce(pemResponse(operational.publicKey));
+		mockFetch.mockResolvedValueOnce(jsonResponse({ version: 1, endorsements: [endorsement] }));
+		// signer unknown locally -> root key fetched from {toolName}.root.pub
+		mockFetch.mockResolvedValueOnce(pemResponse(root.publicKey));
+
+		const result = await checkProviderKeyUpdate({ force: true });
+		expect(result.updated).toBe(true);
+		expect(result.detail).toContain('endorsed-root');
+
+		const store = await loadProviderKeyStore();
+		const stored = store.keys.find((k) => k.keyid === operational.keyId);
+		expect(stored?.trust).toBe('endorsed-root');
+		expect(stored?.endorsed_by).toBe(root.keyId);
+		expect(store.root_key?.keyid).toBe(root.keyId);
+	});
+
+	it('keys pulled with no published endorsement file record unendorsed trust', async () => {
+		const key = generateKeyPair();
+		mockFetch.mockResolvedValueOnce(pemResponse(key.publicKey));
+		mockFetch.mockResolvedValueOnce(notFoundResponse());
+
+		await checkProviderKeyUpdate({ force: true });
+		const store = await loadProviderKeyStore();
+		expect(store.keys[0].trust).toBe('unendorsed');
 	});
 });
