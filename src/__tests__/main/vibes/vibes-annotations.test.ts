@@ -4,7 +4,10 @@
  * prompt, reasoning entries, line annotations, and session records.
  */
 
-import { gunzipSync } from 'zlib';
+import { gunzipSync, gzipSync } from 'zlib';
+import { mkdtemp, rm, writeFile } from 'fs/promises';
+import * as path from 'path';
+import * as os from 'os';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
 	createEnvironmentEntry,
@@ -15,9 +18,11 @@ import {
 	createDecisionEntry,
 	createEdgeRecord,
 	createLineAnnotation,
+	createLineAnnotationWithAnchors,
 	createFunctionAnnotation,
 	createSessionRecord,
 } from '../../../main/vibes/vibes-annotations';
+import { computeVibesHashV2 } from '../../../main/vibes/vibes-hash';
 
 describe('vibes-annotations', () => {
 	// Freeze time so timestamp assertions are deterministic
@@ -397,6 +402,38 @@ describe('vibes-annotations', () => {
 			expect(decompressed).toBe(originalText);
 		});
 
+		it('canonicalizes the gzip header of the stored compressed payload', () => {
+			const largeText = 'G'.repeat(11000);
+			const { entry } = createReasoningEntry({ reasoningText: largeText });
+
+			const storedBuf = Buffer.from(entry.reasoning_text_compressed!, 'base64');
+			// MTIME (bytes 4-7) zeroed, OS byte (offset 9) pinned to 0xff (unknown)
+			expect(storedBuf.readUInt32LE(4)).toBe(0);
+			expect(storedBuf[9]).toBe(0xff);
+			// Canonicalized header must not break decompression
+			expect(gunzipSync(storedBuf).toString('utf8')).toBe(largeText);
+		});
+
+		it('reasoning entry hash is independent of the gzip header OS/MTIME bytes', () => {
+			const largeText = 'H'.repeat(11000);
+			const { entry, hash } = createReasoningEntry({ reasoningText: largeText });
+
+			// Simulate what a Windows zlib build would stamp into the header
+			// (OS code 0x0b NTFS, nonzero MTIME), then apply the same
+			// canonicalization createReasoningEntry performs: the stored
+			// payload and manifest entry hash must come out byte-identical.
+			const foreignBuf = gzipSync(Buffer.from(largeText, 'utf8'));
+			foreignBuf.writeUInt32LE(1765432100, 4);
+			foreignBuf[9] = 0x0b;
+			// Canonicalization
+			foreignBuf.writeUInt32LE(0, 4);
+			foreignBuf[9] = 0xff;
+
+			expect(foreignBuf.toString('base64')).toBe(entry.reasoning_text_compressed);
+			const foreignEntry = { ...entry, reasoning_text_compressed: foreignBuf.toString('base64') };
+			expect(computeVibesHashV2(foreignEntry as unknown as Record<string, unknown>)).toBe(hash);
+		});
+
 		it('respects custom compressThresholdBytes parameter', () => {
 			const text = 'E'.repeat(500); // 500 bytes
 
@@ -688,6 +725,50 @@ describe('vibes-annotations', () => {
 	// ========================================================================
 	// createFunctionAnnotation
 	// ========================================================================
+	// ========================================================================
+	// createLineAnnotationWithAnchors - line ending canonicalization
+	// ========================================================================
+	describe('createLineAnnotationWithAnchors line endings', () => {
+		let tmpDir: string;
+
+		beforeEach(async () => {
+			tmpDir = await mkdtemp(path.join(os.tmpdir(), 'vibes-annotations-crlf-'));
+		});
+
+		afterEach(async () => {
+			await rm(tmpDir, { recursive: true, force: true });
+		});
+
+		it('produces identical anchors for LF and CRLF checkouts of the same content', async () => {
+			const lines = ['line one', 'line two', 'line three', 'line four', 'line five'];
+			await writeFile(path.join(tmpDir, 'lf.ts'), lines.join('\n'), 'utf8');
+			await writeFile(path.join(tmpDir, 'crlf.ts'), lines.join('\r\n'), 'utf8');
+
+			const base = {
+				lineStart: 2,
+				lineEnd: 4,
+				environmentHash: 'e'.repeat(64),
+				action: 'modify' as const,
+				assuranceLevel: 'medium' as const,
+				projectPath: tmpDir,
+			};
+			const lfAnnotation = await createLineAnnotationWithAnchors({ ...base, filePath: 'lf.ts' });
+			const crlfAnnotation = await createLineAnnotationWithAnchors({
+				...base,
+				filePath: 'crlf.ts',
+			});
+
+			// All three anchoring fields are hashed attestation subjects and must
+			// be byte-identical for a CRLF (Windows) vs LF (POSIX) checkout.
+			expect(lfAnnotation.file_content_hash).toBeDefined();
+			expect(crlfAnnotation.file_content_hash).toBe(lfAnnotation.file_content_hash);
+			expect(crlfAnnotation.anchor_context).toBe(lfAnnotation.anchor_context);
+			expect(crlfAnnotation.anchor_hash).toBe(lfAnnotation.anchor_hash);
+			// The split/rejoin path must not leave embedded carriage returns
+			expect(crlfAnnotation.anchor_context).not.toContain('\r');
+		});
+	});
+
 	describe('createFunctionAnnotation', () => {
 		it('creates function annotation with required fields', () => {
 			const annotation = createFunctionAnnotation({

@@ -84,27 +84,33 @@ function extractFilePath(input: unknown): string | null {
  * VIBES standard requires all file_path values to be project-relative.
  * If the path is absolute and starts with projectPath, the prefix is stripped.
  * If already relative, it is returned as-is after normalization.
+ *
+ * The result always uses forward slashes: file_path is a VIBES spec identifier
+ * written into annotations.jsonl (a hashed attestation subject) and consumed by
+ * exclude-glob matching, so it must be byte-identical on every OS.
+ * Exported for tests.
  */
-function normalizePath(filePath: string, projectPath?: string): string {
+export function normalizePath(filePath: string, projectPath?: string): string {
 	const normalized = path.normalize(filePath);
+	let relative = normalized;
 	if (projectPath && path.isAbsolute(normalized)) {
 		const normalizedProject = path.normalize(projectPath);
 		if (normalized.startsWith(normalizedProject + path.sep)) {
-			return normalized.slice(normalizedProject.length + 1);
-		}
-		if (normalized.startsWith(normalizedProject)) {
-			return normalized.slice(normalizedProject.length) || normalized;
+			relative = normalized.slice(normalizedProject.length + 1);
+		} else if (normalized.startsWith(normalizedProject)) {
+			relative = normalized.slice(normalizedProject.length) || normalized;
 		}
 	}
-	return normalized;
+	return relative.split(path.sep).join('/');
 }
 
 /**
  * Check if a file path matches any of the exclude patterns.
  * Supports simple glob patterns: `*` (any segment chars), `**` (any path depth),
  * and literal path segments. No external dependency required.
+ * Exported for tests.
  */
-function matchesExcludePattern(filePath: string, excludePatterns: string[]): boolean {
+export function matchesExcludePattern(filePath: string, excludePatterns: string[]): boolean {
 	if (!excludePatterns || excludePatterns.length === 0) {
 		return false;
 	}

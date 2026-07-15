@@ -139,6 +139,14 @@ export function createReasoningEntry(params: {
 
 	if (textBytes > compressThreshold) {
 		const compressedBuf = gzipSync(Buffer.from(params.reasoningText, 'utf8'));
+		// Canonicalize the gzip header so the stored payload (and therefore
+		// the manifest entry hash, a hashed attestation subject) is identical
+		// on every platform. zlib stamps byte 9 with a build-specific OS code
+		// (3 Unix, 19 Darwin on zlib-ng, 0/10/11 on Windows builds) and bytes
+		// 4-7 with MTIME. Both are ignored by gunzip, so decompression of the
+		// stored blob is unaffected.
+		compressedBuf.writeUInt32LE(0, 4); // MTIME: 0 = no timestamp
+		compressedBuf[9] = 0xff; // OS: 255 = unknown (RFC 1952)
 		reasoningTextCompressed = compressedBuf.toString('base64');
 		compressedFlag = true;
 	} else {
@@ -298,7 +306,14 @@ export async function createLineAnnotationWithAnchors(params: {
 		const fullPath = path.isAbsolute(params.filePath)
 			? params.filePath
 			: path.join(params.projectPath, params.filePath);
-		const content = await readFile(fullPath, 'utf8');
+		const rawContent = await readFile(fullPath, 'utf8');
+
+		// Canonicalize CRLF to LF before hashing. file_content_hash,
+		// anchor_context, and anchor_hash live in annotations.jsonl (a hashed
+		// attestation subject) and are compared against re-reads on other
+		// machines, so a Windows CRLF checkout must produce the same bytes as
+		// a POSIX LF checkout of the same logical content.
+		const content = rawContent.replace(/\r\n/g, '\n');
 
 		// file_content_hash: SHA-256 of entire file
 		const fileHash = createHash('sha256').update(content, 'utf8').digest('hex');
