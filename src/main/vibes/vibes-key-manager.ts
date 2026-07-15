@@ -56,10 +56,22 @@ export interface VibesKeyPair {
 	keyId: string; // SHA-256[0:16] of DER public key (16 hex chars)
 }
 
+/** Why the private key is NOT encrypted at rest. */
+export type EncryptedAtRestReason = 'os-keychain-unavailable' | 'plaintext-legacy-key';
+
 export interface VibesKeyInfo {
 	publicKey: string;
 	keyId: string;
 	exists: boolean;
+	/**
+	 * True when the canonical private key is sealed with the OS keychain
+	 * (Electron safeStorage) in Maestro userData. False means the key lives
+	 * as hardened plaintext at the spec path. Optional only so existing
+	 * mocks stay shape-compatible; getUserKeyInfo always sets it.
+	 */
+	encryptedAtRest?: boolean;
+	/** Set when encryptedAtRest is false and the cause is known. */
+	encryptedAtRestReason?: EncryptedAtRestReason;
 }
 
 export type { SealProvider } from '../plugins/authorization-ledger';
@@ -214,17 +226,61 @@ export async function saveUserKeyPair(keyPair: VibesKeyPair, ctx?: KeyStoreConte
 }
 
 /**
- * Get user key info (public only) without loading private key.
+ * Get user key info (public key only; the private key is never written back
+ * out). Also reports the honest at-rest encryption status: encryptedAtRest is
+ * true only when a sealed private key exists in userData AND the OS keychain
+ * (safeStorage) is usable to unseal it. On keyring-less Linux or headless/SSH
+ * hosts sealing is unavailable, so the status is false with reason
+ * 'os-keychain-unavailable'; a not-yet-migrated plaintext key on a sealing-
+ * capable host reports 'plaintext-legacy-key'.
  */
-export async function getUserKeyInfo(): Promise<VibesKeyInfo> {
+export async function getUserKeyInfo(ctx?: KeyStoreContext): Promise<VibesKeyInfo> {
+	const { seal, sealedKeyDir, specKeysDir } = await resolveKeyStoreContext(ctx);
+
+	const sealedPath = path.join(sealedKeyDir, SEALED_KEY_FILE);
+	const sealedExists = await access(sealedPath, constants.R_OK).then(
+		() => true,
+		() => false
+	);
+	const encryptedAtRest = seal.available() && sealedExists;
+	const reason: EncryptedAtRestReason | undefined = encryptedAtRest
+		? undefined
+		: seal.available()
+			? 'plaintext-legacy-key'
+			: 'os-keychain-unavailable';
+
 	try {
-		const publicPath = path.join(KEYS_DIR, PUBLIC_KEY_FILE);
+		const publicPath = path.join(specKeysDir, PUBLIC_KEY_FILE);
 		await access(publicPath, constants.R_OK);
 		const publicKey = await readFile(publicPath, 'utf8');
 		const keyId = computeKeyId(publicKey);
-		return { publicKey, keyId, exists: true };
+		return encryptedAtRest
+			? { publicKey, keyId, exists: true, encryptedAtRest: true }
+			: { publicKey, keyId, exists: true, encryptedAtRest: false, encryptedAtRestReason: reason };
 	} catch {
-		return { publicKey: '', keyId: '', exists: false };
+		if (encryptedAtRest) {
+			// Sealed key present but the spec .pub is missing - derive it in
+			// memory (mirrors loadUserKeyPair) so the key still reads as existing.
+			try {
+				const blob = await readFile(sealedPath);
+				const publicKey = derivePublicKeyPem(seal.unseal(blob));
+				return {
+					publicKey,
+					keyId: computeKeyId(publicKey),
+					exists: true,
+					encryptedAtRest: true,
+				};
+			} catch {
+				// Unsealable blob - report as no key below.
+			}
+		}
+		return {
+			publicKey: '',
+			keyId: '',
+			exists: false,
+			encryptedAtRest: false,
+			...(seal.available() ? {} : { encryptedAtRestReason: 'os-keychain-unavailable' as const }),
+		};
 	}
 }
 

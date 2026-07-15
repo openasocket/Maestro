@@ -18,6 +18,7 @@ import {
 	verifyPAESignature,
 	saveUserKeyPair,
 	loadUserKeyPair,
+	getUserKeyInfo,
 	checkKeyPermissions,
 	buildInTotoStatement,
 	buildDSSEEnvelope,
@@ -633,6 +634,77 @@ describe('vibes-key-manager', () => {
 
 			const loaded = await loadUserKeyPair(ctx);
 			expect(loaded!.privateKey).toBe(keyPair.privateKey);
+		});
+
+		// ====================================================================
+		// getUserKeyInfo - honest encryptedAtRest status
+		// ====================================================================
+		describe('getUserKeyInfo encryptedAtRest honesty', () => {
+			it('reports encryptedAtRest: true (no reason) when the key is sealed', async () => {
+				const ctx = testContext();
+				await saveUserKeyPair(generateKeyPair(), ctx);
+
+				const info = await getUserKeyInfo(ctx);
+				expect(info.exists).toBe(true);
+				expect(info.encryptedAtRest).toBe(true);
+				expect(info.encryptedAtRestReason).toBeUndefined();
+
+				// And no plaintext private key was written anywhere
+				await expect(access(path.join(ctx.specKeysDir, 'vibescheck.key'))).rejects.toThrow();
+			});
+
+			it('reports encryptedAtRest: false with os-keychain-unavailable when sealing is unavailable', async () => {
+				const ctx = testContext(false);
+				const keyPair = generateKeyPair();
+				await saveUserKeyPair(keyPair, ctx);
+
+				const info = await getUserKeyInfo(ctx);
+				expect(info.exists).toBe(true);
+				expect(info.encryptedAtRest).toBe(false);
+				expect(info.encryptedAtRestReason).toBe('os-keychain-unavailable');
+
+				// Degraded write is hardened plaintext, and keygen was NOT blocked
+				const privatePath = path.join(ctx.specKeysDir, 'vibescheck.key');
+				expect(await readFile(privatePath, 'utf8')).toBe(keyPair.privateKey);
+				if (isPosix) {
+					const stats = await stat(privatePath);
+					expect(stats.mode & 0o777).toBe(0o600);
+				}
+			});
+
+			it('reports plaintext-legacy-key for an unmigrated plaintext key on a sealing-capable host', async () => {
+				const ctx = testContext();
+				const keyPair = generateKeyPair();
+				await mkdir(ctx.specKeysDir, { recursive: true });
+				await writeFile(path.join(ctx.specKeysDir, 'vibescheck.key'), keyPair.privateKey, 'utf8');
+				await writeFile(path.join(ctx.specKeysDir, 'vibescheck.pub'), keyPair.publicKey, 'utf8');
+
+				const info = await getUserKeyInfo(ctx);
+				expect(info.exists).toBe(true);
+				expect(info.keyId).toBe(keyPair.keyId);
+				expect(info.encryptedAtRest).toBe(false);
+				expect(info.encryptedAtRestReason).toBe('plaintext-legacy-key');
+			});
+
+			it('reports exists: false with encryptedAtRest: false when no key exists', async () => {
+				const info = await getUserKeyInfo(testContext());
+				expect(info.exists).toBe(false);
+				expect(info.encryptedAtRest).toBe(false);
+				expect(info.encryptedAtRestReason).toBeUndefined();
+			});
+
+			it('derives the public key from the sealed store if the spec .pub is missing', async () => {
+				const ctx = testContext();
+				const keyPair = generateKeyPair();
+				await saveUserKeyPair(keyPair, ctx);
+				await rm(path.join(ctx.specKeysDir, 'vibescheck.pub'));
+
+				const info = await getUserKeyInfo(ctx);
+				expect(info.exists).toBe(true);
+				expect(info.encryptedAtRest).toBe(true);
+				expect(info.keyId).toBe(keyPair.keyId);
+				expect(info.publicKey).toContain('-----BEGIN PUBLIC KEY-----');
+			});
 		});
 	});
 });

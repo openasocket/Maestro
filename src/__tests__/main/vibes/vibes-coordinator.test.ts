@@ -1920,6 +1920,27 @@ describe('vibes-coordinator', () => {
 			expect(safeSend).not.toHaveBeenCalled();
 		});
 
+		it('should skip the plaintext permissions check when the key is sealed (encryptedAtRest)', async () => {
+			const { getUserKeyInfo, checkKeyPermissions } =
+				await import('../../../main/vibes/vibes-key-manager');
+			vi.mocked(getUserKeyInfo).mockResolvedValue({
+				exists: true,
+				publicKey: 'mock-pub-key',
+				keyId: 'a1b2c3d4e5f6a7b8',
+				encryptedAtRest: true,
+			});
+
+			const safeSend = vi.fn() as unknown as SafeSendFn;
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store, safeSend });
+
+			await coordinator.checkKeyPermissionsOnStartup();
+
+			// No plaintext file exists when sealed - the 0600 check must not run
+			expect(checkKeyPermissions).not.toHaveBeenCalled();
+			expect(safeSend).not.toHaveBeenCalled();
+		});
+
 		it('should skip check when no key exists', async () => {
 			const { getUserKeyInfo, checkKeyPermissions } =
 				await import('../../../main/vibes/vibes-key-manager');

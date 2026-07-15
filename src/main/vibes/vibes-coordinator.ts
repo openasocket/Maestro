@@ -777,6 +777,18 @@ export class VibesCoordinator {
 				return;
 			}
 
+			// Sealed keys live in userData (OS-keychain encrypted); there is no
+			// plaintext spec file whose POSIX mode could be wrong.
+			if (keyInfo.encryptedAtRest) {
+				return;
+			}
+			if (keyInfo.encryptedAtRestReason === 'os-keychain-unavailable') {
+				logger.warn(
+					'VIBES signing key is stored as hardened plaintext - OS keychain (safeStorage) is unavailable on this host',
+					'VibesCoordinator'
+				);
+			}
+
 			const permCheck = await checkKeyPermissions();
 			if (!permCheck.valid) {
 				logger.warn('VIBES signing key has incorrect permissions', 'VibesCoordinator', {
