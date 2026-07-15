@@ -8,6 +8,14 @@ import * as path from 'path';
 import * as os from 'os';
 
 import type { VibesAssuranceLevel } from '../../shared/vibes-types';
+import { isWindows } from '../../shared/platformDetection';
+import {
+	getWindowsShellForAgentExecution,
+	isPowerShellShell,
+	escapeArgsForShell,
+	escapePowerShellArg,
+	escapeCmdArg,
+} from '../process-manager/utils/shellEscape';
 import { backfillCommitHash } from './vibes-io';
 
 const execFileAsync = promisify(execFile);
@@ -25,12 +33,35 @@ const VIBES_MAX_BUFFER = 5 * 1024 * 1024;
 /** Name of the vibecheck binary. */
 const VIBES_BINARY_NAME = 'vibecheck';
 
-/** Common installation paths to search for the vibecheck binary. */
-const COMMON_BINARY_PATHS = [
-	path.join(os.homedir(), '.cargo', 'bin', VIBES_BINARY_NAME),
-	path.join(os.homedir(), '.local', 'bin', VIBES_BINARY_NAME),
-	path.join('/usr', 'local', 'bin', VIBES_BINARY_NAME),
-];
+/**
+ * Executable extensions to probe for each candidate, in priority order.
+ * On Windows a cargo install produces `vibecheck.exe` and npm shims are
+ * `vibecheck.cmd`, so the bare extensionless name never matches there.
+ * Computed at call time so tests can mock `process.platform`.
+ */
+function getBinaryExtensions(): string[] {
+	return isWindows() ? ['.exe', '.cmd', '.bat', ''] : [''];
+}
+
+/**
+ * Common installation directories to search for the vibecheck binary.
+ * The POSIX-only `/usr/local/bin` is skipped on Windows; `%USERPROFILE%\.cargo\bin`
+ * is covered by the `os.homedir()` entries. Computed at call time so tests
+ * can mock `process.platform`.
+ */
+function getCommonBinaryDirs(): string[] {
+	const dirs = [path.join(os.homedir(), '.cargo', 'bin'), path.join(os.homedir(), '.local', 'bin')];
+	if (!isWindows()) {
+		dirs.push(path.join('/usr', 'local', 'bin'));
+	}
+	return dirs;
+}
+
+/** Whether the resolved binary is a Windows shim that cannot be spawned directly. */
+function isWindowsShimBinary(binaryPath: string): boolean {
+	const lower = binaryPath.toLowerCase();
+	return lower.endsWith('.cmd') || lower.endsWith('.bat');
+}
 
 // ============================================================================
 // Binary Path Cache
@@ -68,19 +99,45 @@ interface ExecVibesCheckResult {
  * Execute the vibecheck binary with the given arguments.
  * Uses child_process.execFile with a 30-second timeout.
  * Never throws — returns an ExecVibesCheckResult with exit code.
+ *
+ * On Windows, `.cmd`/`.bat` shims (npm installs) cannot be spawned directly:
+ * execFile throws EINVAL on modern Node. Those are routed through a shell
+ * resolved via getWindowsShellForAgentExecution(), mirroring handle-spawn.ts.
+ * `.exe` targets stay on plain execFile.
  */
 async function execVibesCheck(
 	binaryPath: string,
 	args: string[],
 	cwd: string
 ): Promise<ExecVibesCheckResult> {
+	let file = binaryPath;
+	let execArgs = args;
+	const options: {
+		cwd: string;
+		encoding: 'utf8';
+		timeout: number;
+		maxBuffer: number;
+		shell?: string;
+	} = {
+		cwd,
+		encoding: 'utf8',
+		timeout: VIBES_EXEC_TIMEOUT_MS,
+		maxBuffer: VIBES_MAX_BUFFER,
+	};
+
+	if (isWindows() && isWindowsShimBinary(binaryPath)) {
+		const shell = getWindowsShellForAgentExecution().shell;
+		options.shell = shell;
+		execArgs = escapeArgsForShell(args, shell);
+		// PowerShell needs the call operator (&) to run a quoted command path;
+		// cmd.exe accepts a plain double-quoted path.
+		file = isPowerShellShell(shell)
+			? `& ${escapePowerShellArg(binaryPath)}`
+			: escapeCmdArg(binaryPath);
+	}
+
 	try {
-		const { stdout, stderr } = await execFileAsync(binaryPath, args, {
-			cwd,
-			encoding: 'utf8',
-			timeout: VIBES_EXEC_TIMEOUT_MS,
-			maxBuffer: VIBES_MAX_BUFFER,
-		});
+		const { stdout, stderr } = await execFileAsync(file, execArgs, options);
 		return { stdout, stderr, exitCode: 0 };
 	} catch (error: any) {
 		return {
@@ -97,9 +154,11 @@ async function execVibesCheck(
 
 /**
  * Find the vibecheck binary. Checks custom path first, then common
- * installation paths (~/.cargo/bin, /usr/local/bin), the project's
- * node_modules/.bin/, and $PATH. Caches the result after first
- * successful detection; call `clearBinaryPathCache()` on settings change.
+ * installation paths (~/.cargo/bin, ~/.local/bin, and /usr/local/bin on
+ * POSIX), the project's node_modules/.bin/, and $PATH. On Windows each
+ * location is probed with `.exe`/`.cmd`/`.bat` extensions in addition to
+ * the bare name. Caches the result after first successful detection;
+ * call `clearBinaryPathCache()` on settings change.
  *
  * @param customPath  User-configured custom binary path (overrides auto-detect)
  * @param projectPath Optional project directory to check node_modules/.bin/
@@ -133,23 +192,27 @@ export async function findVibesCheckBinary(
 		cachedBinaryPath = undefined;
 	}
 
-	// Build the list of candidate paths to search
-	const candidates: string[] = [...COMMON_BINARY_PATHS];
+	// Build the list of candidate directories to search
+	const extensions = getBinaryExtensions();
+	const candidateDirs: string[] = [...getCommonBinaryDirs()];
 
 	// Add project-local node_modules/.bin/ if a project path is provided
 	if (projectPath) {
-		candidates.push(path.join(projectPath, 'node_modules', '.bin', VIBES_BINARY_NAME));
+		candidateDirs.push(path.join(projectPath, 'node_modules', '.bin'));
 	}
 
-	// Check common installation paths first
-	for (const candidate of candidates) {
-		try {
-			await access(candidate, constants.X_OK);
-			console.log(`[VibesBridge] Found vibecheck at: ${candidate}`);
-			cachedBinaryPath = candidate;
-			return candidate;
-		} catch (err: any) {
-			console.debug(`[VibesBridge] Not found at ${candidate}: ${err.code || err.message}`);
+	// Check common installation paths first, probing each platform extension
+	for (const dir of candidateDirs) {
+		for (const ext of extensions) {
+			const candidate = path.join(dir, VIBES_BINARY_NAME + ext);
+			try {
+				await access(candidate, constants.X_OK);
+				console.log(`[VibesBridge] Found vibecheck at: ${candidate}`);
+				cachedBinaryPath = candidate;
+				return candidate;
+			} catch (err: any) {
+				console.debug(`[VibesBridge] Not found at ${candidate}: ${err.code || err.message}`);
+			}
 		}
 	}
 
@@ -164,14 +227,16 @@ export async function findVibesCheckBinary(
 	}
 	const pathDirs = searchPath.split(path.delimiter);
 	for (const dir of pathDirs) {
-		const candidate = path.join(dir, VIBES_BINARY_NAME);
-		try {
-			await access(candidate, constants.X_OK);
-			console.log(`[VibesBridge] Found vibecheck in PATH at: ${candidate}`);
-			cachedBinaryPath = candidate;
-			return candidate;
-		} catch {
-			// Not found in this directory, continue
+		for (const ext of extensions) {
+			const candidate = path.join(dir, VIBES_BINARY_NAME + ext);
+			try {
+				await access(candidate, constants.X_OK);
+				console.log(`[VibesBridge] Found vibecheck in PATH at: ${candidate}`);
+				cachedBinaryPath = candidate;
+				return candidate;
+			} catch {
+				// Not found in this directory, continue
+			}
 		}
 	}
 

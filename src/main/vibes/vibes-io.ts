@@ -18,6 +18,7 @@ import {
 	constants,
 	open,
 	rename,
+	unlink,
 	readdir,
 } from 'fs/promises';
 import * as path from 'path';
@@ -77,12 +78,57 @@ function logWarn(message: string, error?: unknown): void {
 // ============================================================================
 
 /**
+ * Backoff delays (ms) between rename retries. Length caps the retry count:
+ * 5 attempts total (1 initial + 4 retries).
+ */
+const RENAME_RETRY_DELAYS_MS = [10, 30, 80, 200];
+
+/**
+ * Error codes worth retrying on rename. On Windows, renaming over a target
+ * that another process holds open (the vibecheck binary, Explorer, antivirus,
+ * the Search Indexer) fails with one of these under mandatory file locking.
+ */
+const RETRYABLE_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Rename with bounded retry-with-backoff for Windows file-locking errors.
+ * Retries only on EPERM/EACCES/EBUSY; anything else (and final exhaustion)
+ * rethrows immediately.
+ */
+async function renameWithRetry(tmpPath: string, filePath: string): Promise<void> {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			await rename(tmpPath, filePath);
+			return;
+		} catch (err: any) {
+			if (!RETRYABLE_RENAME_CODES.has(err?.code) || attempt >= RENAME_RETRY_DELAYS_MS.length) {
+				throw err;
+			}
+			await sleep(RENAME_RETRY_DELAYS_MS[attempt]);
+		}
+	}
+}
+
+/**
+ * Monotonic counter giving each temp file a unique suffix, so two in-flight
+ * writers never collide on the same `${filePath}.tmp`.
+ */
+let tmpFileCounter = 0;
+
+/**
  * Write a file atomically: write to a temp file, fsync, then rename.
  * On POSIX systems, rename() is atomic, so readers will either see the
- * old content or the new content — never a partial write.
+ * old content or the new content — never a partial write. On Windows the
+ * rename can fail transiently while a reader holds the target open, so it
+ * is retried with backoff (see renameWithRetry).
  */
 async function atomicWriteFile(filePath: string, data: string): Promise<void> {
-	const tmpPath = `${filePath}.tmp`;
+	tmpFileCounter = (tmpFileCounter + 1) % Number.MAX_SAFE_INTEGER;
+	const tmpPath = `${filePath}.${tmpFileCounter}.tmp`;
 	const fh = await open(tmpPath, 'w');
 	try {
 		await fh.writeFile(data, 'utf8');
@@ -90,7 +136,13 @@ async function atomicWriteFile(filePath: string, data: string): Promise<void> {
 	} finally {
 		await fh.close();
 	}
-	await rename(tmpPath, filePath);
+	try {
+		await renameWithRetry(tmpPath, filePath);
+	} catch (err) {
+		// Best-effort cleanup of the orphaned temp file
+		await unlink(tmpPath).catch(() => {});
+		throw err;
+	}
 }
 
 // ============================================================================
@@ -730,7 +782,7 @@ export async function rehashManifest(
 		const auditDir = path.join(projectPath, '.ai-audit');
 		const annotationsPath = path.join(auditDir, 'annotations.jsonl');
 		const content = updated.map((a) => JSON.stringify(a)).join('\n') + '\n';
-		await writeFile(annotationsPath, content, 'utf-8');
+		await atomicWriteFile(annotationsPath, content);
 	}
 
 	return { rehashedEntries, updatedAnnotations };

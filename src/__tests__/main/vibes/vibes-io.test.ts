@@ -15,6 +15,7 @@ import {
 	constants,
 	writeFile as fsWriteFile,
 	mkdir,
+	readdir,
 } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
@@ -424,10 +425,7 @@ describe('vibes-io', () => {
 	// ========================================================================
 	describe('atomic writes', () => {
 		it('writes manifest atomically via temp file + rename', async () => {
-			// Pre-create a stale .tmp file to prove the atomic write cycle runs
 			await ensureAuditDir(tmpDir);
-			const manifestTmpPath = path.join(tmpDir, '.ai-audit', 'manifest.json.tmp');
-			await fsWriteFile(manifestTmpPath, 'stale-data', 'utf8');
 
 			const manifest: VibesManifest = {
 				standard: 'VIBES',
@@ -441,15 +439,16 @@ describe('vibes-io', () => {
 			const raw = await readFile(manifestPath, 'utf8');
 			expect(JSON.parse(raw)).toEqual(manifest);
 
-			// Temp file was consumed by rename (no longer exists)
-			await expect(access(manifestTmpPath, constants.F_OK)).rejects.toThrow();
+			// Temp file was consumed by rename (temp names carry a unique
+			// counter suffix, e.g. manifest.json.3.tmp, so scan the dir)
+			const leftovers = (await readdir(path.join(tmpDir, '.ai-audit'))).filter((f) =>
+				f.endsWith('.tmp')
+			);
+			expect(leftovers).toEqual([]);
 		});
 
 		it('writes config atomically via temp file + rename', async () => {
-			// Pre-create a stale .tmp file to prove the atomic write cycle runs
 			await ensureAuditDir(tmpDir);
-			const configTmpPath = path.join(tmpDir, '.ai-audit', 'config.json.tmp');
-			await fsWriteFile(configTmpPath, 'stale-data', 'utf8');
 
 			await writeVibesConfig(tmpDir, SAMPLE_CONFIG);
 
@@ -458,8 +457,11 @@ describe('vibes-io', () => {
 			const raw = await readFile(configPath, 'utf8');
 			expect(JSON.parse(raw)).toEqual(SAMPLE_CONFIG);
 
-			// Temp file was consumed by rename (no longer exists)
-			await expect(access(configTmpPath, constants.F_OK)).rejects.toThrow();
+			// Temp file was consumed by rename (no .tmp residue)
+			const leftovers = (await readdir(path.join(tmpDir, '.ai-audit'))).filter((f) =>
+				f.endsWith('.tmp')
+			);
+			expect(leftovers).toEqual([]);
 		});
 
 		it('no temp file remains after successful write', async () => {
@@ -471,11 +473,11 @@ describe('vibes-io', () => {
 			await writeVibesManifest(tmpDir, manifest);
 			await writeVibesConfig(tmpDir, SAMPLE_CONFIG);
 
-			// Neither .tmp file should exist
-			const manifestTmpPath = path.join(tmpDir, '.ai-audit', 'manifest.json.tmp');
-			const configTmpPath = path.join(tmpDir, '.ai-audit', 'config.json.tmp');
-			await expect(access(manifestTmpPath, constants.F_OK)).rejects.toThrow();
-			await expect(access(configTmpPath, constants.F_OK)).rejects.toThrow();
+			// No .tmp file should remain for either write
+			const leftovers = (await readdir(path.join(tmpDir, '.ai-audit'))).filter((f) =>
+				f.endsWith('.tmp')
+			);
+			expect(leftovers).toEqual([]);
 		});
 	});
 
