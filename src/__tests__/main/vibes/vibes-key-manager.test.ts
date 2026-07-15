@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, mkdir, writeFile, stat, chmod } from 'fs/promises';
+import { mkdtemp, rm, mkdir, writeFile, stat, chmod, readFile, access } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { createHash } from 'crypto';
@@ -17,17 +17,21 @@ import {
 	signPAE,
 	verifyPAESignature,
 	saveUserKeyPair,
+	loadUserKeyPair,
 	checkKeyPermissions,
 	buildInTotoStatement,
 	buildDSSEEnvelope,
 	computeAttestationId,
 	exportPublicKey,
+	SEALED_KEY_FILE,
 } from '../../../main/vibes/vibes-key-manager';
 
 import type {
 	VibesKeyPair,
 	DSSEEnvelope,
 	InTotoStatement,
+	KeyStoreContext,
+	SealProvider,
 } from '../../../main/vibes/vibes-key-manager';
 
 describe('vibes-key-manager', () => {
@@ -478,6 +482,157 @@ describe('vibes-key-manager', () => {
 			const keyPair = generateKeyPair();
 			const exported = exportPublicKey(keyPair.publicKey, 'ssh');
 			expect(exported).toMatch(/^ssh-ed25519 [A-Za-z0-9+/=]+$/);
+		});
+	});
+
+	// ========================================================================
+	// Sealed key store (injected SealProvider, no Electron runtime needed)
+	// ========================================================================
+	describe('sealed key store', () => {
+		const isPosix = process.platform !== 'win32';
+		const SEAL_MAGIC = Buffer.from('FAKESEAL:', 'utf8');
+
+		// Fake "encryption": magic prefix + base64 of the plaintext. Not secure,
+		// but enough that the sealed blob never contains the raw PEM bytes.
+		function fakeSealProvider(available = true): SealProvider {
+			return {
+				available: () => available,
+				seal: (plaintext: string) =>
+					Buffer.concat([
+						SEAL_MAGIC,
+						Buffer.from(Buffer.from(plaintext, 'utf8').toString('base64'), 'utf8'),
+					]),
+				unseal: (blob: Buffer) => {
+					if (!blob.subarray(0, SEAL_MAGIC.length).equals(SEAL_MAGIC)) {
+						throw new Error('not a fake-sealed blob');
+					}
+					return Buffer.from(blob.subarray(SEAL_MAGIC.length).toString('utf8'), 'base64').toString(
+						'utf8'
+					);
+				},
+			};
+		}
+
+		function testContext(available = true): KeyStoreContext {
+			return {
+				seal: fakeSealProvider(available),
+				sealedKeyDir: path.join(tempDir, 'userData', 'vibes'),
+				specKeysDir: path.join(tempDir, '.vibescheck', 'keys'),
+			};
+		}
+
+		it('saves a sealed blob and does NOT write a plaintext private key', async () => {
+			const ctx = testContext();
+			const keyPair = generateKeyPair();
+
+			await saveUserKeyPair(keyPair, ctx);
+
+			const sealedPath = path.join(ctx.sealedKeyDir, SEALED_KEY_FILE);
+			const blob = await readFile(sealedPath);
+			expect(blob.toString('utf8')).not.toContain('PRIVATE KEY');
+			expect(ctx.seal.unseal(blob)).toBe(keyPair.privateKey);
+
+			// No plaintext private key at the spec path
+			await expect(access(path.join(ctx.specKeysDir, 'vibescheck.key'))).rejects.toThrow();
+		});
+
+		it('still writes the public key in plaintext at the spec path', async () => {
+			const ctx = testContext();
+			const keyPair = generateKeyPair();
+
+			await saveUserKeyPair(keyPair, ctx);
+
+			const publicKey = await readFile(path.join(ctx.specKeysDir, 'vibescheck.pub'), 'utf8');
+			expect(publicKey).toBe(keyPair.publicKey);
+		});
+
+		it.skipIf(!isPosix)('hardens sealed blob to 0600 and public key to 0644', async () => {
+			const ctx = testContext();
+			await saveUserKeyPair(generateKeyPair(), ctx);
+
+			const sealedStats = await stat(path.join(ctx.sealedKeyDir, SEALED_KEY_FILE));
+			const publicStats = await stat(path.join(ctx.specKeysDir, 'vibescheck.pub'));
+			expect(sealedStats.mode & 0o777).toBe(0o600);
+			expect(publicStats.mode & 0o777).toBe(0o644);
+		});
+
+		it('round-trips the exact private key PEM through save + load', async () => {
+			const ctx = testContext();
+			const keyPair = generateKeyPair();
+
+			await saveUserKeyPair(keyPair, ctx);
+			const loaded = await loadUserKeyPair(ctx);
+
+			expect(loaded).not.toBeNull();
+			expect(loaded!.privateKey).toBe(keyPair.privateKey);
+			expect(loaded!.publicKey).toBe(keyPair.publicKey);
+			expect(loaded!.keyId).toBe(keyPair.keyId);
+		});
+
+		it('prefers the sealed store over a plaintext spec key', async () => {
+			const ctx = testContext();
+			const sealedKeyPair = generateKeyPair();
+			const plaintextKeyPair = generateKeyPair();
+
+			await saveUserKeyPair(sealedKeyPair, ctx);
+			// A different plaintext key at the spec path (e.g. CLI-exported stale key)
+			await writeFile(path.join(ctx.specKeysDir, 'vibescheck.key'), plaintextKeyPair.privateKey);
+
+			const loaded = await loadUserKeyPair(ctx);
+			expect(loaded!.privateKey).toBe(sealedKeyPair.privateKey);
+		});
+
+		it('falls back to a plaintext spec key when no sealed store exists', async () => {
+			const ctx = testContext();
+			const keyPair = generateKeyPair();
+
+			await mkdir(ctx.specKeysDir, { recursive: true });
+			await writeFile(path.join(ctx.specKeysDir, 'vibescheck.key'), keyPair.privateKey, 'utf8');
+			await writeFile(path.join(ctx.specKeysDir, 'vibescheck.pub'), keyPair.publicKey, 'utf8');
+
+			const loaded = await loadUserKeyPair(ctx);
+			expect(loaded).not.toBeNull();
+			expect(loaded!.privateKey).toBe(keyPair.privateKey);
+			expect(loaded!.keyId).toBe(keyPair.keyId);
+		});
+
+		it('derives the public key from the sealed private key if the spec .pub is missing', async () => {
+			const ctx = testContext();
+			const keyPair = generateKeyPair();
+
+			await saveUserKeyPair(keyPair, ctx);
+			await rm(path.join(ctx.specKeysDir, 'vibescheck.pub'));
+
+			const loaded = await loadUserKeyPair(ctx);
+			expect(loaded).not.toBeNull();
+			expect(loaded!.keyId).toBe(keyPair.keyId);
+			expect(loaded!.publicKey).toContain('-----BEGIN PUBLIC KEY-----');
+		});
+
+		it('returns null when neither a sealed store nor spec keys exist', async () => {
+			const loaded = await loadUserKeyPair(testContext());
+			expect(loaded).toBeNull();
+		});
+
+		it('degrades to a hardened plaintext private key when sealing is unavailable', async () => {
+			const ctx = testContext(false);
+			const keyPair = generateKeyPair();
+
+			await saveUserKeyPair(keyPair, ctx);
+
+			// No sealed blob was written
+			await expect(access(path.join(ctx.sealedKeyDir, SEALED_KEY_FILE))).rejects.toThrow();
+
+			const privatePath = path.join(ctx.specKeysDir, 'vibescheck.key');
+			const plaintext = await readFile(privatePath, 'utf8');
+			expect(plaintext).toBe(keyPair.privateKey);
+			if (isPosix) {
+				const stats = await stat(privatePath);
+				expect(stats.mode & 0o777).toBe(0o600);
+			}
+
+			const loaded = await loadUserKeyPair(ctx);
+			expect(loaded!.privateKey).toBe(keyPair.privateKey);
 		});
 	});
 });

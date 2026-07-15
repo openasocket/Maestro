@@ -2,7 +2,11 @@
 // DSSE envelope construction, and in-toto v1 attestation statement building.
 //
 // Implements the VERIFY specification for cryptographic signing of VIBES audit data.
-// Keys are stored at ~/.vibescheck/keys/ per the spec.
+// The canonical private key is SEALED with the OS keychain (Electron safeStorage)
+// inside Maestro userData; the public key lives in plaintext at the spec path
+// ~/.vibescheck/keys/ so the external vibecheck CLI can read it. A plaintext
+// private key at the spec path is only a fallback (legacy installs, CLI export,
+// or hosts where safeStorage is unavailable).
 //
 // No external crypto dependencies — uses Node.js 18+ native Ed25519 support.
 
@@ -17,6 +21,8 @@ import {
 import { readFile, writeFile, mkdir, stat, chmod, access, constants } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+import { safeStorageSeal } from '../plugins/authorization-ledger';
+import type { SealProvider } from '../plugins/authorization-ledger';
 
 // ============================================================================
 // Constants
@@ -30,6 +36,9 @@ const PRIVATE_KEY_FILE = 'vibescheck.key';
 
 /** Public key filename. */
 const PUBLIC_KEY_FILE = 'vibescheck.pub';
+
+/** Sealed private-key filename (inside Maestro userData, NOT the spec dir). */
+export const SEALED_KEY_FILE = 'vibescheck.key.sealed';
 
 /** Audit directory name at project root. */
 const AUDIT_DIR = '.ai-audit';
@@ -51,6 +60,21 @@ export interface VibesKeyInfo {
 	publicKey: string;
 	keyId: string;
 	exists: boolean;
+}
+
+export type { SealProvider } from '../plugins/authorization-ledger';
+
+/**
+ * Injectable storage context for key persistence. Production resolves lazily
+ * to Electron safeStorage + userData; unit tests inject a fake SealProvider
+ * and temp directories so this module never needs an Electron runtime.
+ */
+export interface KeyStoreContext {
+	seal: SealProvider;
+	/** Directory holding the sealed private key (production: <userData>/vibes). */
+	sealedKeyDir: string;
+	/** Directory holding the plaintext spec keys (production: ~/.vibescheck/keys). */
+	specKeysDir: string;
 }
 
 // VERIFY spec types — re-exported from shared for backward compat
@@ -91,14 +115,61 @@ export function computeKeyId(publicKeyPem: string): string {
 // Key Persistence
 // ============================================================================
 
+let productionContext: KeyStoreContext | null = null;
+
 /**
- * Load user keypair from ~/.vibescheck/keys/.
+ * Resolve the storage context. When none is injected, lazily binds the
+ * production context (Electron safeStorage + userData). The electron import
+ * stays dynamic so unit tests can drive persistence with a fake context
+ * without an Electron runtime.
+ */
+async function resolveKeyStoreContext(ctx?: KeyStoreContext): Promise<KeyStoreContext> {
+	if (ctx) return ctx;
+	if (!productionContext) {
+		const { app, safeStorage } = await import('electron');
+		productionContext = {
+			seal: safeStorageSeal(safeStorage),
+			sealedKeyDir: path.join(app.getPath('userData'), 'vibes'),
+			specKeysDir: KEYS_DIR,
+		};
+	}
+	return productionContext;
+}
+
+/** Derive the SPKI PEM public key from a PKCS8 PEM private key. */
+function derivePublicKeyPem(privateKeyPem: string): string {
+	return createPublicKey(privateKeyPem).export({ type: 'spki', format: 'pem' }).toString();
+}
+
+/**
+ * Load user keypair. Prefers the sealed store in Maestro userData (unsealed
+ * in memory, never written back as plaintext); falls back to a plaintext
+ * PKCS8 PEM at the spec path (legacy installs / keys exported for the CLI).
  * Returns null if keys have not been generated yet.
  */
-export async function loadUserKeyPair(): Promise<VibesKeyPair | null> {
+export async function loadUserKeyPair(ctx?: KeyStoreContext): Promise<VibesKeyPair | null> {
+	const { seal, sealedKeyDir, specKeysDir } = await resolveKeyStoreContext(ctx);
+
+	if (seal.available()) {
+		try {
+			const blob = await readFile(path.join(sealedKeyDir, SEALED_KEY_FILE));
+			const privateKey = seal.unseal(blob);
+			let publicKey: string;
+			try {
+				publicKey = await readFile(path.join(specKeysDir, PUBLIC_KEY_FILE), 'utf8');
+			} catch {
+				publicKey = derivePublicKeyPem(privateKey);
+			}
+			return { publicKey, privateKey, keyId: computeKeyId(publicKey) };
+		} catch {
+			// No sealed store (or unsealable blob) - fall through to the
+			// plaintext spec path below.
+		}
+	}
+
 	try {
-		const privatePath = path.join(KEYS_DIR, PRIVATE_KEY_FILE);
-		const publicPath = path.join(KEYS_DIR, PUBLIC_KEY_FILE);
+		const privatePath = path.join(specKeysDir, PRIVATE_KEY_FILE);
+		const publicPath = path.join(specKeysDir, PUBLIC_KEY_FILE);
 
 		await access(privatePath, constants.R_OK);
 		await access(publicPath, constants.R_OK);
@@ -114,20 +185,32 @@ export async function loadUserKeyPair(): Promise<VibesKeyPair | null> {
 }
 
 /**
- * Save user keypair to ~/.vibescheck/keys/.
- * Sets chmod 0600 on private key, 0644 on public key.
+ * Save user keypair. The public key always goes to the spec path in plaintext
+ * (public keys need no protection; the vibecheck CLI reads it there). When
+ * sealing is available the private key is sealed into Maestro userData and
+ * NO plaintext private key is written. Only when sealing is unavailable
+ * (e.g. keyring-less Linux, headless/SSH) does it degrade to the legacy
+ * hardened plaintext file at the spec path so key generation still works.
  */
-export async function saveUserKeyPair(keyPair: VibesKeyPair): Promise<void> {
-	await mkdir(KEYS_DIR, { recursive: true });
+export async function saveUserKeyPair(keyPair: VibesKeyPair, ctx?: KeyStoreContext): Promise<void> {
+	const { seal, sealedKeyDir, specKeysDir } = await resolveKeyStoreContext(ctx);
 
-	const privatePath = path.join(KEYS_DIR, PRIVATE_KEY_FILE);
-	const publicPath = path.join(KEYS_DIR, PUBLIC_KEY_FILE);
-
-	await writeFile(privatePath, keyPair.privateKey, 'utf8');
-	await chmod(privatePath, 0o600);
-
+	await mkdir(specKeysDir, { recursive: true });
+	const publicPath = path.join(specKeysDir, PUBLIC_KEY_FILE);
 	await writeFile(publicPath, keyPair.publicKey, 'utf8');
 	await chmod(publicPath, 0o644);
+
+	if (seal.available()) {
+		await mkdir(sealedKeyDir, { recursive: true });
+		const sealedPath = path.join(sealedKeyDir, SEALED_KEY_FILE);
+		await writeFile(sealedPath, seal.seal(keyPair.privateKey));
+		await chmod(sealedPath, 0o600);
+		return;
+	}
+
+	const privatePath = path.join(specKeysDir, PRIVATE_KEY_FILE);
+	await writeFile(privatePath, keyPair.privateKey, 'utf8');
+	await chmod(privatePath, 0o600);
 }
 
 /**
