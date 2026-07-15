@@ -384,29 +384,46 @@ export async function getUserKeyInfo(ctx?: KeyStoreContext): Promise<VibesKeyInf
 }
 
 /**
- * Check if private key file has correct permissions (0600).
- * Returns { valid: true } if correct, or { valid: false, message } if not.
+ * Check how the private key is protected at rest, honestly across the sealed
+ * model and platforms. Only a REAL problem returns { valid: false }:
+ * - No plaintext private key at the spec path (canonical key sealed in the
+ *   OS keychain, or no key generated yet): { valid: true } - there is no
+ *   file whose protection could be wrong.
+ * - Plaintext spec key present (exported for the CLI, legacy install, or the
+ *   seal-unavailable fallback):
+ *   - POSIX: its mode must be 0600, otherwise { valid: false } with a chmod
+ *     remediation message.
+ *   - Windows: NTFS has no POSIX mode bits (stat reports ~0666), and the file
+ *     is ACL-hardened via icacls when written, so an existing readable file
+ *     counts as valid and the chmod wording is never emitted.
  */
-export async function checkKeyPermissions(): Promise<{ valid: boolean; message?: string }> {
+export async function checkKeyPermissions(
+	ctx?: KeyStoreContext
+): Promise<{ valid: boolean; message?: string }> {
+	const { specKeysDir } = await resolveKeyStoreContext(ctx);
+	const privatePath = path.join(specKeysDir, PRIVATE_KEY_FILE);
+
+	let stats;
 	try {
-		const privatePath = path.join(KEYS_DIR, PRIVATE_KEY_FILE);
-		const stats = await stat(privatePath);
-		const mode = stats.mode & 0o777;
-
-		if (mode !== 0o600) {
-			return {
-				valid: false,
-				message: `Private key permissions are ${mode.toString(8)}, expected 600. Run: chmod 600 ${privatePath}`,
-			};
-		}
-
+		stats = await stat(privatePath);
+	} catch {
+		// No plaintext private key on disk - nothing to warn about.
 		return { valid: true };
-	} catch (error) {
+	}
+
+	if (isWindows()) {
+		return { valid: true };
+	}
+
+	const mode = stats.mode & 0o777;
+	if (mode !== 0o600) {
 		return {
 			valid: false,
-			message: `Cannot check key permissions: ${error instanceof Error ? error.message : String(error)}`,
+			message: `Private key permissions are ${mode.toString(8)}, expected 600. Run: chmod 600 ${privatePath}`,
 		};
 	}
+
+	return { valid: true };
 }
 
 // ============================================================================

@@ -412,17 +412,24 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 	// VERIFY Spec: Key Management & Attestation Handlers
 	// ========================================================================
 
-	// Generate Ed25519 keypair, save to ~/.vibescheck/keys/, return public key info
+	// Generate Ed25519 keypair, save to ~/.vibescheck/keys/, return public key
+	// info plus the honest at-rest encryption status so the UI can tell the
+	// user whether the private key was sealed or written as hardened plaintext.
 	ipcMain.handle('vibes:keygen', async () => {
 		try {
 			const keyPair = generateKeyPair();
 			await saveUserKeyPair(keyPair);
+			const keyInfo = await getUserKeyInfo();
 			return {
 				success: true,
 				data: {
 					publicKey: keyPair.publicKey,
 					keyId: keyPair.keyId,
 					exists: true,
+					encryptedAtRest: keyInfo.encryptedAtRest === true,
+					...(keyInfo.encryptedAtRestReason
+						? { encryptedAtRestReason: keyInfo.encryptedAtRestReason }
+						: {}),
 				},
 			};
 		} catch (error) {

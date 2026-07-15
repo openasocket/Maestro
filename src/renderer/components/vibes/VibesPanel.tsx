@@ -3,6 +3,7 @@ import { Settings, RefreshCw, AlertTriangle, CheckCircle2, Lock, ShieldAlert } f
 import DiscoBallIcon from '../icons/DiscoBallIcon';
 import type { Theme } from '../../types';
 import type { VibesAssuranceLevel } from '../../../shared/vibes-types';
+import { isWindows } from '../../../shared/platformDetection';
 import { useSettings, useVibesData, useVibesLive } from '../../hooks';
 import { VibesDashboard } from './VibesDashboard';
 import { VibesAnnotationLog } from './VibesAnnotationLog';
@@ -494,10 +495,19 @@ export const VibesPanel: React.FC<VibesPanelProps> = ({
 										git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo
 										build --release
 									</code>
-									<span>
-										Then copy <code className="font-mono">target/release/vibecheck</code> to a
-										directory in your PATH (e.g. <code className="font-mono">/usr/local/bin/</code>)
-									</span>
+									{isWindows() ? (
+										<span>
+											Then copy <code className="font-mono">target\release\vibecheck.exe</code> to{' '}
+											<code className="font-mono">%USERPROFILE%\.cargo\bin</code> (auto-detected),
+											or set a custom path in Settings &gt; VIBES
+										</span>
+									) : (
+										<span>
+											Then copy <code className="font-mono">target/release/vibecheck</code> to a
+											directory in your PATH (e.g.{' '}
+											<code className="font-mono">/usr/local/bin/</code>)
+										</span>
+									)}
 								</div>
 								<a
 									href="https://github.com/openasocket/VibeCheck"

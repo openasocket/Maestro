@@ -133,6 +133,18 @@ The font picker stores a bare name (`Roboto Mono`) with no generic fallback, whi
 
 ---
 
+## VIBES Key Path Display (`src/renderer/utils/vibesKeyPaths.ts` - Renderer)
+
+Display-only strings for the VIBES spec key paths; branches on `isWindows()` so Windows users see `%USERPROFILE%\.vibescheck\keys` shaped copy. Never use these for file access - real paths are resolved in `src/main/vibes/vibes-key-manager.ts`.
+
+| Function                       | Signature      | Purpose                                                      |
+| ------------------------------ | -------------- | ------------------------------------------------------------ |
+| `vibesKeyDirDisplay()`         | `() => string` | Key dir for UI copy: `~/.vibescheck/keys` or Windows-shaped. |
+| `vibesPrivateKeyPathDisplay()` | `() => string` | Private key path for UI copy (`vibescheck.key`).             |
+| `vibesPublicKeyPathDisplay()`  | `() => string` | Public key path for UI copy (`vibescheck.pub`).              |
+
+---
+
 ## Emoji Utilities (`src/shared/emojiUtils.ts` - Both)
 
 | Function                           | Signature                    | Purpose                                         |

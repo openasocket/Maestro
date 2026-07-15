@@ -219,8 +219,112 @@ describe('VibesKeygenWizard', () => {
 		});
 
 		expect(screen.getByText(/MUST NOT transmit the private key/)).toBeTruthy();
-		expect(screen.getByText(/MUST have 0600 permissions/)).toBeTruthy();
+		// Softened plaintext-protection rule (platform-branched copy)
+		expect(screen.getByText(/plaintext private key file/)).toBeTruthy();
 		expect(screen.getByText(/MUST NOT appear in VIBES audit data/)).toBeTruthy();
+	});
+
+	it('shows the POSIX 0600 wording on non-Windows and never on Windows', async () => {
+		const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+		try {
+			Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+			const { unmount } = render(<VibesKeygenWizard theme={testTheme} onClose={vi.fn()} />);
+			await act(async () => {
+				fireEvent.click(screen.getByText('Generate Key'));
+			});
+			await waitFor(() => {
+				expect(screen.getByText(/must keep 0600 permissions/)).toBeTruthy();
+			});
+			unmount();
+
+			Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+			render(<VibesKeygenWizard theme={testTheme} onClose={vi.fn()} />);
+			await act(async () => {
+				fireEvent.click(screen.getByText('Generate Key'));
+			});
+			await waitFor(() => {
+				expect(screen.getByTestId('keygen-step-2')).toBeTruthy();
+			});
+			expect(screen.queryByText(/0600/)).toBeNull();
+			expect(screen.getByText(/access-restricted to your user account/)).toBeTruthy();
+		} finally {
+			Object.defineProperty(process, 'platform', realPlatform);
+		}
+	});
+
+	it('shows a %USERPROFILE% shaped key path on Windows', async () => {
+		const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+		try {
+			Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+			render(<VibesKeygenWizard theme={testTheme} onClose={vi.fn()} />);
+			await act(async () => {
+				fireEvent.click(screen.getByText('Generate Key'));
+			});
+			await waitFor(() => {
+				expect(screen.getByTestId('keygen-step-2')).toBeTruthy();
+			});
+			// Location row shows the exact Windows-shaped dir
+			expect(screen.getByText('%USERPROFILE%\\.vibescheck\\keys')).toBeTruthy();
+			// Public key path is Windows-shaped too
+			expect(screen.getByText(/%USERPROFILE%.*vibescheck\.pub/)).toBeTruthy();
+		} finally {
+			Object.defineProperty(process, 'platform', realPlatform);
+		}
+	});
+
+	it('shows sealed storage status and no plaintext private key path when encryptedAtRest', async () => {
+		mockKeygen.mockResolvedValue({
+			success: true,
+			data: {
+				publicKey: 'mock-public-key-pem',
+				keyId: 'a1b2c3d4e5f6a7b8',
+				encryptedAtRest: true,
+			},
+		});
+
+		render(<VibesKeygenWizard theme={testTheme} onClose={vi.fn()} />);
+		await act(async () => {
+			fireEvent.click(screen.getByText('Generate Key'));
+		});
+
+		await waitFor(() => {
+			expect(screen.getByTestId('keygen-step-2')).toBeTruthy();
+		});
+
+		expect(screen.getByText('Encrypted at rest (OS keychain)')).toBeTruthy();
+		expect(screen.getByTestId('keygen-sealed-note')).toBeTruthy();
+		// Only the public key file is listed; there is no plaintext .key file
+		expect(screen.getByText(/vibescheck\.pub/)).toBeTruthy();
+		expect(screen.queryByText(/vibescheck\.key$/)).toBeNull();
+
+		// Step 3 points at the export action instead of a nonexistent file
+		await act(async () => {
+			fireEvent.click(screen.getByText('Next'));
+		});
+		expect(screen.getByTestId('backup-sealed-note')).toBeTruthy();
+	});
+
+	it('shows plaintext storage status when the key is not encrypted at rest', async () => {
+		mockKeygen.mockResolvedValue({
+			success: true,
+			data: {
+				publicKey: 'mock-public-key-pem',
+				keyId: 'a1b2c3d4e5f6a7b8',
+				encryptedAtRest: false,
+			},
+		});
+
+		render(<VibesKeygenWizard theme={testTheme} onClose={vi.fn()} />);
+		await act(async () => {
+			fireEvent.click(screen.getByText('Generate Key'));
+		});
+
+		await waitFor(() => {
+			expect(screen.getByTestId('keygen-step-2')).toBeTruthy();
+		});
+
+		expect(screen.getByText('Plaintext file (OS keychain unavailable)')).toBeTruthy();
+		expect(screen.getByText(/vibescheck\.key/)).toBeTruthy();
 	});
 
 	it('shows file paths on step 2', async () => {

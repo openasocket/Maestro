@@ -12,6 +12,12 @@ import { Key, Shield, Copy, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-
 import type { Theme } from '../../types';
 import { Modal, ModalFooter } from '../ui/Modal';
 import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
+import { isWindows } from '../../../shared/platformDetection';
+import {
+	vibesKeyDirDisplay,
+	vibesPrivateKeyPathDisplay,
+	vibesPublicKeyPathDisplay,
+} from '../../utils/vibesKeyPaths';
 
 // ============================================================================
 // Types
@@ -26,17 +32,11 @@ interface VibesKeygenWizardProps {
 interface KeygenResult {
 	publicKey: string;
 	keyId: string;
+	/** True when the private key was sealed with the OS keychain (no plaintext file). */
+	encryptedAtRest?: boolean;
 }
 
 type WizardStep = 1 | 2 | 3;
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-const KEY_DIR = '~/.vibescheck/keys';
-const PRIVATE_KEY_PATH = `${KEY_DIR}/vibescheck.key`;
-const PUBLIC_KEY_PATH = `${KEY_DIR}/vibescheck.pub`;
 
 // ============================================================================
 // Component
@@ -86,8 +86,12 @@ export const VibesKeygenWizard: React.FC<VibesKeygenWizardProps> = ({
 		try {
 			const result = await window.maestro.vibes.attestation.keygen();
 			if (result.success && result.data) {
-				const data = result.data as { publicKey: string; keyId: string };
-				setKeyResult({ publicKey: data.publicKey, keyId: data.keyId });
+				const data = result.data as KeygenResult;
+				setKeyResult({
+					publicKey: data.publicKey,
+					keyId: data.keyId,
+					encryptedAtRest: data.encryptedAtRest,
+				});
 				setStep(2);
 			} else {
 				setError(result.error ?? 'Key generation failed');
@@ -131,6 +135,13 @@ export const VibesKeygenWizard: React.FC<VibesKeygenWizardProps> = ({
 	// ========================================================================
 	// Step Renderers
 	// ========================================================================
+
+	// Display-only path strings (platform-shaped); real paths live in the main process.
+	const keyDir = vibesKeyDirDisplay();
+	const privateKeyPath = vibesPrivateKeyPathDisplay();
+	const publicKeyPath = vibesPublicKeyPathDisplay();
+	// True when the private key was sealed with the OS keychain (no plaintext file on disk).
+	const sealed = keyResult?.encryptedAtRest === true;
 
 	const renderStep1 = () => (
 		<div className="flex flex-col gap-4" data-testid="keygen-step-1">
@@ -227,7 +238,17 @@ export const VibesKeygenWizard: React.FC<VibesKeygenWizardProps> = ({
 				</div>
 				<div className="flex items-center justify-between">
 					<span style={{ color: theme.colors.textDim }}>Location:</span>
-					<span style={{ color: theme.colors.textMain }}>{KEY_DIR}/</span>
+					<span style={{ color: theme.colors.textMain }}>{keyDir}</span>
+				</div>
+				<div className="flex items-center justify-between" data-testid="keygen-storage-status">
+					<span style={{ color: theme.colors.textDim }}>Private key storage:</span>
+					{sealed ? (
+						<span style={{ color: theme.colors.success }}>Encrypted at rest (OS keychain)</span>
+					) : (
+						<span style={{ color: theme.colors.warning }}>
+							Plaintext file (OS keychain unavailable)
+						</span>
+					)}
 				</div>
 			</div>
 
@@ -244,7 +265,9 @@ export const VibesKeygenWizard: React.FC<VibesKeygenWizardProps> = ({
 				</div>
 				{[
 					'You MUST NOT transmit the private key over any network',
-					'Private key file MUST have 0600 permissions (owner read/write only)',
+					isWindows()
+						? 'A plaintext private key file (e.g. exported for the CLI) is access-restricted to your user account - keep it that way'
+						: 'A plaintext private key file (e.g. exported for the CLI) must keep 0600 permissions (owner read/write only)',
 					'Key material MUST NOT appear in VIBES audit data',
 					'Back up your private key to a secure offline location',
 				].map((rule) => (
@@ -260,19 +283,27 @@ export const VibesKeygenWizard: React.FC<VibesKeygenWizardProps> = ({
 				<span className="font-medium" style={{ color: theme.colors.textDim }}>
 					Files created:
 				</span>
+				{sealed ? (
+					<span data-testid="keygen-sealed-note" style={{ color: theme.colors.textDim }}>
+						Your private key is sealed in the OS keychain - no plaintext private key file is
+						written. Use &quot;Export key for the vibecheck CLI&quot; in Settings if you need a
+						plaintext copy.
+					</span>
+				) : (
+					<code
+						className="px-2 py-1 rounded"
+						style={{ backgroundColor: theme.colors.bgActivity, color: theme.colors.textMain }}
+					>
+						{privateKeyPath}{' '}
+						<span style={{ color: theme.colors.error }}>(PRIVATE - never share)</span>
+					</code>
+				)}
 				<code
 					className="px-2 py-1 rounded"
 					style={{ backgroundColor: theme.colors.bgActivity, color: theme.colors.textMain }}
 				>
-					{PRIVATE_KEY_PATH}{' '}
-					<span style={{ color: theme.colors.error }}>(PRIVATE — never share)</span>
-				</code>
-				<code
-					className="px-2 py-1 rounded"
-					style={{ backgroundColor: theme.colors.bgActivity, color: theme.colors.textMain }}
-				>
-					{PUBLIC_KEY_PATH}{' '}
-					<span style={{ color: theme.colors.success }}>(PUBLIC — safe to share)</span>
+					{publicKeyPath}{' '}
+					<span style={{ color: theme.colors.success }}>(PUBLIC - safe to share)</span>
 				</code>
 			</div>
 
@@ -333,27 +364,37 @@ export const VibesKeygenWizard: React.FC<VibesKeygenWizardProps> = ({
 			</div>
 
 			{/* File to back up */}
-			<div className="flex flex-col gap-1 text-xs">
-				<span style={{ color: theme.colors.textDim }}>File to back up:</span>
-				<div className="flex items-center gap-2">
-					<code
-						className="flex-1 px-2 py-1 rounded"
-						style={{
-							backgroundColor: theme.colors.bgActivity,
-							color: theme.colors.accent,
-						}}
-					>
-						{PRIVATE_KEY_PATH}
-					</code>
-					<CopyButton
-						theme={theme}
-						label="Copy Path"
-						onClick={() => copyToClipboard(PRIVATE_KEY_PATH, 'path')}
-						copied={copiedField === 'path'}
-						compact
-					/>
+			{sealed ? (
+				<div className="flex flex-col gap-1 text-xs" data-testid="backup-sealed-note">
+					<span style={{ color: theme.colors.textDim }}>
+						Your private key is sealed in the OS keychain, so there is no plaintext file to copy
+						yet. To back it up (or use the vibecheck CLI), export a plaintext copy from Settings
+						{' -> '}VIBES{' -> '}&quot;Export key for the vibecheck CLI&quot;.
+					</span>
 				</div>
-			</div>
+			) : (
+				<div className="flex flex-col gap-1 text-xs">
+					<span style={{ color: theme.colors.textDim }}>File to back up:</span>
+					<div className="flex items-center gap-2">
+						<code
+							className="flex-1 px-2 py-1 rounded"
+							style={{
+								backgroundColor: theme.colors.bgActivity,
+								color: theme.colors.accent,
+							}}
+						>
+							{privateKeyPath}
+						</code>
+						<CopyButton
+							theme={theme}
+							label="Copy Path"
+							onClick={() => copyToClipboard(privateKeyPath, 'path')}
+							copied={copiedField === 'path'}
+							compact
+						/>
+					</div>
+				</div>
+			)}
 
 			{/* Acknowledgment checkbox */}
 			<label

@@ -783,7 +783,7 @@ describe('vibes-handlers', () => {
 	// ========================================================================
 
 	describe('vibes:keygen', () => {
-		it('should generate a keypair, save it, and return key info', async () => {
+		it('should generate a keypair, save it, and return key info with encryptedAtRest', async () => {
 			const mockKeyPair = {
 				publicKey: '-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----',
 				privateKey: '-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----',
@@ -791,6 +791,12 @@ describe('vibes-handlers', () => {
 			};
 			mockGenerateKeyPair.mockReturnValue(mockKeyPair);
 			mockSaveUserKeyPair.mockResolvedValue(undefined);
+			mockGetUserKeyInfo.mockResolvedValue({
+				publicKey: mockKeyPair.publicKey,
+				keyId: mockKeyPair.keyId,
+				exists: true,
+				encryptedAtRest: true,
+			});
 
 			const result = await handlers['vibes:keygen']({});
 
@@ -802,6 +808,37 @@ describe('vibes-handlers', () => {
 					publicKey: mockKeyPair.publicKey,
 					keyId: mockKeyPair.keyId,
 					exists: true,
+					encryptedAtRest: true,
+				},
+			});
+		});
+
+		it('should surface the unencrypted reason when sealing is unavailable', async () => {
+			const mockKeyPair = {
+				publicKey: '-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----',
+				privateKey: '-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----',
+				keyId: 'abcdef0123456789',
+			};
+			mockGenerateKeyPair.mockReturnValue(mockKeyPair);
+			mockSaveUserKeyPair.mockResolvedValue(undefined);
+			mockGetUserKeyInfo.mockResolvedValue({
+				publicKey: mockKeyPair.publicKey,
+				keyId: mockKeyPair.keyId,
+				exists: true,
+				encryptedAtRest: false,
+				encryptedAtRestReason: 'os-keychain-unavailable',
+			});
+
+			const result = await handlers['vibes:keygen']({});
+
+			expect(result).toEqual({
+				success: true,
+				data: {
+					publicKey: mockKeyPair.publicKey,
+					keyId: mockKeyPair.keyId,
+					exists: true,
+					encryptedAtRest: false,
+					encryptedAtRestReason: 'os-keychain-unavailable',
 				},
 			});
 		});

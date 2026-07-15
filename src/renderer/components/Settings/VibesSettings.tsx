@@ -33,11 +33,15 @@ import {
 	Loader2,
 	Shield,
 	RefreshCw,
+	Lock,
+	Download,
 } from 'lucide-react';
 import DiscoBallIcon from '../icons/DiscoBallIcon';
 import type { Theme } from '../../types';
 import type { VibesAssuranceLevel } from '../../../shared/vibes-types';
 import { VIBES_SETTINGS_DEFAULTS } from '../../../shared/vibes-settings';
+import { notifyToast } from '../../stores/notificationStore';
+import { vibesPrivateKeyPathDisplay } from '../../utils/vibesKeyPaths';
 
 export interface VibesSettingsProps {
 	theme: Theme;
@@ -122,6 +126,10 @@ export function VibesSettings({
 	const prevBinaryPath = useRef(vibesCheckBinaryPath);
 	const [signingKeyId, setSigningKeyId] = useState<string | null>(null);
 	const [keygenLoading, setKeygenLoading] = useState(false);
+	const [keyEncryptedAtRest, setKeyEncryptedAtRest] = useState<boolean | null>(null);
+	const [keyEncryptedAtRestReason, setKeyEncryptedAtRestReason] = useState<string | null>(null);
+	const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
+	const [exportLoading, setExportLoading] = useState(false);
 
 	// Detect binary when VIBES is enabled or binary path changes
 	useEffect(() => {
@@ -172,6 +180,8 @@ export function VibesSettings({
 	useEffect(() => {
 		if (!vibesEnabled) {
 			setSigningKeyId(null);
+			setKeyEncryptedAtRest(null);
+			setKeyEncryptedAtRestReason(null);
 			return;
 		}
 		let cancelled = false;
@@ -181,11 +191,19 @@ export function VibesSettings({
 				const data = result.data as Record<string, unknown> | undefined;
 				if (!cancelled && result.success && data?.keyId) {
 					setSigningKeyId(data.keyId as string);
+					setKeyEncryptedAtRest(data.encryptedAtRest === true);
+					setKeyEncryptedAtRestReason((data.encryptedAtRestReason as string) ?? null);
 				} else if (!cancelled) {
 					setSigningKeyId(null);
+					setKeyEncryptedAtRest(null);
+					setKeyEncryptedAtRestReason(null);
 				}
 			} catch {
-				if (!cancelled) setSigningKeyId(null);
+				if (!cancelled) {
+					setSigningKeyId(null);
+					setKeyEncryptedAtRest(null);
+					setKeyEncryptedAtRestReason(null);
+				}
 			}
 		})();
 		return () => {
@@ -206,6 +224,38 @@ export function VibesSettings({
 			// Let Sentry capture unexpected errors
 		} finally {
 			setKeygenLoading(false);
+		}
+	}, []);
+
+	// Export the private key (unencrypted, permission-hardened) for the
+	// external vibecheck CLI. Only reachable through the inline confirm box.
+	const handleExportKeyForCli = useCallback(async () => {
+		setExportLoading(true);
+		try {
+			const result = await window.maestro.vibes.attestation.exportPrivateKeyForCli();
+			const data = result.data as { path?: string } | undefined;
+			if (result.success && data?.path) {
+				notifyToast({
+					color: 'green',
+					title: 'Private key exported',
+					message: `Unencrypted signing key written to ${data.path} for the vibecheck CLI.`,
+				});
+			} else {
+				notifyToast({
+					color: 'red',
+					title: 'Key export failed',
+					message: result.error ?? 'Unknown error',
+				});
+			}
+		} catch (err) {
+			notifyToast({
+				color: 'red',
+				title: 'Key export failed',
+				message: err instanceof Error ? err.message : String(err),
+			});
+		} finally {
+			setExportLoading(false);
+			setExportConfirmOpen(false);
 		}
 	}, []);
 
@@ -987,6 +1037,97 @@ export function VibesSettings({
 									{signingKeyId ? 'Regenerate' : 'Generate'}
 								</button>
 							</div>
+
+							{/* Encryption-at-rest status */}
+							{signingKeyId && (
+								<div
+									className="flex items-center gap-1.5 -mt-2 mb-3 text-xs"
+									data-testid="attestation-encryption-status"
+								>
+									{keyEncryptedAtRest ? (
+										<>
+											<Lock className="w-3.5 h-3.5" style={{ color: theme.colors.success }} />
+											<span style={{ color: theme.colors.success }}>
+												Encrypted at rest (OS keychain)
+											</span>
+										</>
+									) : (
+										<>
+											<AlertCircle
+												className="w-3.5 h-3.5"
+												style={{ color: theme.colors.warning }}
+											/>
+											<span style={{ color: theme.colors.warning }}>
+												{keyEncryptedAtRestReason === 'plaintext-legacy-key'
+													? 'Stored unencrypted - legacy plaintext key (restart Maestro to seal it)'
+													: 'Stored unencrypted - OS keychain unavailable on this host'}
+											</span>
+										</>
+									)}
+								</div>
+							)}
+
+							{/* Export for the vibecheck CLI */}
+							{signingKeyId && (
+								<div className="mb-4">
+									{!exportConfirmOpen ? (
+										<button
+											type="button"
+											onClick={() => setExportConfirmOpen(true)}
+											className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors"
+											style={{
+												backgroundColor: theme.colors.accent + '20',
+												color: theme.colors.accent,
+											}}
+											data-testid="attestation-export-key-btn"
+										>
+											<Download className="w-3 h-3" />
+											Export key for the vibecheck CLI
+										</button>
+									) : (
+										<div
+											className="p-2.5 rounded text-xs"
+											style={{
+												backgroundColor: theme.colors.warning + '15',
+												border: '1px solid',
+												borderColor: theme.colors.warning + '40',
+											}}
+											data-testid="attestation-export-confirm"
+										>
+											<p className="mb-2" style={{ color: theme.colors.textMain }}>
+												This writes an <strong>UNENCRYPTED</strong> copy of your private key to{' '}
+												<code className="font-mono">{vibesPrivateKeyPathDisplay()}</code> so the
+												external vibecheck CLI can sign with it. The file is restricted to your user
+												account, but anyone who can read your files can read the key.
+											</p>
+											<div className="flex items-center gap-2">
+												<button
+													type="button"
+													onClick={handleExportKeyForCli}
+													disabled={exportLoading}
+													className="px-2 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50"
+													style={{
+														backgroundColor: theme.colors.warning + '30',
+														color: theme.colors.warning,
+													}}
+													data-testid="attestation-export-confirm-btn"
+												>
+													{exportLoading ? 'Exporting...' : 'Export unencrypted key'}
+												</button>
+												<button
+													type="button"
+													onClick={() => setExportConfirmOpen(false)}
+													className="px-2 py-1 rounded text-xs transition-colors"
+													style={{ color: theme.colors.textDim }}
+													data-testid="attestation-export-cancel-btn"
+												>
+													Cancel
+												</button>
+											</div>
+										</div>
+									)}
+								</div>
+							)}
 
 							{/* Cosign toggle */}
 							<label className="flex items-center gap-2 cursor-pointer mb-2">

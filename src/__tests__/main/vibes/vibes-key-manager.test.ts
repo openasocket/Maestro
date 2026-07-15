@@ -267,18 +267,88 @@ describe('vibes-key-manager', () => {
 	});
 
 	// ========================================================================
-	// 9. checkKeyPermissions() detects incorrect permissions
+	// 9. checkKeyPermissions() only flags real plaintext-protection problems
 	// ========================================================================
 	describe('checkKeyPermissions', () => {
-		it('should report invalid when key file does not exist', async () => {
-			const result = await checkKeyPermissions();
-			// If no keys exist at ~/.vibescheck/keys/, it should report invalid
-			// (test may pass or fail depending on host; we just verify it returns a valid shape)
-			expect(result).toHaveProperty('valid');
-			expect(typeof result.valid).toBe('boolean');
-			if (!result.valid) {
-				expect(result.message).toBeDefined();
+		const isPosixHost = process.platform !== 'win32';
+		const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+
+		afterEach(() => {
+			Object.defineProperty(process, 'platform', realPlatform);
+		});
+
+		function permCtx(): KeyStoreContext {
+			return {
+				seal: {
+					available: () => true,
+					seal: (plaintext: string) => Buffer.from(plaintext, 'utf8'),
+					unseal: (blob: Buffer) => blob.toString('utf8'),
+				},
+				sealedKeyDir: path.join(tempDir, 'userData', 'vibes'),
+				specKeysDir: path.join(tempDir, '.vibescheck', 'keys'),
+			};
+		}
+
+		it('is valid with no message when no key exists at all', async () => {
+			const result = await checkKeyPermissions(permCtx());
+			expect(result.valid).toBe(true);
+			expect(result.message).toBeUndefined();
+		});
+
+		it('is valid with no message when the canonical key is sealed and no plaintext key exists', async () => {
+			const ctx = permCtx();
+			await saveUserKeyPair(generateKeyPair(), ctx);
+
+			// Sealed save writes no plaintext private key at the spec path
+			await expect(access(path.join(ctx.specKeysDir, 'vibescheck.key'))).rejects.toThrow();
+
+			const result = await checkKeyPermissions(ctx);
+			expect(result.valid).toBe(true);
+			expect(result.message).toBeUndefined();
+		});
+
+		it.skipIf(!isPosixHost)(
+			'flags a POSIX plaintext key with 0644 and suggests chmod 600',
+			async () => {
+				const ctx = permCtx();
+				await mkdir(ctx.specKeysDir, { recursive: true });
+				const privatePath = path.join(ctx.specKeysDir, 'vibescheck.key');
+				await writeFile(privatePath, generateKeyPair().privateKey, 'utf8');
+				await chmod(privatePath, 0o644);
+
+				const result = await checkKeyPermissions(ctx);
+				expect(result.valid).toBe(false);
+				expect(result.message).toContain('644');
+				expect(result.message).toContain(`chmod 600 ${privatePath}`);
 			}
+		);
+
+		it.skipIf(!isPosixHost)('accepts a POSIX plaintext key with 0600', async () => {
+			const ctx = permCtx();
+			await mkdir(ctx.specKeysDir, { recursive: true });
+			const privatePath = path.join(ctx.specKeysDir, 'vibescheck.key');
+			await writeFile(privatePath, generateKeyPair().privateKey, 'utf8');
+			await chmod(privatePath, 0o600);
+
+			const result = await checkKeyPermissions(ctx);
+			expect(result.valid).toBe(true);
+			expect(result.message).toBeUndefined();
+		});
+
+		it('on Windows treats an existing plaintext key as valid and never emits chmod wording', async () => {
+			const ctx = permCtx();
+			await mkdir(ctx.specKeysDir, { recursive: true });
+			const privatePath = path.join(ctx.specKeysDir, 'vibescheck.key');
+			await writeFile(privatePath, generateKeyPair().privateKey, 'utf8');
+			if (isPosixHost) {
+				// A mode that would fail the POSIX 0600 check - Windows must not care
+				await chmod(privatePath, 0o644);
+			}
+			Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+
+			const result = await checkKeyPermissions(ctx);
+			expect(result.valid).toBe(true);
+			expect(result.message).toBeUndefined();
 		});
 	});
 

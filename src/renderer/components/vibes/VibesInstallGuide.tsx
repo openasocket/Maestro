@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { Copy, CheckCircle2, RefreshCw, X } from 'lucide-react';
 import type { Theme } from '../../types';
+import { isWindows } from '../../../shared/platformDetection';
 
 // ============================================================================
 // Types
@@ -17,21 +18,30 @@ interface VibesInstallGuideProps {
 // Install options
 // ============================================================================
 
-const INSTALL_OPTIONS = [
-	{
-		label: 'Install from source (Rust)',
-		command:
-			'git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo install --path .',
-		description: 'Preferred method — requires Rust toolchain (1.91.0+)',
-	},
-	{
-		label: 'Build manually',
-		command:
-			'git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo build --release',
-		description:
-			'Binary at target/release/vibecheck — copy to a directory in PATH (e.g. /usr/local/bin/)',
-	},
-];
+// Platform-branched copy: on Windows the build output is vibecheck.exe and
+// /usr/local/bin does not exist; %USERPROFILE%\.cargo\bin (where cargo
+// install puts it) is one of the locations the binary resolver probes.
+function getInstallOptions() {
+	const win = isWindows();
+	return [
+		{
+			label: 'Install from source (Rust)',
+			command:
+				'git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo install --path .',
+			description: win
+				? 'Preferred method - requires Rust toolchain (1.91.0+); installs vibecheck.exe into %USERPROFILE%\\.cargo\\bin, which Maestro auto-detects'
+				: 'Preferred method - requires Rust toolchain (1.91.0+)',
+		},
+		{
+			label: 'Build manually',
+			command:
+				'git clone https://github.com/openasocket/VibeCheck.git && cd VibeCheck && cargo build --release',
+			description: win
+				? 'Binary at target\\release\\vibecheck.exe - copy it to %USERPROFILE%\\.cargo\\bin, or point Settings > VIBES at it with a custom path'
+				: 'Binary at target/release/vibecheck - copy to a directory in PATH (e.g. /usr/local/bin/)',
+		},
+	];
+}
 
 // ============================================================================
 // Component
@@ -48,6 +58,7 @@ export const VibesInstallGuide: React.FC<VibesInstallGuideProps> = ({
 	onOpenSettings,
 }) => {
 	const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+	const installOptions = getInstallOptions();
 
 	const handleCopy = useCallback(async (command: string, index: number) => {
 		try {
@@ -91,7 +102,7 @@ export const VibesInstallGuide: React.FC<VibesInstallGuideProps> = ({
 			</div>
 
 			{/* Install options */}
-			{INSTALL_OPTIONS.map((option, idx) => (
+			{installOptions.map((option, idx) => (
 				<div key={option.label} className="flex flex-col gap-1">
 					<span className="text-[11px] font-medium" style={{ color: theme.colors.textMain }}>
 						{option.label}

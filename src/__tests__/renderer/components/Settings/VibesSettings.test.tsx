@@ -15,10 +15,17 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { VibesSettings } from '../../../../renderer/components/Settings/VibesSettings';
 import type { Theme } from '../../../../renderer/types';
 import { VIBES_SETTINGS_DEFAULTS } from '../../../../shared/vibes-settings';
+
+// Mock the toast store so export success/failure notifications can be asserted
+// without pulling the whole notification stack into the test.
+const { mockNotifyToast } = vi.hoisted(() => ({ mockNotifyToast: vi.fn() }));
+vi.mock('../../../../renderer/stores/notificationStore', () => ({
+	notifyToast: mockNotifyToast,
+}));
 
 const mockTheme: Theme = {
 	id: 'dracula',
@@ -561,6 +568,176 @@ describe('Settings/VibesSettings', () => {
 			render(<VibesSettings {...props} />);
 			expect(screen.getByTestId('attestation-regenerate-btn')).toBeTruthy();
 			expect(screen.getByText('Generate')).toBeTruthy();
+		});
+	});
+
+	// ==========================================================================
+	// Key Encryption Status & CLI Export
+	// ==========================================================================
+	describe('key encryption status and CLI export', () => {
+		const mockGetKeyInfo = vi.fn();
+		const mockExportPrivateKeyForCli = vi.fn();
+
+		beforeEach(() => {
+			mockGetKeyInfo.mockReset();
+			mockExportPrivateKeyForCli.mockReset();
+			mockNotifyToast.mockReset();
+			(window as unknown as { maestro: unknown }).maestro = {
+				vibes: {
+					findBinary: vi
+						.fn()
+						.mockResolvedValue({ path: '/usr/local/bin/vibecheck', version: '1.0.0' }),
+					clearBinaryCache: vi.fn().mockResolvedValue(undefined),
+					attestation: {
+						getKeyInfo: mockGetKeyInfo,
+						exportPrivateKeyForCli: mockExportPrivateKeyForCli,
+					},
+				},
+			};
+		});
+
+		it('shows "Encrypted at rest" when key info reports encryptedAtRest: true', async () => {
+			mockGetKeyInfo.mockResolvedValue({
+				success: true,
+				data: { exists: true, keyId: 'a1b2c3d4e5f6a7b8', encryptedAtRest: true },
+			});
+			const props = createDefaultProps({ vibesEnabled: true });
+			render(<VibesSettings {...props} />);
+
+			await waitFor(() => {
+				expect(screen.getByTestId('attestation-encryption-status')).toBeTruthy();
+			});
+			expect(screen.getByText('Encrypted at rest (OS keychain)')).toBeTruthy();
+		});
+
+		it('shows an honest unencrypted note when the OS keychain is unavailable', async () => {
+			mockGetKeyInfo.mockResolvedValue({
+				success: true,
+				data: {
+					exists: true,
+					keyId: 'a1b2c3d4e5f6a7b8',
+					encryptedAtRest: false,
+					encryptedAtRestReason: 'os-keychain-unavailable',
+				},
+			});
+			const props = createDefaultProps({ vibesEnabled: true });
+			render(<VibesSettings {...props} />);
+
+			await waitFor(() => {
+				expect(screen.getByTestId('attestation-encryption-status')).toBeTruthy();
+			});
+			expect(
+				screen.getByText('Stored unencrypted - OS keychain unavailable on this host')
+			).toBeTruthy();
+		});
+
+		it('shows the legacy plaintext note for an unmigrated key', async () => {
+			mockGetKeyInfo.mockResolvedValue({
+				success: true,
+				data: {
+					exists: true,
+					keyId: 'a1b2c3d4e5f6a7b8',
+					encryptedAtRest: false,
+					encryptedAtRestReason: 'plaintext-legacy-key',
+				},
+			});
+			const props = createDefaultProps({ vibesEnabled: true });
+			render(<VibesSettings {...props} />);
+
+			await waitFor(() => {
+				expect(screen.getByTestId('attestation-encryption-status')).toBeTruthy();
+			});
+			expect(screen.getByText(/legacy plaintext key/)).toBeTruthy();
+		});
+
+		it('hides the status line and export button when no key exists', async () => {
+			mockGetKeyInfo.mockResolvedValue({
+				success: true,
+				data: { exists: false, publicKey: '', keyId: '' },
+			});
+			const props = createDefaultProps({ vibesEnabled: true });
+			render(<VibesSettings {...props} />);
+
+			await waitFor(() => {
+				expect(screen.getByTestId('attestation-no-key')).toBeTruthy();
+			});
+			expect(screen.queryByTestId('attestation-encryption-status')).toBeNull();
+			expect(screen.queryByTestId('attestation-export-key-btn')).toBeNull();
+		});
+
+		it('export flow: button opens a warning confirm, confirming invokes the IPC and fires a success toast', async () => {
+			mockGetKeyInfo.mockResolvedValue({
+				success: true,
+				data: { exists: true, keyId: 'a1b2c3d4e5f6a7b8', encryptedAtRest: true },
+			});
+			mockExportPrivateKeyForCli.mockResolvedValue({
+				success: true,
+				data: { path: '/home/user/.vibescheck/keys/vibescheck.key' },
+			});
+			const props = createDefaultProps({ vibesEnabled: true });
+			render(<VibesSettings {...props} />);
+
+			const exportBtn = await screen.findByTestId('attestation-export-key-btn');
+			expect(mockExportPrivateKeyForCli).not.toHaveBeenCalled();
+
+			fireEvent.click(exportBtn);
+			expect(screen.getByTestId('attestation-export-confirm')).toBeTruthy();
+			expect(screen.getByText(/UNENCRYPTED/)).toBeTruthy();
+			expect(mockExportPrivateKeyForCli).not.toHaveBeenCalled();
+
+			await act(async () => {
+				fireEvent.click(screen.getByTestId('attestation-export-confirm-btn'));
+			});
+
+			expect(mockExportPrivateKeyForCli).toHaveBeenCalledTimes(1);
+			expect(mockNotifyToast).toHaveBeenCalledWith(
+				expect.objectContaining({
+					color: 'green',
+					message: expect.stringContaining('/home/user/.vibescheck/keys/vibescheck.key'),
+				})
+			);
+			// Confirm box closes after export
+			expect(screen.queryByTestId('attestation-export-confirm')).toBeNull();
+		});
+
+		it('export flow: cancel closes the confirm without invoking the IPC', async () => {
+			mockGetKeyInfo.mockResolvedValue({
+				success: true,
+				data: { exists: true, keyId: 'a1b2c3d4e5f6a7b8', encryptedAtRest: true },
+			});
+			const props = createDefaultProps({ vibesEnabled: true });
+			render(<VibesSettings {...props} />);
+
+			fireEvent.click(await screen.findByTestId('attestation-export-key-btn'));
+			fireEvent.click(screen.getByTestId('attestation-export-cancel-btn'));
+
+			expect(screen.queryByTestId('attestation-export-confirm')).toBeNull();
+			expect(mockExportPrivateKeyForCli).not.toHaveBeenCalled();
+		});
+
+		it('export flow: failure fires a red toast', async () => {
+			mockGetKeyInfo.mockResolvedValue({
+				success: true,
+				data: { exists: true, keyId: 'a1b2c3d4e5f6a7b8', encryptedAtRest: true },
+			});
+			mockExportPrivateKeyForCli.mockResolvedValue({
+				success: false,
+				error: 'No signing key to export',
+			});
+			const props = createDefaultProps({ vibesEnabled: true });
+			render(<VibesSettings {...props} />);
+
+			fireEvent.click(await screen.findByTestId('attestation-export-key-btn'));
+			await act(async () => {
+				fireEvent.click(screen.getByTestId('attestation-export-confirm-btn'));
+			});
+
+			expect(mockNotifyToast).toHaveBeenCalledWith(
+				expect.objectContaining({
+					color: 'red',
+					message: expect.stringContaining('No signing key to export'),
+				})
+			);
 		});
 	});
 
