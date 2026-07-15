@@ -9,6 +9,7 @@ import {
 	computeAnnotationId,
 	computeVibesHash,
 	computeVibesHashV2,
+	canonicalStringify,
 } from '../../../main/vibes/vibes-hash';
 import {
 	createLineAnnotation,
@@ -179,17 +180,43 @@ describe('vibes-annotation-ids', () => {
 		// Entry should have type 'decision'
 		expect(entry.type).toBe('decision');
 
-		// V2 hash should include the type field — verify by manual computation
+		// V2 hash should include the type field — verify by manual computation over
+		// the RECURSIVELY canonicalized form (nested `options` objects must be
+		// included; the old replacer-array serialization dropped them, which both
+		// lost audit data and collided distinct decisions to the same key).
 		const { created_at: _, ...rest } = entry as unknown as Record<string, unknown>;
-		const serialized = JSON.stringify(rest, Object.keys(rest).sort());
+		const serialized = canonicalStringify(rest);
 		const expected = createHash('sha256').update(serialized, 'utf8').digest('hex');
 		expect(hash).toBe(expected);
+		// The canonical serialization must actually contain the nested option
+		// content (regression guard against the replacer-array data-loss bug).
+		expect(serialized).toContain('single writer');
+		expect(serialized).toContain('fast analytics');
 
 		// Stripping type should produce a different hash (proves type is included)
 		const { type: __, ...noType } = rest;
-		const noTypeSerialized = JSON.stringify(noType, Object.keys(noType).sort());
-		const noTypeHash = createHash('sha256').update(noTypeSerialized, 'utf8').digest('hex');
+		const noTypeHash = createHash('sha256')
+			.update(canonicalStringify(noType), 'utf8')
+			.digest('hex');
 		expect(hash).not.toBe(noTypeHash);
+
+		// Two decisions that differ ONLY in nested option content must NOT collide
+		// (the replacer-array bug erased nested objects, so they hashed identically).
+		const variantA = createDecisionEntry({
+			decisionPoint: 'Choose cache policy',
+			options: [{ id: 'x', description: 'opt', pros: ['keep-recent'], cons: [] }],
+			selected: 'x',
+			rationale: 'r',
+			confidence: 'high',
+		});
+		const variantB = createDecisionEntry({
+			decisionPoint: 'Choose cache policy',
+			options: [{ id: 'x', description: 'opt', pros: ['keep-oldest'], cons: [] }],
+			selected: 'x',
+			rationale: 'r',
+			confidence: 'high',
+		});
+		expect(variantA.hash).not.toBe(variantB.hash);
 	});
 
 	// ========================================================================

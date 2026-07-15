@@ -40,6 +40,7 @@ import {
 	exportPublicKey,
 	SEALED_KEY_FILE,
 } from '../../../main/vibes/vibes-key-manager';
+import { canonicalStringify } from '../../../main/vibes/vibes-hash';
 
 import type {
 	VibesKeyPair,
@@ -477,6 +478,41 @@ describe('vibes-key-manager', () => {
 			expect(envelope.signatures[0].keytype).toBe('user');
 			expect(envelope.signatures[1].keytype).toBe('tool_provider');
 			expect(envelope.signatures[1].keyid).toBe('deadbeef12345678');
+		});
+
+		it('signs the CANONICAL payload so user + cosign cover identical PAE bytes', async () => {
+			// Regression guard: buildDSSEEnvelope used to serialize the statement
+			// UNSORTED while the cosign path (vibes-attestation) canonicalized it, so
+			// the two signatures covered different PAE bytes and the tool cosignature
+			// could never re-verify. The stored payload MUST be the canonical form.
+			const keyPair = generateKeyPair();
+			// Deliberately author keys out of sorted order at both levels.
+			const statement = {
+				predicateType: 'https://itsavibe.ai/vibes/attestation/v1',
+				subject: [],
+				_type: 'https://in-toto.io/Statement/v1',
+				predicate: {
+					stats: { unique_models: 2, total_annotations: 10 },
+					validation: { version: '1.0.0', result: 'PASS' },
+					project: { assurance_level: 'high', name: 'test' },
+				},
+			} as unknown as InTotoStatement;
+
+			const envelope = await buildDSSEEnvelope(statement, keyPair);
+
+			// The payload is base64url of the RECURSIVELY canonical statement - the
+			// exact bytes the cosign path derives its PAE hash from.
+			const canonicalPayload = Buffer.from(canonicalStringify(statement), 'utf8').toString(
+				'base64url'
+			);
+			expect(envelope.payload).toBe(canonicalPayload);
+
+			// And the user signature verifies over the PAE recomputed from that payload
+			// (identical to what a verifier and the cosigner use).
+			const paeBytes = computePAE(envelope.payloadType, envelope.payload);
+			expect(verifyPAESignature(paeBytes, envelope.signatures[0].sig, keyPair.publicKey)).toBe(
+				true
+			);
 		});
 	});
 

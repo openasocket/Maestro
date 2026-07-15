@@ -23,6 +23,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { safeStorageSeal } from '../plugins/authorization-ledger';
 import type { SealProvider } from '../plugins/authorization-ledger';
+import { canonicalStringify } from './vibes-hash';
 import { isWindows } from '../../shared/platformDetection';
 import { execFileNoThrow } from '../utils/execFile';
 import { logger } from '../utils/logger';
@@ -577,7 +578,13 @@ export async function buildDSSEEnvelope(
 	toolProviderSignature?: DSSESignature
 ): Promise<DSSEEnvelope> {
 	const payloadType = 'application/vnd.in-toto+json' as const;
-	const statementJson = JSON.stringify(statement);
+	// Canonicalize (recursive key sort) so the bytes the USER key signs are
+	// identical to the bytes the tool provider cosigns (vibes-attestation.ts
+	// derives the cosign PAE from the same canonical form) and to what the
+	// verifier recomputes from the stored payload. Signing the unsorted
+	// JSON.stringify(statement) here made every tool-corroborated envelope
+	// unverifiable, since the two signatures then covered different PAE bytes.
+	const statementJson = canonicalStringify(statement);
 	const payload = Buffer.from(statementJson, 'utf8').toString('base64url');
 
 	// Compute PAE and sign
@@ -597,23 +604,10 @@ export async function buildDSSEEnvelope(
 // Attestation ID
 // ============================================================================
 
-/**
- * Recursively sort all keys in a JSON-compatible value.
- * Per VERIFY spec section 7: "Sort all keys recursively."
- * Arrays preserve order; objects get sorted keys at every nesting level.
- */
-export function sortKeysRecursively(value: unknown): unknown {
-	if (value === null || value === undefined) return value;
-	if (Array.isArray(value)) return value.map(sortKeysRecursively);
-	if (typeof value === 'object') {
-		const sorted: Record<string, unknown> = {};
-		for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-			sorted[key] = sortKeysRecursively((value as Record<string, unknown>)[key]);
-		}
-		return sorted;
-	}
-	return value;
-}
+// Canonicalization lives in vibes-hash.ts (the single source of truth shared by
+// manifest-entry hashing, annotation IDs, and this attestation layer). Re-export
+// sortKeysRecursively for the existing importers of this module.
+export { sortKeysRecursively } from './vibes-hash';
 
 /**
  * Compute content-addressed attestation ID per VERIFY spec section 7.
@@ -623,7 +617,7 @@ export function sortKeysRecursively(value: unknown): unknown {
  * 4. 64-character lowercase hex.
  */
 export function computeAttestationId(envelope: DSSEEnvelope): string {
-	const canonical = JSON.stringify(sortKeysRecursively(envelope));
+	const canonical = canonicalStringify(envelope);
 	return createHash('sha256').update(canonical, 'utf8').digest('hex');
 }
 

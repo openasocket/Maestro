@@ -191,14 +191,26 @@ describe('vibes-hash', () => {
 			expect(computeVibesHashV2(context)).toBe(expected);
 		});
 
-		it('should handle nested objects', () => {
+		it('should recursively canonicalize nested objects (nested keys sorted and included)', () => {
 			const context = {
 				type: 'environment',
-				model_parameters: { temperature: 0.7, top_p: 0.9 },
+				model_parameters: { top_p: 0.9, temperature: 0.7 },
 				created_at: '2026-01-01T00:00:00Z',
 			};
-			const hash = computeVibesHashV2(context);
-			expect(hash).toMatch(/^[0-9a-f]{64}$/);
+			// created_at stripped; top-level AND nested keys sorted; nested content present.
+			const expectedSerialized =
+				'{"model_parameters":{"temperature":0.7,"top_p":0.9},"type":"environment"}';
+			const expected = createHash('sha256').update(expectedSerialized, 'utf8').digest('hex');
+			expect(computeVibesHashV2(context)).toBe(expected);
+		});
+
+		it('does NOT drop nested object content or collide on nested differences', () => {
+			// Regression guard for the replacer-array bug: JSON.stringify(x, keys.sort())
+			// applied the top-level key list at every depth, erasing nested objects and
+			// collapsing distinct entries to the same hash.
+			const a = { type: 'environment', model_parameters: { temperature: 0.1 } };
+			const b = { type: 'environment', model_parameters: { temperature: 0.9 } };
+			expect(computeVibesHashV2(a)).not.toBe(computeVibesHashV2(b));
 		});
 
 		it('should handle arrays in values', () => {

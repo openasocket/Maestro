@@ -17,11 +17,11 @@ import {
 	buildDSSEEnvelope,
 	computeAttestationId,
 	computePAE,
-	sortKeysRecursively,
 	type DSSEEnvelope,
 	type DSSESignature,
 	type VibesKeyPair,
 } from './vibes-key-manager';
+import { canonicalStringify } from './vibes-hash';
 import { computePAEHash, requestCosignature } from './vibes-cosign-service';
 
 const LOG_CONTEXT = '[VIBES-ATTEST]';
@@ -310,8 +310,10 @@ export async function createAttestation(
 
 	// ── Step 4: Compute PAE bytes ─────────────────────────────────────────
 	const payloadType = 'application/vnd.in-toto+json' as const;
-	// Canonicalize statement: sorted keys recursively, no whitespace (per VERIFY spec)
-	const statementJson = JSON.stringify(sortKeysRecursively(statement));
+	// Canonicalize statement: sorted keys recursively, no whitespace (per VERIFY spec).
+	// buildDSSEEnvelope canonicalizes identically, so the user signature and this
+	// cosign PAE cover the same bytes.
+	const statementJson = canonicalStringify(statement);
 	const payload = Buffer.from(statementJson, 'utf8').toString('base64url');
 	const paeBytes = computePAE(payloadType, payload);
 
@@ -376,7 +378,7 @@ export async function createAttestation(
 	// ── Save envelope locally to .ai-audit/attestation.json ──────────────
 	const attestationPath = path.join(options.projectPath, AUDIT_DIR, 'attestation.json');
 	// Store in canonical form (sorted keys, no whitespace) matching the attestation ID hash input
-	await writeFile(attestationPath, JSON.stringify(sortKeysRecursively(envelope)), 'utf8');
+	await writeFile(attestationPath, canonicalStringify(envelope), 'utf8');
 	logger.info(`Envelope saved to ${attestationPath}`, LOG_CONTEXT);
 
 	// ── Step 8: Registry Submission (optional) ────────────────────────────
