@@ -32,6 +32,7 @@ import type { ProcessConfig } from '../../../main/process-manager/types';
 vi.mock('../../../main/vibes/vibes-key-manager', () => ({
 	getUserKeyInfo: vi.fn().mockResolvedValue({ exists: false, publicKey: '', keyId: '' }),
 	checkKeyPermissions: vi.fn().mockResolvedValue({ valid: true }),
+	migrateLegacyKeyIfNeeded: vi.fn().mockResolvedValue(false),
 	generateKeyPair: vi.fn(),
 	saveUserKeyPair: vi.fn(),
 	loadUserKeyPair: vi.fn(),
@@ -1867,6 +1868,7 @@ describe('vibes-coordinator', () => {
 			const keyManager = await import('../../../main/vibes/vibes-key-manager');
 			vi.mocked(keyManager.getUserKeyInfo).mockClear();
 			vi.mocked(keyManager.checkKeyPermissions).mockClear();
+			vi.mocked(keyManager.migrateLegacyKeyIfNeeded).mockClear();
 			// Reset default mock return values
 			vi.mocked(keyManager.getUserKeyInfo).mockResolvedValue({
 				exists: false,
@@ -1874,6 +1876,7 @@ describe('vibes-coordinator', () => {
 				keyId: '',
 			});
 			vi.mocked(keyManager.checkKeyPermissions).mockResolvedValue({ valid: true });
+			vi.mocked(keyManager.migrateLegacyKeyIfNeeded).mockResolvedValue(false);
 		});
 
 		it('should warn and send IPC when key has incorrect permissions', async () => {
@@ -1961,7 +1964,8 @@ describe('vibes-coordinator', () => {
 		});
 
 		it('should skip check when VIBES is disabled', async () => {
-			const { getUserKeyInfo } = await import('../../../main/vibes/vibes-key-manager');
+			const { getUserKeyInfo, migrateLegacyKeyIfNeeded } =
+				await import('../../../main/vibes/vibes-key-manager');
 
 			const safeSend = vi.fn() as unknown as SafeSendFn;
 			const store = createMockSettingsStore({ vibesEnabled: false });
@@ -1970,7 +1974,33 @@ describe('vibes-coordinator', () => {
 			await coordinator.checkKeyPermissionsOnStartup();
 
 			expect(getUserKeyInfo).not.toHaveBeenCalled();
+			expect(migrateLegacyKeyIfNeeded).not.toHaveBeenCalled();
 			expect(safeSend).not.toHaveBeenCalled();
+		});
+
+		it('should migrate a legacy plaintext key into the sealed store on startup (once)', async () => {
+			const { getUserKeyInfo, migrateLegacyKeyIfNeeded } =
+				await import('../../../main/vibes/vibes-key-manager');
+			vi.mocked(migrateLegacyKeyIfNeeded).mockResolvedValue(true);
+			vi.mocked(getUserKeyInfo).mockResolvedValue({
+				exists: true,
+				publicKey: 'mock-pub-key',
+				keyId: 'a1b2c3d4e5f6a7b8',
+				encryptedAtRest: true,
+			});
+
+			const safeSend = vi.fn() as unknown as SafeSendFn;
+			const store = createMockSettingsStore();
+			const coordinator = new VibesCoordinator({ settingsStore: store, safeSend });
+
+			await coordinator.checkKeyPermissionsOnStartup();
+			await coordinator.checkKeyPermissionsOnStartup();
+
+			// Migration runs before the key-info read, and only once per session
+			expect(migrateLegacyKeyIfNeeded).toHaveBeenCalledTimes(1);
+			expect(vi.mocked(migrateLegacyKeyIfNeeded).mock.invocationCallOrder[0]).toBeLessThan(
+				vi.mocked(getUserKeyInfo).mock.invocationCallOrder[0]
+			);
 		});
 
 		it('should only check once per session (one-time)', async () => {

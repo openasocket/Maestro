@@ -3741,6 +3741,12 @@ interface MaestroAPI {
 			exportPublicKey: (
 				format: 'pem' | 'ssh'
 			) => Promise<{ success: boolean; data?: unknown; error?: string }>;
+			/**
+			 * Export the plaintext private key to ~/.vibescheck/keys/vibescheck.key
+			 * for the external vibecheck CLI. Writes an UNENCRYPTED (permission-
+			 * hardened) key to disk - only call after explicit user confirmation.
+			 */
+			exportPrivateKeyForCli: () => Promise<{ success: boolean; data?: unknown; error?: string }>;
 			attest: (
 				projectPath: string,
 				options?: {

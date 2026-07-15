@@ -59,6 +59,7 @@ import {
 	getUserKeyInfo,
 	checkKeyPermissions,
 	exportPublicKey,
+	exportPrivateKeyForCli,
 } from '../../vibes/vibes-key-manager';
 import type { DSSEEnvelope } from '../../vibes/vibes-key-manager';
 import { fetchProviderKeys } from '../../vibes/vibes-cosign-service';
@@ -463,6 +464,19 @@ export function registerVibesHandlers(deps: VibesHandlerDependencies): void {
 			return { success: true, data: exported };
 		} catch (error) {
 			logger.error('exportPublicKey error', LOG_CONTEXT, { error: String(error) });
+			return { success: false, error: String(error) };
+		}
+	});
+
+	// Export the plaintext private key to the spec path for the vibecheck CLI.
+	// Writes an UNENCRYPTED (permission-hardened) key to disk - only invoked
+	// from an explicit, user-confirmed action in the renderer.
+	ipcMain.handle('vibes:exportPrivateKeyForCli', async () => {
+		try {
+			const result = await exportPrivateKeyForCli();
+			return { success: true, data: result };
+		} catch (error) {
+			logger.error('exportPrivateKeyForCli error', LOG_CONTEXT, { error: String(error) });
 			return { success: false, error: String(error) };
 		}
 	});

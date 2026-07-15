@@ -192,6 +192,15 @@ export function createVibesApi() {
 			exportPublicKey: (format: 'pem' | 'ssh'): Promise<VibesAttestationResult> =>
 				ipcRenderer.invoke('vibes:exportPublicKey', format),
 
+			/**
+			 * Export the plaintext private key to ~/.vibescheck/keys/vibescheck.key
+			 * for the external vibecheck CLI. Writes an UNENCRYPTED key to disk
+			 * (permission-hardened) - only call after an explicit user confirmation.
+			 * Resolves with data: { path } on success.
+			 */
+			exportPrivateKeyForCli: (): Promise<VibesAttestationResult> =>
+				ipcRenderer.invoke('vibes:exportPrivateKeyForCli'),
+
 			attest: (
 				projectPath: string,
 				options?: {

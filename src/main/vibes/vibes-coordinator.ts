@@ -13,7 +13,7 @@ import { CodexInstrumenter } from './instrumenters/codex-instrumenter';
 import { MaestroInstrumenter } from './instrumenters/maestro-instrumenter';
 import { createEnvironmentEntry } from './vibes-annotations';
 import { isVibesInitialized, vibesInit, findVibesCheckBinary } from './vibes-bridge';
-import { getUserKeyInfo, checkKeyPermissions } from './vibes-key-manager';
+import { getUserKeyInfo, checkKeyPermissions, migrateLegacyKeyIfNeeded } from './vibes-key-manager';
 import { initVibesDirectly, backfillCommitHash, flushAll } from './vibes-io';
 import { VIBES_SETTINGS_DEFAULTS, getVibesSettingWithDefault } from '../../shared/vibes-settings';
 import type {
@@ -762,8 +762,9 @@ export class VibesCoordinator {
 
 	/**
 	 * Check signing key permissions on startup (VERIFY spec).
-	 * If a key exists but has incorrect permissions, logs a warning
-	 * and sends a one-time notification to the renderer via safeSend.
+	 * First migrates a legacy plaintext key into the sealed store when
+	 * possible, then, if a plaintext key remains with incorrect permissions,
+	 * logs a warning and sends a one-time notification via safeSend.
 	 */
 	async checkKeyPermissionsOnStartup(): Promise<void> {
 		if (this.keyPermissionsChecked || !this.isEnabled()) {
@@ -772,6 +773,10 @@ export class VibesCoordinator {
 		this.keyPermissionsChecked = true;
 
 		try {
+			// Seal a legacy plaintext key into userData before reading its
+			// status (no-op when already sealed, sealing unavailable, or no key).
+			await migrateLegacyKeyIfNeeded();
+
 			const keyInfo = await getUserKeyInfo();
 			if (!keyInfo.exists) {
 				return;

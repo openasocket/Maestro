@@ -4,11 +4,23 @@
  * DSSE envelope construction, and in-toto v1 attestation statement building.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, rm, mkdir, writeFile, stat, chmod, readFile, access } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { createHash } from 'crypto';
+
+// Mock the execFile util so Windows-branch tests can assert the icacls
+// invocation without spawning anything, and the logger to keep tests quiet.
+const { mockExecFileNoThrow } = vi.hoisted(() => ({
+	mockExecFileNoThrow: vi.fn(),
+}));
+vi.mock('../../../main/utils/execFile', () => ({
+	execFileNoThrow: mockExecFileNoThrow,
+}));
+vi.mock('../../../main/utils/logger', () => ({
+	logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 
 import {
 	generateKeyPair,
@@ -20,6 +32,8 @@ import {
 	loadUserKeyPair,
 	getUserKeyInfo,
 	checkKeyPermissions,
+	exportPrivateKeyForCli,
+	migrateLegacyKeyIfNeeded,
 	buildInTotoStatement,
 	buildDSSEEnvelope,
 	computeAttestationId,
@@ -704,6 +718,154 @@ describe('vibes-key-manager', () => {
 				expect(info.encryptedAtRest).toBe(true);
 				expect(info.keyId).toBe(keyPair.keyId);
 				expect(info.publicKey).toContain('-----BEGIN PUBLIC KEY-----');
+			});
+		});
+
+		// ====================================================================
+		// exportPrivateKeyForCli - explicit plaintext export for the CLI
+		// ====================================================================
+		describe('exportPrivateKeyForCli', () => {
+			const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+
+			afterEach(() => {
+				Object.defineProperty(process, 'platform', realPlatform);
+				mockExecFileNoThrow.mockReset();
+			});
+
+			it.skipIf(!isPosix)(
+				'on POSIX unseals and writes the plaintext PEM to the spec path, chmods 0600, and does not invoke icacls',
+				async () => {
+					const ctx = testContext();
+					const keyPair = generateKeyPair();
+					await saveUserKeyPair(keyPair, ctx);
+
+					const { path: exportedPath } = await exportPrivateKeyForCli(ctx);
+
+					expect(exportedPath).toBe(path.join(ctx.specKeysDir, 'vibescheck.key'));
+					expect(await readFile(exportedPath, 'utf8')).toBe(keyPair.privateKey);
+					const stats = await stat(exportedPath);
+					expect(stats.mode & 0o777).toBe(0o600);
+					expect(mockExecFileNoThrow).not.toHaveBeenCalled();
+				}
+			);
+
+			it('on Windows restricts the ACL to the current user via icacls', async () => {
+				const ctx = testContext();
+				const keyPair = generateKeyPair();
+				await saveUserKeyPair(keyPair, ctx);
+
+				mockExecFileNoThrow.mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+				Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+
+				const { path: exportedPath } = await exportPrivateKeyForCli(ctx);
+
+				expect(await readFile(exportedPath, 'utf8')).toBe(keyPair.privateKey);
+				expect(mockExecFileNoThrow).toHaveBeenCalledWith('icacls', [
+					exportedPath,
+					'/inheritance:r',
+					'/grant:r',
+					`${os.userInfo().username}:F`,
+				]);
+			});
+
+			it('on Windows swallows an icacls failure - the export still succeeds', async () => {
+				const ctx = testContext();
+				const keyPair = generateKeyPair();
+				await saveUserKeyPair(keyPair, ctx);
+
+				mockExecFileNoThrow.mockResolvedValue({ stdout: '', stderr: 'denied', exitCode: 5 });
+				Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+
+				const { path: exportedPath } = await exportPrivateKeyForCli(ctx);
+				expect(await readFile(exportedPath, 'utf8')).toBe(keyPair.privateKey);
+			});
+
+			it('fails cleanly without writing a partial file when there is no key to unseal', async () => {
+				const ctx = testContext();
+
+				await expect(exportPrivateKeyForCli(ctx)).rejects.toThrow(/No signing key/);
+				await expect(access(path.join(ctx.specKeysDir, 'vibescheck.key'))).rejects.toThrow();
+			});
+		});
+
+		// ====================================================================
+		// migrateLegacyKeyIfNeeded - one-time plaintext -> sealed migration
+		// ====================================================================
+		describe('migrateLegacyKeyIfNeeded', () => {
+			it('seals a legacy plaintext key, leaves the plaintext in place, and load prefers the sealed copy', async () => {
+				const ctx = testContext();
+				const keyPair = generateKeyPair();
+				await mkdir(ctx.specKeysDir, { recursive: true });
+				const privatePath = path.join(ctx.specKeysDir, 'vibescheck.key');
+				await writeFile(privatePath, keyPair.privateKey, 'utf8');
+				await writeFile(path.join(ctx.specKeysDir, 'vibescheck.pub'), keyPair.publicKey, 'utf8');
+
+				expect(await migrateLegacyKeyIfNeeded(ctx)).toBe(true);
+
+				const sealedPath = path.join(ctx.sealedKeyDir, SEALED_KEY_FILE);
+				const blob = await readFile(sealedPath);
+				expect(ctx.seal.unseal(blob)).toBe(keyPair.privateKey);
+				if (isPosix) {
+					expect((await stat(sealedPath)).mode & 0o777).toBe(0o600);
+				}
+
+				// The existing plaintext spec file is untouched
+				expect(await readFile(privatePath, 'utf8')).toBe(keyPair.privateKey);
+
+				// Subsequent loads use the sealed store: replace the plaintext with
+				// a different key; the original (sealed) key still wins.
+				await writeFile(privatePath, generateKeyPair().privateKey, 'utf8');
+				const loaded = await loadUserKeyPair(ctx);
+				expect(loaded!.privateKey).toBe(keyPair.privateKey);
+			});
+
+			it('is a no-op when a sealed store already exists', async () => {
+				const ctx = testContext();
+				await saveUserKeyPair(generateKeyPair(), ctx);
+				const sealedPath = path.join(ctx.sealedKeyDir, SEALED_KEY_FILE);
+				const before = await readFile(sealedPath);
+
+				// A stray plaintext key must NOT overwrite the sealed store
+				await writeFile(
+					path.join(ctx.specKeysDir, 'vibescheck.key'),
+					generateKeyPair().privateKey,
+					'utf8'
+				);
+
+				expect(await migrateLegacyKeyIfNeeded(ctx)).toBe(false);
+				expect((await readFile(sealedPath)).equals(before)).toBe(true);
+			});
+
+			it('is idempotent - the second call is a no-op', async () => {
+				const ctx = testContext();
+				await mkdir(ctx.specKeysDir, { recursive: true });
+				await writeFile(
+					path.join(ctx.specKeysDir, 'vibescheck.key'),
+					generateKeyPair().privateKey,
+					'utf8'
+				);
+
+				expect(await migrateLegacyKeyIfNeeded(ctx)).toBe(true);
+				expect(await migrateLegacyKeyIfNeeded(ctx)).toBe(false);
+			});
+
+			it('does nothing when sealing is unavailable', async () => {
+				const ctx = testContext(false);
+				await mkdir(ctx.specKeysDir, { recursive: true });
+				await writeFile(
+					path.join(ctx.specKeysDir, 'vibescheck.key'),
+					generateKeyPair().privateKey,
+					'utf8'
+				);
+
+				expect(await migrateLegacyKeyIfNeeded(ctx)).toBe(false);
+				await expect(access(path.join(ctx.sealedKeyDir, SEALED_KEY_FILE))).rejects.toThrow();
+			});
+
+			it('does nothing when there is no key at all', async () => {
+				const ctx = testContext();
+				expect(await migrateLegacyKeyIfNeeded(ctx)).toBe(false);
+				await expect(access(path.join(ctx.sealedKeyDir, SEALED_KEY_FILE))).rejects.toThrow();
 			});
 		});
 	});

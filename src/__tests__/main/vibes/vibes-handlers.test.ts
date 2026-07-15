@@ -36,6 +36,7 @@ const {
 	mockGetUserKeyInfo,
 	mockCheckKeyPermissions,
 	mockExportPublicKey,
+	mockExportPrivateKeyForCli,
 	mockLoadUserKeyPair,
 	mockBuildInTotoStatement,
 	mockBuildDSSEEnvelope,
@@ -78,6 +79,7 @@ const {
 	mockGetUserKeyInfo: vi.fn(),
 	mockCheckKeyPermissions: vi.fn(),
 	mockExportPublicKey: vi.fn(),
+	mockExportPrivateKeyForCli: vi.fn(),
 	mockLoadUserKeyPair: vi.fn(),
 	mockBuildInTotoStatement: vi.fn(),
 	mockBuildDSSEEnvelope: vi.fn(),
@@ -124,6 +126,7 @@ vi.mock('../../../main/vibes/vibes-key-manager', () => ({
 	getUserKeyInfo: mockGetUserKeyInfo,
 	checkKeyPermissions: mockCheckKeyPermissions,
 	exportPublicKey: mockExportPublicKey,
+	exportPrivateKeyForCli: mockExportPrivateKeyForCli,
 	loadUserKeyPair: mockLoadUserKeyPair,
 	buildInTotoStatement: mockBuildInTotoStatement,
 	buildDSSEEnvelope: mockBuildDSSEEnvelope,
@@ -206,8 +209,8 @@ describe('vibes-handlers', () => {
 	});
 
 	describe('handler registration', () => {
-		it('should register all 27 VIBES IPC handlers', () => {
-			expect(mockIpcMainHandle).toHaveBeenCalledTimes(27);
+		it('should register all 28 VIBES IPC handlers', () => {
+			expect(mockIpcMainHandle).toHaveBeenCalledTimes(28);
 		});
 
 		it('should register handlers with correct channel names', () => {
@@ -236,6 +239,7 @@ describe('vibes-handlers', () => {
 				'vibes:getKeyInfo',
 				'vibes:checkKeyPermissions',
 				'vibes:exportPublicKey',
+				'vibes:exportPrivateKeyForCli',
 				'vibes:attest',
 				'vibes:verifyAttestation',
 				'vibes:getProviderKeys',
@@ -920,6 +924,35 @@ describe('vibes-handlers', () => {
 			const result = await handlers['vibes:exportPublicKey']({}, 'pem');
 
 			expect(result).toEqual({ success: false, error: 'Error: read failed' });
+		});
+	});
+
+	describe('vibes:exportPrivateKeyForCli', () => {
+		it('should export the private key and return the written path', async () => {
+			mockExportPrivateKeyForCli.mockResolvedValue({
+				path: '/home/u/.vibescheck/keys/vibescheck.key',
+			});
+
+			const result = await handlers['vibes:exportPrivateKeyForCli']({});
+
+			expect(mockExportPrivateKeyForCli).toHaveBeenCalledTimes(1);
+			expect(result).toEqual({
+				success: true,
+				data: { path: '/home/u/.vibescheck/keys/vibescheck.key' },
+			});
+		});
+
+		it('should return error when there is no key to export', async () => {
+			mockExportPrivateKeyForCli.mockRejectedValue(
+				new Error('No signing key to export. Generate a keypair first.')
+			);
+
+			const result = await handlers['vibes:exportPrivateKeyForCli']({});
+
+			expect(result).toEqual({
+				success: false,
+				error: 'Error: No signing key to export. Generate a keypair first.',
+			});
 		});
 	});
 

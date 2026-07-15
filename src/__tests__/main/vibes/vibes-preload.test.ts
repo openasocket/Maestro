@@ -65,17 +65,18 @@ describe('vibes preload API', () => {
 			expect(Object.keys(api)).toHaveLength(21);
 		});
 
-		it('should have attestation sub-namespace with 8 methods', () => {
+		it('should have attestation sub-namespace with 9 methods', () => {
 			const attestation = (api as any).attestation;
 			expect(attestation).toHaveProperty('keygen');
 			expect(attestation).toHaveProperty('getKeyInfo');
 			expect(attestation).toHaveProperty('checkKeyPermissions');
 			expect(attestation).toHaveProperty('exportPublicKey');
+			expect(attestation).toHaveProperty('exportPrivateKeyForCli');
 			expect(attestation).toHaveProperty('attest');
 			expect(attestation).toHaveProperty('verifyAttestation');
 			expect(attestation).toHaveProperty('getProviderKeys');
 			expect(attestation).toHaveProperty('checkProviderKeyUpdate');
-			expect(Object.keys(attestation)).toHaveLength(8);
+			expect(Object.keys(attestation)).toHaveLength(9);
 		});
 	});
 
@@ -434,6 +435,23 @@ describe('vibes preload API', () => {
 
 			expect(mockInvoke).toHaveBeenCalledWith('vibes:exportPublicKey', 'ssh');
 			expect(result).toEqual({ success: true, data: 'ssh-ed25519 AAAA...' });
+		});
+	});
+
+	describe('attestation.exportPrivateKeyForCli', () => {
+		it('should invoke vibes:exportPrivateKeyForCli', async () => {
+			mockInvoke.mockResolvedValue({
+				success: true,
+				data: { path: '/home/u/.vibescheck/keys/vibescheck.key' },
+			});
+
+			const result = await (api as any).attestation.exportPrivateKeyForCli();
+
+			expect(mockInvoke).toHaveBeenCalledWith('vibes:exportPrivateKeyForCli');
+			expect(result).toEqual({
+				success: true,
+				data: { path: '/home/u/.vibescheck/keys/vibescheck.key' },
+			});
 		});
 	});
 

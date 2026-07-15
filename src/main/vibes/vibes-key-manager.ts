@@ -23,6 +23,9 @@ import * as path from 'path';
 import * as os from 'os';
 import { safeStorageSeal } from '../plugins/authorization-ledger';
 import type { SealProvider } from '../plugins/authorization-ledger';
+import { isWindows } from '../../shared/platformDetection';
+import { execFileNoThrow } from '../utils/execFile';
+import { logger } from '../utils/logger';
 
 // ============================================================================
 // Constants
@@ -154,6 +157,34 @@ function derivePublicKeyPem(privateKeyPem: string): string {
 }
 
 /**
+ * Harden a plaintext private-key file so only the current user can read it.
+ * POSIX: chmod 0600. Windows: best-effort ACL restriction via icacls (strip
+ * inheritance, grant only the current user full control); a stock user may
+ * lack the right on some volumes, so failure is swallowed with a logged
+ * warning rather than failing the write.
+ */
+async function hardenPrivateKeyFile(filePath: string): Promise<void> {
+	if (isWindows()) {
+		const user = os.userInfo().username;
+		const result = await execFileNoThrow('icacls', [
+			filePath,
+			'/inheritance:r',
+			'/grant:r',
+			`${user}:F`,
+		]);
+		if (result.exitCode !== 0) {
+			logger.warn(
+				'Failed to restrict VIBES private key ACL via icacls - key written but not hardened',
+				'VibesKeyManager',
+				{ path: filePath, exitCode: result.exitCode, stderr: result.stderr }
+			);
+		}
+		return;
+	}
+	await chmod(filePath, 0o600);
+}
+
+/**
  * Load user keypair. Prefers the sealed store in Maestro userData (unsealed
  * in memory, never written back as plaintext); falls back to a plaintext
  * PKCS8 PEM at the spec path (legacy installs / keys exported for the CLI).
@@ -222,7 +253,75 @@ export async function saveUserKeyPair(keyPair: VibesKeyPair, ctx?: KeyStoreConte
 
 	const privatePath = path.join(specKeysDir, PRIVATE_KEY_FILE);
 	await writeFile(privatePath, keyPair.privateKey, 'utf8');
-	await chmod(privatePath, 0o600);
+	await hardenPrivateKeyFile(privatePath);
+}
+
+/**
+ * Export the plaintext PKCS8 private key to the spec path
+ * (~/.vibescheck/keys/vibescheck.key) so the external vibecheck CLI can sign
+ * with it. This is the ONLY code path that intentionally writes the private
+ * key unencrypted; it must be triggered by an explicit user action (the UI
+ * warns before calling it). The file is permission-hardened after writing.
+ * Throws (without writing anything) when no key exists to export.
+ */
+export async function exportPrivateKeyForCli(ctx?: KeyStoreContext): Promise<{ path: string }> {
+	const resolved = await resolveKeyStoreContext(ctx);
+
+	const keyPair = await loadUserKeyPair(resolved);
+	if (!keyPair) {
+		throw new Error('No signing key to export. Generate a keypair first.');
+	}
+
+	await mkdir(resolved.specKeysDir, { recursive: true });
+	const privatePath = path.join(resolved.specKeysDir, PRIVATE_KEY_FILE);
+	await writeFile(privatePath, keyPair.privateKey, 'utf8');
+	await hardenPrivateKeyFile(privatePath);
+
+	return { path: privatePath };
+}
+
+/**
+ * One-time migration of a legacy plaintext private key into the sealed store.
+ * When a plaintext key exists at the spec path, NO sealed store exists yet,
+ * and sealing is available, the plaintext is sealed into userData. The
+ * plaintext spec file is left in place (the user may rely on it for the
+ * vibecheck CLI; loadUserKeyPair prefers the sealed copy from then on).
+ * Idempotent: a no-op when a sealed store already exists, sealing is
+ * unavailable, or there is no legacy key. Returns true when a migration
+ * actually happened.
+ */
+export async function migrateLegacyKeyIfNeeded(ctx?: KeyStoreContext): Promise<boolean> {
+	const { seal, sealedKeyDir, specKeysDir } = await resolveKeyStoreContext(ctx);
+
+	if (!seal.available()) {
+		return false;
+	}
+
+	const sealedPath = path.join(sealedKeyDir, SEALED_KEY_FILE);
+	const sealedExists = await access(sealedPath, constants.R_OK).then(
+		() => true,
+		() => false
+	);
+	if (sealedExists) {
+		return false;
+	}
+
+	let privateKey: string;
+	try {
+		privateKey = await readFile(path.join(specKeysDir, PRIVATE_KEY_FILE), 'utf8');
+	} catch {
+		return false;
+	}
+
+	await mkdir(sealedKeyDir, { recursive: true });
+	await writeFile(sealedPath, seal.seal(privateKey));
+	await chmod(sealedPath, 0o600);
+
+	logger.info(
+		'Migrated legacy plaintext VIBES signing key into the sealed store (plaintext left in place for the vibecheck CLI)',
+		'VibesKeyManager'
+	);
+	return true;
 }
 
 /**
