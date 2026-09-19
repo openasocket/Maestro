@@ -10,9 +10,9 @@ related:
 
 # MINT-E01-00: blocked
 
-Required branch `feature/mega-maestro-integration` is active in `/Users/dr3/dev-shit/Maestro` at `2727d8299cd84091a0ea61ed18c6ee93bebdde8c`. This supersedes the previous wrong-branch finding.
+Required branch `feature/mega-maestro-integration` is active in `/Users/dr3/dev-shit/Maestro` at `9cfa88f7cb457065e491c77f55046379d989d436`. This supersedes the previous wrong-branch finding.
 
-`git status --porcelain=v1` showed no tracked modifications and five preexisting untracked directories: `.ai-audit/`, `.maestro-provider-key/`, `.sloptimize/`, `Plans/`, and `rustygraphify-out/`. Their contents were not changed by this preflight except this evidence report. A clean tracked tree does not establish the explicitly selected clean base. Phase-01 base/merge-base evidence is absent.
+`git status --porcelain=v1` showed no tracked modifications and 18 preexisting untracked entries, including planning sources and unrelated tool output. These entries were left untouched. The observed merge base with local `main` is `2727d8299cd84091a0ea61ed18c6ee93bebdde8c`; this observation does not establish the explicitly selected clean starting base. Phase-01 base/merge-base evidence remains absent.
 
 ## Design verification
 
@@ -25,7 +25,7 @@ Computed SHA-256 directly from file bytes and compared with `execution-plan.json
 
 ## Blocking prerequisites
 
-- All five tasks in `MAESTRO-ENTERPRISE-01.md` remain unchecked. Its branch-failure note is stale, but there is no `evidence/15-preflight.md` or `evidence/01-bootstrap.md` establishing phase-01 completion or the selected base. Checkbox status alone cannot establish readiness.
+- All five tasks in `MAESTRO-ENTERPRISE-01.md` remain unchecked. Its historical branch blocker is resolved, but there is no `evidence/15-preflight.md` or `evidence/01-bootstrap.md` establishing phase-01 completion or the selected base. Checkbox status alone cannot establish readiness.
 - No explicit readable application `early-handoff.json` path or approved immutable artifact URI was supplied. No archive was imported. Application producer status, both producer design digests, source revision/tree digest, archive provenance/checksums and OS/provider/version/backend matrix therefore remain unverified.
 - `execution-plan.json` additionally requires application `MM-E01-11` before this task; no supplied handoff proves it passed.
 
