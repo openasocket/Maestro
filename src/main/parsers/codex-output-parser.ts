@@ -236,8 +236,15 @@ interface CodexPayload {
  */
 interface CodexItem {
 	id?: string;
-	type?: 'reasoning' | 'agent_message' | 'tool_call' | 'tool_result' | 'command_execution';
+	type?:
+		| 'reasoning'
+		| 'agent_message'
+		| 'tool_call'
+		| 'tool_result'
+		| 'command_execution'
+		| 'error';
 	text?: string;
+	message?: string;
 	// Legacy tool_call/tool_result fields (Codex < v0.111.0)
 	tool?: string;
 	args?: Record<string, unknown>;
@@ -917,6 +924,16 @@ export class CodexOutputParser implements AgentOutputParser {
 					raw: msg,
 				};
 			}
+
+			case 'error':
+				// Codex configuration errors (e.g., unrecognized settings, typos).
+				// Surface them as errors rather than dropping them as system events,
+				// so the user can diagnose misconfiguration.
+				return {
+					type: 'error',
+					text: item.message || 'Codex error',
+					raw: msg,
+				};
 
 			default:
 				// Unknown item type - preserve as system event

@@ -311,10 +311,21 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 				dynamic: true,
 				// Static fallback used when ~/.codex/models_cache.json hasn't been
 				// written yet (e.g. fresh install) so the dropdown still renders.
-				options: ['', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+				options: ['', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
 				default: '',
 				argBuilder: (value: string) =>
-					value && value.trim() ? ['-c', `reasoning.effort="${value.trim()}"`] : [],
+					value && value.trim() ? ['-c', `model_reasoning_effort="${value.trim()}"`] : [],
+			},
+			{
+				key: 'reasoningSummary',
+				type: 'select',
+				label: 'Reasoning Summary',
+				description:
+					'Level of detail for model reasoning output. Detailed includes full chain of thought.',
+				options: ['', 'concise', 'detailed'],
+				default: 'detailed',
+				argBuilder: (value: string) =>
+					value && value.trim() ? ['-c', `model_reasoning_summary="${value.trim()}"`] : [],
 			},
 		],
 	},

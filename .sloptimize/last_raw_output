@@ -1,0 +1,7 @@
+{
+  "command": "python3 -",
+  "stdout": "{'unchanged': 2586, 'changed': 616, 'missing': 966}\n",
+  "stderr": "",
+  "exit_code": 0,
+  "timestamp": "1790691508"
+}
