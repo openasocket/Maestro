@@ -26,8 +26,28 @@ import type { CueEngineDeps } from './cue-engine';
 import type {
 	executeCuePrompt as ExecuteCuePrompt,
 	stopCueRun as StopCueRun,
+	CueManagedAdmission,
+	CueManagedState,
 	CueRunTranscript,
 } from './cue-executor';
+import type { ManagedLaunchInput } from '../../shared/maestro-lib/launch/launch-plan';
+import {
+	sha256Hex,
+	type ContextVerification,
+	type DispatchLease,
+	type HostAuthority,
+	type PolicySourceSet,
+} from '../../shared/maestro-lib/managed/authority';
+import type { HeadlessSpawnContextInput } from '../../shared/maestro-lib/managed/host-adapter';
+import type {
+	ManagedDelegationRef,
+	ManagedDenialCode,
+	ManagedRunIdentity,
+	ManagedWorkflowRef,
+} from '../../shared/maestro-lib/managed/types';
+import type { AutoRunOwnerFence } from '../../shared/maestro-lib/autorun/attribution';
+import { canonicalJson } from '../../shared/canonicalJson';
+import { generateUUID } from '../../shared/uuid';
 import type { executeCueShell as ExecuteCueShell } from './cue-shell-executor';
 import type { executeCueCli as ExecuteCueCli } from './cue-cli-executor';
 import type { CueNotifyExecutionConfig } from './cue-notify-executor';
@@ -114,6 +134,218 @@ export interface CueRunActionDeps {
 		toolType: string,
 		sshRemoteId?: string
 	) => Promise<void>;
+	/**
+	 * The managed authority prompt runs are admitted with (MRC-07-02). Absent:
+	 * the host asks no admission (a standalone runner, or a host that has not
+	 * wired one). Present: read on EVERY run, so an enrollment that appears or
+	 * lapses applies to the next firing, and a restored queue entry, a fan-out
+	 * child and the `:output` phase each reauthorize when they fire.
+	 */
+	managed?: CueManagedDeps;
+}
+
+// ─── Managed admission (MRC-07-02) ───────────────────────────────────────────
+
+/**
+ * What a managed Cue run admits with: the spawn authority of the host running
+ * the engine (`createHeadlessSpawnAuthority` with origin `cue`, or the
+ * desktop's port under the same shape).
+ */
+export interface CueSpawnAuthorityPort {
+	standing(): 'standalone' | 'managed';
+	readonly authority: HostAuthority;
+	policy(): PolicySourceSet;
+	context(input: HeadlessSpawnContextInput): ContextVerification;
+}
+
+/** What became of one run's admission, for a journal or a test. */
+export type CueAdmissionEvent =
+	| { kind: 'admitted'; lineage: CueRunLineage; leaseId: string }
+	| {
+			kind: 'refused';
+			lineage: CueRunLineage;
+			state: CueManagedState;
+			code: ManagedDenialCode;
+			message: string;
+	  };
+
+export interface CueManagedDeps {
+	/** The host's port, read per run; null while the host has none to offer. */
+	port(): CueSpawnAuthorityPort | null;
+	/**
+	 * The owner fence of the workflow this run belongs to (its pipeline, or the
+	 * lone subscription), read on every run. Null: the workflow has no owner,
+	 * and a managed host runs none of it (unavailable, not denied: no policy
+	 * decided). The fence comes from a workflow owner producer (MRC-07-06,
+	 * CP-03); the router never mints one, and Cue stays the scheduler.
+	 */
+	workflowFence?(workflow: CueWorkflowIdentity): AutoRunOwnerFence | null;
+	/** The policy's route ceiling and approved credential references, when the host has them. */
+	launch?: ManagedLaunchInput;
+	/** An opaque account reference for the snapshot; never a credential. */
+	account?: string | null;
+	/** Id minting for the attempt, injected by a test. */
+	newId?(): string;
+	onAdmission?(event: CueAdmissionEvent): void;
+}
+
+/** The workflow a Cue run belongs to: its named pipeline, or the subscription standing alone. */
+export interface CueWorkflowIdentity {
+	workflowId: string;
+	/** A digest over the subscription's name, prompt and action: an edit is a new version. */
+	version: string;
+	/** The event that fired it, `<type>:<event id>`. */
+	triggerEventId: string;
+}
+
+/**
+ * Everything a managed host binds a Cue run on. Built from what the engine
+ * handed the router (the run, the chain root and dispatching run, the
+ * pipeline, the event) and the stored owner record; nothing is read from the
+ * prompt text or invented here.
+ */
+export interface CueRunLineage {
+	workflow: CueWorkflowIdentity;
+	identity: ManagedRunIdentity;
+	/** The principals behind the launch: the subscription, then the agent that owns it. */
+	delegation: ManagedDelegationRef;
+	traceId: string;
+	/** The owning agent, as the engine resolved it (ownership tie-breaking included). */
+	ownerAgentId: string;
+	pipelineName: string | null;
+}
+
+export function cueWorkflowIdentity(input: {
+	subscriptionName: string;
+	pipelineName?: string | null;
+	prompt: string;
+	action?: CueSubscription['action'];
+	event: Pick<CueEvent, 'id' | 'type'>;
+}): CueWorkflowIdentity {
+	return {
+		workflowId: input.pipelineName
+			? `cue-pipeline:${input.pipelineName}`
+			: `cue:${input.subscriptionName}`,
+		version: sha256Hex(
+			canonicalJson({
+				subscription: input.subscriptionName,
+				prompt: input.prompt,
+				action: input.action ?? 'prompt',
+			})
+		).slice(0, 16),
+		triggerEventId: `${input.event.type}:${input.event.id}`,
+	};
+}
+
+/**
+ * The run's lineage. Each firing is its own request (the engine mints a fresh
+ * run id per firing, a restored queue entry included), each spawn its own
+ * attempt; the chain root is the root run and the dispatching run the parent.
+ */
+export function cueRunLineage(input: {
+	runId: string;
+	chainRootId?: string;
+	parentEventId?: string;
+	pipelineName?: string | null;
+	subscriptionName: string;
+	prompt: string;
+	action?: CueSubscription['action'];
+	event: Pick<CueEvent, 'id' | 'type'>;
+	ownerAgentId: string;
+	attemptId: string;
+}): CueRunLineage {
+	const rootRunId = input.chainRootId ?? input.runId;
+	return {
+		workflow: cueWorkflowIdentity(input),
+		identity: {
+			requestId: input.runId,
+			idempotencyKey: input.runId,
+			attemptId: input.attemptId,
+			runId: input.runId,
+			rootRunId,
+			parentRunId: input.parentEventId ?? null,
+		},
+		delegation: {
+			chain: [
+				{ kind: 'service', id: `cue-subscription:${input.subscriptionName}` },
+				{ kind: 'agent', id: input.ownerAgentId },
+			],
+			grantRef: null,
+		},
+		traceId: `cue:${rootRunId}:${input.runId}:${input.attemptId}`,
+		ownerAgentId: input.ownerAgentId,
+		pipelineName: input.pipelineName ?? null,
+	};
+}
+
+/** The workflow reference the context carries, once the workflow has an owner. Null without a fence. */
+export function cueWorkflowRef(
+	workflow: CueWorkflowIdentity,
+	fence: AutoRunOwnerFence | null
+): ManagedWorkflowRef | null {
+	if (!fence) return null;
+	return { ...workflow, ownerEpoch: fence.ownerEpoch, fencingToken: fence.fencingToken };
+}
+
+type CueManagedBinding =
+	| { managed: false }
+	| { managed: true; admission: CueManagedAdmission; launch?: ManagedLaunchInput }
+	| {
+			managed: true;
+			refusal: { state: CueManagedState; code: ManagedDenialCode; message: string };
+	  };
+
+/**
+ * Bind one run's lineage into a verified context, or say why not. Read on
+ * every run: the port, its standing, the fence and the policy revision are
+ * what they are NOW, not when the engine started. The authority itself is
+ * asked later, by the lifecycle, on the snapshot of the final spawn.
+ */
+function bindCueManagedRun(
+	deps: CueManagedDeps | undefined,
+	lineage: CueRunLineage
+): CueManagedBinding {
+	const port = deps?.port();
+	if (!deps || !port || port.standing() === 'standalone') return { managed: false };
+	const refuse = (state: CueManagedState, code: ManagedDenialCode, message: string) => {
+		deps.onAdmission?.({ kind: 'refused', lineage, state, code, message });
+		return { managed: true, refusal: { state, code, message } } as const;
+	};
+	const fence = deps.workflowFence?.(lineage.workflow) ?? null;
+	if (!fence) {
+		return refuse(
+			'unavailable',
+			'runtime-unavailable',
+			`Cue workflow "${lineage.workflow.workflowId}" has no workflow owner fence; a managed host does not run an unowned workflow, and the Cue engine does not mint one (CP-03, the workflow owner producer).`
+		);
+	}
+	const policy = port.policy();
+	const verified = port.context({
+		identity: lineage.identity,
+		traceId: lineage.traceId,
+		policyRevision: policy.policyRevision,
+		workflow: cueWorkflowRef(lineage.workflow, fence),
+		delegation: lineage.delegation,
+	});
+	if (!verified.ok) {
+		return refuse(
+			'denied',
+			verified.code,
+			`The run's context was not accepted: ${verified.problems.join('; ')}`
+		);
+	}
+	return {
+		managed: true,
+		admission: {
+			authority: port.authority,
+			context: verified.context,
+			policy,
+			account: deps.account ?? null,
+			onLease: (lease: DispatchLease) =>
+				deps.onAdmission?.({ kind: 'admitted', lineage, leaseId: lease.leaseId }),
+		},
+		...(deps.launch ? { launch: deps.launch } : {}),
+	};
 }
 
 export async function executeCueRunAction(
@@ -131,6 +363,9 @@ export async function executeCueRunAction(
 		autoRun,
 		turnSettings,
 		signal,
+		pipelineName,
+		chainRootId,
+		parentEventId,
 	}: OnCueRunParams
 ): Promise<CueRunResult> {
 	const storedSession = deps.findSession(sessionId);
@@ -373,6 +608,51 @@ export async function executeCueRunAction(
 		else deps.onLog('cue', line);
 	}
 
+	// Managed admission, bound as late as the router can: the port's standing,
+	// the workflow's owner fence and the policy revision are read here, on this
+	// firing, so a restored queue entry or a chain child fired later is admitted
+	// on what holds then. The authority itself decides on the final spawn
+	// snapshot inside the lifecycle. A refusal is the run's result: the agent
+	// is never started unmanaged, and the yolo / full-permission flags the Cue
+	// spawn carries are part of what the authority sees, not a wider grant.
+	const lineage = cueRunLineage({
+		runId,
+		chainRootId,
+		parentEventId,
+		pipelineName,
+		subscriptionName,
+		prompt,
+		action,
+		event,
+		ownerAgentId: storedSession.id,
+		attemptId: deps.managed?.newId?.() ?? generateUUID(),
+	});
+	const binding = bindCueManagedRun(deps.managed, lineage);
+	if (binding.managed && 'refusal' in binding) {
+		const { state, code, message } = binding.refusal;
+		deps.onLog(
+			'warn',
+			`[CUE] "${subscriptionName}" was not admitted (${state}, ${code}): ${message}`
+		);
+		const startedAt = new Date().toISOString();
+		return {
+			runId,
+			sessionId: storedSession.id,
+			sessionName: storedSession.name,
+			subscriptionName,
+			pipelineName: pipelineName ?? undefined,
+			event,
+			status: 'failed',
+			stdout: '',
+			stderr: `[managed-${state}] ${message}`,
+			exitCode: null,
+			durationMs: 0,
+			startedAt,
+			endedAt: startedAt,
+			managed: { state, code },
+		};
+	}
+
 	const result = await deps.executeCuePrompt({
 		runId,
 		session: sessionInfo,
@@ -393,6 +673,9 @@ export async function executeCueRunAction(
 		customArgs: storedSession.customArgs,
 		customEnvVars: storedSession.customEnvVars,
 		requiredSecrets: storedSession.requiredSecrets,
+		...(binding.managed
+			? { admission: binding.admission, ...(binding.launch ? { managed: binding.launch } : {}) }
+			: {}),
 		customModel: turn.model,
 		customEffort: turn.effort,
 		// Claude token-source selection (TUI / API / dynamic), read from

@@ -70,8 +70,10 @@ vi.mock('../../../main/cue/cue-spawn-builder', async (importOriginal) => {
 	};
 });
 
-// Mock crypto
-vi.mock('crypto', () => ({
+// Mock crypto. The real hashes stay: the managed admission digests its
+// snapshot with `createHash`, and a fake digest would prove nothing.
+vi.mock('crypto', async (importOriginal) => ({
+	...(await importOriginal<typeof import('crypto')>()),
 	randomUUID: vi.fn(() => 'test-uuid-1234'),
 }));
 
@@ -217,8 +219,20 @@ import {
 	stopCueRun,
 	getActiveProcesses,
 	getCueProcessList,
+	cueDispatchAttribution,
 	type CueExecutionConfig,
+	type CueManagedAdmission,
 } from '../../../main/cue/cue-executor';
+import {
+	createContextVerifier,
+	createLocalHostAuthority,
+	type AdmissionRequest,
+	type PolicyDecision,
+} from '../../../shared/maestro-lib/managed/authority';
+import {
+	MANAGED_CONTRACT_VERSION,
+	type ManagedAuthenticatedContext,
+} from '../../../shared/maestro-lib/managed/types';
 
 // --- Helpers ---
 
@@ -1712,6 +1726,121 @@ describe('cue-executor', () => {
 			// Process completed - should be removed
 			expect(getActiveProcesses().has('completed-run')).toBe(false);
 			expect(getCueProcessList().some((p) => p.runId === 'completed-run')).toBe(false);
+		});
+	});
+
+	// MRC-07-02: the router's bound context reaches the spawn sink with the
+	// attribution only the executor knows (provider, model, start, target).
+	describe('managed admission', () => {
+		function managedContext(): ManagedAuthenticatedContext {
+			const verified = createContextVerifier({
+				verifierId: 'cue-test',
+				peer: 'in-process',
+				now: () => 1_700_000_000_000,
+				accept: () => [],
+			}).verify({
+				contractVersion: MANAGED_CONTRACT_VERSION,
+				installation: { installationId: 'inst-1', runtimeId: 'cue-1', processEpoch: 'e1' },
+				origin: 'cue',
+				actor: { kind: 'human', id: 'operator:inst-1' },
+				delegation: { chain: [], grantRef: null },
+				identity: {
+					requestId: 'run-1',
+					idempotencyKey: 'run-1',
+					attemptId: 'a1',
+					runId: 'run-1',
+					rootRunId: 'run-1',
+					parentRunId: null,
+				},
+				policyRevision: 1,
+				workflow: null,
+				traceId: 'cue:run-1',
+				requestedCapabilities: ['runs.submit'],
+			});
+			if (!verified.ok) throw new Error(verified.problems.join('; '));
+			return verified.context;
+		}
+
+		function admissionWith(decide: () => PolicyDecision) {
+			const asked: AdmissionRequest[] = [];
+			const authority = createLocalHostAuthority({
+				authorityId: 'test-authority',
+				decide: (request) => {
+					asked.push(request);
+					return decide();
+				},
+				now: () => 1_700_000_000_000,
+				newId: () => 'lease-1',
+			});
+			const admission: CueManagedAdmission = {
+				authority,
+				context: managedContext(),
+				policy: { sources: [], policyRevision: 1 },
+				account: 'acct-ref',
+			};
+			return { admission, asked };
+		}
+
+		it('is asked on the final spawn with the executor attribution, then the run proceeds', async () => {
+			const { admission, asked } = admissionWith(() => ({ decision: 'allow', policyRevision: 1 }));
+			const onRunTranscript = vi.fn();
+			const resultPromise = executeCuePrompt(
+				createExecutionConfig({ admission, customModel: 'opus', onRunTranscript })
+			);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(mockSpawn).toHaveBeenCalledTimes(1);
+			expect(asked).toHaveLength(1);
+			expect(asked[0].snapshot).toMatchObject({
+				provider: 'claude-code',
+				model: 'opus',
+				operation: 'start',
+				account: 'acct-ref',
+				target: { kind: 'local' },
+			});
+			// The snapshot is of what spawn received: the Cue permission flags included.
+			expect(asked[0].snapshot.args).toEqual(mockSpawn.mock.calls[0][1]);
+			expect(asked[0].context.origin).toBe('cue');
+
+			mockChild.stdout.emit('data', 'done');
+			mockChild.emit('close', 0);
+			const result = await resultPromise;
+			expect(result.status).toBe('completed');
+			expect(result.managed).toBeUndefined();
+			expect(onRunTranscript).toHaveBeenCalledTimes(1);
+		});
+
+		it('a refusal is the run result and no process or transcript exists', async () => {
+			const { admission } = admissionWith(() => ({
+				decision: 'deny',
+				reason: 'Not for this agent.',
+				policyRevision: 1,
+			}));
+			const onRunTranscript = vi.fn();
+			const result = await executeCuePrompt(createExecutionConfig({ admission, onRunTranscript }));
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(result.status).toBe('failed');
+			expect(result.managed).toEqual({ state: 'denied', code: 'policy-denied' });
+			expect(result.stderr).toBe('[managed-denied] Not for this agent.');
+			expect(onRunTranscript).not.toHaveBeenCalled();
+		});
+
+		it('names an SSH target when the run went to a remote', () => {
+			expect(
+				cueDispatchAttribution(
+					{
+						toolType: 'codex',
+						sshRemoteConfig: { enabled: true, remoteId: 'remote-7' },
+						admission: undefined,
+					},
+					true
+				)
+			).toEqual({
+				provider: 'codex',
+				model: null,
+				operation: 'start',
+				account: null,
+				target: { kind: 'ssh', remoteId: 'remote-7' },
+			});
 		});
 	});
 });

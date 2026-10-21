@@ -155,6 +155,16 @@ export interface CueRunManagerDeps {
 		signal?: AbortSignal;
 		autoRun?: CueAutoRunConfig;
 		turnSettings?: CueTurnSettings;
+		/**
+		 * The run's place in its pipeline (MRC-07-02): the pipeline label, the
+		 * chain root this run descends from (its own id for a root trigger) and
+		 * the run that dispatched it. Carried so a managed host admits the run on
+		 * its lineage rather than as an anonymous launch. Attribution only; the
+		 * engine's own scheduling never reads it back.
+		 */
+		pipelineName?: string;
+		chainRootId?: string;
+		parentEventId?: string;
 	}) => Promise<CueRunResult>;
 	onStopCueRun?: (runId: string) => boolean;
 	onLog: (level: MainLogLevel, message: string, data?: unknown) => void;
@@ -648,6 +658,9 @@ export function createCueRunManager(deps: CueRunManagerDeps): CueRunManager {
 				autoRun,
 				turnSettings,
 				signal: abortController.signal,
+				pipelineName,
+				chainRootId: effectiveChainRootId,
+				parentEventId,
 			});
 			if (!activeRuns.has(runId)) {
 				// Engine was stopped (or run was cleared) while onCueRun was in
@@ -762,6 +775,11 @@ export function createCueRunManager(deps: CueRunManagerDeps): CueRunManager {
 						turnSettings,
 						// The same signal: a stop during this phase cancels its launch too.
 						signal: abortController.signal,
+						// The follow-up is its own run under the same root, dispatched
+						// by the main run, so a managed host admits it on that lineage.
+						pipelineName,
+						chainRootId: effectiveChainRootId,
+						parentEventId: runId,
 					});
 					outputStatus = outputResult.status;
 				} finally {

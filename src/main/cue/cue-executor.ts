@@ -9,6 +9,7 @@
  */
 
 import type { ManagedLaunchInput } from '../../shared/maestro-lib/launch/launch-plan';
+import type { DispatchAttribution } from '../../shared/maestro-lib/managed/authority';
 import * as path from 'path';
 import { getWakaTimeManager } from '../wakatime-instance';
 import type { CueEvent, CueRunResult, CueRunStatus, CueSubscription } from './cue-types';
@@ -25,6 +26,7 @@ import {
 	getActiveProcessMap,
 	getActiveProcessOutput,
 	getProcessList,
+	type CueManagedSpawn,
 } from './cue-process-lifecycle';
 import { beginSleepAwareSpan, sleepAwareElapsedMs } from '../utils/sleep-tracker';
 import { isLaunchCancelled, stoppedBeforeLaunchResult } from './cue-launch-cancel';
@@ -61,6 +63,17 @@ export interface CueRunTranscript {
 	sshRemoteId?: string;
 }
 
+/**
+ * What the router bound for a managed run, minus what only the final spawn
+ * knows. The executor turns it into the lifecycle's `CueManagedSpawn` by
+ * adding the attribution (provider, model, `start`, local or SSH target).
+ */
+export type CueManagedAdmission = Omit<CueManagedSpawn, 'attribution'> & {
+	/** An opaque account reference for the snapshot; never a credential. */
+	account?: string | null;
+};
+export type { CueManagedRefusal, CueManagedSpawn, CueManagedState } from './cue-process-lifecycle';
+
 /** Configuration for executing a Cue-triggered prompt */
 export interface CueExecutionConfig {
 	runId: string;
@@ -86,6 +99,16 @@ export interface CueExecutionConfig {
 	 * nothing. Supplied by the host; never read from cue.yaml or a bundle.
 	 */
 	managed?: ManagedLaunchInput;
+	/**
+	 * A managed host's admission for this run (MRC-07-02): the subscription's
+	 * owner, pipeline and event already bound into a verified context by the
+	 * router, and the authority that decides on the final spawn snapshot in
+	 * `runProcess`. Absent on a standalone host. The executor adds what the
+	 * spec does not say (provider, model, operation, target) and never widens
+	 * it: the provider's own full-permission flags are part of the snapshot the
+	 * authority decides on, not a grant.
+	 */
+	admission?: CueManagedAdmission;
 	customModel?: string;
 	customEffort?: string;
 	/** Legacy Adaptive Mode opt-in (maestro-p TUI). Off/absent means pure API. */
@@ -117,6 +140,27 @@ export interface CueExecutionConfig {
 	 * for agents that support it, embedded into the prompt otherwise.
 	 */
 	appendSystemPrompt?: string;
+}
+
+/**
+ * The attribution a managed Cue spawn is admitted with: the parts of the
+ * snapshot the resolved spec does not carry. Exported so a host can assert
+ * what its authority is asked.
+ */
+export function cueDispatchAttribution(
+	config: Pick<CueExecutionConfig, 'toolType' | 'customModel' | 'sshRemoteConfig' | 'admission'>,
+	sshActuallyUsed: boolean
+): DispatchAttribution {
+	return {
+		provider: config.toolType,
+		model: config.customModel ?? null,
+		operation: 'start',
+		account: config.admission?.account ?? null,
+		target:
+			sshActuallyUsed && config.sshRemoteConfig?.remoteId
+				? { kind: 'ssh', remoteId: config.sshRemoteConfig.remoteId }
+				: { kind: 'local' },
+	};
 }
 
 /**
@@ -258,6 +302,19 @@ export async function executeCuePrompt(config: CueExecutionConfig): Promise<CueR
 		sshActuallyUsed
 	);
 
+	// The managed admission, completed with what only the final spawn knows.
+	// Every Cue run is a fresh provider session (never `--resume`), so the
+	// operation is always `start`; the target is where the plan put the run.
+	const managed: CueManagedSpawn | undefined = config.admission
+		? {
+				authority: config.admission.authority,
+				context: config.admission.context,
+				policy: config.admission.policy,
+				attribution: cueDispatchAttribution(config, sshActuallyUsed),
+				...(config.admission.onLease ? { onLease: config.admission.onLease } : {}),
+			}
+		: undefined;
+
 	// Capture the existing raw stream only when the optional recorder listens.
 	let rawStdout = '';
 	let processResult;
@@ -268,6 +325,7 @@ export async function executeCuePrompt(config: CueExecutionConfig): Promise<CueR
 			sshRemoteEnabled: sshActuallyUsed,
 			sshStdinScript: sshActuallyUsed ? spec.sshStdinScript : undefined,
 			stdinPrompt: spec.stdinPrompt,
+			...(managed ? { managed } : {}),
 			onLog,
 			onActivity: wakaHeartbeat,
 			signal: config.signal,
@@ -312,10 +370,12 @@ export async function executeCuePrompt(config: CueExecutionConfig): Promise<CueR
 		endedAt: new Date().toISOString(),
 		providerSessionId: processResult.providerSessionId,
 		usage: processResult.usage ?? undefined,
+		...(processResult.managed ? { managed: processResult.managed } : {}),
 	};
 
 	// After the result is built, so nothing the observer does is in its timing.
-	if (config.onRunTranscript) {
+	// A managed refusal started no process, so there is no transcript to hand over.
+	if (config.onRunTranscript && !processResult.managed) {
 		try {
 			config.onRunTranscript({
 				agentId: session.id,

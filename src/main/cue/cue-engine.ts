@@ -108,6 +108,14 @@ export interface CueEngineDeps {
 		/** Aborted when the run is stopped; see `CueRunManagerDeps.onCueRun`. */
 		signal?: AbortSignal;
 		autoRun?: CueAutoRunConfig;
+		/**
+		 * The run's place in its pipeline, for the managed lineage a run is
+		 * admitted on (see `CueRunManagerDeps.onCueRun`). Absent for a host that
+		 * does not carry it; the run then stands as its own root.
+		 */
+		pipelineName?: string;
+		chainRootId?: string;
+		parentEventId?: string;
 		/** The subscription's `tier` / `model` / `effort`; the host resolves it
 		 *  against the target agent (see `resolveCueTurnSettings`). */
 		turnSettings?: CueTurnSettings;

@@ -31,7 +31,24 @@ import {
 	BACKGROUND_STOP_GRACE_MS,
 	type StopHandle,
 } from '../../shared/maestro-lib/control/termination';
-import { startTurn, type TurnHandle } from '../../shared/maestro-lib/run/start-turn';
+import {
+	DispatchRefusedError,
+	leaseAdmission,
+	startTurn,
+	type StartTurnOptions,
+	type TurnHandle,
+} from '../../shared/maestro-lib/run/start-turn';
+import {
+	buildDispatchSnapshot,
+	type DispatchAttribution,
+	type DispatchLease,
+	type HostAuthority,
+	type PolicySourceSet,
+} from '../../shared/maestro-lib/managed/authority';
+import type {
+	ManagedAuthenticatedContext,
+	ManagedDenialCode,
+} from '../../shared/maestro-lib/managed/types';
 import { isLaunchCancelled } from './cue-launch-cancel';
 import {
 	newRemotePidFilePath,
@@ -91,6 +108,40 @@ export interface ProcessRunResult {
 	providerSessionId: string | null;
 	/** Usage delta-normalized from the stdout stream. See `CueRunResult.usage`. Null when the run produced no usage events or has no output parser. */
 	usage: UsageStats | null;
+	/**
+	 * Set when a managed host refused the launch: no process was started, and
+	 * `stderr` carries the reason. `denied` is a policy decision; `unavailable`
+	 * means no decision could be obtained; `unknown` that the answer was lost.
+	 */
+	managed?: CueManagedRefusal;
+}
+
+export type CueManagedState = 'denied' | 'unavailable' | 'unknown';
+
+export interface CueManagedRefusal {
+	state: CueManagedState;
+	code: ManagedDenialCode;
+}
+
+/**
+ * The admission a managed Cue run spawns under (MRC-07-02). The host bound
+ * the subscription's owner, pipeline and event into `context` before the
+ * launch; the authority is asked here with the snapshot of the FINAL spec
+ * (command, arguments, cwd, environment and what goes to stdin), the instant
+ * before `spawn`, and the lease it grants is re-checked by `startTurn`'s gate
+ * against the spec that reaches `spawn`, bound to the pid and released on
+ * exit. A refusal is the run's result, never a reason to spawn unmanaged.
+ * Asked on every spawn: a restored queue entry, a fan-out child and the
+ * `:output` phase of a two-phase run each carry their own.
+ */
+export interface CueManagedSpawn {
+	authority: HostAuthority;
+	context: ManagedAuthenticatedContext;
+	policy: PolicySourceSet;
+	/** What the spec does not say: the provider, the model, the operation, the target. */
+	attribution: DispatchAttribution;
+	/** The lease, once admitted, so the caller can journal its id and hear its end. */
+	onLease?(lease: DispatchLease): void;
 }
 
 /** Options controlling process execution */
@@ -100,6 +151,8 @@ export interface ProcessRunOptions {
 	sshRemoteEnabled?: boolean;
 	sshStdinScript?: string;
 	stdinPrompt?: string;
+	/** A managed host's admission for this spawn. Absent: a standalone run, admitted by nobody. */
+	managed?: CueManagedSpawn;
 	onLog: (level: string, message: string) => void;
 	/**
 	 * Called on every stdout/stderr chunk while the agent is producing output.
@@ -448,18 +501,18 @@ export async function runProcess(
 		onRawStdout,
 	} = options;
 
-	// The last check before the spawn; nothing below awaits until the child
-	// is started and registered, so a stop cannot slip in between.
-	if (isLaunchCancelled(options.signal)) {
-		return {
-			stdout: '',
-			stderr: '',
-			exitCode: null,
-			status: 'stopped',
-			providerSessionId: null,
-			usage: null,
-		};
-	}
+	const stoppedResult = (): ProcessRunResult => ({
+		stdout: '',
+		stderr: '',
+		exitCode: null,
+		status: 'stopped',
+		providerSessionId: null,
+		usage: null,
+	});
+	// A stopped run never starts a process (see cue-launch-cancel.ts). Checked
+	// again after the managed admission below, which is the one await before
+	// the spawn.
+	if (isLaunchCancelled(options.signal)) return stoppedResult();
 
 	let stdout = '';
 	let stderr = '';
@@ -480,6 +533,58 @@ export async function runProcess(
 				? withRemotePidRecord(sshStdinScript, sshRemotePidFile)
 				: sshStdinScript
 			: stdinPrompt;
+	const processSpec = {
+		command: spec.command,
+		args: spec.args,
+		cwd: spec.cwd,
+		env: spec.env,
+		stdin,
+	};
+
+	// Managed admission: everything about the spec is final here, stdin included.
+	// The authority sees the snapshot of exactly what will be spawned (so the
+	// provider's own permission flags are part of what it decides on, and grant
+	// nothing on their own), and the lease it issues is checked again inside
+	// `startTurn` against the spec that reaches `spawn`. Nothing short of
+	// `admitted` starts a process, and a refusal never runs the agent unmanaged.
+	const managedRefusal = (
+		state: CueManagedState,
+		code: ManagedDenialCode,
+		message: string
+	): ProcessRunResult => {
+		onLog('warn', `[CUE] Run ${runId} was not admitted (${state}, ${code}): ${message}`);
+		return {
+			stdout: '',
+			stderr: `[managed-${state}] ${message}`,
+			exitCode: null,
+			status: 'failed',
+			providerSessionId: null,
+			usage: null,
+			managed: { state, code },
+		};
+	};
+	let admission: StartTurnOptions['admission'];
+	if (options.managed) {
+		const managed = options.managed;
+		const admitted = await managed.authority.admit({
+			context: managed.context,
+			snapshot: buildDispatchSnapshot(processSpec, managed.attribution),
+			policy: managed.policy,
+		});
+		if (admitted.state !== 'admitted') {
+			return managedRefusal(admitted.state, admitted.code, admitted.message);
+		}
+		// Stopped while the authority was deciding: release the lease unused.
+		if (isLaunchCancelled(options.signal)) {
+			admitted.lease.release({ outcome: 'stopped', by: 'caller' });
+			return stoppedResult();
+		}
+		managed.onLease?.(admitted.lease);
+		admission = {
+			gate: leaseAdmission(managed.authority, admitted.lease),
+			attribution: managed.attribution,
+		};
+	}
 
 	let turn: TurnHandle;
 	try {
@@ -487,7 +592,7 @@ export async function runProcess(
 		// node-pty internally, so plain pipe stdio here is sufficient; no
 		// caller-side TTY is needed.
 		turn = startTurn(
-			{ command: spec.command, args: spec.args, cwd: spec.cwd, env: spec.env, stdin },
+			processSpec,
 			{
 				onStdout: (text) => {
 					stdout += text;
@@ -515,9 +620,14 @@ export async function runProcess(
 				stderrTailLimit: 0,
 				sessionId: runId,
 				label: 'cue',
+				...(admission ? { admission } : {}),
 			}
 		);
 	} catch (err) {
+		// The gate refused the final spec: a decision, not a crash.
+		if (err instanceof DispatchRefusedError) {
+			return managedRefusal(err.state, err.code, err.message);
+		}
 		captureException(err, { operation: 'cue:spawn', runId, command: spec.command });
 		return {
 			stdout: '',

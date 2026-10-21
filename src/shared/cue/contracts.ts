@@ -530,6 +530,14 @@ export interface CueRunResult {
 	exitCode: number | null;
 	durationMs: number;
 	startedAt: string;
+	/**
+	 * Set when a managed host refused the run before any process started
+	 * (`status: 'failed'`, the reason in `stderr`). `denied` is a policy
+	 * decision; `unavailable` means no decision could be obtained (no owner
+	 * fence, no reachable authority); `unknown` that the answer was lost.
+	 * Absent on a standalone host and on every run that was admitted.
+	 */
+	managed?: { state: 'denied' | 'unavailable' | 'unknown'; code: string };
 	endedAt: string;
 	/**
 	 * Provider session id (e.g. Claude's `session_id`) parsed from the agent's
