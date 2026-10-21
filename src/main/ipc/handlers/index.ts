@@ -60,6 +60,7 @@ import {
 	WebHandlerDependencies,
 } from './web';
 import { registerWebLoginHandlers } from './webLogin';
+import { registerEnterpriseHandlers, type EnterpriseHandlerDependencies } from './enterprise';
 import { registerComputerHistoryHandlers } from './computerHistory';
 import { registerMaestroRunHandlers } from './maestroRun';
 import { registerLeaderboardHandlers, LeaderboardHandlerDependencies } from './leaderboard';
@@ -145,6 +146,8 @@ export {
 };
 export type { WebHandlerDependencies };
 export { registerWebLoginHandlers };
+export { registerEnterpriseHandlers };
+export type { EnterpriseHandlerDependencies };
 export { registerComputerHistoryHandlers };
 export { registerMaestroRunHandlers };
 export { registerLeaderboardHandlers };

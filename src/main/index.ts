@@ -98,6 +98,9 @@ import {
 	shouldDisablePluginForVerifyResult,
 	type AuthorizationStore,
 } from './plugins/authorization-ledger';
+import { anchorAccountForDirectory } from './utils/keyring-anchor';
+import { createEnterpriseService, type EnterpriseService } from './enterprise/service';
+import { ENTERPRISE_IDENTITY_ANCHOR_SERVICE } from './enterprise/identity-store';
 import {
 	FirstPartyPluginBridge,
 	createFirstPartyGrantMinter,
@@ -170,6 +173,7 @@ import {
 	getAgentSessionOriginsStore,
 	getSshRemoteById,
 	getLiveSessions,
+	getProductionDataPath,
 } from './stores';
 import { runSettingsMigrations } from './stores/migrations';
 import { migrateClaudeSessionNamesFromHistory } from './stores/migrations/claude-session-names-backfill';
@@ -526,6 +530,10 @@ let pluginGroupingRegistry: PluginGroupingRegistry | null = null;
 let pluginBackgroundSupervisor: PluginBackgroundSupervisor | null = null;
 let pluginAuthStore: AuthorizationStore | null = null;
 let pluginEventBus: PluginEventBusImpl | null = null;
+// The enterprise enrollment service (identity custody, endpoint client,
+// lifecycle, policy status, host adapter). Null when its composition failed;
+// the enterprise IPC verbs then answer unavailable. See src/main/enterprise/.
+let enterpriseService: EnterpriseService | null = null;
 // Set by registerPersistenceHandlers (in setupIpcHandlers). Lets the plugin
 // focus verbs record into the persistence layer's `session.activated` dedupe so
 // the two emit paths never desync. Null before IPC setup / when unavailable.
@@ -1534,6 +1542,36 @@ app
 		});
 		// Expose the same instance to the IPC registration phase below.
 		pluginAuthStore = authStore;
+
+		// Enterprise enrollment: the protected identity, endpoint client, lifecycle,
+		// policy status and host adapter, composed before the IPC handlers so every
+		// enterprise:* verb finds them. The sealed record and its keyring anchor are
+		// per data directory (a demo or dev run never shares the installed app's).
+		// A failed composition is reported and leaves the verbs answering
+		// unavailable; nothing else in startup depends on it.
+		try {
+			const enterpriseDataDir = app.getPath('userData');
+			enterpriseService = createEnterpriseService({
+				userDataDir: enterpriseDataDir,
+				productionDataDir: getProductionDataPath(),
+				hostname: os.hostname(),
+				pid: process.pid,
+				startedAt: new Date().toISOString(),
+				appVersion: app.getVersion(),
+				safeStorage,
+				anchor: createKeyringAnchor(
+					ENTERPRISE_IDENTITY_ANCHOR_SERVICE,
+					anchorAccountForDirectory('enterprise-identity', enterpriseDataDir)
+				),
+			});
+		} catch (error) {
+			enterpriseService = null;
+			void captureException(error, { operation: 'enterprise:compose' });
+			logger.error(
+				`Enterprise enrollment service failed to compose: ${String(error)}`,
+				'Enterprise'
+			);
+		}
 		const trustedKeysFor = (): string[] => {
 			const keys = store.get('pluginTrustedKeys', []) as unknown;
 			const userKeys = Array.isArray(keys)
@@ -3149,6 +3187,7 @@ app
 			getPluginSandboxHost: () => pluginSandboxHost,
 			getPluginGroupingRegistry: () => pluginGroupingRegistry,
 			getPluginAuthStore: () => pluginAuthStore,
+			getEnterpriseService: () => enterpriseService,
 			getPluginEventBus: () => pluginEventBus,
 			getInteractiveReplayController: () => interactiveReplayController,
 			setNoteSessionActivated: (fn) => {
@@ -3340,6 +3379,19 @@ app
 		// out. The idle reaper would get to them eventually, but a preview tab
 		// left open otherwise holds a descriptor until the process dies.
 		app.on('will-quit', () => void closeAllParquetFiles());
+		// Drop the endpoint socket on the way out; the sealed record stays.
+		app.on('will-quit', () => void enterpriseService?.close());
+
+		// Re-attach a previously enrolled installation. Runs after the handlers are
+		// registered and the window is up; a refusal is visible in enterprise:status
+		// and never blocks startup.
+		void enterpriseService?.start().catch((error) => {
+			void captureException(error, { operation: 'enterprise:start' });
+			logger.warn(
+				`Enterprise enrollment did not re-attach at start: ${String(error)}`,
+				'Enterprise'
+			);
+		});
 
 		// Flush any deep link URL that arrived before the window was ready (cold start)
 		flushPendingDeepLink(() => mainWindow);

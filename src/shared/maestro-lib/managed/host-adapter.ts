@@ -275,8 +275,11 @@ function executionRequestProblem(request: AdmissionRequest): string | null {
 
 export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedHostAdapter {
 	const now = deps.now ?? (() => Date.now());
-	const first = deps.identity.read();
-	const authorityId = first.record ? managedAuthorityId(first.record) : 'unavailable';
+	/** Follows the record: a desktop composed before it enrolls gets its authority id when the record lands. */
+	const authorityId = (): string => {
+		const view = deps.identity.read();
+		return view.status === 'ok' && view.record ? managedAuthorityId(view.record) : 'unavailable';
+	};
 
 	async function decide(request: AdmissionRequest): Promise<PolicyDecision> {
 		const identity = deps.identity.read();
@@ -284,12 +287,6 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 			return {
 				decision: 'unavailable',
 				reason: identity.message ?? 'This host holds no enrollment.',
-			};
-		}
-		if (managedAuthorityId(identity.record) !== authorityId) {
-			return {
-				decision: 'unavailable',
-				reason: 'The enrollment record changed under this authority.',
 			};
 		}
 		const standing = deps.status();
@@ -367,13 +364,28 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 		return { decision: 'allow', policyRevision };
 	}
 
-	const authority = createLocalHostAuthority({
-		authorityId,
+	// The lease authority reads the id at every mint, so a lease names the
+	// authority of the record that was current when it was admitted.
+	const leases = createLocalHostAuthority({
+		get authorityId() {
+			return authorityId();
+		},
 		decide,
 		now,
 		newId: deps.newId ?? (() => `lease-${sha256Hex(`${now()}-${Math.random()}`).slice(0, 16)}`),
 		...(deps.leaseTtlMs !== undefined ? { leaseTtlMs: deps.leaseTtlMs } : {}),
 	});
+
+	const authority: HostAuthority = {
+		get authorityId() {
+			return authorityId();
+		},
+		admit: (request) => leases.admit(request),
+		check: (lease, digest) => leases.check(lease, digest),
+		revoke: (leaseId, reason) => leases.revoke(leaseId, reason),
+		revokeAll: (reason) => leases.revokeAll(reason),
+		live: () => leases.live(),
+	};
 
 	return {
 		installation: deps.installation,
@@ -386,7 +398,7 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 			const live = deps.status().endpoint;
 			const revision = live?.appliedPolicyRevision ?? identity.record.policy.appliedRevision;
 			return {
-				sources: [{ id: authorityId, kind: 'endpoint', revision }],
+				sources: [{ id: authorityId(), kind: 'endpoint', revision }],
 				policyRevision: revision,
 			};
 		},

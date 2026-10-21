@@ -8,6 +8,7 @@ import type { PluginManager } from '../../plugins/plugin-manager';
 import type { PluginSandboxHost } from '../../plugins/plugin-sandbox-host';
 import type { PluginGroupingRegistry } from '../../plugins/plugin-grouping-registry';
 import type { AuthorizationStore } from '../../plugins/authorization-ledger';
+import type { EnterpriseService } from '../../enterprise/service';
 import type { PluginEventBusImpl } from '../../plugins/plugin-event-bus';
 import type { InteractiveReplayController } from '../../agents/claude-interactive-replay';
 import type { ProcessConfig as ProcessSpawnConfig } from '../../process-manager/types';
@@ -42,6 +43,8 @@ export interface IpcBootstrapDependencies {
 	getPluginSandboxHost: () => PluginSandboxHost | null;
 	getPluginGroupingRegistry: () => PluginGroupingRegistry | null;
 	getPluginAuthStore: () => AuthorizationStore | null;
+	/** The enterprise enrollment service, null when its composition failed (the verbs answer unavailable). */
+	getEnterpriseService: () => EnterpriseService | null;
 	getPluginEventBus: () => PluginEventBusImpl | null;
 	getInteractiveReplayController: () => InteractiveReplayController<ProcessSpawnConfig> | null;
 	/**

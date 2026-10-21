@@ -39,6 +39,7 @@ import {
 	registerAttachmentsHandlers,
 	registerWebHandlers,
 	registerWebLoginHandlers,
+	registerEnterpriseHandlers,
 	registerComputerHistoryHandlers,
 	registerMaestroRunHandlers,
 	registerLeaderboardHandlers,
@@ -122,6 +123,14 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 	// Web Login account management - desktop-only, the bridge refuses every
 	// `webLogin:*` channel. See src/main/ipc/handlers/webLogin.ts.
 	registerWebLoginHandlers();
+
+	// Enterprise enrollment - desktop-only, the bridge inventory has no
+	// `enterprise` namespace. See src/main/ipc/handlers/enterprise.ts.
+	registerEnterpriseHandlers({
+		getLifecycle: () => deps.getEnterpriseService()?.lifecycle ?? null,
+		getPolicyStatus: () => deps.getEnterpriseService()?.policy ?? null,
+		getIdentity: () => deps.getEnterpriseService()?.identity ?? null,
+	});
 
 	// Computer History - desktop-only, the bridge refuses every
 	// `computerHistory:*` channel (D15). See src/main/ipc/handlers/computerHistory.ts.
