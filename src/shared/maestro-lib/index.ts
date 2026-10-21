@@ -21,6 +21,7 @@ export * from './managed/run-journal';
 export * from './managed/operations';
 export * from './managed/endpoint-port';
 export * from './managed/host-adapter';
+export * from './managed/provider-route';
 
 // Paths and configuration
 export * from './paths/userDataDir';

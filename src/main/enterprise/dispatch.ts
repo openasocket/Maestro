@@ -36,18 +36,36 @@ import {
 	STORE_SCHEMA_KEY,
 	writeStoreDocument,
 } from '../../shared/maestro-lib/store/io';
-import type {
-	AdmissionRequest,
-	DispatchLease,
-	HostAuthority,
-	LeaseRelease,
-	ManagedDecisionReceipt,
+import { INTERACTIVE_STOP_GRACE_MS } from '../../shared/maestro-lib/control/termination';
+import {
+	buildDispatchSnapshot,
+	dispatchSnapshotDigest,
+	type AdmissionRequest,
+	type DispatchLease,
+	type HostAuthority,
+	type LeaseRelease,
+	type ManagedDecisionReceipt,
 } from '../../shared/maestro-lib/managed/authority';
 import type { ManagedHostAdapter } from '../../shared/maestro-lib/managed/host-adapter';
+import {
+	buildHarnessLaunchSpec,
+	harnessRouteProblems,
+	SYNTHETIC_HARNESS_MODEL,
+	SYNTHETIC_HARNESS_PROVIDER,
+	syntheticHarnessRouteSupport,
+	type HarnessRouteRequest,
+} from '../../shared/maestro-lib/managed/provider-route';
 import type {
 	ManagedAuthenticatedContext,
+	ManagedDenialCode,
 	ManagedPrincipalRef,
 } from '../../shared/maestro-lib/managed/types';
+import {
+	DispatchRefusedError,
+	startTurn,
+	type DispatchAdmission,
+	type TurnExit,
+} from '../../shared/maestro-lib/run/start-turn';
 import type { ManagedTurnAuthority } from '../../shared/maestro-lib/turns/run-agent-turn';
 
 export const DISPATCH_RECEIPTS_FILE_NAME = 'maestro-managed-dispatch-receipts.json';
@@ -308,4 +326,127 @@ export function createBrokerDispatch(deps: BrokerDispatchDeps): BrokerDispatch {
 
 		persistFailures: () => failures,
 	};
+}
+
+// ---------------------------------------------------------------------------
+// The synthetic harness route through the protected dispatch
+// ---------------------------------------------------------------------------
+
+export type HarnessDispatchOutcome =
+	| { status: 'refused'; reason: 'route-unsupported' | 'invalid-request'; problems: string[] }
+	| { status: 'denied' | 'unavailable' | 'unknown'; code: ManagedDenialCode; message: string }
+	| {
+			status: 'ran';
+			leaseId: string;
+			decision: ManagedDecisionReceipt | null;
+			receipt: DispatchReceiptRecord | null;
+			exit: TurnExit;
+	  };
+
+export interface HarnessDispatchOptions {
+	/** Aborting stops the program from the terminate stage. */
+	signal?: AbortSignal;
+	stopGraceMs?: number;
+	onStdout?(text: string): void;
+}
+
+/**
+ * Run one synthetic harness program through the protected dispatch: the
+ * route's own validation, the launch spec under the permission model, the
+ * admission of its snapshot by `bridge.authority` (which asks the endpoint
+ * through the adapter), the lease checked again at the spawn inside
+ * `startTurn`, the pid bound, the exit released and recorded, a revocation
+ * terminating it. A route this Node cannot enforce, an invalid request, or
+ * any admission short of `admitted` returns before anything runs; nothing
+ * is written to the work directory until the lease passed at the spawn.
+ */
+export async function dispatchHarness(
+	bridge: BrokerDispatch,
+	request: HarnessRouteRequest,
+	managed: { context: ManagedAuthenticatedContext; policy?: ManagedTurnAuthority['policy'] },
+	options: HarnessDispatchOptions = {}
+): Promise<HarnessDispatchOutcome> {
+	const support = syntheticHarnessRouteSupport();
+	if (support.managed === 'unsupported') {
+		return { status: 'refused', reason: 'route-unsupported', problems: [support.note] };
+	}
+	const problems = harnessRouteProblems(request);
+	if (problems.length > 0) return { status: 'refused', reason: 'invalid-request', problems };
+
+	const spec = buildHarnessLaunchSpec(request);
+	const attribution = {
+		provider: SYNTHETIC_HARNESS_PROVIDER,
+		model: SYNTHETIC_HARNESS_MODEL,
+		operation: 'start' as const,
+		target: { kind: 'local' } as const,
+		resourceIds: [...request.inputs],
+	};
+	const turn = bridge.turnAuthority({ context: managed.context, resourceIds: request.inputs });
+	const admitted = await turn.authority.admit({
+		context: managed.context,
+		snapshot: buildDispatchSnapshot(spec, attribution),
+		policy: managed.policy ?? turn.policy,
+	});
+	if (admitted.state !== 'admitted') {
+		return { status: admitted.state, code: admitted.code, message: admitted.message };
+	}
+	const { lease } = admitted;
+	const gate: DispatchAdmission = {
+		admit(final) {
+			const verdict = turn.authority.check(lease, dispatchSnapshotDigest(final));
+			return verdict.ok
+				? { ok: true }
+				: {
+						ok: false,
+						state: 'denied',
+						code: 'lease-invalid',
+						message: `The lease for this launch is ${verdict.reason}.`,
+					};
+		},
+		bound: (pid) => lease.bind(pid),
+		released: (exit) =>
+			lease.release(
+				exit.spawnError
+					? { outcome: 'spawn-failed', message: exit.spawnError.message }
+					: exit.stoppedBy
+						? { outcome: 'stopped', by: exit.stoppedBy }
+						: { outcome: 'exited', exitCode: exit.exitCode, signal: exit.signal }
+			),
+		onRevoked: (listener) => lease.onRevoked(listener),
+	};
+
+	let handle: ReturnType<typeof startTurn>;
+	try {
+		handle = startTurn(
+			spec,
+			{ onStdout: options.onStdout },
+			{
+				admission: { gate, attribution },
+				stopGraceMs: options.stopGraceMs ?? INTERACTIVE_STOP_GRACE_MS,
+				...(options.signal ? { signal: options.signal } : {}),
+				stdoutTailLimit: 64 * 1024,
+				stderrTailLimit: 64 * 1024,
+				label: `harness ${lease.leaseId}`,
+			}
+		);
+	} catch (error) {
+		if (error instanceof DispatchRefusedError) {
+			lease.release({ outcome: 'unknown', message: error.message });
+			return { status: error.state, code: error.code, message: error.message };
+		}
+		throw error;
+	}
+	const timer = setTimeout(() => handle.terminate(), request.timeoutMs);
+	try {
+		const exit = await handle.done;
+		return {
+			status: 'ran',
+			leaseId: lease.leaseId,
+			decision: lease.decision,
+			receipt: bridge.receipt(lease.leaseId),
+			exit,
+		};
+	} finally {
+		clearTimeout(timer);
+	}
 }
