@@ -8,6 +8,14 @@
  * steps are `prepareGroupChatSpawn` in the library (the headless runtime runs the same
  * ones); this helper supplies the desktop's collaborators and hands the result to the
  * `ProcessManager`.
+ *
+ * Under management the turn is admitted at the sink (`ProcessManager.spawnAdmitted`,
+ * MRC-07-05) as the CHILD of the operation it belongs to: the room for a moderator,
+ * participant, synthesis or recovery turn (`groupChatRoomContext`), or the asking
+ * operation's record for a consult that carries one. The process id is the child's
+ * request, attempt and link, the same derivation the headless runner binds, and the
+ * child record is stamped on the process so what the agent itself dispatches carries
+ * the chain one link deeper. A standalone desktop spawns as before.
  */
 
 import { IProcessManager } from './group-chat-moderator';
@@ -19,9 +27,20 @@ import type { AgentConfig } from '../agents/definitions';
 import type { AgentSshRemoteConfig } from '../../shared/types';
 import { resolveClaudeSpawnMode } from '../agents/resolveClaudeSpawnMode';
 import type { ClaudeTokenMode } from '../../shared/claudeTokenMode';
-import { prepareGroupChatSpawn } from '../../shared/maestro-lib/groupchat/spawn';
+import {
+	groupChatIdOf,
+	groupChatRoomContext,
+	groupChatTurnContext,
+	prepareGroupChatSpawn,
+} from '../../shared/maestro-lib/groupchat/spawn';
+import {
+	delegationContextEnv,
+	type ManagedDelegationContext,
+} from '../../shared/maestro-lib/managed/delegation';
+import type { ManagedDenialCode } from '../../shared/maestro-lib/managed/types';
 import { applySystemPromptDelivery } from '../utils/system-prompt-delivery';
 import { steeringSocketPathFor } from '../process-manager/steering-client';
+import type { DispatchedSpawnIds, ProcessSpawnActor } from '../process-manager/types';
 
 export interface SpawnGroupChatAgentConfig {
 	/** Stable session id for the process manager */
@@ -79,11 +98,34 @@ export interface SpawnGroupChatAgentConfig {
 	appendSystemPrompt?: string;
 	/** True when `args` resume an existing provider session. */
 	isResume?: boolean;
+	/** Who asked for the turn, as the sink binds it. Default: this process (the keyboard). */
+	actor?: ProcessSpawnActor;
 }
 
 export interface SpawnGroupChatAgentResult {
 	pid: number;
 	success: boolean;
+	error?: string;
+	/** Set when a managed desktop refused the turn at the sink. Nothing started. */
+	managed?: { state: 'denied' | 'unavailable' | 'unknown'; code: ManagedDenialCode };
+}
+
+/**
+ * The lineage a desktop group chat turn is spawned with: the room as the operation that
+ * dispatched it (`ProcessConfig.delegation`) and the process id as the child's own request and
+ * attempt (`dispatchedAs`), so `ProcessManager.admitSpawn` derives exactly the child the headless
+ * runner binds (`groupChatTurnContext`: link `agent <process id>`, parented under the room).
+ * Null for a process that is no room's (a consult), which the sink admits as a chat turn.
+ */
+export function groupChatSpawnLineage(
+	sessionId: string
+): { delegation: ManagedDelegationContext; dispatchedAs: DispatchedSpawnIds } | null {
+	const chatId = groupChatIdOf(sessionId);
+	if (!chatId) return null;
+	return {
+		delegation: groupChatRoomContext(chatId),
+		dispatchedAs: { requestId: sessionId, attemptId: sessionId },
+	};
 }
 
 /**
@@ -102,6 +144,16 @@ export async function spawnGroupChatAgent(
 	config: SpawnGroupChatAgentConfig
 ): Promise<SpawnGroupChatAgentResult> {
 	const { processManager, sshStore } = config;
+
+	// The lineage: what the sink binds the turn as, and what its process is stamped with, so what
+	// the agent itself asks or dispatches from its shell carries the chain one link deeper. Stamped
+	// BEFORE the SSH wrap, so it reaches the remote agent and not only the ssh client. The same
+	// derivation as the headless runner's, so one turn has one record on either host.
+	const lineage = groupChatSpawnLineage(config.sessionId);
+	const child = groupChatTurnContext({ processId: config.sessionId });
+	const customEnvVars = child
+		? { ...(config.customEnvVars ?? {}), ...delegationContextEnv(child) }
+		: config.customEnvVars;
 
 	// System prompt first, so every later step (maestro-p rewrite, SSH wrap,
 	// Windows stdin) sees the final args and prompt.
@@ -126,7 +178,7 @@ export async function spawnGroupChatAgent(
 			args: delivered.args,
 			cwd: config.cwd,
 			prompt: delivered.prompt,
-			customEnvVars: config.customEnvVars,
+			customEnvVars,
 			agentConfigValues: config.agentConfigValues,
 			sshRemoteConfig: config.sshRemoteConfig,
 			tokenMode: config.tokenMode,
@@ -145,7 +197,7 @@ export async function spawnGroupChatAgent(
 		}
 	);
 
-	return processManager.spawn({
+	const spawnConfig = {
 		sessionId: prepared.processId,
 		toolType: prepared.providerId,
 		cwd: prepared.cwd,
@@ -163,5 +215,23 @@ export async function spawnGroupChatAgent(
 		sendPromptViaStdinRaw: prepared.sendPromptViaStdinRaw,
 		sshStdinScript: prepared.sshStdinScript,
 		sshRemoteCommand: prepared.sshRemoteCommand,
-	});
+		...(lineage ?? {}),
+	};
+
+	// Admitted at the sink for the actor named: a managed desktop spawns nothing without an
+	// admission (and binds the room's child, never a fresh chat turn of the room); a standalone
+	// desktop, and a process manager double with no admission path, spawn as before.
+	if (processManager.spawnAdmitted) {
+		const result = await processManager.spawnAdmitted(
+			spawnConfig,
+			config.actor ?? { peer: 'in-process' }
+		);
+		return {
+			pid: result.pid,
+			success: result.success,
+			...(result.error ? { error: result.error } : {}),
+			...(result.managed ? { managed: result.managed } : {}),
+		};
+	}
+	return processManager.spawn(spawnConfig);
 }

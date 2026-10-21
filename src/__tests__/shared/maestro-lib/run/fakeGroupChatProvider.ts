@@ -12,6 +12,7 @@
  * like any moderator reply), so it is told apart by its prompt.
  */
 import { parseParticipantSessionId } from '../../../../shared/maestro-lib/groupchat/session-ids';
+import { buildDispatchSnapshot } from '../../../../shared/maestro-lib/managed/authority';
 import type { BackgroundTurnDeps } from '../../../../shared/maestro-lib/runtime/background-turns';
 import { runTurn } from '../../../../shared/maestro-lib/run/run-to-completion';
 import type { TurnProcessSpec } from '../../../../shared/maestro-lib/run/start-turn';
@@ -134,7 +135,24 @@ export function createFakeGroupChatProvider(
 					...(reply.hold ? { FAKE_AGENT_HOLD: '1' } : {}),
 				},
 			};
-			return runTurn(fakeSpec, { ...options, stopGraceMs: 200 }, handlers);
+			// A managed turn's lease covers the spec the runtime planned, which is what the authority
+			// admitted; the swapped command is this fake's. So the gate is checked against the planned
+			// spec, and the lease's lifetime (bound, released, revoked) still runs on the real process.
+			const planned = options.admission;
+			const admission = planned
+				? {
+						attribution: planned.attribution,
+						gate: {
+							...planned.gate,
+							admit: () => planned.gate.admit(buildDispatchSnapshot(spec, planned.attribution)),
+						},
+					}
+				: undefined;
+			return runTurn(
+				fakeSpec,
+				{ ...options, stopGraceMs: 200, ...(admission ? { admission } : {}) },
+				handlers
+			);
 		},
 	};
 }

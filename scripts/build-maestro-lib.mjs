@@ -221,6 +221,7 @@ async function build() {
 			'isManagedOperationContext',
 			'childDelegationContext',
 			'readDelegationContextEnv',
+			'groupChatTurnContext',
 		]) {
 			if (typeof lib[name] !== 'function') {
 				throw new Error(`The built bundle exports no ${name}`);

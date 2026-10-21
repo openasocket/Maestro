@@ -31,10 +31,99 @@ import {
 	type SshRemoteResolveResult,
 } from '../launch/ssh-remote-resolver';
 import { sshUnresolvedRemoteMessage, wrapSpawnWithSsh } from '../launch/ssh-spawn-wrapper';
+import { childDelegationContext, type ManagedDelegationContext } from '../managed/delegation';
+import { MANAGED_CONTRACT_VERSION, type ManagedDispatchTarget } from '../managed/types';
+import type { DispatchAttribution } from '../managed/authority';
+import { parseModeratorSessionId, parseParticipantSessionId } from './session-ids';
 import type { WindowsSpawnConfig } from './windows-spawn';
 import type { GroupChatSpawn } from './types';
 
 const LOG_CONTEXT = '[GroupChatSpawn]';
+
+// The lineage a turn is admitted under (MRC-07-05): a group chat turn is a CHILD
+// of its room, as a dispatched turn is of the operation that dispatched it. The
+// room is the run every turn is parented under and the first principal on the
+// chain; the process id (room, role, participant, B15) is the turn's request,
+// attempt and link. Both hosts derive it alike (the desktop's sink over the room
+// record, the headless runner directly), nothing here mints a workflow, a fence
+// or a policy generation, and the admitting host meets it with its own standing.
+
+/** The run id of a room: what every turn in it is parented under, and the service on its chain. */
+export const groupChatRoomRunId = (chatId: string): string => `group-chat:${chatId}`;
+
+/** The chat a group chat process id belongs to, or null for an id that is not a room's (a consult). */
+export function groupChatIdOf(processId: string): string | null {
+	return (
+		parseModeratorSessionId(processId) ?? parseParticipantSessionId(processId)?.groupChatId ?? null
+	);
+}
+
+/**
+ * The room as the operation its turns are children of. A lineage, not a verified context: the
+ * installation, origin and actor are the admitting host's own, and `policyRevision` is null
+ * because a room claims no generation (the host admits under its current one).
+ */
+export function groupChatRoomContext(chatId: string): ManagedDelegationContext {
+	const runId = groupChatRoomRunId(chatId);
+	return {
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		identity: {
+			requestId: runId,
+			idempotencyKey: runId,
+			attemptId: runId,
+			runId,
+			rootRunId: runId,
+			parentRunId: null,
+		},
+		traceId: runId,
+		workflow: null,
+		delegation: { chain: [{ kind: 'service', id: runId }], grantRef: null },
+		policyRevision: null,
+	};
+}
+
+/**
+ * The context one turn is bound under: the record the spawn carries (a consult's, derived by the
+ * asking operation's host), else the room's child for a moderator, participant, synthesis or
+ * recovery turn, with the process id as the child's request, attempt and link. Null for a turn
+ * that carries no record and belongs to no room (a consult the host derived nothing for).
+ */
+export function groupChatTurnContext(
+	spawn: Pick<GroupChatSpawn, 'processId' | 'delegation'>
+): ManagedDelegationContext | null {
+	if (spawn.delegation) return spawn.delegation;
+	const chatId = groupChatIdOf(spawn.processId);
+	if (!chatId) return null;
+	return childDelegationContext(groupChatRoomContext(chatId), {
+		link: { kind: 'agent', id: spawn.processId },
+		requestId: spawn.processId,
+		attemptId: spawn.processId,
+	});
+}
+
+/**
+ * What the authority is told about a turn beside its final process spec: the provider, the model
+ * the agent's configuration names, where it runs, and which working directory it may touch. The
+ * same attribution on both hosts, so one turn has one snapshot wherever it is admitted.
+ */
+export function groupChatTurnAttribution(
+	spawn: Pick<GroupChatSpawn, 'providerId' | 'agentConfigValues' | 'sshRemoteConfig' | 'isResume'>,
+	cwd: string,
+	account: string | null = null
+): DispatchAttribution {
+	const model = spawn.agentConfigValues?.model;
+	const target: ManagedDispatchTarget = spawn.sshRemoteConfig?.enabled
+		? { kind: 'ssh', remoteId: spawn.sshRemoteConfig.remoteId ?? '' }
+		: { kind: 'local' };
+	return {
+		provider: spawn.providerId,
+		model: typeof model === 'string' && model !== '' ? model : null,
+		account,
+		target,
+		resourceIds: [`dir:${cwd}`],
+		operation: spawn.isResume ? 'resume' : 'start',
+	};
+}
 
 /** What the host contributes to preparing a spawn. */
 export interface GroupChatSpawnDeps {

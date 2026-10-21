@@ -14,7 +14,7 @@
  * | The consult tab | `repository.openConsultTab`: found or created per asking agent, hidden, never active |
  * | Order | consults sharing a consult tab run one at a time (two processes resuming one provider session corrupt it); consults to different agents run at once |
  * | Lineage | the consult is a CHILD of the asking operation: `childDelegationContext` over the record the asking process carried, else a lineage with the asking agent as the chain |
- * | Admission | the initiator's scope meets this host's standing (`intersectDelegationScope`); a managed host binds the context on its spawn port and, until the consult runner carries an admission (MRC-07-05), refuses rather than run unmanaged |
+ * | Admission | the initiator's scope meets this host's standing (`intersectDelegationScope`) and a managed host binds the context on its spawn port BEFORE the target hears of it; the lease is then asked for by the background runner on the final process spec, right before the spawn (MRC-07-05), so a managed runtime never runs a consult it did not admit |
  * | Run | `createConsultService` over the background runner, with the target's own system prompt: the 10 and 30 minute budgets; the child record stamped on the process (`MAESTRO_DELEGATION_CONTEXT`) |
  * | Access | a consult is read-only unless `crossAgentMentionsWritable`; a hand-off may write unless `crossAgentHandoffsWritable` is off; neither widens what the initiator may do (`delegatedWritable`) |
  * | Record | the answer or the failure on the consult tab, a History entry on the target |
@@ -94,7 +94,11 @@ export interface ConsultInitiator {
 
 export type ConsultManagedState = 'denied' | 'unavailable';
 
-/** What became of one consult's admission, for a journal or a test. Nothing is admitted yet (MRC-07-05). */
+/**
+ * What became of one consult's admission at THIS stage (before the target hears of it), for a
+ * journal or a test. A consult the stage lets through is then admitted by the background runner on
+ * its final process spec, which reports to the runner's own `onAdmission` (`BackgroundAdmissionEvent`).
+ */
 export type ConsultAdmissionEvent = {
 	kind: 'refused';
 	/** The consult's derived context: the chain one link deeper than the asker's. */
@@ -105,7 +109,10 @@ export type ConsultAdmissionEvent = {
 };
 
 export interface RuntimeConsultsManagedOptions {
-	/** The host's port, read on every ask: standing, policy and authority as they are NOW. */
+	/**
+	 * The host's port, read on every ask: standing, policy and authority as they are NOW. The
+	 * same port the background runner admits the consult's process with.
+	 */
 	port(): ConsultSpawnAuthorityPort;
 	/**
 	 * The asking turn's own record, for a host that can name it (a managed send the runtime
@@ -305,13 +312,14 @@ export function createRuntimeConsults(options: RuntimeConsultsOptions): RuntimeC
 	 * Meet the initiator's scope with this host's standing, read on every ask. Standalone: a
 	 * managed initiator's child is refused (a consult is not a way out of management), anything
 	 * else runs as before. Managed: the consult's context is bound on the port under the host's
-	 * own generation, and then refused, because the consult runner carries no admission yet
-	 * (MRC-07-05): a managed runtime does not run a consult unmanaged in its place.
+	 * own generation BEFORE the question is written anywhere, so a consult the host cannot bind
+	 * leaves nothing on the target. The lease itself is asked for by the background runner on the
+	 * final process spec (`background.consultRunner`, MRC-07-05): the runner reads the same port,
+	 * binds the same record (`GroupChatSpawn.delegation`), and refuses rather than run unmanaged.
 	 */
 	function admitConsult(
 		initiator: ManagedDelegationContext,
-		child: ManagedDelegationContext,
-		targetName: string
+		child: ManagedDelegationContext
 	): ConsultRefusal | null {
 		const refuse = (
 			state: ConsultManagedState,
@@ -348,11 +356,13 @@ export function createRuntimeConsults(options: RuntimeConsultsOptions): RuntimeC
 				`The consult's context was not accepted: ${verified.problems.join('; ')}`
 			);
 		}
-		return refuse(
-			'unavailable',
-			'runtime-unavailable',
-			`${targetName} was not consulted: the consult runner carries no managed admission yet (MRC-07-05), and a managed runtime does not run a consult unmanaged in its place.${scope.reauthorized ? ` The asking run was admitted under policy revision ${initiator.policyRevision ?? 'none'}; this host holds ${scope.policyRevision ?? 'none'}.` : ''}`
-		);
+		if (scope.reauthorized) {
+			logger.info(
+				`The asking run was admitted under policy revision ${initiator.policyRevision ?? 'none'}; this host admits the consult under ${scope.policyRevision ?? 'none'}.`,
+				LOG_CONTEXT
+			);
+		}
+		return null;
 	}
 
 	// The target's system prompt is read from the sources its own chat turn reads.
@@ -463,9 +473,9 @@ export function createRuntimeConsults(options: RuntimeConsultsOptions): RuntimeC
 					);
 				}
 
-				// Admitted (or not) when it is its turn, on the host's standing NOW, before the target
-				// hears of it: a refused consult leaves nothing on the target.
-				const refusal = admitConsult(initiator.delegation, delegation, target.name);
+				// Bound (or refused) when it is its turn, on the host's standing NOW, before the target
+				// hears of it: a refused consult leaves nothing on the target. The lease comes at the spawn.
+				const refusal = admitConsult(initiator.delegation, delegation);
 				if (refusal) {
 					logger.warn(
 						`${target.name} was not consulted (${refusal.state}, ${refusal.code}): ${refusal.message}`,

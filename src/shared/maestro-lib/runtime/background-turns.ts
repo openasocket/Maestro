@@ -12,8 +12,10 @@
  * | Step | Piece |
  * | --- | --- |
  * | Deliver the system prompt | `deliverSystemPrompt`: the native flag, a Windows temp file, or embedded |
+ * | Name the lineage | `groupChatTurnContext`: the record the spawn carries (a consult), else the room's child; stamped on the process |
  * | Decide the launch | `prepareGroupChatSpawn`: SSH wrap, Claude token source, Windows shell, turn clock |
  * | Decide the process | `planPipeSpawn`: where the prompt travels, the environment, stdin |
+ * | Admit | the host's port (MRC-07-05): the initiator's scope met with this host's standing, the context bound, a lease on the FINAL spec, re-checked at the spawn |
  * | Start, stream, stop | `runTurn`: the library run layer's buffered turn |
  * | Settle, and stop remotely | `guardTurn`: the stdio close watchdog, Stop on an SSH agent's host |
  * | Own its lifetime | `ProcessRegistry`, under an owner that is not an agent id |
@@ -37,6 +39,17 @@ import {
 import type { SshRemoteSettingsStore } from '../launch/ssh-remote-resolver';
 import { createOutputParser } from '../parsers/parser-factory';
 import type { MaestroPaths } from '../paths/resolve';
+import {
+	buildDispatchSnapshot,
+	type HostAuthority,
+	type PolicySourceSet,
+} from '../managed/authority';
+import {
+	delegationContextEnv,
+	intersectDelegationScope,
+	type ManagedDelegationContext,
+} from '../managed/delegation';
+import type { ManagedAuthenticatedContext, ManagedDenialCode } from '../managed/types';
 import { planPipeSpawn, removeTempFiles, resumeIdFromArgs } from '../run/pipe-spawn';
 import {
 	runTurn,
@@ -46,12 +59,20 @@ import {
 } from '../run/run-to-completion';
 import {
 	DEFAULT_STDOUT_TAIL_LIMIT,
+	DispatchRefusedError,
+	leaseAdmission,
+	type DispatchAdmission,
 	type TurnHandlers,
 	type TurnProcessSpec,
 } from '../run/start-turn';
-import { prepareGroupChatSpawn, type GroupChatSpawnDeps } from '../groupchat/spawn';
+import {
+	groupChatTurnAttribution,
+	groupChatTurnContext,
+	prepareGroupChatSpawn,
+	type GroupChatSpawnDeps,
+} from '../groupchat/spawn';
 import { getWindowsSpawnConfig } from '../groupchat/windows-spawn';
-import type { GroupChatSpawn, GroupChatTurnRunner } from '../groupchat/types';
+import type { GroupChatSpawn, GroupChatTurnRunner, GroupChatTurnStart } from '../groupchat/types';
 import { readSettingsStore } from '../store/read-stores';
 import type { AgentConfig } from '../providers/definitions';
 import { deliverSystemPrompt } from '../turns/args';
@@ -62,6 +83,7 @@ import {
 	primeClaudeResume,
 	readClaudeResumeBaseline,
 } from '../turns/run-agent-turn';
+import type { AutoRunSpawnAuthorityPort } from './autorun-turns';
 import type { ProcessRegistry } from './processes';
 import type { RuntimeTurnOptions } from './turns';
 import { createSshRemoteStore } from './ssh-store';
@@ -74,11 +96,39 @@ export const groupChatOwner = (chatId: string): string => `group-chat:${chatId}`
 /** The owner a consult's turn registers under. */
 export const consultOwner = (requestId: string): string => `consult:${requestId}`;
 
-/** Seams for tests: the provider launch and the binary probe. */
+/** Seams for tests: the provider launch, the binary probe, and every admission as it is decided. */
 export interface BackgroundTurnDeps {
 	/** Start one buffered turn. A test replaces it with a recorded provider. */
 	runTurn(spec: TurnProcessSpec, options: RunTurnOptions, handlers: TurnHandlers): RunningTurn;
 	probeBinary?: BinaryProbe;
+	/** What became of each turn's managed admission (the runtime hands it to `managed.onAdmission`). */
+	onAdmission?(event: BackgroundAdmissionEvent): void;
+}
+
+/** What a background turn is admitted with: the port an Auto Run and a consult are admitted with. */
+export type BackgroundSpawnAuthorityPort = AutoRunSpawnAuthorityPort;
+
+export type BackgroundManagedState = 'denied' | 'unavailable' | 'unknown';
+
+/** What became of one turn's admission, for a journal or a test. */
+export type BackgroundAdmissionEvent =
+	| { kind: 'admitted'; processId: string; delegation: ManagedDelegationContext; leaseId: string }
+	| {
+			kind: 'refused';
+			processId: string;
+			/** The context the turn would have been bound under; null for a turn that has none. */
+			delegation: ManagedDelegationContext | null;
+			state: BackgroundManagedState;
+			code: ManagedDenialCode;
+			message: string;
+	  };
+
+export interface BackgroundManagedOptions {
+	/** The host's port, read on every turn: standing, policy and authority as they are NOW. */
+	port(): BackgroundSpawnAuthorityPort;
+	/** An opaque account reference for the snapshot; never a credential. */
+	account?: string | null;
+	onAdmission?(event: BackgroundAdmissionEvent): void;
 }
 
 export interface BackgroundTurnsOptions {
@@ -89,7 +139,24 @@ export interface BackgroundTurnsOptions {
 	/** Starts the turn clock for a process id (`GroupChatTurnMetrics.begin`). */
 	beginTurn(processId: string): void;
 	deps?: Partial<BackgroundTurnDeps>;
+	/**
+	 * What every turn is admitted with (MRC-07-05). Absent: a host with no port, which still
+	 * derives and stamps the lineage. Present: the port's standing decides on every turn, and a
+	 * managed host runs no turn it did not admit, a consult included.
+	 */
+	managed?: BackgroundManagedOptions;
 }
+
+/** What one turn runs under, decided afresh for every turn. */
+type ManagedTurn =
+	| { managed: false }
+	| {
+			managed: true;
+			authority: HostAuthority;
+			context: ManagedAuthenticatedContext;
+			policy: PolicySourceSet;
+	  }
+	| { managed: true; refusal: GroupChatTurnStart };
 
 /** What a runner reports about one turn, in the order it happens. */
 interface TurnHooks {
@@ -174,6 +241,81 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		beginTurn: options.beginTurn,
 	});
 
+	function managedRefusal(
+		processId: string,
+		delegation: ManagedDelegationContext | null,
+		state: BackgroundManagedState,
+		code: ManagedDenialCode,
+		message: string
+	): GroupChatTurnStart {
+		options.managed?.onAdmission?.({
+			kind: 'refused',
+			processId,
+			delegation,
+			state,
+			code,
+			message,
+		});
+		logger.warn(`${processId} was not admitted (${state}, ${code}): ${message}`, LOG_CONTEXT);
+		return { success: false, error: `[managed-${state}] ${message}`, managed: { state, code } };
+	}
+
+	/**
+	 * The admission of one turn, decided on the host's standing NOW. Standalone: a turn whose
+	 * initiator ran under management is refused (a room or a consult is not a way out of
+	 * management), anything else runs as before. Managed: the initiator's scope is met with this
+	 * host's generation, the turn's context is bound on the port, and the lease is asked for on the
+	 * final spec in `launch`. A managed host runs no turn it cannot bind: one that belongs to no room
+	 * and carries no record is refused, never run unmanaged in its place.
+	 */
+	function managedTurnFor(
+		processId: string,
+		delegation: ManagedDelegationContext | null
+	): ManagedTurn {
+		const refuse = (state: BackgroundManagedState, code: ManagedDenialCode, message: string) =>
+			({
+				managed: true,
+				refusal: managedRefusal(processId, delegation, state, code, message),
+			}) as const;
+		const port = options.managed?.port() ?? null;
+		if (!port || port.standing() === 'standalone') {
+			if (!delegation) return { managed: false };
+			const scope = intersectDelegationScope(delegation, {
+				standing: 'standalone',
+				policyRevision: null,
+			});
+			return scope.ok ? { managed: false } : refuse(scope.state, scope.code, scope.message);
+		}
+		if (!delegation) {
+			return refuse(
+				'unavailable',
+				'runtime-unavailable',
+				`${processId} belongs to no room and carries no record, so a managed host cannot bind it, and does not run it unmanaged in its place.`
+			);
+		}
+		const policy = port.policy();
+		const scope = intersectDelegationScope(delegation, {
+			standing: 'managed',
+			policyRevision: policy.policyRevision,
+		});
+		if (!scope.ok) return refuse(scope.state, scope.code, scope.message);
+		const verified = port.context({
+			identity: delegation.identity,
+			traceId: delegation.traceId,
+			policyRevision: scope.policyRevision,
+			workflow: delegation.workflow,
+			delegation: delegation.delegation,
+		});
+		if (!verified.ok) {
+			return refuse(
+				'denied',
+				verified.code,
+				`The turn's context was not accepted: ${verified.problems.join('; ')}`
+			);
+		}
+		return { managed: true, authority: port.authority, context: verified.context, policy };
+	}
+
 	/**
 	 * Start one turn and keep reporting it to `hooks` until it ends.
 	 *
@@ -185,7 +327,17 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		spawn: GroupChatSpawn,
 		owner: string,
 		hooks: TurnHooks
-	): Promise<{ success: boolean; pid?: number; error?: string }> {
+	): Promise<GroupChatTurnStart> {
+		// The lineage first: what the turn is bound as, and what its process is stamped with, so
+		// what the agent itself asks or dispatches from its shell carries the chain one link deeper.
+		// Stamped BEFORE the SSH wrap, so it reaches the remote agent and not only the ssh client.
+		const delegation = groupChatTurnContext(spawn);
+		const managedTurn = managedTurnFor(spawn.processId, delegation);
+		if (managedTurn.managed && 'refusal' in managedTurn) return managedTurn.refusal;
+		const customEnvVars = delegation
+			? { ...(spawn.customEnvVars ?? {}), ...delegationContextEnv(delegation) }
+			: spawn.customEnvVars;
+
 		// System prompt first, so every later step (maestro-p rewrite, SSH wrap, Windows stdin)
 		// sees the final args and prompt, as on the desktop (`spawnGroupChatAgent`).
 		const delivered = await deliverSystemPrompt({
@@ -200,7 +352,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 			logContext: LOG_CONTEXT,
 		});
 		const prepared = await prepareGroupChatSpawn(
-			{ ...spawn, args: delivered.args, prompt: delivered.prompt },
+			{ ...spawn, args: delivered.args, prompt: delivered.prompt, customEnvVars },
 			spawnDeps()
 		);
 		const plan = planPipeSpawn({
@@ -232,6 +384,41 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 			remote: !!spawn.sshRemoteConfig?.enabled,
 		});
 
+		// Managed admission: the spec is final here. The authority sees the snapshot of what will be
+		// spawned, and the lease it grants is checked again inside `startTurn` against the spec that
+		// reaches `spawn`, so a replaced spec fails there rather than running.
+		let admission: RunTurnOptions['admission'];
+		if (managedTurn.managed && delegation) {
+			const attribution = groupChatTurnAttribution(
+				spawn,
+				spawn.cwd,
+				options.managed?.account ?? null
+			);
+			const admitted = await managedTurn.authority.admit({
+				context: managedTurn.context,
+				snapshot: buildDispatchSnapshot(plan.spec, attribution),
+				policy: managedTurn.policy,
+			});
+			if (admitted.state !== 'admitted') {
+				removeTempFiles(plan.tempFiles);
+				return managedRefusal(
+					spawn.processId,
+					delegation,
+					admitted.state,
+					admitted.code,
+					admitted.message
+				);
+			}
+			options.managed?.onAdmission?.({
+				kind: 'admitted',
+				processId: spawn.processId,
+				delegation,
+				leaseId: admitted.lease.leaseId,
+			});
+			const gate: DispatchAdmission = leaseAdmission(managedTurn.authority, admitted.lease);
+			admission = { gate, attribution };
+		}
+
 		let turn: RunningTurn;
 		try {
 			turn = deps.runTurn(
@@ -243,6 +430,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 					stdoutTailLimit: DEFAULT_STDOUT_TAIL_LIMIT,
 					keepStdinOpen: plan.keepStdinOpen,
 					label: spawn.debugLabel,
+					...(admission ? { admission } : {}),
 				},
 				{
 					onStdout: (chunk) => {
@@ -254,8 +442,12 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 				}
 			);
 		} catch (error) {
-			// An unknown provider, or an option the process could not be created with.
 			removeTempFiles(plan.tempFiles);
+			// The lease did not cover the spec that reached the spawn: a decision, nothing started.
+			if (error instanceof DispatchRefusedError) {
+				return managedRefusal(spawn.processId, delegation, error.state, error.code, error.message);
+			}
+			// An unknown provider, or an option the process could not be created with.
 			return { success: false, error: errorText(error) };
 		}
 		// Before the first line is read, which is on a later tick.

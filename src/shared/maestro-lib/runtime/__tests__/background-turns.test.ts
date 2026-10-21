@@ -31,11 +31,22 @@ import { embedSystemPromptInPrompt } from '../../../embeddedSystemPrompt';
 import { getAgentCapabilities } from '../../providers/capabilities';
 import { getAgentDefinition, type AgentConfig } from '../../providers/definitions';
 import { resolveMaestroPaths } from '../../paths/resolve';
+import { groupChatTurnContext } from '../../groupchat/spawn';
 import type { GroupChatSpawn } from '../../groupchat/types';
+import { createLocalHostAuthority, type AdmissionRequest } from '../../managed/authority';
+import type { ManagedBindingState } from '../../managed/binding';
+import {
+	MANAGED_DELEGATION_ENV_VAR,
+	readDelegationContextEnv,
+	type ManagedDelegationContext,
+} from '../../managed/delegation';
+import { createHeadlessSpawnAuthority } from '../../managed/host-adapter';
 import {
 	consultOwner,
 	createBackgroundTurns,
 	groupChatOwner,
+	type BackgroundAdmissionEvent,
+	type BackgroundSpawnAuthorityPort,
 	type GroupChatRunnerHandlers,
 } from '../background-turns';
 import { createProcessRegistry, type ProcessRegistry } from '../processes';
@@ -413,6 +424,284 @@ describe('background turns', () => {
 				available: false,
 			});
 			expect(await background.resolveAgent('no-such-provider')).toBeNull();
+		});
+	});
+
+	describe('managed admission (MRC-07-05)', () => {
+		const installation = { installationId: 'inst-1', runtimeId: 'host-1', processEpoch: 'abc123' };
+		const actor = { kind: 'human', id: 'operator:inst-1' } as const;
+		let asked: AdmissionRequest[];
+		let admissions: BackgroundAdmissionEvent[];
+		let leases: number;
+
+		/** The fleet authority an enrolled host answers admissions with, deciding as `decide` says. */
+		const authorityOf = (decide: (request: AdmissionRequest) => 'allow' | 'deny') =>
+			createLocalHostAuthority({
+				authorityId: 'fleet',
+				decide: (request) => {
+					asked.push(request);
+					return decide(request) === 'allow'
+						? { decision: 'allow', policyRevision: 3 }
+						: { decision: 'deny', reason: 'the policy says no', policyRevision: 3 };
+				},
+				now: () => Date.now(),
+				newId: () => `lease-${++leases}`,
+				leaseTtlMs: 60_000,
+			});
+
+		/** The headless spawn port of a host enrolled with `authority`, or of a standalone one. */
+		const portOf = (
+			authority: ReturnType<typeof authorityOf> | null
+		): BackgroundSpawnAuthorityPort => {
+			const binding: ManagedBindingState = authority
+				? {
+						state: 'enrolled',
+						file: '/data/maestro-managed-binding.json',
+						record: {
+							authorityId: 'fleet',
+							policySources: [],
+							policyRevision: 3,
+						} as unknown as Extract<ManagedBindingState, { state: 'enrolled' }>['record'],
+					}
+				: { state: 'standalone', files: [] };
+			return createHeadlessSpawnAuthority({
+				installation,
+				binding,
+				host: authority ? { authority, policy: () => ({ sources: [], policyRevision: 3 }) } : null,
+				origin: 'headless',
+				actor,
+			});
+		};
+
+		function managedTurns(
+			script: FakeScript,
+			authority: ReturnType<typeof authorityOf> | null,
+			account: string | null = null
+		) {
+			const provider = createFakeGroupChatProvider(dir, script);
+			const port = portOf(authority);
+			const background = createBackgroundTurns({
+				paths: paths(),
+				registry,
+				host: {},
+				beginTurn,
+				deps: { runTurn: provider.runTurn },
+				managed: {
+					port: () => port,
+					account,
+					onAdmission: (event) => admissions.push(event),
+				},
+			});
+			return { background, provider };
+		}
+
+		/** The record a process was handed, as the agent inside it would read it. */
+		const stampedOn = (env: Record<string, string | undefined>): ManagedDelegationContext => {
+			const read = readDelegationContextEnv(env);
+			if (read.status !== 'ok') throw new Error(`no record on the process: ${read.status}`);
+			return read.context;
+		};
+
+		/** A record from an operation admitted elsewhere under policy revision 7. */
+		const carried = (policyRevision: number | null): ManagedDelegationContext => ({
+			contractVersion: 'maestro-managed/1',
+			identity: {
+				requestId: 'ask-1',
+				idempotencyKey: 'ask-1',
+				attemptId: 'ask-1',
+				runId: 'ask-1',
+				rootRunId: 'turn-0',
+				parentRunId: 'turn-0',
+			},
+			traceId: 'delegated:turn-0:ask-1:ask-1',
+			workflow: null,
+			delegation: {
+				chain: [
+					{ kind: 'agent', id: 'asker' },
+					{ kind: 'agent', id: 'target' },
+				],
+				grantRef: null,
+			},
+			policyRevision,
+		});
+
+		beforeEach(() => {
+			asked = [];
+			admissions = [];
+			leases = 0;
+		});
+
+		it('admits a room turn as the room’s child on a lease over the final spec, stamps the record, and releases the lease when the turn ends', async () => {
+			const authority = authorityOf(() => 'allow');
+			const { background, provider } = managedTurns(
+				() => ({ text: 'Done.', sessionId: 'sess-1' }),
+				authority,
+				'acct-1'
+			);
+			const runner = background.groupChatRunner(handlers);
+
+			const started = await runner.start(spawnOf());
+
+			expect(started).toMatchObject({ success: true });
+			const turn = groupChatTurnContext({ processId: PARTICIPANT })!;
+			expect(asked).toHaveLength(1);
+			expect(asked[0].context).toMatchObject({
+				installation,
+				origin: 'headless',
+				actor,
+				policyRevision: 3,
+				workflow: null,
+				identity: turn.identity,
+				traceId: turn.traceId,
+				delegation: {
+					chain: [
+						{ kind: 'service', id: `group-chat:${CHAT_ID}` },
+						{ kind: 'agent', id: PARTICIPANT },
+					],
+					grantRef: null,
+				},
+			});
+			expect(asked[0].snapshot).toMatchObject({
+				provider: 'claude-code',
+				account: 'acct-1',
+				operation: 'start',
+				target: { kind: 'local' },
+				resourceIds: [`dir:${os.tmpdir()}`],
+			});
+			// The process carries the record the admission bound.
+			expect(stampedOn(provider.calls[0].spec.env)).toEqual(turn);
+			expect(admissions).toEqual([
+				{ kind: 'admitted', processId: PARTICIPANT, delegation: turn, leaseId: 'lease-1' },
+			]);
+			// The lease lives with the process and is released with its exit.
+			await vi.waitFor(() => expect(reported).toHaveLength(3));
+			await vi.waitFor(() => expect(authority.live()).toEqual([]));
+		});
+
+		it('refuses a denied turn before anything runs: no process, no end, the decision on the result', async () => {
+			const { background, provider } = managedTurns(
+				() => ({ text: 'never' }),
+				authorityOf(() => 'deny')
+			);
+			const runner = background.groupChatRunner(handlers);
+
+			const started = await runner.start(spawnOf({ processId: MODERATOR }));
+
+			expect(started).toEqual({
+				success: false,
+				error: expect.stringMatching(/^\[managed-denied\] /),
+				managed: { state: 'denied', code: 'policy-denied' },
+			});
+			expect(asked).toHaveLength(1);
+			expect(provider.calls).toEqual([]);
+			expect(background.activeCount()).toBe(0);
+			expect(admissions).toEqual([
+				expect.objectContaining({
+					kind: 'refused',
+					processId: MODERATOR,
+					state: 'denied',
+					code: 'policy-denied',
+					delegation: groupChatTurnContext({ processId: MODERATOR }),
+				}),
+			]);
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			expect(reported).toEqual([]);
+		});
+
+		it('binds a consult under the record it carries, as it is, and never as a fresh turn of the target', async () => {
+			const { background, provider } = managedTurns(
+				() => ({ text: 'The answer.' }),
+				authorityOf(() => 'allow')
+			);
+			const record = carried(null);
+			const ended = new Promise<void>((resolve) => {
+				void background
+					.consultRunner()
+					.start(spawnOf({ processId: 'cross-agent-r1', delegation: record }), {
+						onActivity: () => undefined,
+						onSessionId: () => undefined,
+						onEnd: () => resolve(),
+					});
+			});
+			await ended;
+
+			expect(asked).toHaveLength(1);
+			expect(asked[0].context).toMatchObject({
+				identity: record.identity,
+				traceId: record.traceId,
+				delegation: record.delegation,
+				// The host's generation decides, not the initiator's claim.
+				policyRevision: 3,
+			});
+			expect(stampedOn(provider.calls[0].spec.env)).toEqual(record);
+		});
+
+		it('refuses a consult that carries no record on a managed host: nothing to bind, nothing run unmanaged', async () => {
+			const { background, provider } = managedTurns(
+				() => ({ text: 'never' }),
+				authorityOf(() => 'allow')
+			);
+
+			const started = await background
+				.consultRunner()
+				.start(spawnOf({ processId: 'cross-agent-r1' }), {
+					onActivity: () => undefined,
+					onSessionId: () => undefined,
+					onEnd: () => undefined,
+				});
+
+			expect(started).toMatchObject({
+				success: false,
+				managed: { state: 'unavailable', code: 'runtime-unavailable' },
+			});
+			expect(asked).toEqual([]);
+			expect(provider.calls).toEqual([]);
+			expect(admissions).toEqual([
+				expect.objectContaining({ kind: 'refused', delegation: null, state: 'unavailable' }),
+			]);
+		});
+
+		it('refuses a managed initiator’s child on a standalone host, and runs an unmanaged one as before', async () => {
+			const { background, provider } = managedTurns(() => ({ text: 'ok' }), null);
+			const observer = {
+				onActivity: () => undefined,
+				onSessionId: () => undefined,
+				onEnd: () => undefined,
+			};
+
+			const refused = await background
+				.consultRunner()
+				.start(spawnOf({ processId: 'cross-agent-r1', delegation: carried(7) }), observer);
+			expect(refused).toMatchObject({
+				success: false,
+				error: expect.stringMatching(/^\[managed-unavailable\] /),
+				managed: { state: 'unavailable', code: 'runtime-unavailable' },
+			});
+			expect(provider.calls).toEqual([]);
+
+			const ran = await background
+				.consultRunner()
+				.start(spawnOf({ processId: 'cross-agent-r2', delegation: carried(null) }), observer);
+			expect(ran.success).toBe(true);
+			// Standalone: no admission, but the record still rides the process for what it dispatches.
+			expect(asked).toEqual([]);
+			expect(Object.keys(provider.calls[0].spec.env)).toContain(MANAGED_DELEGATION_ENV_VAR);
+			await vi.waitFor(() => expect(background.activeCount()).toBe(0));
+		});
+
+		it('stops a running turn when its lease is revoked, and reports the end', async () => {
+			const authority = authorityOf(() => 'allow');
+			const { background } = managedTurns(() => ({ text: 'working', hold: true }), authority);
+			const runner = background.groupChatRunner(handlers);
+			const started = await runner.start(spawnOf());
+			expect(started.success).toBe(true);
+			expect(background.activeCount()).toBe(1);
+
+			expect(authority.revoke('lease-1', 'the policy changed')).toBe(true);
+
+			await vi.waitFor(() => expect(background.activeCount()).toBe(0));
+			await vi.waitFor(() => expect(reported.some((entry) => entry.startsWith('end:'))).toBe(true));
+			expect(authority.live()).toEqual([]);
 		});
 	});
 });

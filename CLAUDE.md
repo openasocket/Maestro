@@ -323,7 +323,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **Which agent a persisted group chat participant came from:** `findSessionForParticipantName(participantName, sessions)` in `src/shared/group-chat-types.ts`
 - **Running an Auto Run with no desktop (launch, progress, pause, stop):** `createRuntimeAutoRun()` in `src/shared/maestro-lib/runtime/autorun.ts`
 - **The lineage of an Auto Run turn (workflow, run, request, attempt):** `newAutoRunTurnRequest()`, `nextAutoRunAttempt()`, `autoRunRunIdentity()`, `autoRunWorkflowRef()` in `src/shared/maestro-lib/autorun/attribution.ts`; `createAutoRunTurnRunner()` in `src/shared/maestro-lib/runtime/autorun-turns.ts`
-- **Running a group chat or a consult with no desktop (rounds, `@participant`, `ask`):** `createRuntimeGroupChats()` in `src/shared/maestro-lib/runtime/group-chats.ts`, `createRuntimeConsults()` in `src/shared/maestro-lib/runtime/consults.ts`
+- **Running a group chat or a consult with no desktop (rounds, `@participant`, `ask`):** `createRuntimeGroupChats()` in `src/shared/maestro-lib/runtime/group-chats.ts`, `createRuntimeConsults()` in `src/shared/maestro-lib/runtime/consults.ts`; a turn's room lineage, `groupChatTurnContext()` in `groupchat/spawn.ts`
 
 #### Notifications, modals, and surfaces
 

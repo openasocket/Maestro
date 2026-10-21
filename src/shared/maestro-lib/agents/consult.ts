@@ -34,7 +34,7 @@ import type { CrossAgentRequest, CrossAgentResponseChunk } from '../../crossAgen
 import { CROSS_AGENT_SESSION_PREFIX } from '../../crossAgentTypes';
 import type { AgentSshRemoteConfig, ToolType } from '../../types';
 import { createIdleWatchdog, type IdleWatchdog } from '../control/idle-watchdog';
-import type { GroupChatSpawn } from '../groupchat/types';
+import type { GroupChatSpawn, GroupChatTurnStart } from '../groupchat/types';
 import { captureException, logger } from '../host';
 import { applyAgentConfigOverrides, buildAgentArgs } from '../launch/agent-args';
 import type { SshRemoteSettingsStore } from '../launch/ssh-remote-resolver';
@@ -115,10 +115,7 @@ export interface ConsultEnd {
  */
 export interface ConsultRunner {
 	/** Start the process. `success: false` is a refusal: nothing runs and no end will be reported. */
-	start(
-		spawn: GroupChatSpawn,
-		observer: ConsultObserver
-	): Promise<{ success: boolean; pid?: number; error?: string }>;
+	start(spawn: GroupChatSpawn, observer: ConsultObserver): Promise<GroupChatTurnStart>;
 	/**
 	 * Kill the process, detach, and answer whatever it had said so far (best effort, `''` when
 	 * unreadable). Idempotent, and safe for an id whose process does not exist yet.
@@ -523,6 +520,8 @@ export function createConsultService() {
 					// for agents without the native flag (already in that transcript).
 					appendSystemPrompt: await opts.getSystemPrompt?.(target),
 					isResume: !!request.resumeAgentSessionId && !!agent.resumeArgs,
+					// The runner binds the consult under this record at admission (MRC-07-05).
+					...(opts.delegation ? { delegation: opts.delegation } : {}),
 				},
 				observer
 			);
@@ -534,7 +533,11 @@ export function createConsultService() {
 				if (!settled) {
 					settled = true;
 					release();
-					emitError(`${target.name} could not be started.`);
+					// A runner that says why (a managed refusal names its state and code) is quoted, so
+					// the asker reads the decision and not only that nothing ran.
+					emitError(
+						`${target.name} could not be started.${spawnResult.error ? ` ${spawnResult.error}` : ''}`
+					);
 				}
 				return;
 			}

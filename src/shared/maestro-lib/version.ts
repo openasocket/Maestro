@@ -22,8 +22,10 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * admits each turn on.
  * 0.6.0: the delegated-dispatch context (`./managed/delegation`) one
  * operation hands a child it dispatches or consults.
+ * 0.7.0: the room lineage a group chat turn is admitted under
+ * (`./groupchat/spawn`: `groupChatRoomContext`, `groupChatTurnContext`).
  */
-export const MAESTRO_LIB_VERSION = '0.6.0';
+export const MAESTRO_LIB_VERSION = '0.7.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

@@ -29,6 +29,7 @@ import {
 } from '../../managed/delegation';
 import { MANAGED_CONTRACT_VERSION } from '../../managed/types';
 import { readHistory } from '../../store/read-history';
+import type { BackgroundAdmissionEvent } from '../background-turns';
 import type { ConsultAdmissionEvent } from '../consults';
 import {
 	createMaestroRuntime,
@@ -84,6 +85,8 @@ describe('runtime consults', () => {
 	let provider: FakeGroupChatProvider;
 	/** Every admission the runtime decided, and the asking turn a test names (none by default). */
 	let admissions: ConsultAdmissionEvent[];
+	/** Every admission the background runner decided at the spawn (MRC-07-05). */
+	let backgroundAdmissions: BackgroundAdmissionEvent[];
 	let initiator: RuntimeDeps['consults']['initiator'];
 
 	function deps(): Partial<RuntimeDeps> {
@@ -100,7 +103,10 @@ describe('runtime consults', () => {
 			readTabDefaults: async () => DEFAULT_TAB_DEFAULTS,
 			watchDirectory: () => ({ close: () => undefined }),
 			probeBinary: async (binaryName) => ({ exists: true, path: `/fake/bin/${binaryName}` }),
-			background: { runTurn: provider.runTurn },
+			background: {
+				runTurn: provider.runTurn,
+				onAdmission: (event) => backgroundAdmissions.push(event),
+			},
 			consults: {
 				minTimeoutMs: 50,
 				onAdmission: (event) => admissions.push(event),
@@ -158,6 +164,7 @@ describe('runtime consults', () => {
 		work = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-runtime-consult-work-'));
 		open = [];
 		admissions = [];
+		backgroundAdmissions = [];
 		initiator = undefined;
 	});
 	afterEach(async () => {
@@ -637,19 +644,23 @@ describe('runtime consults', () => {
 			expect(lineageOf(0).identity.parentRunId).toBe('run-7');
 		});
 
-		it('on an enrolled runtime binds the consult on the port under the host’s generation, then refuses it until the runner carries an admission', async () => {
-			const asked: AdmissionRequest[] = [];
+		/** An enrolled runtime over `authority`: the fleet authority a desktop or host would have enrolled with. */
+		async function startEnrolled(
+			decide: (request: AdmissionRequest) => 'allow' | 'deny',
+			asked: AdmissionRequest[]
+		): Promise<MaestroRuntime> {
 			const authority = createLocalHostAuthority({
 				authorityId: 'fleet-authority',
 				decide: (request) => {
 					asked.push(request);
-					return { decision: 'allow', policyRevision: 1 };
+					return decide(request) === 'allow'
+						? { decision: 'allow', policyRevision: 1 }
+						: { decision: 'deny', reason: 'the policy says no', policyRevision: 1 };
 				},
 				now: () => Date.now(),
 				newId: () => 'lease-1',
 				leaseTtlMs: 60_000,
 			});
-			// Enroll this data directory to the fleet authority, as a desktop or host would have.
 			const enroller = await start();
 			const binding = createManagedBinding({
 				paths: { userDataDir: dir, productionDataDir: dir },
@@ -669,26 +680,73 @@ describe('runtime consults', () => {
 			open.splice(open.indexOf(enroller), 1);
 			const runtime = await start(ANSWER, undefined, {}, { authority });
 			expect(runtime.managedBinding.state().state).toBe('enrolled');
+			return runtime;
+		}
+
+		it('on an enrolled runtime binds the consult under the host’s generation and admits its process on a lease over the final spec (MRC-07-05)', async () => {
+			const asked: AdmissionRequest[] = [];
+			const runtime = await startEnrolled(() => 'allow', asked);
+
+			const answer = value(
+				await runtime.consults.ask({ targetAgentId: 'a2', question: 'Why?', fromAgentId: 'a1' })
+			);
+			expect(answer.answer).toMatch(/^Answer \d+: use a queue\.$/);
+			// The stage before the target hears of it refused nothing; the lease was asked for once, on
+			// the consult's own context: this host, the headless origin, the chain one link deeper than
+			// the asker's, under the host's generation (not the initiator's claim, which was none).
+			expect(admissions).toEqual([]);
+			expect(asked).toHaveLength(1);
+			expect(asked[0].context).toMatchObject({
+				installation: { installationId: runtime.installation.installationId },
+				origin: 'headless',
+				policyRevision: 1,
+				workflow: null,
+				delegation: {
+					chain: [
+						{ kind: 'agent', id: 'a1' },
+						{ kind: 'agent', id: 'a2' },
+					],
+					grantRef: null,
+				},
+			});
+			expect(asked[0].snapshot).toMatchObject({
+				provider: 'claude-code',
+				operation: 'start',
+				target: { kind: 'local' },
+				resourceIds: [`dir:${work}`],
+			});
+			// The process ran with the record the admission bound, and the admitted lease is journaled.
+			expect(lineageOf(0).identity.requestId).toBe(asked[0].context.identity.requestId);
+			expect(backgroundAdmissions).toEqual([
+				expect.objectContaining({
+					kind: 'admitted',
+					leaseId: 'lease-1',
+					processId: provider.callsFor('consult')[0].processId,
+					delegation: expect.objectContaining({
+						identity: expect.objectContaining({ requestId: asked[0].context.identity.requestId }),
+					}),
+				}),
+			]);
+		});
+
+		it('on an enrolled runtime a denied lease starts nothing: the consult fails with the decision and the target ran no process', async () => {
+			const asked: AdmissionRequest[] = [];
+			const runtime = await startEnrolled(() => 'deny', asked);
 
 			const error = errorOf(
 				await runtime.consults.ask({ targetAgentId: 'a2', question: 'Why?', fromAgentId: 'a1' })
 			);
-			expect(error.code).toBe('host-unavailable');
-			expect(error.message).toMatch(/no managed admission yet/);
-			// Nothing started, nothing reached the target, and no lease was asked for.
+			expect(error.code).toBe('failed');
+			expect(error.message).toMatch(/\[managed-denied\]/);
+			expect(asked).toHaveLength(1);
 			expect(provider.calls).toEqual([]);
-			expect(asked).toEqual([]);
-			expect(consultTab('a2')).toBeUndefined();
-			expect(admissions).toEqual([
-				expect.objectContaining({
-					kind: 'refused',
-					state: 'unavailable',
-					code: 'runtime-unavailable',
-					// The host's generation decides, not the initiator's claim (none, standalone lineage).
-					message: expect.stringContaining('policy revision none; this host holds 1'),
-					delegation: expect.objectContaining({ policyRevision: null }),
-				}),
+			expect(backgroundAdmissions).toEqual([
+				expect.objectContaining({ kind: 'refused', state: 'denied', code: 'policy-denied' }),
 			]);
+			// The question was written before the spawn; the refusal is recorded on the consult tab
+			// after it, so the target shows why nothing ran rather than a silent loss.
+			const tab = consultTab('a2');
+			expect(tab.logs.map((entry: { source: string }) => entry.source)).toEqual(['user', 'error']);
 		});
 	});
 });

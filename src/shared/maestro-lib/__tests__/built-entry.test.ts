@@ -79,6 +79,9 @@ const FUNCTION_EXPORTS = [
 	'childDelegationContext',
 	'intersectDelegationScope',
 	'readDelegationContextEnv',
+	// The room lineage a group chat turn is admitted under (0.7.0).
+	'groupChatRoomContext',
+	'groupChatTurnContext',
 ];
 
 let scratch: string;

@@ -153,6 +153,7 @@ export type {
 	GroupChatSpawn,
 	GroupChatTurnEnd,
 	GroupChatTurnRunner,
+	GroupChatTurnStart,
 	ModeratorUsage,
 	ParticipantState,
 } from './groupchat/types';
@@ -196,7 +197,14 @@ export {
 	detectSessionNotFoundError,
 	needsSessionRecovery,
 } from './groupchat/session-recovery';
-export { prepareGroupChatSpawn } from './groupchat/spawn';
+export {
+	prepareGroupChatSpawn,
+	groupChatRoomRunId,
+	groupChatIdOf,
+	groupChatRoomContext,
+	groupChatTurnContext,
+	groupChatTurnAttribution,
+} from './groupchat/spawn';
 export { getWindowsSpawnConfig } from './groupchat/windows-spawn';
 export type { SpawnSshConfig, WindowsSpawnConfig } from './groupchat/windows-spawn';
 export { toGroupChatSessionInfo } from './groupchat/session-info';

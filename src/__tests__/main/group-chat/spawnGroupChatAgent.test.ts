@@ -55,6 +55,14 @@ import { spawnGroupChatAgent } from '../../../main/group-chat/spawnGroupChatAgen
 import { embedSystemPromptInPrompt } from '../../../shared/embeddedSystemPrompt';
 import type { AgentConfig } from '../../../main/agents/definitions';
 import type { IProcessManager } from '../../../main/group-chat/group-chat-moderator';
+import {
+	groupChatRoomContext,
+	groupChatTurnContext,
+} from '../../../shared/maestro-lib/groupchat/spawn';
+import {
+	readDelegationContextEnv,
+	type ManagedDelegationContext,
+} from '../../../shared/maestro-lib/managed/delegation';
 
 function makeAgent(): AgentConfig {
 	return {
@@ -311,6 +319,155 @@ describe('spawnGroupChatAgent', () => {
 			});
 			const wrapConfig = mockWrapSpawnWithSsh.mock.calls[0][0] as { prompt: string };
 			expect(wrapConfig.prompt).toBe(embedSystemPromptInPrompt('SYS', 'hello'));
+		});
+	});
+
+	describe('the room lineage and the admitted spawn (MRC-07-05)', () => {
+		const CHAT = '11111111-2222-4333-8444-555555555555';
+		const PARTICIPANT = `group-chat-${CHAT}-participant-Alpha-1700000000000`;
+		const apiDecision = { mode: 'api', reason: 'auto' };
+		let spawnAdmitted: ReturnType<typeof vi.fn>;
+		let admitting: IProcessManager;
+
+		beforeEach(() => {
+			mockResolve.mockReturnValue(apiDecision);
+			spawnAdmitted = vi.fn().mockResolvedValue({ pid: 4343, success: true });
+			admitting = {
+				spawn: spawnSpy,
+				spawnAdmitted,
+				write: vi.fn().mockReturnValue(true),
+				kill: vi.fn().mockReturnValue(true),
+			} as unknown as IProcessManager;
+		});
+
+		it('spawns a room turn through the admitted path as the room’s child: the room record, the process id as its ids, the keyboard as the actor', async () => {
+			const result = await spawnGroupChatAgent({
+				sessionId: PARTICIPANT,
+				agentId: 'claude-code',
+				agent: makeAgent(),
+				args: ['--print'],
+				cwd: '/tmp/work',
+				prompt: 'hello',
+				customEnvVars: { MINE: '1' },
+				processManager: admitting,
+			});
+
+			expect(result).toEqual({ pid: 4343, success: true });
+			expect(spawnSpy).not.toHaveBeenCalled();
+			expect(spawnAdmitted).toHaveBeenCalledTimes(1);
+			const [config, actor] = spawnAdmitted.mock.calls[0] as [
+				{
+					delegation: ManagedDelegationContext;
+					dispatchedAs: { requestId: string; attemptId: string };
+					customEnvVars: Record<string, string>;
+				},
+				unknown,
+			];
+			expect(actor).toEqual({ peer: 'in-process' });
+			expect(config.delegation).toEqual(groupChatRoomContext(CHAT));
+			expect(config.dispatchedAs).toEqual({ requestId: PARTICIPANT, attemptId: PARTICIPANT });
+			// The process carries the CHILD record (the one the sink binds), beside the agent's own variables.
+			const stamped = readDelegationContextEnv(config.customEnvVars);
+			expect(stamped.status).toBe('ok');
+			expect(stamped.status === 'ok' && stamped.context).toEqual(
+				groupChatTurnContext({ processId: PARTICIPANT })
+			);
+			expect(config.customEnvVars.MINE).toBe('1');
+		});
+
+		it('reports a refusal at the sink as the result, with nothing spawned', async () => {
+			spawnAdmitted.mockResolvedValue({
+				pid: -1,
+				success: false,
+				error: 'The spawn was not admitted.',
+				managed: { state: 'unavailable', code: 'runtime-unavailable' },
+			});
+
+			const result = await spawnGroupChatAgent({
+				sessionId: PARTICIPANT,
+				agentId: 'claude-code',
+				agent: makeAgent(),
+				args: ['--print'],
+				cwd: '/tmp/work',
+				prompt: 'hello',
+				processManager: admitting,
+			});
+
+			expect(result).toEqual({
+				pid: -1,
+				success: false,
+				error: 'The spawn was not admitted.',
+				managed: { state: 'unavailable', code: 'runtime-unavailable' },
+			});
+			expect(spawnSpy).not.toHaveBeenCalled();
+		});
+
+		it('hands a consult (no room) to the sink with no lineage and no stamp, and a named actor as given', async () => {
+			await spawnGroupChatAgent({
+				sessionId: 'cross-agent-req-1',
+				agentId: 'claude-code',
+				agent: makeAgent(),
+				args: ['--print'],
+				cwd: '/tmp/work',
+				prompt: 'hello',
+				processManager: admitting,
+				actor: { peer: 'web-login', username: 'pat' },
+			});
+
+			const [config, actor] = spawnAdmitted.mock.calls[0] as [
+				{ delegation?: unknown; dispatchedAs?: unknown; customEnvVars?: Record<string, string> },
+				unknown,
+			];
+			expect(actor).toEqual({ peer: 'web-login', username: 'pat' });
+			expect(config.delegation).toBeUndefined();
+			expect(config.dispatchedAs).toBeUndefined();
+			expect(config.customEnvVars).toBeUndefined();
+		});
+
+		it('spawns as before through a process manager with no admitted path, still stamping the room record', async () => {
+			await spawnGroupChatAgent({
+				sessionId: PARTICIPANT,
+				agentId: 'claude-code',
+				agent: makeAgent(),
+				args: ['--print'],
+				cwd: '/tmp/work',
+				prompt: 'hello',
+				processManager,
+			});
+
+			expect(spawnSpy).toHaveBeenCalledTimes(1);
+			const spawned = spawnSpy.mock.calls[0][0] as {
+				delegation: ManagedDelegationContext;
+				customEnvVars: Record<string, string>;
+			};
+			expect(spawned.delegation).toEqual(groupChatRoomContext(CHAT));
+			expect(readDelegationContextEnv(spawned.customEnvVars).status).toBe('ok');
+		});
+
+		it('stamps the record before the SSH wrap, so it reaches the remote agent', async () => {
+			mockWrapSpawnWithSsh.mockResolvedValue({
+				command: 'ssh',
+				args: ['host'],
+				cwd: '/remote',
+				prompt: undefined,
+				customEnvVars: undefined,
+				sshRemoteUsed: { id: 'r1', name: 'R', host: 'h' },
+			});
+			await spawnGroupChatAgent({
+				sessionId: PARTICIPANT,
+				agentId: 'claude-code',
+				agent: makeAgent(),
+				args: ['--print'],
+				cwd: '/tmp/work',
+				prompt: 'hello',
+				sshRemoteConfig: { enabled: true, remoteId: 'r1' },
+				sshStore: { getSshRemotes: () => [] } as any,
+				processManager: admitting,
+			});
+			const wrapConfig = mockWrapSpawnWithSsh.mock.calls[0][0] as {
+				customEnvVars: Record<string, string>;
+			};
+			expect(readDelegationContextEnv(wrapConfig.customEnvVars).status).toBe('ok');
 		});
 	});
 });

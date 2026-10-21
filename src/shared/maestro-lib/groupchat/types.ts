@@ -18,6 +18,8 @@ import type {
 import type { AgentSshRemoteConfig } from '../../types';
 import type { ClaudeTokenMode } from '../../claudeTokenMode';
 import type { SshRemoteSettingsStore } from '../launch/ssh-remote-resolver';
+import type { ManagedDelegationContext } from '../managed/delegation';
+import type { ManagedDenialCode } from '../managed/types';
 import type { AgentConfig } from '../providers/definitions';
 
 /**
@@ -209,12 +211,31 @@ export interface GroupChatSpawn {
 	appendSystemPrompt?: string;
 	/** True when `args` resume an existing provider session. */
 	isResume?: boolean;
+	/**
+	 * The operation this turn is a child of, when the caller derived it: a consult carries the
+	 * asking operation's child record (`childDelegationContext`, MRC-07-04A). Absent, the runner
+	 * derives the room's (`groupChatTurnContext`): a group chat turn is a child of its room. The
+	 * runner binds it at admission and stamps it on the process (`MAESTRO_DELEGATION_CONTEXT`).
+	 */
+	delegation?: ManagedDelegationContext;
+}
+
+/**
+ * How a turn started: running with a pid, or refused with nothing running and no end to follow.
+ * `managed` names a refusal by the host's managed admission (MRC-07-05): the authority's own
+ * distinction between a decision (`denied`) and no decision (`unavailable`, `unknown`).
+ */
+export interface GroupChatTurnStart {
+	success: boolean;
+	pid?: number;
+	error?: string;
+	managed?: { state: 'denied' | 'unavailable' | 'unknown'; code: ManagedDenialCode };
 }
 
 /** Starts and stops the processes a round is made of. */
 export interface GroupChatTurnRunner {
 	/** Start one turn. `success: false` is a refusal: nothing runs and no end will be reported. */
-	start(spawn: GroupChatSpawn): Promise<{ success: boolean; pid?: number; error?: string }>;
+	start(spawn: GroupChatSpawn): Promise<GroupChatTurnStart>;
 	/** Stop a turn by its FULL process id. Unknown ids are ignored. */
 	stop(processId: string): void;
 }

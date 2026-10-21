@@ -439,11 +439,12 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			? { authority: managedAuthority, policy: admissionPolicy, identity: null }
 			: null;
 	/**
-	 * What a consult is admitted with: the headless spawn authority over the binding and that same
-	 * host, with the enrollment's registered actor as the principal, rebuilt on every ask so an
-	 * enrollment that appeared or lapsed applies to the next consult (the Auto Run port's recipe).
+	 * What a consult and a group chat turn are admitted with: the headless spawn authority over the
+	 * binding and that same host, with the enrollment's registered actor as the principal, rebuilt
+	 * on every turn so an enrollment that appeared or lapsed applies to the next one (the Auto Run
+	 * port's recipe). The consult stage and the background runner read the one port.
 	 */
-	const consultSpawnPort = (): ConsultSpawnAuthorityPort =>
+	const backgroundSpawnPort = (): ConsultSpawnAuthorityPort =>
 		createHeadlessSpawnAuthority({
 			installation,
 			binding: binding.state(),
@@ -498,6 +499,11 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		host: options.turns ?? {},
 		beginTurn: (processId) => groupChatMetrics.begin(processId),
 		deps: { probeBinary: deps.probeBinary, ...deps.background },
+		// Every group chat turn and consult process is admitted on the host's standing (MRC-07-05).
+		managed: {
+			port: backgroundSpawnPort,
+			...(deps.background?.onAdmission ? { onAdmission: deps.background.onAdmission } : {}),
+		},
 	});
 	const groupChats = createRuntimeGroupChats({
 		paths,
@@ -522,7 +528,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			? { minTimeoutMs: deps.consults.minTimeoutMs }
 			: {}),
 		managed: {
-			port: consultSpawnPort,
+			port: backgroundSpawnPort,
 			...(deps.consults?.initiator ? { initiator: deps.consults.initiator } : {}),
 			...(deps.consults?.onAdmission ? { onAdmission: deps.consults.onAdmission } : {}),
 		},

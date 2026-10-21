@@ -11,7 +11,16 @@ import type { SshRemoteSettingsStore } from '../../launch/ssh-remote-resolver';
 import { getAgentDefinition } from '../../providers/definitions';
 import type { AgentConfig } from '../../providers/definitions';
 import { getAgentCapabilities } from '../../providers/capabilities';
-import { prepareGroupChatSpawn, type GroupChatSpawnDeps } from '../spawn';
+import { MANAGED_CONTRACT_VERSION } from '../../managed/types';
+import { delegationContextProblems, type ManagedDelegationContext } from '../../managed/delegation';
+import {
+	groupChatIdOf,
+	groupChatRoomContext,
+	groupChatTurnAttribution,
+	groupChatTurnContext,
+	prepareGroupChatSpawn,
+	type GroupChatSpawnDeps,
+} from '../spawn';
 import type { GroupChatSpawn } from '../types';
 
 const claude = (): AgentConfig =>
@@ -61,6 +70,114 @@ const remote = {
 };
 const storeOf = (remotes: unknown[]): SshRemoteSettingsStore =>
 	({ getSshRemotes: () => remotes }) as unknown as SshRemoteSettingsStore;
+
+describe('the room lineage a turn is admitted under (MRC-07-05)', () => {
+	const CHAT = '11111111-2222-4333-8444-555555555555';
+	const MODERATOR = `group-chat-${CHAT}-moderator-1700000000000`;
+	const PARTICIPANT = `group-chat-${CHAT}-participant-Alpha-Beta-1700000000000`;
+	const RECOVERY = `group-chat-${CHAT}-participant-Alpha-recovery-1700000000001`;
+
+	it('names the room from a moderator, participant or recovery id, and nothing from a consult', () => {
+		expect(groupChatIdOf(MODERATOR)).toBe(CHAT);
+		expect(groupChatIdOf(PARTICIPANT)).toBe(CHAT);
+		expect(groupChatIdOf(RECOVERY)).toBe(CHAT);
+		expect(groupChatIdOf('cross-agent-req-1')).toBeNull();
+	});
+
+	it('makes the room an unmanaged operation its turns are children of: one run, the room on the chain, no workflow, no generation', () => {
+		const room = groupChatRoomContext(CHAT);
+		expect(room).toEqual({
+			contractVersion: MANAGED_CONTRACT_VERSION,
+			identity: {
+				requestId: `group-chat:${CHAT}`,
+				idempotencyKey: `group-chat:${CHAT}`,
+				attemptId: `group-chat:${CHAT}`,
+				runId: `group-chat:${CHAT}`,
+				rootRunId: `group-chat:${CHAT}`,
+				parentRunId: null,
+			},
+			traceId: `group-chat:${CHAT}`,
+			workflow: null,
+			delegation: { chain: [{ kind: 'service', id: `group-chat:${CHAT}` }], grantRef: null },
+			policyRevision: null,
+		});
+		expect(delegationContextProblems(room)).toEqual([]);
+	});
+
+	it('derives a turn as the room’s child: the process id is its request, attempt and link, parented under the room', () => {
+		for (const processId of [MODERATOR, PARTICIPANT, RECOVERY]) {
+			const turn = groupChatTurnContext({ processId });
+			expect(turn).toMatchObject({
+				identity: {
+					requestId: processId,
+					idempotencyKey: processId,
+					attemptId: processId,
+					runId: processId,
+					rootRunId: `group-chat:${CHAT}`,
+					parentRunId: `group-chat:${CHAT}`,
+				},
+				traceId: `delegated:group-chat:${CHAT}:${processId}:${processId}`,
+				workflow: null,
+				delegation: {
+					chain: [
+						{ kind: 'service', id: `group-chat:${CHAT}` },
+						{ kind: 'agent', id: processId },
+					],
+					grantRef: null,
+				},
+				policyRevision: null,
+			});
+			expect(delegationContextProblems(turn)).toEqual([]);
+		}
+	});
+
+	it('binds the record a spawn carries as it is (a consult’s), and derives nothing for a consult that carries none', () => {
+		const carried: ManagedDelegationContext = {
+			...groupChatRoomContext(CHAT),
+			traceId: 'carried',
+			policyRevision: 7,
+		};
+		expect(groupChatTurnContext({ processId: 'cross-agent-req-1', delegation: carried })).toBe(
+			carried
+		);
+		expect(groupChatTurnContext({ processId: PARTICIPANT, delegation: carried })).toBe(carried);
+		expect(groupChatTurnContext({ processId: 'cross-agent-req-1' })).toBeNull();
+	});
+
+	it('tells the authority the provider, the configured model, the target and the directory, and a resume as a resume', () => {
+		expect(
+			groupChatTurnAttribution(
+				{ providerId: 'codex', agentConfigValues: { model: 'gpt-5' }, isResume: true },
+				'/work',
+				'acct-1'
+			)
+		).toEqual({
+			provider: 'codex',
+			model: 'gpt-5',
+			account: 'acct-1',
+			target: { kind: 'local' },
+			resourceIds: ['dir:/work'],
+			operation: 'resume',
+		});
+		expect(
+			groupChatTurnAttribution(
+				{
+					providerId: 'claude-code',
+					agentConfigValues: { model: '' },
+					sshRemoteConfig: { enabled: true, remoteId: 'r1' },
+				},
+				'/remote/work'
+			)
+		).toEqual({
+			provider: 'claude-code',
+			model: null,
+			account: null,
+			target: { kind: 'ssh', remoteId: 'r1' },
+			resourceIds: ['dir:/remote/work'],
+			operation: 'start',
+		});
+	});
+});
 
 describe('prepareGroupChatSpawn', () => {
 	describe('a local turn', () => {

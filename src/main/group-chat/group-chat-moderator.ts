@@ -15,6 +15,8 @@
 import * as os from 'os';
 import type { GroupChat } from './group-chat-storage';
 import { desktopGroupChatEngine as engine } from './desktop-engine';
+import type { DispatchedSpawnIds, ProcessSpawnActor, SpawnResult } from '../process-manager/types';
+import type { ManagedDelegationContext } from '../../shared/maestro-lib/managed/delegation';
 
 /**
  * Interface for the process manager dependency.
@@ -47,7 +49,20 @@ export interface IProcessManager {
 		sshStdinScript?: string;
 		/** Human-readable remote agent invocation (shown in Process Details for SSH spawns) */
 		sshRemoteCommand?: string;
+		/** The operation this turn is a child of (the room), which `admitSpawn` binds it under (MRC-07-05). */
+		delegation?: ManagedDelegationContext;
+		/** The child's own request and attempt ids, so the sink binds the record the process carries. */
+		dispatchedAs?: DispatchedSpawnIds;
 	}): { pid: number; success: boolean };
+
+	/**
+	 * `admitSpawn` then `spawn`: the managed admission at the sink, for the actor named. The real
+	 * `ProcessManager` has it; a test double without it is spawned through `spawn`, as before.
+	 */
+	spawnAdmitted?(
+		config: Parameters<IProcessManager['spawn']>[0],
+		actor: ProcessSpawnActor
+	): Promise<SpawnResult>;
 
 	write(sessionId: string, data: string): boolean;
 
