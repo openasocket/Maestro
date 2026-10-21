@@ -14,6 +14,7 @@ export type { MaestroLibVersionInfo } from './version';
 // Managed operation contracts: generic and serializable. An enterprise
 // product's own wire types stay in the package it ships, never here.
 export * from './managed/types';
+export * from './managed/compatibility';
 
 // Paths and configuration
 export * from './paths/userDataDir';

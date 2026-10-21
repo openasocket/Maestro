@@ -16,6 +16,8 @@
 import type { AgentCapabilities } from '../../types';
 import { DEFAULT_CAPABILITIES } from '../../types';
 
+import type { SupportStatus } from '../managed/compatibility';
+
 export type { AgentCapabilities };
 export { DEFAULT_CAPABILITIES };
 
@@ -537,4 +539,87 @@ export function getAgentCapabilities(agentId: string): AgentCapabilities {
 export function hasCapability(agentId: string, capability: keyof AgentCapabilities): boolean {
 	const capabilities = getAgentCapabilities(agentId);
 	return !!capabilities[capability];
+}
+
+// ---------------------------------------------------------------------------
+// Managed route support
+// ---------------------------------------------------------------------------
+
+/**
+ * The distinct execution routes a provider's work can take. They are separate
+ * enforcement families: a check on one proves nothing about another.
+ */
+export type ManagedRoute = 'child-process' | 'codex-app-server' | 'opencode-server' | 'pty' | 'ssh';
+
+export const MANAGED_ROUTES: readonly ManagedRoute[] = [
+	'child-process',
+	'codex-app-server',
+	'opencode-server',
+	'pty',
+	'ssh',
+];
+
+/**
+ * One provider on one route: what Maestro can do on it standalone, and how
+ * far managed enforcement (policy and identity bound at the real sink, denial
+ * before side effects, lifecycle and cancellation) has been proven there.
+ */
+export interface ProviderRouteSupport {
+	agentId: string;
+	route: ManagedRoute;
+	/** Whether this build runs the provider over the route at all. */
+	standalone: SupportStatus;
+	/** Whether a managed restriction is enforced on the route. */
+	managed: SupportStatus;
+	note: string;
+}
+
+const NO_MANAGED_ENFORCEMENT = 'no managed enforcement producer on this route in this build';
+
+/**
+ * Report a provider's routes precisely. `standalone` comes from the
+ * capability table and the spawner each route has: a provider that cannot
+ * run a headless turn has no child-process route, only Codex has an
+ * app-server, only OpenCode a server. Nothing here is advertised because a
+ * binary starts or metadata says so: a route whose only evidence is the
+ * table is `unverified`, and `managed` is `unsupported` on every route until
+ * its enforcement producer exists and is exercised (phases 6 to 8). A caller
+ * that reads `unsupported` must refuse, not fall back to standalone.
+ */
+export function providerRouteSupport(agentId: string): ProviderRouteSupport[] {
+	const capabilities = getAgentCapabilities(agentId);
+	const standalone = (route: ManagedRoute): [SupportStatus, string] => {
+		switch (route) {
+			case 'child-process':
+				return capabilities.supportsBatchMode
+					? ['implemented', 'headless turn through the shared child-process launch']
+					: ['unsupported', 'provider has no batch mode'];
+			case 'codex-app-server':
+				return agentId === 'codex'
+					? ['implemented', 'Codex app-server transport']
+					: ['unsupported', 'only Codex has an app-server'];
+			case 'opencode-server':
+				return agentId === 'opencode'
+					? ['implemented', 'shared OpenCode server']
+					: ['unsupported', 'only OpenCode has a server'];
+			case 'pty':
+				return capabilities.requiresPromptToStart
+					? ['unverified', 'provider needs a prompt to start; interactive PTY use is not exercised']
+					: ['implemented', 'interactive terminal through the PTY spawner'];
+			case 'ssh':
+				return capabilities.supportsBatchMode
+					? ['unverified', 'remote launch exists; containment on the remote is not proven here']
+					: ['unsupported', 'provider has no batch mode'];
+		}
+	};
+	return MANAGED_ROUTES.map((route) => {
+		const [status, note] = standalone(route);
+		return {
+			agentId,
+			route,
+			standalone: status,
+			managed: 'unsupported',
+			note: status === 'unsupported' ? note : `${note}; ${NO_MANAGED_ENFORCEMENT}`,
+		};
+	});
 }
