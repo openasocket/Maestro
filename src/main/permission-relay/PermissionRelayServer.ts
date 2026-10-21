@@ -24,22 +24,69 @@ import { randomUUID } from 'crypto';
 import { logger } from '../utils/logger';
 import { createPending, lookupBinding } from './registry';
 import { parseQuestionRequest } from './question-request';
-import type { BridgeToServerMessage, PermissionRequest, ServerToBridgeMessage } from './types';
+import type {
+	BridgeToServerMessage,
+	PermissionDecision,
+	PermissionRequest,
+	RelaySpawnBinding,
+	ServerToBridgeMessage,
+} from './types';
+import {
+	effectGranted,
+	type ManagedEffectDecision,
+} from '../../shared/maestro-lib/managed/effects';
 
 const LOG_CONTEXT = '[PermissionRelay]';
 
 /** Called for each validated request; must surface it to the user. */
 export type OnPermissionRequest = (request: PermissionRequest) => void;
 
+/**
+ * The managed host's answer for one relayed tool request, decided BEFORE the
+ * user is asked and intersected with the user's consent after:
+ *
+ *   - `{ managed: false }`: this host is standalone; the user's answer is the
+ *     answer, exactly as before.
+ *   - `{ managed: true, decision }`: the host is managed. Anything but `allow`
+ *     denies the request at once, with the reason, and the user is never
+ *     asked: a local allow cannot override a managed deny, an unavailable
+ *     authority or a lost answer. An `allow` is necessary, not sufficient:
+ *     the user is then asked, and their deny stands.
+ *
+ * `recheck` runs after the user answered, so a lease that ended while the
+ * prompt was open (revoked, released, expired) denies even an allowed and
+ * consented request. A timeout, a revocation and a dropped socket are never
+ * an approval: each path answers deny or answers nothing a bridge could read
+ * as allow.
+ */
+export type RelayManagedVerdict =
+	| { managed: false }
+	| { managed: true; decision: ManagedEffectDecision };
+
+export interface RelayManagedGate {
+	decide(binding: RelaySpawnBinding, request: PermissionRequest): Promise<RelayManagedVerdict>;
+	/** Whether the spawn the token belongs to still holds a live admission. */
+	recheck(binding: RelaySpawnBinding): { ok: true } | { ok: false; reason: string };
+}
+
 export class PermissionRelayServer {
 	private server: net.Server | null = null;
 	private socketPath: string | null = null;
 	private onRequest: OnPermissionRequest | null = null;
+	private managedGate: RelayManagedGate | null = null;
 	private starting: Promise<string> | null = null;
 
 	/** Set the callback that surfaces requests to the user (renderer). */
 	setOnRequest(cb: OnPermissionRequest): void {
 		this.onRequest = cb;
+	}
+
+	/**
+	 * Set (or clear) the managed host's gate. With none, every request is the
+	 * user's to decide, as on a standalone host.
+	 */
+	setManagedGate(gate: RelayManagedGate | null): void {
+		this.managedGate = gate;
 	}
 
 	/** True once the socket is listening. */
@@ -226,15 +273,72 @@ export class PermissionRelayServer {
 			...(questionFields ?? {}),
 		};
 
+		// The managed host decides first, on the exact tool and input, bound to
+		// the spawn the token names. Anything but allow ends here: the user is
+		// not asked, so no local consent can override it.
+		const verdict = await this.managedVerdict(binding, request);
+		if (verdict.managed && !effectGranted(verdict.decision)) {
+			const reason = verdict.decision.decision === 'allow' ? 'refused' : verdict.decision.reason;
+			logger.info('Managed host refused relayed tool request', LOG_CONTEXT, {
+				requestId,
+				sessionId: binding.sessionId,
+				toolName: msg.toolName,
+				state: verdict.decision.decision,
+			});
+			this.send(socket, {
+				type: 'permission-response',
+				requestId: bridgeRequestId,
+				decision: { behavior: 'deny', message: `Refused under management: ${reason}` },
+			});
+			return;
+		}
+
 		const decisionPromise = createPending(requestId, msg.token);
 		this.onRequest(request);
-		const decision = await decisionPromise;
+		let decision: PermissionDecision = await decisionPromise;
+
+		// Consent is intersected with the admission as it stands NOW: a lease
+		// that ended while the prompt was open denies, whatever the user said.
+		if (verdict.managed && decision.behavior === 'allow') {
+			const live = this.managedGate?.recheck(binding) ?? { ok: true };
+			if (!live.ok) {
+				logger.info(
+					'Relayed tool request allowed by the user but its admission ended',
+					LOG_CONTEXT,
+					{
+						requestId,
+						sessionId: binding.sessionId,
+						reason: live.reason,
+					}
+				);
+				decision = { behavior: 'deny', message: `Refused under management: ${live.reason}` };
+			}
+		}
 
 		this.send(socket, {
 			type: 'permission-response',
 			requestId: bridgeRequestId,
 			decision,
 		});
+	}
+
+	/** Ask the managed gate, or treat the host as standalone when none is set. A gate that throws is a refusal. */
+	private async managedVerdict(
+		binding: RelaySpawnBinding,
+		request: PermissionRequest
+	): Promise<RelayManagedVerdict> {
+		if (!this.managedGate) return { managed: false };
+		try {
+			return await this.managedGate.decide(binding, request);
+		} catch (error) {
+			return {
+				managed: true,
+				decision: {
+					decision: 'unavailable',
+					reason: `the managed gate failed: ${error instanceof Error ? error.message : String(error)}`,
+				},
+			};
+		}
 	}
 
 	private send(socket: net.Socket, msg: ServerToBridgeMessage): void {

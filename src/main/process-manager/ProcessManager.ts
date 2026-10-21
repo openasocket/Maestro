@@ -674,6 +674,21 @@ export class ProcessManager extends EventEmitter {
 		return this.boundLeases.get(sessionId)?.admission ?? null;
 	}
 
+	/** Whether a session's admission is still bound to its process. */
+	admissionLive(sessionId: string): { ok: true } | { ok: false; reason: string } {
+		const bound = this.boundLeases.get(sessionId);
+		if (!bound) return { ok: false, reason: 'no admission is bound to this session.' };
+		const state = bound.lease.state();
+		return state === 'bound'
+			? { ok: true }
+			: { ok: false, reason: `the lease for this session is ${state}.` };
+	}
+
+	/** The host authority port this manager admits with, read live. */
+	managedPort(): ProcessSpawnAuthorityPort | null {
+		return this.spawnAuthority();
+	}
+
 	/**
 	 * Emit a spawn event AFTER the spawner returns so the agent-run capture
 	 * service only records a running run for a process that actually started

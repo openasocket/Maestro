@@ -32,6 +32,7 @@ import {
 	type PermissionDecision,
 } from '../../permission-relay';
 import { releaseConcertoHtmlDocument, restoreConcertoHtmlDocument } from '../../concerto-html';
+import { createRelayManagedGate } from '../../enterprise/dispatch';
 
 const LOG_CONTEXT = '[ProcessManager]';
 
@@ -117,7 +118,22 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 
 	// Wire the Claude Code permission relay: surface requests to the renderer
 	// and clean up per-spawn bindings when a process exits.
-	initPermissionRelay(getMainWindow, getProcessManager());
+	// The relay intersects the user's consent with the managed host's decision
+	// for the exact tool request, bound to the admission of the spawn the relay
+	// token names; on a standalone host the gate answers "not managed".
+	initPermissionRelay(
+		getMainWindow,
+		getProcessManager(),
+		createRelayManagedGate({
+			port: () => getProcessManager()?.managedPort() ?? null,
+			admissionOf: (sessionId) => getProcessManager()?.admissionOf(sessionId) ?? null,
+			admissionLive: (sessionId) =>
+				getProcessManager()?.admissionLive(sessionId) ?? {
+					ok: false,
+					reason: 'no process manager is running.',
+				},
+		})
+	);
 
 	// Manual renderer closes are ownership events, not remote Movement/Cadenza
 	// mutations. Release their isolated documents explicitly so closed mockups do

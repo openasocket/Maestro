@@ -66,6 +66,13 @@ import {
 	type TurnExit,
 } from '../../shared/maestro-lib/run/start-turn';
 import type { ManagedTurnAuthority } from '../../shared/maestro-lib/turns/run-agent-turn';
+import {
+	unavailableEffectAuthority,
+	type ManagedEffect,
+	type ManagedEffectBinding,
+} from '../../shared/maestro-lib/managed/effects';
+import type { RelayManagedGate } from '../permission-relay/PermissionRelayServer';
+import type { ProcessSpawnAdmission, ProcessSpawnAuthorityPort } from '../process-manager/types';
 
 export const DISPATCH_RECEIPTS_FILE_NAME = 'maestro-managed-dispatch-receipts.json';
 
@@ -445,4 +452,87 @@ export async function dispatchHarness(
 	} finally {
 		clearTimeout(timer);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The permission relay intersection (MRC-06-07)
+// ---------------------------------------------------------------------------
+
+/**
+ * The exact effect a relayed Claude Code tool request asks for, from the
+ * tool name and the input the bridge forwarded verbatim: `Bash` is a command
+ * (`command`, with no cwd of its own), the editing tools are a file change
+ * over the path they name, everything else is that tool with its input. The
+ * model's `description` is prose and never an input to a decision.
+ */
+export function claudeToolEffect(toolName: string, input: Record<string, unknown>): ManagedEffect {
+	const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+	switch (toolName) {
+		case 'Bash':
+			return { kind: 'command', command: text(input.command) ?? '', cwd: null, argv: null };
+		case 'Edit':
+		case 'MultiEdit':
+		case 'Write':
+		case 'NotebookEdit': {
+			const path = text(input.file_path) ?? text(input.notebook_path);
+			return { kind: 'file-change', paths: path ? [path] : [], cwd: null };
+		}
+		case 'AskUserQuestion':
+			return { kind: 'user-input', prompt: null };
+		default:
+			return { kind: 'tool-call', tool: toolName, input };
+	}
+}
+
+export interface RelayGateDeps {
+	/** The host's spawn authority port, read live; null or standalone means every request is the user's. */
+	port(): ProcessSpawnAuthorityPort | null;
+	/** The admission bound to a session's live process, if any. */
+	admissionOf(sessionId: string): ProcessSpawnAdmission | null;
+	/** Whether that admission's lease is still bound to the process. */
+	admissionLive(sessionId: string): { ok: true } | { ok: false; reason: string };
+}
+
+/**
+ * The managed gate the permission relay intersects local consent with: the
+ * host's effect authority decides the exact tool request, bound to the lease
+ * of the spawn the relay token names (its actor, the tab as the turn, the
+ * request id), and the admission is re-checked after the user answers. A
+ * spawn with no live admission (a process that predates the enrollment, a
+ * lease that ended) is refused outright; the user is never asked.
+ */
+export function createRelayManagedGate(deps: RelayGateDeps): RelayManagedGate {
+	return {
+		async decide(binding, request) {
+			const port = deps.port();
+			if (!port || port.standing() === 'standalone') return { managed: false };
+			const admission = deps.admissionOf(binding.sessionId);
+			if (!admission) {
+				return {
+					managed: true,
+					decision: {
+						decision: 'deny',
+						reason: 'the spawn this request came from holds no live admission on this host.',
+					},
+				};
+			}
+			const live = deps.admissionLive(binding.sessionId);
+			if (!live.ok) return { managed: true, decision: { decision: 'deny', reason: live.reason } };
+			const effect = claudeToolEffect(request.toolName, request.input);
+			const effectBinding: ManagedEffectBinding = {
+				leaseId: admission.leaseId,
+				actor: admission.actor,
+				provider: admission.provider,
+				threadId: null,
+				turnId: binding.tabId ?? null,
+				requestId: request.requestId,
+			};
+			const authority =
+				port.effects ??
+				unavailableEffectAuthority('This host has no effect authority for managed turns.');
+			const decision = await authority.decide(effect, effectBinding, new AbortController().signal);
+			return { managed: true, decision };
+		},
+		recheck: (binding) => deps.admissionLive(binding.sessionId),
+	};
 }

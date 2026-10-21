@@ -12,7 +12,7 @@ import type { BrowserWindow } from 'electron';
 import type { EventEmitter } from 'events';
 import * as fs from 'fs';
 import { logger } from '../utils/logger';
-import { permissionRelayServer } from './PermissionRelayServer';
+import { permissionRelayServer, type RelayManagedGate } from './PermissionRelayServer';
 import { registerSpawn, resolvePending } from './registry';
 import { buildRelayArgs, resolveBridgeScriptPath } from './spawn-args';
 import type { PermissionDecision } from './types';
@@ -34,12 +34,15 @@ let initialized = false;
  */
 export function initPermissionRelay(
 	getMainWindow: () => BrowserWindow | null,
-	processManager: EventEmitter | null
+	processManager: EventEmitter | null,
+	/** The managed host's gate the relay intersects consent with (`createRelayManagedGate`). */
+	managedGate: RelayManagedGate | null = null
 ): void {
 	if (initialized) {
 		return;
 	}
 	initialized = true;
+	permissionRelayServer.setManagedGate(managedGate);
 
 	permissionRelayServer.setOnRequest((request) => {
 		const win = getMainWindow();
