@@ -1416,9 +1416,15 @@ app
 			// lapses applies to the next firing. No service (it failed to
 			// compose) is no port, which the router treats as unmanaged, the
 			// same as the process manager with no spawn authority. The workflow
-			// owner fence has no producer yet (MRC-07-06, CP-03), so an enrolled
-			// desktop refuses every Cue prompt run as unavailable in its result.
-			managed: { port: () => enterpriseService?.cueSpawnAuthority ?? null },
+			// owner fence is claimed per firing through the service's held
+			// ownership (MRC-07-06): the endpoint's workflow owner operation, or
+			// the named reason there is none (the reviewed daemon serves no such
+			// operation, CP-03), so an enrolled desktop refuses the run with it.
+			managed: {
+				port: () => enterpriseService?.cueSpawnAuthority ?? null,
+				workflowFence: (workflow, run) =>
+					enterpriseService ? enterpriseService.claimWorkflowFence(workflow, run) : null,
+			},
 		};
 
 		// Initialize Cue Engine for event-driven automation

@@ -28,13 +28,26 @@
  */
 
 import { MAESTRO_LIB_VERSION } from '../../shared/maestro-lib/version';
-import type { EndpointComponent } from '../../shared/maestro-lib/managed/endpoint-port';
+import type {
+	EndpointComponent,
+	EndpointPort,
+} from '../../shared/maestro-lib/managed/endpoint-port';
 import {
 	createManagedHostAdapter,
 	installationIdentity,
+	managedAuthorityId,
 	type ManagedHostAdapter,
 } from '../../shared/maestro-lib/managed/host-adapter';
 import type { ManagedInstallationIdentity } from '../../shared/maestro-lib/managed/types';
+import {
+	createWorkflowOwnership,
+	endpointWorkflowOwnerPort,
+	workflowFenceOf,
+	MANAGED_WORKFLOWS_FILE_NAME,
+	type WorkflowFenceAnswer,
+	type WorkflowIdentityLike,
+	type WorkflowOwnership,
+} from '../../shared/maestro-lib/managed/workflows';
 import type { AnchorStore } from '../utils/keyring-anchor';
 import { safeStorageSeal, type SafeStorageLike } from '../utils/safe-storage-seal';
 import { createBrokerDispatch, DISPATCH_RECEIPTS_FILE_NAME, type BrokerDispatch } from './dispatch';
@@ -60,6 +73,7 @@ export const ENTERPRISE_SUPPORTED_CAPABILITIES: readonly string[] = [
 	'noticeList',
 	'inbox',
 	'command',
+	'workflow',
 ];
 
 export interface EnterpriseServiceDeps {
@@ -93,6 +107,22 @@ export interface EnterpriseService {
 	readonly spawnAuthority: ProcessSpawnAuthorityPort;
 	/** The port the Cue run router admits every desktop Cue prompt run with (origin `cue`, same enrollment). */
 	readonly cueSpawnAuthority: CueSpawnAuthorityPort;
+	/**
+	 * The workflow owner fences this installation holds (MRC-07-06), claimed
+	 * through the endpoint's workflow owner operation and kept in
+	 * `maestro-managed-workflows.json` across retries, restarts and offline.
+	 */
+	readonly workflows: WorkflowOwnership;
+	/**
+	 * Claim the owner fence of a workflow for one run and attempt, as the Cue
+	 * router's `workflowFence` and any other desktop sink read it: the fence
+	 * the registry confirmed, or the named reason there is none. Offline
+	 * holding is declared when an installed policy revision is on record.
+	 */
+	claimWorkflowFence(
+		workflow: WorkflowIdentityLike,
+		run: { runId: string; attemptId: string }
+	): Promise<WorkflowFenceAnswer>;
 	/** Re-attach a previously enrolled installation. Never throws; the outcome is in `status()`. */
 	start(): Promise<void>;
 	close(): Promise<void>;
@@ -118,15 +148,17 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		{ id: 'maestro', kind: 'maestro', version: deps.appVersion },
 		{ id: 'maestro-lib', kind: 'runtime', version: MAESTRO_LIB_VERSION },
 	];
-	let port: ReturnType<typeof createLocalEndpointClient> | null = null;
+	// The socket the lifecycle opened last, injected or the real client, so the
+	// host adapter and the workflow ownership speak over the same connection.
+	let port: EndpointPort | null = null;
+	const openPort =
+		deps.openPort ?? ((socketPath: string) => createLocalEndpointClient({ socketPath }));
 	const lifecycle = createEnrollmentLifecycle({
 		identity,
-		openPort:
-			deps.openPort ??
-			((socketPath) => {
-				port = createLocalEndpointClient({ socketPath });
-				return port;
-			}),
+		openPort: (socketPath) => {
+			port = openPort(socketPath);
+			return port;
+		},
 		installation,
 		components,
 		capabilities: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES, required: [] },
@@ -163,6 +195,25 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		dispatch,
 		now,
 	});
+	// The owner fences this installation holds, claimed as the installation
+	// (the owner that outlives this process) under the authority the sealed
+	// record names, through whatever socket is open right now. No record, no
+	// standing to claim under; no socket, an offline-enabled holder keeps what
+	// the registry already issued and nothing else is answered.
+	const workflows = createWorkflowOwnership({
+		file: `${deps.userDataDir}/${MANAGED_WORKFLOWS_FILE_NAME}`,
+		port: () => (port ? endpointWorkflowOwnerPort(port) : null),
+		owner: () => {
+			const view = lifecycle.status().identity;
+			if (view.status !== 'ok' || !view.record) return null;
+			return {
+				ownerId: installation.installationId,
+				authorityId: managedAuthorityId(view.record),
+				policyRevision: host.policy().policyRevision,
+			};
+		},
+		now,
+	});
 
 	return {
 		installation,
@@ -173,9 +224,22 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		dispatch,
 		spawnAuthority,
 		cueSpawnAuthority,
+		workflows,
+		async claimWorkflowFence(workflow, run) {
+			return workflowFenceOf(
+				await workflows.claim({
+					workflow,
+					runId: run.runId,
+					attemptId: run.attemptId,
+					offlineEnabled: host.policyStatus().offline.installedPolicyAvailable,
+				})
+			);
+		},
 		async start() {
 			// The ledger is read first: a lease still bound at the last exit is unknown from here on.
 			await dispatch.load();
+			// So are the held fences: a restarted host re-claims with what it held, never afresh.
+			await workflows.load();
 			// No sealed file, no custody read: an unenrolled desktop never touches the keyring here.
 			if (identity.read().status !== 'ok') return;
 			await lifecycle.connect();

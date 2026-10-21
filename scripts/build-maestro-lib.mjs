@@ -222,6 +222,7 @@ async function build() {
 			'childDelegationContext',
 			'readDelegationContextEnv',
 			'groupChatTurnContext',
+			'createWorkflowOwnership',
 		]) {
 			if (typeof lib[name] !== 'function') {
 				throw new Error(`The built bundle exports no ${name}`);

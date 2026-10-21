@@ -47,6 +47,10 @@ import type {
 } from '../../shared/maestro-lib/managed/types';
 import type { AutoRunOwnerFence } from '../../shared/maestro-lib/autorun/attribution';
 import { delegationContextOf } from '../../shared/maestro-lib/managed/delegation';
+import {
+	isWorkflowFenceRefusal,
+	type WorkflowFenceAnswer,
+} from '../../shared/maestro-lib/managed/workflows';
 import { canonicalJson } from '../../shared/canonicalJson';
 import { generateUUID } from '../../shared/uuid';
 import type { executeCueShell as ExecuteCueShell } from './cue-shell-executor';
@@ -175,12 +179,19 @@ export interface CueManagedDeps {
 	port(): CueSpawnAuthorityPort | null;
 	/**
 	 * The owner fence of the workflow this run belongs to (its pipeline, or the
-	 * lone subscription), read on every run. Null: the workflow has no owner,
-	 * and a managed host runs none of it (unavailable, not denied: no policy
-	 * decided). The fence comes from a workflow owner producer (MRC-07-06,
-	 * CP-03); the router never mints one, and Cue stays the scheduler.
+	 * lone subscription), claimed on EVERY run for this run id and attempt
+	 * (MRC-07-06): the host's `WorkflowOwnership.claim` through the endpoint's
+	 * workflow owner producer (`workflowFenceOf()` in
+	 * `src/shared/maestro-lib/managed/workflows.ts`). A refusal names why
+	 * (the producer missing, the registry holding another owner, a lost
+	 * answer) and is the run's result; a bare null is an unowned workflow. A
+	 * managed host runs none of an unowned workflow, the router never mints a
+	 * fence, and Cue stays the scheduler.
 	 */
-	workflowFence?(workflow: CueWorkflowIdentity): AutoRunOwnerFence | null;
+	workflowFence?(
+		workflow: CueWorkflowIdentity,
+		run: { runId: string; attemptId: string }
+	): WorkflowFenceAnswer | Promise<WorkflowFenceAnswer>;
 	/** The policy's route ceiling and approved credential references, when the host has them. */
 	launch?: ManagedLaunchInput;
 	/** An opaque account reference for the snapshot; never a credential. */
@@ -302,17 +313,25 @@ type CueManagedBinding =
  * what they are NOW, not when the engine started. The authority itself is
  * asked later, by the lifecycle, on the snapshot of the final spawn.
  */
-function bindCueManagedRun(
+async function bindCueManagedRun(
 	deps: CueManagedDeps | undefined,
 	lineage: CueRunLineage
-): CueManagedBinding {
+): Promise<CueManagedBinding> {
 	const port = deps?.port();
 	if (!deps || !port || port.standing() === 'standalone') return { managed: false };
 	const refuse = (state: CueManagedState, code: ManagedDenialCode, message: string) => {
 		deps.onAdmission?.({ kind: 'refused', lineage, state, code, message });
 		return { managed: true, refusal: { state, code, message } } as const;
 	};
-	const fence = deps.workflowFence?.(lineage.workflow) ?? null;
+	// The fence is claimed for this very run and attempt, so a retry and a
+	// restored queue entry each re-confirm the owner instead of reusing a
+	// decision; the producer's refusal, when it has one, is the run's reason.
+	const fence =
+		(await deps.workflowFence?.(lineage.workflow, {
+			runId: lineage.identity.requestId,
+			attemptId: lineage.identity.attemptId,
+		})) ?? null;
+	if (isWorkflowFenceRefusal(fence)) return refuse(fence.state, fence.code, fence.message);
 	if (!fence) {
 		return refuse(
 			'unavailable',
@@ -569,7 +588,7 @@ export async function executeCueRunAction(
 			// edit to the command is a new workflow version. The executor asks the
 			// authority on the final substituted command, cwd, environment and
 			// route; a refusal here or there is the run's result.
-			const binding = bindCueManagedRun(
+			const binding = await bindCueManagedRun(
 				deps.managed,
 				cueRunLineage({
 					runId,
@@ -621,7 +640,7 @@ export async function executeCueRunAction(
 			ownerAgentId: storedSession.id,
 			attemptId: deps.managed?.newId?.() ?? generateUUID(),
 		});
-		const cliBinding = bindCueManagedRun(deps.managed, cliLineage);
+		const cliBinding = await bindCueManagedRun(deps.managed, cliLineage);
 		if (cliBinding.managed && 'refusal' in cliBinding) {
 			return managedRefusalResult(cliBinding.refusal);
 		}
@@ -718,7 +737,7 @@ export async function executeCueRunAction(
 		ownerAgentId: storedSession.id,
 		attemptId: deps.managed?.newId?.() ?? generateUUID(),
 	});
-	const binding = bindCueManagedRun(deps.managed, lineage);
+	const binding = await bindCueManagedRun(deps.managed, lineage);
 	if (binding.managed && 'refusal' in binding) return managedRefusalResult(binding.refusal);
 
 	const result = await deps.executeCuePrompt({

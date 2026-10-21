@@ -183,4 +183,114 @@ describe('enterprise service', () => {
 		});
 		expect(second.host.authority.authorityId).toBe(first.host.authority.authorityId);
 	});
+
+	/** Enroll, attach and register the service against the running fake (the approval flow of the test above). */
+	async function register(service: EnterpriseService): Promise<void> {
+		await service.identity.write({
+			installationId: service.installation.installationId,
+			tenantId: 'tenant-1',
+			orgId: 'org-1',
+			enrollmentId: 'enr-1',
+			endpoint: {
+				socketPath: fake.socketPath,
+				bindingDigest: 'a'.repeat(64),
+				trustRootDigest: null,
+			},
+			management: 'enrolled',
+			registration: null,
+			policy: { desiredRevision: null, appliedRevision: null, observedAt: null },
+			enrolledAt: new Date(NOW).toISOString(),
+		});
+		await service.start();
+		expect((await service.policy.recover()).status).toBe('approval-required');
+		expect((await service.lifecycle.completeRegistration()).status).toBe('ok');
+		expect(service.lifecycle.status().authority).toBe('registered');
+	}
+
+	const WORKFLOW = {
+		workflowId: 'cue-pipeline:Nightly QA',
+		version: 'v1',
+		triggerEventId: 'time.scheduled:evt-1',
+	};
+
+	it('claims a workflow owner fence through the endpoint workflow operation and holds it across a restart (MRC-07-06)', async () => {
+		await fake.close();
+		fake = await startFakeEndpoint({
+			registrationRequired: true,
+			capabilities: ['execution', 'workflow'],
+			now: () => NOW,
+			operations: {
+				workflow: (payload) => {
+					const p = payload as { workflowId: string; ownerId: string };
+					return {
+						outcome: 'owned',
+						workflowId: p.workflowId,
+						ownerId: p.ownerId,
+						ownerEpoch: 2,
+						fencingToken: 'fence-2',
+					};
+				},
+			},
+		});
+		const service = compose();
+		await register(service);
+
+		const fence = await service.claimWorkflowFence(WORKFLOW, {
+			runId: 'run-1',
+			attemptId: 'att-1',
+		});
+		expect(fence).toEqual({ ownerEpoch: '2', fencingToken: 'fence-2' });
+		const claim = fake.calls.find(
+			(c) => (c.body as { operation?: string }).operation === 'workflow'
+		)?.body as { payload: Record<string, unknown> };
+		expect(claim.payload).toMatchObject({
+			ownerId: service.installation.installationId,
+			ownerEpoch: 0,
+			policyRevision: 3,
+			offlineEnabled: true,
+			runId: 'run-1',
+			attemptId: 'att-1',
+		});
+		expect(service.workflows.fence(WORKFLOW)).toEqual({ ownerEpoch: '2', fencingToken: 'fence-2' });
+		expect(fs.existsSync(path.join(dir, 'maestro-managed-workflows.json'))).toBe(true);
+
+		// A restarted desktop holds the same fence before it asks the endpoint anything.
+		await service.close();
+		services.splice(0);
+		const restarted = compose();
+		await restarted.workflows.load();
+		expect(restarted.workflows.fence(WORKFLOW)).toEqual({
+			ownerEpoch: '2',
+			fencingToken: 'fence-2',
+		});
+	});
+
+	it('an endpoint that serves no workflow operation answers capability-unsupported and nothing is held', async () => {
+		const service = compose();
+		await register(service);
+		const answer = await service.claimWorkflowFence(WORKFLOW, {
+			runId: 'run-1',
+			attemptId: 'att-1',
+		});
+		expect(answer).toMatchObject({
+			fence: null,
+			state: 'unavailable',
+			code: 'capability-unsupported',
+			message: expect.stringContaining('CP-03'),
+		});
+		expect(service.workflows.held()).toHaveLength(0);
+	});
+
+	it('an unenrolled desktop has no standing to claim a workflow under', async () => {
+		const service = compose();
+		await service.start();
+		expect(
+			await service.claimWorkflowFence(WORKFLOW, { runId: 'run-1', attemptId: 'att-1' })
+		).toMatchObject({
+			fence: null,
+			state: 'unavailable',
+			message: expect.stringContaining('no managed standing'),
+		});
+		expect(fake.calls).toHaveLength(0);
+	});
 });

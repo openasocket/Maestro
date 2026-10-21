@@ -82,6 +82,9 @@ const FUNCTION_EXPORTS = [
 	// The room lineage a group chat turn is admitted under (0.7.0).
 	'groupChatRoomContext',
 	'groupChatTurnContext',
+	// Durable workflow ownership (0.8.0).
+	'createWorkflowOwnership',
+	'workflowFenceOf',
 ];
 
 let scratch: string;

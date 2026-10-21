@@ -489,3 +489,84 @@ describe('a maestro-cli action under management (MRC-07-04)', () => {
 		});
 	});
 });
+
+describe('the owner fence claimed per firing (MRC-07-06)', () => {
+	it('asks the fence producer for this run and attempt, awaits it, and binds what it answers', async () => {
+		const asked: unknown[] = [];
+		const port = cuePort();
+		const deps = makeDeps({
+			port: () => port,
+			workflowFence: async (workflow, run) => {
+				asked.push([workflow, run]);
+				await new Promise((resolve) => setTimeout(resolve, 1));
+				return { ownerEpoch: '5', fencingToken: 'token-5' };
+			},
+			newId: () => 'attempt-w',
+		});
+		await executeCueRunAction(deps, params());
+
+		expect(asked).toEqual([
+			[
+				cueWorkflowIdentity({
+					subscriptionName: 'nightly',
+					pipelineName: 'Nightly QA',
+					prompt: 'review the nightly build',
+					event: EVENT,
+				}),
+				{ runId: 'run-9', attemptId: 'attempt-w' },
+			],
+		]);
+		expect(deps.executeCuePrompt).toHaveBeenCalledTimes(1);
+		const config = deps.executeCuePrompt.mock.calls[0][0];
+		expect(config.admission?.context.workflow).toMatchObject({
+			workflowId: 'cue-pipeline:Nightly QA',
+			ownerEpoch: '5',
+			fencingToken: 'token-5',
+		});
+	});
+
+	it("the producer's refusal is the run's result, with its state and code, on the prompt and the shell path", async () => {
+		const events: CueAdmissionEvent[] = [];
+		const deps = makeDeps({
+			port: () => cuePort(),
+			workflowFence: () => ({
+				fence: null,
+				state: 'denied',
+				code: 'policy-denied',
+				message: 'Workflow "cue-pipeline:Nightly QA" is fenced: the registry holds another owner.',
+			}),
+			onAdmission: (event) => events.push(event),
+		});
+		const prompt = await executeCueRunAction(deps, params());
+		expect(prompt.managed).toEqual({ state: 'denied', code: 'policy-denied' });
+		expect(prompt.stderr).toContain(
+			'[managed-denied] Workflow "cue-pipeline:Nightly QA" is fenced'
+		);
+		expect(deps.executeCuePrompt).not.toHaveBeenCalled();
+
+		const shell = await executeCueRunAction(
+			deps,
+			params({ action: 'command', command: { mode: 'shell', shell: 'echo hi' } as never })
+		);
+		expect(shell.managed).toEqual({ state: 'denied', code: 'policy-denied' });
+		expect(deps.executeCueShell).not.toHaveBeenCalled();
+		expect(events.map((e) => e.kind)).toEqual(['refused', 'refused']);
+		expect(events[0]).toMatchObject({ state: 'denied', code: 'policy-denied' });
+	});
+
+	it('a producer that cannot be reached is unavailable by its own reason, never an unmanaged run', async () => {
+		const deps = makeDeps({
+			port: () => cuePort(),
+			workflowFence: async () => ({
+				fence: null,
+				state: 'unavailable',
+				code: 'capability-unsupported',
+				message: 'The endpoint serves no workflow owner operation (CP-03, owner mega-maestro).',
+			}),
+		});
+		const result = await executeCueRunAction(deps, params());
+		expect(result.managed).toEqual({ state: 'unavailable', code: 'capability-unsupported' });
+		expect(result.stderr).toContain('CP-03');
+		expect(deps.executeCuePrompt).not.toHaveBeenCalled();
+	});
+});
