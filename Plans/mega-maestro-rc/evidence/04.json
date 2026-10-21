@@ -1,0 +1,375 @@
+{
+	"frontMatter": {
+		"type": "evidence",
+		"title": "Phase 04 evidence: early real paired execution slice",
+		"created": "2026-10-21",
+		"phase": 4,
+		"base_revision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+		"head_revision": "ecc0969163a0016f02fae26ecdcbf25aef08d45e",
+		"branch": "feature/mega-maestro-v1.1.0-rc",
+		"tags": ["maestro", "mega-maestro", "integration", "evidence", "phase-04"],
+		"related": ["[[EXECUTION-RULES]]", "[[ANALYSIS]]", "[[01]]", "[[02]]", "[[03]]"]
+	},
+	"summary": "Phase 04 built the real-pair harness, the broker dispatch bridge with its durable decision-to-effect ledger, the one qualified synthetic harness route, and the early-pair tests, all on feature/mega-maestro-v1.1.0-rc in the Maestro checkout (macOS, Darwin 27, Node v26.12.0). The real pair was exercised inside a Linux container against the sibling endpoint built from its development checkout: the native peer module built there, the daemon started, Maestro's real client and the built library spoke to it, and every answer was the daemon's own refusal because it holds no enrollment. That is not a pair: MRC-04-05 stays unchecked, with CP-01, CP-02 and the registration approval producer named below. No double, no fabricated lease and no dirty-source artifact was counted toward it.",
+	"commits": [
+		{
+			"commit": "1a9834a",
+			"task": "MRC-04-01",
+			"files": [
+				"scripts/mega-maestro-pair.mjs",
+				"src/__tests__/integration/mega-maestro/fixtures.ts"
+			],
+			"lines": "+864"
+		},
+		{
+			"commit": "a76e253",
+			"task": "MRC-04-02, MRC-04-02A",
+			"files": [
+				"src/shared/maestro-lib/managed/authority.ts",
+				"src/shared/maestro-lib/managed/host-adapter.ts",
+				"src/main/enterprise/dispatch.ts",
+				"src/main/enterprise/service.ts",
+				"src/shared/maestro-lib/turns/run-agent-turn.ts",
+				"src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts",
+				"src/__tests__/main/enterprise/dispatch.test.ts"
+			],
+			"lines": "+829 -52"
+		},
+		{
+			"commit": "45933e2",
+			"task": "MRC-04-03",
+			"files": [
+				"src/shared/maestro-lib/managed/provider-route.ts",
+				"src/main/enterprise/dispatch.ts",
+				"src/shared/maestro-lib/index.ts",
+				"src/__tests__/shared/maestro-lib/managed/provider-route.test.ts"
+			],
+			"lines": "+507 -6"
+		},
+		{
+			"commit": "ecc0969",
+			"task": "MRC-04-04",
+			"files": [
+				"src/__tests__/integration/mega-maestro/early-pair.test.ts",
+				"src/__tests__/integration/mega-maestro/fixtures.ts",
+				"vitest.config.mts",
+				"src/main/enterprise/dispatch.ts"
+			],
+			"lines": "+733 -26"
+		}
+	],
+	"lineBudgetNotes": "MRC-04-01 (864), MRC-04-02 (881) and MRC-04-04 (759) are over the 500-line guideline; in each the source files are inside it (the harness script 668 lines, dispatch.ts 331 at MRC-04-02, early-pair.test.ts 380) and the overage is the test or fixture authored in the same task rather than left unexercised. MRC-04-02 touched five source files: the two one-line wirings outside its three named files (the operation attribution in run-agent-turn.ts, the composition in service.ts) are recorded as the bounded continuation MRC-04-02A in the same commit.",
+	"commands": [
+		{
+			"command": "node scripts/mega-maestro-pair.mjs check --json",
+			"exit": 2,
+			"result": "report printed; assessment.ready false; dependencies CP-01 (no pin, no clean Linux artifact), CP-02 (adapter unsupported), registration-approval (no producer); library ready at HEAD after the rebuild below"
+		},
+		{
+			"command": "node scripts/mega-maestro-pair.mjs run --allow-dirty --out .maestro/playbooks/Working/pair-run-04-final.json",
+			"exit": 3,
+			"result": "run completed (container exit 0), certifiable false: endpoint source is the dirty development checkout (CP-01); see realEndpointAttempt"
+		},
+		{
+			"command": "npm run lint",
+			"exit": 2,
+			"result": "exactly the two pre-existing TS2307 errors (@serenity-kit/opaque, smol-toml), as at phases 01 to 03"
+		},
+		{ "command": "npm run lint:eslint", "exit": 0, "result": "clean (both configs)" },
+		{
+			"command": "prettier --check over the 15 files changed since 1bebefa plus the three docs edited for this evidence",
+			"exit": 0,
+			"result": "All matched files use Prettier code style (the shell's cat hijack injected a bogus 'tee' pattern into the file list, which prettier reported as unmatched; every real file passed)"
+		},
+		{
+			"command": "npm run docs:verify",
+			"exit": 0,
+			"result": "969 asserted paths, 330 index entries against 330 full entries, 0 findings"
+		},
+		{
+			"command": "npm run build:maestro-lib",
+			"exit": 0,
+			"result": "dist/maestro-lib/index.js 1552.8 KB, maestro-lib 0.4.0, maestro-managed/1, provenance.json sourceDirty false, sourceRevision ecc0969"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/main/enterprise src/__tests__/shared/maestro-lib/managed src/shared/maestro-lib/runtime/__tests__ src/__tests__/shared/maestro-lib/run src/__tests__/shared/maestro-lib/turns src/__tests__/integration/mega-maestro src/shared/maestro-lib/__tests__ src/__tests__/main/ipc/handlers/enterprise.test.ts src/__tests__/main/preload/enterprise.test.ts",
+			"exit": 0,
+			"result": "57 files, 890 passed, 2 skipped (the Windows .cmd shim test off Windows; the real-pair case, blocked, see skippedTests)"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs list src/__tests__/integration",
+			"exit": 0,
+			"result": "lists only the mega-maestro suite: the rest of integration/ stays excluded from the default config"
+		},
+		{
+			"command": "node --permission --allow-fs-write=/tmp -e '<probe>'",
+			"exit": 1,
+			"result": "net.connect ERR_ACCESS_DENIED (permission Net), spawnSync ERR_ACCESS_DENIED, undeclared readFileSync ERR_ACCESS_DENIED, declared write ok: the runtime enforcement the harness route relies on, probed on this Node before the route was written"
+		}
+	],
+	"notRun": [
+		"npm install (same reason as phases 01 to 03: the environment baseline is the user's)",
+		"the full npm test",
+		"any real provider, any paid provider traffic",
+		"any enrollment against a Mega-Maestro API (none is running; none is authorized by this playbook)",
+		"any registration approval by the harness (it has no producer and never approves its own)"
+	],
+	"failedAttemptsPreserved": [
+		"First container run blocked for 2 minutes 44 seconds at the daemon's start verb: the endpoint's start stays in the foreground, so the container script never reached the driver. The script now backgrounds the daemon, polls for its runtime socket (socket.exit recorded) and stops it with its own stop verb after the driver; the stuck container was removed by hand.",
+		"First early-pair run: 2 of 8 failed. The provider double recorded its effects-file path after serializing the file (so the file said wroteFile ''); and the restart case composed a second host over the ledger before the release write had landed and read the receipt as unknown. The double now sets the path before writing; the bridge gained flush() and dispatchHarness returns only once the ledger holds the exit. No product behavior was weakened.",
+		"First dispatch-bridge run: 1 of 3 failed on the test's own lease-id counter (it derived the id from the decision counter, which the decision had already advanced). The test now keeps its own counter.",
+		"host-adapter.test.ts expectations rewritten twice by hand before a scripted patch landed: the exact-string edits missed on indentation (one tab fewer than assumed).",
+		"A docs patch written inline on the shell broke on an apostrophe inside a single-quoted script and ran nothing; moved to a script file under the Working folder."
+	],
+	"realEndpointAttempt": {
+		"status": "not-a-pass",
+		"certifiable": false,
+		"notCertifiableBecause": ["endpoint source is the sibling development checkout, dirty (CP-01)"],
+		"harness": "scripts/mega-maestro-pair.mjs run --allow-dirty",
+		"startedAt": "2026-10-21T08:42:40.815Z",
+		"endedAt": "2026-10-21T08:42:49.043Z",
+		"container": {
+			"image": "node@sha256:71bcbb3b215b3fa84b5b167585675072f4c270855e37a599803f1a58141a0716",
+			"imageId": "sha256:71bcbb3b215b3fa84b5b167585675072f4c270855e37a599803f1a58141a0716",
+			"os": "linux",
+			"arch": "arm64",
+			"node": "v22.16.0",
+			"engine": "Docker 29.9.1, OSType linux, seccomp profile=builtin",
+			"network": "none",
+			"workspace": "tmpfs /work (daemon workspace, endpoint copy, generated development key); bind mounts /library:ro, /endpoint:ro, /driver:ro, /out:rw",
+			"exit": 0
+		},
+		"endpointSource": {
+			"kind": "development-checkout",
+			"dir": "/Users/dr3/dev-shit/mega-maestro",
+			"revision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+			"dirty": true,
+			"dirtyEntries": 935,
+			"endpointBuild": "apps/endpoint/dist/cli.js, 2026-10-19T17:30:27Z",
+			"nativePeerModule": "built inside the container by apps/endpoint/native/build.mjs (exit 0; native dir lists build.mjs, peer.c, peer.node); absent in the checkout itself"
+		},
+		"maestroSide": {
+			"library": "dist/maestro-lib at ecc0969, sourceDirty false, mounted read-only and required by the driver (installationIdentity, createManagedHostAdapter, createContextVerifier, inProcessContext, buildDispatchSnapshot, MAESTRO_LIB_VERSION 0.4.0, maestro-managed/1, protocol 1)",
+			"client": "src/main/enterprise/endpoint-client.ts bundled with esbuild, sha256 967e47036d410dcafad756b8a2e38f3f37ef5501198ae0562e2d18354626a67e",
+			"driver": "inline driver, sha256 c21b7502313d831bb854944ea5a3c23d38392558162f43209fa41564177ff2ba"
+		},
+		"observed": {
+			"start": {
+				"exit": 0,
+				"answer": {
+					"protocol": 1,
+					"outcome": "started",
+					"socketPath": "/work/ws/.local/endpoint/ipc.sock",
+					"runtimeSocketPath": "/work/ws/.local/endpoint/runtime.sock"
+				},
+				"socketAppeared": true
+			},
+			"driverSteps": [
+				{ "name": "compatibility", "outcome": { "status": "denied", "reason": "unauthenticated" } },
+				{ "name": "attach", "outcome": { "status": "denied", "reason": "unauthenticated" } },
+				{
+					"name": "registration.challenge",
+					"outcome": { "status": "denied", "reason": "unavailable" }
+				},
+				{
+					"name": "execution.admit",
+					"outcome": {
+						"state": "unavailable",
+						"code": "runtime-unavailable",
+						"message": "not registered-attached-managed in this process"
+					}
+				},
+				{
+					"name": "execution.raw",
+					"outcome": {
+						"status": "unavailable",
+						"reason": "not-attached",
+						"message": "This connection is not attached; attach() first."
+					}
+				}
+			],
+			"approval": "no-producer",
+			"status": {
+				"outcome": "attached",
+				"protocol": 1,
+				"capabilities": [],
+				"management": "unenrolled",
+				"desiredPolicyRevision": null,
+				"appliedPolicyRevision": null,
+				"connectivity": "unavailable",
+				"collectionProfile": "metadata"
+			},
+			"stop": { "protocol": 1, "outcome": "stopping" },
+			"leasesMinted": 0
+		},
+		"whatThisProves": "On Linux, with the native peer module built, the real daemon accepts the real client's framing over its private Unix socket and answers inside the envelope with its own refusals; the built library derives the installation identity the endpoint's identifier rule accepts; the adapter asks nothing of an endpoint it has no registered standing with and answers unavailable; the client refuses to send an operation on an unattached connection; the daemon's control socket answers status and stop. Compared with phase 03 on macOS, the platform refusal (IPC_PLATFORM_UNSUPPORTED) is gone: the refusal is now the daemon's unenrolled state (the development peer authority reads no enrollment binding and answers IPC_UNENROLLED, so every runtime peer is unauthenticated and no challenge opens).",
+		"whatThisDoesNotProve": "Enrollment, registration, policy delivery, a decision, a receipt, a lease, an effect. The daemon holds no enrollment because no Mega-Maestro API exists to enroll it against or to approve an actor registration; the harness takes approval only from --approve-command and had none. The endpoint source is dirty, so even a complete exchange could not be pinned or certified (CP-01). The sibling runtime adapter still declares itself unsupported (CP-02). The endpoint's broker, by its own code (createExecutionRuntime.withExecution hands the broker null; managedBackendCapability is unsupported; the synthetic-node provider is harness-only), denies every execution request today, so the protected-effects row cannot pass against it until the Mega-Maestro owner qualifies a backend and provider route."
+	},
+	"deterministicCoverage": {
+		"suite": "src/__tests__/integration/mega-maestro/early-pair.test.ts",
+		"against": "the fake daemon (src/__tests__/main/enterprise/fakeEndpoint.ts, a declared double of the socket protocol) with the real client, the real host adapter, the real dispatch bridge and the real startTurn sink; the program is the declared harmless double under the Node permission model",
+		"cases": [
+			"allow: one file in the private work directory, the loopback observer heard no connection, no child started, declared read succeeded, undeclared read refused, wire request in the broker vocabulary with no arguments, ledger released with the observed pid",
+			"policy receipt: the broker decision on the lease, joined in the ledger by decision id, with the registration that held",
+			"deny before effect: policy_denied, a replay of a consumed request (idempotency-conflict), an endpoint with no execution (unavailable): nothing in any work directory",
+			"changed inputs: a lease admitted for one snapshot refuses the spawn of another (snapshot-mismatch) before any effect, lease stays issued",
+			"wrong runtime: a context naming another runtime is refused by the verifier; another runtime id cannot attach on the registered socket; the dispatch is unavailable",
+			"offline and restart: a dropped endpoint session is unavailable (no request sent) until re-attached on the surviving registration; a second host over the same ledger reads the released receipt",
+			"endpoint loss: an answer lost after the request left is unknown; a closed endpoint is unavailable; nothing runs either way"
+		],
+		"independentObservation": "the effects file read from disk by the test, a TCP listener owned by the test counting connections, the work directory listing, and the ledger file read from disk; never the program's stdout alone"
+	},
+	"skippedTests": [
+		{
+			"test": "early pair: the real endpoint through the harness script > runs the certifiable pair",
+			"reason": "check not ready; the title names the blocking producers: CP-01 (mega-maestro), CP-02 (mega-maestro), registration-approval (mega-maestro)"
+		},
+		{
+			"test": "the Windows .cmd shim test in the run suite",
+			"reason": "off Windows, as in phase 03"
+		}
+	],
+	"publicBuildArtifact": {
+		"command": "npm run build:maestro-lib",
+		"sourceRevision": "ecc0969163a0016f02fae26ecdcbf25aef08d45e",
+		"sourceDirty": false,
+		"version": "0.4.0",
+		"maestroAppVersion": "1.1.0-RC",
+		"maestroManagedContract": "maestro-managed/1",
+		"tooling": { "node": "26.12.0" },
+		"sha256": {
+			"dist/maestro-lib/index.js": "08bf3f843682255fc0edc44cc22d26565e0586669c1fb958b78dbcd4cc52911a",
+			"dist/maestro-lib/index.d.ts": "b74a2430c659e8bda6f00155a1932874cf7ac0f2039e8f9f242cfa70cf1e75ea",
+			"dist/maestro-lib/README.md": "f238cc5ef2989b8f8d29e9bfcb7e86223454d561531c960a6f6f5f4a54ca9720",
+			"dist/maestro-lib/package.json": "7bb0975b36778f964e8716352a618c2659c63df82c219c6ada26cc599776b493",
+			"dist/maestro-lib/provenance.json": "1f610efca57afdbb2ae908086190c9b0f0b80c57e3ad24fd44f6b257599cdb10"
+		},
+		"versionNote": "not bumped: the entry gained the provider route export, DispatchSnapshot gained operation and DispatchLease gained decision, additions a 0.4.0 consumer tolerates; the docs edited in the evidence commit are not part of the payload",
+		"pin": "still none (vendor/mega-maestro/contracts.pin.json absent, CP-01 open)"
+	},
+	"builtByEnforcementProperty": [
+		{
+			"property": "The broker is spoken to in its own vocabulary and never handed an override",
+			"where": "host-adapter.ts decide()",
+			"how": "operation start/input/resume from the snapshot, no arguments on the wire, resources and policy revision bound; the resolved command line stays in the local lease digest"
+		},
+		{
+			"property": "A decision is a decision, an outage is an outage",
+			"where": "host-adapter.ts DECIDED_DENIALS",
+			"how": "policy_denied, budget_exhausted, unknown_price, untrusted_clock, expired, owner_unfenced deny with policy-denied; replay denies with idempotency-conflict; every other refusal is unavailable; a receipt whose identifiers are not the contract's is unknown"
+		},
+		{
+			"property": "The broker's receipt rides the lease and joins its ledger",
+			"where": "authority.ts ManagedDecisionReceipt, dispatch.ts ledger",
+			"how": "decisionId, requestDigest, brokerId, policyRevision on the lease and the admitted outcome; the ledger joins them to the lease, the registration, the pid and the exit; byDecision() joins back"
+		},
+		{
+			"property": "Never authorize, then spawn something else",
+			"where": "dispatchHarness over startTurn",
+			"how": "the admitted snapshot's lease is re-checked by digest the instant before spawn; a changed spec throws DispatchRefusedError before any effect (early-pair test, changed inputs)"
+		},
+		{
+			"property": "The effect lifetime is written as it happens, and a restart admits ignorance",
+			"where": "dispatch.ts follow(), load()",
+			"how": "bound with pid, released with exit, revoked with reason; a receipt still live at the last exit is unknown after load; flush() makes the ledger durable before an outcome is returned"
+		},
+		{
+			"property": "The synthetic route constrains files and egress by the runtime, not by the program's manners",
+			"where": "provider-route.ts",
+			"how": "node --permission with --allow-fs-read per declared input and --allow-fs-write for the work directory only; network, child processes, workers, addons and undeclared reads refused with ERR_ACCESS_DENIED; complete environment (PATH, HOME)"
+		},
+		{
+			"property": "The route qualifies exactly itself",
+			"where": "syntheticHarnessRouteSupport()",
+			"how": "one provider on one route id, enforcement per effect, unsupported on Windows or a Node without the flags, doesNotQualify names real providers, descendants and the permission model as an OS boundary"
+		},
+		{
+			"property": "The harness names what it cannot prove",
+			"where": "scripts/mega-maestro-pair.mjs assessPair()",
+			"how": "each missing producer by coordination id and owner; dirty or stale inputs run only with an explicit flag and are recorded certifiable false with the reason; approval only from --approve-command"
+		}
+	],
+	"supportMatrix": [
+		{
+			"capability": "capabilities.negotiate",
+			"status": "locally-verified",
+			"evidence": "contracts.test.ts, built-entry.test.ts"
+		},
+		{
+			"capability": "agents.list, runs.list, runs.submit, runs.inspect, runs.cancel, runs.interrupt",
+			"status": "implemented",
+			"evidence": "unchanged from 02"
+		},
+		{ "capability": "policy.status", "status": "implemented", "evidence": "unchanged from 03" },
+		{
+			"capability": "events.resume",
+			"status": "unsupported",
+			"evidence": "fleet events: phase 10"
+		},
+		{
+			"route": "synthetic-harness / child-process (synthetic-harness/node-permission-v1)",
+			"standalone": "implemented",
+			"managed": "implemented",
+			"evidence": "early-pair.test.ts: the launch admitted at the real spawn against the fake daemon's decision, files and egress enforced by the runtime and observed independently; the decision producer was a double, so the route is not locally-verified against a real broker"
+		},
+		{
+			"route": "every real provider on every route",
+			"managed": "unchanged from 02 (child-process implemented, no real authority producer paired; others unsupported)",
+			"evidence": "providerRouteSupport() untouched; nothing in this phase qualifies a provider"
+		}
+	],
+	"positiveAcceptanceMatrix": {
+		"protected-effects": {
+			"required": true,
+			"passed": false,
+			"outcomeRequired": "Actual safe provider/tool child/file effect and denied child/egress through real endpoint/broker",
+			"state": "The Maestro side is built and exercised: a safe synthetic program produced a real child and file effect with child and egress denied, through the protected dispatch, with the decision from a declared double. Through the real endpoint the exchange ended at unauthenticated (no enrollment) before any decision; the real broker denies every execution by its own code today. Not passed; not counted."
+		}
+	},
+	"openDependencies": [
+		{
+			"id": "CP-01",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no clean Linux application artifact and no contracts pin; the four packaged application artifacts (2f7206b0, 381701b0, e2864376, f87c39a5) are sourceDirty, darwin/arm64, source e29195d8; the development checkout at d5143a6 is dirty (935 entries)"
+		},
+		{
+			"id": "CP-02",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "packages/runtime-adapter/dist/maestro.js still declares status unsupported (public-artifact-not-supplied / not-qualified); the harness reads that declaration from the built text"
+		},
+		{
+			"id": "CP-03",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "unchanged from 02 and 03: the bridge denies any delegation chain or workflow context"
+		},
+		{
+			"id": "CP-04",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "the runtime socket serves no enrollment operation; the broker provisions no execution (withExecution hands null; managedBackendCapability unsupported; synthetic-node is harness-only)"
+		},
+		{
+			"id": "CP-06",
+			"owner": "mega-maestro",
+			"status": "narrowed",
+			"detail": "native peer authentication is Linux-only, and the harness now builds and runs it inside the pinned Linux container, so the platform is no longer the blocker on this machine; macOS and Windows stay unqualified"
+		},
+		{
+			"id": "registration-approval",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no API or console exists here to enroll the daemon or approve an actor registration; the harness accepts an approval producer through --approve-command and runs none of its own"
+		},
+		{
+			"id": "CLI parity",
+			"owner": "maestro",
+			"status": "unchanged",
+			"detail": "no new UI surface this phase; the enterprise:* verbs still have no maestro-cli counterpart (open gap 0 in CLI-UI-PARITY.md)"
+		}
+	],
+	"preExistingEnvironmentFailures": "smol-toml and @serenity-kit/opaque are absent from node_modules; they break two tsc files and the translation-*.test.ts files identically at the base revision. Fix: npm install. Left for the user.",
+	"scratch": "Harness workspaces under .maestro/playbooks/Working/pair-* hold only the endpoint copy, the bundled client and the out/ records; the daemon's generated development key lived in the container's tmpfs and is gone with it. The kept run's endpoint copy was removed after the evidence was written."
+}

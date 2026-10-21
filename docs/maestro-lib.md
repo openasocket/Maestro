@@ -492,6 +492,8 @@ The client interface carries the extension as `MaestroClient.managed`, optional:
 
 The entry also exports the endpoint port (`EndpointPort`, `ManagedIdentityPort`, the protocol-1 envelope helpers and validators in `managed/endpoint-port.ts`) and the host adapter (`createManagedHostAdapter()`, `installationIdentity()`, `projectPolicyStatus()` in `managed/host-adapter.ts`). A host injects its own custody and socket through `createMaestroRuntime({ managed: { host } })`; the library never opens a socket or reads a keyring itself, and `ManagedApi.policy()` answers the adapter's policy projection.
 
+The entry also exports the one qualified synthetic route (`managed/provider-route.ts`): `buildHarnessLaunchSpec()` runs an inline Node program under the Node permission model with exactly the declared inputs readable, its private work directory writable, and the network, child processes and workers refused by the runtime; `syntheticHarnessRouteSupport()` reports that route alone, with its enforcement per effect, and says in so many words that it qualifies no real provider. Every snapshot now carries a `DispatchOperation` (`start`, `input`, `resume`), and a lease an endpoint-backed authority minted carries the broker's `ManagedDecisionReceipt`.
+
 ## See also
 
 - [Maestro CLI](./cli) for running agents and playbooks from a shell.
