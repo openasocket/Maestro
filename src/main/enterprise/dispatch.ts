@@ -40,11 +40,14 @@ import { INTERACTIVE_STOP_GRACE_MS } from '../../shared/maestro-lib/control/term
 import {
 	buildDispatchSnapshot,
 	type AdmissionRequest,
+	type DispatchAttribution,
 	type DispatchLease,
+	type DispatchSnapshot,
 	type HostAuthority,
 	type LeaseRelease,
 	type ManagedDecisionReceipt,
 } from '../../shared/maestro-lib/managed/authority';
+import type { SupportStatus } from '../../shared/maestro-lib/managed/compatibility';
 import type { ManagedHostAdapter } from '../../shared/maestro-lib/managed/host-adapter';
 import {
 	buildHarnessLaunchSpec,
@@ -63,6 +66,7 @@ import {
 	DispatchRefusedError,
 	leaseAdmission,
 	startTurn,
+	type DispatchAdmission,
 	type TurnExit,
 } from '../../shared/maestro-lib/run/start-turn';
 import type { ManagedTurnAuthority } from '../../shared/maestro-lib/turns/run-agent-turn';
@@ -73,6 +77,7 @@ import {
 } from '../../shared/maestro-lib/managed/effects';
 import type { RelayManagedGate } from '../permission-relay/PermissionRelayServer';
 import type { ProcessSpawnAdmission, ProcessSpawnAuthorityPort } from '../process-manager/types';
+import type { CueManagedAdmission } from '../cue/cue-executor';
 
 export const DISPATCH_RECEIPTS_FILE_NAME = 'maestro-managed-dispatch-receipts.json';
 
@@ -534,5 +539,156 @@ export function createRelayManagedGate(deps: RelayGateDeps): RelayManagedGate {
 			return { managed: true, decision };
 		},
 		recheck: (binding) => deps.admissionLive(binding.sessionId),
+	};
+}
+
+// ---------------------------------------------------------------------------
+// The Cue shell boundary (MRC-07-03)
+// ---------------------------------------------------------------------------
+
+/**
+ * The two ways a Cue `action: command` / `mode: shell` subscription runs its
+ * command: through the user's shell on this machine (`spawn` with
+ * `shell: true`), or as `bash -c` inside a remote login shell over SSH.
+ * Neither is a provider route: nothing parses a tool call, nothing asks
+ * before acting, and the command does whatever the shell lets it.
+ */
+export type CueShellRoute = 'local-shell' | 'ssh-shell';
+
+/** The provider a Cue shell action is attributed to in its dispatch snapshot. */
+export const CUE_SHELL_PROVIDER = 'cue-shell';
+
+export interface CueShellRouteSupport {
+	route: CueShellRoute;
+	/** Whether this build runs the action over the route at all. */
+	standalone: SupportStatus;
+	/** Whether a managed restriction is enforced on the route. */
+	managed: SupportStatus;
+	note: string;
+}
+
+const CUE_SHELL_NO_CONFINEMENT =
+	'no confinement producer qualifies the route, so a managed host refuses the action before anything starts, and never runs it unmanaged in its place';
+
+/**
+ * The one table for the Cue shell routes. Both run standalone as they always
+ * have; neither is qualified under management: a shell child inherits the
+ * engine environment and the login-shell PATH and does whatever the shell
+ * lets it, and a remote login shell proves no containment at all. The table
+ * reads `unsupported` until a real confinement producer is exercised at this
+ * sink; it is never flipped from a test or a host flag.
+ */
+export function cueShellRouteSupport(route: CueShellRoute): CueShellRouteSupport {
+	return route === 'local-shell'
+		? {
+				route,
+				standalone: 'implemented',
+				managed: 'unsupported',
+				note: `the substituted command runs through the user's shell on this machine with the engine's environment; ${CUE_SHELL_NO_CONFINEMENT}`,
+			}
+		: {
+				route,
+				standalone: 'implemented',
+				managed: 'unsupported',
+				note: `the substituted command runs as bash -c inside a remote login shell over SSH; the remote proves no containment and ${CUE_SHELL_NO_CONFINEMENT}`,
+			};
+}
+
+/**
+ * The final spawn of a Cue shell action, as the executor is about to issue
+ * it: the substituted command (the shell parses it locally; the SSH wrapper
+ * already folded it into the `ssh` invocation remotely), the cwd, the exact
+ * environment and which route it takes. Built after template substitution,
+ * the SSH wrap and the PATH probe, so nothing about it can still change.
+ */
+export interface CueShellSpawnPlan {
+	route: CueShellRoute;
+	command: string;
+	args: readonly string[];
+	cwd: string;
+	env: Readonly<Record<string, string>>;
+	shell: boolean;
+	/** The directory the command acts on: the owning agent's project root, local or remote. */
+	projectRoot: string;
+	/** The SSH remote the command runs on, as the wrapper resolved it; null on this machine. */
+	remoteId: string | null;
+}
+
+/** What the plan does not say for itself: a shell action has no provider, model or session. */
+export function cueShellAttribution(
+	plan: Pick<CueShellSpawnPlan, 'projectRoot' | 'remoteId'>,
+	account: string | null
+): DispatchAttribution {
+	return {
+		provider: CUE_SHELL_PROVIDER,
+		model: null,
+		operation: 'start',
+		account,
+		target: plan.remoteId ? { kind: 'ssh', remoteId: plan.remoteId } : { kind: 'local' },
+		resourceIds: [`dir:${plan.projectRoot}`],
+	};
+}
+
+export type CueShellAdmissionOutcome =
+	| {
+			state: 'admitted';
+			lease: DispatchLease;
+			/** The sink's gate: re-check at `spawn()`, hear a revocation. */
+			gate: DispatchAdmission;
+			attribution: DispatchAttribution;
+			snapshot: DispatchSnapshot;
+	  }
+	| { state: 'denied' | 'unavailable' | 'unknown'; code: ManagedDenialCode; message: string };
+
+export interface CueShellAdmissionDeps {
+	/** The route table. Default {@link cueShellRouteSupport}; a test injects a declared double to reach the sink past the refusal. */
+	routeSupport?: (route: CueShellRoute) => CueShellRouteSupport;
+}
+
+/**
+ * Admit one Cue shell action on a managed host, or say why not. The route is
+ * read FIRST, on the final plan (so an SSH action is judged as the remote
+ * launch it is, not as the local `bash` it was before the wrap): a route the
+ * table does not qualify is `unavailable` with `capability-unsupported`, and
+ * no lease is asked for a launch this host could not confine. A qualified
+ * route is admitted by the host authority on the snapshot of exactly this
+ * spawn (command, arguments, cwd, every environment variable by name and
+ * digest, the shell, the target, the project root as its resource); the
+ * lease comes back with the gate the executor re-checks the instant before
+ * `spawn()`. Nothing short of `admitted` runs the command, anywhere.
+ */
+export async function admitCueShell(
+	admission: CueManagedAdmission,
+	plan: CueShellSpawnPlan,
+	deps: CueShellAdmissionDeps = {}
+): Promise<CueShellAdmissionOutcome> {
+	const support = (deps.routeSupport ?? cueShellRouteSupport)(plan.route);
+	if (support.managed !== 'implemented') {
+		return {
+			state: 'unavailable',
+			code: 'capability-unsupported',
+			message: `A Cue shell action over the ${plan.route} route is unavailable under management on this host: ${support.note}. Nothing was started.`,
+		};
+	}
+	const attribution = cueShellAttribution(plan, admission.account ?? null);
+	const snapshot = buildDispatchSnapshot(
+		{ command: plan.command, args: plan.args, cwd: plan.cwd, env: plan.env, shell: plan.shell },
+		attribution
+	);
+	const admitted = await admission.authority.admit({
+		context: admission.context,
+		snapshot,
+		policy: admission.policy,
+	});
+	if (admitted.state !== 'admitted') {
+		return { state: admitted.state, code: admitted.code, message: admitted.message };
+	}
+	admission.onLease?.(admitted.lease);
+	return {
+		state: 'admitted',
+		lease: admitted.lease,
+		gate: leaseAdmission(admission.authority, admitted.lease),
+		attribution,
+		snapshot,
 	};
 }

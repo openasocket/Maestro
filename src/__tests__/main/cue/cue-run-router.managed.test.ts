@@ -290,17 +290,112 @@ describe('executeCueRunAction under management', () => {
 		expect(refused.managed?.state).toBe('unavailable');
 	});
 
-	it('leaves the command and notify actions to their own gates', async () => {
+	it('leaves the maestro-cli and notify actions to their own gates (the shell action is admitted below)', async () => {
 		const deps = makeDeps({ port: () => cuePort(), workflowFence: () => null });
 		await executeCueRunAction(
 			deps,
-			params({ action: 'command', command: { mode: 'shell', shell: 'echo hi' } as never })
+			params({
+				action: 'command',
+				command: { mode: 'cli', cli: { message: 'hi' } } as never,
+			})
 		);
-		expect(deps.executeCueShell).toHaveBeenCalledTimes(1);
+		expect(deps.executeCueCli).toHaveBeenCalledTimes(1);
 		await executeCueRunAction(
 			deps,
 			params({ action: 'notify', notify: { message: 'hi' } as never })
 		);
 		expect(deps.onNotify).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('a shell action under management (MRC-07-03)', () => {
+	const shellParams = (overrides: Partial<OnCueRunParams> = {}) =>
+		params({
+			action: 'command',
+			prompt: 'shell',
+			command: { mode: 'shell', shell: 'echo hi' } as never,
+			...overrides,
+		});
+
+	it('a standalone host hands the shell executor no admission', async () => {
+		const deps = makeDeps({ port: () => cuePort('standalone'), workflowFence: () => FENCE });
+		await executeCueRunAction(deps, shellParams());
+		expect(deps.executeCueShell).toHaveBeenCalledTimes(1);
+		expect(deps.executeCueShell.mock.calls[0][0]).not.toHaveProperty('admission');
+	});
+
+	it('an unowned workflow is refused unavailable before the command is substituted', async () => {
+		const events: CueAdmissionEvent[] = [];
+		const deps = makeDeps({
+			port: () => cuePort(),
+			workflowFence: () => null,
+			onAdmission: (event) => events.push(event),
+		});
+		const result = await executeCueRunAction(deps, shellParams());
+
+		expect(deps.executeCueShell).not.toHaveBeenCalled();
+		expect(result.status).toBe('failed');
+		expect(result.managed).toEqual({ state: 'unavailable', code: 'runtime-unavailable' });
+		expect(result.stderr).toContain('cue-pipeline:Nightly QA');
+		expect(events).toHaveLength(1);
+		// The versioned text of a shell action is its command, not the prompt carrier.
+		expect(events[0].lineage.workflow.version).toBe(
+			cueWorkflowIdentity({
+				subscriptionName: 'nightly',
+				pipelineName: 'Nightly QA',
+				prompt: 'echo hi',
+				action: 'command',
+				event: EVENT,
+			}).version
+		);
+		expect(events[0].lineage.delegation.chain).toEqual([
+			{ kind: 'service', id: 'cue-subscription:nightly' },
+			{ kind: 'agent', id: 'agent-1' },
+		]);
+	});
+
+	it('with an owner fence the shell executor receives the admission bound on the run lineage', async () => {
+		const port = cuePort();
+		const deps = makeDeps({
+			port: () => port,
+			workflowFence: () => FENCE,
+			account: 'acct-ref',
+			newId: () => 'attempt-s',
+		});
+		await executeCueRunAction(deps, shellParams());
+
+		expect(deps.executeCueShell).toHaveBeenCalledTimes(1);
+		const config = deps.executeCueShell.mock.calls[0][0] as unknown as {
+			shellCommand: string;
+			admission: CueExecutionConfig['admission'];
+		};
+		expect(config.shellCommand).toBe('echo hi');
+		const admission = config.admission!;
+		expect(admission.authority).toBe(port.authority);
+		expect(admission.policy.policyRevision).toBe(7);
+		expect(admission.account).toBe('acct-ref');
+		expect(admission.context.origin).toBe('cue');
+		expect(admission.context.identity).toMatchObject({
+			requestId: 'run-9',
+			attemptId: 'attempt-s',
+			rootRunId: 'root-1',
+			parentRunId: 'run-8',
+		});
+		expect(admission.context.workflow).toMatchObject({
+			workflowId: 'cue-pipeline:Nightly QA',
+			ownerEpoch: 'epoch-3',
+			fencingToken: 'fence-3',
+		});
+	});
+
+	it('a maestro-cli action carries no admission yet (MRC-07-04), unchanged', async () => {
+		const deps = makeDeps({ port: () => cuePort(), workflowFence: () => FENCE });
+		await executeCueRunAction(
+			deps,
+			shellParams({ command: { mode: 'cli', cli: { message: 'hi' } } as never })
+		);
+		expect(deps.executeCueShell).not.toHaveBeenCalled();
+		expect(deps.executeCueCli).toHaveBeenCalledTimes(1);
+		expect(deps.executeCueCli.mock.calls[0][0]).not.toHaveProperty('admission');
 	});
 });

@@ -101,6 +101,16 @@ vi.mock('child_process', async (importOriginal) => {
 import { executeCueShell } from '../../../main/cue/cue-shell-executor';
 import { getProcessList, stopProcess } from '../../../main/cue/cue-process-lifecycle';
 import { wrapSpawnWithSsh } from '../../../shared/maestro-lib/launch/ssh-spawn-wrapper';
+import {
+	createContextVerifier,
+	createLocalHostAuthority,
+	type AdmissionRequest,
+	type DispatchLease,
+	type PolicyDecision,
+} from '../../../shared/maestro-lib/managed/authority';
+import { inProcessContext } from '../../../shared/maestro-lib/managed/operations';
+import type { CueManagedAdmission } from '../../../main/cue/cue-executor';
+import type { CueShellRoute, CueShellRouteSupport } from '../../../main/enterprise/dispatch';
 
 function createSession(): SessionInfo {
 	return {
@@ -493,6 +503,248 @@ describe('cue-shell-executor', () => {
 				expect.any(Error),
 				expect.objectContaining({ operation: 'cue:shell:sshWrap' })
 			);
+		});
+	});
+
+	/**
+	 * Managed admission at the shell sink (MRC-07-03). The authority is the
+	 * REAL `createLocalHostAuthority` over a policy table double and the
+	 * context is verified by the real verifier; only the route table is a
+	 * declared double where the sink has to be reached past the refusal.
+	 */
+	describe('managed admission', () => {
+		let leaseSeq = 0;
+
+		function managedAdmission(
+			decide: (request: AdmissionRequest) => PolicyDecision | Promise<PolicyDecision>,
+			onLease?: (lease: DispatchLease) => void
+		): CueManagedAdmission {
+			const authority = createLocalHostAuthority({
+				authorityId: 'authority-test',
+				decide,
+				now: () => Date.now(),
+				newId: () => `lease-${++leaseSeq}`,
+			});
+			const verified = createContextVerifier({
+				verifierId: 'test',
+				peer: 'in-process',
+				now: () => Date.now(),
+				accept: () => [],
+			}).verify(
+				inProcessContext({
+					origin: 'cue',
+					installation: { installationId: 'inst-1', runtimeId: 'cue-1', processEpoch: 'e1' },
+					actor: { kind: 'human', id: 'actor-registered' },
+					delegation: {
+						chain: [
+							{ kind: 'service', id: 'cue-subscription:shell-test' },
+							{ kind: 'agent', id: 'session-1' },
+						],
+						grantRef: null,
+					},
+					identity: {
+						requestId: 'run-1',
+						idempotencyKey: 'run-1',
+						attemptId: 'att-1',
+						runId: 'run-1',
+						rootRunId: 'run-1',
+						parentRunId: null,
+					},
+					policyRevision: 3,
+					workflow: {
+						workflowId: 'cue:shell-test',
+						version: 'v1',
+						triggerEventId: 'time.heartbeat:evt-1',
+						ownerEpoch: 'epoch-1',
+						fencingToken: 'fence-1',
+					},
+					traceId: 'cue:run-1:run-1:att-1',
+					requestedCapabilities: ['runs.submit'],
+				})
+			);
+			if (!verified.ok) throw new Error(verified.problems.join('; '));
+			return {
+				authority,
+				context: verified.context,
+				policy: { sources: [], policyRevision: 3 },
+				account: null,
+				...(onLease ? { onLease } : {}),
+			};
+		}
+
+		/** DECLARED TEST DOUBLE: no real confinement producer qualifies a shell route. */
+		const qualified = (route: CueShellRoute): CueShellRouteSupport => ({
+			route,
+			standalone: 'implemented',
+			managed: 'implemented',
+			note: 'declared test double: a confinement producer this build does not have',
+		});
+
+		it('refuses the local shell route before spawning or asking for a lease', async () => {
+			const decide = vi.fn(() => ({ decision: 'allow', policyRevision: 3 }) as PolicyDecision);
+			const onLog = vi.fn();
+			const result = await executeCueShell(
+				createConfig({ admission: managedAdmission(decide), onLog }) as any
+			);
+
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(decide).not.toHaveBeenCalled();
+			expect(result.status).toBe('failed');
+			expect(result.exitCode).toBeNull();
+			expect(result.managed).toEqual({ state: 'unavailable', code: 'capability-unsupported' });
+			expect(result.stderr).toContain(
+				'[managed-unavailable] A Cue shell action over the local-shell route is unavailable under management'
+			);
+			expect(result.stderr).toContain('Nothing was started.');
+			expect(onLog).toHaveBeenCalledWith(
+				'warn',
+				expect.stringContaining('was not admitted (unavailable, capability-unsupported)')
+			);
+		});
+
+		it('judges an SSH action as the remote route, after the wrap, and refuses it without running anywhere', async () => {
+			mockWrapSpawnWithSsh.mockResolvedValue({
+				command: 'ssh',
+				args: ['user@host', 'bash -c "echo hello"'],
+				cwd: '/Users/local',
+				sshRemoteUsed: { id: 'remote-1', name: 'Server', host: 'host' },
+			});
+			const decide = vi.fn(() => ({ decision: 'allow', policyRevision: 3 }) as PolicyDecision);
+			const result = await executeCueShell(
+				createConfig({
+					admission: managedAdmission(decide),
+					sshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+					sshStore: { getSshRemotes: () => [] },
+				}) as any
+			);
+
+			expect(mockWrapSpawnWithSsh).toHaveBeenCalledTimes(1);
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(decide).not.toHaveBeenCalled();
+			expect(result.managed).toEqual({ state: 'unavailable', code: 'capability-unsupported' });
+			expect(result.stderr).toContain('over the ssh-shell route is unavailable');
+			expect(result.stderr).toContain('remote login shell over SSH');
+		});
+
+		it('on a qualified route (declared double) admits the final spawn, binds the pid and releases it with the exit', async () => {
+			const requests: AdmissionRequest[] = [];
+			const leases: DispatchLease[] = [];
+			const admission = managedAdmission(
+				(request) => {
+					requests.push(request);
+					return { decision: 'allow', policyRevision: 3 };
+				},
+				(lease) => leases.push(lease)
+			);
+			const onLog = vi.fn();
+			const promise = executeCueShell(
+				createConfig({ admission, routeSupport: qualified, onLog }) as any
+			);
+			await vi.advanceTimersByTimeAsync(0);
+
+			expect(requests).toHaveLength(1);
+			const snapshot = requests[0].snapshot;
+			expect(snapshot).toMatchObject({
+				executable: 'echo hello',
+				args: [],
+				cwd: '/projects/test',
+				shell: true,
+				provider: 'cue-shell',
+				model: null,
+				operation: 'start',
+				target: { kind: 'local' },
+				resourceIds: ['dir:/projects/test'],
+				stdinDigest: null,
+			});
+			expect(snapshot.envKeys).toContain('PATH');
+			expect(snapshot.envKeys).toContain('MAESTRO_QUERY_SOURCE');
+			expect(requests[0].context.origin).toBe('cue');
+
+			expect(mockSpawn).toHaveBeenCalledTimes(1);
+			expect(leases).toHaveLength(1);
+			const lease = leases[0];
+			expect(lease.state()).toBe('bound');
+			expect(lease.pid()).toBe(54321);
+			expect(onLog).toHaveBeenCalledWith(
+				'cue',
+				expect.stringContaining(`admitted under lease ${lease.leaseId}`)
+			);
+
+			mockChild.stdout.emit('data', 'hello\n');
+			mockChild.emit('close', 0, null);
+			const result = await promise;
+			expect(result.status).toBe('completed');
+			expect(result.managed).toBeUndefined();
+			expect(lease.state()).toBe('released');
+			expect(lease.ended().release).toEqual({ outcome: 'exited', exitCode: 0, signal: null });
+		});
+
+		it('a policy denial on a qualified route starts nothing and is the run result', async () => {
+			const admission = managedAdmission(() => ({
+				decision: 'deny',
+				reason: 'shell actions are not allowed on this host',
+				policyRevision: 3,
+				code: 'policy-denied',
+			}));
+			const result = await executeCueShell(
+				createConfig({ admission, routeSupport: qualified }) as any
+			);
+
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(result.status).toBe('failed');
+			expect(result.managed).toEqual({ state: 'denied', code: 'policy-denied' });
+			expect(result.stderr).toContain('[managed-denied] shell actions are not allowed');
+		});
+
+		it('a revocation while the command runs stops it; the authority owns that stop', async () => {
+			const leases: DispatchLease[] = [];
+			const admission = managedAdmission(
+				() => ({ decision: 'allow', policyRevision: 3 }),
+				(lease) => leases.push(lease)
+			);
+			const promise = executeCueShell(createConfig({ admission, routeSupport: qualified }) as any);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(mockSpawn).toHaveBeenCalledTimes(1);
+			const lease = leases[0];
+
+			expect(admission.authority.revoke(lease.leaseId, 'policy generation 4 forbids shells')).toBe(
+				true
+			);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(mockChild.killed).toBe(true);
+
+			mockChild.emit('close', null, 'SIGTERM');
+			const result = await promise;
+			expect(result.status).toBe('stopped');
+			expect(result.stderr).toContain('[managed-revoked] policy generation 4 forbids shells');
+			expect(result.managed).toBeUndefined();
+			expect(lease.state()).toBe('revoked');
+		});
+
+		it('stopped while the authority decides releases the lease unused and spawns nothing', async () => {
+			let answer!: (decision: PolicyDecision) => void;
+			const leases: DispatchLease[] = [];
+			const admission = managedAdmission(
+				() =>
+					new Promise<PolicyDecision>((resolve) => {
+						answer = resolve;
+					}),
+				(lease) => leases.push(lease)
+			);
+			const controller = new AbortController();
+			const promise = executeCueShell(
+				createConfig({ admission, routeSupport: qualified, signal: controller.signal }) as any
+			);
+			await vi.advanceTimersByTimeAsync(0);
+			controller.abort();
+			answer({ decision: 'allow', policyRevision: 3 });
+			const result = await promise;
+
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(result.status).toBe('stopped');
+			expect(leases).toHaveLength(1);
+			expect(leases[0].state()).toBe('released');
+			expect(leases[0].ended().release).toEqual({ outcome: 'stopped', by: 'caller' });
 		});
 	});
 });

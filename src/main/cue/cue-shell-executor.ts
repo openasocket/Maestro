@@ -7,6 +7,13 @@
  * resolve as if typed in a terminal. cwd is the owning session's project root.
  * Output, exit code, and timeout handling mirror the agent executor so chained
  * `agent.completed` subscriptions can read shell stdout via {{CUE_SOURCE_OUTPUT}}.
+ *
+ * Under management (MRC-07-03) the executor is the sink: once the command,
+ * cwd, environment and route (this machine's shell, or a remote login shell
+ * over SSH) are final, it asks `admitCueShell` for a lease on exactly that
+ * spawn, re-checks the lease at `spawn()`, binds the pid, releases it with
+ * the exit and stops the child when the authority revokes it. A refusal is
+ * the run's result; the command never runs unmanaged, locally or remotely.
  */
 
 import { spawn, type ChildProcess } from 'child_process';
@@ -28,6 +35,19 @@ import { killCueProcess, trackCueProcess } from './cue-process-lifecycle';
 import type { StopHandle } from '../../shared/maestro-lib/control/termination';
 import { isLaunchCancelled, stoppedBeforeLaunchResult } from './cue-launch-cancel';
 import { QUERY_SOURCE_ENV_VAR } from '../../shared/querySource';
+import {
+	admitCueShell,
+	type CueShellRoute,
+	type CueShellRouteSupport,
+	type CueShellSpawnPlan,
+} from '../enterprise/dispatch';
+import type { CueManagedAdmission } from './cue-executor';
+import {
+	buildDispatchSnapshot,
+	type DispatchAttribution,
+	type DispatchLease,
+} from '../../shared/maestro-lib/managed/authority';
+import type { DispatchAdmission } from '../../shared/maestro-lib/run/start-turn';
 
 export interface CueShellExecutionConfig {
 	runId: string;
@@ -52,6 +72,18 @@ export interface CueShellExecutionConfig {
 	isServerMode?: boolean;
 	/** Aborted when the run is stopped: a command not yet spawned returns `stopped` (see cue-launch-cancel.ts). */
 	signal?: AbortSignal;
+	/**
+	 * A managed host's admission for this run (MRC-07-03): the subscription's
+	 * owner, pipeline and event bound into a verified context by the router,
+	 * and the authority asked on the final spawn. Absent on a standalone host.
+	 */
+	admission?: CueManagedAdmission;
+	/**
+	 * The route table consulted under management. Default
+	 * `cueShellRouteSupport` (both shell routes unsupported); no runner passes
+	 * one. A test injects a declared double to drive the sink past the refusal.
+	 */
+	routeSupport?: (route: CueShellRoute) => CueShellRouteSupport;
 }
 
 /**
@@ -74,10 +106,23 @@ export async function executeCueShell(config: CueShellExecutionConfig): Promise<
 		sshStore,
 		isServerMode,
 		signal,
+		admission,
+		routeSupport,
 	} = config;
 
 	const startedAt = new Date().toISOString();
 	const startTime = Date.now();
+
+	const stoppedResult = () =>
+		stoppedBeforeLaunchResult({
+			runId,
+			sessionId: session.id,
+			sessionName: session.name,
+			subscriptionName: subscription.name,
+			pipelineName: subscription.pipeline_name,
+			event,
+			startedAt,
+		});
 
 	const failedResult = (message: string): CueRunResult => ({
 		runId,
@@ -124,6 +169,7 @@ export async function executeCueShell(config: CueShellExecutionConfig): Promise<
 		: process.env;
 	let spawnEnv: Record<string, string> = { ...inheritedEnv } as Record<string, string>;
 	let useLocalShell = true;
+	let sshRemoteUsedId: string | null = null;
 
 	if (sshRemoteConfig?.enabled && sshStore) {
 		let wrapped: SshSpawnWrapResult;
@@ -154,6 +200,7 @@ export async function executeCueShell(config: CueShellExecutionConfig): Promise<
 		spawnCwd = wrapped.cwd;
 		spawnEnv = { ...inheritedEnv, ...(wrapped.customEnvVars || {}) } as Record<string, string>;
 		useLocalShell = false;
+		sshRemoteUsedId = wrapped.sshRemoteUsed.id;
 		onLog(
 			'cue',
 			`[CUE] Shell run ${runId} executing on SSH remote "${wrapped.sshRemoteUsed.name}"`
@@ -186,21 +233,85 @@ export async function executeCueShell(config: CueShellExecutionConfig): Promise<
 	spawnEnv[QUERY_SOURCE_ENV_VAR] = 'cue';
 
 	// Stopped while the SSH wrap or the PATH probe was awaited. Checked after
-	// the last await, so nothing can stop the run between here and the spawn
+	// the last await (and again after the admission below, the one await that
+	// can follow), so nothing can stop the run between here and the spawn
 	// without also reaching the registered child.
-	if (isLaunchCancelled(signal)) {
-		return stoppedBeforeLaunchResult({
-			runId,
-			sessionId: session.id,
-			sessionName: session.name,
-			subscriptionName: subscription.name,
-			pipelineName: subscription.pipeline_name,
-			event,
-			startedAt,
-		});
+	if (isLaunchCancelled(signal)) return stoppedResult();
+
+	// Managed admission: the command, cwd, environment and route are all final
+	// here, so the authority is asked on the snapshot of exactly this spawn. The
+	// route is judged first, as the launch it is (an SSH action is the remote
+	// shell, not the local `bash` it was before the wrap); neither shell route
+	// is confined in this build, so a managed host refuses before asking for a
+	// lease it could not honor. A refusal is the run's result, never a reason
+	// to run the command unmanaged, here or on the remote.
+	const plan: CueShellSpawnPlan = {
+		route: useLocalShell ? 'local-shell' : 'ssh-shell',
+		command: spawnCommand,
+		args: spawnArgs,
+		cwd: spawnCwd,
+		env: spawnEnv,
+		shell: useLocalShell,
+		projectRoot,
+		remoteId: sshRemoteUsedId,
+	};
+	let lease: DispatchLease | undefined;
+	let gate: DispatchAdmission | undefined;
+	let attribution: DispatchAttribution | undefined;
+	if (admission) {
+		const outcome = await admitCueShell(
+			admission,
+			plan,
+			routeSupport ? { routeSupport } : undefined
+		);
+		if (outcome.state !== 'admitted') {
+			onLog(
+				'warn',
+				`[CUE] Shell run ${runId} was not admitted (${outcome.state}, ${outcome.code}): ${outcome.message}`
+			);
+			return {
+				...failedResult(`[managed-${outcome.state}] ${outcome.message}`),
+				managed: { state: outcome.state, code: outcome.code },
+			};
+		}
+		// Stopped while the authority was deciding: release the lease unused.
+		if (isLaunchCancelled(signal)) {
+			outcome.lease.release({ outcome: 'stopped', by: 'caller' });
+			return stoppedResult();
+		}
+		lease = outcome.lease;
+		gate = outcome.gate;
+		attribution = outcome.attribution;
+		onLog('cue', `[CUE] Shell run ${runId} admitted under lease ${lease.leaseId}`);
 	}
 
 	return new Promise<CueRunResult>((resolve) => {
+		// The gate sees exactly what spawn sees: the snapshot is rebuilt from the
+		// arguments handed to `spawn()` below, under the attribution the lease
+		// was admitted on, and nothing runs in between.
+		if (gate && lease && attribution) {
+			const verdict = gate.admit(
+				buildDispatchSnapshot(
+					{
+						command: spawnCommand,
+						args: spawnArgs,
+						cwd: spawnCwd,
+						env: spawnEnv,
+						shell: useLocalShell,
+					},
+					attribution
+				)
+			);
+			if (!verdict.ok) {
+				lease.release({ outcome: 'unknown', message: verdict.message });
+				resolve({
+					...failedResult(`[managed-${verdict.state}] ${verdict.message}`),
+					managed: { state: verdict.state, code: verdict.code },
+				});
+				return;
+			}
+		}
+
 		let child: ChildProcess;
 		try {
 			child = spawn(spawnCommand, spawnArgs, {
@@ -215,9 +326,16 @@ export async function executeCueShell(config: CueShellExecutionConfig): Promise<
 			});
 		} catch (err) {
 			captureException(err, { operation: 'cue:shell:spawn', runId, command: substitutedCommand });
-			resolve(failedResult(`Spawn error: ${err instanceof Error ? err.message : String(err)}`));
+			const message = err instanceof Error ? err.message : String(err);
+			lease?.release({ outcome: 'spawn-failed', message });
+			resolve(failedResult(`Spawn error: ${message}`));
 			return;
 		}
+
+		// The process exists: the protected lifetime begins, and a revocation
+		// from here on stops it. The authority owns that stop.
+		lease?.bind(child.pid);
+		let revokedReason: string | null = null;
 
 		let stdout = '';
 		let stderr = '';
@@ -239,14 +357,30 @@ export async function executeCueShell(config: CueShellExecutionConfig): Promise<
 		let timedOut = false;
 		let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
 		let stopHandle: StopHandle | undefined;
+		const unsubscribeRevocation = gate?.onRevoked?.((reason) => {
+			if (settled || revokedReason !== null) return;
+			revokedReason = reason;
+			onLog('warn', `[CUE] Shell run ${runId} lease revoked, stopping process: ${reason}`);
+			stopHandle = killCueProcess(child);
+		});
 
-		const finish = (status: CueRunStatus, exitCode: number | null) => {
+		const finish = (
+			status: CueRunStatus,
+			exitCode: number | null,
+			signalName: NodeJS.Signals | null = null
+		) => {
 			if (settled) return;
 			settled = true;
 
 			untrack();
 			if (timeoutTimer) clearTimeout(timeoutTimer);
 			stopHandle?.dispose();
+			unsubscribeRevocation?.();
+			lease?.release(
+				revokedReason !== null
+					? { outcome: 'stopped', by: 'authority' }
+					: { outcome: 'exited', exitCode, signal: signalName }
+			);
 
 			resolve({
 				runId,
@@ -280,15 +414,20 @@ export async function executeCueShell(config: CueShellExecutionConfig): Promise<
 		// before the I/O phase, so a child that exits naturally at nearly the
 		// same instant as the timeout can have its 'close' event re-routed to
 		// the new handler, falsely reporting a timeout.
-		child.on('close', (code) => {
-			finish(timedOut ? 'timeout' : code === 0 ? 'completed' : 'failed', code);
+		child.on('close', (code, signalName) => {
+			if (revokedReason !== null) {
+				stderr += `\n[managed-revoked] ${revokedReason}`;
+				finish('stopped', code, signalName);
+				return;
+			}
+			finish(timedOut ? 'timeout' : code === 0 ? 'completed' : 'failed', code, signalName);
 		});
 
 		child.on('error', (error) => {
-			// During a timeout-triggered kill the OS/process may emit 'error'
-			// before 'close'. Short-circuit so the run is reported as 'timeout'
-			// rather than 'failed'.
-			if (timedOut) return;
+			// During a timeout-triggered kill (or a revocation's) the OS/process
+			// may emit 'error' before 'close'. Short-circuit so the run is
+			// reported as 'timeout' (or 'stopped') rather than 'failed'.
+			if (timedOut || revokedReason !== null) return;
 			captureException(error, {
 				operation: 'cue:shell:childProcess:error',
 				runId,

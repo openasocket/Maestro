@@ -18,10 +18,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
 	createBrokerDispatch,
 	DISPATCH_RECEIPTS_FILE_NAME,
+	admitCueShell,
+	cueShellAttribution,
+	cueShellRouteSupport,
+	type CueShellSpawnPlan,
 } from '../../../main/enterprise/dispatch';
 import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
 import {
 	buildDispatchSnapshot,
+	createLocalHostAuthority,
 	createContextVerifier,
 	type AdmissionRequest,
 } from '../../../shared/maestro-lib/managed/authority';
@@ -315,5 +320,153 @@ describe('broker dispatch bridge', () => {
 			effect: { state: 'unknown', pid: 99 },
 		});
 		expect(again.dispatch.receipt(admitted.lease.leaseId)?.effect.reason).toMatch(/restarted/);
+	});
+});
+
+/**
+ * The Cue shell boundary (MRC-07-03): the route table, the refusal of an
+ * unqualified route before any lease is asked, and the admission of a
+ * qualified route (a declared double) on the exact final spawn, with a gate
+ * that holds the sink to that snapshot. The authority is the real local host
+ * authority over a policy table double.
+ */
+describe('the Cue shell boundary', () => {
+	const localPlan: CueShellSpawnPlan = {
+		route: 'local-shell',
+		command: 'echo hello',
+		args: [],
+		cwd: '/work/project',
+		env: { PATH: '/usr/bin', MAESTRO_QUERY_SOURCE: 'cue' },
+		shell: true,
+		projectRoot: '/work/project',
+		remoteId: null,
+	};
+	const sshPlan: CueShellSpawnPlan = {
+		route: 'ssh-shell',
+		command: 'ssh',
+		args: ['user@host', 'bash -c "echo hello"'],
+		cwd: '/Users/local',
+		env: { PATH: '/usr/bin' },
+		shell: false,
+		projectRoot: '/remote/project',
+		remoteId: 'remote-1',
+	};
+
+	function shellAdmission(
+		decide: Parameters<typeof createLocalHostAuthority>[0]['decide']
+	): Parameters<typeof admitCueShell>[0] & { decisions: AdmissionRequest[] } {
+		const decisions: AdmissionRequest[] = [];
+		let seq = 0;
+		const authority = createLocalHostAuthority({
+			authorityId: 'authority-test',
+			decide: (request) => {
+				decisions.push(request);
+				return decide(request);
+			},
+			now: () => T0,
+			newId: () => `lease-${++seq}`,
+		});
+		return {
+			authority,
+			context: admission('req-shell', 'att-shell').context,
+			policy: { sources: [], policyRevision: 3 },
+			account: 'acct-ref',
+			decisions,
+		};
+	}
+
+	it('qualifies neither shell route under management, both run standalone', () => {
+		for (const route of ['local-shell', 'ssh-shell'] as const) {
+			const support = cueShellRouteSupport(route);
+			expect(support.route).toBe(route);
+			expect(support.standalone).toBe('implemented');
+			expect(support.managed).toBe('unsupported');
+			expect(support.note).toContain('no confinement producer qualifies the route');
+		}
+		expect(cueShellRouteSupport('local-shell').note).toContain("user's shell on this machine");
+		expect(cueShellRouteSupport('ssh-shell').note).toContain('remote login shell over SSH');
+	});
+
+	it('refuses an unqualified route unavailable before asking the authority for a lease', async () => {
+		for (const plan of [localPlan, sshPlan]) {
+			const shell = shellAdmission(() => ({ decision: 'allow', policyRevision: 3 }));
+			const outcome = await admitCueShell(shell, plan);
+			expect(outcome).toMatchObject({
+				state: 'unavailable',
+				code: 'capability-unsupported',
+				message: expect.stringContaining(`over the ${plan.route} route is unavailable`),
+			});
+			expect(shell.decisions).toHaveLength(0);
+			expect(shell.authority.live()).toHaveLength(0);
+		}
+	});
+
+	it('attributes a shell action to cue-shell with its target and the project root as its resource', () => {
+		expect(cueShellAttribution(localPlan, null)).toEqual({
+			provider: 'cue-shell',
+			model: null,
+			operation: 'start',
+			account: null,
+			target: { kind: 'local' },
+			resourceIds: ['dir:/work/project'],
+		});
+		expect(cueShellAttribution(sshPlan, 'acct-ref')).toMatchObject({
+			account: 'acct-ref',
+			target: { kind: 'ssh', remoteId: 'remote-1' },
+			resourceIds: ['dir:/remote/project'],
+		});
+	});
+
+	it('on a qualified route (declared double) admits the exact final spawn and gates the sink to it', async () => {
+		// DECLARED TEST DOUBLE: no real confinement producer qualifies a shell route.
+		const routeSupport = (route: CueShellSpawnPlan['route']) => ({
+			route,
+			standalone: 'implemented' as const,
+			managed: 'implemented' as const,
+			note: 'declared test double',
+		});
+		const shell = shellAdmission(() => ({ decision: 'allow', policyRevision: 3 }));
+		const outcome = await admitCueShell(shell, sshPlan, { routeSupport });
+		if (outcome.state !== 'admitted') throw new Error(outcome.message);
+
+		expect(shell.decisions).toHaveLength(1);
+		expect(shell.decisions[0].snapshot).toBe(outcome.snapshot);
+		expect(outcome.snapshot).toMatchObject({
+			executable: 'ssh',
+			args: ['user@host', 'bash -c "echo hello"'],
+			cwd: '/Users/local',
+			shell: false,
+			envKeys: ['PATH'],
+			provider: 'cue-shell',
+			account: 'acct-ref',
+			target: { kind: 'ssh', remoteId: 'remote-1' },
+			resourceIds: ['dir:/remote/project'],
+		});
+		expect(outcome.attribution).toEqual(cueShellAttribution(sshPlan, 'acct-ref'));
+		expect(outcome.lease.state()).toBe('issued');
+
+		// The gate holds the sink to the admitted snapshot: the same spawn passes,
+		// a command that changed in between does not.
+		expect(outcome.gate.admit(outcome.snapshot)).toEqual({ ok: true });
+		const changed = buildDispatchSnapshot(
+			{ ...sshPlan, args: ['user@host', 'bash -c "rm -rf /"'] },
+			outcome.attribution
+		);
+		expect(outcome.gate.admit(changed)).toMatchObject({
+			ok: false,
+			state: 'denied',
+			code: 'lease-invalid',
+		});
+
+		const denied = shellAdmission(() => ({
+			decision: 'deny',
+			reason: 'no',
+			policyRevision: 3,
+			code: 'policy-denied',
+		}));
+		expect(await admitCueShell(denied, sshPlan, { routeSupport })).toMatchObject({
+			state: 'denied',
+			code: 'policy-denied',
+		});
 	});
 });

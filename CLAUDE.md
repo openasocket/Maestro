@@ -166,6 +166,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **The port a Cue host admits with:** `createCueSpawnAuthority()` in `src/main/enterprise/spawn-authority.ts` (desktop, `EnterpriseService.cueSpawnAuthority`); `buildStandaloneCueSpawnPort()`, `StandaloneCueEngineOptions.managedHost` in `src/cli/services/cue-standalone-engine.ts` (headless)
 - **Intersecting relay consent with the managed host:** `createRelayManagedGate()` in `src/main/enterprise/dispatch.ts`; `RelayManagedGate`, `setManagedGate()` in `src/main/permission-relay/PermissionRelayServer.ts`
 - **A shell command, a PTY or terminal input under management:** `managedCommandRefusal()` in `src/main/process-manager/types.ts`; `managedPtyRefusal()` in `src/main/process-manager/spawners/PtySpawner.ts`; `managedChildRefusal()` in `src/main/process-manager/spawners/ChildProcessSpawner.ts`
+- **The Cue shell boundary under management (final command, resources, local or remote target):** `admitCueShell()`, `cueShellRouteSupport()`, `cueShellAttribution()`, `CueShellSpawnPlan` in `src/main/enterprise/dispatch.ts`; `CueShellExecutionConfig.admission` in `src/main/cue/cue-shell-executor.ts`
 
 #### Providers, accounts, and auth
 

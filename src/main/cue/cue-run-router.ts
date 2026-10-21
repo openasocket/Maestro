@@ -385,6 +385,37 @@ export async function executeCueRunAction(
 		});
 	if (isLaunchCancelled(signal)) return stoppedResult();
 
+	// A managed host refused the run before anything started: the run's result,
+	// with the reason in stderr, never a reason to run it unmanaged.
+	const managedRefusalResult = (refusal: {
+		state: CueManagedState;
+		code: ManagedDenialCode;
+		message: string;
+	}): CueRunResult => {
+		const { state, code, message } = refusal;
+		deps.onLog(
+			'warn',
+			`[CUE] "${subscriptionName}" was not admitted (${state}, ${code}): ${message}`
+		);
+		const startedAt = new Date().toISOString();
+		return {
+			runId,
+			sessionId: storedSession.id,
+			sessionName: storedSession.name,
+			subscriptionName,
+			pipelineName: pipelineName ?? undefined,
+			event,
+			status: 'failed',
+			stdout: '',
+			stderr: `[managed-${state}] ${message}`,
+			exitCode: null,
+			durationMs: 0,
+			startedAt,
+			endedAt: startedAt,
+			managed: { state, code },
+		};
+	};
+
 	const projectRoot =
 		storedSession.projectRoot || storedSession.cwd || storedSession.fullPath || os.homedir();
 	const templateContext: TemplateContext = {
@@ -529,40 +560,67 @@ export async function executeCueRunAction(
 		};
 		// History reads Cue runs from `cue_events`, not the JSONL file -
 		// see the note on the notify path above.
-		return command.mode === 'shell'
-			? deps.executeCueShell({
+		if (command.mode === 'shell') {
+			// A shell action is admitted on the same lineage as a prompt run
+			// (MRC-07-03): the subscription, the pipeline, the chain root and the
+			// event, bound here on this firing. Its versioned text is the command
+			// itself (the `prompt` slot is only the dispatcher's carrier), so an
+			// edit to the command is a new workflow version. The executor asks the
+			// authority on the final substituted command, cwd, environment and
+			// route; a refusal here or there is the run's result.
+			const binding = bindCueManagedRun(
+				deps.managed,
+				cueRunLineage({
 					runId,
-					session: sessionInfo,
-					subscription,
+					chainRootId,
+					parentEventId,
+					pipelineName,
+					subscriptionName,
+					prompt: command.shell,
+					action,
 					event,
-					shellCommand: command.shell,
-					projectRoot,
-					templateContext,
-					timeoutMs,
-					onLog: deps.onLog,
-					// Forward SSH config so shell commands run on the remote
-					// host when the owning session is SSH-remote-enabled.
-					sshRemoteConfig: storedSession.sessionSshRemoteConfig,
-					sshStore: deps.sshStore,
-					isServerMode: deps.isServerMode,
-					signal,
+					ownerAgentId: storedSession.id,
+					attemptId: deps.managed?.newId?.() ?? generateUUID(),
 				})
-			: deps.executeCueCli({
-					runId,
-					session: sessionInfo,
-					subscription,
-					event,
-					cli: command.cli,
-					templateContext,
-					timeoutMs,
-					onLog: deps.onLog,
-					// CLI mode intentionally stays local: `maestro-cli send`
-					// targets the local Maestro daemon (routing messages to
-					// sessions managed by this app), so SSH wrapping would
-					// point at the wrong daemon and `maestro-cli.js` may not
-					// exist on the remote host.
-					signal,
-				});
+			);
+			if (binding.managed && 'refusal' in binding) return managedRefusalResult(binding.refusal);
+			return deps.executeCueShell({
+				runId,
+				session: sessionInfo,
+				subscription,
+				event,
+				shellCommand: command.shell,
+				projectRoot,
+				templateContext,
+				timeoutMs,
+				onLog: deps.onLog,
+				// Forward SSH config so shell commands run on the remote
+				// host when the owning session is SSH-remote-enabled.
+				sshRemoteConfig: storedSession.sessionSshRemoteConfig,
+				sshStore: deps.sshStore,
+				isServerMode: deps.isServerMode,
+				signal,
+				...(binding.managed ? { admission: binding.admission } : {}),
+			});
+		}
+		// CLI mode carries no admission yet (MRC-07-04): it is a nested
+		// maestro-cli dispatch, and its delegation context is its own task.
+		return deps.executeCueCli({
+			runId,
+			session: sessionInfo,
+			subscription,
+			event,
+			cli: command.cli,
+			templateContext,
+			timeoutMs,
+			onLog: deps.onLog,
+			// CLI mode intentionally stays local: `maestro-cli send`
+			// targets the local Maestro daemon (routing messages to
+			// sessions managed by this app), so SSH wrapping would
+			// point at the wrong daemon and `maestro-cli.js` may not
+			// exist on the remote host.
+			signal,
+		});
 	}
 
 	const agentConfigValues = deps.getAgentConfigValues(storedSession.toolType);
@@ -628,30 +686,7 @@ export async function executeCueRunAction(
 		attemptId: deps.managed?.newId?.() ?? generateUUID(),
 	});
 	const binding = bindCueManagedRun(deps.managed, lineage);
-	if (binding.managed && 'refusal' in binding) {
-		const { state, code, message } = binding.refusal;
-		deps.onLog(
-			'warn',
-			`[CUE] "${subscriptionName}" was not admitted (${state}, ${code}): ${message}`
-		);
-		const startedAt = new Date().toISOString();
-		return {
-			runId,
-			sessionId: storedSession.id,
-			sessionName: storedSession.name,
-			subscriptionName,
-			pipelineName: pipelineName ?? undefined,
-			event,
-			status: 'failed',
-			stdout: '',
-			stderr: `[managed-${state}] ${message}`,
-			exitCode: null,
-			durationMs: 0,
-			startedAt,
-			endedAt: startedAt,
-			managed: { state, code },
-		};
-	}
+	if (binding.managed && 'refusal' in binding) return managedRefusalResult(binding.refusal);
 
 	const result = await deps.executeCuePrompt({
 		runId,
