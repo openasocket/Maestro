@@ -39,6 +39,13 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { createKeyedWriteQueue } from '../../shared/keyedWriteQueue';
+import type {
+	ManagedIdentityEndpointRef,
+	ManagedIdentityManagement,
+	ManagedIdentityRecord,
+	ManagedIdentityRegistration,
+	ManagedIdentityView,
+} from '../../shared/maestro-lib/managed/endpoint-port';
 import type { AnchorStore } from '../utils/keyring-anchor';
 import { sealProtectionProblem, type SealProvider } from '../utils/safe-storage-seal';
 
@@ -51,52 +58,15 @@ export const ENTERPRISE_IDENTITY_ANCHOR_SERVICE = 'com.maestro.enterprise-identi
 const MAX_FILE_BYTES = 64 * 1024;
 const MAX_ID_LENGTH = 256;
 
-export type EnterpriseManagementState = 'enrolled' | 'suspended' | 'revoked' | 'retired';
-
-/** The local endpoint this installation attaches to, and its binding as last verified. */
-export interface EnterpriseEndpointRef {
-	/** Unix socket path of the endpoint's runtime listener. Never a TCP origin. */
-	socketPath: string;
-	/** The endpoint's own binding digest (its enrollment, not ours) when the attachment was verified. */
-	bindingDigest: string;
-	trustRootDigest: string | null;
-}
-
 /**
- * The actor registration the endpoint last consumed for this installation.
- * Identifiers and timestamps only; the approval nonce never persists.
+ * The record shapes are the library's (`managed/endpoint-port.ts`), so a headless
+ * host and the desktop hold the same thing; this module is their sealed home.
  */
-export interface EnterpriseActorRegistration {
-	challengeId: string;
-	actorId: string;
-	runtimeId: string;
-	processEpoch: string;
-	bindingDigest: string;
-	processBirthDigest: string;
-	challengeDigest: string;
-	expiresAt: string;
-	registeredAt: string;
-}
-
-export interface EnterprisePolicyObservation {
-	desiredRevision: number | null;
-	appliedRevision: number | null;
-	observedAt: string | null;
-}
-
-export interface EnterpriseIdentityRecord {
-	version: typeof ENTERPRISE_IDENTITY_VERSION;
-	installationId: string;
-	tenantId: string;
-	orgId: string;
-	enrollmentId: string;
-	endpoint: EnterpriseEndpointRef;
-	management: EnterpriseManagementState;
-	registration: EnterpriseActorRegistration | null;
-	policy: EnterprisePolicyObservation;
-	enrolledAt: string;
-	updatedAt: string;
-}
+export type EnterpriseManagementState = ManagedIdentityManagement;
+export type EnterpriseEndpointRef = ManagedIdentityEndpointRef;
+export type EnterpriseActorRegistration = ManagedIdentityRegistration;
+export type EnterprisePolicyObservation = ManagedIdentityRecord['policy'];
+export type EnterpriseIdentityRecord = ManagedIdentityRecord;
 
 /** What the sealed file holds: the record plus the two anchor facts. */
 interface SealedIdentityFile {
@@ -224,17 +194,19 @@ export function enterpriseIdentityProblems(value: unknown): string[] {
 		else {
 			const keys = [
 				'challengeId',
-				'actorId',
 				'runtimeId',
 				'processEpoch',
 				'bindingDigest',
-				'processBirthDigest',
 				'challengeDigest',
 				'expiresAt',
 				'registeredAt',
 			] as const;
 			for (const key of keys) {
 				if (!isId(registration[key])) problems.push(`registration.${key} is not an id`);
+			}
+			for (const key of ['actorId', 'processBirthDigest'] as const) {
+				if (!isIdOrNull(registration[key]))
+					problems.push(`registration.${key} is not an id or null`);
 			}
 		}
 	}
@@ -474,12 +446,7 @@ export function createEnterpriseIdentityStore(
  * facts (epoch, install secret) left out; it exists so every surface that
  * shows the identity shows the one projection.
  */
-export function publicEnterpriseIdentity(read: IdentityRead): {
-	status: IdentityRead['status'];
-	reason: string | null;
-	message: string | null;
-	record: EnterpriseIdentityRecord | null;
-} {
+export function publicEnterpriseIdentity(read: IdentityRead): ManagedIdentityView {
 	switch (read.status) {
 		case 'ok':
 			return { status: 'ok', reason: null, message: null, record: structuredClone(read.record) };

@@ -19,6 +19,7 @@ export * from './managed/authority';
 export * from './managed/binding';
 export * from './managed/run-journal';
 export * from './managed/operations';
+export * from './managed/endpoint-port';
 
 // Paths and configuration
 export * from './paths/userDataDir';
