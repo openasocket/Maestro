@@ -7,8 +7,13 @@
  * Internal modules (bin/, test utilities) are not exported.
  */
 
-// The library's own version, separate from the app's (docs/maestro-lib.md, Version)
-export { MAESTRO_LIB_VERSION } from './version';
+// The library's own versions, separate from the app's (docs/maestro-lib.md, Version)
+export { MAESTRO_LIB_VERSION, MAESTRO_LIB_NODE_RANGE, MAESTRO_LIB_VERSION_INFO } from './version';
+export type { MaestroLibVersionInfo } from './version';
+
+// Managed operation contracts: generic and serializable. An enterprise
+// product's own wire types stay in the package it ships, never here.
+export * from './managed/types';
 
 // Paths and configuration
 export * from './paths/userDataDir';

@@ -14,7 +14,13 @@
  *   README.md      docs/maestro-lib.md, the library's documentation.
  *   package.json   Private (never published), versioned with
  *                  MAESTRO_LIB_VERSION; `maestroAppVersion` records the app
- *                  version the build was cut from.
+ *                  version the build was cut from and `maestroManagedContract`
+ *                  the managed-operation contract the entry speaks. Three
+ *                  versions, three fields: none implies another.
+ *   provenance.json The sha256 of every file in the package, the git revision
+ *                  the build was cut from and whether that source was dirty,
+ *                  so a consumer can pin the artifact it qualified, not the
+ *                  app name.
  *
  * node-pty stays external: the library only uses its types, so nothing of it
  * is left in the bundle, and the package lists it as an optional peer for the
@@ -31,6 +37,8 @@
 import * as esbuild from 'esbuild';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createHash } from 'crypto';
+import { execFileSync } from 'child_process';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import ts from 'typescript';
@@ -70,6 +78,45 @@ function desktopInputs(metafile) {
 			normalized === 'electron'
 		);
 	});
+}
+
+/** `git rev-parse HEAD` and whether the library's inputs are dirty; null when there is no git. */
+function sourceProvenance() {
+	const git = (args) =>
+		execFileSync('git', args, {
+			cwd: rootDir,
+			encoding: 'utf8',
+			stdio: ['ignore', 'pipe', 'ignore'],
+		});
+	try {
+		const sourceRevision = git(['rev-parse', 'HEAD']).trim();
+		const status = git([
+			'status',
+			'--porcelain',
+			'--',
+			'src/shared',
+			'src/types',
+			'docs/maestro-lib.md',
+			'scripts/build-maestro-lib.mjs',
+			'package.json',
+		]);
+		return { sourceRevision, sourceDirty: status.trim().length > 0 };
+	} catch {
+		return { sourceRevision: null, sourceDirty: null };
+	}
+}
+
+/** Every file under `dir`, repo-style relative paths, sorted. */
+function filesUnder(dir, base = dir) {
+	return fs
+		.readdirSync(dir, { withFileTypes: true })
+		.sort((a, b) => a.name.localeCompare(b.name))
+		.flatMap((entry) => {
+			const full = path.join(dir, entry.name);
+			return entry.isDirectory()
+				? filesUnder(full, base)
+				: [path.relative(base, full).split(path.sep).join('/')];
+		});
 }
 
 /** Emit declarations for the entry and everything it reaches. Returns error messages. */
@@ -155,9 +202,24 @@ async function build() {
 		);
 
 		// Loading the bundle here, in plain Node, is the check that it stands alone.
-		const { MAESTRO_LIB_VERSION } = require(outfile);
+		const lib = require(outfile);
+		const { MAESTRO_LIB_VERSION, MAESTRO_LIB_VERSION_INFO: info } = lib;
 		if (typeof MAESTRO_LIB_VERSION !== 'string' || MAESTRO_LIB_VERSION.length === 0) {
 			throw new Error('The built bundle exports no MAESTRO_LIB_VERSION');
+		}
+		if (
+			!info ||
+			info.library !== MAESTRO_LIB_VERSION ||
+			typeof info.managedContract !== 'string' ||
+			typeof info.node !== 'string'
+		) {
+			throw new Error('The built bundle exports no consistent MAESTRO_LIB_VERSION_INFO');
+		}
+		// The management extension must reach the entry, not just its types.
+		for (const name of ['managedContextProblems', 'isManagedOperationContext']) {
+			if (typeof lib[name] !== 'function') {
+				throw new Error(`The built bundle exports no ${name}`);
+			}
 		}
 
 		fs.copyFileSync(path.join(rootDir, 'docs/maestro-lib.md'), path.join(outDir, 'README.md'));
@@ -170,20 +232,47 @@ async function build() {
 			license: pkgJson.license,
 			main: 'index.js',
 			types: 'index.d.ts',
-			engines: { node: '>=20' },
+			engines: { node: info.node },
 			// Only the stop types name node-pty (a PTY a caller started itself), so
 			// a consumer that never stops a PTY does not need it.
 			peerDependencies: { 'node-pty': pkgJson.dependencies['node-pty'] },
 			peerDependenciesMeta: { 'node-pty': { optional: true } },
 			maestroAppVersion: appVersion,
+			maestroManagedContract: info.managedContract,
 		};
 		fs.writeFileSync(
 			path.join(outDir, 'package.json'),
 			`${JSON.stringify(libPackage, null, '\t')}\n`
 		);
 
+		// Provenance last, over everything else in the package, itself excluded.
+		const payloadSha256 = {};
+		for (const file of filesUnder(outDir)) {
+			if (file === 'provenance.json') continue;
+			payloadSha256[file] = createHash('sha256')
+				.update(fs.readFileSync(path.join(outDir, file)))
+				.digest('hex');
+		}
+		const provenance = {
+			formatVersion: 1,
+			name: libPackage.name,
+			version: MAESTRO_LIB_VERSION,
+			maestroAppVersion: appVersion,
+			maestroManagedContract: info.managedContract,
+			...sourceProvenance(),
+			tooling: { node: process.versions.node },
+			payloadSha256,
+		};
+		fs.writeFileSync(
+			path.join(outDir, 'provenance.json'),
+			`${JSON.stringify(provenance, null, '\t')}\n`
+		);
+
 		const sizeKB = (fs.statSync(outfile).size / 1024).toFixed(1);
-		console.log(`✓ Built ${outfile} (${sizeKB} KB), maestro-lib ${MAESTRO_LIB_VERSION}`);
+		console.log(
+			`✓ Built ${outfile} (${sizeKB} KB), maestro-lib ${MAESTRO_LIB_VERSION}, ` +
+				`${info.managedContract}, index.js sha256 ${payloadSha256['index.js']}`
+		);
 	} catch (error) {
 		console.error('Build failed:', error);
 		process.exit(1);

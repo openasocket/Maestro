@@ -1,5 +1,7 @@
 // src/shared/maestro-lib/version.ts
 
+import { MANAGED_CONTRACT_VERSION } from './managed/types';
+
 /**
  * The version of maestro-lib's public surface (`index.ts`), for a tool that
  * builds on the library and has to pin what it was written against.
@@ -13,5 +15,31 @@
  *
  * `npm run build:maestro-lib` writes it into the built package's
  * `package.json`, next to the app version the build was cut from.
+ *
+ * 0.4.0: the managed-operation contracts (`./managed/types`) and this
+ * version descriptor.
  */
-export const MAESTRO_LIB_VERSION = '0.3.0';
+export const MAESTRO_LIB_VERSION = '0.4.0';
+
+/** The Node range the built library runs on; `engines.node` of the built package. */
+export const MAESTRO_LIB_NODE_RANGE = '>=20';
+
+/**
+ * Every version a consumer may have to pin, each independent of the others:
+ * the library surface, the managed-operation contract it speaks, and the Node
+ * it needs. The app version the build was cut from is not here on purpose: it
+ * is the build's to stamp (`maestroAppVersion` in the built `package.json`),
+ * and the plugin SDK, plugin host API and any enterprise protocol are
+ * versioned by their own packages.
+ */
+export interface MaestroLibVersionInfo {
+	readonly library: string;
+	readonly managedContract: string;
+	readonly node: string;
+}
+
+export const MAESTRO_LIB_VERSION_INFO: MaestroLibVersionInfo = Object.freeze({
+	library: MAESTRO_LIB_VERSION,
+	managedContract: MANAGED_CONTRACT_VERSION,
+	node: MAESTRO_LIB_NODE_RANGE,
+});
