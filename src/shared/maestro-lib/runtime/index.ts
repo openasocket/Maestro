@@ -34,9 +34,12 @@ import {
 	acquireDataDirLock,
 	type DataDirLockDeps,
 	type DataDirRefusal,
+	type DataDirVerdict,
 	type RuntimeLockInfo,
 	type RuntimeLockMode,
 } from './data-dir-lock';
+import type { HostAuthority } from '../managed/authority';
+import { createManagedBinding, type ManagedBinding } from '../managed/binding';
 import { createBackgroundTurns, type BackgroundTurnDeps } from './background-turns';
 import { createRuntimeConsults } from './consults';
 import { createRuntimeGroupChats } from './group-chats';
@@ -83,6 +86,13 @@ export interface MaestroRuntimeOptions {
 	quarantineCorruptStores?: boolean;
 	/** What the runtime needs to run turns: the SQLite loader, the CLI script, the bundled prompts. */
 	turns?: RuntimeTurnOptions;
+	/**
+	 * The managed authority this host answers admissions with, injected before
+	 * anything is admitted. An enrolled data directory (`maestro-managed-binding.json`)
+	 * with no authority, or one for another authority, runs enrolled-unavailable:
+	 * managed operations answer `unavailable`, never standalone.
+	 */
+	managed?: { authority?: HostAuthority };
 	deps?: Partial<RuntimeDeps>;
 }
 
@@ -100,6 +110,8 @@ export interface MaestroRuntime extends MaestroClient {
 	readonly paths: MaestroPaths;
 	/** What this process wrote into `maestro-runtime.lock`. */
 	readonly lock: RuntimeLockInfo;
+	/** Whether this installation is enrolled, and who answers for it. */
+	readonly managedBinding: Pick<ManagedBinding, 'state' | 'reload' | 'authority'>;
 	/**
 	 * The Auto Runs in flight, for a host that reports them (`host status`, the refusal to stop with
 	 * work in flight) and replays them to a client that connects mid-run.
@@ -201,6 +213,16 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 
 	const bus = createEventBus(LOG_CONTEXT);
 	const registry = createProcessRegistry();
+	let fenceVerdict: () => DataDirVerdict = () => ({ ok: true });
+	// Read before any admission, under the lock. The binding reads the
+	// production directory too, so an alternate data directory under an
+	// enrolled installation is still enrolled.
+	const binding = createManagedBinding({
+		paths,
+		fence: () => fenceVerdict(),
+		...(options.managed?.authority ? { authority: options.managed.authority } : {}),
+		now: deps.now ?? (() => Date.now()),
+	});
 	let phase: RuntimePhase = 'open';
 	let fencedText = 'Another Maestro took over this data directory.';
 	/** Filled in once the runtime is up; the fence and the shutdown both close them. */
@@ -242,6 +264,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		if (!verdict.ok) fenceRuntime(verdict.reason);
 		return verdict;
 	};
+	fenceVerdict = fence;
 
 	const repository = createAgentRepository({
 		paths,
@@ -421,6 +444,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			...client,
 			paths,
 			lock: lock.info,
+			managedBinding: binding,
 			runs: { activeRuns: autoRun.activeRuns, latestState: autoRun.latestState },
 			// The registry holds every process the runtime owns; the background ones are counted apart.
 			turnsInFlight: () => registry.size() - background.registeredCount(),

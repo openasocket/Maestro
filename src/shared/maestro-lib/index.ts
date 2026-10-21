@@ -16,6 +16,7 @@ export type { MaestroLibVersionInfo } from './version';
 export * from './managed/types';
 export * from './managed/compatibility';
 export * from './managed/authority';
+export * from './managed/binding';
 
 // Paths and configuration
 export * from './paths/userDataDir';

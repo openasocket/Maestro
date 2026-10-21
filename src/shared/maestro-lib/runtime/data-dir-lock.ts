@@ -26,6 +26,7 @@ import type { HostInfo } from '../client/types';
 import { parseCliServerInfo, type CliServerInfo } from '../client/discovery';
 import type { MaestroPaths } from '../paths/resolve';
 import * as fs from 'fs';
+import * as path from 'path';
 import {
 	createProcessLock,
 	defaultProcessLockDeps,
@@ -46,6 +47,13 @@ export type RuntimeLockMode = 'desktop' | 'tui' | 'host';
 export type RuntimeLockInfo = ProcessLockInfo<RuntimeLockMode>;
 
 export const RUNTIME_LOCK_FILE_NAME = 'maestro-runtime.lock';
+
+/**
+ * The managed enrollment record, beside the lock and for the same reason: it
+ * names one installation on one machine. Written only by the lock holder
+ * (`managed/binding.ts`), read by anything that asks who this host answers to.
+ */
+export const MANAGED_BINDING_FILE_NAME = 'maestro-managed-binding.json';
 
 /** The Cue lock's timings: a 30 s beat, stale after six missed beats, a minute of boot-time slack. */
 export const RUNTIME_LOCK_SPEC: ProcessLockSpec = {
@@ -73,6 +81,8 @@ export type DataDirVerdict = { ok: true } | { ok: false; reason: string };
 export interface DataDirLock {
 	readonly file: string;
 	readonly mode: RuntimeLockMode;
+	/** Where this directory's managed enrollment lives. Only the lock holder may write it. */
+	readonly managedBindingFile: string;
 	/** What this process wrote into the lock. */
 	readonly info: RuntimeLockInfo;
 	/**
@@ -245,6 +255,7 @@ export function acquireDataDirLock(
 		lock: {
 			file: lock.file,
 			mode,
+			managedBindingFile: path.join(paths.userDataDir, MANAGED_BINDING_FILE_NAME),
 			info,
 			verify,
 			startHeartbeat(onLost) {
