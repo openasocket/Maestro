@@ -50,7 +50,9 @@ import {
 import { createManagedBinding, type ManagedBinding } from '../managed/binding';
 import {
 	bindingEnrollment,
+	createHeadlessSpawnAuthority,
 	installationIdentity,
+	managedActorPrincipal,
 	type ManagedHostAdapter,
 } from '../managed/host-adapter';
 import { createManagedOperations, type ApprovedResource } from '../managed/operations';
@@ -59,7 +61,11 @@ import type { ManagedAuthenticatedContext, ManagedInstallationIdentity } from '.
 import { getVisibleAgentDefinitions } from '../providers/definitions';
 import type { AgentRecord } from '../store/records';
 import { createBackgroundTurns, type BackgroundTurnDeps } from './background-turns';
-import { createRuntimeConsults } from './consults';
+import {
+	createRuntimeConsults,
+	type ConsultSpawnAuthorityPort,
+	type RuntimeConsultsManagedOptions,
+} from './consults';
 import { createRuntimeGroupChats } from './group-chats';
 import { createProcessRegistry } from './processes';
 import { createRuntimeAutoRun, type RuntimeAutoRun, type RuntimeAutoRunHost } from './autorun';
@@ -85,8 +91,13 @@ export type RuntimeDeps = DataDirLockDeps & {
 	turns: Partial<RuntimeTurnDeps>;
 	/** The seams of the group chat and consult runner: the provider launch and the binary probe. */
 	background: Partial<BackgroundTurnDeps>;
-	/** The seams of the consult service: the shortest wait a caller may ask for. */
-	consults: { minTimeoutMs?: number };
+	/**
+	 * The seams of the consult service: the shortest wait a caller may ask for, who the asking
+	 * turn is when the host can name it, and every admission as it is decided.
+	 */
+	consults: Pick<RuntimeConsultsManagedOptions, 'initiator' | 'onAdmission'> & {
+		minTimeoutMs?: number;
+	};
 };
 
 export interface MaestroRuntimeOptions {
@@ -427,6 +438,20 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		: managedAuthority
 			? { authority: managedAuthority, policy: admissionPolicy, identity: null }
 			: null;
+	/**
+	 * What a consult is admitted with: the headless spawn authority over the binding and that same
+	 * host, with the enrollment's registered actor as the principal, rebuilt on every ask so an
+	 * enrollment that appeared or lapsed applies to the next consult (the Auto Run port's recipe).
+	 */
+	const consultSpawnPort = (): ConsultSpawnAuthorityPort =>
+		createHeadlessSpawnAuthority({
+			installation,
+			binding: binding.state(),
+			host: autoRunHost,
+			origin: 'headless',
+			actor: managedActorPrincipal(autoRunHost?.identity?.read() ?? null, installation),
+			...(deps.now ? { now: deps.now } : {}),
+		});
 
 	// The run releases what it held back (queued chat messages) when it ends, and the turn service
 	// asks whether a run holds an agent: each needs the other, so the run reaches `turns`, declared
@@ -496,6 +521,11 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		...(deps.consults?.minTimeoutMs !== undefined
 			? { minTimeoutMs: deps.consults.minTimeoutMs }
 			: {}),
+		managed: {
+			port: consultSpawnPort,
+			...(deps.consults?.initiator ? { initiator: deps.consults.initiator } : {}),
+			...(deps.consults?.onAdmission ? { onAdmission: deps.consults.onAdmission } : {}),
+		},
 	});
 
 	// NF-7: a crash or a plain exit must not leave a held lock or an orphan it could have stopped.

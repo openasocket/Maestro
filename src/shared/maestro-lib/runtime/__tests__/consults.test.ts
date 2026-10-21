@@ -20,8 +20,22 @@ import {
 import { CROSS_AGENT_ASK_SESSION_ID, CROSS_AGENT_ASK_TAB_ID } from '../../../crossAgentTypes';
 import { DEFAULT_TAB_DEFAULTS } from '../../agents/rules';
 import type { ClientResult, MaestroEvent } from '../../client/types';
+import { createLocalHostAuthority, type AdmissionRequest } from '../../managed/authority';
+import { createManagedBinding } from '../../managed/binding';
+import {
+	MANAGED_DELEGATION_ENV_VAR,
+	readDelegationContextEnv,
+	type ManagedDelegationContext,
+} from '../../managed/delegation';
+import { MANAGED_CONTRACT_VERSION } from '../../managed/types';
 import { readHistory } from '../../store/read-history';
-import { createMaestroRuntime, type MaestroRuntime, type RuntimeDeps } from '../index';
+import type { ConsultAdmissionEvent } from '../consults';
+import {
+	createMaestroRuntime,
+	type MaestroRuntime,
+	type MaestroRuntimeOptions,
+	type RuntimeDeps,
+} from '../index';
 
 const T0 = Date.parse('2026-10-04T12:00:00Z');
 const BUNDLED_PROMPTS = path.resolve(__dirname, '../../../../prompts');
@@ -68,6 +82,9 @@ describe('runtime consults', () => {
 	let work: string;
 	let open: MaestroRuntime[];
 	let provider: FakeGroupChatProvider;
+	/** Every admission the runtime decided, and the asking turn a test names (none by default). */
+	let admissions: ConsultAdmissionEvent[];
+	let initiator: RuntimeDeps['consults']['initiator'];
 
 	function deps(): Partial<RuntimeDeps> {
 		let id = 0;
@@ -84,7 +101,11 @@ describe('runtime consults', () => {
 			watchDirectory: () => ({ close: () => undefined }),
 			probeBinary: async (binaryName) => ({ exists: true, path: `/fake/bin/${binaryName}` }),
 			background: { runTurn: provider.runTurn },
-			consults: { minTimeoutMs: 50 },
+			consults: {
+				minTimeoutMs: 50,
+				onAdmission: (event) => admissions.push(event),
+				...(initiator ? { initiator } : {}),
+			},
 		};
 	}
 
@@ -98,7 +119,8 @@ describe('runtime consults', () => {
 			agentRecord('a2', 'Beta', work),
 			agentRecord('a3', 'Gamma', work),
 		],
-		settings: Record<string, unknown> = {}
+		settings: Record<string, unknown> = {},
+		managed?: MaestroRuntimeOptions['managed']
 	): Promise<MaestroRuntime> {
 		provider = createFakeGroupChatProvider(work, script);
 		fs.writeFileSync(
@@ -111,6 +133,7 @@ describe('runtime consults', () => {
 			mode: 'tui',
 			deps: deps(),
 			turns: { bundledPromptsDir: BUNDLED_PROMPTS },
+			...(managed ? { managed } : {}),
 		});
 		if (!started.ok) throw new Error(`refused: ${started.refusal.message}`);
 		open.push(started.runtime);
@@ -123,10 +146,19 @@ describe('runtime consults', () => {
 			.find((s: { id: string }) => s.id === agentId)
 			.aiTabs.find((t: { consultOrigin?: unknown }) => t.consultOrigin);
 
+	/** The record the consult's process was handed, as the consulted agent would read it. */
+	const lineageOf = (nth: number): ManagedDelegationContext => {
+		const read = readDelegationContextEnv(provider.callsFor('consult')[nth].spec.env);
+		if (read.status !== 'ok') throw new Error(`the process carried no lineage: ${read.status}`);
+		return read.context;
+	};
+
 	beforeEach(() => {
 		dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-runtime-consult-'));
 		work = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-runtime-consult-work-'));
 		open = [];
+		admissions = [];
+		initiator = undefined;
 	});
 	afterEach(async () => {
 		for (const runtime of open) await runtime.connection.close();
@@ -453,6 +485,210 @@ describe('runtime consults', () => {
 			expect(
 				errorOf(await runtime.consults.ask({ targetAgentId: 'a2', question: 'Too late' })).code
 			).toBe('host-unavailable');
+		});
+	});
+
+	/**
+	 * The consult as a CHILD of the asking operation (MRC-07-04A): the record its process is
+	 * handed, the chain that deepens when a consulted agent asks a third, and the scope this host
+	 * meets it with. Nothing is admitted yet: the consult runner carries no admission (MRC-07-05),
+	 * so an enrolled runtime refuses rather than run a consult unmanaged.
+	 */
+	describe('lineage and admission (MRC-07-04A)', () => {
+		/** An asking turn the host can name: admitted elsewhere under `policyRevision`. */
+		const namedInitiator = (
+			policyRevision: number | null,
+			writable: boolean | null
+		): NonNullable<RuntimeDeps['consults']['initiator']> => {
+			const record: ManagedDelegationContext = {
+				contractVersion: MANAGED_CONTRACT_VERSION,
+				identity: {
+					requestId: 'run-7',
+					idempotencyKey: 'run-7',
+					attemptId: 'run-7-a1',
+					runId: 'run-7',
+					rootRunId: 'run-7',
+					parentRunId: null,
+				},
+				traceId: 'trace-7',
+				workflow: null,
+				delegation: { chain: [{ kind: 'agent', id: 'a1' }], grantRef: null },
+				policyRevision,
+			};
+			return () => ({ delegation: record, writable });
+		};
+
+		it('hands the consult its lineage: the asker as the chain, the target as the new link, this request as the child run', async () => {
+			const runtime = await start();
+			value(
+				await runtime.consults.ask({ targetAgentId: 'a2', question: 'Why?', fromAgentId: 'a1' })
+			);
+
+			const lineage = lineageOf(0);
+			const requestId = provider.callsFor('consult')[0].processId.slice('cross-agent-'.length);
+			expect(lineage).toMatchObject({
+				workflow: null,
+				policyRevision: null,
+				delegation: {
+					chain: [
+						{ kind: 'agent', id: 'a1' },
+						{ kind: 'agent', id: 'a2' },
+					],
+					grantRef: null,
+				},
+				identity: { requestId, attemptId: requestId, runId: requestId },
+			});
+			// The asking turn is unnamed on this host, so its run is the one minted for this ask.
+			expect(lineage.identity.parentRunId).toMatch(/^ask:a1:/);
+			expect(lineage.identity.rootRunId).toBe(lineage.identity.parentRunId);
+			expect(lineage.traceId).toBe(
+				`delegated:${lineage.identity.rootRunId}:${requestId}:${requestId}`
+			);
+			// Standalone: nothing to admit, and the target's own env vars are untouched beside the record.
+			expect(admissions).toEqual([]);
+			expect(Object.keys(provider.callsFor('consult')[0].spec.env)).toContain(
+				MANAGED_DELEGATION_ENV_VAR
+			);
+		});
+
+		it('carries an empty chain plus the target for an unattributed ask', async () => {
+			const runtime = await start();
+			value(await runtime.consults.ask({ targetAgentId: 'a2', question: 'Why?' }));
+			expect(lineageOf(0).delegation.chain).toEqual([{ kind: 'agent', id: 'a2' }]);
+			expect(lineageOf(0).identity.parentRunId).toMatch(
+				new RegExp(`^ask:${CROSS_AGENT_ASK_SESSION_ID}:`)
+			);
+		});
+
+		it('makes a consulted agent asking a third that consult’s child: the chain deepens, and a read-only consult never widens through a hand-off', async () => {
+			const runtime = await start((call) =>
+				call.nth === 1 ? { text: 'thinking', hold: true } : { text: `nested ${call.nth}` }
+			);
+			const outer = runtime.consults.ask({
+				targetAgentId: 'a2',
+				question: 'Outer',
+				fromAgentId: 'a1',
+			});
+			await vi.waitFor(() => expect(provider.callsFor('consult')).toHaveLength(1));
+
+			// Beta, answering read-only, hands work to Gamma. A hand-off may write by default, but
+			// Beta may not, so neither may Gamma on Beta's behalf.
+			const nested = value(
+				await runtime.consults.ask({
+					targetAgentId: 'a3',
+					question: 'Save this',
+					fromAgentId: 'a2',
+					handoffAnswer: 'The answer.',
+				})
+			);
+			expect(nested.answer).toBe('nested 2');
+			expect(permissionMode(provider.callsFor('consult')[1].spec.args)).toBe('plan');
+			const outerLineage = lineageOf(0);
+			const inner = lineageOf(1);
+			expect(inner.delegation.chain).toEqual([
+				{ kind: 'agent', id: 'a1' },
+				{ kind: 'agent', id: 'a2' },
+				{ kind: 'agent', id: 'a3' },
+			]);
+			expect(inner.identity.parentRunId).toBe(outerLineage.identity.requestId);
+			expect(inner.identity.rootRunId).toBe(outerLineage.identity.rootRunId);
+
+			value(await runtime.turns.interrupt('a1', 'a1-t1'));
+			expect(errorOf(await outer).code).toBe('rejected');
+		});
+
+		it('refuses a managed initiator on a standalone runtime, and starts nothing', async () => {
+			initiator = namedInitiator(7, null);
+			const runtime = await start();
+			const error = errorOf(
+				await runtime.consults.ask({ targetAgentId: 'a2', question: 'Why?', fromAgentId: 'a1' })
+			);
+			expect(error.code).toBe('host-unavailable');
+			expect(error.message).toMatch(/policy revision 7/);
+			expect(provider.calls).toEqual([]);
+			expect(consultTab('a2')).toBeUndefined();
+			expect(admissions).toEqual([
+				expect.objectContaining({
+					kind: 'refused',
+					state: 'unavailable',
+					code: 'runtime-unavailable',
+					delegation: expect.objectContaining({
+						policyRevision: 7,
+						delegation: {
+							chain: [
+								{ kind: 'agent', id: 'a1' },
+								{ kind: 'agent', id: 'a2' },
+							],
+							grantRef: null,
+						},
+						identity: expect.objectContaining({ parentRunId: 'run-7', rootRunId: 'run-7' }),
+					}),
+				}),
+			]);
+		});
+
+		it('narrows access to what a named initiator may write: a read-only asking turn gets no writable consult, even opted in', async () => {
+			initiator = namedInitiator(null, false);
+			const runtime = await start(ANSWER, undefined, { crossAgentMentionsWritable: true });
+			value(
+				await runtime.consults.ask({ targetAgentId: 'a2', question: 'Fix this', fromAgentId: 'a1' })
+			);
+			expect(permissionMode(provider.callsFor('consult')[0].spec.args)).toBe('plan');
+			expect(lineageOf(0).identity.parentRunId).toBe('run-7');
+		});
+
+		it('on an enrolled runtime binds the consult on the port under the host’s generation, then refuses it until the runner carries an admission', async () => {
+			const asked: AdmissionRequest[] = [];
+			const authority = createLocalHostAuthority({
+				authorityId: 'fleet-authority',
+				decide: (request) => {
+					asked.push(request);
+					return { decision: 'allow', policyRevision: 1 };
+				},
+				now: () => Date.now(),
+				newId: () => 'lease-1',
+				leaseTtlMs: 60_000,
+			});
+			// Enroll this data directory to the fleet authority, as a desktop or host would have.
+			const enroller = await start();
+			const binding = createManagedBinding({
+				paths: { userDataDir: dir, productionDataDir: dir },
+				fence: () => ({ ok: true }),
+				authority,
+				now: () => T0,
+			});
+			const enrolled = await binding.enroll({
+				installationId: enroller.installation.installationId,
+				authorityId: 'fleet-authority',
+				endpointRef: 'ep',
+				policySources: [],
+				policyRevision: 1,
+			});
+			if (!enrolled.ok) throw new Error(enrolled.message);
+			await enroller.connection.close();
+			open.splice(open.indexOf(enroller), 1);
+			const runtime = await start(ANSWER, undefined, {}, { authority });
+			expect(runtime.managedBinding.state().state).toBe('enrolled');
+
+			const error = errorOf(
+				await runtime.consults.ask({ targetAgentId: 'a2', question: 'Why?', fromAgentId: 'a1' })
+			);
+			expect(error.code).toBe('host-unavailable');
+			expect(error.message).toMatch(/no managed admission yet/);
+			// Nothing started, nothing reached the target, and no lease was asked for.
+			expect(provider.calls).toEqual([]);
+			expect(asked).toEqual([]);
+			expect(consultTab('a2')).toBeUndefined();
+			expect(admissions).toEqual([
+				expect.objectContaining({
+					kind: 'refused',
+					state: 'unavailable',
+					code: 'runtime-unavailable',
+					// The host's generation decides, not the initiator's claim (none, standalone lineage).
+					message: expect.stringContaining('policy revision none; this host holds 1'),
+					delegation: expect.objectContaining({ policyRevision: null }),
+				}),
+			]);
 		});
 	});
 });

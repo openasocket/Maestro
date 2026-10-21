@@ -13,8 +13,10 @@
  * | Context | none, unless asked for: then the asking tab, windowed by the question |
  * | The consult tab | `repository.openConsultTab`: found or created per asking agent, hidden, never active |
  * | Order | consults sharing a consult tab run one at a time (two processes resuming one provider session corrupt it); consults to different agents run at once |
- * | Run | `createConsultService` over the background runner, with the target's own system prompt: the 10 and 30 minute budgets |
- * | Access | a consult is read-only unless `crossAgentMentionsWritable`; a hand-off may write unless `crossAgentHandoffsWritable` is off |
+ * | Lineage | the consult is a CHILD of the asking operation: `childDelegationContext` over the record the asking process carried, else a lineage with the asking agent as the chain |
+ * | Admission | the initiator's scope meets this host's standing (`intersectDelegationScope`); a managed host binds the context on its spawn port and, until the consult runner carries an admission (MRC-07-05), refuses rather than run unmanaged |
+ * | Run | `createConsultService` over the background runner, with the target's own system prompt: the 10 and 30 minute budgets; the child record stamped on the process (`MAESTRO_DELEGATION_CONTEXT`) |
+ * | Access | a consult is read-only unless `crossAgentMentionsWritable`; a hand-off may write unless `crossAgentHandoffsWritable` is off; neither widens what the initiator may do (`delegatedWritable`) |
  * | Record | the answer or the failure on the consult tab, a History entry on the target |
  * | Answer | the text, or a failure that says why |
  *
@@ -24,7 +26,7 @@
  * The caller's `timeoutMs` stops the consult when it runs out (GD19), and Stop on the asking agent
  * stops every consult it started (B20).
  *
- * Design: `Plans/maestro-tui-group-chat.md` section 7.
+ * Design: `Plans/maestro-tui-group-chat.md` section 7; the lineage, MRC-07-04A.
  */
 
 import {
@@ -58,6 +60,14 @@ import type {
 	ConsultAskInput,
 } from '../client/types';
 import { logger } from '../host';
+import {
+	childDelegationContext,
+	delegatedWritable,
+	delegationContextOf,
+	intersectDelegationScope,
+	type ManagedDelegationContext,
+} from '../managed/delegation';
+import type { ManagedDenialCode } from '../managed/types';
 import type { MaestroPaths } from '../paths/resolve';
 import { readAgentConfigsStore, readSettingsStore } from '../store/read-stores';
 import type { AgentRecord } from '../store/records';
@@ -65,11 +75,47 @@ import { transcriptOf, type LogEntryRecord } from '../store/transcript';
 import { loadStandInSystemPrompt, type SystemPromptSources } from '../turns/context';
 import { toTurnAgent } from '../turns/records';
 import { createHistoryWriter, type HistoryWriter } from '../turns/history';
+import type { AutoRunSpawnAuthorityPort } from './autorun-turns';
 import type { BackgroundTurns } from './background-turns';
 import type { DataDirVerdict } from './data-dir-lock';
 import type { RuntimeTurnOptions } from './turns';
 
 const LOG_CONTEXT = '[RuntimeConsults]';
+
+/** What the runtime admits a consult with: the port its Auto Runs are admitted with. */
+export type ConsultSpawnAuthorityPort = AutoRunSpawnAuthorityPort;
+
+/** The asking operation as the runtime knows it: its record, and whether it may write. */
+export interface ConsultInitiator {
+	delegation: ManagedDelegationContext;
+	/** What the asking operation may write; null when unknown, which narrows nothing. */
+	writable: boolean | null;
+}
+
+export type ConsultManagedState = 'denied' | 'unavailable';
+
+/** What became of one consult's admission, for a journal or a test. Nothing is admitted yet (MRC-07-05). */
+export type ConsultAdmissionEvent = {
+	kind: 'refused';
+	/** The consult's derived context: the chain one link deeper than the asker's. */
+	delegation: ManagedDelegationContext;
+	state: ConsultManagedState;
+	code: ManagedDenialCode;
+	message: string;
+};
+
+export interface RuntimeConsultsManagedOptions {
+	/** The host's port, read on every ask: standing, policy and authority as they are NOW. */
+	port(): ConsultSpawnAuthorityPort;
+	/**
+	 * The asking turn's own record, for a host that can name it (a managed send the runtime
+	 * admitted). Default none: the runtime's chat turns expose no running turn's context yet, so
+	 * the initiator is the consult the asker is itself answering, else a lineage with the asker as
+	 * the chain (workflow null, no policy generation).
+	 */
+	initiator?(asker: { agentId: string; tabId?: string }): ConsultInitiator | null;
+	onAdmission?(event: ConsultAdmissionEvent): void;
+}
 
 /** The bounds the caller's `timeoutMs` is held to, as the desktop's handler holds it. */
 const MIN_TIMEOUT_MS = 10_000;
@@ -92,6 +138,11 @@ export interface RuntimeConsultsOptions {
 	minTimeoutMs?: number;
 	/** Where the bundled prompts and the CLI are, as chat turns read them for the target's system prompt. */
 	options?: Pick<RuntimeTurnOptions, 'bundledPromptsDir' | 'moduleDirectory' | 'maestroCliPath'>;
+	/**
+	 * What a consult is admitted with (MRC-07-04A). Absent: a standalone host with no port, which
+	 * still derives and records the lineage. Present: the port's standing decides on every ask.
+	 */
+	managed?: RuntimeConsultsManagedOptions;
 }
 
 /**
@@ -168,6 +219,14 @@ export function createRuntimeConsults(options: RuntimeConsultsOptions): RuntimeC
 	let disposed = false;
 	/** Every ask not yet finished, so shutdown can wait for what each one writes down. */
 	const pending = new Set<Promise<unknown>>();
+	/**
+	 * The consults running right now, by request id: the record each target was handed and what it
+	 * may write. A consulted agent that asks another from its shell is this consult's child.
+	 */
+	const running = new Map<
+		string,
+		{ targetId: string; delegation: ManagedDelegationContext; writable: boolean }
+	>();
 
 	const agentConfigs = (): Record<string, Record<string, unknown>> => {
 		const read = readAgentConfigsStore(paths.agentConfigsFile);
@@ -190,6 +249,111 @@ export function createRuntimeConsults(options: RuntimeConsultsOptions): RuntimeC
 			? data.crossAgentHandoffsWritable !== false
 			: data.crossAgentMentionsWritable === true;
 	};
+
+	/**
+	 * The operation this consult is a child of. In order: the asking turn's own record when the
+	 * host names one; the consult the asker is itself answering (a consulted agent asking a third,
+	 * so the chain deepens and a read-only consult never widens into a writable one); else a
+	 * lineage of this ask with the asker as the chain, unmanaged (workflow null, no generation).
+	 * With several consults on the asker, the newest is the parent and the narrowest access holds.
+	 */
+	function initiatorFor(
+		source: AgentRecord | undefined,
+		tabId: string | undefined
+	): ConsultInitiator {
+		if (source) {
+			const named = options.managed?.initiator?.({
+				agentId: source.id,
+				...(tabId ? { tabId } : {}),
+			});
+			if (named) return named;
+			const answering = [...running.values()].filter((entry) => entry.targetId === source.id);
+			const newest = answering.at(-1);
+			if (newest) {
+				return {
+					delegation: newest.delegation,
+					writable: answering.every((entry) => entry.writable),
+				};
+			}
+		}
+		const originId = `ask:${source?.id ?? CROSS_AGENT_ASK_SESSION_ID}:${ctx.newId()}`;
+		return {
+			delegation: delegationContextOf({
+				identity: {
+					requestId: originId,
+					idempotencyKey: originId,
+					attemptId: originId,
+					runId: null,
+					rootRunId: null,
+					parentRunId: null,
+				},
+				traceId: originId,
+				workflow: null,
+				delegation: {
+					chain: source ? [{ kind: 'agent', id: source.id }] : [],
+					grantRef: null,
+				},
+				policyRevision: null,
+			}),
+			writable: null,
+		};
+	}
+
+	type ConsultRefusal = { state: ConsultManagedState; code: ManagedDenialCode; message: string };
+
+	/**
+	 * Meet the initiator's scope with this host's standing, read on every ask. Standalone: a
+	 * managed initiator's child is refused (a consult is not a way out of management), anything
+	 * else runs as before. Managed: the consult's context is bound on the port under the host's
+	 * own generation, and then refused, because the consult runner carries no admission yet
+	 * (MRC-07-05): a managed runtime does not run a consult unmanaged in its place.
+	 */
+	function admitConsult(
+		initiator: ManagedDelegationContext,
+		child: ManagedDelegationContext,
+		targetName: string
+	): ConsultRefusal | null {
+		const refuse = (
+			state: ConsultManagedState,
+			code: ManagedDenialCode,
+			message: string
+		): ConsultRefusal => {
+			options.managed?.onAdmission?.({ kind: 'refused', delegation: child, state, code, message });
+			return { state, code, message };
+		};
+		const port = options.managed?.port() ?? null;
+		if (!port || port.standing() === 'standalone') {
+			const scope = intersectDelegationScope(initiator, {
+				standing: 'standalone',
+				policyRevision: null,
+			});
+			return scope.ok ? null : refuse(scope.state, scope.code, scope.message);
+		}
+		const scope = intersectDelegationScope(initiator, {
+			standing: 'managed',
+			policyRevision: port.policy().policyRevision,
+		});
+		if (!scope.ok) return refuse(scope.state, scope.code, scope.message);
+		const verified = port.context({
+			identity: child.identity,
+			traceId: child.traceId,
+			policyRevision: scope.policyRevision,
+			workflow: child.workflow,
+			delegation: child.delegation,
+		});
+		if (!verified.ok) {
+			return refuse(
+				'denied',
+				verified.code,
+				`The consult's context was not accepted: ${verified.problems.join('; ')}`
+			);
+		}
+		return refuse(
+			'unavailable',
+			'runtime-unavailable',
+			`${targetName} was not consulted: the consult runner carries no managed admission yet (MRC-07-05), and a managed runtime does not run a consult unmanaged in its place.${scope.reauthorized ? ` The asking run was admitted under policy revision ${initiator.policyRevision ?? 'none'}; this host holds ${scope.policyRevision ?? 'none'}.` : ''}`
+		);
+	}
 
 	// The target's system prompt is read from the sources its own chat turn reads.
 	const host = options.options ?? {};
@@ -268,6 +432,16 @@ export function createRuntimeConsults(options: RuntimeConsultsOptions): RuntimeC
 
 		// The caller's clock covers the wait for an earlier consult on the same tab, too.
 		const requestId = ctx.newId();
+		// The consult is a child of the asking operation: the chain one link deeper (the target),
+		// this request as the child run, the workflow and generation carried as they are. Access
+		// is the narrower of what the initiator may do and what the settings allow this consult.
+		const initiator = initiatorFor(source, input.fromTabId);
+		const delegation = childDelegationContext(initiator.delegation, {
+			link: { kind: 'agent', id: target.id },
+			requestId,
+			attemptId: requestId,
+		});
+		const writable = delegatedWritable(initiator.writable, writableFor(isHandoff));
 		const timer: { expired: boolean; handle?: ReturnType<typeof setTimeout> } = { expired: false };
 		timer.handle = setTimeout(() => {
 			timer.expired = true;
@@ -286,6 +460,21 @@ export function createRuntimeConsults(options: RuntimeConsultsOptions): RuntimeC
 						method,
 						'timeout',
 						`${target.name} was not asked: an earlier consult ran past the ${Math.round(timeoutMs / 1000)}s wait.`
+					);
+				}
+
+				// Admitted (or not) when it is its turn, on the host's standing NOW, before the target
+				// hears of it: a refused consult leaves nothing on the target.
+				const refusal = admitConsult(initiator.delegation, delegation, target.name);
+				if (refusal) {
+					logger.warn(
+						`${target.name} was not consulted (${refusal.state}, ${refusal.code}): ${refusal.message}`,
+						LOG_CONTEXT
+					);
+					return fail<AnswerValue>(
+						method,
+						refusal.state === 'unavailable' ? 'host-unavailable' : 'rejected',
+						refusal.message
 					);
 				}
 
@@ -331,35 +520,42 @@ export function createRuntimeConsults(options: RuntimeConsultsOptions): RuntimeC
 					createdAt: now(),
 				};
 
-				const chunk = await new Promise<CrossAgentResponseChunk>((resolve) => {
-					void service.start(request, {
-						runner: background.consultRunner(),
-						resolveAgent: (providerId) => background.resolveAgent(providerId),
-						sshStore: background.sshStore,
-						getTargetSession: (id) => {
-							const found = repository.getAgent(id);
-							return found ? (toTargetSession(found) ?? null) : null;
-						},
-						getCustomEnvVars: (toolType) =>
-							agentConfigs()[toolType]?.customEnvVars as Record<string, string> | undefined,
-						getAgentConfig: (toolType) => agentConfigs()[toolType],
-						writable: writableFor(isHandoff),
-						// The target answers as itself: the system prompt its own chat turn carries.
-						getSystemPrompt: (consulted) => {
-							const stored = repository.getAgent(consulted.id);
-							return loadStandInSystemPrompt(
-								stored ? toTurnAgent(stored) : undefined,
-								promptSources,
-								{
-									isSsh: consulted.sshRemoteConfig?.enabled === true,
-								}
-							);
-						},
-						onChunk: (piece) => {
-							if (piece.done) resolve(piece);
-						},
+				running.set(requestId, { targetId: target.id, delegation, writable });
+				let chunk: CrossAgentResponseChunk;
+				try {
+					chunk = await new Promise<CrossAgentResponseChunk>((resolve) => {
+						void service.start(request, {
+							runner: background.consultRunner(),
+							resolveAgent: (providerId) => background.resolveAgent(providerId),
+							sshStore: background.sshStore,
+							getTargetSession: (id) => {
+								const found = repository.getAgent(id);
+								return found ? (toTargetSession(found) ?? null) : null;
+							},
+							getCustomEnvVars: (toolType) =>
+								agentConfigs()[toolType]?.customEnvVars as Record<string, string> | undefined,
+							getAgentConfig: (toolType) => agentConfigs()[toolType],
+							writable,
+							delegation,
+							// The target answers as itself: the system prompt its own chat turn carries.
+							getSystemPrompt: (consulted) => {
+								const stored = repository.getAgent(consulted.id);
+								return loadStandInSystemPrompt(
+									stored ? toTurnAgent(stored) : undefined,
+									promptSources,
+									{
+										isSsh: consulted.sshRemoteConfig?.enabled === true,
+									}
+								);
+							},
+							onChunk: (piece) => {
+								if (piece.done) resolve(piece);
+							},
+						});
 					});
-				});
+				} finally {
+					running.delete(requestId);
+				}
 
 				// A failed or stopped consult keeps what the target managed to say, and the reason after it.
 				const note = crossAgentTerminationNote(chunk);

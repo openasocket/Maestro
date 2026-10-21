@@ -38,6 +38,7 @@ import type { GroupChatSpawn } from '../groupchat/types';
 import { captureException, logger } from '../host';
 import { applyAgentConfigOverrides, buildAgentArgs } from '../launch/agent-args';
 import type { SshRemoteSettingsStore } from '../launch/ssh-remote-resolver';
+import { delegationContextEnv, type ManagedDelegationContext } from '../managed/delegation';
 import type { AgentConfig } from '../providers/definitions';
 import { buildCrossAgentPrompt } from './consult-prompt';
 
@@ -149,6 +150,14 @@ export interface ConsultStartOptions {
 	 * the consult starts without it.
 	 */
 	getSystemPrompt?: (target: CrossAgentTargetSession) => Promise<string | undefined>;
+	/**
+	 * The consult's causal context, derived by the host from the asking
+	 * operation's (`childDelegationContext`, MRC-07-04A). Stamped on the
+	 * process as `MAESTRO_DELEGATION_CONTEXT` over the target's own env vars,
+	 * so what the consulted agent itself asks or dispatches carries the chain
+	 * one link deeper. Attribution only: admission stays with the host.
+	 */
+	delegation?: ManagedDelegationContext;
 	/** Called with each response chunk; `done: true` marks completion/failure. */
 	onChunk: (chunk: CrossAgentResponseChunk) => void;
 }
@@ -343,6 +352,13 @@ export function createConsultService() {
 		});
 
 		const sessionId = `${CROSS_AGENT_SESSION_PREFIX}${request.requestId}`;
+		const targetEnvVars =
+			configResolution.effectiveCustomEnvVars ?? opts.getCustomEnvVars?.(target.toolType);
+		// The record goes LAST, over anything the target's own overrides carry: a
+		// consulted agent never inherits a lineage from two hops up.
+		const customEnvVars = opts.delegation
+			? { ...(targetEnvVars ?? {}), ...delegationContextEnv(opts.delegation) }
+			: targetEnvVars;
 
 		let settled = false;
 		// The target's own provider session id, captured from its output stream. Forwarded on the
@@ -490,8 +506,7 @@ export function createConsultService() {
 					args: configResolution.args,
 					cwd: target.cwd,
 					prompt: fullPrompt,
-					customEnvVars:
-						configResolution.effectiveCustomEnvVars ?? opts.getCustomEnvVars?.(target.toolType),
+					customEnvVars,
 					agentConfigValues,
 					sshRemoteConfig: target.sshRemoteConfig,
 					tokenMode: getClaudeTokenMode(target, {
