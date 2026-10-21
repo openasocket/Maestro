@@ -37,6 +37,11 @@ import {
 	type SecretProblem,
 	type SecretSource,
 } from '../../serverSecrets';
+import {
+	describeCredentialRefusals,
+	isApprovedCredentialSet,
+	type ApprovedCredentialSet,
+} from '../managed/credentials';
 import { buildAgentEnvironment, resolveAgentEnvVars, type AgentEnvSurface } from './env';
 import {
 	resolvePromptDelivery,
@@ -109,6 +114,14 @@ export interface AgentLaunchInput {
 	requiredSecrets?: readonly string[];
 	/** Where secrets are looked up. Defaults to the real paths and `process.env`; tests inject. */
 	secretLookup?: SecretLookupOptions;
+	/**
+	 * A managed launch: what the host's policy bound for it. Absent for an
+	 * unmanaged launch, which is planned exactly as before. Present, the plan
+	 * fails closed: credentials come only from the approved set (never from
+	 * `requiredSecrets`, a user variable or a provider login the policy did not
+	 * allow), and a reference the binding refused stops the launch.
+	 */
+	managed?: ManagedLaunchInput;
 
 	/** The agent's SSH setting, and where to look its remote up. */
 	sshRemoteConfig?: AgentSshRemoteConfig | null;
@@ -122,6 +135,34 @@ export interface AgentLaunchInput {
 	 * then goes over stdin on every surface, for a provider that reads it there.
 	 */
 	cmdShellLaunch?: boolean;
+}
+
+/** What a managed launch is planned under. Produced by the host, never by a bundle or a label. */
+export interface ManagedLaunchInput {
+	/**
+	 * The credential references the policy bound to this launch, as
+	 * `bindApprovedCredentials()` returned them. Anything else (a copy, a
+	 * literal, a cast) is refused as unbound.
+	 */
+	credentials?: ApprovedCredentialSet;
+}
+
+/** Why a managed launch was not planned. Nothing was resolved and nothing is spawned. */
+export type ManagedLaunchRefusal =
+	/** `managed.credentials` is not a set `bindApprovedCredentials()` produced. */
+	| 'managed-credentials-unbound'
+	/** The binding refused at least one reference (revoked, expired, mismatched). */
+	| 'managed-credential-refused';
+
+/**
+ * What happened to the approved credential references, by reference id and
+ * variable NAME only (safe to log). Absent for an unmanaged launch.
+ */
+export interface ManagedCredentialReport {
+	/** Approved references, with the variable each one is delivered as. */
+	approved: { refId: string; envVar: string }[];
+	/** The binding's digest, so a journal can join the launch to the decision. */
+	bindingDigest: string;
 }
 
 interface LaunchPlanCommon {
@@ -146,6 +187,8 @@ interface LaunchPlanCommon {
 	 * when the agent declares none or the surface does not deliver them.
 	 */
 	secrets?: LaunchSecretsReport;
+	/** The approved credential references a managed launch was planned with. Names only. */
+	managedCredentials?: ManagedCredentialReport;
 }
 
 export interface LaunchSecretsReport {
@@ -175,9 +218,43 @@ export type AgentLaunchPlanResult =
 	| { ok: true; plan: AgentLaunchPlan }
 	| {
 			ok: false;
-			reason: Extract<SshLaunchTarget, { kind: 'unresolved' }>['reason'];
+			reason: Extract<SshLaunchTarget, { kind: 'unresolved' }>['reason'] | ManagedLaunchRefusal;
 			error: string;
 	  };
+
+/** True for a refusal the managed binding raised (as opposed to an unresolved SSH remote). */
+export function isManagedLaunchRefusal(reason: string): reason is ManagedLaunchRefusal {
+	return reason.startsWith('managed-');
+}
+
+/**
+ * The approved credentials of a managed launch, or the refusal that stops it.
+ * Checked before anything else is resolved: a set this module does not
+ * recognize, or one with a refused reference, plans nothing.
+ */
+function managedCredentialsFor(
+	managed: ManagedLaunchInput | undefined
+):
+	| { ok: true; set: ApprovedCredentialSet | undefined }
+	| Extract<AgentLaunchPlanResult, { ok: false }> {
+	if (!managed || managed.credentials === undefined) return { ok: true, set: undefined };
+	const set = managed.credentials;
+	if (!isApprovedCredentialSet(set)) {
+		return {
+			ok: false,
+			reason: 'managed-credentials-unbound',
+			error: 'The managed credentials were not bound by bindApprovedCredentials() on this host.',
+		};
+	}
+	if (set.refused.length > 0) {
+		return {
+			ok: false,
+			reason: 'managed-credential-refused',
+			error: `The policy binding refused a credential reference for this launch - ${describeCredentialRefusals(set.refused)}`,
+		};
+	}
+	return { ok: true, set };
+}
 
 /**
  * Plan an agent launch. Fails, before anything is spawned, when SSH is on and
@@ -188,6 +265,15 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 	if (target.kind === 'unresolved') {
 		return { ok: false, reason: target.reason, error: target.message };
 	}
+	const managedCredentials = managedCredentialsFor(input.managed);
+	if (!managedCredentials.ok) return managedCredentials;
+	const approvedCredentials = managedCredentials.set;
+	const managedReport: ManagedCredentialReport | undefined = approvedCredentials
+		? {
+				approved: approvedCredentials.approved.map(({ refId, envVar }) => ({ refId, envVar })),
+				bindingDigest: approvedCredentials.digest,
+			}
+		: undefined;
 
 	const agent = input.agent;
 	const layers = {
@@ -260,6 +346,7 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 							},
 						}
 					: {}),
+				...(managedReport ? { managedCredentials: managedReport } : {}),
 				env: undefined,
 			},
 		};
@@ -293,6 +380,7 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 						},
 					}
 				: {}),
+			...(managedReport ? { managedCredentials: managedReport } : {}),
 			env: buildAgentEnvironment({
 				...layers,
 				secretEnvVars: resolved?.values,
