@@ -181,6 +181,8 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **Rendering a Codex `visualize` reference inline:** `loadCodexVisualization()` in `src/main/codex-visualization.ts`, drawn by `CodexVisualizationFrame` in `src/renderer/components/Markdown/components/CodexVisualizationFrame.tsx`
 - **Acting on a clicked Codex followup chip:** `requestCodexFollowup()`, `resolveCodexFollowup()`, `codexDirectivesLiveForSource()` in `src/renderer/services/codexFollowup.ts`, drawn by `FollowupChip`
 - **Changing an agent's provider:** `switchAgentProvider()`, `switchTabProvider()`, `resolveTurnProvider()` in `src/shared/maestro-lib/agents/providerSwap.ts`
+- **Importing a Mega-Maestro contracts artifact:** `scripts/import-mega-maestro.mjs` (`npm run import:mega-maestro`), pinned in `vendor/mega-maestro/contracts.pin.json`
+- **Managed-operation contracts and compatibility negotiation:** `managedContextProblems()` in `src/shared/maestro-lib/managed/types.ts`; `negotiateCompatibility()` in `src/shared/maestro-lib/managed/compatibility.ts`; `providerRouteSupport()` in `src/shared/maestro-lib/providers/capabilities.ts`
 
 #### Agents (renderer state and navigation)
 

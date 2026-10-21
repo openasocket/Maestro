@@ -1,0 +1,787 @@
+{
+	"schemaVersion": 1,
+	"profile": "maestro-rc-integration-phase2",
+	"created": "2026-10-21",
+	"executionMode": "task-based",
+	"executionRoot": "maestro",
+	"branch": "feature/mega-maestro-v1.1.0-rc",
+	"baseRef": "v1.1.0-RC",
+	"baseRevision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+	"dependsOn": "MAESTRO-MEGA-01..12 (92 tasks) complete",
+	"gapAnalysis": "Plans/mega-maestro-rc/PHASE2-GAPS.md",
+	"counterpartPrerequisites": ["CP-01", "CP-02", "CP-03", "CP-04", "CP-05", "CP-06"],
+	"documents": [
+		{
+			"path": ".maestro/playbooks/2026-10-21-Maestro-Mega-Integration-P2/MAESTRO-MEGA-P2-01.md",
+			"title": "Contract conformance and plan reconciliation",
+			"tasks": [
+				{
+					"id": "MRC2-01-01",
+					"title": "Contract vectors and drift test",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/fixtures/mega-maestro/contract-vectors.json",
+						"src/__tests__/shared/maestro-lib/managed/contract-vectors.test.ts",
+						"scripts/check-mega-contract-vectors.mjs"
+					]
+				},
+				{
+					"id": "MRC2-01-02",
+					"title": "Counterpart-unsupported capability rows",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/compatibility.ts",
+						"Plans/mega-maestro-rc/support-matrix.json"
+					]
+				},
+				{
+					"id": "MRC2-01-03",
+					"title": "Narrow typed commands to the published actions",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/commands.ts",
+						"src/main/enterprise/commands.ts",
+						"Plans/mega-maestro-rc/counterpart-requests.md"
+					]
+				},
+				{
+					"id": "MRC2-01-04",
+					"title": "Handoff manifest at the agreed path",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"scripts/write-mega-maestro-handoff.mjs",
+						"Plans/mega-maestro/evidence/handoff.json"
+					]
+				},
+				{
+					"id": "MRC2-01-05",
+					"title": "Joint evidence import verifier",
+					"kind": "IMPLEMENT",
+					"targets": ["scripts/import-joint-integration.mjs", "Plans/mega-maestro-rc/README.md"]
+				},
+				{
+					"id": "MRC2-01-06",
+					"title": "reconciliation tests",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/shared/maestro-lib/managed/compatibility.counterpart.test.ts",
+						"src/__tests__/shared/maestro-lib/managed/commands.published.test.ts",
+						"src/__tests__/scripts/mega-maestro-handoff.test.ts"
+					]
+				},
+				{
+					"id": "MRC2-01-07",
+					"title": "contract reconciliation",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/p2-01.md"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-21-Maestro-Mega-Integration-P2/MAESTRO-MEGA-P2-02.md",
+			"title": "Utility, background and web-originated turns",
+			"tasks": [
+				{
+					"id": "MRC2-02-01",
+					"title": "Admission in the real spawn handler",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/ipc/handlers/process/handle-spawn.ts",
+						"src/main/process-manager/types.ts"
+					]
+				},
+				{
+					"id": "MRC2-02-02",
+					"title": "Utility turn authority and provider ceiling",
+					"kind": "IMPLEMENT",
+					"targets": ["src/main/utils/context-groomer.ts", "src/main/ipc/handlers/tabNaming.ts"]
+				},
+				{
+					"id": "MRC2-02-03",
+					"title": "Quick Chat routing and cross-agent consults",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/quick-chat/quick-chat-controller.ts",
+						"src/main/cross-agent/cross-agent-router.ts",
+						"src/main/cross-agent/consult-runner.ts"
+					]
+				},
+				{
+					"id": "MRC2-02-04",
+					"title": "Skill discovery and web terminal creation",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/agents/codex-skills.ts",
+						"src/main/web-server/callbacks/terminalCallbacks.ts"
+					]
+				},
+				{
+					"id": "MRC2-02-05",
+					"title": "Background supervisors",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/pianola/pianola-supervisor.ts",
+						"src/main/pianola/pianola-lifecycle.ts",
+						"src/main/computer-history/observer-supervisor.ts"
+					]
+				},
+				{
+					"id": "MRC2-02-06",
+					"title": "spawn handler and utility turns",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts",
+						"src/__tests__/main/utils/context-groomer.managed.test.ts",
+						"src/__tests__/main/ipc/handlers/tabNaming.managed.test.ts"
+					]
+				},
+				{
+					"id": "MRC2-02-07",
+					"title": "routing consults and supervisors",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/quick-chat/quick-chat-controller.managed.test.ts",
+						"src/__tests__/main/cross-agent/cross-agent-router.managed.test.ts",
+						"src/__tests__/main/pianola/pianola-supervisor.managed.test.ts"
+					]
+				},
+				{
+					"id": "MRC2-02-08",
+					"title": "non-conversation turns",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/p2-02.md"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-21-Maestro-Mega-Integration-P2/MAESTRO-MEGA-P2-03.md",
+			"title": "Permission-mode ceiling and the maestro-p TUI",
+			"tasks": [
+				{
+					"id": "MRC2-03-01",
+					"title": "One permission ceiling function",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/permission-ceiling.ts",
+						"src/shared/maestro-lib/launch/agent-args.ts"
+					]
+				},
+				{
+					"id": "MRC2-03-02",
+					"title": "Provider definitions declare enforceability",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/providers/definitions.ts",
+						"src/shared/maestro-lib/launch/launch-plan.ts"
+					]
+				},
+				{
+					"id": "MRC2-03-03",
+					"title": "Codex sandbox and CLI flags consume the ceiling",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/codex-app-server/invocation.ts",
+						"src/cli/services/agent-spawner.ts"
+					]
+				},
+				{
+					"id": "MRC2-03-04",
+					"title": "Provider probes under admission",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/agents/claude-slash-command-probe.ts",
+						"src/main/agents/detector.ts"
+					]
+				},
+				{
+					"id": "MRC2-03-05",
+					"title": "maestro-p binary resolution and pty admission",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/maestro-p/index.ts",
+						"src/maestro-p/tui-driver.ts",
+						"src/shared/maestro-lib/managed/tui-handshake.ts"
+					]
+				},
+				{
+					"id": "MRC2-03-06",
+					"title": "TUI tool approvals and steering authority",
+					"kind": "IMPLEMENT",
+					"targets": ["src/maestro-p/open-tool-calls.ts", "src/maestro-p/steering-server.ts"]
+				},
+				{
+					"id": "MRC2-03-07",
+					"title": "ceiling and TUI",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/shared/maestro-lib/managed/permission-ceiling.test.ts",
+						"src/__tests__/shared/maestro-lib/launch/agent-args.managed.test.ts",
+						"src/__tests__/maestro-p/tui-driver.managed.test.ts"
+					]
+				},
+				{
+					"id": "MRC2-03-08",
+					"title": "permission ceiling",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/p2-03.md"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-21-Maestro-Mega-Integration-P2/MAESTRO-MEGA-P2-04.md",
+			"title": "Repository, shell, install and destructive sinks",
+			"tasks": [
+				{
+					"id": "MRC2-04-01",
+					"title": "Shared git executor consults repository policy",
+					"kind": "IMPLEMENT",
+					"targets": ["src/main/utils/remote-git.ts", "src/main/enterprise/repository-policy.ts"]
+				},
+				{
+					"id": "MRC2-04-02",
+					"title": "Git IPC writes and the arbitrary command runner",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/ipc/handlers/git/streaming.ts",
+						"src/main/ipc/handlers/git/github.ts",
+						"src/main/ipc/handlers/git/branch.ts"
+					]
+				},
+				{
+					"id": "MRC2-04-03",
+					"title": "Worktrees, setup scripts and web git callbacks",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/ipc/handlers/git/worktree.ts",
+						"src/main/utils/worktree-setup-script.ts",
+						"src/main/web-server/callbacks/gitCallbacks.ts"
+					]
+				},
+				{
+					"id": "MRC2-04-04",
+					"title": "Symphony contribution start and fork",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/ipc/handlers/symphony/shared.ts",
+						"src/main/ipc/handlers/symphony/contributionStart.ts",
+						"src/main/utils/symphony-fork.ts"
+					]
+				},
+				{
+					"id": "MRC2-04-04A",
+					"title": "Symphony finish, lifecycle and agent-run producers",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/ipc/handlers/symphony/contributionFinish.ts",
+						"src/main/ipc/handlers/symphony/lifecycle.ts",
+						"src/main/agent-run/producers.ts"
+					]
+				},
+				{
+					"id": "MRC2-04-05",
+					"title": "GitHub effects from feedback, login and the Cue poller",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/feedback/index.ts",
+						"src/cli/services/gh-login.ts",
+						"src/main/cue/cue-github-poller.ts"
+					]
+				},
+				{
+					"id": "MRC2-04-06",
+					"title": "User-configured notification commands",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/ipc/handlers/notifications.ts",
+						"src/main/enterprise/shell-policy.ts"
+					]
+				},
+				{
+					"id": "MRC2-04-07",
+					"title": "Downloaded binaries and installers",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/wakatime-manager.ts",
+						"src/main/maestro-cli-manager.ts",
+						"src/main/enterprise/install-policy.ts"
+					]
+				},
+				{
+					"id": "MRC2-04-08",
+					"title": "Spec tool installers",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/speckit-manager.ts",
+						"src/main/openspec-manager.ts",
+						"src/main/bmad-manager.ts"
+					]
+				},
+				{
+					"id": "MRC2-04-08A",
+					"title": "Marketplace import and MCP config writers",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/services/marketplace-service.ts",
+						"src/main/coworking/installers/claude-code.ts",
+						"src/main/coworking/installers/codex.ts"
+					]
+				},
+				{
+					"id": "MRC2-04-08B",
+					"title": "Remaining MCP installers and the coworking server script",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/coworking/installers/opencode.ts",
+						"src/main/coworking/installers/factory-droid.ts",
+						"src/main/coworking/coworking-server-script.ts"
+					]
+				},
+				{
+					"id": "MRC2-04-09",
+					"title": "Open-external, clipboard and file deletion",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/ipc/handlers/system.ts",
+						"src/main/ipc/handlers/filesystem.ts",
+						"src/main/enterprise/local-effects-policy.ts"
+					]
+				},
+				{
+					"id": "MRC2-04-09A",
+					"title": "Auto Run, playbook and Cue backup deletes and ZIP imports",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/ipc/handlers/autorun.ts",
+						"src/main/ipc/handlers/playbooks.ts",
+						"src/main/cue/backup/cue-backup-manager.ts"
+					]
+				},
+				{
+					"id": "MRC2-04-10",
+					"title": "Move inline plugin sinks behind the plugin host",
+					"kind": "IMPLEMENT",
+					"targets": ["src/main/index.ts", "src/main/plugins/plugin-host-handlers.ts"]
+				},
+				{
+					"id": "MRC2-04-11",
+					"title": "repository and shell sinks",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/utils/remote-git.managed.test.ts",
+						"src/__tests__/main/ipc/handlers/git/streaming.managed.test.ts",
+						"src/__tests__/main/ipc/handlers/notifications.managed.test.ts"
+					]
+				},
+				{
+					"id": "MRC2-04-12",
+					"title": "install and local effect sinks",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/enterprise/install-policy.test.ts",
+						"src/__tests__/main/enterprise/local-effects-policy.test.ts",
+						"src/__tests__/main/plugins/plugin-host-handlers.sinks.test.ts"
+					]
+				},
+				{
+					"id": "MRC2-04-13",
+					"title": "secondary sink inventory",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/p2-04.md"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-21-Maestro-Mega-Integration-P2/MAESTRO-MEGA-P2-05.md",
+			"title": "Network egress and inbound listener ceilings",
+			"tasks": [
+				{
+					"id": "MRC2-05-01",
+					"title": "Egress policy at the fetch chokepoint",
+					"kind": "IMPLEMENT",
+					"targets": ["src/main/enterprise/egress-policy.ts", "src/main/utils/fetchWithTimeout.ts"]
+				},
+				{
+					"id": "MRC2-05-02",
+					"title": "Raw https callers move behind the chokepoint",
+					"kind": "IMPLEMENT",
+					"targets": ["src/main/wakatime-manager.ts", "src/main/cue/cue-susfactor.ts"]
+				},
+				{
+					"id": "MRC2-05-03",
+					"title": "Vendor telemetry defaults to deny when managed",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/checkin.ts",
+						"src/main/cue/cue-telemetry.ts",
+						"src/main/ipc/handlers/leaderboard.ts"
+					]
+				},
+				{
+					"id": "MRC2-05-04",
+					"title": "Managed update policy",
+					"kind": "IMPLEMENT",
+					"targets": ["src/main/auto-updater.ts", "src/main/update-checker.ts"]
+				},
+				{
+					"id": "MRC2-05-05",
+					"title": "Provider account polling and model catalog",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/agents/codex-usage-sampler.ts",
+						"src/main/agents/codex-reset-credits.ts",
+						"src/main/agents/detector.ts"
+					]
+				},
+				{
+					"id": "MRC2-05-06",
+					"title": "Inbound listener ceiling for the web server and tunnels",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/enterprise/listener-policy.ts",
+						"src/main/web-server/WebServer.ts",
+						"src/main/tunnel-manager.ts"
+					]
+				},
+				{
+					"id": "MRC2-05-06A",
+					"title": "Lite listeners and the SSH tunnel",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/lite/control-server.ts",
+						"src/main/lite/tailnet-listener.ts",
+						"src/main/lite/tunnel.ts"
+					]
+				},
+				{
+					"id": "MRC2-05-06B",
+					"title": "Discovery, Cue webhook and status servers",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/lite/discovery/mdns.ts",
+						"src/main/lite/discovery/advertiser.ts",
+						"src/main/cue/cue-webhook-server.ts"
+					]
+				},
+				{
+					"id": "MRC2-05-07",
+					"title": "Remote file system and remote probes under remote identity",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/utils/remote-fs.ts",
+						"src/main/ssh-remote-manager.ts",
+						"src/main/enterprise/remote.ts"
+					]
+				},
+				{
+					"id": "MRC2-05-07A",
+					"title": "Agent SSH probes and Tailscale discovery",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/ipc/handlers/agents.ts",
+						"src/main/agents/probeRemoteMaestroP.ts",
+						"src/main/lite/discovery/tailscale.ts"
+					]
+				},
+				{
+					"id": "MRC2-05-08",
+					"title": "egress",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/enterprise/egress-policy.test.ts",
+						"src/__tests__/main/utils/fetchWithTimeout.managed.test.ts",
+						"src/__tests__/main/auto-updater.managed.test.ts"
+					]
+				},
+				{
+					"id": "MRC2-05-09",
+					"title": "listeners and remote",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/enterprise/listener-policy.test.ts",
+						"src/__tests__/main/web-server/WebServer.listenerPolicy.test.ts",
+						"src/__tests__/main/utils/remote-fs.managed.test.ts"
+					]
+				},
+				{
+					"id": "MRC2-05-10",
+					"title": "egress and listener inventory",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/p2-05.md"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-21-Maestro-Mega-Integration-P2/MAESTRO-MEGA-P2-06.md",
+			"title": "Managed settings lock and credential custody",
+			"tasks": [
+				{
+					"id": "MRC2-06-01",
+					"title": "Settings lock model",
+					"kind": "IMPLEMENT",
+					"targets": ["src/shared/managedSettingsLock.ts", "src/shared/settingsMetadata.ts"]
+				},
+				{
+					"id": "MRC2-06-02",
+					"title": "Main-process enforcement of locks",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/ipc/handlers/persistence.ts",
+						"src/main/stores/instances.ts",
+						"src/main/web-server/handlers/messageHandlers/settings.ts"
+					]
+				},
+				{
+					"id": "MRC2-06-03",
+					"title": "Per-agent configuration writes",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/ipc/handlers/agents.ts",
+						"src/cli/commands/update-agent.ts",
+						"src/cli/commands/settings-agent.ts"
+					]
+				},
+				{
+					"id": "MRC2-06-04",
+					"title": "Admin IPC: SSH remotes, prompts, plugins",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/ipc/handlers/ssh-remote.ts",
+						"src/main/ipc/handlers/prompts.ts",
+						"src/main/ipc/handlers/plugins.ts"
+					]
+				},
+				{
+					"id": "MRC2-06-04A",
+					"title": "Admin IPC: sync path, tunnel, live, Lite control",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/ipc/handlers/system.ts",
+						"src/main/ipc/handlers/web.ts",
+						"src/main/lite/index.ts"
+					]
+				},
+				{
+					"id": "MRC2-06-05",
+					"title": "Lock indication in Settings",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/renderer/stores/settingsStore.ts",
+						"src/renderer/components/ui/ManagedLockBadge.tsx",
+						"src/renderer/components/Settings/searchableSettings.ts"
+					]
+				},
+				{
+					"id": "MRC2-06-06",
+					"title": "Custody for stores Phase 1 did not name",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/cot-export/config-store.ts",
+						"src/main/wakatime-manager.ts",
+						"src/main/cue/cue-susfactor.ts"
+					]
+				},
+				{
+					"id": "MRC2-06-07",
+					"title": "Redaction on every export path",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/redactSecrets.ts",
+						"src/main/debug-package/index.ts",
+						"src/main/feedback/index.ts"
+					]
+				},
+				{
+					"id": "MRC2-06-08",
+					"title": "locks",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/shared/managedSettingsLock.test.ts",
+						"src/__tests__/main/ipc/handlers/persistence.locks.test.ts",
+						"src/__tests__/main/ipc/handlers/agents.locks.test.ts"
+					]
+				},
+				{
+					"id": "MRC2-06-09",
+					"title": "custody and redaction",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/cot-export/config-store.managed.test.ts",
+						"src/__tests__/shared/redactSecrets.managed.test.ts",
+						"src/__tests__/main/debug-package/redaction-canaries.test.ts"
+					]
+				},
+				{
+					"id": "MRC2-06-10",
+					"title": "settings and custody",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/p2-06.md"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-21-Maestro-Mega-Integration-P2/MAESTRO-MEGA-P2-07.md",
+			"title": "CLI parity, surface registration and documentation",
+			"tasks": [
+				{
+					"id": "MRC2-07-01",
+					"title": "Shared managed service and CLI status verbs",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/enterprise/service.ts",
+						"src/cli/commands/managed.ts",
+						"src/cli/index.ts"
+					]
+				},
+				{
+					"id": "MRC2-07-02",
+					"title": "CLI inbox and command verbs",
+					"kind": "IMPLEMENT",
+					"targets": ["src/cli/commands/managed-inbox.ts", "src/cli/index.ts"]
+				},
+				{
+					"id": "MRC2-07-03",
+					"title": "Web bridge handlers for managed status and inbox",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/web-server/handlers/messageHandlers/managed.ts",
+						"src/main/web-server/handlers/messageHandlers/index.ts",
+						"src/main/web-server/handlers/bridgeDenyList.ts"
+					]
+				},
+				{
+					"id": "MRC2-07-04",
+					"title": "Settings tab registration",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/renderer/types/index.ts",
+						"src/shared/settingsMetadataManaged.ts",
+						"src/renderer/components/Settings/searchableSettingsManaged.ts"
+					]
+				},
+				{
+					"id": "MRC2-07-05",
+					"title": "Surface registration: hotkey, palette, menu",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/uiSurfaces.ts",
+						"src/renderer/constants/modalPriorities.ts",
+						"src/renderer/constants/shortcuts.ts"
+					]
+				},
+				{
+					"id": "MRC2-07-05A",
+					"title": "Palette commands, hamburger menu, web shortcuts",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/renderer/components/QuickActionsModal/commands/featureCommands.ts",
+						"src/renderer/components/SessionList/HamburgerMenuContent.tsx",
+						"src/web/constants/webShortcuts.ts"
+					]
+				},
+				{
+					"id": "MRC2-07-06",
+					"title": "Managed mode is not an Encore flag; policy may pin flags",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/encoreFeatureDefaults.ts",
+						"src/main/encore-feature-lifecycle.ts",
+						"src/renderer/utils/encoreShortcuts.ts"
+					]
+				},
+				{
+					"id": "MRC2-07-07",
+					"title": "Documentation and parity record",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"docs/mega-maestro.md",
+						"docs/docs.json",
+						"docs/agent-guides/CLI-UI-PARITY.md"
+					]
+				},
+				{
+					"id": "MRC2-07-08",
+					"title": "parity and registration",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/cli/commands/managed.test.ts",
+						"src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts",
+						"src/__tests__/shared/encoreFeatureDefaults.pins.test.ts"
+					]
+				},
+				{
+					"id": "MRC2-07-09",
+					"title": "constitution check",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/p2-07.md"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-21-Maestro-Mega-Integration-P2/MAESTRO-MEGA-P2-08.md",
+			"title": "Phase 2 verification, CI and handoff",
+			"tasks": [
+				{
+					"id": "MRC2-08-01",
+					"title": "Integration config and platform skip rule",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"vitest.integration.config.ts",
+						"src/__tests__/integration/mega-maestro/platform-skip.ts",
+						"package.json"
+					]
+				},
+				{
+					"id": "MRC2-08-02",
+					"title": "Canonical utility registration",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"docs/agent-guides/CANONICAL-UTILITIES.md",
+						"CLAUDE.md",
+						"docs/agent-guides/DEDUP-TRACKER.md"
+					]
+				},
+				{
+					"id": "MRC2-08-03",
+					"title": "Support matrix and handoff refresh",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"Plans/mega-maestro-rc/support-matrix.json",
+						"Plans/mega-maestro/evidence/handoff.json",
+						"Plans/mega-maestro-rc/counterpart-requests.md"
+					]
+				},
+				{
+					"id": "MRC2-08-04",
+					"title": "standalone and whole-repository checks",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/p2-standalone.md"]
+				},
+				{
+					"id": "MRC2-08-05",
+					"title": "sink inventory audit",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/p2-sink-inventory.json"]
+				},
+				{
+					"id": "MRC2-08-06",
+					"title": "Phase 2 completion report",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/p2-final.md"]
+				}
+			]
+		}
+	],
+	"taskCount": 80,
+	"taskCounts": {
+		"IMPLEMENT": 59,
+		"TEST": 11,
+		"VERIFY": 10
+	},
+	"targetCount": 190,
+	"existingTargets": 118,
+	"newTargets": 72,
+	"loopEnabled": false,
+	"resetOnCompletion": false,
+	"automaticHandoffs": false,
+	"autoRunPrompt": "Execute Phase 2 of the Maestro managed integration per Plans/mega-maestro-rc/EXECUTION-RULES.md and Plans/mega-maestro-rc/PHASE2-GAPS.md on branch feature/mega-maestro-v1.1.0-rc. Fresh-context tasks, ordered documents, no loop, reset or peer dispatch. Standalone behavior unchanged; managed denials explicit; no stub, mock-only path or skipped test counts as a pass."
+}

@@ -1,0 +1,26 @@
+{
+	"created": "2026-10-19",
+	"profile": "maestro-rc-integration",
+	"baseRevision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+	"documents": 12,
+	"tasks": 92,
+	"taskCounts": {
+		"IMPLEMENT": 62,
+		"TEST": 17,
+		"VERIFY": 13
+	},
+	"checks": {
+		"structureAndSourcePins": "passed",
+		"preparerSyntax": "passed",
+		"preparerReadOnlyCheck": "passed",
+		"wrongWorkspacePreparationRefusal": "passed",
+		"whitespace": "passed"
+	},
+	"scope": "Authoring and source review only; no application runtime tests executed.",
+	"preparationExecuted": false,
+	"maestroBranchChanged": false,
+	"savedPlaybookCreated": false,
+	"autoRunLaunched": false,
+	"requiredCounterpartProducers": ["CP-01", "CP-02", "CP-03"],
+	"runtimeEvidenceValidated": false
+}

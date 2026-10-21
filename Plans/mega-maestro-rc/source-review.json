@@ -1,0 +1,47 @@
+{
+	"reviewDate": "2026-10-19",
+	"maestro": {
+		"root": "/Users/dr3/dev-shit/Maestro",
+		"ref": "v1.1.0-RC",
+		"revision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+		"comparisonRef": "v1.0.0",
+		"comparisonRevision": "aa23ffd516bd4a6403b79563834b0432f5cced70",
+		"sourceSha256": {
+			"src/shared/maestro-lib/index.ts": "0a81e2d71a3006aa70da8fd8df519a279eb9c489e730d35bd4dc348e3c204bb3",
+			"src/shared/maestro-lib/version.ts": "e61b67cae730ef6b93db583fceca15c8f4c61d9b73d11107a211bb69ed258e3f",
+			"src/shared/maestro-lib/client/types.ts": "0eb1a00f0e7dbf5556bd05927f5e4a75fe531997c6af8868f7f14149b7ec6f98",
+			"src/shared/maestro-lib/runtime/index.ts": "d89795d322c7c0bdf030029ce39cce7d00a51386fbe940204150e1e2a62514e6",
+			"src/shared/maestro-lib/run/start-turn.ts": "f238620716f87cbb2eddd89394daca39ebc504f2ffd421dc9cec62fc7dde05f9",
+			"src/shared/maestro-lib/launch/launch-plan.ts": "681d6f917368cb9490dcebfd3626b63932197e5b92bec947a778fead6e3190f4",
+			"src/shared/maestro-lib/launch/env.ts": "4dcb4ed2fb849d4897b85641540d921c9c3fa5a6984052f83a1e362e1843d565",
+			"src/shared/serverSecrets.ts": "76ff4f9b4f89b0b6dd77634479af796a63ec0fb35f5cc4349cbebe67e68e4858",
+			"src/main/lite/device-credentials.ts": "7570699a633da48bd324ea6491c3b19483e0e99ee17f1838781d4b0a993b98e8",
+			"src/main/utils/safe-storage-seal.ts": "f7c4bc1ca8f9b685b07ce7cb76af6f537b6285f55c7821d2caf54423ab07e510",
+			"src/main/utils/keyring-anchor.ts": "880db3784892b1c750ca2557b1b033f6fb2450a3c622e9f6db107b35945644f4",
+			"src/main/process-manager/ProcessManager.ts": "6d211248f0e72c933bf45e913a6022c623f62cdbeca8dc2cbac54b73144f57f8",
+			"src/main/process-manager/spawners/CodexAppServerSpawner.ts": "bdd46a5f26311b926760986dc3ac7905131ff4f4a7a8b653c9006b251391604f",
+			"src/main/opencode-server/OpencodeServerManager.ts": "2bd296921a6fa53fd3a369285b91b899e1448d3a29414948395d68583c311f83",
+			"src/main/plugins/permission-broker.ts": "62d7387a08da8abedab480d3c99d71bd83b24143a22c9d8ff6c13e0649adb3e7",
+			"src/main/cue/cue-shell-executor.ts": "37f24d7a6fb75c061fcc483f750ff80be0bd701e14a0cd403ca3c3dfdccad7fe",
+			"src/main/services/symphony-runner.ts": "da48be006998cdb5c4f8be34cf6d96aebe18e71c9c0abd5c267fb75a20290f37",
+			"src/main/agent-run/capture-service.ts": "7e3bc599d0c878282beaafd93f5d599386a516c249639faeea8955c7da11dea0",
+			"scripts/build-maestro-lib.mjs": "89c7c3897a4b8113277b318b1826d7137d226a44e0176dce889ae9b6de1e5020",
+			"docs/maestro-lib.md": "7deb7fd051cde5489511bc44cafef031c0d29a25395d9c704988c7764b23a4cf",
+			"package.json": "d97aba0a931c0596043c6cb46416c4fbe36ce9be6081f9bdb6ee6d7973756e60",
+			"src/main/preload/index.ts": "b7262d6299c50b97ad127e8fd32e329a339f4ead273a8badc9912efbe4db21a9"
+		}
+	},
+	"megaMaestro": {
+		"revision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+		"sourceDirty": true,
+		"sourceSha256": {
+			"packages/runtime-adapter/src/maestro.ts": "3651c89bf653c579f893ac9a5d3f850f6462fdcbf4e0a50537128da33aa5dd7a",
+			"packages/runtime-adapter/src/port.ts": "78693e4c4573f78f5ff0d38ac6e9a7eb64ee7c7799bacd8642ca00c37452012f",
+			"packages/runtime-adapter/src/endpoint.ts": "240f1b74b2e0c0fd7b8954d4a9d7b33067cf91d1178dea92f36d0543689396ce",
+			"packages/contracts/src/local-endpoint.ts": "23560b9fbc7bd028293f53434ff63162d4d94e3b4e4f520ba8071e7c6d0c61b6",
+			"apps/endpoint/src/ipc/server.ts": "725f2eeb240845397844781d3d21b811e8cee3ded98761d82a2c1da59804fc4f",
+			"apps/endpoint/src/policy/trust.ts": "25d56a58c25ad48107920f2056b93a10d1c236cbbbbd02111f9923450bf4ab5f"
+		}
+	},
+	"evidence": "Read-only source audit; no runtime qualification or customer credential access."
+}

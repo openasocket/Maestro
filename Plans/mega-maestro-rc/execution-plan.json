@@ -1,0 +1,954 @@
+{
+	"schemaVersion": 1,
+	"profile": "maestro-rc-integration",
+	"created": "2026-10-19",
+	"executionMode": "task-based",
+	"executionRoot": "maestro",
+	"parentAgentId": "9b4b298d-918a-4c8d-a9a8-c9a014a04adb",
+	"targetAgent": "isolated worktree agent from maestro-cli create-worktree",
+	"branch": "feature/mega-maestro-v1.1.0-rc",
+	"baseRef": "v1.1.0-RC",
+	"baseRevision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+	"documents": [
+		{
+			"path": ".maestro/playbooks/2026-10-19-Maestro-Mega-Integration/MAESTRO-MEGA-01.md",
+			"title": "Public contracts and compatibility",
+			"tasks": [
+				{
+					"id": "MRC-01-01",
+					"kind": "IMPLEMENT",
+					"targets": ["scripts/import-mega-maestro.mjs", "package.json"]
+				},
+				{
+					"id": "MRC-01-02",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/types.ts",
+						"src/shared/maestro-lib/client/types.ts"
+					]
+				},
+				{
+					"id": "MRC-01-03",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/index.ts",
+						"src/shared/maestro-lib/version.ts",
+						"scripts/build-maestro-lib.mjs"
+					]
+				},
+				{
+					"id": "MRC-01-04",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/compatibility.ts",
+						"src/shared/maestro-lib/providers/capabilities.ts"
+					]
+				},
+				{
+					"id": "MRC-01-05",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/shared/maestro-lib/managed/contracts.test.ts",
+						"src/shared/maestro-lib/__tests__/built-entry.test.ts"
+					]
+				},
+				{
+					"id": "MRC-01-06",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/01.md"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-19-Maestro-Mega-Integration/MAESTRO-MEGA-02.md",
+			"title": "Protected authority and durable runtime operations",
+			"tasks": [
+				{
+					"id": "MRC-02-01",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/authority.ts",
+						"src/shared/maestro-lib/managed/types.ts"
+					]
+				},
+				{
+					"id": "MRC-02-02",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/binding.ts",
+						"src/shared/maestro-lib/runtime/index.ts",
+						"src/shared/maestro-lib/runtime/data-dir-lock.ts"
+					]
+				},
+				{
+					"id": "MRC-02-03",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/run-journal.ts",
+						"src/shared/maestro-lib/runtime/processes.ts"
+					]
+				},
+				{
+					"id": "MRC-02-04",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/operations.ts",
+						"src/shared/maestro-lib/runtime/client.ts"
+					]
+				},
+				{
+					"id": "MRC-02-05",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/run/start-turn.ts",
+						"src/shared/maestro-lib/turns/run-agent-turn.ts"
+					]
+				},
+				{
+					"id": "MRC-02-06",
+					"kind": "TEST",
+					"targets": [
+						"src/shared/maestro-lib/runtime/__tests__/turns.test.ts",
+						"src/__tests__/shared/maestro-lib/run/start-turn.test.ts",
+						"src/__tests__/shared/maestro-lib/managed/authority.test.ts"
+					]
+				},
+				{
+					"id": "MRC-02-07",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/02.md"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-19-Maestro-Mega-Integration/MAESTRO-MEGA-03.md",
+			"title": "Enrollment identity and authenticated endpoint client",
+			"tasks": [
+				{
+					"id": "MRC-03-01",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/enterprise/identity-store.ts",
+						"src/main/utils/safe-storage-seal.ts",
+						"src/main/utils/keyring-anchor.ts"
+					]
+				},
+				{
+					"id": "MRC-03-02",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/enterprise/endpoint-client.ts",
+						"src/shared/maestro-lib/managed/endpoint-port.ts"
+					]
+				},
+				{
+					"id": "MRC-03-03",
+					"kind": "IMPLEMENT",
+					"targets": ["src/main/enterprise/enrollment.ts", "src/main/enterprise/endpoint-client.ts"]
+				},
+				{
+					"id": "MRC-03-04",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/host-adapter.ts",
+						"src/shared/maestro-lib/runtime/index.ts"
+					]
+				},
+				{
+					"id": "MRC-03-05",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/enterprise/policy-status.ts",
+						"src/shared/maestro-lib/managed/host-adapter.ts"
+					]
+				},
+				{
+					"id": "MRC-03-06",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/ipc/handlers/enterprise.ts",
+						"src/main/preload/enterprise.ts",
+						"src/main/preload/index.ts"
+					]
+				},
+				{
+					"id": "MRC-03-06A",
+					"kind": "IMPLEMENT",
+					"targets": ["src/main/index.ts", "src/main/enterprise/service.ts"]
+				},
+				{
+					"id": "MRC-03-07",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/enterprise/endpoint-client.test.ts",
+						"src/__tests__/main/enterprise/identity-store.test.ts",
+						"src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts"
+					]
+				},
+				{
+					"id": "MRC-03-08",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/03.md"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-19-Maestro-Mega-Integration/MAESTRO-MEGA-04.md",
+			"title": "Early real paired execution slice",
+			"tasks": [
+				{
+					"id": "MRC-04-01",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"scripts/mega-maestro-pair.mjs",
+						"src/__tests__/integration/mega-maestro/fixtures.ts"
+					]
+				},
+				{
+					"id": "MRC-04-02",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/enterprise/dispatch.ts",
+						"src/shared/maestro-lib/managed/host-adapter.ts"
+					]
+				},
+				{
+					"id": "MRC-04-03",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/provider-route.ts",
+						"src/main/enterprise/dispatch.ts"
+					]
+				},
+				{
+					"id": "MRC-04-04",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/integration/mega-maestro/early-pair.test.ts",
+						"src/__tests__/integration/mega-maestro/fixtures.ts"
+					]
+				},
+				{
+					"id": "MRC-04-05",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/04.json"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-19-Maestro-Mega-Integration/MAESTRO-MEGA-05.md",
+			"title": "Credentials accounts provider routing and translation",
+			"tasks": [
+				{
+					"id": "MRC-05-01",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/credentials.ts",
+						"src/shared/maestro-lib/launch/launch-plan.ts"
+					]
+				},
+				{
+					"id": "MRC-05-02",
+					"kind": "IMPLEMENT",
+					"targets": ["src/shared/serverSecrets.ts", "src/shared/maestro-lib/launch/launch-plan.ts"]
+				},
+				{
+					"id": "MRC-05-03",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/launch/env.ts",
+						"src/shared/maestro-lib/managed/credentials.ts"
+					]
+				},
+				{
+					"id": "MRC-05-04",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/agentAccountDir.ts",
+						"src/shared/maestro-lib/agents/providerSwap.ts",
+						"src/shared/maestro-lib/translation/identity.ts"
+					]
+				},
+				{
+					"id": "MRC-05-05",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/translation/transaction.ts",
+						"src/shared/maestro-lib/translation/resources.ts",
+						"src/shared/maestro-lib/translation/knowledge-binding.ts"
+					]
+				},
+				{
+					"id": "MRC-05-06",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/cue/bundle/cue-bundle-exporter.ts",
+						"src/main/cue/bundle/cue-bundle-importer.ts"
+					]
+				},
+				{
+					"id": "MRC-05-07",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/shared/maestro-lib/launch/launch-plan-secrets.test.ts",
+						"src/__tests__/main/cue/cue-spawn-builder-secrets.test.ts",
+						"src/__tests__/shared/maestro-lib/managed/credentials.test.ts"
+					]
+				},
+				{
+					"id": "MRC-05-08",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/shared/maestro-lib/translation-transaction.test.ts",
+						"src/__tests__/main/cue/bundle/cue-bundle-exporter.test.ts"
+					]
+				},
+				{
+					"id": "MRC-05-09",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/05.md"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-19-Maestro-Mega-Integration/MAESTRO-MEGA-06.md",
+			"title": "Desktop SDK CLI and terminal effects",
+			"tasks": [
+				{
+					"id": "MRC-06-01",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/process-manager/ProcessManager.ts",
+						"src/main/process-manager/types.ts",
+						"src/main/ipc/handlers/process.ts"
+					]
+				},
+				{
+					"id": "MRC-06-02",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/process-manager/spawners/ChildProcessSpawner.ts",
+						"src/main/process-manager/spawners/PtySpawner.ts"
+					]
+				},
+				{
+					"id": "MRC-06-03",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/process-manager/spawners/CodexAppServerSpawner.ts",
+						"src/shared/maestro-lib/codex/server-requests.ts"
+					]
+				},
+				{
+					"id": "MRC-06-04",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/opencode-server/OpencodeServerManager.ts",
+						"src/main/process-manager/spawners/OpenCodeServerSpawner.ts"
+					]
+				},
+				{
+					"id": "MRC-06-05",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/cli/services/agent-spawner.ts",
+						"src/shared/maestro-lib/managed/host-adapter.ts"
+					]
+				},
+				{
+					"id": "MRC-06-06",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/process-manager/ProcessManager.ts",
+						"src/main/process-manager/runners/LocalCommandRunner.ts",
+						"src/main/process-manager/runners/SshCommandRunner.ts"
+					]
+				},
+				{
+					"id": "MRC-06-07",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/permission-relay/PermissionRelayServer.ts",
+						"src/main/enterprise/dispatch.ts"
+					]
+				},
+				{
+					"id": "MRC-06-08",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/process-manager/ProcessManager.codexRouting.test.ts",
+						"src/__tests__/main/process-manager/ProcessManager.serveSpawn.test.ts",
+						"src/__tests__/main/process-manager/CodexAppServerSpawner.test.ts"
+					]
+				},
+				{
+					"id": "MRC-06-09",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/cli/services/agent-spawner.test.ts",
+						"src/__tests__/main/process-manager/ProcessManager.terminalAttach.test.ts",
+						"src/__tests__/main/permission-relay/relay-core.test.ts"
+					]
+				},
+				{
+					"id": "MRC-06-10",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/06.json"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-19-Maestro-Mega-Integration/MAESTRO-MEGA-07.md",
+			"title": "Auto Run Cue delegation and ownership",
+			"tasks": [
+				{
+					"id": "MRC-07-01",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/autorun-turns.ts",
+						"src/renderer/hooks/batch/useDocumentProcessor.ts"
+					]
+				},
+				{
+					"id": "MRC-07-02",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/cue/cue-run-router.ts",
+						"src/main/cue/cue-spawn-builder.ts",
+						"src/main/cue/cue-process-lifecycle.ts"
+					]
+				},
+				{
+					"id": "MRC-07-03",
+					"kind": "IMPLEMENT",
+					"targets": ["src/main/cue/cue-shell-executor.ts", "src/main/enterprise/dispatch.ts"]
+				},
+				{
+					"id": "MRC-07-04",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/cue/cue-cli-executor.ts",
+						"src/shared/maestro-lib/runtime/consults.ts"
+					]
+				},
+				{
+					"id": "MRC-07-05",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/group-chat/spawnGroupChatAgent.ts",
+						"src/shared/maestro-lib/runtime/background-turns.ts",
+						"src/shared/maestro-lib/groupchat/spawn.ts"
+					]
+				},
+				{
+					"id": "MRC-07-06",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/workflows.ts",
+						"src/main/cue/cue-run-router.ts"
+					]
+				},
+				{
+					"id": "MRC-07-07",
+					"kind": "TEST",
+					"targets": [
+						"src/shared/maestro-lib/runtime/__tests__/autorun-turns.test.ts",
+						"src/__tests__/main/cue/cue-shell-executor.test.ts",
+						"src/shared/maestro-lib/runtime/__tests__/background-turns.test.ts"
+					]
+				},
+				{
+					"id": "MRC-07-08",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/shared/maestro-lib/managed/workflows.test.ts",
+						"src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts",
+						"src/__tests__/main/cue/cue-cli-executor.test.ts"
+					]
+				},
+				{
+					"id": "MRC-07-09",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/07.json"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-19-Maestro-Mega-Integration/MAESTRO-MEGA-08.md",
+			"title": "Web Lite SSH headless and TUI control",
+			"tasks": [
+				{
+					"id": "MRC-08-01",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/web-server/handlers/bridgeHandlers.ts",
+						"src/main/web-server/handlers/messageHandlers/commands.ts"
+					]
+				},
+				{
+					"id": "MRC-08-02",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/web-server/handlers/messageHandlers/terminal.ts",
+						"src/main/web-server/handlers/messageHandlers/tabs.ts"
+					]
+				},
+				{
+					"id": "MRC-08-03",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/lite/device-credentials.ts",
+						"src/main/lite/pairing/paired-devices.ts"
+					]
+				},
+				{
+					"id": "MRC-08-04",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/launch/ssh-remote-resolver.ts",
+						"src/shared/maestro-lib/launch/ssh-spawn-wrapper.ts",
+						"src/main/enterprise/remote.ts"
+					]
+				},
+				{
+					"id": "MRC-08-05",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/server-requests.ts",
+						"src/shared/maestro-lib/client/ws-client.ts",
+						"src/shared/maestro-lib/runtime/turns.ts"
+					]
+				},
+				{
+					"id": "MRC-08-06",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/web-server/handlers/messageHandlers.test.ts",
+						"src/__tests__/main/lite/device-credentials.test.ts",
+						"src/__tests__/shared/maestro-lib/launch/launch-plan.test.ts"
+					]
+				},
+				{
+					"id": "MRC-08-07",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/08.json"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-19-Maestro-Mega-Integration/MAESTRO-MEGA-09.md",
+			"title": "Plugins browser tools and repository effects",
+			"tasks": [
+				{
+					"id": "MRC-09-01",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/plugins/permission-broker.ts",
+						"src/main/plugins/authorization-ledger.ts"
+					]
+				},
+				{
+					"id": "MRC-09-02",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/plugins/plugin-host-handlers.ts",
+						"src/main/plugins/plugin-headless-agent-runner.ts",
+						"src/main/index.ts"
+					]
+				},
+				{
+					"id": "MRC-09-03",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/plugins/permission-broker.ts",
+						"src/shared/plugins/host-api.ts",
+						"src/main/enterprise/plugin-policy.ts"
+					]
+				},
+				{
+					"id": "MRC-09-04",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/browser/browser-relay.ts",
+						"src/main/coworking/coworking-bridge.ts",
+						"src/main/enterprise/browser-policy.ts"
+					]
+				},
+				{
+					"id": "MRC-09-05",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/services/symphony-runner.ts",
+						"src/main/enterprise/repository-policy.ts"
+					]
+				},
+				{
+					"id": "MRC-09-06",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/plugins/plugin-host-handlers.test.ts",
+						"src/__tests__/main/browser/browser-relay.test.ts",
+						"src/__tests__/main/plugins/authorization-ledger.test.ts"
+					]
+				},
+				{
+					"id": "MRC-09-07",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/services/symphony-runner.test.ts",
+						"src/__tests__/main/enterprise/repository-policy.test.ts"
+					]
+				},
+				{
+					"id": "MRC-09-08",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/09.json"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-19-Maestro-Mega-Integration/MAESTRO-MEGA-10.md",
+			"title": "Fleet metadata usage and VIBES evidence",
+			"tasks": [
+				{
+					"id": "MRC-10-01",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/events.ts",
+						"src/main/agent-run/capture-service.ts",
+						"src/shared/maestro-lib/turns/record-turn.ts"
+					]
+				},
+				{
+					"id": "MRC-10-02",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/event-journal.ts",
+						"src/shared/maestro-lib/client/types.ts"
+					]
+				},
+				{
+					"id": "MRC-10-03",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/enterprise/telemetry.ts",
+						"src/shared/maestro-lib/managed/host-adapter.ts"
+					]
+				},
+				{
+					"id": "MRC-10-04",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/streaming/usage-accumulator.ts",
+						"src/main/enterprise/usage.ts"
+					]
+				},
+				{
+					"id": "MRC-10-05",
+					"kind": "IMPLEMENT",
+					"targets": ["src/main/enterprise/content.ts", "src/main/enterprise/vibes.ts"]
+				},
+				{
+					"id": "MRC-10-06",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/enterprise/inventory.ts",
+						"src/shared/maestro-lib/managed/events.ts"
+					]
+				},
+				{
+					"id": "MRC-10-07",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/shared/maestro-lib/managed/events.test.ts",
+						"src/__tests__/main/enterprise/telemetry.test.ts",
+						"src/__tests__/main/enterprise/usage.test.ts"
+					]
+				},
+				{
+					"id": "MRC-10-08",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/enterprise/content.test.ts",
+						"src/__tests__/main/enterprise/vibes.test.ts"
+					]
+				},
+				{
+					"id": "MRC-10-09",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/10.json"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-19-Maestro-Mega-Integration/MAESTRO-MEGA-11.md",
+			"title": "Typed commands notices and managed UX",
+			"tasks": [
+				{
+					"id": "MRC-11-01",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/managed/commands.ts",
+						"src/main/enterprise/commands.ts"
+					]
+				},
+				{
+					"id": "MRC-11-02",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/enterprise/inbox.ts",
+						"src/shared/maestro-lib/managed/host-adapter.ts"
+					]
+				},
+				{
+					"id": "MRC-11-03",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/renderer/components/Settings/MegaMaestroSettings.tsx",
+						"src/renderer/hooks/enterprise/useManagedStatus.ts",
+						"src/main/ipc/handlers/enterprise.ts"
+					]
+				},
+				{
+					"id": "MRC-11-04",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/renderer/components/Enterprise/ManagedStatus.tsx",
+						"src/renderer/components/Enterprise/ManagedInbox.tsx"
+					]
+				},
+				{
+					"id": "MRC-11-05",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/index.ts",
+						"src/main/enterprise/service.ts",
+						"src/main/preload/index.ts"
+					]
+				},
+				{
+					"id": "MRC-11-06",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/enterprise/commands.test.ts",
+						"src/__tests__/main/enterprise/inbox.test.ts",
+						"src/__tests__/renderer/Enterprise/ManagedStatus.test.tsx"
+					]
+				},
+				{
+					"id": "MRC-11-07",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/11.json"]
+				}
+			]
+		},
+		{
+			"path": ".maestro/playbooks/2026-10-19-Maestro-Mega-Integration/MAESTRO-MEGA-12.md",
+			"title": "Public handoff and full paired acceptance",
+			"tasks": [
+				{
+					"id": "MRC-12-01",
+					"kind": "IMPLEMENT",
+					"targets": ["scripts/package-mega-maestro-runtime.mjs", "scripts/build-maestro-lib.mjs"]
+				},
+				{
+					"id": "MRC-12-02",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"scripts/mega-maestro-pair.mjs",
+						"src/__tests__/integration/mega-maestro/journeys.ts"
+					]
+				},
+				{
+					"id": "MRC-12-03",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/integration/mega-maestro/full-pair.test.ts",
+						"src/__tests__/integration/mega-maestro/offline-recovery.test.ts",
+						"src/__tests__/integration/mega-maestro/standalone.test.ts"
+					]
+				},
+				{
+					"id": "MRC-12-04",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"docs/maestro-lib.md",
+						"docs/mega-maestro.md",
+						"Plans/mega-maestro-rc/support-matrix.json"
+					]
+				},
+				{
+					"id": "MRC-12-05",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/evidence/12-standalone.md"]
+				},
+				{
+					"id": "MRC-12-06",
+					"kind": "VERIFY",
+					"targets": ["Plans/mega-maestro-rc/joint-integration.json"]
+				}
+			]
+		}
+	],
+	"taskCount": 92,
+	"taskCounts": {
+		"IMPLEMENT": 62,
+		"TEST": 17,
+		"VERIFY": 13
+	},
+	"completionTask": "MRC-12-06",
+	"loopEnabled": false,
+	"resetOnCompletion": false,
+	"automaticHandoffs": false,
+	"producerRequirements": ["CP-01", "CP-02", "CP-03"],
+	"requirements": [
+		{
+			"id": "RC-BASE",
+			"outcome": "Exact RC source and public API provenance",
+			"phases": [1, 12]
+		},
+		{
+			"id": "RC-AUTHORITY",
+			"outcome": "Protected managed identity, durable authorization and run ownership",
+			"phases": [2, 3, 4]
+		},
+		{
+			"id": "RC-POLICY",
+			"outcome": "Endpoint-owned policy verification, applied status and offline enforcement",
+			"phases": [3, 4, 7, 11]
+		},
+		{
+			"id": "RC-CREDENTIALS",
+			"outcome": "Approved credentials/accounts, routing and provider translation",
+			"phases": [5, 6]
+		},
+		{
+			"id": "RC-EFFECTS",
+			"outcome": "Coverage of all inventoried execution/effect families with explicit route support",
+			"phases": [6, 7, 8, 9]
+		},
+		{
+			"id": "RC-FLEET",
+			"outcome": "Durable inventory, activity, usage and bounded VIBES evidence",
+			"phases": [10]
+		},
+		{
+			"id": "RC-CONTROL",
+			"outcome": "Authenticated typed commands, notices and managed UX",
+			"phases": [11]
+		},
+		{
+			"id": "RC-PAIR",
+			"outcome": "Actual Maestro/enterprise pair with positive effects, denials, recovery and standalone regression",
+			"phases": [4, 12]
+		}
+	],
+	"counterpartPrerequisites": [
+		{
+			"id": "CP-01",
+			"owner": "mega-maestro",
+			"producer": "Fresh contracts and packaged API/endpoint/gateway artifacts",
+			"neededBeforePhases": [1, 3, 4, 12],
+			"statusAtReview": "Existing archives require current source/capability verification"
+		},
+		{
+			"id": "CP-02",
+			"owner": "mega-maestro",
+			"producer": "Actual implementation of packages/runtime-adapter/src/maestro.ts",
+			"neededBeforePhases": [4, 12],
+			"statusAtReview": "Always unsupported"
+		},
+		{
+			"id": "CP-03",
+			"owner": "mega-maestro",
+			"producer": "Authenticated delegation/workflow authority, protocol receivers and durable ownership/fencing",
+			"neededBeforePhases": [7, 12],
+			"statusAtReview": "Endpoint bridge rejects nonempty delegation or workflow context"
+		}
+	],
+	"completionClaims": {
+		"localCode": "All owned implementation tasks and focused checks complete",
+		"pairedIntegration": "Both real pair milestones pass against exact source/artifact pins; required CP producers present",
+		"production": "Separate platform/provider/customer identity/custody/scale qualification; not implied by this playbook"
+	},
+	"positiveAcceptanceMatrix": [
+		{
+			"id": "enrollment-policy",
+			"required": true,
+			"outcome": "Real enrollment/actor registration, policy delivery/signature verification/install receipt and revoke",
+			"verificationTask": "MRC-03-08"
+		},
+		{
+			"id": "protected-effects",
+			"required": true,
+			"outcome": "Actual safe provider/tool child/file effect and denied child/egress through real endpoint/broker",
+			"verificationTask": "MRC-04-05"
+		},
+		{
+			"id": "headless-library",
+			"required": true,
+			"outcome": "Actual built library/runtime submit/inspect/cancel and current authority denial",
+			"verificationTask": "MRC-12-06"
+		},
+		{
+			"id": "desktop-dispatch",
+			"required": true,
+			"outcome": "Actual desktop ProcessManager child route using a declared safe fixture provider, plus denied stale authority",
+			"verificationTask": "MRC-06-10"
+		},
+		{
+			"id": "cli-dispatch",
+			"required": true,
+			"outcome": "Actual CLI dispatch/retry and revoked authority zero-effect case",
+			"verificationTask": "MRC-06-10"
+		},
+		{
+			"id": "autorun",
+			"required": true,
+			"outcome": "Actual engine runs multiple tasks with preserved lineage and changed-policy denial on a later attempt",
+			"verificationTask": "MRC-07-09"
+		},
+		{
+			"id": "cue",
+			"required": true,
+			"outcome": "Actual Cue prompt, safe constrained shell and nested CLI dispatch with authenticated owner and current policy",
+			"verificationTask": "MRC-07-09"
+		},
+		{
+			"id": "delegated-work",
+			"required": true,
+			"outcome": "Actual group-chat/consult lineage and durable owner/restart/fence behavior against CP-03",
+			"verificationTask": "MRC-07-09"
+		},
+		{
+			"id": "credential-routing",
+			"required": true,
+			"outcome": "Approved synthetic credential/gateway route and rejected user environment/account override",
+			"verificationTask": "MRC-05-09"
+		},
+		{
+			"id": "secondary-effects",
+			"required": true,
+			"outcome": "Real host plugin/browser/repository safe fixture effects plus denied scope/revocation; no live external publishing",
+			"verificationTask": "MRC-09-08"
+		},
+		{
+			"id": "fleet-evidence",
+			"required": true,
+			"outcome": "Actual events/usage/vault/VIBES/TRACE through server, endpoint, ingest and worker with known source comparison",
+			"verificationTask": "MRC-10-09"
+		},
+		{
+			"id": "commands-notices",
+			"required": true,
+			"outcome": "Actual runtime pause/resume/cancel and private notice/feedback receipts; stale/replayed control denied",
+			"verificationTask": "MRC-11-07"
+		},
+		{
+			"id": "standalone",
+			"required": true,
+			"outcome": "Existing unmanaged desktop/library/CLI/Cue/plugin behavior preserved and built library loads without Electron",
+			"verificationTask": "MRC-12-05"
+		}
+	]
+}
