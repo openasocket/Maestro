@@ -45,6 +45,7 @@ import {
 	type ApprovedCredentialSet,
 } from '../managed/credentials';
 import {
+	applyManagedEnvCeiling,
 	buildAgentEnvironment,
 	managedArgsProblems,
 	resolveAgentEnvVars,
@@ -376,10 +377,21 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 		readOnlyEnvOverrides: input.readOnlyMode ? agent?.readOnlyEnvOverrides : undefined,
 	};
 	const layered = resolveAgentEnvVars(layers);
-	const envVars =
+	let envVars =
 		layered || input.maestroEnvVars
 			? { ...(layered ?? {}), ...(input.maestroEnvVars ?? {}) }
 			: undefined;
+	if (route && envVars) {
+		// The record Process Details shows as "set by Maestro" tells the same
+		// story as the process: the user's route variables are gone and the
+		// policy's pins are there. Credential values are never in it.
+		const shown: NodeJS.ProcessEnv = { ...envVars };
+		applyManagedEnvCeiling(shown, { ceiling: route, credentialEnvVars: {} });
+		Object.assign(shown, input.maestroEnvVars ?? {});
+		const kept: Record<string, string> = {};
+		for (const [key, value] of Object.entries(shown)) if (value !== undefined) kept[key] = value;
+		envVars = Object.keys(kept).length > 0 ? kept : undefined;
+	}
 
 	// Declared secrets: CLI and Cue only, so the desktop never reads a secret
 	// file, and never into `envVars`, which crosses to an SSH remote and is

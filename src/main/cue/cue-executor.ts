@@ -8,6 +8,7 @@
  * - CueProcessLifecycle: spawns the process, captures output, enforces timeout
  */
 
+import type { ManagedLaunchInput } from '../../shared/maestro-lib/launch/launch-plan';
 import * as path from 'path';
 import { getWakaTimeManager } from '../wakatime-instance';
 import type { CueEvent, CueRunResult, CueRunStatus, CueSubscription } from './cue-types';
@@ -77,6 +78,14 @@ export interface CueExecutionConfig {
 	customEnvVars?: Record<string, string>;
 	/** Secret names this agent needs; resolved into this run's env only (see `buildAgentLaunchPlan`). */
 	requiredSecrets?: string[];
+	/**
+	 * A managed run: the policy's route ceiling and approved credential
+	 * references, handed to the launch plan as `AgentLaunchInput.managed`. The
+	 * plan then refuses the run rather than start it on a personal login, an
+	 * inherited key or a bypassing argument, and `requiredSecrets` grants
+	 * nothing. Supplied by the host; never read from cue.yaml or a bundle.
+	 */
+	managed?: ManagedLaunchInput;
 	customModel?: string;
 	customEffort?: string;
 	/** Legacy Adaptive Mode opt-in (maestro-p TUI). Off/absent means pure API. */

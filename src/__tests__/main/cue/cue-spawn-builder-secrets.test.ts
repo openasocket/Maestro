@@ -18,6 +18,8 @@ import type { SessionInfo } from '../../../shared/types';
 import { getAgentDefinition } from '../../../shared/maestro-lib/providers/definitions';
 import { getAgentCapabilities } from '../../../shared/maestro-lib/providers/capabilities';
 import { formatJsonLogLine } from '../../../shared/jsonLogLine';
+import { bindApprovedCredentials } from '../../../shared/maestro-lib/managed/credentials';
+import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
 
 vi.mock('../../../main/agents', () => ({
 	getAgentDefinition: (id: string) => getAgentDefinition(id as never),
@@ -134,6 +136,84 @@ describe('Cue run with a declared secret', () => {
 		expect(result.ok).toBe(true);
 		const warning = logLines.find((line) => line.includes('NPM_TOKEN'));
 		expect(warning).toContain('Agent \\"Deployer\\" requires secrets it did not receive');
+		expect(logLines.join('\n')).not.toContain(SENTINEL);
+	});
+});
+
+describe('a managed Cue run', () => {
+	const NOW = Date.parse('2026-10-21T12:00:00Z');
+	const managed = (secretName: string): NonNullable<CueExecutionConfig['managed']> => ({
+		route: {
+			providerId: 'codex',
+			model: null,
+			baseUrl: null,
+			accountDir: '/srv/accounts/codex-team',
+			login: 'approved-credential',
+		},
+		credentials: bindApprovedCredentials(
+			[
+				{
+					contractVersion: MANAGED_CONTRACT_VERSION,
+					refId: 'cred-codex',
+					tenantId: 't',
+					actorId: 'a',
+					agentId: 'agent-1',
+					audience: { providerId: 'codex', destination: null },
+					accountRef: null,
+					policyRevision: 1,
+					issuedAt: '2026-10-21T00:00:00Z',
+					expiresAt: '2026-10-22T00:00:00Z',
+					status: 'active',
+					source: { kind: 'server-secret', secretName, envVar: 'OPENAI_API_KEY' },
+				},
+			],
+			{
+				tenantId: 't',
+				actorId: 'a',
+				agentId: 'agent-1',
+				providerId: 'codex',
+				destination: null,
+				accountRef: null,
+				policyRevision: 1,
+				now: NOW,
+			}
+		),
+		now: NOW,
+	});
+
+	it('delivers the approved credential, ignores the declared name and the personal key, and leaks nothing', async () => {
+		const result = await buildSpawnSpec(
+			{
+				...config(
+					{ customEnvVars: { OPENAI_API_KEY: 'personal-key', CODEX_HOME: '/home/u/.codex' } },
+					['DEPLOY_TOKEN']
+				),
+				managed: managed('DEPLOY_TOKEN'),
+			},
+			'deploy now'
+		);
+		if (!result.ok) throw new Error(result.message);
+		const { env, ...rest } = result.spec;
+		expect(env.OPENAI_API_KEY).toBe(SENTINEL);
+		expect(env.DEPLOY_TOKEN).toBeUndefined();
+		expect(env.CODEX_HOME).toBe('/srv/accounts/codex-team');
+		expect(env.MAESTRO_QUERY_SOURCE).toBe('cue');
+		expect(JSON.stringify(rest)).not.toContain(SENTINEL);
+		expect(JSON.stringify(rest)).not.toContain('personal-key');
+		expect(logLines.join('\n')).not.toContain(SENTINEL);
+		expect(written.join('\n')).not.toContain(SENTINEL);
+	});
+
+	it('refuses the run when the approved credential is missing, where an ordinary run would warn and start', async () => {
+		const result = await buildSpawnSpec(
+			{ ...config({}, ['DEPLOY_TOKEN']), managed: managed('ABSENT_TOKEN') },
+			'deploy now'
+		);
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.message).toContain('ABSENT_TOKEN');
+			expect(result.message).not.toContain(SENTINEL);
+		}
 		expect(logLines.join('\n')).not.toContain(SENTINEL);
 	});
 });

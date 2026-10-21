@@ -214,6 +214,8 @@ export async function buildSpawnSpec(
 		isServerMode: config.isServerMode,
 		// The secrets this agent declared, into this run's environment only.
 		requiredSecrets,
+		// A managed run: the policy's ceiling and approved credentials, or nothing.
+		...(config.managed ? { managed: config.managed } : {}),
 		sshRemoteConfig,
 		sshStore,
 	});
