@@ -52,6 +52,7 @@ import { logger } from '../host';
 import type { BinaryDetectionResult } from '../launch/path-prober';
 import { createOutputParser } from '../parsers/parser-factory';
 import type { MaestroPaths } from '../paths/resolve';
+import type { CompletedTurn } from '../run/run-to-completion';
 import {
 	createExecutionQueue,
 	TurnCollisionError,
@@ -60,6 +61,7 @@ import {
 	type QueueItem,
 	type QueuedTurnHandle,
 } from '../turns/queue';
+import type { ManagedDispatch, ManagedSendResult, ManagedTurnPort } from '../managed/operations';
 import {
 	assembleTurn,
 	type AssembledTurn,
@@ -74,7 +76,7 @@ import {
 	type TurnRecorder,
 } from '../turns/record-turn';
 import { toTurnAgent, toTurnTab } from '../turns/records';
-import { runAgentTurn, type AgentTurnRun } from '../turns/run-agent-turn';
+import { runAgentTurn, type AgentTurnRun, type RunAgentTurnRefusal } from '../turns/run-agent-turn';
 import { createTurnEventMapper, type UnstampedTurnEvent } from '../turns/turn-events';
 import type { StatsConnectionConstructor } from '../turns/stats';
 import type { DataDirVerdict } from './data-dir-lock';
@@ -127,6 +129,8 @@ export interface RuntimeTurnsOptions {
 
 export interface RuntimeTurns {
 	readonly api: TurnsApi;
+	/** The managed facade's side: a managed send, and cancel by run id. */
+	readonly managed: ManagedTurnPort;
 	/** Look at an agent's queue again, for a hold that cleared (an Auto Run ended). */
 	drain(agentId: string): void;
 	/** Stop looking at queues: nothing more starts. Running turns are left to `registry.stopAll`. */
@@ -144,9 +148,34 @@ interface TurnItem extends QueueItem {
 	 * so a message still queued when the agent switches runs with the new provider's settings.
 	 */
 	settingsProvider: string;
+	/** Set on a managed item: the authority admits it at the spawn, the journal records it. */
+	managed?: ManagedDispatch;
 }
 
-type Verdict = { ok: true } | { ok: false; message: string };
+type Verdict = { ok: true } | { ok: false; message: string; reason?: RunAgentTurnRefusal };
+
+/** A start the provider layer refused, with its reason, so a managed caller hears which. */
+class TurnStartRefusal extends Error {
+	constructor(
+		readonly reason: RunAgentTurnRefusal,
+		message: string
+	) {
+		super(message);
+		this.name = 'TurnStartRefusal';
+	}
+}
+
+function terminalOutcomeOf(completed: CompletedTurn): 'completed' | 'failed' | 'cancelled' {
+	switch (completed.outcome) {
+		case 'completed':
+		case 'completed-with-warning':
+			return 'completed';
+		case 'interrupted':
+			return 'cancelled';
+		case 'crashed':
+			return 'failed';
+	}
+}
 
 const ok = <T>(value: T): ClientResult<T> => ({ ok: true, value });
 
@@ -244,13 +273,36 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		const turn: AssembledTurn = assembled.turn;
 		const provider = turn.settings.provider;
 
+		const managed = item.managed;
+		let leaseId: string | null = null;
 		const started = await deps.runAgentTurn(turn, {
 			sessionId: `${agentId}-ai-${item.tabId}`,
 			sshStore,
 			claudeTokenSource: getClaudeTokenSourceFields(record as ClaudeTokenSourceFields),
 			maestroPBinPath: host.maestroPBinPath ?? null,
+			...(managed
+				? {
+						managed: {
+							authority: managed.authority,
+							context: managed.context,
+							policy: managed.policy,
+							resourceIds: managed.resources.map((resource) => resource.id),
+							onLease: (lease) => {
+								leaseId = lease.leaseId;
+							},
+						},
+					}
+				: {}),
 		});
-		if (!started.ok) throw new Error(started.message);
+		if (!started.ok) {
+			if (managed) {
+				await managed.journal.markTerminal(managed.runId, managed.attemptId, {
+					outcome: 'failed',
+					detail: `${started.reason}: ${started.message}`,
+				});
+			}
+			throw new TurnStartRefusal(started.reason, started.message);
+		}
 		const run = started.run;
 
 		// The process exists, so the registry learns of it before anything is awaited: the agent
@@ -260,12 +312,29 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		const settled = new Promise<void>((resolve) => {
 			settle = resolve;
 		});
-		registry.register(agentId, item.tabId, {
-			interrupt: () => run.interrupt(),
-			terminate: () => run.terminate(),
-			terminateNow: () => run.terminateNow(),
-			done: settled,
-		});
+		registry.register(
+			agentId,
+			item.tabId,
+			{
+				interrupt: () => run.interrupt(),
+				terminate: () => run.terminate(),
+				terminateNow: () => run.terminateNow(),
+				done: settled,
+			},
+			managed ? { runId: managed.runId } : {}
+		);
+		// The process exists: the attempt is dispatched. A receipt the journal
+		// cannot write is an unknown attempt, not a started one.
+		if (managed) {
+			try {
+				await managed.journal.markDispatched(managed.runId, managed.attemptId, {
+					pid: run.pid ?? null,
+					leaseId,
+				});
+			} catch (error) {
+				logger.warn(`The run journal was not written: ${errorText(error)}`, LOG_CONTEXT);
+			}
+		}
 
 		let done: Promise<void>;
 		try {
@@ -283,7 +352,7 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 			emitTurn(agentId, item.tabId, { kind: 'user', entry: userEntry });
 			emitTurn(agentId, item.tabId, { kind: 'started' });
 
-			done = streamTurn({ agentId, tabId: item.tabId, turn, run, startedAt });
+			done = streamTurn({ agentId, tabId: item.tabId, turn, run, startedAt, managed });
 		} catch (error) {
 			run.terminate();
 			await run.result.catch(() => undefined);
@@ -304,8 +373,9 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		turn: AssembledTurn;
 		run: AgentTurnRun;
 		startedAt: number;
+		managed: ManagedDispatch | undefined;
 	}): Promise<void> {
-		const { agentId, tabId, turn, run, startedAt } = input;
+		const { agentId, tabId, turn, run, startedAt, managed } = input;
 		const provider = turn.settings.provider;
 		const mapper = createTurnEventMapper({
 			agentId: provider,
@@ -336,8 +406,30 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 			logger.warn(`Reading the turn's events failed: ${errorText(error)}`, LOG_CONTEXT);
 		}
 
-		const completed = await run.result;
+		let completed: CompletedTurn;
+		try {
+			completed = await run.result;
+		} catch (error) {
+			// The process ran and its ending was lost: the attempt is unknown, never retried blind.
+			if (managed) {
+				await managed.journal
+					.markUnknown(managed.runId, managed.attemptId, errorText(error))
+					.catch(() => undefined);
+			}
+			throw error;
+		}
 		const endedAt = deps.now();
+		if (managed) {
+			try {
+				await managed.journal.markTerminal(managed.runId, managed.attemptId, {
+					outcome: terminalOutcomeOf(completed),
+					...(completed.error ? { detail: completed.error.message } : {}),
+					providerSessionId: completed.sessionId ?? null,
+				});
+			} catch (error) {
+				logger.warn(`The run journal was not written: ${errorText(error)}`, LOG_CONTEXT);
+			}
+		}
 		if (completed.sessionId && completed.sessionId !== mapper.sessionId()) {
 			emitTurn(agentId, tabId, { kind: 'session', providerSessionId: completed.sessionId });
 		}
@@ -402,7 +494,11 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 						},
 					});
 				}
-				verdicts.get(event.item.id)?.({ ok: false, message: event.error.message });
+				verdicts.get(event.item.id)?.({
+					ok: false,
+					message: event.error.message,
+					...(event.error instanceof TurnStartRefusal ? { reason: event.error.reason } : {}),
+				});
 				verdicts.delete(event.item.id);
 				break;
 			}
@@ -447,6 +543,65 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 	// The API
 	// -----------------------------------------------------------------------
 
+	type Submission =
+		| { status: 'queued'; receipt: Extract<TurnSendReceipt, { status: 'queued' }> }
+		| { status: 'started' }
+		| { status: 'failed'; message: string; reason?: RunAgentTurnRefusal }
+		| { status: 'not-found' | 'rejected'; message: string };
+
+	/** Build the item and submit it; the two senders word the answer. */
+	async function submitText(
+		agentId: string,
+		tabId: string,
+		text: string,
+		managed?: ManagedDispatch
+	): Promise<Submission> {
+		const record = repository.getAgent(agentId);
+		if (!record) return { status: 'not-found', message: `No agent ${agentId}.` };
+		const tabRecord = repository.getTab(agentId, tabId);
+		if (!tabRecord) return { status: 'not-found', message: `No tab ${tabId}.` };
+		const agent = toTurnAgent(record);
+		if (!agent) {
+			return { status: 'rejected', message: 'The agent has no working directory to run in.' };
+		}
+		const tab = toTurnTab(tabRecord);
+
+		const item: TurnItem = {
+			id: ctx.newId(),
+			tabId,
+			text,
+			queuedAt: deps.now(),
+			readOnly: tab.readOnlyMode === true || tab.permissionMode === 'readonly',
+			turnSettings: {
+				model: tab.customModel ?? agent.customModel,
+				effort: tab.customEffort ?? agent.customEffort,
+			},
+			settingsProvider: agent.toolType,
+			...(managed ? { managed } : {}),
+		};
+
+		const queue = queueFor(agentId);
+		const attempt = new Promise<Verdict>((resolve) => verdicts.set(item.id, resolve));
+		const { queued } = queue.submit(item);
+		if (queued) {
+			verdicts.delete(item.id);
+			const waiting = queue.items();
+			return {
+				status: 'queued',
+				receipt: {
+					status: 'queued',
+					itemId: item.id,
+					// 1-based: the position the message holds in line, as the desktop reports it.
+					position: waiting.findIndex((entry) => entry.id === item.id) + 1,
+					queueLength: waiting.length,
+				},
+			};
+		}
+		const verdict = await attempt;
+		if (verdict.ok) return { status: 'started' };
+		return { status: 'failed', message: verdict.message, reason: verdict.reason };
+	}
+
 	async function send(
 		agentId: string,
 		tabId: string,
@@ -461,49 +616,65 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 			);
 		}
 		if (!input.text?.trim()) return fail(method, 'invalid', 'There is nothing to send.');
-		const record = repository.getAgent(agentId);
-		if (!record) return fail(method, 'not-found', `No agent ${agentId}.`);
-		const tabRecord = repository.getTab(agentId, tabId);
-		if (!tabRecord) return fail(method, 'not-found', `No tab ${tabId}.`);
-		const agent = toTurnAgent(record);
-		if (!agent) return fail(method, 'rejected', 'The agent has no working directory to run in.');
-		const tab = toTurnTab(tabRecord);
-
-		const item: TurnItem = {
-			id: ctx.newId(),
-			tabId,
-			text: input.text,
-			queuedAt: deps.now(),
-			readOnly: tab.readOnlyMode === true || tab.permissionMode === 'readonly',
-			turnSettings: {
-				model: tab.customModel ?? agent.customModel,
-				effort: tab.customEffort ?? agent.customEffort,
-			},
-			settingsProvider: agent.toolType,
-		};
-
-		const queue = queueFor(agentId);
-		const attempt = new Promise<Verdict>((resolve) => verdicts.set(item.id, resolve));
-		const { queued } = queue.submit(item);
-		if (queued) {
-			verdicts.delete(item.id);
-			const waiting = queue.items();
-			return ok({
-				status: 'queued',
-				itemId: item.id,
-				// 1-based: the position the message holds in line, as the desktop reports it.
-				position: waiting.findIndex((entry) => entry.id === item.id) + 1,
-				queueLength: waiting.length,
-			});
+		const submitted = await submitText(agentId, tabId, input.text);
+		switch (submitted.status) {
+			case 'queued':
+				return ok(submitted.receipt);
+			case 'started':
+				return ok({ status: 'started' });
+			case 'not-found':
+			case 'rejected':
+				return fail(method, submitted.status, submitted.message);
+			case 'failed':
+				return fail(
+					method,
+					'failed',
+					`${submitted.message} The message is held in the queue; remove it or fix the cause and resume.`
+				);
 		}
-		const verdict = await attempt;
-		if (verdict.ok) return ok({ status: 'started' });
-		return fail(
-			method,
-			'failed',
-			`${verdict.message} The message is held in the queue; remove it or fix the cause and resume.`
-		);
 	}
+
+	const managedPort: ManagedTurnPort = {
+		async sendManaged(agentId, tabId, text, dispatch): Promise<ManagedSendResult> {
+			const submitted = await submitText(agentId, tabId, text, dispatch);
+			switch (submitted.status) {
+				case 'queued':
+				case 'started':
+					return { status: submitted.status };
+				case 'not-found':
+				case 'rejected':
+					await dispatch.journal.markTerminal(dispatch.runId, dispatch.attemptId, {
+						outcome: 'failed',
+						detail: submitted.message,
+					});
+					return { status: 'refused', reason: 'other', message: submitted.message };
+				case 'failed': {
+					const reason =
+						submitted.reason === 'managed-denied' ||
+						submitted.reason === 'managed-unavailable' ||
+						submitted.reason === 'managed-unknown'
+							? submitted.reason
+							: 'other';
+					return { status: 'refused', reason, message: submitted.message };
+				}
+			}
+		},
+		async cancelRun(runId, kind) {
+			for (const queue of queues.values()) {
+				const waiting = queue.items().find((item) => item.managed?.runId === runId);
+				if (waiting?.managed && queue.remove(waiting.id)) {
+					await waiting.managed.journal.markTerminal(runId, waiting.managed.attemptId, {
+						outcome: 'cancelled',
+						detail: 'Removed from the queue before it was dispatched.',
+					});
+					return 'dequeued';
+				}
+			}
+			const stopped =
+				kind === 'interrupt' ? await registry.interruptRun(runId) : await registry.stopRun(runId);
+			return stopped ? 'stopped' : 'none';
+		},
+	};
 
 	const api: TurnsApi = {
 		send,
@@ -553,6 +724,7 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 
 	return {
 		api,
+		managed: managedPort,
 		drain: (agentId) => queues.get(agentId)?.drain(),
 		dispose() {
 			unsubscribeLifecycle();

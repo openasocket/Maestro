@@ -18,6 +18,7 @@ export * from './managed/compatibility';
 export * from './managed/authority';
 export * from './managed/binding';
 export * from './managed/run-journal';
+export * from './managed/operations';
 
 // Paths and configuration
 export * from './paths/userDataDir';

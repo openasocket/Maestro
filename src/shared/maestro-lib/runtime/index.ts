@@ -22,7 +22,7 @@ import { createAgentRepository } from '../agents/repository';
 import type { RepositoryLoadFailure } from '../agents/repository';
 import type { RuleContext, TabDefaults } from '../agents/rules';
 import { createEventBus } from '../client/event-bus';
-import type { HostInfo, MaestroClient } from '../client/types';
+import type { HostInfo, MaestroClient, ManagedApi } from '../client/types';
 import { logger } from '../host';
 import { createGroupChatTurnMetrics } from '../groupchat/turn-metrics';
 import type { BinaryDetectionResult } from '../launch/path-prober';
@@ -38,8 +38,21 @@ import {
 	type RuntimeLockInfo,
 	type RuntimeLockMode,
 } from './data-dir-lock';
-import type { HostAuthority } from '../managed/authority';
+import * as os from 'os';
+
+import { generateUUID } from '../../uuid';
+import {
+	createContextVerifier,
+	sha256Hex,
+	type HostAuthority,
+	type PolicySourceSet,
+} from '../managed/authority';
 import { createManagedBinding, type ManagedBinding } from '../managed/binding';
+import { createManagedOperations, type ApprovedResource } from '../managed/operations';
+import { createRunJournal, managedRunJournalPath, type RunJournal } from '../managed/run-journal';
+import type { ManagedAuthenticatedContext, ManagedInstallationIdentity } from '../managed/types';
+import { getVisibleAgentDefinitions } from '../providers/definitions';
+import type { AgentRecord } from '../store/records';
 import { createBackgroundTurns, type BackgroundTurnDeps } from './background-turns';
 import { createRuntimeConsults } from './consults';
 import { createRuntimeGroupChats } from './group-chats';
@@ -92,7 +105,15 @@ export interface MaestroRuntimeOptions {
 	 * with no authority, or one for another authority, runs enrolled-unavailable:
 	 * managed operations answer `unavailable`, never standalone.
 	 */
-	managed?: { authority?: HostAuthority };
+	managed?: {
+		authority?: HostAuthority;
+		/** The approved handle for a resource id a managed submission names. Default: none. */
+		resolveResource?(id: string, context: ManagedAuthenticatedContext): ApprovedResource | null;
+		/** Which agents a verified actor may see. Default: all of them. */
+		scopeAgents?(context: ManagedAuthenticatedContext, agents: AgentRecord[]): AgentRecord[];
+		/** The policy sources admissions are decided on. Default: what the enrollment record names. */
+		policy?(): PolicySourceSet;
+	};
 	deps?: Partial<RuntimeDeps>;
 }
 
@@ -112,6 +133,10 @@ export interface MaestroRuntime extends MaestroClient {
 	readonly lock: RuntimeLockInfo;
 	/** Whether this installation is enrolled, and who answers for it. */
 	readonly managedBinding: Pick<ManagedBinding, 'state' | 'reload' | 'authority'>;
+	/** The managed run journal, for a host that reports runs. Null when it could not be loaded. */
+	readonly managedRuns: Pick<RunJournal, 'get' | 'list' | 'open'> | null;
+	/** This installation as a managed peer sees it. A local label, not an enrolled device identity. */
+	readonly installation: ManagedInstallationIdentity;
 	/**
 	 * The Auto Runs in flight, for a host that reports them (`host status`, the refusal to stop with
 	 * work in flight) and replays them to a client that connects mid-run.
@@ -255,6 +280,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 				LOG_CONTEXT
 			);
 		});
+		options.managed?.authority?.revokeAll(reason);
 		bus.emit({ type: 'host.lost', reason });
 	};
 
@@ -423,6 +449,60 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		label: hostLabel(options.mode, lock.info.pid),
 	};
 
+	// Managed operations. The installation id is a label derived from this
+	// machine and the production data directory, so a peer can tell two
+	// installs apart; it is not a minted device identity (that is the peer's,
+	// bound at enrollment). The verifier accepts in-process callers that name
+	// this installation; every other transport waits on its own verifier.
+	const hostname = (deps.hostname ?? os.hostname)() ?? 'unknown-host';
+	const installation: ManagedInstallationIdentity = {
+		installationId: sha256Hex(`${hostname}\n${paths.productionDataDir}`).slice(0, 32),
+		runtimeId: `${options.mode}-${lock.info.pid}`,
+		processEpoch: lock.info.startedAt,
+	};
+	const journal = createRunJournal({
+		file: managedRunJournalPath(paths),
+		now: deps.now ?? (() => Date.now()),
+		newId: deps.rules?.newId ?? generateUUID,
+	});
+	const journalLoaded = await journal.load({ liveRunIds: registry.liveRunIds() });
+	let managed: ManagedApi | undefined;
+	if (journalLoaded.ok) {
+		const bindingPolicy = (): PolicySourceSet => {
+			const state = binding.state();
+			return state.state === 'enrolled'
+				? { sources: state.record.policySources, policyRevision: state.record.policyRevision }
+				: { sources: [], policyRevision: null };
+		};
+		managed = createManagedOperations({
+			installation,
+			binding,
+			verifier: createContextVerifier({
+				verifierId: `in-process:${installation.runtimeId}`,
+				peer: 'in-process',
+				now: deps.now ?? (() => Date.now()),
+				accept: (context) =>
+					context.installation.installationId === installation.installationId
+						? []
+						: [`installation ${context.installation.installationId} is not this one`],
+			}),
+			journal,
+			repository,
+			turns: turns.managed,
+			providers: () => getVisibleAgentDefinitions().map((definition) => definition.id),
+			policy: options.managed?.policy ?? bindingPolicy,
+			...(options.managed?.resolveResource
+				? { resolveResource: options.managed.resolveResource }
+				: {}),
+			...(options.managed?.scopeAgents ? { scopeAgents: options.managed.scopeAgents } : {}),
+		});
+	} else {
+		logger.warn(
+			`Managed operations are unavailable: the run journal ${journalLoaded.file} is ${journalLoaded.reason} (${journalLoaded.message}).`,
+			LOG_CONTEXT
+		);
+	}
+
 	const client = createRuntimeClient({
 		paths,
 		repository,
@@ -436,6 +516,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		autoRun: autoRun.api,
 		groupChats: groupChats.api,
 		consults: { api: consults.api, cancelForSource: consults.cancelForSource },
+		...(managed ? { managed } : {}),
 	});
 
 	return {
@@ -445,6 +526,8 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			paths,
 			lock: lock.info,
 			managedBinding: binding,
+			managedRuns: journalLoaded.ok ? journal : null,
+			installation,
 			runs: { activeRuns: autoRun.activeRuns, latestState: autoRun.latestState },
 			// The registry holds every process the runtime owns; the background ones are counted apart.
 			turnsInFlight: () => registry.size() - background.registeredCount(),
