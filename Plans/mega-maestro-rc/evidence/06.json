@@ -1,0 +1,421 @@
+{
+	"frontMatter": {
+		"type": "evidence",
+		"title": "Phase 06 evidence: desktop SDK, CLI and terminal effects (execution support matrix)",
+		"created": "2026-10-21",
+		"phase": 6,
+		"base_revision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+		"head_revision": "709b42b6d120a0a90d0aa71428597cc439139de3",
+		"branch": "feature/mega-maestro-v1.1.0-rc",
+		"tags": ["maestro", "mega-maestro", "integration", "evidence", "phase-06"],
+		"related": [
+			"[[EXECUTION-RULES]]",
+			"[[ANALYSIS]]",
+			"[[01]]",
+			"[[02]]",
+			"[[03]]",
+			"[[04]]",
+			"[[05]]"
+		]
+	},
+	"summary": "Phase 06 put managed admission at the actual process sinks on feature/mega-maestro-v1.1.0-rc in the Maestro checkout (macOS, Darwin 27, Node v26.12.0): the desktop process manager admits every spawn before any branch against a live host authority port and binds a lease to the process for its lifetime; the child spawner confines the admitted launch at startTurn's gate and the PTY, SSH, OpenCode-server and one-off shell routes refuse explicitly as unavailable; the Codex app-server and OpenCode sinks decide each tool effect from a live effect authority bound to lease, thread, turn and request and never fall back to an unrestricted path; the bare CLI reads the managed binding and refuses on an enrolled machine while a host-injected authority admits every spawn afresh; terminal input reaches only admitted processes; and the permission relay decides managed-first, intersected with user consent. The desktop's effect authority is unavailable in this build because the endpoint socket exposes no per-effect operation, so on a managed desktop every real provider route is refused or declined today, explicitly, and nothing counts as a positive real-provider result. Verified locally with deterministic tests over the real lease authority and declared doubles; the real pair remains blocked on the same Mega-Maestro producers as phases 04 and 05.",
+	"commits": [
+		{
+			"commit": "377722a",
+			"task": "MRC-06-01, 06-01A, 06-01B",
+			"files": [
+				"src/main/process-manager/ProcessManager.ts",
+				"src/main/process-manager/types.ts",
+				"src/main/ipc/handlers/process.ts",
+				"src/main/ipc/handlers/process/handle-spawn.ts",
+				"src/main/enterprise/spawn-authority.ts (new)",
+				"src/main/enterprise/service.ts",
+				"src/main/index.ts",
+				"src/__tests__/main/ipc/handlers/process.test.ts"
+			],
+			"lines": "+710 -86"
+		},
+		{
+			"commit": "3a0aa0b",
+			"task": "MRC-06-02",
+			"files": [
+				"src/main/process-manager/spawners/ChildProcessSpawner.ts",
+				"src/main/process-manager/spawners/PtySpawner.ts"
+			],
+			"lines": "+181 -2"
+		},
+		{
+			"commit": "3a5a94c",
+			"task": "MRC-06-03, 06-03A, 06-03B",
+			"files": [
+				"src/main/process-manager/spawners/CodexAppServerSpawner.ts",
+				"src/shared/maestro-lib/codex/server-requests.ts",
+				"src/shared/maestro-lib/managed/effects.ts (new)",
+				"src/shared/maestro-lib/index.ts",
+				"src/main/process-manager/types.ts",
+				"src/main/process-manager/ProcessManager.ts",
+				"src/main/enterprise/spawn-authority.ts",
+				"src/__tests__/main/process-manager/ProcessManager.codexRouting.test.ts"
+			],
+			"lines": "+371 -8"
+		},
+		{
+			"commit": "6e56e85",
+			"task": "MRC-06-04",
+			"files": [
+				"src/main/opencode-server/OpencodeServerManager.ts",
+				"src/main/process-manager/spawners/OpencodeServerSpawner.ts",
+				"src/main/process-manager/ProcessManager.ts"
+			],
+			"lines": "+341 -16"
+		},
+		{
+			"commit": "e08432d",
+			"task": "MRC-06-05, 06-05A, 06-05B",
+			"files": [
+				"src/cli/services/agent-spawner.ts",
+				"src/shared/maestro-lib/managed/host-adapter.ts",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/turns/run-agent-turn.ts",
+				"src/main/enterprise/dispatch.ts",
+				"src/__tests__/cli/services/agent-spawner.test.ts"
+			],
+			"lines": "+523 -155"
+		},
+		{
+			"commit": "3fca420",
+			"task": "MRC-06-06, 06-06A",
+			"files": [
+				"src/main/process-manager/ProcessManager.ts",
+				"src/main/process-manager/runners/LocalCommandRunner.ts",
+				"src/main/process-manager/runners/SshCommandRunner.ts",
+				"src/main/process-manager/types.ts"
+			],
+			"lines": "+132 -6"
+		},
+		{
+			"commit": "4c9adfd",
+			"task": "MRC-06-07, 06-07A",
+			"files": [
+				"src/main/permission-relay/PermissionRelayServer.ts",
+				"src/main/enterprise/dispatch.ts",
+				"src/main/permission-relay/integration.ts",
+				"src/main/process-manager/ProcessManager.ts",
+				"src/main/ipc/handlers/process.ts"
+			],
+			"lines": "+233 -5"
+		},
+		{
+			"commit": "4198cac",
+			"task": "MRC-06-08, 06-08A, 06-08B",
+			"files": [
+				"src/__tests__/main/process-manager/ProcessManager.serveSpawn.test.ts",
+				"src/__tests__/main/process-manager/ProcessManager.codexRouting.test.ts",
+				"src/__tests__/main/process-manager/CodexAppServerSpawner.test.ts",
+				"src/__tests__/helpers/managedSpawnPort.ts (new)",
+				"src/main/process-manager/spawners/CodexAppServerSpawner.ts"
+			],
+			"lines": "+672 -9"
+		},
+		{
+			"commit": "709b42b",
+			"task": "MRC-06-09",
+			"files": [
+				"src/__tests__/cli/services/agent-spawner.test.ts",
+				"src/__tests__/main/process-manager/ProcessManager.terminalAttach.test.ts",
+				"src/__tests__/main/permission-relay/relay-core.test.ts"
+			],
+			"lines": "+500 -0"
+		}
+	],
+	"lineBudgetNotes": "MRC-06-01 (710) is over the 500-line guideline: its three named files hold the sink (ProcessManager +330, types +95, the two handlers +80) and the overage is the new 113-line desktop port, the service and startup wiring (06-01A) and the handler test mock that the first run showed needed the admitted spawn (06-01B), all in the same commit. MRC-06-05 (523, of which 155 removed) replaced three hand-copied lease gates with leaseAdmission (06-05A) and added the CLI test's binding mock (06-05B). MRC-06-08 (672) and MRC-06-09 (500) are test tasks whose lines are the tests, the shared 151-line test double and a 13-line product repair the Codex tests found. Every other task is inside the guideline and names one to three authored files; each continuation is recorded beside its task in MAESTRO-MEGA-06.md.",
+	"commands": [
+		{
+			"command": "git merge-base --is-ancestor 6400a6da0cfbae97bd90c4b361eea163fc3a1223 HEAD",
+			"exit": 0,
+			"result": "the base revision is an ancestor of HEAD"
+		},
+		{
+			"command": "npm run lint",
+			"exit": 2,
+			"result": "exactly the two pre-existing TS2307 errors (@serenity-kit/opaque in src/main/lite/pairing/{client,host}.ts, smol-toml in translation/resources.ts), as at phases 01 to 05; no other error across tsconfig.lint, tsconfig.main and tsconfig.cli"
+		},
+		{
+			"command": "npm run lint:eslint",
+			"exit": 0,
+			"result": "clean on both configs (the first attempt was refused by the machine's Bash hook for a non-ASCII character in the output filter, not by eslint; rerun identically with an ASCII filter)"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run <process-manager, enterprise, permission-relay, ipc/handlers/process*, tabNaming, groupChat, cli/services, shared/maestro-lib/{managed,run,turns,runtime}, codex-app-server, opencode-server, integration/mega-maestro, process-listeners, coworking-injection, context-groomer, group-chat, cue>",
+			"exit": 0,
+			"result": "253 files, 5471 passed, 8 skipped (named under skippedTests), 36.7 s"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run <the same set without tabNaming, groupChat, process-listeners, coworking-injection, context-groomer, group-chat> --reporter=verbose",
+			"exit": 0,
+			"result": "224 files, 4772 passed, 8 skipped; used to name every skipped test"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/main/process-manager/{ProcessManager.serveSpawn,ProcessManager.codexRouting,CodexAppServerSpawner,ProcessManager.terminalAttach}.test.ts src/__tests__/main/permission-relay/relay-core.test.ts",
+			"exit": 0,
+			"result": "5 files, 102 passed (the MRC-06-08 and MRC-06-09 target files)"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/cli/services/agent-spawner.test.ts",
+			"exit": 0,
+			"result": "211 passed (the MRC-06-09 CLI target file, 5 managed-launch cases added)"
+		},
+		{
+			"command": "npm run build:maestro-lib",
+			"exit": 0,
+			"result": "dist/maestro-lib/index.js 1579.6 KB, maestro-lib 0.4.0, maestro-managed/1, provenance sourceRevision 709b42b6d120a0a90d0aa71428597cc439139de3, sourceDirty false, index.js sha256 72a4ab344b841a6a9ccc1be3be4a32e1ad0a42a37012adc7c4017bdbff3fb430"
+		},
+		{
+			"command": "node scripts/mega-maestro-pair.mjs check --json",
+			"exit": 2,
+			"result": "assessment.ready false; dependencies CP-01 (no contracts pin), CP-01 (no clean Linux application artifact: 4 dirty-source packaged artifacts, development checkout never certifiable), CP-02 (createMaestroAdapter unsupported), registration-approval (no API/console producer); library ready at HEAD. Identical to the phase 04 re-checks and phase 05"
+		},
+		{
+			"command": "prettier --check <the 32 files changed since 483aabf9e>",
+			"exit": 0,
+			"result": "All matched files use Prettier code style"
+		},
+		{
+			"command": "npm run docs:verify",
+			"exit": 0,
+			"result": "recorded after the six canonical-utility entries for this phase were added (see the docs commit)"
+		}
+	],
+	"notRun": [
+		"npm install (same reason as phases 01 to 05: the environment baseline is the user's; smol-toml and @serenity-kit/opaque stay absent)",
+		"the full npm test (the focused set above covers every directory this phase touched plus Cue, group chat and the process listeners)",
+		"any real provider turn: codex is installed at /opt/homebrew/bin/codex and claude at ~/.local/bin/claude, but no paid provider traffic is authorized by this playbook, and opencode is not installed, so the Codex app-server and OpenCode sinks were exercised only against the fake app-server and pure helpers",
+		"any enrollment against a Mega-Maestro API (none is running; none is authorized)",
+		"the container pair run (no Mega-Maestro input changed since the third MRC-04-05 re-check; the pair check output is identical, so repeating it would prove nothing new)",
+		"the Windows and Linux CI legs locally (macOS only here; the branch is pushed for the matrix)"
+	],
+	"failedAttemptsPreserved": [
+		"First run after MRC-06-01: 99 of the process handler tests failed with `processManager.spawnAdmitted is not a function`; the handler now spawns through the admitted path and the test's manager mock had only `spawn`. The mock learned `admitSpawn` (standalone), `spawnAdmitted` (delegating to `spawn`) and `terminalTabConfig`; no assertion changed (06-01B).",
+		"After MRC-06-03: `codexRouting` asserted the app-server spawner's options equal `{ clientVersion }` exactly; the options now carry the live `effects` read. The assertion was widened and checks the read answers null without a port (06-03B).",
+		"After MRC-06-05: 5 of the CLI spawner's #1608 cold-cache tests failed with the spawn never called. The new binding-file read ran under that suite's blanket `fs` mock (`existsSync` left true by an earlier test, `readFileSync` answering nothing), which reads as a corrupt enrollment and correctly fails closed; the suite now mocks `readManagedBindingFile` as absent (06-05B). Product behavior unchanged.",
+		"MRC-06-08's pending-revocation case found a real defect: a revoked pending Codex approval was answered through a placeholder method (`revoked`), which the answer table turns into a JSON-RPC method-not-found error instead of the method's own decline. The spawner now keeps the original request in its pending map and declines it by its method (06-08B, +13 -8 in CodexAppServerSpawner.ts).",
+		"MRC-06-09's first terminal-sink draft had a standalone `runCommand` case; the terminal attach suite mocks Windows, where the local runner spawns a real shell child. The case was dropped (the standalone runner is covered by LocalCommandRunner.test.ts) rather than spawn a shell in a unit test.",
+		"MRC-06-09's standalone CLI case first drove Codex with a `task_started` line only, which the shared resolver reads as no final text (a failure); it now emits an agent message.",
+		"Two Edit attempts on text the st-filtered file view had elided (relay server comments, the dispatch harness tail) did not match; the exact lines were read with /usr/bin/sed and patched with node scripts. The machine's Bash hook refused one inline command containing a non-ASCII character as 'control characters'; rerun with ASCII. The hook also blocks `rm` and `mv`, which is why the scratch test named under scratch is still in the tree."
+	],
+	"deterministicCoverage": {
+		"doubles": "src/__tests__/helpers/managedSpawnPort.ts: fakeSpawnPort (the REAL createLocalHostAuthority and createContextVerifier over a policy table), tableEffects (an effect authority answering from a table or a pending promise), fakeAdmission (a plain admission object, refused as forged at the manager's sink). The Codex app-server is the suite's existing fake server; the relay client is a real socket.",
+		"cases": [
+			"ProcessManager sink: no admission refused before any branch; look-alike admission forged; exact request admitted, changed prompt refused on digest; lease bound to the serve transport, spent on reuse, released on exit; policy denial as a decision; web-login actor the verifier refuses, authority never asked; revocation kills; spawner failure releases; standalone never asks",
+			"OpenCode: server key per authority/actor/policy apart from standalone; ask-mode config for a managed scope; route unavailable while unqualified; scope from the admission; permission events to exact effects",
+			"Codex routing: managed app-server turn without admission routes nothing; admission rides on the spawner config; live effects read answers the port",
+			"Codex app-server: positive accept bound to lease/thread/turn/request with the exact command effect; deny, unavailable and unknown decline under full-access args; no authority declines; pending request stays unanswered and is declined on Stop with the abort seen; exec fallback refused under management, kept standalone; pure effect extraction and codexRequestGranted",
+			"CLI: denied launch zero-effect and never retried as an effort rejection; enrolled machine without host unavailable; forged actor refused before the authority, forged lease refused at the spawn; effort retry under its own fresh admission with distinct request ids and snapshots; standalone binding unchanged",
+			"Terminal sinks: managed terminal tab refused without admission and PTY unavailable with one (lease released); preexisting terminal takes no input once managed, reason in the pane; local and SSH one-off commands refused at the runner with 126",
+			"Relay: managed deny answers the bridge without asking the user; user deny kept after a managed allow; user allow denied once the admission ended; allow+allow+live passes; throwing gate refuses, standalone gate leaves the user alone; the composed gate over fake process-manager deps denies without a live admission, decides the exact tool with the lease/actor/tab/request binding, answers not managed when standalone"
+		]
+	},
+	"skippedTests": [
+		{
+			"test": "integration/mega-maestro/early-pair.test.ts > runs the certifiable pair",
+			"reason": "check not ready; the title names CP-01 (x2), CP-02 and registration-approval (owner mega-maestro)"
+		},
+		{
+			"test": "shared/maestro-lib/run/start-turn.test.ts > applyWindowsShellRules > .cmd shim under a path with spaces",
+			"reason": "off Windows, as in phases 03 to 05"
+		},
+		{
+			"test": "main/cue/cue-engine-lock.test.ts > token identity > takes over a foreign token naming our PID",
+			"reason": "pre-existing skip, unrelated to this phase"
+		},
+		{
+			"test": "cli/services/batch-processor.test.ts > loop mode > maxLoops",
+			"reason": "pre-existing skip, unrelated to this phase"
+		},
+		{
+			"test": "main/cue/cue-db-integration.test.ts (4 real SQLite cases)",
+			"reason": "pre-existing skips, unrelated to this phase"
+		}
+	],
+	"publicBuildArtifact": {
+		"command": "npm run build:maestro-lib",
+		"sourceRevision": "709b42b6d120a0a90d0aa71428597cc439139de3",
+		"sourceDirty": false,
+		"version": "0.4.0",
+		"maestroAppVersion": "1.1.0-RC",
+		"maestroManagedContract": "maestro-managed/1",
+		"tooling": { "node": "26.12.0" },
+		"sha256": {
+			"dist/maestro-lib/index.js": "72a4ab344b841a6a9ccc1be3be4a32e1ad0a42a37012adc7c4017bdbff3fb430",
+			"dist/maestro-lib/index.d.ts": "b74a2430c659e8bda6f00155a1932874cf7ac0f2039e8f9f242cfa70cf1e75ea"
+		},
+		"note": "the library entry now exports managed/effects.ts; the docs commit after this build moves HEAD, so the next phase first sees one Maestro-owned `maestro-lib stale` dependency that a rebuild clears"
+	},
+	"supportMatrix": [
+		{
+			"surface": "desktop",
+			"os": "macOS (Darwin 27, observed)",
+			"transport": "process manager sink (every transport)",
+			"managed": "implemented",
+			"evidence": "admission required before the serve, app-server, PTY and child branches; lease bound for the process lifetime; revocation kills; serveSpawn.test.ts (9 cases) over the real lease authority",
+			"limits": "only the desktop spawn handler and terminal-tab handler resolve an actor and admit; group chat, tab naming, context groomer, the replay controller and the web terminal callback carry no admission and are refused explicitly on a managed host"
+		},
+		{
+			"surface": "desktop",
+			"os": "macOS",
+			"transport": "child-process (claude-code, codex exec, every provider with batch mode)",
+			"managed": "implemented for the launch; effects unsupported",
+			"evidence": "managedChildRefusal before any temp file, startTurn gate on the final spec with the final digest logged beside the lease (ChildProcessSpawner); route table note: provider-internal tool, file and network effects unqualified",
+			"limits": "no real provider launched under management here (no paid traffic); on this desktop a managed launch is admitted only through a reachable authority, and none is attached"
+		},
+		{
+			"surface": "desktop",
+			"os": "macOS",
+			"transport": "codex-app-server",
+			"managed": "sink implemented; effects unavailable on this host",
+			"evidence": "CodexAppServerSpawner.test.ts: accept only on a live allow bound to lease/thread/turn/request, decline on deny/unavailable/unknown/no authority even with full-access args, pending revoked on Stop, exec fallback refused; standalone fallback and table unchanged",
+			"limits": "the desktop's effect authority is unavailableEffectAuthority (no per-effect endpoint operation: CP-01, CP-03), so every managed Codex effect is declined today; not exercised against a real codex app-server"
+		},
+		{
+			"surface": "desktop",
+			"os": "macOS",
+			"transport": "opencode-server",
+			"managed": "unavailable (route table); sink implemented behind it",
+			"evidence": "managedOpencodeRefusal before the process is registered; isolated ask-mode server per authority/actor/policy, permission.updated intercepted and decided, once/reject replies, no CLI fallback; pure helpers tested in serveSpawn.test.ts",
+			"limits": "opencode is not installed on this machine; the interception has not been exercised against a real server, which is why the table keeps the route unsupported"
+		},
+		{
+			"surface": "desktop",
+			"os": "macOS",
+			"transport": "pty (terminal tabs, TTY agents)",
+			"managed": "unavailable",
+			"evidence": "managedPtyRefusal in PtySpawner; terminalAttach.test.ts: refused without admission, unavailable with one, lease released",
+			"limits": "a raw PTY has no confinement producer; prompt checks and keystroke parsing are named as insufficient"
+		},
+		{
+			"surface": "desktop",
+			"os": "macOS",
+			"transport": "ssh (any provider, SSH terminal tab)",
+			"managed": "unavailable",
+			"evidence": "managedChildRefusal on the ssh route (no containment proven on the remote); the SSH terminal tab is a PTY and refused there",
+			"limits": "no remote was contacted"
+		},
+		{
+			"surface": "desktop",
+			"os": "macOS",
+			"transport": "one-off runCommand (local PTY or shell child, SSH login shell)",
+			"managed": "unavailable",
+			"evidence": "managedCommandRefusal at LocalCommandRunner.run and SshCommandRunner.run: stderr, command-exit 126, nothing spawned or dialed; terminalAttach.test.ts",
+			"limits": "standalone runners unchanged (LocalCommandRunner.test.ts)"
+		},
+		{
+			"surface": "desktop",
+			"os": "macOS",
+			"transport": "terminal input (ProcessManager.write)",
+			"managed": "implemented",
+			"evidence": "input reaches only a process carrying an admission whose lease is bound; a terminal that predates the enrollment is refused with the reason in its pane (terminalAttach.test.ts)",
+			"limits": "per-message input admission for an admitted interactive agent's stdin is not asked (the launch lease covers the session; the broker's input operation is a follow-up seam)"
+		},
+		{
+			"surface": "desktop",
+			"os": "macOS",
+			"transport": "permission relay (claude-code standard mode)",
+			"managed": "implemented; effects unavailable on this host",
+			"evidence": "relay-core.test.ts over a real socket: managed deny never asks the user, user deny kept, user allow denied once the admission ended, allow+allow+live passes, throwing and standalone gates; createRelayManagedGate composed over the process manager",
+			"limits": "with the desktop's unavailable effect authority every relayed tool is denied under management today"
+		},
+		{
+			"surface": "maestro-cli",
+			"os": "macOS (observed); any OS by construction",
+			"transport": "child-process (both direct spawn paths, effort retry, headless plugin dispatch)",
+			"managed": "implemented",
+			"evidence": "agent-spawner.test.ts managed launches (5 cases) over createHeadlessSpawnAuthority and the real lease authority; cliSpawnAuthority reads the binding files beside the data-dir lock",
+			"limits": "a bare CLI on an enrolled machine refuses every launch as unavailable (no attached host); an attached host's authority is injected by the host, not read from the environment"
+		},
+		{
+			"surface": "any",
+			"os": "Windows, Linux",
+			"transport": "all of the above",
+			"managed": "not observed locally",
+			"evidence": "macOS only in this run; the CI matrix (ubuntu-latest, windows-latest) runs on the pushed branch",
+			"limits": "the Windows .cmd shim test is skipped off Windows"
+		},
+		{
+			"route": "synthetic-harness / child-process (synthetic-harness/node-permission-v1)",
+			"standalone": "implemented",
+			"managed": "implemented",
+			"evidence": "unchanged from 04; dispatchHarness now builds its gate with leaseAdmission (early-pair.test.ts, 7 cases pass, the real-pair case skipped)"
+		},
+		{
+			"route": "every real provider on every route",
+			"managed": "unchanged in the table: child-process implemented (launch), others unsupported",
+			"evidence": "providerRouteSupport() untouched; nothing in this phase qualifies a provider route, and the OpenCode interception stays behind the table until exercised against a real server"
+		}
+	],
+	"positiveAcceptanceMatrix": {
+		"protected-effects": {
+			"required": true,
+			"passed": false,
+			"outcomeRequired": "Actual safe provider/tool child/file effect and denied child/egress through real endpoint/broker",
+			"state": "Unchanged from 04 and 05: the Maestro side is built and exercised with the decision from a declared double; through the real endpoint the exchange still ends unauthenticated (no enrollment). Not passed; not counted."
+		},
+		"sdk-effects-decided": {
+			"required": true,
+			"passed": false,
+			"outcomeRequired": "A real Codex or OpenCode tool effect allowed and another denied through a real effect authority",
+			"state": "The sinks decide every effect from the effect authority with the exact effect and binding, proven against the fake app-server and a table authority (allow accepted, deny/unavailable/unknown declined, pending revoked). No real provider ran and no real effect producer exists (the endpoint has no per-effect operation: CP-01, CP-03). Not passed; mock-only is not counted."
+		},
+		"terminal-sinks-governed": {
+			"required": true,
+			"passed": false,
+			"outcomeRequired": "A terminal or one-off command run through a qualified broker, or refused at the real sink with nothing started",
+			"state": "The refusal half is real and observed at the sinks (PTY unavailable, runner exit 126 with nothing spawned, input blocked); the qualified-broker half has no producer. A denial-only route is not a working feature and is not counted as positive."
+		},
+		"cli-admission": {
+			"required": true,
+			"passed": false,
+			"outcomeRequired": "A CLI launch admitted and one denied through the real endpoint authority with zero effect on denial",
+			"state": "Admission on every spawn with zero effect on denial is proven over the real lease authority and a policy table; the real endpoint authority is not reachable (CP-01, CP-02). Not passed."
+		}
+	},
+	"openDependencies": [
+		{
+			"id": "CP-01",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no contracts pin and no clean Linux application artifact (pair check unchanged from phase 04)"
+		},
+		{
+			"id": "CP-02",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "createMaestroAdapter still unsupported"
+		},
+		{
+			"id": "CP-03",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no per-effect authorization operation on the endpoint socket; the desktop composes unavailableEffectAuthority and every managed effect is declined"
+		},
+		{
+			"id": "CP-04",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no enrollment or execution provisioning, so the desktop's spawn authority has no registered standing to admit with"
+		},
+		{
+			"id": "registration-approval",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no API/console producer"
+		},
+		{
+			"id": "maestro follow-ups",
+			"owner": "maestro (phase 07+)",
+			"status": "open",
+			"detail": "admit the remaining processManager.spawn callers (group chat, tab naming, context groomer, replay controller, web terminal callback) through spawnAdmitted; per-message input admission for interactive stdin; exercise the OpenCode interception against a real server before flipping the route"
+		}
+	],
+	"preExistingEnvironmentFailures": "smol-toml and @serenity-kit/opaque are absent from node_modules; they break two tsc files and the translation-*.test.ts files identically at the base revision. Fix: npm install. Left for the user.",
+	"scratch": "Patch and note scripts, command outputs and the scratch admission test copy live under .maestro/playbooks/Working/ (gitignored). One untracked file is in the source tree: src/__tests__/main/process-manager/zz-scratch-admission.test.ts, the MRC-06-01 smoke test whose cases were folded into ProcessManager.serveSpawn.test.ts; this machine's hook blocks rm and mv, so it is left for the user to delete (it passes and is not committed)."
+}
