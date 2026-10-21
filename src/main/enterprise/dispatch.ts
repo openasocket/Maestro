@@ -39,7 +39,6 @@ import {
 import { INTERACTIVE_STOP_GRACE_MS } from '../../shared/maestro-lib/control/termination';
 import {
 	buildDispatchSnapshot,
-	dispatchSnapshotDigest,
 	type AdmissionRequest,
 	type DispatchLease,
 	type HostAuthority,
@@ -62,8 +61,8 @@ import type {
 } from '../../shared/maestro-lib/managed/types';
 import {
 	DispatchRefusedError,
+	leaseAdmission,
 	startTurn,
-	type DispatchAdmission,
 	type TurnExit,
 } from '../../shared/maestro-lib/run/start-turn';
 import type { ManagedTurnAuthority } from '../../shared/maestro-lib/turns/run-agent-turn';
@@ -408,29 +407,7 @@ export async function dispatchHarness(
 		return { status: admitted.state, code: admitted.code, message: admitted.message };
 	}
 	const { lease } = admitted;
-	const gate: DispatchAdmission = {
-		admit(final) {
-			const verdict = turn.authority.check(lease, dispatchSnapshotDigest(final));
-			return verdict.ok
-				? { ok: true }
-				: {
-						ok: false,
-						state: 'denied',
-						code: 'lease-invalid',
-						message: `The lease for this launch is ${verdict.reason}.`,
-					};
-		},
-		bound: (pid) => lease.bind(pid),
-		released: (exit) =>
-			lease.release(
-				exit.spawnError
-					? { outcome: 'spawn-failed', message: exit.spawnError.message }
-					: exit.stoppedBy
-						? { outcome: 'stopped', by: exit.stoppedBy }
-						: { outcome: 'exited', exitCode: exit.exitCode, signal: exit.signal }
-			),
-		onRevoked: (listener) => lease.onRevoked(listener),
-	};
+	const gate = leaseAdmission(turn.authority, lease);
 
 	let handle: ReturnType<typeof startTurn>;
 	try {

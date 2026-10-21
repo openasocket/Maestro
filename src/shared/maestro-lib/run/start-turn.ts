@@ -12,8 +12,11 @@ import { escapeCmdArgs } from '../launch/windows-shell-escape';
 import { isWindows } from '../../platformDetection';
 import {
 	buildDispatchSnapshot,
+	dispatchSnapshotDigest,
 	type DispatchAttribution,
+	type DispatchLease,
 	type DispatchSnapshot,
+	type HostAuthority,
 } from '../managed/authority';
 import type { ManagedDenialCode } from '../managed/types';
 
@@ -161,6 +164,42 @@ export type DispatchAdmissionState = 'denied' | 'unavailable' | 'unknown';
 export type DispatchAdmissionVerdict =
 	| { ok: true }
 	| { ok: false; state: DispatchAdmissionState; code: ManagedDenialCode; message: string };
+
+/**
+ * The admission an admitted lease makes at the sink: re-check the lease
+ * against the digest of the FINAL snapshot the instant before `spawn`, bind
+ * the pid, release with the exit (spawn failure, a stop and who asked for
+ * it, or the exit code and signal), and hear a revocation. The one gate
+ * every lease-backed sink uses (`runAgentTurn`, the harness dispatch, the
+ * CLI spawner), so a caller cannot forget a step of the lifetime.
+ */
+export function leaseAdmission(
+	authority: Pick<HostAuthority, 'check'>,
+	lease: DispatchLease
+): DispatchAdmission {
+	return {
+		admit(final) {
+			const verdict = authority.check(lease, dispatchSnapshotDigest(final));
+			if (verdict.ok) return { ok: true };
+			return {
+				ok: false,
+				state: 'denied',
+				code: 'lease-invalid',
+				message: `The lease for this launch is ${verdict.reason}.`,
+			};
+		},
+		bound: (pid) => lease.bind(pid),
+		released: (exit) =>
+			lease.release(
+				exit.spawnError
+					? { outcome: 'spawn-failed', message: exit.spawnError.message }
+					: exit.stoppedBy
+						? { outcome: 'stopped', by: exit.stoppedBy }
+						: { outcome: 'exited', exitCode: exit.exitCode, signal: exit.signal }
+			),
+		onRevoked: (listener) => lease.onRevoked(listener),
+	};
+}
 
 /** Thrown by `startTurn` when the admission refuses. Nothing was spawned and nothing was written. */
 export class DispatchRefusedError extends Error {

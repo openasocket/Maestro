@@ -48,11 +48,14 @@
  */
 
 import { canonicalJson } from '../../canonicalJson';
-import type { EnrollInput } from './binding';
+import type { EnrollInput, ManagedBindingState } from './binding';
 import {
+	createContextVerifier,
 	createLocalHostAuthority,
 	sha256Hex,
+	unavailableAuthority,
 	type AdmissionRequest,
+	type ContextVerification,
 	type HostAuthority,
 	type ManagedDecisionReceipt,
 	type PolicyDecision,
@@ -68,7 +71,134 @@ import {
 	type ManagedIdentityPort,
 	type ManagedIdentityRecord,
 } from './endpoint-port';
-import type { ManagedDenialCode, ManagedInstallationIdentity, ManagedOrigin } from './types';
+import {
+	MANAGED_CONTRACT_VERSION,
+	type ManagedDenialCode,
+	type ManagedInstallationIdentity,
+	type ManagedOrigin,
+	type ManagedPrincipalRef,
+	type ManagedRunIdentity,
+} from './types';
+
+// ---------------------------------------------------------------------------
+// The spawn authority of a host with no Electron (maestro-cli, a headless
+// host, a Cue engine), composed from the managed BINDING and, when this
+// process is an attached host, the adapter above.
+// ---------------------------------------------------------------------------
+
+export interface HeadlessSpawnAuthorityDeps {
+	installation: ManagedInstallationIdentity;
+	/** The binding this process read beside the data-dir lock (`createManagedBinding().state()` or the files). */
+	binding: ManagedBindingState;
+	/**
+	 * The attached adapter when this process is itself a managed host
+	 * (`maestro-cli host`); absent for a bare CLI invocation, which then holds
+	 * no authority at all and refuses every managed launch as unavailable.
+	 */
+	host?: Pick<ManagedHostAdapter, 'authority' | 'policy'> | null;
+	/** The origin the context carries; `cli` for maestro-cli, `headless` for a host. */
+	origin: Extract<ManagedOrigin, 'cli' | 'headless' | 'cue'>;
+	/** The principal this process acts as; attribution, never authority. */
+	actor: ManagedPrincipalRef;
+	now?: () => number;
+}
+
+export interface HeadlessSpawnContextInput {
+	identity: ManagedRunIdentity;
+	traceId: string;
+	policyRevision: number | null;
+}
+
+/**
+ * What a non-desktop launch sink admits with. `standing()` is `standalone`
+ * only when the binding says so; an enrolled binding whose authority this
+ * process cannot reach (a bare CLI with no attached host, an adapter for
+ * another binding, an unreadable file) is `managed` with an authority that
+ * answers `unavailable` on every admission. Electron's absence is never an
+ * opt-out: the binding is read from the same files the desktop writes, in
+ * this data directory and the production one.
+ */
+export interface HeadlessSpawnAuthority {
+	standing(): 'standalone' | 'managed';
+	readonly authority: HostAuthority;
+	policy(): PolicySourceSet;
+	/** Why the authority is unavailable, when it is; null when it answers. */
+	readonly unavailableReason: string | null;
+	context(input: HeadlessSpawnContextInput): ContextVerification;
+}
+
+export function createHeadlessSpawnAuthority(
+	deps: HeadlessSpawnAuthorityDeps
+): HeadlessSpawnAuthority {
+	const now = deps.now ?? (() => Date.now());
+	const { binding } = deps;
+	let authority: HostAuthority;
+	let policy: () => PolicySourceSet;
+	let unavailableReason: string | null = null;
+	switch (binding.state) {
+		case 'standalone':
+			authority = unavailableAuthority('This installation holds no enrollment.');
+			policy = () => ({ sources: [], policyRevision: null });
+			break;
+		case 'enrolled':
+			if (deps.host && deps.host.authority.authorityId === binding.record.authorityId) {
+				const host = deps.host;
+				authority = host.authority;
+				policy = () => host.policy();
+			} else {
+				unavailableReason = deps.host
+					? `This process is attached to authority ${deps.host.authority.authorityId}, not to the binding's ${binding.record.authorityId}.`
+					: 'This process holds no attached host authority; an enrolled installation launches through the desktop or a maestro-cli host.';
+				authority = unavailableAuthority(unavailableReason);
+				policy = () => ({
+					sources: binding.record.policySources,
+					policyRevision: binding.record.policyRevision,
+				});
+			}
+			break;
+		case 'enrolled-unavailable':
+			unavailableReason = binding.reason;
+			authority = unavailableAuthority(binding.reason);
+			policy = () => ({
+				sources: binding.record.policySources,
+				policyRevision: binding.record.policyRevision,
+			});
+			break;
+		case 'unreadable':
+			unavailableReason = `The managed binding at ${binding.file} is unreadable: ${binding.reason}`;
+			authority = unavailableAuthority(unavailableReason);
+			policy = () => ({ sources: [], policyRevision: null });
+			break;
+	}
+	const verifier = createContextVerifier({
+		verifierId: `${deps.origin}:${deps.installation.runtimeId}`,
+		peer: 'in-process',
+		now,
+		accept: (context) =>
+			context.installation.installationId === deps.installation.installationId
+				? []
+				: [`installation ${context.installation.installationId} is not this one`],
+	});
+	return {
+		standing: () => (binding.state === 'standalone' ? 'standalone' : 'managed'),
+		authority,
+		policy,
+		unavailableReason,
+		context: (input) =>
+			verifier.verify({
+				contractVersion: MANAGED_CONTRACT_VERSION,
+				installation: deps.installation,
+				origin: deps.origin,
+				actor: deps.actor,
+				delegation: { chain: [], grantRef: null },
+				identity: input.identity,
+				policyRevision: input.policyRevision,
+				workflow: null,
+				traceId: input.traceId,
+				requestedCapabilities: ['runs.submit'],
+			}),
+	};
+}
 
 /**
  * The installation identity a runtime and a desktop compute the same way, so

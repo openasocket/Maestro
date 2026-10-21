@@ -151,6 +151,16 @@ vi.mock('../../../cli/services/storage', () => ({
 	readSshRemotes: () => mockReadSshRemotes(),
 }));
 
+// The managed binding beside the data-dir lock: this suite's `fs` mock answers
+// every path, which would read as a corrupt enrollment (and fail closed), so
+// the binding is read as absent here. The managed CLI path is exercised by
+// injecting a `HeadlessSpawnAuthority` through `SpawnAgentOptions.managed`.
+vi.mock('../../../shared/maestro-lib/managed/binding', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('../../../shared/maestro-lib/managed/binding')>();
+	return { ...actual, readManagedBindingFile: () => ({ status: 'none' as const }) };
+});
+
 // Mock SSH wrapper so SSH tests don't need real ssh/bash on the test machine
 const mockWrapSpawnWithSsh = vi.fn();
 vi.mock('../../../shared/maestro-lib/launch/ssh-spawn-wrapper', () => ({

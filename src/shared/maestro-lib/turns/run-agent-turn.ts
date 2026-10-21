@@ -62,7 +62,6 @@ import { createOutputParser } from '../parsers/parser-factory';
 import { removeTempFiles } from '../run/pipe-spawn';
 import {
 	buildDispatchSnapshot,
-	dispatchSnapshotDigest,
 	type DispatchLease,
 	type HostAuthority,
 	type PolicySourceSet,
@@ -74,7 +73,7 @@ import {
 	type CompletedTurn,
 	type RunningTurn,
 } from '../run/run-to-completion';
-import { DispatchRefusedError, type DispatchAdmission } from '../run/start-turn';
+import { DispatchRefusedError, leaseAdmission, type DispatchAdmission } from '../run/start-turn';
 import { turnProcessSpecFromPlan, type TurnProcessSpec } from '../run/start-turn';
 import type { ResolveTurnOutcomeOptions } from '../streaming/turn-outcome';
 import { writeSystemPromptFile } from './args';
@@ -533,31 +532,7 @@ export async function runAgentTurn(
 			return abandon(`managed-${admitted.state}`, admitted.message);
 		const lease = admitted.lease;
 		managed.onLease?.(lease);
-		admission = {
-			gate: {
-				admit(final) {
-					const verdict = managed.authority.check(lease, dispatchSnapshotDigest(final));
-					if (verdict.ok) return { ok: true };
-					return {
-						ok: false,
-						state: 'denied',
-						code: 'lease-invalid',
-						message: `The lease for this launch is ${verdict.reason}.`,
-					};
-				},
-				bound: (pid) => lease.bind(pid),
-				released: (exit) =>
-					lease.release(
-						exit.spawnError
-							? { outcome: 'spawn-failed', message: exit.spawnError.message }
-							: exit.stoppedBy
-								? { outcome: 'stopped', by: exit.stoppedBy }
-								: { outcome: 'exited', exitCode: exit.exitCode, signal: exit.signal }
-					),
-				onRevoked: (listener) => lease.onRevoked(listener),
-			},
-			attribution,
-		};
+		admission = { gate: leaseAdmission(managed.authority, lease), attribution };
 	}
 
 	const stopGraceMs = options.stopGraceMs ?? INTERACTIVE_STOP_GRACE_MS;

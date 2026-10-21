@@ -32,10 +32,30 @@ import { buildChildProcessEnv } from '../../shared/maestro-lib/launch/env';
 import { checkBinaryExists, checkCustomPath } from '../../shared/maestro-lib/launch/path-prober';
 import { BACKGROUND_STOP_GRACE_MS } from '../../shared/maestro-lib/control/termination';
 import {
+	DispatchRefusedError,
+	leaseAdmission,
 	startTurn,
 	DEFAULT_STDERR_TAIL_LIMIT,
 	type StartTurnOptions,
+	type TurnProcessSpec,
 } from '../../shared/maestro-lib/run/start-turn';
+import {
+	buildDispatchSnapshot,
+	type DispatchAttribution,
+} from '../../shared/maestro-lib/managed/authority';
+import {
+	createHeadlessSpawnAuthority,
+	installationIdentity,
+	type HeadlessSpawnAuthority,
+} from '../../shared/maestro-lib/managed/host-adapter';
+import {
+	managedBindingFiles,
+	readManagedBindingFile,
+	type ManagedBindingState,
+} from '../../shared/maestro-lib/managed/binding';
+import type { ManagedDenialCode } from '../../shared/maestro-lib/managed/types';
+import { resolveUserDataDir } from '../../shared/userDataDir';
+import { resolveProductionDataDir } from '../../shared/maestro-lib/paths/userDataDir';
 import { TurnCapture } from '../../shared/maestro-lib/run/turn-capture';
 import { replaceUsageStats } from '../../shared/maestro-lib/streaming/usage-totals';
 import type { TurnOutcome } from '../../shared/maestro-lib/streaming/turn-outcome';
@@ -167,6 +187,7 @@ type SpawnOverrides = Pick<
 	| 'onProgress'
 	| 'onProcessStarted'
 	| 'maestroPMaxWaitSeconds'
+	| 'managed'
 >;
 
 /** Derive an action only from known tool names and narrow public metadata fields. */
@@ -497,6 +518,13 @@ export interface AgentResult {
 	usageStats?: UsageStats;
 	error?: string;
 	/**
+	 * Set when a managed host refused the launch before anything started: the
+	 * authority's own distinction between a decision (`denied`), no decision
+	 * obtainable (`unavailable`) and an answer lost (`unknown`). A caller must
+	 * not retry an `unknown` as if it were an outage.
+	 */
+	managed?: { state: 'denied' | 'unavailable' | 'unknown'; code: ManagedDenialCode };
+	/**
 	 * How the turn ended, from the shared `resolveTurnOutcome`. `success` is
 	 * derived from it (`completed` and `completed-with-warning` succeed), so
 	 * existing callers keep working; a caller that needs to tell a user stop
@@ -657,7 +685,10 @@ const NO_EXIT_CLASSIFICATION = { detectErrorFromExit: () => null };
  * process is not guaranteed to receive the hangup, so a remote agent may
  * outlive an interrupted CLI run. Documented in Plans/maestro-lib-cli-migration.md.
  */
-function cliTurnOptions(signal: AbortSignal | undefined): StartTurnOptions {
+function cliTurnOptions(
+	signal: AbortSignal | undefined,
+	admission?: StartTurnOptions['admission']
+): StartTurnOptions {
 	return {
 		stopGraceMs: BACKGROUND_STOP_GRACE_MS,
 		signal,
@@ -665,7 +696,166 @@ function cliTurnOptions(signal: AbortSignal | undefined): StartTurnOptions {
 		stdoutTailLimit: STDOUT_TAIL_LIMIT,
 		stderrTailLimit: DEFAULT_STDERR_TAIL_LIMIT,
 		label: 'cli',
+		...(admission ? { admission } : {}),
 	};
+}
+
+// ============================================================================
+// Managed admission for a CLI launch (MRC-06-05)
+// ============================================================================
+
+/**
+ * The managed binding of the installation this CLI runs in, read from the
+ * same files the desktop writes beside the data-dir lock: this data directory
+ * first, then the production one, so an alternate `MAESTRO_USER_DATA` under
+ * an enrolled installation is still enrolled. A present file that cannot be
+ * read is `unreadable`, which fails closed. Read once per process: the
+ * binding changes only through an explicit enroll or unenroll, and a long
+ * CLI run should not flip standing between two tasks.
+ */
+function readCliManagedBinding(): ManagedBindingState {
+	const userDataDir = resolveUserDataDir();
+	const files = managedBindingFiles({
+		userDataDir,
+		productionDataDir: resolveProductionDataDir(userDataDir),
+	});
+	for (const file of files) {
+		if (!fs.existsSync(file)) continue;
+		const read = readManagedBindingFile(file);
+		if (read.status === 'none') continue;
+		if (read.status === 'unreadable') return { state: 'unreadable', file, reason: read.reason };
+		return {
+			state: 'enrolled-unavailable',
+			record: read.record,
+			file,
+			reason:
+				'maestro-cli holds no attached host authority; an enrolled installation launches through the desktop or a maestro-cli host.',
+		};
+	}
+	return { state: 'standalone', files };
+}
+
+let cliAuthority: HeadlessSpawnAuthority | null = null;
+
+/**
+ * The spawn authority of a bare CLI invocation: the installation's binding
+ * with no attached host. `standalone` while the installation holds no
+ * enrollment; `managed` and unavailable the moment it holds one, so a CLI
+ * run on an enrolled machine refuses every launch instead of running it
+ * unmanaged. A host that has an attached adapter passes its own authority
+ * through `SpawnAgentOptions.managed` and never reaches this.
+ */
+export function cliSpawnAuthority(): HeadlessSpawnAuthority {
+	if (cliAuthority) return cliAuthority;
+	const userDataDir = resolveUserDataDir();
+	cliAuthority = createHeadlessSpawnAuthority({
+		installation: installationIdentity({
+			hostname: os.hostname(),
+			productionDataDir: resolveProductionDataDir(userDataDir),
+			mode: 'cli',
+			pid: process.pid,
+			startedAt: new Date().toISOString(),
+		}),
+		binding: readCliManagedBinding(),
+		host: null,
+		origin: 'cli',
+		actor: { kind: 'service', id: `maestro-cli:${os.userInfo().username}` },
+	});
+	return cliAuthority;
+}
+
+/** Forget the process-wide CLI authority (tests, and a host that enrolls mid-run). */
+export function resetCliSpawnAuthority(): void {
+	cliAuthority = null;
+}
+
+type CliAdmission =
+	| { ok: true; admission: StartTurnOptions['admission'] }
+	| { ok: false; result: AgentResult };
+
+function managedRefusal(
+	state: 'denied' | 'unavailable' | 'unknown',
+	code: ManagedDenialCode,
+	message: string
+): AgentResult {
+	return { ...spawnFailureResult(`[managed-${state}] ${message}`), managed: { state, code } };
+}
+
+/**
+ * Admit one CLI launch on the FINAL spec, the way `runAgentTurn` admits a
+ * turn: a standalone host needs no admission; a managed host binds the run
+ * identity into a verified context, asks its authority with the snapshot of
+ * exactly what will be spawned, and gets back a lease the gate re-checks the
+ * instant before `spawn`. Called on every spawn, so the effort retry, a
+ * replanned launch and a headless plugin's dispatch each carry their own.
+ * Nothing short of `admitted` leads anywhere: the refusal is the result.
+ */
+async function admitCliLaunch(
+	authority: HeadlessSpawnAuthority | undefined,
+	spec: TurnProcessSpec,
+	attribution: DispatchAttribution
+): Promise<CliAdmission> {
+	if (!authority || authority.standing() === 'standalone')
+		return { ok: true, admission: undefined };
+	const requestId = generateUUID();
+	const policy = authority.policy();
+	const verified = authority.context({
+		identity: {
+			requestId,
+			idempotencyKey: requestId,
+			attemptId: generateUUID(),
+			runId: null,
+			rootRunId: null,
+			parentRunId: null,
+		},
+		traceId: `cli-${requestId}`,
+		policyRevision: policy.policyRevision,
+	});
+	if (!verified.ok) {
+		return {
+			ok: false,
+			result: managedRefusal(
+				'denied',
+				verified.code,
+				`The launch's actor could not be bound: ${verified.problems.join('; ')}.`
+			),
+		};
+	}
+	const admitted = await authority.authority.admit({
+		context: verified.context,
+		snapshot: buildDispatchSnapshot(spec, attribution),
+		policy,
+	});
+	if (admitted.state !== 'admitted') {
+		return { ok: false, result: managedRefusal(admitted.state, admitted.code, admitted.message) };
+	}
+	return {
+		ok: true,
+		admission: { gate: leaseAdmission(authority.authority, admitted.lease), attribution },
+	};
+}
+
+/** The attribution a CLI launch is admitted with: the provider, the operation and the target. */
+function cliAttribution(
+	toolType: ToolType,
+	input: { resuming: boolean; sshRemoteConfig?: AgentSshRemoteConfig; model?: string }
+): DispatchAttribution {
+	return {
+		provider: toolType,
+		model: input.model ?? null,
+		operation: input.resuming ? 'resume' : 'start',
+		target:
+			input.sshRemoteConfig?.enabled && input.sshRemoteConfig.remoteId
+				? { kind: 'ssh', remoteId: input.sshRemoteConfig.remoteId }
+				: { kind: 'local' },
+	};
+}
+
+/** A refusal thrown by the gate inside `startTurn`, as the result a CLI caller reads. */
+function refusedResult(error: unknown): AgentResult | null {
+	return error instanceof DispatchRefusedError
+		? managedRefusal(error.state, error.code, error.message)
+		: null;
 }
 
 /**
@@ -1044,22 +1234,42 @@ async function spawnClaudeAgent(
 		}
 	};
 
-	const turn = startTurn(
-		{
-			command: spawnCommand,
-			args: spawnArgs,
-			cwd: spawnCwd,
-			env: spawnEnv,
-			stdin: sshStdinScript || plan.stdin,
-		},
-		{
-			onStarted: overrides.onProcessStarted,
-			onStdout: () => wakaHeartbeat?.(),
-			onLine: processLine,
-			onOversizedLine: warnOversizedLineBuffer,
-		},
-		cliTurnOptions(undefined)
+	// Everything about the launch is final here; a managed host admits exactly
+	// this spec and the lease is re-checked against it inside `startTurn`.
+	const spec: TurnProcessSpec = {
+		command: spawnCommand,
+		args: spawnArgs,
+		cwd: spawnCwd,
+		env: spawnEnv,
+		stdin: sshStdinScript || plan.stdin,
+	};
+	const admitted = await admitCliLaunch(
+		overrides.managed,
+		spec,
+		cliAttribution('claude-code', {
+			resuming: !!agentSessionId,
+			sshRemoteConfig,
+			model: overrides.customModel,
+		})
 	);
+	if (!admitted.ok) return admitted.result;
+	let turn: ReturnType<typeof startTurn>;
+	try {
+		turn = startTurn(
+			spec,
+			{
+				onStarted: overrides.onProcessStarted,
+				onStdout: () => wakaHeartbeat?.(),
+				onLine: processLine,
+				onOversizedLine: warnOversizedLineBuffer,
+			},
+			cliTurnOptions(undefined, admitted.admission)
+		);
+	} catch (error) {
+		const refused = refusedResult(error);
+		if (refused) return refused;
+		throw error;
+	}
 	let forcedStop!: () => void;
 	const forced = new Promise<undefined>((resolve) => {
 		forcedStop = () => resolve(undefined);
@@ -1372,99 +1582,115 @@ async function spawnJsonLineAgent(
 		});
 	};
 
-	const turn = startTurn(
-		{
-			command: spawnCommand,
-			args: spawnArgs,
-			cwd: spawnCwd,
-			env: spawnEnv,
-			stdin: sshStdinScript || plan.stdin,
-		},
-		{
-			onStarted: overrides.onProcessStarted,
-			onStdout: () => wakaHeartbeat?.(),
-			onEvent: (event) => {
-				if (stopped || overrides.signal?.aborted) {
-					capture.handleEvent({ ...event, type: 'system', text: undefined });
-					return;
-				}
-				capture.handleEvent(event);
-				if (
-					toolType === 'codex' &&
-					!event.isRetryNotice &&
-					event.raw &&
-					typeof event.raw === 'object' &&
-					((['text', 'result'].includes(event.type) && Boolean(event.text)) ||
-						event.type === 'tool_use' ||
-						event.type === 'usage')
-				)
-					supervision.modelActivity();
-				if (event.type === 'tool_use') {
-					const tool =
-						typeof event.toolName === 'string' &&
-						/^[A-Za-z][A-Za-z0-9_.:-]{0,79}$/.test(event.toolName)
-							? event.toolName
-							: 'Tool';
-					const state =
-						event.toolState && typeof event.toolState === 'object' && 'status' in event.toolState
-							? (event.toolState as { status?: unknown }).status
-							: undefined;
-					const status =
-						state === 'failed' || state === 'error'
-							? 'failed'
-							: state === 'completed' || state === 'success'
-								? 'completed'
-								: 'started';
-					const input =
-						event.toolState && typeof event.toolState === 'object' && 'input' in event.toolState
-							? (event.toolState as { input?: unknown }).input
-							: undefined;
-					let summary = status === 'started' ? publicToolSummary(tool, input) : undefined;
-					if (event.toolCallId && event.toolCallId.length <= 128) {
-						if (status === 'started' && summary) {
-							progressSummaries.set(event.toolCallId, summary);
-							if (progressSummaries.size > 128) {
-								const oldest = progressSummaries.keys().next().value;
-								if (oldest) progressSummaries.delete(oldest);
-							}
-						} else if (status !== 'started') {
-							summary = progressSummaries.get(event.toolCallId);
-							progressSummaries.delete(event.toolCallId);
-						}
-					}
-					emitAgentProgress(overrides.onProgress, {
-						type: 'tool',
-						tool,
-						status,
-						...(summary ? { summary } : {}),
-						at: new Date().toISOString(),
-					});
-				}
-				// Phase-less Codex messages remain buffered until a distinct answer
-				// follows. Only then can we safely release one as public progress.
-				if (toolType === 'codex' && event.responsePhase === 'commentary' && event.text) {
-					emitCodexInterim(event.text);
-				}
-
-				if (event.type === 'result' && event.text) {
-					if (toolType === 'codex') {
-						if (event.responsePhase === 'final') {
-							if (codexCandidate && codexCandidate !== event.text) {
-								emitCodexInterim(codexCandidate);
-							}
-							codexCandidate = undefined;
-							codexFinal = event.text;
-						} else if (!codexFinal && event.text !== codexCandidate) {
-							if (codexCandidate) emitCodexInterim(codexCandidate);
-							codexCandidate = event.text;
-						}
-					}
-				}
-			},
-			onOversizedLine: warnOversizedLineBuffer,
-		},
-		{ ...cliTurnOptions(undefined), parser }
+	// Everything about the launch is final here; a managed host admits exactly
+	// this spec and the lease is re-checked against it inside `startTurn`.
+	const spec: TurnProcessSpec = {
+		command: spawnCommand,
+		args: spawnArgs,
+		cwd: spawnCwd,
+		env: spawnEnv,
+		stdin: sshStdinScript || plan.stdin,
+	};
+	const admitted = await admitCliLaunch(
+		overrides.managed,
+		spec,
+		cliAttribution(toolType, { resuming: isResume, sshRemoteConfig, model: overrides.customModel })
 	);
+	if (!admitted.ok) return admitted.result;
+	let turn: ReturnType<typeof startTurn>;
+	try {
+		turn = startTurn(
+			spec,
+			{
+				onStarted: overrides.onProcessStarted,
+				onStdout: () => wakaHeartbeat?.(),
+				onEvent: (event) => {
+					if (stopped || overrides.signal?.aborted) {
+						capture.handleEvent({ ...event, type: 'system', text: undefined });
+						return;
+					}
+					capture.handleEvent(event);
+					if (
+						toolType === 'codex' &&
+						!event.isRetryNotice &&
+						event.raw &&
+						typeof event.raw === 'object' &&
+						((['text', 'result'].includes(event.type) && Boolean(event.text)) ||
+							event.type === 'tool_use' ||
+							event.type === 'usage')
+					)
+						supervision.modelActivity();
+					if (event.type === 'tool_use') {
+						const tool =
+							typeof event.toolName === 'string' &&
+							/^[A-Za-z][A-Za-z0-9_.:-]{0,79}$/.test(event.toolName)
+								? event.toolName
+								: 'Tool';
+						const state =
+							event.toolState && typeof event.toolState === 'object' && 'status' in event.toolState
+								? (event.toolState as { status?: unknown }).status
+								: undefined;
+						const status =
+							state === 'failed' || state === 'error'
+								? 'failed'
+								: state === 'completed' || state === 'success'
+									? 'completed'
+									: 'started';
+						const input =
+							event.toolState && typeof event.toolState === 'object' && 'input' in event.toolState
+								? (event.toolState as { input?: unknown }).input
+								: undefined;
+						let summary = status === 'started' ? publicToolSummary(tool, input) : undefined;
+						if (event.toolCallId && event.toolCallId.length <= 128) {
+							if (status === 'started' && summary) {
+								progressSummaries.set(event.toolCallId, summary);
+								if (progressSummaries.size > 128) {
+									const oldest = progressSummaries.keys().next().value;
+									if (oldest) progressSummaries.delete(oldest);
+								}
+							} else if (status !== 'started') {
+								summary = progressSummaries.get(event.toolCallId);
+								progressSummaries.delete(event.toolCallId);
+							}
+						}
+						emitAgentProgress(overrides.onProgress, {
+							type: 'tool',
+							tool,
+							status,
+							...(summary ? { summary } : {}),
+							at: new Date().toISOString(),
+						});
+					}
+					// Phase-less Codex messages remain buffered until a distinct answer
+					// follows. Only then can we safely release one as public progress.
+					if (toolType === 'codex' && event.responsePhase === 'commentary' && event.text) {
+						emitCodexInterim(event.text);
+					}
+
+					if (event.type === 'result' && event.text) {
+						if (toolType === 'codex') {
+							if (event.responsePhase === 'final') {
+								if (codexCandidate && codexCandidate !== event.text) {
+									emitCodexInterim(codexCandidate);
+								}
+								codexCandidate = undefined;
+								codexFinal = event.text;
+							} else if (!codexFinal && event.text !== codexCandidate) {
+								if (codexCandidate) emitCodexInterim(codexCandidate);
+								codexCandidate = event.text;
+							}
+						}
+					}
+				},
+				onOversizedLine: warnOversizedLineBuffer,
+			},
+			{ ...cliTurnOptions(undefined, admitted.admission), parser }
+		);
+	} catch (error) {
+		const refused = refusedResult(error);
+		if (refused) return refused;
+		throw error;
+	}
 	let forcedStop!: () => void;
 	const forced = new Promise<undefined>((resolve) => {
 		forcedStop = () => resolve(undefined);
@@ -1535,6 +1761,14 @@ async function spawnJsonLineAgent(
 export interface SpawnAgentOptions {
 	/** Host-only lifecycle callback; no plugin can assert its own busy state. */
 	onProcessStarted?: (pid: number | undefined) => void;
+	/**
+	 * The spawn authority of the host running this CLI (`maestro-cli host`, the
+	 * Cue engine): its attached adapter answers admissions. Omitted by a bare
+	 * CLI invocation, which then reads the managed binding beside the data-dir
+	 * lock itself and, when the installation is enrolled, holds no authority
+	 * and refuses every launch as unavailable. Never a way to opt out.
+	 */
+	managed?: HeadlessSpawnAuthority;
 	pluginRunProofFile?: string;
 	mcpCliScriptPath?: string;
 	timeoutMs?: number;
@@ -1680,6 +1914,9 @@ async function spawnAgentOnce(
 		additionalDirectories: options?.additionalDirectories,
 		querySource: options?.querySource,
 		maestroPMaxWaitSeconds: options?.maestroPMaxWaitSeconds,
+		// Resolved on EVERY spawn, so the effort retry above and a replanned
+		// launch each get a fresh admission on their own final plan.
+		managed: options?.managed ?? cliSpawnAuthority(),
 	};
 	// Single source of truth for the token-source triple (never a partial forward).
 	const tokenSource = getClaudeTokenSourceFields(options);
