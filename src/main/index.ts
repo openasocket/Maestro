@@ -1069,6 +1069,9 @@ app
 		processManager = new ProcessManager(() => isEncoreFeatureEnabled(store, 'opencodeServer'), {
 			appVersion: app.getVersion(),
 			isCoworkingEnabled: () => isEncoreFeatureEnabled(store, 'coworking'),
+			// The enterprise service is composed later in startup; read live so an
+			// enrollment that appears after this point governs every later spawn.
+			spawnAuthority: () => enterpriseService?.spawnAuthority ?? null,
 		});
 		// Note: webServer is created on-demand when user enables web interface (see setupWebServerCallbacks)
 		agentDetector = new AgentDetector();

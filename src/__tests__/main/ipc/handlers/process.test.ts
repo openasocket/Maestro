@@ -311,6 +311,9 @@ describe('process IPC handlers', () => {
 		get: ReturnType<typeof vi.fn>;
 		runCommand: ReturnType<typeof vi.fn>;
 		spawnTerminalTab: ReturnType<typeof vi.fn>;
+		admitSpawn: ReturnType<typeof vi.fn>;
+		spawnAdmitted: ReturnType<typeof vi.fn>;
+		terminalTabConfig: ReturnType<typeof vi.fn>;
 	};
 	let mockAgentDetector: {
 		getAgent: ReturnType<typeof vi.fn>;
@@ -348,6 +351,11 @@ describe('process IPC handlers', () => {
 			get: vi.fn(),
 			runCommand: vi.fn(),
 			spawnTerminalTab: vi.fn(),
+			// A standalone host: the admitted spawn is the plain spawn, and the
+			// terminal tab request is admitted as built (see ProcessManager).
+			admitSpawn: vi.fn().mockResolvedValue({ state: 'standalone' }),
+			spawnAdmitted: vi.fn((config: unknown) => Promise.resolve(mockProcessManager.spawn(config))),
+			terminalTabConfig: vi.fn((config: unknown) => config),
 		};
 
 		// Create mock agent detector

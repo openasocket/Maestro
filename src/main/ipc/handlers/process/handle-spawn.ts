@@ -23,7 +23,10 @@ import {
 	MCP_CONFIG_BY_AGENT,
 } from '../../../../shared/plugins/mcp-agent-config';
 import type { InteractiveReplayController } from '../../../agents/claude-interactive-replay';
-import type { ProcessConfig as ProcessSpawnConfig } from '../../../process-manager/types';
+import type {
+	ProcessConfig as ProcessSpawnConfig,
+	ProcessSpawnActor,
+} from '../../../process-manager/types';
 import type { AgentConfigsData } from '../../../stores/types';
 import { logger } from '../../../utils/logger';
 import { isWindows } from '../../../../shared/platformDetection';
@@ -997,50 +1000,56 @@ async function handleProcessSpawnImpl(
 		}
 	}
 
-	const result = processManager.spawn({
-		...config,
-		command: commandToSpawn,
-		args: argsToSpawn,
-		// When using SSH, use user's home directory as local cwd
-		// The remote working directory is embedded in the SSH stdin script
-		// This fixes ENOENT errors when session.cwd is a remote-only path
-		cwd: sshRemoteUsed ? os.homedir() : config.cwd,
-		// When using SSH, disable PTY (SSH provides its own terminal handling)
-		requiresPty: sshRemoteUsed ? false : agent?.requiresPty,
-		// For SSH, prompt is included in the stdin script, not passed separately
-		// For local execution, pass prompt (with system prompt embedded for non-append-system-prompt agents)
-		prompt: sshRemoteUsed ? undefined : effectivePrompt,
-		// Host-authoritative (see above): overrides whatever the caller sent.
-		sendPromptViaStdin,
-		sendPromptViaStdinRaw,
-		shell: shellToUse,
-		runInShell: useShell,
-		shellArgs: shellArgsStr, // Shell-specific CLI args (for terminal sessions)
-		shellEnvVars: globalShellEnvVars, // Global shell env vars (for both terminals and agents)
-		contextWindow, // Pass configured context window to process manager
-		ompModelCatalogKey, // Identity for the omp model catalog (local omp only)
-		// When using SSH, env vars are passed in the stdin script, not locally
-		customEnvVars: customEnvVarsToPass,
-		imageArgs: agent?.imageArgs, // Function to build image CLI args (for Codex, OpenCode)
-		imagePromptBuilder: agent?.imagePromptBuilder, // Function to embed image refs into prompts (for Copilot)
-		promptArgs: agent?.promptArgs, // Function to build prompt args (e.g., ['-p', prompt] for OpenCode)
-		noPromptSeparator: agent?.noPromptSeparator, // Some agents don't support '--' before prompt
-		// Stats tracking: use cwd as projectPath if not explicitly provided
-		projectPath: config.cwd,
-		// SSH remote context (for SSH-specific error messages)
-		sshRemoteId: sshRemoteUsed?.id,
-		sshRemoteHost: sshRemoteUsed?.host,
-		// SSH stdin script - the entire command is sent via stdin to /bin/bash on remote
-		sshStdinScript,
-		// Human-readable remote agent invocation (shown in Process Details)
-		sshRemoteCommand,
-		// Extra dirs to prepend to spawn PATH (local non-SSH only)
-		extraPathDirs: localAgentBinDir ? [localAgentBinDir] : undefined,
-		// Host-authoritative (see above): overrides whatever the caller sent.
-		codexTransport,
-		// SSH app-server launch, when this Codex turn wants app-server.
-		codexAppServerSsh: sshWrap.codexAppServerSsh,
-	});
+	// Admitted for the actor this transport resolved (the keyboard, or the
+	// logged-in browser account) before any branch: a managed host spawns
+	// nothing without an admission, a standalone host spawns as before.
+	const result = await processManager.spawnAdmitted(
+		{
+			...config,
+			command: commandToSpawn,
+			args: argsToSpawn,
+			// When using SSH, use user's home directory as local cwd
+			// The remote working directory is embedded in the SSH stdin script
+			// This fixes ENOENT errors when session.cwd is a remote-only path
+			cwd: sshRemoteUsed ? os.homedir() : config.cwd,
+			// When using SSH, disable PTY (SSH provides its own terminal handling)
+			requiresPty: sshRemoteUsed ? false : agent?.requiresPty,
+			// For SSH, prompt is included in the stdin script, not passed separately
+			// For local execution, pass prompt (with system prompt embedded for non-append-system-prompt agents)
+			prompt: sshRemoteUsed ? undefined : effectivePrompt,
+			// Host-authoritative (see above): overrides whatever the caller sent.
+			sendPromptViaStdin,
+			sendPromptViaStdinRaw,
+			shell: shellToUse,
+			runInShell: useShell,
+			shellArgs: shellArgsStr, // Shell-specific CLI args (for terminal sessions)
+			shellEnvVars: globalShellEnvVars, // Global shell env vars (for both terminals and agents)
+			contextWindow, // Pass configured context window to process manager
+			ompModelCatalogKey, // Identity for the omp model catalog (local omp only)
+			// When using SSH, env vars are passed in the stdin script, not locally
+			customEnvVars: customEnvVarsToPass,
+			imageArgs: agent?.imageArgs, // Function to build image CLI args (for Codex, OpenCode)
+			imagePromptBuilder: agent?.imagePromptBuilder, // Function to embed image refs into prompts (for Copilot)
+			promptArgs: agent?.promptArgs, // Function to build prompt args (e.g., ['-p', prompt] for OpenCode)
+			noPromptSeparator: agent?.noPromptSeparator, // Some agents don't support '--' before prompt
+			// Stats tracking: use cwd as projectPath if not explicitly provided
+			projectPath: config.cwd,
+			// SSH remote context (for SSH-specific error messages)
+			sshRemoteId: sshRemoteUsed?.id,
+			sshRemoteHost: sshRemoteUsed?.host,
+			// SSH stdin script - the entire command is sent via stdin to /bin/bash on remote
+			sshStdinScript,
+			// Human-readable remote agent invocation (shown in Process Details)
+			sshRemoteCommand,
+			// Extra dirs to prepend to spawn PATH (local non-SSH only)
+			extraPathDirs: localAgentBinDir ? [localAgentBinDir] : undefined,
+			// Host-authoritative (see above): overrides whatever the caller sent.
+			codexTransport,
+			// SSH app-server launch, when this Codex turn wants app-server.
+			codexAppServerSsh: sshWrap.codexAppServerSsh,
+		},
+		currentSpawnActor()
+	);
 	if (!result.success && pluginRunToken) exitListener.current?.(config.sessionId);
 	if (result.success) proofCleanup.release = undefined;
 
@@ -1248,12 +1257,24 @@ async function handleProcessSpawnImpl(
 }
 
 /**
+ * Who is asking for this spawn, as the transport knows it: a bridge call from
+ * a logged-in browser runs inside an acting-user context, an Electron IPC
+ * call from the desktop renderer runs outside any and is the operator at the
+ * keyboard. This is attribution the managed authority binds, never authority
+ * itself: a web login is a local operator, not an enterprise principal.
+ */
+export function currentSpawnActor(): ProcessSpawnActor {
+	const actingUser = getActingUser();
+	return actingUser ? { peer: 'web-login', username: actingUser.username } : { peer: 'in-process' };
+}
+
+/**
  * Tell the tab why a spawn was refused, in its own output. Used for failures
  * found before a process exists (an unresolvable SSH remote, the permission
  * relay), which therefore have no exit to report them.
  */
-function reportSpawnRefusal(
-	deps: SpawnHandlerDependencies,
+export function reportSpawnRefusal(
+	deps: Pick<SpawnHandlerDependencies, 'getMainWindow'>,
 	sessionId: string,
 	message: string
 ): void {

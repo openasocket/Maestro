@@ -7,7 +7,7 @@ import * as path from 'path';
 import { ProcessManager } from '../../process-manager';
 import { AgentDetector } from '../../agents';
 import type { InteractiveReplayController } from '../../agents/claude-interactive-replay';
-import type { ProcessConfig as ProcessSpawnConfig } from '../../process-manager/types';
+import type { ProcessConfig as ProcessSpawnConfig, SpawnResult } from '../../process-manager/types';
 import { logger } from '../../utils/logger';
 import { getChildProcesses } from '../../process-manager/utils/childProcessInfo';
 import { addBreadcrumb } from '../../utils/sentry';
@@ -24,7 +24,7 @@ import type { SshRemoteConfig } from '../../../shared/types';
 import { buildSshOptionArgs } from '../../../shared/sshOptions';
 import { MaestroSettings } from './persistence';
 import { getDefaultShell, resolveConfiguredShell } from '../../stores/defaults';
-import { handleProcessSpawn } from './process/handle-spawn';
+import { currentSpawnActor, handleProcessSpawn, reportSpawnRefusal } from './process/handle-spawn';
 import type { SpawnProcessConfig } from './process/spawn-types';
 import {
 	initPermissionRelay,
@@ -486,17 +486,23 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 						remoteParts.push('exec "$SHELL" -l');
 						sshArgs.push(remoteParts.join(' && '));
 
-						return processManager.spawn({
-							sessionId: config.sessionId,
-							reuseTerminal: true,
-							toolType: 'terminal',
-							cwd: os.homedir(),
-							command: await resolveSshPath(),
-							args: sshArgs,
-							shellEnvVars: mergedEnvVars,
-							cols: config.cols || 80,
-							rows: config.rows || 24,
-						});
+						return reportTerminalRefusal(
+							await processManager.spawnAdmitted(
+								{
+									sessionId: config.sessionId,
+									reuseTerminal: true,
+									toolType: 'terminal',
+									cwd: os.homedir(),
+									command: await resolveSshPath(),
+									args: sshArgs,
+									shellEnvVars: mergedEnvVars,
+									cols: config.cols || 80,
+									rows: config.rows || 24,
+								},
+								currentSpawnActor()
+							),
+							config.sessionId
+						);
 					}
 					// SSH is enabled but the remote config was not found (deleted or disabled).
 					// Fail explicitly rather than silently falling through to a local terminal,
@@ -508,7 +514,10 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 					return { success: false, pid: 0 };
 				}
 
-				return processManager.spawnTerminalTab({
+				// The exact request `spawnTerminalTab` will build is admitted for the
+				// actor first: a managed host spawns no PTY without an admission, a
+				// standalone host spawns as before.
+				const terminalConfig = {
 					sessionId: config.sessionId,
 					cwd: config.cwd,
 					shell: shellToUse,
@@ -516,10 +525,45 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 					shellEnvVars: mergedEnvVars,
 					cols: config.cols || 80,
 					rows: config.rows || 24,
-				});
+				};
+				const admitted = await processManager.admitSpawn(
+					processManager.terminalTabConfig(terminalConfig),
+					currentSpawnActor()
+				);
+				if (admitted.state !== 'standalone' && admitted.state !== 'admitted') {
+					return reportTerminalRefusal(
+						{
+							pid: -1,
+							success: false,
+							error: admitted.message,
+							managed: { state: admitted.state, code: admitted.code },
+						},
+						config.sessionId
+					);
+				}
+				return processManager.spawnTerminalTab(
+					admitted.state === 'admitted'
+						? { ...terminalConfig, admission: admitted.admission }
+						: terminalConfig
+				);
 			}
 		)
 	);
+
+	/**
+	 * A terminal tab has no agent-error surface, so a managed refusal is
+	 * written into the tab's own output, where the user asked for the shell.
+	 */
+	function reportTerminalRefusal(result: SpawnResult, sessionId: string): SpawnResult {
+		if (!result.success && result.managed) {
+			reportSpawnRefusal(
+				{ getMainWindow },
+				sessionId,
+				result.error ?? 'The spawn was not admitted.'
+			);
+		}
+		return result;
+	}
 
 	// Run a single command and capture only stdout/stderr (no PTY echo/prompts)
 	// Supports SSH remote execution when sessionSshRemoteConfig is provided

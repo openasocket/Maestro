@@ -8,6 +8,91 @@ import type { TurnOutcome } from '../../shared/maestro-lib/streaming/turn-outcom
 import type { CodexTransport } from '../../shared/codexTransport';
 import type { CodexAppServerSshLaunch } from '../codex-app-server/ssh-launch';
 import type { CodexAppServerProcessHandle } from '../codex-app-server/protocol';
+import type {
+	ContextVerification,
+	DispatchOperation,
+	HostAuthority,
+	PolicySourceSet,
+} from '../../shared/maestro-lib/managed/authority';
+import type {
+	ManagedDenialCode,
+	ManagedDispatchTarget,
+	ManagedPrincipalRef,
+	ManagedRunIdentity,
+} from '../../shared/maestro-lib/managed/types';
+
+// ============================================================================
+// Managed admission at the process sink
+// ============================================================================
+
+/**
+ * Who asked for a spawn, as the transport that carried the request knows it.
+ * `in-process` is the desktop operator at the keyboard (an Electron IPC call
+ * runs outside any acting-user context); `web-login` is a logged-in browser
+ * account, which is attribution for the record, not an enterprise principal:
+ * the principal of a managed launch is always the enrollment's registered
+ * actor, and the web user is carried on the delegation chain.
+ */
+export type ProcessSpawnActor = { peer: 'in-process' } | { peer: 'web-login'; username: string };
+
+export interface ProcessSpawnContextInput {
+	actor: ProcessSpawnActor;
+	identity: ManagedRunIdentity;
+	traceId: string;
+	policyRevision: number | null;
+}
+
+/**
+ * The host authority the process manager admits every spawn with. Injected
+ * by the desktop (the enterprise service's spawn authority) and by any other
+ * host composing the manager; absent in a bare `new ProcessManager()`, which
+ * is standalone by construction.
+ *
+ * `standing()` is the one question a sink asks before anything else: a host
+ * holding no enrollment is `standalone` and spawns exactly as before; a host
+ * holding one, usable or not, is `managed`, and nothing in it spawns without
+ * an admission. An enrollment with no usable standing never falls back to
+ * standalone; its admissions are all `unavailable`, and that is the answer.
+ */
+export interface ProcessSpawnAuthorityPort {
+	standing(): 'standalone' | 'managed';
+	readonly authority: HostAuthority;
+	policy(): PolicySourceSet;
+	/** Bind the actor and the run identity into a verified context, or say why not. */
+	verify(input: ProcessSpawnContextInput): ContextVerification;
+}
+
+/**
+ * The immutable admission one spawn carries from the handler that obtained it
+ * to the sink that spawns: the lease's identity and the digest of the request
+ * it covers. The lease itself is held by the process manager that admitted
+ * (keyed by this object, so a copy or a look-alike is forged); the fields are
+ * what a caller may journal or show. Frozen on creation.
+ */
+export interface ProcessSpawnAdmission {
+	readonly leaseId: string;
+	readonly authorityId: string;
+	/** Digest of the request snapshot (`buildSpawnRequestSnapshot`) the lease covers. */
+	readonly requestDigest: string;
+	readonly actor: ManagedPrincipalRef;
+	readonly provider: string;
+	readonly operation: DispatchOperation;
+	readonly target: ManagedDispatchTarget;
+	readonly policyRevision: number | null;
+	readonly requestId: string;
+	readonly attemptId: string;
+}
+
+/**
+ * What asking for a spawn admission came to. `standalone` means the host
+ * holds no enrollment and needs none; `admitted` carries the admission to
+ * put on the config; the other three are the authority's own distinctions
+ * (a decision, no decision obtainable, an answer lost) and start nothing.
+ */
+export type ProcessSpawnAdmissionOutcome =
+	| { state: 'standalone' }
+	| { state: 'admitted'; admission: ProcessSpawnAdmission }
+	| { state: 'denied' | 'unavailable' | 'unknown'; code: ManagedDenialCode; message: string };
 
 /**
  * Kill/interrupt handle for server-backed processes, whose stop starts with a
@@ -107,6 +192,10 @@ export interface ProcessConfig {
 	 *  beside the exec wrapper, set only when the turn wants app-server. The
 	 *  app-server spawner runs it; exec ignores it. */
 	codexAppServerSsh?: CodexAppServerSshLaunch;
+	/** The admission this spawn was granted (`ProcessManager.admitSpawn`). On a
+	 *  managed host every spawn must carry one that is live for this exact
+	 *  request; on a standalone host it is ignored. */
+	admission?: ProcessSpawnAdmission;
 }
 
 /**
@@ -207,6 +296,10 @@ export interface ManagedProcess {
 	 *  the session even after that newer spawn has removed its own map entry.
 	 *  See `process-manager/generation.ts`. */
 	spawnGeneration?: number;
+	/** The admission this process was spawned under on a managed host. Absent
+	 *  for a standalone spawn, and for a process that predates the enrollment
+	 *  (an unqualified process a managed sink must not drive). */
+	admission?: ProcessSpawnAdmission;
 }
 
 export interface UsageTotals {
@@ -225,6 +318,9 @@ export interface SpawnResult {
 	pid: number;
 	success: boolean;
 	error?: string;
+	/** Set when a managed host refused the spawn at the sink: the authority's
+	 *  own distinction between a decision and no decision. Nothing started. */
+	managed?: { state: 'denied' | 'unavailable' | 'unknown'; code: ManagedDenialCode };
 	/** True when the existing terminal was reused; startup commands must not run again. */
 	attached?: boolean;
 }

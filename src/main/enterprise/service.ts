@@ -46,6 +46,8 @@ import {
 	type EnterpriseIdentityStore,
 } from './identity-store';
 import { createPolicyStatusService, type PolicyStatusService } from './policy-status';
+import { createProcessSpawnAuthority } from './spawn-authority';
+import type { ProcessSpawnAuthorityPort } from '../process-manager/types';
 
 /** What this host can do over the endpoint socket. Execution is the one it cannot run managed without. */
 export const ENTERPRISE_SUPPORTED_CAPABILITIES: readonly string[] = [
@@ -86,6 +88,8 @@ export interface EnterpriseService {
 	readonly host: ManagedHostAdapter;
 	/** The broker dispatch bridge: the sink-facing authority and the decision-to-effect ledger. */
 	readonly dispatch: BrokerDispatch;
+	/** The port the process manager admits every desktop spawn with (`spawn-authority.ts`). */
+	readonly spawnAuthority: ProcessSpawnAuthorityPort;
 	/** Re-attach a previously enrolled installation. Never throws; the outcome is in `status()`. */
 	start(): Promise<void>;
 	close(): Promise<void>;
@@ -142,6 +146,14 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		...(deps.onDispatchPersistError ? { onPersistError: deps.onDispatchPersistError } : {}),
 	});
 
+	const spawnAuthority = createProcessSpawnAuthority({
+		installation,
+		identity,
+		host,
+		dispatch,
+		now,
+	});
+
 	return {
 		installation,
 		identity,
@@ -149,6 +161,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		policy,
 		host,
 		dispatch,
+		spawnAuthority,
 		async start() {
 			// The ledger is read first: a lease still bound at the last exit is unknown from here on.
 			await dispatch.load();

@@ -9,7 +9,21 @@ import type {
 	CommandResult,
 	ParsedEvent,
 	AgentOutputParser,
+	ProcessSpawnActor,
+	ProcessSpawnAdmission,
+	ProcessSpawnAdmissionOutcome,
+	ProcessSpawnAuthorityPort,
 } from './types';
+import {
+	buildDispatchSnapshot,
+	dispatchSnapshotDigest,
+	type DispatchLease,
+	type DispatchSnapshot,
+	type LeaseRelease,
+} from '../../shared/maestro-lib/managed/authority';
+import type { ManagedDenialCode } from '../../shared/maestro-lib/managed/types';
+import { generateUUID } from '../../shared/uuid';
+import { argsResumeSession } from './utils/resumeArgs';
 import { PtySpawner } from './spawners/PtySpawner';
 import { ChildProcessSpawner } from './spawners/ChildProcessSpawner';
 import { OpencodeServerSpawner } from './spawners/OpencodeServerSpawner';
@@ -53,6 +67,70 @@ export interface ProcessManagerOptions {
 	 * is what a bare `new ProcessManager()` in a test expects.
 	 */
 	isCoworkingEnabled?: () => boolean;
+	/**
+	 * Live read of the host authority every spawn is admitted with (the
+	 * desktop's enterprise service composes one after the manager exists, so
+	 * it is read on every call, never captured). `null` or omitted means no
+	 * authority is reachable at all, which a sink treats as standalone only
+	 * because nothing on this host holds an enrollment; a port that does is
+	 * what says `managed`.
+	 */
+	spawnAuthority?: () => ProcessSpawnAuthorityPort | null;
+}
+
+/**
+ * The request a managed spawn is admitted on: the resolved command, its
+ * arguments, the working directory, the NAMES and digest of the environment
+ * Maestro sets (global shell vars beneath the agent's own), the prompt by
+ * digest, the provider (the tool type), the operation and the target. It is
+ * built from the exact `ProcessConfig` the sink receives, so the digest the
+ * lease carries proves the sink spawns the request the authority admitted
+ * and nothing else; what the spawner derives from that request afterwards
+ * (prompt argv, the host's inherited environment, temp files) is a function
+ * of it and of this host, not of the caller.
+ */
+export function buildSpawnRequestSnapshot(config: ProcessConfig): DispatchSnapshot {
+	const resuming =
+		!!config.agentSessionId || argsResumeSession(config.args) || !!config.codexAppServerSsh?.prompt;
+	return buildDispatchSnapshot(
+		{
+			command: config.command,
+			args: config.args,
+			cwd: config.cwd,
+			env: { ...(config.shellEnvVars ?? {}), ...(config.customEnvVars ?? {}) },
+			stdin: config.sshStdinScript ?? config.prompt,
+			shell: config.runInShell ? (config.shell ?? true) : false,
+		},
+		{
+			provider: config.toolType,
+			model: modelFromArgs(config.args),
+			operation: resuming ? 'resume' : 'start',
+			target: config.sshRemoteId
+				? { kind: 'ssh', remoteId: config.sshRemoteId }
+				: { kind: 'local' },
+			resourceIds: config.images?.length ? [`images:${config.images.length}`] : [],
+		}
+	);
+}
+
+export interface TerminalTabSpawnConfig {
+	sessionId: string;
+	cwd: string;
+	shell?: string;
+	shellArgs?: string;
+	shellEnvVars?: Record<string, string>;
+	cols?: number;
+	rows?: number;
+	/** The admission a managed host granted `terminalTabConfig(config)`. */
+	admission?: ProcessSpawnAdmission;
+}
+
+function modelFromArgs(args: readonly string[]): string | null {
+	for (let i = 0; i < args.length; i += 1) {
+		if (args[i] === '--model') return args[i + 1] ?? null;
+		if (args[i].startsWith('--model=')) return args[i].slice('--model='.length) || null;
+	}
+	return null;
 }
 
 /**
@@ -74,6 +152,14 @@ export class ProcessManager extends EventEmitter {
 	private localCommandRunner: LocalCommandRunner;
 	private sshCommandRunner: SshCommandRunner;
 	private readonly isCoworkingEnabled: () => boolean;
+	private readonly spawnAuthority: () => ProcessSpawnAuthorityPort | null;
+	/** The lease behind each admission this manager minted; a look-alike has none. */
+	private readonly admissionLeases = new WeakMap<ProcessSpawnAdmission, DispatchLease>();
+	/** The lease bound to each session's live process, released when it ends. */
+	private readonly boundLeases = new Map<
+		string,
+		{ lease: DispatchLease; admission: ProcessSpawnAdmission; unsubscribe: () => void }
+	>();
 
 	constructor(
 		/**
@@ -87,6 +173,18 @@ export class ProcessManager extends EventEmitter {
 	) {
 		super();
 		this.isCoworkingEnabled = options.isCoworkingEnabled ?? (() => true);
+		this.spawnAuthority = options.spawnAuthority ?? (() => null);
+		// A lease ends with the process it was bound to. A stale exit (one from a
+		// process a newer spawn has already replaced) finds the newer entry in
+		// the map and leaves the newer lease alone.
+		this.on('exit', (sessionId: string, code: number, signal?: number) => {
+			if (this.processes.has(sessionId)) return;
+			this.releaseLease(sessionId, {
+				outcome: 'exited',
+				exitCode: code,
+				signal: signal === undefined ? null : String(signal),
+			});
+		});
 		this.bufferManager = new DataBufferManager(this.processes, this);
 		this.ptySpawner = new PtySpawner(this.processes, this, this.bufferManager);
 		this.childProcessSpawner = new ChildProcessSpawner(this.processes, this, this.bufferManager);
@@ -130,6 +228,36 @@ export class ProcessManager extends EventEmitter {
 		) {
 			return { pid: existing.pid, success: true, attached: true };
 		}
+
+		// Managed admission at the sink, before any branch: on a managed host the
+		// config must carry an admission this manager minted, still live, for
+		// exactly this request. Checked on the config as received, which is the
+		// config the admission was asked for; everything below derives from it.
+		const admitted = this.checkAdmissionAtSink(config);
+		if (!admitted.ok) {
+			logger.warn('[ProcessManager] Refusing to spawn: managed admission', 'ProcessManager', {
+				sessionId: config.sessionId,
+				toolType: config.toolType,
+				state: admitted.state,
+				code: admitted.code,
+				message: admitted.message,
+			});
+			this.emit('agent-error', config.sessionId, {
+				type: 'unknown',
+				message: admitted.message,
+				recoverable: false,
+				agentId: config.toolType,
+				sessionId: config.sessionId,
+				timestamp: Date.now(),
+			} satisfies AgentError);
+			return {
+				pid: -1,
+				success: false,
+				error: admitted.message,
+				managed: { state: admitted.state, code: admitted.code },
+			};
+		}
+		const lease = admitted.lease;
 		// Expand a leading `~` in the working directory before spawning. node-pty
 		// and child_process hand `cwd` straight to the OS, which - unlike a shell -
 		// does not expand `~`. A session whose cwd is persisted as `~/project` (or
@@ -240,6 +368,10 @@ export class ProcessManager extends EventEmitter {
 				// kill() here: there is no process left to signal, and kill() would
 				// emit a spurious exit for a turn that ended long ago.
 				this.processes.delete(config.sessionId);
+				this.releaseLease(config.sessionId, {
+					outcome: 'unknown',
+					message: 'The process vanished without an observed exit.',
+				});
 			} else if (existingProcessRunning) {
 				logger.warn('[ProcessManager] Restarting existing terminal process', 'ProcessManager', {
 					sessionId: config.sessionId,
@@ -261,7 +393,9 @@ export class ProcessManager extends EventEmitter {
 		// resulting env-less MCP subprocess (its parent is the shared serve PID, not a
 		// tracked agent CLI), so the tools are cleanly unavailable, never mis-scoped.
 		if (this.shouldUseOpencodeServer(config)) {
-			const serveResult = this.opencodeServerSpawner.spawn(config);
+			const serveResult = this.withLease(config, lease, () =>
+				this.opencodeServerSpawner.spawn(config)
+			);
 			// The same `spawn` seam the CLI path emits below. This transport
 			// reports `exit` through the shared handlers, so a listener that pairs
 			// the two would otherwise see every turn here end without a start.
@@ -305,18 +439,204 @@ export class ProcessManager extends EventEmitter {
 		// The Codex app-server child is spawned per turn (no shared server to
 		// fingerprint, unlike OpenCode serve), so it takes the coworking env like
 		// any CLI spawn and is routed after the injection.
-		let result: SpawnResult;
-		if (this.shouldUseCodexAppServer(configWithCoworkingSession)) {
-			result = this.codexAppServerSpawner.spawn(configWithCoworkingSession);
-		} else if (this.shouldUsePty(configWithCoworkingSession)) {
-			result = this.ptySpawner.spawn(configWithCoworkingSession);
-		} else {
-			result = this.childProcessSpawner.spawn(configWithCoworkingSession);
-		}
+		const result = this.withLease(config, lease, () => {
+			if (this.shouldUseCodexAppServer(configWithCoworkingSession)) {
+				return this.codexAppServerSpawner.spawn(configWithCoworkingSession);
+			}
+			if (this.shouldUsePty(configWithCoworkingSession)) {
+				return this.ptySpawner.spawn(configWithCoworkingSession);
+			}
+			return this.childProcessSpawner.spawn(configWithCoworkingSession);
+		});
 
 		if (result.success) this.emitSpawn(config);
 
 		return result;
+	}
+
+	// ── Managed admission ────────────────────────────────────────────────
+
+	/**
+	 * Ask the host authority to admit one spawn for the actor the transport
+	 * resolved. Standalone hosts need no admission and get `standalone`. On a
+	 * managed host the request snapshot is built from `config` exactly as
+	 * `spawn()` will receive it (so pass the same object, with `admission`
+	 * added), the actor is bound into a verified context, and the authority's
+	 * answer is returned as it is: nothing but `admitted` leads anywhere.
+	 */
+	async admitSpawn(
+		config: ProcessConfig,
+		actor: ProcessSpawnActor
+	): Promise<ProcessSpawnAdmissionOutcome> {
+		const port = this.spawnAuthority();
+		if (!port || port.standing() === 'standalone') return { state: 'standalone' };
+
+		const requestId = generateUUID();
+		const policy = port.policy();
+		const verified = port.verify({
+			actor,
+			identity: {
+				requestId,
+				idempotencyKey: requestId,
+				attemptId: generateUUID(),
+				runId: null,
+				rootRunId: null,
+				parentRunId: null,
+			},
+			traceId: config.sessionId,
+			policyRevision: policy.policyRevision,
+		});
+		if (!verified.ok) {
+			return {
+				state: 'denied',
+				code: verified.code,
+				message: `The spawn's actor could not be bound: ${verified.problems.join('; ')}.`,
+			};
+		}
+		const snapshot = buildSpawnRequestSnapshot(config);
+		const outcome = await port.authority.admit({ context: verified.context, snapshot, policy });
+		if (outcome.state !== 'admitted') {
+			return { state: outcome.state, code: outcome.code, message: outcome.message };
+		}
+		const { lease } = outcome;
+		const admission: ProcessSpawnAdmission = Object.freeze({
+			leaseId: lease.leaseId,
+			authorityId: lease.authorityId,
+			requestDigest: dispatchSnapshotDigest(snapshot),
+			actor: lease.actor,
+			provider: snapshot.provider,
+			operation: snapshot.operation,
+			target: snapshot.target,
+			policyRevision: lease.policyRevision,
+			requestId: verified.context.identity.requestId,
+			attemptId: lease.attemptId,
+		});
+		this.admissionLeases.set(admission, lease);
+		return { state: 'admitted', admission };
+	}
+
+	/**
+	 * `admitSpawn` then `spawn`, the way a handler that resolved its actor
+	 * uses them: a standalone host spawns as before, an admitted spawn carries
+	 * its admission, and a refusal is returned as a failed `SpawnResult` with
+	 * the authority's state and code (and reported to the tab as an
+	 * `agent-error`, since no process exists to report it).
+	 */
+	async spawnAdmitted(config: ProcessConfig, actor: ProcessSpawnActor): Promise<SpawnResult> {
+		const admitted = await this.admitSpawn(config, actor);
+		if (admitted.state === 'standalone') return this.spawn(config);
+		if (admitted.state === 'admitted') {
+			return this.spawn({ ...config, admission: admitted.admission });
+		}
+		logger.warn('[ProcessManager] Spawn not admitted', 'ProcessManager', {
+			sessionId: config.sessionId,
+			toolType: config.toolType,
+			state: admitted.state,
+			code: admitted.code,
+			message: admitted.message,
+		});
+		this.emit('agent-error', config.sessionId, {
+			type: 'unknown',
+			message: admitted.message,
+			recoverable: false,
+			agentId: config.toolType,
+			sessionId: config.sessionId,
+			timestamp: Date.now(),
+		} satisfies AgentError);
+		return {
+			pid: -1,
+			success: false,
+			error: admitted.message,
+			managed: { state: admitted.state, code: admitted.code },
+		};
+	}
+
+	/**
+	 * The sink's own check, right before a branch is chosen: is this host
+	 * managed, and if so does the config carry an admission this manager
+	 * minted, whose lease the authority still holds live for the digest of
+	 * exactly this request? A standalone host passes with no lease.
+	 */
+	private checkAdmissionAtSink(
+		config: ProcessConfig
+	):
+		| { ok: true; lease: DispatchLease | null }
+		| { ok: false; state: 'denied' | 'unavailable'; code: ManagedDenialCode; message: string } {
+		const port = this.spawnAuthority();
+		if (!port || port.standing() === 'standalone') return { ok: true, lease: null };
+		const refuse = (message: string) => ({
+			ok: false as const,
+			state: 'denied' as const,
+			code: 'lease-invalid' as const,
+			message: `This host runs under management and ${message}`,
+		});
+		const admission = config.admission;
+		if (!admission) return refuse('the launch carries no admission.');
+		const lease = this.admissionLeases.get(admission);
+		if (!lease) return refuse('the launch carries an admission this host did not mint.');
+		const verdict = port.authority.check(
+			lease,
+			dispatchSnapshotDigest(buildSpawnRequestSnapshot(config))
+		);
+		if (!verdict.ok) return refuse(`the lease for this launch is ${verdict.reason}.`);
+		return { ok: true, lease };
+	}
+
+	/**
+	 * Run one spawner under a lease: bind the lease to the process it started
+	 * (a server-backed transport has no pid of its own and binds `undefined`),
+	 * terminate the process when the authority revokes the lease, release it
+	 * when the spawner failed or threw. Without a lease the spawner just runs.
+	 */
+	private withLease(
+		config: ProcessConfig,
+		lease: DispatchLease | null,
+		run: () => SpawnResult
+	): SpawnResult {
+		if (!lease) return run();
+		const { sessionId } = config;
+		let result: SpawnResult;
+		try {
+			result = run();
+		} catch (error) {
+			lease.release({
+				outcome: 'spawn-failed',
+				message: error instanceof Error ? error.message : String(error),
+			});
+			throw error;
+		}
+		if (!result.success) {
+			lease.release({ outcome: 'spawn-failed', message: result.error ?? 'The spawn failed.' });
+			return result;
+		}
+		lease.bind(result.pid > 0 ? result.pid : undefined);
+		const unsubscribe = lease.onRevoked((reason) => {
+			logger.warn('[ProcessManager] Lease revoked; stopping process', 'ProcessManager', {
+				sessionId,
+				leaseId: lease.leaseId,
+				reason,
+			});
+			this.boundLeases.delete(sessionId);
+			this.kill(sessionId);
+		});
+		this.boundLeases.set(sessionId, { lease, admission: config.admission!, unsubscribe });
+		const proc = this.processes.get(sessionId);
+		if (proc) proc.admission = config.admission;
+		return result;
+	}
+
+	/** Release the lease bound to a session's process, if one is. Idempotent. */
+	private releaseLease(sessionId: string, release: LeaseRelease): void {
+		const bound = this.boundLeases.get(sessionId);
+		if (!bound) return;
+		this.boundLeases.delete(sessionId);
+		bound.unsubscribe();
+		bound.lease.release(release);
+	}
+
+	/** The admission a session's live process runs under, if it was admitted. */
+	admissionOf(sessionId: string): ProcessSpawnAdmission | null {
+		return this.boundLeases.get(sessionId)?.admission ?? null;
 	}
 
 	/**
@@ -578,6 +898,9 @@ export class ProcessManager extends EventEmitter {
 		// watchdog), so the exit it causes is not a crash. The resolver reads any
 		// signal it is not told about as an outside kill, which it is not here.
 		proc.interrupted = true;
+		// The lease ends with the process. A kill the authority asked for has
+		// already revoked it, and a release after a revocation is a no-op.
+		this.releaseLease(sessionId, { outcome: 'stopped', by: 'caller' });
 
 		try {
 			if (proc.dataBufferTimeout) {
@@ -759,24 +1082,26 @@ export class ProcessManager extends EventEmitter {
 	 * Uses the terminal tab session ID format {sessionId}-terminal-{tabId},
 	 * which causes PtySpawner to forward raw PTY data without filtering.
 	 */
-	spawnTerminalTab(config: {
-		sessionId: string;
-		cwd: string;
-		shell?: string;
-		shellArgs?: string;
-		shellEnvVars?: Record<string, string>;
-		cols?: number;
-		rows?: number;
-	}): SpawnResult {
-		const shell = config.shell || getDefaultShell();
+	spawnTerminalTab(config: TerminalTabSpawnConfig): SpawnResult {
+		const spawnConfig = this.terminalTabConfig(config);
 		logger.info('[ProcessManager] Spawning terminal tab PTY', 'ProcessManager', {
 			sessionId: config.sessionId,
 			cwd: config.cwd,
-			shell,
-			cols: config.cols || 80,
-			rows: config.rows || 24,
+			shell: spawnConfig.shell,
+			cols: spawnConfig.cols,
+			rows: spawnConfig.rows,
 		});
-		return this.spawn({
+		return this.spawn(spawnConfig);
+	}
+
+	/**
+	 * The process config a terminal tab spawns as. Built separately so a
+	 * managed host can admit exactly this request (`admitSpawn`) and then hand
+	 * it, with the admission added, to `spawnTerminalTab`.
+	 */
+	terminalTabConfig(config: TerminalTabSpawnConfig): ProcessConfig {
+		const shell = config.shell || getDefaultShell();
+		return {
 			sessionId: config.sessionId,
 			toolType: 'terminal',
 			reuseTerminal: true,
@@ -788,7 +1113,8 @@ export class ProcessManager extends EventEmitter {
 			shellEnvVars: config.shellEnvVars,
 			cols: config.cols || 80,
 			rows: config.rows || 24,
-		});
+			...(config.admission ? { admission: config.admission } : {}),
+		};
 	}
 
 	/**
