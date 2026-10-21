@@ -153,6 +153,8 @@ export interface BrokerDispatch {
 	turnAuthority(input: TurnAuthorityInput): ManagedTurnAuthority;
 	/** Ledger writes that failed since load, for a status pane. */
 	persistFailures(): number;
+	/** Resolves once every ledger write issued so far has landed (or failed and been counted). */
+	flush(): Promise<void>;
 }
 
 const DEFAULT_MAX_RECEIPTS = 2_000;
@@ -168,6 +170,7 @@ export function createBrokerDispatch(deps: BrokerDispatchDeps): BrokerDispatch {
 	const maxReceipts = deps.maxReceipts ?? DEFAULT_MAX_RECEIPTS;
 	let doc: DispatchReceiptsDocument = emptyDocument();
 	let failures = 0;
+	let pending: Promise<void> = Promise.resolve();
 	const byLease = new Map<string, DispatchReceiptRecord>();
 
 	function index(): void {
@@ -188,7 +191,7 @@ export function createBrokerDispatch(deps: BrokerDispatchDeps): BrokerDispatch {
 		index();
 	}
 
-	async function persist(): Promise<void> {
+	async function writeLedger(): Promise<void> {
 		trim();
 		if (!deps.file) return;
 		try {
@@ -197,6 +200,12 @@ export function createBrokerDispatch(deps: BrokerDispatchDeps): BrokerDispatch {
 			failures += 1;
 			deps.onPersistError?.(error);
 		}
+	}
+
+	/** One write at a time, in order; `flush()` resolves once the last one has landed. */
+	function persist(): Promise<void> {
+		pending = pending.then(writeLedger, writeLedger);
+		return pending;
 	}
 
 	/** The registration the standing holds right now, as identifiers. */
@@ -325,6 +334,7 @@ export function createBrokerDispatch(deps: BrokerDispatchDeps): BrokerDispatch {
 		},
 
 		persistFailures: () => failures,
+		flush: () => pending,
 	};
 }
 
@@ -439,6 +449,8 @@ export async function dispatchHarness(
 	const timer = setTimeout(() => handle.terminate(), request.timeoutMs);
 	try {
 		const exit = await handle.done;
+		// The outcome is returned only once the ledger holds how it ended.
+		await bridge.flush();
 		return {
 			status: 'ran',
 			leaseId: lease.leaseId,

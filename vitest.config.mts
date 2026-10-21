@@ -7,7 +7,11 @@ const sharedExclude = [
 	'node_modules',
 	'dist',
 	'release',
-	'src/__tests__/integration/**',
+	// The Mega-Maestro early-pair suite is deterministic (a declared endpoint double, a
+	// harmless provider double) and runs with the unit tests; the rest of integration/
+	// needs real agents and keeps its own config.
+	'src/__tests__/integration/!(mega-maestro)/**',
+	'src/__tests__/integration/*.{test,spec}.{ts,tsx,cjs}',
 	'src/__tests__/e2e/**',
 	'src/__tests__/performance/**',
 ];
