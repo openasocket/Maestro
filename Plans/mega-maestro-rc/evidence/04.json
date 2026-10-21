@@ -371,5 +371,68 @@
 		}
 	],
 	"preExistingEnvironmentFailures": "smol-toml and @serenity-kit/opaque are absent from node_modules; they break two tsc files and the translation-*.test.ts files identically at the base revision. Fix: npm install. Left for the user.",
-	"scratch": "Harness workspaces under .maestro/playbooks/Working/pair-* hold only the endpoint copy, the bundled client and the out/ records; the daemon's generated development key lived in the container's tmpfs and is gone with it. The kept run's endpoint copy was removed after the evidence was written."
+	"scratch": "Harness workspaces under .maestro/playbooks/Working/pair-* hold only the endpoint copy, the bundled client and the out/ records; the daemon's generated development key lived in the container's tmpfs and is gone with it. The kept run's endpoint copy was removed after the evidence was written.",
+	"rechecks": [
+		{
+			"date": "2026-10-21",
+			"maestroHead": "256c6d1bd83b3e756a9e724b1e0f03fc8533c12a",
+			"decision": "MRC-04-05 stays unchecked; the container run was not repeated",
+			"reason": "No input of the pair changed since the recorded attempt: the sibling development checkout is still d5143a6 with 935 dirty entries, its endpoint build is still the 2026-10-19T17:30:27Z cli.js, peer.node is still absent in the checkout (built only inside the container), the runtime adapter still declares unsupported, the four packaged artifacts are still sourceDirty at e29195d8, no contracts pin exists and no approval producer exists. Repeating the daemon exercise against identical inputs would reproduce the recorded unauthenticated/unavailable answers and prove nothing new.",
+			"commands": [
+				{
+					"command": "node scripts/mega-maestro-pair.mjs check --json",
+					"exit": 2,
+					"result": "before the rebuild: five open dependencies; the new one, maestro-lib (owner maestro), because the evidence commit 256c6d1 moved HEAD past the library built at ecc0969"
+				},
+				{
+					"command": "npm run build:maestro-lib",
+					"exit": 0,
+					"result": "provenance sourceRevision 256c6d1, sourceDirty false; index.js sha256 08bf3f843682255fc0edc44cc22d26565e0586669c1fb958b78dbcd4cc52911a, identical to the ecc0969 build (the evidence commit touched docs only)"
+				},
+				{
+					"command": "node scripts/mega-maestro-pair.mjs check --json",
+					"exit": 2,
+					"result": "after the rebuild: library ready at HEAD; the open dependencies are exactly the mega-maestro-owned ones: CP-01 (no pin), CP-01 (no clean Linux artifact), CP-02 (adapter unsupported), registration-approval (no producer)"
+				},
+				{
+					"command": "node node_modules/vitest/vitest.mjs run src/__tests__/integration/mega-maestro src/__tests__/main/enterprise/dispatch.test.ts",
+					"exit": 0,
+					"result": "2 files, 11 passed, 1 skipped: the real-pair case, with the four blocking producers and their owner in its title"
+				}
+			],
+			"inputsCompared": {
+				"siblingRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+				"siblingDirtyEntries": 935,
+				"endpointBuiltAt": "2026-10-19T17:30:27.161Z",
+				"peerNodeInCheckout": false,
+				"adapterStatus": "unsupported",
+				"packagedArtifacts": [
+					{
+						"digest": "2f7206b0",
+						"sourceRevision": "e29195d8",
+						"sourceDirty": true
+					},
+					{
+						"digest": "381701b0",
+						"sourceRevision": "e29195d8",
+						"sourceDirty": true
+					},
+					{
+						"digest": "e2864376",
+						"sourceRevision": "e29195d8",
+						"sourceDirty": true
+					},
+					{
+						"digest": "f87c39a5",
+						"sourceRevision": "e29195d8",
+						"sourceDirty": true
+					}
+				],
+				"pin": "absent",
+				"approvalProducer": false,
+				"linuxImage": "sha256:71bcbb3b215b3fa84b5b167585675072f4c270855e37a599803f1a58141a0716"
+			},
+			"nextPass": "Re-run check; repeat the container run only when the sibling revision, an artifact manifest, the adapter declared status or peer.node changes, or when an approval producer appears for --approve-command."
+		}
+	]
 }
