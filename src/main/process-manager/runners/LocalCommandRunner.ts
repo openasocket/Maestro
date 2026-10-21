@@ -6,7 +6,7 @@ import * as os from 'os';
 import { EventEmitter } from 'events';
 import * as pty from 'node-pty';
 import { logger } from '../../utils/logger';
-import type { CommandResult } from '../types';
+import { managedCommandRefusal, type CommandResult, type ManagedCommandContext } from '../types';
 import { buildSpawnPath } from '../../utils/spawnPath';
 import {
 	resolveShellPath,
@@ -24,6 +24,12 @@ import { getDefaultShell } from '../../stores/defaults';
  * ended. 128+9, the shell convention for "killed by signal 9".
  */
 const SIGKILL_EXIT_CODE = 137;
+
+/**
+ * Exit code reported when a managed host refused the command at the sink and
+ * nothing ran: 126, the shell convention for "command cannot execute".
+ */
+export const MANAGED_REFUSAL_EXIT_CODE = 126;
 
 /**
  * Runs single commands locally and captures stdout/stderr cleanly.
@@ -71,8 +77,21 @@ export class LocalCommandRunner {
 		command: string,
 		cwd: string,
 		shell?: string,
-		shellEnvVars?: Record<string, string>
+		shellEnvVars?: Record<string, string>,
+		managed?: ManagedCommandContext
 	): Promise<CommandResult> {
+		// The sink's own refusal under management: no PTY, no shell child, no
+		// prompt check standing in for confinement. Standalone runs as before.
+		const refusal = managedCommandRefusal(managed, 'local-shell');
+		if (refusal) {
+			logger.warn('[ProcessManager] runCommand refused under management', 'ProcessManager', {
+				sessionId,
+				cwd,
+			});
+			this.emitter.emit('stderr', sessionId, `[Maestro] ${refusal}\n`);
+			this.emitter.emit('command-exit', sessionId, MANAGED_REFUSAL_EXIT_CODE);
+			return Promise.resolve({ exitCode: MANAGED_REFUSAL_EXIT_CODE });
+		}
 		return new Promise((resolve) => {
 			const shellToUse = shell || getDefaultShell();
 

@@ -13,6 +13,7 @@ import type {
 	ProcessSpawnAdmission,
 	ProcessSpawnAdmissionOutcome,
 	ProcessSpawnAuthorityPort,
+	ManagedCommandContext,
 } from './types';
 import {
 	buildDispatchSnapshot,
@@ -630,6 +631,35 @@ export class ProcessManager extends EventEmitter {
 		return result;
 	}
 
+	/**
+	 * Why input into a session's process is refused under management, or null
+	 * when it may be written: the host is standalone, or the process carries an
+	 * admission this manager minted whose lease is still bound to it.
+	 */
+	private managedWriteRefusal(sessionId: string, proc: ManagedProcess): string | null {
+		const port = this.spawnAuthority();
+		if (!port || port.standing() === 'standalone') return null;
+		const what = proc.isTerminal ? 'terminal' : 'process';
+		if (!proc.admission) {
+			return `This host runs under management and this ${what} was started without an admission; input to it is unavailable.`;
+		}
+		const bound = this.boundLeases.get(sessionId);
+		if (!bound || bound.admission !== proc.admission) {
+			return `This host runs under management and this ${what} carries an admission that is not bound here; input to it is unavailable.`;
+		}
+		const state = bound.lease.state();
+		if (state !== 'bound') {
+			return `This host runs under management and the lease for this ${what} is ${state}; input to it is unavailable.`;
+		}
+		return null;
+	}
+
+	/** What the one-off command sinks are told about the host. */
+	private managedCommandContext(): ManagedCommandContext {
+		const port = this.spawnAuthority();
+		return { standing: !port ? 'standalone' : port.standing() };
+	}
+
 	/** Release the lease bound to a session's process, if one is. Idempotent. */
 	private releaseLease(sessionId: string, release: LeaseRelease): void {
 		const bound = this.boundLeases.get(sessionId);
@@ -754,6 +784,31 @@ export class ProcessManager extends EventEmitter {
 			logger.error('[ProcessManager] write() - No process found for session', 'ProcessManager', {
 				sessionId,
 			});
+			return false;
+		}
+
+		// A managed host drives only processes it admitted and whose lease is
+		// still bound. A terminal or agent that predates the enrollment, one
+		// spawned around the gate, or one whose lease ended gets no input.
+		const blocked = this.managedWriteRefusal(sessionId, process);
+		if (blocked) {
+			logger.warn('[ProcessManager] write() refused under management', 'ProcessManager', {
+				sessionId,
+				isTerminal: process.isTerminal,
+				message: blocked,
+			});
+			if (process.isTerminal) {
+				this.emit('data', sessionId, `\r\n[Maestro] ${blocked}\r\n`);
+			} else {
+				this.emit('agent-error', sessionId, {
+					type: 'unknown',
+					message: blocked,
+					recoverable: false,
+					agentId: process.toolType,
+					sessionId,
+					timestamp: Date.now(),
+				} satisfies AgentError);
+			}
 			return false;
 		}
 
@@ -1133,10 +1188,20 @@ export class ProcessManager extends EventEmitter {
 		shellEnvVars?: Record<string, string>,
 		sshRemoteConfig?: SshRemoteConfig | null
 	): Promise<CommandResult> {
+		// The sinks decide: a managed host has no confined route for a one-off
+		// shell command and the runner refuses before anything starts.
+		const managed = this.managedCommandContext();
 		if (sshRemoteConfig) {
-			return this.sshCommandRunner.run(sessionId, command, cwd, sshRemoteConfig, shellEnvVars);
+			return this.sshCommandRunner.run(
+				sessionId,
+				command,
+				cwd,
+				sshRemoteConfig,
+				shellEnvVars,
+				managed
+			);
 		}
-		return this.localCommandRunner.run(sessionId, command, cwd, shell, shellEnvVars);
+		return this.localCommandRunner.run(sessionId, command, cwd, shell, shellEnvVars, managed);
 	}
 
 	/**

@@ -92,6 +92,34 @@ export interface ProcessSpawnAdmission {
 }
 
 /**
+ * What a one-off command sink (`runCommand`, local or SSH) is told about the
+ * host: standalone runs as before; managed has no confined route for a shell
+ * command in this build and refuses at the sink, explicitly.
+ */
+export interface ManagedCommandContext {
+	standing: 'standalone' | 'managed';
+}
+
+/**
+ * Why a one-off shell command cannot run under management on this host, or
+ * null when it may. Both runners put the command in an unconfined shell (a
+ * transient PTY or a shell child locally, a remote login shell over SSH) and
+ * no confinement producer qualifies either, so a managed host refuses before
+ * anything starts. Never a fallback, never a prompt check.
+ */
+export function managedCommandRefusal(
+	context: ManagedCommandContext | undefined,
+	route: 'local-shell' | 'ssh-shell'
+): string | null {
+	if (!context || context.standing === 'standalone') return null;
+	const where =
+		route === 'local-shell'
+			? 'a transient PTY (a shell child on Windows)'
+			: 'a remote login shell over SSH';
+	return `A one-off ${route === 'local-shell' ? 'terminal' : 'SSH terminal'} command is unavailable under management on this host: it would run in ${where} with no confinement, and no producer qualifies that route. Nothing was started.`;
+}
+
+/**
  * What asking for a spawn admission came to. `standalone` means the host
  * holds no enrollment and needs none; `admitted` carries the admission to
  * put on the config; the other three are the authority's own distinctions

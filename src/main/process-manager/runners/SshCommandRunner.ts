@@ -8,9 +8,10 @@ import { shellEscapeForDoubleQuotes, shellEscapeRemotePath } from '../../utils/s
 import { getExpandedEnv, resolveSshPath } from '../../utils/cliDetection';
 import { expandTilde } from '../../../shared/pathUtils';
 import { killProcessTreeNow } from '../utils/commandKill';
-import type { CommandResult } from '../types';
+import { managedCommandRefusal, type CommandResult, type ManagedCommandContext } from '../types';
 import type { SshRemoteConfig } from '../../../shared/types';
 import { buildSshOptionArgs } from '../../../shared/sshOptions';
+import { MANAGED_REFUSAL_EXIT_CODE } from './LocalCommandRunner';
 
 /** Exit code for a command we SIGKILLed. 128+9, the shell convention. */
 const SIGKILL_EXIT_CODE = 137;
@@ -47,8 +48,21 @@ export class SshCommandRunner {
 		command: string,
 		cwd: string,
 		sshConfig: SshRemoteConfig,
-		shellEnvVars?: Record<string, string>
+		shellEnvVars?: Record<string, string>,
+		managed?: ManagedCommandContext
 	): Promise<CommandResult> {
+		// The sink's own refusal under management: a remote login shell proves
+		// no containment, so nothing is dialed. Standalone runs as before.
+		const refusal = managedCommandRefusal(managed, 'ssh-shell');
+		if (refusal) {
+			logger.warn('[ProcessManager] runCommandViaSsh refused under management', 'ProcessManager', {
+				sessionId,
+				sshHost: sshConfig.host,
+			});
+			this.emitter.emit('stderr', sessionId, `[Maestro] ${refusal}\n`);
+			this.emitter.emit('command-exit', sessionId, MANAGED_REFUSAL_EXIT_CODE);
+			return { exitCode: MANAGED_REFUSAL_EXIT_CODE };
+		}
 		// Build SSH arguments
 		const sshArgs: string[] = [];
 
