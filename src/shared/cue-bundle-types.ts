@@ -170,6 +170,15 @@ export interface CueBundleAgentSettings {
 		/** Variables whose value was a path on the exporting machine. Name only. */
 		machineSpecific?: string[];
 	};
+	/**
+	 * Non-secret managed requirements. `credentialRefs` are the opaque
+	 * reference ids the agent's launches were bound to on the exporting host;
+	 * they carry no value and no grant, and the importing host's policy must
+	 * validate every one before the agent is scheduled.
+	 */
+	managed?: {
+		credentialRefs: string[];
+	};
 }
 
 /** What the importing machine must provide before the bundle can run. */
@@ -180,6 +189,10 @@ export interface CueBundleRequirements {
 	tools: string[];
 	/** Environment variable names that must hold a secret on the importing machine. */
 	secrets: string[];
+	/** Opaque credential reference ids the importing host's policy must approve. Non-secret. */
+	managed?: {
+		credentialRefs: string[];
+	};
 }
 
 /** Contents of `manifest.json`. */
@@ -228,4 +241,7 @@ export const CUE_BUNDLE_AGENT_FIELDS = [
 	// Set to exactly the names the bundle's agent declares, and cleared when it
 	// declares none, on the desktop path as on the file path.
 	'requiredSecrets',
+	// The reference ids the importing host's policy approved; cleared when the
+	// bundle's agent declares none.
+	'managedCredentialRefs',
 ] as const;

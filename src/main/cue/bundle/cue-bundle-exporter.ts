@@ -166,7 +166,7 @@ function asStringList(value: unknown): string[] {
 	return [];
 }
 
-function sortedUnique(values: Iterable<string>): string[] {
+export function sortedUnique(values: Iterable<string>): string[] {
 	return [...new Set(values)].sort();
 }
 
@@ -410,6 +410,58 @@ function resolveContainedFile(root: string, ref: string, what: string): string {
 	return toPosix(path.relative(realRoot, real));
 }
 
+// ─── What never enters a bundle ──────────────────────────────────────────────
+
+/**
+ * Files that are credentials, grants or enrollment, by name. An archive path
+ * whose base name or a directory on the way matches one is refused at the
+ * builder, whichever export path tried to add it: a workspace file, a
+ * playbook document, a Claude asset. The bundle format carries secret NAMES
+ * and opaque references; it never carries the enrollment record, a Lite
+ * device credential, a browser session, a provider login file or a grant or
+ * receipt ledger, and no option turns this off.
+ */
+const FORBIDDEN_BUNDLE_BASENAMES: readonly RegExp[] = [
+	// Enrollment, the managed binding, the dispatch receipt and run ledgers.
+	/^enterprise-identity\.bin$/i,
+	/^maestro-managed-.*\.(json|bin)$/i,
+	// Lite paired-device credentials.
+	/^(lite-)?device-credentials.*$/i,
+	// Browser session state.
+	/^maestro-browser-.*$/i,
+	/^(Cookies|Login Data|Web Data)(-journal)?$/,
+	// Provider logins and generic credential files.
+	/^\.?credentials\.json$/i,
+	/^auth\.json$/i,
+	/^token\.json$/i,
+	/^\.netrc$/i,
+	/^\.env(\..*)?$/i,
+	/^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$/i,
+	/\.(pem|key|p12|pfx|lease)$/i,
+	// Plugin grant ledgers.
+	/^plugin-grants.*\.json$/i,
+];
+const FORBIDDEN_BUNDLE_DIRECTORIES: readonly RegExp[] = [
+	/^(Local Storage|Session Storage|IndexedDB)$/,
+	/^\.ssh$/i,
+	/^\.aws$/i,
+];
+
+/** Whether an archive path names a file that may never be bundled. Exported for the importer. */
+export function isForbiddenBundleEntry(archivePath: string): boolean {
+	const segments = archivePath.split(/[\\/]/).filter((segment) => segment !== '');
+	if (segments.length === 0) return false;
+	const base = segments[segments.length - 1];
+	if (FORBIDDEN_BUNDLE_BASENAMES.some((pattern) => pattern.test(base))) return true;
+	return segments.slice(0, -1).some((dir) => FORBIDDEN_BUNDLE_DIRECTORIES.some((p) => p.test(dir)));
+}
+
+/** Env var names that are authority-shaped: never exported, not even by name. */
+function isManagedAuthorityEnvKey(key: string): boolean {
+	const upper = key.toUpperCase();
+	return upper.startsWith('MAESTRO_MANAGED_') || /(^|_)(GRANT|LEASE|ENROLL)/.test(upper);
+}
+
 // ─── The exporter ────────────────────────────────────────────────────────────
 
 class BundleBuilder {
@@ -419,6 +471,11 @@ class BundleBuilder {
 	readonly executables = new Set<string>();
 
 	add(archivePath: string, content: Buffer | string): void {
+		if (isForbiddenBundleEntry(archivePath)) {
+			throw new Error(
+				`Refusing to bundle ${archivePath}: credential, grant and enrollment files never enter a bundle.`
+			);
+		}
 		const buf = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
 		const existing = this.files.get(archivePath);
 		if (existing && !existing.equals(buf)) {
@@ -608,8 +665,15 @@ function buildAgentSettings(
 	const required: string[] = [];
 	const machineSpecific: string[] = [];
 	const secretByValue: string[] = [];
+	const authorityDropped: string[] = [];
 	for (const key of Object.keys(env).sort()) {
 		const value = env[key];
+		if (isManagedAuthorityEnvKey(key)) {
+			// A grant, a lease or an enrollment token is neither a secret to be
+			// re-supplied nor a setting to carry: it stays on the host, unnamed.
+			authorityDropped.push(key);
+			continue;
+		}
 		if (isSecretEnvKey(key)) required.push(key);
 		else if (looksLikeSecretValue(value)) {
 			required.push(key);
@@ -629,6 +693,17 @@ function buildAgentSettings(
 		if (!required.includes(name) && !(name in values)) required.push(name);
 	}
 	required.sort();
+	if (authorityDropped.length > 0) {
+		builder.warnings.add(
+			`Agent "${session.name}" sets ${authorityDropped.join(', ')}, which look like managed grants or enrollment; they were not exported.`
+		);
+	}
+	// Managed requirements travel as opaque reference ids only: no value, no
+	// grant, and no authority until the importing host's policy approves them.
+	const credentialRefs = sortedUnique(
+		(session.managedCredentialRefs ?? []).filter((ref) => typeof ref === 'string' && ref !== '')
+	);
+	if (credentialRefs.length > 0) settings.managed = { credentialRefs };
 	if (secretByValue.length > 0) {
 		builder.warnings.add(
 			`Agent "${session.name}" sets ${secretByValue.join(', ')} to a value that looks like a credential; ${secretByValue.length === 1 ? 'it was' : 'they were'} exported by name only. Set ${secretByValue.length === 1 ? 'it' : 'them'} again after import.`
@@ -940,6 +1015,7 @@ export async function exportCueBundle(
 	const generatedConfigs = new Map<string, { key: string; subNames: unknown[] }>();
 	const events = new Set<string>();
 	const secrets = new Set<string>();
+	const managedCredentialRefs = new Set<string>();
 	/** Workspace key -> secrets its exported `.mcp.json` references. */
 	const mcpSecretsByKey = new Map<string, string[]>();
 	// Ordered by key, the bundle's only name for a project root. Ordering by the
@@ -1080,6 +1156,7 @@ export async function exportCueBundle(
 			session.toolType === 'claude-code' ? (mcpSecretsByKey.get(wsKey) ?? []) : []
 		);
 		for (const key of settings.env?.required ?? []) secrets.add(key);
+		for (const ref of settings.managed?.credentialRefs ?? []) managedCredentialRefs.add(ref);
 		const settingsPath = `agents/${session.id}.json`;
 		addGenerated(settingsPath, JSON.stringify(settings, null, '\t') + '\n');
 		const agentEntry: CueBundleAgent = {
@@ -1108,6 +1185,9 @@ export async function exportCueBundle(
 		events: sortedUnique(events),
 		tools: sortedUnique(tools),
 		secrets: sortedUnique(secrets),
+		...(managedCredentialRefs.size > 0
+			? { managed: { credentialRefs: sortedUnique(managedCredentialRefs) } }
+			: {}),
 	};
 
 	const warnings = sortedUnique(builder.warnings);

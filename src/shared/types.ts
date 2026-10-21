@@ -301,6 +301,14 @@ export interface SessionInfo {
 	 * and never reads it; bundle export writes it back into `env.required`.
 	 */
 	requiredSecrets?: string[];
+	/**
+	 * Opaque approved credential REFERENCE ids a managed policy bound to this
+	 * agent (`ManagedCredentialRef.refId`). Never a value, never authority on
+	 * its own: the host binds each reference again at every launch
+	 * (`bindApprovedCredentials`), and a bundle may carry the ids only after the
+	 * importing host's policy has validated them.
+	 */
+	managedCredentialRefs?: string[];
 	/** Prefixed to the first message of every new session (not shown in chat). */
 	newSessionMessage?: string;
 	/** Appended to every message sent to the agent (not shown in chat). */

@@ -85,7 +85,7 @@ import {
 	type CueBundleArchive,
 	type CueBundleValidationIssue,
 } from './cue-bundle-validator';
-import { isWithin } from './cue-bundle-exporter';
+import { isForbiddenBundleEntry, isWithin, sortedUnique } from './cue-bundle-exporter';
 import {
 	MCP_CONFIG_FILE,
 	isClaudeMemoryFileName,
@@ -122,6 +122,12 @@ export type CueBundleImportErrorCode =
 	| 'AGENT_NAME_TAKEN'
 	/** A target path leaves its root or goes through a symlink. */
 	| 'PATH_ESCAPE'
+	/** The archive carries a credential, grant or enrollment file; it is refused whole. */
+	| 'FORBIDDEN_ENTRY'
+	/** An agent declares managed credential references and no host policy was given to validate them. */
+	| 'MANAGED_POLICY_REQUIRED'
+	/** The host policy refused at least one declared credential reference. */
+	| 'MANAGED_CREDENTIAL_REFUSED'
 	/** A target path exists and is not a regular file. */
 	| 'TARGET_NOT_A_FILE'
 	/** A workspace's existing cue.yaml is not valid YAML. */
@@ -146,7 +152,44 @@ export class CueBundleImportError extends Error {
 
 export type CueBundleImportLogLevel = 'info' | 'warn';
 
+/** One agent's declared references, as the host policy is asked about them. */
+export interface CueBundleManagedValidationInput {
+	refIds: readonly string[];
+	agent: { id: string; name: string; toolType: string; workspace: string };
+}
+
+export interface CueBundleManagedValidation {
+	approved: string[];
+	refused: { refId: string; reason: string }[];
+}
+
+/**
+ * The importing host's policy over managed requirements. The archive carries
+ * reference ids and nothing else; whether an id names a credential this host
+ * may bind to this agent is the policy's answer, asked before the plan is
+ * built. Without one, an agent that declares references cannot be imported.
+ */
+export interface CueBundleManagedPolicy {
+	validateCredentialRefs(
+		input: CueBundleManagedValidationInput
+	): CueBundleManagedValidation | Promise<CueBundleManagedValidation>;
+}
+
+export interface CueBundleImportManagedReport {
+	agentId: string;
+	agentName: string;
+	/** The ids the bundle declared, sorted. */
+	credentialRefs: string[];
+	/** The ids the host policy approved and the record was written with. */
+	approved: string[];
+}
+
 export interface CueBundleImportOptions {
+	/**
+	 * The host policy that validates every declared managed credential
+	 * reference before scheduling. Required when any agent declares one.
+	 */
+	managedPolicy?: CueBundleManagedPolicy;
 	/** The bundle zip. */
 	bundlePath: string;
 	/** Target Maestro data directory. Created when missing (and logged). */
@@ -322,6 +365,8 @@ export interface CueBundleImportPlan {
 	shellCommands: CueBundleImportShellCommand[];
 	env: CueBundleImportEnvReport[];
 	secrets: CueBundleImportSecret[];
+	/** Managed requirements, per agent that declared any, validated by the host policy. */
+	managed: CueBundleImportManagedReport[];
 	conflicts: CueBundleImportConflict[];
 	warnings: string[];
 }
@@ -606,6 +651,17 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 	}
 	const manifest: CueBundleManifest = validation.manifest;
 	const entries = archive.entries;
+	// The archive is not authority and never a credential store: an entry
+	// that names an enrollment, device, browser, login or grant file refuses
+	// the whole bundle before anything in it is read.
+	const forbidden = [...entries.keys()].filter(isForbiddenBundleEntry).sort();
+	if (forbidden.length > 0) {
+		throw new CueBundleImportError(
+			'FORBIDDEN_ENTRY',
+			`The bundle carries files that never belong in one: ${forbidden.join(', ')}`,
+			{ entries: forbidden }
+		);
+	}
 	warnings.push(...(manifest.warnings ?? []), ...validation.warnings.map((w) => w.message));
 
 	let layoutEntry: CuePipeline | undefined;
@@ -850,6 +906,7 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 	) as ThinkingMode;
 
 	const agents: CueBundleImportAgent[] = [];
+	const managedReports: CueBundleImportManagedReport[] = [];
 	const envReports: CueBundleImportEnvReport[] = [];
 	const unknownTypes: string[] = [];
 	const nameTaken: string[] = [];
@@ -928,6 +985,53 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 		// The workspace root is the agent's project root even when it works in a
 		// subfolder, the way the desktop records an agent created in a project.
 		const projectRoot = realpathOrResolve(root);
+		// Managed requirements: every declared reference id is validated by the
+		// host policy before this agent can be scheduled. No policy, no import;
+		// one refused reference, no import. The record carries the approved ids.
+		const declaredRefs = sortedUnique(
+			asStringList(settings.managed?.credentialRefs).filter((ref) => ref !== '')
+		);
+		let approvedRefs: string[] | undefined;
+		if (declaredRefs.length > 0) {
+			if (!options.managedPolicy) {
+				throw new CueBundleImportError(
+					'MANAGED_POLICY_REQUIRED',
+					`Agent "${settings.name}" declares managed credential references (${declaredRefs.join(', ')}) and no host policy was given to validate them.`,
+					{ agent: settings.name, credentialRefs: declaredRefs }
+				);
+			}
+			const verdict = await options.managedPolicy.validateCredentialRefs({
+				refIds: declaredRefs,
+				agent: {
+					id: agent.id,
+					name: settings.name,
+					toolType: settings.toolType,
+					workspace: settings.workspace,
+				},
+			});
+			const approved = sortedUnique(verdict.approved.filter((ref) => declaredRefs.includes(ref)));
+			const refused = verdict.refused.filter((entry) => declaredRefs.includes(entry.refId));
+			const unanswered = declaredRefs.filter(
+				(ref) => !approved.includes(ref) && !refused.some((entry) => entry.refId === ref)
+			);
+			if (refused.length > 0 || unanswered.length > 0) {
+				throw new CueBundleImportError(
+					'MANAGED_CREDENTIAL_REFUSED',
+					`The host policy did not approve every credential reference agent "${settings.name}" declares: ${[
+						...refused.map((entry) => `${entry.refId} (${entry.reason})`),
+						...unanswered.map((ref) => `${ref} (no answer)`),
+					].join(', ')}`,
+					{ agent: settings.name, refused, unanswered }
+				);
+			}
+			approvedRefs = approved;
+			managedReports.push({
+				agentId: agent.id,
+				agentName: settings.name,
+				credentialRefs: declaredRefs,
+				approved,
+			});
+		}
 		const bundleFields = {
 			name: settings.name,
 			toolType: settings.toolType,
@@ -955,6 +1059,8 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 					? (mcpSecretsByWorkspace.get(settings.workspace) ?? [])
 					: []),
 			]),
+			// Ids only, and only the ones the host policy approved above.
+			managedCredentialRefs: approvedRefs,
 		} satisfies Record<(typeof CUE_BUNDLE_AGENT_FIELDS)[number], unknown>;
 		const sameName = existingSessions.find(
 			(s) => s.id !== agent.id && s.name.toLowerCase() === settings.name.toLowerCase()
@@ -1384,6 +1490,7 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 		shellCommands,
 		env: envReports,
 		secrets,
+		managed: managedReports,
 		conflicts,
 		warnings: [...new Set(warnings)],
 	};
