@@ -18,8 +18,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
 
 import { MAESTRO_LIB_VERSION } from '../version';
+import { MANAGED_CONTRACT_VERSION } from '../managed/types';
 import {
 	CAPTURED_RECORDINGS,
 	CAPTURED_CLAUDE_CODE_SESSION_ID,
@@ -62,6 +64,13 @@ const FUNCTION_EXPORTS = [
 	'setMaestroLibErrorReporter',
 	'setMaestroLibImageRefResolver',
 	'setMaestroLibCapabilitySnapshotLookup',
+	// The management extension (0.4.0).
+	'negotiateCompatibility',
+	'hostCompatibilityProfile',
+	'supportAtLeast',
+	'managedContextProblems',
+	'isManagedOperationContext',
+	'providerRouteSupport',
 ];
 
 let scratch: string;
@@ -126,21 +135,54 @@ describe('the built maestro-lib entry', () => {
 			catch { electron = 'absent'; }
 			const types = {};
 			for (const name of ${JSON.stringify(FUNCTION_EXPORTS)}) types[name] = typeof lib[name];
+			// Negotiate through the built entry: the one managed capability this
+			// build has activates, a required one it lacks is refused.
+			const profile = lib.hostCompatibilityProfile({ providers: lib.getAgentIds() });
+			const request = {
+				contractVersions: [lib.MANAGED_CONTRACT_VERSION],
+				endpointProtocols: [1],
+				transport: 'in-process',
+				required: ['capabilities.negotiate'],
+			};
 			console.log(JSON.stringify({
 				version: lib.MAESTRO_LIB_VERSION,
+				info: lib.MAESTRO_LIB_VERSION_INFO,
 				types,
 				agents: lib.getAgentIds().length,
 				electron,
+				activated: lib.negotiateCompatibility(profile, request),
+				denied: lib.negotiateCompatibility(profile, { ...request, required: ['runs.submit'] }),
 			}));
 			`,
-		]) as { version: string; types: Record<string, string>; agents: number; electron: string };
+		]) as {
+			version: string;
+			info: { library: string; managedContract: string; node: string };
+			types: Record<string, string>;
+			agents: number;
+			electron: string;
+			activated: { outcome: string; capabilities?: string[] };
+			denied: { outcome: string; reasons?: { reason: string }[] };
+		};
 
 		expect(loaded.electron).toBe('absent');
 		expect(loaded.version).toBe(MAESTRO_LIB_VERSION);
+		expect(loaded.info).toEqual({
+			library: MAESTRO_LIB_VERSION,
+			managedContract: MANAGED_CONTRACT_VERSION,
+			node: '>=20',
+		});
 		expect(loaded.agents).toBeGreaterThan(0);
 		for (const name of FUNCTION_EXPORTS) {
 			expect(loaded.types[name], name).toBe('function');
 		}
+		expect(loaded.activated).toMatchObject({
+			outcome: 'activated',
+			capabilities: ['capabilities.negotiate'],
+		});
+		expect(loaded.denied).toMatchObject({
+			outcome: 'denied',
+			reasons: [{ reason: 'missing-required-capability' }],
+		});
 	});
 
 	it('loads with import from an ES module', () => {
@@ -177,7 +219,9 @@ describe('the built maestro-lib entry', () => {
 			private: true,
 			main: 'index.js',
 			types: 'index.d.ts',
+			engines: { node: '>=20' },
 			maestroAppVersion: appPackage.version,
+			maestroManagedContract: MANAGED_CONTRACT_VERSION,
 		});
 		expect(fs.existsSync(path.join(libDir, 'index.d.ts'))).toBe(true);
 		expect(fs.readFileSync(path.join(libDir, 'README.md'), 'utf8')).toBe(
@@ -190,6 +234,42 @@ describe('the built maestro-lib entry', () => {
 		expect(fs.readFileSync(path.join(types, 'run/session.d.ts'), 'utf8')).toContain(
 			'planSessionTurn'
 		);
+		expect(fs.existsSync(path.join(types, 'managed/compatibility.d.ts'))).toBe(true);
+	});
+
+	it('records its own provenance: every file hashed, the source revision named', () => {
+		const provenance = JSON.parse(fs.readFileSync(path.join(libDir, 'provenance.json'), 'utf8'));
+		expect(provenance).toMatchObject({
+			formatVersion: 1,
+			name: 'maestro-lib',
+			version: MAESTRO_LIB_VERSION,
+			maestroManagedContract: MANAGED_CONTRACT_VERSION,
+			tooling: { node: process.versions.node },
+		});
+		expect(
+			provenance.sourceRevision === null || /^[a-f0-9]{40}$/.test(provenance.sourceRevision)
+		).toBe(true);
+		expect(typeof provenance.sourceDirty === 'boolean' || provenance.sourceDirty === null).toBe(
+			true
+		);
+
+		const files: string[] = [];
+		const walk = (dir: string) => {
+			for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+				const full = path.join(dir, entry.name);
+				if (entry.isDirectory()) walk(full);
+				else files.push(path.relative(libDir, full).split(path.sep).join('/'));
+			}
+		};
+		walk(libDir);
+		const hashed = Object.keys(provenance.payloadSha256).sort();
+		expect(hashed).toEqual(files.filter((file) => file !== 'provenance.json').sort());
+		for (const file of ['index.js', 'index.d.ts', 'package.json', 'README.md']) {
+			const actual = createHash('sha256')
+				.update(fs.readFileSync(path.join(libDir, file)))
+				.digest('hex');
+			expect(provenance.payloadSha256[file], file).toBe(actual);
+		}
 	});
 });
 
