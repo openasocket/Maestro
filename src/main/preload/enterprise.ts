@@ -1,0 +1,72 @@
+/**
+ * Preload API for enterprise enrollment (`window.maestro.enterprise`).
+ *
+ * Mirrors the `enterprise:*` channels registered in
+ * `src/main/ipc/handlers/enterprise.ts`. Desktop-only by construction: the
+ * web-desktop bridge's method inventory has no `enterprise` namespace, so a
+ * browser holds this object and gets nothing back from it. Everything here
+ * answers a public projection or a lifecycle outcome; the only secret-shaped
+ * answer is the registration approval, a one-time pairing code the actor
+ * reads once and types into the console.
+ */
+
+import { ipcRenderer } from 'electron';
+
+import type {
+	EndpointEnrollmentResult,
+	EndpointStatus,
+	ManagedEnrollmentStatus,
+	ManagedIdentityManagement,
+} from '../../shared/maestro-lib/managed/endpoint-port';
+import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
+import type {
+	EnrollmentRequestInput,
+	LifecycleOutcome,
+	RegistrationApprovalHandoff,
+} from '../enterprise/enrollment';
+import type { IdentityClearOutcome, IdentityCustodyState } from '../enterprise/identity-store';
+import type { PolicyRecovery } from '../enterprise/policy-status';
+
+export function createEnterpriseApi() {
+	return {
+		/** Null when the desktop runs no enrollment service. */
+		status: (): Promise<ManagedEnrollmentStatus | null> => ipcRenderer.invoke('enterprise:status'),
+		custody: (): Promise<IdentityCustodyState | null> => ipcRenderer.invoke('enterprise:custody'),
+		policyStatus: (): Promise<ManagedPolicyStatus | null> =>
+			ipcRenderer.invoke('enterprise:policyStatus'),
+		requestEnrollment: (
+			input: EnrollmentRequestInput
+		): Promise<LifecycleOutcome<EndpointEnrollmentResult>> =>
+			ipcRenderer.invoke('enterprise:requestEnrollment', input),
+		connect: (): Promise<LifecycleOutcome<EndpointStatus>> =>
+			ipcRenderer.invoke('enterprise:connect'),
+		/** The approval handoff is shown once; nothing keeps it. */
+		beginRegistration: (): Promise<LifecycleOutcome<RegistrationApprovalHandoff>> =>
+			ipcRenderer.invoke('enterprise:beginRegistration'),
+		completeRegistration: (): Promise<LifecycleOutcome<EndpointStatus>> =>
+			ipcRenderer.invoke('enterprise:completeRegistration'),
+		refreshPolicy: (): Promise<LifecycleOutcome<EndpointStatus>> =>
+			ipcRenderer.invoke('enterprise:refreshPolicy'),
+		recoverPolicy: (): Promise<PolicyRecovery> => ipcRenderer.invoke('enterprise:recoverPolicy'),
+		requestRotation: (): Promise<LifecycleOutcome<never>> =>
+			ipcRenderer.invoke('enterprise:requestRotation'),
+		requestRevocation: (): Promise<LifecycleOutcome<never>> =>
+			ipcRenderer.invoke('enterprise:requestRevocation'),
+		requestRetirement: (): Promise<LifecycleOutcome<never>> =>
+			ipcRenderer.invoke('enterprise:requestRetirement'),
+		acknowledgeRevocation: (input: {
+			installationId: string;
+		}): Promise<LifecycleOutcome<ManagedIdentityManagement>> =>
+			ipcRenderer.invoke('enterprise:acknowledgeRevocation', input),
+		retire: (input: {
+			installationId: string;
+		}): Promise<LifecycleOutcome<ManagedIdentityManagement>> =>
+			ipcRenderer.invoke('enterprise:retire', input),
+		clearIdentity: (input: {
+			installationId: string;
+			acknowledgeUntrusted?: boolean;
+		}): Promise<IdentityClearOutcome> => ipcRenderer.invoke('enterprise:clearIdentity', input),
+	};
+}
+
+export type EnterpriseApi = ReturnType<typeof createEnterpriseApi>;

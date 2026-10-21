@@ -1,0 +1,207 @@
+/**
+ * Enterprise enrollment IPC: the narrow set of lifecycle and status requests
+ * the renderer may make of the main-process enrollment service.
+ *
+ * Desktop-only by construction: `enterprise:*` is not in the web bridge's
+ * method inventory (`src/main/web-server/handlers/bridgeDenyList.ts`), so a
+ * browser client cannot reach any of these. What crosses the bridge is the
+ * public projection only (`ManagedEnrollmentStatus`, `ManagedPolicyStatus`,
+ * the lifecycle's outcome records): no sealed bytes, no install secret, no
+ * anchor, nothing the endpoint holds. The one secret-shaped value is the
+ * registration approval (`beginRegistration`), a one-time pairing code the
+ * actor must read off the screen and type into the console; it is returned
+ * once and never persisted or logged anywhere in main.
+ *
+ * Every verb is validated here before it reaches the lifecycle, and the
+ * lifecycle serializes them, so two renderer windows cannot interleave an
+ * enroll and a revoke. `withIpcErrorLogging` re-throws, so a genuine fault
+ * still reaches Sentry and the renderer's inline error text is the service's
+ * own sentence; a refusal is a normal outcome, not a throw.
+ */
+
+import { ipcMain } from 'electron';
+import * as path from 'path';
+
+import { isEndpointDigest } from '../../../shared/maestro-lib/managed/endpoint-port';
+import type {
+	EnrollmentLifecycle,
+	EnrollmentRequestInput,
+	LifecycleOutcome,
+} from '../../enterprise/enrollment';
+import type {
+	EnterpriseIdentityStore,
+	IdentityClearOutcome,
+	IdentityCustodyState,
+} from '../../enterprise/identity-store';
+import type { PolicyStatusService } from '../../enterprise/policy-status';
+import { withIpcErrorLogging } from '../../utils/ipcHandler';
+
+const LOG_CONTEXT = '[Enterprise]';
+const MAX_TEXT = 8192;
+const MODES = ['attended', 'managed'] as const;
+const PROFILES = ['metadata', 'redacted', 'full', 'full_vibes'] as const;
+
+export interface EnterpriseHandlerDependencies {
+	getLifecycle: () => EnrollmentLifecycle | null;
+	getPolicyStatus: () => PolicyStatusService | null;
+	getIdentity: () => EnterpriseIdentityStore | null;
+}
+
+function handlerOpts(operation: string) {
+	return { context: LOG_CONTEXT, operation };
+}
+
+function text(value: unknown, name: string, max = MAX_TEXT): string {
+	if (typeof value !== 'string' || value.length === 0 || value.length > max) {
+		throw new Error(`${name} must be a string of 1 to ${max} characters.`);
+	}
+	return value;
+}
+
+function oneOf<T extends string>(value: unknown, name: string, allowed: readonly T[]): T {
+	if (typeof value !== 'string' || !allowed.includes(value as T)) {
+		throw new Error(`${name} must be one of ${allowed.join(', ')}.`);
+	}
+	return value as T;
+}
+
+/** The enrollment request as the renderer may send it; anything else is refused before the lifecycle. */
+export function validateEnrollmentRequest(raw: unknown): EnrollmentRequestInput {
+	if (typeof raw !== 'object' || raw === null)
+		throw new Error('The enrollment request must be an object.');
+	const input = raw as Record<string, unknown>;
+	const socketPath = text(input.socketPath, 'socketPath', 103);
+	if (!path.isAbsolute(socketPath))
+		throw new Error('socketPath must be an absolute Unix socket path.');
+	const trustRootDigest = text(input.trustRootDigest, 'trustRootDigest', 64);
+	if (!isEndpointDigest(trustRootDigest))
+		throw new Error('trustRootDigest must be a lowercase sha256 hex digest.');
+	return {
+		socketPath,
+		tenantId: text(input.tenantId, 'tenantId', 128),
+		orgId: text(input.orgId, 'orgId', 128),
+		mode: oneOf(input.mode, 'mode', MODES),
+		invitation: text(input.invitation, 'invitation'),
+		collectionProfile: oneOf(input.collectionProfile, 'collectionProfile', PROFILES),
+		trustRootDigest,
+		keyPossessionProof: text(input.keyPossessionProof, 'keyPossessionProof'),
+	};
+}
+
+function installationInput(raw: unknown): { installationId: string } {
+	if (typeof raw !== 'object' || raw === null)
+		throw new Error('The request must name an installation.');
+	return {
+		installationId: text((raw as Record<string, unknown>).installationId, 'installationId', 256),
+	};
+}
+
+const NO_SERVICE_MESSAGE = 'The enterprise enrollment service is not running in this desktop.';
+const NO_SERVICE: LifecycleOutcome<never> = { status: 'unavailable', message: NO_SERVICE_MESSAGE };
+
+export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies): void {
+	const lifecycle = () => deps.getLifecycle();
+
+	ipcMain.handle(
+		'enterprise:status',
+		withIpcErrorLogging(handlerOpts('status'), async () => lifecycle()?.status() ?? null)
+	);
+
+	ipcMain.handle(
+		'enterprise:custody',
+		withIpcErrorLogging(
+			handlerOpts('custody'),
+			async (): Promise<IdentityCustodyState | null> => deps.getIdentity()?.custody() ?? null
+		)
+	);
+
+	ipcMain.handle(
+		'enterprise:policyStatus',
+		withIpcErrorLogging(
+			handlerOpts('policyStatus'),
+			async () => deps.getPolicyStatus()?.status() ?? null
+		)
+	);
+
+	ipcMain.handle(
+		'enterprise:requestEnrollment',
+		withIpcErrorLogging(handlerOpts('requestEnrollment'), async (raw: unknown) => {
+			const input = validateEnrollmentRequest(raw);
+			return lifecycle()?.requestEnrollment(input) ?? NO_SERVICE;
+		})
+	);
+
+	ipcMain.handle(
+		'enterprise:connect',
+		withIpcErrorLogging(handlerOpts('connect'), async () => lifecycle()?.connect() ?? NO_SERVICE)
+	);
+
+	ipcMain.handle(
+		'enterprise:beginRegistration',
+		withIpcErrorLogging(
+			handlerOpts('beginRegistration'),
+			async () => lifecycle()?.beginRegistration() ?? NO_SERVICE
+		)
+	);
+
+	ipcMain.handle(
+		'enterprise:completeRegistration',
+		withIpcErrorLogging(
+			handlerOpts('completeRegistration'),
+			async () => lifecycle()?.completeRegistration() ?? NO_SERVICE
+		)
+	);
+
+	ipcMain.handle(
+		'enterprise:refreshPolicy',
+		withIpcErrorLogging(
+			handlerOpts('refreshPolicy'),
+			async () => deps.getPolicyStatus()?.refresh() ?? NO_SERVICE
+		)
+	);
+
+	ipcMain.handle(
+		'enterprise:recoverPolicy',
+		withIpcErrorLogging(
+			handlerOpts('recoverPolicy'),
+			async () => deps.getPolicyStatus()?.recover() ?? NO_SERVICE
+		)
+	);
+
+	for (const request of ['requestRotation', 'requestRevocation', 'requestRetirement'] as const) {
+		ipcMain.handle(
+			`enterprise:${request}`,
+			withIpcErrorLogging(handlerOpts(request), async () => lifecycle()?.[request]() ?? NO_SERVICE)
+		);
+	}
+
+	ipcMain.handle(
+		'enterprise:acknowledgeRevocation',
+		withIpcErrorLogging(handlerOpts('acknowledgeRevocation'), async (raw: unknown) => {
+			return lifecycle()?.acknowledgeRevocation(installationInput(raw)) ?? NO_SERVICE;
+		})
+	);
+
+	ipcMain.handle(
+		'enterprise:retire',
+		withIpcErrorLogging(handlerOpts('retire'), async (raw: unknown) => {
+			return lifecycle()?.retire(installationInput(raw)) ?? NO_SERVICE;
+		})
+	);
+
+	ipcMain.handle(
+		'enterprise:clearIdentity',
+		withIpcErrorLogging(
+			handlerOpts('clearIdentity'),
+			async (raw: unknown): Promise<IdentityClearOutcome> => {
+				const identity = deps.getIdentity();
+				if (!identity) return { ok: false, reason: 'unprotected', message: NO_SERVICE_MESSAGE };
+				const { installationId } = installationInput(raw);
+				const acknowledgeUntrusted = (raw as Record<string, unknown>).acknowledgeUntrusted === true;
+				// The lifecycle holds the socket for this record; drop it before the record goes.
+				await lifecycle()?.close();
+				return identity.clear({ installationId, acknowledgeUntrusted });
+			}
+		)
+	);
+}

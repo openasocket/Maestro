@@ -242,6 +242,7 @@ import type {
 import type { WindowCommandRequest, WindowCommandResult } from '../shared/windowCommands';
 import type { WebUserPublic } from '../shared/webLogin';
 import type { ComputerHistoryApi } from '../main/preload/computerHistory';
+import type { EnterpriseApi } from '../main/preload/enterprise';
 import type { MaestroRunApi } from '../main/preload/maestroRun';
 
 interface MaestroAPI {
@@ -1947,6 +1948,14 @@ interface MaestroAPI {
 		setDisabled: (id: string, disabled: boolean) => Promise<WebUserPublic>;
 		deleteUser: (id: string) => Promise<void>;
 	};
+	/**
+	 * Enterprise enrollment with a Mega-Maestro endpoint: status, policy status,
+	 * the enrollment request, the browser-approved actor registration and the
+	 * explicit local transitions. Desktop-only: the web-desktop bridge inventory
+	 * has no `enterprise` namespace. Answers are public projections and lifecycle
+	 * outcomes; the registration approval is a one-time pairing code.
+	 */
+	enterprise: EnterpriseApi;
 	/**
 	 * Computer History (the recorder's status, config, rules, pause, clear,
 	 * permission flow, and recent-activity query). Desktop-only: the web-desktop

@@ -430,6 +430,15 @@ acting again.
 Ranked by how often an agent is likely to hit them. Most are not built yet;
 deliberate design constraints, including protected host consent, are noted below.
 
+0. **Enterprise enrollment (`window.maestro.enterprise`).** The `enterprise:*`
+   IPC verbs (status, policy status, enrollment request, the browser-approved
+   actor registration, refresh/recover, the explicit local transitions and the
+   identity clear) have no `maestro-cli` verb yet. They were added in the
+   Mega-Maestro integration (phase 03) ahead of their CLI counterpart, which
+   belongs with the headless host wiring of a later phase; the service modules
+   under `src/main/enterprise/` are Electron-free so the CLI will reach the
+   same code. Until then the renderer is the only caller.
+
 1. **Interrupt a running turn.** Escape stops a busy agent in the UI. There is
    no CLI equivalent and no WS message behind one. This is the largest remaining
    gap: an agent that starts a runaway turn on another agent cannot stop it.

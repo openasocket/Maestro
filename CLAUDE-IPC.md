@@ -39,6 +39,7 @@ The `window.maestro` API exposes the following namespaces:
 - `live` - Toggle live sessions, get status, dashboard URL, connected clients
 - `webserver` - Get URL, connected client count
 - `tunnel` - Cloudflare tunnel: isCloudflaredInstalled, start, stop, getStatus
+- `enterprise` - Enrollment with a Mega-Maestro endpoint (desktop-only, the bridge inventory has no `enterprise` namespace): status, custody, policyStatus, requestEnrollment, connect, beginRegistration (a one-time approval code), completeRegistration, refreshPolicy, recoverPolicy, requestRotation/requestRevocation/requestRetirement (answer `unsupported` until the endpoint protocol carries them), acknowledgeRevocation, retire, clearIdentity. Handlers in `src/main/ipc/handlers/enterprise.ts`, service in `src/main/enterprise/`
 
 ## Automation
 

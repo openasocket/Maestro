@@ -19,6 +19,7 @@ import {
 import { createContextApi } from './context';
 import { createWebApi, createWebserverApi, createLiveApi } from './web';
 import { createWebLoginApi } from './webLogin';
+import { createEnterpriseApi } from './enterprise';
 import { createComputerHistoryApi } from './computerHistory';
 import { createMaestroRunApi } from './maestroRun';
 import {
@@ -130,6 +131,9 @@ contextBridge.exposeInMainWorld('maestro', {
 
 	// Web Login API (accounts for the web interface - desktop-only)
 	webLogin: createWebLoginApi(),
+
+	// Enterprise enrollment API (desktop-only; the web bridge inventory has no enterprise namespace)
+	enterprise: createEnterpriseApi(),
 
 	// Computer History API (desktop-only; the web bridge refuses these channels)
 	computerHistory: createComputerHistoryApi(),
@@ -716,3 +720,7 @@ export type {
 	// From codexVisualization
 	CodexVisualizationApi,
 } from './codexVisualization';
+export type {
+	// From enterprise
+	EnterpriseApi,
+} from './enterprise';
