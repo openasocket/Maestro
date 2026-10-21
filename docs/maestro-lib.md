@@ -490,6 +490,8 @@ if (problems.length > 0) throw new Error(problems.join('; '));
 
 The client interface carries the extension as `MaestroClient.managed`, optional: a host without it is `unsupported`, never "unmanaged, so allowed".
 
+The entry also exports the endpoint port (`EndpointPort`, `ManagedIdentityPort`, the protocol-1 envelope helpers and validators in `managed/endpoint-port.ts`) and the host adapter (`createManagedHostAdapter()`, `installationIdentity()`, `projectPolicyStatus()` in `managed/host-adapter.ts`). A host injects its own custody and socket through `createMaestroRuntime({ managed: { host } })`; the library never opens a socket or reads a keyring itself, and `ManagedApi.policy()` answers the adapter's policy projection.
+
 ## See also
 
 - [Maestro CLI](./cli) for running agents and playbooks from a shell.
