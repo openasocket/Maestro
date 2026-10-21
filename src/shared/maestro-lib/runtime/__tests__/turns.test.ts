@@ -516,7 +516,9 @@ describe('runtime turns', () => {
 		function envelope<T>(
 			runtime: MaestroRuntime,
 			input: T,
-			overrides: Partial<ManagedOperationContext> & { identity?: Partial<ManagedRunIdentity> } = {}
+			overrides: Omit<Partial<ManagedOperationContext>, 'identity'> & {
+				identity?: Partial<ManagedRunIdentity>;
+			} = {}
 		): ManagedOperationEnvelope<T> {
 			const { identity, ...rest } = overrides;
 			return {
