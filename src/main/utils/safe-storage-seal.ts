@@ -19,11 +19,22 @@
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 
+/**
+ * Who holds the key a provider seals with. `os-keystore` is the OS credential
+ * store, with the backend Electron selected where it says (Linux names
+ * `gnome_libsecret`, `kwallet`, `basic_text` and so on; macOS and Windows
+ * report nothing). `obscuring` is the built-in key of `obscuringSeal`. A store
+ * that must hold a credential asks (`sealProtectionProblem`) before it writes.
+ */
+export type SealCustody = { kind: 'os-keystore'; backend: string | null } | { kind: 'obscuring' };
+
 /** Seals and unseals a string with a key the OS holds. */
 export interface SealProvider {
 	available(): boolean;
 	seal(plaintext: string): Buffer;
 	unseal(blob: Buffer): string;
+	/** Who holds the key. A provider that cannot say is refused protected custody. */
+	custody?(): SealCustody;
 }
 
 /** The part of Electron's `safeStorage` a seal needs. */
@@ -31,6 +42,31 @@ export interface SafeStorageLike {
 	isEncryptionAvailable(): boolean;
 	encryptString(s: string): Buffer;
 	decryptString(b: Buffer): string;
+	/** Linux only in Electron; elsewhere absent or `unknown`. */
+	getSelectedStorageBackend?(): string;
+}
+
+/**
+ * Why `seal` is not protected custody for a credential, or null when it is.
+ * Three refusals, all of them final for the file in question: no encryption at
+ * all, the built-in obscuring key, and Linux's `basic_text` backend (a file on
+ * disk standing in for a keyring). A provider that reports no custody is
+ * refused too: "probably fine" is not a custody claim.
+ */
+export function sealProtectionProblem(
+	seal: SealProvider,
+	platform: NodeJS.Platform = process.platform
+): string | null {
+	if (!seal.available()) return 'The operating system offers no encryption for this app.';
+	const custody = seal.custody?.();
+	if (!custody) return 'The seal provider does not say who holds its key.';
+	if (custody.kind === 'obscuring') {
+		return 'The obscuring seal uses a key built into the app; it is not credential protection.';
+	}
+	if (platform === 'linux' && custody.backend === 'basic_text') {
+		return 'Linux is storing app secrets as basic_text; unlock a keyring before enrolling.';
+	}
+	return null;
 }
 
 /**
@@ -50,6 +86,15 @@ export function safeStorageSeal(safeStorage: SafeStorageLike): SealProvider {
 		},
 		seal: (plaintext) => safeStorage.encryptString(plaintext),
 		unseal: (blob) => safeStorage.decryptString(blob),
+		custody: () => {
+			let backend: string | null = null;
+			try {
+				backend = safeStorage.getSelectedStorageBackend?.() ?? null;
+			} catch {
+				backend = null;
+			}
+			return { kind: 'os-keystore', backend };
+		},
 	};
 }
 
@@ -77,6 +122,7 @@ const OBSCURING_TAG_BYTES = 16;
 export function obscuringSeal(): SealProvider {
 	return {
 		available: () => true,
+		custody: () => ({ kind: 'obscuring' }),
 		seal: (plaintext) => {
 			const iv = randomBytes(OBSCURING_IV_BYTES);
 			const cipher = createCipheriv('aes-256-gcm', OBSCURING_KEY, iv);

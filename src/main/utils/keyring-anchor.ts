@@ -26,6 +26,21 @@
  *   user can delete the entry. Say so wherever a guarantee is stated.
  */
 
+import { createHash } from 'crypto';
+import * as path from 'path';
+
+/**
+ * The account name of an anchor that belongs to one data folder. A development
+ * run, a demo instance and the installed app each have a folder of their own
+ * and must each have an anchor of their own: one shared entry would make every
+ * one of them call the others' files older copies. `prefix` names the store
+ * (`state`, `enterprise-identity`); the rest is a digest of the folder.
+ */
+export function anchorAccountForDirectory(prefix: string, directory: string): string {
+	const digest = createHash('sha256').update(path.resolve(directory), 'utf8').digest('hex');
+	return `${prefix}:${digest.slice(0, 16)}`;
+}
+
 /** What an anchor holds. */
 export interface Anchor {
 	installSecret: string;
