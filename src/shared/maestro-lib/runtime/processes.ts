@@ -24,9 +24,21 @@ export type RegisteredTurn = Pick<TurnHandle, 'interrupt' | 'terminate' | 'termi
 	readonly done: Promise<unknown>;
 };
 
+/** What a turn is registered under besides its agent and tab: the managed run it serves, if any. */
+export interface RegisteredTurnMeta {
+	runId?: string;
+}
+
 export interface ProcessRegistry extends RepositoryProcesses {
 	/** Track a running turn. It drops out of the registry by itself when `done` settles. */
-	register(agentId: string, tabId: string, turn: RegisteredTurn): void;
+	register(agentId: string, tabId: string, turn: RegisteredTurn, meta?: RegisteredTurnMeta): void;
+	/** The agent and tab a managed run is running on, while it runs. */
+	findRun(runId: string): { agentId: string; tabId: string } | null;
+	/** Every managed run with a live process, for the journal's restart recovery. */
+	liveRunIds(): string[];
+	/** Interrupt / stop the process of one managed run. False when no process serves it. */
+	interruptRun(runId: string): Promise<boolean>;
+	stopRun(runId: string): Promise<boolean>;
 	/** A user interrupt: the first stage a person's Stop uses. Resolves once the turn has ended. */
 	interruptTab(agentId: string, tabId: string): Promise<boolean>;
 	/** A tab close and a fence start at terminate (lib-D5). Resolves once the turns have ended. */
@@ -48,6 +60,7 @@ interface Entry {
 	agentId: string;
 	tabId: string;
 	turn: RegisteredTurn;
+	runId: string | undefined;
 }
 
 /** Resolves when `promise` settles or after `ms`, whichever is first. Never rejects. */
@@ -77,6 +90,9 @@ export function createProcessRegistry(options: ProcessRegistryOptions = {}): Pro
 			(entry) => entry.agentId === agentId && (tabId === undefined || entry.tabId === tabId)
 		);
 
+	const byRun = (runId: string): Entry | undefined =>
+		[...entries].find((entry) => entry.runId === runId);
+
 	const stopEntries = async (
 		list: Entry[],
 		stop: (turn: RegisteredTurn) => void
@@ -95,8 +111,8 @@ export function createProcessRegistry(options: ProcessRegistryOptions = {}): Pro
 	};
 
 	return {
-		register(agentId, tabId, turn) {
-			const entry: Entry = { agentId, tabId, turn };
+		register(agentId, tabId, turn, meta = {}) {
+			const entry: Entry = { agentId, tabId, turn, runId: meta.runId };
 			entries.add(entry);
 			const forget = (): void => {
 				entries.delete(entry);
@@ -110,6 +126,21 @@ export function createProcessRegistry(options: ProcessRegistryOptions = {}): Pro
 			return list.length > 0;
 		},
 		stopTab: (agentId, tabId) => stopEntries(matching(agentId, tabId), (turn) => turn.terminate()),
+		findRun(runId) {
+			const entry = byRun(runId);
+			return entry ? { agentId: entry.agentId, tabId: entry.tabId } : null;
+		},
+		liveRunIds: () => [...entries].flatMap((entry) => (entry.runId ? [entry.runId] : [])),
+		async interruptRun(runId) {
+			const list = byRun(runId) ? [byRun(runId) as Entry] : [];
+			await stopEntries(list, (turn) => turn.interrupt());
+			return list.length > 0;
+		},
+		async stopRun(runId) {
+			const list = byRun(runId) ? [byRun(runId) as Entry] : [];
+			await stopEntries(list, (turn) => turn.terminate());
+			return list.length > 0;
+		},
 		stopAgent: (agentId) => stopEntries(matching(agentId), (turn) => turn.terminate()),
 		stopAll: () => stopEntries([...entries], (turn) => turn.terminate()),
 		terminateAllNow() {
