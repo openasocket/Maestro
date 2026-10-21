@@ -19,6 +19,7 @@ import * as fs from 'fs/promises';
 
 import { createSleepTracker } from '../../sleepTracking';
 import { createAgentRepository } from '../agents/repository';
+import type { AutoRunOwnerFence, AutoRunWorkflowIdentity } from '../autorun/attribution';
 import type { RepositoryLoadFailure } from '../agents/repository';
 import type { RuleContext, TabDefaults } from '../agents/rules';
 import { createEventBus } from '../client/event-bus';
@@ -61,7 +62,7 @@ import { createBackgroundTurns, type BackgroundTurnDeps } from './background-tur
 import { createRuntimeConsults } from './consults';
 import { createRuntimeGroupChats } from './group-chats';
 import { createProcessRegistry } from './processes';
-import { createRuntimeAutoRun, type RuntimeAutoRun } from './autorun';
+import { createRuntimeAutoRun, type RuntimeAutoRun, type RuntimeAutoRunHost } from './autorun';
 import { createProviderLister } from './providers';
 import { watchSettingsFile, type WatchDirectory } from './settings-watch';
 import { createRuntimeTurns, type RuntimeTurnDeps, type RuntimeTurnOptions } from './turns';
@@ -125,6 +126,12 @@ export interface MaestroRuntimeOptions {
 		scopeAgents?(context: ManagedAuthenticatedContext, agents: AgentRecord[]): AgentRecord[];
 		/** The policy sources admissions are decided on. Default: what the enrollment record names. */
 		policy?(): PolicySourceSet;
+		/**
+		 * The owner fence of an Auto Run's workflow, read on every attempt (the CP-03 workflow
+		 * owner producer). Default none: a managed runtime refuses every Auto Run as unavailable
+		 * rather than run an unowned workflow or mint a fence of its own. Standalone never asks.
+		 */
+		workflowFence?(workflow: AutoRunWorkflowIdentity): AutoRunOwnerFence | null;
 	};
 	deps?: Partial<RuntimeDeps>;
 }
@@ -402,6 +409,25 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		now: deps.now,
 	});
 
+	// The policy sources admissions are decided on: the injected reader, the attached host's, or
+	// what the binding record names. One answer for the Auto Run port and the managed facade.
+	const bindingPolicy = (): PolicySourceSet => {
+		const state = binding.state();
+		return state.state === 'enrolled'
+			? { sources: state.record.policySources, policyRevision: state.record.policyRevision }
+			: { sources: [], policyRevision: null };
+	};
+	const admissionPolicy =
+		options.managed?.policy ?? (managedHost ? () => managedHost.policy() : bindingPolicy);
+	// What an Auto Run's turns are admitted with: the attached host with its custody naming the
+	// registered actor, or an injected authority standing in for one. Neither: an enrolled binding
+	// is still managed, and the port answers unavailable.
+	const autoRunHost: RuntimeAutoRunHost | null = managedHost
+		? { authority: managedHost.authority, policy: admissionPolicy, identity: managedHost.identity }
+		: managedAuthority
+			? { authority: managedAuthority, policy: admissionPolicy, identity: null }
+			: null;
+
 	// The run releases what it held back (queued chat messages) when it ends, and the turn service
 	// asks whether a run holds an agent: each needs the other, so the run reaches `turns`, declared
 	// below, only when a run ends.
@@ -414,6 +440,14 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		options: options.turns,
 		deps: { probeBinary: deps.probeBinary, ...deps.turns },
 		onRunEnded: (agentId) => turns.drain(agentId),
+		trigger: options.mode === 'host' ? 'api' : 'cli',
+		managed: {
+			installation,
+			binding,
+			host: autoRunHost,
+			...(options.managed?.workflowFence ? { workflowFence: options.managed.workflowFence } : {}),
+		},
+		...(deps.rules?.newId ? { newId: deps.rules.newId } : {}),
 	});
 	const turns = createRuntimeTurns({
 		paths,
@@ -516,12 +550,6 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 	const journalLoaded = await journal.load({ liveRunIds: registry.liveRunIds() });
 	let managed: ManagedApi | undefined;
 	if (journalLoaded.ok) {
-		const bindingPolicy = (): PolicySourceSet => {
-			const state = binding.state();
-			return state.state === 'enrolled'
-				? { sources: state.record.policySources, policyRevision: state.record.policyRevision }
-				: { sources: [], policyRevision: null };
-		};
 		managed = createManagedOperations({
 			installation,
 			binding,
@@ -538,7 +566,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			repository,
 			turns: turns.managed,
 			providers: () => getVisibleAgentDefinitions().map((definition) => definition.id),
-			policy: options.managed?.policy ?? (managedHost ? () => managedHost.policy() : bindingPolicy),
+			policy: admissionPolicy,
 			...(options.managed?.resolveResource
 				? { resolveResource: options.managed.resolveResource }
 				: {}),

@@ -70,6 +70,7 @@ import {
 	type ManagedEnrollmentStatus,
 	type ManagedIdentityPort,
 	type ManagedIdentityRecord,
+	type ManagedIdentityView,
 } from './endpoint-port';
 import {
 	MANAGED_CONTRACT_VERSION,
@@ -254,6 +255,25 @@ export function bindingEnrollment(record: ManagedIdentityRecord): EnrollInput {
 		policySources: [{ id: authorityId, kind: 'endpoint', revision: record.policy.appliedRevision }],
 		policyRevision: record.policy.appliedRevision,
 	};
+}
+
+/**
+ * The principal a managed launch runs as on this installation: the actor the
+ * endpoint registered this process for, or the installation's operator before
+ * one is registered. Attribution the sink binds, never authority: a keyboard,
+ * a Web Login cookie and a host's own process are not enterprise principals,
+ * and go on the delegation chain instead. Every host (the desktop's
+ * `spawnPrincipal`, the headless runtime's Auto Run port) names it this way.
+ */
+export function managedActorPrincipal(
+	identity: Pick<ManagedIdentityView, 'status' | 'record'> | null,
+	installation: Pick<ManagedInstallationIdentity, 'installationId'>
+): ManagedPrincipalRef {
+	const registered =
+		identity?.status === 'ok' ? (identity.record?.registration?.actorId ?? null) : null;
+	return registered
+		? { kind: 'human', id: registered }
+		: { kind: 'human', id: `operator:${installation.installationId}` };
 }
 
 export interface ManagedHostAdapterDeps {

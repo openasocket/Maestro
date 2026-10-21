@@ -26,7 +26,10 @@ import {
 	createContextVerifier,
 	type ContextVerifier,
 } from '../../shared/maestro-lib/managed/authority';
-import type { ManagedHostAdapter } from '../../shared/maestro-lib/managed/host-adapter';
+import {
+	managedActorPrincipal,
+	type ManagedHostAdapter,
+} from '../../shared/maestro-lib/managed/host-adapter';
 import {
 	unavailableEffectAuthority,
 	type ManagedEffectAuthority,
@@ -43,7 +46,7 @@ import type {
 	ProcessSpawnContextInput,
 } from '../process-manager/types';
 import type { BrokerDispatch } from './dispatch';
-import type { EnterpriseIdentityStore } from './identity-store';
+import { publicEnterpriseIdentity, type EnterpriseIdentityStore } from './identity-store';
 
 export interface ProcessSpawnAuthorityDeps {
 	installation: ManagedInstallationIdentity;
@@ -60,10 +63,7 @@ export function spawnPrincipal(
 	read: ReturnType<EnterpriseIdentityStore['read']>,
 	installation: ManagedInstallationIdentity
 ): ManagedPrincipalRef {
-	const registered = read.status === 'ok' ? (read.record.registration?.actorId ?? null) : null;
-	return registered
-		? { kind: 'human', id: registered }
-		: { kind: 'human', id: `operator:${installation.installationId}` };
+	return managedActorPrincipal(publicEnterpriseIdentity(read), installation);
 }
 
 /** The delegation chain the transport's actor contributes: a web login is attribution, never the principal. */

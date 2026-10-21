@@ -26,14 +26,30 @@ import {
 } from '../../../../__tests__/shared/maestro-lib/run/fakeAgent';
 import type { HistoryEntry } from '../../../types';
 import { DEFAULT_TAB_DEFAULTS } from '../../agents/rules';
+import {
+	autoRunWorkflowVersion,
+	type AutoRunOwnerFence,
+	type AutoRunWorkflowIdentity,
+} from '../../autorun/attribution';
 import type { AutoRunRunEvent } from '../../autorun/run-tracker';
 import type { AutoRunOutcome, ClientResult, MaestroEvent } from '../../client/types';
+import {
+	createLocalHostAuthority,
+	type AdmissionRequest,
+	type HostAuthority,
+} from '../../managed/authority';
+import { createManagedBinding } from '../../managed/binding';
 import { readHistory } from '../../store/read-history';
 import { AUTO_RUN_SESSION_COLUMNS, AUTO_RUN_TASK_COLUMNS } from '../../stats/auto-run-insert';
 import { QUERY_EVENT_COLUMNS } from '../../stats/query-event-insert';
 import { runAgentTurn } from '../../turns/run-agent-turn';
 import { outcomeOfEngineEvent } from '../autorun';
-import { createMaestroRuntime, type MaestroRuntime, type RuntimeDeps } from '../index';
+import {
+	createMaestroRuntime,
+	type MaestroRuntime,
+	type MaestroRuntimeOptions,
+	type RuntimeDeps,
+} from '../index';
 import type { WatchDirectory } from '../settings-watch';
 
 const T0 = Date.parse('2026-10-04T12:00:00Z');
@@ -190,7 +206,10 @@ describe('runtime Auto Run', () => {
 		...extra,
 	});
 
-	async function start(agent: Record<string, unknown> = seedAgent()): Promise<MaestroRuntime> {
+	async function start(
+		agent: Record<string, unknown> = seedAgent(),
+		managed?: MaestroRuntimeOptions['managed']
+	): Promise<MaestroRuntime> {
 		fs.writeFileSync(
 			path.join(dir, 'maestro-sessions.json'),
 			JSON.stringify({ sessions: [agent], activeSessionId: 'a1' }, null, '\t')
@@ -203,6 +222,7 @@ describe('runtime Auto Run', () => {
 				bundledPromptsDir: BUNDLED_PROMPTS,
 				loadSqlite: () => FakeDatabase as never,
 			},
+			...(managed ? { managed } : {}),
 		});
 		if (!started.ok) throw new Error(`refused: ${started.refusal.message}`);
 		open.push(started.runtime);
@@ -756,6 +776,139 @@ describe('runtime Auto Run', () => {
 		it('refuses an empty goal', async () => {
 			const runtime = await start();
 			expect(errorOf(await runtime.autoRun.launchGoal('a1', { goal: '   ' })).code).toBe('invalid');
+		});
+	});
+
+	/**
+	 * The runtime on an enrolled installation (MRC-07-01A): every turn is admitted on the run's
+	 * lineage against the injected authority, or refused before a process starts. The fleet
+	 * authority allows everything and keeps what it was asked, so the test reads the context the
+	 * runtime built rather than trusting the caller's word for it.
+	 */
+	describe('under management', () => {
+		function fleetAuthority(): { authority: HostAuthority; asked: AdmissionRequest[] } {
+			const asked: AdmissionRequest[] = [];
+			let ids = 0;
+			const authority = createLocalHostAuthority({
+				authorityId: 'fleet-authority',
+				decide: (request) => {
+					asked.push(request);
+					return { decision: 'allow', policyRevision: 1 };
+				},
+				now: () => Date.now(),
+				newId: () => `lease-${++ids}`,
+				leaseTtlMs: 60_000,
+			});
+			return { authority, asked };
+		}
+
+		/** Enroll this data directory to the fleet authority, as a desktop or host would have, then start on it. */
+		async function startEnrolled(
+			authority: HostAuthority,
+			workflowFence?: (workflow: AutoRunWorkflowIdentity) => AutoRunOwnerFence | null
+		): Promise<MaestroRuntime> {
+			const enroller = await start();
+			const binding = createManagedBinding({
+				paths: { userDataDir: dir, productionDataDir: dir },
+				fence: () => ({ ok: true }),
+				authority,
+				now: () => T0,
+			});
+			const enrolled = await binding.enroll({
+				installationId: enroller.installation.installationId,
+				authorityId: 'fleet-authority',
+				endpointRef: 'ep',
+				policySources: [],
+				policyRevision: 1,
+			});
+			if (!enrolled.ok) throw new Error(enrolled.message);
+			await enroller.connection.close();
+			open.splice(open.indexOf(enroller), 1);
+			const runtime = await start(seedAgent(), {
+				authority,
+				...(workflowFence ? { workflowFence } : {}),
+			});
+			expect(runtime.managedBinding.state().state).toBe('enrolled');
+			return runtime;
+		}
+
+		it('refuses every turn of an unowned workflow as unavailable, parks the run with the reason, and starts no process', async () => {
+			const file = doc('tasks', tasks(1));
+			const { authority, asked } = fleetAuthority();
+			const runtime = await startEnrolled(authority);
+			const run = watchRun(runtime);
+
+			value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+			await run.paused();
+			expect(
+				run
+					.frames()
+					.filter((frame) => frame.pause)
+					.pop()?.pause
+			).toMatchObject({
+				type: 'permission_denied',
+				recoverable: true,
+				message: expect.stringContaining('no workflow owner fence'),
+			});
+			// Nothing was decided and nothing ran: no admission reached the authority, no provider
+			// started, and the document is as it was.
+			expect(asked).toEqual([]);
+			expect(runLaunches).toEqual([]);
+			expect(read(file)).toBe(tasks(1));
+
+			value(await runtime.autoRun.abort('a1'));
+			await run.ended();
+			expect(run.outcome()).toEqual({ status: 'stopped' });
+			expect(runLaunches).toEqual([]);
+		});
+
+		it("admits each task on the run's lineage: the workflow with its fence, the run id, one request per task", async () => {
+			const file = doc('tasks', tasks(2));
+			script = [
+				{ text: 'Finished task one. Done.', tick: file },
+				{ text: 'Finished task two. Done.', tick: file },
+			];
+			const { authority, asked } = fleetAuthority();
+			const runtime = await startEnrolled(authority, () => ({
+				ownerEpoch: 'epoch-1',
+				fencingToken: 'fence-1',
+			}));
+			const run = watchRun(runtime);
+
+			value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+			await run.ended();
+
+			expect(run.outcome()).toEqual({ status: 'completed' });
+			expect(read(file)).toBe(tasks(2, 2));
+			expect(runLaunches).toHaveLength(2);
+			expect(asked).toHaveLength(2);
+			const contexts = asked.map((request) => request.context);
+			const runId = contexts[0].identity.rootRunId;
+			expect(runId).toEqual(expect.any(String));
+			// The playbook id the runtime minted carries the launch time; the trigger event names the same launch.
+			const startedAt = contexts[0].workflow?.workflowId.slice('runtime-a1-'.length);
+			expect(startedAt).toMatch(/^\d+$/);
+			for (const context of contexts) {
+				expect(context).toMatchObject({
+					origin: 'headless',
+					// No actor is registered for this process, so the installation's operator is the principal.
+					actor: { kind: 'human', id: `operator:${runtime.installation.installationId}` },
+					delegation: { chain: [], grantRef: null },
+					workflow: {
+						workflowId: expect.stringMatching(/^runtime-a1-/),
+						version: autoRunWorkflowVersion(['tasks']),
+						triggerEventId: `cli:autoRun.launch:a1:${startedAt}`,
+						ownerEpoch: 'epoch-1',
+						fencingToken: 'fence-1',
+					},
+					identity: { rootRunId: runId, parentRunId: runId },
+					policyRevision: 1,
+				});
+			}
+			// One logical request per task, each its own run under the Auto Run's root.
+			expect(new Set(contexts.map((context) => context.identity.requestId)).size).toBe(2);
+			expect(new Set(contexts.map((context) => context.identity.runId)).size).toBe(2);
+			expect(asked.map((request) => request.snapshot.operation)).toEqual(['start', 'start']);
 		});
 	});
 

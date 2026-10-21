@@ -30,6 +30,15 @@
  * - **How a run ended is said once**, as `autorun.ended` just before that last frame: completed,
  *   stopped by a person, failed with the engine's reason, or an engine error. The progress frames
  *   cannot say it, since a run that died and one that finished both end in `null`.
+ * - **Under management every turn is admitted on the run's lineage** (MRC-07-01A). A run is a
+ *   workflow (`autorun/attribution.ts`): the playbook or goal is the workflow id, the document set
+ *   (or the goal's text) its version, this launch its trigger event, and the run id is new. The
+ *   turn runner admits each attempt against the host's headless spawn authority, built on every
+ *   call over the runtime's binding and attached host with the enrollment's registered actor as
+ *   the principal (`origin: headless`). The workflow's owner fence is read per attempt from
+ *   `managed.workflowFence`; with no fence producer wired (MRC-07-06, CP-03) a managed runtime
+ *   refuses every Auto Run as unavailable before any process starts, and never mints one. A
+ *   standalone runtime asks nothing and runs as before.
  *
  * Deferred, with the reason in `Plans/maestro-tui-autorun-engine.md`: worktree runs (AE13),
  * steering notes (AE14), a working copy per loop (AE21), Agent Resilience retry (W4), and Auto Run
@@ -42,6 +51,7 @@ import { describeUnresolvedHaltMarker } from '../../autorunMarkers';
 import type { AutoRunBroadcastState } from '../../autoRunBroadcast';
 import type { GoalRunConfig } from '../../goalDriven/types';
 import type { Playbook, SessionInfo } from '../../types';
+import { generateUUID } from '../../uuid';
 import {
 	registerCliActivity,
 	unregisterCliActivity,
@@ -49,6 +59,13 @@ import {
 } from '../../cli-activity';
 import { sshRecordOf } from '../agents/rules';
 import type { AgentRepository } from '../agents/repository';
+import {
+	autoRunTriggerEventId,
+	autoRunWorkflowVersion,
+	type AutoRunOwnerFence,
+	type AutoRunTriggerKind,
+	type AutoRunWorkflowIdentity,
+} from '../autorun/attribution';
 import { resolveAutoRunFolder } from '../autorun/documents';
 import type { AutoRunDeps, AutoRunEvent } from '../autorun/engine-types';
 import {
@@ -76,6 +93,14 @@ import type {
 	ClientResult,
 } from '../client/types';
 import { logger } from '../host';
+import type { ManagedBinding } from '../managed/binding';
+import type { ManagedIdentityPort } from '../managed/endpoint-port';
+import {
+	createHeadlessSpawnAuthority,
+	managedActorPrincipal,
+	type ManagedHostAdapter,
+} from '../managed/host-adapter';
+import type { ManagedInstallationIdentity } from '../managed/types';
 import type { MaestroPaths } from '../paths/resolve';
 import { createPromptLoaderFor } from '../prompts/load';
 import { readHistory } from '../store/read-history';
@@ -87,7 +112,12 @@ import {
 	readStatsCollectionEnabled,
 	type StatsRecorder,
 } from '../turns/stats';
-import { createAutoRunTurnRunner, type AutoRunStreamEvent } from './autorun-turns';
+import {
+	createAutoRunTurnRunner,
+	type AutoRunAdmissionEvent,
+	type AutoRunSpawnAuthorityPort,
+	type AutoRunStreamEvent,
+} from './autorun-turns';
 import type { DataDirVerdict } from './data-dir-lock';
 import { commitAll, isGitRepository, readGitBranch } from './git';
 import { createLocalDocuments } from './local-documents';
@@ -105,6 +135,37 @@ export interface ActiveAutoRun {
 	paused: boolean;
 }
 
+/** What started a run here: `cli` for a CLI surface (the TUI), `api` for the host's bridge. */
+export type AutoRunTrigger = Extract<AutoRunTriggerKind, 'cli' | 'api'>;
+
+/** The authority a run's turns are admitted with, and the custody naming the actor they run as. */
+export interface RuntimeAutoRunHost extends Pick<ManagedHostAdapter, 'authority' | 'policy'> {
+	/** The identity port naming the registered actor; absent for an injected authority with none. */
+	identity?: ManagedIdentityPort | null;
+}
+
+/** What a managed runtime admits an Auto Run's turns with. */
+export interface RuntimeAutoRunManagedOptions {
+	installation: ManagedInstallationIdentity;
+	/** The binding beside the data-dir lock, read on every admission: standalone, enrolled, or enrolled and unanswered. */
+	binding: Pick<ManagedBinding, 'state'>;
+	/**
+	 * This process's authority when it is an attached host (`maestro-cli host` over an adapter, or
+	 * an authority a harness injected). Null: an enrolled binding is managed with nothing to
+	 * answer, and every turn is refused unavailable, never run standalone.
+	 */
+	host: RuntimeAutoRunHost | null;
+	/**
+	 * The owner fence of a run's workflow, read on every attempt (the CP-03 workflow owner
+	 * producer MRC-07-06 consumes). Default none: a managed host runs no unowned workflow and this
+	 * runtime never mints a fence, so until one is wired every managed Auto Run is refused as
+	 * unavailable before a process starts. A standalone runtime never asks.
+	 */
+	workflowFence?(workflow: AutoRunWorkflowIdentity): AutoRunOwnerFence | null;
+	/** Every admission and refusal, for a journal or a test. */
+	onAdmission?(event: AutoRunAdmissionEvent): void;
+}
+
 export interface RuntimeAutoRunOptions {
 	paths: MaestroPaths;
 	repository: AgentRepository;
@@ -115,8 +176,17 @@ export interface RuntimeAutoRunOptions {
 	deps?: Partial<RuntimeTurnDeps>;
 	/** A run ended: whatever it held back (queued chat messages) may start now. */
 	onRunEnded?(agentId: string): void;
-	/** Test seam: the stats writer. Default: the library recorder over the host's SQLite loader. */
+	/** The recorder the turn service already built, so both write the same stats.db. */
 	statsRecorder?: StatsRecorder;
+	/**
+	 * What a managed runtime admits a run's turns with. Absent: no admission is asked, which only
+	 * a harness with no binding should do; `createMaestroRuntime` always passes its own.
+	 */
+	managed?: RuntimeAutoRunManagedOptions;
+	/** How a launch reaches this runtime. Default `cli`. */
+	trigger?: AutoRunTrigger;
+	/** Id minting for a run's lineage. Default `generateUUID`. */
+	newId?(): string;
 }
 
 export interface RuntimeAutoRun {
@@ -209,6 +279,8 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 	const { paths, repository, bus, registry } = options;
 	const host = options.options ?? {};
 	const now = options.deps?.now ?? (() => Date.now());
+	const newId = options.newId ?? generateUUID;
+	const trigger: AutoRunTrigger = options.trigger ?? 'cli';
 
 	const documents = createLocalDocuments();
 	const historyWriter = createHistoryWriter({ paths, fence: options.fence });
@@ -374,7 +446,60 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 	// The engine's ports
 	// -----------------------------------------------------------------------
 
-	function buildDeps(agentId: string, controller: RunController): AutoRunDeps {
+	/**
+	 * The admission port of this runtime: the headless spawn authority over the binding and the
+	 * attached host, with the enrollment's registered actor as the principal. Built on every call,
+	 * so an enrollment that appeared, lapsed or changed hands since the run started applies to its
+	 * next attempt rather than to its next run.
+	 */
+	function spawnPort(managed: RuntimeAutoRunManagedOptions): AutoRunSpawnAuthorityPort {
+		const build = () =>
+			createHeadlessSpawnAuthority({
+				installation: managed.installation,
+				binding: managed.binding.state(),
+				host: managed.host,
+				origin: 'headless',
+				actor: managedActorPrincipal(managed.host?.identity?.read() ?? null, managed.installation),
+				now,
+			});
+		return {
+			standing: () => build().standing(),
+			get authority() {
+				return build().authority;
+			},
+			policy: () => build().policy(),
+			context: (input) => build().context(input),
+		};
+	}
+
+	/**
+	 * The run as a workflow: the playbook (or the goal) is the workflow, the document set (or the
+	 * goal's text) is its version, this launch is the trigger event, and the run id is new.
+	 */
+	function workflowIdentity(input: {
+		method: ClientMethod;
+		agentId: string;
+		workflowId: string;
+		documents: readonly string[];
+		startedAt: number;
+	}): AutoRunWorkflowIdentity {
+		return {
+			workflowId: input.workflowId,
+			version: autoRunWorkflowVersion(input.documents),
+			triggerEventId: autoRunTriggerEventId(
+				trigger,
+				`${input.method}:${input.agentId}:${input.startedAt}`
+			),
+			runId: newId(),
+		};
+	}
+
+	function buildDeps(
+		agentId: string,
+		controller: RunController,
+		workflow: AutoRunWorkflowIdentity
+	): AutoRunDeps {
+		const managed = options.managed;
 		const turns = createAutoRunTurnRunner({
 			agentId,
 			paths,
@@ -389,6 +514,17 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 				now,
 			},
 			onStream: (event) => forwardStream(agentId, event),
+			workflow,
+			newId,
+			...(managed
+				? {
+						managed: {
+							port: spawnPort(managed),
+							fence: () => managed.workflowFence?.(workflow) ?? null,
+							...(managed.onAdmission ? { onAdmission: managed.onAdmission } : {}),
+						},
+					}
+				: {}),
 		});
 		const loadPrompt = async (id: string): Promise<string> => {
 			const text = promptLoader()?.get(id);
@@ -636,6 +772,13 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 
 		const controller = newController();
 		const abort = new AbortController();
+		const workflow = workflowIdentity({
+			method,
+			agentId,
+			workflowId: playbook.id,
+			documents: names,
+			startedAt,
+		});
 		startRun(
 			{
 				agentId,
@@ -670,7 +813,7 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 					...(input.ignoreModelHints ? { ignoreModelHints: true } : {}),
 					signal: abort.signal,
 				},
-				buildDeps(agentId, controller)
+				buildDeps(agentId, controller, workflow)
 			)
 		);
 		return ok(undefined);
@@ -699,6 +842,13 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 		const startedAt = now();
 		const controller = newController();
 		const abort = new AbortController();
+		const workflow = workflowIdentity({
+			method,
+			agentId,
+			workflowId: `runtime-goal-${agentId}-${startedAt}`,
+			documents: [goalConfig.goal, goalConfig.exitCriteria],
+			startedAt,
+		});
 		startRun(
 			{
 				agentId,
@@ -731,7 +881,7 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 					...(input.effort ? { effort: input.effort } : {}),
 					signal: abort.signal,
 				},
-				buildDeps(agentId, controller)
+				buildDeps(agentId, controller, workflow)
 			)
 		);
 		// The runtime has no tab to name.

@@ -18,8 +18,10 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  *
  * 0.4.0: the managed-operation contracts (`./managed/types`) and this
  * version descriptor.
+ * 0.5.0: the Auto Run lineage (`./autorun/attribution`) a managed host
+ * admits each turn on.
  */
-export const MAESTRO_LIB_VERSION = '0.4.0';
+export const MAESTRO_LIB_VERSION = '0.5.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

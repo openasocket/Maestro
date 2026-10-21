@@ -71,6 +71,10 @@ const FUNCTION_EXPORTS = [
 	'managedContextProblems',
 	'isManagedOperationContext',
 	'providerRouteSupport',
+	// The Auto Run lineage (0.5.0).
+	'newAutoRunTurnRequest',
+	'nextAutoRunAttempt',
+	'autoRunWorkflowVersion',
 ];
 
 let scratch: string;

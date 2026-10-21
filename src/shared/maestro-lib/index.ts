@@ -124,6 +124,8 @@ export * from './autorun/run-goal';
 export * from './autorun/policy';
 export * from './autorun/preflight';
 export * from './autorun/run-control';
+// The lineage an Auto Run's turns carry under management (0.5.0): workflow, run, request, attempt.
+export * from './autorun/attribution';
 export * from './autorun/synopsis';
 export * from './autorun/task-selection';
 
