@@ -29,6 +29,7 @@ import type {
 	ManagedIdentityRecord,
 	ManagedIdentityView,
 } from '../../../../shared/maestro-lib/managed/endpoint-port';
+import type { ManagedDelegationRef } from '../../../../shared/maestro-lib/managed/types';
 import {
 	bindingEnrollment,
 	createManagedHostAdapter,
@@ -110,7 +111,10 @@ function standing(
 	};
 }
 
-function admission(snapshotArgs: string[] = ['--print']): AdmissionRequest {
+function admission(
+	snapshotArgs: string[] = ['--print'],
+	delegation: ManagedDelegationRef = { chain: [], grantRef: null }
+): AdmissionRequest {
 	const verifier = createContextVerifier({
 		verifierId: 'test',
 		peer: 'in-process',
@@ -121,7 +125,7 @@ function admission(snapshotArgs: string[] = ['--print']): AdmissionRequest {
 		inProcessContext({
 			installation: INSTALLATION,
 			actor: { kind: 'human', id: 'ada' },
-			delegation: { chain: [], grantRef: null },
+			delegation,
 			identity: {
 				requestId: 'req-1',
 				idempotencyKey: 'key-1',
@@ -215,6 +219,51 @@ describe('managed host adapter', () => {
 			policyRevision: 3,
 			policySources: [{ kind: 'endpoint', revision: 3 }],
 		});
+	});
+
+	it('is unavailable, unasked, for a context carrying a delegation chain or a grant reference (CP-03)', async () => {
+		const fake = await endpoint();
+		let asked = 0;
+		fake.options.operations = {
+			execution: (payload) => {
+				asked += 1;
+				return RECEIPT(payload as Record<string, unknown>);
+			},
+		};
+		const port = await attachedPort(fake);
+		const view = okView(record(fake.socketPath));
+		const adapter = createManagedHostAdapter({
+			installation: INSTALLATION,
+			identity: { read: () => view },
+			endpoint: port,
+			status: () => standing(port, view),
+			now: () => T0,
+			newId: () => 'lease-1',
+		});
+
+		// A dispatched turn's chain (the initiator, then the target) is not
+		// described with the chain stripped off; neither is a grant reference.
+		const chained = await adapter.authority.admit(
+			admission(['--print'], {
+				chain: [
+					{ kind: 'agent', id: 'owner-agent' },
+					{ kind: 'agent', id: 'target-agent' },
+				],
+				grantRef: null,
+			})
+		);
+		expect(chained).toMatchObject({ state: 'unavailable' });
+		expect((chained as { message: string }).message).toContain('a delegation chain of 2');
+		const granted = await adapter.authority.admit(
+			admission(['--print'], { chain: [], grantRef: 'grant-1' })
+		);
+		expect(granted).toMatchObject({ state: 'unavailable' });
+		expect((granted as { message: string }).message).toContain('a grant reference');
+		expect(asked).toBe(0);
+
+		// A direct action still reaches the endpoint, as before.
+		expect((await adapter.authority.admit(admission())).state).toBe('admitted');
+		expect(asked).toBe(1);
 	});
 
 	it('asks the endpoint for every decision and admits on a matching dispatch receipt', async () => {

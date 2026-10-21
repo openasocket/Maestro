@@ -216,7 +216,12 @@ async function build() {
 			throw new Error('The built bundle exports no consistent MAESTRO_LIB_VERSION_INFO');
 		}
 		// The management extension must reach the entry, not just its types.
-		for (const name of ['managedContextProblems', 'isManagedOperationContext']) {
+		for (const name of [
+			'managedContextProblems',
+			'isManagedOperationContext',
+			'childDelegationContext',
+			'readDelegationContextEnv',
+		]) {
 			if (typeof lib[name] !== 'function') {
 				throw new Error(`The built bundle exports no ${name}`);
 			}

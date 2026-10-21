@@ -9,6 +9,10 @@ import { MaestroNotRunningError, MAESTRO_NOT_RUNNING_CODE } from '../services/ma
 import { getSettingDefault } from '../../shared/settingsMetadata';
 import { resolveBackgroundFlag } from '../../shared/focusPlacement';
 import { callerMessageFields, readCallerIdentity } from '../../shared/agentDelegation';
+import {
+	MANAGED_DELEGATION_ENV_VAR,
+	readDelegationContextEnv,
+} from '../../shared/maestro-lib/managed/delegation';
 
 export interface DispatchOptions {
 	newTab?: boolean;
@@ -354,7 +358,23 @@ export async function runDispatch(
 	// Who is dispatching, when this runs inside a Maestro agent's shell. The
 	// desktop uses it to mark the hand-off in the CALLER's transcript; a human or
 	// an external script has no identity and the message goes out unchanged.
-	const caller = callerMessageFields(readCallerIdentity(process.env));
+	// And the operation this dispatch is a child of, when the shell is a managed
+	// one's (a Cue `mode: cli` action, an agent admitted under management): the
+	// desktop binds the dispatched turn as that operation's child, so the
+	// record travels beside the caller. A record that is not a context refuses
+	// the dispatch here; it is never sent anonymous in its place.
+	const delegation = readDelegationContextEnv(process.env);
+	if (delegation.status === 'invalid') {
+		return {
+			success: false,
+			error: `${MANAGED_DELEGATION_ENV_VAR} does not hold a delegation context, so the dispatch was not sent as a fresh action of the target: ${delegation.problems.join('; ')}`,
+			code: 'DELEGATION_INVALID',
+		};
+	}
+	const caller = {
+		...callerMessageFields(readCallerIdentity(process.env)),
+		...(delegation.status === 'ok' ? { delegation: delegation.context } : {}),
+	};
 
 	// --queue routes through the renderer's authoritative execution queue.
 	if (queue) {

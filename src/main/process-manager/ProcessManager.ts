@@ -13,6 +13,7 @@ import type {
 	ProcessSpawnAdmission,
 	ProcessSpawnAdmissionOutcome,
 	ProcessSpawnAuthorityPort,
+	ProcessSpawnContextInput,
 	ManagedCommandContext,
 } from './types';
 import {
@@ -29,6 +30,11 @@ import {
 	autoRunTraceId,
 	autoRunWorkflowRef,
 } from '../../shared/maestro-lib/autorun/attribution';
+import {
+	childDelegationContext,
+	delegationContextProblems,
+	intersectDelegationScope,
+} from '../../shared/maestro-lib/managed/delegation';
 import { argsResumeSession } from './utils/resumeArgs';
 import { PtySpawner } from './spawners/PtySpawner';
 import { ChildProcessSpawner } from './spawners/ChildProcessSpawner';
@@ -130,6 +136,40 @@ function chatTurnIdentity(): ManagedRunIdentity {
 		rootRunId: null,
 		parentRunId: null,
 	};
+}
+
+/**
+ * What a spawn is bound as. An Auto Run attempt is bound on its lineage; a
+ * dispatched turn (`config.delegation`) is the CHILD of the operation that
+ * dispatched it: the chain one link deeper (the target agent), parented under
+ * the initiator's run, the initiator's workflow and fence carried as they are
+ * (this sink mints none, CP-03); anything else is a chat turn of its own.
+ */
+function spawnContextInput(
+	config: ProcessConfig
+): Omit<ProcessSpawnContextInput, 'actor' | 'policyRevision'> {
+	const lineage = config.autoRun;
+	if (lineage) {
+		return {
+			identity: autoRunRunIdentity(lineage.attribution),
+			traceId: autoRunTraceId(lineage.attribution),
+			workflow: autoRunWorkflowRef(lineage.attribution.workflow, lineage.fence),
+		};
+	}
+	if (config.delegation) {
+		const child = childDelegationContext(config.delegation, {
+			link: { kind: 'agent', id: resolveOwningMaestroSessionId(config.sessionId) },
+			requestId: generateUUID(),
+			attemptId: generateUUID(),
+		});
+		return {
+			identity: child.identity,
+			traceId: child.traceId,
+			workflow: child.workflow,
+			delegation: child.delegation,
+		};
+	}
+	return { identity: chatTurnIdentity(), traceId: config.sessionId, workflow: null };
 }
 
 export interface TerminalTabSpawnConfig {
@@ -495,15 +535,48 @@ export class ProcessManager extends EventEmitter {
 	 * workflow with no fence is refused `unavailable` before the authority is
 	 * asked: a managed host does not run an unowned workflow, and this sink
 	 * does not mint a fence (CP-03, the workflow owner producer).
+	 *
+	 * A dispatched turn (`config.delegation`, the record `maestro-cli dispatch`
+	 * read off its environment) is bound as the dispatching operation's child
+	 * (`childDelegationContext`), never as a fresh chat turn, and the
+	 * initiator's scope is met with THIS host's standing first: a managed
+	 * initiator's child on a host with no enrollment is refused `unavailable`
+	 * rather than run unmanaged in its place, and a managed host admits it
+	 * under its own current policy generation, whatever the initiator claimed.
 	 */
 	async admitSpawn(
 		config: ProcessConfig,
 		actor: ProcessSpawnActor
 	): Promise<ProcessSpawnAdmissionOutcome> {
 		const port = this.spawnAuthority();
-		if (!port || port.standing() === 'standalone') return { state: 'standalone' };
+		const managed = port && port.standing() === 'managed' ? port : null;
+		const carried = config.delegation;
+		if (carried) {
+			const problems = delegationContextProblems(carried);
+			if (problems.length > 0) {
+				return {
+					state: 'denied',
+					code: 'invalid-input',
+					message: `The spawn carries a delegation context that is not one, and is not started as a fresh action of the target: ${problems.join('; ')}. Nothing was started.`,
+				};
+			}
+			const scope = intersectDelegationScope(carried, {
+				standing: managed ? 'managed' : 'standalone',
+				policyRevision: managed ? managed.policy().policyRevision : null,
+			});
+			if (!scope.ok) return { state: scope.state, code: scope.code, message: scope.message };
+		}
+		if (!managed) return { state: 'standalone' };
 
 		const lineage = config.autoRun;
+		if (lineage && carried) {
+			return {
+				state: 'denied',
+				code: 'invalid-input',
+				message:
+					'The spawn carries both an Auto Run lineage and a delegation context; a turn is one attempt of a workflow or the child of a dispatching operation, never both. Nothing was started.',
+			};
+		}
 		if (lineage && !lineage.fence) {
 			return {
 				state: 'unavailable',
@@ -511,13 +584,11 @@ export class ProcessManager extends EventEmitter {
 				message: `Auto Run "${lineage.attribution.workflow.workflowId}" has no workflow owner fence; a managed host does not run an unowned workflow, and this host does not mint one (CP-03, the workflow owner producer). Nothing was started.`,
 			};
 		}
-		const policy = port.policy();
-		const verified = port.verify({
+		const policy = managed.policy();
+		const verified = managed.verify({
 			actor,
-			identity: lineage ? autoRunRunIdentity(lineage.attribution) : chatTurnIdentity(),
-			traceId: lineage ? autoRunTraceId(lineage.attribution) : config.sessionId,
 			policyRevision: policy.policyRevision,
-			workflow: lineage ? autoRunWorkflowRef(lineage.attribution.workflow, lineage.fence) : null,
+			...spawnContextInput(config),
 		});
 		if (!verified.ok) {
 			return {
@@ -527,7 +598,7 @@ export class ProcessManager extends EventEmitter {
 			};
 		}
 		const snapshot = buildSpawnRequestSnapshot(config);
-		const outcome = await port.authority.admit({ context: verified.context, snapshot, policy });
+		const outcome = await managed.authority.admit({ context: verified.context, snapshot, policy });
 		if (outcome.state !== 'admitted') {
 			return { state: outcome.state, code: outcome.code, message: outcome.message };
 		}

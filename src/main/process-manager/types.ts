@@ -15,6 +15,7 @@ import type {
 	PolicySourceSet,
 } from '../../shared/maestro-lib/managed/authority';
 import type {
+	ManagedDelegationRef,
 	ManagedDenialCode,
 	ManagedDispatchTarget,
 	ManagedPrincipalRef,
@@ -22,6 +23,7 @@ import type {
 	ManagedWorkflowRef,
 } from '../../shared/maestro-lib/managed/types';
 import type { AutoRunSpawnLineage } from '../../shared/maestro-lib/autorun/attribution';
+import type { ManagedDelegationContext } from '../../shared/maestro-lib/managed/delegation';
 import type { ManagedEffectAuthority } from '../../shared/maestro-lib/managed/effects';
 
 // ============================================================================
@@ -50,6 +52,13 @@ export interface ProcessSpawnContextInput {
 	 * a launch-only route, and never invents one.
 	 */
 	workflow: ManagedWorkflowRef | null;
+	/**
+	 * The delegation chain the spawn arrived with (a dispatched turn is the
+	 * child of the operation that dispatched it: the carried chain plus the
+	 * target), bound as it is. Absent for a spawn that is its own request,
+	 * where the port contributes only the transport's attribution.
+	 */
+	delegation?: ManagedDelegationRef;
 }
 
 /**
@@ -246,6 +255,13 @@ export interface ProcessConfig {
 	 *  exists). `admitSpawn` binds it into the verified context in place of
 	 *  the anonymous per-spawn identity; a standalone host ignores it. */
 	autoRun?: AutoRunSpawnLineage;
+	/** The context of the operation that DISPATCHED this spawn (a Cue `mode:
+	 *  cli` action, an agent's `maestro-cli dispatch`), as `maestro-cli` read
+	 *  it off its environment. `admitSpawn` binds the spawn as that operation's
+	 *  child (`childDelegationContext`) under the host's own standing, never as
+	 *  a fresh chat turn; a managed initiator's child on a standalone host is
+	 *  refused, never run unmanaged in its place. */
+	delegation?: ManagedDelegationContext;
 }
 
 /**

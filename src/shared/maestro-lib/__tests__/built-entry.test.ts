@@ -75,6 +75,10 @@ const FUNCTION_EXPORTS = [
 	'newAutoRunTurnRequest',
 	'nextAutoRunAttempt',
 	'autoRunWorkflowVersion',
+	// The delegated-dispatch context (0.6.0).
+	'childDelegationContext',
+	'intersectDelegationScope',
+	'readDelegationContextEnv',
 ];
 
 let scratch: string;

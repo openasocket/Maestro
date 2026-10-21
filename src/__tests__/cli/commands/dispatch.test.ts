@@ -32,11 +32,18 @@ import { withMaestroClient } from '../../../cli/services/maestro-client';
 import { resolveAgentId, readSettingValue } from '../../../cli/services/storage';
 import { isolateAgentEnv } from '../../helpers/agentEnvIsolation';
 import { CALLER_AGENT_ID_ENV_VAR, CALLER_TAB_ID_ENV_VAR } from '../../../shared/agentDelegation';
+import {
+	MANAGED_DELEGATION_ENV_VAR,
+	delegationContextOf,
+	encodeDelegationContext,
+	type ManagedDelegationContext,
+} from '../../../shared/maestro-lib/managed/delegation';
 
 describe('dispatch command', () => {
-	// The caller identity is read from the environment, and the suite runs in
-	// whatever shell launched it - inside a Maestro agent that is a real id.
-	isolateAgentEnv([CALLER_AGENT_ID_ENV_VAR, CALLER_TAB_ID_ENV_VAR]);
+	// The caller identity and the delegation context are read from the
+	// environment, and the suite runs in whatever shell launched it - inside a
+	// Maestro agent that is a real id, under a Cue run a real record.
+	isolateAgentEnv([CALLER_AGENT_ID_ENV_VAR, CALLER_TAB_ID_ENV_VAR, MANAGED_DELEGATION_ENV_VAR]);
 
 	let consoleSpy: MockInstance;
 	let processExitSpy: MockInstance;
@@ -852,6 +859,99 @@ describe('dispatch command', () => {
 
 			expect(sendCommand.mock.calls[0][0]).not.toHaveProperty('fromSessionId');
 			expect(sendCommand.mock.calls[0][0]).not.toHaveProperty('fromTabId');
+		});
+	});
+
+	/**
+	 * The receiving half of the delegated dispatch (MRC-07-04B): the record the
+	 * initiator stamped on this shell travels to the desktop beside the caller,
+	 * on every path, so the dispatched turn is bound as that operation's child;
+	 * a record that is not a context refuses the dispatch instead of sending it
+	 * as a fresh action of the target.
+	 */
+	describe('delegation context (MRC-07-04B)', () => {
+		const RECORD: ManagedDelegationContext = delegationContextOf({
+			identity: {
+				requestId: 'req-cue-1',
+				idempotencyKey: 'req-cue-1',
+				attemptId: 'att-cue-1',
+				runId: 'run-cue-1',
+				rootRunId: 'run-cue-1',
+				parentRunId: null,
+			},
+			traceId: 'cue:run-cue-1:req-cue-1:att-cue-1',
+			workflow: null,
+			delegation: { chain: [{ kind: 'agent', id: 'owner-agent' }], grantRef: null },
+			policyRevision: null,
+		});
+
+		const stubClient = (response: Record<string, unknown>) => {
+			const sendCommand = vi.fn().mockResolvedValue(response);
+			vi.mocked(withMaestroClient).mockImplementation(async (action) =>
+				action({ sendCommand } as never)
+			);
+			return sendCommand;
+		};
+
+		beforeEach(() => {
+			vi.mocked(resolveAgentId).mockReturnValue('agent-abc-123');
+		});
+
+		it('forwards the record beside the caller on the send, new-tab and queue paths', async () => {
+			process.env[CALLER_AGENT_ID_ENV_VAR] = 'owner-agent';
+			process.env[MANAGED_DELEGATION_ENV_VAR] = encodeDelegationContext(RECORD);
+			const sendCommand = stubClient({ success: true, tabId: 'tab-new' });
+
+			await runDispatch('agent-abc', 'Fix it', {});
+			await runDispatch('agent-abc', 'Fix it', { newTab: true });
+			await runDispatch('agent-abc', 'Fix it', { queue: true });
+
+			expect(sendCommand.mock.calls.map((call) => call[0])).toEqual([
+				expect.objectContaining({
+					type: 'send_command',
+					fromSessionId: 'owner-agent',
+					delegation: RECORD,
+				}),
+				expect.objectContaining({
+					type: 'new_ai_tab_with_prompt',
+					fromSessionId: 'owner-agent',
+					delegation: RECORD,
+				}),
+				expect.objectContaining({
+					type: 'enqueue_command',
+					fromSessionId: 'owner-agent',
+					delegation: RECORD,
+				}),
+			]);
+		});
+
+		it('refuses a record that is not a context and sends nothing', async () => {
+			process.env[MANAGED_DELEGATION_ENV_VAR] = JSON.stringify({ ...RECORD, extra: 1 });
+			const sendCommand = stubClient({ success: true });
+
+			const result = await runDispatch('agent-abc', 'Fix it', {});
+
+			expect(result).toMatchObject({ success: false, code: 'DELEGATION_INVALID' });
+			expect(result.error).toContain('unknown field "extra"');
+			expect(sendCommand).not.toHaveBeenCalled();
+
+			process.env[MANAGED_DELEGATION_ENV_VAR] = '{not json';
+			expect(await runDispatch('agent-abc', 'Fix it', { queue: true })).toMatchObject({
+				success: false,
+				code: 'DELEGATION_INVALID',
+			});
+			expect(sendCommand).not.toHaveBeenCalled();
+		});
+
+		it('adds nothing when the shell carries no record, or a blank one', async () => {
+			const sendCommand = stubClient({ success: true });
+
+			await runDispatch('agent-abc', 'Fix it', {});
+			process.env[MANAGED_DELEGATION_ENV_VAR] = '   ';
+			await runDispatch('agent-abc', 'Fix it', {});
+
+			expect(sendCommand.mock.calls[0][0]).not.toHaveProperty('delegation');
+			expect(sendCommand.mock.calls[1][0]).not.toHaveProperty('delegation');
 		});
 	});
 });

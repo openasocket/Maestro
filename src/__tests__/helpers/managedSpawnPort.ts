@@ -86,7 +86,7 @@ export function fakeSpawnPort(options: FakeSpawnPortOptions = {}): FakeSpawnPort
 				installation: { installationId: 'inst-test', runtimeId: 'desktop-1', processEpoch: 'e1' },
 				origin: 'desktop',
 				actor: { kind: 'human', id: 'ada' },
-				delegation: {
+				delegation: input.delegation ?? {
 					chain:
 						input.actor.peer === 'web-login'
 							? [{ kind: 'human', id: `web-login:${input.actor.username}` }]

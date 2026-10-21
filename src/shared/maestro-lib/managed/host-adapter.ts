@@ -525,6 +525,21 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 				reason: `The endpoint carries no workflow authority, so workflow "${context.workflow.workflowId}" cannot be bound to this launch and is not dropped from it (CP-03).`,
 			};
 		}
+		// Nor does it name a delegation: a launch whose context carries a chain
+		// of principals (a dispatched turn, a Web Login's attribution) or a grant
+		// reference is not described with them stripped off either (the sibling
+		// bridge refuses a nonempty delegation, CP-03).
+		const { chain, grantRef } = context.delegation;
+		if (chain.length > 0 || grantRef !== null) {
+			const carried = [
+				...(chain.length > 0 ? [`a delegation chain of ${chain.length}`] : []),
+				...(grantRef !== null ? ['a grant reference'] : []),
+			].join(' and ');
+			return {
+				decision: 'unavailable',
+				reason: `The endpoint carries no delegation authority, so ${carried} cannot be bound to this launch and is not dropped from it (CP-03).`,
+			};
+		}
 		// The broker's request: identity, operation, provider, model, resources and
 		// the revision. No arguments: the resolved command line is bound in the
 		// local lease, and the broker refuses any argument as an unsafe override.

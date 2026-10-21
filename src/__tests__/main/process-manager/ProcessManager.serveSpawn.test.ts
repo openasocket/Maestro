@@ -44,6 +44,10 @@ import {
 	nextAutoRunAttempt,
 	type AutoRunWorkflowIdentity,
 } from '../../../shared/maestro-lib/autorun/attribution';
+import {
+	delegationContextOf,
+	type ManagedDelegationContext,
+} from '../../../shared/maestro-lib/managed/delegation';
 
 const SERVE_RESULT = { pid: -1, success: true };
 
@@ -401,6 +405,141 @@ describe('ProcessManager admission on an Auto Run lineage', () => {
 		});
 		expect(manager.spawn(request)).toBe(SERVE_RESULT);
 		expect(serve).toHaveBeenCalledTimes(1);
+		expect(port.asked).toHaveLength(0);
+	});
+});
+
+/**
+ * The receiving sink of a delegated dispatch (MRC-07-04B): a spawn that
+ * carries the dispatching operation's record (`config.delegation`, what
+ * `maestro-cli dispatch` read off its shell) is bound as that operation's
+ * child, never as a fresh chat turn, and the initiator's scope is met with
+ * this host's standing before the authority is asked.
+ */
+describe('ProcessManager admission on a delegated dispatch', () => {
+	const initiator = (
+		overrides: Partial<Pick<ManagedDelegationContext, 'workflow' | 'policyRevision'>> = {}
+	): ManagedDelegationContext => ({
+		...delegationContextOf({
+			identity: {
+				requestId: 'req-cue-1',
+				idempotencyKey: 'req-cue-1',
+				attemptId: 'att-cue-1',
+				runId: 'run-cue-1',
+				rootRunId: 'run-root',
+				parentRunId: null,
+			},
+			traceId: 'cue:run-root:req-cue-1:att-cue-1',
+			workflow: null,
+			delegation: { chain: [{ kind: 'agent', id: 'owner-agent' }], grantRef: null },
+			policyRevision: null,
+		}),
+		...overrides,
+	});
+	const FENCED_WORKFLOW = {
+		workflowId: 'cue:/work:nightly',
+		version: 'v1',
+		triggerEventId: 'evt-1',
+		ownerEpoch: 'epoch-1',
+		fencingToken: 'fence-1',
+	};
+
+	function managedManager(port = fakeSpawnPort()) {
+		const manager = new ProcessManager(() => true, { spawnAuthority: () => port });
+		const serve = vi.fn(() => SERVE_RESULT);
+		(
+			manager as unknown as { opencodeServerSpawner: { spawn: typeof serve } }
+		).opencodeServerSpawner = { spawn: serve };
+		return { manager, port, serve };
+	}
+
+	it('binds the dispatched turn as the initiator child: chain, parent run, trace, own generation', async () => {
+		const { manager, port } = managedManager();
+		const request = config({ delegation: initiator() });
+		const admitted = await manager.admitSpawn(request, { peer: 'in-process' });
+		expect(admitted.state).toBe('admitted');
+		const { context } = port.asked[0];
+		// The chain is the initiator's with the target agent appended, never the
+		// transport's attribution and never a fresh chat identity.
+		expect(context.delegation).toEqual({
+			chain: [
+				{ kind: 'agent', id: 'owner-agent' },
+				{ kind: 'agent', id: 'agent-1' },
+			],
+			grantRef: null,
+		});
+		expect(context.identity).toMatchObject({ rootRunId: 'run-root', parentRunId: 'run-cue-1' });
+		expect(context.identity.requestId).not.toBe('req-cue-1');
+		expect(context.identity.runId).toBe(context.identity.requestId);
+		expect(context.traceId).toBe(
+			`delegated:run-root:${context.identity.requestId}:${context.identity.attemptId}`
+		);
+		expect(context.workflow).toBeNull();
+		// The host's current generation, not the initiator's claim (null, standalone).
+		expect(context.policyRevision).toBe(1);
+		if (admitted.state === 'admitted') {
+			expect(admitted.admission.requestId).toBe(context.identity.requestId);
+		}
+	});
+
+	it('carries the initiator workflow and fence as the context workflow, minting nothing', async () => {
+		const { manager, port } = managedManager();
+		const request = config({ delegation: initiator({ workflow: FENCED_WORKFLOW }) });
+		expect((await manager.admitSpawn(request, { peer: 'in-process' })).state).toBe('admitted');
+		expect(port.asked[0].context.workflow).toEqual(FENCED_WORKFLOW);
+	});
+
+	it('refuses a managed initiator child on a standalone host, before any authority', async () => {
+		const port = fakeSpawnPort({ standing: 'standalone' });
+		const { manager, serve } = managedManager(port);
+		const request = config({ delegation: initiator({ policyRevision: 7 }) });
+		expect(await manager.admitSpawn(request, { peer: 'in-process' })).toMatchObject({
+			state: 'unavailable',
+			code: 'runtime-unavailable',
+		});
+		const result = await manager.spawnAdmitted(request, { peer: 'in-process' });
+		expect(result.success).toBe(false);
+		expect(serve).not.toHaveBeenCalled();
+		expect(port.asked).toHaveLength(0);
+	});
+
+	it('runs a standalone initiator child on a standalone host as before', async () => {
+		const port = fakeSpawnPort({ standing: 'standalone' });
+		const { manager, serve } = managedManager(port);
+		const request = config({ delegation: initiator() });
+		expect(await manager.admitSpawn(request, { peer: 'in-process' })).toEqual({
+			state: 'standalone',
+		});
+		expect(manager.spawn(request)).toBe(SERVE_RESULT);
+		expect(serve).toHaveBeenCalledTimes(1);
+	});
+
+	it('refuses a record that is not a context, and one beside an Auto Run lineage, unasked', async () => {
+		const { manager, port } = managedManager();
+		const malformed = { ...initiator(), extra: 'field' } as unknown as ManagedDelegationContext;
+		expect(
+			await manager.admitSpawn(config({ delegation: malformed }), { peer: 'in-process' })
+		).toMatchObject({ state: 'denied', code: 'invalid-input' });
+
+		const workflow: AutoRunWorkflowIdentity = {
+			workflowId: 'playbook:/work/.maestro/playbooks/release',
+			version: 'docs-1',
+			triggerEventId: 'operator:1',
+			runId: 'run-ar',
+		};
+		const attribution = newAutoRunTurnRequest(workflow, {
+			purpose: 'task',
+			document: '01-build',
+			newId: () => 'id-ar',
+		});
+		const both = config({
+			delegation: initiator(),
+			autoRun: { attribution, fence: { ownerEpoch: 'e', fencingToken: 'f' } },
+		});
+		expect(await manager.admitSpawn(both, { peer: 'in-process' })).toMatchObject({
+			state: 'denied',
+			code: 'invalid-input',
+		});
 		expect(port.asked).toHaveLength(0);
 	});
 });

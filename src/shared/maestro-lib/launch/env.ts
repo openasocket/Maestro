@@ -7,6 +7,7 @@ import { buildSpawnPath, STANDARD_UNIX_PATHS } from './spawn-path';
 import { isBlankEnvKey, isBlankEnvValue } from '../../agentEnvironment';
 import { CALLER_AGENT_ID_ENV_VAR, CALLER_TAB_ID_ENV_VAR } from '../../agentDelegation';
 import { PROVIDER_ENV_VAR_SUGGESTIONS } from '../../envVarCatalog';
+import { MANAGED_DELEGATION_ENV_VAR } from '../managed/delegation';
 
 const SERVER_MODE_ENV_VAR_NAME = 'MAESTRO_SERVER_MODE';
 const SERVER_ENV_ALLOW_ENV_VAR_NAME = 'MAESTRO_SERVER_ENV_ALLOW';
@@ -700,6 +701,7 @@ export const MANAGED_AUTHORITY_ENV_NAMES: readonly string[] = [
 	QUERY_SOURCE_ENV_VAR,
 	CALLER_AGENT_ID_ENV_VAR,
 	CALLER_TAB_ID_ENV_VAR,
+	MANAGED_DELEGATION_ENV_VAR,
 	SERVER_MODE_ENV_VAR_NAME,
 	SERVER_ENV_ALLOW_ENV_VAR_NAME,
 	'MAESTRO_USER_DATA',

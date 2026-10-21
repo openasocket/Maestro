@@ -117,7 +117,13 @@ export function createProcessSpawnAuthority(
 				installation: deps.installation,
 				origin: 'desktop',
 				actor: spawnPrincipal(deps.identity.read(), deps.installation),
-				delegation: { chain: spawnDelegationChain(input.actor), grantRef: null },
+				// A dispatched turn arrives with its initiator's chain already ending
+				// in this target; it is bound as it is. Only a spawn that is its own
+				// request takes the transport's attribution.
+				delegation: input.delegation ?? {
+					chain: spawnDelegationChain(input.actor),
+					grantRef: null,
+				},
 				identity: input.identity,
 				policyRevision: input.policyRevision,
 				// As the sink bound it: an Auto Run's workflow with its fence, or null
