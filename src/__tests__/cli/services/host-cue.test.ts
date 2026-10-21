@@ -348,6 +348,25 @@ describe('what the engine learns after it started', () => {
 			expect.objectContaining({ runAutoRun: expect.any(Function) })
 		);
 	});
+
+	// MRC-07-02A: an enrolled host's Cue runs are admitted by the host's own
+	// authority, so the adapter the runtime holds reaches the engine as it is.
+	it("hands the engine the runtime's managed host adapter, or null when it holds none", async () => {
+		const managedHost = { authority: {}, policy: () => ({}), identity: {} };
+		const withHost = { ...fakeRuntime().runtime, managedHost } as unknown as HostCueRuntime;
+		const createEngine = vi.fn(async () => fakeEngine());
+		const { all } = deps({ createEngine, readLock: () => lock(PID) });
+		await startHostCue({ ...PATHS, runtime: withHost }, all);
+		expect(createEngine).toHaveBeenCalledWith(expect.objectContaining({ managedHost }));
+
+		createEngine.mockClear();
+		await startHostCue({ ...PATHS, runtime: fakeRuntime().runtime }, all);
+		expect(createEngine).toHaveBeenCalledWith(expect.objectContaining({ managedHost: null }));
+
+		createEngine.mockClear();
+		await startHostCue(PATHS, all);
+		expect(createEngine).toHaveBeenCalledWith(expect.objectContaining({ managedHost: null }));
+	});
 });
 
 describe('runAutoRunInRuntime', () => {

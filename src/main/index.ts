@@ -1409,6 +1409,16 @@ app
 			reportAuthFailure: async (result, toolType, sshRemoteId) => {
 				reportCueAuthFailure(mainWindow, result, toolType as ToolType, sshRemoteId);
 			},
+			// Managed admission of a Cue prompt run (MRC-07-02A): the enterprise
+			// service's Cue port, under the same enrollment that admits every
+			// desktop spawn. Read lazily, per run: the service is composed later
+			// in startup than these deps, and an enrollment that appears or
+			// lapses applies to the next firing. No service (it failed to
+			// compose) is no port, which the router treats as unmanaged, the
+			// same as the process manager with no spawn authority. The workflow
+			// owner fence has no producer yet (MRC-07-06, CP-03), so an enrolled
+			// desktop refuses every Cue prompt run as unavailable in its result.
+			managed: { port: () => enterpriseService?.cueSpawnAuthority ?? null },
 		};
 
 		// Initialize Cue Engine for event-driven automation

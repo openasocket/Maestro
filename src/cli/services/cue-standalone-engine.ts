@@ -76,6 +76,19 @@ import {
 import type { CueRunResult } from '../../shared/cue/contracts';
 import type { CueExternalNotification } from '../../main/cue/cue-notify-webhook';
 import { formatJsonLogLine } from '../../shared/jsonLogLine';
+// The managed binding and the headless port: plain maestro-lib, no Electron,
+// the same modules `agent-spawner.ts` holds statically for every CLI verb.
+import * as os from 'os';
+import { createManagedBinding } from '../../shared/maestro-lib/managed/binding';
+import {
+	createHeadlessSpawnAuthority,
+	installationIdentity,
+	managedActorPrincipal,
+	type HeadlessSpawnAuthority,
+	type ManagedHostAdapter,
+} from '../../shared/maestro-lib/managed/host-adapter';
+import { resolveProductionDataDir } from '../../shared/maestro-lib/paths/userDataDir';
+import { resolveUserDataDir } from '../../shared/userDataDir';
 import {
 	readLiveSessions,
 	readSessions,
@@ -313,11 +326,19 @@ function buildOnCueRun(
 	onLog: StandaloneCueLog,
 	onExternalNotification: ((notification: CueExternalNotification) => void) | undefined,
 	runAutoRun: StandaloneCueAutoRun | undefined,
-	autoRunStops: Map<string, AbortController>
+	autoRunStops: Map<string, AbortController>,
+	spawnPort: () => HeadlessSpawnAuthority
 ): CueEngineDeps['onCueRun'] {
 	return async (params) => {
 		const executors = await loadExecutors();
 		const deps: CueRunActionDeps = {
+			// Managed admission of a prompt run (MRC-07-02A): the port is rebuilt
+			// on every run over the binding as it is NOW, so an enrollment that
+			// appears or lapses while the engine runs applies to the next firing.
+			// The workflow owner fence has no producer yet (MRC-07-06, CP-03), so
+			// an enrolled machine refuses every prompt run as unavailable in the
+			// run's result instead of running it unmanaged.
+			managed: { port: spawnPort },
 			executeCuePrompt: executors.executeCuePrompt,
 			executeCueShell: executors.executeCueShell,
 			executeCueCli: executors.executeCueCli,
@@ -406,8 +427,73 @@ async function reportStandaloneAuthFailure(
 	);
 }
 
+/** The attached host adapter a Cue engine inside `maestro-cli host` admits with: authority, policy, and the identity the actor is named from. */
+export type StandaloneCueManagedHost = Pick<
+	ManagedHostAdapter,
+	'authority' | 'policy' | 'identity'
+>;
+
+/**
+ * The spawn authority a standalone Cue engine admits prompt runs with
+ * (`CueRunActionDeps.managed.port`), read fresh on every call. The binding is
+ * the one beside the data-dir lock, from the same files the desktop writes
+ * (this data directory, then the production one, the way `cliSpawnAuthority()`
+ * reads it), so Electron's absence is never an opt-out. With an attached host
+ * whose authority is the binding's, the engine admits as that host does
+ * (origin `cue`, the enrollment's registered actor as the principal); with
+ * none, an enrolled machine is `managed` with an authority that answers
+ * unavailable, and `maestro-cli cue engine start` refuses every prompt run
+ * instead of running it unmanaged. No binding file is standalone, unchanged.
+ */
+export function buildStandaloneCueSpawnPort(options: {
+	managedHost: StandaloneCueManagedHost | null;
+	now?: () => number;
+}): () => HeadlessSpawnAuthority {
+	const startedAt = new Date().toISOString();
+	return () => {
+		const userDataDir = resolveUserDataDir();
+		const productionDataDir = resolveProductionDataDir(userDataDir);
+		const host = options.managedHost;
+		// Only `state()` is read: the fence guards enroll / unenroll and the
+		// binding's own `authority()`, none of which the engine calls (the port
+		// takes the attached host's authority directly, matched by id).
+		const binding = createManagedBinding({
+			paths: { userDataDir, productionDataDir },
+			fence: () => ({ ok: true as const }),
+			...(host ? { authority: host.authority } : {}),
+			now: options.now ?? (() => Date.now()),
+		}).state();
+		const installation = installationIdentity({
+			hostname: os.hostname(),
+			productionDataDir,
+			mode: 'cue',
+			pid: process.pid,
+			startedAt,
+		});
+		return createHeadlessSpawnAuthority({
+			installation,
+			binding,
+			host,
+			origin: 'cue',
+			// Attribution, never authority: the registered actor through the
+			// attached host, else this engine process as a service principal.
+			actor: host
+				? managedActorPrincipal(host.identity.read(), installation)
+				: { kind: 'service', id: `maestro-cue:${os.userInfo().username}` },
+			...(options.now ? { now: options.now } : {}),
+		});
+	};
+}
+
 export interface StandaloneCueEngineOptions {
 	onLog?: StandaloneCueLog;
+	/**
+	 * The managed host adapter of the process hosting this engine (`maestro-cli
+	 * host`), when it has one. Absent or null: the engine reads the binding
+	 * alone and holds no authority, so an enrolled machine refuses every
+	 * prompt run (see `buildStandaloneCueSpawnPort`).
+	 */
+	managedHost?: StandaloneCueManagedHost | null;
 	/** See `CueEngineDeps.onLockLost`. */
 	onLockLost?: () => void;
 	/** See `CueEngineDeps.onDrainPhase`. */
@@ -436,7 +522,8 @@ export function buildStandaloneCueEngineDeps(
 			onLog,
 			options.onExternalNotification,
 			options.runAutoRun,
-			autoRunStops
+			autoRunStops,
+			buildStandaloneCueSpawnPort({ managedHost: options.managedHost ?? null })
 		),
 		onStopCueRun: (runId) => {
 			const autoRunStop = autoRunStops.get(runId);

@@ -7,8 +7,13 @@
  */
 
 import { EventEmitter } from 'events';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { CueEvent, CueRunResult } from '../../../shared/cue/contracts';
+import { createLocalHostAuthority } from '../../../shared/maestro-lib/managed/authority';
+import { createManagedBinding } from '../../../shared/maestro-lib/managed/binding';
 
 const initializeOutputParsers = vi.fn();
 const executeCuePrompt = vi.fn();
@@ -60,6 +65,7 @@ vi.mock('../../../cli/services/system-prompt', () => ({ prepareMaestroSystemProm
 import {
 	AUTO_RUN_NEEDS_HOST,
 	buildStandaloneCueEngineDeps,
+	buildStandaloneCueSpawnPort,
 	consoleCueLog,
 	cueLogForFormat,
 	jsonCueLog,
@@ -67,6 +73,7 @@ import {
 	waitForStandaloneCueProcesses,
 	type StandaloneCueAutoRun,
 	type StandaloneCueAutoRunEnd,
+	type StandaloneCueManagedHost,
 } from '../../../cli/services/cue-standalone-engine';
 
 const event: CueEvent = {
@@ -458,5 +465,180 @@ describe('engine log sinks (--log-format)', () => {
 		expect(error).toHaveBeenCalledWith('[Cue] Engine started');
 		log.mockRestore();
 		error.mockRestore();
+	});
+});
+
+/**
+ * Managed admission on the standalone runner (MRC-07-02A): the engine's port
+ * is the REAL `createHeadlessSpawnAuthority` with origin `cue` over the
+ * binding file beside the data-dir lock, read on every run. The binding is
+ * written by the real `createManagedBinding` into a temporary data directory
+ * (`MAESTRO_USER_DATA`); the host authority is a real `createLocalHostAuthority`
+ * over a policy table that allows everything, labeled a double. No workflow
+ * owner fence exists yet (MRC-07-06, CP-03), so an enrolled machine refuses
+ * every prompt run as unavailable in the run's result.
+ */
+describe('managed admission (MRC-07-02A)', () => {
+	let dir: string;
+	let savedUserData: string | undefined;
+
+	beforeEach(() => {
+		dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cue-standalone-managed-'));
+		savedUserData = process.env.MAESTRO_USER_DATA;
+		process.env.MAESTRO_USER_DATA = dir;
+		executeCuePrompt.mockReset();
+		executeCuePrompt.mockResolvedValue({ status: 'completed' } as CueRunResult);
+	});
+	afterEach(() => {
+		if (savedUserData === undefined) delete process.env.MAESTRO_USER_DATA;
+		else process.env.MAESTRO_USER_DATA = savedUserData;
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+
+	/** The binding file the desktop would have written at enrollment, through the real writer. */
+	async function enroll(authorityId = 'endpoint-test') {
+		const outcome = await createManagedBinding({
+			paths: { userDataDir: dir, productionDataDir: dir },
+			fence: () => ({ ok: true as const }),
+			now: () => 1_700_000_000_000,
+		}).enroll({
+			installationId: 'inst-test',
+			authorityId,
+			endpointRef: '/tmp/endpoint.sock',
+			policySources: [{ id: authorityId, kind: 'endpoint', revision: 7 }],
+			policyRevision: 7,
+		});
+		expect(outcome.ok).toBe(true);
+	}
+
+	/** A host adapter attached to the named authority, with a registered actor. */
+	function attachedHost(authorityId = 'endpoint-test'): StandaloneCueManagedHost {
+		return {
+			authority: createLocalHostAuthority({
+				authorityId,
+				decide: () => ({ decision: 'allow', policyRevision: 7 }),
+				now: () => 1_700_000_000_000,
+			}),
+			policy: () => ({ sources: [], policyRevision: 7 }),
+			identity: {
+				read: () =>
+					({
+						status: 'ok',
+						record: { registration: { actorId: 'actor-registered' } },
+					}) as never,
+			},
+		};
+	}
+
+	const promptRun = (deps: ReturnType<typeof buildStandaloneCueEngineDeps>, runId: string) =>
+		deps.onCueRun({
+			runId,
+			sessionId: 'agent-1',
+			prompt: 'Say pong',
+			subscriptionName: 'ask',
+			event,
+			timeoutMs: 1000,
+		} as Parameters<typeof deps.onCueRun>[0]);
+
+	it('is standalone with no binding file, and the run is unmanaged as before', async () => {
+		const port = buildStandaloneCueSpawnPort({ managedHost: null })();
+		expect(port.standing()).toBe('standalone');
+
+		await promptRun(buildStandaloneCueEngineDeps({ onLog: vi.fn() }), 'run-plain');
+		expect(executeCuePrompt).toHaveBeenCalledTimes(1);
+		expect(executeCuePrompt.mock.calls[0][0].admission).toBeUndefined();
+	});
+
+	it('holds no authority on an enrolled machine with no attached host, and names this engine as the actor', async () => {
+		await enroll();
+		const port = buildStandaloneCueSpawnPort({ managedHost: null })();
+		expect(port.standing()).toBe('managed');
+		expect(port.unavailableReason).toContain('no authority is attached');
+		const verified = port.context({
+			identity: {
+				requestId: 'run-1',
+				idempotencyKey: 'run-1',
+				attemptId: 'att-1',
+				runId: 'run-1',
+				rootRunId: 'run-1',
+				parentRunId: null,
+			},
+			traceId: 'cue:run-1:run-1:att-1',
+			policyRevision: 7,
+		});
+		expect(verified.ok).toBe(true);
+		if (!verified.ok) return;
+		expect(verified.context.origin).toBe('cue');
+		expect(verified.context.actor).toEqual({
+			kind: 'service',
+			id: `maestro-cue:${os.userInfo().username}`,
+		});
+		expect(verified.context.verification.verifierId).toMatch(/^cue:cue-\d+$/);
+	});
+
+	it("admits as the attached host when its authority is the binding's, with the registered actor", async () => {
+		await enroll();
+		const host = attachedHost();
+		const port = buildStandaloneCueSpawnPort({ managedHost: host })();
+		expect(port.standing()).toBe('managed');
+		expect(port.unavailableReason).toBeNull();
+		expect(port.authority).toBe(host.authority);
+		expect(port.policy()).toEqual({ sources: [], policyRevision: 7 });
+		const verified = port.context({
+			identity: {
+				requestId: 'run-1',
+				idempotencyKey: 'run-1',
+				attemptId: 'att-1',
+				runId: 'run-1',
+				rootRunId: 'run-1',
+				parentRunId: null,
+			},
+			traceId: 'cue:run-1:run-1:att-1',
+			policyRevision: 7,
+		});
+		expect(verified.ok).toBe(true);
+		if (!verified.ok) return;
+		expect(verified.context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
+	});
+
+	it("stays unavailable when the attached host answers for another authority than the binding's", async () => {
+		await enroll('endpoint-other');
+		const port = buildStandaloneCueSpawnPort({ managedHost: attachedHost('endpoint-test') })();
+		expect(port.standing()).toBe('managed');
+		expect(port.unavailableReason).toContain('endpoint-other');
+		expect(port.authority.authorityId).toBe('unavailable');
+	});
+
+	it('refuses every prompt run on an enrolled machine in the result, with no process, and re-reads the binding per run', async () => {
+		const onLog = vi.fn();
+		const deps = buildStandaloneCueEngineDeps({ onLog });
+
+		// Not enrolled yet: this run goes through unmanaged.
+		await promptRun(deps, 'run-before');
+		expect(executeCuePrompt).toHaveBeenCalledTimes(1);
+
+		// Enrolled between two firings of the same engine: the next run is refused.
+		await enroll();
+		const result = await promptRun(deps, 'run-after');
+		expect(executeCuePrompt).toHaveBeenCalledTimes(1);
+		expect(result).toMatchObject({
+			runId: 'run-after',
+			status: 'failed',
+			managed: { state: 'unavailable', code: 'runtime-unavailable' },
+		});
+		expect(result.stderr).toContain('[managed-unavailable]');
+		expect(result.stderr).toContain('no workflow owner fence');
+		expect(onLog).toHaveBeenCalledWith(
+			'warn',
+			expect.stringContaining('"ask" was not admitted (unavailable, runtime-unavailable)')
+		);
+
+		// The same holds with the host attached: the fence is still nobody's to mint (CP-03).
+		const attached = buildStandaloneCueEngineDeps({ onLog, managedHost: attachedHost() });
+		expect(await promptRun(attached, 'run-attached')).toMatchObject({
+			status: 'failed',
+			managed: { state: 'unavailable', code: 'runtime-unavailable' },
+		});
+		expect(executeCuePrompt).toHaveBeenCalledTimes(1);
 	});
 });

@@ -28,6 +28,7 @@ import type {
 	MaestroClient,
 	Unsubscribe,
 } from '../../shared/maestro-lib/client/types';
+import type { MaestroRuntime } from '../../shared/maestro-lib/runtime';
 import { readStoreDocument } from '../../shared/maestro-lib/store/io';
 import type { AgentRecord } from '../../shared/maestro-lib/store/records';
 import {
@@ -55,8 +56,14 @@ export interface HostCueEngine {
 	removeSession(sessionId: string): void;
 }
 
-/** The part of the in-process runtime Cue uses: Auto Runs to launch, and the events that say what changed. */
-export type HostCueRuntime = Pick<MaestroClient, 'agents' | 'autoRun' | 'events'>;
+/**
+ * The part of the in-process runtime Cue uses: Auto Runs to launch, the events
+ * that say what changed, and the managed host adapter the runtime admits with
+ * (absent or null on a runtime that holds none), so a Cue prompt run in an
+ * enrolled host is admitted by the same authority as the host's own turns.
+ */
+export type HostCueRuntime = Pick<MaestroClient, 'agents' | 'autoRun' | 'events'> &
+	Partial<Pick<MaestroRuntime, 'managedHost'>>;
 
 export interface HostCueContext {
 	userDataDir: string;
@@ -70,7 +77,7 @@ export interface HostCueDeps {
 	isEnabled(settingsFile: string): Promise<boolean>;
 	readLock(dataDir: string): CueEngineLockInfo | null;
 	createEngine(
-		options: Pick<StandaloneCueEngineOptions, 'onLog' | 'runAutoRun'>
+		options: Pick<StandaloneCueEngineOptions, 'onLog' | 'runAutoRun' | 'managedHost'>
 	): Promise<HostCueEngine>;
 	/** Serve `maestro-cli cue trigger`, which has no desktop WebSocket to reach this process by. Returns the stop. */
 	startInbox(engine: HostCueEngine, dataDir: string): () => void;
@@ -328,6 +335,10 @@ export async function startHostCue(
 					consoleCueLog(level, message);
 				},
 				...(runtime ? { runAutoRun: runAutoRunInRuntime(runtime) } : {}),
+				// The host's attached authority, so the engine's port is the runtime's
+				// (MRC-07-02A); null when the runtime holds none, and the engine then
+				// reads the binding alone, as `maestro-cli cue engine start` does.
+				managedHost: runtime?.managedHost ?? null,
 			});
 			if (runtime) unfollowAgents = await followAgents(runtime, engine);
 			engine.start('system-boot');

@@ -46,8 +46,9 @@ import {
 	type EnterpriseIdentityStore,
 } from './identity-store';
 import { createPolicyStatusService, type PolicyStatusService } from './policy-status';
-import { createProcessSpawnAuthority } from './spawn-authority';
+import { createCueSpawnAuthority, createProcessSpawnAuthority } from './spawn-authority';
 import type { ProcessSpawnAuthorityPort } from '../process-manager/types';
+import type { CueSpawnAuthorityPort } from '../cue/cue-run-router';
 
 /** What this host can do over the endpoint socket. Execution is the one it cannot run managed without. */
 export const ENTERPRISE_SUPPORTED_CAPABILITIES: readonly string[] = [
@@ -90,6 +91,8 @@ export interface EnterpriseService {
 	readonly dispatch: BrokerDispatch;
 	/** The port the process manager admits every desktop spawn with (`spawn-authority.ts`). */
 	readonly spawnAuthority: ProcessSpawnAuthorityPort;
+	/** The port the Cue run router admits every desktop Cue prompt run with (origin `cue`, same enrollment). */
+	readonly cueSpawnAuthority: CueSpawnAuthorityPort;
 	/** Re-attach a previously enrolled installation. Never throws; the outcome is in `status()`. */
 	start(): Promise<void>;
 	close(): Promise<void>;
@@ -153,6 +156,13 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		dispatch,
 		now,
 	});
+	const cueSpawnAuthority = createCueSpawnAuthority({
+		installation,
+		identity,
+		host,
+		dispatch,
+		now,
+	});
 
 	return {
 		installation,
@@ -162,6 +172,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		host,
 		dispatch,
 		spawnAuthority,
+		cueSpawnAuthority,
 		async start() {
 			// The ledger is read first: a lease still bound at the last exit is unknown from here on.
 			await dispatch.load();

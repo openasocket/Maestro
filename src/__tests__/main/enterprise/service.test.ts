@@ -79,6 +79,9 @@ describe('enterprise service', () => {
 		});
 		expect(service.policy.status()).toMatchObject({ source: 'none' });
 		expect(service.host.authority.authorityId).toBe('unavailable');
+		// The Cue port is the same enrollment seen from the Cue run router (MRC-07-02A).
+		expect(service.cueSpawnAuthority.standing()).toBe('standalone');
+		expect(service.cueSpawnAuthority.authority).toBe(service.spawnAuthority.authority);
 		expect(fake.calls).toHaveLength(0);
 		// `identity.read()` ran once for the start check and once per status; the file
 		// does not exist, so custody was consulted but the anchor was never read.

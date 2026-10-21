@@ -7,7 +7,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { createProcessSpawnAuthority } from '../../../main/enterprise/spawn-authority';
+import {
+	createCueSpawnAuthority,
+	createProcessSpawnAuthority,
+} from '../../../main/enterprise/spawn-authority';
 import type { IdentityRead } from '../../../main/enterprise/identity-store';
 import type { ManagedWorkflowRef } from '../../../shared/maestro-lib/managed/types';
 import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
@@ -91,5 +94,98 @@ describe('createProcessSpawnAuthority verify', () => {
 		expect(verified.ok).toBe(false);
 		if (verified.ok) return;
 		expect(verified.problems.join('; ')).toContain('workflow.ownerEpoch');
+	});
+});
+
+/**
+ * The desktop's Cue port (`createCueSpawnAuthority`, MRC-07-02A): the same
+ * enrollment, authority and policy as the process manager's port, under the
+ * shape the Cue run router admits a prompt run with, with origin `cue` and the
+ * lineage the router bound carried through untouched.
+ */
+describe('createCueSpawnAuthority', () => {
+	const port = fakeSpawnPort();
+	const CUE_WORKFLOW: ManagedWorkflowRef = {
+		workflowId: 'cue-pipeline:Nightly QA',
+		version: 'a'.repeat(64),
+		triggerEventId: 'time.scheduled:evt-1',
+		ownerEpoch: 'epoch-3',
+		fencingToken: 'fence-3',
+	};
+	const DELEGATION = {
+		chain: [
+			{ kind: 'service' as const, id: 'cue-subscription:nightly' },
+			{ kind: 'agent' as const, id: 'agent-1' },
+		],
+		grantRef: null,
+	};
+
+	function cueAuthority(read: IdentityRead = { status: 'none' }) {
+		return createCueSpawnAuthority({
+			installation: INSTALLATION,
+			identity: { read: () => read },
+			host: { policy: () => ({ sources: [], policyRevision: 3 }) },
+			dispatch: { authority: port.authority },
+			now: () => 1_000_000,
+		});
+	}
+
+	it('binds a Cue run with origin cue, the operator principal, and the lineage the router handed it', () => {
+		const authority = cueAuthority();
+		const verified = authority.context({
+			identity: { ...IDENTITY, runId: 'run-9', rootRunId: 'root-1', parentRunId: 'run-8' },
+			traceId: 'cue:root-1:run-9:att-1',
+			policyRevision: 3,
+			workflow: CUE_WORKFLOW,
+			delegation: DELEGATION,
+		});
+		expect(verified.ok).toBe(true);
+		if (!verified.ok) return;
+		expect(verified.context.origin).toBe('cue');
+		expect(verified.context.actor).toEqual({ kind: 'human', id: 'operator:inst-1' });
+		expect(verified.context.workflow).toEqual(CUE_WORKFLOW);
+		expect(verified.context.delegation).toEqual(DELEGATION);
+		expect(verified.context.traceId).toBe('cue:root-1:run-9:att-1');
+		expect(verified.context.installation).toEqual(INSTALLATION);
+		expect(verified.context.verification).toMatchObject({
+			verifierId: 'desktop-cue:desktop-1',
+			peer: 'in-process',
+		});
+		expect(verified.context.requestedCapabilities).toEqual(['runs.submit']);
+	});
+
+	it('shares the enrollment standing, the dispatch authority and the policy of the process port', () => {
+		const standalone = cueAuthority();
+		expect(standalone.standing()).toBe('standalone');
+		const enrolled = cueAuthority({
+			status: 'ok',
+			record: { registration: { actorId: 'actor-registered' } } as never,
+		});
+		expect(enrolled.standing()).toBe('managed');
+		expect(enrolled.authority).toBe(port.authority);
+		expect(enrolled.policy()).toEqual({ sources: [], policyRevision: 3 });
+		const verified = enrolled.context({
+			identity: IDENTITY,
+			traceId: 'cue:root-1:run-9:att-1',
+			policyRevision: 3,
+		});
+		expect(verified.ok).toBe(true);
+		if (!verified.ok) return;
+		// The registered actor is the principal once one exists; a direct action has no chain.
+		expect(verified.context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
+		expect(verified.context.delegation).toEqual({ chain: [], grantRef: null });
+		expect(verified.context.workflow).toBeNull();
+	});
+
+	it('refuses a workflow with a blank fence field rather than repairing or dropping it', () => {
+		const verified = cueAuthority().context({
+			identity: IDENTITY,
+			traceId: 'cue:root-1:run-9:att-1',
+			policyRevision: 3,
+			workflow: { ...CUE_WORKFLOW, fencingToken: '' },
+		});
+		expect(verified.ok).toBe(false);
+		if (verified.ok) return;
+		expect(verified.problems.join('; ')).toContain('workflow.fencingToken');
 	});
 });

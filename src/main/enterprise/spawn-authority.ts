@@ -45,6 +45,8 @@ import type {
 	ProcessSpawnAuthorityPort,
 	ProcessSpawnContextInput,
 } from '../process-manager/types';
+import type { CueSpawnAuthorityPort } from '../cue/cue-run-router';
+import type { HeadlessSpawnContextInput } from '../../shared/maestro-lib/managed/host-adapter';
 import type { BrokerDispatch } from './dispatch';
 import { publicEnterpriseIdentity, type EnterpriseIdentityStore } from './identity-store';
 
@@ -125,6 +127,60 @@ export function createProcessSpawnAuthority(
 				requestedCapabilities: ['runs.submit'],
 			};
 			return verifiers[input.actor.peer].verify(context);
+		},
+	};
+}
+
+/** What the desktop's Cue port is composed from: the same parts as the process manager's, minus the effects nothing on the Cue path asks for. */
+export type CueSpawnAuthorityDeps = Omit<ProcessSpawnAuthorityDeps, 'effects'>;
+
+/**
+ * The desktop's Cue port (MRC-07-02A): what the Cue run router admits a prompt
+ * run with on a desktop (`CueRunActionDeps.managed.port`). The same standing,
+ * authority and policy as the process manager's port, since the same
+ * enrollment answers for both, under the `CueSpawnAuthorityPort` shape the
+ * router takes from any host (the headless engine composes
+ * `createHeadlessSpawnAuthority` with origin `cue` for the same seat).
+ *
+ * The context carries origin `cue`, the registered actor (or the operator
+ * before registration) as the principal, and whatever the router bound: the
+ * run's lineage, the subscription-then-agent delegation chain and the
+ * workflow with its owner fence. None of it is stripped or invented here: a
+ * context naming another installation is refused, a workflow the router did
+ * not fence never reaches this port (the router refuses it first), and a
+ * Cue firing is a direct action of this process (peer `in-process`), never a
+ * Web Login's.
+ */
+export function createCueSpawnAuthority(deps: CueSpawnAuthorityDeps): CueSpawnAuthorityPort {
+	const now = deps.now ?? (() => Date.now());
+	const verifier = createContextVerifier({
+		verifierId: `desktop-cue:${deps.installation.runtimeId}`,
+		peer: 'in-process',
+		now,
+		accept: (context) =>
+			context.installation.installationId === deps.installation.installationId
+				? []
+				: [`installation ${context.installation.installationId} is not this one`],
+	});
+	return {
+		standing: () => (deps.identity.read().status === 'none' ? 'standalone' : 'managed'),
+		get authority() {
+			return deps.dispatch.authority;
+		},
+		policy: () => deps.host.policy(),
+		context(input: HeadlessSpawnContextInput) {
+			return verifier.verify({
+				contractVersion: MANAGED_CONTRACT_VERSION,
+				installation: deps.installation,
+				origin: 'cue',
+				actor: spawnPrincipal(deps.identity.read(), deps.installation),
+				delegation: input.delegation ?? { chain: [], grantRef: null },
+				identity: input.identity,
+				policyRevision: input.policyRevision,
+				workflow: input.workflow ?? null,
+				traceId: input.traceId,
+				requestedCapabilities: ['runs.submit'],
+			});
 		},
 	};
 }
