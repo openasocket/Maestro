@@ -48,6 +48,7 @@ import {
 } from './authority';
 import type {
 	EndpointPort,
+	EndpointStatus,
 	LocalEndpointDenialReason,
 	ManagedEnrollmentStatus,
 	ManagedIdentityPort,
@@ -110,6 +111,8 @@ export interface ManagedHostAdapterDeps {
 	now?: () => number;
 	newId?: () => string;
 	leaseTtlMs?: number;
+	/** How long the last attachment answer counts as fresh. Default `POLICY_FRESHNESS_MS`. */
+	freshnessMs?: number;
 }
 
 export interface ManagedHostAdapter {
@@ -118,6 +121,119 @@ export interface ManagedHostAdapter {
 	readonly authority: HostAuthority;
 	policy(): PolicySourceSet;
 	status(): ManagedEnrollmentStatus;
+	policyStatus(): ManagedPolicyStatus;
+}
+
+// ---------------------------------------------------------------------------
+// Policy status: what policy this host is under, and how far to trust it
+// ---------------------------------------------------------------------------
+
+/** Five minutes: the endpoint's attachment answer is re-read at least this often, or it is stale. */
+export const POLICY_FRESHNESS_MS = 5 * 60_000;
+
+/**
+ * The policy standing of this host, projected from the endpoint's last
+ * attachment answer and the sealed record. `source` says where the revisions
+ * came from (`endpoint`: the live attached answer; `cached`: the record's
+ * copy, which is what stays installed offline; `none`). `admission` is not a
+ * policy decision: it says whether a fresh decision can be asked for at all,
+ * and lists every reason it cannot. A stale observation, a lapsed registration
+ * or a lapsed approval each deny, and an offline host keeps its installed
+ * revision without gaining any new grant from it.
+ */
+export interface ManagedPolicyStatus {
+	desiredRevision: number | null;
+	appliedRevision: number | null;
+	/** The record's last applied revision: the policy kept while offline. */
+	installedRevision: number | null;
+	source: 'endpoint' | 'cached' | 'none';
+	freshness: 'fresh' | 'stale' | 'unknown';
+	observedAt: string | null;
+	connectivity: EndpointStatus['connectivity'] | 'detached';
+	management: EndpointStatus['management'] | null;
+	capabilities: readonly string[];
+	/** Whether desired and applied agree; null when either is unknown. */
+	converged: boolean | null;
+	offline: {
+		installedPolicyAvailable: boolean;
+		mode: 'endpoint' | 'installed-policy-only' | 'none';
+	};
+	approval: { state: 'none' | 'pending' | 'expired'; expiresAt: string | null };
+	registration: { state: 'none' | 'live' | 'expired'; expiresAt: string | null };
+	admission: { possible: boolean; reasons: readonly string[] };
+}
+
+export function projectPolicyStatus(input: {
+	standing: ManagedEnrollmentStatus;
+	now: number;
+	freshnessMs?: number;
+}): ManagedPolicyStatus {
+	const { standing, now } = input;
+	const freshnessMs = input.freshnessMs ?? POLICY_FRESHNESS_MS;
+	const record = standing.identity.status === 'ok' ? standing.identity.record : null;
+	const live = standing.connection?.attached ? standing.endpoint : null;
+	const observedAt = record?.policy.observedAt ?? null;
+	const age = observedAt === null ? null : now - Date.parse(observedAt);
+	// An observation from the future is a clock the host cannot trust, not a fresh one.
+	const freshness: ManagedPolicyStatus['freshness'] =
+		age === null || !Number.isFinite(age) || age < 0
+			? 'unknown'
+			: age <= freshnessMs
+				? 'fresh'
+				: 'stale';
+	const source: ManagedPolicyStatus['source'] = live ? 'endpoint' : record ? 'cached' : 'none';
+	const desiredRevision = live?.desiredPolicyRevision ?? record?.policy.desiredRevision ?? null;
+	const appliedRevision = live?.appliedPolicyRevision ?? record?.policy.appliedRevision ?? null;
+	const installedRevision = record?.policy.appliedRevision ?? null;
+
+	const lapsed = (at: string | null) => at !== null && Date.parse(at) <= now;
+	const approval: ManagedPolicyStatus['approval'] = standing.pendingApproval
+		? {
+				state: lapsed(standing.pendingApproval.expiresAt) ? 'expired' : 'pending',
+				expiresAt: standing.pendingApproval.expiresAt,
+			}
+		: { state: 'none', expiresAt: null };
+	const registration: ManagedPolicyStatus['registration'] = record?.registration
+		? {
+				state: lapsed(record.registration.expiresAt) ? 'expired' : 'live',
+				expiresAt: record.registration.expiresAt,
+			}
+		: { state: 'none', expiresAt: null };
+
+	const reasons: string[] = [];
+	if (standing.authority !== 'registered')
+		reasons.push(standing.reason ?? 'No registered standing.');
+	if (freshness !== 'fresh') reasons.push(`The policy observation is ${freshness}.`);
+	if (registration.state === 'expired') reasons.push('The actor registration has lapsed.');
+	if (approval.state === 'expired')
+		reasons.push('The pending approval has lapsed without a redeem.');
+	if (live && live.connectivity !== 'online' && desiredRevision !== appliedRevision) {
+		reasons.push(`The endpoint is ${live.connectivity} with a policy update outstanding.`);
+	}
+	if (appliedRevision === null) reasons.push('No applied policy revision is known.');
+
+	return {
+		desiredRevision,
+		appliedRevision,
+		installedRevision,
+		source,
+		freshness,
+		observedAt,
+		connectivity: live?.connectivity ?? 'detached',
+		management: live?.management ?? null,
+		capabilities: live?.capabilities ?? [],
+		converged:
+			desiredRevision === null || appliedRevision === null
+				? null
+				: desiredRevision === appliedRevision,
+		offline: {
+			installedPolicyAvailable: installedRevision !== null,
+			mode: live ? 'endpoint' : installedRevision !== null ? 'installed-policy-only' : 'none',
+		},
+		approval,
+		registration,
+		admission: { possible: reasons.length === 0, reasons },
+	};
 }
 
 const EXECUTION_SOURCES: Record<ManagedOrigin, 'ux' | 'cli' | 'cue' | 'headless'> = {
@@ -179,6 +295,12 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 		const standing = deps.status();
 		if (standing.authority !== 'registered' || !deps.endpoint) {
 			return { decision: 'unavailable', reason: standing.reason ?? 'No endpoint is attached.' };
+		}
+		// A stale observation, a lapsed registration or a lapsed approval is not
+		// a standing to ask under: the installed policy stays, no new grant comes.
+		const policy = projectPolicyStatus({ standing, now: now(), freshnessMs: deps.freshnessMs });
+		if (!policy.admission.possible) {
+			return { decision: 'unavailable', reason: policy.admission.reasons.join(' ') };
 		}
 		const problem = executionRequestProblem(request);
 		if (problem)
@@ -269,5 +391,7 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 			};
 		},
 		status: deps.status,
+		policyStatus: () =>
+			projectPolicyStatus({ standing: deps.status(), now: now(), freshnessMs: deps.freshnessMs }),
 	};
 }

@@ -40,6 +40,8 @@ export interface FakeEndpointOptions {
 	/** The answer to any operation other than attachment/compatibility. */
 	operations?: Partial<Record<string, (payload: unknown) => unknown>>;
 	maxResponseBytes?: number;
+	/** The daemon clock, for the approval expiry. Default: the real one. */
+	now?: () => number;
 }
 
 export interface FakeEndpoint {
@@ -183,7 +185,7 @@ export async function startFakeEndpoint(options: FakeEndpointOptions = {}): Prom
 					challengeId: handshake.challengeId,
 					nonce: 'n'.repeat(43),
 					challengeDigest: 'c'.repeat(64),
-					expiresAt: new Date(Date.now() + 120_000).toISOString(),
+					expiresAt: new Date((live.now?.() ?? Date.now()) + 120_000).toISOString(),
 				});
 				return;
 			}

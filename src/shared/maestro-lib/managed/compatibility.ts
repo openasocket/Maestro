@@ -67,8 +67,9 @@ export const MANAGED_ENDPOINT_PROTOCOLS: readonly number[] = [1];
  * operations over the host's own journal, registry and turn service, with
  * admission at the real spawn; they are `implemented`, not `locally-verified`,
  * until the phase's evidence names the test that exercised the real sink, and
- * no real authority producer (CP-03) has been paired with them. Fleet events
- * and policy status still wait on their producers.
+ * no real authority producer (CP-03) has been paired with them. Phase 3 projects
+ * policy status from the endpoint attachment and the sealed record. Fleet
+ * events still wait on their producer.
  */
 export const MANAGED_CAPABILITY_SUPPORT: readonly SupportEntry<ManagedCapability>[] = [
 	{
@@ -113,7 +114,12 @@ export const MANAGED_CAPABILITY_SUPPORT: readonly SupportEntry<ManagedCapability
 		note: 'journal ownership, then the registry; no real peer paired',
 	},
 	{ key: 'events.resume', status: 'unsupported', evidence: null, note: 'fleet events: phase 10' },
-	{ key: 'policy.status', status: 'unsupported', evidence: null, note: 'policy status: phase 3' },
+	{
+		key: 'policy.status',
+		status: 'implemented',
+		evidence: 'src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts',
+		note: 'projected from the endpoint attachment status and the sealed record; no real endpoint paired (CP-04)',
+	},
 ];
 
 /** What a host offers. The default is this build's own; tests and adapters inject theirs. */

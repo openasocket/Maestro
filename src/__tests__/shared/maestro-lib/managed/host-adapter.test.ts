@@ -34,6 +34,7 @@ import {
 	createManagedHostAdapter,
 	installationIdentity,
 	managedAuthorityId,
+	projectPolicyStatus,
 } from '../../../../shared/maestro-lib/managed/host-adapter';
 import { inProcessContext } from '../../../../shared/maestro-lib/managed/operations';
 import {
@@ -266,6 +267,7 @@ describe('managed host adapter', () => {
 			identity: { read: () => view },
 			endpoint: port,
 			status: () => standing(port, view),
+			now: () => T0,
 		});
 
 		fake.options.operations = { execution: () => ({ outcome: 'denied', reason: 'policy_denied' }) };
@@ -330,6 +332,7 @@ describe('managed host adapter', () => {
 			identity: { read: () => untrusted },
 			endpoint: port,
 			status: () => standing(port, untrusted),
+			now: () => T0,
 		});
 		expect(noCustody.authority.authorityId).toBe('unavailable');
 		expect(await noCustody.authority.admit(admission())).toMatchObject({
@@ -343,6 +346,7 @@ describe('managed host adapter', () => {
 			identity: { read: () => view },
 			endpoint: null,
 			status: () => standing(null, view),
+			now: () => T0,
 		});
 		expect(await noSocket.authority.admit(admission())).toMatchObject({ state: 'unavailable' });
 
@@ -351,6 +355,7 @@ describe('managed host adapter', () => {
 			identity: { read: () => view },
 			endpoint: port,
 			status: () => standing(port, view),
+			now: () => T0,
 		});
 		expect(
 			await tooWide.authority.admit(admission(Array.from({ length: 129 }, () => 'x')))
@@ -368,6 +373,140 @@ describe('managed host adapter', () => {
 			message: expect.stringContaining('no policy revision'),
 		});
 		expect(fake.calls).toHaveLength(before);
+	});
+});
+
+describe('projectPolicyStatus', () => {
+	const socketPath = '/tmp/endpoint.sock';
+	const live = (port: EndpointPort | null, r = record(socketPath)) => standing(port, okView(r));
+	const attachedState = {
+		connection: 1,
+		attached: true,
+		registration: 'registered' as const,
+		closed: false,
+		status: {
+			outcome: 'attached' as const,
+			protocol: 1 as const,
+			capabilities: ['execution'],
+			management: 'managed' as const,
+			desiredPolicyRevision: 4,
+			appliedPolicyRevision: 3,
+			connectivity: 'online' as const,
+			collectionProfile: 'metadata' as const,
+		},
+	};
+	const attachedPort = { state: () => attachedState } as unknown as EndpointPort;
+
+	it('reads the live attachment when attached and the record when not, and keeps the installed revision offline', () => {
+		const online = projectPolicyStatus({ standing: live(attachedPort), now: T0 });
+		expect(online).toMatchObject({
+			source: 'endpoint',
+			desiredRevision: 4,
+			appliedRevision: 3,
+			installedRevision: 3,
+			converged: false,
+			freshness: 'fresh',
+			connectivity: 'online',
+			management: 'managed',
+			capabilities: ['execution'],
+			offline: { installedPolicyAvailable: true, mode: 'endpoint' },
+			admission: { possible: true, reasons: [] },
+		});
+		const offline = projectPolicyStatus({ standing: live(null), now: T0 });
+		expect(offline).toMatchObject({
+			source: 'cached',
+			desiredRevision: 3,
+			appliedRevision: 3,
+			installedRevision: 3,
+			connectivity: 'detached',
+			offline: { installedPolicyAvailable: true, mode: 'installed-policy-only' },
+			admission: { possible: false },
+		});
+		expect(offline.admission.reasons.join(' ')).toMatch(/not registered/);
+		const nothing = projectPolicyStatus({
+			standing: standing(null, { status: 'none', reason: null, message: null, record: null }),
+			now: T0,
+		});
+		expect(nothing).toMatchObject({
+			source: 'none',
+			installedRevision: null,
+			offline: { mode: 'none' },
+		});
+	});
+
+	it('denies a fresh decision on a stale, future or missing observation, a lapsed registration or a lapsed approval', () => {
+		const stale = projectPolicyStatus({ standing: live(attachedPort), now: T0 + 6 * 60_000 });
+		expect(stale).toMatchObject({ freshness: 'stale', admission: { possible: false } });
+		expect(stale.admission.reasons).toEqual(['The policy observation is stale.']);
+		const future = projectPolicyStatus({ standing: live(attachedPort), now: T0 - 1 });
+		expect(future.freshness).toBe('unknown');
+		const unknown = projectPolicyStatus({
+			standing: live(attachedPort, {
+				...record(socketPath),
+				policy: { desiredRevision: null, appliedRevision: null, observedAt: null },
+			}),
+			now: T0,
+		});
+		expect(unknown.freshness).toBe('unknown');
+
+		const registration = {
+			challengeId: 'c1',
+			actorId: null,
+			runtimeId: 'desktop-100',
+			processEpoch: 'epoch-1',
+			bindingDigest: 'a'.repeat(64),
+			processBirthDigest: null,
+			challengeDigest: 'c'.repeat(64),
+			expiresAt: new Date(T0 - 1).toISOString(),
+			registeredAt: new Date(T0 - 60_000).toISOString(),
+		};
+		const lapsed = projectPolicyStatus({
+			standing: live(attachedPort, { ...record(socketPath), registration }),
+			now: T0,
+		});
+		expect(lapsed.registration.state).toBe('expired');
+		expect(lapsed.admission.reasons).toEqual(['The actor registration has lapsed.']);
+
+		const approval = projectPolicyStatus({
+			standing: {
+				...live(attachedPort),
+				pendingApproval: { challengeId: 'c2', expiresAt: new Date(T0 - 1).toISOString() },
+			},
+			now: T0,
+		});
+		expect(approval.approval.state).toBe('expired');
+		expect(approval.admission.reasons).toEqual([
+			'The pending approval has lapsed without a redeem.',
+		]);
+
+		const outstanding = projectPolicyStatus({
+			standing: live({
+				state: () => ({
+					...attachedState,
+					status: { ...attachedState.status, connectivity: 'offline' },
+				}),
+			} as unknown as EndpointPort),
+			now: T0,
+		});
+		expect(outstanding.admission.reasons).toEqual([
+			'The endpoint is offline with a policy update outstanding.',
+		]);
+	});
+
+	it('the adapter refuses to ask under a stale observation and reports the same projection', async () => {
+		const view = okView(record(socketPath));
+		const adapter = createManagedHostAdapter({
+			installation: INSTALLATION,
+			identity: { read: () => view },
+			endpoint: attachedPort,
+			status: () => standing(attachedPort, view),
+			now: () => T0 + 6 * 60_000,
+		});
+		expect(adapter.policyStatus().freshness).toBe('stale');
+		expect(await adapter.authority.admit(admission())).toMatchObject({
+			state: 'unavailable',
+			message: 'The policy observation is stale.',
+		});
 	});
 });
 
