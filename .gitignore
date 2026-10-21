@@ -73,3 +73,7 @@ examples/plugins/*/signature.json
 
 # Superseded local-only Lite prototype and visual verification artifacts
 src/main/lite/discovery-pairing-prototype/
+
+# Mega-Maestro contracts imported by scripts/import-mega-maestro.mjs (the pin beside them is committed)
+vendor/mega-maestro/contracts/
+vendor/mega-maestro/.import-*/

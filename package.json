@@ -42,6 +42,7 @@
 		"build:maestro-p": "node scripts/build-maestro-p.mjs",
 		"build:maestro-lib": "node scripts/build-maestro-lib.mjs",
 		"build:maestro-lib-run": "node scripts/build-maestro-lib-run.mjs",
+		"import:mega-maestro": "node scripts/import-mega-maestro.mjs",
 		"build:permission-relay-bridge": "node scripts/build-permission-relay-bridge.mjs",
 		"build:computer-history": "node scripts/build-maestro-computer-history.mjs",
 		"build:renderer": "vite build",
