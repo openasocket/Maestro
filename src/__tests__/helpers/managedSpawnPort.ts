@@ -95,7 +95,7 @@ export function fakeSpawnPort(options: FakeSpawnPortOptions = {}): FakeSpawnPort
 				},
 				identity: input.identity,
 				policyRevision: input.policyRevision,
-				workflow: null,
+				workflow: input.workflow,
 				traceId: input.traceId,
 				requestedCapabilities: ['runs.submit'],
 			}),

@@ -1,5 +1,6 @@
 import type { AdditionalDirectory } from '../../../../shared/types';
 import type { CodexTransport } from '../../../../shared/codexTransport';
+import type { AutoRunSpawnLineage } from '../../../../shared/maestro-lib/autorun/attribution';
 
 /**
  * IPC payload for `process:spawn`.
@@ -66,4 +67,8 @@ export interface SpawnProcessConfig {
 	// Stats tracking options
 	querySource?: 'user' | 'auto'; // Whether this query is user-initiated or from Auto Run
 	tabId?: string; // Tab ID for multi-tab tracking
+	/** The Auto Run lineage this spawn is one attempt of (attribution plus the
+	 *  run's owner fence, if any). Carried as it is into `ProcessConfig.autoRun`
+	 *  so the sink admits the attempt on its lineage; absent on a chat turn. */
+	autoRun?: AutoRunSpawnLineage;
 }

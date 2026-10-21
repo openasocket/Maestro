@@ -36,6 +36,14 @@ import {
 	opencodePermissionEffect,
 } from '../../../main/process-manager/spawners/OpencodeServerSpawner';
 import { fakeAdmission, fakeSpawnPort } from '../../helpers/managedSpawnPort';
+import {
+	autoRunRunIdentity,
+	autoRunTraceId,
+	autoRunWorkflowRef,
+	newAutoRunTurnRequest,
+	nextAutoRunAttempt,
+	type AutoRunWorkflowIdentity,
+} from '../../../shared/maestro-lib/autorun/attribution';
 
 const SERVE_RESULT = { pid: -1, success: true };
 
@@ -258,6 +266,140 @@ describe('ProcessManager managed admission at the sink', () => {
 			state: 'standalone',
 		});
 		expect(manager.spawn(config())).toBe(SERVE_RESULT);
+		expect(serve).toHaveBeenCalledTimes(1);
+		expect(port.asked).toHaveLength(0);
+	});
+});
+
+/**
+ * An Auto Run attempt at the sink (MRC-07-01B): a spawn that carries its
+ * lineage (`config.autoRun`) is bound on the task's request and attempt ids
+ * under the workflow's run, with the workflow reference and its owner fence
+ * in the verified context, instead of the anonymous identity a chat turn
+ * gets. An unowned workflow (no fence) is refused unavailable before the
+ * authority is asked, and a standalone host ignores the lineage.
+ */
+describe('ProcessManager admission on an Auto Run lineage', () => {
+	const WORKFLOW: AutoRunWorkflowIdentity = {
+		workflowId: 'playbook:/work/.maestro/playbooks/release',
+		version: 'docs-2-0badf00d',
+		triggerEventId: 'operator:1700000000000',
+		runId: 'run-root',
+	};
+	const FENCE = { ownerEpoch: 'epoch-1', fencingToken: 'fence-1' };
+	let ids = 0;
+	const newId = () => `id-${++ids}`;
+	const taskRequest = () =>
+		newAutoRunTurnRequest(WORKFLOW, { purpose: 'task', document: '01-build', newId });
+
+	function managedManager(port = fakeSpawnPort()) {
+		const manager = new ProcessManager(() => true, { spawnAuthority: () => port });
+		const serve = vi.fn(() => SERVE_RESULT);
+		(
+			manager as unknown as { opencodeServerSpawner: { spawn: typeof serve } }
+		).opencodeServerSpawner = { spawn: serve };
+		return { manager, port, serve };
+	}
+
+	it('binds the attempt on its lineage: identity, workflow reference, fence and trace id', async () => {
+		const { manager, port, serve } = managedManager();
+		const attribution = taskRequest();
+		const request = config({ autoRun: { attribution, fence: FENCE } });
+
+		const admitted = await manager.admitSpawn(request, { peer: 'in-process' });
+		expect(admitted.state).toBe('admitted');
+		if (admitted.state !== 'admitted') return;
+
+		expect(port.asked).toHaveLength(1);
+		const { context } = port.asked[0];
+		expect(context.identity).toEqual(autoRunRunIdentity(attribution));
+		expect(context.identity).toMatchObject({
+			requestId: attribution.requestId,
+			attemptId: attribution.attemptId,
+			rootRunId: 'run-root',
+			parentRunId: 'run-root',
+		});
+		expect(context.workflow).toEqual(autoRunWorkflowRef(WORKFLOW, FENCE));
+		expect(context.workflow).toMatchObject({
+			workflowId: WORKFLOW.workflowId,
+			ownerEpoch: 'epoch-1',
+			fencingToken: 'fence-1',
+		});
+		expect(context.traceId).toBe(autoRunTraceId(attribution));
+		expect(context.traceId).not.toBe(request.sessionId);
+		// The admission the handler journals names the task's request and attempt.
+		expect(admitted.admission.requestId).toBe(attribution.requestId);
+		expect(admitted.admission.attemptId).toBe(attribution.attemptId);
+
+		expect(manager.spawn({ ...request, admission: admitted.admission })).toBe(SERVE_RESULT);
+		expect(serve).toHaveBeenCalledTimes(1);
+	});
+
+	it('admits a retry as its own attempt under the same request', async () => {
+		const { manager, port } = managedManager();
+		const first = taskRequest();
+		const retry = nextAutoRunAttempt(first, newId);
+
+		const one = await manager.admitSpawn(
+			config({ autoRun: { attribution: first, fence: FENCE } }),
+			{ peer: 'in-process' }
+		);
+		const two = await manager.admitSpawn(
+			config({ autoRun: { attribution: retry, fence: FENCE } }),
+			{ peer: 'in-process' }
+		);
+		expect(one.state).toBe('admitted');
+		expect(two.state).toBe('admitted');
+		if (one.state !== 'admitted' || two.state !== 'admitted') return;
+
+		expect(two.admission.requestId).toBe(one.admission.requestId);
+		expect(two.admission.attemptId).not.toBe(one.admission.attemptId);
+		expect(two.admission.leaseId).not.toBe(one.admission.leaseId);
+		expect(port.asked.map((ask) => ask.context.identity.attemptId)).toEqual([
+			first.attemptId,
+			retry.attemptId,
+		]);
+	});
+
+	it('refuses an unowned workflow as unavailable before the authority is asked', async () => {
+		const { manager, port, serve } = managedManager();
+		const request = config({ autoRun: { attribution: taskRequest(), fence: null } });
+
+		const outcome = await manager.admitSpawn(request, { peer: 'in-process' });
+		expect(outcome).toMatchObject({ state: 'unavailable', code: 'runtime-unavailable' });
+		if (outcome.state !== 'unavailable') return;
+		expect(outcome.message).toContain(WORKFLOW.workflowId);
+		expect(outcome.message).toContain('no workflow owner fence');
+		expect(port.asked).toHaveLength(0);
+
+		// Admit-then-spawn reports the same refusal and starts nothing.
+		expect(await manager.spawnAdmitted(request, { peer: 'in-process' })).toMatchObject({
+			success: false,
+			managed: { state: 'unavailable', code: 'runtime-unavailable' },
+		});
+		expect(serve).not.toHaveBeenCalled();
+	});
+
+	it('binds a chat turn under a fresh identity with no workflow, as before', async () => {
+		const { manager, port } = managedManager();
+		const request = config();
+		const admitted = await manager.admitSpawn(request, { peer: 'in-process' });
+		expect(admitted.state).toBe('admitted');
+		const { context } = port.asked[0];
+		expect(context.workflow).toBeNull();
+		expect(context.identity).toMatchObject({ runId: null, rootRunId: null, parentRunId: null });
+		expect(context.identity.idempotencyKey).toBe(context.identity.requestId);
+		expect(context.traceId).toBe(request.sessionId);
+	});
+
+	it('ignores the lineage on a standalone host', async () => {
+		const port = fakeSpawnPort({ standing: 'standalone' });
+		const { manager, serve } = managedManager(port);
+		const request = config({ autoRun: { attribution: taskRequest(), fence: null } });
+		expect(await manager.admitSpawn(request, { peer: 'in-process' })).toEqual({
+			state: 'standalone',
+		});
+		expect(manager.spawn(request)).toBe(SERVE_RESULT);
 		expect(serve).toHaveBeenCalledTimes(1);
 		expect(port.asked).toHaveLength(0);
 	});

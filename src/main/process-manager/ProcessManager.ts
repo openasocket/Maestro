@@ -22,8 +22,13 @@ import {
 	type DispatchSnapshot,
 	type LeaseRelease,
 } from '../../shared/maestro-lib/managed/authority';
-import type { ManagedDenialCode } from '../../shared/maestro-lib/managed/types';
+import type { ManagedDenialCode, ManagedRunIdentity } from '../../shared/maestro-lib/managed/types';
 import { generateUUID } from '../../shared/uuid';
+import {
+	autoRunRunIdentity,
+	autoRunTraceId,
+	autoRunWorkflowRef,
+} from '../../shared/maestro-lib/autorun/attribution';
 import { argsResumeSession } from './utils/resumeArgs';
 import { PtySpawner } from './spawners/PtySpawner';
 import { ChildProcessSpawner } from './spawners/ChildProcessSpawner';
@@ -112,6 +117,19 @@ export function buildSpawnRequestSnapshot(config: ProcessConfig): DispatchSnapsh
 			resourceIds: config.images?.length ? [`images:${config.images.length}`] : [],
 		}
 	);
+}
+
+/** The identity of a spawn that is its own request (a chat turn): fresh, no run above it. */
+function chatTurnIdentity(): ManagedRunIdentity {
+	const requestId = generateUUID();
+	return {
+		requestId,
+		idempotencyKey: requestId,
+		attemptId: generateUUID(),
+		runId: null,
+		rootRunId: null,
+		parentRunId: null,
+	};
 }
 
 export interface TerminalTabSpawnConfig {
@@ -469,6 +487,14 @@ export class ProcessManager extends EventEmitter {
 	 * `spawn()` will receive it (so pass the same object, with `admission`
 	 * added), the actor is bound into a verified context, and the authority's
 	 * answer is returned as it is: nothing but `admitted` leads anywhere.
+	 *
+	 * A chat turn is its own request and is bound under a fresh identity. An
+	 * Auto Run attempt (`config.autoRun`) is bound on its lineage instead: the
+	 * task request and attempt ids, the run under the workflow's root run, the
+	 * workflow reference with its owner fence, and the lineage's trace id. A
+	 * workflow with no fence is refused `unavailable` before the authority is
+	 * asked: a managed host does not run an unowned workflow, and this sink
+	 * does not mint a fence (CP-03, the workflow owner producer).
 	 */
 	async admitSpawn(
 		config: ProcessConfig,
@@ -477,20 +503,21 @@ export class ProcessManager extends EventEmitter {
 		const port = this.spawnAuthority();
 		if (!port || port.standing() === 'standalone') return { state: 'standalone' };
 
-		const requestId = generateUUID();
+		const lineage = config.autoRun;
+		if (lineage && !lineage.fence) {
+			return {
+				state: 'unavailable',
+				code: 'runtime-unavailable',
+				message: `Auto Run "${lineage.attribution.workflow.workflowId}" has no workflow owner fence; a managed host does not run an unowned workflow, and this host does not mint one (CP-03, the workflow owner producer). Nothing was started.`,
+			};
+		}
 		const policy = port.policy();
 		const verified = port.verify({
 			actor,
-			identity: {
-				requestId,
-				idempotencyKey: requestId,
-				attemptId: generateUUID(),
-				runId: null,
-				rootRunId: null,
-				parentRunId: null,
-			},
-			traceId: config.sessionId,
+			identity: lineage ? autoRunRunIdentity(lineage.attribution) : chatTurnIdentity(),
+			traceId: lineage ? autoRunTraceId(lineage.attribution) : config.sessionId,
 			policyRevision: policy.policyRevision,
+			workflow: lineage ? autoRunWorkflowRef(lineage.attribution.workflow, lineage.fence) : null,
 		});
 		if (!verified.ok) {
 			return {

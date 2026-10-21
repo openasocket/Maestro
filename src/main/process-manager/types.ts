@@ -19,7 +19,9 @@ import type {
 	ManagedDispatchTarget,
 	ManagedPrincipalRef,
 	ManagedRunIdentity,
+	ManagedWorkflowRef,
 } from '../../shared/maestro-lib/managed/types';
+import type { AutoRunSpawnLineage } from '../../shared/maestro-lib/autorun/attribution';
 import type { ManagedEffectAuthority } from '../../shared/maestro-lib/managed/effects';
 
 // ============================================================================
@@ -41,6 +43,13 @@ export interface ProcessSpawnContextInput {
 	identity: ManagedRunIdentity;
 	traceId: string;
 	policyRevision: number | null;
+	/**
+	 * The workflow the spawn belongs to (an Auto Run with its owner fence), or
+	 * null for a spawn that is its own request (a chat turn). Passed through
+	 * to the verified context as it is: a port never strips a workflow to fit
+	 * a launch-only route, and never invents one.
+	 */
+	workflow: ManagedWorkflowRef | null;
 }
 
 /**
@@ -232,6 +241,11 @@ export interface ProcessConfig {
 	 *  managed host every spawn must carry one that is live for this exact
 	 *  request; on a standalone host it is ignored. */
 	admission?: ProcessSpawnAdmission;
+	/** The Auto Run lineage this spawn is one attempt of (the workflow, the
+	 *  run, the task request, this attempt, and the run's owner fence if one
+	 *  exists). `admitSpawn` binds it into the verified context in place of
+	 *  the anonymous per-spawn identity; a standalone host ignores it. */
+	autoRun?: AutoRunSpawnLineage;
 }
 
 /**

@@ -118,7 +118,9 @@ export function createProcessSpawnAuthority(
 				delegation: { chain: spawnDelegationChain(input.actor), grantRef: null },
 				identity: input.identity,
 				policyRevision: input.policyRevision,
-				workflow: null,
+				// As the sink bound it: an Auto Run's workflow with its fence, or null
+				// for a chat turn. Never stripped, never invented here.
+				workflow: input.workflow,
 				traceId: input.traceId,
 				requestedCapabilities: ['runs.submit'],
 			};

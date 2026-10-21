@@ -45,6 +45,17 @@ export interface AutoRunOwnerFence {
 	fencingToken: string;
 }
 
+/**
+ * What an Auto Run spawn carries to a sink in another process (the renderer to the desktop
+ * process manager over IPC): its attribution, and the run's owner fence when a workflow owner
+ * producer issued one. Serializable. The fence is carried, never checked, here: the sink refuses
+ * an unowned workflow and the host authority judges a fence it is shown (CP-03).
+ */
+export interface AutoRunSpawnLineage {
+	attribution: AutoRunTurnAttribution;
+	fence: AutoRunOwnerFence | null;
+}
+
 export type AutoRunTriggerKind = 'operator' | 'cue' | 'cli' | 'api';
 
 export interface AutoRunTurnAttribution {
