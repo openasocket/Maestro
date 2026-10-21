@@ -175,6 +175,47 @@ export function resolveSecrets(
 	return result;
 }
 
+/** One name a strict resolution could not deliver, and why (safe to log: no values). */
+export type StrictSecretProblem =
+	| { name: string; status: 'missing' }
+	| { name: string; status: 'unusable'; problem: SecretProblem; path?: string };
+
+/**
+ * Every name or nothing. The ordinary `resolveSecrets()` reports what it
+ * found and lets the caller warn and start; a managed launch may not: an
+ * approved credential that is missing, unreadable, empty or oversized denies
+ * the launch, and no partial environment is built. Same precedence (systemd
+ * credential, `/run/secrets`, environment), same bounds, same "an existing
+ * file is the answer" rule. On failure no value is returned at all.
+ */
+export type StrictSecretResolution =
+	| { ok: true; values: Record<string, string>; found: { name: string; source: SecretSource }[] }
+	| { ok: false; problems: StrictSecretProblem[] };
+
+export function resolveSecretsStrict(
+	names: readonly string[],
+	options: SecretLookupOptions = {}
+): StrictSecretResolution {
+	const resolved = resolveSecrets(names, options);
+	const problems: StrictSecretProblem[] = [
+		...resolved.missing.map((name) => ({ name, status: 'missing' as const })),
+		...resolved.unusable.map((entry) => ({ ...entry, status: 'unusable' as const })),
+	].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+	if (problems.length > 0) return { ok: false, problems };
+	return { ok: true, values: resolved.values, found: resolved.found };
+}
+
+/** One line per undeliverable name. Names and paths only, never a value. */
+export function describeStrictSecretProblems(problems: readonly StrictSecretProblem[]): string {
+	return problems
+		.map((entry) =>
+			entry.status === 'missing'
+				? `${entry.name} is not set ($CREDENTIALS_DIRECTORY, /run/secrets, environment)`
+				: describeSecretProblem(entry)
+		)
+		.join('; ');
+}
+
 /** One line naming what is wrong with a secret, without its value. */
 export function describeSecretProblem(entry: {
 	name: string;

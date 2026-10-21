@@ -32,7 +32,9 @@ import type { QuerySource } from '../../querySource';
 import type { AgentSshRemoteConfig, SshRemoteConfig } from '../../types';
 import {
 	describeSecretProblem,
+	describeStrictSecretProblems,
 	resolveSecrets,
+	resolveSecretsStrict,
 	type SecretLookupOptions,
 	type SecretProblem,
 	type SecretSource,
@@ -145,14 +147,20 @@ export interface ManagedLaunchInput {
 	 * literal, a cast) is refused as unbound.
 	 */
 	credentials?: ApprovedCredentialSet;
+	/** The launch instant, epoch milliseconds, for the expiry re-check. Defaults to `Date.now()`. */
+	now?: number;
 }
 
 /** Why a managed launch was not planned. Nothing was resolved and nothing is spawned. */
 export type ManagedLaunchRefusal =
 	/** `managed.credentials` is not a set `bindApprovedCredentials()` produced. */
 	| 'managed-credentials-unbound'
-	/** The binding refused at least one reference (revoked, expired, mismatched). */
-	| 'managed-credential-refused';
+	/** The binding refused at least one reference (revoked, expired, mismatched), or one expired since. */
+	| 'managed-credential-refused'
+	/** An approved reference's value is missing or unusable on this host. The ordinary warn-and-start does not apply. */
+	| 'managed-credential-unavailable'
+	/** The launch runs on an SSH remote: a local secret value is never forwarded there. */
+	| 'managed-credential-remote';
 
 /**
  * What happened to the approved credential references, by reference id and
@@ -161,6 +169,8 @@ export type ManagedLaunchRefusal =
 export interface ManagedCredentialReport {
 	/** Approved references, with the variable each one is delivered as. */
 	approved: { refId: string; envVar: string }[];
+	/** What was placed in this launch's environment, and where each value came from. */
+	delivered: { refId: string; envVar: string; source: SecretSource }[];
 	/** The binding's digest, so a journal can join the launch to the decision. */
 	bindingDigest: string;
 }
@@ -253,7 +263,49 @@ function managedCredentialsFor(
 			error: `The policy binding refused a credential reference for this launch - ${describeCredentialRefusals(set.refused)}`,
 		};
 	}
+	// Bound earlier, launched now: a reference that lapsed in between is as refused as one that never bound.
+	const now = managed.now ?? Date.now();
+	const lapsed = set.approved.filter((entry) => now >= Date.parse(entry.expiresAt));
+	if (lapsed.length > 0) {
+		return {
+			ok: false,
+			reason: 'managed-credential-refused',
+			error: `A credential reference for this launch expired before it started - ${lapsed.map((entry) => `${entry.refId} (${entry.expiresAt})`).join(', ')}`,
+		};
+	}
 	return { ok: true, set };
+}
+
+/**
+ * The approved values, read once at this launch boundary and keyed by the
+ * variable the consumer reads. Every reference or nothing: a missing or
+ * unusable value refuses the launch; no partial delivery is built.
+ */
+function deliverManagedCredentials(
+	set: ApprovedCredentialSet,
+	lookup: SecretLookupOptions | undefined
+):
+	| { ok: true; values: Record<string, string>; delivered: ManagedCredentialReport['delivered'] }
+	| Extract<AgentLaunchPlanResult, { ok: false }> {
+	const resolved = resolveSecretsStrict(
+		set.approved.map((entry) => entry.secretName),
+		lookup
+	);
+	if (!resolved.ok) {
+		return {
+			ok: false,
+			reason: 'managed-credential-unavailable',
+			error: `An approved credential for this launch is not available on this host - ${describeStrictSecretProblems(resolved.problems)}`,
+		};
+	}
+	const values: Record<string, string> = {};
+	const delivered: ManagedCredentialReport['delivered'] = [];
+	for (const entry of set.approved) {
+		values[entry.envVar] = resolved.values[entry.secretName];
+		const source = resolved.found.find((found) => found.name === entry.secretName)?.source ?? 'env';
+		delivered.push({ refId: entry.refId, envVar: entry.envVar, source });
+	}
+	return { ok: true, values, delivered };
 }
 
 /**
@@ -271,6 +323,7 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 	const managedReport: ManagedCredentialReport | undefined = approvedCredentials
 		? {
 				approved: approvedCredentials.approved.map(({ refId, envVar }) => ({ refId, envVar })),
+				delivered: [],
 				bindingDigest: approvedCredentials.digest,
 			}
 		: undefined;
@@ -292,9 +345,14 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 
 	// Declared secrets: CLI and Cue only, so the desktop never reads a secret
 	// file, and never into `envVars`, which crosses to an SSH remote and is
-	// shown in Process Details.
+	// shown in Process Details. Not under management at all: a declared NAME
+	// is a dependency statement, and the only credentials a managed launch
+	// receives are the ones its approved references deliver.
 	const declaredSecrets =
-		input.surface !== 'desktop' && input.requiredSecrets && input.requiredSecrets.length > 0
+		!input.managed &&
+		input.surface !== 'desktop' &&
+		input.requiredSecrets &&
+		input.requiredSecrets.length > 0
 			? [...new Set(input.requiredSecrets)].sort()
 			: undefined;
 
@@ -325,6 +383,15 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 	});
 
 	if (target.kind === 'remote') {
+		// A value read here belongs to this host. It is never sent over SSH, so a
+		// launch that needs one on a remote is refused rather than run without it.
+		if (approvedCredentials && approvedCredentials.approved.length > 0) {
+			return {
+				ok: false,
+				reason: 'managed-credential-remote',
+				error: `This launch runs on an SSH remote and its approved credentials (${approvedCredentials.approved.map((entry) => entry.envVar).join(', ')}) are local to this host; they are not forwarded.`,
+			};
+		}
 		return {
 			ok: true,
 			plan: {
@@ -355,6 +422,13 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 	const resolved = declaredSecrets
 		? resolveSecrets(declaredSecrets, input.secretLookup)
 		: undefined;
+	// Approved credentials: read once, here, for this child alone. Every
+	// reference or nothing.
+	const credentials = approvedCredentials
+		? deliverManagedCredentials(approvedCredentials, input.secretLookup)
+		: undefined;
+	if (credentials && !credentials.ok) return credentials;
+	if (managedReport && credentials?.ok) managedReport.delivered = credentials.delivered;
 
 	const args =
 		prompt.via === 'argv' || prompt.via === 'stdin'
@@ -381,18 +455,34 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 					}
 				: {}),
 			...(managedReport ? { managedCredentials: managedReport } : {}),
-			env: buildAgentEnvironment({
-				...layers,
-				secretEnvVars: resolved?.values,
-				surface: input.surface,
-				maestroEnvVars: input.maestroEnvVars,
-				isResuming: input.isResuming,
-				querySource: input.querySource,
-				extraPathDirs: input.extraPathDirs,
-				isServerMode: input.isServerMode,
-			}),
+			env: deliverIntoEnvironment(
+				buildAgentEnvironment({
+					...layers,
+					secretEnvVars: resolved?.values,
+					surface: input.surface,
+					maestroEnvVars: input.maestroEnvVars,
+					isResuming: input.isResuming,
+					querySource: input.querySource,
+					extraPathDirs: input.extraPathDirs,
+					isServerMode: input.isServerMode,
+				}),
+				credentials?.ok ? credentials.values : undefined
+			),
 		},
 	};
+}
+
+/**
+ * Approved credential values go in over every user layer, on every surface:
+ * the policy chose the credential, so a personal key set on the agent or in
+ * the shell does not replace it. Unmanaged launches pass through untouched.
+ */
+function deliverIntoEnvironment(
+	env: NodeJS.ProcessEnv,
+	credentialValues: Record<string, string> | undefined
+): NodeJS.ProcessEnv {
+	if (!credentialValues) return env;
+	return { ...env, ...credentialValues };
 }
 
 /**
