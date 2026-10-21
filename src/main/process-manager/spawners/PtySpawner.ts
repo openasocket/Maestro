@@ -15,6 +15,32 @@ import { resolveShellPath } from '../utils/pathResolver';
 import { escapeArgsForShell } from '../utils/shellEscape';
 import { isWindows } from '../../../shared/platformDetection';
 import { nextSpawnGeneration, isSupersededGeneration } from '../generation';
+import { providerRouteSupport } from '../../../shared/maestro-lib/providers/capabilities';
+import type { ManagedDenialCode } from '../../../shared/maestro-lib/managed/types';
+import type { AgentError } from '../../../shared/types';
+
+/**
+ * Why a managed PTY cannot start on this host, or null when the `pty` route
+ * is one the build confines. A pseudo-terminal hands the user, or the agent
+ * inside it, a raw keyboard to a shell: there is no spawn-time snapshot of
+ * what will run, and reading the prompt or parsing keystrokes to guess is
+ * not enforcement. Until a confinement producer qualifies the route in
+ * `providerRouteSupport`, a managed PTY (a terminal tab, an agent that
+ * requires a TTY) is `unavailable`, explicitly, with no fallback to a raw
+ * PTY. Standalone behavior (no admission) is untouched.
+ */
+export function managedPtyRefusal(
+	config: ProcessConfig
+): { state: 'unavailable'; code: ManagedDenialCode; message: string } | null {
+	if (!config.admission) return null;
+	const support = providerRouteSupport(config.toolType).find((entry) => entry.route === 'pty');
+	if (support?.managed === 'implemented') return null;
+	return {
+		state: 'unavailable',
+		code: 'capability-unsupported',
+		message: `A managed PTY for ${config.toolType} is unavailable on this host: a raw terminal has no confinement, and prompt checks or keystroke parsing are not enforcement (${support?.note ?? 'the route is not known'}).`,
+	};
+}
 
 /**
  * Handles spawning of PTY (pseudo-terminal) processes.
@@ -44,6 +70,32 @@ export class PtySpawner {
 		} = config;
 
 		const isTerminal = toolType === 'terminal';
+
+		// A managed PTY is confined or it does not start; nothing below runs.
+		const refusal = managedPtyRefusal(config);
+		if (refusal) {
+			logger.warn('[ProcessManager] Managed PTY not started', 'ProcessManager', {
+				sessionId,
+				toolType,
+				state: refusal.state,
+				code: refusal.code,
+				message: refusal.message,
+			});
+			this.emitter.emit('agent-error', sessionId, {
+				type: 'unknown',
+				message: refusal.message,
+				recoverable: false,
+				agentId: toolType,
+				sessionId,
+				timestamp: Date.now(),
+			} satisfies AgentError);
+			return {
+				pid: -1,
+				success: false,
+				error: refusal.message,
+				managed: { state: refusal.state, code: refusal.code },
+			};
+		}
 
 		try {
 			let ptyCommand: string;

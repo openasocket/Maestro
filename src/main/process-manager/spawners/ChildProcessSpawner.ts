@@ -34,8 +34,49 @@ import { isWindows } from '../../../shared/platformDetection';
 import type { WindowsShellReason } from '../../../shared/maestro-lib/launch/windows-command';
 import { captureException } from '../../utils/sentry';
 import { nextSpawnGeneration, isSupersededGeneration } from '../generation';
-import { startTurn } from '../../../shared/maestro-lib/run/start-turn';
+import {
+	DispatchRefusedError,
+	startTurn,
+	type DispatchAdmission,
+} from '../../../shared/maestro-lib/run/start-turn';
 import { INTERACTIVE_STOP_GRACE_MS } from '../../../shared/maestro-lib/control/termination';
+import {
+	dispatchSnapshotDigest,
+	type DispatchAttribution,
+} from '../../../shared/maestro-lib/managed/authority';
+import type { ManagedDenialCode } from '../../../shared/maestro-lib/managed/types';
+import {
+	providerRouteSupport,
+	type ManagedRoute,
+} from '../../../shared/maestro-lib/providers/capabilities';
+import type { AgentError } from '../../../shared/types';
+
+/**
+ * Why a managed child cannot be confined on this host, or null when the
+ * launch route is one the build governs. The table is `providerRouteSupport`,
+ * the one source for what each route enforces: the local `child-process`
+ * route admits the launch at the real spawn (the lease checked the instant
+ * before `spawn`, the pid bound, descendants stopped with the process, a
+ * revocation terminating it); the `ssh` route proves no containment on the
+ * remote and stays unavailable. Nothing here is a sandbox over the
+ * provider's own tools, files or network: that remains unqualified, and the
+ * route note says so. A refusal is `unavailable` (no enforcement producer),
+ * never a policy decision, and happens before any side effect (no temp file,
+ * no prompt file, no process).
+ */
+export function managedChildRefusal(
+	config: ProcessConfig
+): { state: 'unavailable'; code: ManagedDenialCode; message: string } | null {
+	if (!config.admission) return null;
+	const route: ManagedRoute = config.sshRemoteId ? 'ssh' : 'child-process';
+	const support = providerRouteSupport(config.toolType).find((entry) => entry.route === route);
+	if (support?.managed === 'implemented') return null;
+	return {
+		state: 'unavailable',
+		code: 'capability-unsupported',
+		message: `Managed execution of ${config.toolType} over the ${route} route is unavailable on this host: ${support?.note ?? 'the route is not known'}.`,
+	};
+}
 
 // The log line each Windows shell promotion writes (see windowsShellReason).
 const WINDOWS_SHELL_LOG_MESSAGES: Record<WindowsShellReason, string> = {
@@ -98,6 +139,11 @@ export class ChildProcessSpawner {
 			sendPromptViaStdin,
 			sendPromptViaStdinRaw,
 		} = config;
+
+		// A managed child is confined or it does not start. Decided first, before
+		// an image or prompt file is written, so a refusal has no effect at all.
+		const refusal = managedChildRefusal(config);
+		if (refusal) return this.refuseManaged(config, refusal);
 
 		const hasImages = images && images.length > 0;
 		const capabilities = getAgentCapabilities(toolType);
@@ -443,6 +489,41 @@ export class ChildProcessSpawner {
 			const isSuperseded = (): boolean =>
 				isSupersededGeneration(sessionId, managedProcess.spawnGeneration);
 
+			// The managed gate at the spawn: `startTurn` builds the snapshot of
+			// the FINAL spec (command, argv with the prompt delivered, the full
+			// environment, stdin) and asks the instant before `spawn`. The route
+			// is checked again on that final shape and the final digest is
+			// recorded beside the request digest the lease covers, so the ledger
+			// can join what was admitted to what actually ran.
+			const admission = config.admission;
+			const managedGate = admission
+				? {
+						gate: {
+							admit: (final) => {
+								const refused = managedChildRefusal(config);
+								if (refused) return { ok: false as const, ...refused };
+								logger.info(
+									'[ProcessManager] Managed child admitted at the spawn',
+									'ProcessManager',
+									{
+										sessionId,
+										leaseId: admission.leaseId,
+										requestDigest: admission.requestDigest,
+										finalDigest: dispatchSnapshotDigest(final),
+										route: config.sshRemoteId ? 'ssh' : 'child-process',
+									}
+								);
+								return { ok: true as const };
+							},
+						} satisfies DispatchAdmission,
+						attribution: {
+							provider: toolType,
+							operation: admission.operation,
+							target: admission.target,
+						} satisfies DispatchAttribution,
+					}
+				: undefined;
+
 			const turn = startTurn(
 				{
 					command: spawnCommand,
@@ -477,6 +558,7 @@ export class ChildProcessSpawner {
 					// The desktop stops through ProcessManager.interrupt() / kill(),
 					// which run the same ladder on this child; the turn's own stop
 					// methods are not used here.
+					...(managedGate ? { admission: managedGate } : {}),
 					stopGraceMs: INTERACTIVE_STOP_GRACE_MS,
 					keepStdinOpen: stdinText === undefined && !isBatchMode,
 					// The stdout and stderr handlers keep what the desktop needs; a
@@ -693,17 +775,62 @@ export class ChildProcessSpawner {
 
 			return { pid: childProcess.pid || -1, success: !!childProcess.pid };
 		} catch (error) {
+			cleanupTempFiles(tempFiles);
+			if (error instanceof DispatchRefusedError) {
+				// Refused at the gate, before the spawn: no process, nothing written.
+				return this.refuseManaged(config, {
+					state: error.state,
+					code: error.code,
+					message: error.message,
+				});
+			}
 			void captureException(error);
 			logger.error('[ProcessManager] Failed to spawn process', 'ProcessManager', {
 				error: String(error),
 			});
-			cleanupTempFiles(tempFiles);
 			return {
 				pid: -1,
 				success: false,
 				error: error instanceof Error ? error.message : String(error),
 			};
 		}
+	}
+
+	/**
+	 * Report a managed refusal the way the manager reports its own: the tab
+	 * hears an `agent-error` (there is no process to report an exit), and the
+	 * result names the authority's state and code so the caller never
+	 * mistakes it for a spawn failure it may retry.
+	 */
+	private refuseManaged(
+		config: ProcessConfig,
+		refusal: {
+			state: 'denied' | 'unavailable' | 'unknown';
+			code: ManagedDenialCode;
+			message: string;
+		}
+	): SpawnResult {
+		logger.warn('[ProcessManager] Managed child not started', 'ProcessManager', {
+			sessionId: config.sessionId,
+			toolType: config.toolType,
+			state: refusal.state,
+			code: refusal.code,
+			message: refusal.message,
+		});
+		this.emitter.emit('agent-error', config.sessionId, {
+			type: 'unknown',
+			message: refusal.message,
+			recoverable: false,
+			agentId: config.toolType,
+			sessionId: config.sessionId,
+			timestamp: Date.now(),
+		} satisfies AgentError);
+		return {
+			pid: -1,
+			success: false,
+			error: refusal.message,
+			managed: { state: refusal.state, code: refusal.code },
+		};
 	}
 }
 
