@@ -249,13 +249,22 @@ describe('managed host adapter', () => {
 			attemptId: 'att-1',
 			runId: 'run-1',
 			source: 'cli',
-			operation: 'launch',
-			arguments: ['--print'],
+			operation: 'start',
+			arguments: [],
 			resources: [],
 			provider: 'claude-code',
 			model: 'sonnet',
 			policyRevision: 3,
 		});
+		if (outcome.state === 'admitted') {
+			expect(outcome.receipt).toEqual({
+				decisionId: 'decision-1',
+				requestDigest: 'd'.repeat(64),
+				brokerId: 'broker-1',
+				policyRevision: 3,
+			});
+			expect(outcome.lease.decision).toEqual(outcome.receipt);
+		}
 	});
 
 	it('maps the endpoint refusals: a policy refusal denies, no decision is unavailable, a wrong receipt is unknown', async () => {
@@ -281,6 +290,25 @@ describe('managed host adapter', () => {
 		expect(await adapter.authority.admit(admission())).toMatchObject({
 			state: 'unavailable',
 			code: 'runtime-unavailable',
+		});
+
+		// A replay is the broker saying it consumed this request already: a denial, not an outage.
+		fake.options.operations = { execution: () => ({ outcome: 'denied', reason: 'replay' }) };
+		expect(await adapter.authority.admit(admission())).toMatchObject({
+			state: 'denied',
+			code: 'idempotency-conflict',
+		});
+
+		// A receipt whose broker identifiers are not the contract's is not a decision this host knows.
+		fake.options.operations = {
+			execution: (payload) => ({
+				...RECEIPT(payload as Record<string, unknown>),
+				requestDigest: 'not a digest',
+			}),
+		};
+		expect(await adapter.authority.admit(admission())).toMatchObject({
+			state: 'unknown',
+			code: 'outcome-unknown',
 		});
 
 		fake.options.operations = {
@@ -357,8 +385,15 @@ describe('managed host adapter', () => {
 			status: () => standing(port, view),
 			now: () => T0,
 		});
+		const wide = admission();
 		expect(
-			await tooWide.authority.admit(admission(Array.from({ length: 129 }, () => 'x')))
+			await tooWide.authority.admit({
+				...wide,
+				snapshot: {
+					...wide.snapshot,
+					resourceIds: Array.from({ length: 65 }, (_, i) => `resource-${i}`),
+				},
+			})
 		).toMatchObject({
 			state: 'unavailable',
 			message: expect.stringContaining('exceed the bound'),

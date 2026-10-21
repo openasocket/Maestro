@@ -14,9 +14,20 @@
  *   - `authority`: the existing lease authority (`createLocalHostAuthority`)
  *     with a policy reader that asks the ENDPOINT. An admission becomes one
  *     `execution` request over the attached socket; `broker_dispatched`
- *     with a matching receipt is `allow`, the endpoint's policy refusals are
- *     `deny`, no answer or no standing is `unavailable`, and a lost answer or
- *     a receipt that does not match is `unknown`. Nothing is decided locally.
+ *     with a matching receipt is `allow` (and the lease carries the broker's
+ *     decision id, request digest and broker id, so it joins the broker's
+ *     own receipt ledger), the endpoint's policy refusals are `deny`, a
+ *     `replay` is a denial too (the broker consumed that request already),
+ *     no answer or no standing is `unavailable`, and a lost answer or a
+ *     receipt that does not match is `unknown`. Nothing is decided locally.
+ *
+ * What the request carries is the broker's vocabulary, not Maestro's: the
+ * run identity, the source, the operation (`start`, `input`, `resume`), the
+ * provider and model, the resource ids and the policy revision. The resolved
+ * executable, arguments and environment stay in the local snapshot the lease
+ * is bound to; the broker treats any argument on the wire as an unsafe
+ * override and refuses it, since the installed provider is its own fact to
+ * resolve, not the caller's to assert.
  *   - `policy()`: the sources admissions are decided on, which is the one
  *     endpoint the record names, at the revision it last reported.
  *   - the inputs the runtime mirrors into its own binding file under the
@@ -43,18 +54,21 @@ import {
 	sha256Hex,
 	type AdmissionRequest,
 	type HostAuthority,
+	type ManagedDecisionReceipt,
 	type PolicyDecision,
 	type PolicySourceSet,
 } from './authority';
-import type {
-	EndpointPort,
-	EndpointStatus,
-	LocalEndpointDenialReason,
-	ManagedEnrollmentStatus,
-	ManagedIdentityPort,
-	ManagedIdentityRecord,
+import {
+	isEndpointDigest,
+	isEndpointIdentifier,
+	type EndpointPort,
+	type EndpointStatus,
+	type LocalEndpointDenialReason,
+	type ManagedEnrollmentStatus,
+	type ManagedIdentityPort,
+	type ManagedIdentityRecord,
 } from './endpoint-port';
-import type { ManagedInstallationIdentity, ManagedOrigin } from './types';
+import type { ManagedDenialCode, ManagedInstallationIdentity, ManagedOrigin } from './types';
 
 /**
  * The installation identity a runtime and a desktop compute the same way, so
@@ -245,32 +259,65 @@ const EXECUTION_SOURCES: Record<ManagedOrigin, 'ux' | 'cli' | 'cue' | 'headless'
 	embedded: 'headless',
 };
 
-/** The endpoint's refusals that are a decision about this request, as opposed to no decision at all. */
-const DECIDED_DENIALS: readonly LocalEndpointDenialReason[] = [
-	'policy_denied',
-	'budget_exhausted',
-	'unknown_price',
-	'untrusted_clock',
-	'expired',
-	'owner_unfenced',
-];
+/**
+ * The endpoint's refusals that are a decision about this request, as opposed
+ * to no decision at all, and the denial code each one maps to. A `replay` is
+ * the broker saying it already consumed this request and attempt: a denial
+ * the caller must not retry, not an outage.
+ */
+const DECIDED_DENIALS: Readonly<Partial<Record<LocalEndpointDenialReason, ManagedDenialCode>>> = {
+	policy_denied: 'policy-denied',
+	budget_exhausted: 'policy-denied',
+	unknown_price: 'policy-denied',
+	untrusted_clock: 'policy-denied',
+	expired: 'policy-denied',
+	owner_unfenced: 'policy-denied',
+	replay: 'idempotency-conflict',
+};
 
-const MAX_ARGUMENTS = 128;
-const MAX_ARGUMENT_LENGTH = 4096;
 const MAX_RESOURCES = 64;
+const MAX_RESOURCE_LENGTH = 4096;
 
 /** Why the snapshot cannot be described to the endpoint at all, or null. */
 function executionRequestProblem(request: AdmissionRequest): string | null {
 	const { snapshot } = request;
-	if (snapshot.args.length > MAX_ARGUMENTS)
-		return `${snapshot.args.length} arguments exceed the bound of ${MAX_ARGUMENTS}`;
-	if (snapshot.args.some((arg) => arg.length > MAX_ARGUMENT_LENGTH)) {
-		return `an argument exceeds ${MAX_ARGUMENT_LENGTH} characters`;
-	}
 	if (snapshot.resourceIds.length > MAX_RESOURCES)
 		return `${snapshot.resourceIds.length} resources exceed the bound of ${MAX_RESOURCES}`;
+	if (snapshot.resourceIds.some((id) => id.length === 0 || id.length > MAX_RESOURCE_LENGTH)) {
+		return `a resource id is empty or exceeds ${MAX_RESOURCE_LENGTH} characters`;
+	}
+	if (!isEndpointIdentifier(snapshot.provider)) return 'the provider is not an endpoint identifier';
+	if (snapshot.model !== null && !isEndpointIdentifier(snapshot.model)) {
+		return 'the model is not an endpoint identifier';
+	}
 	if (request.policy.policyRevision === null) return 'no policy revision is known for this host';
 	return null;
+}
+
+/** The broker's receipt for a dispatched request, read structurally; null when it is not one. */
+function readDispatchReceipt(payload: unknown): ManagedDecisionReceipt | null {
+	const receipt = payload as Partial<{
+		outcome: string;
+		decisionId: string;
+		requestDigest: string;
+		brokerId: string;
+		policyRevision: number;
+	}> | null;
+	if (
+		receipt?.outcome !== 'broker_dispatched' ||
+		!isEndpointIdentifier(receipt.decisionId) ||
+		!isEndpointDigest(receipt.requestDigest) ||
+		!isEndpointIdentifier(receipt.brokerId) ||
+		typeof receipt.policyRevision !== 'number'
+	) {
+		return null;
+	}
+	return {
+		decisionId: receipt.decisionId,
+		requestDigest: receipt.requestDigest,
+		brokerId: receipt.brokerId,
+		policyRevision: receipt.policyRevision,
+	};
 }
 
 export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedHostAdapter {
@@ -307,13 +354,16 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 			};
 		const { context, snapshot } = request;
 		const policyRevision = request.policy.policyRevision as number;
+		// The broker's request: identity, operation, provider, model, resources and
+		// the revision. No arguments: the resolved command line is bound in the
+		// local lease, and the broker refuses any argument as an unsafe override.
 		const execution = {
 			requestId: context.identity.requestId,
 			attemptId: context.identity.attemptId,
 			runId: context.identity.runId ?? context.identity.attemptId,
 			source: EXECUTION_SOURCES[context.origin],
-			operation: 'launch',
-			arguments: [...snapshot.args],
+			operation: snapshot.operation,
+			arguments: [] as string[],
 			resources: [...snapshot.resourceIds],
 			provider: snapshot.provider,
 			model: snapshot.model ?? 'unspecified',
@@ -322,18 +372,21 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 		};
 		const outcome = await deps.endpoint.invoke('execution', execution);
 		switch (outcome.status) {
-			case 'denied':
-				if (DECIDED_DENIALS.includes(outcome.reason)) {
+			case 'denied': {
+				const code = DECIDED_DENIALS[outcome.reason];
+				if (code) {
 					return {
 						decision: 'deny',
 						reason: `The endpoint refused the launch: ${outcome.reason}.`,
 						policyRevision,
+						code,
 					};
 				}
 				return {
 					decision: 'unavailable',
 					reason: `The endpoint did not decide: ${outcome.reason}.`,
 				};
+			}
 			case 'unavailable':
 				return { decision: 'unavailable', reason: outcome.message };
 			case 'unknown':
@@ -341,18 +394,17 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 			case 'ok':
 				break;
 		}
-		const receipt = outcome.payload as Partial<{
-			outcome: string;
+		const answered = outcome.payload as Partial<{
 			requestId: string;
 			attemptId: string;
 			runId: string;
-			policyRevision: number;
 		}> | null;
+		const receipt = readDispatchReceipt(outcome.payload);
 		if (
-			receipt?.outcome !== 'broker_dispatched' ||
-			receipt.requestId !== execution.requestId ||
-			receipt.attemptId !== execution.attemptId ||
-			receipt.runId !== execution.runId ||
+			!receipt ||
+			answered?.requestId !== execution.requestId ||
+			answered.attemptId !== execution.attemptId ||
+			answered.runId !== execution.runId ||
 			receipt.policyRevision !== policyRevision
 		) {
 			return {
@@ -361,7 +413,7 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 					'The endpoint answered with a receipt that does not match the request; the decision is not known.',
 			};
 		}
-		return { decision: 'allow', policyRevision };
+		return { decision: 'allow', policyRevision, receipt };
 	}
 
 	// The lease authority reads the id at every mint, so a lease names the

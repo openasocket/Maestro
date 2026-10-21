@@ -17,11 +17,14 @@
  * `AnchorStore`, so the service itself is plain Node and `maestro-cli host`
  * can compose the same modules with its own custody.
  *
- * The adapter's `authority` is the desktop's managed authority. No desktop
- * sink admits with it yet: the governed admission of desktop spawns is a
- * later phase (04 onward), and until then the authority is reachable here,
- * exercised by the IPC status verbs, and answers `unavailable` to anything
- * that asks before a registered, attached, managed standing exists.
+ * The adapter's `authority` is the desktop's managed authority, and
+ * `dispatch` is the broker dispatch bridge over it (`dispatch.ts`): the
+ * `ManagedTurnAuthority` a sink admits with, plus the durable ledger that
+ * joins each broker decision to the local lease and its effect. The desktop
+ * spawn sinks that admit with it are wired from phase 06 onward; until then
+ * it is reachable here, exercised by the harness route and the tests, and
+ * answers `unavailable` to anything that asks before a registered, attached,
+ * managed standing exists.
  */
 
 import { MAESTRO_LIB_VERSION } from '../../shared/maestro-lib/version';
@@ -34,6 +37,7 @@ import {
 import type { ManagedInstallationIdentity } from '../../shared/maestro-lib/managed/types';
 import type { AnchorStore } from '../utils/keyring-anchor';
 import { safeStorageSeal, type SafeStorageLike } from '../utils/safe-storage-seal';
+import { createBrokerDispatch, DISPATCH_RECEIPTS_FILE_NAME, type BrokerDispatch } from './dispatch';
 import { createLocalEndpointClient } from './endpoint-client';
 import { createEnrollmentLifecycle, type EnrollmentLifecycle } from './enrollment';
 import {
@@ -70,6 +74,8 @@ export interface EnterpriseServiceDeps {
 	now?: () => number;
 	/** Test seam: how a port is opened for a socket path. */
 	openPort?: Parameters<typeof createEnrollmentLifecycle>[0]['openPort'];
+	/** Hears a dispatch ledger write that failed. Default: nothing; `dispatch.persistFailures()` counts them. */
+	onDispatchPersistError?(error: unknown): void;
 }
 
 export interface EnterpriseService {
@@ -78,6 +84,8 @@ export interface EnterpriseService {
 	readonly lifecycle: EnrollmentLifecycle;
 	readonly policy: PolicyStatusService;
 	readonly host: ManagedHostAdapter;
+	/** The broker dispatch bridge: the sink-facing authority and the decision-to-effect ledger. */
+	readonly dispatch: BrokerDispatch;
 	/** Re-attach a previously enrolled installation. Never throws; the outcome is in `status()`. */
 	start(): Promise<void>;
 	close(): Promise<void>;
@@ -127,6 +135,12 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		status: () => lifecycle.status(),
 		now,
 	});
+	const dispatch = createBrokerDispatch({
+		host,
+		file: `${deps.userDataDir}/${DISPATCH_RECEIPTS_FILE_NAME}`,
+		now,
+		...(deps.onDispatchPersistError ? { onPersistError: deps.onDispatchPersistError } : {}),
+	});
 
 	return {
 		installation,
@@ -134,7 +148,10 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		lifecycle,
 		policy,
 		host,
+		dispatch,
 		async start() {
+			// The ledger is read first: a lease still bound at the last exit is unknown from here on.
+			await dispatch.load();
 			// No sealed file, no custody read: an unenrolled desktop never touches the keyring here.
 			if (identity.read().status !== 'ok') return;
 			await lifecycle.connect();

@@ -490,6 +490,8 @@ export async function runAgentTurn(
 	const attribution = {
 		provider: providerId,
 		model: turn.settings.model ?? null,
+		// The broker's vocabulary: a resumed session is a `resume`, anything else a `start`.
+		operation: turn.resumeSessionId ? ('resume' as const) : ('start' as const),
 		account: options.managed?.account ?? null,
 		target:
 			plan.target.kind === 'remote' && sshConfig

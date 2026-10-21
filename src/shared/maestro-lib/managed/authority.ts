@@ -121,11 +121,20 @@ export function isVerifiedContext(value: unknown): value is ManagedAuthenticated
 export type DispatchEffect = 'launch';
 
 /**
+ * What the launch is to the provider session: a fresh session, more input
+ * to a live one, or a resumed one. The broker protocol's own vocabulary for
+ * an execution (`start`, `input`, `resume`); a launch with no session is a
+ * `start`.
+ */
+export type DispatchOperation = 'start' | 'input' | 'resume';
+
+/**
  * What is about to run, resolved and final. Serializable, so it can be sent
  * to a remote authority and journaled; compared by `dispatchSnapshotDigest`.
  */
 export interface DispatchSnapshot {
 	contractVersion: ManagedContractVersion;
+	operation: DispatchOperation;
 	executable: string;
 	args: readonly string[];
 	cwd: string;
@@ -153,6 +162,8 @@ export interface DispatchAttribution {
 	account?: string | null;
 	target?: ManagedDispatchTarget;
 	resourceIds?: readonly string[];
+	/** Default `start`. */
+	operation?: DispatchOperation;
 }
 
 export interface DispatchSpecLike {
@@ -180,6 +191,7 @@ export function buildDispatchSnapshot(
 	}
 	return {
 		contractVersion: MANAGED_CONTRACT_VERSION,
+		operation: attribution.operation ?? 'start',
 		executable: spec.command,
 		args: [...spec.args],
 		cwd: spec.cwd,
@@ -217,6 +229,20 @@ export type LeaseRelease =
 	| { outcome: 'unknown'; message: string };
 
 /**
+ * The durable decision a remote authority answered with: the broker's own
+ * identifiers for the grant it consumed. `decisionId` is the grant the broker
+ * journaled, `requestDigest` its digest over the binding it decided on,
+ * `brokerId` which broker. A lease that carries one can be joined to the
+ * broker's receipt ledger; a lease decided in process carries none.
+ */
+export interface ManagedDecisionReceipt {
+	decisionId: string;
+	requestDigest: string;
+	brokerId: string;
+	policyRevision: number;
+}
+
+/**
  * The protected lifetime for one snapshot. Only an authority mints one; the
  * brand keeps a caller from constructing it, and `HostAuthority.check` keeps
  * a forged object from passing at the sink.
@@ -226,6 +252,8 @@ export interface DispatchLease {
 	readonly leaseId: string;
 	readonly authorityId: string;
 	readonly snapshotDigest: string;
+	/** The remote decision this lease was minted on, or null for an in-process one. */
+	readonly decision: ManagedDecisionReceipt | null;
 	readonly actor: ManagedPrincipalRef;
 	readonly policyRevision: number | null;
 	readonly runId: string | null;
@@ -277,13 +305,18 @@ export interface AdmissionRequest {
  * `admitted` carries a lease, and nothing but a lease starts a process.
  */
 export type AdmissionOutcome =
-	| { state: 'admitted'; lease: DispatchLease; policyRevision: number | null }
+	| {
+			state: 'admitted';
+			lease: DispatchLease;
+			policyRevision: number | null;
+			receipt: ManagedDecisionReceipt | null;
+	  }
 	| { state: 'denied'; code: ManagedDenialCode; message: string; policyRevision: number | null }
 	| { state: 'unavailable'; code: 'runtime-unavailable'; message: string }
 	| { state: 'unknown'; code: 'outcome-unknown'; message: string };
 
 export type PolicyDecision =
-	| { decision: 'allow'; policyRevision: number | null }
+	| { decision: 'allow'; policyRevision: number | null; receipt?: ManagedDecisionReceipt }
 	| { decision: 'deny'; reason: string; policyRevision: number | null; code?: ManagedDenialCode }
 	| { decision: 'unavailable'; reason: string }
 	| { decision: 'unknown'; reason: string };
@@ -326,7 +359,11 @@ export function createLocalHostAuthority(deps: LocalHostAuthorityDeps): HostAuth
 	const byId = new Map<string, DispatchLease>();
 	const revokers = new Map<string, (reason: string) => boolean>();
 
-	function mint(request: AdmissionRequest, policyRevision: number | null): DispatchLease {
+	function mint(
+		request: AdmissionRequest,
+		policyRevision: number | null,
+		decision: ManagedDecisionReceipt | null
+	): DispatchLease {
 		const issued = deps.now();
 		let state: LeaseState = 'issued';
 		let boundPid: number | undefined;
@@ -340,6 +377,7 @@ export function createLocalHostAuthority(deps: LocalHostAuthorityDeps): HostAuth
 			leaseId: id,
 			authorityId: deps.authorityId,
 			snapshotDigest: dispatchSnapshotDigest(request.snapshot),
+			decision,
 			actor: request.context.actor,
 			policyRevision,
 			runId: request.context.identity.runId,
@@ -417,12 +455,15 @@ export function createLocalHostAuthority(deps: LocalHostAuthorityDeps): HostAuth
 				};
 			}
 			switch (decision.decision) {
-				case 'allow':
+				case 'allow': {
+					const receipt = decision.receipt ?? null;
 					return {
 						state: 'admitted',
-						lease: mint(request, decision.policyRevision),
+						lease: mint(request, decision.policyRevision, receipt),
 						policyRevision: decision.policyRevision,
+						receipt,
 					};
+				}
 				case 'deny':
 					return {
 						state: 'denied',
