@@ -7,6 +7,10 @@ import { createMockSession as baseCreateMockSession } from '../../helpers/mockSe
 import { useSettingsStore } from '../../../renderer/stores/settingsStore';
 import { observeEffortRejection } from '../../../renderer/services/effortRejection';
 import { resetEffortRejections } from '../../../shared/effortRejection';
+import {
+	newAutoRunTurnRequest,
+	type AutoRunWorkflowIdentity,
+} from '../../../shared/maestro-lib/autorun/attribution';
 
 const createMockTab = (overrides: Partial<AITab> = {}): AITab =>
 	createMockAITab({
@@ -1142,6 +1146,139 @@ describe('useAgentExecution', () => {
 			act(() => {
 				onExitHandler?.(targetSessionId);
 			});
+			await spawnPromise;
+		});
+	});
+
+	describe('Auto Run lineage', () => {
+		// The Auto Run runners hand each dispatch its attribution (the workflow,
+		// the run, the task's request, this attempt). This is the last hop before
+		// the process: the lineage must reach the spawn payload as `autoRun`, with
+		// no owner fence (no producer is reachable from the renderer, CP-03), so
+		// the main-process sink admits the task on it, or refuses it as unowned.
+		const workflow: AutoRunWorkflowIdentity = {
+			workflowId: 'playbook:/test/folder',
+			version: 'docs-1-deadbeef',
+			triggerEventId: 'operator:1700000000000',
+			runId: 'run-1',
+		};
+		const refusal = (value: string) => ({
+			agentId: 'claude-code',
+			message: `{"type":"error","error":{"message":"Unsupported value: '${value}' is not supported with the 'some-model' model. Supported values are: 'medium', 'high'.","type":"invalid_request_error","param":"reasoning.effort","code":"unsupported_value"},"status":400}`,
+		});
+
+		afterEach(() => {
+			resetEffortRejections();
+		});
+
+		const renderExecution = (session: Session) =>
+			renderHook(() =>
+				useAgentExecution({
+					activeSessionId: session.id,
+					sessionsRef: { current: [session] },
+					setSessions: vi.fn(),
+					processQueuedItemRef: { current: null },
+					setFlashNotification: vi.fn(),
+					setSuccessFlashNotification: vi.fn(),
+				})
+			);
+
+		const exit = async (sid: string, code: number) => {
+			await act(async () => {
+				(onExitHandler as (sid: string, code: number) => void)(sid, code);
+			});
+		};
+
+		it('carries the task lineage to the spawn with no owner fence', async () => {
+			const session = createMockSession();
+			const { result } = renderExecution(session);
+			const attribution = newAutoRunTurnRequest(workflow, {
+				purpose: 'task',
+				document: 'tasks',
+				loopNumber: 1,
+			});
+
+			const spawnPromise = result.current.spawnAgentForSession(
+				session.id,
+				'Do the task',
+				undefined,
+				{ isAutoRun: true, attribution }
+			);
+			await waitFor(() => {
+				expect(mockProcess.spawn).toHaveBeenCalledTimes(1);
+			});
+
+			const payload = mockProcess.spawn.mock.calls[0][0];
+			// The attribution as it was handed over, and the fence explicitly absent:
+			// the renderer carries a lineage, it never mints an owner.
+			expect(payload.autoRun).toEqual({ attribution, fence: null });
+			expect(payload.querySource).toBe('auto');
+
+			await exit(payload.sessionId, 0);
+			await spawnPromise;
+		});
+
+		it('retries a refused effort as the next attempt of the same request', async () => {
+			const session = createMockSession({ customEffort: 'medium' });
+			const { result } = renderExecution(session);
+			const attribution = newAutoRunTurnRequest(workflow, {
+				purpose: 'task',
+				document: 'tasks',
+				loopNumber: 1,
+			});
+
+			const spawnPromise = result.current.spawnAgentForSession(
+				session.id,
+				'Do the task',
+				undefined,
+				{ isAutoRun: true, effortOverride: 'max', attribution }
+			);
+			await waitFor(() => {
+				expect(mockProcess.spawn).toHaveBeenCalledTimes(1);
+			});
+			const first = mockProcess.spawn.mock.calls[0][0];
+			expect(first.autoRun.attribution.attempt).toBe(1);
+
+			observeEffortRejection(first.sessionId, refusal('max'));
+			await exit(first.sessionId, 1);
+
+			await waitFor(() => {
+				expect(mockProcess.spawn).toHaveBeenCalledTimes(2);
+			});
+			const retry = mockProcess.spawn.mock.calls[1][0];
+			expect(retry.sessionCustomEffort).toBe('medium');
+			expect(retry.autoRun.fence).toBeNull();
+			const second = retry.autoRun.attribution;
+			// Same request, same turn, same workflow: a new lease under the same
+			// request at the sink. Only the attempt moves on.
+			expect(second.requestId).toBe(attribution.requestId);
+			expect(second.idempotencyKey).toBe(attribution.idempotencyKey);
+			expect(second.turnRunId).toBe(attribution.turnRunId);
+			expect(second.parentRunId).toBe(attribution.parentRunId);
+			expect(second.workflow).toEqual(workflow);
+			expect(second.attempt).toBe(2);
+			expect(second.attemptId).not.toBe(attribution.attemptId);
+
+			onDataHandler?.(retry.sessionId, 'done');
+			await exit(retry.sessionId, 0);
+			const outcome = await spawnPromise;
+			expect(outcome.success).toBe(true);
+		});
+
+		it('sends no lineage on a chat spawn', async () => {
+			const session = createMockSession();
+			const { result } = renderExecution(session);
+
+			const spawnPromise = result.current.spawnAgentWithPrompt('Hello');
+			await waitFor(() => {
+				expect(mockProcess.spawn).toHaveBeenCalledTimes(1);
+			});
+
+			const payload = mockProcess.spawn.mock.calls[0][0];
+			expect('autoRun' in payload).toBe(false);
+			expect(payload.querySource).toBe('user');
+
+			await exit(payload.sessionId, 0);
 			await spawnPromise;
 		});
 	});

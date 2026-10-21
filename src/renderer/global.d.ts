@@ -104,6 +104,11 @@ interface ProcessConfig {
 	/** maestro-p idle cap (`--max-wait`) for a TUI turn. Unset keeps maestro-p's
 	 *  300s default; Auto Run raises it to its own inactivity budget. */
 	maestroPMaxWaitSeconds?: number;
+	/** The Auto Run lineage this spawn is one attempt of (attribution plus the
+	 *  run's owner fence, or null when no owner producer issued one). Carried as
+	 *  it is into the main process's `ProcessConfig.autoRun`, where the sink
+	 *  admits the task on its lineage. Absent on a chat spawn. */
+	autoRun?: import('../shared/maestro-lib/autorun/attribution').AutoRunSpawnLineage;
 }
 
 type AgentConfigOption = import('../shared/types').AgentConfigOption;

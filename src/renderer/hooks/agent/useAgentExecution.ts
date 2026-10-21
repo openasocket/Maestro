@@ -24,6 +24,11 @@ import { stripAnsiCodes } from '../../../shared/stringUtils';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { logger } from '../../utils/logger';
 import { armEffortFallback, settleEffortFallback } from '../../services/effortRejection';
+import {
+	nextAutoRunAttempt,
+	type AutoRunSpawnLineage,
+	type AutoRunTurnAttribution,
+} from '../../../shared/maestro-lib/autorun/attribution';
 
 /**
  * Result from agent spawn operations.
@@ -67,6 +72,16 @@ export interface SpawnAgentOptions {
 	modelOverride?: string;
 	/** Overrides session.customEffort for this spawn only */
 	effortOverride?: string;
+	/**
+	 * The Auto Run lineage this spawn is one attempt of (the workflow, the run,
+	 * the task's request, this attempt). Carried to the main-process sink as
+	 * `ProcessConfig.autoRun`, where a managed host admits the task on it instead
+	 * of minting an anonymous launch. Attribution only, never authority: the
+	 * run's owner fence is not minted here (CP-03), so the lineage crosses with
+	 * `fence: null` and a managed desktop refuses it as unowned. A chat spawn
+	 * carries none and a standalone host ignores it.
+	 */
+	attribution?: AutoRunTurnAttribution;
 }
 
 /**
@@ -363,6 +378,11 @@ export function useAgentExecution(deps: UseAgentExecutionDeps): UseAgentExecutio
 									void retry(sessionId, prompt, cwdOverride, {
 										...options,
 										effortOverride: undefined,
+										// The same request tried again: the next attempt of the
+										// lineage, admitted afresh, never the first attempt resent.
+										...(options?.attribution
+											? { attribution: nextAutoRunAttempt(options.attribution) }
+											: {}),
 									}).then(resolve);
 									return;
 								}
@@ -689,6 +709,20 @@ export function useAgentExecution(deps: UseAgentExecutionDeps): UseAgentExecutio
 							maestroPMaxWaitSeconds: isBatchProcess
 								? autoRunMaestroPMaxWaitSeconds(useSettingsStore.getState())
 								: undefined,
+							// The Auto Run lineage, when this spawn has one. The sink binds its
+							// admission on it (the task's request and attempt, the run as the
+							// root). The fence stays null until a workflow owner producer is
+							// reachable from the renderer (MRC-07-06, CP-03): a managed desktop
+							// refuses the unowned workflow with the reason in the run's error
+							// pause rather than this path inventing an owner.
+							...(options?.attribution
+								? {
+										autoRun: {
+											attribution: options.attribution,
+											fence: null,
+										} satisfies AutoRunSpawnLineage,
+									}
+								: {}),
 						})
 						.catch((err: unknown) => {
 							resolveOnce({

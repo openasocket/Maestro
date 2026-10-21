@@ -56,6 +56,12 @@ import type {
 	DocumentRunOverrides,
 	UseDocumentProcessorReturn,
 } from '../useDocumentProcessor';
+import {
+	autoRunTriggerEventId,
+	autoRunWorkflowVersion,
+	type AutoRunWorkflowIdentity,
+} from '../../../../shared/maestro-lib/autorun/attribution';
+import { generateId } from '../../../utils/ids';
 
 const AUTO_RUN_PROGRESS_POLL_INTERVAL_MS = 20000;
 
@@ -272,6 +278,17 @@ export function useBatchRunner({
 
 			// Track batch start time for completion notification
 			const batchStartTime = Date.now();
+			// The run as a workflow, built once so every task dispatch, in every loop
+			// of a looping run, hangs under one run id: the playbook folder as the
+			// workflow, the ordered document set as its version, the operator's launch
+			// as the trigger. Attribution only; the run's owner fence is a workflow
+			// owner producer's to issue (CP-03), never minted here.
+			const workflow: AutoRunWorkflowIdentity = {
+				workflowId: `playbook:${folderPath}`,
+				version: autoRunWorkflowVersion(documents.map((d) => d.filename)),
+				triggerEventId: autoRunTriggerEventId('operator', batchStartTime),
+				runId: generateId(),
+			};
 			const sshRemoteId =
 				session.sshRemoteId || session.sessionSshRemoteConfig?.remoteId || undefined;
 			let effectiveCwd = session.cwd;
@@ -978,6 +995,7 @@ export function useBatchRunner({
 									sshRemoteId,
 									runOverrides,
 									steeringNotes,
+									workflow,
 								},
 								effectiveFilename, // Use working copy path for reset-on-completion docs
 								docCheckedCount,

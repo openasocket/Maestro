@@ -8,7 +8,17 @@ import type {
 	UsageStats,
 	Group,
 } from '../../../types';
-import type { AgentSpawnErrorKind, SpawnAgentRunOverrides } from '../../agent/useAgentExecution';
+import type { SpawnAgentRunOverrides } from '../../agent/useAgentExecution';
+import type { AutoRunSpawnAgentFn } from '../useDocumentProcessor';
+import {
+	autoRunTriggerEventId,
+	autoRunWorkflowVersion,
+	newAutoRunTurnRequest,
+	nextAutoRunAttempt,
+	type AutoRunTurnAttribution,
+	type AutoRunWorkflowIdentity,
+} from '../../../../shared/maestro-lib/autorun/attribution';
+import { generateId } from '../../../utils/ids';
 import type {
 	GoalIterationRecord,
 	GoalExitReason,
@@ -51,21 +61,12 @@ type UpdateBatchStateFn = (
 	immediate?: boolean
 ) => void;
 
-type SpawnAgentFn = (
-	sessionId: string,
-	prompt: string,
-	cwdOverride?: string,
-	/** Run-scoped model/effort override from the BatchRunConfig, when the run set one */
-	options?: SpawnAgentRunOverrides
-) => Promise<{
-	success: boolean;
-	response?: string;
-	agentSessionId?: string;
-	usageStats?: UsageStats;
-	contextUsage?: number;
-	error?: string;
-	errorKind?: AgentSpawnErrorKind;
-}>;
+/**
+ * The canonical Auto Run spawn callback (shared with the document runner): the
+ * run-scoped model/effort override plus the iteration's lineage as the 4th
+ * argument.
+ */
+type SpawnAgentFn = AutoRunSpawnAgentFn;
 
 /**
  * Resume an existing provider session and run a prompt against it (used to ask a
@@ -242,6 +243,17 @@ export function useGoalRunner({
 
 			const sessionName = session.name || session.cwd.split('/').pop() || 'Unknown';
 			const goalStartTime = Date.now();
+			// The goal run as a workflow, built once so every iteration hangs under one
+			// run id: the folder as the workflow, the goal and exit criteria as its
+			// version, the operator's launch as the trigger. Attribution only; the
+			// owner fence is a workflow owner producer's to issue (CP-03), never minted
+			// here.
+			const workflow: AutoRunWorkflowIdentity = {
+				workflowId: `goal:${folderPath}`,
+				version: autoRunWorkflowVersion([goalConfig.goal, goalConfig.exitCriteria]),
+				triggerEventId: autoRunTriggerEventId('operator', goalStartTime),
+				runId: generateId(),
+			};
 
 			// Load the goal-driven system prompt template up front. Failing here means
 			// we cannot build a meaningful per-iteration prompt, so bail before any
@@ -434,6 +446,10 @@ export function useGoalRunner({
 			let totalCost = 0;
 			let finalProgress = 0;
 			let iteration = 0;
+			// The request a limit-paused iteration is retried under: the same logical
+			// iteration, so its resume is the next attempt of that request rather
+			// than a new one. Null whenever the next iteration is a fresh one.
+			let retriedAttribution: AutoRunTurnAttribution | null = null;
 			// Handoff note carried from the previous iteration's session into the next
 			// (fresh-context) iteration's prompt. Empty for the first iteration.
 			let predecessorBlurb = '';
@@ -519,6 +535,18 @@ export function useGoalRunner({
 					session.newSessionMessage
 				);
 
+				// This iteration's lineage: one request per iteration under the run, its
+				// first attempt; a limit-paused iteration resumed is the next attempt of
+				// the request it was paused on. The spawn path carries it to the host's
+				// admission (an effort fallback inside the spawn is its own next attempt).
+				const attribution: AutoRunTurnAttribution = retriedAttribution
+					? nextAutoRunAttempt(retriedAttribution)
+					: newAutoRunTurnRequest(workflow, {
+							purpose: 'goal-iteration',
+							loopNumber: iteration,
+						});
+				retriedAttribution = null;
+
 				const iterationStart = Date.now();
 				let result: Awaited<ReturnType<SpawnAgentFn>>;
 				try {
@@ -526,7 +554,7 @@ export function useGoalRunner({
 						sessionId,
 						prompt,
 						effectiveCwd !== session.cwd ? effectiveCwd : undefined,
-						runOverrides
+						{ ...runOverrides, attribution }
 					);
 				} catch (error) {
 					logger.error('[GoalRunner] Agent spawn threw:', undefined, error);
@@ -591,7 +619,9 @@ export function useGoalRunner({
 						}
 
 						// Resume: retry the SAME iteration. Revert the counter so the limited
-						// attempt is not counted, then loop back to re-spawn the same prompt.
+						// attempt is not counted, then loop back to re-spawn the same prompt
+						// as the next attempt of this iteration's request.
+						retriedAttribution = attribution;
 						iteration--;
 						continue;
 					}

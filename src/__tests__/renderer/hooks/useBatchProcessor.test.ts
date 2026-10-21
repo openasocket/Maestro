@@ -25,6 +25,10 @@ import { useBatchStore } from '../../../renderer/stores/batchStore';
 import { useSessionStore } from '../../../renderer/stores/sessionStore';
 import { useSettingsStore } from '../../../renderer/stores/settingsStore';
 import { createMockSession as baseCreateMockSession } from '../../helpers/mockSession';
+import {
+	autoRunWorkflowVersion,
+	type AutoRunTurnAttribution,
+} from '../../../shared/maestro-lib/autorun/attribution';
 
 // Mock notifyToast so we can verify toast notifications
 const { mockNotifyToast } = vi.hoisted(() => ({
@@ -6448,6 +6452,79 @@ describe('useBatchProcessor hook', () => {
 		});
 	});
 
+	describe('Auto Run lineage', () => {
+		// The run is one workflow (the playbook folder, the ordered document set as
+		// its version, the operator's launch as the trigger, one run id) and every
+		// task dispatch is its own request under it. The runner builds the workflow
+		// once and the document processor mints the request per dispatch; both
+		// reach onSpawnAgent as `attribution` on the 4th argument, which is what
+		// the spawn path carries to a managed host's admission.
+		it('dispatches every task as its own request under one workflow', async () => {
+			const sessions = [createMockSession()];
+			const groups = [createMockGroup()];
+
+			// Two tasks: the first read returns both unchecked, then one, then none.
+			let callCount = 0;
+			mockReadDoc.mockImplementation(async () => {
+				callCount++;
+				if (callCount <= 2) {
+					return { success: true, content: '# Tasks\n- [ ] Task 1\n- [ ] Task 2' };
+				} else if (callCount <= 4) {
+					return { success: true, content: '# Tasks\n- [x] Task 1\n- [ ] Task 2' };
+				}
+				return { success: true, content: '# Tasks\n- [x] Task 1\n- [x] Task 2' };
+			});
+
+			useSessionStore.setState({ sessions, activeSessionId: sessions[0]?.id ?? '' });
+			const { result } = renderHook(() =>
+				useBatchProcessor({
+					groups,
+					onUpdateSession: mockOnUpdateSession,
+					onSpawnAgent: mockOnSpawnAgent,
+					onAddHistoryEntry: mockOnAddHistoryEntry,
+					onComplete: mockOnComplete,
+				})
+			);
+
+			await act(async () => {
+				await result.current.startBatchRun(
+					'test-session-id',
+					{
+						documents: [{ filename: 'tasks', resetOnCompletion: false }],
+						prompt: 'Complete the next task',
+						loopEnabled: false,
+					},
+					'/test/folder'
+				);
+			});
+
+			expect(mockOnSpawnAgent).toHaveBeenCalledTimes(2);
+			const lineages = mockOnSpawnAgent.mock.calls.map(
+				(call) => (call[3] as { attribution: AutoRunTurnAttribution }).attribution
+			);
+
+			expect(lineages[0].workflow).toEqual({
+				workflowId: 'playbook:/test/folder',
+				version: autoRunWorkflowVersion(['tasks']),
+				triggerEventId: expect.stringMatching(/^operator:\d+$/),
+				runId: expect.any(String),
+			});
+			const runId = lineages[0].workflow.runId;
+
+			for (const lineage of lineages) {
+				expect(lineage.workflow.runId).toBe(runId);
+				expect(lineage.parentRunId).toBe(runId);
+				expect(lineage.purpose).toBe('task');
+				expect(lineage.document).toBe('tasks');
+				expect(lineage.loopNumber).toBe(1);
+				expect(lineage.attempt).toBe(1);
+			}
+			// Each dispatch is its own request (and its own turn), never a resend.
+			expect(new Set(lineages.map((lineage) => lineage.requestId)).size).toBe(2);
+			expect(new Set(lineages.map((lineage) => lineage.turnRunId)).size).toBe(2);
+		});
+	});
+
 	describe('per-run model/effort override', () => {
 		// The override lives on the BatchRunConfig and has to survive the
 		// startBatchRun -> useBatchRunner -> useDocumentProcessor delegation chain
@@ -6490,27 +6567,42 @@ describe('useBatchProcessor hook', () => {
 		it('forwards config.model and config.effort to onSpawnAgent', async () => {
 			await startRun({ model: 'opus', effort: 'high' });
 
-			expect(mockOnSpawnAgent).toHaveBeenCalledWith('test-session-id', 'Test', undefined, {
-				modelOverride: 'opus',
-				effortOverride: 'high',
-			});
+			expect(mockOnSpawnAgent).toHaveBeenCalledWith(
+				'test-session-id',
+				'Test',
+				undefined,
+				expect.objectContaining({
+					modelOverride: 'opus',
+					effortOverride: 'high',
+				})
+			);
 		});
 
 		it('forwards only the field that was set', async () => {
 			await startRun({ model: 'opus' });
 
-			expect(mockOnSpawnAgent).toHaveBeenCalledWith('test-session-id', 'Test', undefined, {
-				modelOverride: 'opus',
-			});
+			expect(mockOnSpawnAgent).toHaveBeenCalledWith(
+				'test-session-id',
+				'Test',
+				undefined,
+				expect.objectContaining({
+					modelOverride: 'opus',
+				})
+			);
 		});
 
 		it('lets a document marker win over the run model by default', async () => {
 			await startRun({ model: 'sonnet' }, '<!-- MAESTRO:MODEL tier="high" -->\n\n- [ ] Task');
 
-			expect(mockOnSpawnAgent).toHaveBeenCalledWith('test-session-id', 'Test', undefined, {
-				modelOverride: 'opus',
-				effortOverride: undefined,
-			});
+			expect(mockOnSpawnAgent).toHaveBeenCalledWith(
+				'test-session-id',
+				'Test',
+				undefined,
+				expect.objectContaining({
+					modelOverride: 'opus',
+					effortOverride: undefined,
+				})
+			);
 		});
 
 		it('runs at the run model when ignoreModelHints is set, whatever the document asks', async () => {
@@ -6519,10 +6611,15 @@ describe('useBatchProcessor hook', () => {
 				'<!-- MAESTRO:MODEL tier="high" effort="high" -->\n\n- [ ] Task'
 			);
 
-			expect(mockOnSpawnAgent).toHaveBeenCalledWith('test-session-id', 'Test', undefined, {
-				modelOverride: 'sonnet',
-				effortOverride: undefined,
-			});
+			expect(mockOnSpawnAgent).toHaveBeenCalledWith(
+				'test-session-id',
+				'Test',
+				undefined,
+				expect.objectContaining({
+					modelOverride: 'sonnet',
+					effortOverride: undefined,
+				})
+			);
 		});
 
 		it('falls back to the agent settings when hints are ignored and no model was picked', async () => {
@@ -6531,10 +6628,15 @@ describe('useBatchProcessor hook', () => {
 				'<!-- MAESTRO:MODEL tier="high" -->\n\n- [ ] Task'
 			);
 
-			expect(mockOnSpawnAgent).toHaveBeenCalledWith('test-session-id', 'Test', undefined, {
-				modelOverride: undefined,
-				effortOverride: undefined,
-			});
+			expect(mockOnSpawnAgent).toHaveBeenCalledWith(
+				'test-session-id',
+				'Test',
+				undefined,
+				expect.objectContaining({
+					modelOverride: undefined,
+					effortOverride: undefined,
+				})
+			);
 		});
 
 		it('resolves both axes to undefined when the config omits them', async () => {
@@ -6544,10 +6646,15 @@ describe('useBatchProcessor hook', () => {
 			// has to, to carry a document's model hint), so the 4th argument is
 			// present but empty on both axes. That is what "no override" looks like:
 			// the spawn falls through to the agent's own configured values.
-			expect(mockOnSpawnAgent).toHaveBeenCalledWith('test-session-id', 'Test', undefined, {
-				modelOverride: undefined,
-				effortOverride: undefined,
-			});
+			expect(mockOnSpawnAgent).toHaveBeenCalledWith(
+				'test-session-id',
+				'Test',
+				undefined,
+				expect.objectContaining({
+					modelOverride: undefined,
+					effortOverride: undefined,
+				})
+			);
 		});
 	});
 });

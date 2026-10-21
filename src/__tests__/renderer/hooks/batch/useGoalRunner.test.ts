@@ -17,6 +17,10 @@ import { createMockSession as baseCreateMockSession } from '../../../helpers/moc
 import { GOAL_RUN_HARD_ITERATION_CAP } from '../../../../shared/goalDriven/types';
 import { GOAL_SYNOPSIS_REQUEST_PROMPT } from '../../../../shared/goalDriven/goalHandoff';
 import {
+	autoRunWorkflowVersion,
+	type AutoRunTurnAttribution,
+} from '../../../../shared/maestro-lib/autorun/attribution';
+import {
 	setCapabilitiesCache,
 	clearCapabilitiesCache,
 	DEFAULT_CAPABILITIES,
@@ -167,6 +171,56 @@ describe('useGoalRunner (Goal-Driven Auto Run engine)', () => {
 	afterEach(() => {
 		vi.clearAllMocks();
 		clearCapabilitiesCache();
+	});
+
+	it('mints one request per iteration under one goal workflow', async () => {
+		const responses = [
+			progressResponse(30, 'scaffolded'),
+			progressResponse(70, 'data layer migrated'),
+			progressResponse(100, 'feature complete'),
+		];
+		let call = 0;
+		mockOnSpawnAgent.mockImplementation(async () => ({
+			success: true,
+			agentSessionId: `goal-agent-${call}`,
+			response: responses[call++],
+		}));
+
+		const { result } = renderProcessor([createMockSession()], [createMockGroup()]);
+
+		await act(async () => {
+			await result.current.startBatchRun(
+				SESSION_ID,
+				goalConfig('Ship the feature', 'All tests pass', null),
+				'/test/folder'
+			);
+		});
+
+		expect(mockOnSpawnAgent).toHaveBeenCalledTimes(3);
+		const lineages = mockOnSpawnAgent.mock.calls.map(
+			(c) => (c[3] as { attribution: AutoRunTurnAttribution }).attribution
+		);
+
+		// One workflow for the run: the folder, the goal and exit criteria as the
+		// version, the operator's launch as the trigger, one run id.
+		expect(lineages[0].workflow).toEqual({
+			workflowId: 'goal:/test/folder',
+			version: autoRunWorkflowVersion(['Ship the feature', 'All tests pass']),
+			triggerEventId: expect.stringMatching(/^operator:\d+$/),
+			runId: expect.any(String),
+		});
+		const runId = lineages[0].workflow.runId;
+
+		// One request per iteration, each a first attempt hanging under the run.
+		lineages.forEach((lineage, index) => {
+			expect(lineage.workflow.runId).toBe(runId);
+			expect(lineage.parentRunId).toBe(runId);
+			expect(lineage.purpose).toBe('goal-iteration');
+			expect(lineage.loopNumber).toBe(index + 1);
+			expect(lineage.attempt).toBe(1);
+		});
+		expect(new Set(lineages.map((lineage) => lineage.requestId)).size).toBe(3);
+		expect(new Set(lineages.map((lineage) => lineage.turnRunId)).size).toBe(3);
 	});
 
 	it('writes an immediate start marker recording the goal and exit criteria', async () => {
@@ -859,6 +913,18 @@ describe('useGoalRunner (Goal-Driven Auto Run engine)', () => {
 
 		// Two spawns total: the limited attempt + the retried successful attempt.
 		expect(mockOnSpawnAgent).toHaveBeenCalledTimes(2);
+
+		// The retry is the same iteration's request tried again: same request and
+		// turn, the next attempt, never a fresh request for a resumed iteration.
+		const [limited, retried] = mockOnSpawnAgent.mock.calls.map(
+			(c) => (c[3] as { attribution: AutoRunTurnAttribution }).attribution
+		);
+		expect(retried.requestId).toBe(limited.requestId);
+		expect(retried.turnRunId).toBe(limited.turnRunId);
+		expect(retried.loopNumber).toBe(1);
+		expect(limited.attempt).toBe(1);
+		expect(retried.attempt).toBe(2);
+		expect(retried.attemptId).not.toBe(limited.attemptId);
 
 		// Exactly ONE per-iteration progress entry: the limited attempt did not
 		// consume an iteration (no failed-iteration entry was recorded for it).
