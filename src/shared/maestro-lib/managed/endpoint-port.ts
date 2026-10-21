@@ -146,6 +146,21 @@ export interface EndpointRegistrationApproval {
 	expiresAt: string;
 }
 
+/** The `enrollment` operation: a request to the endpoint, which owns the device key and the proof. */
+export interface EndpointEnrollmentRequest {
+	mode: 'attended' | 'managed';
+	invitation: string;
+	collectionProfile: EndpointCollectionProfile;
+	trustRootDigest: string;
+	/** Produced by the endpoint own tooling; Maestro relays it and never computes it. */
+	keyPossessionProof: string;
+}
+
+export interface EndpointEnrollmentResult {
+	outcome: 'enrollment_pending';
+	enrollmentId: string;
+}
+
 export interface EndpointRegistrationReceipt {
 	protocol: typeof LOCAL_ENDPOINT_PROTOCOL;
 	outcome: 'registered';
@@ -382,12 +397,19 @@ export interface EndpointPort {
 		}): Promise<EndpointInvokeOutcome<EndpointRegistrationApproval>>;
 		redeem(): Promise<EndpointInvokeOutcome<EndpointRegistrationReceipt>>;
 	};
+	/** Drop the current socket so the next call dials fresh; the completed registration is kept. */
+	redial(): void;
 	/** Drop the connection; the endpoint's session for it ends with it. */
 	close(): Promise<void>;
 }
 
 /** The serializable identity record a host's custody holds (`src/main/enterprise/identity-store.ts` is the sealed home). */
-export type ManagedIdentityManagement = 'enrolled' | 'suspended' | 'revoked' | 'retired';
+export type ManagedIdentityManagement =
+	| 'enrolling'
+	| 'enrolled'
+	| 'suspended'
+	| 'revoked'
+	| 'retired';
 
 export interface ManagedIdentityEndpointRef {
 	socketPath: string;
@@ -412,7 +434,8 @@ export interface ManagedIdentityRecord {
 	installationId: string;
 	tenantId: string;
 	orgId: string;
-	enrollmentId: string;
+	/** Null until the endpoint reports it; the runtime socket does not carry it today. */
+	enrollmentId: string | null;
 	endpoint: ManagedIdentityEndpointRef;
 	management: ManagedIdentityManagement;
 	registration: ManagedIdentityRegistration | null;
@@ -431,6 +454,25 @@ export interface ManagedIdentityView {
 	reason: string | null;
 	message: string | null;
 	record: ManagedIdentityRecord | null;
+}
+
+/**
+ * What this host believes about its managed standing, as one serializable
+ * answer for a status pane, a CLI verb or a log line. `authority` is the only
+ * field a sink may act on: `registered` means custody is protected, the record
+ * says enrolled, THIS process redeemed an actor registration, the socket is
+ * attached and the endpoint answered `managed`. Everything else is `none`.
+ */
+export interface ManagedEnrollmentStatus {
+	identity: ManagedIdentityView;
+	connection: EndpointConnectionState | null;
+	endpoint: EndpointStatus | null;
+	authority: 'none' | 'registered';
+	/** Why authority is none, in one sentence; null when it is registered. */
+	reason: string | null;
+	/** An open registration challenge the actor must approve, with when it lapses. */
+	pendingApproval: { challengeId: string; expiresAt: string } | null;
+	lastDenial: { at: string; operation: string; reason: LocalEndpointDenialReason } | null;
 }
 
 /** The custody port a host injects beside the transport. Reads only; writes stay with the enrollment lifecycle. */

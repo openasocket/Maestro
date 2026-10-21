@@ -380,6 +380,14 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 				}),
 		},
 
+		redial: () => {
+			const current = socket;
+			if (current) {
+				connectionLost(current);
+				current.destroy();
+			}
+		},
+
 		close: () =>
 			serialized(async () => {
 				closed = true;

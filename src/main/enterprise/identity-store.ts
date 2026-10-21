@@ -153,6 +153,7 @@ const isIdOrNull = (value: unknown): value is string | null => value === null ||
 const isRevision = (value: unknown): value is number | null =>
 	value === null || (typeof value === 'number' && Number.isInteger(value) && value >= 0);
 const MANAGEMENT_STATES: readonly EnterpriseManagementState[] = [
+	'enrolling',
 	'enrolled',
 	'suspended',
 	'revoked',
@@ -164,16 +165,10 @@ export function enterpriseIdentityProblems(value: unknown): string[] {
 	if (!isRecord(value)) return ['record is not an object'];
 	const problems: string[] = [];
 	if (value.version !== ENTERPRISE_IDENTITY_VERSION) problems.push('version is not 1');
-	for (const key of [
-		'installationId',
-		'tenantId',
-		'orgId',
-		'enrollmentId',
-		'enrolledAt',
-		'updatedAt',
-	] as const) {
+	for (const key of ['installationId', 'tenantId', 'orgId', 'enrolledAt', 'updatedAt'] as const) {
 		if (!isId(value[key])) problems.push(`${key} is not an id`);
 	}
+	if (!isIdOrNull(value.enrollmentId)) problems.push('enrollmentId is not an id or null');
 	if (!MANAGEMENT_STATES.includes(value.management as EnterpriseManagementState)) {
 		problems.push('management is not a management state');
 	}
