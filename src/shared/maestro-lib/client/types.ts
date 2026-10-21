@@ -22,8 +22,13 @@ import type { AutoRunLaunchInput, GoalRunLaunchInput } from '../autorun/launch';
 import type { AutoRunRunEvent } from '../autorun/run-tracker';
 import type { GroupChatCreateInput, GroupChatEvent, GroupChatRecord } from '../groupchat/chat';
 import type {
+	ManagedCapability,
 	ManagedCapabilityOffer,
 	ManagedControlReceipt,
+	ManagedDelegationRef,
+	ManagedInstallationIdentity,
+	ManagedPrincipalRef,
+	ManagedVerification,
 	ManagedEventPage,
 	ManagedNegotiationOutcome,
 	ManagedOperationEnvelope,
@@ -115,6 +120,9 @@ export type ClientMethod =
 	| 'providers.list'
 	| 'providers.models'
 	| 'managed.negotiate'
+	| 'managed.identity'
+	| 'managed.agents'
+	| 'managed.runs'
 	| 'managed.submit'
 	| 'managed.inspect'
 	| 'managed.cancel'
@@ -616,9 +624,48 @@ export interface ProvidersApi {
  * the `turn` events. A host with no verifier or no policy answers every
  * operation but `negotiate` with `denied`/`unauthenticated`.
  */
+/** One agent as the management peer sees it: no paths beyond the cwd, no credentials, no transcript. */
+export interface ManagedAgentSummary {
+	agentId: string;
+	name: string;
+	providerId: string;
+	cwd: string | null;
+	tabIds: string[];
+	activeTabId: string | null;
+}
+
+/** Who the host believes is asking, and what this host is to it. */
+export interface ManagedIdentity {
+	actor: ManagedPrincipalRef;
+	delegation: ManagedDelegationRef;
+	installation: ManagedInstallationIdentity;
+	verification: ManagedVerification;
+	binding: 'standalone' | 'enrolled' | 'enrolled-unavailable' | 'unreadable';
+	authorityId: string | null;
+	policyRevision: number | null;
+	capabilities: readonly { key: ManagedCapability; status: string }[];
+}
+
+export interface ManagedPage<T> {
+	items: T[];
+	nextCursor: string | null;
+}
+
 export interface ManagedApi {
 	/** Agree on a contract version and the exact capability set, or be refused. Needs no context. */
 	negotiate(offer: ManagedCapabilityOffer): Promise<ClientResult<ManagedNegotiationOutcome>>;
+	/** The verified actor, its delegation, and what this host is enrolled as. */
+	identity(
+		envelope: ManagedOperationEnvelope<Record<string, never>>
+	): Promise<ClientResult<ManagedOperationResult<ManagedIdentity>>>;
+	/** The agents the actor may see, bounded. `cursor` is the last `agentId` of the previous page. */
+	agents(
+		envelope: ManagedOperationEnvelope<{ cursor: string | null; limit: number }>
+	): Promise<ClientResult<ManagedOperationResult<ManagedPage<ManagedAgentSummary>>>>;
+	/** The journaled runs, newest first, bounded. `cursor` is the last `runId` of the previous page. */
+	runs(
+		envelope: ManagedOperationEnvelope<{ agentId?: string; cursor: string | null; limit: number }>
+	): Promise<ClientResult<ManagedOperationResult<ManagedPage<ManagedRunRecord>>>>;
 	submit(
 		envelope: ManagedOperationEnvelope<ManagedSubmitInput>
 	): Promise<ClientResult<ManagedOperationResult<ManagedSubmitReceipt>>>;

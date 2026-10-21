@@ -29,6 +29,7 @@ import type {
 	GroupChatsApi,
 	HostInfo,
 	MaestroClient,
+	ManagedApi,
 	ProviderInfo,
 	SettingsChange,
 	TranscriptOptions,
@@ -68,6 +69,12 @@ export interface RuntimeClientDeps {
 	groupChats: GroupChatsApi;
 	/** Ask another agent. `cancelForSource` is how Stop on the asker reaches the consults it started. */
 	consults: { api: ConsultsApi; cancelForSource(agentId: string): number };
+	/**
+	 * The managed operations facade (`managed/operations.ts`). Absent on a host
+	 * that built none, and then absent on the client too: `unsupported`, never
+	 * "unmanaged, so allowed".
+	 */
+	managed?: ManagedApi;
 }
 
 const ok = <T>(value: T): ClientResult<T> => ({ ok: true, value });
@@ -303,5 +310,41 @@ export function createRuntimeClient(deps: RuntimeClientDeps): MaestroClient {
 		events: {
 			subscribe: (listener, filter) => bus.subscribe(listener, filter),
 		},
+
+		...(deps.managed ? { managed: gatedManaged(deps.managed) } : {}),
 	};
+
+	/**
+	 * The facade behind the runtime's phase gate. A closed runtime answers
+	 * `host-unavailable` on the transport layer; a fenced one refuses the
+	 * operations that would start or stop something with `host-lost`, and
+	 * still answers the reads, which the fenced repository can serve.
+	 */
+	function gatedManaged(managed: ManagedApi): ManagedApi {
+		const read =
+			<A extends unknown[], T>(
+				method: ClientMethod,
+				call: (...args: A) => Promise<ClientResult<T>>
+			) =>
+			(...args: A) =>
+				Promise.resolve(gate(method) ?? call(...args));
+		const write =
+			<A extends unknown[], T>(
+				method: ClientMethod,
+				call: (...args: A) => Promise<ClientResult<T>>
+			) =>
+			(...args: A) =>
+				Promise.resolve(gate(method, true) ?? call(...args));
+		return {
+			negotiate: read('managed.negotiate', managed.negotiate),
+			identity: read('managed.identity', managed.identity),
+			agents: read('managed.agents', managed.agents),
+			runs: read('managed.runs', managed.runs),
+			submit: write('managed.submit', managed.submit),
+			inspect: read('managed.inspect', managed.inspect),
+			cancel: write('managed.cancel', managed.cancel),
+			interrupt: write('managed.interrupt', managed.interrupt),
+			events: read('managed.events', managed.events),
+		};
+	}
 }
