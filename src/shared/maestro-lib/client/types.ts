@@ -21,6 +21,17 @@ import type { CodexTransport } from '../../codexTransport';
 import type { AutoRunLaunchInput, GoalRunLaunchInput } from '../autorun/launch';
 import type { AutoRunRunEvent } from '../autorun/run-tracker';
 import type { GroupChatCreateInput, GroupChatEvent, GroupChatRecord } from '../groupchat/chat';
+import type {
+	ManagedCapabilityOffer,
+	ManagedControlReceipt,
+	ManagedEventPage,
+	ManagedNegotiationOutcome,
+	ManagedOperationEnvelope,
+	ManagedOperationResult,
+	ManagedRunRecord,
+	ManagedSubmitInput,
+	ManagedSubmitReceipt,
+} from '../managed/types';
 
 // ---------------------------------------------------------------------------
 // Results and errors
@@ -102,7 +113,13 @@ export type ClientMethod =
 	| 'settings.get'
 	| 'settings.sshRemotes'
 	| 'providers.list'
-	| 'providers.models';
+	| 'providers.models'
+	| 'managed.negotiate'
+	| 'managed.submit'
+	| 'managed.inspect'
+	| 'managed.cancel'
+	| 'managed.interrupt'
+	| 'managed.events';
 
 export type Unsubscribe = () => void;
 
@@ -583,6 +600,44 @@ export interface ProvidersApi {
 }
 
 // ---------------------------------------------------------------------------
+// Managed operations
+// ---------------------------------------------------------------------------
+
+/**
+ * The management extension: operations a management peer drives with a
+ * `ManagedOperationContext` attached (`../managed/types`). Each answers in
+ * two layers: the outer `ClientResult` is the transport (host missing, call
+ * timed out), the inner `ManagedOperationResult` is the host's decision
+ * (`ok`, `denied`, `unsupported`, `unavailable`, `unknown`).
+ *
+ * The context is attribution the host verifies; it is never a permission.
+ * A `managed.submit` receipt is durable identity for the run (its `runId`
+ * and `disposition`), not proof the turn started: watch `managed.events` or
+ * the `turn` events. A host with no verifier or no policy answers every
+ * operation but `negotiate` with `denied`/`unauthenticated`.
+ */
+export interface ManagedApi {
+	/** Agree on a contract version and the exact capability set, or be refused. Needs no context. */
+	negotiate(offer: ManagedCapabilityOffer): Promise<ClientResult<ManagedNegotiationOutcome>>;
+	submit(
+		envelope: ManagedOperationEnvelope<ManagedSubmitInput>
+	): Promise<ClientResult<ManagedOperationResult<ManagedSubmitReceipt>>>;
+	inspect(
+		envelope: ManagedOperationEnvelope<{ runId: string }>
+	): Promise<ClientResult<ManagedOperationResult<ManagedRunRecord>>>;
+	cancel(
+		envelope: ManagedOperationEnvelope<{ runId: string }>
+	): Promise<ClientResult<ManagedOperationResult<ManagedControlReceipt>>>;
+	interrupt(
+		envelope: ManagedOperationEnvelope<{ runId: string }>
+	): Promise<ClientResult<ManagedOperationResult<ManagedControlReceipt>>>;
+	/** Durable events after `cursor`, with whether any were lost before them. */
+	events(
+		envelope: ManagedOperationEnvelope<{ cursor: string | null; limit: number }>
+	): Promise<ClientResult<ManagedOperationResult<ManagedEventPage>>>;
+}
+
+// ---------------------------------------------------------------------------
 // Events and the client
 // ---------------------------------------------------------------------------
 
@@ -646,6 +701,12 @@ export interface MaestroClient {
 	readonly settings: SettingsApi;
 	readonly providers: ProvidersApi;
 	readonly events: EventsApi;
+	/**
+	 * The management extension. Absent on a host that has none (the WebSocket
+	 * client against an older desktop, the in-process runtime before phase 2):
+	 * treat absence exactly as `unsupported`, never as "unmanaged, so allowed".
+	 */
+	readonly managed?: ManagedApi;
 }
 
 // ---------------------------------------------------------------------------
