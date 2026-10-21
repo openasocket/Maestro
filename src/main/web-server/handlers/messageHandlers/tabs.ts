@@ -13,7 +13,7 @@ import { isRemoteMediaUrl, type MediaOpenMode } from '../../../../shared/mediaTy
 import fs from 'fs/promises';
 import { logger } from '../../../utils/logger';
 import { validateCallbackRequest, armDispatchCallback } from './dispatchCallbacks';
-import { noteDispatchDelegation } from './agentDelegation';
+import { noteDispatchDelegation, readDispatchDelegation } from './agentDelegation';
 import { LOG_CONTEXT } from './shared';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
 import {
@@ -734,6 +734,16 @@ export function handleNewAITabWithPrompt(
 		return;
 	}
 
+	// The dispatching operation's context, refused before the tab exists when
+	// it is not one: a refusal after creation would leave an orphaned tab, and
+	// a prompt sent without it would start the child as a fresh turn.
+	const delegationRead = readDispatchDelegation(message);
+	if (!delegationRead.ok) {
+		sendErrorResult(delegationRead.error);
+		return;
+	}
+	const delegation = delegationRead.delegation;
+
 	// Reject impossible callback requests BEFORE the tab exists. Arming needs
 	// the fresh tab id, but every tab-independent rejection (no registry,
 	// unknown caller, self-target) would otherwise surface only after the tab
@@ -746,7 +756,7 @@ export function handleNewAITabWithPrompt(
 	}
 
 	ctx.callbacks
-		.newAITabWithPrompt(sessionId, prompt, background, hidden)
+		.newAITabWithPrompt(sessionId, prompt, background, hidden, delegation)
 		.then((result) => {
 			// Arm the callback only once the fresh tab id is known - that id is
 			// the correlation key. `isNewTab` lets the registry adopt a spawn the

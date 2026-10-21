@@ -29,6 +29,7 @@ import type { Shortcut } from '../../shared/shortcut-types';
 import type { CadenzaPayload } from '../../shared/cadenza-types';
 import type { MovementPayload, MovementStateSnapshot } from '../../shared/movement-types';
 import type { AgentDelegationNotice } from '../../shared/agentDelegation';
+import type { ManagedDelegationContext } from '../../shared/maestro-lib/managed/delegation';
 import type { WebActingUser } from '../../shared/webLogin';
 import type {
 	ConcertoDesignerAction,
@@ -337,7 +338,14 @@ export type ExecuteCommandCallback = (
 	 * (the renderer selects it "for visual feedback"), so the web/mobile client and
 	 * every in-app caller keep focusing exactly as they do now.
 	 */
-	background?: boolean
+	background?: boolean,
+	/**
+	 * The context of the operation that dispatched the prompt (a Cue `mode: cli`
+	 * action, an agent's `maestro-cli dispatch`), already narrowed by the WS
+	 * handler. Carried to the renderer beside the prompt so the spawn it builds
+	 * is admitted as that operation's child, never as a fresh turn of the target.
+	 */
+	delegation?: ManagedDelegationContext
 ) => Promise<boolean>;
 
 /**
@@ -546,7 +554,9 @@ export type NewAITabWithPromptCallback = (
 	prompt: string,
 	background?: boolean,
 	/** Create the tab with no chip in the strip (see `AITab.hidden`). */
-	hidden?: boolean
+	hidden?: boolean,
+	/** The dispatching operation's context (see `ExecuteCommandCallback`). */
+	delegation?: ManagedDelegationContext
 ) => Promise<NewAITabWithPromptResult>;
 /**
  * Result of enqueuing (or immediately dispatching) a CLI prompt into the
@@ -584,7 +594,9 @@ export type EnqueueCommandCallback = (
 	images?: string[],
 	background?: boolean,
 	/** Queue Held: always queue, paused, even on an idle agent. */
-	held?: boolean
+	held?: boolean,
+	/** The dispatching operation's context; stored on the queued item so it travels to the spawn. */
+	delegation?: ManagedDelegationContext
 ) => Promise<EnqueueCommandResult>;
 /**
  * A single queued item, mirrored from the renderer's executionQueue for CLI

@@ -38,6 +38,13 @@ import {
 	buildCallerIdentityEnv,
 	withoutCallerIdentityEnv,
 } from '../../../../shared/agentDelegation';
+import {
+	delegationContextEnv,
+	delegationContextProblems,
+} from '../../../../shared/maestro-lib/managed/delegation';
+import { dispatchedChildContext } from '../../../process-manager/ProcessManager';
+import type { DispatchedSpawnIds } from '../../../process-manager/types';
+import { generateUUID } from '../../../../shared/uuid';
 import { QUERY_USER_ENV_VAR } from '../../../../shared/webLogin';
 import { getActingUser } from '../../../web-server/auth/acting-user';
 import { noteTurnActor } from '../../../web-server/auth/turn-attribution';
@@ -381,11 +388,44 @@ async function handleProcessSpawnImpl(
 	// Same injection point as Pianola's id, for the same reason: it has to reach
 	// both the local and the SSH env-merge paths. A terminal is a shell the user
 	// drives, not an agent turn, so it is never stamped.
+	let dispatchedAs: DispatchedSpawnIds | undefined;
 	if (config.toolType !== 'terminal') {
 		effectiveCustomEnvVars = {
 			...(effectiveCustomEnvVars || {}),
 			...buildCallerIdentityEnv(baseSessionId, config.tabId),
 		};
+
+		// A dispatched turn (`config.delegation`, the context of the operation
+		// that dispatched it) is stamped with the CHILD's record, so a dispatch
+		// the agent runs from its shell deepens the chain instead of starting it
+		// anew. Stamped here, beside the caller identity and after the launch
+		// plan's layers, for the same reason: a Maestro-stated fact over every
+		// user layer, on the local and the SSH path alike. The ids are minted
+		// once and handed to the sink (`dispatchedAs`), so the record it binds
+		// is the one the process carries. A record that is not a context refuses
+		// the spawn here, before anything starts: the child is never run as a
+		// fresh turn of the target with the record dropped.
+		if (config.delegation !== undefined) {
+			const problems = delegationContextProblems(config.delegation);
+			if (problems.length > 0) {
+				const message = `The spawn carries a delegation context that is not one, and is not started as a fresh action of this agent: ${problems.join('; ')}. Nothing was started.`;
+				logger.warn('Dispatched spawn refused: invalid delegation context', LOG_CONTEXT, {
+					sessionId: config.sessionId,
+					problems,
+				});
+				reportSpawnRefusal(deps, config.sessionId, message);
+				return { success: false, pid: 0 };
+			}
+			dispatchedAs = { requestId: generateUUID(), attemptId: generateUUID() };
+			const child = dispatchedChildContext({
+				sessionId: config.sessionId,
+				delegation: config.delegation,
+				dispatchedAs,
+			});
+			if (child) {
+				effectiveCustomEnvVars = { ...effectiveCustomEnvVars, ...delegationContextEnv(child) };
+			}
+		}
 
 		// Who asked for this turn, when the spawn came from a logged-in browser.
 		// This is the ONLY point where the answer is in scope: the History entry
@@ -1006,6 +1046,9 @@ async function handleProcessSpawnImpl(
 	const result = await processManager.spawnAdmitted(
 		{
 			...config,
+			// The ids the child's stamped record was minted with (see above), so
+			// the sink binds the same request it carries; absent on an undispatched turn.
+			dispatchedAs,
 			command: commandToSpawn,
 			args: argsToSpawn,
 			// When using SSH, use user's home directory as local cwd

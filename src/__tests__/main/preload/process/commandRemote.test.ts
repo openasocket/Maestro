@@ -61,6 +61,7 @@ describe('Process CommandRemote Preload API', () => {
 				true,
 				images,
 				true,
+				undefined,
 				'receipt-channel'
 			);
 
@@ -72,6 +73,42 @@ describe('Process CommandRemote Preload API', () => {
 				true,
 				images,
 				true,
+				undefined,
+				'receipt-channel'
+			);
+		});
+
+		it('forwards the delegation context in the slot before the receipt channel (MRC-07-04C)', () => {
+			// The dispatching operation's record rides beside the prompt; main
+			// appends the receipt channel after it, so the two must not swap.
+			const callback = vi.fn();
+			let registeredHandler: (...args: unknown[]) => void;
+			mockOn.mockImplementation((channel: string, handler: typeof registeredHandler) => {
+				if (channel === 'remote:executeCommand') registeredHandler = handler;
+			});
+			api.onRemoteCommand(callback);
+			const delegation = { contractVersion: '1.0', traceId: 't' };
+			registeredHandler!(
+				{},
+				'session-123',
+				'go',
+				'ai',
+				'tab-7',
+				false,
+				undefined,
+				true,
+				delegation,
+				'receipt-channel'
+			);
+			expect(callback).toHaveBeenCalledWith(
+				'session-123',
+				'go',
+				'ai',
+				'tab-7',
+				false,
+				undefined,
+				true,
+				delegation,
 				'receipt-channel'
 			);
 		});
@@ -103,6 +140,7 @@ describe('Process CommandRemote Preload API', () => {
 				'session-123',
 				'test command',
 				'ai',
+				undefined,
 				undefined,
 				undefined,
 				undefined,
@@ -154,6 +192,7 @@ describe('Process CommandRemote Preload API', () => {
 				undefined,
 				undefined,
 				false,
+				undefined,
 				undefined
 			);
 		});

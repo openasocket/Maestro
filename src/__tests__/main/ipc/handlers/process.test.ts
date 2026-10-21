@@ -31,6 +31,10 @@ import {
 } from '../../../../main/agents/omp-model-catalog';
 import { runAsActingUser } from '../../../../main/web-server/auth/acting-user';
 import {
+	delegationContextOf,
+	MANAGED_DELEGATION_ENV_VAR,
+} from '../../../../shared/maestro-lib/managed/delegation';
+import {
 	noteTurnActor,
 	resolveTurnActor,
 	resetTurnActors,
@@ -733,6 +737,125 @@ describe('process IPC handlers', () => {
 					}),
 				})
 			);
+		});
+
+		/**
+		 * A dispatched turn (MRC-07-04C): the record of the operation that
+		 * dispatched it arrives on the spawn config, the handler stamps the CHILD
+		 * record on the process so a grandchild dispatch deepens the chain, and
+		 * the sink binds the same request through the ids the handler minted.
+		 */
+		describe('dispatched turn (delegation context)', () => {
+			const initiator = () =>
+				delegationContextOf({
+					identity: {
+						requestId: 'req-cue-1',
+						idempotencyKey: 'req-cue-1',
+						attemptId: 'att-cue-1',
+						runId: 'run-cue-1',
+						rootRunId: 'run-root',
+						parentRunId: null,
+					},
+					traceId: 'cue:run-root:req-cue-1:att-cue-1',
+					workflow: null,
+					delegation: { chain: [{ kind: 'agent', id: 'owner-agent' }], grantRef: null },
+					policyRevision: null,
+				});
+
+			it('stamps the child record on the process and hands the sink the same ids', async () => {
+				mockAgentDetector.getAgent.mockResolvedValue({ id: 'opencode', requiresPty: false });
+				mockProcessManager.spawn.mockReturnValue({ pid: 2002, success: true });
+				const delegation = initiator();
+
+				const handler = handlers.get('process:spawn');
+				await handler!({} as any, {
+					sessionId: 'agent-x-ai-tab-3',
+					tabId: 'tab-3',
+					toolType: 'opencode',
+					cwd: '/test',
+					command: 'opencode',
+					args: [],
+					delegation,
+				});
+
+				expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				const spawned = mockProcessManager.spawn.mock.calls[0][0];
+				// The parent record is carried as it is for the sink to bind.
+				expect(spawned.delegation).toEqual(delegation);
+				expect(spawned.dispatchedAs).toEqual({
+					requestId: expect.any(String),
+					attemptId: expect.any(String),
+				});
+				const stamped = JSON.parse(spawned.customEnvVars[MANAGED_DELEGATION_ENV_VAR]);
+				expect(stamped).toMatchObject({
+					identity: {
+						requestId: spawned.dispatchedAs.requestId,
+						attemptId: spawned.dispatchedAs.attemptId,
+						runId: spawned.dispatchedAs.requestId,
+						rootRunId: 'run-root',
+						parentRunId: 'run-cue-1',
+					},
+					traceId: `delegated:run-root:${spawned.dispatchedAs.requestId}:${spawned.dispatchedAs.attemptId}`,
+					delegation: {
+						chain: [
+							{ kind: 'agent', id: 'owner-agent' },
+							{ kind: 'agent', id: 'agent-x' },
+						],
+						grantRef: null,
+					},
+					workflow: null,
+					policyRevision: null,
+				});
+				// Beside the caller identity, over the user layers.
+				expect(spawned.customEnvVars.MAESTRO_CALLER_AGENT_ID).toBe('agent-x');
+			});
+
+			it('refuses a record that is not a context before anything starts', async () => {
+				mockAgentDetector.getAgent.mockResolvedValue({ id: 'opencode', requiresPty: false });
+				mockProcessManager.spawn.mockReturnValue({ pid: 2003, success: true });
+
+				const handler = handlers.get('process:spawn');
+				const result = await handler!({} as any, {
+					sessionId: 'agent-x-ai-tab-3',
+					tabId: 'tab-3',
+					toolType: 'opencode',
+					cwd: '/test',
+					command: 'opencode',
+					args: [],
+					delegation: { ...initiator(), extra: 'field' },
+				});
+
+				expect(result).toMatchObject({ success: false, pid: 0 });
+				expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+				const window = deps.getMainWindow() as unknown as {
+					webContents: { send: ReturnType<typeof vi.fn> };
+				};
+				expect(window.webContents.send).toHaveBeenCalledWith(
+					'process:data',
+					'agent-x-ai-tab-3',
+					expect.stringContaining('unknown field "extra"')
+				);
+			});
+
+			it('stamps nothing and mints nothing on a turn that carries no record', async () => {
+				mockAgentDetector.getAgent.mockResolvedValue({ id: 'opencode', requiresPty: false });
+				mockProcessManager.spawn.mockReturnValue({ pid: 2004, success: true });
+
+				const handler = handlers.get('process:spawn');
+				await handler!({} as any, {
+					sessionId: 'agent-x-ai-tab-3',
+					tabId: 'tab-3',
+					toolType: 'opencode',
+					cwd: '/test',
+					command: 'opencode',
+					args: [],
+				});
+
+				const spawned = mockProcessManager.spawn.mock.calls[0][0];
+				expect(spawned.dispatchedAs).toBeUndefined();
+				expect(spawned.delegation).toBeUndefined();
+				expect(spawned.customEnvVars?.[MANAGED_DELEGATION_ENV_VAR]).toBeUndefined();
+			});
 		});
 
 		/**

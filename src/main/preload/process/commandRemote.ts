@@ -1,5 +1,6 @@
 import { ipcRenderer } from 'electron';
 import type { AgentDelegationNotice } from '../../../shared/agentDelegation';
+import type { ManagedDelegationContext } from '../../../shared/maestro-lib/managed/delegation';
 
 /**
  * Helper to log via the main process logger.
@@ -21,6 +22,12 @@ export function createCommandRemoteApi() {
 		 * `success` reflects delivery rather than "an IPC send was issued". It is
 		 * undefined for senders that do not wait for a receipt (main's own
 		 * `remote:executeCommand` sends), so the renderer must tolerate that.
+		 *
+		 * `delegation` is the context of the operation that dispatched the prompt
+		 * (a Cue `mode: cli` action, an agent's `maestro-cli dispatch`), already
+		 * narrowed in main; the renderer puts it on the spawn config so the turn
+		 * is admitted as that operation's child. It sits BEFORE the receipt
+		 * channel because main appends that channel last.
 		 */
 		onRemoteCommand: (
 			callback: (
@@ -31,6 +38,7 @@ export function createCommandRemoteApi() {
 				force?: boolean,
 				images?: string[],
 				background?: boolean,
+				delegation?: ManagedDelegationContext,
 				receiptChannel?: string
 			) => void
 		): (() => void) => {
@@ -44,6 +52,7 @@ export function createCommandRemoteApi() {
 				force?: boolean,
 				images?: string[],
 				background?: boolean,
+				delegation?: ManagedDelegationContext,
 				receiptChannel?: string
 			) => {
 				log('Received remote:executeCommand IPC', {
@@ -54,10 +63,21 @@ export function createCommandRemoteApi() {
 					force,
 					imageCount: images?.length ?? 0,
 					background,
+					delegated: delegation !== undefined,
 					receiptChannel,
 				});
 				try {
-					callback(sessionId, command, inputMode, tabId, force, images, background, receiptChannel);
+					callback(
+						sessionId,
+						command,
+						inputMode,
+						tabId,
+						force,
+						images,
+						background,
+						delegation,
+						receiptChannel
+					);
 				} catch (error) {
 					ipcRenderer.invoke(
 						'logger:log',

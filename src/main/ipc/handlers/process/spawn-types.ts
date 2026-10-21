@@ -1,6 +1,7 @@
 import type { AdditionalDirectory } from '../../../../shared/types';
 import type { CodexTransport } from '../../../../shared/codexTransport';
 import type { AutoRunSpawnLineage } from '../../../../shared/maestro-lib/autorun/attribution';
+import type { ManagedDelegationContext } from '../../../../shared/maestro-lib/managed/delegation';
 
 /**
  * IPC payload for `process:spawn`.
@@ -71,4 +72,12 @@ export interface SpawnProcessConfig {
 	 *  run's owner fence, if any). Carried as it is into `ProcessConfig.autoRun`
 	 *  so the sink admits the attempt on its lineage; absent on a chat turn. */
 	autoRun?: AutoRunSpawnLineage;
+	/** The context of the operation that DISPATCHED this spawn (a Cue `mode:
+	 *  cli` action, an agent's `maestro-cli dispatch`), as the renderer received
+	 *  it on the remote command. Validated by the handler (a record that is not
+	 *  a context refuses the spawn, never a child run as a fresh turn), carried
+	 *  into `ProcessConfig.delegation` for the sink to bind the spawn as that
+	 *  operation's child, and the CHILD's record is stamped on the process so
+	 *  a grandchild dispatch deepens the chain. Absent on a user's own turn. */
+	delegation?: ManagedDelegationContext;
 }

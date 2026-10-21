@@ -262,6 +262,19 @@ export interface ProcessConfig {
 	 *  a fresh chat turn; a managed initiator's child on a standalone host is
 	 *  refused, never run unmanaged in its place. */
 	delegation?: ManagedDelegationContext;
+	/** The request and attempt THIS dispatched spawn is, minted once by the
+	 *  spawn handler that stamps the child's record on the process
+	 *  (`MAESTRO_DELEGATION_CONTEXT`), so the record the sink binds under
+	 *  `delegation` and the record the process carries are the same one
+	 *  (`dispatchedChildContext`). Absent, the sink mints its own, and nothing
+	 *  downstream can know them. Meaningless without `delegation`. */
+	dispatchedAs?: DispatchedSpawnIds;
+}
+
+/** The identity a dispatched spawn is minted as: its own request and attempt. */
+export interface DispatchedSpawnIds {
+	requestId: string;
+	attemptId: string;
 }
 
 /**

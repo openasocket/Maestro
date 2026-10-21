@@ -36,6 +36,7 @@ import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomUUID } from 'crypto';
+import type { ManagedDelegationContext } from '../../shared/maestro-lib/managed/delegation';
 import path from 'path';
 import { existsSync } from 'fs';
 import { app, type BrowserWindow } from 'electron';
@@ -1313,7 +1314,8 @@ export class WebServer {
 				tabId?: string,
 				force?: boolean,
 				images?: string[],
-				background?: boolean
+				background?: boolean,
+				delegation?: ManagedDelegationContext
 			) =>
 				this.callbackRegistry.executeCommand(
 					sessionId,
@@ -1322,7 +1324,8 @@ export class WebServer {
 					tabId,
 					force,
 					images,
-					background
+					background,
+					delegation
 				),
 			switchMode: async (sessionId: string, mode: 'ai' | 'terminal', background?: boolean) =>
 				this.callbackRegistry.switchMode(sessionId, mode, background),
@@ -1374,8 +1377,10 @@ export class WebServer {
 				sessionId: string,
 				prompt: string,
 				background?: boolean,
-				hidden?: boolean
-			) => this.callbackRegistry.newAITabWithPrompt(sessionId, prompt, background, hidden),
+				hidden?: boolean,
+				delegation?: ManagedDelegationContext
+			) =>
+				this.callbackRegistry.newAITabWithPrompt(sessionId, prompt, background, hidden, delegation),
 			consultAgent: async (params: ConsultAgentParams): Promise<ConsultAgentResult> =>
 				this.callbackRegistry.consultAgent(params),
 			noteAgentDelegation: (notice: Parameters<NoteAgentDelegationCallback>[0]) =>
@@ -1387,7 +1392,8 @@ export class WebServer {
 				tabId?: string,
 				images?: string[],
 				background?: boolean,
-				held?: boolean
+				held?: boolean,
+				delegation?: ManagedDelegationContext
 			) =>
 				this.callbackRegistry.enqueueCommand(
 					sessionId,
@@ -1396,7 +1402,8 @@ export class WebServer {
 					tabId,
 					images,
 					background,
-					held
+					held,
+					delegation
 				),
 			listQueue: async (sessionId?: string) => this.callbackRegistry.listQueue(sessionId),
 			removeQueueItem: async (sessionId: string, itemId: string) =>

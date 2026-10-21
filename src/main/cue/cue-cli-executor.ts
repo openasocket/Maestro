@@ -119,19 +119,25 @@ export interface CueCliRouteSupport {
 }
 
 /**
- * The table for the nested dispatch: standalone as always, now with the
- * initiator named on the courier; not qualified under management, because
- * `maestro-cli dispatch` does not yet read the record and the desktop's send
- * path admits the dispatched turn as a fresh chat turn, ending the owner's
- * confinement at the hand-off. Reads `unsupported` until the receiving sink
- * binds the carried context (MRC-07-04B); never flipped from a test or a host flag.
+ * The table for the nested dispatch: standalone as always, with the initiator
+ * named on the courier; not qualified under management. `maestro-cli dispatch`
+ * reads the record and forwards it (MRC-07-04B), the desktop's WS handlers
+ * narrow it and carry it to the renderer beside the prompt, and the spawn
+ * handler and `ProcessManager.admitSpawn()` bind a spawn that carries it as
+ * the initiator's child and stamp the child's record on the process
+ * (MRC-07-04C); but the renderer's send path does not yet put the record it
+ * received on the spawn config it builds (the remote command handler, the
+ * queued item, the new tab's first turn, a resumed or retried turn of the
+ * dispatched tab: MRC-07-04D), so the sink still sees the dispatched turn as a
+ * fresh chat turn of the target. Reads `unsupported` until that carriage is
+ * exercised end to end at the real sink; never flipped from a test or a host flag.
  */
 export function cueCliRouteSupport(): CueCliRouteSupport {
 	return {
 		route: 'nested-dispatch',
 		standalone: 'implemented',
 		managed: 'unsupported',
-		note: 'the dispatched turn is started by the desktop send path, which admits it as a fresh chat turn of the target agent; the initiator context stamped on the courier is not yet read by maestro-cli dispatch nor bound at that spawn sink, so a managed host refuses the action rather than let the owning run confinement end at the hand-off',
+		note: 'the initiator context reaches the desktop (maestro-cli dispatch forwards it, the WS handlers narrow it and carry it to the renderer, and the spawn sink binds a spawn that carries it as the initiator child and stamps the child record on the process), but the renderer send path does not yet put the record on the spawn config it builds, so the dispatched turn is still admitted as a fresh chat turn of the target agent; a managed host refuses the action rather than let the owning run confinement end at the hand-off',
 	};
 }
 

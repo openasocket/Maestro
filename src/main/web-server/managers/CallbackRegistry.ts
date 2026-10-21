@@ -1,4 +1,5 @@
 import type { TranslationReport } from '../../../shared/maestro-lib/translation/types';
+import type { ManagedDelegationContext } from '../../../shared/maestro-lib/managed/delegation';
 /**
  * CallbackRegistry - Manages callback functions for the WebServer
  *
@@ -460,7 +461,8 @@ export class CallbackRegistry {
 		tabId?: string,
 		force?: boolean,
 		images?: string[],
-		background?: boolean
+		background?: boolean,
+		delegation?: ManagedDelegationContext
 	): Promise<boolean> {
 		if (!this.callbacks.executeCommand) return false;
 		return this.callbacks.executeCommand(
@@ -470,7 +472,8 @@ export class CallbackRegistry {
 			tabId,
 			force,
 			images,
-			background
+			background,
+			delegation
 		);
 	}
 
@@ -657,10 +660,11 @@ export class CallbackRegistry {
 		sessionId: string,
 		prompt: string,
 		background?: boolean,
-		hidden?: boolean
+		hidden?: boolean,
+		delegation?: ManagedDelegationContext
 	): Promise<{ success: boolean; tabId?: string }> {
 		if (!this.callbacks.newAITabWithPrompt) return { success: false };
-		return this.callbacks.newAITabWithPrompt(sessionId, prompt, background, hidden);
+		return this.callbacks.newAITabWithPrompt(sessionId, prompt, background, hidden, delegation);
 	}
 
 	async consultAgent(params: ConsultAgentParams): Promise<ConsultAgentResult> {
@@ -682,7 +686,8 @@ export class CallbackRegistry {
 		tabId?: string,
 		images?: string[],
 		background?: boolean,
-		held?: boolean
+		held?: boolean,
+		delegation?: ManagedDelegationContext
 	): Promise<EnqueueCommandResult> {
 		if (!this.callbacks.enqueueCommand) return { success: false, error: 'not configured' };
 		return this.callbacks.enqueueCommand(
@@ -692,7 +697,8 @@ export class CallbackRegistry {
 			tabId,
 			images,
 			background,
-			held
+			held,
+			delegation
 		);
 	}
 

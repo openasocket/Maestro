@@ -34,6 +34,7 @@ import {
 	childDelegationContext,
 	delegationContextProblems,
 	intersectDelegationScope,
+	type ManagedDelegationContext,
 } from '../../shared/maestro-lib/managed/delegation';
 import { argsResumeSession } from './utils/resumeArgs';
 import { PtySpawner } from './spawners/PtySpawner';
@@ -139,11 +140,33 @@ function chatTurnIdentity(): ManagedRunIdentity {
 }
 
 /**
+ * The record a dispatched spawn (`config.delegation`, the context of the
+ * operation that dispatched it) is bound as and stamped with: the CHILD of
+ * that operation, the chain one link deeper (the owning agent), parented under
+ * the initiator's run, the initiator's workflow and fence carried as they are
+ * (this sink mints none, CP-03). The child's own request and attempt are the
+ * ids the spawn handler minted (`config.dispatchedAs`), so the record the
+ * admission binds and the record the process is stamped with
+ * (`MAESTRO_DELEGATION_CONTEXT`, for a grandchild dispatch to deepen) are one
+ * and the same; a config with no minted ids gets fresh ones, which then exist
+ * only in the admission. Undefined for a spawn that carries no record.
+ */
+export function dispatchedChildContext(
+	config: Pick<ProcessConfig, 'sessionId' | 'delegation' | 'dispatchedAs'>
+): ManagedDelegationContext | undefined {
+	if (!config.delegation) return undefined;
+	return childDelegationContext(config.delegation, {
+		link: { kind: 'agent', id: resolveOwningMaestroSessionId(config.sessionId) },
+		requestId: config.dispatchedAs?.requestId ?? generateUUID(),
+		attemptId: config.dispatchedAs?.attemptId ?? generateUUID(),
+	});
+}
+
+/**
  * What a spawn is bound as. An Auto Run attempt is bound on its lineage; a
  * dispatched turn (`config.delegation`) is the CHILD of the operation that
- * dispatched it: the chain one link deeper (the target agent), parented under
- * the initiator's run, the initiator's workflow and fence carried as they are
- * (this sink mints none, CP-03); anything else is a chat turn of its own.
+ * dispatched it (`dispatchedChildContext`); anything else is a chat turn of
+ * its own.
  */
 function spawnContextInput(
 	config: ProcessConfig
@@ -156,12 +179,8 @@ function spawnContextInput(
 			workflow: autoRunWorkflowRef(lineage.attribution.workflow, lineage.fence),
 		};
 	}
-	if (config.delegation) {
-		const child = childDelegationContext(config.delegation, {
-			link: { kind: 'agent', id: resolveOwningMaestroSessionId(config.sessionId) },
-			requestId: generateUUID(),
-			attemptId: generateUUID(),
-		});
+	const child = dispatchedChildContext(config);
+	if (child) {
 		return {
 			identity: child.identity,
 			traceId: child.traceId,

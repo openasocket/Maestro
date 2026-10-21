@@ -806,6 +806,7 @@ describe('useRemoteIntegration', () => {
 					undefined,
 					undefined,
 					undefined,
+					undefined,
 					'receipt-1'
 				);
 			});
@@ -828,6 +829,7 @@ describe('useRemoteIntegration', () => {
 					'session-1',
 					'test command',
 					'ai',
+					undefined,
 					undefined,
 					undefined,
 					undefined,
@@ -859,6 +861,7 @@ describe('useRemoteIntegration', () => {
 					undefined,
 					undefined,
 					undefined,
+					undefined,
 					'receipt-3'
 				);
 			});
@@ -871,6 +874,44 @@ describe('useRemoteIntegration', () => {
 			);
 			expect(window.maestro.process.sendRemoteCommandReceipt).not.toHaveBeenCalled();
 
+			dispatchEventSpy.mockRestore();
+		});
+
+		it('carries the delegation context into the remote command event (MRC-07-04C)', () => {
+			// The dispatching operation's record rides in the slot before the
+			// receipt channel and reaches the handler that builds the spawn.
+			const session = createMockSession({ id: 'session-1', state: 'idle' });
+			const deps = createDeps({ sessions: [session] });
+			const dispatchEventSpy = vi.spyOn(window, 'dispatchEvent');
+			const delegation = { contractVersion: '1.0', traceId: 't' } as never;
+
+			renderHook(() => useRemoteIntegration(deps));
+
+			act(() => {
+				onRemoteCommandHandler?.(
+					'session-1',
+					'go',
+					'ai',
+					'tab-1',
+					undefined,
+					undefined,
+					true,
+					delegation,
+					'receipt-4'
+				);
+			});
+
+			const event = dispatchEventSpy.mock.calls
+				.map(([e]) => e as CustomEvent)
+				.find((e) => e.type === 'maestro:remoteCommand');
+			expect(event?.detail).toEqual(
+				expect.objectContaining({
+					sessionId: 'session-1',
+					tabId: 'tab-1',
+					delegation,
+					receiptChannel: 'receipt-4',
+				})
+			);
 			dispatchEventSpy.mockRestore();
 		});
 

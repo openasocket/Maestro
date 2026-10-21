@@ -23,17 +23,24 @@ import {
 	CALLER_TAB_ID_ENV_VAR,
 	buildCallerIdentityEnv,
 } from '../../../../shared/agentDelegation';
+import { MANAGED_DELEGATION_ENV_VAR } from '../../../../shared/maestro-lib/managed/delegation';
 
 describe('envBuilder caller identity', () => {
 	const saved = new Map<string, string | undefined>();
 
 	beforeEach(() => {
-		for (const key of [CALLER_AGENT_ID_ENV_VAR, CALLER_TAB_ID_ENV_VAR]) {
+		for (const key of [
+			CALLER_AGENT_ID_ENV_VAR,
+			CALLER_TAB_ID_ENV_VAR,
+			MANAGED_DELEGATION_ENV_VAR,
+		]) {
 			saved.set(key, process.env[key]);
 		}
-		// What Maestro inherits when it was launched from inside another agent.
+		// What Maestro inherits when it was launched from inside another agent
+		// (or from a dispatched turn: the launcher's own delegation record).
 		process.env[CALLER_AGENT_ID_ENV_VAR] = 'launcher-agent';
 		process.env[CALLER_TAB_ID_ENV_VAR] = 'launcher-tab';
+		process.env[MANAGED_DELEGATION_ENV_VAR] = '{"stale":true}';
 	});
 
 	afterEach(() => {
@@ -44,21 +51,27 @@ describe('envBuilder caller identity', () => {
 		saved.clear();
 	});
 
-	it('strips an inherited identity from an agent spawn', () => {
+	it('strips an inherited identity and delegation record from an agent spawn', () => {
 		const env = buildChildProcessEnv();
 		expect(env[CALLER_AGENT_ID_ENV_VAR]).toBeUndefined();
 		expect(env[CALLER_TAB_ID_ENV_VAR]).toBeUndefined();
+		expect(env[MANAGED_DELEGATION_ENV_VAR]).toBeUndefined();
 	});
 
-	it('keeps the identity the spawn stamps through the session layer', () => {
-		const env = buildChildProcessEnv(buildCallerIdentityEnv('agent-1', 'tab-1'));
+	it('keeps the identity and record the spawn stamps through the session layer', () => {
+		const env = buildChildProcessEnv({
+			...buildCallerIdentityEnv('agent-1', 'tab-1'),
+			[MANAGED_DELEGATION_ENV_VAR]: '{"child":true}',
+		});
 		expect(env[CALLER_AGENT_ID_ENV_VAR]).toBe('agent-1');
 		expect(env[CALLER_TAB_ID_ENV_VAR]).toBe('tab-1');
+		expect(env[MANAGED_DELEGATION_ENV_VAR]).toBe('{"child":true}');
 	});
 
-	it('never hands an identity to a terminal the user drives', () => {
+	it('never hands an identity or a record to a terminal the user drives', () => {
 		const env = buildPtyTerminalEnv();
 		expect(env[CALLER_AGENT_ID_ENV_VAR]).toBeUndefined();
 		expect(env[CALLER_TAB_ID_ENV_VAR]).toBeUndefined();
+		expect(env[MANAGED_DELEGATION_ENV_VAR]).toBeUndefined();
 	});
 });

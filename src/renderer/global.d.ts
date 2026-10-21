@@ -109,6 +109,13 @@ interface ProcessConfig {
 	 *  it is into the main process's `ProcessConfig.autoRun`, where the sink
 	 *  admits the task on its lineage. Absent on a chat spawn. */
 	autoRun?: import('../shared/maestro-lib/autorun/attribution').AutoRunSpawnLineage;
+	/** The context of the operation that DISPATCHED this spawn (a Cue `mode:
+	 *  cli` action, an agent's `maestro-cli dispatch`), as it arrived on the
+	 *  remote command. Carried as it is into the main process's
+	 *  `ProcessConfig.delegation`, where the sink binds the spawn as that
+	 *  operation's child and stamps the child's record on the process. Absent
+	 *  on a turn the user or an Auto Run started. */
+	delegation?: import('../shared/maestro-lib/managed/delegation').ManagedDelegationContext;
 }
 
 type AgentConfigOption = import('../shared/types').AgentConfigOption;
@@ -556,6 +563,7 @@ interface MaestroAPI {
 				force?: boolean,
 				images?: string[],
 				background?: boolean,
+				delegation?: import('../shared/maestro-lib/managed/delegation').ManagedDelegationContext,
 				receiptChannel?: string
 			) => void
 		) => () => void;
@@ -861,7 +869,8 @@ interface MaestroAPI {
 				prompt: string,
 				responseChannel: string,
 				background?: boolean,
-				hidden?: boolean
+				hidden?: boolean,
+				delegation?: import('../shared/maestro-lib/managed/delegation').ManagedDelegationContext
 			) => void
 		) => () => void;
 		sendRemoteNewAITabWithPromptResponse: (
@@ -906,7 +915,8 @@ interface MaestroAPI {
 				tabId?: string,
 				images?: string[],
 				background?: boolean,
-				held?: boolean
+				held?: boolean,
+				delegation?: import('../shared/maestro-lib/managed/delegation').ManagedDelegationContext
 			) => void
 		) => () => void;
 		sendRemoteEnqueueCommandResponse: (

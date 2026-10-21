@@ -63,6 +63,7 @@ import type {
 } from '../../../cue-bundle-service';
 import type { MediaOpenMode } from '../../../../shared/mediaTypes';
 import type { AgentDelegationNotice } from '../../../../shared/agentDelegation';
+import type { ManagedDelegationContext } from '../../../../shared/maestro-lib/managed/delegation';
 import type { GroupAppearance, GroupUpdateRequest } from '../../../../shared/groupAppearance';
 import type { CadenzaPayload } from '../../../../shared/cadenza-types';
 import type { MovementPayload, MovementStateSnapshot } from '../../../../shared/movement-types';
@@ -135,7 +136,9 @@ export interface MessageHandlerCallbacks {
 		tabId?: string,
 		force?: boolean,
 		images?: string[],
-		background?: boolean
+		background?: boolean,
+		/** The context of the operation that dispatched the prompt (see `readDispatchDelegation`). */
+		delegation?: ManagedDelegationContext
 	) => Promise<boolean>;
 	switchMode: (
 		sessionId: string,
@@ -208,7 +211,8 @@ export interface MessageHandlerCallbacks {
 		sessionId: string,
 		prompt: string,
 		background?: boolean,
-		hidden?: boolean
+		hidden?: boolean,
+		delegation?: ManagedDelegationContext
 	) => Promise<{ success: boolean; tabId?: string; queued?: boolean; error?: string }>;
 	/** Consult another agent and return its answer (`maestro-cli ask`). */
 	consultAgent: (params: ConsultAgentParams) => Promise<ConsultAgentResult>;
@@ -221,7 +225,8 @@ export interface MessageHandlerCallbacks {
 		tabId?: string,
 		images?: string[],
 		background?: boolean,
-		held?: boolean
+		held?: boolean,
+		delegation?: ManagedDelegationContext
 	) => Promise<EnqueueCommandResult>;
 	listQueue: (sessionId?: string) => Promise<{
 		success: boolean;

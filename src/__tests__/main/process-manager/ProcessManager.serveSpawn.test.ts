@@ -24,6 +24,7 @@ vi.mock('../../../main/coworking/coworking-socket-path', () => ({
 }));
 
 import { ProcessManager } from '../../../main/process-manager';
+import { dispatchedChildContext } from '../../../main/process-manager/ProcessManager';
 import type { ProcessConfig } from '../../../main/process-manager/types';
 import {
 	buildServerKey,
@@ -480,6 +481,55 @@ describe('ProcessManager admission on a delegated dispatch', () => {
 		if (admitted.state === 'admitted') {
 			expect(admitted.admission.requestId).toBe(context.identity.requestId);
 		}
+	});
+
+	it('binds the child under the ids the spawn handler minted, the record the process is stamped with (MRC-07-04C)', async () => {
+		const { manager, port } = managedManager();
+		const request = config({
+			delegation: initiator(),
+			dispatchedAs: { requestId: 'req-child', attemptId: 'att-child' },
+		});
+		// The one derivation the handler stamps on the process and the sink binds.
+		const child = dispatchedChildContext(request);
+		expect(child).toMatchObject({
+			identity: {
+				requestId: 'req-child',
+				attemptId: 'att-child',
+				runId: 'req-child',
+				rootRunId: 'run-root',
+				parentRunId: 'run-cue-1',
+			},
+			traceId: 'delegated:run-root:req-child:att-child',
+			delegation: {
+				chain: [
+					{ kind: 'agent', id: 'owner-agent' },
+					{ kind: 'agent', id: 'agent-1' },
+				],
+				grantRef: null,
+			},
+			workflow: null,
+			policyRevision: null,
+		});
+		expect(dispatchedChildContext(request)).toEqual(child);
+
+		const admitted = await manager.admitSpawn(request, { peer: 'in-process' });
+		expect(admitted.state).toBe('admitted');
+		const { context } = port.asked[0];
+		expect(context.identity).toEqual(child!.identity);
+		expect(context.traceId).toBe(child!.traceId);
+		expect(context.delegation).toEqual(child!.delegation);
+		if (admitted.state === 'admitted') {
+			expect(admitted.admission.requestId).toBe('req-child');
+		}
+
+		// With no minted ids the sink mints its own, fresh per derivation, and a
+		// config with no record derives nothing.
+		const unminted = config({ delegation: initiator() });
+		const a = dispatchedChildContext(unminted);
+		const b = dispatchedChildContext(unminted);
+		expect(a?.identity.requestId).not.toBe(b?.identity.requestId);
+		expect(a?.delegation).toEqual(child!.delegation);
+		expect(dispatchedChildContext(config())).toBeUndefined();
 	});
 
 	it('carries the initiator workflow and fence as the context workflow, minting nothing', async () => {

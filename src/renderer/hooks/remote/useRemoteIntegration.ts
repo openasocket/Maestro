@@ -7,6 +7,7 @@ import { flushSync } from 'react-dom';
 import type { Session, SessionState, ThinkingMode, QueuedItem, CustomAICommand } from '../../types';
 import type { GroupAppearance, GroupUpdateRequest } from '../../../shared/groupAppearance';
 import type { MediaOpenMode } from '../../../shared/mediaTypes';
+import type { ManagedDelegationContext } from '../../../shared/maestro-lib/managed/delegation';
 import { cueService } from '../../services/cue';
 import { captureException } from '../../utils/sentry';
 import {
@@ -350,6 +351,7 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 				force?: boolean,
 				images?: string[],
 				background?: boolean,
+				delegation?: ManagedDelegationContext,
 				receiptChannel?: string
 			) => {
 				// Delivery receipt for the web server's `executeCommand` promise.
@@ -456,7 +458,18 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 				);
 				window.dispatchEvent(
 					new CustomEvent('maestro:remoteCommand', {
-						detail: { sessionId, command, inputMode, tabId, force, images, receiptChannel },
+						// `delegation` is the dispatching operation's context; the handler
+						// puts it on the spawn config so the sink binds the turn as its child.
+						detail: {
+							sessionId,
+							command,
+							inputMode,
+							tabId,
+							force,
+							images,
+							delegation,
+							receiptChannel,
+						},
 					})
 				);
 				logger.info('[useRemoteIntegration] Event dispatched successfully');
@@ -731,7 +744,8 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 				prompt: string,
 				responseChannel: string,
 				background?: boolean,
-				hidden?: boolean
+				hidden?: boolean,
+				delegation?: ManagedDelegationContext
 			) => {
 				const ack = (result: {
 					success: boolean;
@@ -846,6 +860,7 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 							tabId: createdTabId,
 							// Unexpanded provider commands go to the provider as typed.
 							literalPrompt: commandName.startsWith('/'),
+							delegation,
 						},
 					})
 				);
@@ -1150,7 +1165,8 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 				tabId?: string,
 				images?: string[],
 				background?: boolean,
-				held?: boolean
+				held?: boolean,
+				delegation?: ManagedDelegationContext
 			) => {
 				const reply = (result: {
 					success: boolean;
@@ -1198,7 +1214,14 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 						}
 						window.dispatchEvent(
 							new CustomEvent('maestro:remoteCommand', {
-								detail: { sessionId, command, inputMode: 'ai', tabId: resolvedTabId, images },
+								detail: {
+									sessionId,
+									command,
+									inputMode: 'ai',
+									tabId: resolvedTabId,
+									images,
+									delegation,
+								},
 							})
 						);
 						reply({ success: true, tabId: resolvedTabId, queued: false });

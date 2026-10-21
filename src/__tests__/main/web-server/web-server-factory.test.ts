@@ -939,6 +939,43 @@ describe('web-server/web-server-factory', () => {
 			await expect(resultPromise).resolves.toBe(false);
 		});
 
+		it('forwards the delegation context in the slot before the receipt channel (MRC-07-04C)', async () => {
+			const createWebServer = createWebServerFactory(deps);
+			const server = createWebServer();
+			const setExecuteCallback = server.setExecuteCommandCallback as ReturnType<typeof vi.fn>;
+			const callback = setExecuteCallback.mock.calls[0][0];
+			const delegation = { contractVersion: '1.0', traceId: 't' };
+
+			const resultPromise = callback(
+				'session-1',
+				'go',
+				'ai',
+				'tab-1',
+				undefined,
+				undefined,
+				true,
+				delegation
+			);
+			answerReceipt(true);
+			await expect(resultPromise).resolves.toBe(true);
+
+			const send = mockWebContents.send as ReturnType<typeof vi.fn>;
+			const call = [...send.mock.calls]
+				.reverse()
+				.find((c: unknown[]) => c[0] === 'remote:executeCommand') as unknown[];
+			expect(call.slice(1, 9)).toEqual([
+				'session-1',
+				'go',
+				'ai',
+				'tab-1',
+				undefined,
+				undefined,
+				true,
+				delegation,
+			]);
+			expect(typeof call[9]).toBe('string');
+		});
+
 		it('does not log raw command text at info level (info shows length only)', async () => {
 			const createWebServer = createWebServerFactory(deps);
 			const server = createWebServer();
@@ -1697,7 +1734,29 @@ describe('web-server/web-server-factory', () => {
 				'tab-1',
 				undefined,
 				undefined,
+				undefined,
 				undefined
+			);
+		});
+
+		it('setEnqueueCommandCallback forwards the delegation context last (MRC-07-04C)', () => {
+			const server = createWebServerFactory(deps)() as any;
+			const callback = server.setEnqueueCommandCallback.mock.calls[0][0];
+			const delegation = { contractVersion: '1.0', traceId: 't' };
+
+			void callback('session-1', 'later', 'ai', 'tab-1', undefined, true, true, delegation);
+
+			expect(mockWebContents.send).toHaveBeenCalledWith(
+				'remote:enqueueCommand',
+				'session-1',
+				'later',
+				expect.any(String),
+				'ai',
+				'tab-1',
+				undefined,
+				true,
+				true,
+				delegation
 			);
 		});
 
@@ -2470,6 +2529,7 @@ describe('web-server/web-server-factory', () => {
 				expect.anything(),
 				expect.anything(),
 				expect.anything(),
+				expect.anything(),
 				expect.anything()
 			);
 			const request = secondaryWebContents.send.mock.calls.find(
@@ -2481,6 +2541,7 @@ describe('web-server/web-server-factory', () => {
 				'hello owner',
 				'ai',
 				'tab-1',
+				undefined,
 				undefined,
 				undefined,
 				undefined,

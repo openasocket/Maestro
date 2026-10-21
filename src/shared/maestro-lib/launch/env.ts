@@ -112,6 +112,9 @@ export function buildPtyTerminalEnv(shellEnvVars?: Record<string, string>): Node
 	// and attributing it to whichever agent launched Maestro would be a lie.
 	delete env[CALLER_AGENT_ID_ENV_VAR];
 	delete env[CALLER_TAB_ID_ENV_VAR];
+	// And for a delegation record: a dispatch typed into a terminal is not the
+	// child of whatever operation launched Maestro.
+	delete env[MANAGED_DELEGATION_ENV_VAR];
 
 	// Vim arrow-key ergonomics: when users launch `vi`/`vim` with distro defaults
 	// that force compatible mode, insert-mode arrows can degrade to literal ABCD.
@@ -174,6 +177,10 @@ const STRIPPED_ENV_VARS = [
 	// is merged after this list is stripped, so only a stale inherited copy dies.
 	CALLER_AGENT_ID_ENV_VAR,
 	CALLER_TAB_ID_ENV_VAR,
+	// The delegation record of whatever operation launched Maestro, likewise: a
+	// dispatched turn is stamped with its own child record from the session
+	// layer, and a turn the user started is the child of nothing.
+	MANAGED_DELEGATION_ENV_VAR,
 	// Maestro's own NODE_ENV should not leak to agents
 	'NODE_ENV',
 ];

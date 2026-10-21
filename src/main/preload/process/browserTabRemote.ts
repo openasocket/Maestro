@@ -1,4 +1,5 @@
 import { ipcRenderer } from 'electron';
+import type { ManagedDelegationContext } from '../../../shared/maestro-lib/managed/delegation';
 
 export function createBrowserTabRemoteApi() {
 	return {
@@ -242,7 +243,9 @@ export function createBrowserTabRemoteApi() {
 				prompt: string,
 				responseChannel: string,
 				background?: boolean,
-				hidden?: boolean
+				hidden?: boolean,
+				/** The dispatching operation's context; the renderer puts it on the new tab's first spawn. */
+				delegation?: ManagedDelegationContext
 			) => void
 		): (() => void) => {
 			const handler = (
@@ -251,10 +254,11 @@ export function createBrowserTabRemoteApi() {
 				prompt: string,
 				responseChannel: string,
 				background?: boolean,
-				hidden?: boolean
+				hidden?: boolean,
+				delegation?: ManagedDelegationContext
 			) => {
 				try {
-					callback(sessionId, prompt, responseChannel, background, hidden);
+					callback(sessionId, prompt, responseChannel, background, hidden, delegation);
 				} catch (error) {
 					ipcRenderer.send(responseChannel, false);
 					throw error;

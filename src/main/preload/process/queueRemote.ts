@@ -1,5 +1,6 @@
 import { ipcRenderer } from 'electron';
 import type { QueueSteerResult } from '../../../shared/chatSteering';
+import type { ManagedDelegationContext } from '../../../shared/maestro-lib/managed/delegation';
 
 export function createQueueRemoteApi() {
 	return {
@@ -18,7 +19,9 @@ export function createQueueRemoteApi() {
 				tabId?: string,
 				images?: string[],
 				background?: boolean,
-				held?: boolean
+				held?: boolean,
+				/** The dispatching operation's context; the renderer stores it on the queued item. */
+				delegation?: ManagedDelegationContext
 			) => void
 		): (() => void) => {
 			const handler = (
@@ -30,10 +33,21 @@ export function createQueueRemoteApi() {
 				tabId?: string,
 				images?: string[],
 				background?: boolean,
-				held?: boolean
+				held?: boolean,
+				delegation?: ManagedDelegationContext
 			) => {
 				try {
-					callback(sessionId, command, responseChannel, inputMode, tabId, images, background, held);
+					callback(
+						sessionId,
+						command,
+						responseChannel,
+						inputMode,
+						tabId,
+						images,
+						background,
+						held,
+						delegation
+					);
 				} catch (error) {
 					ipcRenderer.send(responseChannel, { success: false });
 					throw error;

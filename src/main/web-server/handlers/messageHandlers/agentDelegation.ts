@@ -12,7 +12,37 @@
 
 import { captureException } from '../../../utils/sentry';
 import { isSelfDispatch, readCallerMessageFields } from '../../../../shared/agentDelegation';
+import {
+	delegationContextProblems,
+	type ManagedDelegationContext,
+} from '../../../../shared/maestro-lib/managed/delegation';
 import type { MessageHandlerContext, WebClientMessage } from './types';
+
+/**
+ * What a dispatch message carries as the context of the operation that sent
+ * it (`maestro-cli dispatch` forwards the record it read off its shell as
+ * `delegation`, beside `fromSessionId`). None is an ordinary dispatch. One
+ * that is not a context is a refusal with the problems named: the command is
+ * never forwarded as a fresh turn of the target in its place, because the
+ * child of a managed operation that arrives anonymous is exactly the nested
+ * execution a managed restriction must survive (MRC-07-04C).
+ */
+export type DispatchDelegationRead =
+	| { ok: true; delegation?: ManagedDelegationContext }
+	| { ok: false; error: string };
+
+export function readDispatchDelegation(message: WebClientMessage): DispatchDelegationRead {
+	const raw = message.delegation;
+	if (raw === undefined || raw === null) return { ok: true };
+	const problems = delegationContextProblems(raw);
+	if (problems.length > 0) {
+		return {
+			ok: false,
+			error: `The dispatch carries a delegation context that is not one, so it was not sent as a fresh action of the target: ${problems.join('; ')}. Nothing was sent.`,
+		};
+	}
+	return { ok: true, delegation: raw as ManagedDelegationContext };
+}
 
 export interface DeliveredDispatch {
 	targetSessionId: string;

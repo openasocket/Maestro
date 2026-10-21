@@ -5,6 +5,7 @@ import { logger } from '../../utils/logger';
 import { isWebContentsAvailable } from '../../utils/safe-send';
 import { requestFromRenderer } from './remoteRequest';
 import type { ConsultAgentResult } from '../types';
+import type { ManagedDelegationContext } from '../../../shared/maestro-lib/managed/delegation';
 
 /**
  * The renderer's answer to a `remote:executeCommand` send: did it accept the
@@ -96,7 +97,8 @@ export function registerCommandCallbacks(
 			tabId?: string,
 			force?: boolean,
 			images?: string[],
-			background?: boolean
+			background?: boolean,
+			delegation?: ManagedDelegationContext
 		) => {
 			const targetWindow = resolveSessionWindow(sessionId);
 			if (!targetWindow) {
@@ -140,7 +142,9 @@ export function registerCommandCallbacks(
 					fallback: { accepted: false, reason: 'renderer-timeout', timedOut: true },
 					timeoutMs: REMOTE_COMMAND_RECEIPT_TIMEOUT_MS,
 					parse: parseRemoteCommandReceipt,
-					args: [sessionId, command, inputMode, tabId, force, images, background],
+					// The dispatching operation's context rides beside the prompt; the
+					// receipt channel is appended after it by requestFromRenderer.
+					args: [sessionId, command, inputMode, tabId, force, images, background, delegation],
 				}
 			);
 			if (!receipt.accepted) {

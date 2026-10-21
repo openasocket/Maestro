@@ -9,7 +9,7 @@ import { logger } from '../../../utils/logger';
 import { readBackgroundField } from '../../../../shared/focusPlacement';
 import { getDispatchCallbackRegistry } from '../../../dispatch-callbacks';
 import { armDispatchCallback } from './dispatchCallbacks';
-import { noteDispatchDelegation } from './agentDelegation';
+import { noteDispatchDelegation, readDispatchDelegation } from './agentDelegation';
 import { LOG_CONTEXT } from './shared';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
 
@@ -115,6 +115,27 @@ export function handleSendCommand(
 	// the caller-supplied authoritative tabId).
 	const resolvedTabId = requestedTabId;
 
+	// The context of the operation that dispatched this prompt, when one did.
+	// Read before the callback is armed and before the renderer hears of it: a
+	// record that is not a context refuses the whole command (the CLI reads a
+	// `success: false` command_result as DISPATCH_REFUSED), never a fresh turn.
+	const delegationRead = readDispatchDelegation(message);
+	if (!delegationRead.ok) {
+		ctx.send(client, {
+			type: 'command_result',
+			success: false,
+			sessionId,
+			error: delegationRead.error,
+			requestId: message.requestId,
+		});
+		logger.warn(
+			`[Web Command] Dispatch refused for session ${sessionId}: delegation context invalid`,
+			LOG_CONTEXT
+		);
+		return;
+	}
+	const delegation = delegationRead.delegation;
+
 	// Arm a `--notify-on-complete` callback BEFORE handing the prompt to the
 	// renderer: the renderer can spawn the agent process before this handler's
 	// promise resolves, and an entry registered after that spawn would sit
@@ -155,7 +176,8 @@ export function handleSendCommand(
 				requestedTabId,
 				force,
 				images,
-				background
+				background,
+				delegation
 			)
 			.then((success) => {
 				if (!success) cancelArmedCallback();

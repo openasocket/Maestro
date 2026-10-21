@@ -10,7 +10,7 @@ import { logger } from '../../../utils/logger';
 import { captureException } from '../../../utils/sentry';
 import { getDispatchCallbackRegistry } from '../../../dispatch-callbacks';
 import { armDispatchCallback } from './dispatchCallbacks';
-import { noteDispatchDelegation } from './agentDelegation';
+import { noteDispatchDelegation, readDispatchDelegation } from './agentDelegation';
 import { LOG_CONTEXT } from './shared';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
 
@@ -69,6 +69,17 @@ export function handleEnqueueCommand(
 		return;
 	}
 
+	// The dispatching operation's context, read before anything is armed or
+	// queued; a record that is not a context refuses the command outright. The
+	// renderer stores the record on the queued item so it travels with the
+	// prompt to the spawn when the item is its turn, minutes later.
+	const delegationRead = readDispatchDelegation(message);
+	if (!delegationRead.ok) {
+		sendErrorResult(delegationRead.error);
+		return;
+	}
+	const delegation = delegationRead.delegation;
+
 	// Same pre-arm rationale as send_command. A queued prompt can sit behind a
 	// predecessor turn for minutes; the entry stays `pending` until OUR
 	// process spawns, so the predecessor's exit cannot fire it.
@@ -102,7 +113,8 @@ export function handleEnqueueCommand(
 			requestedTabId,
 			images,
 			background,
-			held
+			held,
+			delegation
 		)
 		.then((result) => {
 			if (!result.success) cancelArmedCallback();

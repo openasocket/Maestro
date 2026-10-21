@@ -72,6 +72,7 @@ import {
 	subscribeFeedbackIssue,
 } from '../../../../main/feedback';
 import { generateDebugPackage } from '../../../../main/debug-package';
+import { delegationContextOf } from '../../../../shared/maestro-lib/managed/delegation';
 
 // Mock the logger
 vi.mock('../../../../main/utils/logger', () => ({
@@ -567,7 +568,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					false,
 					undefined,
-					false
+					false,
+					undefined
 				);
 			});
 
@@ -652,7 +654,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					false,
 					undefined,
-					false
+					false,
+					undefined
 				);
 			});
 		});
@@ -718,7 +721,8 @@ describe('WebSocketMessageHandler', () => {
 					'tab-explicit',
 					false,
 					undefined,
-					false
+					false,
+					undefined
 				);
 			});
 
@@ -749,7 +753,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					false,
 					images,
-					false
+					false,
+					undefined
 				);
 			});
 
@@ -788,7 +793,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					false,
 					images,
-					false
+					false,
+					undefined
 				);
 			});
 		});
@@ -812,7 +818,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					true,
 					undefined,
-					false
+					false,
+					undefined
 				);
 			});
 
@@ -838,7 +845,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					false,
 					undefined,
-					true
+					true,
+					undefined
 				);
 			});
 		});
@@ -862,7 +870,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					false,
 					undefined,
-					false
+					false,
+					undefined
 				);
 			});
 		});
@@ -916,6 +925,196 @@ describe('WebSocketMessageHandler', () => {
 				const lastResponse = JSON.parse(calls[calls.length - 1][0]);
 				expect(lastResponse.type).toBe('error');
 				expect(lastResponse.message).toContain('Execution failed');
+			});
+		});
+	});
+
+	/**
+	 * The dispatch wire of a delegated turn (MRC-07-04C): the record
+	 * `maestro-cli dispatch` read off its shell arrives as `delegation` on all
+	 * three dispatch messages, is narrowed here, and is carried to the renderer
+	 * beside the prompt; one that is not a context refuses the whole command
+	 * before anything is armed, queued or created, never a fresh turn in its place.
+	 */
+	describe('Dispatch delegation context (MRC-07-04C)', () => {
+		const initiator = () =>
+			delegationContextOf({
+				identity: {
+					requestId: 'req-cue-1',
+					idempotencyKey: 'req-cue-1',
+					attemptId: 'att-cue-1',
+					runId: 'run-cue-1',
+					rootRunId: 'run-root',
+					parentRunId: null,
+				},
+				traceId: 'cue:run-root:req-cue-1:att-cue-1',
+				workflow: null,
+				delegation: { chain: [{ kind: 'agent', id: 'owner-agent' }], grantRef: null },
+				policyRevision: null,
+			});
+		const malformed = () => ({ ...initiator(), extra: 'field' });
+		const lastSend = (): Record<string, unknown> => {
+			const calls = vi.mocked(client.socket.send).mock.calls;
+			return JSON.parse(String(calls[calls.length - 1][0]));
+		};
+
+		it('send_command carries the record to executeCommand beside the prompt', async () => {
+			const delegation = initiator();
+			handler.handleMessage(client, {
+				type: 'send_command',
+				sessionId: 'session-1',
+				command: 'go',
+				inputMode: 'ai',
+				tabId: 'tab-1',
+				background: true,
+				fromSessionId: 'owner-agent',
+				delegation,
+			});
+			await vi.waitFor(() => {
+				expect(callbacks.executeCommand).toHaveBeenCalledWith(
+					'session-1',
+					'go',
+					'ai',
+					'tab-1',
+					false,
+					undefined,
+					true,
+					delegation
+				);
+			});
+			expect(lastSend()).toMatchObject({ type: 'command_result', success: true });
+		});
+
+		it('send_command refuses a record that is not a context, unforwarded and unarmed', async () => {
+			handler.handleMessage(client, {
+				type: 'send_command',
+				sessionId: 'session-1',
+				command: 'go',
+				inputMode: 'ai',
+				tabId: 'tab-1',
+				requestId: 'r-1',
+				fromSessionId: 'owner-agent',
+				notifyOnComplete: 'caller-1',
+				delegation: malformed(),
+			});
+			await vi.waitFor(() => {
+				expect(lastSend()).toMatchObject({
+					type: 'command_result',
+					success: false,
+					sessionId: 'session-1',
+					requestId: 'r-1',
+					error: expect.stringContaining('unknown field "extra"'),
+				});
+			});
+			expect(callbacks.executeCommand).not.toHaveBeenCalled();
+			expect(callbacks.noteAgentDelegation).not.toHaveBeenCalled();
+			expect(getDispatchCallbackRegistry()?.hasArmedFor('session-1', 'tab-1') ?? false).toBe(false);
+		});
+
+		it('enqueue_command carries the record to enqueueCommand, after held', async () => {
+			const delegation = initiator();
+			handler.handleMessage(client, {
+				type: 'enqueue_command',
+				sessionId: 'session-1',
+				command: 'later',
+				inputMode: 'ai',
+				tabId: 'tab-1',
+				held: true,
+				delegation,
+			});
+			await vi.waitFor(() => {
+				expect(callbacks.enqueueCommand).toHaveBeenCalledWith(
+					'session-1',
+					'later',
+					'ai',
+					'tab-1',
+					undefined,
+					false,
+					true,
+					delegation
+				);
+			});
+		});
+
+		it('enqueue_command refuses a record that is not a context before queuing', async () => {
+			handler.handleMessage(client, {
+				type: 'enqueue_command',
+				sessionId: 'session-1',
+				command: 'later',
+				inputMode: 'ai',
+				requestId: 'r-2',
+				delegation: malformed(),
+			});
+			await vi.waitFor(() => {
+				expect(lastSend()).toMatchObject({
+					type: 'enqueue_command_result',
+					success: false,
+					requestId: 'r-2',
+					error: expect.stringContaining('unknown field "extra"'),
+				});
+			});
+			expect(callbacks.enqueueCommand).not.toHaveBeenCalled();
+		});
+
+		it('new_ai_tab_with_prompt carries the record to newAITabWithPrompt, after hidden', async () => {
+			const delegation = initiator();
+			handler.handleMessage(client, {
+				type: 'new_ai_tab_with_prompt',
+				sessionId: 'session-1',
+				prompt: 'build it',
+				background: true,
+				hidden: true,
+				delegation,
+			});
+			await vi.waitFor(() => {
+				expect(callbacks.newAITabWithPrompt).toHaveBeenCalledWith(
+					'session-1',
+					'build it',
+					true,
+					true,
+					delegation
+				);
+			});
+		});
+
+		it('new_ai_tab_with_prompt refuses a record that is not a context before the tab exists', async () => {
+			handler.handleMessage(client, {
+				type: 'new_ai_tab_with_prompt',
+				sessionId: 'session-1',
+				prompt: 'build it',
+				requestId: 'r-3',
+				delegation: malformed(),
+			});
+			await vi.waitFor(() => {
+				expect(lastSend()).toMatchObject({
+					type: 'new_ai_tab_with_prompt_result',
+					success: false,
+					requestId: 'r-3',
+					error: expect.stringContaining('unknown field "extra"'),
+				});
+			});
+			expect(callbacks.newAITabWithPrompt).not.toHaveBeenCalled();
+		});
+
+		it('an absent or null record is an ordinary dispatch', async () => {
+			handler.handleMessage(client, {
+				type: 'send_command',
+				sessionId: 'session-1',
+				command: 'go',
+				inputMode: 'ai',
+				delegation: null,
+			});
+			await vi.waitFor(() => {
+				expect(callbacks.executeCommand).toHaveBeenCalledWith(
+					'session-1',
+					'go',
+					'ai',
+					undefined,
+					false,
+					undefined,
+					false,
+					undefined
+				);
 			});
 		});
 	});
@@ -2499,7 +2698,8 @@ describe('WebSocketMessageHandler', () => {
 					'session-1',
 					'Summarize the repo',
 					false,
-					false
+					false,
+					undefined
 				);
 			});
 
@@ -2525,7 +2725,8 @@ describe('WebSocketMessageHandler', () => {
 					'session-1',
 					'Summarize the repo',
 					true,
-					false
+					false,
+					undefined
 				);
 			});
 		});
@@ -2544,7 +2745,8 @@ describe('WebSocketMessageHandler', () => {
 					'session-1',
 					'Summarize the repo',
 					true,
-					true
+					true,
+					undefined
 				);
 			});
 		});
@@ -2563,7 +2765,8 @@ describe('WebSocketMessageHandler', () => {
 					'session-1',
 					'Summarize the repo',
 					false,
-					false
+					false,
+					undefined
 				);
 			});
 		});
@@ -2874,7 +3077,8 @@ describe('WebSocketMessageHandler', () => {
 					'tab-1',
 					undefined,
 					true,
-					false
+					false,
+					undefined
 				);
 			});
 
@@ -3070,7 +3274,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					undefined,
 					false,
-					true
+					true,
+					undefined
 				);
 			});
 		});
