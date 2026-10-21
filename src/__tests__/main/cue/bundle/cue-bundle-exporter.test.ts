@@ -15,6 +15,7 @@ import {
 	assignWorkspaceKeys,
 	CueBundleExportInvalidError,
 	exportCueBundle,
+	isForbiddenBundleEntry,
 	isWithin,
 	scrubGitRemote,
 } from '../../../../main/cue/bundle/cue-bundle-exporter';
@@ -958,5 +959,126 @@ describe('helpers', () => {
 		expect(scrubGitRemote('https://user:pass@gitlab.com/o/r')).toBe('https://gitlab.com/o/r');
 		expect(scrubGitRemote('git@github.com:o/r.git')).toBe('git@github.com:o/r.git');
 		expect(scrubGitRemote('ssh://git:pw@host/o/r')).toBe('ssh://git@host/o/r');
+	});
+});
+
+// ─── Portable bundle governance (MRC-05-06) ──────────────────────────────────
+
+describe('exportCueBundle - managed governance', () => {
+	const LEASE_VALUE = 'lease-value-must-never-appear';
+	const GRANT_VALUE = 'grant-value-must-never-appear';
+
+	it('names what never enters a bundle, by file and by directory, and nothing else', () => {
+		for (const entry of [
+			'enterprise-identity.bin',
+			'data/maestro-managed-dispatch-receipts.json',
+			'data/maestro-managed-binding.json',
+			'lite-device-credentials.bin',
+			'workspaces/proj/.claude/.credentials.json',
+			'workspaces/proj/.codex/auth.json',
+			'workspaces/proj/.env',
+			'workspaces/proj/.env.production',
+			'workspaces/proj/.ssh/config',
+			'workspaces/proj/certs/server.pem',
+			'browser/Local Storage/leveldb/000003.log',
+			'browser/Cookies',
+			'plugin-grants.json',
+			'runs/launch.lease',
+		]) {
+			expect(isForbiddenBundleEntry(entry), entry).toBe(true);
+		}
+		for (const entry of [
+			'README.md',
+			'workspaces/proj/.maestro/cue.yaml',
+			'workspaces/proj/.env.md',
+			'workspaces/proj/docs/credentials-policy.md',
+			'agents/agent-a.json',
+			'workspaces/proj/src/auth.ts',
+		]) {
+			expect(isForbiddenBundleEntry(entry), entry).toBe(false);
+		}
+	});
+
+	it('refuses the export when any path would bundle a credential-shaped file', async () => {
+		write(path.join(betaRoot, '.maestro/prompts/auth.json'), '{"token":"x"}');
+		writeCueYaml(betaRoot, {
+			subscriptions: [
+				{
+					name: 'chain',
+					event: 'agent.completed',
+					agent_id: 'agent-beta',
+					pipeline_name: 'Review',
+					source_session: ['Alpha'],
+					source_session_ids: ['agent-alpha'],
+					prompt_file: '.maestro/prompts/auth.json',
+				},
+			],
+		});
+		const out = path.join(tmp, 'out', 'review.zip');
+		await expect(
+			exportCueBundle({ dataDir, pipeline: 'Review', outputPath: out, env: ENV })
+		).rejects.toThrow(/never enter a bundle/);
+		expect(fs.existsSync(out)).toBe(false);
+	});
+
+	it('exports managed requirements as opaque reference ids only and drops authority-shaped env', async () => {
+		const sessionsFile = path.join(dataDir, 'maestro-sessions.json');
+		const store = JSON.parse(fs.readFileSync(sessionsFile, 'utf-8')) as {
+			sessions: Array<Record<string, unknown>>;
+		};
+		const alpha = store.sessions.find((s) => s.id === 'agent-alpha')!;
+		alpha.managedCredentialRefs = ['cred-2', 'cred-1', 'cred-1', ''];
+		alpha.customEnvVars = {
+			...(alpha.customEnvVars as Record<string, string>),
+			MAESTRO_MANAGED_LEASE: LEASE_VALUE,
+			TEAM_GRANT_TOKEN: GRANT_VALUE,
+			ENROLLMENT_ID: 'enrollment-value',
+		};
+		writeJson(sessionsFile, store);
+
+		const out = path.join(tmp, 'out', 'alpha.zip');
+		const result = await exportCueBundle({
+			dataDir,
+			agentId: 'agent-alpha',
+			outputPath: out,
+			env: ENV,
+		});
+		const entries = readZip(out);
+		const manifest = manifestOf(entries);
+		const settings = JSON.parse(
+			entries.get('agents/agent-alpha.json')!.toString('utf-8')
+		) as CueBundleAgentSettings;
+
+		expect(settings.managed).toEqual({ credentialRefs: ['cred-1', 'cred-2'] });
+		expect(manifest.requirements.managed).toEqual({ credentialRefs: ['cred-1', 'cred-2'] });
+		// Not a value, not a name: the authority-shaped variables are gone entirely.
+		expect(settings.env?.required ?? []).not.toContain('MAESTRO_MANAGED_LEASE');
+		expect(settings.env?.required ?? []).not.toContain('TEAM_GRANT_TOKEN');
+		expect(settings.env?.required ?? []).not.toContain('ENROLLMENT_ID');
+		expect(Object.keys(settings.env?.values ?? {})).not.toContain('ENROLLMENT_ID');
+		for (const [name, bytes] of entries) {
+			const text = bytes.toString('utf-8');
+			expect(text, name).not.toContain(LEASE_VALUE);
+			expect(text, name).not.toContain(GRANT_VALUE);
+			expect(text, name).not.toContain('enrollment-value');
+			expect(text, name).not.toContain(SECRET_VALUE);
+		}
+		expect(
+			result.manifest.warnings?.some(
+				(w) => w.includes('MAESTRO_MANAGED_LEASE') && w.includes('not exported')
+			)
+		).toBe(true);
+	});
+
+	it('leaves a bundle without managed requirements byte-identical to before', async () => {
+		const out = path.join(tmp, 'out', 'review.zip');
+		await exportCueBundle({ dataDir, pipeline: 'Review', outputPath: out, env: ENV });
+		const entries = readZip(out);
+		const manifest = manifestOf(entries);
+		expect(manifest.requirements.managed).toBeUndefined();
+		for (const agent of manifest.agents) {
+			const settings = JSON.parse(entries.get(agent.settings)!.toString('utf-8'));
+			expect(settings.managed).toBeUndefined();
+		}
 	});
 });

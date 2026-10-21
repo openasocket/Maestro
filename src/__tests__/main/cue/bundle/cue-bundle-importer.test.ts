@@ -565,6 +565,101 @@ describe('importCueBundle against a fixture bundle', () => {
 		});
 	});
 
+	describe('managed requirements (archive is not authority)', () => {
+		const declaring = (credentialRefs: string[]) => ({
+			files: (files: Map<string, string>) => {
+				const agent = JSON.parse(files.get('agents/agent-a.json')!);
+				if (credentialRefs.length > 0) agent.managed = { credentialRefs };
+				else delete agent.managed;
+				files.set('agents/agent-a.json', JSON.stringify(agent));
+			},
+		});
+
+		it('refuses an archive that carries a credential, grant or enrollment file before reading anything', async () => {
+			const error = await refused(
+				options({
+					files: (files) => {
+						files.set('workspaces/proj/.claude/.credentials.json', '{"token":"x"}');
+						files.set('workspaces/proj/.env', 'KEY=value');
+					},
+				})
+			);
+			expect(error.code).toBe('FORBIDDEN_ENTRY');
+			expect(error.message).toContain('.credentials.json');
+			expect(error.message).toContain('.env');
+		});
+
+		it('refuses declared credential references when no host policy can validate them', async () => {
+			const error = await refused(options(declaring(['cred-1'])));
+			expect(error.code).toBe('MANAGED_POLICY_REQUIRED');
+			expect(error.message).toContain('cred-1');
+		});
+
+		it('refuses the import when the host policy refuses or does not answer a reference', async () => {
+			const refusing = await refused(
+				options(declaring(['cred-1', 'cred-2']), {
+					managedPolicy: {
+						validateCredentialRefs: () => ({
+							approved: ['cred-1'],
+							refused: [{ refId: 'cred-2', reason: 'not issued to this tenant' }],
+						}),
+					},
+				})
+			);
+			expect(refusing.code).toBe('MANAGED_CREDENTIAL_REFUSED');
+			expect(refusing.message).toContain('cred-2 (not issued to this tenant)');
+
+			const silent = await refused(
+				options(declaring(['cred-1']), {
+					managedPolicy: { validateCredentialRefs: () => ({ approved: [], refused: [] }) },
+				})
+			);
+			expect(silent.code).toBe('MANAGED_CREDENTIAL_REFUSED');
+			expect(silent.message).toContain('cred-1 (no answer)');
+		});
+
+		it('writes only the ids the host policy approved, asks about the right agent, and reports them', async () => {
+			const asked: unknown[] = [];
+			const managedPolicy = {
+				validateCredentialRefs: async (input: unknown) => {
+					asked.push(input);
+					return { approved: ['cred-1', 'not-declared'], refused: [] };
+				},
+			};
+			const plan = await planCueBundleImport(options(declaring(['cred-1']), { managedPolicy }));
+			expect(plan.managed).toEqual([
+				{
+					agentId: 'agent-a',
+					agentName: 'Alpha',
+					credentialRefs: ['cred-1'],
+					approved: ['cred-1'],
+				},
+			]);
+			expect(asked).toEqual([
+				{
+					refIds: ['cred-1'],
+					agent: { id: 'agent-a', name: 'Alpha', toolType: 'claude-code', workspace: 'proj' },
+				},
+			]);
+
+			await importCueBundle(options(declaring(['cred-1']), { managedPolicy }));
+			const [agent] = readSessionsStoreFile(dataDir).sessions;
+			expect(agent.managedCredentialRefs).toEqual(['cred-1']);
+
+			await importCueBundle(options(declaring([]), { force: true }));
+			expect(readSessionsStoreFile(dataDir).sessions[0].managedCredentialRefs).toBeUndefined();
+		});
+
+		it('imports a bundle with no managed requirements without asking any policy', async () => {
+			const validateCredentialRefs = vi.fn();
+			const plan = await planCueBundleImport(
+				options({}, { managedPolicy: { validateCredentialRefs } })
+			);
+			expect(plan.managed).toEqual([]);
+			expect(validateCredentialRefs).not.toHaveBeenCalled();
+		});
+	});
+
 	describe('conflicts', () => {
 		/** The fixture plus saved playbooks for agent-a. */
 		const withPlaybooks = {

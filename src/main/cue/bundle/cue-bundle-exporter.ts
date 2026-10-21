@@ -435,7 +435,7 @@ const FORBIDDEN_BUNDLE_BASENAMES: readonly RegExp[] = [
 	/^auth\.json$/i,
 	/^token\.json$/i,
 	/^\.netrc$/i,
-	/^\.env(\..*)?$/i,
+	/^\.env(\.(?!md$)[^.]+)?$/i,
 	/^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$/i,
 	/\.(pem|key|p12|pfx|lease)$/i,
 	// Plugin grant ledgers.
