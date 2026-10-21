@@ -575,6 +575,8 @@ export interface ProviderRouteSupport {
 }
 
 const NO_MANAGED_ENFORCEMENT = 'no managed enforcement producer on this route in this build';
+const CHILD_PROCESS_MANAGED =
+	'launch admitted at the real spawn (runAgentTurn, startTurn) against a local authority; no real authority producer paired (CP-03); provider-internal tool, file and network effects unqualified';
 
 /**
  * Report a provider's routes precisely. `standalone` comes from the
@@ -582,9 +584,12 @@ const NO_MANAGED_ENFORCEMENT = 'no managed enforcement producer on this route in
  * run a headless turn has no child-process route, only Codex has an
  * app-server, only OpenCode a server. Nothing here is advertised because a
  * binary starts or metadata says so: a route whose only evidence is the
- * table is `unverified`, and `managed` is `unsupported` on every route until
- * its enforcement producer exists and is exercised (phases 6 to 8). A caller
- * that reads `unsupported` must refuse, not fall back to standalone.
+ * table is `unverified`. `managed` is `implemented` on the child-process
+ * route only: its launch is admitted at the real spawn (phase 2), while the
+ * effects the provider reaches for once running are not governed there. Every
+ * other route stays `unsupported` until its enforcement producer exists and
+ * is exercised (phases 6 to 8). A caller that reads `unsupported` must
+ * refuse, not fall back to standalone.
  */
 export function providerRouteSupport(agentId: string): ProviderRouteSupport[] {
 	const capabilities = getAgentCapabilities(agentId);
@@ -614,12 +619,16 @@ export function providerRouteSupport(agentId: string): ProviderRouteSupport[] {
 	};
 	return MANAGED_ROUTES.map((route) => {
 		const [status, note] = standalone(route);
+		const managedLaunch = route === 'child-process' && status !== 'unsupported';
 		return {
 			agentId,
 			route,
 			standalone: status,
-			managed: 'unsupported',
-			note: status === 'unsupported' ? note : `${note}; ${NO_MANAGED_ENFORCEMENT}`,
+			managed: managedLaunch ? 'implemented' : 'unsupported',
+			note:
+				status === 'unsupported'
+					? note
+					: `${note}; ${managedLaunch ? CHILD_PROCESS_MANAGED : NO_MANAGED_ENFORCEMENT}`,
 		};
 	});
 }

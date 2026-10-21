@@ -521,14 +521,14 @@ describe('negotiateCompatibility', () => {
 	it('denies a missing required capability instead of downgrading', () => {
 		const outcome = negotiateCompatibility(profile, {
 			...baseRequest,
-			required: ['capabilities.negotiate', 'runs.submit'],
+			required: ['capabilities.negotiate', 'events.resume'],
 		});
 		expect(outcome.outcome).toBe('denied');
 		if (outcome.outcome !== 'denied') return;
 		expect(outcome.reasons).toEqual([
 			{
 				reason: 'missing-required-capability',
-				detail: expect.stringContaining('runs.submit is unsupported'),
+				detail: expect.stringContaining('events.resume is unsupported'),
 			},
 		]);
 		expect(outcome).not.toHaveProperty('capabilities');
@@ -597,12 +597,18 @@ describe('support matrices', () => {
 		}
 	});
 
-	it('reports managed enforcement as unsupported on every provider route', () => {
+	it('reports managed enforcement on the child-process launch only, unsupported elsewhere', () => {
 		for (const definition of getVisibleAgentDefinitions()) {
 			const rows = providerRouteSupport(definition.id);
 			expect(rows.map((row) => row.route)).toEqual([...MANAGED_ROUTES]);
-			for (const row of rows)
-				expect(row.managed, `${definition.id} ${row.route}`).toBe('unsupported');
+			for (const row of rows) {
+				const expected =
+					row.route === 'child-process' && row.standalone !== 'unsupported'
+						? 'implemented'
+						: 'unsupported';
+				expect(row.managed, `${definition.id} ${row.route}`).toBe(expected);
+				if (row.managed === 'implemented') expect(row.note).toContain('CP-03');
+			}
 		}
 		const codex = Object.fromEntries(providerRouteSupport('codex').map((r) => [r.route, r]));
 		const claude = Object.fromEntries(providerRouteSupport('claude-code').map((r) => [r.route, r]));

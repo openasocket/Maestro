@@ -62,9 +62,13 @@ export interface SupportEntry<K extends string = string> {
 export const MANAGED_ENDPOINT_PROTOCOLS: readonly number[] = [1];
 
 /**
- * This build's own managed capability support. Negotiation is the only
- * capability with a code path at phase 1; everything else is refused until
- * its authority and enforcement producers exist (phases 2 to 11).
+ * This build's own managed capability support. Negotiation was the only
+ * capability with a code path at phase 1. Phase 2 implements the run
+ * operations over the host's own journal, registry and turn service, with
+ * admission at the real spawn; they are `implemented`, not `locally-verified`,
+ * until the phase's evidence names the test that exercised the real sink, and
+ * no real authority producer (CP-03) has been paired with them. Fleet events
+ * and policy status still wait on their producers.
  */
 export const MANAGED_CAPABILITY_SUPPORT: readonly SupportEntry<ManagedCapability>[] = [
 	{
@@ -72,17 +76,42 @@ export const MANAGED_CAPABILITY_SUPPORT: readonly SupportEntry<ManagedCapability
 		status: 'locally-verified',
 		evidence: 'src/__tests__/shared/maestro-lib/managed/contracts.test.ts',
 	},
-	{ key: 'agents.list', status: 'unsupported', evidence: null, note: 'host adapter: phase 3' },
-	{ key: 'runs.list', status: 'unsupported', evidence: null, note: 'run journal: phase 2' },
+	{
+		key: 'agents.list',
+		status: 'implemented',
+		evidence: 'src/shared/maestro-lib/runtime/__tests__/turns.test.ts',
+		note: 'scoped inventory over the repository; no real peer paired',
+	},
+	{
+		key: 'runs.list',
+		status: 'implemented',
+		evidence: 'src/shared/maestro-lib/runtime/__tests__/turns.test.ts',
+		note: 'run journal pages; no real peer paired',
+	},
 	{
 		key: 'runs.submit',
-		status: 'unsupported',
-		evidence: null,
-		note: 'protected dispatch: phase 2',
+		status: 'implemented',
+		evidence: 'src/shared/maestro-lib/runtime/__tests__/turns.test.ts',
+		note: 'admission at the spawn with a local authority; no real authority producer paired (CP-03)',
 	},
-	{ key: 'runs.inspect', status: 'unsupported', evidence: null, note: 'run journal: phase 2' },
-	{ key: 'runs.cancel', status: 'unsupported', evidence: null, note: 'run control: phase 2' },
-	{ key: 'runs.interrupt', status: 'unsupported', evidence: null, note: 'run control: phase 2' },
+	{
+		key: 'runs.inspect',
+		status: 'implemented',
+		evidence: 'src/shared/maestro-lib/runtime/__tests__/turns.test.ts',
+		note: 'run journal record; no real peer paired',
+	},
+	{
+		key: 'runs.cancel',
+		status: 'implemented',
+		evidence: 'src/shared/maestro-lib/runtime/__tests__/turns.test.ts',
+		note: 'journal ownership, then the registry or queue; no real peer paired',
+	},
+	{
+		key: 'runs.interrupt',
+		status: 'implemented',
+		evidence: 'src/shared/maestro-lib/runtime/__tests__/turns.test.ts',
+		note: 'journal ownership, then the registry; no real peer paired',
+	},
 	{ key: 'events.resume', status: 'unsupported', evidence: null, note: 'fleet events: phase 10' },
 	{ key: 'policy.status', status: 'unsupported', evidence: null, note: 'policy status: phase 3' },
 ];
