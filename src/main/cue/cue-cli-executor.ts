@@ -125,19 +125,23 @@ export interface CueCliRouteSupport {
  * narrow it and carry it to the renderer beside the prompt, and the spawn
  * handler and `ProcessManager.admitSpawn()` bind a spawn that carries it as
  * the initiator's child and stamp the child's record on the process
- * (MRC-07-04C); but the renderer's send path does not yet put the record it
- * received on the spawn config it builds (the remote command handler, the
- * queued item, the new tab's first turn, a resumed or retried turn of the
- * dispatched tab: MRC-07-04D), so the sink still sees the dispatched turn as a
- * fresh chat turn of the target. Reads `unsupported` until that carriage is
- * exercised end to end at the real sink; never flipped from a test or a host flag.
+ * (MRC-07-04C), and the renderer's send path puts the record it received on
+ * the spawn config it builds, on the queued item and on the resilience
+ * snapshot, so a dispatch that runs now, later or again reaches the sink as
+ * the same child (MRC-07-04D). Every hop is covered by its own suite, but no
+ * test runs the COURIER (this executor spawning a real `maestro-cli dispatch`
+ * over the desktop's WebSocket) through the handler chain into a real
+ * `admitSpawn()`: the chain crosses a child process, a socket, Electron IPC
+ * and a React hook, and no harness in the repository stands those up
+ * together. Reads `unsupported` until one does; never flipped from a test or
+ * a host flag.
  */
 export function cueCliRouteSupport(): CueCliRouteSupport {
 	return {
 		route: 'nested-dispatch',
 		standalone: 'implemented',
 		managed: 'unsupported',
-		note: 'the initiator context reaches the desktop (maestro-cli dispatch forwards it, the WS handlers narrow it and carry it to the renderer, and the spawn sink binds a spawn that carries it as the initiator child and stamps the child record on the process), but the renderer send path does not yet put the record on the spawn config it builds, so the dispatched turn is still admitted as a fresh chat turn of the target agent; a managed host refuses the action rather than let the owning run confinement end at the hand-off',
+		note: 'the initiator context reaches the spawn sink on every path (maestro-cli dispatch forwards it, the WS handlers narrow it, the renderer carries it on the spawn config, the queued item and the retry snapshot, and the sink binds the turn as the initiator child and stamps the child record on the process), but no harness has yet run the courier itself through the desktop handler chain into the real sink, so the restriction is not proven end to end; a managed host refuses the action rather than let the owning run confinement end at the hand-off',
 	};
 }
 

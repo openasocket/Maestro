@@ -827,11 +827,14 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 					// resolves custom and project commands and substitutes $ARGUMENTS.
 					// Sending them as plain messages would skip that resolution when
 					// busy, while the direct remote-command path lacks project commands.
+					// The dispatcher's record waits with the prompt: when the item is
+					// this agent's turn, the drain spawns it as that operation's child.
 					const queued = enqueuePromptForTab({
 						sessionId,
 						tabId: createdTabId,
 						text: prompt,
 						slashCommand: isSlashCommand,
+						delegation,
 					});
 					if (!queued) {
 						logger.warn(
@@ -1233,12 +1236,18 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 					// including the `@mention` intent flags (fired at drain time, not
 					// here) and the model/effort capture that keeps a queued turn running
 					// under the settings it was queued with.
+					//
+					// The dispatcher's record is stored on the item (never rendered: the
+					// queue UI and the `queue list` mirror read the fields they name), so
+					// the drain spawns the turn as that operation's child when its time
+					// comes, exactly as the idle branch above would have spawned it now.
 					const queuedItem: QueuedItem = {
 						...buildQueuedMessageItem({
 							session,
 							tab: targetTab,
 							text: command,
 							images,
+							delegation,
 						}),
 						...(held && { paused: true }),
 					};

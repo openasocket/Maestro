@@ -2370,4 +2370,45 @@ describe('useRemoteHandlers', () => {
 			expect(item.text).toBe('explain this code');
 		});
 	});
+
+	// ========================================================================
+	// Dispatched turn: the dispatching operation's context (MRC-07-04D)
+	// ========================================================================
+
+	describe('dispatched turn (delegation context, MRC-07-04D)', () => {
+		const delegation = { contractVersion: '1.0', traceId: 'delegated:r:q:a' } as never;
+
+		async function dispatch(detail: Record<string, unknown>) {
+			const session = createMockSession();
+			const deps = createMockDeps({ sessionsRef: { current: [session] } });
+			renderHook(() => useRemoteHandlers(deps));
+			const handler = getRemoteCommandHandler();
+			await act(async () => {
+				await handler(new CustomEvent('maestro:remoteCommand', { detail }));
+			});
+		}
+
+		it('puts the record on the spawn config and on the resilience snapshot', async () => {
+			await dispatch({ sessionId: 'session-1', command: 'go', inputMode: 'ai', delegation });
+
+			// The sink binds this turn as the dispatcher's child off `delegation`,
+			// carried exactly as it arrived (the spawn handler validates it).
+			expect(window.maestro.process.spawn).toHaveBeenCalledWith(
+				expect.objectContaining({ sessionId: 'session-1-ai-tab-1', prompt: 'go', delegation })
+			);
+			// A resend of this prompt is the same child turn, not a fresh turn.
+			const [, item] = noteDirectDispatchMock.mock.calls[0];
+			expect(item).toMatchObject({ tabId: 'tab-1', text: 'go', delegation });
+		});
+
+		it('carries nothing on a dispatch that has no record (a composer send)', async () => {
+			await dispatch({ sessionId: 'session-1', command: 'go', inputMode: 'ai' });
+
+			const [config] = (window.maestro.process.spawn as any).mock.calls[0];
+			expect(config).not.toHaveProperty('delegation', expect.anything());
+			expect(config.delegation).toBeUndefined();
+			const [, item] = noteDirectDispatchMock.mock.calls[0];
+			expect(item).not.toHaveProperty('delegation');
+		});
+	});
 });

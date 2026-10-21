@@ -600,6 +600,11 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 					sessionCustomEffort: turnEffort,
 					sessionCustomContextWindow: session.customContextWindow,
 					sessionSshRemoteConfig: session.sessionSshRemoteConfig,
+					// A dispatched item (`maestro-cli dispatch --queue`, a Cue cli action
+					// that found the agent busy) runs as the dispatching operation's
+					// child, exactly as it would have had it run at once. Undefined on
+					// everything a user queued, and on a retry of a user's turn.
+					delegation: item.delegation,
 				});
 			} else if (item.type === 'command' && item.command) {
 				// Process a slash command - find matching command
@@ -703,6 +708,7 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 						sessionCustomEffort: turnEffort,
 						sessionCustomContextWindow: session.customContextWindow,
 						sessionSshRemoteConfig: session.sessionSshRemoteConfig,
+						delegation: item.delegation,
 					});
 				} else {
 					// Unknown command - add error log and reset to idle

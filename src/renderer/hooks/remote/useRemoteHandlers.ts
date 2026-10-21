@@ -44,6 +44,7 @@ import {
 	withMentionTurnNotes,
 } from '../../services/crossAgentMentions';
 import { noteDirectDispatch } from '../../stores/retryStore';
+import type { ManagedDelegationContext } from '../../../shared/maestro-lib/managed/delegation';
 import { requestTabAutoNameForMessage } from '../../services/tabAutoNaming';
 import { logger } from '../../utils/logger';
 
@@ -175,6 +176,13 @@ export function useRemoteHandlers(deps: UseRemoteHandlersDeps): UseRemoteHandler
 				 *  command arrived over `remote:executeCommand`; absent for
 				 *  in-renderer synthetic dispatches. */
 				receiptChannel?: string;
+				/** The context of the operation that dispatched this command (a Cue
+				 *  `mode: cli` action, an agent's `maestro-cli dispatch`), narrowed by
+				 *  the WS handler. Put on the spawn config as `delegation` so the sink
+				 *  binds the turn as that operation's child, and on the resilience
+				 *  snapshot so a resend of this prompt is the same child. Absent on a
+				 *  web/mobile composer send, which is the user's own turn. */
+				delegation?: ManagedDelegationContext;
 			}>;
 			const {
 				sessionId,
@@ -185,6 +193,7 @@ export function useRemoteHandlers(deps: UseRemoteHandlersDeps): UseRemoteHandler
 				images,
 				literalPrompt,
 				receiptChannel,
+				delegation,
 			} = customEvent.detail;
 
 			// The CLI's `dispatch` success flag is this ack, not the fact that an
@@ -680,6 +689,9 @@ export function useRemoteHandlers(deps: UseRemoteHandlersDeps): UseRemoteHandler
 				// spawn is writing to. Skip when no real tab resolved: the spawn falls
 				// back to a `-ai-default` route, and a replay keyed on that would land
 				// nowhere.
+				//
+				// A dispatched prompt keeps its dispatcher's record on the snapshot:
+				// the resend is the same child turn, not a fresh turn of this agent.
 				if (targetTab?.id) {
 					noteDirectDispatch(sessionId, {
 						id: generateId(),
@@ -687,6 +699,7 @@ export function useRemoteHandlers(deps: UseRemoteHandlersDeps): UseRemoteHandler
 						tabId: targetTab.id,
 						type: 'message',
 						text: promptToSend,
+						...(delegation && { delegation }),
 					});
 				}
 
@@ -737,6 +750,10 @@ export function useRemoteHandlers(deps: UseRemoteHandlersDeps): UseRemoteHandler
 						sessionCustomModel: session.customModel,
 						sessionCustomContextWindow: session.customContextWindow,
 						sessionSshRemoteConfig: session.sessionSshRemoteConfig,
+						// The dispatching operation's context, carried as it arrived: the
+						// spawn handler validates it and the sink binds this turn as that
+						// operation's child and stamps the child's record on the process.
+						delegation,
 					});
 				} finally {
 					clearTimeout(ackTimer);

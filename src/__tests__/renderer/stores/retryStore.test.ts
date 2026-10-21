@@ -204,6 +204,28 @@ describe('firing the retry', () => {
 		expect(getRetryEntry('s8', 't1')?.status).toBe('in-flight');
 	});
 
+	it('replays a dispatched turn under the record it was dispatched with (MRC-07-04D)', () => {
+		// The remote handler snapshots a dispatched prompt WITH its dispatcher's
+		// record; the resend is the same child turn, so the record goes back to
+		// the drain unchanged and nothing re-derives or drops it.
+		const delegation = { contractVersion: '1.0', traceId: 'delegated:r:q:a' } as never;
+		setupSession('s8d', 't1');
+		noteDispatch(
+			's8d',
+			{ id: 'item-d', timestamp: 1, tabId: 't1', type: 'message', text: 'go', delegation },
+			deps
+		);
+		scheduleRetryForError('s8d', 't1', overload());
+
+		vi.advanceTimersByTime(availabilityDelayMs(0));
+
+		expect(processQueuedItem).toHaveBeenCalledWith(
+			's8d',
+			expect.objectContaining({ id: 'item-d', tabId: 't1', text: 'go', delegation }),
+			withCancelCheck(deps)
+		);
+	});
+
 	// `processQueuedItem` marks nothing busy - its callers do - and the resend
 	// used to skip that half. The provider ran the turn while the tab read idle:
 	// no Thinking pill, no pulsing dot, and the failed attempt's last output on

@@ -568,6 +568,14 @@ export interface QueuedItem {
 	// with - the configuration it was queued with, not whatever is selected by
 	// the time the queue drains. Undefined only on items queued by older builds.
 	turnSettings?: QueuedTurnSettings;
+	// The context of the operation that DISPATCHED this item (a Cue `mode: cli`
+	// action, an agent's `maestro-cli dispatch --queue`), stored when the dispatch
+	// had to wait (busy target, `--held`, a new tab on a busy agent). The drain
+	// puts it on the spawn config so the sink binds the turn as that operation's
+	// child; a retry snapshot carries it the same way. Absent on anything a user
+	// typed: the child is the dispatched turn, not the tab. Never shown as prose
+	// (the queue mirror `maestro-cli queue list` reads omits it).
+	delegation?: import('../../shared/maestro-lib/managed/delegation').ManagedDelegationContext;
 }
 
 export interface WorkLogItem {

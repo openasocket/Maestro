@@ -21,6 +21,7 @@
  */
 
 import type { AITab, QueuedItem, Session } from '../types';
+import type { ManagedDelegationContext } from '../../shared/maestro-lib/managed/delegation';
 import { useSessionStore, updateSessionWith } from '../stores/sessionStore';
 import { useAgentStore } from '../stores/agentStore';
 import { getDispatchDeps } from '../stores/retryStore';
@@ -45,6 +46,10 @@ export interface QueuedPromptOptions {
 	images?: string[];
 	/** Resolve a slash command through the command queue when this item drains. */
 	slashCommand?: boolean;
+	/** The dispatching operation's context, when a program queued this prompt
+	 *  (`maestro-cli dispatch`); stored on the item so the drain spawns the turn
+	 *  as that operation's child. Absent for text a person typed. */
+	delegation?: ManagedDelegationContext;
 }
 
 /**
@@ -67,6 +72,7 @@ export function buildQueuedMessageItem({
 	text,
 	images,
 	slashCommand,
+	delegation,
 }: QueuedPromptOptions): QueuedItem {
 	const commandText = slashCommand ? text.trim() : undefined;
 	const firstWhitespace = commandText?.search(/\s/) ?? -1;
@@ -90,6 +96,7 @@ export function buildQueuedMessageItem({
 			crossAgentMention: true,
 			crossAgentOnly: mentionPlan.suppressLocal,
 		}),
+		...(delegation && { delegation }),
 	};
 }
 
@@ -138,15 +145,24 @@ export function enqueuePromptForTab(options: {
 	images?: string[];
 	slashCommand?: boolean;
 	expandCommands?: boolean;
+	/** See {@link QueuedPromptOptions.delegation}. */
+	delegation?: ManagedDelegationContext;
 }): QueuedItem | null {
-	const { sessionId, tabId, text, images, slashCommand, expandCommands } = options;
+	const { sessionId, tabId, text, images, slashCommand, expandCommands, delegation } = options;
 	const session = useSessionStore.getState().sessions.find((s) => s.id === sessionId);
 	if (!session) return null;
 
 	const tab = session.aiTabs?.find((t) => t.id === tabId) ?? getActiveTab(session);
 	if (!tab) return null;
 
-	const message = buildQueuedMessageItem({ session, tab, text, images, slashCommand });
+	const message = buildQueuedMessageItem({
+		session,
+		tab,
+		text,
+		images,
+		slashCommand,
+		delegation,
+	});
 	const command = expandCommands && !slashCommand ? matchSlashCommand(session, text) : null;
 	const item: QueuedItem = command
 		? {
@@ -159,6 +175,7 @@ export function enqueuePromptForTab(options: {
 				tabName: message.tabName,
 				readOnlyMode: message.readOnlyMode,
 				turnSettings: message.turnSettings,
+				...(message.delegation && { delegation: message.delegation }),
 			}
 		: message;
 	updateSessionWith(sessionId, (s) => ({

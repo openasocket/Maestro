@@ -1834,6 +1834,36 @@ describe('useRemoteIntegration', () => {
 			dispatchEventSpy.mockRestore();
 		});
 
+		it('keeps the dispatching operation record on a prompt queued for the new tab (MRC-07-04D)', () => {
+			const tab = createMockTab({ id: 'tab-1' });
+			const session = createMockSession({ id: 'session-1', state: 'busy', aiTabs: [tab] });
+			const deps = createDeps({ sessions: [session] });
+			const delegation = { contractVersion: '1.0', traceId: 'delegated:r:q:a' } as never;
+
+			renderHook(() => useRemoteIntegration(deps));
+
+			act(() => {
+				onRemoteNewAITabWithPromptHandler?.(
+					'session-1',
+					'Hello',
+					'chan-busy-d',
+					true,
+					true,
+					delegation
+				);
+			});
+
+			// The busy agent queued the prompt for the new tab: the record is on
+			// the item, so the drain spawns the first turn as the dispatcher's child.
+			const updated = useSessionStore.getState().sessions.find((s) => s.id === 'session-1');
+			const newTabId = updated?.aiTabs[updated.aiTabs.length - 1]?.id;
+			expect(updated?.executionQueue?.[0]).toMatchObject({
+				text: 'Hello',
+				tabId: newTabId,
+				delegation,
+			});
+		});
+
 		it('creates the tab in the background without focusing when background=true (background new-tab dispatch)', () => {
 			const session = createMockSession({ id: 'session-1', state: 'idle' });
 			const originalActiveTabId = session.activeTabId;
@@ -2041,6 +2071,46 @@ describe('useRemoteIntegration', () => {
 			});
 		});
 
+		it('stores the dispatching operation record on the queued item (MRC-07-04D)', () => {
+			// A busy target holds the dispatch; the record waits with it so the
+			// drain spawns the turn as the dispatcher's child, as the idle branch
+			// would have spawned it now.
+			const tab = createMockTab({ id: 'tab-1' });
+			const session = createMockSession({
+				id: 'session-1',
+				state: 'busy',
+				aiTabs: [tab],
+				activeTabId: 'tab-1',
+				executionQueue: [],
+			});
+			useSessionStore.setState({ sessions: [session] });
+			const deps = createDeps({ sessions: [session] });
+			const delegation = { contractVersion: '1.0', traceId: 'delegated:r:q:a' } as never;
+
+			renderHook(() => useRemoteIntegration(deps));
+
+			act(() => {
+				onRemoteEnqueueCommandHandler?.(
+					'session-1',
+					'Later',
+					'chan-d',
+					'ai',
+					'tab-1',
+					undefined,
+					true,
+					true,
+					delegation
+				);
+			});
+
+			const updated = useSessionStore.getState().sessions.find((s) => s.id === 'session-1');
+			expect(updated?.executionQueue[0]).toMatchObject({ text: 'Later', paused: true, delegation });
+			expect(mockProcess.sendRemoteEnqueueCommandResponse).toHaveBeenCalledWith(
+				'chan-d',
+				expect.objectContaining({ success: true, queued: true })
+			);
+		});
+
 		it('appends after existing items so ordering stays FIFO and position advances', () => {
 			const tab = createMockTab({ id: 'tab-1' });
 			const existing = {
@@ -2230,6 +2300,47 @@ describe('useRemoteIntegration', () => {
 					],
 				})
 			);
+		});
+
+		it('does not expose a queued item delegation record in the queue mirror (MRC-07-04D)', () => {
+			// `maestro-cli queue list` reads this snapshot; the record is a
+			// structured attribution, never prose for a listing.
+			const tab = createMockTab({ id: 'tab-1' });
+			const item = {
+				id: 'q1',
+				timestamp: 5,
+				tabId: 'tab-1',
+				type: 'message' as const,
+				text: 'dispatched prompt',
+				delegation: { contractVersion: '1.0', traceId: 'delegated:r:q:a' } as never,
+			};
+			const session = createMockSession({
+				id: 'session-1',
+				state: 'busy',
+				aiTabs: [tab],
+				activeTabId: 'tab-1',
+				executionQueue: [item],
+			});
+			useSessionStore.setState({ sessions: [session] });
+			const deps = createDeps({ sessions: [session] });
+
+			renderHook(() => useRemoteIntegration(deps));
+
+			act(() => {
+				onRemoteListQueueHandler?.('session-1', 'chan-list-d');
+			});
+
+			const [, result] = mockProcess.sendRemoteListQueueResponse.mock.calls.at(-1) as [
+				string,
+				{ queues: Array<{ items: Array<Record<string, unknown>> }> },
+			];
+			expect(result.queues[0].items[0]).toEqual({
+				id: 'q1',
+				timestamp: 5,
+				tabId: 'tab-1',
+				type: 'message',
+				text: 'dispatched prompt',
+			});
 		});
 
 		it('removes a queued item by id and acks removed:true', () => {

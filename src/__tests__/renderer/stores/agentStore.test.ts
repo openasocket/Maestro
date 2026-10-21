@@ -1298,6 +1298,78 @@ describe('agentStore', () => {
 			);
 		});
 
+		describe('dispatched item (delegation context, MRC-07-04D)', () => {
+			const delegation = { contractVersion: '1.0', traceId: 'delegated:r:q:a' } as never;
+
+			function seedTab() {
+				useSessionStore.getState().setSessions([
+					createMockSession({
+						id: 'session-1',
+						toolType: 'claude-code',
+						aiTabs: [
+							{
+								id: 'tab-1',
+								agentSessionId: 'conv-1',
+								name: null,
+								starred: false,
+								logs: [],
+								inputValue: '',
+								stagedImages: [],
+								createdAt: Date.now(),
+								state: 'idle',
+							},
+						],
+						activeTabId: 'tab-1',
+					}),
+				]);
+			}
+
+			it('spawns a queued dispatch as the dispatching operation child', async () => {
+				seedTab();
+				const item = createQueuedItem({ tabId: 'tab-1', text: 'Later', delegation });
+
+				await useAgentStore.getState().processQueuedItem('session-1', item, defaultDeps);
+
+				// The record the queue held travels on the spawn config as it is;
+				// the sink binds the turn under it.
+				expect(mockSpawn).toHaveBeenCalledWith(
+					expect.objectContaining({ sessionId: 'session-1-ai-tab-1', prompt: 'Later', delegation })
+				);
+			});
+
+			it('spawns a queued slash command as the dispatching operation child', async () => {
+				seedTab();
+				const item = createQueuedItem({
+					tabId: 'tab-1',
+					type: 'command',
+					command: '/review',
+					text: undefined,
+					delegation,
+				});
+
+				await useAgentStore.getState().processQueuedItem('session-1', item, {
+					...defaultDeps,
+					customAICommands: [
+						{ id: 'c', command: '/review', description: 'Review', prompt: 'Review it' } as any,
+					],
+				});
+
+				expect(mockSpawn).toHaveBeenCalledWith(
+					expect.objectContaining({ prompt: 'Review it', delegation })
+				);
+			});
+
+			it('carries no record on an item a user queued', async () => {
+				seedTab();
+
+				await useAgentStore
+					.getState()
+					.processQueuedItem('session-1', createQueuedItem({ tabId: 'tab-1' }), defaultDeps);
+
+				expect(mockSpawn.mock.calls[0][0].delegation).toBeUndefined();
+			});
+		});
+
 		describe('New Session Message', () => {
 			function seedTab(agentSessionId: string | null) {
 				const session = createMockSession({

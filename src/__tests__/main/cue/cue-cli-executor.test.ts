@@ -270,10 +270,14 @@ describe('cue-cli-executor nested dispatch delegation', () => {
 		expect(result.stderr).toMatch(/^\[managed-unavailable\] /);
 		expect(result.stderr).toContain('nested-dispatch');
 		expect(onLog).toHaveBeenCalledWith('warn', expect.stringContaining('was not admitted'));
+		// Still unsupported after MRC-07-04D: every hop now carries the record,
+		// but no harness runs the courier through the desktop chain into the
+		// real sink, and the table says exactly that.
 		expect(cueCliRouteSupport()).toMatchObject({
 			route: 'nested-dispatch',
 			standalone: 'implemented',
 			managed: 'unsupported',
+			note: expect.stringContaining('no harness has yet run the courier'),
 		});
 	});
 
