@@ -11,6 +11,7 @@ vi.mock('../../../main/coworking/coworking-socket-path', () => ({
 	getBridgeSocketPath: () => '/tmp/maestro-terminal-test.sock',
 }));
 import { ProcessManager } from '../../../main/process-manager';
+import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
 
 class TerminalPty {
 	pid = 0;
@@ -112,5 +113,84 @@ describe('canonical terminal creation attaches to the host registry', () => {
 		spawnPty.mockReturnValue(next);
 		expect(manager.spawnTerminalTab(terminalConfig()).attached).toBeUndefined();
 		expect(manager.get(id)?.ptyProcess).toBe(next);
+	});
+});
+
+/**
+ * Terminal and one-off sinks under management (MRC-06-06, MRC-06-09): a
+ * managed PTY is unavailable, a terminal that predates the enrollment takes
+ * no input, and a one-off command is refused at the runner before a shell
+ * starts; a standalone host keeps every behavior above.
+ */
+describe('managed terminal sinks', () => {
+	it('refuses a managed terminal tab without an admission, and a managed PTY even with one', async () => {
+		const port = fakeSpawnPort();
+		const managed = new ProcessManager(undefined, { spawnAuthority: () => port });
+		const lines: string[] = [];
+		managed.on('agent-error', (_id: string, error: { message: string }) =>
+			lines.push(error.message)
+		);
+
+		expect(managed.spawnTerminalTab(terminalConfig())).toMatchObject({
+			success: false,
+			managed: { state: 'denied', code: 'lease-invalid' },
+		});
+		expect(spawnPty).not.toHaveBeenCalled();
+
+		const request = managed.terminalTabConfig(terminalConfig());
+		const admitted = await managed.admitSpawn(request, { peer: 'in-process' });
+		if (admitted.state !== 'admitted') throw new Error(admitted.state);
+		expect(
+			managed.spawnTerminalTab({ ...terminalConfig(), admission: admitted.admission })
+		).toMatchObject({
+			success: false,
+			managed: { state: 'unavailable', code: 'capability-unsupported' },
+		});
+		expect(spawnPty).not.toHaveBeenCalled();
+		expect(lines.some((line) => line.includes('raw terminal has no confinement'))).toBe(true);
+		// The lease was released by the refusal, not left issued.
+		expect(port.authority.live()).toHaveLength(0);
+		managed.killAll({ shutdown: true });
+	});
+
+	it('blocks writes into a terminal that predates the enrollment and surfaces why in the pane', () => {
+		const port = fakeSpawnPort({ standing: 'standalone' });
+		const host = new ProcessManager(undefined, { spawnAuthority: () => port });
+		expect(host.spawnTerminalTab(terminalConfig()).success).toBe(true);
+		expect(host.write(id, 'echo before\r')).toBe(true);
+
+		port.setStanding('managed');
+		const pane: string[] = [];
+		host.on('data', (_id: string, data: string) => pane.push(data));
+		expect(host.write(id, 'echo after\r')).toBe(false);
+		expect(pty.write).toHaveBeenCalledTimes(1);
+		expect(pane.join('')).toContain('started without an admission');
+		host.killAll({ shutdown: true });
+	});
+
+	it('refuses a one-off local and SSH command at the runner with exit 126 and nothing started', async () => {
+		const port = fakeSpawnPort();
+		const managed = new ProcessManager(undefined, { spawnAuthority: () => port });
+		const stderr: string[] = [];
+		const exits: number[] = [];
+		managed.on('stderr', (_id: string, text: string) => stderr.push(text));
+		managed.on('command-exit', (_id: string, code: number) => exits.push(code));
+
+		await expect(managed.runCommand(id, 'rm -rf /', '/tmp')).resolves.toEqual({ exitCode: 126 });
+		await expect(
+			managed.runCommand(id, 'rm -rf /', '/tmp', undefined, undefined, {
+				id: 'r1',
+				name: 'r1',
+				host: 'remote',
+				port: 22,
+				username: 'dev',
+				enabled: true,
+			} as never)
+		).resolves.toEqual({ exitCode: 126 });
+
+		expect(spawnPty).not.toHaveBeenCalled();
+		expect(exits).toEqual([126, 126]);
+		expect(stderr.join('')).toContain('unavailable under management');
+		expect(managed.cancelCommand(id)).toBe(false);
 	});
 });

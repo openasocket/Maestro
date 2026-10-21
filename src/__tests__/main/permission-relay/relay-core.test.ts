@@ -18,6 +18,9 @@ import {
 	RELAY_MCP_SERVER_NAME,
 } from '../../../main/permission-relay/types';
 import type { PermissionRequest } from '../../../main/permission-relay/types';
+import type { RelaySpawnBinding } from '../../../main/permission-relay/types';
+import { claudeToolEffect, createRelayManagedGate } from '../../../main/enterprise/dispatch';
+import { fakeAdmission, fakeSpawnPort, tableEffects } from '../../helpers/managedSpawnPort';
 
 describe('permission-relay registry', () => {
 	it('registers a spawn and looks up its binding', () => {
@@ -337,5 +340,213 @@ describe('permission-relay server AskUserQuestion round-trip', () => {
 			client.destroy();
 			cleanup();
 		}
+	});
+
+	/**
+	 * Managed intersection (MRC-06-07, MRC-06-09): the host decides first on
+	 * the exact tool request; a user allow never overrides a managed deny, an
+	 * allow is intersected with the lease as it stands after the user answers,
+	 * and a gate that fails is a refusal. A standalone gate changes nothing.
+	 */
+	async function relayRequest(
+		token: string,
+		requestId: string,
+		toolName: string,
+		input: Record<string, unknown>
+	): Promise<Record<string, unknown>> {
+		const client = net.createConnection(socketPath);
+		try {
+			return await new Promise<Record<string, unknown>>((resolve, reject) => {
+				collectMessages(client, (msg) => {
+					if (msg.type === 'permission-response') resolve(msg);
+				});
+				client.on('error', reject);
+				client.on('connect', () => {
+					client.write(JSON.stringify({ type: 'hello', token }) + '\n');
+					client.write(
+						JSON.stringify({ type: 'permission-request', token, requestId, toolName, input }) + '\n'
+					);
+				});
+			});
+		} finally {
+			client.destroy();
+		}
+	}
+
+	it('denies at once on a managed deny and never asks the user, whatever the user would say', async () => {
+		const { token, cleanup } = registerSpawn({ sessionId: 'sM1', tabId: 'tM1' });
+		const asked: PermissionRequest[] = [];
+		server.setOnRequest((req) => {
+			asked.push(req);
+			resolvePending(req.requestId, { behavior: 'allow' });
+		});
+		const seen: Array<{ binding: RelaySpawnBinding; tool: string }> = [];
+		server.setManagedGate({
+			decide: async (binding, request) => {
+				seen.push({ binding, tool: request.toolName });
+				return { managed: true, decision: { decision: 'deny', reason: 'rm is not allowed' } };
+			},
+			recheck: () => ({ ok: true }),
+		});
+		try {
+			const response = await relayRequest(token, 'm1', 'Bash', { command: 'rm -rf /' });
+			expect(response.decision).toEqual({
+				behavior: 'deny',
+				message: 'Refused under management: rm is not allowed',
+			});
+			expect(asked).toEqual([]);
+			expect(seen).toEqual([{ binding: { sessionId: 'sM1', tabId: 'tM1' }, tool: 'Bash' }]);
+		} finally {
+			server.setManagedGate(null);
+			cleanup();
+		}
+	});
+
+	it('asks the user after a managed allow and keeps their deny', async () => {
+		const { token, cleanup } = registerSpawn({ sessionId: 'sM2' });
+		server.setOnRequest((req) =>
+			resolvePending(req.requestId, { behavior: 'deny', message: 'no' })
+		);
+		server.setManagedGate({
+			decide: async () => ({ managed: true, decision: { decision: 'allow' } }),
+			recheck: () => ({ ok: true }),
+		});
+		try {
+			const response = await relayRequest(token, 'm2', 'Bash', { command: 'ls' });
+			expect(response.decision).toEqual({ behavior: 'deny', message: 'no' });
+		} finally {
+			server.setManagedGate(null);
+			cleanup();
+		}
+	});
+
+	it('denies a user-approved request whose admission ended while the prompt was open', async () => {
+		const { token, cleanup } = registerSpawn({ sessionId: 'sM3' });
+		let live = true;
+		server.setOnRequest((req) => {
+			// The lease is revoked while the user is looking at the prompt.
+			live = false;
+			resolvePending(req.requestId, { behavior: 'allow' });
+		});
+		server.setManagedGate({
+			decide: async () => ({ managed: true, decision: { decision: 'allow' } }),
+			recheck: () => (live ? { ok: true } : { ok: false, reason: 'the lease is revoked.' }),
+		});
+		try {
+			const response = await relayRequest(token, 'm3', 'Edit', { file_path: '/p/a.ts' });
+			expect(response.decision).toEqual({
+				behavior: 'deny',
+				message: 'Refused under management: the lease is revoked.',
+			});
+		} finally {
+			server.setManagedGate(null);
+			cleanup();
+		}
+	});
+
+	it('passes a user allow through when the gate allows and the admission is still live', async () => {
+		const { token, cleanup } = registerSpawn({ sessionId: 'sM4' });
+		server.setOnRequest((req) => resolvePending(req.requestId, { behavior: 'allow' }));
+		server.setManagedGate({
+			decide: async () => ({ managed: true, decision: { decision: 'allow' } }),
+			recheck: () => ({ ok: true }),
+		});
+		try {
+			const response = await relayRequest(token, 'm4', 'Read', { file_path: '/p/a.ts' });
+			expect(response.decision).toEqual({ behavior: 'allow' });
+		} finally {
+			server.setManagedGate(null);
+			cleanup();
+		}
+	});
+
+	it('treats a gate that throws as a refusal, and a standalone gate as the user alone', async () => {
+		const { token, cleanup } = registerSpawn({ sessionId: 'sM5' });
+		server.setOnRequest((req) => resolvePending(req.requestId, { behavior: 'allow' }));
+		try {
+			server.setManagedGate({
+				decide: async () => {
+					throw new Error('endpoint gone');
+				},
+				recheck: () => ({ ok: true }),
+			});
+			const refused = await relayRequest(token, 'm5a', 'Bash', { command: 'ls' });
+			expect((refused.decision as { behavior: string }).behavior).toBe('deny');
+			expect((refused.decision as { message: string }).message).toContain('endpoint gone');
+
+			server.setManagedGate({
+				decide: async () => ({ managed: false }),
+				recheck: () => ({ ok: false, reason: 'never consulted' }),
+			});
+			const allowed = await relayRequest(token, 'm5b', 'Bash', { command: 'ls' });
+			expect(allowed.decision).toEqual({ behavior: 'allow' });
+		} finally {
+			server.setManagedGate(null);
+			cleanup();
+		}
+	});
+
+	it('composes the gate over the process manager: no live admission denies, the effect authority decides the exact tool', async () => {
+		const effects = tableEffects((effect) =>
+			effect.kind === 'command' && effect.command === 'ls'
+				? { decision: 'allow' }
+				: { decision: 'deny', reason: `${effect.kind} is not allowed` }
+		);
+		const port = fakeSpawnPort({ effects });
+		const admissions = new Map<string, ReturnType<typeof fakeAdmission>>();
+		const gate = createRelayManagedGate({
+			port: () => port,
+			admissionOf: (sessionId) => admissions.get(sessionId) ?? null,
+			admissionLive: (sessionId) =>
+				admissions.has(sessionId) ? { ok: true } : { ok: false, reason: 'no admission' },
+		});
+		const request = (toolName: string, input: Record<string, unknown>): PermissionRequest => ({
+			requestId: 'r1',
+			token: 't',
+			sessionId: 'sG',
+			tabId: 'tab-7',
+			toolName,
+			input,
+			createdAt: 0,
+		});
+
+		expect(await gate.decide({ sessionId: 'sG' }, request('Bash', { command: 'ls' }))).toEqual({
+			managed: true,
+			decision: { decision: 'deny', reason: expect.stringContaining('no live admission') },
+		});
+
+		admissions.set('sG', fakeAdmission({ leaseId: 'lease-g', provider: 'claude-code' }));
+		expect(
+			await gate.decide({ sessionId: 'sG', tabId: 'tab-7' }, request('Bash', { command: 'ls' }))
+		).toEqual({ managed: true, decision: { decision: 'allow' } });
+		expect(effects.asked[0].binding).toEqual({
+			leaseId: 'lease-g',
+			actor: { kind: 'human', id: 'ada' },
+			provider: 'claude-code',
+			threadId: null,
+			turnId: 'tab-7',
+			requestId: 'r1',
+		});
+		expect(
+			await gate.decide({ sessionId: 'sG' }, request('Write', { file_path: '/p/a.ts' }))
+		).toEqual({
+			managed: true,
+			decision: { decision: 'deny', reason: 'file-change is not allowed' },
+		});
+		expect(claudeToolEffect('Edit', { file_path: '/p/a.ts', old_string: 'x' })).toEqual({
+			kind: 'file-change',
+			paths: ['/p/a.ts'],
+			cwd: null,
+		});
+		expect(claudeToolEffect('WebFetch', { url: 'https://x' })).toEqual({
+			kind: 'tool-call',
+			tool: 'WebFetch',
+			input: { url: 'https://x' },
+		});
+
+		port.setStanding('standalone');
+		expect(await gate.decide({ sessionId: 'sG' }, request('Bash', { command: 'ls' }))).toEqual({
+			managed: false,
+		});
 	});
 });

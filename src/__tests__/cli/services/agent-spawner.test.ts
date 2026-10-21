@@ -186,6 +186,16 @@ import { isolateAgentEnv } from '../../helpers/agentEnvIsolation';
 // `spawnAgent` above; other suites here call `vi.resetModules()`.
 import { resetEffortRejections } from '../../../shared/effortRejection';
 import { resolveEffortLevel } from '../../../shared/modelTiers';
+import {
+	createHeadlessSpawnAuthority,
+	type HeadlessSpawnAuthority,
+} from '../../../shared/maestro-lib/managed/host-adapter';
+import {
+	createLocalHostAuthority,
+	type AdmissionRequest,
+	type PolicyDecision,
+} from '../../../shared/maestro-lib/managed/authority';
+import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
 
 const hostPlatform = process.platform;
 
@@ -4301,6 +4311,205 @@ Some text with [x] in it that's not a checkbox
 			const sepIdx = args.indexOf('--');
 			expect(sepIdx).toBeGreaterThan(0);
 			expect(args[sepIdx + 1]).toBe('just the user message');
+		});
+	});
+
+	/**
+	 * Managed CLI launches (MRC-06-05, MRC-06-09): a bare CLI on an enrolled
+	 * machine holds no authority and refuses; a host's attached authority
+	 * admits the FINAL spec of every spawn, including the effort retry; a
+	 * denied launch has zero effect and is never retried as an effort
+	 * rejection; a forged actor or lease never reaches `spawn`. The lease
+	 * authority is real with a policy table; the standalone binding is the
+	 * regression.
+	 */
+	describe('spawnAgent: managed launches', () => {
+		const INSTALLATION = { installationId: 'inst-cli', runtimeId: 'cli-1', processEpoch: 'e1' };
+		const RECORD = {
+			contractVersion: MANAGED_CONTRACT_VERSION,
+			installationId: 'inst-cli',
+			authorityId: 'authority-cli',
+			endpointRef: '/tmp/endpoint.sock',
+			enrolledAt: '2026-10-21T00:00:00.000Z',
+			policySources: [],
+			policyRevision: 2,
+			digest: 'd'.repeat(64),
+		};
+		const ENROLLED = { state: 'enrolled' as const, record: RECORD, file: '/tmp/binding.json' };
+		const ACTOR = { kind: 'service' as const, id: 'maestro-cli:test' };
+		const ALLOW = (): PolicyDecision => ({ decision: 'allow', policyRevision: 2 });
+		const MANAGED_REFUSAL_LINE =
+			JSON.stringify({
+				type: 'error',
+				message:
+					'{"type":"error","error":{"message":"Unsupported value: \'low\' is not supported with the \'gpt-6-astra\' model. Supported values are: \'medium\', \'high\'.","type":"invalid_request_error","param":"reasoning.effort","code":"unsupported_value"},"status":400}',
+			}) + '\n';
+
+		function hostAuthority(decide: (request: AdmissionRequest) => PolicyDecision) {
+			const asked: AdmissionRequest[] = [];
+			const authority = createLocalHostAuthority({
+				authorityId: 'authority-cli',
+				decide: (request) => {
+					asked.push(request);
+					return decide(request);
+				},
+				now: () => 1_000,
+				newId: () => `lease-${asked.length}`,
+			});
+			return { authority, asked, policy: () => ({ sources: [], policyRevision: 2 }) };
+		}
+
+		function managedAuthority(decide: (request: AdmissionRequest) => PolicyDecision) {
+			const host = hostAuthority(decide);
+			const authority = createHeadlessSpawnAuthority({
+				installation: INSTALLATION,
+				binding: ENROLLED,
+				host,
+				origin: 'cli',
+				actor: ACTOR,
+			});
+			return { host, authority };
+		}
+
+		beforeEach(() => {
+			mockSpawn.mockReturnValue(mockChild);
+		});
+
+		it('refuses a denied launch with zero effect and never retries it as an effort rejection', async () => {
+			const { host, authority } = managedAuthority(() => ({
+				decision: 'deny',
+				reason: 'codex is not allowed here',
+				policyRevision: 2,
+			}));
+			const result = await spawnAgent('codex', '/p', 'hi', undefined, {
+				managed: authority,
+				customEffort: 'low',
+			});
+
+			expect(result).toMatchObject({
+				success: false,
+				managed: { state: 'denied', code: 'policy-denied' },
+			});
+			expect(result.error).toContain('[managed-denied] codex is not allowed here');
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(host.asked).toHaveLength(1);
+			expect(host.asked[0].snapshot).toMatchObject({
+				provider: 'codex',
+				operation: 'start',
+				target: { kind: 'local' },
+			});
+			expect(host.asked[0].context.origin).toBe('cli');
+			expect(host.asked[0].context.actor).toEqual(ACTOR);
+		});
+
+		it('refuses every launch as unavailable on an enrolled machine with no attached host', async () => {
+			const authority = createHeadlessSpawnAuthority({
+				installation: INSTALLATION,
+				binding: ENROLLED,
+				host: null,
+				origin: 'cli',
+				actor: ACTOR,
+			});
+			expect(authority.standing()).toBe('managed');
+			expect(authority.unavailableReason).toContain('no attached host authority');
+
+			const result = await spawnAgent('claude-code', '/p', 'hi', undefined, {
+				managed: authority,
+			});
+			expect(result).toMatchObject({
+				success: false,
+				managed: { state: 'unavailable', code: 'runtime-unavailable' },
+			});
+			expect(mockSpawn).not.toHaveBeenCalled();
+		});
+
+		it('refuses a forged actor before the authority is asked, and a forged lease at the spawn', async () => {
+			const { host, authority: real } = managedAuthority(ALLOW);
+			const forgedActor: HeadlessSpawnAuthority = {
+				...real,
+				context: () => ({
+					ok: false,
+					code: 'unauthenticated',
+					problems: ['the actor is not this installation'],
+				}),
+			};
+			expect(
+				await spawnAgent('codex', '/p', 'hi', undefined, { managed: forgedActor })
+			).toMatchObject({ success: false, managed: { state: 'denied', code: 'unauthenticated' } });
+			expect(host.asked).toHaveLength(0);
+
+			// A lease minted by ANOTHER authority is forged at this host's sink.
+			const other = hostAuthority(ALLOW);
+			const forgedLease: HeadlessSpawnAuthority = {
+				...real,
+				authority: { ...host.authority, admit: (request) => other.authority.admit(request) },
+			};
+			expect(
+				await spawnAgent('codex', '/p', 'hi', undefined, { managed: forgedLease })
+			).toMatchObject({ success: false, managed: { state: 'denied', code: 'lease-invalid' } });
+			expect(mockSpawn).not.toHaveBeenCalled();
+		});
+
+		it('admits each spawn afresh: the effort-rejection retry runs under its own lease', async () => {
+			const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+			try {
+				const { host, authority } = managedAuthority(ALLOW);
+				const p = spawnAgent('codex', '/p', 'hi', undefined, {
+					managed: authority,
+					customEffort: 'low',
+				});
+				await waitForSpawnCall(1);
+				mockStdout.emit('data', Buffer.from(MANAGED_REFUSAL_LINE));
+				await yieldTick();
+				(mockChild as EventEmitter).emit('close', 1);
+
+				await waitForSpawnCall(2);
+				await yieldTick();
+				mockStdout.emit(
+					'data',
+					Buffer.from(
+						JSON.stringify({
+							type: 'item.completed',
+							item: { type: 'agent_message', text: 'hi' },
+						}) + '\n'
+					)
+				);
+				await yieldTick();
+				(mockChild as EventEmitter).emit('close', 0);
+
+				const result = await p;
+				expect(result.success).toBe(true);
+				expect(mockSpawn).toHaveBeenCalledTimes(2);
+				expect(host.asked).toHaveLength(2);
+				expect(host.asked[0].context.identity.requestId).not.toBe(
+					host.asked[1].context.identity.requestId
+				);
+				// The replanned launch (no effort) is a different snapshot.
+				expect(host.asked[0].snapshot.args).not.toEqual(host.asked[1].snapshot.args);
+				expect(host.authority.live()).toHaveLength(0);
+			} finally {
+				errorSpy.mockRestore();
+				resetEffortRejections();
+			}
+		});
+
+		it('leaves a standalone binding exactly as before and never asks the authority', async () => {
+			const host = hostAuthority(ALLOW);
+			const authority = createHeadlessSpawnAuthority({
+				installation: INSTALLATION,
+				binding: { state: 'standalone', files: [] },
+				host,
+				origin: 'cli',
+				actor: ACTOR,
+			});
+			const result = await driveSpawnToCompletion(
+				spawnAgent('codex', '/p', 'hi', undefined, { managed: authority }),
+				0,
+				JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'hi' } }) +
+					'\n'
+			);
+			expect(result.success).toBe(true);
+			expect(host.asked).toHaveLength(0);
 		});
 	});
 });
