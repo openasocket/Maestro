@@ -22,13 +22,213 @@ import { EventEmitter } from 'events';
 import { logger } from '../../utils/logger';
 import { createOutputParser } from '../../parsers';
 import { captureException } from '../../utils/sentry';
-import type { ProcessConfig, ManagedProcess, SpawnResult } from '../types';
+import type { ProcessConfig, ManagedProcess, ProcessSpawnAdmission, SpawnResult } from '../types';
 import type { DataBufferManager } from '../handlers/DataBufferManager';
 import { StdoutHandler } from '../handlers/StdoutHandler';
 import { ExitHandler } from '../handlers/ExitHandler';
-import { opencodeServerManager } from '../../opencode-server/OpencodeServerManager';
+import {
+	opencodeServerManager,
+	type OpencodeManagedServerScope,
+} from '../../opencode-server/OpencodeServerManager';
 import { OpencodeEventTranslator } from '../../opencode-server/event-translator';
-import type { Event, OpencodeClient } from '@opencode-ai/sdk';
+import type { Event, OpencodeClient, Permission } from '@opencode-ai/sdk';
+import { providerRouteSupport } from '../../../shared/maestro-lib/providers/capabilities';
+import {
+	EFFECT_REVOKED,
+	effectDigest,
+	effectGranted,
+	unavailableEffectAuthority,
+	type ManagedEffect,
+	type ManagedEffectAuthority,
+	type ManagedEffectBinding,
+	type ManagedEffectDecision,
+} from '../../../shared/maestro-lib/managed/effects';
+import type { ManagedDenialCode } from '../../../shared/maestro-lib/managed/types';
+import type { AgentError } from '../../../shared/types';
+
+export interface OpencodeServerSpawnerOptions {
+	/**
+	 * Live read of the managed host's effect authority (`ProcessManager` hands
+	 * its port's). A managed turn asks it for every `permission.updated` the
+	 * server raises for its session; with none, every managed effect is
+	 * rejected as unavailable. Unmanaged turns never consult it.
+	 */
+	effects?: () => ManagedEffectAuthority | null;
+}
+
+/**
+ * Why a managed OpenCode turn cannot run on the shared server, or null when
+ * the `opencode-server` route is one the build governs. The table is
+ * `providerRouteSupport`; until a producer qualifies the route there (the
+ * interception below exercised against a real server), the route is
+ * `unavailable` under management, explicitly, and never falls back to the
+ * CLI, whose config auto-approves every tool.
+ */
+export function managedOpencodeRefusal(
+	config: ProcessConfig
+): { state: 'unavailable'; code: ManagedDenialCode; message: string } | null {
+	if (!config.admission) return null;
+	const support = providerRouteSupport(config.toolType).find(
+		(entry) => entry.route === 'opencode-server'
+	);
+	if (support?.managed === 'implemented') return null;
+	return {
+		state: 'unavailable',
+		code: 'capability-unsupported',
+		message: `Managed execution of ${config.toolType} over the shared OpenCode server is unavailable on this host: ${support?.note ?? 'the route is not known'}.`,
+	};
+}
+
+/** The server scope a managed turn's server is isolated by: from the admission, never the environment. */
+export function opencodeManagedScope(admission: ProcessSpawnAdmission): OpencodeManagedServerScope {
+	return {
+		authorityId: admission.authorityId,
+		actor: admission.actor,
+		policyRevision: admission.policyRevision,
+	};
+}
+
+/**
+ * The exact effect a `permission.updated` asks for. OpenCode names the tool
+ * in `type` (`bash`, `edit`, `write`, `read`, `webfetch`, `external_directory`,
+ * ...) and the target in `pattern` (a path, a glob, a command pattern) with
+ * the tool's own input in `metadata`. A shell tool is a command (the
+ * metadata's `command` when it carries one, else the pattern); a file tool
+ * is a file change over its patterns; anything else is that tool with its
+ * metadata as input. `title` is the model's prose and is never an input.
+ */
+export function opencodePermissionEffect(permission: Permission): ManagedEffect {
+	const patterns = Array.isArray(permission.pattern)
+		? permission.pattern
+		: permission.pattern
+			? [permission.pattern]
+			: [];
+	const metadata = permission.metadata ?? {};
+	const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+	switch (permission.type) {
+		case 'bash':
+			return {
+				kind: 'command',
+				command: text(metadata.command) ?? patterns.join(' '),
+				cwd: text(metadata.cwd),
+				argv: null,
+			};
+		case 'edit':
+		case 'write':
+		case 'patch':
+		case 'external_directory':
+			return {
+				kind: 'file-change',
+				paths: [...new Set(patterns)].sort(),
+				cwd: text(metadata.cwd),
+			};
+		default:
+			return { kind: 'tool-call', tool: permission.type, input: metadata };
+	}
+}
+
+/**
+ * The managed gate over one session's permission events: each is the exact
+ * effect, bound to the lease, actor, OpenCode session (thread), message
+ * (turn) and permission id, decided live by the host's effect authority and
+ * answered on the server's own reply route (`once` on allow, `reject` on
+ * anything else; never `always`, which would outlive the decision). A
+ * pending decision is refused at once when the turn ends or is stopped.
+ */
+class OpencodeManagedEffectGate {
+	private readonly pending = new Map<string, AbortController>();
+
+	constructor(
+		private readonly deps: {
+			client: OpencodeClient;
+			ocSessionId: string;
+			cwd: string;
+			sessionId: string;
+			provider: string;
+			admission: ProcessSpawnAdmission;
+			authority: ManagedEffectAuthority;
+		}
+	) {}
+
+	handle(event: Event): void {
+		if (event.type !== 'permission.updated') return;
+		const permission = event.properties;
+		if (permission.sessionID !== this.deps.ocSessionId) return;
+		if (this.pending.has(permission.id)) return;
+		const effect = opencodePermissionEffect(permission);
+		const binding: ManagedEffectBinding = {
+			leaseId: this.deps.admission.leaseId,
+			actor: this.deps.admission.actor,
+			provider: this.deps.provider,
+			threadId: permission.sessionID,
+			turnId: permission.messageID,
+			requestId: permission.id,
+		};
+		const controller = new AbortController();
+		this.pending.set(permission.id, controller);
+		const settle = (decision: ManagedEffectDecision): void => {
+			if (!this.pending.delete(permission.id)) return;
+			logger.info('[OpencodeServerSpawner] Managed effect decided', 'OpencodeServer', {
+				sessionId: this.deps.sessionId,
+				effect: effect.kind,
+				tool: permission.type,
+				leaseId: binding.leaseId,
+				threadId: binding.threadId,
+				turnId: binding.turnId,
+				requestId: binding.requestId,
+				authorityId: this.deps.authority.authorityId,
+				effectDigest: effectDigest(effect, binding),
+				decision: decision.decision,
+				reason: decision.decision === 'allow' ? undefined : decision.reason,
+			});
+			this.reply(permission.id, effectGranted(decision) ? 'once' : 'reject');
+		};
+		Promise.resolve()
+			.then(() => this.deps.authority.decide(effect, binding, controller.signal))
+			.then(
+				(decision) => settle(controller.signal.aborted ? EFFECT_REVOKED : decision),
+				(error: unknown) =>
+					settle({
+						decision: 'unavailable',
+						reason: `The effect authority failed: ${error instanceof Error ? error.message : String(error)}`,
+					})
+			);
+	}
+
+	/** Refuse every permission still waiting on a decision; the turn or its lease is over. */
+	revokeAll(): void {
+		for (const [permissionId, controller] of [...this.pending]) {
+			controller.abort();
+			this.pending.delete(permissionId);
+			logger.info(
+				'[OpencodeServerSpawner] Managed effect revoked while pending',
+				'OpencodeServer',
+				{
+					sessionId: this.deps.sessionId,
+					requestId: permissionId,
+				}
+			);
+			this.reply(permissionId, 'reject');
+		}
+	}
+
+	private reply(permissionID: string, response: 'once' | 'reject'): void {
+		void this.deps.client
+			.postSessionIdPermissionsPermissionId({
+				path: { id: this.deps.ocSessionId, permissionID },
+				query: { directory: this.deps.cwd },
+				body: { response },
+			})
+			.catch((error: unknown) => {
+				logger.warn('[OpencodeServerSpawner] Could not answer permission', 'OpencodeServer', {
+					sessionId: this.deps.sessionId,
+					requestId: permissionID,
+					response,
+					error: String(error),
+				});
+			});
+	}
+}
 
 /** Parsed agent invocation bits we need from the CLI-style args. */
 interface OpencodeInvocation {
@@ -88,8 +288,9 @@ export class OpencodeServerSpawner {
 		bufferManager: DataBufferManager,
 		/** Fallback used when the server can't start / session can't be created,
 		 *  so local OpenCode never regresses to "broken". Provided by ProcessManager
-		 *  (its ChildProcessSpawner.spawn). */
-		private fallbackToCli: (config: ProcessConfig) => SpawnResult
+		 *  (its ChildProcessSpawner.spawn). Never taken by a managed turn. */
+		private fallbackToCli: (config: ProcessConfig) => SpawnResult,
+		private readonly options: OpencodeServerSpawnerOptions = {}
 	) {
 		this.stdoutHandler = new StdoutHandler({
 			processes: this.processes,
@@ -110,11 +311,39 @@ export class OpencodeServerSpawner {
 	spawn(config: ProcessConfig): SpawnResult {
 		const { sessionId, toolType, cwd, command, args, prompt } = config;
 
+		// A managed turn runs on an isolated, ask-mode server or not at all;
+		// decided before the process is registered, so a refusal has no effect.
+		const refusal = managedOpencodeRefusal(config);
+		if (refusal) {
+			logger.warn('[OpencodeServerSpawner] Managed turn not started', 'OpencodeServer', {
+				sessionId,
+				state: refusal.state,
+				code: refusal.code,
+				message: refusal.message,
+			});
+			this.emitter.emit('agent-error', sessionId, {
+				type: 'unknown',
+				message: refusal.message,
+				recoverable: false,
+				agentId: toolType,
+				sessionId,
+				timestamp: Date.now(),
+			} satisfies AgentError);
+			return {
+				pid: -1,
+				success: false,
+				error: refusal.message,
+				managed: { state: refusal.state, code: refusal.code },
+			};
+		}
+
 		const outputParser = createOutputParser(toolType) || undefined;
 
 		// SSE aborter for the kill path, plus a one-shot exit guard.
 		const streamAbort = new AbortController();
 		let finished = false;
+		// The managed effect gate, once the session exists; stopping revokes it.
+		const managed: { gate: OpencodeManagedEffectGate | null } = { gate: null };
 		const managedProcess: ManagedProcess = {
 			sessionId,
 			toolType,
@@ -140,12 +369,14 @@ export class OpencodeServerSpawner {
 				interrupt: () => {
 					// Abort the in-flight turn but keep the session/stream alive; the
 					// resulting session.idle drives the normal exit path.
+					managed.gate?.revokeAll();
 					this.abortActiveSession(managedProcess);
 				},
 				kill: () => {
 					// Hard stop: abort the turn and tear down the SSE subscription. The
 					// stream ending triggers finish() -> exit, matching child-process
 					// kill timing (ProcessManager deletes the map entry right after).
+					managed.gate?.revokeAll();
 					this.abortActiveSession(managedProcess);
 					streamAbort.abort();
 				},
@@ -156,6 +387,7 @@ export class OpencodeServerSpawner {
 			finish: (code: number) => {
 				if (finished) return;
 				finished = true;
+				managed.gate?.revokeAll();
 				void this.exitHandler.handleExit(sessionId, code, managedProcess).catch((err) => {
 					logger.error('[OpencodeServerSpawner] handleExit threw', 'OpencodeServer', {
 						sessionId,
@@ -181,7 +413,7 @@ export class OpencodeServerSpawner {
 
 		// run() owns its own error handling (CLI fallback for setup failures,
 		// agent-error for streaming failures). This catch is a last-resort net.
-		void this.run(config, managedProcess, streamAbort, lifecycle).catch((err) => {
+		void this.run(config, managedProcess, streamAbort, lifecycle, managed).catch((err) => {
 			void captureException(err);
 			if (!lifecycle.isFinished()) {
 				this.emitAgentError(managedProcess, err);
@@ -229,10 +461,12 @@ export class OpencodeServerSpawner {
 		config: ProcessConfig,
 		managedProcess: ManagedProcess,
 		streamAbort: AbortController,
-		lifecycle: Lifecycle
+		lifecycle: Lifecycle,
+		managed: { gate: OpencodeManagedEffectGate | null }
 	): Promise<void> {
 		const { sessionId, cwd, command, prompt } = config;
 		const invocation = parseInvocation(config);
+		const admission = config.admission;
 
 		// ── Setup phase ──────────────────────────────────────────────────────
 		// Failures here (server won't start, session can't be created, can't
@@ -256,6 +490,9 @@ export class OpencodeServerSpawner {
 				shellEnvVars: config.shellEnvVars,
 				extraPathDirs: config.extraPathDirs,
 				cwd,
+				// A managed turn's server is isolated by its admission's scope and
+				// starts in ask mode; a standalone turn keeps the shared server.
+				...(admission ? { managed: opencodeManagedScope(admission) } : {}),
 			}));
 			if (cancelled()) {
 				lifecycle.finish(0);
@@ -287,11 +524,41 @@ export class OpencodeServerSpawner {
 				lifecycle.finish(0);
 				return;
 			}
+			if (admission) {
+				managed.gate = new OpencodeManagedEffectGate({
+					client,
+					ocSessionId,
+					cwd,
+					sessionId,
+					provider: config.toolType,
+					admission,
+					authority:
+						this.options.effects?.() ??
+						unavailableEffectAuthority('This host has no effect authority for managed turns.'),
+				});
+			}
 		} catch (setupErr) {
 			// A kill mid-setup surfaces as an aborted subscribe/create rejection -
 			// that's a clean stop, not a transport failure, so don't fall back to CLI.
 			if (cancelled()) {
 				lifecycle.finish(0);
+				return;
+			}
+			if (admission) {
+				// Managed: the CLI path auto-approves every tool, so it is no fallback
+				// for a turn whose effects must be decided. The refusal stands.
+				logger.warn(
+					'[OpencodeServerSpawner] SDK setup failed under management; no CLI fallback',
+					'OpencodeServer',
+					{ sessionId, error: String(setupErr) }
+				);
+				this.emitAgentError(
+					managedProcess,
+					new Error(
+						`the shared server could not be set up (${setupErr instanceof Error ? setupErr.message : String(setupErr)}) and the CLI fallback is not qualified under management; nothing was started`
+					)
+				);
+				lifecycle.finish(1);
 				return;
 			}
 			logger.warn(
@@ -324,6 +591,9 @@ export class OpencodeServerSpawner {
 			try {
 				for await (const event of subscription.stream as AsyncIterable<Event>) {
 					if (lifecycle.isFinished()) break;
+					// Managed: every permission the server asks for this session is
+					// decided before the translator sees anything the tool did.
+					managed.gate?.handle(event);
 					const { lines, idle, errored } = translator.handle(event);
 					for (const line of lines) {
 						this.stdoutHandler.handleData(sessionId, line + '\n');

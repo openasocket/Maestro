@@ -194,7 +194,8 @@ export class ProcessManager extends EventEmitter {
 			this.processes,
 			this,
 			this.bufferManager,
-			(config) => this.childProcessSpawner.spawn(config)
+			(config) => this.childProcessSpawner.spawn(config),
+			{ effects: () => this.spawnAuthority()?.effects ?? null }
 		);
 		// Same contract for Codex: a turn the app-server transport cannot carry,
 		// or whose server will not start, runs on `codex exec` instead.

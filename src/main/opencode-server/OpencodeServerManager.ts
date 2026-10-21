@@ -22,12 +22,42 @@ import { loadOpencodeSdk } from './sdk-loader';
 import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
 import { buildChildProcessEnv } from '../process-manager/utils/envBuilder';
+import type { ManagedPrincipalRef } from '../../shared/maestro-lib/managed/types';
 
 /**
- * Auto-approve every tool. This mirrors the CLI path's `OPENCODE_CONFIG_CONTENT`
- * so the SDK migration is behavior-preserving: no permission prompts today. When
- * the permission-bubbling feature lands, this becomes per-tool `ask` and the
- * `permission.updated` SSE events get surfaced to the renderer.
+ * The scope a MANAGED session's server is isolated by: the authority that
+ * admitted the launch, the actor it was admitted for and the policy revision
+ * it was decided under. A managed session never shares a server with a
+ * standalone one or with another actor or policy, because the server's
+ * permission configuration and its process environment are per instance,
+ * and a shared instance would let one principal's effects run under
+ * another's answers. Nothing here is read from the server pid or its
+ * environment: it comes from the admission, which came from the authority.
+ */
+export interface OpencodeManagedServerScope {
+	authorityId: string;
+	actor: ManagedPrincipalRef;
+	policyRevision: number | null;
+}
+
+/**
+ * The permission configuration a managed server starts with: every tool
+ * asks, so each effect reaches the spawner as `permission.updated` and is
+ * decided by the host's effect authority before it happens. `question` stays
+ * denied (nobody is shown it). `AUTO_APPROVE_CONFIG` is never managed
+ * authority: a managed scope always gets this one.
+ */
+export const OPENCODE_MANAGED_PERMISSION_CONFIG = Object.freeze({
+	permission: { '*': 'ask', external_directory: 'ask', question: 'deny' },
+	tools: { question: false },
+} as const);
+
+/**
+ * Auto-approve every tool, for a STANDALONE session only. This mirrors the CLI
+ * path's `OPENCODE_CONFIG_CONTENT` so the SDK migration is behavior-preserving:
+ * no permission prompts today. A managed session's server never starts with
+ * it (`OPENCODE_MANAGED_PERMISSION_CONFIG`); this configuration is desktop
+ * convenience, not a managed policy engine.
  */
 const AUTO_APPROVE_CONFIG = {
 	permission: { '*': 'allow', external_directory: 'allow', question: 'deny' },
@@ -75,6 +105,15 @@ export interface EnsureServerOptions {
 	/** Working directory to spawn the server in (any workspace; requests are
 	 *  scoped per-call via `directory`). */
 	cwd: string;
+	/** The managed scope this server is isolated by, or absent for a standalone session. */
+	managed?: OpencodeManagedServerScope;
+}
+
+/** The permission configuration a server instance starts with, by scope. */
+export function opencodeServerPermissionConfig(
+	managed: OpencodeManagedServerScope | undefined
+): typeof AUTO_APPROVE_CONFIG | typeof OPENCODE_MANAGED_PERMISSION_CONFIG {
+	return managed ? OPENCODE_MANAGED_PERMISSION_CONFIG : AUTO_APPROVE_CONFIG;
 }
 
 class OpencodeServerManager {
@@ -122,12 +161,15 @@ class OpencodeServerManager {
 			opts.shellEnvVars,
 			opts.extraPathDirs
 		);
-		env.OPENCODE_CONFIG_CONTENT = JSON.stringify(AUTO_APPROVE_CONFIG);
+		env.OPENCODE_CONFIG_CONTENT = JSON.stringify(opencodeServerPermissionConfig(opts.managed));
 
 		logger.info('[OpencodeServer] Starting shared server', 'OpencodeServer', {
 			binaryPath: opts.binaryPath,
 			hostname,
 			cwd: opts.cwd,
+			scope: opts.managed
+				? `managed:${opts.managed.authorityId}:${opts.managed.actor.kind}:${opts.managed.actor.id}:rev${opts.managed.policyRevision ?? 'none'}`
+				: 'standalone',
 		});
 
 		// Bind to an OS-assigned port (`--port=0`) and read the real URL from the
@@ -289,21 +331,33 @@ class OpencodeServerManager {
  * would let agents/sessions with different environments (e.g. distinct API keys
  * or PATH) reuse a server started with someone else's env, leaking credentials
  * and config across sessions. Fold a stable fingerprint of the env inputs into
- * the key so those get their own server.
+ * the key so those get their own server. A managed scope is part of the key
+ * too: the authority, the actor and the policy revision each get their own
+ * instance, and `standalone` never matches a managed one.
  */
-function buildServerKey(opts: EnsureServerOptions): string {
+export function buildServerKey(opts: EnsureServerOptions): string {
 	const fingerprint = (record?: Record<string, string>): string =>
 		record
 			? Object.keys(record)
 					.sort()
 					.map((k) => `${k}=${record[k]}`)
-					.join(' ')
+					.join(' ')
 			: '';
+	const scope = opts.managed
+		? [
+				'managed',
+				opts.managed.authorityId,
+				opts.managed.actor.kind,
+				opts.managed.actor.id,
+				String(opts.managed.policyRevision ?? 'none'),
+			].join('\u0002')
+		: 'standalone';
 	return [
 		opts.binaryPath,
 		fingerprint(opts.customEnvVars),
 		fingerprint(opts.shellEnvVars),
 		(opts.extraPathDirs ?? []).join(':'),
+		scope,
 	].join('\u0001');
 }
 
