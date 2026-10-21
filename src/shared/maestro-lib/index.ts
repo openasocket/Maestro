@@ -23,6 +23,7 @@ export * from './managed/endpoint-port';
 export * from './managed/host-adapter';
 export * from './managed/provider-route';
 export * from './managed/credentials';
+export * from './managed/effects';
 
 // Paths and configuration
 export * from './paths/userDataDir';

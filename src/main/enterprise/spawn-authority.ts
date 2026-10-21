@@ -28,6 +28,10 @@ import {
 } from '../../shared/maestro-lib/managed/authority';
 import type { ManagedHostAdapter } from '../../shared/maestro-lib/managed/host-adapter';
 import {
+	unavailableEffectAuthority,
+	type ManagedEffectAuthority,
+} from '../../shared/maestro-lib/managed/effects';
+import {
 	MANAGED_CONTRACT_VERSION,
 	type ManagedInstallationIdentity,
 	type ManagedOperationContext,
@@ -46,6 +50,8 @@ export interface ProcessSpawnAuthorityDeps {
 	identity: Pick<EnterpriseIdentityStore, 'read'>;
 	host: Pick<ManagedHostAdapter, 'policy'>;
 	dispatch: Pick<BrokerDispatch, 'authority'>;
+	/** The per-effect authority, when a producer exists. Default: none, every effect unavailable. */
+	effects?: ManagedEffectAuthority;
 	now?: () => number;
 }
 
@@ -94,6 +100,15 @@ export function createProcessSpawnAuthority(
 			return deps.dispatch.authority;
 		},
 		policy: () => deps.host.policy(),
+		// No per-effect operation exists on the endpoint socket in this build,
+		// so a managed turn's commands, file changes, permissions and tool
+		// calls are refused as unavailable, never decided here and never
+		// granted by the provider's own full-access mode.
+		effects:
+			deps.effects ??
+			unavailableEffectAuthority(
+				'The endpoint exposes no per-effect authorization operation in this build (CP-01, CP-03; owner mega-maestro).'
+			),
 		verify(input: ProcessSpawnContextInput) {
 			const context: ManagedOperationContext = {
 				contractVersion: MANAGED_CONTRACT_VERSION,

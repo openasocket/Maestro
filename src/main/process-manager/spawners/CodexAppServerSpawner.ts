@@ -73,7 +73,19 @@ import {
 	type CodexAppServerMessage,
 } from '../../codex-app-server/protocol';
 import { CodexAppServerRpc, CodexRpcRequestError } from '../../codex-app-server/rpc-client';
-import { answerCodexServerRequest } from '../../codex-app-server/server-requests';
+import {
+	answerCodexServerRequest,
+	codexRequestEffect,
+	codexRequestIds,
+} from '../../codex-app-server/server-requests';
+import {
+	EFFECT_REVOKED,
+	effectDigest,
+	unavailableEffectAuthority,
+	type ManagedEffectAuthority,
+	type ManagedEffectBinding,
+	type ManagedEffectDecision,
+} from '../../../shared/maestro-lib/managed/effects';
 import {
 	codexThreadPolicyMismatch,
 	parseCodexAppServerInvocation,
@@ -97,7 +109,24 @@ const SETUP_STDERR_LIMIT = 16 * 1024;
 export interface CodexAppServerSpawnerOptions {
 	/** `clientInfo.version` on `initialize`; becomes the user-agent suffix. */
 	clientVersion?: string;
+	/**
+	 * Live read of the managed host's effect authority (`ProcessManager` hands
+	 * its port's). A managed turn (one carrying an admission) asks it for every
+	 * server request before answering; with none, every managed effect is
+	 * refused as unavailable. Unmanaged turns never consult it.
+	 */
+	effects?: () => ManagedEffectAuthority | null;
 }
+
+/**
+ * Why a managed turn may not fall back to `codex exec`: exec with the same
+ * arguments runs under `--dangerously-bypass-approvals-and-sandbox`, which
+ * asks nobody, so a transport refusal would turn into an unrestricted run.
+ * Under management the refusal stands and the tab is told; standalone keeps
+ * its fallback.
+ */
+const MANAGED_NO_EXEC_FALLBACK =
+	'app-server refused the turn and the exec fallback is not qualified under management (it would run with approvals bypassed); nothing was started.';
 
 /**
  * Where a turn is in its life. Setup failures fall back to exec. `starting`
@@ -130,6 +159,7 @@ interface TurnContext {
 	exitHandler: ExitHandler;
 	fallbackToCli: (config: ProcessConfig) => SpawnResult;
 	clientVersion: string;
+	effects: () => ManagedEffectAuthority | null;
 }
 
 export class CodexAppServerSpawner {
@@ -151,6 +181,7 @@ export class CodexAppServerSpawner {
 			exitHandler: new ExitHandler({ processes, emitter, bufferManager }),
 			fallbackToCli,
 			clientVersion: options.clientVersion ?? '0.0.0',
+			effects: options.effects ?? (() => null),
 		};
 	}
 
@@ -198,6 +229,12 @@ class CodexAppServerTurn {
 	private exitGraceTimer: ReturnType<typeof setTimeout> | undefined;
 	/** The turn is over (completed, failed, or the child is gone); steering listens. */
 	private turnEnded = false;
+	/**
+	 * Managed server requests whose decision is still being asked for, by the
+	 * server's request id. Ending the turn (stop, kill, exit, completion)
+	 * aborts each and answers it with a refusal at once.
+	 */
+	private readonly pendingEffects = new Map<number | string, AbortController>();
 	private readonly turnEndListeners = new Set<() => void>();
 
 	constructor(
@@ -483,9 +520,83 @@ class CodexAppServerTurn {
 	 * the turn forever, so even a method Maestro does not know gets an error.
 	 */
 	private answerServerRequest(request: Parameters<typeof answerCodexServerRequest>[0]): void {
-		const answer = answerCodexServerRequest(request, {
-			grantApprovals: this.invocation.sandbox === 'danger-full-access',
-		});
+		const admission = this.config.admission;
+		if (!admission) {
+			// Unmanaged: the standalone table, full access granting as exec does.
+			this.respondToServerRequest(request, {
+				grantApprovals: this.invocation.sandbox === 'danger-full-access',
+			});
+			return;
+		}
+		// Managed: the exact effect, bound to this lease, actor, thread, turn and
+		// request, decided live. Full access grants nothing here; only `allow`
+		// does, and the request stays pending (never silently granted) until the
+		// authority answers or the turn ends and revokes it.
+		const effect = codexRequestEffect(request);
+		const ids = codexRequestIds(request);
+		const binding: ManagedEffectBinding = {
+			leaseId: admission.leaseId,
+			actor: admission.actor,
+			provider: this.config.toolType,
+			threadId: ids.threadId ?? this.translator.threadId,
+			turnId: ids.turnId ?? this.translator.activeTurnId,
+			requestId: String(request.id),
+		};
+		const authority =
+			this.ctx.effects() ??
+			unavailableEffectAuthority('This host has no effect authority for managed turns.');
+		const controller = new AbortController();
+		this.pendingEffects.set(request.id, controller);
+		const settle = (decision: ManagedEffectDecision): void => {
+			if (!this.pendingEffects.delete(request.id)) return;
+			logger.info('[CodexAppServerSpawner] Managed effect decided', LOG_CONTEXT, {
+				sessionId: this.config.sessionId,
+				method: request.method,
+				effect: effect.kind,
+				leaseId: binding.leaseId,
+				threadId: binding.threadId,
+				turnId: binding.turnId,
+				requestId: binding.requestId,
+				authorityId: authority.authorityId,
+				effectDigest: effectDigest(effect, binding),
+				decision: decision.decision,
+				reason: decision.decision === 'allow' ? undefined : decision.reason,
+			});
+			this.respondToServerRequest(request, { grantApprovals: false, managed: decision });
+		};
+		Promise.resolve()
+			.then(() => authority.decide(effect, binding, controller.signal))
+			.then(
+				(decision) => settle(controller.signal.aborted ? EFFECT_REVOKED : decision),
+				(error: unknown) =>
+					settle({
+						decision: 'unavailable',
+						reason: `The effect authority failed: ${error instanceof Error ? error.message : String(error)}`,
+					})
+			);
+	}
+
+	/** Refuse every managed request still waiting on a decision; the turn or its lease is over. */
+	private revokePendingEffects(): void {
+		for (const [id, controller] of [...this.pendingEffects]) {
+			controller.abort();
+			this.pendingEffects.delete(id);
+			const request = { id, method: 'revoked' } as Parameters<typeof answerCodexServerRequest>[0];
+			logger.info('[CodexAppServerSpawner] Managed effect revoked while pending', LOG_CONTEXT, {
+				sessionId: this.config.sessionId,
+				requestId: String(id),
+			});
+			// Whatever the method was, a decline is the answer every approval
+			// method accepts; a method the table does not know gets its error.
+			this.respondToServerRequest(request, { grantApprovals: false, managed: EFFECT_REVOKED });
+		}
+	}
+
+	private respondToServerRequest(
+		request: Parameters<typeof answerCodexServerRequest>[0],
+		policy: Parameters<typeof answerCodexServerRequest>[1]
+	): void {
+		const answer = answerCodexServerRequest(request, policy);
 		logger.debug('[CodexAppServerSpawner] Answering server request', LOG_CONTEXT, {
 			sessionId: this.config.sessionId,
 			method: request.method,
@@ -560,6 +671,7 @@ class CodexAppServerTurn {
 	 */
 	private endTurn(): void {
 		this.phase = 'ended';
+		this.revokePendingEffects();
 		this.notifyTurnEnded();
 		this.finish(this.translator.outcome === 'failed' ? 1 : 0);
 		this.releaseChild();
@@ -615,6 +727,7 @@ class CodexAppServerTurn {
 	 */
 	private interrupt(): void {
 		this.cancelled = true;
+		this.revokePendingEffects();
 		const sent = this.sendTurnInterrupt();
 		if (!sent && this.childRunning()) {
 			// Nothing to interrupt yet (setup, or `turn/start` unanswered): stop the child now.
@@ -636,6 +749,7 @@ class CodexAppServerTurn {
 	/** Hard stop: interrupt the turn as a courtesy, then run the ladder from SIGTERM. */
 	private kill(options: { sync?: boolean; shutdown?: boolean } = {}): void {
 		this.cancelled = true;
+		this.revokePendingEffects();
 		this.sendTurnInterrupt();
 		if (this.exitGraceTimer) {
 			clearTimeout(this.exitGraceTimer);
@@ -682,6 +796,7 @@ class CodexAppServerTurn {
 			clearTimeout(this.exitGraceTimer);
 			this.exitGraceTimer = undefined;
 		}
+		this.pendingEffects.clear();
 		this.notifyTurnEnded();
 		this.rpc.close('app-server exited');
 		if (this.isSuperseded() || this.finished) return;
@@ -717,6 +832,28 @@ class CodexAppServerTurn {
 		// failure; only the first one falls back.
 		if (!this.holding || this.finished) return;
 		const { sessionId } = this.config;
+		if (this.config.admission) {
+			// Managed: the transport refused, and exec is not a qualified route for
+			// this turn. Say so and end; nothing else starts.
+			logger.warn('[CodexAppServerSpawner] app-server setup failed under management', LOG_CONTEXT, {
+				sessionId,
+				error: String(error),
+			});
+			this.phase = 'ended';
+			this.heldLines = [];
+			this.heldStderr = '';
+			this.revokePendingEffects();
+			if (this.childRunning()) {
+				this.signalRemote('terminate');
+				stopProcess(
+					{ child: this.turn.child },
+					{ from: 'terminate', graceMs: INTERACTIVE_STOP_GRACE_MS, sessionId, label: 'fallback' }
+				);
+			}
+			this.emitAgentError(new Error(MANAGED_NO_EXEC_FALLBACK));
+			this.finish(1);
+			return;
+		}
 		logger.warn(
 			'[CodexAppServerSpawner] app-server setup failed; falling back to exec',
 			LOG_CONTEXT,
@@ -759,6 +896,7 @@ class CodexAppServerTurn {
 	/** A failure in the committed path (a `turn/start` the server refused, a lost child). */
 	private handleRunError(error: unknown): void {
 		if (this.finished || this.cancelled || this.isSuperseded()) return;
+		this.revokePendingEffects();
 		if (!(error instanceof Error && error.name.startsWith('CodexRpc')))
 			void captureException(error);
 		logger.warn('[CodexAppServerSpawner] app-server turn failed', LOG_CONTEXT, {

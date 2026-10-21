@@ -20,6 +20,7 @@ import type {
 	ManagedPrincipalRef,
 	ManagedRunIdentity,
 } from '../../shared/maestro-lib/managed/types';
+import type { ManagedEffectAuthority } from '../../shared/maestro-lib/managed/effects';
 
 // ============================================================================
 // Managed admission at the process sink
@@ -60,6 +61,13 @@ export interface ProcessSpawnAuthorityPort {
 	policy(): PolicySourceSet;
 	/** Bind the actor and the run identity into a verified context, or say why not. */
 	verify(input: ProcessSpawnContextInput): ContextVerification;
+	/**
+	 * The authority a running managed turn asks for each effect it reaches
+	 * for (a command, a file change, a permission profile, a tool call) before
+	 * it happens. Absent: no effect producer on this host, and every managed
+	 * effect is refused as unavailable.
+	 */
+	readonly effects?: ManagedEffectAuthority;
 }
 
 /**

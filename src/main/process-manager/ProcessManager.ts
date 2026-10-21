@@ -203,7 +203,11 @@ export class ProcessManager extends EventEmitter {
 			this,
 			this.bufferManager,
 			(config) => this.childProcessSpawner.spawn(config),
-			{ clientVersion: options.appVersion }
+			{
+				clientVersion: options.appVersion,
+				// The effect authority of the managed host, read live like the port.
+				effects: () => this.spawnAuthority()?.effects ?? null,
+			}
 		);
 		this.localCommandRunner = new LocalCommandRunner(this);
 		this.sshCommandRunner = new SshCommandRunner(this);

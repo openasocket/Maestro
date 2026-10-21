@@ -124,8 +124,13 @@ describe('ProcessManager Codex transport routing', () => {
 		pm = new ProcessManager(undefined, { appVersion: '9.9.9' });
 	});
 
-	it('hands the app version to the app-server spawner', () => {
-		expect(captured.appServerOptions).toEqual([{ clientVersion: '9.9.9' }]);
+	it('hands the app version and the live effect authority read to the app-server spawner', () => {
+		expect(captured.appServerOptions).toEqual([
+			{ clientVersion: '9.9.9', effects: expect.any(Function) },
+		]);
+		// A manager with no spawn authority has no effect authority either.
+		const options = captured.appServerOptions[0] as { effects: () => unknown };
+		expect(options.effects()).toBeNull();
 	});
 
 	it('runs a Codex turn with no transport on exec (the default)', () => {
