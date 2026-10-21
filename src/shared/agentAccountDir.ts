@@ -13,6 +13,7 @@
 
 import path from 'path';
 import { isBlankEnvValue } from './agentEnvironment';
+import { managedAccountRef } from './maestro-lib/managed/credentials';
 import { expandTilde } from './pathUtils';
 import { effectiveAgentCustomEnvVars, getProviderProfileConfig } from './providerProfiles';
 
@@ -22,6 +23,14 @@ export interface AgentAccountDirInput {
 	customEnvVars?: Record<string, string>;
 	/** Whether the agent runs on an SSH remote. */
 	sshRemote?: boolean;
+	/**
+	 * The account home the managed policy binds this agent to (the route
+	 * ceiling's `accountDir`). Wins over every user and host layer, since the
+	 * ceiling removes those from the process anyway; a remote agent gets it as
+	 * a remote path, unexpanded. `null` or absent: not managed, or the policy
+	 * leaves the provider's default, and the layers below decide as before.
+	 */
+	managedAccountDir?: string | null;
 }
 
 export interface AgentAccountDirLayers {
@@ -53,6 +62,10 @@ export function resolveAgentAccountDir(
 
 	const usable = (value: unknown): value is string =>
 		typeof value === 'string' && !isBlankEnvValue(value);
+	if (usable(agent.managedAccountDir)) {
+		const bound = agent.managedAccountDir.trim();
+		return agent.sshRemote ? bound : path.resolve(expandTilde(bound, layers.homeDir));
+	}
 	const custom = effectiveAgentCustomEnvVars(agent.customEnvVars, layers.agentLevelEnvVars)[
 		config.envVar
 	];
@@ -66,4 +79,20 @@ export function resolveAgentAccountDir(
 	].find(usable);
 	if (!chosen) return path.join(layers.homeDir, config.defaultSubdir);
 	return path.resolve(expandTilde(chosen.trim(), layers.homeDir));
+}
+
+/**
+ * The opaque reference of the account an agent's processes run as: what a
+ * dispatch snapshot carries as `account` and what an account-bound credential
+ * reference must name. Derived from the REAL resolved directory, never from a
+ * label, an e-mail or a directory name on its own; `null` for a provider with
+ * no account concept. Same digest as `managedAccountRef()`, so the host and
+ * the policy issuer agree.
+ */
+export function resolveAgentAccountRef(
+	agent: AgentAccountDirInput,
+	layers: AgentAccountDirLayers
+): string | null {
+	const dir = resolveAgentAccountDir(agent, layers);
+	return dir === undefined ? null : managedAccountRef(agent.toolType, dir);
 }

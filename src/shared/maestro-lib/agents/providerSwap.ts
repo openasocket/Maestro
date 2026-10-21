@@ -125,9 +125,26 @@ export interface ProviderSwitchQueuedItem {
 	turnSettings?: { model?: string; effort?: string };
 }
 
+/** One provider change in an agent's life, oldest first. */
+export interface ProviderLineageEntry {
+	from: ToolType;
+	to: ToolType;
+	/** ISO 8601. */
+	at: string;
+	/** The managed grant that authorized the change, or null for an unmanaged switch. */
+	grantRef: string | null;
+}
+
 /** The agent fields a provider switch reads and writes. */
 export interface ProviderSwitchAgent extends ProviderAgentOverrides {
 	toolType: ToolType;
+	/**
+	 * The provider the agent was created on. Set by the first switch and never
+	 * changed after, so the original provider survives any number of swaps.
+	 */
+	originProvider?: ToolType;
+	/** Every switch so far, oldest first. Appended by every switch, managed or not. */
+	providerLineage?: ProviderLineageEntry[];
 	aiTabs?: ProviderSwitchTab[];
 	/**
 	 * Parked agent-level overrides for every provider this agent is NOT
@@ -165,6 +182,157 @@ export interface ProviderSwitchResult<A> {
 	agent: A;
 	/** Whatever could not be parked and was cleared, for a notice. Empty in the common case. */
 	unparked: UnparkedProviderState[];
+}
+
+// ---------------------------------------------------------------------------
+// Managed reauthorization of a swap or a resume
+// ---------------------------------------------------------------------------
+
+/**
+ * A grant the policy authority issued for one agent to run on `toProvider`,
+ * arriving from `fromProvider` (the same provider for a resume grant), as
+ * the account `accountRef` names (null: not account-bound). Opaque
+ * `grantRef`; the host checks the binding, the reference proves nothing.
+ */
+export interface ProviderSwapGrant {
+	grantRef: string;
+	agentId: string;
+	fromProvider: ToolType;
+	toProvider: ToolType;
+	accountRef: string | null;
+	policyRevision: number;
+	/** ISO 8601. */
+	expiresAt: string;
+}
+
+/** What the host resolved for the swap or resume it is about to perform. */
+export interface ManagedSwapAuthorization {
+	agentId: string;
+	/** The opaque reference of the account the agent will run as on the target provider. */
+	accountRef: string | null;
+	/** The policy revision in force; null when none is known (then nothing is authorized). */
+	policyRevision: number | null;
+	/** Epoch milliseconds. Injected. */
+	now: number;
+	grant: ProviderSwapGrant | null;
+}
+
+export type ProviderSwapRefusalReason =
+	| 'no-grant'
+	| 'grant-agent-mismatch'
+	| 'grant-provider-mismatch'
+	| 'grant-account-mismatch'
+	| 'grant-expired'
+	| 'stale-policy';
+
+export type ProviderSwapVerdict =
+	| { ok: true; grantRef: string }
+	| { ok: false; reason: ProviderSwapRefusalReason; message: string };
+
+function checkGrant(
+	authorization: ManagedSwapAuthorization,
+	fromProvider: ToolType,
+	toProvider: ToolType
+): ProviderSwapVerdict {
+	const grant = authorization.grant;
+	if (!grant)
+		return { ok: false, reason: 'no-grant', message: 'No managed grant covers this change.' };
+	if (grant.agentId !== authorization.agentId) {
+		return {
+			ok: false,
+			reason: 'grant-agent-mismatch',
+			message: 'The grant was issued for another agent.',
+		};
+	}
+	if (grant.fromProvider !== fromProvider || grant.toProvider !== toProvider) {
+		return {
+			ok: false,
+			reason: 'grant-provider-mismatch',
+			message: `The grant covers ${grant.fromProvider} to ${grant.toProvider}, not ${fromProvider} to ${toProvider}.`,
+		};
+	}
+	if (grant.accountRef !== null && grant.accountRef !== authorization.accountRef) {
+		return {
+			ok: false,
+			reason: 'grant-account-mismatch',
+			message: 'The grant is bound to another account.',
+		};
+	}
+	if (authorization.now >= Date.parse(grant.expiresAt)) {
+		return {
+			ok: false,
+			reason: 'grant-expired',
+			message: `The grant expired at ${grant.expiresAt}.`,
+		};
+	}
+	if (
+		authorization.policyRevision === null ||
+		grant.policyRevision !== authorization.policyRevision
+	) {
+		return {
+			ok: false,
+			reason: 'stale-policy',
+			message: `The grant is on policy revision ${grant.policyRevision}; the host is on ${authorization.policyRevision ?? 'none'}.`,
+		};
+	}
+	return { ok: true, grantRef: grant.grantRef };
+}
+
+/**
+ * Whether a managed swap of `agent` to `newProvider` is authorized: the grant
+ * must name this agent, exactly this provider pair, the account the agent
+ * will run as, the policy revision in force, and must not have lapsed.
+ * Switching to the current provider needs no grant (nothing changes).
+ */
+export function authorizeProviderSwap(
+	agent: Pick<ProviderSwitchAgent, 'toolType'>,
+	newProvider: ToolType,
+	authorization: ManagedSwapAuthorization
+): ProviderSwapVerdict {
+	if (agent.toolType === newProvider)
+		return { ok: true, grantRef: authorization.grant?.grantRef ?? '' };
+	return checkGrant(authorization, agent.toolType, newProvider);
+}
+
+/**
+ * Whether a managed RESUME of `tab` is authorized. A resume runs on the
+ * provider that owns the tab's most recent turn (`resolveTurnProvider`), with
+ * that provider's resume token; the grant must cover that provider (as a
+ * same-provider grant, or as the swap grant that brought the agent to it).
+ * A tab with no session resumes nothing and needs no grant.
+ */
+export function authorizeManagedResume(
+	tab: Pick<ProviderSwitchTab, 'agentSessionId' | 'turnProvider'> | undefined,
+	agent: Pick<ProviderSwitchAgent, 'toolType'>,
+	authorization: ManagedSwapAuthorization
+): ProviderSwapVerdict {
+	if (!tab?.agentSessionId) return { ok: true, grantRef: authorization.grant?.grantRef ?? '' };
+	const provider = resolveTurnProvider(tab, agent);
+	const grant = authorization.grant;
+	const from = grant && grant.toProvider === provider ? grant.fromProvider : provider;
+	return checkGrant(authorization, from, provider);
+}
+
+/** Thrown by `switchAgentProvider` when a managed swap is not authorized. Nothing was changed. */
+export class ProviderSwapRefusedError extends Error {
+	constructor(
+		readonly reason: ProviderSwapRefusalReason,
+		message: string
+	) {
+		super(message);
+		this.name = 'ProviderSwapRefusedError';
+	}
+}
+
+export interface ProviderSwitchOptions {
+	/**
+	 * A managed swap: refused (`ProviderSwapRefusedError`) unless
+	 * `authorizeProviderSwap` accepts it, and the grant is recorded in the
+	 * agent's lineage. Absent: an unmanaged switch, recorded with no grant.
+	 */
+	managed?: ManagedSwapAuthorization;
+	/** When the switch happens, for the lineage entry. Default: now. */
+	at?: string;
 }
 
 /**
@@ -288,10 +456,25 @@ function describeClearedQueuedSettings(
  */
 export function switchAgentProvider<A extends ProviderSwitchAgent>(
 	agent: A,
-	newProvider: ToolType
+	newProvider: ToolType,
+	options: ProviderSwitchOptions = {}
 ): ProviderSwitchResult<A> {
 	const fromProvider = agent.toolType;
 	if (fromProvider === newProvider) return { agent, unparked: [] };
+
+	// Under management the swap is reauthorized here, before anything is parked.
+	let grantRef: string | null = null;
+	if (options.managed) {
+		const verdict = authorizeProviderSwap(agent, newProvider, options.managed);
+		if (!verdict.ok) throw new ProviderSwapRefusedError(verdict.reason, verdict.message);
+		grantRef = verdict.grantRef;
+	}
+	const lineage: ProviderLineageEntry = {
+		from: fromProvider,
+		to: newProvider,
+		at: options.at ?? new Date().toISOString(),
+		grantRef,
+	};
 
 	// Park the outgoing provider's overrides and lift the incoming provider's
 	// out of the map. The live values win over any entry the map holds for the
@@ -337,6 +520,9 @@ export function switchAgentProvider<A extends ProviderSwitchAgent>(
 	const switched = {
 		...agent,
 		toolType: newProvider,
+		// The original provider and every change since survive the swap.
+		originProvider: agent.originProvider ?? fromProvider,
+		providerLineage: [...(agent.providerLineage ?? []), lineage],
 		...restoredOverrides,
 		providerOverrides: Object.keys(parked).length > 0 ? parked : undefined,
 		...(agent.aiTabs && {
