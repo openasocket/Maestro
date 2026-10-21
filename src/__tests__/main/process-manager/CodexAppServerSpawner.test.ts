@@ -54,7 +54,15 @@ vi.mock('../../../shared/maestro-lib/control/ssh-remote-signal', async (importOr
 import {
 	CodexAppServerSpawner,
 	CODEX_APP_SERVER_EXIT_GRACE_MS,
+	type CodexAppServerSpawnerOptions,
 } from '../../../main/process-manager/spawners/CodexAppServerSpawner';
+import {
+	codexRequestEffect,
+	codexRequestGranted,
+	codexRequestIds,
+} from '../../../main/codex-app-server/server-requests';
+import { fakeAdmission, tableEffects } from '../../helpers/managedSpawnPort';
+import type { ManagedEffectDecision } from '../../../shared/maestro-lib/managed/effects';
 import { DataBufferManager } from '../../../main/process-manager/handlers/DataBufferManager';
 import type { ManagedProcess, ProcessConfig } from '../../../main/process-manager/types';
 import type { CodexAppServerMessage } from '../../../main/codex-app-server/protocol';
@@ -226,13 +234,17 @@ const READ_ONLY_ARGS = [
 
 let sessionCounter = 0;
 
-function createHarness(server: FakeAppServer | (() => FakeAppServer)) {
+function createHarness(
+	server: FakeAppServer | (() => FakeAppServer),
+	spawnerOptions: Partial<CodexAppServerSpawnerOptions> = {}
+) {
 	const processes = new Map<string, ManagedProcess>();
 	const emitter = new EventEmitter();
 	const bufferManager = new DataBufferManager(processes, emitter);
 	const fallbackToCli = vi.fn(() => ({ pid: 999, success: true }));
 	const spawner = new CodexAppServerSpawner(processes, emitter, bufferManager, fallbackToCli, {
 		clientVersion: '1.2.3',
+		...spawnerOptions,
 	});
 	mockSpawn.mockImplementation(() => (typeof server === 'function' ? server() : server));
 
@@ -1006,5 +1018,227 @@ describe('CodexAppServerSpawner steering (turn/steer)', () => {
 		);
 		expect(result).toMatchObject({ verdict: 'refused', refusal: 'too-long' });
 		expect(server.sent('turn/steer')).toEqual([]);
+	});
+});
+
+/**
+ * Managed server requests (MRC-06-03, MRC-06-08): a turn carrying an
+ * admission answers each approval from the host's live effect decision bound
+ * to the lease, thread, turn and request; full access grants nothing; an
+ * undecided request is revoked on stop; a transport refusal never falls back
+ * to exec. The unmanaged table above is the standalone regression.
+ */
+describe('CodexAppServerSpawner managed server requests', () => {
+	const threadId = 'thread-m';
+	const turnId = 'turn-m';
+	const COMMAND_REQUEST = {
+		threadId,
+		turnId,
+		itemId: 'call_1',
+		command: '/bin/zsh -lc "rm -rf /tmp/x"',
+		cwd: '/tmp/codex-project',
+		proposedExecpolicyAmendment: ['/bin/zsh', '-lc', 'rm -rf /tmp/x'],
+		reason: 'May I?',
+	};
+
+	/** A server that starts a turn, asks one command approval, and completes once answered. */
+	function approvalServer(options: { completeOnAnswer?: boolean } = {}) {
+		return new FakeAppServer((msg, s) => {
+			if (msg.method === 'initialize') s.send({ id: msg.id, result: {} });
+			if (msg.method === 'thread/start')
+				s.send({ id: msg.id, result: { thread: { id: threadId } } });
+			if (msg.method === 'turn/start') {
+				s.send({ id: msg.id, result: { turn: { id: turnId, status: 'inProgress' } } });
+				s.send({ method: 'turn/started', params: { threadId, turn: { id: turnId } } });
+				s.send({ id: 0, method: 'item/commandExecution/requestApproval', params: COMMAND_REQUEST });
+			}
+			if (msg.method === 'turn/interrupt') {
+				s.send({ id: msg.id, result: {} });
+				s.send({
+					method: 'turn/completed',
+					params: { threadId, turn: { id: turnId, status: 'interrupted' } },
+				});
+			}
+			if (msg.method === undefined && msg.id === 0 && options.completeOnAnswer !== false) {
+				s.send({
+					method: 'item/completed',
+					params: { threadId, turnId, item: { type: 'agentMessage', id: 'msg_1', text: 'done' } },
+				});
+				s.send({
+					method: 'turn/completed',
+					params: { threadId, turn: { id: turnId, status: 'completed' } },
+				});
+			}
+		});
+	}
+
+	it('accepts an approval only when the live effect decision allows, bound to lease, thread, turn and request', async () => {
+		const effects = tableEffects(() => ({ decision: 'allow' }));
+		const server = approvalServer();
+		const h = createHarness(server, { effects: () => effects });
+
+		h.spawner.spawn(h.config({ admission: fakeAdmission({ leaseId: 'lease-9' }) }));
+		expect(await h.exited).toBe(0);
+
+		expect(server.responseTo(0)).toMatchObject({ result: { decision: 'accept' } });
+		expect(effects.asked).toHaveLength(1);
+		expect(effects.asked[0].effect).toEqual({
+			kind: 'command',
+			command: '/bin/zsh -lc "rm -rf /tmp/x"',
+			cwd: '/tmp/codex-project',
+			argv: ['/bin/zsh', '-lc', 'rm -rf /tmp/x'],
+		});
+		expect(effects.asked[0].binding).toEqual({
+			leaseId: 'lease-9',
+			actor: { kind: 'human', id: 'ada' },
+			provider: 'codex',
+			threadId,
+			turnId,
+			requestId: '0',
+		});
+		expect(h.fallbackToCli).not.toHaveBeenCalled();
+	});
+
+	it.each<[string, ManagedEffectDecision]>([
+		['a policy denial', { decision: 'deny', reason: 'rm is not allowed' }],
+		['an unavailable authority', { decision: 'unavailable', reason: 'no producer' }],
+		['a lost answer', { decision: 'unknown', reason: 'connection dropped' }],
+	])(
+		'declines the approval on %s even though exec would have bypassed it',
+		async (_name, decision) => {
+			const effects = tableEffects(() => decision);
+			const server = approvalServer();
+			const h = createHarness(server, { effects: () => effects });
+
+			// BYPASS_ARGS: the standalone table would accept; management grants nothing.
+			h.spawner.spawn(h.config({ args: BYPASS_ARGS, admission: fakeAdmission() }));
+			expect(await h.exited).toBe(0);
+
+			expect(server.responseTo(0)).toMatchObject({ result: { decision: 'decline' } });
+		}
+	);
+
+	it('declines every managed approval when the host has no effect authority at all', async () => {
+		const server = approvalServer();
+		const h = createHarness(server);
+
+		h.spawner.spawn(h.config({ admission: fakeAdmission() }));
+		expect(await h.exited).toBe(0);
+
+		expect(server.responseTo(0)).toMatchObject({ result: { decision: 'decline' } });
+	});
+
+	it('keeps an undecided approval pending and revokes it with a decline on stop', async () => {
+		let abortSeen = false;
+		const effects = tableEffects(
+			(_effect, _binding, signal) =>
+				new Promise<ManagedEffectDecision>(() => {
+					signal.addEventListener('abort', () => {
+						abortSeen = true;
+					});
+				})
+		);
+		const server = approvalServer();
+		const h = createHarness(server, { effects: () => effects });
+
+		h.spawner.spawn(h.config({ admission: fakeAdmission() }));
+		await vi.waitFor(() => expect(effects.asked).toHaveLength(1));
+		// Nothing answered while the authority is still deciding.
+		expect(server.responseTo(0)).toBeUndefined();
+
+		h.processes.get(h.sessionId)!.sdkController!.interrupt();
+		expect(await h.exited).toBe(0);
+
+		expect(abortSeen).toBe(true);
+		expect(server.responseTo(0)).toMatchObject({ result: { decision: 'decline' } });
+	});
+
+	it('refuses the exec fallback after a managed transport refusal and reports it', async () => {
+		const server = new FakeAppServer((msg, s) => {
+			if (msg.method === 'initialize')
+				s.send({ id: msg.id, error: { code: -32000, message: 'server unavailable' } });
+		});
+		const h = createHarness(server);
+
+		h.spawner.spawn(h.config({ admission: fakeAdmission() }));
+		expect(await h.exited).toBe(1);
+
+		expect(h.fallbackToCli).not.toHaveBeenCalled();
+		expect(h.errors).toHaveLength(1);
+		expect((h.errors[0] as { message: string }).message).toContain(
+			'exec fallback is not qualified under management'
+		);
+	});
+
+	it('still falls back to exec for the same refusal on a standalone turn', async () => {
+		const server = new FakeAppServer((msg, s) => {
+			if (msg.method === 'initialize')
+				s.send({ id: msg.id, error: { code: -32000, message: 'server unavailable' } });
+		});
+		const h = createHarness(server);
+
+		h.spawner.spawn(h.config());
+		await vi.waitFor(() => expect(h.fallbackToCli).toHaveBeenCalledTimes(1));
+		expect(h.errors).toEqual([]);
+	});
+});
+
+describe('Codex server request effects (pure)', () => {
+	const request = (method: string, params: unknown) => ({ id: 3, method, params });
+
+	it('extracts the exact command, file paths, permissions and tool call', () => {
+		expect(
+			codexRequestEffect(
+				request('item/commandExecution/requestApproval', {
+					command: 'git push',
+					cwd: '/p',
+					proposedExecpolicyAmendment: ['git', 'push'],
+				})
+			)
+		).toEqual({ kind: 'command', command: 'git push', cwd: '/p', argv: ['git', 'push'] });
+		expect(
+			codexRequestEffect(
+				request('item/fileChange/requestApproval', {
+					changes: [{ path: '/p/b.ts' }, { path: '/p/a.ts' }, { path: '/p/a.ts' }],
+				})
+			)
+		).toEqual({ kind: 'file-change', paths: ['/p/a.ts', '/p/b.ts'], cwd: null });
+		expect(
+			codexRequestEffect(
+				request('item/permissions/requestApproval', { permissions: { network: true } })
+			)
+		).toEqual({ kind: 'permissions', permissions: { network: true } });
+		expect(
+			codexRequestEffect(request('item/tool/call', { tool: 'lookup', arguments: { q: 1 } }))
+		).toEqual({
+			kind: 'tool-call',
+			tool: 'lookup',
+			input: { q: 1 },
+		});
+		expect(codexRequestEffect(request('attestation/generate', {}))).toEqual({
+			kind: 'other',
+			method: 'attestation/generate',
+		});
+		expect(codexRequestIds(request('x', { threadId: 't', turnId: 'u', itemId: 'i' }))).toEqual({
+			threadId: 't',
+			turnId: 'u',
+			itemId: 'i',
+		});
+	});
+
+	it('lets only a live allow grant once a managed decision is present', () => {
+		expect(codexRequestGranted({ grantApprovals: true })).toBe(true);
+		expect(
+			codexRequestGranted({ grantApprovals: true, managed: { decision: 'deny', reason: 'no' } })
+		).toBe(false);
+		expect(
+			codexRequestGranted({
+				grantApprovals: true,
+				managed: { decision: 'unavailable', reason: 'x' },
+			})
+		).toBe(false);
+		expect(codexRequestGranted({ grantApprovals: false, managed: { decision: 'allow' } })).toBe(
+			true
+		);
 	});
 });

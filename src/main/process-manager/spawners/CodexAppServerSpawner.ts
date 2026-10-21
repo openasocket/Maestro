@@ -234,7 +234,10 @@ class CodexAppServerTurn {
 	 * server's request id. Ending the turn (stop, kill, exit, completion)
 	 * aborts each and answers it with a refusal at once.
 	 */
-	private readonly pendingEffects = new Map<number | string, AbortController>();
+	private readonly pendingEffects = new Map<
+		number | string,
+		{ controller: AbortController; request: Parameters<typeof answerCodexServerRequest>[0] }
+	>();
 	private readonly turnEndListeners = new Set<() => void>();
 
 	constructor(
@@ -546,7 +549,7 @@ class CodexAppServerTurn {
 			this.ctx.effects() ??
 			unavailableEffectAuthority('This host has no effect authority for managed turns.');
 		const controller = new AbortController();
-		this.pendingEffects.set(request.id, controller);
+		this.pendingEffects.set(request.id, { controller, request });
 		const settle = (decision: ManagedEffectDecision): void => {
 			if (!this.pendingEffects.delete(request.id)) return;
 			logger.info('[CodexAppServerSpawner] Managed effect decided', LOG_CONTEXT, {
@@ -578,17 +581,19 @@ class CodexAppServerTurn {
 
 	/** Refuse every managed request still waiting on a decision; the turn or its lease is over. */
 	private revokePendingEffects(): void {
-		for (const [id, controller] of [...this.pendingEffects]) {
-			controller.abort();
+		for (const [id, pending] of [...this.pendingEffects]) {
+			pending.controller.abort();
 			this.pendingEffects.delete(id);
-			const request = { id, method: 'revoked' } as Parameters<typeof answerCodexServerRequest>[0];
 			logger.info('[CodexAppServerSpawner] Managed effect revoked while pending', LOG_CONTEXT, {
 				sessionId: this.config.sessionId,
+				method: pending.request.method,
 				requestId: String(id),
 			});
-			// Whatever the method was, a decline is the answer every approval
-			// method accepts; a method the table does not know gets its error.
-			this.respondToServerRequest(request, { grantApprovals: false, managed: EFFECT_REVOKED });
+			// The request's own method decides the shape of a decline.
+			this.respondToServerRequest(pending.request, {
+				grantApprovals: false,
+				managed: EFFECT_REVOKED,
+			});
 		}
 	}
 

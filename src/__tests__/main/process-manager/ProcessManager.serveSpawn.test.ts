@@ -25,6 +25,17 @@ vi.mock('../../../main/coworking/coworking-socket-path', () => ({
 
 import { ProcessManager } from '../../../main/process-manager';
 import type { ProcessConfig } from '../../../main/process-manager/types';
+import {
+	buildServerKey,
+	OPENCODE_MANAGED_PERMISSION_CONFIG,
+	opencodeServerPermissionConfig,
+} from '../../../main/opencode-server/OpencodeServerManager';
+import {
+	managedOpencodeRefusal,
+	opencodeManagedScope,
+	opencodePermissionEffect,
+} from '../../../main/process-manager/spawners/OpencodeServerSpawner';
+import { fakeAdmission, fakeSpawnPort } from '../../helpers/managedSpawnPort';
 
 const SERVE_RESULT = { pid: -1, success: true };
 
@@ -100,5 +111,228 @@ describe('ProcessManager spawn event on the OpenCode serve transport', () => {
 
 		expect(serve).not.toHaveBeenCalled();
 		expect(order).toEqual(['cli spawner', 'spawn event']);
+	});
+});
+
+/**
+ * Managed admission at the process manager's sink (MRC-06-01, MRC-06-08):
+ * on a managed host nothing spawns without an admission this manager minted,
+ * still live, for the digest of the exact request; the lease is bound to the
+ * spawner's result, released by the exit, and a revocation kills. The lease
+ * authority is real; only its policy answer is a table.
+ */
+describe('ProcessManager managed admission at the sink', () => {
+	function managedManager(port = fakeSpawnPort()) {
+		const manager = new ProcessManager(() => true, { spawnAuthority: () => port });
+		const serve = vi.fn(() => SERVE_RESULT);
+		const cli = vi.fn(() => ({ pid: 4242, success: true }));
+		const internals = manager as unknown as {
+			opencodeServerSpawner: { spawn: typeof serve };
+			childProcessSpawner: { spawn: typeof cli };
+		};
+		internals.opencodeServerSpawner = { spawn: serve };
+		internals.childProcessSpawner = { spawn: cli };
+		const errors: unknown[] = [];
+		manager.on('agent-error', (_id: string, error: unknown) => errors.push(error));
+		return { manager, port, serve, cli, errors };
+	}
+
+	it('refuses a managed spawn that carries no admission, before any branch', () => {
+		const { manager, serve, cli, errors } = managedManager();
+		const result = manager.spawn(config());
+
+		expect(result).toMatchObject({
+			success: false,
+			pid: -1,
+			managed: { state: 'denied', code: 'lease-invalid' },
+		});
+		expect(serve).not.toHaveBeenCalled();
+		expect(cli).not.toHaveBeenCalled();
+		expect(errors).toHaveLength(1);
+		expect((errors[0] as { message: string }).message).toContain('carries no admission');
+	});
+
+	it('refuses a look-alike admission this manager did not mint', () => {
+		const { manager, serve } = managedManager();
+		expect(manager.spawn(config({ admission: fakeAdmission() }))).toMatchObject({
+			success: false,
+			managed: { state: 'denied', code: 'lease-invalid' },
+		});
+		expect(serve).not.toHaveBeenCalled();
+	});
+
+	it('admits the exact request, refuses a changed one, binds the lease and releases it on exit', async () => {
+		const { manager, port, serve } = managedManager();
+		const request = config();
+		const admitted = await manager.admitSpawn(request, { peer: 'in-process' });
+		expect(admitted.state).toBe('admitted');
+		if (admitted.state !== 'admitted') return;
+		expect(port.asked).toHaveLength(1);
+		expect(port.asked[0].snapshot).toMatchObject({
+			provider: 'opencode',
+			operation: 'start',
+			executable: 'opencode',
+			target: { kind: 'local' },
+		});
+		expect(port.asked[0].context.actor).toEqual({ kind: 'human', id: 'ada' });
+
+		// A different prompt is a different request: the digest does not match.
+		expect(
+			manager.spawn({ ...request, prompt: 'Delete everything.', admission: admitted.admission })
+		).toMatchObject({ success: false, managed: { state: 'denied', code: 'lease-invalid' } });
+		expect(serve).not.toHaveBeenCalled();
+
+		// The admitted request runs on the serve transport under the lease.
+		expect(manager.spawn({ ...request, admission: admitted.admission })).toBe(SERVE_RESULT);
+		expect(serve).toHaveBeenCalledTimes(1);
+		const [lease] = port.authority.live();
+		expect(lease.state()).toBe('bound');
+		expect(manager.admissionOf(request.sessionId)).toBe(admitted.admission);
+		expect(manager.admissionLive(request.sessionId)).toEqual({ ok: true });
+
+		// The lease is spent: the same admission cannot start a second process.
+		expect(manager.spawn({ ...request, admission: admitted.admission })).toMatchObject({
+			success: false,
+			managed: { state: 'denied', code: 'lease-invalid' },
+		});
+
+		manager.emit('exit', request.sessionId, 0);
+		expect(port.authority.live()).toHaveLength(0);
+		expect(lease.ended()).toMatchObject({ state: 'released', release: { outcome: 'exited' } });
+		expect(manager.admissionOf(request.sessionId)).toBeNull();
+	});
+
+	it('returns a policy denial as a decision and starts nothing', async () => {
+		const port = fakeSpawnPort({
+			decide: () => ({ decision: 'deny', reason: 'opencode is not allowed', policyRevision: 1 }),
+		});
+		const { manager, serve } = managedManager(port);
+		const outcome = await manager.admitSpawn(config(), { peer: 'in-process' });
+		expect(outcome).toEqual({
+			state: 'denied',
+			code: 'policy-denied',
+			message: 'opencode is not allowed',
+		});
+		expect(await manager.spawnAdmitted(config(), { peer: 'in-process' })).toMatchObject({
+			success: false,
+			managed: { state: 'denied', code: 'policy-denied' },
+		});
+		expect(serve).not.toHaveBeenCalled();
+	});
+
+	it('refuses an actor the verifier does not accept, before the authority is asked', async () => {
+		const port = fakeSpawnPort({ accept: () => ['the actor is not registered here'] });
+		const { manager } = managedManager(port);
+		const outcome = await manager.admitSpawn(config(), { peer: 'web-login', username: 'mallory' });
+		expect(outcome).toMatchObject({ state: 'denied', code: 'unauthenticated' });
+		expect(port.asked).toHaveLength(0);
+	});
+
+	it('kills the process when the authority revokes its lease', async () => {
+		const { manager, port } = managedManager();
+		const kill = vi.spyOn(manager, 'kill').mockReturnValue(true);
+		const request = config();
+		const admitted = await manager.admitSpawn(request, { peer: 'in-process' });
+		if (admitted.state !== 'admitted') throw new Error(admitted.state);
+		manager.spawn({ ...request, admission: admitted.admission });
+
+		expect(port.authority.revokeAll('policy changed')).toBe(1);
+		expect(kill).toHaveBeenCalledWith(request.sessionId);
+		expect(manager.admissionLive(request.sessionId)).toMatchObject({ ok: false });
+	});
+
+	it('releases the lease as a spawn failure when the spawner fails', async () => {
+		const { manager, port, serve } = managedManager();
+		serve.mockReturnValueOnce({ pid: -1, success: false, error: 'no server' });
+		const request = config();
+		const admitted = await manager.admitSpawn(request, { peer: 'in-process' });
+		if (admitted.state !== 'admitted') throw new Error(admitted.state);
+		expect(manager.spawn({ ...request, admission: admitted.admission }).success).toBe(false);
+		expect(port.authority.live()).toHaveLength(0);
+	});
+
+	it('spawns as before on a standalone host and never asks the authority', async () => {
+		const port = fakeSpawnPort({ standing: 'standalone' });
+		const { manager, serve } = managedManager(port);
+		expect(await manager.admitSpawn(config(), { peer: 'in-process' })).toEqual({
+			state: 'standalone',
+		});
+		expect(manager.spawn(config())).toBe(SERVE_RESULT);
+		expect(serve).toHaveBeenCalledTimes(1);
+		expect(port.asked).toHaveLength(0);
+	});
+});
+
+/**
+ * OpenCode server isolation (MRC-06-04): a managed scope never shares an
+ * instance with a standalone session or another actor or policy, starts in
+ * ask mode, and the route stays explicitly unavailable until the table
+ * qualifies it; permission events map to exact effects.
+ */
+describe('OpenCode server isolation under management', () => {
+	const base = { binaryPath: '/opt/opencode', cwd: '/p' };
+	const scope = (actorId: string, policyRevision: number | null = 3) => ({
+		authorityId: 'endpoint-1',
+		actor: { kind: 'human' as const, id: actorId },
+		policyRevision,
+	});
+
+	it('keys a managed server by authority, actor and policy revision, apart from standalone', () => {
+		const standalone = buildServerKey(base);
+		const ada = buildServerKey({ ...base, managed: scope('ada') });
+		expect(ada).not.toBe(standalone);
+		expect(buildServerKey({ ...base, managed: scope('ada') })).toBe(ada);
+		expect(buildServerKey({ ...base, managed: scope('bob') })).not.toBe(ada);
+		expect(buildServerKey({ ...base, managed: scope('ada', 4) })).not.toBe(ada);
+		expect(
+			buildServerKey({ ...base, managed: { ...scope('ada'), authorityId: 'other' } })
+		).not.toBe(ada);
+	});
+
+	it('starts a managed server in ask mode and a standalone one with the auto-approve config', () => {
+		expect(opencodeServerPermissionConfig(scope('ada'))).toBe(OPENCODE_MANAGED_PERMISSION_CONFIG);
+		expect(OPENCODE_MANAGED_PERMISSION_CONFIG.permission['*']).toBe('ask');
+		expect(OPENCODE_MANAGED_PERMISSION_CONFIG.permission.question).toBe('deny');
+		expect(opencodeServerPermissionConfig(undefined).permission['*']).toBe('allow');
+	});
+
+	it('refuses a managed OpenCode turn while the route table has no qualified producer, and none standalone', () => {
+		expect(managedOpencodeRefusal(config())).toBeNull();
+		expect(managedOpencodeRefusal(config({ admission: fakeAdmission() }))).toMatchObject({
+			state: 'unavailable',
+			code: 'capability-unsupported',
+		});
+	});
+
+	it('takes the server scope from the admission and the effect from the permission event', () => {
+		expect(opencodeManagedScope(fakeAdmission({ policyRevision: 7 }))).toEqual({
+			authorityId: 'test-authority',
+			actor: { kind: 'human', id: 'ada' },
+			policyRevision: 7,
+		});
+		const permission = (type: string, pattern: string | string[], metadata = {}) => ({
+			id: 'perm-1',
+			type,
+			pattern,
+			sessionID: 'ses',
+			messageID: 'msg',
+			title: 'May I?',
+			metadata,
+			time: { created: 1 },
+		});
+		expect(opencodePermissionEffect(permission('bash', 'rm *', { command: 'rm -rf /' }))).toEqual({
+			kind: 'command',
+			command: 'rm -rf /',
+			cwd: null,
+			argv: null,
+		});
+		expect(opencodePermissionEffect(permission('edit', ['/p/b.ts', '/p/a.ts']))).toEqual({
+			kind: 'file-change',
+			paths: ['/p/a.ts', '/p/b.ts'],
+			cwd: null,
+		});
+		expect(
+			opencodePermissionEffect(permission('webfetch', 'https://x', { url: 'https://x' }))
+		).toEqual({ kind: 'tool-call', tool: 'webfetch', input: { url: 'https://x' } });
 	});
 });

@@ -95,6 +95,7 @@ import { ProcessManager } from '../../../main/process-manager';
 import type { ManagedProcess } from '../../../main/process-manager/types';
 import type { CodexAppServerProcessHandle } from '../../../main/codex-app-server/protocol';
 import type { SteeringResultFrame } from '../../../shared/chatSteering';
+import { fakeSpawnPort, tableEffects } from '../../helpers/managedSpawnPort';
 
 let nextId = 0;
 
@@ -316,5 +317,44 @@ describe('ProcessManager.steer on Codex', () => {
 
 		expect(captured.socketSteers).toHaveLength(1);
 		expect(result).toMatchObject({ verdict: 'refused', refusal: 'not-running' });
+	});
+});
+
+/**
+ * Managed routing (MRC-06-08): a managed Codex turn reaches the app-server
+ * spawner only with an admission this manager minted, which rides on the
+ * config it receives, and the spawner's live effect read answers the port's
+ * authority. Standalone routing above is unchanged.
+ */
+describe('ProcessManager managed Codex routing', () => {
+	it('refuses a managed app-server turn with no admission and routes nothing', () => {
+		const port = fakeSpawnPort();
+		const managed = new ProcessManager(undefined, { spawnAuthority: () => port });
+		captured.appServer.length = 0;
+		captured.child.length = 0;
+
+		const result = managed.spawn(codexTurn());
+		expect(result).toMatchObject({ success: false, managed: { state: 'denied' } });
+		expect(captured.appServer).toHaveLength(0);
+		expect(captured.child).toHaveLength(0);
+	});
+
+	it('hands the admission to the app-server spawner and the port effects to its live read', async () => {
+		const effects = tableEffects(() => ({ decision: 'allow' }));
+		const port = fakeSpawnPort({ effects });
+		captured.appServerOptions.length = 0;
+		const managed = new ProcessManager(undefined, { spawnAuthority: () => port });
+		captured.appServer.length = 0;
+
+		const turn = codexTurn();
+		const admitted = await managed.admitSpawn(turn, { peer: 'in-process' });
+		if (admitted.state !== 'admitted') throw new Error(admitted.state);
+		expect(managed.spawn({ ...turn, admission: admitted.admission })).toEqual(SPAWN_RESULT);
+
+		expect(captured.appServer).toHaveLength(1);
+		expect(captured.appServer[0].admission).toBe(admitted.admission);
+		const options = captured.appServerOptions[0] as { effects: () => unknown };
+		expect(options.effects()).toBe(effects);
+		expect(managed.managedPort()).toBe(port);
 	});
 });
