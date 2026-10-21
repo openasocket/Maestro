@@ -37,6 +37,7 @@ import type {
 	ManagedSubmitInput,
 	ManagedSubmitReceipt,
 } from '../managed/types';
+import type { ManagedPolicyStatus } from '../managed/host-adapter';
 
 // ---------------------------------------------------------------------------
 // Results and errors
@@ -127,7 +128,8 @@ export type ClientMethod =
 	| 'managed.inspect'
 	| 'managed.cancel'
 	| 'managed.interrupt'
-	| 'managed.events';
+	| 'managed.events'
+	| 'managed.policy';
 
 export type Unsubscribe = () => void;
 
@@ -682,6 +684,10 @@ export interface ManagedApi {
 	events(
 		envelope: ManagedOperationEnvelope<{ cursor: string | null; limit: number }>
 	): Promise<ClientResult<ManagedOperationResult<ManagedEventPage>>>;
+	/** The policy this host is under and how far to trust it (`policy.status`); unsupported on a host with no adapter. */
+	policy(
+		envelope: ManagedOperationEnvelope<Record<string, never>>
+	): Promise<ClientResult<ManagedOperationResult<ManagedPolicyStatus>>>;
 }
 
 // ---------------------------------------------------------------------------

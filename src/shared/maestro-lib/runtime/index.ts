@@ -543,6 +543,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 				? { resolveResource: options.managed.resolveResource }
 				: {}),
 			...(options.managed?.scopeAgents ? { scopeAgents: options.managed.scopeAgents } : {}),
+			...(managedHost ? { policyStatus: () => managedHost.policyStatus() } : {}),
 		});
 	} else {
 		logger.warn(

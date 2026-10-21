@@ -593,6 +593,54 @@ describe('runtime with a host adapter', () => {
 		expect(again.managedBinding.state().state).toBe('enrolled');
 	});
 
+	it('answers policy.status in process from the adapter projection', async () => {
+		const runtime = await start((installationId) =>
+			okView(record('/tmp/endpoint.sock', installationId))
+		);
+		const envelope = {
+			context: inProcessContext({
+				installation: runtime.installation,
+				actor: { kind: 'human' as const, id: 'ada' },
+				delegation: { chain: [], grantRef: null },
+				identity: {
+					requestId: 'req-p',
+					idempotencyKey: 'key-p',
+					attemptId: 'att-p',
+					runId: null,
+					rootRunId: null,
+					parentRunId: null,
+				},
+				policyRevision: 3,
+				workflow: null,
+				traceId: 'trace-p',
+				requestedCapabilities: ['policy.status' as const],
+			}),
+			input: {},
+		};
+		const answered = await runtime.managed!.policy(envelope);
+		expect(answered.ok).toBe(true);
+		if (answered.ok) {
+			expect(answered.value).toMatchObject({
+				status: 'ok',
+				requestId: 'req-p',
+				value: {
+					source: 'cached',
+					installedRevision: 3,
+					offline: { mode: 'installed-policy-only' },
+					admission: { possible: false },
+				},
+			});
+		}
+		const notAsked = await runtime.managed!.policy({
+			...envelope,
+			context: { ...envelope.context, requestedCapabilities: [] },
+		});
+		expect(notAsked.ok && notAsked.value).toMatchObject({
+			status: 'denied',
+			code: 'capability-unsupported',
+		});
+	});
+
 	it('leaves the binding standalone for a record that names another installation, and unavailable for untrusted custody', async () => {
 		const other = await start(() => okView(record('/tmp/endpoint.sock', 'some-other-install')));
 		expect(other.managedBinding.state().state).toBe('standalone');

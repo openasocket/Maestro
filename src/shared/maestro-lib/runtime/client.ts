@@ -345,6 +345,7 @@ export function createRuntimeClient(deps: RuntimeClientDeps): MaestroClient {
 			cancel: write('managed.cancel', managed.cancel),
 			interrupt: write('managed.interrupt', managed.interrupt),
 			events: read('managed.events', managed.events),
+			policy: read('managed.policy', managed.policy),
 		};
 	}
 }

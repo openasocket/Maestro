@@ -39,6 +39,7 @@ import {
 	type PolicySourceSet,
 } from './authority';
 import type { ManagedBinding } from './binding';
+import type { ManagedPolicyStatus } from './host-adapter';
 import { journalRunRecord, type RunJournal } from './run-journal';
 import {
 	MANAGED_CONTRACT_VERSION,
@@ -119,6 +120,8 @@ export interface ManagedOperationsDeps {
 	scopeAgents?(context: ManagedAuthenticatedContext, agents: AgentRecord[]): AgentRecord[];
 	/** The policy sources the host reads from, for the admission request. */
 	policy(): PolicySourceSet;
+	/** The policy projection of the host adapter; absent on a host with none (`policy` answers unsupported). */
+	policyStatus?(): ManagedPolicyStatus;
 	capabilities?: readonly SupportEntry<ManagedCapability>[];
 }
 
@@ -425,6 +428,24 @@ export function createManagedOperations(deps: ManagedOperationsDeps): ManagedApi
 
 		cancel: (envelope) => control(envelope, 'cancel'),
 		interrupt: (envelope) => control(envelope, 'interrupt'),
+
+		async policy(envelope) {
+			const admitted = admitContext<ManagedPolicyStatus>(envelope, 'policy.status');
+			if (!admitted.ok) return { ok: true, value: admitted.result };
+			const { context } = admitted;
+			if (!deps.policyStatus) {
+				return {
+					ok: true,
+					value: refuse(
+						'unsupported',
+						context.identity.requestId,
+						'capability-unsupported',
+						'This host has no managed host adapter, so it projects no policy status.'
+					),
+				};
+			}
+			return { ok: true, value: ok(context.identity.requestId, deps.policyStatus()) };
+		},
 
 		async events(envelope) {
 			const requestId = requestIdOf(envelope?.context);
