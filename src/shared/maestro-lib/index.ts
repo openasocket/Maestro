@@ -20,6 +20,7 @@ export * from './managed/binding';
 export * from './managed/run-journal';
 export * from './managed/operations';
 export * from './managed/endpoint-port';
+export * from './managed/host-adapter';
 
 // Paths and configuration
 export * from './paths/userDataDir';

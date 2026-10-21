@@ -43,11 +43,15 @@ import * as os from 'os';
 import { generateUUID } from '../../uuid';
 import {
 	createContextVerifier,
-	sha256Hex,
 	type HostAuthority,
 	type PolicySourceSet,
 } from '../managed/authority';
 import { createManagedBinding, type ManagedBinding } from '../managed/binding';
+import {
+	bindingEnrollment,
+	installationIdentity,
+	type ManagedHostAdapter,
+} from '../managed/host-adapter';
 import { createManagedOperations, type ApprovedResource } from '../managed/operations';
 import { createRunJournal, managedRunJournalPath, type RunJournal } from '../managed/run-journal';
 import type { ManagedAuthenticatedContext, ManagedInstallationIdentity } from '../managed/types';
@@ -107,6 +111,14 @@ export interface MaestroRuntimeOptions {
 	 */
 	managed?: {
 		authority?: HostAuthority;
+		/**
+		 * The host adapter over this process's identity custody and endpoint
+		 * socket (`createManagedHostAdapter`), built for the installation identity
+		 * the runtime computes (the factory receives it once the lock is held).
+		 * Its authority answers admissions and its enrollment record is mirrored
+		 * into the binding file under the lock. Takes precedence over `authority`.
+		 */
+		host?(installation: ManagedInstallationIdentity): ManagedHostAdapter;
 		/** The approved handle for a resource id a managed submission names. Default: none. */
 		resolveResource?(id: string, context: ManagedAuthenticatedContext): ApprovedResource | null;
 		/** Which agents a verified actor may see. Default: all of them. */
@@ -137,6 +149,8 @@ export interface MaestroRuntime extends MaestroClient {
 	readonly managedRuns: Pick<RunJournal, 'get' | 'list' | 'open'> | null;
 	/** This installation as a managed peer sees it. A local label, not an enrolled device identity. */
 	readonly installation: ManagedInstallationIdentity;
+	/** The host adapter this runtime admits with, when one was injected. */
+	readonly managedHost: ManagedHostAdapter | null;
 	/**
 	 * The Auto Runs in flight, for a host that reports them (`host status`, the refusal to stop with
 	 * work in flight) and replays them to a client that connects mid-run.
@@ -242,10 +256,23 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 	// Read before any admission, under the lock. The binding reads the
 	// production directory too, so an alternate data directory under an
 	// enrolled installation is still enrolled.
+	// The installation id is a label derived from this machine and the
+	// production data directory, so a peer can tell two installs apart; it is
+	// not a minted device identity (that is the peer's, bound at enrollment).
+	const hostname = (deps.hostname ?? os.hostname)() ?? 'unknown-host';
+	const installation = installationIdentity({
+		hostname,
+		productionDataDir: paths.productionDataDir,
+		mode: options.mode,
+		pid: lock.info.pid,
+		startedAt: lock.info.startedAt,
+	});
+	const managedHost = options.managed?.host?.(installation) ?? null;
+	const managedAuthority = managedHost?.authority ?? options.managed?.authority;
 	const binding = createManagedBinding({
 		paths,
 		fence: () => fenceVerdict(),
-		...(options.managed?.authority ? { authority: options.managed.authority } : {}),
+		...(managedAuthority ? { authority: managedAuthority } : {}),
 		now: deps.now ?? (() => Date.now()),
 	});
 	let phase: RuntimePhase = 'open';
@@ -280,7 +307,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 				LOG_CONTEXT
 			);
 		});
-		options.managed?.authority?.revokeAll(reason);
+		managedAuthority?.revokeAll(reason);
 		bus.emit({ type: 'host.lost', reason });
 	};
 
@@ -321,6 +348,36 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 				message: `Could not start on ${paths.userDataDir}: ${errorText(error)}`,
 			},
 		};
+	}
+
+	// An enrolled sealed record is mirrored into the binding file by the lock
+	// holder, so the runtime's own enrollment and the protected custody agree.
+	// A binding for another authority, or a record for another installation,
+	// is left as it is: the binding then reads enrolled-unavailable and says why.
+	if (managedHost) {
+		const identity = managedHost.identity.read();
+		if (
+			identity.status === 'ok' &&
+			identity.record &&
+			identity.record.installationId === installation.installationId &&
+			binding.state().state === 'standalone'
+		) {
+			const enrolled = await binding.enroll(bindingEnrollment(identity.record));
+			if (!enrolled.ok) {
+				logger.warn(
+					`The managed binding could not mirror the enrollment record (${enrolled.reason}): ${enrolled.message}`,
+					LOG_CONTEXT
+				);
+			}
+		} else if (
+			identity.status === 'ok' &&
+			identity.record?.installationId !== installation.installationId
+		) {
+			logger.warn(
+				`The enrollment record names installation ${identity.record?.installationId}, this runtime is ${installation.installationId}; managed operations stay unavailable.`,
+				LOG_CONTEXT
+			);
+		}
 	}
 
 	running.stopHeartbeat = lock.startHeartbeat(fenceRuntime);
@@ -449,17 +506,8 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		label: hostLabel(options.mode, lock.info.pid),
 	};
 
-	// Managed operations. The installation id is a label derived from this
-	// machine and the production data directory, so a peer can tell two
-	// installs apart; it is not a minted device identity (that is the peer's,
-	// bound at enrollment). The verifier accepts in-process callers that name
+	// Managed operations. The verifier accepts in-process callers that name
 	// this installation; every other transport waits on its own verifier.
-	const hostname = (deps.hostname ?? os.hostname)() ?? 'unknown-host';
-	const installation: ManagedInstallationIdentity = {
-		installationId: sha256Hex(`${hostname}\n${paths.productionDataDir}`).slice(0, 32),
-		runtimeId: `${options.mode}-${lock.info.pid}`,
-		processEpoch: lock.info.startedAt,
-	};
 	const journal = createRunJournal({
 		file: managedRunJournalPath(paths),
 		now: deps.now ?? (() => Date.now()),
@@ -490,7 +538,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			repository,
 			turns: turns.managed,
 			providers: () => getVisibleAgentDefinitions().map((definition) => definition.id),
-			policy: options.managed?.policy ?? bindingPolicy,
+			policy: options.managed?.policy ?? (managedHost ? () => managedHost.policy() : bindingPolicy),
 			...(options.managed?.resolveResource
 				? { resolveResource: options.managed.resolveResource }
 				: {}),
@@ -528,6 +576,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			managedBinding: binding,
 			managedRuns: journalLoaded.ok ? journal : null,
 			installation,
+			managedHost,
 			runs: { activeRuns: autoRun.activeRuns, latestState: autoRun.latestState },
 			// The registry holds every process the runtime owns; the background ones are counted apart.
 			turnsInFlight: () => registry.size() - background.registeredCount(),
