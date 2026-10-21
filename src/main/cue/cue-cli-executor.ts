@@ -13,12 +13,21 @@
  * `--live` was renamed to the dedicated `dispatch` verb in PR1 of the CLI
  * surface refactor. The desktop `send_command` WebSocket message that
  * underlies the dispatch is unchanged, so behavior is identical.
+ *
+ * The dispatch is a NESTED one (MRC-07-04): the Cue run is the initiator and
+ * the target agent's turn, started by the desktop's send path, is its child.
+ * The courier is told who initiated it the way every agent's shell is told
+ * (`MAESTRO_CALLER_AGENT_ID`, the owning agent, forwarded as `fromSessionId`),
+ * that a Cue fired it (`MAESTRO_QUERY_SOURCE`) and the run's causal context
+ * (`MAESTRO_DELEGATION_CONTEXT`), stamped over anything inherited. Under
+ * management the route is judged first (see {@link cueCliRouteSupport}).
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawn, type ChildProcess } from 'child_process';
 import type { CueCommandCliCall, CueEvent, CueRunResult, CueSubscription } from './cue-types';
+import type { CueManagedAdmission } from './cue-executor';
 import type { SessionInfo } from '../../shared/types';
 import { substituteTemplateVariables, type TemplateContext } from '../../shared/templateVariables';
 import { buildCueTemplateContext } from './cue-template-context-builder';
@@ -26,6 +35,15 @@ import { captureException } from '../utils/sentry';
 import { isWindows } from '../../shared/platformDetection';
 import { killCueProcess, trackCueProcess } from './cue-process-lifecycle';
 import { isLaunchCancelled, stoppedBeforeLaunchResult } from './cue-launch-cancel';
+import { buildCallerIdentityEnv, CALLER_TAB_ID_ENV_VAR } from '../../shared/agentDelegation';
+import { QUERY_SOURCE_ENV_VAR } from '../../shared/querySource';
+import type { SupportStatus } from '../../shared/maestro-lib/managed/compatibility';
+import {
+	MANAGED_DELEGATION_ENV_VAR,
+	delegationContextEnv,
+	delegationContextProblems,
+	type ManagedDelegationContext,
+} from '../../shared/maestro-lib/managed/delegation';
 
 /** Timeout for a single maestro-cli send invocation. */
 const CLI_SEND_TIMEOUT_MS = 30_000;
@@ -60,6 +78,61 @@ export interface CueCliExecutionConfig {
 	onLog: (level: string, message: string) => void;
 	/** Aborted when the run is stopped: a call not yet spawned returns `stopped` (see cue-launch-cancel.ts). */
 	signal?: AbortSignal;
+	/**
+	 * The run's causal context, as the router built it from the run lineage
+	 * (standalone: workflow null, no policy generation; managed: the verified
+	 * context's attribution half). Stamped into the child's environment so the
+	 * dispatched turn is parented under this run. Absent on the legacy
+	 * `cli_output` path, which has no lineage of its own.
+	 */
+	delegation?: ManagedDelegationContext;
+	/**
+	 * A managed host's admission for this run (MRC-07-04): the subscription's
+	 * owner, pipeline and event bound into a verified context by the router.
+	 * Absent on a standalone host.
+	 */
+	admission?: CueManagedAdmission;
+	/**
+	 * The route table consulted under management. Default
+	 * {@link cueCliRouteSupport} (the nested dispatch unsupported); no runner
+	 * passes one. A test injects a declared double to drive the sink past the
+	 * refusal.
+	 */
+	routeSupport?: () => CueCliRouteSupport;
+}
+
+/**
+ * The one way a Cue `mode: cli` action runs: `maestro-cli dispatch` to an
+ * agent of the local Maestro, whose turn the desktop then starts. The effect
+ * is that turn, admitted (or not) at the desktop's spawn sink; the CLI
+ * process in between is a courier.
+ */
+export type CueCliRoute = 'nested-dispatch';
+
+export interface CueCliRouteSupport {
+	route: CueCliRoute;
+	/** Whether this build runs the action over the route at all. */
+	standalone: SupportStatus;
+	/** Whether a managed restriction is enforced on the route, end to end. */
+	managed: SupportStatus;
+	note: string;
+}
+
+/**
+ * The table for the nested dispatch: standalone as always, now with the
+ * initiator named on the courier; not qualified under management, because
+ * `maestro-cli dispatch` does not yet read the record and the desktop's send
+ * path admits the dispatched turn as a fresh chat turn, ending the owner's
+ * confinement at the hand-off. Reads `unsupported` until the receiving sink
+ * binds the carried context (MRC-07-04B); never flipped from a test or a host flag.
+ */
+export function cueCliRouteSupport(): CueCliRouteSupport {
+	return {
+		route: 'nested-dispatch',
+		standalone: 'implemented',
+		managed: 'unsupported',
+		note: 'the dispatched turn is started by the desktop send path, which admits it as a fresh chat turn of the target agent; the initiator context stamped on the courier is not yet read by maestro-cli dispatch nor bound at that spawn sink, so a managed host refuses the action rather than let the owning run confinement end at the hand-off',
+	};
 }
 
 export interface CliSendResult {
@@ -120,13 +193,19 @@ export function resolveMaestroCliScriptPath(): string {
  * ({@link trackCueProcess}) so the Process Monitor lists it and Stop reaches
  * it. The legacy cli_output Phase 3 path passes no runId: it is a side effect of
  * an already-completed run, so it stays untracked.
+ *
+ * `stamp` is written over the inherited environment, last: an entry with a
+ * string value is set, one with `undefined` is removed. The cue executor
+ * names the initiator with it; the legacy path passes none and the child
+ * inherits the engine's environment as before.
  */
 export async function runMaestroCliSend(
 	target: string,
 	message: string,
 	timeoutMs: number = CLI_SEND_TIMEOUT_MS,
 	runId?: string,
-	newTab = false
+	newTab = false,
+	stamp: Readonly<Record<string, string | undefined>> = {}
 ): Promise<CliSendResult> {
 	const cliScriptPath = resolveMaestroCliScriptPath();
 	const truncated = message.substring(0, CLI_SEND_OUTPUT_MAX_CHARS);
@@ -140,16 +219,18 @@ export async function runMaestroCliSend(
 			// preserving the user's view. Visibility is separate from placement;
 			// ordinary background dispatches keep their existing hidden default.
 			if (newTab) args.push('--new-tab', '--visible');
+			// In packaged Electron, `process.execPath` is the app binary, not
+			// Node - without this flag the spawn would launch the app instead
+			// of running maestro-cli.js. Mirrors the shims emitted by
+			// maestro-cli-manager.ts for user-facing invocations.
+			const env: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
+			for (const [key, value] of Object.entries(stamp)) {
+				if (value === undefined) delete env[key];
+				else env[key] = value;
+			}
 			child = spawn(process.execPath, args, {
 				stdio: ['ignore', 'pipe', 'pipe'],
-				// In packaged Electron, `process.execPath` is the app binary, not
-				// Node - without this flag the spawn would launch the app instead
-				// of running maestro-cli.js. Mirrors the shims emitted by
-				// maestro-cli-manager.ts for user-facing invocations.
-				env: {
-					...process.env,
-					ELECTRON_RUN_AS_NODE: '1',
-				},
+				env,
 			});
 		} catch (err) {
 			// Synchronous spawn throw is an unexpected process-launch failure
@@ -254,8 +335,20 @@ export async function runMaestroCliSend(
  * `target` + `message` with template variables then invokes maestro-cli.
  */
 export async function executeCueCli(config: CueCliExecutionConfig): Promise<CueRunResult> {
-	const { runId, session, subscription, event, cli, templateContext, timeoutMs, onLog, signal } =
-		config;
+	const {
+		runId,
+		session,
+		subscription,
+		event,
+		cli,
+		templateContext,
+		timeoutMs,
+		onLog,
+		signal,
+		delegation,
+		admission,
+		routeSupport,
+	} = config;
 
 	const startedAt = new Date().toISOString();
 	const startTime = Date.now();
@@ -275,6 +368,35 @@ export async function executeCueCli(config: CueCliExecutionConfig): Promise<CueR
 		startedAt,
 		endedAt: new Date().toISOString(),
 	});
+
+	// A record this build cannot vouch for is the run's failure, never a child
+	// started anonymous or with a record its reader will refuse.
+	if (delegation) {
+		const problems = delegationContextProblems(delegation);
+		if (problems.length > 0) {
+			const message = `Cue subscription "${subscription.name}" cli delegation context is malformed: ${problems.join('; ')}`;
+			onLog('warn', message);
+			return failedResult(message);
+		}
+	}
+
+	// Under management the route is judged before the target is substituted:
+	// an unqualified route is refused with no lease asked. The effect is the
+	// target's turn, admitted where it starts; the courier is not what a lease covers.
+	if (admission) {
+		const support = (routeSupport ?? cueCliRouteSupport)();
+		if (support.managed !== 'implemented') {
+			const message = `A Cue maestro-cli action over the ${support.route} route is unavailable under management on this host: ${support.note}. Nothing was dispatched.`;
+			onLog(
+				'warn',
+				`[CUE] cli run ${runId} was not admitted (unavailable, capability-unsupported): ${message}`
+			);
+			return {
+				...failedResult(`[managed-unavailable] ${message}`),
+				managed: { state: 'unavailable', code: 'capability-unsupported' },
+			};
+		}
+	}
 
 	templateContext.cue = buildCueTemplateContext(event, subscription, runId);
 
@@ -328,12 +450,24 @@ export async function executeCueCli(config: CueCliExecutionConfig): Promise<CueR
 				startedAt,
 			});
 		}
+		// Who initiated the dispatch, stamped over anything inherited (an engine
+		// started from an agent's shell carries that agent's identity, not this
+		// run's): the owner as the caller, no caller tab, a Cue as the source,
+		// and the run's causal context for the receiving sink to bind.
 		const result = await runMaestroCliSend(
 			resolvedTarget,
 			resolvedMessage,
 			clampedTimeout,
 			runId,
-			cli.new_tab
+			cli.new_tab,
+			{
+				...buildCallerIdentityEnv(session.id),
+				[CALLER_TAB_ID_ENV_VAR]: undefined,
+				[QUERY_SOURCE_ENV_VAR]: 'cue',
+				...(delegation
+					? delegationContextEnv(delegation)
+					: { [MANAGED_DELEGATION_ENV_VAR]: undefined }),
+			}
 		);
 		const status = result.timedOut ? 'timeout' : result.ok ? 'completed' : 'failed';
 		if (result.timedOut) {

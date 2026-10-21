@@ -46,6 +46,7 @@ import type {
 	ManagedWorkflowRef,
 } from '../../shared/maestro-lib/managed/types';
 import type { AutoRunOwnerFence } from '../../shared/maestro-lib/autorun/attribution';
+import { delegationContextOf } from '../../shared/maestro-lib/managed/delegation';
 import { canonicalJson } from '../../shared/canonicalJson';
 import { generateUUID } from '../../shared/uuid';
 import type { executeCueShell as ExecuteCueShell } from './cue-shell-executor';
@@ -603,8 +604,38 @@ export async function executeCueRunAction(
 				...(binding.managed ? { admission: binding.admission } : {}),
 			});
 		}
-		// CLI mode carries no admission yet (MRC-07-04): it is a nested
-		// maestro-cli dispatch, and its delegation context is its own task.
+		// A maestro-cli action is a NESTED dispatch (MRC-07-04): this run is
+		// the initiator, the target agent's turn its child. Bound on the same
+		// lineage as a prompt run, versioned on the call itself; the executor
+		// hands the child the run's causal context (the verified context's half
+		// under management, the bare lineage standalone) and judges the route.
+		const cliLineage = cueRunLineage({
+			runId,
+			chainRootId,
+			parentEventId,
+			pipelineName,
+			subscriptionName,
+			prompt: canonicalJson(command.cli),
+			action,
+			event,
+			ownerAgentId: storedSession.id,
+			attemptId: deps.managed?.newId?.() ?? generateUUID(),
+		});
+		const cliBinding = bindCueManagedRun(deps.managed, cliLineage);
+		if (cliBinding.managed && 'refusal' in cliBinding) {
+			return managedRefusalResult(cliBinding.refusal);
+		}
+		const delegation = delegationContextOf(
+			cliBinding.managed
+				? cliBinding.admission.context
+				: {
+						identity: cliLineage.identity,
+						traceId: cliLineage.traceId,
+						workflow: null,
+						delegation: cliLineage.delegation,
+						policyRevision: null,
+					}
+		);
 		return deps.executeCueCli({
 			runId,
 			session: sessionInfo,
@@ -620,6 +651,8 @@ export async function executeCueRunAction(
 			// point at the wrong daemon and `maestro-cli.js` may not
 			// exist on the remote host.
 			signal,
+			delegation,
+			...(cliBinding.managed ? { admission: cliBinding.admission } : {}),
 		});
 	}
 

@@ -6,7 +6,7 @@
  * template substitution applied to both target and (optional) message.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 import type { CueEvent, CueSubscription } from '../../../main/cue/cue-types';
@@ -78,8 +78,16 @@ vi.mock('../../../shared/platformDetection', async (importOriginal) => {
 	};
 });
 
-import { executeCueCli } from '../../../main/cue/cue-cli-executor';
+import { cueCliRouteSupport, executeCueCli } from '../../../main/cue/cue-cli-executor';
 import { getProcessList, stopProcess } from '../../../main/cue/cue-process-lifecycle';
+import {
+	MANAGED_DELEGATION_ENV_VAR,
+	readDelegationContextEnv,
+	type ManagedDelegationContext,
+} from '../../../shared/maestro-lib/managed/delegation';
+import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
+import { CALLER_AGENT_ID_ENV_VAR, CALLER_TAB_ID_ENV_VAR } from '../../../shared/agentDelegation';
+import { QUERY_SOURCE_ENV_VAR } from '../../../shared/querySource';
 
 function createSession(): SessionInfo {
 	return {
@@ -139,6 +147,166 @@ function createConfig(overrides: Record<string, unknown> = {}) {
 		...overrides,
 	};
 }
+
+/** The causal context the router hands the executor for a standalone run: the lineage, no workflow, no policy generation. */
+function createDelegation(
+	overrides: Partial<ManagedDelegationContext> = {}
+): ManagedDelegationContext {
+	return {
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		identity: {
+			requestId: 'run-1',
+			idempotencyKey: 'run-1',
+			attemptId: 'attempt-1',
+			runId: 'run-1',
+			rootRunId: 'root-1',
+			parentRunId: null,
+		},
+		traceId: 'cue:root-1:run-1:attempt-1',
+		workflow: null,
+		delegation: {
+			chain: [
+				{ kind: 'service', id: 'cue-subscription:cli-test' },
+				{ kind: 'agent', id: 'session-1' },
+			],
+			grantRef: null,
+		},
+		policyRevision: null,
+		...overrides,
+	};
+}
+
+/** The env the courier was spawned with. */
+const spawnedEnv = (): Record<string, string | undefined> =>
+	(mockSpawn.mock.calls[0][2] as { env: Record<string, string | undefined> }).env;
+
+/**
+ * Nested dispatch (MRC-07-04): the courier is told who initiated it and
+ * carries the run's causal context; under management the route is judged
+ * before anything is dispatched.
+ */
+describe('cue-cli-executor nested dispatch delegation', () => {
+	const inherited = {
+		[CALLER_AGENT_ID_ENV_VAR]: process.env[CALLER_AGENT_ID_ENV_VAR],
+		[CALLER_TAB_ID_ENV_VAR]: process.env[CALLER_TAB_ID_ENV_VAR],
+		[QUERY_SOURCE_ENV_VAR]: process.env[QUERY_SOURCE_ENV_VAR],
+		[MANAGED_DELEGATION_ENV_VAR]: process.env[MANAGED_DELEGATION_ENV_VAR],
+	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockIsWindows.mockReturnValue(false);
+		// A stale identity two hops up: an engine started from another agent's shell.
+		process.env[CALLER_AGENT_ID_ENV_VAR] = 'stale-agent';
+		process.env[CALLER_TAB_ID_ENV_VAR] = 'stale-tab';
+		process.env[QUERY_SOURCE_ENV_VAR] = 'user';
+		process.env[MANAGED_DELEGATION_ENV_VAR] = '{"stale":true}';
+	});
+
+	afterEach(() => {
+		for (const [key, value] of Object.entries(inherited)) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+	});
+
+	it('names the owning agent as the caller, a Cue as the source, and stamps the context over what was inherited', async () => {
+		const delegation = createDelegation();
+		const promise = executeCueCli(createConfig({ delegation }) as any);
+		await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(1));
+		mockChild.emit('close', 0);
+		const result = await promise;
+
+		expect(result.status).toBe('completed');
+		const env = spawnedEnv();
+		expect(env[CALLER_AGENT_ID_ENV_VAR]).toBe('session-1');
+		expect(env).not.toHaveProperty(CALLER_TAB_ID_ENV_VAR);
+		expect(env[QUERY_SOURCE_ENV_VAR]).toBe('cue');
+		expect(env.ELECTRON_RUN_AS_NODE).toBe('1');
+		expect(readDelegationContextEnv(env)).toEqual({ status: 'ok', context: delegation });
+	});
+
+	it('a run with no context of its own clears the inherited record rather than pass it down', async () => {
+		const promise = executeCueCli(createConfig() as any);
+		await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(1));
+		mockChild.emit('close', 0);
+		await promise;
+
+		const env = spawnedEnv();
+		expect(env).not.toHaveProperty(MANAGED_DELEGATION_ENV_VAR);
+		expect(env[CALLER_AGENT_ID_ENV_VAR]).toBe('session-1');
+	});
+
+	it('a malformed context fails the run before anything is dispatched', async () => {
+		const result = await executeCueCli(
+			createConfig({
+				delegation: { ...createDelegation(), tenantGrant: 'wide-open' },
+			}) as any
+		);
+		expect(mockSpawn).not.toHaveBeenCalled();
+		expect(result.status).toBe('failed');
+		expect(result.stderr).toContain('unknown field "tenantGrant"');
+	});
+
+	it('under management the nested dispatch route is refused unavailable and asks for no lease', async () => {
+		const authority = { admit: vi.fn() };
+		const onLog = vi.fn();
+		const result = await executeCueCli(
+			createConfig({
+				delegation: createDelegation({ policyRevision: 7 }),
+				admission: {
+					authority,
+					context: {},
+					policy: { sources: [], policyRevision: 7 },
+					account: null,
+				},
+				onLog,
+			}) as any
+		);
+		expect(mockSpawn).not.toHaveBeenCalled();
+		expect(authority.admit).not.toHaveBeenCalled();
+		expect(result.status).toBe('failed');
+		expect(result.managed).toEqual({ state: 'unavailable', code: 'capability-unsupported' });
+		expect(result.stderr).toMatch(/^\[managed-unavailable\] /);
+		expect(result.stderr).toContain('nested-dispatch');
+		expect(onLog).toHaveBeenCalledWith('warn', expect.stringContaining('was not admitted'));
+		expect(cueCliRouteSupport()).toMatchObject({
+			route: 'nested-dispatch',
+			standalone: 'implemented',
+			managed: 'unsupported',
+		});
+	});
+
+	it('a route a declared double qualifies hands the child the context and lets the receiving sink admit it', async () => {
+		const authority = { admit: vi.fn() };
+		const delegation = createDelegation({ policyRevision: 7 });
+		const promise = executeCueCli(
+			createConfig({
+				delegation,
+				admission: {
+					authority,
+					context: {},
+					policy: { sources: [], policyRevision: 7 },
+					account: null,
+				},
+				routeSupport: () => ({
+					route: 'nested-dispatch',
+					standalone: 'implemented',
+					managed: 'implemented',
+					note: 'declared test double',
+				}),
+			}) as any
+		);
+		await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(1));
+		mockChild.emit('close', 0);
+		const result = await promise;
+
+		expect(result.status).toBe('completed');
+		expect(result).not.toHaveProperty('managed');
+		expect(authority.admit).not.toHaveBeenCalled();
+		expect(readDelegationContextEnv(spawnedEnv())).toEqual({ status: 'ok', context: delegation });
+	});
+});
 
 describe('cue-cli-executor', () => {
 	beforeEach(() => {

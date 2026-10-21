@@ -27,6 +27,12 @@ import type { CueExecutionConfig } from '../../../main/cue/cue-executor';
 import { createLocalHostAuthority } from '../../../shared/maestro-lib/managed/authority';
 import { createHeadlessSpawnAuthority } from '../../../shared/maestro-lib/managed/host-adapter';
 import type { ManagedBindingState } from '../../../shared/maestro-lib/managed/binding';
+import {
+	delegationContextOf,
+	isManagedDelegationContext,
+	type ManagedDelegationContext,
+} from '../../../shared/maestro-lib/managed/delegation';
+import { canonicalJson } from '../../../shared/canonicalJson';
 import type { CueRunResult } from '../../../shared/cue/contracts';
 
 const SESSION: CueRunSessionRecord = {
@@ -290,16 +296,8 @@ describe('executeCueRunAction under management', () => {
 		expect(refused.managed?.state).toBe('unavailable');
 	});
 
-	it('leaves the maestro-cli and notify actions to their own gates (the shell action is admitted below)', async () => {
+	it('leaves the notify action to its own gate (the shell and maestro-cli actions are admitted below)', async () => {
 		const deps = makeDeps({ port: () => cuePort(), workflowFence: () => null });
-		await executeCueRunAction(
-			deps,
-			params({
-				action: 'command',
-				command: { mode: 'cli', cli: { message: 'hi' } } as never,
-			})
-		);
-		expect(deps.executeCueCli).toHaveBeenCalledTimes(1);
 		await executeCueRunAction(
 			deps,
 			params({ action: 'notify', notify: { message: 'hi' } as never })
@@ -387,15 +385,107 @@ describe('a shell action under management (MRC-07-03)', () => {
 			fencingToken: 'fence-3',
 		});
 	});
+});
 
-	it('a maestro-cli action carries no admission yet (MRC-07-04), unchanged', async () => {
-		const deps = makeDeps({ port: () => cuePort(), workflowFence: () => FENCE });
-		await executeCueRunAction(
-			deps,
-			shellParams({ command: { mode: 'cli', cli: { message: 'hi' } } as never })
-		);
+describe('a maestro-cli action under management (MRC-07-04)', () => {
+	const CLI_CALL = { command: 'send', target: 'agent-2', message: 'hi' };
+	const cliParams = (overrides: Partial<OnCueRunParams> = {}) =>
+		params({
+			action: 'command',
+			prompt: 'cli',
+			command: { mode: 'cli', cli: CLI_CALL } as never,
+			...overrides,
+		});
+	type CliConfig = {
+		cli: unknown;
+		admission?: CueExecutionConfig['admission'];
+		delegation: ManagedDelegationContext;
+	};
+	const cliConfig = (deps: ReturnType<typeof makeDeps>): CliConfig =>
+		deps.executeCueCli.mock.calls[0][0] as unknown as CliConfig;
+
+	it('a standalone host hands the cli executor the run lineage as the context, with no admission', async () => {
+		const deps = makeDeps({ port: () => cuePort('standalone'), workflowFence: () => FENCE });
+		await executeCueRunAction(deps, cliParams());
+
 		expect(deps.executeCueShell).not.toHaveBeenCalled();
 		expect(deps.executeCueCli).toHaveBeenCalledTimes(1);
-		expect(deps.executeCueCli.mock.calls[0][0]).not.toHaveProperty('admission');
+		const config = cliConfig(deps);
+		expect(config).not.toHaveProperty('admission');
+		expect(config.cli).toEqual(CLI_CALL);
+		expect(isManagedDelegationContext(config.delegation)).toBe(true);
+		expect(config.delegation).toMatchObject({
+			identity: {
+				requestId: 'run-9',
+				runId: 'run-9',
+				rootRunId: 'root-1',
+				parentRunId: 'run-8',
+			},
+			traceId: expect.stringMatching(/^cue:root-1:run-9:/),
+			workflow: null,
+			policyRevision: null,
+			delegation: {
+				chain: [
+					{ kind: 'service', id: 'cue-subscription:nightly' },
+					{ kind: 'agent', id: 'agent-1' },
+				],
+				grantRef: null,
+			},
+		});
+	});
+
+	it('a host with no port to offer hands the same context', async () => {
+		const deps = makeDeps();
+		await executeCueRunAction(deps, cliParams());
+		expect(cliConfig(deps).delegation.workflow).toBeNull();
+	});
+
+	it('an unowned workflow is refused unavailable before the target is substituted', async () => {
+		const events: CueAdmissionEvent[] = [];
+		const deps = makeDeps({
+			port: () => cuePort(),
+			workflowFence: () => null,
+			onAdmission: (event) => events.push(event),
+		});
+		const result = await executeCueRunAction(deps, cliParams());
+
+		expect(deps.executeCueCli).not.toHaveBeenCalled();
+		expect(result.status).toBe('failed');
+		expect(result.managed).toEqual({ state: 'unavailable', code: 'runtime-unavailable' });
+		expect(events).toHaveLength(1);
+		// The versioned text of a cli action is the call itself, not the prompt carrier.
+		expect(events[0].lineage.workflow.version).toBe(
+			cueWorkflowIdentity({
+				subscriptionName: 'nightly',
+				pipelineName: 'Nightly QA',
+				prompt: canonicalJson(CLI_CALL),
+				action: 'command',
+				event: EVENT,
+			}).version
+		);
+	});
+
+	it('with an owner fence the cli executor receives the admission and the verified context as the one the child carries', async () => {
+		const port = cuePort();
+		const deps = makeDeps({
+			port: () => port,
+			workflowFence: () => FENCE,
+			account: 'acct-ref',
+			newId: () => 'attempt-c',
+		});
+		await executeCueRunAction(deps, cliParams());
+
+		expect(deps.executeCueCli).toHaveBeenCalledTimes(1);
+		const config = cliConfig(deps);
+		const admission = config.admission!;
+		expect(admission.authority).toBe(port.authority);
+		expect(admission.account).toBe('acct-ref');
+		expect(admission.context.origin).toBe('cue');
+		expect(config.delegation).toEqual(delegationContextOf(admission.context));
+		expect(config.delegation).toMatchObject({
+			identity: { requestId: 'run-9', attemptId: 'attempt-c', rootRunId: 'root-1' },
+			workflow: { workflowId: 'cue-pipeline:Nightly QA', ownerEpoch: 'epoch-3' },
+			policyRevision: 7,
+		});
 	});
 });
