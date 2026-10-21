@@ -88,6 +88,20 @@ export interface ManagedRunIdentity {
 	parentRunId: string | null;
 }
 
+/** Where a dispatch runs: this host, or an SSH remote the host resolved. */
+export type ManagedDispatchTarget = { kind: 'local' } | { kind: 'ssh'; remoteId: string };
+
+/**
+ * One source a policy decision was read from. `endpoint` is the verified
+ * peer, `cached` a copy it left behind (still bounded by its revision),
+ * `local` the host's own configuration. A decision names the set it used.
+ */
+export interface ManagedPolicySource {
+	id: string;
+	kind: 'endpoint' | 'cached' | 'local';
+	revision: number | null;
+}
+
 /** The workflow (an Auto Run, a Cue pipeline) that owns the run, with the fencing that keeps one owner. */
 export interface ManagedWorkflowRef {
 	workflowId: string;
@@ -221,7 +235,9 @@ export type ManagedDenialCode =
 	| 'idempotency-conflict'
 	| 'not-found'
 	| 'runtime-unavailable'
-	| 'outcome-unknown';
+	| 'outcome-unknown'
+	/** The lease offered at the sink was forged, expired, revoked, or for another snapshot. */
+	| 'lease-invalid';
 
 /**
  * How an operation ended. `unknown` is a real answer: the host cannot say

@@ -15,6 +15,7 @@ export type { MaestroLibVersionInfo } from './version';
 // product's own wire types stay in the package it ships, never here.
 export * from './managed/types';
 export * from './managed/compatibility';
+export * from './managed/authority';
 
 // Paths and configuration
 export * from './paths/userDataDir';
