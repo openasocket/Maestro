@@ -183,6 +183,9 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **Changing an agent's provider:** `switchAgentProvider()`, `switchTabProvider()`, `resolveTurnProvider()` in `src/shared/maestro-lib/agents/providerSwap.ts`
 - **Importing a Mega-Maestro contracts artifact:** `scripts/import-mega-maestro.mjs` (`npm run import:mega-maestro`), pinned in `vendor/mega-maestro/contracts.pin.json`
 - **Managed-operation contracts and compatibility negotiation:** `managedContextProblems()` in `src/shared/maestro-lib/managed/types.ts`; `negotiateCompatibility()` in `src/shared/maestro-lib/managed/compatibility.ts`; `providerRouteSupport()` in `src/shared/maestro-lib/providers/capabilities.ts`
+- **Admitting a managed launch (verified context, snapshot, lease):** `createContextVerifier()`, `buildDispatchSnapshot()`, `createLocalHostAuthority()` in `src/shared/maestro-lib/managed/authority.ts`; the sink hook is `options.admission` on `startTurn()`, `options.managed` on `runAgentTurn()`
+- **Whether this installation is enrolled with a management peer:** `createManagedBinding()`, `readManagedBindingFile()` in `src/shared/maestro-lib/managed/binding.ts` (file name `MANAGED_BINDING_FILE_NAME` in `src/shared/maestro-lib/runtime/data-dir-lock.ts`)
+- **Recording a managed run and its attempts:** `createRunJournal()`, `journalRunRecord()` in `src/shared/maestro-lib/managed/run-journal.ts`; the `ManagedApi` facade is `createManagedOperations()` in `src/shared/maestro-lib/managed/operations.ts`
 
 #### Agents (renderer state and navigation)
 
