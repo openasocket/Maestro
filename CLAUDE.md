@@ -193,6 +193,11 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **Joining a broker decision to the lease it authorized and the effect it covered:** `createBrokerDispatch()`, `dispatchHarness()` in `src/main/enterprise/dispatch.ts` (ledger `maestro-managed-dispatch-receipts.json`); `ManagedDecisionReceipt`, `DispatchOperation` in `src/shared/maestro-lib/managed/authority.ts`
 - **The one qualified synthetic route (files and egress under the Node permission model):** `buildHarnessLaunchSpec()`, `harnessRouteProblems()`, `syntheticHarnessRouteSupport()` in `src/shared/maestro-lib/managed/provider-route.ts`
 - **Exercising the real Maestro/endpoint pair, or naming what blocks it:** `scripts/mega-maestro-pair.mjs` (`check`, `run`), with `runPairCheck()`, `composePair()` and the provider double in `src/__tests__/integration/mega-maestro/fixtures.ts`
+- **Approved credential references for a managed launch:** `bindApprovedCredentials()`, `isApprovedCredentialSet()`, `managedAccountRef()` in `src/shared/maestro-lib/managed/credentials.ts`; `AgentLaunchInput.managed` and `resolveSecretsStrict()` in `src/shared/serverSecrets.ts`
+- **The final managed environment ceiling:** `applyManagedEnvCeiling()`, `managedArgsProblems()`, `PROVIDER_ROUTE_ENV_NAMES`, `MANAGED_AUTHORITY_ENV_NAMES` in `src/shared/maestro-lib/launch/env.ts` (applied by the launch plan on every surface)
+- **Reauthorizing a managed provider swap, resume or account:** `authorizeProviderSwap()`, `authorizeManagedResume()` in `src/shared/maestro-lib/agents/providerSwap.ts`; `resolveAgentAccountRef()` in `src/shared/agentAccountDir.ts`; `bindTranslationIdentity()` in `src/shared/maestro-lib/translation/identity.ts`
+- **Governing a managed migration (hold, reauthorize, hash-bound knowledge):** `TranslationGovernance`, `translationGovernanceRefusal()` in `src/shared/maestro-lib/translation/transaction.ts`; `governResourceExport()` in `translation/resources.ts`; `readBoundKnowledgeIndex()` in `translation/knowledge-binding.ts`
+- **What never enters or leaves a Cue bundle (credentials, grants, enrollment):** `isForbiddenBundleEntry()` in `src/main/cue/bundle/cue-bundle-exporter.ts`; `CueBundleManagedPolicy` (`options.managedPolicy`) in `src/main/cue/bundle/cue-bundle-importer.ts`
 
 #### Agents (renderer state and navigation)
 
