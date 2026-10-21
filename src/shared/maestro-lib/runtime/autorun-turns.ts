@@ -26,15 +26,38 @@
  * came off Maestro's static ladder (a document hint, the synopsis pin), and a provider can retire
  * a rung without notice: failing every task on a value nobody typed is the wrong outcome. The
  * refusal is noted (by `runAgentTurn`), so later turns stop asking for the value.
+ *
+ * Under management every attempt carries the run's lineage (`autorun/attribution.ts`): the
+ * workflow (the playbook, its version, what triggered it), the Auto Run's run id, the task's
+ * request id and the attempt id. A dispatch, its effort retry, a synopsis and a handoff are each
+ * admitted on their own attempt against the authority, right before their spawn; nothing admitted
+ * once is reused for the next. A workflow with no owner fence is refused as unavailable, since a
+ * managed host does not run an unowned workflow and this runner never mints a fence. The run's own
+ * scheduling (the stall guard, auto-resume, the watchdog) is the Auto Run's and stays so: a
+ * re-dispatch after a refusal is a new attempt that is admitted again, not the refusal overridden.
  */
 
 import { getClaudeTokenSourceFields, type ClaudeTokenSourceFields } from '../../claudeTokenMode';
 import { usageStatsToTurnFields } from '../../turnUsageLedger';
 import type { UsageStats } from '../../types';
 import type { AgentRepository } from '../agents/repository';
+import {
+	autoRunRunIdentity,
+	autoRunTraceId,
+	autoRunWorkflowRef,
+	newAutoRunTurnRequest,
+	nextAutoRunAttempt,
+	type AutoRunOwnerFence,
+	type AutoRunTurnAttribution,
+	type AutoRunWorkflowIdentity,
+} from '../autorun/attribution';
 import type { AutoRunTurnResult, AutoRunTurnRequest } from '../autorun/engine-types';
 import { createIdleWatchdog } from '../control/idle-watchdog';
 import { logger } from '../host';
+import type { ManagedLaunchInput } from '../launch/launch-plan';
+import type { ContextVerification, HostAuthority, PolicySourceSet } from '../managed/authority';
+import type { HeadlessSpawnContextInput } from '../managed/host-adapter';
+import type { ManagedDenialCode } from '../managed/types';
 import { createOutputParser } from '../parsers/parser-factory';
 import type { MaestroPaths } from '../paths/resolve';
 import { readSettingsStore } from '../store/read-stores';
@@ -43,7 +66,12 @@ import { assembleAutoRunTurn } from '../turns/assemble';
 import { loadTurnContext } from '../turns/context';
 import { describeCrash } from '../turns/record-turn';
 import { toTurnAgent } from '../turns/records';
-import { effortRefusalOf, runAgentTurn } from '../turns/run-agent-turn';
+import {
+	effortRefusalOf,
+	runAgentTurn,
+	type ManagedTurnAuthority,
+	type RunAgentTurnRefusal,
+} from '../turns/run-agent-turn';
 import type { StatsRecorder } from '../turns/stats';
 import { createTurnEventMapper } from '../turns/turn-events';
 import type { ProcessRegistry } from './processes';
@@ -66,6 +94,46 @@ export type AutoRunStreamEvent =
 	| { kind: 'output'; processId: string; text: string }
 	| { kind: 'usage'; processId: string; usage: UsageStats };
 
+/**
+ * What a managed Auto Run admits with: the headless spawn authority of the host running it
+ * (`createHeadlessSpawnAuthority`, or the desktop's port under the same shape).
+ */
+export interface AutoRunSpawnAuthorityPort {
+	standing(): 'standalone' | 'managed';
+	readonly authority: HostAuthority;
+	policy(): PolicySourceSet;
+	context(input: HeadlessSpawnContextInput): ContextVerification;
+}
+
+export type AutoRunManagedState = 'denied' | 'unavailable' | 'unknown';
+
+/** What became of one attempt's admission, for a journal or a test. */
+export type AutoRunAdmissionEvent =
+	| { kind: 'admitted'; attribution: AutoRunTurnAttribution; leaseId: string }
+	| {
+			kind: 'refused';
+			attribution: AutoRunTurnAttribution;
+			state: AutoRunManagedState;
+			code: ManagedDenialCode;
+			message: string;
+	  };
+
+export interface AutoRunManagedOptions {
+	port: AutoRunSpawnAuthorityPort;
+	/**
+	 * The workflow's owner fence, read on every attempt so a fence that lapses stops the next
+	 * dispatch rather than the next run. Null: the workflow has no owner, and a managed host runs
+	 * none of its turns (unavailable, not denied: no policy decided). The fence comes from a
+	 * workflow owner producer; this runner never mints one.
+	 */
+	fence(): AutoRunOwnerFence | null;
+	/** An opaque account reference for the snapshot; never a credential. */
+	account?: string | null;
+	/** The policy's route ceiling and approved credential references, when the host has them. */
+	launch?: ManagedLaunchInput;
+	onAdmission?(event: AutoRunAdmissionEvent): void;
+}
+
 export interface AutoRunTurnRunnerOptions {
 	agentId: string;
 	paths: MaestroPaths;
@@ -77,6 +145,15 @@ export interface AutoRunTurnRunnerOptions {
 	deps: Pick<RuntimeTurnDeps, 'runAgentTurn' | 'probeBinary' | 'readGitBranch' | 'now'>;
 	/** The run's live output and usage, for the progress stream. */
 	onStream(event: AutoRunStreamEvent): void;
+	/**
+	 * The run as a workflow, so every turn carries its lineage. Absent: turns carry none, which a
+	 * managed host refuses (it cannot bind what it was not told) and a standalone host ignores.
+	 */
+	workflow?: AutoRunWorkflowIdentity;
+	/** The managed authority this run's turns are admitted with. Absent: no admission is asked. */
+	managed?: AutoRunManagedOptions;
+	/** Id minting for the lineage, injected by a test. */
+	newId?(): string;
 }
 
 export interface AutoRunTurnRunner {
@@ -109,26 +186,168 @@ interface AutoRunAttempt {
 
 const attempt = (result: AutoRunTurnResult): AutoRunAttempt => ({ result, effortRefused: false });
 
+/** The denial code `runAgentTurn` folds into its reason, by state; the message keeps the detail. */
+const REFUSAL_CODES: Record<AutoRunManagedState, ManagedDenialCode> = {
+	denied: 'policy-denied',
+	unavailable: 'runtime-unavailable',
+	unknown: 'outcome-unknown',
+};
+
+function managedStateOf(reason: RunAgentTurnRefusal): AutoRunManagedState | null {
+	switch (reason) {
+		case 'managed-denied':
+			return 'denied';
+		case 'managed-unavailable':
+			return 'unavailable';
+		case 'managed-unknown':
+			return 'unknown';
+		default:
+			return null;
+	}
+}
+
+/** What one attempt runs under, decided afresh for every attempt. */
+type ManagedTurn =
+	| { managed: false }
+	| { managed: true; authority: ManagedTurnAuthority }
+	| { managed: true; refusal: AutoRunAttempt };
+
 export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): AutoRunTurnRunner {
 	const { agentId, paths, repository, registry, statsRecorder, host, deps } = options;
 	const sshStore = createSshRemoteStore(paths);
 	const startTurn = deps.runAgentTurn ?? runAgentTurn;
+	/** The task turn each provider session came from, so a synopsis hangs under the turn it resumes. */
+	const turnsBySession = new Map<string, AutoRunTurnAttribution>();
+
+	function attributionFor(request: AutoRunTurnRequest): AutoRunTurnAttribution | null {
+		if (!options.workflow) return null;
+		const resumes = request.resumeSessionId
+			? (turnsBySession.get(request.resumeSessionId) ?? null)
+			: null;
+		return newAutoRunTurnRequest(options.workflow, {
+			purpose: request.purpose,
+			document: request.document ?? null,
+			resumes,
+			...(options.newId ? { newId: options.newId } : {}),
+		});
+	}
 
 	async function run(request: AutoRunTurnRequest): Promise<AutoRunTurnResult> {
-		const first = await runOnce(request);
+		const attribution = attributionFor(request);
+		const first = await runOnce(request, attribution);
 		// Only a turn that sent an effort retries, so a refusal of the agent's own configured
-		// effort cannot loop. A run stopped meanwhile is not started again.
+		// effort cannot loop. A run stopped meanwhile is not started again, and a turn a managed
+		// host refused never ran, so there is no provider refusal to answer.
 		if (first.result.success || !request.effort || !first.effortRefused) return first.result;
-		if (request.signal?.aborted) return first.result;
+		if (first.result.managed || request.signal?.aborted) return first.result;
 		logger.warn(
 			`The provider refused effort "${request.effort}"; running the turn again at the agent's own effort`,
 			LOG_CONTEXT,
 			{ agentId }
 		);
-		return (await runOnce({ ...request, effort: undefined })).result;
+		// The same request, tried again: the retry is its own attempt and its own admission.
+		const retry = attribution ? nextAutoRunAttempt(attribution, options.newId) : null;
+		return (await runOnce({ ...request, effort: undefined }, retry)).result;
 	}
 
-	async function runOnce(request: AutoRunTurnRequest): Promise<AutoRunAttempt> {
+	function managedRefusal(
+		provider: string,
+		attribution: AutoRunTurnAttribution | null,
+		state: AutoRunManagedState,
+		code: ManagedDenialCode,
+		message: string
+	): AutoRunAttempt {
+		if (attribution) {
+			options.managed?.onAdmission?.({ kind: 'refused', attribution, state, code, message });
+		}
+		logger.warn(`An Auto Run turn was not admitted (${state}, ${code}): ${message}`, LOG_CONTEXT, {
+			agentId,
+			...(attribution
+				? {
+						workflowId: attribution.workflow.runId,
+						requestId: attribution.requestId,
+						attemptId: attribution.attemptId,
+					}
+				: {}),
+		});
+		return attempt({
+			success: false,
+			error: `[managed-${state}] ${message}`,
+			managed: { state, code },
+			// A classified failure, so a run that can pause does and a person reads the reason. A
+			// denial is a decision nobody retries into; the other two may clear on their own.
+			agentError: {
+				type: 'permission_denied',
+				message,
+				recoverable: state !== 'denied',
+				agentId: provider,
+				timestamp: deps.now(),
+			},
+		});
+	}
+
+	/**
+	 * The admission of one attempt. Asked on every attempt: the fence, the policy revision and
+	 * the context are read now, not when the run started, so what changed since applies here.
+	 */
+	function managedTurnFor(
+		provider: string,
+		attribution: AutoRunTurnAttribution | null
+	): ManagedTurn {
+		const managed = options.managed;
+		if (!managed || managed.port.standing() === 'standalone') return { managed: false };
+		const refuse = (state: AutoRunManagedState, code: ManagedDenialCode, message: string) =>
+			({
+				managed: true,
+				refusal: managedRefusal(provider, attribution, state, code, message),
+			}) as const;
+		if (!attribution) {
+			return refuse(
+				'unavailable',
+				'runtime-unavailable',
+				'This Auto Run carries no workflow identity, so a managed host cannot bind its turns.'
+			);
+		}
+		const fence = managed.fence();
+		if (!fence) {
+			return refuse(
+				'unavailable',
+				'runtime-unavailable',
+				`Auto Run "${attribution.workflow.workflowId}" has no workflow owner fence; a managed host does not run an unowned workflow, and this runner does not mint one (CP-03, the workflow owner producer).`
+			);
+		}
+		const policy = managed.port.policy();
+		const verified = managed.port.context({
+			identity: autoRunRunIdentity(attribution),
+			traceId: autoRunTraceId(attribution),
+			policyRevision: policy.policyRevision,
+			workflow: autoRunWorkflowRef(attribution.workflow, fence),
+		});
+		if (!verified.ok) {
+			return refuse(
+				'denied',
+				verified.code,
+				`The run's context was not accepted: ${verified.problems.join('; ')}`
+			);
+		}
+		return {
+			managed: true,
+			authority: {
+				authority: managed.port.authority,
+				context: verified.context,
+				policy,
+				account: managed.account ?? null,
+				...(managed.launch ? { launch: managed.launch } : {}),
+				onLease: (lease) =>
+					managed.onAdmission?.({ kind: 'admitted', attribution, leaseId: lease.leaseId }),
+			},
+		};
+	}
+
+	async function runOnce(
+		request: AutoRunTurnRequest,
+		attribution: AutoRunTurnAttribution | null
+	): Promise<AutoRunAttempt> {
 		const record = repository.getAgent(agentId);
 		const agent = record ? toTurnAgent(record) : undefined;
 		if (!record || !agent)
@@ -159,6 +378,11 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 		const turn = assembled.turn;
 		const provider = turn.settings.provider;
 
+		// Admission is per attempt and the lease is checked again inside the spawn, so nothing
+		// decided for an earlier turn, or for this request's earlier attempt, carries into this one.
+		const managedTurn = managedTurnFor(provider, attribution);
+		if (managedTurn.managed && 'refusal' in managedTurn) return managedTurn.refusal;
+
 		const sessionId = `${agentId}-batch-${deps.now()}`;
 		const started = await startTurn(turn, {
 			sessionId,
@@ -166,8 +390,14 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 			claudeTokenSource: getClaudeTokenSourceFields(record as ClaudeTokenSourceFields),
 			maestroPBinPath: host.maestroPBinPath ?? null,
 			...(request.signal ? { signal: request.signal } : {}),
+			...(managedTurn.managed ? { managed: managedTurn.authority } : {}),
 		});
-		if (!started.ok) return attempt(failure(started.message));
+		if (!started.ok) {
+			const state = managedStateOf(started.reason);
+			return state
+				? managedRefusal(provider, attribution, state, REFUSAL_CODES[state], started.message)
+				: attempt(failure(started.message));
+		}
 		const process = started.run;
 		const startedAt = deps.now();
 
@@ -245,6 +475,8 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 
 		const finishedWell =
 			completed.outcome === 'completed' || completed.outcome === 'completed-with-warning';
+		// A synopsis or a handoff resumes this session: it hangs under this turn, not the root.
+		if (attribution && completed.sessionId) turnsBySession.set(completed.sessionId, attribution);
 		const common = {
 			...(completed.answerText ? { response: completed.answerText } : {}),
 			...(completed.sessionId ? { agentSessionId: completed.sessionId } : {}),

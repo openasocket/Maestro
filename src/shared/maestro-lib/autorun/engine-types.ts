@@ -14,6 +14,7 @@
 import type { AgentError, HistoryEntry, TaskSelectionMode, UsageStats } from '../../types';
 import type { AutoRunKind } from '../../stats-types';
 import type { PromptId } from '../../promptDefinitions';
+import type { ManagedDenialCode } from '../managed/types';
 import type { TurnOutcome } from '../streaming/turn-outcome';
 import type { AutoRunPolicy } from './policy';
 
@@ -64,6 +65,13 @@ export interface AutoRunTurnResult {
 	 * guard at once instead of after three more dispatches.
 	 */
 	errorKind?: 'watchdog-stalled' | 'watchdog-timeout';
+	/**
+	 * Set when a managed host refused the turn before anything started: a decision (`denied`),
+	 * no decision obtainable (`unavailable`), or an answer lost (`unknown`). Not the agent's own
+	 * failure: the effort retry never follows it, and a later dispatch is a fresh admission on a
+	 * new attempt, never the refused one resent.
+	 */
+	managed?: { state: 'denied' | 'unavailable' | 'unknown'; code: ManagedDenialCode };
 }
 
 /** How a person (or the auto-resume timer) answers a pause. */

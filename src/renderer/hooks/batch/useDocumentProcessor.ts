@@ -21,6 +21,11 @@ import type { AgentSpawnErrorKind, SpawnAgentRunOverrides } from '../agent/useAg
 import { logger } from '../../utils/logger';
 import { beginSleepAwareSpan, sleepAwareElapsedMs } from '../../services/systemSleep';
 import { extractTaskSynopsis } from '../../../shared/maestro-lib/autorun/synopsis';
+import {
+	newAutoRunTurnRequest,
+	type AutoRunTurnAttribution,
+	type AutoRunWorkflowIdentity,
+} from '../../../shared/maestro-lib/autorun/attribution';
 import { findActiveModelHint, countTasksUnderActiveHint } from '../../../shared/autorunModelHints';
 import { resolveTurnSettings } from '../../../shared/autorunTurnSettings';
 import {
@@ -91,6 +96,13 @@ export interface DocumentProcessorConfig {
 	 * Already consumed by the caller - this hook only formats them.
 	 */
 	steeringNotes?: readonly AutoRunSteeringNote[];
+	/**
+	 * The run as a workflow (the playbook, its version, what triggered it, the
+	 * run's own id), so every task dispatch carries its lineage to the spawn and
+	 * a managed host admits the task, not an anonymous launch. Absent: the
+	 * dispatch carries none, which a standalone host does not need.
+	 */
+	workflow?: AutoRunWorkflowIdentity;
 }
 
 /**
@@ -178,6 +190,12 @@ export interface TaskResult {
 	 * Structured failure category from the agent run.
 	 */
 	errorKind?: AgentSpawnErrorKind;
+
+	/**
+	 * The lineage this dispatch ran under (request and first attempt ids), when
+	 * the run carries a workflow. For the history row and the journal.
+	 */
+	attribution?: AutoRunTurnAttribution;
 }
 
 /**
@@ -207,6 +225,14 @@ export interface DocumentReadResult {
 export interface AutoRunTurnOverrides {
 	modelOverride?: string;
 	effortOverride?: string;
+	/**
+	 * The logical identity of this dispatch: the workflow, the Auto Run's run
+	 * id, the task's request id and the attempt id. The spawn path carries it
+	 * to the host's admission so the lease is minted on the task's lineage; a
+	 * retry inside the spawn (the effort fallback) is `nextAutoRunAttempt` of
+	 * it, never the same attempt resent. Attribution only, never authority.
+	 */
+	attribution?: AutoRunTurnAttribution;
 }
 
 /**
@@ -363,6 +389,7 @@ export function useDocumentProcessor(): UseDocumentProcessorReturn {
 				sshRemoteId,
 				runOverrides,
 				steeringNotes,
+				workflow,
 			} = config;
 
 			const docFilePath = `${folderPath}/${filename}.md`;
@@ -487,6 +514,24 @@ export function useDocumentProcessor(): UseDocumentProcessorReturn {
 			// ahead of the task it is steering.
 			const finalPrompt = prependNewSessionMessage(steeredPrompt, session.newSessionMessage);
 
+			// This dispatch's lineage: one request for the task, its first attempt. Minted
+			// here, per dispatch, so a re-dispatch of a stalled document or a resume after
+			// an error pause is a new request admitted afresh, never a decision carried over.
+			const attribution = workflow
+				? newAutoRunTurnRequest(workflow, {
+						purpose: 'task',
+						document: filename,
+						loopNumber: loopIteration,
+					})
+				: undefined;
+			if (attribution) {
+				logger.info(
+					`[DocumentProcessor] Dispatching task request ${attribution.requestId} (attempt ${attribution.attemptId}) under run ${workflow?.runId}`,
+					undefined,
+					{ document: filename }
+				);
+			}
+
 			// Capture start time for elapsed time tracking. Sleep-aware: a task that
 			// spans a lid close must not report the sleep as agent work time.
 			const taskSpan = beginSleepAwareSpan();
@@ -496,7 +541,11 @@ export function useDocumentProcessor(): UseDocumentProcessorReturn {
 				session.id,
 				finalPrompt,
 				effectiveCwd !== session.cwd ? effectiveCwd : undefined,
-				{ modelOverride: turnSettings.model, effortOverride: turnSettings.effort }
+				{
+					modelOverride: turnSettings.model,
+					effortOverride: turnSettings.effort,
+					...(attribution ? { attribution } : {}),
+				}
 			);
 
 			// Capture elapsed time (machine sleep excluded)
@@ -567,6 +616,7 @@ export function useDocumentProcessor(): UseDocumentProcessorReturn {
 				totalTasksChange,
 				errorMessage: result.error,
 				errorKind: result.errorKind,
+				...(attribution ? { attribution } : {}),
 			};
 		},
 		[readDocAndCountTasks]

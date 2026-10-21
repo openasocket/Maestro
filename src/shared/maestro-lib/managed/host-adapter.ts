@@ -73,11 +73,13 @@ import {
 } from './endpoint-port';
 import {
 	MANAGED_CONTRACT_VERSION,
+	type ManagedDelegationRef,
 	type ManagedDenialCode,
 	type ManagedInstallationIdentity,
 	type ManagedOrigin,
 	type ManagedPrincipalRef,
 	type ManagedRunIdentity,
+	type ManagedWorkflowRef,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -107,6 +109,14 @@ export interface HeadlessSpawnContextInput {
 	identity: ManagedRunIdentity;
 	traceId: string;
 	policyRevision: number | null;
+	/**
+	 * The workflow the launch belongs to, with its owner fence (an Auto Run, a
+	 * Cue pipeline). Attribution: the authority decides whether it can bind
+	 * one, and one it cannot bind is refused, never dropped. Default none.
+	 */
+	workflow?: ManagedWorkflowRef | null;
+	/** The chain of principals behind the actor. Default a direct action. */
+	delegation?: ManagedDelegationRef;
 }
 
 /**
@@ -190,10 +200,10 @@ export function createHeadlessSpawnAuthority(
 				installation: deps.installation,
 				origin: deps.origin,
 				actor: deps.actor,
-				delegation: { chain: [], grantRef: null },
+				delegation: input.delegation ?? { chain: [], grantRef: null },
 				identity: input.identity,
 				policyRevision: input.policyRevision,
-				workflow: null,
+				workflow: input.workflow ?? null,
 				traceId: input.traceId,
 				requestedCapabilities: ['runs.submit'],
 			}),
@@ -484,6 +494,17 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 			};
 		const { context, snapshot } = request;
 		const policyRevision = request.policy.policyRevision as number;
+		// The endpoint's execution operation names a run, never a workflow owner:
+		// a launch that belongs to a workflow cannot be described to it with the
+		// workflow attached, and is not described with the workflow stripped off
+		// (the sibling bridge refuses a nonempty workflow context, CP-03). Until a
+		// producer binds workflow authority, the honest answer is no decision.
+		if (context.workflow) {
+			return {
+				decision: 'unavailable',
+				reason: `The endpoint carries no workflow authority, so workflow "${context.workflow.workflowId}" cannot be bound to this launch and is not dropped from it (CP-03).`,
+			};
+		}
 		// The broker's request: identity, operation, provider, model, resources and
 		// the revision. No arguments: the resolved command line is bound in the
 		// local lease, and the broker refuses any argument as an unsafe override.
