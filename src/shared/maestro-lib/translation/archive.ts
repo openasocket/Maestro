@@ -15,9 +15,27 @@ import type {
 	OwnedTranslationWrite,
 } from './types';
 
+/**
+ * What a managed migration was authorized under, recorded before the first
+ * write and kept with the journal and its checkpoint: the tenant, the policy
+ * revision, one opaque grant per governed step, and that dispatch was held.
+ * References only; nothing here is a credential or a decision engine.
+ */
+export interface TranslationGovernanceRecord {
+	tenantId: string;
+	policyRevision: number | null;
+	/** Governed step -> the grant reference that allowed it. */
+	grants: Record<string, string>;
+	dispatchHeld: boolean;
+	/** ISO 8601. */
+	decidedAt: string;
+}
+
 export interface TranslationJournal {
 	schemaVersion: 1;
 	plan: TranslationPlan;
+	/** Present for a managed migration: the authorization it ran under. */
+	governance?: TranslationGovernanceRecord;
 	state: TranslationOperationState;
 	conversations: PortableConversation[];
 	resources: TranslationArtifact[];

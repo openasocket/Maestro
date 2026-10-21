@@ -299,6 +299,56 @@ export async function collectTranslationResources(
 	return { artifacts, limitations };
 }
 
+/** What a managed policy lets a migration carry: resource kinds, and whether selected user resources may leave their account. */
+export interface ApprovedResourceExport {
+	kinds: readonly TranslationArtifact['kind'][];
+	selectedUserResources: boolean;
+}
+
+/**
+ * Narrow collected resources to what the policy approved. Every artifact of
+ * an unapproved kind, and every selected user resource when those may not
+ * leave the account, is dropped and named in a blocking limitation, so the
+ * plan refuses until the scope is narrowed or the policy widened. Nothing is
+ * rewritten and nothing is exported quietly; a cross-account resource move
+ * is a content move and needs its own grant.
+ */
+export function governResourceExport(
+	artifacts: readonly TranslationArtifact[],
+	approved: ApprovedResourceExport
+): TranslationResources {
+	const allowed: TranslationArtifact[] = [];
+	const limitations: TranslationLimitation[] = [];
+	const refusedKinds = new Set<string>();
+	let refusedUser = 0;
+	for (const artifact of artifacts) {
+		if (!approved.kinds.includes(artifact.kind)) {
+			refusedKinds.add(artifact.kind);
+			continue;
+		}
+		if (artifact.scope === 'selected-user' && !approved.selectedUserResources) {
+			refusedUser += 1;
+			continue;
+		}
+		allowed.push(artifact);
+	}
+	for (const kind of [...refusedKinds].sort()) {
+		limitations.push({
+			code: 'resource-export-unauthorized',
+			severity: 'block',
+			message: `The policy does not authorize exporting ${kind} resources with this migration.`,
+		});
+	}
+	if (refusedUser > 0) {
+		limitations.push({
+			code: 'resource-export-unauthorized',
+			severity: 'block',
+			message: `The policy does not authorize ${refusedUser} selected user resource${refusedUser === 1 ? '' : 's'} leaving the source account.`,
+		});
+	}
+	return { artifacts: allowed, limitations };
+}
+
 /** Translate portable bodies; unsupported execution controls stay in the archive. */
 export function projectResourceDefinition(
 	artifact: TranslationArtifact,

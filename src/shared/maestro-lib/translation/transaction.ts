@@ -5,9 +5,14 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { createKeyedWriteQueue } from '../../keyedWriteQueue';
 import { canonicalJson } from '../../canonicalJson';
-import { translationHash, nativeRecordKey } from './identity';
+import { accountIdentityRef, translationHash, nativeRecordKey } from './identity';
 import { extractNativeConversation } from './native-records';
-import { TranslationArchive, type TranslationJournal } from './archive';
+import { KNOWLEDGE_INDEX_FILE, KNOWLEDGE_INDEX_HASH_FILE } from './knowledge-binding';
+import {
+	TranslationArchive,
+	type TranslationGovernanceRecord,
+	type TranslationJournal,
+} from './archive';
 import { TranslationRegistry } from './registry';
 import type {
 	TranslationResult,
@@ -18,6 +23,43 @@ import type {
 } from './types';
 import { TranslationSourceBusyError } from './types';
 
+/** One step of a migration the policy must authorize again, with what it is about. */
+export type TranslationGovernedStep =
+	| {
+			step: 'destination';
+			provider: ProviderMigrationState['destination'];
+			/** The opaque reference of the destination account (`accountIdentityRef`), never its path. */
+			accountRef: string;
+			sourceAccountRef: string;
+	  }
+	| { step: 'project-memory'; projectRoot: string }
+	| { step: 'resource-export'; kinds: string[]; selectedUserResources: number; count: number };
+
+export type TranslationGovernanceDecision =
+	| { decision: 'allow'; grantRef: string }
+	| { decision: 'deny'; reason: string }
+	| { decision: 'unavailable'; reason: string };
+
+/**
+ * The managed authority over a migration, supplied by the host and wired to
+ * its verified peer; a test wires a table. The transaction asks it in a fixed
+ * order (destination provider and account, project memory, resource export)
+ * before the first write, holds every dispatch for the agent while the
+ * migration runs, and refuses on its own when the policy is not fresh or the
+ * destination account belongs to another tenant. It decides nothing itself.
+ */
+export interface TranslationGovernance {
+	tenantId: string;
+	/** The tenant the host resolved for the destination account. */
+	destinationTenantId: string;
+	policy: { revision: number | null; freshness: 'fresh' | 'stale' | 'unknown' };
+	/** Hold every dispatch for the agent; resolves to the release. */
+	holdDispatch(agentId: string, operationId: string): Promise<() => Promise<void>>;
+	authorize(step: TranslationGovernedStep): Promise<TranslationGovernanceDecision>;
+	/** Epoch milliseconds. Default: the clock. */
+	now?(): number;
+}
+
 export interface TranslationTransactionHost {
 	/** Called again before every mutation and commit, not just when planning. */
 	assertSourceUnchanged(journal: TranslationJournal): Promise<void>;
@@ -26,6 +68,72 @@ export interface TranslationTransactionHost {
 	commit(journal: TranslationJournal): Promise<void>;
 	isCommitted(operationId: string): Promise<boolean>;
 	codex?: TranslationRpc;
+	/** Present for a managed migration. Absent: unmanaged, exactly as before. */
+	governance?: TranslationGovernance;
+}
+
+/** Why a managed migration is refused before any lock is taken: names, never content. */
+export function translationGovernanceRefusal(
+	governance: TranslationGovernance
+): string | undefined {
+	if (governance.policy.freshness !== 'fresh') {
+		return `Managed migration refused: the policy observation is ${governance.policy.freshness}.`;
+	}
+	if (governance.policy.revision === null) {
+		return 'Managed migration refused: no applied policy revision is known.';
+	}
+	if (governance.destinationTenantId !== governance.tenantId) {
+		return 'Managed migration refused: the destination account belongs to another tenant.';
+	}
+	return undefined;
+}
+
+/** Ask every governed step in order; the first denial or unavailable answer ends it. */
+async function reauthorizeTranslation(
+	governance: TranslationGovernance,
+	journal: TranslationJournal
+): Promise<{ ok: true; record: TranslationGovernanceRecord } | { ok: false; error: string }> {
+	const plan = journal.plan;
+	const steps: TranslationGovernedStep[] = [
+		{
+			step: 'destination',
+			provider: plan.destination.provider,
+			accountRef: accountIdentityRef(plan.destination),
+			sourceAccountRef: accountIdentityRef(plan.source),
+		},
+	];
+	if (plan.scope.projectKnowledge) {
+		steps.push({ step: 'project-memory', projectRoot: plan.destination.projectRoot });
+	}
+	if (journal.resources.length > 0) {
+		steps.push({
+			step: 'resource-export',
+			kinds: [...new Set(journal.resources.map((artifact) => artifact.kind))].sort(),
+			selectedUserResources: journal.resources.filter((a) => a.scope === 'selected-user').length,
+			count: journal.resources.length,
+		});
+	}
+	const grants: Record<string, string> = {};
+	for (const step of steps) {
+		const decision = await governance.authorize(step);
+		if (decision.decision !== 'allow') {
+			return {
+				ok: false,
+				error: `Managed migration ${decision.decision === 'deny' ? 'denied' : 'could not be authorized'} at ${step.step}: ${decision.reason}`,
+			};
+		}
+		grants[step.step] = decision.grantRef;
+	}
+	return {
+		ok: true,
+		record: {
+			tenantId: governance.tenantId,
+			policyRevision: governance.policy.revision,
+			grants,
+			dispatchHeld: true,
+			decidedAt: new Date(governance.now?.() ?? Date.now()).toISOString(),
+		},
+	};
 }
 
 const operations = createKeyedWriteQueue();
@@ -117,6 +225,20 @@ export async function applyTranslation(
 					'Existing provider migration requires recovery or rollback; native staging is not replayed.',
 			};
 		if (plan.status === 'noop') return { success: true, state: 'noop', plan, mappings: [] };
+		const governance = host.governance;
+		const governanceRefusal = governance ? translationGovernanceRefusal(governance) : undefined;
+		if (governanceRefusal) {
+			journal.result = {
+				success: false,
+				state: 'refused',
+				plan,
+				mappings: [],
+				error: governanceRefusal,
+			};
+			await archive.write(journal);
+			await archive.markLatest(plan.agentId, plan.id);
+			return journal.result;
+		}
 		if (plan.status === 'blocked' || (!acceptLimitations && plan.limitations.length)) {
 			journal.result = {
 				success: false,
@@ -134,8 +256,28 @@ export async function applyTranslation(
 		}
 		const release = await archive.lock(plan.agentId);
 		let releaseProject: (() => Promise<void>) | undefined;
+		let releaseHold: (() => Promise<void>) | undefined;
 		try {
 			releaseProject = await archive.lock(`project:${plan.destination.projectRoot}`);
+			if (governance) {
+				// Nothing may be dispatched for this agent while its provider, account
+				// and knowledge move, and nothing moves until every step is allowed.
+				releaseHold = await governance.holdDispatch(plan.agentId, plan.id);
+				const authorized = await reauthorizeTranslation(governance, journal);
+				if (!authorized.ok) {
+					journal.result = {
+						success: false,
+						state: 'refused',
+						plan,
+						mappings: [],
+						error: authorized.error,
+					};
+					await archive.write(journal);
+					await archive.markLatest(plan.agentId, plan.id);
+					return journal.result;
+				}
+				journal.governance = authorized.record;
+			}
 			await host.assertSourceUnchanged(journal);
 			journal.state = 'staging';
 			await archive.write(journal);
@@ -217,13 +359,27 @@ export async function applyTranslation(
 						bytes
 					);
 				}
-				const indexPath = path.join(directory, 'knowledge-index.md');
+				const indexPath = path.join(directory, KNOWLEDGE_INDEX_FILE);
 				const index = translationKnowledgePrompt(directory, journal.resources);
+				const indexHash = translationHash(index);
 				await stageResourceWrite(
 					archive,
 					journal,
-					{ path: indexPath, sha256: translationHash(index), created: true },
+					{ path: indexPath, sha256: indexHash, created: true },
 					Buffer.from(index)
+				);
+				// The index is bound to its hash: a later edit or replacement is
+				// refused at the launch binding instead of reaching a prompt.
+				const hashLine = `${indexHash}\n`;
+				await stageResourceWrite(
+					archive,
+					journal,
+					{
+						path: path.join(directory, KNOWLEDGE_INDEX_HASH_FILE),
+						sha256: translationHash(hashLine),
+						created: true,
+					},
+					Buffer.from(hashLine)
 				);
 			}
 			await verifyTranslationWrites(journal);
@@ -270,6 +426,7 @@ export async function applyTranslation(
 			});
 			return journal.result;
 		} finally {
+			await releaseHold?.();
 			await releaseProject?.();
 			await release();
 		}
@@ -374,12 +531,23 @@ export async function recoverTranslation(
 	// A later switch may replace the host's active operation ID, but it does not undo this commit.
 	if (rollback && journal.state === 'committed')
 		throw new Error('Committed migration cannot be deleted; switch back through a new translation');
+	// Recovery of a managed migration runs under the same hold and the same
+	// freshness rule; the grants it runs on are the journaled ones.
+	const governance = host.governance;
+	const governanceRefusal = governance ? translationGovernanceRefusal(governance) : undefined;
+	if (governanceRefusal) throw new Error(governanceRefusal);
+	if (governance && !journal.governance) {
+		throw new Error('Managed recovery refused: the journal carries no governance record.');
+	}
 	await archive.recoverLock(journal.plan.agentId);
 	await archive.recoverLock(`project:${journal.plan.destination.projectRoot}`);
 	const release = await archive.lock(journal.plan.agentId);
 	let releaseProject: (() => Promise<void>) | undefined;
+	let releaseHold: (() => Promise<void>) | undefined;
 	try {
 		releaseProject = await archive.lock(`project:${journal.plan.destination.projectRoot}`);
+		if (governance)
+			releaseHold = await governance.holdDispatch(journal.plan.agentId, journal.plan.id);
 		if (await host.isCommitted(journal.plan.id)) {
 			if (rollback)
 				throw new Error(
@@ -477,6 +645,7 @@ export async function recoverTranslation(
 		});
 		return journal.result;
 	} finally {
+		await releaseHold?.();
 		await releaseProject?.();
 		await release();
 	}
