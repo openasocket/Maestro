@@ -133,6 +133,12 @@ export interface TurnAuthorityInput {
 	/** An opaque account reference, never a credential. */
 	account?: string | null;
 	resourceIds?: readonly string[];
+	/**
+	 * The route ceiling and approved credential references the launch plan applies
+	 * (`ManagedTurnAuthority.launch`). Required for a provider turn; the synthetic harness
+	 * route, which builds its own complete spec, is the one caller that passes none.
+	 */
+	launch?: ManagedTurnAuthority['launch'];
 	onLease?(lease: DispatchLease): void;
 }
 
@@ -329,6 +335,7 @@ export function createBrokerDispatch(deps: BrokerDispatchDeps): BrokerDispatch {
 				policy: deps.host.policy(),
 				account: input.account ?? null,
 				resourceIds: input.resourceIds ?? [],
+				...(input.launch ? { launch: input.launch } : {}),
 				onLease: (lease) => input.onLease?.(lease),
 			};
 		},

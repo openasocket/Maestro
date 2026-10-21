@@ -44,7 +44,14 @@ import {
 	isApprovedCredentialSet,
 	type ApprovedCredentialSet,
 } from '../managed/credentials';
-import { buildAgentEnvironment, resolveAgentEnvVars, type AgentEnvSurface } from './env';
+import {
+	buildAgentEnvironment,
+	managedArgsProblems,
+	resolveAgentEnvVars,
+	type AgentEnvSurface,
+	type ManagedEnvCeilingReport,
+	type ManagedRouteCeiling,
+} from './env';
 import {
 	resolvePromptDelivery,
 	type PromptDelivery,
@@ -64,6 +71,8 @@ export interface LaunchPlanAgent extends PromptDeliveryAgent {
 	defaultEnvVars?: Record<string, string>;
 	batchModeEnvVars?: Record<string, string>;
 	readOnlyEnvOverrides?: Record<string, string>;
+	/** How this provider is told which model to use; a managed launch appends the pinned model with it. */
+	modelArgs?: (modelId: string) => string[];
 }
 
 export interface AgentLaunchInput {
@@ -142,6 +151,13 @@ export interface AgentLaunchInput {
 /** What a managed launch is planned under. Produced by the host, never by a bundle or a label. */
 export interface ManagedLaunchInput {
 	/**
+	 * The policy's route: provider, pinned model, gateway origin, account home
+	 * and whether the provider's own login may bill. Applied as the final
+	 * environment ceiling on every surface (`applyManagedEnvCeiling`) and
+	 * checked against the arguments (`managedArgsProblems`).
+	 */
+	route: ManagedRouteCeiling;
+	/**
 	 * The credential references the policy bound to this launch, as
 	 * `bindApprovedCredentials()` returned them. Anything else (a copy, a
 	 * literal, a cast) is refused as unbound.
@@ -160,7 +176,9 @@ export type ManagedLaunchRefusal =
 	/** An approved reference's value is missing or unusable on this host. The ordinary warn-and-start does not apply. */
 	| 'managed-credential-unavailable'
 	/** The launch runs on an SSH remote: a local secret value is never forwarded there. */
-	| 'managed-credential-remote';
+	| 'managed-credential-remote'
+	/** The arguments, the provider or the resulting environment route around the policy's ceiling. */
+	| 'managed-route-refused';
 
 /**
  * What happened to the approved credential references, by reference id and
@@ -173,6 +191,8 @@ export interface ManagedCredentialReport {
 	delivered: { refId: string; envVar: string; source: SecretSource }[];
 	/** The binding's digest, so a journal can join the launch to the decision. */
 	bindingDigest: string;
+	/** What the final ceiling did to the environment: names only. */
+	ceiling?: { removed: string[]; pinned: string[] };
 }
 
 interface LaunchPlanCommon {
@@ -329,6 +349,24 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 		: undefined;
 
 	const agent = input.agent;
+	const route = input.managed?.route;
+	if (route) {
+		if (agent?.id !== undefined && agent.id !== route.providerId) {
+			return {
+				ok: false,
+				reason: 'managed-route-refused',
+				error: `The policy routes this launch to ${route.providerId}, not ${agent.id}.`,
+			};
+		}
+		const argProblems = managedArgsProblems(input.args, route);
+		if (argProblems.length > 0) {
+			return {
+				ok: false,
+				reason: 'managed-route-refused',
+				error: `The launch arguments route around the policy - ${argProblems.join('; ')}`,
+			};
+		}
+	}
 	const layers = {
 		defaultEnvVars: agent?.defaultEnvVars,
 		batchModeEnvVars: input.batchMode ? agent?.batchModeEnvVars : undefined,
@@ -357,14 +395,19 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 			: undefined;
 
 	const knowledgeDirectory = envVars?.[TRANSLATION_KNOWLEDGE_ENV_VAR];
+	const pinnedModelArgs =
+		route?.model && agent?.modelArgs && !input.args.some((arg) => arg === '--model' || arg === '-m')
+			? agent.modelArgs(route.model)
+			: [];
 	const launchArgs =
 		target.kind === 'local' && agent?.id === 'claude-code' && knowledgeDirectory
 			? [
 					...input.args,
+					...pinnedModelArgs,
 					'--settings',
 					JSON.stringify({ autoMemoryDirectory: path.join(knowledgeDirectory, 'memory') }),
 				]
-			: input.args;
+			: [...input.args, ...pinnedModelArgs];
 	const effectivePrompt =
 		target.kind === 'local'
 			? bindTranslationKnowledge(input.prompt, envVars?.[TRANSLATION_KNOWLEDGE_ENV_VAR])
@@ -390,6 +433,16 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 				ok: false,
 				reason: 'managed-credential-remote',
 				error: `This launch runs on an SSH remote and its approved credentials (${approvedCredentials.approved.map((entry) => entry.envVar).join(', ')}) are local to this host; they are not forwarded.`,
+			};
+		}
+		if (route) {
+			// The remote host's inherited environment is not this host's to bound,
+			// so the ceiling cannot be applied there. Unsupported, and said so.
+			return {
+				ok: false,
+				reason: 'managed-route-refused',
+				error:
+					'A managed route is not supported on an SSH remote: the remote environment cannot be bounded from this host.',
 			};
 		}
 		return {
@@ -434,6 +487,51 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 		prompt.via === 'argv' || prompt.via === 'stdin'
 			? [...launchArgs, ...prompt.args]
 			: [...launchArgs];
+
+	// The final ceiling: applied inside the surface's builder, after its user
+	// layers and before Maestro's own facts. Its report decides the launch.
+	let ceilingReport: ManagedEnvCeilingReport | undefined;
+	const env = buildAgentEnvironment({
+		...layers,
+		secretEnvVars: resolved?.values,
+		surface: input.surface,
+		maestroEnvVars: input.maestroEnvVars,
+		isResuming: input.isResuming,
+		querySource: input.querySource,
+		extraPathDirs: input.extraPathDirs,
+		isServerMode: input.isServerMode,
+		...(route
+			? {
+					managed: {
+						ceiling: route,
+						credentialEnvVars: credentials?.ok ? credentials.values : {},
+						report: (report) => {
+							ceilingReport = report;
+						},
+					},
+				}
+			: {}),
+	});
+	if (ceilingReport?.problems.length) {
+		return {
+			ok: false,
+			reason: 'managed-route-refused',
+			error: `The environment does not satisfy the policy's route - ${ceilingReport.problems.join('; ')}`,
+		};
+	}
+	if (managedReport && ceilingReport) {
+		managedReport.ceiling = { removed: ceilingReport.removed, pinned: ceilingReport.pinned };
+	}
+	const planReport: ManagedCredentialReport | undefined =
+		managedReport ??
+		(ceilingReport
+			? {
+					approved: [],
+					delivered: [],
+					bindingDigest: '',
+					ceiling: { removed: ceilingReport.removed, pinned: ceilingReport.pinned },
+				}
+			: undefined);
 	return {
 		ok: true,
 		plan: {
@@ -454,35 +552,10 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 						},
 					}
 				: {}),
-			...(managedReport ? { managedCredentials: managedReport } : {}),
-			env: deliverIntoEnvironment(
-				buildAgentEnvironment({
-					...layers,
-					secretEnvVars: resolved?.values,
-					surface: input.surface,
-					maestroEnvVars: input.maestroEnvVars,
-					isResuming: input.isResuming,
-					querySource: input.querySource,
-					extraPathDirs: input.extraPathDirs,
-					isServerMode: input.isServerMode,
-				}),
-				credentials?.ok ? credentials.values : undefined
-			),
+			...(planReport ? { managedCredentials: planReport } : {}),
+			env,
 		},
 	};
-}
-
-/**
- * Approved credential values go in over every user layer, on every surface:
- * the policy chose the credential, so a personal key set on the agent or in
- * the shell does not replace it. Unmanaged launches pass through untouched.
- */
-function deliverIntoEnvironment(
-	env: NodeJS.ProcessEnv,
-	credentialValues: Record<string, string> | undefined
-): NodeJS.ProcessEnv {
-	if (!credentialValues) return env;
-	return { ...env, ...credentialValues };
 }
 
 /**

@@ -8,6 +8,9 @@ import { isBlankEnvKey, isBlankEnvValue } from '../../agentEnvironment';
 import { CALLER_AGENT_ID_ENV_VAR, CALLER_TAB_ID_ENV_VAR } from '../../agentDelegation';
 import { PROVIDER_ENV_VAR_SUGGESTIONS } from '../../envVarCatalog';
 
+const SERVER_MODE_ENV_VAR_NAME = 'MAESTRO_SERVER_MODE';
+const SERVER_ENV_ALLOW_ENV_VAR_NAME = 'MAESTRO_SERVER_ENV_ALLOW';
+
 /**
  * Build the base PATH for macOS/Linux with detected Node version manager paths.
  *
@@ -482,6 +485,13 @@ export interface BuildAgentEnvironmentOptions extends AgentEnvLayers {
 	 * whose result is shown in Process Details and crosses to SSH remotes.
 	 */
 	secretEnvVars?: Record<string, string>;
+	/**
+	 * A managed launch's final ceiling (see {@link applyManagedEnvCeiling}).
+	 * Applied on every surface at the same point: after every user layer and
+	 * before Maestro's own facts. Absent for an unmanaged launch, which keeps
+	 * its surface's order untouched.
+	 */
+	managed?: ManagedEnvCeilingInput;
 }
 
 /**
@@ -511,6 +521,22 @@ export function buildAgentEnvironment(options: BuildAgentEnvironmentOptions): No
  * `buildChildProcessEnv`). A blank value unsets the variable and `~/` expands.
  */
 function buildDesktopAgentEnvironment(options: BuildAgentEnvironmentOptions): NodeJS.ProcessEnv {
+	if (options.managed) {
+		// The user layers first (as below), the ceiling over them, then
+		// Maestro's facts: the ceiling must see what the user set and must not
+		// be able to touch what Maestro states afterwards.
+		const env = buildChildProcessEnv(
+			resolveAgentEnvVars(options) ?? {},
+			options.isResuming,
+			options.globalShellEnvVars,
+			options.extraPathDirs,
+			options.querySource
+		);
+		applyManagedEnvCeiling(env, options.managed);
+		Object.assign(env, options.maestroEnvVars ?? {});
+		env[QUERY_SOURCE_ENV_VAR] = options.querySource ?? DEFAULT_QUERY_SOURCE;
+		return env;
+	}
 	const record = {
 		...(resolveAgentEnvVars(options) ?? {}),
 		...(options.maestroEnvVars ?? {}),
@@ -559,6 +585,7 @@ function buildCliAgentEnvironment(options: BuildAgentEnvironmentOptions): NodeJS
 	}
 	Object.assign(env, options.sessionCustomEnvVars ?? options.agentCustomEnvVars ?? {});
 	Object.assign(env, options.readOnlyEnvOverrides ?? {});
+	if (options.managed) applyManagedEnvCeiling(env, options.managed);
 	Object.assign(env, options.maestroEnvVars ?? {});
 	env[QUERY_SOURCE_ENV_VAR] = options.querySource ?? DEFAULT_QUERY_SOURCE;
 	return env;
@@ -584,22 +611,309 @@ function buildCueAgentEnvironment(options: BuildAgentEnvironmentOptions): NodeJS
 	const inherited = isServerModeActive(options.isServerMode)
 		? filterServerProcessEnv(process.env)
 		: process.env;
-	return {
+	const env: NodeJS.ProcessEnv = {
 		...inherited,
 		...(options.secretEnvVars ?? {}),
 		PATH: buildSpawnPath(options.extraPathDirs),
 		...(resolveAgentEnvVars(options) ?? {}),
-		...(options.maestroEnvVars ?? {}),
-		[QUERY_SOURCE_ENV_VAR]: options.querySource ?? DEFAULT_QUERY_SOURCE,
 	};
+	if (options.managed) applyManagedEnvCeiling(env, options.managed);
+	Object.assign(env, options.maestroEnvVars ?? {});
+	env[QUERY_SOURCE_ENV_VAR] = options.querySource ?? DEFAULT_QUERY_SOURCE;
+	return env;
+}
+
+// ─── Managed ceiling ─────────────────────────────────────────────────────────
+
+/**
+ * The environment variables through which a provider's route is chosen: the
+ * credential it bills, the origin it talks to, the model it asks for and the
+ * account home it reads its login and transcripts from. These are the names
+ * a managed ceiling controls, across EVERY provider: a Claude agent handed
+ * `OPENAI_API_KEY` by the shell is not routed by it, but it is not the
+ * policy's to leave lying around either.
+ */
+export interface ProviderRouteEnvNames {
+	credential: readonly string[];
+	baseUrl: string | null;
+	model: string | null;
+	accountDir: string | null;
+}
+
+export const PROVIDER_ROUTE_ENV_NAMES: Readonly<Record<string, ProviderRouteEnvNames>> = {
+	'claude-code': {
+		credential: [
+			'ANTHROPIC_API_KEY',
+			'ANTHROPIC_AUTH_TOKEN',
+			'CLAUDE_CODE_USE_BEDROCK',
+			'CLAUDE_CODE_USE_VERTEX',
+		],
+		baseUrl: 'ANTHROPIC_BASE_URL',
+		model: 'ANTHROPIC_MODEL',
+		accountDir: 'CLAUDE_CONFIG_DIR',
+	},
+	codex: {
+		credential: ['OPENAI_API_KEY'],
+		baseUrl: 'OPENAI_BASE_URL',
+		model: null,
+		accountDir: 'CODEX_HOME',
+	},
+	opencode: {
+		credential: ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'],
+		baseUrl: null,
+		model: null,
+		accountDir: null,
+	},
+	'factory-droid': {
+		credential: ['FACTORY_API_KEY'],
+		baseUrl: null,
+		model: null,
+		accountDir: null,
+	},
+	'copilot-cli': {
+		credential: ['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN'],
+		baseUrl: null,
+		model: null,
+		accountDir: 'COPILOT_HOME',
+	},
+};
+
+/** Every route-controlling name of every provider, once. */
+export const ALL_ROUTE_ENV_NAMES: readonly string[] = [
+	...new Set(
+		Object.values(PROVIDER_ROUTE_ENV_NAMES).flatMap((names) => [
+			...names.credential,
+			...(names.baseUrl ? [names.baseUrl] : []),
+			...(names.model ? [names.model] : []),
+			...(names.accountDir ? [names.accountDir] : []),
+		])
+	),
+];
+
+/**
+ * `MAESTRO_*` names that state who is acting, where the data lives or what
+ * mode the host runs in. A user layer or an inherited shell may not set them
+ * under management: Maestro restates every one it means to set right after
+ * the ceiling (`maestroEnvVars`, the query source).
+ */
+export const MANAGED_AUTHORITY_ENV_NAMES: readonly string[] = [
+	QUERY_SOURCE_ENV_VAR,
+	CALLER_AGENT_ID_ENV_VAR,
+	CALLER_TAB_ID_ENV_VAR,
+	SERVER_MODE_ENV_VAR_NAME,
+	SERVER_ENV_ALLOW_ENV_VAR_NAME,
+	'MAESTRO_USER_DATA',
+	'MAESTRO_SESSION_RESUMED',
+	'MAESTRO_CLI_JS',
+	'MAESTRO_AGENT_ID',
+	'MAESTRO_TRANSLATION_KNOWLEDGE',
+];
+/** Any `MAESTRO_MANAGED_*` name is authority-shaped and is never taken from a user layer. */
+export const MANAGED_AUTHORITY_ENV_PREFIX = 'MAESTRO_MANAGED_';
+
+/**
+ * What the policy pins for one launch. `null` for a control the policy does
+ * not pin, which then stays UNSET (never the user's value): a managed route
+ * either names its gateway or uses the provider's own API, it does not
+ * inherit one from the shell.
+ */
+export interface ManagedRouteCeiling {
+	providerId: string;
+	/** The model the launch must ask for, or null to leave the provider's default. */
+	model: string | null;
+	/** The gateway origin, or null for the provider's own API. */
+	baseUrl: string | null;
+	/** The account home (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, ...), or null for the provider's default. */
+	accountDir: string | null;
+	/**
+	 * `approved-credential`: the launch must carry a credential an approved
+	 * reference delivered; with none the provider would fall back to whatever
+	 * personal login sits in the account home, and that is refused.
+	 * `provider-login`: the policy lets the account home's own login bill.
+	 */
+	login: 'approved-credential' | 'provider-login';
+}
+
+export interface ManagedEnvCeilingInput {
+	ceiling: ManagedRouteCeiling;
+	/**
+	 * The values approved credential references delivered, keyed by the
+	 * variable the consumer reads (`deliverManagedCredentials` in the launch
+	 * plan). Placed by the ceiling itself, so they sit above the user layers
+	 * and survive the strip.
+	 */
+	credentialEnvVars: Readonly<Record<string, string>>;
+	/** Hears what the ceiling did, so the launch plan can refuse on a problem. */
+	report?: (report: ManagedEnvCeilingReport) => void;
+}
+
+export interface ManagedEnvCeilingReport {
+	/** Names removed from the environment, sorted. Never values. */
+	removed: string[];
+	/** Names the policy set, sorted. */
+	pinned: string[];
+	/** Why the environment does not satisfy the ceiling; empty when it does. */
+	problems: string[];
+}
+
+/**
+ * The final managed ceiling over an environment that already holds every
+ * user layer. In place, and the same on every surface:
+ *
+ *   1. every route-controlling name of every provider is removed
+ *      ({@link ALL_ROUTE_ENV_NAMES}): an inherited key, a user's personal key
+ *      or base URL, a shell's `CLAUDE_CONFIG_DIR`;
+ *   2. every authority-shaped `MAESTRO_*` name a user layer could have set is
+ *      removed ({@link MANAGED_AUTHORITY_ENV_NAMES}, `MAESTRO_MANAGED_*`);
+ *   3. the policy's pins are set (model, base URL, account home);
+ *   4. the approved credential values are set.
+ *
+ * Then the result is checked against the ceiling: a `login: 'approved-credential'`
+ * route with no credential delivered is a problem (the provider would fall
+ * back to a personal login), as is a delivered credential whose variable is
+ * not one the provider reads. The caller refuses the launch on any problem.
+ */
+export function applyManagedEnvCeiling(
+	env: NodeJS.ProcessEnv,
+	input: ManagedEnvCeilingInput
+): ManagedEnvCeilingReport {
+	const { ceiling, credentialEnvVars } = input;
+	const removed = new Set<string>();
+	const strip = (name: string) => {
+		for (const key of Object.keys(env)) {
+			if (key === name || (isWindows() && key.toUpperCase() === name.toUpperCase())) {
+				delete env[key];
+				removed.add(key);
+			}
+		}
+	};
+	for (const name of ALL_ROUTE_ENV_NAMES) strip(name);
+	for (const name of MANAGED_AUTHORITY_ENV_NAMES) strip(name);
+	for (const key of Object.keys(env)) {
+		if (key.toUpperCase().startsWith(MANAGED_AUTHORITY_ENV_PREFIX)) {
+			delete env[key];
+			removed.add(key);
+		}
+	}
+
+	const names = PROVIDER_ROUTE_ENV_NAMES[ceiling.providerId];
+	const pinned: string[] = [];
+	const problems: string[] = [];
+	const pin = (name: string | null, value: string | null, what: string) => {
+		if (value === null) return;
+		if (!name) {
+			problems.push(`the policy pins the ${what} but ${ceiling.providerId} has no variable for it`);
+			return;
+		}
+		env[name] = value;
+		pinned.push(name);
+	};
+	pin(names?.model ?? null, ceiling.model, 'model');
+	pin(names?.baseUrl ?? null, ceiling.baseUrl, 'base URL');
+	pin(names?.accountDir ?? null, ceiling.accountDir, 'account home');
+
+	const delivered = Object.keys(credentialEnvVars).sort();
+	for (const name of delivered) {
+		if (names && !names.credential.includes(name)) {
+			problems.push(`${name} is not a credential variable ${ceiling.providerId} reads`);
+			continue;
+		}
+		env[name] = credentialEnvVars[name];
+	}
+	if (ceiling.login === 'approved-credential') {
+		const carried = delivered.filter((name) => names?.credential.includes(name));
+		if (carried.length === 0) {
+			problems.push(
+				`the route requires an approved credential and none was delivered; ${ceiling.providerId} would fall back to the personal login in its account home`
+			);
+		}
+	}
+	const report = { removed: [...removed].sort(), pinned: pinned.sort(), problems };
+	input.report?.(report);
+	return report;
+}
+
+/** Codex `-c key=value` keys that choose the provider, the origin or the credential. */
+const CODEX_ROUTE_CONFIG_KEYS =
+	/^(model|model_provider|model_providers\b.*|base_url|openai_base_url|api_key|chatgpt_base_url|experimental_use_.*auth.*)\s*=/i;
+/** Claude `--settings` keys that choose the credential, the model or the environment. */
+const CLAUDE_ROUTE_SETTINGS_KEYS = [
+	'env',
+	'apiKeyHelper',
+	'model',
+	'awsAuthRefresh',
+	'awsCredentialExport',
+];
+
+/**
+ * Arguments that would route around the ceiling. Checked by name, not by
+ * executing anything: a model flag naming a model other than the pinned
+ * one, a Claude `--settings` payload that sets `env`, `model` or an API key
+ * helper, a Codex `-c`/`--config` override of the model, provider or base
+ * URL, or any flag that names an API key or base URL directly.
+ */
+export function managedArgsProblems(
+	args: readonly string[],
+	ceiling: ManagedRouteCeiling
+): string[] {
+	const problems: string[] = [];
+	const modelFlags = new Set(['--model', '-m']);
+	const forbiddenFlags = new Set(['--api-key', '--base-url', '--profile', '--auth-token']);
+	for (let i = 0; i < args.length; i += 1) {
+		const arg = args[i];
+		const eq = arg.indexOf('=');
+		const inline = eq > 0 && arg.startsWith('-');
+		const flag = inline ? arg.slice(0, eq) : arg;
+		const value = inline ? arg.slice(eq + 1) : args[i + 1];
+		if (modelFlags.has(flag)) {
+			if (ceiling.model !== null && value !== ceiling.model) {
+				problems.push(`${flag} names ${value ?? '(nothing)'} but the policy pins ${ceiling.model}`);
+			}
+			continue;
+		}
+		if (forbiddenFlags.has(flag)) {
+			problems.push(`${flag} is not allowed under management`);
+			continue;
+		}
+		if ((flag === '-c' || flag === '--config') && typeof value === 'string') {
+			if (CODEX_ROUTE_CONFIG_KEYS.test(value.trim())) {
+				const key = value.split('=')[0].trim();
+				const named = value
+					.slice(value.indexOf('=') + 1)
+					.trim()
+					.replace(/^"|"$/g, '');
+				if (!(key === 'model' && ceiling.model !== null && named === ceiling.model)) {
+					problems.push(`${flag} ${key} is not allowed under management`);
+				}
+			}
+			continue;
+		}
+		if (flag === '--settings' && typeof value === 'string') {
+			let settings: unknown;
+			try {
+				settings = JSON.parse(value);
+			} catch {
+				problems.push('--settings names a file or unparsable JSON, which cannot be checked');
+				continue;
+			}
+			if (settings && typeof settings === 'object') {
+				for (const key of CLAUDE_ROUTE_SETTINGS_KEYS) {
+					if (key in (settings as Record<string, unknown>)) {
+						problems.push(`--settings sets ${key}, which is not allowed under management`);
+					}
+				}
+			}
+		}
+	}
+	return problems;
 }
 
 // ─── Server mode ─────────────────────────────────────────────────────────────
 
 /** Set to `1` to run Cue with the server-mode environment allowlist. */
-export const SERVER_MODE_ENV_VAR = 'MAESTRO_SERVER_MODE';
+export const SERVER_MODE_ENV_VAR = SERVER_MODE_ENV_VAR_NAME;
 /** Comma-separated extra variable names an operator lets through in server mode. */
-export const SERVER_ENV_ALLOW_ENV_VAR = 'MAESTRO_SERVER_ENV_ALLOW';
+export const SERVER_ENV_ALLOW_ENV_VAR = SERVER_ENV_ALLOW_ENV_VAR_NAME;
 
 /**
  * Whether server mode is on: the caller said so, or the operator set

@@ -45,7 +45,11 @@ import {
 	resolveClaudeSpawnModeCore,
 	type ClaudeSpawnCoreDeps,
 } from '../launch/interactive-mode';
-import { buildAgentLaunchPlan } from '../launch/launch-plan';
+import {
+	buildAgentLaunchPlan,
+	isManagedLaunchRefusal,
+	type ManagedLaunchInput,
+} from '../launch/launch-plan';
 import type { SshRemoteSettingsStore } from '../launch/ssh-remote-resolver';
 import {
 	sshUnresolvedRemoteMessage,
@@ -128,6 +132,14 @@ export interface ManagedTurnAuthority {
 	/** An opaque account reference for the snapshot; never a credential. */
 	account?: string | null;
 	resourceIds?: readonly string[];
+	/**
+	 * The policy's route ceiling and approved credential references for the launch plan
+	 * (`AgentLaunchInput.managed`). The plan refuses the turn (`managed-denied`) when the
+	 * arguments, the provider or the resulting environment route around it, or when an
+	 * approved credential is missing. A real sink always supplies one; the synthetic harness
+	 * route builds its own complete spec and has none.
+	 */
+	launch?: ManagedLaunchInput;
 	/** The lease, once admitted, so the caller can journal its id and hear its end. */
 	onLease?(lease: DispatchLease): void;
 }
@@ -400,8 +412,18 @@ export async function runAgentTurn(
 		return refuse(reason, message);
 	};
 
-	const planned = buildAgentLaunchPlan({ ...launch, args, sshStore: options.sshStore });
-	if (!planned.ok) return abandon('ssh-unresolved', planned.error);
+	const planned = buildAgentLaunchPlan({
+		...launch,
+		args,
+		sshStore: options.sshStore,
+		...(options.managed?.launch ? { managed: options.managed.launch } : {}),
+	});
+	if (!planned.ok) {
+		return abandon(
+			isManagedLaunchRefusal(planned.reason) ? 'managed-denied' : 'ssh-unresolved',
+			planned.error
+		);
+	}
 	const plan = planned.plan;
 
 	// The process to start.
