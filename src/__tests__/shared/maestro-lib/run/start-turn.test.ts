@@ -11,19 +11,30 @@ import path from 'node:path';
 
 import {
 	applyWindowsShellRules,
+	DispatchRefusedError,
 	startTurn,
 	turnProcessSpecFromPlan,
+	type DispatchAdmission,
 	type TurnProcessSpec,
 	type LocalLaunchPlan,
 	type StartTurnOptions,
 	type TurnHandlers,
 } from '../../../../shared/maestro-lib/run/start-turn';
+import {
+	buildDispatchSnapshot,
+	createContextVerifier,
+	createLocalHostAuthority,
+	dispatchSnapshotDigest,
+	type DispatchLease,
+	type HostAuthority,
+} from '../../../../shared/maestro-lib/managed/authority';
+import { MANAGED_CONTRACT_VERSION } from '../../../../shared/maestro-lib/managed/types';
 import type { ParsedEvent } from '../../../../shared/maestro-lib/parsers/agent-output-parser';
 import { createOutputParser } from '../../../../shared/maestro-lib/parsers/parser-factory';
 // The desktop spawners' own import path: the library must escape with that code.
 import { escapeCmdArg } from '../../../../main/process-manager/utils/shellEscape';
 import { CAPTURED_RECORDINGS } from '../../../main/process-manager/recordings/captured';
-import { createScratchDir, fakeAgentSpec, fakeTurnFromRecording } from './fakeAgent';
+import { createScratchDir, fakeAgentSpec, fakeTurnFromRecording, type FakeTurn } from './fakeAgent';
 
 const OPTIONS: StartTurnOptions = { stopGraceMs: 200 };
 const posixIt = it.skipIf(process.platform === 'win32');
@@ -673,4 +684,275 @@ describe('applyWindowsShellRules', () => {
 			expect(JSON.parse(exit.stdoutText.trim())).toEqual({ argv: args, stdin: prompt });
 		}
 	);
+});
+
+describe('managed admission at the spawn', () => {
+	const HOLD_TURN: FakeTurn = {
+		chunks: ['{"type":"text","text":"hi"}\n'],
+		close: { code: 0, signal: null },
+	};
+
+	function authority(decision: 'allow' | 'deny' = 'allow') {
+		let now = 0;
+		let ids = 0;
+		const auth = createLocalHostAuthority({
+			authorityId: 'test-authority',
+			decide: () =>
+				decision === 'allow'
+					? { decision: 'allow', policyRevision: 1 }
+					: { decision: 'deny', reason: 'refused by the table', policyRevision: 1 },
+			now: () => now,
+			newId: () => `lease-${++ids}`,
+			leaseTtlMs: 60_000,
+		});
+		return { auth, tick: (ms: number) => (now += ms) };
+	}
+
+	function context() {
+		const verifier = createContextVerifier({
+			verifierId: 'test',
+			peer: 'in-process',
+			now: () => 0,
+			accept: () => [],
+		});
+		const verified = verifier.verify({
+			contractVersion: MANAGED_CONTRACT_VERSION,
+			installation: { installationId: 'i', runtimeId: 'r', processEpoch: 'e' },
+			origin: 'cli',
+			actor: { kind: 'service', id: 'fleet' },
+			delegation: { chain: [], grantRef: null },
+			identity: {
+				requestId: 'q',
+				idempotencyKey: 'k',
+				attemptId: 'a',
+				runId: 'run',
+				rootRunId: 'run',
+				parentRunId: null,
+			},
+			policyRevision: 1,
+			workflow: null,
+			traceId: 't',
+			requestedCapabilities: ['runs.submit'],
+		});
+		if (!verified.ok) throw new Error(verified.problems.join());
+		return verified.context;
+	}
+
+	const ATTRIBUTION = { provider: 'opencode' } as const;
+
+	/** A lease admitted on `spec`, and the sink gate that re-checks it, as `runAgentTurn` builds them. */
+	async function gateFor(auth: HostAuthority, spec: TurnProcessSpec) {
+		const outcome = await auth.admit({
+			context: context(),
+			snapshot: buildDispatchSnapshot(spec, ATTRIBUTION),
+			policy: { sources: [], policyRevision: 1 },
+		});
+		if (outcome.state !== 'admitted') throw new Error(`not admitted: ${outcome.state}`);
+		const lease = outcome.lease;
+		const seen: string[] = [];
+		const gate: DispatchAdmission = {
+			admit(snapshot) {
+				const verdict = auth.check(lease, dispatchSnapshotDigest(snapshot));
+				seen.push(verdict.ok ? 'admit:ok' : `admit:${verdict.reason}`);
+				return verdict.ok
+					? { ok: true }
+					: { ok: false, state: 'denied', code: 'lease-invalid', message: verdict.reason };
+			},
+			bound: (pid) => {
+				seen.push(`bound:${typeof pid}`);
+				lease.bind(pid);
+			},
+			released: (exit) => {
+				seen.push(`released:${exit.exitCode}:${exit.stoppedBy ?? 'none'}`);
+				lease.release({ outcome: 'exited', exitCode: exit.exitCode, signal: exit.signal });
+			},
+			onRevoked: (listener) => lease.onRevoked(listener),
+		};
+		return { lease, gate, seen };
+	}
+
+	it('admits a harmless launch: the lease is checked at the spawn, bound to the pid, released on exit', async () => {
+		const { auth } = authority();
+		const argvOut = path.join(scratch.dir, 'managed-argv.json');
+		const spec = fakeAgentSpec(scratch.dir, OPENCODE_TURN, { argvOut, args: ['--managed'] });
+		const { lease, gate, seen } = await gateFor(auth, spec);
+
+		const turn = startTurn(
+			spec,
+			{},
+			{ ...OPTIONS, agentId: 'opencode', admission: { gate, attribution: ATTRIBUTION } }
+		);
+		expect(lease.state()).toBe('bound');
+		expect(lease.pid()).toBe(turn.pid);
+		const exit = await turn.done;
+
+		expect(exit.exitCode).toBe(0);
+		expect(exit.stoppedBy).toBeUndefined();
+		expect(seen).toEqual(['admit:ok', 'bound:number', 'released:0:none']);
+		expect(lease.state()).toBe('released');
+		expect(JSON.parse(fs.readFileSync(argvOut, 'utf-8'))).toEqual(['--managed']);
+	});
+
+	it('refuses a denied launch before any effect: no process, no stdin, no file touched', async () => {
+		const { auth } = authority('deny');
+		const argvOut = path.join(scratch.dir, 'denied-argv.json');
+		const spec = fakeAgentSpec(scratch.dir, OPENCODE_TURN, { argvOut, stdin: 'never read' });
+		const outcome = await auth.admit({
+			context: context(),
+			snapshot: buildDispatchSnapshot(spec, ATTRIBUTION),
+			policy: { sources: [], policyRevision: 1 },
+		});
+		expect(outcome).toMatchObject({
+			state: 'denied',
+			code: 'policy-denied',
+			message: 'refused by the table',
+		});
+
+		// Nothing admitted means nothing to hand the sink; a gate that says no is refused the same way.
+		const gate: DispatchAdmission = {
+			admit: () => ({
+				ok: false,
+				state: 'denied',
+				code: 'policy-denied',
+				message: 'refused by the table',
+			}),
+			bound: () => {
+				throw new Error('must not bind');
+			},
+		};
+		let started = false;
+		expect(() =>
+			startTurn(
+				spec,
+				{ onStarted: () => (started = true) },
+				{ ...OPTIONS, admission: { gate, attribution: ATTRIBUTION } }
+			)
+		).toThrow(DispatchRefusedError);
+		try {
+			startTurn(spec, {}, { ...OPTIONS, admission: { gate, attribution: ATTRIBUTION } });
+		} catch (error) {
+			expect(error).toMatchObject({ state: 'denied', code: 'policy-denied' });
+		}
+		expect(started).toBe(false);
+		expect(fs.existsSync(argvOut)).toBe(false);
+		expect(auth.live()).toEqual([]);
+	});
+
+	it('refuses a changed plan: a lease admitted on one spec does not start another', async () => {
+		const { auth } = authority();
+		const admittedSpec = fakeAgentSpec(scratch.dir, OPENCODE_TURN, { args: ['--admitted'] });
+		const { gate, seen, lease } = await gateFor(auth, admittedSpec);
+		const argvOut = path.join(scratch.dir, 'replaced-argv.json');
+		const replaced = {
+			...admittedSpec,
+			args: [...admittedSpec.args.slice(0, 1), '--replaced'],
+			env: { ...admittedSpec.env, FAKE_AGENT_ARGV_OUT: argvOut },
+		};
+
+		expect(() =>
+			startTurn(replaced, {}, { ...OPTIONS, admission: { gate, attribution: ATTRIBUTION } })
+		).toThrow(/snapshot-mismatch/);
+		expect(seen).toEqual(['admit:snapshot-mismatch']);
+		expect(fs.existsSync(argvOut)).toBe(false);
+		expect(lease.state()).toBe('issued');
+		// Different attribution over the same spec is a different snapshot too.
+		expect(() =>
+			startTurn(
+				admittedSpec,
+				{},
+				{ ...OPTIONS, admission: { gate, attribution: { provider: 'claude-code' } } }
+			)
+		).toThrow(/snapshot-mismatch/);
+		// The admitted spec itself still starts.
+		const turn = startTurn(
+			admittedSpec,
+			{},
+			{ ...OPTIONS, admission: { gate, attribution: ATTRIBUTION } }
+		);
+		expect((await turn.done).exitCode).toBe(0);
+	});
+
+	it('refuses a stale, forged or already-used lease at the spawn', async () => {
+		const { auth, tick } = authority();
+		const spec = fakeAgentSpec(scratch.dir, OPENCODE_TURN);
+		const expired = await gateFor(auth, spec);
+		tick(60_001);
+		expect(() =>
+			startTurn(
+				spec,
+				{},
+				{ ...OPTIONS, admission: { gate: expired.gate, attribution: ATTRIBUTION } }
+			)
+		).toThrow(/expired/);
+
+		const { lease } = await gateFor(auth, spec);
+		const forged = { ...lease } as DispatchLease;
+		const forgedGate: DispatchAdmission = {
+			admit: (snapshot) => {
+				const verdict = auth.check(forged, dispatchSnapshotDigest(snapshot));
+				return verdict.ok
+					? { ok: true }
+					: { ok: false, state: 'denied', code: 'lease-invalid', message: verdict.reason };
+			},
+		};
+		expect(() =>
+			startTurn(spec, {}, { ...OPTIONS, admission: { gate: forgedGate, attribution: ATTRIBUTION } })
+		).toThrow(/forged/);
+
+		const used = await gateFor(auth, spec);
+		const first = startTurn(
+			spec,
+			{},
+			{ ...OPTIONS, admission: { gate: used.gate, attribution: ATTRIBUTION } }
+		);
+		expect(() =>
+			startTurn(spec, {}, { ...OPTIONS, admission: { gate: used.gate, attribution: ATTRIBUTION } })
+		).toThrow(/already-bound/);
+		await first.done;
+		expect(() =>
+			startTurn(spec, {}, { ...OPTIONS, admission: { gate: used.gate, attribution: ATTRIBUTION } })
+		).toThrow(/released/);
+	});
+
+	it('stops the process when the lease is revoked mid-run, and the authority owns that stop', async () => {
+		const { auth } = authority();
+		const spec = fakeAgentSpec(scratch.dir, HOLD_TURN, { hold: true });
+		const { lease, gate, seen } = await gateFor(auth, spec);
+		const turn = startTurn(
+			spec,
+			{},
+			{ ...OPTIONS, agentId: 'opencode', admission: { gate, attribution: ATTRIBUTION } }
+		);
+		expect(lease.state()).toBe('bound');
+
+		expect(auth.revoke(lease.leaseId, 'policy revision 2 forbids it')).toBe(true);
+		const exit = await turn.done;
+
+		expect(exit.interrupted).toBe(true);
+		expect(exit.stoppedBy).toBe('authority');
+		expect(turn.stopRequested()).toBe(true);
+		expect(lease.ended()).toMatchObject({
+			state: 'revoked',
+			reason: 'policy revision 2 forbids it',
+		});
+		expect(seen[seen.length - 1]).toMatch(/^released:.*:authority$/);
+	});
+
+	it('records a caller stop as the caller, not the authority', async () => {
+		const { auth } = authority();
+		const spec = fakeAgentSpec(scratch.dir, HOLD_TURN, { hold: true });
+		const { gate } = await gateFor(auth, spec);
+		const turn = startTurn(spec, {}, { ...OPTIONS, admission: { gate, attribution: ATTRIBUTION } });
+		turn.terminate();
+		const exit = await turn.done;
+		expect(exit.interrupted).toBe(true);
+		expect(exit.stoppedBy).toBe('caller');
+	});
+
+	it('runs unmanaged when no admission is given, exactly as before', async () => {
+		const turn = startTurn(fakeAgentSpec(scratch.dir, OPENCODE_TURN), {}, OPTIONS);
+		const exit = await turn.done;
+		expect(exit.exitCode).toBe(0);
+		expect(exit.stoppedBy).toBeUndefined();
+	});
 });

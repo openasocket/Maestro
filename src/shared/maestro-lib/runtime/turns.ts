@@ -634,6 +634,14 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		}
 	}
 
+	function dropManagedItem(runId: string): boolean {
+		for (const queue of queues.values()) {
+			const held = queue.items().find((item) => item.managed?.runId === runId);
+			if (held && queue.remove(held.id)) return true;
+		}
+		return false;
+	}
+
 	const managedPort: ManagedTurnPort = {
 		async sendManaged(agentId, tabId, text, dispatch): Promise<ManagedSendResult> {
 			const submitted = await submitText(agentId, tabId, text, dispatch);
@@ -649,6 +657,9 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 					});
 					return { status: 'refused', reason: 'other', message: submitted.message };
 				case 'failed': {
+					// The attempt is journaled as failed; the peer decides what follows. A held copy in
+					// the queue could be resumed into a second dispatch of the same attempt, so it goes.
+					dropManagedItem(dispatch.runId);
 					const reason =
 						submitted.reason === 'managed-denied' ||
 						submitted.reason === 'managed-unavailable' ||

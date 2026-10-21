@@ -6,6 +6,7 @@
  * the real `runAgentTurn`; only the command is swapped for the fake agent. The runtime, its
  * repository, its queue, and its records are real and write to a temp data directory.
  */
+import { createHash } from 'node:crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -22,7 +23,21 @@ import {
 	writeFakeTurn,
 } from '../../../../__tests__/shared/maestro-lib/run/fakeAgent';
 import { DEFAULT_TAB_DEFAULTS } from '../../agents/rules';
-import type { ClientResult, TurnEvent } from '../../client/types';
+import type { ClientResult, ManagedApi, TurnEvent } from '../../client/types';
+import {
+	createLocalHostAuthority,
+	type HostAuthority,
+	type PolicyDecision,
+} from '../../managed/authority';
+import { createManagedBinding } from '../../managed/binding';
+import { inProcessContext } from '../../managed/operations';
+import {
+	MANAGED_CONTRACT_VERSION,
+	type ManagedOperationContext,
+	type ManagedOperationEnvelope,
+	type ManagedRunIdentity,
+	type ManagedSubmitInput,
+} from '../../managed/types';
 import { readHistory } from '../../store/read-history';
 import { runAgentTurn } from '../../turns/run-agent-turn';
 import { createMaestroRuntime, type MaestroRuntime, type RuntimeDeps } from '../index';
@@ -458,6 +473,518 @@ describe('runtime turns', () => {
 				['on claude', 'on opencode', 'back on claude']
 			);
 			expect(entries.filter((entry) => entry.source === 'stdout')).toHaveLength(3);
+		});
+	});
+
+	describe('managed runs', () => {
+		const sha = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
+
+		function managedAuthority(decision: PolicyDecision = { decision: 'allow', policyRevision: 1 }) {
+			let ids = 0;
+			return createLocalHostAuthority({
+				authorityId: 'fleet-authority',
+				decide: () => decision,
+				now: () => Date.now(),
+				newId: () => `lease-${++ids}`,
+				leaseTtlMs: 60_000,
+			});
+		}
+
+		/** The argv files the fake agent actually wrote: one per process that ran. */
+		const ran = () => argvFiles.filter((file) => fs.existsSync(file));
+
+		async function startManaged(
+			authority: HostAuthority | null = managedAuthority(),
+			extra: Partial<RuntimeDeps> = {}
+		) {
+			fs.writeFileSync(
+				path.join(dir, 'maestro-sessions.json'),
+				JSON.stringify({ sessions: [seedAgent()], activeSessionId: 'a1' }, null, '\t')
+			);
+			const started = await createMaestroRuntime({
+				dataDir: dir,
+				mode: 'tui',
+				deps: { ...deps(), ...extra },
+				turns: { bundledPromptsDir: BUNDLED_PROMPTS },
+				...(authority ? { managed: { authority } } : {}),
+			});
+			if (!started.ok) throw new Error(`refused: ${started.refusal.message}`);
+			open.push(started.runtime);
+			return started.runtime;
+		}
+
+		function envelope<T>(
+			runtime: MaestroRuntime,
+			input: T,
+			overrides: Partial<ManagedOperationContext> & { identity?: Partial<ManagedRunIdentity> } = {}
+		): ManagedOperationEnvelope<T> {
+			const { identity, ...rest } = overrides;
+			return {
+				context: inProcessContext({
+					installation: runtime.installation,
+					actor: { kind: 'service', id: 'fleet' },
+					delegation: { chain: [], grantRef: null },
+					identity: {
+						requestId: 'req-1',
+						idempotencyKey: 'key-1',
+						attemptId: 'attempt-1',
+						runId: null,
+						rootRunId: null,
+						parentRunId: null,
+						...identity,
+					},
+					policyRevision: 1,
+					workflow: null,
+					traceId: 'trace-1',
+					requestedCapabilities: [
+						'runs.submit',
+						'runs.inspect',
+						'runs.cancel',
+						'runs.interrupt',
+						'runs.list',
+						'agents.list',
+						'capabilities.negotiate',
+					],
+					...rest,
+				}),
+				input,
+			};
+		}
+
+		const submission = (text: string): ManagedSubmitInput => ({
+			agentId: 'a1',
+			tabId: 't1',
+			providerId: 'claude-code',
+			modelId: null,
+			content: { text, sha256: sha(text) },
+			resourceIds: [],
+		});
+
+		function managedOf(runtime: MaestroRuntime): ManagedApi {
+			if (!runtime.managed) throw new Error('no managed facade');
+			return runtime.managed;
+		}
+
+		const journalFile = () => path.join(dir, 'maestro-managed-runs.json');
+		const journalRuns = () =>
+			JSON.parse(fs.readFileSync(journalFile(), 'utf-8')).runs as Array<{
+				runId: string;
+				state: string;
+				attempts: Array<{
+					phase: string;
+					pid: number | null;
+					leaseId: string | null;
+					outcome: string | null;
+					detail: string | null;
+				}>;
+				cancellation: { owner: { id: string } } | null;
+			}>;
+
+		it('runs an admitted submission to completion: receipt, journal, transcript and the real process agree', async () => {
+			const runtime = await startManaged();
+			const managed = managedOf(runtime);
+			const turn = watch(runtime);
+
+			const result = value(await managed.submit(envelope(runtime, submission('managed hello'))));
+			expect(result).toMatchObject({
+				status: 'ok',
+				requestId: 'req-1',
+				value: { disposition: 'accepted', run: { agentId: 'a1', attemptId: 'attempt-1' } },
+			});
+			if (result.status !== 'ok') return;
+			const runId = result.value.run.runId;
+			await turn.outcome();
+			expect(turn.outcomes()).toEqual(['completed']);
+
+			const inspected = value(await managed.inspect(envelope(runtime, { runId })));
+			expect(inspected).toMatchObject({
+				status: 'ok',
+				value: { runId, state: 'completed', providerSessionId: CAPTURED_CLAUDE_CODE_SESSION_ID },
+			});
+			const [run] = journalRuns();
+			expect(run).toMatchObject({ runId, state: 'completed' });
+			expect(run.attempts).toEqual([
+				expect.objectContaining({ phase: 'terminal', outcome: 'completed', leaseId: 'lease-1' }),
+			]);
+			expect(run.attempts[0].pid).toBeGreaterThan(0);
+			expect((await transcript(runtime)).map((entry) => entry.text)[0]).toBe('managed hello');
+			expect(argvFiles).toHaveLength(1);
+
+			const listed = value(await managed.runs(envelope(runtime, { cursor: null, limit: 5 })));
+			expect(listed).toMatchObject({
+				status: 'ok',
+				value: { items: [{ runId }], nextCursor: null },
+			});
+		});
+
+		it('denies with zero effect: no process, no transcript, no queue item, a failed attempt in the journal', async () => {
+			const runtime = await startManaged(
+				managedAuthority({
+					decision: 'deny',
+					reason: 'agent a1 is not allowlisted',
+					policyRevision: 2,
+				})
+			);
+			const managed = managedOf(runtime);
+			const turn = watch(runtime);
+
+			const result = value(await managed.submit(envelope(runtime, submission('forbidden'))));
+			expect(result).toMatchObject({
+				status: 'denied',
+				code: 'policy-denied',
+				message: expect.stringContaining('not allowlisted'),
+			});
+			expect(ran()).toEqual([]);
+			expect(await transcript(runtime)).toEqual([]);
+			expect(turn.events.filter((event) => event.kind === 'started')).toEqual([]);
+			expect(value(await runtime.turns.queue.list('a1'))).toEqual([]);
+			expect(journalRuns()[0]).toMatchObject({
+				state: 'failed',
+				attempts: [
+					{
+						phase: 'terminal',
+						outcome: 'failed',
+						detail: expect.stringContaining('managed-denied'),
+					},
+				],
+			});
+			// Standalone sends on the same runtime still work: the denial governs managed runs only.
+			value(await runtime.turns.send('a1', 't1', { text: 'plain' }));
+			await turn.outcome();
+			expect(ran()).toHaveLength(1);
+		});
+
+		it('refuses a forged or stale context before any policy or process is reached', async () => {
+			const runtime = await startManaged();
+			const managed = managedOf(runtime);
+			const otherInstallation = envelope(runtime, submission('x'), {
+				installation: { installationId: 'someone-else', runtimeId: 'r', processEpoch: 'e' },
+			});
+			expect(value(await managed.submit(otherInstallation))).toMatchObject({
+				status: 'denied',
+				code: 'unauthenticated',
+			});
+			const malformed = envelope(runtime, submission('x'), { traceId: '' });
+			expect(value(await managed.submit(malformed))).toMatchObject({
+				status: 'denied',
+				code: 'invalid-input',
+			});
+			const unrequested = envelope(runtime, submission('x'), {
+				requestedCapabilities: ['runs.inspect'],
+			});
+			expect(value(await managed.submit(unrequested))).toMatchObject({
+				status: 'denied',
+				code: 'capability-unsupported',
+			});
+			const wrongDigest = envelope(runtime, {
+				...submission('x'),
+				content: { text: 'x', sha256: sha('y') },
+			});
+			expect(value(await managed.submit(wrongDigest))).toMatchObject({
+				status: 'denied',
+				code: 'invalid-input',
+			});
+			const unknownResource = envelope(runtime, { ...submission('x'), resourceIds: ['res-1'] });
+			expect(value(await managed.submit(unknownResource))).toMatchObject({
+				status: 'denied',
+				code: 'policy-denied',
+				message: expect.stringContaining('res-1'),
+			});
+			expect(argvFiles).toEqual([]);
+			expect(fs.existsSync(journalFile())).toBe(true);
+			expect(journalRuns()).toEqual([]);
+		});
+
+		it('refuses a lease the sink finds expired, as a denial with the reason', async () => {
+			let ids = 0;
+			const expiring = createLocalHostAuthority({
+				authorityId: 'fleet-authority',
+				decide: () => ({ decision: 'allow', policyRevision: 1 }),
+				now: () => Date.now(),
+				newId: () => `lease-${++ids}`,
+				leaseTtlMs: -1,
+			});
+			const runtime = await startManaged(expiring);
+			const result = value(await managedOf(runtime).submit(envelope(runtime, submission('late'))));
+			expect(result).toMatchObject({
+				status: 'denied',
+				code: 'policy-denied',
+				message: expect.stringContaining('expired'),
+			});
+			expect(ran()).toEqual([]);
+			expect(journalRuns()[0]).toMatchObject({ state: 'failed' });
+		});
+
+		it('stops the running process when its lease is revoked, and journals the cancellation', async () => {
+			hold = true;
+			const authority = managedAuthority();
+			const runtime = await startManaged(authority);
+			const managed = managedOf(runtime);
+			const turn = watch(runtime);
+			const result = value(await managed.submit(envelope(runtime, submission('long job'))));
+			if (result.status !== 'ok') throw new Error(result.status);
+			await turn.started();
+			expect(journalRuns()[0]).toMatchObject({
+				state: 'running',
+				attempts: [{ phase: 'dispatched' }],
+			});
+
+			expect(authority.revokeAll('policy revision 2')).toBe(1);
+			await turn.outcome();
+			expect(turn.outcomes()).toEqual(['interrupted']);
+			expect(journalRuns()[0]).toMatchObject({
+				state: 'cancelled',
+				attempts: [{ phase: 'terminal', outcome: 'cancelled' }],
+			});
+			expect(
+				value(await managed.inspect(envelope(runtime, { runId: result.value.run.runId })))
+			).toMatchObject({
+				status: 'ok',
+				value: { state: 'cancelled' },
+			});
+		});
+
+		it('replays the same idempotency key without running twice, and refuses a different payload', async () => {
+			const runtime = await startManaged();
+			const managed = managedOf(runtime);
+			const turn = watch(runtime);
+			const first = value(await managed.submit(envelope(runtime, submission('once'))));
+			if (first.status !== 'ok') throw new Error(first.status);
+			await turn.outcome();
+
+			const again = value(
+				await managed.submit(
+					envelope(runtime, submission('once'), { identity: { requestId: 'req-2' } })
+				)
+			);
+			expect(again).toMatchObject({
+				status: 'ok',
+				requestId: 'req-2',
+				value: { disposition: 'replayed', run: { runId: first.value.run.runId } },
+			});
+			expect(value(await managed.submit(envelope(runtime, submission('twice'))))).toMatchObject({
+				status: 'denied',
+				code: 'idempotency-conflict',
+			});
+			expect(argvFiles).toHaveLength(1);
+		});
+
+		it('answers unknown after a restart lost an attempt mid-dispatch, and never resends it', async () => {
+			// What a crashed host leaves behind: an attempt dispatched, no end recorded.
+			fs.writeFileSync(
+				journalFile(),
+				JSON.stringify({
+					maestroSchemaVersion: 1,
+					runs: [
+						{
+							runId: 'run-crashed',
+							rootRunId: 'run-crashed',
+							parentRunId: null,
+							idempotencyKey: 'key-1',
+							agentId: 'a1',
+							tabId: 't1',
+							providerId: 'claude-code',
+							providerSessionId: null,
+							contentSha256: sha('lost'),
+							resourceIds: [],
+							actor: { kind: 'service', id: 'fleet' },
+							traceId: 'trace-0',
+							submittedAt: '2026-10-21T00:00:00.000Z',
+							state: 'running',
+							attempts: [
+								{
+									attemptId: 'attempt-0',
+									requestId: 'req-0',
+									queuedAt: '2026-10-21T00:00:00.000Z',
+									phase: 'dispatched',
+									dispatchedAt: '2026-10-21T00:00:01.000Z',
+									pid: 999999,
+									leaseId: 'lease-0',
+									endedAt: null,
+									outcome: null,
+									detail: null,
+								},
+							],
+							cancellation: null,
+						},
+					],
+				})
+			);
+			const runtime = await startManaged();
+			const managed = managedOf(runtime);
+			expect(
+				value(await managed.inspect(envelope(runtime, { runId: 'run-crashed' })))
+			).toMatchObject({
+				status: 'ok',
+				value: { state: 'unknown' },
+			});
+			expect(value(await managed.submit(envelope(runtime, submission('lost'))))).toMatchObject({
+				status: 'unknown',
+				code: 'outcome-unknown',
+			});
+			expect(
+				value(await managed.cancel(envelope(runtime, { runId: 'run-crashed' })))
+			).toMatchObject({
+				status: 'ok',
+				value: { outcome: 'unknown' },
+			});
+			expect(argvFiles).toEqual([]);
+			expect(runtime.managedRuns?.get('run-crashed')?.attempts[0]).toMatchObject({
+				phase: 'unknown',
+				detail: expect.stringContaining('restarted'),
+			});
+		});
+
+		it('cancels a queued run before dispatch and interrupts a running one, with the first owner kept', async () => {
+			hold = true;
+			const runtime = await startManaged();
+			const managed = managedOf(runtime);
+			const turn = watch(runtime);
+			const running = value(await managed.submit(envelope(runtime, submission('first'))));
+			if (running.status !== 'ok') throw new Error(running.status);
+			await turn.started();
+			hold = false;
+			const queued = value(
+				await managed.submit(
+					envelope(runtime, submission('second'), {
+						identity: { requestId: 'req-2', idempotencyKey: 'key-2', attemptId: 'attempt-2' },
+					})
+				)
+			);
+			if (queued.status !== 'ok') throw new Error(queued.status);
+			expect(queued.value.run.state).toBe('queued');
+
+			expect(
+				value(await managed.cancel(envelope(runtime, { runId: queued.value.run.runId })))
+			).toMatchObject({
+				status: 'ok',
+				value: { outcome: 'requested' },
+			});
+			expect(value(await runtime.turns.queue.list('a1'))).toEqual([]);
+			expect(journalRuns().find((run) => run.runId === queued.value.run.runId)).toMatchObject({
+				state: 'cancelled',
+				cancellation: { owner: { id: 'fleet' } },
+			});
+
+			const interrupt = envelope(
+				runtime,
+				{ runId: running.value.run.runId },
+				{ actor: { kind: 'human', id: 'operator' } }
+			);
+			expect(value(await managed.interrupt(interrupt))).toMatchObject({
+				status: 'ok',
+				value: { outcome: 'requested' },
+			});
+			await turn.outcome();
+			expect(turn.outcomes()).toEqual(['interrupted']);
+			expect(journalRuns().find((run) => run.runId === running.value.run.runId)).toMatchObject({
+				state: 'cancelled',
+				cancellation: { owner: { id: 'operator' } },
+			});
+			expect(
+				value(await managed.cancel(envelope(runtime, { runId: running.value.run.runId })))
+			).toMatchObject({
+				status: 'ok',
+				value: { outcome: 'already-terminal' },
+			});
+			expect(value(await managed.inspect(envelope(runtime, { runId: 'nope' })))).toMatchObject({
+				status: 'denied',
+				code: 'not-found',
+			});
+		});
+
+		it('answers unavailable, not standalone, when enrolled with no reachable authority', async () => {
+			const authority = managedAuthority();
+			const enroller = await startManaged(authority);
+			const binding = createManagedBinding({
+				paths: { userDataDir: dir, productionDataDir: dir },
+				fence: () => ({ ok: true }),
+				authority,
+				now: () => T0,
+			});
+			expect(
+				(
+					await binding.enroll({
+						installationId: enroller.installation.installationId,
+						authorityId: 'fleet-authority',
+						endpointRef: 'ep',
+						policySources: [],
+						policyRevision: 1,
+					})
+				).ok
+			).toBe(true);
+			await enroller.connection.close();
+
+			const orphan = await startManaged(null);
+			expect(orphan.managedBinding.state()).toMatchObject({ state: 'enrolled-unavailable' });
+			const result = value(
+				await managedOf(orphan).submit(envelope(orphan, submission('nobody answers')))
+			);
+			expect(result).toMatchObject({ status: 'unavailable', code: 'runtime-unavailable' });
+			expect(ran()).toEqual([]);
+			expect(journalRuns()[0]).toMatchObject({
+				state: 'failed',
+				attempts: [{ detail: expect.stringContaining('managed-unavailable') }],
+			});
+			const identity = value(await managedOf(orphan).identity(envelope(orphan, {})));
+			expect(identity).toMatchObject({
+				status: 'ok',
+				value: { binding: 'enrolled-unavailable', authorityId: null },
+			});
+			// Unmanaged sends are not opted into anything: the agent still works standalone.
+			const turn = watch(orphan);
+			value(await orphan.turns.send('a1', 't1', { text: 'plain' }));
+			await turn.outcome();
+			expect(ran()).toHaveLength(1);
+		});
+
+		it('lists agents in bounded pages and reports the actor it verified', async () => {
+			const runtime = await startManaged();
+			const managed = managedOf(runtime);
+			const page = value(await managed.agents(envelope(runtime, { cursor: null, limit: 1 })));
+			expect(page).toMatchObject({
+				status: 'ok',
+				value: {
+					items: [{ agentId: 'a1', providerId: 'claude-code', tabIds: ['t1', 't2'] }],
+					nextCursor: null,
+				},
+			});
+			expect(
+				value(await managed.agents(envelope(runtime, { cursor: 'nope', limit: 1 })))
+			).toMatchObject({
+				status: 'denied',
+				code: 'not-found',
+			});
+			const identity = value(await managed.identity(envelope(runtime, {})));
+			expect(identity).toMatchObject({
+				status: 'ok',
+				value: {
+					actor: { kind: 'service', id: 'fleet' },
+					binding: 'standalone',
+					verification: { peer: 'in-process' },
+					installation: runtime.installation,
+				},
+			});
+			expect(
+				value(
+					await managed.negotiate({
+						supportedVersions: [MANAGED_CONTRACT_VERSION],
+						required: ['capabilities.negotiate'],
+					})
+				)
+			).toMatchObject({ outcome: 'activated' });
+			expect(
+				value(await managed.events(envelope(runtime, { cursor: null, limit: 1 })))
+			).toMatchObject({ status: 'unsupported' });
+		});
+
+		it('refuses a managed write once the runtime is closed', async () => {
+			const runtime = await startManaged();
+			const managed = managedOf(runtime);
+			await runtime.connection.close();
+			expect(errorOf(await managed.submit(envelope(runtime, submission('x')))).code).toBe(
+				'host-unavailable'
+			);
 		});
 	});
 });
