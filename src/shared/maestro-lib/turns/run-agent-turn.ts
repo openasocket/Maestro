@@ -57,11 +57,20 @@ import type { AgentOutputParser, ParsedEvent } from '../parsers/agent-output-par
 import { createOutputParser } from '../parsers/parser-factory';
 import { removeTempFiles } from '../run/pipe-spawn';
 import {
+	buildDispatchSnapshot,
+	dispatchSnapshotDigest,
+	type DispatchLease,
+	type HostAuthority,
+	type PolicySourceSet,
+} from '../managed/authority';
+import type { ManagedAuthenticatedContext } from '../managed/types';
+import {
 	runTurn,
 	UnknownProviderError,
 	type CompletedTurn,
 	type RunningTurn,
 } from '../run/run-to-completion';
+import { DispatchRefusedError, type DispatchAdmission } from '../run/start-turn';
 import { turnProcessSpecFromPlan, type TurnProcessSpec } from '../run/start-turn';
 import type { ResolveTurnOutcomeOptions } from '../streaming/turn-outcome';
 import { writeSystemPromptFile } from './args';
@@ -81,7 +90,13 @@ export type RunAgentTurnRefusal =
 	/** The provider has no output parser, so its answer could not be read. */
 	| 'no-parser'
 	/** The process could not be created. */
-	| 'launch';
+	| 'launch'
+	/** The managed authority refused the final snapshot: a policy decision. Nothing was started. */
+	| 'managed-denied'
+	/** No managed decision could be obtained (no authority, a fenced host). Nothing was started. */
+	| 'managed-unavailable'
+	/** A managed decision was asked for and the answer was lost. Nothing was started. */
+	| 'managed-unknown';
 
 export type RunAgentTurnStart =
 	| { ok: true; run: AgentTurnRun }
@@ -101,7 +116,25 @@ export interface RunAgentTurnDeps {
 	tempDir?: string;
 }
 
+/**
+ * A managed turn's authority. The turn is admitted on the snapshot of its final spec, right
+ * after every resolution (SSH wrap, Windows shell rules, the maestro-p decision) and right before
+ * `runTurn`; the lease is re-checked at the spawn, bound to the pid, and released on exit.
+ */
+export interface ManagedTurnAuthority {
+	authority: HostAuthority;
+	context: ManagedAuthenticatedContext;
+	policy: PolicySourceSet;
+	/** An opaque account reference for the snapshot; never a credential. */
+	account?: string | null;
+	resourceIds?: readonly string[];
+	/** The lease, once admitted, so the caller can journal its id and hear its end. */
+	onLease?(lease: DispatchLease): void;
+}
+
 export interface RunAgentTurnOptions {
+	/** The managed authority this turn runs under. Absent: an unmanaged turn. */
+	managed?: ManagedTurnAuthority;
 	/**
 	 * Names the turn to the outcome resolver (`<agent id>-ai-<tab id>`), which exempts a few
 	 * session shapes from its empty-answer rule by name.
@@ -451,6 +484,58 @@ export async function runAgentTurn(
 		remote: plan.target.kind === 'remote',
 	});
 
+	// Managed admission: everything about the spec is final here. The authority sees the snapshot
+	// of what will be spawned, and the lease it grants is checked again inside `startTurn` against
+	// the spec that reaches `spawn`, so a replaced spec fails there rather than running.
+	const attribution = {
+		provider: providerId,
+		model: turn.settings.model ?? null,
+		account: options.managed?.account ?? null,
+		target:
+			plan.target.kind === 'remote' && sshConfig
+				? ({ kind: 'ssh', remoteId: sshConfig.remoteId ?? '' } as const)
+				: ({ kind: 'local' } as const),
+		resourceIds: options.managed?.resourceIds ?? [],
+	};
+	let admission: { gate: DispatchAdmission; attribution: typeof attribution } | undefined;
+	if (options.managed) {
+		const managed = options.managed;
+		const admitted = await managed.authority.admit({
+			context: managed.context,
+			snapshot: buildDispatchSnapshot(spec, attribution),
+			policy: managed.policy,
+		});
+		if (admitted.state !== 'admitted')
+			return abandon(`managed-${admitted.state}`, admitted.message);
+		const lease = admitted.lease;
+		managed.onLease?.(lease);
+		admission = {
+			gate: {
+				admit(final) {
+					const verdict = managed.authority.check(lease, dispatchSnapshotDigest(final));
+					if (verdict.ok) return { ok: true };
+					return {
+						ok: false,
+						state: 'denied',
+						code: 'lease-invalid',
+						message: `The lease for this launch is ${verdict.reason}.`,
+					};
+				},
+				bound: (pid) => lease.bind(pid),
+				released: (exit) =>
+					lease.release(
+						exit.spawnError
+							? { outcome: 'spawn-failed', message: exit.spawnError.message }
+							: exit.stoppedBy
+								? { outcome: 'stopped', by: exit.stoppedBy }
+								: { outcome: 'exited', exitCode: exit.exitCode, signal: exit.signal }
+					),
+				onRevoked: (listener) => lease.onRevoked(listener),
+			},
+			attribution,
+		};
+	}
+
 	const stopGraceMs = options.stopGraceMs ?? INTERACTIVE_STOP_GRACE_MS;
 	const stream = new EventStream<ParsedEvent>();
 	let running: RunningTurn;
@@ -463,10 +548,14 @@ export async function runAgentTurn(
 				stopGraceMs,
 				signal: options.signal,
 				outcome: options.outcome,
+				...(admission ? { admission } : {}),
 			},
 			{ onEvent: (event) => stream.push(event) }
 		);
 	} catch (error) {
+		if (error instanceof DispatchRefusedError) {
+			return abandon(`managed-${error.state}`, error.message);
+		}
 		if (error instanceof UnknownProviderError) return abandon('no-parser', error.message);
 		return abandon(
 			'launch',

@@ -10,6 +10,12 @@ import type { AgentLaunchPlan } from '../launch/launch-plan';
 import { quoteCommandForCmdShell, windowsShellReason } from '../launch/windows-command';
 import { escapeCmdArgs } from '../launch/windows-shell-escape';
 import { isWindows } from '../../platformDetection';
+import {
+	buildDispatchSnapshot,
+	type DispatchAttribution,
+	type DispatchSnapshot,
+} from '../managed/authority';
+import type { ManagedDenialCode } from '../managed/types';
 
 /**
  * A sensible cap on one buffered stdout line, for a caller that wants one.
@@ -134,7 +140,46 @@ export interface TurnHandlers {
 	onStdinError?(error: Error): void;
 }
 
+/**
+ * The managed admission at the sink. `admit` is synchronous and runs with the
+ * snapshot of the FINAL spec, the instant before `spawn`: there is nothing
+ * between the two for a replacement to slip through. A refusal throws
+ * `DispatchRefusedError` out of `startTurn` before any effect; an admission
+ * is followed by `bound` (the pid), and by `released` once the process is
+ * gone. A revocation heard through `onRevoked` while bound terminates the
+ * process, and the exit says the authority stopped it, not the caller.
+ */
+export interface DispatchAdmission {
+	admit(snapshot: DispatchSnapshot): DispatchAdmissionVerdict;
+	bound?(pid: number | undefined): void;
+	released?(exit: TurnExit): void;
+	onRevoked?(listener: (reason: string) => void): () => void;
+}
+
+export type DispatchAdmissionState = 'denied' | 'unavailable' | 'unknown';
+
+export type DispatchAdmissionVerdict =
+	| { ok: true }
+	| { ok: false; state: DispatchAdmissionState; code: ManagedDenialCode; message: string };
+
+/** Thrown by `startTurn` when the admission refuses. Nothing was spawned and nothing was written. */
+export class DispatchRefusedError extends Error {
+	constructor(
+		readonly state: DispatchAdmissionState,
+		readonly code: ManagedDenialCode,
+		message: string
+	) {
+		super(message);
+		this.name = 'DispatchRefusedError';
+	}
+}
+
 export interface StartTurnOptions {
+	/**
+	 * The managed admission to ask right before the spawn, with the attribution
+	 * the spec does not carry. Absent: an unmanaged turn, admitted by nobody.
+	 */
+	admission?: { gate: DispatchAdmission; attribution: DispatchAttribution };
 	/**
 	 * The provider whose parser reads the stream. Each turn gets its OWN parser
 	 * instance: parsers keep per-stream state, and two turns of one provider
@@ -192,6 +237,8 @@ export interface TurnExit {
 	signal: NodeJS.Signals | null;
 	/** A stop was requested through the handle or the abort signal. */
 	interrupted: boolean;
+	/** Who asked for the stop, when one was: the caller (handle or signal) or the managed authority. */
+	stoppedBy?: 'caller' | 'authority';
 	/** All of stderr, or its tail when `stderrTailLimit` is set. */
 	stderrText: string;
 	/** A bounded tail of stdout. */
@@ -259,6 +306,15 @@ export function startTurn(
 	const hasStdin = spec.stdin !== undefined && spec.stdin !== '';
 	const stdinMode = hasStdin ? 'pipe' : (options.emptyStdin ?? 'pipe');
 
+	// The admission sees exactly what spawn sees: the snapshot is built from
+	// this spec, here, and nothing runs between the verdict and the spawn.
+	const gate = options.admission?.gate;
+	if (options.admission) {
+		const { attribution } = options.admission;
+		const verdict = options.admission.gate.admit(buildDispatchSnapshot(spec, attribution));
+		if (!verdict.ok) throw new DispatchRefusedError(verdict.state, verdict.code, verdict.message);
+	}
+
 	const child = spawn(spec.command, spec.args, {
 		cwd: spec.cwd,
 		env: spec.env,
@@ -282,10 +338,15 @@ export function startTurn(
 	let stderrText = '';
 	let stdinError: Error | undefined;
 	let stopWasRequested = false;
+	let stoppedBy: 'caller' | 'authority' | undefined;
 	let settled = false;
 	let stopLadder: StopHandle | undefined;
 
-	const stop = (from: StopStage, extra: { immediate?: boolean; blocking?: boolean } = {}): void => {
+	const stop = (
+		from: StopStage,
+		extra: { immediate?: boolean; blocking?: boolean; by?: 'caller' | 'authority' } = {}
+	): void => {
+		const { by = 'caller', ...rest } = extra;
 		stopLadder = stopProcess(
 			{ child },
 			{
@@ -293,10 +354,11 @@ export function startTurn(
 				graceMs: options.stopGraceMs,
 				onStopRequested: () => {
 					stopWasRequested = true;
+					stoppedBy ??= by;
 				},
 				sessionId: options.sessionId,
 				label: options.label,
-				...extra,
+				...rest,
 			}
 		);
 	};
@@ -313,23 +375,29 @@ export function startTurn(
 	const framesLines = Boolean(handlers.onLine || handlers.onEvent);
 
 	const onAbort = (): void => stop('terminate');
+	// A revoked lease stops the process; the authority owns that stop.
+	const unsubscribeRevocation = gate?.onRevoked?.(() => stop('terminate', { by: 'authority' }));
 
 	const done = new Promise<TurnExit>((resolve) => {
 		const settle = (exit: Pick<TurnExit, 'exitCode' | 'signal' | 'spawnError'>): void => {
 			if (settled) return;
 			settled = true;
 			options.signal?.removeEventListener('abort', onAbort);
+			unsubscribeRevocation?.();
 			// The ladder ends itself when the process exits. This covers a turn
 			// that settles with no exit to hear: a process that never started.
 			stopLadder?.dispose();
-			resolve({
+			const turnExit: TurnExit = {
 				...exit,
 				interrupted: stopWasRequested,
+				...(stoppedBy ? { stoppedBy } : {}),
 				stderrText,
 				stdoutText,
 				droppedOutputBytes,
 				...(stdinError ? { stdinError } : {}),
-			});
+			};
+			gate?.released?.(turnExit);
+			resolve(turnExit);
 		};
 
 		// Decode on the stream, not per chunk: a multibyte character split across
@@ -364,6 +432,7 @@ export function startTurn(
 		});
 	});
 
+	gate?.bound?.(child.pid);
 	handlers.onStarted?.(child.pid);
 
 	// A stream error with no listener is an uncaught exception, and it would
