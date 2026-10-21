@@ -38,7 +38,7 @@ It is not:
 | `windows-shell` | On Windows, the provider is installed as a `.cmd` shim that only starts through cmd.exe, and an argument cannot pass through cmd.exe intact (a prompt with a line break, `%` or `^`, for a provider that cannot read its prompt from stdin). See [Windows](#windows). |
 | `launch`        | The launch could not be planned. The message says why.                                                                                                                                                                                                                |
 
-What each provider supports in maestro-lib `0.3.0`:
+What each provider supports in maestro-lib `0.4.0`:
 
 | Agent id        | Name            | Runs a turn | Resume | Read-only |
 | --------------- | --------------- | ----------- | ------ | --------- |
@@ -69,12 +69,13 @@ npm run build:maestro-lib
 
 The build writes `dist/maestro-lib/`:
 
-| File           | What it is                                                                                               |
-| -------------- | -------------------------------------------------------------------------------------------------------- |
-| `index.js`     | The library, one CommonJS file for Node 20. Both `require` and `import` load it.                         |
-| `index.d.ts`   | Type declarations for everything the entry exports (the files they refer to are under `types/`).         |
-| `package.json` | Name `maestro-lib`, the library version, and `maestroAppVersion`, the Maestro version it was built from. |
-| `README.md`    | This page.                                                                                               |
+| File              | What it is                                                                                                                                                                    |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `index.js`        | The library, one CommonJS file for Node 20. Both `require` and `import` load it.                                                                                              |
+| `index.d.ts`      | Type declarations for everything the entry exports (the files they refer to are under `types/`).                                                                              |
+| `package.json`    | Name `maestro-lib`, the library version, `maestroAppVersion` (the Maestro version it was built from) and `maestroManagedContract` (the managed-operation contract it speaks). |
+| `provenance.json` | The sha256 of every other file in the folder, the git revision the build was cut from, whether that source was dirty, and the Node that built it.                             |
+| `README.md`       | This page.                                                                                                                                                                    |
 
 Add it to your program as a local dependency:
 
@@ -94,15 +95,23 @@ The library has its own version, separate from the Maestro app's version. The ap
 
 - `MAESTRO_LIB_VERSION`, exported from the entry, and `version` in the built `package.json` hold the same value.
 - It follows semver over what the entry exports. Below `1.0.0`, a minor release may change the surface.
-- To pin it, build from a Maestro commit or tag, keep that `dist/maestro-lib/` folder, and check the version at startup:
+- `MAESTRO_LIB_VERSION_INFO` names every version a consumer may pin, each independent of the others: `library` (the same value), `managedContract` (the managed-operation contract, see below) and `node` (the Node range). The app version is deliberately not in it: the build stamps it as `maestroAppVersion`, and the plugin SDK, plugin host API and any enterprise protocol are versioned by their own packages. None of these implies another.
+- To pin it, build from a Maestro commit or tag, keep that `dist/maestro-lib/` folder with its `provenance.json`, and check the versions at startup:
 
 ```ts
-import { MAESTRO_LIB_VERSION } from 'maestro-lib';
+import {
+	MAESTRO_LIB_VERSION,
+	MAESTRO_LIB_VERSION_INFO,
+	MANAGED_CONTRACT_VERSION,
+} from 'maestro-lib';
 
-const SUPPORTED = '0.2.';
+const SUPPORTED = '0.4.';
 
 if (!MAESTRO_LIB_VERSION.startsWith(SUPPORTED)) {
 	throw new Error(`This tool needs maestro-lib ${SUPPORTED}x, found ${MAESTRO_LIB_VERSION}`);
+}
+if (MAESTRO_LIB_VERSION_INFO.managedContract !== MANAGED_CONTRACT_VERSION) {
+	throw new Error(`Unexpected managed contract ${MAESTRO_LIB_VERSION_INFO.managedContract}`);
 }
 ```
 
@@ -443,6 +452,43 @@ Since `0.3.0` the entry also exports what lets Maestro run with no desktop. This
 - **Auto Run:** the playbook and goal engines the CLI and the runtime share. See `Plans/maestro-tui-autorun-engine.md`.
 - **Group chat and consults:** the group chat engine, its storage, and the cross-agent consult service.
 - **Client and discovery:** the `MaestroClient` interface with its WebSocket implementation, and the discovery file (`cli-server.json`) a client finds a running host by. See `Plans/maestro-tui-client-api.md`.
+
+## Managed operations
+
+Since `0.4.0` the entry exports the generic contracts a management peer (an enterprise endpoint, a fleet controller, a test harness) uses to drive a Maestro host: `ManagedOperationContext` (who asks, from which installation, runtime and process epoch, under which delegation reference, for which run, attempt and idempotency key), `ManagedCapabilityOffer` with its all-or-nothing `ManagedNegotiationOutcome`, `ManagedOperationResult` (with `unknown` as a real answer), and the run, receipt and event records. They are Maestro's own, serializable and product-neutral; an enterprise product's wire types stay in the package it ships. A context is attribution, not authority: a host verifies it against the peer it arrived from and binds authority at the sink, never from the context's fields. `managedContextProblems()` checks the shape:
+
+```ts
+import {
+	managedContextProblems,
+	MANAGED_CONTRACT_VERSION,
+	type ManagedOperationContext,
+} from 'maestro-lib';
+
+const context: ManagedOperationContext = {
+	contractVersion: MANAGED_CONTRACT_VERSION,
+	installation: { installationId: 'inst-1', runtimeId: 'rt-1', processEpoch: 'epoch-1' },
+	origin: 'headless',
+	actor: { kind: 'service', id: 'fleet-controller' },
+	delegation: { chain: [], grantRef: null },
+	identity: {
+		requestId: 'req-1',
+		idempotencyKey: 'submit-1',
+		attemptId: 'attempt-1',
+		runId: null,
+		rootRunId: null,
+		parentRunId: null,
+	},
+	policyRevision: null,
+	workflow: null,
+	traceId: 'trace-1',
+	requestedCapabilities: ['runs.submit'],
+};
+
+const problems = managedContextProblems(context);
+if (problems.length > 0) throw new Error(problems.join('; '));
+```
+
+The client interface carries the extension as `MaestroClient.managed`, optional: a host without it is `unsupported`, never "unmanaged, so allowed".
 
 ## See also
 
