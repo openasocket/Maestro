@@ -295,6 +295,58 @@ describe('local endpoint client', () => {
 		expect(outcome).toEqual({ status: 'denied', reason: 'unsupported_capability' });
 	});
 
+	it('a peer the daemon cannot authenticate is denied on every envelope and refused a registration', async () => {
+		const fake = await endpoint({ peerAuthenticated: false });
+		const port = client(fake);
+		expect(await port.attach(ATTACH)).toEqual({ status: 'denied', reason: 'unauthenticated' });
+		expect(
+			await port.compatibility({ protocol: 1, components: [], requiredCapabilities: [] })
+		).toEqual({
+			status: 'denied',
+			reason: 'unauthenticated',
+		});
+		expect(await port.registration.challenge({ runtimeId: 'r', processEpoch: 'e' })).toEqual({
+			status: 'denied',
+			reason: 'unavailable',
+		});
+		expect(port.state()).toMatchObject({ attached: false, registration: 'none' });
+	});
+
+	it('a second challenge on the same connection is a replay the daemon refuses, and the first is gone', async () => {
+		const fake = await endpoint({ registrationRequired: true });
+		const port = client(fake);
+		expect((await port.registration.challenge({ runtimeId: 'r', processEpoch: 'e' })).status).toBe(
+			'ok'
+		);
+		expect(await port.registration.challenge({ runtimeId: 'r', processEpoch: 'e' })).toEqual({
+			status: 'denied',
+			reason: 'unavailable',
+		});
+		expect(port.state().registration).toBe('none');
+		expect(await port.registration.redeem()).toMatchObject({
+			status: 'unavailable',
+			reason: 'no-challenge',
+		});
+		expect(fake.registered()).toBe(false);
+	});
+
+	it('a daemon that speaks another schema version refuses every envelope as unsupported_version', async () => {
+		const fake = await endpoint({ schemaVersion: 2 });
+		const port = client(fake);
+		expect(
+			await port.compatibility({
+				protocol: 1,
+				components: ATTACH.components,
+				requiredCapabilities: [],
+			})
+		).toEqual({
+			status: 'denied',
+			reason: 'unsupported_version',
+		});
+		expect(await port.attach(ATTACH)).toEqual({ status: 'denied', reason: 'unsupported_version' });
+		expect(port.state().attached).toBe(false);
+	});
+
 	it('answers closed after close() and never dials again', async () => {
 		const fake = await endpoint();
 		const port = client(fake);

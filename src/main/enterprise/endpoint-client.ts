@@ -350,7 +350,11 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 						LOCAL_ENDPOINT_REGISTRATION_CHALLENGE_PATH,
 						JSON.stringify({ runtimeId: input.runtimeId, processEpoch: input.processEpoch })
 					);
-					if (outcome.status !== 'ok') return outcome;
+					if (outcome.status !== 'ok') {
+						// The daemon drops any handshake on this socket when a challenge fails.
+						registration = registration === 'challenged' ? 'none' : registration;
+						return outcome;
+					}
 					const problems = endpointRegistrationApprovalProblems(outcome.payload);
 					if (problems.length > 0) return unavailable('malformed', problems.join('; '));
 					registration = 'challenged';

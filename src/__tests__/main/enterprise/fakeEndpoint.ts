@@ -42,6 +42,8 @@ export interface FakeEndpointOptions {
 	maxResponseBytes?: number;
 	/** The daemon clock, for the approval expiry. Default: the real one. */
 	now?: () => number;
+	/** A daemon that speaks only another schema version refuses every envelope. */
+	schemaVersion?: number;
 }
 
 export interface FakeEndpoint {
@@ -202,7 +204,7 @@ export async function startFakeEndpoint(options: FakeEndpointOptions = {}): Prom
 				return;
 			}
 			const env = raw as Record<string, unknown>;
-			if ('schemaVersion' in env && env.schemaVersion !== 1) {
+			if ('schemaVersion' in env && env.schemaVersion !== (live.schemaVersion ?? 1)) {
 				reply(400, deny('unsupported_version'), true);
 				return;
 			}
