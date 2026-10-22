@@ -25,6 +25,8 @@ import {
 import type { SignatureStatus } from '../../../shared/plugins/signing';
 import type { PermissionGrant } from '../../../shared/plugins/permissions';
 import { isPermitted, parseAllowlistScope } from '../../../shared/plugins/permissions';
+import { PermissionBroker } from '../../../main/plugins/permission-broker';
+import { createPluginPolicySource } from '../../../main/enterprise/plugin-policy';
 
 let tmpDir: string;
 let ledgerPath: string;
@@ -553,5 +555,142 @@ describe('readConsent (MRC-09-01)', () => {
 			ledgerPath,
 		});
 		expect(reread.readConsent('p')?.epoch).toBe(2);
+	});
+});
+
+describe('the sealed ledger under a managed ceiling (MRC-09-06)', () => {
+	const identity = ident('h1', 'trusted', 'k1');
+	const grants: PermissionGrant[] = [
+		{ capability: 'fs:read', scope: '/data', grantedAt: 1 },
+		{ capability: 'fs:write', scope: '/data', grantedAt: 1 },
+		{ capability: 'agents:dispatch', scope: 'a', grantedAt: 1 },
+	];
+	/** A ceiling naming "p" as minted, narrower than consent on fs:write and agents, wider on shell:openExternal. */
+	const document = (entry: Record<string, unknown> = {}) => ({
+		policyRevision: 3,
+		plugins: [
+			{
+				pluginId: 'p',
+				contentHash: 'h1',
+				signerKey: 'k1',
+				capabilities: [
+					{ capability: 'fs:read', scopes: ['/data'] },
+					{ capability: 'fs:write', scopes: ['/data/out'] },
+					{ capability: 'agents:dispatch', scopes: ['a'] },
+					{ capability: 'shell:openExternal' },
+				],
+				...entry,
+			},
+		],
+	});
+
+	/** The desktop's composition: the ledger is the grant and consent source, the policy source the standing. */
+	function managedHost() {
+		const holder = { value: null as Anchor | null };
+		const store = makeStore(fakeSeal(), fakeAnchor(holder));
+		store.mint('p', grants, identity);
+		const state = { enrolled: true, applied: 3 as number | null };
+		const policy = createPluginPolicySource({
+			enrolled: () => state.enrolled,
+			policy: () => (state.applied === null ? null : { appliedRevision: state.applied }),
+		});
+		const broker = new PermissionBroker({
+			getGrants: (pluginId) => store.readGrants(pluginId),
+			managed: () => policy.standing(),
+			getConsent: (pluginId) => store.readConsent(pluginId),
+		});
+		const read = () => broker.authorize('p', 'fs.read', { path: '/data/a.txt' });
+		return { holder, store, policy, state, broker, read };
+	}
+
+	it('a central revoke denies and rewrites nothing: the sealed bytes, the anchor, the epoch and a fresh re-read are unchanged', () => {
+		const { holder, store, policy, read } = managedHost();
+		policy.install(document());
+		expect(read()).toMatchObject({
+			allowed: true,
+			managed: { outcome: 'within-ceiling', contentHash: 'h1', signerKey: 'k1', consentEpoch: 1 },
+		});
+		const bytes = fs.readFileSync(ledgerPath);
+		const anchor = { ...holder.value };
+		policy.install(document({ revoked: true }));
+		expect(read()).toMatchObject({
+			allowed: false,
+			reason: /"p" is revoked by the managed plugin ceiling of policy revision 3/,
+			managed: { outcome: 'revoked', consentEpoch: 1 },
+		});
+		expect(fs.readFileSync(ledgerPath).equals(bytes)).toBe(true);
+		expect(holder.value).toEqual(anchor);
+		expect(store.isEnabled('p')).toBe(true);
+		expect(store.isTombstoned('p')).toBe(false);
+		expect(store.authorizedIds()).toEqual(['p']);
+		expect(store.readConsent('p')).toMatchObject({ epoch: 1, identity, caps: grants });
+		// A fresh store over the same file and anchor reads the same consent: nothing the ceiling did reached disk.
+		expect(makeStore(fakeSeal(), fakeAnchor(holder)).readConsent('p')?.epoch).toBe(1);
+		// The revoke withdrawn: the consent that was never touched runs again.
+		policy.install(document());
+		expect(read().allowed).toBe(true);
+	});
+
+	it('the ceiling narrows consent and never mints it; a local revoke is authoritative under it and tombstones', () => {
+		const { store, policy, broker, read } = managedHost();
+		policy.install(document());
+		// Consented /data, ceiling /data/out: the wider write is outside the ceiling, the narrower one within.
+		expect(broker.authorize('p', 'fs.write', { path: '/data/other.txt' })).toMatchObject({
+			allowed: false,
+			reason: /fs:write \(\/data\/other.txt\) is outside the managed plugin ceiling/,
+			managed: { outcome: 'outside-ceiling' },
+		});
+		expect(broker.authorize('p', 'fs.write', { path: '/data/out/x.txt' }).allowed).toBe(true);
+		// The ceiling admits shell:openExternal; the ledger holds no such grant: denied with no receipt.
+		const minted = broker.authorize('p', 'shell.openExternal', { url: 'https://x.test' });
+		expect(minted).toEqual({
+			allowed: false,
+			capability: 'shell:openExternal',
+			target: 'x.test',
+			reason: 'permission denied: shell:openExternal (x.test)',
+		});
+		expect(store.readGrants('p').some((g) => g.capability === 'shell:openExternal')).toBe(false);
+		// The user revokes locally: the ledger tombstones, and a ceiling naming the plugin changes nothing.
+		store.revoke('p');
+		expect(store.isTombstoned('p')).toBe(true);
+		expect(read()).toEqual({
+			allowed: false,
+			capability: 'fs:read',
+			target: '/data/a.txt',
+			reason: 'permission denied: fs:read (/data/a.txt)',
+		});
+		policy.install(document({ capabilities: [{ capability: 'fs:read' }] }));
+		expect(read().allowed).toBe(false);
+		expect(read().managed).toBeUndefined();
+	});
+
+	it('a plugin change re-minted under a new identity mismatches the ceiling until it names the digest, and a scope edit moves the epoch the receipt carries', () => {
+		const { store, policy, broker } = managedHost();
+		policy.install(document());
+		const dispatch = (agentId: string) =>
+			broker.authorize('p', 'agents.dispatch', { agentId, prompt: 'summarize' });
+		expect(dispatch('a')).toMatchObject({ allowed: true, managed: { consentEpoch: 1 } });
+		// The plugin updates and the user re-consents to the new content under the same publisher.
+		store.mint('p', grants, ident('h2', 'trusted', 'k1'));
+		expect(dispatch('a')).toMatchObject({
+			allowed: false,
+			reason: /names a different content digest, publisher or signature status for "p"/,
+			managed: {
+				outcome: 'identity-mismatch',
+				contentHash: 'h2',
+				signerKey: 'k1',
+				consentEpoch: 2,
+			},
+		});
+		policy.install(document({ contentHash: 'h2' }));
+		expect(dispatch('a')).toMatchObject({ allowed: true, managed: { consentEpoch: 2 } });
+		// The user widens the allowlist in the ledger: the epoch moves with it, and the ceiling still admits only "a".
+		expect(store.setAllowlistScope('p', 'agents:dispatch', ['a', 'b'])).toBe(true);
+		expect(dispatch('a')).toMatchObject({ allowed: true, managed: { consentEpoch: 3 } });
+		expect(dispatch('b')).toMatchObject({
+			allowed: false,
+			managed: { outcome: 'outside-ceiling', consentEpoch: 3 },
+		});
+		expect(isPermitted(store.readGrants('p'), 'agents:dispatch', 'b')).toBe(true);
 	});
 });

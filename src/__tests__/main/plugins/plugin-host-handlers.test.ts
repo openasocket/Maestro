@@ -29,13 +29,21 @@ import {
 	delegationContextProblems,
 } from '../../../shared/maestro-lib/managed/delegation';
 import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
-import type { PluginConsentView } from '../../../main/plugins/authorization-ledger';
+import {
+	AuthorizationStore,
+	type Anchor,
+	type AnchorStore,
+	type PluginConsentView,
+	type SealProvider,
+} from '../../../main/plugins/authorization-ledger';
+import { createPluginPolicySource } from '../../../main/enterprise/plugin-policy';
 import { ActionGuard } from '../../../main/plugins/action-guard';
 import { PluginKvStore } from '../../../main/plugins/plugin-kv-store';
 import { PluginAgentSessionBindings } from '../../../main/plugins/plugin-agent-session-bindings';
 import { PluginEventBusImpl } from '../../../main/plugins/plugin-event-bus';
 import {
 	PermissionBroker,
+	type BrokerDecision,
 	type ManagedPluginStanding,
 	type PluginPolicyCeiling,
 } from '../../../main/plugins/permission-broker';
@@ -3592,6 +3600,316 @@ describe('managed act bindings (MRC-09-02)', () => {
 					receiptStillHeld(binding, { allowed: true, managed: { ...receipt, ...moved } })
 				).toBe(false);
 			}
+		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Managed effects at the real sinks (MRC-09-06): the desktop's composition of
+// the sealed ledger, the plugin policy source and the broker (the one in
+// src/main/index.ts), driven through the fs, net.fetch, process.spawn and
+// net:connect handlers. A refusal is a refusal before the effect: zero bytes
+// written, zero fetches, zero spawns, zero frames. A standalone host runs on
+// the ledger alone, byte-for-byte as before, whatever ceiling is installed.
+// ---------------------------------------------------------------------------
+
+describe('managed effects at the real sinks (MRC-09-06)', () => {
+	/** An in-memory seal and anchor: the ledger's custody is not what is under test here. */
+	const seal: SealProvider = {
+		available: () => true,
+		seal: (plaintext) => Buffer.from(plaintext, 'utf-8'),
+		unseal: (blob) => blob.toString('utf-8'),
+	};
+	const anchorStore = (holder: { value: Anchor | null }): AnchorStore => ({
+		available: () => true,
+		read: () => holder.value,
+		write: (anchor) => {
+			holder.value = { ...anchor };
+		},
+		clear: () => {
+			holder.value = null;
+		},
+	});
+	const v1 = { contentHash: 'sha256:v1', signatureStatus: 'trusted' as const, signerKey: 'pub-1' };
+	const echoEntry = { name: 'echo-tool', binaryPath: path.join(os.tmpdir(), 'echo-tool.exe') };
+	const scratch: string[] = [];
+	/** A directory as the fs handlers see it: they re-authorize the symlink-resolved real path. */
+	const realTmp = (prefix: string): string => {
+		const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+		scratch.push(dir);
+		return dir;
+	};
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		for (const dir of scratch.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+	});
+
+	/** The consent the user minted: broader than every ceiling below (two directories, two hosts, two gateways). */
+	const consented = (work: string, elsewhere: string): PermissionGrant[] => [
+		{ capability: 'fs:read', scope: work, grantedAt: 1 },
+		{ capability: 'fs:write', scope: work, grantedAt: 1 },
+		{ capability: 'fs:write', scope: elsewhere, grantedAt: 1 },
+		{ capability: 'net:fetch', scope: 'example.com', grantedAt: 1 },
+		{ capability: 'net:fetch', scope: 'other.test', grantedAt: 1 },
+		{ capability: 'net:connect', scope: 'gateway.example', grantedAt: 1 },
+		{ capability: 'net:connect', scope: 'other.gateway.test', grantedAt: 1 },
+		{ capability: 'process:spawn', scope: 'echo-tool', grantedAt: 1 },
+	];
+	/** A ceiling document naming "p" as minted: the work directory, example.com, one gateway, the echo tool, and a read the user never granted. */
+	const ceilingFor = (
+		work: string,
+		entry: Record<string, unknown> = {},
+		over: Record<string, unknown> = {}
+	) => ({
+		policyRevision: 3,
+		plugins: [
+			{
+				pluginId: 'p',
+				contentHash: 'sha256:v1',
+				signerKey: 'pub-1',
+				capabilities: [
+					{ capability: 'fs:read', scopes: [work] },
+					{ capability: 'fs:write', scopes: [work] },
+					{ capability: 'net:fetch', scopes: ['example.com'] },
+					{ capability: 'net:connect', scopes: ['gateway.example'] },
+					{ capability: 'process:spawn', scopes: ['echo-tool'] },
+					{ capability: 'sessions:read' },
+				],
+				...entry,
+			},
+		],
+		...over,
+	});
+
+	/** The desktop's composition: the ledger is the grant and consent source, the policy source the standing, each read live per call. */
+	function host(enrolled: boolean) {
+		const work = realTmp('maestro-sink-work-');
+		const elsewhere = realTmp('maestro-sink-elsewhere-');
+		const ledgerPath = path.join(kvBase, 'auth-ledger.bin');
+		const store = new AuthorizationStore({
+			seal,
+			anchor: anchorStore({ value: null }),
+			ledgerPath,
+		});
+		store.mint('p', consented(work, elsewhere), v1);
+		const state = { enrolled, applied: 3 as number | null };
+		const policy = createPluginPolicySource({
+			enrolled: () => state.enrolled,
+			policy: () => (state.applied === null ? null : { appliedRevision: state.applied }),
+		});
+		const decisions: BrokerDecision[] = [];
+		const broker = new PermissionBroker({
+			getGrants: (pluginId) => store.readGrants(pluginId),
+			managed: () => policy.standing(),
+			getConsent: (pluginId) => store.readConsent(pluginId),
+			onDecision: (_pluginId, _method, decision) => decisions.push(decision),
+		});
+		const fetchMock = vi.fn(async () => ({
+			status: 200,
+			statusText: 'OK',
+			body: null,
+			headers: { forEach: () => {} },
+		}));
+		vi.stubGlobal('fetch', fetchMock);
+		const spawn = vi.fn(async (...args: unknown[]) => args.length);
+		const netConnect = vi.fn(async () => ({ socketId: 'sock_1' }));
+		const netSend = vi.fn(async () => ({ ok: true }) as const);
+		const netClose = vi.fn(async () => ({ ok: true }) as const);
+		const h = buildHostCallHandlers(
+			makeDeps({
+				broker,
+				isPluginTrusted: () => true,
+				egressGuard: {
+					assertUrlAllowed: async () => {},
+					lookup: (() => {}) as never,
+					dispatcher: {},
+				},
+				spawn,
+				resolveSpawnBinary: (name) => (name === 'echo-tool' ? echoEntry : null),
+				netConnect,
+				netSend,
+				netClose,
+			})
+		);
+		const connect = async (url: string): Promise<string> =>
+			((await h['net.connect']!('p', { url })) as { socketId: string }).socketId;
+		const lastDecision = () => decisions[decisions.length - 1];
+		return {
+			h,
+			store,
+			policy,
+			state,
+			work,
+			elsewhere,
+			ledgerPath,
+			fetchMock,
+			spawn,
+			netConnect,
+			netSend,
+			decisions,
+			connect,
+			lastDecision,
+		};
+	}
+
+	it('standalone: the ledger alone decides, every sink runs and no decision carries a receipt, whatever ceiling is installed', async () => {
+		const { h, policy, work, fetchMock, spawn, netConnect, netSend, decisions, connect } =
+			host(false);
+		// A ceiling admitting "p" nothing at all is installed, but the host is not enrolled: inert.
+		expect(policy.install(ceilingFor(work, { capabilities: [] }))).toMatchObject({
+			installed: true,
+		});
+		const file = path.join(work, 'out.txt');
+		await expect(h['fs.write']!('p', { path: file, contents: 'standalone' })).resolves.toEqual({
+			ok: true,
+		});
+		await expect(h['fs.read']!('p', { path: file })).resolves.toBe('standalone');
+		await h['net.fetch']!('p', { url: 'https://example.com/data' });
+		await expect(h['process.spawn']!('p', { command: 'echo-tool' })).resolves.toBe(2);
+		const socketId = await connect('wss://gateway.example/socket');
+		await h['net.send']!('p', { socketId, data: 'hello' });
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(spawn.mock.calls[0]).toHaveLength(2);
+		expect(netConnect).toHaveBeenCalledTimes(1);
+		expect(netSend).toHaveBeenCalledWith('p', socketId, 'hello');
+		expect(decisions.length).toBeGreaterThanOrEqual(6);
+		expect(decisions.every((d) => d.allowed && d.managed === undefined)).toBe(true);
+	});
+
+	it('live grant intersection: a consented target outside the ceiling is refused before the effect, and the ceiling mints nothing', async () => {
+		const { h, store, policy, work, elsewhere, fetchMock, netConnect, lastDecision } = host(true);
+		policy.install(ceilingFor(work));
+		// Inside both consent and the ceiling: the effect runs and the decision carries the receipt.
+		const inside = path.join(work, 'in.txt');
+		await expect(h['fs.write']!('p', { path: inside, contents: 'in' })).resolves.toEqual({
+			ok: true,
+		});
+		expect(lastDecision().managed).toEqual({
+			policyRevision: 3,
+			outcome: 'within-ceiling',
+			contentHash: 'sha256:v1',
+			signerKey: 'pub-1',
+			consentEpoch: 1,
+		});
+		await h['net.fetch']!('p', { url: 'https://example.com/data' });
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		await expect(h['process.spawn']!('p', { command: 'echo-tool' })).resolves.toBe(3);
+		// Consented, outside the ceiling: refused by name, nothing written, fetched or opened.
+		const outside = path.join(elsewhere, 'out.txt');
+		await expect(h['fs.write']!('p', { path: outside, contents: 'out' })).rejects.toThrow(
+			/fs:write is outside the managed plugin ceiling for "p" \(policy revision 3\)/
+		);
+		expect(fs.existsSync(outside)).toBe(false);
+		expect(lastDecision().managed?.outcome).toBe('outside-ceiling');
+		await expect(h['net.fetch']!('p', { url: 'https://other.test/data' })).rejects.toThrow(
+			/net:fetch is outside the managed plugin ceiling/
+		);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		await expect(
+			h['net.connect']!('p', { url: 'wss://other.gateway.test/socket' })
+		).rejects.toThrow(/net:connect is outside the managed plugin ceiling/);
+		expect(netConnect).not.toHaveBeenCalled();
+		// The ceiling admits sessions:read; the user never granted it: denied with no receipt (nothing is minted).
+		await expect(h['sessions.list']!('p', {})).rejects.toThrow(/permission denied: sessions:read/);
+		expect(lastDecision().managed).toBeUndefined();
+		// A local revoke stays authoritative under the ceiling: the consent is gone the same instant.
+		store.revoke('p');
+		await expect(h['fs.write']!('p', { path: inside, contents: 'late' })).rejects.toThrow(
+			/permission denied: fs:write/
+		);
+		expect(lastDecision().managed).toBeUndefined();
+		expect(fs.readFileSync(inside, 'utf-8')).toBe('in');
+		expect(store.readConsent('p')).toBeNull();
+	});
+
+	it('plugin change: a re-minted identity the ceiling does not name refuses every sink until a ceiling names the new digest', async () => {
+		const { h, store, policy, work, elsewhere, fetchMock, spawn, lastDecision } = host(true);
+		policy.install(ceilingFor(work));
+		const file = path.join(work, 'v.txt');
+		await expect(h['fs.write']!('p', { path: file, contents: 'v1' })).resolves.toEqual({
+			ok: true,
+		});
+		// The plugin updates: the user re-consents to the new content under the same publisher.
+		store.mint('p', consented(work, elsewhere), { ...v1, contentHash: 'sha256:v2' });
+		for (const call of [
+			() => h['fs.write']!('p', { path: file, contents: 'v2' }),
+			() => h['net.fetch']!('p', { url: 'https://example.com/data' }),
+			() => h['process.spawn']!('p', { command: 'echo-tool' }),
+		]) {
+			await expect(call()).rejects.toThrow(
+				/names a different content digest, publisher or signature status for "p"/
+			);
+			expect(lastDecision().managed).toMatchObject({
+				outcome: 'identity-mismatch',
+				contentHash: 'sha256:v2',
+				consentEpoch: 2,
+			});
+		}
+		expect(fs.readFileSync(file, 'utf-8')).toBe('v1');
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(spawn).not.toHaveBeenCalled();
+		// A ceiling issued for the new digest readmits it; one naming another publisher does not.
+		policy.install(ceilingFor(work, { contentHash: 'sha256:v2' }));
+		await expect(h['fs.write']!('p', { path: file, contents: 'v2' })).resolves.toEqual({
+			ok: true,
+		});
+		policy.install(ceilingFor(work, { contentHash: 'sha256:v2', signerKey: 'pub-2' }));
+		await expect(h['process.spawn']!('p', { command: 'echo-tool' })).rejects.toThrow(
+			/different content digest, publisher/
+		);
+		expect(spawn).not.toHaveBeenCalled();
+	});
+
+	it('policy revoke: a central revoke refuses every sink by name, ends a kept socket at its next frame, and rewrites nothing in the ledger', async () => {
+		const managed = host(true);
+		const { h, store, policy, state, work, ledgerPath, fetchMock, spawn, netSend } = managed;
+		const { connect, lastDecision } = managed;
+		policy.install(ceilingFor(work));
+		const socketId = await connect('wss://gateway.example/socket');
+		await h['net.send']!('p', { socketId, data: 'first' });
+		const bytes = fs.readFileSync(ledgerPath);
+		const file = path.join(work, 'r.txt');
+		const refusedEverywhere = async (pattern: RegExp, outcome: string) => {
+			for (const call of [
+				() => h['fs.write']!('p', { path: file, contents: 'x' }),
+				() => h['net.fetch']!('p', { url: 'https://example.com/data' }),
+				() => h['process.spawn']!('p', { command: 'echo-tool' }),
+				() => h['net.send']!('p', { socketId, data: 'second' }),
+			]) {
+				await expect(call()).rejects.toThrow(pattern);
+				expect(lastDecision().managed?.outcome).toBe(outcome);
+			}
+		};
+		// The plugin revoked by the ceiling, then its publisher revoked outright.
+		policy.install(ceilingFor(work, { revoked: true }));
+		await refusedEverywhere(
+			/"p" is revoked by the managed plugin ceiling of policy revision 3/,
+			'revoked'
+		);
+		policy.install(ceilingFor(work, {}, { revokedPublishers: ['pub-1'] }));
+		await refusedEverywhere(/is revoked by the managed plugin ceiling/, 'revoked');
+		// The ceiling withdrawn, then the host moved to a revision the ceiling was not issued for.
+		policy.clear();
+		await refusedEverywhere(
+			/ceiling is unavailable \(no plugin ceiling is installed for policy revision 3\)/,
+			'unavailable'
+		);
+		policy.install(ceilingFor(work));
+		state.applied = 4;
+		await refusedEverywhere(/revision 3; this host is under revision 4/, 'unavailable');
+		// Zero effects past the first frame, and the sealed ledger exactly as the user left it.
+		expect(fs.existsSync(file)).toBe(false);
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(spawn).not.toHaveBeenCalled();
+		expect(netSend).toHaveBeenCalledTimes(1);
+		expect(fs.readFileSync(ledgerPath).equals(bytes)).toBe(true);
+		expect(store.isEnabled('p')).toBe(true);
+		expect(store.isTombstoned('p')).toBe(false);
+		expect(store.readConsent('p')).toMatchObject({ epoch: 1, identity: v1 });
+		// Back under a usable ceiling the same consent runs again: nothing was rewritten.
+		state.applied = 3;
+		await expect(h['fs.write']!('p', { path: file, contents: 'again' })).resolves.toEqual({
+			ok: true,
 		});
 	});
 });
