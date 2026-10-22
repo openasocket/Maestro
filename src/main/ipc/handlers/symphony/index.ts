@@ -6,6 +6,7 @@ import { registerContributionFinishHandlers } from './contributionFinish';
 import { registerSyncHandlers } from './sync';
 import {
 	logHandlersRegistered,
+	setRepositoryAuthority,
 	setSymphonyEnabledCheck,
 	SymphonyHandlerDependencies,
 } from './shared';
@@ -36,6 +37,8 @@ export type { SymphonyHandlerDependencies } from './shared';
 export function registerSymphonyHandlers(deps: SymphonyHandlerDependencies): void {
 	// Every channel below refuses with `SymphonyDisabled` while the flag is off.
 	setSymphonyEnabledCheck(() => isEncoreFeatureEnabled(deps.settingsStore, 'symphony'));
+	// The repository ceiling every clone, push, draft, finalize and cancel below is held to.
+	setRepositoryAuthority(deps.getRepositoryAuthority ?? (() => null));
 	registerDiscoveryHandlers(deps);
 	registerDashboardHandlers(deps);
 	registerLifecycleHandlers(deps);

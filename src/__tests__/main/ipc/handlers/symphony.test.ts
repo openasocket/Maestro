@@ -69,6 +69,11 @@ global.fetch = mockFetch;
 // Import mocked functions
 import { execFileNoThrow } from '../../../../main/utils/execFile';
 import { ensureForkSetup } from '../../../../main/utils/symphony-fork';
+import { runAsTransport } from '../../../../main/web-server/auth/transport-actor';
+import type {
+	RepositoryEffectDecision,
+	RepositoryEffectRequest,
+} from '../../../../main/enterprise/repository-policy';
 
 describe('Symphony IPC handlers', () => {
 	let handlers: Map<string, Function>;
@@ -6478,6 +6483,385 @@ This is a Symphony task document.
 			// Issue 2 should have no labels (runmaestro.ai filtered out)
 			const availableIssue = result.issues.find((i: any) => i.number === 2);
 			expect(availableIssue.labels).toHaveLength(0);
+		});
+	});
+	// ============================================================================
+	// Repository ceiling (MRC-09-05B)
+	// ============================================================================
+
+	describe('repository ceiling (MRC-09-05B)', () => {
+		type Request = RepositoryEffectRequest;
+		const ok = { stdout: '', stderr: '', exitCode: 0 };
+		const ORIGIN = 'https://github.com/owner/repo.git';
+
+		/** A ceiling double: refuses the named effects by code, admits the rest with a receipt. */
+		function authority(refuse: Partial<Record<Request['effect'], string>> = {}) {
+			const requests: Request[] = [];
+			return {
+				requests,
+				authorize(request: Request): RepositoryEffectDecision {
+					requests.push(request);
+					const receipt = {
+						policyRevision: 7,
+						surface: request.surface,
+						actor: 'ada',
+						effect: request.effect,
+						repository: request.repository,
+						remote: request.remote,
+						outcome: 'within-ceiling' as const,
+					};
+					const code = refuse[request.effect];
+					if (!code) return { allowed: true, managed: receipt };
+					return {
+						allowed: false,
+						code: code as never,
+						message: `no ${request.effect} for ada`,
+						managed: { ...receipt, outcome: code as never },
+					};
+				},
+			};
+		}
+
+		/** Every git and gh call succeeds; origin points at the repository. */
+		const allGitSucceeds = () => {
+			vi.mocked(execFileNoThrow).mockImplementation(async (cmd, args) => {
+				if (cmd === 'gh' && args?.[0] === 'auth') return { ...ok, stdout: 'Logged in' };
+				if (cmd === 'git' && args?.[0] === 'remote') return { ...ok, stdout: ORIGIN };
+				if (cmd === 'git' && args?.[0] === 'symbolic-ref')
+					return { ...ok, stdout: 'refs/remotes/origin/main' };
+				if (cmd === 'git' && args?.[0] === 'rev-parse')
+					return { ...ok, stdout: 'symphony/issue-42-abc' };
+				if (cmd === 'gh' && args?.[0] === 'pr' && args?.[1] === 'create')
+					return { ...ok, stdout: 'https://github.com/owner/repo/pull/1' };
+				return ok;
+			});
+		};
+		const calls = (cmd: string, sub: string) =>
+			vi
+				.mocked(execFileNoThrow)
+				.mock.calls.filter((c) => c[0] === cmd && (c[1] as string[])?.[0] === sub);
+		const effects = (auth: ReturnType<typeof authority>) => auth.requests.map((r) => r.effect);
+
+		/** Re-register with a ceiling in place; the default registration in beforeEach has none. */
+		const registerManaged = (auth: ReturnType<typeof authority>) => {
+			handlers.clear();
+			registerSymphonyHandlers({ ...mockDeps, getRepositoryAuthority: () => auth });
+		};
+
+		const startParams = {
+			repoSlug: 'owner/repo',
+			repoUrl: 'https://github.com/owner/repo',
+			repoName: 'repo',
+			issueNumber: 42,
+			issueTitle: 'Test Issue',
+			documentPaths: [],
+			agentType: 'claude-code',
+			sessionId: 'session-123',
+		};
+		const startContributionParams = {
+			contributionId: 'contrib_managed',
+			sessionId: 'session-123',
+			repoSlug: 'owner/repo',
+			issueNumber: 42,
+			issueTitle: 'Test Issue',
+			localPath: '/tmp/symphony/repos/repo-contrib_managed',
+			documentPaths: [],
+		};
+		const stateWithContribution = () =>
+			JSON.stringify({
+				active: [
+					{
+						id: 'contrib_managed',
+						repoSlug: 'owner/repo',
+						repoName: 'repo',
+						issueNumber: 42,
+						issueTitle: 'Test Issue',
+						localPath: '/tmp/symphony/repos/repo-contrib_managed',
+						branchName: 'symphony/issue-42-abc',
+						draftPrNumber: 99,
+						draftPrUrl: 'https://github.com/owner/repo/pull/99',
+						startedAt: '2024-01-01T00:00:00Z',
+						status: 'running',
+						progress: {
+							totalDocuments: 1,
+							completedDocuments: 1,
+							totalTasks: 1,
+							completedTasks: 1,
+						},
+						tokenUsage: { inputTokens: 1, outputTokens: 1, estimatedCost: 0 },
+						timeSpent: 1,
+						sessionId: 'session-123',
+						agentType: 'claude-code',
+					},
+				],
+				history: [],
+				stats: {
+					totalContributions: 0,
+					totalDocumentsProcessed: 0,
+					totalTasksCompleted: 0,
+					totalTokensUsed: 0,
+					totalTimeSpent: 0,
+					estimatedCostDonated: 0,
+					repositoriesContributed: [],
+					currentStreak: 0,
+					longestStreak: 0,
+				},
+			});
+		const lastStateWrite = () => {
+			const writes = vi
+				.mocked(fs.writeFile)
+				.mock.calls.filter((call) => (call[0] as string).includes('state.json'));
+			return writes.length ? JSON.parse(writes[writes.length - 1][1] as string) : null;
+		};
+
+		it('standalone: with no reader nothing is held, origin is never read and the fork keeps two arguments', async () => {
+			vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+			allGitSucceeds();
+
+			const result = await handlers.get('symphony:start')!({} as any, startParams);
+
+			expect(result.error).toBeUndefined();
+			expect(result.contributionId).toBeDefined();
+			expect(calls('git', 'remote')).toHaveLength(0);
+			expect(ensureForkSetup).toHaveBeenCalledWith(expect.stringContaining('repo'), 'owner/repo');
+		});
+
+		it('symphony:start holds clone, branch, push and pull-request each before its effect, as the operator', async () => {
+			vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+			allGitSucceeds();
+			const auth = authority();
+			registerManaged(auth);
+
+			const result = await handlers.get('symphony:start')!({} as any, startParams);
+
+			expect(result.error).toBeUndefined();
+			expect(effects(auth)).toEqual(['clone', 'branch', 'push', 'pull-request']);
+			expect(auth.requests[0]).toEqual({
+				surface: 'symphony',
+				effect: 'clone',
+				actor: { kind: 'transport', actor: { peer: 'in-process' } },
+				resource: 'remote',
+				repository: 'owner/repo',
+				remote: 'https://github.com/owner/repo',
+			});
+			expect(auth.requests[1]).toMatchObject({ effect: 'branch', resource: 'local', remote: null });
+			// The publication is held against where origin points now.
+			expect(auth.requests[2]).toMatchObject({
+				effect: 'push',
+				resource: 'remote',
+				repository: 'owner/repo',
+				remote: ORIGIN,
+			});
+			expect(auth.requests[3]).toMatchObject({ effect: 'pull-request', remote: ORIGIN });
+			expect(calls('git', 'push')).toHaveLength(1);
+			expect(calls('gh', 'pr')).toHaveLength(1);
+		});
+
+		it('a refused clone answers by code and never runs git clone', async () => {
+			vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+			allGitSucceeds();
+			const auth = authority({ clone: 'outside-ceiling' });
+			registerManaged(auth);
+
+			const result = await handlers.get('symphony:start')!({} as any, startParams);
+
+			expect(result.error).toBe('[managed-outside-ceiling] no clone for ada');
+			expect(calls('git', 'clone')).toHaveLength(0);
+			expect(effects(auth)).toEqual(['clone']);
+			expect(fs.rm).not.toHaveBeenCalled();
+		});
+
+		it('a refused push inside createDraftPR pushes nothing and the clone is discarded', async () => {
+			vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+			vi.mocked(fs.rm).mockResolvedValue(undefined);
+			allGitSucceeds();
+			const auth = authority({ push: 'remote-denied' });
+			registerManaged(auth);
+
+			const result = await handlers.get('symphony:start')!({} as any, startParams);
+
+			expect(result.error).toBe('[managed-remote-denied] no push for ada');
+			expect(effects(auth)).toEqual(['clone', 'branch', 'push']);
+			expect(calls('git', 'push')).toHaveLength(0);
+			expect(calls('gh', 'pr')).toHaveLength(0);
+			expect(fs.rm).toHaveBeenCalledWith(expect.stringContaining('repo-contrib_'), {
+				recursive: true,
+				force: true,
+			});
+		});
+
+		it('a refused pull-request after the push hold leaves the branch unpushed, with no --delete cleanup', async () => {
+			vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+			vi.mocked(fs.rm).mockResolvedValue(undefined);
+			allGitSucceeds();
+			const auth = authority({ 'pull-request': 'outside-ceiling' });
+			registerManaged(auth);
+
+			const result = await handlers.get('symphony:start')!({} as any, startParams);
+
+			expect(result.error).toBe('[managed-outside-ceiling] no pull-request for ada');
+			expect(effects(auth)).toEqual(['clone', 'branch', 'push', 'pull-request']);
+			expect(calls('git', 'push')).toHaveLength(0);
+			expect(calls('gh', 'pr')).toHaveLength(0);
+		});
+
+		it('the fork is held through the hook, only when a fork is needed, against the upstream remote', async () => {
+			vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+			vi.mocked(fs.rm).mockResolvedValue(undefined);
+			allGitSucceeds();
+			vi.mocked(ensureForkSetup).mockImplementation(async (_path, _slug, options) => {
+				const refusal = (await options?.beforeFork?.()) ?? null;
+				return refusal ? { isFork: false, error: refusal } : { isFork: true, forkSlug: 'ada/repo' };
+			});
+			const auth = authority({ fork: 'outside-ceiling' });
+			registerManaged(auth);
+
+			const result = await handlers.get('symphony:start')!({} as any, startParams);
+
+			expect(result.error).toBe('[managed-outside-ceiling] no fork for ada');
+			expect(ensureForkSetup).toHaveBeenCalledWith(
+				expect.stringContaining('repo'),
+				'owner/repo',
+				expect.objectContaining({ beforeFork: expect.any(Function) })
+			);
+			expect(auth.requests[2]).toMatchObject({
+				effect: 'fork',
+				resource: 'remote',
+				repository: 'owner/repo',
+				remote: 'https://github.com/owner/repo',
+			});
+			expect(calls('git', 'push')).toHaveLength(0);
+			expect(fs.rm).toHaveBeenCalled();
+		});
+
+		it('an admitted fork makes the draft land on the upstream repository', async () => {
+			vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+			allGitSucceeds();
+			vi.mocked(ensureForkSetup).mockImplementation(async (_path, _slug, options) => {
+				await options?.beforeFork?.();
+				return { isFork: true, forkSlug: 'ada/repo' };
+			});
+			const auth = authority();
+			registerManaged(auth);
+
+			const result = await handlers.get('symphony:start')!({} as any, startParams);
+
+			expect(result.error).toBeUndefined();
+			expect(effects(auth)).toEqual(['clone', 'branch', 'fork', 'push', 'pull-request']);
+			expect(auth.requests[4]).toMatchObject({ effect: 'pull-request', repository: 'owner/repo' });
+		});
+
+		it('symphony:cloneRepo holds the clone against its URL, naming the repository the URL points at', async () => {
+			allGitSucceeds();
+			const auth = authority({ clone: 'remote-denied' });
+			registerManaged(auth);
+
+			const result = await handlers.get('symphony:cloneRepo')!({} as any, {
+				repoUrl: 'https://github.com/acme/widgets',
+				localPath: '/tmp/widgets',
+			});
+
+			expect(result).toEqual({ success: false, error: '[managed-remote-denied] no clone for ada' });
+			expect(auth.requests[0]).toMatchObject({
+				effect: 'clone',
+				resource: 'remote',
+				repository: 'acme/widgets',
+				remote: 'https://github.com/acme/widgets',
+			});
+			expect(calls('git', 'clone')).toHaveLength(0);
+			expect(fs.mkdir).not.toHaveBeenCalled();
+		});
+
+		it('symphony:startContribution holds branch, fork and commit, and a refused commit fails the call by name', async () => {
+			allGitSucceeds();
+			vi.mocked(ensureForkSetup).mockImplementation(async (_path, _slug, options) => {
+				const refusal = (await options?.beforeFork?.()) ?? null;
+				return refusal ? { isFork: false, error: refusal } : { isFork: false };
+			});
+			const auth = authority({ commit: 'outside-ceiling' });
+			registerManaged(auth);
+
+			const result = await handlers.get('symphony:startContribution')!(
+				{} as any,
+				startContributionParams
+			);
+
+			expect(result).toEqual({
+				success: false,
+				error: '[managed-outside-ceiling] no commit for ada',
+			});
+			expect(effects(auth)).toEqual(['branch', 'fork', 'commit']);
+			// The fork is held against the upstream remote, read before the setup rewrites origin.
+			expect(auth.requests[1]).toMatchObject({ effect: 'fork', remote: ORIGIN });
+			expect(auth.requests[2]).toMatchObject({ effect: 'commit', resource: 'local', remote: null });
+			expect(calls('git', 'commit')).toHaveLength(0);
+			expect(calls('git', 'push')).toHaveLength(0);
+		});
+
+		it('symphony:complete refused on finalize leaves the draft a draft and fails the contribution', async () => {
+			vi.mocked(fs.readFile).mockResolvedValue(stateWithContribution());
+			allGitSucceeds();
+			const auth = authority({ finalize: 'outside-ceiling' });
+			registerManaged(auth);
+
+			const result = await handlers.get('symphony:complete')!({} as any, {
+				contributionId: 'contrib_managed',
+			});
+
+			expect(result.error).toBe('[managed-outside-ceiling] no finalize for ada');
+			expect(auth.requests[0]).toMatchObject({
+				effect: 'finalize',
+				resource: 'remote',
+				repository: 'owner/repo',
+				remote: ORIGIN,
+			});
+			expect(calls('gh', 'pr')).toHaveLength(0);
+			const state = lastStateWrite();
+			expect(state.active).toHaveLength(1);
+			expect(state.active[0].status).toBe('failed');
+			expect(state.active[0].error).toBe('[managed-outside-ceiling] no finalize for ada');
+			expect(state.history).toHaveLength(0);
+		});
+
+		it('symphony:cancel refused leaves the clone and the state untouched', async () => {
+			vi.mocked(fs.readFile).mockResolvedValue(stateWithContribution());
+			vi.mocked(fs.access).mockResolvedValue(undefined);
+			allGitSucceeds();
+			const auth = authority({ cancel: 'outside-ceiling' });
+			registerManaged(auth);
+
+			const result = await handlers.get('symphony:cancel')!({} as any, 'contrib_managed', true);
+
+			expect(result.cancelled).toBe(false);
+			expect(auth.requests).toEqual([
+				expect.objectContaining({
+					effect: 'cancel',
+					resource: 'local',
+					repository: 'owner/repo',
+					remote: null,
+				}),
+			]);
+			expect(fs.rm).not.toHaveBeenCalled();
+			expect(fs.writeFile).not.toHaveBeenCalled();
+		});
+
+		it('the actor is the transport the call was admitted over, never the caller word', async () => {
+			allGitSucceeds();
+			const auth = authority();
+			registerManaged(auth);
+			const user = { id: 'u1', username: 'ada', displayName: 'Ada' };
+
+			await runAsTransport({ kind: 'web-login', user }, () =>
+				handlers.get('symphony:cloneRepo')!({} as any, {
+					repoUrl: 'https://github.com/acme/widgets',
+					localPath: '/tmp/widgets',
+				})
+			);
+
+			expect(auth.requests[0].actor).toEqual({
+				kind: 'transport',
+				actor: { peer: 'web-login', username: 'ada' },
+			});
 		});
 	});
 });

@@ -20,6 +20,10 @@ import {
 	writeState,
 	broadcastSymphonyUpdate,
 	isContributionClone,
+	hasRepositoryAuthority,
+	holdRepositoryEffect,
+	managedRefusal,
+	readOriginRemote,
 	SymphonyHandlerDependencies,
 } from './shared';
 
@@ -306,6 +310,24 @@ export function registerLifecycleHandlers({
 				// Mark PR as ready (use upstreamSlug for fork contributions)
 				const upstreamSlug =
 					contribution.isFork && contribution.upstreamSlug ? contribution.upstreamSlug : undefined;
+
+				// Under a ceiling the finalization (the draft made ready plus the stats
+				// comment) is held before it runs, against the repository the draft
+				// lands on and where origin points now. A refusal fails the
+				// contribution by name, and the draft stays a draft.
+				if (hasRepositoryAuthority()) {
+					const finalizeHold = holdRepositoryEffect('finalize', 'remote', {
+						repository: upstreamSlug ?? contribution.repoSlug,
+						remote: await readOriginRemote(contribution.localPath),
+					});
+					if (!finalizeHold.allowed) {
+						contribution.status = 'failed';
+						contribution.error = managedRefusal(finalizeHold);
+						await writeState(app, state);
+						return { error: contribution.error };
+					}
+				}
+
 				const readyResult = await markPRReady(
 					contribution.localPath,
 					contribution.draftPrNumber,
@@ -457,6 +479,17 @@ export function registerLifecycleHandlers({
 				const index = state.active.findIndex((c) => c.id === contributionId);
 
 				if (index === -1) {
+					return { cancelled: false };
+				}
+
+				// This handler removes the clone and closes no PR, so the cancel is a
+				// local effect, held before anything changes; a refusal leaves the
+				// contribution exactly as it was.
+				const cancelHold = holdRepositoryEffect('cancel', 'local', {
+					repository: state.active[index].repoSlug,
+					remote: null,
+				});
+				if (!cancelHold.allowed) {
 					return { cancelled: false };
 				}
 

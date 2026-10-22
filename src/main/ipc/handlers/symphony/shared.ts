@@ -9,6 +9,14 @@ import { CreateHandlerOptions } from '../../../utils/ipcHandler';
 import { execFileNoThrow } from '../../../utils/execFile';
 import { getExpandedEnv } from '../../../agents/path-prober';
 import { resolveGhPath } from '../../../utils/cliDetection';
+import { getActingTransport, transportSpawnActor } from '../../../web-server/auth/transport-actor';
+import {
+	repositorySlugFromRemote,
+	type RepositoryEffectAuthority,
+	type RepositoryEffectDecision,
+	type RepositoryEffectKind,
+	type RepositoryEffectRequest,
+} from '../../../enterprise/repository-policy';
 import {
 	SYMPHONY_STATE_PATH,
 	SYMPHONY_CACHE_PATH,
@@ -30,6 +38,12 @@ export interface SymphonyHandlerDependencies {
 	getMainWindow: () => BrowserWindow | null;
 	sessionsStore: Store<SessionsData>;
 	settingsStore: Store<MaestroSettings>;
+	/**
+	 * The repository ceiling the desktop's Symphony effects are held to
+	 * (MRC-09-05B). Absent, or answering null, the host is standalone and
+	 * nothing is held.
+	 */
+	getRepositoryAuthority?: () => RepositoryEffectAuthority | null;
 }
 
 /**
@@ -47,6 +61,71 @@ export function setSymphonyEnabledCheck(check: () => boolean): void {
 
 function requireSymphony(): void {
 	if (!isSymphonyEnabled()) throw new Error('SymphonyDisabled');
+}
+
+/**
+ * The repository ceiling, bound once by `registerSymphonyHandlers` from the
+ * dependency above. The desktop's Symphony effects (clone, branch, fork,
+ * commit, push, draft, finalize, cancel) run in these handlers, not in the
+ * contribution runner, so this is where each is held, by itself and right
+ * before it runs. A null reader is a standalone host: nothing is held, no
+ * extra git call is made, and every handler answers byte-for-byte as before.
+ */
+let readRepositoryAuthority: () => RepositoryEffectAuthority | null = () => null;
+
+export function setRepositoryAuthority(reader: () => RepositoryEffectAuthority | null): void {
+	readRepositoryAuthority = reader;
+}
+
+/** Whether a ceiling is in place: asked before a git call a sink only needs under one. */
+export function hasRepositoryAuthority(): boolean {
+	return readRepositoryAuthority() !== null;
+}
+
+export type RepositoryRefusal = Extract<RepositoryEffectDecision, { allowed: false }>;
+
+/**
+ * Hold one repository effect right before it runs. The actor is the transport
+ * this call was admitted over, read from the call's own context (the bridge
+ * runs every invoke as its client), never the caller's word. A standalone host
+ * answers allowed with no receipt; a refusal is logged by code.
+ */
+export function holdRepositoryEffect(
+	effect: RepositoryEffectKind,
+	resource: RepositoryEffectRequest['resource'],
+	target: { repository: string | null; remote: string | null }
+): RepositoryEffectDecision {
+	const authority = readRepositoryAuthority();
+	if (!authority) return { allowed: true };
+	const decision = authority.authorize({
+		surface: 'symphony',
+		effect,
+		actor: { kind: 'transport', actor: transportSpawnActor(getActingTransport()) },
+		resource,
+		repository: target.repository,
+		remote: target.remote,
+	});
+	if (!decision.allowed) {
+		logger.warn('Repository effect refused by the managed ceiling', LOG_CONTEXT, {
+			effect,
+			code: decision.code,
+			repository: target.repository,
+			remote: decision.managed.remote,
+		});
+	}
+	return decision;
+}
+
+/** The failure a refused effect becomes: named by code, never a git or gh failure a login would fix. */
+export function managedRefusal(decision: RepositoryRefusal): string {
+	return `[managed-${decision.code}] ${decision.message}`;
+}
+
+/** What origin points at now (the fork after a fork setup), or null. Read only under a ceiling. */
+export async function readOriginRemote(repoPath: string): Promise<string | null> {
+	const result = await execFileNoThrow('git', ['remote', 'get-url', 'origin'], repoPath);
+	const url = result.stdout.trim();
+	return result.exitCode === 0 && url ? url : null;
 }
 
 export const handlerOpts = (operation: string, logSuccess = true): CreateHandlerOptions => ({
@@ -337,7 +416,14 @@ export async function createDraftPR(
 	body: string,
 	upstreamSlug?: string,
 	forkOwner?: string
-): Promise<{ success: boolean; prUrl?: string; prNumber?: number; error?: string }> {
+): Promise<{
+	success: boolean;
+	prUrl?: string;
+	prNumber?: number;
+	error?: string;
+	/** Set when `error` is the ceiling's refusal, so a caller never rewords it as a PR failure. */
+	refused?: true;
+}> {
 	// Check gh authentication first
 	const authCheck = await checkGhAuthentication();
 	if (!authCheck.authenticated) {
@@ -353,6 +439,27 @@ export async function createDraftPR(
 	const branchName = branchResult.stdout.trim();
 	if (!branchName || branchResult.exitCode !== 0) {
 		return { success: false, error: 'Failed to determine current branch' };
+	}
+
+	// Under a ceiling the publication is held before any of it runs: the push
+	// against where origin points now (the fork after a fork setup), the draft
+	// against the repository it lands on (the upstream of a fork). Both are
+	// answered before the push, so a refused draft leaves the branch unpushed
+	// and there is never a remote branch to delete for a push that did not run.
+	if (hasRepositoryAuthority()) {
+		const origin = await readOriginRemote(repoPath);
+		const target = {
+			repository: upstreamSlug ?? repositorySlugFromRemote(origin),
+			remote: origin,
+		};
+		const pushHold = holdRepositoryEffect('push', 'remote', target);
+		if (!pushHold.allowed) {
+			return { success: false, error: managedRefusal(pushHold), refused: true };
+		}
+		const draftHold = holdRepositoryEffect('pull-request', 'remote', target);
+		if (!draftHold.allowed) {
+			return { success: false, error: managedRefusal(draftHold), refused: true };
+		}
 	}
 
 	// First push the branch

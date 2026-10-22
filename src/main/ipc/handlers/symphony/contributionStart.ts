@@ -5,8 +5,9 @@ import { logger } from '../../../utils/logger';
 import { createSafeSend } from '../../../utils/safe-send';
 import { createIpcHandler } from '../../../utils/ipcHandler';
 import { execFileNoThrow } from '../../../utils/execFile';
-import { ensureForkSetup } from '../../../utils/symphony-fork';
+import { ensureForkSetup, type ForkSetupResult } from '../../../utils/symphony-fork';
 import { fetchWithTimeout } from '../../../utils/fetchWithTimeout';
+import { repositorySlugFromRemote } from '../../../enterprise/repository-policy';
 import { BRANCH_TEMPLATE } from '../../../../shared/symphony-constants';
 import type {
 	ActiveContribution,
@@ -27,8 +28,13 @@ import {
 	validateContributionId,
 	toSafeDocumentFileName,
 	uniqueDocumentFileName,
+	hasRepositoryAuthority,
+	holdRepositoryEffect,
+	managedRefusal,
+	readOriginRemote,
 	SymphonyHandlerDependencies,
 	SYMPHONY_DOCUMENT_FETCH_TIMEOUT_MS,
+	type RepositoryRefusal,
 } from './shared';
 
 /**
@@ -211,6 +217,38 @@ async function createBranch(
 }
 
 /**
+ * Fork setup with the fork held where it happens: under a ceiling the hook is
+ * handed to `ensureForkSetup`, which calls it only when a fork is needed and
+ * right before `gh repo fork`. The standalone call keeps its two arguments.
+ * `refused` is the ceiling's answer when the hook ended the setup.
+ */
+async function setUpFork(
+	localPath: string,
+	repoSlug: string,
+	remote: string | null
+): Promise<{ result: ForkSetupResult; refused: RepositoryRefusal | null }> {
+	if (!hasRepositoryAuthority()) {
+		return { result: await ensureForkSetup(localPath, repoSlug), refused: null };
+	}
+	const gate: { refused: RepositoryRefusal | null } = { refused: null };
+	const result = await ensureForkSetup(localPath, repoSlug, {
+		beforeFork: async () => {
+			const decision = holdRepositoryEffect('fork', 'remote', { repository: repoSlug, remote });
+			gate.refused = decision.allowed ? null : decision;
+			return gate.refused ? managedRefusal(gate.refused) : null;
+		},
+	});
+	return { result, refused: gate.refused };
+}
+
+/** Remove the clone `symphony:start` made itself when a later step fails. */
+async function discardClone(localPath: string): Promise<void> {
+	await fs
+		.rm(localPath, { recursive: true, force: true })
+		.catch((err) => logger.warn(`Failed to clean up directory ${localPath}: ${err}`, LOG_CONTEXT));
+}
+
+/**
  * Register contribution-kickoff Symphony IPC handlers: start, cloneRepo,
  * startContribution. Handlers that begin a new contribution, as opposed to
  * contributionFinish.ts which handles wrapping one up.
@@ -292,7 +330,14 @@ export function registerContributionStartHandlers({
 				// Generate branch name
 				const branchName = generateBranchName(issueNumber);
 
-				// Clone repository
+				// Clone repository, held against its remote right before it runs
+				const cloneHold = holdRepositoryEffect('clone', 'remote', {
+					repository: repoSlug,
+					remote: repoUrl,
+				});
+				if (!cloneHold.allowed) {
+					return { error: managedRefusal(cloneHold) };
+				}
 				const cloneResult = await cloneRepository(repoUrl, localPath);
 				if (!cloneResult.success) {
 					return { error: `Clone failed: ${cloneResult.error}` };
@@ -301,28 +346,33 @@ export function registerContributionStartHandlers({
 				// Detect default branch (don't rely on hardcoded 'main')
 				const baseBranch = params.baseBranch || (await getDefaultBranch(localPath));
 
-				// Create branch
+				// Create branch (a local effect, held by itself; a clone is not a permit)
+				const branchHold = holdRepositoryEffect('branch', 'local', {
+					repository: repoSlug,
+					remote: null,
+				});
+				if (!branchHold.allowed) {
+					await discardClone(localPath);
+					return { error: managedRefusal(branchHold) };
+				}
 				const branchResult = await createBranch(localPath, branchName);
 				if (!branchResult.success) {
-					// Cleanup
-					await fs
-						.rm(localPath, { recursive: true, force: true })
-						.catch((err) =>
-							logger.warn(`Failed to clean up directory ${localPath}: ${err}`, LOG_CONTEXT)
-						);
+					await discardClone(localPath);
 					return { error: `Branch creation failed: ${branchResult.error}` };
 				}
 
-				// Set up fork if user doesn't have push access
+				// Set up fork if user doesn't have push access; the fork itself is
+				// held inside the helper, right before `gh repo fork`.
 				logger.info('Checking fork requirements', LOG_CONTEXT, { repoSlug });
-				const forkResult = await ensureForkSetup(localPath, repoSlug);
+				const fork = await setUpFork(localPath, repoSlug, repoUrl);
+				const forkResult = fork.result;
 				if (forkResult.error) {
-					await fs
-						.rm(localPath, { recursive: true, force: true })
-						.catch((err) =>
-							logger.warn(`Failed to clean up directory ${localPath}: ${err}`, LOG_CONTEXT)
-						);
-					return { error: `Fork setup failed: ${forkResult.error}` };
+					await discardClone(localPath);
+					return {
+						error: fork.refused
+							? managedRefusal(fork.refused)
+							: `Fork setup failed: ${forkResult.error}`,
+					};
 				}
 				if (forkResult.isFork) {
 					logger.info('Using fork for contribution', LOG_CONTEXT, {
@@ -365,13 +415,11 @@ This PR will be updated automatically when the Auto Run completes.`;
 					forkOwner
 				);
 				if (!prResult.success) {
-					// Cleanup
-					await fs
-						.rm(localPath, { recursive: true, force: true })
-						.catch((err) =>
-							logger.warn(`Failed to clean up directory ${localPath}: ${err}`, LOG_CONTEXT)
-						);
-					return { error: `PR creation failed: ${prResult.error}` };
+					await discardClone(localPath);
+					// A managed refusal keeps its name; it is not a PR failure a retry would fix.
+					return {
+						error: prResult.refused ? prResult.error : `PR creation failed: ${prResult.error}`,
+					};
 				}
 
 				// Create active contribution entry
@@ -448,6 +496,15 @@ This PR will be updated automatically when the Auto Run completes.`;
 				const urlValidation = validateGitHubUrl(repoUrl);
 				if (!urlValidation.valid) {
 					return { success: false, error: urlValidation.error };
+				}
+
+				// Held against the URL itself; the repository is the one the URL names
+				const cloneHold = holdRepositoryEffect('clone', 'remote', {
+					repository: repositorySlugFromRemote(repoUrl),
+					remote: repoUrl,
+				});
+				if (!cloneHold.allowed) {
+					return { success: false, error: managedRefusal(cloneHold) };
 				}
 
 				// Ensure parent directory exists
@@ -560,8 +617,15 @@ This PR will be updated automatically when the Auto Run completes.`;
 				}
 
 				try {
-					// 1. Create branch and checkout
+					// 1. Create branch and checkout (a local effect, held before it)
 					const branchName = generateBranchName(issueNumber);
+					const branchHold = holdRepositoryEffect('branch', 'local', {
+						repository: repoSlug,
+						remote: null,
+					});
+					if (!branchHold.allowed) {
+						return { success: false, error: managedRefusal(branchHold) };
+					}
 					const branchResult = await createBranch(localPath, branchName);
 					if (!branchResult.success) {
 						logger.error('Failed to create branch', LOG_CONTEXT, {
@@ -574,12 +638,24 @@ This PR will be updated automatically when the Auto Run completes.`;
 
 					// 1b. Capture upstream default branch before fork setup rewrites origin
 					const upstreamDefaultBranch = await getDefaultBranch(localPath);
+					// Under a ceiling, also the upstream remote the fork would be held
+					// against, read while origin still points at it.
+					const upstreamRemote = hasRepositoryAuthority()
+						? await readOriginRemote(localPath)
+						: null;
 
-					// 1c. Set up fork if user doesn't have push access
+					// 1c. Set up fork if user doesn't have push access; the fork itself
+					// is held inside the helper, right before `gh repo fork`.
 					logger.info('Checking fork requirements', LOG_CONTEXT, { repoSlug });
-					const forkResult = await ensureForkSetup(localPath, repoSlug);
+					const fork = await setUpFork(localPath, repoSlug, upstreamRemote);
+					const forkResult = fork.result;
 					if (forkResult.error) {
-						return { success: false, error: `Fork setup failed: ${forkResult.error}` };
+						return {
+							success: false,
+							error: fork.refused
+								? managedRefusal(fork.refused)
+								: `Fork setup failed: ${forkResult.error}`,
+						};
 					}
 					if (forkResult.isFork) {
 						logger.info('Using fork for contribution', LOG_CONTEXT, {
@@ -729,6 +805,15 @@ This PR will be updated automatically when the Auto Run completes.`;
 					let draftPrUrl: string | undefined;
 
 					const baseBranch = upstreamDefaultBranch;
+					// The commit is a local effect, held before it; a refusal fails the
+					// call by name rather than continuing without a claim.
+					const commitHold = holdRepositoryEffect('commit', 'local', {
+						repository: repoSlug,
+						remote: null,
+					});
+					if (!commitHold.allowed) {
+						return { success: false, error: managedRefusal(commitHold) };
+					}
 					const commitMsg = `[Symphony] Start contribution for #${issueNumber}`;
 					const emptyCommitResult = await execFileNoThrow(
 						'git',
