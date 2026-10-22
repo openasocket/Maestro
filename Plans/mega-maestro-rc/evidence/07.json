@@ -1,0 +1,553 @@
+{
+	"frontMatter": {
+		"type": "evidence",
+		"title": "Phase 07 evidence: Auto Run, Cue, delegation, group chat and durable workflow ownership (automation pair)",
+		"created": "2026-10-21",
+		"phase": 7,
+		"base_revision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+		"head_revision": "656547892a7ac762ffe88bb0b35fa1323e626cd1",
+		"branch": "feature/mega-maestro-v1.1.0-rc",
+		"tags": ["maestro", "mega-maestro", "integration", "evidence", "phase-07"],
+		"related": [
+			"[[EXECUTION-RULES]]",
+			"[[ANALYSIS]]",
+			"[[01]]",
+			"[[02]]",
+			"[[03]]",
+			"[[04]]",
+			"[[05]]",
+			"[[06]]"
+		]
+	},
+	"summary": "Phase 07 carried automation through the managed admission built in phase 06, on feature/mega-maestro-v1.1.0-rc in the Maestro checkout (macOS, Darwin 27, Node v26.12.0). Every Auto Run turn (desktop and maestro-cli host) carries a workflow, task, trigger, run and attempt lineage and is admitted per attempt at the real spawn sink; a Cue prompt, shell or CLI run is admitted per firing on the subscription owner, pipeline, event and target, with the shell command gated as its own sink and an unsupported route refused with no local fallback; a nested maestro-cli dispatch and a consult are children of the operation that dispatched them, bound under an intersected scope and stamped on the child process, with a read-only initiator never gaining a writable consult; group chat moderator, participant, synthesis, recovery and background turns are admitted on the room's lineage; and the CP-03 owner/epoch/fence contract is consumed durably (claimed once per run and attempt, persisted, re-claimed with the held values on retry and restart, fenced when the registry says so, held offline only when issued, and an unknown holder never read as a fence). All of it is exercised locally by deterministic tests over the real lease authority, the real context verifier and the real run layer with the policy table and the workflow registry as declared doubles. On the real pair nothing managed is admitted: the sibling endpoint daemon is unenrolled and its socket server dispatches no workflow operation and its runtime adapter refuses any delegation chain or workflow context, so an enrolled Maestro refuses every automation route explicitly (unavailable, naming CP-03) and nothing counts as a positive paired result. The labeled container run of the real endpoint with the 0.9.0 library at this HEAD is recorded below as failed-attempt evidence.",
+	"commits": [
+		{
+			"commit": "e4328d768",
+			"task": "MRC-07-01",
+			"files": [
+				"src/shared/maestro-lib/autorun/attribution.ts (new)",
+				"src/shared/maestro-lib/runtime/autorun-turns.ts",
+				"src/renderer/hooks/batch/useDocumentProcessor.ts",
+				"src/shared/maestro-lib/autorun/engine-types.ts"
+			],
+			"lines": "+483 -10"
+		},
+		{
+			"commit": "d86defc28",
+			"task": "MRC-07-01A",
+			"files": [
+				"src/shared/maestro-lib/runtime/autorun.ts",
+				"src/shared/maestro-lib/runtime/index.ts",
+				"src/shared/maestro-lib/index.ts"
+			],
+			"lines": "+387 -26"
+		},
+		{
+			"commit": "1711570b8",
+			"task": "MRC-07-01B",
+			"files": [
+				"src/main/process-manager/types.ts",
+				"src/main/process-manager/ProcessManager.ts",
+				"src/main/ipc/handlers/process/spawn-types.ts",
+				"src/main/ipc/handlers/process/handle-spawn.ts",
+				"src/main/enterprise/spawn-authority.ts"
+			],
+			"lines": "+311 -15"
+		},
+		{
+			"commit": "e746f1630",
+			"task": "MRC-07-01C",
+			"files": [
+				"src/renderer/hooks/agent/useAgentExecution.ts",
+				"src/renderer/hooks/batch/internal/useBatchRunner.ts",
+				"src/renderer/hooks/batch/internal/useGoalRunner.ts",
+				"src/renderer/types/index.ts"
+			],
+			"lines": "+439 -42"
+		},
+		{
+			"commit": "85fa6b014",
+			"task": "MRC-07-02",
+			"files": [
+				"src/main/cue/cue-run-router.ts",
+				"src/main/cue/cue-process-lifecycle.ts",
+				"src/main/cue/cue-executor.ts",
+				"src/main/cue/cue-run-manager.ts",
+				"src/main/cue/cue-engine.ts",
+				"src/shared/cue/contracts.ts"
+			],
+			"lines": "+1245 -17 (tests +740 of these)"
+		},
+		{
+			"commit": "4b0e07f25",
+			"task": "MRC-07-02A",
+			"files": [
+				"src/main/enterprise/spawn-authority.ts",
+				"src/main/index.ts",
+				"src/cli/services/cue-standalone-engine.ts"
+			],
+			"lines": "+486 -9"
+		},
+		{
+			"commit": "88b07de10",
+			"task": "MRC-07-03",
+			"files": ["src/main/cue/cue-shell-executor.ts", "src/main/enterprise/dispatch.ts"],
+			"lines": "+910 -77"
+		},
+		{
+			"commit": "c25114f60",
+			"task": "MRC-07-04",
+			"files": [
+				"src/shared/maestro-lib/managed/delegation.ts (new)",
+				"src/main/cue/cue-cli-executor.ts",
+				"src/shared/maestro-lib/runtime/consults.ts"
+			],
+			"lines": "+1061 -34"
+		},
+		{
+			"commit": "f42266482",
+			"task": "MRC-07-04A",
+			"files": [
+				"src/shared/maestro-lib/runtime/consults.ts",
+				"src/shared/maestro-lib/runtime/index.ts",
+				"src/shared/maestro-lib/agents/consult.ts"
+			],
+			"lines": "+519 -42"
+		},
+		{
+			"commit": "4048746b2",
+			"task": "MRC-07-04B",
+			"files": [
+				"src/cli/commands/dispatch.ts",
+				"src/main/process-manager/ProcessManager.ts",
+				"src/shared/maestro-lib/managed/host-adapter.ts"
+			],
+			"lines": "+450 -18"
+		},
+		{
+			"commit": "497efd2a7",
+			"task": "MRC-07-04C",
+			"files": [
+				"src/main/web-server/handlers/messageHandlers/commands.ts",
+				"src/main/web-server/handlers/messageHandlers/queue.ts",
+				"src/main/ipc/handlers/process/spawn-types.ts",
+				"src/main/preload/process/*.ts and src/main/web-server/callbacks/*.ts (the delegation positional on the wire)"
+			],
+			"lines": "+905 -80"
+		},
+		{
+			"commit": "aacb182c5",
+			"task": "MRC-07-04D",
+			"files": [
+				"src/renderer/hooks/remote/useRemoteHandlers.ts",
+				"src/renderer/hooks/remote/useRemoteIntegration.ts",
+				"src/renderer/stores/agentStore.ts",
+				"src/renderer/services/queuedPrompt.ts"
+			],
+			"lines": "+321 -10"
+		},
+		{
+			"commit": "d074fab9f",
+			"task": "MRC-07-05",
+			"files": [
+				"src/main/group-chat/spawnGroupChatAgent.ts",
+				"src/shared/maestro-lib/runtime/background-turns.ts",
+				"src/shared/maestro-lib/groupchat/spawn.ts",
+				"src/main/group-chat/group-chat-moderator.ts"
+			],
+			"lines": "+1124 -63"
+		},
+		{
+			"commit": "f63d945ea",
+			"task": "MRC-07-06",
+			"files": [
+				"src/shared/maestro-lib/managed/workflows.ts (new)",
+				"src/main/cue/cue-run-router.ts",
+				"src/main/enterprise/service.ts"
+			],
+			"lines": "+1213 -23"
+		},
+		{
+			"commit": "a70908c02",
+			"task": "MRC-07-06A",
+			"files": [
+				"src/shared/maestro-lib/managed/host-adapter.ts",
+				"src/shared/maestro-lib/runtime/autorun-turns.ts",
+				"src/cli/services/cue-standalone-engine.ts",
+				"src/shared/maestro-lib/runtime/{autorun,index}.ts, src/cli/services/host-cue.ts"
+			],
+			"lines": "+770 -109"
+		},
+		{
+			"commit": "0c2ac4d2c",
+			"task": "MRC-07-06B",
+			"files": [
+				"src/main/process-manager/ProcessManager.ts",
+				"src/main/process-manager/types.ts",
+				"src/main/enterprise/spawn-authority.ts",
+				"src/main/enterprise/service.ts"
+			],
+			"lines": "+383 -39"
+		},
+		{
+			"commit": "9b0171270",
+			"task": "MRC-07-07 (tests)",
+			"files": [
+				"src/shared/maestro-lib/runtime/__tests__/autorun-turns.test.ts",
+				"src/__tests__/main/cue/cue-shell-executor.test.ts",
+				"src/shared/maestro-lib/runtime/__tests__/background-turns.test.ts"
+			],
+			"lines": "+453 -12"
+		},
+		{
+			"commit": "656547892",
+			"task": "MRC-07-08 (tests)",
+			"files": [
+				"src/__tests__/shared/maestro-lib/managed/workflows.test.ts",
+				"src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts",
+				"src/__tests__/main/cue/cue-cli-executor.test.ts"
+			],
+			"lines": "+833 -0"
+		}
+	],
+	"lineBudgetNotes": "The shortstat lines above include tests and docs; the per-task notes in MAESTRO-MEGA-07.md record the source counts. Over the 500 source-line guideline: MRC-07-02 (+502 / -15 source, 2 over, with its three test files adding +740) and MRC-07-06 (637 source lines add+del, the new workflows.ts module). MRC-07-05 came in at 495. Every other task names one to three authored files inside the guideline, with the wiring split into the bounded continuations recorded beside each task (01A, 01B, 01C, 02A, 04A, 04B, 04C, 04D, 06A, 06B). MRC-07-07 and MRC-07-08 are test-only. Library versions: 0.5.0 (07-01A) to 0.9.0 (07-06A).",
+	"commands": [
+		{
+			"command": "git merge-base --is-ancestor 6400a6da0cfbae97bd90c4b361eea163fc3a1223 HEAD",
+			"exit": 0,
+			"result": "the base revision is an ancestor of HEAD 656547892; the tree is clean apart from the user's untracked .sloptimize/ and rustygraphify-out/"
+		},
+		{
+			"command": "npm run build:maestro-lib",
+			"exit": 0,
+			"result": "dist/maestro-lib/index.js 1617.5 KB, maestro-lib 0.9.0, maestro-managed/1, provenance sourceRevision 656547892a7ac762ffe88bb0b35fa1323e626cd1, sourceDirty false, index.js sha256 dbf346ccb88837827e41cc51f8219611a01253c8437f481faef92c7253ee66c0; the bundle carries endpointWorkflowOwnerPort, createWorkflowOwnership, workflowFenceOf, childDelegationContext, intersectDelegationScope, readDelegationContextEnv and autoRunWorkflowRef"
+		},
+		{
+			"command": "node scripts/mega-maestro-pair.mjs check --json",
+			"exit": 2,
+			"result": "library ready at HEAD (0.9.0, not stale, 290 payload files, none mismatched); assessment.ready false; dependencies CP-01 (no contracts pin), CP-01 (no clean Linux application artifact: 4 dirty-source darwin/arm64 packaged artifacts at sibling e29195d8, the development checkout d5143a6 with 935 dirty entries never certifiable), CP-02 (createMaestroAdapter unsupported), registration-approval (no API/console producer); docker 29.9.1 up with the pinned node image present. Identical to phases 04 to 06 apart from the library version"
+		},
+		{
+			"command": "npm run lint",
+			"exit": 2,
+			"result": "tsconfig.lint.json: exactly the two pre-existing TS2307 errors (@serenity-kit/opaque in src/main/lite/pairing/host.ts, smol-toml in src/shared/maestro-lib/translation/resources.ts); the script chains with && so the other two configs were run by hand below"
+		},
+		{
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.main.json --noEmit",
+			"exit": 2,
+			"result": "the same two missing packages only (client.ts and host.ts for opaque, resources.ts for smol-toml); no other error"
+		},
+		{
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.cli.json --noEmit",
+			"exit": 2,
+			"result": "the same two missing packages only; no other error"
+		},
+		{
+			"command": "npm run lint:eslint",
+			"exit": 0,
+			"result": "clean on both configs"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run <the 35 test files changed since 709b42b, listed under focusedSuites> --reporter=verbose",
+			"exit": 0,
+			"result": "35 files, 1836 passed, 0 skipped, 18.4 s"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run src/shared/maestro-lib src/__tests__/cli src/__tests__/main/cue src/__tests__/main/enterprise src/__tests__/shared/maestro-lib src/__tests__/integration/mega-maestro src/__tests__/main/process-manager src/__tests__/main/group-chat src/__tests__/main/web-server src/__tests__/main/ipc/handlers/process.test.ts src/__tests__/main/preload src/__tests__/renderer/hooks/batch <the six renderer hook and store suites phase 07 touched> --reporter=verbose",
+			"exit": 1,
+			"result": "554 files: 547 passed, 7 failed to LOAD on the two known missing packages (the 5 translation-*.test.ts suites on smol-toml; WebServer.test.ts and routes/liteConnectionRoutes.test.ts on @serenity-kit/opaque), 11189 tests passed, 8 skipped (named under skippedTests), 78.8 s. No test that loaded failed"
+		},
+		{
+			"command": "prettier --check <the 103 files changed since 709b42b outside Plans/>",
+			"exit": 0,
+			"result": "All matched files use Prettier code style"
+		},
+		{
+			"command": "npm run docs:verify",
+			"exit": 0,
+			"result": "1013 asserted paths and 347 index entries against 347 full entries, 0 findings"
+		},
+		{
+			"command": "node scripts/mega-maestro-pair.mjs run --allow-dirty --json --out .maestro/playbooks/Working/07-verify/pair-run.json",
+			"exit": 3,
+			"result": "the labeled development run completed (container exit 0) and is not a pass by the harness's own code; see realPairRun"
+		}
+	],
+	"focusedSuites": "src/__tests__/{cli/commands/dispatch, cli/services/cue-standalone-engine, cli/services/host-cue, main/cue/cue-cli-executor, main/cue/cue-executor, main/cue/cue-process-lifecycle.managed, main/cue/cue-run-router.managed, main/cue/cue-shell-executor, main/enterprise/dispatch, main/enterprise/service, main/enterprise/spawn-authority, main/group-chat/spawnGroupChatAgent, main/ipc/handlers/process, main/preload/process/commandRemote, main/process-manager/ProcessManager.serveSpawn, main/process-manager/utils/envBuilder, main/web-server/handlers/messageHandlers, main/web-server/managers/CallbackRegistry, main/web-server/web-server-factory, renderer/hooks/batch/useGoalRunner, renderer/hooks/useAgentExecution, renderer/hooks/useBatchProcessor, renderer/hooks/useRemoteHandlers, renderer/hooks/useRemoteIntegration, renderer/stores/agentStore, renderer/stores/retryStore, shared/maestro-lib/managed/delegation, shared/maestro-lib/managed/host-adapter, shared/maestro-lib/managed/workflows}.test.ts and src/shared/maestro-lib/{__tests__/built-entry, groupchat/__tests__/spawn, runtime/__tests__/autorun-turns, runtime/__tests__/autorun, runtime/__tests__/background-turns, runtime/__tests__/consults}.test.ts",
+	"realPairRun": {
+		"status": "not-a-pass",
+		"certifiable": false,
+		"notCertifiableBecause": [
+			"endpoint source development-checkout is built, not a clean artifact (CP-01)"
+		],
+		"startedAt": "2026-10-22T00:47:46.702Z",
+		"endedAt": "2026-10-22T00:47:55.152Z",
+		"workspace": ".maestro/playbooks/Working/pair-20261022T004743 (gitignored; the staged endpoint was removed, the out/ folder kept)",
+		"image": "node@sha256:71bcbb3b215b3fa84b5b167585675072f4c270855e37a599803f1a58141a0716 (linux/arm64)",
+		"endpointSource": {
+			"kind": "development-checkout",
+			"revision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+			"dirty": true,
+			"cliBuiltAt": "2026-10-19T17:30:27.161Z"
+		},
+		"library": { "version": "0.9.0", "contract": "maestro-managed/1", "protocol": 1 },
+		"bundle": {
+			"clientSha256": "967e47036d410dcafad756b8a2e38f3f37ef5501198ae0562e2d18354626a67e",
+			"driverSha256": "c21b7502313d831bb854944ea5a3c23d38392558162f43209fa41564177ff2ba"
+		},
+		"observed": {
+			"nativeBuild": { "exit": 0, "dir": "build.mjs peer.c peer.node" },
+			"daemonStart": {
+				"exit": 0,
+				"outcome": "started",
+				"runtimeSocket": "/work/ws/.local/endpoint/runtime.sock",
+				"socketWait": 0
+			},
+			"driver": {
+				"exit": 0,
+				"node": "v22.16.0 in the container",
+				"steps": [
+					{
+						"name": "compatibility",
+						"outcome": { "status": "denied", "reason": "unauthenticated" }
+					},
+					{ "name": "attach", "outcome": { "status": "denied", "reason": "unauthenticated" } },
+					{
+						"name": "registration.challenge",
+						"outcome": { "status": "denied", "reason": "unavailable" }
+					},
+					{
+						"name": "execution.admit",
+						"outcome": {
+							"state": "unavailable",
+							"code": "runtime-unavailable",
+							"message": "not registered-attached-managed in this process"
+						}
+					},
+					{
+						"name": "execution.raw",
+						"outcome": {
+							"status": "unavailable",
+							"reason": "not-attached",
+							"message": "This connection is not attached; attach() first."
+						}
+					}
+				],
+				"leases": 0,
+				"policyStatus": "connectivity detached, management null, admission.possible false (not registered-attached-managed; no applied policy revision)",
+				"approval": "no-producer"
+			},
+			"daemonStatus": {
+				"exit": 0,
+				"management": "unenrolled",
+				"connectivity": "unavailable",
+				"capabilities": []
+			},
+			"daemonStop": { "exit": 0, "outcome": "stopping" }
+		},
+		"reading": "Peer authentication works on Linux (the native peer module built and the daemon answered the real client), the 0.9.0 library loads and composes the host adapter and verifier under the real client, and every step is denied or unavailable because the daemon is unenrolled (CP-04) and no approval producer exists; zero leases were issued. The outcomes are identical to the phase 04 run; what is new is the library at this HEAD. The driver has no workflow or delegation step: the endpoint's socket server (apps/endpoint/src/ipc/server.ts) dispatches attachment, compatibility, model, execution, telemetry, noticeList and inbox and answers any other operation unsupported_capability after attach, so a workflow claim through endpointWorkflowOwnerPort against this daemon could only end not-attached today, and the runtime adapter (packages/runtime-adapter/src/endpoint.ts) denies context-mismatch for any delegation chain or workflow. The workflow and delegation halves of the pair are therefore proven refused on the Maestro side (host-adapter answers unavailable naming CP-03 before the endpoint is asked) and have no producer to be proven admitted against."
+	},
+	"notRun": [
+		"npm install (same reason as phases 01 to 06: the environment baseline is the user's; smol-toml and @serenity-kit/opaque stay absent)",
+		"the full npm test (the wide sweep above covers every directory this phase touched: maestro-lib, cli, cue, enterprise, process manager, group chat, web server, preload, the process handler and the renderer hooks and stores that carry the lineage)",
+		"any real provider turn under management: no paid provider traffic is authorized by this playbook; every automation sink was exercised with the fake agent, the fake app-server or a stub spawner",
+		"any enrollment against a Mega-Maestro API (none is running; none is authorized), so no managed desktop or maestro-cli host exists here to run an Auto Run, Cue firing, dispatch or group chat against the real daemon; the enrolled-desktop case in spawnGroupChatAgent.test.ts runs the real adapter and real client against the in-repo fake endpoint daemon and is a declared double",
+		"a container run with --approve-command (no approval producer exists; registration-approval is open)",
+		"the Windows and Linux CI legs locally (macOS only here; the branch is pushed for the matrix)"
+	],
+	"failedAttemptsPreserved": [
+		"The real pair run above (exit 3, every step denied or unavailable, zero leases) is kept as .maestro/playbooks/Working/07-verify/pair-run.json with the harness out/ folder beside it.",
+		"MRC-07-01's first design carried the lineage on the per-spawn uuid; the desktop context now carries autoRunRunIdentity() and autoRunWorkflowRef() instead (01B), and the renderer's effort fallback retry re-spawns as nextAutoRunAttempt(), never the same attempt (01C).",
+		"MRC-07-04B left the child record nowhere after admission; 04C surfaces it on the admission so the process is stamped with the CHILD record after the env ceiling, and 04C's wire change (the delegation positional before the receipt channel on remote:executeCommand) made every positional test of that chain gain a trailing undefined.",
+		"MRC-07-04D's end-to-end courier test was not authored, so cueCliRouteSupport() nested-dispatch stays 'unsupported' under management by the playbook's own rule; the route is implemented standalone and its note names what is proven.",
+		"MRC-07-06A found docs/maestro-lib.md's provider-support version line had read 0.5.0 since 0.6.0 and failed docs-examples.test.ts at HEAD; corrected in the same commit.",
+		"MRC-07-07's autorun runner fake could not prove 'nothing started' from the efforts list (a refused attempt is assembled first), so the fake agent now writes one started-<n> marker per process it actually runs as; the counts in the zero-effect cases are read from those markers.",
+		"MRC-07-08's first draft of the concurrent-owner case read the registry through a stateless double; it now runs a stateful registry in the endpoint's shapes (epochs never go back, evict() stands in for the registry fencing a lapsed holder) and each installation is its own createWorkflowOwnership over its own file.",
+		"Tooling: the st shell hijack ate heredocs, ranged git log and inline backticks in node -e, so scripts went into .maestro/playbooks/Working/; the machine's Bash hook refused non-ASCII and some long inline commands, rerun from files; zsh does not word-split $VAR lists so eslint and prettier ran through explicit file arguments."
+	],
+	"deterministicCoverage": {
+		"doubles": "The policy table and the workflow registry (workflows.test.ts, stateful, in the endpoint's shapes). Everything else is real: createLocalHostAuthority (the lease authority), createContextVerifier, the run layer (startTurn / runAgentTurn / the fake agent as a real child process), ProcessManager with node-pty and the logger mocked and a stub child spawner reporting a pid (spawnGroupChatAgent.test.ts), the real createManagedHostAdapter over the real createLocalEndpointClient against the in-repo fake endpoint daemon (host-adapter.test.ts, spawnGroupChatAgent.test.ts), createWorkflowOwnership over real files.",
+		"cases": [
+			"Auto Run lineage (autorun-turns, autorun, useAgentExecution, useBatchProcessor, useGoalRunner, serveSpawn): one workflow per batch or goal run, one request per task or iteration under one run id, the effort retry as the next attempt under the same request, the chat spawn carrying none; the desktop sink claims the fence for a fence: null lineage per attempt and binds on the registry's fence, a carried fence is not re-claimed, a producer refusal is answered before the authority with nothing started and the reason on the spawn failure, a fenced owner denied and a lost answer unknown never a fence, an unowned answer refused by name, a chat turn and a standalone host never ask",
+			"Zero effect under Auto Run (07-07): an owner the registry fenced starts nothing and never reaches the authority (permission_denied, non-recoverable); a policy that flips between two attempts refuses the effort retry with no second process; a revocation while the turn runs stops the process (interrupted, no lease live, ended() names the reason); a blank triggerEventId or fencingToken is refused by the verifier naming the field before the authority is asked",
+			"Cue prompt (cue-run-router.managed, cue-process-lifecycle.managed, cue-standalone-engine, host-cue, spawn-authority, service): admitted per firing on owner, pipeline, event and target; managed yolo or full permission does not widen the broker scope; a queued firing and a retry reauthorize; the fence claimed per firing as the installation, the next firing re-claiming the held values, owner_unfenced as the run's denied / policy-denied; a hosting runtime's claim used instead of the engine's; an enrolled machine's bare Cue engine refused 'holds no managed standing'",
+			"Cue shell (cue-shell-executor, dispatch): the final substituted command, resources and local-or-remote target gated at the sink; an unsupported shell route refused with no local fallback; a lease withdrawn between admission and spawn refused at the gate with no pid bound; a context not bound by this host's verifier refused unauthenticated before the policy reader; an unknown answer is unknown / outcome-unknown with the run failed; a policy that flips to deny refuses the next firing after one admitted run",
+			"Nested dispatch and consults (delegation, dispatch (CLI), messageHandlers, useRemoteHandlers, useRemoteIntegration, agentStore, retryStore, serveSpawn, consults, cue-cli-executor): an invalid record refuses the dispatch (never anonymous); the record travels all three wire paths and the queued item, is bound at the sink as the dispatcher's child under intersectDelegationScope (never a fresh chat turn), the child record stamped on the process after the ceiling so a grandchild deepens the chain; a retried turn carries the same record, a user follow-up none; a managed initiator on a standalone runtime refused; a read-only initiator never gains a writable consult; a run holding the fence hands it to the courier whole over a stale wider engine env, a run holding none hands none, under management refused whole over the unsupported route; a retried firing on its own attempt; two firings each with their own record",
+			"Group chat and background (spawnGroupChatAgent, background-turns, groupchat/spawn): a room turn bound as the room child with the host's generation, run under the lease this manager minted and released on exit; four roles share one root and parent with their own requests and leases; a dispatch from a participant's shell bound one link deeper with the room still the root; a consult a chat turn of its own; a forged record in the agent's variables neither widens the binding nor reaches the process; a revoked consult lease stops the consult; a policy that flips after the moderator refuses the participant; a blank ownerEpoch refused before the authority and journaled; an escalating consult admitted on and stamped with the record it carries, not the planted one; on an enrolled desktop over the real adapter and client the room turn is refused unavailable naming 'a delegation chain of 2' and CP-03 with nothing spawned and the endpoint never asked an execution",
+			"Durable ownership (workflows, host-adapter, service): a first claim offers epoch 0 and a nonce and holds the RECEIPT's epoch and token; a restarted host re-offers the held values and is confirmed as the one owner; a replayed attempt holds one record; two installations contend and exactly one holds a fence at the end, the fenced one fenced again after restart; a fenced offline holder keeps nothing; offline holding is what the registry last confirmed and cannot be widened on the unreachable claim; an unknown holder is not an offline holder and reads no fence after restart until confirmed; queued claims behind a fenced one are fenced; no standing, no policy revision, no port and an endpoint serving no such operation (capability-unsupported, CP-03) are refused by name, nothing stripped"
+		]
+	},
+	"skippedTests": [
+		{
+			"test": "integration/mega-maestro/early-pair.test.ts > runs the certifiable pair",
+			"reason": "check not ready; the title names CP-01 (x2), CP-02 and registration-approval (owner mega-maestro); the other 8 early-pair cases pass"
+		},
+		{
+			"test": "shared/maestro-lib/run/start-turn.test.ts > applyWindowsShellRules > .cmd shim under a path with spaces",
+			"reason": "off Windows, as in phases 03 to 06"
+		},
+		{
+			"test": "main/cue/cue-engine-lock.test.ts > token identity > takes over a foreign token naming our PID",
+			"reason": "pre-existing skip, unrelated to this phase"
+		},
+		{
+			"test": "cli/services/batch-processor.test.ts > loop mode > maxLoops",
+			"reason": "pre-existing skip, unrelated to this phase"
+		},
+		{
+			"test": "main/cue/cue-db-integration.test.ts (4 real SQLite cases)",
+			"reason": "pre-existing skips, unrelated to this phase"
+		}
+	],
+	"publicBuildArtifact": {
+		"command": "npm run build:maestro-lib",
+		"sourceRevision": "656547892a7ac762ffe88bb0b35fa1323e626cd1",
+		"sourceDirty": false,
+		"version": "0.9.0",
+		"maestroAppVersion": "1.1.0-RC",
+		"maestroManagedContract": "maestro-managed/1",
+		"tooling": { "node": "26.12.0" },
+		"sha256": {
+			"dist/maestro-lib/index.js": "dbf346ccb88837827e41cc51f8219611a01253c8437f481faef92c7253ee66c0",
+			"dist/maestro-lib/index.d.ts": "b74a2430c659e8bda6f00155a1932874cf7ac0f2039e8f9f242cfa70cf1e75ea"
+		},
+		"note": "the library entry now exports autorun/attribution, managed/delegation and managed/workflows; index.d.ts is the unchanged re-export barrel and the new declarations live under types/; the evidence commit after this build moves HEAD, so the next phase first sees one Maestro-owned 'maestro-lib stale' dependency that a rebuild clears"
+	},
+	"supportMatrix": [
+		{
+			"surface": "desktop Auto Run (batch and goal runs)",
+			"os": "macOS (Darwin 27, observed)",
+			"managed": "implemented at the sink; refused on this host",
+			"evidence": "lineage built once per run in useBatchRunner / useGoalRunner, one request per task or iteration, admitted per attempt at ProcessManager.admitSpawn with the fence claimed through the port's producer; serveSpawn.test.ts, useAgentExecution.test.ts, useBatchProcessor.test.ts, useGoalRunner.test.ts",
+			"limits": "an enrolled desktop refuses every attempt unavailable / capability-unsupported naming CP-03 (the producer has no workflow operation) with the reason in the run's error pause; the background synopsis spawn carries no lineage; standalone unchanged"
+		},
+		{
+			"surface": "maestro-cli host Auto Run (headless)",
+			"os": "macOS (observed); any OS by construction",
+			"managed": "implemented; refused on this host",
+			"evidence": "createRuntimeAutoRun builds the workflow identity per launch and the runner claims the fence per attempt through MaestroRuntime.claimWorkflowFence over createWorkflowOwnership; autorun.test.ts, autorun-turns.test.ts, host-adapter.test.ts",
+			"limits": "an enrolled host refuses every attempt naming CP-03; an injected authority with no host adapter is refused 'No workflow owner producer is attached'; standalone unchanged"
+		},
+		{
+			"surface": "Cue prompt run (desktop and standalone engine)",
+			"os": "macOS",
+			"managed": "implemented; refused on this host",
+			"evidence": "CueRunActionDeps.managed on both runners, admitted per firing on owner / pipeline / event / target, fence claimed per firing; cue-run-router.managed.test.ts, cue-process-lifecycle.managed.test.ts, cue-standalone-engine.test.ts, host-cue.test.ts",
+			"limits": "an enrolled desktop or maestro-cli host refuses every firing naming CP-03; a bare cue engine start on an enrolled machine is refused 'holds no managed standing'; standalone unchanged"
+		},
+		{
+			"surface": "Cue shell run (action: command / mode: shell)",
+			"os": "macOS",
+			"managed": "implemented as its own sink; route unsupported",
+			"evidence": "admitCueShell gates the final command, resources and target before spawn; cueShellRouteSupport keeps the shell route unsupported under management so a managed firing is refused with no local fallback; cue-shell-executor.test.ts, dispatch.test.ts",
+			"limits": "a positive managed shell run needs a qualified shell route producer; the tests reach past the route refusal only through the declared route-table double"
+		},
+		{
+			"surface": "Cue CLI run (mode: cli, nested maestro-cli dispatch)",
+			"os": "macOS",
+			"managed": "unsupported (standalone implemented)",
+			"evidence": "the initiator context reaches the spawn sink on every path (dispatch forwards it, the WS handlers narrow it, the renderer carries it, the queued item and the retry keep it, the sink binds the child and stamps the process); cue-cli-executor.test.ts, dispatch.test.ts, messageHandlers.test.ts, useRemoteHandlers.test.ts, useRemoteIntegration.test.ts, agentStore.test.ts, retryStore.test.ts, serveSpawn.test.ts",
+			"limits": "cueCliRouteSupport() stays unsupported under management because no test yet runs a real Cue mode: cli courier through runDispatch against the desktop handler chain end to end; the sibling adapter refuses any delegation chain (context-mismatch), so there is no producer to admit it against either"
+		},
+		{
+			"surface": "consults (maestro-cli ask, @mention) headless",
+			"os": "macOS",
+			"managed": "implemented; refused on this host",
+			"evidence": "the consult is a child of the asking turn under intersectDelegationScope, write access delegatedWritable; consults.test.ts, background-turns.test.ts",
+			"limits": "a managed runtime refuses the consult unavailable (the host adapter answers unavailable for a nonempty chain, CP-03); a managed initiator on a standalone runtime is refused"
+		},
+		{
+			"surface": "group chat (moderator, participant, synthesis, recovery, background) desktop and headless",
+			"os": "macOS",
+			"managed": "implemented; refused on this host",
+			"evidence": "spawnGroupChatAgent hands the turn to the real ProcessManager with the room lineage; background-turns binds moderator and participant turns; spawnGroupChatAgent.test.ts (real manager, real adapter and client over the fake daemon), background-turns.test.ts, groupchat/spawn.test.ts",
+			"limits": "an enrolled desktop refuses the room turn unavailable naming the delegation chain and CP-03 with nothing spawned"
+		},
+		{
+			"surface": "durable workflow ownership (maestro-managed-workflows.json)",
+			"os": "any (files and a port)",
+			"managed": "implemented against the transcribed CP-03 contract; no producer",
+			"evidence": "workflows.test.ts (23 cases incl. restart, replay, concurrent owner, offline holder, unknown holder), service.test.ts, host-adapter.test.ts; one record shared by the desktop's Auto Run and Cue fences and by a maestro-cli host's Cue firing and Auto Run",
+			"limits": "the sibling endpoint dispatches no workflow operation, so every real claim is refused capability-unsupported naming CP-03; an unknown holder is never read as a fence"
+		},
+		{
+			"surface": "any",
+			"os": "Windows, Linux",
+			"managed": "not observed locally",
+			"evidence": "macOS only in this run (plus the Linux container for the real endpoint); the CI matrix runs on the pushed branch",
+			"limits": "the Windows .cmd shim test is skipped off Windows"
+		}
+	],
+	"positiveAcceptanceMatrix": {
+		"autorun-lineage-admitted": {
+			"required": true,
+			"passed": false,
+			"outcomeRequired": "A desktop or headless Auto Run attempt admitted on its lineage and the registry's fence through the real endpoint, and one refused with zero effect",
+			"state": "The refusal half and the admitted half are both proven at the real sinks over the real lease authority with the policy table and the registry as declared doubles; through the real endpoint the attempt ends unavailable (no workflow operation, CP-03; unenrolled, CP-04). Not passed; mock-only is not counted."
+		},
+		"cue-firing-admitted": {
+			"required": true,
+			"passed": false,
+			"outcomeRequired": "A Cue prompt firing admitted per firing on its owner, pipeline, event and target through the real endpoint, and a shell and a CLI firing governed at their sinks",
+			"state": "Prompt admission, the shell sink and the nested-dispatch carriage are built and exercised; the shell route and the managed CLI route stay unsupported by the tables; nothing admitted through the real endpoint. Not passed."
+		},
+		"delegation-preserved": {
+			"required": true,
+			"passed": false,
+			"outcomeRequired": "A nested dispatch and a consult admitted as children of their initiator through a real delegation authority, with a read-only initiator unable to widen",
+			"state": "The chain is preserved end to end and intersected at the sink; the narrowing is proven; the sibling adapter denies any delegation chain (context-mismatch) so there is no producer. Not passed."
+		},
+		"group-chat-authority": {
+			"required": true,
+			"passed": false,
+			"outcomeRequired": "A room's moderator and participant turns admitted on the room lineage through the real endpoint",
+			"state": "Admitted at the real ProcessManager over the local authority; refused unavailable on the real adapter naming CP-03. Not passed."
+		},
+		"durable-ownership-fenced": {
+			"required": true,
+			"passed": false,
+			"outcomeRequired": "A workflow owner fenced and re-fenced by the real registry across retry, restart and offline, with a second owner refused",
+			"state": "Proven against a stateful registry double in the endpoint's shapes; the real registry does not exist (CP-03). An unknown holder is never counted as a fence. Not passed."
+		}
+	},
+	"openDependencies": [
+		{
+			"id": "CP-01",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no contracts pin and no clean Linux application artifact (pair check unchanged from phase 04; sibling still d5143a6 with 935 dirty entries)"
+		},
+		{
+			"id": "CP-02",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "createMaestroAdapter still unsupported"
+		},
+		{
+			"id": "CP-03",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "the endpoint socket server dispatches no workflow (owner/epoch/fence) operation and no per-effect operation, and the runtime adapter refuses any delegation chain or workflow context as context-mismatch; Maestro consumes the transcribed contract and refuses by name until the producers exist"
+		},
+		{
+			"id": "CP-04",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no enrollment or execution provisioning (the container daemon reports management unenrolled; every real step denied unauthenticated)"
+		},
+		{
+			"id": "registration-approval",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no API/console producer"
+		},
+		{
+			"id": "maestro follow-ups",
+			"owner": "maestro (phase 08+)",
+			"status": "open",
+			"detail": "an end-to-end Cue mode: cli courier test before cueCliRouteSupport() flips under management; lineage on the background synopsis spawn; a qualified shell route producer before the Cue shell route flips; the phase 06 follow-ups (remaining processManager.spawn callers, per-message input admission, OpenCode against a real server) still stand"
+		}
+	],
+	"preExistingEnvironmentFailures": "smol-toml and @serenity-kit/opaque are absent from node_modules; they break three tsc files and seven test files identically at the base revision. Fix: npm install. Left for the user.",
+	"scratch": "Command outputs, the pair check and the pair run live under .maestro/playbooks/Working/07-verify/ and .maestro/playbooks/Working/pair-20261022T004743/ (gitignored). No untracked file was added to the source tree by this phase; the phase 06 scratch test was removed in MRC-07-01C."
+}
