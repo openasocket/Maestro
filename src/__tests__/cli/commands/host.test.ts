@@ -290,6 +290,59 @@ describe('maestro-cli host', () => {
 			);
 		});
 
+		it('says what managed standing the host attests, and that a standalone host attests none', () => {
+			expect(formatHostStatus(report())).toContain(
+				'Managed: none reported (standalone, or no enrollment record)'
+			);
+			const managed = {
+				contractVersion: 'maestro-managed/1',
+				installationId: 'inst-1',
+				runtimeId: 'host-812',
+				processEpoch: 'epoch-1',
+				tenantId: 'tenant-1',
+				orgId: 'org-1',
+				authorityId: 'endpoint-abc',
+				policyRevision: 3,
+				authority: 'none' as const,
+				routes: [
+					{ providerId: 'claude-code', route: 'ssh', managed: 'unverified' as const },
+					{ providerId: 'hermes', route: 'ssh', managed: 'unsupported' as const },
+				],
+			};
+			expect(formatHostStatus(report({ managed }))).toContain(
+				'Managed: tenant tenant-1 / org org-1, authority none, policy revision 3; SSH arrivals confined for no provider'
+			);
+			const confined = {
+				...managed,
+				authority: 'registered' as const,
+				policyRevision: null,
+				routes: [{ providerId: 'codex', route: 'ssh', managed: 'implemented' as const }],
+			};
+			expect(formatHostStatus(report({ managed: confined }))).toContain(
+				'authority registered, policy revision none; SSH arrivals confined for codex'
+			);
+		});
+
+		it('puts the attestation in the JSON a script, or a probing desktop, reads', async () => {
+			const managed = {
+				contractVersion: 'maestro-managed/1',
+				installationId: 'inst-1',
+				runtimeId: 'host-812',
+				processEpoch: 'epoch-1',
+				tenantId: 'tenant-1',
+				orgId: 'org-1',
+				authorityId: 'endpoint-abc',
+				policyRevision: 3,
+				authority: 'none' as const,
+				routes: [],
+			};
+			await hostStatus(
+				{ dataDir: dir, json: true },
+				deps({ requestStatus: vi.fn(async () => report({ managed })) })
+			);
+			expect(JSON.parse(out.join('\n'))).toMatchObject({ running: true, managed });
+		});
+
 		it('reports no host with the not-running exit code', async () => {
 			await hostStatus(
 				{ dataDir: dir },

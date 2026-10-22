@@ -15,8 +15,10 @@
  * host's expectation from its sealed enrollment and binds the identity to the
  * launch target or refuses by name, and the launch then runs nowhere. Not a
  * remote producer: a remote runtime of this build attests `ssh` as
- * `unverified`, so every real remote is refused by its own word, and the
- * headless host does not yet report `managed` at all (MRC-08-04A).
+ * `unverified`, so every real remote is refused by its own word. The host's
+ * side of the attestation is `hostManagedStanding` (`runtime/server.ts`): a
+ * headless host with a composed adapter reports `managed`; `maestro-cli host
+ * start` composes none yet, so a real detached host still reports none.
  */
 
 import { execFileNoThrow, type ExecResult } from '../../shared/maestro-lib/launch/exec-file';
@@ -91,7 +93,8 @@ export function readRemoteAttestation(
 		};
 	}
 	if (parsed.managed === undefined || parsed.managed === null) {
-		const reason = 'the Maestro runtime on the remote reports no managed standing (MRC-08-04A)';
+		const reason =
+			'the Maestro runtime on the remote reports no managed standing (it holds no enrollment, or predates the attestation)';
 		return { status: 'unattested', reason };
 	}
 	return { status: 'attested', identity: parsed.managed, via: REMOTE_ATTESTATION_VIA };

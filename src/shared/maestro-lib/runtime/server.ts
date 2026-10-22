@@ -34,6 +34,15 @@ import {
 	type HostWork,
 } from '../client/host-control';
 import { logger } from '../host';
+import {
+	SSH_REMOTE_ARRIVAL_ROUTE,
+	type SshRemoteEndpointIdentity,
+	type SshRemoteRouteRow,
+} from '../launch/ssh-remote-resolver';
+import { managedAuthorityId, type ManagedHostAdapter } from '../managed/host-adapter';
+import { MANAGED_CONTRACT_VERSION, type ManagedInstallationIdentity } from '../managed/types';
+import { providerRouteSupport } from '../providers/capabilities';
+import { getVisibleAgentDefinitions } from '../providers/definitions';
 import type { MaestroRuntime } from './index';
 import { autoRunStateFrame, createFrameState, framesForEvent, type Frame } from './server-frames';
 import { createRequestHandler } from './server-requests';
@@ -80,6 +89,51 @@ function sameSecret(expected: string, given: string | undefined): boolean {
 function refuse(socket: Duplex, status: string): void {
 	socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
 	socket.destroy();
+}
+
+/**
+ * What this host attests of its managed standing (MRC-08-04A): `HostStatusReport.managed`, which
+ * a desktop's remote endpoint probe reads over SSH before it hands a managed launch here. From
+ * the host's OWN standing only: the installation the runtime computed, the enrollment record the
+ * adapter's custody holds (tenant, org, and the authority id that record implies), the policy
+ * the adapter applies, `registered` only while the enrollment lifecycle says so in this process,
+ * and the `ssh` row of this build's own route table for every provider the runtime serves. No
+ * adapter, no record, or a custody view short of `ok` is no attestation at all (a standalone
+ * runtime says nothing), and an enrolled host that is not attached attests `authority: 'none'`.
+ * Nothing here is flipped by a flag or a test: a peer refuses this host by this word, and a host
+ * of this build attests `ssh` as `unverified` until a producer here admits SSH arrivals at its sink.
+ */
+export function hostManagedStanding(input: {
+	installation: ManagedInstallationIdentity;
+	host: Pick<ManagedHostAdapter, 'identity' | 'policy' | 'status'> | null;
+	/** The providers the runtime serves. Default: every visible provider definition. */
+	providerIds?: readonly string[];
+}): SshRemoteEndpointIdentity | undefined {
+	const { host } = input;
+	if (!host) return undefined;
+	const view = host.identity.read();
+	if (view.status !== 'ok' || !view.record) return undefined;
+	const providerIds =
+		input.providerIds ?? getVisibleAgentDefinitions().map((definition) => definition.id);
+	const routes: SshRemoteRouteRow[] = [];
+	for (const providerId of providerIds) {
+		const row = providerRouteSupport(providerId).find(
+			(entry) => entry.route === SSH_REMOTE_ARRIVAL_ROUTE
+		);
+		if (row) routes.push({ providerId, route: row.route, managed: row.managed, note: row.note });
+	}
+	return {
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		installationId: input.installation.installationId,
+		runtimeId: input.installation.runtimeId,
+		processEpoch: input.installation.processEpoch,
+		tenantId: view.record.tenantId,
+		orgId: view.record.orgId,
+		authorityId: managedAuthorityId(view.record),
+		policyRevision: host.policy().policyRevision,
+		authority: host.status().authority === 'registered' ? 'registered' : 'none',
+		routes,
+	};
 }
 
 export async function startRuntimeServer(options: RuntimeServerOptions): Promise<RuntimeServer> {
@@ -129,6 +183,11 @@ export async function startRuntimeServer(options: RuntimeServerOptions): Promise
 	const statusReport = (): HostStatusReport => {
 		const described = options.describe?.() ?? { cue: { state: 'disabled' as const } };
 		const startedAt = Date.parse(runtime.lock.startedAt);
+		// Read per request: the adapter's custody and standing can change while the host runs.
+		const managed = hostManagedStanding({
+			installation: runtime.installation,
+			host: runtime.managedHost,
+		});
 		return {
 			pid: runtime.lock.pid,
 			startedAt,
@@ -138,6 +197,7 @@ export async function startRuntimeServer(options: RuntimeServerOptions): Promise
 			clients: sockets.size,
 			work: work(described.cueRuns),
 			cue: described.cue,
+			...(managed ? { managed } : {}),
 		};
 	};
 

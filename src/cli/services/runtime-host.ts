@@ -21,6 +21,7 @@ import {
 	type HostWork,
 	type MaestroPaths,
 	type MaestroRuntime,
+	type MaestroRuntimeOptions,
 	type RuntimeRefusal,
 	type RuntimeServer,
 } from '../../shared/maestro-lib';
@@ -43,6 +44,15 @@ export interface RuntimeHostOptions {
 	version?: string;
 	/** Port to listen on. Default 0: any free one. */
 	port?: number;
+	/**
+	 * The managed standing this host runs under (`createMaestroRuntime`'s `managed`): the host
+	 * adapter over this process's identity custody and endpoint socket, when the caller composed
+	 * one. With it the runtime admits as that host and `host status` attests the standing
+	 * (`HostStatusReport.managed`); without it an enrolled data directory runs
+	 * enrolled-unavailable and attests nothing. `maestro-cli host start` composes none yet: it
+	 * has no identity custody off Electron, so a real detached host still reports no `managed`.
+	 */
+	managed?: MaestroRuntimeOptions['managed'];
 	log(line: string): void;
 }
 
@@ -119,6 +129,7 @@ export async function startRuntimeHost(
 		productionDataDir: paths.productionDataDir,
 		mode: 'host',
 		turns: resolveRuntimeTurnOptions(options.moduleDirectory),
+		...(options.managed ? { managed: options.managed } : {}),
 	});
 	if (!started.ok) throw new HostStartError(started.refusal);
 	const { runtime } = started;

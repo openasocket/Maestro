@@ -16,13 +16,41 @@ import { writeCliServerInfoTo } from '../../client/discovery';
 import { requestHostStatus, requestHostStop } from '../../client/host-control';
 import type { ClientResult, MaestroClient, MaestroEvent } from '../../client/types';
 import { createWsMaestroClient } from '../../client/ws-client';
+import { sshRemoteEndpointProblems } from '../../launch/ssh-remote-resolver';
+import type {
+	ManagedEnrollmentStatus,
+	ManagedIdentityRecord,
+	ManagedIdentityView,
+} from '../../managed/endpoint-port';
+import { createManagedHostAdapter, managedAuthorityId } from '../../managed/host-adapter';
+import { MANAGED_CONTRACT_VERSION } from '../../managed/types';
+import { getVisibleAgentDefinitions } from '../../providers/definitions';
 import { createMaestroRuntime, type MaestroRuntime, type RuntimeDeps } from '../index';
-import { startRuntimeServer, type RuntimeServer } from '../server';
+import { hostManagedStanding, startRuntimeServer, type RuntimeServer } from '../server';
 import type { WatchDirectory } from '../settings-watch';
 
 const T0 = Date.parse('2026-10-04T12:00:00Z');
 const TOKEN = 'test-token';
 const SECRET = 'test-secret';
+
+const watchDirectory: WatchDirectory = () => ({ close: () => undefined });
+
+function deps(): Partial<RuntimeDeps> {
+	let id = 0;
+	let now = 1_000;
+	return {
+		pid: 100,
+		now: () => T0,
+		bootTime: () => T0 - 3_600_000,
+		isPidAlive: (pid) => pid === 100,
+		hostname: () => 'testhost',
+		rules: { newId: () => `id-${++id}`, now: () => ++now, random: () => 0 },
+		checkCwd: () => null,
+		readTabDefaults: async () => DEFAULT_TAB_DEFAULTS,
+		watchDirectory,
+		probeBinary: async (binaryName) => ({ exists: true, path: `/fake/bin/${binaryName}` }),
+	};
+}
 
 function value<T>(result: ClientResult<T>): T {
 	if (!result.ok) throw new Error(`expected ok, got ${result.error.code}: ${result.error.message}`);
@@ -50,25 +78,6 @@ describe('runtime server', () => {
 	let inFlight: { turns: number };
 	/** Cue runs the host process says are in flight; undefined for a host that reports none. */
 	let cueRuns: number | undefined;
-
-	const watchDirectory: WatchDirectory = () => ({ close: () => undefined });
-
-	function deps(): Partial<RuntimeDeps> {
-		let id = 0;
-		let now = 1_000;
-		return {
-			pid: 100,
-			now: () => T0,
-			bootTime: () => T0 - 3_600_000,
-			isPidAlive: (pid) => pid === 100,
-			hostname: () => 'testhost',
-			rules: { newId: () => `id-${++id}`, now: () => ++now, random: () => 0 },
-			checkCwd: () => null,
-			readTabDefaults: async () => DEFAULT_TAB_DEFAULTS,
-			watchDirectory,
-			probeBinary: async (binaryName) => ({ exists: true, path: `/fake/bin/${binaryName}` }),
-		};
-	}
 
 	function publish(overrides: Partial<{ token: string; cliSecret: string }> = {}): void {
 		writeCliServerInfoTo(dir, {
@@ -298,6 +307,8 @@ describe('runtime server', () => {
 				cue: { state: 'disabled' },
 			});
 			expect(report.lock.mode).toBe('host');
+			// A standalone host attests no managed standing at all: the key is absent, not null.
+			expect('managed' in report).toBe(false);
 		});
 
 		it('refuses to stop while a turn is in flight, and stops when forced', async () => {
@@ -341,5 +352,199 @@ describe('runtime server', () => {
 			expect(await requestHostStop(dir, {})).toEqual({ stopping: true });
 			await vi.waitFor(() => expect(stopRequests).toBe(1));
 		});
+	});
+});
+
+/**
+ * The managed standing a host attests (MRC-08-04A): an enrolled runtime served by the real server,
+ * with a host adapter over an in-memory custody view and an injected lifecycle standing (declared
+ * doubles; nothing opens an endpoint socket). What is proven: the report carries the standing from
+ * the host's own custody and policy, `registered` only while the lifecycle says so, the ssh rows are
+ * this build's own and read `unverified`, a custody view short of `ok` attests nothing, and the
+ * desktop's rule refuses this build's host by its own word.
+ */
+describe('runtime server managed standing', () => {
+	let dir: string;
+	let runtime: MaestroRuntime;
+	let server: RuntimeServer;
+	let view: ManagedIdentityView;
+	let authority: ManagedEnrollmentStatus['authority'];
+
+	function record(installationId: string): ManagedIdentityRecord {
+		return {
+			version: 1,
+			installationId,
+			tenantId: 'tenant-1',
+			orgId: 'org-1',
+			enrollmentId: 'enr-1',
+			endpoint: {
+				socketPath: '/tmp/endpoint.sock',
+				bindingDigest: 'a'.repeat(64),
+				trustRootDigest: null,
+			},
+			management: 'enrolled',
+			registration: null,
+			policy: { desiredRevision: 3, appliedRevision: 3, observedAt: new Date(T0).toISOString() },
+			enrolledAt: new Date(T0).toISOString(),
+			updatedAt: new Date(T0).toISOString(),
+		};
+	}
+	const okView = (r: ManagedIdentityRecord): ManagedIdentityView => ({
+		status: 'ok',
+		reason: null,
+		message: null,
+		record: r,
+	});
+	const standing = (): ManagedEnrollmentStatus => ({
+		identity: view,
+		connection: null,
+		endpoint: null,
+		authority,
+		reason: authority === 'registered' ? null : 'not attached in this process',
+		pendingApproval: null,
+		lastDenial: null,
+	});
+
+	beforeEach(async () => {
+		dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-server-managed-'));
+		fs.writeFileSync(
+			path.join(dir, 'maestro-sessions.json'),
+			JSON.stringify({ sessions: [], activeSessionId: null })
+		);
+		authority = 'none';
+		const started = await createMaestroRuntime({
+			dataDir: dir,
+			mode: 'host',
+			managed: {
+				host: (installation) => {
+					view = okView(record(installation.installationId));
+					return createManagedHostAdapter({
+						installation,
+						identity: { read: () => view },
+						endpoint: null,
+						status: standing,
+						now: () => T0,
+					});
+				},
+			},
+			deps: deps(),
+		});
+		if (!started.ok) throw new Error(`refused: ${started.refusal.message}`);
+		runtime = started.runtime;
+		server = await startRuntimeServer({
+			runtime,
+			token: TOKEN,
+			cliSecret: SECRET,
+			onStopRequested: () => undefined,
+		});
+		writeCliServerInfoTo(dir, {
+			port: server.port,
+			token: TOKEN,
+			pid: process.pid,
+			startedAt: Date.now(),
+			cliSecret: SECRET,
+			hostKind: 'headless',
+		});
+	});
+
+	afterEach(async () => {
+		await server.close();
+		await runtime.connection.close();
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+
+	it('attests the standing from its own custody and policy, with authority none while unattached', async () => {
+		expect(runtime.managedBinding.state().state).toBe('enrolled');
+		const report = await requestHostStatus(dir);
+		expect(report.managed).toBeDefined();
+		const managed = report.managed!;
+		expect(managed).toMatchObject({
+			contractVersion: MANAGED_CONTRACT_VERSION,
+			installationId: runtime.installation.installationId,
+			runtimeId: 'host-100',
+			processEpoch: runtime.installation.processEpoch,
+			tenantId: 'tenant-1',
+			orgId: 'org-1',
+			authorityId: managedAuthorityId(view.record!),
+			policyRevision: 3,
+			authority: 'none',
+		});
+		expect(managed.authorityId).toBe(runtime.managedHost!.authority.authorityId);
+		// The routes are this build's own ssh rows for every provider the runtime serves: one row
+		// per visible provider, each the `ssh` arrival, and none claiming confinement. The row's
+		// `managed` is the confinement column of `providerRouteSupport` (`unsupported` here: the
+		// launch route exists, `standalone` is `unverified`, but nothing confines it on the remote).
+		expect(managed.routes.map((row) => row.providerId)).toEqual(
+			getVisibleAgentDefinitions().map((definition) => definition.id)
+		);
+		for (const row of managed.routes) expect(row.route).toBe('ssh');
+		expect(managed.routes.find((row) => row.providerId === 'claude-code')).toMatchObject({
+			managed: 'unsupported',
+			note: expect.stringContaining('containment on the remote is not proven here'),
+		});
+		expect(managed.routes.find((row) => row.providerId === 'hermes')).toMatchObject({
+			managed: 'unsupported',
+		});
+		expect(managed.routes.some((row) => row.managed === 'implemented')).toBe(false);
+	});
+
+	it('attests registered only while the lifecycle says so, and the report follows the standing', async () => {
+		authority = 'registered';
+		expect((await requestHostStatus(dir)).managed?.authority).toBe('registered');
+		authority = 'none';
+		expect((await requestHostStatus(dir)).managed?.authority).toBe('none');
+	});
+
+	it('attests nothing when the custody view is short of ok, and again once it is', async () => {
+		const ok = view;
+		view = {
+			status: 'untrusted',
+			reason: 'rollback',
+			message: 'The record was rolled back.',
+			record: ok.record,
+		};
+		expect('managed' in (await requestHostStatus(dir))).toBe(false);
+		view = { status: 'none', reason: null, message: null, record: null };
+		expect('managed' in (await requestHostStatus(dir))).toBe(false);
+		view = ok;
+		expect((await requestHostStatus(dir)).managed?.tenantId).toBe('tenant-1');
+	});
+
+	it("is refused by the desktop's own rule, by this build's word, before any launch is handed over", async () => {
+		authority = 'registered';
+		const managed = (await requestHostStatus(dir)).managed;
+		const problems = sshRemoteEndpointProblems(managed, {
+			tenantId: 'tenant-1',
+			orgId: 'org-1',
+			providerId: 'claude-code',
+			policyRevision: 3,
+		});
+		// The shape and the enterprise pass; the only refusal is the route this build does not confine.
+		expect(problems).toHaveLength(1);
+		expect(problems[0]).toContain('does not confine claude-code launches arriving over SSH');
+		expect(problems[0]).toContain('route table says unsupported');
+		// A peer in another enterprise is refused on that too, never admitted on the shape alone.
+		expect(
+			sshRemoteEndpointProblems(managed, {
+				tenantId: 'tenant-2',
+				orgId: 'org-1',
+				providerId: 'claude-code',
+				policyRevision: null,
+			})
+		).toEqual(expect.arrayContaining([expect.stringContaining('tenant tenant-1 / org org-1')]));
+	});
+
+	it('the producer alone: no adapter is no attestation, and the rows follow the providers named', () => {
+		const installation = runtime.installation;
+		expect(hostManagedStanding({ installation, host: null })).toBeUndefined();
+		const host = runtime.managedHost!;
+		const named = hostManagedStanding({ installation, host, providerIds: ['codex', 'hermes'] });
+		expect(named?.routes).toEqual([
+			expect.objectContaining({ providerId: 'codex', route: 'ssh', managed: 'unsupported' }),
+			expect.objectContaining({ providerId: 'hermes', route: 'ssh', managed: 'unsupported' }),
+		]);
+		// An id no definition names has rows too (the capability table answers for any id), still never confined.
+		const unknown = hostManagedStanding({ installation, host, providerIds: ['not-a-provider'] });
+		expect(unknown?.routes.every((row) => row.managed !== 'implemented')).toBe(true);
 	});
 });

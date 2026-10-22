@@ -37,8 +37,12 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * `SshRemoteEndpointIdentity`, `sshRemoteEndpointProblems`,
  * `qualifySshLaunchTarget` (`endpoint` on a remote target, `remote-unqualified`
  * among the unresolved reasons) and `wrapManagedSpawnWithSsh`.
+ * 0.12.0: a host attests its managed standing (`HostStatusReport.managed`,
+ * produced by `hostManagedStanding` in `./runtime/server`): what a peer's
+ * remote endpoint probe reads over SSH. `RuntimeHostOptions.managed` hands a
+ * composed host adapter to `startRuntimeHost`.
  */
-export const MAESTRO_LIB_VERSION = '0.11.0';
+export const MAESTRO_LIB_VERSION = '0.12.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

@@ -9,6 +9,7 @@
 
 import type WebSocket from 'ws';
 import { BridgeConnection } from './bridge-connection';
+import type { SshRemoteEndpointIdentity } from '../launch/ssh-remote-resolver';
 import type { RuntimeLockInfo } from '../runtime/data-dir-lock';
 
 /** A run in flight, as the host reports it. */
@@ -56,6 +57,15 @@ export interface HostStatusReport {
 	clients: number;
 	work: HostWork;
 	cue: HostCueState;
+	/**
+	 * What this host attests of its managed standing (MRC-08-04A): the value a desktop's remote
+	 * endpoint probe reads over SSH (`maestro-cli host status --json`) before it hands a managed
+	 * launch to this machine. Produced from the host's own standing alone (`hostManagedStanding`
+	 * in `runtime/server.ts`); absent from a standalone host, from one with no enrollment record,
+	 * and from a host that predates the attestation. The host's word, never authority: the reader
+	 * applies its own rule (`sshRemoteEndpointProblems`).
+	 */
+	managed?: SshRemoteEndpointIdentity;
 }
 
 export type HostStopReply =

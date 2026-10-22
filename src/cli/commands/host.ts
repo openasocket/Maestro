@@ -442,6 +442,22 @@ function describeWork(work: HostWork): string {
 	return parts.join(', ');
 }
 
+/**
+ * The host's managed standing as it attests it (MRC-08-04A), or that it attests none: a
+ * standalone host, one with no enrollment record, or one that predates the attestation.
+ */
+function describeManaged(managed: HostStatusReport['managed']): string {
+	if (!managed) return 'none reported (standalone, or no enrollment record)';
+	const confined = managed.routes
+		.filter((row) => row.managed === 'implemented')
+		.map((row) => row.providerId);
+	return (
+		`tenant ${managed.tenantId} / org ${managed.orgId}, authority ${managed.authority}, ` +
+		`policy revision ${managed.policyRevision ?? 'none'}; SSH arrivals confined for ` +
+		(confined.length > 0 ? confined.join(', ') : 'no provider')
+	);
+}
+
 export function formatHostStatus(report: HostStatusReport): string {
 	return [
 		`Host: pid ${report.pid}, up ${formatDurationHuman(report.uptimeMs)}${report.version ? `, version ${report.version}` : ''}`,
@@ -449,6 +465,7 @@ export function formatHostStatus(report: HostStatusReport): string {
 		`Clients: ${report.clients}`,
 		`Work: ${describeWork(report.work)}`,
 		`Cue: ${describeCue(report.cue)}`,
+		`Managed: ${describeManaged(report.managed)}`,
 	].join('\n');
 }
 

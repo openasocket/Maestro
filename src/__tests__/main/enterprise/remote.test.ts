@@ -29,8 +29,14 @@ import {
 	REMOTE_ATTESTATION_VIA,
 } from '../../../main/enterprise/remote';
 import type { IdentityRead } from '../../../main/enterprise/identity-store';
+import { sshRemoteEndpointProblems } from '../../../shared/maestro-lib/launch/ssh-remote-resolver';
 import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
-import type { ManagedIdentityRecord } from '../../../shared/maestro-lib/managed/endpoint-port';
+import type {
+	ManagedEnrollmentStatus,
+	ManagedIdentityRecord,
+	ManagedIdentityView,
+} from '../../../shared/maestro-lib/managed/endpoint-port';
+import { hostManagedStanding } from '../../../shared/maestro-lib/runtime/server';
 import type { SshRemoteConfig } from '../../../shared/types';
 
 const T0 = Date.parse('2026-10-22T12:00:00Z');
@@ -142,7 +148,53 @@ describe('readRemoteAttestation', () => {
 		expect(noManaged.status).toBe('unattested');
 		if (noManaged.status !== 'unattested') throw new Error('expected unattested');
 		expect(noManaged.reason).toContain('reports no managed standing');
-		expect(noManaged.reason).toContain('MRC-08-04A');
+		expect(noManaged.reason).toContain('holds no enrollment, or predates the attestation');
+	});
+
+	it("reads a real host's report as attested, and the rule refuses this build's host by its own word", () => {
+		// The producer the headless host answers `host status` with (MRC-08-04A), over an in-memory
+		// custody view and a registered standing, printed the way `hostStatus --json` prints it.
+		const view: ManagedIdentityView = {
+			status: 'ok',
+			reason: null,
+			message: null,
+			record: record({ installationId: 'inst-remote' }),
+		};
+		const standing: ManagedEnrollmentStatus = {
+			identity: view,
+			connection: null,
+			endpoint: null,
+			authority: 'registered',
+			reason: null,
+			pendingApproval: null,
+			lastDenial: null,
+		};
+		const managed = hostManagedStanding({
+			installation: {
+				installationId: 'inst-remote',
+				runtimeId: 'host-42',
+				processEpoch: 'epoch-remote',
+			},
+			host: {
+				identity: { read: () => view },
+				policy: () => ({ sources: [], policyRevision: 3 }),
+				status: () => standing,
+			},
+		});
+		expect(managed).toBeDefined();
+		const read = readRemoteAttestation({ stdout: running(managed), stderr: '', exitCode: 0 });
+		expect(read).toEqual({ status: 'attested', identity: managed, via: REMOTE_ATTESTATION_VIA });
+		if (read.status !== 'attested') throw new Error('expected attested');
+		const problems = sshRemoteEndpointProblems(read.identity, {
+			tenantId: 'tenant-1',
+			orgId: 'org-1',
+			providerId: 'claude-code',
+			policyRevision: 3,
+		});
+		// Shape, enterprise, authority and policy all pass; the one refusal is the ssh row this
+		// build attests `unsupported` (its confinement column; the route itself is `unverified`).
+		expect(problems).toHaveLength(1);
+		expect(problems[0]).toContain('route table says unsupported');
 	});
 
 	it('is attested with the raw managed value, unread, when a running host reports one', () => {

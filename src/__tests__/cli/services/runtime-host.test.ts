@@ -16,11 +16,14 @@ import {
 	type RunningHost,
 } from '../../../cli/services/runtime-host';
 import {
+	createManagedHostAdapter,
 	createWsMaestroClient,
 	readCliServerInfoFrom,
 	requestHostStatus,
 	requestHostStop,
 	writeCliServerInfoTo,
+	type ManagedEnrollmentStatus,
+	type ManagedIdentityView,
 } from '../../../shared/maestro-lib';
 
 describe('startRuntimeHost', () => {
@@ -113,6 +116,71 @@ describe('startRuntimeHost', () => {
 			pid: process.pid,
 			version: '1.2.3',
 			cue: { state: 'disabled' },
+		});
+		// No managed host composed: a standalone host attests no managed standing.
+		expect('managed' in report).toBe(false);
+	});
+
+	it('hands a composed managed host to the runtime, which then attests its standing in status', async () => {
+		let view: ManagedIdentityView = { status: 'none', reason: null, message: null, record: null };
+		const standing = (): ManagedEnrollmentStatus => ({
+			identity: view,
+			connection: null,
+			endpoint: null,
+			authority: 'none',
+			reason: 'not attached in this process',
+			pendingApproval: null,
+			lastDenial: null,
+		});
+		const host = await startRuntimeHost(
+			{
+				...options(),
+				managed: {
+					host: (installation) => {
+						view = {
+							status: 'ok',
+							reason: null,
+							message: null,
+							record: {
+								version: 1,
+								installationId: installation.installationId,
+								tenantId: 'tenant-1',
+								orgId: 'org-1',
+								enrollmentId: 'enr-1',
+								endpoint: {
+									socketPath: '/tmp/endpoint.sock',
+									bindingDigest: 'a'.repeat(64),
+									trustRootDigest: null,
+								},
+								management: 'enrolled',
+								registration: null,
+								policy: { desiredRevision: 2, appliedRevision: 2, observedAt: null },
+								enrolledAt: '2026-10-22T12:00:00.000Z',
+								updatedAt: '2026-10-22T12:00:00.000Z',
+							},
+						};
+						return createManagedHostAdapter({
+							installation,
+							identity: { read: () => view },
+							endpoint: null,
+							status: standing,
+						});
+					},
+				},
+			},
+			noCue
+		);
+		running.push(host);
+		expect(host.runtime.managedHost).not.toBeNull();
+		expect(host.runtime.managedBinding.state().state).toBe('enrolled');
+		// Enrolled but unattached: the standing is attested, with no authority claimed.
+		expect((await requestHostStatus(dir)).managed).toMatchObject({
+			installationId: host.runtime.installation.installationId,
+			runtimeId: `host-${process.pid}`,
+			tenantId: 'tenant-1',
+			orgId: 'org-1',
+			policyRevision: 2,
+			authority: 'none',
 		});
 	});
 
