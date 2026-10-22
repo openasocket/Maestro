@@ -46,8 +46,12 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * variant of `ManagedDispatchTarget`; `managedSshEndpointRef` reads it off an
  * attested `SshRemoteEndpointIdentity`), so a lease says which remote
  * installation and authority a launch goes to.
+ * 0.14.0: a host that attests no standing can say why (`HostStatusReport.managedUnavailable`,
+ * produced by `hostManagedUnavailable` in `./runtime/server` from the host adapter's own
+ * custody view or the host process's reason for composing none; `describe().managedUnavailable`
+ * on `startRuntimeServer`).
  */
-export const MAESTRO_LIB_VERSION = '0.13.0';
+export const MAESTRO_LIB_VERSION = '0.14.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

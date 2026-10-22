@@ -159,7 +159,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **Assembling the prompt, arguments and launch request of a chat turn:** `assembleTurn()` in `src/shared/maestro-lib/turns/assemble.ts`
 - **Running a chat turn with no desktop (send, queue, stop, per-tab events):** `createRuntimeTurns()` in `src/shared/maestro-lib/runtime/turns.ts`
 - **Recording a finished turn (transcript, History, usage):** `createTurnRecorder()`, `buildTurnTranscript()` in `src/shared/maestro-lib/turns/record-turn.ts`
-- **Serving a runtime to other processes (`maestro-cli host`):** `startRuntimeServer()` in `src/shared/maestro-lib/runtime/server.ts`
+- **Serving a runtime to other processes (`maestro-cli host`):** `startRuntimeServer()` in `src/shared/maestro-lib/runtime/server.ts`; the detached host's custody `composeHostManaged()`, `resolveHostCustody()` in `src/cli/services/host-managed.ts`
 - **Admitting a desktop spawn at the process sink:** `admitSpawn()`, `spawnAdmitted()`, `buildSpawnRequestSnapshot()` in `src/main/process-manager/ProcessManager.ts`; `ProcessSpawnAuthorityPort` in `src/main/process-manager/types.ts`; `createProcessSpawnAuthority()` in `src/main/enterprise/spawn-authority.ts`
 - **Deciding an effect a running managed turn reaches for:** `ManagedEffect`, `ManagedEffectAuthority`, `effectGranted()`, `unavailableEffectAuthority()` in `src/shared/maestro-lib/managed/effects.ts`; `codexRequestEffect()` in `src/shared/maestro-lib/codex/server-requests.ts`
 - **The lease gate at a sink (check, bind, release, revoke):** `leaseAdmission(authority, lease)` in `src/shared/maestro-lib/run/start-turn.ts` (never a hand-rolled `DispatchAdmission`)

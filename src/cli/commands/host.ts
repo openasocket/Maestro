@@ -13,6 +13,8 @@ import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import type { ManagedEnrollmentStatus } from '../../shared/maestro-lib';
+
 import { formatDurationHuman } from '../../shared/duration';
 import {
 	RUNTIME_LOCK_SPEC,
@@ -34,6 +36,7 @@ import {
 	type RuntimeLockMode,
 } from '../../shared/maestro-lib';
 import { ExitCode } from '../exit-codes';
+import { composeHostManaged, type HostManagedComposition } from '../services/host-managed';
 import { startRuntimeHost, type RunningHost } from '../services/runtime-host';
 
 export interface HostCommandOptions {
@@ -263,19 +266,27 @@ async function startDetached(
 	for (let waited = 0; waited < START_WAIT_MS; waited += POLL_MS) {
 		const info = readCliServerInfoFrom(paths.userDataDir);
 		if (info?.pid === child.pid && deps.isPidAlive(child.pid)) {
-			// Cue starts before the host publishes, so its state is settled by now.
-			let cue: HostCueState | undefined;
-			let cueLine: string;
+			// Cue and the managed standing settle before the host publishes, so both are known now.
+			let report: HostStatusReport | undefined;
+			let lines: string;
 			try {
-				cue = (await deps.requestStatus(paths.userDataDir)).cue;
-				cueLine = describeCueAtStart(cue);
+				report = await deps.requestStatus(paths.userDataDir);
+				lines = `${describeCueAtStart(report.cue)}\nManaged: ${describeManaged(report.managed, report.managedUnavailable)}`;
 			} catch (error) {
-				cueLine = `Cue: unknown (the host did not answer a status request: ${error instanceof Error ? error.message : String(error)})`;
+				lines = `Cue: unknown (the host did not answer a status request: ${error instanceof Error ? error.message : String(error)})`;
 			}
 			say(
 				options,
-				{ started: true, pid: info.pid, port: info.port, log: logFile, ...(cue ? { cue } : {}) },
-				`Host started (pid ${info.pid}, port ${info.port}). Log: ${logFile}\n${cueLine}`
+				{
+					started: true,
+					pid: info.pid,
+					port: info.port,
+					log: logFile,
+					...(report ? { cue: report.cue } : {}),
+					...(report?.managed ? { managed: report.managed } : {}),
+					...(report?.managedUnavailable ? { managedUnavailable: report.managedUnavailable } : {}),
+				},
+				`Host started (pid ${info.pid}, port ${info.port}). Log: ${logFile}\n${lines}`
 			);
 			return;
 		}
@@ -370,6 +381,14 @@ async function runForeground(
 	const logFile = hostLogFilePath(paths.userDataDir);
 	setMaestroLibLogger(createFileLogger(logFile));
 
+	// The managed standing this process can hold (MRC-08-04C): composed over the data directory's
+	// sealed record when this process has protected custody for it, or refused by name, once, here.
+	const standing = composeHostManaged({
+		userDataDir: paths.userDataDir,
+		version: cliVersion ?? 'unknown',
+	});
+	if (!standing.composed) console.log(`Managed standing: none composed (${standing.reason})`);
+
 	let host;
 	try {
 		host = await startRuntimeHost({
@@ -377,6 +396,9 @@ async function runForeground(
 			moduleDirectory: __dirname,
 			...(cliVersion ? { version: cliVersion } : {}),
 			...(options.port !== undefined ? { port: Number(options.port) } : {}),
+			...(standing.composed
+				? { managed: standing.managed, managedLifecycle: standing.lifecycle }
+				: { managedUnavailable: standing.reason }),
 			log: (line) => console.log(line),
 		});
 	} catch (error) {
@@ -392,13 +414,33 @@ async function runForeground(
 	process.on('SIGINT', () => shutdown('SIGINT'));
 	process.on('SIGTERM', () => shutdown('SIGTERM'));
 	const cue = host.cue.state();
+	const managedLine = describeComposedStanding(standing);
 	say(
 		options,
-		{ started: true, pid: process.pid, port: host.server.port, cue },
-		`Host started (pid ${process.pid}, port ${host.server.port}).\n${describeCueAtStart(cue)}`
+		{
+			started: true,
+			pid: process.pid,
+			port: host.server.port,
+			cue,
+			...(standing.composed ? {} : { managedUnavailable: standing.reason }),
+		},
+		`Host started (pid ${process.pid}, port ${host.server.port}).\n${describeCueAtStart(cue)}\nManaged: ${managedLine}`
 	);
 	await host.stopped;
 	process.exit(ExitCode.Success);
+}
+
+/** What a foreground start says of the standing it composed, from the lifecycle's own status. */
+function describeComposedStanding(standing: HostManagedComposition): string {
+	if (!standing.composed) return `none reported: ${standing.reason}`;
+	const status: ManagedEnrollmentStatus | null = standing.status();
+	const view = status?.identity;
+	if (!view || view.status === 'none')
+		return 'custody protected, no enrollment record (standalone)';
+	if (view.status !== 'ok' || !view.record) {
+		return `none reported: ${view.message ?? `the identity custody reads ${view.status}`}`;
+	}
+	return `tenant ${view.record.tenantId} / org ${view.record.orgId}, authority ${status.authority}${status.reason ? ` (${status.reason})` : ''}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -443,11 +485,20 @@ function describeWork(work: HostWork): string {
 }
 
 /**
- * The host's managed standing as it attests it (MRC-08-04A), or that it attests none: a
- * standalone host, one with no enrollment record, or one that predates the attestation.
+ * The host's managed standing as it attests it (MRC-08-04A), or that it attests none: with the
+ * reason when the host can say (MRC-08-04C: the custody primitive it is missing, or its own
+ * custody view), otherwise a standalone host, one with no enrollment record, or one that
+ * predates the attestation.
  */
-function describeManaged(managed: HostStatusReport['managed']): string {
-	if (!managed) return 'none reported (standalone, or no enrollment record)';
+function describeManaged(
+	managed: HostStatusReport['managed'],
+	unavailable: HostStatusReport['managedUnavailable']
+): string {
+	if (!managed) {
+		return unavailable
+			? `none reported: ${unavailable}`
+			: 'none reported (standalone, or no enrollment record)';
+	}
 	const confined = managed.routes
 		.filter((row) => row.managed === 'implemented')
 		.map((row) => row.providerId);
@@ -465,7 +516,7 @@ export function formatHostStatus(report: HostStatusReport): string {
 		`Clients: ${report.clients}`,
 		`Work: ${describeWork(report.work)}`,
 		`Cue: ${describeCue(report.cue)}`,
-		`Managed: ${describeManaged(report.managed)}`,
+		`Managed: ${describeManaged(report.managed, report.managedUnavailable)}`,
 	].join('\n');
 }
 

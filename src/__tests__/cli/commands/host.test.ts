@@ -200,6 +200,21 @@ describe('maestro-cli host', () => {
 			});
 		});
 
+		it('says where the managed standing stands once the host is up, and why none when none', async () => {
+			await startedWith(async () => report());
+			expect(out.join('\n')).toContain(
+				'Managed: none reported (standalone, or no enrollment record)'
+			);
+			out.length = 0;
+			// The first start published; a second start on the same directory needs it gone.
+			fs.rmSync(path.join(dir, 'cli-server.json'), { force: true });
+			await startedWith(async () => report({ managedUnavailable: 'no protected seal here' }), true);
+			expect(JSON.parse(out[0])).toMatchObject({
+				started: true,
+				managedUnavailable: 'no protected seal here',
+			});
+		});
+
 		it('does not claim a Cue state it could not read', async () => {
 			await startedWith(async () => {
 				throw new Error('Connection to Maestro timed out');
@@ -321,6 +336,19 @@ describe('maestro-cli host', () => {
 			expect(formatHostStatus(report({ managed: confined }))).toContain(
 				'authority registered, policy revision none; SSH arrivals confined for codex'
 			);
+		});
+
+		it('says why no standing is reported when the host can say (MRC-08-04C)', async () => {
+			const managedUnavailable =
+				'no protected seal exists in a plain Node process: the enrollment record is sealed with the key Electron safeStorage keeps';
+			expect(formatHostStatus(report({ managedUnavailable }))).toContain(
+				`Managed: none reported: ${managedUnavailable}`
+			);
+			await hostStatus(
+				{ dataDir: dir, json: true },
+				deps({ requestStatus: vi.fn(async () => report({ managedUnavailable })) })
+			);
+			expect(JSON.parse(out.join('\n'))).toMatchObject({ running: true, managedUnavailable });
 		});
 
 		it('puts the attestation in the JSON a script, or a probing desktop, reads', async () => {

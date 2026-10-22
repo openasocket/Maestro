@@ -26,7 +26,12 @@ import { createManagedHostAdapter, managedAuthorityId } from '../../managed/host
 import { MANAGED_CONTRACT_VERSION } from '../../managed/types';
 import { getVisibleAgentDefinitions } from '../../providers/definitions';
 import { createMaestroRuntime, type MaestroRuntime, type RuntimeDeps } from '../index';
-import { hostManagedStanding, startRuntimeServer, type RuntimeServer } from '../server';
+import {
+	hostManagedStanding,
+	hostManagedUnavailable,
+	startRuntimeServer,
+	type RuntimeServer,
+} from '../server';
 import type { WatchDirectory } from '../settings-watch';
 
 const T0 = Date.parse('2026-10-04T12:00:00Z');
@@ -503,11 +508,38 @@ describe('runtime server managed standing', () => {
 			message: 'The record was rolled back.',
 			record: ok.record,
 		};
-		expect('managed' in (await requestHostStatus(dir))).toBe(false);
+		const untrusted = await requestHostStatus(dir);
+		expect('managed' in untrusted).toBe(false);
+		// With an adapter, the reason is the adapter's own custody view (MRC-08-04C).
+		expect(untrusted.managedUnavailable).toBe('The record was rolled back.');
 		view = { status: 'none', reason: null, message: null, record: null };
-		expect('managed' in (await requestHostStatus(dir))).toBe(false);
+		const none = await requestHostStatus(dir);
+		expect('managed' in none).toBe(false);
+		expect('managedUnavailable' in none).toBe(false);
 		view = ok;
-		expect((await requestHostStatus(dir)).managed?.tenantId).toBe('tenant-1');
+		const attested = await requestHostStatus(dir);
+		expect(attested.managed?.tenantId).toBe('tenant-1');
+		expect('managedUnavailable' in attested).toBe(false);
+	});
+
+	it('names why no standing is reported: the custody view with an adapter, the host process without', () => {
+		const read = (v: ManagedIdentityView) => ({ identity: { read: () => v } });
+		expect(hostManagedUnavailable({ host: null })).toBeUndefined();
+		expect(hostManagedUnavailable({ host: null, composed: 'no seal here' })).toBe('no seal here');
+		expect(
+			hostManagedUnavailable({ host: read(okView(record('i'))), composed: 'no seal here' })
+		).toBeUndefined();
+		expect(
+			hostManagedUnavailable({
+				host: read({ status: 'unprotected', reason: 'basic_text', message: null, record: null }),
+			})
+		).toBe('the identity custody reads unprotected');
+		expect(
+			hostManagedUnavailable({
+				host: read({ status: 'untrusted', reason: 'foreign', message: 'Foreign.', record: null }),
+				composed: 'ignored: the adapter speaks for itself',
+			})
+		).toBe('Foreign.');
 	});
 
 	it("is refused by the desktop's own rule, by this build's word, before any launch is handed over", async () => {

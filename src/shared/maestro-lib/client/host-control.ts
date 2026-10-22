@@ -66,6 +66,14 @@ export interface HostStatusReport {
 	 * applies its own rule (`sshRemoteEndpointProblems`).
 	 */
 	managed?: SshRemoteEndpointIdentity;
+	/**
+	 * Why `managed` is absent when the host could say (MRC-08-04C): the custody primitive a
+	 * detached host is missing (`maestro-cli host start` composes no standing off Electron), or
+	 * the host's own custody view when it is short of `ok` (an unprotected or untrusted record).
+	 * Absent from a standalone host with no record, from a host that attests, and from a host
+	 * that predates it. A reason, never a standing: nothing reads it as authority.
+	 */
+	managedUnavailable?: string;
 }
 
 export type HostStopReply =

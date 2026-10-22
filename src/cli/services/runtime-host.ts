@@ -27,6 +27,7 @@ import {
 } from '../../shared/maestro-lib';
 import { PROMPT_IDS } from '../../shared/promptDefinitions';
 import { startHostCue, type HostCue } from './host-cue';
+import type { HostManagedLifecycle } from './host-managed';
 
 /** The runtime refused the directory: another host, a desktop, a held lock, a corrupt store. */
 export class HostStartError extends Error {
@@ -47,12 +48,23 @@ export interface RuntimeHostOptions {
 	/**
 	 * The managed standing this host runs under (`createMaestroRuntime`'s `managed`): the host
 	 * adapter over this process's identity custody and endpoint socket, when the caller composed
-	 * one. With it the runtime admits as that host and `host status` attests the standing
-	 * (`HostStatusReport.managed`); without it an enrolled data directory runs
-	 * enrolled-unavailable and attests nothing. `maestro-cli host start` composes none yet: it
-	 * has no identity custody off Electron, so a real detached host still reports no `managed`.
+	 * one (`composeHostManaged` in `host-managed.ts`). With it the runtime admits as that host and
+	 * `host status` attests the standing (`HostStatusReport.managed`); without it an enrolled data
+	 * directory runs enrolled-unavailable and attests nothing.
 	 */
 	managed?: MaestroRuntimeOptions['managed'];
+	/**
+	 * Why no standing was composed, when `managed` is absent: reported as
+	 * `HostStatusReport.managedUnavailable` so `host status` says which custody primitive is
+	 * missing instead of "none". Never a standing of its own.
+	 */
+	managedUnavailable?: string;
+	/**
+	 * The composed standing's lifecycle: `attach` re-attaches a previously enrolled installation
+	 * once the runtime holds the directory and before the host publishes; `close` drops the
+	 * endpoint socket on stop, after the server and before the runtime releases the directory.
+	 */
+	managedLifecycle?: HostManagedLifecycle;
 	log(line: string): void;
 }
 
@@ -157,6 +169,14 @@ export async function startRuntimeHost(
 			}
 			unsubscribeLost();
 			await server?.close();
+			// The endpoint socket goes before the directory does; a failure here must not strand the rest.
+			try {
+				await options.managedLifecycle?.close();
+			} catch (error) {
+				log(
+					`Closing the managed standing failed: ${error instanceof Error ? error.message : String(error)}`
+				);
+			}
 			// The runtime stops its runs and turns, records how they ended, and releases the lock.
 			await runtime.connection.close();
 			log('Host stopped.');
@@ -178,6 +198,15 @@ export async function startRuntimeHost(
 
 	let server: RuntimeServer | undefined;
 	try {
+		// Re-attach before anything is served: a probe that finds this host finds its standing.
+		// The outcome lives in the lifecycle's status; a dial that fails leaves the record alone.
+		try {
+			await options.managedLifecycle?.attach();
+		} catch (error) {
+			log(
+				`Re-attaching the managed standing failed: ${error instanceof Error ? error.message : String(error)}`
+			);
+		}
 		const token = deps.randomToken();
 		const cliSecret = deps.randomToken();
 		cue = await deps.startCue({
@@ -195,6 +224,7 @@ export async function startRuntimeHost(
 				cue: cue.state(),
 				cueRuns: cue.activeRuns(),
 				...(options.version ? { version: options.version } : {}),
+				...(options.managedUnavailable ? { managedUnavailable: options.managedUnavailable } : {}),
 			}),
 		});
 		writeCliServerInfoTo(paths.userDataDir, {

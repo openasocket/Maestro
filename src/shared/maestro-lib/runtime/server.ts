@@ -64,8 +64,16 @@ export interface RuntimeServerOptions {
 	address?: string;
 	/** The host agreed to stop and said so; the caller shuts the process down. */
 	onStopRequested(): void;
-	/** What only the host process knows: where Cue stands, how many Cue runs are in flight, and the build version. */
-	describe?(): { cue: HostCueState; cueRuns?: number; version?: string };
+	/**
+	 * What only the host process knows: where Cue stands, how many Cue runs are in flight, the
+	 * build version, and why no managed standing was composed when none was.
+	 */
+	describe?(): {
+		cue: HostCueState;
+		cueRuns?: number;
+		version?: string;
+		managedUnavailable?: string;
+	};
 }
 
 export interface RuntimeServer {
@@ -103,6 +111,25 @@ function refuse(socket: Duplex, status: string): void {
  * Nothing here is flipped by a flag or a test: a peer refuses this host by this word, and a host
  * of this build attests `ssh` as `unverified` until a producer here admits SSH arrivals at its sink.
  */
+/**
+ * Why a host attests no standing, when it can say (MRC-08-04C): `HostStatusReport.managedUnavailable`.
+ * With an adapter, its own custody view short of `ok` is the reason (an unprotected or untrusted
+ * record); a view of `none` is a standalone host with nothing to say. With no adapter, the reason
+ * the host process gave for composing none (`composed`), if any. Never read as a standing.
+ */
+export function hostManagedUnavailable(input: {
+	host: Pick<ManagedHostAdapter, 'identity'> | null;
+	/** Why the host process composed no adapter, when it composed none. */
+	composed?: string;
+}): string | undefined {
+	if (input.host) {
+		const view = input.host.identity.read();
+		if (view.status === 'ok' || view.status === 'none') return undefined;
+		return view.message ?? `the identity custody reads ${view.status}`;
+	}
+	return input.composed;
+}
+
 export function hostManagedStanding(input: {
 	installation: ManagedInstallationIdentity;
 	host: Pick<ManagedHostAdapter, 'identity' | 'policy' | 'status'> | null;
@@ -188,6 +215,12 @@ export async function startRuntimeServer(options: RuntimeServerOptions): Promise
 			installation: runtime.installation,
 			host: runtime.managedHost,
 		});
+		const managedUnavailable = managed
+			? undefined
+			: hostManagedUnavailable({
+					host: runtime.managedHost,
+					...(described.managedUnavailable ? { composed: described.managedUnavailable } : {}),
+				});
 		return {
 			pid: runtime.lock.pid,
 			startedAt,
@@ -198,6 +231,7 @@ export async function startRuntimeServer(options: RuntimeServerOptions): Promise
 			work: work(described.cueRuns),
 			cue: described.cue,
 			...(managed ? { managed } : {}),
+			...(managedUnavailable ? { managedUnavailable } : {}),
 		};
 	};
 

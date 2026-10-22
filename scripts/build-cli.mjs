@@ -95,7 +95,11 @@ async function build() {
 			// app.getPath('userData') with Maestro's real data directory. See
 			// src/cli/electron-shim.cjs for why (the standalone Cue engine could
 			// not start on a host without Electron installed).
-			external: ['fsevents'],
+			// '@napi-rs/keyring' is a native addon the enterprise identity anchor
+			// (`src/main/utils/keyring-anchor.ts`) loads lazily inside a try/catch,
+			// so a bundle without it reports `available() === false` instead of
+			// failing at build time on its `.node` binaries.
+			external: ['fsevents', '@napi-rs/keyring'],
 			alias: {
 				electron: path.join(rootDir, 'src/cli/electron-shim.cjs'),
 				'better-sqlite3': path.join(rootDir, 'src/cli/better-sqlite3-shim.ts'),

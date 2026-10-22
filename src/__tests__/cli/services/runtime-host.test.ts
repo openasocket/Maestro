@@ -9,12 +9,16 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { HostCue } from '../../../cli/services/host-cue';
+import { composeHostManaged } from '../../../cli/services/host-managed';
 import {
 	HostPromptsMissingError,
 	HostStartError,
 	startRuntimeHost,
 	type RunningHost,
 } from '../../../cli/services/runtime-host';
+import { createEnterpriseIdentityStore } from '../../../main/enterprise/identity-store';
+import type { Anchor } from '../../../main/utils/keyring-anchor';
+import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';
 import {
 	createManagedHostAdapter,
 	createWsMaestroClient,
@@ -181,6 +185,145 @@ describe('startRuntimeHost', () => {
 			orgId: 'org-1',
 			policyRevision: 2,
 			authority: 'none',
+		});
+	});
+
+	describe('the standing maestro-cli host start composes (MRC-08-04C)', () => {
+		let holder: { value: Anchor | null };
+		beforeEach(() => {
+			holder = { value: null };
+		});
+
+		/** The sealed record a desktop enrollment would have left on the directory, under fake custody. */
+		async function enroll(): Promise<void> {
+			const installation = await (async () => {
+				// The installation id the runtime will compute for this directory and host name.
+				const probe = await startRuntimeHost(options(), noCue);
+				const id = probe.runtime.installation.installationId;
+				await probe.stop();
+				return id;
+			})();
+			await createEnterpriseIdentityStore({
+				file: path.join(dir, 'enterprise-identity.bin'),
+				seal: fakeSeal(),
+				anchor: fakeAnchor(holder),
+				platform: 'darwin',
+			}).write({
+				installationId: installation,
+				tenantId: 'tenant-1',
+				orgId: 'org-1',
+				enrollmentId: 'enr-1',
+				endpoint: {
+					socketPath: '/tmp/endpoint.sock',
+					bindingDigest: 'a'.repeat(64),
+					trustRootDigest: null,
+				},
+				management: 'enrolled',
+				registration: null,
+				policy: { desiredRevision: 2, appliedRevision: 2, observedAt: null },
+				enrolledAt: '2026-10-22T12:00:00.000Z',
+			});
+		}
+
+		it('composed over protected custody: the host attests the record and admits as the adapter', async () => {
+			await enroll();
+			const standing = composeHostManaged({
+				userDataDir: dir,
+				version: '1.2.3',
+				custody: { ok: true, seal: fakeSeal(), anchor: fakeAnchor(holder) },
+				platform: 'darwin',
+			});
+			if (!standing.composed) throw new Error(standing.reason);
+			const attach = vi.spyOn(standing.lifecycle, 'attach');
+			const close = vi.spyOn(standing.lifecycle, 'close');
+			const host = await startRuntimeHost(
+				{ ...options(), managed: standing.managed, managedLifecycle: standing.lifecycle },
+				noCue
+			);
+			running.push(host);
+			// Re-attached before the host published, with the record's dial refused (no socket there).
+			expect(attach).toHaveBeenCalledTimes(1);
+			expect(standing.status()).toMatchObject({ authority: 'none', identity: { status: 'ok' } });
+			expect(host.runtime.managedBinding.state().state).toBe('enrolled');
+			// The binding's authority is the adapter's, and the report attests the record's standing.
+			expect(host.runtime.managedBinding.authority().authorityId).toBe(
+				host.runtime.managedHost!.authority.authorityId
+			);
+			const report = await requestHostStatus(dir);
+			expect(report.managed).toMatchObject({
+				installationId: host.runtime.installation.installationId,
+				tenantId: 'tenant-1',
+				orgId: 'org-1',
+				policyRevision: 2,
+				authority: 'none',
+				authorityId: host.runtime.managedHost!.authority.authorityId,
+			});
+			expect('managedUnavailable' in report).toBe(false);
+
+			await host.stop();
+			expect(close).toHaveBeenCalledTimes(1);
+			expect(lines).not.toContain(expect.stringContaining('managed standing failed'));
+		});
+
+		it('refused: no managed in the report, and the named reason beside it', async () => {
+			await enroll();
+			// A managed host ran here once and mirrored the enrollment into the binding file.
+			const composed = composeHostManaged({
+				userDataDir: dir,
+				version: '1.2.3',
+				custody: { ok: true, seal: fakeSeal(), anchor: fakeAnchor(holder) },
+				platform: 'darwin',
+			});
+			if (!composed.composed) throw new Error(composed.reason);
+			const earlier = await startRuntimeHost(
+				{ ...options(), managed: composed.managed, managedLifecycle: composed.lifecycle },
+				noCue
+			);
+			expect(earlier.runtime.managedBinding.state().state).toBe('enrolled');
+			await earlier.stop();
+
+			// A plain Node process: no seal injected, so custody is refused by name.
+			const standing = composeHostManaged({ userDataDir: dir, version: '1.2.3' });
+			expect(standing.composed).toBe(false);
+			if (standing.composed) throw new Error('unreachable');
+			const host = await startRuntimeHost(
+				{ ...options(), managedUnavailable: standing.reason },
+				noCue
+			);
+			running.push(host);
+			expect(host.runtime.managedHost).toBeNull();
+			// An enrolled directory with no standing stays enrolled-unavailable, never standalone.
+			expect(host.runtime.managedBinding.state().state).toBe('enrolled-unavailable');
+			const report = await requestHostStatus(dir);
+			expect('managed' in report).toBe(false);
+			expect(report.managedUnavailable).toBe(standing.reason);
+			expect(report.managedUnavailable).toContain(
+				'no protected seal exists in a plain Node process'
+			);
+			expect(report.managedUnavailable).toContain('cannot be opened here');
+		});
+
+		it('logs a lifecycle that fails to attach or close, and finishes either way', async () => {
+			const host = await startRuntimeHost(
+				{
+					...options(),
+					managedLifecycle: {
+						attach: async () => {
+							throw new Error('socket refused');
+						},
+						close: async () => {
+							throw new Error('already closed');
+						},
+					},
+				},
+				noCue
+			);
+			expect(lines).toContain('Re-attaching the managed standing failed: socket refused');
+			expect(readCliServerInfoFrom(dir)?.pid).toBe(process.pid);
+			await host.stop();
+			expect(lines).toContain('Closing the managed standing failed: already closed');
+			expect(lines[lines.length - 1]).toBe('Host stopped.');
+			expect(fs.existsSync(path.join(dir, 'maestro-runtime.lock'))).toBe(false);
 		});
 	});
 
