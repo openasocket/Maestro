@@ -12,6 +12,12 @@ import type {
 import { HostBrowserPages } from './browser-pages';
 import type { BrowserTabCreationOptions, BrowserTabCreateRequest } from '../../shared/browserPage';
 import { isAllowedBrowserTabUrl } from '../app-lifecycle/guest-webview-security';
+import type {
+	BrowserEffectAuthority,
+	BrowserEffectDecision,
+	BrowserEffectKind,
+} from '../enterprise/browser-policy';
+import { getActingTransport, transportSpawnActor } from '../web-server/auth/transport-actor';
 
 const FRAME_INTERVAL_MS = 125;
 const LEASE_IDLE_MS = 15_000;
@@ -23,6 +29,50 @@ interface Lease extends BrowserRelayTarget {
 	busy: boolean;
 	lastFrame: number;
 	viewport: BrowserRelayViewport;
+	url: string | null; // the page as the host last reported it; null after a navigation
+}
+
+/**
+ * One relay effect as the browser ceiling holds it (MRC-09-04): its kind, the
+ * host tab, and the page it reaches (the URL a navigation requests, or the page
+ * as the host last observed it). A lease is never a permit: every open, frame,
+ * action and input is held by itself.
+ */
+export interface BrowserRelayEffect {
+	kind: BrowserEffectKind;
+	target: BrowserRelayTarget;
+	destination: string | null;
+}
+export type BrowserRelayAuthorize = (effect: BrowserRelayEffect) => BrowserEffectDecision;
+
+/** The effect kind of a relay request: a capture or resolve is a view; an action is what it does to the page. */
+export function relayEffectOf(
+	kind: 'frame' | 'resolve' | 'action',
+	action?: BrowserRelayAction
+): BrowserEffectKind {
+	if (kind !== 'action' || !action) return 'view';
+	switch (action.kind) {
+		case 'navigate':
+		case 'back':
+		case 'forward':
+		case 'reload':
+		case 'stop':
+			return 'navigate';
+		case 'clearData':
+			return 'clear';
+		case 'deleteSelection':
+			return 'input';
+		case 'eval':
+			return 'execute';
+		case 'selection':
+		case 'extract':
+		case 'find':
+			return 'read';
+	}
+}
+
+function relayRefusal(decision: Extract<BrowserEffectDecision, { allowed: false }>): Error {
+	return new Error(`Browser relay refused: [managed-${decision.code}] ${decision.message}`);
 }
 
 /** One controller per canonical tab. A lease owns only capture/input, never the host page. */
@@ -32,8 +82,21 @@ export class BrowserRelay {
 		private request: (
 			request: Omit<BrowserRelayRequest, 'requestId'>
 		) => Promise<BrowserRelayHostResult>,
-		private now = Date.now
+		private now = Date.now,
+		/** The browser ceiling's answer for one effect; absent on a host with no ceiling source (standalone). */
+		private authorize?: BrowserRelayAuthorize
 	) {}
+
+	/** Hold one effect on a lease against the ceiling; throws the refusal by name. */
+	private hold(lease: Lease, kind: BrowserEffectKind, destination: string | null): void {
+		if (!this.authorize) return;
+		const decision = this.authorize({
+			kind,
+			target: { sessionId: lease.sessionId, tabId: lease.tabId },
+			destination,
+		});
+		if (!decision.allowed) throw relayRefusal(decision);
+	}
 
 	private get(clientId: string, id: string): Lease {
 		const lease = this.leases.get(id);
@@ -88,12 +151,16 @@ export class BrowserRelay {
 			lastUsed: this.now(),
 			busy: true,
 			lastFrame: -Infinity,
+			url: null,
 		};
 		this.leases.set(id, lease);
 		try {
 			const result = await this.request({ ...target, kind: 'resolve', viewport });
 			if (!result.ok) throw new Error(result.error || 'Browser tab is unavailable');
 			if (!this.leases.has(id)) throw new Error('Browser client disconnected while opening view');
+			// Held against the page the host named, before any frame; a refusal releases the view below.
+			lease.url = result.state?.url ?? null;
+			this.hold(lease, 'view', lease.url);
 			return id;
 		} catch (error) {
 			if (this.leases.has(id)) this.close(clientId, id);
@@ -119,6 +186,11 @@ export class BrowserRelay {
 		}
 		lease.busy = true;
 		try {
+			this.hold(
+				lease,
+				relayEffectOf(kind, action),
+				action?.kind === 'navigate' ? action.url : lease.url
+			);
 			if (kind === 'frame') {
 				const delay = FRAME_INTERVAL_MS - (this.now() - lease.lastFrame);
 				if (delay > 0) {
@@ -138,6 +210,8 @@ export class BrowserRelay {
 			});
 			this.get(clientId, id);
 			if (!result.ok) throw new Error(result.error || 'Browser tab is unavailable');
+			if (action && ['navigate', 'back', 'forward'].includes(action.kind)) lease.url = null;
+			else lease.url = result.state?.url ?? result.frame?.url ?? lease.url;
 			return result;
 		} catch (error) {
 			if (!this.leases.has(id)) await this.releaseUnusedPage(lease);
@@ -149,6 +223,12 @@ export class BrowserRelay {
 
 	assertActive(clientId: string, id: string): void {
 		this.get(clientId, id);
+	}
+
+	/** Hold an effect the caller performs outside `run` (input) against the lease's page. */
+	assertEffect(clientId: string, id: string, kind: BrowserEffectKind): void {
+		const lease = this.get(clientId, id);
+		this.hold(lease, kind, lease.url);
 	}
 
 	close(clientId: string, id: string): void {
@@ -202,8 +282,25 @@ export function closeBrowserRelayClient(clientId: string): void {
 export function registerBrowserRelayHandlers(deps: {
 	getMainWindow: () => BrowserWindow | null;
 	getWindowForSession?: (sessionId: string) => BrowserWindow | null;
+	/**
+	 * The browser ceiling source (MRC-09-04), read per effect; null or absent
+	 * holds nothing (standalone). The actor is the transport the bridge admitted
+	 * the client over, read from the call's own context, never the client's word.
+	 */
+	browserAuthority?: () => BrowserEffectAuthority | null;
 }): void {
 	getOwner = deps.getMainWindow;
+	const authorize: BrowserRelayAuthorize = (effect) => {
+		const authority = deps.browserAuthority?.() ?? null;
+		if (!authority) return { allowed: true };
+		return authority.authorize({
+			surface: 'relay',
+			effect: effect.kind,
+			actor: { kind: 'transport', actor: transportSpawnActor(getActingTransport()) },
+			resource: 'page',
+			destination: effect.destination,
+		});
+	};
 	const pending = new Map<
 		string,
 		{
@@ -276,7 +373,7 @@ export function registerBrowserRelayHandlers(deps: {
 		if (!payload.action) throw new Error('Missing browser action');
 		return { ok: true, target, value: await pages.action(target, payload.action) };
 	};
-	relay = new BrowserRelay(request);
+	relay = new BrowserRelay(request, Date.now, authorize);
 	setInterval(() => relay?.expire(), 5000).unref();
 	const client = (event: RelayEvent): string => {
 		if (event.type !== 'bridge' || typeof event.clientId !== 'string' || !event.clientId)
@@ -323,6 +420,12 @@ export function registerBrowserRelayHandlers(deps: {
 				(options.ephemeral !== undefined && typeof options.ephemeral !== 'boolean')
 			)
 				throw new Error('Invalid browser creation options');
+			const decision = authorize({
+				kind: 'navigate',
+				target: { sessionId, tabId: '' },
+				destination: options.url ?? null,
+			});
+			if (!decision.allowed) throw relayRefusal(decision);
 			const result = await hostRequest('browser:createTabRequest', { sessionId, options });
 			if (!result.ok) throw new Error(result.error || 'Host browser tab creation failed');
 			return result.value;
@@ -353,6 +456,7 @@ export function registerBrowserRelayHandlers(deps: {
 			const clientId = client(event);
 			const result = await relay!.run(clientId, id, 'resolve');
 			if (!result.target) throw new Error('Host browser tab is not registered');
+			relay!.assertEffect(clientId, id, 'input');
 			await pages.input(result.target, validated, () => relay!.assertActive(clientId, id));
 		}
 	);

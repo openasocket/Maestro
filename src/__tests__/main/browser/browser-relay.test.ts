@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BrowserRelay, validateInput } from '../../../main/browser/browser-relay';
-import type { BrowserRelayHostResult, BrowserRelayRequest } from '../../../shared/browserRelay';
+import {
+	BrowserRelay,
+	relayEffectOf,
+	validateInput,
+	type BrowserRelayEffect,
+} from '../../../main/browser/browser-relay';
+import type {
+	BrowserRelayAction,
+	BrowserRelayHostResult,
+	BrowserRelayRequest,
+} from '../../../shared/browserRelay';
+import type { BrowserEffectDecision } from '../../../main/enterprise/browser-policy';
 
 const { tabSession } = vi.hoisted(() => ({ tabSession: {} }));
 vi.mock('electron', () => ({
@@ -189,5 +199,152 @@ describe('browser target and input authorization', () => {
 			{ type: 'touchStart', x: 1, y: 1 },
 		])
 			expect(() => validateInput(input as never)).toThrow('Invalid browser');
+	});
+});
+
+describe('browser relay effects under a ceiling (MRC-09-04)', () => {
+	const page = (url: string) => ({
+		url,
+		title: 't',
+		canGoBack: false,
+		canGoForward: false,
+		isLoading: false,
+		width: 800,
+		height: 600,
+	});
+	const receipt = {
+		policyRevision: 3,
+		surface: 'relay' as const,
+		actor: 'the operator',
+		destination: null,
+	};
+
+	/** A relay over a host that names `https://host.test/page` and frames `https://host.test/next`, held by `deny`. */
+	function guarded(
+		deny: (effect: BrowserRelayEffect) => BrowserEffectDecision['allowed'] | string
+	) {
+		const held: BrowserRelayEffect[] = [];
+		const requests: Array<Omit<BrowserRelayRequest, 'requestId'>> = [];
+		const relay = new BrowserRelay(
+			async (request) => {
+				requests.push(request);
+				if (request.kind === 'frame')
+					return { ok: true, frame: { ...page('https://host.test/next'), dataUrl: 'data:,' } };
+				if (request.kind === 'resolve') return { ok: true, state: page('https://host.test/page') };
+				return { ok: true, value: 'done' };
+			},
+			Date.now,
+			(effect) => {
+				held.push(effect);
+				const verdict = deny(effect);
+				if (verdict === true) return { allowed: true };
+				return {
+					allowed: false,
+					code: 'outside-ceiling',
+					message: typeof verdict === 'string' ? verdict : `no ${effect.kind}`,
+					managed: { ...receipt, effect: effect.kind, outcome: 'outside-ceiling' },
+				};
+			}
+		);
+		return { relay, held, requests };
+	}
+
+	it('holds nothing on a host with no ceiling source', async () => {
+		const relay = new BrowserRelay(async () => ({ ok: true, value: 1 }));
+		const id = await relay.open('client', target, viewport);
+		await expect(
+			relay.run('client', id, 'action', undefined, { kind: 'eval', code: '1' })
+		).resolves.toMatchObject({ value: 1 });
+		expect(() => relay.assertEffect('client', id, 'execute')).not.toThrow();
+	});
+
+	it('open holds a view against the page the host named and a refusal releases the view', async () => {
+		const { relay, held, requests } = guarded((effect) => effect.kind !== 'view');
+		await expect(relay.open('client', target, viewport)).rejects.toThrow(
+			'Browser relay refused: [managed-outside-ceiling] no view'
+		);
+		expect(held).toEqual([{ kind: 'view', target, destination: 'https://host.test/page' }]);
+		expect(requests.map((r) => r.kind)).toEqual(['resolve', 'release']);
+		expect(requests.filter((r) => r.kind === 'frame')).toHaveLength(0);
+		await expect(relay.open('other', target, viewport)).rejects.toThrow('managed-outside-ceiling');
+	});
+
+	it('a lease is not a permit: each frame, action and input is held by itself', async () => {
+		const { relay, held, requests } = guarded((effect) =>
+			['view', 'read'].includes(effect.kind) ? true : `the ceiling admits no ${effect.kind}`
+		);
+		const id = await relay.open('client', target, viewport);
+		await expect(relay.run('client', id, 'frame')).resolves.toMatchObject({
+			frame: { url: 'https://host.test/next' },
+		});
+		await expect(
+			relay.run('client', id, 'action', undefined, { kind: 'extract', format: 'text' })
+		).resolves.toMatchObject({ value: 'done' });
+		await expect(
+			relay.run('client', id, 'action', undefined, { kind: 'eval', code: '1' })
+		).rejects.toThrow('[managed-outside-ceiling] the ceiling admits no execute');
+		expect(() => relay.assertEffect('client', id, 'input')).toThrow(
+			'[managed-outside-ceiling] the ceiling admits no input'
+		);
+		await expect(
+			relay.run('client', id, 'action', undefined, { kind: 'clearData' })
+		).rejects.toThrow('the ceiling admits no clear');
+		// Held with the page as last observed: the resolve named it, the frame moved it.
+		expect(held.map((effect) => [effect.kind, effect.destination])).toEqual([
+			['view', 'https://host.test/page'],
+			['view', 'https://host.test/page'],
+			['read', 'https://host.test/next'],
+			['execute', 'https://host.test/next'],
+			['input', 'https://host.test/next'],
+			['clear', 'https://host.test/next'],
+		]);
+		// Nothing refused reached the host, and the lease is still live.
+		expect(requests.map((r) => r.kind)).toEqual(['resolve', 'frame', 'action']);
+		expect(() => relay.assertActive('client', id)).not.toThrow();
+	});
+
+	it('a navigation is held against the URL it requests; the page is unknown until the host reports it', async () => {
+		const { relay, held } = guarded(() => true);
+		const id = await relay.open('client', target, viewport);
+		await relay.run('client', id, 'action', undefined, {
+			kind: 'navigate',
+			url: 'https://elsewhere.test/login',
+		});
+		relay.assertEffect('client', id, 'input');
+		await relay.run('client', id, 'action', undefined, { kind: 'reload' });
+		await relay.run('client', id, 'resolve');
+		relay.assertEffect('client', id, 'input');
+		expect(held.map((effect) => [effect.kind, effect.destination])).toEqual([
+			['view', 'https://host.test/page'],
+			['navigate', 'https://elsewhere.test/login'],
+			['input', null],
+			['navigate', null],
+			['view', null],
+			['input', 'https://host.test/page'],
+		]);
+	});
+
+	it('refuses an input on a lease another client holds or that expired, before the ceiling is asked', () => {
+		const { relay, held } = guarded(() => true);
+		expect(() => relay.assertEffect('client', 'missing', 'input')).toThrow('expired');
+		expect(held).toEqual([]);
+	});
+
+	it.each<[Parameters<typeof relayEffectOf>[0], BrowserRelayAction | undefined, string]>([
+		['frame', undefined, 'view'],
+		['resolve', undefined, 'view'],
+		['action', { kind: 'navigate', url: 'https://x.test' }, 'navigate'],
+		['action', { kind: 'back' }, 'navigate'],
+		['action', { kind: 'forward' }, 'navigate'],
+		['action', { kind: 'reload' }, 'navigate'],
+		['action', { kind: 'stop' }, 'navigate'],
+		['action', { kind: 'clearData' }, 'clear'],
+		['action', { kind: 'deleteSelection' }, 'input'],
+		['action', { kind: 'eval', code: '1' }, 'execute'],
+		['action', { kind: 'selection' }, 'read'],
+		['action', { kind: 'extract', format: 'html' }, 'read'],
+		['action', { kind: 'find', text: 'x' }, 'read'],
+	])('%s %o is a %s effect', (kind, action, effect) => {
+		expect(relayEffectOf(kind, action)).toBe(effect);
 	});
 });
