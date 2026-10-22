@@ -462,7 +462,8 @@ export class CallbackRegistry {
 		force?: boolean,
 		images?: string[],
 		background?: boolean,
-		delegation?: ManagedDelegationContext
+		delegation?: ManagedDelegationContext,
+		dispatchTicket?: string
 	): Promise<boolean> {
 		if (!this.callbacks.executeCommand) return false;
 		return this.callbacks.executeCommand(
@@ -473,7 +474,8 @@ export class CallbackRegistry {
 			force,
 			images,
 			background,
-			delegation
+			delegation,
+			dispatchTicket
 		);
 	}
 

@@ -50,6 +50,9 @@ export interface QueuedPromptOptions {
 	 *  (`maestro-cli dispatch`); stored on the item so the drain spawns the turn
 	 *  as that operation's child. Absent for text a person typed. */
 	delegation?: ManagedDelegationContext;
+	/** The host-minted dispatch ticket the WS handler issued, kept on the item
+	 *  so the drain's spawn still binds the transport that sent it. */
+	dispatchTicket?: string;
 }
 
 /**
@@ -73,6 +76,7 @@ export function buildQueuedMessageItem({
 	images,
 	slashCommand,
 	delegation,
+	dispatchTicket,
 }: QueuedPromptOptions): QueuedItem {
 	const commandText = slashCommand ? text.trim() : undefined;
 	const firstWhitespace = commandText?.search(/\s/) ?? -1;
@@ -97,6 +101,7 @@ export function buildQueuedMessageItem({
 			crossAgentOnly: mentionPlan.suppressLocal,
 		}),
 		...(delegation && { delegation }),
+		...(dispatchTicket && { dispatchTicket }),
 	};
 }
 
@@ -147,8 +152,19 @@ export function enqueuePromptForTab(options: {
 	expandCommands?: boolean;
 	/** See {@link QueuedPromptOptions.delegation}. */
 	delegation?: ManagedDelegationContext;
+	/** See {@link QueuedPromptOptions.dispatchTicket}. */
+	dispatchTicket?: string;
 }): QueuedItem | null {
-	const { sessionId, tabId, text, images, slashCommand, expandCommands, delegation } = options;
+	const {
+		sessionId,
+		tabId,
+		text,
+		images,
+		slashCommand,
+		expandCommands,
+		delegation,
+		dispatchTicket,
+	} = options;
 	const session = useSessionStore.getState().sessions.find((s) => s.id === sessionId);
 	if (!session) return null;
 
@@ -162,6 +178,7 @@ export function enqueuePromptForTab(options: {
 		images,
 		slashCommand,
 		delegation,
+		dispatchTicket,
 	});
 	const command = expandCommands && !slashCommand ? matchSlashCommand(session, text) : null;
 	const item: QueuedItem = command
@@ -176,6 +193,7 @@ export function enqueuePromptForTab(options: {
 				readOnlyMode: message.readOnlyMode,
 				turnSettings: message.turnSettings,
 				...(message.delegation && { delegation: message.delegation }),
+				...(message.dispatchTicket && { dispatchTicket: message.dispatchTicket }),
 			}
 		: message;
 	updateSessionWith(sessionId, (s) => ({

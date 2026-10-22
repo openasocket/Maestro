@@ -2410,5 +2410,30 @@ describe('useRemoteHandlers', () => {
 			const [, item] = noteDirectDispatchMock.mock.calls[0];
 			expect(item).not.toHaveProperty('delegation');
 		});
+
+		// The host's dispatch ticket (MRC-08-01B) rides the same way: on the
+		// spawn config as it arrived, unread. It is single-use, so it is NOT on
+		// the resilience snapshot: a resend is the renderer's own action.
+		it('echoes the dispatch ticket on the spawn config and keeps it off the snapshot', async () => {
+			await dispatch({
+				sessionId: 'session-1',
+				command: 'go',
+				inputMode: 'ai',
+				dispatchTicket: 'ticket-xyz',
+			});
+
+			expect(window.maestro.process.spawn).toHaveBeenCalledWith(
+				expect.objectContaining({ sessionId: 'session-1-ai-tab-1', dispatchTicket: 'ticket-xyz' })
+			);
+			const [, item] = noteDirectDispatchMock.mock.calls[0];
+			expect(item).not.toHaveProperty('dispatchTicket');
+		});
+
+		it('carries no ticket on a dispatch that arrived without one', async () => {
+			await dispatch({ sessionId: 'session-1', command: 'go', inputMode: 'ai' });
+
+			const [config] = (window.maestro.process.spawn as any).mock.calls[0];
+			expect(config).not.toHaveProperty('dispatchTicket');
+		});
 	});
 });

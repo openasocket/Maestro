@@ -183,6 +183,12 @@ export function useRemoteHandlers(deps: UseRemoteHandlersDeps): UseRemoteHandler
 				 *  snapshot so a resend of this prompt is the same child. Absent on a
 				 *  web/mobile composer send, which is the user's own turn. */
 				delegation?: ManagedDelegationContext;
+				/** The host-minted ticket the WS handler issued for this dispatch.
+				 *  Echoed on the spawn config, unread: the spawn handler claims it to
+				 *  bind the transport that sent the dispatch. Single-use, so it is
+				 *  NOT put on the resilience snapshot: a resend is the renderer's own
+				 *  action again. Absent on an in-renderer synthetic dispatch. */
+				dispatchTicket?: string;
 			}>;
 			const {
 				sessionId,
@@ -194,6 +200,7 @@ export function useRemoteHandlers(deps: UseRemoteHandlersDeps): UseRemoteHandler
 				literalPrompt,
 				receiptChannel,
 				delegation,
+				dispatchTicket,
 			} = customEvent.detail;
 
 			// The CLI's `dispatch` success flag is this ack, not the fact that an
@@ -754,6 +761,9 @@ export function useRemoteHandlers(deps: UseRemoteHandlersDeps): UseRemoteHandler
 						// spawn handler validates it and the sink binds this turn as that
 						// operation's child and stamps the child's record on the process.
 						delegation,
+						// The host's ticket for the transport that sent this dispatch,
+						// echoed as it arrived; the spawn handler claims it.
+						...(dispatchTicket && { dispatchTicket }),
 					});
 				} finally {
 					clearTimeout(ackTimer);

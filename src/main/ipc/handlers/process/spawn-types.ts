@@ -80,4 +80,11 @@ export interface SpawnProcessConfig {
 	 *  operation's child, and the CHILD's record is stamped on the process so
 	 *  a grandchild dispatch deepens the chain. Absent on a user's own turn. */
 	delegation?: ManagedDelegationContext;
+	/** The host-minted dispatch ticket a WebSocket `send_command` arrived with
+	 *  (`issueDispatchTicket`), echoed by the renderer. The handler claims it
+	 *  for the agent and tab it is spawning (`currentSpawnActor`) to bind the
+	 *  transport that sent the dispatch; an unknown, spent, expired or
+	 *  mismatched ticket binds the renderer's own standing instead. Never
+	 *  reaches the process. Absent on a turn the desktop itself started. */
+	dispatchTicket?: string;
 }

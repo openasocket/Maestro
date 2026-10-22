@@ -31,6 +31,8 @@ import { getActingUser, runAsActingUser } from '../../../../../main/web-server/a
 import {
 	PAIRED_DEVICE_USER_ID_PREFIX,
 	PAIRED_DEVICE_USERNAME,
+	getActingTransport,
+	issueDispatchTicket,
 	runAsClient,
 } from '../../../../../main/web-server/auth/transport-actor';
 
@@ -78,5 +80,73 @@ describe('currentSpawnActor', () => {
 		// Nothing in the app establishes an acting user without runAsClient; if
 		// something did, the sink would still not promote it to a transport.
 		expect(runAsActingUser(ada, () => currentSpawnActor())).toEqual({ peer: 'in-process' });
+	});
+});
+
+/**
+ * The dispatch ticket at the sink (MRC-08-01B): a spawn the renderer built for
+ * a WebSocket dispatch arrives over IPC, outside any transport context, and
+ * claims the ticket the handler issued. A good claim binds the transport that
+ * sent the dispatch; anything else binds the renderer's own standing, the
+ * operator at the keyboard, never what the ticket claimed.
+ */
+describe('currentSpawnActor with a dispatch ticket', () => {
+	const issuedBy = (client: Parameters<typeof runAsClient>[0], tabId?: string) =>
+		runAsClient(client, () =>
+			issueDispatchTicket(getActingTransport(), { agentId: 'agent-1', tabId })
+		);
+
+	it('binds the CLI that dispatched the turn, outside any context, once', () => {
+		const ticket = issuedBy({ cli: true }, 'tab-1');
+		expect(currentSpawnActor({ ticket, agentId: 'agent-1', tabId: 'tab-1' })).toEqual({
+			peer: 'host-secret',
+		});
+		// Spent: the same ticket on a second spawn is the renderer's own action.
+		expect(currentSpawnActor({ ticket, agentId: 'agent-1', tabId: 'tab-1' })).toEqual({
+			peer: 'in-process',
+		});
+	});
+
+	it('binds the paired device that dispatched the turn, while the acting user stays absent', () => {
+		const ticket = issuedBy({ admission: 'device-pairing', user: device });
+		const seen = {
+			actor: currentSpawnActor({ ticket, agentId: 'agent-1', tabId: 'tab-3' }),
+			user: getActingUser(),
+		};
+		expect(seen).toEqual({ actor: { peer: 'device-pairing', deviceId: 'dev-7' }, user: undefined });
+	});
+
+	it('binds the Web Login account that dispatched the turn', () => {
+		const ticket = issuedBy({ user: ada }, 'tab-1');
+		expect(currentSpawnActor({ ticket, agentId: 'agent-1', tabId: 'tab-1' })).toEqual({
+			peer: 'web-login',
+			username: 'ada',
+		});
+	});
+
+	it('falls back to the operator for a ticket issued to another agent or tab', () => {
+		const otherAgent = issuedBy({ cli: true }, 'tab-1');
+		expect(currentSpawnActor({ ticket: otherAgent, agentId: 'agent-2', tabId: 'tab-1' })).toEqual({
+			peer: 'in-process',
+		});
+		const otherTab = issuedBy({ cli: true }, 'tab-1');
+		expect(currentSpawnActor({ ticket: otherTab, agentId: 'agent-1', tabId: 'tab-2' })).toEqual({
+			peer: 'in-process',
+		});
+	});
+
+	it('falls back to the operator for an invented, blank or non-string ticket', () => {
+		for (const ticket of ['forged', '', 42, null, { kind: 'cli' }]) {
+			expect(currentSpawnActor({ ticket, agentId: 'agent-1', tabId: 'tab-1' })).toEqual({
+				peer: 'in-process',
+			});
+		}
+	});
+
+	it('a ticket never widens a transport that is in scope: a bad one leaves the context in charge', () => {
+		const forged = 'forged';
+		expect(
+			runAsClient({ user: ada }, () => currentSpawnActor({ ticket: forged, agentId: 'agent-1' }))
+		).toEqual({ peer: 'web-login', username: 'ada' });
 	});
 });

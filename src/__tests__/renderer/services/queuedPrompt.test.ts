@@ -86,6 +86,30 @@ describe('buildQueuedMessageItem', () => {
 		).toBe(true);
 	});
 
+	it('keeps the dispatch ticket a program queued with, and stamps none for a person', () => {
+		const session = seed();
+		const ticketed = buildQueuedMessageItem({
+			session,
+			tab: session.aiTabs[0],
+			text: 'later',
+			dispatchTicket: 'tk-1',
+		});
+		expect(ticketed.dispatchTicket).toBe('tk-1');
+		const typed = buildQueuedMessageItem({ session, tab: session.aiTabs[0], text: 'later' });
+		expect(typed).not.toHaveProperty('dispatchTicket');
+	});
+
+	it('enqueuePromptForTab keeps the ticket on the item it queues', () => {
+		seed();
+		const item = enqueuePromptForTab({
+			sessionId: 'session-1',
+			tabId: 'a',
+			text: 'later',
+			dispatchTicket: 'tk-2',
+		});
+		expect(item?.dispatchTicket).toBe('tk-2');
+	});
+
 	it('stamps the @mention intent without firing the consult', () => {
 		planCrossAgentMentions.mockReturnValue({ targetSessionIds: ['other'], suppressLocal: true });
 		const session = seed();

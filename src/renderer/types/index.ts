@@ -576,6 +576,11 @@ export interface QueuedItem {
 	// typed: the child is the dispatched turn, not the tab. Never shown as prose
 	// (the queue mirror `maestro-cli queue list` reads omits it).
 	delegation?: import('../../shared/maestro-lib/managed/delegation').ManagedDelegationContext;
+	// The host-minted dispatch ticket a WebSocket dispatch arrived with, kept
+	// while the item waits so the drain's spawn still binds the transport that
+	// sent it. Opaque and single-use; omitted from the queue mirror like
+	// `delegation`. Absent on anything a user typed.
+	dispatchTicket?: string;
 }
 
 export interface WorkLogItem {

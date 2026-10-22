@@ -26,8 +26,12 @@ export function createCommandRemoteApi() {
 		 * `delegation` is the context of the operation that dispatched the prompt
 		 * (a Cue `mode: cli` action, an agent's `maestro-cli dispatch`), already
 		 * narrowed in main; the renderer puts it on the spawn config so the turn
-		 * is admitted as that operation's child. It sits BEFORE the receipt
-		 * channel because main appends that channel last.
+		 * is admitted as that operation's child.
+		 *
+		 * `dispatchTicket` is the host-minted ticket the spawn handler claims to
+		 * bind the transport that sent the dispatch; the renderer echoes it on the
+		 * spawn config unread. Both sit BEFORE the receipt channel because main
+		 * appends that channel last.
 		 */
 		onRemoteCommand: (
 			callback: (
@@ -39,6 +43,7 @@ export function createCommandRemoteApi() {
 				images?: string[],
 				background?: boolean,
 				delegation?: ManagedDelegationContext,
+				dispatchTicket?: string,
 				receiptChannel?: string
 			) => void
 		): (() => void) => {
@@ -53,6 +58,7 @@ export function createCommandRemoteApi() {
 				images?: string[],
 				background?: boolean,
 				delegation?: ManagedDelegationContext,
+				dispatchTicket?: string,
 				receiptChannel?: string
 			) => {
 				log('Received remote:executeCommand IPC', {
@@ -64,6 +70,7 @@ export function createCommandRemoteApi() {
 					imageCount: images?.length ?? 0,
 					background,
 					delegated: delegation !== undefined,
+					ticketed: dispatchTicket !== undefined,
 					receiptChannel,
 				});
 				try {
@@ -76,6 +83,7 @@ export function createCommandRemoteApi() {
 						images,
 						background,
 						delegation,
+						dispatchTicket,
 						receiptChannel
 					);
 				} catch (error) {

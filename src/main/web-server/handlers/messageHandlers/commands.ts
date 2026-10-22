@@ -10,7 +10,12 @@ import { readBackgroundField } from '../../../../shared/focusPlacement';
 import { getDispatchCallbackRegistry } from '../../../dispatch-callbacks';
 import { armDispatchCallback } from './dispatchCallbacks';
 import { noteDispatchDelegation, readDispatchDelegation } from './agentDelegation';
-import { describeTransportAdmission, resolveTransportAdmission } from '../../auth/transport-actor';
+import {
+	describeTransportAdmission,
+	issueDispatchTicket,
+	resolveTransportAdmission,
+	withdrawDispatchTicket,
+} from '../../auth/transport-actor';
 import { LOG_CONTEXT } from './shared';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
 
@@ -62,7 +67,8 @@ export function handleSendCommand(
 	// context the message handler established, bound by every host sink this
 	// dispatch reaches. Transport admission is not tenant IAM: none of these is
 	// an enterprise principal, so none of them widens what the sink admits.
-	const transport = describeTransportAdmission(resolveTransportAdmission(client));
+	const admission = resolveTransportAdmission(client);
+	const transport = describeTransportAdmission(admission);
 	logger.info(
 		`[Web Command] Received: sessionId=${sessionId}, inputMode=${clientInputMode}, transport=${transport}, command=${command?.substring(0, 50)}, images=${images?.length ?? 0}`,
 		LOG_CONTEXT
@@ -175,6 +181,19 @@ export function handleSendCommand(
 		if (sendCallbackId) getDispatchCallbackRegistry()?.cancel(sendCallbackId);
 	};
 
+	// The transport does not survive the hop through the renderer: the spawn
+	// comes back over Electron IPC, outside this client's context, and the sink
+	// would read it as the desktop's own action. A host-minted ticket, issued
+	// here and bound to this agent and tab, lets the spawn handler bind the
+	// transport that actually asked (MRC-08-01B). Only an AI turn spawns; a
+	// terminal write never reaches the spawn sink, so it carries none.
+	const dispatchTicket = isAiMode
+		? issueDispatchTicket(admission, { agentId: sessionId, tabId: requestedTabId })
+		: undefined;
+	const withdrawTicket = () => {
+		if (dispatchTicket) withdrawDispatchTicket(dispatchTicket);
+	};
+
 	// Route ALL commands through the renderer for consistent handling
 	// The renderer handles both AI and terminal modes, updating UI and state
 	// Pass clientInputMode so renderer uses the web's intended mode
@@ -188,10 +207,14 @@ export function handleSendCommand(
 				force,
 				images,
 				background,
-				delegation
+				delegation,
+				dispatchTicket
 			)
 			.then((success) => {
-				if (!success) cancelArmedCallback();
+				if (!success) {
+					cancelArmedCallback();
+					withdrawTicket();
+				}
 				ctx.send(client, {
 					type: 'command_result',
 					success,
@@ -215,6 +238,7 @@ export function handleSendCommand(
 			})
 			.catch((error) => {
 				cancelArmedCallback();
+				withdrawTicket();
 				ctx.reportHandlerError(
 					client,
 					error,

@@ -352,6 +352,7 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 				images?: string[],
 				background?: boolean,
 				delegation?: ManagedDelegationContext,
+				dispatchTicket?: string,
 				receiptChannel?: string
 			) => {
 				// Delivery receipt for the web server's `executeCommand` promise.
@@ -458,8 +459,9 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 				);
 				window.dispatchEvent(
 					new CustomEvent('maestro:remoteCommand', {
-						// `delegation` is the dispatching operation's context; the handler
-						// puts it on the spawn config so the sink binds the turn as its child.
+						// `delegation` is the dispatching operation's context and
+						// `dispatchTicket` the host's ticket for the transport; the handler
+						// puts both on the spawn config, unread, for the sink to bind.
 						detail: {
 							sessionId,
 							command,
@@ -468,6 +470,7 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 							force,
 							images,
 							delegation,
+							dispatchTicket,
 							receiptChannel,
 						},
 					})

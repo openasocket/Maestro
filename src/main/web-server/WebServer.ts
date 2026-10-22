@@ -1316,7 +1316,8 @@ export class WebServer {
 				force?: boolean,
 				images?: string[],
 				background?: boolean,
-				delegation?: ManagedDelegationContext
+				delegation?: ManagedDelegationContext,
+				dispatchTicket?: string
 			) =>
 				this.callbackRegistry.executeCommand(
 					sessionId,
@@ -1326,7 +1327,8 @@ export class WebServer {
 					force,
 					images,
 					background,
-					delegation
+					delegation,
+					dispatchTicket
 				),
 			switchMode: async (sessionId: string, mode: 'ai' | 'terminal', background?: boolean) =>
 				this.callbackRegistry.switchMode(sessionId, mode, background),

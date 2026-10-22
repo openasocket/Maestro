@@ -73,7 +73,11 @@ import {
 } from '../../../../main/feedback';
 import { generateDebugPackage } from '../../../../main/debug-package';
 import { delegationContextOf } from '../../../../shared/maestro-lib/managed/delegation';
-import { getActingTransport } from '../../../../main/web-server/auth/transport-actor';
+import {
+	claimDispatchTicket,
+	getActingTransport,
+	transportSpawnActor,
+} from '../../../../main/web-server/auth/transport-actor';
 
 // Mock the logger
 vi.mock('../../../../main/utils/logger', () => ({
@@ -570,7 +574,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					false,
-					undefined
+					undefined,
+					expect.any(String)
 				);
 			});
 
@@ -656,6 +661,7 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					false,
+					undefined,
 					undefined
 				);
 			});
@@ -723,7 +729,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					false,
-					undefined
+					undefined,
+					expect.any(String)
 				);
 			});
 
@@ -755,7 +762,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					images,
 					false,
-					undefined
+					undefined,
+					expect.any(String)
 				);
 			});
 
@@ -795,7 +803,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					images,
 					false,
-					undefined
+					undefined,
+					expect.any(String)
 				);
 			});
 		});
@@ -820,7 +829,8 @@ describe('WebSocketMessageHandler', () => {
 					true,
 					undefined,
 					false,
-					undefined
+					undefined,
+					expect.any(String)
 				);
 			});
 
@@ -847,7 +857,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					true,
-					undefined
+					undefined,
+					expect.any(String)
 				);
 			});
 		});
@@ -872,7 +883,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					false,
-					undefined
+					undefined,
+					expect.any(String)
 				);
 			});
 		});
@@ -980,7 +992,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					true,
-					delegation
+					delegation,
+					expect.any(String)
 				);
 			});
 			expect(lastSend()).toMatchObject({ type: 'command_result', success: true });
@@ -1114,9 +1127,149 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					false,
-					undefined
+					undefined,
+					expect.any(String)
 				);
 			});
+		});
+	});
+
+	/**
+	 * The dispatch ticket (MRC-08-01B): the handler issues it inside the client
+	 * context and hands it to the renderer beside the delegation record; the
+	 * spawn handler claims it, bound to the agent and tab it was issued for, and
+	 * binds the transport that sent the dispatch. This is the handler half and
+	 * the sink's claim done by hand (`claimDispatchTicket` is what
+	 * `currentSpawnActor` spends; the IPC hop between them carries only the
+	 * opaque string). The fake renderer is the `executeCommand` mock.
+	 */
+	describe('Dispatch ticket (MRC-08-01B)', () => {
+		const sent = () => vi.mocked(callbacks.executeCommand).mock.calls[0];
+		const ticketSent = (): string | undefined => sent()[8] as string | undefined;
+
+		it('issues a ticket for a CLI dispatch that the sink claims as the host secret, once', async () => {
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{
+					type: 'send_command',
+					sessionId: 'session-1',
+					command: 'go',
+					inputMode: 'ai',
+					tabId: 'tab-1',
+				}
+			);
+			await vi.waitFor(() => expect(callbacks.executeCommand).toHaveBeenCalled());
+
+			const ticket = ticketSent();
+			expect(typeof ticket).toBe('string');
+			expect(ticket).not.toContain('cli');
+			// What the spawn handler does for `{agentId}-ai-{tabId}`:
+			const admission = claimDispatchTicket(ticket!, { agentId: 'session-1', tabId: 'tab-1' });
+			expect(admission).toEqual({ kind: 'cli' });
+			expect(transportSpawnActor(admission!)).toEqual({ peer: 'host-secret' });
+			// Spent on the first claim; a replay binds nothing.
+			expect(
+				claimDispatchTicket(ticket!, { agentId: 'session-1', tabId: 'tab-1' })
+			).toBeUndefined();
+		});
+
+		it('issues a ticket for a paired device that the sink claims as that device', async () => {
+			handler.handleMessage(
+				{
+					...client,
+					admission: 'device-pairing',
+					user: { id: 'paired-device:dev-7', username: 'paired-device', displayName: 'Pixel 9' },
+				},
+				{ type: 'send_command', sessionId: 'session-1', command: 'go', inputMode: 'ai' }
+			);
+			await vi.waitFor(() => expect(callbacks.executeCommand).toHaveBeenCalled());
+
+			// No tab was named, so the renderer's pick of the active tab claims it.
+			const admission = claimDispatchTicket(ticketSent()!, {
+				agentId: 'session-1',
+				tabId: 'tab-9',
+			});
+			expect(admission).toEqual({ kind: 'lite', deviceId: 'dev-7', deviceName: 'Pixel 9' });
+			expect(transportSpawnActor(admission!)).toEqual({
+				peer: 'device-pairing',
+				deviceId: 'dev-7',
+			});
+		});
+
+		it('a ticket issued for one agent and tab claims nothing for another', async () => {
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{
+					type: 'send_command',
+					sessionId: 'session-1',
+					command: 'go',
+					inputMode: 'ai',
+					tabId: 'tab-1',
+				}
+			);
+			await vi.waitFor(() => expect(callbacks.executeCommand).toHaveBeenCalled());
+
+			const ticket = ticketSent()!;
+			expect(claimDispatchTicket(ticket, { agentId: 'session-2', tabId: 'tab-1' })).toBeUndefined();
+			// Burned by the mismatch, so the right claimant is not served either.
+			expect(claimDispatchTicket(ticket, { agentId: 'session-1', tabId: 'tab-1' })).toBeUndefined();
+		});
+
+		it('withdraws the ticket when the renderer refuses the dispatch', async () => {
+			vi.mocked(callbacks.executeCommand).mockResolvedValueOnce(false);
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{
+					type: 'send_command',
+					sessionId: 'session-1',
+					command: 'go',
+					inputMode: 'ai',
+					requestId: 'r-9',
+				}
+			);
+			await vi.waitFor(() => {
+				const calls = vi.mocked(client.socket.send).mock.calls;
+				const last = JSON.parse(String(calls[calls.length - 1][0]));
+				expect(last).toMatchObject({ type: 'command_result', success: false, requestId: 'r-9' });
+			});
+
+			expect(claimDispatchTicket(ticketSent()!, { agentId: 'session-1' })).toBeUndefined();
+		});
+
+		it('withdraws the ticket when the dispatch throws', async () => {
+			vi.mocked(callbacks.executeCommand).mockRejectedValueOnce(new Error('renderer gone'));
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{ type: 'send_command', sessionId: 'session-1', command: 'go', inputMode: 'ai' }
+			);
+			await vi.waitFor(() => expect(client.socket.send).toHaveBeenCalled());
+
+			expect(claimDispatchTicket(ticketSent()!, { agentId: 'session-1' })).toBeUndefined();
+		});
+
+		it('issues no ticket for a terminal write, which never reaches the spawn sink', async () => {
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{ type: 'send_command', sessionId: 'session-1', command: 'ls', inputMode: 'terminal' }
+			);
+			await vi.waitFor(() => expect(callbacks.executeCommand).toHaveBeenCalled());
+			expect(ticketSent()).toBeUndefined();
+		});
+
+		it('a bare socket is the owner-operator: its ticket binds in-process, the same as no ticket', async () => {
+			handler.handleMessage(client, {
+				type: 'send_command',
+				sessionId: 'session-1',
+				command: 'go',
+				inputMode: 'ai',
+			});
+			await vi.waitFor(() => expect(callbacks.executeCommand).toHaveBeenCalled());
+			const admission = claimDispatchTicket(ticketSent()!, {
+				agentId: 'session-1',
+				tabId: 'tab-1',
+			});
+			expect(admission).toEqual({ kind: 'owner-token' });
+			expect(transportSpawnActor(admission!)).toEqual({ peer: 'in-process' });
 		});
 	});
 

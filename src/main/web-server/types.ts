@@ -353,7 +353,14 @@ export type ExecuteCommandCallback = (
 	 * handler. Carried to the renderer beside the prompt so the spawn it builds
 	 * is admitted as that operation's child, never as a fresh turn of the target.
 	 */
-	delegation?: ManagedDelegationContext
+	delegation?: ManagedDelegationContext,
+	/**
+	 * The host-minted, single-use ticket the spawn handler claims to bind the
+	 * transport that sent this dispatch (`issueDispatchTicket`). Opaque to the
+	 * renderer, which only echoes it on the spawn config; absent for a terminal
+	 * write, which never reaches the spawn sink.
+	 */
+	dispatchTicket?: string
 ) => Promise<boolean>;
 
 /**

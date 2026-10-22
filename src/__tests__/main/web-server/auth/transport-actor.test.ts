@@ -12,12 +12,17 @@ import {
 	DESKTOP_ADMISSION,
 	PAIRED_DEVICE_USER_ID_PREFIX,
 	PAIRED_DEVICE_USERNAME,
+	claimDispatchTicket,
+	createDispatchTicketRegistry,
 	describeTransportAdmission,
 	getActingTransport,
+	issueDispatchTicket,
 	resolveTransportAdmission,
 	runAsClient,
 	runAsTransport,
 	transportSpawnActor,
+	withdrawDispatchTicket,
+	type TransportAdmission,
 } from '../../../../main/web-server/auth/transport-actor';
 
 const ada = { id: 'u1', username: 'ada', displayName: 'Ada' };
@@ -182,5 +187,113 @@ describe('runAsClient', () => {
 			transport: getActingTransport(),
 		}));
 		expect(seen).toEqual({ user: undefined, transport: { kind: 'owner-token' } });
+	});
+});
+
+/**
+ * Dispatch tickets (MRC-08-01B): the host-minted, single-use, bounded key a
+ * WebSocket dispatch carries across the renderer round trip so the spawn sink
+ * can bind the transport that sent it. The ticket names no actor; the registry
+ * does. Anything but a fresh, unexpired ticket claimed for the agent and tab it
+ * was issued for is worth nothing.
+ */
+describe('dispatch tickets', () => {
+	const cli: TransportAdmission = { kind: 'cli' };
+	const lite: TransportAdmission = { kind: 'lite', deviceId: 'dev-7', deviceName: 'Pixel 9' };
+
+	function registry(opts: { ttlMs?: number; maxOutstanding?: number } = {}) {
+		let at = 1_000;
+		const reg = createDispatchTicketRegistry({ now: () => at, ...opts });
+		return { reg, advance: (ms: number) => void (at += ms) };
+	}
+
+	it('issues an opaque ticket that claims back the admission it was issued for, once', () => {
+		const { reg } = registry();
+		const ticket = reg.issue(cli, { agentId: 'agent-1', tabId: 'tab-1' });
+		expect(typeof ticket).toBe('string');
+		expect(ticket).not.toContain('cli');
+		expect(reg.size).toBe(1);
+
+		expect(reg.claim(ticket, { agentId: 'agent-1', tabId: 'tab-1' })).toEqual(cli);
+		// Spent: a second claim, however well-formed, gets nothing.
+		expect(reg.claim(ticket, { agentId: 'agent-1', tabId: 'tab-1' })).toBeUndefined();
+		expect(reg.size).toBe(0);
+	});
+
+	it('two tickets for the same dispatch are distinct and each stands only for itself', () => {
+		const { reg } = registry();
+		const a = reg.issue(cli, { agentId: 'agent-1' });
+		const b = reg.issue(lite, { agentId: 'agent-1' });
+		expect(a).not.toBe(b);
+		expect(reg.claim(b, { agentId: 'agent-1' })).toEqual(lite);
+		expect(reg.claim(a, { agentId: 'agent-1' })).toEqual(cli);
+	});
+
+	it('claims nothing for another agent, and burns the ticket', () => {
+		const { reg } = registry();
+		const ticket = reg.issue(cli, { agentId: 'agent-1', tabId: 'tab-1' });
+		expect(reg.claim(ticket, { agentId: 'agent-2', tabId: 'tab-1' })).toBeUndefined();
+		// The mismatch spent it: the right claimant is too late now.
+		expect(reg.claim(ticket, { agentId: 'agent-1', tabId: 'tab-1' })).toBeUndefined();
+	});
+
+	it('claims nothing for another tab of the right agent when a tab was named', () => {
+		const { reg } = registry();
+		const ticket = reg.issue(cli, { agentId: 'agent-1', tabId: 'tab-1' });
+		expect(reg.claim(ticket, { agentId: 'agent-1', tabId: 'tab-2' })).toBeUndefined();
+		const tabless = reg.issue(cli, { agentId: 'agent-1', tabId: 'tab-1' });
+		expect(reg.claim(tabless, { agentId: 'agent-1' })).toBeUndefined();
+	});
+
+	it('a ticket issued with no tab (the active tab) claims for whichever tab the renderer picked', () => {
+		const { reg } = registry();
+		const ticket = reg.issue(lite, { agentId: 'agent-1' });
+		expect(reg.claim(ticket, { agentId: 'agent-1', tabId: 'tab-9' })).toEqual(lite);
+	});
+
+	it('expires: a ticket older than the TTL claims nothing and is swept', () => {
+		const { reg, advance } = registry({ ttlMs: 1_000 });
+		const ticket = reg.issue(cli, { agentId: 'agent-1' });
+		advance(999);
+		expect(reg.size).toBe(1);
+		advance(1);
+		expect(reg.size).toBe(0);
+		expect(reg.claim(ticket, { agentId: 'agent-1' })).toBeUndefined();
+	});
+
+	it('is bounded: past the cap the oldest unclaimed ticket is dropped, never the newest', () => {
+		const { reg } = registry({ maxOutstanding: 2 });
+		const first = reg.issue(cli, { agentId: 'agent-1' });
+		const second = reg.issue(cli, { agentId: 'agent-2' });
+		const third = reg.issue(lite, { agentId: 'agent-3' });
+		expect(reg.size).toBe(2);
+		expect(reg.claim(first, { agentId: 'agent-1' })).toBeUndefined();
+		expect(reg.claim(second, { agentId: 'agent-2' })).toEqual(cli);
+		expect(reg.claim(third, { agentId: 'agent-3' })).toEqual(lite);
+	});
+
+	it('withdraws a ticket whose dispatch the renderer refused', () => {
+		const { reg } = registry();
+		const ticket = reg.issue(cli, { agentId: 'agent-1' });
+		expect(reg.withdraw(ticket)).toBe(true);
+		expect(reg.withdraw(ticket)).toBe(false);
+		expect(reg.claim(ticket, { agentId: 'agent-1' })).toBeUndefined();
+	});
+
+	it('an invented ticket claims nothing from the host registry', () => {
+		expect(claimDispatchTicket('not-a-ticket', { agentId: 'agent-1' })).toBeUndefined();
+		expect(claimDispatchTicket('', { agentId: 'agent-1' })).toBeUndefined();
+	});
+
+	it('the host registry: issued inside a client context, claimed outside any (the IPC hop)', async () => {
+		const ticket = runAsClient({ cli: true }, () =>
+			issueDispatchTicket(getActingTransport(), { agentId: 'agent-1', tabId: 'tab-1' })
+		);
+		await Promise.resolve();
+		expect(getActingTransport()).toEqual(DESKTOP_ADMISSION);
+		const admission = claimDispatchTicket(ticket, { agentId: 'agent-1', tabId: 'tab-1' });
+		expect(admission).toEqual({ kind: 'cli' });
+		expect(transportSpawnActor(admission!)).toEqual({ peer: 'host-secret' });
+		expect(withdrawDispatchTicket(ticket)).toBe(false);
 	});
 });

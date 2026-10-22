@@ -1368,6 +1368,18 @@ describe('agentStore', () => {
 
 				expect(mockSpawn.mock.calls[0][0].delegation).toBeUndefined();
 			});
+
+			it('keeps the dispatch ticket with a queued item and spawns with it (MRC-08-01B)', async () => {
+				seedTab();
+				const item = createQueuedItem({ tabId: 'tab-1', text: 'Later', dispatchTicket: 'tk-1' });
+
+				await useAgentStore.getState().processQueuedItem('session-1', item, defaultDeps);
+
+				// The sink claims the ticket for the transport that queued the dispatch.
+				expect(mockSpawn).toHaveBeenCalledWith(
+					expect.objectContaining({ sessionId: 'session-1-ai-tab-1', dispatchTicket: 'tk-1' })
+				);
+			});
 		});
 
 		describe('New Session Message', () => {

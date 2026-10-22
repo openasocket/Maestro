@@ -98,7 +98,8 @@ export function registerCommandCallbacks(
 			force?: boolean,
 			images?: string[],
 			background?: boolean,
-			delegation?: ManagedDelegationContext
+			delegation?: ManagedDelegationContext,
+			dispatchTicket?: string
 		) => {
 			const targetWindow = resolveSessionWindow(sessionId);
 			if (!targetWindow) {
@@ -142,9 +143,20 @@ export function registerCommandCallbacks(
 					fallback: { accepted: false, reason: 'renderer-timeout', timedOut: true },
 					timeoutMs: REMOTE_COMMAND_RECEIPT_TIMEOUT_MS,
 					parse: parseRemoteCommandReceipt,
-					// The dispatching operation's context rides beside the prompt; the
-					// receipt channel is appended after it by requestFromRenderer.
-					args: [sessionId, command, inputMode, tabId, force, images, background, delegation],
+					// The dispatching operation's context and the dispatch ticket ride
+					// beside the prompt; the receipt channel is appended after them by
+					// requestFromRenderer.
+					args: [
+						sessionId,
+						command,
+						inputMode,
+						tabId,
+						force,
+						images,
+						background,
+						delegation,
+						dispatchTicket,
+					],
 				}
 			);
 			if (!receipt.accepted) {

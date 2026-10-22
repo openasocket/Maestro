@@ -152,7 +152,9 @@ export interface MessageHandlerCallbacks {
 		images?: string[],
 		background?: boolean,
 		/** The context of the operation that dispatched the prompt (see `readDispatchDelegation`). */
-		delegation?: ManagedDelegationContext
+		delegation?: ManagedDelegationContext,
+		/** The host-minted ticket the spawn sink claims the transport with (see `issueDispatchTicket`). */
+		dispatchTicket?: string
 	) => Promise<boolean>;
 	switchMode: (
 		sessionId: string,

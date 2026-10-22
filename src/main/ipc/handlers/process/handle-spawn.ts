@@ -47,7 +47,11 @@ import type { DispatchedSpawnIds } from '../../../process-manager/types';
 import { generateUUID } from '../../../../shared/uuid';
 import { QUERY_USER_ENV_VAR } from '../../../../shared/webLogin';
 import { getActingUser } from '../../../web-server/auth/acting-user';
-import { getActingTransport, transportSpawnActor } from '../../../web-server/auth/transport-actor';
+import {
+	claimDispatchTicket,
+	getActingTransport,
+	transportSpawnActor,
+} from '../../../web-server/auth/transport-actor';
 import { noteTurnActor } from '../../../web-server/auth/turn-attribution';
 import { REGEX_AI_SUFFIX } from '../../../constants';
 import { addBreadcrumb, captureException } from '../../../utils/sentry';
@@ -1041,12 +1045,21 @@ async function handleProcessSpawnImpl(
 		}
 	}
 
-	// Admitted for the actor this transport resolved (the keyboard, or the
-	// logged-in browser account) before any branch: a managed host spawns
-	// nothing without an admission, a standalone host spawns as before.
+	// Admitted for the actor this transport resolved (the keyboard, a logged-in
+	// browser account, or, through the ticket a WebSocket dispatch arrived
+	// with, the CLI or the paired device that sent it) before any branch: a
+	// managed host spawns nothing without an admission, a standalone host
+	// spawns as before.
+	// The ticket is spent here, whatever it was worth; the process never sees it.
+	const { dispatchTicket, ...spawnConfig } = config;
+	const actor = currentSpawnActor({
+		ticket: dispatchTicket,
+		agentId: baseSessionId,
+		tabId: spawnTabId(config),
+	});
 	const result = await processManager.spawnAdmitted(
 		{
-			...config,
+			...spawnConfig,
 			// The ids the child's stamped record was minted with (see above), so
 			// the sink binds the same request it carries; absent on an undispatched turn.
 			dispatchedAs,
@@ -1092,7 +1105,7 @@ async function handleProcessSpawnImpl(
 			// SSH app-server launch, when this Codex turn wants app-server.
 			codexAppServerSsh: sshWrap.codexAppServerSsh,
 		},
-		currentSpawnActor()
+		actor
 	);
 	if (!result.success && pluginRunToken) exitListener.current?.(config.sessionId);
 	if (result.success) proofCleanup.release = undefined;
@@ -1310,9 +1323,53 @@ async function handleProcessSpawnImpl(
  * these transports is an enterprise principal. Read through
  * `transportSpawnActor`, never off the acting user, which still names a
  * paired device `paired-device` for History and gives the CLI no name at all.
+ *
+ * A spawn the renderer builds for a WebSocket dispatch (`send_command`)
+ * arrives over Electron IPC, outside the transport context the dispatch was
+ * admitted in. It carries the host-minted ticket the WS handler issued
+ * instead (MRC-08-01B): `claim` spends it for the agent and tab actually
+ * being spawned and binds the transport it was issued for. A ticket that is
+ * unknown, already spent, expired, or issued for another agent or tab is
+ * worth nothing, and the spawn binds the caller's own standing, never what
+ * the ticket claimed. The ticket names no actor; only the host's registry
+ * knows which admission it stood for.
  */
-export function currentSpawnActor(): ProcessSpawnActor {
+export function currentSpawnActor(claim?: DispatchTicketClaim): ProcessSpawnActor {
+	if (claim && typeof claim.ticket === 'string' && claim.ticket) {
+		const issuedFor = claimDispatchTicket(claim.ticket, {
+			agentId: claim.agentId,
+			tabId: claim.tabId,
+		});
+		if (issuedFor) return transportSpawnActor(issuedFor);
+		logger.warn(
+			'Dispatch ticket not honored (unknown, spent, expired or mismatched); binding the caller as itself',
+			LOG_CONTEXT,
+			{ agentId: claim.agentId, tabId: claim.tabId }
+		);
+	}
 	return transportSpawnActor(getActingTransport());
+}
+
+/** What a spawn hands {@link currentSpawnActor} to claim a dispatch ticket with. */
+export interface DispatchTicketClaim {
+	/** The ticket the spawn config carried, as it arrived (unvalidated). */
+	ticket: unknown;
+	/** The agent being spawned (the base session id). */
+	agentId: string;
+	/** The tab being spawned into, when the spawn names one. */
+	tabId?: string;
+}
+
+/**
+ * The tab a spawn writes into: the config's own `tabId` when the caller set
+ * one, else the tab half of the compound `{agentId}-ai-{tabId}` process id a
+ * desktop turn spawns under. A ticket issued for a named tab is claimed
+ * against this; a `-ai` process with no tab half claims as tab-less.
+ */
+function spawnTabId(config: Pick<SpawnProcessConfig, 'sessionId' | 'tabId'>): string | undefined {
+	if (config.tabId) return config.tabId;
+	const match = /-ai-(.+)$/.exec(config.sessionId);
+	return match ? match[1] : undefined;
 }
 
 /**

@@ -116,6 +116,11 @@ interface ProcessConfig {
 	 *  operation's child and stamps the child's record on the process. Absent
 	 *  on a turn the user or an Auto Run started. */
 	delegation?: import('../shared/maestro-lib/managed/delegation').ManagedDelegationContext;
+	/** The host-minted ticket a WebSocket dispatch arrived with, echoed as it
+	 *  is: the spawn handler claims it to bind the transport that sent the
+	 *  dispatch (a CLI, a paired device, a Web Login). Opaque and single-use;
+	 *  absent on a turn the desktop itself started. */
+	dispatchTicket?: string;
 }
 
 type AgentConfigOption = import('../shared/types').AgentConfigOption;
@@ -564,6 +569,7 @@ interface MaestroAPI {
 				images?: string[],
 				background?: boolean,
 				delegation?: import('../shared/maestro-lib/managed/delegation').ManagedDelegationContext,
+				dispatchTicket?: string,
 				receiptChannel?: string
 			) => void
 		) => () => void;
