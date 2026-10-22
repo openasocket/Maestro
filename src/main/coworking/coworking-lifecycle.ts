@@ -12,6 +12,7 @@ import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
 import { ensureCoworkingServerScript } from './coworking-server-paths';
 import { startCoworkingBridge, stopCoworkingBridge } from './coworking-bridge';
+import type { BrowserEffectAuthority } from '../enterprise/browser-policy';
 import { resolveSessionFromPidWalk } from './pid-resolution';
 
 /** The slice of ProcessManager the bridge needs to bind a connection to an agent. */
@@ -22,13 +23,17 @@ export interface CoworkingProcessLookup {
 /**
  * Refresh the MCP-server script and start the bridge. Idempotent. Startup is
  * non-fatal: the feature degrades to "not available" until the next start.
+ * `browserAuthority` is the browser ceiling reader the bridge holds every tool
+ * call against (MRC-09-04A); absent or null is a host with no ceiling source.
  */
 export async function startCoworkingService(
-	getProcessManager: () => CoworkingProcessLookup | null
+	getProcessManager: () => CoworkingProcessLookup | null,
+	browserAuthority?: () => BrowserEffectAuthority | null
 ): Promise<void> {
 	try {
 		await ensureCoworkingServerScript();
 		await startCoworkingBridge({
+			browserAuthority,
 			resolveSessionFromPid: (pid) =>
 				resolveSessionFromPidWalk(
 					pid,

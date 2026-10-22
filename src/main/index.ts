@@ -55,6 +55,7 @@ import { transcriptReadEgressConflict } from '../shared/plugins/capability-polic
 import { evaluateScheduledDispatch } from '../shared/plugins/plugin-dispatch-gate';
 import { PermissionBroker } from './plugins/permission-broker';
 import { createPluginPolicySource } from './enterprise/plugin-policy';
+import { createBrowserPolicySource } from './enterprise/browser-policy';
 import { PluginSandboxHost } from './plugins/plugin-sandbox-host';
 import { PluginBackgroundSupervisor } from './plugins/plugin-background-supervisor';
 import { PluginGroupingRegistry } from './plugins/plugin-grouping-registry';
@@ -921,7 +922,24 @@ if (!gotSingleInstanceLock) {
 app
 	.whenReady()
 	.then(async () => {
-		registerBrowserRelayHandlers({ getMainWindow: () => mainWindow, getWindowForSession });
+		// The browser ceiling source (MRC-09-04 / 09-04A): the one installed
+		// ceiling, bound to the applied policy revision under the enrollment rule
+		// the spawn authority uses, read live on every relay and coworking effect.
+		// Composed before the enterprise service exists (its identity and policy
+		// are read through the closure per call), so the relay registered here and
+		// the coworking bridge started by the IPC bootstrap hold from the first
+		// call. No endpoint operation of this build carries a browser ceiling
+		// (CP-01), so nothing installs one yet: an enrolled host refuses every
+		// effect `unavailable` by name; a standalone host holds nothing.
+		const browserPolicy = createBrowserPolicySource({
+			identity: { read: () => enterpriseService?.identity.read() ?? { status: 'none' } },
+			policy: () => enterpriseService?.policy.status() ?? null,
+		});
+		registerBrowserRelayHandlers({
+			getMainWindow: () => mainWindow,
+			getWindowForSession,
+			browserAuthority: () => browserPolicy,
+		});
 
 		// Serve agent-authored Concerto mockups as real documents with their own
 		// CSP. A srcdoc frame would inherit Maestro's renderer CSP and block the
@@ -1667,7 +1685,11 @@ app
 			// Coworking: the bundled MCP-server script and the bridge socket the
 			// agents' MCP subprocesses dial. Off also drops live connections.
 			coworking: {
-				reconcile: () => void startCoworkingService(() => processManager),
+				reconcile: () =>
+					void startCoworkingService(
+						() => processManager,
+						() => browserPolicy
+					),
 				stopAll: () => void stopCoworkingService(),
 			},
 			// OpenCode serve: the shared server spawns lazily on the first OpenCode
@@ -3350,6 +3372,7 @@ app
 			getPluginGroupingRegistry: () => pluginGroupingRegistry,
 			getPluginAuthStore: () => pluginAuthStore,
 			getEnterpriseService: () => enterpriseService,
+			getBrowserAuthority: () => browserPolicy,
 			getPluginEventBus: () => pluginEventBus,
 			getInteractiveReplayController: () => interactiveReplayController,
 			setNoteSessionActivated: (fn) => {

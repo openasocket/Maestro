@@ -419,7 +419,7 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		settingsStore: deps.settingsStore,
 	});
 	if (isEncoreFeatureEnabled(deps.settingsStore, 'coworking')) {
-		void startCoworkingService(deps.getProcessManager);
+		void startCoworkingService(deps.getProcessManager, deps.getBrowserAuthority);
 	}
 	// Register multi-window handlers (windows:* channel surface). Registered here
 	// because the running app wires handlers through setupIpcHandlers(), not

@@ -174,7 +174,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **The causal context one operation hands a child it dispatches (nested CLI, consult):** `ManagedDelegationContext`, `childDelegationContext()`, `intersectDelegationScope()`, `readDelegationContextEnv()` in `src/shared/maestro-lib/managed/delegation.ts`; `cueCliRouteSupport()` in `src/main/cue/cue-cli-executor.ts`
 - **A plugin act verb under management (dispatch, process, headless send):** `pluginActBinding()`, `admitPluginProcess()`, `pluginProcessRouteSupport()` in `src/main/plugins/plugin-host-handlers.ts`; `pluginHeadlessAuthority()`, `pluginBoundHeadlessAuthority()` in `src/main/plugins/plugin-headless-agent-runner.ts`
 - **The plugin ceiling a managed desktop holds plugins to (calls and kept resources):** `createPluginPolicySource()`, `parsePluginPolicyCeiling()` in `src/main/enterprise/plugin-policy.ts`; `PermissionBroker.holds()`, `ceilingVerdict()`, `managedPluginStanding()` in `src/main/plugins/permission-broker.ts`
-- **The browser ceiling a managed desktop holds relay and coworking effects to:** `createBrowserPolicySource()`, `browserEffectVerdict()`, `parseBrowserPolicyCeiling()` in `src/main/enterprise/browser-policy.ts`; `relayEffectOf()`, `BrowserRelay.assertEffect()` in `src/main/browser/browser-relay.ts`
+- **The browser ceiling a managed desktop holds relay and coworking effects to:** `createBrowserPolicySource()`, `browserEffectVerdict()` in `src/main/enterprise/browser-policy.ts`; `relayEffectOf()` in `src/main/browser/browser-relay.ts`; `coworkingEffectOf()` in `src/main/coworking/coworking-bridge.ts`
 
 #### Providers, accounts, and auth
 

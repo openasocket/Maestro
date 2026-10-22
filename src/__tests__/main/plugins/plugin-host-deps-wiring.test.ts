@@ -421,3 +421,50 @@ describe('production managed act bindings (MRC-09-02)', () => {
 		expect(source).toMatch(/managed: \(\) => enterpriseService\?\.spawnAuthority \?\? null,/);
 	});
 });
+
+describe('production browser ceiling wiring (MRC-09-04A)', () => {
+	const bootstrapSource = fs.readFileSync(
+		path.join(__dirname, '../../../main/ipc/bootstrap/index.ts'),
+		'utf-8'
+	);
+
+	it('composes ONE browser policy source, reading identity and policy live through the service closure', () => {
+		// Composed before the enterprise service exists: both readers go through
+		// `enterpriseService?.` per call, so an enrollment that lands later is seen
+		// by the next effect without re-wiring, and a host with no service reads
+		// as never enrolled (standalone) rather than throwing.
+		expect(source.match(/createBrowserPolicySource\(\{/g)).toHaveLength(1);
+		expect(source).toMatch(/const browserPolicy = createBrowserPolicySource\(\{/);
+		expect(source).toMatch(
+			/identity: \{ read: \(\) => enterpriseService\?\.identity\.read\(\) \?\? \{ status: 'none' \} \},/
+		);
+		expect(source).toMatch(
+			/policy: \(\) => enterpriseService\?\.policy\.status\(\) \?\? null,\n\t\t\}\);/
+		);
+	});
+
+	it('the remote browser relay holds every effect against that source', () => {
+		expect(source).toMatch(
+			/registerBrowserRelayHandlers\(\{\n\t+getMainWindow: \(\) => mainWindow,\n\t+getWindowForSession,\n\t+browserAuthority: \(\) => browserPolicy,\n\t+\}\);/
+		);
+	});
+
+	it('the coworking bridge holds against that source on BOTH starts: the boot start and the Encore reconcile', () => {
+		// The boot start lives in the IPC bootstrap and runs before any flag
+		// change; a reconcile alone would leave an enrolled desktop's bridge
+		// holding nothing from boot until the first toggle.
+		expect(source).toMatch(/getBrowserAuthority: \(\) => browserPolicy,/);
+		expect(bootstrapSource).toMatch(
+			/startCoworkingService\(deps\.getProcessManager, deps\.getBrowserAuthority\)/
+		);
+		expect(source).toMatch(
+			/reconcile: \(\) =>\n\t+void startCoworkingService\(\n\t+\(\) => processManager,\n\t+\(\) => browserPolicy\n\t+\),/
+		);
+		// No start of the service anywhere runs without the reader.
+		for (const text of [source, bootstrapSource]) {
+			for (const call of text.match(/startCoworkingService\([^;]*\)/g) ?? []) {
+				expect(call, call).toMatch(/browserPolicy|getBrowserAuthority/);
+			}
+		}
+	});
+});

@@ -54,10 +54,96 @@ import {
 	redactBrowserOpDetail,
 	type BrowserAuditEntry,
 } from './coworking-audit';
+import type { BrowserEffectAuthority, BrowserEffectKind } from '../enterprise/browser-policy';
 
 const LOG_CTX = '[Coworking][Bridge]';
 
 let server: net.Server | null = null;
+
+/**
+ * The browser ceiling source (MRC-09-04), read per call; null is a host with
+ * no ceiling source, which holds nothing (standalone). The actor is the agent
+ * session the handshake bound, by id and provider; the local gates (the
+ * handshake, the per-agent interaction toggle, op and URL validation, the
+ * renderer's confirmations and read caps) run first and are never replaced.
+ */
+let browserAuthority: (() => BrowserEffectAuthority | null) | null = null;
+
+type ToolMethod = Exclude<CoworkingBridgeMethod, 'hello'>;
+const TOOL_NAMES: Record<ToolMethod, string> = {
+	listTerminals: 'list_terminals',
+	readTerminal: 'read_terminal',
+	listBrowsers: 'list_browsers',
+	getBrowserUrl: 'get_browser_url',
+	readBrowser: 'read_browser',
+	browserInteract: 'browser_interact',
+};
+
+/** The effect kind of a coworking tool call, as the browser ceiling holds it. */
+export function coworkingEffectOf(method: ToolMethod, op?: BrowserOp): BrowserEffectKind {
+	if (method !== 'browserInteract')
+		return method === 'readTerminal' || method === 'readBrowser' ? 'read' : 'view';
+	switch (op?.kind) {
+		case 'click':
+		case 'type':
+		case 'waitFor':
+			return 'input';
+		case 'eval':
+			return 'execute';
+		case 'screenshot':
+			return 'view';
+		case 'read':
+			return 'read';
+		default:
+			return 'navigate';
+	}
+}
+
+/**
+ * Hold one tool call against the ceiling after its local gates passed. A
+ * tab-scoped call is a page effect held against the URL a navigation names
+ * or the page the registry last heard for the tab; a list or a terminal is a
+ * session effect with no destination. A refusal is audited as denied with
+ * the receipt's outcome and answered by name; nothing reaches the tool.
+ */
+function holdCoworkingEffect(
+	sessionId: string,
+	method: ToolMethod,
+	page?: { id?: string; op?: BrowserOp }
+): CoworkingBridgeResponse['error'] | null {
+	const authority = browserAuthority?.() ?? null;
+	if (!authority) return null;
+	const agentType = coworkingRegistry.getAgentType(sessionId);
+	const op = page?.op;
+	const known = coworkingRegistry.listBrowsersForSession(sessionId).find((b) => b.id === page?.id);
+	const destination =
+		op?.kind === 'navigate'
+			? op.url
+			: op?.kind === 'newTab'
+				? (op.url ?? null)
+				: (known?.url ?? null);
+	const decision = authority.authorize({
+		surface: 'coworking',
+		effect: coworkingEffectOf(method, op),
+		actor: { kind: 'agent', sessionId, agentType: agentType ?? null },
+		resource: page ? 'page' : 'session',
+		destination: page ? destination : null,
+	});
+	if (decision.allowed) return null;
+	recordBrowserAudit({
+		ts: Date.now(),
+		sessionId,
+		agentType,
+		tool: TOOL_NAMES[method],
+		...(op ? { opKind: op.kind } : {}),
+		detail: `managed-${decision.code}`,
+		status: 'denied',
+	});
+	return {
+		code: -32002,
+		message: `coworking bridge: [managed-${decision.code}] ${decision.message}`,
+	};
+}
 
 /** Run a browser tool call and emit one audit record with its outcome (ok or
  *  error). Denied calls are audited separately by the caller. */
@@ -111,9 +197,13 @@ let starting: Promise<void> | null = null;
 /** Start the bridge. Idempotent. Must be called inside `app.whenReady`. */
 export async function startCoworkingBridge(options?: {
 	resolveSessionFromPid?: CoworkingSessionFromPidResolver;
+	browserAuthority?: () => BrowserEffectAuthority | null;
 }): Promise<void> {
 	if (options?.resolveSessionFromPid !== undefined) {
 		resolveSessionFromPid = options.resolveSessionFromPid;
+	}
+	if (options?.browserAuthority !== undefined) {
+		browserAuthority = options.browserAuthority;
 	}
 	if (server) return;
 	if (!starting) {
@@ -419,6 +509,8 @@ async function dispatch(
 		}
 
 		if (method === 'listTerminals') {
+			const held = holdCoworkingEffect(sessionId, method);
+			if (held) return { id: req.id, error: held };
 			const result = await auditedBrowserCall(
 				{
 					sessionId,
@@ -434,6 +526,8 @@ async function dispatch(
 			if (typeof params.id !== 'string') {
 				return { id: req.id, error: { code: -32602, message: '`id` is required' } };
 			}
+			const held = holdCoworkingEffect(sessionId, method);
+			if (held) return { id: req.id, error: held };
 			const result = await auditedBrowserCall(
 				{
 					sessionId,
@@ -447,6 +541,8 @@ async function dispatch(
 		}
 		if (method === 'listBrowsers') {
 			const agentType = coworkingRegistry.getAgentType(sessionId);
+			const held = holdCoworkingEffect(sessionId, method);
+			if (held) return { id: req.id, error: held };
 			const result = await auditedBrowserCall({ sessionId, agentType, tool: 'list_browsers' }, () =>
 				listBrowsers(sessionId)
 			);
@@ -459,6 +555,8 @@ async function dispatch(
 				return { id: req.id, error: { code: -32602, message: '`id` is required' } };
 			}
 			const agentType = coworkingRegistry.getAgentType(sessionId);
+			const held = holdCoworkingEffect(sessionId, method, { id });
+			if (held) return { id: req.id, error: held };
 			const result = await auditedBrowserCall(
 				{ sessionId, agentType, tool: 'get_browser_url', detail: `id=${id}` },
 				() => getBrowserUrl(sessionId, { id })
@@ -510,6 +608,8 @@ async function dispatch(
 				};
 			}
 			const agentType = coworkingRegistry.getAgentType(sessionId);
+			const held = holdCoworkingEffect(sessionId, method, { id });
+			if (held) return { id: req.id, error: held };
 			const result = await auditedBrowserCall(
 				{
 					sessionId,
@@ -551,6 +651,13 @@ async function dispatch(
 			if (op.kind !== 'newTab' && typeof id !== 'string') {
 				return { id: req.id, error: { code: -32602, message: '`id` is required' } };
 			}
+			// Held after the toggle and the op's own validation, before the renderer
+			// (whose confirmation prompt still runs).
+			const held = holdCoworkingEffect(sessionId, method, {
+				id: typeof id === 'string' ? id : undefined,
+				op,
+			});
+			if (held) return { id: req.id, error: held };
 			const result = await auditedBrowserCall(
 				{
 					sessionId,
@@ -578,5 +685,8 @@ export const __testing = {
 	connections,
 	setResolveSessionFromPid(fn: CoworkingSessionFromPidResolver | null) {
 		resolveSessionFromPid = fn;
+	},
+	setBrowserAuthority(fn: (() => BrowserEffectAuthority | null) | null) {
+		browserAuthority = fn;
 	},
 };

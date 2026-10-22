@@ -9,6 +9,7 @@ import type { PluginSandboxHost } from '../../plugins/plugin-sandbox-host';
 import type { PluginGroupingRegistry } from '../../plugins/plugin-grouping-registry';
 import type { AuthorizationStore } from '../../plugins/authorization-ledger';
 import type { EnterpriseService } from '../../enterprise/service';
+import type { BrowserEffectAuthority } from '../../enterprise/browser-policy';
 import type { PluginEventBusImpl } from '../../plugins/plugin-event-bus';
 import type { InteractiveReplayController } from '../../agents/claude-interactive-replay';
 import type { ProcessConfig as ProcessSpawnConfig } from '../../process-manager/types';
@@ -45,6 +46,8 @@ export interface IpcBootstrapDependencies {
 	getPluginAuthStore: () => AuthorizationStore | null;
 	/** The enterprise enrollment service, null when its composition failed (the verbs answer unavailable). */
 	getEnterpriseService: () => EnterpriseService | null;
+	/** The browser ceiling the coworking bridge holds every tool call against (MRC-09-04A); null or absent holds nothing. */
+	getBrowserAuthority?: () => BrowserEffectAuthority | null;
 	getPluginEventBus: () => PluginEventBusImpl | null;
 	getInteractiveReplayController: () => InteractiveReplayController<ProcessSpawnConfig> | null;
 	/**
