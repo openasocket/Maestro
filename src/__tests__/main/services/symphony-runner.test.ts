@@ -56,7 +56,13 @@ import {
 	startContribution,
 	finalizeContribution,
 	cancelContribution,
+	type SymphonyRepositoryGate,
 } from '../../../main/services/symphony-runner';
+import type {
+	RepositoryEffectActor,
+	RepositoryEffectDecision,
+	RepositoryEffectRequest,
+} from '../../../main/enterprise/repository-policy';
 
 describe('Symphony Runner Service', () => {
 	// Helper to set up full successful workflow mocks (7 calls for startContribution)
@@ -1573,6 +1579,407 @@ describe('Symphony Runner Service', () => {
 					'/tmp/test-repo'
 				);
 			});
+		});
+	});
+});
+
+// ============================================================================
+// Managed repository gate (MRC-09-05)
+// ============================================================================
+
+describe('Symphony Runner under a managed repository gate (MRC-09-05)', () => {
+	const successfulStart = (prUrl = 'https://github.com/owner/repo/pull/1') => {
+		vi.mocked(execFileNoThrow)
+			.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }) // clone
+			.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }) // checkout -b
+			.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }) // config user.name
+			.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }) // config user.email
+			.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }) // commit --allow-empty
+			.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }) // push
+			.mockResolvedValueOnce({ stdout: prUrl, stderr: '', exitCode: 0 }); // pr create
+	};
+	const successfulFinalize = (prUrl = 'https://github.com/owner/repo/pull/1') => {
+		vi.mocked(execFileNoThrow)
+			.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }) // config user.name
+			.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }) // config user.email
+			.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }) // git add -A
+			.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }) // git commit
+			.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }) // git push
+			.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }) // gh pr ready
+			.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }) // gh pr edit
+			.mockResolvedValueOnce({ stdout: prUrl, stderr: '', exitCode: 0 }); // gh pr view
+	};
+
+	type Request = RepositoryEffectRequest;
+	type Decision = RepositoryEffectDecision;
+
+	const okExec = { stdout: '', stderr: '', exitCode: 0 };
+	const actor: RepositoryEffectActor = {
+		kind: 'transport',
+		actor: { peer: 'web-login', username: 'ada' },
+	};
+
+	/** A ceiling double: refuses the named effects by code, admits the rest with a receipt. */
+	function authority(refuse: Partial<Record<Request['effect'], string>> = {}) {
+		const requests: Request[] = [];
+		return {
+			requests,
+			authorize(request: Request): Decision {
+				requests.push(request);
+				const receipt = {
+					policyRevision: 7,
+					surface: request.surface,
+					actor: 'ada',
+					effect: request.effect,
+					repository: request.repository,
+					remote: request.remote,
+					outcome: 'within-ceiling' as const,
+				};
+				const code = refuse[request.effect];
+				if (!code) return { allowed: true, managed: receipt };
+				return {
+					allowed: false,
+					code: code as never,
+					message: `no ${request.effect} for ada`,
+					managed: { ...receipt, outcome: code as never },
+				};
+			},
+		};
+	}
+
+	const startOptions = (gate: SymphonyRepositoryGate) => ({
+		contributionId: 'contrib-1',
+		repoSlug: 'acme/widgets',
+		repoUrl: 'https://github.com/acme/widgets',
+		issueNumber: 12,
+		issueTitle: 'Fix widgets',
+		documentPaths: [],
+		localPath: '/tmp/managed-repo',
+		branchName: 'symphony/issue-12',
+		gate,
+	});
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.mocked(fs.mkdir).mockResolvedValue(undefined);
+		vi.mocked(fs.rm).mockResolvedValue(undefined);
+		vi.mocked(ensureForkSetup).mockResolvedValue({ isFork: false });
+	});
+
+	it('runs byte-for-byte standalone with a null authority: no receipts, two-argument fork setup', async () => {
+		successfulStart();
+
+		const result = await startContribution(startOptions({ authority: null }));
+
+		expect(result.success).toBe(true);
+		expect('managed' in result).toBe(false);
+		expect(ensureForkSetup).toHaveBeenCalledWith('/tmp/managed-repo', 'acme/widgets');
+	});
+
+	it('holds every effect in order before it runs and returns the receipts', async () => {
+		successfulStart();
+		const auth = authority();
+
+		const result = await startContribution(startOptions({ authority: auth, actor }));
+
+		expect(result.success).toBe(true);
+		expect(auth.requests.map((r) => [r.effect, r.resource, r.repository, r.remote])).toEqual([
+			['clone', 'remote', 'acme/widgets', 'https://github.com/acme/widgets'],
+			['branch', 'local', 'acme/widgets', null],
+			['commit', 'local', 'acme/widgets', null],
+			['push', 'remote', 'acme/widgets', 'https://github.com/acme/widgets'],
+			['pull-request', 'remote', 'acme/widgets', 'https://github.com/acme/widgets'],
+		]);
+		expect(auth.requests.every((r) => r.surface === 'symphony-runner' && r.actor === actor)).toBe(
+			true
+		);
+		expect(result.managed?.map((r) => r.effect)).toEqual([
+			'clone',
+			'branch',
+			'commit',
+			'push',
+			'pull-request',
+		]);
+	});
+
+	it('refuses the clone before anything runs, with nothing to clean up', async () => {
+		const auth = authority({ clone: 'outside-ceiling' });
+
+		const result = await startContribution(startOptions({ authority: auth, actor }));
+
+		expect(result).toEqual({
+			success: false,
+			error: '[managed-outside-ceiling] no clone for ada',
+			managed: [expect.objectContaining({ effect: 'clone', outcome: 'outside-ceiling' })],
+		});
+		expect(execFileNoThrow).not.toHaveBeenCalled();
+		expect(fs.rm).not.toHaveBeenCalled();
+	});
+
+	it('refuses the push after the clone, removes the clone and never pushes or opens a PR', async () => {
+		vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+		const auth = authority({ push: 'remote-denied' });
+
+		const result = await startContribution(startOptions({ authority: auth, actor }));
+
+		expect(result.success).toBe(false);
+		expect(result.error).toBe('[managed-remote-denied] no push for ada');
+		expect(result.managed?.at(-1)).toMatchObject({ effect: 'push', outcome: 'remote-denied' });
+		const commands = vi.mocked(execFileNoThrow).mock.calls.map((call) => call[1]);
+		expect(commands).not.toContainEqual(expect.arrayContaining(['push']));
+		expect(commands).not.toContainEqual(expect.arrayContaining(['pr']));
+		expect(fs.rm).toHaveBeenCalledWith('/tmp/managed-repo', { recursive: true, force: true });
+	});
+
+	it('refuses the draft PR after the push and names it by code, not as a gh failure', async () => {
+		vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+		const auth = authority({ 'pull-request': 'outside-ceiling' });
+
+		const result = await startContribution(startOptions({ authority: auth, actor }));
+
+		expect(result.error).toBe('[managed-outside-ceiling] no pull-request for ada');
+		const commands = vi.mocked(execFileNoThrow).mock.calls.map((call) => call[1]);
+		expect(commands).toContainEqual(['push', '-u', 'origin', 'symphony/issue-12']);
+		expect(commands).not.toContainEqual(expect.arrayContaining(['pr', 'create']));
+	});
+
+	it('holds the fork where it happens and the push against the fork, when one is set up', async () => {
+		successfulStart();
+		const auth = authority();
+		vi.mocked(ensureForkSetup).mockImplementation(async (_path, _slug, options) => {
+			const refusal = await options?.beforeFork?.();
+			return refusal
+				? { isFork: false, error: refusal }
+				: { isFork: true, forkSlug: 'ada/widgets' };
+		});
+
+		const result = await startContribution(startOptions({ authority: auth, actor }));
+
+		expect(result).toMatchObject({ success: true, isFork: true, forkSlug: 'ada/widgets' });
+		expect(auth.requests.map((r) => [r.effect, r.remote])).toEqual([
+			['clone', 'https://github.com/acme/widgets'],
+			['branch', null],
+			['fork', 'https://github.com/acme/widgets'],
+			['commit', null],
+			['push', 'https://github.com/ada/widgets.git'],
+			['pull-request', 'https://github.com/acme/widgets'],
+		]);
+	});
+
+	it('refuses the fork before it is created and reports the managed refusal, not a fork failure', async () => {
+		vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+		const auth = authority({ fork: 'outside-ceiling' });
+		vi.mocked(ensureForkSetup).mockImplementation(async (_path, _slug, options) => {
+			const refusal = await options?.beforeFork?.();
+			return refusal
+				? { isFork: false, error: refusal }
+				: { isFork: true, forkSlug: 'ada/widgets' };
+		});
+
+		const result = await startContribution(startOptions({ authority: auth, actor }));
+
+		expect(result).toEqual({
+			success: false,
+			error: '[managed-outside-ceiling] no fork for ada',
+			managed: expect.arrayContaining([
+				expect.objectContaining({ effect: 'fork', outcome: 'outside-ceiling' }),
+			]),
+		});
+		expect(fs.rm).toHaveBeenCalledWith('/tmp/managed-repo', { recursive: true, force: true });
+		const commands = vi.mocked(execFileNoThrow).mock.calls.map((call) => call[1]);
+		expect(commands).not.toContainEqual(expect.arrayContaining(['commit']));
+	});
+
+	it('binds the actor to the transport of the call when the gate names none', async () => {
+		successfulStart();
+		const auth = authority();
+
+		await startContribution(startOptions({ authority: auth }));
+
+		expect(auth.requests[0].actor).toEqual({ kind: 'transport', actor: { peer: 'in-process' } });
+	});
+
+	describe('finalizeContribution', () => {
+		it('reads origin, holds commit, push and finalize, and returns the receipts', async () => {
+			vi.mocked(execFileNoThrow)
+				.mockResolvedValueOnce({
+					stdout: 'https://github.com/ada/widgets.git\n',
+					stderr: '',
+					exitCode: 0,
+				}) // remote get-url origin
+				.mockResolvedValueOnce(okExec) // config user.name
+				.mockResolvedValueOnce(okExec) // config user.email
+				.mockResolvedValueOnce(okExec) // add -A
+				.mockResolvedValueOnce(okExec) // commit
+				.mockResolvedValueOnce(okExec) // push
+				.mockResolvedValueOnce(okExec) // pr ready
+				.mockResolvedValueOnce(okExec) // pr edit
+				.mockResolvedValueOnce({
+					stdout: 'https://github.com/acme/widgets/pull/9',
+					stderr: '',
+					exitCode: 0,
+				}); // pr view
+			const auth = authority();
+
+			const result = await finalizeContribution(
+				'/tmp/managed-repo',
+				9,
+				12,
+				'Fix widgets',
+				'acme/widgets',
+				{ authority: auth, actor }
+			);
+
+			expect(result).toEqual({
+				success: true,
+				prUrl: 'https://github.com/acme/widgets/pull/9',
+				managed: [
+					expect.objectContaining({ effect: 'commit', repository: 'acme/widgets', remote: null }),
+					expect.objectContaining({
+						effect: 'push',
+						repository: 'acme/widgets',
+						remote: 'https://github.com/ada/widgets.git',
+					}),
+					expect.objectContaining({ effect: 'finalize', repository: 'acme/widgets' }),
+				],
+			});
+			expect(vi.mocked(execFileNoThrow).mock.calls[0][1]).toEqual(['remote', 'get-url', 'origin']);
+		});
+
+		it('names the repository from origin when no upstream slug is given', async () => {
+			vi.mocked(execFileNoThrow).mockResolvedValue({
+				stdout: 'git@github.com:acme/widgets.git\n',
+				stderr: '',
+				exitCode: 0,
+			});
+			const auth = authority();
+
+			await finalizeContribution('/tmp/managed-repo', 9, 12, 'Fix widgets', undefined, {
+				authority: auth,
+				actor,
+			});
+
+			expect(auth.requests[0]).toMatchObject({ effect: 'commit', repository: 'acme/widgets' });
+			expect(auth.requests[1]).toMatchObject({
+				effect: 'push',
+				remote: 'git@github.com:acme/widgets.git',
+			});
+		});
+
+		it('refuses the finalize after the push and never marks the PR ready', async () => {
+			vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+			const auth = authority({ finalize: 'outside-ceiling' });
+
+			const result = await finalizeContribution(
+				'/tmp/managed-repo',
+				9,
+				12,
+				'Fix widgets',
+				'acme/widgets',
+				{ authority: auth, actor }
+			);
+
+			expect(result.success).toBe(false);
+			expect(result.error).toBe('[managed-outside-ceiling] no finalize for ada');
+			const commands = vi.mocked(execFileNoThrow).mock.calls.map((call) => call[1]);
+			expect(commands).toContainEqual(['push']);
+			expect(commands).not.toContainEqual(expect.arrayContaining(['pr', 'ready']));
+		});
+
+		it('refuses the push before it runs, after the local commit', async () => {
+			vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+			const auth = authority({ push: 'remote-denied' });
+
+			const result = await finalizeContribution(
+				'/tmp/managed-repo',
+				9,
+				12,
+				'Fix widgets',
+				'acme/widgets',
+				{ authority: auth, actor }
+			);
+
+			expect(result.error).toBe('[managed-remote-denied] no push for ada');
+			const commands = vi.mocked(execFileNoThrow).mock.calls.map((call) => call[1]);
+			expect(commands).not.toContainEqual(['push']);
+			expect(commands).toContainEqual(['add', '-A']);
+		});
+
+		it('does not read origin with a null authority', async () => {
+			successfulFinalize();
+
+			const result = await finalizeContribution(
+				'/tmp/managed-repo',
+				9,
+				12,
+				'Fix widgets',
+				undefined,
+				{ authority: null }
+			);
+
+			expect(result.success).toBe(true);
+			expect('managed' in result).toBe(false);
+			expect(vi.mocked(execFileNoThrow).mock.calls[0][1]).toEqual([
+				'config',
+				'user.name',
+				'Maestro Symphony',
+			]);
+		});
+	});
+
+	describe('cancelContribution', () => {
+		it('holds the cancel against origin before gh pr close', async () => {
+			vi.mocked(execFileNoThrow)
+				.mockResolvedValueOnce({
+					stdout: 'https://github.com/acme/widgets.git\n',
+					stderr: '',
+					exitCode: 0,
+				})
+				.mockResolvedValueOnce(okExec);
+			const auth = authority();
+
+			const result = await cancelContribution('/tmp/managed-repo', 9, true, undefined, {
+				authority: auth,
+				actor,
+			});
+
+			expect(result).toEqual({
+				success: true,
+				managed: [
+					expect.objectContaining({
+						effect: 'cancel',
+						repository: 'acme/widgets',
+						remote: 'https://github.com/acme/widgets.git',
+					}),
+				],
+			});
+			expect(auth.requests[0].resource).toBe('remote');
+			expect(vi.mocked(execFileNoThrow).mock.calls[1][1]).toEqual([
+				'pr',
+				'close',
+				'9',
+				'--delete-branch',
+			]);
+			expect(fs.rm).toHaveBeenCalledWith('/tmp/managed-repo', { recursive: true, force: true });
+		});
+
+		it('refuses the cancel and leaves the PR and the clone alone', async () => {
+			vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+			const auth = authority({ cancel: 'outside-ceiling' });
+
+			const result = await cancelContribution('/tmp/managed-repo', 9, true, 'acme/widgets', {
+				authority: auth,
+				actor,
+			});
+
+			expect(result).toEqual({
+				success: false,
+				error: '[managed-outside-ceiling] no cancel for ada',
+				managed: [expect.objectContaining({ effect: 'cancel', outcome: 'outside-ceiling' })],
+			});
+			const commands = vi.mocked(execFileNoThrow).mock.calls.map((call) => call[1]);
+			expect(commands).not.toContainEqual(expect.arrayContaining(['pr', 'close']));
+			expect(fs.rm).not.toHaveBeenCalled();
 		});
 	});
 });

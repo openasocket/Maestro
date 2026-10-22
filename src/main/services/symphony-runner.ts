@@ -19,8 +19,97 @@ import {
 	uniqueDocumentFileName,
 	SYMPHONY_DOCUMENT_FETCH_TIMEOUT_MS,
 } from '../ipc/handlers/symphony/shared';
+import {
+	repositoryRemoteOrigin,
+	repositorySlugFromRemote,
+	type RepositoryEffectActor,
+	type RepositoryEffectAuthority,
+	type RepositoryEffectDecision,
+	type RepositoryEffectKind,
+	type RepositoryEffectReceipt,
+	type RepositoryEffectRequest,
+} from '../enterprise/repository-policy';
+import { getActingTransport, transportSpawnActor } from '../web-server/auth/transport-actor';
 
 const LOG_CONTEXT = '[SymphonyRunner]';
+
+/**
+ * What a caller hands the runner to hold every repository effect against
+ * (MRC-09-05). Absent, or with a null authority, the runner is standalone and
+ * runs byte-for-byte as before. The actor defaults to the transport the call
+ * was admitted over, read from the call's own context, never the caller's word.
+ */
+export interface SymphonyRepositoryGate {
+	authority: RepositoryEffectAuthority | null;
+	actor?: RepositoryEffectActor;
+}
+
+interface RepositoryHold {
+	hold(
+		effect: RepositoryEffectKind,
+		resource: RepositoryEffectRequest['resource'],
+		repository: string | null,
+		remote: string | null
+	): RepositoryEffectDecision;
+	/** Every managed answer, in order; empty on a standalone host. */
+	receipts: RepositoryEffectReceipt[];
+}
+
+type Refused = Extract<RepositoryEffectDecision, { allowed: false }>;
+
+/** Each effect held by itself, right before it runs; a standalone gate answers allowed with no receipt. */
+function repositoryHold(gate: SymphonyRepositoryGate | undefined): RepositoryHold {
+	const receipts: RepositoryEffectReceipt[] = [];
+	const authority = gate?.authority ?? null;
+	if (!authority) return { receipts, hold: () => ({ allowed: true }) };
+	const actor: RepositoryEffectActor = gate?.actor ?? {
+		kind: 'transport',
+		actor: transportSpawnActor(getActingTransport()),
+	};
+	return {
+		receipts,
+		hold(effect, resource, repository, remote) {
+			const decision = authority.authorize({
+				surface: 'symphony-runner',
+				effect,
+				actor,
+				resource,
+				repository,
+				remote,
+			});
+			if (decision.managed) receipts.push(decision.managed);
+			if (!decision.allowed)
+				logger.warn('Repository effect refused by the managed ceiling', LOG_CONTEXT, {
+					effect,
+					code: decision.code,
+					repository,
+					remote: decision.managed.remote,
+				});
+			return decision;
+		},
+	};
+}
+
+/** The failure a refused effect becomes: named by code, never a git or gh failure a login would fix. */
+const refusal = (decision: Refused): string => `[managed-${decision.code}] ${decision.message}`;
+
+/** The result with the managed receipts on it, or exactly the result on a standalone host. */
+function withReceipts<T extends object>(result: T, hold: RepositoryHold): T {
+	return hold.receipts.length > 0 ? { ...result, managed: hold.receipts } : result;
+}
+
+/** Where a push lands: the fork `ensureForkSetup` pointed origin at (the same forge), or the repository itself. */
+function pushDestination(repoUrl: string, forkSlug: string | undefined): string {
+	const origin = repositoryRemoteOrigin(repoUrl);
+	return forkSlug && origin && origin !== 'file:' ? `${origin}/${forkSlug}.git` : repoUrl;
+}
+
+/** The remote a later effect reaches: what origin points at now (the fork after a fork setup). */
+async function originRemote(localPath: string): Promise<string | null> {
+	const result = await execFileNoThrow('git', ['remote', 'get-url', 'origin'], localPath);
+	const url = result.stdout.trim();
+	return result.exitCode === 0 && url ? url : null;
+}
 
 /**
  * Clean up local repository directory on failure.
@@ -50,6 +139,8 @@ export interface SymphonyRunnerOptions {
 	branchName: string;
 	onProgress?: (progress: { completedDocuments: number; totalDocuments: number }) => void;
 	onStatusChange?: (status: string) => void;
+	/** The managed repository gate; absent means standalone. */
+	gate?: SymphonyRepositoryGate;
 }
 
 /**
@@ -264,6 +355,13 @@ async function setupAutoRunDocs(
  * 4. Push the branch
  * 5. Create a draft PR (claims the issue via "Closes #N")
  * 6. Set up Auto Run documents
+ *
+ * Under management (`options.gate`) every step that reaches a remote or
+ * changes what will be published is held by itself before it runs: the clone, the branch,
+ * the fork (inside `ensureForkSetup`, only when one is needed), the commit,
+ * the push (against the fork when origin was pointed at one) and the draft
+ * PR. A refusal after the clone removes the clone like any other failure and
+ * is reported `[managed-<code>]` with the receipts, never as a git failure.
  */
 export async function startContribution(options: SymphonyRunnerOptions): Promise<{
 	success: boolean;
@@ -273,6 +371,7 @@ export async function startContribution(options: SymphonyRunnerOptions): Promise
 	isFork?: boolean;
 	forkSlug?: string;
 	error?: string;
+	managed?: RepositoryEffectReceipt[];
 }> {
 	const {
 		repoSlug,
@@ -284,27 +383,51 @@ export async function startContribution(options: SymphonyRunnerOptions): Promise
 		documentPaths,
 		onStatusChange,
 	} = options;
+	const gate = repositoryHold(options.gate);
+	const refused = (decision: Refused) =>
+		withReceipts({ success: false, error: refusal(decision) }, gate);
 
 	try {
 		// 1. Clone
+		const cloneHold = gate.hold('clone', 'remote', repoSlug, repoUrl);
+		if (!cloneHold.allowed) return refused(cloneHold);
 		onStatusChange?.('cloning');
 		if (!(await cloneRepo(repoUrl, localPath))) {
-			return { success: false, error: 'Clone failed' };
+			return withReceipts({ success: false, error: 'Clone failed' }, gate);
 		}
 
 		// 2. Create branch
 		onStatusChange?.('setting_up');
+		const branchHold = gate.hold('branch', 'local', repoSlug, null);
+		if (!branchHold.allowed) {
+			await cleanupLocalRepo(localPath);
+			return refused(branchHold);
+		}
 		if (!(await createBranch(localPath, branchName))) {
 			await cleanupLocalRepo(localPath);
-			return { success: false, error: 'Branch creation failed' };
+			return withReceipts({ success: false, error: 'Branch creation failed' }, gate);
 		}
 
-		// 2.5. Fork setup - detect if user needs a fork for push access
+		// 2.5. Fork setup - detect if user needs a fork for push access. The
+		// fork itself is held where it happens, right before `gh repo fork`.
 		logger.info('Checking fork requirements', LOG_CONTEXT, { repoSlug });
-		const forkResult = await ensureForkSetup(localPath, repoSlug);
+		const forkGate: { refused: Refused | null } = { refused: null };
+		const forkResult = options.gate?.authority
+			? await ensureForkSetup(localPath, repoSlug, {
+					beforeFork: async () => {
+						const decision = gate.hold('fork', 'remote', repoSlug, repoUrl);
+						forkGate.refused = decision.allowed ? null : decision;
+						return forkGate.refused ? refusal(forkGate.refused) : null;
+					},
+				})
+			: await ensureForkSetup(localPath, repoSlug);
 		if (forkResult.error) {
 			await cleanupLocalRepo(localPath);
-			return { success: false, error: `Fork setup failed: ${forkResult.error}` };
+			if (forkGate.refused) return refused(forkGate.refused);
+			return withReceipts(
+				{ success: false, error: `Fork setup failed: ${forkResult.error}` },
+				gate
+			);
 		}
 		if (forkResult.isFork) {
 			logger.info('Using fork for contribution', LOG_CONTEXT, {
@@ -319,19 +442,39 @@ export async function startContribution(options: SymphonyRunnerOptions): Promise
 		await configureGitUser(localPath);
 
 		// 3. Empty commit
+		const commitHold = gate.hold('commit', 'local', repoSlug, null);
+		if (!commitHold.allowed) {
+			await cleanupLocalRepo(localPath);
+			return refused(commitHold);
+		}
 		const commitMessage = `[Symphony] Start contribution for #${issueNumber}`;
 		if (!(await createEmptyCommit(localPath, commitMessage))) {
 			await cleanupLocalRepo(localPath);
-			return { success: false, error: 'Empty commit failed' };
+			return withReceipts({ success: false, error: 'Empty commit failed' }, gate);
 		}
 
-		// 4. Push branch
+		// 4. Push branch (to the fork when origin now points at one)
+		const pushHold = gate.hold(
+			'push',
+			'remote',
+			repoSlug,
+			pushDestination(repoUrl, forkResult.isFork ? forkResult.forkSlug : undefined)
+		);
+		if (!pushHold.allowed) {
+			await cleanupLocalRepo(localPath);
+			return refused(pushHold);
+		}
 		if (!(await pushBranch(localPath, branchName))) {
 			await cleanupLocalRepo(localPath);
-			return { success: false, error: 'Push failed' };
+			return withReceipts({ success: false, error: 'Push failed' }, gate);
 		}
 
 		// 5. Create draft PR (cross-fork if needed)
+		const prHold = gate.hold('pull-request', 'remote', repoSlug, repoUrl);
+		if (!prHold.allowed) {
+			await cleanupLocalRepo(localPath);
+			return refused(prHold);
+		}
 		const forkOwner =
 			forkResult.isFork && forkResult.forkSlug ? forkResult.forkSlug.split('/')[0] : undefined;
 		if (forkResult.isFork) {
@@ -350,7 +493,7 @@ export async function startContribution(options: SymphonyRunnerOptions): Promise
 		);
 		if (!prResult.success) {
 			await cleanupLocalRepo(localPath);
-			return { success: false, error: prResult.error };
+			return withReceipts({ success: false, error: prResult.error }, gate);
 		}
 
 		// 6. Setup Auto Run docs
@@ -359,33 +502,57 @@ export async function startContribution(options: SymphonyRunnerOptions): Promise
 		// Ready - actual Auto Run processing happens via session
 		onStatusChange?.('running');
 
-		return {
-			success: true,
-			draftPrUrl: prResult.prUrl,
-			draftPrNumber: prResult.prNumber,
-			autoRunPath,
-			isFork: forkResult.isFork,
-			forkSlug: forkResult.forkSlug,
-		};
+		return withReceipts(
+			{
+				success: true,
+				draftPrUrl: prResult.prUrl,
+				draftPrNumber: prResult.prNumber,
+				autoRunPath,
+				isFork: forkResult.isFork,
+				forkSlug: forkResult.forkSlug,
+			},
+			gate
+		);
 	} catch (error) {
 		await cleanupLocalRepo(localPath);
-		return {
-			success: false,
-			error: error instanceof Error ? error.message : 'Unknown error',
-		};
+		return withReceipts(
+			{
+				success: false,
+				error: error instanceof Error ? error.message : 'Unknown error',
+			},
+			gate
+		);
 	}
 }
 
 /**
  * Finalize a contribution by converting draft PR to ready for review.
+ *
+ * Under management the commit, the push (against what origin points at now)
+ * and the finalization (the PR made ready and rewritten) are each held before
+ * they run; the repository is the upstream slug when given, else the one the
+ * origin remote names.
  */
 export async function finalizeContribution(
 	localPath: string,
 	prNumber: number,
 	issueNumber: number,
 	issueTitle: string,
-	upstreamSlug?: string
-): Promise<{ success: boolean; prUrl?: string; error?: string }> {
+	upstreamSlug?: string,
+	gate?: SymphonyRepositoryGate
+): Promise<{
+	success: boolean;
+	prUrl?: string;
+	error?: string;
+	managed?: RepositoryEffectReceipt[];
+}> {
+	const hold = repositoryHold(gate);
+	const remote = gate?.authority ? await originRemote(localPath) : null;
+	const repository = upstreamSlug ?? repositorySlugFromRemote(remote);
+	const commitHold = hold.hold('commit', 'local', repository, null);
+	if (!commitHold.allowed)
+		return withReceipts({ success: false, error: refusal(commitHold) }, hold);
+
 	// Configure git user for commits (in case not already configured)
 	await configureGitUser(localPath);
 
@@ -398,22 +565,30 @@ Processed all Auto Run documents for: ${issueTitle}`;
 
 	const commitResult = await execFileNoThrow('git', ['commit', '-m', commitMessage], localPath);
 	if (commitResult.exitCode !== 0 && !commitResult.stderr.includes('nothing to commit')) {
-		return { success: false, error: `Commit failed: ${commitResult.stderr}` };
+		return withReceipts({ success: false, error: `Commit failed: ${commitResult.stderr}` }, hold);
 	}
 
 	// Push changes (origin points to fork if ensureForkSetup ran)
+	const pushHold = hold.hold('push', 'remote', repository, remote);
+	if (!pushHold.allowed) return withReceipts({ success: false, error: refusal(pushHold) }, hold);
 	const pushResult = await execFileNoThrow('git', ['push'], localPath);
 	if (pushResult.exitCode !== 0) {
-		return { success: false, error: `Push failed: ${pushResult.stderr}` };
+		return withReceipts({ success: false, error: `Push failed: ${pushResult.stderr}` }, hold);
 	}
 
 	// Convert draft to ready for review
+	const finalizeHold = hold.hold('finalize', 'remote', repository, remote);
+	if (!finalizeHold.allowed)
+		return withReceipts({ success: false, error: refusal(finalizeHold) }, hold);
 	const ghCommand = await resolveGhPath();
 	const readyArgs = ['pr', 'ready', prNumber.toString()];
 	if (upstreamSlug) readyArgs.push('--repo', upstreamSlug);
 	const readyResult = await execFileNoThrow(ghCommand, readyArgs, localPath);
 	if (readyResult.exitCode !== 0) {
-		return { success: false, error: `Failed to mark PR ready: ${readyResult.stderr}` };
+		return withReceipts(
+			{ success: false, error: `Failed to mark PR ready: ${readyResult.stderr}` },
+			hold
+		);
 	}
 
 	// Update PR body with completion summary
@@ -438,21 +613,39 @@ Closes #${issueNumber}
 	if (upstreamSlug) viewArgs.push('--repo', upstreamSlug);
 	const prInfoResult = await execFileNoThrow(ghCommand, viewArgs, localPath);
 
-	return {
-		success: true,
-		prUrl: prInfoResult.stdout.trim(),
-	};
+	return withReceipts(
+		{
+			success: true,
+			prUrl: prInfoResult.stdout.trim(),
+		},
+		hold
+	);
 }
 
 /**
  * Cancel a contribution by closing the draft PR and cleaning up.
+ *
+ * Under management the cancel (the PR closed on the forge, the remote branch
+ * deleted) is held before `gh pr close` runs, against what origin points at.
  */
 export async function cancelContribution(
 	localPath: string,
 	prNumber: number,
 	cleanup: boolean = true,
-	upstreamSlug?: string
-): Promise<{ success: boolean; error?: string }> {
+	upstreamSlug?: string,
+	gate?: SymphonyRepositoryGate
+): Promise<{ success: boolean; error?: string; managed?: RepositoryEffectReceipt[] }> {
+	const hold = repositoryHold(gate);
+	const remote = gate?.authority ? await originRemote(localPath) : null;
+	const cancelHold = hold.hold(
+		'cancel',
+		'remote',
+		upstreamSlug ?? repositorySlugFromRemote(remote),
+		remote
+	);
+	if (!cancelHold.allowed)
+		return withReceipts({ success: false, error: refusal(cancelHold) }, hold);
+
 	// Close the draft PR
 	const ghCommand = await resolveGhPath();
 	const closeArgs = ['pr', 'close', prNumber.toString()];
@@ -465,10 +658,13 @@ export async function cancelContribution(
 	const closeResult = await execFileNoThrow(ghCommand, closeArgs, localPath);
 	if (closeResult.exitCode !== 0) {
 		logger.warn('Failed to close PR', LOG_CONTEXT, { prNumber, error: closeResult.stderr });
-		return {
-			success: false,
-			error: `Failed to close PR #${prNumber}: ${closeResult.stderr || closeResult.stdout}`,
-		};
+		return withReceipts(
+			{
+				success: false,
+				error: `Failed to close PR #${prNumber}: ${closeResult.stderr || closeResult.stdout}`,
+			},
+			hold
+		);
 	}
 
 	// Clean up local directory using Node.js fs API
@@ -476,5 +672,5 @@ export async function cancelContribution(
 		await cleanupLocalRepo(localPath);
 	}
 
-	return { success: true };
+	return withReceipts({ success: true }, hold);
 }

@@ -175,7 +175,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **A plugin act verb under management (dispatch, process, headless send):** `pluginActBinding()`, `admitPluginProcess()`, `pluginProcessRouteSupport()` in `src/main/plugins/plugin-host-handlers.ts`; `pluginHeadlessAuthority()`, `pluginBoundHeadlessAuthority()` in `src/main/plugins/plugin-headless-agent-runner.ts`
 - **The plugin ceiling a managed desktop holds plugins to (calls and kept resources):** `createPluginPolicySource()`, `parsePluginPolicyCeiling()` in `src/main/enterprise/plugin-policy.ts`; `PermissionBroker.holds()`, `ceilingVerdict()`, `managedPluginStanding()` in `src/main/plugins/permission-broker.ts`
 - **The browser ceiling a managed desktop holds relay and coworking effects to:** `createBrowserPolicySource()`, `browserEffectVerdict()` in `src/main/enterprise/browser-policy.ts`; `relayEffectOf()` in `src/main/browser/browser-relay.ts`; `coworkingEffectOf()` in `src/main/coworking/coworking-bridge.ts`
-- **The repository ceiling a managed desktop holds Symphony clone, push and PR effects to:** `createRepositoryPolicySource()`, `repositoryEffectVerdict()`, `repositoryRemoteOrigin()` in `src/main/enterprise/repository-policy.ts`; `ForkSetupOptions.beforeFork` in `src/main/utils/symphony-fork.ts`
+- **The repository ceiling a managed desktop holds Symphony clone, push and PR effects to:** `createRepositoryPolicySource()` in `src/main/enterprise/repository-policy.ts`; `ForkSetupOptions.beforeFork` in `src/main/utils/symphony-fork.ts`; `SymphonyRepositoryGate` in `src/main/services/symphony-runner.ts`
 
 #### Providers, accounts, and auth
 
