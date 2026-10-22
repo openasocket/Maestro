@@ -38,6 +38,7 @@ import {
 	type ManagedCapability,
 	type ManagedInstallationIdentity,
 	type ManagedOperationContext,
+	type ManagedPeerAuthentication,
 	type ManagedPrincipalRef,
 } from '../managed/types';
 import type { MaestroRuntime } from './index';
@@ -350,6 +351,14 @@ export function runtimeManagedScope(
 	};
 }
 
+/**
+ * The transport this handler answers over: `startRuntimeServer` admits a caller on the host's
+ * per-boot secret, so the handler stamps `host-secret` on the envelope it hands the facade, after
+ * the scope has admitted the context (MRC-08-05A). The facade then verifies the context with the
+ * verifier of that transport, and its verification record names it. A caller never stamps it.
+ */
+const BRIDGE_PEER: ManagedPeerAuthentication = 'host-secret';
+
 /** The operations with an effect: admitted on the host's current policy generation only. */
 const EFFECT_OPS: ReadonlySet<ManagedWireOperation> = new Set(['submit', 'cancel', 'interrupt']);
 const MANAGED_WIRE_OPERATIONS_TEXT =
@@ -496,8 +505,10 @@ function facadeRefusal(
 
 /**
  * Answer one managed operation, in a fixed order: the operation is on the list, the host has a
- * facade and a scope, the context is well formed and fits the scope, the input has the shape, and
- * only then does the facade see it (and verifies the context again). A refusal names its step.
+ * facade and a scope, the envelope names no transport of its own, the context is well formed and
+ * fits the scope, the input has the shape, and only then does the facade see it, stamped with the
+ * transport this handler admits over (and verifies the context again, with that transport's
+ * verifier). A refusal names its step.
  */
 async function answerManaged(
 	managed: ManagedApi | undefined,
@@ -554,6 +565,13 @@ async function answerManaged(
 	}
 	const envelope = obj(message.envelope);
 	if (!envelope) return managedRefusal('invalid-input', 'envelope is not an object', operation);
+	if (envelope.peer !== undefined) {
+		return managedRefusal(
+			'invalid-input',
+			'envelope.peer is stamped by this host once it has admitted the caller; a caller does not name the transport it arrived over.',
+			operation
+		);
+	}
 	const problems = managedContextProblems(envelope.context);
 	if (problems.length > 0) {
 		return managedRefusal('invalid-input', `envelope.context: ${problems.join('; ')}`, operation);
@@ -565,7 +583,11 @@ async function answerManaged(
 	if (!shaped.ok) {
 		return managedRefusal('invalid-input', `envelope.${shaped.problem}`, operation);
 	}
-	const result = await managed[operation]({ context, input: shaped.input as never });
+	const result = await managed[operation]({
+		context,
+		input: shaped.input as never,
+		peer: BRIDGE_PEER,
+	});
 	return result.ok
 		? { type, success: true, operation, result: result.value }
 		: facadeRefusal(operation, result);

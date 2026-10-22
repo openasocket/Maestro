@@ -56,7 +56,12 @@ import {
 } from '../managed/host-adapter';
 import { createManagedOperations, type ApprovedResource } from '../managed/operations';
 import { createRunJournal, managedRunJournalPath, type RunJournal } from '../managed/run-journal';
-import type { ManagedAuthenticatedContext, ManagedInstallationIdentity } from '../managed/types';
+import type {
+	ManagedAuthenticatedContext,
+	ManagedInstallationIdentity,
+	ManagedOperationContext,
+	ManagedPeerAuthentication,
+} from '../managed/types';
 import {
 	createWorkflowOwnership,
 	MANAGED_WORKFLOWS_FILE_NAME,
@@ -640,28 +645,36 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		label: hostLabel(options.mode, lock.info.pid),
 	};
 
-	// Managed operations. The verifier accepts in-process callers that name
-	// this installation; every other transport waits on its own verifier.
+	// Managed operations. One verifier per transport the facade is reachable
+	// over, each accepting a context that names this installation: the host's
+	// own in-process callers, and the bridge, whose request handler admits a
+	// caller on the per-boot secret and stamps `host-secret` on the envelope
+	// (MRC-08-05A). Every other transport waits on its own verifier.
+	const managedNow = deps.now ?? (() => Date.now());
 	const journal = createRunJournal({
 		file: managedRunJournalPath(paths),
-		now: deps.now ?? (() => Date.now()),
+		now: managedNow,
 		newId: deps.rules?.newId ?? generateUUID,
 	});
 	const journalLoaded = await journal.load({ liveRunIds: registry.liveRunIds() });
+	const acceptThisInstallation = (context: ManagedOperationContext): readonly string[] =>
+		context.installation.installationId === installation.installationId
+			? []
+			: [`installation ${context.installation.installationId} is not this one`];
+	const verifierOver = (peer: ManagedPeerAuthentication) =>
+		createContextVerifier({
+			verifierId: `${peer}:${installation.runtimeId}`,
+			peer,
+			now: managedNow,
+			accept: acceptThisInstallation,
+		});
 	let managed: ManagedApi | undefined;
 	if (journalLoaded.ok) {
 		managed = createManagedOperations({
 			installation,
 			binding,
-			verifier: createContextVerifier({
-				verifierId: `in-process:${installation.runtimeId}`,
-				peer: 'in-process',
-				now: deps.now ?? (() => Date.now()),
-				accept: (context) =>
-					context.installation.installationId === installation.installationId
-						? []
-						: [`installation ${context.installation.installationId} is not this one`],
-			}),
+			verifier: verifierOver('in-process'),
+			verifiers: { 'host-secret': verifierOver('host-secret') },
 			journal,
 			repository,
 			turns: turns.managed,

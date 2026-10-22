@@ -53,8 +53,12 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * 0.15.0: managed operations over the bridge (`managed_operation`, MRC-08-05): a detached host
  * answers `ManagedApi` in its own scope (`runtimeManagedScope` in `./runtime/server-requests`),
  * `createWsMaestroClient().managed` drives it, and `ManagedApi.scope` reads that scope (`ManagedScope`).
+ * 0.16.0: the facade records the transport that admitted an operation (MRC-08-05A):
+ * `ManagedOperationEnvelope.peer` is stamped by the host's own handler (`host-secret` over the
+ * bridge, nothing in process) and refused from a caller; `ManagedOperationsDeps.verifiers` holds
+ * one verifier per transport, so a verification record names the transport, never a default.
  */
-export const MAESTRO_LIB_VERSION = '0.15.0';
+export const MAESTRO_LIB_VERSION = '0.16.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

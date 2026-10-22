@@ -240,7 +240,8 @@ describe('runtime server', () => {
 			traceId: 'trace-1',
 			requestedCapabilities: ['capabilities.negotiate' as const, 'agents.list' as const],
 		});
-		// The facade verified the context the handler admitted: the actor is the scope's, by the host's own verifier.
+		// The facade verified the context the handler admitted: the actor is the scope's, by the host's
+		// own verifier for the transport that admitted it (the per-boot secret), which the record names.
 		expect(value(await managed.identity({ context: context(), input: {} }))).toMatchObject({
 			status: 'ok',
 			requestId: 'req-1',
@@ -248,8 +249,26 @@ describe('runtime server', () => {
 				actor: scope.actor,
 				installation: runtime.installation,
 				binding: 'standalone',
-				verification: { peer: 'in-process' },
+				verification: {
+					peer: 'host-secret',
+					verifierId: `host-secret:${runtime.installation.runtimeId}`,
+				},
 			},
+		});
+		// The runtime's own facade, held in process, still names in-process (MRC-08-05A).
+		expect(value(await runtime.managed!.identity({ context: context(), input: {} }))).toMatchObject(
+			{ status: 'ok', value: { verification: { peer: 'in-process' } } }
+		);
+		// A caller that names the transport itself is refused by the host; the client passes it through unread.
+		const selfStamped = await managed.identity({
+			context: context(),
+			input: {},
+			peer: 'host-secret',
+		});
+		expect(errorOf(selfStamped)).toMatchObject({
+			code: 'invalid',
+			method: 'managed.identity',
+			message: expect.stringContaining('envelope.peer is stamped by this host'),
 		});
 		expect(
 			value(await managed.agents({ context: context(), input: { cursor: null, limit: 5 } }))

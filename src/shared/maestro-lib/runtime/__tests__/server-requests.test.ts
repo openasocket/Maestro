@@ -641,7 +641,7 @@ describe('managed_operation (MRC-08-05)', () => {
 			result: {
 				status: 'ok',
 				requestId: 'req-1',
-				value: { actor: operator(), binding: 'standalone', verification: { peer: 'in-process' } },
+				value: { actor: operator(), binding: 'standalone', verification: { peer: 'host-secret' } },
 			},
 		});
 		const agents = await send('agents', {
@@ -673,6 +673,67 @@ describe('managed_operation (MRC-08-05)', () => {
 			success: true,
 			result: { outcome: 'denied', reason: 'missing-required-capability' },
 		});
+	});
+
+	it('records the transport that admitted the operation: host-secret over the bridge, in-process in process, and never a transport the caller names (MRC-08-05A)', async () => {
+		const { runtimeId } = runtime.installation;
+		// The handler stamps the transport it admits over; the facade verifies with that transport's verifier.
+		const overBridge = await send('identity', { envelope: { context: context(), input: {} } });
+		expect(overBridge).toMatchObject({
+			success: true,
+			result: {
+				status: 'ok',
+				value: {
+					verification: { peer: 'host-secret', verifierId: `host-secret:${runtimeId}` },
+				},
+			},
+		});
+		// The same facade, held in process, still verifies its own callers as in-process.
+		const inProcess = await runtime.managed!.identity({ context: context(), input: {} });
+		expect(inProcess).toMatchObject({
+			ok: true,
+			value: {
+				status: 'ok',
+				value: { verification: { peer: 'in-process', verifierId: `in-process:${runtimeId}` } },
+			},
+		});
+		// A caller naming the transport is refused before the context is read; nothing reached the facade.
+		for (const peer of ['host-secret', 'in-process', 'web-login', 'fleet']) {
+			expect(
+				await send('identity', { envelope: { context: context(), input: {}, peer } })
+			).toMatchObject({
+				success: false,
+				operation: 'identity',
+				reason: 'invalid-input',
+				error: expect.stringContaining('envelope.peer is stamped by this host'),
+			});
+		}
+		const stampedSubmit = await send('submit', {
+			envelope: { context: context(), input: submission('stamped'), peer: 'host-secret' },
+		});
+		expect(stampedSubmit).toMatchObject({ success: false, reason: 'invalid-input' });
+		expect(await listed()).toEqual([]);
+		// The facade itself: a transport it has no verifier for is refused, never verified as in-process.
+		const unverifiable = await runtime.managed!.identity({
+			context: context(),
+			input: {},
+			peer: 'web-login',
+		});
+		expect(unverifiable).toMatchObject({
+			ok: true,
+			value: {
+				status: 'denied',
+				requestId: 'req-1',
+				code: 'unauthenticated',
+				message: expect.stringContaining('verifies no caller over the web-login transport'),
+			},
+		});
+		// Negotiation advertises the transports the facade can verify, and only those.
+		const negotiated = await runtime.managed!.negotiate({
+			supportedVersions: [MANAGED_CONTRACT_VERSION],
+			required: ['capabilities.negotiate'],
+		});
+		expect(negotiated).toMatchObject({ ok: true, value: { outcome: 'activated' } });
 	});
 
 	it('submits through the facade and reports its decision: a denial reaches the journal with zero effect', async () => {

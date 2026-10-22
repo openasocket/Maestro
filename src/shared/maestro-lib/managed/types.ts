@@ -252,6 +252,15 @@ export type ManagedAuthenticatedContext = ManagedOperationContext & {
 export interface ManagedOperationEnvelope<TInput> {
 	context: ManagedOperationContext;
 	input: TInput;
+	/**
+	 * The transport the HOST admitted this operation over (MRC-08-05A). The
+	 * host's own handler stamps it after it has admitted the caller; a caller
+	 * never names it, and a bridge handler refuses an envelope that arrives
+	 * with one as `invalid-input`. Absent for the host's in-process callers.
+	 * The facade verifies the context with this transport's verifier and no
+	 * other: a transport the host has no verifier for is refused, not defaulted.
+	 */
+	peer?: ManagedPeerAuthentication;
 }
 
 // ---------------------------------------------------------------------------

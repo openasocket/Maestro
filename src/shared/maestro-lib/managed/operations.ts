@@ -52,6 +52,7 @@ import {
 	type ManagedOperationContext,
 	type ManagedOperationEnvelope,
 	type ManagedOperationResult,
+	type ManagedPeerAuthentication,
 	type ManagedRunRecord,
 	type ManagedSubmitInput,
 	type ManagedSubmitReceipt,
@@ -104,7 +105,15 @@ export interface ManagedTurnPort {
 export interface ManagedOperationsDeps {
 	installation: ManagedInstallationIdentity;
 	binding: Pick<ManagedBinding, 'authority' | 'state'>;
+	/** The verifier of the host's own in-process callers: an envelope that names no `peer`. */
 	verifier: ContextVerifier;
+	/**
+	 * One verifier per further transport the facade is reachable over (MRC-08-05A),
+	 * keyed by the `peer` the host's handler stamps on the envelope. An envelope
+	 * naming a transport with no verifier here is refused `unauthenticated`;
+	 * nothing falls back to the in-process verifier.
+	 */
+	verifiers?: Partial<Record<ManagedPeerAuthentication, ContextVerifier>>;
 	journal: RunJournal;
 	repository: {
 		listAgents(): AgentRecord[];
@@ -149,14 +158,35 @@ export function createManagedOperations(deps: ManagedOperationsDeps): ManagedApi
 	const support = deps.capabilities ?? MANAGED_CAPABILITY_SUPPORT;
 	const resolveResource = deps.resolveResource ?? (() => null);
 	const scopeAgents = deps.scopeAgents ?? ((_context, agents) => agents);
+	/** The verifier of each transport, the in-process one under its own name. */
+	const verifiers: Partial<Record<ManagedPeerAuthentication, ContextVerifier>> = {
+		'in-process': deps.verifier,
+		...deps.verifiers,
+	};
+	const transports = Object.keys(verifiers) as ManagedPeerAuthentication[];
 
-	/** Verify the context and the capability, or answer why not. */
+	/** Verify the context over the transport the host stamped, and the capability, or answer why not. */
 	function admitContext<T>(
 		envelope: ManagedOperationEnvelope<unknown>,
 		capability: ManagedCapability
 	): { ok: true; context: ManagedAuthenticatedContext } | { ok: false; result: Result<T> } {
 		const requestId = requestIdOf(envelope?.context);
-		const verified = deps.verifier.verify(envelope?.context);
+		const peer = envelope?.peer ?? 'in-process';
+		const verifier = Object.prototype.hasOwnProperty.call(verifiers, peer)
+			? verifiers[peer]
+			: undefined;
+		if (!verifier) {
+			return {
+				ok: false,
+				result: refuse(
+					'denied',
+					requestId,
+					'unauthenticated',
+					`This host verifies no caller over the ${String(peer)} transport; the operation was not admitted.`
+				),
+			};
+		}
+		const verified = verifier.verify(envelope?.context);
 		if (!verified.ok) {
 			return {
 				ok: false,
@@ -184,7 +214,11 @@ export function createManagedOperations(deps: ManagedOperationsDeps): ManagedApi
 	const api: ManagedApi = {
 		async negotiate(offer) {
 			const outcome = negotiateCompatibility(
-				hostCompatibilityProfile({ providers: deps.providers(), capabilities: support }),
+				hostCompatibilityProfile({
+					providers: deps.providers(),
+					transports,
+					capabilities: support,
+				}),
 				{
 					contractVersions: offer.supportedVersions,
 					endpointProtocols: MANAGED_ENDPOINT_PROTOCOLS,
