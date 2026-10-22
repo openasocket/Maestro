@@ -721,6 +721,111 @@ describe('cue-shell-executor', () => {
 			expect(lease.state()).toBe('revoked');
 		});
 
+		/**
+		 * Zero effect (MRC-07-07): a lease the owner withdrew before the spawn, a context this
+		 * host's verifier never bound, an answer that was lost, and a policy that changed between
+		 * two firings. Nothing spawns in any of them, and each is told apart by state and code.
+		 */
+		it('a lease withdrawn between the admission and the spawn (the owner revoked) is refused at the gate, and nothing spawns', async () => {
+			const leases: DispatchLease[] = [];
+			const admission: CueManagedAdmission = managedAdmission(
+				() => ({ decision: 'allow', policyRevision: 3 }),
+				(lease) => {
+					leases.push(lease);
+					// Withdrawn the instant it is issued: what the gate sees at `spawn()` is a dead lease.
+					admission.authority.revoke(lease.leaseId, 'the owner withdrew the workflow');
+				}
+			);
+			const result = await executeCueShell(
+				createConfig({ admission, routeSupport: qualified }) as any
+			);
+
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(result.status).toBe('failed');
+			expect(result.exitCode).toBeNull();
+			expect(result.managed).toEqual({ state: 'denied', code: 'lease-invalid' });
+			expect(result.stderr).toContain('[managed-denied] The lease for this launch is revoked.');
+			expect(leases).toHaveLength(1);
+			expect(leases[0].state()).toBe('revoked');
+			expect(leases[0].pid()).toBeUndefined();
+		});
+
+		it('a context this host’s verifier did not bind (a fabricated one) is refused unauthenticated before any lease or spawn', async () => {
+			const decide = vi.fn(() => ({ decision: 'allow', policyRevision: 3 }) as PolicyDecision);
+			const bound = managedAdmission(decide);
+			// The same fields, copied: the verifier's brand does not copy with them.
+			const forged: CueManagedAdmission = { ...bound, context: { ...bound.context } };
+
+			const result = await executeCueShell(
+				createConfig({ admission: forged, routeSupport: qualified }) as any
+			);
+
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(decide).not.toHaveBeenCalled();
+			expect(result.status).toBe('failed');
+			expect(result.managed).toEqual({ state: 'denied', code: 'unauthenticated' });
+			expect(result.stderr).toContain(
+				'[managed-denied] The context was not bound by a verifier on this host.'
+			);
+			expect(bound.authority.live()).toEqual([]);
+		});
+
+		it('an answer lost after asking is unknown: nothing spawns, and the run is not reported completed', async () => {
+			const admission = managedAdmission(() => ({
+				decision: 'unknown',
+				reason: 'the endpoint answered with a receipt that does not match the request',
+			}));
+
+			const result = await executeCueShell(
+				createConfig({ admission, routeSupport: qualified }) as any
+			);
+
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(result.status).toBe('failed');
+			expect(result.exitCode).toBeNull();
+			expect(result.managed).toEqual({ state: 'unknown', code: 'outcome-unknown' });
+			expect(result.stderr).toContain(
+				'[managed-unknown] the endpoint answered with a receipt that does not match the request'
+			);
+			expect(admission.authority.live()).toEqual([]);
+		});
+
+		it('decides every firing afresh: a policy that flips to deny after one admitted run refuses the next run before it spawns', async () => {
+			const answers: PolicyDecision[] = [
+				{ decision: 'allow', policyRevision: 3 },
+				{
+					decision: 'deny',
+					reason: 'policy revision 4 forbids shell actions on this host',
+					policyRevision: 4,
+					code: 'policy-denied',
+				},
+			];
+			const admission = managedAdmission(() => {
+				const answer = answers.shift();
+				if (!answer) throw new Error('asked more than twice');
+				return answer;
+			});
+
+			const first = executeCueShell(createConfig({ admission, routeSupport: qualified }) as any);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(mockSpawn).toHaveBeenCalledTimes(1);
+			mockChild.emit('close', 0, null);
+			expect((await first).status).toBe('completed');
+
+			const second = await executeCueShell(
+				createConfig({ runId: 'run-2', admission, routeSupport: qualified }) as any
+			);
+
+			expect(mockSpawn).toHaveBeenCalledTimes(1);
+			expect(answers).toEqual([]);
+			expect(second.status).toBe('failed');
+			expect(second.managed).toEqual({ state: 'denied', code: 'policy-denied' });
+			expect(second.stderr).toContain(
+				'[managed-denied] policy revision 4 forbids shell actions on this host'
+			);
+			expect(admission.authority.live()).toEqual([]);
+		});
+
 		it('stopped while the authority decides releases the lease unused and spawns nothing', async () => {
 			let answer!: (decision: PolicyDecision) => void;
 			const leases: DispatchLease[] = [];

@@ -37,6 +37,7 @@ import { createLocalHostAuthority, type AdmissionRequest } from '../../managed/a
 import type { ManagedBindingState } from '../../managed/binding';
 import {
 	MANAGED_DELEGATION_ENV_VAR,
+	delegationContextEnv,
 	readDelegationContextEnv,
 	type ManagedDelegationContext,
 } from '../../managed/delegation';
@@ -702,6 +703,156 @@ describe('background turns', () => {
 			await vi.waitFor(() => expect(background.activeCount()).toBe(0));
 			await vi.waitFor(() => expect(reported.some((entry) => entry.startsWith('end:'))).toBe(true));
 			expect(authority.live()).toEqual([]);
+		});
+
+		/**
+		 * Zero effect (MRC-07-07): a consult's owner revoked mid-answer, a policy that changed
+		 * between two turns of one room, a record carrying a fabricated fence, and a read-only
+		 * consult trying to widen itself through its own environment. Nothing runs that should
+		 * not, and what runs carries exactly what was bound.
+		 */
+		describe('zero effect: a revoked owner, a revoked policy, a fabricated fence, an escalating consult', () => {
+			const observer = (onEnd: (exitCode: number | null) => void) => ({
+				onActivity: () => undefined,
+				onSessionId: () => undefined,
+				onEnd: ({ exitCode }: { exitCode: number | null }) => onEnd(exitCode),
+			});
+
+			it('stops a running consult when its lease is revoked: the authority owns that stop, the observer hears the end, and no lease stays live', async () => {
+				const authority = authorityOf(() => 'allow');
+				const { background } = managedTurns(() => ({ text: 'working', hold: true }), authority);
+				const ends: Array<number | null> = [];
+
+				const started = await background.consultRunner().start(
+					spawnOf({ processId: 'cross-agent-r1', delegation: carried(null) }),
+					observer((exitCode) => ends.push(exitCode))
+				);
+
+				expect(started.success).toBe(true);
+				// Bound to the process the instant it existed.
+				const [lease] = authority.live();
+				expect(lease.state()).toBe('bound');
+				expect(lease.pid()).toBe(started.pid);
+
+				expect(authority.revoke(lease.leaseId, 'the owner withdrew the consult')).toBe(true);
+
+				await vi.waitFor(() => expect(background.activeCount()).toBe(0));
+				await vi.waitFor(() => expect(ends).toHaveLength(1));
+				// A stop, not a clean answer: the consult does not read as a success.
+				expect(ends[0]).not.toBe(0);
+				expect(lease.ended()).toMatchObject({
+					state: 'revoked',
+					reason: 'the owner withdrew the consult',
+				});
+				expect(authority.live()).toEqual([]);
+			});
+
+			it('decides every turn afresh: a policy that flips to deny after the moderator ran refuses the participant, and nothing starts for it', async () => {
+				const answers: Array<'allow' | 'deny'> = ['allow', 'deny'];
+				const { background, provider } = managedTurns(
+					() => ({ text: 'ok' }),
+					authorityOf(() => answers.shift() ?? 'deny')
+				);
+				const runner = background.groupChatRunner(handlers);
+
+				const moderator = await runner.start(spawnOf({ processId: MODERATOR }));
+				expect(moderator.success).toBe(true);
+				await vi.waitFor(() => expect(background.activeCount()).toBe(0));
+
+				const participant = await runner.start(spawnOf());
+
+				expect(participant).toMatchObject({
+					success: false,
+					error: '[managed-denied] the policy says no',
+					managed: { state: 'denied', code: 'policy-denied' },
+				});
+				expect(asked).toHaveLength(2);
+				expect(provider.calls.map((call) => call.processId)).toEqual([MODERATOR]);
+				expect(admissions.map((event) => [event.kind, event.processId])).toEqual([
+					['admitted', MODERATOR],
+					['refused', PARTICIPANT],
+				]);
+			});
+
+			it('refuses a consult whose record carries a fabricated fence before the authority is asked: nothing to bind, nothing run', async () => {
+				const { background, provider } = managedTurns(
+					() => ({ text: 'never' }),
+					authorityOf(() => 'allow')
+				);
+				const forged: ManagedDelegationContext = {
+					...carried(null),
+					workflow: {
+						workflowId: 'playbook:nightly',
+						version: 'v1',
+						triggerEventId: 'cli:launch:1',
+						ownerEpoch: '',
+						fencingToken: 'minted-by-the-asker',
+					},
+				};
+
+				const started = await background.consultRunner().start(
+					spawnOf({ processId: 'cross-agent-r1', delegation: forged }),
+					observer(() => undefined)
+				);
+
+				expect(started).toMatchObject({
+					success: false,
+					error: expect.stringContaining('workflow.ownerEpoch is not an id'),
+					managed: { state: 'denied', code: 'invalid-input' },
+				});
+				expect(asked).toEqual([]);
+				expect(provider.calls).toEqual([]);
+				expect(background.activeCount()).toBe(0);
+				expect(admissions).toEqual([
+					expect.objectContaining({
+						kind: 'refused',
+						processId: 'cross-agent-r1',
+						delegation: forged,
+						state: 'denied',
+						code: 'invalid-input',
+					}),
+				]);
+			});
+
+			it('a consult cannot widen itself through its environment: a planted record claiming a grant and no generation is overwritten by the one the admission bound', async () => {
+				const { background, provider } = managedTurns(
+					() => ({ text: 'The answer.' }),
+					authorityOf(() => 'allow')
+				);
+				const record = carried(null);
+				// What an escalating consult would plant for its own children: no chain, a grant it was
+				// never issued, and no generation to be reauthorized under.
+				const planted: ManagedDelegationContext = {
+					...record,
+					delegation: { chain: [], grantRef: 'grant-forged' },
+					policyRevision: null,
+				};
+
+				const ended = new Promise<void>((resolve) => {
+					void background.consultRunner().start(
+						spawnOf({
+							processId: 'cross-agent-r1',
+							delegation: record,
+							customEnvVars: delegationContextEnv(planted),
+						}),
+						observer(() => resolve())
+					);
+				});
+				await ended;
+
+				expect(asked).toHaveLength(1);
+				expect(asked[0].context.delegation).toEqual(record.delegation);
+				expect(stampedOn(provider.calls[0].spec.env)).toEqual(record);
+				expect(stampedOn(provider.calls[0].spec.env)).not.toEqual(planted);
+
+				// The same for a room turn: the room's child, never what the spawn's env claimed.
+				const runner = background.groupChatRunner(handlers);
+				await runner.start(spawnOf({ customEnvVars: delegationContextEnv(planted) }));
+				await vi.waitFor(() => expect(background.activeCount()).toBe(0));
+				expect(stampedOn(provider.calls[1].spec.env)).toEqual(
+					groupChatTurnContext({ processId: PARTICIPANT })
+				);
+			});
 		});
 	});
 });
