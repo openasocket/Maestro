@@ -1,0 +1,631 @@
+{
+	"frontMatter": {
+		"type": "evidence",
+		"title": "Phase 09 evidence: plugins, browser tools and repository effects (secondary effect inventory)",
+		"created": "2026-10-22",
+		"phase": 9,
+		"base_revision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+		"head_revision": "5e1d8c60c9c45e15a1022ac744afc4647def3a5d",
+		"branch": "feature/mega-maestro-v1.1.0-rc",
+		"tags": ["maestro", "mega-maestro", "integration", "evidence", "phase-09"],
+		"related": [
+			"[[EXECUTION-RULES]]",
+			"[[ANALYSIS]]",
+			"[[01]]",
+			"[[02]]",
+			"[[03]]",
+			"[[04]]",
+			"[[05]]",
+			"[[06]]",
+			"[[07]]",
+			"[[08]]"
+		]
+	},
+	"summary": "Phase 09 put the three families of secondary effects under the managed ceiling on feature/mega-maestro-v1.1.0-rc in the Maestro checkout (macOS, Darwin 27, Node v26.12.0, git 2.54.0). Plugins: the permission broker intersects every sandboxed call's local grant with a signed plugin ceiling (plugin digest, publisher, capability, target) at the existing broker and the existing execution handlers; the ceiling may narrow consent and never mints it, never rewrites the sealed grant ledger, and a central revoke ends process, socket, media and retained service calls while a local revoke stays authoritative under it. Browser: the relay (frames, resolves and actions on a lease) and the coworking bridge hold every view, read, navigate, input, execute and clear effect against a browser ceiling by actor, effect and destination, with the actor read from the admitting transport and a navigation's admitted URL kept as the lease's provisional page. Repository: Symphony's clone, branch, fork, commit, push, pull-request, finalize and cancel are each held by themselves right before they run, in the runner and in the desktop's own IPC sinks, with the fork held inside the helper where gh repo fork happens, a denial reported as [managed-<code>] and never as an authentication failure, and no new git call on a standalone host. Deterministic coverage over the real broker, the real sealed ledger, the real policy sources, the real relay, the real coworking bridge, the real runner and the real Symphony handlers is green (71 focused files, 1645 tests). The repository family was exercised for REAL on this host: real git against a bare repository on this disk under the real repository ceiling source (eight cases: the admitted start, finalize and cancel landing commits in the bare repository with one receipt per effect; the push, the clone, a GitHub remote, a missing ceiling and the cancel each refused by name before the effect, with the bare repository untouched, the clone removed and the forge double never asked to publish). The GitHub CLI was a labeled double, so nothing was published anywhere. No ceiling was installed by an endpoint: no Mega-Maestro operation installs a plugin, browser or repository ceiling yet (CP-01, CP-03), so every enrolled desktop refuses these effects unavailable by name and every ceiling exercised here was installed by the harness over injected custody. The container run of the real sibling endpoint at this HEAD is recorded as failed-attempt evidence, answer for answer the phase 04 to 08 runs. The secondary-effects acceptance row is therefore NOT passed; every inventoried entrypoint is listed below as guarded, grant-only, no-effect or unavailable, none omitted.",
+	"commits": [
+		{
+			"commit": "4c8272743",
+			"task": "MRC-09-01",
+			"files": [
+				"src/main/plugins/permission-broker.ts",
+				"src/main/plugins/authorization-ledger.ts",
+				"src/main/index.ts (wiring)"
+			],
+			"lines": "+313 -6 source, +414 -1 tests"
+		},
+		{
+			"commit": "ab8d67225",
+			"task": "MRC-09-02",
+			"files": [
+				"src/main/plugins/plugin-host-handlers.ts",
+				"src/main/plugins/plugin-headless-agent-runner.ts",
+				"src/main/index.ts (wiring)"
+			],
+			"lines": "+482 -25 source, +520 -1 tests, +2 docs"
+		},
+		{
+			"commit": "c59c74e83",
+			"task": "MRC-09-02A",
+			"files": [
+				"src/main/plugins/plugin-host-handlers.ts",
+				"src/main/plugins/plugin-headless-agent-runner.ts",
+				"src/main/plugins/plugin-manager-singleton.ts"
+			],
+			"lines": "+175 -30 source, +353 tests, +2 -2 docs"
+		},
+		{
+			"commit": "455b1f9b1",
+			"task": "MRC-09-02B",
+			"files": ["src/main/ipc/handlers/tabNaming.ts", "src/main/index.ts (wiring)"],
+			"lines": "+116 -4 source, +280 -1 tests, +1 -1 docs"
+		},
+		{
+			"commit": "84a020055",
+			"task": "MRC-09-03",
+			"files": [
+				"src/main/enterprise/plugin-policy.ts (new)",
+				"src/main/plugins/permission-broker.ts",
+				"src/main/index.ts (wiring)"
+			],
+			"lines": "+412 -29 source, +563 tests, +2 docs"
+		},
+		{
+			"commit": "fe9fe4d22",
+			"task": "MRC-09-04",
+			"files": ["src/main/enterprise/browser-policy.ts (new)", "src/main/browser/browser-relay.ts"],
+			"lines": "+496 -2 source, +700 -2 tests, +2 docs"
+		},
+		{
+			"commit": "be05e4105",
+			"task": "MRC-09-04A",
+			"files": [
+				"src/main/coworking/coworking-bridge.ts",
+				"src/main/coworking/coworking-lifecycle.ts",
+				"src/main/index.ts, src/main/ipc/bootstrap/{index,types}.ts (wiring)"
+			],
+			"lines": "+145 -4 source, +494 -1 tests, +2 -2 docs"
+		},
+		{
+			"commit": "947f62472",
+			"task": "MRC-09-05",
+			"files": [
+				"src/main/enterprise/repository-policy.ts (new)",
+				"src/main/utils/symphony-fork.ts",
+				"src/main/enterprise/browser-policy.ts (shared parsers exported)"
+			],
+			"lines": "+474 -7 source, +568 tests, +3 docs"
+		},
+		{
+			"commit": "db7adf39a",
+			"task": "MRC-09-05A",
+			"files": ["src/main/services/symphony-runner.ts"],
+			"lines": "+233 -37 source, +407 tests, +2 -2 docs"
+		},
+		{
+			"commit": "c4b65c188",
+			"task": "MRC-09-05B",
+			"files": [
+				"src/main/ipc/handlers/symphony/shared.ts",
+				"src/main/ipc/handlers/symphony/contributionStart.ts",
+				"src/main/ipc/handlers/symphony/lifecycle.ts",
+				"src/main/ipc/handlers/symphony/index.ts (wiring)"
+			],
+			"lines": "+258 -30 source, +384 tests, +1 -1 docs"
+		},
+		{
+			"commit": "f7f309268",
+			"task": "MRC-09-05C",
+			"files": [
+				"src/main/index.ts",
+				"src/main/ipc/bootstrap/index.ts",
+				"src/main/ipc/bootstrap/types.ts"
+			],
+			"lines": "+17 source, +31 tests, +1 -1 docs"
+		},
+		{
+			"commit": "a2c1d7d2d",
+			"task": "MRC-09-06 (tests)",
+			"files": [
+				"src/__tests__/main/plugins/plugin-host-handlers.test.ts",
+				"src/__tests__/main/plugins/authorization-ledger.test.ts"
+			],
+			"lines": "+458 -1 (tests only)"
+		},
+		{
+			"commit": "1131fc92f",
+			"task": "MRC-09-06A",
+			"files": ["src/main/browser/browser-relay.ts"],
+			"lines": "+12 -2 source, +28 -2 tests, +1 -1 docs"
+		},
+		{
+			"commit": "a36a139fc",
+			"task": "MRC-09-06B (tests)",
+			"files": ["src/__tests__/main/browser/browser-relay.test.ts"],
+			"lines": "+308 -3 (tests only)"
+		},
+		{
+			"commit": "5e1d8c60c",
+			"task": "MRC-09-07 (tests)",
+			"files": [
+				"src/__tests__/main/services/symphony-runner.test.ts",
+				"src/__tests__/main/enterprise/repository-policy.test.ts"
+			],
+			"lines": "+488 -4 (tests only)"
+		}
+	],
+	"lineBudgetNotes": "Source counts above are added/deleted lines of non-test, non-doc files per commit (git show --numstat). Every source commit stayed under the 500 source-line guideline (largest MRC-09-04 at +496 -2, then MRC-09-02 at +482 -25); the phase used bounded continuations (02A, 02B, 04A, 05A, 05B, 05C, 06A, 06B) where a target would have passed it, and the MRC-09-06 relay suite was parked as a patch and applied by 06B for the same reason. Tests are counted separately.",
+	"commands": [
+		{
+			"command": "git merge-base --is-ancestor 6400a6da0cfbae97bd90c4b361eea163fc3a1223 HEAD",
+			"exit": 0,
+			"result": "the base revision is an ancestor of HEAD 5e1d8c60c9c45e15a1022ac744afc4647def3a5d; the tree is clean apart from the user's untracked .sloptimize/ and rustygraphify-out/ (git status --porcelain)"
+		},
+		{
+			"command": "npm run build:maestro-lib",
+			"exit": 0,
+			"result": "dist/maestro-lib/index.js 1639.5 KB, maestro-lib 0.16.0, maestro-managed/1, provenance sourceRevision 5e1d8c60c9c45e15a1022ac744afc4647def3a5d, sourceDirty false, index.js sha256 38a561c78a76b0d8f44a45f0e8101e83d64680786da7aad582056052690c7745 (byte-identical to the phase 08 artifact: this phase changed no file under src/shared/maestro-lib)"
+		},
+		{
+			"command": "npm run build:cli",
+			"exit": 0,
+			"result": "dist/cli/maestro-cli.js 7670.2 KB, sha256 a9c11cd8272ec356eebe115bdaf77b9a4bb8fb8920fd24dead9683e3aa48af75 (identical to phase 08)"
+		},
+		{
+			"command": "node scripts/mega-maestro-pair.mjs check --json",
+			"exit": 2,
+			"result": "library ready at HEAD (0.16.0, not stale, 290 payload files, none mismatched); assessment.ready false; dependencies CP-01 (no contracts pin), CP-01 (no clean Linux application artifact: 4 dirty-source darwin/arm64 packaged artifacts at sibling e29195d8, the development checkout d5143a6 dirty and never certifiable), CP-02 (createMaestroAdapter unsupported), registration-approval (no API/console producer); docker 29.9.1 linux/arm64 with the pinned node image present. Identical to phases 04 to 08"
+		},
+		{
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.lint.json --noEmit",
+			"exit": 2,
+			"result": "exactly the three pre-existing errors: TS2307 @serenity-kit/opaque (src/main/lite/pairing/host.ts), TS2307 smol-toml (src/shared/maestro-lib/translation/resources.ts), TS2339 RequestInit dispatcher (src/main/plugins/plugin-host-handlers.ts:1175, present at the base revision); nothing from this phase"
+		},
+		{
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.main.json --noEmit",
+			"exit": 2,
+			"result": "the two missing packages only (opaque in client.ts and host.ts, smol-toml in resources.ts); no other error"
+		},
+		{
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.cli.json --noEmit",
+			"exit": 2,
+			"result": "the two missing packages only; no other error"
+		},
+		{
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+			"exit": 2,
+			"result": "the same three pre-existing errors as tsconfig.lint.json; no other error"
+		},
+		{
+			"command": "eslint src/ ; eslint -c eslint.dashes.config.mjs src/__tests__ scripts",
+			"exit": 0,
+			"result": "clean on both (run after the scratch fixture test was removed)"
+		},
+		{
+			"command": "node scripts/verify-docs-paths.mjs (npm run docs:verify)",
+			"exit": 0,
+			"result": "1050 asserted paths and 355 index entries against 355 full entries, 0 findings"
+		},
+		{
+			"command": "prettier --check <the 38 files changed in 23c3c3f4d..HEAD>",
+			"exit": 0,
+			"result": "All matched files use Prettier code style"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run <19 focused targets> --reporter=verbose",
+			"exit": 0,
+			"result": "71 files, 1645 passed, 0 failed, 0 skipped (Working/09-verify/vitest-focused.log)"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run src/shared/maestro-lib/__tests__/{built-entry,docs-examples,tui-example,no-desktop-framework.smoke}.test.ts src/__tests__/shared/maestro-lib/managed/contracts.test.ts src/__tests__/integration/mega-maestro",
+			"exit": 0,
+			"result": "6 files, 69 passed, 1 skipped (the certifiable pair, blocked by CP-01 x2, CP-02, registration-approval) (Working/09-verify/vitest-lib.log)"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/zz-mrc-09-08-fixture.test.ts --reporter=verbose (scratch, removed after the run)",
+			"exit": 0,
+			"result": "8 passed: the real repository fixture run below (Working/09-verify/vitest-fixture.log, fixture-run.json); the first attempt exited 1, see failedAttemptsPreserved"
+		},
+		{
+			"command": "node scripts/mega-maestro-pair.mjs run --allow-dirty --json --out .maestro/playbooks/Working/09-verify/pair-run.json",
+			"exit": 3,
+			"result": "completed, not certifiable (development checkout, CP-01); container exit 0; every driver step denied or unavailable; zero leases; daemon unenrolled (realPairRun)"
+		}
+	],
+	"focusedSuites": "19 targets expanding to 71 files: the 15 test files this phase touched (src/__tests__/main/plugins/{authorization-ledger,permission-broker,plugin-headless-agent-runner,plugin-host-deps-wiring,plugin-host-handlers}.test.ts, src/__tests__/main/ipc/handlers/{tabNaming,symphony}.test.ts, src/__tests__/main/enterprise/{plugin-policy,browser-policy,repository-policy}.test.ts, src/__tests__/main/browser/browser-relay.test.ts, src/__tests__/main/coworking/{coworking-browser-bridge,coworking-lifecycle}.test.ts, src/__tests__/main/utils/symphony-fork.test.ts, src/__tests__/main/services/symphony-runner.test.ts) plus the neighbouring directories src/__tests__/main/{plugins,browser,coworking,enterprise} in full (Working/09-verify/focused-files.txt)",
+	"realFixtureRun": {
+		"what": "The Symphony runner (src/main/services/symphony-runner.ts) over the REAL repository ceiling source (createRepositoryPolicySource with identity and applied revision injected), REAL git (/usr/bin/git 2.54.0) and a REAL bare repository created under os.tmpdir() and seeded with one commit on main. Only the GitHub CLI was replaced: resolveGhPath was mocked to .maestro/playbooks/Working/09-verify/gh, a LABELED DOUBLE that logs every call and answers api user with acme (the slug owner, so no fork is needed), pr create with a forge.invalid URL for #42, and pr ready/edit/view/close with fixed text; it exits 9 if repo fork ever reaches it. The logger was silenced. commit.gpgsign was forced off through GIT_CONFIG_* for the test process so the runner's own git commit could not block on the user's signing key.",
+		"labeledDoubles": ["gh (GitHub CLI): .maestro/playbooks/Working/09-verify/gh", "logger"],
+		"ceiling": "policyRevision 3, actors [{ operator: <effects> }], repositories.allow ['acme/*'], remotes.allow ['file:'], installed by the harness over an enrolled identity read (registration actorId actor-1) and policy appliedRevision 3",
+		"cases": [
+			{
+				"case": "admitted start (all eight effects)",
+				"observed": "success true, draftPrNumber 42, isFork false; the bare repository gained symphony/issue-11 '[Symphony] Start contribution for #11' (git for-each-ref); receipts clone, branch, commit, push, pull-request all within-ceiling, remote 'file:' on the remote effects and null on the local ones, no receipt containing the fixture path; gh double saw exactly 'api user' then 'pr create'"
+			},
+			{
+				"case": "admitted finalize over that clone",
+				"observed": "success true; a real commit and push landed (the branch log is seed, start, '[Symphony] Complete contribution for #11'); receipts commit, push, finalize; gh double saw 'pr ready', 'pr edit', 'pr view' in that order"
+			},
+			{
+				"case": "push outside the ceiling (effects clone, branch, commit only)",
+				"observed": "success false, error '[managed-outside-ceiling] the repository ceiling admits no push effect for the operator' (never 'Push failed', never an authentication message); clone and branch ran with real git and were removed (clone directory gone); the bare repository has no issue-12 ref; receipts clone/branch/commit within-ceiling then push outside-ceiling; gh double saw only 'api user' (the forge read ensureForkSetup makes before the fork decision)"
+			},
+			{
+				"case": "repository denied (repositories.deny ['acme/widgets'])",
+				"observed": "success false, '[managed-repository-denied] the repository ceiling denies acme/widgets'; nothing on disk, gh never called, one receipt (clone, repository-denied)"
+			},
+			{
+				"case": "GitHub remote under the file:-only ceiling",
+				"observed": "success false, '[managed-remote-denied] the repository ceiling does not admit https://github.com'; nothing on disk, gh never called; the receipt names the origin https://github.com and never the URL path"
+			},
+			{
+				"case": "enrolled host with no ceiling installed",
+				"observed": "success false, '[managed-unavailable] the managed repository ceiling is unavailable (no repository ceiling is installed for policy revision 3)'; nothing on disk, gh never called"
+			},
+			{
+				"case": "cancel held by itself",
+				"observed": "under a ceiling without cancel: success false, '[managed-outside-ceiling] the repository ceiling admits no cancel effect for the operator', gh never called; under the full ceiling: success true, gh double saw exactly 'pr close 42 --repo acme/widgets'"
+			},
+			{
+				"case": "standalone (no gate)",
+				"observed": "success true with no managed key; the same real chain landed symphony/issue-16 in the bare repository; gh double saw 'api user' then 'pr create'"
+			}
+		],
+		"limits": "This is the runner, which the desktop does not call (the desktop's Symphony sinks are the IPC handlers in src/main/ipc/handlers/symphony/, proven over the real handler chain in symphony.test.ts with git and gh mocked). The ceiling was installed by the harness, not by an endpoint; the forge was a double; the fork path was proven refused-before-gh in tests only because the double owner equals the slug owner here. It demonstrates positive allowed execution and denial before side effects at the real git sink; it does not demonstrate an endpoint-installed ceiling or a real forge.",
+		"artifacts": ".maestro/playbooks/Working/09-verify/fixture-run.json (results, receipts, the gh calls seen, the bare repository refs before and after), vitest-fixture.log, steps-fixture.json; the temporary repository was removed by the test"
+	},
+	"realPairRun": {
+		"status": "completed, not-a-pass",
+		"certifiable": false,
+		"notCertifiableBecause": ["endpoint source development-checkout is built (CP-01)"],
+		"startedAt": "2026-10-22T23:03:31.085Z",
+		"endedAt": "2026-10-22T23:03:43.349Z",
+		"workspace": ".maestro/playbooks/Working/pair-20261022T230323 (gitignored)",
+		"image": "node@sha256:71bcbb3b215b3fa84b5b167585675072f4c270855e37a599803f1a58141a0716 (linux/arm64)",
+		"endpointSource": {
+			"kind": "development-checkout",
+			"revision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+			"dirty": true
+		},
+		"library": { "version": "0.16.0", "contract": "maestro-managed/1", "protocol": 1 },
+		"bundle": {
+			"clientSha256": "967e47036d410dcafad756b8a2e38f3f37ef5501198ae0562e2d18354626a67e",
+			"driverSha256": "c21b7502313d831bb854944ea5a3c23d38392558162f43209fa41564177ff2ba"
+		},
+		"observed": {
+			"nativeBuild": { "exit": 0, "dir": "build.mjs peer.c peer.node" },
+			"daemonStart": {
+				"exit": 0,
+				"outcome": "started",
+				"runtimeSocket": "/work/ws/.local/endpoint/runtime.sock"
+			},
+			"driver": {
+				"exit": 0,
+				"node": "v22.16.0 in the container",
+				"steps": [
+					{
+						"name": "compatibility",
+						"outcome": { "status": "denied", "reason": "unauthenticated" }
+					},
+					{ "name": "attach", "outcome": { "status": "denied", "reason": "unauthenticated" } },
+					{
+						"name": "registration.challenge",
+						"outcome": { "status": "denied", "reason": "unavailable" }
+					},
+					{
+						"name": "execution.admit",
+						"outcome": {
+							"state": "unavailable",
+							"code": "runtime-unavailable",
+							"message": "not registered-attached-managed in this process"
+						}
+					},
+					{
+						"name": "execution.raw",
+						"outcome": {
+							"status": "unavailable",
+							"reason": "not-attached",
+							"message": "This connection is not attached; attach() first."
+						}
+					}
+				],
+				"leases": 0,
+				"policyStatus": "connectivity detached, management null, admission.possible false (not registered-attached-managed; no applied policy revision)",
+				"approval": "no-producer"
+			},
+			"daemonStatus": {
+				"exit": 0,
+				"management": "unenrolled",
+				"connectivity": "unavailable",
+				"capabilities": []
+			},
+			"containerExit": 0
+		},
+		"reading": "Answer for answer the phase 04 to 08 runs, with the same 0.16.0 library bundle (its digest did not move because this phase touched no library source): peer authentication, the daemon and the socket contract work; registration, attachment and admission are denied for want of enrollment and an approval producer; the endpoint dispatches no plugin, browser or repository ceiling operation, so no ceiling exercised in this phase could have come from it. Recorded as failed-attempt evidence."
+	},
+	"notRun": [
+		"npm install (same reason as phases 01 to 08: the environment baseline is the user's; smol-toml, @serenity-kit/opaque and dns-packet stay absent)",
+		"the full npm test (the focused run above covers every directory this phase touched: plugins, browser, coworking, enterprise, the Symphony runner, the Symphony and tabNaming handlers, symphony-fork)",
+		"an Electron desktop with a plugin, a browser tab or a Symphony contribution (no desktop was launched: plugin, relay, coworking and Symphony handler sinks are proven over the real broker, ledger, policy sources, relay, bridge and handler chain in tests only; the relay host and the coworking tool were fakes, the net.fetch sink a stubbed global fetch)",
+		"any real forge call: gh was a labeled double in the fixture run and a mock in the suites; no fork, PR, comment or close reached GitHub (no publishing is authorized)",
+		"the IPC Symphony sinks over real git (they need the Electron handler registry and gh; proven with execFileNoThrow mocked in symphony.test.ts; the runner shares the same hold shape and was run over real git instead)",
+		"any real provider turn through agents.send, agents.generateTitle or the headless plugin runner (no paid provider traffic is authorized; the spawn sinks were observed through spawnAdmitted with a fake process manager)",
+		"any enrollment against a Mega-Maestro API (none is running; none is authorized), so no endpoint-installed ceiling exists and no managed desktop exists here",
+		"a container run with --approve-command (no approval producer exists; registration-approval is open)",
+		"the Windows and Linux CI legs locally (macOS only here; the branch is pushed for the matrix)"
+	],
+	"failedAttemptsPreserved": [
+		"The real pair run above (exit 3, every step denied or unavailable, zero leases) is kept as .maestro/playbooks/Working/09-verify/pair-run.json with the harness out/ folder under pair-20261022T230323/.",
+		"The first run of the scratch fixture test exited 1 with 3 of 8 failing: the gh double appended each call as one log line, but the PR body the runner passes is multi-line, so one 'pr create' call became six lines and the harness compared whole argument strings ('api user' against the real 'api user --jq .login'). The runner, the ceiling and git behaved correctly in that run (the admitted start, the refused push and the finalize all landed or refused as expected); only the harness's log reading was wrong. The double now folds newlines and the assertions compare the gh verb (api user, pr create, pr ready, pr edit, pr view, pr close); the rerun passed 8/8. The first run's vitest log was overwritten by the rerun, so its three assertion messages are transcribed here rather than kept as a file.",
+		"The fixture run shows ensureForkSetup reads the forge (gh api user, and gh api repos/<slug> when the user is not the owner) BEFORE the fork hold: a push refused by the ceiling still issued 'api user' to the double. These are read-only forge queries, not publications, and the fork itself is held before gh repo fork; recorded as an inventory limit rather than repaired here (reads precede the only hold that can know whether a fork is needed).",
+		"MRC-09-06 found that after an admitted navigate the relay forgot its page, so under a destinations clause every later view and input was refused destination-unknown; MRC-09-06A repaired it (the admitted URL is the lease's provisional page) and MRC-09-06B turned the parked expected failure into a plain test.",
+		"MRC-09-05 found the desktop never calls src/main/services/symphony-runner.ts (only tests import it); the real Symphony sinks are the IPC handlers, bound by MRC-09-05B and wired by MRC-09-05C. The runner keeps its gate because it is the library-side path and the one that can run over real git without Electron.",
+		"MRC-09-07 found the receipt's device actor label is lite-device:dev-1 while 'a paired Lite device (dev-1)' appears only in the unauthenticated message; and that a standalone host with a non-null source still calls ensureForkSetup with a beforeFork hook that answers null (the runner keys on gate.authority, not on standing).",
+		"Tooling: the st shell hijack ate grep, ls, cat and ranged git log, so all lookups and git calls went through node (.maestro/playbooks/Working/{g,git}.mjs) and the runner scripts under Working/09-verify/; the Bash hook refuses rm, so the scratch test was removed with fs.unlinkSync; the test type-check pattern of MRC-09-06 (a Working tsconfig extending tsconfig.main.json) was not repeated because the tsc runs above report nothing new."
+	],
+	"deterministicCoverage": {
+		"doubles": "The sandbox and the plugin process (the handlers are called directly with a plugin id), the relay host (a fake request function), the coworking tool and registry entries, the fetch sink (vi.stubGlobal), the process manager behind spawnAdmitted, git and gh in the handler and runner suites (execFileNoThrow mocked), the enrolled identity (IdentityRead literals), the policy readers (closures over a mutable revision), the seal and anchor of the sealed ledger (in-memory). Everything else is real: PermissionBroker.authorize and holds, ceilingVerdict, AuthorizationStore and the sealed ledger, createPluginPolicySource / createBrowserPolicySource / createRepositoryPolicySource and their parsers, the fs.read/fs.write/net.fetch/process.spawn/net.connect/net.send handlers, pluginActBinding, admitPluginProcess, pluginHeadlessAuthority, namingSpawnLineage, BrowserRelay and registerBrowserRelayHandlers, coworkingEffectOf and holdCoworkingEffect through startCoworkingBridge, resolveTransportAdmission / transportSpawnActor / runAsTransport, ensureForkSetup with beforeFork, startContribution / finalizeContribution / cancelContribution, the symphony:start, cloneRepo, startContribution, createDraftPR, complete and cancel handlers through registerSymphonyHandlers, and the index.ts wiring assertions.",
+		"cases": [
+			"Plugins, live intersection (permission-broker, authorization-ledger, plugin-policy, plugin-host-handlers): a consented in-ceiling write lands with its receipt; a consented directory, host or gateway outside the ceiling is refused by name with zero bytes, fetches or sockets; a capability the ceiling admits but the user never granted is denied with no receipt (the ceiling never mints consent); a local revoke stays authoritative under the ceiling; a re-minted plugin (new digest) is identity-mismatch at write, fetch and spawn until a ceiling names the digest, and a ceiling naming another publisher refuses again; a policy revoke of the plugin, its publisher, a withdrawn ceiling or a moved revision refuses write, fetch, spawn and the next frame of a kept socket with the sealed ledger byte-identical, enabled, not tombstoned, same epoch; standalone runs every sink on the ledger alone with no receipt whatever ceiling is installed",
+			"Plugins, act verbs and lineage (plugin-host-handlers, plugin-headless-agent-runner, tabNaming, plugin-host-deps-wiring): agents.dispatch, agents.send and agents.generateTitle hand the sink the plugin's consent-bound binding only when bound; process.spawn is admitted through admitPluginProcess on the exec-file route only; the headless runner's authority is bound per plugin; retained service calls are re-checked through holds() on every sweep so a central revoke ends them as a local one does; index.ts composes one plugin policy source and the broker reads it live",
+			"Browser (browser-policy, browser-relay, coworking-browser-bridge, coworking-lifecycle, wiring): a closed ceiling parses with limits; standalone runs every relay effect intact whatever ceiling is installed; an enrolled host with no usable ceiling is refused unavailable before any frame reaches the host; the operator is held by actor, effect and destination with each refusal never reaching the host; after an admitted navigation the next input is held against the requested page until the host reports one, back and forward leave it unknown, a refused navigation or a host failure never sets it; the actor is the admitting transport (maestro-cli, a registered paired device, an unregistered one refused unauthenticated, web login) and never the client's word; a policy revoke mid-lease ends the next frame by name; browser:createTab holds the navigation before the host is asked; the coworking bridge maps every tool call to one effect and holds it with the agent actor; index.ts composes one browser source and hands it to the relay handlers and the coworking service",
+			"Repository (repository-policy, symphony-fork, symphony-runner, symphony handlers, wiring): the parser, origins (credentials dropped, scp to ssh, local path to file:), slug and remote matching; every effect held by itself with one receipt naming the origin and never the path; clone, push, PR, finalize and cancel refused before the effect with no git or gh run and the clone removed; the fork held inside ensureForkSetup right before gh repo fork and reported as the ceiling's own message; every denial code reported as [managed-<code>] and never matching isGitHubAuthError / isGitHubMissingScopeError or login wording; the actor bound through runAsTransport; an enrolled host with no ceiling unavailable before the clone; a never-enrolled host running the chain with no managed key and no new git call; the desktop handlers holding clone, branch, fork, commit, push and pull-request (both before the push), finalize after the completing write and cancel before cleanup; index.ts composes one repository source and the bootstrap hands it to registerSymphonyHandlers"
+		]
+	},
+	"skippedTests": [
+		{
+			"test": "integration/mega-maestro/early-pair.test.ts > runs the certifiable pair",
+			"reason": "check not ready; the title names CP-01 (x2), CP-02 and registration-approval (owner mega-maestro); the other 8 early-pair cases pass"
+		}
+	],
+	"publicBuildArtifact": {
+		"library": "dist/maestro-lib (maestro-lib 0.16.0, maestro-managed/1, provenance sourceRevision 5e1d8c60c9c45e15a1022ac744afc4647def3a5d, sourceDirty false)",
+		"sha256": {
+			"dist/maestro-lib/index.js": "38a561c78a76b0d8f44a45f0e8101e83d64680786da7aad582056052690c7745",
+			"dist/maestro-lib/index.d.ts": "b74a2430c659e8bda6f00155a1932874cf7ac0f2039e8f9f242cfa70cf1e75ea",
+			"dist/cli/maestro-cli.js": "a9c11cd8272ec356eebe115bdaf77b9a4bb8fb8920fd24dead9683e3aa48af75"
+		},
+		"note": "All three digests equal the phase 08 artifacts: phase 09 changed main-process files only, so the public library and the CLI bundle did not move."
+	},
+	"effectInventory": {
+		"legend": "guarded = held at the real sink against the managed ceiling before the effect, with a receipt, refused by name, standalone unchanged; grant-only = gated by local consent, the ceiling is not consulted (open); no-effect = a lifecycle, read or bookkeeping entry that performs none of the inventoried effects and is not held; unavailable = how every guarded entry answers on an enrolled desktop today, because no endpoint operation installs a ceiling (CP-01, CP-03). Nothing is omitted: every handler of the plugin host, every relay and coworking verb and every Symphony channel is listed.",
+		"plugins": [
+			{
+				"entry": "fs.read, fs.write (plugin-host-handlers; broker on the resolved real path)",
+				"status": "guarded",
+				"evidence": "plugin-host-handlers.test.ts MRC-09-06 (real AuthorizationStore + real plugin policy source): in-ceiling write with receipt; consented directory outside the ceiling refused with zero bytes; revoke of plugin / publisher / ceiling / revision refused by name"
+			},
+			{
+				"entry": "fs.watch",
+				"status": "guarded at open; the kept watcher is not re-held after a revoke (open)",
+				"evidence": "broker entry via assertBrokerAllowed; inventoried in MRC-09-06 notes"
+			},
+			{
+				"entry": "net.fetch (host and gateway destinations)",
+				"status": "guarded",
+				"evidence": "MRC-09-06: consented host and gateway outside the ceiling refused with zero fetches (stubbed global fetch sink); revoke refuses the next fetch"
+			},
+			{
+				"entry": "net.connect, net.send, net.close (kept sockets re-held per frame)",
+				"status": "guarded; a centrally revoked plugin cannot close its own socket, as under a local revoke (inventoried)",
+				"evidence": "MRC-09-06: the next frame of a kept socket refused by name after a policy revoke"
+			},
+			{
+				"entry": "process.spawn (admitPluginProcess, exec-file route only)",
+				"status": "guarded",
+				"evidence": "MRC-09-02 / 09-06: spawn admitted with the plugin binding and lineage; identity-mismatch and revoke refuse with zero spawns"
+			},
+			{
+				"entry": "agents.dispatch, agents.send, agents.generateTitle (pluginActBinding; the title sink namingSpawnLineage; dispatched turns via spawnAdmitted in-process)",
+				"status": "guarded",
+				"evidence": "MRC-09-02, 02A, 02B tests: the binding handed only when bound; standalone two-argument calls unchanged"
+			},
+			{
+				"entry": "plugin headless agent runner (pluginHeadlessAuthority, pluginBoundHeadlessAuthority)",
+				"status": "guarded",
+				"evidence": "plugin-headless-agent-runner.test.ts MRC-09-02 / 02A"
+			},
+			{
+				"entry": "media.open, media.status, media.download, media.probe, media.decode, media.run, media.close",
+				"status": "guarded (broker by method; media.close stays free so a revoked plugin can release)",
+				"evidence": "MRC-09-03 broker tests; plugin-media-tools"
+			},
+			{
+				"entry": "services.register, unregister, readiness, status, openSettings, start, result, cancel; retained service calls",
+				"status": "guarded (broker by method; retained calls re-checked through holds() on every sweep, index.ts serviceAllowed)",
+				"evidence": "MRC-09-03: PermissionBroker.holds, plugin-host-deps-wiring"
+			},
+			{
+				"entry": "settings.get/set, sessions.list/get/create/update/delete/focus, history.list/get, transcripts.read/append, storage.get/keys/set/delete/sql, ui.runCommand/hostViewUpdate/hostViewRemove/groupingPublish/groupingClear/panelPost, tabs.list/create/focus/close, events.subscribe/unsubscribe, agents.list/get, notifications.toast, shell.openExternal, decisions.record, power.preventSleep/releaseSleep, background.register/unregister/list",
+				"status": "guarded (every one enters through assertBrokerAllowed, so the ceiling verdict applies to the capability; no per-target ceiling clause beyond the capability)",
+				"evidence": "the handler table of plugin-host-handlers.ts (lines 1100 to 1712) and the broker's ceilingVerdict order grant, protected path, ceiling"
+			},
+			{
+				"entry": "plugin event bus topic fan-out after subscription (index.ts hasCapability = isPermitted(grants))",
+				"status": "grant-only (the ceiling is not consulted when a topic is delivered; open follow-up)",
+				"evidence": "src/main/index.ts:2444; plugin-event-bus.test.ts fails closed without a hasCapability dep"
+			},
+			{
+				"entry": "the sealed grant ledger",
+				"status": "guarded against the ceiling in the right direction: a central revoke rewrites nothing on disk or in the anchor; a ceiling never mints a grant; a local revoke tombstones",
+				"evidence": "authorization-ledger.test.ts MRC-09-01 / 09-06"
+			},
+			{
+				"entry": "installing a plugin ceiling",
+				"status": "unavailable (no endpoint operation installs one; createPluginPolicySource.install is reachable only from tests)",
+				"evidence": "pair run: the endpoint dispatches no such operation; CP-01 / CP-03"
+			}
+		],
+		"browser": [
+			{
+				"entry": "relay frame, relay resolve (view)",
+				"status": "guarded",
+				"evidence": "browser-relay.test.ts MRC-09-04 / 09-06B: refused unavailable before any frame on an enrolled host without a ceiling; held by actor, effect, destination"
+			},
+			{
+				"entry": "relay actions navigate, back, forward, reload, stop (navigate); clearData (clear); deleteSelection (input); eval (execute); selection, extract, find (read)",
+				"status": "guarded; an admitted navigate's URL is the lease's provisional page until the host reports one (MRC-09-06A); back and forward leave it unknown",
+				"evidence": "browser-relay.test.ts: 38 tests including the real-ceiling describe"
+			},
+			{
+				"entry": "browser:createTab (navigate held before the host is asked)",
+				"status": "guarded",
+				"evidence": "MRC-09-06B through the real registerBrowserRelayHandlers"
+			},
+			{
+				"entry": "browser:relayReady, browser:relayClose",
+				"status": "no-effect (lifecycle of the relay and of a lease; perform no page effect; not held)",
+				"evidence": "browser-relay.ts:394, :459"
+			},
+			{
+				"entry": "coworking bridge: listBrowsers and other non-interact methods (view); readTerminal, readBrowser (read); browserInteract click, type, waitFor (input); eval (execute); screenshot (view); read (read); navigate, newTab, back, forward, reload, stop, closeTab (navigate)",
+				"status": "guarded (holdCoworkingEffect with the agent actor {sessionId, agentType}; destination from the navigation's URL or the registry's last page)",
+				"evidence": "coworking-browser-bridge.test.ts and coworking-lifecycle.test.ts MRC-09-04A"
+			},
+			{
+				"entry": "installing a browser ceiling",
+				"status": "unavailable (no endpoint operation installs one)",
+				"evidence": "pair run; CP-01 / CP-03"
+			}
+		],
+		"repository": [
+			{
+				"entry": "runner startContribution: clone, branch, fork (inside ensureForkSetup, right before gh repo fork), commit, push (destination the fork or the repository), pull-request",
+				"status": "guarded; exercised over REAL git against the local bare fixture (admitted and refused)",
+				"evidence": "realFixtureRun; symphony-runner.test.ts MRC-09-05A / 09-07"
+			},
+			{
+				"entry": "runner finalizeContribution: commit, push, finalize (gh pr ready, edit, view)",
+				"status": "guarded; exercised over REAL git",
+				"evidence": "realFixtureRun admitted finalize; MRC-09-07"
+			},
+			{
+				"entry": "runner cancelContribution: cancel (gh pr close)",
+				"status": "guarded; exercised (refused without the effect, admitted with it)",
+				"evidence": "realFixtureRun cancel case"
+			},
+			{
+				"entry": "symphony:start (clone, branch, fork, then createDraftPR: push and pull-request both held before the push)",
+				"status": "guarded",
+				"evidence": "symphony.test.ts MRC-09-05B through the real registerSymphonyHandlers"
+			},
+			{
+				"entry": "symphony:cloneRepo (clone)",
+				"status": "guarded",
+				"evidence": "contributionStart.ts:502; symphony.test.ts"
+			},
+			{
+				"entry": "symphony:startContribution (clone, branch, fork via setUpFork, commit, then createDraftPR: push, pull-request)",
+				"status": "guarded; a refused commit fails the start",
+				"evidence": "contributionStart.ts:622, :650, :810, :847; symphony.test.ts"
+			},
+			{
+				"entry": "symphony:createDraftPR (shared createDraftPR: push, pull-request)",
+				"status": "guarded (both held before the push, so a refused PR leaves the branch unpushed)",
+				"evidence": "shared.ts:455-459; symphony.test.ts"
+			},
+			{
+				"entry": "symphony:complete (finalize: gh pr ready, pr comment)",
+				"status": "guarded (held after the completing write, before gh runs; refusal lands as status failed with the refusal as the error)",
+				"evidence": "lifecycle.ts:319; symphony.test.ts"
+			},
+			{
+				"entry": "symphony:cancel (cancel, local, before any cleanup)",
+				"status": "guarded",
+				"evidence": "lifecycle.ts:488; symphony.test.ts"
+			},
+			{
+				"entry": "symphony:registerActive, symphony:updateStatus, symphony:getState, getActive, getCompleted, getStats, symphony:getRegistry, getIssues, getIssueCounts, symphony:fetchDocumentContent, symphony:prCreated, symphony:manualCredit, symphony:checkPRStatuses, symphony:syncContribution, symphony:clearCache",
+				"status": "no-effect for the repository ceiling (local state, reads of the Symphony registry and PR status over fetchWithTimeout, and credit bookkeeping to the Symphony service; the one git call, contributionFinish.ts:121, is a read-only commit check). The Symphony-service HTTP calls are network bookkeeping outside this ceiling's scope and are not held by it (inventoried, not repaired)",
+				"evidence": "the channel list of src/main/ipc/handlers/symphony/*.ts"
+			},
+			{
+				"entry": "forge reads before the fork hold: gh auth status (shared.ts:344), gh api user and gh api repos/<slug> in ensureForkSetup",
+				"status": "no-effect reads that precede the hold (a refused push still issued 'api user' in the fixture); the publication itself (gh repo fork) is held",
+				"evidence": "realFixtureRun refused-push case; symphony-fork.ts:38-70"
+			},
+			{
+				"entry": "installing a repository ceiling",
+				"status": "unavailable (no endpoint operation installs one; the fixture installed its own over injected custody)",
+				"evidence": "pair run; CP-01 / CP-03"
+			}
+		]
+	},
+	"supportMatrix": [
+		{
+			"surface": "sandboxed plugin calls (fs, net, process, agents, media, services and the rest of the host table)",
+			"os": "macOS (tests over the real broker, ledger, policy source and handlers; no desktop launched)",
+			"managed": "implemented at the existing broker and execution handlers; refused unavailable on an enrolled desktop until a ceiling is installed; standalone on the ledger alone",
+			"evidence": "permission-broker, authorization-ledger, plugin-policy, plugin-host-handlers, plugin-headless-agent-runner, tabNaming, plugin-host-deps-wiring suites",
+			"limits": "fs.watch watchers and event-bus topic fan-out are not re-held after a revoke (grant-only for the fan-out); no sandbox process was spawned (handlers called directly); no provider turn ran"
+		},
+		{
+			"surface": "browser relay (frames, resolves, actions, createTab) and the coworking bridge",
+			"os": "macOS (tests over the real relay, real handler registration and real bridge with a fake host and tool)",
+			"managed": "implemented as per-effect holds with the admitting transport or agent as actor; refused unavailable on an enrolled desktop until a ceiling is installed; standalone intact",
+			"evidence": "browser-policy, browser-relay, coworking-browser-bridge, coworking-lifecycle suites",
+			"limits": "no real browser page was driven; the provisional-page rule covers an admitted navigate only (back/forward leave the page unknown by nature)"
+		},
+		{
+			"surface": "Symphony repository effects (runner)",
+			"os": "macOS (REAL git 2.54.0 against a local bare repository; gh a labeled double)",
+			"managed": "implemented as per-effect holds; positive allowed execution and denial before the effect observed at the real git sink",
+			"evidence": "realFixtureRun (8 cases), symphony-runner and repository-policy suites",
+			"limits": "the runner is not called by the desktop; the ceiling was harness-installed; the forge was a double; the fork path refused-before-gh is proven in tests only"
+		},
+		{
+			"surface": "Symphony repository effects (desktop IPC sinks)",
+			"os": "macOS (tests through the real registerSymphonyHandlers with git and gh mocked)",
+			"managed": "implemented as per-effect holds at every channel that clones, branches, forks, commits, pushes, opens, finalizes or cancels; refused unavailable on an enrolled desktop until a ceiling is installed",
+			"evidence": "symphony.test.ts MRC-09-05B, plugin-host-deps-wiring MRC-09-05C",
+			"limits": "not run over real git (needs the Electron handler registry); the Symphony-service HTTP bookkeeping channels are outside the repository ceiling"
+		}
+	],
+	"positiveAcceptanceMatrix": {
+		"secondary-effects": {
+			"required": true,
+			"passed": false,
+			"outcomeRequired": "Real host plugin/browser/repository safe fixture effects plus denied scope/revocation; no live external publishing",
+			"state": "No live external publishing happened (gh doubled or mocked everywhere; nothing authorized). Repository effects ran for REAL on this host over real git against a local safe fixture under the real repository ceiling source, admitted and denied before the effect, denial never an authentication failure; plugin and browser effects were exercised at their real sinks over in-memory custody with the host, tool, fetch and process sinks observed through doubles, including denied scope and revocation. But every ceiling was installed by the harness over injected identity, not by an enrolled endpoint (no Mega-Maestro operation installs a plugin, browser or repository ceiling: CP-01, CP-03), the forge was a double, and the plugin and browser rows are tests only. Not passed; the fixture run is recorded as positive evidence at the git sink, not as the pair."
+		}
+	},
+	"openDependencies": [
+		{
+			"id": "CP-01",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no contracts pin and no clean Linux application artifact (pair check unchanged from phase 04; sibling still d5143a6 dirty)"
+		},
+		{
+			"id": "CP-02",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "createMaestroAdapter still unsupported"
+		},
+		{
+			"id": "CP-03",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "the endpoint dispatches no plugin, browser or repository ceiling operation (nor any workflow, per-effect, delegation or remote-attestation operation); an enrolled Maestro refuses every secondary effect unavailable by name until the producers exist"
+		},
+		{
+			"id": "CP-04",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no enrollment or execution provisioning (the container daemon reports management unenrolled; every real step denied unauthenticated)"
+		},
+		{
+			"id": "registration-approval",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no API/console producer"
+		},
+		{
+			"id": "maestro follow-ups",
+			"owner": "maestro (phase 10+)",
+			"status": "open",
+			"detail": "re-hold kept fs.watch watchers and event-bus topic fan-out under the ceiling (grant-only today); decide whether a centrally revoked plugin may close its own socket; the forge reads ensureForkSetup makes before the fork hold; the Symphony-service HTTP bookkeeping channels outside the repository ceiling; the desktop does not use the runner (two hold implementations of the same effects: runner and IPC sinks); the IPC Symphony sinks have no real-git run; the phase 08 follow-ups (custody off Electron, SSH enforcement producer, CLI/Cue SSH qualifier, device tickets after revoke, durable fleet events) and the phase 07 follow-ups still stand"
+		}
+	],
+	"preExistingEnvironmentFailures": "smol-toml, @serenity-kit/opaque and dns-packet are absent from node_modules; they break three tsc files identically at the base revision, and tsconfig.lint.json / tsconfig.json also report the pre-existing RequestInit dispatcher error in plugin-host-handlers.ts:1175. Fix: npm install. Left for the user.",
+	"scratch": "Command outputs live under .maestro/playbooks/Working/09-verify/ (run-checks.mjs, steps-{checks,focused,lint,lib,fixture,pair}.json, *.log, changed-files.txt, focused-files.txt, pair-check.log, pair-run.json, the gh double, fixture-run.json) and .maestro/playbooks/Working/pair-20261022T230323/ (gitignored). The scratch test src/__tests__/zz-mrc-09-08-fixture.test.ts was removed after its run and the temporary bare repository was deleted by the test; no untracked file was added to the source tree by this phase."
+}
