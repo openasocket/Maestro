@@ -76,8 +76,10 @@ import { delegationContextOf } from '../../../../shared/maestro-lib/managed/dele
 import {
 	claimDispatchTicket,
 	getActingTransport,
+	sameSpawnActor,
 	transportSpawnActor,
 } from '../../../../main/web-server/auth/transport-actor';
+import { getActingUser } from '../../../../main/web-server/auth/acting-user';
 
 // Mock the logger
 vi.mock('../../../../main/utils/logger', () => ({
@@ -1755,6 +1757,180 @@ describe('WebSocketMessageHandler', () => {
 				data: 'pwd\r',
 			});
 			expect(callbacks.writeToTerminal).toHaveBeenCalledWith('session-1', 'pwd\r');
+		});
+	});
+
+	/**
+	 * MRC-08-06: identity across surfaces at the message handler. The actor a
+	 * sink binds is read off the socket's admission, never off the message or
+	 * the shape of the account; `force` reaches the busy guard only; a revoked
+	 * socket lands no effect, no ticket and no reply on any route; a
+	 * reconnecting device is the same actor on its new socket.
+	 */
+	describe('Identity across surfaces (MRC-08-06)', () => {
+		const alice = { id: 'u-alice', username: 'alice', displayName: 'Alice' };
+		const bob = { id: 'u-bob', username: 'bob', displayName: 'Bob' };
+		const send = (): WebClientMessage => ({
+			type: 'send_command',
+			sessionId: 'session-1',
+			command: 'go',
+			inputMode: 'ai',
+			tabId: 'tab-1',
+		});
+		const sentTickets = (): string[] =>
+			vi.mocked(callbacks.executeCommand).mock.calls.map((call) => call[8] as string);
+		const claimed = (ticket: string) =>
+			transportSpawnActor(claimDispatchTicket(ticket, { agentId: 'session-1', tabId: 'tab-1' })!);
+		const device = (id: string, name: string, extra: Partial<WebClient> = {}): WebClient => ({
+			...client,
+			...extra,
+			admission: 'device-pairing',
+			user: { id: `paired-device:${id}`, username: 'paired-device', displayName: name },
+		});
+		const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+		describe('acting-user mismatch', () => {
+			it('binds the account the socket was admitted as; force bypasses the busy guard, never the actor', async () => {
+				let acting: unknown = 'unset';
+				callbacks.executeCommand = vi.fn(async () => {
+					await Promise.resolve();
+					acting = getActingUser();
+					return true;
+				});
+				handler.setCallbacks(callbacks);
+
+				handler.handleMessage({ ...client, user: alice }, { ...send(), force: true });
+				await vi.waitFor(() => expect(callbacks.executeCommand).toHaveBeenCalled());
+
+				expect(acting).toEqual(alice);
+				expect(vi.mocked(callbacks.executeCommand).mock.calls[0][4]).toBe(true);
+				const admission = claimDispatchTicket(sentTickets()[0], {
+					agentId: 'session-1',
+					tabId: 'tab-1',
+				});
+				expect(admission).toEqual({ kind: 'web-login', user: alice });
+				expect(transportSpawnActor(admission!)).toEqual({ peer: 'web-login', username: 'alice' });
+			});
+
+			it('two accounts dispatching to one agent are two actors, each bound by its own ticket', async () => {
+				handler.handleMessage({ ...client, user: alice }, send());
+				handler.handleMessage({ ...createMockClient('bob-socket'), user: bob }, send());
+				await vi.waitFor(() => expect(callbacks.executeCommand).toHaveBeenCalledTimes(2));
+
+				const [aliceTicket, bobTicket] = sentTickets();
+				expect(aliceTicket).not.toBe(bobTicket);
+				const [a, b] = [claimed(aliceTicket), claimed(bobTicket)];
+				expect(a).toEqual({ peer: 'web-login', username: 'alice' });
+				expect(b).toEqual({ peer: 'web-login', username: 'bob' });
+				expect(sameSpawnActor(a, b)).toBe(false);
+			});
+
+			it('attributes a CLI socket that also carries a cookie to the account, and binds it as the host secret', async () => {
+				let acting: unknown = 'unset';
+				callbacks.executeCommand = vi.fn(async () => {
+					acting = getActingUser();
+					return true;
+				});
+				handler.setCallbacks(callbacks);
+
+				handler.handleMessage({ ...client, cli: true, user: alice }, send());
+				await vi.waitFor(() => expect(callbacks.executeCommand).toHaveBeenCalled());
+
+				// History names the account; the sink binds the transport that
+				// admitted the socket, which a cookie in a CLI's jar does not change.
+				expect(acting).toEqual(alice);
+				expect(claimed(sentTickets()[0])).toEqual({ peer: 'host-secret' });
+			});
+
+			it('reads a device off the admission the upgrade recorded, never off the shape of the account', async () => {
+				handler.handleMessage(
+					{
+						...client,
+						user: { id: 'paired-device:dev-7', username: 'paired-device', displayName: 'Pixel 9' },
+					},
+					send()
+				);
+				handler.handleMessage(
+					device('dev-7', 'Pixel 9', createMockClient('paired-socket')),
+					send()
+				);
+				await vi.waitFor(() => expect(callbacks.executeCommand).toHaveBeenCalledTimes(2));
+
+				const [account, paired] = sentTickets().map(claimed);
+				expect(account).toEqual({ peer: 'web-login', username: 'paired-device' });
+				expect(paired).toEqual({ peer: 'device-pairing', deviceId: 'dev-7' });
+				expect(sameSpawnActor(account, paired)).toBe(false);
+			});
+		});
+
+		describe('reconnect and revoke', () => {
+			it('a revoked socket lands no effect, no ticket and no reply on any dispatch route', async () => {
+				const revoked = device('dev-7', 'Pixel 9', {
+					subscribedSessionId: 'session-1',
+					isAuthorized: () => false,
+				});
+				const messages: WebClientMessage[] = [
+					send(),
+					{ type: 'cross_agent_ask', sessionId: 'session-1', question: 'q' },
+					{ type: 'new_ai_tab_with_prompt', sessionId: 'session-1', prompt: 'go' },
+					{ type: 'enqueue_command', sessionId: 'session-1', command: 'go', inputMode: 'ai' },
+					{ type: 'open_terminal_tab', sessionId: 'session-1', background: true },
+					{ type: 'write_terminal_tab', sessionId: 'session-1', data: 'ls\n' },
+					{ type: 'switch_mode', sessionId: 'session-1', mode: 'terminal' },
+					{ type: 'terminal_write', sessionId: 'session-1', data: 'ls\r' },
+					{ type: 'terminal_resize', sessionId: 'session-1', cols: 80, rows: 24 },
+				];
+				for (const message of messages) handler.handleMessage(revoked, message);
+				await settle();
+
+				for (const effect of [
+					callbacks.executeCommand,
+					callbacks.consultAgent,
+					callbacks.newAITabWithPrompt,
+					callbacks.enqueueCommand,
+					callbacks.openTerminalTab,
+					callbacks.writeTerminalTab,
+					callbacks.switchMode,
+					callbacks.spawnTerminalForWeb,
+					callbacks.writeToTerminal,
+					callbacks.resizeTerminal,
+				]) {
+					expect(effect).not.toHaveBeenCalled();
+				}
+				expect(client.socket.send).not.toHaveBeenCalled();
+			});
+
+			it('reads revocation at every message: a socket admitted a moment ago is dropped the moment its pairing goes', async () => {
+				let paired = true;
+				const socket = device('dev-7', 'Pixel 9', { isAuthorized: () => paired });
+				handler.handleMessage(socket, send());
+				await vi.waitFor(() => expect(client.socket.send).toHaveBeenCalledTimes(1));
+				expect(claimed(sentTickets()[0])).toEqual({ peer: 'device-pairing', deviceId: 'dev-7' });
+
+				// The registry's immediate revoke, between two messages on one socket.
+				paired = false;
+				handler.handleMessage(socket, send());
+				await settle();
+				expect(callbacks.executeCommand).toHaveBeenCalledTimes(1);
+				expect(client.socket.send).toHaveBeenCalledTimes(1);
+			});
+
+			it('a reconnecting device is the same actor on its new socket, with a ticket of its own; another device is not', async () => {
+				handler.handleMessage(device('dev-7', 'Pixel 9'), send());
+				handler.handleMessage(
+					device('dev-7', 'Pixel 9', createMockClient('reconnected-socket')),
+					send()
+				);
+				handler.handleMessage(device('dev-8', 'Tablet', createMockClient('other-socket')), send());
+				await vi.waitFor(() => expect(callbacks.executeCommand).toHaveBeenCalledTimes(3));
+
+				const tickets = sentTickets();
+				expect(new Set(tickets).size).toBe(3);
+				const [before, after, other] = tickets.map(claimed);
+				expect(after).toEqual({ peer: 'device-pairing', deviceId: 'dev-7' });
+				expect(sameSpawnActor(before, after)).toBe(true);
+				expect(sameSpawnActor(before, other)).toBe(false);
+			});
 		});
 	});
 

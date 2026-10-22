@@ -30,12 +30,28 @@ vi.mock('node:fs/promises', async (original) => {
 	return { ...fs, rename: vi.fn(fs.rename) };
 });
 import { DeviceCredentials } from '../../../main/lite/device-credentials';
-import { PairedDevices } from '../../../main/lite/pairing/paired-devices';
+import { PairedDevices, type PairedDevice } from '../../../main/lite/pairing/paired-devices';
 import {
 	LITE_DEVICE_CREDENTIALS_FILE_NAME,
 	LITE_PAIRED_DEVICES_FILE_NAME,
+	isLitePairingStoreFile,
 	litePairingDeviceId,
 } from '../../../shared/litePairingCredential';
+import {
+	createProcessSpawnAuthority,
+	pairedDeviceActorProblems,
+	spawnDelegationChain,
+} from '../../../main/enterprise/spawn-authority';
+import type { IdentityRead } from '../../../main/enterprise/identity-store';
+import {
+	PAIRED_DEVICE_USER_ID_PREFIX,
+	PAIRED_DEVICE_USERNAME,
+	resolveTransportAdmission,
+	sameSpawnActor,
+	transportSpawnActor,
+} from '../../../main/web-server/auth/transport-actor';
+import { redactSecrets } from '../../../shared/redactSecrets';
+import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
 let directory: string;
 const origin = 'https://aster.synthetic.ts.net',
 	first = 'A'.repeat(43) + '.' + 'B'.repeat(43),
@@ -168,5 +184,157 @@ describe('host paired device persistence', () => {
 		await restarted.load();
 		expect(restarted.resolve(first, 'aster-id', origin)).toBeUndefined();
 		expect(restarted.resolve(second, 'aster-id', origin)?.name).toBe('Second device');
+	});
+});
+
+/**
+ * Identity across surfaces (MRC-08-03, MRC-08-06): what a resolved pairing is
+ * good for. The device the host registry resolves is the transport behind a
+ * socket, bound at the sink as `device-pairing` with its public id; it is
+ * refused until the enrollment registers an enterprise actor and rides the
+ * delegation chain as attribution after. The credential never becomes a key:
+ * nothing past the registry carries the proof. A reconnect is the same device;
+ * a revoke leaves nothing to reconnect as, live and after a restart.
+ */
+describe('a pairing admits a transport, never an enterprise actor (MRC-08-06)', () => {
+	const INSTALLATION = { installationId: 'inst-1', runtimeId: 'desktop-1', processEpoch: 'e1' };
+	const UNREGISTERED: IdentityRead = {
+		status: 'ok',
+		epoch: 1,
+		record: { registration: null } as never,
+	};
+	const REGISTERED: IdentityRead = {
+		status: 'ok',
+		epoch: 1,
+		record: { registration: { actorId: 'actor-registered' } } as never,
+	};
+	const turn = {
+		identity: {
+			requestId: 'req-1',
+			idempotencyKey: 'req-1',
+			attemptId: 'att-1',
+			runId: null,
+			rootRunId: null,
+			parentRunId: null,
+		},
+		traceId: 'agent-1-ai-tab-1',
+		policyRevision: 3,
+		workflow: null,
+	};
+	const authority = (read: IdentityRead) =>
+		createProcessSpawnAuthority({
+			installation: INSTALLATION,
+			identity: { read: () => read },
+			host: { policy: () => ({ sources: [], policyRevision: 3 }) },
+			dispatch: { authority: fakeSpawnPort().authority },
+			now: () => 1_000_000,
+		});
+	// What the Lite connection route builds for a device it resolved: the
+	// synthesized History account and the admission method, recorded at the
+	// upgrade. The transport is read off the method, never off the account.
+	const socketFor = (device: PairedDevice) => ({
+		admission: 'device-pairing' as const,
+		user: {
+			id: PAIRED_DEVICE_USER_ID_PREFIX + device.id,
+			username: PAIRED_DEVICE_USERNAME,
+			displayName: device.name,
+		},
+	});
+	const actorFor = (device: PairedDevice) =>
+		transportSpawnActor(resolveTransportAdmission(socketFor(device)));
+
+	it('binds a resolved device as the device, refuses it until an actor is registered, then carries it as attribution', async () => {
+		const store = new PairedDevices(directory);
+		await store.add(first, 'Pixel 9', 'aster-id', origin);
+		const device = store.resolve(first, 'aster-id', origin)!;
+
+		const admission = resolveTransportAdmission(socketFor(device));
+		expect(admission).toEqual({
+			kind: 'lite',
+			deviceId: litePairingDeviceId(first),
+			deviceName: 'Pixel 9',
+		});
+		const actor = transportSpawnActor(admission);
+		expect(actor).toEqual({ peer: 'device-pairing', deviceId: device.id });
+
+		// Lite-only: the pairing is transport admission, not the enterprise
+		// actor a managed action needs. Refused by name, never as the operator.
+		const refused = authority(UNREGISTERED).verify({ actor, ...turn });
+		expect(refused.ok).toBe(false);
+		if (refused.ok) throw new Error('expected refusal');
+		expect(refused.code).toBe('unauthenticated');
+		expect(refused.problems).toEqual([expect.stringContaining(device.id)]);
+		expect(refused.problems[0]).toContain('registered enterprise actor');
+		expect(refused.problems[0]).not.toContain('operator');
+		expect(pairedDeviceActorProblems(actor, { status: 'none' })).toHaveLength(1);
+
+		const admitted = authority(REGISTERED).verify({ actor, ...turn });
+		expect(admitted.ok).toBe(true);
+		if (!admitted.ok) throw new Error('expected admission');
+		expect(admitted.context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
+		expect(admitted.context.delegation.chain).toEqual([
+			{ kind: 'service', id: `lite-device:${device.id}` },
+		]);
+	});
+
+	it('carries the public id only: no proof in the admission, the actor, the chain or the verified context', async () => {
+		const store = new PairedDevices(directory);
+		await store.add(first, 'Pixel 9', 'aster-id', origin);
+		const device = store.resolve(first, 'aster-id', origin)!;
+		const proof = first.split('.')[1];
+		const actor = actorFor(device);
+
+		const verified = authority(REGISTERED).verify({ actor, ...turn });
+		const everything = JSON.stringify({
+			admission: resolveTransportAdmission(socketFor(device)),
+			actor,
+			chain: spawnDelegationChain(actor),
+			verified,
+		});
+		expect(everything).toContain(device.id);
+		expect(everything).not.toContain(proof);
+		expect(everything).not.toContain(first);
+
+		// A pasted credential is scrubbed from anything persisted or shown;
+		// the device on a chain stays readable.
+		const scrubbed = redactSecrets(
+			`x-maestro-device-credential: ${first} for lite-device:${device.id}`
+		);
+		expect(scrubbed.redacted).toBe(true);
+		expect(scrubbed.text).not.toContain(proof);
+		expect(scrubbed.text).toContain(`lite-device:${device.id}`);
+		// Both stores live under the names the bundle exporter refuses.
+		expect(isLitePairingStoreFile(LITE_PAIRED_DEVICES_FILE_NAME)).toBe(true);
+		expect(isLitePairingStoreFile(LITE_DEVICE_CREDENTIALS_FILE_NAME)).toBe(true);
+	});
+
+	it('a reconnect is the same device; a revoke leaves nothing to reconnect as, live and after a restart', async () => {
+		const store = new PairedDevices(directory);
+		await store.add(first, 'Pixel 9', 'aster-id', origin);
+		await store.add(second, 'Tablet', 'aster-id', origin);
+		const phone = actorFor(store.resolve(first, 'aster-id', origin)!);
+		const tablet = actorFor(store.resolve(second, 'aster-id', origin)!);
+		expect(sameSpawnActor(phone, tablet)).toBe(false);
+
+		// The host restarted and the phone presented the same credential on a
+		// new socket: the same actor, so the sink's "same caller" rule holds.
+		const restarted = new PairedDevices(directory);
+		await restarted.load();
+		const reconnected = actorFor(restarted.resolve(first, 'aster-id', origin)!);
+		expect(sameSpawnActor(phone, reconnected)).toBe(true);
+
+		// The registry's immediate revoke: what the socket's reauthorization
+		// re-resolves before the next message is gone, the other device is not.
+		await restarted.revoke(litePairingDeviceId(first)!);
+		expect(restarted.resolve(first, 'aster-id', origin)).toBeUndefined();
+		expect(restarted.resolve(second, 'aster-id', origin)).toBeDefined();
+
+		const later = new PairedDevices(directory);
+		await later.load();
+		expect(later.resolve(first, 'aster-id', origin)).toBeUndefined();
+		expect(sameSpawnActor(tablet, actorFor(later.resolve(second, 'aster-id', origin)!))).toBe(true);
+		// The surviving pairing is still bound to its instance and origin.
+		expect(later.resolve(second, 'aster-id', 'https://other.synthetic.ts.net')).toBeUndefined();
+		expect(later.resolve(second, 'other-id', origin)).toBeUndefined();
 	});
 });
