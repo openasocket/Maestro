@@ -352,9 +352,12 @@ export interface DispatchTicketClaim {
  *
  * One function for every sink a renderer-relayed dispatch reaches: the
  * `process:spawn` handler (`ipc/handlers/process/handle-spawn.ts`), the web
- * terminal callback, and the `cross-agent:send` consult handler, whose spawn
+ * terminal callback, the `cross-agent:send` consult handler, whose spawn
  * is the main-process consult runner rather than `process:spawn` and claims
- * the ticket `cross_agent_ask` issued for the target (MRC-08-01C).
+ * the ticket `cross_agent_ask` issued for the target (MRC-08-01C), and the
+ * `process:spawnTerminalTab` handler, where a desktop terminal tab a remote
+ * `open_terminal_tab` created claims the ticket on its first spawn
+ * (MRC-08-02A).
  */
 export function currentSpawnActor(claim?: DispatchTicketClaim): ProcessSpawnActor {
 	if (claim && typeof claim.ticket === 'string' && claim.ticket) {

@@ -733,10 +733,18 @@ export interface OpenTerminalTabResult {
 	success: boolean;
 	tabId?: string;
 }
+/**
+ * `dispatchTicket` is the host-minted ticket the handler issued for the agent
+ * inside the client context (MRC-08-02A). The renderer carries it on the new
+ * terminal tab record to the tab's first PTY spawn, where
+ * `process:spawnTerminalTab` claims it, so the lease records the transport
+ * that opened the tab rather than the desktop.
+ */
 export type OpenTerminalTabCallback = (
 	sessionId: string,
 	config: OpenTerminalTabConfig,
-	options?: { background?: boolean }
+	options?: { background?: boolean },
+	dispatchTicket?: string
 ) => Promise<OpenTerminalTabResult>;
 
 /**
@@ -746,6 +754,12 @@ export type OpenTerminalTabCallback = (
 export interface WriteTerminalTabPayload {
 	tabRef?: string;
 	data: string;
+	/**
+	 * Host-minted ticket for the agent (MRC-08-02A). The renderer echoes it on
+	 * `process:write`, where the sink spends it and binds the input to the
+	 * actor the terminal tab was admitted for under management.
+	 */
+	dispatchTicket?: string;
 }
 export interface WriteTerminalTabResult {
 	success: boolean;
@@ -753,6 +767,8 @@ export interface WriteTerminalTabResult {
 	/** The tab that actually received the write, echoed back for reporting. */
 	tabId?: string;
 	tabName?: string;
+	/** Set when a managed host refused the input (another actor's terminal). */
+	managed?: { state: 'denied'; code: string };
 }
 export type WriteTerminalTabCallback = (
 	sessionId: string,

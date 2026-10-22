@@ -7,6 +7,15 @@ import { isWebContentsAvailable } from '../../utils/safe-send';
 import type { ManagedDelegationContext } from '../../../shared/maestro-lib/managed/delegation';
 import type { TerminalTabInfo, ReadTerminalTabResult, NewAITabWithPromptResult } from '../types';
 
+/** The managed refusal a desktop terminal write relays (MRC-08-02A), if the renderer sent one. */
+function readManagedRefusal(value: unknown): { state: 'denied'; code: string } | undefined {
+	if (typeof value !== 'object' || value === null) return undefined;
+	const refusal = value as { state?: unknown; code?: unknown };
+	return refusal.state === 'denied' && typeof refusal.code === 'string'
+		? { state: 'denied', code: refusal.code }
+		: undefined;
+}
+
 export function registerBrowserTabCallbacks(
 	server: WebServer,
 	deps: Pick<WebServerFactoryDependencies, 'getMainWindow'>
@@ -113,7 +122,8 @@ export function registerBrowserTabCallbacks(
 				command?: string;
 				inputRequired?: boolean;
 			},
-			options?: { background?: boolean }
+			options?: { background?: boolean },
+			dispatchTicket?: string
 		) => {
 			const mainWindow = getMainWindow();
 			if (!mainWindow) {
@@ -149,9 +159,14 @@ export function registerBrowserTabCallbacks(
 					resolve({ success: false });
 					return;
 				}
-				mainWindow.webContents.send('remote:openTerminalTab', sessionId, config, responseChannel, {
-					background: options?.background === true,
-				});
+				mainWindow.webContents.send(
+					'remote:openTerminalTab',
+					sessionId,
+					config,
+					responseChannel,
+					{ background: options?.background === true },
+					dispatchTicket
+				);
 
 				const timeoutId = setTimeout(() => {
 					if (resolved) return;
@@ -165,7 +180,10 @@ export function registerBrowserTabCallbacks(
 	);
 
 	server.setWriteTerminalTabCallback(
-		async (sessionId: string, payload: { tabRef?: string; data: string }) => {
+		async (
+			sessionId: string,
+			payload: { tabRef?: string; data: string; dispatchTicket?: string }
+		) => {
 			const mainWindow = getMainWindow();
 			if (!mainWindow) {
 				logger.warn('mainWindow is null for writeTerminalTab', 'WebServer');
@@ -177,6 +195,7 @@ export function registerBrowserTabCallbacks(
 				error?: string;
 				tabId?: string;
 				tabName?: string;
+				managed?: { state: 'denied'; code: string };
 			}>((resolve) => {
 				const responseChannel = `remote:writeTerminalTab:response:${randomUUID()}`;
 				let resolved = false;
@@ -191,12 +210,15 @@ export function registerBrowserTabCallbacks(
 							error?: unknown;
 							tabId?: unknown;
 							tabName?: unknown;
+							managed?: unknown;
 						};
+						const managed = readManagedRefusal(r.managed);
 						resolve({
 							success: r.success === true,
 							error: typeof r.error === 'string' ? r.error : undefined,
 							tabId: typeof r.tabId === 'string' ? r.tabId : undefined,
 							tabName: typeof r.tabName === 'string' ? r.tabName : undefined,
+							...(managed ? { managed } : {}),
 						});
 						return;
 					}

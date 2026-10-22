@@ -657,6 +657,14 @@ export async function handleOpenTerminalTab(
 		return;
 	}
 
+	// The tab's PTY is spawned by the renderer, outside this client context, so
+	// the transport goes along as a dispatch ticket for the agent (MRC-08-02A).
+	// No tab is named because the tab does not exist yet; the renderer puts the
+	// ticket on the new tab record for its first spawn to claim.
+	const dispatchTicket = issueDispatchTicket(resolveTransportAdmission(client), {
+		agentId: sessionId,
+	});
+
 	ctx.callbacks
 		.openTerminalTab(
 			sessionId,
@@ -667,9 +675,12 @@ export async function handleOpenTerminalTab(
 				command,
 				...(rawInputRequired === true && { inputRequired: true }),
 			},
-			{ background }
+			{ background },
+			dispatchTicket
 		)
 		.then((result) => {
+			// A tab the renderer never created spawns nothing: take the ticket back.
+			if (!result.success) withdrawDispatchTicket(dispatchTicket);
 			ctx.send(client, {
 				type: 'open_terminal_tab_result',
 				success: result.success,
@@ -680,6 +691,7 @@ export async function handleOpenTerminalTab(
 			});
 		})
 		.catch((error) => {
+			withdrawDispatchTicket(dispatchTicket);
 			sendErrorResult(`Failed to open terminal tab: ${error.message}`);
 		});
 }
@@ -879,21 +891,34 @@ export async function handleWriteTerminalTab(
 		return;
 	}
 
+	// The write lands as process:write from the renderer, outside this client
+	// context, so the transport goes along as a dispatch ticket for the agent
+	// (MRC-08-02A; the tab is the renderer's to resolve from tabRef). The sink
+	// spends it and binds the input to the actor the tab was admitted for.
+	const dispatchTicket = issueDispatchTicket(resolveTransportAdmission(client), {
+		agentId: sessionId,
+	});
 	try {
 		const result = await ctx.callbacks.writeTerminalTab(sessionId, {
 			tabRef: typeof rawTabRef === 'string' ? rawTabRef : undefined,
 			data: rawData,
+			dispatchTicket,
 		});
+		// A write the renderer could not place never reached the sink: take the
+		// ticket back (one the sink spent is already gone).
+		if (!result.success) withdrawDispatchTicket(dispatchTicket);
 		ctx.send(client, {
 			type: 'write_terminal_tab_result',
 			success: result.success,
 			error: result.error,
 			tabId: result.tabId,
 			tabName: result.tabName,
+			...(result.managed ? { managed: result.managed } : {}),
 			sessionId,
 			requestId: message.requestId,
 		});
 	} catch (error) {
+		withdrawDispatchTicket(dispatchTicket);
 		sendErrorResult(
 			`Failed to write to terminal tab: ${error instanceof Error ? error.message : String(error)}`
 		);

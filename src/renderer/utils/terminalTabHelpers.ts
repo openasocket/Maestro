@@ -126,34 +126,10 @@ export function resolveTerminalTab(
 
 // ─── Session ID Helpers ──────────────────────────────────────────────────────
 
-/**
- * Get the composite terminal session ID that identifies a specific terminal tab within a Maestro session.
- * Format: "{sessionId}-terminal-{tabId}"
- * Distinguishes terminal sessions from AI sessions ("{sessionId}-ai-{tabId}").
- */
-export function getTerminalSessionId(sessionId: string, tabId: string): string {
-	return `${sessionId}-terminal-${tabId}`;
-}
-
-/**
- * Parse a composite terminal session ID back into its component parts.
- * Returns null if the string doesn't match the expected "-terminal-" format.
- */
-export function parseTerminalSessionId(
-	terminalSessionId: string
-): { sessionId: string; tabId: string } | null {
-	const separator = '-terminal-';
-	const separatorIndex = terminalSessionId.indexOf(separator);
-	if (separatorIndex === -1) {
-		return null;
-	}
-	const sessionId = terminalSessionId.substring(0, separatorIndex);
-	const tabId = terminalSessionId.substring(separatorIndex + separator.length);
-	if (!sessionId || !tabId) {
-		return null;
-	}
-	return { sessionId, tabId };
-}
+// The composite id "{sessionId}-terminal-{tabId}" and its parser live in
+// src/shared/terminalSessionId.ts, because the main process takes the id apart
+// at the spawn and write sinks (MRC-08-02A); re-exported here for the renderer.
+export { getTerminalSessionId, parseTerminalSessionId } from '../../shared/terminalSessionId';
 
 // ─── CRUD Mutations ──────────────────────────────────────────────────────────
 
@@ -467,9 +443,13 @@ export function updateTerminalTabPid(session: Session, tabId: string, pid: numbe
 	const terminalTabs = session.terminalTabs || [];
 	return {
 		...session,
-		terminalTabs: terminalTabs.map((tab) =>
-			tab.id === tabId ? { ...tab, pid, ptyInitialized: true } : tab
-		),
+		terminalTabs: terminalTabs.map((tab) => {
+			if (tab.id !== tabId) return tab;
+			// The dispatch ticket was for this spawn alone (MRC-08-02A); a restart
+			// binds anew, and a spent ticket must not be sent again.
+			const { dispatchTicket: _spent, ...rest } = tab;
+			return { ...rest, pid, ptyInitialized: true };
+		}),
 	};
 }
 

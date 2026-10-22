@@ -426,7 +426,8 @@ export function useAppRemoteEventListeners(deps: UseAppRemoteEventListenersDeps)
 	// Acks success to responseChannel so the CLI only reports success after
 	// the tab is actually created.
 	useEventListener('maestro:openTerminalTab', (e: Event) => {
-		const { sessionId, config, responseChannel, background } = (e as CustomEvent).detail as {
+		const { sessionId, config, responseChannel, background, dispatchTicket } = (e as CustomEvent)
+			.detail as {
 			sessionId: string;
 			config: {
 				cwd?: string;
@@ -437,6 +438,7 @@ export function useAppRemoteEventListeners(deps: UseAppRemoteEventListenersDeps)
 			};
 			responseChannel?: string;
 			background?: boolean;
+			dispatchTicket?: string;
 		};
 		const ack = (success: boolean, tabId?: string) => {
 			if (responseChannel) {
@@ -462,7 +464,16 @@ export function useAppRemoteEventListeners(deps: UseAppRemoteEventListenersDeps)
 		// storing it means a `npm run dev` terminal comes back after a restart or
 		// a manual restart of the tab instead of reopening to an empty shell.
 		const command = config?.command?.trim();
-		const tab = command ? { ...baseTab, startupCommand: command } : baseTab;
+		// The dispatch ticket rides on the tab record until the tab's first PTY
+		// spawn claims it (MRC-08-02A). The spawn below usually does, but a tab
+		// created while its agent is on screen may be spawned by TerminalView
+		// first, and the ticket has to be on whichever call wins; the pid update
+		// drops it afterwards and it is never persisted.
+		const tab = {
+			...baseTab,
+			...(command ? { startupCommand: command } : {}),
+			...(typeof dispatchTicket === 'string' && dispatchTicket ? { dispatchTicket } : {}),
+		};
 		setSessions((prev) =>
 			prev.map((s) => {
 				if (s.id !== sessionId) return s;
@@ -538,15 +549,22 @@ export function useAppRemoteEventListeners(deps: UseAppRemoteEventListenersDeps)
 	// This is the "type into the terminal the user is looking at" path, as
 	// opposed to openTerminalTab which makes a new one.
 	useEventListener('maestro:writeTerminalTab', async (e: Event) => {
-		const { sessionId, tabRef, data, responseChannel } = (e as CustomEvent).detail as {
+		const { sessionId, tabRef, data, responseChannel, dispatchTicket } = (e as CustomEvent)
+			.detail as {
 			sessionId: string;
 			tabRef?: string;
 			data: string;
 			responseChannel?: string;
+			dispatchTicket?: string;
 		};
 		const ack = (
 			success: boolean,
-			result?: { error?: string; tabId?: string; tabName?: string }
+			result?: {
+				error?: string;
+				tabId?: string;
+				tabName?: string;
+				managed?: { state: 'denied'; code: string };
+			}
 		) => {
 			if (responseChannel) {
 				window.maestro.process.sendRemoteWriteTerminalTabResponse(responseChannel, success, result);
@@ -611,12 +629,20 @@ export function useAppRemoteEventListeners(deps: UseAppRemoteEventListenersDeps)
 			return;
 		}
 
-		const success = await window.maestro.process.write(
+		// The ticket the handler minted for this agent goes to the sink, which
+		// spends it and binds the input to the actor the tab was admitted for
+		// (MRC-08-02A). A managed refusal comes back as an object, not a boolean.
+		const written = await window.maestro.process.write(
 			getTerminalSessionId(owner.id, tab.id),
-			data
+			data,
+			dispatchTicket
 		);
-		ack(success, {
-			error: success ? undefined : `Failed to write to terminal "${tabName}"`,
+		if (typeof written === 'object') {
+			ack(false, { error: written.error, tabId: tab.id, tabName, managed: written.managed });
+			return;
+		}
+		ack(written, {
+			error: written ? undefined : `Failed to write to terminal "${tabName}"`,
 			tabId: tab.id,
 			tabName,
 		});

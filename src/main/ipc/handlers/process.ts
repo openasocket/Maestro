@@ -7,7 +7,11 @@ import * as path from 'path';
 import { ProcessManager } from '../../process-manager';
 import { AgentDetector } from '../../agents';
 import type { InteractiveReplayController } from '../../agents/claude-interactive-replay';
-import type { ProcessConfig as ProcessSpawnConfig, SpawnResult } from '../../process-manager/types';
+import type {
+	ProcessConfig as ProcessSpawnConfig,
+	ProcessSpawnActor,
+	SpawnResult,
+} from '../../process-manager/types';
 import { logger } from '../../utils/logger';
 import { getChildProcesses } from '../../process-manager/utils/childProcessInfo';
 import { addBreadcrumb } from '../../utils/sentry';
@@ -25,6 +29,14 @@ import { buildSshOptionArgs } from '../../../shared/sshOptions';
 import { MaestroSettings } from './persistence';
 import { getDefaultShell, resolveConfiguredShell } from '../../stores/defaults';
 import { currentSpawnActor, handleProcessSpawn, reportSpawnRefusal } from './process/handle-spawn';
+import {
+	claimDispatchTicket,
+	describeSpawnActor,
+	sameSpawnActor,
+	transportSpawnActor,
+} from '../../web-server/auth/transport-actor';
+import type { WebTerminalInputRefusal } from '../../web-server/handlers/messageHandlers/types';
+import { parseTerminalSessionId } from '../../../shared/terminalSessionId';
 import type { SpawnProcessConfig } from './process/spawn-types';
 import {
 	initPermissionRelay,
@@ -35,6 +47,8 @@ import { releaseConcertoHtmlDocument, restoreConcertoHtmlDocument } from '../../
 import { createRelayManagedGate } from '../../enterprise/dispatch';
 
 const LOG_CONTEXT = '[ProcessManager]';
+
+const OPERATOR: ProcessSpawnActor = Object.freeze({ peer: 'in-process' as const });
 
 /**
  * Helper to create handler options with consistent context
@@ -189,17 +203,101 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 		)
 	);
 
-	// Write data to a process
+	/**
+	 * The actor each desktop terminal tab's PTY was admitted for, by process id
+	 * (MRC-08-02A), kept the way the web PTY's record is kept in
+	 * `web-server/callbacks/terminalCallbacks.ts`: `ProcessSpawnAdmission.actor`
+	 * is the enrollment principal, the same for every transport, so the
+	 * admission alone cannot say which transport opened the tab. Set when a PTY
+	 * is spawned (not when a live one is attached), forgotten when its spawn
+	 * fails, and pruned of dead processes at the next spawn.
+	 */
+	const terminalTabActors = new Map<string, ProcessSpawnActor>();
+	const rememberTerminalTabActor = (
+		processManager: ProcessManager,
+		terminalSessionId: string,
+		actor: ProcessSpawnActor,
+		result: SpawnResult
+	): SpawnResult => {
+		for (const id of terminalTabActors.keys()) {
+			if (!processManager.get(id)) terminalTabActors.delete(id);
+		}
+		if (!result.success) terminalTabActors.delete(terminalSessionId);
+		else if (!result.attached) terminalTabActors.set(terminalSessionId, actor);
+		return result;
+	};
+
+	/**
+	 * Why a write may not reach a desktop terminal tab, or null when it may.
+	 * Only a tab this host ADMITTED (its admission still bound) is actor-bound.
+	 * A relayed `write_terminal_tab` carries the ticket its handler minted for
+	 * the agent; the sink spends it here, and the input binds to the transport
+	 * it was issued for, which must be the actor the tab was admitted for. Under
+	 * management a ticket that cannot be honored (unknown, spent, expired, or
+	 * issued for another agent) refuses the write outright: a relayed write has
+	 * no standing of its own to fall back to. A write with no ticket is the
+	 * caller's own: the desktop renderer (the operator at the keyboard, who may
+	 * answer a prompt in a terminal the CLI opened for exactly that) or a
+	 * bridged web-desktop client, whose transport `runAsClient` established.
+	 * A standalone host writes as before, and `ProcessManager.write()` still
+	 * refuses an unadmitted or released process under management.
+	 */
+	const terminalTabInputRefusal = (
+		processManager: ProcessManager,
+		terminalSessionId: string,
+		dispatchTicket: unknown
+	): WebTerminalInputRefusal | null => {
+		const target = parseTerminalSessionId(terminalSessionId);
+		if (!target) return null;
+		const ticketed = typeof dispatchTicket === 'string' && dispatchTicket !== '';
+		const issuedFor = ticketed
+			? claimDispatchTicket(dispatchTicket, { agentId: target.sessionId, tabId: target.tabId })
+			: undefined;
+		if (!processManager.admissionOf(terminalSessionId)) return null;
+		const owner = terminalTabActors.get(terminalSessionId) ?? OPERATOR;
+		if (ticketed && !issuedFor) {
+			return {
+				success: false,
+				error: `This terminal was admitted for ${describeSpawnActor(owner)} on a managed host; the dispatch ticket for this write was not honored.`,
+				managed: { state: 'denied', code: 'context-mismatch' },
+			};
+		}
+		const caller = issuedFor ? transportSpawnActor(issuedFor) : currentSpawnActor();
+		if (sameSpawnActor(owner, caller)) return null;
+		// The host's own keyboard: a ticket-less write from the desktop renderer
+		// (or the owner-operator a path token admits) is the enrollment principal
+		// itself, so it may answer a prompt in a terminal the CLI opened for it.
+		if (!ticketed && caller.peer === 'in-process') return null;
+		return {
+			success: false,
+			error: `This terminal was admitted for ${describeSpawnActor(owner)} on a managed host; input by ${describeSpawnActor(caller)} is unavailable.`,
+			managed: { state: 'denied', code: 'context-mismatch' },
+		};
+	};
+
+	// Write data to a process. A relayed write_terminal_tab carries a dispatch
+	// ticket (MRC-08-02A); the desktop renderer's own writes carry none.
 	ipcMain.handle(
 		'process:write',
-		withIpcErrorLogging(handlerOpts('write'), async (sessionId: string, data: string) => {
-			const processManager = requireProcessManager(getProcessManager);
-			logger.debug(`Writing to process: ${sessionId}`, LOG_CONTEXT, {
-				sessionId,
-				dataLength: data.length,
-			});
-			return processManager.write(sessionId, data);
-		})
+		withIpcErrorLogging(
+			handlerOpts('write'),
+			async (sessionId: string, data: string, dispatchTicket?: unknown) => {
+				const processManager = requireProcessManager(getProcessManager);
+				logger.debug(`Writing to process: ${sessionId}`, LOG_CONTEXT, {
+					sessionId,
+					dataLength: data.length,
+				});
+				const refused = terminalTabInputRefusal(processManager, sessionId, dispatchTicket);
+				if (refused) {
+					logger.warn(`Terminal tab write refused under management: ${sessionId}`, LOG_CONTEXT, {
+						sessionId,
+						message: refused.error,
+					});
+					return refused;
+				}
+				return processManager.write(sessionId, data);
+			}
+		)
 	);
 
 	// Chat steering: hand text to a Claude turn that is ALREADY RUNNING so claude can
@@ -387,8 +485,22 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 					remoteId: string | null;
 					workingDirOverride?: string;
 				};
+				// The ticket a remote open_terminal_tab issued for this tab (MRC-08-02A)
+				dispatchTicket?: string;
 			}) => {
 				const processManager = requireProcessManager(getProcessManager);
+
+				// Who asked for this tab (MRC-08-02A): a tab a remote open_terminal_tab
+				// created carries the ticket its handler minted for the agent, claimed
+				// here for the agent and tab half of the process id so the lease
+				// records that transport; a tab the operator opened carries none and
+				// binds the caller's own standing.
+				const target = parseTerminalSessionId(config.sessionId);
+				const actor = currentSpawnActor(
+					target
+						? { ticket: config.dispatchTicket, agentId: target.sessionId, tabId: target.tabId }
+						: undefined
+				);
 
 				// Resolve shell: prefer config.shell, then settings default
 				const globalShellEnvVars = settingsStore.get('shellEnvVars', {}) as Record<string, string>;
@@ -502,22 +614,27 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 						remoteParts.push('exec "$SHELL" -l');
 						sshArgs.push(remoteParts.join(' && '));
 
-						return reportTerminalRefusal(
-							await processManager.spawnAdmitted(
-								{
-									sessionId: config.sessionId,
-									reuseTerminal: true,
-									toolType: 'terminal',
-									cwd: os.homedir(),
-									command: await resolveSshPath(),
-									args: sshArgs,
-									shellEnvVars: mergedEnvVars,
-									cols: config.cols || 80,
-									rows: config.rows || 24,
-								},
-								currentSpawnActor()
-							),
-							config.sessionId
+						return rememberTerminalTabActor(
+							processManager,
+							config.sessionId,
+							actor,
+							reportTerminalRefusal(
+								await processManager.spawnAdmitted(
+									{
+										sessionId: config.sessionId,
+										reuseTerminal: true,
+										toolType: 'terminal',
+										cwd: os.homedir(),
+										command: await resolveSshPath(),
+										args: sshArgs,
+										shellEnvVars: mergedEnvVars,
+										cols: config.cols || 80,
+										rows: config.rows || 24,
+									},
+									actor
+								),
+								config.sessionId
+							)
 						);
 					}
 					// SSH is enabled but the remote config was not found (deleted or disabled).
@@ -544,7 +661,7 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 				};
 				const admitted = await processManager.admitSpawn(
 					processManager.terminalTabConfig(terminalConfig),
-					currentSpawnActor()
+					actor
 				);
 				if (admitted.state !== 'standalone' && admitted.state !== 'admitted') {
 					return reportTerminalRefusal(
@@ -557,10 +674,15 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 						config.sessionId
 					);
 				}
-				return processManager.spawnTerminalTab(
-					admitted.state === 'admitted'
-						? { ...terminalConfig, admission: admitted.admission }
-						: terminalConfig
+				return rememberTerminalTabActor(
+					processManager,
+					config.sessionId,
+					actor,
+					processManager.spawnTerminalTab(
+						admitted.state === 'admitted'
+							? { ...terminalConfig, admission: admitted.admission }
+							: terminalConfig
+					)
 				);
 			}
 		)

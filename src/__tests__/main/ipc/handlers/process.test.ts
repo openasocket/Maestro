@@ -39,6 +39,11 @@ import {
 	resolveTurnActor,
 	resetTurnActors,
 } from '../../../../main/web-server/auth/turn-attribution';
+import {
+	claimDispatchTicket,
+	issueDispatchTicket,
+	runAsClient,
+} from '../../../../main/web-server/auth/transport-actor';
 
 // Mock electron's ipcMain
 vi.mock('electron', () => ({
@@ -318,6 +323,7 @@ describe('process IPC handlers', () => {
 		admitSpawn: ReturnType<typeof vi.fn>;
 		spawnAdmitted: ReturnType<typeof vi.fn>;
 		terminalTabConfig: ReturnType<typeof vi.fn>;
+		admissionOf: ReturnType<typeof vi.fn>;
 	};
 	let mockAgentDetector: {
 		getAgent: ReturnType<typeof vi.fn>;
@@ -360,6 +366,8 @@ describe('process IPC handlers', () => {
 			admitSpawn: vi.fn().mockResolvedValue({ state: 'standalone' }),
 			spawnAdmitted: vi.fn((config: unknown) => Promise.resolve(mockProcessManager.spawn(config))),
 			terminalTabConfig: vi.fn((config: unknown) => config),
+			// Standalone: no admission is bound to any process.
+			admissionOf: vi.fn().mockReturnValue(null),
 		};
 
 		// Create mock agent detector
@@ -2043,6 +2051,237 @@ describe('process IPC handlers', () => {
 			const result = await handler!({} as any, 'exited-session', 'data');
 
 			expect(result).toBe(false);
+		});
+	});
+
+	/**
+	 * MRC-08-02A: a desktop terminal tab a remote open_terminal_tab created
+	 * carries the host-minted ticket to its first spawn, where the sink claims it
+	 * and binds the transport; the actor the tab was admitted for is recorded
+	 * beside the sink, and a relayed write_terminal_tab (a ticketed process:write)
+	 * must come from that actor under management. The registry is the real one;
+	 * tickets are issued the way the WS handlers issue them.
+	 */
+	describe('desktop terminal tab actor binding (MRC-08-02A)', () => {
+		const TAB = 'session-1-terminal-tab-1';
+		const cliTicket = () => issueDispatchTicket({ kind: 'cli' }, { agentId: 'session-1' });
+		const deviceTicket = () =>
+			issueDispatchTicket(
+				{ kind: 'lite', deviceId: 'dev-7', deviceName: 'Pixel 9' },
+				{ agentId: 'session-1' }
+			);
+		const spawnTab = async (dispatchTicket?: string) => {
+			mockProcessManager.spawnTerminalTab.mockReturnValue({ pid: 5000, success: true });
+			const handler = handlers.get('process:spawnTerminalTab');
+			return handler!({} as any, { sessionId: TAB, cwd: '/local/project', dispatchTicket });
+		};
+		const managedHost = () => {
+			const admission = { id: 'adm-1' };
+			mockProcessManager.admitSpawn.mockResolvedValue({ state: 'admitted', admission });
+			mockProcessManager.admissionOf.mockImplementation((id: string) =>
+				id === TAB ? admission : null
+			);
+			mockProcessManager.get.mockImplementation((id: string) =>
+				id === TAB ? { pid: 5000 } : undefined
+			);
+		};
+		const write = (sessionId: string, dispatchTicket?: string) =>
+			handlers.get('process:write')!({} as any, sessionId, 'ls\n', dispatchTicket);
+
+		it('spawns a ticketed tab for the transport the ticket was issued for and spends the ticket', async () => {
+			const ticket = cliTicket();
+			await spawnTab(ticket);
+			expect(mockProcessManager.admitSpawn).toHaveBeenCalledWith(
+				expect.objectContaining({ sessionId: TAB }),
+				{ peer: 'host-secret' }
+			);
+			expect(claimDispatchTicket(ticket, { agentId: 'session-1', tabId: 'tab-1' })).toBeUndefined();
+		});
+
+		it('binds a device ticket as the device and no ticket as the caller itself', async () => {
+			await spawnTab(deviceTicket());
+			expect(mockProcessManager.admitSpawn).toHaveBeenLastCalledWith(expect.anything(), {
+				peer: 'device-pairing',
+				deviceId: 'dev-7',
+			});
+			await spawnTab();
+			expect(mockProcessManager.admitSpawn).toHaveBeenLastCalledWith(expect.anything(), {
+				peer: 'in-process',
+			});
+		});
+
+		it('binds the caller itself, never the ticket, when the ticket is forged, spent or for another agent', async () => {
+			await spawnTab('forged-ticket');
+			expect(mockProcessManager.admitSpawn).toHaveBeenLastCalledWith(expect.anything(), {
+				peer: 'in-process',
+			});
+			const spent = cliTicket();
+			claimDispatchTicket(spent, { agentId: 'session-1', tabId: 'tab-1' });
+			await spawnTab(spent);
+			expect(mockProcessManager.admitSpawn).toHaveBeenLastCalledWith(expect.anything(), {
+				peer: 'in-process',
+			});
+			const other = issueDispatchTicket({ kind: 'cli' }, { agentId: 'session-9' });
+			await spawnTab(other);
+			expect(mockProcessManager.admitSpawn).toHaveBeenLastCalledWith(expect.anything(), {
+				peer: 'in-process',
+			});
+		});
+
+		it('claims a ticket on the SSH terminal path too', async () => {
+			mockSettingsStore.get.mockImplementation((key: string, defaultValue: unknown) => {
+				if (key === 'sshRemotes')
+					return [
+						{
+							id: 'remote-1',
+							name: 'Dev Server',
+							host: 'dev.example.com',
+							port: 22,
+							username: 'devuser',
+							enabled: true,
+						},
+					];
+				return defaultValue;
+			});
+			mockProcessManager.spawn.mockReturnValue({ pid: 5001, success: true });
+			const handler = handlers.get('process:spawnTerminalTab');
+			await handler!({} as any, {
+				sessionId: TAB,
+				cwd: '/local/project',
+				sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+				dispatchTicket: cliTicket(),
+			});
+			expect(mockProcessManager.spawnAdmitted).toHaveBeenCalledWith(
+				expect.objectContaining({ command: 'ssh', sessionId: TAB }),
+				{ peer: 'host-secret' }
+			);
+		});
+
+		it('on a managed host a relayed write must come from the actor the tab was admitted for', async () => {
+			managedHost();
+			await spawnTab(cliTicket());
+			mockProcessManager.write.mockReturnValue(true);
+
+			// The CLI that opened the tab types into it.
+			expect(await write(TAB, cliTicket())).toBe(true);
+			expect(mockProcessManager.write).toHaveBeenCalledWith(TAB, 'ls\n');
+
+			// A paired device does not.
+			mockProcessManager.write.mockClear();
+			const refused = await write(TAB, deviceTicket());
+			expect(refused).toMatchObject({
+				success: false,
+				managed: { state: 'denied', code: 'context-mismatch' },
+			});
+			expect(String((refused as { error: string }).error)).toContain('admitted for maestro-cli');
+			expect(String((refused as { error: string }).error)).toContain('lite-device:dev-7');
+			expect(mockProcessManager.write).not.toHaveBeenCalled();
+		});
+
+		it('on a managed host a relayed write whose ticket is not honored is refused, never bound as the operator', async () => {
+			managedHost();
+			await spawnTab();
+			mockProcessManager.write.mockReturnValue(true);
+
+			for (const bad of [
+				'forged',
+				issueDispatchTicket({ kind: 'cli' }, { agentId: 'session-9' }),
+			]) {
+				const refused = await write(TAB, bad);
+				expect(refused).toMatchObject({
+					success: false,
+					managed: { state: 'denied', code: 'context-mismatch' },
+				});
+				expect(String((refused as { error: string }).error)).toContain('not honored');
+			}
+			const spent = cliTicket();
+			claimDispatchTicket(spent, { agentId: 'session-1', tabId: 'tab-1' });
+			expect(await write(TAB, spent)).toMatchObject({ success: false });
+			expect(mockProcessManager.write).not.toHaveBeenCalled();
+		});
+
+		it('the operator at the keyboard keeps a CLI-opened tab, and a bridged client is the transport that admitted it', async () => {
+			managedHost();
+			await spawnTab(cliTicket());
+			mockProcessManager.write.mockReturnValue(true);
+
+			// The desktop renderer writes with no ticket and outside any transport
+			// context: the host's own keyboard (an --input-required prompt).
+			expect(await write(TAB)).toBe(true);
+
+			// A web-desktop client writes with no ticket but inside the transport
+			// context the bridge established: the login, not the CLI.
+			mockProcessManager.write.mockClear();
+			const asLogin = await runAsClient(
+				{ user: { id: 'u1', username: 'alice', displayName: 'Alice' } } as any,
+				() => write(TAB)
+			);
+			expect(asLogin).toMatchObject({ success: false, managed: { state: 'denied' } });
+			expect(String((asLogin as { error: string }).error)).toContain('web-login:alice');
+			expect(mockProcessManager.write).not.toHaveBeenCalled();
+
+			// The CLI itself, through the bridge with no ticket, is the owner.
+			expect(await runAsClient({ cli: true } as any, () => write(TAB))).toBe(true);
+		});
+
+		it('a CLI write into a tab the operator opened is refused under management', async () => {
+			managedHost();
+			await spawnTab();
+			mockProcessManager.write.mockReturnValue(true);
+			const refused = await write(TAB, cliTicket());
+			expect(refused).toMatchObject({ success: false, managed: { state: 'denied' } });
+			expect(String((refused as { error: string }).error)).toContain('admitted for the operator');
+			expect(String((refused as { error: string }).error)).toContain('maestro-cli');
+			expect(mockProcessManager.write).not.toHaveBeenCalled();
+		});
+
+		it('an attach keeps the owner the PTY was spawned for; a respawn after exit binds anew', async () => {
+			managedHost();
+			await spawnTab(cliTicket());
+			mockProcessManager.write.mockReturnValue(true);
+
+			// A second client attaching to the live PTY is not a new admission and
+			// must not take the tab over.
+			mockProcessManager.spawnTerminalTab.mockReturnValue({
+				pid: 5000,
+				success: true,
+				attached: true,
+			});
+			await handlers.get('process:spawnTerminalTab')!({} as any, {
+				sessionId: TAB,
+				cwd: '/local/project',
+				dispatchTicket: deviceTicket(),
+			});
+			expect(await write(TAB, cliTicket())).toBe(true);
+			expect(await write(TAB, deviceTicket())).toMatchObject({ success: false });
+
+			// The PTY exits and the operator restarts the tab: it is the operator's now.
+			mockProcessManager.get.mockReturnValue(undefined);
+			await spawnTab();
+			mockProcessManager.get.mockImplementation((id: string) =>
+				id === TAB ? { pid: 5000 } : undefined
+			);
+			expect(await write(TAB, cliTicket())).toMatchObject({ success: false });
+			expect(await write(TAB)).toBe(true);
+		});
+
+		it('a standalone host writes for any caller and still spends the ticket', async () => {
+			await spawnTab(cliTicket());
+			mockProcessManager.write.mockReturnValue(true);
+			const ticket = deviceTicket();
+			expect(await write(TAB, ticket)).toBe(true);
+			expect(mockProcessManager.write).toHaveBeenCalledWith(TAB, 'ls\n');
+			expect(claimDispatchTicket(ticket, { agentId: 'session-1', tabId: 'tab-1' })).toBeUndefined();
+			expect(await write(TAB, 'forged')).toBe(true);
+		});
+
+		it('leaves a write to anything but a desktop terminal tab alone', async () => {
+			managedHost();
+			mockProcessManager.admissionOf.mockReturnValue({ id: 'adm-2' });
+			mockProcessManager.write.mockReturnValue(true);
+			expect(await write('session-1-ai-tab-1', cliTicket())).toBe(true);
+			expect(await write('session-1-terminal')).toBe(true);
+			expect(mockProcessManager.write).toHaveBeenCalledTimes(2);
 		});
 	});
 

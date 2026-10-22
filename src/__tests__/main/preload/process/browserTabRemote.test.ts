@@ -56,7 +56,13 @@ describe('Process BrowserTabRemote Preload API', () => {
 				background: true,
 			});
 
-			expect(callback).toHaveBeenCalledWith('session-1', config, 'chan-1', { background: true });
+			expect(callback).toHaveBeenCalledWith(
+				'session-1',
+				config,
+				'chan-1',
+				{ background: true },
+				undefined
+			);
 		});
 
 		it('forwards background:false when the verb should focus', () => {
@@ -67,7 +73,13 @@ describe('Process BrowserTabRemote Preload API', () => {
 				background: false,
 			});
 
-			expect(callback).toHaveBeenCalledWith('session-1', config, 'chan-1', { background: false });
+			expect(callback).toHaveBeenCalledWith(
+				'session-1',
+				config,
+				'chan-1',
+				{ background: false },
+				undefined
+			);
 		});
 
 		it('treats a missing options argument as foreground, not undefined', () => {
@@ -77,7 +89,13 @@ describe('Process BrowserTabRemote Preload API', () => {
 			// An older main process that predates the flag sends only three args.
 			registeredHandler('remote:openTerminalTab')(null, 'session-1', config, 'chan-1');
 
-			expect(callback).toHaveBeenCalledWith('session-1', config, 'chan-1', { background: false });
+			expect(callback).toHaveBeenCalledWith(
+				'session-1',
+				config,
+				'chan-1',
+				{ background: false },
+				undefined
+			);
 		});
 
 		it('only a literal true opts in', () => {
@@ -88,7 +106,57 @@ describe('Process BrowserTabRemote Preload API', () => {
 				background: 'yes' as unknown as boolean,
 			});
 
-			expect(callback).toHaveBeenCalledWith('session-1', config, 'chan-1', { background: false });
+			expect(callback).toHaveBeenCalledWith(
+				'session-1',
+				config,
+				'chan-1',
+				{ background: false },
+				undefined
+			);
+		});
+
+		it('forwards the dispatch ticket after the options, unread (MRC-08-02A)', () => {
+			const callback = vi.fn();
+			api.onRemoteOpenTerminalTab(callback);
+
+			registeredHandler('remote:openTerminalTab')(
+				null,
+				'session-1',
+				config,
+				'chan-1',
+				{ background: true },
+				'tkt-open-1'
+			);
+
+			expect(callback).toHaveBeenCalledWith(
+				'session-1',
+				config,
+				'chan-1',
+				{ background: true },
+				'tkt-open-1'
+			);
+		});
+
+		it('drops a dispatch ticket that is not a string (MRC-08-02A)', () => {
+			const callback = vi.fn();
+			api.onRemoteOpenTerminalTab(callback);
+
+			registeredHandler('remote:openTerminalTab')(
+				null,
+				'session-1',
+				config,
+				'chan-1',
+				{ background: false },
+				{ forged: true }
+			);
+
+			expect(callback).toHaveBeenCalledWith(
+				'session-1',
+				config,
+				'chan-1',
+				{ background: false },
+				undefined
+			);
 		});
 
 		it('acks false on the response channel when the callback throws', () => {

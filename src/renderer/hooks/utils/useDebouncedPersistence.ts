@@ -181,7 +181,7 @@ export const prepareSessionForPersistence = (session: Session): Session => {
 
 	// Strip terminal tab runtime state - PTY processes don't survive app restart
 	const cleanedTerminalTabs = (session.terminalTabs || []).map(
-		({ ptyInitialized: _ptyInitialized, ...tab }) => ({
+		({ ptyInitialized: _ptyInitialized, dispatchTicket: _dispatchTicket, ...tab }) => ({
 			...tab,
 			pid: 0,
 			state: 'idle' as const,

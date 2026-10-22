@@ -627,10 +627,11 @@ export class CallbackRegistry {
 	async openTerminalTab(
 		sessionId: string,
 		config: OpenTerminalTabConfig,
-		options?: { background?: boolean }
+		options?: { background?: boolean },
+		dispatchTicket?: string
 	): Promise<OpenTerminalTabResult> {
 		if (!this.callbacks.openTerminalTab) return { success: false };
-		return this.callbacks.openTerminalTab(sessionId, config, options);
+		return this.callbacks.openTerminalTab(sessionId, config, options, dispatchTicket);
 	}
 
 	async writeTerminalTab(

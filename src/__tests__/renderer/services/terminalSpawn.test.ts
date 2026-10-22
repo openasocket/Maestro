@@ -197,6 +197,22 @@ describe('spawnPtyForTab', () => {
 		expect(onSpawnFailure).toHaveBeenCalledWith('tab-1', true, expect.stringContaining('SSH'));
 	});
 
+	it('hands the dispatch ticket a remote open_terminal_tab left on the tab to the spawn, and nothing otherwise (MRC-08-02A)', async () => {
+		await spawnPtyForTab({
+			session: session(),
+			tab: tab({ dispatchTicket: 'tkt-open-1' }),
+			onPid,
+			onSpawnFailure,
+		});
+		expect(spawnTerminalTab.mock.calls[0][0]).toMatchObject({
+			sessionId: 'sess-1-terminal-tab-1',
+			dispatchTicket: 'tkt-open-1',
+		});
+
+		await spawnPtyForTab({ session: session(), tab: tab({ id: 'tab-2' }), onPid, onSpawnFailure });
+		expect('dispatchTicket' in spawnTerminalTab.mock.calls[1][0]).toBe(false);
+	});
+
 	it('releases the in-flight guard when the spawn throws', async () => {
 		spawnTerminalTab.mockRejectedValue(new Error('boom'));
 

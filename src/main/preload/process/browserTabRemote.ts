@@ -84,7 +84,8 @@ export function createBrowserTabRemoteApi() {
 				sessionId: string,
 				config: { cwd?: string; shell?: string; name?: string | null; command?: string },
 				responseChannel: string,
-				options: { background?: boolean }
+				options: { background?: boolean },
+				dispatchTicket?: string
 			) => void
 		): (() => void) => {
 			const handler = (
@@ -92,12 +93,19 @@ export function createBrowserTabRemoteApi() {
 				sessionId: string,
 				config: { cwd?: string; shell?: string; name?: string | null; command?: string },
 				responseChannel: string,
-				options?: { background?: boolean }
+				options?: { background?: boolean },
+				dispatchTicket?: unknown
 			) => {
 				try {
-					callback(sessionId, config, responseChannel, {
-						background: options?.background === true,
-					});
+					// The ticket (MRC-08-02A) is opaque to the renderer: forwarded as the
+					// string the main process minted, or not at all.
+					callback(
+						sessionId,
+						config,
+						responseChannel,
+						{ background: options?.background === true },
+						typeof dispatchTicket === 'string' && dispatchTicket ? dispatchTicket : undefined
+					);
 				} catch (error) {
 					ipcRenderer.send(responseChannel, false);
 					throw error;
@@ -125,14 +133,14 @@ export function createBrowserTabRemoteApi() {
 		onRemoteWriteTerminalTab: (
 			callback: (
 				sessionId: string,
-				payload: { tabRef?: string; data: string },
+				payload: { tabRef?: string; data: string; dispatchTicket?: string },
 				responseChannel: string
 			) => void
 		): (() => void) => {
 			const handler = (
 				_: unknown,
 				sessionId: string,
-				payload: { tabRef?: string; data: string },
+				payload: { tabRef?: string; data: string; dispatchTicket?: string },
 				responseChannel: string
 			) => {
 				try {
@@ -153,7 +161,12 @@ export function createBrowserTabRemoteApi() {
 		sendRemoteWriteTerminalTabResponse: (
 			responseChannel: string,
 			success: boolean,
-			result?: { error?: string; tabId?: string; tabName?: string }
+			result?: {
+				error?: string;
+				tabId?: string;
+				tabName?: string;
+				managed?: { state: 'denied'; code: string };
+			}
 		): void => {
 			ipcRenderer.send(responseChannel, { success, ...result });
 		},

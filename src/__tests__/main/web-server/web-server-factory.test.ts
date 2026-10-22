@@ -1720,6 +1720,74 @@ describe('web-server/web-server-factory', () => {
 	// callback is the REAL implementation (calls webContents.send with the
 	// right channel), not a silently-dropped no-op - the one failure mode
 	// tsc and the completeness diff can't catch on their own.
+	describe('browserTabCallbacks terminal tab tickets (MRC-08-02A)', () => {
+		it('setOpenTerminalTabCallback forwards the dispatch ticket after the placement options', () => {
+			const server = createWebServerFactory(deps)() as any;
+			const callback = server.setOpenTerminalTabCallback.mock.calls[0][0];
+
+			void callback('session-1', { name: 'Build' }, { background: true }, 'tkt-open-1');
+
+			expect(mockWebContents.send).toHaveBeenCalledWith(
+				'remote:openTerminalTab',
+				'session-1',
+				{ name: 'Build' },
+				expect.any(String),
+				{ background: true },
+				'tkt-open-1'
+			);
+		});
+
+		it('setWriteTerminalTabCallback forwards the ticket in the payload and reads a managed refusal back', async () => {
+			const server = createWebServerFactory(deps)() as any;
+			const callback = server.setWriteTerminalTabCallback.mock.calls[0][0];
+
+			const pending = callback('session-1', { data: 'ls\n', dispatchTicket: 'tkt-w-1' });
+			const request = vi
+				.mocked(mockWebContents.send)
+				.mock.calls.find((call) => call[0] === 'remote:writeTerminalTab');
+			expect(request?.[2]).toEqual({ data: 'ls\n', dispatchTicket: 'tkt-w-1' });
+			const responseChannel = request?.[3] as string;
+			const respond = vi
+				.mocked(ipcMain.once)
+				.mock.calls.find((call) => call[0] === responseChannel)?.[1];
+			respond?.({} as any, {
+				success: false,
+				error:
+					'This terminal was admitted for maestro-cli on a managed host; input by the operator is unavailable.',
+				tabId: 'term-1',
+				tabName: 'Dev server',
+				managed: { state: 'denied', code: 'context-mismatch' },
+			});
+			await expect(pending).resolves.toEqual({
+				success: false,
+				error: expect.stringContaining('admitted for maestro-cli'),
+				tabId: 'term-1',
+				tabName: 'Dev server',
+				managed: { state: 'denied', code: 'context-mismatch' },
+			});
+		});
+
+		it('setWriteTerminalTabCallback ignores a malformed managed field', async () => {
+			const server = createWebServerFactory(deps)() as any;
+			const callback = server.setWriteTerminalTabCallback.mock.calls[0][0];
+
+			const pending = callback('session-1', { data: 'ls\n' });
+			const request = vi
+				.mocked(mockWebContents.send)
+				.mock.calls.find((call) => call[0] === 'remote:writeTerminalTab');
+			const respond = vi
+				.mocked(ipcMain.once)
+				.mock.calls.find((call) => call[0] === request?.[3])?.[1];
+			respond?.({} as any, { success: true, tabId: 'term-1', managed: { state: 'allowed' } });
+			await expect(pending).resolves.toEqual({
+				success: true,
+				error: undefined,
+				tabId: 'term-1',
+				tabName: undefined,
+			});
+		});
+	});
+
 	describe('queueCallbacks smoke', () => {
 		it('setEnqueueCommandCallback forwards to the renderer', () => {
 			const createWebServer = createWebServerFactory(deps);

@@ -154,6 +154,10 @@ export async function spawnPtyForTab(options: SpawnPtyForTabOptions): Promise<vo
 			toolType: session.toolType,
 			sessionCustomEnvVars: session.customEnvVars,
 			sessionSshRemoteConfig: effectiveSshConfig,
+			// A tab a remote open_terminal_tab created carries the host-minted
+			// ticket for its first spawn (MRC-08-02A); the sink claims it there and
+			// the renderer never learns which transport it stood for.
+			...(tab.dispatchTicket ? { dispatchTicket: tab.dispatchTicket } : {}),
 		});
 
 		if (result.success) {

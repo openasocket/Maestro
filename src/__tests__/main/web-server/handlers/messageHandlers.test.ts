@@ -1558,6 +1558,162 @@ describe('WebSocketMessageHandler', () => {
 	});
 
 	/**
+	 * MRC-08-02A: the two desktop terminal tab routes MRC-08-02 left unticketed.
+	 * The fake renderer is the callback mock; the sink's claim is done by hand.
+	 */
+	describe('Dispatch ticket on open_terminal_tab and write_terminal_tab (MRC-08-02A)', () => {
+		const openTicket = (): string | undefined =>
+			vi.mocked(callbacks.openTerminalTab).mock.calls[0]?.[3] as string | undefined;
+		const writeTicket = (): string | undefined =>
+			(vi.mocked(callbacks.writeTerminalTab).mock.calls[0]?.[1] as { dispatchTicket?: string })
+				?.dispatchTicket;
+		const lastSent = (): Record<string, unknown> => {
+			const calls = vi.mocked(client.socket.send).mock.calls;
+			return JSON.parse(String(calls[calls.length - 1][0]));
+		};
+		const device = () => ({
+			...client,
+			admission: 'device-pairing' as const,
+			user: { id: 'paired-device:dev-7', username: 'paired-device', displayName: 'Pixel 9' },
+		});
+
+		it('open_terminal_tab from the CLI issues a ticket for the agent that claims, once, for the tab the renderer creates', async () => {
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{ type: 'open_terminal_tab', sessionId: 'session-1', background: true }
+			);
+			await vi.waitFor(() => expect(callbacks.openTerminalTab).toHaveBeenCalled());
+
+			const ticket = openTicket();
+			expect(typeof ticket).toBe('string');
+			expect(ticket).not.toContain('cli');
+			// No tab was named (none existed): the tab the renderer created claims it
+			// on its first spawn, for this agent only.
+			expect(claimDispatchTicket(ticket!, { agentId: 'session-2', tabId: 'any' })).toBeUndefined();
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{ type: 'open_terminal_tab', sessionId: 'session-1' }
+			);
+			await vi.waitFor(() => expect(callbacks.openTerminalTab).toHaveBeenCalledTimes(2));
+			const second = vi.mocked(callbacks.openTerminalTab).mock.calls[1][3] as string;
+			const admission = claimDispatchTicket(second, { agentId: 'session-1', tabId: 'tab-new' });
+			expect(admission).toEqual({ kind: 'cli' });
+			expect(transportSpawnActor(admission!)).toEqual({ peer: 'host-secret' });
+			expect(
+				claimDispatchTicket(second, { agentId: 'session-1', tabId: 'tab-new' })
+			).toBeUndefined();
+		});
+
+		it('open_terminal_tab withdraws the ticket when the renderer refuses and when it throws', async () => {
+			vi.mocked(callbacks.openTerminalTab).mockResolvedValueOnce({ success: false });
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{ type: 'open_terminal_tab', sessionId: 'session-1', requestId: 'o-1' }
+			);
+			await vi.waitFor(() =>
+				expect(lastSent()).toMatchObject({
+					type: 'open_terminal_tab_result',
+					success: false,
+					requestId: 'o-1',
+				})
+			);
+			expect(claimDispatchTicket(openTicket()!, { agentId: 'session-1' })).toBeUndefined();
+
+			vi.mocked(callbacks.openTerminalTab).mockClear();
+			vi.mocked(callbacks.openTerminalTab).mockRejectedValueOnce(new Error('renderer gone'));
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{ type: 'open_terminal_tab', sessionId: 'session-1', requestId: 'o-2' }
+			);
+			await vi.waitFor(() =>
+				expect(lastSent()).toMatchObject({ requestId: 'o-2', success: false })
+			);
+			expect(claimDispatchTicket(openTicket()!, { agentId: 'session-1' })).toBeUndefined();
+		});
+
+		it('write_terminal_tab from a paired device carries a ticket for the agent that claims as that device for the tab the renderer resolved', async () => {
+			handler.handleMessage(device(), {
+				type: 'write_terminal_tab',
+				sessionId: 'session-1',
+				data: 'ls\n',
+			});
+			await vi.waitFor(() => expect(callbacks.writeTerminalTab).toHaveBeenCalled());
+
+			const ticket = writeTicket();
+			expect(typeof ticket).toBe('string');
+			expect(ticket).not.toContain('dev-7');
+			expect(
+				claimDispatchTicket(ticket!, { agentId: 'session-2', tabId: 'terminal-tab-1' })
+			).toBeUndefined();
+
+			handler.handleMessage(device(), {
+				type: 'write_terminal_tab',
+				sessionId: 'session-1',
+				tabRef: 'Dev server',
+				data: 'ls\n',
+			});
+			await vi.waitFor(() => expect(callbacks.writeTerminalTab).toHaveBeenCalledTimes(2));
+			const second = (
+				vi.mocked(callbacks.writeTerminalTab).mock.calls[1][1] as { dispatchTicket?: string }
+			).dispatchTicket!;
+			const admission = claimDispatchTicket(second, {
+				agentId: 'session-1',
+				tabId: 'terminal-tab-1',
+			});
+			expect(admission).toEqual({ kind: 'lite', deviceId: 'dev-7', deviceName: 'Pixel 9' });
+			expect(transportSpawnActor(admission!)).toEqual({
+				peer: 'device-pairing',
+				deviceId: 'dev-7',
+			});
+		});
+
+		it('write_terminal_tab withdraws the ticket of a write the renderer could not place and relays a managed refusal', async () => {
+			vi.mocked(callbacks.writeTerminalTab).mockResolvedValueOnce({
+				success: false,
+				error: 'No terminal tab is open for this agent. Use open-terminal first.',
+			});
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{ type: 'write_terminal_tab', sessionId: 'session-1', data: 'ls\n', requestId: 'w-1' }
+			);
+			await vi.waitFor(() =>
+				expect(lastSent()).toMatchObject({
+					type: 'write_terminal_tab_result',
+					success: false,
+					requestId: 'w-1',
+				})
+			);
+			expect(claimDispatchTicket(writeTicket()!, { agentId: 'session-1' })).toBeUndefined();
+			expect(lastSent().managed).toBeUndefined();
+
+			vi.mocked(callbacks.writeTerminalTab).mockResolvedValueOnce({
+				success: false,
+				error:
+					'This terminal was admitted for maestro-cli on a managed host; input by lite-device:dev-7 is unavailable.',
+				tabId: 'terminal-tab-1',
+				tabName: 'Dev server',
+				managed: { state: 'denied', code: 'context-mismatch' },
+			});
+			handler.handleMessage(device(), {
+				type: 'write_terminal_tab',
+				sessionId: 'session-1',
+				data: 'ls\n',
+				requestId: 'w-2',
+			});
+			await vi.waitFor(() =>
+				expect(lastSent()).toMatchObject({
+					type: 'write_terminal_tab_result',
+					success: false,
+					requestId: 'w-2',
+					tabId: 'terminal-tab-1',
+					managed: { state: 'denied', code: 'context-mismatch' },
+				})
+			);
+			expect(String(lastSent().error)).toContain('admitted for maestro-cli');
+		});
+	});
+
+	/**
 	 * MRC-08-02: a socket is reauthorized before every dispatch, not only before
 	 * the reply. A revoked pairing or an expired login lands no effect.
 	 */
@@ -2450,7 +2606,8 @@ describe('WebSocketMessageHandler', () => {
 				expect(callbacks.openTerminalTab).toHaveBeenCalledWith(
 					'session-1',
 					expect.objectContaining({ inputRequired: true }),
-					{ background: false }
+					{ background: false },
+					expect.any(String)
 				);
 			});
 		});
@@ -2482,7 +2639,8 @@ describe('WebSocketMessageHandler', () => {
 						name: undefined,
 						command: undefined,
 					},
-					{ background: false }
+					{ background: false },
+					expect.any(String)
 				);
 			});
 
@@ -2503,9 +2661,12 @@ describe('WebSocketMessageHandler', () => {
 			});
 
 			await vi.waitFor(() => {
-				expect(callbacks.openTerminalTab).toHaveBeenCalledWith('session-1', expect.anything(), {
-					background: true,
-				});
+				expect(callbacks.openTerminalTab).toHaveBeenCalledWith(
+					'session-1',
+					expect.anything(),
+					{ background: true },
+					expect.any(String)
+				);
 			});
 		});
 
@@ -2526,7 +2687,8 @@ describe('WebSocketMessageHandler', () => {
 						name: 'build logs',
 						command: undefined,
 					},
-					{ background: false }
+					{ background: false },
+					expect.any(String)
 				);
 			});
 		});
@@ -2543,7 +2705,8 @@ describe('WebSocketMessageHandler', () => {
 				expect(callbacks.openTerminalTab).toHaveBeenCalledWith(
 					'session-1',
 					expect.objectContaining({ name: 'Dev server', command: 'npm run dev' }),
-					{ background: false }
+					{ background: false },
+					expect.any(String)
 				);
 			});
 		});
@@ -2559,7 +2722,8 @@ describe('WebSocketMessageHandler', () => {
 				expect(callbacks.openTerminalTab).toHaveBeenCalledWith(
 					'session-1',
 					expect.objectContaining({ command: undefined }),
-					{ background: false }
+					{ background: false },
+					expect.any(String)
 				);
 			});
 		});
@@ -2648,7 +2812,8 @@ describe('WebSocketMessageHandler', () => {
 							// names (RUNNER~1 -> runneradmin); the JS realpathSync does not.
 							cwd: fs.realpathSync.native(path.join(sessionRoot, 'sub')),
 						}),
-						{ background: false }
+						{ background: false },
+						expect.any(String)
 					);
 				});
 			});
@@ -2749,6 +2914,7 @@ describe('WebSocketMessageHandler', () => {
 				expect(callbacks.writeTerminalTab).toHaveBeenCalledWith('session-1', {
 					tabRef: undefined,
 					data: 'npm run dev\n',
+					dispatchTicket: expect.any(String),
 				});
 			});
 
@@ -2774,6 +2940,7 @@ describe('WebSocketMessageHandler', () => {
 				expect(callbacks.writeTerminalTab).toHaveBeenCalledWith('session-1', {
 					tabRef: 'Dev server',
 					data: '',
+					dispatchTicket: expect.any(String),
 				});
 			});
 		});

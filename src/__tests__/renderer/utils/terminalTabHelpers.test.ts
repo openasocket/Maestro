@@ -666,6 +666,16 @@ describe('updateTerminalTabPid', () => {
 		const updated = updateTerminalTabPid(session, 'tab-1', 12345);
 		expect(updated.terminalTabs![0].pid).toBe(12345);
 	});
+
+	it('drops the dispatch ticket the first spawn claimed, so a restart never resends it (MRC-08-02A)', () => {
+		const tab = createMockTerminalTab({ id: 'tab-1', pid: 0, dispatchTicket: 'tkt-open-1' });
+		const other = createMockTerminalTab({ id: 'tab-2', pid: 0, dispatchTicket: 'tkt-open-2' });
+		const session = createMockSession({ terminalTabs: [tab, other] });
+		const updated = updateTerminalTabPid(session, 'tab-1', 12345);
+		expect(updated.terminalTabs![0]).toMatchObject({ pid: 12345, ptyInitialized: true });
+		expect('dispatchTicket' in updated.terminalTabs![0]).toBe(false);
+		expect(updated.terminalTabs![1].dispatchTicket).toBe('tkt-open-2');
+	});
 });
 
 describe('renameTerminalTab', () => {

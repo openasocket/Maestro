@@ -171,14 +171,26 @@ export function createProcessCoreApi() {
 				remoteId: string | null;
 				workingDirOverride?: string;
 			};
+			/** The ticket a remote open_terminal_tab issued for this tab's first spawn (MRC-08-02A). */
+			dispatchTicket?: string;
 		}): Promise<{ pid: number; success: boolean; attached?: boolean }> =>
 			ipcRenderer.invoke('process:spawnTerminalTab', config),
 
 		/**
-		 * Write data to a process stdin
+		 * Write data to a process stdin. `dispatchTicket` rides only on a relayed
+		 * `write_terminal_tab` (MRC-08-02A); the sink may answer that one with a
+		 * managed refusal instead of a boolean.
 		 */
-		write: (sessionId: string, data: string): Promise<boolean> =>
-			ipcRenderer.invoke('process:write', sessionId, data),
+		write: (
+			sessionId: string,
+			data: string,
+			dispatchTicket?: string
+		): Promise<
+			boolean | { success: false; error: string; managed?: { state: 'denied'; code: string } }
+		> =>
+			dispatchTicket === undefined
+				? ipcRenderer.invoke('process:write', sessionId, data)
+				: ipcRenderer.invoke('process:write', sessionId, data, dispatchTicket),
 
 		/**
 		 * Steer a Claude turn that is already running: type `text` into the live TUI so

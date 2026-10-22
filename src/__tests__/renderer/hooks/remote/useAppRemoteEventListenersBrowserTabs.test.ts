@@ -40,6 +40,8 @@ vi.mock('../../../../renderer/utils/ids', () => ({ generateId: () => 'new-tab-id
 const openAck = vi.fn();
 const closeAck = vi.fn();
 const terminalAck = vi.fn();
+const writeAck = vi.fn();
+const processWrite = vi.fn();
 
 function setup(sessions: Session[]) {
 	const sessionsRef = { current: sessions };
@@ -87,8 +89,123 @@ beforeEach(() => {
 			sendRemoteOpenBrowserTabResponse: openAck,
 			sendRemoteCloseBrowserTabResponse: closeAck,
 			sendRemoteOpenTerminalTabResponse: terminalAck,
+			sendRemoteWriteTerminalTabResponse: writeAck,
+			write: processWrite,
 		},
 	};
+});
+
+/**
+ * MRC-08-02A: the dispatch ticket a remote open_terminal_tab or
+ * write_terminal_tab carries is the renderer's to pass along, never to read.
+ */
+describe('maestro:openTerminalTab dispatch ticket', () => {
+	it('puts the ticket on the new tab record so its first spawn carries it', () => {
+		const sessions = [createMockSession({ id: 'session-1' })];
+		vi.mocked(selectSessionById).mockReturnValue(() => sessions[0]);
+		const { setSessions } = setup(sessions);
+		window.dispatchEvent(
+			new CustomEvent('maestro:openTerminalTab', {
+				detail: {
+					sessionId: 'session-1',
+					config: { name: 'Build' },
+					background: true,
+					responseChannel: 'ch',
+					dispatchTicket: 'tkt-open-1',
+				},
+			})
+		);
+		const [updated] = applyUpdate(setSessions, sessions);
+		expect(updated.terminalTabs?.[0]).toMatchObject({
+			id: 'new-tab-id',
+			dispatchTicket: 'tkt-open-1',
+		});
+		expect(vi.mocked(spawnPtyForTab).mock.calls[0][0].tab).toMatchObject({
+			dispatchTicket: 'tkt-open-1',
+		});
+		expect(terminalAck).toHaveBeenCalledWith('ch', true, 'new-tab-id');
+	});
+
+	it('creates a tab without a ticket when none was sent', () => {
+		const sessions = [createMockSession({ id: 'session-1' })];
+		vi.mocked(selectSessionById).mockReturnValue(() => sessions[0]);
+		const { setSessions } = setup(sessions);
+		window.dispatchEvent(
+			new CustomEvent('maestro:openTerminalTab', {
+				detail: { sessionId: 'session-1', config: {}, background: true },
+			})
+		);
+		const [updated] = applyUpdate(setSessions, sessions);
+		expect('dispatchTicket' in (updated.terminalTabs?.[0] ?? {})).toBe(false);
+	});
+});
+
+describe('maestro:writeTerminalTab dispatch ticket', () => {
+	const liveTab = () =>
+		({ id: 'term-1', name: 'Dev server', pid: 77, ptyInitialized: true, state: 'idle' }) as any;
+
+	it('passes the ticket to process:write and acks the write', async () => {
+		processWrite.mockResolvedValue(true);
+		const sessions = [
+			createMockSession({
+				id: 'session-1',
+				terminalTabs: [liveTab()],
+				activeTerminalTabId: 'term-1',
+			}),
+		];
+		setup(sessions);
+		window.dispatchEvent(
+			new CustomEvent('maestro:writeTerminalTab', {
+				detail: {
+					sessionId: 'session-1',
+					data: 'ls\n',
+					responseChannel: 'wch',
+					dispatchTicket: 'tkt-w-1',
+				},
+			})
+		);
+		await vi.waitFor(() => expect(writeAck).toHaveBeenCalled());
+		expect(processWrite).toHaveBeenCalledWith('session-1-terminal-term-1', 'ls\n', 'tkt-w-1');
+		expect(writeAck).toHaveBeenCalledWith('wch', true, {
+			error: undefined,
+			tabId: 'term-1',
+			tabName: 'Dev server',
+		});
+	});
+
+	it('acks a managed refusal from the sink as a failure with the reason and the managed fields', async () => {
+		processWrite.mockResolvedValue({
+			success: false,
+			error:
+				'This terminal was admitted for maestro-cli on a managed host; input by lite-device:dev-7 is unavailable.',
+			managed: { state: 'denied', code: 'context-mismatch' },
+		});
+		const sessions = [
+			createMockSession({
+				id: 'session-1',
+				terminalTabs: [liveTab()],
+				activeTerminalTabId: 'term-1',
+			}),
+		];
+		setup(sessions);
+		window.dispatchEvent(
+			new CustomEvent('maestro:writeTerminalTab', {
+				detail: {
+					sessionId: 'session-1',
+					data: 'ls\n',
+					responseChannel: 'wch',
+					dispatchTicket: 'tkt-w-2',
+				},
+			})
+		);
+		await vi.waitFor(() => expect(writeAck).toHaveBeenCalled());
+		expect(writeAck).toHaveBeenCalledWith('wch', false, {
+			error: expect.stringContaining('admitted for maestro-cli'),
+			tabId: 'term-1',
+			tabName: 'Dev server',
+			managed: { state: 'denied', code: 'context-mismatch' },
+		});
+	});
 });
 
 describe('maestro:openTerminalTab human input', () => {

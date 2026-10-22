@@ -226,12 +226,19 @@ export interface MessageHandlerCallbacks {
 			command?: string;
 			inputRequired?: boolean;
 		},
-		options?: { background?: boolean }
+		options?: { background?: boolean },
+		dispatchTicket?: string
 	) => Promise<{ success: boolean; tabId?: string }>;
 	writeTerminalTab: (
 		sessionId: string,
-		payload: { tabRef?: string; data: string }
-	) => Promise<{ success: boolean; error?: string; tabId?: string; tabName?: string }>;
+		payload: { tabRef?: string; data: string; dispatchTicket?: string }
+	) => Promise<{
+		success: boolean;
+		error?: string;
+		tabId?: string;
+		tabName?: string;
+		managed?: { state: 'denied'; code: string };
+	}>;
 	listTerminalTabs: (sessionId?: string) => Promise<TerminalTabInfo[]>;
 	readTerminalTab: (
 		sessionId: string,

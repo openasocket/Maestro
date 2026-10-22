@@ -418,8 +418,24 @@ interface MaestroAPI {
 				workingDirOverride?: string;
 				syncHistory?: boolean;
 			};
+			/** The ticket a remote open_terminal_tab issued for this tab's first spawn (MRC-08-02A). */
+			dispatchTicket?: string;
 		}) => Promise<{ pid: number; success: boolean; attached?: boolean }>;
-		write: (sessionId: string, data: string) => Promise<boolean>;
+		/**
+		 * A relayed `write_terminal_tab` passes the host-minted ticket along
+		 * (MRC-08-02A) and may be answered with a managed refusal; every other
+		 * write is the caller's own and answers with a boolean.
+		 */
+		write: {
+			(sessionId: string, data: string): Promise<boolean>;
+			(
+				sessionId: string,
+				data: string,
+				dispatchTicket: string | undefined
+			): Promise<
+				boolean | { success: false; error: string; managed?: { state: 'denied'; code: string } }
+			>;
+		};
 		/**
 		 * Steer a Claude turn that is already running (chat steering). The verdict is
 		 * the point: only `absorbed` means the turn in flight changed course, and
@@ -793,7 +809,8 @@ interface MaestroAPI {
 					inputRequired?: boolean;
 				},
 				responseChannel: string,
-				options: { background?: boolean }
+				options: { background?: boolean },
+				dispatchTicket?: string
 			) => void
 		) => () => void;
 		sendRemoteOpenTerminalTabResponse: (
@@ -804,14 +821,19 @@ interface MaestroAPI {
 		onRemoteWriteTerminalTab: (
 			callback: (
 				sessionId: string,
-				payload: { tabRef?: string; data: string },
+				payload: { tabRef?: string; data: string; dispatchTicket?: string },
 				responseChannel: string
 			) => void
 		) => () => void;
 		sendRemoteWriteTerminalTabResponse: (
 			responseChannel: string,
 			success: boolean,
-			result?: { error?: string; tabId?: string; tabName?: string }
+			result?: {
+				error?: string;
+				tabId?: string;
+				tabName?: string;
+				managed?: { state: 'denied'; code: string };
+			}
 		) => void;
 		onRemoteListTerminalTabs: (
 			callback: (sessionId: string | undefined, responseChannel: string) => void

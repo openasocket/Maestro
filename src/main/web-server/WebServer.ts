@@ -1375,8 +1375,9 @@ export class WebServer {
 			openTerminalTab: async (
 				sessionId: string,
 				config: { cwd?: string; shell?: string; name?: string | null; command?: string },
-				options?: { background?: boolean }
-			) => this.callbackRegistry.openTerminalTab(sessionId, config, options),
+				options?: { background?: boolean },
+				dispatchTicket?: string
+			) => this.callbackRegistry.openTerminalTab(sessionId, config, options, dispatchTicket),
 			writeTerminalTab: async (sessionId: string, payload: WriteTerminalTabPayload) =>
 				this.callbackRegistry.writeTerminalTab(sessionId, payload),
 			listTerminalTabs: async (sessionId?: string) =>

@@ -1867,7 +1867,8 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 					inputRequired?: boolean;
 				},
 				responseChannel: string,
-				options: { background?: boolean }
+				options: { background?: boolean },
+				dispatchTicket?: string
 			) => {
 				window.dispatchEvent(
 					new CustomEvent('maestro:openTerminalTab', {
@@ -1876,6 +1877,7 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 							config,
 							responseChannel,
 							background: options?.background === true,
+							dispatchTicket,
 						},
 					})
 				);

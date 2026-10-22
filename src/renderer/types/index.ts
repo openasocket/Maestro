@@ -1030,6 +1030,10 @@ export interface TerminalTab {
 	// Working directory for the startup command. When set, the PTY is spawned in
 	// this directory. Falls back to tab.cwd / session.cwd when unset.
 	startupCommandCwd?: string;
+	// Runtime-only: the host-minted dispatch ticket a remote open_terminal_tab
+	// issued for this agent (MRC-08-02A). Carried to the tab's FIRST PTY spawn,
+	// which claims it; dropped once the PTY is up and never persisted.
+	dispatchTicket?: string;
 }
 
 /**
