@@ -4,6 +4,10 @@ import path from 'node:path';
 import { assertSerializedJsonIsSafe, parseJsonWithBom } from '../../../shared/jsonUtils';
 import { displayName, connectionOrigin } from '../discovery/types';
 import { createKeyedWriteQueue } from '../../utils/atomic-json-store';
+import {
+	isLitePairingCredential,
+	LITE_PAIRED_DEVICES_FILE_NAME,
+} from '../../../shared/litePairingCredential';
 
 export interface PairedDevice {
 	id: string;
@@ -15,17 +19,27 @@ export interface PairedDevice {
 interface DeviceRecord extends PairedDevice {
 	verifier: string;
 }
-const validCredential = (value: unknown): value is string =>
-	typeof value === 'string' && /^[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/.test(value);
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
-/** Host-only registry. Disk contains high-entropy credential verifiers, never client secrets. */
+/**
+ * Host-only registry. Disk contains high-entropy credential verifiers, never
+ * client secrets.
+ *
+ * What a resolved {@link PairedDevice} is good for is transport admission
+ * (MRC-08-03): it is the device behind a connection, keyed by the public half
+ * of its credential, revocable at once. It is not an enterprise actor and
+ * never becomes one: a managed action over a paired device is bound to the
+ * enrollment's registered actor by the spawn authority, with the device as
+ * attribution (`lite-device:<id>`), and is refused until one is registered.
+ * Nothing here is read by the enterprise identity store, and the file is one
+ * the Cue bundle exporter refuses by name.
+ */
 export class PairedDevices {
 	private records = new Map<string, DeviceRecord>();
 	private loaded?: Promise<void>;
 	private writes = createKeyedWriteQueue();
 	private file?: string;
 	constructor(directory?: string) {
-		if (directory) this.file = path.join(directory, 'lite-paired-devices.json');
+		if (directory) this.file = path.join(directory, LITE_PAIRED_DEVICES_FILE_NAME);
 	}
 	load(): Promise<void> {
 		return (this.loaded ??= this.read());
@@ -75,7 +89,8 @@ export class PairedDevices {
 	async add(credential: string, name: string, instanceId: string, origin: string): Promise<void> {
 		await this.writes.enqueue(this.file ?? 'devices', async () => {
 			await this.load();
-			if (!validCredential(credential) || !instanceId) throw new Error('invalid-device-credential');
+			if (!isLitePairingCredential(credential) || !instanceId)
+				throw new Error('invalid-device-credential');
 			if (this.records.size >= 128) throw new Error('paired-device-limit');
 			const id = credential.split('.')[0];
 			if (this.records.has(id)) throw new Error('device-already-paired');
@@ -96,7 +111,7 @@ export class PairedDevices {
 		});
 	}
 	resolve(credential: unknown, instanceId: string, origin: string): PairedDevice | undefined {
-		if (!validCredential(credential)) return;
+		if (!isLitePairingCredential(credential)) return;
 		const row = this.records.get(credential.split('.')[0]);
 		if (
 			!row ||

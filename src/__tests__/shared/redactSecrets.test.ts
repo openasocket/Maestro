@@ -33,6 +33,19 @@ describe('redactSecrets - typed placeholders', () => {
 		expect(result.redacted).toBe(true);
 	});
 
+	it('redacts a Lite pairing credential and leaves the public device id (MRC-08-03)', () => {
+		const id = 'A'.repeat(43);
+		const credential = id + '.' + 'b-_'.repeat(14) + 'c';
+		expect(redactSecrets(`x-maestro-device-credential: ${credential} sent`).text).toBe(
+			'x-maestro-device-credential: [REDACTED_SECRET] sent'
+		);
+		expect(redactSecrets(`lite-device:${id} opened a tab`)).toEqual({
+			text: `lite-device:${id} opened a tab`,
+			redacted: false,
+		});
+		expect(redactSecrets('Z' + credential).redacted).toBe(false);
+	});
+
 	it('redacts a JWT', () => {
 		const jwt =
 			'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U';
@@ -160,6 +173,8 @@ describe('redactSecrets - adversarial input stays linear (ReDoS)', () => {
 		'repeated token=': 'token='.repeat(K / 6),
 		'hex-ish hyphen chain': 'ab-'.repeat(Math.floor(K / 3)),
 		'one long word': 'a'.repeat(K),
+		'base64url halves and dots': ('A'.repeat(43) + '.').repeat(Math.floor(K / 44)),
+		'dotted base64url run': 'A.'.repeat(K / 2),
 		'your-word chain': 'your code '.repeat(K / 10),
 		'code with no digits': 'verification code '.repeat(K / 18),
 		'digits before is your': '1234 is your '.repeat(K / 13),

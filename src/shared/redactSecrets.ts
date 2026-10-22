@@ -26,6 +26,8 @@
  */
 
 /** Which family a redacted span belonged to. */
+import { LITE_PAIRING_CREDENTIAL_SOURCE } from './litePairingCredential';
+
 export type SecretKind =
 	| 'api_key'
 	| 'github_token'
@@ -136,6 +138,11 @@ const RULES: readonly Rule[] = [
 		pattern:
 			/\beyJ(?=([A-Za-z0-9_-]{8,512}))\1\.(?=([A-Za-z0-9_-]{8,16384}))\2\.(?=([A-Za-z0-9_-]{8,4096}))\3/g,
 	},
+	// Maestro Lite pairing credentials: `<device id>.<proof>`, two 43-character
+	// base64url halves (MRC-08-03). The id alone is public (it names the
+	// device on a delegation chain and in History) and is left; only the whole
+	// credential is a secret. Fixed length, guarded by lookarounds, linear.
+	{ kind: 'secret', pattern: new RegExp(LITE_PAIRING_CREDENTIAL_SOURCE, 'g') },
 	// `Bearer <token>`, with or without an `Authorization:` header in front.
 	{
 		kind: 'bearer',

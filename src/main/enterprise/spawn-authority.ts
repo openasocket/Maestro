@@ -17,7 +17,10 @@
  *     attribution on the delegation chain, because neither a keyboard, a Web
  *     Login cookie, a per-boot secret nor a pairing credential is an
  *     enterprise principal. One verifier per peer, each accepting only a
- *     context that names this installation.
+ *     context that names this installation. A paired Lite device is bound
+ *     only once an actor IS registered (`pairedDeviceActorProblems`,
+ *     MRC-08-03): before that the principal would be the installation's
+ *     operator, and a device is not the operator.
  *   - `authority` and `policy()`: the broker dispatch bridge's authority (so
  *     every decision lands in the receipt ledger) and the adapter's policy
  *     sources at their last reported revision.
@@ -98,6 +101,36 @@ export function spawnDelegationChain(actor: ProcessSpawnActor): ManagedPrincipal
 	}
 }
 
+/**
+ * Why a paired Lite device cannot be bound yet, if it cannot (MRC-08-03).
+ *
+ * Before the enrollment registers an actor, the principal a managed spawn
+ * runs as is `operator:<installationId>`. For the keyboard that is the
+ * truth: the operator is at it. The bare path token admits the same
+ * owner-operator, a Web Login account is an equal operator of this desktop
+ * and the CLI secret is a process on this machine. A paired Lite device is
+ * none of those. Its credential admits a transport and names a DEVICE, and
+ * binding that device to the installation's operator would let the pairing
+ * stand in for the enterprise actor the enrollment has not registered, which
+ * is the one thing a pairing secret must never become. So a device-admitted
+ * spawn is refused `unauthenticated`, by name, until an actor is registered,
+ * rather than admitted as the operator and left for the adapter to answer
+ * `unavailable`. Once one is, the device rides the delegation chain as
+ * attribution like every other transport, and the registry's immediate
+ * revoke still closes its socket before the next dispatch.
+ */
+export function pairedDeviceActorProblems(
+	actor: ProcessSpawnActor,
+	read: ReturnType<EnterpriseIdentityStore['read']>
+): string[] {
+	if (actor.peer !== 'device-pairing') return [];
+	const registered = read.status === 'ok' ? (read.record.registration?.actorId ?? null) : null;
+	if (registered) return [];
+	return [
+		`a paired Lite device (${actor.deviceId}) admits its transport only; a managed action over it needs the enrollment's registered enterprise actor, and none is registered`,
+	];
+}
+
 export function createProcessSpawnAuthority(
 	deps: ProcessSpawnAuthorityDeps
 ): ProcessSpawnAuthorityPort {
@@ -153,11 +186,17 @@ export function createProcessSpawnAuthority(
 		// fallback that answers a fence the registry did not issue.
 		...(deps.workflowFence ? { workflowFence: deps.workflowFence } : {}),
 		verify(input: ProcessSpawnContextInput) {
+			const read = deps.identity.read();
+			// A device is refused before the principal is derived: the operator
+			// fallback is never computed for it, so it cannot leak into a context.
+			const unbindable = pairedDeviceActorProblems(input.actor, read);
+			if (unbindable.length > 0)
+				return { ok: false, code: 'unauthenticated', problems: unbindable };
 			const context: ManagedOperationContext = {
 				contractVersion: MANAGED_CONTRACT_VERSION,
 				installation: deps.installation,
 				origin: 'desktop',
-				actor: spawnPrincipal(deps.identity.read(), deps.installation),
+				actor: spawnPrincipal(read, deps.installation),
 				// A dispatched turn arrives with its initiator's chain already ending
 				// in this target; it is bound as it is. Only a spawn that is its own
 				// request takes the transport's attribution.

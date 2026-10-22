@@ -38,6 +38,7 @@ import {
 	resolveAgentAccountKey,
 } from '../../../shared/providerProfiles';
 import { isSecretEnvKey } from '../../../shared/agentEnvironment';
+import { LITE_PAIRING_STORE_FILE_PATTERN } from '../../../shared/litePairingCredential';
 import {
 	CUE_BUNDLE_LAYOUT_PATH,
 	CUE_BUNDLE_MANIFEST_PATH,
@@ -425,8 +426,11 @@ const FORBIDDEN_BUNDLE_BASENAMES: readonly RegExp[] = [
 	// Enrollment, the managed binding, the dispatch receipt and run ledgers.
 	/^enterprise-identity\.bin$/i,
 	/^maestro-managed-.*\.(json|bin)$/i,
-	// Lite paired-device credentials.
+	// Lite pairing: the device's saved credentials and the host's paired-device
+	// registry (ids, names and verifiers; a host's authorization state is not
+	// portable either), by the names the stores own (MRC-08-03).
 	/^(lite-)?device-credentials.*$/i,
+	LITE_PAIRING_STORE_FILE_PATTERN,
 	// Browser session state.
 	/^maestro-browser-.*$/i,
 	/^(Cookies|Login Data|Web Data)(-journal)?$/,

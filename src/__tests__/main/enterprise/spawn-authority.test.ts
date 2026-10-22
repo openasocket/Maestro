@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	createCueSpawnAuthority,
 	createProcessSpawnAuthority,
+	pairedDeviceActorProblems,
 	type ProcessSpawnAuthorityDeps,
 } from '../../../main/enterprise/spawn-authority';
 import type { IdentityRead } from '../../../main/enterprise/identity-store';
@@ -195,6 +196,95 @@ describe('createProcessSpawnAuthority transport peers', () => {
 		if (!carried.ok) return;
 		expect(carried.context.delegation.chain).toEqual([{ kind: 'agent', id: 'agent-9' }]);
 		expect(carried.context.verification.peer).toBe('host-secret');
+	});
+});
+
+/**
+ * A paired Lite device needs a registered enterprise actor (MRC-08-03). The
+ * keyboard, the path token, a Web Login account and the CLI secret may run as
+ * the installation's operator before the enrollment registers an actor; a
+ * paired device may not, because a device is not the operator and binding it
+ * so would let the pairing credential stand in for the actor. The refusal is
+ * `unauthenticated`, by name, before any principal is derived.
+ */
+describe('createProcessSpawnAuthority paired device without a registered actor', () => {
+	const DEVICE = { peer: 'device-pairing', deviceId: 'dev-7' } as const;
+	const UNREGISTERED: IdentityRead = {
+		status: 'ok',
+		record: { registration: null } as never,
+	};
+	const PENDING: IdentityRead = {
+		status: 'ok',
+		record: { registration: { actorId: null, challengeId: 'ch-1' } } as never,
+	};
+	const turn = {
+		identity: { ...IDENTITY, runId: null, rootRunId: null, parentRunId: null },
+		traceId: 'agent-1-ai-tab-1',
+		policyRevision: 3,
+		workflow: null,
+	};
+
+	it.each([
+		['no registration at all', UNREGISTERED],
+		['a registration the endpoint has not consumed', PENDING],
+		['no enrollment record', { status: 'none' } as IdentityRead],
+		[
+			'an unreadable record',
+			{ status: 'untrusted', reason: 'rollback', message: 'older epoch' } as IdentityRead,
+		],
+	])('refuses the device by name under %s, never as the operator', (_name, read) => {
+		const verified = authority(read).verify({ actor: DEVICE, ...turn });
+		expect(verified.ok).toBe(false);
+		if (verified.ok) return;
+		expect(verified.code).toBe('unauthenticated');
+		expect(verified.problems).toHaveLength(1);
+		expect(verified.problems[0]).toContain('dev-7');
+		expect(verified.problems[0]).toContain('registered enterprise actor');
+		expect(verified.problems[0]).not.toContain('operator');
+	});
+
+	it('still lets the keyboard, the browser account and the CLI run as the operator before registration', () => {
+		const port = authority(UNREGISTERED);
+		for (const actor of [
+			{ peer: 'in-process' },
+			{ peer: 'web-login', username: 'ada' },
+			{ peer: 'host-secret' },
+		] as const) {
+			const verified = port.verify({ actor, ...turn });
+			expect(verified.ok, actor.peer).toBe(true);
+			if (!verified.ok) return;
+			expect(verified.context.actor).toEqual({ kind: 'human', id: 'operator:inst-1' });
+		}
+	});
+
+	it('binds the device as attribution the moment an actor is registered', () => {
+		const REGISTERED: IdentityRead = {
+			status: 'ok',
+			record: { registration: { actorId: 'actor-registered' } } as never,
+		};
+		const verified = authority(REGISTERED).verify({ actor: DEVICE, ...turn });
+		expect(verified.ok).toBe(true);
+		if (!verified.ok) return;
+		expect(verified.context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
+		expect(verified.context.delegation.chain).toEqual([
+			{ kind: 'service', id: 'lite-device:dev-7' },
+		]);
+	});
+
+	it('is the pure rule the port applies, and answers nothing for the other peers', () => {
+		expect(pairedDeviceActorProblems(DEVICE, UNREGISTERED)).toHaveLength(1);
+		expect(pairedDeviceActorProblems(DEVICE, { status: 'none' })).toHaveLength(1);
+		expect(
+			pairedDeviceActorProblems(DEVICE, {
+				status: 'ok',
+				record: { registration: { actorId: 'actor-registered' } } as never,
+			})
+		).toEqual([]);
+		expect(pairedDeviceActorProblems({ peer: 'in-process' }, UNREGISTERED)).toEqual([]);
+		expect(pairedDeviceActorProblems({ peer: 'host-secret' }, { status: 'none' })).toEqual([]);
+		expect(pairedDeviceActorProblems({ peer: 'web-login', username: 'ada' }, UNREGISTERED)).toEqual(
+			[]
+		);
 	});
 });
 

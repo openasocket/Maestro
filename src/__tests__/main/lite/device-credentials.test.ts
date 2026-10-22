@@ -31,6 +31,11 @@ vi.mock('node:fs/promises', async (original) => {
 });
 import { DeviceCredentials } from '../../../main/lite/device-credentials';
 import { PairedDevices } from '../../../main/lite/pairing/paired-devices';
+import {
+	LITE_DEVICE_CREDENTIALS_FILE_NAME,
+	LITE_PAIRED_DEVICES_FILE_NAME,
+	litePairingDeviceId,
+} from '../../../shared/litePairingCredential';
 let directory: string;
 const origin = 'https://aster.synthetic.ts.net',
 	first = 'A'.repeat(43) + '.' + 'B'.repeat(43),
@@ -120,6 +125,34 @@ describe('host paired device persistence', () => {
 		await restarted.load();
 		expect(restarted.resolve(first, 'aster-id', origin)).toBeUndefined();
 		expect(restarted.resolve(second, 'aster-id', origin)?.name).toBe('Second device');
+	});
+	it('hands out the public device id and never the proof or the verifier (MRC-08-03)', async () => {
+		const store = new PairedDevices(directory);
+		await store.add(first, 'First device', 'aster-id', origin);
+		const proof = first.split('.')[1];
+		const resolved = store.resolve(first, 'aster-id', origin);
+		expect(resolved).toBeDefined();
+		expect(resolved?.id).toBe(litePairingDeviceId(first));
+		expect(Object.keys(resolved!).sort()).toEqual([
+			'createdAt',
+			'id',
+			'instanceId',
+			'name',
+			'origin',
+		]);
+		expect(JSON.stringify(store.list('aster-id'))).not.toContain(proof);
+		const disk = readFileSync(path.join(directory, LITE_PAIRED_DEVICES_FILE_NAME), 'utf8');
+		expect(disk).toContain(resolved!.id);
+		expect(disk).not.toContain(proof);
+		expect(disk).not.toContain(first);
+		// A credential that shares the public half but not the proof is not the device.
+		expect(store.resolve(resolved!.id + '.' + 'Z'.repeat(43), 'aster-id', origin)).toBeUndefined();
+	});
+	it('keeps the two stores under the names the exporter refuses by', async () => {
+		await new PairedDevices(directory).add(first, 'First device', 'aster-id', origin);
+		await new DeviceCredentials(directory).save('aster-id', origin, second);
+		expect(existsSync(path.join(directory, LITE_PAIRED_DEVICES_FILE_NAME))).toBe(true);
+		expect(existsSync(path.join(directory, LITE_DEVICE_CREDENTIALS_FILE_NAME))).toBe(true);
 	});
 	it('does not persist a failed pairing through a later concurrent successful write', async () => {
 		const store = new PairedDevices(directory);

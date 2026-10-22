@@ -185,6 +185,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **Naming the account a login acts on:** `<AccountPill>`, `ghAccountLabel()` in `src/renderer/components/ui/AccountPill.tsx`; `parseGhActiveAccount()` in `src/main/utils/ghErrors.ts`
 - **Whether a login flow can fix an auth failure:** `classifyCredentialKind()`, `credentialKindBlocksLogin()`, `providerAuthKey()` in `src/shared/providerAuthIdentity.ts`
 - **Typing a login command into a shell:** `formatAgentLoginCommand()`, `loginShellSyntaxFor()` in `src/shared/agentMetadata.ts`
+- **A Lite pairing credential (shape, device id, the two store files):** `isLitePairingCredential()`, `litePairingDeviceId()`, `isLitePairingStoreFile()` in `src/shared/litePairingCredential.ts`; `pairedDeviceActorProblems()` in `src/main/enterprise/spawn-authority.ts`
 - **Reading a Codex account's credentials off disk:** `readCodexAuth()`, `codexAuthHeaders()`, `extractEmailFromJwt()` in `src/main/agents/codex-auth.ts`
 - **Codex rate-limit reset credits:** spend rules (`describeCreditSpend()`) in `src/shared/codexResetCredits.ts`, primitives in `src/main/agents/codex-reset-credits.ts`, state in `src/renderer/stores/codexResetCreditsStore.ts`, automation in `src/renderer/services/codexAutoReset.ts`
 - **Keeping a plan account on the Usage Dashboard after its agents leave:** `rememberQuotaAccounts()`, `pruneMissingQuotaAccounts()` in `src/main/stores/quotaAccountsStore.ts`; `partitionSnapshotsByAge()` in `src/main/stores/usageSnapshotRetention.ts`

@@ -5,6 +5,7 @@ import { tailnetDestination } from './tailnet';
 import { directTailnetOrigin } from './tailnet-origin';
 import { lanDestination, lanOrigin } from './lan';
 import { CONNECT_PATH, ADMISSION_HEADER } from './pairing/protocol';
+import { isLitePairingCredential } from '../../shared/litePairingCredential';
 
 /** Private browser adapter: localhost remains a secure browser context, upstream binds the verified private interface.
  * Never a general proxy. Only the selected paired host's application subtree and credential are accepted.
@@ -63,10 +64,7 @@ async function openPairedRelay<T extends { hostname: string; port: number; local
 	readDestination: () => Promise<T>,
 	sameIdentity: (next: T, initial: T) => boolean
 ): Promise<{ url: URL; tunnel: { stop(): Promise<void> } }> {
-	if (
-		endpoint.pathname !== CONNECT_PATH ||
-		!/^[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/.test(credential)
-	)
+	if (endpoint.pathname !== CONNECT_PATH || !isLitePairingCredential(credential))
 		throw new Error('Invalid paired private connection.');
 	const initial = await readDestination();
 	let bound = initial,

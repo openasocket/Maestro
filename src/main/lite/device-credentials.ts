@@ -6,6 +6,10 @@ import { assertSerializedJsonIsSafe, parseJsonWithBom } from '../../shared/jsonU
 import { connectionOrigin } from './discovery/types';
 import { tailnetIPv4 } from './tailnet-origin';
 import { createKeyedWriteQueue } from '../utils/atomic-json-store';
+import {
+	isLitePairingCredential,
+	LITE_DEVICE_CREDENTIALS_FILE_NAME,
+} from '../../shared/litePairingCredential';
 
 interface SavedDevice {
 	instanceId: string;
@@ -13,14 +17,25 @@ interface SavedDevice {
 	credential: string;
 	peerId?: string;
 }
-/** Main-process only. Never send credentials to the renderer, URLs, clipboard or logs. */
+/**
+ * Main-process only. Never send credentials to the renderer, URLs, clipboard
+ * or logs.
+ *
+ * The credential this store protects is the device's admission to one host
+ * (MRC-08-03): OS-encrypted, decrypted only for an exact instance and origin
+ * match and, over Tailscale, the verified peer. It is not a Mega-Maestro
+ * device identity and is never offered as one: the enterprise identity store
+ * has its own sealed, anchored custody and never reads this file, which the
+ * Cue bundle exporter refuses by name and the canonical redactor scrubs by
+ * shape.
+ */
 export class DeviceCredentials {
 	private rows = new Map<string, { instanceId: string; origin: string; encrypted: string }>();
 	private writes = createKeyedWriteQueue();
 	private loaded?: Promise<void>;
 	private readonly file: string;
 	constructor(directory: string) {
-		this.file = path.join(directory, 'lite-device-credentials.json');
+		this.file = path.join(directory, LITE_DEVICE_CREDENTIALS_FILE_NAME);
 	}
 	assertAvailable(): void {
 		if (
@@ -84,7 +99,7 @@ export class DeviceCredentials {
 			value.instanceId !== instanceId ||
 			value.origin !== origin ||
 			(tailnet && value.peerId !== peerId) ||
-			!/^[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/.test(value.credential)
+			!isLitePairingCredential(value.credential)
 		)
 			throw new Error('Saved device identity does not match.');
 		return value.credential;
@@ -102,7 +117,7 @@ export class DeviceCredentials {
 			origin = connectionOrigin(origin);
 			if (origin.startsWith('http:') && tailnetIPv4(new URL(origin).hostname) && !peerId)
 				throw new Error('A verified Tailscale node identity is required.');
-			if (!/^[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/.test(credential) || !instanceId)
+			if (!isLitePairingCredential(credential) || !instanceId)
 				throw new Error('Invalid paired-device credential.');
 			const key = this.key(instanceId, origin);
 			if (!this.rows.has(key) && this.rows.size >= 128)
