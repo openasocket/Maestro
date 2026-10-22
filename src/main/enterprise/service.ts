@@ -181,20 +181,6 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		...(deps.onDispatchPersistError ? { onPersistError: deps.onDispatchPersistError } : {}),
 	});
 
-	const spawnAuthority = createProcessSpawnAuthority({
-		installation,
-		identity,
-		host,
-		dispatch,
-		now,
-	});
-	const cueSpawnAuthority = createCueSpawnAuthority({
-		installation,
-		identity,
-		host,
-		dispatch,
-		now,
-	});
 	// The owner fences this installation holds, claimed as the installation
 	// (the owner that outlives this process) under the authority the sealed
 	// record names, through whatever socket is open right now. No record, no
@@ -214,6 +200,34 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		},
 		now,
 	});
+	const claimWorkflowFence: EnterpriseService['claimWorkflowFence'] = async (workflow, run) =>
+		workflowFenceOf(
+			await workflows.claim({
+				workflow,
+				runId: run.runId,
+				attemptId: run.attemptId,
+				offlineEnabled: host.policyStatus().offline.installedPolicyAvailable,
+			})
+		);
+
+	// The process sink claims an unowned Auto Run's fence through the same
+	// held ownership the Cue router claims through, so one record holds
+	// every fence this desktop was issued.
+	const spawnAuthority = createProcessSpawnAuthority({
+		installation,
+		identity,
+		host,
+		dispatch,
+		workflowFence: claimWorkflowFence,
+		now,
+	});
+	const cueSpawnAuthority = createCueSpawnAuthority({
+		installation,
+		identity,
+		host,
+		dispatch,
+		now,
+	});
 
 	return {
 		installation,
@@ -225,16 +239,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		spawnAuthority,
 		cueSpawnAuthority,
 		workflows,
-		async claimWorkflowFence(workflow, run) {
-			return workflowFenceOf(
-				await workflows.claim({
-					workflow,
-					runId: run.runId,
-					attemptId: run.attemptId,
-					offlineEnabled: host.policyStatus().offline.installedPolicyAvailable,
-				})
-			);
-		},
+		claimWorkflowFence,
 		async start() {
 			// The ledger is read first: a lease still bound at the last exit is unknown from here on.
 			await dispatch.load();

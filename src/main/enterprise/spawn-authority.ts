@@ -57,6 +57,14 @@ export interface ProcessSpawnAuthorityDeps {
 	dispatch: Pick<BrokerDispatch, 'authority'>;
 	/** The per-effect authority, when a producer exists. Default: none, every effect unavailable. */
 	effects?: ManagedEffectAuthority;
+	/**
+	 * The workflow owner claim the port hands the process sink as its
+	 * `workflowFence` (MRC-07-06B): the service's `claimWorkflowFence`, which
+	 * goes through the held ownership and the endpoint's workflow owner
+	 * operation. Default: none, and an Auto Run that arrives unowned is
+	 * refused at the sink by name.
+	 */
+	workflowFence?: NonNullable<ProcessSpawnAuthorityPort['workflowFence']>;
 	now?: () => number;
 }
 
@@ -111,6 +119,10 @@ export function createProcessSpawnAuthority(
 			unavailableEffectAuthority(
 				'The endpoint exposes no per-effect authorization operation in this build (CP-01, CP-03; owner mega-maestro).'
 			),
+		// The sink claims an unowned Auto Run's fence through this, for the
+		// attempt it is admitting; handed through as it is, never wrapped in a
+		// fallback that answers a fence the registry did not issue.
+		...(deps.workflowFence ? { workflowFence: deps.workflowFence } : {}),
 		verify(input: ProcessSpawnContextInput) {
 			const context: ManagedOperationContext = {
 				contractVersion: MANAGED_CONTRACT_VERSION,
@@ -137,8 +149,8 @@ export function createProcessSpawnAuthority(
 	};
 }
 
-/** What the desktop's Cue port is composed from: the same parts as the process manager's, minus the effects nothing on the Cue path asks for. */
-export type CueSpawnAuthorityDeps = Omit<ProcessSpawnAuthorityDeps, 'effects'>;
+/** What the desktop's Cue port is composed from: the same parts as the process manager's, minus the effects nothing on the Cue path asks for and the fence claim the Cue router takes on its own deps. */
+export type CueSpawnAuthorityDeps = Omit<ProcessSpawnAuthorityDeps, 'effects' | 'workflowFence'>;
 
 /**
  * The desktop's Cue port (MRC-07-02A): what the Cue run router admits a prompt

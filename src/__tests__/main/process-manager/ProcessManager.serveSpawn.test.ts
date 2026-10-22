@@ -49,6 +49,7 @@ import {
 	delegationContextOf,
 	type ManagedDelegationContext,
 } from '../../../shared/maestro-lib/managed/delegation';
+import type { WorkflowFenceAnswer } from '../../../shared/maestro-lib/managed/workflows';
 
 const SERVE_RESULT = { pid: -1, success: true };
 
@@ -375,6 +376,8 @@ describe('ProcessManager admission on an Auto Run lineage', () => {
 		if (outcome.state !== 'unavailable') return;
 		expect(outcome.message).toContain(WORKFLOW.workflowId);
 		expect(outcome.message).toContain('no workflow owner fence');
+		// A port with no producer is named as the reason, not papered over.
+		expect(outcome.message).toContain('no workflow owner producer');
 		expect(port.asked).toHaveLength(0);
 
 		// Admit-then-spawn reports the same refusal and starts nothing.
@@ -407,6 +410,206 @@ describe('ProcessManager admission on an Auto Run lineage', () => {
 		expect(manager.spawn(request)).toBe(SERVE_RESULT);
 		expect(serve).toHaveBeenCalledTimes(1);
 		expect(port.asked).toHaveLength(0);
+	});
+});
+
+/**
+ * The owner fence claimed at the sink (MRC-07-06B): the renderer sends every
+ * Auto Run lineage unowned (`fence: null`, it has no producer and must not
+ * claim), and the sink claims the fence through the port's workflow owner
+ * producer for exactly that attempt's request and attempt ids before the
+ * context is verified. The registry's fence is what the attempt is bound on;
+ * the producer's refusal is the sink's answer with its state and code, before
+ * the authority is asked; a lineage that arrives with a fence is carried, not
+ * re-claimed; a chat turn and a standalone host never ask the producer.
+ */
+describe('ProcessManager claiming the owner fence at the sink', () => {
+	const WORKFLOW: AutoRunWorkflowIdentity = {
+		workflowId: 'playbook:/work/.maestro/playbooks/release',
+		version: 'docs-2-0badf00d',
+		triggerEventId: 'operator:1700000000000',
+		runId: 'run-root',
+	};
+	const REGISTRY_FENCE = { ownerEpoch: '3', fencingToken: 'fence-3' };
+	const CARRIED_FENCE = { ownerEpoch: 'epoch-1', fencingToken: 'fence-1' };
+	let ids = 0;
+	const newId = () => `fence-id-${++ids}`;
+	const taskRequest = () =>
+		newAutoRunTurnRequest(WORKFLOW, { purpose: 'task', document: '01-build', newId });
+
+	/** The managed port with a workflow owner producer standing in: a table answering what a claim comes to. */
+	function fencedManager(
+		answer: (
+			workflow: AutoRunWorkflowIdentity,
+			run: { runId: string; attemptId: string }
+		) => WorkflowFenceAnswer | Promise<WorkflowFenceAnswer>,
+		standing: 'standalone' | 'managed' = 'managed'
+	) {
+		const workflowFence = vi.fn(answer);
+		const port = { ...fakeSpawnPort({ standing }), workflowFence };
+		const manager = new ProcessManager(() => true, { spawnAuthority: () => port });
+		const serve = vi.fn(() => SERVE_RESULT);
+		(
+			manager as unknown as { opencodeServerSpawner: { spawn: typeof serve } }
+		).opencodeServerSpawner = { spawn: serve };
+		return { manager, port, serve, workflowFence };
+	}
+
+	it('claims the fence of an unowned lineage for this attempt and binds the attempt on it', async () => {
+		const { manager, port, serve, workflowFence } = fencedManager(async () => REGISTRY_FENCE);
+		const attribution = taskRequest();
+		const request = config({ autoRun: { attribution, fence: null } });
+
+		const admitted = await manager.admitSpawn(request, { peer: 'in-process' });
+		expect(admitted.state).toBe('admitted');
+		if (admitted.state !== 'admitted') return;
+
+		// Claimed once, for the workflow identity and the attempt's own ids.
+		expect(workflowFence).toHaveBeenCalledTimes(1);
+		expect(workflowFence).toHaveBeenCalledWith(WORKFLOW, {
+			runId: attribution.requestId,
+			attemptId: attribution.attemptId,
+		});
+		// Bound on the REGISTRY's fence, the rest of the lineage as before.
+		expect(port.asked).toHaveLength(1);
+		const { context } = port.asked[0];
+		expect(context.workflow).toEqual(autoRunWorkflowRef(WORKFLOW, REGISTRY_FENCE));
+		expect(context.workflow).toMatchObject({ ownerEpoch: '3', fencingToken: 'fence-3' });
+		expect(context.identity).toEqual(autoRunRunIdentity(attribution));
+		expect(context.traceId).toBe(autoRunTraceId(attribution));
+		expect(admitted.admission.requestId).toBe(attribution.requestId);
+		expect(admitted.admission.attemptId).toBe(attribution.attemptId);
+
+		// The admission covers the request as the handler spawns it (fence still null on the wire).
+		expect(manager.spawn({ ...request, admission: admitted.admission })).toBe(SERVE_RESULT);
+		expect(serve).toHaveBeenCalledTimes(1);
+	});
+
+	it('claims again on a retry, for the retry attempt under the same request', async () => {
+		const { manager, port, workflowFence } = fencedManager(() => REGISTRY_FENCE);
+		const first = taskRequest();
+		const retry = nextAutoRunAttempt(first, newId);
+
+		const one = await manager.admitSpawn(config({ autoRun: { attribution: first, fence: null } }), {
+			peer: 'in-process',
+		});
+		const two = await manager.admitSpawn(config({ autoRun: { attribution: retry, fence: null } }), {
+			peer: 'in-process',
+		});
+		expect(one.state).toBe('admitted');
+		expect(two.state).toBe('admitted');
+		if (one.state !== 'admitted' || two.state !== 'admitted') return;
+
+		expect(workflowFence.mock.calls.map(([, run]) => run)).toEqual([
+			{ runId: first.requestId, attemptId: first.attemptId },
+			{ runId: first.requestId, attemptId: retry.attemptId },
+		]);
+		expect(two.admission.requestId).toBe(one.admission.requestId);
+		expect(two.admission.attemptId).not.toBe(one.admission.attemptId);
+		expect(port.asked.map((ask) => ask.context.workflow?.fencingToken)).toEqual([
+			'fence-3',
+			'fence-3',
+		]);
+	});
+
+	it('answers the producer refusal with its state and code, before the authority is asked, and starts nothing', async () => {
+		const { manager, port, serve, workflowFence } = fencedManager(async () => ({
+			fence: null,
+			state: 'unavailable',
+			code: 'capability-unsupported',
+			message: 'The endpoint serves no workflow owner operation in this build (CP-03).',
+		}));
+		const request = config({ autoRun: { attribution: taskRequest(), fence: null } });
+
+		const outcome = await manager.admitSpawn(request, { peer: 'in-process' });
+		expect(outcome).toEqual({
+			state: 'unavailable',
+			code: 'capability-unsupported',
+			message: 'The endpoint serves no workflow owner operation in this build (CP-03).',
+		});
+		expect(port.asked).toHaveLength(0);
+
+		// The run's spawn failure carries the producer's reason; nothing ran.
+		expect(await manager.spawnAdmitted(request, { peer: 'in-process' })).toMatchObject({
+			success: false,
+			error: expect.stringContaining('CP-03'),
+			managed: { state: 'unavailable', code: 'capability-unsupported' },
+		});
+		expect(workflowFence).toHaveBeenCalledTimes(2);
+		expect(serve).not.toHaveBeenCalled();
+	});
+
+	it('answers a fenced owner as the producer denied it, and a lost answer as unknown, not as a fence', async () => {
+		const denied = fencedManager(() => ({
+			fence: null,
+			state: 'denied',
+			code: 'policy-denied',
+			message: 'Workflow "playbook:release" is fenced: another owner holds epoch 4.',
+		}));
+		expect(
+			await denied.manager.admitSpawn(
+				config({ autoRun: { attribution: taskRequest(), fence: null } }),
+				{ peer: 'in-process' }
+			)
+		).toMatchObject({ state: 'denied', code: 'policy-denied' });
+		expect(denied.port.asked).toHaveLength(0);
+
+		const lost = fencedManager(() => ({
+			fence: null,
+			state: 'unknown',
+			code: 'outcome-unknown',
+			message: 'The workflow owner answer was lost.',
+		}));
+		expect(
+			await lost.manager.admitSpawn(
+				config({ autoRun: { attribution: taskRequest(), fence: null } }),
+				{ peer: 'in-process' }
+			)
+		).toMatchObject({ state: 'unknown', code: 'outcome-unknown' });
+		expect(lost.port.asked).toHaveLength(0);
+	});
+
+	it('refuses an unowned workflow the producer answers nothing for, by name', async () => {
+		const { manager, port, workflowFence } = fencedManager(() => null);
+		const outcome = await manager.admitSpawn(
+			config({ autoRun: { attribution: taskRequest(), fence: null } }),
+			{ peer: 'in-process' }
+		);
+		expect(outcome).toMatchObject({ state: 'unavailable', code: 'runtime-unavailable' });
+		if (outcome.state !== 'unavailable') return;
+		expect(outcome.message).toContain('the workflow owner producer answered none');
+		expect(workflowFence).toHaveBeenCalledTimes(1);
+		expect(port.asked).toHaveLength(0);
+	});
+
+	it('carries a fence the lineage arrived with and does not claim', async () => {
+		const { manager, port, workflowFence } = fencedManager(() => REGISTRY_FENCE);
+		const attribution = taskRequest();
+		const admitted = await manager.admitSpawn(
+			config({ autoRun: { attribution, fence: CARRIED_FENCE } }),
+			{ peer: 'in-process' }
+		);
+		expect(admitted.state).toBe('admitted');
+		expect(workflowFence).not.toHaveBeenCalled();
+		expect(port.asked[0].context.workflow).toEqual(autoRunWorkflowRef(WORKFLOW, CARRIED_FENCE));
+	});
+
+	it('never asks the producer for a chat turn, nor on a standalone host', async () => {
+		const chat = fencedManager(() => REGISTRY_FENCE);
+		const admitted = await chat.manager.admitSpawn(config(), { peer: 'in-process' });
+		expect(admitted.state).toBe('admitted');
+		expect(chat.workflowFence).not.toHaveBeenCalled();
+		expect(chat.port.asked[0].context.workflow).toBeNull();
+
+		const standalone = fencedManager(() => REGISTRY_FENCE, 'standalone');
+		expect(
+			await standalone.manager.admitSpawn(
+				config({ autoRun: { attribution: taskRequest(), fence: null } }),
+				{ peer: 'in-process' }
+			)
+		).toEqual({ state: 'standalone' });
+		expect(standalone.workflowFence).not.toHaveBeenCalled();
+		expect(standalone.port.asked).toHaveLength(0);
 	});
 });
 

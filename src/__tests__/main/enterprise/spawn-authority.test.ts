@@ -6,10 +6,11 @@
  * principal is the enrollment's registered actor or the installation operator.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	createCueSpawnAuthority,
 	createProcessSpawnAuthority,
+	type ProcessSpawnAuthorityDeps,
 } from '../../../main/enterprise/spawn-authority';
 import type { IdentityRead } from '../../../main/enterprise/identity-store';
 import type { ManagedWorkflowRef } from '../../../shared/maestro-lib/managed/types';
@@ -17,13 +18,17 @@ import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
 
 const INSTALLATION = { installationId: 'inst-1', runtimeId: 'desktop-1', processEpoch: 'e1' };
 
-function authority(read: IdentityRead = { status: 'none' }) {
+function authority(
+	read: IdentityRead = { status: 'none' },
+	extra: Pick<ProcessSpawnAuthorityDeps, 'workflowFence'> = {}
+) {
 	return createProcessSpawnAuthority({
 		installation: INSTALLATION,
 		identity: { read: () => read },
 		host: { policy: () => ({ sources: [], policyRevision: 3 }) },
 		dispatch: { authority: fakeSpawnPort().authority },
 		now: () => 1_000_000,
+		...extra,
 	});
 }
 
@@ -94,6 +99,49 @@ describe('createProcessSpawnAuthority verify', () => {
 		expect(verified.ok).toBe(false);
 		if (verified.ok) return;
 		expect(verified.problems.join('; ')).toContain('workflow.ownerEpoch');
+	});
+});
+
+/**
+ * The workflow owner claim on the process port (MRC-07-06B): the service's
+ * `claimWorkflowFence` is handed through as the port's `workflowFence`, as it
+ * is, for the sink to claim an unowned Auto Run's fence with; a service that
+ * hands none leaves the port without one, so the sink refuses by name rather
+ * than finding a fence here.
+ */
+describe('createProcessSpawnAuthority workflowFence', () => {
+	const WORKFLOW = {
+		workflowId: 'playbook:/work/.maestro/playbooks/release',
+		version: 'docs-2-0badf00d',
+		triggerEventId: 'operator:1700000000000',
+	};
+
+	it('hands the workflow owner claim through, with the workflow and the attempt it is asked for', async () => {
+		const workflowFence = vi.fn(async () => ({ ownerEpoch: '2', fencingToken: 'fence-2' }));
+		const port = authority({ status: 'none' }, { workflowFence });
+		expect(port.workflowFence).toBe(workflowFence);
+		await expect(
+			port.workflowFence?.(WORKFLOW, { runId: 'req-1', attemptId: 'att-1' })
+		).resolves.toEqual({ ownerEpoch: '2', fencingToken: 'fence-2' });
+		expect(workflowFence).toHaveBeenCalledWith(WORKFLOW, { runId: 'req-1', attemptId: 'att-1' });
+	});
+
+	it('hands a refusal through untouched, never a fence in its place', async () => {
+		const refusal = {
+			fence: null,
+			state: 'unavailable' as const,
+			code: 'capability-unsupported' as const,
+			message: 'The endpoint serves no workflow owner operation (CP-03).',
+		};
+		const port = authority({ status: 'none' }, { workflowFence: () => refusal });
+		expect(await port.workflowFence?.(WORKFLOW, { runId: 'req-1', attemptId: 'att-1' })).toBe(
+			refusal
+		);
+	});
+
+	it('has no claim when the service hands none', () => {
+		expect(authority().workflowFence).toBeUndefined();
+		expect('workflowFence' in authority()).toBe(false);
 	});
 });
 

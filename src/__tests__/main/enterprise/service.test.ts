@@ -254,6 +254,13 @@ describe('enterprise service', () => {
 		expect(service.workflows.fence(WORKFLOW)).toEqual({ ownerEpoch: '2', fencingToken: 'fence-2' });
 		expect(fs.existsSync(path.join(dir, 'maestro-managed-workflows.json'))).toBe(true);
 
+		// The process sink claims through the same held ownership (MRC-07-06B):
+		// a re-claim for another attempt confirms the held fence, one record.
+		expect(
+			await service.spawnAuthority.workflowFence?.(WORKFLOW, { runId: 'run-1', attemptId: 'att-2' })
+		).toEqual({ ownerEpoch: '2', fencingToken: 'fence-2' });
+		expect(service.workflows.held()).toHaveLength(1);
+
 		// A restarted desktop holds the same fence before it asks the endpoint anything.
 		await service.close();
 		services.splice(0);

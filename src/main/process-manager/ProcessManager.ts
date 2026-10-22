@@ -29,7 +29,12 @@ import {
 	autoRunRunIdentity,
 	autoRunTraceId,
 	autoRunWorkflowRef,
+	type AutoRunSpawnLineage,
 } from '../../shared/maestro-lib/autorun/attribution';
+import {
+	isWorkflowFenceRefusal,
+	type WorkflowFenceAnswer,
+} from '../../shared/maestro-lib/managed/workflows';
 import {
 	childDelegationContext,
 	delegationContextProblems,
@@ -189,6 +194,32 @@ function spawnContextInput(
 		};
 	}
 	return { identity: chatTurnIdentity(), traceId: config.sessionId, workflow: null };
+}
+
+/**
+ * The owner fence an Auto Run attempt is bound on at this sink. A lineage
+ * that arrives with a fence is carried as it is: a producer elsewhere issued
+ * it, the host authority judges it, and this sink neither checks nor
+ * re-claims it. A lineage that arrives unowned (`fence: null`, what the
+ * renderer sends: it has no producer and must not claim) is claimed here,
+ * through the port's workflow owner producer, for exactly this attempt's
+ * request and attempt ids, so a retry re-confirms the owner instead of
+ * reusing a decision and a fence that lapsed stops the next attempt. A port
+ * with no producer answers null, and the sink refuses by name. Nothing is
+ * minted here (CP-03, the workflow owner producer).
+ */
+async function autoRunFenceFor(
+	port: ProcessSpawnAuthorityPort,
+	lineage: AutoRunSpawnLineage
+): Promise<WorkflowFenceAnswer> {
+	if (lineage.fence) return lineage.fence;
+	if (!port.workflowFence) return null;
+	return (
+		(await port.workflowFence(lineage.attribution.workflow, {
+			runId: lineage.attribution.requestId,
+			attemptId: lineage.attribution.attemptId,
+		})) ?? null
+	);
 }
 
 export interface TerminalTabSpawnConfig {
@@ -550,8 +581,12 @@ export class ProcessManager extends EventEmitter {
 	 * A chat turn is its own request and is bound under a fresh identity. An
 	 * Auto Run attempt (`config.autoRun`) is bound on its lineage instead: the
 	 * task request and attempt ids, the run under the workflow's root run, the
-	 * workflow reference with its owner fence, and the lineage's trace id. A
-	 * workflow with no fence is refused `unavailable` before the authority is
+	 * workflow reference with its owner fence, and the lineage's trace id. The
+	 * fence of a lineage that arrives unowned is CLAIMED here, through the
+	 * port's workflow owner producer, for this very attempt and before the
+	 * context is verified (`autoRunFenceFor`); the producer's refusal is the
+	 * answer, with its state and code, and a workflow left with no fence (no
+	 * producer on this host) is refused `unavailable` before the authority is
 	 * asked: a managed host does not run an unowned workflow, and this sink
 	 * does not mint a fence (CP-03, the workflow owner producer).
 	 *
@@ -596,18 +631,32 @@ export class ProcessManager extends EventEmitter {
 					'The spawn carries both an Auto Run lineage and a delegation context; a turn is one attempt of a workflow or the child of a dispatching operation, never both. Nothing was started.',
 			};
 		}
-		if (lineage && !lineage.fence) {
-			return {
-				state: 'unavailable',
-				code: 'runtime-unavailable',
-				message: `Auto Run "${lineage.attribution.workflow.workflowId}" has no workflow owner fence; a managed host does not run an unowned workflow, and this host does not mint one (CP-03, the workflow owner producer). Nothing was started.`,
-			};
+		// The attempt is bound on the fence it arrived with or the one claimed
+		// for it now; the snapshot below is still built from `config` as the
+		// handler will spawn it, so the lease covers the request unchanged.
+		let bound = config;
+		if (lineage) {
+			const fence = await autoRunFenceFor(managed, lineage);
+			if (isWorkflowFenceRefusal(fence)) {
+				return { state: fence.state, code: fence.code, message: fence.message };
+			}
+			if (!fence) {
+				const producer = managed.workflowFence
+					? 'the workflow owner producer answered none'
+					: 'this host has no workflow owner producer to claim one through';
+				return {
+					state: 'unavailable',
+					code: 'runtime-unavailable',
+					message: `Auto Run "${lineage.attribution.workflow.workflowId}" has no workflow owner fence (${producer}); a managed host does not run an unowned workflow, and this host does not mint one (CP-03, the workflow owner producer). Nothing was started.`,
+				};
+			}
+			bound = { ...config, autoRun: { attribution: lineage.attribution, fence } };
 		}
 		const policy = managed.policy();
 		const verified = managed.verify({
 			actor,
 			policyRevision: policy.policyRevision,
-			...spawnContextInput(config),
+			...spawnContextInput(bound),
 		});
 		if (!verified.ok) {
 			return {

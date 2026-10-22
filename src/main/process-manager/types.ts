@@ -25,6 +25,10 @@ import type {
 import type { AutoRunSpawnLineage } from '../../shared/maestro-lib/autorun/attribution';
 import type { ManagedDelegationContext } from '../../shared/maestro-lib/managed/delegation';
 import type { ManagedEffectAuthority } from '../../shared/maestro-lib/managed/effects';
+import type {
+	WorkflowFenceAnswer,
+	WorkflowIdentityLike,
+} from '../../shared/maestro-lib/managed/workflows';
 
 // ============================================================================
 // Managed admission at the process sink
@@ -86,6 +90,22 @@ export interface ProcessSpawnAuthorityPort {
 	 * effect is refused as unavailable.
 	 */
 	readonly effects?: ManagedEffectAuthority;
+	/**
+	 * The owner fence of the workflow an Auto Run spawn belongs to, claimed
+	 * through this host's workflow owner producer for exactly that spawn's
+	 * request and attempt ids (MRC-07-06B): the fence the registry confirmed,
+	 * a `WorkflowFenceRefusal` naming why there is none (the sink's answer,
+	 * with the producer's state and code), or null for an unowned workflow.
+	 * The sink asks it only for a lineage that arrives unowned (the renderer
+	 * sends `fence: null`: it has no producer and must not claim); a lineage
+	 * that carries a fence is bound as it is. Absent: this host has no
+	 * producer to claim through, and an unowned workflow is refused by name.
+	 * Nothing on this side mints a fence (CP-03).
+	 */
+	workflowFence?(
+		workflow: WorkflowIdentityLike,
+		run: { runId: string; attemptId: string }
+	): WorkflowFenceAnswer | Promise<WorkflowFenceAnswer>;
 }
 
 /**
