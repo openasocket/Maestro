@@ -149,6 +149,20 @@ describe('production host-handler deps wiring (FC2 - wired and gated)', () => {
 			expect(keys).toContain(key);
 	});
 
+	it('routes the live service hold through the broker and reads the ceiling from the plugin policy source (MRC-09-03)', () => {
+		// `serviceAllowed` is the re-check the service host runs on both principals
+		// of a call and on every sweep while it is retained. Read from grants alone
+		// it would never see the ceiling; through `holds()` a central revoke ends a
+		// retained call as a local one does. The broker's standing comes from the
+		// one installed ceiling bound to the applied revision, never a literal.
+		expect(source).toMatch(
+			/serviceAllowed: \(id, capability, target\) =>\n\t+pluginBroker\.holds\(id, capability, target, \{ audit: false \}\)\.allowed,/
+		);
+		expect(source).toMatch(/managed: \(\) => pluginPolicy\.standing\(\),/);
+		expect(source).toMatch(/const pluginPolicy = createPluginPolicySource\(\{/);
+		expect(source).not.toMatch(/ceiling: null,/);
+	});
+
 	it.each(['success', 'failure', 'disabled'] as const)(
 		'production crash hook waits for resource drain before supervised restart (%s)',
 		async (mode) => {

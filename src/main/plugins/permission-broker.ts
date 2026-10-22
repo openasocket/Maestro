@@ -22,6 +22,17 @@
  * target outside the ceiling, and a host with no usable ceiling are all denied
  * by name. Release and cancellation methods stay exempt, as they are locally,
  * so a revocation never blocks letting go of a resource.
+ *
+ * A resource a plugin KEEPS (a retained service call, a delegated media lease,
+ * an open socket, a watched path) is re-checked while it lives, and that
+ * check has no RPC method in flight: the service host asks about a capability
+ * and the resource's own target (a provider/service pair, a media profile) for
+ * both principals of a call and on every sweep while the call is retained.
+ * `holds()` (MRC-09-03) is that check: the same grant matcher, the same
+ * protected-location exclusion and the same ceiling, in the same order, so a
+ * ceiling narrowed or a plugin revoked centrally mid-call ends the lease the
+ * way a local revoke does, and a standalone host answers from consent alone.
+ * The desktop's ceiling comes from `src/main/enterprise/plugin-policy.ts`.
  */
 
 import {
@@ -105,12 +116,16 @@ export interface BrokerDecision {
 	managed?: PluginCeilingReceipt;
 }
 
+/** What a decision is audited under: the RPC method, or the capability a live hold re-checked. */
+export type BrokerAuditKey = HostMethod | PluginCapability;
+
 export interface PermissionBrokerDeps {
 	/** Returns the live grants for a plugin (re-read each call so a revoked grant
 	 * takes effect immediately, mirroring the Encore-flag re-read pattern). */
 	getGrants: (pluginId: string) => PermissionGrant[];
-	/** Optional audit sink for RPC decisions (allow and deny); host-only polling can opt out. */
-	onDecision?: (pluginId: string, method: HostMethod, decision: BrokerDecision) => void;
+	/** Optional audit sink for RPC decisions and live holds (allow and deny);
+	 * host-only polling can opt out. A hold is keyed by its capability. */
+	onDecision?: (pluginId: string, method: BrokerAuditKey, decision: BrokerDecision) => void;
 	/** Absolute directory prefixes that fs:read AND fs:write must NEVER touch -
 	 * the userData/config tree (grants, enable-state, encoreFeatures settings,
 	 * agent-configs, cli-server.json, the plugins dir, plugin KV, supervisor
@@ -231,11 +246,13 @@ interface CeilingVerdict {
 
 /**
  * Hold one locally allowed call against the ceiling. Pure: the standing and
- * the consent view are what the caller read for this call.
+ * the consent view are what the caller read for this call. `method` is
+ * undefined for a live hold on a kept resource: no method is in flight, so
+ * the admitted scopes are matched against the resource's own target.
  */
 export function ceilingVerdict(input: {
 	pluginId: string;
-	method: HostMethod;
+	method: HostMethod | undefined;
 	capability: PluginCapability;
 	target: string | undefined;
 	standing: Exclude<ManagedPluginStanding, { standing: 'standalone' }>;
@@ -290,9 +307,10 @@ export function ceilingVerdict(input: {
 		);
 	}
 	const admitted = ceilingGrants(entry, capability);
-	const within = HANDLER_REAUTHORIZED_METHODS.has(method)
-		? admitted.length > 0
-		: isPermitted(admitted, capability, target);
+	const within =
+		method !== undefined && HANDLER_REAUTHORIZED_METHODS.has(method)
+			? admitted.length > 0
+			: isPermitted(admitted, capability, target);
 	if (!within) {
 		return deny(
 			'outside-ceiling',
@@ -335,10 +353,70 @@ export class PermissionBroker {
 			reason = allowed ? undefined : `permission denied: ${capability}`;
 		} else {
 			allowed = isPermitted(grants, capability, target);
-			reason = allowed
-				? undefined
-				: `permission denied: ${capability}${target ? ` (${target})` : ''}`;
+			reason = allowed ? undefined : deniedReason(capability, target);
 		}
+		const decision = this.narrow(pluginId, {
+			method,
+			capability,
+			target,
+			allowed,
+			reason,
+			exempt: RELEASE_METHODS.has(method),
+		});
+		if (options?.audit !== false) this.deps.onDecision?.(pluginId, method, decision);
+		return decision;
+	}
+
+	/**
+	 * Hold a capability a plugin is EXERCISING against the live grant and, on a
+	 * managed host, the ceiling. No RPC method is in flight: the service host
+	 * asks this for both principals of a service call (`services:call` on the
+	 * caller's provider/service pair, `services:provide` and the fixed media
+	 * profiles on the provider) when a call is bound and on every sweep while
+	 * it is retained, so a grant revoked locally, a plugin or publisher revoked
+	 * centrally or a ceiling narrowed to exclude the pair ends the call the
+	 * same way. Same order as `authorize`: grant, protected location, ceiling.
+	 * A standalone host answers exactly what the pure matcher answers. Audited
+	 * under the capability; a host-owned sweep passes `audit: false`.
+	 */
+	holds(
+		pluginId: string,
+		capability: PluginCapability,
+		target?: string,
+		options?: { audit?: boolean }
+	): BrokerDecision {
+		const allowed = isPermitted(this.deps.getGrants(pluginId), capability, target);
+		const decision = this.narrow(pluginId, {
+			method: undefined,
+			capability,
+			target,
+			allowed,
+			reason: allowed ? undefined : deniedReason(capability, target),
+			exempt: false,
+		});
+		if (options?.audit !== false) this.deps.onDecision?.(pluginId, capability, decision);
+		return decision;
+	}
+
+	/**
+	 * The two gates every locally allowed call and hold then pass, in order:
+	 * the protected-location exclusion, then the managed ceiling. Neither can
+	 * allow; each can only narrow.
+	 */
+	private narrow(
+		pluginId: string,
+		input: {
+			method: HostMethod | undefined;
+			capability: PluginCapability;
+			target: string | undefined;
+			allowed: boolean;
+			reason: string | undefined;
+			/** A release or cancellation: never held against the ceiling. */
+			exempt: boolean;
+		}
+	): BrokerDecision {
+		const { capability, target } = input;
+		let { allowed, reason } = input;
 
 		// Structural data-dir exclusion: fs:read AND fs:write can never touch the
 		// userData/config tree, regardless of how broad the grant is. Applied to
@@ -356,12 +434,12 @@ export class PermissionBroker {
 		// consent or the protected-location rule denied is denied already, and a
 		// release method is never held against it.
 		let managed: PluginCeilingReceipt | undefined;
-		if (allowed && !RELEASE_METHODS.has(method)) {
+		if (allowed && !input.exempt) {
 			const standing = this.deps.managed?.();
 			if (standing && standing.standing === 'managed') {
 				const verdict = ceilingVerdict({
 					pluginId,
-					method,
+					method: input.method,
 					capability,
 					target,
 					standing,
@@ -375,14 +453,16 @@ export class PermissionBroker {
 			}
 		}
 
-		const decision: BrokerDecision = {
+		return {
 			allowed,
 			capability,
 			...(target !== undefined ? { target } : {}),
 			...(reason !== undefined ? { reason } : {}),
 			...(managed !== undefined ? { managed } : {}),
 		};
-		if (options?.audit !== false) this.deps.onDecision?.(pluginId, method, decision);
-		return decision;
 	}
+}
+
+function deniedReason(capability: PluginCapability, target: string | undefined): string {
+	return `permission denied: ${capability}${target ? ` (${target})` : ''}`;
 }

@@ -53,7 +53,8 @@ import { seedBundledPlugins } from './plugins/bundled-plugins';
 import { SpawnBinaryRegistry } from './plugins/spawn-binary-registry';
 import { transcriptReadEgressConflict } from '../shared/plugins/capability-policy';
 import { evaluateScheduledDispatch } from '../shared/plugins/plugin-dispatch-gate';
-import { PermissionBroker, managedPluginStanding } from './plugins/permission-broker';
+import { PermissionBroker } from './plugins/permission-broker';
+import { createPluginPolicySource } from './enterprise/plugin-policy';
 import { PluginSandboxHost } from './plugins/plugin-sandbox-host';
 import { PluginBackgroundSupervisor } from './plugins/plugin-background-supervisor';
 import { PluginGroupingRegistry } from './plugins/plugin-grouping-registry';
@@ -1726,20 +1727,21 @@ app
 		const DISPATCH_DENY_TOAST_THROTTLE_MS = 60_000;
 		const dispatchDenyToastAt = new Map<string, number>();
 
+		// The plugin ceiling source (MRC-09-03): the one installed ceiling, bound to
+		// the applied policy revision under the same enrollment rule the spawn
+		// authority uses, read live on every call and every live hold. No endpoint
+		// operation of this build carries a plugin ceiling (CP-01), so nothing
+		// installs one yet: an enrolled host holds none and the broker refuses each
+		// plugin call by name instead of running it on consent alone; a standalone
+		// host is unchanged.
+		const pluginPolicy = createPluginPolicySource({
+			enrolled: () =>
+				enterpriseService !== null && enterpriseService.identity.read().status !== 'none',
+			policy: () => enterpriseService?.policy.status() ?? null,
+		});
 		const pluginBroker = new PermissionBroker({
 			getGrants: (pluginId) => grantsOf(pluginId),
-			// The managed plugin ceiling (MRC-09-01), read live on every call under
-			// the same enrollment rule the spawn authority uses. No producer publishes
-			// a plugin ceiling over the endpoint socket in this build (CP-01), so an
-			// enrolled host holds none and the broker refuses each plugin call by name
-			// instead of running it on consent alone; a standalone host is unchanged.
-			managed: () =>
-				managedPluginStanding({
-					enrolled:
-						enterpriseService !== null && enterpriseService.identity.read().status !== 'none',
-					policy: enterpriseService?.policy.status() ?? null,
-					ceiling: null,
-				}),
+			managed: () => pluginPolicy.standing(),
 			getConsent: (pluginId) => authStore.readConsent(pluginId),
 			// Structurally exclude the entire Maestro userData/config tree (grants,
 			// enable-state, encoreFeatures + every setting, agent-configs,
@@ -2566,7 +2568,13 @@ app
 					});
 				},
 				serviceRunning: (id) => pluginSandboxHost?.isAcceptingServiceCalls(id) === true,
-				serviceAllowed: (id, capability, target) => isPermitted(grantsOf(id), capability, target),
+				// The live hold the service host re-checks on both principals of a call
+				// and on every sweep while it is retained: the broker's grant, protected
+				// location and (under management) ceiling in one answer, so a central
+				// revoke ends a retained call as a local one does (MRC-09-03). The entry
+				// RPC is audited by `authorize`; this host-owned sweep is not.
+				serviceAllowed: (id, capability, target) =>
+					pluginBroker.holds(id, capability, target, { audit: false }).allowed,
 				serviceInvoke: (id, command, request, signal, timeoutMs) =>
 					pluginSandboxHost
 						? pluginSandboxHost.invokeTool(id, command, request, {
