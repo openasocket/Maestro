@@ -37,6 +37,14 @@ import {
 	opencodePermissionEffect,
 } from '../../../main/process-manager/spawners/OpencodeServerSpawner';
 import { fakeAdmission, fakeSpawnPort } from '../../helpers/managedSpawnPort';
+import { createProcessSpawnAuthority } from '../../../main/enterprise/spawn-authority';
+import {
+	PAIRED_DEVICE_USER_ID_PREFIX,
+	PAIRED_DEVICE_USERNAME,
+	getActingTransport,
+	runAsClient,
+	transportSpawnActor,
+} from '../../../main/web-server/auth/transport-actor';
 import {
 	autoRunRunIdentity,
 	autoRunTraceId,
@@ -868,5 +876,131 @@ describe('OpenCode server isolation under management', () => {
 		expect(
 			opencodePermissionEffect(permission('webfetch', 'https://x', { url: 'https://x' }))
 		).toEqual({ kind: 'tool-call', tool: 'webfetch', input: { url: 'https://x' } });
+	});
+});
+
+/**
+ * The actor each transport binds at the sink (MRC-08-01A): the desktop's REAL
+ * spawn authority (createProcessSpawnAuthority over a registered enrollment,
+ * the fake port's lease authority recording what the policy table was asked)
+ * admits a spawn for the actor the acting transport maps to. A CLI caller is
+ * the maestro-cli service on the chain, a paired device is the device, a Web
+ * Login is the account, the bare path token and the renderer are the operator;
+ * the principal is the registered actor for every one of them, and the lease
+ * records which transport asked. Standalone asks nothing.
+ */
+describe('ProcessManager: the actor each transport binds (MRC-08-01A)', () => {
+	const INSTALLATION = { installationId: 'inst-1', runtimeId: 'desktop-1', processEpoch: 'e1' };
+	const ada = { id: 'u1', username: 'ada', displayName: 'Ada' };
+	const device = {
+		id: `${PAIRED_DEVICE_USER_ID_PREFIX}dev-7`,
+		username: PAIRED_DEVICE_USERNAME,
+		displayName: 'Pixel 9',
+	};
+
+	function desktopPort(status: 'ok' | 'none' = 'ok') {
+		const fake = fakeSpawnPort();
+		const port = createProcessSpawnAuthority({
+			installation: INSTALLATION,
+			identity: {
+				read: () =>
+					status === 'ok'
+						? ({
+								status: 'ok',
+								record: { registration: { actorId: 'actor-registered' } },
+							} as never)
+						: { status: 'none' },
+			},
+			host: { policy: () => ({ sources: [], policyRevision: 3 }) },
+			dispatch: { authority: fake.authority },
+			now: () => 1_000_000,
+		});
+		const manager = new ProcessManager(() => true, { spawnAuthority: () => port });
+		const serve = vi.fn(() => SERVE_RESULT);
+		(
+			manager as unknown as { opencodeServerSpawner: { spawn: typeof serve } }
+		).opencodeServerSpawner = { spawn: serve };
+		return { manager, fake, serve };
+	}
+
+	/** What a sink does: admit for the actor the acting transport maps to, then spawn. */
+	async function admitAs(
+		manager: ProcessManager,
+		client: Parameters<typeof runAsClient>[0],
+		request = config()
+	) {
+		return runAsClient(client, async () => {
+			await Promise.resolve();
+			return manager.admitSpawn(request, transportSpawnActor(getActingTransport()));
+		});
+	}
+
+	it('binds a CLI caller as the maestro-cli service, not as the operator at the keyboard', async () => {
+		const { manager, fake } = desktopPort();
+		const admitted = await admitAs(manager, { cli: true, user: ada });
+		expect(admitted.state).toBe('admitted');
+		expect(fake.asked).toHaveLength(1);
+		const { context } = fake.asked[0];
+		expect(context.verification.peer).toBe('host-secret');
+		expect(context.delegation.chain).toEqual([{ kind: 'service', id: 'maestro-cli' }]);
+		expect(context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
+	});
+
+	it('binds a paired Lite device as the device, not as the paired-device Web Login human', async () => {
+		const { manager, fake } = desktopPort();
+		const admitted = await admitAs(manager, { admission: 'device-pairing', user: device });
+		expect(admitted.state).toBe('admitted');
+		const { context } = fake.asked[0];
+		expect(context.verification.peer).toBe('device-pairing');
+		expect(context.delegation.chain).toEqual([{ kind: 'service', id: 'lite-device:dev-7' }]);
+		expect(context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
+	});
+
+	it('binds a Web Login as the account, and the bare token and the renderer as the operator', async () => {
+		const { manager, fake } = desktopPort();
+		await admitAs(manager, { user: ada });
+		await admitAs(manager, {});
+		await manager.admitSpawn(config(), transportSpawnActor(getActingTransport()));
+		expect(fake.asked.map((a) => a.context.verification.peer)).toEqual([
+			'web-login',
+			'in-process',
+			'in-process',
+		]);
+		expect(fake.asked.map((a) => a.context.delegation.chain)).toEqual([
+			[{ kind: 'human', id: 'web-login:ada' }],
+			[],
+			[],
+		]);
+		expect(new Set(fake.asked.map((a) => a.context.actor.id))).toEqual(
+			new Set(['actor-registered'])
+		);
+	});
+
+	it('runs the admitted request under a lease whose context names the transport', async () => {
+		const { manager, fake, serve } = desktopPort();
+		const request = config();
+		const admitted = await admitAs(manager, { cli: true }, request);
+		if (admitted.state !== 'admitted') throw new Error(admitted.state);
+		expect(manager.spawn({ ...request, admission: admitted.admission })).toBe(SERVE_RESULT);
+		expect(serve).toHaveBeenCalledTimes(1);
+		const [lease] = fake.authority.live();
+		expect(lease.state()).toBe('bound');
+		// The lease is the one minted on the admission the CLI transport asked for:
+		// same digest, the registered actor as principal, the CLI on the chain.
+		expect(fake.asked).toHaveLength(1);
+		const { context } = fake.asked[0];
+		expect(lease.snapshotDigest).toBe(admitted.admission.requestDigest);
+		expect(lease.actor).toEqual({ kind: 'human', id: 'actor-registered' });
+		expect(context.verification.peer).toBe('host-secret');
+		expect(context.delegation.chain).toEqual([{ kind: 'service', id: 'maestro-cli' }]);
+	});
+
+	it('asks nothing of a standalone host, for any transport', async () => {
+		const { manager, fake } = desktopPort('none');
+		expect(await admitAs(manager, { cli: true })).toEqual({ state: 'standalone' });
+		expect(await admitAs(manager, { admission: 'device-pairing', user: device })).toEqual({
+			state: 'standalone',
+		});
+		expect(fake.asked).toHaveLength(0);
 	});
 });

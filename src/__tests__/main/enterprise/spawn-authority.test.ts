@@ -103,6 +103,102 @@ describe('createProcessSpawnAuthority verify', () => {
 });
 
 /**
+ * The transport peers a host sink binds (MRC-08-01A): the CLI secret and a
+ * paired Lite device each get their own verifier and their own attribution on
+ * the delegation chain, while the PRINCIPAL stays the enrollment's registered
+ * actor for every peer. A transport is admission, never a tenant role.
+ */
+describe('createProcessSpawnAuthority transport peers', () => {
+	const REGISTERED: IdentityRead = {
+		status: 'ok',
+		record: { registration: { actorId: 'actor-registered' } } as never,
+	};
+	const turn = {
+		identity: { ...IDENTITY, runId: null, rootRunId: null, parentRunId: null },
+		traceId: 'agent-1-ai-tab-1',
+		policyRevision: 3,
+		workflow: null,
+	};
+
+	it('binds the CLI secret as the maestro-cli service on the chain, under its own verifier', () => {
+		const verified = authority(REGISTERED).verify({ actor: { peer: 'host-secret' }, ...turn });
+		expect(verified.ok).toBe(true);
+		if (!verified.ok) return;
+		expect(verified.context.verification.peer).toBe('host-secret');
+		expect(verified.context.verification.verifierId).toBe('desktop-cli-secret:desktop-1');
+		expect(verified.context.delegation).toEqual({
+			chain: [{ kind: 'service', id: 'maestro-cli' }],
+			grantRef: null,
+		});
+		// The CLI is attribution: the principal is still the registered actor.
+		expect(verified.context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
+	});
+
+	it('binds a paired Lite device as the device on the chain, by the id the pairing issued', () => {
+		const verified = authority(REGISTERED).verify({
+			actor: { peer: 'device-pairing', deviceId: 'dev-7' },
+			...turn,
+		});
+		expect(verified.ok).toBe(true);
+		if (!verified.ok) return;
+		expect(verified.context.verification.peer).toBe('device-pairing');
+		expect(verified.context.verification.verifierId).toBe('desktop-device-pairing:desktop-1');
+		expect(verified.context.delegation.chain).toEqual([
+			{ kind: 'service', id: 'lite-device:dev-7' },
+		]);
+		expect(verified.context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
+	});
+
+	it('gives every peer the same principal and its own verification, and the keyboard no chain', () => {
+		const actors = [
+			{ peer: 'in-process' },
+			{ peer: 'web-login', username: 'ada' },
+			{ peer: 'host-secret' },
+			{ peer: 'device-pairing', deviceId: 'dev-7' },
+		] as const;
+		const port = authority(REGISTERED);
+		const bound = actors.map((actor) => {
+			const verified = port.verify({ actor, ...turn });
+			if (!verified.ok) throw new Error(verified.problems.join('; '));
+			return verified.context;
+		});
+		expect(bound.map((c) => c.actor)).toEqual(
+			actors.map(() => ({ kind: 'human', id: 'actor-registered' }))
+		);
+		expect(bound.map((c) => c.verification.peer)).toEqual(actors.map((a) => a.peer));
+		expect(bound.map((c) => c.delegation.chain)).toEqual([
+			[],
+			[{ kind: 'human', id: 'web-login:ada' }],
+			[{ kind: 'service', id: 'maestro-cli' }],
+			[{ kind: 'service', id: 'lite-device:dev-7' }],
+		]);
+		expect(new Set(bound.map((c) => c.verification.verifierId)).size).toBe(actors.length);
+	});
+
+	it('refuses a context naming another installation for the new peers too', () => {
+		const other = createProcessSpawnAuthority({
+			installation: { ...INSTALLATION, installationId: 'inst-2' },
+			identity: { read: () => REGISTERED },
+			host: { policy: () => ({ sources: [], policyRevision: 3 }) },
+			dispatch: { authority: fakeSpawnPort().authority },
+			now: () => 1_000_000,
+		});
+		// The port names its own installation; a verifier cannot be handed another.
+		// What it does refuse is a chain the actor does not account for: a
+		// carried delegation is bound as it is, never rewritten to the transport.
+		const carried = other.verify({
+			actor: { peer: 'host-secret' },
+			...turn,
+			delegation: { chain: [{ kind: 'agent', id: 'agent-9' }], grantRef: null },
+		});
+		expect(carried.ok).toBe(true);
+		if (!carried.ok) return;
+		expect(carried.context.delegation.chain).toEqual([{ kind: 'agent', id: 'agent-9' }]);
+		expect(carried.context.verification.peer).toBe('host-secret');
+	});
+});
+
+/**
  * The workflow owner claim on the process port (MRC-07-06B): the service's
  * `claimWorkflowFence` is handed through as the port's `workflowFence`, as it
  * is, for the sink to claim an unowned Auto Run's fence with; a service that

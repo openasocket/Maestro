@@ -191,8 +191,23 @@ export interface ManagedOperationContext {
 	requestedCapabilities: readonly ManagedCapability[];
 }
 
-/** The transport a verifier authenticated the peer over. */
-export type ManagedPeerAuthentication = 'in-process' | 'os-peer' | 'host-secret' | 'web-login';
+/**
+ * The transport a verifier authenticated the peer over. `in-process` is a
+ * caller in the host's own process; `os-peer` an OS-authenticated peer on a
+ * local socket; `host-secret` a process that presented the host's per-boot
+ * secret (the Maestro CLI); `web-login` a browser session the host's own
+ * login issued; `device-pairing` a device the host paired (Maestro Lite),
+ * authenticated by a pairing credential bound to this host's origin. Each is
+ * transport admission, never a principal: the principal of a managed
+ * operation is the enrollment's registered actor, and the transport is
+ * recorded as attribution.
+ */
+export type ManagedPeerAuthentication =
+	| 'in-process'
+	| 'os-peer'
+	| 'host-secret'
+	| 'web-login'
+	| 'device-pairing';
 
 /** The record of one verification: which verifier, over what, when. */
 export interface ManagedVerification {

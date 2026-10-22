@@ -12,11 +12,12 @@
  *     from the adapter, and the sink refuses. It never drops to standalone.
  *   - `verify()`: binds the actor the transport resolved into a verified
  *     context. The PRINCIPAL is the enrollment's registered actor (the one
- *     the endpoint registered this process for); the desktop operator or
- *     the logged-in browser account is attribution on the delegation chain,
- *     because neither a keyboard nor a Web Login cookie is an enterprise
- *     principal. One verifier per peer, both accepting only a context that
- *     names this installation.
+ *     the endpoint registered this process for); the desktop operator, the
+ *     logged-in browser account, the CLI secret or the paired Lite device is
+ *     attribution on the delegation chain, because neither a keyboard, a Web
+ *     Login cookie, a per-boot secret nor a pairing credential is an
+ *     enterprise principal. One verifier per peer, each accepting only a
+ *     context that names this installation.
  *   - `authority` and `policy()`: the broker dispatch bridge's authority (so
  *     every decision lands in the receipt ledger) and the adapter's policy
  *     sources at their last reported revision.
@@ -76,9 +77,25 @@ export function spawnPrincipal(
 	return managedActorPrincipal(publicEnterpriseIdentity(read), installation);
 }
 
-/** The delegation chain the transport's actor contributes: a web login is attribution, never the principal. */
+/**
+ * The delegation chain the transport's actor contributes: attribution, never
+ * the principal (MRC-08-01A). A web login is the human account the cookie
+ * named; the CLI secret is the `maestro-cli` service; a paired Lite device is
+ * the device, by the id the pairing issued; the keyboard (and the bare path
+ * token, which admits the same owner-operator) contributes nothing, since the
+ * principal already names the installation's operator.
+ */
 export function spawnDelegationChain(actor: ProcessSpawnActor): ManagedPrincipalRef[] {
-	return actor.peer === 'web-login' ? [{ kind: 'human', id: `web-login:${actor.username}` }] : [];
+	switch (actor.peer) {
+		case 'web-login':
+			return [{ kind: 'human', id: `web-login:${actor.username}` }];
+		case 'host-secret':
+			return [{ kind: 'service', id: 'maestro-cli' }];
+		case 'device-pairing':
+			return [{ kind: 'service', id: `lite-device:${actor.deviceId}` }];
+		case 'in-process':
+			return [];
+	}
 }
 
 export function createProcessSpawnAuthority(
@@ -99,6 +116,18 @@ export function createProcessSpawnAuthority(
 		'web-login': createContextVerifier({
 			verifierId: `desktop-web-login:${deps.installation.runtimeId}`,
 			peer: 'web-login',
+			now,
+			accept,
+		}),
+		'host-secret': createContextVerifier({
+			verifierId: `desktop-cli-secret:${deps.installation.runtimeId}`,
+			peer: 'host-secret',
+			now,
+			accept,
+		}),
+		'device-pairing': createContextVerifier({
+			verifierId: `desktop-device-pairing:${deps.installation.runtimeId}`,
+			peer: 'device-pairing',
 			now,
 			accept,
 		}),

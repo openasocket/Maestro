@@ -35,14 +35,22 @@ import type {
 // ============================================================================
 
 /**
- * Who asked for a spawn, as the transport that carried the request knows it.
- * `in-process` is the desktop operator at the keyboard (an Electron IPC call
- * runs outside any acting-user context); `web-login` is a logged-in browser
- * account, which is attribution for the record, not an enterprise principal:
- * the principal of a managed launch is always the enrollment's registered
- * actor, and the web user is carried on the delegation chain.
+ * Who asked for a spawn, as the transport that carried the request knows it
+ * (MRC-08-01A). `in-process` is the desktop operator at the keyboard (an
+ * Electron IPC call runs outside any acting-user context, and the bare path
+ * token admits the same owner-operator); `web-login` is a logged-in browser
+ * account; `host-secret` is a process that presented the per-boot CLI secret
+ * (`maestro-cli`, or whatever an agent runs); `device-pairing` is a paired
+ * Lite device. Every one of them is attribution for the record, not an
+ * enterprise principal: the principal of a managed launch is always the
+ * enrollment's registered actor, and the transport's peer is carried on the
+ * delegation chain (`spawnDelegationChain`).
  */
-export type ProcessSpawnActor = { peer: 'in-process' } | { peer: 'web-login'; username: string };
+export type ProcessSpawnActor =
+	| { peer: 'in-process' }
+	| { peer: 'web-login'; username: string }
+	| { peer: 'host-secret' }
+	| { peer: 'device-pairing'; deviceId: string };
 
 export interface ProcessSpawnContextInput {
 	actor: ProcessSpawnActor;

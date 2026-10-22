@@ -30,8 +30,11 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * (the producer port over the adapter's endpoint), `MaestroRuntime.claimWorkflowFence`
  * (the runtime's own ownership, what every Auto Run attempt is admitted on), and
  * `managed.workflowFence` taking the attempt's run and attempt ids.
+ * 0.10.0: `ManagedPeerAuthentication` gains `device-pairing` (a device the
+ * host paired, Maestro Lite), so a host verifier can record that transport
+ * on a verification instead of passing a paired device off as a web login.
  */
-export const MAESTRO_LIB_VERSION = '0.9.0';
+export const MAESTRO_LIB_VERSION = '0.10.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

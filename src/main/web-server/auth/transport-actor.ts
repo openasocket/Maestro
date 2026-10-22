@@ -32,6 +32,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { WebActingUser } from '../../../shared/webLogin';
+import type { ProcessSpawnActor } from '../../process-manager/types';
 import type { WebClient } from '../types';
 import { runAsActingUser } from './acting-user';
 
@@ -93,6 +94,30 @@ export function describeTransportAdmission(admission: TransportAdmission): strin
 			return `lite-device:${admission.deviceId}`;
 		default:
 			return admission.kind;
+	}
+}
+
+/**
+ * The actor a host sink binds for a transport (MRC-08-01A): what
+ * `ProcessManager.admitSpawn()` is handed, and what the spawn authority turns
+ * into the verification's peer and the delegation chain's attribution. The
+ * desktop renderer and the bare path token are both the owner-operator
+ * (`in-process`); a Web Login cookie is the account it named; the CLI secret
+ * is the host secret, so `maestro-cli` is never bound as the operator at the
+ * keyboard; a Lite pairing is the device, never the `paired-device` account
+ * the route synthesizes for History.
+ */
+export function transportSpawnActor(admission: TransportAdmission): ProcessSpawnActor {
+	switch (admission.kind) {
+		case 'web-login':
+			return { peer: 'web-login', username: admission.user.username };
+		case 'cli':
+			return { peer: 'host-secret' };
+		case 'lite':
+			return { peer: 'device-pairing', deviceId: admission.deviceId };
+		case 'desktop':
+		case 'owner-token':
+			return { peer: 'in-process' };
 	}
 }
 

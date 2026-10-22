@@ -47,6 +47,7 @@ import type { DispatchedSpawnIds } from '../../../process-manager/types';
 import { generateUUID } from '../../../../shared/uuid';
 import { QUERY_USER_ENV_VAR } from '../../../../shared/webLogin';
 import { getActingUser } from '../../../web-server/auth/acting-user';
+import { getActingTransport, transportSpawnActor } from '../../../web-server/auth/transport-actor';
 import { noteTurnActor } from '../../../web-server/auth/turn-attribution';
 import { REGEX_AI_SUFFIX } from '../../../constants';
 import { addBreadcrumb, captureException } from '../../../utils/sentry';
@@ -1300,15 +1301,18 @@ async function handleProcessSpawnImpl(
 }
 
 /**
- * Who is asking for this spawn, as the transport knows it: a bridge call from
- * a logged-in browser runs inside an acting-user context, an Electron IPC
- * call from the desktop renderer runs outside any and is the operator at the
- * keyboard. This is attribution the managed authority binds, never authority
- * itself: a web login is a local operator, not an enterprise principal.
+ * Who is asking for this spawn, as the transport knows it (MRC-08-01A): a
+ * bridge call or a WebSocket message runs inside the transport context
+ * `runAsClient` established (a Web Login account, the CLI secret, a Lite
+ * pairing, or the bare path token), an Electron IPC call from the desktop
+ * renderer runs outside any and is the operator at the keyboard. This is
+ * attribution the managed authority binds, never authority itself: none of
+ * these transports is an enterprise principal. Read through
+ * `transportSpawnActor`, never off the acting user, which still names a
+ * paired device `paired-device` for History and gives the CLI no name at all.
  */
 export function currentSpawnActor(): ProcessSpawnActor {
-	const actingUser = getActingUser();
-	return actingUser ? { peer: 'web-login', username: actingUser.username } : { peer: 'in-process' };
+	return transportSpawnActor(getActingTransport());
 }
 
 /**

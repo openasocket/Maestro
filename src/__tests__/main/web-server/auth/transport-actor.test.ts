@@ -17,6 +17,7 @@ import {
 	resolveTransportAdmission,
 	runAsClient,
 	runAsTransport,
+	transportSpawnActor,
 } from '../../../../main/web-server/auth/transport-actor';
 
 const ada = { id: 'u1', username: 'ada', displayName: 'Ada' };
@@ -69,6 +70,47 @@ describe('describeTransportAdmission', () => {
 		expect(
 			describeTransportAdmission({ kind: 'lite', deviceId: 'dev-7', deviceName: 'Pixel 9' })
 		).toBe('lite-device:dev-7');
+	});
+});
+
+/**
+ * The actor a host sink binds for a transport (MRC-08-01A): the renderer and
+ * the bare path token are the owner-operator, a login is the account, the CLI
+ * secret is the host secret and a pairing is the device. None of them is a
+ * principal; this is what `admitSpawn()` records as attribution.
+ */
+describe('transportSpawnActor', () => {
+	it('binds the desktop renderer and the bare path token as the owner-operator', () => {
+		expect(transportSpawnActor({ kind: 'desktop' })).toEqual({ peer: 'in-process' });
+		expect(transportSpawnActor({ kind: 'owner-token' })).toEqual({ peer: 'in-process' });
+	});
+
+	it('binds a Web Login as the account the cookie named', () => {
+		expect(transportSpawnActor({ kind: 'web-login', user: ada })).toEqual({
+			peer: 'web-login',
+			username: 'ada',
+		});
+	});
+
+	it('binds the CLI secret as the host secret, never as the operator at the keyboard', () => {
+		expect(transportSpawnActor({ kind: 'cli' })).toEqual({ peer: 'host-secret' });
+	});
+
+	it('binds a Lite pairing as the device, never as the synthesized paired-device account', () => {
+		expect(transportSpawnActor({ kind: 'lite', deviceId: 'dev-7', deviceName: 'Pixel 9' })).toEqual(
+			{ peer: 'device-pairing', deviceId: 'dev-7' }
+		);
+		// The whole way from the client the upgrade built to the actor the sink binds.
+		expect(
+			transportSpawnActor(resolveTransportAdmission({ admission: 'device-pairing', user: device }))
+		).toEqual({ peer: 'device-pairing', deviceId: 'dev-7' });
+	});
+
+	it('is the owner-operator outside any context, and follows the context inside one', () => {
+		expect(transportSpawnActor(getActingTransport())).toEqual({ peer: 'in-process' });
+		expect(runAsClient({ cli: true }, () => transportSpawnActor(getActingTransport()))).toEqual({
+			peer: 'host-secret',
+		});
 	});
 });
 
