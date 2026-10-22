@@ -8,6 +8,7 @@ import type { TurnOutcome } from '../../shared/maestro-lib/streaming/turn-outcom
 import type { CodexTransport } from '../../shared/codexTransport';
 import type { CodexAppServerSshLaunch } from '../codex-app-server/ssh-launch';
 import type { CodexAppServerProcessHandle } from '../codex-app-server/protocol';
+import type { SshRemoteEndpointIdentity } from '../../shared/maestro-lib/launch/ssh-remote-resolver';
 import type {
 	ContextVerification,
 	DispatchOperation,
@@ -245,6 +246,12 @@ export interface ProcessConfig {
 	/** Human-readable remote command line (the actual agent invocation running on the
 	 *  remote host). Surfaced in Process Details above the local SSH command. */
 	sshRemoteCommand?: string;
+	/** The enrolled remote runtime a managed SSH launch was qualified against
+	 *  (`EnterpriseService.remote.qualify`, MRC-08-04B): the remote's own
+	 *  attestation, bound by the spawn handler before any side effect. The sink
+	 *  names it in the lease's target and the child spawner admits the `ssh`
+	 *  route only when it is present; absent on a standalone launch. */
+	sshRemoteEndpoint?: SshRemoteEndpointIdentity;
 	/** PTY terminal width in columns (default 80) */
 	cols?: number;
 	/** PTY terminal height in rows (default 24) */

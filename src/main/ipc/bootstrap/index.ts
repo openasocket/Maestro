@@ -235,6 +235,8 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		safeSend: deps.safeSend,
 		sessionsStore: deps.sessionsStore,
 		interactiveReplayController: deps.getInteractiveReplayController() ?? undefined,
+		// A managed SSH spawn is qualified by the remote's own attestation (MRC-08-04B).
+		remoteQualifier: () => deps.getEnterpriseService()?.remote ?? null,
 		getCueProcesses: () => {
 			// Always query the executor's active process map - processes may still be
 			// running even if the engine has been disabled (in-flight runs complete

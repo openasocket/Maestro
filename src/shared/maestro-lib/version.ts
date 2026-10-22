@@ -41,8 +41,13 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * produced by `hostManagedStanding` in `./runtime/server`): what a peer's
  * remote endpoint probe reads over SSH. `RuntimeHostOptions.managed` hands a
  * composed host adapter to `startRuntimeHost`.
+ * 0.13.0: a managed dispatch target on an SSH remote names the endpoint it
+ * was qualified against (`ManagedSshEndpointRef`, `endpoint` on the `ssh`
+ * variant of `ManagedDispatchTarget`; `managedSshEndpointRef` reads it off an
+ * attested `SshRemoteEndpointIdentity`), so a lease says which remote
+ * installation and authority a launch goes to.
  */
-export const MAESTRO_LIB_VERSION = '0.12.0';
+export const MAESTRO_LIB_VERSION = '0.13.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

@@ -15,7 +15,7 @@
 
 import type { SshRemoteConfig, AgentSshRemoteConfig } from '../../types';
 import type { SupportStatus } from '../managed/compatibility';
-import { MANAGED_CONTRACT_VERSION } from '../managed/types';
+import { MANAGED_CONTRACT_VERSION, type ManagedSshEndpointRef } from '../managed/types';
 
 /**
  * Options for resolving SSH remote configuration.
@@ -403,5 +403,16 @@ export function qualifySshLaunchTarget(
 		kind: 'remote',
 		remote: target.remote,
 		endpoint: structuredClone(read.identity as SshRemoteEndpointIdentity),
+	};
+}
+
+/** The part of an attested identity a lease's target names: which remote installation, process and authority (never the route table). */
+export function managedSshEndpointRef(identity: SshRemoteEndpointIdentity): ManagedSshEndpointRef {
+	return {
+		installationId: identity.installationId,
+		runtimeId: identity.runtimeId,
+		processEpoch: identity.processEpoch,
+		authorityId: identity.authorityId,
+		policyRevision: identity.policyRevision,
 	};
 }

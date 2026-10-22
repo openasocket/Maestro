@@ -79,6 +79,11 @@ import { persistClaudeInteractiveMode } from './persist-claude-interactive-mode'
 import { wrapSpawnForSsh } from './wrap-spawn-for-ssh';
 import { createSshRemoteStoreAdapter } from '../../../utils/ssh-remote-resolver';
 import { sshUnresolvedRemoteMessage } from '../../../utils/ssh-spawn-wrapper';
+import {
+	unqualifiedSshLaunchTarget,
+	type SshRemoteEndpointIdentity,
+} from '../../../../shared/maestro-lib/launch/ssh-remote-resolver';
+import type { RemoteEndpointQualifier } from '../../../enterprise/remote';
 import { buildAgentLaunchPlan } from '../../../../shared/maestro-lib/launch/launch-plan';
 import { resolvePromptDelivery } from '../../../../shared/maestro-lib/launch/prompt-delivery';
 import { preparePermissionRelayArgs } from '../../../permission-relay';
@@ -101,6 +106,13 @@ export interface SpawnHandlerDependencies {
 	safeSend?: (channel: string, ...args: unknown[]) => void;
 	sessionsStore: Store<{ sessions: unknown[] }>;
 	interactiveReplayController?: InteractiveReplayController<ProcessSpawnConfig>;
+	/**
+	 * The desktop's remote endpoint qualifier (`EnterpriseService.remote`,
+	 * MRC-08-04B), read only when the host's standing is managed and the spawn
+	 * asks for SSH. Null or absent on a host with no enterprise service: a
+	 * managed host then refuses the SSH spawn by that name, never runs it.
+	 */
+	remoteQualifier?: () => RemoteEndpointQualifier | null;
 }
 
 /**
@@ -353,6 +365,33 @@ async function handleProcessSpawnImpl(
 		effectiveCustomEnvVars = planResult.plan.envVars;
 	} else {
 		effectiveCustomEnvVars = configResolution.effectiveCustomEnvVars;
+	}
+
+	// Under management a resolved SSH remote is still nothing a launch may be
+	// handed to until the Maestro runtime there attests a standing this host
+	// accepts (MRC-08-04B, `EnterpriseService.remote`). Asked here, beside the
+	// plan and before any side effect, and only on a managed host: a standalone
+	// SSH spawn is unchanged. A refusal runs nowhere, not on the remote
+	// unmanaged and not on this machine instead; a qualified remote's endpoint
+	// rides the config to the sink, which names it in the lease's target.
+	let sshRemoteEndpoint: SshRemoteEndpointIdentity | undefined;
+	let qualifiedRemoteId: string | undefined;
+	if (
+		config.toolType !== 'terminal' &&
+		config.sessionSshRemoteConfig?.enabled &&
+		processManager.managedPort()?.standing() === 'managed'
+	) {
+		const qualified = await qualifyManagedSshRemote(config, deps, settingsStore);
+		if (!qualified.ok) {
+			logger.error('Managed SSH remote not qualified; not spawning', LOG_CONTEXT, {
+				sessionId: config.sessionId,
+				remoteId: config.sessionSshRemoteConfig.remoteId,
+			});
+			reportSpawnRefusal(deps, config.sessionId, qualified.message);
+			return { success: false, pid: 0 };
+		}
+		sshRemoteEndpoint = qualified.endpoint;
+		qualifiedRemoteId = qualified.remoteId;
 	}
 	if (configResolution.customEnvSource !== 'none' && effectiveCustomEnvVars) {
 		logger.debug(
@@ -871,6 +910,21 @@ async function handleProcessSpawnImpl(
 		reportSpawnRefusal(deps, config.sessionId, message);
 		return { success: false, pid: 0 };
 	}
+	// The endpoint was bound to one remote; a launch wrapped for another (the
+	// store changed under us) carries no qualification and runs nowhere.
+	if (sshRemoteEndpoint && sshRemoteUsed && sshRemoteUsed.id !== qualifiedRemoteId) {
+		const message = unqualifiedSshLaunchTarget(
+			sshRemoteUsed,
+			'the remote changed between its qualification and the launch.'
+		).message;
+		logger.error('SSH remote changed after qualification; not spawning', LOG_CONTEXT, {
+			sessionId: config.sessionId,
+			qualifiedRemoteId,
+			remoteId: sshRemoteUsed.id,
+		});
+		reportSpawnRefusal(deps, config.sessionId, message);
+		return { success: false, pid: 0 };
+	}
 
 	// Debug logging for shell configuration
 	logger.info(`Shell configuration before spawn`, LOG_CONTEXT, {
@@ -1087,6 +1141,8 @@ async function handleProcessSpawnImpl(
 			// SSH remote context (for SSH-specific error messages)
 			sshRemoteId: sshRemoteUsed?.id,
 			sshRemoteHost: sshRemoteUsed?.host,
+			// The remote endpoint a managed SSH launch was qualified against (above)
+			sshRemoteEndpoint: sshRemoteUsed ? sshRemoteEndpoint : undefined,
 			// SSH stdin script - the entire command is sent via stdin to /bin/bash on remote
 			sshStdinScript,
 			// Human-readable remote agent invocation (shown in Process Details)
@@ -1324,6 +1380,44 @@ function spawnTabId(config: Pick<SpawnProcessConfig, 'sessionId' | 'tabId'>): st
 	if (config.tabId) return config.tabId;
 	const match = /-ai-(.+)$/.exec(config.sessionId);
 	return match ? match[1] : undefined;
+}
+
+/**
+ * Ask the desktop's remote endpoint qualifier where a managed SSH launch may
+ * run: the remote with its endpoint bound, or the refusal to show as-is. A
+ * managed host with no qualifier composed refuses by that name; nothing here
+ * reads the local route table or takes a working login for qualification.
+ */
+async function qualifyManagedSshRemote(
+	config: SpawnProcessConfig,
+	deps: Pick<SpawnHandlerDependencies, 'remoteQualifier'>,
+	settingsStore: Store<MaestroSettings>
+): Promise<
+	| { ok: true; endpoint: SshRemoteEndpointIdentity; remoteId: string }
+	| { ok: false; message: string }
+> {
+	const sshConfig = config.sessionSshRemoteConfig;
+	const named = { id: sshConfig?.remoteId ?? '', name: '' };
+	const qualifier = deps.remoteQualifier?.() ?? null;
+	if (!qualifier) {
+		const detail =
+			'this host composes no remote endpoint qualifier (no enterprise service), so the remote cannot be asked for its managed standing.';
+		return { ok: false, message: unqualifiedSshLaunchTarget(named, detail).message };
+	}
+	const target = await qualifier.qualify({
+		sshConfig,
+		sshStore: createSshRemoteStoreAdapter(settingsStore),
+		providerId: config.toolType,
+	});
+	if (target.kind === 'unresolved') return { ok: false, message: target.message };
+	// SSH is on, so the qualifier never answers local; a remote it bound no
+	// endpoint to is not one a managed launch is handed to either.
+	if (target.kind !== 'remote' || !target.endpoint) {
+		const remote = target.kind === 'remote' ? target.remote : named;
+		const detail = 'the qualifier bound no endpoint identity to it.';
+		return { ok: false, message: unqualifiedSshLaunchTarget(remote, detail).message };
+	}
+	return { ok: true, endpoint: target.endpoint, remoteId: target.remote.id };
 }
 
 /**

@@ -106,7 +106,14 @@ vi.mock('../../../../shared/platformDetection', () => ({
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────
 
-import { ChildProcessSpawner } from '../../../../main/process-manager/spawners/ChildProcessSpawner';
+import {
+	ChildProcessSpawner,
+	managedChildRefusal,
+} from '../../../../main/process-manager/spawners/ChildProcessSpawner';
+import { fakeAdmission } from '../../../helpers/managedSpawnPort';
+import { providerRouteSupport } from '../../../../shared/maestro-lib/providers/capabilities';
+import { MANAGED_CONTRACT_VERSION } from '../../../../shared/maestro-lib/managed/types';
+import type { SshRemoteEndpointIdentity } from '../../../../shared/maestro-lib/launch/ssh-remote-resolver';
 import type { ManagedProcess, ProcessConfig } from '../../../../main/process-manager/types';
 import { getAgentCapabilities } from '../../../../main/agents';
 import { buildChildProcessEnv } from '../../../../main/process-manager/utils/envBuilder';
@@ -1409,5 +1416,78 @@ describe('ChildProcessSpawner', () => {
 
 			expect(prime).not.toHaveBeenCalled();
 		});
+	});
+});
+
+/**
+ * MRC-08-04B: under management the local `ssh` child (the ssh client that
+ * carries the launch to the remote) is admitted only on the remote's own
+ * word, the endpoint identity the spawn handler bound after the enrolled
+ * runtime there attested (`config.sshRemoteEndpoint`). This host's own
+ * `ssh` row stays `unverified` and never qualifies it; the child-process
+ * route keeps reading the table; a standalone launch is untouched.
+ */
+describe('managedChildRefusal: the ssh route on the remote word (MRC-08-04B)', () => {
+	const identity: SshRemoteEndpointIdentity = {
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		installationId: 'inst-remote',
+		runtimeId: 'rt-remote',
+		processEpoch: 'epoch-remote',
+		tenantId: 'tenant-1',
+		orgId: 'org-1',
+		authorityId: 'authority-remote',
+		policyRevision: 3,
+		authority: 'registered',
+		routes: [{ providerId: 'claude-code', route: 'ssh', managed: 'implemented' }],
+	};
+	const admitted = (overrides: Partial<ProcessConfig> = {}) =>
+		createBaseConfig({ admission: fakeAdmission({ provider: 'claude-code' }), ...overrides });
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockSpawn.mockImplementation(() => {
+			mockChildProcess = createMockChildProcess();
+			return mockChildProcess;
+		});
+	});
+
+	it('keeps admitting the local child-process route from the table', () => {
+		expect(managedChildRefusal(admitted())).toBeNull();
+	});
+
+	it('refuses a managed ssh launch with no endpoint bound, and the spawner starts nothing', () => {
+		const refusal = managedChildRefusal(admitted({ sshRemoteId: 'remote-1' }));
+		expect(refusal).toMatchObject({ state: 'unavailable', code: 'capability-unsupported' });
+		expect(refusal?.message).toContain('no qualified remote endpoint is bound');
+		expect(refusal?.message).toContain('Nothing was started');
+
+		const { spawner, processes } = createTestContext();
+		const result = spawner.spawn(
+			admitted({ sshRemoteId: 'remote-1', command: '/usr/bin/ssh', sshStdinScript: 'exec claude' })
+		);
+		expect(result.success).toBe(false);
+		expect(result.managed).toEqual({ state: 'unavailable', code: 'capability-unsupported' });
+		expect(mockSpawn).not.toHaveBeenCalled();
+		expect(processes.size).toBe(0);
+	});
+
+	it('admits the ssh route on the remote attestation alone, never on the local table', () => {
+		expect(
+			managedChildRefusal(admitted({ sshRemoteId: 'remote-1', sshRemoteEndpoint: identity }))
+		).toBeNull();
+		// The local row is what it was: the remote's word is the only qualification.
+		expect(providerRouteSupport('claude-code').find((row) => row.route === 'ssh')).toMatchObject({
+			standalone: 'unverified',
+			managed: 'unsupported',
+		});
+	});
+
+	it('leaves a standalone ssh launch alone', () => {
+		expect(managedChildRefusal(createBaseConfig({ sshRemoteId: 'remote-1' }))).toBeNull();
+		expect(
+			managedChildRefusal(
+				createBaseConfig({ sshRemoteId: 'remote-1', sshRemoteEndpoint: identity })
+			)
+		).toBeNull();
 	});
 });

@@ -28,7 +28,12 @@ import type { SshRemoteConfig } from '../../../shared/types';
 import { buildSshOptionArgs } from '../../../shared/sshOptions';
 import { MaestroSettings } from './persistence';
 import { getDefaultShell, resolveConfiguredShell } from '../../stores/defaults';
-import { currentSpawnActor, handleProcessSpawn, reportSpawnRefusal } from './process/handle-spawn';
+import {
+	currentSpawnActor,
+	handleProcessSpawn,
+	reportSpawnRefusal,
+	type SpawnHandlerDependencies,
+} from './process/handle-spawn';
 import {
 	claimDispatchTicket,
 	describeSpawnActor,
@@ -105,6 +110,8 @@ export interface ProcessHandlerDependencies {
 	 * can omit it cleanly.
 	 */
 	interactiveReplayController?: InteractiveReplayController<ProcessSpawnConfig>;
+	/** The desktop's remote endpoint qualifier (`EnterpriseService.remote`), for a managed SSH spawn (MRC-08-04B). */
+	remoteQualifier?: SpawnHandlerDependencies['remoteQualifier'];
 }
 
 /**
@@ -199,6 +206,7 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 				safeSend,
 				sessionsStore: deps.sessionsStore,
 				interactiveReplayController: deps.interactiveReplayController,
+				remoteQualifier: deps.remoteQualifier,
 			})
 		)
 	);

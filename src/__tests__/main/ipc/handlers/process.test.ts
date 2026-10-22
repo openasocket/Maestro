@@ -44,6 +44,11 @@ import {
 	issueDispatchTicket,
 	runAsClient,
 } from '../../../../main/web-server/auth/transport-actor';
+import { MANAGED_CONTRACT_VERSION } from '../../../../shared/maestro-lib/managed/types';
+import type {
+	SshLaunchTarget,
+	SshRemoteEndpointIdentity,
+} from '../../../../shared/maestro-lib/launch/ssh-remote-resolver';
 
 // Mock electron's ipcMain
 vi.mock('electron', () => ({
@@ -324,6 +329,7 @@ describe('process IPC handlers', () => {
 		spawnAdmitted: ReturnType<typeof vi.fn>;
 		terminalTabConfig: ReturnType<typeof vi.fn>;
 		admissionOf: ReturnType<typeof vi.fn>;
+		managedPort: ReturnType<typeof vi.fn>;
 	};
 	let mockAgentDetector: {
 		getAgent: ReturnType<typeof vi.fn>;
@@ -368,6 +374,8 @@ describe('process IPC handlers', () => {
 			terminalTabConfig: vi.fn((config: unknown) => config),
 			// Standalone: no admission is bound to any process.
 			admissionOf: vi.fn().mockReturnValue(null),
+			// Standalone: no host authority port (see ProcessManager.managedPort).
+			managedPort: vi.fn().mockReturnValue(null),
 		};
 
 		// Create mock agent detector
@@ -4809,6 +4817,179 @@ describe('process IPC handlers', () => {
 
 			expect(spawnCall.sendPromptViaStdin).toBe(false);
 			expect(spawnCall.sendPromptViaStdinRaw).toBe(false);
+		});
+	});
+
+	/**
+	 * MRC-08-04B: on a managed host an SSH spawn is handed over only on the
+	 * remote's own word. The handler asks the enterprise service's remote
+	 * endpoint qualifier beside the launch plan, before any side effect; a
+	 * refusal is reported to the tab as the resolver phrased it and nothing
+	 * runs anywhere; a qualified remote's attestation rides the config to the
+	 * sink. A standalone host never asks.
+	 */
+	describe('managed SSH spawn qualified by the remote (MRC-08-04B)', () => {
+		const remote = {
+			id: 'remote-1',
+			name: 'Dev Server',
+			host: 'dev.example.com',
+			port: 22,
+			username: 'devuser',
+			privateKeyPath: '',
+			enabled: true,
+		};
+		const identity: SshRemoteEndpointIdentity = {
+			contractVersion: MANAGED_CONTRACT_VERSION,
+			installationId: 'inst-remote',
+			runtimeId: 'rt-remote',
+			processEpoch: 'epoch-remote',
+			tenantId: 'tenant-1',
+			orgId: 'org-1',
+			authorityId: 'authority-remote',
+			policyRevision: 3,
+			authority: 'registered',
+			routes: [{ providerId: 'claude-code', route: 'ssh', managed: 'implemented' }],
+		};
+		const sshConfig = { enabled: true, remoteId: 'remote-1' };
+		const spawnSsh = () =>
+			handlers.get('process:spawn')!({} as any, {
+				sessionId: 'session-1',
+				toolType: 'claude-code',
+				cwd: '/remote/project',
+				command: 'claude',
+				args: ['--print'],
+				prompt: 'hello',
+				sessionSshRemoteConfig: sshConfig,
+			});
+		const qualifierAnswering = (answer: SshLaunchTarget) => {
+			const qualify = vi.fn(async () => answer);
+			deps.remoteQualifier = () => ({ qualify, probe: vi.fn() }) as never;
+			return qualify;
+		};
+		const tabOutput = () =>
+			vi
+				.mocked(deps.getMainWindow()!.webContents.send)
+				.mock.calls.filter(([channel]) => channel === 'process:data')
+				.map(([, , text]) => text as string);
+
+		beforeEach(() => {
+			mockAgentDetector.getAgent.mockResolvedValue({
+				id: 'claude-code',
+				requiresPty: false,
+				capabilities: { supportsStreamJsonInput: true },
+			});
+			mockSettingsStore.get.mockImplementation((key, defaultValue) =>
+				key === 'sshRemotes' ? [remote] : defaultValue
+			);
+			mockProcessManager.spawn.mockReturnValue({ pid: 777, success: true });
+			mockProcessManager.managedPort.mockReturnValue({ standing: () => 'managed' });
+		});
+
+		it('refuses by the remote word before any side effect, with the resolver message, and runs nowhere', async () => {
+			const message =
+				'SSH remote execution is enabled for this agent, but under management its remote "Dev Server" is not a qualified managed endpoint: the remote runtime reports no managed standing. The agent was not started: nothing ran on the remote unmanaged, and nothing ran on this machine instead.';
+			const qualify = qualifierAnswering({
+				kind: 'unresolved',
+				reason: 'remote-unqualified',
+				message,
+			});
+
+			const result = await spawnSsh();
+
+			expect(result).toEqual({ success: false, pid: 0 });
+			expect(qualify).toHaveBeenCalledTimes(1);
+			expect(qualify).toHaveBeenCalledWith({
+				sshConfig,
+				sshStore: expect.objectContaining({ getSshRemotes: expect.any(Function) }),
+				providerId: 'claude-code',
+			});
+			// Nothing reached the sink, locally or over SSH, and no remote status was announced.
+			expect(mockProcessManager.admitSpawn).not.toHaveBeenCalled();
+			expect(mockProcessManager.spawnAdmitted).not.toHaveBeenCalled();
+			expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+			expect(vi.mocked(deps.getMainWindow()!.webContents.send)).not.toHaveBeenCalledWith(
+				'process:ssh-remote',
+				expect.anything(),
+				expect.anything()
+			);
+			// The tab is told in the resolver's words.
+			expect(tabOutput()).toEqual([`\r\n[Maestro] ${message}\r\n`]);
+		});
+
+		it('carries a qualified remote attestation to the sink as the launch it admits', async () => {
+			const qualify = qualifierAnswering({ kind: 'remote', remote, endpoint: identity });
+
+			const result = await spawnSsh();
+
+			expect(result).toMatchObject({ pid: 777, success: true, sshRemote: { id: 'remote-1' } });
+			expect(qualify).toHaveBeenCalledTimes(1);
+			expect(mockProcessManager.spawnAdmitted).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId: 'session-1',
+					sshRemoteId: 'remote-1',
+					sshRemoteHost: 'dev.example.com',
+					sshRemoteEndpoint: identity,
+				}),
+				{ peer: 'in-process' }
+			);
+			expect(tabOutput()).toEqual([]);
+		});
+
+		it('refuses a managed host that composes no qualifier, by that name', async () => {
+			deps.remoteQualifier = () => null;
+
+			expect(await spawnSsh()).toEqual({ success: false, pid: 0 });
+
+			expect(mockProcessManager.spawnAdmitted).not.toHaveBeenCalled();
+			expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+			expect(tabOutput().join('')).toContain('composes no remote endpoint qualifier');
+			expect(tabOutput().join('')).toContain('nothing ran on this machine instead');
+		});
+
+		it('refuses a launch wrapped for a remote other than the qualified one', async () => {
+			// The qualifier bound remote-2; the store the wrap reads names remote-1.
+			qualifierAnswering({
+				kind: 'remote',
+				remote: { ...remote, id: 'remote-2', name: 'Other' },
+				endpoint: identity,
+			});
+
+			expect(await spawnSsh()).toEqual({ success: false, pid: 0 });
+
+			expect(mockProcessManager.spawnAdmitted).not.toHaveBeenCalled();
+			expect(tabOutput().join('')).toContain(
+				'the remote changed between its qualification and the launch'
+			);
+		});
+
+		it('never asks on a standalone host, whose SSH spawn carries no endpoint', async () => {
+			mockProcessManager.managedPort.mockReturnValue(null);
+			const qualify = qualifierAnswering({ kind: 'remote', remote, endpoint: identity });
+
+			expect(await spawnSsh()).toMatchObject({ pid: 777, success: true });
+
+			expect(qualify).not.toHaveBeenCalled();
+			const [spawned] = mockProcessManager.spawnAdmitted.mock.calls[0];
+			expect(spawned).toMatchObject({ sshRemoteId: 'remote-1' });
+			expect(spawned.sshRemoteEndpoint).toBeUndefined();
+		});
+
+		it('never asks for a local spawn on a managed host', async () => {
+			const qualify = qualifierAnswering({ kind: 'remote', remote, endpoint: identity });
+
+			await handlers.get('process:spawn')!({} as any, {
+				sessionId: 'session-1',
+				toolType: 'claude-code',
+				cwd: '/local/project',
+				command: 'claude',
+				args: ['--print'],
+				prompt: 'hello',
+			});
+
+			expect(qualify).not.toHaveBeenCalled();
+			const [spawned] = mockProcessManager.spawnAdmitted.mock.calls[0];
+			expect(spawned.sshRemoteId).toBeUndefined();
+			expect(spawned.sshRemoteEndpoint).toBeUndefined();
 		});
 	});
 });

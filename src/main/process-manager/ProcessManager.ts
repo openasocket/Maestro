@@ -24,6 +24,7 @@ import {
 	type LeaseRelease,
 } from '../../shared/maestro-lib/managed/authority';
 import type { ManagedDenialCode, ManagedRunIdentity } from '../../shared/maestro-lib/managed/types';
+import { managedSshEndpointRef } from '../../shared/maestro-lib/launch/ssh-remote-resolver';
 import { generateUUID } from '../../shared/uuid';
 import {
 	autoRunRunIdentity,
@@ -123,8 +124,17 @@ export function buildSpawnRequestSnapshot(config: ProcessConfig): DispatchSnapsh
 			provider: config.toolType,
 			model: modelFromArgs(config.args),
 			operation: resuming ? 'resume' : 'start',
+			// An SSH target names the remote endpoint the launch was qualified
+			// against (MRC-08-04B), so the lease says which remote installation
+			// and authority it goes to, not only the remote's local id.
 			target: config.sshRemoteId
-				? { kind: 'ssh', remoteId: config.sshRemoteId }
+				? {
+						kind: 'ssh',
+						remoteId: config.sshRemoteId,
+						...(config.sshRemoteEndpoint
+							? { endpoint: managedSshEndpointRef(config.sshRemoteEndpoint) }
+							: {}),
+					}
 				: { kind: 'local' },
 			resourceIds: config.images?.length ? [`images:${config.images.length}`] : [],
 		}

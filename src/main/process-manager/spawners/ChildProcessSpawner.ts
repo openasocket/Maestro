@@ -58,17 +58,28 @@ import type { AgentError } from '../../../shared/types';
  * route admits the launch at the real spawn (the lease checked the instant
  * before `spawn`, the pid bound, descendants stopped with the process, a
  * revocation terminating it); the `ssh` route proves no containment on the
- * remote and stays unavailable. Nothing here is a sandbox over the
- * provider's own tools, files or network: that remains unqualified, and the
- * route note says so. A refusal is `unavailable` (no enforcement producer),
- * never a policy decision, and happens before any side effect (no temp file,
- * no prompt file, no process).
+ * remote from here, so it is admitted only on the remote's own word: the
+ * endpoint identity the spawn handler bound after the enrolled runtime there
+ * attested a standing this host accepts (`config.sshRemoteEndpoint`,
+ * MRC-08-04B), never this host's `ssh` row, which stays `unverified`.
+ * Nothing here is a sandbox over the provider's own tools, files or network:
+ * that remains unqualified, and the route note says so. A refusal is
+ * `unavailable` (no enforcement producer), never a policy decision, and
+ * happens before any side effect (no temp file, no prompt file, no process).
  */
 export function managedChildRefusal(
 	config: ProcessConfig
 ): { state: 'unavailable'; code: ManagedDenialCode; message: string } | null {
 	if (!config.admission) return null;
 	const route: ManagedRoute = config.sshRemoteId ? 'ssh' : 'child-process';
+	if (route === 'ssh') {
+		if (config.sshRemoteEndpoint) return null;
+		return {
+			state: 'unavailable',
+			code: 'capability-unsupported',
+			message: `Managed execution of ${config.toolType} over the ssh route is unavailable on this host: no qualified remote endpoint is bound to the launch (the remote runtime's own attestation qualifies it, not this host's route table). Nothing was started.`,
+		};
+	}
 	const support = providerRouteSupport(config.toolType).find((entry) => entry.route === route);
 	if (support?.managed === 'implemented') return null;
 	return {

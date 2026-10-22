@@ -24,7 +24,13 @@ vi.mock('../../../main/coworking/coworking-socket-path', () => ({
 }));
 
 import { ProcessManager } from '../../../main/process-manager';
-import { dispatchedChildContext } from '../../../main/process-manager/ProcessManager';
+import {
+	buildSpawnRequestSnapshot,
+	dispatchedChildContext,
+} from '../../../main/process-manager/ProcessManager';
+import { dispatchSnapshotDigest } from '../../../shared/maestro-lib/managed/authority';
+import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
+import type { SshRemoteEndpointIdentity } from '../../../shared/maestro-lib/launch/ssh-remote-resolver';
 import type { ProcessConfig } from '../../../main/process-manager/types';
 import {
 	buildServerKey,
@@ -1002,5 +1008,76 @@ describe('ProcessManager: the actor each transport binds (MRC-08-01A)', () => {
 			state: 'standalone',
 		});
 		expect(fake.asked).toHaveLength(0);
+	});
+});
+
+/**
+ * MRC-08-04B: a managed SSH request names the enrolled remote runtime the
+ * spawn handler qualified it against, so the lease the authority grants says
+ * which remote installation and authority the launch goes to, not only the
+ * remote's local id. Only the identifying fields are bound (never the
+ * remote's route table), and the request digest changes with them.
+ */
+describe('ProcessManager: the remote endpoint in the lease target (MRC-08-04B)', () => {
+	const identity: SshRemoteEndpointIdentity = {
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		installationId: 'inst-remote',
+		runtimeId: 'rt-remote',
+		processEpoch: 'epoch-remote',
+		tenantId: 'tenant-1',
+		orgId: 'org-1',
+		authorityId: 'authority-remote',
+		policyRevision: 3,
+		authority: 'registered',
+		routes: [{ providerId: 'claude-code', route: 'ssh', managed: 'implemented' }],
+	};
+	const endpointRef = {
+		installationId: 'inst-remote',
+		runtimeId: 'rt-remote',
+		processEpoch: 'epoch-remote',
+		authorityId: 'authority-remote',
+		policyRevision: 3,
+	};
+	const sshRequest = (overrides: Partial<ProcessConfig> = {}) =>
+		config({
+			toolType: 'claude-code',
+			command: 'ssh',
+			args: ['-o', 'BatchMode=yes', 'devuser@dev.example.com'],
+			prompt: undefined,
+			sshRemoteId: 'remote-1',
+			sshRemoteHost: 'dev.example.com',
+			sshStdinScript: 'cd /remote/project\nexec claude --print\n',
+			...overrides,
+		});
+
+	it('binds the qualified endpoint into the snapshot and the lease, by its identifying fields alone', async () => {
+		const port = fakeSpawnPort();
+		const manager = new ProcessManager(() => true, { spawnAuthority: () => port });
+
+		const admitted = await manager.admitSpawn(sshRequest({ sshRemoteEndpoint: identity }), {
+			peer: 'in-process',
+		});
+
+		expect(admitted.state).toBe('admitted');
+		if (admitted.state !== 'admitted') return;
+		const target = { kind: 'ssh', remoteId: 'remote-1', endpoint: endpointRef };
+		expect(admitted.admission.target).toEqual(target);
+		expect(port.asked).toHaveLength(1);
+		expect(port.asked[0].snapshot.target).toEqual(target);
+		expect(admitted.admission.target).not.toHaveProperty('endpoint.routes');
+		expect(admitted.admission.target).not.toHaveProperty('endpoint.tenantId');
+	});
+
+	it('names only the remote id without an attestation, and the digest tells the two apart', () => {
+		const bare = buildSpawnRequestSnapshot(sshRequest());
+		const bound = buildSpawnRequestSnapshot(sshRequest({ sshRemoteEndpoint: identity }));
+
+		expect(bare.target).toEqual({ kind: 'ssh', remoteId: 'remote-1' });
+		expect(bound.target).toEqual({ kind: 'ssh', remoteId: 'remote-1', endpoint: endpointRef });
+		expect(dispatchSnapshotDigest(bare)).not.toBe(dispatchSnapshotDigest(bound));
+		// A local request is untouched by the field.
+		expect(buildSpawnRequestSnapshot(config({ sshRemoteEndpoint: identity })).target).toEqual({
+			kind: 'local',
+		});
 	});
 });

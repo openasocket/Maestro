@@ -88,8 +88,26 @@ export interface ManagedRunIdentity {
 	parentRunId: string | null;
 }
 
-/** Where a dispatch runs: this host, or an SSH remote the host resolved. */
-export type ManagedDispatchTarget = { kind: 'local' } | { kind: 'ssh'; remoteId: string };
+/**
+ * The enrolled runtime a managed SSH launch was qualified against (MRC-08-04B):
+ * the fields of its `SshRemoteEndpointIdentity` that name WHICH remote
+ * installation, process and authority the launch goes to. Bound into the
+ * lease's target by the sink, so the lease names the remote endpoint and not
+ * only the remote's local id; absent on a standalone launch, and on a managed
+ * one the remote never attested, which no managed sink runs.
+ */
+export interface ManagedSshEndpointRef {
+	installationId: string;
+	runtimeId: string;
+	processEpoch: string;
+	authorityId: string;
+	policyRevision: number | null;
+}
+
+/** Where a dispatch runs: this host, or an SSH remote the host resolved (with the endpoint it qualified, under management). */
+export type ManagedDispatchTarget =
+	| { kind: 'local' }
+	| { kind: 'ssh'; remoteId: string; endpoint?: ManagedSshEndpointRef };
 
 /**
  * One source a policy decision was read from. `endpoint` is the verified
