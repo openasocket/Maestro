@@ -66,6 +66,10 @@ export interface LedgerEntry {
 	identity: AuthIdentity;
 	/** When this entry was last minted (audit). */
 	mintedAt: number;
+	/** The ledger epoch the entry was last minted at (MRC-09-01): names WHICH
+	 * consent a managed receipt was taken under. Absent on entries minted
+	 * before it was recorded; never required, so no ledger is dropped for it. */
+	mintedAtEpoch?: number;
 }
 
 /** A removed/revoked plugin - blocks silent re-enable of a restored folder. */
@@ -151,6 +155,20 @@ export interface VerifyResult {
 
 export function shouldDisablePluginForVerifyResult(result: VerifyResult): boolean {
 	return !result.authorized;
+}
+
+/**
+ * One plugin's consented authorization as a managed ceiling is bound to it
+ * (MRC-09-01): the live grants, the identity the user approved, and the
+ * epoch of that approval. Read only; the ceiling never writes back.
+ */
+export interface PluginConsentView {
+	caps: PermissionGrant[];
+	identity: AuthIdentity;
+	mintedAt: number;
+	/** Null when the entry predates epoch recording. */
+	epoch: number | null;
+	trust: LedgerTrustState;
 }
 
 /**
@@ -313,6 +331,7 @@ export class AuthorizationStore {
 			caps: caps.map((c) => ({ ...c })),
 			identity: { ...identity },
 			mintedAt: this.now(),
+			mintedAtEpoch: this.ledger.epoch,
 		};
 		// A fresh mint clears any prior tombstone for this id.
 		this.ledger.tombstones = this.ledger.tombstones.filter((t) => t.pluginId !== pluginId);
@@ -384,8 +403,26 @@ export class AuthorizationStore {
 		this.bump();
 		entry.caps = entry.caps.map((c, i) => (i === idx ? { ...c, scope } : { ...c }));
 		entry.mintedAt = this.now();
+		entry.mintedAtEpoch = this.ledger.epoch;
 		this.persist();
 		return true;
+	}
+
+	/** The consented authorization a managed ceiling binds to: grants plus the
+	 * identity and epoch of the consent. Null unless the plugin is enabled in
+	 * the verified ledger, so a local revoke empties it the same instant it
+	 * empties `readGrants`. */
+	readConsent(pluginId: string): PluginConsentView | null {
+		this.ensureLoaded();
+		const entry = this.ledger.entries[pluginId];
+		if (!entry || !entry.enabled) return null;
+		return {
+			caps: entry.caps.map((c) => ({ ...c })),
+			identity: { ...entry.identity },
+			mintedAt: entry.mintedAt,
+			epoch: typeof entry.mintedAtEpoch === 'number' ? entry.mintedAtEpoch : null,
+			trust: this.trustState(),
+		};
 	}
 
 	/** The granted capabilities for a plugin - the broker's live source of truth.

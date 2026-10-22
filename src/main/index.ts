@@ -53,7 +53,7 @@ import { seedBundledPlugins } from './plugins/bundled-plugins';
 import { SpawnBinaryRegistry } from './plugins/spawn-binary-registry';
 import { transcriptReadEgressConflict } from '../shared/plugins/capability-policy';
 import { evaluateScheduledDispatch } from '../shared/plugins/plugin-dispatch-gate';
-import { PermissionBroker } from './plugins/permission-broker';
+import { PermissionBroker, managedPluginStanding } from './plugins/permission-broker';
 import { PluginSandboxHost } from './plugins/plugin-sandbox-host';
 import { PluginBackgroundSupervisor } from './plugins/plugin-background-supervisor';
 import { PluginGroupingRegistry } from './plugins/plugin-grouping-registry';
@@ -1723,6 +1723,19 @@ app
 
 		const pluginBroker = new PermissionBroker({
 			getGrants: (pluginId) => grantsOf(pluginId),
+			// The managed plugin ceiling (MRC-09-01), read live on every call under
+			// the same enrollment rule the spawn authority uses. No producer publishes
+			// a plugin ceiling over the endpoint socket in this build (CP-01), so an
+			// enrolled host holds none and the broker refuses each plugin call by name
+			// instead of running it on consent alone; a standalone host is unchanged.
+			managed: () =>
+				managedPluginStanding({
+					enrolled:
+						enterpriseService !== null && enterpriseService.identity.read().status !== 'none',
+					policy: enterpriseService?.policy.status() ?? null,
+					ceiling: null,
+				}),
+			getConsent: (pluginId) => authStore.readConsent(pluginId),
 			// Structurally exclude the entire Maestro userData/config tree (grants,
 			// enable-state, encoreFeatures + every setting, agent-configs,
 			// cli-server.json token, the plugins dir, plugin KV, supervisor targets,

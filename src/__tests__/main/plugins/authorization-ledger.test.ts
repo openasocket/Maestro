@@ -497,3 +497,61 @@ describe('AuthorizationStore - verify (refresh-time gate)', () => {
 		});
 	});
 });
+
+describe('readConsent (MRC-09-01)', () => {
+	it('returns the grants, identity and mint epoch of an enabled entry, and null once revoked', () => {
+		const holder = { value: null as Anchor | null };
+		const store = new AuthorizationStore({
+			seal: fakeSeal(),
+			anchor: fakeAnchor(holder),
+			ledgerPath,
+			now: () => 42,
+		});
+		const identity: AuthIdentity = {
+			contentHash: 'h1',
+			signatureStatus: 'trusted',
+			signerKey: 'k1',
+		};
+		expect(store.readConsent('p')).toBeNull();
+		store.mint('p', [{ capability: 'fs:read', scope: '/data', grantedAt: 1 }], identity);
+		const view = store.readConsent('p');
+		expect(view).toEqual({
+			caps: [{ capability: 'fs:read', scope: '/data', grantedAt: 1 }],
+			identity,
+			mintedAt: 42,
+			epoch: 1,
+			trust: 'persistent',
+		});
+		// A copy: mutating the view never reaches the ledger.
+		view!.caps[0].scope = '/';
+		expect(store.readGrants('p')[0].scope).toBe('/data');
+		store.revoke('p');
+		expect(store.readConsent('p')).toBeNull();
+	});
+
+	it('moves the epoch when the user edits an allowlist scope, and reads null for an entry without one', () => {
+		const holder = { value: null as Anchor | null };
+		const store = new AuthorizationStore({
+			seal: fakeSeal(),
+			anchor: fakeAnchor(holder),
+			ledgerPath,
+		});
+		const identity: AuthIdentity = {
+			contentHash: 'h1',
+			signatureStatus: 'trusted',
+			signerKey: 'k1',
+		};
+		store.mint('p', [{ capability: 'agents:dispatch', scope: 'a', grantedAt: 1 }], identity);
+		expect(store.readConsent('p')?.epoch).toBe(1);
+		expect(store.setAllowlistScope('p', 'agents:dispatch', ['a', 'b'])).toBe(true);
+		expect(store.readConsent('p')?.epoch).toBe(2);
+
+		// An entry persisted before epoch recording: re-read through a fresh store.
+		const reread = new AuthorizationStore({
+			seal: fakeSeal(),
+			anchor: fakeAnchor(holder),
+			ledgerPath,
+		});
+		expect(reread.readConsent('p')?.epoch).toBe(2);
+	});
+});
