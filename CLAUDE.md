@@ -172,7 +172,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **A shell command, a PTY or terminal input under management:** `managedCommandRefusal()` in `src/main/process-manager/types.ts`; `managedPtyRefusal()` in `src/main/process-manager/spawners/PtySpawner.ts`; `managedChildRefusal()` in `src/main/process-manager/spawners/ChildProcessSpawner.ts`
 - **The Cue shell boundary under management (final command, resources, local or remote target):** `admitCueShell()`, `cueShellRouteSupport()`, `cueShellAttribution()`, `CueShellSpawnPlan` in `src/main/enterprise/dispatch.ts`; `CueShellExecutionConfig.admission` in `src/main/cue/cue-shell-executor.ts`
 - **The causal context one operation hands a child it dispatches (nested CLI, consult):** `ManagedDelegationContext`, `childDelegationContext()`, `intersectDelegationScope()`, `readDelegationContextEnv()` in `src/shared/maestro-lib/managed/delegation.ts`; `cueCliRouteSupport()` in `src/main/cue/cue-cli-executor.ts`
-- **A plugin act verb under management (dispatch, process, headless send):** `pluginActBinding()`, `admitPluginProcess()`, `pluginProcessRouteSupport()` in `src/main/plugins/plugin-host-handlers.ts`; `pluginHeadlessAuthority()` in `src/main/plugins/plugin-headless-agent-runner.ts`
+- **A plugin act verb under management (dispatch, process, headless send):** `pluginActBinding()`, `admitPluginProcess()`, `pluginProcessRouteSupport()` in `src/main/plugins/plugin-host-handlers.ts`; `pluginHeadlessAuthority()`, `pluginBoundHeadlessAuthority()` in `src/main/plugins/plugin-headless-agent-runner.ts`
 
 #### Providers, accounts, and auth
 

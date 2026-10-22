@@ -18,6 +18,7 @@ import {
 	pluginProcessRouteSupport,
 	pluginProcessSnapshot,
 	purgePluginData,
+	receiptStillHeld,
 	type HostHandlerDeps,
 	type PluginActBinding,
 	type PluginSessionMetadata,
@@ -3371,6 +3372,225 @@ describe('managed act bindings (MRC-09-02)', () => {
 					standalone: 'unsupported',
 					managed: 'unsupported',
 				});
+			}
+		});
+	});
+
+	describe('consent-bound headless turns (MRC-09-02A)', () => {
+		const friendly = 'write a friendly summary';
+		/** A broker whose managed standing and consent can move under a running turn. */
+		const movableBroker = (grants: PermissionGrant[]) => {
+			const live = {
+				standing: {
+					standing: 'managed',
+					ceiling: ceiling(),
+					policyRevision: 3,
+				} as ManagedPluginStanding,
+				consent: consent(),
+			};
+			const broker = new PermissionBroker({
+				getGrants: () => grants,
+				managed: () => live.standing,
+				getConsent: () => live.consent,
+			});
+			return { broker, live };
+		};
+
+		it('hands a standalone send sink exactly the six arguments it always had, and a title sink three', async () => {
+			const sendAgent = vi.fn(async (...args: unknown[]) => ({
+				success: true,
+				response: `${args.length}`,
+				sessionId: 'ps-1',
+			}));
+			const generateTitle = vi.fn(async (...args: unknown[]) => `${args.length}`);
+			const h = buildHostCallHandlers(
+				makeDeps({
+					broker: new PermissionBroker({
+						getGrants: () => [scopedGrant('agents:dispatch', 'a')],
+						managed: () => ({ standing: 'standalone' }),
+						getConsent: () => consent(),
+					}),
+					isPluginTrusted: () => true,
+					dispatchUnattendedAllowed: () => true,
+					sendAgent,
+					generateTitle,
+				})
+			);
+			await expect(h['agents.send']!('p', { agentId: 'a', prompt: friendly })).resolves.toEqual({
+				success: true,
+				response: '6',
+				sessionId: 'ps-1',
+			});
+			expect(sendAgent.mock.calls[0]).toHaveLength(6);
+			await expect(
+				h['agents.generateTitle']!('p', { agentId: 'a', firstMessage: friendly })
+			).resolves.toBe('3');
+			expect(generateTitle.mock.calls[0]).toHaveLength(3);
+		});
+
+		it('binds a managed send: the sink gets the binding as the trailing argument with the CLI receipt slots empty', async () => {
+			const sendAgent = vi.fn(async (...args: unknown[]) => ({
+				success: true,
+				response: 'done',
+				sessionId: 'ps-2',
+				calls: args.length,
+			}));
+			const deps = makeDeps({
+				broker: managedBroker([scopedGrant('agents:dispatch', 'a')]),
+				isPluginTrusted: () => true,
+				dispatchUnattendedAllowed: () => true,
+				sendAgent,
+			});
+			const h = buildHostCallHandlers(deps);
+			await expect(h['agents.send']!('p', { agentId: 'a', prompt: friendly })).resolves.toEqual({
+				success: true,
+				response: 'done',
+				sessionId: 'ps-2',
+			});
+			const args = sendAgent.mock.calls[0]!;
+			expect(args).toHaveLength(9);
+			expect(args.slice(0, 5)).toEqual(['a', friendly, undefined, expect.any(AbortSignal), 'auto']);
+			expect(args[5]).toEqual(expect.any(Function));
+			expect(args[6]).toBeUndefined();
+			expect(args[7]).toBeUndefined();
+			const binding = args[8] as PluginActBinding;
+			expect(binding.pluginId).toBe('p');
+			expect(binding.receipt).toEqual(receipt);
+			expect(delegationContextProblems(binding.delegation)).toEqual([]);
+			expect(binding.delegation.delegation).toEqual({
+				chain: [{ kind: 'service', id: 'plugin:p' }],
+				grantRef: 'plugin-consent:p:sha256:abc:7',
+			});
+			expect(binding.delegation.policyRevision).toBe(3);
+			expect(deps.providerSessions!.isOwned('p', 'a', 'ps-2')).toBe(true);
+		});
+
+		it('binds a managed title turn as the fourth argument of its sink', async () => {
+			const generateTitle = vi.fn(async (...args: unknown[]) => `${args.length}`);
+			const h = buildHostCallHandlers(
+				makeDeps({
+					broker: managedBroker([scopedGrant('agents:dispatch', 'a')]),
+					isPluginTrusted: () => true,
+					dispatchUnattendedAllowed: () => true,
+					generateTitle,
+				})
+			);
+			await expect(
+				h['agents.generateTitle']!('p', { agentId: 'a', firstMessage: friendly })
+			).resolves.toBe('4');
+			const args = generateTitle.mock.calls[0]!;
+			expect(args.slice(0, 3)).toEqual(['a', friendly, expect.any(AbortSignal)]);
+			expect((args[3] as PluginActBinding).receipt).toEqual(receipt);
+			expect((args[3] as PluginActBinding).delegation.delegation.chain).toEqual([
+				{ kind: 'service', id: 'plugin:p' },
+			]);
+		});
+
+		it('a bound send is cancelled the moment the policy generation moves under it (progress re-check)', async () => {
+			const { broker, live } = movableBroker([scopedGrant('agents:dispatch', 'a')]);
+			const progress: AgentSendProgressEvent = {
+				type: 'commentary',
+				text: 'working',
+				at: '2026-10-22T00:00:00Z',
+			};
+			let signalSeen: AbortSignal | undefined;
+			const sendAgent = vi.fn(
+				async (
+					_agentId: string,
+					_prompt: string,
+					_sessionId: string | undefined,
+					signal: AbortSignal | undefined,
+					_origin: string | undefined,
+					report: ((event: AgentSendProgressEvent) => void) | undefined
+				) => {
+					signalSeen = signal;
+					report?.(progress);
+					expect(signal?.aborted).toBe(false);
+					live.standing = {
+						standing: 'managed',
+						ceiling: ceiling({ policyRevision: 4 }),
+						policyRevision: 4,
+					};
+					report?.(progress);
+					return { success: true, response: 'late', sessionId: 'ps-late' };
+				}
+			);
+			const onProgress = vi.fn();
+			const deps = makeDeps({
+				broker,
+				isPluginTrusted: () => true,
+				dispatchUnattendedAllowed: () => true,
+				sendAgent,
+			});
+			const h = buildHostCallHandlers(deps);
+			await expect(
+				h['agents.send']!('p', { agentId: 'a', prompt: friendly }, { onProgress })
+			).resolves.toEqual({
+				success: false,
+				response: null,
+				sessionId: null,
+				error: 'Agent run timed out or was cancelled',
+			});
+			expect(onProgress).toHaveBeenCalledTimes(1);
+			expect(signalSeen?.aborted).toBe(true);
+			expect(deps.providerSessions!.isOwned('p', 'a', 'ps-late')).toBe(false);
+		});
+
+		it('a quiet bound send whose consent epoch moved is refused before its text is released or its session remembered', async () => {
+			const { broker, live } = movableBroker([scopedGrant('agents:dispatch', 'a')]);
+			const sendAgent = vi.fn(async () => {
+				live.consent = { ...consent(), epoch: 8, mintedAt: 9 };
+				return { success: true, response: 'quiet', sessionId: 'ps-quiet' };
+			});
+			const deps = makeDeps({
+				broker,
+				isPluginTrusted: () => true,
+				dispatchUnattendedAllowed: () => true,
+				sendAgent,
+			});
+			const h = buildHostCallHandlers(deps);
+			await expect(h['agents.send']!('p', { agentId: 'a', prompt: friendly })).rejects.toThrow(
+				/ceiling receipt the turn was admitted on no longer holds/
+			);
+			expect(sendAgent).toHaveBeenCalledOnce();
+			expect(deps.providerSessions!.isOwned('p', 'a', 'ps-quiet')).toBe(false);
+			// The same post-run check guards a title turn (its handler folds the refusal into null).
+			const generateTitle = vi.fn(async () => {
+				live.consent = { ...consent(), epoch: 9, mintedAt: 10 };
+				return 'A Title';
+			});
+			live.consent = consent();
+			const titled = buildHostCallHandlers(
+				makeDeps({
+					broker,
+					isPluginTrusted: () => true,
+					dispatchUnattendedAllowed: () => true,
+					generateTitle,
+				})
+			);
+			await expect(
+				titled['agents.generateTitle']!('p', { agentId: 'a', firstMessage: friendly })
+			).resolves.toBeNull();
+			expect(generateTitle).toHaveBeenCalledOnce();
+		});
+
+		it('receiptStillHeld: a standalone run is held by the grant; a bound run by the exact receipt', () => {
+			const binding = pluginActBinding('p', { allowed: true, managed: receipt })!;
+			expect(receiptStillHeld(undefined, { allowed: true })).toBe(true);
+			expect(receiptStillHeld(undefined, { allowed: false })).toBe(false);
+			expect(receiptStillHeld(binding, { allowed: true, managed: receipt })).toBe(true);
+			expect(receiptStillHeld(binding, { allowed: false, managed: receipt })).toBe(false);
+			// A standing that went standalone under a bound run is not a way back.
+			expect(receiptStillHeld(binding, { allowed: true })).toBe(false);
+			for (const moved of [
+				{ policyRevision: 4 },
+				{ contentHash: 'sha256:other' },
+				{ signerKey: 'pub-2' },
+				{ consentEpoch: 8 },
+			]) {
+				expect(
+					receiptStillHeld(binding, { allowed: true, managed: { ...receipt, ...moved } })
+				).toBe(false);
 			}
 		});
 	});

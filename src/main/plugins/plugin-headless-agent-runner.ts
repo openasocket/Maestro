@@ -2,14 +2,20 @@
  * One host-owned, headless provider turn, shared by plugin send and CLI send.
  * Under management (MRC-09-02) it is admitted by the host's own spawn
  * authority (`deps.managed`, through `pluginHeadlessAuthority`), not by the
- * data dir's binding, which on an enrolled desktop holds no authority.
+ * data dir's binding, which on an enrolled desktop holds no authority. A turn
+ * a plugin host call carries its binding for (MRC-09-02A) is admitted as that
+ * plugin's child (`pluginBoundHeadlessAuthority`), by id and consent.
  */
 import type { SessionInfo } from '../../shared/types';
 import type { ProcessSpawnAuthorityPort } from '../process-manager/types';
 import type { HeadlessSpawnAuthority } from '../../shared/maestro-lib/managed/host-adapter';
 import type { ManagedPrincipalRef } from '../../shared/maestro-lib/managed/types';
 import { RELAY_PLUGIN_ID } from '../../shared/plugins/relay-identity';
-import { pluginPrincipal } from './plugin-host-handlers';
+import { pluginPrincipal, type PluginActBinding } from './plugin-host-handlers';
+import {
+	childDelegationContext,
+	delegationContextProblems,
+} from '../../shared/maestro-lib/managed/delegation';
 import type { AgentResult, SpawnAgentOptions } from '../../cli/services/agent-spawner';
 import type { HeadlessAgentRunner } from './plugin-manager-singleton';
 import { createPluginRunProofFile, removePluginRunProofFile } from './plugin-tool-run-identity';
@@ -57,11 +63,12 @@ export interface PluginHeadlessRunnerDeps {
 }
 
 /**
- * The chain a headless plugin turn carries, by what the caller said of itself:
- * the Relay plugin for a Relay conversation (the one caller that names itself
- * through the origin), nothing for a turn no plugin is named for. Threading
- * the calling plugin's consent-bound binding through `agents.send` is
- * MRC-09-02A; until then an `auto` turn is a direct action of this process.
+ * The chain a headless turn with NO binding carries, by what the caller said
+ * of itself: the Relay plugin for a Relay conversation (the one caller that
+ * names itself through the origin), nothing for a turn no plugin is named
+ * for (the authenticated CLI send, a direct action of this process). A plugin
+ * host call carries its consent-bound binding instead (MRC-09-02A), and is
+ * admitted through `pluginBoundHeadlessAuthority`, never by its origin.
  */
 export function pluginHeadlessChain(origin: 'user' | 'auto' | 'relay'): ManagedPrincipalRef[] {
 	return origin === 'relay' ? [pluginPrincipal(RELAY_PLUGIN_ID)] : [];
@@ -101,6 +108,58 @@ export function pluginHeadlessAuthority(
 	};
 }
 
+/**
+ * The authority a plugin's consent-bound headless turn is admitted with
+ * (MRC-09-02A): the turn is the CHILD of the plugin's act-verb call, bound
+ * as the process sink binds a dispatched turn (`dispatchedChildContext`):
+ * the chain one link deeper (the target agent), parented under the plugin's
+ * request and sharing its root, the plugin's ledger consent as the grant
+ * reference, the request and attempt the spawner minted for this launch as
+ * the child's own, so the record the admission binds is the launch. The
+ * child runs under THIS host's policy generation (the revision the spawner
+ * read off the port), whatever the receipt named. A binding that is not a
+ * delegation context is refused by name before the port is asked, and so is
+ * a launch that also claims a workflow or a chain of its own: a plugin's
+ * turn is its child, never both.
+ */
+export function pluginBoundHeadlessAuthority(
+	port: ProcessSpawnAuthorityPort,
+	binding: PluginActBinding,
+	agentId: string
+): HeadlessSpawnAuthority {
+	return {
+		standing: () => port.standing(),
+		get authority() {
+			return port.authority;
+		},
+		policy: () => port.policy(),
+		unavailableReason: null,
+		context: (input) => {
+			const problems = delegationContextProblems(binding.delegation).map(
+				(problem) => `the plugin binding is not a delegation context: ${problem}`
+			);
+			if (input.workflow) problems.push('a plugin-bound turn is not an attempt of a workflow');
+			if (input.delegation) {
+				problems.push("a plugin-bound turn is the plugin's child and carries no chain of its own");
+			}
+			if (problems.length > 0) return { ok: false, code: 'invalid-input', problems };
+			const child = childDelegationContext(binding.delegation, {
+				link: { kind: 'agent', id: agentId },
+				requestId: input.identity.requestId,
+				attemptId: input.identity.attemptId,
+			});
+			return port.verify({
+				actor: { peer: 'in-process' },
+				identity: child.identity,
+				traceId: child.traceId,
+				policyRevision: input.policyRevision,
+				workflow: child.workflow,
+				delegation: child.delegation,
+			});
+		},
+	};
+}
+
 /** Build a cancellable host turn using live desktop provider settings and execution mode.
  * Required tools/receipts fail before spawn when no authenticated local MCP bridge exists.
  * Every issued proof is revoked in finally, including provider and cleanup failures.
@@ -116,7 +175,8 @@ export function createPluginHeadlessAgentRunner(
 		origin = 'auto',
 		onProgress,
 		receiptToolId,
-		requirePluginTools = false
+		requirePluginTools = false,
+		binding
 	) => {
 		const agent = deps.getAgent(agentId);
 		if (!agent) throw new Error(`agents.send: no agent "${agentId}"`);
@@ -167,9 +227,14 @@ export function createPluginHeadlessAgentRunner(
 				: undefined;
 			deps.audit(agent.id, !!providerSessionId);
 			// The host's own authority admits the turn (read now, so an enrollment
-			// that appeared since the last run governs this one).
+			// that appeared since the last run governs this one): as the calling
+			// plugin's child when the call carried its binding, else by origin.
 			const port = deps.managed?.() ?? null;
-			const managed = port ? pluginHeadlessAuthority(port, pluginHeadlessChain(origin)) : undefined;
+			const managed = port
+				? binding
+					? pluginBoundHeadlessAuthority(port, binding, agent.id)
+					: pluginHeadlessAuthority(port, pluginHeadlessChain(origin))
+				: undefined;
 			if (signal?.aborted) {
 				return {
 					success: false,

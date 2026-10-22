@@ -10,10 +10,12 @@ import type { SpawnAgentOptions } from '../../../cli/services/agent-spawner';
 import type { SessionInfo } from '../../../shared/types';
 import {
 	createPluginHeadlessAgentRunner,
+	pluginBoundHeadlessAuthority,
 	pluginHeadlessAuthority,
 	pluginHeadlessChain,
 	type PluginHeadlessRunnerDeps,
 } from '../../../main/plugins/plugin-headless-agent-runner';
+import { pluginActBinding } from '../../../main/plugins/plugin-host-handlers';
 import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
 import type { HeadlessSpawnAuthority } from '../../../shared/maestro-lib/managed/host-adapter';
 
@@ -901,5 +903,131 @@ describe('managed admission through the host authority (MRC-09-02)', () => {
 		expect((seen[0] as HeadlessSpawnAuthority).standing()).toBe('standalone');
 		expect(seen[1]).toBe('absent');
 		expect(seen[2]).toBe('absent');
+	});
+
+	describe("a turn carrying the calling plugin's binding (MRC-09-02A)", () => {
+		const receipt = {
+			policyRevision: 3,
+			outcome: 'within-ceiling' as const,
+			contentHash: 'sha256:abc',
+			signerKey: 'pub-1',
+			consentEpoch: 7,
+		};
+		const binding = () => pluginActBinding('p', { allowed: true, managed: receipt })!;
+
+		it("is admitted as the plugin's child: chain one deeper, parented under its request, consent as the grant, this host's revision", async () => {
+			const port = fakeSpawnPort();
+			let managed: HeadlessSpawnAuthority | undefined;
+			let querySource: string | undefined;
+			const spawn = vi.fn(async (_t, _c, _p, _s, options?: SpawnAgentOptions) => {
+				managed = options?.managed;
+				querySource = options?.querySource;
+				return { success: true, response: 'done' };
+			});
+			const bound = binding();
+			const run = createPluginHeadlessAgentRunner({ ...baseDeps(spawn), managed: () => port });
+			await run(
+				'agent-a',
+				'hello',
+				undefined,
+				undefined,
+				'auto',
+				undefined,
+				undefined,
+				false,
+				bound
+			);
+			expect(querySource).toBe('auto');
+			expect(managed).toBeDefined();
+			expect(managed!.standing()).toBe('managed');
+			expect(managed!.authority).toBe(port.authority);
+			expect(managed!.unavailableReason).toBeNull();
+			const verified = managed!.context({ identity, traceId: 'cli-req-1', policyRevision: 1 });
+			expect(verified.ok).toBe(true);
+			if (!verified.ok) return;
+			const root = bound.delegation.identity.requestId;
+			expect(verified.context.delegation).toEqual({
+				chain: [
+					{ kind: 'service', id: 'plugin:p' },
+					{ kind: 'agent', id: 'agent-a' },
+				],
+				grantRef: 'plugin-consent:p:sha256:abc:7',
+			});
+			expect(verified.context.identity).toEqual({
+				requestId: 'req-1',
+				idempotencyKey: 'req-1',
+				attemptId: 'att-1',
+				runId: 'req-1',
+				rootRunId: root,
+				parentRunId: root,
+			});
+			expect(verified.context.traceId).toBe(`delegated:${root}:req-1:att-1`);
+			expect(verified.context.policyRevision).toBe(1);
+			expect(verified.context.workflow).toBeNull();
+		});
+
+		it("outranks the origin: a relay-origin turn with a binding is that plugin's child, not the Relay by name", async () => {
+			const port = fakeSpawnPort();
+			let managed: HeadlessSpawnAuthority | undefined;
+			const spawn = vi.fn(async (_t, _c, _p, _s, options?: SpawnAgentOptions) => {
+				managed = options?.managed;
+				return { success: true, response: 'done' };
+			});
+			const run = createPluginHeadlessAgentRunner({ ...baseDeps(spawn), managed: () => port });
+			await run(
+				'agent-a',
+				'hello',
+				undefined,
+				undefined,
+				'relay',
+				undefined,
+				undefined,
+				false,
+				binding()
+			);
+			const verified = managed!.context({ identity, traceId: 't', policyRevision: 1 });
+			expect(verified.ok && verified.context.delegation.chain).toEqual([
+				{ kind: 'service', id: 'plugin:p' },
+				{ kind: 'agent', id: 'agent-a' },
+			]);
+		});
+
+		it('refuses by name, before the port is asked, a binding that is not a context, a workflow claim, or a chain of its own', () => {
+			const port = fakeSpawnPort();
+			const verify = vi.spyOn(port, 'verify');
+			const broken = {
+				...binding(),
+				delegation: { ...binding().delegation, contractVersion: 999 },
+			} as ReturnType<typeof binding>;
+			const notAContext = pluginBoundHeadlessAuthority(port, broken, 'agent-a').context({
+				identity,
+				traceId: 't',
+				policyRevision: 1,
+			});
+			expect(notAContext.ok).toBe(false);
+			expect(!notAContext.ok && notAContext.code).toBe('invalid-input');
+			expect(!notAContext.ok && notAContext.problems.join(' ')).toMatch(
+				/plugin binding is not a delegation context/
+			);
+			const workflow = pluginBoundHeadlessAuthority(port, binding(), 'agent-a').context({
+				identity,
+				traceId: 't',
+				policyRevision: 1,
+				workflow: { workflowId: 'wf', ownerFence: null } as never,
+			});
+			expect(!workflow.ok && workflow.problems).toEqual([
+				'a plugin-bound turn is not an attempt of a workflow',
+			]);
+			const chained = pluginBoundHeadlessAuthority(port, binding(), 'agent-a').context({
+				identity,
+				traceId: 't',
+				policyRevision: 1,
+				delegation: { chain: [{ kind: 'agent', id: 'initiator' }], grantRef: 'g-1' },
+			});
+			expect(!chained.ok && chained.problems).toEqual([
+				"a plugin-bound turn is the plugin's child and carries no chain of its own",
+			]);
+			expect(verify).not.toHaveBeenCalled();
+		});
 	});
 });

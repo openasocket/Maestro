@@ -342,25 +342,37 @@ export interface HostHandlerDeps {
 	 * ceiling receipt and the delegation context the sink admits the turn as the
 	 * child of); a standalone host is handed exactly the two it always was. */
 	dispatch?: (agentId: string, prompt: string, binding?: PluginActBinding) => Promise<unknown>;
-	/** Headless, resumable provider turn. The host returns the provider session id. */
+	/** Headless, resumable provider turn. The host returns the provider session id.
+	 * The shape is the `HeadlessAgentRunner` the desktop wires directly: the two
+	 * receipt slots after `onProgress` belong to the authenticated CLI send and
+	 * are typed so the plugin host can never fill them. On a managed host the
+	 * trailing argument is the calling plugin's binding (MRC-09-02A), passed
+	 * only when the broker consulted the ceiling; a standalone host's sink is
+	 * handed exactly the six arguments it always was. */
 	sendAgent?: (
 		agentId: string,
 		prompt: string,
 		sessionId?: string,
 		signal?: AbortSignal,
 		origin?: 'user' | 'auto' | 'relay',
-		onProgress?: (event: AgentSendProgressEvent) => void
+		onProgress?: (event: AgentSendProgressEvent) => void,
+		receiptToolId?: undefined,
+		requirePluginTools?: undefined,
+		binding?: PluginActBinding
 	) => Promise<{
 		success: boolean;
 		response: string | null;
 		sessionId: string | null;
 		error?: string;
 	}>;
-	/** Host-owned tab naming turn; resolves provider, cwd and auth by agent id. */
+	/** Host-owned tab naming turn; resolves provider, cwd and auth by agent id.
+	 * On a managed host the fourth argument is the calling plugin's binding
+	 * (MRC-09-02A); a standalone host's sink is handed the three it always was. */
 	generateTitle?: (
 		agentId: string,
 		firstMessage: string,
-		signal: AbortSignal
+		signal: AbortSignal,
+		binding?: PluginActBinding
 	) => Promise<string | null>;
 	/** Host-only persistent ownership ledger for resumable provider sessions. */
 	providerSessions?: PluginAgentSessionBindings;
@@ -513,6 +525,31 @@ export function pluginActBinding(
 		receipt: decision.managed,
 		delegation: pluginDelegationContext({ pluginId, receipt: decision.managed }),
 	};
+}
+
+/**
+ * Whether a live re-authorization still holds the receipt a bound run was
+ * admitted on: the same policy generation, consented content, publisher and
+ * consent epoch. A run with no binding (a standalone host) is held by the
+ * grant alone. A ceiling that moved under a running turn (a new revision, a
+ * re-consent, a standing that changed) ends the run the way a revoked grant
+ * does, rather than letting the turn finish on an admission that no longer
+ * describes it; the grant and the ceiling are both re-read by the broker.
+ */
+export function receiptStillHeld(
+	binding: PluginActBinding | undefined,
+	decision: Pick<BrokerDecision, 'allowed' | 'managed'>
+): boolean {
+	if (!decision.allowed) return false;
+	if (!binding) return true;
+	const live = decision.managed;
+	return (
+		!!live &&
+		live.policyRevision === binding.receipt.policyRevision &&
+		live.contentHash === binding.receipt.contentHash &&
+		live.signerKey === binding.receipt.signerKey &&
+		live.consentEpoch === binding.receipt.consentEpoch
+	);
 }
 
 /**
@@ -1859,11 +1896,14 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 			) {
 				throw new Error('agents.send: invalid provider sessionId');
 			}
-			assertBrokerAllowed(deps, pluginId, 'agents.send', p);
+			const decision = assertBrokerAllowed(deps, pluginId, 'agents.send', p);
 			if (!deps.dispatchUnattendedAllowed?.(pluginId, agentId)) {
 				throw new Error('agents.send requires separate unattended consent');
 			}
 			assertTrustedActVerb(deps, pluginId);
+			// Under management the turn is admitted as this plugin's child, by id
+			// and consent (MRC-09-02A); a standalone decision binds nothing.
+			const bound = pluginActBinding(pluginId, decision);
 			// The trusted Relay is an authorized user conversation transport.
 			// Preserve its full prompt and the agent's configured execution mode;
 			// topic keywords are not an additional conversation permission gate.
@@ -1891,11 +1931,14 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 					runs.add(controller);
 					activeRuns.set(pluginId, runs);
 					try {
-						/** Forward progress only while the run retains live grants, consent and Relay identity. */
+						/** Forward progress only while the run retains live grants, consent, the ceiling receipt it was admitted on and Relay identity. */
 						const onProgress = (event: AgentSendProgressEvent): void => {
 							if (controller.signal.aborted) return;
 							if (
-								!deps.broker.authorize(pluginId, 'agents.send', p, { audit: false }).allowed ||
+								!receiptStillHeld(
+									bound,
+									deps.broker.authorize(pluginId, 'agents.send', p, { audit: false })
+								) ||
 								!deps.dispatchUnattendedAllowed?.(pluginId, agentId) ||
 								(relayConversation &&
 									!isRelayConversationIdentity(pluginId, deps.getPluginSignature?.(pluginId)))
@@ -1905,14 +1948,27 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 							}
 							context?.onProgress(event);
 						};
-						const { success, response, sessionId, error } = await sendAgent(
-							agentId,
-							prompt,
-							opts.sessionId as string | undefined,
-							controller.signal,
-							pluginId === RELAY_PLUGIN_ID ? 'relay' : 'auto',
-							onProgress
-						);
+						const origin = pluginId === RELAY_PLUGIN_ID ? 'relay' : 'auto';
+						const { success, response, sessionId, error } = bound
+							? await sendAgent(
+									agentId,
+									prompt,
+									opts.sessionId as string | undefined,
+									controller.signal,
+									origin,
+									onProgress,
+									undefined,
+									undefined,
+									bound
+								)
+							: await sendAgent(
+									agentId,
+									prompt,
+									opts.sessionId as string | undefined,
+									controller.signal,
+									origin,
+									onProgress
+								);
 						// Stop/uninstall may have purged this plugin's bindings while the
 						// provider was closing. A late successful result must not restore them.
 						if (controller.signal.aborted) {
@@ -1925,7 +1981,11 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 						}
 						// Quiet providers may finish without any progress callbacks. Check
 						// current grants again before releasing text or recording ownership.
-						assertBrokerAllowed(deps, pluginId, 'agents.send', p);
+						if (!receiptStillHeld(bound, assertBrokerAllowed(deps, pluginId, 'agents.send', p))) {
+							throw new Error(
+								'agents.send: the plugin ceiling receipt the turn was admitted on no longer holds'
+							);
+						}
 						if (!deps.dispatchUnattendedAllowed?.(pluginId, agentId)) {
 							throw new Error('agents.send requires separate unattended consent');
 						}
@@ -1985,12 +2045,13 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 					`agents.generateTitle: firstMessage must be 1-${MAX_TITLE_MESSAGE_CHARS} characters`
 				);
 			}
-			assertBrokerAllowed(deps, pluginId, 'agents.generateTitle', p);
+			const decision = assertBrokerAllowed(deps, pluginId, 'agents.generateTitle', p);
 			if (!deps.dispatchUnattendedAllowed?.(pluginId, agentId)) {
 				throw new Error('agents.generateTitle requires separate unattended consent');
 			}
 			assertTrustedActVerb(deps, pluginId);
 			assertLowOrMediumRisk(firstMessage);
+			const bound = pluginActBinding(pluginId, decision);
 			return underGuard(
 				deps.actionGuard,
 				pluginId,
@@ -2002,9 +2063,20 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 					runs.add(controller);
 					pluginRunControllers.set(pluginId, runs);
 					try {
-						const title = await generateTitle(agentId, firstMessage, controller.signal);
+						const title = bound
+							? await generateTitle(agentId, firstMessage, controller.signal, bound)
+							: await generateTitle(agentId, firstMessage, controller.signal);
 						if (controller.signal.aborted) return null;
-						assertBrokerAllowed(deps, pluginId, 'agents.generateTitle', p);
+						if (
+							!receiptStillHeld(
+								bound,
+								assertBrokerAllowed(deps, pluginId, 'agents.generateTitle', p)
+							)
+						) {
+							throw new Error(
+								'agents.generateTitle: the plugin ceiling receipt the turn was admitted on no longer holds'
+							);
+						}
 						if (!deps.dispatchUnattendedAllowed?.(pluginId, agentId)) {
 							throw new Error('agents.generateTitle requires separate unattended consent');
 						}

@@ -15,6 +15,7 @@
 import type { PluginManager } from './plugin-manager';
 import type { AgentSendProgressEvent } from '../../shared/plugins/rpc-protocol';
 import type { PluginToolReceipt } from './plugin-tool-run-identity';
+import type { PluginActBinding } from './plugin-host-handlers';
 
 export interface HeadlessAgentReply {
 	success: boolean;
@@ -33,7 +34,14 @@ export type HeadlessAgentRunner = (
 	origin?: 'user' | 'auto' | 'relay',
 	onProgress?: (event: AgentSendProgressEvent) => void,
 	receiptToolId?: string,
-	requirePluginTools?: boolean
+	requirePluginTools?: boolean,
+	/**
+	 * The calling plugin's consent-bound act binding (MRC-09-02A), present only
+	 * for a plugin host call on a managed desktop: the turn is then admitted as
+	 * that plugin's child, by id and consent, not by what the origin says. A
+	 * CLI send and a standalone host pass none; the turn is a direct action.
+	 */
+	binding?: PluginActBinding
 ) => Promise<HeadlessAgentReply>;
 let headlessAgentRunner: HeadlessAgentRunner | null = null;
 

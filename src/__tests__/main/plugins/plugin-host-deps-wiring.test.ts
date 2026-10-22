@@ -107,6 +107,11 @@ describe('production host-handler deps wiring (FC2 - wired and gated)', () => {
 		}
 	});
 
+	it('hands the headless runner to agents.send directly, so a plugin binding reaches its admission (MRC-09-02A)', () => {
+		expect(keys).toContain('sendAgent');
+		expect(source).toMatch(/sendAgent: runHeadlessAgent,/);
+	});
+
 	it('wires title generation with the same unattended and host-owned naming path', () => {
 		expect(keys).toContain('generateTitle');
 		expect(keys).toContain('dispatchUnattendedAllowed');
