@@ -42,6 +42,12 @@ import { getPrompt } from '../../prompt-manager';
 import { isWindows } from '../../../shared/platformDetection';
 import { truncateAtWordBoundary } from '../../../shared/formatters';
 import type { ProcessManager } from '../../process-manager';
+import { dispatchedChildContext } from '../../process-manager/ProcessManager';
+import type { DispatchedSpawnIds, ProcessConfig } from '../../process-manager/types';
+import {
+	delegationContextEnv,
+	type ManagedDelegationContext,
+} from '../../../shared/maestro-lib/managed/delegation';
 import type { AgentDetector } from '../../agents';
 import type { MaestroSettings } from './persistence';
 import { captureException } from '../../utils/sentry';
@@ -121,6 +127,49 @@ export interface TabNamingConfig {
 	maestroPPath?: string;
 	/** Plugin calls pin the authorized agent; ordinary tab naming may use the utility agent. */
 	useUtilityAgent?: boolean;
+	/**
+	 * The operation that DISPATCHED this naming turn (a plugin's
+	 * `agents.generateTitle` under management, MRC-09-02B), as the sink binds
+	 * it: the spawn goes through `spawnAdmitted` with this on its config, so
+	 * `admitSpawn` derives the naming turn as that operation's child (chain one
+	 * link deeper, parented under its request) instead of this host's own chat
+	 * turn, and the process is stamped with the same child record. Absent, the
+	 * turn spawns exactly as before, this host's own action.
+	 */
+	delegation?: ManagedDelegationContext;
+	/** The request and attempt the dispatched naming turn is, minted by the
+	 *  caller beside `delegation`; meaningless without it. */
+	dispatchedAs?: DispatchedSpawnIds;
+}
+
+/**
+ * The spawn-config fields a dispatched naming turn carries (`delegation`,
+ * `dispatchedAs`) and the env entry its process is stamped with: the CHILD
+ * record `admitSpawn` binds (`dispatchedChildContext`), derived here from the
+ * same ids so the record the sink binds and the record the process carries are
+ * one. Empty for a turn that was not dispatched, so the standalone config is
+ * byte-for-byte what it was.
+ */
+export function namingSpawnLineage(
+	sessionId: string,
+	config: Pick<TabNamingConfig, 'delegation' | 'dispatchedAs'>
+): {
+	lineage: Pick<ProcessConfig, 'delegation' | 'dispatchedAs'>;
+	env: Record<string, string>;
+} {
+	if (!config.delegation) return { lineage: {}, env: {} };
+	const child = dispatchedChildContext({
+		sessionId,
+		delegation: config.delegation,
+		dispatchedAs: config.dispatchedAs,
+	});
+	return {
+		lineage: {
+			delegation: config.delegation,
+			...(config.dispatchedAs ? { dispatchedAs: config.dispatchedAs } : {}),
+		},
+		env: child ? delegationContextEnv(child) : {},
+	};
 }
 
 /** Shared isolated naming turn for UI tabs and brokered plugin titles.
@@ -269,9 +318,14 @@ export async function generateTabName(
 		// agent points that agent at the wrong provider, so they are only
 		// merged when the two are the same agent. `configResolution` is
 		// already keyed by `effectiveAgentType` and always applies.
+		// A dispatched naming turn (MRC-09-02B) is stamped with the child record
+		// the sink binds, BEFORE the SSH wrap so it reaches the remote agent and
+		// not only the ssh client (the same derivation as a group chat turn's).
+		const dispatched = namingSpawnLineage(sessionId, config);
 		let customEnvVars: Record<string, string> | undefined = {
 			...(configResolution.effectiveCustomEnvVars ?? {}),
 			...(effectiveAgentType === config.agentType ? (config.sessionCustomEnvVars ?? {}) : {}),
+			...dispatched.env,
 		};
 
 		// Resolve the triggering agent's Claude token source ONCE, up front,
@@ -558,7 +612,15 @@ export async function generateTabName(
 						LOG_CONTEXT,
 						{ sessionId, effort: cheapNaming.effort, ...rejection }
 					);
-					resolve(generateTabName(deps, config, signal, true));
+					// A dispatched turn's retry is a new ATTEMPT of the same request,
+					// so the sink never binds two spawns as one attempt.
+					const retryConfig: TabNamingConfig = config.dispatchedAs
+						? {
+								...config,
+								dispatchedAs: { requestId: config.dispatchedAs.requestId, attemptId: uuidv4() },
+							}
+						: config;
+					resolve(generateTabName(deps, retryConfig, signal, true));
 					return;
 				}
 
@@ -629,7 +691,7 @@ export async function generateTabName(
 			// returned rather than awaited. Bail to null like every other
 			// failure path here so a cosmetic feature can't break the send.
 			try {
-				processManager.spawn({
+				const spawnConfig: ProcessConfig = {
 					sessionId,
 					toolType: effectiveAgentType,
 					cwd,
@@ -647,7 +709,43 @@ export async function generateTabName(
 					sendPromptViaStdin: shouldSendPromptViaStdin,
 					sendPromptViaStdinRaw,
 					promptAlreadyInArgs,
-				});
+					...dispatched.lineage,
+				};
+				if (config.delegation && processManager.spawnAdmitted) {
+					// A dispatched naming turn is admitted at the sink for this
+					// process as the actor (the plugin host call runs in-process):
+					// a managed desktop binds it as the dispatching operation's
+					// child under its own policy generation and spawns nothing
+					// without the admission; a standalone desktop spawns as before.
+					// A refusal returns as a failed result with no process behind
+					// it (no exit ever arrives), so the name resolves null now
+					// instead of at the timeout.
+					void processManager
+						.spawnAdmitted(spawnConfig, { peer: 'in-process' })
+						.then((result) => {
+							if (result.success) return;
+							logger.warn('Dispatched tab naming spawn was not admitted', LOG_CONTEXT, {
+								sessionId,
+								managed: result.managed,
+								error: result.error,
+							});
+							resolveWith(null, result.managed ? 'not admitted' : 'spawn failed');
+						})
+						.catch((error: unknown) => {
+							if (!isExpectedSpawnFailure(error)) {
+								void captureException(error);
+							}
+							logger.warn('Dispatched tab naming spawn failed', LOG_CONTEXT, {
+								sessionId,
+								command,
+								code: (error as NodeJS.ErrnoException).code,
+								error: String(error),
+							});
+							resolveWith(null, 'spawn failed');
+						});
+				} else {
+					processManager.spawn(spawnConfig);
+				}
 			} catch (error) {
 				if (!isExpectedSpawnFailure(error)) {
 					void captureException(error);

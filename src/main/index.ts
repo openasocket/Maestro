@@ -2727,11 +2727,24 @@ app
 					pluginManager?.getRegistry().records.find((record) => record.id === pluginId)?.signature,
 				dispatch: async (agentId, prompt) => dispatchPromptToSession(agentId, prompt),
 				sendAgent: runHeadlessAgent,
-				generateTitle: async (agentId, firstMessage, signal) => {
+				generateTitle: async (agentId, firstMessage, signal, binding) => {
 					const session = (getLiveSessions() as SessionInfo[]).find(
 						(candidate) => candidate.id === agentId
 					);
 					if (!session) throw new Error(`agents.generateTitle: no agent "${agentId}"`);
+					// Under management the calling plugin's binding (MRC-09-02B) rides
+					// onto the naming spawn's config: the sink admits the turn as the
+					// plugin's child (chain one link deeper, parented under the
+					// plugin's request) with this host's generation, and the ids the
+					// child is minted as are fixed here so the record the sink binds
+					// and the record the process is stamped with are one. A standalone
+					// host, and a call with no binding, spawn exactly as before.
+					const dispatched = binding
+						? {
+								delegation: binding.delegation,
+								dispatchedAs: { requestId: crypto.randomUUID(), attemptId: crypto.randomUUID() },
+							}
+						: {};
 					return generateTabName(
 						{
 							getProcessManager: () => processManager,
@@ -2749,6 +2762,7 @@ app
 							maestroPMode: session.maestroPMode,
 							maestroPPath: session.maestroPPath,
 							useUtilityAgent: false,
+							...dispatched,
 						},
 						signal
 					);

@@ -115,9 +115,20 @@ describe('production host-handler deps wiring (FC2 - wired and gated)', () => {
 	it('wires title generation with the same unattended and host-owned naming path', () => {
 		expect(keys).toContain('generateTitle');
 		expect(keys).toContain('dispatchUnattendedAllowed');
-		expect(source).toMatch(/generateTitle: async \(agentId, firstMessage, signal\) =>/);
+		expect(source).toMatch(/generateTitle: async \(agentId, firstMessage, signal, binding\) =>/);
 		expect(source).toMatch(/return generateTabName\(/);
 		expect(source).toMatch(/useUtilityAgent: false/);
+	});
+
+	it("the title sink hands the calling plugin's delegation to the naming spawn with the ids it is minted as (MRC-09-02B)", () => {
+		// The binding reaches the naming spawn's config: `admitSpawn` binds the
+		// turn as the plugin's child, and the request/attempt are fixed here so
+		// the record the sink binds and the record the process carries are one.
+		expect(source).toMatch(/delegation: binding\.delegation,/);
+		expect(source).toMatch(
+			/dispatchedAs: \{ requestId: crypto\.randomUUID\(\), attemptId: crypto\.randomUUID\(\) \},/
+		);
+		expect(source).toMatch(/useUtilityAgent: false,\n\t{7}\.\.\.dispatched,/);
 	});
 
 	it('still wires the safe read-only deps (guard targets the right call)', () => {

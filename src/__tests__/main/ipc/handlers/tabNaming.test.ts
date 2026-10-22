@@ -13,6 +13,13 @@ import {
 } from '../../../../main/ipc/handlers/tabNaming';
 import { logger } from '../../../../main/utils/logger';
 import type { ProcessManager } from '../../../../main/process-manager';
+import { namingSpawnLineage } from '../../../../main/ipc/handlers/tabNaming';
+import {
+	MANAGED_DELEGATION_ENV_VAR,
+	readDelegationContextEnv,
+	type ManagedDelegationContext,
+} from '../../../../shared/maestro-lib/managed/delegation';
+import { MANAGED_CONTRACT_VERSION } from '../../../../shared/maestro-lib/managed/types';
 import type { AgentDetector, AgentConfig } from '../../../../main/agents';
 
 // Mock the logger
@@ -2887,5 +2894,266 @@ describe('extractTabName utility', () => {
 			// Long lines are filtered out, resulting in null
 			expect(result).toBeNull();
 		});
+	});
+});
+
+describe('dispatched naming turn (MRC-09-02B)', () => {
+	// The context a plugin's `agents.generateTitle` hands the title sink under
+	// management: the plugin as the one chain link, its consent as the grant.
+	const PLUGIN_CONTEXT: ManagedDelegationContext = {
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		identity: {
+			requestId: 'req-plugin',
+			idempotencyKey: 'req-plugin',
+			attemptId: 'att-plugin',
+			runId: 'req-plugin',
+			rootRunId: 'req-plugin',
+			parentRunId: null,
+		},
+		traceId: 'plugin:p:req-plugin:att-plugin',
+		workflow: null,
+		delegation: {
+			chain: [{ kind: 'service', id: 'plugin:p' }],
+			grantRef: 'plugin-consent:p:sha256:deadbeef:1',
+		},
+		policyRevision: 3,
+	};
+	const DISPATCHED_AS = { requestId: 'req-naming', attemptId: 'att-naming' };
+	const NAMING_SESSION = 'tab-naming-mock-uuid-1234';
+
+	type SpawnConfig = {
+		sessionId: string;
+		delegation?: ManagedDelegationContext;
+		dispatchedAs?: { requestId: string; attemptId: string };
+		customEnvVars?: Record<string, string>;
+		args: string[];
+	};
+
+	let mockProcessManager: {
+		spawn: Mock;
+		spawnAdmitted: Mock;
+		kill: Mock;
+		on: Mock;
+		off: Mock;
+	};
+	let mockAgentDetector: { getAgent: Mock };
+	const listeners = new Map<string, (...args: unknown[]) => void>();
+
+	const agent: AgentConfig = {
+		id: 'claude-code',
+		name: 'Claude Code',
+		command: 'claude',
+		path: '/usr/local/bin/claude',
+		args: ['--print', '--output-format', 'stream-json'],
+		batchModeArgs: ['--print'],
+		capabilities: { supportsPromptViaStdin: true },
+	};
+
+	function deps() {
+		return {
+			getProcessManager: () => mockProcessManager as unknown as ProcessManager,
+			getAgentDetector: () => mockAgentDetector as unknown as AgentDetector,
+			agentConfigsStore: { get: vi.fn().mockReturnValue({}), set: vi.fn() } as any,
+			settingsStore: {
+				get: vi.fn((key: string, defaultValue?: unknown) =>
+					key === 'utilityAgentId' || key === 'utilityModelId'
+						? (defaultValue ?? null)
+						: (defaultValue ?? {})
+				),
+				set: vi.fn(),
+			} as any,
+		};
+	}
+
+	function baseConfig() {
+		return {
+			userMessage: 'Build a login form',
+			agentType: 'claude-code',
+			cwd: '/work',
+			sessionCustomEnvVars: { MINE: '1' },
+			useUtilityAgent: false,
+			enableMaestroP: false,
+		};
+	}
+
+	/** Lets the naming turn finish with a name once the spawn was observed. */
+	function answer(name: string) {
+		listeners.get('data')?.(NAMING_SESSION, name);
+		listeners.get('exit')?.(NAMING_SESSION, 0);
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		listeners.clear();
+		mockProcessManager = {
+			spawn: vi.fn(() => ({ pid: 101, success: true })),
+			spawnAdmitted: vi.fn(async () => ({ pid: 202, success: true })),
+			kill: vi.fn(),
+			on: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+				listeners.set(event, cb);
+			}),
+			off: vi.fn(),
+		};
+		mockAgentDetector = { getAgent: vi.fn().mockResolvedValue(agent) };
+	});
+
+	it('namingSpawnLineage: the child record the sink binds is the record the process is stamped with', () => {
+		const { lineage, env } = namingSpawnLineage(NAMING_SESSION, {
+			delegation: PLUGIN_CONTEXT,
+			dispatchedAs: DISPATCHED_AS,
+		});
+		expect(lineage).toEqual({ delegation: PLUGIN_CONTEXT, dispatchedAs: DISPATCHED_AS });
+		const stamped = readDelegationContextEnv(env);
+		expect(stamped.status).toBe('ok');
+		const child = stamped.status === 'ok' ? stamped.context : null;
+		// The CHILD of the plugin's operation: chain one link deeper (the ephemeral
+		// naming session, its own process), parented under the plugin's request,
+		// minted as the ids the caller fixed, this host's generation carried.
+		expect(child?.delegation.chain).toEqual([
+			{ kind: 'service', id: 'plugin:p' },
+			{ kind: 'agent', id: NAMING_SESSION },
+		]);
+		expect(child?.delegation.grantRef).toBe('plugin-consent:p:sha256:deadbeef:1');
+		expect(child?.identity).toEqual({
+			requestId: 'req-naming',
+			idempotencyKey: 'req-naming',
+			attemptId: 'att-naming',
+			runId: 'req-naming',
+			rootRunId: 'req-plugin',
+			parentRunId: 'req-plugin',
+		});
+		expect(child?.traceId).toBe('delegated:req-plugin:req-naming:att-naming');
+		expect(child?.policyRevision).toBe(3);
+		expect(child?.workflow).toBeNull();
+	});
+
+	it('namingSpawnLineage: a turn that was not dispatched adds nothing to the config or the env', () => {
+		expect(namingSpawnLineage(NAMING_SESSION, {})).toEqual({ lineage: {}, env: {} });
+		expect(namingSpawnLineage(NAMING_SESSION, { dispatchedAs: DISPATCHED_AS })).toEqual({
+			lineage: {},
+			env: {},
+		});
+	});
+
+	it('spawns a dispatched turn through spawnAdmitted as this process, with the lineage on the config and the child record stamped', async () => {
+		const pending = generateTabName(deps(), {
+			...baseConfig(),
+			delegation: PLUGIN_CONTEXT,
+			dispatchedAs: DISPATCHED_AS,
+		});
+		await vi.waitFor(() => expect(mockProcessManager.spawnAdmitted).toHaveBeenCalledOnce());
+		expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+		const [config, actor] = mockProcessManager.spawnAdmitted.mock.calls[0] as [
+			SpawnConfig,
+			unknown,
+		];
+		expect(actor).toEqual({ peer: 'in-process' });
+		expect(config.sessionId).toBe(NAMING_SESSION);
+		expect(config.delegation).toEqual(PLUGIN_CONTEXT);
+		expect(config.dispatchedAs).toEqual(DISPATCHED_AS);
+		// Stamped beside the agent's own variables, the same record the sink binds.
+		expect(config.customEnvVars?.MINE).toBe('1');
+		expect(config.customEnvVars).toEqual(
+			expect.objectContaining(
+				namingSpawnLineage(NAMING_SESSION, {
+					delegation: PLUGIN_CONTEXT,
+					dispatchedAs: DISPATCHED_AS,
+				}).env
+			)
+		);
+		answer('Login Form');
+		await expect(pending).resolves.toBe('Login Form');
+	});
+
+	it('spawns a turn with no delegation exactly as before: spawn, no lineage, no stamp, even when spawnAdmitted exists', async () => {
+		const pending = generateTabName(deps(), baseConfig());
+		await vi.waitFor(() => expect(mockProcessManager.spawn).toHaveBeenCalledOnce());
+		expect(mockProcessManager.spawnAdmitted).not.toHaveBeenCalled();
+		const [config] = mockProcessManager.spawn.mock.calls[0] as [SpawnConfig];
+		expect(config).not.toHaveProperty('delegation');
+		expect(config).not.toHaveProperty('dispatchedAs');
+		expect(config.customEnvVars).toEqual({ MINE: '1' });
+		expect(config.customEnvVars).not.toHaveProperty(MANAGED_DELEGATION_ENV_VAR);
+		answer('Login Form');
+		await expect(pending).resolves.toBe('Login Form');
+	});
+
+	it('resolves null at once when the sink refuses the dispatched turn (no process, no exit to wait for)', async () => {
+		mockProcessManager.spawnAdmitted.mockResolvedValue({
+			pid: -1,
+			success: false,
+			error: 'This host runs under management and the launch carries no admission.',
+			managed: { state: 'denied', code: 'lease-invalid' },
+		});
+		const result = await generateTabName(deps(), {
+			...baseConfig(),
+			delegation: PLUGIN_CONTEXT,
+			dispatchedAs: DISPATCHED_AS,
+		});
+		expect(result).toBeNull();
+		expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalledWith(
+			'Dispatched tab naming spawn was not admitted',
+			'[TabNaming]',
+			expect.objectContaining({ managed: { state: 'denied', code: 'lease-invalid' } })
+		);
+		expect(mockProcessManager.off).toHaveBeenCalledWith('exit', expect.any(Function));
+	});
+
+	it('resolves null when the admitted spawn rejects, reporting an unexpected error', async () => {
+		const { captureException } = await import('../../../../main/utils/sentry');
+		(captureException as Mock).mockClear();
+		mockProcessManager.spawnAdmitted.mockRejectedValue(
+			new TypeError('spawnCommand is not a string')
+		);
+		const result = await generateTabName(deps(), {
+			...baseConfig(),
+			delegation: PLUGIN_CONTEXT,
+			dispatchedAs: DISPATCHED_AS,
+		});
+		expect(result).toBeNull();
+		expect(captureException).toHaveBeenCalledTimes(1);
+	});
+
+	it('falls through to spawn with the lineage on the config for a process manager with no admitted path', async () => {
+		const bare = { ...mockProcessManager, spawnAdmitted: undefined };
+		const pending = generateTabName(
+			{ ...deps(), getProcessManager: () => bare as unknown as ProcessManager },
+			{ ...baseConfig(), delegation: PLUGIN_CONTEXT, dispatchedAs: DISPATCHED_AS }
+		);
+		await vi.waitFor(() => expect(mockProcessManager.spawn).toHaveBeenCalledOnce());
+		const [config] = mockProcessManager.spawn.mock.calls[0] as [SpawnConfig];
+		expect(config.delegation).toEqual(PLUGIN_CONTEXT);
+		expect(config.dispatchedAs).toEqual(DISPATCHED_AS);
+		answer('Login Form');
+		await expect(pending).resolves.toBe('Login Form');
+	});
+
+	it('retries an effort refusal as a new attempt of the same request', async () => {
+		const pending = generateTabName(deps(), {
+			...baseConfig(),
+			delegation: PLUGIN_CONTEXT,
+			dispatchedAs: DISPATCHED_AS,
+		});
+		await vi.waitFor(() => expect(mockProcessManager.spawnAdmitted).toHaveBeenCalledOnce());
+		// The provider refuses the cheap effort; the turn runs again at the agent's own.
+		listeners.get('agent-error')?.(NAMING_SESSION, {
+			type: 'unknown',
+			message:
+				'Error: Model "auto" does not support reasoning effort configuration (requested: "low").',
+			recoverable: false,
+			agentId: 'claude-code',
+			sessionId: NAMING_SESSION,
+			timestamp: Date.now(),
+		});
+		listeners.get('exit')?.(NAMING_SESSION, 1);
+		await vi.waitFor(() => expect(mockProcessManager.spawnAdmitted).toHaveBeenCalledTimes(2));
+		const [first] = mockProcessManager.spawnAdmitted.mock.calls[0] as [SpawnConfig];
+		const [second] = mockProcessManager.spawnAdmitted.mock.calls[1] as [SpawnConfig];
+		expect(second.delegation).toEqual(PLUGIN_CONTEXT);
+		expect(second.dispatchedAs?.requestId).toBe(first.dispatchedAs?.requestId);
+		expect(second.dispatchedAs?.attemptId).not.toBe(first.dispatchedAs?.attemptId);
+		answer('Login Form');
+		await expect(pending).resolves.toBe('Login Form');
 	});
 });
