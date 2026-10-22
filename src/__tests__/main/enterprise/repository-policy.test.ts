@@ -23,10 +23,13 @@ import {
 	repositoryRemoteOrigin,
 	repositorySlugFromRemote,
 	type ManagedRepositoryStanding,
+	type RepositoryEffectDecision,
+	type RepositoryEffectKind,
 	type RepositoryEffectRequest,
 	type RepositoryPolicyCeiling,
 } from '../../../main/enterprise/repository-policy';
 import type { IdentityRead } from '../../../main/enterprise/identity-store';
+import { isGitHubAuthError, isGitHubMissingScopeError } from '../../../main/utils/ghErrors';
 
 function document(overrides: Record<string, unknown> = {}): Record<string, unknown> {
 	return {
@@ -506,5 +509,126 @@ describe('createRepositoryPolicySource', () => {
 		expect(src.authorize(request())).toMatchObject({ allowed: true });
 		revision = 4;
 		expect(src.authorize(request())).toMatchObject({ code: 'unavailable' });
+	});
+});
+
+describe('repository effects over a local fixture, never an authentication fallback (MRC-09-07)', () => {
+	/** The local fixture: a bare repository on this disk is the only remote the ceiling admits. */
+	const LOCAL_REMOTE = '/tmp/remotes/acme/widgets.git';
+	const localDocument = (effects: readonly RepositoryEffectKind[] = REPOSITORY_EFFECTS) =>
+		document({
+			actors: [
+				{ actor: 'operator', effects: [...effects] },
+				{ actor: 'lite-device', effects: [...REPOSITORY_EFFECTS] },
+			],
+			repositories: { allow: ['acme/*'] },
+			remotes: { allow: ['file:'] },
+		});
+	const enrolled = { status: 'ok', record: { registration: { actorId: 'actor-1' } } };
+	const unregistered = { status: 'ok', record: {} };
+	const sourceOver = (raw: Record<string, unknown> | null, read: object = enrolled) => {
+		const src = createRepositoryPolicySource({
+			identity: { read: () => read as IdentityRead },
+			policy: () => ({ appliedRevision: 3 }),
+		});
+		if (raw) {
+			const outcome = src.install(raw);
+			if (!outcome.installed) throw new Error(outcome.problems.join('; '));
+		}
+		return src;
+	};
+	/** The chain a contribution runs, as the runner holds it: each effect by itself, remote ones against the fixture. */
+	const chain: Array<[RepositoryEffectKind, RepositoryEffectRequest['resource'], string | null]> = [
+		['clone', 'remote', LOCAL_REMOTE],
+		['branch', 'local', null],
+		['fork', 'remote', LOCAL_REMOTE],
+		['commit', 'local', null],
+		['push', 'remote', `file://${LOCAL_REMOTE}`],
+		['pull-request', 'remote', LOCAL_REMOTE],
+		['finalize', 'remote', LOCAL_REMOTE],
+		['cancel', 'remote', LOCAL_REMOTE],
+	];
+
+	it('admits every effect of a contribution against the local remote, each with its own receipt', () => {
+		const src = sourceOver(localDocument());
+		for (const [effect, resource, remote] of chain) {
+			expect(src.authorize(request({ effect, resource, remote })), effect).toEqual({
+				allowed: true,
+				managed: {
+					policyRevision: 3,
+					surface: 'symphony-runner',
+					actor: 'the operator',
+					effect,
+					repository: 'acme/widgets',
+					remote: resource === 'remote' ? 'file:' : null,
+					outcome: 'within-ceiling',
+				},
+			});
+		}
+	});
+
+	it('holds each effect by itself: an admitted clone is no permit for a push the ceiling omits', () => {
+		const src = sourceOver(localDocument(['clone', 'branch', 'commit', 'pull-request']));
+		expect(src.authorize(request({ effect: 'clone', remote: LOCAL_REMOTE }))).toMatchObject({
+			allowed: true,
+		});
+		expect(src.authorize(request({ effect: 'push', remote: LOCAL_REMOTE }))).toMatchObject({
+			allowed: false,
+			code: 'outside-ceiling',
+			message: 'the repository ceiling admits no push effect for the operator',
+			managed: { effect: 'push', outcome: 'outside-ceiling' },
+		});
+		expect(src.authorize(request({ effect: 'pull-request', remote: LOCAL_REMOTE }))).toMatchObject({
+			allowed: true,
+		});
+	});
+
+	it('never answers a refusal as an authentication failure a login would fix', () => {
+		const device: RepositoryEffectRequest['actor'] = {
+			kind: 'transport',
+			actor: { peer: 'device-pairing', deviceId: 'dev-1' },
+		};
+		type Overrides = Partial<RepositoryEffectRequest>;
+		const refusals: Array<[string, Record<string, unknown> | null, Overrides, object?]> = [
+			['unavailable', null, { remote: LOCAL_REMOTE }],
+			['unauthenticated', localDocument(), { actor: device, remote: LOCAL_REMOTE }, unregistered],
+			['outside-ceiling', localDocument(['branch']), {}],
+			['repository-unknown', localDocument(), { repository: null }],
+			['repository-denied', localDocument(), { repository: 'acme-x/w' }],
+			['remote-unknown', localDocument(), { remote: null }],
+			['remote-denied', localDocument(), {}],
+		];
+		for (const [code, raw, overrides, read] of refusals) {
+			const decision: RepositoryEffectDecision = sourceOver(raw, read).authorize(
+				request(overrides)
+			);
+			expect(decision.allowed, code).toBe(false);
+			if (decision.allowed) continue;
+			expect(decision.code, code).toBe(code);
+			expect(decision.managed.outcome, code).toBe(code);
+			const asRunnerReports = `[managed-${decision.code}] ${decision.message}`;
+			expect(asRunnerReports, code).not.toBe('GitHub CLI not authenticated');
+			expect(asRunnerReports, code).not.toMatch(/gh auth|log ?in|logged|credential/i);
+			expect(isGitHubAuthError({ message: asRunnerReports, stderr: '' }), code).toBe(false);
+			expect(isGitHubMissingScopeError({ message: asRunnerReports }), code).toBe(false);
+		}
+	});
+
+	it('moves nothing on a refusal: the standing stays managed, the ceiling installed, the next effect held again', () => {
+		const src = sourceOver(localDocument(['clone', 'branch', 'commit']));
+		expect(src.authorize(request({ remote: LOCAL_REMOTE }))).toMatchObject({
+			code: 'outside-ceiling',
+		});
+		expect(src.standing()).toMatchObject({ standing: 'managed', policyRevision: 3 });
+		expect(src.installed()?.policyRevision).toBe(3);
+		expect(src.authorize(request({ effect: 'clone', remote: LOCAL_REMOTE }))).toMatchObject({
+			allowed: true,
+			managed: { outcome: 'within-ceiling' },
+		});
+		src.clear();
+		expect(src.standing()).toMatchObject({ standing: 'managed', ceiling: null });
+		expect(src.authorize(request({ effect: 'clone', remote: LOCAL_REMOTE }))).toMatchObject({
+			code: 'unavailable',
+		});
 	});
 });

@@ -58,11 +58,18 @@ import {
 	cancelContribution,
 	type SymphonyRepositoryGate,
 } from '../../../main/services/symphony-runner';
-import type {
-	RepositoryEffectActor,
-	RepositoryEffectDecision,
-	RepositoryEffectRequest,
+import {
+	REPOSITORY_EFFECTS,
+	createRepositoryPolicySource,
+	type RepositoryEffectActor,
+	type RepositoryEffectAuthority,
+	type RepositoryEffectDecision,
+	type RepositoryEffectKind,
+	type RepositoryEffectRequest,
 } from '../../../main/enterprise/repository-policy';
+import type { IdentityRead } from '../../../main/enterprise/identity-store';
+import { runAsTransport } from '../../../main/web-server/auth/transport-actor';
+import { isGitHubAuthError, isGitHubMissingScopeError } from '../../../main/utils/ghErrors';
 
 describe('Symphony Runner Service', () => {
 	// Helper to set up full successful workflow mocks (7 calls for startContribution)
@@ -1981,5 +1988,358 @@ describe('Symphony Runner under a managed repository gate (MRC-09-05)', () => {
 			expect(commands).not.toContainEqual(expect.arrayContaining(['pr', 'close']));
 			expect(fs.rm).not.toHaveBeenCalled();
 		});
+	});
+});
+
+// ============================================================================
+// The real repository ceiling over a local fixture (MRC-09-07)
+// ============================================================================
+
+describe('Symphony Runner over the real repository ceiling (MRC-09-07)', () => {
+	const okExec = { stdout: '', stderr: '', exitCode: 0 };
+	/** The local fixture: a bare repository on this disk, the only remote the ceiling admits. */
+	const LOCAL_REMOTE = '/tmp/remotes/acme/widgets.git';
+	const LOCAL_PATH = '/tmp/managed-local';
+	const identity = (read: object) => read as unknown as IdentityRead;
+	const enrolled = identity({ status: 'ok', record: { registration: { actorId: 'actor-1' } } });
+	const unregistered = identity({ status: 'ok', record: {} });
+	const neverEnrolled = identity({ status: 'none' });
+	const device = { kind: 'lite' as const, deviceId: 'dev-1', deviceName: 'Phone' };
+
+	/** A ceiling admitting the operator (and a paired device) the named effects, against acme/* over a local remote only. */
+	const localCeiling = (effects: readonly RepositoryEffectKind[] = REPOSITORY_EFFECTS) => ({
+		policyRevision: 3,
+		actors: [
+			{ actor: 'operator', effects: [...effects] },
+			{ actor: 'lite-device', effects: [...REPOSITORY_EFFECTS] },
+		],
+		repositories: { allow: ['acme/*'] },
+		remotes: { allow: ['file:'] },
+	});
+
+	/** The desktop's composition: one source reading the identity and the applied revision live, per call. */
+	function ceiling(options: { read?: IdentityRead; install?: unknown } = {}) {
+		const state = { read: options.read ?? enrolled, revision: 3 as number | null };
+		const source = createRepositoryPolicySource({
+			identity: { read: () => state.read },
+			policy: () => (state.revision === null ? null : { appliedRevision: state.revision }),
+		});
+		if (options.install !== undefined) {
+			const outcome = source.install(options.install);
+			if (!outcome.installed) throw new Error(outcome.problems.join('; '));
+		}
+		return { source, state };
+	}
+
+	const startOptions = (authority: RepositoryEffectAuthority | null, repoUrl = LOCAL_REMOTE) => ({
+		contributionId: 'contrib-7',
+		repoSlug: 'acme/widgets',
+		repoUrl,
+		issueNumber: 12,
+		issueTitle: 'Fix widgets',
+		documentPaths: [],
+		localPath: LOCAL_PATH,
+		branchName: 'symphony/issue-12',
+		gate: { authority },
+	});
+
+	/** Every command the sinks issued: the binary first, then its arguments. */
+	const commandsRun = () =>
+		vi.mocked(execFileNoThrow).mock.calls.map((call) => [call[0], ...(call[1] ?? [])]);
+	const ran = (...prefix: string[]) =>
+		commandsRun().some((command) => prefix.every((word, index) => command[index] === word));
+	/** Origin points at the local fixture; everything else succeeds. */
+	function originIsLocal() {
+		vi.mocked(execFileNoThrow).mockImplementation(async (_command, args) =>
+			args?.[0] === 'remote' && args[1] === 'get-url'
+				? { stdout: `${LOCAL_REMOTE}\n`, stderr: '', exitCode: 0 }
+				: okExec
+		);
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.mocked(execFileNoThrow).mockReset();
+		vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+		vi.mocked(fs.mkdir).mockResolvedValue(undefined);
+		vi.mocked(fs.rm).mockResolvedValue(undefined);
+		vi.mocked(ensureForkSetup).mockReset();
+		vi.mocked(ensureForkSetup).mockResolvedValue({ isFork: false });
+	});
+
+	it('admits the whole start over the local fixture, one receipt per effect naming file: and never the path', async () => {
+		const { source } = ceiling({ install: localCeiling() });
+
+		const result = await startContribution(startOptions(source));
+
+		expect(result.success).toBe(true);
+		const shape = (r: NonNullable<typeof result.managed>[number]) =>
+			[r.effect, r.remote, r.outcome, r.policyRevision, r.actor, r.repository, r.surface].join(' ');
+		expect(result.managed?.map(shape)).toEqual([
+			'clone file: within-ceiling 3 the operator acme/widgets symphony-runner',
+			'branch  within-ceiling 3 the operator acme/widgets symphony-runner',
+			'commit  within-ceiling 3 the operator acme/widgets symphony-runner',
+			'push file: within-ceiling 3 the operator acme/widgets symphony-runner',
+			'pull-request file: within-ceiling 3 the operator acme/widgets symphony-runner',
+		]);
+		expect(JSON.stringify(result.managed)).not.toContain('/tmp/remotes');
+		expect(ran('git', 'clone', '--depth=1', LOCAL_REMOTE, LOCAL_PATH)).toBe(true);
+		expect(ran('git', 'push', '-u', 'origin', 'symphony/issue-12')).toBe(true);
+		expect(ran('gh', 'pr', 'create', '--draft')).toBe(true);
+		expect(fs.rm).not.toHaveBeenCalled();
+	});
+
+	it('admits the finalization and the cancel against the origin the clone points at, the local fixture', async () => {
+		const { source } = ceiling({ install: localCeiling() });
+		originIsLocal();
+
+		const finalized = await finalizeContribution(LOCAL_PATH, 9, 12, 'Fix widgets', undefined, {
+			authority: source,
+		});
+
+		expect(finalized.success).toBe(true);
+		expect(finalized.managed?.map((r) => [r.effect, r.repository, r.remote, r.outcome])).toEqual([
+			['commit', 'acme/widgets', null, 'within-ceiling'],
+			['push', 'acme/widgets', 'file:', 'within-ceiling'],
+			['finalize', 'acme/widgets', 'file:', 'within-ceiling'],
+		]);
+		expect(ran('gh', 'pr', 'ready', '9')).toBe(true);
+
+		vi.mocked(execFileNoThrow).mockClear();
+		const cancelled = await cancelContribution(LOCAL_PATH, 9, true, undefined, {
+			authority: source,
+		});
+
+		expect(cancelled).toEqual({
+			success: true,
+			managed: [
+				expect.objectContaining({ effect: 'cancel', remote: 'file:', outcome: 'within-ceiling' }),
+			],
+		});
+		expect(ran('gh', 'pr', 'close', '9')).toBe(true);
+		expect(fs.rm).toHaveBeenCalledWith(LOCAL_PATH, { recursive: true, force: true });
+	});
+
+	it('refuses a remote and a repository outside the local fixture before the clone, by name', async () => {
+		const { source } = ceiling({ install: localCeiling() });
+
+		const remote = await startContribution(
+			startOptions(source, 'https://token@github.com/acme/widgets.git')
+		);
+
+		expect(remote).toEqual({
+			success: false,
+			error: '[managed-remote-denied] the repository ceiling does not admit https://github.com',
+			managed: [
+				expect.objectContaining({
+					effect: 'clone',
+					remote: 'https://github.com',
+					outcome: 'remote-denied',
+				}),
+			],
+		});
+		expect(JSON.stringify(remote.managed)).not.toContain('token');
+
+		const repository = await startContribution({
+			...startOptions(source),
+			repoSlug: 'other/widgets',
+		});
+
+		expect(repository.error).toBe(
+			'[managed-repository-denied] the repository ceiling does not admit other/widgets'
+		);
+		expect(execFileNoThrow).not.toHaveBeenCalled();
+		expect(fs.rm).not.toHaveBeenCalled();
+	});
+
+	it('holds each effect by itself: the admitted clone is no permit for a push the ceiling omits', async () => {
+		const { source } = ceiling({
+			install: localCeiling(['clone', 'branch', 'commit', 'pull-request']),
+		});
+
+		const result = await startContribution(startOptions(source));
+
+		expect(result.success).toBe(false);
+		expect(result.error).toBe(
+			'[managed-outside-ceiling] the repository ceiling admits no push effect for the operator'
+		);
+		expect(result.managed?.map((r) => [r.effect, r.outcome])).toEqual([
+			['clone', 'within-ceiling'],
+			['branch', 'within-ceiling'],
+			['commit', 'within-ceiling'],
+			['push', 'outside-ceiling'],
+		]);
+		expect(ran('git', 'clone')).toBe(true);
+		expect(ran('git', 'commit', '--allow-empty')).toBe(true);
+		expect(ran('git', 'push')).toBe(false);
+		expect(ran('gh')).toBe(false);
+		expect(fs.rm).toHaveBeenCalledWith(LOCAL_PATH, { recursive: true, force: true });
+	});
+
+	it('refuses the draft PR after the push, by name, and removes the clone', async () => {
+		const { source } = ceiling({
+			install: localCeiling(['clone', 'branch', 'commit', 'push']),
+		});
+
+		const result = await startContribution(startOptions(source));
+
+		expect(result.error).toBe(
+			'[managed-outside-ceiling] the repository ceiling admits no pull-request effect for the operator'
+		);
+		expect(ran('git', 'push', '-u', 'origin', 'symphony/issue-12')).toBe(true);
+		expect(ran('gh')).toBe(false);
+		expect(result.managed?.at(-1)).toMatchObject({
+			effect: 'pull-request',
+			outcome: 'outside-ceiling',
+		});
+		expect(fs.rm).toHaveBeenCalledWith(LOCAL_PATH, { recursive: true, force: true });
+	});
+
+	it('refuses the finalization before gh pr ready and leaves the draft a draft', async () => {
+		const { source } = ceiling({
+			install: localCeiling(['clone', 'branch', 'commit', 'push', 'pull-request']),
+		});
+		originIsLocal();
+
+		const result = await finalizeContribution(LOCAL_PATH, 9, 12, 'Fix widgets', 'acme/widgets', {
+			authority: source,
+		});
+
+		expect(result).toEqual({
+			success: false,
+			error:
+				'[managed-outside-ceiling] the repository ceiling admits no finalize effect for the operator',
+			managed: [
+				expect.objectContaining({ effect: 'commit', outcome: 'within-ceiling' }),
+				expect.objectContaining({ effect: 'push', outcome: 'within-ceiling' }),
+				expect.objectContaining({ effect: 'finalize', outcome: 'outside-ceiling' }),
+			],
+		});
+		expect(ran('git', 'push')).toBe(true);
+		expect(ran('gh')).toBe(false);
+	});
+
+	it('refuses the fork where it happens and reports the ceiling, never a fork or a login failure', async () => {
+		const { source } = ceiling({
+			install: localCeiling(['clone', 'branch', 'commit', 'push', 'pull-request']),
+		});
+		vi.mocked(ensureForkSetup).mockImplementation(async (_path, _slug, options) => {
+			const refusal = await options?.beforeFork?.();
+			return refusal
+				? { isFork: false, error: refusal }
+				: { isFork: true, forkSlug: 'ada/widgets' };
+		});
+
+		const result = await startContribution(startOptions(source));
+
+		expect(result.error).toBe(
+			'[managed-outside-ceiling] the repository ceiling admits no fork effect for the operator'
+		);
+		expect(result.error).not.toMatch(/^Fork setup failed/);
+		expect(isGitHubAuthError({ message: result.error, stderr: '' })).toBe(false);
+		expect(result.managed?.at(-1)).toMatchObject({ effect: 'fork', outcome: 'outside-ceiling' });
+		expect(ran('git', 'commit')).toBe(false);
+		expect(fs.rm).toHaveBeenCalledWith(LOCAL_PATH, { recursive: true, force: true });
+	});
+
+	it('never answers a refusal as an authentication failure a login would fix', async () => {
+		const cases: Array<{
+			code: string;
+			install?: unknown;
+			options?: Partial<ReturnType<typeof startOptions>>;
+		}> = [
+			{ code: 'unavailable' },
+			{ code: 'outside-ceiling', install: localCeiling(['branch']) },
+			{ code: 'repository-unknown', install: localCeiling(), options: { repoSlug: '' } },
+			{ code: 'repository-denied', install: localCeiling(), options: { repoSlug: 'acme-x/w' } },
+			{ code: 'remote-unknown', install: localCeiling(), options: { repoUrl: 'widgets' } },
+			{
+				code: 'remote-denied',
+				install: localCeiling(),
+				options: { repoUrl: 'git@github.com:acme/widgets.git' },
+			},
+		];
+		for (const scenario of cases) {
+			vi.mocked(execFileNoThrow).mockClear();
+			const { source } = ceiling({ install: scenario.install });
+
+			const result = await startContribution({ ...startOptions(source), ...scenario.options });
+
+			expect(result.success, scenario.code).toBe(false);
+			expect(result.error, scenario.code).toMatch(new RegExp(`^\\[managed-${scenario.code}\\] `));
+			expect(result.managed?.at(-1)?.outcome, scenario.code).toBe(scenario.code);
+			expect(result.error, scenario.code).not.toBe('GitHub CLI not authenticated');
+			expect(result.error, scenario.code).not.toMatch(/gh auth|log ?in|logged|credential/i);
+			expect(isGitHubAuthError({ message: result.error, stderr: '' }), scenario.code).toBe(false);
+			expect(isGitHubMissingScopeError({ message: result.error }), scenario.code).toBe(false);
+			expect(execFileNoThrow, scenario.code).not.toHaveBeenCalled();
+			expect(ensureForkSetup, scenario.code).not.toHaveBeenCalled();
+		}
+	});
+
+	it('binds the actor to the admitting transport: a paired device is held as itself, registered or not', async () => {
+		const { source, state } = ceiling({ install: localCeiling() });
+
+		const registered = await runAsTransport(device, () => startContribution(startOptions(source)));
+
+		expect(registered.success).toBe(true);
+		expect(registered.managed?.[0]).toMatchObject({
+			effect: 'clone',
+			actor: 'lite-device:dev-1',
+			outcome: 'within-ceiling',
+		});
+
+		state.read = unregistered;
+		vi.mocked(execFileNoThrow).mockClear();
+		const unbound = await runAsTransport(device, () => startContribution(startOptions(source)));
+
+		expect(unbound.error).toMatch(/^\[managed-unauthenticated\] a paired Lite device \(dev-1\)/);
+		expect(unbound.error).toContain('registered enterprise actor');
+		expect(isGitHubAuthError({ message: unbound.error, stderr: '' })).toBe(false);
+		expect(execFileNoThrow).not.toHaveBeenCalled();
+	});
+
+	it('refuses an enrolled host with no ceiling before the clone, and holds a host never enrolled to nothing', async () => {
+		const { source } = ceiling();
+
+		const refused = await startContribution(startOptions(source));
+
+		expect(refused.error).toBe(
+			'[managed-unavailable] the managed repository ceiling is unavailable (no repository ceiling is installed for policy revision 3)'
+		);
+		expect(execFileNoThrow).not.toHaveBeenCalled();
+
+		const standalone = ceiling({ read: neverEnrolled, install: localCeiling() }).source;
+		const result = await startContribution(
+			startOptions(standalone, 'https://github.com/acme/widgets')
+		);
+
+		expect(result.success).toBe(true);
+		expect('managed' in result).toBe(false);
+		const forkCall = vi.mocked(ensureForkSetup).mock.calls[0];
+		expect(forkCall.slice(0, 2)).toEqual([LOCAL_PATH, 'acme/widgets']);
+		await expect(forkCall[2]?.beforeFork?.()).resolves.toBeNull();
+	});
+
+	it('a policy move between the clone and the push ends the contribution by name', async () => {
+		const { source, state } = ceiling({ install: localCeiling() });
+		vi.mocked(execFileNoThrow).mockImplementation(async (_command, args) => {
+			if (args?.[0] === 'commit') state.revision = 4;
+			return okExec;
+		});
+
+		const result = await startContribution(startOptions(source));
+
+		expect(result.error).toBe(
+			'[managed-unavailable] the managed repository ceiling is unavailable (the installed repository ceiling is for policy revision 3; this host is under revision 4)'
+		);
+		expect(result.managed?.map((r) => [r.effect, r.policyRevision, r.outcome])).toEqual([
+			['clone', 3, 'within-ceiling'],
+			['branch', 3, 'within-ceiling'],
+			['commit', 3, 'within-ceiling'],
+			['push', 4, 'unavailable'],
+		]);
+		expect(ran('git', 'push')).toBe(false);
+		expect(fs.rm).toHaveBeenCalledWith(LOCAL_PATH, { recursive: true, force: true });
 	});
 });
