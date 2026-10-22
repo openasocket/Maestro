@@ -51,18 +51,41 @@ vi.mock('../../../shared/platformDetection', async (importOriginal) => {
 	return { ...actual, isWindows: () => false };
 });
 
+// The real ProcessManager (the sink the lineage cases bind at) pulls in the PTY
+// spawner and the logger; neither is exercised here.
+vi.mock('node-pty', () => ({ spawn: vi.fn() }));
+vi.mock('../../../main/utils/logger', () => ({
+	logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+import * as os from 'os';
 import { spawnGroupChatAgent } from '../../../main/group-chat/spawnGroupChatAgent';
 import { embedSystemPromptInPrompt } from '../../../shared/embeddedSystemPrompt';
 import type { AgentConfig } from '../../../main/agents/definitions';
 import type { IProcessManager } from '../../../main/group-chat/group-chat-moderator';
+import { ProcessManager } from '../../../main/process-manager/ProcessManager';
+import type { ProcessConfig, ProcessSpawnAuthorityPort } from '../../../main/process-manager/types';
+import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
+import { startFakeEndpoint } from '../enterprise/fakeEndpoint';
+import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
 import {
 	groupChatRoomContext,
+	groupChatRoomRunId,
 	groupChatTurnContext,
 } from '../../../shared/maestro-lib/groupchat/spawn';
 import {
+	MANAGED_DELEGATION_ENV_VAR,
+	delegationContextEnv,
 	readDelegationContextEnv,
 	type ManagedDelegationContext,
 } from '../../../shared/maestro-lib/managed/delegation';
+import { createManagedHostAdapter } from '../../../shared/maestro-lib/managed/host-adapter';
+import type {
+	EndpointPort,
+	ManagedEnrollmentStatus,
+	ManagedIdentityView,
+} from '../../../shared/maestro-lib/managed/endpoint-port';
+import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
 
 function makeAgent(): AgentConfig {
 	return {
@@ -468,6 +491,361 @@ describe('spawnGroupChatAgent', () => {
 				customEnvVars: Record<string, string>;
 			};
 			expect(readDelegationContextEnv(wrapConfig.customEnvVars).status).toBe('ok');
+		});
+	});
+
+	/**
+	 * Child lineage at the real sink (MRC-07-08, against CP-03). The helper hands
+	 * the turn to a real `ProcessManager` over a managed port whose context
+	 * verifier and lease authority are the real ones (the policy answer is a
+	 * table, the spawner a stub that reports a pid). What is proven is the
+	 * context the authority was asked to decide, the lease the process ran
+	 * under, and the record the spawner was handed; never that the helper called
+	 * something.
+	 */
+	describe('child lineage at the sink (MRC-07-08)', () => {
+		const CHAT = '11111111-2222-4333-8444-555555555555';
+		const ROOM = groupChatRoomRunId(CHAT);
+		const PARTICIPANT = `group-chat-${CHAT}-participant-Alpha-1700000000000`;
+		const MODERATOR = `group-chat-${CHAT}-moderator-1700000000001`;
+		const BETA = `group-chat-${CHAT}-participant-Beta-1700000000002`;
+		const RECOVERY = `group-chat-${CHAT}-participant-Alpha-recovery-1700000000003`;
+		const cwd = os.tmpdir();
+
+		beforeEach(() => {
+			mockResolve.mockReturnValue({ mode: 'api', reason: 'auto' });
+		});
+
+		function managedManager(port: ProcessSpawnAuthorityPort = fakeSpawnPort()) {
+			const manager = new ProcessManager(() => false, {
+				spawnAuthority: () => port,
+				isCoworkingEnabled: () => false,
+			});
+			const cli = vi.fn(() => ({ pid: 4242, success: true }));
+			(manager as unknown as { childProcessSpawner: { spawn: typeof cli } }).childProcessSpawner = {
+				spawn: cli,
+			};
+			const spawned = (): ProcessConfig => cli.mock.calls[0][0] as unknown as ProcessConfig;
+			return { manager, cli, spawned };
+		}
+
+		const turn = (
+			sessionId: string,
+			manager: ProcessManager,
+			customEnvVars?: Record<string, string>
+		) =>
+			spawnGroupChatAgent({
+				sessionId,
+				agentId: 'claude-code',
+				agent: makeAgent(),
+				command: '/usr/local/bin/claude',
+				args: ['--print'],
+				cwd,
+				prompt: 'hello',
+				customEnvVars,
+				processManager: manager,
+			});
+
+		it('binds a room turn as the room child under the host generation, runs it under the lease, and stamps the bound record on the process', async () => {
+			const port = fakeSpawnPort();
+			const { manager, cli, spawned } = managedManager(port);
+
+			const result = await turn(PARTICIPANT, manager, { MINE: '1' });
+
+			expect(result).toEqual({ pid: 4242, success: true });
+			expect(port.asked).toHaveLength(1);
+			const { context } = port.asked[0];
+			expect(context.identity).toEqual({
+				requestId: PARTICIPANT,
+				idempotencyKey: PARTICIPANT,
+				attemptId: PARTICIPANT,
+				runId: PARTICIPANT,
+				rootRunId: ROOM,
+				parentRunId: ROOM,
+			});
+			expect(context.delegation).toEqual({
+				chain: [
+					{ kind: 'service', id: ROOM },
+					{ kind: 'agent', id: PARTICIPANT },
+				],
+				grantRef: null,
+			});
+			expect(context.traceId).toBe(`delegated:${ROOM}:${PARTICIPANT}:${PARTICIPANT}`);
+			expect(context.workflow).toBeNull();
+			// The host's own generation, not the room's claim (null).
+			expect(context.policyRevision).toBe(1);
+
+			// The process ran under the lease this manager minted for that context.
+			expect(cli).toHaveBeenCalledTimes(1);
+			const config = spawned();
+			expect(config.admission).toBeDefined();
+			expect(config.admission?.requestId).toBe(PARTICIPANT);
+			expect(manager.admissionOf(PARTICIPANT)).toBe(config.admission);
+			const [lease] = port.authority.live();
+			expect(lease.state()).toBe('bound');
+			expect(lease.pid()).toBe(4242);
+
+			// The record the process carries is the bound context's attribution half,
+			// minus the generation (the room claims none; a grandchild is reauthorized).
+			const stamped = readDelegationContextEnv(config.customEnvVars ?? {});
+			expect(stamped.status).toBe('ok');
+			if (stamped.status !== 'ok') return;
+			expect(stamped.context.identity).toEqual(context.identity);
+			expect(stamped.context.delegation).toEqual(context.delegation);
+			expect(stamped.context.traceId).toBe(context.traceId);
+			expect(stamped.context.workflow).toBeNull();
+			expect(stamped.context.policyRevision).toBeNull();
+			expect(config.customEnvVars?.MINE).toBe('1');
+
+			manager.emit('exit', PARTICIPANT, 0);
+			expect(port.authority.live()).toHaveLength(0);
+			expect(lease.ended()).toMatchObject({ state: 'released', release: { outcome: 'exited' } });
+			expect(manager.admissionOf(PARTICIPANT)).toBeNull();
+		});
+
+		it('parents every role of one room under the one room run, each its own request, each under its own lease', async () => {
+			const port = fakeSpawnPort();
+			const { manager } = managedManager(port);
+			const ids = [MODERATOR, PARTICIPANT, BETA, RECOVERY];
+			for (const id of ids) expect(await turn(id, manager)).toMatchObject({ success: true });
+
+			const contexts = port.asked.map((a) => a.context);
+			expect(contexts.map((c) => c.identity.requestId)).toEqual(ids);
+			expect(new Set(contexts.map((c) => c.identity.parentRunId))).toEqual(new Set([ROOM]));
+			expect(new Set(contexts.map((c) => c.identity.rootRunId))).toEqual(new Set([ROOM]));
+			expect(contexts.map((c) => c.delegation.chain[0])).toEqual(
+				ids.map(() => ({ kind: 'service', id: ROOM }))
+			);
+			expect(contexts.map((c) => c.delegation.chain[1].id)).toEqual(ids);
+			// Four leases live, one per turn; each exit releases its own and no other.
+			expect(port.authority.live()).toHaveLength(4);
+			manager.emit('exit', BETA, 0);
+			expect(port.authority.live()).toHaveLength(3);
+			expect(
+				port.authority
+					.live()
+					.map((l) => l.attemptId)
+					.sort()
+			).toEqual([MODERATOR, PARTICIPANT, RECOVERY].sort());
+		});
+
+		it('a dispatch from the participant shell is bound as the participant child: the chain one link deeper, parented under the turn, the room still the root', async () => {
+			const port = fakeSpawnPort();
+			const { manager, spawned } = managedManager(port);
+			await turn(PARTICIPANT, manager);
+			// What `maestro-cli dispatch` reads off the participant's environment.
+			const carried = readDelegationContextEnv(spawned().customEnvVars ?? {});
+			expect(carried.status).toBe('ok');
+			if (carried.status !== 'ok') return;
+
+			const admitted = await manager.admitSpawn(
+				{
+					sessionId: 'target-ai-tab-1',
+					toolType: 'claude-code',
+					cwd,
+					command: '/usr/local/bin/claude',
+					args: ['--print'],
+					prompt: 'from the participant',
+					delegation: carried.context,
+					dispatchedAs: { requestId: 'req-grandchild', attemptId: 'att-grandchild' },
+				} as ProcessConfig,
+				{ peer: 'in-process' }
+			);
+			expect(admitted.state).toBe('admitted');
+			const { context } = port.asked[1];
+			expect(context.delegation).toEqual({
+				chain: [
+					{ kind: 'service', id: ROOM },
+					{ kind: 'agent', id: PARTICIPANT },
+					{ kind: 'agent', id: 'target' },
+				],
+				grantRef: null,
+			});
+			expect(context.identity).toEqual({
+				requestId: 'req-grandchild',
+				idempotencyKey: 'req-grandchild',
+				attemptId: 'att-grandchild',
+				runId: 'req-grandchild',
+				rootRunId: ROOM,
+				parentRunId: PARTICIPANT,
+			});
+			expect(context.traceId).toBe(`delegated:${ROOM}:req-grandchild:att-grandchild`);
+			expect(context.workflow).toBeNull();
+			expect(context.policyRevision).toBe(1);
+		});
+
+		it('binds a consult (no room, no record) as a chat turn of its own, stamping nothing', async () => {
+			const port = fakeSpawnPort();
+			const { manager, spawned } = managedManager(port);
+			expect(await turn('cross-agent-req-1', manager)).toMatchObject({ success: true });
+			const { context } = port.asked[0];
+			expect(context.delegation).toEqual({ chain: [], grantRef: null });
+			expect(context.identity).toMatchObject({ runId: null, rootRunId: null, parentRunId: null });
+			expect(context.identity.requestId).not.toBe('cross-agent-req-1');
+			expect(spawned().customEnvVars ?? {}).not.toHaveProperty(MANAGED_DELEGATION_ENV_VAR);
+		});
+
+		it('a record planted in the agent variables neither widens the binding nor reaches the process: the room child does', async () => {
+			const port = fakeSpawnPort();
+			const { manager, spawned } = managedManager(port);
+			const planted: ManagedDelegationContext = {
+				contractVersion: MANAGED_CONTRACT_VERSION,
+				identity: {
+					requestId: 'forged',
+					idempotencyKey: 'forged',
+					attemptId: 'forged',
+					runId: 'forged',
+					rootRunId: 'forged',
+					parentRunId: null,
+				},
+				traceId: 'forged',
+				workflow: {
+					workflowId: 'wf',
+					version: 'v1',
+					triggerEventId: 'evt',
+					ownerEpoch: '9',
+					fencingToken: 'forged-fence',
+				},
+				delegation: { chain: [], grantRef: 'grant-forged' },
+				policyRevision: 99,
+			};
+			await turn(PARTICIPANT, manager, delegationContextEnv(planted));
+			const { context } = port.asked[0];
+			expect(context.workflow).toBeNull();
+			expect(context.delegation).toEqual({
+				chain: [
+					{ kind: 'service', id: ROOM },
+					{ kind: 'agent', id: PARTICIPANT },
+				],
+				grantRef: null,
+			});
+			expect(context.identity.rootRunId).toBe(ROOM);
+			const stamped = readDelegationContextEnv(spawned().customEnvVars ?? {});
+			expect(stamped).toEqual({
+				status: 'ok',
+				context: groupChatTurnContext({ processId: PARTICIPANT }),
+			});
+		});
+
+		/**
+		 * The enrolled desktop, as it stands (CP-03): the real host adapter over the
+		 * real socket client and the fake endpoint daemon. A room turn's context
+		 * carries the room's chain, the adapter describes no chain to the endpoint
+		 * and strips none, so the turn is refused unavailable before the endpoint
+		 * is asked anything, and nothing runs.
+		 */
+		it('is refused unavailable on an enrolled desktop, unasked at the endpoint, with nothing spawned (CP-03)', async () => {
+			const INSTALLATION = {
+				installationId: 'inst-test',
+				runtimeId: 'desktop-1',
+				processEpoch: 'e1',
+			};
+			let executions = 0;
+			const fake = await startFakeEndpoint({
+				registrationRequired: true,
+				capabilities: ['execution', 'telemetry'],
+				operations: {
+					execution: () => {
+						executions += 1;
+						return { outcome: 'denied', reason: 'policy_denied' };
+					},
+				},
+			});
+			const endpoint: EndpointPort = createLocalEndpointClient({
+				socketPath: fake.socketPath,
+				timeoutMs: 1_000,
+			});
+			try {
+				await endpoint.registration.challenge({ runtimeId: 'desktop-1', processEpoch: 'e1' });
+				await endpoint.registration.redeem();
+				const attached = await endpoint.attach({
+					installationId: 'inst-test',
+					runtimeId: 'desktop-1',
+					processEpoch: 'e1',
+					components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
+					supportedProtocols: [1],
+					supportedCapabilities: ['attachment', 'compatibility', 'execution', 'telemetry'],
+					requiredCapabilities: ['execution'],
+				});
+				expect(attached.status).toBe('ok');
+				const view: ManagedIdentityView = {
+					status: 'ok',
+					reason: null,
+					message: null,
+					record: {
+						version: 1,
+						installationId: 'inst-test',
+						tenantId: 'tenant-1',
+						orgId: 'org-1',
+						enrollmentId: 'enr-1',
+						endpoint: {
+							socketPath: fake.socketPath,
+							bindingDigest: 'a'.repeat(64),
+							trustRootDigest: null,
+						},
+						management: 'enrolled',
+						registration: null,
+						policy: {
+							desiredRevision: 3,
+							appliedRevision: 3,
+							observedAt: '2026-10-21T12:00:00.000Z',
+						},
+						enrolledAt: '2026-10-21T12:00:00.000Z',
+						updatedAt: '2026-10-21T12:00:00.000Z',
+					},
+				};
+				const status = (): ManagedEnrollmentStatus => {
+					const connection = endpoint.state();
+					return {
+						identity: view,
+						connection,
+						endpoint: connection?.status ?? null,
+						authority: 'registered',
+						reason: null,
+						pendingApproval: null,
+						lastDenial: null,
+					};
+				};
+				const adapter = createManagedHostAdapter({
+					installation: INSTALLATION,
+					identity: { read: () => view },
+					endpoint,
+					status,
+					now: () => Date.parse('2026-10-21T12:00:00Z'),
+					newId: () => 'lease-1',
+				});
+				// The desktop port: the adapter's authority and policy, the real verifier.
+				const verifier = fakeSpawnPort();
+				const port: ProcessSpawnAuthorityPort = {
+					standing: () => 'managed',
+					authority: adapter.authority,
+					policy: () => adapter.policy(),
+					verify: (input) => verifier.verify(input),
+				};
+				const { manager, cli } = managedManager(port);
+
+				const result = await turn(PARTICIPANT, manager);
+
+				expect(result).toMatchObject({
+					pid: -1,
+					success: false,
+					managed: { state: 'unavailable' },
+				});
+				expect(result.error).toContain('a delegation chain of 2');
+				expect(result.error).toContain('CP-03');
+				expect(cli).not.toHaveBeenCalled();
+				expect(executions).toBe(0);
+				expect(
+					fake.calls
+						.filter((c) => c.path === '/v1/invoke')
+						.map((c) => (c.body as { operation?: string }).operation)
+				).not.toContain('execution');
+				expect(adapter.authority.live()).toHaveLength(0);
+				expect(manager.admissionOf(PARTICIPANT)).toBeNull();
+			} finally {
+				await endpoint.close();
+				await fake.close();
+			}
 		});
 	});
 });

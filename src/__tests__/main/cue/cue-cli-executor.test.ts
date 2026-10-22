@@ -82,6 +82,8 @@ import { cueCliRouteSupport, executeCueCli } from '../../../main/cue/cue-cli-exe
 import { getProcessList, stopProcess } from '../../../main/cue/cue-process-lifecycle';
 import {
 	MANAGED_DELEGATION_ENV_VAR,
+	childDelegationContext,
+	delegationContextEnv,
 	readDelegationContextEnv,
 	type ManagedDelegationContext,
 } from '../../../shared/maestro-lib/managed/delegation';
@@ -309,6 +311,177 @@ describe('cue-cli-executor nested dispatch delegation', () => {
 		expect(result).not.toHaveProperty('managed');
 		expect(authority.admit).not.toHaveBeenCalled();
 		expect(readDelegationContextEnv(spawnedEnv())).toEqual({ status: 'ok', context: delegation });
+	});
+
+	/**
+	 * Child lineage against CP-03 (MRC-07-08): the fence a Cue run holds travels
+	 * to the courier whole or not at all, the child the receiving sink derives
+	 * is parented under the run with the fence carried as it is (nothing minted,
+	 * nothing stripped), a retry carries its own attempt, and concurrent
+	 * firings never share a record. The courier's exit is the courier's, not the
+	 * turn's admission.
+	 */
+	describe('the fence and the child lineage (MRC-07-08)', () => {
+		const FENCED = {
+			workflowId: 'cue:/projects/test:nightly',
+			version: 'v3',
+			triggerEventId: 'time.scheduled:evt-1',
+			ownerEpoch: '4',
+			fencingToken: 'token-A',
+		};
+		/** The env the i-th courier was spawned with, and its child process. */
+		const courier = (i: number) => ({
+			env: (mockSpawn.mock.calls[i][2] as { env: Record<string, string | undefined> }).env,
+			child: mockSpawn.mock.results[i].value as unknown as MockChildProcess,
+		});
+		/** What the desktop sink binds the dispatched turn as (the derivation `dispatchedChildContext` shares). */
+		const childOf = (record: ManagedDelegationContext) =>
+			childDelegationContext(record, {
+				link: { kind: 'agent', id: 'session-research' },
+				requestId: 'req-child',
+				attemptId: 'att-child',
+			});
+
+		it('carries the run fence to the courier whole, and the child the sink derives keeps it under the run, minting nothing', async () => {
+			// The engine's own environment holds a stale, wider record with another fence.
+			process.env[MANAGED_DELEGATION_ENV_VAR] = delegationContextEnv(
+				createDelegation({
+					workflow: { ...FENCED, ownerEpoch: '9', fencingToken: 'stale-fence' },
+					delegation: { chain: [{ kind: 'service', id: 'stale' }], grantRef: 'grant-stale' },
+					policyRevision: 42,
+				})
+			)[MANAGED_DELEGATION_ENV_VAR];
+			const delegation = createDelegation({ workflow: FENCED });
+			const promise = executeCueCli(createConfig({ delegation }) as any);
+			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(1));
+			courier(0).child.emit('close', 0);
+			const result = await promise;
+			expect(result.status).toBe('completed');
+			expect(result).not.toHaveProperty('managed');
+
+			const carried = readDelegationContextEnv(courier(0).env);
+			expect(carried).toEqual({ status: 'ok', context: delegation });
+			if (carried.status !== 'ok') return;
+			expect(carried.context.workflow).toEqual(FENCED);
+			expect(carried.context.delegation.grantRef).toBeNull();
+			expect(carried.context.policyRevision).toBeNull();
+
+			const child = childOf(carried.context);
+			expect(child.workflow).toEqual(FENCED);
+			expect(child.identity).toEqual({
+				requestId: 'req-child',
+				idempotencyKey: 'req-child',
+				attemptId: 'att-child',
+				runId: 'req-child',
+				rootRunId: 'root-1',
+				parentRunId: 'run-1',
+			});
+			expect(child.delegation.chain).toEqual([
+				{ kind: 'service', id: 'cue-subscription:cli-test' },
+				{ kind: 'agent', id: 'session-1' },
+				{ kind: 'agent', id: 'session-research' },
+			]);
+			expect(child.traceId).toBe('delegated:root-1:req-child:att-child');
+		});
+
+		it('a run that holds no fence hands the courier none, whatever the engine environment carried', async () => {
+			process.env[MANAGED_DELEGATION_ENV_VAR] = delegationContextEnv(
+				createDelegation({ workflow: FENCED })
+			)[MANAGED_DELEGATION_ENV_VAR];
+			const promise = executeCueCli(createConfig({ delegation: createDelegation() }) as any);
+			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(1));
+			courier(0).child.emit('close', 0);
+			await promise;
+			const carried = readDelegationContextEnv(courier(0).env);
+			expect(carried.status === 'ok' && carried.context.workflow).toBeNull();
+			expect(carried.status === 'ok' && childOf(carried.context).workflow).toBeNull();
+		});
+
+		it('under management a run holding the fence is refused whole over the unsupported route: no courier, no stamp, no lease', async () => {
+			const authority = { admit: vi.fn() };
+			const result = await executeCueCli(
+				createConfig({
+					delegation: createDelegation({ workflow: FENCED, policyRevision: 7 }),
+					admission: {
+						authority,
+						context: {},
+						policy: { sources: [], policyRevision: 7 },
+						account: null,
+					},
+				}) as any
+			);
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(authority.admit).not.toHaveBeenCalled();
+			expect(result).toMatchObject({
+				status: 'failed',
+				exitCode: null,
+				managed: { state: 'unavailable', code: 'capability-unsupported' },
+			});
+			expect(result.stderr).toContain('nested-dispatch');
+			// The fence is named nowhere a child could read it: not stripped to fit, not forwarded.
+			expect(result.stderr).not.toContain('token-A');
+		});
+
+		it('a retried firing carries its own attempt under the same run; the first courier record is not reused', async () => {
+			const first = createDelegation({ workflow: FENCED });
+			const retry = createDelegation({
+				workflow: FENCED,
+				identity: { ...first.identity, attemptId: 'attempt-2' },
+				traceId: 'cue:root-1:run-1:attempt-2',
+			});
+			for (const [i, delegation] of [first, retry].entries()) {
+				const promise = executeCueCli(createConfig({ delegation }) as any);
+				await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(i + 1));
+				courier(i).child.emit('close', 0);
+				await promise;
+			}
+			const records = [0, 1].map((i) => readDelegationContextEnv(courier(i).env));
+			expect(records[0]).toEqual({ status: 'ok', context: first });
+			expect(records[1]).toEqual({ status: 'ok', context: retry });
+			if (records[0].status !== 'ok' || records[1].status !== 'ok') return;
+			expect(records[1].context.identity).toMatchObject({ runId: 'run-1', rootRunId: 'root-1' });
+			expect(records[1].context.identity.attemptId).not.toBe(records[0].context.identity.attemptId);
+			// Either attempt's child is parented under the one run, with the one fence.
+			for (const record of records) {
+				if (record.status !== 'ok') continue;
+				expect(childOf(record.context)).toMatchObject({
+					identity: { parentRunId: 'run-1', rootRunId: 'root-1' },
+					workflow: FENCED,
+				});
+			}
+		});
+
+		it('two firings at once each hand their courier their own record; neither inherits the other', async () => {
+			const one = createDelegation({ workflow: FENCED });
+			const two = createDelegation({
+				identity: { ...one.identity, requestId: 'run-2', idempotencyKey: 'run-2', runId: 'run-2' },
+				traceId: 'cue:root-1:run-2:attempt-1',
+				delegation: {
+					chain: [
+						{ kind: 'service', id: 'cue-subscription:other' },
+						{ kind: 'agent', id: 'session-1' },
+					],
+					grantRef: null,
+				},
+			});
+			const promises = [
+				executeCueCli(createConfig({ runId: 'run-1', delegation: one }) as any),
+				executeCueCli(createConfig({ runId: 'run-2', delegation: two }) as any),
+			];
+			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(2));
+			const envs = [0, 1].map((i) => courier(i).env);
+			courier(1).child.emit('close', 0);
+			courier(0).child.emit('close', 0);
+			const results = await Promise.all(promises);
+			expect(results.map((r) => r.status)).toEqual(['completed', 'completed']);
+
+			expect(readDelegationContextEnv(envs[0])).toEqual({ status: 'ok', context: one });
+			expect(readDelegationContextEnv(envs[1])).toEqual({ status: 'ok', context: two });
+			expect(envs[0][MANAGED_DELEGATION_ENV_VAR]).not.toBe(envs[1][MANAGED_DELEGATION_ENV_VAR]);
+			// The fence one run holds is not the other's: run-2's child carries none.
+			const second = readDelegationContextEnv(envs[1]);
+			expect(second.status === 'ok' && childOf(second.context).workflow).toBeNull();
+		});
 	});
 });
 
