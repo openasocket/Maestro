@@ -85,10 +85,11 @@ export type BrowserCeilingParse =
 	| { ok: true; ceiling: BrowserPolicyCeiling }
 	| { ok: false; problems: readonly string[] };
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+/** Shared with the repository ceiling (`repository-policy.ts`): the same closed-schema helpers. */
+export const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const unknownKeys = (value: object, known: readonly string[], at: string): string[] =>
+export const unknownKeys = (value: object, known: readonly string[], at: string): string[] =>
 	Object.keys(value)
 		.filter((key) => !known.includes(key))
 		.map((key) => `${at}${key} is not a known key`);
@@ -102,7 +103,7 @@ export function isBrowserDestinationPattern(pattern: string): boolean {
 }
 
 /** A bounded list of strings each `accept`s; every bad member is a problem, and a bad list is null. */
-function parseList(
+export function parseStringList(
 	raw: unknown,
 	at: string,
 	max: number,
@@ -135,7 +136,7 @@ function parseActor(raw: unknown, at: string, problems: string[]): BrowserCeilin
 	const before = problems.length;
 	if (!(BROWSER_ACTORS as readonly unknown[]).includes(raw.actor))
 		problems.push(`${at}.actor is not a browser actor kind`);
-	const effects = parseList(
+	const effects = parseStringList(
 		raw.effects,
 		`${at}.effects`,
 		BROWSER_EFFECTS.length,
@@ -176,7 +177,7 @@ export function parseBrowserPolicyCeiling(raw: unknown): BrowserCeilingParse {
 		destinations = {};
 		for (const key of DESTINATION_KEYS) {
 			if (raw.destinations[key] === undefined) continue;
-			const parsed = parseList(
+			const parsed = parseStringList(
 				raw.destinations[key],
 				`destinations.${key}`,
 				BROWSER_CEILING_LIMITS.patterns,

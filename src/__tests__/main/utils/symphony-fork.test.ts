@@ -187,3 +187,61 @@ describe('ensureForkSetup', () => {
 		expect(result.error).toContain('Failed to get fork clone URL');
 	});
 });
+
+describe('ensureForkSetup under a managed hold (MRC-09-05)', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('refuses the fork by name before gh repo fork and before any remote change', async () => {
+		mockExecFileNoThrow
+			.mockResolvedValueOnce(ok('chris\n')) // gh api user
+			.mockResolvedValueOnce(ok('false\n')); // permissions.push
+		const beforeFork = vi.fn().mockResolvedValue('[managed-outside-ceiling] no fork for you');
+
+		const result = await ensureForkSetup('/tmp/repo', 'owner/repo', { beforeFork });
+
+		expect(result).toEqual({
+			isFork: false,
+			error: '[managed-outside-ceiling] no fork for you',
+		});
+		expect(beforeFork).toHaveBeenCalledTimes(1);
+		expect(mockExecFileNoThrow).toHaveBeenCalledTimes(2);
+		const commands = mockExecFileNoThrow.mock.calls.map((call) => call[1]);
+		expect(commands).not.toContainEqual(expect.arrayContaining(['repo', 'fork']));
+		expect(commands).not.toContainEqual(expect.arrayContaining(['remote']));
+	});
+
+	it('never asks when no fork is needed', async () => {
+		mockExecFileNoThrow.mockResolvedValueOnce(ok('chris\n'));
+		const beforeFork = vi.fn().mockResolvedValue('refused');
+
+		const result = await ensureForkSetup('/tmp/repo', 'chris/repo', { beforeFork });
+
+		expect(result).toEqual({ isFork: false });
+		expect(beforeFork).not.toHaveBeenCalled();
+	});
+
+	it('forks as before when the hold answers null', async () => {
+		mockExecFileNoThrow
+			.mockResolvedValueOnce(ok('chris\n')) // gh api user
+			.mockResolvedValueOnce(ok('false\n')) // permissions.push
+			.mockResolvedValueOnce(ok('')) // gh repo fork
+			.mockResolvedValueOnce(ok('https://github.com/chris/repo.git\n')) // clone_url
+			.mockResolvedValueOnce(ok('')) // remote rename
+			.mockResolvedValueOnce(ok('')) // remote add
+			.mockResolvedValueOnce(ok('')); // remote set-head
+		const beforeFork = vi.fn().mockResolvedValue(null);
+
+		const result = await ensureForkSetup('/tmp/repo', 'owner/repo', { beforeFork });
+
+		expect(result).toEqual({ isFork: true, forkSlug: 'chris/repo' });
+		expect(beforeFork).toHaveBeenCalledTimes(1);
+		expect(mockExecFileNoThrow.mock.calls[2][1]).toEqual([
+			'repo',
+			'fork',
+			'owner/repo',
+			'--clone=false',
+		]);
+	});
+});

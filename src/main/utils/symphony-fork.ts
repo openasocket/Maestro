@@ -11,6 +11,15 @@ export interface ForkSetupResult {
 	error?: string;
 }
 
+export interface ForkSetupOptions {
+	/**
+	 * Held right before `gh repo fork` runs (MRC-09-05): a non-null answer is
+	 * the refusal, by name, and ends the setup with it as the error before the
+	 * fork or any remote change. Never called when no fork is needed.
+	 */
+	beforeFork?: () => Promise<string | null>;
+}
+
 /**
  * Ensures the user has push access to the repo, forking if necessary.
  * Reconfigures git remotes so `origin` points to the user's fork
@@ -18,7 +27,8 @@ export interface ForkSetupResult {
  */
 export async function ensureForkSetup(
 	repoPath: string,
-	repoSlug: string
+	repoSlug: string,
+	options?: ForkSetupOptions
 ): Promise<ForkSetupResult> {
 	const env = getExpandedEnv();
 	const ghCommand = await resolveGhPath();
@@ -57,7 +67,13 @@ export async function ensureForkSetup(
 		return { isFork: false };
 	}
 
-	// 4. Fork the repo (idempotent)
+	// 4. Fork the repo (idempotent). A managed host holds the fork here, the
+	// one place the publication happens, after the access checks above.
+	const refusal = (await options?.beforeFork?.()) ?? null;
+	if (refusal) {
+		logger.warn('Fork refused before it ran', LOG_CONTEXT, { repoSlug });
+		return { isFork: false, error: refusal };
+	}
 	logger.info(`Forking ${repoSlug}`, LOG_CONTEXT);
 	const forkResult = await execFileNoThrow(
 		ghCommand,
