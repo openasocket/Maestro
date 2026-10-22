@@ -29,7 +29,13 @@ interface Lease extends BrowserRelayTarget {
 	busy: boolean;
 	lastFrame: number;
 	viewport: BrowserRelayViewport;
-	url: string | null; // the page as the host last reported it; null after a navigation
+	/**
+	 * The page the lease is held against: the page as the host last reported it, or
+	 * after an admitted `navigate` the URL that navigation requested (provisional until
+	 * the host reports the page it reached). Null after `back` / `forward`, whose
+	 * destination is unknown by nature. Never set from the client on any other path.
+	 */
+	url: string | null;
 }
 
 /**
@@ -210,7 +216,11 @@ export class BrowserRelay {
 			});
 			this.get(clientId, id);
 			if (!result.ok) throw new Error(result.error || 'Browser tab is unavailable');
-			if (action && ['navigate', 'back', 'forward'].includes(action.kind)) lease.url = null;
+			// An admitted navigation keeps its requested URL as the provisional page, so the
+			// next frame or resolve is held against it until the host reports the page it
+			// reached (MRC-09-06A); back and forward leave the page unknown.
+			if (action?.kind === 'navigate') lease.url = action.url;
+			else if (action?.kind === 'back' || action?.kind === 'forward') lease.url = null;
 			else lease.url = result.state?.url ?? result.frame?.url ?? lease.url;
 			return result;
 		} catch (error) {

@@ -303,25 +303,51 @@ describe('browser relay effects under a ceiling (MRC-09-04)', () => {
 		expect(() => relay.assertActive('client', id)).not.toThrow();
 	});
 
-	it('a navigation is held against the URL it requests; the page is unknown until the host reports it', async () => {
+	it('an admitted navigation keeps the URL it requested as the page until the host reports one; back and forward leave it unknown (MRC-09-06A)', async () => {
 		const { relay, held } = guarded(() => true);
 		const id = await relay.open('client', target, viewport);
 		await relay.run('client', id, 'action', undefined, {
 			kind: 'navigate',
 			url: 'https://elsewhere.test/login',
 		});
+		// The requested page is provisional: input and reload are held against it, and
+		// the next frame is held against it before the host's reported page replaces it.
 		relay.assertEffect('client', id, 'input');
 		await relay.run('client', id, 'action', undefined, { kind: 'reload' });
+		await relay.run('client', id, 'frame');
+		relay.assertEffect('client', id, 'input');
+		await relay.run('client', id, 'action', undefined, { kind: 'back' });
+		relay.assertEffect('client', id, 'input');
 		await relay.run('client', id, 'resolve');
 		relay.assertEffect('client', id, 'input');
 		expect(held.map((effect) => [effect.kind, effect.destination])).toEqual([
 			['view', 'https://host.test/page'],
 			['navigate', 'https://elsewhere.test/login'],
+			['input', 'https://elsewhere.test/login'],
+			['navigate', 'https://elsewhere.test/login'],
+			['view', 'https://elsewhere.test/login'],
+			['input', 'https://host.test/next'],
+			['navigate', 'https://host.test/next'],
 			['input', null],
-			['navigate', null],
 			['view', null],
 			['input', 'https://host.test/page'],
 		]);
+	});
+
+	it('a refused navigation never sets the page from the word of the client', async () => {
+		const { relay, held, requests } = guarded(
+			(effect) => effect.destination !== 'https://blocked.test/x'
+		);
+		const id = await relay.open('client', target, viewport);
+		await expect(
+			relay.run('client', id, 'action', undefined, {
+				kind: 'navigate',
+				url: 'https://blocked.test/x',
+			})
+		).rejects.toThrow('[managed-outside-ceiling] no navigate');
+		relay.assertEffect('client', id, 'input');
+		expect(held.at(-1)).toEqual({ kind: 'input', target, destination: 'https://host.test/page' });
+		expect(requests.map((request) => request.kind)).toEqual(['resolve']);
 	});
 
 	it('refuses an input on a lease another client holds or that expired, before the ceiling is asked', () => {
