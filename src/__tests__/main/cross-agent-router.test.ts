@@ -12,6 +12,7 @@ import {
 import type { CrossAgentRequest, CrossAgentResponseChunk } from '../../shared/crossAgentTypes';
 import { spawnGroupChatAgent } from '../../main/group-chat/spawnGroupChatAgent';
 import { buildMaestroSystemPromptForSession } from '../../main/utils/maestro-system-prompt';
+import type { ProcessSpawnActor } from '../../main/process-manager/types';
 
 /**
  * The desktop's binding of the consult service: the dispatch rules themselves (prompt, budgets,
@@ -67,7 +68,11 @@ const targetSession = (): CrossAgentTargetSession => ({
 
 function harness(
 	sshStore: unknown = null,
-	overrides: { request?: Partial<CrossAgentRequest>; agent?: Record<string, unknown> } = {}
+	overrides: {
+		request?: Partial<CrossAgentRequest>;
+		agent?: Record<string, unknown>;
+		actor?: ProcessSpawnActor;
+	} = {}
 ) {
 	const processManager = new FakeProcessManager();
 	const chunks: CrossAgentResponseChunk[] = [];
@@ -90,6 +95,7 @@ function harness(
 			} as never,
 			sshStore: sshStore as never,
 			getTargetSession: targetSession,
+			...(overrides.actor ? { actor: overrides.actor } : {}),
 			onChunk: (c) => chunks.push(c),
 		});
 	// The runner keys its listeners on `cross-agent-<requestId>`; request() uses 'r1'.
@@ -121,6 +127,20 @@ describe('the desktop consult runner', () => {
 	it('exports the prompt builders the renderer and tests still import from here', () => {
 		expect(serializeTranscript([{ source: 'user', text: 'Hi' }])).toBe('**User:** Hi');
 		expect(buildCrossAgentPrompt(request())).toContain('There is no prior conversation to read');
+	});
+
+	it('hands the sink the actor the IPC handler resolved for the consult (MRC-08-01C)', async () => {
+		const { dispatch } = harness(null, { actor: { peer: 'host-secret' } });
+		await dispatch();
+
+		expect(vi.mocked(spawnGroupChatAgent).mock.calls[0][0].actor).toEqual({ peer: 'host-secret' });
+	});
+
+	it('names no actor for a consult nobody ticketed, so the sink binds it in-process as before', async () => {
+		const { dispatch } = harness();
+		await dispatch();
+
+		expect(vi.mocked(spawnGroupChatAgent).mock.calls[0][0]).not.toHaveProperty('actor');
 	});
 
 	it('hands the consulted agent its own Maestro system prompt (fresh session)', async () => {

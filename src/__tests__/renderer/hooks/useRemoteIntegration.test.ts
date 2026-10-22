@@ -1476,6 +1476,24 @@ describe('useRemoteIntegration', () => {
 	});
 
 	describe('remote cross-agent ask', () => {
+		it('passes the dispatch ticket through unread (MRC-08-01C)', async () => {
+			const deps = createDeps({ sessions: [createMockSession({ id: 'session-1' })] });
+			vi.mocked(runCrossAgentAsk).mockResolvedValue({ success: true, answer: 'ok' });
+
+			renderHook(() => useRemoteIntegration(deps));
+
+			await act(async () => {
+				onRemoteCrossAgentAskHandler?.(
+					{ targetSessionId: 'session-1', question: 'q', dispatchTicket: 'tkt-1' },
+					'ask-chan'
+				);
+			});
+
+			expect(runCrossAgentAsk).toHaveBeenCalledWith(
+				expect.objectContaining({ dispatchTicket: 'tkt-1' })
+			);
+		});
+
 		it('forwards the consult and answers the response channel with the result', async () => {
 			const deps = createDeps({ sessions: [createMockSession({ id: 'session-1' })] });
 			vi.mocked(runCrossAgentAsk).mockResolvedValue({

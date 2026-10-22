@@ -13,6 +13,7 @@
  */
 
 import type { ProcessManager } from '../process-manager';
+import type { ProcessSpawnActor } from '../process-manager/types';
 import type { SshRemoteSettingsStore } from '../utils/ssh-remote-resolver';
 import { spawnGroupChatAgent } from '../group-chat/spawnGroupChatAgent';
 import { toSpawnGroupChatAgentConfig } from '../group-chat/spawn-config';
@@ -29,7 +30,15 @@ interface RunningConsult {
 
 export function createDesktopConsultRunner(
 	processManager: ProcessManager,
-	sshStore: SshRemoteSettingsStore | null
+	sshStore: SshRemoteSettingsStore | null,
+	options: {
+		/**
+		 * Who asked, as the sink binds it (the transport a dispatch ticket stood
+		 * for). Left off the spawn config when absent, so the sink binds the
+		 * consult in-process the way it always did (MRC-08-01C).
+		 */
+		actor?: ProcessSpawnActor;
+	} = {}
 ): ConsultRunner {
 	const runs = new Map<string, RunningConsult>();
 
@@ -76,8 +85,9 @@ export function createDesktopConsultRunner(
 			runs.set(sessionId, run);
 
 			try {
+				const config = toSpawnGroupChatAgentConfig(spawn, { processManager, sshStore });
 				const result = await spawnGroupChatAgent(
-					toSpawnGroupChatAgentConfig(spawn, { processManager, sshStore })
+					options.actor ? { ...config, actor: options.actor } : config
 				);
 				if (!result.success) {
 					run.detach();

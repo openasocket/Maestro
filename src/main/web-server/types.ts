@@ -535,6 +535,13 @@ export type ConsultAgentParams = {
 	withContext?: boolean;
 	/** How long the caller is willing to wait, already clamped by the CLI. */
 	timeoutMs: number;
+	/**
+	 * The host-minted, single-use ticket the `cross-agent:send` handler claims
+	 * to bind the transport that asked (`issueDispatchTicket`). Issued for the
+	 * target agent with no tab, because the renderer finds or creates the
+	 * consult tab; opaque to the renderer, which only echoes it (MRC-08-01C).
+	 */
+	dispatchTicket?: string;
 };
 export type ConsultAgentResult = {
 	success: boolean;

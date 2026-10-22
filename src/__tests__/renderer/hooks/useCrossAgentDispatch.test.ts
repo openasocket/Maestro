@@ -361,6 +361,46 @@ describe('sendCrossAgentRequest in-flight registration', () => {
 		useCrossAgentInFlightStore.setState({ requests: {} });
 	});
 
+	it('echoes a dispatch ticket on the send and omits the key when there is none (MRC-08-01C)', async () => {
+		useSessionStore.setState({
+			sessions: [
+				createMockSession({ id: 'target', name: 'Pedsidian', toolType: 'claude-code' }),
+				createMockSession({ id: 'src', name: 'Scratch' }),
+			],
+		} as never);
+
+		const send = vi.fn().mockResolvedValue({ requestId: 'req-1' });
+		(globalThis as unknown as { window: Record<string, unknown> }).window.maestro = {
+			crossAgent: { send },
+		} as never;
+
+		sendCrossAgentRequest({
+			sourceSessionId: 'src',
+			sourceAgentName: 'Scratch',
+			sourceTabId: 'src-tab',
+			sourceLogs: [],
+			targetSessionId: 'target',
+			userPrompt: 'How does the gate work?',
+			dispatchTicket: 'tkt-1',
+		});
+		expect(send.mock.calls[0][0].dispatchTicket).toBe('tkt-1');
+
+		send.mockResolvedValue({ requestId: 'req-2' });
+		sendCrossAgentRequest({
+			sourceSessionId: 'src',
+			sourceAgentName: 'Scratch',
+			sourceTabId: 'src-tab',
+			sourceLogs: [],
+			targetSessionId: 'target',
+			userPrompt: '@Pedsidian and now?',
+		});
+		expect(send.mock.calls[1][0]).not.toHaveProperty('dispatchTicket');
+
+		await vi.waitFor(() => {
+			expect(Object.keys(useCrossAgentInFlightStore.getState().requests)).toHaveLength(2);
+		});
+	});
+
 	it('registers the consult tab so the responding-agent chip can deep-link to it', async () => {
 		useSessionStore.setState({
 			sessions: [

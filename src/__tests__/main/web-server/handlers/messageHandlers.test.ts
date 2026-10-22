@@ -451,6 +451,96 @@ describe('WebSocketMessageHandler', () => {
 	});
 
 	describe('Cross-Agent Ask (maestro-cli ask)', () => {
+		const ticketSent = (): string | undefined =>
+			vi.mocked(callbacks.consultAgent).mock.calls[0][0].dispatchTicket;
+
+		it('issues a ticket for the target that the consult sink claims as the transport that asked (MRC-08-01C)', async () => {
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{ type: 'cross_agent_ask', sessionId: 'session-1', question: 'q' }
+			);
+			await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+
+			const ticket = ticketSent();
+			expect(typeof ticket).toBe('string');
+			expect(ticket).not.toContain('cli');
+			// Issued with no tab: the consult tab is the renderer's to find or create,
+			// so the sink claims it for whichever tab that turned out to be.
+			const admission = claimDispatchTicket(ticket!, {
+				agentId: 'session-1',
+				tabId: 'consult-tab-7',
+			});
+			expect(admission).toEqual({ kind: 'cli' });
+			expect(transportSpawnActor(admission!)).toEqual({ peer: 'host-secret' });
+			// Spent on the first claim; a replay binds nothing.
+			expect(
+				claimDispatchTicket(ticket!, { agentId: 'session-1', tabId: 'consult-tab-7' })
+			).toBeUndefined();
+		});
+
+		it('issues a ticket for a paired device that the consult sink claims as that device', async () => {
+			handler.handleMessage(
+				{
+					...client,
+					admission: 'device-pairing',
+					user: { id: 'paired-device:dev-7', username: 'paired-device', displayName: 'Pixel 9' },
+				},
+				{ type: 'cross_agent_ask', sessionId: 'session-1', question: 'q' }
+			);
+			await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+
+			const admission = claimDispatchTicket(ticketSent()!, {
+				agentId: 'session-1',
+				tabId: 'consult-tab-7',
+			});
+			expect(transportSpawnActor(admission!)).toEqual({
+				peer: 'device-pairing',
+				deviceId: 'dev-7',
+			});
+		});
+
+		it('a consult ticket claims nothing for another agent', async () => {
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{ type: 'cross_agent_ask', sessionId: 'session-1', question: 'q' }
+			);
+			await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+
+			const ticket = ticketSent()!;
+			expect(claimDispatchTicket(ticket, { agentId: 'session-2', tabId: 'x' })).toBeUndefined();
+			// Burned by the mismatch, so the right claimant is not served either.
+			expect(claimDispatchTicket(ticket, { agentId: 'session-1', tabId: 'x' })).toBeUndefined();
+		});
+
+		it('withdraws the ticket when the consult never reached the renderer', async () => {
+			vi.mocked(callbacks.consultAgent).mockResolvedValueOnce({
+				success: false,
+				error: 'No Maestro window is available',
+			});
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{ type: 'cross_agent_ask', sessionId: 'session-1', question: 'q', requestId: 'r-1' }
+			);
+			await vi.waitFor(() => {
+				const calls = vi.mocked(client.socket.send).mock.calls;
+				const last = JSON.parse(String(calls[calls.length - 1][0]));
+				expect(last).toMatchObject({ type: 'cross_agent_ask_result', success: false });
+			});
+
+			expect(claimDispatchTicket(ticketSent()!, { agentId: 'session-1' })).toBeUndefined();
+		});
+
+		it('withdraws the ticket when the consult throws', async () => {
+			vi.mocked(callbacks.consultAgent).mockRejectedValueOnce(new Error('renderer gone'));
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{ type: 'cross_agent_ask', sessionId: 'session-1', question: 'q' }
+			);
+			await vi.waitFor(() => expect(client.socket.send).toHaveBeenCalled());
+
+			expect(claimDispatchTicket(ticketSent()!, { agentId: 'session-1' })).toBeUndefined();
+		});
+
 		it('forwards the asking agent tab so the consult pill lands in that conversation', async () => {
 			handler.handleMessage(client, {
 				type: 'cross_agent_ask',

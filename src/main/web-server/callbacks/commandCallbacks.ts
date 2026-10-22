@@ -205,6 +205,7 @@ export function registerCommandCallbacks(
 					fromSessionId: params.fromSessionId,
 					fromTabId: params.fromTabId,
 					withContext: params.withContext,
+					dispatchTicket: params.dispatchTicket,
 				},
 			],
 		});

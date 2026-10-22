@@ -152,9 +152,18 @@ export interface CrossAgentRequest {
 /**
  * The renderer -> main payload for `window.maestro.crossAgent.send`. The main
  * process stamps `requestId` + `createdAt` to form the full
- * {@link CrossAgentRequest}.
+ * {@link CrossAgentRequest}, and drops the dispatch ticket once claimed.
  */
-export type CrossAgentSendRequest = Omit<CrossAgentRequest, 'requestId' | 'createdAt'>;
+export type CrossAgentSendRequest = Omit<CrossAgentRequest, 'requestId' | 'createdAt'> & {
+	/**
+	 * The host-minted, single-use dispatch ticket a consult asked for over the
+	 * CLI (`maestro-cli ask`) carries, so the main process can admit it for the
+	 * transport that asked (MRC-08-01C). Claimed by the `cross-agent:send`
+	 * handler; it never enters the {@link CrossAgentRequest} and never reaches
+	 * the consult process. A typed `@mention` carries none.
+	 */
+	dispatchTicket?: string;
+};
 
 /**
  * One streamed piece of a target agent's response, routed back to the source

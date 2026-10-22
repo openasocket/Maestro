@@ -465,12 +465,22 @@ export function handleCrossAgentAsk(
 		return;
 	}
 
+	const admission = resolveTransportAdmission(client);
 	// Metadata only at info level: a consult question can carry proprietary code
 	// or secrets, exactly like a dispatched prompt.
 	logger.info(
-		`[Web Ask] Consult | Target: ${targetSessionId} | From: ${fromSessionId ?? 'unattributed'} | Transport: ${describeTransportAdmission(resolveTransportAdmission(client))} | Context: ${withContext ? 'yes' : 'no'} | Timeout: ${timeoutMs}ms | QuestionLength: ${question.length}`,
+		`[Web Ask] Consult | Target: ${targetSessionId} | From: ${fromSessionId ?? 'unattributed'} | Transport: ${describeTransportAdmission(admission)} | Context: ${withContext ? 'yes' : 'no'} | Timeout: ${timeoutMs}ms | QuestionLength: ${question.length}`,
 		LOG_CONTEXT
 	);
+
+	// The consult spawns in the main process, but only after a round trip
+	// through the renderer (`remote:crossAgentAsk` -> `crossAgent.send`), and no
+	// transport context survives that hop: the sink would read the consult as the
+	// desktop's own. The ticket is issued here, inside this client's context, for
+	// the target agent alone (the consult tab is the renderer's to find or
+	// create), and the `cross-agent:send` handler claims it so the consult is
+	// admitted for the CLI or device that asked (MRC-08-01C).
+	const dispatchTicket = issueDispatchTicket(admission, { agentId: targetSessionId });
 
 	ctx.callbacks
 		.consultAgent({
@@ -480,9 +490,16 @@ export function handleCrossAgentAsk(
 			...(fromTabId ? { fromTabId } : {}),
 			withContext,
 			timeoutMs,
+			dispatchTicket,
 		})
-		.then((result) => reply({ ...result }))
+		.then((result) => {
+			// A consult that never reached the sink (no window, the renderer refused
+			// it) leaves its ticket unclaimed; one that ran has already spent it.
+			if (!result.success) withdrawDispatchTicket(dispatchTicket);
+			reply({ ...result });
+		})
 		.catch((error) => {
+			withdrawDispatchTicket(dispatchTicket);
 			ctx.reportHandlerError(
 				client,
 				error,

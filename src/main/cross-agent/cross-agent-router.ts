@@ -26,6 +26,7 @@ import {
 	serializeTranscript,
 } from '../../shared/maestro-lib/agents/consult-prompt';
 import { createDesktopConsultRunner } from './consult-runner';
+import type { ProcessSpawnActor } from '../process-manager/types';
 import { buildMaestroSystemPromptForSession } from '../utils/maestro-system-prompt';
 
 /**
@@ -79,6 +80,12 @@ export interface StartCrossAgentRequestOptions {
 	 * Defaults to false: consults are read-only.
 	 */
 	writable?: boolean;
+	/**
+	 * Who asked for the consult, as the sink binds it: the transport a dispatch
+	 * ticket stood for (a `maestro-cli ask` over the WebSocket), else the
+	 * caller's own standing. Absent for a typed mention: in-process.
+	 */
+	actor?: ProcessSpawnActor;
 	/** Called with each response chunk; `done: true` marks completion/failure. */
 	onChunk: (chunk: CrossAgentResponseChunk) => void;
 }
@@ -93,7 +100,7 @@ export function startCrossAgentRequest(
 	opts: StartCrossAgentRequestOptions
 ): Promise<void> {
 	return consultService.start(request, {
-		runner: createDesktopConsultRunner(opts.processManager, opts.sshStore),
+		runner: createDesktopConsultRunner(opts.processManager, opts.sshStore, { actor: opts.actor }),
 		resolveAgent: (providerId) => opts.agentDetector.getAgent(providerId),
 		sshStore: opts.sshStore,
 		getTargetSession: opts.getTargetSession,

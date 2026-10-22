@@ -131,6 +131,7 @@ export function createCommandRemoteApi() {
 					fromSessionId?: string;
 					fromTabId?: string;
 					withContext?: boolean;
+					dispatchTicket?: string;
 				},
 				responseChannel: string
 			) => void
@@ -144,6 +145,7 @@ export function createCommandRemoteApi() {
 					fromSessionId?: string;
 					fromTabId?: string;
 					withContext?: boolean;
+					dispatchTicket?: string;
 				},
 				responseChannel: string
 			) => {

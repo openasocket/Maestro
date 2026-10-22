@@ -35,6 +35,7 @@ import { randomBytes } from 'node:crypto';
 import type { WebActingUser } from '../../../shared/webLogin';
 import type { ProcessSpawnActor } from '../../process-manager/types';
 import type { WebClient } from '../types';
+import { logger } from '../../utils/logger';
 import { runAsActingUser } from './acting-user';
 
 export type TransportAdmission =
@@ -281,4 +282,59 @@ export function claimDispatchTicket(
 /** Withdraw a ticket whose dispatch the renderer refused (see {@link DispatchTicketRegistry.withdraw}). */
 export function withdrawDispatchTicket(ticket: string): boolean {
 	return dispatchTickets.withdraw(ticket);
+}
+
+const LOG_CONTEXT = '[TransportActor]';
+
+/** What a sink hands {@link currentSpawnActor} to claim a dispatch ticket with. */
+export interface DispatchTicketClaim {
+	/** The ticket the request carried, as it arrived (unvalidated). */
+	ticket: unknown;
+	/** The agent being spawned (the base session id). */
+	agentId: string;
+	/** The tab being spawned into, when the request names one. */
+	tabId?: string;
+}
+
+/**
+ * Who is asking for this spawn, as the transport knows it (MRC-08-01A): a
+ * bridge call or a WebSocket message runs inside the transport context
+ * `runAsClient` established (a Web Login account, the CLI secret, a Lite
+ * pairing, or the bare path token), an Electron IPC call from the desktop
+ * renderer runs outside any and is the operator at the keyboard. This is
+ * attribution the managed authority binds, never authority itself: none of
+ * these transports is an enterprise principal. Read through
+ * `transportSpawnActor`, never off the acting user, which still names a
+ * paired device `paired-device` for History and gives the CLI no name at all.
+ *
+ * A spawn the renderer builds for a WebSocket dispatch (`send_command`)
+ * arrives over Electron IPC, outside the transport context the dispatch was
+ * admitted in. It carries the host-minted ticket the WS handler issued
+ * instead (MRC-08-01B): `claim` spends it for the agent and tab actually
+ * being spawned and binds the transport it was issued for. A ticket that is
+ * unknown, already spent, expired, or issued for another agent or tab is
+ * worth nothing, and the spawn binds the caller's own standing, never what
+ * the ticket claimed. The ticket names no actor; only the host's registry
+ * knows which admission it stood for.
+ *
+ * One function for every sink a renderer-relayed dispatch reaches: the
+ * `process:spawn` handler (`ipc/handlers/process/handle-spawn.ts`), the web
+ * terminal callback, and the `cross-agent:send` consult handler, whose spawn
+ * is the main-process consult runner rather than `process:spawn` and claims
+ * the ticket `cross_agent_ask` issued for the target (MRC-08-01C).
+ */
+export function currentSpawnActor(claim?: DispatchTicketClaim): ProcessSpawnActor {
+	if (claim && typeof claim.ticket === 'string' && claim.ticket) {
+		const issuedFor = claimDispatchTicket(claim.ticket, {
+			agentId: claim.agentId,
+			tabId: claim.tabId,
+		});
+		if (issuedFor) return transportSpawnActor(issuedFor);
+		logger.warn(
+			'Dispatch ticket not honored (unknown, spent, expired or mismatched); binding the caller as itself',
+			LOG_CONTEXT,
+			{ agentId: claim.agentId, tabId: claim.tabId }
+		);
+	}
+	return transportSpawnActor(getActingTransport());
 }

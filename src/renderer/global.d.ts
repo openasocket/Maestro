@@ -893,6 +893,7 @@ interface MaestroAPI {
 					fromSessionId?: string;
 					fromTabId?: string;
 					withContext?: boolean;
+					dispatchTicket?: string;
 				},
 				responseChannel: string
 			) => void

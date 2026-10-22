@@ -32,6 +32,7 @@ import type {
 } from '../../../shared/crossAgentTypes';
 import { generateUUID } from '../../../shared/uuid';
 import { logger } from '../../utils/logger';
+import { currentSpawnActor } from '../../web-server/auth/transport-actor';
 import {
 	startCrossAgentRequest,
 	cancelCrossAgentRequestsForSource,
@@ -136,6 +137,18 @@ export function registerCrossAgentHandlers(deps: CrossAgentHandlerDependencies):
 				const processManager = requireDependency(getProcessManager, 'Process manager');
 				const agentDetector = requireDependency(getAgentDetector, 'Agent detector');
 
+				// The consult spawns here, in the main process, outside the transport
+				// context a `cross_agent_ask` was admitted in. Claim the ticket the WS
+				// handler issued for the target (for any tab: the consult tab is the
+				// renderer's to find or create), else bind the caller's own standing.
+				// A forged, spent, expired or mismatched ticket binds nothing, and a
+				// typed `@mention` carries none and stays in-process (MRC-08-01C).
+				const actor = currentSpawnActor({
+					ticket: payload.dispatchTicket,
+					agentId: payload.targetSessionId,
+					tabId: payload.targetTabId,
+				});
+
 				const requestId = generateUUID();
 				const request: CrossAgentRequest = {
 					requestId,
@@ -178,6 +191,7 @@ export function registerCrossAgentHandlers(deps: CrossAgentHandlerDependencies):
 					getAgentConfig,
 					getCustomEnvVars,
 					writable,
+					actor,
 					onChunk: (chunk: CrossAgentResponseChunk) => safeSend('cross-agent:chunk', chunk),
 				}).catch((err) => {
 					logger.error(`${LOG_CONTEXT} Cross-agent dispatch failed`, LOG_CONTEXT, {

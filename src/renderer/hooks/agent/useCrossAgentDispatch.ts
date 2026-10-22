@@ -112,6 +112,12 @@ export interface SendCrossAgentRequestOptions {
 	 */
 	handoffAnswer?: string;
 	/**
+	 * The host-minted ticket a consult asked for over the CLI carries
+	 * (MRC-08-01C). Echoed on the send and never read here: the main process
+	 * claims it to bind the transport that asked. A typed mention has none.
+	 */
+	dispatchTicket?: string;
+	/**
 	 * Called once with the finished answer. A typed `@mention` needs nothing here
 	 * (the streamed bubble IS the delivery), but a consult asked for over the CLI
 	 * has to hand the text back to a caller that is blocked waiting for it, so
@@ -520,6 +526,7 @@ export function sendCrossAgentRequest(opts: SendCrossAgentRequestOptions): void 
 			strategy,
 			sourceCwd: opts.sourceCwd,
 			...(opts.handoffAnswer !== undefined && { handoffAnswer: opts.handoffAnswer }),
+			...(opts.dispatchTicket !== undefined && { dispatchTicket: opts.dispatchTicket }),
 		})
 		.then(({ requestId }) => {
 			// The terminal chunk already landed (fast failure/short response that

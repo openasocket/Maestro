@@ -62,6 +62,12 @@ export interface CrossAgentAskRequest {
 	 * transcript is what `@mention` is for.
 	 */
 	withContext?: boolean;
+	/**
+	 * The host-minted ticket the WebSocket handler issued for this consult
+	 * (MRC-08-01C). Echoed unread down to `crossAgent.send`, where the main
+	 * process claims it to admit the consult for the transport that asked.
+	 */
+	dispatchTicket?: string;
 }
 
 export interface CrossAgentAskResult {
@@ -158,6 +164,7 @@ export function runCrossAgentAsk(request: CrossAgentAskRequest): Promise<CrossAg
 			userPrompt: request.question,
 			sourceLogs,
 			sourceCwd: source?.cwd,
+			dispatchTicket: request.dispatchTicket,
 			onComplete: finish,
 		});
 	});

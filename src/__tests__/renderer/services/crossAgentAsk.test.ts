@@ -55,6 +55,24 @@ describe('runCrossAgentAsk', () => {
 		expect(sendCrossAgentRequest).not.toHaveBeenCalled();
 	});
 
+	it('echoes the dispatch ticket to the consult dispatcher unread (MRC-08-01C)', async () => {
+		const pending = runCrossAgentAsk({
+			targetSessionId: 'target',
+			question: 'q',
+			dispatchTicket: 'tkt-1',
+		});
+		expect(sentOptions().dispatchTicket).toBe('tkt-1');
+		complete({ text: 'ok' });
+		await pending;
+	});
+
+	it('carries no ticket when the caller sent none', async () => {
+		const pending = runCrossAgentAsk({ targetSessionId: 'target', question: 'q' });
+		expect(sentOptions().dispatchTicket).toBeUndefined();
+		complete({ text: 'ok' });
+		await pending;
+	});
+
 	it('sends a fresh context by default - no transcript is forwarded', async () => {
 		const pending = runCrossAgentAsk({
 			targetSessionId: 'target',
