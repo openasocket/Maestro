@@ -194,3 +194,16 @@ describe('managed terminal sinks', () => {
 		expect(managed.cancelCommand(id)).toBe(false);
 	});
 });
+
+describe('terminalAttachable (MRC-08-02)', () => {
+	it('is true only while a live terminal PTY holds the session id', () => {
+		expect(manager.terminalAttachable(id)).toBe(false);
+		expect(manager.spawnTerminalTab(terminalConfig()).success).toBe(true);
+		expect(manager.terminalAttachable(id)).toBe(true);
+		// What spawn() does with it: a second canonical creation attaches.
+		expect(manager.spawnTerminalTab(terminalConfig())).toMatchObject({ attached: true });
+		pty.exit();
+		vi.runAllTimers();
+		expect(manager.terminalAttachable(id)).toBe(false);
+	});
+});

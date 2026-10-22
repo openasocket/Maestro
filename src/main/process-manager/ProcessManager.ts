@@ -324,6 +324,24 @@ export class ProcessManager extends EventEmitter {
 	}
 
 	/**
+	 * Whether a terminal spawn for this session would attach to a live PTY
+	 * instead of starting one (the `reuseTerminal` rule in `spawn()`). A sink
+	 * that keeps one PTY across clients (the web terminal) asks this before it
+	 * asks for a new admission: an attach runs under the lease the PTY already
+	 * holds, and under management only the actor it was admitted for attaches.
+	 */
+	terminalAttachable(sessionId: string): boolean {
+		const existing = this.processes.get(sessionId);
+		return !!(
+			existing?.isTerminal &&
+			(existing.ptyProcess ||
+				(existing.childProcess &&
+					existing.childProcess.exitCode === null &&
+					!existing.childProcess.signalCode))
+		);
+	}
+
+	/**
 	 * Spawn a new process for a session.
 	 *
 	 * Live AI processes own their sessionId until they exit. Canonical terminal-tab
@@ -334,11 +352,8 @@ export class ProcessManager extends EventEmitter {
 		if (
 			config.reuseTerminal &&
 			config.toolType === 'terminal' &&
-			existing?.isTerminal &&
-			(existing.ptyProcess ||
-				(existing.childProcess &&
-					existing.childProcess.exitCode === null &&
-					!existing.childProcess.signalCode))
+			existing &&
+			this.terminalAttachable(config.sessionId)
 		) {
 			return { pid: existing.pid, success: true, attached: true };
 		}

@@ -578,7 +578,9 @@ export type NewAITabWithPromptCallback = (
 	/** Create the tab with no chip in the strip (see `AITab.hidden`). */
 	hidden?: boolean,
 	/** The dispatching operation's context (see `ExecuteCommandCallback`). */
-	delegation?: ManagedDelegationContext
+	delegation?: ManagedDelegationContext,
+	/** The host-minted dispatch ticket (see `ExecuteCommandCallback`). */
+	dispatchTicket?: string
 ) => Promise<NewAITabWithPromptResult>;
 /**
  * Result of enqueuing (or immediately dispatching) a CLI prompt into the
@@ -618,7 +620,9 @@ export type EnqueueCommandCallback = (
 	/** Queue Held: always queue, paused, even on an idle agent. */
 	held?: boolean,
 	/** The dispatching operation's context; stored on the queued item so it travels to the spawn. */
-	delegation?: ManagedDelegationContext
+	delegation?: ManagedDelegationContext,
+	/** The host-minted dispatch ticket; kept on the queued item so the drain's spawn still binds the transport. */
+	dispatchTicket?: string
 ) => Promise<EnqueueCommandResult>;
 /**
  * A single queued item, mirrored from the renderer's executionQueue for CLI

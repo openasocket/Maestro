@@ -281,6 +281,18 @@ export class WebSocketMessageHandler {
 		// Established HERE, once, so a callback a handler reaches (the web
 		// terminal's PTY spawn, a renderer round trip) finds the same answers at
 		// every await, and no handler can forget to say who asked.
+		// Reauthorized before the effect, not only before the reply (`send`): a
+		// revoked device pairing, a host admission that lapsed or an expired
+		// login is answered by `isAuthorized` closing the socket, and a message
+		// already in flight must not land its write, spawn or dispatch first
+		// (MRC-08-02). A client with no check (the desktop's own bridge) passes.
+		if (client.isAuthorized?.() === false) {
+			logger.warn(
+				`[Web] Dropped ${message.type} from ${client.id}: admission expired or revoked`,
+				LOG_CONTEXT
+			);
+			return;
+		}
 		runAsClient(client, () => this.dispatchMessage(client, message));
 	}
 

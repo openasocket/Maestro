@@ -21,7 +21,9 @@ export function createQueueRemoteApi() {
 				background?: boolean,
 				held?: boolean,
 				/** The dispatching operation's context; the renderer stores it on the queued item. */
-				delegation?: ManagedDelegationContext
+				delegation?: ManagedDelegationContext,
+				/** The host-minted dispatch ticket; echoed unread on the spawn or the queued item. */
+				dispatchTicket?: string
 			) => void
 		): (() => void) => {
 			const handler = (
@@ -34,7 +36,8 @@ export function createQueueRemoteApi() {
 				images?: string[],
 				background?: boolean,
 				held?: boolean,
-				delegation?: ManagedDelegationContext
+				delegation?: ManagedDelegationContext,
+				dispatchTicket?: string
 			) => {
 				try {
 					callback(
@@ -46,7 +49,8 @@ export function createQueueRemoteApi() {
 						images,
 						background,
 						held,
-						delegation
+						delegation,
+						dispatchTicket
 					);
 				} catch (error) {
 					ipcRenderer.send(responseChannel, { success: false });

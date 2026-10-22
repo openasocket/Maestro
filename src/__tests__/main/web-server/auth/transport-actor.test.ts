@@ -14,12 +14,14 @@ import {
 	PAIRED_DEVICE_USERNAME,
 	claimDispatchTicket,
 	createDispatchTicketRegistry,
+	describeSpawnActor,
 	describeTransportAdmission,
 	getActingTransport,
 	issueDispatchTicket,
 	resolveTransportAdmission,
 	runAsClient,
 	runAsTransport,
+	sameSpawnActor,
 	transportSpawnActor,
 	withdrawDispatchTicket,
 	type TransportAdmission,
@@ -295,5 +297,50 @@ describe('dispatch tickets', () => {
 		expect(admission).toEqual({ kind: 'cli' });
 		expect(transportSpawnActor(admission!)).toEqual({ peer: 'host-secret' });
 		expect(withdrawDispatchTicket(ticket)).toBe(false);
+	});
+});
+
+describe('sameSpawnActor / describeSpawnActor (MRC-08-02)', () => {
+	it('matches the same caller and tells callers apart by peer, account and device', () => {
+		expect(sameSpawnActor({ peer: 'in-process' }, { peer: 'in-process' })).toBe(true);
+		expect(sameSpawnActor({ peer: 'host-secret' }, { peer: 'host-secret' })).toBe(true);
+		expect(
+			sameSpawnActor({ peer: 'web-login', username: 'ada' }, { peer: 'web-login', username: 'ada' })
+		).toBe(true);
+		expect(
+			sameSpawnActor(
+				{ peer: 'device-pairing', deviceId: 'dev-7' },
+				{ peer: 'device-pairing', deviceId: 'dev-7' }
+			)
+		).toBe(true);
+
+		expect(
+			sameSpawnActor({ peer: 'web-login', username: 'ada' }, { peer: 'web-login', username: 'bob' })
+		).toBe(false);
+		expect(
+			sameSpawnActor(
+				{ peer: 'device-pairing', deviceId: 'dev-7' },
+				{ peer: 'device-pairing', deviceId: 'dev-8' }
+			)
+		).toBe(false);
+		expect(sameSpawnActor({ peer: 'in-process' }, { peer: 'host-secret' })).toBe(false);
+		expect(sameSpawnActor({ peer: 'host-secret' }, { peer: 'web-login', username: 'ada' })).toBe(
+			false
+		);
+		expect(
+			sameSpawnActor(
+				{ peer: 'web-login', username: 'ada' },
+				{ peer: 'device-pairing', deviceId: 'ada' }
+			)
+		).toBe(false);
+	});
+
+	it('names a caller in one word', () => {
+		expect(describeSpawnActor({ peer: 'in-process' })).toBe('the operator');
+		expect(describeSpawnActor({ peer: 'host-secret' })).toBe('maestro-cli');
+		expect(describeSpawnActor({ peer: 'web-login', username: 'ada' })).toBe('web-login:ada');
+		expect(describeSpawnActor({ peer: 'device-pairing', deviceId: 'dev-7' })).toBe(
+			'lite-device:dev-7'
+		);
 	});
 });

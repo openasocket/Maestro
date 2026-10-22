@@ -1135,7 +1135,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					false,
 					true,
-					delegation
+					delegation,
+					expect.any(String)
 				);
 			});
 		});
@@ -1176,7 +1177,8 @@ describe('WebSocketMessageHandler', () => {
 					'build it',
 					true,
 					true,
-					delegation
+					delegation,
+					expect.any(String)
 				);
 			});
 		});
@@ -1360,6 +1362,243 @@ describe('WebSocketMessageHandler', () => {
 			});
 			expect(admission).toEqual({ kind: 'owner-token' });
 			expect(transportSpawnActor(admission!)).toEqual({ peer: 'in-process' });
+		});
+	});
+
+	/**
+	 * MRC-08-02: the two dispatch routes MRC-08-01B left unticketed. The fake
+	 * renderer is the callback mock; the sink's claim is done by hand, as above.
+	 */
+	describe('Dispatch ticket on new_ai_tab_with_prompt and enqueue_command (MRC-08-02)', () => {
+		const newTabTicket = (): string | undefined =>
+			vi.mocked(callbacks.newAITabWithPrompt).mock.calls[0]?.[5] as string | undefined;
+		const enqueueTicket = (): string | undefined =>
+			vi.mocked(callbacks.enqueueCommand).mock.calls[0]?.[8] as string | undefined;
+		const lastSent = (): Record<string, unknown> => {
+			const calls = vi.mocked(client.socket.send).mock.calls;
+			return JSON.parse(String(calls[calls.length - 1][0]));
+		};
+
+		it('new_ai_tab_with_prompt from the CLI issues a ticket for the agent that claims, once, for the tab the renderer created', async () => {
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{
+					type: 'new_ai_tab_with_prompt',
+					sessionId: 'session-1',
+					prompt: 'Build it',
+					background: true,
+				}
+			);
+			await vi.waitFor(() => expect(callbacks.newAITabWithPrompt).toHaveBeenCalled());
+
+			const ticket = newTabTicket();
+			expect(typeof ticket).toBe('string');
+			expect(ticket).not.toContain('cli');
+			// No tab was named (it did not exist): the one the renderer created claims it.
+			const admission = claimDispatchTicket(ticket!, {
+				agentId: 'session-1',
+				tabId: 'tab-mock-123',
+			});
+			expect(admission).toEqual({ kind: 'cli' });
+			expect(transportSpawnActor(admission!)).toEqual({ peer: 'host-secret' });
+			expect(
+				claimDispatchTicket(ticket!, { agentId: 'session-1', tabId: 'tab-mock-123' })
+			).toBeUndefined();
+		});
+
+		it('new_ai_tab_with_prompt keeps the ticket on a queued prompt and claims nothing for another agent', async () => {
+			vi.mocked(callbacks.newAITabWithPrompt).mockResolvedValueOnce({
+				success: true,
+				tabId: 'tab-q',
+				queued: true,
+			});
+			handler.handleMessage(
+				{
+					...client,
+					admission: 'device-pairing',
+					user: { id: 'paired-device:dev-7', username: 'paired-device', displayName: 'Pixel 9' },
+				},
+				{ type: 'new_ai_tab_with_prompt', sessionId: 'session-1', prompt: 'Later' }
+			);
+			await vi.waitFor(() => expect(callbacks.newAITabWithPrompt).toHaveBeenCalled());
+			const ticket = newTabTicket()!;
+			// Queued: the drain spawns later and the ticket is still good, for this agent only.
+			expect(claimDispatchTicket(ticket, { agentId: 'session-2', tabId: 'tab-q' })).toBeUndefined();
+			expect(claimDispatchTicket(ticket, { agentId: 'session-1', tabId: 'tab-q' })).toBeUndefined();
+		});
+
+		it('new_ai_tab_with_prompt withdraws the ticket when the renderer refuses and when it throws', async () => {
+			vi.mocked(callbacks.newAITabWithPrompt).mockResolvedValueOnce({
+				success: false,
+				error: 'Agent not found: session-1',
+			});
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{ type: 'new_ai_tab_with_prompt', sessionId: 'session-1', prompt: 'Nope', requestId: 'r-1' }
+			);
+			await vi.waitFor(() =>
+				expect(lastSent()).toMatchObject({
+					type: 'new_ai_tab_with_prompt_result',
+					success: false,
+					requestId: 'r-1',
+				})
+			);
+			expect(claimDispatchTicket(newTabTicket()!, { agentId: 'session-1' })).toBeUndefined();
+
+			vi.mocked(callbacks.newAITabWithPrompt).mockClear();
+			vi.mocked(callbacks.newAITabWithPrompt).mockRejectedValueOnce(new Error('renderer gone'));
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{ type: 'new_ai_tab_with_prompt', sessionId: 'session-1', prompt: 'Nope', requestId: 'r-2' }
+			);
+			await vi.waitFor(() =>
+				expect(lastSent()).toMatchObject({ requestId: 'r-2', success: false })
+			);
+			expect(claimDispatchTicket(newTabTicket()!, { agentId: 'session-1' })).toBeUndefined();
+		});
+
+		it('enqueue_command from a paired device issues a ticket bound to the named tab, claimed as that device', async () => {
+			handler.handleMessage(
+				{
+					...client,
+					admission: 'device-pairing',
+					user: { id: 'paired-device:dev-7', username: 'paired-device', displayName: 'Pixel 9' },
+				},
+				{
+					type: 'enqueue_command',
+					sessionId: 'session-1',
+					command: 'Queue me',
+					inputMode: 'ai',
+					tabId: 'tab-1',
+				}
+			);
+			await vi.waitFor(() => expect(callbacks.enqueueCommand).toHaveBeenCalled());
+			const ticket = enqueueTicket();
+			expect(typeof ticket).toBe('string');
+			const admission = claimDispatchTicket(ticket!, { agentId: 'session-1', tabId: 'tab-1' });
+			expect(admission).toEqual({ kind: 'lite', deviceId: 'dev-7', deviceName: 'Pixel 9' });
+			expect(transportSpawnActor(admission!)).toEqual({
+				peer: 'device-pairing',
+				deviceId: 'dev-7',
+			});
+		});
+
+		it('an enqueue_command ticket issued for one tab claims nothing for another, and is burned', async () => {
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{
+					type: 'enqueue_command',
+					sessionId: 'session-1',
+					command: 'Queue me',
+					inputMode: 'ai',
+					tabId: 'tab-1',
+				}
+			);
+			await vi.waitFor(() => expect(callbacks.enqueueCommand).toHaveBeenCalled());
+			const ticket = enqueueTicket()!;
+			expect(claimDispatchTicket(ticket, { agentId: 'session-1', tabId: 'tab-2' })).toBeUndefined();
+			expect(claimDispatchTicket(ticket, { agentId: 'session-1', tabId: 'tab-1' })).toBeUndefined();
+		});
+
+		it('enqueue_command without a tab claims for the tab the renderer picked', async () => {
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{ type: 'enqueue_command', sessionId: 'session-1', command: 'Queue me', inputMode: 'ai' }
+			);
+			await vi.waitFor(() => expect(callbacks.enqueueCommand).toHaveBeenCalled());
+			expect(
+				claimDispatchTicket(enqueueTicket()!, { agentId: 'session-1', tabId: 'tab-mock-123' })
+			).toEqual({ kind: 'cli' });
+		});
+
+		it('enqueue_command withdraws the ticket on a refused enqueue and on a throw', async () => {
+			vi.mocked(callbacks.enqueueCommand).mockResolvedValueOnce({
+				success: false,
+				error: 'Tab not found: ghost',
+			});
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{
+					type: 'enqueue_command',
+					sessionId: 'session-1',
+					command: 'x',
+					inputMode: 'ai',
+					tabId: 'ghost',
+					requestId: 'q-1',
+				}
+			);
+			await vi.waitFor(() =>
+				expect(lastSent()).toMatchObject({
+					type: 'enqueue_command_result',
+					success: false,
+					requestId: 'q-1',
+				})
+			);
+			expect(
+				claimDispatchTicket(enqueueTicket()!, { agentId: 'session-1', tabId: 'ghost' })
+			).toBeUndefined();
+
+			vi.mocked(callbacks.enqueueCommand).mockClear();
+			vi.mocked(callbacks.enqueueCommand).mockRejectedValueOnce(new Error('renderer gone'));
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{
+					type: 'enqueue_command',
+					sessionId: 'session-1',
+					command: 'x',
+					inputMode: 'ai',
+					requestId: 'q-2',
+				}
+			);
+			await vi.waitFor(() =>
+				expect(lastSent()).toMatchObject({ requestId: 'q-2', success: false })
+			);
+			expect(claimDispatchTicket(enqueueTicket()!, { agentId: 'session-1' })).toBeUndefined();
+		});
+	});
+
+	/**
+	 * MRC-08-02: a socket is reauthorized before every dispatch, not only before
+	 * the reply. A revoked pairing or an expired login lands no effect.
+	 */
+	describe('Reauthorization before dispatch (MRC-08-02)', () => {
+		it('drops a message from a client whose admission no longer holds, before any effect', () => {
+			const revoked: WebClient = {
+				...client,
+				subscribedSessionId: 'session-1',
+				isAuthorized: () => false,
+			};
+			handler.handleMessage(revoked, {
+				type: 'terminal_write',
+				sessionId: 'session-1',
+				data: 'rm -rf /\r',
+			});
+			handler.handleMessage(revoked, {
+				type: 'send_command',
+				sessionId: 'session-1',
+				command: 'go',
+				inputMode: 'ai',
+			});
+			expect(callbacks.writeToTerminal).not.toHaveBeenCalled();
+			expect(callbacks.executeCommand).not.toHaveBeenCalled();
+			expect(client.socket.send).not.toHaveBeenCalled();
+		});
+
+		it('dispatches for a client whose admission still holds, and for one with no check', () => {
+			const live: WebClient = {
+				...client,
+				subscribedSessionId: 'session-1',
+				isAuthorized: () => true,
+			};
+			handler.handleMessage(live, { type: 'terminal_write', sessionId: 'session-1', data: 'ls\r' });
+			expect(callbacks.writeToTerminal).toHaveBeenCalledWith('session-1', 'ls\r');
+			client.subscribedSessionId = 'session-1';
+			handler.handleMessage(client, {
+				type: 'terminal_write',
+				sessionId: 'session-1',
+				data: 'pwd\r',
+			});
+			expect(callbacks.writeToTerminal).toHaveBeenCalledWith('session-1', 'pwd\r');
 		});
 	});
 
@@ -3000,7 +3239,8 @@ describe('WebSocketMessageHandler', () => {
 					'Summarize the repo',
 					false,
 					false,
-					undefined
+					undefined,
+					expect.any(String)
 				);
 			});
 
@@ -3027,7 +3267,8 @@ describe('WebSocketMessageHandler', () => {
 					'Summarize the repo',
 					true,
 					false,
-					undefined
+					undefined,
+					expect.any(String)
 				);
 			});
 		});
@@ -3047,7 +3288,8 @@ describe('WebSocketMessageHandler', () => {
 					'Summarize the repo',
 					true,
 					true,
-					undefined
+					undefined,
+					expect.any(String)
 				);
 			});
 		});
@@ -3067,7 +3309,8 @@ describe('WebSocketMessageHandler', () => {
 					'Summarize the repo',
 					false,
 					false,
-					undefined
+					undefined,
+					expect.any(String)
 				);
 			});
 		});
@@ -3379,7 +3622,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					true,
 					false,
-					undefined
+					undefined,
+					expect.any(String)
 				);
 			});
 
@@ -3576,7 +3820,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					false,
 					true,
-					undefined
+					undefined,
+					expect.any(String)
 				);
 			});
 		});
@@ -4737,6 +4982,56 @@ describe('WebSocketMessageHandler', () => {
 	});
 
 	describe('Terminal Session Ownership', () => {
+		it("relays the sink's refusal of a write under management, with the reason and code (MRC-08-02)", () => {
+			client.subscribedSessionId = 'session-1';
+			vi.mocked(callbacks.writeToTerminal).mockReturnValueOnce({
+				success: false,
+				error:
+					'This terminal was admitted for web-login:ada on a managed host; input by maestro-cli is unavailable.',
+				managed: { state: 'denied', code: 'context-mismatch' },
+			});
+
+			handler.handleMessage(client, {
+				type: 'terminal_write',
+				sessionId: 'session-1',
+				data: 'ls\r',
+			});
+
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response).toMatchObject({
+				type: 'terminal_write_result',
+				success: false,
+				sessionId: 'session-1',
+				managed: { state: 'denied', code: 'context-mismatch' },
+			});
+			expect(response.error).toContain('admitted for web-login:ada');
+		});
+
+		it("relays the sink's refusal of a resize the same way (MRC-08-02)", () => {
+			client.subscribedSessionId = 'session-1';
+			vi.mocked(callbacks.resizeTerminal).mockReturnValueOnce({
+				success: false,
+				error:
+					'This terminal was admitted for lite-device:dev-7 on a managed host; a resize by the operator is unavailable.',
+				managed: { state: 'denied', code: 'context-mismatch' },
+			});
+
+			handler.handleMessage(client, {
+				type: 'terminal_resize',
+				sessionId: 'session-1',
+				cols: 80,
+				rows: 24,
+			});
+
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response).toMatchObject({
+				type: 'terminal_resize_result',
+				success: false,
+				managed: { state: 'denied', code: 'context-mismatch' },
+			});
+			expect(response.error).toContain('a resize by the operator');
+		});
+
 		it('should reject terminal_write when client is not subscribed to session', () => {
 			client.subscribedSessionId = 'other-session';
 

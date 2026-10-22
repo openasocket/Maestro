@@ -876,7 +876,8 @@ interface MaestroAPI {
 				responseChannel: string,
 				background?: boolean,
 				hidden?: boolean,
-				delegation?: import('../shared/maestro-lib/managed/delegation').ManagedDelegationContext
+				delegation?: import('../shared/maestro-lib/managed/delegation').ManagedDelegationContext,
+				dispatchTicket?: string
 			) => void
 		) => () => void;
 		sendRemoteNewAITabWithPromptResponse: (
@@ -923,7 +924,8 @@ interface MaestroAPI {
 				images?: string[],
 				background?: boolean,
 				held?: boolean,
-				delegation?: import('../shared/maestro-lib/managed/delegation').ManagedDelegationContext
+				delegation?: import('../shared/maestro-lib/managed/delegation').ManagedDelegationContext,
+				dispatchTicket?: string
 			) => void
 		) => () => void;
 		sendRemoteEnqueueCommandResponse: (

@@ -123,6 +123,39 @@ export function transportSpawnActor(admission: TransportAdmission): ProcessSpawn
 	}
 }
 
+/**
+ * Whether two spawn actors are the same caller (MRC-08-02): the same peer,
+ * and for a login the same account, for a device the same device. What a
+ * sink that keeps a process across calls (the web terminal's PTY) compares
+ * the caller of a later attach, write or resize against the actor the
+ * process was admitted for. Subscription to the session is not part of it.
+ */
+export function sameSpawnActor(a: ProcessSpawnActor, b: ProcessSpawnActor): boolean {
+	switch (a.peer) {
+		case 'web-login':
+			return b.peer === 'web-login' && b.username === a.username;
+		case 'device-pairing':
+			return b.peer === 'device-pairing' && b.deviceId === a.deviceId;
+		case 'host-secret':
+		case 'in-process':
+			return b.peer === a.peer;
+	}
+}
+
+/** One word for a message: which caller a spawn actor is. */
+export function describeSpawnActor(actor: ProcessSpawnActor): string {
+	switch (actor.peer) {
+		case 'web-login':
+			return `web-login:${actor.username}`;
+		case 'host-secret':
+			return 'maestro-cli';
+		case 'device-pairing':
+			return `lite-device:${actor.deviceId}`;
+		case 'in-process':
+			return 'the operator';
+	}
+}
+
 const storage = new AsyncLocalStorage<TransportAdmission>();
 
 /** Run `fn` with `admission` as the acting transport for every await inside it. */

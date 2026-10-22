@@ -62,6 +62,7 @@ describe('Process CommandRemote Preload API', () => {
 				images,
 				true,
 				undefined,
+				undefined,
 				'receipt-channel'
 			);
 
@@ -73,6 +74,7 @@ describe('Process CommandRemote Preload API', () => {
 				true,
 				images,
 				true,
+				undefined,
 				undefined,
 				'receipt-channel'
 			);
@@ -98,6 +100,7 @@ describe('Process CommandRemote Preload API', () => {
 				undefined,
 				true,
 				delegation,
+				undefined,
 				'receipt-channel'
 			);
 			expect(callback).toHaveBeenCalledWith(
@@ -109,6 +112,7 @@ describe('Process CommandRemote Preload API', () => {
 				undefined,
 				true,
 				delegation,
+				undefined,
 				'receipt-channel'
 			);
 		});
@@ -140,6 +144,7 @@ describe('Process CommandRemote Preload API', () => {
 				'session-123',
 				'test command',
 				'ai',
+				undefined,
 				undefined,
 				undefined,
 				undefined,
@@ -192,6 +197,7 @@ describe('Process CommandRemote Preload API', () => {
 				undefined,
 				undefined,
 				false,
+				undefined,
 				undefined,
 				undefined
 			);

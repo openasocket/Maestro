@@ -55,7 +55,10 @@ import {
 } from '../utils/network-address-watcher';
 import { captureException } from '../utils/sentry';
 import { WebSocketMessageHandler } from './handlers';
-import type { WebTerminalSpawnResult } from './handlers/messageHandlers/types';
+import type {
+	WebTerminalInputResult,
+	WebTerminalSpawnResult,
+} from './handlers/messageHandlers/types';
 import { BroadcastService } from './services';
 import {
 	ApiRoutes,
@@ -541,9 +544,11 @@ export class WebServer {
 		this.callbackRegistry.setWriteToSessionCallback(callback);
 	}
 
-	private writeToTerminalCallback: ((sessionId: string, data: string) => boolean) | null = null;
+	private writeToTerminalCallback:
+		| ((sessionId: string, data: string) => WebTerminalInputResult)
+		| null = null;
 	private resizeTerminalCallback:
-		| ((sessionId: string, cols: number, rows: number) => boolean)
+		| ((sessionId: string, cols: number, rows: number) => WebTerminalInputResult)
 		| null = null;
 	private spawnTerminalForWebCallback:
 		| ((
@@ -553,12 +558,14 @@ export class WebServer {
 		| null = null;
 	private killTerminalForWebCallback: ((sessionId: string) => boolean) | null = null;
 
-	setWriteToTerminalCallback(callback: (sessionId: string, data: string) => boolean): void {
+	setWriteToTerminalCallback(
+		callback: (sessionId: string, data: string) => WebTerminalInputResult
+	): void {
 		this.writeToTerminalCallback = callback;
 	}
 
 	setResizeTerminalCallback(
-		callback: (sessionId: string, cols: number, rows: number) => boolean
+		callback: (sessionId: string, cols: number, rows: number) => WebTerminalInputResult
 	): void {
 		this.resizeTerminalCallback = callback;
 	}
@@ -1381,9 +1388,17 @@ export class WebServer {
 				prompt: string,
 				background?: boolean,
 				hidden?: boolean,
-				delegation?: ManagedDelegationContext
+				delegation?: ManagedDelegationContext,
+				dispatchTicket?: string
 			) =>
-				this.callbackRegistry.newAITabWithPrompt(sessionId, prompt, background, hidden, delegation),
+				this.callbackRegistry.newAITabWithPrompt(
+					sessionId,
+					prompt,
+					background,
+					hidden,
+					delegation,
+					dispatchTicket
+				),
 			consultAgent: async (params: ConsultAgentParams): Promise<ConsultAgentResult> =>
 				this.callbackRegistry.consultAgent(params),
 			noteAgentDelegation: (notice: Parameters<NoteAgentDelegationCallback>[0]) =>
@@ -1396,7 +1411,8 @@ export class WebServer {
 				images?: string[],
 				background?: boolean,
 				held?: boolean,
-				delegation?: ManagedDelegationContext
+				delegation?: ManagedDelegationContext,
+				dispatchTicket?: string
 			) =>
 				this.callbackRegistry.enqueueCommand(
 					sessionId,
@@ -1406,7 +1422,8 @@ export class WebServer {
 					images,
 					background,
 					held,
-					delegation
+					delegation,
+					dispatchTicket
 				),
 			listQueue: async (sessionId?: string) => this.callbackRegistry.listQueue(sessionId),
 			removeQueueItem: async (sessionId: string, itemId: string) =>

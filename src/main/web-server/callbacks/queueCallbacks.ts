@@ -59,7 +59,8 @@ export function registerQueueCallbacks(
 			images?: string[],
 			background?: boolean,
 			held?: boolean,
-			delegation?: ManagedDelegationContext
+			delegation?: ManagedDelegationContext,
+			dispatchTicket?: string
 		) => {
 			const mainWindow = resolveSessionWindow(sessionId);
 			if (!mainWindow) {
@@ -109,7 +110,8 @@ export function registerQueueCallbacks(
 					images,
 					background,
 					held,
-					delegation
+					delegation,
+					dispatchTicket
 				);
 
 				const timeoutId = setTimeout(() => {

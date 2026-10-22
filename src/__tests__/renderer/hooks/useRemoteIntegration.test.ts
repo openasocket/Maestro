@@ -1585,6 +1585,63 @@ describe('useRemoteIntegration', () => {
 	});
 
 	describe('remote new AI tab with prompt', () => {
+		it('keeps the dispatch ticket on a prompt queued for the new tab of a busy agent (MRC-08-02)', () => {
+			const tab = createMockTab({ id: 'tab-1' });
+			const session = createMockSession({ id: 'session-1', state: 'busy', aiTabs: [tab] });
+			const deps = createDeps({ sessions: [session] });
+
+			renderHook(() => useRemoteIntegration(deps));
+
+			act(() => {
+				onRemoteNewAITabWithPromptHandler?.(
+					'session-1',
+					'Hello',
+					'chan-tkt-busy',
+					true,
+					false,
+					undefined,
+					'tkt-new-1'
+				);
+			});
+
+			const updated = useSessionStore.getState().sessions.find((s) => s.id === 'session-1');
+			const newTabId = updated?.aiTabs[updated.aiTabs.length - 1]?.id;
+			expect(updated?.executionQueue?.[0]).toMatchObject({
+				text: 'Hello',
+				tabId: newTabId,
+				dispatchTicket: 'tkt-new-1',
+			});
+		});
+
+		it('puts the dispatch ticket on the immediate spawn of a new tab on an idle agent (MRC-08-02)', () => {
+			const tab = createMockTab({ id: 'tab-1' });
+			const session = createMockSession({ id: 'session-1', state: 'idle', aiTabs: [tab] });
+			const deps = createDeps({ sessions: [session] });
+			const dispatchEventSpy = vi.spyOn(window, 'dispatchEvent');
+
+			renderHook(() => useRemoteIntegration(deps));
+
+			act(() => {
+				onRemoteNewAITabWithPromptHandler?.(
+					'session-1',
+					'Hello',
+					'chan-tkt-idle',
+					true,
+					false,
+					undefined,
+					'tkt-new-2'
+				);
+			});
+
+			const event = dispatchEventSpy.mock.calls
+				.map(([e]) => e as CustomEvent)
+				.find((e) => e.type === 'maestro:remoteCommand');
+			expect(event?.detail).toEqual(
+				expect.objectContaining({ sessionId: 'session-1', dispatchTicket: 'tkt-new-2' })
+			);
+			dispatchEventSpy.mockRestore();
+		});
+
 		it.each(['idle', 'busy'] as const)(
 			'creates a visible background tab on a %s agent without moving the view',
 			(state) => {
@@ -2011,6 +2068,77 @@ describe('useRemoteIntegration', () => {
 	});
 
 	describe('remote enqueue command (dispatch --queue)', () => {
+		it('keeps the dispatch ticket on the item queued behind a busy agent (MRC-08-02)', () => {
+			const tab = createMockTab({ id: 'tab-1' });
+			const session = createMockSession({
+				id: 'session-1',
+				state: 'busy',
+				aiTabs: [tab],
+				activeTabId: 'tab-1',
+				executionQueue: [],
+			});
+			useSessionStore.setState({ sessions: [session] });
+			renderHook(() => useRemoteIntegration(createDeps({ sessions: [session] })));
+
+			act(() => {
+				onRemoteEnqueueCommandHandler?.(
+					'session-1',
+					'Later',
+					'chan-tkt-q',
+					'ai',
+					'tab-1',
+					undefined,
+					true,
+					false,
+					undefined,
+					'tkt-q-1'
+				);
+			});
+
+			const updated = useSessionStore.getState().sessions.find((s) => s.id === 'session-1');
+			expect(updated?.executionQueue[0]).toMatchObject({
+				text: 'Later',
+				dispatchTicket: 'tkt-q-1',
+			});
+		});
+
+		it('puts the dispatch ticket on the immediate spawn of an idle agent (MRC-08-02)', () => {
+			const tab = createMockTab({ id: 'tab-1' });
+			const session = createMockSession({
+				id: 'session-1',
+				state: 'idle',
+				aiTabs: [tab],
+				activeTabId: 'tab-1',
+				executionQueue: [],
+			});
+			useSessionStore.setState({ sessions: [session] });
+			const dispatchEventSpy = vi.spyOn(window, 'dispatchEvent');
+			renderHook(() => useRemoteIntegration(createDeps({ sessions: [session] })));
+
+			act(() => {
+				onRemoteEnqueueCommandHandler?.(
+					'session-1',
+					'Run now',
+					'chan-tkt-now',
+					'ai',
+					'tab-1',
+					undefined,
+					true,
+					false,
+					undefined,
+					'tkt-q-2'
+				);
+			});
+
+			expect(dispatchEventSpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: 'maestro:remoteCommand',
+					detail: expect.objectContaining({ tabId: 'tab-1', dispatchTicket: 'tkt-q-2' }),
+				})
+			);
+			dispatchEventSpy.mockRestore();
+		});
+
 		it('enqueues a message on a busy session and acks the queue position', () => {
 			const tab = createMockTab({ id: 'tab-1', name: 'PR review' });
 			const session = createMockSession({

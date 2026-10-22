@@ -245,7 +245,9 @@ export function createBrowserTabRemoteApi() {
 				background?: boolean,
 				hidden?: boolean,
 				/** The dispatching operation's context; the renderer puts it on the new tab's first spawn. */
-				delegation?: ManagedDelegationContext
+				delegation?: ManagedDelegationContext,
+				/** The host-minted dispatch ticket; echoed unread on the spawn or the queued item. */
+				dispatchTicket?: string
 			) => void
 		): (() => void) => {
 			const handler = (
@@ -255,10 +257,19 @@ export function createBrowserTabRemoteApi() {
 				responseChannel: string,
 				background?: boolean,
 				hidden?: boolean,
-				delegation?: ManagedDelegationContext
+				delegation?: ManagedDelegationContext,
+				dispatchTicket?: string
 			) => {
 				try {
-					callback(sessionId, prompt, responseChannel, background, hidden, delegation);
+					callback(
+						sessionId,
+						prompt,
+						responseChannel,
+						background,
+						hidden,
+						delegation,
+						dispatchTicket
+					);
 				} catch (error) {
 					ipcRenderer.send(responseChannel, false);
 					throw error;

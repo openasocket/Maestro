@@ -748,7 +748,8 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 				responseChannel: string,
 				background?: boolean,
 				hidden?: boolean,
-				delegation?: ManagedDelegationContext
+				delegation?: ManagedDelegationContext,
+				dispatchTicket?: string
 			) => {
 				const ack = (result: {
 					success: boolean;
@@ -838,6 +839,7 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 						text: prompt,
 						slashCommand: isSlashCommand,
 						delegation,
+						dispatchTicket,
 					});
 					if (!queued) {
 						logger.warn(
@@ -867,6 +869,9 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 							// Unexpanded provider commands go to the provider as typed.
 							literalPrompt: commandName.startsWith('/'),
 							delegation,
+							// The host's ticket for the transport, echoed unread for the
+							// spawn handler to claim.
+							dispatchTicket,
 						},
 					})
 				);
@@ -1172,7 +1177,8 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 				images?: string[],
 				background?: boolean,
 				held?: boolean,
-				delegation?: ManagedDelegationContext
+				delegation?: ManagedDelegationContext,
+				dispatchTicket?: string
 			) => {
 				const reply = (result: {
 					success: boolean;
@@ -1227,6 +1233,7 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 									tabId: resolvedTabId,
 									images,
 									delegation,
+									dispatchTicket,
 								},
 							})
 						);
@@ -1251,6 +1258,7 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 							text: command,
 							images,
 							delegation,
+							dispatchTicket,
 						}),
 						...(held && { paused: true }),
 					};

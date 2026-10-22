@@ -1,16 +1,62 @@
 import type { WebServer } from '../WebServer';
 import type { WebServerFactoryDependencies } from '../web-server-factory';
 import type { StoredSession } from '../../stores/types';
+import type { ProcessManager } from '../../process-manager';
+import type { ProcessSpawnActor } from '../../process-manager/types';
 import { logger } from '../../utils/logger';
 import { getDefaultShell } from '../../stores/defaults';
-import { currentSpawnActor } from '../../ipc/handlers/process/handle-spawn';
-import { describeTransportAdmission, getActingTransport } from '../auth/transport-actor';
+import {
+	currentSpawnActor,
+	describeSpawnActor,
+	describeTransportAdmission,
+	getActingTransport,
+	sameSpawnActor,
+} from '../auth/transport-actor';
+import type { WebTerminalInputRefusal } from '../handlers/messageHandlers/types';
+
+/** The owner a host-admitted web PTY has when no web spawn recorded one: the operator. */
+const OPERATOR: ProcessSpawnActor = Object.freeze({ peer: 'in-process' as const });
 
 export function registerTerminalCallbacks(
 	server: WebServer,
 	deps: Pick<WebServerFactoryDependencies, 'getProcessManager' | 'sessionsStore' | 'settingsStore'>
 ): void {
 	const { getProcessManager, sessionsStore, settingsStore } = deps;
+
+	// The actor each web PTY was admitted for, by terminal session id
+	// (MRC-08-02). The PTY outlives the socket that asked for it (a reconnecting
+	// client attaches to the live handle), so the actor is kept here, beside
+	// the sink, and compared against the caller of every later attach, write
+	// and resize. Recorded on a successful spawn, dropped on kill; a PTY that
+	// died and is spawned again records its new owner.
+	const webTerminalActors = new Map<string, ProcessSpawnActor>();
+
+	/**
+	 * Why input from the current caller may not reach a web PTY, or null when
+	 * it may. Only a PTY this host ADMITTED (its admission still bound) is
+	 * actor-bound: on a managed host the caller must be the actor the PTY was
+	 * admitted for, as the transport context resolves it now (a reconnected
+	 * socket was re-resolved at its upgrade and rechecked for this message). A
+	 * standalone host's PTY takes input from any subscribed client, as before,
+	 * and `ProcessManager.write()` still refuses an unadmitted or released
+	 * process under management. Being subscribed to the session is read access
+	 * and plays no part here.
+	 */
+	const inputRefusal = (
+		processManager: ProcessManager,
+		terminalSessionId: string,
+		verb: string
+	): WebTerminalInputRefusal | null => {
+		if (!processManager.admissionOf(terminalSessionId)) return null;
+		const owner = webTerminalActors.get(terminalSessionId) ?? OPERATOR;
+		const caller = currentSpawnActor();
+		if (sameSpawnActor(owner, caller)) return null;
+		return {
+			success: false,
+			error: `This terminal was admitted for ${describeSpawnActor(owner)} on a managed host; ${verb} by ${describeSpawnActor(caller)} is unavailable.`,
+			managed: { state: 'denied', code: 'context-mismatch' },
+		};
+	};
 
 	// Set up callback for web server to write commands to sessions
 	// Note: Process IDs have -ai or -terminal suffix based on session's inputMode
@@ -46,7 +92,16 @@ export function registerTerminalCallbacks(
 			logger.warn('processManager is null for writeToTerminal', 'WebServer');
 			return false;
 		}
-		return processManager.write(`${sessionId}-terminal`, data);
+		const terminalSessionId = `${sessionId}-terminal`;
+		const refused = inputRefusal(processManager, terminalSessionId, 'input');
+		if (refused) {
+			logger.warn(`Web terminal write refused for ${terminalSessionId}`, 'WebServer', {
+				transport: describeTransportAdmission(getActingTransport()),
+				message: refused.error,
+			});
+			return refused;
+		}
+		return processManager.write(terminalSessionId, data);
 	});
 
 	server.setResizeTerminalCallback((sessionId: string, cols: number, rows: number) => {
@@ -55,7 +110,16 @@ export function registerTerminalCallbacks(
 			logger.warn('processManager is null for resizeTerminal', 'WebServer');
 			return false;
 		}
-		return processManager.resize(`${sessionId}-terminal`, cols, rows);
+		const terminalSessionId = `${sessionId}-terminal`;
+		const refused = inputRefusal(processManager, terminalSessionId, 'a resize');
+		if (refused) {
+			logger.warn(`Web terminal resize refused for ${terminalSessionId}`, 'WebServer', {
+				transport: describeTransportAdmission(getActingTransport()),
+				message: refused.error,
+			});
+			return refused;
+		}
+		return processManager.resize(terminalSessionId, cols, rows);
 	});
 
 	// Ensure the host terminal exists; reconnecting clients attach to its live handle.
@@ -70,6 +134,13 @@ export function registerTerminalCallbacks(
 	// enterprise principal. Before this, a managed host refused the spawn at the
 	// sink for carrying no admission at all, and the client was told only that
 	// the spawn failed. Standalone hosts spawn exactly as before.
+	//
+	// A PTY that is already live is ATTACHED to, not spawned (MRC-08-02): the
+	// lease it runs under is the one its admission bound, so no new admission
+	// is asked for, and under management only the actor it was admitted for
+	// may attach. A client that reconnected as that actor carries on; another
+	// actor is refused and the PTY stays its owner's. A standalone host attaches
+	// any client, as before.
 	server.setSpawnTerminalForWebCallback(
 		async (sessionId: string, config: { cwd: string; cols?: number; rows?: number }) => {
 			const processManager = getProcessManager();
@@ -95,6 +166,26 @@ export function registerTerminalCallbacks(
 			};
 
 			const transport = describeTransportAdmission(getActingTransport());
+			if (processManager.terminalAttachable(terminalSessionId)) {
+				const refused = inputRefusal(processManager, terminalSessionId, 'attaching');
+				if (refused) {
+					logger.warn(`Web terminal attach refused for ${terminalSessionId}`, 'WebServer', {
+						transport,
+						message: refused.error,
+					});
+					return { pid: -1, success: false, error: refused.error, managed: refused.managed };
+				}
+				logger.info(
+					`Attaching web client to live terminal PTY: ${terminalSessionId}`,
+					'WebServer',
+					{
+						transport,
+					}
+				);
+				return processManager.spawnTerminalTab(terminalConfig);
+			}
+
+			const actor = currentSpawnActor();
 			logger.info(`Spawning terminal PTY for web client: ${terminalSessionId}`, 'WebServer', {
 				shell,
 				cwd: config.cwd,
@@ -104,7 +195,7 @@ export function registerTerminalCallbacks(
 			// the renderer's `process:spawnTerminalTab` handler does.
 			const admitted = await processManager.admitSpawn(
 				processManager.terminalTabConfig(terminalConfig),
-				currentSpawnActor()
+				actor
 			);
 			if (admitted.state !== 'standalone' && admitted.state !== 'admitted') {
 				logger.warn(`Web terminal PTY not admitted for ${terminalSessionId}`, 'WebServer', {
@@ -120,11 +211,14 @@ export function registerTerminalCallbacks(
 					managed: { state: admitted.state, code: admitted.code },
 				};
 			}
-			return processManager.spawnTerminalTab(
+			const result = processManager.spawnTerminalTab(
 				admitted.state === 'admitted'
 					? { ...terminalConfig, admission: admitted.admission }
 					: terminalConfig
 			);
+			if (result.success) webTerminalActors.set(terminalSessionId, actor);
+			else webTerminalActors.delete(terminalSessionId);
+			return result;
 		}
 	);
 
@@ -136,6 +230,7 @@ export function registerTerminalCallbacks(
 			return false;
 		}
 		const terminalSessionId = `${sessionId}-terminal`;
+		webTerminalActors.delete(terminalSessionId);
 		if (!processManager.get(terminalSessionId)) {
 			return true; // Already gone
 		}

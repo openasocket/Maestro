@@ -14,6 +14,11 @@ import fs from 'fs/promises';
 import { logger } from '../../../utils/logger';
 import { validateCallbackRequest, armDispatchCallback } from './dispatchCallbacks';
 import { noteDispatchDelegation, readDispatchDelegation } from './agentDelegation';
+import {
+	issueDispatchTicket,
+	resolveTransportAdmission,
+	withdrawDispatchTicket,
+} from '../../auth/transport-actor';
 import { LOG_CONTEXT } from './shared';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
 import {
@@ -755,9 +760,21 @@ export function handleNewAITabWithPrompt(
 		return;
 	}
 
+	// The prompt spawns from the renderer, now or from the execution queue when
+	// the agent is busy, outside this client's context. The ticket is issued
+	// here for the agent alone (the tab does not exist yet) and the spawn
+	// handler claims it for whichever tab the renderer created, so the turn
+	// binds the CLI or device that dispatched it, as a `send_command` has since
+	// MRC-08-01B (MRC-08-02). A refused dispatch withdraws it; a queued one
+	// keeps it on the item until the drain spawns.
+	const dispatchTicket = issueDispatchTicket(resolveTransportAdmission(client), {
+		agentId: sessionId,
+	});
+
 	ctx.callbacks
-		.newAITabWithPrompt(sessionId, prompt, background, hidden, delegation)
+		.newAITabWithPrompt(sessionId, prompt, background, hidden, delegation, dispatchTicket)
 		.then((result) => {
+			if (!result.success) withdrawDispatchTicket(dispatchTicket);
 			// Arm the callback only once the fresh tab id is known - that id is
 			// the correlation key. `isNewTab` lets the registry adopt a spawn the
 			// renderer may already have emitted while this ack was in flight.
@@ -800,6 +817,7 @@ export function handleNewAITabWithPrompt(
 			}
 		})
 		.catch((error) => {
+			withdrawDispatchTicket(dispatchTicket);
 			sendErrorResult(`Failed to create AI tab with prompt: ${error.message}`);
 		});
 }

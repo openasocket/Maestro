@@ -663,10 +663,18 @@ export class CallbackRegistry {
 		prompt: string,
 		background?: boolean,
 		hidden?: boolean,
-		delegation?: ManagedDelegationContext
+		delegation?: ManagedDelegationContext,
+		dispatchTicket?: string
 	): Promise<{ success: boolean; tabId?: string }> {
 		if (!this.callbacks.newAITabWithPrompt) return { success: false };
-		return this.callbacks.newAITabWithPrompt(sessionId, prompt, background, hidden, delegation);
+		return this.callbacks.newAITabWithPrompt(
+			sessionId,
+			prompt,
+			background,
+			hidden,
+			delegation,
+			dispatchTicket
+		);
 	}
 
 	async consultAgent(params: ConsultAgentParams): Promise<ConsultAgentResult> {
@@ -689,7 +697,8 @@ export class CallbackRegistry {
 		images?: string[],
 		background?: boolean,
 		held?: boolean,
-		delegation?: ManagedDelegationContext
+		delegation?: ManagedDelegationContext,
+		dispatchTicket?: string
 	): Promise<EnqueueCommandResult> {
 		if (!this.callbacks.enqueueCommand) return { success: false, error: 'not configured' };
 		return this.callbacks.enqueueCommand(
@@ -700,7 +709,8 @@ export class CallbackRegistry {
 			images,
 			background,
 			held,
-			delegation
+			delegation,
+			dispatchTicket
 		);
 	}
 

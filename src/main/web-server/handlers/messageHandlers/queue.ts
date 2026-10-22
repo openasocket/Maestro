@@ -11,6 +11,11 @@ import { captureException } from '../../../utils/sentry';
 import { getDispatchCallbackRegistry } from '../../../dispatch-callbacks';
 import { armDispatchCallback } from './dispatchCallbacks';
 import { noteDispatchDelegation, readDispatchDelegation } from './agentDelegation';
+import {
+	issueDispatchTicket,
+	resolveTransportAdmission,
+	withdrawDispatchTicket,
+} from '../../auth/transport-actor';
 import { LOG_CONTEXT } from './shared';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
 
@@ -105,6 +110,17 @@ export function handleEnqueueCommand(
 		if (enqueueCallbackId) getDispatchCallbackRegistry()?.cancel(enqueueCallbackId);
 	};
 
+	// The renderer dispatches now or queues the prompt; either way the spawn
+	// comes back over IPC outside this client's context. The ticket, bound to
+	// the agent and the tab named (none: the renderer's pick of the active
+	// tab), rides the queued item, so a dispatch that waits its turn still
+	// binds the transport that sent it (MRC-08-02, as `send_command` has since
+	// MRC-08-01B). A refused enqueue withdraws it.
+	const dispatchTicket = issueDispatchTicket(resolveTransportAdmission(client), {
+		agentId: sessionId,
+		tabId: requestedTabId,
+	});
+
 	ctx.callbacks
 		.enqueueCommand(
 			sessionId,
@@ -114,10 +130,14 @@ export function handleEnqueueCommand(
 			images,
 			background,
 			held,
-			delegation
+			delegation,
+			dispatchTicket
 		)
 		.then((result) => {
-			if (!result.success) cancelArmedCallback();
+			if (!result.success) {
+				cancelArmedCallback();
+				withdrawDispatchTicket(dispatchTicket);
+			}
 			ctx.send(client, {
 				type: 'enqueue_command_result',
 				success: result.success,
@@ -142,6 +162,7 @@ export function handleEnqueueCommand(
 		})
 		.catch((error) => {
 			cancelArmedCallback();
+			withdrawDispatchTicket(dispatchTicket);
 			captureException(error instanceof Error ? error : new Error(String(error)), {
 				extra: { area: 'web-server', handler: 'enqueue_command', sessionId },
 			});

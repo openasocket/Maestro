@@ -973,7 +973,10 @@ describe('web-server/web-server-factory', () => {
 				true,
 				delegation,
 			]);
-			expect(typeof call[9]).toBe('string');
+			// The dispatch ticket slot (MRC-08-01B) sits between the delegation and
+			// the receipt channel; none was handed in here.
+			expect(call[9]).toBeUndefined();
+			expect(typeof call[10]).toBe('string');
 		});
 
 		it('does not log raw command text at info level (info shows length only)', async () => {
@@ -1735,6 +1738,7 @@ describe('web-server/web-server-factory', () => {
 				undefined,
 				undefined,
 				undefined,
+				undefined,
 				undefined
 			);
 		});
@@ -1756,7 +1760,39 @@ describe('web-server/web-server-factory', () => {
 				undefined,
 				true,
 				true,
-				delegation
+				delegation,
+				undefined
+			);
+		});
+
+		it('setEnqueueCommandCallback forwards the dispatch ticket after the delegation context (MRC-08-02)', () => {
+			const server = createWebServerFactory(deps)() as any;
+			const callback = server.setEnqueueCommandCallback.mock.calls[0][0];
+
+			void callback(
+				'session-1',
+				'later',
+				'ai',
+				'tab-1',
+				undefined,
+				true,
+				false,
+				undefined,
+				'tkt-1'
+			);
+
+			expect(mockWebContents.send).toHaveBeenCalledWith(
+				'remote:enqueueCommand',
+				'session-1',
+				'later',
+				expect.any(String),
+				'ai',
+				'tab-1',
+				undefined,
+				true,
+				false,
+				undefined,
+				'tkt-1'
 			);
 		});
 
@@ -2541,6 +2577,7 @@ describe('web-server/web-server-factory', () => {
 				'hello owner',
 				'ai',
 				'tab-1',
+				undefined,
 				undefined,
 				undefined,
 				undefined,

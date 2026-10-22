@@ -321,7 +321,8 @@ export function registerBrowserTabCallbacks(
 			prompt: string,
 			background?: boolean,
 			hidden?: boolean,
-			delegation?: ManagedDelegationContext
+			delegation?: ManagedDelegationContext,
+			dispatchTicket?: string
 		) => {
 			const mainWindow = getMainWindow();
 			if (!mainWindow) {
@@ -373,7 +374,8 @@ export function registerBrowserTabCallbacks(
 					responseChannel,
 					background,
 					hidden,
-					delegation
+					delegation,
+					dispatchTicket
 				);
 
 				const timeoutId = setTimeout(() => {

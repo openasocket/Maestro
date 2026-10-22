@@ -111,6 +111,20 @@ export interface WebTerminalSpawnResult {
 }
 
 /**
+ * What the web terminal's write and resize callbacks answer: `true` or
+ * `false` as the process manager reports it, or a refusal when a managed host
+ * will not take this caller's input into a PTY admitted for another actor
+ * (MRC-08-02). Being subscribed to the session is read access and never this
+ * authority; the refusal names the reason and the authority's state and code.
+ */
+export interface WebTerminalInputRefusal {
+	success: false;
+	error: string;
+	managed?: { state: 'denied'; code: string };
+}
+export type WebTerminalInputResult = boolean | WebTerminalInputRefusal;
+
+/**
  * Session detail for command validation
  */
 export interface SessionDetailForHandler {
@@ -228,7 +242,9 @@ export interface MessageHandlerCallbacks {
 		prompt: string,
 		background?: boolean,
 		hidden?: boolean,
-		delegation?: ManagedDelegationContext
+		delegation?: ManagedDelegationContext,
+		/** The host-minted ticket the spawn sink claims the transport with (see `issueDispatchTicket`). */
+		dispatchTicket?: string
 	) => Promise<{ success: boolean; tabId?: string; queued?: boolean; error?: string }>;
 	/** Consult another agent and return its answer (`maestro-cli ask`). */
 	consultAgent: (params: ConsultAgentParams) => Promise<ConsultAgentResult>;
@@ -242,7 +258,9 @@ export interface MessageHandlerCallbacks {
 		images?: string[],
 		background?: boolean,
 		held?: boolean,
-		delegation?: ManagedDelegationContext
+		delegation?: ManagedDelegationContext,
+		/** The host-minted ticket the spawn sink claims the transport with (see `issueDispatchTicket`). */
+		dispatchTicket?: string
 	) => Promise<EnqueueCommandResult>;
 	listQueue: (sessionId?: string) => Promise<{
 		success: boolean;
@@ -454,8 +472,8 @@ export interface MessageHandlerCallbacks {
 		lookbackDays: number,
 		provider: string
 	) => Promise<DirectorNotesSynopsisResult>;
-	writeToTerminal: (sessionId: string, data: string) => boolean;
-	resizeTerminal: (sessionId: string, cols: number, rows: number) => boolean;
+	writeToTerminal: (sessionId: string, data: string) => WebTerminalInputResult;
+	resizeTerminal: (sessionId: string, cols: number, rows: number) => WebTerminalInputResult;
 	spawnTerminalForWeb: (
 		sessionId: string,
 		config: { cwd: string; cols?: number; rows?: number }
