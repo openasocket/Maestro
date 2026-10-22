@@ -85,6 +85,50 @@ export const HOST_STATUS_REPLY = 'host_status_result';
 export const HOST_STOP_MESSAGE = 'host_stop';
 export const HOST_STOP_REPLY = 'host_stop_result';
 
+/**
+ * The one message a managed operation rides over the bridge (MRC-08-05): `{ type, operation,
+ * envelope | offer }`, answered with `result` on success and a `reason` on refusal. Answered by
+ * `maestro-cli host`; a desktop or an older host echoes it, which is `unsupported`, never "unmanaged".
+ */
+export const MANAGED_OPERATION_MESSAGE = 'managed_operation';
+export const MANAGED_OPERATION_REPLY = 'managed_operation_result';
+
+/**
+ * The operations the wire carries: `ManagedApi`'s, plus `scope`, the read a caller fills its context
+ * from. A closed list: nothing on it changes the host's standing, custody, binding or policy.
+ */
+export const MANAGED_WIRE_OPERATIONS = [
+	'scope',
+	'negotiate',
+	'identity',
+	'agents',
+	'runs',
+	'submit',
+	'inspect',
+	'cancel',
+	'interrupt',
+	'events',
+	'policy',
+] as const;
+export type ManagedWireOperation = (typeof MANAGED_WIRE_OPERATIONS)[number];
+
+export function isManagedWireOperation(value: unknown): value is ManagedWireOperation {
+	return (MANAGED_WIRE_OPERATIONS as readonly unknown[]).includes(value);
+}
+
+/**
+ * Why the host refused a managed request: at the bridge, before the facade saw it (the first four),
+ * or by the facade's own transport gate (a host that lost its data directory, or a closed one).
+ */
+export type ManagedWireRefusal =
+	| 'unsupported'
+	| 'invalid-input'
+	| 'unauthenticated'
+	| 'context-mismatch'
+	| 'host-lost'
+	| 'host-unavailable'
+	| 'failed';
+
 /** `true` when the host has anything a stop would interrupt. */
 export function hostHasWork(work: HostWork): boolean {
 	return (

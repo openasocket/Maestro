@@ -14,14 +14,33 @@
 
 import type { AgentRecord } from '../store/records';
 import { parseProcessId } from '../client/bridge-frames';
+import {
+	MANAGED_OPERATION_MESSAGE,
+	MANAGED_OPERATION_REPLY,
+	isManagedWireOperation,
+	type ManagedWireOperation,
+	type ManagedWireRefusal,
+} from '../client/host-control';
 import type {
 	AgentPatch,
 	ClientResult,
 	MaestroClient,
+	ManagedApi,
+	ManagedScope,
 	ProviderInfo,
 	TabPatch,
 	TurnSendReceipt,
 } from '../client/types';
+import { managedActorPrincipal } from '../managed/host-adapter';
+import {
+	MANAGED_CAPABILITIES,
+	managedContextProblems,
+	type ManagedCapability,
+	type ManagedInstallationIdentity,
+	type ManagedOperationContext,
+	type ManagedPrincipalRef,
+} from '../managed/types';
+import type { MaestroRuntime } from './index';
 import { groupChatToWire, type Frame } from './server-frames';
 
 type Request = Record<string, unknown>;
@@ -299,6 +318,260 @@ function sendFailure(
 }
 
 // ---------------------------------------------------------------------------
+// Managed operations over the bridge (`managed_operation`, MRC-08-05)
+// ---------------------------------------------------------------------------
+
+/**
+ * The scope a caller over the bridge is admitted in, read from the host's own standing. The host's
+ * per-boot secret admits the transport and grants no role: the caller acts as the principal the
+ * host's custody names, carries no delegation, and submits on the current policy generation only.
+ */
+export interface ManagedRequestScope {
+	installation: ManagedInstallationIdentity;
+	actor(): ManagedPrincipalRef;
+	policyRevision(): number | null;
+	binding(): ManagedScope['binding'];
+}
+
+/** The scope of a runtime, from the host adapter's custody first and the enrollment record next. */
+export function runtimeManagedScope(
+	runtime: Pick<MaestroRuntime, 'installation' | 'managedHost' | 'managedBinding'>
+): ManagedRequestScope {
+	const { installation, managedHost, managedBinding } = runtime;
+	return {
+		installation,
+		actor: () => managedActorPrincipal(managedHost?.identity.read() ?? null, installation),
+		policyRevision: () => {
+			if (managedHost) return managedHost.policy().policyRevision;
+			const state = managedBinding.state();
+			return state.state === 'enrolled' ? state.record.policyRevision : null;
+		},
+		binding: () => managedBinding.state().state,
+	};
+}
+
+/** The operations with an effect: admitted on the host's current policy generation only. */
+const EFFECT_OPS: ReadonlySet<ManagedWireOperation> = new Set(['submit', 'cancel', 'interrupt']);
+const MANAGED_WIRE_OPERATIONS_TEXT =
+	'scope, negotiate, identity, agents, runs, submit, inspect, cancel, interrupt, events and policy';
+
+type ScopeRefusal = { code: 'unauthenticated' | 'context-mismatch'; message: string };
+const mismatch = (message: string): ScopeRefusal => ({ code: 'context-mismatch', message });
+const unauthenticated = (message: string): ScopeRefusal => ({ code: 'unauthenticated', message });
+
+/** Whether a well-formed context fits the transport's scope. Refused by name, never rewritten. */
+export function managedScopeRefusal(
+	context: ManagedOperationContext,
+	scope: ManagedRequestScope,
+	operation: ManagedWireOperation
+): ScopeRefusal | undefined {
+	const here = scope.installation;
+	const named = context.installation;
+	if (
+		named.installationId !== here.installationId ||
+		named.runtimeId !== here.runtimeId ||
+		named.processEpoch !== here.processEpoch
+	) {
+		return mismatch(
+			`The context names installation ${named.installationId} (runtime ${named.runtimeId}, epoch ${named.processEpoch}); this host is ${here.installationId} (runtime ${here.runtimeId}, epoch ${here.processEpoch}). Read scope and send again.`
+		);
+	}
+	const actor = scope.actor();
+	if (context.actor.kind !== actor.kind || context.actor.id !== actor.id) {
+		return unauthenticated(
+			`A caller over this transport acts as ${actor.kind} ${actor.id}, the host's own principal; the context names ${context.actor.kind} ${context.actor.id}.`
+		);
+	}
+	if (context.delegation.chain.length > 0 || context.delegation.grantRef !== null) {
+		return unauthenticated(
+			'A caller over this transport carries no delegation this host can verify; the context names a chain or a grant reference.'
+		);
+	}
+	const current = scope.policyRevision();
+	if (EFFECT_OPS.has(operation) && context.policyRevision !== current) {
+		return mismatch(
+			`The context names policy revision ${String(context.policyRevision)}; this host applies ${String(current)}. Read scope and send again.`
+		);
+	}
+	return undefined;
+}
+
+const isCapabilityList = (value: unknown): value is ManagedCapability[] =>
+	Array.isArray(value) &&
+	value.every((entry) => (MANAGED_CAPABILITIES as readonly unknown[]).includes(entry));
+const isStringList = (value: unknown): value is string[] =>
+	Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+const isCursor = (value: unknown): value is string | null =>
+	value === null || (typeof value === 'string' && value !== '');
+const isLimit = (value: unknown): value is number =>
+	typeof value === 'number' && Number.isInteger(value) && value > 0;
+const isNullableString = (value: unknown): value is string | null =>
+	value === null || typeof value === 'string';
+
+type ShapedInput = { ok: true; input: unknown } | { ok: false; problem: string };
+
+/** The closed input shape of each operation: the facade is handed what its signature says, nothing more. */
+function shapeManagedInput(operation: ManagedWireOperation, raw: unknown): ShapedInput {
+	const input = obj(raw) ?? (raw === undefined ? {} : undefined);
+	if (!input) return { ok: false, problem: 'input is not an object' };
+	const page = (): ShapedInput =>
+		isCursor(input.cursor) && isLimit(input.limit)
+			? { ok: true, input: { cursor: input.cursor, limit: input.limit } }
+			: { ok: false, problem: 'input needs cursor (string or null) and limit (positive integer)' };
+	const run = (): ShapedInput =>
+		str(input.runId)
+			? { ok: true, input: { runId: input.runId } }
+			: { ok: false, problem: 'input.runId is not an id' };
+	switch (operation) {
+		case 'identity':
+		case 'policy':
+			return { ok: true, input: {} };
+		case 'agents':
+		case 'events':
+			return page();
+		case 'runs': {
+			const paged = page();
+			if (!paged.ok) return paged;
+			if (input.agentId === undefined) return paged;
+			if (!str(input.agentId)) return { ok: false, problem: 'input.agentId is not an id' };
+			return { ok: true, input: { ...(paged.input as object), agentId: input.agentId } };
+		}
+		case 'inspect':
+		case 'cancel':
+		case 'interrupt':
+			return run();
+		case 'submit': {
+			const content = obj(input.content);
+			if (
+				!str(input.agentId) ||
+				!isNullableString(input.tabId) ||
+				!str(input.providerId) ||
+				!isNullableString(input.modelId) ||
+				!content ||
+				typeof content.text !== 'string' ||
+				!str(content.sha256) ||
+				!isStringList(input.resourceIds)
+			) {
+				return {
+					ok: false,
+					problem:
+						'input needs agentId, tabId (string or null), providerId, modelId (string or null), content { text, sha256 } and resourceIds (strings)',
+				};
+			}
+			return {
+				ok: true,
+				input: {
+					agentId: input.agentId,
+					tabId: input.tabId,
+					providerId: input.providerId,
+					modelId: input.modelId,
+					content: { text: content.text, sha256: content.sha256 },
+					resourceIds: [...input.resourceIds],
+				},
+			};
+		}
+		case 'scope':
+		case 'negotiate':
+			return { ok: true, input: {} };
+	}
+}
+
+const managedRefusal = (
+	reason: ManagedWireRefusal,
+	error: string,
+	operation?: ManagedWireOperation
+): Frame =>
+	refusal(MANAGED_OPERATION_REPLY, error, { reason, ...(operation ? { operation } : {}) });
+
+/** What the facade's own transport gate said, as a wire reason the client maps back. */
+function facadeRefusal(
+	operation: ManagedWireOperation,
+	result: Extract<ClientResult<unknown>, { ok: false }>
+): Frame {
+	const code = result.error.code;
+	const reason: ManagedWireRefusal =
+		code === 'host-lost' || code === 'host-unavailable' || code === 'unsupported' ? code : 'failed';
+	return managedRefusal(reason, errorText(result), operation);
+}
+
+/**
+ * Answer one managed operation, in a fixed order: the operation is on the list, the host has a
+ * facade and a scope, the context is well formed and fits the scope, the input has the shape, and
+ * only then does the facade see it (and verifies the context again). A refusal names its step.
+ */
+async function answerManaged(
+	managed: ManagedApi | undefined,
+	scope: ManagedRequestScope | undefined,
+	message: Request
+): Promise<Frame> {
+	const type = MANAGED_OPERATION_REPLY;
+	const operation = message.operation;
+	if (!isManagedWireOperation(operation)) {
+		return managedRefusal(
+			'unsupported',
+			`Unknown managed operation ${JSON.stringify(operation ?? null)}; this host answers ${MANAGED_WIRE_OPERATIONS_TEXT}.`
+		);
+	}
+	if (!managed || !scope) {
+		return managedRefusal(
+			'unsupported',
+			'This host exposes no managed operations over the bridge: it has no managed facade or no scope to admit a caller in.',
+			operation
+		);
+	}
+	if (operation === 'scope') {
+		const { installation } = scope;
+		const view: ManagedScope = {
+			installation,
+			actor: scope.actor(),
+			policyRevision: scope.policyRevision(),
+			binding: scope.binding(),
+		};
+		return { type, success: true, operation, result: view };
+	}
+	if (operation === 'negotiate') {
+		const offer = obj(message.offer);
+		if (
+			!offer ||
+			!isStringList(offer.supportedVersions) ||
+			!isCapabilityList(offer.required) ||
+			(offer.optional !== undefined && !isCapabilityList(offer.optional))
+		) {
+			return managedRefusal(
+				'invalid-input',
+				'offer needs supportedVersions (strings), required (capabilities) and, if present, optional (capabilities).',
+				operation
+			);
+		}
+		const result = await managed.negotiate({
+			supportedVersions: offer.supportedVersions,
+			required: offer.required,
+			...(offer.optional ? { optional: offer.optional } : {}),
+		});
+		return result.ok
+			? { type, success: true, operation, result: result.value }
+			: facadeRefusal(operation, result);
+	}
+	const envelope = obj(message.envelope);
+	if (!envelope) return managedRefusal('invalid-input', 'envelope is not an object', operation);
+	const problems = managedContextProblems(envelope.context);
+	if (problems.length > 0) {
+		return managedRefusal('invalid-input', `envelope.context: ${problems.join('; ')}`, operation);
+	}
+	const context = structuredClone(envelope.context as ManagedOperationContext);
+	const refused = managedScopeRefusal(context, scope, operation);
+	if (refused) return managedRefusal(refused.code, refused.message, operation);
+	const shaped = shapeManagedInput(operation, envelope.input);
+	if (!shaped.ok) {
+		return managedRefusal('invalid-input', `envelope.${shaped.problem}`, operation);
+	}
+	const result = await managed[operation]({ context, input: shaped.input as never });
+	return result.ok
+		? { type, success: true, operation, result: result.value }
+		: facadeRefusal(operation, result);
+}
+
+// ---------------------------------------------------------------------------
 // The handler
 // ---------------------------------------------------------------------------
 
@@ -336,14 +609,29 @@ async function projectSessions(client: MaestroClient): Promise<Frame[]> {
 
 export type RequestHandler = (message: Request) => Promise<Frame | undefined>;
 
+export interface RequestHandlerOptions {
+	/**
+	 * The scope managed requests are admitted in (`runtimeManagedScope(runtime)` for a host).
+	 * Absent: `managed_operation` is refused `unsupported`, whatever facade the client has.
+	 */
+	managedScope?: ManagedRequestScope;
+}
+
 /** Answer the desktop bridge's typed messages with `client`. */
-export function createRequestHandler(client: MaestroClient): RequestHandler {
+export function createRequestHandler(
+	client: MaestroClient,
+	options: RequestHandlerOptions = {}
+): RequestHandler {
 	const sessionId = (message: Request): string => str(message.sessionId) ?? '';
 
 	return async (message) => {
 		switch (message.type) {
 			case 'ping':
 				return { type: 'pong' };
+
+			// -- managed operations (MRC-08-05) -----------------------------
+			case MANAGED_OPERATION_MESSAGE:
+				return answerManaged(client.managed, options.managedScope, message);
 
 			case 'get_sessions':
 				return { type: 'sessions_list', sessions: await projectSessions(client) };

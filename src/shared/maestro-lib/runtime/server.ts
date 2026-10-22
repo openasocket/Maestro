@@ -45,7 +45,7 @@ import { providerRouteSupport } from '../providers/capabilities';
 import { getVisibleAgentDefinitions } from '../providers/definitions';
 import type { MaestroRuntime } from './index';
 import { autoRunStateFrame, createFrameState, framesForEvent, type Frame } from './server-frames';
-import { createRequestHandler } from './server-requests';
+import { createRequestHandler, runtimeManagedScope } from './server-requests';
 
 const LOG_CONTEXT = '[RuntimeServer]';
 
@@ -166,7 +166,8 @@ export function hostManagedStanding(input: {
 export async function startRuntimeServer(options: RuntimeServerOptions): Promise<RuntimeServer> {
 	const { runtime } = options;
 	const epoch = crypto.randomUUID();
-	const handle = createRequestHandler(runtime);
+	// Managed requests are admitted in the runtime's own scope (MRC-08-05), read per request.
+	const handle = createRequestHandler(runtime, { managedScope: runtimeManagedScope(runtime) });
 	const frameState = createFrameState();
 	const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
 	const sockets = new Set<WebSocket>();

@@ -274,7 +274,25 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		const provider = turn.settings.provider;
 
 		const managed = item.managed;
-		let leaseId: string | null = null;
+		// The single-writer check, before the spawn (MRC-08-05): a runtime that lost its data directory
+		// starts nothing (its records would be refused once the process existed); a managed attempt is journaled.
+		const writer = options.fence();
+		if (!writer.ok) {
+			const message = `This runtime no longer owns its data directory: ${writer.reason}`;
+			if (managed) {
+				await managed.journal
+					.markTerminal(managed.runId, managed.attemptId, {
+						outcome: 'failed',
+						detail: `managed-unavailable: ${message}`,
+					})
+					.catch((error) =>
+						logger.warn(`The run journal was not written: ${errorText(error)}`, LOG_CONTEXT)
+					);
+				throw new TurnStartRefusal('managed-unavailable', message);
+			}
+			throw new Error(message);
+		}
+		const admitted: { leaseId: string | null } = { leaseId: null };
 		const started = await deps.runAgentTurn(turn, {
 			sessionId: `${agentId}-ai-${item.tabId}`,
 			sshStore,
@@ -288,7 +306,7 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 							policy: managed.policy,
 							resourceIds: managed.resources.map((resource) => resource.id),
 							onLease: (lease) => {
-								leaseId = lease.leaseId;
+								admitted.leaseId = lease.leaseId;
 							},
 						},
 					}
@@ -304,6 +322,23 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 			throw new TurnStartRefusal(started.reason, started.message);
 		}
 		const run = started.run;
+		// A managed turn runs on a lease or not at all: a sink that answered with a process and no lease
+		// did not admit it (a replaced provider launch cannot run it unadmitted), so it is stopped here.
+		if (managed && admitted.leaseId === null) {
+			run.terminateNow();
+			await run.result.catch(() => undefined);
+			const message =
+				'The provider launch started a process for a managed turn without a lease from the authority; it was stopped.';
+			await managed.journal
+				.markTerminal(managed.runId, managed.attemptId, {
+					outcome: 'failed',
+					detail: `managed-unavailable: ${message}`,
+				})
+				.catch((error) =>
+					logger.warn(`The run journal was not written: ${errorText(error)}`, LOG_CONTEXT)
+				);
+			throw new TurnStartRefusal('managed-unavailable', message);
+		}
 
 		// The process exists, so the registry learns of it before anything is awaited: the agent
 		// reads busy to Auto Run, and a shutdown stops this process, from this line on. `settled`
@@ -329,7 +364,7 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 			try {
 				await managed.journal.markDispatched(managed.runId, managed.attemptId, {
 					pid: run.pid ?? null,
-					leaseId,
+					leaseId: admitted.leaseId,
 				});
 			} catch (error) {
 				logger.warn(`The run journal was not written: ${errorText(error)}`, LOG_CONTEXT);
@@ -644,6 +679,21 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 
 	const managedPort: ManagedTurnPort = {
 		async sendManaged(agentId, tabId, text, dispatch): Promise<ManagedSendResult> {
+			// The single-writer check at the port (MRC-08-05): nothing of a managed send is queued on a
+			// runtime that lost its data directory; the attempt is journaled as failed, a fact a peer reads.
+			const writer = options.fence();
+			if (!writer.ok) {
+				const message = `This runtime no longer owns its data directory: ${writer.reason}`;
+				await dispatch.journal
+					.markTerminal(dispatch.runId, dispatch.attemptId, {
+						outcome: 'failed',
+						detail: `managed-unavailable: ${message}`,
+					})
+					.catch((error) =>
+						logger.warn(`The run journal was not written: ${errorText(error)}`, LOG_CONTEXT)
+					);
+				return { status: 'refused', reason: 'managed-unavailable', message };
+			}
 			const submitted = await submitText(agentId, tabId, text, dispatch);
 			switch (submitted.status) {
 				case 'queued':

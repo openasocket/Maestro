@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createWsMaestroClient } from '../ws-client';
 import type { MaestroClient, MaestroEvent, TurnEvent } from '../types';
+import { MANAGED_CONTRACT_VERSION, type ManagedOperationContext } from '../../managed/types';
 import { CLI_SECRET, FakeBridge, TOKEN, agentRecord, tabProcessId, type Frame } from './fakeBridge';
 
 const A1 = 'a1';
@@ -2050,6 +2051,157 @@ describe('createWsMaestroClient', () => {
 			expect(await client.consults.ask({ targetAgentId: 'a2', question: 'q' })).toMatchObject({
 				ok: false,
 				error: { code: 'host-unavailable', method: 'consults.ask' },
+			});
+		});
+	});
+
+	// -----------------------------------------------------------------------
+
+	describe('managed operations (MRC-08-05)', () => {
+		const context = (): ManagedOperationContext => ({
+			contractVersion: MANAGED_CONTRACT_VERSION,
+			installation: { installationId: 'inst-1', runtimeId: 'host-1', processEpoch: 'epoch-1' },
+			origin: 'cli',
+			actor: { kind: 'human', id: 'operator:inst-1' },
+			delegation: { chain: [], grantRef: null },
+			identity: {
+				requestId: 'req-1',
+				idempotencyKey: 'key-1',
+				attemptId: 'attempt-1',
+				runId: null,
+				rootRunId: null,
+				parentRunId: null,
+			},
+			policyRevision: null,
+			workflow: null,
+			traceId: 'trace-1',
+			requestedCapabilities: ['agents.list', 'runs.submit'],
+		});
+		const managed = () => client.managed!;
+
+		it("sends one managed_operation per call and returns the host's own result", async () => {
+			await connect();
+			bridge.typed.set('managed_operation', (message) => ({
+				type: 'managed_operation_result',
+				success: true,
+				operation: message.operation,
+				result:
+					message.operation === 'scope'
+						? {
+								installation: context().installation,
+								actor: context().actor,
+								policyRevision: null,
+								binding: 'standalone',
+							}
+						: message.operation === 'negotiate'
+							? {
+									outcome: 'activated',
+									contractVersion: MANAGED_CONTRACT_VERSION,
+									capabilities: ['agents.list'],
+								}
+							: { status: 'ok', requestId: 'req-1', value: { items: [], nextCursor: null } },
+			}));
+			expect(await managed().scope!()).toEqual({
+				ok: true,
+				value: {
+					installation: context().installation,
+					actor: context().actor,
+					policyRevision: null,
+					binding: 'standalone',
+				},
+			});
+			const envelope = { context: context(), input: { cursor: null, limit: 5 } };
+			expect(await managed().agents(envelope)).toEqual({
+				ok: true,
+				value: { status: 'ok', requestId: 'req-1', value: { items: [], nextCursor: null } },
+			});
+			const offer = {
+				supportedVersions: [MANAGED_CONTRACT_VERSION],
+				required: ['agents.list' as const],
+			};
+			expect(await managed().negotiate(offer)).toMatchObject({
+				ok: true,
+				value: { outcome: 'activated' },
+			});
+			expect(bridge.sent('managed_operation')).toEqual([
+				expect.objectContaining({ operation: 'scope' }),
+				expect.objectContaining({ operation: 'agents', envelope }),
+				expect.objectContaining({ operation: 'negotiate', offer }),
+			]);
+			// The scope read carries no envelope, and nothing else rides any of them.
+			expect('envelope' in bridge.sent('managed_operation')[0]).toBe(false);
+			expect(bridge.received.map((frame) => frame.type)).toEqual([
+				'managed_operation',
+				'managed_operation',
+				'managed_operation',
+			]);
+		});
+
+		it("maps a refusal to its code by the host's reason, and keeps the host's words", async () => {
+			await connect();
+			const reasons = [
+				['unauthenticated', 'rejected'],
+				['context-mismatch', 'rejected'],
+				['invalid-input', 'invalid'],
+				['unsupported', 'unsupported'],
+				['host-lost', 'host-lost'],
+				['host-unavailable', 'host-unavailable'],
+				['failed', 'failed'],
+				[undefined, 'failed'],
+			] as const;
+			for (const [reason, code] of reasons) {
+				bridge.typed.set('managed_operation', () => ({
+					type: 'managed_operation_result',
+					success: false,
+					operation: 'identity',
+					...(reason ? { reason } : {}),
+					error: `refused: ${String(reason)}`,
+				}));
+				expect(await managed().identity({ context: context(), input: {} }), String(reason)).toEqual(
+					{
+						ok: false,
+						error: { code, message: `refused: ${String(reason)}`, method: 'managed.identity' },
+					}
+				);
+			}
+			bridge.typed.set('managed_operation', () => ({
+				type: 'managed_operation_result',
+				success: true,
+				operation: 'identity',
+			}));
+			expect(await managed().identity({ context: context(), input: {} })).toMatchObject({
+				ok: false,
+				error: { code: 'failed', message: expect.stringContaining('without a result') },
+			});
+		});
+
+		it('reads an echo as unsupported: a desktop or an older host does not do this, and that is never "unmanaged"', async () => {
+			await connect();
+			expect(await managed().submit({ context: context(), input: {} as never })).toMatchObject({
+				ok: false,
+				error: {
+					code: 'unsupported',
+					method: 'managed.submit',
+					message: expect.stringMatching(/too old/),
+				},
+			});
+			expect(bridge.sent('managed_operation')).toHaveLength(1);
+		});
+
+		it('refuses a malformed context without a call, and needs a host', async () => {
+			await connect();
+			expect(
+				await managed().identity({ context: { ...context(), traceId: '' }, input: {} })
+			).toMatchObject({
+				ok: false,
+				error: { code: 'invalid', message: expect.stringContaining('traceId') },
+			});
+			expect(bridge.sent('managed_operation')).toEqual([]);
+
+			await client.connection.close();
+			expect(await managed().scope!()).toMatchObject({
+				ok: false,
+				error: { code: 'host-unavailable', method: 'managed.scope' },
 			});
 		});
 	});

@@ -210,6 +210,62 @@ describe('runtime server', () => {
 		expect(value(await runtime.tabs.list('a1')).map((candidate) => candidate.id)).toEqual(['t1']);
 	});
 
+	it("answers managed operations in the runtime's own scope, end to end (MRC-08-05)", async () => {
+		value(await client.connection.connect());
+		const managed = client.managed;
+		if (!managed?.scope) throw new Error('the WebSocket client exposes managed.scope');
+		const scope = value(await managed.scope());
+		expect(scope).toEqual({
+			installation: runtime.installation,
+			actor: { kind: 'human', id: `operator:${runtime.installation.installationId}` },
+			policyRevision: null,
+			binding: 'standalone',
+		});
+		const context = (actor = scope.actor) => ({
+			contractVersion: MANAGED_CONTRACT_VERSION,
+			installation: scope.installation,
+			origin: 'cli' as const,
+			actor,
+			delegation: { chain: [], grantRef: null },
+			identity: {
+				requestId: 'req-1',
+				idempotencyKey: 'key-1',
+				attemptId: 'attempt-1',
+				runId: null,
+				rootRunId: null,
+				parentRunId: null,
+			},
+			policyRevision: scope.policyRevision,
+			workflow: null,
+			traceId: 'trace-1',
+			requestedCapabilities: ['capabilities.negotiate' as const, 'agents.list' as const],
+		});
+		// The facade verified the context the handler admitted: the actor is the scope's, by the host's own verifier.
+		expect(value(await managed.identity({ context: context(), input: {} }))).toMatchObject({
+			status: 'ok',
+			requestId: 'req-1',
+			value: {
+				actor: scope.actor,
+				installation: runtime.installation,
+				binding: 'standalone',
+				verification: { peer: 'in-process' },
+			},
+		});
+		expect(
+			value(await managed.agents({ context: context(), input: { cursor: null, limit: 5 } }))
+		).toMatchObject({ status: 'ok', value: { items: [{ agentId: 'a1' }], nextCursor: null } });
+		// Another principal is refused at the bridge, on state, before the facade sees it.
+		const someoneElse = await managed.identity({
+			context: context({ kind: 'service', id: 'fleet' }),
+			input: {},
+		});
+		expect(errorOf(someoneElse)).toMatchObject({
+			code: 'rejected',
+			method: 'managed.identity',
+			message: expect.stringContaining("host's own principal"),
+		});
+	});
+
 	it('answers settings and providers', async () => {
 		fs.writeFileSync(
 			path.join(dir, 'maestro-settings.json'),

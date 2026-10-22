@@ -40,6 +40,7 @@ import {
 } from '../../managed/types';
 import { readHistory } from '../../store/read-history';
 import { runAgentTurn } from '../../turns/run-agent-turn';
+import { RUNTIME_LOCK_FILE_NAME } from '../data-dir-lock';
 import { createMaestroRuntime, type MaestroRuntime, type RuntimeDeps } from '../index';
 import type { WatchDirectory } from '../settings-watch';
 
@@ -938,6 +939,74 @@ describe('runtime turns', () => {
 			value(await orphan.turns.send('a1', 't1', { text: 'plain' }));
 			await turn.outcome();
 			expect(ran()).toHaveLength(1);
+		});
+
+		it('refuses a managed send on a runtime that lost its data directory, before anything is queued or spawned (MRC-08-05)', async () => {
+			const runtime = await startManaged();
+			const managed = managedOf(runtime);
+			const turn = watch(runtime);
+			// Another process took the lock: this runtime is no longer the directory's writer.
+			fs.writeFileSync(
+				path.join(dir, RUNTIME_LOCK_FILE_NAME),
+				JSON.stringify({
+					pid: 200,
+					mode: 'host',
+					startedAt: new Date(T0).toISOString(),
+					heartbeatAt: new Date(T0).toISOString(),
+					bootTime: T0 - 3_600_000,
+				})
+			);
+			const result = value(await managed.submit(envelope(runtime, submission('after takeover'))));
+			expect(result).toMatchObject({
+				status: 'unavailable',
+				code: 'runtime-unavailable',
+				message: expect.stringContaining('no longer owns its data directory'),
+			});
+			expect(ran()).toEqual([]);
+			expect(turn.events.filter((event) => event.kind === 'started')).toEqual([]);
+			expect(value(await runtime.turns.queue.list('a1'))).toEqual([]);
+			expect(journalRuns()[0]).toMatchObject({
+				state: 'failed',
+				attempts: [
+					{
+						phase: 'terminal',
+						outcome: 'failed',
+						detail: expect.stringContaining('managed-unavailable'),
+					},
+				],
+			});
+		});
+
+		it('stops a process a replaced provider launch started for a managed turn without a lease, and journals it (MRC-08-05)', async () => {
+			// A host that swapped the provider launch for one that skips admission: the turn service
+			// sees a process and no lease, and does not let it run as a managed turn.
+			const unadmitted: RuntimeDeps['turns']['runAgentTurn'] = (turn, { managed: _, ...rest }) =>
+				fakeProvider(turn, rest);
+			const runtime = await startManaged(managedAuthority(), {
+				turns: { runAgentTurn: unadmitted },
+			});
+			const managed = managedOf(runtime);
+			const turn = watch(runtime);
+			const result = value(await managed.submit(envelope(runtime, submission('unadmitted'))));
+			expect(result).toMatchObject({
+				status: 'unavailable',
+				code: 'runtime-unavailable',
+				message: expect.stringContaining('without a lease'),
+			});
+			expect(turn.events.filter((event) => event.kind === 'started')).toEqual([]);
+			expect(await transcript(runtime)).toEqual([]);
+			expect(value(await runtime.turns.queue.list('a1'))).toEqual([]);
+			expect(journalRuns()[0]).toMatchObject({
+				state: 'failed',
+				attempts: [
+					{
+						phase: 'terminal',
+						outcome: 'failed',
+						detail: expect.stringContaining('without a lease'),
+					},
+				],
+			});
+			expect(runtime.turnsInFlight()).toBe(0);
 		});
 
 		it('lists agents in bounded pages and reports the actor it verified', async () => {

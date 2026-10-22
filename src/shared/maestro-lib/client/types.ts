@@ -129,7 +129,8 @@ export type ClientMethod =
 	| 'managed.cancel'
 	| 'managed.interrupt'
 	| 'managed.events'
-	| 'managed.policy';
+	| 'managed.policy'
+	| 'managed.scope';
 
 export type Unsubscribe = () => void;
 
@@ -653,7 +654,21 @@ export interface ManagedPage<T> {
 	nextCursor: string | null;
 }
 
+/**
+ * The scope a caller over a transport is admitted in (MRC-08-05): the installation, the one
+ * principal it may act as, the policy generation the host applies now, and what the host is
+ * enrolled as. What a transport client fills its context from; anything else is refused. Read, never claimed.
+ */
+export interface ManagedScope {
+	installation: ManagedInstallationIdentity;
+	actor: ManagedPrincipalRef;
+	policyRevision: number | null;
+	binding: ManagedIdentity['binding'];
+}
+
 export interface ManagedApi {
+	/** The scope this transport admits (MRC-08-05); absent on the in-process facade, whose caller holds the runtime. */
+	scope?(): Promise<ClientResult<ManagedScope>>;
 	/** Agree on a contract version and the exact capability set, or be refused. Needs no context. */
 	negotiate(offer: ManagedCapabilityOffer): Promise<ClientResult<ManagedNegotiationOutcome>>;
 	/** The verified actor, its delegation, and what this host is enrolled as. */

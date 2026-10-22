@@ -50,8 +50,11 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * produced by `hostManagedUnavailable` in `./runtime/server` from the host adapter's own
  * custody view or the host process's reason for composing none; `describe().managedUnavailable`
  * on `startRuntimeServer`).
+ * 0.15.0: managed operations over the bridge (`managed_operation`, MRC-08-05): a detached host
+ * answers `ManagedApi` in its own scope (`runtimeManagedScope` in `./runtime/server-requests`),
+ * `createWsMaestroClient().managed` drives it, and `ManagedApi.scope` reads that scope (`ManagedScope`).
  */
-export const MAESTRO_LIB_VERSION = '0.14.0';
+export const MAESTRO_LIB_VERSION = '0.15.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

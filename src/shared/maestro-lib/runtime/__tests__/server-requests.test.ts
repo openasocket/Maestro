@@ -7,6 +7,7 @@
  * lands in the agent record. Auto Run and dispatch run against a recording client, so nothing here
  * starts a provider.
  */
+import { createHash } from 'node:crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -20,8 +21,15 @@ import type {
 	TurnInput,
 	TurnSendReceipt,
 } from '../../client/types';
+import { createLocalHostAuthority, type PolicyDecision } from '../../managed/authority';
+import { inProcessContext } from '../../managed/operations';
+import {
+	MANAGED_CAPABILITIES,
+	MANAGED_CONTRACT_VERSION,
+	type ManagedOperationContext,
+} from '../../managed/types';
 import { createMaestroRuntime, type MaestroRuntime, type RuntimeDeps } from '../index';
-import { createRequestHandler, type RequestHandler } from '../server-requests';
+import { createRequestHandler, runtimeManagedScope, type RequestHandler } from '../server-requests';
 import type { WatchDirectory } from '../settings-watch';
 
 const ok = <T>(value: T): ClientResult<T> => ({ ok: true, value });
@@ -488,5 +496,296 @@ describe('dispatch messages', () => {
 				tabId: 'new-1',
 			});
 		});
+	});
+});
+
+/**
+ * Managed operations over the bridge (MRC-08-05): a real runtime with an injected authority that
+ * denies every launch, so a submission reaches the facade and the journal with zero effect. The
+ * rule under test is the scope: a caller over the host's secret acts as the host's own principal,
+ * carries no delegation, and names this installation and, for an effect, the current policy
+ * generation; anything else is refused by name before the facade sees it.
+ */
+describe('managed_operation (MRC-08-05)', () => {
+	let dir: string;
+	let runtime: MaestroRuntime;
+	let handle: RequestHandler;
+	const sha = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
+	const watchDirectory: WatchDirectory = () => ({ close: () => undefined });
+
+	function hostDeps(): Partial<RuntimeDeps> {
+		let id = 0;
+		let now = 1_000;
+		return {
+			pid: 100,
+			now: () => 5_000,
+			bootTime: () => 1_000,
+			isPidAlive: (pid) => pid === 100,
+			hostname: () => 'testhost',
+			rules: { newId: () => `id-${++id}`, now: () => ++now, random: () => 0 },
+			checkCwd: () => null,
+			readTabDefaults: async () => DEFAULT_TAB_DEFAULTS,
+			watchDirectory,
+			probeBinary: async (binaryName) => ({ exists: true, path: `/fake/bin/${binaryName}` }),
+		};
+	}
+
+	const decision: PolicyDecision = {
+		decision: 'deny',
+		reason: 'nothing runs here',
+		policyRevision: 1,
+	};
+
+	beforeEach(async () => {
+		dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-requests-managed-'));
+		fs.writeFileSync(
+			path.join(dir, 'maestro-sessions.json'),
+			JSON.stringify({
+				sessions: [
+					{
+						id: 'a1',
+						name: 'Alpha',
+						toolType: 'claude-code',
+						cwd: dir,
+						projectRoot: dir,
+						aiTabs: [{ id: 't1', agentSessionId: null, name: null, logs: [] }],
+						activeTabId: 't1',
+						unifiedTabOrder: [{ type: 'ai', id: 't1' }],
+					},
+				],
+				activeSessionId: 'a1',
+			})
+		);
+		const started = await createMaestroRuntime({
+			dataDir: dir,
+			mode: 'host',
+			deps: hostDeps(),
+			managed: {
+				authority: createLocalHostAuthority({
+					authorityId: 'fleet-authority',
+					decide: () => decision,
+					now: () => Date.now(),
+					newId: () => 'lease-1',
+				}),
+			},
+		});
+		if (!started.ok) throw new Error(`refused: ${started.refusal.message}`);
+		runtime = started.runtime;
+		handle = createRequestHandler(runtime, { managedScope: runtimeManagedScope(runtime) });
+	});
+
+	afterEach(async () => {
+		await runtime.connection.close();
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+
+	const operator = () => ({
+		kind: 'human' as const,
+		id: `operator:${runtime.installation.installationId}`,
+	});
+	const context = (overrides: Partial<ManagedOperationContext> = {}): ManagedOperationContext =>
+		inProcessContext({
+			installation: runtime.installation,
+			actor: operator(),
+			delegation: { chain: [], grantRef: null },
+			identity: {
+				requestId: 'req-1',
+				idempotencyKey: 'key-1',
+				attemptId: 'attempt-1',
+				runId: null,
+				rootRunId: null,
+				parentRunId: null,
+			},
+			policyRevision: null,
+			workflow: null,
+			traceId: 'trace-1',
+			requestedCapabilities: [...MANAGED_CAPABILITIES],
+			...overrides,
+		});
+	const send = (operation: string, fields: Record<string, unknown> = {}) =>
+		handle({ type: 'managed_operation', operation, ...fields });
+	const submission = (text: string) => ({
+		agentId: 'a1',
+		tabId: 't1',
+		providerId: 'claude-code',
+		modelId: null,
+		content: { text, sha256: sha(text) },
+		resourceIds: [],
+	});
+	const listed = async () => {
+		const reply = await send('runs', {
+			envelope: { context: context(), input: { cursor: null, limit: 5 } },
+		});
+		return (reply?.result as { value: { items: unknown[] } }).value.items;
+	};
+
+	it("answers scope from the runtime's own standing: this installation, its operator, no policy, standalone", async () => {
+		expect(await send('scope')).toEqual({
+			type: 'managed_operation_result',
+			success: true,
+			operation: 'scope',
+			result: {
+				installation: runtime.installation,
+				actor: operator(),
+				policyRevision: null,
+				binding: 'standalone',
+			},
+		});
+	});
+
+	it('answers the reads and the negotiation in scope, through the facade', async () => {
+		const identity = await send('identity', { envelope: { context: context(), input: {} } });
+		expect(identity).toMatchObject({
+			success: true,
+			operation: 'identity',
+			result: {
+				status: 'ok',
+				requestId: 'req-1',
+				value: { actor: operator(), binding: 'standalone', verification: { peer: 'in-process' } },
+			},
+		});
+		const agents = await send('agents', {
+			envelope: { context: context(), input: { cursor: null, limit: 10 } },
+		});
+		expect(agents).toMatchObject({
+			success: true,
+			result: { status: 'ok', value: { items: [{ agentId: 'a1', providerId: 'claude-code' }] } },
+		});
+		expect(await listed()).toEqual([]);
+		expect(
+			await send('negotiate', {
+				offer: {
+					supportedVersions: [MANAGED_CONTRACT_VERSION],
+					required: ['capabilities.negotiate'],
+				},
+			})
+		).toMatchObject({
+			success: true,
+			operation: 'negotiate',
+			result: { outcome: 'activated', contractVersion: MANAGED_CONTRACT_VERSION },
+		});
+		// The facade's own answer rides the wire: a capability this build has not verified is denied, not downgraded.
+		expect(
+			await send('negotiate', {
+				offer: { supportedVersions: [MANAGED_CONTRACT_VERSION], required: ['agents.list'] },
+			})
+		).toMatchObject({
+			success: true,
+			result: { outcome: 'denied', reason: 'missing-required-capability' },
+		});
+	});
+
+	it('submits through the facade and reports its decision: a denial reaches the journal with zero effect', async () => {
+		const reply = await send('submit', {
+			envelope: { context: context(), input: submission('forbidden') },
+		});
+		expect(reply).toMatchObject({
+			success: true,
+			operation: 'submit',
+			result: {
+				status: 'denied',
+				code: 'policy-denied',
+				message: expect.stringContaining('nothing runs here'),
+			},
+		});
+		expect(await listed()).toEqual([expect.objectContaining({ agentId: 'a1', state: 'failed' })]);
+		const transcript = await runtime.tabs.transcript('a1', 't1');
+		expect(transcript.ok && transcript.value).toEqual([]);
+	});
+
+	it('refuses a context out of scope by name, before the facade: another actor, a delegation, another installation, a stale generation', async () => {
+		const otherActor = await send('identity', {
+			envelope: { context: context({ actor: { kind: 'service', id: 'fleet' } }), input: {} },
+		});
+		expect(otherActor).toMatchObject({
+			success: false,
+			operation: 'identity',
+			reason: 'unauthenticated',
+			error: expect.stringContaining("host's own principal"),
+		});
+		const delegated = await send('agents', {
+			envelope: {
+				context: context({ delegation: { chain: [operator()], grantRef: null } }),
+				input: { cursor: null, limit: 1 },
+			},
+		});
+		expect(delegated).toMatchObject({ success: false, reason: 'unauthenticated' });
+		const elsewhere = await send('identity', {
+			envelope: {
+				context: context({
+					installation: { ...runtime.installation, processEpoch: 'an-earlier-start' },
+				}),
+				input: {},
+			},
+		});
+		expect(elsewhere).toMatchObject({
+			success: false,
+			reason: 'context-mismatch',
+			error: expect.stringContaining('Read scope'),
+		});
+		// A read is answered on a stale generation; an effect is not.
+		const staleRead = await send('identity', {
+			envelope: { context: context({ policyRevision: 7 }), input: {} },
+		});
+		expect(staleRead).toMatchObject({ success: true, result: { status: 'ok' } });
+		const staleSubmit = await send('submit', {
+			envelope: { context: context({ policyRevision: 7 }), input: submission('stale') },
+		});
+		expect(staleSubmit).toMatchObject({
+			success: false,
+			operation: 'submit',
+			reason: 'context-mismatch',
+			error: expect.stringContaining('policy revision 7'),
+		});
+		expect(await listed()).toEqual([]);
+	});
+
+	it('refuses what it does not do: an unknown operation, a malformed envelope or input, and the route without a scope', async () => {
+		expect(await send('enroll')).toMatchObject({
+			success: false,
+			reason: 'unsupported',
+			error: expect.stringContaining('Unknown managed operation "enroll"'),
+		});
+		expect(await send('identity', { envelope: 'nope' })).toMatchObject({
+			success: false,
+			reason: 'invalid-input',
+			error: 'envelope is not an object',
+		});
+		expect(
+			await send('identity', { envelope: { context: { ...context(), traceId: '' }, input: {} } })
+		).toMatchObject({
+			success: false,
+			reason: 'invalid-input',
+			error: expect.stringContaining('traceId'),
+		});
+		expect(
+			await send('agents', { envelope: { context: context(), input: { cursor: null, limit: 0 } } })
+		).toMatchObject({
+			success: false,
+			reason: 'invalid-input',
+			error: expect.stringContaining('limit'),
+		});
+		expect(await send('inspect', { envelope: { context: context(), input: {} } })).toMatchObject({
+			success: false,
+			reason: 'invalid-input',
+			error: 'envelope.input.runId is not an id',
+		});
+		expect(
+			await send('submit', { envelope: { context: context(), input: { agentId: 'a1' } } })
+		).toMatchObject({ success: false, reason: 'invalid-input' });
+		expect(
+			await send('negotiate', { offer: { supportedVersions: 'x', required: [] } })
+		).toMatchObject({
+			success: false,
+			reason: 'invalid-input',
+		});
+		const unscoped = createRequestHandler(runtime);
+		expect(await unscoped({ type: 'managed_operation', operation: 'scope' })).toMatchObject({
+			success: false,
+			operation: 'scope',
+			reason: 'unsupported',
+			error: expect.stringContaining('no scope'),
+		});
+		expect(await listed()).toEqual([]);
 	});
 });

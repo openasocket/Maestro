@@ -58,6 +58,16 @@ import {
 } from './bridge-connection';
 import { isPidAlive, readCliServerInfoFrom, type CliServerInfo } from './discovery';
 import {
+	MANAGED_OPERATION_MESSAGE,
+	MANAGED_OPERATION_REPLY,
+	type ManagedWireOperation,
+} from './host-control';
+import {
+	managedContextProblems,
+	type ManagedCapabilityOffer,
+	type ManagedOperationEnvelope,
+} from '../managed/types';
+import {
 	CUSTOM_COMMANDS_STORE_KEY,
 	THEME_STORE_KEY,
 	changedWebSettingKeys,
@@ -89,6 +99,8 @@ import type {
 	HostInfo,
 	MaestroClient,
 	MaestroEvent,
+	ManagedApi,
+	ManagedScope,
 	ProviderInfo,
 	QueuedTurn,
 	SettingsChange,
@@ -155,6 +167,23 @@ function parseAutoRunOutcome(value: unknown): AutoRunOutcome | undefined {
 			return { status: value.status, reason };
 		default:
 			return undefined;
+	}
+}
+
+/** A managed refusal's wire `reason` (`ManagedWireRefusal`) as the client's code; a scope refusal is on state. */
+function managedRefusalCode(reason: string | undefined): ClientErrorCode {
+	switch (reason) {
+		case 'unsupported':
+		case 'host-lost':
+		case 'host-unavailable':
+			return reason;
+		case 'invalid-input':
+			return 'invalid';
+		case 'unauthenticated':
+		case 'context-mismatch':
+			return 'rejected';
+		default:
+			return 'failed';
 	}
 }
 
@@ -386,6 +415,25 @@ class WsMaestroClient implements MaestroClient {
 	readonly events = {
 		subscribe: (listener: (event: MaestroEvent) => void, filter?: EventFilter): Unsubscribe =>
 			this.subscribe(listener, filter),
+	};
+
+	/**
+	 * The management extension over the bridge (MRC-08-05): one `managed_operation` per call, answered
+	 * by the host's facade in the scope this transport is admitted in (`scope` reads it). A context is
+	 * checked for shape before it is sent, never filled in or rewritten on the caller's behalf.
+	 */
+	readonly managed: ManagedApi = {
+		scope: () => this.managedCall<ManagedScope>('managed.scope', 'scope', {}),
+		negotiate: (offer) => this.managedCall('managed.negotiate', 'negotiate', { offer }),
+		identity: (envelope) => this.managedCall('managed.identity', 'identity', { envelope }),
+		agents: (envelope) => this.managedCall('managed.agents', 'agents', { envelope }),
+		runs: (envelope) => this.managedCall('managed.runs', 'runs', { envelope }),
+		submit: (envelope) => this.managedCall('managed.submit', 'submit', { envelope }),
+		inspect: (envelope) => this.managedCall('managed.inspect', 'inspect', { envelope }),
+		cancel: (envelope) => this.managedCall('managed.cancel', 'cancel', { envelope }),
+		interrupt: (envelope) => this.managedCall('managed.interrupt', 'interrupt', { envelope }),
+		events: (envelope) => this.managedCall('managed.events', 'events', { envelope }),
+		policy: (envelope) => this.managedCall('managed.policy', 'policy', { envelope }),
 	};
 
 	// =======================================================================
@@ -2023,6 +2071,41 @@ class WsMaestroClient implements MaestroClient {
 		}
 		const text = asString(reply.error);
 		return this.fail(method, classifyFailure(text), text ?? `${who} did not answer.`);
+	}
+
+	// =======================================================================
+	// Managed operations
+	// =======================================================================
+
+	/** One managed operation: the facade's own value in `result`, or a refusal whose `reason` names the step. */
+	private async managedCall<T>(
+		method: ClientMethod,
+		operation: ManagedWireOperation,
+		body: { envelope?: ManagedOperationEnvelope<unknown>; offer?: ManagedCapabilityOffer }
+	): Promise<ClientResult<T>> {
+		const gate = this.requireConnected(method);
+		if (gate) return gate;
+		if (body.envelope) {
+			const problems = managedContextProblems(body.envelope.context);
+			if (problems.length > 0) {
+				return this.fail(method, 'invalid', `The context is malformed: ${problems.join('; ')}`);
+			}
+		}
+		const sent = await this.send(
+			method,
+			{ type: MANAGED_OPERATION_MESSAGE, operation, ...body },
+			MANAGED_OPERATION_REPLY
+		);
+		if (!sent.ok) return sent;
+		const reply = sent.value;
+		if (reply.success === true) {
+			if (!isObject(reply.result)) {
+				return this.fail(method, 'failed', `The host answered ${operation} without a result.`);
+			}
+			return ok(reply.result as T);
+		}
+		const text = asString(reply.error) ?? `The host refused ${operation}.`;
+		return this.fail(method, managedRefusalCode(asString(reply.reason)), text);
 	}
 
 	// =======================================================================
