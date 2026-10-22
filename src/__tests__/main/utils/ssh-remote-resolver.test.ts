@@ -262,3 +262,199 @@ describe('integration with getSshRemoteConfig', () => {
 		expect(result.source).toBe('none');
 	});
 });
+
+/**
+ * MRC-08-04: the remote endpoint identity. Under management a remote that
+ * resolves is still nothing a launch may be handed to until the runtime THERE
+ * attests a standing this host accepts; the rule is pure and the refusal
+ * promises the launch ran nowhere.
+ */
+import {
+	qualifySshLaunchTarget,
+	resolveSshLaunchTarget,
+	sshRemoteEndpointProblems,
+	unqualifiedSshLaunchTarget,
+	SSH_REMOTE_ARRIVAL_ROUTE,
+	type SshRemoteEndpointIdentity,
+	type SshRemoteExpectation,
+} from '../../../main/utils/ssh-remote-resolver';
+import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
+
+const buildBox: SshRemoteConfig = {
+	id: 'remote-1',
+	name: 'Build Box',
+	host: 'build.example.com',
+	port: 22,
+	username: 'ci',
+	privateKeyPath: '~/.ssh/id_ed25519',
+	enabled: true,
+};
+
+const expectation: SshRemoteExpectation = {
+	tenantId: 'tenant-1',
+	orgId: 'org-1',
+	providerId: 'claude-code',
+	policyRevision: 3,
+};
+
+function attested(overrides: Partial<SshRemoteEndpointIdentity> = {}): SshRemoteEndpointIdentity {
+	return {
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		installationId: 'inst-remote',
+		runtimeId: 'headless-42',
+		processEpoch: 'epoch-remote',
+		tenantId: 'tenant-1',
+		orgId: 'org-1',
+		authorityId: 'endpoint-remote',
+		policyRevision: 3,
+		authority: 'registered',
+		routes: [
+			{ providerId: 'claude-code', route: SSH_REMOTE_ARRIVAL_ROUTE, managed: 'implemented' },
+		],
+		...overrides,
+	};
+}
+
+describe('sshRemoteEndpointProblems', () => {
+	it('accepts a remote enrolled with the same enterprise, registered, current and confining', () => {
+		expect(sshRemoteEndpointProblems(attested(), expectation)).toEqual([]);
+	});
+
+	it('accepts a remote ahead of this host, and any remote when this host applies no policy yet', () => {
+		expect(sshRemoteEndpointProblems(attested({ policyRevision: 9 }), expectation)).toEqual([]);
+		expect(
+			sshRemoteEndpointProblems(attested({ policyRevision: null }), {
+				...expectation,
+				policyRevision: null,
+			})
+		).toEqual([]);
+	});
+
+	it('refuses a malformed attestation as such, before reading anything else', () => {
+		expect(sshRemoteEndpointProblems('yes', expectation)).toEqual([
+			'the remote attestation is not an object',
+		]);
+		const problems = sshRemoteEndpointProblems(
+			{ ...attested(), contractVersion: 'other/9', tenantId: '', routes: [{ providerId: 1 }] },
+			expectation
+		);
+		expect(problems).toEqual([
+			`the remote runtime speaks managed contract other/9, not ${MANAGED_CONTRACT_VERSION}`,
+			'tenantId is not an id',
+			'routes[0] is not a route row',
+		]);
+	});
+
+	it.each([
+		[
+			'another tenant',
+			attested({ tenantId: 'tenant-2' }),
+			'enrolled with tenant tenant-2 / org org-1, not this host',
+		],
+		['another org', attested({ orgId: 'org-9' }), 'enrolled with tenant tenant-1 / org org-9'],
+		['no registered authority', attested({ authority: 'none' }), 'no registered authority'],
+		[
+			'a policy behind this host',
+			attested({ policyRevision: 2 }),
+			"policy revision 2, behind this host's 3",
+		],
+		[
+			'no policy where this host has one',
+			attested({ policyRevision: null }),
+			"policy revision none, behind this host's 3",
+		],
+		[
+			'no row for the provider',
+			attested({ routes: [{ providerId: 'codex', route: 'ssh', managed: 'implemented' }] }),
+			'does not report whether it confines claude-code launches arriving over SSH',
+		],
+		[
+			'a row for another route only',
+			attested({
+				routes: [{ providerId: 'claude-code', route: 'child-process', managed: 'implemented' }],
+			}),
+			'does not report whether it confines claude-code',
+		],
+		[
+			'an unverified ssh row (what a remote of this build attests)',
+			attested({
+				routes: [
+					{
+						providerId: 'claude-code',
+						route: 'ssh',
+						managed: 'unverified',
+						note: 'containment on the remote is not proven here',
+					},
+				],
+			}),
+			'does not confine claude-code launches arriving over SSH (its route table says unverified: containment on the remote is not proven here)',
+		],
+	])('refuses %s', (_case, identity, fragment) => {
+		const problems = sshRemoteEndpointProblems(identity, expectation);
+		expect(problems.length).toBeGreaterThan(0);
+		expect(problems.join('; ')).toContain(fragment);
+	});
+});
+
+describe('qualifySshLaunchTarget', () => {
+	const store = { getSshRemotes: () => [buildBox] };
+	const resolved = resolveSshLaunchTarget(store, { enabled: true, remoteId: 'remote-1' });
+
+	it('passes a local or already unresolved target through', () => {
+		expect(
+			qualifySshLaunchTarget({ kind: 'local' }, { status: 'unreachable', reason: 'x' }, expectation)
+		).toEqual({ kind: 'local' });
+		const missing = resolveSshLaunchTarget(store, { enabled: true, remoteId: 'gone' });
+		expect(
+			qualifySshLaunchTarget(missing, { status: 'unreachable', reason: 'x' }, expectation)
+		).toBe(missing);
+	});
+
+	it('binds the attested identity onto a qualified remote, as a copy', () => {
+		const identity = attested();
+		const target = qualifySshLaunchTarget(
+			resolved,
+			{ status: 'attested', identity, via: 'maestro-cli host status --json' },
+			expectation
+		);
+		expect(target).toEqual({ kind: 'remote', remote: buildBox, endpoint: identity });
+		if (target.kind !== 'remote') throw new Error('expected remote');
+		expect(target.endpoint).not.toBe(identity);
+	});
+
+	it.each([
+		[
+			'the remote is unreachable',
+			{ status: 'unreachable' as const, reason: 'Connection refused. Check host and port.' },
+			'could not be asked for its managed standing (Connection refused. Check host and port.)',
+		],
+		[
+			'the remote attests no standing',
+			{ status: 'unattested' as const, reason: 'no Maestro runtime is running on the remote' },
+			'no Maestro runtime is running on the remote.',
+		],
+		[
+			'the attestation fails the expectation',
+			{ status: 'attested' as const, identity: attested({ authority: 'none' }), via: 'probe' },
+			'holds no registered authority',
+		],
+		[
+			'the attestation is malformed',
+			{ status: 'attested' as const, identity: null, via: 'probe' },
+			'the remote attestation is not an object',
+		],
+	])('refuses by name when %s, and the launch runs nowhere', (_case, read, fragment) => {
+		const target = qualifySshLaunchTarget(resolved, read, expectation);
+		expect(target).toMatchObject({ kind: 'unresolved', reason: 'remote-unqualified' });
+		if (target.kind !== 'unresolved') throw new Error('expected unresolved');
+		expect(target.message).toContain('"Build Box" is not a qualified managed endpoint');
+		expect(target.message).toContain(fragment);
+		expect(target.message).toContain('nothing ran on the remote unmanaged');
+		expect(target.message).toContain('nothing ran on this machine instead');
+	});
+
+	it('names the remote by id when it has no name', () => {
+		const target = unqualifiedSshLaunchTarget({ id: 'r-7', name: '' }, 'because.');
+		expect(target.message).toContain('"r-7" is not a qualified managed endpoint: because.');
+	});
+});

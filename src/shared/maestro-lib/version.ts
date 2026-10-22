@@ -33,8 +33,12 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * 0.10.0: `ManagedPeerAuthentication` gains `device-pairing` (a device the
  * host paired, Maestro Lite), so a host verifier can record that transport
  * on a verification instead of passing a paired device off as a web login.
+ * 0.11.0: the remote endpoint identity (`./launch/ssh-remote-resolver`):
+ * `SshRemoteEndpointIdentity`, `sshRemoteEndpointProblems`,
+ * `qualifySshLaunchTarget` (`endpoint` on a remote target, `remote-unqualified`
+ * among the unresolved reasons) and `wrapManagedSpawnWithSsh`.
  */
-export const MAESTRO_LIB_VERSION = '0.10.0';
+export const MAESTRO_LIB_VERSION = '0.11.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

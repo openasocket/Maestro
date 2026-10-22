@@ -60,6 +60,11 @@ import {
 } from './identity-store';
 import { createPolicyStatusService, type PolicyStatusService } from './policy-status';
 import { createCueSpawnAuthority, createProcessSpawnAuthority } from './spawn-authority';
+import {
+	createRemoteEndpointQualifier,
+	type RemoteEndpointProbe,
+	type RemoteEndpointQualifier,
+} from './remote';
 import type { ProcessSpawnAuthorityPort } from '../process-manager/types';
 import type { CueSpawnAuthorityPort } from '../cue/cue-run-router';
 
@@ -93,6 +98,8 @@ export interface EnterpriseServiceDeps {
 	openPort?: Parameters<typeof createEnrollmentLifecycle>[0]['openPort'];
 	/** Hears a dispatch ledger write that failed. Default: nothing; `dispatch.persistFailures()` counts them. */
 	onDispatchPersistError?(error: unknown): void;
+	/** Test seam: how an SSH remote is asked for its managed standing. Default: the real probe over ssh. */
+	remoteProbe?: RemoteEndpointProbe;
 }
 
 export interface EnterpriseService {
@@ -107,6 +114,8 @@ export interface EnterpriseService {
 	readonly spawnAuthority: ProcessSpawnAuthorityPort;
 	/** The port the Cue run router admits every desktop Cue prompt run with (origin `cue`, same enrollment). */
 	readonly cueSpawnAuthority: CueSpawnAuthorityPort;
+	/** Where a managed launch with an SSH setting may run (`remote.ts`, MRC-08-04): the remote with its endpoint bound, or a refusal by name. */
+	readonly remote: RemoteEndpointQualifier;
 	/**
 	 * The workflow owner fences this installation holds (MRC-07-06), claimed
 	 * through the endpoint's workflow owner operation and kept in
@@ -228,6 +237,10 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		dispatch,
 		now,
 	});
+	const remote = createRemoteEndpointQualifier({
+		identity,
+		...(deps.remoteProbe ? { probe: deps.remoteProbe } : {}),
+	});
 
 	return {
 		installation,
@@ -238,6 +251,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		dispatch,
 		spawnAuthority,
 		cueSpawnAuthority,
+		remote,
 		workflows,
 		claimWorkflowFence,
 		async start() {

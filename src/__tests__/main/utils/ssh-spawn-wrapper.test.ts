@@ -7,7 +7,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  */
 
 const mockGetSshRemoteConfig = vi.fn();
-vi.mock('../../../shared/maestro-lib/launch/ssh-remote-resolver', () => ({
+vi.mock('../../../shared/maestro-lib/launch/ssh-remote-resolver', async (importOriginal) => ({
+	...(await importOriginal<
+		typeof import('../../../shared/maestro-lib/launch/ssh-remote-resolver')
+	>()),
 	getSshRemoteConfig: (...args: unknown[]) => mockGetSshRemoteConfig(...args),
 }));
 
@@ -23,9 +26,12 @@ vi.mock('../../../main/utils/logger', () => ({
 }));
 
 import {
+	wrapManagedSpawnWithSsh,
 	wrapSpawnWithSsh,
 	sshUnresolvedRemoteMessage,
+	type SshRemoteEndpointRead,
 } from '../../../main/utils/ssh-spawn-wrapper';
+import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
 import type { SshRemoteSettingsStore } from '../../../main/utils/ssh-remote-resolver';
 
 const remote = {
@@ -193,5 +199,159 @@ describe('wrapSpawnWithSsh', () => {
 		expect(result.sshRemoteUsed).toBeNull();
 		expect(result.customEnvVars).toEqual({ KEPT: 'value' });
 		expect(mockGetSshRemoteConfig).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * MRC-08-04: the managed wrap. With SSH on it never answers with a local
+ * launch: an unresolved remote is the resolver's refusal, a resolved remote
+ * is handed the launch only once the runtime there attests a standing this
+ * host accepts, and the endpoint identity rides the wrap. SSH off is the
+ * standalone wrap.
+ */
+describe('wrapManagedSpawnWithSsh', () => {
+	const baseConfig = {
+		command: '/opt/homebrew/bin/claude',
+		args: ['--print'],
+		cwd: '/remote/project',
+		agentBinaryName: 'claude',
+	};
+	const expect_ = {
+		tenantId: 'tenant-1',
+		orgId: 'org-1',
+		providerId: 'claude-code',
+		policyRevision: 3 as number | null,
+	};
+	const identity = {
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		installationId: 'inst-remote',
+		runtimeId: 'headless-42',
+		processEpoch: 'epoch-remote',
+		tenantId: 'tenant-1',
+		orgId: 'org-1',
+		authorityId: 'endpoint-remote',
+		policyRevision: 3,
+		authority: 'registered' as const,
+		routes: [{ providerId: 'claude-code', route: 'ssh', managed: 'implemented' as const }],
+	};
+	const sshOn = { enabled: true, remoteId: 'jennifer-box' };
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockGetSshRemoteConfig.mockReturnValue({ config: remote, source: 'session' });
+		mockBuildSshCommand.mockResolvedValue({
+			command: 'ssh',
+			args: ['jennifer.local', 'claude'],
+			remoteCommandLine: 'claude',
+		});
+	});
+
+	it('is the standalone local wrap when SSH is off, and asks the remote nothing', async () => {
+		const readEndpoint = vi.fn();
+		const outcome = await wrapManagedSpawnWithSsh(
+			baseConfig,
+			{ enabled: false, remoteId: null },
+			sshStore,
+			{
+				expect: expect_,
+				readEndpoint,
+			}
+		);
+		expect(outcome).toMatchObject({ ok: true, target: { kind: 'local' } });
+		if (!outcome.ok) throw new Error('expected ok');
+		expect(outcome.wrapped.sshRemoteUsed).toBeNull();
+		expect(outcome.wrapped.sshRemoteEndpoint).toBeUndefined();
+		expect(readEndpoint).not.toHaveBeenCalled();
+	});
+
+	it('hands the launch to a qualified remote with its endpoint identity on the wrap', async () => {
+		const readEndpoint = vi.fn(
+			async (): Promise<SshRemoteEndpointRead> => ({ status: 'attested', identity, via: 'probe' })
+		);
+		const outcome = await wrapManagedSpawnWithSsh(baseConfig, sshOn, sshStore, {
+			expect: expect_,
+			readEndpoint,
+		});
+		expect(outcome.ok).toBe(true);
+		if (!outcome.ok) throw new Error('expected ok');
+		expect(readEndpoint).toHaveBeenCalledWith(remote);
+		expect(outcome.wrapped.sshRemoteUsed).toEqual(remote);
+		expect(outcome.wrapped.command).toBe('ssh');
+		expect(outcome.wrapped.sshRemoteEndpoint).toEqual(identity);
+		expect(outcome.target).toEqual({ kind: 'remote', remote, endpoint: identity });
+	});
+
+	it("refuses an unresolved remote with the resolver's reason, before asking the remote", async () => {
+		const readEndpoint = vi.fn();
+		const outcome = await wrapManagedSpawnWithSsh(
+			baseConfig,
+			{ enabled: true, remoteId: 'gone' },
+			sshStore,
+			{ expect: expect_, readEndpoint }
+		);
+		expect(outcome).toMatchObject({ ok: false, reason: 'remote-not-found' });
+		if (outcome.ok) throw new Error('expected refusal');
+		expect(outcome.message).toContain('nothing ran on this machine');
+		expect(readEndpoint).not.toHaveBeenCalled();
+		expect(mockBuildSshCommand).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		[
+			'unreachable',
+			{ status: 'unreachable' as const, reason: 'Connection timed out.' },
+			'Connection timed out.',
+		],
+		[
+			'unattested',
+			{ status: 'unattested' as const, reason: 'no Maestro runtime is running on the remote' },
+			'no Maestro runtime',
+		],
+		[
+			'attesting an unverified ssh route',
+			{
+				status: 'attested' as const,
+				identity: {
+					...identity,
+					routes: [{ ...identity.routes[0], managed: 'unverified' as const }],
+				},
+				via: 'probe',
+			},
+			'route table says unverified',
+		],
+		[
+			'enrolled with another tenant',
+			{
+				status: 'attested' as const,
+				identity: { ...identity, tenantId: 'tenant-2' },
+				via: 'probe',
+			},
+			'tenant tenant-2',
+		],
+	])(
+		'refuses a resolved remote that is %s, and builds no ssh command',
+		async (_case, read, fragment) => {
+			const outcome = await wrapManagedSpawnWithSsh(baseConfig, sshOn, sshStore, {
+				expect: expect_,
+				readEndpoint: async () => read,
+			});
+			expect(outcome).toMatchObject({ ok: false, reason: 'remote-unqualified' });
+			if (outcome.ok) throw new Error('expected refusal');
+			expect(outcome.message).toContain(fragment);
+			expect(outcome.message).toContain('nothing ran on the remote unmanaged');
+			expect(mockBuildSshCommand).not.toHaveBeenCalled();
+			expect(mockBuildSshCommandWithStdin).not.toHaveBeenCalled();
+		}
+	);
+
+	it('refuses, never degrades, when the remote is lost between qualifying and wrapping', async () => {
+		mockGetSshRemoteConfig.mockReturnValue({ config: null, source: 'none' });
+		const outcome = await wrapManagedSpawnWithSsh(baseConfig, sshOn, sshStore, {
+			expect: expect_,
+			readEndpoint: async () => ({ status: 'attested', identity, via: 'probe' }),
+		});
+		expect(outcome).toMatchObject({ ok: false, reason: 'remote-not-found' });
+		if (outcome.ok) throw new Error('expected refusal');
+		expect(outcome.message).toBe(sshUnresolvedRemoteMessage(sshOn));
 	});
 });

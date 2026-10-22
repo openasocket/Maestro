@@ -12,7 +12,17 @@
 
 import * as os from 'os';
 import type { SshRemoteConfig, AgentSshRemoteConfig } from '../../types';
-import { getSshRemoteConfig, SshRemoteSettingsStore } from './ssh-remote-resolver';
+import {
+	getSshRemoteConfig,
+	qualifySshLaunchTarget,
+	resolveSshLaunchTarget,
+	type SshLaunchTarget,
+	type SshLaunchUnresolvedReason,
+	type SshRemoteEndpointIdentity,
+	type SshRemoteEndpointRead,
+	type SshRemoteExpectation,
+	type SshRemoteSettingsStore,
+} from './ssh-remote-resolver';
 import { buildSshCommand, buildSshCommandWithStdin } from './ssh-command-builder';
 import { buildPromptArgv } from './prompt-delivery';
 import { logger } from '../host';
@@ -116,6 +126,8 @@ export interface SshSpawnWrapResult {
 	sshRemoteCommand?: string;
 	/** Whether SSH remote was used */
 	sshRemoteUsed: SshRemoteConfig | null;
+	/** The enrolled remote endpoint a managed launch was qualified against; set only by {@link wrapManagedSpawnWithSsh}. */
+	sshRemoteEndpoint?: SshRemoteEndpointIdentity;
 }
 
 /**
@@ -275,4 +287,64 @@ export async function wrapSpawnWithSsh(
 		sshRemoteCommand: sshCommand.remoteCommandLine,
 		sshRemoteUsed: sshResult.config,
 	};
+}
+
+// ---------------------------------------------------------------------------
+// The managed wrap (MRC-08-04)
+// ---------------------------------------------------------------------------
+
+/** What a managed caller hands the wrap: what it requires of the remote, and how to ask the remote. */
+export interface SshManagedWrapInput {
+	expect: SshRemoteExpectation;
+	/** Ask the resolved remote for its standing over the launch's own connection (`createRemoteEndpointProbe`). */
+	readEndpoint(remote: SshRemoteConfig): Promise<SshRemoteEndpointRead>;
+}
+
+export type SshManagedWrapOutcome =
+	/** The wrap (`sshRemoteEndpoint` bound for a remote launch) and where it runs. */
+	| { ok: true; wrapped: SshSpawnWrapResult; target: SshLaunchTarget }
+	| { ok: false; reason: SshLaunchUnresolvedReason; message: string };
+
+/**
+ * Wrap a managed launch for SSH, or refuse it. With SSH on this never answers
+ * with a local launch: an unresolved remote is the resolver's refusal, and a
+ * resolved one is handed the launch only once the runtime there attests a
+ * standing this host accepts (`qualifySshLaunchTarget`); this host's own
+ * approval is not consulted, the remote's word is. SSH off is the local wrap.
+ */
+export async function wrapManagedSpawnWithSsh(
+	config: SshSpawnWrapConfig,
+	sshConfig: AgentSshRemoteConfig | undefined,
+	sshStore: SshRemoteSettingsStore,
+	managed: SshManagedWrapInput
+): Promise<SshManagedWrapOutcome> {
+	if (!sshConfig?.enabled) {
+		const wrapped = await wrapSpawnWithSsh(config, sshConfig, sshStore);
+		return { ok: true, wrapped, target: { kind: 'local' } };
+	}
+	const lost = { ok: false as const, reason: 'remote-not-found' as const, message: '' };
+	const resolved = resolveSshLaunchTarget(sshStore, sshConfig);
+	if (resolved.kind === 'unresolved') {
+		return { ok: false, reason: resolved.reason, message: resolved.message };
+	}
+	// SSH is on, so the resolver never says local; refused anyway, never spawned locally.
+	if (resolved.kind !== 'remote')
+		return { ...lost, message: sshUnresolvedRemoteMessage(sshConfig) };
+	const read = await managed.readEndpoint(resolved.remote);
+	const target = qualifySshLaunchTarget(resolved, read, managed.expect);
+	if (target.kind !== 'remote' || !target.endpoint) {
+		const message =
+			target.kind === 'unresolved' ? target.message : sshUnresolvedRemoteMessage(sshConfig);
+		const remoteId = resolved.remote.id;
+		logger.warn('Managed SSH launch refused: remote not qualified', LOG_CONTEXT, {
+			remoteId,
+			read,
+		});
+		return { ok: false, reason: 'remote-unqualified', message };
+	}
+	const wrapped = await wrapSpawnWithSsh(config, sshConfig, sshStore);
+	// Lost between resolving and wrapping (the store changed under us): the
+	// local config the wrapper degraded to is never the managed answer.
+	if (!wrapped.sshRemoteUsed) return { ...lost, message: sshUnresolvedRemoteMessage(sshConfig) };
+	return { ok: true, wrapped: { ...wrapped, sshRemoteEndpoint: target.endpoint }, target };
 }
