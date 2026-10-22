@@ -539,6 +539,157 @@
 				"linuxImage": "sha256:71bcbb3b215b3fa84b5b167585675072f4c270855e37a599803f1a58141a0716"
 			},
 			"nextPass": "Re-run check; repeat the container run only when the sibling revision, an artifact manifest, the adapter declared status or peer.node changes, or when an approval producer appears for --approve-command. A re-check that finds only the Maestro-owned stale-library item needs just npm run build:maestro-lib. Three identical re-checks are now recorded; the task cannot progress from the Maestro side."
+		},
+		{
+			"date": "2026-10-22",
+			"maestroHead": "d6fde5de7c1ffaf28e163256ba70c9a1cde46814",
+			"decision": "MRC-04-05 stays unchecked; the container run WAS repeated this pass because it is cheap and the library that drives the daemon is a different build from the one the recorded runs used",
+			"reason": "Fourth re-check. No input of the pair changed on the Mega-Maestro side since the third re-check: the sibling development checkout is still d5143a6 with 935 dirty entries, its endpoint build is still the 2026-10-19T17:30:27.161Z cli.js, peer.node is still absent in the checkout, the runtime adapter still declares unsupported, the four packaged artifacts are still sourceDirty at e29195d8, no contracts pin exists and no approval producer exists. On the Maestro side, phases 05 through 08 landed since the third re-check (maestro-lib is now 0.10.0; the recorded runs in this file used the 08bf3f84 index.js), and the third re-check's HEAD 6902522 is many commits behind. The library was stale because the phase 03 seventh re-check commit (d6fde5de7, evidence only) moved HEAD past its 327118041 build. So the real pair was exercised again with the 0.10.0 library at this HEAD rather than inferred from the earlier runs. Every answer the real unmodified endpoint gave was the same as in the original attempt and as in the phase 03 fifth, sixth and seventh passes.",
+			"commands": [
+				{
+					"command": "node scripts/mega-maestro-pair.mjs check",
+					"exit": 2,
+					"result": "before the rebuild: five open dependencies; maestro-lib (owner maestro) stale because HEAD d6fde5de7 moved past the 327118041 build; the other four are the mega-maestro-owned ones"
+				},
+				{
+					"command": "npm run build:maestro-lib",
+					"exit": 0,
+					"result": "provenance sourceRevision d6fde5de7, sourceDirty false, maestro-lib 0.10.0, maestro-managed/1; index.js sha256 a4457e51f3278710c3dbbc3cbee5f51bdcff514ae6415b90169af4517b398bc6, identical to the 0.10.0 build recorded by the phase 03 sixth and seventh re-checks (d6fde5de7 touched evidence text only)"
+				},
+				{
+					"command": "node scripts/mega-maestro-pair.mjs run --allow-dirty --json --out .maestro/playbooks/Working/04-fourth/pair-run.json",
+					"exit": 3,
+					"result": "exit 3 by design (status completed, certifiable false: endpoint source development-checkout is built, CP-01); the embedded check after the rebuild shows the library ready at HEAD and exactly the four mega-maestro-owned dependencies open; container exit 0, empty container stderr, 2026-10-22T04:52:58.762Z to 04:53:07.157Z (8.4 s); staged bundle clientSha256 967e4703..., driverSha256 c21b7502..., both identical to the original attempt and to the phase 03 passes; workspace removed afterwards"
+				},
+				{
+					"command": "node node_modules/vitest/vitest.mjs run src/__tests__/integration/mega-maestro src/__tests__/main/enterprise/dispatch.test.ts",
+					"exit": 0,
+					"result": "2 files, 15 passed, 1 skipped: the real-pair case, with the four blocking producers and their owner in its title (the dispatch suite grew in phases 05 through 08, hence 15 rather than 11)"
+				}
+			],
+			"observedInContainer": {
+				"image": "sha256:71bcbb3b215b3fa84b5b167585675072f4c270855e37a599803f1a58141a0716",
+				"containerNode": "v22.16.0",
+				"nativeBuild": {
+					"exit": 0,
+					"produced": ["build.mjs", "peer.c", "peer.node"]
+				},
+				"start": {
+					"exit": 0,
+					"outcome": "started",
+					"runtimeSocketPath": "/work/ws/.local/endpoint/runtime.sock"
+				},
+				"library": {
+					"version": "0.10.0",
+					"contract": "maestro-managed/1",
+					"protocol": 1
+				},
+				"steps": [
+					{
+						"name": "compatibility",
+						"outcome": "denied",
+						"reason": "unauthenticated"
+					},
+					{
+						"name": "attach",
+						"outcome": "denied",
+						"reason": "unauthenticated"
+					},
+					{
+						"name": "registration.challenge",
+						"outcome": "denied",
+						"reason": "unavailable"
+					},
+					{
+						"name": "execution.admit",
+						"outcome": "unavailable",
+						"code": "runtime-unavailable",
+						"message": "not registered-attached-managed in this process"
+					},
+					{
+						"name": "execution.raw",
+						"outcome": "unavailable",
+						"reason": "not-attached"
+					}
+				],
+				"leases": 0,
+				"policyStatus": {
+					"connectivity": "detached",
+					"capabilities": [],
+					"registration": "none",
+					"approval": "none",
+					"admissionPossible": false,
+					"revisions": null
+				},
+				"status": {
+					"exit": 0,
+					"management": "unenrolled",
+					"capabilities": [],
+					"connectivity": "unavailable",
+					"policyRevisions": null
+				},
+				"stop": {
+					"exit": 0,
+					"outcome": "stopping"
+				},
+				"approvalProduced": false,
+				"effects": "none: no decision, no receipt, no lease, no child, no file and no network effect reached the real broker"
+			},
+			"inputsCompared": {
+				"siblingRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+				"siblingDirtyEntries": 935,
+				"endpointBuiltAt": "2026-10-19T17:30:27.161Z",
+				"peerNodeInCheckout": false,
+				"adapterStatus": "unsupported",
+				"packagedArtifacts": [
+					{
+						"digest": "2f7206b0",
+						"sourceRevision": "e29195d8",
+						"sourceDirty": true
+					},
+					{
+						"digest": "381701b0",
+						"sourceRevision": "e29195d8",
+						"sourceDirty": true
+					},
+					{
+						"digest": "e2864376",
+						"sourceRevision": "e29195d8",
+						"sourceDirty": true
+					},
+					{
+						"digest": "f87c39a5",
+						"sourceRevision": "e29195d8",
+						"sourceDirty": true
+					}
+				],
+				"pin": "absent",
+				"approvalProducer": false,
+				"linuxImage": "sha256:71bcbb3b215b3fa84b5b167585675072f4c270855e37a599803f1a58141a0716"
+			},
+			"stillNotProven": [
+				{
+					"id": "CP-01",
+					"owner": "mega-maestro",
+					"detail": "no pinned clean contracts artifact; no clean Linux application artifact"
+				},
+				{
+					"id": "CP-02",
+					"owner": "mega-maestro",
+					"detail": "runtime adapter createMaestroAdapter declares unsupported"
+				},
+				{
+					"id": "CP-04",
+					"owner": "mega-maestro",
+					"detail": "the daemon is unenrolled and provisions no execution; the broker denies every execution by its own code"
+				},
+				{
+					"id": "registration-approval",
+					"owner": "mega-maestro",
+					"detail": "no API or console producer exists for --approve-command"
+				}
+			],
+			"nextPass": "Re-run check; repeat the container run when the sibling revision, an artifact manifest, the adapter declared status or peer.node changes, when an approval producer appears for --approve-command, or when the Maestro library that drives the daemon is a new build (it is cheap, about 10 s, and gives direct evidence rather than inference). A re-check that finds only the Maestro-owned stale-library item needs just npm run build:maestro-lib. Four re-checks are now recorded with identical daemon answers; the task cannot progress from the Maestro side."
 		}
 	]
 }
