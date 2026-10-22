@@ -11,16 +11,33 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+	admitPluginProcess,
 	buildHostCallHandlers,
+	pluginActBinding,
+	pluginConsentGrantRef,
+	pluginProcessRouteSupport,
+	pluginProcessSnapshot,
 	purgePluginData,
 	type HostHandlerDeps,
+	type PluginActBinding,
 	type PluginSessionMetadata,
+	type ResolvedSpawnSpec,
 } from '../../../main/plugins/plugin-host-handlers';
+import {
+	childDelegationContext,
+	delegationContextProblems,
+} from '../../../shared/maestro-lib/managed/delegation';
+import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
+import type { PluginConsentView } from '../../../main/plugins/authorization-ledger';
 import { ActionGuard } from '../../../main/plugins/action-guard';
 import { PluginKvStore } from '../../../main/plugins/plugin-kv-store';
 import { PluginAgentSessionBindings } from '../../../main/plugins/plugin-agent-session-bindings';
 import { PluginEventBusImpl } from '../../../main/plugins/plugin-event-bus';
-import { PermissionBroker } from '../../../main/plugins/permission-broker';
+import {
+	PermissionBroker,
+	type ManagedPluginStanding,
+	type PluginPolicyCeiling,
+} from '../../../main/plugins/permission-broker';
 import { PluginBackgroundSupervisor } from '../../../main/plugins/plugin-background-supervisor';
 import { PluginGroupingRegistry } from '../../../main/plugins/plugin-grouping-registry';
 import {
@@ -2986,5 +3003,375 @@ describe('host media configuration', () => {
 		} finally {
 			discovery.mockRestore();
 		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Managed act bindings (MRC-09-02): what agents.dispatch and process.spawn hand
+// their sinks under management, and how the host admits a plugin process.
+// ---------------------------------------------------------------------------
+
+describe('managed act bindings (MRC-09-02)', () => {
+	const scopedGrant = (
+		capability: PermissionGrant['capability'],
+		scope: string
+	): PermissionGrant => ({ capability, scope, grantedAt: 1 });
+	const consent = (): PluginConsentView => ({
+		caps: [scopedGrant('agents:dispatch', 'a'), scopedGrant('process:spawn', 'echo-tool')],
+		identity: { contentHash: 'sha256:abc', signatureStatus: 'trusted', signerKey: 'pub-1' },
+		mintedAt: 5,
+		epoch: 7,
+		trust: 'persistent',
+	});
+	const ceiling = (over: Partial<PluginPolicyCeiling> = {}): PluginPolicyCeiling => ({
+		policyRevision: 3,
+		plugins: [
+			{
+				pluginId: 'p',
+				contentHash: 'sha256:abc',
+				signerKey: 'pub-1',
+				capabilities: [
+					{ capability: 'agents:dispatch', scopes: ['a'] },
+					{ capability: 'process:spawn', scopes: ['echo-tool'] },
+				],
+			},
+		],
+		...over,
+	});
+	const managedBroker = (
+		grants: PermissionGrant[],
+		standing: ManagedPluginStanding = { standing: 'managed', ceiling: ceiling(), policyRevision: 3 }
+	) =>
+		new PermissionBroker({
+			getGrants: () => grants,
+			managed: () => standing,
+			getConsent: () => consent(),
+		});
+	const receipt = {
+		policyRevision: 3,
+		outcome: 'within-ceiling' as const,
+		contentHash: 'sha256:abc',
+		signerKey: 'pub-1',
+		consentEpoch: 7,
+	};
+	const echoEntry = {
+		name: 'echo-tool',
+		binaryPath: path.join(os.tmpdir(), 'echo-tool.exe'),
+		baseArgs: ['--safe'],
+		env: { SAFE_FLAG: '1' },
+	};
+	const resolveSpawnBinary = (name: string) => (name === 'echo-tool' ? echoEntry : null);
+
+	it('hands a standalone sink exactly the two arguments it always has (no binding)', async () => {
+		const dispatch = vi.fn(async (...args: unknown[]) => args.length);
+		const spawn = vi.fn(async (...args: unknown[]) => args.length);
+		const h = buildHostCallHandlers(
+			makeDeps({
+				broker: new PermissionBroker({
+					getGrants: () => [
+						scopedGrant('agents:dispatch', 'a'),
+						scopedGrant('process:spawn', 'echo-tool'),
+					],
+					managed: () => ({ standing: 'standalone' }),
+					getConsent: () => consent(),
+				}),
+				isPluginTrusted: () => true,
+				dispatch,
+				dispatchUnattendedAllowed: () => true,
+				spawn,
+				resolveSpawnBinary,
+			})
+		);
+		await expect(
+			h['agents.dispatch']!('p', { agentId: 'a', prompt: 'friendly summary' })
+		).resolves.toBe(2);
+		await expect(h['process.spawn']!('p', { command: 'echo-tool' })).resolves.toBe(2);
+		expect(dispatch).toHaveBeenCalledWith('a', 'friendly summary');
+		expect(spawn.mock.calls[0]).toHaveLength(2);
+	});
+
+	it('binds a managed dispatch: the plugin on the chain, its consent as the grant, the policy revision held', async () => {
+		const dispatch = vi.fn(async () => 'dispatched');
+		const h = buildHostCallHandlers(
+			makeDeps({
+				broker: managedBroker([scopedGrant('agents:dispatch', 'a')]),
+				isPluginTrusted: () => true,
+				dispatch,
+				dispatchUnattendedAllowed: () => true,
+			})
+		);
+		await expect(
+			h['agents.dispatch']!('p', { agentId: 'a', prompt: 'write a friendly summary' })
+		).resolves.toBe('dispatched');
+		expect(dispatch).toHaveBeenCalledTimes(1);
+		const [agentId, prompt, binding] = dispatch.mock.calls[0] as unknown as [
+			string,
+			string,
+			PluginActBinding,
+		];
+		expect([agentId, prompt]).toEqual(['a', 'write a friendly summary']);
+		expect(binding.pluginId).toBe('p');
+		expect(binding.receipt).toEqual(receipt);
+		expect(delegationContextProblems(binding.delegation)).toEqual([]);
+		expect(binding.delegation.delegation).toEqual({
+			chain: [{ kind: 'service', id: 'plugin:p' }],
+			grantRef: 'plugin-consent:p:sha256:abc:7',
+		});
+		expect(binding.delegation.policyRevision).toBe(3);
+		expect(binding.delegation.workflow).toBeNull();
+		const { identity } = binding.delegation;
+		expect(identity.runId).toBe(identity.requestId);
+		expect(identity.rootRunId).toBe(identity.requestId);
+		expect(identity.idempotencyKey).toBe(identity.requestId);
+		expect(identity.parentRunId).toBeNull();
+		expect(binding.delegation.traceId).toBe(`plugin:p:${identity.requestId}:${identity.attemptId}`);
+		// The process sink derives the dispatched turn's record: one link deeper,
+		// parented under the plugin's request and sharing its root.
+		const child = childDelegationContext(binding.delegation, {
+			link: { kind: 'agent', id: 'a' },
+			requestId: 'req-child',
+			attemptId: 'att-child',
+		});
+		expect(child.delegation).toEqual({
+			chain: [
+				{ kind: 'service', id: 'plugin:p' },
+				{ kind: 'agent', id: 'a' },
+			],
+			grantRef: 'plugin-consent:p:sha256:abc:7',
+		});
+		expect(child.identity.rootRunId).toBe(identity.requestId);
+		expect(child.identity.parentRunId).toBe(identity.requestId);
+		expect(child.policyRevision).toBe(3);
+		expect(delegationContextProblems(child)).toEqual([]);
+	});
+
+	it('mints a fresh request and attempt per dispatch, so two calls are two operations', async () => {
+		const dispatch = vi.fn(async () => 'dispatched');
+		const h = buildHostCallHandlers(
+			makeDeps({
+				broker: managedBroker([scopedGrant('agents:dispatch', 'a')]),
+				isPluginTrusted: () => true,
+				dispatch,
+				dispatchUnattendedAllowed: () => true,
+			})
+		);
+		await h['agents.dispatch']!('p', { agentId: 'a', prompt: 'friendly summary' });
+		await h['agents.dispatch']!('p', { agentId: 'a', prompt: 'friendly summary' });
+		const first = (dispatch.mock.calls[0] as unknown as [string, string, PluginActBinding])[2];
+		const second = (dispatch.mock.calls[1] as unknown as [string, string, PluginActBinding])[2];
+		expect(first.delegation.identity.requestId).not.toBe(second.delegation.identity.requestId);
+		expect(first.delegation.identity.attemptId).not.toBe(second.delegation.identity.attemptId);
+	});
+
+	it('a dispatch outside the ceiling never reaches the sink, and the denial names the ceiling', async () => {
+		const dispatch = vi.fn(async () => 'dispatched');
+		const h = buildHostCallHandlers(
+			makeDeps({
+				// Consent names both agents; the ceiling admits only "a".
+				broker: managedBroker([scopedGrant('agents:dispatch', 'a,b')]),
+				isPluginTrusted: () => true,
+				dispatch,
+				dispatchUnattendedAllowed: () => true,
+			})
+		);
+		await expect(
+			h['agents.dispatch']!('p', { agentId: 'b', prompt: 'friendly summary' })
+		).rejects.toThrow(/outside the managed plugin ceiling/);
+		// A managed host with no usable ceiling refuses by name too.
+		const h2 = buildHostCallHandlers(
+			makeDeps({
+				broker: managedBroker([scopedGrant('agents:dispatch', 'a')], {
+					standing: 'managed',
+					ceiling: null,
+					policyRevision: 3,
+					reason: 'no plugin ceiling is installed for policy revision 3',
+				}),
+				isPluginTrusted: () => true,
+				dispatch,
+				dispatchUnattendedAllowed: () => true,
+			})
+		);
+		await expect(
+			h2['agents.dispatch']!('p', { agentId: 'a', prompt: 'friendly summary' })
+		).rejects.toThrow(/ceiling is unavailable/);
+		expect(dispatch).not.toHaveBeenCalled();
+	});
+
+	it('binds a managed spawn with the same receipt and the host-owned spec untouched', async () => {
+		const spawn = vi.fn(async () => 'spawned');
+		const h = buildHostCallHandlers(
+			makeDeps({
+				broker: managedBroker([scopedGrant('process:spawn', 'echo-tool')]),
+				isPluginTrusted: () => true,
+				spawn,
+				resolveSpawnBinary,
+			})
+		);
+		await expect(
+			h['process.spawn']!('p', { command: 'echo-tool', opts: { args: ['hello'] } })
+		).resolves.toBe('spawned');
+		const [pluginId, spec, binding] = spawn.mock.calls[0] as unknown as [
+			string,
+			ResolvedSpawnSpec,
+			PluginActBinding,
+		];
+		expect(pluginId).toBe('p');
+		expect(spec).toEqual({
+			name: 'echo-tool',
+			binaryPath: echoEntry.binaryPath,
+			args: ['--safe', 'hello'],
+			env: { SAFE_FLAG: '1' },
+		});
+		expect(binding.receipt).toEqual(receipt);
+		expect(binding.delegation.delegation.chain).toEqual([{ kind: 'service', id: 'plugin:p' }]);
+		expect(delegationContextProblems(binding.delegation)).toEqual([]);
+	});
+
+	it('pluginActBinding binds only an allowed decision that carries a receipt', () => {
+		expect(pluginActBinding('p', { allowed: true })).toBeUndefined();
+		expect(pluginActBinding('p', { allowed: false, managed: receipt })).toBeUndefined();
+		const bound = pluginActBinding('p', { allowed: true, managed: receipt });
+		expect(bound?.receipt).toBe(receipt);
+		expect(bound?.delegation.delegation.grantRef).toBe('plugin-consent:p:sha256:abc:7');
+		// No readable consent digest: the chain carries no grant reference.
+		expect(pluginConsentGrantRef('p', { contentHash: null, consentEpoch: null })).toBeNull();
+		expect(pluginConsentGrantRef('p', { contentHash: 'sha256:abc', consentEpoch: null })).toBe(
+			'plugin-consent:p:sha256:abc:none'
+		);
+	});
+
+	describe('admitPluginProcess (the lease-gated execFile sink)', () => {
+		const spec: ResolvedSpawnSpec = {
+			name: 'echo-tool',
+			binaryPath: '/opt/echo',
+			args: ['--safe', 'hello'],
+			env: { SAFE_FLAG: '1' },
+		};
+		const binding = pluginActBinding('p', { allowed: true, managed: receipt })!;
+		const input = { mode: 'exec-file' as const, pluginId: 'p', spec, cwd: '/work', binding };
+
+		it('a host with no port, or a standalone port, admits nothing and needs nothing', async () => {
+			expect(await admitPluginProcess(null, input)).toEqual({ state: 'standalone' });
+			const port = fakeSpawnPort({ standing: 'standalone' });
+			expect(await admitPluginProcess(port, input)).toEqual({ state: 'standalone' });
+			expect(port.asked).toHaveLength(0);
+		});
+
+		it('admits exec-file on a managed host: the authority sees exactly the launch and the gate honors that snapshot only', async () => {
+			const port = fakeSpawnPort();
+			const outcome = await admitPluginProcess(port, input);
+			expect(outcome.state).toBe('admitted');
+			if (outcome.state !== 'admitted') return;
+			expect(port.asked).toHaveLength(1);
+			const asked = port.asked[0];
+			expect(asked.snapshot).toMatchObject({
+				executable: '/opt/echo',
+				args: ['--safe', 'hello'],
+				cwd: '/work',
+				shell: false,
+				envKeys: ['SAFE_FLAG'],
+				stdinDigest: null,
+				provider: 'plugin-process',
+				operation: 'start',
+				target: { kind: 'local' },
+				resourceIds: ['binary:echo-tool', 'plugin:p'],
+			});
+			expect(asked.context.origin).toBe('desktop');
+			expect(asked.context.identity).toEqual(binding.delegation.identity);
+			expect(asked.context.traceId).toBe(binding.delegation.traceId);
+			expect(asked.context.delegation.chain).toEqual([{ kind: 'service', id: 'plugin:p' }]);
+			expect(asked.context.workflow).toBeNull();
+			expect(outcome.attribution).toMatchObject({ provider: 'plugin-process', operation: 'start' });
+			expect(outcome.lease.actor).toEqual(asked.context.actor);
+			// The gate: the same snapshot passes, a changed argv does not.
+			expect(
+				outcome.gate.admit(pluginProcessSnapshot({ pluginId: 'p', spec, cwd: '/work' }))
+			).toEqual({
+				ok: true,
+			});
+			expect(
+				outcome.gate.admit(
+					pluginProcessSnapshot({
+						pluginId: 'p',
+						spec: { ...spec, args: ['--unsafe'] },
+						cwd: '/work',
+					})
+				)
+			).toMatchObject({ ok: false, state: 'denied', code: 'lease-invalid' });
+			// Lifecycle: bound to the pid, released with the exit.
+			outcome.gate.bound?.(4242);
+			expect(outcome.lease.state()).toBe('bound');
+			expect(outcome.lease.pid()).toBe(4242);
+			outcome.lease.release({ outcome: 'exited', exitCode: 0, signal: null });
+			expect(outcome.lease.state()).toBe('released');
+		});
+
+		it('a revocation reaches the sink through the gate while the process is bound', async () => {
+			const port = fakeSpawnPort();
+			const outcome = await admitPluginProcess(port, input);
+			if (outcome.state !== 'admitted') throw new Error(outcome.state);
+			const heard: string[] = [];
+			outcome.gate.onRevoked?.((reason) => heard.push(reason));
+			outcome.gate.bound?.(7);
+			expect(port.authority.revoke(outcome.lease.leaseId, 'policy changed')).toBe(true);
+			expect(heard).toEqual(['policy changed']);
+			expect(outcome.lease.state()).toBe('revoked');
+		});
+
+		it('is denied by the policy table before anything starts', async () => {
+			const port = fakeSpawnPort({
+				decide: () => ({
+					decision: 'deny',
+					reason: 'binaries are not approved',
+					policyRevision: 1,
+				}),
+			});
+			const outcome = await admitPluginProcess(port, input);
+			expect(outcome).toMatchObject({ state: 'denied', code: 'policy-denied' });
+			expect(port.authority.live()).toHaveLength(0);
+		});
+
+		it.each(['shell', 'pty', 'detached'] as const)(
+			'refuses an unsupported process mode by name without asking the authority (%s)',
+			async (mode) => {
+				const port = fakeSpawnPort();
+				const outcome = await admitPluginProcess(port, { ...input, mode });
+				expect(outcome).toMatchObject({ state: 'unavailable', code: 'capability-unsupported' });
+				expect(outcome.state === 'unavailable' && outcome.message).toMatch(
+					new RegExp(`in ${mode} mode`)
+				);
+				expect(port.asked).toHaveLength(0);
+			}
+		);
+
+		it('refuses a managed call that carried no binding (the broker was not asked under management)', async () => {
+			const port = fakeSpawnPort();
+			const outcome = await admitPluginProcess(port, { ...input, binding: undefined });
+			expect(outcome).toMatchObject({ state: 'denied', code: 'unauthenticated' });
+			expect(outcome.state === 'denied' && outcome.message).toMatch(/ceiling receipt/);
+			expect(port.asked).toHaveLength(0);
+		});
+
+		it('refuses a context the host does not accept before any admission', async () => {
+			const port = fakeSpawnPort({ accept: () => ['installation inst-test is not this one'] });
+			const outcome = await admitPluginProcess(port, input);
+			expect(outcome).toMatchObject({ state: 'denied' });
+			expect(outcome.state === 'denied' && outcome.message).toMatch(/could not be bound/);
+			expect(port.asked).toHaveLength(0);
+		});
+
+		it('names the route table: exec-file is the one admitted mode, every other mode unsupported', () => {
+			expect(pluginProcessRouteSupport('exec-file')).toMatchObject({
+				standalone: 'implemented',
+				managed: 'implemented',
+			});
+			for (const mode of ['shell', 'pty', 'detached'] as const) {
+				expect(pluginProcessRouteSupport(mode)).toMatchObject({
+					mode,
+					standalone: 'unsupported',
+					managed: 'unsupported',
+				});
+			}
+		});
 	});
 });

@@ -64,11 +64,16 @@ import {
 } from './plugins/plugin-manager-singleton';
 import { PluginSchedulerHost } from './plugins/plugin-scheduler-host';
 import {
+	admitPluginProcess,
 	buildHostCallHandlers,
+	pluginActBinding,
+	pluginProcessSnapshot,
 	purgePluginData,
+	type PluginActBinding,
 	type PluginSessionMetadata,
 	type PluginTabMetadata,
 } from './plugins/plugin-host-handlers';
+import { stopProcess } from '../shared/maestro-lib/control/termination';
 import { createCadenzaDelivery, registerCadenzaIpcHandlers } from './cadenza-bridge';
 import { createPluginHostViewBridge } from './plugin-host-view-bridge';
 import { ActionGuard } from './plugins/action-guard';
@@ -2427,7 +2432,8 @@ app
 		// "dispatched" success.
 		const dispatchPromptToSession = (
 			agentId: string,
-			prompt: string
+			prompt: string,
+			binding?: PluginActBinding
 		): { dispatched: true; sessionId: string } => {
 			const sessions = getLiveSessions() as Array<{
 				id?: string;
@@ -2444,14 +2450,36 @@ app
 				);
 			}
 			logger.info(
-				`agents.dispatch -> session ${target.id} (requested "${agentId}", ${prompt.length} chars)`,
+				`agents.dispatch -> session ${target.id} (requested "${agentId}", ${prompt.length} chars)${
+					binding
+						? ` bound as plugin "${binding.pluginId}" under policy revision ${binding.receipt.policyRevision ?? 'none'} (consent ${binding.receipt.contentHash ?? 'none'} at epoch ${binding.receipt.consentEpoch ?? 'none'}, request ${binding.delegation.identity.requestId})`
+						: ''
+				}`,
 				'[PluginAudit]'
 			);
 			const win = mainWindow;
 			if (!win || win.isDestroyed() || !isWebContentsAvailable(win)) {
 				throw new Error('agents.dispatch: no renderer available to run the agent');
 			}
-			win.webContents.send('remote:executeCommand', target.id, prompt, 'ai');
+			// Under management the plugin's delegation context rides beside the
+			// prompt (MRC-09-02), in the slot a Cue cli action's dispatch uses: the
+			// renderer puts it on the spawn config and the process sink admits the
+			// turn as the plugin's child. A standalone dispatch is sent as before.
+			if (binding) {
+				win.webContents.send(
+					'remote:executeCommand',
+					target.id,
+					prompt,
+					'ai',
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					binding.delegation
+				);
+			} else {
+				win.webContents.send('remote:executeCommand', target.id, prompt, 'ai');
+			}
 			return { dispatched: true, sessionId: target.id };
 		};
 
@@ -2501,6 +2529,10 @@ app
 			getGlobalEnvVars: () => store.get('shellEnvVars', {}),
 			hasPluginTools: () => (pluginManager?.getContributions().tools.length ?? 0) > 0,
 			spawn: spawnAgent,
+			// The desktop's own spawn authority (MRC-09-02), read per run, so a
+			// plugin's headless turn is admitted by this host rather than refused
+			// by the bare CLI binding read; null until the service composes.
+			managed: () => enterpriseService?.spawnAuthority ?? null,
 			recordRelayOrigin: markRelaySession,
 			prepareSystemPrompt: prepareMaestroSystemPromptCli,
 			issueRunToken: (agentId, ttlMs, receiptToolId) =>
@@ -2746,38 +2778,100 @@ app
 				// - the same grant source and check the time-based scheduler uses.
 				dispatchUnattendedAllowed: (pluginId, agentId) =>
 					isPermittedUnattended(grantsOf(pluginId), 'agents:dispatch', agentId),
-				spawn: async (pluginId, spec) => {
+				spawn: async (pluginId, spec, binding) => {
+					// The cwd is fixed here (the registry's pin, else execFile's own
+					// default) so the admitted snapshot is the spawn.
+					const cwd = spec.cwd ?? process.cwd();
+					// Managed admission (MRC-09-02): the host's authority decides on the
+					// snapshot of exactly this launch, bound to the plugin the broker's
+					// receipt names. Standalone runs as before; a refusal starts nothing.
+					const admitted = await admitPluginProcess(enterpriseService?.spawnAuthority ?? null, {
+						mode: 'exec-file',
+						pluginId,
+						spec,
+						cwd,
+						binding,
+					});
+					if (admitted.state !== 'standalone' && admitted.state !== 'admitted') {
+						logger.warn(
+							`process.spawn by "${pluginId}" not admitted (${admitted.state}, ${admitted.code}): ${admitted.message}`,
+							'[PluginAudit]'
+						);
+						throw new Error(`process.spawn: [managed-${admitted.state}] ${admitted.message}`);
+					}
+					const leased = admitted.state === 'admitted' ? admitted : null;
 					logger.info(
-						`process.spawn by "${pluginId}": ${spec.name} (${spec.binaryPath}) argv=${JSON.stringify(spec.args)}`,
+						`process.spawn by "${pluginId}": ${spec.name} (${spec.binaryPath}) argv=${JSON.stringify(spec.args)}${leased ? ` under lease ${leased.lease.leaseId}` : ''}`,
 						'[PluginAudit]'
 					);
 					// Shell-less by construction: execFile(binary, argv). Env/cwd are
 					// host-owned registry values; output is bounded; never shell:true.
 					return await new Promise((resolve, reject) => {
-						execFile(
+						// The gate sees exactly what execFile sees: the snapshot is rebuilt
+						// from the arguments handed to it below, and nothing runs between.
+						if (leased) {
+							const verdict = leased.gate.admit(pluginProcessSnapshot({ pluginId, spec, cwd }));
+							if (!verdict.ok) {
+								leased.lease.release({ outcome: 'unknown', message: verdict.message });
+								reject(new Error(`process.spawn: [managed-${verdict.state}] ${verdict.message}`));
+								return;
+							}
+						}
+						let revokedReason: string | null = null;
+						const revocation: { unsubscribe?: () => void } = {};
+						const child = execFile(
 							spec.binaryPath,
 							spec.args,
 							{
 								env: spec.env,
-								...(spec.cwd ? { cwd: spec.cwd } : {}),
+								cwd,
 								timeout: 30_000,
 								maxBuffer: 1024 * 1024,
 								windowsHide: true,
 								shell: false,
 							},
 							(error, stdout, stderr) => {
-								if (error && error.code === undefined) {
-									// Spawn-level failure (missing binary, timeout kill).
+								revocation.unsubscribe?.();
+								// Spawn-level failure (missing binary, timeout kill) has no exit code.
+								const spawnFailed = !!error && error.code === undefined;
+								const exitCode = typeof error?.code === 'number' ? error.code : 0;
+								leased?.lease.release(
+									spawnFailed
+										? { outcome: 'spawn-failed', message: error.message }
+										: revokedReason !== null
+											? { outcome: 'stopped', by: 'authority' }
+											: { outcome: 'exited', exitCode, signal: error?.signal ?? null }
+								);
+								if (revokedReason !== null) {
+									reject(new Error(`process.spawn: [managed-revoked] ${revokedReason}`));
+									return;
+								}
+								if (spawnFailed) {
 									reject(new Error(`process.spawn: ${error.message}`));
 									return;
 								}
 								resolve({
-									exitCode: typeof error?.code === 'number' ? error.code : 0,
+									exitCode,
 									stdout: String(stdout).slice(0, 64 * 1024),
 									stderr: String(stderr).slice(0, 64 * 1024),
 								});
 							}
 						);
+						// The process exists: the protected lifetime begins, and a
+						// revocation from here on stops it through the one stop ladder.
+						leased?.lease.bind(child.pid);
+						revocation.unsubscribe = leased?.gate.onRevoked?.((reason) => {
+							if (revokedReason !== null) return;
+							revokedReason = reason;
+							logger.warn(
+								`process.spawn by "${pluginId}" lease revoked, stopping ${spec.name}: ${reason}`,
+								'[PluginAudit]'
+							);
+							stopProcess(
+								{ child },
+								{ from: 'terminate', graceMs: 2_000, label: 'plugin-process' }
+							);
+						});
 					});
 				},
 				resolveSpawnBinary: (name) => spawnBinaryRegistry.resolve(name),
@@ -3119,9 +3213,23 @@ app
 				if (!trigger.agentId) {
 					throw new Error(`cue trigger "${trigger.id}" has no agentId to dispatch to`);
 				}
+				// The broker's decision for this firing (MRC-09-02): on a standalone
+				// host the same allowlist answer evaluateDispatch already gave; on a
+				// managed host the ceiling's, with the receipt the sink binds the
+				// turn under. A denial throws here too, and the trigger is skipped
+				// loudly rather than fired unbound.
+				const decision = pluginBroker.authorize(trigger.pluginId, 'agents.dispatch', {
+					agentId: trigger.agentId,
+					prompt: trigger.payload,
+				});
+				if (!decision.allowed) throw new Error(decision.reason ?? 'permission denied');
 				// Synchronous: a vanished/ambiguous session or missing renderer throws
 				// HERE, into the scheduler tick's try/catch - never a false success.
-				dispatchPromptToSession(trigger.agentId, trigger.payload);
+				dispatchPromptToSession(
+					trigger.agentId,
+					trigger.payload,
+					pluginActBinding(trigger.pluginId, decision)
+				);
 			},
 			evaluateDispatch: (trigger) => {
 				const rec = pluginManager?.getRegistry().records.find((r) => r.id === trigger.pluginId);

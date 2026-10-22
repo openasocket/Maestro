@@ -10,8 +10,12 @@ import type { SpawnAgentOptions } from '../../../cli/services/agent-spawner';
 import type { SessionInfo } from '../../../shared/types';
 import {
 	createPluginHeadlessAgentRunner,
+	pluginHeadlessAuthority,
+	pluginHeadlessChain,
 	type PluginHeadlessRunnerDeps,
 } from '../../../main/plugins/plugin-headless-agent-runner';
+import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
+import type { HeadlessSpawnAuthority } from '../../../shared/maestro-lib/managed/host-adapter';
 
 const agent = {
 	id: 'agent-a',
@@ -800,3 +804,102 @@ it.each(['success', 'error', 'throw', 'cancel-before-spawn'] as const)(
 		}
 	}
 );
+
+describe('managed admission through the host authority (MRC-09-02)', () => {
+	const identity = {
+		requestId: 'req-1',
+		idempotencyKey: 'req-1',
+		attemptId: 'att-1',
+		runId: null,
+		rootRunId: null,
+		parentRunId: null,
+	};
+	const baseDeps = (spawn: PluginHeadlessRunnerDeps['spawn']): PluginHeadlessRunnerDeps => ({
+		getAgent: () => agent,
+		detectAgent: async () => ({ available: true, path: '/desktop/codex' }),
+		hasPluginTools: () => false,
+		spawn,
+		prepareSystemPrompt: async () => undefined,
+		issueRunToken: vi.fn(),
+		revokeRunToken: vi.fn(),
+		cliScriptPath: () => '/cli.js',
+		audit: vi.fn(),
+	});
+
+	it('hands the spawner the host authority, with the Relay plugin on the chain for a relay turn', async () => {
+		const port = fakeSpawnPort();
+		let managed: HeadlessSpawnAuthority | undefined;
+		const spawn = vi.fn(async (_t, _c, _p, _s, options?: SpawnAgentOptions) => {
+			managed = options?.managed;
+			return { success: true, response: 'done' };
+		});
+		const run = createPluginHeadlessAgentRunner({ ...baseDeps(spawn), managed: () => port });
+		await run('agent-a', 'hello', undefined, undefined, 'relay');
+		expect(managed).toBeDefined();
+		expect(managed!.standing()).toBe('managed');
+		expect(managed!.authority).toBe(port.authority);
+		expect(managed!.policy()).toEqual(port.policy());
+		expect(managed!.unavailableReason).toBeNull();
+		const verified = managed!.context({ identity, traceId: 'cli-req-1', policyRevision: 1 });
+		expect(verified.ok).toBe(true);
+		if (!verified.ok) return;
+		expect(verified.context.origin).toBe('desktop');
+		expect(verified.context.delegation).toEqual({
+			chain: [{ kind: 'service', id: 'plugin:sh.maestro.relay' }],
+			grantRef: null,
+		});
+		expect(verified.context.identity).toEqual(identity);
+		expect(verified.context.workflow).toBeNull();
+	});
+
+	it('an auto turn is a direct action of this process; a chain the caller carries is kept', async () => {
+		const port = fakeSpawnPort();
+		let managed: HeadlessSpawnAuthority | undefined;
+		const spawn = vi.fn(async (_t, _c, _p, _s, options?: SpawnAgentOptions) => {
+			managed = options?.managed;
+			return { success: true, response: 'done' };
+		});
+		const run = createPluginHeadlessAgentRunner({ ...baseDeps(spawn), managed: () => port });
+		await run('agent-a', 'hello', undefined, undefined, 'auto');
+		const direct = managed!.context({ identity, traceId: 't', policyRevision: 1 });
+		expect(direct.ok && direct.context.delegation).toEqual({ chain: [], grantRef: null });
+		const carried = pluginHeadlessAuthority(port, pluginHeadlessChain('relay')).context({
+			identity,
+			traceId: 't',
+			policyRevision: 1,
+			delegation: { chain: [{ kind: 'agent', id: 'initiator' }], grantRef: 'g-1' },
+		});
+		expect(carried.ok && carried.context.delegation).toEqual({
+			chain: [{ kind: 'agent', id: 'initiator' }],
+			grantRef: 'g-1',
+		});
+		expect(pluginHeadlessChain('relay')).toEqual([
+			{ kind: 'service', id: 'plugin:sh.maestro.relay' },
+		]);
+		expect(pluginHeadlessChain('auto')).toEqual([]);
+		expect(pluginHeadlessChain('user')).toEqual([]);
+	});
+
+	it('a standalone port admits nothing and the spawner runs as before; no port leaves the option out', async () => {
+		const standalone = fakeSpawnPort({ standing: 'standalone' });
+		const seen: Array<HeadlessSpawnAuthority | undefined | 'absent'> = [];
+		const spawn = vi.fn(async (_t, _c, _p, _s, options?: SpawnAgentOptions) => {
+			seen.push(options && 'managed' in options ? options.managed : 'absent');
+			return { success: true, response: 'done' };
+		});
+		await createPluginHeadlessAgentRunner({ ...baseDeps(spawn), managed: () => standalone })(
+			'agent-a',
+			'hello'
+		);
+		await createPluginHeadlessAgentRunner({ ...baseDeps(spawn), managed: () => null })(
+			'agent-a',
+			'hello'
+		);
+		await createPluginHeadlessAgentRunner(baseDeps(spawn))('agent-a', 'hello');
+		expect(seen).toHaveLength(3);
+		expect(seen[0]).toBeDefined();
+		expect((seen[0] as HeadlessSpawnAuthority).standing()).toBe('standalone');
+		expect(seen[1]).toBe('absent');
+		expect(seen[2]).toBe('absent');
+	});
+});

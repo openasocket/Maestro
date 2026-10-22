@@ -1,5 +1,15 @@
-/** One host-owned, headless provider turn, shared by plugin send and CLI send. */
+/**
+ * One host-owned, headless provider turn, shared by plugin send and CLI send.
+ * Under management (MRC-09-02) it is admitted by the host's own spawn
+ * authority (`deps.managed`, through `pluginHeadlessAuthority`), not by the
+ * data dir's binding, which on an enrolled desktop holds no authority.
+ */
 import type { SessionInfo } from '../../shared/types';
+import type { ProcessSpawnAuthorityPort } from '../process-manager/types';
+import type { HeadlessSpawnAuthority } from '../../shared/maestro-lib/managed/host-adapter';
+import type { ManagedPrincipalRef } from '../../shared/maestro-lib/managed/types';
+import { RELAY_PLUGIN_ID } from '../../shared/plugins/relay-identity';
+import { pluginPrincipal } from './plugin-host-handlers';
 import type { AgentResult, SpawnAgentOptions } from '../../cli/services/agent-spawner';
 import type { HeadlessAgentRunner } from './plugin-manager-singleton';
 import { createPluginRunProofFile, removePluginRunProofFile } from './plugin-tool-run-identity';
@@ -37,6 +47,58 @@ export interface PluginHeadlessRunnerDeps {
 	cliScriptPath: () => string;
 	audit: (agentId: string, resumed: boolean) => void;
 	recordRelayOrigin?: (agent: SessionInfo, providerSessionId: string) => void;
+	/**
+	 * The host's managed spawn authority, read per run (MRC-09-02). Present and
+	 * managed, the turn is admitted by this host with the origin's plugin on the
+	 * chain; standalone runs as before; absent or null, the spawner reads the
+	 * data dir's binding. Never a way to opt out: a refusal is the turn's result.
+	 */
+	managed?: () => ProcessSpawnAuthorityPort | null;
+}
+
+/**
+ * The chain a headless plugin turn carries, by what the caller said of itself:
+ * the Relay plugin for a Relay conversation (the one caller that names itself
+ * through the origin), nothing for a turn no plugin is named for. Threading
+ * the calling plugin's consent-bound binding through `agents.send` is
+ * MRC-09-02A; until then an `auto` turn is a direct action of this process.
+ */
+export function pluginHeadlessChain(origin: 'user' | 'auto' | 'relay'): ManagedPrincipalRef[] {
+	return origin === 'relay' ? [pluginPrincipal(RELAY_PLUGIN_ID)] : [];
+}
+
+/**
+ * The host's spawn authority under the shape the CLI spawner admits with: the
+ * process sink's standing, authority and policy, the context bound through the
+ * port's own verifier as an in-process action (no transport carried a plugin)
+ * with the chain the caller names, so the lease records the plugin behind the
+ * turn. A caller that already carries a chain keeps it; nothing is widened.
+ */
+export function pluginHeadlessAuthority(
+	port: ProcessSpawnAuthorityPort,
+	chain: readonly ManagedPrincipalRef[]
+): HeadlessSpawnAuthority {
+	return {
+		standing: () => port.standing(),
+		get authority() {
+			return port.authority;
+		},
+		policy: () => port.policy(),
+		unavailableReason: null,
+		context: (input) =>
+			port.verify({
+				actor: { peer: 'in-process' },
+				identity: input.identity,
+				traceId: input.traceId,
+				policyRevision: input.policyRevision,
+				workflow: input.workflow ?? null,
+				...(input.delegation
+					? { delegation: input.delegation }
+					: chain.length > 0
+						? { delegation: { chain: [...chain], grantRef: null } }
+						: {}),
+			}),
+	};
 }
 
 /** Build a cancellable host turn using live desktop provider settings and execution mode.
@@ -104,6 +166,10 @@ export function createPluginHeadlessAgentRunner(
 				? createPluginRunProofFile(runToken, HEADLESS_RUN_COMPLETION_TIMEOUT_MS)
 				: undefined;
 			deps.audit(agent.id, !!providerSessionId);
+			// The host's own authority admits the turn (read now, so an enrollment
+			// that appeared since the last run governs this one).
+			const port = deps.managed?.() ?? null;
+			const managed = port ? pluginHeadlessAuthority(port, pluginHeadlessChain(origin)) : undefined;
 			if (signal?.aborted) {
 				return {
 					success: false,
@@ -127,6 +193,7 @@ export function createPluginHeadlessAgentRunner(
 				maestroPMode: agent.maestroPMode,
 				maestroPPath: agent.maestroPPath,
 				querySource: origin === 'relay' ? 'auto' : origin,
+				...(managed ? { managed } : {}),
 				pluginRunProofFile,
 				mcpCliScriptPath: deps.cliScriptPath(),
 				timeoutMs: HEADLESS_RUN_TIMEOUT_MS,

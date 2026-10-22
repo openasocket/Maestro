@@ -10,7 +10,12 @@
  * arbitrary-code-execution-grade methods (agents.dispatch, process.spawn) remain
  * optional integrations, but when wired they re-check broker authorization
  * (allowlist-scoped per Phase 4), trusted-signature posture, Pianola risk, the
- * closed opts schema, and the host-owned spawn binary registry here.
+ * closed opts schema, and the host-owned spawn binary registry here. Under
+ * management (MRC-09-02) the two act verbs also hand their sink the plugin's
+ * binding: the broker's ceiling receipt for the call and the delegation
+ * context derived from it, so the process sink admits the dispatched turn as
+ * the plugin's child and the host's `execFile` runs only under a lease the
+ * host authority minted on the exact launch (`admitPluginProcess`).
  */
 
 import * as fs from 'fs';
@@ -24,7 +29,23 @@ import type { PluginSignatureInfo } from '../../shared/plugins/plugin-registry';
 import type { PluginManifest } from '../../shared/plugins/plugin-manifest';
 import { PluginMediaTools, resolveMediaRuntime } from './plugin-media-tools';
 import type { HostCallHandler, HostCallHandlers } from './plugin-sandbox-host';
-import type { PermissionBroker } from './permission-broker';
+import type { BrokerDecision, PermissionBroker, PluginCeilingReceipt } from './permission-broker';
+import type { ProcessSpawnAuthorityPort } from '../process-manager/types';
+import { generateUUID } from '../../shared/uuid';
+import {
+	MANAGED_CONTRACT_VERSION,
+	type ManagedDenialCode,
+	type ManagedPrincipalRef,
+} from '../../shared/maestro-lib/managed/types';
+import type { ManagedDelegationContext } from '../../shared/maestro-lib/managed/delegation';
+import type { SupportStatus } from '../../shared/maestro-lib/managed/compatibility';
+import {
+	buildDispatchSnapshot,
+	type DispatchAttribution,
+	type DispatchLease,
+	type DispatchSnapshot,
+} from '../../shared/maestro-lib/managed/authority';
+import { leaseAdmission, type DispatchAdmission } from '../../shared/maestro-lib/run/start-turn';
 import type { AgentSendProgressEvent, HostMethod } from '../../shared/plugins/rpc-protocol';
 import type { ActionGuard } from './action-guard';
 import type { PluginKvStore } from './plugin-kv-store';
@@ -316,8 +337,11 @@ export interface HostHandlerDeps {
 	/** Optional Phase-4 act verb: send a prompt to an agent through the brokered
 	 * high-power path. The handler enforces the closed {agentId, prompt} schema
 	 * and re-checks broker (allowlist scope) + trust + risk + guard before
-	 * calling; the sink resolves the agent id to a live session at call time. */
-	dispatch?: (agentId: string, prompt: string) => Promise<unknown>;
+	 * calling; the sink resolves the agent id to a live session at call time.
+	 * On a managed host the third argument is the plugin's binding (the broker's
+	 * ceiling receipt and the delegation context the sink admits the turn as the
+	 * child of); a standalone host is handed exactly the two it always was. */
+	dispatch?: (agentId: string, prompt: string, binding?: PluginActBinding) => Promise<unknown>;
 	/** Headless, resumable provider turn. The host returns the provider session id. */
 	sendAgent?: (
 		agentId: string,
@@ -358,8 +382,14 @@ export interface HostHandlerDeps {
 	 * `command` through `resolveSpawnBinary` (the host-owned registry) and hands
 	 * the sink a fully host-owned spec - binary path, env, cwd all come from the
 	 * registry entry, never from the plugin; only validated argv strings pass
-	 * through. The sink must spawn WITHOUT a shell. */
-	spawn?: (pluginId: string, spec: ResolvedSpawnSpec) => Promise<unknown>;
+	 * through. The sink must spawn WITHOUT a shell. On a managed host the third
+	 * argument is the plugin's binding, which the sink admits the launch with
+	 * (`admitPluginProcess`); a standalone host is handed the two it always was. */
+	spawn?: (
+		pluginId: string,
+		spec: ResolvedSpawnSpec,
+		binding?: PluginActBinding
+	) => Promise<unknown>;
 	/** The host-owned binary allowlist for `process.spawn`. Absent (or resolving
 	 * null) = deny: a name outside the registry can never be spawned. */
 	resolveSpawnBinary?: (name: string) => SpawnBinaryEntry | null;
@@ -405,6 +435,242 @@ export interface ResolvedSpawnSpec {
 	env: Record<string, string>;
 	/** Host-confined cwd, when the registry entry pins one. */
 	cwd?: string;
+}
+
+// ============================================================================
+// Managed act bindings (MRC-09-02)
+// ============================================================================
+
+/** The principal a plugin is on a delegation chain: a service of this host, by plugin id. */
+export function pluginPrincipal(pluginId: string): ManagedPrincipalRef {
+	return { kind: 'service', id: `plugin:${pluginId}` };
+}
+
+/** The grant reference a plugin's chain carries: its ledger consent, by content digest and epoch. A reference the host looks up; carrying it proves nothing. */
+export function pluginConsentGrantRef(
+	pluginId: string,
+	receipt: Pick<PluginCeilingReceipt, 'contentHash' | 'consentEpoch'>
+): string | null {
+	if (!receipt.contentHash) return null;
+	return `plugin-consent:${pluginId}:${receipt.contentHash}:${receipt.consentEpoch ?? 'none'}`;
+}
+
+/**
+ * The context a plugin's act verb hands its sink: the attribution half of a
+ * managed operation, the plugin as the one link of the chain, its consent as
+ * the grant reference, the policy generation the broker held the call against.
+ * A run of its own (a plugin's call is not a child of a turn); the process
+ * sink derives the dispatched turn's record from it, one link deeper.
+ */
+export function pluginDelegationContext(input: {
+	pluginId: string;
+	receipt: PluginCeilingReceipt;
+	requestId?: string;
+	attemptId?: string;
+}): ManagedDelegationContext {
+	const requestId = input.requestId ?? generateUUID();
+	const attemptId = input.attemptId ?? generateUUID();
+	return {
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		identity: {
+			requestId,
+			idempotencyKey: requestId,
+			attemptId,
+			runId: requestId,
+			rootRunId: requestId,
+			parentRunId: null,
+		},
+		traceId: `plugin:${input.pluginId}:${requestId}:${attemptId}`,
+		workflow: null,
+		delegation: {
+			chain: [pluginPrincipal(input.pluginId)],
+			grantRef: pluginConsentGrantRef(input.pluginId, input.receipt),
+		},
+		policyRevision: input.receipt.policyRevision,
+	};
+}
+
+/** What a managed act verb binds at its sink: the plugin, the broker's ceiling receipt for this call and the delegation context derived from it. */
+export interface PluginActBinding {
+	pluginId: string;
+	receipt: PluginCeilingReceipt;
+	delegation: ManagedDelegationContext;
+}
+
+/**
+ * The binding of one allowed act-verb call, or undefined on a standalone host:
+ * present only when the broker consulted the ceiling and the call was within
+ * it (a denied call threw already; a standalone decision carries no receipt).
+ * Fresh request and attempt ids per call, so two dispatches are two operations.
+ */
+export function pluginActBinding(
+	pluginId: string,
+	decision: Pick<BrokerDecision, 'allowed' | 'managed'>
+): PluginActBinding | undefined {
+	if (!decision.allowed || !decision.managed) return undefined;
+	return {
+		pluginId,
+		receipt: decision.managed,
+		delegation: pluginDelegationContext({ pluginId, receipt: decision.managed }),
+	};
+}
+
+/**
+ * How a plugin process could be started. The handler builds `exec-file` and
+ * nothing else; the other modes name what a sink refuses by name if it is
+ * ever asked for one (a shell, a PTY, a detached child), never runs.
+ */
+export type PluginProcessMode = 'exec-file' | 'shell' | 'pty' | 'detached';
+
+/** The provider a plugin process is attributed to in its dispatch snapshot. */
+export const PLUGIN_PROCESS_PROVIDER = 'plugin-process';
+
+export interface PluginProcessRouteSupport {
+	mode: PluginProcessMode;
+	/** Whether this build runs a plugin process in the mode at all. */
+	standalone: SupportStatus;
+	/** Whether a managed restriction is enforced on the mode. */
+	managed: SupportStatus;
+	note: string;
+}
+
+/**
+ * The one table for plugin process modes. `exec-file` is the sink this build
+ * has: a host-blessed binary by absolute path, no shell, a closed host-owned
+ * environment, a host-pinned cwd and validated argv, so under management the
+ * host authority decides on the snapshot of exactly that launch and a lease
+ * gates the `execFile`, binds its pid and stops the child on revocation. What
+ * the binary does once running is not confined by this host, as with a
+ * provider's child process. Every other mode is unsupported on both standings:
+ * the handler builds no such spawn and a sink asked for one refuses by name.
+ */
+export function pluginProcessRouteSupport(mode: PluginProcessMode): PluginProcessRouteSupport {
+	if (mode === 'exec-file') {
+		return {
+			mode,
+			standalone: 'implemented',
+			managed: 'implemented',
+			note: 'a host-blessed binary runs by absolute path with no shell, a closed host-owned environment and validated arguments; the launch is admitted on its exact snapshot and lease-gated at execFile',
+		};
+	}
+	const what = mode === 'shell' ? 'a shell command' : mode === 'pty' ? 'a PTY' : 'a detached child';
+	return {
+		mode,
+		standalone: 'unsupported',
+		managed: 'unsupported',
+		note: `no plugin process runs as ${what} on this host; the handler builds no such spawn and the sink refuses one by name`,
+	};
+}
+
+export interface PluginProcessAdmissionInput {
+	mode: PluginProcessMode;
+	pluginId: string;
+	spec: ResolvedSpawnSpec;
+	/** The cwd the sink hands `execFile` (the spec's pin, or the host's own), so the snapshot is the spawn. */
+	cwd: string;
+	binding: PluginActBinding | undefined;
+}
+
+export type PluginProcessAdmissionOutcome =
+	| { state: 'standalone' }
+	| {
+			state: 'admitted';
+			lease: DispatchLease;
+			/** The sink's gate: re-check at `execFile`, bind the pid, hear a revocation. */
+			gate: DispatchAdmission;
+			attribution: DispatchAttribution;
+			snapshot: DispatchSnapshot;
+	  }
+	| { state: 'denied' | 'unavailable' | 'unknown'; code: ManagedDenialCode; message: string };
+
+/** What the spec does not say for itself: a plugin process has no provider session, model or account. */
+export function pluginProcessAttribution(
+	input: Pick<PluginProcessAdmissionInput, 'pluginId' | 'spec'>
+): DispatchAttribution {
+	return {
+		provider: PLUGIN_PROCESS_PROVIDER,
+		model: null,
+		operation: 'start',
+		account: null,
+		target: { kind: 'local' },
+		resourceIds: [`binary:${input.spec.name}`, `plugin:${input.pluginId}`],
+	};
+}
+
+/** The snapshot of exactly what the sink hands `execFile`: binary, argv, cwd, the closed env, no shell. */
+export function pluginProcessSnapshot(
+	input: Pick<PluginProcessAdmissionInput, 'pluginId' | 'spec' | 'cwd'>
+): DispatchSnapshot {
+	return buildDispatchSnapshot(
+		{
+			command: input.spec.binaryPath,
+			args: input.spec.args,
+			cwd: input.cwd,
+			env: input.spec.env,
+			shell: false,
+		},
+		pluginProcessAttribution(input)
+	);
+}
+
+/**
+ * Admit one plugin process on the host, or say why not. A standalone host
+ * admits nothing and needs nothing. On a managed host the mode is judged first
+ * (an unsupported mode asks no authority), then the binding: without the
+ * broker's receipt for this call the host spawns nothing. The context is
+ * verified by the host's own authority as an in-process action with the plugin
+ * on the chain, the authority admits the snapshot of exactly the launch the
+ * sink will make, and the lease's gate is re-checked right before `execFile`.
+ */
+export async function admitPluginProcess(
+	port: ProcessSpawnAuthorityPort | null,
+	input: PluginProcessAdmissionInput,
+	deps: { routeSupport?: (mode: PluginProcessMode) => PluginProcessRouteSupport } = {}
+): Promise<PluginProcessAdmissionOutcome> {
+	if (!port || port.standing() !== 'managed') return { state: 'standalone' };
+	const support = (deps.routeSupport ?? pluginProcessRouteSupport)(input.mode);
+	if (support.managed !== 'implemented') {
+		return {
+			state: 'unavailable',
+			code: 'capability-unsupported',
+			message: `A plugin process in ${input.mode} mode is unavailable under management on this host: ${support.note}. Nothing was started.`,
+		};
+	}
+	if (!input.binding) {
+		return {
+			state: 'denied',
+			code: 'unauthenticated',
+			message: `A managed host spawns no plugin process without the broker's ceiling receipt binding "${input.pluginId}" to its consented identity, and this call carried none. Nothing was started.`,
+		};
+	}
+	const policy = port.policy();
+	const verified = port.verify({
+		actor: { peer: 'in-process' },
+		identity: input.binding.delegation.identity,
+		traceId: input.binding.delegation.traceId,
+		policyRevision: policy.policyRevision,
+		workflow: null,
+		delegation: input.binding.delegation.delegation,
+	});
+	if (!verified.ok) {
+		return {
+			state: 'denied',
+			code: verified.code,
+			message: `The plugin process's actor could not be bound: ${verified.problems.join('; ')}. Nothing was started.`,
+		};
+	}
+	const snapshot = pluginProcessSnapshot(input);
+	const admitted = await port.authority.admit({ context: verified.context, snapshot, policy });
+	if (admitted.state !== 'admitted') {
+		return { state: admitted.state, code: admitted.code, message: admitted.message };
+	}
+	return {
+		state: 'admitted',
+		lease: admitted.lease,
+		gate: leaseAdmission(port.authority, admitted.lease),
+		attribution: pluginProcessAttribution(input),
+		snapshot,
+	};
 }
 
 function asObject(params: unknown): Record<string, unknown> {
@@ -640,11 +906,12 @@ function assertBrokerAllowed(
 	method: HostMethod,
 	params: unknown,
 	options?: { audit?: boolean }
-): void {
+): BrokerDecision {
 	const decision = deps.broker.authorize(pluginId, method, params, options);
 	if (!decision.allowed) {
 		throw new Error(decision.reason ?? 'permission denied');
 	}
+	return decision;
 }
 
 function assertTrustedActVerb(
@@ -1527,8 +1794,10 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 					`agents.dispatch: prompt too long (max ${MAX_DISPATCH_PROMPT_CHARS} chars)`
 				);
 			}
-			// Broker: allowlist scope - the grant must name THIS exact agentId.
-			assertBrokerAllowed(deps, pluginId, 'agents.dispatch', p);
+			// Broker: allowlist scope - the grant must name THIS exact agentId. On a
+			// managed host the decision also carries the ceiling receipt the sink
+			// binds the turn under (MRC-09-02).
+			const decision = assertBrokerAllowed(deps, pluginId, 'agents.dispatch', p);
 			// Unattended gate: direct plugin dispatch is never user-present, so it
 			// requires the separate unattended consent on top of the allowlist grant.
 			// Fail CLOSED: an absent predicate denies (mirrors the net.connect trust
@@ -1541,8 +1810,14 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 			}
 			assertTrustedActVerb(deps, pluginId);
 			assertLowOrMediumRisk(prompt);
+			// Under management the sink admits the dispatched turn as the plugin's
+			// child: the receipt for this call and the delegation context derived
+			// from it ride to the process sink, which binds the chain one link
+			// deeper under this host's current policy generation. A standalone
+			// host hands the sink exactly the two arguments it always has.
+			const bound = pluginActBinding(pluginId, decision);
 			return underGuard(deps.actionGuard, pluginId, 'agents:dispatch', `agent:${agentId}`, () =>
-				dispatch(agentId, prompt)
+				bound ? dispatch(agentId, prompt, bound) : dispatch(agentId, prompt)
 			);
 		};
 	}
@@ -1765,8 +2040,10 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 			if (typeof command !== 'string' || command.trim() === '') {
 				throw new Error('command is required');
 			}
-			// Broker: allowlist scope - the grant must name THIS exact binary name.
-			assertBrokerAllowed(deps, pluginId, 'process.spawn', p);
+			// Broker: allowlist scope - the grant must name THIS exact binary name. On
+			// a managed host the decision also carries the ceiling receipt the sink
+			// admits the launch with (MRC-09-02).
+			const decision = assertBrokerAllowed(deps, pluginId, 'process.spawn', p);
 			assertTrustedActVerb(deps, pluginId);
 			const args = validateSpawnArgs(opts.args);
 			// Host-owned registry: the name must resolve to a blessed entry; a
@@ -1786,8 +2063,13 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 				env: { ...(entry.env ?? {}) },
 				...(entry.cwd !== undefined ? { cwd: entry.cwd } : {}),
 			};
+			// Under management the sink admits the launch with the plugin's binding
+			// (`admitPluginProcess`): the host authority decides on the snapshot of
+			// exactly this spec and a lease gates the execFile. A standalone host
+			// hands the sink the two arguments it always has.
+			const bound = pluginActBinding(pluginId, decision);
 			return underGuard(deps.actionGuard, pluginId, 'process:spawn', `binary:${command}`, () =>
-				spawn(pluginId, spec)
+				bound ? spawn(pluginId, spec, bound) : spawn(pluginId, spec)
 			);
 		};
 	}

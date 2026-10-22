@@ -362,3 +362,32 @@ describe('production net:connect wiring (persistent socket sink)', () => {
 		expect(source).toMatch(/maxPayload:/);
 	});
 });
+
+describe('production managed act bindings (MRC-09-02)', () => {
+	const keys = depsObjectKeys();
+
+	it('the process.spawn sink takes the binding and admits through the desktop spawn authority before execFile', () => {
+		expect(keys).toContain('spawn');
+		expect(source).toMatch(/spawn: async \(pluginId, spec, binding\) =>/);
+		expect(source).toMatch(/admitPluginProcess\(enterpriseService\?\.spawnAuthority \?\? null, \{/);
+		// The lease lifetime at the sink: the gate re-checked on the execFile
+		// snapshot, the pid bound, a revocation stopping the child.
+		expect(source).toMatch(/leased\.gate\.admit\(pluginProcessSnapshot\(/);
+		expect(source).toMatch(/leased\?\.lease\.bind\(child\.pid\)/);
+		expect(source).toMatch(/leased\?\.gate\.onRevoked\?\./);
+		expect(source).toMatch(/stopProcess\(\s*\{ child \},/);
+	});
+
+	it('the dispatch sink and the scheduler sink carry the binding; the scheduler consults the broker first', () => {
+		expect(source).toMatch(
+			/binding\?: PluginActBinding\n\t\t\): \{ dispatched: true; sessionId: string \} =>/
+		);
+		expect(source).toMatch(/binding\.delegation\n\t\t\t\t\);/);
+		expect(source).toMatch(/pluginBroker\.authorize\(trigger\.pluginId, 'agents\.dispatch', \{/);
+		expect(source).toMatch(/pluginActBinding\(trigger\.pluginId, decision\)/);
+	});
+
+	it('the headless runner admits through the desktop spawn authority, read per run', () => {
+		expect(source).toMatch(/managed: \(\) => enterpriseService\?\.spawnAuthority \?\? null,/);
+	});
+});
