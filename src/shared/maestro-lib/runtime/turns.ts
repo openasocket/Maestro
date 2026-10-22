@@ -61,6 +61,12 @@ import {
 	type QueueItem,
 	type QueuedTurnHandle,
 } from '../turns/queue';
+import {
+	lifecycleAdmissionOfLease,
+	lifecycleLineageOf,
+	type LifecycleAdmissionRef,
+	type LifecycleEventSink,
+} from '../managed/events';
 import type { ManagedDispatch, ManagedSendResult, ManagedTurnPort } from '../managed/operations';
 import {
 	assembleTurn,
@@ -100,6 +106,8 @@ export interface RuntimeTurnOptions {
 	bundledPromptsDir?: string;
 	/** The `maestro-p` script for a Claude agent whose token source is the TUI. None: `claude --print`. */
 	maestroPBinPath?: string | null;
+	/** The managed lifecycle projection every finished turn is reported to (MRC-10-01). Absent: none. */
+	lifecycle?: LifecycleEventSink;
 }
 
 /** Seams for tests: the provider launch and the probes `loadTurnContext` makes. */
@@ -212,6 +220,7 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		loadSqlite: host.loadSqlite ?? noLoader,
 		fence: options.fence,
 		context: options.rules,
+		...(host.lifecycle ? { lifecycle: host.lifecycle } : {}),
 	});
 
 	const sshStore = createSshRemoteStore(paths);
@@ -292,7 +301,10 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 			}
 			throw new Error(message);
 		}
-		const admitted: { leaseId: string | null } = { leaseId: null };
+		const admitted: { leaseId: string | null; admission: LifecycleAdmissionRef | null } = {
+			leaseId: null,
+			admission: null,
+		};
 		const started = await deps.runAgentTurn(turn, {
 			sessionId: `${agentId}-ai-${item.tabId}`,
 			sshStore,
@@ -307,6 +319,7 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 							resourceIds: managed.resources.map((resource) => resource.id),
 							onLease: (lease) => {
 								admitted.leaseId = lease.leaseId;
+								admitted.admission = lifecycleAdmissionOfLease(lease);
 							},
 						},
 					}
@@ -387,7 +400,15 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 			emitTurn(agentId, item.tabId, { kind: 'user', entry: userEntry });
 			emitTurn(agentId, item.tabId, { kind: 'started' });
 
-			done = streamTurn({ agentId, tabId: item.tabId, turn, run, startedAt, managed });
+			done = streamTurn({
+				agentId,
+				tabId: item.tabId,
+				turn,
+				run,
+				startedAt,
+				managed,
+				admission: admitted.admission,
+			});
 		} catch (error) {
 			run.terminate();
 			await run.result.catch(() => undefined);
@@ -409,8 +430,10 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		run: AgentTurnRun;
 		startedAt: number;
 		managed: ManagedDispatch | undefined;
+		/** The lease the turn was admitted on, for the lifecycle projection. Null when none was minted. */
+		admission: LifecycleAdmissionRef | null;
 	}): Promise<void> {
-		const { agentId, tabId, turn, run, startedAt, managed } = input;
+		const { agentId, tabId, turn, run, startedAt, managed, admission } = input;
 		const provider = turn.settings.provider;
 		const mapper = createTurnEventMapper({
 			agentId: provider,
@@ -480,6 +503,8 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 				startedAt,
 				endedAt,
 				userEntryWritten: true,
+				...(managed ? { lineage: lifecycleLineageOf(managed.context) } : {}),
+				admission,
 			});
 			if (!recorded.transcript.ok && recorded.transcript.error.code !== 'not-found') {
 				logger.warn(

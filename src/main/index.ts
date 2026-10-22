@@ -3463,7 +3463,11 @@ app
 		// per D1: minimal metadata capture is observability, not an opt-in feature.
 		if (processManager) {
 			try {
-				setupAgentRunCapture(processManager);
+				// The enterprise service's lifecycle projection (MRC-10-01) hears every
+				// spawn and exit the capture does, terminal and group-chat included.
+				setupAgentRunCapture(processManager, {
+					...(enterpriseService ? { lifecycle: enterpriseService.events } : {}),
+				});
 				// F3 live push: forward every ledger write to the renderer + web clients.
 				setAgentRunSink({
 					runUpdated: (run) => {

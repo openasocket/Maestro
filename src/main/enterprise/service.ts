@@ -33,8 +33,13 @@ import type {
 	EndpointPort,
 } from '../../shared/maestro-lib/managed/endpoint-port';
 import {
+	createLifecycleProjector,
+	type LifecycleProjector,
+} from '../../shared/maestro-lib/managed/events';
+import {
 	createManagedHostAdapter,
 	installationIdentity,
+	managedActorPrincipal,
 	managedAuthorityId,
 	type ManagedHostAdapter,
 } from '../../shared/maestro-lib/managed/host-adapter';
@@ -116,6 +121,13 @@ export interface EnterpriseService {
 	readonly cueSpawnAuthority: CueSpawnAuthorityPort;
 	/** Where a managed launch with an SSH setting may run (`remote.ts`, MRC-08-04): the remote with its endpoint bound, or a refusal by name. */
 	readonly remote: RemoteEndpointQualifier;
+	/**
+	 * The lifecycle metadata projection (MRC-10-01): what the agent-run capture
+	 * reports of every desktop spawn and exit, as managed events in a bounded
+	 * window, attributed to the registered actor (else the operator) under the
+	 * policy generation the host applies. A projection, not delivery.
+	 */
+	readonly events: LifecycleProjector;
 	/**
 	 * The workflow owner fences this installation holds (MRC-07-06), claimed
 	 * through the endpoint's workflow owner operation and kept in
@@ -241,6 +253,12 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		identity,
 		...(deps.remoteProbe ? { probe: deps.remoteProbe } : {}),
 	});
+	const events = createLifecycleProjector({
+		installation,
+		origin: 'desktop',
+		actor: () => managedActorPrincipal(lifecycle.status().identity, installation),
+		policyRevision: () => host.policy().policyRevision,
+	});
 
 	return {
 		installation,
@@ -252,6 +270,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		spawnAuthority,
 		cueSpawnAuthority,
 		remote,
+		events,
 		workflows,
 		claimWorkflowFence,
 		async start() {

@@ -32,6 +32,13 @@ import type { LogEntryRecord } from '../store/transcript';
 import type { AgentRepository } from '../agents/repository';
 import { DEFAULT_RULE_CONTEXT, sshRecordOf, type RuleContext } from '../agents/rules';
 import type { ClientResult } from '../client/types';
+import {
+	lifecycleStateOf,
+	type LifecycleAdmissionRef,
+	type LifecycleEventSink,
+	type LifecycleFact,
+	type LifecycleLineage,
+} from '../managed/events';
 import type { MaestroPaths } from '../paths/resolve';
 import { estimateContextUsage } from '../parsers/usage-aggregator';
 import type { CompletedTurn } from '../run/run-to-completion';
@@ -72,6 +79,10 @@ export interface RecordedTurn {
 	 * starts, through `beginTurn`). The entries written here then start at the answer.
 	 */
 	userEntryWritten?: boolean;
+	/** The managed lineage the turn ran under (`lifecycleLineageOf(dispatch.context)`), when it had one. */
+	lineage?: LifecycleLineage;
+	/** The lease the turn was admitted on (`lifecycleAdmissionOfLease`), when the authority minted one. */
+	admission?: LifecycleAdmissionRef | null;
 }
 
 /** What happened to each record. A skipped record says why. */
@@ -93,6 +104,11 @@ export interface TurnRecorderOptions {
 	/** Test seams: the writers themselves. */
 	historyWriter?: HistoryWriter;
 	statsRecorder?: StatsRecorder;
+	/**
+	 * The managed lifecycle projection (MRC-10-01). Every recorded turn ends as one metadata-only
+	 * fact (`buildTurnLifecycleFact`), after the records, whatever became of them. Absent: none.
+	 */
+	lifecycle?: LifecycleEventSink;
 }
 
 export interface TurnRecorder {
@@ -173,6 +189,40 @@ export function buildTurnTranscript(turn: RecordedTurn, ctx: RuleContext): LogEn
 	return entries;
 }
 
+/**
+ * The lifecycle fact one finished turn amounts to (MRC-10-01): the terminal state from the
+ * outcome (an interrupted turn is `cancelled`, a crash `failed`), the identities, the provider
+ * and model, the exit code and elapsed time, and the error's classification as the detail. The
+ * run is the managed run when the turn had a lineage with one (recorded in the run journal),
+ * else the process session at its start (recorded nowhere). Pure. No text of the turn is in it.
+ */
+export function buildTurnLifecycleFact(
+	turn: RecordedTurn,
+	detail: string | null = turn.completed.error?.type ?? null
+): LifecycleFact {
+	const sessionId = `${turn.agentId}-ai-${turn.tabId}`;
+	const managedRunId = turn.lineage?.identity.runId ?? null;
+	return {
+		surface: 'headless-turn',
+		state: lifecycleStateOf(turn.completed.outcome),
+		at: turn.endedAt,
+		sessionId,
+		agentId: turn.agentId,
+		tabId: turn.tabId,
+		provider: turn.assembled.settings.provider,
+		model: turn.assembled.settings.model ?? null,
+		providerSessionId: turn.completed.sessionId ?? null,
+		runId: managedRunId ?? `${sessionId}@${turn.startedAt}`,
+		record: managedRunId ? 'journal' : 'none',
+		ledgerStatus: turn.completed.outcome,
+		exitCode: turn.completed.exit.exitCode ?? null,
+		durationMs: Math.max(0, turn.endedAt - turn.startedAt),
+		detail,
+		...(turn.lineage ? { lineage: turn.lineage } : {}),
+		admission: turn.admission ?? null,
+	};
+}
+
 export function createTurnRecorder(options: TurnRecorderOptions): TurnRecorder {
 	const ctx: RuleContext = { ...DEFAULT_RULE_CONTEXT, ...options.context };
 	const historyWriter =
@@ -191,6 +241,18 @@ export function createTurnRecorder(options: TurnRecorderOptions): TurnRecorder {
 			isEnabled: () => readStatsCollectionEnabled(options.paths.settingsFile),
 		});
 
+	/** The projection hears every turn, whatever became of its records. Never throws into the recorder. */
+	const project = (turn: RecordedTurn, detail?: string): void => {
+		if (!options.lifecycle) return;
+		try {
+			options.lifecycle.record(
+				detail === undefined ? buildTurnLifecycleFact(turn) : buildTurnLifecycleFact(turn, detail)
+			);
+		} catch {
+			// The projection is a consumer of the turn, not a condition of it.
+		}
+	};
+
 	async function recordTurn(turn: RecordedTurn): Promise<TurnRecordResult> {
 		const agent = options.repository.getAgent(turn.agentId);
 		const tab = options.repository.getTab(turn.agentId, turn.tabId);
@@ -201,6 +263,7 @@ export function createTurnRecorder(options: TurnRecorderOptions): TurnRecorder {
 				: undefined;
 		if (!agent || !tab) {
 			const message = missing ?? 'Nothing to record against.';
+			project(turn, 'not recorded: the agent or tab is gone');
 			return {
 				transcript: { ok: false, error: { code: 'not-found', message, method: 'tabs.update' } },
 				history: { ok: false, reason: 'not-recorded', message },
@@ -262,6 +325,7 @@ export function createTurnRecorder(options: TurnRecorderOptions): TurnRecorder {
 			...usageStatsToTurnFields(completed.usage),
 		});
 
+		project(turn);
 		return { transcript, history, stats };
 	}
 

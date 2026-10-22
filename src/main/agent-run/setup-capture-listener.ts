@@ -16,10 +16,16 @@ import {
 	appendAgentRunEvent,
 } from '../../cli/services/agent-run-store';
 import { logger } from '../utils/logger';
-import { AgentRunCaptureService, type CaptureServiceDeps } from './capture-service';
+import {
+	AgentRunCaptureService,
+	spawnLifecycleAdmission,
+	spawnLifecycleLineage,
+	type CaptureServiceDeps,
+} from './capture-service';
 import { broadcastRunUpdated, broadcastEventAppended } from './broadcast';
 import { redactPrompt } from '../../shared/agent-run';
 import { buildEnrichHook } from './producers';
+import { resolveOwningMaestroSessionId } from '../coworking/coworking-session-id';
 
 const LOG_CONTEXT = '[AgentRunCapture]';
 
@@ -28,6 +34,8 @@ export interface CaptureListenerOptions {
 	enrich?: CaptureServiceDeps['enrich'];
 	/** F6 prompt redaction/gating, injected by the integrity wave. */
 	preparePrompt?: CaptureServiceDeps['preparePrompt'];
+	/** The managed lifecycle projection (MRC-10-01): the enterprise service's, when the desktop has one. */
+	lifecycle?: CaptureServiceDeps['lifecycle'];
 }
 
 export function setupAgentRunCapture(
@@ -49,12 +57,16 @@ export function setupAgentRunCapture(
 		findActiveRunBySession,
 		enrich: options.enrich ?? buildEnrichHook({}),
 		preparePrompt: options.preparePrompt ?? redactPrompt,
+		...(options.lifecycle ? { lifecycle: options.lifecycle } : {}),
 		log: (level, message, error) => {
 			logger[level](`${message}`, LOG_CONTEXT, error ? { error: String(error) } : undefined);
 		},
 	});
 
 	processManager.on('spawn', (config: ProcessConfig) => {
+		// The lifecycle projection's identities: the owning agent, the lineage
+		// the sink bound the spawn as, and the admission it granted.
+		const lineage = spawnLifecycleLineage(config);
 		service.captureSpawn({
 			sessionId: config.sessionId,
 			toolType: config.toolType,
@@ -62,6 +74,9 @@ export function setupAgentRunCapture(
 			tabId: config.tabId,
 			prompt: config.prompt,
 			worktreePath: config.projectPath,
+			agentId: resolveOwningMaestroSessionId(config.sessionId),
+			...(lineage ? { lineage } : {}),
+			admission: spawnLifecycleAdmission(config.admission),
 		});
 	});
 

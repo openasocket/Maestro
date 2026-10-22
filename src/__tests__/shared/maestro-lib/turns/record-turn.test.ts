@@ -28,7 +28,12 @@ import { createEventBus } from '../../../../shared/maestro-lib/client/event-bus'
 import { resolveMaestroPaths } from '../../../../shared/maestro-lib/paths/resolve';
 import type { MaestroPaths } from '../../../../shared/maestro-lib/paths/resolve';
 import { transcriptOf } from '../../../../shared/maestro-lib/store/transcript';
+import type {
+	LifecycleEventSink,
+	LifecycleFact,
+} from '../../../../shared/maestro-lib/managed/events';
 import {
+	buildTurnLifecycleFact,
 	buildTurnTranscript,
 	buildUserTranscriptEntry,
 	createTurnRecorder,
@@ -108,7 +113,11 @@ describe('turn records', () => {
 		);
 
 	async function recorder(
-		options: { statsRecorder?: StatsRecorder; loadSqlite?: () => never } = {}
+		options: {
+			statsRecorder?: StatsRecorder;
+			loadSqlite?: () => never;
+			lifecycle?: LifecycleEventSink;
+		} = {}
 	) {
 		const repository = createAgentRepository({
 			paths,
@@ -132,6 +141,7 @@ describe('turn records', () => {
 				context: context(),
 				// With a loader given, the real recorder runs; otherwise the spy.
 				...(options.loadSqlite ? {} : { statsRecorder }),
+				...(options.lifecycle ? { lifecycle: options.lifecycle } : {}),
 			}),
 		};
 	}
@@ -294,6 +304,142 @@ describe('turn records', () => {
 		]);
 		// No usage reported: the columns stay NULL rather than becoming 0.
 		expect(statsEvents[0]).not.toHaveProperty('inputTokens');
+	});
+
+	describe('lifecycle projection (MRC-10-01)', () => {
+		const sink = () => {
+			const facts: LifecycleFact[] = [];
+			const lifecycle: LifecycleEventSink = {
+				record: (fact) => {
+					facts.push(fact);
+					return [];
+				},
+			};
+			return { facts, lifecycle };
+		};
+
+		it('reports a finished turn as one metadata-only fact, after the records, with no text of the turn', async () => {
+			const { facts, lifecycle } = sink();
+			const { recorder: records } = await recorder({ lifecycle });
+			const result = await records.recordTurn(turn());
+			expect(result.transcript.ok).toBe(true);
+			expect(facts).toEqual([
+				{
+					surface: 'headless-turn',
+					state: 'completed',
+					at: 1_700_000_004_200,
+					sessionId: 'a1-ai-t1',
+					agentId: 'a1',
+					tabId: 't1',
+					provider: 'claude-code',
+					model: 'opus',
+					providerSessionId: 'abcd1234-0000-4000-8000-000000000000',
+					runId: 'a1-ai-t1@1700000000000',
+					record: 'none',
+					ledgerStatus: 'completed',
+					exitCode: 0,
+					durationMs: 4200,
+					detail: null,
+					admission: null,
+				},
+			]);
+			const serialized = JSON.stringify(facts);
+			expect(serialized).not.toContain('fix the login bug');
+			expect(serialized).not.toContain('Fixed the login bug');
+		});
+
+		it('names the managed run from the lineage and carries the lease it was admitted on', async () => {
+			const { facts, lifecycle } = sink();
+			const { recorder: records } = await recorder({ lifecycle });
+			const lineage = {
+				identity: {
+					requestId: 'req-1',
+					idempotencyKey: 'key-1',
+					attemptId: 'attempt-1',
+					runId: 'run-1',
+					rootRunId: 'run-1',
+					parentRunId: null,
+				},
+				traceId: 'trace-1',
+				workflow: null,
+				delegation: { chain: [], grantRef: null },
+				actor: { kind: 'human' as const, id: 'alice' },
+				policyRevision: 3,
+			};
+			const admission = {
+				leaseId: 'lease-1',
+				authorityId: 'auth-1',
+				requestDigest: 'digest-1',
+				policyRevision: 3,
+				decision: null,
+			};
+			await records.recordTurn(turn({ lineage, admission }));
+			expect(facts[0]).toMatchObject({ runId: 'run-1', record: 'journal', lineage, admission });
+		});
+
+		it('folds an interrupted turn to cancelled and a crash to failed with the error classification', () => {
+			const interrupted = buildTurnLifecycleFact(
+				turn({
+					completed: {
+						...turn().completed,
+						outcome: 'interrupted',
+						exit: { ...CLEAN_EXIT, exitCode: null, signal: 'SIGINT', interrupted: true },
+					},
+				})
+			);
+			expect(interrupted).toMatchObject({
+				state: 'cancelled',
+				ledgerStatus: 'interrupted',
+				exitCode: null,
+			});
+			const crashed = buildTurnLifecycleFact(
+				turn({
+					completed: {
+						...turn().completed,
+						outcome: 'crashed',
+						answerText: undefined,
+						error: {
+							type: 'auth_expired',
+							message: 'Authentication failed. Sign in again.',
+							recoverable: true,
+							agentId: 'claude-code',
+							timestamp: 1,
+						},
+						exit: { ...CLEAN_EXIT, exitCode: 1 },
+					},
+				})
+			);
+			expect(crashed).toMatchObject({ state: 'failed', exitCode: 1, detail: 'auth_expired' });
+			expect(JSON.stringify(crashed)).not.toContain('Sign in again');
+		});
+
+		it('still reports a turn whose agent or tab is gone, saying it was not recorded', async () => {
+			const { facts, lifecycle } = sink();
+			const { recorder: records } = await recorder({ lifecycle });
+			await records.recordTurn(turn({ tabId: 'gone' }));
+			expect(facts).toEqual([
+				expect.objectContaining({
+					tabId: 'gone',
+					state: 'completed',
+					detail: 'not recorded: the agent or tab is gone',
+				}),
+			]);
+		});
+
+		it('keeps the records when the sink throws, and reports nothing without one', async () => {
+			const { recorder: throwing } = await recorder({
+				lifecycle: {
+					record: () => {
+						throw new Error('sink down');
+					},
+				},
+			});
+			const result = await throwing.recordTurn(turn());
+			expect(result.transcript.ok).toBe(true);
+			expect(result.history).toMatchObject({ ok: true });
+			const { recorder: plain } = await recorder();
+			await expect(plain.recordTurn(turn())).resolves.toMatchObject({ history: { ok: true } });
+		});
 	});
 
 	describe('buildTurnTranscript', () => {

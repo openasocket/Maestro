@@ -20,10 +20,20 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
 	AgentRunCaptureService,
+	lifecycleSurfaceOf,
 	newRunId,
+	spawnLifecycleAdmission,
+	spawnLifecycleLineage,
 	type CaptureServiceDeps,
 } from '../../../main/agent-run/capture-service';
+import type { ProcessSpawnAdmission } from '../../../main/process-manager/types';
 import type { AgentRun, AgentRunEvent, AgentRunReviewFinding } from '../../../shared/agent-run';
+import {
+	LIFECYCLE_FACT_FIELDS,
+	type LifecycleFact,
+	type LifecycleLineage,
+} from '../../../shared/maestro-lib/managed/events';
+import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
 
 // Terminal states inlined as a static lookup so the fake store's "active run"
 // resolution mirrors the real store without importing the impl's own helper.
@@ -404,6 +414,368 @@ describe('AgentRunCaptureService.captureExit', () => {
 		const svc = new AgentRunCaptureService(throwing.deps);
 		await expect(svc.captureExit({ sessionId: 'sess-boom', exitCode: 0 })).resolves.toBeUndefined();
 		expect(throwing.deps.log).toHaveBeenCalled();
+	});
+});
+
+describe('AgentRunCaptureService lifecycle projection (MRC-10-01)', () => {
+	const ADMISSION: ProcessSpawnAdmission = Object.freeze({
+		leaseId: 'lease-1',
+		authorityId: 'auth-1',
+		requestDigest: 'digest-1',
+		actor: { kind: 'human', id: 'alice' },
+		provider: 'claude-code',
+		operation: 'start',
+		target: { kind: 'local' },
+		policyRevision: 4,
+		requestId: 'req-1',
+		attemptId: 'attempt-1',
+	});
+
+	function withSink(extra: Partial<CaptureServiceDeps> = {}) {
+		const facts: LifecycleFact[] = [];
+		const store = makeStore({
+			lifecycle: {
+				record: (fact) => {
+					facts.push(fact);
+					return [];
+				},
+			},
+			...extra,
+		});
+		return { facts, store, service: new AgentRunCaptureService(store.deps) };
+	}
+
+	it('projects a ledger spawn and its exit under the ledger run and the owning agent, with no prompt', async () => {
+		const { facts, store, service } = withSink();
+		store.clock.t = 1000;
+		const created = service.captureSpawn({
+			sessionId: 'agent-7-ai-tab-1',
+			toolType: 'claude',
+			cwd: '/private/repo',
+			tabId: 'tab-1',
+			model: 'opus',
+			prompt: 'CANARY the whole prompt sk-ant-123',
+		});
+		store.clock.t = 1750;
+		await service.captureExit({ sessionId: 'agent-7-ai-tab-1', exitCode: 0 });
+
+		expect(facts.map((f) => [f.state, f.ledgerStatus])).toEqual([
+			['running', 'running'],
+			['completed', 'completed'],
+		]);
+		expect(facts[0]).toMatchObject({
+			surface: 'agent',
+			at: 1000,
+			sessionId: 'agent-7-ai-tab-1',
+			agentId: 'agent-7',
+			tabId: 'tab-1',
+			provider: 'claude',
+			model: 'opus',
+			runId: created!.id,
+			record: 'ledger',
+			exitCode: null,
+			durationMs: null,
+			admission: null,
+		});
+		expect(facts[1]).toMatchObject({
+			runId: created!.id,
+			at: 1750,
+			exitCode: 0,
+			durationMs: 750,
+		});
+		const serialized = JSON.stringify(facts);
+		expect(serialized).not.toContain('CANARY');
+		expect(serialized).not.toContain('/private/repo');
+		for (const fact of facts) {
+			for (const key of Object.keys(fact)) expect(LIFECYCLE_FACT_FIELDS).toContain(key);
+		}
+	});
+
+	it.each([
+		['agent-7-terminal-2', 'terminal'],
+		['group-chat-room-1', 'group-chat'],
+	])(
+		'projects %s, which the ledger omits, at spawn and at exit while the ledger stays empty',
+		async (sessionId, surface) => {
+			const { facts, store, service } = withSink();
+			store.clock.t = 1000;
+			expect(service.captureSpawn({ sessionId, toolType: 'terminal', cwd: '/r' })).toBeUndefined();
+			store.clock.t = 1300;
+			expect(await service.captureExit({ sessionId, exitCode: 130 })).toBeUndefined();
+
+			expect(store.runs.size).toBe(0);
+			expect(store.events).toHaveLength(0);
+			expect(facts).toHaveLength(2);
+			expect(facts[0]).toMatchObject({
+				surface,
+				state: 'running',
+				sessionId,
+				runId: `${sessionId}@1000`,
+				record: 'omitted',
+				ledgerStatus: null,
+				tabId: null,
+			});
+			expect(facts[1]).toMatchObject({
+				surface,
+				state: 'failed',
+				runId: `${sessionId}@1000`,
+				record: 'omitted',
+				exitCode: 130,
+				durationMs: 300,
+				detail: null,
+			});
+			expect(lifecycleSurfaceOf(sessionId)).toBe(surface);
+		}
+	);
+
+	it('projects the exit of an omitted session whose spawn this process never saw, and says so', async () => {
+		const { facts, service, store } = withSink();
+		store.clock.t = 5000;
+		await service.captureExit({ sessionId: 'x-terminal-y', exitCode: 0 });
+		expect(facts).toEqual([
+			expect.objectContaining({
+				surface: 'terminal',
+				state: 'completed',
+				runId: 'x-terminal-y@5000',
+				record: 'omitted',
+				durationMs: null,
+				detail: 'spawn not observed by this process',
+			}),
+		]);
+	});
+
+	it('projects a superseded run as cancelled before the replacing run starts', () => {
+		const { facts, store, service } = withSink();
+		store.clock.t = 1000;
+		const first = service.captureSpawn({ sessionId: 'agent-1-ai-t', toolType: 'codex', cwd: '/r' });
+		store.clock.t = 2000;
+		const second = service.captureSpawn({
+			sessionId: 'agent-1-ai-t',
+			toolType: 'codex',
+			cwd: '/r',
+		});
+		expect(facts.map((f) => [f.state, f.runId])).toEqual([
+			['running', first!.id],
+			['cancelled', first!.id],
+			['running', second!.id],
+		]);
+		expect(facts[1]).toMatchObject({
+			ledgerStatus: 'cancelled',
+			durationMs: 1000,
+			detail: `superseded by ${second!.id}`,
+		});
+	});
+
+	it('carries the lineage and the admission on the start and on the exit', async () => {
+		const { facts, store, service } = withSink();
+		const lineage: LifecycleLineage = {
+			identity: {
+				requestId: 'req-1',
+				idempotencyKey: 'req-1',
+				attemptId: 'attempt-1',
+				runId: null,
+				rootRunId: null,
+				parentRunId: null,
+			},
+			traceId: 'req-1',
+			workflow: null,
+			delegation: { chain: [], grantRef: null },
+			actor: { kind: 'human', id: 'alice' },
+			policyRevision: 4,
+		};
+		const admission = spawnLifecycleAdmission(ADMISSION);
+		store.clock.t = 1000;
+		service.captureSpawn({
+			sessionId: 'agent-1-ai-t',
+			toolType: 'claude-code',
+			cwd: '/r',
+			lineage,
+			admission,
+		});
+		store.clock.t = 1200;
+		await service.captureExit({ sessionId: 'agent-1-ai-t', exitCode: 1 });
+		expect(facts).toHaveLength(2);
+		for (const fact of facts) {
+			expect(fact.lineage).toEqual(lineage);
+			expect(fact.admission).toEqual({
+				leaseId: 'lease-1',
+				authorityId: 'auth-1',
+				requestDigest: 'digest-1',
+				policyRevision: 4,
+				operation: 'start',
+				target: { kind: 'local' },
+			});
+		}
+		expect(facts[1]).toMatchObject({ state: 'failed', exitCode: 1 });
+	});
+
+	it('survives a throwing sink: the ledger write stands and the failure is logged', async () => {
+		const log = vi.fn();
+		const store = makeStore({
+			lifecycle: {
+				record: () => {
+					throw new Error('sink down');
+				},
+			},
+			log,
+		});
+		const service = new AgentRunCaptureService(store.deps);
+		const created = service.captureSpawn({
+			sessionId: 'agent-1-ai-t',
+			toolType: 'codex',
+			cwd: '/r',
+		});
+		expect(created?.status).toBe('running');
+		expect(store.runs.size).toBe(1);
+		await expect(
+			service.captureExit({ sessionId: 'agent-1-ai-t', exitCode: 0 })
+		).resolves.toMatchObject({ status: 'completed' });
+		expect(log).toHaveBeenCalledWith(
+			'warn',
+			expect.stringContaining('lifecycle projection failed'),
+			expect.anything()
+		);
+	});
+
+	it('projects nothing and binds nothing without a sink', async () => {
+		const store = makeStore();
+		const service = new AgentRunCaptureService(store.deps);
+		expect(
+			service.captureSpawn({ sessionId: 'a-terminal-1', toolType: 'terminal', cwd: '/r' })
+		).toBeUndefined();
+		expect(await service.captureExit({ sessionId: 'a-terminal-1', exitCode: 0 })).toBeUndefined();
+		expect(store.runs.size).toBe(0);
+	});
+
+	describe('spawnLifecycleLineage', () => {
+		const attribution = {
+			workflow: { workflowId: 'wf-1', version: 'v1', triggerEventId: 'operator:1', runId: 'ar-1' },
+			purpose: 'task' as never,
+			document: 'doc.md',
+			loopNumber: 1,
+			requestId: 'task-req',
+			idempotencyKey: 'task-key',
+			attemptId: 'task-attempt',
+			attempt: 1,
+			turnRunId: 'turn-1',
+			parentRunId: 'ar-1',
+		};
+
+		it('reads an Auto Run attempt off its attribution, with the fence as the workflow', () => {
+			const lineage = spawnLifecycleLineage({
+				sessionId: 'agent-1-ai-t',
+				autoRun: { attribution, fence: { ownerEpoch: 'e1', fencingToken: 'f1' } },
+				admission: ADMISSION,
+			});
+			expect(lineage).toEqual({
+				identity: {
+					requestId: 'task-req',
+					idempotencyKey: 'task-key',
+					attemptId: 'task-attempt',
+					runId: 'turn-1',
+					rootRunId: 'ar-1',
+					parentRunId: 'ar-1',
+				},
+				traceId: 'autorun:ar-1:task-req:1',
+				workflow: {
+					workflowId: 'wf-1',
+					version: 'v1',
+					triggerEventId: 'operator:1',
+					ownerEpoch: 'e1',
+					fencingToken: 'f1',
+				},
+				delegation: { chain: [], grantRef: null },
+				actor: { kind: 'human', id: 'alice' },
+				policyRevision: 4,
+			});
+			// Unowned: the workflow is null (never invented), and a standalone host binds no actor.
+			expect(
+				spawnLifecycleLineage({ sessionId: 'agent-1-ai-t', autoRun: { attribution, fence: null } })
+			).toMatchObject({ workflow: null });
+			expect(
+				spawnLifecycleLineage({ sessionId: 'agent-1-ai-t', autoRun: { attribution, fence: null } })
+			).not.toHaveProperty('actor');
+		});
+
+		it('binds a dispatched spawn as its initiator child with the ids the handler minted', () => {
+			const lineage = spawnLifecycleLineage({
+				sessionId: 'agent-9-ai-tab',
+				delegation: {
+					contractVersion: MANAGED_CONTRACT_VERSION,
+					identity: {
+						requestId: 'cue-req',
+						idempotencyKey: 'cue-key',
+						attemptId: 'cue-attempt',
+						runId: 'cue-run',
+						rootRunId: 'cue-root',
+						parentRunId: null,
+					},
+					traceId: 'cue:trace',
+					workflow: null,
+					delegation: { chain: [{ kind: 'service', id: 'cue' }], grantRef: 'g1' },
+					policyRevision: 2,
+				},
+				dispatchedAs: { requestId: 'child-req', attemptId: 'child-attempt' },
+			});
+			expect(lineage).toMatchObject({
+				identity: {
+					requestId: 'child-req',
+					attemptId: 'child-attempt',
+					runId: 'child-req',
+					rootRunId: 'cue-root',
+					parentRunId: 'cue-run',
+				},
+				traceId: 'delegated:cue-root:child-req:child-attempt',
+				delegation: {
+					chain: [
+						{ kind: 'service', id: 'cue' },
+						{ kind: 'agent', id: 'agent-9' },
+					],
+					grantRef: 'g1',
+				},
+			});
+			// A delegation with no minted ids and no admission is not guessed at.
+			expect(
+				spawnLifecycleLineage({
+					sessionId: 'agent-9-ai-tab',
+					delegation: {
+						contractVersion: MANAGED_CONTRACT_VERSION,
+						identity: {
+							requestId: 'cue-req',
+							idempotencyKey: 'cue-key',
+							attemptId: 'cue-attempt',
+							runId: null,
+							rootRunId: null,
+							parentRunId: null,
+						},
+						traceId: 'cue:trace',
+						workflow: null,
+						delegation: { chain: [], grantRef: null },
+						policyRevision: null,
+					},
+				})
+			).toBeUndefined();
+		});
+
+		it('names an admitted chat turn by its admission, and a standalone one by nothing', () => {
+			expect(spawnLifecycleLineage({ sessionId: 'agent-1-ai-t', admission: ADMISSION })).toEqual({
+				identity: {
+					requestId: 'req-1',
+					idempotencyKey: 'req-1',
+					attemptId: 'attempt-1',
+					runId: null,
+					rootRunId: null,
+					parentRunId: null,
+				},
+				traceId: 'req-1',
+				workflow: null,
+				delegation: { chain: [], grantRef: null },
+				actor: { kind: 'human', id: 'alice' },
+				policyRevision: 4,
+			});
+			expect(spawnLifecycleLineage({ sessionId: 'agent-1-ai-t' })).toBeUndefined();
+			expect(spawnLifecycleAdmission(undefined)).toBeNull();
+		});
 	});
 });
 
