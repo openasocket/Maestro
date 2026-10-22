@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { BrowserWindow } from 'electron';
 import {
 	BrowserRelay,
+	registerBrowserRelayHandlers,
 	relayEffectOf,
 	validateInput,
 	type BrowserRelayEffect,
@@ -10,12 +12,32 @@ import type {
 	BrowserRelayHostResult,
 	BrowserRelayRequest,
 } from '../../../shared/browserRelay';
-import type { BrowserEffectDecision } from '../../../main/enterprise/browser-policy';
+import {
+	createBrowserPolicySource,
+	type BrowserEffectDecision,
+	type BrowserEffectRequest,
+} from '../../../main/enterprise/browser-policy';
+import type { IdentityRead } from '../../../main/enterprise/identity-store';
+import {
+	getActingTransport,
+	runAsTransport,
+	transportSpawnActor,
+} from '../../../main/web-server/auth/transport-actor';
 
-const { tabSession } = vi.hoisted(() => ({ tabSession: {} }));
+type IpcHandler = (...args: unknown[]) => unknown;
+const { tabSession, ipc } = vi.hoisted(() => ({
+	tabSession: {},
+	ipc: {
+		handlers: new Map<string, (...args: unknown[]) => unknown>(),
+		listeners: new Map<string, (...args: unknown[]) => unknown>(),
+	},
+}));
 vi.mock('electron', () => ({
 	BrowserWindow: {},
-	ipcMain: {},
+	ipcMain: {
+		handle: (channel: string, handler: IpcHandler) => ipc.handlers.set(channel, handler),
+		on: (channel: string, listener: IpcHandler) => ipc.listeners.set(channel, listener),
+	},
 	webContents: {},
 	session: { fromPartition: () => tabSession },
 }));
@@ -372,5 +394,288 @@ describe('browser relay effects under a ceiling (MRC-09-04)', () => {
 		['action', { kind: 'find', text: 'x' }, 'read'],
 	])('%s %o is a %s effect', (kind, action, effect) => {
 		expect(relayEffectOf(kind, action)).toBe(effect);
+	});
+});
+
+describe('browser relay under the real browser ceiling (MRC-09-06)', () => {
+	const pageState = (url: string) => ({
+		url,
+		title: 't',
+		canGoBack: false,
+		canGoForward: false,
+		isLoading: false,
+		width: 800,
+		height: 600,
+	});
+	const enrolled: IdentityRead = {
+		status: 'ok',
+		epoch: 1,
+		record: { registration: { actorId: 'actor-1' } } as never,
+	};
+	const unregistered: IdentityRead = { status: 'ok', epoch: 1, record: {} as never };
+	const document = (over: Record<string, unknown> = {}) => ({
+		policyRevision: 3,
+		actors: [
+			{ actor: 'operator', effects: ['view', 'read', 'navigate', 'input'] },
+			{ actor: 'maestro-cli', effects: ['view'] },
+			{ actor: 'lite-device', effects: ['view', 'read'] },
+		],
+		destinations: {
+			allow: ['https://host.test', 'https://*.allowed.test'],
+			deny: ['https://denied.allowed.test'],
+		},
+		...over,
+	});
+
+	/**
+	 * The desktop's composition: one source over the identity read and the
+	 * applied revision, and the relay holding every effect through it with the
+	 * actor the call was admitted over, exactly as registerBrowserRelayHandlers
+	 * composes its closure (the IPC test below drives that closure itself).
+	 */
+	function ceilingHost(read: IdentityRead = enrolled) {
+		const state = { read, applied: 3 as number | null };
+		const source = createBrowserPolicySource({
+			identity: { read: () => state.read },
+			policy: () => (state.applied === null ? null : { appliedRevision: state.applied }),
+		});
+		const held: BrowserEffectRequest[] = [];
+		const requests: Array<Omit<BrowserRelayRequest, 'requestId'>> = [];
+		const relay = new BrowserRelay(
+			async (request) => {
+				requests.push(request);
+				if (request.kind === 'frame')
+					return { ok: true, frame: { ...pageState('https://host.test/next'), dataUrl: 'data:,' } };
+				if (request.kind === 'resolve')
+					return { ok: true, state: pageState('https://host.test/page') };
+				return { ok: true, value: 'done' };
+			},
+			Date.now,
+			(effect) => {
+				const request: BrowserEffectRequest = {
+					surface: 'relay',
+					effect: effect.kind,
+					actor: { kind: 'transport', actor: transportSpawnActor(getActingTransport()) },
+					resource: 'page',
+					destination: effect.destination,
+				};
+				held.push(request);
+				return source.authorize(request);
+			}
+		);
+		return { source, state, relay, requests, held };
+	}
+
+	it('standalone (never enrolled): every effect runs and the source holds nothing, whatever is installed', async () => {
+		const { source, relay, requests, held } = ceilingHost({ status: 'none' });
+		expect(source.install(document({ actors: [] }))).toEqual({
+			installed: true,
+			policyRevision: 3,
+		});
+		const id = await relay.open('client', target, viewport);
+		await relay.run('client', id, 'frame');
+		await expect(
+			relay.run('client', id, 'action', undefined, { kind: 'eval', code: '1' })
+		).resolves.toMatchObject({ value: 'done' });
+		expect(() => relay.assertEffect('client', id, 'input')).not.toThrow();
+		expect(requests.map((r) => r.kind)).toEqual(['resolve', 'frame', 'action']);
+		expect(held.map((request) => request.effect)).toEqual(['view', 'view', 'execute', 'input']);
+	});
+
+	it('enrolled with no usable ceiling: refused unavailable by name before the host paints a frame', async () => {
+		const { source, state, relay, requests } = ceilingHost();
+		await expect(relay.open('client', target, viewport)).rejects.toThrow(
+			'[managed-unavailable] the managed browser ceiling is unavailable (no browser ceiling is installed for policy revision 3)'
+		);
+		source.install(document({ policyRevision: 2 }));
+		await expect(relay.open('client', target, viewport)).rejects.toThrow(
+			'revision 2; this host is under revision 3'
+		);
+		state.applied = null;
+		await expect(relay.open('client', target, viewport)).rejects.toThrow(
+			'no applied policy revision is known'
+		);
+		expect(requests.map((r) => r.kind)).toEqual([
+			'resolve',
+			'release',
+			'resolve',
+			'release',
+			'resolve',
+			'release',
+		]);
+	});
+
+	it('the operator is held by actor, effect and destination on every call; a refusal never reaches the host', async () => {
+		const { source, relay, requests } = ceilingHost();
+		source.install(document());
+		const id = await relay.open('client', target, viewport);
+		await expect(relay.run('client', id, 'frame')).resolves.toMatchObject({
+			frame: { url: 'https://host.test/next' },
+		});
+		await expect(
+			relay.run('client', id, 'action', undefined, { kind: 'extract', format: 'text' })
+		).resolves.toMatchObject({ value: 'done' });
+		await expect(
+			relay.run('client', id, 'action', undefined, { kind: 'eval', code: '1' })
+		).rejects.toThrow(
+			'[managed-outside-ceiling] the browser ceiling admits no execute effect for the operator'
+		);
+		await expect(
+			relay.run('client', id, 'action', undefined, {
+				kind: 'navigate',
+				url: 'https://denied.allowed.test/x',
+			})
+		).rejects.toThrow(
+			'[managed-destination-denied] the browser ceiling denies https://denied.allowed.test'
+		);
+		await expect(
+			relay.run('client', id, 'action', undefined, {
+				kind: 'navigate',
+				url: 'https://elsewhere.test/x',
+			})
+		).rejects.toThrow(
+			'[managed-destination-denied] the browser ceiling does not admit https://elsewhere.test'
+		);
+		await expect(
+			relay.run('client', id, 'action', undefined, {
+				kind: 'navigate',
+				url: 'https://app.allowed.test/login?next=%2Fhome',
+			})
+		).resolves.toMatchObject({ value: 'done' });
+		// After an admitted navigation the lease is held against the page it requested (MRC-09-06A);
+		// after a back the page is unknown until the host reports it: an input is refused by name, never guessed.
+		expect(() => relay.assertEffect('client', id, 'input')).not.toThrow();
+		await expect(
+			relay.run('client', id, 'action', undefined, { kind: 'back' })
+		).resolves.toMatchObject({ value: 'done' });
+		expect(() => relay.assertEffect('client', id, 'input')).toThrow(
+			'[managed-destination-unknown] the host observed no page for this input effect'
+		);
+		expect(requests.map((r) => r.kind)).toEqual(['resolve', 'frame', 'action', 'action', 'action']);
+		expect(() => relay.assertActive('client', id)).not.toThrow();
+	});
+
+	it('after an admitted navigation the next view is held against the page the navigation requested until the host reports it (MRC-09-06A)', async () => {
+		const { source, relay } = ceilingHost();
+		source.install(document());
+		const id = await relay.open('client', target, viewport);
+		await relay.run('client', id, 'action', undefined, {
+			kind: 'navigate',
+			url: 'https://app.allowed.test/login',
+		});
+		// The lease keeps the requested page as its provisional page (MRC-09-06A), so
+		// under a destinations clause the next view is held against it and streams again;
+		// the page the host reports then replaces it.
+		await expect(relay.run('client', id, 'frame')).resolves.toMatchObject({
+			frame: { url: 'https://host.test/next' },
+		});
+	});
+
+	it('the actor is the transport the call was admitted over, never the client: each kind is held by its own entry', async () => {
+		const { source, state, relay, requests } = ceilingHost();
+		source.install(document());
+		const id = await relay.open('client', target, viewport);
+		const extract = () =>
+			relay.run('client', id, 'action', undefined, { kind: 'extract', format: 'text' });
+		await expect(runAsTransport({ kind: 'cli' }, extract)).rejects.toThrow(
+			'[managed-outside-ceiling] the browser ceiling admits no read effect for maestro-cli'
+		);
+		const device = { kind: 'lite' as const, deviceId: 'dev-1', deviceName: 'Phone' };
+		await expect(runAsTransport(device, extract)).resolves.toMatchObject({ value: 'done' });
+		// The same device once no enterprise actor is registered for the enrollment: unauthenticated, before the ceiling is read.
+		state.read = unregistered;
+		await expect(runAsTransport(device, extract)).rejects.toThrow(
+			'[managed-unauthenticated] a paired Lite device (dev-1) admits its transport only'
+		);
+		state.read = enrolled;
+		await expect(
+			runAsTransport({ kind: 'web-login', user: { username: 'ada' } as never }, extract)
+		).rejects.toThrow('the browser ceiling admits no browser effect for web-login:ada');
+		expect(requests.map((r) => r.kind)).toEqual(['resolve', 'action']);
+	});
+
+	it('policy revoke mid-lease: the next frame on a live lease is refused when the ceiling is withdrawn, moved or narrowed, and the lease is not a way back', async () => {
+		const { source, state, relay, requests } = ceilingHost();
+		source.install(document());
+		const id = await relay.open('client', target, viewport);
+		await relay.run('client', id, 'frame');
+		source.clear();
+		await expect(relay.run('client', id, 'frame')).rejects.toThrow('[managed-unavailable]');
+		source.install(document({ policyRevision: 4 }));
+		await expect(relay.run('client', id, 'frame')).rejects.toThrow(
+			'revision 4; this host is under revision 3'
+		);
+		state.applied = 4;
+		await expect(relay.run('client', id, 'frame')).resolves.toMatchObject({
+			frame: { url: 'https://host.test/next' },
+		});
+		source.install(
+			document({ policyRevision: 4, actors: [{ actor: 'operator', effects: ['read'] }] })
+		);
+		await expect(relay.run('client', id, 'frame')).rejects.toThrow(
+			'the browser ceiling admits no view effect for the operator'
+		);
+		expect(() => relay.assertEffect('client', id, 'input')).toThrow('[managed-outside-ceiling]');
+		source.install(document({ policyRevision: 4, destinations: { deny: ['https://host.test'] } }));
+		await expect(relay.run('client', id, 'frame')).rejects.toThrow(
+			'[managed-destination-denied] the browser ceiling denies https://host.test'
+		);
+		expect(requests.map((r) => r.kind)).toEqual(['resolve', 'frame', 'frame']);
+		expect(() => relay.assertActive('client', id)).not.toThrow();
+	});
+
+	it('browser:createTab holds the navigation through the real handler with the actor the call was admitted over, before the host is asked', async () => {
+		const { source, state } = ceilingHost();
+		source.install(document());
+		const sent: string[] = [];
+		const owner = {
+			isDestroyed: () => false,
+			webContents: {
+				id: 7,
+				isDestroyed: () => false,
+				setBackgroundThrottling: () => {},
+				send: (channel: string, payload: { requestId: string }) => {
+					sent.push(channel);
+					ipc.listeners.get('browser:relayResponse')!({ sender: { id: 7 } }, payload.requestId, {
+						ok: true,
+						value: { tabId: 'created' },
+					});
+				},
+			},
+		};
+		registerBrowserRelayHandlers({
+			getMainWindow: () => owner as unknown as BrowserWindow,
+			browserAuthority: () => source,
+		});
+		await ipc.handlers.get('browser:relayReady')!({ sender: owner.webContents }, true);
+		const createTab = (options: Record<string, unknown>) =>
+			ipc.handlers.get('browser:createTab')!(
+				{ type: 'bridge', clientId: 'lite' },
+				'session',
+				options
+			);
+		// The operator (a desktop admission) to an admitted origin: the host is asked once and answers.
+		await expect(createTab({ url: 'https://app.allowed.test/' })).resolves.toEqual({
+			tabId: 'created',
+		});
+		expect(sent).toEqual(['browser:createTabRequest']);
+		// The same client over the CLI transport: maestro-cli admits no navigate; the host is never asked.
+		await expect(
+			runAsTransport({ kind: 'cli' }, () => createTab({ url: 'https://app.allowed.test/' }))
+		).rejects.toThrow(
+			'[managed-outside-ceiling] the browser ceiling admits no navigate effect for maestro-cli'
+		);
+		// A denied destination, an unknown one, and a paired device with no registered actor: refused by name first.
+		await expect(createTab({ url: 'https://denied.allowed.test/' })).rejects.toThrow(
+			'[managed-destination-denied]'
+		);
+		await expect(createTab({})).rejects.toThrow('[managed-destination-unknown]');
+		state.read = unregistered;
+		await expect(
+			runAsTransport({ kind: 'lite', deviceId: 'dev-1', deviceName: 'Phone' }, () =>
+				createTab({ url: 'https://app.allowed.test/' })
+			)
+		).rejects.toThrow('[managed-unauthenticated]');
+		expect(sent).toEqual(['browser:createTabRequest']);
 	});
 });
