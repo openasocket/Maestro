@@ -18,7 +18,7 @@ import { ipcMain } from 'electron';
 import { logger } from '../../utils/logger';
 import type { WebClient } from '../types';
 import type { BroadcastService } from '../services';
-import { runAsActingUser } from '../auth/acting-user';
+import { runAsClient } from '../auth/transport-actor';
 import { isDesktopOnlyChannel } from '../../ipc/desktop-only-channels';
 import { bridgeGuardViolation } from './bridgePathGuard';
 import {
@@ -212,10 +212,10 @@ export async function handleBridgeInvoke(
 		// listener is strictly less reachable than what is already exposed.
 		if (!desktopOnly && ipcMain.listenerCount(channel) > 0) {
 			try {
-				// Same acting-user context as the invoke path below: a `send`-style
-				// API mutates state too, and a turn started through one has to be
-				// attributed to the account that asked for it.
-				runAsActingUser(client.user, () => ipcMain.emit(channel, event, ...args));
+				// Same client context as the invoke path below: a `send`-style API
+				// mutates state too, and a turn started through one has to be
+				// attributed to the account and the transport that asked for it.
+				runAsClient(client, () => ipcMain.emit(channel, event, ...args));
 				send(client, { type: 'bridge.response', requestId, ok: true, result: undefined });
 			} catch (err) {
 				const error = err instanceof Error ? err.message : String(err);
@@ -233,11 +233,18 @@ export async function handleBridgeInvoke(
 	}
 
 	try {
-		// The handler runs INSIDE the acting-user context, not beside it: the
-		// context has to be established before the call so every await the
-		// handler performs still reads the same account from `getActingUser()`.
-		// `client.user` is undefined for maestro-cli (admitted by its secret) and
-		// for every client when the gate is off, which reads as "the desktop".
+		// The handler runs INSIDE the client context, not beside it: the context
+		// has to be established before the call so every await the handler
+		// performs still reads the same account from `getActingUser()` and the
+		// same transport from `getActingTransport()` (auth/transport-actor.ts).
+		// The account is attribution (`client.user` is undefined for maestro-cli
+		// and for every client when the gate is off); the transport is what a
+		// host sink binds: a CLI secret, a Lite pairing and a Web Login cookie
+		// each admit a socket, and none of them is an enterprise principal.
+		//
+		// Provider credentials never cross this boundary in either direction: a
+		// remote `agents:setConfig` may carry only what `sanitizeRemoteConfiguration`
+		// leaves, merged over the host's own record, whatever transport sent it.
 		if (channel === 'agents:setConfig') {
 			const incoming = args[1];
 			if (
@@ -253,7 +260,7 @@ export async function handleBridgeInvoke(
 			const existing = (await getConfig(event, args[0])) as Record<string, unknown>;
 			args = [args[0], { ...existing, ...incoming }];
 		}
-		const result = await runAsActingUser(client.user, () => handler(event, ...args));
+		const result = await runAsClient(client, () => handler(event, ...args));
 		send(client, {
 			type: 'bridge.response',
 			requestId,

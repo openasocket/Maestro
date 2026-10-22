@@ -55,6 +55,7 @@ import {
 } from '../utils/network-address-watcher';
 import { captureException } from '../utils/sentry';
 import { WebSocketMessageHandler } from './handlers';
+import type { WebTerminalSpawnResult } from './handlers/messageHandlers/types';
 import { BroadcastService } from './services';
 import {
 	ApiRoutes,
@@ -548,7 +549,7 @@ export class WebServer {
 		| ((
 				sessionId: string,
 				config: { cwd: string; cols?: number; rows?: number }
-		  ) => Promise<{ success: boolean; pid: number }>)
+		  ) => Promise<WebTerminalSpawnResult>)
 		| null = null;
 	private killTerminalForWebCallback: ((sessionId: string) => boolean) | null = null;
 
@@ -566,7 +567,7 @@ export class WebServer {
 		callback: (
 			sessionId: string,
 			config: { cwd: string; cols?: number; rows?: number }
-		) => Promise<{ success: boolean; pid: number }>
+		) => Promise<WebTerminalSpawnResult>
 	): void {
 		this.spawnTerminalForWebCallback = callback;
 	}

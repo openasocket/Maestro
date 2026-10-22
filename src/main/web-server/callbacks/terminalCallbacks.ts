@@ -3,6 +3,8 @@ import type { WebServerFactoryDependencies } from '../web-server-factory';
 import type { StoredSession } from '../../stores/types';
 import { logger } from '../../utils/logger';
 import { getDefaultShell } from '../../stores/defaults';
+import { currentSpawnActor } from '../../ipc/handlers/process/handle-spawn';
+import { describeTransportAdmission, getActingTransport } from '../auth/transport-actor';
 
 export function registerTerminalCallbacks(
 	server: WebServer,
@@ -58,6 +60,16 @@ export function registerTerminalCallbacks(
 
 	// Ensure the host terminal exists; reconnecting clients attach to its live handle.
 	// Uses session ID format {sessionId}-terminal so data-listener broadcasts terminal_data
+	//
+	// This is a host sink: the PTY is spawned HERE, in the main process, not by
+	// the renderer, so the admission a managed host requires is asked for here
+	// too (MRC-08-01), for the actor the transport resolved. The WebSocket
+	// handler runs this callback inside the client's context, so the actor is
+	// the socket's: a Web Login account, the CLI secret, a Lite pairing or the
+	// path token, each attribution the authority binds and none of them an
+	// enterprise principal. Before this, a managed host refused the spawn at the
+	// sink for carrying no admission at all, and the client was told only that
+	// the spawn failed. Standalone hosts spawn exactly as before.
 	server.setSpawnTerminalForWebCallback(
 		async (sessionId: string, config: { cwd: string; cols?: number; rows?: number }) => {
 			const processManager = getProcessManager();
@@ -72,12 +84,7 @@ export function registerTerminalCallbacks(
 			const shell = (customShellPath && customShellPath.trim()) || defaultShell;
 			const shellArgs = settingsStore.get<string>('shellArgs', '');
 			const shellEnvVars = settingsStore.get<Record<string, string>>('shellEnvVars', {});
-
-			logger.info(`Spawning terminal PTY for web client: ${terminalSessionId}`, 'WebServer', {
-				shell,
-				cwd: config.cwd,
-			});
-			return processManager.spawnTerminalTab({
+			const terminalConfig = {
 				sessionId: terminalSessionId,
 				cwd: config.cwd,
 				shell,
@@ -85,7 +92,39 @@ export function registerTerminalCallbacks(
 				shellEnvVars,
 				cols: config.cols,
 				rows: config.rows,
+			};
+
+			const transport = describeTransportAdmission(getActingTransport());
+			logger.info(`Spawning terminal PTY for web client: ${terminalSessionId}`, 'WebServer', {
+				shell,
+				cwd: config.cwd,
+				transport,
 			});
+			// The exact request `spawnTerminalTab` will build is admitted first, as
+			// the renderer's `process:spawnTerminalTab` handler does.
+			const admitted = await processManager.admitSpawn(
+				processManager.terminalTabConfig(terminalConfig),
+				currentSpawnActor()
+			);
+			if (admitted.state !== 'standalone' && admitted.state !== 'admitted') {
+				logger.warn(`Web terminal PTY not admitted for ${terminalSessionId}`, 'WebServer', {
+					transport,
+					state: admitted.state,
+					code: admitted.code,
+					message: admitted.message,
+				});
+				return {
+					pid: -1,
+					success: false,
+					error: admitted.message,
+					managed: { state: admitted.state, code: admitted.code },
+				};
+			}
+			return processManager.spawnTerminalTab(
+				admitted.state === 'admitted'
+					? { ...terminalConfig, admission: admitted.admission }
+					: terminalConfig
+			);
 		}
 	);
 

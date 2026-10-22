@@ -97,6 +97,20 @@ export interface WebClientMessage {
 export type { WebClient } from '../../types';
 
 /**
+ * What the web terminal's PTY spawn answers (`spawnTerminalForWeb`): the
+ * process manager's own result, narrowed to what the client is told. On a
+ * managed host a refusal carries the authority's state and code beside the
+ * reason, so the client learns WHY there is no shell rather than that the
+ * spawn "failed".
+ */
+export interface WebTerminalSpawnResult {
+	success: boolean;
+	pid: number;
+	error?: string;
+	managed?: { state: 'denied' | 'unavailable' | 'unknown'; code: string };
+}
+
+/**
  * Session detail for command validation
  */
 export interface SessionDetailForHandler {
@@ -443,7 +457,7 @@ export interface MessageHandlerCallbacks {
 	spawnTerminalForWeb: (
 		sessionId: string,
 		config: { cwd: string; cols?: number; rows?: number }
-	) => Promise<{ success: boolean; pid: number }>;
+	) => Promise<WebTerminalSpawnResult>;
 	killTerminalForWeb: (sessionId: string) => boolean;
 	notifyToast: (params: NotifyToastParams) => Promise<boolean>;
 	cadenzaView: (params: CadenzaPayload) => Promise<boolean>;

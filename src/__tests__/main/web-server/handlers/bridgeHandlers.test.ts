@@ -48,6 +48,7 @@ import {
 	uninstallWebContentsBridgeHook,
 } from '../../../../main/web-server/handlers/bridgeHandlers';
 import { getActingUser } from '../../../../main/web-server/auth/acting-user';
+import { getActingTransport } from '../../../../main/web-server/auth/transport-actor';
 import {
 	__resetDesktopOnlyChannelsForTests,
 	markDesktopOnlyChannel,
@@ -370,6 +371,102 @@ describe('handleBridgeInvoke acting user', () => {
 		);
 
 		expect(getActingUser()).toBeUndefined();
+	});
+});
+
+/**
+ * The transport that admitted the socket is in scope beside the account
+ * (MRC-08-01): a CLI secret, a Lite pairing and a Web Login cookie each admit
+ * a socket, and a host sink deep in the main process tells them apart with
+ * `getActingTransport()` rather than reading the CLI as the desktop or a
+ * paired device as a login named `paired-device`.
+ */
+describe('handleBridgeInvoke transport admission', () => {
+	const seeHistoryAdd = () => {
+		let seen: { transport: unknown; user: unknown } | undefined;
+		invokeHandlers.set('history:add', async () => {
+			await Promise.resolve();
+			seen = { transport: getActingTransport(), user: getActingUser() };
+		});
+		return () => seen;
+	};
+
+	it('reads a maestro-cli socket as the CLI transport with no acting user', async () => {
+		const seen = seeHistoryAdd();
+		await handleBridgeInvoke(
+			{ ...makeClient(), cli: true },
+			{ type: 'bridge.invoke', requestId: 6, channel: 'history:add' },
+			vi.fn()
+		);
+		expect(seen()).toEqual({ transport: { kind: 'cli' }, user: undefined });
+	});
+
+	it('reads a paired device as a device, keeping the synthesized account for attribution', async () => {
+		const seen = seeHistoryAdd();
+		const device = { id: 'paired-device:dev-7', username: 'paired-device', displayName: 'Pixel 9' };
+		await handleBridgeInvoke(
+			{ ...makeClient(device), admission: 'device-pairing' as const },
+			{ type: 'bridge.invoke', requestId: 7, channel: 'history:add' },
+			vi.fn()
+		);
+		expect(seen()).toEqual({
+			transport: { kind: 'lite', deviceId: 'dev-7', deviceName: 'Pixel 9' },
+			user: device,
+		});
+	});
+
+	it('reads a logged-in browser as the web-login transport and a bare socket as the owner token', async () => {
+		const seen = seeHistoryAdd();
+		const ada = { id: 'u1', username: 'ada', displayName: 'Ada' };
+		await handleBridgeInvoke(
+			makeClient(ada),
+			{ type: 'bridge.invoke', requestId: 8, channel: 'history:add' },
+			vi.fn()
+		);
+		expect(seen()).toEqual({ transport: { kind: 'web-login', user: ada }, user: ada });
+
+		await handleBridgeInvoke(
+			makeClient(),
+			{ type: 'bridge.invoke', requestId: 9, channel: 'history:add' },
+			vi.fn()
+		);
+		expect(seen()).toEqual({ transport: { kind: 'owner-token' }, user: undefined });
+		expect(getActingTransport()).toEqual({ kind: 'desktop' });
+	});
+
+	it('carries the transport into a send-style listener too', async () => {
+		let seen: unknown;
+		sendListeners.set('tabs:aiTabClosed', () => {
+			seen = getActingTransport();
+		});
+		await handleBridgeInvoke(
+			{ ...makeClient(), cli: true },
+			{ type: 'bridge.invoke', requestId: 10, channel: 'tabs:aiTabClosed' },
+			vi.fn()
+		);
+		expect(seen).toEqual({ kind: 'cli' });
+	});
+
+	it('still refuses provider credentials in a remote agents:setConfig, whatever the transport', async () => {
+		const setConfig = vi.fn(async () => 'saved');
+		invokeHandlers.set('agents:setConfig', setConfig);
+		invokeHandlers.set('agents:getConfig', async () => ({ customPath: '/usr/local/bin/claude' }));
+		const send = vi.fn();
+		await handleBridgeInvoke(
+			{ ...makeClient(), cli: true },
+			{
+				type: 'bridge.invoke',
+				requestId: 11,
+				channel: 'agents:setConfig',
+				args: ['claude-code', { customEnvVars: { ANTHROPIC_API_KEY: 'sk-live' } }],
+			},
+			send
+		);
+		expect(setConfig).not.toHaveBeenCalled();
+		expect(send.mock.calls.at(-1)?.[1]).toMatchObject({
+			ok: false,
+			error: 'Provider credentials must be managed on the host',
+		});
 	});
 });
 

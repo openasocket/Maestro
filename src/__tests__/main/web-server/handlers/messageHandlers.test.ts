@@ -73,6 +73,7 @@ import {
 } from '../../../../main/feedback';
 import { generateDebugPackage } from '../../../../main/debug-package';
 import { delegationContextOf } from '../../../../shared/maestro-lib/managed/delegation';
+import { getActingTransport } from '../../../../main/web-server/auth/transport-actor';
 
 // Mock the logger
 vi.mock('../../../../main/utils/logger', () => ({
@@ -1168,6 +1169,63 @@ describe('WebSocketMessageHandler', () => {
 
 			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
 			expect(response.type).toBe('error');
+		});
+
+		// MRC-08-01: the web terminal's PTY is spawned by the main process for this
+		// client, so the sink that admits it must know which transport asked. The
+		// message handler establishes the client's context around every message;
+		// the spawn callback reads the transport from inside it.
+		it('runs the terminal spawn inside the client transport context', async () => {
+			let seen: unknown = 'unset';
+			callbacks.spawnTerminalForWeb = vi.fn(async () => {
+				await Promise.resolve();
+				seen = getActingTransport();
+				return { success: true, pid: 7 };
+			});
+			handler.setCallbacks(callbacks);
+
+			handler.handleMessage(
+				{ ...client, cli: true },
+				{ type: 'switch_mode', sessionId: 'session-1', mode: 'terminal' }
+			);
+
+			await vi.waitFor(() => expect(callbacks.spawnTerminalForWeb).toHaveBeenCalled());
+			expect(seen).toEqual({ kind: 'cli' });
+			expect(getActingTransport()).toEqual({ kind: 'desktop' });
+		});
+
+		it('reports a managed refusal of the web terminal with its state, code and reason', async () => {
+			callbacks.spawnTerminalForWeb = vi.fn().mockResolvedValue({
+				success: false,
+				pid: -1,
+				error: 'A managed PTY for terminal is unavailable on this host.',
+				managed: { state: 'unavailable', code: 'capability-unsupported' },
+			});
+			handler.setCallbacks(callbacks);
+
+			handler.handleMessage(client, {
+				type: 'switch_mode',
+				sessionId: 'session-1',
+				mode: 'terminal',
+				requestId: 'switch-9',
+			});
+
+			await vi.waitFor(() => expect(client.socket.send).toHaveBeenCalled());
+			const response = JSON.parse((client.socket.send as any).mock.calls.at(-1)[0]);
+			expect(response).toMatchObject({
+				type: 'mode_switch_result',
+				success: false,
+				sessionId: 'session-1',
+				mode: 'terminal',
+				error: 'A managed PTY for terminal is unavailable on this host.',
+				managed: { state: 'unavailable', code: 'capability-unsupported' },
+				requestId: 'switch-9',
+			});
+			expect(
+				(client.socket.send as any).mock.calls.some(
+					(call: [string]) => JSON.parse(call[0]).type === 'terminal_ready'
+				)
+			).toBe(false);
 		});
 	});
 

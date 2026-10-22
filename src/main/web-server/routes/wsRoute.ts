@@ -178,6 +178,9 @@ export class WsRoute {
 				...(auth.user ? { user: auth.user, sessionId: auth.sessionId } : {}),
 				// Same moment, same reason: only the upgrade carries the CLI secret.
 				...(auth.cli ? { cli: true } : {}),
+				// And the pairing credential: a paired device is a transport, not an
+				// account, and the sinks tell it from a login by this field.
+				...(auth.method ? { admission: auth.method } : {}),
 				isAuthorized: () => {
 					if (admission && !admission(request)) {
 						socket.close(4403, 'Host admission expired or revoked');

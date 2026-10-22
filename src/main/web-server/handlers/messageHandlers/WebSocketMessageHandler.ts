@@ -36,6 +36,7 @@ import { app } from 'electron';
 import { logger } from '../../../utils/logger';
 import { captureException } from '../../../utils/sentry';
 import { getCommitHash } from '../../../utils/build-info';
+import { runAsClient } from '../../auth/transport-actor';
 import { LOG_CONTEXT } from './shared';
 import type {
 	WebClientMessage,
@@ -274,6 +275,16 @@ export class WebSocketMessageHandler {
 			LOG_CONTEXT
 		);
 
+		// Every message handler runs inside the client's context, the way every
+		// bridge.invoke does: the acting user for attribution and the transport
+		// that admitted the socket for the host sinks (auth/transport-actor.ts).
+		// Established HERE, once, so a callback a handler reaches (the web
+		// terminal's PTY spawn, a renderer round trip) finds the same answers at
+		// every await, and no handler can forget to say who asked.
+		runAsClient(client, () => this.dispatchMessage(client, message));
+	}
+
+	private dispatchMessage(client: WebClient, message: WebClientMessage): void {
 		switch (message.type) {
 			case 'ping':
 				this.handlePing(client);

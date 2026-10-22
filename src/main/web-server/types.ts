@@ -259,6 +259,14 @@ export interface WebClient {
 	 * browser must never touch (Computer History) refuse sockets without it.
 	 */
 	cli?: boolean;
+	/**
+	 * How the upgrade was admitted when it was not a cookie or the CLI secret:
+	 * `device-pairing` for a Lite paired device (the dedicated device route
+	 * verified its pairing credential). Recorded at the upgrade, like `cli`,
+	 * so `resolveTransportAdmission()` reads the transport off the client and
+	 * never off the shape of the acting user that route synthesized.
+	 */
+	admission?: 'device-pairing';
 }
 
 /**

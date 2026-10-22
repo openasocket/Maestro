@@ -10,6 +10,7 @@ import { readBackgroundField } from '../../../../shared/focusPlacement';
 import { getDispatchCallbackRegistry } from '../../../dispatch-callbacks';
 import { armDispatchCallback } from './dispatchCallbacks';
 import { noteDispatchDelegation, readDispatchDelegation } from './agentDelegation';
+import { describeTransportAdmission, resolveTransportAdmission } from '../../auth/transport-actor';
 import { LOG_CONTEXT } from './shared';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
 
@@ -40,7 +41,11 @@ export function handleSendCommand(
 	const requestedTabId = typeof message.tabId === 'string' ? message.tabId : undefined;
 	// force=true bypasses the busy-state guard below, allowing callers to
 	// dispatch concurrent writes to an already-running agent. Used by
-	// `maestro-cli dispatch --force`.
+	// `maestro-cli dispatch --force`. That is the WHOLE of what it bypasses: it
+	// is a scheduling hint, not authority. The turn it dispatches is admitted
+	// at the spawn sink for the transport that sent it exactly as an unforced
+	// one is, and a managed refusal there comes back as a failed command_result
+	// whatever this flag says (MRC-08-01).
 	const force = message.force === true;
 	// background=true suppresses the desktop's focus side effect (switching
 	// to the target agent/tab). `maestro-cli dispatch` sets this by default;
@@ -52,8 +57,14 @@ export function handleSendCommand(
 		? (message.images as unknown[]).filter((v): v is string => typeof v === 'string')
 		: undefined;
 
+	// Which transport admitted the caller (a Web Login account, the CLI secret,
+	// a Lite pairing, the path token): named in the log and, through the client
+	// context the message handler established, bound by every host sink this
+	// dispatch reaches. Transport admission is not tenant IAM: none of these is
+	// an enterprise principal, so none of them widens what the sink admits.
+	const transport = describeTransportAdmission(resolveTransportAdmission(client));
 	logger.info(
-		`[Web Command] Received: sessionId=${sessionId}, inputMode=${clientInputMode}, command=${command?.substring(0, 50)}, images=${images?.length ?? 0}`,
+		`[Web Command] Received: sessionId=${sessionId}, inputMode=${clientInputMode}, transport=${transport}, command=${command?.substring(0, 50)}, images=${images?.length ?? 0}`,
 		LOG_CONTEXT
 	);
 
@@ -232,8 +243,9 @@ export function handleSwitchMode(
 	const sessionId = message.sessionId as string;
 	const mode = message.mode as 'ai' | 'terminal';
 	const background = readBackgroundField(message);
+	const transport = describeTransportAdmission(resolveTransportAdmission(client));
 	logger.info(
-		`[Web] Received switch_mode message: session=${sessionId}, mode=${mode}, background=${background}`,
+		`[Web] Received switch_mode message: session=${sessionId}, mode=${mode}, background=${background}, transport=${transport}`,
 		LOG_CONTEXT
 	);
 
@@ -260,9 +272,11 @@ export function handleSwitchMode(
 				const sessionDetail = ctx.callbacks.getSessionDetail?.(sessionId);
 				const cwd = sessionDetail?.cwd || process.cwd();
 				try {
+					// A host sink: the PTY is spawned in the main process, admitted for
+					// the actor this client's context resolved (see terminalCallbacks).
 					const spawnResult = await ctx.callbacks.spawnTerminalForWeb?.(sessionId, { cwd });
 					logger.info(
-						`[Web] Terminal PTY spawn for ${sessionId}: success=${spawnResult?.success}`,
+						`[Web] Terminal PTY spawn for ${sessionId}: success=${spawnResult?.success}, transport=${transport}${spawnResult?.managed ? `, managed=${spawnResult.managed.state}/${spawnResult.managed.code}` : ''}`,
 						LOG_CONTEXT
 					);
 					if (spawnResult?.success) {
@@ -273,13 +287,17 @@ export function handleSwitchMode(
 							sessionId,
 						});
 					} else {
-						// PTY failed to spawn - report failure so the client can roll back
+						// PTY failed to spawn - report failure so the client can roll back.
+						// A managed refusal names the authority's reason, state and code:
+						// the client learns there is no shell for this actor on this host,
+						// not that a spawn "failed".
 						ctx.send(client, {
 							type: 'mode_switch_result',
 							success: false,
 							sessionId,
 							mode,
-							error: 'Failed to spawn terminal PTY',
+							error: spawnResult?.error ?? 'Failed to spawn terminal PTY',
+							...(spawnResult?.managed ? { managed: spawnResult.managed } : {}),
 							requestId: message.requestId,
 						});
 						return;
@@ -426,7 +444,7 @@ export function handleCrossAgentAsk(
 	// Metadata only at info level: a consult question can carry proprietary code
 	// or secrets, exactly like a dispatched prompt.
 	logger.info(
-		`[Web Ask] Consult | Target: ${targetSessionId} | From: ${fromSessionId ?? 'unattributed'} | Context: ${withContext ? 'yes' : 'no'} | Timeout: ${timeoutMs}ms | QuestionLength: ${question.length}`,
+		`[Web Ask] Consult | Target: ${targetSessionId} | From: ${fromSessionId ?? 'unattributed'} | Transport: ${describeTransportAdmission(resolveTransportAdmission(client))} | Context: ${withContext ? 'yes' : 'no'} | Timeout: ${timeoutMs}ms | QuestionLength: ${question.length}`,
 		LOG_CONTEXT
 	);
 
