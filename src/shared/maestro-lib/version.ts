@@ -57,8 +57,12 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * `ManagedOperationEnvelope.peer` is stamped by the host's own handler (`host-secret` over the
  * bridge, nothing in process) and refused from a caller; `ManagedOperationsDeps.verifiers` holds
  * one verifier per transport, so a verification record names the transport, never a default.
+ * 0.17.0: the lifecycle metadata projection (`./managed/events`, MRC-10-01): `createLifecycleProjector`
+ * turns the facts the real lifecycle producers report (the desktop's agent-run capture, the runtime's
+ * turn recorder) into metadata-only `ManagedLifecycleEvent`s with digest-stable ids, a per-process
+ * sequence and a counted bounded window; `RuntimeTurnOptions.lifecycle` hands a sink to the runtime.
  */
-export const MAESTRO_LIB_VERSION = '0.16.0';
+export const MAESTRO_LIB_VERSION = '0.17.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';
