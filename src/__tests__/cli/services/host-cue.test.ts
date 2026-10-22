@@ -367,6 +367,26 @@ describe('what the engine learns after it started', () => {
 		await startHostCue(PATHS, all);
 		expect(createEngine).toHaveBeenCalledWith(expect.objectContaining({ managedHost: null }));
 	});
+
+	// MRC-07-06A: the runtime's own workflow fence claim reaches the engine, so a
+	// Cue firing and an Auto Run in one process hold their fences in one record.
+	it("hands the engine the runtime's workflow fence claim, and none when the runtime has none", async () => {
+		const claimWorkflowFence = vi.fn();
+		const withClaim = {
+			...fakeRuntime().runtime,
+			claimWorkflowFence,
+		} as unknown as HostCueRuntime;
+		const createEngine = vi.fn(async () => fakeEngine());
+		const { all } = deps({ createEngine, readLock: () => lock(PID) });
+		await startHostCue({ ...PATHS, runtime: withClaim }, all);
+		expect(createEngine).toHaveBeenCalledWith(
+			expect.objectContaining({ workflowFence: claimWorkflowFence })
+		);
+
+		createEngine.mockClear();
+		await startHostCue({ ...PATHS, runtime: fakeRuntime().runtime }, all);
+		expect(createEngine.mock.calls[0][0]).not.toHaveProperty('workflowFence');
+	});
 });
 
 describe('runAutoRunInRuntime', () => {

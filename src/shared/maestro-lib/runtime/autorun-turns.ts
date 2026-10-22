@@ -47,7 +47,6 @@ import {
 	autoRunWorkflowRef,
 	newAutoRunTurnRequest,
 	nextAutoRunAttempt,
-	type AutoRunOwnerFence,
 	type AutoRunTurnAttribution,
 	type AutoRunWorkflowIdentity,
 } from '../autorun/attribution';
@@ -58,6 +57,7 @@ import type { ManagedLaunchInput } from '../launch/launch-plan';
 import type { ContextVerification, HostAuthority, PolicySourceSet } from '../managed/authority';
 import type { HeadlessSpawnContextInput } from '../managed/host-adapter';
 import type { ManagedDenialCode } from '../managed/types';
+import { isWorkflowFenceRefusal, type WorkflowFenceAnswer } from '../managed/workflows';
 import { createOutputParser } from '../parsers/parser-factory';
 import type { MaestroPaths } from '../paths/resolve';
 import { readSettingsStore } from '../store/read-stores';
@@ -121,12 +121,18 @@ export type AutoRunAdmissionEvent =
 export interface AutoRunManagedOptions {
 	port: AutoRunSpawnAuthorityPort;
 	/**
-	 * The workflow's owner fence, read on every attempt so a fence that lapses stops the next
-	 * dispatch rather than the next run. Null: the workflow has no owner, and a managed host runs
-	 * none of its turns (unavailable, not denied: no policy decided). The fence comes from a
-	 * workflow owner producer; this runner never mints one.
+	 * The workflow's owner fence, claimed on every attempt for that attempt's request and attempt
+	 * ids (`runId` is the task's request id, as the Cue router claims it), so a fence that lapses
+	 * stops the next dispatch rather than the next run and a retry re-confirms the owner instead of
+	 * reusing a decision. The producer's refusal (`WorkflowFenceRefusal`) is the turn's reason with
+	 * its state and code; a bare null is an unowned workflow, and a managed host runs none of its
+	 * turns (unavailable, not denied: no policy decided). The fence comes from a workflow owner
+	 * producer (`createWorkflowOwnership`); this runner never mints one.
 	 */
-	fence(): AutoRunOwnerFence | null;
+	fence(run: {
+		runId: string;
+		attemptId: string;
+	}): WorkflowFenceAnswer | Promise<WorkflowFenceAnswer>;
 	/** An opaque account reference for the snapshot; never a credential. */
 	account?: string | null;
 	/** The policy's route ceiling and approved credential references, when the host has them. */
@@ -287,13 +293,14 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 	}
 
 	/**
-	 * The admission of one attempt. Asked on every attempt: the fence, the policy revision and
-	 * the context are read now, not when the run started, so what changed since applies here.
+	 * The admission of one attempt. Asked on every attempt: the fence is claimed for this attempt,
+	 * and the policy revision and the context are read now, not when the run started, so what
+	 * changed since applies here.
 	 */
-	function managedTurnFor(
+	async function managedTurnFor(
 		provider: string,
 		attribution: AutoRunTurnAttribution | null
-	): ManagedTurn {
+	): Promise<ManagedTurn> {
 		const managed = options.managed;
 		if (!managed || managed.port.standing() === 'standalone') return { managed: false };
 		const refuse = (state: AutoRunManagedState, code: ManagedDenialCode, message: string) =>
@@ -308,7 +315,11 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 				'This Auto Run carries no workflow identity, so a managed host cannot bind its turns.'
 			);
 		}
-		const fence = managed.fence();
+		const fence = await managed.fence({
+			runId: attribution.requestId,
+			attemptId: attribution.attemptId,
+		});
+		if (isWorkflowFenceRefusal(fence)) return refuse(fence.state, fence.code, fence.message);
 		if (!fence) {
 			return refuse(
 				'unavailable',
@@ -380,7 +391,7 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 
 		// Admission is per attempt and the lease is checked again inside the spawn, so nothing
 		// decided for an earlier turn, or for this request's earlier attempt, carries into this one.
-		const managedTurn = managedTurnFor(provider, attribution);
+		const managedTurn = await managedTurnFor(provider, attribution);
 		if (managedTurn.managed && 'refusal' in managedTurn) return managedTurn.refusal;
 
 		const sessionId = `${agentId}-batch-${deps.now()}`;

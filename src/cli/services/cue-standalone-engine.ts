@@ -70,6 +70,7 @@ import type { SshRemoteSettingsStore } from '../../main/utils/ssh-remote-resolve
 // pulls in nothing beyond `os` and agent metadata.
 import {
 	executeCueRunAction,
+	type CueManagedDeps,
 	type CueRunActionDeps,
 	type CueRunSessionRecord,
 } from '../../main/cue/cue-run-router';
@@ -79,7 +80,10 @@ import { formatJsonLogLine } from '../../shared/jsonLogLine';
 // The managed binding and the headless port: plain maestro-lib, no Electron,
 // the same modules `agent-spawner.ts` holds statically for every CLI verb.
 import * as os from 'os';
-import { createManagedBinding } from '../../shared/maestro-lib/managed/binding';
+import {
+	createManagedBinding,
+	type ManagedBindingState,
+} from '../../shared/maestro-lib/managed/binding';
 import {
 	createHeadlessSpawnAuthority,
 	installationIdentity,
@@ -87,6 +91,12 @@ import {
 	type HeadlessSpawnAuthority,
 	type ManagedHostAdapter,
 } from '../../shared/maestro-lib/managed/host-adapter';
+import type { ManagedInstallationIdentity } from '../../shared/maestro-lib/managed/types';
+import {
+	createWorkflowOwnership,
+	MANAGED_WORKFLOWS_FILE_NAME,
+	workflowFenceOf,
+} from '../../shared/maestro-lib/managed/workflows';
 import { resolveProductionDataDir } from '../../shared/maestro-lib/paths/userDataDir';
 import { resolveUserDataDir } from '../../shared/userDataDir';
 import {
@@ -327,18 +337,20 @@ function buildOnCueRun(
 	onExternalNotification: ((notification: CueExternalNotification) => void) | undefined,
 	runAutoRun: StandaloneCueAutoRun | undefined,
 	autoRunStops: Map<string, AbortController>,
-	spawnPort: () => HeadlessSpawnAuthority
+	spawnPort: () => HeadlessSpawnAuthority,
+	workflowFence: CueManagedDeps['workflowFence']
 ): CueEngineDeps['onCueRun'] {
 	return async (params) => {
 		const executors = await loadExecutors();
 		const deps: CueRunActionDeps = {
-			// Managed admission of a prompt run (MRC-07-02A): the port is rebuilt
-			// on every run over the binding as it is NOW, so an enrollment that
+			// Managed admission of a run (MRC-07-02A): the port is rebuilt on
+			// every run over the binding as it is NOW, so an enrollment that
 			// appears or lapses while the engine runs applies to the next firing.
-			// The workflow owner fence has no producer yet (MRC-07-06, CP-03), so
-			// an enrolled machine refuses every prompt run as unavailable in the
-			// run's result instead of running it unmanaged.
-			managed: { port: spawnPort },
+			// The workflow owner fence is claimed per firing (MRC-07-06A) through
+			// the attached host's producer; with none attached an enrolled
+			// machine refuses every run by that name in the run's result instead
+			// of running it unmanaged.
+			managed: { port: spawnPort, workflowFence },
 			executeCuePrompt: executors.executeCuePrompt,
 			executeCueShell: executors.executeCueShell,
 			executeCueCli: executors.executeCueCli,
@@ -427,49 +439,72 @@ async function reportStandaloneAuthFailure(
 	);
 }
 
-/** The attached host adapter a Cue engine inside `maestro-cli host` admits with: authority, policy, and the identity the actor is named from. */
+/**
+ * The attached host adapter a Cue engine inside `maestro-cli host` admits
+ * with: authority, policy, the identity the actor is named from, the workflow
+ * owner port its fences are claimed through, and the policy standing that
+ * says whether a held fence may be kept offline.
+ */
 export type StandaloneCueManagedHost = Pick<
 	ManagedHostAdapter,
-	'authority' | 'policy' | 'identity'
+	'authority' | 'policy' | 'identity' | 'workflows' | 'policyStatus'
 >;
 
 /**
- * The spawn authority a standalone Cue engine admits prompt runs with
- * (`CueRunActionDeps.managed.port`), read fresh on every call. The binding is
- * the one beside the data-dir lock, from the same files the desktop writes
+ * The binding beside the data-dir lock and this engine's installation
+ * identity, read fresh on every call from the same files the desktop writes
  * (this data directory, then the production one, the way `cliSpawnAuthority()`
- * reads it), so Electron's absence is never an opt-out. With an attached host
- * whose authority is the binding's, the engine admits as that host does
- * (origin `cue`, the enrollment's registered actor as the principal); with
- * none, an enrolled machine is `managed` with an authority that answers
- * unavailable, and `maestro-cli cue engine start` refuses every prompt run
- * instead of running it unmanaged. No binding file is standalone, unchanged.
+ * reads it), so Electron's absence is never an opt-out. Only `state()` is
+ * read: the fence guards enroll / unenroll and the binding's own
+ * `authority()`, none of which the engine calls (the port takes the attached
+ * host's authority directly, matched by id).
+ */
+function readStandaloneCueStanding(
+	host: StandaloneCueManagedHost | null,
+	now: () => number,
+	startedAt: string
+): {
+	userDataDir: string;
+	binding: ManagedBindingState;
+	installation: ManagedInstallationIdentity;
+} {
+	const userDataDir = resolveUserDataDir();
+	const productionDataDir = resolveProductionDataDir(userDataDir);
+	const binding = createManagedBinding({
+		paths: { userDataDir, productionDataDir },
+		fence: () => ({ ok: true as const }),
+		...(host ? { authority: host.authority } : {}),
+		now,
+	}).state();
+	const installation = installationIdentity({
+		hostname: os.hostname(),
+		productionDataDir,
+		mode: 'cue',
+		pid: process.pid,
+		startedAt,
+	});
+	return { userDataDir, binding, installation };
+}
+
+/**
+ * The spawn authority a standalone Cue engine admits prompt runs with
+ * (`CueRunActionDeps.managed.port`), read fresh on every call over the
+ * binding (`readStandaloneCueStanding`). With an attached host whose
+ * authority is the binding's, the engine admits as that host does (origin
+ * `cue`, the enrollment's registered actor as the principal); with none, an
+ * enrolled machine is `managed` with an authority that answers unavailable,
+ * and `maestro-cli cue engine start` refuses every prompt run instead of
+ * running it unmanaged. No binding file is standalone, unchanged.
  */
 export function buildStandaloneCueSpawnPort(options: {
 	managedHost: StandaloneCueManagedHost | null;
 	now?: () => number;
 }): () => HeadlessSpawnAuthority {
 	const startedAt = new Date().toISOString();
+	const now = options.now ?? (() => Date.now());
 	return () => {
-		const userDataDir = resolveUserDataDir();
-		const productionDataDir = resolveProductionDataDir(userDataDir);
 		const host = options.managedHost;
-		// Only `state()` is read: the fence guards enroll / unenroll and the
-		// binding's own `authority()`, none of which the engine calls (the port
-		// takes the attached host's authority directly, matched by id).
-		const binding = createManagedBinding({
-			paths: { userDataDir, productionDataDir },
-			fence: () => ({ ok: true as const }),
-			...(host ? { authority: host.authority } : {}),
-			now: options.now ?? (() => Date.now()),
-		}).state();
-		const installation = installationIdentity({
-			hostname: os.hostname(),
-			productionDataDir,
-			mode: 'cue',
-			pid: process.pid,
-			startedAt,
-		});
+		const { binding, installation } = readStandaloneCueStanding(host, now, startedAt);
 		return createHeadlessSpawnAuthority({
 			installation,
 			binding,
@@ -485,6 +520,53 @@ export function buildStandaloneCueSpawnPort(options: {
 	};
 }
 
+/**
+ * The workflow owner fence a standalone Cue engine claims per firing
+ * (`CueRunActionDeps.managed.workflowFence`, MRC-07-06A), the way the
+ * desktop's enterprise service does: one `createWorkflowOwnership` over
+ * `maestro-managed-workflows.json` in this data directory, claiming as this
+ * installation under the authority the binding names, through the attached
+ * host's workflow owner port (the endpoint's `workflow` operation, CP-03). A
+ * held fence is kept offline only while the host's installed policy says so.
+ * With no host attached (`maestro-cli cue engine start` on an enrolled
+ * machine) the binding reads enrolled-unavailable and the claim is refused by
+ * name: the engine mints nothing and runs nothing unmanaged. A host that holds
+ * the ownership already (`maestro-cli host`) hands its own claim in instead
+ * (`StandaloneCueEngineOptions.workflowFence`), so one record holds every
+ * fence in that process.
+ */
+export function buildStandaloneCueWorkflowFence(options: {
+	managedHost: StandaloneCueManagedHost | null;
+	now?: () => number;
+}): NonNullable<CueManagedDeps['workflowFence']> {
+	const startedAt = new Date().toISOString();
+	const now = options.now ?? (() => Date.now());
+	const host = options.managedHost;
+	const workflows = createWorkflowOwnership({
+		file: `${resolveUserDataDir()}/${MANAGED_WORKFLOWS_FILE_NAME}`,
+		port: () => host?.workflows ?? null,
+		owner: () => {
+			const { binding, installation } = readStandaloneCueStanding(host, now, startedAt);
+			if (binding.state !== 'enrolled') return null;
+			return {
+				ownerId: installation.installationId,
+				authorityId: binding.record.authorityId,
+				policyRevision: host ? host.policy().policyRevision : binding.record.policyRevision,
+			};
+		},
+		now,
+	});
+	return async (workflow, run) =>
+		workflowFenceOf(
+			await workflows.claim({
+				workflow,
+				runId: run.runId,
+				attemptId: run.attemptId,
+				offlineEnabled: host?.policyStatus().offline.installedPolicyAvailable ?? false,
+			})
+		);
+}
+
 export interface StandaloneCueEngineOptions {
 	onLog?: StandaloneCueLog;
 	/**
@@ -494,6 +576,13 @@ export interface StandaloneCueEngineOptions {
 	 * prompt run (see `buildStandaloneCueSpawnPort`).
 	 */
 	managedHost?: StandaloneCueManagedHost | null;
+	/**
+	 * The workflow owner fence claimed per firing. Default: this engine's own
+	 * ownership over the host's port (`buildStandaloneCueWorkflowFence`). A
+	 * hosting runtime passes its `claimWorkflowFence` so the two share one
+	 * record.
+	 */
+	workflowFence?: CueManagedDeps['workflowFence'];
 	/** See `CueEngineDeps.onLockLost`. */
 	onLockLost?: () => void;
 	/** See `CueEngineDeps.onDrainPhase`. */
@@ -523,7 +612,9 @@ export function buildStandaloneCueEngineDeps(
 			options.onExternalNotification,
 			options.runAutoRun,
 			autoRunStops,
-			buildStandaloneCueSpawnPort({ managedHost: options.managedHost ?? null })
+			buildStandaloneCueSpawnPort({ managedHost: options.managedHost ?? null }),
+			options.workflowFence ??
+				buildStandaloneCueWorkflowFence({ managedHost: options.managedHost ?? null })
 		),
 		onStopCueRun: (runId) => {
 			const autoRunStop = autoRunStops.get(runId);

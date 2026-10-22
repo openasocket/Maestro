@@ -82,6 +82,7 @@ import {
 	type ManagedRunIdentity,
 	type ManagedWorkflowRef,
 } from './types';
+import { endpointWorkflowOwnerPort, type WorkflowOwnerPort } from './workflows';
 
 // ---------------------------------------------------------------------------
 // The spawn authority of a host with no Electron (maestro-cli, a headless
@@ -293,6 +294,14 @@ export interface ManagedHostAdapter {
 	readonly installation: ManagedInstallationIdentity;
 	readonly identity: ManagedIdentityPort;
 	readonly authority: HostAuthority;
+	/**
+	 * The workflow owner producer over this adapter's endpoint socket (the
+	 * endpoint's `workflow` operation, MRC-07-06A), for a host's
+	 * `createWorkflowOwnership` to claim through; null while no socket is
+	 * attached. A port, never a fence: the registry decides every claim, and
+	 * an endpoint serving no such operation answers so by name (CP-03).
+	 */
+	readonly workflows: WorkflowOwnerPort | null;
 	policy(): PolicySourceSet;
 	status(): ManagedEnrollmentStatus;
 	policyStatus(): ManagedPolicyStatus;
@@ -629,6 +638,10 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 		installation: deps.installation,
 		identity: deps.identity,
 		authority,
+		// Read per access: a desktop composes the adapter before its socket opens.
+		get workflows() {
+			return deps.endpoint ? endpointWorkflowOwnerPort(deps.endpoint) : null;
+		},
 		policy() {
 			const identity = deps.identity.read();
 			if (identity.status !== 'ok' || !identity.record)

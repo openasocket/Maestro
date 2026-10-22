@@ -26,11 +26,7 @@ import {
 } from '../../../../__tests__/shared/maestro-lib/run/fakeAgent';
 import type { HistoryEntry } from '../../../types';
 import { DEFAULT_TAB_DEFAULTS } from '../../agents/rules';
-import {
-	autoRunWorkflowVersion,
-	type AutoRunOwnerFence,
-	type AutoRunWorkflowIdentity,
-} from '../../autorun/attribution';
+import { autoRunWorkflowVersion } from '../../autorun/attribution';
 import type { AutoRunRunEvent } from '../../autorun/run-tracker';
 import type { AutoRunOutcome, ClientResult, MaestroEvent } from '../../client/types';
 import {
@@ -805,7 +801,7 @@ describe('runtime Auto Run', () => {
 		/** Enroll this data directory to the fleet authority, as a desktop or host would have, then start on it. */
 		async function startEnrolled(
 			authority: HostAuthority,
-			workflowFence?: (workflow: AutoRunWorkflowIdentity) => AutoRunOwnerFence | null
+			workflowFence?: NonNullable<MaestroRuntimeOptions['managed']>['workflowFence']
 		): Promise<MaestroRuntime> {
 			const enroller = await start();
 			const binding = createManagedBinding({
@@ -832,10 +828,23 @@ describe('runtime Auto Run', () => {
 			return runtime;
 		}
 
-		it('refuses every turn of an unowned workflow as unavailable, parks the run with the reason, and starts no process', async () => {
+		it('refuses every turn of a workflow with no owner producer by name, parks the run with the reason, and starts no process', async () => {
 			const file = doc('tasks', tasks(1));
 			const { authority, asked } = fleetAuthority();
+			// No host adapter, so the runtime's own ownership has no producer port to claim through
+			// (MRC-07-06A): the claim is refused by that name, and nothing stands in for the registry.
 			const runtime = await startEnrolled(authority);
+			expect(
+				await runtime.claimWorkflowFence(
+					{ workflowId: 'wf', version: 'v1', triggerEventId: 'cli:x' },
+					{ runId: 'req-1', attemptId: 'att-1' }
+				)
+			).toMatchObject({
+				fence: null,
+				state: 'unavailable',
+				code: 'runtime-unavailable',
+				message: expect.stringContaining('No workflow owner producer is attached'),
+			});
 			const run = watchRun(runtime);
 
 			value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
@@ -848,7 +857,7 @@ describe('runtime Auto Run', () => {
 			).toMatchObject({
 				type: 'permission_denied',
 				recoverable: true,
-				message: expect.stringContaining('no workflow owner fence'),
+				message: expect.stringContaining('No workflow owner producer is attached'),
 			});
 			// Nothing was decided and nothing ran: no admission reached the authority, no provider
 			// started, and the document is as it was.
@@ -862,17 +871,50 @@ describe('runtime Auto Run', () => {
 			expect(runLaunches).toEqual([]);
 		});
 
-		it("admits each task on the run's lineage: the workflow with its fence, the run id, one request per task", async () => {
+		it("parks the run on the producer's own refusal, with its state and code, and asks the authority nothing", async () => {
+			const file = doc('tasks', tasks(1));
+			const { authority, asked } = fleetAuthority();
+			const runtime = await startEnrolled(authority, async (workflow) => ({
+				fence: null,
+				state: 'denied',
+				code: 'policy-denied',
+				message: `Workflow "${workflow.workflowId}" is fenced: the registry holds another owner.`,
+			}));
+			const run = watchRun(runtime);
+
+			value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+			await run.paused();
+			expect(
+				run
+					.frames()
+					.filter((frame) => frame.pause)
+					.pop()?.pause
+			).toMatchObject({
+				type: 'permission_denied',
+				// A denial is a decision nobody retries into.
+				recoverable: false,
+				message: expect.stringMatching(/^Workflow "runtime-a1-\d+" is fenced/),
+			});
+			expect(asked).toEqual([]);
+			expect(runLaunches).toEqual([]);
+
+			value(await runtime.autoRun.abort('a1'));
+			await run.ended();
+			expect(run.outcome()).toEqual({ status: 'stopped' });
+		});
+
+		it("admits each task on the run's lineage: the workflow with its fence, the run id, one request per task, the fence claimed per attempt", async () => {
 			const file = doc('tasks', tasks(2));
 			script = [
 				{ text: 'Finished task one. Done.', tick: file },
 				{ text: 'Finished task two. Done.', tick: file },
 			];
 			const { authority, asked } = fleetAuthority();
-			const runtime = await startEnrolled(authority, () => ({
-				ownerEpoch: 'epoch-1',
-				fencingToken: 'fence-1',
-			}));
+			const claims: Array<{ workflowId: string; runId: string; attemptId: string }> = [];
+			const runtime = await startEnrolled(authority, (workflow, run) => {
+				claims.push({ workflowId: workflow.workflowId, ...run });
+				return { ownerEpoch: 'epoch-1', fencingToken: 'fence-1' };
+			});
 			const run = watchRun(runtime);
 
 			value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
@@ -883,6 +925,14 @@ describe('runtime Auto Run', () => {
 			expect(runLaunches).toHaveLength(2);
 			expect(asked).toHaveLength(2);
 			const contexts = asked.map((request) => request.context);
+			// One claim per attempt, for the request and attempt the authority then saw.
+			expect(claims).toEqual(
+				contexts.map((context) => ({
+					workflowId: context.workflow?.workflowId,
+					runId: context.identity.requestId,
+					attemptId: context.identity.attemptId,
+				}))
+			);
 			const runId = contexts[0].identity.rootRunId;
 			expect(runId).toEqual(expect.any(String));
 			// The playbook id the runtime minted carries the launch time; the trigger event names the same launch.

@@ -62,7 +62,6 @@ import type { AgentRepository } from '../agents/repository';
 import {
 	autoRunTriggerEventId,
 	autoRunWorkflowVersion,
-	type AutoRunOwnerFence,
 	type AutoRunTriggerKind,
 	type AutoRunWorkflowIdentity,
 } from '../autorun/attribution';
@@ -101,6 +100,7 @@ import {
 	type ManagedHostAdapter,
 } from '../managed/host-adapter';
 import type { ManagedInstallationIdentity } from '../managed/types';
+import type { WorkflowFenceAnswer } from '../managed/workflows';
 import type { MaestroPaths } from '../paths/resolve';
 import { createPromptLoaderFor } from '../prompts/load';
 import { readHistory } from '../store/read-history';
@@ -156,12 +156,17 @@ export interface RuntimeAutoRunManagedOptions {
 	 */
 	host: RuntimeAutoRunHost | null;
 	/**
-	 * The owner fence of a run's workflow, read on every attempt (the CP-03 workflow owner
-	 * producer MRC-07-06 consumes). Default none: a managed host runs no unowned workflow and this
-	 * runtime never mints a fence, so until one is wired every managed Auto Run is refused as
-	 * unavailable before a process starts. A standalone runtime never asks.
+	 * The owner fence of a run's workflow, claimed on every attempt for that attempt's request
+	 * and attempt ids (the CP-03 workflow owner producer MRC-07-06 consumes, through the host's
+	 * `createWorkflowOwnership`). The producer's refusal is the turn's reason, with its state and
+	 * code. Default none: a managed host runs no unowned workflow and this runtime never mints a
+	 * fence, so every managed Auto Run is then refused as unavailable before a process starts. A
+	 * standalone runtime never asks.
 	 */
-	workflowFence?(workflow: AutoRunWorkflowIdentity): AutoRunOwnerFence | null;
+	workflowFence?(
+		workflow: AutoRunWorkflowIdentity,
+		run: { runId: string; attemptId: string }
+	): WorkflowFenceAnswer | Promise<WorkflowFenceAnswer>;
 	/** Every admission and refusal, for a journal or a test. */
 	onAdmission?(event: AutoRunAdmissionEvent): void;
 }
@@ -520,7 +525,7 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 				? {
 						managed: {
 							port: spawnPort(managed),
-							fence: () => managed.workflowFence?.(workflow) ?? null,
+							fence: (run) => managed.workflowFence?.(workflow, run) ?? null,
 							...(managed.onAdmission ? { onAdmission: managed.onAdmission } : {}),
 						},
 					}

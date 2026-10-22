@@ -58,12 +58,14 @@ export interface HostCueEngine {
 
 /**
  * The part of the in-process runtime Cue uses: Auto Runs to launch, the events
- * that say what changed, and the managed host adapter the runtime admits with
+ * that say what changed, the managed host adapter the runtime admits with
  * (absent or null on a runtime that holds none), so a Cue prompt run in an
- * enrolled host is admitted by the same authority as the host's own turns.
+ * enrolled host is admitted by the same authority as the host's own turns,
+ * and the runtime's workflow fence claim, so the engine's runs and the host's
+ * Auto Runs hold their fences in one record (MRC-07-06A).
  */
 export type HostCueRuntime = Pick<MaestroClient, 'agents' | 'autoRun' | 'events'> &
-	Partial<Pick<MaestroRuntime, 'managedHost'>>;
+	Partial<Pick<MaestroRuntime, 'managedHost' | 'claimWorkflowFence'>>;
 
 export interface HostCueContext {
 	userDataDir: string;
@@ -77,7 +79,10 @@ export interface HostCueDeps {
 	isEnabled(settingsFile: string): Promise<boolean>;
 	readLock(dataDir: string): CueEngineLockInfo | null;
 	createEngine(
-		options: Pick<StandaloneCueEngineOptions, 'onLog' | 'runAutoRun' | 'managedHost'>
+		options: Pick<
+			StandaloneCueEngineOptions,
+			'onLog' | 'runAutoRun' | 'managedHost' | 'workflowFence'
+		>
 	): Promise<HostCueEngine>;
 	/** Serve `maestro-cli cue trigger`, which has no desktop WebSocket to reach this process by. Returns the stop. */
 	startInbox(engine: HostCueEngine, dataDir: string): () => void;
@@ -339,6 +344,9 @@ export async function startHostCue(
 				// (MRC-07-02A); null when the runtime holds none, and the engine then
 				// reads the binding alone, as `maestro-cli cue engine start` does.
 				managedHost: runtime?.managedHost ?? null,
+				// The runtime's own ownership record, so a Cue firing and an Auto Run
+				// in this process never hold two copies of one fence (MRC-07-06A).
+				...(runtime?.claimWorkflowFence ? { workflowFence: runtime.claimWorkflowFence } : {}),
 			});
 			if (runtime) unfollowAgents = await followAgents(runtime, engine);
 			engine.start('system-boot');

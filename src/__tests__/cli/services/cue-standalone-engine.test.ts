@@ -14,6 +14,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { CueEvent, CueRunResult } from '../../../shared/cue/contracts';
 import { createLocalHostAuthority } from '../../../shared/maestro-lib/managed/authority';
 import { createManagedBinding } from '../../../shared/maestro-lib/managed/binding';
+import type { EndpointInvokeOutcome } from '../../../shared/maestro-lib/managed/endpoint-port';
+import type {
+	WorkflowOwnerPort,
+	WorkflowOwnerRequest,
+} from '../../../shared/maestro-lib/managed/workflows';
 
 const initializeOutputParsers = vi.fn();
 const executeCuePrompt = vi.fn();
@@ -511,8 +516,11 @@ describe('managed admission (MRC-07-02A)', () => {
 		expect(outcome.ok).toBe(true);
 	}
 
-	/** A host adapter attached to the named authority, with a registered actor. */
-	function attachedHost(authorityId = 'endpoint-test'): StandaloneCueManagedHost {
+	/** A host adapter attached to the named authority, with a registered actor and, when given, a workflow owner producer. */
+	function attachedHost(
+		authorityId = 'endpoint-test',
+		workflows: WorkflowOwnerPort | null = null
+	): StandaloneCueManagedHost {
 		return {
 			authority: createLocalHostAuthority({
 				authorityId,
@@ -527,8 +535,32 @@ describe('managed admission (MRC-07-02A)', () => {
 						record: { registration: { actorId: 'actor-registered' } },
 					}) as never,
 			},
+			workflows,
+			policyStatus: () => ({ offline: { installedPolicyAvailable: false } }) as never,
 		};
 	}
+
+	/** A workflow owner producer that records every claim and answers as told: the registry, a double. */
+	function ownerPort(answer: (request: WorkflowOwnerRequest) => EndpointInvokeOutcome<unknown>) {
+		const requests: WorkflowOwnerRequest[] = [];
+		const port: WorkflowOwnerPort = {
+			claim: async (request) => {
+				requests.push(request);
+				return answer(request);
+			},
+		};
+		return { port, requests };
+	}
+	const owned = (request: WorkflowOwnerRequest): EndpointInvokeOutcome<unknown> => ({
+		status: 'ok',
+		payload: {
+			outcome: 'owned',
+			workflowId: request.workflowId,
+			ownerId: request.ownerId,
+			ownerEpoch: 3,
+			fencingToken: 'fence-3',
+		},
+	});
 
 	const promptRun = (deps: ReturnType<typeof buildStandaloneCueEngineDeps>, runId: string) =>
 		deps.onCueRun({
@@ -627,18 +659,104 @@ describe('managed admission (MRC-07-02A)', () => {
 			managed: { state: 'unavailable', code: 'runtime-unavailable' },
 		});
 		expect(result.stderr).toContain('[managed-unavailable]');
-		expect(result.stderr).toContain('no workflow owner fence');
+		// No authority is attached, so the engine has no standing to claim the fence under
+		// (MRC-07-06A): refused by that name, nothing minted in the registry's place.
+		expect(result.stderr).toContain('holds no managed standing');
 		expect(onLog).toHaveBeenCalledWith(
 			'warn',
 			expect.stringContaining('"ask" was not admitted (unavailable, runtime-unavailable)')
 		);
 
-		// The same holds with the host attached: the fence is still nobody's to mint (CP-03).
+		// With the host attached but no producer on it, the claim names the missing producer (CP-03).
 		const attached = buildStandaloneCueEngineDeps({ onLog, managedHost: attachedHost() });
-		expect(await promptRun(attached, 'run-attached')).toMatchObject({
+		const refused = await promptRun(attached, 'run-attached');
+		expect(refused).toMatchObject({
 			status: 'failed',
 			managed: { state: 'unavailable', code: 'runtime-unavailable' },
 		});
+		expect(refused.stderr).toContain('No workflow owner producer is attached');
 		expect(executeCuePrompt).toHaveBeenCalledTimes(1);
+	});
+
+	// MRC-07-06A: the fence is claimed per firing through the attached host's
+	// producer, held in this data directory, and the run is admitted on what
+	// the registry answered, never on anything the engine made up.
+	it("claims the fence per firing through the host's producer, as this installation, and admits the run on the registry's fence", async () => {
+		await enroll();
+		const { port, requests } = ownerPort(owned);
+		const deps = buildStandaloneCueEngineDeps({
+			onLog: vi.fn(),
+			managedHost: attachedHost('endpoint-test', port),
+		});
+
+		expect(await promptRun(deps, 'run-owned')).toMatchObject({ status: 'completed' });
+		expect(executeCuePrompt).toHaveBeenCalledTimes(1);
+		const admission = executeCuePrompt.mock.calls[0][0].admission;
+		expect(admission.context.workflow).toMatchObject({
+			workflowId: 'cue:ask',
+			ownerEpoch: '3',
+			fencingToken: 'fence-3',
+		});
+		// A first claim offers epoch 0 and a nonce for this run and attempt; the owner is the
+		// installation, named as an identifier, under the binding's policy generation.
+		expect(requests).toHaveLength(1);
+		expect(requests[0]).toMatchObject({
+			runId: 'run-owned',
+			ownerEpoch: 0,
+			offlineEnabled: false,
+			policyRevision: 7,
+		});
+		expect(requests[0].ownerId).toMatch(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
+		expect(requests[0].attemptId).toMatch(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
+		expect(fs.existsSync(path.join(dir, 'maestro-managed-workflows.json'))).toBe(true);
+
+		// The next firing re-claims with what the registry issued, never afresh.
+		expect(await promptRun(deps, 'run-owned-2')).toMatchObject({ status: 'completed' });
+		expect(requests[1]).toMatchObject({
+			runId: 'run-owned-2',
+			ownerEpoch: 3,
+			fencingToken: 'fence-3',
+		});
+		expect(executeCuePrompt).toHaveBeenCalledTimes(2);
+	});
+
+	it("refuses the run with the registry's denial when another owner holds the workflow, and starts nothing", async () => {
+		await enroll();
+		const { port } = ownerPort(() => ({ status: 'denied', reason: 'owner_unfenced' }));
+		const deps = buildStandaloneCueEngineDeps({
+			onLog: vi.fn(),
+			managedHost: attachedHost('endpoint-test', port),
+		});
+
+		const result = await promptRun(deps, 'run-fenced');
+		expect(result).toMatchObject({
+			status: 'failed',
+			managed: { state: 'denied', code: 'policy-denied' },
+		});
+		expect(result.stderr).toContain('[managed-denied]');
+		expect(result.stderr).toContain('is fenced');
+		expect(executeCuePrompt).not.toHaveBeenCalled();
+	});
+
+	it("claims through a hosting runtime's own fence when one is handed in, so the host and the engine share one record", async () => {
+		await enroll();
+		const { port, requests } = ownerPort(owned);
+		const workflowFence = vi.fn(async () => ({ ownerEpoch: '5', fencingToken: 'fence-5' }));
+		const deps = buildStandaloneCueEngineDeps({
+			onLog: vi.fn(),
+			managedHost: attachedHost('endpoint-test', port),
+			workflowFence,
+		});
+
+		expect(await promptRun(deps, 'run-hosted')).toMatchObject({ status: 'completed' });
+		expect(workflowFence).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'cue:ask' }), {
+			runId: 'run-hosted',
+			attemptId: expect.any(String),
+		});
+		expect(requests).toEqual([]);
+		expect(executeCuePrompt.mock.calls[0][0].admission.context.workflow).toMatchObject({
+			ownerEpoch: '5',
+			fencingToken: 'fence-5',
+		});
 	});
 });

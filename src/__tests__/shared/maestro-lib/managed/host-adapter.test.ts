@@ -151,6 +151,24 @@ function admission(
 	};
 }
 
+/** Register this process and attach on `fake` with the named capabilities, as the lifecycle does. */
+async function attachPort(fake: FakeEndpoint, supported: string[]): Promise<EndpointPort> {
+	const port = createLocalEndpointClient({ socketPath: fake.socketPath, timeoutMs: 1_000 });
+	await port.registration.challenge({ runtimeId: 'desktop-100', processEpoch: 'epoch-1' });
+	await port.registration.redeem();
+	const attached = await port.attach({
+		installationId: 'inst-1',
+		runtimeId: 'desktop-100',
+		processEpoch: 'epoch-1',
+		components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
+		supportedProtocols: [1],
+		supportedCapabilities: supported,
+		requiredCapabilities: ['execution'],
+	});
+	expect(attached.status).toBe('ok');
+	return port;
+}
+
 describe('managed host adapter', () => {
 	const open: FakeEndpoint[] = [];
 	const ports: EndpointPort[] = [];
@@ -165,26 +183,73 @@ describe('managed host adapter', () => {
 		return fake;
 	}
 	/** A registered, attached port on `fake`, as the lifecycle leaves it. */
-	async function attachedPort(fake: FakeEndpoint): Promise<EndpointPort> {
-		const port = createLocalEndpointClient({ socketPath: fake.socketPath, timeoutMs: 1_000 });
+	async function attachedPort(
+		fake: FakeEndpoint,
+		supported: string[] = ['attachment', 'compatibility', 'execution', 'telemetry']
+	): Promise<EndpointPort> {
+		const port = await attachPort(fake, supported);
 		ports.push(port);
-		await port.registration.challenge({ runtimeId: 'desktop-100', processEpoch: 'epoch-1' });
-		await port.registration.redeem();
-		const attached = await port.attach({
-			installationId: 'inst-1',
-			runtimeId: 'desktop-100',
-			processEpoch: 'epoch-1',
-			components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
-			supportedProtocols: [1],
-			supportedCapabilities: ['attachment', 'compatibility', 'execution', 'telemetry'],
-			requiredCapabilities: ['execution'],
-		});
-		expect(attached.status).toBe('ok');
 		return port;
 	}
 	afterEach(async () => {
 		for (const port of ports.splice(0)) await port.close();
 		for (const fake of open.splice(0)) await fake.close();
+	});
+
+	it('exposes the workflow owner producer over its endpoint, and none without one (MRC-07-06A)', async () => {
+		const fake = await endpoint({
+			capabilities: ['execution', 'workflow'],
+			operations: {
+				workflow: (payload) => ({
+					outcome: 'owned',
+					workflowId: (payload as { workflowId: string }).workflowId,
+					ownerId: 'inst-1',
+					ownerEpoch: 1,
+					fencingToken: 'fence-1',
+				}),
+			},
+		});
+		const port = await attachedPort(fake, ['attachment', 'execution', 'workflow']);
+		const view = okView(record(fake.socketPath));
+		const adapter = createManagedHostAdapter({
+			installation: INSTALLATION,
+			identity: { read: () => view },
+			endpoint: port,
+			status: () => standing(port, view),
+			now: () => T0,
+		});
+		expect(adapter.workflows).not.toBeNull();
+		// The port is the endpoint's `workflow` operation, answered as the registry sent it.
+		expect(
+			await adapter.workflows!.claim({
+				workflowId: 'wf-1',
+				triggerId: 'trig-1',
+				runId: 'run-1',
+				attemptId: 'att-1',
+				ownerId: 'inst-1',
+				ownerEpoch: 0,
+				fencingToken: 'nonce-1',
+				offlineEnabled: false,
+				policyRevision: 3,
+			})
+		).toEqual({
+			status: 'ok',
+			payload: {
+				outcome: 'owned',
+				workflowId: 'wf-1',
+				ownerId: 'inst-1',
+				ownerEpoch: 1,
+				fencingToken: 'fence-1',
+			},
+		});
+		const detached = createManagedHostAdapter({
+			installation: INSTALLATION,
+			identity: { read: () => view },
+			endpoint: null,
+			status: () => standing(null, view),
+			now: () => T0,
+		});
+		expect(detached.workflows).toBeNull();
 	});
 
 	it('derives an identifier-safe installation identity and a stable authority id', () => {
@@ -613,7 +678,10 @@ describe('runtime with a host adapter', () => {
 		fs.rmSync(work, { recursive: true, force: true });
 	});
 
-	async function start(view: (installationId: string) => ManagedIdentityView) {
+	async function start(
+		view: (installationId: string) => ManagedIdentityView,
+		port: EndpointPort | null = null
+	) {
 		let id = 0;
 		const started = await createMaestroRuntime({
 			dataDir: dir,
@@ -623,8 +691,8 @@ describe('runtime with a host adapter', () => {
 					createManagedHostAdapter({
 						installation,
 						identity: { read: () => view(installation.installationId) },
-						endpoint: null,
-						status: () => standing(null, view(installation.installationId)),
+						endpoint: port,
+						status: () => standing(port, view(installation.installationId)),
 					}),
 			},
 			deps: {
@@ -723,6 +791,82 @@ describe('runtime with a host adapter', () => {
 			status: 'denied',
 			code: 'capability-unsupported',
 		});
+	});
+
+	// MRC-07-06A: the runtime's own ownership claims through the adapter's
+	// producer port as this installation, holds what the registry answered in
+	// its data directory, and refuses by name when no socket carries a producer.
+	it("claims a workflow owner fence per attempt through the adapter's endpoint, and refuses by name with no socket", async () => {
+		const WORKFLOW = {
+			workflowId: 'runtime-a1-1',
+			version: 'v1',
+			triggerEventId: 'cli:autoRun.launch:a1:1',
+		};
+		const view = (installationId: string) => okView(record('/tmp/endpoint.sock', installationId));
+		const detached = await start(view);
+		expect(detached.managedHost!.workflows).toBeNull();
+		expect(
+			await detached.claimWorkflowFence(WORKFLOW, { runId: 'req-1', attemptId: 'att-1' })
+		).toMatchObject({
+			fence: null,
+			state: 'unavailable',
+			code: 'runtime-unavailable',
+			message: expect.stringContaining('No workflow owner producer is attached'),
+		});
+		await detached.connection.close();
+		open.splice(0);
+
+		const requests: Array<Record<string, unknown>> = [];
+		const fake = await startFakeEndpoint({
+			registrationRequired: true,
+			capabilities: ['execution', 'workflow'],
+			operations: {
+				workflow: (payload) => {
+					const p = payload as Record<string, unknown>;
+					requests.push(p);
+					return {
+						outcome: 'owned',
+						workflowId: p.workflowId,
+						ownerId: p.ownerId,
+						ownerEpoch: 4,
+						fencingToken: 'fence-4',
+					};
+				},
+			},
+		});
+		const port = await attachPort(fake, ['attachment', 'execution', 'workflow']);
+		try {
+			const runtime = await start(view, port);
+			expect(runtime.managedHost!.workflows).not.toBeNull();
+			expect(
+				await runtime.claimWorkflowFence(WORKFLOW, { runId: 'req-1', attemptId: 'att-1' })
+			).toEqual({ ownerEpoch: '4', fencingToken: 'fence-4' });
+			// A first claim: epoch 0 and a nonce, as the installation, under the record's policy
+			// generation; the held fence is kept offline because an installed policy is on record.
+			expect(requests).toHaveLength(1);
+			expect(requests[0]).toMatchObject({
+				workflowId: 'runtime-a1-1',
+				runId: 'req-1',
+				attemptId: 'att-1',
+				ownerId: runtime.installation.installationId,
+				ownerEpoch: 0,
+				policyRevision: 3,
+				offlineEnabled: true,
+			});
+			// The next attempt re-claims with what the registry issued.
+			expect(
+				await runtime.claimWorkflowFence(WORKFLOW, { runId: 'req-1', attemptId: 'att-2' })
+			).toEqual({ ownerEpoch: '4', fencingToken: 'fence-4' });
+			expect(requests[1]).toMatchObject({
+				attemptId: 'att-2',
+				ownerEpoch: 4,
+				fencingToken: 'fence-4',
+			});
+			expect(fs.existsSync(path.join(dir, 'maestro-managed-workflows.json'))).toBe(true);
+		} finally {
+			await port.close();
+			await fake.close();
+		}
 	});
 
 	it('leaves the binding standalone for a record that names another installation, and unavailable for untrusted custody', async () => {

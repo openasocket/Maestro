@@ -26,8 +26,12 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * (`./groupchat/spawn`: `groupChatRoomContext`, `groupChatTurnContext`).
  * 0.8.0: durable workflow ownership (`./managed/workflows`): the owner fence
  * a host claims from the workflow owner producer and holds across retries.
+ * 0.9.0: the ownership wired on the headless hosts: `ManagedHostAdapter.workflows`
+ * (the producer port over the adapter's endpoint), `MaestroRuntime.claimWorkflowFence`
+ * (the runtime's own ownership, what every Auto Run attempt is admitted on), and
+ * `managed.workflowFence` taking the attempt's run and attempt ids.
  */
-export const MAESTRO_LIB_VERSION = '0.8.0';
+export const MAESTRO_LIB_VERSION = '0.9.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

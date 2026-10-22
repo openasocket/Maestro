@@ -19,7 +19,6 @@ import * as fs from 'fs/promises';
 
 import { createSleepTracker } from '../../sleepTracking';
 import { createAgentRepository } from '../agents/repository';
-import type { AutoRunOwnerFence, AutoRunWorkflowIdentity } from '../autorun/attribution';
 import type { RepositoryLoadFailure } from '../agents/repository';
 import type { RuleContext, TabDefaults } from '../agents/rules';
 import { createEventBus } from '../client/event-bus';
@@ -58,6 +57,14 @@ import {
 import { createManagedOperations, type ApprovedResource } from '../managed/operations';
 import { createRunJournal, managedRunJournalPath, type RunJournal } from '../managed/run-journal';
 import type { ManagedAuthenticatedContext, ManagedInstallationIdentity } from '../managed/types';
+import {
+	createWorkflowOwnership,
+	MANAGED_WORKFLOWS_FILE_NAME,
+	workflowFenceOf,
+	type WorkflowFenceAnswer,
+	type WorkflowIdentityLike,
+	type WorkflowOwnerStanding,
+} from '../managed/workflows';
 import { getVisibleAgentDefinitions } from '../providers/definitions';
 import type { AgentRecord } from '../store/records';
 import { createBackgroundTurns, type BackgroundTurnDeps } from './background-turns';
@@ -138,11 +145,18 @@ export interface MaestroRuntimeOptions {
 		/** The policy sources admissions are decided on. Default: what the enrollment record names. */
 		policy?(): PolicySourceSet;
 		/**
-		 * The owner fence of an Auto Run's workflow, read on every attempt (the CP-03 workflow
-		 * owner producer). Default none: a managed runtime refuses every Auto Run as unavailable
-		 * rather than run an unowned workflow or mint a fence of its own. Standalone never asks.
+		 * The owner fence of an Auto Run's (or a hosted Cue run's) workflow, claimed on every
+		 * attempt for that attempt's run and attempt ids. Default: the runtime's own
+		 * `createWorkflowOwnership` over `maestro-managed-workflows.json` in the data directory,
+		 * claiming through the host adapter's `workflows` port (the endpoint's workflow owner
+		 * operation, CP-03) as this installation; with no attached producer the claim is refused by
+		 * name. An override stands in for the producer (a harness); nothing here mints a fence, and
+		 * standalone never asks.
 		 */
-		workflowFence?(workflow: AutoRunWorkflowIdentity): AutoRunOwnerFence | null;
+		workflowFence?(
+			workflow: WorkflowIdentityLike,
+			run: { runId: string; attemptId: string }
+		): WorkflowFenceAnswer | Promise<WorkflowFenceAnswer>;
 	};
 	deps?: Partial<RuntimeDeps>;
 }
@@ -169,6 +183,16 @@ export interface MaestroRuntime extends MaestroClient {
 	readonly installation: ManagedInstallationIdentity;
 	/** The host adapter this runtime admits with, when one was injected. */
 	readonly managedHost: ManagedHostAdapter | null;
+	/**
+	 * Claim the owner fence of a workflow for one run and attempt (MRC-07-06A): what every Auto Run
+	 * attempt is admitted on, and what a Cue engine hosted in this process claims with, so one
+	 * ownership record per data directory holds every fence. The fence the registry confirmed, or
+	 * the named reason there is none; an injected `managed.workflowFence` answers instead.
+	 */
+	claimWorkflowFence(
+		workflow: WorkflowIdentityLike,
+		run: { runId: string; attemptId: string }
+	): Promise<WorkflowFenceAnswer>;
 	/**
 	 * The Auto Runs in flight, for a host that reports them (`host status`, the refusal to stop with
 	 * work in flight) and replays them to a client that connects mid-run.
@@ -438,6 +462,46 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		: managedAuthority
 			? { authority: managedAuthority, policy: admissionPolicy, identity: null }
 			: null;
+	// The owner fences this installation holds (MRC-07-06A), claimed as the installation under the
+	// authority the binding names, through the attached host's workflow owner port; one record per
+	// data directory, shared by the Auto Runs here and a Cue engine hosted in this process. A
+	// standalone binding has no standing to claim under; no port, nothing is minted in its place.
+	const workflowOwner = (): WorkflowOwnerStanding | null => {
+		const state = binding.state();
+		if (state.state !== 'enrolled') return null;
+		return {
+			ownerId: installation.installationId,
+			authorityId: state.record.authorityId,
+			policyRevision: admissionPolicy().policyRevision,
+		};
+	};
+	const workflows = createWorkflowOwnership({
+		file: `${paths.userDataDir}/${MANAGED_WORKFLOWS_FILE_NAME}`,
+		port: () => managedHost?.workflows ?? null,
+		owner: workflowOwner,
+		now: deps.now ?? (() => Date.now()),
+		...(deps.rules?.newId ? { newId: deps.rules.newId } : {}),
+	});
+	// Read now, under the lock: a restarted host re-claims with what it held, never afresh. A file
+	// that cannot be read refuses every claim with that reason (the claim re-reads it).
+	const workflowsLoaded = await workflows.load();
+	if (!workflowsLoaded.ok) {
+		logger.warn(
+			`Workflow ownership is unavailable: ${workflowsLoaded.file} is ${workflowsLoaded.reason} (${workflowsLoaded.message}).`,
+			LOG_CONTEXT
+		);
+	}
+	const claimWorkflowFence: MaestroRuntime['claimWorkflowFence'] = async (workflow, run) =>
+		options.managed?.workflowFence
+			? options.managed.workflowFence(workflow, run)
+			: workflowFenceOf(
+					await workflows.claim({
+						workflow,
+						runId: run.runId,
+						attemptId: run.attemptId,
+						offlineEnabled: managedHost?.policyStatus().offline.installedPolicyAvailable ?? false,
+					})
+				);
 	/**
 	 * What a consult and a group chat turn are admitted with: the headless spawn authority over the
 	 * binding and that same host, with the enrollment's registered actor as the principal, rebuilt
@@ -471,7 +535,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			installation,
 			binding,
 			host: autoRunHost,
-			...(options.managed?.workflowFence ? { workflowFence: options.managed.workflowFence } : {}),
+			workflowFence: claimWorkflowFence,
 		},
 		...(deps.rules?.newId ? { newId: deps.rules.newId } : {}),
 	});
@@ -642,6 +706,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			managedRuns: journalLoaded.ok ? journal : null,
 			installation,
 			managedHost,
+			claimWorkflowFence,
 			runs: { activeRuns: autoRun.activeRuns, latestState: autoRun.latestState },
 			// The registry holds every process the runtime owns; the background ones are counted apart.
 			turnsInFlight: () => registry.size() - background.registeredCount(),
