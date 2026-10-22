@@ -10,6 +10,7 @@ import type { PluginGroupingRegistry } from '../../plugins/plugin-grouping-regis
 import type { AuthorizationStore } from '../../plugins/authorization-ledger';
 import type { EnterpriseService } from '../../enterprise/service';
 import type { BrowserEffectAuthority } from '../../enterprise/browser-policy';
+import type { RepositoryEffectAuthority } from '../../enterprise/repository-policy';
 import type { PluginEventBusImpl } from '../../plugins/plugin-event-bus';
 import type { InteractiveReplayController } from '../../agents/claude-interactive-replay';
 import type { ProcessConfig as ProcessSpawnConfig } from '../../process-manager/types';
@@ -48,6 +49,8 @@ export interface IpcBootstrapDependencies {
 	getEnterpriseService: () => EnterpriseService | null;
 	/** The browser ceiling the coworking bridge holds every tool call against (MRC-09-04A); null or absent holds nothing. */
 	getBrowserAuthority?: () => BrowserEffectAuthority | null;
+	/** The repository ceiling the Symphony handlers hold every clone, push, draft, finalize and cancel against (MRC-09-05C); null or absent holds nothing. */
+	getRepositoryAuthority?: () => RepositoryEffectAuthority | null;
 	getPluginEventBus: () => PluginEventBusImpl | null;
 	getInteractiveReplayController: () => InteractiveReplayController<ProcessSpawnConfig> | null;
 	/**

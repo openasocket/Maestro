@@ -468,3 +468,34 @@ describe('production browser ceiling wiring (MRC-09-04A)', () => {
 		}
 	});
 });
+
+describe('production repository ceiling wiring (MRC-09-05C)', () => {
+	const bootstrapSource = fs.readFileSync(
+		path.join(__dirname, '../../../main/ipc/bootstrap/index.ts'),
+		'utf-8'
+	);
+
+	it('composes ONE repository policy source, reading identity and policy live through the service closure', () => {
+		// Same composition as the browser ceiling: both readers go through
+		// `enterpriseService?.` per call, so an enrollment that lands later is
+		// seen by the next Symphony effect without re-wiring, and a host with no
+		// service reads as never enrolled (standalone) rather than throwing.
+		expect(source.match(/createRepositoryPolicySource\(\{/g)).toHaveLength(1);
+		expect(source).toMatch(
+			/const repositoryPolicy = createRepositoryPolicySource\(\{\n\t+identity: \{ read: \(\) => enterpriseService\?\.identity\.read\(\) \?\? \{ status: 'none' \} \},\n\t+policy: \(\) => enterpriseService\?\.policy\.status\(\) \?\? null,\n\t+\}\);/
+		);
+	});
+
+	it('the IPC bootstrap is handed that source and passes it to the Symphony handlers', () => {
+		expect(source).toMatch(/getRepositoryAuthority: \(\) => repositoryPolicy,/);
+		expect(bootstrapSource).toMatch(
+			/registerSymphonyHandlers\(\{[^;]*getRepositoryAuthority: deps\.getRepositoryAuthority,\n\t+\}\);/
+		);
+		// No registration of the Symphony handlers anywhere runs without the reader.
+		const calls = bootstrapSource.match(/registerSymphonyHandlers\([^;]*\)/g) ?? [];
+		expect(calls.length).toBeGreaterThan(0);
+		for (const call of calls) {
+			expect(call, call).toMatch(/getRepositoryAuthority/);
+		}
+	});
+});

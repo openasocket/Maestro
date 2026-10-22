@@ -56,6 +56,7 @@ import { evaluateScheduledDispatch } from '../shared/plugins/plugin-dispatch-gat
 import { PermissionBroker } from './plugins/permission-broker';
 import { createPluginPolicySource } from './enterprise/plugin-policy';
 import { createBrowserPolicySource } from './enterprise/browser-policy';
+import { createRepositoryPolicySource } from './enterprise/repository-policy';
 import { PluginSandboxHost } from './plugins/plugin-sandbox-host';
 import { PluginBackgroundSupervisor } from './plugins/plugin-background-supervisor';
 import { PluginGroupingRegistry } from './plugins/plugin-grouping-registry';
@@ -939,6 +940,17 @@ app
 			getMainWindow: () => mainWindow,
 			getWindowForSession,
 			browserAuthority: () => browserPolicy,
+		});
+		// The repository ceiling source (MRC-09-05 / 09-05C): the one installed
+		// ceiling every Symphony clone, branch, commit, fork, push, draft,
+		// finalize and cancel is held to, composed the same way as the browser
+		// ceiling above (identity and policy read through the service closure
+		// per call) and handed to the Symphony IPC handlers by the bootstrap. No
+		// endpoint operation installs one yet (CP-01): an enrolled host refuses
+		// every repository effect `unavailable` by name; standalone holds nothing.
+		const repositoryPolicy = createRepositoryPolicySource({
+			identity: { read: () => enterpriseService?.identity.read() ?? { status: 'none' } },
+			policy: () => enterpriseService?.policy.status() ?? null,
 		});
 
 		// Serve agent-authored Concerto mockups as real documents with their own
@@ -3373,6 +3385,7 @@ app
 			getPluginAuthStore: () => pluginAuthStore,
 			getEnterpriseService: () => enterpriseService,
 			getBrowserAuthority: () => browserPolicy,
+			getRepositoryAuthority: () => repositoryPolicy,
 			getPluginEventBus: () => pluginEventBus,
 			getInteractiveReplayController: () => interactiveReplayController,
 			setNoteSessionActivated: (fn) => {
