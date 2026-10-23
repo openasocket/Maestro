@@ -805,3 +805,190 @@ describe('inventory facts (MRC-10-06)', () => {
 		expect(JSON.stringify(projector.recent())).not.toContain('sk-live');
 	});
 });
+
+// MRC-10-07: dedup, arrival order, window gaps, the other surfaces and canaries across the three fact kinds.
+describe('lifecycle projector: dedup, order, gaps and canaries (MRC-10-07)', () => {
+	const routes = Object.fromEntries(
+		MANAGED_ROUTES.map((route) => [route, { standalone: 'unverified', managed: 'unsupported' }])
+	) as InventoryFact['providers'][number]['routes'];
+	const inv = (overrides: Partial<InventoryFact> = {}): InventoryFact => ({
+		at: 1_700_000_000_000,
+		device: { deviceId: 'enr-1', hostname: null, os: null },
+		runtimes: [
+			{
+				runtimeId: 'rt-1',
+				processEpoch: 'epoch-1',
+				components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
+			},
+		],
+		providers: [{ agentId: 'claude-code', installed: 'detected', version: null, routes }],
+		subagents: {
+			managed: { state: 'observed', count: 0 },
+			providerInternal: { state: 'unavailable', count: null },
+		},
+		policyRevision: 7,
+		completeness: 'partial',
+		gaps: [],
+		...overrides,
+	});
+
+	it('gives a replayed fact of each kind the same event id while the sequence counts every projection', () => {
+		const projector = createLifecycleProjector(deps());
+		const admission = {
+			leaseId: 'lease-7',
+			authorityId: 'auth-1',
+			requestDigest: 'digest-7',
+			policyRevision: 7,
+		};
+		const first = projector.record(fact({ admission }));
+		const again = projector.record(fact({ admission }));
+		expect(first.map((e) => e.kind)).toEqual(['decision', 'run-state']);
+		expect(again.map((e) => e.eventId)).toEqual(first.map((e) => e.eventId));
+		expect(first[0].eventId).not.toBe(first[1].eventId);
+		const [usageOnce] = projector.recordUsage(usageFact());
+		const [usageAgain] = projector.recordUsage(usageFact());
+		expect(usageAgain.eventId).toBe(usageOnce.eventId);
+		const [inventoryOnce] = projector.recordInventory(inv());
+		const [inventoryLater] = projector.recordInventory(inv({ at: inv().at + 60_000 }));
+		expect(inventoryLater.eventId).toBe(inventoryOnce.eventId);
+		// Eight projections, eight sequence numbers, four distinct ids: the projector numbers, the journal dedups.
+		expect(projector.nextSequence()).toBe(9);
+		expect(new Set(projector.recent().map((e) => e.sequence)).size).toBe(8);
+		expect(new Set(projector.recent().map((e) => e.eventId)).size).toBe(4);
+		// The same run under another kind is never the same id.
+		expect(usageOnce.eventId).not.toBe(first[1].eventId);
+		expect(inventoryOnce.eventId).not.toBe(usageOnce.eventId);
+	});
+
+	it('numbers by arrival and stamps by occurrence: facts out of time order keep their own time, and the ids do not depend on the order', () => {
+		const late = fact({ at: 1_700_000_000_000, state: 'running' });
+		const early = fact({ at: 1_699_999_999_000, state: 'queued' });
+		const a = createLifecycleProjector(deps());
+		const [lateA] = a.record(late);
+		const [earlyA] = a.record(early);
+		const b = createLifecycleProjector(deps());
+		const [earlyB] = b.record(early);
+		const [lateB] = b.record(late);
+		expect([lateA.sequence, earlyA.sequence]).toEqual([1, 2]);
+		expect([earlyB.sequence, lateB.sequence]).toEqual([1, 2]);
+		expect(lateA.eventId).toBe(lateB.eventId);
+		expect(earlyA.eventId).toBe(earlyB.eventId);
+		expect(lateA.occurredAt > earlyA.occurredAt).toBe(true);
+		// A reader that orders by occurrence reads the same story from both.
+		const byTime = (events: readonly { occurredAt: string; eventId: string }[]) =>
+			[...events].sort((x, y) => x.occurredAt.localeCompare(y.occurredAt)).map((e) => e.eventId);
+		expect(byTime(a.recent())).toEqual(byTime(b.recent()));
+	});
+
+	it('counts what the window dropped and what it refused across the three kinds; a refusal takes no sequence number', () => {
+		const projector = createLifecycleProjector({ ...deps(), capacity: 2 });
+		projector.record(fact({ at: 1 }));
+		projector.recordUsage(usageFact());
+		projector.recordInventory(inv());
+		expect(projector.gaps()).toEqual({ dropped: 1, refused: 0 });
+		expect(projector.recent().map((e) => e.kind)).toEqual(['usage', 'inventory']);
+		expect(projector.record({ ...fact(), prompt: 'p' } as never)).toEqual([]);
+		expect(projector.recordUsage({ ...usageFact(), apiKey: 'k' } as never)).toEqual([]);
+		expect(projector.recordInventory({ ...inv(), socketPath: '/s' } as never)).toEqual([]);
+		expect(projector.gaps()).toEqual({ dropped: 1, refused: 3 });
+		const [next] = projector.record(fact({ at: 2, state: 'completed', exitCode: 0 }));
+		expect(next.sequence).toBe(4);
+		expect(projector.gaps()).toEqual({ dropped: 2, refused: 3 });
+		expect(projector.recent().map((e) => e.sequence)).toEqual([3, 4]);
+	});
+
+	it('projects every surface the producers run work on, not only an AI tab, each with a valid context', () => {
+		const projector = createLifecycleProjector(deps());
+		const surfaces: Partial<LifecycleFact>[] = [
+			{
+				surface: 'terminal',
+				sessionId: 'agent-1-terminal-2',
+				tabId: null,
+				provider: 'terminal',
+				model: null,
+				runId: 'agent-1-terminal-2@1700000000000',
+				record: 'omitted',
+				ledgerStatus: null,
+			},
+			{
+				surface: 'group-chat',
+				sessionId: 'room-1',
+				tabId: null,
+				runId: 'room-1:turn-3',
+				record: 'omitted',
+				ledgerStatus: null,
+			},
+			{
+				surface: 'headless-turn',
+				sessionId: 'cli-7',
+				tabId: null,
+				runId: 'run-headless-1',
+				record: 'journal',
+				ledgerStatus: null,
+			},
+		];
+		for (const overrides of surfaces) {
+			const [event] = projector.record(fact(overrides));
+			expect(event.source).toMatchObject({ surface: overrides.surface, record: overrides.record });
+			expect(managedContextProblems(event.context)).toEqual([]);
+		}
+		const [usage] = projector.recordUsage(
+			usageFact({
+				surface: 'group-chat',
+				sessionId: 'room-1',
+				tabId: null,
+				runId: 'room-1:turn-3',
+				record: 'omitted',
+			})
+		);
+		expect(usage.source).toMatchObject({ surface: 'group-chat', record: 'omitted' });
+		expect(projector.recent().map((e) => e.source.surface)).toEqual([
+			'terminal',
+			'group-chat',
+			'headless-turn',
+			'group-chat',
+		]);
+	});
+
+	it('lets no prompt, token or path through under any key of any kind at any level it validates, and keeps only the bounded detail', () => {
+		const canaries = [
+			'CANARY the user asked for a refactor',
+			'sk-ant-api03-CANARY0123456789',
+			'/Users/canary/.codex/auth.json',
+		];
+		const projector = createLifecycleProjector(deps());
+		for (const value of canaries) {
+			expect(projector.record({ ...fact(), stdin: value } as never)).toEqual([]);
+			expect(
+				projector.recordUsage(
+					usageFact({
+						usage: {
+							...usageFact().usage,
+							counts: { ...usageFact().usage.counts!, note: value },
+						} as never,
+					})
+				)
+			).toEqual([]);
+			expect(
+				projector.recordUsage(
+					usageFact({
+						attribution: { tenantId: 'tenant-1', orgId: 'org-eng', note: value } as never,
+					})
+				)
+			).toEqual([]);
+			expect(
+				projector.recordInventory(inv({ device: { ...inv().device, path: value } as never }))
+			).toEqual([]);
+			expect(
+				projector.recordInventory(inv({ subagents: { ...inv().subagents, note: value } as never }))
+			).toEqual([]);
+		}
+		expect(projector.gaps()).toEqual({ dropped: 0, refused: 15 });
+		// What a fact may carry is a bounded word about the state, and the source keeps it as given.
+		const [kept] = projector.record(fact({ detail: 'superseded by run-2' }));
+		expect(kept.source.detail).toBe('superseded by run-2');
+		expect(projector.recent()).toHaveLength(1);
+		const wire = JSON.stringify(projector.recent());
+		for (const value of canaries) expect(wire).not.toContain(value);
+	});
+});

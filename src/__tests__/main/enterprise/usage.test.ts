@@ -317,3 +317,278 @@ describe('createUsageCapture', () => {
 		expect(fact.accountRef).toBe('/Users/someone/.codex-work');
 	});
 });
+
+// MRC-10-07: unknown usage (no model, no total, replays only), the other surfaces, the managed lineage, and canaries.
+describe('usage capture: unknown usage, replays, surfaces and canaries (MRC-10-07)', () => {
+	const lineage = {
+		identity: {
+			requestId: 'req-1',
+			idempotencyKey: 'key-1',
+			attemptId: 'attempt-1',
+			runId: 'run-1',
+			rootRunId: 'root-1',
+			parentRunId: null,
+		},
+		traceId: 'trace-1',
+		workflow: null,
+		delegation: { chain: [], grantRef: null },
+	};
+
+	it('settles what nothing can price as estimated tokens with no cost: a stream that named no model and a settle that names none', () => {
+		const p = projector();
+		const capture = createUsageCapture({ events: p, identity: () => null, accountRef: () => null });
+		capture.observe('pi-1', 'pi', { inputTokens: 10, outputTokens: 2 });
+		capture.observe('pi-1', 'pi', { inputTokens: 12, outputTokens: 3 });
+		const [event] = capture.settle(
+			settle({
+				sessionId: 'pi-1',
+				provider: 'pi',
+				model: null,
+				providerSessionId: null,
+				total: total({
+					inputTokens: 22,
+					outputTokens: 5,
+					cacheReadInputTokens: 0,
+					cacheCreationInputTokens: 0,
+					contextWindow: 0,
+				}),
+			})
+		);
+		expect(event.usage).toEqual({
+			provenance: 'estimated',
+			tokens: 'provider-stream',
+			cost: 'none',
+			costUsd: null,
+			priceRevision: null,
+			reporting: 'per-step',
+			events: 2,
+			corrections: 0,
+			cacheReadCounting: 'unknown',
+			counts: {
+				inputTokens: 22,
+				outputTokens: 5,
+				cacheReadInputTokens: null,
+				cacheCreationInputTokens: null,
+				reasoningTokens: null,
+			},
+			contextWindow: null,
+			accountRef: null,
+			attribution: null,
+		});
+		expect(event.source.model).toBeNull();
+	});
+
+	it('a stream that reported but a host that summed nothing is unavailable with the reports counted; replays that carry only a correction are not reports', () => {
+		const p = projector();
+		const capture = createUsageCapture({ events: p, identity: () => null, accountRef: () => null });
+		capture.observe('codex-1', 'codex', { inputTokens: 5, outputTokens: 1 });
+		const [noTotal] = capture.settle(settle({ sessionId: 'codex-1', total: undefined }));
+		expect(noTotal.usage).toMatchObject({
+			provenance: 'unavailable',
+			tokens: 'none',
+			cost: 'none',
+			costUsd: null,
+			counts: null,
+			events: 1,
+			corrections: 0,
+			reporting: 'running-total',
+		});
+		capture.observe('codex-2', 'codex', { inputTokens: 5, outputTokens: 1, correctionOnly: true });
+		capture.observe('codex-2', 'codex', { inputTokens: 5, outputTokens: 1, correctionOnly: true });
+		const [onlyCorrections] = capture.settle(
+			settle({ sessionId: 'codex-2', runId: 'run-2', total: total() })
+		);
+		expect(onlyCorrections.usage).toMatchObject({
+			provenance: 'unavailable',
+			tokens: 'none',
+			events: 0,
+			corrections: 2,
+			reporting: 'none',
+			counts: null,
+		});
+		expect(capture.size()).toBe(0);
+	});
+
+	it('names the reporting: a known provider keeps its word even for one report, a tracker told nothing says single-event, and a context window counts only when a report named it', () => {
+		const p = projector();
+		const capture = createUsageCapture({ events: p, identity: () => null, accountRef: () => null });
+		capture.observe('pi-1', 'pi', {
+			inputTokens: 10,
+			outputTokens: 2,
+			contextWindowReported: true,
+		});
+		const [single] = capture.settle(
+			settle({
+				sessionId: 'pi-1',
+				provider: 'pi',
+				total: total({ inputTokens: 10, outputTokens: 2 }),
+			})
+		);
+		// The capture names every provider's reporting up front, so one report is still that word; only a tracker told nothing says single-event.
+		expect(single.usage).toMatchObject({ reporting: 'per-step', contextWindow: 272_000 });
+		const untold = new UsageProvenanceTracker();
+		untold.observe({ inputTokens: 10, outputTokens: 2 });
+		expect(untold.summary().reporting).toBe('single-event');
+		capture.observe('claude-1', 'claude-code', { inputTokens: 10, outputTokens: 2 });
+		const [turn] = capture.settle(
+			settle({
+				sessionId: 'claude-1',
+				provider: 'claude-code',
+				model: 'claude-opus-4-8',
+				total: total({ inputTokens: 10, outputTokens: 2 }),
+			})
+		);
+		expect(turn.usage).toMatchObject({ reporting: 'turn-total', contextWindow: null });
+	});
+
+	it('the model a stream names prices the turn but never reaches the event; a token-shaped model, a prompt or a key in a report leaves no trace', () => {
+		const canaryModel = 'sk-ant-api03-CANARY-MODEL';
+		const p = projector();
+		const capture = createUsageCapture({ events: p, identity: () => null, accountRef: () => null });
+		capture.observe('pi-1', 'pi', {
+			inputTokens: 100,
+			outputTokens: 10,
+			model: canaryModel,
+			prompt: 'CANARY PROMPT',
+			apiKey: 'CANARY KEY',
+		} as never);
+		const [event] = capture.settle(
+			settle({
+				sessionId: 'pi-1',
+				provider: 'pi',
+				model: null,
+				total: total({
+					inputTokens: 100,
+					outputTokens: 10,
+					cacheReadInputTokens: 0,
+					cacheCreationInputTokens: 0,
+				}),
+			})
+		);
+		// A model nothing resolves prices at the default table: the revision is the table's digest, not the name.
+		expect(event.usage).toMatchObject({ cost: 'priced', priceRevision: usagePriceRevision(null) });
+		expect(event.usage.priceRevision).toBe(usagePriceRevision(canaryModel));
+		expect(event.source.model).toBeNull();
+		const wire = JSON.stringify(p.recent());
+		for (const canary of [canaryModel, 'CANARY PROMPT', 'CANARY KEY', 'sk-ant']) {
+			expect(wire).not.toContain(canary);
+		}
+	});
+
+	it('carries the lineage and the admission of a managed settle, so the usage joins the request and the lease; another lease on the same figures is another event', () => {
+		const p = projector();
+		const capture = createUsageCapture({
+			events: p,
+			identity: () => enrolled(),
+			accountRef: () => null,
+		});
+		const admission = {
+			leaseId: 'lease-1',
+			authorityId: 'auth-1',
+			requestDigest: 'digest-1',
+			policyRevision: 3,
+		};
+		capture.observe('agent-1-ai-tab-1', 'codex', { inputTokens: 100, outputTokens: 1 });
+		const [first] = capture.settle(
+			settle({
+				lineage,
+				admission,
+				record: 'journal',
+				total: total({ inputTokens: 100, outputTokens: 1 }),
+			})
+		);
+		expect(first.context.identity).toEqual(lineage.identity);
+		expect(first.context.traceId).toBe('trace-1');
+		expect(first.context.policyRevision).toBe(3);
+		expect(first.run).toMatchObject({
+			runId: 'run-1',
+			rootRunId: 'root-1',
+			attemptId: 'attempt-1',
+		});
+		capture.observe('agent-1-ai-tab-1', 'codex', { inputTokens: 100, outputTokens: 1 });
+		const [other] = capture.settle(
+			settle({
+				lineage,
+				admission: { ...admission, leaseId: 'lease-2' },
+				record: 'journal',
+				total: total({ inputTokens: 100, outputTokens: 1 }),
+			})
+		);
+		expect(other.eventId).not.toBe(first.eventId);
+		expect(other.usage).toEqual(first.usage);
+	});
+
+	it('settles every surface: a room turn and a headless turn are usage events too, with the record each producer keeps', () => {
+		const p = projector();
+		const capture = createUsageCapture({ events: p, identity: () => null, accountRef: () => null });
+		capture.observe('room-1', 'codex', { inputTokens: 40, outputTokens: 4 });
+		const [room] = capture.settle(
+			settle({
+				surface: 'group-chat',
+				sessionId: 'room-1',
+				tabId: null,
+				runId: 'room-1:turn-3',
+				record: 'omitted',
+				total: total({ inputTokens: 40, outputTokens: 4 }),
+			})
+		);
+		capture.observe('cli-7', 'claude-code', { inputTokens: 30, outputTokens: 3, costUsd: 0.001 });
+		const [headless] = capture.settle(
+			settle({
+				surface: 'headless-turn',
+				sessionId: 'cli-7',
+				tabId: null,
+				provider: 'claude-code',
+				model: 'claude-opus-4-8',
+				runId: 'run-headless-1',
+				record: 'journal',
+				total: total({ inputTokens: 30, outputTokens: 3, totalCostUsd: 0.001 }),
+			})
+		);
+		expect(room.source).toMatchObject({ surface: 'group-chat', record: 'omitted', tabId: null });
+		expect(headless.source).toMatchObject({ surface: 'headless-turn', record: 'journal' });
+		expect(headless.usage).toMatchObject({
+			cost: 'reported',
+			costUsd: 0.001,
+			reporting: 'turn-total',
+		});
+		expect(p.recent().map((e) => e.kind)).toEqual(['usage', 'usage']);
+	});
+
+	it('a settle the projector refuses is a counted gap in the attached journal, never a throw, and the file never sees what it carried', async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-usage-'));
+		dirs.push(dir);
+		let ids = 0;
+		const journal = createEventJournal({
+			file: path.join(dir, 'maestro-managed-events.json'),
+			now: () => T0,
+			newId: () => `j-${++ids}`,
+		});
+		const loaded = await journal.load();
+		if (!loaded.ok) throw new Error(loaded.message);
+		const p = projector();
+		journal.attach(p);
+		const capture = createUsageCapture({ events: p, identity: () => null, accountRef: () => null });
+		capture.observe('agent-1-ai-tab-1', 'codex', { inputTokens: 100, outputTokens: 1 });
+		expect(
+			capture.settle(
+				settle({
+					state: 'done' as never,
+					answerText: 'CANARY ANSWER',
+					total: total({ inputTokens: 100, outputTokens: 1 }),
+				} as never)
+			)
+		).toEqual([]);
+		expect(p.gaps()).toEqual({ dropped: 0, refused: 1 });
+		// The refused settle forgot its session: the next settle of it is a silent one.
+		expect(capture.size()).toBe(0);
+		const [next] = capture.settle(settle({ runId: 'run-2', total: total() }));
+		expect(next.usage.provenance).toBe('unavailable');
+		expect(journal.status().gaps).toEqual([
+			expect.objectContaining({ kind: 'projector-refused', count: 1, afterSequence: 0 }),
+		]);
+		expect(journal.page({ cursor: null, limit: 10 })).toMatchObject({ completeness: 'gap' });
+		await journal.flush();
+		expect(fs.readFileSync(journal.file, 'utf8')).not.toContain('CANARY ANSWER');
+	});
+});
