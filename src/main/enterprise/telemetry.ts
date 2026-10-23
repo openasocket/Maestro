@@ -207,8 +207,16 @@ export interface TelemetryClient {
 	wake(): void;
 	/** One pass, now: take, report, settle. Serialized; a pass in flight is awaited instead. */
 	pump(): Promise<TelemetryPass>;
+	/** Settles once no pass is in flight; starts none. What a host awaits after `stop()`, before it flushes the journal. */
+	drain(): Promise<void>;
 	status(): TelemetryClientStatus;
 }
+
+/**
+ * The idle poll a long-lived host runs the client at: a standing read costs a sealed-record read
+ * (the keyring anchor with it), so the hosts pass on `wake()` and poll this rarely for retries.
+ */
+export const TELEMETRY_HOST_IDLE_POLL_MS = 60_000;
 
 export interface TelemetryClientDeps {
 	journal: Pick<EventJournal, 'take' | 'acknowledge' | 'settle'>;
@@ -251,7 +259,8 @@ export function createTelemetryClient(deps: TelemetryClientDeps): TelemetryClien
 	const wakeDelayMs = Math.max(0, deps.wakeDelayMs ?? DEFAULT_WAKE_DELAY_MS);
 	const maxBackoffMs = Math.max(intervalMs, deps.maxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS);
 	const timers = deps.timers ?? {
-		set: (callback, ms) => setTimeout(callback, ms),
+		// Auxiliary to the host: the timer never keeps a process alive on its own.
+		set: (callback, ms) => setTimeout(callback, ms).unref(),
 		clear: (handle) => clearTimeout(handle as NodeJS.Timeout),
 	};
 	const iso = (): string => new Date(now()).toISOString();
@@ -456,6 +465,13 @@ export function createTelemetryClient(deps: TelemetryClientDeps): TelemetryClien
 			schedule(wakeDelayMs);
 		},
 		pump,
+		drain: async () => {
+			if (inFlight)
+				await inFlight.then(
+					() => undefined,
+					() => undefined
+				);
+		},
 		status: () => ({
 			running,
 			passInFlight: inFlight !== null,

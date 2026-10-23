@@ -259,8 +259,14 @@ describe('startRuntimeHost', () => {
 				authorityId: host.runtime.managedHost!.authority.authorityId,
 			});
 			expect('managedUnavailable' in report).toBe(false);
+			// The telemetry client runs over the runtime's journal and adapter, and sends nothing
+			// without a standing: the record's socket is not there to attach to (MRC-10-03B).
+			expect(host.telemetry).not.toBeNull();
+			expect(host.telemetry!.status().running).toBe(true);
+			expect(await host.telemetry!.pump()).toMatchObject({ outcome: 'no-standing', taken: 0 });
 
 			await host.stop();
+			expect(host.telemetry!.status().running).toBe(false);
 			expect(close).toHaveBeenCalledTimes(1);
 			expect(lines).not.toContain(expect.stringContaining('managed standing failed'));
 		});

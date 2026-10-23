@@ -25,6 +25,11 @@ import {
 	type RuntimeRefusal,
 	type RuntimeServer,
 } from '../../shared/maestro-lib';
+import {
+	createTelemetryClient,
+	TELEMETRY_HOST_IDLE_POLL_MS,
+	type TelemetryClient,
+} from '../../main/enterprise/telemetry';
 import { PROMPT_IDS } from '../../shared/promptDefinitions';
 import { startHostCue, type HostCue } from './host-cue';
 import type { HostManagedLifecycle } from './host-managed';
@@ -99,6 +104,12 @@ export interface RunningHost {
 	readonly server: RuntimeServer;
 	readonly cue: HostCue;
 	readonly token: string;
+	/**
+	 * The telemetry client over the runtime's event journal and managed host (MRC-10-03B): started
+	 * after the standing re-attaches, woken by every event the runtime projects, stopped and drained
+	 * before the standing closes. Null when the runtime holds no host adapter or no journal.
+	 */
+	readonly telemetry: TelemetryClient | null;
 	/** The work a stop would cut off now: what `host status` reports and a draining host waits on. */
 	work(): HostWork;
 	/** Settles once the host has fully stopped. */
@@ -151,6 +162,8 @@ export async function startRuntimeHost(
 		activeRuns: () => 0,
 		stop: async () => undefined,
 	};
+	let telemetry: TelemetryClient | null = null;
+	let unsubscribeTelemetryWake = (): void => undefined;
 	let stopping: Promise<void> | undefined;
 	let finish!: () => void;
 	const stopped = new Promise<void>((resolve) => {
@@ -169,6 +182,14 @@ export async function startRuntimeHost(
 			}
 			unsubscribeLost();
 			await server?.close();
+			// No new telemetry pass; the one in flight settles its batch before the socket goes.
+			unsubscribeTelemetryWake();
+			telemetry?.stop();
+			try {
+				await telemetry?.drain();
+			} catch (error) {
+				log(`Draining telemetry failed: ${error instanceof Error ? error.message : String(error)}`);
+			}
 			// The endpoint socket goes before the directory does; a failure here must not strand the rest.
 			try {
 				await options.managedLifecycle?.close();
@@ -207,6 +228,18 @@ export async function startRuntimeHost(
 				`Re-attaching the managed standing failed: ${error instanceof Error ? error.message : String(error)}`
 			);
 		}
+		// With a host adapter and a journal, the journaled events go to the endpoint from here on,
+		// under whatever standing the adapter reports at each pass (MRC-10-03B).
+		if (runtime.managedHost && runtime.managedEvents) {
+			telemetry = createTelemetryClient({
+				journal: runtime.managedEvents,
+				host: runtime.managedHost,
+				intervalMs: TELEMETRY_HOST_IDLE_POLL_MS,
+			});
+			const client = telemetry;
+			unsubscribeTelemetryWake = runtime.lifecycle.subscribe(() => client.wake());
+			telemetry.start();
+		}
 		const token = deps.randomToken();
 		const cliSecret = deps.randomToken();
 		cue = await deps.startCue({
@@ -238,7 +271,7 @@ export async function startRuntimeHost(
 		});
 		log(`Host serving ${paths.userDataDir} on 127.0.0.1:${server.port} (pid ${deps.pid}).`);
 		const serving = server;
-		return { runtime, server, cue, token, work: () => serving.work(), stopped, stop };
+		return { runtime, server, cue, token, telemetry, work: () => serving.work(), stopped, stop };
 	} catch (error) {
 		await stop();
 		throw error;

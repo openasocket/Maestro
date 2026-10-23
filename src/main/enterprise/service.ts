@@ -73,6 +73,11 @@ import {
 import { createPolicyStatusService, type PolicyStatusService } from './policy-status';
 import { createCueSpawnAuthority, createProcessSpawnAuthority } from './spawn-authority';
 import {
+	createTelemetryClient,
+	TELEMETRY_HOST_IDLE_POLL_MS,
+	type TelemetryClient,
+} from './telemetry';
+import {
 	createRemoteEndpointQualifier,
 	type RemoteEndpointProbe,
 	type RemoteEndpointQualifier,
@@ -145,6 +150,13 @@ export interface EnterpriseService {
 	 */
 	readonly eventJournal: EventJournal;
 	eventJournalAttached(): boolean;
+	/**
+	 * The authenticated telemetry client (MRC-10-03B) over `eventJournal` and `host`: started
+	 * at `start()` once the journal is attached, woken by every event `events` projects, polling
+	 * rarely otherwise, stopped and drained at `close()` before the journal flushes. It sends
+	 * only under a registered standing and settles every entry with the endpoint's own answer.
+	 */
+	readonly telemetry: TelemetryClient;
 	/**
 	 * The workflow owner fences this installation holds (MRC-07-06), claimed
 	 * through the endpoint's workflow owner operation and kept in
@@ -282,6 +294,12 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		newId: generateUUID,
 	});
 	let eventJournalAttached = false;
+	const telemetry = createTelemetryClient({
+		journal: eventJournal,
+		host,
+		now,
+		intervalMs: TELEMETRY_HOST_IDLE_POLL_MS,
+	});
 
 	return {
 		installation,
@@ -296,6 +314,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		events,
 		eventJournal,
 		eventJournalAttached: () => eventJournalAttached,
+		telemetry,
 		workflows,
 		claimWorkflowFence,
 		async start() {
@@ -309,6 +328,11 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 			if (loadedEvents.ok) {
 				eventJournal.attach(events);
 				eventJournalAttached = true;
+				// The client passes when an event lands and rarely otherwise; with no record its
+				// standing read finds no file and stops there, so an unenrolled desktop still never
+				// touches the keyring. Started with no standing yet: the first passes answer so.
+				events.subscribe(() => telemetry.wake());
+				telemetry.start();
 			} else {
 				deps.onEventJournalUnavailable?.(loadedEvents);
 			}
@@ -317,6 +341,9 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 			await lifecycle.connect();
 		},
 		async close() {
+			// No new pass; the one in flight settles its batch before the socket and the file go.
+			telemetry.stop();
+			await telemetry.drain();
 			await lifecycle.close();
 			// What the journal recorded of the last spawns and exits, before the process goes.
 			if (eventJournalAttached) await eventJournal.flush();

@@ -731,8 +731,9 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 			return deps.endpoint ? endpointTelemetryPort(deps.endpoint) : null;
 		},
 		telemetryStanding() {
+			// One standing read: the lifecycle's view already carries the custody read.
 			const standing = deps.status();
-			const identity = deps.identity.read();
+			const { identity } = standing;
 			const record = identity.status === 'ok' ? identity.record : null;
 			const connection = standing.connection;
 			const live = standing.endpoint;

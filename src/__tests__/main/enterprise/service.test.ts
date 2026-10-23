@@ -330,6 +330,87 @@ describe('enterprise service', () => {
 		expect(fake.calls).toHaveLength(0);
 	});
 
+	it('hands a journaled event to the endpoint telemetry operation under a registered standing and marks it received from the receipt (MRC-10-03B)', async () => {
+		const reports: Record<string, unknown>[] = [];
+		const telemetryFake = await startFakeEndpoint({
+			registrationRequired: true,
+			capabilities: ['execution', 'telemetry'],
+			now: () => NOW,
+			operations: {
+				telemetry: (payload) => {
+					reports.push(payload as Record<string, unknown>);
+					return {
+						outcome: 'durably_accepted',
+						eventId: (payload as { eventId: string }).eventId,
+						receivedAt: new Date(NOW).toISOString(),
+						duplicate: false,
+					};
+				},
+			},
+		});
+		try {
+			const service = compose();
+			await service.identity.write({
+				installationId: service.installation.installationId,
+				tenantId: 'tenant-1',
+				orgId: 'org-1',
+				enrollmentId: 'enr-1',
+				endpoint: {
+					socketPath: telemetryFake.socketPath,
+					bindingDigest: 'a'.repeat(64),
+					trustRootDigest: null,
+				},
+				management: 'enrolled',
+				registration: null,
+				policy: { desiredRevision: null, appliedRevision: null, observedAt: null },
+				enrolledAt: new Date(NOW).toISOString(),
+			});
+			await service.start();
+			expect(service.telemetry.status().running).toBe(true);
+			// Before the actor approves there is no standing: an event is journaled, nothing is sent.
+			const [early] = service.events.record(SPAWN);
+			expect(await service.telemetry.pump()).toMatchObject({ outcome: 'no-standing', taken: 0 });
+			expect(reports).toHaveLength(0);
+			expect((await service.policy.recover()).status).toBe('approval-required');
+			expect((await service.lifecycle.completeRegistration()).status).toBe('ok');
+			expect(service.host.telemetryStanding()).toMatchObject({
+				ok: true,
+				binding: { deviceId: 'enr-1', policyRevision: 3 },
+			});
+			const pass = await service.telemetry.pump();
+			expect(pass).toMatchObject({ outcome: 'sent', taken: 1, received: 1 });
+			expect(reports).toHaveLength(1);
+			expect(reports[0]).toMatchObject({
+				eventId: early.eventId,
+				deviceId: 'enr-1',
+				instanceId: service.installation.installationId,
+				bootId: service.installation.processEpoch,
+				source: 'runtime',
+				family: 'agent.lifecycle',
+				policyRevision: 3,
+				collectionProfile: 'metadata',
+			});
+			// The run identities stay in the journal; the wire carries none of them.
+			const wire = JSON.stringify(reports[0]);
+			for (const canary of [SPAWN.agentId, SPAWN.sessionId, SPAWN.runId, SPAWN.provider]) {
+				expect(wire).not.toContain(canary);
+			}
+			expect(service.eventJournal.status()).toMatchObject({
+				delivery: { pending: 0, uncertain: 0, received: 1 },
+				held: 0,
+			});
+			await service.close();
+			services.splice(0);
+			expect(service.telemetry.status().running).toBe(false);
+			const written = JSON.parse(
+				fs.readFileSync(path.join(dir, 'maestro-managed-events.json'), 'utf8')
+			);
+			expect(written.entries[0]).toMatchObject({ eventId: early.eventId, delivery: 'received' });
+		} finally {
+			await telemetryFake.close();
+		}
+	});
+
 	it('reports a journal file that will not load by name, keeps the projection detached and leaves the file alone', async () => {
 		const file = path.join(dir, 'maestro-managed-events.json');
 		fs.writeFileSync(file, '{ not json');
