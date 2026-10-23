@@ -108,7 +108,9 @@ async function journal(): Promise<EventJournal> {
 
 type Answer =
 	| EndpointInvokeOutcome<unknown>
-	| ((report: EndpointTelemetryEvent) => EndpointInvokeOutcome<unknown>);
+	| ((
+			report: EndpointTelemetryEvent
+	  ) => EndpointInvokeOutcome<unknown> | Promise<EndpointInvokeOutcome<unknown>>);
 
 /** The adapter's two telemetry members, scripted: a standing to answer and a queue of answers to give. */
 function hostDouble(initial: Partial<TelemetryStanding> = {}) {
@@ -633,5 +635,354 @@ describe('telemetryReportOf for a usage event (MRC-10-04)', () => {
 			family: 'usage',
 			usageProvenance: 'unavailable',
 		});
+	});
+});
+
+// MRC-10-07: backpressure, a real restart over the file, serialized passes, backoff and the wire canaries.
+describe('telemetry client: backpressure, restart and canaries (MRC-10-07)', () => {
+	/** The report keys the endpoint operation reads; a key outside this list never leaves. */
+	const REPORT_KEYS = [
+		'bootId',
+		'collectionProfile',
+		'completeness',
+		'contentReferences',
+		'deviceId',
+		'eventId',
+		'family',
+		'instanceId',
+		'occurredAt',
+		'policyRevision',
+		'redaction',
+		'schemaVersion',
+		'sequence',
+		'source',
+		'usageProvenance',
+	];
+
+	async function journalAt(file: string): Promise<EventJournal> {
+		let ids = 0;
+		const made = createEventJournal({
+			file,
+			now: () => T0,
+			newId: () => `journal-${++ids}`,
+		});
+		open.push(made);
+		const loaded = await made.load();
+		if (!loaded.ok) throw new Error(loaded.message);
+		return made;
+	}
+
+	it('hands over at most a batch per pass, drains the backlog pass by pass, and no entry is lost or doubled on the way', async () => {
+		const j = await journal();
+		const p = projector();
+		j.attach(p);
+		const events: ManagedLifecycleEvent[] = [];
+		for (let i = 0; i < 7; i += 1) events.push(...p.record(fact()));
+		const h = hostDouble();
+		const c = client(j, h.host, { batchSize: 3 });
+		expect(await c.pump()).toMatchObject({ outcome: 'sent', taken: 3, received: 3 });
+		expect(j.status()).toMatchObject({ delivery: { pending: 4, received: 3 }, held: 0 });
+		expect(await c.pump()).toMatchObject({ outcome: 'sent', taken: 3, received: 3 });
+		expect(await c.pump()).toMatchObject({ outcome: 'sent', taken: 1, received: 1 });
+		expect(await c.pump()).toMatchObject({ outcome: 'idle', taken: 0 });
+		expect(h.reports.map((r) => r.eventId)).toEqual(events.map((e) => e.eventId));
+		expect(j.status()).toMatchObject({
+			entries: 7,
+			delivery: { pending: 0, uncertain: 0, received: 7 },
+		});
+		expect(c.status().counters).toMatchObject({ passes: 4, taken: 7, received: 7, duplicates: 0 });
+	});
+
+	it('a hold is a pause: events keep arriving, the journal keeps every one, nothing is taken until the standing changes, then all go in order', async () => {
+		const j = await journal();
+		const p = projector();
+		j.attach(p);
+		p.record(fact());
+		const h = hostDouble();
+		h.answers.push({ status: 'denied', reason: 'policy_denied' });
+		const c = client(j, h.host, { batchSize: 2 });
+		expect(await c.pump()).toMatchObject({ outcome: 'held', denial: 'policy_denied' });
+		for (let i = 0; i < 5; i += 1) p.record(fact());
+		expect(await c.pump()).toMatchObject({ outcome: 'held', taken: 0 });
+		expect(j.status()).toMatchObject({
+			entries: 6,
+			delivery: { pending: 6, received: 0 },
+			held: 0,
+		});
+		expect(h.reports).toHaveLength(1);
+		h.setStanding({
+			standingKey: 'c2:registered:attached:managed:4:telemetry',
+			ok: true,
+			binding: { ...BINDING, policyRevision: 4 },
+		});
+		let received = 0;
+		for (let i = 0; i < 3; i += 1) received += (await c.pump()).received;
+		expect(received).toBe(6);
+		const sequences = h.reports.slice(1).map((r) => r.sequence);
+		expect(sequences).toEqual([...sequences].sort((a, b) => a - b));
+		expect(j.status().delivery).toEqual({ pending: 0, uncertain: 0, received: 6 });
+		expect(c.status().hold).toBeNull();
+	});
+
+	it('serializes passes: a pump during a pass is that pass, drain waits for it, and the batch is handed over once', async () => {
+		const j = await journal();
+		const p = projector();
+		j.attach(p);
+		p.record(fact());
+		p.record(fact());
+		const h = hostDouble();
+		let release: (() => void) | null = null;
+		h.answers.push(
+			(report) =>
+				new Promise((resolve) => {
+					release = () =>
+						resolve({
+							status: 'ok',
+							payload: {
+								outcome: 'durably_accepted',
+								eventId: report.eventId,
+								receivedAt: '2026-10-22T12:00:01.000Z',
+								duplicate: false,
+							},
+						});
+				})
+		);
+		const c = client(j, h.host);
+		const first = c.pump();
+		const second = c.pump();
+		expect(second).toBe(first);
+		expect(c.status().passInFlight).toBe(true);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(release).not.toBeNull();
+		release!();
+		expect(await first).toMatchObject({ outcome: 'sent', taken: 2, received: 2 });
+		await c.drain();
+		expect(c.status()).toMatchObject({ passInFlight: false, counters: { passes: 1 } });
+		expect(h.reports).toHaveLength(2);
+	});
+
+	it('backs off after consecutive interruptions, caps the wait, ignores a wake while backing off, and resets on a pass that sent', async () => {
+		const j = await journal();
+		const p = projector();
+		j.attach(p);
+		const [only] = p.record(fact());
+		const h = hostDouble();
+		for (let i = 0; i < 3; i += 1) {
+			h.answers.push({ status: 'unavailable', reason: 'transport', message: 'ECONNREFUSED' });
+		}
+		const scheduled: { ms: number; fire: () => void }[] = [];
+		const c = createTelemetryClient({
+			journal: j,
+			host: h.host,
+			now: () => T0,
+			intervalMs: 1_000,
+			maxBackoffMs: 3_000,
+			timers: {
+				set: (fire, ms) => {
+					const handle = { ms, fire };
+					scheduled.push(handle);
+					return handle;
+				},
+				clear: (handle) => {
+					const at = scheduled.indexOf(handle as { ms: number; fire: () => void });
+					if (at >= 0) scheduled.splice(at, 1);
+				},
+			},
+		});
+		const fire = async () => {
+			scheduled.shift()?.fire();
+			await new Promise((resolve) => setTimeout(resolve, 20));
+		};
+		c.start();
+		await fire();
+		expect(c.status()).toMatchObject({ consecutiveFailures: 1 });
+		expect(scheduled.map((s) => s.ms)).toEqual([2_000]);
+		c.wake();
+		expect(scheduled.map((s) => s.ms)).toEqual([2_000]);
+		await fire();
+		expect(c.status().consecutiveFailures).toBe(2);
+		expect(scheduled.map((s) => s.ms)).toEqual([3_000]);
+		await fire();
+		expect(c.status().consecutiveFailures).toBe(3);
+		expect(scheduled.map((s) => s.ms)).toEqual([3_000]);
+		await fire();
+		expect(c.status()).toMatchObject({ consecutiveFailures: 0, lastPass: { outcome: 'sent' } });
+		expect(scheduled.map((s) => s.ms)).toEqual([1_000]);
+		c.stop();
+		// One entry, four hand-overs, received once: every retry resent the same id, the journal never grew a copy.
+		expect(j.status()).toMatchObject({ entries: 1, delivery: { received: 1 } });
+		expect(h.reports.map((r) => r.eventId)).toEqual(Array(4).fill(only.eventId));
+		const written = JSON.parse(fs.readFileSync(j.file, 'utf8')) as {
+			entries: { attempts: number }[];
+		};
+		expect(written.entries.map((e) => e.attempts)).toEqual([4]);
+	});
+
+	it('after a restart the new boot sends only its own events; the earlier boot entries stay in place by name and the restart is a gap in the file', async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-telemetry-restart-'));
+		dirs.push(dir);
+		const file = path.join(dir, 'maestro-managed-events.json');
+		const before = await journalAt(file);
+		const earlier = projector('epoch-1');
+		before.attach(earlier);
+		const [lostAnswer, neverSent] = [...earlier.record(fact()), ...earlier.record(fact())];
+		const firstBoot = hostDouble();
+		firstBoot.answers.push((report) => {
+			firstBoot.seen.add(report.eventId);
+			return { status: 'unknown', message: `lost ${report.eventId}` };
+		});
+		expect(await client(before, firstBoot.host).pump()).toMatchObject({
+			outcome: 'interrupted',
+			uncertain: 1,
+			unavailable: 1,
+		});
+		await before.flush();
+
+		const after = await journalAt(file);
+		expect(after.status()).toMatchObject({
+			entries: 2,
+			delivery: { pending: 1, uncertain: 1, received: 0 },
+		});
+		const current = projector('epoch-2');
+		after.attach(current);
+		const [mine] = current.record(fact());
+		const secondBoot = hostDouble({
+			binding: { ...BINDING, installation: { ...INSTALLATION, processEpoch: 'epoch-2' } },
+		});
+		const pass = await client(after, secondBoot.host).pump();
+		expect(pass).toMatchObject({ outcome: 'sent', taken: 1, received: 1 });
+		expect(pass.withheld).toMatchObject({ 'other-boot': 2 });
+		expect(secondBoot.reports.map((r) => [r.eventId, r.bootId])).toEqual([
+			[mine.eventId, 'epoch-2'],
+		]);
+		const status = after.status();
+		expect(status.delivery).toEqual({ pending: 1, uncertain: 1, received: 1 });
+		expect(status.gaps.map((g) => g.kind)).toEqual(['restart']);
+		expect(after.page({ cursor: null, limit: 10 })).toMatchObject({ completeness: 'gap' });
+		await after.flush();
+		const written = JSON.parse(fs.readFileSync(file, 'utf8')) as {
+			entries: { eventId: string; delivery: string; attempts: number }[];
+			gaps: { kind: string }[];
+		};
+		expect(written.entries.map((e) => [e.eventId, e.delivery, e.attempts])).toEqual([
+			[lostAnswer.eventId, 'uncertain', 1],
+			[neverSent.eventId, 'pending', 1],
+			[mine.eventId, 'received', 1],
+		]);
+		expect(written.gaps.map((g) => g.kind)).toEqual(['restart']);
+	});
+
+	it('the wire carries the allowlist and nothing else: across a decision, every surface and a usage event no prompt, path, token, figure or identity leaves this host', async () => {
+		const j = await journal();
+		const p = projector();
+		j.attach(p);
+		const detail = 'error: sk-ant-api03-CANARYTOKEN while reading /Users/canary/project/.env';
+		p.record(
+			fact({
+				detail,
+				admission: {
+					leaseId: 'lease-CANARY',
+					authorityId: 'auth-1',
+					requestDigest: 'digest-CANARY',
+					policyRevision: 3,
+				},
+			})
+		);
+		p.record(
+			fact({
+				surface: 'terminal',
+				sessionId: 'agent-1-terminal-CANARY',
+				tabId: null,
+				provider: 'terminal',
+				model: null,
+				runId: 'terminal-run-CANARY',
+				record: 'omitted',
+				ledgerStatus: null,
+			})
+		);
+		p.record(
+			fact({
+				surface: 'group-chat',
+				sessionId: 'room-CANARY',
+				tabId: null,
+				runId: 'room-CANARY:turn-1',
+				record: 'omitted',
+				ledgerStatus: null,
+				providerSessionId: 'thread-CANARY',
+			})
+		);
+		p.recordUsage({
+			surface: 'headless-turn',
+			state: 'completed',
+			at: T0 + 900,
+			sessionId: 'cli-CANARY',
+			agentId: 'agent-CANARY',
+			tabId: null,
+			provider: 'codex',
+			model: 'gpt-5-codex',
+			providerSessionId: null,
+			runId: 'run-CANARY',
+			record: 'journal',
+			accountRef: 'd'.repeat(64),
+			attribution: { tenantId: 'tenant-CANARY', orgId: 'org-CANARY' },
+			usage: {
+				provenance: 'estimated',
+				tokens: 'provider-stream',
+				cost: 'priced',
+				costUsd: 0.0777,
+				priceRevision: 'price-CANARYREV',
+				reporting: 'per-step',
+				events: 1,
+				corrections: 0,
+				cacheReadCounting: 'unknown',
+				counts: {
+					inputTokens: 77_777,
+					outputTokens: 7,
+					cacheReadInputTokens: null,
+					cacheCreationInputTokens: null,
+					reasoningTokens: null,
+				},
+				contextWindow: null,
+			},
+		});
+		const h = hostDouble();
+		const pass = await client(j, h.host).pump();
+		expect(pass).toMatchObject({ outcome: 'sent', taken: 5, received: 5 });
+		expect(h.reports.map((r) => r.family)).toEqual([
+			'agent.lifecycle',
+			'agent.lifecycle',
+			'agent.lifecycle',
+			'agent.lifecycle',
+			'usage',
+		]);
+		for (const report of h.reports) {
+			expect(Object.keys(report).sort()).toEqual(REPORT_KEYS);
+			expect(report).toMatchObject({ source: 'runtime', collectionProfile: 'metadata' });
+		}
+		const wire = JSON.stringify(h.reports);
+		for (const canary of [
+			'CANARY',
+			'sk-ant',
+			'/Users',
+			'terminal',
+			'group-chat',
+			'headless',
+			'codex',
+			'opus',
+			'77777',
+			'0.0777',
+			'd'.repeat(64),
+			'lease-',
+			'agent-1',
+		]) {
+			expect(wire).not.toContain(canary);
+		}
+		// The identities and the detail stay on this host, in the journal, paged by the same ids.
+		await j.flush();
+		const kept = fs.readFileSync(j.file, 'utf8');
+		expect(kept).toContain(detail);
+		expect(kept).toContain('room-CANARY');
+		expect(kept).toContain('org-CANARY');
+		expect(j.status()).toMatchObject({ entries: 5, delivery: { received: 5 } });
 	});
 });
