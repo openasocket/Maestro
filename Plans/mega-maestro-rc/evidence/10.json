@@ -1,0 +1,669 @@
+{
+	"frontMatter": {
+		"type": "evidence",
+		"title": "Phase 10 evidence: fleet metadata, usage provenance, bounded content, VIBES evidence and installation inventory (fleet-evidence row)",
+		"created": "2026-10-22",
+		"phase": 10,
+		"base_revision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+		"head_revision": "c61265b16ade47cf095972aa017058aeade00ee2",
+		"branch": "feature/mega-maestro-v1.1.0-rc",
+		"tags": ["maestro", "mega-maestro", "integration", "evidence", "phase-10"],
+		"related": [
+			"[[EXECUTION-RULES]]",
+			"[[ANALYSIS]]",
+			"[[01]]",
+			"[[02]]",
+			"[[03]]",
+			"[[04]]",
+			"[[05]]",
+			"[[06]]",
+			"[[07]]",
+			"[[08]]",
+			"[[09]]"
+		]
+	},
+	"summary": "Phase 10 built the governed fleet metadata path on feature/mega-maestro-v1.1.0-rc in the Maestro checkout (macOS, Darwin 27, Node v26.12.0, git 2.54.0): the lifecycle projector (metadata-only run-state and decision events from the real desktop capture and the headless turn recorder), the durable event journal (one sequence across restarts, digest ids that dedup a replay, cursors with honest completeness, every gap counted), the authenticated telemetry client (one event per endpoint telemetry request, received only from a durable receipt, a lost answer resent under the same id, a policy denial a hold and never a drop), usage provenance (estimated or unavailable, never a zero the stream did not carry, priced under a named rate table revision, attributed to the org of record), bounded content capture under the endpoint collection profile and a signed per-role ceiling (exact original and derivative digests, a redacted derivative only, VIBES evidence under full_vibes alone, shed and revoke by count), the VIBES recorded graph from real run-states, and the installation inventory (detection apart from enforcement, subagents observed or unavailable, every gap named). Phase 10 added 51 tests in 07/08 over those seams. Deterministic coverage over the real projector, the real journal files, the real telemetry client, the real content capture, the real inventory module and the real socket client is green (24 targets, 45 files, 736 tests; the library suite 69 passed and the certifiable pair skipped for CP-01, CP-02 and the approval producer). The journey was exercised for REAL on this host over real producers and the real transport (projector, journal file, telemetry client, host adapter port, socket client, registration and attachment over a unix socket) against a LABELED DOUBLE of the daemon whose telemetry operation validated every report with the sibling's real @mega-maestro/contracts package and the runtime gate transcribed from apps/endpoint/src/spool/runtime.ts: five of six events received once each by id, sequence, time, family and boot, the inventory withheld by family, a resend answered duplicate, a dropped connection recovered after re-attach, a foreign boot refused unauthenticated, the VIBES and prompt digests recomputed independently, no canary on the wire. The real sibling daemon in its container (the same harness as phases 04 to 09, library 0.21.0 this time) again answered every step denied or unavailable: unenrolled, no approval producer, zero events ingested, so NO central event, usage figure or hash exists to compare against the observed sources. The endpoint of this build takes no inventory family from a runtime, carries no content and installs no ceiling (CP-01), the usage producer is not yet wired to the desktop process stream (Maestro-owned, named), and TRACE and vault have no producer on either side of this phase. The fleet-evidence acceptance row is therefore NOT passed; the fixture journey is recorded as positive evidence at the Maestro boundary, not as the pair.",
+	"commits": [
+		{
+			"commit": "da2654e4d",
+			"task": "MRC-10-01",
+			"files": [
+				"CLAUDE.md",
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"docs/maestro-lib.md",
+				"src/__tests__/shared/maestro-lib/managed/events.test.ts",
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/managed/events.ts",
+				"src/shared/maestro-lib/version.ts"
+			],
+			"lines": "+459 -1 source, +385 -0 tests, +5 -1 docs"
+		},
+		{
+			"commit": "358809892",
+			"task": "MRC-10-01A",
+			"files": [
+				"src/__tests__/main/agent-run/capture-service.test.ts",
+				"src/__tests__/shared/maestro-lib/turns/record-turn.test.ts",
+				"src/main/agent-run/capture-service.ts",
+				"src/main/agent-run/setup-capture-listener.ts",
+				"src/main/enterprise/service.ts",
+				"src/main/index.ts",
+				"src/shared/maestro-lib/runtime/turns.ts",
+				"src/shared/maestro-lib/turns/record-turn.ts"
+			],
+			"lines": "+425 -13 source, +519 -1 tests, +0 -0 docs"
+		},
+		{
+			"commit": "f1915c336",
+			"task": "MRC-10-02",
+			"files": [
+				"CLAUDE.md",
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"docs/maestro-lib.md",
+				"src/__tests__/shared/maestro-lib/managed/event-journal.test.ts",
+				"src/shared/maestro-lib/client/types.ts",
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/managed/event-journal.ts",
+				"src/shared/maestro-lib/version.ts"
+			],
+			"lines": "+498 -3 source, +365 -0 tests, +4 -0 docs"
+		},
+		{
+			"commit": "631f6b06b",
+			"task": "MRC-10-02A",
+			"files": [
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"docs/maestro-lib.md",
+				"src/__tests__/main/enterprise/service.test.ts",
+				"src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts",
+				"src/main/enterprise/service.ts",
+				"src/main/index.ts",
+				"src/shared/maestro-lib/managed/compatibility.ts",
+				"src/shared/maestro-lib/managed/operations.ts",
+				"src/shared/maestro-lib/runtime/__tests__/turns.test.ts",
+				"src/shared/maestro-lib/runtime/index.ts"
+			],
+			"lines": "+154 -12 source, +233 -1 tests, +3 -3 docs"
+		},
+		{
+			"commit": "48a3f5f65",
+			"task": "MRC-10-03",
+			"files": [
+				"docs/maestro-lib.md",
+				"src/__tests__/shared/maestro-lib/managed/event-journal.test.ts",
+				"src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts",
+				"src/shared/maestro-lib/managed/event-journal.ts",
+				"src/shared/maestro-lib/managed/host-adapter.ts",
+				"src/shared/maestro-lib/version.ts"
+			],
+			"lines": "+137 -4 source, +116 -0 tests, +2 -0 docs"
+		},
+		{
+			"commit": "86a43b104",
+			"task": "MRC-10-03A",
+			"files": [
+				"CLAUDE.md",
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"src/__tests__/main/enterprise/telemetry.test.ts",
+				"src/main/enterprise/telemetry.ts"
+			],
+			"lines": "+469 -0 source, +503 -0 tests, +2 -0 docs"
+		},
+		{
+			"commit": "ce60e129c",
+			"task": "MRC-10-03B",
+			"files": [
+				"src/__tests__/cli/services/runtime-host.test.ts",
+				"src/__tests__/main/enterprise/service.test.ts",
+				"src/cli/services/runtime-host.ts",
+				"src/main/enterprise/service.ts",
+				"src/main/enterprise/telemetry.ts",
+				"src/shared/maestro-lib/managed/host-adapter.ts"
+			],
+			"lines": "+80 -3 source, +87 -0 tests, +0 -0 docs"
+		},
+		{
+			"commit": "aca1df2dd",
+			"task": "MRC-10-04",
+			"files": [
+				"src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts",
+				"src/shared/maestro-lib/streaming/usage-accumulator.ts",
+				"src/shared/maestro-lib/version.ts"
+			],
+			"lines": "+347 -1 source, +177 -1 tests, +0 -0 docs"
+		},
+		{
+			"commit": "8678991cf",
+			"task": "MRC-10-04A",
+			"files": [
+				"CLAUDE.md",
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"docs/maestro-lib.md",
+				"src/__tests__/main/enterprise/telemetry.test.ts",
+				"src/__tests__/main/enterprise/usage.test.ts",
+				"src/__tests__/shared/maestro-lib/managed/events.test.ts",
+				"src/main/enterprise/telemetry.ts",
+				"src/main/enterprise/usage.ts",
+				"src/shared/maestro-lib/managed/events.ts",
+				"src/shared/maestro-lib/managed/types.ts"
+			],
+			"lines": "+485 -23 source, +632 -0 tests, +5 -1 docs"
+		},
+		{
+			"commit": "b94db1eec",
+			"task": "MRC-10-05",
+			"files": [
+				"CLAUDE.md",
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"src/__tests__/main/enterprise/content.test.ts",
+				"src/main/enterprise/content.ts"
+			],
+			"lines": "+497 -0 source, +389 -0 tests, +2 -0 docs"
+		},
+		{
+			"commit": "f2bb9fa2e",
+			"task": "MRC-10-05A",
+			"files": [
+				"src/__tests__/main/enterprise/service.test.ts",
+				"src/__tests__/main/enterprise/vibes.test.ts",
+				"src/main/enterprise/service.ts",
+				"src/main/enterprise/vibes.ts",
+				"src/main/index.ts",
+				"src/main/process-listeners/__tests__/content-capture-listener.test.ts",
+				"src/main/process-listeners/content-capture-listener.ts"
+			],
+			"lines": "+442 -0 source, +526 -0 tests, +0 -0 docs"
+		},
+		{
+			"commit": "9cfee5677",
+			"task": "MRC-10-06",
+			"files": [
+				"docs/maestro-lib.md",
+				"src/__tests__/shared/maestro-lib/managed/events.test.ts",
+				"src/shared/maestro-lib/managed/events.ts",
+				"src/shared/maestro-lib/managed/types.ts",
+				"src/shared/maestro-lib/version.ts"
+			],
+			"lines": "+303 -5 source, +204 -0 tests, +3 -1 docs"
+		},
+		{
+			"commit": "f120a9449",
+			"task": "MRC-10-06A",
+			"files": [
+				"CLAUDE.md",
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"src/__tests__/main/enterprise/inventory.test.ts",
+				"src/main/enterprise/inventory.ts"
+			],
+			"lines": "+476 -0 source, +516 -0 tests, +2 -0 docs"
+		},
+		{
+			"commit": "f7c74afcb",
+			"task": "MRC-10-06B",
+			"files": [
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"docs/agent-guides/CLI-UI-PARITY.md",
+				"src/__tests__/main/enterprise/inventory.test.ts",
+				"src/__tests__/main/enterprise/service.test.ts",
+				"src/__tests__/main/enterprise/telemetry.test.ts",
+				"src/__tests__/main/ipc/handlers/enterprise.test.ts",
+				"src/__tests__/main/preload/enterprise.test.ts",
+				"src/main/enterprise/inventory.ts",
+				"src/main/enterprise/service.ts",
+				"src/main/enterprise/telemetry.ts",
+				"src/main/index.ts",
+				"src/main/ipc/bootstrap/index.ts",
+				"src/main/ipc/handlers/enterprise.ts",
+				"src/main/preload/enterprise.ts"
+			],
+			"lines": "+116 -3 source, +130 -6 tests, +2 -2 docs"
+		},
+		{
+			"commit": "f4d48a6af",
+			"task": "MRC-10-07",
+			"files": [
+				"src/__tests__/main/enterprise/usage.test.ts",
+				"src/__tests__/shared/maestro-lib/managed/events.test.ts"
+			],
+			"lines": "+0 -0 source, +462 -0 tests, +0 -0 docs"
+		},
+		{
+			"commit": "93456febf",
+			"task": "MRC-10-07A",
+			"files": ["src/__tests__/main/enterprise/telemetry.test.ts"],
+			"lines": "+0 -0 source, +352 -1 tests, +0 -0 docs"
+		},
+		{
+			"commit": "a0f8466df",
+			"task": "MRC-10-08",
+			"files": ["src/__tests__/main/enterprise/content.test.ts"],
+			"lines": "+0 -0 source, +275 -0 tests, +0 -0 docs"
+		},
+		{
+			"commit": "c61265b16",
+			"task": "MRC-10-08A",
+			"files": ["src/__tests__/main/enterprise/vibes.test.ts"],
+			"lines": "+0 -0 source, +345 -0 tests, +0 -0 docs"
+		}
+	],
+	"lineBudgetNotes": "Source counts above are added/deleted lines of non-test, non-doc files per commit (git show --numstat). Every source commit stayed under the 500 source-line guideline (largest MRC-10-02 at +498 -3 and MRC-10-05 at +497 -0); the phase used bounded continuations (01A, 02A, 03A, 03B, 04A, 05A, 06A, 06B) where a target would have passed it, and split the two TEST tasks the same way (07/07A at 462 and 352 test lines, 08/08A at 275 and 345). Tests and docs are counted separately.",
+	"commands": [
+		{
+			"command": "git merge-base --is-ancestor 6400a6da0cfbae97bd90c4b361eea163fc3a1223 HEAD",
+			"exit": 0,
+			"result": "the base revision is an ancestor of HEAD c61265b16ade47cf095972aa017058aeade00ee2; the tree is clean apart from the user's untracked .sloptimize/ and rustygraphify-out/ (git status --porcelain)"
+		},
+		{
+			"command": "npm run build:maestro-lib",
+			"exit": 0,
+			"result": "dist/maestro-lib/index.js 1684.6 KB, maestro-lib 0.21.0, maestro-managed/1, provenance sourceRevision c61265b16ade47cf095972aa017058aeade00ee2, sourceDirty false, index.js sha256 d5a4892673c552a55ea699c6048d2e16e1462d55ac31ded3b450cef1f6811c54 (moved from phase 09's 38a561c7: this phase changed events.ts, event-journal.ts, host-adapter.ts, usage-accumulator.ts, types.ts, operations.ts, compatibility.ts, runtime/turns.ts, turns/record-turn.ts, client/types.ts, index.ts and version.ts 0.16.0 -> 0.21.0)"
+		},
+		{
+			"command": "npm run build:cli",
+			"exit": 0,
+			"result": "dist/cli/maestro-cli.js 7721.3 KB, sha256 aa89417eb666221756df24cd46cba3ce649fe577b3669ab0944e213aa116cb38 (moved from phase 09's a9c11cd8: runtime-host.ts composes the journal and the telemetry client)"
+		},
+		{
+			"command": "node scripts/mega-maestro-pair.mjs check --json",
+			"exit": 2,
+			"result": "library ready at HEAD (0.21.0, stale false, 292 payload files, none mismatched); assessment.ready false; dependencies CP-01 (mega-maestro), CP-01 (mega-maestro), CP-02 (mega-maestro), registration-approval (mega-maestro): no contracts pin, no clean Linux application artifact (4 dirty-source darwin/arm64 packaged artifacts at sibling e29195d8, the development checkout d5143a6 dirty with 935 entries and never certifiable), createMaestroAdapter unsupported, no approval producer; docker 29.9.2 linux/arm64 with the pinned node image present. Identical to phases 04 to 09 apart from the library version"
+		},
+		{
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.lint.json --noEmit",
+			"exit": 2,
+			"result": "exactly the three pre-existing errors: TS2307 @serenity-kit/opaque (src/main/lite/pairing/host.ts), TS2307 smol-toml (src/shared/maestro-lib/translation/resources.ts), TS2339 RequestInit dispatcher (src/main/plugins/plugin-host-handlers.ts:1175, present at the base revision); nothing from this phase"
+		},
+		{
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.main.json --noEmit",
+			"exit": 2,
+			"result": "the two missing packages only (opaque in client.ts and host.ts, smol-toml in resources.ts); no other error"
+		},
+		{
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.cli.json --noEmit",
+			"exit": 2,
+			"result": "the two missing packages only; no other error"
+		},
+		{
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+			"exit": 2,
+			"result": "the same three pre-existing errors as tsconfig.lint.json; no other error"
+		},
+		{
+			"command": "eslint src/ ; eslint -c eslint.dashes.config.mjs src/__tests__ scripts",
+			"exit": 0,
+			"result": "clean on both (run after the scratch fixture test was removed from src/__tests__)"
+		},
+		{
+			"command": "node scripts/verify-docs-paths.mjs (npm run docs:verify)",
+			"exit": 0,
+			"result": "docs:verify checked 1068 asserted paths and 361 index entries against 361 full entries, 0 finding(s)"
+		},
+		{
+			"command": "prettier --check <the 48 files changed in df51f06e9..HEAD>",
+			"exit": 0,
+			"result": "All matched files use Prettier code style"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run <24 focused targets> --reporter=verbose",
+			"exit": 0,
+			"result": "45 passed (45); 736 passed (736) (Working/10-verify/vitest-focused.log)"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run src/shared/maestro-lib/__tests__/{built-entry,docs-examples,tui-example,no-desktop-framework.smoke}.test.ts src/__tests__/shared/maestro-lib/managed/contracts.test.ts src/__tests__/integration/mega-maestro",
+			"exit": 0,
+			"result": "6 passed (6); 69 passed | 1 skipped (70) (the skip is the certifiable pair, blocked by CP-01 x2, CP-02, registration-approval) (Working/10-verify/vitest-lib.log)"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/zz-mrc-10-09-fixture.test.ts --reporter=verbose (scratch, removed after the run; preserved as Working/10-verify/zz-mrc-10-09-fixture.test.ts.txt)",
+			"exit": 0,
+			"result": "1 passed (1); 5 passed (5): the real journey below (Working/10-verify/vitest-fixture.log, fixture-run.json); the first two attempts failed, see failedAttemptsPreserved"
+		},
+		{
+			"command": "node scripts/mega-maestro-pair.mjs run --allow-dirty --json --out .maestro/playbooks/Working/10-verify/pair-run.json",
+			"exit": 3,
+			"result": "completed, not certifiable (endpoint source development-checkout is built (CP-01)); container exit 0; every driver step denied or unavailable; zero leases; daemon unenrolled; nothing ingested (realPairRun)"
+		}
+	],
+	"focusedSuites": "24 targets expanding to 45 files: the 17 test files this phase touched (src/__tests__/cli/services/runtime-host.test.ts, src/__tests__/main/agent-run/capture-service.test.ts, src/__tests__/main/enterprise/content.test.ts, src/__tests__/main/enterprise/inventory.test.ts, src/__tests__/main/enterprise/service.test.ts, src/__tests__/main/enterprise/telemetry.test.ts, src/__tests__/main/enterprise/usage.test.ts, src/__tests__/main/enterprise/vibes.test.ts, src/__tests__/main/ipc/handlers/enterprise.test.ts, src/__tests__/main/preload/enterprise.test.ts, src/__tests__/shared/maestro-lib/managed/event-journal.test.ts, src/__tests__/shared/maestro-lib/managed/events.test.ts, src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts, src/__tests__/shared/maestro-lib/turns/record-turn.test.ts, src/main/process-listeners/__tests__/content-capture-listener.test.ts, src/shared/maestro-lib/runtime/__tests__/turns.test.ts, src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts) plus the neighbouring directories src/__tests__/main/{enterprise,agent-run,process-listeners} and src/__tests__/shared/maestro-lib/managed in full, the headless host suites and the library docs examples (Working/10-verify/focused-files.txt)",
+	"realFixtureRun": {
+		"what": "The fleet metadata journey over the REAL Maestro producers and transport on this host, against a LABELED DOUBLE of the endpoint daemon. Real: createLifecycleProjector (PAIR_INSTALLATION), createEventJournal over a temp file, createTelemetryClient, the host adapter telemetry port (createManagedHostAdapter), createLocalEndpointClient registered (challenge, redeem) and attached over a unix socket with telemetry negotiated and required, telemetryReportOf, createUsageCapture, createInstallationInventory (readContractsPin on the real vendor path: absent), createContentCollectionSource, createContentCapture, buildVibesRecordedGraph, vibesEvidenceOf, a verified context from the pair verifier. Double: fakeEndpoint.ts (the daemon protocol transcribed from the sibling: envelopes, per-socket sessions, correlation replay, registration handshake) whose telemetry operation validated every report with the sibling's real contract package (@mega-maestro/contracts dist, read-only, zod incomingMetadataEvent) and applied the runtime gate transcribed from apps/endpoint/src/spool/runtime.ts lines 523-527 (binding), 530-534 (families, profile, references, provenance, identities) and 544 (revision), then answered the contract's durableReceipt (validated with the sibling schema too). Labeled too: the admission reference on the start (hand-built; the dispatch bridge is phase 04 to 06 evidence), the account reference (a digest handed in; the real resolver reads the agent layers), the content ceiling (installed by the harness: no endpoint operation installs one, CP-01).",
+		"labeledDoubles": [
+			"endpoint daemon: src/__tests__/main/enterprise/fakeEndpoint.ts with a telemetry operation written for this run",
+			"admission reference on the start fact (lease-pair-fixture)",
+			"account reference resolver (a 64-hex digest)",
+			"content ceiling document (installed by the harness)"
+		],
+		"siblingContracts": "~/dev-shit/mega-maestro/packages/contracts/dist",
+		"cases": [
+			{
+				"case": "journey produced through the real projector",
+				"observed": "six events in one sequence: decision#1, run-state#2, run-state#3, run-state#4, usage#5, inventory#6; the usage settled estimated / priced / attributed to tenant-pair:org-pair with the account digest; the inventory named the enrollment as deviceId; contracts pin absent; inventory gaps: 6 named (runtimes, subagents, contracts, unprobed providers, no telemetry client, no content source); the journal held 6 pending",
+				"eventIds": [
+					"evt-446e1c7bb8d364b072b314114262e8c88387b8036ea3e3a8a493d81e60ff2ead",
+					"evt-6147ee56d5597e732c904ee397fcf92b480c212f90352a4a6e717880a483e997",
+					"evt-e6305864d5f2bdc3e5d378f7e2e148ff631bbc98182e9757d8ab2e8ff3db90ef",
+					"evt-1279cddff1fcb1bb2c2c762117df31de28434665cdc7bf5c35580985ca694e83",
+					"evt-16c623572c72695cff354ddcc4e6cbd1c90ed9634bbdd3615722bd889ba76a84",
+					"evt-3d7a8678205dd014ec9672df8867a6194e3e0004b6849a12cc999308ce2a75b2"
+				]
+			},
+			{
+				"case": "telemetry over the real socket",
+				"observed": "two passes at batchSize 4: sent taken 4 received 4; sent taken 1 received 1 withheld.family 1; then idle. The double's spool holds exactly the five runtime-family events in projector order (agent.lifecycle#1, agent.lifecycle#2, agent.lifecycle#3, agent.lifecycle#4, usage#5), each report equal to its event by sequence, occurredAt, bootId epoch-pair, instanceId inst-pair, deviceId enr-pair, policyRevision 3, family (usage for the usage event, agent.lifecycle otherwise) and usageProvenance (estimated for usage, unavailable otherwise), every report parsed by the sibling incomingMetadataEvent (contractValidated true); zero denials at the double. Journal delivery {\"pending\":1,\"uncertain\":0,\"received\":5}, held 0; the received entries in the file are exactly the spool ids; the inventory entry stays pending with attempts 0. Canaries: the prompt, the sk-ant token, the /Users path, the account digest, org-pair, the model, agent/run/thread ids, the surface words, the token count and the cost appear nowhere on the wire; the journal file keeps the detail (token, path), the account digest and the org by design, and the prompt nowhere (it was never a fact field)."
+			},
+			{
+				"case": "dedup, drop and foreign boot",
+				"observed": "a resend of the first report through the real port answered {\"outcome\":\"durably_accepted\",\"eventId\":\"evt-446e1c7bb8d364b072b314114262e8c88387b8036ea3e3a8a493d81e60ff2ead\",\"receivedAt\":\"2026-10-21T12:00:04.100Z\",\"duplicate\":true} and the spool stayed at 5; after fake.dropConnections() the next pass was no-standing (not registered-attached-managed in this process) with nothing taken; re-registration and re-attach ok, then the pass {\"outcome\":\"sent\",\"received\":1} for the event recorded during the lapse; a report stamped bootId epoch-other was refused {\"status\":\"denied\",\"reason\":\"unauthenticated\"} as runtime.ts 527 refuses it"
+			},
+			{
+				"case": "inventory and content against the sibling contract",
+				"observed": "telemetryReportOf refuses the inventory event \"family\"; the fact's device, runtimes and completeness parse as the sibling fleetInventory (true); a contract-valid incomingFleetEvent envelope with family inventory.snapshot was built from it (true) and is refused by runtime.ts 530: a runtime report may be presence, agent.lifecycle, usage or error only; INVENTORY_DELIVERY and contentDeliveryStanding both unavailable by name"
+			},
+			{
+				"case": "VIBES evidence and a prompt as content",
+				"observed": "under a harness-installed full_vibes ceiling (harness (no endpoint operation installs one: CP-01)) over the real standing (registered, attached, profile full_vibes from the double's attachment answer): the recorded graph of the window ({\"sessions\":4,\"delegations\":0,\"gaps\":7}), evidence sha256 e6a34036c83166fe6b8e569d62aecca2bcae341bfaf01f7ffb9db3bb86da9f59 over 1130 bytes recomputed independently from the canonical JSON lines (a plain JSON.stringify serialization digests differently: true), the content fact carries that digest and length, the held bytes hash to it; a prompt fact carries the sha of the prompt bytes; both original references parse as the sibling contentReference; both facts pending_upload; no CANARY in the facts; the evidence digest never reached the spool"
+			}
+		],
+		"limits": "The daemon was a double, so nothing here is the pair: the real daemon received zero events (realPairRun). The usage settle called createUsageCapture directly; the desktop process stream and exit are not wired to it yet (openDependencies). No provider turn ran; no desktop was launched; the headless maestro-cli host was not started against a daemon.",
+		"artifacts": [
+			"Working/10-verify/fixture-run.json",
+			"Working/10-verify/vitest-fixture.log",
+			"Working/10-verify/zz-mrc-10-09-fixture.test.ts.txt (the scratch test, preserved)"
+		]
+	},
+	"realPairRun": {
+		"status": "completed, not-a-pass",
+		"certifiable": false,
+		"notCertifiableBecause": ["endpoint source development-checkout is built (CP-01)"],
+		"startedAt": "2026-10-23T03:30:32.896Z",
+		"endedAt": "2026-10-23T03:30:44.705Z",
+		"workspace": ".maestro/playbooks/Working/pair-20261023T033026 (gitignored)",
+		"image": "node@sha256:71bcbb3b215b3fa84b5b167585675072f4c270855e37a599803f1a58141a0716 (linux/arm64)",
+		"endpointSource": {
+			"kind": "development-checkout",
+			"revision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+			"dirty": true
+		},
+		"library": {
+			"version": "0.21.0",
+			"contract": "maestro-managed/1",
+			"protocol": 1
+		},
+		"bundle": {
+			"clientSha256": "967e47036d410dcafad756b8a2e38f3f37ef5501198ae0562e2d18354626a67e",
+			"driverSha256": "c21b7502313d831bb854944ea5a3c23d38392558162f43209fa41564177ff2ba"
+		},
+		"observed": {
+			"nativeBuild": {
+				"exit": 0,
+				"dir": "build.mjs peer.c peer.node"
+			},
+			"daemonStart": {
+				"exit": 0,
+				"outcome": "started",
+				"runtimeSocket": "/work/ws/.local/endpoint/runtime.sock"
+			},
+			"driver": {
+				"exit": 0,
+				"node": "v22.16.0 in the container",
+				"steps": [
+					{
+						"name": "compatibility",
+						"outcome": {
+							"status": "denied",
+							"reason": "unauthenticated"
+						}
+					},
+					{
+						"name": "attach",
+						"outcome": {
+							"status": "denied",
+							"reason": "unauthenticated"
+						}
+					},
+					{
+						"name": "registration.challenge",
+						"outcome": {
+							"status": "denied",
+							"reason": "unavailable"
+						}
+					},
+					{
+						"name": "execution.admit",
+						"outcome": {
+							"state": "unavailable",
+							"code": "runtime-unavailable",
+							"message": "not registered-attached-managed in this process"
+						}
+					},
+					{
+						"name": "execution.raw",
+						"outcome": {
+							"status": "unavailable",
+							"reason": "not-attached",
+							"message": "This connection is not attached; attach() first."
+						}
+					}
+				],
+				"leases": 0,
+				"admission": {
+					"possible": false,
+					"reasons": [
+						"not registered-attached-managed in this process",
+						"No applied policy revision is known."
+					]
+				}
+			},
+			"status": {
+				"outcome": "attached",
+				"protocol": 1,
+				"capabilities": [],
+				"management": "unenrolled",
+				"desiredPolicyRevision": null,
+				"appliedPolicyRevision": null,
+				"connectivity": "unavailable",
+				"collectionProfile": "metadata"
+			},
+			"stop": {
+				"protocol": 1,
+				"outcome": "stopping"
+			}
+		},
+		"reading": "Answer for answer the phase 04 to 09 runs, now with the 0.21.0 library bundle: peer authentication, the daemon and the socket contract work; compatibility and attachment are denied unauthenticated, the registration challenge is unavailable (no approval producer), admission is unavailable, zero leases, management unenrolled with an empty capability list and the metadata profile. No telemetry request could be made (telemetryStanding refuses before a socket is used: not registered-attached-managed), so the daemon ingested nothing, its spool holds nothing, and no server, ingest or worker record exists to compare the observed sources against. Recorded as failed-attempt evidence."
+	},
+	"centralComparison": {
+		"required": "Compare central events, usage and hashes to the observed sources (the manifest fleet-evidence row).",
+		"performed": [
+			"Observed sources: the real projector's six events and the real journal file (ids, sequences, times, delivery states) on this host.",
+			"Against the endpoint DOUBLE's spool over the real socket: five of six ids present once each with equal sequence, occurredAt, bootId, instanceId, deviceId, revision, family and provenance; the inventory id absent (withheld by family, pending in the journal with zero attempts); a resend answered duplicate; every report and receipt parsed by the sibling's real contract package.",
+			"Against the sibling contract schemas directly: the inventory fact parses as fleetInventory and an incomingFleetEvent envelope built from it is valid, while the runtime gate refuses the family; the content references parse as contentReference.",
+			"Hashes: the VIBES evidence sha256 recomputed independently from the canonical lines equals the content fact's original digest and the held bytes' digest; every event id is a digest of its fact (a replayed fact is the same id, shown in events.test.ts and usage.test.ts)."
+		],
+		"notPerformed": [
+			"Against the REAL endpoint, ingest, worker, server or API: the daemon is unenrolled and ingested zero events, so there is no central record of any event, usage figure or hash (realPairRun).",
+			"Usage against a provider's billing record or the gateway meter: a runtime report says estimated or unavailable only, by contract; no gateway ran.",
+			"VIBES attestation, TRACE evidence binding and vault custody: no producer on either side in this phase (openDependencies)."
+		]
+	},
+	"notRun": [
+		"npm install (same reason as phases 01 to 09: the environment baseline is the user's; smol-toml, @serenity-kit/opaque and dns-packet stay absent)",
+		"the Mega-Maestro API, ingest, worker, server and gateway: no packaged artifact, no enrollment, no approval producer (CP-01); the pair harness starts the endpoint daemon alone",
+		"a real provider turn or a desktop launch: no paid provider traffic is authorized; the producers were fed facts directly and through the real projector",
+		"maestro-cli host against a daemon: the headless host composes the journal and the telemetry client (MRC-10-03B) but no enrolled daemon exists to attach to",
+		"the desktop usage wiring: createUsageCapture is composed in no desktop path yet (StdoutHandler usage events and the exit settle are not connected), so no usage event was produced by a real process in this phase",
+		"a TRACE journey or a vault: Maestro has no TRACE evidence producer and no vault consumer in this phase; the sibling trace contracts were not consumed",
+		"content delivery: no endpoint operation carries content or a content reference (LOCAL_ENDPOINT_OPERATIONS names none; telemetry refuses one), so every content record is pending_upload by construction",
+		"a Windows or Linux desktop run of the inventory (the OS label and the capability snapshots were read on macOS only through tests and the fixture)"
+	],
+	"failedAttemptsPreserved": [
+		"The real pair run above (exit 3, every step denied or unavailable, zero leases, nothing ingested) is kept as .maestro/playbooks/Working/10-verify/pair-run.json with the harness out/ folder under pair-20261023T033026/.",
+		"The fixture journey took three attempts: the first failed to load (ERR_MODULE_NOT_FOUND, the shared imports were written two directories up); the second ran 4 of 5 cases and failed the recovery case because the composition's re-attach negotiates execution alone, so the telemetry standing after the dropped connection was no-standing (the fix: re-attach with telemetry negotiated and required, which is what the first attach already did). The runner rewrote steps-fixture.json and vitest-fixture.log on each rerun, so those two attempts are recorded here from their output and not as separate logs.",
+		"MRC-10-07 first focused run (Working/10-07-vitest-focused.log): two test-side mistakes, a backoff assertion that expected one report where the double records every attempted report (four of the same id), and a reporting assertion that expected single-event where the capture names a known provider's reporting up front (per-step for pi); both corrected in the tests before commit f4d48a6af / 93456febf. Second run green (Working/10-07-vitest-focused2.log).",
+		"MRC-10-08 first focused run (Working/10-08-vitest-focused.log): two count mistakes in the VIBES tests (10 window events, 6 records); corrected before commit c61265b16. Second run green (Working/10-08-vitest-focused2.log).",
+		"The phase 04 to 09 pair runs remain under their own Working/*-verify folders."
+	],
+	"deterministicCoverage": {
+		"doubles": "The endpoint daemon (fakeEndpoint.ts over a real unix socket, and the in-memory hostDouble of the adapter's two telemetry members in telemetry.test.ts), scripted timers, the identity view (ManagedIdentityView literals), the enrollment status (literals and pairStanding over the real port), the account reference resolver, the installed-provider reader, the content ceiling documents (installed by the tests), the capability snapshots. Everything else is real: the projector and its three fact validators, the journal over real temp files (load, attach, take, acknowledge, settle, page, trim, gaps, flush, restart over one file), telemetryReportOf and readTelemetryReceipt, the telemetry client (pump, hold, backoff, wake, drain, timers), describeUsageProvenance and the rate tables, buildUsageFact and createUsageCapture, the content source standing and parseContentCollectionCeiling, createContentCapture (digests, redactSecrets derivative, hold, shed, revoke, forget), buildVibesRecordedGraph and the VIBES annotation id rule, createInstallationInventory and readContractsPin, the enterprise service composition, the IPC handler and preload for enterprise:inventory, the headless runtime-host composition, the desktop capture listener and the content capture listener.",
+		"cases": "45 passed (45); 736 passed (736) across the focused targets; the phase's own tests: events.test.ts 28, event-journal.test.ts, telemetry.test.ts 25, usage.test.ts 13, content.test.ts 12, vibes.test.ts 13 (see the test headers for what each proves)"
+	},
+	"skippedTests": [
+		{
+			"test": "integration/mega-maestro/early-pair.test.ts > runs the certifiable pair",
+			"reason": "check not ready; the title names CP-01 (x2), CP-02 and registration-approval (owner mega-maestro); the other early-pair cases pass"
+		}
+	],
+	"publicBuildArtifact": {
+		"library": "dist/maestro-lib (maestro-lib 0.21.0, maestro-managed/1, provenance sourceRevision c61265b16ade47cf095972aa017058aeade00ee2, sourceDirty false)",
+		"sha256": {
+			"dist/maestro-lib/index.js": "d5a4892673c552a55ea699c6048d2e16e1462d55ac31ded3b450cef1f6811c54",
+			"dist/maestro-lib/index.d.ts": "b74a2430c659e8bda6f00155a1932874cf7ac0f2039e8f9f242cfa70cf1e75ea",
+			"dist/cli/maestro-cli.js": "aa89417eb666221756df24cd46cba3ce649fe577b3669ab0944e213aa116cb38"
+		},
+		"note": "The library and the CLI bundle both moved from the phase 09 artifacts (38a561c7 and a9c11cd8): phase 10 changed library sources (0.16.0 -> 0.21.0) and the headless host. The .d.ts entry is unchanged."
+	},
+	"fleetEvidenceMatrix": {
+		"legend": "implemented = the Maestro seam exists and is covered deterministically; exercised = driven for real on this host over real transport against the labeled daemon double; central = received and comparable at the real endpoint, ingest or worker; gap = what blocks central, by owner.",
+		"channels": [
+			{
+				"channel": "lifecycle events (run-state, decision)",
+				"implemented": true,
+				"exercised": true,
+				"central": false,
+				"gap": "daemon unenrolled, no approval producer (mega-maestro)"
+			},
+			{
+				"channel": "durable journal (resume, dedup, gaps, restart)",
+				"implemented": true,
+				"exercised": true,
+				"central": "n/a (host-side record)",
+				"gap": null
+			},
+			{
+				"channel": "telemetry delivery (receipt, resend, hold, backoff)",
+				"implemented": true,
+				"exercised": true,
+				"central": false,
+				"gap": "as above; the real daemon took no report"
+			},
+			{
+				"channel": "usage provenance",
+				"implemented": true,
+				"exercised": "through createUsageCapture fed directly; not from a real process stream",
+				"central": false,
+				"gap": "desktop wiring of the usage producer (maestro); the daemon took no report (mega-maestro)"
+			},
+			{
+				"channel": "installation inventory",
+				"implemented": true,
+				"exercised": true,
+				"central": false,
+				"gap": "no runtime inventory family at the endpoint (runtime.ts 530); the API's executionCapabilities are catalog-based (mega-maestro)"
+			},
+			{
+				"channel": "bounded content (prompt, answer, tool input)",
+				"implemented": true,
+				"exercised": "under a harness-installed ceiling; the desktop listener covered by tests",
+				"central": false,
+				"gap": "no content operation, no ceiling installer (CP-01, mega-maestro)"
+			},
+			{
+				"channel": "VIBES recorded evidence",
+				"implemented": true,
+				"exercised": true,
+				"central": false,
+				"gap": "as content above; attestation belongs to the endpoint capture; this host holds no VIBES key"
+			},
+			{
+				"channel": "TRACE evidence binding",
+				"implemented": false,
+				"exercised": false,
+				"central": false,
+				"gap": "no producer on either side in this phase; a surfaced proposal, not built"
+			},
+			{
+				"channel": "vault",
+				"implemented": false,
+				"exercised": false,
+				"central": false,
+				"gap": "no producer on either side in this phase"
+			}
+		]
+	},
+	"supportMatrix": [
+		{
+			"surface": "desktop (ProcessManager spawn and exit -> capture-service -> projector -> journal -> telemetry client)",
+			"os": "macOS (tests over the real listeners and service composition; no desktop launched)",
+			"managed": "events projected and journaled on every desktop; telemetry sent only registered-attached-managed with telemetry negotiated; refused no-standing otherwise; standalone unchanged (no journal entry leaves the host)",
+			"evidence": "capture-service, service, telemetry, index-wiring and content-capture-listener suites; the fixture journey",
+			"limits": "usage producer not wired to the process stream; content ceiling never installed by an endpoint"
+		},
+		{
+			"surface": "headless (maestro-cli host: runtime-host composes the journal and the telemetry client)",
+			"os": "macOS (tests)",
+			"managed": "same client and journal; no inventory and no content capture composed headless (named)",
+			"evidence": "runtime-host, host, host-managed suites",
+			"limits": "not started against a daemon"
+		},
+		{
+			"surface": "the endpoint telemetry operation (real socket client -> daemon)",
+			"os": "macOS host, Linux container for the real daemon",
+			"managed": "real daemon: every step denied or unavailable (unenrolled); daemon double: five of six events received once each under the sibling contract",
+			"evidence": "realPairRun; realFixtureRun",
+			"limits": "the double is not the pair"
+		}
+	],
+	"positiveAcceptanceMatrix": {
+		"fleet-evidence": {
+			"required": true,
+			"passed": false,
+			"outcomeRequired": "Actual events/usage/vault/VIBES/TRACE through server, endpoint, ingest and worker with known source comparison",
+			"state": "Events, usage and VIBES evidence were produced by the real Maestro producers and compared to a known source for REAL over the real transport, but the receiving end was a labeled double of the daemon: the real endpoint in its container is unenrolled, has no approval producer and ingested nothing, so no server, ingest or worker record exists to compare against (CP-01). The endpoint takes no inventory family from a runtime and carries no content, so the inventory and the VIBES evidence cannot leave the host even enrolled. The usage producer is not wired to a real process stream (Maestro-owned gap). TRACE and vault have no producer. Not passed; the fixture journey is recorded as positive evidence at the Maestro boundary, the real pair run as failed-attempt evidence."
+		}
+	},
+	"openDependencies": [
+		{
+			"id": "CP-01",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no contracts pin and no clean Linux application artifact (pair check unchanged from phase 04; sibling still d5143a6 dirty); no endpoint operation carries content or installs a collection ceiling; the runtime telemetry gate admits no inventory family"
+		},
+		{
+			"id": "CP-02",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "createMaestroAdapter unsupported (pair check)"
+		},
+		{
+			"id": "CP-03",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "delegation and workflow authority still refused by the bridge (not exercised in this phase; the lineage fields of the events are ready for it)"
+		},
+		{
+			"id": "registration-approval",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no API or console producer approves the actor registration, so the real daemon never reaches a telemetry request"
+		},
+		{
+			"id": "usage-producer-wiring",
+			"owner": "maestro",
+			"status": "open",
+			"detail": "createUsageCapture (src/main/enterprise/usage.ts) is not composed into the desktop process stream (StdoutHandler usage events) or the exit settle; the inventory reports it as \"usage: no producer is wired\"; a bounded continuation in phase 11"
+		},
+		{
+			"id": "trace-and-vault",
+			"owner": "unassigned (surfaced proposal)",
+			"status": "open",
+			"detail": "the manifest row names TRACE and vault; neither has an agreed Maestro producer design nor an endpoint operation in this build"
+		},
+		{
+			"id": "lineage-identity-allowlist",
+			"owner": "maestro",
+			"status": "open (hardening)",
+			"detail": "contextOf() and lifecycleLineageOf() copy lineage.identity by spread; a producer handing a lineage with an unknown identity key would carry it into an event context; both real producers hand lineages from verified contexts, and managedContextProblems does not refuse unknown identity keys either; candidate bounded hardening"
+		}
+	],
+	"preExistingEnvironmentFailures": "smol-toml, @serenity-kit/opaque and dns-packet are absent from node_modules; they break three tsc files identically at the base revision, and tsconfig.lint.json / tsconfig.json also report the pre-existing RequestInit dispatcher error in plugin-host-handlers.ts:1175. Fix: npm install. Left for the user.",
+	"scratch": "Command outputs live under .maestro/playbooks/Working/10-verify/ (run-checks.mjs, build-evidence.mjs, steps-{checks,lint,focused,lib,fixture,pair}.json, *.log, changed-files.txt, focused-files.txt, commits.json, pair-check.log, pair-run.json, fixture-run.json, the preserved scratch test) and .maestro/playbooks/Working/pair-20261023T033026/ (gitignored). The scratch test src/__tests__/zz-mrc-10-09-fixture.test.ts was removed after its run and its temp directory deleted by the test; the sibling repository was read (its built contracts package) and never written; no untracked file was added to the source tree by this phase."
+}
