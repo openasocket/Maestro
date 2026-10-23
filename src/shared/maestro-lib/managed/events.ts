@@ -16,6 +16,14 @@
  * directory, an environment value or an argument list: the fact type has no
  * field for them and `record()` refuses a fact that smuggles one in.
  *
+ * The same projector carries the usage half (MRC-10-04): a `UsageFact` is the
+ * provenance of one run's usage total (`describeUsageProvenance` in
+ * `streaming/usage-accumulator.ts`) with the identities a fleet joins cost on
+ * (request, run, attempt, account, provider, model, the rate table's revision
+ * and the org the record named when the work ran), projected as a `usage`
+ * event under the same sequence. A count the stream never carried is null, a
+ * zero is never invented, and no bucket here is billing authority.
+ *
  * A projection, not delivery: `recent()` is a bounded window with its loss
  * counted, `subscribe()` is what the durable journal (MRC-10-02) and the
  * telemetry client (MRC-10-03) read, nothing here acknowledges anything to a
@@ -24,6 +32,14 @@
  */
 
 import { canonicalJson } from '../../canonicalJson';
+import {
+	CACHE_READ_COUNTINGS,
+	USAGE_COST_SOURCES,
+	USAGE_PROVENANCE_FIELDS,
+	USAGE_PROVENANCES,
+	USAGE_REPORTINGS,
+	type UsageProvenanceFact,
+} from '../streaming/usage-accumulator';
 import {
 	sha256Hex,
 	type DispatchLease,
@@ -182,6 +198,13 @@ export function lifecycleFactProblems(value: unknown): string[] {
 	) {
 		problems.push(`detail is not a string within ${MAX_DETAIL_LENGTH} characters or null`);
 	}
+	problems.push(...attributionProblems(value));
+	return problems;
+}
+
+/** The lineage and admission checks both fact kinds share. */
+function attributionProblems(value: Record<string, unknown>): string[] {
+	const problems: string[] = [];
 	if (value.lineage !== undefined) {
 		const lineage = value.lineage;
 		if (!isRecord(lineage) || !isRecord(lineage.identity) || !isId(lineage.traceId)) {
@@ -200,6 +223,245 @@ export function lifecycleFactProblems(value: unknown): string[] {
 		}
 	}
 	return problems;
+}
+
+// ---------------------------------------------------------------------------
+// Usage facts (MRC-10-04)
+// ---------------------------------------------------------------------------
+
+/** Who a run's usage is attributed to, as the enrollment record named them when the work ran. */
+export interface UsageAttribution {
+	tenantId: string;
+	orgId: string;
+}
+
+/**
+ * One run's usage, as a producer reports it when the run settles: the lifecycle
+ * identities (the same fields a `LifecycleFact` carries, with the state the run
+ * settled in), the account the work ran as, the attribution of record, and the
+ * provenance of the total. Metadata only: counts and a cost, never a prompt.
+ */
+export interface UsageFact extends Pick<
+	LifecycleFact,
+	| 'surface'
+	| 'state'
+	| 'at'
+	| 'sessionId'
+	| 'agentId'
+	| 'tabId'
+	| 'provider'
+	| 'model'
+	| 'providerSessionId'
+	| 'runId'
+	| 'record'
+	| 'lineage'
+	| 'admission'
+> {
+	/** The provider account the work ran as (`managedAccountRef`, a digest of provider and resolved directory); null for a provider with no account concept or one the producer could not resolve. A name or a path never stands in. */
+	accountRef: string | null;
+	/** Historical: the tenant and org the record named at the time. Null on a standalone host. A later move of the installation never rewrites it. */
+	attribution: UsageAttribution | null;
+	usage: UsageProvenanceFact;
+}
+
+/** Every field a usage fact may carry. A key outside this list is refused, whatever it holds. */
+export const USAGE_FACT_FIELDS: readonly (keyof UsageFact)[] = [
+	'surface',
+	'state',
+	'at',
+	'sessionId',
+	'agentId',
+	'tabId',
+	'provider',
+	'model',
+	'providerSessionId',
+	'runId',
+	'record',
+	'accountRef',
+	'attribution',
+	'usage',
+	'lineage',
+	'admission',
+];
+
+const isCount = (value: unknown): boolean =>
+	typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+const isCountOrNull = (value: unknown): boolean => value === null || isCount(value);
+const isAmountOrNull = (value: unknown): boolean =>
+	value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
+const USAGE_COUNT_FIELDS = [
+	'inputTokens',
+	'outputTokens',
+	'cacheReadInputTokens',
+	'cacheCreationInputTokens',
+	'reasoningTokens',
+] as const;
+
+/** The problems with a value offered as a usage fact: every field known (inside `usage` and `counts` too), the enums ours, the figures counts or null, and the provenance a word this host may say. A fact with a problem is refused whole. */
+export function usageFactProblems(value: unknown): string[] {
+	if (!isRecord(value)) return ['fact is not an object'];
+	const problems: string[] = [];
+	for (const key of Object.keys(value)) {
+		if (!oneOf(USAGE_FACT_FIELDS, key)) problems.push(`unknown field "${key}"`);
+	}
+	if (!oneOf(LIFECYCLE_SURFACES, value.surface)) problems.push('surface is unknown');
+	if (!oneOf(RUN_STATES, value.state)) problems.push('state is unknown');
+	if (!oneOf(LIFECYCLE_RECORDS, value.record)) problems.push('record is unknown');
+	if (typeof value.at !== 'number' || !Number.isFinite(value.at)) problems.push('at is not a time');
+	for (const key of ['sessionId', 'agentId', 'provider', 'runId'] as const) {
+		if (!isId(value[key])) problems.push(`${key} is not an id`);
+	}
+	for (const key of ['tabId', 'model', 'providerSessionId', 'accountRef'] as const) {
+		if (!isIdOrNull(value[key])) problems.push(`${key} is not an id or null`);
+	}
+	const attribution = value.attribution;
+	if (
+		attribution !== null &&
+		(!isRecord(attribution) ||
+			!isId(attribution.tenantId) ||
+			!isId(attribution.orgId) ||
+			Object.keys(attribution).length !== 2)
+	) {
+		problems.push('attribution is not a tenant and org, or null');
+	}
+	const usage = value.usage;
+	if (!isRecord(usage)) {
+		problems.push('usage is not a provenance');
+	} else {
+		for (const key of Object.keys(usage)) {
+			if (!oneOf(USAGE_PROVENANCE_FIELDS, key)) problems.push(`unknown field "usage.${key}"`);
+		}
+		if (!oneOf(USAGE_PROVENANCES, usage.provenance)) problems.push('usage.provenance is unknown');
+		else if (usage.provenance === 'gateway_metered' || usage.provenance === 'provider_reported') {
+			problems.push(
+				`usage.provenance ${usage.provenance} is the gateway's or the provider's word, not this host's`
+			);
+		}
+		if (!oneOf(['provider-stream', 'none'], usage.tokens)) problems.push('usage.tokens is unknown');
+		if (!oneOf(USAGE_COST_SOURCES, usage.cost)) problems.push('usage.cost is unknown');
+		if (!isAmountOrNull(usage.costUsd)) problems.push('usage.costUsd is not an amount or null');
+		if (!isIdOrNull(usage.priceRevision)) problems.push('usage.priceRevision is not an id or null');
+		if (!oneOf(USAGE_REPORTINGS, usage.reporting)) problems.push('usage.reporting is unknown');
+		if (!isCount(usage.events) || !isCount(usage.corrections)) {
+			problems.push('usage.events and usage.corrections are not counts');
+		}
+		if (!oneOf(CACHE_READ_COUNTINGS, usage.cacheReadCounting)) {
+			problems.push('usage.cacheReadCounting is unknown');
+		}
+		if (usage.contextWindow !== null && !isCount(usage.contextWindow)) {
+			problems.push('usage.contextWindow is not a count or null');
+		}
+		const counts = usage.counts;
+		if (counts !== null) {
+			if (!isRecord(counts)) problems.push('usage.counts is not counts or null');
+			else {
+				for (const key of Object.keys(counts)) {
+					if (!oneOf(USAGE_COUNT_FIELDS, key)) problems.push(`unknown field "usage.counts.${key}"`);
+				}
+				if (!isCount(counts.inputTokens) || !isCount(counts.outputTokens)) {
+					problems.push('usage.counts input and output are not counts');
+				}
+				for (const key of USAGE_COUNT_FIELDS.slice(2)) {
+					if (!isCountOrNull(counts[key]))
+						problems.push(`usage.counts.${key} is not a count or null`);
+				}
+			}
+		}
+		// What the words promise, the figures must keep.
+		if (usage.tokens === 'none' && (counts !== null || usage.provenance !== 'unavailable')) {
+			problems.push('usage with no tokens carries counts or a provenance');
+		}
+		if (usage.tokens === 'provider-stream' && counts === null) {
+			problems.push('usage with tokens carries no counts');
+		}
+		if (usage.cost === 'none' && usage.costUsd !== null)
+			problems.push('usage with no cost carries a figure');
+		if (usage.cost !== 'none' && usage.costUsd === null)
+			problems.push('usage with a cost carries no figure');
+		if ((usage.cost === 'priced') !== (usage.priceRevision !== null)) {
+			problems.push('usage.priceRevision is set exactly when this host priced the tokens');
+		}
+	}
+	problems.push(...attributionProblems(value));
+	return problems;
+}
+
+/** The usage half of a `usage` event: the provenance plus the account and attribution, an allowlist copy. */
+export interface UsageSource extends UsageProvenanceFact {
+	accountRef: string | null;
+	attribution: UsageAttribution | null;
+}
+
+/** A `ManagedEvent` of kind `usage`, with the producer's view and the usage it settled. */
+export interface ManagedUsageEvent extends ManagedLifecycleEvent {
+	kind: 'usage';
+	usage: UsageSource;
+}
+
+function usageSourceOf(fact: UsageFact): UsageSource {
+	const u = fact.usage;
+	return {
+		provenance: u.provenance,
+		tokens: u.tokens,
+		cost: u.cost,
+		costUsd: u.costUsd,
+		priceRevision: u.priceRevision,
+		reporting: u.reporting,
+		events: u.events,
+		corrections: u.corrections,
+		cacheReadCounting: u.cacheReadCounting,
+		counts: u.counts ? { ...u.counts } : null,
+		contextWindow: u.contextWindow,
+		accountRef: fact.accountRef,
+		attribution: fact.attribution ? { ...fact.attribution } : null,
+	};
+}
+
+/** `evt-` plus a digest of the run, the figures and their provenance: the same settled usage twice is one event; a corrected total is another. */
+export function usageEventId(installation: ManagedInstallationIdentity, fact: UsageFact): string {
+	return `evt-${sha256Hex(
+		canonicalJson({
+			installation,
+			kind: 'usage',
+			surface: fact.surface,
+			sessionId: fact.sessionId,
+			runId: fact.runId,
+			at: fact.at,
+			counts: fact.usage.counts,
+			costUsd: fact.usage.costUsd,
+			provenance: fact.usage.provenance,
+			leaseId: fact.admission?.leaseId ?? null,
+			requestId: fact.lineage?.identity.requestId ?? null,
+			attemptId: fact.lineage?.identity.attemptId ?? null,
+		})
+	)}`;
+}
+
+/** The `usage` event one fact amounts to, pure, numbered `sequence`. */
+export function projectUsageEvent(
+	fact: UsageFact,
+	deps: LifecycleProjectionDeps,
+	sequence: number
+): ManagedUsageEvent {
+	const context = contextOf(fact, deps);
+	return {
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		eventId: usageEventId(deps.installation, fact),
+		installation: { ...deps.installation },
+		sequence,
+		occurredAt: new Date(fact.at).toISOString(),
+		kind: 'usage',
+		context,
+		run: runOf(fact, context),
+		source: sourceOf({
+			...fact,
+			ledgerStatus: null,
+			exitCode: null,
+			durationMs: null,
+			detail: null,
+		}),
+		usage: usageSourceOf(fact),
+	};
 }
 
 /** The contract's run state for a producer's status word; never a guess at success. */
@@ -263,7 +525,10 @@ export interface LifecycleProjectionDeps {
 	capacity?: number;
 }
 
-function contextOf(fact: LifecycleFact, deps: LifecycleProjectionDeps): ManagedOperationContext {
+function contextOf(
+	fact: Pick<LifecycleFact, 'runId' | 'lineage' | 'admission'>,
+	deps: LifecycleProjectionDeps
+): ManagedOperationContext {
 	const lineage = fact.lineage;
 	// With no managed lineage the producer's run id is the one request and the one attempt there is.
 	const own = fact.runId;
@@ -299,7 +564,10 @@ function contextOf(fact: LifecycleFact, deps: LifecycleProjectionDeps): ManagedO
 	};
 }
 
-function runOf(fact: LifecycleFact, context: ManagedOperationContext): ManagedRunRecord {
+function runOf(
+	fact: Pick<LifecycleFact, 'runId' | 'agentId' | 'providerSessionId' | 'state'>,
+	context: ManagedOperationContext
+): ManagedRunRecord {
 	const runId = context.identity.runId ?? fact.runId;
 	return {
 		runId,
@@ -396,7 +664,12 @@ export interface LifecycleEventSink {
 	record(fact: LifecycleFact): readonly ManagedLifecycleEvent[];
 }
 
-export interface LifecycleProjector extends LifecycleEventSink {
+/** What a usage producer holds. Never throws. */
+export interface UsageEventSink {
+	recordUsage(fact: UsageFact): readonly ManagedUsageEvent[];
+}
+
+export interface LifecycleProjector extends LifecycleEventSink, UsageEventSink {
 	/** Hear every event as it is projected. A listener that throws is dropped from that event only. */
 	subscribe(listener: (event: ManagedLifecycleEvent) => void): () => void;
 	/** The newest events, oldest first, at most `capacity`. */
@@ -418,29 +691,40 @@ export function createLifecycleProjector(deps: LifecycleProjectionDeps): Lifecyc
 	let dropped = 0;
 	let refused = 0;
 
+	/** Both fact kinds go out the same way: one sequence, one window, every listener. */
+	function publish<E extends ManagedLifecycleEvent>(events: E[]): E[] {
+		sequence += events.length;
+		for (const event of events) {
+			window.push(event);
+			while (window.length > capacity) {
+				window.shift();
+				dropped += 1;
+			}
+			for (const listener of [...listeners]) {
+				try {
+					listener(event);
+				} catch {
+					// A consumer's failure is its own; the producer's lifecycle path goes on.
+				}
+			}
+		}
+		return events;
+	}
+
 	return {
 		record(fact) {
 			if (lifecycleFactProblems(fact).length > 0) {
 				refused += 1;
 				return [];
 			}
-			const events = projectLifecycleEvents(fact, deps, sequence);
-			sequence += events.length;
-			for (const event of events) {
-				window.push(event);
-				while (window.length > capacity) {
-					window.shift();
-					dropped += 1;
-				}
-				for (const listener of [...listeners]) {
-					try {
-						listener(event);
-					} catch {
-						// A consumer's failure is its own; the producer's lifecycle path goes on.
-					}
-				}
+			return publish(projectLifecycleEvents(fact, deps, sequence));
+		},
+		recordUsage(fact) {
+			if (usageFactProblems(fact).length > 0) {
+				refused += 1;
+				return [];
 			}
-			return events;
+			return publish([projectUsageEvent(fact, deps, sequence)]);
 		},
 		subscribe(listener) {
 			listeners.add(listener);

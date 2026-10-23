@@ -33,7 +33,10 @@ import type {
 	EventJournal,
 	JournalEventEntry,
 } from '../../shared/maestro-lib/managed/event-journal';
-import type { ManagedLifecycleEvent } from '../../shared/maestro-lib/managed/events';
+import type {
+	ManagedLifecycleEvent,
+	ManagedUsageEvent,
+} from '../../shared/maestro-lib/managed/events';
 import type {
 	EndpointTelemetryEvent,
 	ManagedHostAdapter,
@@ -65,6 +68,12 @@ export function telemetryReportOf(
 	binding: TelemetryBinding
 ): TelemetryProjection {
 	const produced = event.installation;
+	// A usage event (MRC-10-04) goes as the `usage` family with the provenance the
+	// fact settled; a runtime report may say only estimated or unavailable, and
+	// the fact never says more. The figures stay in the journal with the identities.
+	const usage = event.kind === 'usage' ? (event as ManagedUsageEvent).usage : null;
+	const usageProvenance: EndpointTelemetryEvent['usageProvenance'] =
+		usage?.provenance === 'estimated' ? 'estimated' : 'unavailable';
 	if (produced.installationId !== binding.installation.installationId) {
 		return {
 			ok: false,
@@ -103,13 +112,13 @@ export function telemetryReportOf(
 			sequence: event.sequence,
 			occurredAt: event.occurredAt,
 			source: 'runtime',
-			family: 'agent.lifecycle',
+			family: usage ? 'usage' : 'agent.lifecycle',
 			policyRevision: binding.policyRevision,
 			collectionProfile: 'metadata',
 			// The state, provider and surface stay in the journal; the operation
 			// refuses the run identities; nothing collects content.
 			completeness: { metadata: 'partial', content: 'unavailable', lineage: 'filtered_by_policy' },
-			usageProvenance: 'unavailable',
+			usageProvenance,
 			redaction: { state: 'not_applicable', ruleIds: [] },
 			contentReferences: [],
 		},

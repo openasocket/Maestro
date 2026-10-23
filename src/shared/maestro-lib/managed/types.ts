@@ -343,7 +343,7 @@ export interface ManagedControlReceipt {
 	outcome: ManagedControlOutcome;
 }
 
-export type ManagedEventKind = 'run-state' | 'decision' | 'capabilities-changed';
+export type ManagedEventKind = 'run-state' | 'decision' | 'capabilities-changed' | 'usage';
 
 /** Metadata only. Provider output and content never ride on these. */
 export interface ManagedEvent {

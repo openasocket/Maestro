@@ -501,3 +501,98 @@ describe('telemetry client', () => {
 		expect(c.status()).toMatchObject({ running: false, nextPassAt: null });
 	});
 });
+
+describe('telemetryReportOf for a usage event (MRC-10-04)', () => {
+	it('goes as the usage family with the provenance the fact settled; the figures, account and org stay in the journal', () => {
+		const p = projector();
+		const [priced] = p.recordUsage({
+			surface: 'agent',
+			state: 'completed',
+			at: T0 + 500,
+			sessionId: 'agent-1-ai-tab-1',
+			agentId: 'agent-1',
+			tabId: 'tab-1',
+			provider: 'codex',
+			model: 'gpt-5-codex',
+			providerSessionId: 'thread-1',
+			runId: 'run-9',
+			record: 'ledger',
+			accountRef: 'c'.repeat(64),
+			attribution: { tenantId: 'tenant-1', orgId: 'org-eng' },
+			usage: {
+				provenance: 'estimated',
+				tokens: 'provider-stream',
+				cost: 'priced',
+				costUsd: 0.0021,
+				priceRevision: 'price-0123456789abcdef',
+				reporting: 'running-total',
+				events: 2,
+				corrections: 0,
+				cacheReadCounting: 'inside-input',
+				counts: {
+					inputTokens: 1_600,
+					outputTokens: 80,
+					cacheReadInputTokens: 1_300,
+					cacheCreationInputTokens: null,
+					reasoningTokens: null,
+				},
+				contextWindow: null,
+			},
+		});
+		const projected = telemetryReportOf(priced, BINDING);
+		expect(projected.ok).toBe(true);
+		if (!projected.ok) return;
+		expect(projected.report).toMatchObject({
+			eventId: priced.eventId,
+			family: 'usage',
+			usageProvenance: 'estimated',
+			collectionProfile: 'metadata',
+		});
+		const wire = JSON.stringify(projected.report);
+		for (const canary of [
+			'1600',
+			'0.0021',
+			'price-',
+			'c'.repeat(64),
+			'org-eng',
+			'tenant-1',
+			'run-9',
+			'thread-1',
+		]) {
+			expect(wire).not.toContain(canary);
+		}
+		const [silent] = p.recordUsage({
+			surface: 'agent',
+			state: 'failed',
+			at: T0 + 600,
+			sessionId: 'agent-1-ai-tab-1',
+			agentId: 'agent-1',
+			tabId: 'tab-1',
+			provider: 'codex',
+			model: null,
+			providerSessionId: null,
+			runId: 'run-10',
+			record: 'ledger',
+			accountRef: null,
+			attribution: null,
+			usage: {
+				provenance: 'unavailable',
+				tokens: 'none',
+				cost: 'none',
+				costUsd: null,
+				priceRevision: null,
+				reporting: 'none',
+				events: 0,
+				corrections: 0,
+				cacheReadCounting: 'unknown',
+				counts: null,
+				contextWindow: null,
+			},
+		});
+		const unavailable = telemetryReportOf(silent, BINDING);
+		expect(unavailable.ok && unavailable.report).toMatchObject({
+			family: 'usage',
+			usageProvenance: 'unavailable',
+		});
+	});
+});

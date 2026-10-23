@@ -19,8 +19,12 @@ import {
 	lifecycleLineageOf,
 	lifecycleStateOf,
 	projectLifecycleEvents,
+	USAGE_FACT_FIELDS,
+	usageEventId,
+	usageFactProblems,
 	type LifecycleFact,
 	type LifecycleProjectionDeps,
+	type UsageFact,
 } from '../../../../shared/maestro-lib/managed/events';
 import {
 	MANAGED_CONTRACT_VERSION,
@@ -381,5 +385,219 @@ describe('createLifecycleProjector', () => {
 		});
 		// The prompt went into the snapshot by digest; the event has the digest and not the text.
 		expect(JSON.stringify(events)).not.toContain('the prompt text');
+	});
+});
+
+// MRC-10-04: the usage half of the projection.
+const usageFact = (overrides: Partial<UsageFact> = {}): UsageFact => ({
+	surface: 'agent',
+	state: 'completed',
+	at: 1_700_000_000_500,
+	sessionId: 'agent-1-ai-tab-1',
+	agentId: 'agent-1',
+	tabId: 'tab-1',
+	provider: 'codex',
+	model: 'gpt-5-codex',
+	providerSessionId: 'thread-1',
+	runId: 'run:agent-1-ai-tab-1:1700000000000:abc123',
+	record: 'ledger',
+	accountRef: 'a'.repeat(64),
+	attribution: { tenantId: 'tenant-1', orgId: 'org-eng' },
+	usage: {
+		provenance: 'estimated',
+		tokens: 'provider-stream',
+		cost: 'priced',
+		costUsd: 0.0012,
+		priceRevision: 'price-0123456789abcdef',
+		reporting: 'running-total',
+		events: 3,
+		corrections: 0,
+		cacheReadCounting: 'inside-input',
+		counts: {
+			inputTokens: 1_600,
+			outputTokens: 80,
+			cacheReadInputTokens: 1_300,
+			cacheCreationInputTokens: null,
+			reasoningTokens: null,
+		},
+		contextWindow: null,
+	},
+	...overrides,
+});
+
+describe('usage facts', () => {
+	it('accepts a complete fact and names every problem of a malformed one', () => {
+		expect(usageFactProblems(usageFact())).toEqual([]);
+		expect(usageFactProblems(usageFact({ accountRef: null, attribution: null }))).toEqual([]);
+		const problems = usageFactProblems({
+			...usageFact(),
+			state: 'done',
+			accountRef: 42,
+			attribution: { tenantId: 't', orgId: 'o', path: '/eng' },
+			usage: {
+				...usageFact().usage,
+				provenance: 'provider_reported',
+				cost: 'free',
+				costUsd: -1,
+				events: 1.5,
+				counts: { ...usageFact().usage.counts, inputTokens: -3, prompt: 'x' },
+			},
+		});
+		expect(problems).toEqual(
+			expect.arrayContaining([
+				'state is unknown',
+				'accountRef is not an id or null',
+				'attribution is not a tenant and org, or null',
+				"usage.provenance provider_reported is the gateway's or the provider's word, not this host's",
+				'usage.cost is unknown',
+				'usage.costUsd is not an amount or null',
+				'usage.events and usage.corrections are not counts',
+				'unknown field "usage.counts.prompt"',
+				'usage.counts input and output are not counts',
+			])
+		);
+	});
+
+	it('holds the words to the figures: no tokens means no counts, a priced cost names its revision, a reported one does not', () => {
+		const base = usageFact().usage;
+		expect(usageFactProblems(usageFact({ usage: { ...base, tokens: 'none' } }))).toEqual([
+			'usage with no tokens carries counts or a provenance',
+		]);
+		expect(usageFactProblems(usageFact({ usage: { ...base, counts: null } }))).toEqual([
+			'usage with tokens carries no counts',
+		]);
+		expect(usageFactProblems(usageFact({ usage: { ...base, cost: 'none' } }))).toEqual([
+			'usage with no cost carries a figure',
+			'usage.priceRevision is set exactly when this host priced the tokens',
+		]);
+		expect(usageFactProblems(usageFact({ usage: { ...base, cost: 'reported' } }))).toEqual([
+			'usage.priceRevision is set exactly when this host priced the tokens',
+		]);
+		expect(
+			usageFactProblems(
+				usageFact({
+					usage: {
+						...base,
+						provenance: 'unavailable',
+						tokens: 'none',
+						cost: 'none',
+						costUsd: null,
+						priceRevision: null,
+						counts: null,
+					},
+				})
+			)
+		).toEqual([]);
+	});
+
+	it('refuses a fact that smuggles content under any key, at the top or inside usage', () => {
+		for (const key of ['prompt', 'answerText', 'cwd', 'env', 'accountDir', 'apiKey']) {
+			expect(usageFactProblems({ ...usageFact(), [key]: 'sk-secret-or-prose' })).toEqual([
+				`unknown field "${key}"`,
+			]);
+			expect(
+				usageFactProblems(usageFact({ usage: { ...usageFact().usage, [key]: 'x' } as never }))
+			).toEqual([`unknown field "usage.${key}"`]);
+		}
+		expect(USAGE_FACT_FIELDS).toHaveLength(16);
+	});
+
+	it('projects one usage event under the shared sequence with the identities, the figures and the attribution of record, by allowlist', () => {
+		const projector = createLifecycleProjector(deps());
+		projector.record(fact({ at: 1_700_000_000_000 }));
+		const [event] = projector.recordUsage(usageFact());
+		expect(event.kind).toBe('usage');
+		expect(event.sequence).toBe(2);
+		expect(projector.nextSequence()).toBe(3);
+		expect(event.eventId).toBe(usageEventId(INSTALLATION, usageFact()));
+		expect(event.run).toMatchObject({
+			runId: usageFact().runId,
+			agentId: 'agent-1',
+			providerSessionId: 'thread-1',
+			state: 'completed',
+		});
+		expect(event.source).toEqual({
+			surface: 'agent',
+			sessionId: 'agent-1-ai-tab-1',
+			tabId: 'tab-1',
+			provider: 'codex',
+			model: 'gpt-5-codex',
+			runId: usageFact().runId,
+			record: 'ledger',
+			ledgerStatus: null,
+			exitCode: null,
+			durationMs: null,
+			detail: null,
+		});
+		expect(event.usage).toEqual({
+			...usageFact().usage,
+			accountRef: 'a'.repeat(64),
+			attribution: { tenantId: 'tenant-1', orgId: 'org-eng' },
+		});
+		expect(managedContextProblems(event.context)).toEqual([]);
+		expect(event.context.identity.runId).toBe(usageFact().runId);
+		expect(projector.recent().map((e) => e.kind)).toEqual(['run-state', 'usage']);
+	});
+
+	it('is one event for the same settled usage and another for a corrected total; a refused fact is counted, not thrown', () => {
+		const projector = createLifecycleProjector(deps());
+		const [first] = projector.recordUsage(usageFact());
+		const [again] = projector.recordUsage(usageFact());
+		expect(again.eventId).toBe(first.eventId);
+		const [corrected] = projector.recordUsage(
+			usageFact({
+				usage: {
+					...usageFact().usage,
+					counts: { ...usageFact().usage.counts!, outputTokens: 81 },
+				},
+			})
+		);
+		expect(corrected.eventId).not.toBe(first.eventId);
+		// A later move of the installation is another fact; the first keeps the org it was settled under.
+		const [moved] = projector.recordUsage(
+			usageFact({ attribution: { tenantId: 'tenant-1', orgId: 'org-platform' } })
+		);
+		expect(moved.usage.attribution?.orgId).toBe('org-platform');
+		expect(first.usage.attribution?.orgId).toBe('org-eng');
+		expect(
+			projector.recordUsage({ ...usageFact(), prompt: 'the prompt' } as unknown as UsageFact)
+		).toEqual([]);
+		expect(projector.gaps()).toEqual({ dropped: 0, refused: 1 });
+		expect(JSON.stringify(projector.recent())).not.toContain('the prompt');
+	});
+
+	it('carries the lineage and the admission a managed run settled under, so cost joins the request, run and attempt', () => {
+		const projector = createLifecycleProjector(deps());
+		const lineage = lifecycleLineageOf(context());
+		const [event] = projector.recordUsage(
+			usageFact({
+				lineage,
+				admission: {
+					leaseId: 'lease-1',
+					authorityId: 'auth-1',
+					requestDigest: 'd1',
+					policyRevision: 3,
+				},
+				record: 'journal',
+			})
+		);
+		expect(event.context.identity).toEqual(lineage.identity);
+		expect(event.context.actor).toEqual({ kind: 'human', id: 'alice' });
+		expect(event.context.policyRevision).toBe(3);
+		expect(event.run.rootRunId).toBe('root-1');
+		// The lease is part of what identifies the event; another lease on the same figures is another event.
+		const [other] = projector.recordUsage(
+			usageFact({
+				lineage,
+				admission: {
+					leaseId: 'lease-2',
+					authorityId: 'auth-1',
+					requestDigest: 'd1',
+					policyRevision: 3,
+				},
+				record: 'journal',
+			})
+		);
+		expect(other.eventId).not.toBe(event.eventId);
 	});
 });
