@@ -32,6 +32,7 @@
  */
 
 import { canonicalJson } from '../../canonicalJson';
+import { MANAGED_ROUTES, type ManagedRoute } from '../providers/capabilities';
 import {
 	CACHE_READ_COUNTINGS,
 	USAGE_COST_SOURCES,
@@ -46,6 +47,8 @@ import {
 	type DispatchOperation,
 	type ManagedDecisionReceipt,
 } from './authority';
+import { SUPPORT_RANK, type SupportStatus } from './compatibility';
+import { endpointComponentProblems, type EndpointComponent } from './endpoint-port';
 import {
 	MANAGED_CONTRACT_VERSION,
 	type ManagedDelegationRef,
@@ -61,8 +64,14 @@ import {
 	type ManagedWorkflowRef,
 } from './types';
 
-/** The surface that ran the work: an AI tab's process, a terminal tab's PTY, a room's turn, a headless turn. */
-export const LIFECYCLE_SURFACES = ['agent', 'terminal', 'group-chat', 'headless-turn'] as const;
+/** The surface that ran the work: an AI tab's process, a terminal tab's PTY, a room's turn, a headless turn, or the host process itself (an inventory, MRC-10-06). */
+export const LIFECYCLE_SURFACES = [
+	'agent',
+	'terminal',
+	'group-chat',
+	'headless-turn',
+	'host',
+] as const;
 export type LifecycleSurface = (typeof LIFECYCLE_SURFACES)[number];
 
 /** Where the producer wrote the run: the AgentRun store, the run journal, nowhere by design (the ledger skips that surface), nowhere at all. */
@@ -464,6 +473,272 @@ export function projectUsageEvent(
 	};
 }
 
+// ---------------------------------------------------------------------------
+// Inventory facts (MRC-10-06)
+// ---------------------------------------------------------------------------
+
+/** A count the host observed, or the named absence of one: an unobserved count is never a zero. */
+export type InventoryObservation =
+	| { state: 'observed'; count: number }
+	| { state: 'unavailable'; count: null };
+
+/** One host process on this installation, in the endpoint's attachment vocabulary (the sibling `fleetInventory.runtimes`). */
+export interface InventoryRuntime {
+	runtimeId: string;
+	processEpoch: string;
+	components: readonly EndpointComponent[];
+}
+
+/** One provider: whether its binary was detected (installation, never enforcement) and, per route, what runs standalone and what is enforced managed. */
+export interface InventoryProvider {
+	agentId: string;
+	installed: 'detected' | 'absent' | 'unknown';
+	/** The version the probe reported; null when none did. */
+	version: string | null;
+	routes: Readonly<Record<ManagedRoute, { standalone: SupportStatus; managed: SupportStatus }>>;
+}
+
+/**
+ * One installation's inventory as its host reports it: the device the endpoint
+ * enrolled, the runtimes it knows of, what each provider can do and how far
+ * managed enforcement goes on it, the subagents it observed, the policy
+ * revision it runs under, and every gap named. Metadata only: no path, no
+ * socket, no secret; `inventoryFactProblems()` refuses any other field.
+ */
+export interface InventoryFact {
+	at: number;
+	device: { deviceId: string | null; hostname: string | null; os: string | null };
+	runtimes: readonly InventoryRuntime[];
+	providers: readonly InventoryProvider[];
+	subagents: { managed: InventoryObservation; providerInternal: InventoryObservation };
+	policyRevision: number | null;
+	completeness: InventoryCompleteness;
+	/** What this inventory could not observe, each named. */
+	gaps: readonly string[];
+}
+
+export const INVENTORY_COMPLETENESS = ['complete', 'partial', 'unavailable'] as const;
+export type InventoryCompleteness = (typeof INVENTORY_COMPLETENESS)[number];
+export const INVENTORY_FACT_FIELDS: readonly (keyof InventoryFact)[] = (
+	'at device runtimes providers subagents policyRevision completeness gaps' as const
+).split(' ') as (keyof InventoryFact)[];
+const INSTALLATIONS = ['detected', 'absent', 'unknown'] as const;
+const SUPPORT_WORDS: readonly string[] = Object.keys(SUPPORT_RANK);
+const INVENTORY_LIMITS = { runtimes: 128, providers: 64, gaps: 64, gap: 512, version: 64 };
+const isTextOrNull = (value: unknown, max: number): boolean =>
+	value === null || (typeof value === 'string' && value.length > 0 && value.length <= max);
+const isRevisionOrNull = (value: unknown): boolean =>
+	value === null || (typeof value === 'number' && Number.isInteger(value) && value >= 0);
+const hasKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
+	Object.keys(value).length === keys.length && keys.every((key) => key in value);
+
+function observationProblems(value: unknown, at: string): string[] {
+	if (!isRecord(value) || !hasKeys(value, ['state', 'count']))
+		return [`${at} is not an observation`];
+	const sound =
+		value.state === 'observed'
+			? isCount(value.count)
+			: value.state === 'unavailable' && value.count === null;
+	return sound ? [] : [`${at} is not an observed count or unavailable with none`];
+}
+
+function runtimeProblems(value: unknown, at: string): string[] {
+	if (
+		!isRecord(value) ||
+		!hasKeys(value, ['runtimeId', 'processEpoch', 'components']) ||
+		!isId(value.runtimeId) ||
+		!isId(value.processEpoch) ||
+		!Array.isArray(value.components) ||
+		value.components.length < 1 ||
+		value.components.length > 32
+	) {
+		return [`${at} is not a runtime`];
+	}
+	const problems: string[] = [];
+	const ids = new Set<string>();
+	value.components.forEach((component, i) => {
+		problems.push(...endpointComponentProblems(component, `${at}.components[${i}]`));
+		const id = isRecord(component) && isId(component.id) ? component.id : null;
+		if (id !== null && ids.has(id)) problems.push(`${at} repeats component ${id}`);
+		if (id !== null) ids.add(id);
+	});
+	return problems;
+}
+
+function providerProblems(value: unknown, at: string): string[] {
+	if (!isRecord(value) || !hasKeys(value, ['agentId', 'installed', 'version', 'routes'])) {
+		return [`${at} is not a provider`];
+	}
+	const problems: string[] = [];
+	if (!isId(value.agentId)) problems.push(`${at}.agentId is not an id`);
+	if (!oneOf(INSTALLATIONS, value.installed)) problems.push(`${at}.installed is unknown`);
+	if (!isTextOrNull(value.version, INVENTORY_LIMITS.version))
+		problems.push(`${at}.version is not a version or null`);
+	const routes = value.routes;
+	if (!isRecord(routes) || !hasKeys(routes, MANAGED_ROUTES)) {
+		problems.push(`${at}.routes does not name every route once`);
+		return problems;
+	}
+	for (const route of MANAGED_ROUTES) {
+		const support = routes[route];
+		if (
+			!isRecord(support) ||
+			!hasKeys(support, ['standalone', 'managed']) ||
+			!oneOf(SUPPORT_WORDS, support.standalone) ||
+			!oneOf(SUPPORT_WORDS, support.managed)
+		) {
+			problems.push(`${at}.routes.${route} is not a standalone and managed support word`);
+		}
+	}
+	return problems;
+}
+
+/** The problems with a value offered as an inventory fact: every field known at every level, the enums ours, every list bounded and free of repeats. A path, a socket or a secret under any key is an unknown field, and the fact is refused whole. */
+export function inventoryFactProblems(value: unknown): string[] {
+	if (!isRecord(value)) return ['fact is not an object'];
+	const problems: string[] = [];
+	for (const key of Object.keys(value)) {
+		if (!oneOf(INVENTORY_FACT_FIELDS, key)) problems.push(`unknown field "${key}"`);
+	}
+	if (typeof value.at !== 'number' || !Number.isFinite(value.at)) problems.push('at is not a time');
+	const device = value.device;
+	if (
+		!isRecord(device) ||
+		!hasKeys(device, ['deviceId', 'hostname', 'os']) ||
+		!isIdOrNull(device.deviceId) ||
+		!isTextOrNull(device.hostname, 255) ||
+		!isTextOrNull(device.os, 128)
+	) {
+		problems.push('device is not a device id, hostname and os, each or null');
+	}
+	const lists: [string, unknown, number, (item: unknown, at: string) => string[]][] = [
+		['runtimes', value.runtimes, INVENTORY_LIMITS.runtimes, runtimeProblems],
+		['providers', value.providers, INVENTORY_LIMITS.providers, providerProblems],
+	];
+	for (const [name, list, max, check] of lists) {
+		if (!Array.isArray(list) || list.length > max) {
+			problems.push(`${name} is not a list of at most ${max}`);
+			continue;
+		}
+		const seen = new Set<unknown>();
+		list.forEach((item, i) => {
+			problems.push(...check(item, `${name}[${i}]`));
+			const id = isRecord(item) ? (item.runtimeId ?? item.agentId) : null;
+			if (seen.has(id)) problems.push(`${name}[${i}] repeats ${String(id)}`);
+			seen.add(id);
+		});
+	}
+	const subagents = value.subagents;
+	if (!isRecord(subagents) || !hasKeys(subagents, ['managed', 'providerInternal'])) {
+		problems.push('subagents is not a managed and provider-internal observation');
+	} else {
+		problems.push(...observationProblems(subagents.managed, 'subagents.managed'));
+		problems.push(...observationProblems(subagents.providerInternal, 'subagents.providerInternal'));
+	}
+	if (!isRevisionOrNull(value.policyRevision))
+		problems.push('policyRevision is not a revision or null');
+	if (!oneOf(INVENTORY_COMPLETENESS, value.completeness)) problems.push('completeness is unknown');
+	const gaps = value.gaps;
+	if (
+		!Array.isArray(gaps) ||
+		gaps.length > INVENTORY_LIMITS.gaps ||
+		!gaps.every((gap) => typeof gap === 'string' && gap.length <= INVENTORY_LIMITS.gap)
+	) {
+		problems.push(`gaps is not a list of at most ${INVENTORY_LIMITS.gaps} strings`);
+	}
+	return problems;
+}
+
+/** The inventory an `inventory` event carries: the fact without its time, an allowlist copy. */
+export type InventorySource = Omit<InventoryFact, 'at'>;
+
+export interface ManagedInventoryEvent extends ManagedLifecycleEvent {
+	kind: 'inventory';
+	inventory: InventorySource;
+}
+
+function inventorySourceOf(fact: InventoryFact): InventorySource {
+	const routesOf = (p: InventoryProvider): InventoryProvider['routes'] =>
+		Object.fromEntries(
+			MANAGED_ROUTES.map((route) => [
+				route,
+				{ standalone: p.routes[route].standalone, managed: p.routes[route].managed },
+			])
+		) as InventoryProvider['routes'];
+	return {
+		device: { deviceId: fact.device.deviceId, hostname: fact.device.hostname, os: fact.device.os },
+		runtimes: fact.runtimes.map((r) => ({
+			runtimeId: r.runtimeId,
+			processEpoch: r.processEpoch,
+			components: r.components.map((c) => ({ id: c.id, kind: c.kind, version: c.version })),
+		})),
+		providers: fact.providers.map((p) => ({
+			agentId: p.agentId,
+			installed: p.installed,
+			version: p.version,
+			routes: routesOf(p),
+		})),
+		subagents: {
+			managed: { ...fact.subagents.managed },
+			providerInternal: { ...fact.subagents.providerInternal },
+		},
+		policyRevision: fact.policyRevision,
+		completeness: fact.completeness,
+		gaps: [...fact.gaps],
+	};
+}
+
+/** `evt-` plus a digest of the inventory itself, not its time: the same inventory reported again is one event, and a change (a new boot, a provider detected, a revision applied) is the delta. */
+export function inventoryEventId(
+	installation: Pick<ManagedInstallationIdentity, 'installationId'>,
+	fact: InventoryFact
+): string {
+	const inventory = inventorySourceOf(fact);
+	return `evt-${sha256Hex(canonicalJson({ installation: installation.installationId, kind: 'inventory', inventory }))}`;
+}
+
+/** The host process as the lifecycle surface the event's context and source describe: no agent, no tab, no provider session, nothing recorded. */
+function hostFactOf(fact: InventoryFact, deps: LifecycleProjectionDeps): LifecycleFact {
+	const { runtimeId, processEpoch, installationId } = deps.installation;
+	return {
+		surface: 'host',
+		state: 'running',
+		at: fact.at,
+		sessionId: runtimeId,
+		agentId: installationId,
+		tabId: null,
+		provider: 'maestro',
+		model: null,
+		providerSessionId: null,
+		runId: `host:${runtimeId}:${processEpoch}`,
+		record: 'none',
+		ledgerStatus: null,
+		exitCode: null,
+		durationMs: null,
+		detail: `inventory ${fact.completeness}`,
+	};
+}
+
+/** The `inventory` event one fact amounts to, pure, numbered `sequence`; it names no run. */
+export function projectInventoryEvent(
+	fact: InventoryFact,
+	deps: LifecycleProjectionDeps,
+	sequence: number
+): ManagedInventoryEvent {
+	const host = hostFactOf(fact, deps);
+	return {
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		eventId: inventoryEventId(deps.installation, fact),
+		installation: { ...deps.installation },
+		sequence,
+		occurredAt: new Date(fact.at).toISOString(),
+		kind: 'inventory',
+		context: contextOf(host, deps),
+		source: sourceOf(host),
+		inventory: inventorySourceOf(fact),
+	};
+}
+
 /** The contract's run state for a producer's status word; never a guess at success. */
 export function lifecycleStateOf(status: string): ManagedRunState {
 	return STATE_OF[status] ?? 'unknown';
@@ -669,7 +944,12 @@ export interface UsageEventSink {
 	recordUsage(fact: UsageFact): readonly ManagedUsageEvent[];
 }
 
-export interface LifecycleProjector extends LifecycleEventSink, UsageEventSink {
+/** What an inventory producer holds. Never throws. */
+export interface InventoryEventSink {
+	recordInventory(fact: InventoryFact): readonly ManagedInventoryEvent[];
+}
+
+export interface LifecycleProjector extends LifecycleEventSink, UsageEventSink, InventoryEventSink {
 	/** Hear every event as it is projected. A listener that throws is dropped from that event only. */
 	subscribe(listener: (event: ManagedLifecycleEvent) => void): () => void;
 	/** The newest events, oldest first, at most `capacity`. */
@@ -725,6 +1005,13 @@ export function createLifecycleProjector(deps: LifecycleProjectionDeps): Lifecyc
 				return [];
 			}
 			return publish([projectUsageEvent(fact, deps, sequence)]);
+		},
+		recordInventory(fact) {
+			if (inventoryFactProblems(fact).length > 0) {
+				refused += 1;
+				return [];
+			}
+			return publish([projectInventoryEvent(fact, deps, sequence)]);
 		},
 		subscribe(listener) {
 			listeners.add(listener);

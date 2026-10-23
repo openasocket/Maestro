@@ -76,8 +76,14 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * the reporting style, the cache convention, a null for a count the stream never carried); and the usage
  * half of the projection (`./managed/events`, MRC-10-04A): `UsageFact`, `usageFactProblems`,
  * `LifecycleProjector.recordUsage` raising a `usage` event under the shared sequence.
+ * 0.21.0: the inventory half of the projection (`./managed/events`, MRC-10-06): `InventoryFact` (the
+ * device, the runtimes and their components in the endpoint's attachment vocabulary, each provider's
+ * detected installation beside its route enforcement, subagents as an observation or `unavailable`,
+ * the applied revision, completeness and named gaps), `inventoryFactProblems`, and
+ * `LifecycleProjector.recordInventory` raising an `inventory` event whose id digests the inventory,
+ * so an unchanged inventory is one event and a change is the delta; the `host` lifecycle surface.
  */
-export const MAESTRO_LIB_VERSION = '0.20.0';
+export const MAESTRO_LIB_VERSION = '0.21.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

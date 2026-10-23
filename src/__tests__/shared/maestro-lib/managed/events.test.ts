@@ -11,8 +11,12 @@ import {
 	buildDispatchSnapshot,
 } from '../../../../shared/maestro-lib/managed/authority';
 import {
+	INVENTORY_FACT_FIELDS,
 	LIFECYCLE_FACT_FIELDS,
 	createLifecycleProjector,
+	inventoryEventId,
+	inventoryFactProblems,
+	projectInventoryEvent,
 	lifecycleAdmissionOfLease,
 	lifecycleEventId,
 	lifecycleFactProblems,
@@ -22,10 +26,12 @@ import {
 	USAGE_FACT_FIELDS,
 	usageEventId,
 	usageFactProblems,
+	type InventoryFact,
 	type LifecycleFact,
 	type LifecycleProjectionDeps,
 	type UsageFact,
 } from '../../../../shared/maestro-lib/managed/events';
+import { MANAGED_ROUTES } from '../../../../shared/maestro-lib/providers/capabilities';
 import {
 	MANAGED_CONTRACT_VERSION,
 	managedContextProblems,
@@ -599,5 +605,203 @@ describe('usage facts', () => {
 			})
 		);
 		expect(other.eventId).not.toBe(event.eventId);
+	});
+});
+
+describe('inventory facts (MRC-10-06)', () => {
+	const routes = (managed: 'implemented' | 'unsupported' = 'unsupported') =>
+		Object.fromEntries(
+			MANAGED_ROUTES.map((route) => [
+				route,
+				{
+					standalone: route === 'child-process' ? 'implemented' : 'unverified',
+					managed: route === 'child-process' ? managed : 'unsupported',
+				},
+			])
+		) as InventoryFact['providers'][number]['routes'];
+
+	const inventory = (overrides: Partial<InventoryFact> = {}): InventoryFact => ({
+		at: 1_700_000_000_000,
+		device: { deviceId: 'enr-1', hostname: 'box', os: 'darwin 25.0.0 arm64' },
+		runtimes: [
+			{
+				runtimeId: 'desktop-4242',
+				processEpoch: 'epoch-1',
+				components: [
+					{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' },
+					{ id: 'maestro-lib', kind: 'runtime', version: '0.21.0' },
+				],
+			},
+		],
+		providers: [
+			{
+				agentId: 'claude-code',
+				installed: 'detected',
+				version: '2.0.1',
+				routes: routes('implemented'),
+			},
+			{ agentId: 'codex', installed: 'unknown', version: null, routes: routes() },
+		],
+		subagents: {
+			managed: { state: 'observed', count: 0 },
+			providerInternal: { state: 'unavailable', count: null },
+		},
+		policyRevision: 7,
+		completeness: 'partial',
+		gaps: ['runtimes: only this process is inventoried'],
+		...overrides,
+	});
+
+	it('projects an inventory event under the shared sequence, with the host as its surface and no run', () => {
+		const projector = createLifecycleProjector(deps());
+		projector.record(fact());
+		const [event] = projector.recordInventory(inventory());
+		expect(event.kind).toBe('inventory');
+		expect(event.sequence).toBe(2);
+		expect(event.run).toBeUndefined();
+		expect(event.source).toMatchObject({
+			surface: 'host',
+			sessionId: 'rt-1',
+			provider: 'maestro',
+			runId: 'host:rt-1:epoch-1',
+			record: 'none',
+			detail: 'inventory partial',
+		});
+		expect(event.context.identity.runId).toBe('host:rt-1:epoch-1');
+		expect(event.context.policyRevision).toBe(7);
+		expect(event.inventory).toEqual({
+			device: { deviceId: 'enr-1', hostname: 'box', os: 'darwin 25.0.0 arm64' },
+			runtimes: inventory().runtimes,
+			providers: inventory().providers,
+			subagents: inventory().subagents,
+			policyRevision: 7,
+			completeness: 'partial',
+			gaps: ['runtimes: only this process is inventoried'],
+		});
+		// An allowlist copy: the source is not the fact, and a later mutation of the fact does not reach it.
+		expect(event.inventory).not.toBe(inventory());
+		expect(projector.recent()).toHaveLength(2);
+		expect(projector.nextSequence()).toBe(3);
+	});
+
+	it('digests the inventory, not its time: an unchanged inventory is one event, a change is the delta', () => {
+		const later = inventory({ at: 1_700_000_999_999 });
+		expect(inventoryEventId(INSTALLATION, later)).toBe(inventoryEventId(INSTALLATION, inventory()));
+		const detected = inventory({
+			providers: [
+				{ ...inventory().providers[0] },
+				{ ...inventory().providers[1], installed: 'detected', version: '0.42.0' },
+			],
+		});
+		const rebooted = inventory({
+			runtimes: [{ ...inventory().runtimes[0], processEpoch: 'epoch-2' }],
+		});
+		const applied = inventory({ policyRevision: 8 });
+		const ids = new Set(
+			[inventory(), detected, rebooted, applied].map((f) => inventoryEventId(INSTALLATION, f))
+		);
+		expect(ids.size).toBe(4);
+		expect(inventoryEventId({ installationId: 'inst-2' }, inventory())).not.toBe(
+			inventoryEventId(INSTALLATION, inventory())
+		);
+		const event = projectInventoryEvent(inventory(), deps(), 1);
+		expect(event.eventId).toBe(inventoryEventId(INSTALLATION, inventory()));
+		expect(event.occurredAt).toBe('2023-11-14T22:13:20.000Z');
+	});
+
+	it('refuses a fact with an unknown field at any level, an unbounded list, a repeat, or a word that is not ours, whole', () => {
+		expect(inventoryFactProblems(inventory())).toEqual([]);
+		expect(INVENTORY_FACT_FIELDS).toContain('gaps');
+		const problems = (value: unknown) => inventoryFactProblems(value);
+		expect(problems({ ...inventory(), socketPath: '/run/endpoint.sock' })).toEqual([
+			'unknown field "socketPath"',
+		]);
+		expect(
+			problems(inventory({ device: { ...inventory().device, path: '/Users/me' } as never }))
+		).toEqual(['device is not a device id, hostname and os, each or null']);
+		expect(
+			problems(
+				inventory({
+					runtimes: [inventory().runtimes[0], { ...inventory().runtimes[0] }],
+				})
+			)
+		).toEqual(['runtimes[1] repeats desktop-4242']);
+		expect(
+			problems(
+				inventory({
+					runtimes: [
+						{
+							...inventory().runtimes[0],
+							components: [
+								{ id: 'maestro', kind: 'maestro', version: '1' },
+								{ id: 'maestro', kind: 'secret' as never, version: '' },
+							],
+						},
+					],
+				})
+			)
+		).toEqual([
+			'runtimes[0].components[1].kind is unknown',
+			'runtimes[0].components[1].version is not 1 to 64 characters',
+			'runtimes[0] repeats component maestro',
+		]);
+		const provider = inventory().providers[0];
+		expect(
+			problems(
+				inventory({
+					providers: [
+						{ ...provider, installed: 'yes' as never, version: 'x'.repeat(65) },
+						{
+							...provider,
+							routes: {
+								...provider.routes,
+								pty: { standalone: 'enforced', managed: 'implemented' },
+							} as never,
+						},
+					],
+				})
+			)
+		).toEqual([
+			'providers[0].installed is unknown',
+			'providers[0].version is not a version or null',
+			'providers[1].routes.pty is not a standalone and managed support word',
+			'providers[1] repeats claude-code',
+		]);
+		expect(
+			problems(
+				inventory({
+					providers: [
+						{ ...provider, routes: { 'child-process': provider.routes['child-process'] } as never },
+					],
+				})
+			)
+		).toEqual(['providers[0].routes does not name every route once']);
+		// An unobserved count is never a zero, and an observed one is never null.
+		expect(
+			problems(
+				inventory({
+					subagents: {
+						managed: { state: 'unavailable', count: 0 } as never,
+						providerInternal: { state: 'observed', count: null } as never,
+					},
+				})
+			)
+		).toEqual([
+			'subagents.managed is not an observed count or unavailable with none',
+			'subagents.providerInternal is not an observed count or unavailable with none',
+		]);
+		expect(
+			problems(
+				inventory({ policyRevision: -1, completeness: 'done' as never, gaps: ['x'.repeat(513)] })
+			)
+		).toEqual([
+			'policyRevision is not a revision or null',
+			'completeness is unknown',
+			'gaps is not a list of at most 64 strings',
+		]);
+		const projector = createLifecycleProjector(deps());
+		expect(projector.recordInventory({ ...inventory(), token: 'sk-live' } as never)).toEqual([]);
+		expect(projector.gaps()).toEqual({ dropped: 0, refused: 1 });
+		expect(JSON.stringify(projector.recent())).not.toContain('sk-live');
 	});
 });
