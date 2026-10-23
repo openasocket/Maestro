@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
 	createInstallationInventory,
+	installationOfSnapshot,
 	INVENTORY_DELIVERY,
 	readContractsPin,
 	type InventoryDeps,
@@ -512,5 +513,37 @@ describe('installation inventory (MRC-10-06A)', () => {
 		fs.writeFileSync(file, '{not json');
 		expect(readContractsPin(file)).toMatchObject({ status: 'unreadable' });
 		expect(JSON.stringify(readContractsPin(file))).not.toContain(dir);
+	});
+	it('reads a capability snapshot as a detection, an absence, or nobody knows yet; never its path', () => {
+		expect(installationOfSnapshot(undefined)).toEqual({ state: 'unknown', version: null });
+		expect(installationOfSnapshot({ status: 'probing' })).toEqual({
+			state: 'unknown',
+			version: null,
+		});
+		expect(installationOfSnapshot({ status: 'failed', version: '1' })).toEqual({
+			state: 'unknown',
+			version: null,
+		});
+		expect(installationOfSnapshot({ status: 'not_installed' })).toEqual({
+			state: 'absent',
+			version: null,
+		});
+		expect(installationOfSnapshot({ status: 'ok', version: '2.0.1' })).toEqual({
+			state: 'detected',
+			version: '2.0.1',
+		});
+		expect(installationOfSnapshot({ status: 'auth_required', version: '' })).toEqual({
+			state: 'detected',
+			version: null,
+		});
+		const snapshot = {
+			status: 'ok' as const,
+			version: 'v'.repeat(80),
+			path: '/Users/me/.local/bin/claude',
+			lastProbedAt: 1,
+		};
+		const read = installationOfSnapshot(snapshot);
+		expect(read.version).toHaveLength(64);
+		expect(JSON.stringify(read)).not.toContain('/Users');
 	});
 });

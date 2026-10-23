@@ -130,6 +130,7 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		getLifecycle: () => deps.getEnterpriseService()?.lifecycle ?? null,
 		getPolicyStatus: () => deps.getEnterpriseService()?.policy ?? null,
 		getIdentity: () => deps.getEnterpriseService()?.identity ?? null,
+		getInventory: () => deps.getEnterpriseService()?.inventory ?? null,
 	});
 
 	// Computer History - desktop-only, the bridge refuses every

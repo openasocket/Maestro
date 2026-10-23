@@ -25,6 +25,7 @@ import type {
 	RegistrationApprovalHandoff,
 } from '../enterprise/enrollment';
 import type { IdentityClearOutcome, IdentityCustodyState } from '../enterprise/identity-store';
+import type { InstallationInventory } from '../enterprise/inventory';
 import type { PolicyRecovery } from '../enterprise/policy-status';
 
 export function createEnterpriseApi() {
@@ -34,6 +35,9 @@ export function createEnterpriseApi() {
 		custody: (): Promise<IdentityCustodyState | null> => ipcRenderer.invoke('enterprise:custody'),
 		policyStatus: (): Promise<ManagedPolicyStatus | null> =>
 			ipcRenderer.invoke('enterprise:policyStatus'),
+		/** What this installation is and can do (MRC-10-06B): versions, standing, routes, collection health, named gaps. */
+		inventory: (): Promise<InstallationInventory | null> =>
+			ipcRenderer.invoke('enterprise:inventory'),
 		requestEnrollment: (
 			input: EnrollmentRequestInput
 		): Promise<LifecycleOutcome<EndpointEnrollmentResult>> =>

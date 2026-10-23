@@ -76,6 +76,13 @@ import {
 	type ContentCapture,
 	type ContentCollectionSource,
 } from './content';
+import {
+	createInstallationInventory,
+	readContractsPin,
+	type ContractsPinStatus,
+	type InstallationInventoryService,
+	type InventoryDeps,
+} from './inventory';
 import { createPolicyStatusService, type PolicyStatusService } from './policy-status';
 import { createCueSpawnAuthority, createProcessSpawnAuthority } from './spawn-authority';
 import { buildVibesRecordedGraph, type VibesRecordedGraph } from './vibes';
@@ -126,6 +133,12 @@ export interface EnterpriseServiceDeps {
 	remoteProbe?: RemoteEndpointProbe;
 	/** Hears the event journal file refusing to load at start (corrupt, unreadable); the journal then stays detached. Default: nothing. */
 	onEventJournalUnavailable?(load: Extract<EventJournalLoad, { ok: false }>): void;
+	/** The OS label the inventory reports beside the hostname (MRC-10-06B). Default: none. */
+	os?: InventoryDeps['os'];
+	/** Whether a provider binary was detected on this host, from the capability snapshots. Default: unknown for every provider. */
+	installed?: InventoryDeps['installed'];
+	/** The pinned Mega-Maestro contracts artifact (`vendor/mega-maestro/contracts.pin.json`) to read, or its status. Default: absent (CP-01). */
+	contractsPin?: string | (() => ContractsPinStatus);
 }
 
 export interface EnterpriseService {
@@ -175,6 +188,14 @@ export interface EnterpriseService {
 	readonly content: ContentCollectionSource;
 	readonly contentCapture: ContentCapture;
 	vibes(): VibesRecordedGraph;
+	/**
+	 * What this installation is and can do (MRC-10-06B): `snapshot()` is the local
+	 * read every status surface answers from, `record()` projects the fleet-facing
+	 * fact as one `inventory` event per distinct inventory. Recorded once at the end
+	 * of `start()`, after the standing is known; the journal keeps it, the telemetry
+	 * client withholds it by name (no runtime family carries it).
+	 */
+	readonly inventory: InstallationInventoryService;
 	/**
 	 * The workflow owner fences this installation holds (MRC-07-06), claimed
 	 * through the endpoint's workflow owner operation and kept in
@@ -323,6 +344,36 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 	// refuses every capture by name and a standalone one never follows a process.
 	const content = createContentCollectionSource({ status: () => lifecycle.status() });
 	const contentCapture = createContentCapture({ source: content, now });
+	const contractsPin: () => ContractsPinStatus =
+		typeof deps.contractsPin === 'function'
+			? deps.contractsPin
+			: deps.contractsPin
+				? (
+						(file) => () =>
+							readContractsPin(file)
+					)(deps.contractsPin)
+				: () => ({
+						status: 'absent',
+						reason: 'no contracts pin file was named to this desktop (CP-01, owner mega-maestro)',
+					});
+	const inventory = createInstallationInventory({
+		installation,
+		appVersion: deps.appVersion,
+		components,
+		hostname: deps.hostname,
+		os: deps.os ?? null,
+		status: () => lifecycle.status(),
+		policyStatus: () => host.policyStatus(),
+		events,
+		journal: () => (eventJournalAttached ? eventJournal.status() : null),
+		telemetry: () => telemetry.status(),
+		content: () => ({ standing: content.standing(), capture: contentCapture.status() }),
+		// No producer calls the usage capture yet (MRC-10-04A open): a gap by name, not a zero.
+		usage: () => null,
+		installed: deps.installed ?? (() => ({ state: 'unknown', version: null })),
+		contractsPin,
+		now,
+	});
 
 	return {
 		installation,
@@ -341,6 +392,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		content,
 		contentCapture,
 		vibes: () => buildVibesRecordedGraph(events.recent(), { projectorGaps: events.gaps() }),
+		inventory,
 		workflows,
 		claimWorkflowFence,
 		async start() {
@@ -363,8 +415,10 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 				deps.onEventJournalUnavailable?.(loadedEvents);
 			}
 			// No sealed file, no custody read: an unenrolled desktop never touches the keyring here.
-			if (identity.read().status !== 'ok') return;
-			await lifecycle.connect();
+			if (identity.read().status === 'ok') await lifecycle.connect();
+			// What this boot is, once its standing is known: one event per distinct
+			// inventory, kept by the journal, withheld from the endpoint by name.
+			inventory.record();
 		},
 		async close() {
 			// No new pass; the one in flight settles its batch before the socket and the file go.

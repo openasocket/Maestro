@@ -33,6 +33,7 @@ import type {
 	IdentityClearOutcome,
 	IdentityCustodyState,
 } from '../../enterprise/identity-store';
+import type { InstallationInventoryService } from '../../enterprise/inventory';
 import type { PolicyStatusService } from '../../enterprise/policy-status';
 import { withIpcErrorLogging } from '../../utils/ipcHandler';
 
@@ -45,6 +46,8 @@ export interface EnterpriseHandlerDependencies {
 	getLifecycle: () => EnrollmentLifecycle | null;
 	getPolicyStatus: () => PolicyStatusService | null;
 	getIdentity: () => EnterpriseIdentityStore | null;
+	/** The installation inventory (MRC-10-06B); null when no service runs. */
+	getInventory: () => InstallationInventoryService | null;
 }
 
 function handlerOpts(operation: string) {
@@ -120,6 +123,17 @@ export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies):
 		withIpcErrorLogging(
 			handlerOpts('policyStatus'),
 			async () => deps.getPolicyStatus()?.status() ?? null
+		)
+	);
+
+	// The local read of what this installation is and can do: versions, standing,
+	// routes with detection apart from enforcement, collection health, named gaps.
+	// No path, socket or secret is in it (`src/main/enterprise/inventory.ts`).
+	ipcMain.handle(
+		'enterprise:inventory',
+		withIpcErrorLogging(
+			handlerOpts('inventory'),
+			async () => deps.getInventory()?.snapshot() ?? null
 		)
 	);
 

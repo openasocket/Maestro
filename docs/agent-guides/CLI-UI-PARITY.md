@@ -431,7 +431,7 @@ Ranked by how often an agent is likely to hit them. Most are not built yet;
 deliberate design constraints, including protected host consent, are noted below.
 
 0. **Enterprise enrollment (`window.maestro.enterprise`).** The `enterprise:*`
-   IPC verbs (status, policy status, enrollment request, the browser-approved
+   IPC verbs (status, policy status, the installation inventory, enrollment request, the browser-approved
    actor registration, refresh/recover, the explicit local transitions and the
    identity clear) have no `maestro-cli` verb yet. They were added in the
    Mega-Maestro integration (phase 03) ahead of their CLI counterpart, which

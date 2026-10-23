@@ -46,6 +46,7 @@ const lifecycle = {
 };
 const policyStatus = { status: vi.fn(), refresh: vi.fn(), recover: vi.fn() };
 const identity = { custody: vi.fn(), clear: vi.fn() };
+const inventory = { snapshot: vi.fn(), fact: vi.fn(), record: vi.fn() };
 
 const ENROLL = {
 	socketPath: '/run/endpoint/runtime.sock',
@@ -72,6 +73,7 @@ describe('enterprise handlers', () => {
 			getLifecycle: () => lifecycle as any,
 			getPolicyStatus: () => policyStatus as any,
 			getIdentity: () => identity as any,
+			getInventory: () => inventory as any,
 		});
 	});
 
@@ -83,6 +85,7 @@ describe('enterprise handlers', () => {
 			'enterprise:completeRegistration',
 			'enterprise:connect',
 			'enterprise:custody',
+			'enterprise:inventory',
 			'enterprise:policyStatus',
 			'enterprise:recoverPolicy',
 			'enterprise:refreshPolicy',
@@ -99,9 +102,13 @@ describe('enterprise handlers', () => {
 		lifecycle.status.mockReturnValue({ authority: 'none' });
 		policyStatus.status.mockReturnValue({ freshness: 'unknown' });
 		identity.custody.mockReturnValue({ state: 'protected' });
+		inventory.snapshot.mockReturnValue({ completeness: 'partial' });
 		expect(await invoke('enterprise:status')).toEqual({ authority: 'none' });
 		expect(await invoke('enterprise:policyStatus')).toEqual({ freshness: 'unknown' });
 		expect(await invoke('enterprise:custody')).toEqual({ state: 'protected' });
+		// The inventory read is the snapshot and nothing more: no record, no projection from a read.
+		expect(await invoke('enterprise:inventory')).toEqual({ completeness: 'partial' });
+		expect(inventory.record).not.toHaveBeenCalled();
 
 		lifecycle.connect.mockResolvedValue({ status: 'ok', value: { management: 'managed' } });
 		expect(await invoke('enterprise:connect')).toEqual({
@@ -154,9 +161,11 @@ describe('enterprise handlers', () => {
 			getLifecycle: () => null,
 			getPolicyStatus: () => null,
 			getIdentity: () => null,
+			getInventory: () => null,
 		});
 		expect(await invoke('enterprise:status')).toBeNull();
 		expect(await invoke('enterprise:custody')).toBeNull();
+		expect(await invoke('enterprise:inventory')).toBeNull();
 		expect(await invoke('enterprise:connect')).toMatchObject({ status: 'unavailable' });
 		expect(await invoke('enterprise:requestEnrollment', ENROLL)).toMatchObject({
 			status: 'unavailable',

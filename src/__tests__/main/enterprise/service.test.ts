@@ -95,6 +95,23 @@ describe('enterprise service', () => {
 			sessions: [],
 			gaps: [{ kind: 'caller_reported_gap', reference: 'decisions:not-recorded-by-this-host' }],
 		});
+		// The inventory (MRC-10-06B): read off the standing, recorded once at start, kept by the
+		// journal; a second record of the same inventory is the same event, which the journal dedups.
+		expect(service.inventory.snapshot()).toMatchObject({
+			device: { deviceId: null, hostname: 'testhost' },
+			versions: { app: '1.1.0-RC', contracts: { status: 'absent' } },
+			endpoint: { authority: 'none', status: null },
+			identity: { custody: 'none' },
+			collection: { journal: { attached: true }, telemetry: { running: true }, usage: null },
+			completeness: 'partial',
+		});
+		expect(service.events.recent().map((event) => event.kind)).toEqual(['inventory']);
+		expect(service.eventJournal.status()).toMatchObject({ entries: 1, delivery: { pending: 1 } });
+		expect(service.inventory.record()[0].eventId).toBe(service.events.recent()[0].eventId);
+		expect(service.eventJournal.status()).toMatchObject({
+			entries: 1,
+			counters: { duplicates: 1 },
+		});
 		expect(fake.calls).toHaveLength(0);
 		// `identity.read()` ran once for the start check and once per status; the file
 		// does not exist, so custody was consulted but the anchor was never read.
@@ -142,6 +159,15 @@ describe('enterprise service', () => {
 			admission: { possible: true },
 		});
 		expect(service.host.policy()).toMatchObject({ policyRevision: 3 });
+		// The registered standing reaches the inventory: the enrollment id is the device, the
+		// record's tenant and actor are named, and the socket path is nowhere in the fleet fact.
+		expect(service.inventory.snapshot()).toMatchObject({
+			device: { deviceId: 'enr-1' },
+			identity: { custody: 'ok', tenantId: 'tenant-1', enrollmentId: 'enr-1' },
+			endpoint: { authority: 'registered', connection: { attached: true } },
+			policy: { appliedRevision: 3 },
+		});
+		expect(JSON.stringify(service.inventory.fact())).not.toContain(fake.socketPath);
 
 		await service.close();
 		services.splice(0);
@@ -327,18 +353,24 @@ describe('enterprise service', () => {
 		expect(service.eventJournalAttached()).toBe(false);
 		await service.start();
 		expect(service.eventJournalAttached()).toBe(true);
+		// Start recorded this boot's inventory (MRC-10-06B) before the spawn arrived.
+		const [inventory] = service.events.recent();
+		expect(inventory.kind).toBe('inventory');
 		const [event] = service.events.record(SPAWN);
 		expect(event.context.origin).toBe('desktop');
 		expect(service.eventJournal.status()).toMatchObject({
-			entries: 1,
-			delivery: { pending: 1, uncertain: 0, received: 0 },
+			entries: 2,
+			delivery: { pending: 2, uncertain: 0, received: 0 },
 		});
 		await service.close();
 		services.splice(0);
 		const written = JSON.parse(
 			fs.readFileSync(path.join(dir, 'maestro-managed-events.json'), 'utf8')
 		);
-		expect(written.entries.map((e: { eventId: string }) => e.eventId)).toEqual([event.eventId]);
+		expect(written.entries.map((e: { eventId: string }) => e.eventId)).toEqual([
+			inventory.eventId,
+			event.eventId,
+		]);
 		expect(fake.calls).toHaveLength(0);
 	});
 
@@ -390,7 +422,13 @@ describe('enterprise service', () => {
 				binding: { deviceId: 'enr-1', policyRevision: 3 },
 			});
 			const pass = await service.telemetry.pump();
-			expect(pass).toMatchObject({ outcome: 'sent', taken: 1, received: 1 });
+			// The boot's inventory entry is walked past by name (no runtime family carries it) and stays pending.
+			expect(pass).toMatchObject({
+				outcome: 'sent',
+				taken: 1,
+				received: 1,
+				withheld: { family: 1 },
+			});
 			expect(reports).toHaveLength(1);
 			expect(reports[0]).toMatchObject({
 				eventId: early.eventId,
@@ -408,7 +446,7 @@ describe('enterprise service', () => {
 				expect(wire).not.toContain(canary);
 			}
 			expect(service.eventJournal.status()).toMatchObject({
-				delivery: { pending: 0, uncertain: 0, received: 1 },
+				delivery: { pending: 1, uncertain: 0, received: 1 },
 				held: 0,
 			});
 			await service.close();
@@ -417,7 +455,9 @@ describe('enterprise service', () => {
 			const written = JSON.parse(
 				fs.readFileSync(path.join(dir, 'maestro-managed-events.json'), 'utf8')
 			);
-			expect(written.entries[0]).toMatchObject({ eventId: early.eventId, delivery: 'received' });
+			expect(written.entries[0]).toMatchObject({ delivery: 'pending', attempts: 0 });
+			expect(written.entries[0].event.kind).toBe('inventory');
+			expect(written.entries[1]).toMatchObject({ eventId: early.eventId, delivery: 'received' });
 		} finally {
 			await telemetryFake.close();
 		}

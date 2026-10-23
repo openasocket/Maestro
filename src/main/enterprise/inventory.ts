@@ -32,6 +32,7 @@
 
 import * as fs from 'node:fs';
 
+import type { AgentCapabilitiesSnapshot } from '../../shared/agentCapabilities';
 import { PICKABLE_AGENT_IDS } from '../../shared/agentMetadata';
 import { HOST_API_VERSION } from '../../shared/plugins/host-api';
 import { MAESTRO_LIB_VERSION } from '../../shared/maestro-lib/version';
@@ -85,6 +86,25 @@ export type ContractsPinStatus =
 			sourceDirty: boolean | null;
 	  }
 	| { status: 'absent' | 'unreadable'; reason: string };
+
+/**
+ * The installation a capability snapshot amounts to: `ok`, `auth_required` and
+ * `not_configured` all mean the binary was found; `not_installed` means it was
+ * not; `probing`, `failed` and no snapshot at all mean nobody knows yet. The
+ * snapshot's path never comes along.
+ */
+export function installationOfSnapshot(
+	snapshot: Pick<AgentCapabilitiesSnapshot, 'status' | 'version'> | null | undefined
+): ProviderInstallation {
+	if (!snapshot || snapshot.status === 'probing' || snapshot.status === 'failed') {
+		return { state: 'unknown', version: null };
+	}
+	const version =
+		typeof snapshot.version === 'string' && snapshot.version.length > 0
+			? snapshot.version.slice(0, 64)
+			: null;
+	return { state: snapshot.status === 'not_installed' ? 'absent' : 'detected', version };
+}
 
 const PIN_MAX_BYTES = 64 * 1024;
 const HEX64 = /^[a-f0-9]{64}$/;

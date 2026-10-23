@@ -31,6 +31,7 @@ import {
 } from '../../../shared/maestro-lib/managed/event-journal';
 import {
 	createLifecycleProjector,
+	type InventoryFact,
 	type LifecycleFact,
 	type LifecycleProjector,
 	type ManagedLifecycleEvent,
@@ -168,6 +169,44 @@ function client(
 ): TelemetryClient {
 	return createTelemetryClient({ journal: j, host, now: () => T0, ...options });
 }
+
+const INVENTORY: InventoryFact = {
+	at: T0,
+	device: { deviceId: 'enr-1', hostname: 'inventory-box', os: null },
+	runtimes: [
+		{
+			runtimeId: 'desktop-100',
+			processEpoch: 'epoch-1',
+			components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
+		},
+	],
+	providers: [],
+	subagents: {
+		managed: { state: 'observed', count: 0 },
+		providerInternal: { state: 'unavailable', count: null },
+	},
+	policyRevision: 3,
+	completeness: 'partial',
+	gaps: [],
+};
+
+describe('inventory events (MRC-10-06B)', () => {
+	it('withholds an inventory event by family: no runtime family carries it, the entry stays pending and nothing of it is sent', async () => {
+		const j = await journal();
+		const p = projector();
+		j.attach(p);
+		const [inventory] = p.recordInventory(INVENTORY);
+		const [mine] = p.record(fact());
+		expect(telemetryReportOf(inventory, BINDING)).toMatchObject({ ok: false, reason: 'family' });
+		const h = hostDouble();
+		const pass = await client(j, h.host).pump();
+		expect(pass).toMatchObject({ outcome: 'sent', taken: 1, received: 1 });
+		expect(pass.withheld).toMatchObject({ family: 1 });
+		expect(h.reports.map((r) => r.eventId)).toEqual([mine.eventId]);
+		expect(j.status()).toMatchObject({ delivery: { pending: 1, received: 1 }, held: 0 });
+		expect(JSON.stringify(h.reports)).not.toContain('inventory-box');
+	});
+});
 
 describe('telemetryReportOf', () => {
 	it('builds the runtime report by allowlist: bound to the enrollment, installation and producing boot, identities withheld by name', () => {

@@ -107,6 +107,7 @@ import {
 	type AuthorizationStore,
 } from './plugins/authorization-ledger';
 import { anchorAccountForDirectory } from './utils/keyring-anchor';
+import { installationOfSnapshot } from './enterprise/inventory';
 import { createEnterpriseService, type EnterpriseService } from './enterprise/service';
 import { ENTERPRISE_IDENTITY_ANCHOR_SERVICE } from './enterprise/identity-store';
 import {
@@ -1624,6 +1625,12 @@ app
 						`Durable managed events are unavailable: ${load.file} is ${load.reason} (${load.message}).`,
 						'Enterprise'
 					),
+				// The inventory (MRC-10-06B): the OS label, each provider's detected
+				// installation from the capability snapshots (never the path), and the
+				// contracts pin the importer writes into the checkout (absent when packaged).
+				os: { platform: process.platform, release: os.release(), arch: process.arch },
+				installed: (agentId) => installationOfSnapshot(capabilitySnapshots.get(agentId)),
+				contractsPin: path.join(app.getAppPath(), 'vendor', 'mega-maestro', 'contracts.pin.json'),
 			});
 		} catch (error) {
 			enterpriseService = null;

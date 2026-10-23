@@ -53,7 +53,8 @@ export type TelemetryWithheldReason =
 	| 'other-boot'
 	| 'event-id'
 	| 'sequence'
-	| 'occurred-at';
+	| 'occurred-at'
+	| 'family';
 
 export type TelemetryProjection =
 	| { ok: true; report: EndpointTelemetryEvent }
@@ -74,6 +75,17 @@ export function telemetryReportOf(
 	const usage = event.kind === 'usage' ? (event as ManagedUsageEvent).usage : null;
 	const usageProvenance: EndpointTelemetryEvent['usageProvenance'] =
 		usage?.provenance === 'estimated' ? 'estimated' : 'unavailable';
+	// An inventory event (MRC-10-06) has no runtime family: the endpoint takes
+	// inventory.snapshot and inventory.delta from no runtime source, and sending it
+	// as a lifecycle report would be a lie the spool keeps. It stays in the journal.
+	if (event.kind === 'inventory') {
+		return {
+			ok: false,
+			reason: 'family',
+			detail:
+				'the endpoint takes no inventory family from a runtime source; the event stays on this host (owner mega-maestro)',
+		};
+	}
 	if (produced.installationId !== binding.installation.installationId) {
 		return {
 			ok: false,
@@ -259,6 +271,7 @@ const emptyWithheld = (): Record<TelemetryWithheldReason, number> => ({
 	'event-id': 0,
 	sequence: 0,
 	'occurred-at': 0,
+	family: 0,
 });
 
 export function createTelemetryClient(deps: TelemetryClientDeps): TelemetryClient {
