@@ -29,6 +29,7 @@ import type {
 	ManagedIdentityRecord,
 	ManagedIdentityView,
 } from '../../../../shared/maestro-lib/managed/endpoint-port';
+import type { LifecycleFact } from '../../../../shared/maestro-lib/managed/events';
 import type { ManagedDelegationRef } from '../../../../shared/maestro-lib/managed/types';
 import {
 	bindingEnrollment,
@@ -867,6 +868,144 @@ describe('runtime with a host adapter', () => {
 			await port.close();
 			await fake.close();
 		}
+	});
+
+	// MRC-10-02A: the runtime composes the lifecycle projection and the durable journal under its
+	// data directory, hands the projection to its turn recorder, and answers managed.events from the
+	// journal with the cursor contract; a journal file that will not load leaves events unsupported.
+	describe('lifecycle events journal (MRC-10-02A)', () => {
+		const FACT: LifecycleFact = {
+			surface: 'headless-turn',
+			state: 'completed',
+			at: T0,
+			sessionId: 'a1-ai-t1',
+			agentId: 'a1',
+			tabId: 't1',
+			provider: 'claude-code',
+			model: null,
+			providerSessionId: null,
+			runId: 'a1-ai-t1@1',
+			record: 'journal',
+			ledgerStatus: null,
+			exitCode: 0,
+			durationMs: 1200,
+			detail: null,
+		};
+		const eventsEnvelope = (runtime: MaestroRuntime, cursor: string | null, limit = 10) => ({
+			context: inProcessContext({
+				installation: runtime.installation,
+				actor: { kind: 'human' as const, id: 'ada' },
+				delegation: { chain: [], grantRef: null },
+				identity: {
+					requestId: 'req-e',
+					idempotencyKey: 'key-e',
+					attemptId: 'att-e',
+					runId: null,
+					rootRunId: null,
+					parentRunId: null,
+				},
+				policyRevision: 3,
+				workflow: null,
+				traceId: 'trace-e',
+				requestedCapabilities: ['events.resume' as const],
+			}),
+			input: { cursor, limit },
+		});
+
+		it('keeps what the projection raises in its data directory and pages it through managed.events', async () => {
+			const runtime = await start((installationId) =>
+				okView(record('/tmp/endpoint.sock', installationId))
+			);
+			expect(runtime.managedEvents).not.toBeNull();
+			const [event] = runtime.lifecycle.record(FACT);
+			// The projection names this installation and the enrollment's registered actor.
+			expect(event.installation).toEqual(runtime.installation);
+			expect(event.context.origin).toBe('headless');
+			expect(event.context.actor).toEqual({
+				kind: 'human',
+				id: 'operator:' + runtime.installation.installationId,
+			});
+			expect(event.context.policyRevision).toBe(3);
+			expect(runtime.managedEvents!.status().entries).toBe(1);
+
+			const page = await runtime.managed!.events(eventsEnvelope(runtime, null));
+			expect(page.ok).toBe(true);
+			if (page.ok) {
+				expect(page.value).toMatchObject({
+					status: 'ok',
+					requestId: 'req-e',
+					value: { completeness: 'complete' },
+				});
+				if (page.value.status === 'ok') {
+					expect(page.value.value.items.map((e) => e.eventId)).toEqual([event.eventId]);
+					expect(page.value.value.nextCursor).toMatch(/^evc:/);
+					const after = await runtime.managed!.events(
+						eventsEnvelope(runtime, page.value.value.nextCursor)
+					);
+					expect(after.ok && after.value.status === 'ok' && after.value.value.items).toEqual([]);
+				}
+			}
+			// The host now reports events.resume as implemented (this build's bare table says unsupported).
+			const identity = await runtime.managed!.identity({
+				context: {
+					...eventsEnvelope(runtime, null).context,
+					requestedCapabilities: ['capabilities.negotiate' as const],
+				},
+				input: {},
+			});
+			expect(
+				identity.ok && identity.value.status === 'ok' && identity.value.value.capabilities
+			).toContainEqual({ key: 'events.resume', status: 'implemented' });
+			// Bad input is refused by name, and a context that did not ask is denied.
+			const badLimit = await runtime.managed!.events(eventsEnvelope(runtime, null, 0));
+			expect(badLimit.ok && badLimit.value).toMatchObject({
+				status: 'denied',
+				code: 'invalid-input',
+			});
+			const notAsked = await runtime.managed!.events({
+				...eventsEnvelope(runtime, null),
+				context: { ...eventsEnvelope(runtime, null).context, requestedCapabilities: [] },
+			});
+			expect(notAsked.ok && notAsked.value).toMatchObject({
+				status: 'denied',
+				code: 'capability-unsupported',
+			});
+			// The journal is on disk under the data directory, and flushed by shutdown.
+			await runtime.connection.close();
+			open.splice(0);
+			const file = path.join(dir, 'maestro-managed-events.json');
+			const written = JSON.parse(fs.readFileSync(file, 'utf8'));
+			expect(written.entries.map((e: { eventId: string }) => e.eventId)).toEqual([event.eventId]);
+			expect(JSON.stringify(written)).not.toContain('prompt');
+		});
+
+		it('leaves events unsupported over a journal file that will not load, and never overwrites it', async () => {
+			const file = path.join(dir, 'maestro-managed-events.json');
+			fs.writeFileSync(file, '{ not json');
+			const runtime = await start((installationId) =>
+				okView(record('/tmp/endpoint.sock', installationId))
+			);
+			expect(runtime.managedEvents).toBeNull();
+			runtime.lifecycle.record(FACT);
+			const page = await runtime.managed!.events(eventsEnvelope(runtime, null));
+			expect(page.ok && page.value).toMatchObject({
+				status: 'unsupported',
+				code: 'capability-unsupported',
+			});
+			const identity = await runtime.managed!.identity({
+				context: {
+					...eventsEnvelope(runtime, null).context,
+					requestedCapabilities: ['capabilities.negotiate' as const],
+				},
+				input: {},
+			});
+			expect(
+				identity.ok && identity.value.status === 'ok' && identity.value.value.capabilities
+			).toContainEqual({ key: 'events.resume', status: 'unsupported' });
+			await runtime.connection.close();
+			open.splice(0);
+			expect(fs.readFileSync(file, 'utf8')).toBe('{ not json');
+		});
 	});
 
 	it('leaves the binding standalone for a record that names another installation, and unavailable for untrusted custody', async () => {

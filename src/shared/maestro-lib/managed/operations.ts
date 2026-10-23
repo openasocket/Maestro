@@ -23,7 +23,12 @@
  * denial, not an empty attachment. A launch admitted here says nothing about
  * what the provider does once it runs; that stays reported per route.
  */
-import type { ManagedApi, ManagedAgentSummary, ManagedIdentity } from '../client/types';
+import type {
+	ManagedApi,
+	ManagedAgentSummary,
+	ManagedEventsQuery,
+	ManagedIdentity,
+} from '../client/types';
 import type { AgentRecord, AITabRecord } from '../store/records';
 import {
 	MANAGED_CAPABILITY_SUPPORT,
@@ -39,6 +44,7 @@ import {
 	type PolicySourceSet,
 } from './authority';
 import type { ManagedBinding } from './binding';
+import type { EventJournal } from './event-journal';
 import type { ManagedPolicyStatus } from './host-adapter';
 import { journalRunRecord, type RunJournal } from './run-journal';
 import {
@@ -47,6 +53,7 @@ import {
 	type ManagedCapability,
 	type ManagedControlReceipt,
 	type ManagedDenialCode,
+	type ManagedEventPage,
 	type ManagedInstallationIdentity,
 	type ManagedNegotiationOutcome,
 	type ManagedOperationContext,
@@ -132,6 +139,8 @@ export interface ManagedOperationsDeps {
 	/** The policy projection of the host adapter; absent on a host with none (`policy` answers unsupported). */
 	policyStatus?(): ManagedPolicyStatus;
 	capabilities?: readonly SupportEntry<ManagedCapability>[];
+	/** The durable event journal `events` pages from (MRC-10-02A); absent on a host with none, which answers unsupported. */
+	events?: Pick<EventJournal, 'page'>;
 }
 
 type Result<T> = ManagedOperationResult<T>;
@@ -155,7 +164,19 @@ function requestIdOf(context: unknown): string {
 const MAX_PAGE = 200;
 
 export function createManagedOperations(deps: ManagedOperationsDeps): ManagedApi {
-	const support = deps.capabilities ?? MANAGED_CAPABILITY_SUPPORT;
+	// This build's table says events.resume is unsupported; a host that attached a journal has it.
+	const support =
+		deps.capabilities ??
+		MANAGED_CAPABILITY_SUPPORT.map((entry) =>
+			entry.key === 'events.resume' && deps.events
+				? {
+						...entry,
+						status: 'implemented' as const,
+						evidence: 'src/__tests__/shared/maestro-lib/managed/event-journal.test.ts',
+						note: 'durable event journal pages with gap completeness; no real peer paired',
+					}
+				: entry
+		);
 	const resolveResource = deps.resolveResource ?? (() => null);
 	const scopeAgents = deps.scopeAgents ?? ((_context, agents) => agents);
 	/** The verifier of each transport, the in-process one under its own name. */
@@ -482,15 +503,48 @@ export function createManagedOperations(deps: ManagedOperationsDeps): ManagedApi
 		},
 
 		async events(envelope) {
-			const requestId = requestIdOf(envelope?.context);
+			const admitted = admitContext<ManagedEventPage>(envelope, 'events.resume');
+			if (!admitted.ok) return { ok: true, value: admitted.result };
+			const requestId = admitted.context.identity.requestId;
+			if (!deps.events) {
+				return {
+					ok: true,
+					value: refuse(
+						'unsupported',
+						requestId,
+						'capability-unsupported',
+						'This host keeps no durable event journal (events.resume).'
+					),
+				};
+			}
+			const input = envelope.input as Partial<ManagedEventsQuery> | undefined;
+			const cursor = input?.cursor ?? null;
+			const limit = input?.limit;
+			if (typeof cursor !== 'string' && cursor !== null) {
+				return {
+					ok: true,
+					value: refuse(
+						'denied',
+						requestId,
+						'invalid-input',
+						'input.cursor is not a cursor or null.'
+					),
+				};
+			}
+			if (!Number.isInteger(limit) || (limit as number) < 1) {
+				return {
+					ok: true,
+					value: refuse(
+						'denied',
+						requestId,
+						'invalid-input',
+						'input.limit is not a positive integer.'
+					),
+				};
+			}
 			return {
 				ok: true,
-				value: refuse(
-					'unsupported',
-					requestId,
-					'capability-unsupported',
-					'Durable fleet events are not implemented in this build (events.resume).'
-				),
+				value: ok(requestId, deps.events.page({ cursor, limit: limit as number })),
 			};
 		},
 	};

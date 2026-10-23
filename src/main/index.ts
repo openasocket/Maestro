@@ -1618,6 +1618,11 @@ app
 					ENTERPRISE_IDENTITY_ANCHOR_SERVICE,
 					anchorAccountForDirectory('enterprise-identity', enterpriseDataDir)
 				),
+				onEventJournalUnavailable: (load) =>
+					logger.warn(
+						`Durable managed events are unavailable: ${load.file} is ${load.reason} (${load.message}).`,
+						'Enterprise'
+					),
 			});
 		} catch (error) {
 			enterpriseService = null;

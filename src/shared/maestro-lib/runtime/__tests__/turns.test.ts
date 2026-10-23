@@ -1044,9 +1044,25 @@ describe('runtime turns', () => {
 					})
 				)
 			).toMatchObject({ outcome: 'activated' });
+			// Events (MRC-10-02A): a context that did not ask is denied; one that did reads the runtime's
+			// own durable journal, empty and complete before any turn ran.
 			expect(
 				value(await managed.events(envelope(runtime, { cursor: null, limit: 1 })))
-			).toMatchObject({ status: 'unsupported' });
+			).toMatchObject({ status: 'denied', code: 'capability-unsupported' });
+			expect(
+				value(
+					await managed.events(
+						envelope(
+							runtime,
+							{ cursor: null, limit: 1 },
+							{ requestedCapabilities: ['events.resume'] }
+						)
+					)
+				)
+			).toMatchObject({
+				status: 'ok',
+				value: { items: [], nextCursor: null, completeness: 'complete' },
+			});
 		});
 
 		it('refuses a managed write once the runtime is closed', async () => {

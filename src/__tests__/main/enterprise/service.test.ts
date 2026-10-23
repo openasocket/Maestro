@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
 import { createEnterpriseService, type EnterpriseService } from '../../../main/enterprise/service';
+import type { LifecycleFact } from '../../../shared/maestro-lib/managed/events';
 import type { Anchor } from '../../../main/utils/keyring-anchor';
 import { fakeAnchor, fakeSeal } from './fakeCustody';
 import { startFakeEndpoint, type FakeEndpoint } from './fakeEndpoint';
@@ -286,6 +287,82 @@ describe('enterprise service', () => {
 			message: expect.stringContaining('CP-03'),
 		});
 		expect(service.workflows.held()).toHaveLength(0);
+	});
+
+	// MRC-10-02A: the desktop's event journal is attached to the lifecycle projection at start,
+	// keeps what the agent-run capture reports under the data directory, is flushed at close, and a
+	// file that will not load is reported by name and never overwritten.
+	const SPAWN: LifecycleFact = {
+		surface: 'agent',
+		state: 'running',
+		at: NOW,
+		sessionId: 'agent-1-ai-tab-1',
+		agentId: 'agent-1',
+		tabId: 'tab-1',
+		provider: 'claude-code',
+		model: 'opus',
+		providerSessionId: null,
+		runId: 'run-1',
+		record: 'ledger',
+		ledgerStatus: 'running',
+		exitCode: null,
+		durationMs: null,
+		detail: null,
+	};
+
+	it('attaches the event journal at start, keeps what the projection raises and flushes it at close', async () => {
+		const service = compose();
+		expect(service.eventJournalAttached()).toBe(false);
+		await service.start();
+		expect(service.eventJournalAttached()).toBe(true);
+		const [event] = service.events.record(SPAWN);
+		expect(event.context.origin).toBe('desktop');
+		expect(service.eventJournal.status()).toMatchObject({
+			entries: 1,
+			delivery: { pending: 1, uncertain: 0, received: 0 },
+		});
+		await service.close();
+		services.splice(0);
+		const written = JSON.parse(
+			fs.readFileSync(path.join(dir, 'maestro-managed-events.json'), 'utf8')
+		);
+		expect(written.entries.map((e: { eventId: string }) => e.eventId)).toEqual([event.eventId]);
+		expect(fake.calls).toHaveLength(0);
+	});
+
+	it('reports a journal file that will not load by name, keeps the projection detached and leaves the file alone', async () => {
+		const file = path.join(dir, 'maestro-managed-events.json');
+		fs.writeFileSync(file, '{ not json');
+		const unavailable: unknown[] = [];
+		const seal = fakeSeal();
+		const service = createEnterpriseService({
+			userDataDir: dir,
+			productionDataDir: dir,
+			hostname: 'testhost',
+			pid: 4242,
+			startedAt: '2026-10-21T11:59:00.000Z',
+			appVersion: '1.1.0-RC',
+			safeStorage: {
+				isEncryptionAvailable: () => true,
+				encryptString: (text) => seal.seal(text),
+				decryptString: (blob) => seal.unseal(blob),
+				getSelectedStorageBackend: () => 'keychain',
+			},
+			anchor: fakeAnchor(holder),
+			platform: 'darwin',
+			now: () => NOW,
+			openPort: (socketPath) => createLocalEndpointClient({ socketPath, timeoutMs: 1_000 }),
+			onEventJournalUnavailable: (load) => unavailable.push(load),
+		});
+		services.push(service);
+		await service.start();
+		expect(service.eventJournalAttached()).toBe(false);
+		expect(unavailable).toEqual([expect.objectContaining({ ok: false, reason: 'corrupt', file })]);
+		service.events.record(SPAWN);
+		expect(() => service.eventJournal.status()).toThrow(/not loaded/);
+		await service.close();
+		services.splice(0);
+		expect(fs.readFileSync(file, 'utf8')).toBe('{ not json');
 	});
 
 	it('an unenrolled desktop has no standing to claim a workflow under', async () => {

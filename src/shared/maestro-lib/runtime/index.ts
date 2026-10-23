@@ -48,6 +48,12 @@ import {
 } from '../managed/authority';
 import { createManagedBinding, type ManagedBinding } from '../managed/binding';
 import {
+	createEventJournal,
+	managedEventJournalPath,
+	type EventJournal,
+} from '../managed/event-journal';
+import { createLifecycleProjector, type LifecycleProjector } from '../managed/events';
+import {
 	bindingEnrollment,
 	createHeadlessSpawnAuthority,
 	installationIdentity,
@@ -184,6 +190,10 @@ export interface MaestroRuntime extends MaestroClient {
 	readonly managedBinding: Pick<ManagedBinding, 'state' | 'reload' | 'authority'>;
 	/** The managed run journal, for a host that reports runs. Null when it could not be loaded. */
 	readonly managedRuns: Pick<RunJournal, 'get' | 'list' | 'open'> | null;
+	/** The lifecycle projection this runtime's turn recorder reports to (MRC-10-01); a host's own producers report their facts here. */
+	readonly lifecycle: LifecycleProjector;
+	/** The durable event journal attached to that projection (MRC-10-02A), for a telemetry client. Null when its file could not be read. */
+	readonly managedEvents: EventJournal | null;
 	/** This installation as a managed peer sees it. A local label, not an enrolled device identity. */
 	readonly installation: ManagedInstallationIdentity;
 	/** The host adapter this runtime admits with, when one was injected. */
@@ -544,6 +554,31 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		},
 		...(deps.rules?.newId ? { newId: deps.rules.newId } : {}),
 	});
+	// The lifecycle projection (MRC-10-01) every finished turn is reported to, under this
+	// installation and the actor the enrollment registered (else the operator); a host that
+	// passed its own sink keeps it. The durable journal (MRC-10-02A) reads this projection under
+	// the data directory; a file that cannot be read is reported and left as it is, so `events`
+	// answers unsupported and nothing writes a fresh journal over the old one.
+	const lifecycle = createLifecycleProjector({
+		installation,
+		origin: 'headless',
+		actor: () => managedActorPrincipal(managedHost?.identity.read() ?? null, installation),
+		policyRevision: () => managedHost?.policy().policyRevision ?? null,
+	});
+	const eventJournal = createEventJournal({
+		file: managedEventJournalPath(paths),
+		now: deps.now ?? (() => Date.now()),
+		newId: deps.rules?.newId ?? generateUUID,
+	});
+	const eventsLoaded = await eventJournal.load();
+	if (eventsLoaded.ok) {
+		eventJournal.attach(lifecycle);
+	} else {
+		logger.warn(
+			`Durable managed events are unavailable: the event journal ${eventsLoaded.file} is ${eventsLoaded.reason} (${eventsLoaded.message}).`,
+			LOG_CONTEXT
+		);
+	}
 	const turns = createRuntimeTurns({
 		paths,
 		repository,
@@ -552,7 +587,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		fence,
 		rules: deps.rules,
 		autoRunHolds: (agentId) => autoRun.holds(agentId),
-		options: options.turns,
+		options: { ...options.turns, lifecycle: options.turns?.lifecycle ?? lifecycle },
 		deps: { probeBinary: deps.probeBinary, ...deps.turns },
 	});
 
@@ -631,6 +666,8 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 				await consults.settled();
 				await groupChats.drain();
 				await repository.drain();
+				// What the journal recorded of the turns that just ended, before the lock goes.
+				if (eventsLoaded.ok) await eventJournal.flush();
 			} finally {
 				process.off('exit', onExit);
 				lock.release();
@@ -685,6 +722,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 				: {}),
 			...(options.managed?.scopeAgents ? { scopeAgents: options.managed.scopeAgents } : {}),
 			...(managedHost ? { policyStatus: () => managedHost.policyStatus() } : {}),
+			...(eventsLoaded.ok ? { events: eventJournal } : {}),
 		});
 	} else {
 		logger.warn(
@@ -717,6 +755,8 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			lock: lock.info,
 			managedBinding: binding,
 			managedRuns: journalLoaded.ok ? journal : null,
+			lifecycle,
+			managedEvents: eventsLoaded.ok ? eventJournal : null,
 			installation,
 			managedHost,
 			claimWorkflowFence,

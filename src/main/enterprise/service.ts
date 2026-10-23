@@ -28,6 +28,13 @@
  */
 
 import { MAESTRO_LIB_VERSION } from '../../shared/maestro-lib/version';
+import { generateUUID } from '../../shared/uuid';
+import {
+	createEventJournal,
+	MANAGED_EVENT_JOURNAL_FILE_NAME,
+	type EventJournal,
+	type EventJournalLoad,
+} from '../../shared/maestro-lib/managed/event-journal';
 import type {
 	EndpointComponent,
 	EndpointPort,
@@ -105,6 +112,8 @@ export interface EnterpriseServiceDeps {
 	onDispatchPersistError?(error: unknown): void;
 	/** Test seam: how an SSH remote is asked for its managed standing. Default: the real probe over ssh. */
 	remoteProbe?: RemoteEndpointProbe;
+	/** Hears the event journal file refusing to load at start (corrupt, unreadable); the journal then stays detached. Default: nothing. */
+	onEventJournalUnavailable?(load: Extract<EventJournalLoad, { ok: false }>): void;
 }
 
 export interface EnterpriseService {
@@ -128,6 +137,14 @@ export interface EnterpriseService {
 	 * policy generation the host applies. A projection, not delivery.
 	 */
 	readonly events: LifecycleProjector;
+	/**
+	 * The durable event journal (MRC-10-02A) attached to `events` at start: what a
+	 * telemetry client takes batches from and settles with the endpoint's answer.
+	 * `eventJournalAttached()` says whether its file loaded; a file that would not
+	 * is reported through `onEventJournalUnavailable` and never overwritten.
+	 */
+	readonly eventJournal: EventJournal;
+	eventJournalAttached(): boolean;
 	/**
 	 * The workflow owner fences this installation holds (MRC-07-06), claimed
 	 * through the endpoint's workflow owner operation and kept in
@@ -259,6 +276,12 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		actor: () => managedActorPrincipal(lifecycle.status().identity, installation),
 		policyRevision: () => host.policy().policyRevision,
 	});
+	const eventJournal = createEventJournal({
+		file: `${deps.userDataDir}/${MANAGED_EVENT_JOURNAL_FILE_NAME}`,
+		now,
+		newId: generateUUID,
+	});
+	let eventJournalAttached = false;
 
 	return {
 		installation,
@@ -271,6 +294,8 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		cueSpawnAuthority,
 		remote,
 		events,
+		eventJournal,
+		eventJournalAttached: () => eventJournalAttached,
 		workflows,
 		claimWorkflowFence,
 		async start() {
@@ -278,10 +303,23 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 			await dispatch.load();
 			// So are the held fences: a restarted host re-claims with what it held, never afresh.
 			await workflows.load();
+			// The event journal reads its file before the projection raises anything this process
+			// observes; a file that will not load is reported and left alone, never overwritten.
+			const loadedEvents = await eventJournal.load();
+			if (loadedEvents.ok) {
+				eventJournal.attach(events);
+				eventJournalAttached = true;
+			} else {
+				deps.onEventJournalUnavailable?.(loadedEvents);
+			}
 			// No sealed file, no custody read: an unenrolled desktop never touches the keyring here.
 			if (identity.read().status !== 'ok') return;
 			await lifecycle.connect();
 		},
-		close: () => lifecycle.close(),
+		async close() {
+			await lifecycle.close();
+			// What the journal recorded of the last spawns and exits, before the process goes.
+			if (eventJournalAttached) await eventJournal.flush();
+		},
 	};
 }

@@ -113,7 +113,12 @@ export const MANAGED_CAPABILITY_SUPPORT: readonly SupportEntry<ManagedCapability
 		evidence: 'src/shared/maestro-lib/runtime/__tests__/turns.test.ts',
 		note: 'journal ownership, then the registry; no real peer paired',
 	},
-	{ key: 'events.resume', status: 'unsupported', evidence: null, note: 'fleet events: phase 10' },
+	{
+		key: 'events.resume',
+		status: 'unsupported',
+		evidence: null,
+		note: 'the bare build; a host that attached a durable event journal reports implemented (MRC-10-02A)',
+	},
 	{
 		key: 'policy.status',
 		status: 'implemented',
