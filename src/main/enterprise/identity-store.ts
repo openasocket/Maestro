@@ -116,7 +116,13 @@ export type IdentityClearOutcome =
 	| { ok: true; removed: boolean }
 	| {
 			ok: false;
-			reason: 'unprotected' | 'installation-mismatch' | 'untrusted' | 'write-failed';
+			reason:
+				| 'unprotected'
+				| 'installation-mismatch'
+				| 'untrusted'
+				| 'write-failed'
+				/** Refused before the store: the endpoint still manages this installation (`managed-state.ts`). */
+				| 'management-required';
 			message: string;
 	  };
 

@@ -36,6 +36,7 @@ describe('Enterprise Preload API', () => {
 			'connect',
 			'custody',
 			'inventory',
+			'managedState',
 			'policyStatus',
 			'recoverPolicy',
 			'refreshPolicy',
@@ -53,6 +54,7 @@ describe('Enterprise Preload API', () => {
 		await api.custody();
 		await api.policyStatus();
 		await api.inventory();
+		await api.managedState();
 		await api.connect();
 		await api.beginRegistration();
 		await api.completeRegistration();
@@ -66,6 +68,7 @@ describe('Enterprise Preload API', () => {
 			'enterprise:custody',
 			'enterprise:policyStatus',
 			'enterprise:inventory',
+			'enterprise:managedState',
 			'enterprise:connect',
 			'enterprise:beginRegistration',
 			'enterprise:completeRegistration',

@@ -34,7 +34,14 @@ import type {
 	IdentityCustodyState,
 } from '../../enterprise/identity-store';
 import type { InstallationInventoryService } from '../../enterprise/inventory';
+import {
+	localReleaseOf,
+	projectManagedState,
+	type LocalRelease,
+	type ManagedStateView,
+} from '../../enterprise/managed-state';
 import type { PolicyStatusService } from '../../enterprise/policy-status';
+import { ENTERPRISE_SUPPORTED_CAPABILITIES } from '../../enterprise/service';
 import { withIpcErrorLogging } from '../../utils/ipcHandler';
 
 const LOG_CONTEXT = '[Enterprise]';
@@ -102,12 +109,38 @@ function installationInput(raw: unknown): { installationId: string } {
 const NO_SERVICE_MESSAGE = 'The enterprise enrollment service is not running in this desktop.';
 const NO_SERVICE: LifecycleOutcome<never> = { status: 'unavailable', message: NO_SERVICE_MESSAGE };
 
+/** The narrow standing a settings pane reads (MRC-11-03), or null without a service. */
+export function readManagedState(deps: EnterpriseHandlerDependencies): ManagedStateView | null {
+	const lifecycle = deps.getLifecycle();
+	const policy = deps.getPolicyStatus();
+	const identity = deps.getIdentity();
+	if (!lifecycle || !policy || !identity) return null;
+	return projectManagedState({
+		status: lifecycle.status(),
+		policy: policy.status(),
+		custody: identity.custody(),
+		supported: ENTERPRISE_SUPPORTED_CAPABILITIES,
+	});
+}
+
 export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies): void {
 	const lifecycle = () => deps.getLifecycle();
+	// Required management is not a local setting: a record the endpoint still
+	// manages cannot be retired, revoked or forgotten from this desktop until the
+	// endpoint releases it. Read fresh at each verb, never cached.
+	const localRelease = (): LocalRelease => {
+		const current = lifecycle();
+		return current ? localReleaseOf(current.status()) : { allowed: true, reason: 'no-record' };
+	};
 
 	ipcMain.handle(
 		'enterprise:status',
 		withIpcErrorLogging(handlerOpts('status'), async () => lifecycle()?.status() ?? null)
+	);
+
+	ipcMain.handle(
+		'enterprise:managedState',
+		withIpcErrorLogging(handlerOpts('managedState'), async () => readManagedState(deps))
 	);
 
 	ipcMain.handle(
@@ -189,19 +222,19 @@ export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies):
 		);
 	}
 
-	ipcMain.handle(
-		'enterprise:acknowledgeRevocation',
-		withIpcErrorLogging(handlerOpts('acknowledgeRevocation'), async (raw: unknown) => {
-			return lifecycle()?.acknowledgeRevocation(installationInput(raw)) ?? NO_SERVICE;
-		})
-	);
-
-	ipcMain.handle(
-		'enterprise:retire',
-		withIpcErrorLogging(handlerOpts('retire'), async (raw: unknown) => {
-			return lifecycle()?.retire(installationInput(raw)) ?? NO_SERVICE;
-		})
-	);
+	for (const transition of ['acknowledgeRevocation', 'retire'] as const) {
+		ipcMain.handle(
+			`enterprise:${transition}`,
+			withIpcErrorLogging(handlerOpts(transition), async (raw: unknown) => {
+				const input = installationInput(raw);
+				const release = localRelease();
+				if (!release.allowed) {
+					return { status: 'refused', reason: 'management-required', message: release.message };
+				}
+				return lifecycle()?.[transition](input) ?? NO_SERVICE;
+			})
+		);
+	}
 
 	ipcMain.handle(
 		'enterprise:clearIdentity',
@@ -212,6 +245,10 @@ export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies):
 				if (!identity) return { ok: false, reason: 'unprotected', message: NO_SERVICE_MESSAGE };
 				const { installationId } = installationInput(raw);
 				const acknowledgeUntrusted = (raw as Record<string, unknown>).acknowledgeUntrusted === true;
+				const release = localRelease();
+				if (!release.allowed) {
+					return { ok: false, reason: 'management-required', message: release.message };
+				}
 				// The lifecycle holds the socket for this record; drop it before the record goes.
 				await lifecycle()?.close();
 				return identity.clear({ installationId, acknowledgeUntrusted });

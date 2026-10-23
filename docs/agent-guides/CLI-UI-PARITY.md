@@ -431,9 +431,13 @@ Ranked by how often an agent is likely to hit them. Most are not built yet;
 deliberate design constraints, including protected host consent, are noted below.
 
 0. **Enterprise enrollment (`window.maestro.enterprise`).** The `enterprise:*`
-   IPC verbs (status, policy status, the installation inventory, enrollment request, the browser-approved
+   IPC verbs (status, policy status, the installation inventory, the managed-state
+   projection of MRC-11-03, enrollment request, the browser-approved
    actor registration, refresh/recover, the explicit local transitions and the
-   identity clear) have no `maestro-cli` verb yet. They were added in the
+   identity clear) have no `maestro-cli` verb yet. A CLI verb for the local
+   transitions or the clear must apply `localReleaseOf()` from
+   `src/main/enterprise/managed-state.ts` the way the handler does: required
+   management is not a local setting on any surface. They were added in the
    Mega-Maestro integration (phase 03) ahead of their CLI counterpart, which
    belongs with the headless host wiring of a later phase; the service modules
    under `src/main/enterprise/` are Electron-free so the CLI will reach the

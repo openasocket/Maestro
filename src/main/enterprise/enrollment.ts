@@ -75,7 +75,9 @@ export type LifecycleRefusal =
 	| 'not-enrolled'
 	| 'installation-mismatch'
 	| 'no-endpoint'
-	| 'no-challenge';
+	| 'no-challenge'
+	/** A local transition refused because the endpoint still manages this installation (`managed-state.ts`). */
+	| 'management-required';
 
 export type LifecycleOutcome<T> =
 	| { status: 'ok'; value: T }
