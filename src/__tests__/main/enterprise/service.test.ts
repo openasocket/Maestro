@@ -83,6 +83,18 @@ describe('enterprise service', () => {
 		// The Cue port is the same enrollment seen from the Cue run router (MRC-07-02A).
 		expect(service.cueSpawnAuthority.standing()).toBe('standalone');
 		expect(service.cueSpawnAuthority.authority).toBe(service.spawnAuthority.authority);
+		// Content collection is a managed feature (MRC-10-05): standalone keeps nothing,
+		// and the recorded VIBES graph of an empty window names only its own gap.
+		expect(service.content.standing()).toEqual({ mode: 'standalone' });
+		expect(service.contentCapture.status()).toMatchObject({
+			records: 0,
+			delivery: { available: false },
+		});
+		expect(service.vibes()).toMatchObject({
+			profile: 'mega-maestro.vibes-recorded.v1',
+			sessions: [],
+			gaps: [{ kind: 'caller_reported_gap', reference: 'decisions:not-recorded-by-this-host' }],
+		});
 		expect(fake.calls).toHaveLength(0);
 		// `identity.read()` ran once for the start check and once per status; the file
 		// does not exist, so custody was consulted but the anchor was never read.

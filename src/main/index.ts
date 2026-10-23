@@ -240,6 +240,7 @@ import { createQuickChatController, closeQuickChatWindow } from './quick-chat';
 import { planWindowRestore, pickFocusWindowSpec } from './window-state-persistence';
 import type { WindowState as SharedWindowState } from '../shared/window-types';
 import { setupAgentRunCapture } from './agent-run/setup-capture-listener';
+import { setupContentCaptureListener } from './process-listeners/content-capture-listener';
 import { setAgentRunSink } from './agent-run/broadcast';
 import { startAgentRunStoreWatcher } from './agent-run/store-watcher';
 import { setupAgentRunRecovery } from './agent-run/setup-recovery';
@@ -3473,6 +3474,14 @@ app
 				setupAgentRunCapture(processManager, {
 					...(enterpriseService ? { lifecycle: enterpriseService.events } : {}),
 				});
+				// Managed content capture (MRC-10-05A): follows a spawn only when the
+				// collection standing admits it; a standalone desktop never subscribes.
+				if (enterpriseService) {
+					setupContentCaptureListener(processManager, {
+						source: enterpriseService.content,
+						capture: enterpriseService.contentCapture,
+					});
+				}
 				// F3 live push: forward every ledger write to the renderer + web clients.
 				setAgentRunSink({
 					runUpdated: (run) => {

@@ -70,8 +70,15 @@ import {
 	ENTERPRISE_IDENTITY_FILE_NAME,
 	type EnterpriseIdentityStore,
 } from './identity-store';
+import {
+	createContentCapture,
+	createContentCollectionSource,
+	type ContentCapture,
+	type ContentCollectionSource,
+} from './content';
 import { createPolicyStatusService, type PolicyStatusService } from './policy-status';
 import { createCueSpawnAuthority, createProcessSpawnAuthority } from './spawn-authority';
+import { buildVibesRecordedGraph, type VibesRecordedGraph } from './vibes';
 import {
 	createTelemetryClient,
 	TELEMETRY_HOST_IDLE_POLL_MS,
@@ -157,6 +164,17 @@ export interface EnterpriseService {
 	 * only under a registered standing and settles every entry with the endpoint's own answer.
 	 */
 	readonly telemetry: TelemetryClient;
+	/**
+	 * Content collection under the signed profile (MRC-10-05): `content` reads the
+	 * standing (the endpoint's profile, a ceiling for the applied revision, held in
+	 * memory only; no endpoint operation of this build carries one, so nothing
+	 * installs it yet) and `contentCapture` records what the process listener hands
+	 * it, bytes held until an endpoint capture takes them. `vibes()` is the
+	 * recorded VIBES graph of what `events` holds right now, gaps named.
+	 */
+	readonly content: ContentCollectionSource;
+	readonly contentCapture: ContentCapture;
+	vibes(): VibesRecordedGraph;
 	/**
 	 * The workflow owner fences this installation holds (MRC-07-06), claimed
 	 * through the endpoint's workflow owner operation and kept in
@@ -300,6 +318,11 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		now,
 		intervalMs: TELEMETRY_HOST_IDLE_POLL_MS,
 	});
+	// The content standing is the lifecycle's standing read at each capture; the
+	// ceiling it needs has no endpoint operation yet (CP-01), so an enrolled desktop
+	// refuses every capture by name and a standalone one never follows a process.
+	const content = createContentCollectionSource({ status: () => lifecycle.status() });
+	const contentCapture = createContentCapture({ source: content, now });
 
 	return {
 		installation,
@@ -315,6 +338,9 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		eventJournal,
 		eventJournalAttached: () => eventJournalAttached,
 		telemetry,
+		content,
+		contentCapture,
+		vibes: () => buildVibesRecordedGraph(events.recent(), { projectorGaps: events.gaps() }),
 		workflows,
 		claimWorkflowFence,
 		async start() {
