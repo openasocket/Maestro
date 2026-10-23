@@ -441,7 +441,10 @@ deliberate design constraints, including protected host consent, are noted below
    Mega-Maestro integration (phase 03) ahead of their CLI counterpart, which
    belongs with the headless host wiring of a later phase; the service modules
    under `src/main/enterprise/` are Electron-free so the CLI will reach the
-   same code. Until then the renderer is the only caller.
+   same code. Until then the renderer is the only caller: the Mega-Maestro
+   management section of Settings > Environment (`MegaMaestroSettings.tsx`,
+   MRC-11-03A) reads the projection and offers Refresh policy, Recover standing
+   and Complete registration, and nothing on it leaves management.
 
 1. **Interrupt a running turn.** Escape stops a busy agent in the UI. There is
    no CLI equivalent and no WS message behind one. This is the largest remaining

@@ -8,6 +8,7 @@
 
 import { Globe } from 'lucide-react';
 import { HostMediaSection } from '../HostMediaSection';
+import { MegaMaestroSettings } from '../MegaMaestroSettings';
 import { useSettings } from '../../../hooks';
 import { useKnownAuthDirs } from '../../../hooks/agent/useKnownAuthDirs';
 import type { Theme } from '../../../types';
@@ -26,6 +27,7 @@ export function EnvironmentTab({ theme }: EnvironmentTabProps) {
 
 	return (
 		<div className="space-y-5">
+			<MegaMaestroSettings theme={theme} />
 			<HostMediaSection theme={theme} />
 			{/* Global Environment Variables */}
 			<div data-setting-id="environment-global-vars">

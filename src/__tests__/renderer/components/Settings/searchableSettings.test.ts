@@ -339,6 +339,17 @@ describe('searchableSettings', () => {
 			// SSH tab
 			['test connection', 'ssh-remotes'],
 
+			// Environment tab: the Mega-Maestro pane (MRC-11-03A) is read by its
+			// heading, its standing badge words and its three buttons.
+			['Mega-Maestro management', 'environment-mega-maestro'],
+			['enrollment', 'environment-mega-maestro'],
+			['standing', 'environment-mega-maestro'],
+			['leaving management', 'environment-mega-maestro'],
+			['refresh policy', 'environment-mega-maestro'],
+			['recover standing', 'environment-mega-maestro'],
+			['complete registration', 'environment-mega-maestro'],
+			['approval code', 'environment-mega-maestro'],
+
 			// Encore tab
 			['lookback', 'encore-usage-stats'],
 			['coding activity', 'encore-usage-stats'],
