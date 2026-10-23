@@ -90,8 +90,11 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * accepted, completed, no-effect, failed, denied and unknown distinct in the published settlement words.
  * 0.23.0: the ledger and the executor that note names, delivered (MRC-11-01A); 0.22.0 shipped the
  * contract half alone (the vocabulary, `managedCommandProblems`, `commandBindingProblem`, the settlement words).
+ * 0.24.0: the inbox port (`./managed/host-adapter`, MRC-11-02): the endpoint's `noticeList` and `inbox`
+ * operations (`EndpointNotice`, `EndpointInboxRequest`, `EndpointInboxReceipt`, `InboxPort`) as
+ * `ManagedHostAdapter.inbox` / `endpointInboxPort`, and `inboxStanding()` (this process's registration, its actor, the capabilities).
  */
-export const MAESTRO_LIB_VERSION = '0.23.0';
+export const MAESTRO_LIB_VERSION = '0.24.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

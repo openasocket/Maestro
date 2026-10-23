@@ -311,12 +311,109 @@ export interface ManagedHostAdapter {
 	 * from the event journal, reports here and settles with the answer.
 	 */
 	readonly telemetry: TelemetryPort | null;
+	/**
+	 * The endpoint's `noticeList` and `inbox` operations over this adapter's
+	 * socket (MRC-11-02): the notices the endpoint retains for the actor this
+	 * process is registered as, and the delivered / read / acknowledged / reply
+	 * receipts it records. Null while no socket is open. A port, not custody:
+	 * the inbox client (`src/main/enterprise/inbox.ts`) holds the receipts.
+	 */
+	readonly inbox: InboxPort | null;
 	policy(): PolicySourceSet;
 	status(): ManagedEnrollmentStatus;
 	policyStatus(): ManagedPolicyStatus;
 	/** Whether a report may be handed to the endpoint right now, and the binding every report carries. */
 	telemetryStanding(): TelemetryStanding;
+	/** Whether a notice may be listed or an inbox action recorded right now, and the binding each receipt carries. */
+	inboxStanding(): InboxStanding;
 }
+
+// ---------------------------------------------------------------------------
+// Inbox: the endpoint's notice listing and inbox action operations (MRC-11-02)
+// ---------------------------------------------------------------------------
+
+/**
+ * The endpoint's `notice`: one ordinary user-facing notice the endpoint retains
+ * for the actor it resolved from the OS peer. `agentInput: false` is the
+ * contract's own word: the body is for the person, and never enters a model's
+ * context without a separately approved operator prompt command.
+ */
+export interface EndpointNotice {
+	campaignId: string;
+	messageId: string;
+	body: string;
+	expiresAt: string;
+	kind: 'notice';
+	agentInput: false;
+}
+
+/** The endpoint's `noticeListRequest`: offset 0..7, limit 1..8; each page is freshly authorized. */
+export interface EndpointNoticeListRequest {
+	offset: number;
+	limit: number;
+}
+
+export interface EndpointNoticeListResult {
+	outcome: 'notices';
+	items: readonly EndpointNotice[];
+	nextOffset: number | null;
+}
+
+export type EndpointInboxAction =
+	| { kind: 'delivered' }
+	| { kind: 'read' }
+	| { kind: 'acknowledged' }
+	| { kind: 'reply'; text: string };
+
+/** The endpoint's `inboxRequest`; the scope is the authenticated peer's, never a payload audience. */
+export interface EndpointInboxRequest {
+	campaignId: string;
+	messageId: string;
+	idempotencyKey: string;
+	action: EndpointInboxAction;
+}
+
+export type EndpointInboxState = 'delivered' | 'read' | 'acknowledged' | 'replied';
+
+export interface EndpointInboxReceipt {
+	outcome: 'recorded';
+	messageId: string;
+	receiptId: string;
+	state: EndpointInboxState;
+}
+
+/** The producer port. A host builds it over its endpoint socket; a test injects a table. */
+export interface InboxPort {
+	list(request: EndpointNoticeListRequest): Promise<EndpointInvokeOutcome<unknown>>;
+	act(request: EndpointInboxRequest): Promise<EndpointInvokeOutcome<unknown>>;
+}
+
+/** The port over an attached endpoint socket. `inbox` is effectful (a lost answer is unknown); `noticeList` is not. */
+export function endpointInboxPort(endpoint: Pick<EndpointPort, 'invoke'>): InboxPort {
+	return {
+		list: (request) => endpoint.invoke('noticeList', request),
+		act: (request) => endpoint.invoke('inbox', request),
+	};
+}
+
+/** What every receipt this host records is bound to; read per call, never cached across a standing change. */
+export interface InboxBinding {
+	tenantId: string;
+	/** Null until the endpoint reports it (the runtime socket does not carry it today). */
+	enrollmentId: string | null;
+	/** The registration THIS process redeemed: its challenge id, and the actor it named when it did. */
+	registrationId: string;
+	actorId: string | null;
+	installation: ManagedInstallationIdentity;
+	policyRevision: number | null;
+	/** Which of the two operations the endpoint negotiated on this connection. */
+	capabilities: { noticeList: boolean; inbox: boolean };
+}
+
+export type InboxStanding = { standingKey: string } & (
+	| { ok: true; binding: InboxBinding }
+	| { ok: false; reason: string }
+);
 
 // ---------------------------------------------------------------------------
 // Telemetry: the endpoint's metadata event operation (MRC-10-03)
@@ -502,6 +599,22 @@ export function projectPolicyStatus(input: {
 		registration,
 		admission: { possible: reasons.length === 0, reasons },
 	};
+}
+
+/** What a standing is made of (connection, registration, attachment, management, revision, capabilities): a hold placed under one key lifts when the key changes. */
+function standingKeyOf(standing: ManagedEnrollmentStatus): string {
+	const connection = standing.connection;
+	const live = standing.endpoint;
+	const record = standing.identity.status === 'ok' ? standing.identity.record : null;
+	const revision = live?.appliedPolicyRevision ?? record?.policy.appliedRevision ?? null;
+	return [
+		connection?.connection ?? 0,
+		connection?.registration ?? 'none',
+		connection?.attached ? 'attached' : 'detached',
+		live?.management ?? 'none',
+		revision ?? 'none',
+		(live?.capabilities ?? []).join('+'),
+	].join(':');
 }
 
 const EXECUTION_SOURCES: Record<ManagedOrigin, 'ux' | 'cli' | 'cue' | 'headless'> = {
@@ -730,22 +843,54 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 		get telemetry() {
 			return deps.endpoint ? endpointTelemetryPort(deps.endpoint) : null;
 		},
+		get inbox() {
+			return deps.endpoint ? endpointInboxPort(deps.endpoint) : null;
+		},
+		inboxStanding() {
+			const standing = deps.status();
+			const { identity } = standing;
+			const record = identity.status === 'ok' ? identity.record : null;
+			const live = standing.endpoint;
+			const standingKey = standingKeyOf(standing);
+			const refuse = (reason: string): InboxStanding => ({ standingKey, ok: false, reason });
+			if (!record) return refuse(identity.message ?? 'This host holds no enrollment.');
+			if (standing.authority !== 'registered' || !deps.endpoint || !live) {
+				return refuse(standing.reason ?? 'No endpoint is attached.');
+			}
+			// `registered` means THIS process redeemed the registration the record carries.
+			const registration = record.registration;
+			if (!registration || Date.parse(registration.expiresAt) <= now()) {
+				return refuse('This process holds no live actor registration.');
+			}
+			const capabilities = {
+				noticeList: live.capabilities.includes('noticeList'),
+				inbox: live.capabilities.includes('inbox'),
+			};
+			if (!capabilities.noticeList && !capabilities.inbox) {
+				return refuse('The endpoint negotiated neither noticeList nor inbox on this connection.');
+			}
+			return {
+				standingKey,
+				ok: true,
+				binding: {
+					tenantId: record.tenantId,
+					enrollmentId: record.enrollmentId,
+					registrationId: registration.challengeId,
+					actorId: registration.actorId,
+					installation: deps.installation,
+					policyRevision: live.appliedPolicyRevision ?? record.policy.appliedRevision,
+					capabilities,
+				},
+			};
+		},
 		telemetryStanding() {
 			// One standing read: the lifecycle's view already carries the custody read.
 			const standing = deps.status();
 			const { identity } = standing;
 			const record = identity.status === 'ok' ? identity.record : null;
-			const connection = standing.connection;
 			const live = standing.endpoint;
 			const revision = live?.appliedPolicyRevision ?? record?.policy.appliedRevision ?? null;
-			const standingKey = [
-				connection?.connection ?? 0,
-				connection?.registration ?? 'none',
-				connection?.attached ? 'attached' : 'detached',
-				live?.management ?? 'none',
-				revision ?? 'none',
-				(live?.capabilities ?? []).join('+'),
-			].join(':');
+			const standingKey = standingKeyOf(standing);
 			const refuse = (reason: string): TelemetryStanding => ({ standingKey, ok: false, reason });
 			if (!record) return refuse(identity.message ?? 'This host holds no enrollment.');
 			if (standing.authority !== 'registered' || !deps.endpoint || !live) {
