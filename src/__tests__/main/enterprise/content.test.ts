@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	CONTENT_REDACTION_RULE_ID,
 	CONTENT_ROLE_FAMILIES,
+	CONTENT_ROLES,
 	contentDeliveryStanding,
 	contentFactProblems,
 	createContentCapture,
@@ -26,6 +27,7 @@ import type {
 	EndpointCollectionProfile,
 	ManagedEnrollmentStatus,
 } from '../../../shared/maestro-lib/managed/endpoint-port';
+import { redactSecrets } from '../../../shared/redactSecrets';
 
 const sha = (text: string) => createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex');
 
@@ -384,6 +386,279 @@ describe('the fact reader and delivery', () => {
 		expect(contentDeliveryStanding()).toEqual({
 			available: false,
 			reason: expect.stringContaining('CP-01'),
+		});
+	});
+});
+
+// MRC-10-08: metadata-only exclusion, separate permissions, exact integrity, revoke and bounded input.
+describe('bounded content (MRC-10-08)', () => {
+	const T = Date.parse('2026-10-22T12:00:00.000Z');
+
+	it('metadata-only: under the metadata profile no role is collected whatever the ceiling grants, no byte is held, and nothing of the inputs is kept anywhere', () => {
+		const { source, capture: cap } = capture(
+			'attached',
+			'metadata',
+			ceiling({ profile: 'metadata', roles: [...CONTENT_ROLES] })
+		);
+		expect(source.installed()?.roles).toEqual(CONTENT_ROLES);
+		for (const role of CONTENT_ROLES) {
+			expect(
+				cap.capture(input({ role, text: `CANARY ${role} sk-ant-api03-XYZ0123456789` }))
+			).toEqual({
+				outcome: 'not-collected',
+				reason: expect.stringContaining('metadata profile: no content is collected'),
+			});
+		}
+		expect(cap.status()).toMatchObject({
+			records: 0,
+			held: { count: 0, bytes: 0 },
+			notCollected: CONTENT_ROLES.length,
+			byRole: {},
+		});
+		expect(cap.facts()).toEqual([]);
+		expect(JSON.stringify([cap.status(), source.standing()])).not.toContain('CANARY');
+	});
+
+	it('a standing that lapses mid-turn refuses the next line by name and keeps what it held until a revoke; a standing that returns admits again', () => {
+		let kind: 'attached' | 'detached' = 'attached';
+		let profile: EndpointCollectionProfile = 'full';
+		const source = createContentCollectionSource({ status: () => standing(kind, profile) });
+		expect(source.install(ceiling()).ok).toBe(true);
+		let n = 0;
+		const cap = createContentCapture({ source, now: () => T, newId: () => `ref-${++n}` });
+		expect(cap.capture(input({ text: 'first line' }))).toMatchObject({ outcome: 'recorded' });
+		kind = 'detached';
+		expect(cap.capture(input({ text: 'second line' }))).toEqual({
+			outcome: 'not-collected',
+			reason: 'No endpoint is attached.',
+		});
+		kind = 'attached';
+		profile = 'metadata';
+		expect(cap.capture(input({ text: 'third line' }))).toMatchObject({
+			outcome: 'not-collected',
+			reason: expect.stringContaining('metadata'),
+		});
+		// A lapse is not a revoke: the first line is still held, until the host says otherwise.
+		expect(cap.take('ref-1')?.bytes.toString('utf8')).toBe('first line');
+		expect(cap.revoke('standing lapsed')).toBe(1);
+		profile = 'full';
+		expect(cap.capture(input({ text: 'fourth line' }))).toMatchObject({
+			outcome: 'recorded',
+			fact: { kept: 'original', gap: null },
+		});
+		expect(cap.status()).toMatchObject({
+			records: 2,
+			notCollected: 2,
+			revoked: 1,
+			held: { count: 1, bytes: Buffer.byteLength('fourth line') },
+		});
+		expect(JSON.stringify(cap.facts())).not.toContain('line');
+	});
+
+	it('separate permissions: each role is its own grant checked before the profile, and the permission words ride the fact as a copy of the parsed ceiling', () => {
+		const only = ceiling({
+			roles: ['assistant.output'],
+			permissions: {
+				capture: true,
+				upload: false,
+				storage: false,
+				index: false,
+				display: false,
+				export: false,
+			},
+		});
+		const { source, capture: cap } = capture('attached', 'full', only);
+		expect(cap.capture(input({ role: 'user.prompt' }))).toEqual({
+			outcome: 'not-collected',
+			reason: 'the ceiling grants no user.prompt',
+		});
+		expect(cap.capture(input({ role: 'tool.input', text: '{}' }))).toEqual({
+			outcome: 'not-collected',
+			reason: 'the ceiling grants no tool.input',
+		});
+		expect(cap.capture(input({ role: 'vibes.annotations', text: '{}' }))).toEqual({
+			outcome: 'not-collected',
+			reason: 'the ceiling grants no vibes.annotations',
+		});
+		const out = cap.capture(input({ role: 'assistant.output', text: 'an answer' }));
+		expect(out).toMatchObject({
+			outcome: 'recorded',
+			fact: { permissions: { ...only.permissions }, sensitivity: 'confidential' },
+		});
+		if (out.outcome !== 'recorded') return;
+		// The document handed in is not the ceiling held: a later change to it reaches neither the source nor the fact.
+		only.permissions.upload = true;
+		expect(source.installed()?.permissions.upload).toBe(false);
+		expect(out.fact.permissions.upload).toBe(false);
+		// The profile that would admit VIBES evidence does not grant it: the grant is the ceiling's alone.
+		const { capture: ungranted } = capture(
+			'attached',
+			'full_vibes',
+			ceiling({ profile: 'full_vibes', roles: ['user.prompt'] })
+		);
+		expect(ungranted.capture(input({ role: 'vibes.annotations', text: '{}' }))).toEqual({
+			outcome: 'not-collected',
+			reason: 'the ceiling grants no vibes.annotations',
+		});
+		expect(ungranted.capture(input())).toMatchObject({
+			outcome: 'recorded',
+			fact: { profile: 'full_vibes', kept: 'original' },
+		});
+		expect(cap.status()).toMatchObject({
+			records: 1,
+			notCollected: 3,
+			byRole: { 'assistant.output': 1 },
+		});
+	});
+
+	it('exact integrity: the original digest is of the bytes as given, the derivative digest is of the bytes held, multi-byte text counts in bytes, and a take is a copy', () => {
+		const text =
+			'Déploie la clé sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij0123456789 puis Bearer eyJhbGciOiJIUzI1NiJ9.CANARYCLAIMS.CANARYSIG en prod';
+		const expected = redactSecrets(text, { hexBlobs: true }).text;
+		expect(expected).not.toContain('sk-ant');
+		expect(expected).not.toContain('CANARY');
+		expect(Buffer.byteLength(text, 'utf8')).toBeGreaterThan(text.length);
+		const { capture: redacted } = capture('attached', 'redacted');
+		const out = redacted.capture(input({ text }));
+		if (out.outcome !== 'recorded') throw new Error('not recorded');
+		expect(out.fact.original).toEqual({
+			referenceId: 'ref-1',
+			sha256: sha(text),
+			representation: 'original',
+			byteLength: Buffer.byteLength(text, 'utf8'),
+		});
+		const held = redacted.take(out.fact.derivative!.referenceId)!;
+		expect(held.bytes.toString('utf8')).toBe(expected);
+		expect(out.fact.derivative).toEqual({
+			referenceId: 'ref-2',
+			sha256: sha(expected),
+			representation: 'derivative',
+			byteLength: held.bytes.byteLength,
+		});
+		expect(held.fact).toBe(out.fact);
+		// A copy: writing into the taken buffer changes nothing held.
+		held.bytes.fill(0);
+		expect(redacted.take('ref-2')!.bytes.toString('utf8')).toBe(expected);
+		// Text with nothing to redact: byte-identical, which the two digests say, and still a derivative under the rules.
+		const plain = redacted.capture(input({ text: 'nothing secret here' }));
+		if (plain.outcome !== 'recorded') throw new Error('not recorded');
+		expect(plain.fact.derivative!.sha256).toBe(plain.fact.original.sha256);
+		expect(plain.fact).toMatchObject({
+			kept: 'derivative',
+			transformation: { ruleIds: [CONTENT_REDACTION_RULE_ID, 'dlp-rule-7'], at: plain.fact.at },
+		});
+		// Under full the held bytes are the input itself, verified against the digest, and no derivative is made.
+		const { capture: full } = capture('attached', 'full');
+		const kept = full.capture(input({ text }));
+		if (kept.outcome !== 'recorded') throw new Error('not recorded');
+		const original = full.take(kept.fact.original.referenceId)!;
+		expect(original.bytes.toString('utf8')).toBe(text);
+		expect(sha(original.bytes.toString('utf8'))).toBe(kept.fact.original.sha256);
+		expect(kept.fact).toMatchObject({ derivative: null, transformation: null });
+		// The ledgers hold digests and lengths, never the text.
+		const ledgers = JSON.stringify([
+			redacted.facts(),
+			full.facts(),
+			redacted.status(),
+			full.status(),
+		]);
+		for (const canary of ['sk-ant', 'CANARY', 'Déploie', 'nothing secret', 'REDACTED']) {
+			expect(ledgers).not.toContain(canary);
+		}
+		for (const fact of [...redacted.facts(), ...full.facts()]) {
+			expect(contentFactProblems(fact)).toEqual([]);
+		}
+	});
+
+	it('revoke drops every held byte across roles by name and leaves the records with their digests; a later capture is held afresh; an empty revoke is zero', () => {
+		const { capture: cap } = capture('attached', 'full');
+		const outs = [
+			cap.capture(input({ text: 'prompt' })),
+			cap.capture(input({ role: 'assistant.output', text: 'answer' })),
+			cap.capture(input({ role: 'tool.input', text: '{"toolName":"Read"}', toolName: 'Read' })),
+		];
+		expect(cap.status().held).toEqual({ count: 3, bytes: 6 + 6 + 19 });
+		expect(cap.revoke('policy revision 4 applied')).toBe(3);
+		for (const out of outs) {
+			if (out.outcome !== 'recorded') throw new Error('not recorded');
+			expect(out.fact).toMatchObject({
+				kept: 'none',
+				completeness: 'unavailable',
+				gap: 'revoked: policy revision 4 applied',
+			});
+			expect(out.fact.original.sha256).toMatch(/^[a-f0-9]{64}$/);
+			expect(cap.take(out.fact.original.referenceId)).toBeNull();
+		}
+		expect(cap.revoke('again')).toBe(0);
+		expect(cap.status()).toMatchObject({ records: 3, held: { count: 0, bytes: 0 }, revoked: 3 });
+		expect(cap.capture(input({ text: 'after' }))).toMatchObject({
+			outcome: 'recorded',
+			fact: { kept: 'original', completeness: 'pending_upload', gap: null },
+		});
+		expect(cap.status().held).toEqual({ count: 1, bytes: 5 });
+		expect(cap.facts().map((fact) => fact.gap)).toEqual([
+			'revoked: policy revision 4 applied',
+			'revoked: policy revision 4 applied',
+			'revoked: policy revision 4 applied',
+			null,
+		]);
+	});
+
+	it('bounded input: the payload cap holds at the byte and applies to the kept representation, one capture can shed several, a tool name is cut at 128, and empty text is a record', () => {
+		const { capture: capped } = capture('attached', 'full', ceiling({ maxPayloadBytes: 16 }));
+		expect(capped.capture(input({ text: 'x'.repeat(16) }))).toMatchObject({
+			outcome: 'recorded',
+			fact: { kept: 'original', gap: null, original: { byteLength: 16 } },
+		});
+		// Nine characters, eighteen bytes: the cap is in bytes.
+		expect(capped.capture(input({ text: 'é'.repeat(9) }))).toMatchObject({
+			outcome: 'recorded',
+			fact: {
+				kept: 'none',
+				gap: 'oversize',
+				original: { byteLength: 18, sha256: sha('é'.repeat(9)) },
+			},
+		});
+		expect(capped.status()).toMatchObject({ records: 2, held: { count: 1, bytes: 16 } });
+		// Under redacted the cap is measured on the derivative: an original over the cap whose derivative fits is kept.
+		const { capture: redacted } = capture(
+			'attached',
+			'redacted',
+			ceiling({ profile: 'redacted', maxPayloadBytes: 48 })
+		);
+		const secret = redacted.capture(input());
+		if (secret.outcome !== 'recorded') throw new Error('not recorded');
+		expect(secret.fact.original.byteLength).toBeGreaterThan(48);
+		expect(secret.fact.derivative!.byteLength).toBeLessThanOrEqual(48);
+		expect(secret.fact).toMatchObject({ kept: 'derivative', gap: null });
+		// One capture sheds as many of the oldest held as it needs, each counted and named.
+		const { capture: hold } = capture('attached', 'full', ceiling(), { holdBytes: 24 });
+		const a = hold.capture(input({ text: 'a'.repeat(10) }));
+		const b = hold.capture(input({ text: 'b'.repeat(10) }));
+		const c = hold.capture(input({ text: 'c'.repeat(16) }));
+		if (a.outcome !== 'recorded' || b.outcome !== 'recorded' || c.outcome !== 'recorded')
+			throw new Error('not recorded');
+		expect([a.fact.gap, b.fact.gap, c.fact.gap]).toEqual(['shed', 'shed', null]);
+		expect(hold.status()).toMatchObject({ shed: 2, held: { count: 1, bytes: 16 }, records: 3 });
+		expect(hold.take(a.fact.original.referenceId)).toBeNull();
+		expect(hold.take(c.fact.original.referenceId)!.bytes.toString('utf8')).toBe('c'.repeat(16));
+		// The ledger bound forgets the oldest record and its bytes.
+		const { capture: one } = capture('attached', 'full', ceiling(), { capacity: 1 });
+		const first = one.capture(input({ text: 'first' }));
+		one.capture(input({ text: 'second' }));
+		if (first.outcome !== 'recorded') throw new Error('not recorded');
+		expect(one.facts()).toHaveLength(1);
+		expect(one.take(first.fact.original.referenceId)).toBeNull();
+		expect(one.status()).toMatchObject({ forgotten: 1, held: { count: 1, bytes: 6 } });
+		// A tool name is bounded; empty text is a record with the digest of nothing.
+		const { capture: tools } = capture('attached', 'full');
+		const call = tools.capture(
+			input({ role: 'tool.input', text: '{}', toolName: 'T'.repeat(200) })
+		);
+		expect(call).toMatchObject({ outcome: 'recorded', fact: { toolName: 'T'.repeat(128) } });
+		expect(tools.capture(input({ role: 'assistant.output', text: '' }))).toMatchObject({
+			outcome: 'recorded',
+			fact: { kept: 'original', original: { byteLength: 0, sha256: sha('') } },
 		});
 	});
 });
