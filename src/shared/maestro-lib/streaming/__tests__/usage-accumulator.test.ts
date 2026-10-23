@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { UsageAccumulator } from '../usage-accumulator';
+import {
+	describeUsageProvenance,
+	USAGE_PROVENANCE_FIELDS,
+	USAGE_PROVENANCES,
+	UsageAccumulator,
+	usagePriceRevision,
+	usageProvenanceOf,
+	UsageProvenanceTracker,
+} from '../usage-accumulator';
 import { CodexOutputParser } from '../../parsers/codex-output-parser';
 import type { UsageStats } from '../../../types';
 
@@ -217,5 +225,173 @@ describe('UsageAccumulator over a resumed Codex process', () => {
 		expect(turn2.inputTokens).toBe(26500);
 		expect(turn2.outputTokens).toBe(180);
 		expect(turn2.cacheReadInputTokens).toBe(25000);
+	});
+});
+
+// MRC-10-04: the provenance of a usage total, read off the parsed reports the
+// totals lose: where the tokens and the cost came from, the rate table a price
+// was read from, how the provider reported, what was replayed, the cache
+// convention, and an honest `unavailable` for a stream that carried nothing.
+describe('usage provenance', () => {
+	it('maps every source onto the contract word, and a runtime only ever says estimated or unavailable', () => {
+		expect(usageProvenanceOf('gateway')).toBe('gateway_metered');
+		expect(usageProvenanceOf('provider-billing')).toBe('provider_reported');
+		expect(usageProvenanceOf('runtime-stream')).toBe('estimated');
+		expect(usageProvenanceOf('none')).toBe('unavailable');
+		expect(USAGE_PROVENANCES).toEqual([
+			'gateway_metered',
+			'provider_reported',
+			'estimated',
+			'unavailable',
+		]);
+	});
+
+	it('tells a field the stream never carried from a zero, skips correction replays, and names the reporting', () => {
+		const acc = new UsageAccumulator({ attachesAbsoluteUsage: true });
+		const tracker = new UsageProvenanceTracker({ accumulator: acc });
+		expect(tracker.summary()).toMatchObject({ events: 0, reporting: 'none', models: [] });
+		// Codex: running totals, no cost, cached input reported, no cache creation.
+		for (const [input, cached] of [
+			[1_000, 800],
+			[1_600, 1_300],
+		]) {
+			const report = { inputTokens: input, outputTokens: 50, cacheReadTokens: cached };
+			acc.normalize(usage({ inputTokens: input, outputTokens: 50, cacheReadInputTokens: cached }));
+			tracker.observe({ ...report, model: 'gpt-5-codex' });
+		}
+		tracker.observe({ inputTokens: 0, outputTokens: 0, correctionOnly: true });
+		expect(tracker.summary()).toEqual({
+			events: 2,
+			corrections: 1,
+			costReports: 0,
+			cacheReadReports: 2,
+			cacheCreationReports: 0,
+			reasoningReports: 0,
+			contextWindowReported: false,
+			models: ['gpt-5-codex'],
+			reporting: 'running-total',
+		});
+		expect(new UsageProvenanceTracker({ reporting: 'turn-total' }).summary().reporting).toBe(
+			'none'
+		);
+		const single = new UsageProvenanceTracker();
+		single.observe({ inputTokens: 1, outputTokens: 1 });
+		expect(single.summary().reporting).toBe('single-event');
+		single.observe({ inputTokens: 1, outputTokens: 1 });
+		expect(single.summary().reporting).toBe('per-step');
+	});
+
+	it('prices tokens nobody priced from the rate table and names its revision; a reported cost stands as reported', () => {
+		const codex = new UsageProvenanceTracker({ reporting: 'running-total' });
+		codex.observe({ inputTokens: 1_000, outputTokens: 50, cacheReadTokens: 800 });
+		codex.observe({ inputTokens: 1_600, outputTokens: 80, cacheReadTokens: 1_300 });
+		const total = usage({
+			inputTokens: 1_600,
+			outputTokens: 80,
+			cacheReadInputTokens: 1_300,
+			totalCostUsd: 0,
+		});
+		const priced = describeUsageProvenance(codex.summary(), total, 'gpt-5-codex');
+		expect(priced).toMatchObject({
+			provenance: 'estimated',
+			tokens: 'provider-stream',
+			cost: 'priced',
+			reporting: 'running-total',
+			events: 2,
+			cacheReadCounting: 'inside-input',
+			counts: {
+				inputTokens: 1_600,
+				outputTokens: 80,
+				cacheReadInputTokens: 1_300,
+				cacheCreationInputTokens: null,
+				reasoningTokens: null,
+			},
+			contextWindow: null,
+		});
+		// OpenAI counts cached input INSIDE input: 300 uncached at $1.25, 1300 cached at $0.125, 80 out at $10.
+		expect(priced.costUsd).toBeCloseTo((300 * 1.25 + 1_300 * 0.125 + 80 * 10) / 1_000_000, 10);
+		expect(priced.priceRevision).toBe(usagePriceRevision('gpt-5-codex'));
+		expect(priced.priceRevision).toMatch(/^price-[0-9a-f]{16}$/);
+		// The revision names the rate table entry: a sibling on the same tier shares it, another tier does not.
+		expect(usagePriceRevision('gpt-5-codex')).toBe(usagePriceRevision('gpt-5'));
+		expect(usagePriceRevision('gpt-5-mini')).not.toBe(usagePriceRevision('gpt-5'));
+
+		const claude = new UsageProvenanceTracker({ reporting: 'turn-total' });
+		claude.observe({
+			inputTokens: 10,
+			outputTokens: 5,
+			cacheReadTokens: 900,
+			cacheCreationTokens: 100,
+			costUsd: 0.0123,
+			contextWindowReported: true,
+		});
+		const reported = describeUsageProvenance(
+			claude.summary(),
+			usage({
+				inputTokens: 10,
+				outputTokens: 5,
+				cacheReadInputTokens: 900,
+				cacheCreationInputTokens: 100,
+				totalCostUsd: 0.0123,
+			}),
+			'claude-opus-4-8'
+		);
+		expect(reported).toMatchObject({
+			provenance: 'estimated',
+			cost: 'reported',
+			costUsd: 0.0123,
+			priceRevision: null,
+			cacheReadCounting: 'beside-input',
+			contextWindow: 200_000,
+			counts: { cacheCreationInputTokens: 100, reasoningTokens: null },
+		});
+	});
+
+	it('falls back to the model the stream named, prices nothing for an unknown model, and says unavailable for a silent stream', () => {
+		const named = new UsageProvenanceTracker();
+		named.observe({ inputTokens: 100, outputTokens: 10, model: 'claude-haiku-4-5' });
+		const fromStream = describeUsageProvenance(
+			named.summary(),
+			usage({ inputTokens: 100, outputTokens: 10 }),
+			null
+		);
+		expect(fromStream).toMatchObject({
+			cost: 'priced',
+			priceRevision: usagePriceRevision('claude-haiku-4-5'),
+		});
+		expect(fromStream.costUsd).toBeCloseTo((100 * 1 + 10 * 5) / 1_000_000, 10);
+
+		const anonymous = new UsageProvenanceTracker();
+		anonymous.observe({ inputTokens: 100, outputTokens: 10 });
+		expect(
+			describeUsageProvenance(anonymous.summary(), usage({ inputTokens: 100 }), null)
+		).toMatchObject({
+			provenance: 'estimated',
+			tokens: 'provider-stream',
+			cost: 'none',
+			costUsd: null,
+			priceRevision: null,
+			cacheReadCounting: 'unknown',
+		});
+
+		const silent = new UsageProvenanceTracker().summary();
+		expect(describeUsageProvenance(silent, usage({ inputTokens: 100 }), 'opus')).toEqual({
+			provenance: 'unavailable',
+			tokens: 'none',
+			cost: 'none',
+			costUsd: null,
+			priceRevision: null,
+			reporting: 'none',
+			events: 0,
+			corrections: 0,
+			cacheReadCounting: 'unknown',
+			counts: null,
+			contextWindow: null,
+		});
+		// A total the host never summed is unavailable too, whatever was observed.
+		expect(describeUsageProvenance(named.summary(), undefined, 'opus').provenance).toBe(
+			'unavailable'
+		);
+		expect(USAGE_PROVENANCE_FIELDS).toHaveLength(11);
 	});
 });

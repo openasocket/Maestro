@@ -70,8 +70,14 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * shape `EndpointTelemetryEvent`, and `telemetryStanding()` (whether a report may go now, the
  * `TelemetryBinding` it carries, and the `standingKey` a hold is released on); `EventJournal.take`
  * takes a `skip` so an entry the transport cannot carry is left in place, not counted as an attempt.
+ * 0.20.0: usage provenance (`./streaming/usage-accumulator`, MRC-10-04): `UsageProvenanceTracker` watches
+ * the parsed reports before a total fills their gaps, `describeUsageProvenance` says what a total is made of
+ * (the contract word, where the tokens and the cost came from, the rate table revision `usagePriceRevision`,
+ * the reporting style, the cache convention, a null for a count the stream never carried); and the usage
+ * half of the projection (`./managed/events`, MRC-10-04A): `UsageFact`, `usageFactProblems`,
+ * `LifecycleProjector.recordUsage` raising a `usage` event under the shared sequence.
  */
-export const MAESTRO_LIB_VERSION = '0.19.0';
+export const MAESTRO_LIB_VERSION = '0.20.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';
