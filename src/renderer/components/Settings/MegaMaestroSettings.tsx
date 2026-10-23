@@ -30,6 +30,7 @@ import {
 	type ManagedActionVerb,
 } from '../../hooks/enterprise/useManagedStatus';
 import type { Theme } from '../../types';
+import { ManagedInbox } from '../Enterprise/ManagedInbox';
 import { ManagedStatus, STATUS_COPY } from '../Enterprise/ManagedStatus';
 import { SettingsSectionHeading } from './SettingsSectionHeading';
 import { SectionCard } from './tabs/DisplayTab/components/SectionCard';
@@ -253,6 +254,7 @@ export function MegaMaestroSettings({ theme }: { theme: Theme }) {
 						onClick={() => void act('completeRegistration')}
 					/>
 				) : null}
+				<ManagedInbox theme={theme} />
 			</>
 		);
 	}
