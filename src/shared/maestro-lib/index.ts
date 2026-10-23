@@ -28,6 +28,7 @@ export * from './managed/delegation';
 export * from './managed/workflows';
 export * from './managed/events';
 export * from './managed/event-journal';
+export * from './managed/commands';
 
 // Paths and configuration
 export * from './paths/userDataDir';

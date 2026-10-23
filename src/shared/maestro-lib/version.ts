@@ -82,8 +82,14 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * the applied revision, completeness and named gaps), `inventoryFactProblems`, and
  * `LifecycleProjector.recordInventory` raising an `inventory` event whose id digests the inventory,
  * so an unchanged inventory is one event and a change is the delta; the `host` lifecycle surface.
+ * 0.22.0: typed runtime commands (`./managed/commands`, MRC-11-01): the endpoint's six typed actions
+ * as `ManagedRuntimeCommand` with `managedCommandProblems`, the binding of a command to this run,
+ * process epoch, actor, policy revision and approval (`commandBindingProblem`), the durable command
+ * ledger (`createCommandLedger`, one record per command id, nonce and idempotency key enrollment-wide,
+ * an accepted record a restart turns unknown) and `createCommandExecutor` over injected ports, keeping
+ * accepted, completed, no-effect, failed, denied and unknown distinct in the published settlement words.
  */
-export const MAESTRO_LIB_VERSION = '0.21.0';
+export const MAESTRO_LIB_VERSION = '0.22.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';
