@@ -61,8 +61,12 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * turns the facts the real lifecycle producers report (the desktop's agent-run capture, the runtime's
  * turn recorder) into metadata-only `ManagedLifecycleEvent`s with digest-stable ids, a per-process
  * sequence and a counted bounded window; `RuntimeTurnOptions.lifecycle` hands a sink to the runtime.
+ * 0.18.0: the durable event journal (`./managed/event-journal`, MRC-10-02): `createEventJournal` keeps
+ * the projected events under one sequence that survives a restart, dedups by event id, hands batches
+ * to a telemetry client and marks `received` only from an endpoint receipt, answers cursor pages with
+ * `completeness`, and records every gap; `ManagedEventsQuery` names what `managed.events` is asked.
  */
-export const MAESTRO_LIB_VERSION = '0.17.0';
+export const MAESTRO_LIB_VERSION = '0.18.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

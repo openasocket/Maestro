@@ -655,6 +655,22 @@ export interface ManagedPage<T> {
 }
 
 /**
+ * What `managed.events` is asked for (MRC-10-02). `cursor` is opaque: the
+ * `nextCursor` of an earlier page of the same host, or null for the oldest
+ * the host still holds. A page's `completeness` is `gap` when events were
+ * lost between the cursor and its items (a bounded journal trimmed them, a
+ * restart went unobserved, the projector refused a fact or skipped a number),
+ * `unknown` when the cursor is not one this host's journal issued. The
+ * `nextCursor` of a page is the position after its last item, so a poller
+ * hands it back later; it is null only while the host has no event at all.
+ */
+export interface ManagedEventsQuery {
+	cursor: string | null;
+	/** 1 to 500; more is clamped. */
+	limit: number;
+}
+
+/**
  * The scope a caller over a transport is admitted in (MRC-08-05): the installation, the one
  * principal it may act as, the policy generation the host applies now, and what the host is
  * enrolled as. What a transport client fills its context from; anything else is refused. Read, never claimed.
@@ -695,9 +711,13 @@ export interface ManagedApi {
 	interrupt(
 		envelope: ManagedOperationEnvelope<{ runId: string }>
 	): Promise<ClientResult<ManagedOperationResult<ManagedControlReceipt>>>;
-	/** Durable events after `cursor`, with whether any were lost before them. */
+	/**
+	 * Durable lifecycle events after `cursor`, oldest first, from the host's event
+	 * journal (`managed/event-journal.ts`), with whether any were lost before them.
+	 * Metadata only; a host with no journal answers `unsupported`.
+	 */
 	events(
-		envelope: ManagedOperationEnvelope<{ cursor: string | null; limit: number }>
+		envelope: ManagedOperationEnvelope<ManagedEventsQuery>
 	): Promise<ClientResult<ManagedOperationResult<ManagedEventPage>>>;
 	/** The policy this host is under and how far to trust it (`policy.status`); unsupported on a host with no adapter. */
 	policy(
