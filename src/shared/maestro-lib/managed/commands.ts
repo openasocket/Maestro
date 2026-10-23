@@ -29,6 +29,7 @@
  */
 
 import { canonicalJson } from '../../canonicalJson';
+import { readStoreDocument, STORE_SCHEMA_KEY, writeStoreDocument } from '../store/io';
 import { sha256Hex } from './authority';
 import type { ManagedInstallationIdentity } from './types';
 
@@ -360,4 +361,471 @@ export function commandEvidenceDigest(input: {
 	facts?: unknown;
 }): string {
 	return sha256Hex(canonicalJson({ ...input, facts: input.facts ?? null }));
+}
+
+// ---------------------------------------------------------------------------
+// The ledger: durable idempotency, one record per command id
+// ---------------------------------------------------------------------------
+
+export type CommandLedgerState =
+	| 'accepted'
+	| 'completed'
+	| 'failed'
+	| 'no-effect'
+	| 'denied'
+	| 'unknown';
+
+export interface CommandLedgerRecord {
+	commandId: string;
+	idempotencyKey: string;
+	nonce: string;
+	payloadDigest: string;
+	releaseId: string | null;
+	kind: ManagedCommandKind;
+	runId: string | null;
+	actorId: string;
+	policyRevision: number;
+	acceptedAt: string;
+	dispatchedAt: string | null;
+	settledAt: string | null;
+	state: CommandLedgerState;
+	/** The refusal a burned id settled on; null unless denied. */
+	refusal: CommandRefusal | null;
+	evidenceDigest: string | null;
+	/** Why it is uncertain, or a port's safe detail. Never command text. */
+	detail: string | null;
+}
+
+export interface CommandLedgerDocument {
+	[STORE_SCHEMA_KEY]: number;
+	commands: CommandLedgerRecord[];
+}
+
+export type CommandAcceptance =
+	| { disposition: 'accepted'; record: CommandLedgerRecord }
+	| { disposition: 'duplicate'; record: CommandLedgerRecord }
+	| { disposition: 'replay'; record: CommandLedgerRecord };
+
+export type CommandLedgerLoad =
+	| { ok: true; commands: number; recoveredUnknown: number }
+	| { ok: false; reason: 'corrupt' | 'unreadable'; file: string; message: string };
+
+export interface CommandLedger {
+	readonly file: string | null;
+	/** Read the file; an `accepted` record from an earlier process becomes `unknown`. Once, first. */
+	load(): Promise<CommandLedgerLoad>;
+	accept(command: ManagedRuntimeCommand): Promise<CommandAcceptance>;
+	markDispatched(commandId: string): Promise<CommandLedgerRecord | null>;
+	settle(
+		commandId: string,
+		effect: CommandSettlement,
+		detail?: string | null
+	): Promise<CommandLedgerRecord | null>;
+	get(commandId: string): CommandLedgerRecord | null;
+	list(): readonly CommandLedgerRecord[];
+	/** Accepted, not yet settled. */
+	open(): readonly CommandLedgerRecord[];
+}
+
+export interface CommandLedgerDeps {
+	/** Absent: in memory only (a test, a one-shot host). */
+	file?: string;
+	now(): number;
+	/** Oldest settled records go first; an open one is never dropped. Default 2000. */
+	maxCommands?: number;
+}
+
+const DEFAULT_MAX_COMMANDS = 2_000;
+const SETTLED: readonly CommandLedgerState[] = [
+	'completed',
+	'failed',
+	'no-effect',
+	'denied',
+	'unknown',
+];
+
+export function createCommandLedger(deps: CommandLedgerDeps): CommandLedger {
+	const maxCommands = deps.maxCommands ?? DEFAULT_MAX_COMMANDS;
+	let doc: CommandLedgerDocument = { [STORE_SCHEMA_KEY]: 1, commands: [] };
+	let loaded = deps.file === undefined;
+	const byId = new Map<string, CommandLedgerRecord>();
+	const iso = (): string => new Date(deps.now()).toISOString();
+
+	function index(): void {
+		byId.clear();
+		for (const record of doc.commands) byId.set(record.commandId, record);
+	}
+
+	async function persist(): Promise<void> {
+		if (!loaded) throw new Error('The command ledger was not loaded.');
+		if (doc.commands.length > maxCommands) {
+			let excess = doc.commands.length - maxCommands;
+			doc.commands = doc.commands.filter((record) => {
+				if (excess > 0 && SETTLED.includes(record.state)) {
+					excess -= 1;
+					return false;
+				}
+				return true;
+			});
+			index();
+		}
+		if (deps.file) await writeStoreDocument(deps.file, doc);
+	}
+
+	return {
+		file: deps.file ?? null,
+
+		async load() {
+			if (!deps.file) return { ok: true, commands: 0, recoveredUnknown: 0 };
+			const read = await readStoreDocument<CommandLedgerDocument>(deps.file, (value) =>
+				Array.isArray(value.commands) ? null : 'commands is not an array'
+			);
+			if (read.status === 'corrupt' || read.status === 'unreadable') {
+				return { ok: false, reason: read.status, file: deps.file, message: read.reason };
+			}
+			doc = read.status === 'ok' ? read.data : { [STORE_SCHEMA_KEY]: 1, commands: [] };
+			index();
+			loaded = true;
+			let recoveredUnknown = 0;
+			for (const record of doc.commands) {
+				if (record.state !== 'accepted') continue;
+				record.state = 'unknown';
+				record.settledAt = iso();
+				record.detail = 'The host restarted while this command was accepted.';
+				recoveredUnknown += 1;
+			}
+			if (recoveredUnknown > 0 || read.status === 'missing') await persist();
+			return { ok: true, commands: doc.commands.length, recoveredUnknown };
+		},
+
+		async accept(command) {
+			if (!loaded) throw new Error('The command ledger was not loaded.');
+			const prior = byId.get(command.commandId);
+			if (prior) {
+				return {
+					disposition: prior.payloadDigest === command.payloadDigest ? 'duplicate' : 'replay',
+					record: prior,
+				};
+			}
+			// Nonce and idempotency key are enrollment-wide: another id reusing one is a replay.
+			const reused = doc.commands.find(
+				(record) =>
+					record.idempotencyKey === command.idempotencyKey || record.nonce === command.nonce
+			);
+			if (reused) return { disposition: 'replay', record: reused };
+			const record: CommandLedgerRecord = {
+				commandId: command.commandId,
+				idempotencyKey: command.idempotencyKey,
+				nonce: command.nonce,
+				payloadDigest: command.payloadDigest,
+				releaseId: command.releaseId,
+				kind: command.action.kind,
+				runId: command.recipient.runId,
+				actorId: command.recipient.actorId,
+				policyRevision: command.preconditions.policyRevision,
+				acceptedAt: iso(),
+				dispatchedAt: null,
+				settledAt: null,
+				state: 'accepted',
+				refusal: null,
+				evidenceDigest: null,
+				detail: null,
+			};
+			doc.commands.push(record);
+			byId.set(record.commandId, record);
+			await persist();
+			return { disposition: 'accepted', record };
+		},
+
+		async markDispatched(commandId) {
+			const record = byId.get(commandId);
+			if (!record) return null;
+			if (record.state === 'accepted' && record.dispatchedAt === null) {
+				record.dispatchedAt = iso();
+				await persist();
+			}
+			return record;
+		},
+
+		async settle(commandId, effect, detail = null) {
+			const record = byId.get(commandId);
+			if (!record) return null;
+			if (record.state !== 'accepted') return record;
+			if (effect.state === 'settled') {
+				record.state = effect.outcome;
+				record.evidenceDigest = effect.evidenceDigest;
+				record.detail = detail;
+			} else if (effect.state === 'denied') {
+				record.state = 'denied';
+				record.refusal = effect.reason;
+				record.evidenceDigest = effect.evidenceDigest;
+				record.detail = detail;
+			} else {
+				record.state = 'unknown';
+				record.detail = detail ?? effect.reason;
+			}
+			record.settledAt = iso();
+			await persist();
+			return record;
+		},
+
+		get: (commandId) => byId.get(commandId) ?? null,
+		list: () => doc.commands,
+		open: () => doc.commands.filter((record) => record.state === 'accepted'),
+	};
+}
+
+// ---------------------------------------------------------------------------
+// The executor
+// ---------------------------------------------------------------------------
+
+/**
+ * What a port answers. `accepted` means the effect was requested and its end
+ * will be reported through `CommandExecutor.settle` (a stop whose exit comes
+ * later); the three settled outcomes mean the port saw the effect through.
+ * `facts` is metadata the evidence digest covers; never content.
+ */
+export interface CommandPortAnswer {
+	outcome: CommandSettledOutcome | 'accepted';
+	detail?: string;
+	facts?: unknown;
+}
+
+/** The sinks a host composes. A port that is absent makes its command `unsupported-capability`, by name. */
+export interface CommandPorts {
+	pause?(runId: string, command: ManagedRuntimeCommand): Promise<CommandPortAnswer>;
+	resume?(runId: string, command: ManagedRuntimeCommand): Promise<CommandPortAnswer>;
+	cancel?(runId: string, command: ManagedRuntimeCommand): Promise<CommandPortAnswer>;
+	report?(command: ManagedRuntimeCommand): Promise<CommandPortAnswer>;
+	refresh?(desiredRevision: number, command: ManagedRuntimeCommand): Promise<CommandPortAnswer>;
+	/** The one path an operator prompt reaches a run by; composed only where the host admits agent input. */
+	prompt?(text: string, runId: string, command: ManagedRuntimeCommand): Promise<CommandPortAnswer>;
+}
+
+export type CommandExecution =
+	| {
+			status: 'accepted' | CommandSettledOutcome | 'unknown';
+			commandId: string;
+			/** The ledger already held this command; nothing ran again. */
+			duplicate: boolean;
+			evidenceDigest: string | null;
+			detail: string | null;
+			facts: unknown;
+	  }
+	| { status: 'denied'; commandId: string | null; reason: CommandRefusal; detail: string }
+	| { status: 'unavailable'; commandId: string | null; detail: string };
+
+export interface CommandExecutor {
+	/** The `command-<action>` capabilities the composed ports execute. */
+	capabilities(): readonly string[];
+	execute(raw: unknown): Promise<CommandExecution>;
+	/** A port's requested effect ended: settle the accepted record. */
+	settle(
+		commandId: string,
+		effect: CommandEffect,
+		detail?: string
+	): Promise<CommandLedgerRecord | null>;
+}
+
+export interface CommandExecutorDeps {
+	ledger: CommandLedger;
+	binding(): CommandBinding;
+	ports: CommandPorts;
+	now(): number;
+	dispatchWindowMs?: number;
+}
+
+const PORT_OF: Readonly<Record<ManagedCommandKind, keyof CommandPorts>> = {
+	'pause-run': 'pause',
+	'resume-run': 'resume',
+	'cancel-run': 'cancel',
+	'report-status': 'report',
+	'refresh-policy': 'refresh',
+	'operator-prompt': 'prompt',
+};
+
+export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecutor {
+	const windowMs = deps.dispatchWindowMs ?? COMMAND_DISPATCH_WINDOW_MS;
+	const capabilities = (): string[] =>
+		MANAGED_COMMAND_KINDS.filter((kind) => typeof deps.ports[PORT_OF[kind]] === 'function').map(
+			commandCapability
+		);
+
+	const stateOf = (record: CommandLedgerRecord, duplicate: boolean): CommandExecution =>
+		record.state === 'denied'
+			? {
+					status: 'denied',
+					commandId: record.commandId,
+					reason: record.refusal ?? 'policy-denied',
+					detail: record.detail ?? '',
+				}
+			: {
+					status: record.state,
+					commandId: record.commandId,
+					duplicate,
+					evidenceDigest: record.evidenceDigest,
+					detail: record.detail,
+					facts: null,
+				};
+
+	async function run(
+		command: ManagedRuntimeCommand,
+		record: CommandLedgerRecord
+	): Promise<CommandExecution> {
+		const { commandId } = command;
+		const kind = command.action.kind;
+		const denyBurned = async (
+			reason: CommandRefusal,
+			detail: string
+		): Promise<CommandExecution> => {
+			// A failed recheck burns the id: the record settles as denied, never retried.
+			const evidenceDigest = commandEvidenceDigest({
+				commandId,
+				kind,
+				outcome: 'no-effect',
+				facts: { reason },
+			});
+			await deps.ledger.settle(commandId, { state: 'denied', reason, evidenceDigest }, detail);
+			return { status: 'denied', commandId, reason, detail };
+		};
+		const recheck = commandBindingProblem(command, deps.binding(), capabilities());
+		if (recheck) return denyBurned(recheck.reason, recheck.detail);
+		if (deps.now() - Date.parse(record.acceptedAt) > windowMs) {
+			await deps.ledger.settle(commandId, { state: 'uncertain', reason: 'deadline-elapsed' });
+			return {
+				status: 'unknown',
+				commandId,
+				duplicate: false,
+				evidenceDigest: null,
+				detail: 'the dispatch window elapsed after acceptance',
+				facts: null,
+			};
+		}
+		const port = deps.ports[PORT_OF[kind]] as
+			| ((...args: unknown[]) => Promise<CommandPortAnswer>)
+			| undefined;
+		if (!port)
+			return denyBurned('unsupported-capability', `no port executes ${commandCapability(kind)}`);
+		await deps.ledger.markDispatched(commandId);
+		let answer: CommandPortAnswer;
+		try {
+			const { action, recipient } = command;
+			answer =
+				action.kind === 'refresh-policy'
+					? await port(action.desiredRevision, command)
+					: action.kind === 'report-status'
+						? await port(command)
+						: action.kind === 'operator-prompt'
+							? await port(action.text, recipient.runId, command)
+							: await port(recipient.runId, command);
+		} catch (error) {
+			const detail = `the port failed after dispatch: ${error instanceof Error ? error.message : String(error)}`;
+			await deps.ledger.settle(
+				commandId,
+				{ state: 'uncertain', reason: 'recovery-required' },
+				detail
+			);
+			return {
+				status: 'unknown',
+				commandId,
+				duplicate: false,
+				evidenceDigest: null,
+				detail,
+				facts: null,
+			};
+		}
+		if (answer.outcome === 'accepted') {
+			return {
+				status: 'accepted',
+				commandId,
+				duplicate: false,
+				evidenceDigest: null,
+				detail: answer.detail ?? null,
+				facts: answer.facts ?? null,
+			};
+		}
+		const evidenceDigest = commandEvidenceDigest({
+			commandId,
+			kind,
+			outcome: answer.outcome,
+			facts: answer.facts,
+		});
+		await deps.ledger.settle(
+			commandId,
+			{ state: 'settled', outcome: answer.outcome, evidenceDigest },
+			answer.detail ?? null
+		);
+		return {
+			status: answer.outcome,
+			commandId,
+			duplicate: false,
+			evidenceDigest,
+			detail: answer.detail ?? null,
+			facts: answer.facts ?? null,
+		};
+	}
+
+	return {
+		capabilities,
+
+		async execute(raw) {
+			const problems = managedCommandProblems(raw);
+			const commandId = isRecord(raw) && isId(raw.commandId) ? raw.commandId : null;
+			if (problems.length > 0) {
+				return {
+					status: 'denied',
+					commandId,
+					reason: 'invalid-input',
+					detail: problems.join('; '),
+				};
+			}
+			const command = structuredClone(raw as ManagedRuntimeCommand);
+			// History before authority: a known id answers what it already answered, and grants
+			// nothing new, whatever the standing is now.
+			const prior = deps.ledger.get(command.commandId);
+			if (prior) {
+				if (prior.payloadDigest !== command.payloadDigest) {
+					return {
+						status: 'denied',
+						commandId: command.commandId,
+						reason: 'replay',
+						detail: 'the command id was consumed by another payload',
+					};
+				}
+				return stateOf(prior, true);
+			}
+			const binding = deps.binding();
+			if (!binding.standing.ok) {
+				return {
+					status: 'unavailable',
+					commandId: command.commandId,
+					detail: binding.standing.reason,
+				};
+			}
+			const refused = commandBindingProblem(command, binding, capabilities());
+			if (refused) return { status: 'denied', commandId: command.commandId, ...refused };
+			let accepted: CommandAcceptance;
+			try {
+				accepted = await deps.ledger.accept(command);
+			} catch (error) {
+				return {
+					status: 'unavailable',
+					commandId: command.commandId,
+					detail: `the command ledger could not be written, so nothing ran: ${error instanceof Error ? error.message : String(error)}`,
+				};
+			}
+			if (accepted.disposition === 'replay') {
+				return {
+					status: 'denied',
+					commandId: command.commandId,
+					reason: 'replay',
+					detail: 'the nonce or idempotency key was consumed by another command',
+				};
+			}
+			if (accepted.disposition === 'duplicate') return stateOf(accepted.record, true);
+			return run(command, accepted.record);
+		},
+
+		settle: (commandId, effect, detail) => deps.ledger.settle(commandId, effect, detail ?? null),
+	};
 }
