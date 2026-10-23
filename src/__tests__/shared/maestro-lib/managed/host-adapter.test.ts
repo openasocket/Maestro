@@ -253,6 +253,105 @@ describe('managed host adapter', () => {
 		expect(detached.workflows).toBeNull();
 	});
 
+	it('exposes the telemetry operation over its endpoint and a standing that names what a report is bound to (MRC-10-03)', async () => {
+		const fake = await endpoint({
+			operations: {
+				telemetry: (payload) => ({
+					outcome: 'durably_accepted',
+					eventId: (payload as { eventId: string }).eventId,
+					receivedAt: '2026-10-21T12:00:01.000Z',
+					duplicate: false,
+				}),
+			},
+		});
+		const port = await attachedPort(fake);
+		const view = okView(record(fake.socketPath));
+		const adapter = createManagedHostAdapter({
+			installation: INSTALLATION,
+			identity: { read: () => view },
+			endpoint: port,
+			status: () => standing(port, view),
+			now: () => T0,
+		});
+		const telemetryStanding = adapter.telemetryStanding();
+		expect(telemetryStanding).toMatchObject({
+			ok: true,
+			binding: { deviceId: 'enr-1', installation: INSTALLATION, policyRevision: 3 },
+		});
+		expect(telemetryStanding.standingKey).toContain(':registered:attached:managed:3:');
+		expect(adapter.telemetry).not.toBeNull();
+		const report = {
+			schemaVersion: 1 as const,
+			eventId: 'evt-1',
+			deviceId: 'enr-1',
+			instanceId: 'inst-1',
+			bootId: 'epoch-1',
+			sequence: 1,
+			occurredAt: '2026-10-21T12:00:00.000Z',
+			source: 'runtime' as const,
+			family: 'agent.lifecycle' as const,
+			policyRevision: 3,
+			collectionProfile: 'metadata' as const,
+			completeness: {
+				metadata: 'partial' as const,
+				content: 'unavailable' as const,
+				lineage: 'filtered_by_policy' as const,
+			},
+			usageProvenance: 'unavailable' as const,
+			redaction: { state: 'not_applicable' as const, ruleIds: [] },
+			contentReferences: [],
+		};
+		// The port is the endpoint's `telemetry` operation, answered as the spool sent it.
+		expect(await adapter.telemetry!.report(report)).toEqual({
+			status: 'ok',
+			payload: {
+				outcome: 'durably_accepted',
+				eventId: 'evt-1',
+				receivedAt: '2026-10-21T12:00:01.000Z',
+				duplicate: false,
+			},
+		});
+		expect(fake.calls.at(-1)?.body).toMatchObject({ operation: 'telemetry', payload: report });
+
+		// No socket: no port and no standing. A record with no enrollment id: no binding either.
+		const detached = createManagedHostAdapter({
+			installation: INSTALLATION,
+			identity: { read: () => view },
+			endpoint: null,
+			status: () => standing(null, view),
+			now: () => T0,
+		});
+		expect(detached.telemetry).toBeNull();
+		expect(detached.telemetryStanding()).toMatchObject({ ok: false });
+		const unnumbered = okView({ ...record(fake.socketPath), enrollmentId: null });
+		const noEnrollmentId = createManagedHostAdapter({
+			installation: INSTALLATION,
+			identity: { read: () => unnumbered },
+			endpoint: port,
+			status: () => standing(port, unnumbered),
+			now: () => T0,
+		});
+		expect(noEnrollmentId.telemetryStanding()).toMatchObject({
+			ok: false,
+			reason: expect.stringContaining('no enrollment id'),
+		});
+		// A connection that negotiated no telemetry capability is refused before a round trip.
+		const narrow = await endpoint({ capabilities: ['execution'] });
+		const narrowPort = await attachedPort(narrow, ['attachment', 'compatibility', 'execution']);
+		const narrowView = okView(record(narrow.socketPath));
+		const noCapability = createManagedHostAdapter({
+			installation: INSTALLATION,
+			identity: { read: () => narrowView },
+			endpoint: narrowPort,
+			status: () => standing(narrowPort, narrowView),
+			now: () => T0,
+		});
+		expect(noCapability.telemetryStanding()).toMatchObject({
+			ok: false,
+			reason: expect.stringContaining('no telemetry capability'),
+		});
+	});
+
 	it('derives an identifier-safe installation identity and a stable authority id', () => {
 		const identity = installationIdentity({
 			hostname: 'host',

@@ -64,6 +64,7 @@ import {
 import {
 	isEndpointDigest,
 	isEndpointIdentifier,
+	type EndpointInvokeOutcome,
 	type EndpointPort,
 	type EndpointStatus,
 	type LocalEndpointDenialReason,
@@ -302,10 +303,94 @@ export interface ManagedHostAdapter {
 	 * an endpoint serving no such operation answers so by name (CP-03).
 	 */
 	readonly workflows: WorkflowOwnerPort | null;
+	/**
+	 * The endpoint's `telemetry` operation over this adapter's socket
+	 * (MRC-10-03): one metadata event per request, answered with the endpoint's
+	 * durable receipt or its denial. Null while no socket is open. A port, not
+	 * delivery: the telemetry client (`src/main/enterprise/telemetry.ts`) takes
+	 * from the event journal, reports here and settles with the answer.
+	 */
+	readonly telemetry: TelemetryPort | null;
 	policy(): PolicySourceSet;
 	status(): ManagedEnrollmentStatus;
 	policyStatus(): ManagedPolicyStatus;
+	/** Whether a report may be handed to the endpoint right now, and the binding every report carries. */
+	telemetryStanding(): TelemetryStanding;
 }
+
+// ---------------------------------------------------------------------------
+// Telemetry: the endpoint's metadata event operation (MRC-10-03)
+// ---------------------------------------------------------------------------
+
+/**
+ * The endpoint's `telemetry` request (its `incomingMetadataEvent`), as this host
+ * sends it: the subset a runtime report may carry. The endpoint binds a report to
+ * the enrollment (`deviceId`), the installation (`instanceId`) and the reporting
+ * process (`bootId`), and refuses a runtime report that names an agent, a
+ * session, a run or a trace: those identities stay in the host's own event
+ * journal, reachable by `eventId` through `events.resume`. Nothing here carries
+ * content, a reference to content, or a secret.
+ */
+export interface EndpointTelemetryEvent {
+	schemaVersion: 1;
+	eventId: string;
+	deviceId: string;
+	instanceId: string;
+	bootId: string;
+	sequence: number;
+	occurredAt: string;
+	source: 'runtime';
+	family: 'agent.lifecycle' | 'presence' | 'usage' | 'error';
+	policyRevision: number;
+	collectionProfile: 'metadata';
+	completeness: {
+		metadata: EndpointCompleteness;
+		content: EndpointCompleteness;
+		lineage: EndpointCompleteness;
+	};
+	usageProvenance: 'estimated' | 'unavailable';
+	redaction: { state: 'not_applicable' | 'applied' | 'unavailable'; ruleIds: readonly string[] };
+	contentReferences: readonly never[];
+}
+
+export type EndpointCompleteness =
+	| 'complete'
+	| 'partial'
+	| 'unavailable'
+	| 'filtered_by_policy'
+	| 'truncated'
+	| 'pending_upload'
+	| 'verification_failed';
+
+/** The producer port. A host builds it over its endpoint socket; a test injects a table. */
+export interface TelemetryPort {
+	report(event: EndpointTelemetryEvent): Promise<EndpointInvokeOutcome<unknown>>;
+}
+
+/** The port over an attached endpoint socket. The client decides unavailable vs unknown. */
+export function endpointTelemetryPort(endpoint: Pick<EndpointPort, 'invoke'>): TelemetryPort {
+	return { report: (event) => endpoint.invoke('telemetry', event) };
+}
+
+/** What every report this host sends is bound to; read per pass, never cached across a standing change. */
+export interface TelemetryBinding {
+	/** The enrollment id the endpoint issued: its `deviceId`. */
+	deviceId: string;
+	installation: ManagedInstallationIdentity;
+	/** The applied policy revision collection is authorized under, as the endpoint last reported it. */
+	policyRevision: number;
+}
+
+/**
+ * Whether this host may hand a report to the endpoint right now. `standingKey`
+ * names what the answer was made of (connection, registration, attachment,
+ * management, revision, negotiated capabilities): a telemetry hold placed
+ * under one key is released when the key changes, and not before.
+ */
+export type TelemetryStanding = { standingKey: string } & (
+	| { ok: true; binding: TelemetryBinding }
+	| { ok: false; reason: string }
+);
 
 // ---------------------------------------------------------------------------
 // Policy status: what policy this host is under, and how far to trust it
@@ -641,6 +726,48 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 		// Read per access: a desktop composes the adapter before its socket opens.
 		get workflows() {
 			return deps.endpoint ? endpointWorkflowOwnerPort(deps.endpoint) : null;
+		},
+		get telemetry() {
+			return deps.endpoint ? endpointTelemetryPort(deps.endpoint) : null;
+		},
+		telemetryStanding() {
+			const standing = deps.status();
+			const identity = deps.identity.read();
+			const record = identity.status === 'ok' ? identity.record : null;
+			const connection = standing.connection;
+			const live = standing.endpoint;
+			const revision = live?.appliedPolicyRevision ?? record?.policy.appliedRevision ?? null;
+			const standingKey = [
+				connection?.connection ?? 0,
+				connection?.registration ?? 'none',
+				connection?.attached ? 'attached' : 'detached',
+				live?.management ?? 'none',
+				revision ?? 'none',
+				(live?.capabilities ?? []).join('+'),
+			].join(':');
+			const refuse = (reason: string): TelemetryStanding => ({ standingKey, ok: false, reason });
+			if (!record) return refuse(identity.message ?? 'This host holds no enrollment.');
+			if (standing.authority !== 'registered' || !deps.endpoint || !live) {
+				return refuse(standing.reason ?? 'No endpoint is attached.');
+			}
+			if (!live.capabilities.includes('telemetry')) {
+				return refuse('The endpoint negotiated no telemetry capability on this connection.');
+			}
+			if (record.enrollmentId === null) {
+				return refuse('The record names no enrollment id; the endpoint binds every report to one.');
+			}
+			if (revision === null) {
+				return refuse('No applied policy revision is known; collection is authorized under one.');
+			}
+			return {
+				standingKey,
+				ok: true,
+				binding: {
+					deviceId: record.enrollmentId,
+					installation: deps.installation,
+					policyRevision: revision,
+				},
+			};
 		},
 		policy() {
 			const identity = deps.identity.read();

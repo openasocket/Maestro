@@ -259,6 +259,23 @@ describe('event journal: hand-over and receipts', () => {
 		expect(again.status().delivery.received).toBe(1);
 	});
 
+	it('leaves an entry the transport skips in place: not held, not an attempt, taken later when the skip lifts', async () => {
+		const file = tempFile();
+		const { journal: j } = await journal(file);
+		const p = projector();
+		j.attach(p);
+		const [old, next] = feed(p, 2);
+		const skipped = j.take(10, { skip: (entry) => entry.eventId === old.eventId });
+		expect(skipped.map((e) => e.eventId)).toEqual([next.eventId]);
+		expect(j.status().held).toBe(1);
+		await j.acknowledge([next.eventId], { correlationId: null });
+		await j.flush();
+		const written = readDocument(file).entries as { eventId: string; attempts: number }[];
+		expect(written.find((e) => e.eventId === old.eventId)?.attempts).toBe(0);
+		// Without the skip the entry is the oldest unconfirmed one again.
+		expect(j.take(10).map((e) => e.eventId)).toEqual([old.eventId]);
+	});
+
 	it('leaves a request that never left as pending and releases the hold', async () => {
 		const { journal: j } = await journal(tempFile());
 		const p = projector();

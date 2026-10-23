@@ -123,8 +123,8 @@ export interface EventJournal {
 	/** Keep every event the projector raises from now on, and its refusals as gaps. */
 	attach(projector: Pick<LifecycleProjector, 'subscribe' | 'gaps'>): () => void;
 	record(event: ManagedLifecycleEvent): 'recorded' | 'duplicate' | 'refused';
-	/** The oldest unconfirmed entries not already held, marked held until settled. */
-	take(limit: number): JournalEventEntry[];
+	/** The oldest unconfirmed entries not already held, marked held until settled. `skip` leaves an entry the transport cannot carry right now in place, untouched and uncounted as an attempt. */
+	take(limit: number, options?: { skip?(entry: JournalEventEntry): boolean }): JournalEventEntry[];
 	/** Written only from an endpoint receipt. Answers how many entries it confirmed. */
 	acknowledge(ids: readonly string[], receipt: { correlationId: string | null }): Promise<number>;
 	/** Release a held batch the endpoint did not confirm. `uncertain` is durable; `unavailable` says nothing about the entry. */
@@ -379,13 +379,14 @@ export function createEventJournal(deps: EventJournalDeps): EventJournal {
 
 		record,
 
-		take(limit) {
+		take(limit, options) {
 			requireLoaded();
 			const size = Math.max(1, Math.min(limit, MAX_PAGE));
 			const batch: JournalEventEntry[] = [];
 			for (const entry of doc.entries) {
 				if (batch.length >= size) break;
 				if (entry.delivery === 'received' || held.has(entry.eventId)) continue;
+				if (options?.skip?.(entry)) continue;
 				held.add(entry.eventId);
 				entry.attempts += 1;
 				batch.push(entry);

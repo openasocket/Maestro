@@ -65,8 +65,13 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * the projected events under one sequence that survives a restart, dedups by event id, hands batches
  * to a telemetry client and marks `received` only from an endpoint receipt, answers cursor pages with
  * `completeness`, and records every gap; `ManagedEventsQuery` names what `managed.events` is asked.
+ * 0.19.0: the telemetry seam on the host adapter (MRC-10-03): `ManagedHostAdapter.telemetry` (the
+ * endpoint's `telemetry` operation over the adapter's socket, `endpointTelemetryPort`), the wire
+ * shape `EndpointTelemetryEvent`, and `telemetryStanding()` (whether a report may go now, the
+ * `TelemetryBinding` it carries, and the `standingKey` a hold is released on); `EventJournal.take`
+ * takes a `skip` so an entry the transport cannot carry is left in place, not counted as an attempt.
  */
-export const MAESTRO_LIB_VERSION = '0.18.0';
+export const MAESTRO_LIB_VERSION = '0.19.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';
