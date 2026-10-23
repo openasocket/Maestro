@@ -131,6 +131,7 @@ describe('enterprise handlers', () => {
 			getPolicyStatus: () => policyStatus as any,
 			getIdentity: () => identity as any,
 			getInventory: () => inventory as any,
+			getInbox: () => null,
 		});
 	});
 
@@ -142,6 +143,9 @@ describe('enterprise handlers', () => {
 			'enterprise:completeRegistration',
 			'enterprise:connect',
 			'enterprise:custody',
+			'enterprise:inboxAct',
+			'enterprise:inboxRefresh',
+			'enterprise:inboxState',
 			'enterprise:inventory',
 			'enterprise:managedState',
 			'enterprise:policyStatus',
@@ -278,11 +282,21 @@ describe('enterprise handlers', () => {
 			getPolicyStatus: () => null,
 			getIdentity: () => null,
 			getInventory: () => null,
+			getInbox: () => null,
 		});
 		expect(await invoke('enterprise:status')).toBeNull();
 		expect(await invoke('enterprise:custody')).toBeNull();
 		expect(await invoke('enterprise:inventory')).toBeNull();
 		expect(await invoke('enterprise:managedState')).toBeNull();
+		expect(await invoke('enterprise:inboxState')).toBeNull();
+		expect(await invoke('enterprise:inboxRefresh')).toBeNull();
+		expect(
+			await invoke('enterprise:inboxAct', {
+				campaignId: 'c',
+				messageId: 'm',
+				action: { kind: 'read' },
+			})
+		).toMatchObject({ status: 'unavailable' });
 		expect(await invoke('enterprise:retire', { installationId: 'inst-1' })).toMatchObject({
 			status: 'unavailable',
 		});

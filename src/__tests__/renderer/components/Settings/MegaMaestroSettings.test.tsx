@@ -157,7 +157,9 @@ describe('MegaMaestroSettings', () => {
 		expect(await screen.findByText('Policy refreshed from the endpoint.')).toBeInTheDocument();
 		expect(refreshPolicy).toHaveBeenCalledTimes(1);
 		expect(managedState.mock.calls.length).toBeGreaterThanOrEqual(2);
-		expect(screen.getByRole('status')).toHaveTextContent('Policy refreshed from the endpoint.');
+		// The inbox surface (MRC-11-04A) adds a second polite live region beside this one.
+		const announced = screen.getAllByRole('status').map((region) => region.textContent);
+		expect(announced).toContain('Policy refreshed from the endpoint.');
 	});
 
 	it('shows a recovery approval code once and then offers to complete the registration', async () => {

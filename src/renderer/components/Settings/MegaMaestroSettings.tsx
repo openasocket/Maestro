@@ -14,20 +14,23 @@
  * table; the facts are a `<dl>` so a screen reader pairs each term with its
  * value; the outcome of an action is announced through a polite live region;
  * the approval code a recovery hands back is shown once and kept nowhere.
+ *
+ * The standing itself is `<ManagedStatus>` (`src/renderer/components/Enterprise/`,
+ * MRC-11-04), so a header slot and this pane never spell the word twice; the
+ * notices addressed to the actor join it as `<ManagedInbox>` (MRC-11-04A).
  */
 
 import { useState, type ReactNode } from 'react';
 import { AlertTriangle, ShieldCheck } from 'lucide-react';
 import { formatRelativeTime } from '../../../shared/formatters';
-import type { ManagedStanding, ManagedStateView } from '../../../main/enterprise/managed-state';
+import type { ManagedStateView } from '../../../main/enterprise/managed-state';
 import {
-	MANAGED_STANDING_COPY,
 	useManagedStatus,
 	type ManagedActionResult,
 	type ManagedActionVerb,
 } from '../../hooks/enterprise/useManagedStatus';
 import type { Theme } from '../../types';
-import { MiniBadge } from '../ui/MiniBadge';
+import { ManagedStatus, STATUS_COPY } from '../Enterprise/ManagedStatus';
 import { SettingsSectionHeading } from './SettingsSectionHeading';
 import { SectionCard } from './tabs/DisplayTab/components/SectionCard';
 
@@ -35,11 +38,11 @@ export const COPY = {
 	heading: 'Mega-Maestro management',
 	intro:
 		'Enrollment of this desktop with a Mega-Maestro endpoint. The endpoint applies management; this pane reports it and cannot switch it off.',
-	desktopOnly: 'Mega-Maestro management is available in the desktop app.',
-	noService: 'The enterprise enrollment service is not running in this desktop.',
-	reading: 'Reading the managed standing...',
-	readFailed: 'Could not read the managed standing. Try again.',
-	standing: 'Standing',
+	desktopOnly: STATUS_COPY.desktopOnly,
+	noService: STATUS_COPY.noService,
+	reading: STATUS_COPY.reading,
+	readFailed: STATUS_COPY.readFailed,
+	standing: STATUS_COPY.standing,
 	organization: 'Organization',
 	enrollment: 'Enrollment',
 	installation: 'Installation',
@@ -70,20 +73,6 @@ export const COPY = {
 		released: 'The endpoint has released this installation; the record may be forgotten.',
 	},
 } as const;
-
-const STANDING_TINT: Record<ManagedStanding, 'success' | 'warning' | 'error' | 'textDim'> = {
-	managed: 'success',
-	stale: 'warning',
-	unregistered: 'warning',
-	offline: 'warning',
-	enrolling: 'warning',
-	denied: 'error',
-	suspended: 'error',
-	revoked: 'error',
-	'custody-refused': 'error',
-	retired: 'textDim',
-	unenrolled: 'textDim',
-};
 
 const FAILED: ReadonlySet<ManagedActionResult['status']> = new Set([
 	'refused',
@@ -201,33 +190,18 @@ export function MegaMaestroSettings({ theme }: { theme: Theme }) {
 		}
 	};
 
+	// A browser, no service, the first read and a failed read are the standing's own sentences.
+	const standing = <ManagedStatus theme={theme} status={managed} />;
 	let body: ReactNode;
-	if (!managed.supported) body = <p className="text-xs">{COPY.desktopOnly}</p>;
-	else if (state === undefined && managed.error) {
-		body = (
-			<p className="text-xs" style={{ color: theme.colors.error }}>
-				{COPY.readFailed}
-			</p>
-		);
-	} else if (state === undefined) body = <p className="text-xs">{COPY.reading}</p>;
-	else if (state === null) body = <p className="text-xs">{COPY.noService}</p>;
+	if (!state) body = standing;
 	else {
-		const copy = MANAGED_STANDING_COPY[state.standing];
-		const tint = theme.colors[STANDING_TINT[state.standing]];
 		const completeOffered =
 			outcome?.handoff !== null && outcome?.handoff !== undefined
 				? true
 				: state.actor.approval.state === 'pending';
 		body = (
 			<>
-				<div className="flex items-center gap-2">
-					<span className="font-medium">{COPY.standing}</span>
-					<MiniBadge label={copy.label} theme={theme} color={tint} testId="managed-standing" />
-				</div>
-				<p className="text-xs opacity-70">
-					{copy.detail}
-					{state.reason ? ` ${state.reason}` : ''}
-				</p>
+				{standing}
 				<Facts state={state} />
 				<div>
 					<span className="font-medium">{COPY.leaving}</span>

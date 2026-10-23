@@ -444,7 +444,14 @@ deliberate design constraints, including protected host consent, are noted below
    same code. Until then the renderer is the only caller: the Mega-Maestro
    management section of Settings > Environment (`MegaMaestroSettings.tsx`,
    MRC-11-03A) reads the projection and offers Refresh policy, Recover standing
-   and Complete registration, and nothing on it leaves management.
+   and Complete registration, and nothing on it leaves management. The same
+   pane hosts `<ManagedStatus>` (MRC-11-04) and `<ManagedInbox>` (MRC-11-04A) over the
+   `inboxState` / `inboxRefresh` / `inboxAct` verbs: the notices with their
+   bodies, Mark read, Acknowledge and a private reply. A CLI inbox verb must
+   read `inboxView()` and call `InboxClient.act()` from
+   `src/main/enterprise/inbox.ts` the way the handler does, and must never
+   print a body into an agent-readable stream by default: a notice is for the
+   person (`agentInput: false`).
 
 1. **Interrupt a running turn.** Escape stops a busy agent in the UI. There is
    no CLI equivalent and no WS message behind one. This is the largest remaining

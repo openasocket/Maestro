@@ -18,13 +18,17 @@ import type {
 	ManagedEnrollmentStatus,
 	ManagedIdentityManagement,
 } from '../../shared/maestro-lib/managed/endpoint-port';
-import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
+import type {
+	EndpointInboxAction,
+	ManagedPolicyStatus,
+} from '../../shared/maestro-lib/managed/host-adapter';
 import type {
 	EnrollmentRequestInput,
 	LifecycleOutcome,
 	RegistrationApprovalHandoff,
 } from '../enterprise/enrollment';
 import type { IdentityClearOutcome, IdentityCustodyState } from '../enterprise/identity-store';
+import type { InboxActionOutcome, InboxRefresh, ManagedInboxView } from '../enterprise/inbox';
 import type { InstallationInventory } from '../enterprise/inventory';
 import type { ManagedStateView } from '../enterprise/managed-state';
 import type { PolicyRecovery } from '../enterprise/policy-status';
@@ -42,6 +46,16 @@ export function createEnterpriseApi() {
 		/** The one-word standing with the facts beside it (MRC-11-03); null without a service. */
 		managedState: (): Promise<ManagedStateView | null> =>
 			ipcRenderer.invoke('enterprise:managedState'),
+		/** The held notices, bodies included, for the person's surface (MRC-11-04); null until the client is composed. */
+		inboxState: (): Promise<ManagedInboxView | null> => ipcRenderer.invoke('enterprise:inboxState'),
+		/** List the endpoint's notices again (records `delivered` for the new ones). */
+		inboxRefresh: (): Promise<InboxRefresh | null> => ipcRenderer.invoke('enterprise:inboxRefresh'),
+		/** Record one receipt (read, acknowledged, or a private reply sent once and kept nowhere). */
+		inboxAct: (input: {
+			campaignId: string;
+			messageId: string;
+			action: EndpointInboxAction;
+		}): Promise<InboxActionOutcome> => ipcRenderer.invoke('enterprise:inboxAct', input),
 		requestEnrollment: (
 			input: EnrollmentRequestInput
 		): Promise<LifecycleOutcome<EndpointEnrollmentResult>> =>

@@ -35,6 +35,9 @@ describe('Enterprise Preload API', () => {
 			'completeRegistration',
 			'connect',
 			'custody',
+			'inboxAct',
+			'inboxRefresh',
+			'inboxState',
 			'inventory',
 			'managedState',
 			'policyStatus',
@@ -55,6 +58,8 @@ describe('Enterprise Preload API', () => {
 		await api.policyStatus();
 		await api.inventory();
 		await api.managedState();
+		await api.inboxState();
+		await api.inboxRefresh();
 		await api.connect();
 		await api.beginRegistration();
 		await api.completeRegistration();
@@ -69,6 +74,8 @@ describe('Enterprise Preload API', () => {
 			'enterprise:policyStatus',
 			'enterprise:inventory',
 			'enterprise:managedState',
+			'enterprise:inboxState',
+			'enterprise:inboxRefresh',
 			'enterprise:connect',
 			'enterprise:beginRegistration',
 			'enterprise:completeRegistration',
@@ -94,11 +101,13 @@ describe('Enterprise Preload API', () => {
 		await api.acknowledgeRevocation({ installationId: 'inst-1' });
 		await api.retire({ installationId: 'inst-1' });
 		await api.clearIdentity({ installationId: 'inst-1', acknowledgeUntrusted: true });
+		await api.inboxAct({ campaignId: 'c', messageId: 'm', action: { kind: 'read' } });
 		expect(mockInvoke.mock.calls).toEqual([
 			['enterprise:requestEnrollment', enroll],
 			['enterprise:acknowledgeRevocation', { installationId: 'inst-1' }],
 			['enterprise:retire', { installationId: 'inst-1' }],
 			['enterprise:clearIdentity', { installationId: 'inst-1', acknowledgeUntrusted: true }],
+			['enterprise:inboxAct', { campaignId: 'c', messageId: 'm', action: { kind: 'read' } }],
 		]);
 	});
 

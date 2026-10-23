@@ -23,6 +23,7 @@ import { ipcMain } from 'electron';
 import * as path from 'path';
 
 import { isEndpointDigest } from '../../../shared/maestro-lib/managed/endpoint-port';
+import type { EndpointInboxAction } from '../../../shared/maestro-lib/managed/host-adapter';
 import type {
 	EnrollmentLifecycle,
 	EnrollmentRequestInput,
@@ -33,6 +34,13 @@ import type {
 	IdentityClearOutcome,
 	IdentityCustodyState,
 } from '../../enterprise/identity-store';
+import {
+	inboxActionProblem,
+	inboxView,
+	type InboxActionOutcome,
+	type InboxClient,
+	type ManagedInboxView,
+} from '../../enterprise/inbox';
 import type { InstallationInventoryService } from '../../enterprise/inventory';
 import {
 	localReleaseOf,
@@ -55,6 +63,8 @@ export interface EnterpriseHandlerDependencies {
 	getIdentity: () => EnterpriseIdentityStore | null;
 	/** The installation inventory (MRC-10-06B); null when no service runs. */
 	getInventory: () => InstallationInventoryService | null;
+	/** The notice and inbox client (MRC-11-04); null until the service composes it (MRC-11-05). */
+	getInbox: () => InboxClient | null;
 }
 
 function handlerOpts(operation: string) {
@@ -108,6 +118,28 @@ function installationInput(raw: unknown): { installationId: string } {
 
 const NO_SERVICE_MESSAGE = 'The enterprise enrollment service is not running in this desktop.';
 const NO_SERVICE: LifecycleOutcome<never> = { status: 'unavailable', message: NO_SERVICE_MESSAGE };
+const NO_INBOX: InboxActionOutcome = {
+	status: 'unavailable',
+	detail: 'No notice inbox is composed in this desktop.',
+};
+const MAX_ID = 256;
+
+/** One inbox act as the renderer may send it; refused here, by name, before the client sees it. */
+export function validateInboxAct(raw: unknown): {
+	campaignId: string;
+	messageId: string;
+	action: EndpointInboxAction;
+} {
+	if (typeof raw !== 'object' || raw === null) throw new Error('An inbox act must be an object.');
+	const input = raw as Record<string, unknown>;
+	const problem = inboxActionProblem(input.action);
+	if (problem) throw new Error(`action: ${problem}.`);
+	return {
+		campaignId: text(input.campaignId, 'campaignId', MAX_ID),
+		messageId: text(input.messageId, 'messageId', MAX_ID),
+		action: input.action as EndpointInboxAction,
+	};
+}
 
 /** The narrow standing a settings pane reads (MRC-11-03), or null without a service. */
 export function readManagedState(deps: EnterpriseHandlerDependencies): ManagedStateView | null {
@@ -167,6 +199,34 @@ export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies):
 		withIpcErrorLogging(
 			handlerOpts('inventory'),
 			async () => deps.getInventory()?.snapshot() ?? null
+		)
+	);
+
+	// The notice inbox (MRC-11-04): the held notices with their bodies for the
+	// person's surface alone, a listing on request, one receipt per act. The
+	// client refuses an act on a notice this host never listed; the endpoint
+	// authorizes every effect itself. Null or unavailable until MRC-11-05 composes it.
+	ipcMain.handle(
+		'enterprise:inboxState',
+		withIpcErrorLogging(handlerOpts('inboxState'), async (): Promise<ManagedInboxView | null> => {
+			const inbox = deps.getInbox();
+			return inbox ? inboxView(inbox) : null;
+		})
+	);
+
+	ipcMain.handle(
+		'enterprise:inboxRefresh',
+		withIpcErrorLogging(handlerOpts('inboxRefresh'), async () => deps.getInbox()?.refresh() ?? null)
+	);
+
+	ipcMain.handle(
+		'enterprise:inboxAct',
+		withIpcErrorLogging(
+			handlerOpts('inboxAct'),
+			async (raw: unknown): Promise<InboxActionOutcome> => {
+				const input = validateInboxAct(raw);
+				return deps.getInbox()?.act(input) ?? NO_INBOX;
+			}
 		)
 	);
 

@@ -63,6 +63,7 @@ import {
 import type { AnchorStore } from '../utils/keyring-anchor';
 import { safeStorageSeal, type SafeStorageLike } from '../utils/safe-storage-seal';
 import { createBrokerDispatch, DISPATCH_RECEIPTS_FILE_NAME, type BrokerDispatch } from './dispatch';
+import type { InboxClient } from './inbox';
 import { createLocalEndpointClient } from './endpoint-client';
 import { createEnrollmentLifecycle, type EnrollmentLifecycle } from './enrollment';
 import {
@@ -196,6 +197,12 @@ export interface EnterpriseService {
 	 * client withholds it by name (no runtime family carries it).
 	 */
 	readonly inventory: InstallationInventoryService;
+	/**
+	 * The notice and inbox client (`inbox.ts`, MRC-11-02A) over `host` and the receipt
+	 * ledger in the data directory; the `enterprise:inbox*` IPC and the inbox surface
+	 * read it. Null until MRC-11-05 composes it, and every surface says so by name.
+	 */
+	readonly inbox: InboxClient | null;
 	/**
 	 * The workflow owner fences this installation holds (MRC-07-06), claimed
 	 * through the endpoint's workflow owner operation and kept in
@@ -393,6 +400,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		contentCapture,
 		vibes: () => buildVibesRecordedGraph(events.recent(), { projectorGaps: events.gaps() }),
 		inventory,
+		inbox: null,
 		workflows,
 		claimWorkflowFence,
 		async start() {

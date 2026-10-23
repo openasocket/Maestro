@@ -766,3 +766,22 @@ export function createInboxClient(deps: InboxClientDeps): InboxClient {
 		},
 	};
 }
+
+// ---------------------------------------------------------------------------
+// The view a person's surface reads (MRC-11-04)
+// ---------------------------------------------------------------------------
+
+/**
+ * What one read of the inbox hands a renderer or a CLI verb: the client's
+ * status and the held notices, bodies included. The body reaches the person
+ * and nothing else: no handler and no surface hands it to a model, a queue or
+ * a prompt (`agentInput: false` is the contract's word on every notice).
+ */
+export interface ManagedInboxView {
+	status: InboxClientStatus;
+	notices: readonly NoticeView[];
+}
+
+export function inboxView(client: InboxClient): ManagedInboxView {
+	return { status: client.status(), notices: client.notices() };
+}
