@@ -451,7 +451,12 @@ deliberate design constraints, including protected host consent, are noted below
    read `inboxView()` and call `InboxClient.act()` from
    `src/main/enterprise/inbox.ts` the way the handler does, and must never
    print a body into an agent-readable stream by default: a notice is for the
-   person (`agentInput: false`).
+   person (`agentInput: false`). Since MRC-11-05 the service composes the
+   client itself and lists the notices again after every accepted attachment,
+   and `commandStatus` reads the typed command service
+   (`src/main/enterprise/commands.ts`): a CLI status verb reads
+   `CommandService.status()` the same way; no surface, CLI included, delivers
+   a command, since no producer delivers one yet (CP-02).
 
 1. **Interrupt a running turn.** Escape stops a busy agent in the UI. There is
    no CLI equivalent and no WS message behind one. This is the largest remaining

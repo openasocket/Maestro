@@ -113,6 +113,32 @@ describe('enterprise service', () => {
 			counters: { duplicates: 1 },
 		});
 		expect(fake.calls).toHaveLength(0);
+		// The command service and the inbox (MRC-11-05): both ledgers read at start, each in the
+		// data directory; with no standing nothing can be decided or listed, and that is said by name.
+		expect(service.commands.status()).toMatchObject({
+			file: `${dir}/maestro-managed-commands.json`,
+			loaded: true,
+			commands: { total: 0, open: 0 },
+			standing: { ok: false, reason: 'This installation holds no enrollment.' },
+		});
+		expect([...service.commands.capabilities()].sort()).toEqual([
+			'command-cancel_run',
+			'command-refresh_policy',
+			'command-report_status',
+		]);
+		expect(service.commands.unsupported().map((entry) => entry.kind)).toEqual([
+			'pause-run',
+			'resume-run',
+			'operator-prompt',
+		]);
+		expect(service.inbox.status()).toMatchObject({
+			file: `${dir}/maestro-managed-inbox-receipts.json`,
+			loaded: true,
+			standing: { ok: false },
+			notices: { held: 0 },
+			receipts: { total: 0 },
+		});
+		expect(await service.inbox.refresh()).toMatchObject({ outcome: 'no-standing', listed: 0 });
 		// `identity.read()` ran once for the start check and once per status; the file
 		// does not exist, so custody was consulted but the anchor was never read.
 		expect(available).toHaveBeenCalled();
@@ -460,6 +486,139 @@ describe('enterprise service', () => {
 			expect(written.entries[1]).toMatchObject({ eventId: early.eventId, delivery: 'received' });
 		} finally {
 			await telemetryFake.close();
+		}
+	});
+
+	it('composes the command service and the inbox: ledgers before the attach, notices listed on every attach, a command decided by name, one drain (MRC-11-05)', async () => {
+		const calls: { operation: string; payload: Record<string, unknown> }[] = [];
+		const notice = {
+			campaignId: 'c-1',
+			messageId: 'm-1',
+			body: 'Planned maintenance on Friday.',
+			expiresAt: new Date(NOW + 86_400_000).toISOString(),
+			kind: 'notice',
+			agentInput: false,
+		};
+		const inboxFake = await startFakeEndpoint({
+			registrationRequired: true,
+			capabilities: ['execution', 'inbox', 'noticeList'],
+			now: () => NOW,
+			operations: {
+				noticeList: (payload) => {
+					calls.push({ operation: 'noticeList', payload: payload as Record<string, unknown> });
+					return { outcome: 'notices', items: [notice], nextOffset: null };
+				},
+				inbox: (payload) => {
+					const request = payload as { messageId: string; action: { kind: string } };
+					calls.push({ operation: 'inbox', payload: request });
+					return {
+						outcome: 'recorded',
+						messageId: request.messageId,
+						receiptId: `rcpt-${calls.length}`,
+						state: request.action.kind,
+					};
+				},
+			},
+		});
+		try {
+			const service = compose();
+			await service.identity.write({
+				installationId: service.installation.installationId,
+				tenantId: 'tenant-1',
+				orgId: 'org-1',
+				enrollmentId: 'enr-1',
+				endpoint: {
+					socketPath: inboxFake.socketPath,
+					bindingDigest: 'a'.repeat(64),
+					trustRootDigest: null,
+				},
+				management: 'enrolled',
+				registration: null,
+				policy: { desiredRevision: null, appliedRevision: null, observedAt: null },
+				enrolledAt: new Date(NOW).toISOString(),
+			});
+			await service.start();
+			// Both ledgers were read before the attach; the endpoint wanted a registration first,
+			// so nothing was listed and no command could be decided, each said by name.
+			expect(service.commands.status()).toMatchObject({ loaded: true, standing: { ok: false } });
+			expect(service.inbox.status()).toMatchObject({ loaded: true, notices: { held: 0 } });
+			expect(calls).toHaveLength(0);
+
+			expect((await service.policy.recover()).status).toBe('approval-required');
+			expect((await service.lifecycle.completeRegistration()).status).toBe('ok');
+			// The accepted attachment listed the notices without a click, held the one addressed
+			// here and recorded `delivered` for it; the body is on the person's surface and nowhere else.
+			await vi.waitFor(() =>
+				expect(calls.map((call) => call.operation)).toEqual(['noticeList', 'inbox'])
+			);
+			expect(service.inbox.notices()).toMatchObject([
+				{ messageId: 'm-1', body: notice.body, agentInput: false, recorded: 'delivered' },
+			]);
+			expect(service.inbox.status()).toMatchObject({
+				standing: { ok: true },
+				notices: { held: 1, unread: 1 },
+			});
+			expect(
+				await service.inbox.act({ campaignId: 'c-1', messageId: 'm-1', action: { kind: 'read' } })
+			).toMatchObject({ status: 'recorded', duplicate: false });
+			expect(service.inbox.status().notices).toMatchObject({ held: 1, unread: 0 });
+			// A policy refresh is another accepted attachment: the notices are listed again.
+			expect((await service.policy.refresh()).status).toBe('ok');
+			await vi.waitFor(() =>
+				expect(calls.filter((call) => call.operation === 'noticeList')).toHaveLength(2)
+			);
+			expect(service.inbox.status().notices).toMatchObject({ held: 1 });
+
+			// A command is decided against the standing this process holds: the registration
+			// Maestro redeems names no actor (CP-01/CP-04), so it is refused by that name, and
+			// the refusal is the ledger's, durable in the data directory.
+			expect(service.commands.status().standing).toEqual({ ok: true });
+			const decided = await service.commands.receive({
+				commandId: 'cmd-1',
+				tenantId: 'tenant-1',
+				issuerId: 'issuer-1',
+				recipient: {
+					actorId: 'actor-1',
+					enrollmentId: 'enr-1',
+					installationId: service.installation.installationId,
+					runtimeId: service.installation.runtimeId,
+					processEpoch: service.installation.processEpoch,
+					runId: 'run-1',
+				},
+				action: { kind: 'report-status' },
+				preconditions: {
+					policyRevision: 3,
+					requiredCapability: 'command-report_status',
+					policyDigest: null,
+					bindingDigest: null,
+				},
+				approval: { kind: 'policy-not-required', policyRevision: 3 },
+				issuedAt: new Date(NOW - 1_000).toISOString(),
+				expiresAt: new Date(NOW + 60_000).toISOString(),
+				nonce: 'n'.repeat(64),
+				idempotencyKey: 'idem-1',
+				payloadDigest: 'a'.repeat(64),
+				releaseId: null,
+			});
+			expect(decided).toMatchObject({ status: 'denied', reason: 'unauthenticated' });
+			// A command that does not bind to this host's actor is nobody's to record here.
+			expect(service.commands.status().commands).toMatchObject({ total: 0, open: 0 });
+
+			// Close is one drain: a second caller waits on the first instead of starting another.
+			const first = service.close();
+			expect(service.close()).toBe(first);
+			await first;
+			services.splice(0);
+			expect(service.lifecycle.status()).toMatchObject({ authority: 'none', connection: null });
+			// What the ledgers kept: ids and states, never the notice body.
+			const receipts = fs.readFileSync(
+				path.join(dir, 'maestro-managed-inbox-receipts.json'),
+				'utf8'
+			);
+			expect(receipts).toContain('"m-1"');
+			expect(receipts).not.toContain(notice.body);
+		} finally {
+			await inboxFake.close();
 		}
 	});
 

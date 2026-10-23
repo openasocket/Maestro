@@ -62,8 +62,15 @@ import {
 } from '../../shared/maestro-lib/managed/workflows';
 import type { AnchorStore } from '../utils/keyring-anchor';
 import { safeStorageSeal, type SafeStorageLike } from '../utils/safe-storage-seal';
+import { MANAGED_COMMAND_LEDGER_FILE_NAME } from '../../shared/maestro-lib/managed/commands';
+import { createCommandService, type CommandService } from './commands';
 import { createBrokerDispatch, DISPATCH_RECEIPTS_FILE_NAME, type BrokerDispatch } from './dispatch';
-import type { InboxClient } from './inbox';
+import {
+	createInboxClient,
+	createInboxReceiptLedger,
+	MANAGED_INBOX_RECEIPTS_FILE_NAME,
+	type InboxClient,
+} from './inbox';
 import { createLocalEndpointClient } from './endpoint-client';
 import { createEnrollmentLifecycle, type EnrollmentLifecycle } from './enrollment';
 import {
@@ -199,10 +206,22 @@ export interface EnterpriseService {
 	readonly inventory: InstallationInventoryService;
 	/**
 	 * The notice and inbox client (`inbox.ts`, MRC-11-02A) over `host` and the receipt
-	 * ledger in the data directory; the `enterprise:inbox*` IPC and the inbox surface
-	 * read it. Null until MRC-11-05 composes it, and every surface says so by name.
+	 * ledger in the data directory (MRC-11-05): its ledger is read at `start()` before
+	 * any attach, and the notices are listed again after every attachment the endpoint
+	 * accepts, so a registered desktop holds what is addressed to its actor without a
+	 * click. The `enterprise:inbox*` IPC and the inbox surface read it; a body reaches
+	 * the person's surface and nothing else.
 	 */
-	readonly inbox: InboxClient | null;
+	readonly inbox: InboxClient;
+	/**
+	 * The typed runtime command service (`commands.ts`, MRC-11-01B) over the dispatch
+	 * authority, the policy status and the inventory (MRC-11-05): its ledger is read at
+	 * `start()` before any attach, so a command accepted by an earlier process is
+	 * `unknown` before this one admits anything. `receive()` is the one inbound entry;
+	 * no producer delivers a command to it yet (CP-02), and `enterprise:commandStatus`
+	 * is its read.
+	 */
+	readonly commands: CommandService;
 	/**
 	 * The workflow owner fences this installation holds (MRC-07-06), claimed
 	 * through the endpoint's workflow owner operation and kept in
@@ -247,6 +266,8 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 	// The socket the lifecycle opened last, injected or the real client, so the
 	// host adapter and the workflow ownership speak over the same connection.
 	let port: EndpointPort | null = null;
+	// Close once: the quit handler's cleanup and a later will-quit can both reach it.
+	let closing: Promise<void> | null = null;
 	const openPort =
 		deps.openPort ?? ((socketPath: string) => createLocalEndpointClient({ socketPath }));
 	const lifecycle = createEnrollmentLifecycle({
@@ -259,6 +280,12 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		components,
 		capabilities: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES, required: [] },
 		now,
+		// Every accepted attachment lists the notices again (below): what the endpoint
+		// holds for this actor is held here without a click, and the listing is the
+		// client's own, fired after the verb and never awaited by it.
+		onAttached: () => {
+			if (!closing) void inbox.refresh();
+		},
 	});
 	const policy = createPolicyStatusService({ lifecycle, now });
 	const host = createManagedHostAdapter({
@@ -381,7 +408,30 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		contractsPin,
 		now,
 	});
-
+	// The typed command executor over the real sinks (MRC-11-01B): the dispatch
+	// authority a cancel revokes through, the policy status a refresh re-attaches
+	// through, the inventory a report answers with. No prompt port is composed on
+	// the desktop, so no operator prompt reaches a composer, a queue or a model.
+	const commands = createCommandService({
+		installation,
+		lifecycle,
+		host,
+		policy,
+		dispatch,
+		inventory,
+		file: `${deps.userDataDir}/${MANAGED_COMMAND_LEDGER_FILE_NAME}`,
+		now,
+	});
+	// The notice inbox (MRC-11-02A) over the same host adapter and its own receipt
+	// ledger: ids, digests and states on disk, never a body or a reply's text.
+	const inbox = createInboxClient({
+		host,
+		ledger: createInboxReceiptLedger({
+			file: `${deps.userDataDir}/${MANAGED_INBOX_RECEIPTS_FILE_NAME}`,
+			now,
+		}),
+		now,
+	});
 	return {
 		installation,
 		identity,
@@ -400,7 +450,8 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		contentCapture,
 		vibes: () => buildVibesRecordedGraph(events.recent(), { projectorGaps: events.gaps() }),
 		inventory,
-		inbox: null,
+		inbox,
+		commands,
 		workflows,
 		claimWorkflowFence,
 		async start() {
@@ -408,6 +459,10 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 			await dispatch.load();
 			// So are the held fences: a restarted host re-claims with what it held, never afresh.
 			await workflows.load();
+			// And the command and receipt ledgers, before any attach makes admission possible:
+			// a command accepted by the last process is unknown, a pending receipt uncertain.
+			await commands.load();
+			await inbox.load();
 			// The event journal reads its file before the projection raises anything this process
 			// observes; a file that will not load is reported and left alone, never overwritten.
 			const loadedEvents = await eventJournal.load();
@@ -428,13 +483,18 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 			// inventory, kept by the journal, withheld from the endpoint by name.
 			inventory.record();
 		},
-		async close() {
-			// No new pass; the one in flight settles its batch before the socket and the file go.
-			telemetry.stop();
-			await telemetry.drain();
-			await lifecycle.close();
-			// What the journal recorded of the last spawns and exits, before the process goes.
-			if (eventJournalAttached) await eventJournal.flush();
+		close() {
+			// Idempotent: the quit handler's cleanup and a later will-quit both land here, and
+			// the second caller waits on the first drain instead of starting another.
+			closing ??= (async () => {
+				// No new pass; the one in flight settles its batch before the socket and the file go.
+				telemetry.stop();
+				await telemetry.drain();
+				await lifecycle.close();
+				// What the journal recorded of the last spawns and exits, before the process goes.
+				if (eventJournalAttached) await eventJournal.flush();
+			})();
+			return closing;
 		},
 	};
 }

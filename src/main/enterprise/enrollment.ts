@@ -59,6 +59,13 @@ export interface EnrollmentLifecycleDeps {
 	/** What this host can do over the socket, and what it cannot run without. */
 	capabilities: { supported: readonly string[]; required: readonly string[] };
 	now?: () => number;
+	/**
+	 * Hears every attachment the endpoint accepted (a connect, a completed
+	 * registration, a policy refresh), after the record observed it. Fired
+	 * inside the serialized verb, so it must not call a lifecycle verb; a
+	 * composer uses it to start work that follows an attach (MRC-11-05).
+	 */
+	onAttached?(status: EndpointStatus): void;
 }
 
 export interface EnrollmentRequestInput extends EndpointEnrollmentRequest {
@@ -199,6 +206,7 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 				},
 			});
 		}
+		deps.onAttached?.(endpoint);
 		return outcome;
 	}
 

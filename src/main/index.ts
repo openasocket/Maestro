@@ -3602,8 +3602,9 @@ app
 		// out. The idle reaper would get to them eventually, but a preview tab
 		// left open otherwise holds a descriptor until the process dies.
 		app.on('will-quit', () => void closeAllParquetFiles());
-		// Drop the endpoint socket on the way out; the sealed record stays.
-		app.on('will-quit', () => void enterpriseService?.close());
+		// The enterprise service drains inside the quit handler's cleanup (below, with
+		// the other services): a confirmed quit prevents the default and hard-exits
+		// after its grace window, so will-quit never fires on that path.
 
 		// Re-attach a previously enrolled installation. Runs after the handlers are
 		// registered and the window is up; a refusal is visible in enterprise:status
@@ -3770,6 +3771,16 @@ quitHandler = createQuitHandler({
 		});
 		// Tear down the background quota refresh timers.
 		usageRefreshScheduler?.stop();
+		// Drain managed telemetry, drop the endpoint socket and flush the event
+		// journal inside the grace window (MRC-11-05). Idempotent; the sealed record,
+		// the command ledger and the receipt ledger stay as they are: a command
+		// accepted here is unknown to the next process, a pending receipt uncertain.
+		void enterpriseService?.close().catch((error) => {
+			void captureException(error instanceof Error ? error : new Error(String(error)), {
+				operation: 'shutdown:enterprise',
+			});
+			logger.warn(`Enterprise service did not drain on quit: ${String(error)}`, 'Shutdown');
+		});
 	},
 	stopSettingsWatcher: () => {
 		settingsWatcher.stop();

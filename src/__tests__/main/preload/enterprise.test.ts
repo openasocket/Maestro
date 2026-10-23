@@ -32,6 +32,7 @@ describe('Enterprise Preload API', () => {
 			'acknowledgeRevocation',
 			'beginRegistration',
 			'clearIdentity',
+			'commandStatus',
 			'completeRegistration',
 			'connect',
 			'custody',
@@ -60,6 +61,7 @@ describe('Enterprise Preload API', () => {
 		await api.managedState();
 		await api.inboxState();
 		await api.inboxRefresh();
+		await api.commandStatus();
 		await api.connect();
 		await api.beginRegistration();
 		await api.completeRegistration();
@@ -76,6 +78,7 @@ describe('Enterprise Preload API', () => {
 			'enterprise:managedState',
 			'enterprise:inboxState',
 			'enterprise:inboxRefresh',
+			'enterprise:commandStatus',
 			'enterprise:connect',
 			'enterprise:beginRegistration',
 			'enterprise:completeRegistration',

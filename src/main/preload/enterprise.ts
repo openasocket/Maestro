@@ -22,6 +22,7 @@ import type {
 	EndpointInboxAction,
 	ManagedPolicyStatus,
 } from '../../shared/maestro-lib/managed/host-adapter';
+import type { CommandServiceStatus } from '../enterprise/commands';
 import type {
 	EnrollmentRequestInput,
 	LifecycleOutcome,
@@ -47,6 +48,9 @@ export function createEnterpriseApi() {
 		managedState: (): Promise<ManagedStateView | null> =>
 			ipcRenderer.invoke('enterprise:managedState'),
 		/** The held notices, bodies included, for the person's surface (MRC-11-04); null until the client is composed. */
+		/** The command service's read (MRC-11-05): capabilities, refusals by name, counts, standing. Nothing delivers a command from here. */
+		commandStatus: (): Promise<CommandServiceStatus | null> =>
+			ipcRenderer.invoke('enterprise:commandStatus'),
 		inboxState: (): Promise<ManagedInboxView | null> => ipcRenderer.invoke('enterprise:inboxState'),
 		/** List the endpoint's notices again (records `delivered` for the new ones). */
 		inboxRefresh: (): Promise<InboxRefresh | null> => ipcRenderer.invoke('enterprise:inboxRefresh'),

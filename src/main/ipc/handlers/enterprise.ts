@@ -24,6 +24,7 @@ import * as path from 'path';
 
 import { isEndpointDigest } from '../../../shared/maestro-lib/managed/endpoint-port';
 import type { EndpointInboxAction } from '../../../shared/maestro-lib/managed/host-adapter';
+import type { CommandService, CommandServiceStatus } from '../../enterprise/commands';
 import type {
 	EnrollmentLifecycle,
 	EnrollmentRequestInput,
@@ -63,8 +64,10 @@ export interface EnterpriseHandlerDependencies {
 	getIdentity: () => EnterpriseIdentityStore | null;
 	/** The installation inventory (MRC-10-06B); null when no service runs. */
 	getInventory: () => InstallationInventoryService | null;
-	/** The notice and inbox client (MRC-11-04); null until the service composes it (MRC-11-05). */
+	/** The notice and inbox client (MRC-11-04); null when no service runs. */
 	getInbox: () => InboxClient | null;
+	/** The typed runtime command service (MRC-11-05); null when no service runs. Read only: nothing here delivers a command. */
+	getCommands: () => CommandService | null;
 }
 
 function handlerOpts(operation: string) {
@@ -227,6 +230,17 @@ export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies):
 				const input = validateInboxAct(raw);
 				return deps.getInbox()?.act(input) ?? NO_INBOX;
 			}
+		)
+	);
+
+	// The command service's read (MRC-11-05): what this desktop executes and refuses
+	// by name, the ledger's counts and whether a command could be decided right now.
+	// A read only: no channel delivers a command, and no renderer verb ever will.
+	ipcMain.handle(
+		'enterprise:commandStatus',
+		withIpcErrorLogging(
+			handlerOpts('commandStatus'),
+			async (): Promise<CommandServiceStatus | null> => deps.getCommands()?.status() ?? null
 		)
 	);
 

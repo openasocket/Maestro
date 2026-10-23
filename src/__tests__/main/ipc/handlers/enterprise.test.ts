@@ -47,6 +47,7 @@ const lifecycle = {
 const policyStatus = { status: vi.fn(), refresh: vi.fn(), recover: vi.fn() };
 const identity = { custody: vi.fn(), clear: vi.fn() };
 const inventory = { snapshot: vi.fn(), fact: vi.fn(), record: vi.fn() };
+const commands = { status: vi.fn(), receive: vi.fn() };
 
 /** The lifecycle's status for a desktop with no record: every local verb is open. */
 const UNENROLLED = {
@@ -132,6 +133,7 @@ describe('enterprise handlers', () => {
 			getIdentity: () => identity as any,
 			getInventory: () => inventory as any,
 			getInbox: () => null,
+			getCommands: () => commands as any,
 		});
 	});
 
@@ -140,6 +142,7 @@ describe('enterprise handlers', () => {
 			'enterprise:acknowledgeRevocation',
 			'enterprise:beginRegistration',
 			'enterprise:clearIdentity',
+			'enterprise:commandStatus',
 			'enterprise:completeRegistration',
 			'enterprise:connect',
 			'enterprise:custody',
@@ -190,6 +193,22 @@ describe('enterprise handlers', () => {
 			value: 'retired',
 		});
 		expect(lifecycle.retire).toHaveBeenCalledWith({ installationId: 'inst-1' });
+	});
+
+	it('reads the command service status through unchanged and never hands it a command (MRC-11-05)', async () => {
+		const status = {
+			file: null,
+			loaded: true,
+			load: { ok: true, commands: 0, recoveredUnknown: 0 },
+			capabilities: ['command-cancel_run'],
+			unsupported: [],
+			commands: { total: 0, open: 0, byState: {} },
+			standing: { ok: false, reason: 'This process holds no registered standing.' },
+		};
+		commands.status.mockReturnValue(status);
+		expect(await invoke('enterprise:commandStatus')).toEqual(status);
+		expect(registeredHandlers.has('enterprise:commandReceive')).toBe(false);
+		expect(commands.receive).not.toHaveBeenCalled();
 	});
 
 	it('validates the enrollment request before the lifecycle sees it', async () => {
@@ -283,11 +302,13 @@ describe('enterprise handlers', () => {
 			getIdentity: () => null,
 			getInventory: () => null,
 			getInbox: () => null,
+			getCommands: () => null,
 		});
 		expect(await invoke('enterprise:status')).toBeNull();
 		expect(await invoke('enterprise:custody')).toBeNull();
 		expect(await invoke('enterprise:inventory')).toBeNull();
 		expect(await invoke('enterprise:managedState')).toBeNull();
+		expect(await invoke('enterprise:commandStatus')).toBeNull();
 		expect(await invoke('enterprise:inboxState')).toBeNull();
 		expect(await invoke('enterprise:inboxRefresh')).toBeNull();
 		expect(
