@@ -5,28 +5,37 @@
  * replay, a stale epoch, a lapsed window, another actor and an untyped action
  * are refused by name and leave no record; history is answered before
  * authority, so a known id answers under a revoked standing while a new
- * command finds none. The refresh and prompt ports, the ledger across
- * processes and the real lifecycle, client and fake daemon are the bounded
- * continuation MRC-11-06A.
+ * command finds none. MRC-11-06A adds the refresh port (the status service's
+ * answer compared with the desired revision), the prompt port (composed only
+ * when handed in; the text reaches it and nowhere else), the ledger across
+ * processes (unavailable until loaded, accepted turns unknown on a restart,
+ * a deleted file forgets, a corrupt one is named) and the real lifecycle,
+ * client and fake daemon, where the record names no actor (CP-01/CP-04).
  */
 
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { createCommandService } from '../../../main/enterprise/commands';
+import { createCommandService, type CommandServiceDeps } from '../../../main/enterprise/commands';
+import { createBrokerDispatch } from '../../../main/enterprise/dispatch';
 import type { InstallationInventory } from '../../../main/enterprise/inventory';
 import {
 	createLocalHostAuthority,
 	type DispatchLease,
 } from '../../../shared/maestro-lib/managed/authority';
-import type {
-	CommandRefusal,
-	ManagedRuntimeCommand,
+import {
+	MANAGED_COMMAND_LEDGER_FILE_NAME,
+	type CommandRefusal,
+	type ManagedRuntimeCommand,
 } from '../../../shared/maestro-lib/managed/commands';
 import { projectPolicyStatus } from '../../../shared/maestro-lib/managed/host-adapter';
+import { startFakeEndpoint } from './fakeEndpoint';
 import {
 	anotherCommand as another,
 	COMMAND_PRECONDITIONS as PRECONDITIONS,
 	COMMAND_RECIPIENT as RECIPIENT,
+	DIGEST_A,
 	INSTALLATION,
 	type ManagedStandingInput,
 	NOW,
@@ -36,7 +45,11 @@ import {
 	runAdmission,
 	runtimeCommand as command,
 	runtimeOnlyCommand as onRuntime,
+	startRegisteredLifecycle,
+	tempDirs,
 } from './fakeManaged';
+
+const tempDir = tempDirs('mrc-11-06a-');
 
 const REVOKED = 'The endpoint revoked this registration.';
 
@@ -66,7 +79,12 @@ const inventory = () =>
 	}) as unknown as InstallationInventory;
 
 /** The service over a real local authority and a doubled, mutable standing; the ledger in memory. */
-function harness(over: Partial<ManagedStandingInput> = {}) {
+type RefreshAnswer = Awaited<ReturnType<CommandServiceDeps['policy']['refresh']>>;
+/** A doubled, mutable standing over a real local authority; the ledger in memory unless a file is named. */
+function harness(
+	over: Partial<ManagedStandingInput> = {},
+	opts: { file?: string; prompt?: CommandServiceDeps['prompt'] } = {}
+) {
 	const state: ManagedStandingInput = { ...REGISTERED_STANDING, ...over };
 	const standing = () => registeredStatus(state);
 	let leases = 0;
@@ -77,14 +95,22 @@ function harness(over: Partial<ManagedStandingInput> = {}) {
 		newId: () => `lease-${++leases}`,
 	});
 	const receipts: { leaseId: string; runId: string | null; effect: { state: string } }[] = [];
+	let refreshAnswer: RefreshAnswer = { status: 'ok', value: standing().endpoint! };
+	let refreshes = 0;
 	const service = createCommandService({
 		installation: INSTALLATION,
 		lifecycle: { status: standing },
 		host: { policyStatus: () => projectPolicyStatus({ standing: standing(), now: NOW }) },
-		policy: { refresh: async () => ({ status: 'ok', value: standing().endpoint! }) },
+		policy: {
+			refresh: async () => {
+				refreshes += 1;
+				return refreshAnswer;
+			},
+		},
 		dispatch: { authority, receipts: () => receipts as never },
 		inventory: { snapshot: inventory },
 		now: () => NOW,
+		...opts,
 	});
 	async function lease(runId: string, requestId: string): Promise<DispatchLease> {
 		const out = await authority.admit(runAdmission(runId, requestId));
@@ -97,7 +123,16 @@ function harness(over: Partial<ManagedStandingInput> = {}) {
 		});
 		return out.lease;
 	}
-	return { service, authority, lease, state };
+	return {
+		service,
+		authority,
+		lease,
+		state,
+		setRefresh: (answer: RefreshAnswer) => {
+			refreshAnswer = answer;
+		},
+		refreshes: () => refreshes,
+	};
 }
 type Harness = ReturnType<typeof harness>;
 const receive = (h: Harness, raw: unknown) => h.service.receive(raw);
@@ -245,5 +280,194 @@ describe('the desktop command service', () => {
 		await expectDenied(h, onRun2, 'policy-denied', 'binds policy revision 3; this host applies 7');
 		expect(liveRuns(h)).toEqual(['run-2']);
 		expect(h.service.ledger.get('cmd-2')).toBeNull();
+	});
+
+	it('refreshes policy through the status service: completed when the endpoint applies the desired revision, failed with both named otherwise or when the re-attach did not complete', async () => {
+		const h = harness();
+		const refresh = (id: string, desiredRevision: number) =>
+			onRuntime(id, { kind: 'refresh-policy', desiredRevision });
+		expect(await receive(h, refresh('r1', 3))).toMatchObject({
+			status: 'completed',
+			detail: 'the endpoint applies revision 3',
+			facts: { desiredRevision: 3, before: { desired: 3, applied: 3 }, after: { applied: 3 } },
+		});
+		expect(await receive(h, refresh('r2', 5))).toMatchObject({
+			status: 'failed',
+			detail: 'the endpoint applies revision 3 and desires 3, not 5',
+		});
+		h.setRefresh({
+			status: 'ok',
+			value: {
+				...registeredStatus().endpoint!,
+				desiredPolicyRevision: 5,
+				appliedPolicyRevision: 5,
+			},
+		});
+		expect(await receive(h, refresh('r3', 5))).toMatchObject({
+			status: 'completed',
+			facts: { before: { applied: 3 }, after: { desired: 5, applied: 5 } },
+		});
+		h.setRefresh({ status: 'unavailable', message: 'socket gone' });
+		expect(await receive(h, refresh('r4', 3))).toMatchObject({
+			status: 'failed',
+			detail: 'the re-attach did not complete: unavailable: socket gone',
+			facts: { refresh: 'unavailable' },
+		});
+		expect(h.refreshes()).toBe(4);
+		expect(h.service.status().commands).toMatchObject({
+			total: 4,
+			open: 0,
+			byState: { completed: 2, failed: 2 },
+		});
+	});
+
+	it('composes operator_prompt only with a prompt port: approval-required without its own approval, the text reaches the port and never the ledger', async () => {
+		const prompts: { text: string; runId: string }[] = [];
+		const h = harness(
+			{},
+			{
+				prompt: async (text, runId) => {
+					prompts.push({ text, runId });
+					return { outcome: 'accepted' };
+				},
+			}
+		);
+		expect(h.service.capabilities()).toContain('command-operator_prompt');
+		expect(h.service.unsupported().map((u) => u.kind)).toEqual(['pause-run', 'resume-run']);
+		await h.lease('run-1', 'req-1');
+		const approved = operatorPromptCommand();
+		const unapproved = {
+			...approved,
+			approval: { kind: 'policy-not-required', policyRevision: 3 },
+		};
+		await expectDenied(h, unapproved, 'approval-required', 'separate approval');
+		const otherPayload = {
+			...approved,
+			approval: { ...approved.approval, payloadDigest: 'b'.repeat(64) },
+		};
+		await expectDenied(h, otherPayload, 'approval-required', 'does not bind this payload');
+		expect(prompts).toEqual([]);
+		expect(h.service.ledger.list()).toEqual([]);
+
+		expect(await receive(h, approved)).toMatchObject({
+			status: 'accepted',
+			commandId: 'cmd-p',
+			duplicate: false,
+		});
+		expect(prompts).toEqual([{ text: 'say hi', runId: 'run-1' }]);
+		expect(h.service.ledger.get('cmd-p')).toMatchObject({
+			state: 'accepted',
+			kind: 'operator-prompt',
+			runId: 'run-1',
+		});
+		expect(JSON.stringify(h.service.ledger.list())).not.toContain('say hi');
+		expect(await receive(h, approved)).toMatchObject({ status: 'accepted', duplicate: true });
+		expect(prompts).toHaveLength(1);
+		await h.service.settle('cmd-p', {
+			state: 'settled',
+			outcome: 'completed',
+			evidenceDigest: DIGEST_A,
+		});
+		expect(h.service.ledger.get('cmd-p')).toMatchObject({
+			state: 'completed',
+			evidenceDigest: DIGEST_A,
+		});
+		expect(h.service.status().commands).toMatchObject({ total: 1, open: 0 });
+		expect(liveRuns(h)).toEqual(['run-1']);
+	});
+
+	it('keeps the ledger across processes: unavailable until loaded, an accepted prompt turns unknown on restart and a late settle never rewrites it, a deleted file forgets, a corrupt one is named', async () => {
+		const prompt: CommandServiceDeps['prompt'] = async () => ({ outcome: 'accepted' });
+		const file = path.join(tempDir(), MANAGED_COMMAND_LEDGER_FILE_NAME);
+		const first = harness({}, { file, prompt });
+		await first.lease('run-1', 'req-1');
+		expect(first.service.status()).toMatchObject({ loaded: false, file, standing: { ok: true } });
+		expect(await receive(first, command())).toMatchObject({
+			status: 'unavailable',
+			detail: expect.stringContaining('not loaded'),
+		});
+		expect(liveRuns(first)).toEqual(['run-1']);
+		expect(await first.service.load()).toEqual({ ok: true, commands: 0, recoveredUnknown: 0 });
+		expect(await receive(first, operatorPromptCommand())).toMatchObject({ status: 'accepted' });
+		expect(first.service.status().commands).toMatchObject({ total: 1, open: 1 });
+
+		const second = harness({}, { file, prompt });
+		expect(await second.service.load()).toEqual({ ok: true, commands: 1, recoveredUnknown: 1 });
+		expect(second.service.ledger.get('cmd-p')).toMatchObject({
+			state: 'unknown',
+			detail: 'The host restarted while this command was accepted.',
+		});
+		await second.service.settle('cmd-p', {
+			state: 'settled',
+			outcome: 'completed',
+			evidenceDigest: DIGEST_A,
+		});
+		expect(second.service.ledger.get('cmd-p')).toMatchObject({ state: 'unknown' });
+		expect(await receive(second, operatorPromptCommand())).toMatchObject({
+			status: 'unknown',
+			duplicate: true,
+		});
+		expect(JSON.stringify(JSON.parse(fs.readFileSync(file, 'utf8')))).not.toContain('say hi');
+
+		fs.rmSync(file);
+		const third = harness({}, { file, prompt });
+		expect(await third.service.load()).toEqual({ ok: true, commands: 0, recoveredUnknown: 0 });
+		expect(third.service.ledger.get('cmd-p')).toBeNull();
+		await expectDenied(third, command(), 'stale-run', 'this host knows no run run-1');
+
+		fs.writeFileSync(file, '{not json');
+		const fourth = harness({}, { file });
+		expect(await fourth.service.load()).toMatchObject({ ok: false, reason: 'corrupt', file });
+		await fourth.lease('run-1', 'req-1');
+		expect(fourth.service.status()).toMatchObject({
+			loaded: false,
+			load: { ok: false, reason: 'corrupt' },
+		});
+		expect(await receive(fourth, command())).toMatchObject({ status: 'unavailable' });
+		expect(liveRuns(fourth)).toEqual(['run-1']);
+		expect(fs.readFileSync(file, 'utf8')).toBe('{not json');
+	});
+
+	it('over the real lifecycle, client and fake daemon: a registered standing whose record names no actor refuses report_status unauthenticated and records nothing; unavailable after close (CP-01/CP-04)', async () => {
+		const fake = await startFakeEndpoint({
+			registrationRequired: true,
+			capabilities: ['execution'],
+			now: () => NOW,
+		});
+		const { lifecycle, policy, host } = await startRegisteredLifecycle({
+			dir: tempDir(),
+			socketPath: fake.socketPath,
+			supported: ['execution'],
+		});
+		const dispatch = createBrokerDispatch({ host, now: () => NOW });
+		const service = createCommandService({
+			installation: INSTALLATION,
+			lifecycle,
+			host,
+			policy,
+			dispatch,
+			inventory: { snapshot: inventory },
+			now: () => NOW,
+		});
+		try {
+			expect(lifecycle.status()).toMatchObject({
+				authority: 'registered',
+				identity: { record: { registration: { actorId: null } } },
+			});
+			expect(service.status()).toMatchObject({ file: null, loaded: true, standing: { ok: true } });
+			expect(await service.receive(onRuntime('cmd-r', { kind: 'report-status' }))).toMatchObject({
+				status: 'denied',
+				reason: 'unauthenticated',
+				detail: expect.stringContaining('names no actor'),
+			});
+			expect(service.ledger.list()).toEqual([]);
+			await lifecycle.close();
+			expect(service.status().standing).toMatchObject({ ok: false });
+			expect(await service.receive(command())).toMatchObject({ status: 'unavailable' });
+			expect(service.ledger.list()).toEqual([]);
+		} finally {
+			await lifecycle.close();
+			await fake.close();
+		}
 	});
 });

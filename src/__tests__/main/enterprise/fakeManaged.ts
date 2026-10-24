@@ -7,6 +7,16 @@
  * doubles and `fakeEndpoint.ts` the daemon; this file holds the VALUES.
  */
 
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach } from 'vitest';
+
+import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
+import { createEnrollmentLifecycle } from '../../../main/enterprise/enrollment';
+import { createEnterpriseIdentityStore } from '../../../main/enterprise/identity-store';
+import { createPolicyStatusService } from '../../../main/enterprise/policy-status';
+import type { Anchor } from '../../../main/utils/keyring-anchor';
 import {
 	buildDispatchSnapshot,
 	createContextVerifier,
@@ -14,10 +24,83 @@ import {
 } from '../../../shared/maestro-lib/managed/authority';
 import type { ManagedRuntimeCommand } from '../../../shared/maestro-lib/managed/commands';
 import type {
+	EndpointPort,
 	ManagedEnrollmentStatus,
 	ManagedIdentityRecord,
 } from '../../../shared/maestro-lib/managed/endpoint-port';
+import { createManagedHostAdapter } from '../../../shared/maestro-lib/managed/host-adapter';
 import { inProcessContext } from '../../../shared/maestro-lib/managed/operations';
+import { fakeAnchor, fakeSeal } from './fakeCustody';
+
+/**
+ * Temp directories for one test file: call at module level, use the returned
+ * factory inside tests; every directory made is removed after each test.
+ */
+export function tempDirs(prefix: string): () => string {
+	const dirs: string[] = [];
+	afterEach(() => {
+		for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+	});
+	return () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+		dirs.push(dir);
+		return dir;
+	};
+}
+
+/**
+ * The real lifecycle, identity store, policy status service and local client
+ * over a fake daemon, registered: the record is written with the daemon's
+ * socket and no registration, `recover()` hands the approval back and
+ * `completeRegistration()` redeems it. Maestro's record then names no actor
+ * (CP-01/CP-04). `host` is the managed host adapter over the live port.
+ */
+export async function startRegisteredLifecycle(input: {
+	dir: string;
+	socketPath: string;
+	supported: readonly string[];
+}) {
+	const identity = createEnterpriseIdentityStore({
+		file: path.join(input.dir, 'enterprise-identity.bin'),
+		seal: fakeSeal(),
+		anchor: fakeAnchor({ value: null } as { value: Anchor | null }),
+		platform: 'darwin',
+		now: () => NOW,
+	});
+	let port: EndpointPort | null = null;
+	const lifecycle = createEnrollmentLifecycle({
+		identity,
+		openPort: (socketPath) => {
+			port = createLocalEndpointClient({ socketPath, timeoutMs: 1_000 });
+			return port;
+		},
+		installation: INSTALLATION,
+		components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
+		capabilities: { supported: ['attachment', 'compatibility', ...input.supported], required: [] },
+		now: () => NOW,
+	});
+	const base = managedRecord(null);
+	await identity.write({
+		...base,
+		endpoint: { ...base.endpoint, socketPath: input.socketPath },
+		registration: null,
+	});
+	const policy = createPolicyStatusService({ lifecycle, now: () => NOW });
+	const recovered = await policy.recover();
+	if (recovered.status !== 'approval-required') throw new Error(recovered.status);
+	const completed = await lifecycle.completeRegistration();
+	if (completed.status !== 'ok') throw new Error(completed.status);
+	const host = createManagedHostAdapter({
+		installation: INSTALLATION,
+		identity: { read: () => lifecycle.status().identity },
+		get endpoint() {
+			return port;
+		},
+		status: () => lifecycle.status(),
+		now: () => NOW,
+	});
+	return { identity, lifecycle, policy, host };
+}
 
 /** The one clock every fixture is stamped by. */
 export const NOW = Date.parse('2026-10-23T12:00:00.000Z');
