@@ -1,0 +1,669 @@
+{
+	"frontMatter": {
+		"type": "evidence",
+		"title": "Phase 11 evidence: typed runtime commands, notices and private replies, managed UX (commands-notices row)",
+		"created": "2026-10-24",
+		"phase": 11,
+		"base_revision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+		"head_revision": "fbc64cf0da0e4ca72d3c50c199f1a8da77749514",
+		"branch": "feature/mega-maestro-v1.1.0-rc",
+		"tags": ["maestro", "mega-maestro", "integration", "evidence", "phase-11"],
+		"related": [
+			"[[EXECUTION-RULES]]",
+			"[[ANALYSIS]]",
+			"[[01]]",
+			"[[02]]",
+			"[[03]]",
+			"[[04]]",
+			"[[05]]",
+			"[[06]]",
+			"[[07]]",
+			"[[08]]",
+			"[[09]]",
+			"[[10]]"
+		]
+	},
+	"summary": "Phase 11 built the typed command and notice path on feature/mega-maestro-v1.1.0-rc in the Maestro checkout (macOS, Darwin 27, Node v26.12.1, git 2.54.0): the typed runtime command contract and its binding to this tenant, enrollment, installation, process epoch, registered actor, advertised capability, applied policy revision, validity window and known run, the durable command ledger (one record per id, nonce and idempotency key enrollment-wide, accepted turned unknown by a restart) and the executor over injected ports, the desktop command service (cancel revokes the run's live leases through the dispatch authority, report answers metadata, refresh re-attaches; pause and resume not composed and refused by name; no desktop prompt port), the notice inbox seam on the host adapter and its client over a receipt ledger (list, hold the unexpired, delivered once, read, acknowledged and a private reply recorded durably before the request leaves, duplicates answered from history, the body on the person's surface and nowhere on disk), the managed-state projection and the local-release gate, the Mega-Maestro settings pane with the managed status and the notice inbox surfaces, and the desktop composition of all of it (ledgers read before the attach, notices listed again on every accepted attachment, one drain at quit). Phase 11 added 43 tests in 06/06A/06A1/06B/06C over those seams. Deterministic coverage over the real executor, the real ledgers on real files, the real command and inbox services, the real lifecycle, socket client and fake daemon, the IPC handler and preload, the hooks and both renderer surfaces is green (see commands). The journey was exercised for REAL on this host over the real desktop composition (createEnterpriseService over a fake seal and anchor: sealed identity store, enrollment lifecycle registered over a unix socket, policy status, host adapter, broker dispatch bridge with its receipts ledger, command service, inbox client, every ledger a real file in a temp data directory) against a LABELED DOUBLE of the daemon whose noticeList and inbox operations validated every request with the sibling's real @mega-maestro/contracts package and answered contract-valid notices and receipts deduplicated by idempotency key: notices listed across two pages on the accepted attachment, the expired one dropped, delivered recorded once per held notice and never again, read, acknowledged and a private reply over the socket with the reply text reaching the double and never a ledger file, a duplicate answered from history with no request, an unknown message and an untyped action refused before any request, an endpoint denial kept as a denial, a dropped daemon leaving the act unavailable and the resend after the re-attach going under the same idempotency key; cancel_run revoked the live lease of a REAL child process admitted through the real bridge against the double's broker decision, the child exited on SIGTERM and was observed gone, the receipt says revoked, the duplicate was answered from history with one revocation and a cancel of an ended run was no-effect; report_status completed with metadata alone (no path, no program, no prompt), refresh_policy re-attached over the socket and completed on the applied revision and failed naming both on a desired one the endpoint does not apply; pause and resume refused by name; an operator prompt refused on the desktop by capability, refused approval-required without a bound approval, accepted only under a bound approval against a live run with its text reaching the harness port and nowhere else; and stale or replayed control (another process epoch, an unknown run, a lapsed window, another actor, another tenant, a policy behind, a reused id under another payload, a consumed nonce, a consumed idempotency key, an untyped action, a bare string) denied by name with no record and the leases untouched. Two facts keep the commands-notices row from passing: over the REAL service every command is refused unauthenticated because the registration Maestro redeems names no actor (CP-01/CP-04), so the command effects above ran under the real lifecycle's standing with the missing actor id supplied by the harness and the command handed to receive() by the harness (no producer delivers a command to a Maestro runtime: the daemon serves no command operation and its command runtime executes against neutral sessions it binds itself, CP-02); and the real sibling daemon in its container (library 0.24.0) again answered every step denied or unavailable (unenrolled, no approval producer, no notice custody), so NO central receipt exists for any notice, reply or command. pause_run and resume_run have no desktop producer (named, not approximated by a stop). The row is therefore NOT passed; the fixture journey is recorded as positive evidence at the Maestro boundary, not as the pair.",
+	"commits": [
+		{
+			"commit": "302128ed1",
+			"task": "MRC-11-01",
+			"files": [
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/managed/commands.ts",
+				"src/shared/maestro-lib/version.ts"
+			],
+			"lines": "+371 -1 source, +0 -0 tests, +0 -0 docs"
+		},
+		{
+			"commit": "fb28fd389",
+			"task": "MRC-11-01A",
+			"files": [
+				"src/__tests__/shared/maestro-lib/managed/commands.test.ts",
+				"src/shared/maestro-lib/managed/commands.ts",
+				"src/shared/maestro-lib/version.ts"
+			],
+			"lines": "+471 -1 source, +651 -0 tests, +0 -0 docs"
+		},
+		{
+			"commit": "525230899",
+			"task": "MRC-11-01B",
+			"files": [
+				"CLAUDE.md",
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"src/main/enterprise/commands.ts"
+			],
+			"lines": "+376 -0 source, +0 -0 tests, +2 -0 docs"
+		},
+		{
+			"commit": "3c3f9ddaa",
+			"task": "MRC-11-02",
+			"files": [
+				"CLAUDE.md",
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"src/main/enterprise/inbox.ts",
+				"src/shared/maestro-lib/managed/host-adapter.ts",
+				"src/shared/maestro-lib/version.ts"
+			],
+			"lines": "+499 -10 source, +0 -0 tests, +2 -0 docs"
+		},
+		{
+			"commit": "08f3e94e8",
+			"task": "MRC-11-02A",
+			"files": [
+				"CLAUDE.md",
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"src/main/enterprise/inbox.ts"
+			],
+			"lines": "+430 -3 source, +0 -0 tests, +2 -2 docs"
+		},
+		{
+			"commit": "84280a36a",
+			"task": "MRC-11-03",
+			"files": [
+				"CLAUDE-IPC.md",
+				"CLAUDE.md",
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"docs/agent-guides/CLI-UI-PARITY.md",
+				"src/__tests__/main/enterprise/managed-state.test.ts",
+				"src/__tests__/main/ipc/handlers/enterprise.test.ts",
+				"src/__tests__/main/preload/enterprise.test.ts",
+				"src/main/enterprise/enrollment.ts",
+				"src/main/enterprise/identity-store.ts",
+				"src/main/enterprise/managed-state.ts",
+				"src/main/ipc/handlers/enterprise.ts",
+				"src/main/preload/enterprise.ts",
+				"src/renderer/hooks/enterprise/useManagedStatus.ts"
+			],
+			"lines": "+497 -15 source, +388 -5 tests, +9 -3 docs"
+		},
+		{
+			"commit": "1902eecd4",
+			"task": "MRC-11-03A",
+			"files": [
+				"docs/agent-guides/CLI-UI-PARITY.md",
+				"src/__tests__/renderer/components/Settings/MegaMaestroSettings.test.tsx",
+				"src/__tests__/renderer/components/Settings/searchableSettings.test.ts",
+				"src/renderer/components/Settings/MegaMaestroSettings.tsx",
+				"src/renderer/components/Settings/searchableSettingsMisc.ts",
+				"src/renderer/components/Settings/tabs/EnvironmentTab.tsx"
+			],
+			"lines": "+332 -0 source, +228 -0 tests, +4 -1 docs"
+		},
+		{
+			"commit": "87c30e279",
+			"task": "MRC-11-04",
+			"files": [
+				"CLAUDE-IPC.md",
+				"CLAUDE.md",
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"docs/agent-guides/CLI-UI-PARITY.md",
+				"src/__tests__/main/ipc/handlers/enterprise.test.ts",
+				"src/__tests__/main/preload/enterprise.test.ts",
+				"src/__tests__/renderer/components/Settings/MegaMaestroSettings.test.tsx",
+				"src/main/enterprise/inbox.ts",
+				"src/main/enterprise/service.ts",
+				"src/main/ipc/bootstrap/index.ts",
+				"src/main/ipc/handlers/enterprise.ts",
+				"src/main/preload/enterprise.ts",
+				"src/renderer/components/Enterprise/ManagedStatus.tsx",
+				"src/renderer/components/Settings/MegaMaestroSettings.tsx",
+				"src/renderer/hooks/enterprise/useManagedInbox.ts"
+			],
+			"lines": "+398 -42 source, +26 -1 tests, +11 -2 docs"
+		},
+		{
+			"commit": "06aeef3c9",
+			"task": "MRC-11-04A",
+			"files": [
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"src/renderer/components/Enterprise/ManagedInbox.tsx",
+				"src/renderer/components/Settings/MegaMaestroSettings.tsx"
+			],
+			"lines": "+305 -0 source, +0 -0 tests, +1 -1 docs"
+		},
+		{
+			"commit": "954b383cd",
+			"task": "MRC-11-05",
+			"files": [
+				"CLAUDE-IPC.md",
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"docs/agent-guides/CLI-UI-PARITY.md",
+				"src/__tests__/main/enterprise/service.test.ts",
+				"src/__tests__/main/ipc/handlers/enterprise.test.ts",
+				"src/__tests__/main/preload/enterprise.test.ts",
+				"src/main/enterprise/enrollment.ts",
+				"src/main/enterprise/service.ts",
+				"src/main/index.ts",
+				"src/main/ipc/bootstrap/index.ts",
+				"src/main/ipc/handlers/enterprise.ts",
+				"src/main/preload/enterprise.ts"
+			],
+			"lines": "+114 -16 source, +183 -0 tests, +9 -4 docs"
+		},
+		{
+			"commit": "75721d356",
+			"task": "MRC-11-06",
+			"files": [
+				"src/__tests__/main/enterprise/commands.test.ts",
+				"src/__tests__/main/enterprise/fakeManaged.ts"
+			],
+			"lines": "+0 -0 source, +475 -0 tests, +0 -0 docs"
+		},
+		{
+			"commit": "f683e9e1b",
+			"task": "MRC-11-06A",
+			"files": [
+				"src/__tests__/main/enterprise/commands.test.ts",
+				"src/__tests__/main/enterprise/fakeManaged.ts"
+			],
+			"lines": "+0 -0 source, +317 -10 tests, +0 -0 docs"
+		},
+		{
+			"commit": "980724449",
+			"task": "MRC-11-06A1",
+			"files": ["src/__tests__/main/enterprise/inbox.test.ts"],
+			"lines": "+0 -0 source, +323 -0 tests, +0 -0 docs"
+		},
+		{
+			"commit": "c7e6e2280",
+			"task": "MRC-11-06B",
+			"files": ["src/__tests__/main/enterprise/inbox.test.ts"],
+			"lines": "+0 -0 source, +400 -3 tests, +0 -0 docs"
+		},
+		{
+			"commit": "5440b7c83",
+			"task": "MRC-11-06C",
+			"files": ["src/__tests__/renderer/components/Enterprise/ManagedStatus.test.tsx"],
+			"lines": "+0 -0 source, +440 -0 tests, +0 -0 docs"
+		},
+		{
+			"commit": "fbc64cf0d",
+			"task": "MRC-11-07A",
+			"files": ["docs/maestro-lib.md"],
+			"lines": "+0 -0 source, +0 -0 tests, +7 -1 docs"
+		}
+	],
+	"lineBudgetNotes": "Source counts above are added/deleted lines of non-test, non-doc files per commit (git show --numstat; fake*.ts fixtures count as tests). Every source commit stayed under the 500 source-line guideline (largest MRC-11-02 at +499 -10 and MRC-11-03 at +497 -15); the phase used bounded continuations (01A, 01B, 02A, 03A, 04A) where a target would have passed it, split the TEST task into 06, 06A, 06A1, 06B and 06C (475, 317, 323, 400 and 440 test lines), and the VERIFY found one docs defect repaired as 07A (docs only). Tests and docs are counted separately.",
+	"commands": [
+		{
+			"command": "git merge-base --is-ancestor 6400a6da0cfbae97bd90c4b361eea163fc3a1223 HEAD",
+			"exit": 0,
+			"result": "the base revision is an ancestor of HEAD fbc64cf0da0e4ca72d3c50c199f1a8da77749514; the tree is clean apart from the user's untracked .sloptimize/ and rustygraphify-out/ (git status --porcelain: 0 other entries)"
+		},
+		{
+			"command": "npm run build:maestro-lib",
+			"exit": 0,
+			"result": "dist/maestro-lib/index.js 1705.5 KB, maestro-lib 0.24.0, maestro-managed/1, provenance sourceRevision fbc64cf0da0e4ca72d3c50c199f1a8da77749514, sourceDirty false, index.js sha256 f08ea73d57cc12ead5308b034073ef76f4c489605c5a0120c82a3f96ec7cdf50 (moved from phase 10's d5a48926: this phase changed managed/commands.ts (new), managed/host-adapter.ts, index.ts and version.ts 0.21.0 -> 0.24.0; the docs repair fbc64cf0d touched no library source, so the entry sha is the one the pair run carried)"
+		},
+		{
+			"command": "npm run build:cli",
+			"exit": 0,
+			"result": "dist/cli/maestro-cli.js 7723.5 KB, sha256 057effb54a7161e5d1c43b72345aa2563ad2d3aba1c705cf5280b3a3c6daf2cc"
+		},
+		{
+			"command": "node scripts/mega-maestro-pair.mjs check --json",
+			"exit": 2,
+			"result": "library ready at HEAD (0.24.0, stale false, 293 payload files, none mismatched); assessment.ready false; dependencies CP-01 (mega-maestro), CP-01 (mega-maestro), CP-02 (mega-maestro), registration-approval (mega-maestro): no contracts pin, no clean Linux application artifact (4 dirty-source darwin/arm64 packaged artifacts, the development checkout d5143a6 dirty with 935 entries and never certifiable), createMaestroAdapter unsupported, no approval producer; docker 29.9.2 linux/arm64 with the pinned node image present. Identical to phases 04 to 10 apart from the library version"
+		},
+		{
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.lint.json --noEmit",
+			"exit": 2,
+			"result": "exactly the three pre-existing errors: TS2307 @serenity-kit/opaque (src/main/lite/pairing/host.ts), TS2307 smol-toml (src/shared/maestro-lib/translation/resources.ts), TS2339 RequestInit dispatcher (src/main/plugins/plugin-host-handlers.ts:1175, present at the base revision); nothing from this phase"
+		},
+		{
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.main.json --noEmit",
+			"exit": 2,
+			"result": "the two missing packages only (opaque in client.ts and host.ts, smol-toml in resources.ts); no other error"
+		},
+		{
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.cli.json --noEmit",
+			"exit": 2,
+			"result": "the two missing packages only; no other error"
+		},
+		{
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+			"exit": 2,
+			"result": "the same three pre-existing errors as tsconfig.lint.json; no other error"
+		},
+		{
+			"command": "eslint src/ ; eslint -c eslint.dashes.config.mjs src/__tests__ scripts",
+			"exit": 0,
+			"result": "clean on both (run after the scratch fixture test was removed from src/__tests__)"
+		},
+		{
+			"command": "node scripts/verify-docs-paths.mjs (npm run docs:verify)",
+			"exit": 0,
+			"result": "docs:verify checked 1082 asserted paths and 365 index entries against 365 full entries, 0 finding(s)"
+		},
+		{
+			"command": "prettier --check <the 37 files changed in cb15d369c..HEAD>",
+			"exit": 0,
+			"result": "All matched files use Prettier code style"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run <16 focused targets> --reporter=verbose",
+			"exit": 0,
+			"result": "37 passed (37); 731 passed (731) (Working/11-verify/vitest-focused.log; the first attempt under the concurrent build load is recorded in failedAttemptsPreserved)"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run src/shared/maestro-lib/__tests__/{built-entry,docs-examples,tui-example,no-desktop-framework.smoke}.test.ts src/__tests__/shared/maestro-lib/managed/contracts.test.ts src/__tests__/integration/mega-maestro",
+			"exit": 0,
+			"result": "6 passed (6); 69 passed | 1 skipped (70) (the skip is the certifiable pair, blocked by CP-01 x2, CP-02, registration-approval) (Working/11-verify/vitest-lib.log)"
+		},
+		{
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/zz-mrc-11-07-fixture.test.ts --reporter=verbose (scratch, removed after the run; preserved as Working/11-verify/zz-mrc-11-07-fixture.test.ts.txt)",
+			"exit": 0,
+			"result": "1 passed (1); 8 passed (8): the real journey below (Working/11-verify/vitest-fixture.log, fixture-run.json); the first attempt failed on one expectation, see failedAttemptsPreserved"
+		},
+		{
+			"command": "node scripts/mega-maestro-pair.mjs run --allow-dirty --json --out .maestro/playbooks/Working/11-verify/pair-run.json",
+			"exit": 3,
+			"result": "completed, not certifiable (endpoint source development-checkout is built (CP-01)); container exit 0; every driver step denied or unavailable; zero leases; daemon unenrolled; no notice listed, no receipt recorded, no command delivered (realPairRun)"
+		}
+	],
+	"focusedSuites": "16 targets: the test files this phase touched (src/__tests__/main/enterprise/commands.test.ts, src/__tests__/main/enterprise/inbox.test.ts, src/__tests__/main/enterprise/managed-state.test.ts, src/__tests__/main/enterprise/service.test.ts, src/__tests__/main/ipc/handlers/enterprise.test.ts, src/__tests__/main/preload/enterprise.test.ts, src/__tests__/renderer/components/Enterprise/ManagedStatus.test.tsx, src/__tests__/renderer/components/Settings/MegaMaestroSettings.test.tsx, src/__tests__/renderer/components/Settings/searchableSettings.test.ts, src/__tests__/shared/maestro-lib/managed/commands.test.ts, src/__tests__/cli/commands/host.test.ts, src/__tests__/cli/services/host-managed.test.ts, src/shared/maestro-lib/__tests__/docs-examples.test.ts) plus the neighbouring directories src/__tests__/main/enterprise, src/__tests__/shared/maestro-lib/managed and src/__tests__/renderer/components/Enterprise in full, the enterprise IPC handler and preload suites, the index wiring and quit handler suites, the Settings pane suites, the headless host suites and the library docs examples (Working/11-verify/focused-files.txt)",
+	"realFixtureRun": {
+		"what": "The typed command and notice journey over the REAL Maestro desktop composition and transport on this host, against a LABELED DOUBLE of the endpoint daemon. Real: createEnterpriseService (the one desktop composition, Electron bound only through a SafeStorageLike over the fakeSeal and an AnchorStore over the fakeAnchor): the sealed identity store on a real file, the enrollment lifecycle (recover, completeRegistration: challenge and redeem over the socket, attach), the policy status service (refresh is a real re-attach), the host adapter, createLocalEndpointClient registered and attached over a unix socket with execution, inbox and noticeList negotiated, the broker dispatch bridge and its receipts ledger file, the command service and its ledger file, the inbox client and its receipt ledger file, the onAttached hook that lists the notices after every accepted attachment, the local authority's lease (bound to a real pid, revoked by the cancel port), a REAL child process (node -e setInterval) as the cancel target, createCommandService a second time over the same real lifecycle, host, policy, dispatch and inventory with a harness prompt port and a harness ledger file. Double: fakeEndpoint.ts (the daemon protocol transcribed from the sibling: envelopes, per-socket sessions, correlation replay, registration handshake) whose noticeList and inbox operations validated every request with the sibling's real contract package (@mega-maestro/contracts dist, read-only: noticeListRequest, inboxRequest) and answered values the same package validated (notice, noticeListResult, inboxReceipt), holding one receipt per idempotency key the way a durable inbox answers a resend, and whose execution operation answered the broker decision the bridge records. Labeled too: the actor id on the standing the harness command service reads (the real registration names none: CP-01/CP-04), the source of every command (receive() called by the harness: no delivery producer, CP-02), the prompt port (the desktop composes none), and the sink that stops the child on lease revocation (the harness plays it; the ProcessManager sink is phase 06 evidence).",
+		"labeledDoubles": [
+			"endpoint daemon: src/__tests__/main/enterprise/fakeEndpoint.ts with noticeList and inbox operations written for this run (contract-validated both ways, deduplicated by idempotency key) and the broker execution answer",
+			"the actor id the registration lacks, supplied on the standing of a second real command service over the real lifecycle (the real service was exercised too and refused every command by that name)",
+			"the command source (the harness calls receive(); no endpoint operation delivers a command to a runtime)",
+			"the operator prompt port (a harness port that records the text; the desktop composes none)",
+			"the process sink (the harness binds a real child to the lease and stops it on revocation)"
+		],
+		"siblingContracts": "~/dev-shit/mega-maestro/packages/contracts/dist",
+		"cases": [
+			{
+				"case": "notices listed on the accepted attachment and delivered once each",
+				"observed": "after completeRegistration the standing was registered with actorId null; the onAttached hook listed the notices without a click over the real socket: two pages ({ offset: 0, limit: 8 } then { offset: 1, limit: 8 }), four notices listed, the expired one (0894ef59-76fc-48f0-b359-3738c539282a) dropped, three held with recorded delivered and firstListedAt 2026-10-24T12:00:00.000Z; three delivered inbox requests under three distinct idempotency keys, 3 receipts at the double, every request and answer parsed by the sibling schemas (contractValidated true, schema denials 0); a second refresh listed the same two pages (expired 1, newlyHeld 0, delivered recorded 0) and sent nothing; the ledger file holds the message ids and not the body (bodyInLedgerFile false). The noticeListRequests array in fixture-run.json is held by reference and ends at ten entries: the attach listing, the explicit refresh, the re-attach after the drop and the two refresh_policy re-attachments, two pages each."
+			},
+			{
+				"case": "read, acknowledged and a private reply",
+				"observed": "read recorded (a second read answered duplicate from history with no request), acknowledged recorded, reply recorded with the reply text reaching the double (replyReachedDouble true) under three distinct keys (read, acknowledged, reply); 6 receipts at the double; the notice view shows recorded replied with receipts {\"delivered\":\"recorded\",\"read\":\"recorded\",\"acknowledged\":\"recorded\",\"reply\":\"recorded\"}; an unknown message and an untyped action were denied by name before any request; the inbox receipt ledger file holds neither the reply text nor the body (replyOrBodyInLedgerFile false)"
+			},
+			{
+				"case": "an endpoint denial, a dropped daemon, a resend",
+				"observed": "the double answering denied/unavailable was kept as a denial (denied); after fake.dropConnections() the act was unavailable with nothing sent; policy.refresh() re-attached (ok) and the onAttached hook listed again (2 listings); the next act was recorded under the SAME idempotency key (2 requests under the key, 1 receipt at the double)"
+			},
+			{
+				"case": "commands over the real service",
+				"observed": "report_status, cancel_run and refresh_policy each refused unauthenticated: \"the registration this process holds names no actor\"; 0 records (the registration record names no actor (CP-01/CP-04)); capabilities advertised command-cancel_run, command-refresh_policy, command-report_status; unsupported by name pause-run, resume-run, operator-prompt"
+			},
+			{
+				"case": "cancel_run over a real child process",
+				"observed": "admission admitted through the real bridge (decision decision-1, lease lease-9cffa4d51017ac30) bound to pid 18996; cancel completed with evidence digest 51838586ebf8798d6e4f8adaebcf7e2098564c6214fed94e483da73a465d1411 and facts {\"runId\":\"run-pair-1\",\"revoked\":[\"lease-9cffa4d51017ac30\"],\"stillLive\":[],\"ended\":[]}; the child exited {\"code\":null,\"signal\":\"SIGTERM\"} and process.kill(pid, 0) finds nothing (processAliveAfter false); lease revoked, receipt effect revoked, revocation reason \"cancel_run cmd-cancel-1 issued by issuer-pair\"; the duplicate answered completed with duplicate true and 1 revocation in all; a second cancel of the ended run no-effect"
+			},
+			{
+				"case": "report_status, refresh_policy, pause, resume, operator prompt",
+				"observed": "report completed with facts keyed at, installation, versions, endpoint, identity, policy, runs, commands, completeness, gaps and none of the program path, the data directory, the provider name or a canary in them; refresh completed after 1 real attachment over the socket, and desired 4 failed: \"the endpoint applies revision 3 and desires 3, not 4\"; pause \"unsupported-capability: this host does not execute command-pause_run\"; resume \"unsupported-capability: this host does not execute command-resume_run\"; operator prompt on the desktop composition \"unsupported-capability: this host does not execute command-operator_prompt\", without approval approval-required, with an approval bound to another digest \"approval-required: the approval does not bind this payload\", approved and bound against a live run accepted with the text reaching the harness port only (true: not in the ledger file, not on the wire), settled completed, the duplicate after settle completed from history; the second run cancelled completed and its child exited {\"code\":null,\"signal\":\"SIGTERM\"}"
+			},
+			{
+				"case": "stale and replayed control",
+				"observed": "stale epoch: stale-run: the command names another process epoch; unknown run: stale-run: this host knows no run run-ghost; lapsed window: expired: the command or its approval is outside its validity window; another actor: unauthenticated: the command names an actor other than the registered one; another tenant: stale-run: the command names another tenant; policy behind: policy-denied: the command binds policy revision 2; this host applies 3; reused id, another payload: replay: the command id was consumed by another payload; consumed nonce: replay: the nonce or idempotency key was consumed by another command; consumed idempotency key: replay: the nonce or idempotency key was consumed by another command; untyped action: invalid-input: action.kind \"shell\" is not a typed command; bare string: invalid-input: command is not an object. Records before 7, after 7 (byState {\"accepted\":0,\"completed\":5,\"failed\":1,\"no-effect\":1,\"denied\":0,\"unknown\":0}), live leases 0"
+			},
+			{
+				"case": "command delivery against the sibling contract",
+				"observed": "every Maestro action name (pause_run, resume_run, cancel_run, report_status, refresh_policy, operator_prompt) is one the sibling commandAction names (true); a local-endpoint commandRequest built from the cancel parses (true) and the local contract table names 12 operations including command; the daemon serves none of it: apps/endpoint/src/ipc/server.ts line 66 advertises execution, telemetry, model, inbox and noticeList only; command-provision.ts line 219 to 226 runs commands against neutral sessions the endpoint binds itself, never by runtime IPC (CP-02); notice custody at the real daemon: development-only provision-notices then bind-notice-session (apps/endpoint/src/main.ts lines 585 and 557); listAuthorized filters by the registration actor (inbox.ts line 383), which Maestro's registration lacks (CP-01/CP-04)"
+			}
+		],
+		"limits": "The daemon was a double, so nothing here is the pair: the real daemon listed no notice, recorded no receipt and delivered no command (realPairRun). The command effects ran under a harness-supplied actor id over the real lifecycle because the real registration names none; the real service refused every command for that reason. No command was delivered by an endpoint; no operator prompt reached a composer, a queue or a model; no desktop was launched; no provider turn ran; the headless maestro-cli host composes neither the command service nor the inbox client (named).",
+		"artifacts": [
+			"Working/11-verify/fixture-run.json",
+			"Working/11-verify/vitest-fixture.log",
+			"Working/11-verify/zz-mrc-11-07-fixture.test.ts.txt (the scratch test, preserved)"
+		]
+	},
+	"realPairRun": {
+		"status": "completed, not-a-pass",
+		"certifiable": false,
+		"notCertifiableBecause": ["endpoint source development-checkout is built (CP-01)"],
+		"startedAt": "2026-10-24T05:38:45.012Z",
+		"endedAt": "2026-10-24T05:38:56.773Z",
+		"workspace": ".maestro/playbooks/Working/pair-20261024T053841 (gitignored)",
+		"image": "node@sha256:71bcbb3b215b3fa84b5b167585675072f4c270855e37a599803f1a58141a0716 (linux/arm64)",
+		"endpointSource": {
+			"kind": "development-checkout",
+			"revision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+			"dirty": true
+		},
+		"library": {
+			"version": "0.24.0",
+			"contract": "maestro-managed/1",
+			"protocol": 1
+		},
+		"bundle": {
+			"clientSha256": "967e47036d410dcafad756b8a2e38f3f37ef5501198ae0562e2d18354626a67e",
+			"driverSha256": "c21b7502313d831bb854944ea5a3c23d38392558162f43209fa41564177ff2ba"
+		},
+		"observed": {
+			"nativeBuild": {
+				"exit": 0
+			},
+			"daemonStart": {
+				"exit": 0,
+				"outcome": "started",
+				"runtimeSocket": "/work/ws/.local/endpoint/runtime.sock"
+			},
+			"driver": {
+				"exit": 0,
+				"node": "v22.16.0 in the container",
+				"steps": [
+					{
+						"name": "compatibility",
+						"outcome": {
+							"status": "denied",
+							"reason": "unauthenticated"
+						}
+					},
+					{
+						"name": "attach",
+						"outcome": {
+							"status": "denied",
+							"reason": "unauthenticated"
+						}
+					},
+					{
+						"name": "registration.challenge",
+						"outcome": {
+							"status": "denied",
+							"reason": "unavailable"
+						}
+					},
+					{
+						"name": "execution.admit",
+						"outcome": {
+							"state": "unavailable",
+							"code": "runtime-unavailable",
+							"message": "not registered-attached-managed in this process"
+						}
+					},
+					{
+						"name": "execution.raw",
+						"outcome": {
+							"status": "unavailable",
+							"reason": "not-attached",
+							"message": "This connection is not attached; attach() first."
+						}
+					}
+				],
+				"leases": 0,
+				"admission": {
+					"possible": false,
+					"reasons": [
+						"not registered-attached-managed in this process",
+						"No applied policy revision is known."
+					]
+				}
+			},
+			"status": {
+				"outcome": "attached",
+				"protocol": 1,
+				"capabilities": [],
+				"management": "unenrolled",
+				"desiredPolicyRevision": null,
+				"appliedPolicyRevision": null,
+				"connectivity": "unavailable",
+				"collectionProfile": "metadata"
+			},
+			"stop": {
+				"protocol": 1,
+				"outcome": "stopping"
+			}
+		},
+		"reading": "Answer for answer the phase 04 to 10 runs, now with the 0.24.0 library bundle: peer authentication, the daemon and the socket contract work; compatibility and attachment are denied unauthenticated, the registration challenge is unavailable (no approval producer), admission is unavailable, zero leases, management unenrolled with an empty capability list. No noticeList or inbox request could be made (the inbox standing refuses before a socket is used: not registered-attached-managed, and the daemon of this build advertises inbox and noticeList only with notice custody provisioned by its development-only verbs and lists only what is addressed to the registration actor), and no command operation exists on that socket at all, so the daemon recorded no receipt and delivered no command. Recorded as failed-attempt evidence."
+	},
+	"centralComparison": {
+		"required": "Actual runtime pause/resume/cancel and private notice/feedback receipts with central receipts; stale/replayed control denied (the manifest commands-notices row).",
+		"performed": [
+			"Notice receipts against the endpoint DOUBLE over the real socket: three delivered, one read, one acknowledged, one reply and one resent acknowledgement, each held once at the double under its idempotency key, each request and receipt parsed by the sibling's real contract package; the reply text present at the double and absent from every ledger file.",
+			"Command effects against the real dispatch authority and a real child: the lease revoked, the receipt effect revoked, the process gone, the evidence digest recorded; the duplicate and the stale or replayed controls compared against the ledger (records unchanged, leases untouched).",
+			"Against the sibling contract schemas directly: every Maestro action name is a sibling commandAction kind; a local-endpoint commandRequest built from the cancel parses; the local contract table names a command operation the daemon does not serve."
+		],
+		"notPerformed": [
+			"Against the REAL endpoint, server, API or console: the daemon is unenrolled, provisions no notice custody and serves no command operation, so no central receipt exists for any notice, reply or command (realPairRun).",
+			"A pause or a resume of a running turn: the desktop has no main-process producer for either (DESKTOP_UNCOMPOSED_COMMANDS), so both are refused by name and no effect exists to compare.",
+			"An operator prompt reaching an agent: the desktop composes no prompt port by design (nothing writes to a composer, a queue or a model); the harness port only records the text."
+		]
+	},
+	"notRun": [
+		"npm install (same reason as phases 01 to 10: the environment baseline is the user's; smol-toml, @serenity-kit/opaque and dns-packet stay absent)",
+		"the Mega-Maestro API, console, ingest, worker, server and gateway: no packaged artifact, no enrollment, no approval producer (CP-01); the pair harness starts the endpoint daemon alone",
+		"the sibling's development-only notice and command provisioning verbs (provision-notices, bind-notice-session, provision-commands, bind-command-session, register-command-run): they bind the endpoint's own neutral sessions and development devices, not a Maestro registration, and nothing authorizes running them against the user's checkout",
+		"a real provider turn or a desktop launch: no paid provider traffic is authorized; the cancel target was a declared harmless node child",
+		"a live customer message: every notice body and reply was a fixture canary on a temp data directory against the double; nothing reached a person or a real inbox",
+		"maestro-cli host against a daemon: the headless host composes neither the command service nor the inbox client (named gap)",
+		"the desktop usage wiring named open in phase 10 (createUsageCapture into the process stream and the exit settle): not taken up in phase 11; still open",
+		"a Windows or Linux desktop run of the surfaces (the renderer tests ran under jsdom on macOS)"
+	],
+	"failedAttemptsPreserved": [
+		"The real pair run above (exit 3, every step denied or unavailable, zero leases, nothing listed or delivered) is kept as .maestro/playbooks/Working/11-verify/pair-run.json with the harness out/ folder under pair-20261024T053841/.",
+		"The fixture journey took two attempts: the first ran 7 of 8 cases and failed the endpoint-denial case on the harness's own expectation (the client keeps the endpoint's denied/unavailable answer as a denial with its reason, it does not report it as unavailable); the expectation was corrected to the client's published outcome and the second run was 8/8. The runner rewrote steps-fixture.json and vitest-fixture.log on the rerun, so the first attempt is recorded here from its output.",
+		"The first focused run (Working/11-verify/vitest-focused-attempt1-under-load.log, steps-focused-attempt1.json: 2 failed files, 3 failed tests of 731) ran while the checks batch was building the library and the CLI: two dispatch.test.ts assertions read the receipts ledger file before its coalesced write landed (effect admitted instead of released; pid null instead of 99) and the docs-examples version test failed on the stale docs line. dispatch.test.ts alone passed 7/7 at once (Working/11-verify/dispatch-alone.log); the docs line was repaired in fbc64cf0d (MRC-11-07A); the focused and library batches were rerun serially at that HEAD and are the runs recorded in commands.",
+		"The first library run (Working/11-verify/vitest-lib-attempt1-before-docs-repair.log: 1 failed of 70, 1 skipped) failed the same docs version test; rerun green after the repair.",
+		"The phase 04 to 10 pair runs remain under their own Working/*-verify folders."
+	],
+	"deterministicCoverage": {
+		"doubles": "The endpoint daemon (fakeEndpoint.ts over a real unix socket), the doubled standing of fakeManaged.ts (registeredStatus with its actor, applied revision, authority and capability knobs), the doubled inbox host of inbox.test.ts, scripted clocks, the fake seal and anchor, the window.maestro.enterprise bridge in the renderer tests. Everything else is real: the command contract and its validators, the ledger over real temp files (load, accept, settle, restart turns accepted unknown, corrupt named and untouched), the executor and its ports, the desktop command service over a real local authority (cancel revokes a bound lease, report, refresh through the status service, the prompt port, history before authority), the inbox readers, the idempotency key, the receipt ledger over a real file, the inbox client (refresh over pages, delivered once, act serialized, duplicates from history, denial and uncertainty kept, resend under the same key), the host adapter inbox standing, the enterprise service composition (ledgers at start, onAttached listing, one drain), the IPC handler and preload for enterprise:inbox* and enterprise:commandStatus, the managed-state projection and the local-release gate, useManagedStatus and useManagedInbox through the components, ManagedStatus, ManagedInbox and MegaMaestroSettings.",
+		"cases": "37 passed (37); 731 passed (731) across the focused targets; the phase's own tests: shared commands.test.ts 22, main commands.test.ts 9, inbox.test.ts 10, ManagedStatus.test.tsx 9, MegaMaestroSettings.test.tsx 6, plus the service, handler, preload and index-wiring additions (see the test headers for what each proves)"
+	},
+	"skippedTests": [
+		{
+			"test": "integration/mega-maestro/early-pair.test.ts > runs the certifiable pair",
+			"reason": "check not ready; the title names CP-01 (x2), CP-02 and registration-approval (owner mega-maestro); the other early-pair cases pass"
+		}
+	],
+	"publicBuildArtifact": {
+		"library": "dist/maestro-lib (maestro-lib 0.24.0, maestro-managed/1, provenance sourceRevision fbc64cf0da0e4ca72d3c50c199f1a8da77749514, sourceDirty false)",
+		"sha256": {
+			"dist/maestro-lib/index.js": "f08ea73d57cc12ead5308b034073ef76f4c489605c5a0120c82a3f96ec7cdf50",
+			"dist/maestro-lib/index.d.ts": "b74a2430c659e8bda6f00155a1932874cf7ac0f2039e8f9f242cfa70cf1e75ea",
+			"dist/cli/maestro-cli.js": "057effb54a7161e5d1c43b72345aa2563ad2d3aba1c705cf5280b3a3c6daf2cc"
+		},
+		"note": "The library and the CLI bundle both moved from the phase 10 artifacts (d5a48926 and aa89417e): phase 11 changed library sources (0.21.0 -> 0.24.0) and the desktop composition the CLI bundle carries. The .d.ts entry moved with the new exports."
+	},
+	"commandsNoticesMatrix": {
+		"legend": "implemented = the Maestro seam exists and is covered deterministically; exercised = driven for real on this host over the real desktop composition and transport against the labeled daemon double; central = a receipt or delivery at the real endpoint; gap = what blocks central, by owner.",
+		"channels": [
+			{
+				"channel": "pause_run",
+				"implemented": false,
+				"exercised": "refused by name (unsupported-capability) on the real service and the harness one",
+				"central": false,
+				"gap": "no main-process pause of a running turn on the desktop (maestro, named; not approximated by a stop)"
+			},
+			{
+				"channel": "resume_run",
+				"implemented": false,
+				"exercised": "refused by name",
+				"central": false,
+				"gap": "nothing pauses, so nothing resumes (maestro, named)"
+			},
+			{
+				"channel": "cancel_run",
+				"implemented": true,
+				"exercised": "a real child under a real lease revoked and gone; duplicate from history; no-effect on an ended run",
+				"central": false,
+				"gap": "the registration names no actor (CP-01/CP-04) and no endpoint delivers a command to a runtime (CP-02): the actor and the source were the harness"
+			},
+			{
+				"channel": "report_status",
+				"implemented": true,
+				"exercised": "completed with metadata alone",
+				"central": false,
+				"gap": "as above"
+			},
+			{
+				"channel": "refresh_policy",
+				"implemented": true,
+				"exercised": "a real re-attach over the socket; completed on the applied revision, failed naming both otherwise",
+				"central": false,
+				"gap": "as above"
+			},
+			{
+				"channel": "operator_prompt",
+				"implemented": "contract and executor only; no desktop port",
+				"exercised": "refused by capability on the desktop; approval-required without a bound approval; accepted only under a bound approval with a harness port",
+				"central": false,
+				"gap": "no desktop prompt port by design until agent-input admission is produced (maestro, surfaced); as above"
+			},
+			{
+				"channel": "notice listing (noticeList)",
+				"implemented": true,
+				"exercised": "two pages over the real socket on every accepted attachment; expired dropped",
+				"central": false,
+				"gap": "the real daemon provisions notice custody by development-only verbs and lists by registration actor, which Maestro's registration lacks (CP-01/CP-04, mega-maestro)"
+			},
+			{
+				"channel": "delivered receipt",
+				"implemented": true,
+				"exercised": "once per held notice, never again",
+				"central": false,
+				"gap": "as above"
+			},
+			{
+				"channel": "read and acknowledged receipts",
+				"implemented": true,
+				"exercised": "recorded; duplicates from history; resend under the same key after a drop",
+				"central": false,
+				"gap": "as above"
+			},
+			{
+				"channel": "private reply (feedback)",
+				"implemented": true,
+				"exercised": "the text reached the double and no ledger file",
+				"central": false,
+				"gap": "as above"
+			},
+			{
+				"channel": "stale or replayed control denied",
+				"implemented": true,
+				"exercised": "eleven refusals by name, no record, leases untouched",
+				"central": "n/a (host-side refusal)",
+				"gap": null
+			},
+			{
+				"channel": "managed status and inbox surfaces",
+				"implemented": true,
+				"exercised": "jsdom tests only (no desktop launched)",
+				"central": "n/a",
+				"gap": null
+			}
+		]
+	},
+	"supportMatrix": [
+		{
+			"surface": "desktop (createEnterpriseService: lifecycle, dispatch bridge, command service, inbox client, IPC, Settings pane)",
+			"os": "macOS (the fixture over the real composition; tests over the handler, preload, wiring and surfaces; no desktop launched)",
+			"managed": "commands decided only under a registered, attached, managed standing with a registered actor (none today: every command unauthenticated by name); notices listed and receipts recorded only under that standing with inbox and noticeList negotiated; standalone unchanged (nothing listed, nothing decided, said by name)",
+			"evidence": "commands, inbox, service, handlers/enterprise, preload/enterprise, index-wiring, Enterprise and Settings suites; the fixture journey",
+			"limits": "no pause or resume producer; no prompt port; no command delivery producer"
+		},
+		{
+			"surface": "headless (maestro-cli host)",
+			"os": "macOS (tests)",
+			"managed": "composes neither the command service nor the inbox client (named gap)",
+			"evidence": "host and host-managed suites unchanged",
+			"limits": "not started against a daemon"
+		},
+		{
+			"surface": "the endpoint noticeList, inbox and command operations (real socket client -> daemon)",
+			"os": "macOS host, Linux container for the real daemon",
+			"managed": "real daemon: every step denied or unavailable (unenrolled); daemon double: notices and receipts under the sibling contract; command: no operation on either",
+			"evidence": "realPairRun; realFixtureRun",
+			"limits": "the double is not the pair"
+		}
+	],
+	"positiveAcceptanceMatrix": {
+		"commands-notices": {
+			"required": true,
+			"passed": false,
+			"outcomeRequired": "Actual runtime pause/resume/cancel and private notice/feedback receipts; stale/replayed control denied",
+			"state": "Cancel ran for REAL against a real child process under a real lease through the real dispatch bridge, report and refresh completed over the real socket, notice listing, delivered, read, acknowledged and a private reply ran for REAL over the real desktop composition and transport with every payload under the sibling contract, and stale or replayed control was denied by name with no record. But pause and resume have no desktop producer and are refused by name; the real registration names no actor so the real service refused every command and the command effects ran under a harness-supplied actor id with the harness as the command source (no endpoint delivers a command to a runtime: CP-02); and the receiving end was a labeled double of the daemon: the real endpoint in its container is unenrolled, provisions no notice custody and serves no command operation, so no central receipt exists (CP-01/CP-04, registration-approval). Not passed; the fixture journey is recorded as positive evidence at the Maestro boundary, the real pair run as failed-attempt evidence."
+		}
+	},
+	"openDependencies": [
+		{
+			"id": "CP-01",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no contracts pin and no clean Linux application artifact (pair check unchanged from phase 04; sibling still d5143a6 dirty with 935 entries)"
+		},
+		{
+			"id": "CP-02",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "createMaestroAdapter unsupported (pair check); the daemon serves no command operation on the runtime socket (apps/endpoint/src/ipc/server.ts line 66) and its command runtime executes against neutral sessions it binds itself (command-provision.ts lines 219 to 226), so no producer delivers a command to a Maestro runtime"
+		},
+		{
+			"id": "CP-03",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "delegation and workflow authority still refused by the bridge (not exercised in this phase)"
+		},
+		{
+			"id": "registration-approval",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "no API or console producer approves the actor registration, so the real daemon never reaches an attached standing; the registration Maestro redeems names no actor (CP-04 in the playbook's terms), which both the command binding and the daemon's notice listing require"
+		},
+		{
+			"id": "notice-custody",
+			"owner": "mega-maestro",
+			"status": "open",
+			"detail": "notice custody at the endpoint is development-only (provision-notices, bind-notice-session in apps/endpoint/src/main.ts) and lists by registration actor (inbox.ts listAuthorized); no production producer addresses a notice to a Maestro registration"
+		},
+		{
+			"id": "desktop-pause-resume",
+			"owner": "maestro",
+			"status": "open (surfaced, not built)",
+			"detail": "the desktop has no main-process pause or resume of a running turn (DESKTOP_UNCOMPOSED_COMMANDS); a producer would have to hold a provider turn without stopping it, which no provider route offers today; refused by name, never approximated by a stop"
+		},
+		{
+			"id": "desktop-prompt-port",
+			"owner": "maestro",
+			"status": "open (by design)",
+			"detail": "no CommandPorts.prompt is composed on the desktop: an operator prompt reaching a composer, a queue or a model needs an agent-input admission the enterprise service does not yet hold; the contract, the approval binding and the executor are ready for it"
+		},
+		{
+			"id": "headless-commands-inbox",
+			"owner": "maestro",
+			"status": "open",
+			"detail": "maestro-cli host composes neither the command service nor the inbox client"
+		},
+		{
+			"id": "usage-producer-wiring",
+			"owner": "maestro",
+			"status": "open",
+			"detail": "carried from phase 10: createUsageCapture is still not composed into the desktop process stream or the exit settle; not taken up in phase 11"
+		},
+		{
+			"id": "lineage-identity-allowlist",
+			"owner": "maestro",
+			"status": "open (hardening)",
+			"detail": "carried from phase 10: contextOf() and lifecycleLineageOf() copy lineage.identity by spread"
+		}
+	],
+	"preExistingEnvironmentFailures": "smol-toml, @serenity-kit/opaque and dns-packet are absent from node_modules; they break three tsc files identically at the base revision, and tsconfig.lint.json / tsconfig.json also report the pre-existing RequestInit dispatcher error in plugin-host-handlers.ts:1175. Fix: npm install. Left for the user.",
+	"scratch": "Command outputs live under .maestro/playbooks/Working/11-verify/ (run-checks.mjs, build-evidence.mjs, commits.mjs, steps-{checks,lint,focused,lib,fixture,pair}.json, the attempt-1 copies, *.log, changed-files.txt, focused-files.txt, commits.json, pair-check.log, pair-run.json, fixture-run.json, dispatch-alone.log, docs-examples-repaired.log, the preserved scratch test) and .maestro/playbooks/Working/pair-20261024T053841/ (gitignored). The scratch test src/__tests__/zz-mrc-11-07-fixture.test.ts was removed after its run and its temp directory deleted by the test; the two node children it started exited on SIGTERM; the sibling repository was read (its built contracts package and three source files for line references) and never written; no untracked file was added to the source tree by this phase."
+}
