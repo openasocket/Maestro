@@ -1,13 +1,17 @@
 /**
- * MRC-11-06A: the notice inbox seam (`src/main/enterprise/inbox.ts`), part
- * one. The wire is read structurally (a notice that admits agent input, an
+ * MRC-11-06A and MRC-11-06B: the notice inbox seam (`src/main/enterprise/inbox.ts`). The wire is read structurally (a notice that admits agent input, an
  * untyped kind, an oversize body or a bad expiry is not one; a receipt whose
  * message or state does not match the action sent is null), the idempotency
  * key is deterministic per binding, action and reply text, the receipt
  * ledger over a real file holds no body and no reply text, the adapter's
  * inbox standing follows the registration and the negotiated capabilities,
  * and noticeList + inbox go over the real lifecycle, client and fake daemon
- * with the payloads pinned. The inbox client is MRC-11-06B.
+ * with the payloads pinned. Then the client (MRC-11-06B) over a doubled host
+ * (standing + port table) and the real ledger on a temp file: the listing is
+ * custody, delivered is recorded once per newly held notice, the four receipts
+ * are distinct acts, every endpoint answer settles the record by name, a
+ * not-sent is resent under the same key, refreshes coalesce, and neither a body
+ * nor a reply text reaches the ledger file.
  */
 
 import * as fs from 'node:fs';
@@ -15,22 +19,32 @@ import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+	createInboxClient,
 	createInboxReceiptLedger,
 	inboxActionProblem,
 	inboxIdempotencyKey,
+	inboxView,
 	MANAGED_INBOX_RECEIPTS_FILE_NAME,
+	openInboxReceipt,
 	readInboxReceipt,
 	readNotice,
 	readNoticeListResult,
+	type InboxClient,
 	type InboxReceiptRecord,
 } from '../../../main/enterprise/inbox';
 import type {
+	EndpointInvokeOutcome,
 	ManagedEnrollmentStatus,
 	ManagedIdentityRecord,
 } from '../../../shared/maestro-lib/managed/endpoint-port';
 import {
 	createManagedHostAdapter,
+	type EndpointInboxAction,
+	type EndpointInboxRequest,
+	type EndpointNoticeListRequest,
 	type InboxBinding,
+	type InboxPort,
+	type InboxStanding,
 } from '../../../shared/maestro-lib/managed/host-adapter';
 import { startFakeEndpoint } from './fakeEndpoint';
 import {
@@ -319,5 +333,388 @@ describe('the notice inbox seam', () => {
 			await lifecycle.close();
 			await fake.close();
 		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The inbox client (MRC-11-06B), over a doubled host and the real ledger
+// ---------------------------------------------------------------------------
+
+const M2 = '33333333-3333-4333-8333-333333333333';
+const M3 = '44444444-4444-4444-8444-444444444444';
+const REPLY_TEXT = 'Thanks, noted the maintenance window.';
+
+interface Double {
+	standing: InboxStanding;
+	/** The listing the port answers for each offset; a missing page is an empty last page. */
+	pages: Array<EndpointInvokeOutcome<unknown>>;
+	acts: EndpointInboxRequest[];
+	lists: EndpointNoticeListRequest[];
+	answer: (request: EndpointInboxRequest) => EndpointInvokeOutcome<unknown>;
+	port: InboxPort | null;
+}
+
+const recordedAnswer = (request: EndpointInboxRequest): EndpointInvokeOutcome<unknown> => ({
+	status: 'ok',
+	payload: {
+		outcome: 'recorded',
+		messageId: request.messageId,
+		receiptId: `rcpt-${request.action.kind}-${request.messageId.slice(0, 2)}`,
+		state: request.action.kind === 'reply' ? 'replied' : request.action.kind,
+	},
+});
+
+function double(): Double {
+	const d: Double = {
+		standing: { standingKey: 'k1', ok: true, binding: BINDING },
+		pages: [],
+		acts: [],
+		lists: [],
+		answer: recordedAnswer,
+		port: null,
+	};
+	d.port = {
+		list: async (request) => {
+			d.lists.push(request);
+			return (
+				d.pages[request.offset] ?? {
+					status: 'ok',
+					payload: { outcome: 'notices', items: [], nextOffset: null },
+				}
+			);
+		},
+		act: async (request) => {
+			d.acts.push(request);
+			return d.answer(request);
+		},
+	};
+	return d;
+}
+
+/** The client over the double; with no file the ledger is in memory and loaded at once. */
+function client(d: Double, file?: string): InboxClient {
+	return createInboxClient({
+		host: {
+			inboxStanding: () => d.standing,
+			get inbox() {
+				return d.port;
+			},
+		},
+		ledger: createInboxReceiptLedger({ file, now: () => NOW }),
+		now: () => NOW,
+	});
+}
+
+const page = (items: unknown[], nextOffset: number | null): EndpointInvokeOutcome<unknown> => ({
+	status: 'ok',
+	payload: { outcome: 'notices', items, nextOffset },
+});
+
+const held = (c: InboxClient, messageId: string, action: EndpointInboxAction) =>
+	c.act({ campaignId: CAMPAIGN, messageId, action });
+
+describe('the inbox client', () => {
+	it('refreshes over two pages, drops the expired, records delivered once per newly held notice, and follows the listing as custody', async () => {
+		const d = double();
+		d.pages[0] = page(
+			[notice(), notice({ messageId: M2, expiresAt: new Date(NOW - 1).toISOString() })],
+			1
+		);
+		d.pages[1] = page([notice({ messageId: M3, body: 'Body of M3' })], null);
+		const c = client(d, path.join(tempDir(), MANAGED_INBOX_RECEIPTS_FILE_NAME));
+		expect((await c.load()).ok).toBe(true);
+		expect(await c.refresh()).toMatchObject({
+			outcome: 'listed',
+			at: new Date(NOW).toISOString(),
+			pages: 2,
+			listed: 3,
+			expired: 1,
+			newlyHeld: 2,
+			delivered: { recorded: 2, uncertain: 0, denied: 0, unavailable: 0 },
+		});
+		expect(d.lists).toEqual([
+			{ offset: 0, limit: 8 },
+			{ offset: 1, limit: 8 },
+		]);
+		expect(d.acts.map((a) => [a.messageId, a.action.kind])).toEqual([
+			[MESSAGE, 'delivered'],
+			[M3, 'delivered'],
+		]);
+		const views = c.notices();
+		expect(views.map((v) => v.messageId)).toEqual([MESSAGE, M3]);
+		expect(views[0]).toMatchObject({
+			body: BODY,
+			agentInput: false,
+			recorded: 'delivered',
+			receipts: { delivered: 'recorded' },
+			firstListedAt: new Date(NOW).toISOString(),
+		});
+
+		// The second listing names M3 no longer: nothing new is delivered and M3 is no longer held.
+		d.pages = [page([notice()], null)];
+		expect(await c.refresh()).toMatchObject({
+			outcome: 'listed',
+			pages: 1,
+			listed: 1,
+			newlyHeld: 0,
+		});
+		expect(d.acts).toHaveLength(2);
+		expect(c.notices().map((v) => v.messageId)).toEqual([MESSAGE]);
+		expect(c.status().notices).toEqual({ held: 1, unread: 1, unacknowledged: 1 });
+		// A page that points at itself ends the walk.
+		d.pages = [page([notice()], 1), page([], 1)];
+		expect(await c.refresh()).toMatchObject({ outcome: 'listed', pages: 2, listed: 1 });
+	});
+
+	it('acts: unknown message and invalid action are refused, the four receipts are distinct, the duplicate is answered from the ledger, no text reaches the disk', async () => {
+		const d = double();
+		d.pages[0] = page([notice()], null);
+		const file = path.join(tempDir(), MANAGED_INBOX_RECEIPTS_FILE_NAME);
+		const c = client(d, file);
+		await c.load();
+
+		// Loaded, but nothing is held yet: nobody here has seen the message.
+		expect(await held(c, MESSAGE, { kind: 'read' })).toMatchObject({
+			status: 'denied',
+			reason: 'unknown-message',
+			detail: `message ${MESSAGE} of campaign ${CAMPAIGN} is not held on this host`,
+			record: null,
+		});
+		await c.refresh();
+		expect(await held(c, MESSAGE, { kind: 'reply', text: '' })).toMatchObject({
+			status: 'denied',
+			reason: 'invalid-action',
+			detail: expect.stringMatching(/needs text/),
+			record: null,
+		});
+		expect(d.acts.map((a) => a.action.kind)).toEqual(['delivered']);
+
+		const read = await held(c, MESSAGE, { kind: 'read' });
+		expect(read).toMatchObject({
+			status: 'recorded',
+			duplicate: false,
+			record: { state: 'recorded', action: 'read', receipt: { state: 'read' } },
+		});
+		expect(await held(c, MESSAGE, { kind: 'read' })).toMatchObject({
+			status: 'recorded',
+			duplicate: true,
+			record: { receipt: { receiptId: 'rcpt-read-22' } },
+		});
+		expect(d.acts.filter((a) => a.action.kind === 'read')).toHaveLength(1);
+
+		expect(await held(c, MESSAGE, { kind: 'acknowledged' })).toMatchObject({
+			status: 'recorded',
+			record: { action: 'acknowledged', receipt: { state: 'acknowledged' } },
+		});
+		expect(await held(c, MESSAGE, { kind: 'reply', text: REPLY_TEXT })).toMatchObject({
+			status: 'recorded',
+			record: {
+				action: 'reply',
+				reply: { length: REPLY_TEXT.length },
+				receipt: { state: 'replied' },
+			},
+		});
+		expect(d.acts.map((a) => a.action.kind)).toEqual([
+			'delivered',
+			'read',
+			'acknowledged',
+			'reply',
+		]);
+		const view = inboxView(c);
+		expect(view.notices).toHaveLength(1);
+		expect(view.notices.every((n) => n.agentInput === false)).toBe(true);
+		expect(view.notices[0]).toMatchObject({
+			recorded: 'replied',
+			receipts: {
+				delivered: 'recorded',
+				read: 'recorded',
+				acknowledged: 'recorded',
+				reply: 'recorded',
+			},
+		});
+		expect(view.status.notices).toEqual({ held: 1, unread: 0, unacknowledged: 0 });
+		expect(view.status.receipts).toEqual({
+			total: 4,
+			byState: { pending: 0, recorded: 4, denied: 0, uncertain: 0 },
+		});
+		expect(view.status).toMatchObject({ file, loaded: true, standing: { ok: true } });
+
+		const onDisk = fs.readFileSync(file, 'utf8');
+		expect(onDisk).not.toContain(REPLY_TEXT);
+		expect(onDisk).not.toContain('maintenance');
+		expect(onDisk).not.toContain(BODY);
+		const key = inboxIdempotencyKey(BINDING, CAMPAIGN, MESSAGE, { kind: 'read' });
+		const receipt = c.receipts().find((r) => r.idempotencyKey === key);
+		expect(receipt).toMatchObject({ actorId: 'actor-1', policyRevision: 3, reply: null });
+		expect(receipt?.requestDigest).toMatch(/^[a-f0-9]{64}$/);
+		expect(openInboxReceipt(BINDING, d.acts[1], 'x')).toMatchObject({
+			idempotencyKey: d.acts[1].idempotencyKey,
+			requestDigest: receipt?.requestDigest,
+			state: 'pending',
+		});
+	});
+
+	it('settles denied, replay, unknown, a mismatched receipt and not-sent distinctly, and resends after not-sent under the same key', async () => {
+		const d = double();
+		d.pages[0] = page([notice()], null);
+		const c = client(d);
+		expect(c.status()).toMatchObject({ file: null, loaded: true });
+		await c.refresh();
+		const act = (kind: 'read' | 'acknowledged') => held(c, MESSAGE, { kind });
+
+		d.answer = () => ({ status: 'denied', reason: 'unauthenticated' });
+		expect(await act('read')).toMatchObject({
+			status: 'denied',
+			reason: 'unauthenticated',
+			detail: 'the endpoint refused the action: unauthenticated',
+			record: { state: 'denied', denial: 'unauthenticated' },
+		});
+		d.answer = () => ({ status: 'denied', reason: 'replay' });
+		expect(await act('read')).toMatchObject({
+			status: 'uncertain',
+			record: {
+				state: 'uncertain',
+				denial: 'replay',
+				detail: expect.stringContaining('replay'),
+			},
+		});
+		d.answer = () => ({ status: 'unknown', message: 'socket closed mid-answer' });
+		expect(await act('acknowledged')).toMatchObject({
+			status: 'uncertain',
+			detail: 'socket closed mid-answer',
+			record: { state: 'uncertain', denial: null, detail: 'socket closed mid-answer' },
+		});
+		d.answer = (request) => ({
+			status: 'ok',
+			payload: { outcome: 'recorded', messageId: request.messageId, receiptId: 'r', state: 'read' },
+		});
+		expect(await act('acknowledged')).toMatchObject({
+			status: 'uncertain',
+			detail: expect.stringContaining('does not match'),
+			record: { receipt: null },
+		});
+		d.answer = () => ({ status: 'unavailable', reason: 'not-attached', message: 'no socket' });
+		expect(await act('acknowledged')).toEqual({ status: 'unavailable', detail: 'no socket' });
+		const key = inboxIdempotencyKey(BINDING, CAMPAIGN, MESSAGE, { kind: 'acknowledged' });
+		expect(c.receipts().find((r) => r.idempotencyKey === key)).toMatchObject({
+			state: 'uncertain',
+			detail: 'not sent: no socket',
+		});
+		d.answer = recordedAnswer;
+		expect(await act('acknowledged')).toMatchObject({
+			status: 'recorded',
+			duplicate: false,
+			// The settlement names its own detail; the resent note lived on the pending record alone.
+			record: { detail: null, receipt: { state: 'acknowledged' } },
+		});
+		expect(
+			d.acts.filter((a) => a.action.kind === 'acknowledged').map((a) => a.idempotencyKey)
+		).toEqual(Array(4).fill(key));
+		expect(c.notices()[0]).toMatchObject({
+			recorded: 'acknowledged',
+			receipts: { delivered: 'recorded', read: 'uncertain', acknowledged: 'recorded' },
+		});
+		expect(c.status().receipts).toEqual({
+			total: 3,
+			byState: { pending: 0, recorded: 2, denied: 0, uncertain: 1 },
+		});
+	});
+
+	it('refuses by name when not loaded, without standing, without the capability or the socket, and coalesces refreshes', async () => {
+		const d = double();
+		d.pages[0] = page([notice()], null);
+		const c = client(d, path.join(tempDir(), MANAGED_INBOX_RECEIPTS_FILE_NAME));
+		expect(await held(c, MESSAGE, { kind: 'read' })).toEqual({
+			status: 'unavailable',
+			detail: 'The inbox receipt ledger is not loaded.',
+		});
+		expect(c.status()).toMatchObject({ loaded: false, load: null, lastRefresh: null });
+		await c.load();
+
+		d.standing = { standingKey: 'k0', ok: false, reason: 'not registered' };
+		expect(await c.refresh()).toMatchObject({
+			outcome: 'no-standing',
+			reason: 'not registered',
+			pages: 0,
+		});
+		expect(await held(c, MESSAGE, { kind: 'read' })).toEqual({
+			status: 'unavailable',
+			detail: 'not registered',
+		});
+		expect(c.status()).toMatchObject({
+			standing: { ok: false, reason: 'not registered' },
+			capabilities: { noticeList: false, inbox: false },
+		});
+		d.standing = {
+			standingKey: 'k2',
+			ok: true,
+			binding: { ...BINDING, capabilities: { noticeList: false, inbox: true } },
+		};
+		expect(await c.refresh()).toMatchObject({
+			outcome: 'no-standing',
+			reason: expect.stringContaining('noticeList'),
+		});
+		d.standing = {
+			standingKey: 'k3',
+			ok: true,
+			binding: { ...BINDING, capabilities: { noticeList: true, inbox: false } },
+		};
+		expect(await c.refresh()).toMatchObject({
+			outcome: 'listed',
+			newlyHeld: 1,
+			delivered: { recorded: 0, uncertain: 0, denied: 0, unavailable: 1 },
+		});
+		expect(d.acts).toHaveLength(0);
+		expect(c.notices()[0]).toMatchObject({ recorded: null, receipts: {} });
+		expect(await held(c, MESSAGE, { kind: 'read' })).toEqual({
+			status: 'unavailable',
+			detail: 'The endpoint negotiated no inbox capability on this connection.',
+		});
+
+		d.standing = { standingKey: 'k1', ok: true, binding: BINDING };
+		const p1 = c.refresh();
+		const p2 = c.refresh();
+		expect(p1).toBe(p2);
+		await p1;
+		expect(d.lists.filter((l) => l.offset === 0)).toHaveLength(2);
+		expect(c.status().lastRefresh?.outcome).toBe('listed');
+		// Once it has settled, the next refresh is a new one.
+		const p3 = c.refresh();
+		expect(p3).not.toBe(p1);
+		await p3;
+
+		d.port = null;
+		expect(await c.refresh()).toMatchObject({
+			outcome: 'no-standing',
+			reason: 'No endpoint socket is open.',
+		});
+		expect(await held(c, MESSAGE, { kind: 'read' })).toEqual({
+			status: 'unavailable',
+			detail: 'No endpoint socket is open.',
+		});
+		expect(c.receipts()).toHaveLength(0);
+	});
+
+	it('answers a denied listing, a malformed page and an unavailable one by name', async () => {
+		const d = double();
+		d.pages[0] = { status: 'denied', reason: 'unauthenticated' };
+		const c = client(d);
+		expect(await c.refresh()).toMatchObject({
+			outcome: 'denied',
+			denial: 'unauthenticated',
+			reason: 'the endpoint refused the listing: unauthenticated',
+			pages: 1,
+			listed: 0,
+		});
+		d.pages[0] = page([{ bad: true }], null);
+		expect(await c.refresh()).toMatchObject({
+			outcome: 'malformed',
+			reason: 'the endpoint answered with no notice list',
+		});
+		d.pages[0] = { status: 'unavailable', reason: 'timeout', message: 'timed out' };
+		expect(await c.refresh()).toMatchObject({ outcome: 'unavailable', reason: 'timed out' });
+		expect(c.notices()).toEqual([]);
+		expect(d.acts).toHaveLength(0);
+		expect(c.status().lastRefresh).toMatchObject({ outcome: 'unavailable' });
 	});
 });
