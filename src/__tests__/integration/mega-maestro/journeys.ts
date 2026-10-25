@@ -31,7 +31,55 @@ import type {
 	ManagedPrincipalRef,
 	ManagedRunIdentity,
 } from '../../../shared/maestro-lib/managed/types';
-import { SYNTHETIC_EFFECTS_FILE, SYNTHETIC_PROVIDER_SOURCE } from './fixtures';
+
+export const SYNTHETIC_EFFECTS_FILE = 'synthetic-provider-effects.json';
+
+/**
+ * The provider double, as an inline program for the harness route. Declared
+ * harmless: it reads its input from stdin, tries one loopback connection,
+ * one child, one declared read and one undeclared read, writes one JSON
+ * file into its cwd, prints one JSON line and exits 0. Every attempt is
+ * recorded as it went, refusal included.
+ */
+export const SYNTHETIC_PROVIDER_SOURCE = String.raw`
+'use strict';
+const fs = require('node:fs');
+const net = require('node:net');
+const path = require('node:path');
+const effects = { wroteFile: '', stdinBytes: 0, connected: false, spawnedChild: false, readDeclared: false, readUndeclared: false, cwd: process.cwd(), pid: process.pid };
+const code = (error) => (error && error.code) || String(error);
+const tryRead = (file) => { if (!file) return false; try { fs.readFileSync(file); return true; } catch (error) { return code(error); } };
+const chunks = [];
+process.stdin.on('data', (c) => chunks.push(c));
+process.stdin.on('end', () => {
+	const raw = Buffer.concat(chunks);
+	effects.stdinBytes = raw.length;
+	let input = {};
+	try { input = JSON.parse(raw.toString('utf8')); } catch {}
+	try {
+		const { spawnSync } = require('node:child_process');
+		const child = spawnSync(process.execPath, ['-e', '0']);
+		effects.spawnedChild = child.error ? code(child.error) : true;
+	} catch (error) { effects.spawnedChild = code(error); }
+	effects.readDeclared = tryRead(input.declaredFile);
+	effects.readUndeclared = tryRead(input.undeclaredFile);
+	const finish = () => {
+		const file = path.join(process.cwd(), '${SYNTHETIC_EFFECTS_FILE}');
+		effects.wroteFile = file;
+		try { fs.writeFileSync(file, JSON.stringify(effects)); }
+		catch (error) { effects.wroteFile = 'refused:' + code(error); }
+		process.stdout.write(JSON.stringify({ type: 'synthetic-provider', effects }) + '\n');
+		process.exit(0);
+	};
+	const port = Number(input.probePort || 0);
+	if (!port) return finish();
+	try {
+		const socket = net.connect({ host: '127.0.0.1', port });
+		socket.once('connect', () => { effects.connected = true; socket.end(); finish(); });
+		socket.once('error', (error) => { effects.connected = code(error); finish(); });
+	} catch (error) { effects.connected = code(error); finish(); }
+});
+`;
 
 // ---------------------------------------------------------------------------
 // The catalog
@@ -427,19 +475,86 @@ export async function runPairJourneys(deps: JourneyDeps): Promise<JourneyRun> {
 		return exit.exitCode === 0 && effects !== null && admitted.lease.state() === 'released';
 	});
 
-	// The desktop journeys need the process-manager port bundled into the driver
-	// (MRC-12-02A); until then they are recorded as not run, never as passed.
-	for (const id of ['desktop.admit', 'desktop.workflow']) {
-		run.journeys.push({
-			id,
-			surface: 'desktop',
-			status: 'not-run',
-			reason: deps.desktop
-				? 'the desktop journeys are not wired in this build'
-				: 'no desktop port factory was supplied',
-			steps: [],
+	const desktopPort = deps.desktop
+		? deps.desktop.createProcessSpawnAuthority({
+				installation,
+				identity: { read: () => ({ status: 'ok', record, epoch: 1 }) },
+				host: adapter,
+				dispatch: { authority: adapter.authority },
+				now,
+			})
+		: null;
+
+	await journey(find('desktop.admit'), async (step) => {
+		if (!desktopPort) throw new Error('no desktop port factory was supplied');
+		await step('desktop.standing', () => desktopPort.standing());
+		const verified = desktopPort.verify({
+			actor: { peer: 'in-process' },
+			identity: ids(),
+			traceId: `pair-trace-${counter}`,
+			policyRevision,
+			workflow: null,
 		});
-	}
+		if (!verified.ok) throw new Error(`desktop context refused: ${verified.problems.join('; ')}`);
+		const admitted = await step('desktop.admit', async () =>
+			summarizeAdmission(
+				await desktopPort.authority.admit({
+					context: verified.context,
+					snapshot: launchOnly(workDir('desktop')),
+					policy: desktopPort.policy(),
+				})
+			)
+		);
+		return admitted.state === 'admitted';
+	});
+
+	await journey(find('desktop.workflow'), async (step) => {
+		if (!desktopPort) throw new Error('no desktop port factory was supplied');
+		const ownership = lib.createWorkflowOwnership({
+			file: path.join(deps.workDir, 'maestro-managed-workflows.json'),
+			port: () => adapter.workflows,
+			owner: () => ({
+				ownerId: actor.id,
+				authorityId: adapter.authority.authorityId,
+				policyRevision,
+			}),
+			now,
+		});
+		const identity = ids();
+		const claim = await step('workflow.claim', () =>
+			ownership.claim({
+				workflow: { workflowId: 'pair-autorun', version: '1', triggerEventId: 'pair-trigger-1' },
+				runId: identity.runId!,
+				attemptId: identity.attemptId,
+			})
+		);
+		const fence = lib.workflowFenceOf(claim);
+		if (!fence || fence.fence === null) return false;
+		const verified = desktopPort.verify({
+			actor: { peer: 'in-process' },
+			identity,
+			traceId: `pair-trace-${counter}`,
+			policyRevision,
+			workflow: {
+				workflowId: 'pair-autorun',
+				version: '1',
+				triggerEventId: 'pair-trigger-1',
+				ownerEpoch: fence.ownerEpoch,
+				fencingToken: fence.fencingToken,
+			},
+		});
+		if (!verified.ok) throw new Error(`fenced context refused: ${verified.problems.join('; ')}`);
+		const admitted = await step('desktop.workflow.admit', async () =>
+			summarizeAdmission(
+				await desktopPort.authority.admit({
+					context: verified.context,
+					snapshot: launchOnly(workDir('desktop-workflow')),
+					policy: desktopPort.policy(),
+				})
+			)
+		);
+		return admitted.state === 'admitted';
+	});
 
 	run.leases = adapter.authority.live().length;
 	return run;

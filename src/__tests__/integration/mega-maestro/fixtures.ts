@@ -47,6 +47,7 @@ import {
 	type ManagedHostAdapter,
 } from '../../../shared/maestro-lib/managed/host-adapter';
 import { inProcessContext } from '../../../shared/maestro-lib/managed/operations';
+import { SYNTHETIC_EFFECTS_FILE, SYNTHETIC_PROVIDER_SOURCE } from './journeys';
 import type {
 	ManagedAuthenticatedContext,
 	ManagedInstallationIdentity,
@@ -149,54 +150,9 @@ export interface SyntheticProviderEffects {
 	pid: number;
 }
 
-export const SYNTHETIC_EFFECTS_FILE = 'synthetic-provider-effects.json';
-
-/**
- * The provider double, as an inline program for the harness route. Declared
- * harmless: it reads its input from stdin, tries one loopback connection,
- * one child, one declared read and one undeclared read, writes one JSON
- * file into its cwd, prints one JSON line and exits 0. Every attempt is
- * recorded as it went, refusal included.
- */
-export const SYNTHETIC_PROVIDER_SOURCE = String.raw`
-'use strict';
-const fs = require('node:fs');
-const net = require('node:net');
-const path = require('node:path');
-const effects = { wroteFile: '', stdinBytes: 0, connected: false, spawnedChild: false, readDeclared: false, readUndeclared: false, cwd: process.cwd(), pid: process.pid };
-const code = (error) => (error && error.code) || String(error);
-const tryRead = (file) => { if (!file) return false; try { fs.readFileSync(file); return true; } catch (error) { return code(error); } };
-const chunks = [];
-process.stdin.on('data', (c) => chunks.push(c));
-process.stdin.on('end', () => {
-	const raw = Buffer.concat(chunks);
-	effects.stdinBytes = raw.length;
-	let input = {};
-	try { input = JSON.parse(raw.toString('utf8')); } catch {}
-	try {
-		const { spawnSync } = require('node:child_process');
-		const child = spawnSync(process.execPath, ['-e', '0']);
-		effects.spawnedChild = child.error ? code(child.error) : true;
-	} catch (error) { effects.spawnedChild = code(error); }
-	effects.readDeclared = tryRead(input.declaredFile);
-	effects.readUndeclared = tryRead(input.undeclaredFile);
-	const finish = () => {
-		const file = path.join(process.cwd(), '${SYNTHETIC_EFFECTS_FILE}');
-		effects.wroteFile = file;
-		try { fs.writeFileSync(file, JSON.stringify(effects)); }
-		catch (error) { effects.wroteFile = 'refused:' + code(error); }
-		process.stdout.write(JSON.stringify({ type: 'synthetic-provider', effects }) + '\n');
-		process.exit(0);
-	};
-	const port = Number(input.probePort || 0);
-	if (!port) return finish();
-	try {
-		const socket = net.connect({ host: '127.0.0.1', port });
-		socket.once('connect', () => { effects.connected = true; socket.end(); finish(); });
-		socket.once('error', (error) => { effects.connected = code(error); finish(); });
-	} catch (error) { effects.connected = code(error); finish(); }
-});
-`;
+// The provider program and its effects file live in journeys.ts so the container
+// driver bundle carries no fake endpoint; re-exported here for the tests.
+export { SYNTHETIC_EFFECTS_FILE, SYNTHETIC_PROVIDER_SOURCE };
 
 /** Write the double into `dir` as a file (for a launch that takes a path) and return it. */
 export function writeSyntheticProvider(dir: string): string {
