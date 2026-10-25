@@ -139,12 +139,16 @@ function collectLibrary(libraryDir, library) {
 	}));
 }
 
-/** The matrix the packaged bundle reports, loaded in this plain Node process. */
+/**
+ * The matrix the packaged bundle reports, loaded in this plain Node process:
+ * the providers the app offers (a hidden definition, such as the internal
+ * terminal or a provider kept only for back-compat, is not a route to report).
+ */
 export function capabilityMatrix(libraryDir) {
 	const lib = createRequire(import.meta.url)(path.join(libraryDir, 'index.js'));
 	const routes = lib
-		.getAgentIds()
-		.filter((id) => id !== 'terminal')
+		.getVisibleAgentDefinitions()
+		.map((definition) => definition.id)
 		.flatMap((id) => lib.providerRouteSupport(id));
 	return {
 		readFrom: 'the packaged bundle, loaded by this Node process',
