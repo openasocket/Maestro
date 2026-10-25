@@ -18,8 +18,11 @@
  * content capture, inventory, dispatch bridge, command service and inbox, every
  * file in a temp data directory) against the same double, whose telemetry
  * operation applies the runtime gate transcribed from the sibling daemon
- * (`apps/endpoint/src/spool/runtime.ts` 523-534 and 544) and, when the sibling
- * contracts package is built beside this checkout, its real schemas.
+ * (`apps/endpoint/src/spool/runtime.ts` 523-534 and 544), whose inbox and
+ * notice listing answer the way the daemon's durable inbox does, and, when the
+ * sibling contracts package is built beside this checkout, its real schemas.
+ * Commands run over the same real command service with the actor supplied by
+ * the harness and said so: the service's own registration names no actor.
  */
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -29,8 +32,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createCommandService, type CommandService } from '../../../main/enterprise/commands';
 import { contentDeliveryStanding } from '../../../main/enterprise/content';
 import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
 import { INVENTORY_DELIVERY } from '../../../main/enterprise/inventory';
@@ -41,6 +45,11 @@ import { createUsageCapture } from '../../../main/enterprise/usage';
 import { vibesEvidenceOf } from '../../../main/enterprise/vibes';
 import { canonicalJson } from '../../../shared/canonicalJson';
 import * as Lib from '../../../shared/maestro-lib/index';
+import {
+	ENDPOINT_COMMAND_ACTIONS,
+	type ManagedRuntimeCommand,
+} from '../../../shared/maestro-lib/managed/commands';
+import type { ManagedEnrollmentStatus } from '../../../shared/maestro-lib/managed/endpoint-port';
 import {
 	lifecycleAdmissionOfLease,
 	lifecycleLineageOf,
@@ -527,7 +536,7 @@ describe('full pair: the real endpoint through the harness script', () => {
 
 // ---------------------------------------------------------------------------
 // The fleet side over the real desktop composition (condensed from the 10-09
-// VERIFY fixture; the commands and notices of 11-07 follow in MRC-12-03D)
+// and 11-07 VERIFY fixtures)
 // ---------------------------------------------------------------------------
 
 const SIBLING_CONTRACTS = path.resolve(process.cwd(), '../mega-maestro/packages/contracts/dist');
@@ -535,7 +544,13 @@ interface Schema {
 	safeParse(value: unknown): { success: boolean; error?: { issues: unknown[] } };
 }
 type SiblingContracts = Record<
-	'incomingMetadataEvent' | 'durableReceipt' | 'contentReference' | 'fleetInventory',
+	| 'incomingMetadataEvent'
+	| 'durableReceipt'
+	| 'contentReference'
+	| 'fleetInventory'
+	| 'noticeListRequest'
+	| 'inboxRequest'
+	| 'inboxReceipt',
 	Schema
 >;
 /** The sibling's zod schemas from its built package (read-only), or null when it is not beside this checkout. */
@@ -549,6 +564,9 @@ async function loadSibling(): Promise<SiblingContracts | null> {
 		incomingMetadataEvent: events.incomingMetadataEvent,
 		contentReference: events.contentReference,
 		durableReceipt: local.durableReceipt,
+		noticeListRequest: local.noticeListRequest,
+		inboxRequest: local.inboxRequest,
+		inboxReceipt: local.inboxReceipt,
 		fleetInventory: fleet.fleetInventory,
 	};
 }
@@ -562,6 +580,41 @@ const CANARIES = {
 	token: 'sk-ant-api03-CANARYTOKEN0123456789',
 	path: '/Users/canary/project/.env',
 	account: 'c'.repeat(64),
+};
+/** A notice body and the person's reply: the reply crosses the wire by design, so neither is a wire canary. */
+const NOTICE_BODY = 'CANARY-NOTICE planned maintenance of the billing cluster on Friday';
+const NOTICE_REPLY = 'CANARY-REPLY the Friday window collides with our release; Monday works';
+const notice = (messageId: string, body: string, expiresAt: number) => ({
+	campaignId: '7d2c3f0e-5a4b-4c6d-9e8f-0a1b2c3d4e5f',
+	messageId,
+	body,
+	expiresAt: new Date(expiresAt).toISOString(),
+	kind: 'notice',
+	agentInput: false,
+});
+const DAY = 86_400_000;
+const N1 = notice('0f1e2d3c-4b5a-4968-8776-655443322110', NOTICE_BODY, FLEET_T0 + DAY);
+const N2 = notice(
+	'1f1e2d3c-4b5a-4968-8776-655443322111',
+	'The policy revision moves.',
+	FLEET_T0 + DAY
+);
+const N_EXPIRED = notice(
+	'2f1e2d3c-4b5a-4968-8776-655443322112',
+	'Expired: never held.',
+	FLEET_T0 - 1
+);
+const N3 = notice(
+	'3f1e2d3c-4b5a-4968-8776-655443322113',
+	'Third, on the second page.',
+	FLEET_T0 + DAY
+);
+/** The daemon's inbox state for a recorded action (its receipt vocabulary). */
+const STATE_OF: Record<string, string> = {
+	delivered: 'delivered',
+	read: 'read',
+	acknowledged: 'acknowledged',
+	reply: 'replied',
 };
 /** The harness-installed collection ceiling: no endpoint operation of this build carries one (CP-01). */
 const GRANTED = { capture: true, upload: true, storage: true };
@@ -584,22 +637,37 @@ const alive = (pid: number): boolean => {
 		return false;
 	}
 };
+/** Every file under the data directory, read as text: where a body, a reply or a prompt must never be. */
+const filesUnder = (dir: string): string[] =>
+	fs
+		.readdirSync(dir, { withFileTypes: true })
+		.flatMap((entry) =>
+			entry.isDirectory()
+				? filesUnder(path.join(dir, entry.name))
+				: [fs.readFileSync(path.join(dir, entry.name), 'utf8')]
+		);
 
-describe('full pair: fleet evidence, usage, VIBES, TRACE and governance over the real desktop composition', () => {
+describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands and notices over the real desktop composition', () => {
 	let clock = FLEET_T0;
 	const now = () => clock;
 	let dir: string;
 	let fake: FakeEndpoint;
 	let service: EnterpriseService;
 	let sibling: SiblingContracts | null;
-	/** The double's durable side: the telemetry spool by event id, deduplicated the way the daemon's is. */
+	/** The double's durable side: the telemetry spool by event id and the inbox by idempotency key, deduplicated the way the daemon's are. */
 	const spool = new Map<string, Record<string, unknown>>();
+	const inbox = new Map<string, Record<string, unknown>>();
 	const denials: { operation: string; reason: string; issues?: unknown }[] = [];
+	const noticeListRequests: Record<string, unknown>[] = [];
+	const inboxRequests: { action: { kind: string; text?: string }; idempotencyKey: string }[] = [];
+	const repliesSeen: string[] = [];
 	let decisions = 0;
 	let live: Awaited<ReturnType<typeof admitChild>>;
+	let second: Awaited<ReturnType<typeof admitChild>>;
 	let lineage: LifecycleLineage;
 	let admission: ReturnType<typeof lifecycleAdmissionOfLease>;
 	let evidenceSha = '';
+	let harness: CommandService;
 
 	const fits = (schema: Schema | undefined, operation: string, value: unknown): boolean => {
 		if (!schema) return true;
@@ -611,13 +679,15 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE and governance over the
 	const delivery = () => service.eventJournal.status().delivery;
 	const wireOperations = () =>
 		new Set(fake.calls.map((c) => (c.body as { operation?: string }).operation ?? c.path));
+	const operations = (name: string) =>
+		fake.calls.filter((c) => (c.body as { operation?: string }).operation === name);
 
 	beforeAll(async () => {
 		sibling = await loadSibling();
 		dir = fs.mkdtempSync(path.join(os.tmpdir(), 'full-pair-fleet-'));
 		fake = await startFakeEndpoint({
 			registrationRequired: true,
-			capabilities: ['execution', 'telemetry'],
+			capabilities: ['execution', 'telemetry', 'inbox', 'noticeList'],
 			status: { collectionProfile: 'full_vibes' },
 			now,
 			operations: {
@@ -659,6 +729,34 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE and governance over the
 					fits(sibling?.durableReceipt, 'durableReceipt', receipt);
 					return receipt;
 				},
+				noticeList: (payload) => {
+					noticeListRequests.push(payload as Record<string, unknown>);
+					if (!fits(sibling?.noticeListRequest, 'noticeList', payload))
+						return { outcome: 'denied', reason: 'invalid_request' };
+					return (payload as { offset: number }).offset === 0
+						? { outcome: 'notices', items: [N1, N2, N_EXPIRED], nextOffset: 1 }
+						: { outcome: 'notices', items: [N3], nextOffset: null };
+				},
+				inbox: (payload) => {
+					const request = payload as (typeof inboxRequests)[number] & { messageId: string };
+					inboxRequests.push(request);
+					if (!fits(sibling?.inboxRequest, 'inbox', payload))
+						return { outcome: 'denied', reason: 'invalid_request' };
+					// A durable inbox answers the same receipt under the same key and records nothing twice.
+					const held = inbox.get(request.idempotencyKey);
+					if (held) return held;
+					if (request.action.kind === 'reply' && request.action.text)
+						repliesSeen.push(request.action.text);
+					const receipt = {
+						outcome: 'recorded',
+						messageId: request.messageId,
+						receiptId: `rcpt-${inbox.size + 1}`,
+						state: STATE_OF[request.action.kind],
+					};
+					fits(sibling?.inboxReceipt, 'inboxReceipt', receipt);
+					inbox.set(request.idempotencyKey, receipt);
+					return receipt;
+				},
 			},
 		});
 		const seal = fakeSeal();
@@ -697,10 +795,13 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE and governance over the
 		// The actor's approval, played by the test and labeled: the double has no approval producer.
 		expect((await service.policy.recover()).status).toBe('approval-required');
 		expect((await service.lifecycle.completeRegistration()).status).toBe('ok');
+		// The accepted attachment lists the notices and records `delivered` for each held one on its own.
+		await vi.waitFor(() => expect(inboxRequests).toHaveLength(3), { timeout: 5_000 });
 	}, 30_000);
 
 	afterAll(async () => {
-		if (live?.child.pid && alive(live.child.pid)) live.child.kill('SIGKILL');
+		for (const run of [live, second])
+			if (run?.child.pid && alive(run.child.pid)) run.child.kill('SIGKILL');
 		await service?.close();
 		await fake?.close();
 		fs.rmSync(dir, { recursive: true, force: true });
@@ -765,6 +866,78 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE and governance over the
 		});
 		return { child, lease: admitted.lease, exited, revocations };
 	}
+	const act = (messageId: string, action: { kind: string; text?: string }) =>
+		service.inbox.act({ campaignId: N1.campaignId, messageId, action: action as never });
+
+	it('notices: the accepted attachment lists two pages, drops the expired one and records delivered once each; read, acknowledged and a private reply are recorded under their keys, a duplicate is answered from history, an unknown message and an untyped action are refused before any request, and the reply text is in no file under the data directory', async () => {
+		expect(noticeListRequests.slice(0, 2)).toEqual([
+			{ offset: 0, limit: 8 },
+			{ offset: 1, limit: 8 },
+		]);
+		const held = service.inbox.notices();
+		expect(held.map((n) => n.messageId)).toEqual([N1.messageId, N2.messageId, N3.messageId]);
+		expect(held.every((n) => n.agentInput === false && n.recorded === 'delivered')).toBe(true);
+		expect(held[0]?.body).toBe(NOTICE_BODY);
+		expect(inboxRequests.map((r) => r.action.kind)).toEqual([
+			'delivered',
+			'delivered',
+			'delivered',
+		]);
+		expect(new Set(inboxRequests.map((r) => r.idempotencyKey)).size).toBe(3);
+		// A second listing records nothing again: the delivered receipts are durable on this host.
+		expect(await service.inbox.refresh()).toMatchObject({
+			outcome: 'listed',
+			pages: 2,
+			expired: 1,
+			newlyHeld: 0,
+			delivered: { recorded: 0 },
+		});
+		expect(inboxRequests).toHaveLength(3);
+
+		expect(await act(N1.messageId, { kind: 'read' })).toMatchObject({
+			status: 'recorded',
+			duplicate: false,
+		});
+		expect(await act(N1.messageId, { kind: 'read' })).toMatchObject({
+			status: 'recorded',
+			duplicate: true,
+		});
+		expect(inboxRequests).toHaveLength(4);
+		expect(await act(N1.messageId, { kind: 'acknowledged' })).toMatchObject({ status: 'recorded' });
+		expect(await act(N1.messageId, { kind: 'reply', text: NOTICE_REPLY })).toMatchObject({
+			status: 'recorded',
+			duplicate: false,
+		});
+		expect(repliesSeen).toEqual([NOTICE_REPLY]);
+		expect(inbox.size).toBe(6);
+		expect(service.inbox.notices().find((n) => n.messageId === N1.messageId)).toMatchObject({
+			recorded: 'replied',
+			receipts: {
+				delivered: 'recorded',
+				read: 'recorded',
+				acknowledged: 'recorded',
+				reply: 'recorded',
+			},
+		});
+		// Refused by name before any request leaves: a message the listing never held, an action the contract has no kind for.
+		expect(await act('ffffffff-4b5a-4968-8776-655443322110', { kind: 'read' })).toMatchObject({
+			status: 'denied',
+			reason: 'unknown-message',
+		});
+		expect(await act(N2.messageId, { kind: 'forward' })).toMatchObject({
+			status: 'denied',
+			reason: 'invalid-action',
+		});
+		expect(inboxRequests).toHaveLength(6);
+		expect(denials).toEqual([]);
+		// The ledger holds ids and states; the body and the reply reached the double and the person's surface only.
+		const ledger = fs.readFileSync(path.join(dir, 'maestro-managed-inbox-receipts.json'), 'utf8');
+		expect(ledger).toContain(N1.messageId);
+		for (const text of filesUnder(dir)) {
+			expect(text).not.toContain(NOTICE_REPLY);
+			expect(text).not.toContain(NOTICE_BODY);
+		}
+	});
 
 	it('TRACE and governance: a real child admitted through the real process-manager port carries its lineage on every event and a nested run its parent; the ceiling is the harness installed (CP-01) and the VIBES evidence digest recomputes, held pending_upload with no delivery', async () => {
 		// No endpoint operation installs a ceiling: the standing says so, then the harness installs one and says so.
@@ -834,18 +1007,20 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE and governance over the
 		expect(capture.facts().every((f) => f.completeness === 'pending_upload')).toBe(true);
 		expect(JSON.stringify(capture.facts())).not.toContain('CANARY');
 		expect(contentDeliveryStanding().available).toBe(false);
-		// Nothing on the wire installed, carried or delivered content: the handshake, attachments and one execution so far.
+		// Nothing on the wire installed, carried or delivered content: the handshake, attachments, notices, inbox and one execution so far.
 		const handshake = [
 			'/v1/registration/challenge',
 			'/v1/registration/redeem',
 			'attachment',
+			'noticeList',
+			'inbox',
 			'execution',
 		];
 		expect(wireOperations()).toEqual(new Set(handshake));
 	});
 
 	it('fleet evidence: the run ends under a host revocation and settles its usage as estimated; the pump hands every runtime-family event to the double once under the contract and withholds the inventory by family; canaries stay off the wire and the prompt out of the journal; a resend is a duplicate and another boot is refused', async () => {
-		// The host withdraws the lease (labeled: no command producer delivers a cancel here, MRC-12-03D): the sink stops the process.
+		// The host withdraws the lease (labeled: no command producer delivers a cancel here; the commands case below cancels a second run): the sink stops the process.
 		expect(service.dispatch.authority.revokeAll('the operator stopped the run')).toBe(1);
 		expect((await live.exited).signal).toBe('SIGTERM');
 		expect(alive(live.child.pid!)).toBe(false);
@@ -958,5 +1133,171 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE and governance over the
 		});
 		expect(foreign).toMatchObject({ status: 'denied', reason: 'unauthenticated' });
 		expect(denials).toEqual([{ operation: 'telemetry', reason: 'unauthenticated' }]);
+	}, 20_000);
+
+	// --- Commands: the real service refuses every one (its registration names no actor: CP-01/CP-04); the harness
+	// service is the same real composition with the actor id supplied, and says so. ---
+	type CommandOver = Omit<Partial<ManagedRuntimeCommand>, 'recipient'> & {
+		recipient?: Partial<ManagedRuntimeCommand['recipient']>;
+	};
+	const command = ({ recipient, ...rest }: CommandOver = {}): ManagedRuntimeCommand => {
+		const kind = rest.action?.kind ?? 'cancel-run';
+		return {
+			commandId: `cmd-${kind}`,
+			tenantId: 'tenant-pair',
+			issuerId: 'issuer-pair',
+			recipient: {
+				actorId: 'actor-pair',
+				enrollmentId: 'enr-pair',
+				installationId: service.installation.installationId,
+				runtimeId: service.installation.runtimeId,
+				processEpoch: service.installation.processEpoch,
+				runId: 'run-c',
+				...recipient,
+			},
+			action: { kind: 'cancel-run' },
+			preconditions: {
+				policyRevision: PAIR_POLICY_REVISION,
+				requiredCapability: `command-${ENDPOINT_COMMAND_ACTIONS[kind]}`,
+				policyDigest: null,
+				bindingDigest: null,
+			},
+			approval: { kind: 'policy-not-required', policyRevision: PAIR_POLICY_REVISION },
+			issuedAt: new Date(now() - 1_000).toISOString(),
+			expiresAt: new Date(now() + 60_000).toISOString(),
+			nonce: sha(`nonce-${kind}`),
+			idempotencyKey: `idem-${kind}`,
+			payloadDigest: DIGEST_A,
+			releaseId: null,
+			...rest,
+		};
+	};
+	/** The real standing with the actor id the registration never carried: what a registration producer would supply (CP-01/CP-04). */
+	const withActor = (): ManagedEnrollmentStatus => {
+		const status = service.lifecycle.status();
+		const record = status.identity.record;
+		if (!record?.registration) return status;
+		return {
+			...status,
+			identity: {
+				...status.identity,
+				record: { ...record, registration: { ...record.registration, actorId: 'actor-pair' } },
+			},
+		};
+	};
+
+	it('commands: the real service refuses every command by name (no actor); with the actor supplied, cancel_run revokes a second real child (exit observed), report_status leaks no path, program text, canary or run id, refresh_policy re-attaches, pause and resume are refused by name, and stale or replayed control is denied with no record', async () => {
+		expect(service.lifecycle.status().identity.record?.registration?.actorId).toBeNull();
+		expect(await service.commands.receive(command({ commandId: 'cmd-real' }))).toMatchObject({
+			status: 'denied',
+			reason: 'unauthenticated',
+			detail: expect.stringContaining('names no actor'),
+		});
+		expect(service.commands.status().commands.total).toBe(0);
+		harness = createCommandService({
+			installation: service.installation,
+			lifecycle: { status: withActor },
+			host: service.host,
+			policy: service.policy,
+			dispatch: service.dispatch,
+			inventory: service.inventory,
+			file: path.join(dir, 'harness-commands.json'),
+			now,
+		});
+		expect((await harness.load()).ok).toBe(true);
+		expect(harness.unsupported().map((u) => u.kind)).toEqual([
+			'pause-run',
+			'resume-run',
+			'operator-prompt',
+		]);
+
+		// cancel_run: a second real child under its own run, admitted through the real bridge; the lease is revoked and the process ends.
+		second = await admitChild(verify('run-c', null));
+		expect(second.lease.decision).toMatchObject({ decisionId: 'decision-2' });
+		expect(alive(second.child.pid!)).toBe(true);
+		expect(service.dispatch.receipt(second.lease.leaseId)?.effect.state).toBe('bound');
+		const cancelled = await harness.receive(command({ commandId: 'cmd-cancel-1' }));
+		expect(cancelled).toMatchObject({
+			status: 'completed',
+			commandId: 'cmd-cancel-1',
+			duplicate: false,
+		});
+		expect((await second.exited).signal).toBe('SIGTERM');
+		expect(alive(second.child.pid!)).toBe(false);
+		expect(second.lease.state()).toBe('revoked');
+		expect(second.revocations).toEqual([expect.stringContaining('cmd-cancel-1')]);
+		expect(service.dispatch.receipt(second.lease.leaseId)?.effect.state).toBe('revoked');
+		expect(service.dispatch.authority.live()).toEqual([]);
+		// The same command again: answered from the ledger, nothing revoked twice.
+		expect(await harness.receive(command({ commandId: 'cmd-cancel-1' }))).toMatchObject({
+			status: 'completed',
+			duplicate: true,
+		});
+		expect(second.revocations).toHaveLength(1);
+
+		// report_status: the installation and the standing, never the work.
+		const report = await harness.receive(
+			command({ action: { kind: 'report-status' }, recipient: { runId: null } })
+		);
+		expect(report).toMatchObject({ status: 'completed', commandId: 'cmd-report-status' });
+		const facts = JSON.stringify(report.status === 'completed' ? report.facts : null);
+		expect(facts).toContain(service.installation.installationId);
+		const secrets = [process.execPath, dir, 'setInterval', 'synthetic', 'CANARY', 'run-a', 'run-c'];
+		for (const secret of secrets) expect(facts).not.toContain(secret);
+
+		// refresh_policy: one more attachment on the wire, the registration kept.
+		const attachments = operations('attachment').length;
+		const refresh = command({
+			action: { kind: 'refresh-policy', desiredRevision: PAIR_POLICY_REVISION },
+			recipient: { runId: null },
+		});
+		expect(await harness.receive(refresh)).toMatchObject({
+			status: 'completed',
+			commandId: 'cmd-refresh-policy',
+		});
+		expect(operations('attachment')).toHaveLength(attachments + 1);
+		expect(service.lifecycle.status().authority).toBe('registered');
+		for (const kind of ['pause-run', 'resume-run'] as const) {
+			expect(await harness.receive(command({ action: { kind } }))).toMatchObject({
+				status: 'denied',
+				reason: 'unsupported-capability',
+				detail: `this host does not execute command-${ENDPOINT_COMMAND_ACTIONS[kind]}`,
+			});
+		}
+
+		// Stale or replayed control: denied with no record on the ledger.
+		const total = harness.status().commands.total;
+		const fresh = (id: string, over: CommandOver = {}) =>
+			command({
+				commandId: id,
+				nonce: sha(id),
+				idempotencyKey: `idem-${id}`,
+				recipient: { runId: null },
+				action: { kind: 'report-status' },
+				...over,
+			});
+		const denied = async (raw: ManagedRuntimeCommand, reason: string, detail?: RegExp) => {
+			const out = await harness.receive(raw);
+			expect(out).toMatchObject({ status: 'denied', reason });
+			if (detail && out.status === 'denied') expect(out.detail).toMatch(detail);
+		};
+		await denied(
+			fresh('stale-epoch', { recipient: { runId: null, processEpoch: 'epoch-other' } }),
+			'stale-run',
+			/process epoch/
+		);
+		await denied(fresh('lapsed', { expiresAt: new Date(now() - 1).toISOString() }), 'expired');
+		await denied(
+			fresh('other-tenant', { tenantId: 'tenant-other' }),
+			'stale-run',
+			/another tenant/
+		);
+		await denied(fresh('nonce-reuse', { nonce: sha('nonce-cancel-run') }), 'replay');
+		await denied(fresh('key-reuse', { idempotencyKey: 'idem-cancel-run' }), 'replay');
+		expect(harness.status().commands.total).toBe(total);
+		const ledger = fs.readFileSync(path.join(dir, 'harness-commands.json'), 'utf8');
+		expect(ledger).toContain('cmd-cancel-1');
+		for (const id of ['stale-epoch', 'lapsed', 'other-tenant', 'nonce-reuse', 'key-reuse'])
+			expect(ledger).not.toContain(id);
 	}, 20_000);
 });
