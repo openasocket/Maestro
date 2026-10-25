@@ -77,7 +77,10 @@
 			"dirty": false,
 			"baseRevision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
 			"branch": "feature/mega-maestro-v1.1.0-rc",
-			"host": { "platform": "darwin", "node": "v26.12.1" }
+			"host": {
+				"platform": "darwin",
+				"node": "v26.12.1"
+			}
 		},
 		"library": {
 			"dir": "dist/maestro-lib",
@@ -135,7 +138,10 @@
 			"whyRejected": "dirty source, wrong platform, no adapter; none is a clean CP-01 artifact"
 		},
 		"producerPins": {
-			"contracts": { "file": "vendor/mega-maestro/contracts.pin.json", "status": "absent" },
+			"contracts": {
+				"file": "vendor/mega-maestro/contracts.pin.json",
+				"status": "absent"
+			},
 			"runtimeAdapter": {
 				"file": "vendor/mega-maestro/runtime-adapter.pin.json",
 				"status": "absent"
@@ -204,11 +210,26 @@
 			"verdict": "blocked",
 			"blockedBy": ["registration-approval"],
 			"steps": [
-				{ "name": "compatibility", "outcome": { "status": "denied", "reason": "unauthenticated" } },
-				{ "name": "attach", "outcome": { "status": "denied", "reason": "unauthenticated" } },
+				{
+					"name": "compatibility",
+					"outcome": {
+						"status": "denied",
+						"reason": "unauthenticated"
+					}
+				},
+				{
+					"name": "attach",
+					"outcome": {
+						"status": "denied",
+						"reason": "unauthenticated"
+					}
+				},
 				{
 					"name": "registration.challenge",
-					"outcome": { "status": "denied", "reason": "unavailable" }
+					"outcome": {
+						"status": "denied",
+						"reason": "unavailable"
+					}
 				}
 			]
 		},
@@ -246,7 +267,10 @@
 			"steps": [
 				{
 					"name": "headless.standing",
-					"outcome": { "standing": "managed", "unavailableReason": null }
+					"outcome": {
+						"standing": "managed",
+						"unavailableReason": null
+					}
 				},
 				{
 					"name": "headless.admit",
@@ -266,7 +290,10 @@
 			"verdict": "blocked",
 			"blockedBy": ["CP-01", "registration-approval"],
 			"steps": [
-				{ "name": "desktop.standing", "outcome": "managed" },
+				{
+					"name": "desktop.standing",
+					"outcome": "managed"
+				},
 				{
 					"name": "desktop.admit",
 					"outcome": {
@@ -434,7 +461,11 @@
 				"blockedBy": []
 			}
 		],
-		"totals": { "required": 13, "passed": 1, "notPassed": 12 }
+		"totals": {
+			"required": 13,
+			"passed": 1,
+			"notPassed": 12
+		}
 	},
 	"failedAttemptsPreserved": [
 		{
@@ -489,9 +520,44 @@
 			"endpointRevision": "d5143a63",
 			"checkExit": 2,
 			"runExit": 3,
-			"verdicts": { "passed": 0, "failed": 0, "blocked": 5, "not-run": 0 },
+			"verdicts": {
+				"passed": 0,
+				"failed": 0,
+				"blocked": 5,
+				"not-run": 0
+			},
 			"leases": 0,
 			"moved": "nothing on the Mega-Maestro side since 2026-10-13 (revision) and 2026-10-19 (build)"
+		},
+		{
+			"date": "2026-10-25",
+			"recordedAt": "2026-10-25T19:15:12.310Z",
+			"maestroHead": "20fc93139",
+			"librarySha256": "f08ea73d",
+			"endpointRevision": "d5143a63",
+			"checkExit": 2,
+			"checkBeforeRebuild": {
+				"exit": 2,
+				"recordedAt": "2026-10-25T19:15:02.366Z",
+				"libraryStatus": "stale",
+				"dependencies": "maestro-lib, CP-01, CP-01, CP-02, CP-03, registration-approval"
+			},
+			"checkAfterRebuild": {
+				"exit": 2,
+				"libraryStatus": "ready",
+				"librarySourceRevision": "20fc93139",
+				"dependencies": "CP-01, CP-01, CP-02, CP-03, registration-approval"
+			},
+			"containerRun": "skipped by the repeat rule: no Mega-Maestro input and no library entry sha moved",
+			"runExit": null,
+			"verdicts": null,
+			"leases": null,
+			"moved": "nothing: endpoint d5143a63 (dirty, 935 entries, built 2026-10-19T17:30:27.161Z), 4 packaged artifacts dirty-source e29195d8c with the adapter unsupported, contracts pin absent, runtime-adapter and workflow-authority pins absent/absent, approval producer false; only the Maestro HEAD moved (to the commit that added this record), which the library rebuild absorbed with the same index.js sha",
+			"logs": [
+				".maestro/playbooks/Working/12-06/recheck-2/pair-check-1.json",
+				".maestro/playbooks/Working/12-06/recheck-2/pair-check-2.json",
+				".maestro/playbooks/Working/12-06/recheck-2/build-lib.log"
+			]
 		}
 	]
 }
