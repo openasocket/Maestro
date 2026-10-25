@@ -12,18 +12,48 @@
  * the harness `run --runtime` when `check` says every producer is present and
  * otherwise skips, naming the dependency and its owner. Unit doubles close
  * nothing about the real pair; the harness does, and MRC-12-06 judges its rows.
+ *
+ * The third describe is the fleet side over the REAL desktop composition
+ * (`createEnterpriseService`: projector, durable journal, telemetry client,
+ * content capture, inventory, dispatch bridge, command service and inbox, every
+ * file in a temp data directory) against the same double, whose telemetry
+ * operation applies the runtime gate transcribed from the sibling daemon
+ * (`apps/endpoint/src/spool/runtime.ts` 523-534 and 544) and, when the sibling
+ * contracts package is built beside this checkout, its real schemas.
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { pathToFileURL } from 'node:url';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { contentDeliveryStanding } from '../../../main/enterprise/content';
+import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
+import { INVENTORY_DELIVERY } from '../../../main/enterprise/inventory';
+import { createEnterpriseService, type EnterpriseService } from '../../../main/enterprise/service';
 import { createProcessSpawnAuthority } from '../../../main/enterprise/spawn-authority';
+import { telemetryReportOf } from '../../../main/enterprise/telemetry';
+import { createUsageCapture } from '../../../main/enterprise/usage';
+import { vibesEvidenceOf } from '../../../main/enterprise/vibes';
+import { canonicalJson } from '../../../shared/canonicalJson';
 import * as Lib from '../../../shared/maestro-lib/index';
-import type { ManagedOrigin } from '../../../shared/maestro-lib/managed/types';
 import {
+	lifecycleAdmissionOfLease,
+	lifecycleLineageOf,
+	type LifecycleFact,
+	type LifecycleLineage,
+	type ManagedInventoryEvent,
+	type ManagedLifecycleEvent,
+} from '../../../shared/maestro-lib/managed/events';
+import type { ManagedOrigin } from '../../../shared/maestro-lib/managed/types';
+import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';
+import { startFakeEndpoint, type FakeEndpoint } from '../../main/enterprise/fakeEndpoint';
+import {
+	brokerReceipt,
 	composePair,
 	describePairSkip,
 	PAIR_HARNESS_SCRIPT,
@@ -493,4 +523,440 @@ describe('full pair: the real endpoint through the harness script', () => {
 		},
 		400_000
 	);
+});
+
+// ---------------------------------------------------------------------------
+// The fleet side over the real desktop composition (condensed from the 10-09
+// VERIFY fixture; the commands and notices of 11-07 follow in MRC-12-03D)
+// ---------------------------------------------------------------------------
+
+const SIBLING_CONTRACTS = path.resolve(process.cwd(), '../mega-maestro/packages/contracts/dist');
+interface Schema {
+	safeParse(value: unknown): { success: boolean; error?: { issues: unknown[] } };
+}
+type SiblingContracts = Record<
+	'incomingMetadataEvent' | 'durableReceipt' | 'contentReference' | 'fleetInventory',
+	Schema
+>;
+/** The sibling's zod schemas from its built package (read-only), or null when it is not beside this checkout. */
+async function loadSibling(): Promise<SiblingContracts | null> {
+	if (!fs.existsSync(path.join(SIBLING_CONTRACTS, 'events.js'))) return null;
+	const load = (file: string) => import(pathToFileURL(path.join(SIBLING_CONTRACTS, file)).href);
+	const [events, local, fleet] = await Promise.all(
+		['events', 'local-endpoint', 'fleet'].map((f) => load(`${f}.js`))
+	);
+	return {
+		incomingMetadataEvent: events.incomingMetadataEvent,
+		contentReference: events.contentReference,
+		durableReceipt: local.durableReceipt,
+		fleetInventory: fleet.fleetInventory,
+	};
+}
+
+/** runtime.ts 530: the families a runtime source may report. */
+const RUNTIME_FAMILIES = ['presence', 'agent.lifecycle', 'usage', 'error'];
+const FLEET_T0 = Date.parse('2026-10-25T12:00:00Z');
+const DIGEST_A = 'a'.repeat(64);
+const CANARIES = {
+	prompt: 'CANARY-PROMPT refactor the billing module',
+	token: 'sk-ant-api03-CANARYTOKEN0123456789',
+	path: '/Users/canary/project/.env',
+	account: 'c'.repeat(64),
+};
+/** The harness-installed collection ceiling: no endpoint operation of this build carries one (CP-01). */
+const GRANTED = { capture: true, upload: true, storage: true };
+const CEILING = {
+	policyRevision: PAIR_POLICY_REVISION,
+	profile: 'full_vibes',
+	roles: ['user.prompt', 'vibes.annotations'],
+	permissions: { ...GRANTED, index: false, display: false, export: false },
+	sensitivity: 'restricted',
+	maxPayloadBytes: 1024 * 1024,
+	redactionRuleIds: [],
+};
+const CHILD_ARGS = ['-e', 'setInterval(() => {}, 1000)'];
+const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
+const alive = (pid: number): boolean => {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+};
+
+describe('full pair: fleet evidence, usage, VIBES, TRACE and governance over the real desktop composition', () => {
+	let clock = FLEET_T0;
+	const now = () => clock;
+	let dir: string;
+	let fake: FakeEndpoint;
+	let service: EnterpriseService;
+	let sibling: SiblingContracts | null;
+	/** The double's durable side: the telemetry spool by event id, deduplicated the way the daemon's is. */
+	const spool = new Map<string, Record<string, unknown>>();
+	const denials: { operation: string; reason: string; issues?: unknown }[] = [];
+	let decisions = 0;
+	let live: Awaited<ReturnType<typeof admitChild>>;
+	let lineage: LifecycleLineage;
+	let admission: ReturnType<typeof lifecycleAdmissionOfLease>;
+	let evidenceSha = '';
+
+	const fits = (schema: Schema | undefined, operation: string, value: unknown): boolean => {
+		if (!schema) return true;
+		const parsed = schema.safeParse(value);
+		if (!parsed.success)
+			denials.push({ operation, reason: 'invalid_request', issues: parsed.error });
+		return parsed.success;
+	};
+	const delivery = () => service.eventJournal.status().delivery;
+	const wireOperations = () =>
+		new Set(fake.calls.map((c) => (c.body as { operation?: string }).operation ?? c.path));
+
+	beforeAll(async () => {
+		sibling = await loadSibling();
+		dir = fs.mkdtempSync(path.join(os.tmpdir(), 'full-pair-fleet-'));
+		fake = await startFakeEndpoint({
+			registrationRequired: true,
+			capabilities: ['execution', 'telemetry'],
+			status: { collectionProfile: 'full_vibes' },
+			now,
+			operations: {
+				execution: (payload) =>
+					brokerReceipt(payload as Record<string, unknown>, `decision-${++decisions}`),
+				telemetry: (payload) => {
+					const env = payload as Record<string, unknown>;
+					if (!fits(sibling?.incomingMetadataEvent, 'telemetry', env))
+						return { outcome: 'denied', reason: 'invalid_request' };
+					// runtime.ts 523-527: bound to the enrollment, the installation and the boot.
+					if (
+						env.deviceId !== 'enr-pair' ||
+						env.instanceId !== service.installation.installationId ||
+						env.bootId !== service.installation.processEpoch
+					) {
+						denials.push({ operation: 'telemetry', reason: 'unauthenticated' });
+						return { outcome: 'denied', reason: 'unauthenticated' };
+					}
+					// runtime.ts 530-534 and 544: the runtime gate and the revision.
+					if (
+						env.source !== 'runtime' ||
+						!RUNTIME_FAMILIES.includes(env.family as string) ||
+						env.collectionProfile !== 'metadata' ||
+						(env.contentReferences as unknown[]).length > 0 ||
+						!['estimated', 'unavailable'].includes(env.usageProvenance as string) ||
+						['agentId', 'sessionId', 'runId', 'parentRunId', 'traceId', 'spanId'].some(
+							(k) => env[k]
+						) ||
+						env.policyRevision !== PAIR_POLICY_REVISION
+					) {
+						denials.push({ operation: 'telemetry', reason: 'policy_denied' });
+						return { outcome: 'denied', reason: 'policy_denied' };
+					}
+					const id = env.eventId as string;
+					const duplicate = spool.has(id);
+					if (!duplicate) spool.set(id, env);
+					const receivedAt = new Date(now()).toISOString();
+					const receipt = { outcome: 'durably_accepted', eventId: id, receivedAt, duplicate };
+					fits(sibling?.durableReceipt, 'durableReceipt', receipt);
+					return receipt;
+				},
+			},
+		});
+		const seal = fakeSeal();
+		service = createEnterpriseService({
+			userDataDir: dir,
+			productionDataDir: dir,
+			hostname: 'full-pair-host',
+			pid: 4242,
+			startedAt: new Date(FLEET_T0 - 60_000).toISOString(),
+			appVersion: '1.1.0-RC',
+			safeStorage: {
+				isEncryptionAvailable: () => true,
+				encryptString: (text) => seal.seal(text),
+				decryptString: (blob) => seal.unseal(blob),
+				getSelectedStorageBackend: () => 'keychain',
+			},
+			anchor: fakeAnchor({ value: null }),
+			platform: 'darwin',
+			now,
+			openPort: (socketPath) => createLocalEndpointClient({ socketPath, timeoutMs: 1_000 }),
+		});
+		await service.identity.write({
+			installationId: service.installation.installationId,
+			tenantId: 'tenant-pair',
+			orgId: 'org-pair',
+			enrollmentId: 'enr-pair',
+			endpoint: { socketPath: fake.socketPath, bindingDigest: DIGEST_A, trustRootDigest: null },
+			management: 'enrolled',
+			registration: null,
+			policy: { desiredRevision: null, appliedRevision: null, observedAt: null },
+			enrolledAt: new Date(FLEET_T0).toISOString(),
+		});
+		await service.start();
+		// The passes below are driven by hand so each outcome is observed; the idle poll is the service's own.
+		service.telemetry.stop();
+		// The actor's approval, played by the test and labeled: the double has no approval producer.
+		expect((await service.policy.recover()).status).toBe('approval-required');
+		expect((await service.lifecycle.completeRegistration()).status).toBe('ok');
+	}, 30_000);
+
+	afterAll(async () => {
+		if (live?.child.pid && alive(live.child.pid)) live.child.kill('SIGKILL');
+		await service?.close();
+		await fake?.close();
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+
+	const fact = (over: Partial<LifecycleFact>): LifecycleFact => ({
+		surface: 'agent',
+		state: 'running',
+		at: now(),
+		sessionId: 'agent-pair-ai-tab-1',
+		agentId: 'agent-pair',
+		tabId: 'tab-1',
+		provider: 'codex',
+		model: 'gpt-5-codex',
+		providerSessionId: 'thread-pair',
+		runId: 'run-a',
+		record: 'journal',
+		ledgerStatus: 'running',
+		exitCode: null,
+		durationMs: null,
+		detail: null,
+		...over,
+	});
+	/** A context the real process-manager port verified: the lineage every event of the run carries. */
+	const verify = (runId: string, parentRunId: string | null) => {
+		const verified = service.spawnAuthority.verify({
+			actor: { peer: 'in-process' },
+			identity: {
+				requestId: `req-${runId}`,
+				idempotencyKey: `key-${runId}`,
+				attemptId: `att-${runId}`,
+				runId,
+				rootRunId: parentRunId ?? runId,
+				parentRunId,
+			},
+			traceId: `trace-${runId}`,
+			policyRevision: service.host.policy().policyRevision,
+			workflow: null,
+		});
+		if (!verified.ok) throw new Error(verified.problems.join('; '));
+		return verified.context;
+	};
+	/** Admit through the real bridge (the double answers the broker decision) and start a REAL child under the lease; the test plays the sink. */
+	async function admitChild(context: ReturnType<typeof verify>) {
+		const admitted = await service.spawnAuthority.authority.admit({
+			context,
+			snapshot: Lib.buildDispatchSnapshot(
+				{ command: process.execPath, args: CHILD_ARGS, cwd: dir, env: {} },
+				{ provider: SYNTHETIC_PROVIDER_ID, model: 'synthetic', resourceIds: [] }
+			),
+			policy: service.spawnAuthority.policy(),
+		});
+		if (admitted.state !== 'admitted') throw new Error(`${admitted.state}: ${admitted.message}`);
+		const child = spawn(process.execPath, CHILD_ARGS, { cwd: dir, stdio: 'ignore' });
+		await once(child, 'spawn');
+		const exited = once(child, 'exit').then(([code, signal]) => ({ code, signal }));
+		const revocations: string[] = [];
+		admitted.lease.bind(child.pid);
+		admitted.lease.onRevoked((reason) => {
+			revocations.push(reason);
+			child.kill('SIGTERM');
+		});
+		return { child, lease: admitted.lease, exited, revocations };
+	}
+
+	it('TRACE and governance: a real child admitted through the real process-manager port carries its lineage on every event and a nested run its parent; the ceiling is the harness installed (CP-01) and the VIBES evidence digest recomputes, held pending_upload with no delivery', async () => {
+		// No endpoint operation installs a ceiling: the standing says so, then the harness installs one and says so.
+		const before = service.content.standing();
+		expect(before).toMatchObject({ mode: 'managed', ok: false, profile: 'full_vibes' });
+		expect(before.mode === 'managed' && !before.ok ? before.reason : '').toContain('CP-01');
+		expect(service.content.install(CEILING).ok).toBe(true);
+		expect(service.content.standing()).toMatchObject({ mode: 'managed', ok: true });
+
+		const context = verify('run-a', null);
+		lineage = lifecycleLineageOf(context);
+		live = await admitChild(context);
+		expect(live.lease.decision).toMatchObject({ decisionId: 'decision-1' });
+		expect(service.dispatch.receipt(live.lease.leaseId)?.effect.state).toBe('bound');
+		admission = lifecycleAdmissionOfLease(live.lease);
+
+		const started = service.events.record(fact({ lineage, admission }));
+		expect(started.map((e) => e.kind)).toEqual(['decision', 'run-state']);
+		for (const event of started) {
+			expect(event.context).toMatchObject({ traceId: 'trace-run-a', identity: lineage.identity });
+			expect(event.run).toMatchObject({ runId: 'run-a', rootRunId: 'run-a', parentRunId: null });
+		}
+		expect(started[0]?.decision).toMatchObject(admission);
+		clock += 100;
+		const nestedLineage = lifecycleLineageOf(verify('run-b', 'run-a'));
+		const [nested] = service.events.record(
+			fact({ lineage: nestedLineage, runId: 'run-b', sessionId: 'ai-tab-2' })
+		);
+		expect(nested).toMatchObject({
+			kind: 'run-state',
+			context: { traceId: 'trace-run-b', identity: { parentRunId: 'run-a' } },
+			run: { runId: 'run-b', rootRunId: 'run-a', parentRunId: 'run-a' },
+		});
+
+		// VIBES: the graph of what the projector holds, its evidence digest recomputed from the annotations on this side.
+		const graph = service.vibes();
+		expect(graph.sessions.length).toBeGreaterThan(0);
+		const evidence = vibesEvidenceOf(graph);
+		expect(sha(graph.annotations.map((a) => canonicalJson(a)).join('\n') + '\n')).toBe(
+			evidence.sha256
+		);
+		evidenceSha = evidence.sha256;
+		const capture = service.contentCapture;
+		const captureOf = (role: string, text: string, runId: string | null) =>
+			capture.capture({
+				role: role as never,
+				text,
+				sessionId: runId ? 'agent-pair-ai-tab-1' : 'host',
+				agentId: runId ? 'agent-pair' : service.installation.installationId,
+				tabId: runId ? 'tab-1' : null,
+				provider: runId ? 'codex' : 'maestro',
+				runId,
+			});
+		const vibes = captureOf(evidence.role, evidence.text, null);
+		if (vibes.outcome !== 'recorded') throw new Error(vibes.reason);
+		const { sha256, byteLength } = evidence;
+		expect(vibes.fact.original).toMatchObject({ sha256, byteLength });
+		expect(sha(capture.take(vibes.fact.original.referenceId)!.bytes)).toBe(evidence.sha256);
+		const prompt = captureOf('user.prompt', CANARIES.prompt, 'run-a');
+		if (prompt.outcome !== 'recorded') throw new Error(prompt.reason);
+		expect(prompt.fact.original.sha256).toBe(sha(Buffer.from(CANARIES.prompt, 'utf8')));
+		if (sibling) {
+			expect(sibling.contentReference.safeParse(vibes.fact.original).success).toBe(true);
+			expect(sibling.contentReference.safeParse(prompt.fact.original).success).toBe(true);
+		}
+		expect(capture.status()).toMatchObject({ records: 2, delivery: { available: false } });
+		expect(capture.facts().every((f) => f.completeness === 'pending_upload')).toBe(true);
+		expect(JSON.stringify(capture.facts())).not.toContain('CANARY');
+		expect(contentDeliveryStanding().available).toBe(false);
+		// Nothing on the wire installed, carried or delivered content: the handshake, attachments and one execution so far.
+		const handshake = [
+			'/v1/registration/challenge',
+			'/v1/registration/redeem',
+			'attachment',
+			'execution',
+		];
+		expect(wireOperations()).toEqual(new Set(handshake));
+	});
+
+	it('fleet evidence: the run ends under a host revocation and settles its usage as estimated; the pump hands every runtime-family event to the double once under the contract and withholds the inventory by family; canaries stay off the wire and the prompt out of the journal; a resend is a duplicate and another boot is refused', async () => {
+		// The host withdraws the lease (labeled: no command producer delivers a cancel here, MRC-12-03D): the sink stops the process.
+		expect(service.dispatch.authority.revokeAll('the operator stopped the run')).toBe(1);
+		expect((await live.exited).signal).toBe('SIGTERM');
+		expect(alive(live.child.pid!)).toBe(false);
+		expect(live.revocations).toEqual(['the operator stopped the run']);
+		expect(service.dispatch.receipt(live.lease.leaseId)?.effect.state).toBe('revoked');
+		clock += 4_000;
+		const detail = `stopped after ${CANARIES.token} at ${CANARIES.path}`;
+		const ended = fact({
+			lineage,
+			admission,
+			state: 'cancelled',
+			ledgerStatus: 'cancelled',
+			detail,
+		});
+		expect(service.events.record(ended)[0]).toMatchObject({
+			kind: 'run-state',
+			run: { state: 'cancelled' },
+		});
+
+		const usage = createUsageCapture({
+			events: service.events,
+			identity: () => service.lifecycle.status().identity,
+			// The real resolver reads the agent's layers; here the account is a labeled digest.
+			accountRef: () => CANARIES.account,
+			now,
+		});
+		const report = { model: 'gpt-5-codex', inputTokens: 1_600, outputTokens: 80 };
+		usage.observe('agent-pair-ai-tab-1', 'codex', { ...report, prompt: CANARIES.prompt } as never);
+		const [settled] = usage.settle({
+			...fact({ state: 'cancelled' }),
+			lineage,
+			admission,
+			total: {
+				inputTokens: 1_600,
+				outputTokens: 80,
+				cacheReadInputTokens: 1_300,
+				cacheCreationInputTokens: 0,
+				totalCostUsd: 0,
+				contextWindow: 272_000,
+			},
+		});
+		expect(settled).toMatchObject({ kind: 'usage', context: { traceId: 'trace-run-a' } });
+		expect(settled.usage).toMatchObject({ provenance: 'estimated', accountRef: CANARIES.account });
+		expect(settled.usage.attribution).toEqual({ tenantId: 'tenant-pair', orgId: 'org-pair' });
+		const events: readonly ManagedLifecycleEvent[] = service.events.recent();
+		expect(events.map((e) => e.kind).join()).toBe(
+			'inventory,decision,run-state,run-state,run-state,usage'
+		);
+		expect(delivery()).toEqual({ pending: 6, uncertain: 0, received: 0 });
+
+		const pass = await service.telemetry.pump();
+		expect(pass).toMatchObject({ outcome: 'sent', received: 5, withheld: { family: 1 } });
+		expect(await service.telemetry.pump()).toMatchObject({ outcome: 'idle', taken: 0 });
+		expect(denials).toEqual([]);
+		const sent = events.filter((e) => e.kind !== 'inventory');
+		const inventory = events.find((e) => e.kind === 'inventory') as ManagedInventoryEvent;
+		// Known-source comparison: the spool against the projector's events, in order, once each.
+		expect([...spool.keys()]).toEqual(sent.map((e) => e.eventId));
+		for (const event of sent) {
+			expect(spool.get(event.eventId)).toMatchObject({
+				sequence: event.sequence,
+				occurredAt: event.occurredAt,
+				bootId: service.installation.processEpoch,
+				instanceId: service.installation.installationId,
+				deviceId: 'enr-pair',
+				family: event.kind === 'usage' ? 'usage' : 'agent.lifecycle',
+				policyRevision: PAIR_POLICY_REVISION,
+				usageProvenance: event.kind === 'usage' ? 'estimated' : 'unavailable',
+			});
+		}
+		expect(delivery()).toEqual({ pending: 1, uncertain: 0, received: 5 });
+		await service.eventJournal.flush();
+		const journalFile = path.join(dir, 'maestro-managed-events.json');
+		const written = JSON.parse(fs.readFileSync(journalFile, 'utf8')) as {
+			entries: { eventId: string; delivery: string; attempts: number; event: { kind: string } }[];
+		};
+		const received = written.entries.filter((e) => e.delivery === 'received').map((e) => e.eventId);
+		expect(received).toEqual([...spool.keys()]);
+		const kept = written.entries.find((e) => e.event.kind === 'inventory');
+		expect(kept).toMatchObject({ eventId: inventory.eventId, delivery: 'pending', attempts: 0 });
+		// The inventory is withheld by name; its fact fits the sibling's fleet shape, which no runtime source may carry.
+		const standing = service.host.telemetryStanding();
+		if (!standing.ok) throw new Error(standing.reason);
+		const withheld = telemetryReportOf(inventory, standing.binding);
+		expect(withheld).toMatchObject({ ok: false, reason: 'family' });
+		expect(INVENTORY_DELIVERY.available).toBe(false);
+		const { device, runtimes, completeness } = inventory.inventory;
+		expect(device).toMatchObject({ deviceId: 'enr-pair' });
+		const fleetShape = { device, runtimes, completeness };
+		if (sibling) expect(sibling.fleetInventory.safeParse(fleetShape).success).toBe(true);
+		// Canaries: nothing of the work crossed the socket; the journal keeps the detail and the account digest, never the prompt.
+		const wire = JSON.stringify(fake.calls);
+		const offWire = [evidenceSha, 'agent-pair', 'thread-pair', 'tab-1', '1600', 'trace-', 'lease-'];
+		for (const canary of [...Object.values(CANARIES), ...offWire])
+			expect(wire).not.toContain(canary);
+		const journal = fs.readFileSync(journalFile, 'utf8');
+		expect(journal).toContain(CANARIES.token);
+		expect(journal).toContain(CANARIES.account);
+		expect(journal).toContain('trace-run-b');
+		expect(journal).not.toContain(CANARIES.prompt);
+		// The same id again through the real port: the double answers duplicate and spools nothing new; another boot is refused.
+		const projected = telemetryReportOf(sent[0]!, standing.binding);
+		if (!projected.ok) throw new Error(projected.detail);
+		const again = await service.host.telemetry!.report(projected.report);
+		expect(again).toMatchObject({ status: 'ok', payload: { duplicate: true } });
+		expect(spool.size).toBe(5);
+		const foreign = await service.host.telemetry!.report({
+			...projected.report,
+			bootId: 'epoch-other',
+		});
+		expect(foreign).toMatchObject({ status: 'denied', reason: 'unauthenticated' });
+		expect(denials).toEqual([{ operation: 'telemetry', reason: 'unauthenticated' }]);
+	}, 20_000);
 });
