@@ -1,0 +1,227 @@
+{
+	"type": "support-matrix",
+	"title": "Maestro 1.1.0-RC managed operation: per-route support and residual requirements",
+	"created": "2026-10-25",
+	"task": "MRC-12-04",
+	"generated": {
+		"routes": "capabilityMatrix(dist/maestro-lib).routes from scripts/package-mega-maestro-runtime.mjs, folded to routes[agentId][route] = [standalone, managed]; the generator is .maestro/playbooks/Working/12-04-support-matrix.mjs",
+		"library": {
+			"version": "0.24.0",
+			"managedContract": "maestro-managed/1",
+			"endpointProtocol": 1,
+			"node": ">=20",
+			"sourceRevision": "4a7e5af1523a9f95c0238bf002a29dea7d03746b",
+			"sourceDirty": false
+		},
+		"readOn": {
+			"platform": "darwin",
+			"arch": "arm64",
+			"node": "v26.12.1"
+		}
+	},
+	"words": {
+		"implemented": "exercised on this build; a caller may proceed",
+		"unverified": "the route exists but its evidence is the capability table alone; a managed caller refuses",
+		"unsupported": "no producer; a managed caller refuses and never falls back to standalone"
+	},
+	"routes": {
+		"claude-code": {
+			"child-process": ["implemented", "implemented"],
+			"codex-app-server": ["unsupported", "unsupported"],
+			"opencode-server": ["unsupported", "unsupported"],
+			"pty": ["implemented", "unsupported"],
+			"ssh": ["unverified", "unsupported"]
+		},
+		"codex": {
+			"child-process": ["implemented", "implemented"],
+			"codex-app-server": ["implemented", "unsupported"],
+			"opencode-server": ["unsupported", "unsupported"],
+			"pty": ["unverified", "unsupported"],
+			"ssh": ["unverified", "unsupported"]
+		},
+		"antigravity": {
+			"child-process": ["implemented", "implemented"],
+			"codex-app-server": ["unsupported", "unsupported"],
+			"opencode-server": ["unsupported", "unsupported"],
+			"pty": ["unverified", "unsupported"],
+			"ssh": ["unverified", "unsupported"]
+		},
+		"qwen3-coder": {
+			"child-process": ["implemented", "implemented"],
+			"codex-app-server": ["unsupported", "unsupported"],
+			"opencode-server": ["unsupported", "unsupported"],
+			"pty": ["implemented", "unsupported"],
+			"ssh": ["unverified", "unsupported"]
+		},
+		"hermes": {
+			"child-process": ["implemented", "implemented"],
+			"codex-app-server": ["unsupported", "unsupported"],
+			"opencode-server": ["unsupported", "unsupported"],
+			"pty": ["unverified", "unsupported"],
+			"ssh": ["unverified", "unsupported"]
+		},
+		"pi": {
+			"child-process": ["implemented", "implemented"],
+			"codex-app-server": ["unsupported", "unsupported"],
+			"opencode-server": ["unsupported", "unsupported"],
+			"pty": ["unverified", "unsupported"],
+			"ssh": ["unverified", "unsupported"]
+		},
+		"omp": {
+			"child-process": ["implemented", "implemented"],
+			"codex-app-server": ["unsupported", "unsupported"],
+			"opencode-server": ["unsupported", "unsupported"],
+			"pty": ["unverified", "unsupported"],
+			"ssh": ["unverified", "unsupported"]
+		},
+		"opencode": {
+			"child-process": ["implemented", "implemented"],
+			"codex-app-server": ["unsupported", "unsupported"],
+			"opencode-server": ["implemented", "unsupported"],
+			"pty": ["unverified", "unsupported"],
+			"ssh": ["unverified", "unsupported"]
+		},
+		"factory-droid": {
+			"child-process": ["implemented", "implemented"],
+			"codex-app-server": ["unsupported", "unsupported"],
+			"opencode-server": ["unsupported", "unsupported"],
+			"pty": ["unverified", "unsupported"],
+			"ssh": ["unverified", "unsupported"]
+		},
+		"copilot-cli": {
+			"child-process": ["implemented", "implemented"],
+			"codex-app-server": ["unsupported", "unsupported"],
+			"opencode-server": ["unsupported", "unsupported"],
+			"pty": ["implemented", "unsupported"],
+			"ssh": ["unverified", "unsupported"]
+		},
+		"grok": {
+			"child-process": ["implemented", "implemented"],
+			"codex-app-server": ["unsupported", "unsupported"],
+			"opencode-server": ["unsupported", "unsupported"],
+			"pty": ["unverified", "unsupported"],
+			"ssh": ["unverified", "unsupported"]
+		}
+	},
+	"routeNotes": [
+		"headless turn through the shared child-process launch; launch admitted at the real spawn (runAgentTurn, startTurn) against a local authority; no real authority producer paired (CP-03); provider-internal tool, file and network effects unqualified",
+		"only Codex has an app-server",
+		"only OpenCode has a server",
+		"interactive terminal through the PTY spawner; no managed enforcement producer on this route in this build",
+		"remote launch exists; containment on the remote is not proven here; no managed enforcement producer on this route in this build",
+		"Codex app-server transport; no managed enforcement producer on this route in this build",
+		"provider needs a prompt to start; interactive PTY use is not exercised; no managed enforcement producer on this route in this build",
+		"shared OpenCode server; no managed enforcement producer on this route in this build"
+	],
+	"harness": {
+		"agentId": "synthetic-harness",
+		"route": "child-process",
+		"routeId": "synthetic-harness/node-permission-v1",
+		"standalone": "implemented",
+		"managed": "implemented",
+		"note": "inline Node program under --permission, admitted at the real spawn with declared read-only inputs and a private work directory",
+		"enforcement": {
+			"files": "read: the declared inputs only; write: the work directory only; anything else ERR_ACCESS_DENIED",
+			"network": "denied: no --allow-net, so connect and listen fail with ERR_ACCESS_DENIED",
+			"descendants": "denied: no --allow-child-process or --allow-worker, so none can start",
+			"environment": "complete, not inherited: PATH and HOME only",
+			"enforcedBy": "node-permission-model"
+		},
+		"qualifies": "exactly this: a synthetic Node program launched through the protected dispatch on this host",
+		"doesNotQualify": "any real provider (Claude, Codex, OpenCode or another), anything a provider starts, or the Node permission model as an OS boundary"
+	},
+	"readings": [
+		"managed: implemented on child-process is the launch admitted at the real spawn, not the provider: tool, file and network effects of a real provider are unqualified",
+		"hermes reads implemented from the capability table, but planSessionTurn refuses it with no-parser, so no Hermes turn runs on any surface",
+		"an enrolled installation with the reviewed endpoint refuses every real launch as unavailable (effect authority and delegation producers absent: CP-01, CP-03); only the synthetic harness route runs end to end",
+		"ssh stays unsupported until a remote attests a registered authority with managed: implemented on its own ssh row; no build of this version does"
+	],
+	"acceptance": {
+		"source": "Plans/mega-maestro-rc/evidence/*.json positiveAcceptanceMatrix",
+		"passed": [],
+		"notPassed": [
+			"enrollment-policy",
+			"protected-effects",
+			"desktop-dispatch",
+			"cli-dispatch",
+			"credential-routing",
+			"autorun",
+			"cue",
+			"delegated-work",
+			"secondary-effects",
+			"fleet-evidence",
+			"commands-notices"
+		],
+		"pending": ["headless-library (MRC-12-06)", "standalone (MRC-12-05)"],
+		"lastRealPair": {
+			"file": ".maestro/playbooks/Working/12-02B-pair-run.json",
+			"exit": 3,
+			"verdicts": {
+				"passed": 0,
+				"failed": 0,
+				"blocked": 5,
+				"not-run": 0
+			},
+			"leases": 0,
+			"runtimeArchiveSha256": "4963972d4a73d938c417e21f26f45076a63063d7818988529c967925a7fbaee0"
+		}
+	},
+	"requirements": {
+		"producers": [
+			{
+				"id": "CP-01",
+				"owner": "mega-maestro",
+				"needs": "current public contracts pin (vendor/mega-maestro/contracts.pin.json) and a clean packaged endpoint artifact",
+				"blocks": [
+					"library.admit",
+					"headless.turn",
+					"desktop.admit",
+					"desktop.workflow",
+					"collection ceiling from the endpoint",
+					"fleet comparison"
+				]
+			},
+			{
+				"id": "CP-02",
+				"owner": "mega-maestro",
+				"needs": "a supported createMaestroAdapter qualified against the packaged runtime, and a command operation on the runtime socket",
+				"blocks": ["headless.turn", "command delivery to a Maestro runtime"]
+			},
+			{
+				"id": "CP-03",
+				"owner": "mega-maestro",
+				"needs": "authenticated delegation and workflow authority accepted by the bridge, durable owner fencing",
+				"blocks": [
+					"desktop.workflow",
+					"Auto Run on an enrolled host",
+					"group chat and consults on an enrolled host",
+					"nested CLI dispatch"
+				]
+			},
+			{
+				"id": "registration-approval",
+				"owner": "mega-maestro",
+				"needs": "an API or console producer that approves the actor registration and names the actor (CP-04); production notice custody",
+				"blocks": ["library.handshake", "every registered standing", "commands", "notices"]
+			}
+		],
+		"platform": [
+			"identity custody needs Electron safeStorage or an equivalent protected seal; a plain Node host (maestro-cli host) composes no managed standing",
+			"Linux basic_text safeStorage and a missing keyring anchor read custody-refused; nothing managed runs",
+			"the synthetic harness route needs --permission, --allow-fs-read, --allow-fs-write, --allow-net and --allow-child-process honored by the Node binary (Node 26 yes, Node 22.16 no) and is not offered on Windows",
+			"the endpoint pinned container image runs Node 22.16 without --allow-net, so headless.turn cannot pass inside it"
+		],
+		"provider": [
+			"no real provider route is enforced beyond launch admission; provider-internal effects are unqualified",
+			"pty, codex-app-server, opencode-server and ssh have no managed enforcement producer",
+			"pause_run and resume_run have no desktop producer (no provider route holds a turn without stopping it); operator_prompt has no desktop prompt port",
+			"usage provenance is estimated or unavailable from a runtime; gateway_metered and provider_reported belong to the endpoint and the provider"
+		],
+		"maestroOwned": [
+			"createUsageCapture is not composed into the desktop process stream (carried from phase 10)",
+			"maestro-cli host composes neither the command service nor the inbox client",
+			"docs/mega-maestro.md is not yet in docs/docs.json navigation (MRC2-07-07)",
+			"contextOf() and lifecycleLineageOf() copy lineage.identity by spread (hardening)"
+		]
+	}
+}
