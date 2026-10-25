@@ -558,6 +558,36 @@
 				".maestro/playbooks/Working/12-06/recheck-2/pair-check-2.json",
 				".maestro/playbooks/Working/12-06/recheck-2/build-lib.log"
 			]
+		},
+		{
+			"date": "2026-10-25",
+			"recordedAt": "2026-10-25T19:18:30.116Z",
+			"maestroHead": "f4c6103eb",
+			"librarySha256": "f08ea73d",
+			"endpointRevision": "d5143a63",
+			"checkExit": 2,
+			"checkBeforeRebuild": {
+				"exit": 2,
+				"recordedAt": "2026-10-25T19:18:19.215Z",
+				"libraryStatus": "stale",
+				"dependencies": "maestro-lib, CP-01, CP-01, CP-02, CP-03, registration-approval"
+			},
+			"checkAfterRebuild": {
+				"exit": 2,
+				"libraryStatus": "ready",
+				"librarySourceRevision": "f4c6103eb",
+				"dependencies": "CP-01, CP-01, CP-02, CP-03, registration-approval"
+			},
+			"containerRun": "skipped by the repeat rule: no Mega-Maestro input and no library entry sha moved",
+			"runExit": null,
+			"verdicts": null,
+			"leases": null,
+			"moved": "nothing: endpoint d5143a63 (dirty, 935 entries, built 2026-10-19T17:30:27.161Z), 4 packaged artifacts dirty-source e29195d8c with the adapter unsupported, contracts pin absent, runtime-adapter and workflow-authority pins absent/absent, approval producer false; only the Maestro HEAD moved (to the commit that appended the second recheck row), which the library rebuild absorbed with the same index.js sha",
+			"logs": [
+				".maestro/playbooks/Working/12-06/recheck-3/pair-check-1.json",
+				".maestro/playbooks/Working/12-06/recheck-3/pair-check-2.json",
+				".maestro/playbooks/Working/12-06/recheck-3/build-lib.log"
+			]
 		}
 	]
 }
