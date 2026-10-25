@@ -5,9 +5,26 @@
  * exactly which producer is missing when the pair cannot be closed.
  *
  *   node scripts/mega-maestro-pair.mjs check [--sibling <dir>] [--artifact <dir>]
- *        [--library dist/maestro-lib] [--image <ref>] [--json]
- *   node scripts/mega-maestro-pair.mjs run   [the same] [--allow-dirty] [--allow-stale]
- *        [--approve-command <cmd>] [--timeout-ms <n>] [--out <evidence.json>] [--keep]
+ *        [--library dist/maestro-lib | --runtime <packaged runtime dir>] [--image <ref>] [--json]
+ *   node scripts/mega-maestro-pair.mjs run   [the same] [--surfaces library,headless,desktop]
+ *        [--allow-dirty] [--allow-stale] [--approve-command <cmd>] [--timeout-ms <n>]
+ *        [--out <evidence.json>] [--keep]
+ *
+ * The journeys the driver runs live in
+ * `src/__tests__/integration/mega-maestro/journeys.ts` (one catalog for the
+ * container and the tests): the library handshake and admission, the headless
+ * authority running the harness program under its lease, the desktop
+ * process-manager port admitting a chat turn and claiming an Auto Run fence.
+ * `--runtime` drives the packaged Maestro runtime artifact
+ * (`npm run package:mega-maestro-runtime`) instead of `dist/maestro-lib`: only
+ * its `library/` payload is extracted, every file checked against the
+ * manifest, and nothing else in the archive is loaded. The producer pins
+ * beside the contracts pin (`runtime-adapter.pin.json` for CP-02,
+ * `workflow-authority.pin.json` for CP-03: `sha256`, `sourceRevision`,
+ * `sourceDirty`, and for CP-02 `qualifiedAgainst.maestroRuntimeSha256`) are
+ * fresh only when they name the clean endpoint source being driven; a journey
+ * whose producer is not fresh is recorded blocked by that producer, whatever
+ * the endpoint answered.
  *
  * `check` inspects every input of the pair and reports them as one JSON
  * record: the built library (`provenance.json`, its payload digests, whether
@@ -43,6 +60,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parseArgs } from 'node:util';
+import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -117,13 +135,131 @@ export function inspectPin(file) {
 		return {
 			status: 'pinned',
 			file,
-			digest: pin.digest ?? null,
+			digest: pin.sha256 ?? pin.digest ?? null,
 			sourceRevision: pin.sourceRevision ?? null,
 			sourceDirty: pin.sourceDirty ?? null,
 		};
 	} catch (error) {
 		return { status: 'malformed', file, reason: String(error) };
 	}
+}
+
+/** The archive name `scripts/package-mega-maestro-runtime.mjs` writes (not imported: that script imports this one). */
+export const RUNTIME_ARCHIVE_NAME = 'runtime.tgz';
+
+/** One packaged Maestro runtime artifact directory, bound to its digest by name, sidecar and manifest. */
+export function inspectRuntimeArtifact(dir, headRevision) {
+	const manifestFile = path.join(dir, 'artifact.json');
+	if (!exists(manifestFile)) return { status: 'no-manifest', dir };
+	const manifest = readJson(manifestFile);
+	const archive = path.join(dir, RUNTIME_ARCHIVE_NAME);
+	const archiveSha256 = exists(archive) ? sha256(fs.readFileSync(archive)) : null;
+	const sidecar = `${archive}.sha256`;
+	const sidecarSha256 = exists(sidecar)
+		? fs.readFileSync(sidecar, 'utf8').trim().split(/\s+/)[0]
+		: null;
+	const bound =
+		archiveSha256 !== null &&
+		sidecarSha256 === archiveSha256 &&
+		manifest.archive?.sha256 === archiveSha256 &&
+		path.basename(dir) === archiveSha256;
+	const stale = headRevision !== null && manifest.source?.head !== headRevision;
+	const status =
+		manifest.kind !== 'maestro-runtime'
+			? 'wrong-kind'
+			: !bound
+				? 'digest-mismatch'
+				: manifest.certifiable !== true
+					? 'not-certifiable'
+					: stale
+						? 'stale'
+						: 'ready';
+	return {
+		status,
+		dir,
+		archiveSha256,
+		versions: manifest.versions ?? null,
+		sourceHead: manifest.source?.head ?? null,
+		treeDirty: manifest.source?.treeDirty ?? null,
+		library: manifest.source?.library ?? null,
+		contracts: manifest.contracts?.status ?? null,
+		stale,
+		certifiable: manifest.certifiable === true,
+		reasons: manifest.reasons ?? [],
+		payloadSha256: manifest.payloadSha256 ?? {},
+	};
+}
+
+function readProducerPin(file) {
+	if (!exists(file)) return { status: 'absent', file };
+	try {
+		const pin = readJson(file);
+		return {
+			status: 'pinned',
+			file,
+			sha256: pin.sha256 ?? null,
+			sourceRevision: pin.sourceRevision ?? null,
+			sourceDirty: pin.sourceDirty ?? null,
+			qualifiedAgainst: pin.qualifiedAgainst ?? null,
+		};
+	} catch (error) {
+		return { status: 'malformed', file, reason: String(error) };
+	}
+}
+
+/**
+ * The standing of every producer the journeys need, against the endpoint
+ * source the run drives: fresh only when pinned from that clean source.
+ */
+export function inspectProducers({ pin, pinDir, source, runtime, approvalProducer }) {
+	const revision = source?.sourceRevision ?? source?.revision ?? null;
+	const clean = revision !== null && (source?.sourceDirty ?? source?.dirty) === false;
+	const against = `endpoint source ${revision ?? 'absent'}${clean ? '' : ' (dirty or absent)'}`;
+	const fromSource = (p) =>
+		p.status === 'pinned' && clean && p.sourceRevision === revision && p.sourceDirty === false;
+	const adapter = readProducerPin(path.join(pinDir, 'runtime-adapter.pin.json'));
+	const workflow = readProducerPin(path.join(pinDir, 'workflow-authority.pin.json'));
+	const declared = source?.maestroAdapter?.status ?? source?.adapter?.status ?? 'absent';
+	const contractsFresh =
+		pin.status === 'pinned' &&
+		clean &&
+		(source?.contractsSha256
+			? pin.digest === source.contractsSha256
+			: pin.sourceRevision === revision);
+	const adapterFresh =
+		fromSource(adapter) &&
+		declared !== 'unsupported' &&
+		declared !== 'absent' &&
+		(!runtime || adapter.qualifiedAgainst?.maestroRuntimeSha256 === runtime.archiveSha256);
+	return {
+		'CP-01': {
+			fresh: contractsFresh,
+			detail: contractsFresh
+				? `contracts ${pin.digest} pinned from ${against}`
+				: `contracts pin ${pin.status}; needs the clean contracts artifact of ${against}`,
+			pin: { status: pin.status, digest: pin.digest ?? null },
+		},
+		'CP-02': {
+			fresh: adapterFresh,
+			detail: adapterFresh
+				? `runtime adapter ${adapter.sha256} qualified against this runtime`
+				: `runtime adapter pin ${adapter.status}, declared ${declared}; needs a supported createMaestroAdapter from ${against}${runtime ? ` qualified against runtime ${runtime.archiveSha256}` : ''}`,
+			pin: adapter,
+		},
+		'CP-03': {
+			fresh: fromSource(workflow),
+			detail: fromSource(workflow)
+				? `workflow authority ${workflow.sha256} pinned from ${against}`
+				: `workflow authority pin ${workflow.status}; needs the delegation/workflow owner producer from ${against}`,
+			pin: workflow,
+		},
+		'registration-approval': {
+			fresh: Boolean(approvalProducer),
+			detail: approvalProducer
+				? 'an approval producer is configured (--approve-command)'
+				: 'no API/console producer to approve the actor registration (--approve-command)',
+		},
+	};
 }
 
 /** One packaged application artifact directory (`artifact.json` beside `application.tgz`). */
@@ -159,6 +295,9 @@ export function inspectArtifactDir(dir) {
 		platform: manifest.platform ?? null,
 		arch: manifest.arch ?? null,
 		components: Object.keys(manifest.components ?? {}),
+		contractsSha256: manifest.contracts?.sha256 ?? null,
+		/** CP-02 as the artifact itself declares it (`maestro.status`), never guessed. */
+		maestroAdapter: manifest.maestro ?? null,
 		certifiable: archiveDigest !== null && sidecarDigest === archiveDigest && !sourceDirty && linux,
 	};
 }
@@ -282,13 +421,10 @@ export function assessPair(report) {
 			`no clean Linux application artifact (${dirty} dirty-source packaged artifact(s); development checkout is never certifiable)`
 		);
 	}
-	const checkout = report.endpointSources.find((s) => s.kind === 'development-checkout');
-	if (checkout?.adapter?.status !== 'unknown')
-		open(
-			'CP-02',
-			'mega-maestro',
-			`runtime adapter createMaestroAdapter is ${checkout?.adapter?.status ?? 'absent'}`
-		);
+	for (const id of ['CP-02', 'CP-03'])
+		if (!report.producers[id].fresh) open(id, 'mega-maestro', report.producers[id].detail);
+	if (report.runtime && report.runtime.status !== 'ready')
+		open('maestro-runtime', 'maestro', `packaged runtime artifact is ${report.runtime.status}`);
 	if (!report.linuxHost.linux)
 		open('linux-host', 'maestro', 'no Linux Docker engine with built-in seccomp');
 	else if (!report.linuxHost.image.present)
@@ -298,16 +434,24 @@ export function assessPair(report) {
 			`image ${report.linuxHost.image.ref} is not present (pull it explicitly)`
 		);
 	if (!report.approvalProducer)
-		open(
-			'registration-approval',
-			'mega-maestro',
-			'no API/console producer to approve the actor registration (--approve-command)'
-		);
+		open('registration-approval', 'mega-maestro', report.producers['registration-approval'].detail);
 	return { ready: dependencies.length === 0, dependencies };
+}
+
+/** The endpoint source a run drives: the named artifact, else the first certifiable one, else the built checkout. */
+export function chooseEndpointSource(report, options) {
+	return options.artifact
+		? report.endpointSources[0]
+		: (report.endpointSources.find((s) => s.certifiable) ??
+				report.endpointSources.find(
+					(s) => s.kind === 'development-checkout' && s.status === 'built'
+				) ??
+				null);
 }
 
 export function buildCheckReport(options) {
 	const headRevision = git(REPO_ROOT, ['rev-parse', 'HEAD']);
+	const pinFile = path.resolve(options.pin ?? DEFAULT_PIN_FILE);
 	const endpointSources = [];
 	if (options.artifact) endpointSources.push(inspectArtifactDir(path.resolve(options.artifact)));
 	const sibling = inspectSibling(path.resolve(options.sibling ?? DEFAULT_SIBLING_DIR));
@@ -328,11 +472,21 @@ export function buildCheckReport(options) {
 					.filter((l) => l && !/^\?\? /.test(l)).length > 0,
 		},
 		library: inspectLibrary(path.resolve(options.library ?? DEFAULT_LIBRARY_DIR), headRevision),
-		pin: inspectPin(path.resolve(options.pin ?? DEFAULT_PIN_FILE)),
+		runtime: options.runtime
+			? inspectRuntimeArtifact(path.resolve(options.runtime), headRevision)
+			: null,
+		pin: inspectPin(pinFile),
 		endpointSources,
 		linuxHost: inspectLinuxHost(options.image ?? DEFAULT_IMAGE),
 		approvalProducer: Boolean(options.approveCommand),
 	};
+	report.producers = inspectProducers({
+		pin: report.pin,
+		pinDir: path.dirname(pinFile),
+		source: chooseEndpointSource(report, options),
+		runtime: report.runtime,
+		approvalProducer: report.approvalProducer,
+	});
 	report.assessment = assessPair(report);
 	return report;
 }
@@ -347,48 +501,35 @@ const DRIVER_SOURCE = String.raw`
 const fs = require('node:fs');
 const os = require('node:os');
 const lib = require('/library/index.js');
-const { createLocalEndpointClient } = require('/driver/endpoint-client.cjs');
+const bundle = require('/driver/bundle.cjs');
 const OUT = process.env.PAIR_OUT;
+const surfaces = (process.env.PAIR_SURFACES || '').split(',').filter(Boolean);
 const out = { driver: 'mega-maestro-pair', platform: process.platform, node: process.version, uid: process.getuid(),
-	library: { version: lib.MAESTRO_LIB_VERSION, contract: lib.MANAGED_CONTRACT_VERSION, protocol: lib.LOCAL_ENDPOINT_PROTOCOL }, steps: [] };
+	library: { version: lib.MAESTRO_LIB_VERSION, contract: lib.MANAGED_CONTRACT_VERSION, protocol: lib.LOCAL_ENDPOINT_PROTOCOL }, surfaces, steps: [] };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// The approval code goes to the approval producer once, through a private file, and is never in the evidence; the wait is bounded.
+const approvalMs = Number(process.env.PAIR_APPROVAL_TIMEOUT_MS || 0);
+const approval = approvalMs > 0 ? async (challenge) => {
+	fs.writeFileSync(OUT + '/challenge.json', JSON.stringify(challenge), { mode: 0o600 });
+	const deadline = Date.now() + approvalMs;
+	while (Date.now() < deadline && !fs.existsSync(OUT + '/approval.json')) await wait(250);
+	fs.rmSync(OUT + '/challenge.json', { force: true });
+	return fs.existsSync(OUT + '/approval.json');
+} : undefined;
 async function main() {
-	const port = createLocalEndpointClient({ socketPath: process.env.PAIR_SOCKET });
+	const port = bundle.createLocalEndpointClient({ socketPath: process.env.PAIR_SOCKET });
 	const installation = lib.installationIdentity({ hostname: os.hostname(), productionDataDir: '/work/maestro-data', mode: 'pair', pid: process.pid, startedAt: new Date().toISOString() });
 	out.installation = installation;
-	const step = async (name, fn) => { const t = Date.now(); let outcome; try { outcome = await fn(); } catch (e) { outcome = { status: 'threw', message: String(e) }; } out.steps.push({ name, ms: Date.now() - t, outcome, connection: port.state() }); return outcome; };
-	const components = [{ id: 'maestro-lib', kind: 'runtime', version: lib.MAESTRO_LIB_VERSION }];
-	const attach = () => port.attach({ installationId: installation.installationId, runtimeId: installation.runtimeId, processEpoch: installation.processEpoch, components, supportedProtocols: [1], supportedCapabilities: ['attachment', 'compatibility', 'execution', 'telemetry'], requiredCapabilities: [] });
-	await step('compatibility', () => port.compatibility({ protocol: 1, components, requiredCapabilities: [] }));
-	let status = await step('attach', attach);
-	const challenge = await step('registration.challenge', () => port.registration.challenge({ runtimeId: installation.runtimeId, processEpoch: installation.processEpoch }));
-	if (challenge.status === 'ok') {
-		// The approval code goes to the approval producer once, through a private file, and is never in the evidence.
-		const { nonce, ...shown } = challenge.payload;
-		fs.writeFileSync(OUT + '/challenge.json', JSON.stringify({ ...shown, nonce }), { mode: 0o600 });
-		const deadline = Date.now() + Number(process.env.PAIR_APPROVAL_TIMEOUT_MS || 0);
-		while (Date.now() < deadline && !fs.existsSync(OUT + '/approval.json')) await wait(250);
-		fs.rmSync(OUT + '/challenge.json', { force: true });
-		const approved = fs.existsSync(OUT + '/approval.json');
-		out.approval = approved ? 'approved' : 'no-producer';
-		if (approved) { await step('registration.redeem', () => port.registration.redeem()); status = await step('attach.registered', attach); }
-	}
-	const endpointStatus = status.status === 'ok' ? status.payload : null;
-	const view = { status: 'ok', reason: null, message: null, record: { version: 1, installationId: installation.installationId, tenantId: 'pair-development', orgId: 'pair-development', enrollmentId: null,
+	// A labeled development record: custody is not under test here, the endpoint's answers are.
+	const identity = (status) => ({ version: 1, installationId: installation.installationId, tenantId: 'pair-development', orgId: 'pair-development', enrollmentId: null,
 		endpoint: { socketPath: process.env.PAIR_SOCKET, bindingDigest: 'a'.repeat(64), trustRootDigest: null }, management: 'enrolled', registration: null,
-		policy: { desiredRevision: endpointStatus?.desiredPolicyRevision ?? null, appliedRevision: endpointStatus?.appliedPolicyRevision ?? null, observedAt: new Date().toISOString() }, enrolledAt: new Date().toISOString(), updatedAt: new Date().toISOString() } };
-	const standing = () => { const c = port.state(); const ok = c.attached && c.registration === 'registered' && c.status?.management === 'managed'; return { identity: view, connection: c, endpoint: c.status, authority: ok ? 'registered' : 'none', reason: ok ? null : 'not registered-attached-managed in this process', pendingApproval: null, lastDenial: null }; };
-	const adapter = lib.createManagedHostAdapter({ installation, identity: { read: () => view }, endpoint: port, status: standing });
-	out.policyStatus = adapter.policyStatus();
-	const verifier = lib.createContextVerifier({ verifierId: 'pair-driver', peer: 'in-process', now: Date.now, accept: () => [] });
-	const verified = verifier.verify(lib.inProcessContext({ installation, origin: 'headless', actor: { kind: 'service', id: 'pair-harness' }, delegation: { chain: [], grantRef: null },
-		identity: { requestId: 'pair-req-1', idempotencyKey: 'pair-key-1', attemptId: 'pair-att-1', runId: 'pair-run-1', rootRunId: 'pair-run-1', parentRunId: null },
-		policyRevision: endpointStatus?.appliedPolicyRevision ?? null, workflow: null, traceId: 'pair-trace-1', requestedCapabilities: ['runs.submit'] }));
-	if (!verified.ok) throw new Error('context refused: ' + verified.problems.join('; '));
-	const snapshot = lib.buildDispatchSnapshot({ command: process.execPath, args: ['-e', 'process.exit(0)'], cwd: '/work', env: {} }, { provider: '${SYNTHETIC_ENDPOINT_PROVIDER}', model: 'synthetic', resourceIds: [] });
-	await step('execution.admit', () => adapter.authority.admit({ context: verified.context, snapshot, policy: adapter.policy() }));
-	await step('execution.raw', () => port.invoke('execution', { requestId: 'pair-raw-1', attemptId: 'pair-raw-1', runId: 'pair-raw-run', source: 'headless', operation: 'start', arguments: [], resources: [], provider: '${SYNTHETIC_ENDPOINT_PROVIDER}', model: 'synthetic', policyRevision: endpointStatus?.appliedPolicyRevision ?? 0 }));
-	out.leases = adapter.authority.live().length;
+		policy: { desiredRevision: status?.desiredPolicyRevision ?? null, appliedRevision: status?.appliedPolicyRevision ?? null, observedAt: new Date().toISOString() }, enrolledAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+	fs.mkdirSync('/work/pair', { recursive: true });
+	out.journeys = await bundle.runPairJourneys({ lib, port, installation, identity, provider: '${SYNTHETIC_ENDPOINT_PROVIDER}',
+		surfaces: surfaces.length ? surfaces : undefined, workDir: '/work/pair', desktop: bundle, approval, timeoutMs: 10000 });
+	out.approval = out.journeys.approval;
+	out.steps = out.journeys.journeys.flatMap((j) => j.steps.map((s) => ({ journey: j.id, ...s })));
+	out.leases = out.journeys.leases;
 	out.state = port.state();
 	await port.close();
 }
@@ -435,23 +576,76 @@ function stageEndpointFromArtifact(artifactDir, into) {
 	fs.cpSync(path.join(extracted, found, '..', '..'), into, { recursive: true, dereference: true });
 }
 
-async function bundleClient(into) {
+export const DRIVER_BUNDLE_ENTRIES = {
+	'main/enterprise/endpoint-client.ts': ['createLocalEndpointClient'],
+	'main/enterprise/spawn-authority.ts': ['createProcessSpawnAuthority'],
+	'__tests__/integration/mega-maestro/journeys.ts': [
+		'runPairJourneys',
+		'assessJourney',
+		'PAIR_JOURNEYS',
+	],
+};
+
+/** Bundle the driver's Maestro modules once; the same file runs in the container and assesses on the host. */
+async function bundleDriver(into) {
 	const esbuild = await import('esbuild');
 	fs.mkdirSync(into, { recursive: true });
+	const entry = path.join(into, 'entry.ts');
+	fs.writeFileSync(
+		entry,
+		Object.entries(DRIVER_BUNDLE_ENTRIES)
+			.map(
+				([file, names]) =>
+					`export { ${names.join(', ')} } from ${JSON.stringify(path.join(REPO_ROOT, 'src', file))};`
+			)
+			.join('\n')
+	);
+	const outfile = path.join(into, 'bundle.cjs');
 	await esbuild.build({
-		entryPoints: [path.join(REPO_ROOT, 'src', 'main', 'enterprise', 'endpoint-client.ts')],
+		entryPoints: [entry],
 		bundle: true,
 		platform: 'node',
 		target: 'node20',
 		format: 'cjs',
 		logLevel: 'silent',
-		outfile: path.join(into, 'endpoint-client.cjs'),
+		outfile,
 	});
+	const bundled = fs.readFileSync(outfile, 'utf8');
+	if (/require\("electron"\)/.test(bundled)) throw new Error('the driver bundle requires electron');
 	fs.writeFileSync(path.join(into, 'driver.cjs'), DRIVER_SOURCE);
 	return {
-		clientSha256: sha256(fs.readFileSync(path.join(into, 'endpoint-client.cjs'))),
+		file: outfile,
+		entries: DRIVER_BUNDLE_ENTRIES,
+		bundleSha256: sha256(bundled),
 		driverSha256: sha256(DRIVER_SOURCE),
 	};
+}
+
+/** Extract only the packaged runtime's library payload, and refuse unless every file is the manifest's. */
+function stageLibraryFromRuntime(runtime, into) {
+	fs.mkdirSync(into, { recursive: true });
+	execFileSync('tar', [
+		'-xzf',
+		path.join(runtime.dir, RUNTIME_ARCHIVE_NAME),
+		'-C',
+		into,
+		'--strip-components=2',
+		'package/library',
+	]);
+	const walk = (dir) =>
+		fs
+			.readdirSync(dir, { withFileTypes: true })
+			.flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]));
+	const files = walk(into);
+	const named = Object.keys(runtime.payloadSha256).filter((p) => p.startsWith('library/'));
+	const mismatched = files
+		.map((file) => `library/${path.relative(into, file).split(path.sep).join('/')}`)
+		.filter((rel, i) => runtime.payloadSha256[rel] !== sha256(fs.readFileSync(files[i])));
+	if (mismatched.length > 0 || files.length !== named.length)
+		throw new Error(
+			`the runtime payload is not its manifest's: ${mismatched.join(', ') || `${files.length} files extracted, ${named.length} named`}`
+		);
+	return { files: files.length, archiveSha256: runtime.archiveSha256 };
 }
 
 /** Run the approval producer on the host once the driver has handed the challenge over. */
@@ -490,13 +684,22 @@ const readOut = (dir, name) => {
 
 export async function runPair(options) {
 	const report = buildCheckReport(options);
-	const source = options.artifact
-		? report.endpointSources[0]
-		: (report.endpointSources.find((s) => s.certifiable) ??
-			report.endpointSources.find(
-				(s) => s.kind === 'development-checkout' && s.status === 'built'
-			));
+	const source = chooseEndpointSource(report, options);
 	const refusals = [];
+	const stamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15);
+	const workspace = path.resolve(REPO_ROOT, WORKING_DIR, `pair-${stamp}`);
+	let libraryDir = path.resolve(options.library ?? DEFAULT_LIBRARY_DIR);
+	let staged = null;
+	if (report.runtime) {
+		const status = report.runtime.status;
+		if (!['ready', 'stale', 'not-certifiable'].includes(status))
+			refusals.push(`the packaged runtime artifact is ${status}`);
+		else {
+			libraryDir = path.join(workspace, 'library');
+			staged = stageLibraryFromRuntime(report.runtime, libraryDir);
+			report.library = inspectLibrary(libraryDir, report.host.maestroHead);
+		}
+	}
 	if (!source)
 		refusals.push('no endpoint source: no clean artifact and no built development checkout');
 	if (source && !source.certifiable && !options.allowDirty)
@@ -509,17 +712,19 @@ export async function runPair(options) {
 		refusals.push(`the built library is ${report.library.status}`);
 	if (!report.linuxHost.linux || !report.linuxHost.image.present)
 		refusals.push('no Linux engine or the pinned image is absent');
-	if (refusals.length) return { ...report, run: { status: 'refused', refusals } };
+	if (refusals.length) {
+		fs.rmSync(workspace, { recursive: true, force: true });
+		return { ...report, run: { status: 'refused', refusals } };
+	}
 
-	const stamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15);
-	const workspace = path.resolve(REPO_ROOT, WORKING_DIR, `pair-${stamp}`);
 	const endpointDir = path.join(workspace, 'endpoint');
 	const driverDir = path.join(workspace, 'driver');
 	const outDir = path.join(workspace, 'out');
 	for (const dir of [workspace, outDir]) fs.mkdirSync(dir, { recursive: true });
 	if (source.kind === 'packaged') stageEndpointFromArtifact(source.dir, endpointDir);
 	else stageEndpointFromCheckout(source.dir, endpointDir);
-	const bundle = await bundleClient(driverDir);
+	const bundle = await bundleDriver(driverDir);
+	const surfaces = options.surfaces ?? [];
 	const timeoutMs = options.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
 	const stopWatching = options.approveCommand
 		? watchForChallenge(outDir, options.approveCommand, timeoutMs)
@@ -533,7 +738,7 @@ export async function runPair(options) {
 		'--tmpfs',
 		'/work:rw,exec,size=512m',
 		'-v',
-		`${path.resolve(options.library ?? DEFAULT_LIBRARY_DIR)}:/library:ro`,
+		`${libraryDir}:/library:ro`,
 		'-v',
 		`${endpointDir}:/endpoint:ro`,
 		'-v',
@@ -544,6 +749,8 @@ export async function runPair(options) {
 		'NODE_ENV=development',
 		'-e',
 		`PAIR_APPROVAL_TIMEOUT_MS=${options.approveCommand ? timeoutMs : 0}`,
+		'-e',
+		`PAIR_SURFACES=${surfaces.join(',')}`,
 		'-w',
 		'/work',
 		options.image ?? DEFAULT_IMAGE,
@@ -554,18 +761,46 @@ export async function runPair(options) {
 	const startedAt = new Date().toISOString();
 	const container = docker(args, { timeout: timeoutMs + 30_000 });
 	stopWatching();
+	const driverResult = readOut(outDir, 'driver.json');
+	const { assessJourney } = createRequire(import.meta.url)(bundle.file);
+	const journeys = (driverResult?.journeys?.journeys ?? []).map((result) =>
+		assessJourney(result, report.producers)
+	);
 	const run = {
+		surfaces: surfaces.length ? surfaces : 'all',
+		journeys,
+		verdicts: Object.fromEntries(
+			['passed', 'failed', 'blocked', 'not-run'].map((v) => [
+				v,
+				journeys.filter((j) => j.verdict === v).length,
+			])
+		),
 		status:
 			container.status === 0
 				? 'completed'
 				: container.error
 					? 'container-failed'
 					: 'container-nonzero',
-		certifiable: source.certifiable && report.library.status === 'ready',
+		certifiable:
+			source.certifiable &&
+			report.library.status === 'ready' &&
+			(!report.runtime || report.runtime.status === 'ready'),
 		notCertifiableBecause: [
 			...(source.certifiable ? [] : [`endpoint source ${source.kind} is ${source.status} (CP-01)`]),
 			...(report.library.status === 'ready' ? [] : [`library is ${report.library.status}`]),
+			...(!report.runtime || report.runtime.status === 'ready'
+				? []
+				: [`packaged runtime is ${report.runtime.status}`]),
 		],
+		/** Both source digests: the Maestro runtime driven (packaged or dist) and the endpoint source. */
+		runtime: report.runtime
+			? {
+					archiveSha256: report.runtime.archiveSha256,
+					sourceHead: report.runtime.sourceHead,
+					library: report.runtime.library,
+					staged,
+				}
+			: { archiveSha256: null, library: report.library, staged: null },
 		startedAt,
 		endedAt: new Date().toISOString(),
 		workspace,
@@ -595,7 +830,7 @@ export async function runPair(options) {
 			driver: {
 				exit: readOut(outDir, 'driver.exit'),
 				log: readOut(outDir, 'driver.log'),
-				result: readOut(outDir, 'driver.json'),
+				result: driverResult,
 				approval: options.approveCommand
 					? exists(path.join(outDir, 'approval.json'))
 					: 'no-producer',
@@ -607,6 +842,7 @@ export async function runPair(options) {
 	fs.rmSync(path.join(outDir, 'challenge.json'), { force: true });
 	if (!options.keep) {
 		fs.rmSync(endpointDir, { recursive: true, force: true });
+		if (staged) fs.rmSync(libraryDir, { recursive: true, force: true });
 		fs.rmSync(path.join(workspace, 'artifact'), { recursive: true, force: true });
 	}
 	return { ...report, run };
@@ -624,6 +860,8 @@ export async function main(argv) {
 			sibling: { type: 'string' },
 			artifact: { type: 'string' },
 			library: { type: 'string' },
+			runtime: { type: 'string' },
+			surfaces: { type: 'string' },
 			pin: { type: 'string' },
 			image: { type: 'string' },
 			'approve-command': { type: 'string' },
@@ -639,7 +877,7 @@ export async function main(argv) {
 	const command = positionals[0];
 	if (values.help || !['check', 'run'].includes(command)) {
 		process.stdout.write(
-			'usage: mega-maestro-pair.mjs check|run [--sibling DIR] [--artifact DIR] [--library DIR] [--image REF] [--approve-command CMD] [--allow-dirty] [--allow-stale] [--timeout-ms N] [--out FILE] [--keep] [--json]\n'
+			'usage: mega-maestro-pair.mjs check|run [--sibling DIR] [--artifact DIR] [--library DIR | --runtime DIR] [--surfaces library,headless,desktop] [--image REF] [--approve-command CMD] [--allow-dirty] [--allow-stale] [--timeout-ms N] [--out FILE] [--keep] [--json]\n'
 		);
 		return values.help ? 0 : 2;
 	}
@@ -647,6 +885,8 @@ export async function main(argv) {
 		sibling: values.sibling,
 		artifact: values.artifact,
 		library: values.library,
+		runtime: values.runtime,
+		surfaces: values.surfaces ? values.surfaces.split(',').filter(Boolean) : undefined,
 		pin: values.pin,
 		image: values.image,
 		approveCommand: values['approve-command'],
