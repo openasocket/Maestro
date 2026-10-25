@@ -152,11 +152,14 @@
 			"delegated-work",
 			"secondary-effects",
 			"fleet-evidence",
-			"commands-notices"
+			"commands-notices",
+			"headless-library (MRC-12-06, joint-integration.json: the built library attached to the real daemon and was denied unauthenticated, headless.admit runtime-unavailable; CP-01, CP-02, registration-approval)"
 		],
-		"pending": ["headless-library (MRC-12-06)"],
+		"pending": [],
 		"lastRealPair": {
-			"file": ".maestro/playbooks/Working/12-02B-pair-run.json",
+			"file": ".maestro/playbooks/Working/12-06/pair-run.json",
+			"record": "Plans/mega-maestro-rc/joint-integration.json",
+			"date": "2026-10-25T19:06Z",
 			"exit": 3,
 			"verdicts": {
 				"passed": 0,
@@ -165,8 +168,11 @@
 				"not-run": 0
 			},
 			"leases": 0,
-			"runtimeArchiveSha256": "4963972d4a73d938c417e21f26f45076a63063d7818988529c967925a7fbaee0"
-		}
+			"libraryEntrySha256": "f08ea73d57cc12ead5308b034073ef76f4c489605c5a0120c82a3f96ec7cdf50",
+			"endpointRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+			"certifiable": false
+		},
+		"completion": "MRC-12-06 unchecked: CP-01, CP-02, CP-03 and registration-approval absent (owner mega-maestro); see joint-integration.json"
 	},
 	"requirements": {
 		"producers": [

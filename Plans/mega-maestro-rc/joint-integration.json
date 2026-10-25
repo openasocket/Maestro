@@ -1,0 +1,497 @@
+{
+	"frontMatter": {
+		"type": "evidence",
+		"title": "Joint integration record: the final real Maestro/Mega-Maestro pair (MRC-12-06, incomplete)",
+		"created": "2026-10-25",
+		"phase": 12,
+		"task": "MRC-12-06",
+		"base_revision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+		"head_revision": "a112e973683ea879a4f3cc211b4b654f71ab65c8",
+		"branch": "feature/mega-maestro-v1.1.0-rc",
+		"tags": ["maestro", "mega-maestro", "integration", "evidence", "phase-12", "joint-integration"],
+		"related": [
+			"[[EXECUTION-RULES]]",
+			"[[ANALYSIS]]",
+			"[[PHASE2-GAPS]]",
+			"[[03]]",
+			"[[04]]",
+			"[[05]]",
+			"[[06]]",
+			"[[07]]",
+			"[[08]]",
+			"[[09]]",
+			"[[10]]",
+			"[[11]]",
+			"[[12-standalone]]"
+		]
+	},
+	"summary": "The final real pair was driven again on 2026-10-25 with the library rebuilt from HEAD a112e9736 (maestro-lib 0.24.0, index.js f08ea73d) against the only Mega-Maestro endpoint source on this host, the development checkout at d5143a63 (dirty, 935 entries, endpoint built 2026-10-19; labeled with --allow-dirty), inside the pinned Linux harness image. The daemon started, attached as unenrolled, and every one of the five journeys ended before any lease: attach and compatibility denied unauthenticated, the registration challenge unavailable (no approval producer), execution and workflow admission runtime-unavailable, the desktop admission denied unauthenticated. Zero leases, zero effects, exit 3 by design. The record separates three claims: Maestro code is complete for every owned task of the twelve phases (all implementation, test and verify boxes except this one are checked; see the per-phase evidence); joint integration is NOT verified, because the three cross-project producers (CP-01 fresh contracts and clean packaged artifacts, CP-02 a supported createMaestroAdapter, CP-03 an authenticated delegation/workflow authority) and the registration-approval producer are absent, so no required acceptance row passed against the real pair; production qualification is not implied by anything here. Twelve of thirteen required rows are not passed; the thirteenth (standalone) passed for what it demonstrates on this host. This task stays unchecked.",
+	"claims": {
+		"localCode": {
+			"claim": "All owned implementation tasks and focused checks complete",
+			"status": "met",
+			"basis": "MAESTRO-MEGA-01..12 have every IMPLEMENT, TEST and VERIFY box checked except MRC-12-06 and the three VERIFY boxes that the rules keep open while a producer is absent (MRC-01-06, MRC-02-07, MRC-03-08, MRC-04-05; see each phase's evidence and PHASE2-GAPS for the counterpart gaps). Focused suites, type checks and builds for phase 12 are recorded in evidence/12-standalone.md (469 files, 9153 passed, 0 failed, 14 skipped with each gate recorded).",
+			"notClaimed": "Completed local code is not completed integration (EXECUTION-RULES, Completion)."
+		},
+		"pairedIntegration": {
+			"claim": "Both real pair milestones pass against exact source/artifact pins; required CP producers present",
+			"status": "not met",
+			"basis": "Phase 04's early pair (MRC-04-05) and this final pair (MRC-12-06) both ended with every journey blocked and zero leases; CP-01, CP-02, CP-03 and registration-approval are open, owner mega-maestro. No required acceptance row passed against the real pair.",
+			"notClaimed": "No unit double, labeled fake daemon or harness-installed ceiling counts toward this claim. The per-phase fixture journeys are positive evidence at the Maestro boundary only."
+		},
+		"production": {
+			"claim": "Separate platform/provider/customer identity/custody/scale qualification; not implied by this playbook",
+			"status": "not addressed",
+			"basis": "Nothing in this playbook enrolled a real tenant, used a real provider, paid for traffic, deployed or published."
+		}
+	},
+	"commands": [
+		{
+			"step": "pair check",
+			"command": "node scripts/mega-maestro-pair.mjs check --json",
+			"exit": 2,
+			"recordedAt": "2026-10-25T19:04:52.781Z",
+			"result": "library stale (built from 7405e099d, HEAD a112e9736); contracts pin absent; 4 packaged artifacts dirty-source (e29195d8) with maestroAdapter unsupported (public-artifact-not-supplied); development checkout built, dirty; adapter unsupported; Docker 29.9.2 with the pinned image present; approvalProducer false; dependencies: maestro-lib, CP-01 x2, CP-02, CP-03, registration-approval",
+			"log": ".maestro/playbooks/Working/12-06/pair-check.json"
+		},
+		{
+			"step": "rebuild the library from HEAD",
+			"command": "npm run build:maestro-lib",
+			"exit": 0,
+			"result": "dist/maestro-lib/index.js 1705.5 KB, maestro-lib 0.24.0, maestro-managed/1, index.js sha256 f08ea73d57cc12ead5308b034073ef76f4c489605c5a0120c82a3f96ec7cdf50 (unchanged from the 12-05 build; only provenance.json moved to a112e9736, which clears the stale reading)",
+			"log": ".maestro/playbooks/Working/12-06/build-lib.log"
+		},
+		{
+			"step": "final real pair run",
+			"command": "node scripts/mega-maestro-pair.mjs run --allow-dirty --out .maestro/playbooks/Working/12-06/pair-run.json",
+			"exit": 3,
+			"startedAt": "2026-10-25T19:06:38.491Z",
+			"endedAt": "2026-10-25T19:06:46.741Z",
+			"result": "run status completed, certifiable false (endpoint source development-checkout is built (CP-01)); container exit 0; native peer build exit 0; daemon start exit 0 (socketPath /work/ws/.local/endpoint/ipc.sock, runtimeSocketPath /work/ws/.local/endpoint/runtime.sock); driver exit 0; status answer attached, management unenrolled, capabilities [], desiredPolicyRevision null, appliedPolicyRevision null, connectivity unavailable, collectionProfile metadata; stop exit 0 (stopping); verdicts passed 0 / failed 0 / blocked 5 / not-run 0; leases 0; approval not-offered (no producer)",
+			"log": ".maestro/playbooks/Working/12-06/pair-run.json, pair-run.stdout, pair-run.err (empty)"
+		}
+	],
+	"pins": {
+		"maestro": {
+			"head": "a112e973683ea879a4f3cc211b4b654f71ab65c8",
+			"dirty": false,
+			"baseRevision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+			"branch": "feature/mega-maestro-v1.1.0-rc",
+			"host": { "platform": "darwin", "node": "v26.12.1" }
+		},
+		"library": {
+			"dir": "dist/maestro-lib",
+			"version": "0.24.0",
+			"managedContract": "maestro-managed/1",
+			"protocol": 1,
+			"sourceRevision": "a112e973683ea879a4f3cc211b4b654f71ab65c8",
+			"sourceDirty": false,
+			"stale": false,
+			"payloadFiles": 293,
+			"mismatched": 0,
+			"entrySha256": "f08ea73d57cc12ead5308b034073ef76f4c489605c5a0120c82a3f96ec7cdf50"
+		},
+		"driverBundle": {
+			"bundleSha256": "81afc663b6d68b3febc6ebe0b79712f4a2c34c118daababfc85a2b0cc73b16d9",
+			"entries": {
+				"main/enterprise/endpoint-client.ts": ["createLocalEndpointClient"],
+				"main/enterprise/spawn-authority.ts": ["createProcessSpawnAuthority"],
+				"__tests__/integration/mega-maestro/journeys.ts": [
+					"runPairJourneys",
+					"assessJourney",
+					"PAIR_JOURNEYS"
+				]
+			}
+		},
+		"endpoint": {
+			"kind": "development-checkout",
+			"dir": "../mega-maestro",
+			"branch": "feature/mega-maestro-foundations",
+			"revision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+			"committed": "2026-10-13T14:07:03-04:00",
+			"dirty": true,
+			"dirtyEntries": 935,
+			"endpointCli": "apps/endpoint/dist/cli.js",
+			"endpointBuiltAt": "2026-10-19T17:30:27.161Z",
+			"peerNodePrebuilt": false,
+			"peerSourcePresent": true,
+			"runtimeAdapter": {
+				"file": "packages/runtime-adapter/dist/maestro.js",
+				"status": "unsupported"
+			},
+			"contractsDistPresent": true,
+			"certifiable": false,
+			"unchangedSince": "the MRC-12-02B run of 2026-10-25T17:21Z and every earlier phase run (same revision, same build time)"
+		},
+		"packagedArtifactsRejected": {
+			"dir": "../mega-maestro/artifacts/application/0.1.0",
+			"count": 4,
+			"digests": ["2f7206b0e7c5", "381701b01d09", "e2864376c896", "f87c39a5f696"],
+			"sourceRevision": "e29195d8c45568bdbc4decc90b0190fd2cb88ed5",
+			"sourceDirty": true,
+			"platform": "darwin/arm64 (not a Linux application artifact)",
+			"contractsSha256": "3e0fc6311bc02c10b6823191826453ca003f90a44b0be9fadbc9229ed7997e63",
+			"maestroAdapter": "unsupported (public-artifact-not-supplied)",
+			"whyRejected": "dirty source, wrong platform, no adapter; none is a clean CP-01 artifact"
+		},
+		"producerPins": {
+			"contracts": { "file": "vendor/mega-maestro/contracts.pin.json", "status": "absent" },
+			"runtimeAdapter": {
+				"file": "vendor/mega-maestro/runtime-adapter.pin.json",
+				"status": "absent"
+			},
+			"workflowAuthority": {
+				"file": "vendor/mega-maestro/workflow-authority.pin.json",
+				"status": "absent"
+			}
+		},
+		"linuxHarness": {
+			"docker": "29.9.2",
+			"seccompBuiltin": true,
+			"image": {
+				"ref": "node@sha256:71bcbb3b215b3fa84b5b167585675072f4c270855e37a599803f1a58141a0716",
+				"id": "sha256:71bcbb3b215b3fa84b5b167585675072f4c270855e37a599803f1a58141a0716",
+				"os": "linux",
+				"arch": "arm64",
+				"created": "2025-05-21T17:04:49Z",
+				"nodeInContainer": "v22.16.0"
+			},
+			"workspace": ".maestro/playbooks/Working/pair-20261025T190634 (scratch, removed by the harness unless --keep)"
+		}
+	},
+	"producers": {
+		"CP-01": {
+			"owner": "mega-maestro",
+			"producer": "Fresh contracts and packaged API/endpoint/gateway artifacts",
+			"status": "open",
+			"observed": "contracts pin absent; no clean Linux application artifact (4 dirty-source darwin artifacts; the development checkout is never certifiable)",
+			"blocks": ["library.admit", "headless.turn", "desktop.admit", "desktop.workflow"]
+		},
+		"CP-02": {
+			"owner": "mega-maestro",
+			"producer": "Actual implementation of packages/runtime-adapter/src/maestro.ts (createMaestroAdapter)",
+			"status": "open",
+			"observed": "runtime adapter pin absent; dist/maestro.js declares unsupported",
+			"blocks": ["headless.turn"]
+		},
+		"CP-03": {
+			"owner": "mega-maestro",
+			"producer": "Authenticated delegation/workflow authority, protocol receivers and durable ownership/fencing",
+			"status": "open",
+			"observed": "workflow authority pin absent; the endpoint bridge rejects a nonempty delegation or workflow context; no workflow operation",
+			"blocks": ["desktop.workflow"]
+		},
+		"registration-approval": {
+			"owner": "mega-maestro",
+			"producer": "An API or console producer that approves the actor registration (the harness takes it as --approve-command)",
+			"status": "open",
+			"observed": "no producer; the handshake stops at the challenge (registration.challenge denied unavailable), the daemon stays unenrolled",
+			"blocks": [
+				"library.handshake",
+				"library.admit",
+				"headless.turn",
+				"desktop.admit",
+				"desktop.workflow"
+			]
+		},
+		"CP-04-note": "The daemon's unenrolled standing (no enrollment anywhere, PHASE2-GAPS CP-04) is what every unauthenticated denial above reads as; it resolves with registration-approval and CP-01 together."
+	},
+	"journeys": [
+		{
+			"id": "library.handshake",
+			"surface": "library",
+			"observed": "failed",
+			"verdict": "blocked",
+			"blockedBy": ["registration-approval"],
+			"steps": [
+				{ "name": "compatibility", "outcome": { "status": "denied", "reason": "unauthenticated" } },
+				{ "name": "attach", "outcome": { "status": "denied", "reason": "unauthenticated" } },
+				{
+					"name": "registration.challenge",
+					"outcome": { "status": "denied", "reason": "unavailable" }
+				}
+			]
+		},
+		{
+			"id": "library.admit",
+			"surface": "library",
+			"observed": "failed",
+			"verdict": "blocked",
+			"blockedBy": ["CP-01", "registration-approval"],
+			"steps": [
+				{
+					"name": "execution.admit",
+					"outcome": {
+						"state": "unavailable",
+						"code": "runtime-unavailable",
+						"message": "not registered-attached-managed in this process"
+					}
+				},
+				{
+					"name": "execution.raw",
+					"outcome": {
+						"status": "unavailable",
+						"reason": "not-attached",
+						"message": "This connection is not attached; attach() first."
+					}
+				}
+			]
+		},
+		{
+			"id": "headless.turn",
+			"surface": "headless",
+			"observed": "failed",
+			"verdict": "blocked",
+			"blockedBy": ["CP-01", "CP-02", "registration-approval"],
+			"steps": [
+				{
+					"name": "headless.standing",
+					"outcome": { "standing": "managed", "unavailableReason": null }
+				},
+				{
+					"name": "headless.admit",
+					"outcome": {
+						"state": "unavailable",
+						"code": "runtime-unavailable",
+						"message": "not registered-attached-managed in this process"
+					}
+				}
+			],
+			"platformNote": "Even with every producer present, the pinned harness image runs Node v22.16.0, which has no --allow-net permission flag, so the synthetic harness route (buildHarnessLaunchSpec) cannot admit a turn inside this container; a Node 24+ image or a host-side run is a Maestro-owned follow-up recorded in evidence/12-standalone.md and docs/mega-maestro.md."
+		},
+		{
+			"id": "desktop.admit",
+			"surface": "desktop",
+			"observed": "failed",
+			"verdict": "blocked",
+			"blockedBy": ["CP-01", "registration-approval"],
+			"steps": [
+				{ "name": "desktop.standing", "outcome": "managed" },
+				{
+					"name": "desktop.admit",
+					"outcome": {
+						"state": "denied",
+						"code": "unauthenticated",
+						"message": "The context was not bound by a verifier on this host.",
+						"policyRevision": null
+					}
+				}
+			]
+		},
+		{
+			"id": "desktop.workflow",
+			"surface": "desktop",
+			"observed": "failed",
+			"verdict": "blocked",
+			"blockedBy": ["CP-01", "CP-03", "registration-approval"],
+			"steps": [
+				{
+					"name": "workflow.claim",
+					"outcome": {
+						"state": "unavailable",
+						"code": "runtime-unavailable",
+						"message": "No policy revision is known for this host, so workflow \"pair-autorun\" cannot be claimed under one."
+					}
+				}
+			]
+		}
+	],
+	"effectsAndReceipts": {
+		"leases": 0,
+		"childProcesses": 0,
+		"fileEffects": 0,
+		"egress": 0,
+		"receipts": 0,
+		"positiveEffectsObserved": "none: every journey stopped at authentication or availability before any effect, which is the designed fail-closed behavior of the Maestro sinks, not a passed row",
+		"deniedEffectsObserved": "every denial above is an authentication or availability refusal, not a policy denial; the rules say counting only denials cannot satisfy completion, and nothing here is counted"
+	},
+	"positiveAcceptanceMatrix": {
+		"source": "Plans/mega-maestro-rc/execution-plan.json positiveAcceptanceMatrix (13 rows, all required)",
+		"legend": {
+			"passed": "the outcome was observed against the real pair or, for standalone, demonstrated on this host",
+			"not passed": "the Maestro side is built and exercised (fixture journey, real sinks, labeled doubles) but the outcome was not observed against the real pair",
+			"rule": "no row counts as passed from a double, a skipped case or a denial-only run"
+		},
+		"rows": [
+			{
+				"id": "enrollment-policy",
+				"required": true,
+				"verificationTask": "MRC-03-08",
+				"passed": false,
+				"evidence": "evidence/03.md (ten re-checks, the tenth 2026-10-25)",
+				"realPair": "attach denied unauthenticated, registration challenge unavailable; no policy delivered, no install receipt, no revoke",
+				"blockedBy": ["CP-01", "registration-approval"]
+			},
+			{
+				"id": "protected-effects",
+				"required": true,
+				"verificationTask": "MRC-04-05",
+				"passed": false,
+				"evidence": "evidence/04.json (nine re-checks, the ninth 2026-10-25)",
+				"realPair": "execution.admit runtime-unavailable; no child, file or egress effect and no broker decision through the real endpoint",
+				"blockedBy": ["CP-01", "CP-02", "registration-approval"]
+			},
+			{
+				"id": "headless-library",
+				"required": true,
+				"verificationTask": "MRC-12-06",
+				"passed": false,
+				"evidence": "this record (journeys library.handshake, library.admit, headless.turn)",
+				"realPair": "the built library attached to the real daemon and was denied unauthenticated; headless standing read managed, headless.admit runtime-unavailable; no submit, inspect or cancel ran; the current authority denial is observed but is an authentication refusal",
+				"blockedBy": ["CP-01", "CP-02", "registration-approval"],
+				"maestroOwnedLimit": "harness image Node v22.16.0 lacks --allow-net (see journeys.headless.turn.platformNote)"
+			},
+			{
+				"id": "desktop-dispatch",
+				"required": true,
+				"verificationTask": "MRC-06-10",
+				"passed": false,
+				"evidence": "evidence/06.json",
+				"realPair": "desktop.admit denied unauthenticated (the context was not bound by a verifier on this host); no process-manager child route ran against the real pair",
+				"blockedBy": ["CP-01", "registration-approval"]
+			},
+			{
+				"id": "cli-dispatch",
+				"required": true,
+				"verificationTask": "MRC-06-10",
+				"passed": false,
+				"evidence": "evidence/06.json (cli-admission row)",
+				"realPair": "not driven; the CLI authority reaches the same endpoint operation that is unavailable here",
+				"blockedBy": ["CP-01", "CP-02", "registration-approval"]
+			},
+			{
+				"id": "autorun",
+				"required": true,
+				"verificationTask": "MRC-07-09",
+				"passed": false,
+				"evidence": "evidence/07.json (autorun-lineage-admitted row)",
+				"realPair": "desktop.workflow claim runtime-unavailable (no policy revision known, no workflow operation)",
+				"blockedBy": ["CP-01", "CP-03", "registration-approval"]
+			},
+			{
+				"id": "cue",
+				"required": true,
+				"verificationTask": "MRC-07-09",
+				"passed": false,
+				"evidence": "evidence/07.json (cue-firing-admitted row)",
+				"realPair": "not driven; Cue admission reaches the same unavailable workflow/execution operations",
+				"blockedBy": ["CP-01", "CP-03", "registration-approval"]
+			},
+			{
+				"id": "delegated-work",
+				"required": true,
+				"verificationTask": "MRC-07-09",
+				"passed": false,
+				"evidence": "evidence/07.json (delegation-preserved, group-chat-authority, durable-ownership-fenced rows)",
+				"realPair": "the sibling adapter denies any delegation chain (context-mismatch); no registry, no fence",
+				"blockedBy": ["CP-03", "registration-approval"]
+			},
+			{
+				"id": "credential-routing",
+				"required": true,
+				"verificationTask": "MRC-05-09",
+				"passed": false,
+				"evidence": "evidence/05.md",
+				"realPair": "no approved credential reference was ever delivered by the real endpoint (no policy, no enrollment); the rejection of user environment and account overrides is proven at the Maestro boundary only",
+				"blockedBy": ["CP-01", "registration-approval"]
+			},
+			{
+				"id": "secondary-effects",
+				"required": true,
+				"verificationTask": "MRC-09-08",
+				"passed": false,
+				"evidence": "evidence/09.json",
+				"realPair": "no Mega-Maestro operation installs a plugin, browser or repository ceiling; the real-git fixture run is positive evidence at the git sink, not the pair",
+				"blockedBy": ["CP-01", "CP-03", "registration-approval"]
+			},
+			{
+				"id": "fleet-evidence",
+				"required": true,
+				"verificationTask": "MRC-10-09",
+				"passed": false,
+				"evidence": "evidence/10.json",
+				"realPair": "the real daemon is unenrolled and ingested nothing; status answer collectionProfile metadata, connectivity unavailable; no server, ingest or worker record exists",
+				"blockedBy": ["CP-01", "registration-approval"],
+				"maestroOwnedLimit": "usage producer not wired to a real process stream (evidence/10.json)"
+			},
+			{
+				"id": "commands-notices",
+				"required": true,
+				"verificationTask": "MRC-11-07",
+				"passed": false,
+				"evidence": "evidence/11.json",
+				"realPair": "the real daemon advertises capabilities [] and serves no command or notice operation; the real registration names no actor",
+				"blockedBy": ["CP-01", "CP-02", "registration-approval"],
+				"maestroOwnedLimit": "pause and resume have no desktop producer and are refused by name"
+			},
+			{
+				"id": "standalone",
+				"required": true,
+				"verificationTask": "MRC-12-05",
+				"passed": true,
+				"evidence": "evidence/12-standalone.md (2026-10-25, HEAD 7405e099d)",
+				"realPair": "not a pair row; demonstrated on this host with one named environment gap (five TOML translation suites not run for want of smol-toml) that is not counted as passed",
+				"blockedBy": []
+			}
+		],
+		"totals": { "required": 13, "passed": 1, "notPassed": 12 }
+	},
+	"failedAttemptsPreserved": [
+		{
+			"when": "2026-10-25T17:21Z",
+			"task": "MRC-12-02B",
+			"what": "packaged runtime archive 4963972d (library source 4a7e5af1) against the same development checkout; exit 3, 5 blocked, 0 leases",
+			"where": ".maestro/playbooks/Working/12-02B-pair-run.json, 12-02B-pair-run-887fdec18.json, 12-02B-pair-smoke.json"
+		},
+		{
+			"when": "2026-10-25 (MRC-12-05)",
+			"task": "MRC-12-05",
+			"what": "pair check exit 2 naming CP-01 x2, CP-02, CP-03, registration-approval",
+			"where": ".maestro/playbooks/Working/12-verify/pair-check.log"
+		},
+		{
+			"when": "2026-10-25T19:04Z and 19:06Z",
+			"task": "MRC-12-06",
+			"what": "this check (exit 2, the stale library cleared by the rebuild) and this run (exit 3)",
+			"where": ".maestro/playbooks/Working/12-06/"
+		},
+		{
+			"when": "phases 03, 04, 07, 08, 09, 10, 11",
+			"task": "MRC-03-08, MRC-04-05, MRC-07-09, MRC-08-07, MRC-09-08, MRC-10-09, MRC-11-07",
+			"what": "every earlier real pair or real endpoint attempt ended unauthenticated or unavailable before any lease",
+			"where": "the realPairRun / realEndpointAttempt fields of the phase evidence files"
+		}
+	],
+	"notRun": [
+		"the gateway (no routing was exercisable: no enrollment, no approved credential, no policy)",
+		"any real provider, any paid traffic, any production enrollment, deployment, publishing or merge",
+		"a certifiable (clean-source) endpoint: none exists on this host; --allow-dirty labels the run and the record carries certifiable: false",
+		"the container run against a changed input: the endpoint source (d5143a63, built 2026-10-19) and the library payload (f08ea73d) are byte-identical to the MRC-12-02B run; the run was repeated here because this task's artifact did not yet exist"
+	],
+	"completion": {
+		"taskChecked": false,
+		"why": "EXECUTION-RULES: if CP-01, CP-02 or CP-03 remains missing, keep the final completion task unchecked, name the producer and owner, and record evidence. All three and the registration-approval producer are missing; no required row passed against the real pair; no unit-only substitute is counted.",
+		"whatClosesIt": [
+			"mega-maestro: a clean contracts artifact pinned at vendor/mega-maestro/contracts.pin.json and a clean Linux application artifact built from a committed endpoint source (CP-01)",
+			"mega-maestro: a supported createMaestroAdapter with runtime-adapter.pin.json naming the Maestro runtime sha it was qualified against (CP-02)",
+			"mega-maestro: the delegation/workflow owner producer with workflow-authority.pin.json (CP-03)",
+			"mega-maestro: an approval producer for the actor registration, handed to the harness as --approve-command",
+			"maestro: a harness image on Node 24+ (or a host-side run) so the synthetic route's --allow-net permission exists; wire the usage producer to a real process stream; a pause/resume producer for the desktop command service",
+			"then: node scripts/mega-maestro-pair.mjs check (exit 0) and run without --allow-dirty/--allow-stale (certifiable: true) with every journey passed, and the twelve not-passed rows re-verified by their tasks against that pair"
+		],
+		"repeatRule": "Re-run the container pair only when a Mega-Maestro input (endpoint revision, build time, artifacts, pins) or the library entry sha moves; otherwise re-run the check alone and append its date here."
+	},
+	"rechecks": [
+		{
+			"date": "2026-10-25",
+			"maestroHead": "a112e9736",
+			"librarySha256": "f08ea73d",
+			"endpointRevision": "d5143a63",
+			"checkExit": 2,
+			"runExit": 3,
+			"verdicts": { "passed": 0, "failed": 0, "blocked": 5, "not-run": 0 },
+			"leases": 0,
+			"moved": "nothing on the Mega-Maestro side since 2026-10-13 (revision) and 2026-10-19 (build)"
+		}
+	]
+}
