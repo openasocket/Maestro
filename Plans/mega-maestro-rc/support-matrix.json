@@ -138,7 +138,9 @@
 	],
 	"acceptance": {
 		"source": "Plans/mega-maestro-rc/evidence/*.json positiveAcceptanceMatrix",
-		"passed": [],
+		"passed": [
+			"standalone (MRC-12-05, evidence/12-standalone.md: demonstrated on this host, five TOML translation suites not run for want of smol-toml)"
+		],
 		"notPassed": [
 			"enrollment-policy",
 			"protected-effects",
@@ -152,7 +154,7 @@
 			"fleet-evidence",
 			"commands-notices"
 		],
-		"pending": ["headless-library (MRC-12-06)", "standalone (MRC-12-05)"],
+		"pending": ["headless-library (MRC-12-06)"],
 		"lastRealPair": {
 			"file": ".maestro/playbooks/Working/12-02B-pair-run.json",
 			"exit": 3,
