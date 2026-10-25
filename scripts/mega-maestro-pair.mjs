@@ -586,23 +586,22 @@ export const DRIVER_BUNDLE_ENTRIES = {
 	],
 };
 
-/** Bundle the driver's Maestro modules once; the same file runs in the container and assesses on the host. */
+/**
+ * Bundle the driver's Maestro modules once; the same file runs in the container
+ * and assesses on the host. The entry is fed on stdin under a fixed name, so
+ * equal sources give an equal digest whatever workspace the run lands in.
+ */
 async function bundleDriver(into) {
 	const esbuild = await import('esbuild');
 	fs.mkdirSync(into, { recursive: true });
-	const entry = path.join(into, 'entry.ts');
-	fs.writeFileSync(
-		entry,
-		Object.entries(DRIVER_BUNDLE_ENTRIES)
-			.map(
-				([file, names]) =>
-					`export { ${names.join(', ')} } from ${JSON.stringify(path.join(REPO_ROOT, 'src', file))};`
-			)
-			.join('\n')
-	);
+	const entry = Object.entries(DRIVER_BUNDLE_ENTRIES)
+		.map(
+			([file, names]) => `export { ${names.join(', ')} } from ${JSON.stringify(`./src/${file}`)};`
+		)
+		.join('\n');
 	const outfile = path.join(into, 'bundle.cjs');
 	await esbuild.build({
-		entryPoints: [entry],
+		stdin: { contents: entry, resolveDir: REPO_ROOT, sourcefile: 'driver-entry.ts', loader: 'ts' },
 		bundle: true,
 		platform: 'node',
 		target: 'node20',
