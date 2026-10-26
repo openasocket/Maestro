@@ -78,6 +78,11 @@ export function createContextApi() {
 				// beside that tab's own turns. Attribution only; leave it out for a
 				// turn with no owning agent.
 				lineage?: { sessionId: string; tabId?: string };
+				// A host-minted dispatch ticket (the Quick Chat controller's
+				// `routingTicket`), echoed so the turn is admitted for the CLI or
+				// device that asked. Opaque, single-use, never an actor (see
+				// `issueDispatchTicket`); needs `lineage`. Leave it out otherwise.
+				dispatchTicket?: string;
 			}
 		): Promise<string> =>
 			ipcRenderer.invoke('context:groomContext', projectRoot, agentType, prompt, options),

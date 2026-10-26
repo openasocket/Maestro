@@ -19,7 +19,12 @@ import {
 } from '../../utils/ipcHandler';
 import { getSessionStorage, type SessionMessagesResult } from '../../agents';
 import { groomContext, cancelAllGroomingSessions } from '../../utils/context-groomer';
-import { utilityLineageOf } from '../../process-manager/types';
+import {
+	utilityLineageOf,
+	type ProcessSpawnActor,
+	type UtilityTurnLineage,
+} from '../../process-manager/types';
+import { currentSpawnActor, withdrawDispatchTicket } from '../../web-server/auth/transport-actor';
 import { createSshRemoteStoreAdapter } from '../../utils/ssh-remote-resolver';
 import { getSettingsStore } from '../../stores';
 import type { ProcessManager } from '../../process-manager';
@@ -45,6 +50,67 @@ const handlerOpts = (
 	logSuccess: false,
 	...extra,
 });
+
+/**
+ * Reads the `dispatchTicket` option of `context:groomContext` (MRC2-02-03B).
+ * Nothing sent is no ticket (`undefined`), the shape of every call before the
+ * option existed, so a standalone desktop is unchanged. A ticket must be a
+ * plain non-empty string: the renderer echoes the host-minted string as it
+ * arrived, so anything else is a malformed request and is refused before a
+ * turn runs, never read as "no ticket".
+ */
+function dispatchTicketOf(raw: unknown): string | undefined {
+	if (raw === undefined || raw === null) return undefined;
+	if (typeof raw !== 'string' || raw.length === 0) {
+		throw new Error('The utility turn dispatch ticket must be a non-empty string.');
+	}
+	return raw;
+}
+
+/**
+ * Who this utility turn serves and who asked for it, read off the options a
+ * caller sent (MRC2-02-02A, MRC2-02-03B), before any turn runs.
+ *
+ * A `context:groomContext` call arrives over Electron IPC, outside any
+ * transport context, so the groomer's default actor is the operator at the
+ * keyboard (`in-process`). A routing turn the Quick Chat engine runs for a
+ * `maestro-cli quick-chat send` or a paired device's message carries the
+ * `routingTicket` the controller minted inside the sender's context, bound to
+ * the engine agent; claiming it here, for the agent (and tab) the lineage
+ * names, binds the transport it was issued for, so the turn is admitted with
+ * `origin: cli` (or the device) instead of `desktop`. The ticket names no
+ * actor: an unknown, spent, expired or mismatched one binds the caller as
+ * itself, logged by `currentSpawnActor`.
+ *
+ * A ticket with no lineage names no agent to claim it for and is refused like
+ * a malformed lineage. Either refusal withdraws the ticket first, so a refused
+ * call never leaves a claimable ticket behind (the spawn handler's rule). No
+ * ticket leaves the actor undefined and the groomer's default applies, so a
+ * call that names none is exactly what it was.
+ */
+function utilityTurnAttribution(raw: { lineage?: unknown; dispatchTicket?: unknown } | undefined): {
+	lineage: UtilityTurnLineage | undefined;
+	actor: ProcessSpawnActor | undefined;
+} {
+	const ticket = dispatchTicketOf(raw?.dispatchTicket);
+	let lineage: UtilityTurnLineage | undefined;
+	try {
+		lineage = utilityLineageOf(raw?.lineage);
+		if (ticket !== undefined && !lineage) {
+			throw new Error(
+				'A dispatch ticket on a utility turn needs a lineage naming the agent it was issued for.'
+			);
+		}
+	} catch (error) {
+		if (ticket !== undefined) withdrawDispatchTicket(ticket);
+		throw error;
+	}
+	if (ticket === undefined || !lineage) return { lineage, actor: undefined };
+	return {
+		lineage,
+		actor: currentSpawnActor({ ticket, agentId: lineage.sessionId, tabId: lineage.tabId }),
+	};
+}
 
 /**
  * Dependencies required for context handler registration
@@ -159,12 +225,24 @@ export function registerContextHandlers(deps: ContextHandlerDependencies): void 
 					 * its own id, as before.
 					 */
 					lineage?: { sessionId: string; tabId?: string };
+					/**
+					 * A host-minted dispatch ticket (MRC2-02-03B): the `routingTicket`
+					 * the Quick Chat controller issued for a send that arrived over a
+					 * transport, echoed by the engine so this turn is admitted for the
+					 * CLI or device that asked instead of the operator at the keyboard.
+					 * Opaque and single-use; never an actor (see `issueDispatchTicket`).
+					 * Needs `lineage`, which names the agent it was issued for. Left
+					 * out, the turn is admitted as the desktop, as before.
+					 */
+					dispatchTicket?: string;
 				}
 			): Promise<string> => {
 				const processManager = requireDependency(getProcessManager, 'Process manager');
 				const agentDetector = requireDependency(getAgentDetector, 'Agent detector');
-				// Checked at the boundary: a malformed id is refused before any turn runs.
-				const lineage = utilityLineageOf(options?.lineage);
+				// Checked at the boundary: a malformed id or an orphan ticket is refused
+				// before any turn runs, and a ticket is spent (or withdrawn) here,
+				// before anything else can refuse, whatever happens to the turn.
+				const { lineage, actor } = utilityTurnAttribution(options);
 
 				// Resolve the agent: use the utility agent if configured, otherwise the
 				// requested agent. Null/empty leaves behavior unchanged (session agent).
@@ -227,6 +305,9 @@ export function registerContextHandlers(deps: ContextHandlerDependencies): void 
 						disableTools: options?.disableTools,
 						timeoutMs: options?.timeoutMs,
 						lineage,
+						// Only when a ticket bound one: left out, the groomer's own
+						// default (`in-process`) applies, as for every call before.
+						...(actor ? { actor } : {}),
 					},
 					processManager,
 					agentDetector

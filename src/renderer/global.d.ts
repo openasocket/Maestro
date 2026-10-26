@@ -302,6 +302,11 @@ interface MaestroAPI {
 				// traces it under that tab instead of its own groomer id. Attribution
 				// only: it lends the turn nothing. Mirrors src/main/preload/context.ts.
 				lineage?: { sessionId: string; tabId?: string };
+				// A host-minted dispatch ticket (the Quick Chat controller's
+				// `routingTicket`), echoed so the turn is admitted for the CLI or
+				// device that asked. Opaque, single-use, never an actor (see
+				// `issueDispatchTicket`); needs `lineage`. Mirrors src/main/preload/context.ts.
+				dispatchTicket?: string;
 			}
 		) => Promise<string>;
 		// Cancel all active grooming sessions
