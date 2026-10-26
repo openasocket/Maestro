@@ -15,7 +15,7 @@
 import type { ProcessManager } from '../process-manager';
 import type { ProcessSpawnActor } from '../process-manager/types';
 import type { SshRemoteSettingsStore } from '../utils/ssh-remote-resolver';
-import { spawnGroupChatAgent } from '../group-chat/spawnGroupChatAgent';
+import { spawnGroupChatAgent, type GroupChatSpawnLineage } from '../group-chat/spawnGroupChatAgent';
 import { toSpawnGroupChatAgentConfig } from '../group-chat/spawn-config';
 import { extractTextFromStreamJson } from '../group-chat/output-parser';
 import { AGENT_LIVENESS_EVENTS } from '../utils/agent-liveness';
@@ -38,6 +38,14 @@ export function createDesktopConsultRunner(
 		 * consult in-process the way it always did (MRC-08-01C).
 		 */
 		actor?: ProcessSpawnActor;
+		/**
+		 * The asking operation's record and the ids this consult is minted as, as the
+		 * router resolved them (MRC2-02-03): what the sink binds the consult under
+		 * (`ProcessConfig.delegation` / `dispatchedAs`), the same record the service
+		 * stamps on the process (`GroupChatSpawn.delegation`). Left off when absent, so
+		 * the sink admits a chat turn of the target as it did before.
+		 */
+		dispatchedBy?: GroupChatSpawnLineage;
 	} = {}
 ): ConsultRunner {
 	const runs = new Map<string, RunningConsult>();
@@ -86,9 +94,11 @@ export function createDesktopConsultRunner(
 
 			try {
 				const config = toSpawnGroupChatAgentConfig(spawn, { processManager, sshStore });
-				const result = await spawnGroupChatAgent(
-					options.actor ? { ...config, actor: options.actor } : config
-				);
+				const result = await spawnGroupChatAgent({
+					...config,
+					...(options.actor ? { actor: options.actor } : {}),
+					...(options.dispatchedBy ? { dispatchedBy: options.dispatchedBy } : {}),
+				});
 				if (!result.success) {
 					run.detach();
 					runs.delete(sessionId);

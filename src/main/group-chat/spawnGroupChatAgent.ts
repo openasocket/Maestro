@@ -12,8 +12,9 @@
  * Under management the turn is admitted at the sink (`ProcessManager.spawnAdmitted`,
  * MRC-07-05) as the CHILD of the operation it belongs to: the room for a moderator,
  * participant, synthesis or recovery turn (`groupChatRoomContext`), or the asking
- * operation's record for a consult that carries one. The process id is the child's
- * request, attempt and link, the same derivation the headless runner binds, and the
+ * operation's record for a consult (`dispatchedBy`, MRC2-02-03). The process id is the
+ * child's request, attempt and link, the same derivation the headless runner binds for a
+ * room turn and the sink's own for a dispatched one (`dispatchedChildContext`), and the
  * child record is stamped on the process so what the agent itself dispatches carries
  * the chain one link deeper. A standalone desktop spawns as before.
  */
@@ -39,8 +40,20 @@ import {
 } from '../../shared/maestro-lib/managed/delegation';
 import type { ManagedDenialCode } from '../../shared/maestro-lib/managed/types';
 import { applySystemPromptDelivery } from '../utils/system-prompt-delivery';
+import { dispatchedChildContext } from '../process-manager/ProcessManager';
 import { steeringSocketPathFor } from '../process-manager/steering-client';
 import type { DispatchedSpawnIds, ProcessSpawnActor } from '../process-manager/types';
+
+/**
+ * What the sink binds a turn's lineage from: the context of the operation the turn is a
+ * child of (`ProcessConfig.delegation`) and the request and attempt the child is minted as
+ * (`ProcessConfig.dispatchedAs`). The sink derives the child record from the two
+ * (`dispatchedChildContext`), and the process is stamped with that same record.
+ */
+export interface GroupChatSpawnLineage {
+	delegation: ManagedDelegationContext;
+	dispatchedAs: DispatchedSpawnIds;
+}
 
 export interface SpawnGroupChatAgentConfig {
 	/** Stable session id for the process manager */
@@ -100,6 +113,16 @@ export interface SpawnGroupChatAgentConfig {
 	isResume?: boolean;
 	/** Who asked for the turn, as the sink binds it. Default: this process (the keyboard). */
 	actor?: ProcessSpawnActor;
+	/**
+	 * The operation this turn is the child of and the ids the child is minted as, for a turn
+	 * that belongs to no room: a consult, whose asking operation the router resolved
+	 * (`startCrossAgentRequest`, MRC2-02-03). Handed to the sink as it is, which binds the
+	 * consult as that operation's child under its own standing and stamps the derived record
+	 * on the process. A room turn names none: its lineage is the room's
+	 * (`groupChatSpawnLineage`). Absent on a turn that belongs to no room, the sink admits a
+	 * chat turn of its own, as before.
+	 */
+	dispatchedBy?: GroupChatSpawnLineage;
 }
 
 export interface SpawnGroupChatAgentResult {
@@ -115,11 +138,10 @@ export interface SpawnGroupChatAgentResult {
  * dispatched it (`ProcessConfig.delegation`) and the process id as the child's own request and
  * attempt (`dispatchedAs`), so `ProcessManager.admitSpawn` derives exactly the child the headless
  * runner binds (`groupChatTurnContext`: link `agent <process id>`, parented under the room).
- * Null for a process that is no room's (a consult), which the sink admits as a chat turn.
+ * Null for a process that is no room's (a consult), which the sink admits as a chat turn
+ * unless the caller names the asking operation (`dispatchedBy`).
  */
-export function groupChatSpawnLineage(
-	sessionId: string
-): { delegation: ManagedDelegationContext; dispatchedAs: DispatchedSpawnIds } | null {
+export function groupChatSpawnLineage(sessionId: string): GroupChatSpawnLineage | null {
 	const chatId = groupChatIdOf(sessionId);
 	if (!chatId) return null;
 	return {
@@ -147,10 +169,14 @@ export async function spawnGroupChatAgent(
 
 	// The lineage: what the sink binds the turn as, and what its process is stamped with, so what
 	// the agent itself asks or dispatches from its shell carries the chain one link deeper. Stamped
-	// BEFORE the SSH wrap, so it reaches the remote agent and not only the ssh client. The same
-	// derivation as the headless runner's, so one turn has one record on either host.
-	const lineage = groupChatSpawnLineage(config.sessionId);
-	const child = groupChatTurnContext({ processId: config.sessionId });
+	// BEFORE the SSH wrap, so it reaches the remote agent and not only the ssh client. A room turn
+	// uses the same derivation as the headless runner's, so one turn has one record on either
+	// host; a consult carries the asking operation's record and is derived as the sink derives a
+	// dispatched turn, so the stamp and the admission agree on the one record.
+	const lineage = config.dispatchedBy ?? groupChatSpawnLineage(config.sessionId);
+	const child = config.dispatchedBy
+		? dispatchedChildContext({ sessionId: config.sessionId, ...config.dispatchedBy })
+		: groupChatTurnContext({ processId: config.sessionId });
 	const customEnvVars = child
 		? { ...(config.customEnvVars ?? {}), ...delegationContextEnv(child) }
 		: config.customEnvVars;
