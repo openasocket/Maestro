@@ -158,6 +158,9 @@ async function askRoutingModel(
 				readOnly: true,
 				disableTools: true,
 				timeoutMs: ROUTE_MODEL_TIMEOUT_MS,
+				// The turn serves this agent; which of its tabs is what it decides,
+				// so it names none. Attribution only, on a managed desktop.
+				lineage: { sessionId: session.id },
 			}
 		);
 		return parseRouteAnswer(response, shortlist.length);

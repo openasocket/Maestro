@@ -298,6 +298,10 @@ interface MaestroAPI {
 				timeoutMs?: number;
 				// The agent's Claude token source: a TUI agent runs this turn through maestro-p.
 				claudeTokenSource?: import('../shared/claudeTokenMode').ClaudeTokenSourceFields;
+				// The agent (and tab) this utility turn serves, so a managed desktop
+				// traces it under that tab instead of its own groomer id. Attribution
+				// only: it lends the turn nothing. Mirrors src/main/preload/context.ts.
+				lineage?: { sessionId: string; tabId?: string };
 			}
 		) => Promise<string>;
 		// Cancel all active grooming sessions

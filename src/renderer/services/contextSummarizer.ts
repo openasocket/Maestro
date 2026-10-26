@@ -202,17 +202,7 @@ export class ContextSummarizationService {
 				request.projectRoot,
 				request.agentType,
 				prompt,
-				// Pass SSH and custom config for remote execution support
-				{
-					sshRemoteConfig: request.sshRemoteConfig,
-					customPath: request.customPath,
-					customArgs: request.customArgs,
-					customEnvVars: request.customEnvVars,
-					// Summaries are read once by a human and never fed back into
-					// context, so this turn runs at the bottom of both ladders.
-					claudeTokenSource: request.claudeTokenSource,
-					cheapTurn: true,
-				}
+				this.groomOptions(request)
 			);
 			logger.info(
 				'[ContextSummarizer] Received response, length:',
@@ -285,17 +275,7 @@ export class ContextSummarizationService {
 				request.projectRoot,
 				request.agentType,
 				prompt,
-				// Pass SSH and custom config for remote execution support
-				{
-					sshRemoteConfig: request.sshRemoteConfig,
-					customPath: request.customPath,
-					customArgs: request.customArgs,
-					customEnvVars: request.customEnvVars,
-					// Summaries are read once by a human and never fed back into
-					// context, so this turn runs at the bottom of both ladders.
-					claudeTokenSource: request.claudeTokenSource,
-					cheapTurn: true,
-				}
+				this.groomOptions(request)
 			);
 			chunkSummaries.push(summary);
 		}
@@ -329,17 +309,7 @@ export class ContextSummarizationService {
 				request.projectRoot,
 				request.agentType,
 				consolidationPrompt,
-				// Pass SSH and custom config for remote execution support
-				{
-					sshRemoteConfig: request.sshRemoteConfig,
-					customPath: request.customPath,
-					customArgs: request.customArgs,
-					customEnvVars: request.customEnvVars,
-					// Summaries are read once by a human and never fed back into
-					// context, so this turn runs at the bottom of both ladders.
-					claudeTokenSource: request.claudeTokenSource,
-					cheapTurn: true,
-				}
+				this.groomOptions(request)
 			);
 
 			const newTokens = estimateTextTokenCount(consolidated);
@@ -362,6 +332,29 @@ export class ContextSummarizationService {
 			summarizedLogs,
 			originalTokens: totalOriginalTokens,
 			compactedTokens,
+		};
+	}
+
+	/**
+	 * The options every summarization turn sends: SSH and custom agent config
+	 * for remote execution, the agent's Claude token source (a TUI agent
+	 * summarizes through maestro-p, exactly as its own tabs do), the cheap
+	 * turn (summaries are read once by a human and never fed back into
+	 * context, so the turn runs at the bottom of both ladders), and the
+	 * lineage: the tab being compacted is the one this utility turn serves,
+	 * so a managed desktop traces it under that tab. Attribution only.
+	 */
+	private groomOptions(
+		request: SummarizeRequest
+	): NonNullable<Parameters<typeof window.maestro.context.groomContext>[3]> {
+		return {
+			sshRemoteConfig: request.sshRemoteConfig,
+			customPath: request.customPath,
+			customArgs: request.customArgs,
+			customEnvVars: request.customEnvVars,
+			claudeTokenSource: request.claudeTokenSource,
+			cheapTurn: true,
+			lineage: { sessionId: request.sourceSessionId, tabId: request.sourceTabId },
 		};
 	}
 

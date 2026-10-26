@@ -274,6 +274,8 @@ Continue with implementation.`);
 					// here so a future refactor cannot silently drop the flag and put
 					// summaries back on the agent's full model.
 					cheapTurn: true,
+					// The tab being compacted is the one the turn serves (MRC2-02-02B).
+					lineage: { sessionId: 'session-123', tabId: 'tab-456' },
 				}
 			);
 		});

@@ -233,6 +233,24 @@ export interface GroomingConfig {
 }
 
 /**
+ * The agent and tab a grooming turn serves, for the `lineage` option of
+ * `groomContext`. Every caller (a merge, a transfer to another agent, a
+ * recovery) lists the conversation the operation was raised from FIRST, so
+ * the first source names the tab a managed desktop traces the turn under.
+ * A stored session has no open tab and names the agent alone. Attribution
+ * only: it lends the turn nothing, and no source means no lineage.
+ */
+function servedLineage(
+	sources: readonly ContextSource[]
+): { sessionId: string; tabId?: string } | undefined {
+	const [raised] = sources;
+	if (!raised) return undefined;
+	return raised.tabId
+		? { sessionId: raised.sessionId, tabId: raised.tabId }
+		: { sessionId: raised.sessionId };
+}
+
+/**
  * Service for grooming and consolidating multiple conversation contexts.
  *
  * @example
@@ -327,7 +345,8 @@ export class ContextGroomingService {
 				groomedText = await window.maestro.context.groomContext(
 					targetProjectRoot,
 					request.targetAgent,
-					prompt
+					prompt,
+					{ lineage: servedLineage(sources) }
 				);
 			} finally {
 				this.groomingInFlight--;
