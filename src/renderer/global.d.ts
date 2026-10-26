@@ -4620,6 +4620,9 @@ interface MaestroAPI {
 				exitCode?: number;
 				status?: 'running' | 'finished' | 'cancelled';
 			}[];
+			// The agent and tab the suggestion serves; attribution only.
+			sessionId?: string;
+			tabId?: string;
 		}) => Promise<{ success: boolean; command?: string; error?: string }>;
 	};
 

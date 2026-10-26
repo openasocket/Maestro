@@ -73,6 +73,11 @@ export async function requestAiCommand(options: {
 			customEffort: turnEffort,
 			claudeTokenSource: getClaudeTokenSourceFields(session),
 			recentCommands,
+			// The agent and tab this suggestion serves, so a managed desktop traces
+			// the utility turn beside the tab's own turns. Attribution only: the
+			// ids lend the turn nothing, and a standalone desktop ignores them.
+			sessionId: session.id,
+			tabId,
 		});
 
 		if (result.success && result.command) {

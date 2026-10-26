@@ -35,6 +35,14 @@ export interface AiCommandSuggestRequest {
 	claudeTokenSource?: ClaudeTokenSourceFields;
 	/** Commands already run in this tab, oldest first, so follow-ups can refine. */
 	recentCommands?: AiCommandHistoryEntry[];
+	/**
+	 * The agent and tab the suggestion serves (MRC2-02-02A), so the main
+	 * process traces the turn beside that tab's own turns. Attribution only:
+	 * the ids lend the turn nothing. Both optional; a tab without its agent is
+	 * refused.
+	 */
+	sessionId?: string;
+	tabId?: string;
 }
 
 export interface AiCommandSuggestResult {
