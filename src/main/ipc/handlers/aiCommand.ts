@@ -25,6 +25,7 @@ import {
 } from '../../utils/ipcHandler';
 import { getPrompt } from '../../prompt-manager';
 import { groomContext } from '../../utils/context-groomer';
+import { utilityLineageOf } from '../../process-manager/types';
 import { createSshRemoteStoreAdapter } from '../../utils/ssh-remote-resolver';
 import { resolveConfiguredShell } from '../../stores/defaults';
 import {
@@ -89,6 +90,14 @@ export interface AiCommandSuggestRequest {
 	 * fresh command. Collected by the renderer from the tab's own transcript.
 	 */
 	recentCommands?: AiCommandHistoryEntry[];
+	/**
+	 * The agent and tab the suggestion serves (MRC2-02-02A), so the main
+	 * process traces the turn beside that tab's own turns. Attribution only:
+	 * the ids lend the turn nothing. Both optional; a tab without its agent is
+	 * refused.
+	 */
+	sessionId?: string;
+	tabId?: string;
 }
 
 export interface AiCommandSuggestResult {
@@ -156,10 +165,15 @@ export function registerAiCommandHandlers(deps: AiCommandHandlerDependencies): v
 					effort: config.customEffort,
 					remote: isRemote,
 					historyCount: recentCommands.length,
+					sessionId: config.sessionId,
+					tabId: config.tabId,
 				});
 
 				let response: string;
 				try {
+					// Checked at the boundary, inside the try so a malformed id is
+					// reported as a failed suggestion like every other refusal.
+					const lineage = utilityLineageOf({ sessionId: config.sessionId, tabId: config.tabId });
 					const result = await groomContext(
 						{
 							projectRoot: config.cwd,
@@ -186,6 +200,7 @@ export function registerAiCommandHandlers(deps: AiCommandHandlerDependencies): v
 							sessionCustomEffort: config.customEffort,
 							claudeTokenSource: config.claudeTokenSource,
 							agentConfigValues,
+							lineage,
 						},
 						processManager,
 						agentDetector

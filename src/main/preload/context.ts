@@ -74,6 +74,10 @@ export function createContextApi() {
 				timeoutMs?: number;
 				// The agent's Claude token source: a TUI agent runs this turn through maestro-p.
 				claudeTokenSource?: ClaudeTokenSourceFields;
+				// The agent and tab the turn serves, so the main process traces it
+				// beside that tab's own turns. Attribution only; leave it out for a
+				// turn with no owning agent.
+				lineage?: { sessionId: string; tabId?: string };
 			}
 		): Promise<string> =>
 			ipcRenderer.invoke('context:groomContext', projectRoot, agentType, prompt, options),

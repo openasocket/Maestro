@@ -151,6 +151,51 @@ export interface UtilityTurnLineage {
 	tabId?: string;
 }
 
+/** Longest agent or tab id a caller may name as a utility turn lineage. */
+export const MAX_UTILITY_LINEAGE_ID_LENGTH = 256;
+
+function lineageId(value: unknown, name: string): string {
+	if (
+		typeof value !== 'string' ||
+		value.length === 0 ||
+		value.length > MAX_UTILITY_LINEAGE_ID_LENGTH
+	) {
+		throw new Error(
+			`The utility turn ${name} must be a string of 1 to ${MAX_UTILITY_LINEAGE_ID_LENGTH} characters.`
+		);
+	}
+	return value;
+}
+
+/**
+ * Reads a `UtilityTurnLineage` off what a caller sent across a boundary
+ * (MRC2-02-02A): the `lineage` option of `context:groomContext` and the
+ * `sessionId` / `tabId` of an `aiCommand:suggest` request. Nothing named is
+ * no lineage (`undefined`), which is what every caller sent before the ids
+ * existed, so a standalone desktop is unchanged. Anything named must be a
+ * plain string: the sink builds the served tab's trace id from these, so a
+ * number, an object or an empty string is refused HERE, before a turn is
+ * admitted under a trace that names nothing. A tab without the agent it
+ * belongs to is refused too, since a tab id alone traces nowhere.
+ */
+export function utilityLineageOf(raw: unknown): UtilityTurnLineage | undefined {
+	if (raw === undefined || raw === null) return undefined;
+	if (typeof raw !== 'object') {
+		throw new Error('The utility turn lineage must name an agent and, optionally, a tab.');
+	}
+	const { sessionId, tabId } = raw as { sessionId?: unknown; tabId?: unknown };
+	const hasTab = tabId !== undefined && tabId !== null;
+	if (sessionId === undefined || sessionId === null) {
+		if (hasTab) {
+			throw new Error('The utility turn lineage names a tab but not the agent it belongs to.');
+		}
+		return undefined;
+	}
+	const lineage: UtilityTurnLineage = { sessionId: lineageId(sessionId, 'agent id') };
+	if (hasTab) lineage.tabId = lineageId(tabId, 'tab id');
+	return lineage;
+}
+
 /** What a utility turn asks to run as, before the route ceiling is applied. */
 export interface UtilityRouteRequest {
 	/** The provider the turn resolved to (`utilityAgentId`, else the session's agent). */

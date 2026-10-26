@@ -19,6 +19,7 @@ import {
 } from '../../utils/ipcHandler';
 import { getSessionStorage, type SessionMessagesResult } from '../../agents';
 import { groomContext, cancelAllGroomingSessions } from '../../utils/context-groomer';
+import { utilityLineageOf } from '../../process-manager/types';
 import { createSshRemoteStoreAdapter } from '../../utils/ssh-remote-resolver';
 import { getSettingsStore } from '../../stores';
 import type { ProcessManager } from '../../process-manager';
@@ -150,10 +151,20 @@ export function registerContextHandlers(deps: ContextHandlerDependencies): void 
 					timeoutMs?: number;
 					/** The session agent's Claude token source (see GroomContextOptions). */
 					claudeTokenSource?: ClaudeTokenSourceFields;
+					/**
+					 * The agent and tab this turn serves (MRC2-02-02A), so the sink
+					 * traces it under `<agent>-ai-<tab>` beside the turns it was run
+					 * for instead of under its own `groomer-*` id. Attribution only:
+					 * it lends the turn nothing. Left out, the turn is traced under
+					 * its own id, as before.
+					 */
+					lineage?: { sessionId: string; tabId?: string };
 				}
 			): Promise<string> => {
 				const processManager = requireDependency(getProcessManager, 'Process manager');
 				const agentDetector = requireDependency(getAgentDetector, 'Agent detector');
+				// Checked at the boundary: a malformed id is refused before any turn runs.
+				const lineage = utilityLineageOf(options?.lineage);
 
 				// Resolve the agent: use the utility agent if configured, otherwise the
 				// requested agent. Null/empty leaves behavior unchanged (session agent).
@@ -215,6 +226,7 @@ export function registerContextHandlers(deps: ContextHandlerDependencies): void 
 						readOnlyMode: options?.readOnly,
 						disableTools: options?.disableTools,
 						timeoutMs: options?.timeoutMs,
+						lineage,
 					},
 					processManager,
 					agentDetector
