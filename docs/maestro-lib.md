@@ -38,7 +38,7 @@ It is not:
 | `windows-shell` | On Windows, the provider is installed as a `.cmd` shim that only starts through cmd.exe, and an argument cannot pass through cmd.exe intact (a prompt with a line break, `%` or `^`, for a provider that cannot read its prompt from stdin). See [Windows](#windows). |
 | `launch`        | The launch could not be planned. The message says why.                                                                                                                                                                                                                |
 
-What each provider supports in maestro-lib `0.25.0`:
+What each provider supports in maestro-lib `0.26.0`:
 
 | Agent id        | Name            | Runs a turn | Resume | Read-only |
 | --------------- | --------------- | ----------- | ------ | --------- |
@@ -490,7 +490,7 @@ if (problems.length > 0) throw new Error(problems.join('; '));
 
 The client interface carries the extension as `MaestroClient.managed`, optional: a host without it is `unsupported`, never "unmanaged, so allowed".
 
-What that adds up to in `0.25.0`, before the release-by-release detail below:
+What that adds up to in `0.26.0`, before the release-by-release detail below:
 
 - **Standalone is untouched.** A program that never passes `managed` to `createMaestroRuntime`, and a `startTurn` with no `admission`, plan and run exactly as the earlier sections describe. Nothing here reads a keyring, opens a socket or asks a peer.
 - **A managed host admits launches, not providers.** `providerRouteSupport(agentId)` is the table: `managed` is `implemented` on the `child-process` route alone (the launch is admitted at the real spawn), and `unsupported` on `pty`, `codex-app-server`, `opencode-server` and `ssh`. What a provider's own tools do once running is not governed. The one route whose effects are enforced is the synthetic harness route, which qualifies no real provider.
@@ -546,6 +546,8 @@ Since `0.23.0` the same module holds the durable command ledger and the executor
 Since `0.24.0` the host adapter carries the notice inbox seam (`managed/host-adapter.ts`, MRC-11-02): `ManagedHostAdapter.inbox` is the endpoint's `noticeList` and `inbox` operations over the adapter's socket (`endpointInboxPort(endpoint)`: `EndpointNotice`, `EndpointNoticeListRequest`, `EndpointNoticeListResult`, `EndpointInboxRequest` with its `delivered`, `read`, `acknowledged` and `reply` actions, `EndpointInboxReceipt`; null while no socket is open), and `inboxStanding()` says whether a notice may be listed or a receipt recorded right now: `ok` with the `InboxBinding` (tenant, enrollment, registration, actor, installation, policy revision and the two negotiated capabilities) under a registered, attached, managed standing, else the one reason, under the same `standingKey` rule as telemetry. The client that lists, holds and records (`createInboxClient` over `createInboxReceiptLedger`) is `src/main/enterprise/inbox.ts`, plain Node, composed by the desktop service; a body reaches the person's surface and nothing else.
 
 Since `0.25.0` the dispatch snapshot carries a launch classification (`managed/authority.ts`, MRC2-02-01): `DispatchPurpose` says what the launch is for (`conversation` for a person's turn, `utility` for a tab name or a synopsis Maestro runs beside one, `probe` for a read-only look at a provider, `supervisor` for a background service's child) and the contract's `ManagedOrigin` says which surface raised it; both are optional on `DispatchSnapshot`, set from `DispatchAttribution` and left out of the digest when a surface does not classify, so a policy can tell a person's turn from Maestro's own. They are attribution, never a permission level: a utility turn is admitted or refused like any other. The desktop sink classifies every spawn (`buildSpawnRequestSnapshot` in `src/main/process-manager/ProcessManager.ts`, from `ProcessConfig.purpose` and `ProcessConfig.origin`).
+
+Since `0.26.0` a probe (a provider started for its metadata alone, with no prompt of the person's: Codex's skill list) has its own admission in `managed/host-adapter.ts` (MRC2-02-04). `admitProbeTurn({ authority, policy, context, spec, attribution })` asks the host's authority for a lease on the snapshot of the probe's final spec, stamped `purpose: probe` and `operation: start`, and hands back the `admission` that `startTurn` takes, built over `leaseAdmission` so the lease is checked again against the spec that reaches `spawn`, bound to the pid, released with the exit and revocable. `probeRouteRefusal(providerId, route)` holds a probe to the route's managed standing in `providerRouteSupport` before the authority is asked (a route with no enforcement producer refuses `unavailable` by name, never runs unmanaged), `probeTurnIdentity()` is a probe's own run identity (one request, one attempt, no run above it), and `createProbeRefusalCache()` remembers a refusal per authority, policy revision, provider, route and caller scope for `PROBE_REFUSAL_TTL_MS`, so a surface that probes on every detection does not ask again for the same answer; a new revision is a new key and an admission is never cached. A standalone host passes no `managed` to the surface and probes as before.
 
 ## See also
 

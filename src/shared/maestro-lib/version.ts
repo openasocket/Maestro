@@ -97,8 +97,13 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * (`conversation`, `utility`, `probe`, `supervisor`) and the contract's `ManagedOrigin` as optional `purpose` and
  * `origin` on `DispatchSnapshot`, set from `DispatchAttribution` and left out of the digest when a surface does not
  * classify, so a policy can tell a person's turn from Maestro's own; attribution, never a permission level.
+ * 0.26.0: probe turns (`./managed/host-adapter`, MRC2-02-04): `admitProbeTurn` asks the host's authority for a
+ * lease on the snapshot of a probe's final spec (`purpose: probe`, `operation: start`) and hands back the
+ * `startTurn` admission over `leaseAdmission`; `probeRouteRefusal` holds a probe to its route's managed standing
+ * before the authority is asked; `probeTurnIdentity` is a probe's own run identity; `createProbeRefusalCache`
+ * remembers a refusal per authority, policy revision, provider, route and scope for `PROBE_REFUSAL_TTL_MS`.
  */
-export const MAESTRO_LIB_VERSION = '0.25.0';
+export const MAESTRO_LIB_VERSION = '0.26.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

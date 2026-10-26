@@ -166,6 +166,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **Deciding an effect a running managed turn reaches for:** `ManagedEffect`, `ManagedEffectAuthority`, `effectGranted()`, `unavailableEffectAuthority()` in `src/shared/maestro-lib/managed/effects.ts`; `codexRequestEffect()` in `src/shared/maestro-lib/codex/server-requests.ts`
 - **The lease gate at a sink (check, bind, release, revoke):** `leaseAdmission(authority, lease)` in `src/shared/maestro-lib/run/start-turn.ts` (never a hand-rolled `DispatchAdmission`)
 - **Spawn authority of a host with no Electron (maestro-cli, a Cue engine):** `createHeadlessSpawnAuthority()` in `src/shared/maestro-lib/managed/host-adapter.ts`; `cliSpawnAuthority()`, `SpawnAgentOptions.managed`, `AgentResult.managed` in `src/cli/services/agent-spawner.ts`
+- **Admitting a probe of a provider (its skills, its version) outside the process manager:** `admitProbeTurn()`, `probeRouteRefusal()`, `probeTurnIdentity()`, `createProbeRefusalCache()` in `src/shared/maestro-lib/managed/host-adapter.ts`; `CodexSkillProbeManaged` in `src/main/agents/codex-skills.ts`
 - **Admitting a Cue prompt run on a managed host (owner, pipeline, event, target):** `CueRunActionDeps.managed`, `cueRunLineage()` in `src/main/cue/cue-run-router.ts`; `CueExecutionConfig.admission` in `src/main/cue/cue-executor.ts`; `ProcessRunOptions.managed` in `src/main/cue/cue-process-lifecycle.ts`
 - **The port a Cue host admits with:** `createCueSpawnAuthority()` in `src/main/enterprise/spawn-authority.ts` (desktop, `EnterpriseService.cueSpawnAuthority`); `buildStandaloneCueSpawnPort()`, `StandaloneCueEngineOptions.managedHost` in `src/cli/services/cue-standalone-engine.ts` (headless)
 - **The owner fence a managed Auto Run or Cue run is admitted on (CP-03 consumer):** `createWorkflowOwnership()`, `workflowFenceOf()`, `endpointWorkflowOwnerPort()` in `src/shared/maestro-lib/managed/workflows.ts`; `EnterpriseService.claimWorkflowFence()` in `src/main/enterprise/service.ts`
@@ -181,7 +182,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 #### Providers, accounts, and auth
 
 - **Claude Code's memory folder for a project:** `resolveClaudeMemoryPath()` in `src/shared/maestro-lib/translation/memory.ts`, `resolveConfigDirKeyFromEnv()` in `src/shared/maestro-lib/launch/interactive-mode.ts`
-- **Discovering installed Codex skills:** `discoverCodexSkills()` in `src/main/agents/codex-skills.ts`
+- **Discovering installed Codex skills:** `discoverCodexSkills()`, `clearCodexSkillProbeRefusals()` in `src/main/agents/codex-skills.ts`
 - **Agent display name:** `getAgentDisplayName()` in `src/shared/agentMetadata.ts`
 - **Two-letter labels for a set of agents:** `buildAgentInitials(agents)`, `agentInitialCandidates(name)` in `src/shared/agentInitials.ts`
 - **Which providers a user can pick:** `AGENT_PICKER_META`, `PICKABLE_AGENT_IDS`, `getAgentPickerMeta()`, `AGENT_AUTOSELECT_ORDER` in `src/shared/agentMetadata.ts`

@@ -22,7 +22,10 @@ import { capabilitySnapshots } from '../../agents/capability-snapshot';
 import type { AgentCapabilitiesSnapshotMap } from '../../../shared/agentCapabilities';
 import { probeRemoteMaestroP, ensureRemoteMaestroPProbed } from '../../agents/probeRemoteMaestroP';
 import { execFileNoThrow } from '../../utils/execFile';
-import { discoverCodexSkills } from '../../agents/codex-skills';
+import { discoverCodexSkills, type CodexSkillProbeManaged } from '../../agents/codex-skills';
+import { DispatchRefusedError } from '../../../shared/maestro-lib/run/start-turn';
+import type { ProcessSpawnAuthorityPort } from '../../process-manager/types';
+import { currentSpawnActor } from '../../web-server/auth/transport-actor';
 import { checkCustomPath } from '../../agents/path-prober';
 import { CodexRpcRequestError, CodexRpcTransportError } from '../../codex-app-server/rpc-client';
 import { buildChildProcessEnv } from '../../process-manager/utils/envBuilder';
@@ -373,22 +376,40 @@ async function discoverOpenCodeSlashCommands(cwd: string): Promise<DiscoveredCom
 async function discoverCodexSlashCommands(
 	cwd: string,
 	command: string,
-	env: NodeJS.ProcessEnv
+	env: NodeJS.ProcessEnv,
+	managed?: CodexSkillProbeManaged
 ): Promise<DiscoveredCommand[]> {
 	const commands = new Map<string, DiscoveredCommand>();
 	let nativeSkillsAvailable = false;
 	try {
-		for (const skill of await discoverCodexSkills(command, cwd, env)) {
+		// A host with a spawn authority hands the probe its port and the actor
+		// (MRC2-02-04); a standalone call keeps the shape it always had.
+		const skills = managed
+			? await discoverCodexSkills(command, cwd, env, managed)
+			: await discoverCodexSkills(command, cwd, env);
+		for (const skill of skills) {
 			commands.set(skill.name, skill);
 		}
 		nativeSkillsAvailable = true;
 	} catch (error) {
-		const unsupportedRequest =
-			error instanceof CodexRpcRequestError && (error.code === -32601 || error.code === -32602);
-		if (!unsupportedRequest && !(error instanceof CodexRpcTransportError)) {
-			void captureException(error, { operation: 'discoverCodexSlashCommands' });
+		if (error instanceof DispatchRefusedError) {
+			// A managed host refused the probe before it started (its route is
+			// unqualified, or the policy or authority said no): explicit, by
+			// name, and no process. The scan below reads the skill and prompt
+			// files on disk, which starts nothing; it never spawns in its place.
+			logger.warn('Codex skill probe refused under management; using disk discovery', LOG_CONTEXT, {
+				state: error.state,
+				code: error.code,
+				message: error.message,
+			});
+		} else {
+			const unsupportedRequest =
+				error instanceof CodexRpcRequestError && (error.code === -32601 || error.code === -32602);
+			if (!unsupportedRequest && !(error instanceof CodexRpcTransportError)) {
+				void captureException(error, { operation: 'discoverCodexSlashCommands' });
+			}
+			logger.debug('Codex skills/list unavailable; using disk discovery', LOG_CONTEXT);
 		}
-		logger.debug('Codex skills/list unavailable; using disk discovery', LOG_CONTEXT);
 	}
 
 	const addCommand = (name: string, content: string) => {
@@ -472,7 +493,13 @@ async function discoverCodexSlashCommands(
  * Dependencies required for agents handler registration
  */
 export interface AgentsHandlerDependencies {
-	getProcessManager?: () => ProcessLivenessProbe | null;
+	/**
+	 * The process manager, as a liveness probe and, when it is the real one,
+	 * the host authority port it admits with (`managedPort`), which the Codex
+	 * skill probe is admitted against (MRC2-02-04). A double with no
+	 * `managedPort` is standalone by construction.
+	 */
+	getProcessManager?: () => ProcessManagerForAgents | null;
 	getAgentDetector: () => AgentDetector | null;
 	agentConfigsStore: Store<AgentConfigsData>;
 	/** The settings store (MaestroSettings) - required for SSH remote lookup */
@@ -484,6 +511,25 @@ export interface AgentsHandlerDependencies {
 	 * paths that wire only the read-only handlers.
 	 */
 	sessionsStore?: Store<SessionsData>;
+}
+
+/** The slice of the process manager these handlers read: liveness, and the managed port when there is one. */
+export type ProcessManagerForAgents = ProcessLivenessProbe & {
+	managedPort?(): ProcessSpawnAuthorityPort | null;
+};
+
+/**
+ * What the Codex skill probe is admitted with on this host (MRC2-02-04): the
+ * port the process manager admits every spawn with and the actor the
+ * transport resolved for this request (the keyboard, a Web Login account, the
+ * CLI secret or a paired device). A manager with no port, or none at all, is
+ * standalone by construction and the probe runs unadmitted, as before.
+ */
+function codexSkillProbeManaged(
+	processManager: ProcessManagerForAgents | null
+): CodexSkillProbeManaged | undefined {
+	const port = processManager?.managedPort?.() ?? null;
+	return port ? { port, actor: currentSpawnActor() } : undefined;
 }
 
 /**
@@ -1811,7 +1857,10 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 						false,
 						settingsStore?.get('shellEnvVars', {})
 					);
-					return discoverCodexSlashCommands(cwd, commandPath, env);
+					// Resolved at the boundary, before the probe: the actor is the
+					// transport's answer for THIS request, read here and not later.
+					const managed = codexSkillProbeManaged(deps.getProcessManager?.() ?? null);
+					return discoverCodexSlashCommands(cwd, commandPath, env, managed);
 				}
 				if (!agent?.available) {
 					logger.warn(`Agent ${agentId} not available for slash command discovery`, LOG_CONTEXT);

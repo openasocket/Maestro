@@ -48,14 +48,24 @@
  */
 
 import { canonicalJson } from '../../canonicalJson';
+import { generateUUID } from '../../uuid';
+import { providerRouteSupport, type ManagedRoute } from '../providers/capabilities';
+import {
+	leaseAdmission,
+	type DispatchAdmission,
+	type DispatchAdmissionState,
+} from '../run/start-turn';
 import type { EnrollInput, ManagedBindingState } from './binding';
 import {
+	buildDispatchSnapshot,
 	createContextVerifier,
 	createLocalHostAuthority,
 	sha256Hex,
 	unavailableAuthority,
 	type AdmissionRequest,
 	type ContextVerification,
+	type DispatchAttribution,
+	type DispatchSpecLike,
 	type HostAuthority,
 	type ManagedDecisionReceipt,
 	type PolicyDecision,
@@ -75,6 +85,7 @@ import {
 } from './endpoint-port';
 import {
 	MANAGED_CONTRACT_VERSION,
+	type ManagedAuthenticatedContext,
 	type ManagedDelegationRef,
 	type ManagedDenialCode,
 	type ManagedInstallationIdentity,
@@ -929,5 +940,187 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 		status: deps.status,
 		policyStatus: () =>
 			projectPolicyStatus({ standing: deps.status(), now: now(), freshnessMs: deps.freshnessMs }),
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Probe turns: a provider started for its metadata alone (MRC2-02-04)
+// ---------------------------------------------------------------------------
+//
+// A probe is a `DispatchPurpose` of `probe`: Maestro starts the provider to
+// read what it knows (Codex's skill list, a version, a slash-command table),
+// sends it no prompt of the person's and stops it when the answer is in. It
+// still starts the provider's own executable on one of its routes, so under
+// management it is admitted exactly like a turn: the host's authority sees a
+// snapshot of the final spec, mints a lease on it, and the sink (`startTurn`)
+// checks the lease against the spec that reaches `spawn`. A surface that
+// probes outside the process manager (`discoverCodexSkills`) composes its
+// admission from these; a standalone host passes none and probes as before.
+
+/** Why a probe may not run: the authority's three distinctions, plus a route with no enforcement. */
+export interface ProbeTurnRefusal {
+	state: DispatchAdmissionState;
+	code: ManagedDenialCode;
+	message: string;
+}
+
+/**
+ * Why a probe may not take a route under management, or null when the route
+ * is qualified. A probe starts the provider the way a turn on that route
+ * would (`codex app-server` for Codex's skill list), so it is held to the
+ * route's managed standing in the support table: a route with no enforcement
+ * producer refuses `unavailable`, by name, before any process and before the
+ * authority is asked, and is never run unmanaged in its place.
+ */
+export function probeRouteRefusal(
+	providerId: string,
+	route: ManagedRoute
+): ProbeTurnRefusal | null {
+	const support = providerRouteSupport(providerId).find((entry) => entry.route === route);
+	if (support?.managed === 'implemented') return null;
+	return {
+		state: 'unavailable',
+		code: 'capability-unsupported',
+		message: `A managed probe of ${providerId} over the ${route} route is unavailable on this host: ${support?.note ?? 'the route is not known'}. Nothing was started.`,
+	};
+}
+
+/** The identity of a probe: its own request, one attempt, no run above it. */
+export function probeTurnIdentity(newId: () => string = generateUUID): ManagedRunIdentity {
+	const requestId = newId();
+	return {
+		requestId,
+		idempotencyKey: requestId,
+		attemptId: newId(),
+		runId: null,
+		rootRunId: null,
+		parentRunId: null,
+	};
+}
+
+export interface ProbeTurnRequest {
+	/** The host's authority: it mints the lease and checks it again at the sink. */
+	authority: Pick<HostAuthority, 'admit' | 'check'>;
+	policy: PolicySourceSet;
+	/** The verified context the host bound the probing actor into. */
+	context: ManagedAuthenticatedContext;
+	/**
+	 * The spec exactly as it will reach `startTurn`. The lease covers the
+	 * digest of this snapshot, and `startTurn` rebuilds the snapshot from the
+	 * spec it is handed the instant before `spawn`, so a spec changed between
+	 * the two fails at the sink rather than running.
+	 */
+	spec: DispatchSpecLike;
+	/** The provider and target; the purpose is always `probe` and the operation `start`. */
+	attribution: Omit<DispatchAttribution, 'purpose' | 'operation'>;
+}
+
+export type ProbeTurnAdmission =
+	| {
+			ok: true;
+			leaseId: string;
+			/** What to hand `startTurn` as `options.admission`. */
+			admission: { gate: DispatchAdmission; attribution: DispatchAttribution };
+	  }
+	| ({ ok: false } & ProbeTurnRefusal);
+
+/**
+ * Ask the host's authority for a lease on a probe of the final spec, and
+ * turn the lease into the admission `startTurn` takes. The gate is the one
+ * every lease-backed sink uses (`leaseAdmission`): the lease is re-checked
+ * against the final snapshot, bound to the pid, released with the exit, and
+ * a revocation stops the process. A refusal is the authority's own answer,
+ * with its state and code; nothing was started.
+ */
+export async function admitProbeTurn(request: ProbeTurnRequest): Promise<ProbeTurnAdmission> {
+	const attribution: DispatchAttribution = {
+		...request.attribution,
+		operation: 'start',
+		purpose: 'probe',
+	};
+	const outcome = await request.authority.admit({
+		context: request.context,
+		snapshot: buildDispatchSnapshot(request.spec, attribution),
+		policy: request.policy,
+	});
+	if (outcome.state !== 'admitted') {
+		return { ok: false, state: outcome.state, code: outcome.code, message: outcome.message };
+	}
+	return {
+		ok: true,
+		leaseId: outcome.lease.leaseId,
+		admission: { gate: leaseAdmission(request.authority, outcome.lease), attribution },
+	};
+}
+
+/**
+ * What a remembered probe refusal was decided on. The policy revision is part
+ * of the key, so a new revision never answers from an old refusal; `scope`
+ * is whatever else the caller's decision depended on (the actor's transport,
+ * the directory probed), as one string.
+ */
+export interface ProbeRefusalKey {
+	authorityId: string;
+	policyRevision: number | null;
+	providerId: string;
+	route: ManagedRoute;
+	scope: string;
+}
+
+export interface ProbeRefusalCache {
+	/** The refusal remembered for this key, or null once it expired or was never recorded. */
+	recall(key: ProbeRefusalKey): ProbeTurnRefusal | null;
+	/** Remember a refusal for this key until the TTL passes; returns the refusal. */
+	remember(key: ProbeRefusalKey, refusal: ProbeTurnRefusal): ProbeTurnRefusal;
+	clear(): void;
+	size(): number;
+}
+
+/** How long a probe refusal is remembered: the same bound a policy status is fresh for. */
+export const PROBE_REFUSAL_TTL_MS = POLICY_FRESHNESS_MS;
+
+/**
+ * Remembers a probe's refusal so a surface that probes on every detection
+ * (a provider's skill list on each agent start) does not ask the authority
+ * again for the same answer. A refusal is kept for its key until the TTL
+ * passes; a changed policy revision or authority is a different key, so a
+ * decision made on an old revision is never replayed on a new one, and an
+ * `unavailable` from an endpoint that was away is retried once the TTL has
+ * run out. Nothing admitted is ever cached: an admission is a lease on one
+ * snapshot and is asked for every time.
+ */
+export function createProbeRefusalCache(
+	options: { now?: () => number; ttlMs?: number } = {}
+): ProbeRefusalCache {
+	const now = options.now ?? (() => Date.now());
+	const ttl = options.ttlMs ?? PROBE_REFUSAL_TTL_MS;
+	const entries = new Map<string, { refusal: ProbeTurnRefusal; until: number }>();
+	const keyOf = (key: ProbeRefusalKey): string => canonicalJson(key);
+	const sweep = (at: number): void => {
+		for (const [key, entry] of entries) if (entry.until <= at) entries.delete(key);
+	};
+	return {
+		recall(key) {
+			const at = now();
+			const entry = entries.get(keyOf(key));
+			if (!entry) return null;
+			if (entry.until <= at) {
+				sweep(at);
+				return null;
+			}
+			return entry.refusal;
+		},
+		remember(key, refusal) {
+			const at = now();
+			sweep(at);
+			entries.set(keyOf(key), { refusal, until: at + ttl });
+			return refusal;
+		},
+		clear() {
+			entries.clear();
+		},
+		size() {
+			return entries.size;
+		},
 	};
 }
