@@ -15,6 +15,7 @@ import type {
 	ProcessSpawnAuthorityPort,
 	ProcessSpawnContextInput,
 	ManagedCommandContext,
+	UtilityTurnLineage,
 } from './types';
 import {
 	buildDispatchSnapshot,
@@ -186,10 +187,23 @@ export function dispatchedChildContext(
 }
 
 /**
+ * The trace a utility turn is bound under (MRC2-02-02): the served tab's own
+ * process session id, the very string that tab's chat turns are traced by
+ * (`spawnContextInput` traces a chat turn under `config.sessionId`, which the
+ * renderer forms as `<agent>-ai-<tab>`), or the served agent's id when the
+ * turn serves no one tab. So a synopsis or a routing answer and the turns it
+ * was run beside share one trace in the journal, under separate requests.
+ */
+export function utilityTurnTraceId(lineage: UtilityTurnLineage): string {
+	return lineage.tabId ? `${lineage.sessionId}-ai-${lineage.tabId}` : lineage.sessionId;
+}
+
+/**
  * What a spawn is bound as. An Auto Run attempt is bound on its lineage; a
  * dispatched turn (`config.delegation`) is the CHILD of the operation that
  * dispatched it (`dispatchedChildContext`); anything else is a chat turn of
- * its own.
+ * its own, traced under its own session id, or under the served tab's when
+ * it is a utility turn that names one (`config.utilityOf`).
  */
 function spawnContextInput(
 	config: ProcessConfig
@@ -211,7 +225,11 @@ function spawnContextInput(
 			delegation: child.delegation,
 		};
 	}
-	return { identity: chatTurnIdentity(), traceId: config.sessionId, workflow: null };
+	return {
+		identity: chatTurnIdentity(),
+		traceId: config.utilityOf ? utilityTurnTraceId(config.utilityOf) : config.sessionId,
+		workflow: null,
+	};
 }
 
 /**

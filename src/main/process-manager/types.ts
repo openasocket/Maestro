@@ -32,6 +32,11 @@ import type {
 	WorkflowFenceAnswer,
 	WorkflowIdentityLike,
 } from '../../shared/maestro-lib/managed/workflows';
+import {
+	applyManagedEnvCeiling,
+	managedArgsProblems,
+	type ManagedRouteCeiling,
+} from '../../shared/maestro-lib/launch/env';
 
 // ============================================================================
 // Managed admission at the process sink
@@ -128,6 +133,121 @@ export function managedPermissionModeRefusal(
 	return `Permission mode "${requested}" is unavailable under management on this host: the policy's ceiling allows at most "${pinned}" for this provider, and a managed host does not lower a request to fit it. Nothing was started.`;
 }
 
+/**
+ * The agent and tab a utility turn of Maestro's own serves (MRC2-02-02): a
+ * synopsis, a Quick Chat routing answer, a command suggestion or a context
+ * summary run BESIDE a person's conversation by a `groomer-*` process that is
+ * no agent of its own. The sink binds the turn's trace to the served tab's
+ * (`utilityTurnTraceId`), so the journal reads the utility turn next to the
+ * turns it was run for instead of as an orphan under a throwaway id.
+ * Attribution, never a permission level: the served agent's own admissions
+ * lend the utility turn nothing, and it is admitted or refused on its own
+ * snapshot like any other.
+ */
+export interface UtilityTurnLineage {
+	/** The agent (Maestro session id) the turn serves. */
+	sessionId: string;
+	/** The tab within it, when the turn serves one tab. */
+	tabId?: string;
+}
+
+/** What a utility turn asks to run as, before the route ceiling is applied. */
+export interface UtilityRouteRequest {
+	/** The provider the turn resolved to (`utilityAgentId`, else the session's agent). */
+	providerId: string;
+	/** The resolved arguments, overrides applied. Checked by name, never run. */
+	args: readonly string[];
+	/**
+	 * The environment layer this surface sets on the process (the agent's own
+	 * variables with the session's overrides), the one layer the surface owns.
+	 * The ceiling is applied to a copy; the input is never mutated.
+	 */
+	customEnvVars: Record<string, string> | undefined;
+	/** Builds the provider's model flag, to pin the ceiling's model when the arguments name none. */
+	modelArgs?: (modelId: string) => string[];
+	/** Where the turn runs. A route cannot be bounded on an SSH remote. */
+	target: 'local' | 'ssh';
+}
+
+export type UtilityRouteAnswer =
+	| {
+			ok: true;
+			args: string[];
+			customEnvVars: Record<string, string> | undefined;
+			/** Set when a ceiling was applied: what it removed and pinned, by name. */
+			ceiling?: { removed: string[]; pinned: string[] };
+	  }
+	| { ok: false; reason: string };
+
+/**
+ * The provider, model and account ceiling of a utility turn (MRC2-02-02), the
+ * same `ManagedRouteCeiling` the launch plan applies to a person's turn
+ * (`applyManagedEnvCeiling`, `managedArgsProblems`), applied by a surface that
+ * spawns outside the plan. A managed host refuses a utility turn the policy
+ * routes to another provider, one whose arguments name a model other than
+ * the pinned one or route around the ceiling, one that would run on an SSH
+ * remote (the remote environment cannot be bounded from here), and one whose
+ * route requires an approved credential, since a utility turn delivers none.
+ * It never swaps the provider or lowers the request to fit: the surface
+ * degrades to no answer, and says why. With a ceiling that pins a model and
+ * arguments that name none, the model is pinned (as the launch plan does);
+ * the pinned names and the stripped user variables are reported by name.
+ * A host with no route ceiling producer, and a ceiling of null (the policy
+ * pins no route on this provider), forbid nothing here: the admission on the
+ * snapshot decides, as before. A standalone host is unchanged.
+ */
+export function boundUtilityRoute(
+	request: UtilityRouteRequest,
+	ceiling: ManagedRouteCeiling | null | undefined,
+	standing: 'standalone' | 'managed'
+): UtilityRouteAnswer {
+	const unchanged: UtilityRouteAnswer = {
+		ok: true,
+		args: [...request.args],
+		customEnvVars: request.customEnvVars,
+	};
+	if (standing === 'standalone' || !ceiling) return unchanged;
+	if (ceiling.providerId !== request.providerId) {
+		return {
+			ok: false,
+			reason: `The policy routes utility turns on this host to ${ceiling.providerId}, not ${request.providerId}; a managed host does not run them on another provider in its place. Nothing was started.`,
+		};
+	}
+	if (request.target === 'ssh') {
+		return {
+			ok: false,
+			reason:
+				'A managed route is not supported for a utility turn on an SSH remote: the remote environment cannot be bounded from this host. Nothing was started.',
+		};
+	}
+	const argProblems = managedArgsProblems(request.args, ceiling);
+	if (argProblems.length > 0) {
+		return {
+			ok: false,
+			reason: `The utility turn's arguments route around the policy: ${argProblems.join('; ')}. A managed host does not rewrite them to fit. Nothing was started.`,
+		};
+	}
+	const env: NodeJS.ProcessEnv = { ...(request.customEnvVars ?? {}) };
+	const report = applyManagedEnvCeiling(env, { ceiling, credentialEnvVars: {} });
+	if (report.problems.length > 0) {
+		return {
+			ok: false,
+			reason: `The utility turn's environment does not satisfy the policy's route: ${report.problems.join('; ')}. Nothing was started.`,
+		};
+	}
+	const bounded: Record<string, string> = {};
+	for (const [key, value] of Object.entries(env)) if (value !== undefined) bounded[key] = value;
+	const namesModel = request.args.some((arg) => arg === '--model' || arg === '-m');
+	const pinnedModelArgs =
+		ceiling.model && request.modelArgs && !namesModel ? request.modelArgs(ceiling.model) : [];
+	return {
+		ok: true,
+		args: [...request.args, ...pinnedModelArgs],
+		customEnvVars: Object.keys(bounded).length > 0 ? bounded : undefined,
+		ceiling: { removed: report.removed, pinned: report.pinned },
+	};
+}
+
 export interface ProcessSpawnContextInput {
 	actor: ProcessSpawnActor;
 	identity: ManagedRunIdentity;
@@ -200,6 +320,18 @@ export interface ProcessSpawnAuthorityPort {
 	 * `managedPermissionModeRefusal`, never lowered to fit.
 	 */
 	permissionCeiling?(providerId: string): ManagedPermissionCeiling | null;
+	/**
+	 * The route the policy pins for one provider (`ManagedRouteCeiling`: the
+	 * provider, its model, gateway origin, account home and whether its own
+	 * login may bill), read by a surface that spawns a utility turn of
+	 * Maestro's own outside the launch plan (the context groomer, MRC2-02-02)
+	 * and applied there by `boundUtilityRoute`; null for a provider the
+	 * policy pins no route on. Absent: this host composes no route ceiling
+	 * producer, and the surface bounds nothing on its own (the admission on
+	 * the snapshot decides, as before). Whether a provider may run at all is
+	 * the admission's answer on `DispatchSnapshot.provider`, not this one's.
+	 */
+	routeCeiling?(providerId: string): ManagedRouteCeiling | null;
 }
 
 /**
@@ -316,6 +448,11 @@ export interface ProcessConfig {
 	 *  the caller its transport resolved (`spawnOriginOf`); absent at the sink
 	 *  is `desktop`. Attribution, never a permission level. */
 	origin?: ManagedOrigin;
+	/** The agent and tab a `utility` turn serves (`UtilityTurnLineage`,
+	 *  MRC2-02-02). The sink binds the turn's trace to the served tab's, so
+	 *  the journal reads it beside the turns it was run for. Absent, a
+	 *  utility turn is traced under its own throwaway session id. */
+	utilityOf?: UtilityTurnLineage;
 	tabId?: string;
 	projectPath?: string;
 	/**

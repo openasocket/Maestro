@@ -30,37 +30,74 @@ import {
 import { ensureRemoteMaestroPProbed } from '../agents/probeRemoteMaestroP';
 import { getSshRemoteConfig, type SshRemoteSettingsStore } from './ssh-remote-resolver';
 import { getClaudeTokenMode, type ClaudeTokenSourceFields } from '../../shared/claudeTokenMode';
+import {
+	boundUtilityRoute,
+	spawnOriginOf,
+	type ProcessSpawnActor,
+	type ProcessSpawnAuthorityPort,
+	type UtilityTurnLineage,
+} from '../process-manager/types';
+import type { DispatchPurpose } from '../../shared/maestro-lib/managed/authority';
+import type { ManagedDenialCode, ManagedOrigin } from '../../shared/maestro-lib/managed/types';
 
 const LOG_CONTEXT = '[ContextGroomer]';
+
+/** The spawn config a grooming turn hands the process manager. */
+export interface GroomingSpawnConfig {
+	sessionId: string;
+	toolType: string;
+	cwd: string;
+	command: string;
+	args: string[];
+	prompt?: string;
+	promptArgs?: (prompt: string) => string[];
+	noPromptSeparator?: boolean;
+	// Send prompt as stream-json via stdin (for agents supporting it, e.g. with images)
+	sendPromptViaStdin?: boolean;
+	// Send prompt as raw text via stdin (used on Windows to avoid command-line length limits)
+	sendPromptViaStdinRaw?: boolean;
+	// Script piped to the remote shell's stdin for SSH execution (built by wrapSpawnWithSsh)
+	sshStdinScript?: string;
+	// Human-readable remote agent invocation (shown in Process Details)
+	sshRemoteCommand?: string;
+	// Resolved SSH remote identity, for Process Details / logging
+	sshRemoteId?: string;
+	sshRemoteHost?: string;
+	// Custom environment variables (resolved via applyAgentConfigOverrides)
+	customEnvVars?: Record<string, string>;
+	/** Always `utility`: a grooming turn is Maestro's own, run beside a conversation (MRC2-02-02). */
+	purpose?: DispatchPurpose;
+	/** Which surface raised the turn; defaulted from the actor (`spawnOriginOf`). */
+	origin?: ManagedOrigin;
+	/** The agent and tab the turn serves, when the caller said. */
+	utilityOf?: UtilityTurnLineage;
+}
+
+/** What an admitted grooming spawn came to (`SpawnResult`, narrowed). */
+export interface GroomingSpawnOutcome {
+	pid: number;
+	success: boolean;
+	error?: string;
+	managed?: { state: 'denied' | 'unavailable' | 'unknown'; code: ManagedDenialCode };
+}
 
 /**
  * Minimal process manager interface required for context grooming.
  * This is compatible with both ProcessManager and GenericProcessManager.
+ *
+ * `spawnAdmitted` and `managedPort` are the real manager's admission path
+ * (MRC2-02-02): a grooming turn goes through `spawnAdmitted` when the
+ * manager has one, so a managed desktop spawns nothing without an admission
+ * and a standalone one spawns as before; a double with only `spawn` is
+ * standalone by construction and spawns as it always did.
  */
 export interface GroomingProcessManager {
-	spawn(config: {
-		sessionId: string;
-		toolType: string;
-		cwd: string;
-		command: string;
-		args: string[];
-		prompt?: string;
-		promptArgs?: (prompt: string) => string[];
-		noPromptSeparator?: boolean;
-		// Send prompt as stream-json via stdin (for agents supporting it, e.g. with images)
-		sendPromptViaStdin?: boolean;
-		// Send prompt as raw text via stdin (used on Windows to avoid command-line length limits)
-		sendPromptViaStdinRaw?: boolean;
-		// Script piped to the remote shell's stdin for SSH execution (built by wrapSpawnWithSsh)
-		sshStdinScript?: string;
-		// Human-readable remote agent invocation (shown in Process Details)
-		sshRemoteCommand?: string;
-		// Resolved SSH remote identity, for Process Details / logging
-		sshRemoteId?: string;
-		sshRemoteHost?: string;
-		// Custom environment variables (resolved via applyAgentConfigOverrides)
-		customEnvVars?: Record<string, string>;
-	}): { pid: number; success?: boolean } | null;
+	spawn(config: GroomingSpawnConfig): { pid: number; success?: boolean } | null;
+	spawnAdmitted?(
+		config: GroomingSpawnConfig,
+		actor: ProcessSpawnActor
+	): Promise<GroomingSpawnOutcome>;
+	managedPort?(): Pick<ProcessSpawnAuthorityPort, 'standing' | 'routeCeiling'> | null;
 	on(event: string, handler: (...args: unknown[]) => void): void;
 	off(event: string, handler: (...args: unknown[]) => void): void;
 	kill(sessionId: string): void;
@@ -196,6 +233,21 @@ export interface GroomContextOptions {
 	claudeTokenSource?: ClaudeTokenSourceFields;
 	/** Optional callback for progress updates during grooming */
 	onProgress?: (update: GroomProgressUpdate) => void;
+	/**
+	 * Who asked for this turn, as the transport that carried the request
+	 * knows it (MRC2-02-02). The turn is admitted at the sink for this actor;
+	 * left out, it is the desktop operator (`in-process`), which is what every
+	 * IPC caller is. A web or CLI entry names its own.
+	 */
+	actor?: ProcessSpawnActor;
+	/** Which surface raised the turn. Defaulted from the actor (`spawnOriginOf`). */
+	origin?: ManagedOrigin;
+	/**
+	 * The agent and tab this turn serves, so the sink traces it beside the
+	 * turns it was run for. A caller with no owning agent (Director's Notes)
+	 * leaves it out and the turn is traced under its own `groomer-*` id.
+	 */
+	lineage?: UtilityTurnLineage;
 }
 
 /**
@@ -278,6 +330,9 @@ async function groomContextOnce(
 		agentConfigValues,
 		claudeTokenSource,
 		onProgress,
+		actor = { peer: 'in-process' },
+		origin = spawnOriginOf(actor),
+		lineage,
 	} = options;
 
 	const groomerSessionId = `groomer-${uuidv4()}`;
@@ -321,11 +376,52 @@ async function groomContextOnce(
 		sessionCustomEffort,
 		readOnlyMode,
 	});
-	const resolvedArgs =
+	const toolArgs =
 		disableTools && agent.noToolsArgs?.length
 			? [...configResolution.args, ...agent.noToolsArgs]
 			: configResolution.args;
-	const resolvedEnvVars = configResolution.effectiveCustomEnvVars;
+
+	// Under management the provider this utility turn resolved to (the utility
+	// agent, else the session's), its model and its account are measured
+	// against the route the policy pins for that provider, the same ceiling
+	// the launch plan applies to a person's turn, read off the port's
+	// `routeCeiling` seam and applied by `boundUtilityRoute` (MRC2-02-02). A
+	// turn the policy routes elsewhere, or whose arguments or environment
+	// route around the ceiling, is refused here with the reason, before any
+	// side effect: the caller degrades to no name or no synopsis, never to a
+	// turn on another provider or an unmanaged spawn. A host with no route
+	// ceiling producer bounds nothing here (the admission below decides, as
+	// before); a standalone host is unchanged.
+	const managedPort = processManager.managedPort?.() ?? null;
+	const standing = managedPort?.standing() ?? 'standalone';
+	const bounded = boundUtilityRoute(
+		{
+			providerId: agent.id,
+			args: toolArgs,
+			customEnvVars: configResolution.effectiveCustomEnvVars,
+			modelArgs: agent.modelArgs,
+			target: sessionSshRemoteConfig?.enabled ? 'ssh' : 'local',
+		},
+		standing === 'managed' ? (managedPort?.routeCeiling?.(agent.id) ?? null) : null,
+		standing
+	);
+	if (!bounded.ok) {
+		logger.error('Managed route ceiling refused the grooming turn; not spawning', LOG_CONTEXT, {
+			groomerSessionId,
+			agentType,
+			reason: bounded.reason,
+		});
+		throw new Error(bounded.reason);
+	}
+	if (bounded.ceiling) {
+		logger.info('Grooming turn bounded by the managed route ceiling', LOG_CONTEXT, {
+			groomerSessionId,
+			agentType,
+			...bounded.ceiling,
+		});
+	}
+	const resolvedArgs = bounded.args;
+	const resolvedEnvVars = bounded.customEnvVars;
 	// Prefer the absolute path the detector resolved over the static `command`
 	// field from the agent definition. `agent.command` is a bare name like
 	// `claude`, which is not spawnable on Windows: the npm install leaves a
@@ -612,8 +708,11 @@ async function groomContextOnce(
 		// `sshStdinScript`, which owns the child's stdin), so skip it there.
 		const useStdinForPrompt = isWindows() && !sshRemoteUsed;
 
-		// Spawn the process in batch mode
-		const spawnResult = processManager.spawn({
+		// The batch-mode spawn. Classified as a `utility` turn of Maestro's own,
+		// raised by the surface the actor came in through, serving the agent and
+		// tab the caller named (MRC2-02-02); the sink carries all three into the
+		// admission snapshot and the trace.
+		const spawnConfig: GroomingSpawnConfig = {
 			sessionId: groomerSessionId,
 			toolType: agentType,
 			cwd: spawnCwd,
@@ -632,52 +731,85 @@ async function groomContextOnce(
 			sshRemoteHost: sshRemoteUsed?.host,
 			// Pass resolved env vars (merged from agent defaults + agent config + session overrides)
 			customEnvVars: spawnEnvVars,
-		});
+			purpose: 'utility',
+			origin,
+			...(lineage ? { utilityOf: lineage } : {}),
+		};
 
-		if (!spawnResult || spawnResult.pid <= 0) {
-			cleanup();
-			reject(new Error(`Failed to spawn grooming process for ${agentType}`));
-			return;
-		}
-
-		logger.debug('Spawned grooming batch process', LOG_CONTEXT, {
-			groomerSessionId,
-			pid: spawnResult.pid,
-		});
-
-		// Set up idle check
-		idleCheckInterval = setInterval(() => {
-			const idleTime = Date.now() - lastDataTime;
-			if (idleTime > IDLE_TIMEOUT_MS && responseBuffer.length >= MIN_RESPONSE_LENGTH) {
-				finishWithResponse('idle timeout with content');
+		const armAfterSpawn = (
+			spawnResult: { pid: number; success?: boolean; error?: string } | null
+		) => {
+			// A refusal at the sink already arrived as an `agent-error` for this
+			// session and settled the promise through `onError`; nothing to add.
+			if (resolved) return;
+			if (!spawnResult || spawnResult.pid <= 0 || spawnResult.success === false) {
+				cleanup();
+				resolved = true;
+				reject(
+					new Error(
+						spawnResult?.error
+							? `Grooming was not started: ${spawnResult.error}`
+							: `Failed to spawn grooming process for ${agentType}`
+					)
+				);
+				return;
 			}
-		}, 1000);
 
-		// Overall timeout
-		setTimeout(() => {
-			if (!resolved) {
-				logger.warn('Grooming timeout', LOG_CONTEXT, {
-					groomerSessionId,
-					responseLength: responseBuffer.length,
-				});
+			logger.debug('Spawned grooming batch process', LOG_CONTEXT, {
+				groomerSessionId,
+				pid: spawnResult.pid,
+			});
 
-				if (responseBuffer.length > 0) {
-					finishWithResponse('overall timeout with content');
-				} else {
-					// Nobody is waiting for this process anymore. Left running it
-					// keeps its provider session open until it finishes on its own,
-					// which a caller with a short deadline (tab routing) would stack up.
-					try {
-						processManager.kill(groomerSessionId);
-					} catch {
-						// Process may have already exited
-					}
-					cleanup();
-					resolved = true;
-					reject(new Error('Grooming timed out with no response'));
+			// Set up idle check
+			idleCheckInterval = setInterval(() => {
+				const idleTime = Date.now() - lastDataTime;
+				if (idleTime > IDLE_TIMEOUT_MS && responseBuffer.length >= MIN_RESPONSE_LENGTH) {
+					finishWithResponse('idle timeout with content');
 				}
-			}
-		}, timeoutMs);
+			}, 1000);
+
+			// Overall timeout
+			setTimeout(() => {
+				if (!resolved) {
+					logger.warn('Grooming timeout', LOG_CONTEXT, {
+						groomerSessionId,
+						responseLength: responseBuffer.length,
+					});
+
+					if (responseBuffer.length > 0) {
+						finishWithResponse('overall timeout with content');
+					} else {
+						// Nobody is waiting for this process anymore. Left running it
+						// keeps its provider session open until it finishes on its own,
+						// which a caller with a short deadline (tab routing) would stack up.
+						try {
+							processManager.kill(groomerSessionId);
+						} catch {
+							// Process may have already exited
+						}
+						cleanup();
+						resolved = true;
+						reject(new Error('Grooming timed out with no response'));
+					}
+				}
+			}, timeoutMs);
+		};
+
+		// Admitted at the sink for the actor named: a managed desktop spawns
+		// nothing without an admission and answers a refusal as a failed result
+		// (and an `agent-error` on this session, which `onError` turns into the
+		// rejection the caller reports); a standalone desktop, and a manager
+		// double with no admission path, spawn as before.
+		if (processManager.spawnAdmitted) {
+			processManager.spawnAdmitted(spawnConfig, actor).then(armAfterSpawn, (error: unknown) => {
+				if (resolved) return;
+				cleanup();
+				resolved = true;
+				reject(error instanceof Error ? error : new Error(String(error)));
+			});
+		} else {
+			armAfterSpawn(processManager.spawn(spawnConfig));
+		}
 	});
 }
 
