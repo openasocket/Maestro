@@ -29,6 +29,12 @@ import {
 import { setNamedGlobalHotkey, summonAppWindow } from '../global-hotkey-manager';
 import { logger } from '../utils/logger';
 import { isWebContentsAvailable } from '../utils/safe-send';
+import {
+	describeTransportAdmission,
+	getActingTransport,
+	issueDispatchTicket,
+	withdrawDispatchTicket,
+} from '../web-server/auth/transport-actor';
 import { requestFromRenderer } from '../web-server/callbacks/remoteRequest';
 import {
 	createQuickChatRecents,
@@ -130,6 +136,84 @@ export function createQuickChatController(deps: QuickChatControllerDeps): QuickC
 		snapshot,
 	});
 
+	/** Hand a command to the engine and keep the state it reports. */
+	const relay = async (
+		win: BrowserWindow,
+		command: QuickChatCommand
+	): Promise<QuickChatCommandResult> => {
+		const result = await requestFromRenderer<QuickChatCommandResult>(win, 'quickChat:command', {
+			args: [command],
+			timeoutMs: COMMAND_TIMEOUT_MS,
+			fallback: { ok: false, error: 'Maestro did not answer', snapshot },
+		});
+		snapshot = result.snapshot;
+		pushSnapshotToWindow();
+		return result;
+	};
+
+	/**
+	 * The agent the engine sends to: the one it last reported (its own answer,
+	 * so a chat in progress stays on its agent), else the configured one.
+	 */
+	const engineAgentId = (): string | null => snapshot.agentId || readSettings().agentId || null;
+
+	/**
+	 * Tickets for the spawns a command causes (MRC2-02-03A).
+	 *
+	 * The controller only relays a command to the renderer engine, and no
+	 * transport context survives that hop: the engine's tab turn comes back as
+	 * `process:spawn` and its routing turn as `context:groomContext`, both over
+	 * Electron IPC, so the sinks read a `maestro-cli quick-chat send` or a
+	 * paired device's message as the operator at the keyboard. A send that
+	 * arrived over a transport (the WebSocket handler runs inside `runAsClient`,
+	 * so the admission is in scope here, the way every host sink reads it)
+	 * carries one host-minted ticket per spawn, bound to the engine agent and
+	 * no tab, since which tab is what the engine decides: `dispatchTicket` for
+	 * the tab turn, echoed on the queued item and claimed by the spawn handler,
+	 * and `routingTicket` for the routing turn, claimed by the groomContext
+	 * handler. The window's own IPC runs outside any context (`desktop`) and
+	 * issues none, so a window send behaves as before. The ticket carries no
+	 * actor: a forged, spent or mismatched one binds the caller as itself.
+	 *
+	 * Only a `send` spawns. A recall reopens a tab without a turn (a live chat
+	 * it brings back keeps the tickets its queued messages already carry), and
+	 * the other commands start nothing.
+	 */
+	const ticketCommand = async (
+		command: QuickChatCommand,
+		win: BrowserWindow
+	): Promise<{ command: QuickChatCommand; withdraw: () => void }> => {
+		const bare = { command, withdraw: () => {} };
+		if (command.type !== 'send') return bare;
+		const admission = getActingTransport();
+		if (admission.kind === 'desktop') return bare;
+		// Before its first command the engine has reported no agent; ask it.
+		let agentId = engineAgentId();
+		if (!agentId) {
+			await relay(win, { type: 'sync' });
+			agentId = engineAgentId();
+		}
+		const transport = describeTransportAdmission(admission);
+		if (!agentId) {
+			// The engine has no agent to chat with and refuses the send itself.
+			logger.warn('Quick Chat send has no engine agent to bind a ticket to', 'QuickChat', {
+				transport,
+			});
+			return bare;
+		}
+		const target = { agentId };
+		const dispatchTicket = issueDispatchTicket(admission, target);
+		const routingTicket = issueDispatchTicket(admission, target);
+		logger.info('Quick Chat send ticketed for its transport', 'QuickChat', { transport, agentId });
+		return {
+			command: { ...command, dispatchTicket, routingTicket },
+			withdraw: () => {
+				withdrawDispatchTicket(dispatchTicket);
+				withdrawDispatchTicket(routingTicket);
+			},
+		};
+	};
+
 	const runCommand = async (command: QuickChatCommand): Promise<QuickChatCommandResult> => {
 		if (!isEnabled()) {
 			return { ok: false, error: 'Quick Chat is turned off in Encore Features', snapshot };
@@ -138,13 +222,10 @@ export function createQuickChatController(deps: QuickChatControllerDeps): QuickC
 		if (!win || !isWebContentsAvailable(win)) {
 			return { ok: false, error: 'No Maestro window is available', snapshot };
 		}
-		const result = await requestFromRenderer<QuickChatCommandResult>(win, 'quickChat:command', {
-			args: [command],
-			timeoutMs: COMMAND_TIMEOUT_MS,
-			fallback: { ok: false, error: 'Maestro did not answer', snapshot },
-		});
-		snapshot = result.snapshot;
-		pushSnapshotToWindow();
+		const ticketed = await ticketCommand(command, win);
+		const result = await relay(win, ticketed.command);
+		// A send the engine refused (or never answered) spawns nothing.
+		if (!result.ok) ticketed.withdraw();
 		// "Open in Maestro" is a deliberate trip to the main window: put the
 		// floating window away and bring the window showing the tab forward.
 		if (command.type === 'reveal' && result.ok) summonAppWindow(win);

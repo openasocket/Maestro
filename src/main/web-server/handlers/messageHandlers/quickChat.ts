@@ -16,6 +16,7 @@ import {
 	type QuickChatCommand,
 } from '../../../../shared/quickChat';
 import { asThinkingMode } from '../../../../shared/types';
+import { describeTransportAdmission, resolveTransportAdmission } from '../../auth/transport-actor';
 import { logger } from '../../../utils/logger';
 import { LOG_CONTEXT } from './shared';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
@@ -85,7 +86,13 @@ export function handleQuickChat(
 	}
 
 	const action = typeof message.action === 'string' ? message.action : '';
-	logger.info(`[Web] Received quick_chat: action=${action}`, LOG_CONTEXT);
+	// Which transport admitted the caller (the CLI secret, a Web Login account,
+	// a Lite pairing, the path token): named here, and bound by the controller,
+	// which asks `getActingTransport()` inside the client context the message
+	// handler established and tickets the spawns a `send` causes (MRC2-02-03A).
+	// Transport admission is not tenant IAM; it widens nothing at the sinks.
+	const transport = describeTransportAdmission(resolveTransportAdmission(client));
+	logger.info(`[Web] Received quick_chat: action=${action}, transport=${transport}`, LOG_CONTEXT);
 
 	if (action === 'status') {
 		reply({ success: true, status: controller.getStatus() });

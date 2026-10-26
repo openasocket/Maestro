@@ -271,8 +271,24 @@ export const EMPTY_QUICK_CHAT_SNAPSHOT: Readonly<QuickChatSnapshot> = {
 
 /** Actions the quick window (and `maestro-cli quick-chat`) can ask the engine for. */
 export type QuickChatCommand =
-	/** `images`: data URLs sent with the text, like images pasted in the main composer. */
-	| { type: 'send'; text: string; images?: string[] }
+	/**
+	 * `images`: data URLs sent with the text, like images pasted in the main
+	 * composer. `dispatchTicket` and `routingTicket` (MRC2-02-03A): the
+	 * host-minted dispatch tickets the controller issues for a send that arrived
+	 * over a transport (`maestro-cli quick-chat`, a paired device, a Web Login
+	 * account), one per spawn the send causes, so the sinks bind the transport
+	 * that asked instead of the operator at the keyboard: the tab turn echoes
+	 * `dispatchTicket` on its queued item for the spawn handler, the routing
+	 * turn hands `routingTicket` to the groomContext handler. Opaque, single-use,
+	 * bound to the engine agent and no tab. A send from the window carries none.
+	 */
+	| {
+			type: 'send';
+			text: string;
+			images?: string[];
+			dispatchTicket?: string;
+			routingTicket?: string;
+	  }
 	| { type: 'new' }
 	| { type: 'setPersistent'; persistent: boolean }
 	/** Send the next message to another tab, a new tab, or wherever Maestro finds. */
