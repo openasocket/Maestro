@@ -1,0 +1,80 @@
+{
+	"formatVersion": 1,
+	"counterpart": {
+		"repository": "mega-maestro",
+		"sourceRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+		"recordedOn": "2026-10-26",
+		"runtimePortSource": "packages/runtime-adapter/src/port.ts",
+		"localEndpointSource": "packages/contracts/src/local-endpoint.ts"
+	},
+	"runtimePort": {
+		"contractVersion": "mega-maestro-runtime-port/0.1",
+		"capabilities": [
+			"agents.list",
+			"runs.list",
+			"runs.submit",
+			"runs.inspect",
+			"runs.cancel",
+			"runs.interrupt",
+			"events.resume"
+		],
+		"origins": ["ux", "cli", "cue", "enterprise", "embedded"],
+		"resultStatuses": ["ok", "denied", "unsupported", "unavailable", "unknown"],
+		"resultCodes": [
+			"policy-denied",
+			"unauthenticated",
+			"version-unsupported",
+			"capability-unsupported",
+			"invalid-input",
+			"idempotency-conflict",
+			"not-found",
+			"runtime-unavailable",
+			"outcome-unknown"
+		]
+	},
+	"localEndpoint": {
+		"protocol": 1,
+		"operations": [
+			"attachment",
+			"enrollment",
+			"execution",
+			"offline",
+			"telemetry",
+			"command",
+			"inbox",
+			"noticeList",
+			"workflow",
+			"budget",
+			"compatibility",
+			"model"
+		],
+		"denialReasons": [
+			"unsupported_version",
+			"unsupported_capability",
+			"unauthenticated",
+			"policy_denied",
+			"expired",
+			"replay",
+			"unavailable",
+			"invalid_request",
+			"untrusted_clock",
+			"budget_exhausted",
+			"unknown_price",
+			"owner_unfenced"
+		],
+		"commandActions": ["cancel_run", "refresh_policy", "report_status"],
+		"componentKinds": ["endpoint", "maestro", "runtime", "ux", "cli", "cue", "vibes"],
+		"executionSources": ["ux", "cli", "cue", "headless"],
+		"maxRequestBytes": 1048576,
+		"maxResponseBytes": 65536
+	},
+	"maestro": {
+		"contractVersion": "maestro-managed/1",
+		"capabilityExtensions": ["capabilities.negotiate", "policy.status"],
+		"originAliases": { "desktop": "ux" },
+		"originExtensions": ["headless"],
+		"denialCodeExtensions": ["context-mismatch", "lease-invalid"],
+		"commandActionExtensions": ["pause_run", "resume_run", "operator_prompt"],
+		"commandActionExtensionsNote": "pause_run and resume_run wait on CP-05; all three are answered unsupported by name"
+	}
+}
