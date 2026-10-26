@@ -40,7 +40,12 @@ import {
 	delegationContextProblems,
 } from '../../../../shared/maestro-lib/managed/delegation';
 import { dispatchedChildContext } from '../../../process-manager/ProcessManager';
-import type { DispatchedSpawnIds } from '../../../process-manager/types';
+import {
+	managedPermissionModeRefusal,
+	requestedPermissionMode,
+	spawnOriginOf,
+	type DispatchedSpawnIds,
+} from '../../../process-manager/types';
 import { generateUUID } from '../../../../shared/uuid';
 import { QUERY_USER_ENV_VAR } from '../../../../shared/webLogin';
 import { getActingUser } from '../../../web-server/auth/acting-user';
@@ -272,6 +277,20 @@ async function handleProcessSpawnImpl(
 	// what is saved. Handed to ProcessManager.spawn() below.
 	const codexTransport = resolveCodexSpawnTransport(config, baseSessionId, deps.sessionsStore);
 
+	// Who is asking, as the transport knows it (MRC-08-01A): the keyboard, a
+	// logged-in browser account, or, through the ticket a WebSocket dispatch
+	// arrived with, the CLI or the paired device that sent it. Resolved HERE,
+	// before the launch plan and every refusal below, so the origin the sink
+	// admits (`spawnOriginOf`, MRC2-02-01A) is the caller's and a refused
+	// spawn never leaves a claimable ticket behind. The ticket is spent now,
+	// whatever it was worth; the process never sees it (it is stripped at the
+	// spawn site below).
+	const actor = currentSpawnActor({
+		ticket: config.dispatchTicket,
+		agentId: baseSessionId,
+		tabId: spawnTabId(config),
+	});
+
 	let finalArgs = buildAgentArgs(agent, {
 		baseArgs: config.args,
 		prompt: config.prompt,
@@ -316,6 +335,41 @@ async function handleProcessSpawnImpl(
 	const isReadOnly =
 		config.permissionMode === 'readonly' ||
 		(!hasExplicitPermissionMode && config.readOnlyMode === true);
+
+	// Under management the mode this turn asks for is measured against the
+	// ceiling the policy pins for its provider (`ManagedRouteCeiling.
+	// permissionMode`, P2-03, through the port's `permissionCeiling` seam) and
+	// a request above it is DENIED, never lowered to fit: a turn the person
+	// asked to run with full access, silently run read-only, is a turn they
+	// were told nothing about (MRC2-02-01A). Asked here, beside the derivation
+	// the argument builder already acted on and before the launch plan, so a
+	// refusal reaches neither the plan nor the sink. A port with no ceiling
+	// producer forbids nothing here (the admission on the snapshot decides, as
+	// before); a standalone host is unchanged; a terminal is a shell the user
+	// drives and asks for no mode. `config.permissionMode` is never rewritten.
+	if (config.toolType !== 'terminal') {
+		const port = processManager.managedPort();
+		const standing = port?.standing() ?? 'standalone';
+		if (standing === 'managed') {
+			const requested = requestedPermissionMode(config);
+			const ceiling = port?.permissionCeiling?.(config.toolType) ?? null;
+			const refusal = managedPermissionModeRefusal(requested, ceiling, standing);
+			if (refusal) {
+				logger.error(
+					'Managed permission-mode ceiling refused the spawn; not spawning',
+					LOG_CONTEXT,
+					{
+						sessionId: config.sessionId,
+						toolType: config.toolType,
+						requested,
+						ceiling: ceiling?.permissionMode ?? null,
+					}
+				);
+				reportSpawnRefusal(deps, config.sessionId, refusal);
+				return { success: false, pid: 0 };
+			}
+		}
+	}
 
 	// Settings -> Environment (`globalShellEnvVars`, read above before
 	// resolveClaudeSpawnContext). Loaded for every process type: terminals get it
@@ -1092,21 +1146,22 @@ async function handleProcessSpawnImpl(
 		}
 	}
 
-	// Admitted for the actor this transport resolved (the keyboard, a logged-in
-	// browser account, or, through the ticket a WebSocket dispatch arrived
-	// with, the CLI or the paired device that sent it) before any branch: a
-	// managed host spawns nothing without an admission, a standalone host
-	// spawns as before.
-	// The ticket is spent here, whatever it was worth; the process never sees it.
-	const { dispatchTicket, ...spawnConfig } = config;
-	const actor = currentSpawnActor({
-		ticket: dispatchTicket,
-		agentId: baseSessionId,
-		tabId: spawnTabId(config),
-	});
+	// Admitted for the actor resolved above (before the launch plan) before any
+	// branch: a managed host spawns nothing without an admission, a standalone
+	// host spawns as before. The ticket was spent there; strip it so the
+	// process never sees it.
+	const { dispatchTicket: _claimedTicket, ...spawnConfig } = config;
 	const result = await processManager.spawnAdmitted(
 		{
 			...spawnConfig,
+			// Classification the policy reads off the admission snapshot
+			// (MRC2-02-01A): `process:spawn` is the composer's own turn, so its
+			// purpose is `conversation`, and its origin is the caller the transport
+			// resolved (`cli` for a ticketed maestro-cli dispatch, `desktop` for the
+			// keyboard, a browser login or a paired device). Host-authoritative:
+			// nothing the renderer sent names either.
+			purpose: 'conversation',
+			origin: spawnOriginOf(actor),
 			// The ids the child's stamped record was minted with (see above), so
 			// the sink binds the same request it carries; absent on an undispatched turn.
 			dispatchedAs,
