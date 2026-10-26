@@ -77,8 +77,8 @@ registerHooks({
 		return { format: 'module-typescript', source, shortCircuit: true };
 	},
 });
-const { canonicalJson } = await import('../src/shared/canonicalJson.ts');
-const { redactSecrets } = await import('../src/shared/redactSecrets.ts');
+export const { canonicalJson } = await import('../src/shared/canonicalJson.ts');
+export const { redactSecrets } = await import('../src/shared/redactSecrets.ts');
 
 export class HandoffRefusal extends Error {
 	constructor(code, message) {

@@ -113,6 +113,50 @@ do not add implementation scope automatically. Required controls around existing
 translation, headless operation and plugins remain in this playbook even though
 new central product experiences for those features are optional.
 
+## Handoff and joint evidence (Phase 2)
+
+Phase 1 wrote its rules, plan, support matrix and evidence under
+`Plans/mega-maestro-rc/`. The integration design (MEGA-MAESTRO-INTEGRATION,
+"Handoff and joint acceptance") names `Plans/mega-maestro/evidence/` as the path
+the counterpart reads and writes to, so Phase 2 keeps both:
+
+| Path                                                 | Written by                                  | Content                                                                   |
+| ---------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------- |
+| `Plans/mega-maestro-rc/`                             | Phase 1 and 2 tasks                         | Rules, plans, support matrix, per-phase evidence, the Phase 1 pair record |
+| `Plans/mega-maestro/evidence/handoff.json`           | `scripts/write-mega-maestro-handoff.mjs`    | Maestro's handoff manifest, the record Mega-Maestro keys on               |
+| `Plans/mega-maestro/evidence/joint-integration.json` | `scripts/import-joint-integration.mjs` only | The digest-verified copy of Mega-Maestro's joint record                   |
+
+Both scripts need Node 26 from `/opt/homebrew/bin` and a built library
+(`npm run build:maestro-lib`); `Plans/mega-maestro/evidence/` is excluded from
+Prettier so neither file is ever reformatted.
+
+```sh
+node scripts/write-mega-maestro-handoff.mjs --agreement <MEGA-MAESTRO-INTEGRATION.md> --enforceability <MEGA-MAESTRO-ENFORCEABILITY.md>
+node scripts/write-mega-maestro-handoff.mjs --check   # 0 when the file on disk reproduces, 1 when it differs
+node scripts/import-joint-integration.mjs <joint-integration.json from Mega-Maestro> [--dry-run] [--json]
+```
+
+The writer records `repositoryRevision` (HEAD), `sourceTreeDigest` over the
+git-tracked implementation tree (`src/`, `scripts/`, `package.json`, the
+lockfile, `tsconfig*.json` and the contracts pin; `Plans/`, `.maestro/` and
+`docs/` excluded, so a report or checkbox edit never moves it), the built
+library's digests, the capability and OS/provider matrix, the pair commands, the
+local and joint status and the open producers CP-01 through CP-06. It is
+deterministic and refuses an absolute path or a secret shape before writing
+(exit 2). A committed manifest always names the commit before it, so `--check`
+reads "differs" right after a commit until the next regeneration.
+
+The importer copies the counterpart record byte for byte, and only when the
+Maestro facts it carries (an object at `maestro`, `participants.maestro` or
+`handoffs.maestro` with `repositoryRevision`, `sourceTreeDigest` and
+`artifacts[]` naming `kind`, `entry.sha256` and `payloadDigest`) equal what the
+writer computes on this checkout right now, with the library built from HEAD. A
+differing field is named and nothing is written (exit 1); an unusable record, a
+missing build, an absolute path or a secret shape is refused (exit 2). Changed
+implementation, lockfiles or artifacts therefore invalidate the joint evidence
+by construction, exactly as the design requires. The counterpart has not yet
+published a joint record; the shape above is what the importer reads once it does.
+
 ## Authoring verification
 
 The structural validator checks task order/uniqueness/counts, one-to-three file
