@@ -104,7 +104,25 @@ interface Turn {
 	reply: QuickChatMessage[];
 	/** The tab's provider conversation as last read, so a closed tab can be reopened. */
 	agentSessionId: string | null;
+	/**
+	 * The host-minted dispatch tickets a send that arrived over a transport carries
+	 * (`maestro-cli quick-chat`, a paired device; see QuickChatCommand.send). Opaque,
+	 * single-use, bound to the chat's agent and no tab, and never an actor. The
+	 * engine only echoes them to the sinks that spend them: `dispatchTicket` rides
+	 * the queued item into `process:spawn`, `routingTicket` goes with the routing
+	 * turn into `context:groomContext`. A send from the window carries none, a
+	 * remembered chat brings none back, and a turn that ran holds a spent one, so
+	 * it is dropped before the turn is sent again (see moveToNewTab).
+	 */
+	dispatchTicket: string | null;
+	routingTicket: string | null;
 }
+
+/** The tickets a `send` command carries; both absent for a send from the window. */
+type TurnTickets = Pick<
+	Extract<QuickChatCommand, { type: 'send' }>,
+	'dispatchTicket' | 'routingTicket'
+>;
 
 /** One chat: a thread of turns on one agent. */
 interface Chat {
@@ -686,6 +704,9 @@ function deliverToTab(
 		// A message that is a slash command runs as that command, which takes no
 		// images: one sent with images stays a message, so they reach the agent.
 		expandCommands: turn.images.length === 0,
+		// The queued item carries the ticket into `process:spawn`, where the spawn
+		// handler claims it for the agent and whichever tab was picked here.
+		...(turn.dispatchTicket && { dispatchTicket: turn.dispatchTicket }),
 	});
 	if (!item) return fail(turn, 'Could not reach the agent');
 	if (item.tabId !== tabId) {
@@ -858,10 +879,15 @@ async function routeToTab(
 ): Promise<{ tabId: string; origin: QuickChatRouteOrigin } | null> {
 	const session = findSession(sessionId);
 	if (!session) return null;
+	// The routing turn spends the ticket, so the turn lets go of it here: a turn
+	// is routed once, and a spent ticket is nothing to carry.
+	const routingTicket = turn.routingTicket;
+	turn.routingTicket = null;
 	const target = await routeQuickChatMessage(session, turn.text, {
 		currentTabId: currentTab(session, c)?.id ?? null,
 		// A copy: the decision is about the chat as it stood when this was sent.
 		ownedTabIds: new Set(c.ownedTabIds),
+		...(routingTicket && { routingTicket }),
 	});
 	if (target.kind === 'open' && findTab(findSession(sessionId), target.tabId)) {
 		return { tabId: target.tabId, origin: 'open' };
@@ -873,7 +899,7 @@ async function routeToTab(
 	return null;
 }
 
-function send(text: string, images: string[]): string | null {
+function send(text: string, images: string[], tickets: TurnTickets = {}): string | null {
 	const session = resolveAgent();
 	if (!session) return 'No agent to chat with. Create an agent first.';
 	chat.sessionId = session.id;
@@ -896,6 +922,8 @@ function send(text: string, images: string[]): string | null {
 		tabName: null,
 		reply: [],
 		agentSessionId: null,
+		dispatchTicket: tickets.dispatchTicket || null,
+		routingTicket: tickets.routingTicket || null,
 	};
 	chat.turns.push(turn);
 	if (images.length > 0) void drawPreviews(turn);
@@ -1007,7 +1035,12 @@ async function moveToNewTab(messageId: string | undefined): Promise<string | nul
 	// One store update decides it: a message taken out of the queue here, and
 	// not held, never ran. Anything else may be running in the old tab now.
 	const withdrawn = !!turn.queuedItemId && removeQueuedItem(session.id, turn.queuedItemId);
+	// A message that left the queue unrun still holds an unspent ticket, and the
+	// new tab's spawn is the one it was minted for. One that ran spent it at the
+	// spawn handler, so the move carries none: a spent ticket binds nothing and
+	// is only logged as refused at the sink.
 	if (!withdrawn || held) {
+		turn.dispatchTicket = null;
 		// A recovery resends from its own copy of the prompt. End it, or the
 		// message would run again in the old tab after it moved.
 		cancelRecoveryForTab(session.id, oldTabId);
@@ -1136,6 +1169,10 @@ function restoreTurn(turn: QuickChatRecentTurn): Turn {
 		tabName: turn.tabName,
 		reply: turn.reply,
 		agentSessionId: turn.agentSessionId,
+		// Tickets are never persisted (see Turn): a remembered message ran, or was
+		// withdrawn with its ticket, and a recent record carries none either way.
+		dispatchTicket: null,
+		routingTicket: null,
 	};
 }
 
@@ -1252,7 +1289,10 @@ export async function runQuickChatCommand(
 			const images = command.images ?? [];
 			error =
 				command.text.trim() || images.length > 0
-					? send(command.text, images)
+					? send(command.text, images, {
+							dispatchTicket: command.dispatchTicket,
+							routingTicket: command.routingTicket,
+						})
 					: 'Message cannot be empty';
 			break;
 		}

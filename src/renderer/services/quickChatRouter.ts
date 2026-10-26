@@ -43,6 +43,17 @@ export interface RouteContext {
 	currentTabId: string | null;
 	/** Tabs this chat created. Hidden ones are candidates though no chip shows them. */
 	ownedTabIds: ReadonlySet<string>;
+	/**
+	 * The host-minted dispatch ticket the Quick Chat controller issued for this
+	 * message's routing turn, when the message arrived over a transport
+	 * (`QuickChatCommand.routingTicket`, MRC2-02-03A). Opaque, single-use, bound
+	 * to the agent and no tab, never an actor: it is echoed as the `dispatchTicket`
+	 * option of `context:groomContext`, where the handler claims it so the routing
+	 * turn is admitted for the CLI or device that asked rather than the operator
+	 * at the keyboard. A message from the window carries none, and a message the
+	 * words alone route never asks the model, so its ticket goes unspent.
+	 */
+	routingTicket?: string;
 }
 
 /** How long the routing model gets. Past this the message is routed without it. */
@@ -137,7 +148,8 @@ function tabLastActiveAt(tab: AITab): number {
 async function askRoutingModel(
 	session: Session,
 	message: string,
-	shortlist: readonly RouteCandidate[]
+	shortlist: readonly RouteCandidate[],
+	routingTicket: string | undefined
 ): Promise<number | 'new' | null> {
 	try {
 		const template = await window.maestro.prompts.get(PROMPT_IDS.QUICK_CHAT_ROUTE);
@@ -161,6 +173,9 @@ async function askRoutingModel(
 				// The turn serves this agent; which of its tabs is what it decides,
 				// so it names none. Attribution only, on a managed desktop.
 				lineage: { sessionId: session.id },
+				// The controller's ticket for a transport's message (see RouteContext):
+				// the handler claims it for the agent the lineage names.
+				...(routingTicket && { dispatchTicket: routingTicket }),
 			}
 		);
 		return parseRouteAnswer(response, shortlist.length);
@@ -237,7 +252,12 @@ export async function routeQuickChatMessage(
 	if (decision.action === 'new') return { kind: 'new' };
 	if (decision.action === 'route') return targets.get(decision.candidate.key) ?? { kind: 'new' };
 
-	const answer = await askRoutingModel(session, message, decision.shortlist);
+	const answer = await askRoutingModel(
+		session,
+		message,
+		decision.shortlist,
+		context.routingTicket || undefined
+	);
 	if (answer === 'new') return { kind: 'new' };
 	const chosen =
 		answer === null ? decision.shortlist.find((c) => c.current) : decision.shortlist[answer];
