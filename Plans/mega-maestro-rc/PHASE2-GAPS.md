@@ -163,3 +163,61 @@ from the UI, the IPC bridge, the web bridge and the CLI (`settings-set`,
   missing seam rather than editing the Phase 1 documents.
 - Native OS confinement. Phase 2 gates and inventories sinks; it does not claim
   sandboxing where none exists.
+
+## Reconciliation (2026-10-25)
+
+Phase 1 finished on 2026-10-25 with 147 of 152 tasks checked. The five open
+tasks (MRC-01-06, 02-07, 03-08, 04-05, 12-06) are real-pair verifications
+blocked on the producers listed in [[counterpart-requests]]; each now carries
+a guard that stops re-runs until the sibling commit, the artifact set or the
+built library sha moves. Phase 2 was re-audited against the tree at
+`34822c6ec` and reissued as
+`.maestro/playbooks/2026-10-25-Maestro-Mega-Integration-P2/` (74 tasks, down
+from 80). Task IDs are stable; the original draft is archived under
+`.maestro/playbooks/Working/P2-draft-2026-10-21/`.
+
+### Delivered by Phase 1, dropped from Phase 2
+
+| Dropped | Phase 1 seam that covers it |
+| --- | --- |
+| MRC2-01-03 | `src/main/enterprise/commands.ts` already limits commands to `cancel_run`, `refresh_policy` and `report_status` and answers pause and resume as `unsupported` by name (`DESKTOP_UNCOMPOSED_COMMANDS`, MRC-11-01B). The request document is [[counterpart-requests]]. |
+| MRC2-03-02 | `readOnlyCliEnforced` is declared on 12 providers in `providers/definitions.ts`; `providerRouteSupport()` in `providers/capabilities.ts` reports support per route (MRC-01-04). |
+| MRC2-04-04 | Symphony `shared.ts` and `contributionStart.ts` consult `repository-policy.ts`; `symphony-fork.ts` exposes `ForkSetupOptions.beforeFork` for the gate (MRC-09-05). |
+| MRC2-07-04 | The managed pane is a section of Settings > Environment with searchable id `environment-mega-maestro` (MRC-11-03A); a separate tab adds nothing. |
+| MRC2-07-05A | Folded into MRC2-07-05, which registers a deep link instead of a modal. |
+| MRC2-08-01 | The mega-maestro suites already run under the default vitest node project and skip behind `skipIf(!report.assessment.ready)` with a printed reason. |
+
+### Retargeted because Phase 1 moved the seam
+
+| Task | Change |
+| --- | --- |
+| MRC2-02-01 | Admission at the sink exists (`ProcessManager.admitSpawn()`, MRC-06-01; SSH qualification MRC-08-04B). The task now adds purpose and origin classification to `buildSpawnRequestSnapshot()` and the permission-mode check. |
+| MRC2-02-02 | Tab naming already spawns through `spawnAdmitted()` with delegation context (MRC-09-02). The task now covers the context groomer and the utility provider ceiling only. |
+| MRC2-02-04 | Web terminal creation already carries the transport actor admission. The task now covers Codex skill discovery only. |
+| MRC2-03-01 | `managedArgsProblems()` in `launch/env.ts` (MRC-05-03) already refuses model, key, base URL, profile and Codex config overrides. The task extends it with a permission-mode field instead of adding a new file. |
+| MRC2-07-05 | Registers a `managed-status` deep link to the Environment pane plus palette and menu entries; no new modal, priority or shortcut. |
+| MRC2-07-07 | Keeps `docs/mega-maestro.md` out of `docs/docs.json` per the MRC-12-04 decision; moves the enterprise rows in CLI-UI-PARITY from Open gaps to Covered as the verbs land. |
+
+### Still genuinely missing (verified 2026-10-25)
+
+Every other Phase 2 target was probed and is absent: no egress class on
+`fetchWithTimeout()`, no listener policy, no settings lock model, no
+permission-mode ceiling, no `maestro-cli managed` verbs, no bridge handler for
+managed status, no Encore pins, no shell, install or local-effects policy, no
+repository gate on the git IPC handlers, `remote-git.ts`, feedback, the Cue
+GitHub poller or the remaining Symphony files, two inline `execFile` calls and
+one inline WebSocket still in `src/main/index.ts`, no managed admission for
+the groomer, Quick Chat routing, the consult router, Codex skill discovery or
+the Pianola and Computer History supervisors, and no handshake for the
+maestro-p TUI.
+
+### Branch facts recorded at reconciliation
+
+- `upstream/rc` is 223 commits past the pinned base; a dry-run merge of the
+  feature branch into it reports 38 conflicting files, including
+  `start-turn.ts`, `handle-spawn.ts`, `agent-spawner.ts` and the Cue
+  lifecycle. A rebase is a separate decision, not a Phase 2 task.
+- The fork CI runs only on pull requests into `main`, `rc` or an `*-RC`
+  branch, and on pushes to `main` or `rc`. The feature branch has never run
+  CI. Pushing `release/v1.1.0-RC` to the fork and opening a pull request from
+  the feature branch against it is the shortest path to both matrix legs.
