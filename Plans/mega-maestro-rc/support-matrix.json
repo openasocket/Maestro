@@ -3,8 +3,12 @@
 	"title": "Maestro 1.1.0-RC managed operation: per-route support and residual requirements",
 	"created": "2026-10-25",
 	"task": "MRC-12-04",
+	"revisions": [
+		"MRC2-01-02 2026-10-26: the word unsupported-by-counterpart and the counterpart section (CP-04, CP-05, CP-06 rows with evidence and owner)"
+	],
 	"generated": {
 		"routes": "capabilityMatrix(dist/maestro-lib).routes from scripts/package-mega-maestro-runtime.mjs, folded to routes[agentId][route] = [standalone, managed]; the generator is .maestro/playbooks/Working/12-04-support-matrix.mjs",
+		"counterpart": "authored by hand from COUNTERPART_SUPPORT in src/shared/maestro-lib/managed/compatibility.ts; the 12-04 generator does not emit this section, so keep the two in step when either changes",
 		"library": {
 			"version": "0.24.0",
 			"managedContract": "maestro-managed/1",
@@ -22,7 +26,96 @@
 	"words": {
 		"implemented": "exercised on this build; a caller may proceed",
 		"unverified": "the route exists but its evidence is the capability table alone; a managed caller refuses",
-		"unsupported": "no producer; a managed caller refuses and never falls back to standalone"
+		"unsupported": "no producer; a managed caller refuses and never falls back to standalone",
+		"unsupported-by-counterpart": "the Maestro consumer exists and refuses; the producer is one the counterpart owes (owner mega-maestro, named by dependency) and has not published; a managed caller refuses and never falls back to standalone, and negotiation reports the row by this name instead of activating"
+	},
+	"counterpart": {
+		"source": "COUNTERPART_SUPPORT in src/shared/maestro-lib/managed/compatibility.ts (MRC2-01-02); the request document is Plans/mega-maestro-rc/counterpart-requests.md",
+		"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+		"negotiation": "negotiateCompatibility() answers a required capability on an unsupported-by-counterpart row with the denial reason unsupported-by-counterpart and keeps the required set as asked; a server unsupported_capability denial is folded over the host rows by applyCounterpartDenial() (CompatibilityProfile.counterpartDenial), never by dropping a required member",
+		"rows": [
+			{
+				"key": "endpoint.command",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-04",
+				"evidence": "mega-maestro apps/endpoint/src/ipc/server.ts:65-67",
+				"consumer": "src/main/enterprise/commands.ts",
+				"note": "the endpoint server serves attachment, compatibility, telemetry, inbox, noticeList, execution and model only; command falls through to unsupported_capability"
+			},
+			{
+				"key": "endpoint.workflow",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-04",
+				"evidence": "mega-maestro apps/endpoint/src/ipc/server.ts:65-67",
+				"consumer": "src/shared/maestro-lib/managed/workflows.ts (owner fences, with CP-03)",
+				"note": "workflow falls through to unsupported_capability"
+			},
+			{
+				"key": "endpoint.offline",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-04",
+				"evidence": "mega-maestro apps/endpoint/src/ipc/server.ts:65-67",
+				"consumer": "none built yet; the operation is in the shared endpoint-port vocabulary only",
+				"note": "offline falls through to unsupported_capability"
+			},
+			{
+				"key": "endpoint.enrollment",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-04",
+				"evidence": "mega-maestro apps/endpoint/src/ipc/server.ts:65-67",
+				"consumer": "src/main/enterprise/enrollment.ts (enroll, rotate, revoke, retire)",
+				"note": "enrollment falls through to unsupported_capability; createEnrollmentLifecycle() already answers unsupported with owner mega-maestro when the compatibility answer lacks it"
+			},
+			{
+				"key": "endpoint.budget",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-04",
+				"evidence": "mega-maestro apps/endpoint/src/ipc/server.ts:65-67",
+				"consumer": "none built yet (usage leaves through telemetry); the operation is in the shared endpoint-port vocabulary only",
+				"note": "budget falls through to unsupported_capability"
+			},
+			{
+				"key": "command.pause_run",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-05",
+				"evidence": "mega-maestro packages/contracts/src/local-endpoint.ts:76-84",
+				"consumer": "src/main/enterprise/commands.ts (DESKTOP_UNCOMPOSED_COMMANDS answers it unsupported by name)",
+				"note": "the published action union is cancel_run, refresh_policy and report_status"
+			},
+			{
+				"key": "command.resume_run",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-05",
+				"evidence": "mega-maestro packages/contracts/src/local-endpoint.ts:76-84",
+				"consumer": "src/main/enterprise/commands.ts (DESKTOP_UNCOMPOSED_COMMANDS answers it unsupported by name)",
+				"note": "the published action union is cancel_run, refresh_policy and report_status"
+			},
+			{
+				"key": "transport.os-peer.darwin",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-06",
+				"evidence": "mega-maestro apps/endpoint/src/ipc/native.ts:24",
+				"consumer": "src/main/enterprise/endpoint-client.ts over the os-peer transport; the pair runs only in the Linux container",
+				"note": "OS peer authentication is Linux only: inspectNativePeer throws IPC_PLATFORM_UNSUPPORTED on macOS and every application artifact records nativeEndpoint: unsupported"
+			},
+			{
+				"key": "transport.os-peer.win32",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-06",
+				"evidence": "mega-maestro apps/endpoint/src/ipc/native.ts:24",
+				"consumer": "src/main/enterprise/endpoint-client.ts over the os-peer transport; the Windows CI leg skips the pair with a reason",
+				"note": "OS peer authentication is Linux only: inspectNativePeer throws IPC_PLATFORM_UNSUPPORTED on Windows and every application artifact records nativeEndpoint: unsupported"
+			}
+		]
 	},
 	"routes": {
 		"claude-code": {

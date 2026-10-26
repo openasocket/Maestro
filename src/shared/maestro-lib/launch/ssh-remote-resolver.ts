@@ -14,7 +14,7 @@
  */
 
 import type { SshRemoteConfig, AgentSshRemoteConfig } from '../../types';
-import type { SupportStatus } from '../managed/compatibility';
+import { isSupportStatus, type SupportStatus } from '../managed/compatibility';
 import { MANAGED_CONTRACT_VERSION, type ManagedSshEndpointRef } from '../managed/types';
 
 /**
@@ -286,7 +286,6 @@ export interface SshRemoteExpectation {
 const isObject = (v: unknown): v is Record<string, unknown> =>
 	typeof v === 'object' && v !== null && !Array.isArray(v);
 const isId = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 256;
-const SUPPORT_STATUSES = new Set(['unsupported', 'unverified', 'implemented', 'locally-verified']);
 
 /** The problems with a value offered as a remote endpoint identity against the expectation; shape first, then the rule. Pure. */
 export function sshRemoteEndpointProblems(value: unknown, expect: SshRemoteExpectation): string[] {
@@ -323,8 +322,7 @@ export function sshRemoteEndpointProblems(value: unknown, expect: SshRemoteExpec
 				!isObject(row) ||
 				!isId(row.providerId) ||
 				!isId(row.route) ||
-				typeof row.managed !== 'string' ||
-				!SUPPORT_STATUSES.has(row.managed)
+				!isSupportStatus(row.managed)
 			) {
 				problems.push(`routes[${i}] is not a route row`);
 			}
