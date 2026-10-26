@@ -1,0 +1,201 @@
+{
+	"formatVersion": 1,
+	"integrationId": "mega-maestro-v1",
+	"producer": "maestro",
+	"stage": "full",
+	"agreementDigest": "d9b80b9222e2f31a83192ba62cbbd2ca9f6827ed3737f6c4f6ef0fc7163bdef3",
+	"enforceabilityDigest": "6e85fe9b3d5e9c068fee1839779d7ca935777e2bdbbe66af13e03542acf3a9e0",
+	"documentDigestRule": "sha256 of the raw bytes of each named Mega-Maestro design document; null if none",
+	"repositoryRevision": "eda29c5cca6e0608d2a18ce99512615588fa8fdd",
+	"repository": {
+		"branch": "feature/mega-maestro-v1.1.0-rc",
+		"baseRevision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+		"headCommittedAt": "2026-10-26T17:07:36-04:00",
+		"includedTreeDirty": false,
+		"dirtyIncludedFiles": 0
+	},
+	"sourceTreeDigest": "778477b639377b593097acef75373d8359e86d6eab6f358ebe97477998f50efb",
+	"sourceTree": {
+		"rules": {
+			"id": "maestro-implementation-tree/1",
+			"include": [
+				"src/",
+				"scripts/",
+				"package.json",
+				"package-lock.json",
+				"tsconfig*.json",
+				"vendor/mega-maestro/contracts.pin.json"
+			],
+			"exclude": [
+				"Plans/",
+				".maestro/",
+				"docs/"
+			],
+			"method": "sha256 of canonicalJson({ rules, files }): files maps each included git-tracked path (POSIX separators, sorted) to the sha256 of its working-tree bytes, or \"deleted\" when the tracked file is absent"
+		},
+		"files": 6492,
+		"deleted": 0
+	},
+	"artifacts": [
+		{
+			"kind": "maestro-lib",
+			"path": "dist/maestro-lib",
+			"buildCommand": "npm run build:maestro-lib",
+			"version": "0.24.0",
+			"managedContract": "maestro-managed/1",
+			"appVersion": "1.1.0-RC",
+			"status": "ready",
+			"sourceRevision": "eda29c5cca6e0608d2a18ce99512615588fa8fdd",
+			"sourceDirty": false,
+			"inputSha256": "2ac3358b87ca352c560af7cfc0f96d4dfe7f53ede421fcfbae8563ee57b4c775",
+			"entry": {
+				"path": "dist/maestro-lib/index.js",
+				"sha256": "94b7fe9c35c880a1511f4d735d43ba91388e32920f01c93c201c2bf99586efae"
+			},
+			"payloadFiles": 293,
+			"payloadDigest": "a9ce50919724b29cae07b72780026f13c55276c54194b5a7968ad99bf4cd18e8",
+			"builtWithNode": "26.12.1"
+		}
+	],
+	"contracts": {
+		"status": "absent",
+		"dependency": "CP-01",
+		"owner": "mega-maestro"
+	},
+	"capabilities": {
+		"managedContract": "maestro-managed/1",
+		"endpointProtocol": 1,
+		"nodeRange": ">=20",
+		"contractVectors": {
+			"file": "src/__tests__/fixtures/mega-maestro/contract-vectors.json",
+			"sha256": "4a9f98c7abf864c43d39cbed99b88d3f3da4b92b5878d1dc23f4c2869c32f8e3"
+		},
+		"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1"
+	},
+	"matrix": {
+		"readOn": {
+			"platform": "darwin",
+			"arch": "arm64",
+			"node": "v26.12.1"
+		},
+		"legend": "route=standalone/managed, in the words of Plans/mega-maestro-rc/support-matrix.json",
+		"platforms": {
+			"linux": "route-available: the pair runs in the pinned Linux container; no row passed",
+			"darwin": "unsupported-by-counterpart (CP-06; mega-maestro apps/endpoint/src/ipc/native.ts:24)",
+			"win32": "unsupported-by-counterpart (CP-06; mega-maestro apps/endpoint/src/ipc/native.ts:24)"
+		},
+		"providers": {
+			"claude-code": "child-process=implemented/implemented codex-app-server=unsupported/unsupported opencode-server=unsupported/unsupported pty=implemented/unsupported ssh=unverified/unsupported",
+			"codex": "child-process=implemented/implemented codex-app-server=implemented/unsupported opencode-server=unsupported/unsupported pty=unverified/unsupported ssh=unverified/unsupported",
+			"antigravity": "child-process=implemented/implemented codex-app-server=unsupported/unsupported opencode-server=unsupported/unsupported pty=unverified/unsupported ssh=unverified/unsupported",
+			"qwen3-coder": "child-process=implemented/implemented codex-app-server=unsupported/unsupported opencode-server=unsupported/unsupported pty=implemented/unsupported ssh=unverified/unsupported",
+			"hermes": "child-process=implemented/implemented codex-app-server=unsupported/unsupported opencode-server=unsupported/unsupported pty=unverified/unsupported ssh=unverified/unsupported",
+			"pi": "child-process=implemented/implemented codex-app-server=unsupported/unsupported opencode-server=unsupported/unsupported pty=unverified/unsupported ssh=unverified/unsupported",
+			"omp": "child-process=implemented/implemented codex-app-server=unsupported/unsupported opencode-server=unsupported/unsupported pty=unverified/unsupported ssh=unverified/unsupported",
+			"opencode": "child-process=implemented/implemented codex-app-server=unsupported/unsupported opencode-server=implemented/unsupported pty=unverified/unsupported ssh=unverified/unsupported",
+			"factory-droid": "child-process=implemented/implemented codex-app-server=unsupported/unsupported opencode-server=unsupported/unsupported pty=unverified/unsupported ssh=unverified/unsupported",
+			"copilot-cli": "child-process=implemented/implemented codex-app-server=unsupported/unsupported opencode-server=unsupported/unsupported pty=implemented/unsupported ssh=unverified/unsupported",
+			"grok": "child-process=implemented/implemented codex-app-server=unsupported/unsupported opencode-server=unsupported/unsupported pty=unverified/unsupported ssh=unverified/unsupported"
+		},
+		"harness": "synthetic-harness/node-permission-v1=implemented/implemented"
+	},
+	"commands": [
+		{
+			"step": "build the library",
+			"command": "npm run build:maestro-lib",
+			"exit": 0,
+			"result": "maestro-lib 0.24.0 from eda29c5cca6e0608d2a18ce99512615588fa8fdd (ready against HEAD)"
+		},
+		{
+			"step": "pair check",
+			"command": "node scripts/mega-maestro-pair.mjs check --json",
+			"exit": 2,
+			"result": "library stale (built from 7405e099d, HEAD a112e9736); contracts pin absent; 4 packaged artifacts dirty-source (e29195d8) with maestroAdapter unsupported (public-artifact-not-supplied); development checkout built, dirty; adapter unsupported; Docker 29.9.2 with the pinned image present; approvalProducer false; dependencies: maestro-lib, CP-01 x2, CP-02, CP-03, registration-approval"
+		},
+		{
+			"step": "rebuild the library from HEAD",
+			"command": "npm run build:maestro-lib",
+			"exit": 0,
+			"result": "dist/maestro-lib/index.js 1705.5 KB, maestro-lib 0.24.0, maestro-managed/1, index.js sha256 f08ea73d57cc12ead5308b034073ef76f4c489605c5a0120c82a3f96ec7cdf50 (unchanged from the 12-05 build; only provenance.json moved to a112e9736, which clears the stale reading)"
+		},
+		{
+			"step": "final real pair run",
+			"command": "node scripts/mega-maestro-pair.mjs run --allow-dirty --out .maestro/playbooks/Working/12-06/pair-run.json",
+			"exit": 3,
+			"result": "run status completed, certifiable false (endpoint source development-checkout is built (CP-01)); container exit 0; native peer build exit 0; daemon start exit 0 (socketPath /work/ws/.local/endpoint/ipc.sock, runtimeSocketPath /work/ws/.local/endpoint/runtime.sock); driver exit 0; status answer attached, management unenrolled, capabilities [], desiredPolicyRevision null, appliedPolicyRevision null, connectivity unavailable, collectionProfile metadata; stop exit 0 (stopping); verdicts passed 0 / failed 0 / blocked 5 / not-run 0; leases 0; approval not-offered (no producer)"
+		},
+		{
+			"step": "write this manifest",
+			"command": "node scripts/write-mega-maestro-handoff.mjs --agreement <doc> --enforceability <doc>",
+			"exit": 0,
+			"result": "this file; --check reproduces it byte for byte or exits 1"
+		}
+	],
+	"localStatus": "complete",
+	"jointStatus": "not-verified",
+	"acceptance": {
+		"source": "Plans/mega-maestro-rc/joint-integration.json",
+		"headRevision": "a112e973683ea879a4f3cc211b4b654f71ab65c8",
+		"totals": {
+			"required": 13,
+			"passed": 1,
+			"notPassed": 12
+		}
+	},
+	"pendingPrerequisites": [
+		{
+			"id": "CP-01",
+			"owner": "mega-maestro",
+			"producer": "Fresh contracts and packaged API/endpoint/gateway artifacts",
+			"status": "open",
+			"observed": "contracts pin absent; no clean Linux application artifact (4 dirty-source darwin artifacts; the development checkout is never certifiable)"
+		},
+		{
+			"id": "CP-02",
+			"owner": "mega-maestro",
+			"producer": "Actual implementation of packages/runtime-adapter/src/maestro.ts",
+			"status": "open",
+			"observed": "runtime adapter pin absent; dist/maestro.js declares unsupported"
+		},
+		{
+			"id": "CP-03",
+			"owner": "mega-maestro",
+			"producer": "Authenticated delegation/workflow authority, protocol receivers and durable ownership/fencing",
+			"status": "open",
+			"observed": "workflow authority pin absent; the endpoint bridge rejects a nonempty delegation or workflow context; no workflow operation"
+		},
+		{
+			"id": "CP-04",
+			"owner": "mega-maestro",
+			"producer": "rows endpoint.command, endpoint.workflow, endpoint.offline, endpoint.enrollment, endpoint.budget",
+			"status": "open",
+			"observed": "mega-maestro apps/endpoint/src/ipc/server.ts:65-67"
+		},
+		{
+			"id": "CP-05",
+			"owner": "mega-maestro",
+			"producer": "rows command.pause_run, command.resume_run",
+			"status": "open",
+			"observed": "mega-maestro packages/contracts/src/local-endpoint.ts:76-84"
+		},
+		{
+			"id": "CP-06",
+			"owner": "mega-maestro",
+			"producer": "rows transport.os-peer.darwin, transport.os-peer.win32",
+			"status": "open",
+			"observed": "mega-maestro apps/endpoint/src/ipc/native.ts:24"
+		},
+		{
+			"id": "registration-approval",
+			"owner": "mega-maestro",
+			"producer": "An API or console producer that approves the actor registration (the harness takes it as --approve-command)",
+			"status": "open",
+			"observed": "no producer; the handshake stops at the challenge (registration.challenge denied unavailable), the daemon stays unenrolled"
+		}
+	],
+	"pathMapping": {
+		"agreed": "Plans/mega-maestro/evidence/",
+		"phase1": "Plans/mega-maestro-rc/ (rules, plan, support matrix, evidence, the pair record)",
+		"jointIntegration": "written only by scripts/import-joint-integration.mjs after a digest check"
+	}
+}

@@ -108,3 +108,4 @@ Maestro-owned gaps, open and recorded in `Plans/mega-maestro-rc/evidence/11.json
 - [maestro-lib](./maestro-lib) for the library surface the managed contracts are exported from, release by release.
 - [Maestro CLI](./cli#headless-host-maestro-cli-host) for `maestro-cli host`.
 - `Plans/mega-maestro-rc/` in the repository: the execution rules, the plan and its evidence.
+- `Plans/mega-maestro/evidence/handoff.json`: the handoff manifest at the path the integration design names, written by `scripts/write-mega-maestro-handoff.mjs` (the implementation-tree and library digests, the open producers, the local and joint status); the digest-verified copy of the counterpart's `joint-integration.json` belongs beside it, while the Phase 1 evidence stays under `Plans/mega-maestro-rc/`.
