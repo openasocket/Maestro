@@ -45,6 +45,7 @@ import {
 	type ManagedDenialCode,
 	type ManagedDispatchTarget,
 	type ManagedOperationContext,
+	type ManagedOrigin,
 	type ManagedPeerAuthentication,
 	type ManagedPolicySource,
 	type ManagedPrincipalRef,
@@ -129,12 +130,45 @@ export type DispatchEffect = 'launch';
 export type DispatchOperation = 'start' | 'input' | 'resume';
 
 /**
+ * What the launch is FOR, as the surface that raised it classifies it: a
+ * person's `conversation` turn (the composer, a dispatched prompt, a group
+ * chat round), a `utility` turn Maestro runs beside one (a tab name, a
+ * synopsis, Quick Chat routing), a `probe` of a provider (its version, its
+ * skills, its slash commands: read-only, with no prompt of the person's), or
+ * a `supervisor` child a background service keeps alive (Pianola, Computer
+ * History). A policy reads it to tell a person's turn from Maestro's own. It
+ * is attribution, never a permission level: a `utility` turn is admitted or
+ * refused like any other, it is not trusted more for being small.
+ */
+export type DispatchPurpose = 'conversation' | 'utility' | 'probe' | 'supervisor';
+export const DISPATCH_PURPOSES: readonly DispatchPurpose[] = [
+	'conversation',
+	'utility',
+	'probe',
+	'supervisor',
+];
+
+/**
  * What is about to run, resolved and final. Serializable, so it can be sent
  * to a remote authority and journaled; compared by `dispatchSnapshotDigest`.
  */
 export interface DispatchSnapshot {
 	contractVersion: ManagedContractVersion;
 	operation: DispatchOperation;
+	/**
+	 * What the launch is for, when the surface that raised it said
+	 * (`DispatchPurpose`). Absent from a surface that does not classify its
+	 * launches; a policy reads an unclassified launch as it reads any other.
+	 */
+	purpose?: DispatchPurpose;
+	/**
+	 * Which surface raised the launch, when it said (the contract's
+	 * `ManagedOrigin`; `desktop` is a person at Maestro's own UI, `cli` a
+	 * process that presented the CLI secret). Attribution for the policy and
+	 * the journal, never a permission level, and absent from a surface that
+	 * does not say.
+	 */
+	origin?: ManagedOrigin;
 	executable: string;
 	args: readonly string[];
 	cwd: string;
@@ -164,6 +198,10 @@ export interface DispatchAttribution {
 	resourceIds?: readonly string[];
 	/** Default `start`. */
 	operation?: DispatchOperation;
+	/** What the launch is for. Left out of the snapshot (and its digest) when not given. */
+	purpose?: DispatchPurpose;
+	/** Which surface raised the launch. Left out of the snapshot (and its digest) when not given. */
+	origin?: ManagedOrigin;
 }
 
 export interface DispatchSpecLike {
@@ -192,6 +230,10 @@ export function buildDispatchSnapshot(
 	return {
 		contractVersion: MANAGED_CONTRACT_VERSION,
 		operation: attribution.operation ?? 'start',
+		// Set only when attributed, so a surface that does not classify its
+		// launches digests exactly what it digested before.
+		...(attribution.purpose ? { purpose: attribution.purpose } : {}),
+		...(attribution.origin ? { origin: attribution.origin } : {}),
 		executable: spec.command,
 		args: [...spec.args],
 		cwd: spec.cwd,

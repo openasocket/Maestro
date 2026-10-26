@@ -38,7 +38,7 @@ It is not:
 | `windows-shell` | On Windows, the provider is installed as a `.cmd` shim that only starts through cmd.exe, and an argument cannot pass through cmd.exe intact (a prompt with a line break, `%` or `^`, for a provider that cannot read its prompt from stdin). See [Windows](#windows). |
 | `launch`        | The launch could not be planned. The message says why.                                                                                                                                                                                                                |
 
-What each provider supports in maestro-lib `0.24.0`:
+What each provider supports in maestro-lib `0.25.0`:
 
 | Agent id        | Name            | Runs a turn | Resume | Read-only |
 | --------------- | --------------- | ----------- | ------ | --------- |
@@ -490,7 +490,7 @@ if (problems.length > 0) throw new Error(problems.join('; '));
 
 The client interface carries the extension as `MaestroClient.managed`, optional: a host without it is `unsupported`, never "unmanaged, so allowed".
 
-What that adds up to in `0.24.0`, before the release-by-release detail below:
+What that adds up to in `0.25.0`, before the release-by-release detail below:
 
 - **Standalone is untouched.** A program that never passes `managed` to `createMaestroRuntime`, and a `startTurn` with no `admission`, plan and run exactly as the earlier sections describe. Nothing here reads a keyring, opens a socket or asks a peer.
 - **A managed host admits launches, not providers.** `providerRouteSupport(agentId)` is the table: `managed` is `implemented` on the `child-process` route alone (the launch is admitted at the real spawn), and `unsupported` on `pty`, `codex-app-server`, `opencode-server` and `ssh`. What a provider's own tools do once running is not governed. The one route whose effects are enforced is the synthetic harness route, which qualifies no real provider.
@@ -544,6 +544,8 @@ Since `0.22.0` the entry exports typed runtime commands (`managed/commands.ts`, 
 Since `0.23.0` the same module holds the durable command ledger and the executor (MRC-11-01A). `createCommandLedger({ file, now, maxCommands })` keeps one record per command id and refuses a reused id under another payload, a consumed nonce or a consumed idempotency key as `replay` enrollment-wide; `load()` turns a record accepted by an earlier process `unknown`, and a file that will not load is named and never overwritten. `createCommandExecutor({ ledger, binding, ports, now })` advertises `command-<action>` for exactly the ports a host composed (`CommandPorts`: `pause`, `resume`, `cancel`, `report`, `refresh`, `prompt`), executes a command inside `COMMAND_DISPATCH_WINDOW_MS`, answers a known id from history without running anything again, and `settle()` records a port's later effect. The desktop composes it in `src/main/enterprise/commands.ts` (cancel revokes the run's live leases through the dispatch authority, report answers metadata, refresh re-attaches; pause and resume are not composed and are refused by name; no prompt port exists on the desktop).
 
 Since `0.24.0` the host adapter carries the notice inbox seam (`managed/host-adapter.ts`, MRC-11-02): `ManagedHostAdapter.inbox` is the endpoint's `noticeList` and `inbox` operations over the adapter's socket (`endpointInboxPort(endpoint)`: `EndpointNotice`, `EndpointNoticeListRequest`, `EndpointNoticeListResult`, `EndpointInboxRequest` with its `delivered`, `read`, `acknowledged` and `reply` actions, `EndpointInboxReceipt`; null while no socket is open), and `inboxStanding()` says whether a notice may be listed or a receipt recorded right now: `ok` with the `InboxBinding` (tenant, enrollment, registration, actor, installation, policy revision and the two negotiated capabilities) under a registered, attached, managed standing, else the one reason, under the same `standingKey` rule as telemetry. The client that lists, holds and records (`createInboxClient` over `createInboxReceiptLedger`) is `src/main/enterprise/inbox.ts`, plain Node, composed by the desktop service; a body reaches the person's surface and nothing else.
+
+Since `0.25.0` the dispatch snapshot carries a launch classification (`managed/authority.ts`, MRC2-02-01): `DispatchPurpose` says what the launch is for (`conversation` for a person's turn, `utility` for a tab name or a synopsis Maestro runs beside one, `probe` for a read-only look at a provider, `supervisor` for a background service's child) and the contract's `ManagedOrigin` says which surface raised it; both are optional on `DispatchSnapshot`, set from `DispatchAttribution` and left out of the digest when a surface does not classify, so a policy can tell a person's turn from Maestro's own. They are attribution, never a permission level: a utility turn is admitted or refused like any other. The desktop sink classifies every spawn (`buildSpawnRequestSnapshot` in `src/main/process-manager/ProcessManager.ts`, from `ProcessConfig.purpose` and `ProcessConfig.origin`).
 
 ## See also
 

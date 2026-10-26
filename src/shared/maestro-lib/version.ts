@@ -93,8 +93,12 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * 0.24.0: the inbox port (`./managed/host-adapter`, MRC-11-02): the endpoint's `noticeList` and `inbox`
  * operations (`EndpointNotice`, `EndpointInboxRequest`, `EndpointInboxReceipt`, `InboxPort`) as
  * `ManagedHostAdapter.inbox` / `endpointInboxPort`, and `inboxStanding()` (this process's registration, its actor, the capabilities).
+ * 0.25.0: launch classification on the dispatch snapshot (`./managed/authority`, MRC2-02-01): `DispatchPurpose`
+ * (`conversation`, `utility`, `probe`, `supervisor`) and the contract's `ManagedOrigin` as optional `purpose` and
+ * `origin` on `DispatchSnapshot`, set from `DispatchAttribution` and left out of the digest when a surface does not
+ * classify, so a policy can tell a person's turn from Maestro's own; attribution, never a permission level.
  */
-export const MAESTRO_LIB_VERSION = '0.24.0';
+export const MAESTRO_LIB_VERSION = '0.25.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

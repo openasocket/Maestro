@@ -101,7 +101,9 @@ export interface ProcessManagerOptions {
  * The request a managed spawn is admitted on: the resolved command, its
  * arguments, the working directory, the NAMES and digest of the environment
  * Maestro sets (global shell vars beneath the agent's own), the prompt by
- * digest, the provider (the tool type), the operation and the target. It is
+ * digest, the provider (the tool type), the operation, the target, and the
+ * classification the policy tells a person's turn from Maestro's own by: what
+ * the launch is for (`purpose`) and which surface raised it (`origin`). It is
  * built from the exact `ProcessConfig` the sink receives, so the digest the
  * lease carries proves the sink spawns the request the authority admitted
  * and nothing else; what the spawner derives from that request afterwards
@@ -137,6 +139,12 @@ export function buildSpawnRequestSnapshot(config: ProcessConfig): DispatchSnapsh
 					}
 				: { kind: 'local' },
 			resourceIds: config.images?.length ? [`images:${config.images.length}`] : [],
+			// The desktop sink classifies every spawn (MRC2-02-01): a config that
+			// says nothing is a person's conversation turn at Maestro's own UI.
+			// The handler that resolved the caller names the origin
+			// (`spawnOriginOf`); a utility, probe or supervisor names its purpose.
+			purpose: config.purpose ?? 'conversation',
+			origin: config.origin ?? 'desktop',
 		}
 	);
 }

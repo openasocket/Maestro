@@ -12,6 +12,7 @@ import type { SshRemoteEndpointIdentity } from '../../shared/maestro-lib/launch/
 import type {
 	ContextVerification,
 	DispatchOperation,
+	DispatchPurpose,
 	HostAuthority,
 	PolicySourceSet,
 } from '../../shared/maestro-lib/managed/authority';
@@ -19,6 +20,7 @@ import type {
 	ManagedDelegationRef,
 	ManagedDenialCode,
 	ManagedDispatchTarget,
+	ManagedOrigin,
 	ManagedPrincipalRef,
 	ManagedRunIdentity,
 	ManagedWorkflowRef,
@@ -52,6 +54,79 @@ export type ProcessSpawnActor =
 	| { peer: 'web-login'; username: string }
 	| { peer: 'host-secret' }
 	| { peer: 'device-pairing'; deviceId: string };
+
+/**
+ * The origin a spawn takes from the actor its transport resolved, when the
+ * caller named none (MRC2-02-01): a process that presented the CLI secret is
+ * `cli` (`maestro-cli`, an agent's own shell, a Cue `mode: cli` action), and
+ * the keyboard, a logged-in browser account and a paired Lite device are all
+ * a person at Maestro's own UI, which the contract calls `desktop`. A
+ * surface that knows better (a Cue engine, an embedded host) names its own
+ * origin on the config instead of taking this default.
+ */
+export function spawnOriginOf(actor: ProcessSpawnActor): ManagedOrigin {
+	return actor.peer === 'host-secret' ? 'cli' : 'desktop';
+}
+
+/**
+ * The three-way permission mode a spawn asks for, as the renderer sends it
+ * (`SpawnProcessConfig.permissionMode`) and the argument builder reads it.
+ */
+export type SpawnPermissionMode = 'full' | 'standard' | 'readonly';
+
+/**
+ * The mode a spawn request asks for, by the argument builder's own rules
+ * (`buildAgentArgs`): an explicit `permissionMode` wins; without one the
+ * legacy booleans are honored, full access first; a request that says
+ * nothing runs the provider's own prompting, which is `standard`.
+ */
+export function requestedPermissionMode(config: {
+	permissionMode?: SpawnPermissionMode;
+	readOnlyMode?: boolean;
+	yoloMode?: boolean;
+}): SpawnPermissionMode {
+	if (config.permissionMode) return config.permissionMode;
+	if (config.yoloMode === true) return 'full';
+	if (config.readOnlyMode === true) return 'readonly';
+	return 'standard';
+}
+
+/** How much a mode may do: a ceiling pins the widest mode a launch may ask for. */
+const PERMISSION_MODE_WIDTH: Readonly<Record<SpawnPermissionMode, number>> = {
+	readonly: 0,
+	standard: 1,
+	full: 2,
+};
+
+/**
+ * The permission-mode half of the policy's route ceiling, as a port exposes
+ * it (`ManagedRouteCeiling.permissionMode`, P2-03): the widest mode a launch
+ * on one provider may ask for, or null when the policy pins none.
+ */
+export interface ManagedPermissionCeiling {
+	permissionMode: SpawnPermissionMode | null;
+}
+
+/**
+ * Why a spawn's permission mode cannot run under management, or null when it
+ * may (MRC2-02-01). A managed host DENIES a request wider than the ceiling;
+ * it never lowers the request to fit, since a turn the person asked to run
+ * with full access, silently run read-only, is a turn they were told nothing
+ * about. A ceiling that pins no mode, and a host that composes no ceiling
+ * producer, forbid nothing here: the admission on the snapshot decides, as
+ * before. A standalone host is never refused by this.
+ */
+export function managedPermissionModeRefusal(
+	requested: SpawnPermissionMode,
+	ceiling: ManagedPermissionCeiling | null | undefined,
+	standing: 'standalone' | 'managed'
+): string | null {
+	if (standing === 'standalone') return null;
+	const pinned = ceiling?.permissionMode ?? null;
+	if (pinned === null) return null;
+	if (PERMISSION_MODE_WIDTH[requested] <= PERMISSION_MODE_WIDTH[pinned]) return null;
+	return `Permission mode "${requested}" is unavailable under management on this host: the policy's ceiling allows at most "${pinned}" for this provider, and a managed host does not lower a request to fit it. Nothing was started.`;
+}
 
 export interface ProcessSpawnContextInput {
 	actor: ProcessSpawnActor;
@@ -115,6 +190,16 @@ export interface ProcessSpawnAuthorityPort {
 		workflow: WorkflowIdentityLike,
 		run: { runId: string; attemptId: string }
 	): WorkflowFenceAnswer | Promise<WorkflowFenceAnswer>;
+	/**
+	 * The permission-mode ceiling the policy pins for one provider
+	 * (`ManagedRouteCeiling.permissionMode`, P2-03), read by the spawn handler
+	 * before the launch plan: the widest mode a launch may ask for, or null
+	 * for none pinned. Absent: this host composes no route ceiling producer,
+	 * and the handler forbids no mode on its own (the admission on the
+	 * snapshot decides). A request above the ceiling is denied by
+	 * `managedPermissionModeRefusal`, never lowered to fit.
+	 */
+	permissionCeiling?(providerId: string): ManagedPermissionCeiling | null;
 }
 
 /**
@@ -221,6 +306,16 @@ export interface ProcessConfig {
 	sshRemoteId?: string;
 	sshRemoteHost?: string;
 	querySource?: 'user' | 'auto';
+	/** What this spawn is for (`DispatchPurpose`, MRC2-02-01). The surface that
+	 *  raised it classifies it and the sink carries it into the admission
+	 *  snapshot, so the policy can tell a person's turn from a utility, probe
+	 *  or supervisor turn of Maestro's own. Absent is a `conversation` turn. */
+	purpose?: DispatchPurpose;
+	/** Which surface raised this spawn (the contract's `ManagedOrigin`;
+	 *  `desktop` is a person at Maestro's own UI). The handler defaults it from
+	 *  the caller its transport resolved (`spawnOriginOf`); absent at the sink
+	 *  is `desktop`. Attribution, never a permission level. */
+	origin?: ManagedOrigin;
 	tabId?: string;
 	projectPath?: string;
 	/**
