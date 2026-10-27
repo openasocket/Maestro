@@ -35,6 +35,8 @@ import type {
 import {
 	applyManagedEnvCeiling,
 	managedArgsProblems,
+	permissionModeWithinCeiling,
+	type LaunchPermissionMode,
 	type ManagedRouteCeiling,
 } from '../../shared/maestro-lib/launch/env';
 
@@ -77,7 +79,7 @@ export function spawnOriginOf(actor: ProcessSpawnActor): ManagedOrigin {
  * The three-way permission mode a spawn asks for, as the renderer sends it
  * (`SpawnProcessConfig.permissionMode`) and the argument builder reads it.
  */
-export type SpawnPermissionMode = 'full' | 'standard' | 'readonly';
+export type SpawnPermissionMode = LaunchPermissionMode;
 
 /**
  * The mode a spawn request asks for, by the argument builder's own rules
@@ -96,17 +98,12 @@ export function requestedPermissionMode(config: {
 	return 'standard';
 }
 
-/** How much a mode may do: a ceiling pins the widest mode a launch may ask for. */
-const PERMISSION_MODE_WIDTH: Readonly<Record<SpawnPermissionMode, number>> = {
-	readonly: 0,
-	standard: 1,
-	full: 2,
-};
-
 /**
  * The permission-mode half of the policy's route ceiling, as a port exposes
- * it (`ManagedRouteCeiling.permissionMode`, P2-03): the widest mode a launch
- * on one provider may ask for, or null when the policy pins none.
+ * it (`ManagedRouteCeiling.permissionMode`, MRC2-03-01): the widest mode a
+ * launch on one provider may ask for, or null when the policy pins none. A
+ * `ManagedRouteCeiling` is one of these, so a producer hands the same object
+ * to both seams.
  */
 export interface ManagedPermissionCeiling {
 	permissionMode: SpawnPermissionMode | null;
@@ -129,7 +126,7 @@ export function managedPermissionModeRefusal(
 	if (standing === 'standalone') return null;
 	const pinned = ceiling?.permissionMode ?? null;
 	if (pinned === null) return null;
-	if (PERMISSION_MODE_WIDTH[requested] <= PERMISSION_MODE_WIDTH[pinned]) return null;
+	if (permissionModeWithinCeiling(requested, pinned)) return null;
 	return `Permission mode "${requested}" is unavailable under management on this host: the policy's ceiling allows at most "${pinned}" for this provider, and a managed host does not lower a request to fit it. Nothing was started.`;
 }
 

@@ -36,6 +36,7 @@ const ROUTE: ManagedRouteCeiling = {
 	baseUrl: null,
 	accountDir: null,
 	login: 'approved-credential',
+	permissionMode: null,
 };
 const NOW = Date.parse('2026-10-21T12:00:00Z');
 

@@ -109,8 +109,15 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * drives around the raw child it spawns itself (admit, spawned, onRevoked, exited, withdraw); a refusal is
  * a `ManagedAdmissionRefusal` (the shape `ProbeTurnRefusal` now aliases); `ownRunIdentity` is the identity
  * of a launch that is its own request (`probeTurnIdentity` calls it).
+ * 0.28.0: the permission-mode ceiling (`./launch/env`, MRC2-03-01): `ManagedRouteCeiling.permissionMode`
+ * (the widest `LaunchPermissionMode` a launch may ask for, or null), `permissionModeWithinCeiling`,
+ * `managedPermissionModeProblem`, the full-access vocabulary (`KNOWN_FULL_ACCESS_FLAGS`,
+ * `permissionVocabularyOf`, `fullAccessFlagsOf`) and `managedArgsProblems` refusing a flag that asks for
+ * a wider mode than the pin, or a read-only pin the provider's command line cannot enforce or does not
+ * carry; `buildAgentArgs` (`./launch/agent-args`) takes `managedCeiling` and throws
+ * `ManagedPermissionModeError` instead of a weaker command line; `KNOWN_YOLO_FLAGS` is exported.
  */
-export const MAESTRO_LIB_VERSION = '0.27.0';
+export const MAESTRO_LIB_VERSION = '0.28.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

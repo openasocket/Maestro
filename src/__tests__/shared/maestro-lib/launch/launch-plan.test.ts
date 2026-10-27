@@ -261,6 +261,7 @@ describe('a managed launch on an SSH remote is unsupported, never local (MRC-08-
 		baseUrl: null,
 		accountDir: null,
 		login: 'provider-login',
+		permissionMode: null,
 	});
 	const sshOn = (): Partial<AgentLaunchInput> => ({
 		sshRemoteConfig: { enabled: true, remoteId: 'remote-1' },

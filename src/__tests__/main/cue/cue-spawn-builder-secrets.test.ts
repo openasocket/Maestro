@@ -149,6 +149,7 @@ describe('a managed Cue run', () => {
 			baseUrl: null,
 			accountDir: '/srv/accounts/codex-team',
 			login: 'approved-credential',
+			permissionMode: null,
 		},
 		credentials: bindApprovedCredentials(
 			[

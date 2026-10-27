@@ -195,6 +195,7 @@ describe('the managed route ceiling', () => {
 		baseUrl: null,
 		accountDir: null,
 		login: 'approved-credential',
+		permissionMode: null,
 		...overrides,
 	});
 	const approved = (envVar = 'ANTHROPIC_API_KEY', secretName = 'GITHUB_TOKEN') =>

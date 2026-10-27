@@ -98,6 +98,7 @@ const route = (overrides: Partial<ManagedRouteCeiling> = {}): ManagedRouteCeilin
 	baseUrl: null,
 	accountDir: null,
 	login: 'provider-login',
+	permissionMode: null,
 	...overrides,
 });
 

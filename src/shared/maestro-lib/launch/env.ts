@@ -8,6 +8,7 @@ import { isBlankEnvKey, isBlankEnvValue } from '../../agentEnvironment';
 import { CALLER_AGENT_ID_ENV_VAR, CALLER_TAB_ID_ENV_VAR } from '../../agentDelegation';
 import { PROVIDER_ENV_VAR_SUGGESTIONS } from '../../envVarCatalog';
 import { MANAGED_DELEGATION_ENV_VAR } from '../managed/delegation';
+import { getAgentDefinition } from '../providers/definitions';
 
 const SERVER_MODE_ENV_VAR_NAME = 'MAESTRO_SERVER_MODE';
 const SERVER_ENV_ALLOW_ENV_VAR_NAME = 'MAESTRO_SERVER_ENV_ALLOW';
@@ -721,6 +722,36 @@ export const MANAGED_AUTHORITY_ENV_NAMES: readonly string[] = [
 export const MANAGED_AUTHORITY_ENV_PREFIX = 'MAESTRO_MANAGED_';
 
 /**
+ * The permission modes a launch can ask for, as the argument builder names
+ * them (`BuildAgentArgsOptions.permissionMode`): `readonly` is the provider's
+ * plan or read-only mode, `standard` its own prompting, `full` its bypass of
+ * every approval. Ordered by width: `readonly` < `standard` < `full`.
+ */
+export type LaunchPermissionMode = 'readonly' | 'standard' | 'full';
+
+/** How much a mode may do: a ceiling pins the widest mode a launch may ask for. */
+const PERMISSION_MODE_WIDTH: Readonly<Record<LaunchPermissionMode, number>> = {
+	readonly: 0,
+	standard: 1,
+	full: 2,
+};
+
+/**
+ * Whether a requested mode fits under a pinned one. A ceiling of null pins
+ * no mode and admits every request; otherwise the request may be as wide as
+ * the pin and no wider. The one width rule for every surface that compares
+ * a request to a ceiling (the desktop spawn handler, the argument builder,
+ * the argument check below): a second table would drift.
+ */
+export function permissionModeWithinCeiling(
+	requested: LaunchPermissionMode,
+	pinned: LaunchPermissionMode | null
+): boolean {
+	if (pinned === null) return true;
+	return PERMISSION_MODE_WIDTH[requested] <= PERMISSION_MODE_WIDTH[pinned];
+}
+
+/**
  * What the policy pins for one launch. `null` for a control the policy does
  * not pin, which then stays UNSET (never the user's value): a managed route
  * either names its gateway or uses the provider's own API, it does not
@@ -741,6 +772,20 @@ export interface ManagedRouteCeiling {
 	 * `provider-login`: the policy lets the account home's own login bill.
 	 */
 	login: 'approved-credential' | 'provider-login';
+	/**
+	 * The widest permission mode a launch on this provider may ask for, or
+	 * null when the policy pins none (MRC2-03-01). A request above it is
+	 * DENIED, by name, wherever the request is seen: the mode itself at the
+	 * desktop spawn handler (`managedPermissionModeRefusal`) and the argument
+	 * builder (`buildAgentArgs` under `managedCeiling`), and the flags that
+	 * ask for it on the final command line (`managedArgsProblems`). Nothing
+	 * lowers a request to fit: a turn the person asked to run with full
+	 * access, silently run read-only, is a turn they were told nothing about.
+	 * `readonly` also demands a provider whose read-only mode the command
+	 * line enforces (`readOnlyCliEnforced`), since a prompt-only read-only
+	 * mode would make the ceiling a label.
+	 */
+	permissionMode: LaunchPermissionMode | null;
 }
 
 export interface ManagedEnvCeilingInput {
@@ -842,6 +887,109 @@ export function applyManagedEnvCeiling(
 	return report;
 }
 
+/**
+ * Boolean flags that ask a provider to bypass every approval, across the
+ * providers Maestro drives. The static half of the full-access vocabulary:
+ * `filterYoloArgs` strips them from a read-only turn, and a managed ceiling
+ * below `full` refuses them. A provider's own `fullAccessArgs` /
+ * `yoloModeArgs` (`--yolo`, `--always-approve`) join them per provider in
+ * {@link fullAccessFlagsOf}.
+ */
+export const KNOWN_FULL_ACCESS_FLAGS: readonly string[] = [
+	'--dangerously-skip-permissions',
+	'--dangerously-bypass-approvals-and-sandbox',
+	'--skip-permissions-unsafe',
+	'-y',
+	'--allow-all',
+];
+
+/**
+ * Value-taking mode flags whose named value asks for full access: Claude's
+ * and Grok's `--permission-mode bypassPermissions`, Qwen's and Gemini's
+ * `--approval-mode yolo`, Codex's `--sandbox danger-full-access` and
+ * `--ask-for-approval never`. The same flags with another value (`plan`,
+ * `read-only`) are the read-only vocabulary and are not refused here.
+ */
+const FULL_ACCESS_MODE_VALUES: Readonly<Record<string, readonly string[]>> = {
+	'--permission-mode': ['bypassPermissions'],
+	'--approval-mode': ['yolo'],
+	'--sandbox': ['danger-full-access'],
+	'--ask-for-approval': ['never'],
+	'-a': ['never'],
+};
+
+/**
+ * What one provider's command line says about permission modes, read from
+ * its definition: the boolean flags that ask for full access (the static
+ * vocabulary plus the provider's own), the flags its read-only mode is made
+ * of, and whether the command line ENFORCES that read-only mode or only
+ * accepts the flag (`readOnlyCliEnforced`). An unknown provider has the
+ * static flags alone and enforces nothing.
+ */
+export interface ProviderPermissionVocabulary {
+	providerId: string;
+	known: boolean;
+	fullAccessFlags: readonly string[];
+	readOnlyArgs: readonly string[];
+	readOnlyCliEnforced: boolean;
+}
+
+export function permissionVocabularyOf(providerId: string): ProviderPermissionVocabulary {
+	const definition = getAgentDefinition(providerId);
+	const own = [...(definition?.fullAccessArgs ?? []), ...(definition?.yoloModeArgs ?? [])];
+	return {
+		providerId,
+		known: definition !== undefined,
+		fullAccessFlags: [
+			...new Set([...KNOWN_FULL_ACCESS_FLAGS, ...own.filter((arg) => arg.startsWith('-'))]),
+		],
+		readOnlyArgs: definition?.readOnlyArgs ?? [],
+		readOnlyCliEnforced: definition?.readOnlyCliEnforced === true,
+	};
+}
+
+/** The flags that ask `providerId` for full access, as a set. */
+export function fullAccessFlagsOf(providerId: string): ReadonlySet<string> {
+	return new Set(permissionVocabularyOf(providerId).fullAccessFlags);
+}
+
+/**
+ * Whether the args carry every flag of a provider's read-only vocabulary,
+ * with the value the vocabulary gives it (`--sandbox read-only` or
+ * `--sandbox=read-only`). A flag the vocabulary gives no value is a switch
+ * and is satisfied by its presence. An empty vocabulary is satisfied by
+ * anything (Factory Droid's `exec` is read-only with no flag).
+ */
+function carriesReadOnlyArgs(args: readonly string[], readOnlyArgs: readonly string[]): boolean {
+	for (let i = 0; i < readOnlyArgs.length; i += 1) {
+		const flag = readOnlyArgs[i];
+		if (!flag.startsWith('-')) continue;
+		const next = readOnlyArgs[i + 1];
+		const value = next !== undefined && !next.startsWith('-') ? next : null;
+		if (value !== null) i += 1;
+		const present = args.some((arg, index) => {
+			if (value === null) return arg === flag;
+			return arg === `${flag}=${value}` || (arg === flag && args[index + 1] === value);
+		});
+		if (!present) return false;
+	}
+	return true;
+}
+
+/**
+ * Why a permission mode cannot run under a ceiling, as one problem, or null
+ * when it may. The request is measured against the pin by width alone
+ * (`permissionModeWithinCeiling`); the words name both so a refusal says
+ * what was asked and what the policy allows.
+ */
+export function managedPermissionModeProblem(
+	requested: LaunchPermissionMode,
+	ceiling: Pick<ManagedRouteCeiling, 'providerId' | 'permissionMode'>
+): string | null {
+	if (permissionModeWithinCeiling(requested, ceiling.permissionMode)) return null;
+	return `permission mode "${requested}" asks for more than the policy's ceiling, which allows at most "${ceiling.permissionMode}" for ${ceiling.providerId}`;
+}
+
 /** Codex `-c key=value` keys that choose the provider, the origin or the credential. */
 const CODEX_ROUTE_CONFIG_KEYS =
 	/^(model|model_provider|model_providers\b.*|base_url|openai_base_url|api_key|chatgpt_base_url|experimental_use_.*auth.*)\s*=/i;
@@ -860,6 +1008,18 @@ const CLAUDE_ROUTE_SETTINGS_KEYS = [
  * one, a Claude `--settings` payload that sets `env`, `model` or an API key
  * helper, a Codex `-c`/`--config` override of the model, provider or base
  * URL, or any flag that names an API key or base URL directly.
+ *
+ * And, when the ceiling pins a permission mode (MRC2-03-01), the flags that
+ * ask for a wider one: under `standard` or `readonly`, any flag of the
+ * provider's full-access vocabulary ({@link fullAccessFlagsOf}: the static
+ * `KNOWN_FULL_ACCESS_FLAGS` and its own `fullAccessArgs` / `yoloModeArgs`)
+ * and any mode flag whose value names full access; under `readonly`, a
+ * provider whose read-only mode the command line does not enforce is a
+ * problem, and so is a command line that does not carry that provider's
+ * read-only flags, since a request for `standard` leaves no flag behind and
+ * can only be seen by the absence of those. Every problem names the flag or
+ * the gap and the pinned mode; nothing is rewritten to fit. A ceiling that
+ * pins no mode adds no problem, and an unmanaged launch never gets here.
  */
 export function managedArgsProblems(
 	args: readonly string[],
@@ -868,12 +1028,32 @@ export function managedArgsProblems(
 	const problems: string[] = [];
 	const modelFlags = new Set(['--model', '-m']);
 	const forbiddenFlags = new Set(['--api-key', '--base-url', '--profile', '--auth-token']);
+	const pinnedMode = ceiling.permissionMode;
+	const vocabulary = permissionVocabularyOf(ceiling.providerId);
+	const fullAccess = new Set(vocabulary.fullAccessFlags);
+	const forbidsFull = pinnedMode !== null && !permissionModeWithinCeiling('full', pinnedMode);
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i];
 		const eq = arg.indexOf('=');
 		const inline = eq > 0 && arg.startsWith('-');
 		const flag = inline ? arg.slice(0, eq) : arg;
 		const value = inline ? arg.slice(eq + 1) : args[i + 1];
+		if (forbidsFull && fullAccess.has(arg)) {
+			problems.push(
+				`${arg} asks for full access but the policy's ceiling allows at most "${pinnedMode}" for ${ceiling.providerId}`
+			);
+			continue;
+		}
+		if (
+			forbidsFull &&
+			typeof value === 'string' &&
+			FULL_ACCESS_MODE_VALUES[flag]?.includes(value) === true
+		) {
+			problems.push(
+				`${flag} ${value} asks for full access but the policy's ceiling allows at most "${pinnedMode}" for ${ceiling.providerId}`
+			);
+			continue;
+		}
 		if (modelFlags.has(flag)) {
 			if (ceiling.model !== null && value !== ceiling.model) {
 				problems.push(`${flag} names ${value ?? '(nothing)'} but the policy pins ${ceiling.model}`);
@@ -912,6 +1092,17 @@ export function managedArgsProblems(
 					}
 				}
 			}
+		}
+	}
+	if (pinnedMode === 'readonly') {
+		if (!vocabulary.readOnlyCliEnforced) {
+			problems.push(
+				`the policy pins read-only but ${ceiling.providerId} cannot enforce it on the command line`
+			);
+		} else if (!carriesReadOnlyArgs(args, vocabulary.readOnlyArgs)) {
+			problems.push(
+				`the policy pins read-only and the arguments do not carry ${ceiling.providerId}'s read-only flags (${vocabulary.readOnlyArgs.join(' ')})`
+			);
 		}
 	}
 	return problems;

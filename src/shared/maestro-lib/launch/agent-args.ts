@@ -1,6 +1,12 @@
 import type { AgentConfig, AgentDefinition } from '../providers/definitions';
 import type { AdditionalDirectory } from '../../types';
 import { logger } from '../host';
+import {
+	KNOWN_FULL_ACCESS_FLAGS,
+	managedPermissionModeProblem,
+	type LaunchPermissionMode,
+	type ManagedRouteCeiling,
+} from './env';
 
 /** Fields applyAgentConfigOverrides actually reads. Accepting this narrower
  * shape lets CLI callers pass AgentDefinition (no capabilities/available). */
@@ -18,7 +24,17 @@ export type BuildAgentArgsOptions = {
 	readOnlyMode?: boolean;
 	modelId?: string;
 	yoloMode?: boolean;
-	permissionMode?: 'full' | 'standard' | 'readonly';
+	permissionMode?: LaunchPermissionMode;
+	/**
+	 * The policy's ceiling for this provider, passed ONLY when an authority is
+	 * present (a managed host; MRC2-03-01). The requested mode is measured
+	 * against `permissionMode` before any access flag is emitted, and a
+	 * request above it throws {@link ManagedPermissionModeError}: the builder
+	 * never lowers a request to fit, and never emits a weaker mode in silence.
+	 * Absent or null (unmanaged, or a policy that pins no mode) consults
+	 * nothing and the output is byte for byte what it was.
+	 */
+	managedCeiling?: Pick<ManagedRouteCeiling, 'providerId' | 'permissionMode'> | null;
 	agentSessionId?: string;
 	/**
 	 * The session's Additional Directories. Providers that declare
@@ -190,6 +206,24 @@ export function buildAgentArgs(
 	const isReadOnly =
 		options.permissionMode === 'readonly' ||
 		(options.permissionMode === undefined && options.readOnlyMode === true);
+
+	// Under an authority the mode this launch asks for is held to the policy's
+	// ceiling here, where the request is still a mode and not yet a flag: a
+	// provider whose full access is an environment setting (OpenCode) or has
+	// no flag at all (Pi, Oh My Pi) leaves nothing on the command line for
+	// `managedArgsProblems` to see. A request above the ceiling is refused by
+	// name, never rewritten; without an authority nothing is consulted.
+	if (options.managedCeiling) {
+		const requested: LaunchPermissionMode = isFullAccess
+			? 'full'
+			: isReadOnly
+				? 'readonly'
+				: 'standard';
+		const problem = managedPermissionModeProblem(requested, options.managedCeiling);
+		if (problem) {
+			throw new ManagedPermissionModeError(problem, requested, options.managedCeiling);
+		}
+	}
 
 	// Batch-mode gate: normally we infer "batch mode" from the presence of a
 	// truthy prompt, so a bare interactive launch (no prompt) doesn't get batch
@@ -487,17 +521,37 @@ export function getContextWindowValue(
 }
 
 /**
+ * A launch asked for a permission mode above the policy's ceiling
+ * (`BuildAgentArgsOptions.managedCeiling`). Thrown by `buildAgentArgs` in
+ * place of a weaker command line; the caller under the authority reports it
+ * and starts nothing. Carries the problem `managedArgsProblems` would word
+ * the same way, so a refusal reads alike whichever check saw it first.
+ */
+export class ManagedPermissionModeError extends Error {
+	readonly requested: LaunchPermissionMode;
+	readonly pinned: LaunchPermissionMode | null;
+	readonly providerId: string;
+	constructor(
+		problem: string,
+		requested: LaunchPermissionMode,
+		ceiling: Pick<ManagedRouteCeiling, 'providerId' | 'permissionMode'>
+	) {
+		super(`The launch arguments route around the policy - ${problem}`);
+		this.name = 'ManagedPermissionModeError';
+		this.requested = requested;
+		this.pinned = ceiling.permissionMode;
+		this.providerId = ceiling.providerId;
+	}
+}
+
+/**
  * Known YOLO/permission-bypass flags that should be filtered from base args
  * when running in read-only mode. Safety net for agents that embed these
- * flags in their base args without defining yoloModeArgs.
+ * flags in their base args without defining yoloModeArgs. The list itself
+ * lives beside the managed ceiling (`KNOWN_FULL_ACCESS_FLAGS` in `env.ts`),
+ * which refuses the same flags under a ceiling below `full`.
  */
-const KNOWN_YOLO_FLAGS = new Set([
-	'--dangerously-skip-permissions',
-	'--dangerously-bypass-approvals-and-sandbox',
-	'--skip-permissions-unsafe',
-	'-y',
-	'--allow-all',
-]);
+export const KNOWN_YOLO_FLAGS: ReadonlySet<string> = new Set(KNOWN_FULL_ACCESS_FLAGS);
 
 /**
  * Filters YOLO/permission-bypass flags from agent args for read-only mode.
