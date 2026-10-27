@@ -55,6 +55,8 @@ import { createPluginPolicySource } from './enterprise/plugin-policy';
 import { createBrowserPolicySource } from './enterprise/browser-policy';
 import { createShellPolicySource } from './enterprise/shell-policy';
 import { createInstallPolicySource } from './enterprise/install-policy';
+import { createEgressPolicySource } from './enterprise/egress-policy';
+import { setEgressAuthority } from './utils/fetchWithTimeout';
 import {
 	createLocalEffectsPolicySource,
 	describeLocalEffect,
@@ -1000,6 +1002,17 @@ app
 		// Marketplace imports and the coworking MCP config writers hold with it too (MRC2-04-08A).
 		setMarketplaceInstallAuthority(installPolicy);
 		setMcpInstallAuthority(installPolicy);
+		// The egress ceiling (MRC2-05-01): every outbound HTTP request of the main
+		// process leaves through `fetchWithTimeout()`, and under management each
+		// is held by its destination class and origin before a socket opens; a
+		// refusal is a thrown `EgressDeniedError`, never a network failure. None
+		// installed yet (CP-01): an enrolled host refuses every request
+		// `unavailable` by name, so vendor telemetry is off under management.
+		const egressPolicy = createEgressPolicySource({
+			identity: { read: () => enterpriseService?.identity.read() ?? { status: 'none' } },
+			policy: () => enterpriseService?.policy.status() ?? null,
+		});
+		setEgressAuthority(egressPolicy);
 		// The local-effects ceiling (MRC2-04-09): opens, clipboard writes, trashes
 		// and deletes are held by class (allow, deny, confirm) in the system and
 		// filesystem handlers. A `confirm` is a dialog on the main window; with no
