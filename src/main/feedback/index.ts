@@ -26,6 +26,9 @@ import {
 	resolveGhPath,
 } from '../utils/cliDetection';
 import { execFileNoThrow } from '../utils/execFile';
+import { holdGitForgeEffect } from '../utils/remote-git';
+import type { GitForgeEffect } from '../enterprise/repository-policy';
+import { redactSecrets } from '../../shared/redactSecrets';
 import {
 	parseGhActiveAccount,
 	type GhAccount,
@@ -73,6 +76,8 @@ const LOG_CONTEXT = '[Feedback]';
 const FEEDBACK_REPO = 'RunMaestro/Maestro';
 const REPO_PROBE_TIMEOUT_MS = 15_000;
 const ATTACHMENTS_REPO = 'maestro-feedback-attachments';
+/** The forge every feedback write reaches, as the repository ceiling names a destination. */
+const FEEDBACK_FORGE_ORIGIN = 'https://github.com';
 const MAX_DRAFTS = 30;
 const MAX_DRAFT_ATTACHMENTS = 5;
 const MAX_DRAFT_MESSAGES = 200;
@@ -138,6 +143,47 @@ export class GhCommandError extends Error {
 		this.name = 'GhCommandError';
 		this.needsGhLogin = needsGhLogin;
 	}
+}
+
+/**
+ * The managed repository ceiling refused a feedback effect (MRC2-04-05): the
+ * message is the `[managed-<code>] ...` text, never a gh failure a login fixes.
+ */
+export class FeedbackRefusedError extends Error {
+	readonly refused = true as const;
+	constructor(message: string) {
+		super(message);
+		this.name = 'FeedbackRefusedError';
+	}
+}
+
+/**
+ * Hold one forge effect of feedback against the managed repository ceiling
+ * right before the gh call that performs it (MRC2-04-05): an `issue` on the
+ * feedback repository (an issue, a comment, a reaction, a label) or an
+ * `upload` to the attachments repository under the signed-in account. The
+ * actor is the transport this call was admitted over (the desktop modal is
+ * the operator; `maestro-cli feedback` runs inside `runAsClient`). Answers
+ * the refusal text, or null to run; standalone answers null with no call. A
+ * read (a search, a label or repository check, the login, issue states) is
+ * never held.
+ */
+async function holdFeedbackEffect(
+	effect: Extract<GitForgeEffect, 'issue' | 'upload'>,
+	repository: string
+): Promise<string | null> {
+	const refused = await holdGitForgeEffect(effect, null, FEEDBACK_FORGE_ORIGIN, repository);
+	return refused ? refused.stderr : null;
+}
+
+/** The feedback result of a refused effect: nothing left the machine, and the draft stays. */
+function refusedResult(message: string): FeedbackSubmitResponse {
+	return { success: false, error: message, refused: true };
+}
+
+/** Feedback text about to leave the machine, with any credential it carries replaced. */
+function redactOutbound(text: string): string {
+	return redactSecrets(text).text;
 }
 
 /** The failure half of a feedback result for a gh call that failed. */
@@ -596,7 +642,14 @@ function parseAttachmentDataUrl(attachment: FeedbackAttachmentInput): {
 	return { base64: match[2], filename };
 }
 
+/**
+ * The attachments repository under `owner`, created when absent. One
+ * `upload` effect covers the creation and the content the caller puts there
+ * next, so it is held here, before the check, by the repository it names.
+ */
 async function ensureAttachmentsRepo(owner: string): Promise<void> {
+	const refused = await holdFeedbackEffect('upload', `${owner}/${ATTACHMENTS_REPO}`);
+	if (refused) throw new FeedbackRefusedError(refused);
 	const repoCheck = await execFileNoThrow(
 		await resolveFeedbackGhCommand(),
 		['api', `repos/${owner}/${ATTACHMENTS_REPO}`],
@@ -763,6 +816,8 @@ async function ensureFeedbackLabel(): Promise<void> {
 		return;
 	}
 
+	const refused = await holdFeedbackEffect('issue', FEEDBACK_REPO);
+	if (refused) throw new FeedbackRefusedError(refused);
 	const labelCreate = await execFileNoThrow(
 		await resolveFeedbackGhCommand(),
 		[
@@ -1168,6 +1223,10 @@ export async function subscribeFeedbackIssue(payload: {
 		return { success: false, error: 'Invalid issue number.' };
 	}
 
+	// One issue effect: the reaction, and the comment that follows it.
+	const refused = await holdFeedbackEffect('issue', FEEDBACK_REPO);
+	if (refused) return refusedResult(refused);
+
 	// Add a +1 reaction to show interest
 	await execFileNoThrow(
 		await resolveFeedbackGhCommand(),
@@ -1194,7 +1253,7 @@ export async function subscribeFeedbackIssue(payload: {
 				'-R',
 				'RunMaestro/Maestro',
 				'--body',
-				comment.trim(),
+				redactOutbound(comment.trim()),
 			],
 			undefined,
 			getExpandedEnv()
@@ -1211,7 +1270,7 @@ export async function subscribeFeedbackIssue(payload: {
 /** Legacy one-shot submit: create a structured GitHub issue directly. */
 export async function submitFeedback(
 	rawPayload: FeedbackSubmitPayload
-): Promise<{ success: boolean; error?: string }> {
+): Promise<FeedbackSubmitResponse> {
 	if (!rawPayload || typeof rawPayload !== 'object') {
 		return { success: false, error: 'Feedback payload is missing.' };
 	}
@@ -1294,12 +1353,34 @@ export async function submitFeedback(
 		sshRemoteEnabled: typeof sshRemoteEnabled === 'boolean' ? sshRemoteEnabled : undefined,
 		attachments: normalizedAttachments,
 	};
-	const { markdown } = await uploadAttachments(normalizedAttachments);
-	await ensureFeedbackLabel();
+	// The issue is held before anything leaves the machine (an upload is its
+	// own effect, held where it happens), and again right before gh files it.
+	const refusedUpFront = await holdFeedbackEffect('issue', FEEDBACK_REPO);
+	if (refusedUpFront) return refusedResult(refusedUpFront);
+	let markdown: string;
+	try {
+		({ markdown } = await uploadAttachments(normalizedAttachments));
+		await ensureFeedbackLabel();
+	} catch (error) {
+		if (error instanceof FeedbackRefusedError) return refusedResult(error.message);
+		throw error;
+	}
 	const environment = buildEnvironmentSummary(normalizedPayload);
+	const title = redactOutbound(
+		buildIssueTitle(normalizedPayload.category, normalizedPayload.summary)
+	);
 
 	const bodyPath = path.join(os.tmpdir(), `maestro-feedback-body-${Date.now()}.md`);
-	await fs.writeFile(bodyPath, buildIssueBody(normalizedPayload, environment, markdown), 'utf8');
+	await fs.writeFile(
+		bodyPath,
+		redactOutbound(buildIssueBody(normalizedPayload, environment, markdown)),
+		'utf8'
+	);
+	const refused = await holdFeedbackEffect('issue', FEEDBACK_REPO);
+	if (refused) {
+		await fs.unlink(bodyPath).catch(() => {});
+		return refusedResult(refused);
+	}
 	const issueCreate = await execFileNoThrow(
 		await resolveFeedbackGhCommand(),
 		[
@@ -1308,7 +1389,7 @@ export async function submitFeedback(
 			'-R',
 			'RunMaestro/Maestro',
 			'--title',
-			buildIssueTitle(normalizedPayload.category, normalizedPayload.summary),
+			title,
 			'--body-file',
 			bodyPath,
 			'--label',
@@ -1324,11 +1405,7 @@ export async function submitFeedback(
 
 	const issueUrl = issueCreate.stdout.trim();
 	if (issueUrl) {
-		await recordSubmittedIssue({
-			issueUrl,
-			title: buildIssueTitle(normalizedPayload.category, normalizedPayload.summary),
-			category: normalizedPayload.category,
-		});
+		await recordSubmittedIssue({ issueUrl, title, category: normalizedPayload.category });
 	}
 
 	return { success: true };
@@ -1456,12 +1533,18 @@ export async function submitFeedbackConversation(
 					a.dataUrl.startsWith('data:image/')
 			)
 		: [];
+	// The issue is held before anything leaves the machine (each upload is its
+	// own effect, held where it happens), and again right before gh files it.
+	const refusedUpFront = await holdFeedbackEffect('issue', FEEDBACK_REPO);
+	if (refusedUpFront) return refusedResult(refusedUpFront);
+
 	// An upload failure is reported as a result, not thrown: a throw crosses IPC
 	// as "Error invoking remote method ...", burying the gh guidance it carries.
 	let attachmentMarkdown: string;
 	try {
 		({ markdown: attachmentMarkdown } = await uploadAttachments(normalizedAttachments));
 	} catch (error) {
+		if (error instanceof FeedbackRefusedError) return refusedResult(error.message);
 		return {
 			success: false,
 			error: error instanceof Error ? error.message : 'Failed to upload screenshots.',
@@ -1496,6 +1579,9 @@ export async function submitFeedbackConversation(
 				}
 			}
 		} catch (e) {
+			// A refused upload is the person's to resolve (file without the
+			// package), never a downgrade filed without saying so.
+			if (e instanceof FeedbackRefusedError) return refusedResult(e.message);
 			void captureException(e);
 			logger.warn(`Failed to generate/upload debug package: ${e}`, LOG_CONTEXT);
 		}
@@ -1511,6 +1597,7 @@ export async function submitFeedbackConversation(
 				'maestro-performance-trace.zip'
 			);
 		} catch (e) {
+			if (e instanceof FeedbackRefusedError) return refusedResult(e.message);
 			void captureException(e);
 			logger.warn(`Failed to upload performance trace: ${e}`, LOG_CONTEXT);
 		} finally {
@@ -1518,9 +1605,9 @@ export async function submitFeedbackConversation(
 		}
 	}
 
-	// Build issue body
+	// Build issue body; what leaves the machine carries no credential.
 	const liveDiagnosisMarkdown = formatLiveDiagnosisForIssue(liveDiagnosis);
-	const title = buildIssueTitle(payload.category, summaryField.value!);
+	const title = redactOutbound(buildIssueTitle(payload.category, summaryField.value!));
 	const isBug = payload.category === 'bug_report';
 	const sections = [
 		`## Summary\n${summaryField.value!}`,
@@ -1536,18 +1623,22 @@ export async function submitFeedbackConversation(
 	]
 		.filter(Boolean)
 		.join('\n\n');
+	const body = redactOutbound(sections);
 
 	// Ensure label and create issue
 	try {
 		await ensureFeedbackLabel();
-	} catch {
+	} catch (error) {
+		if (error instanceof FeedbackRefusedError) return refusedResult(error.message);
 		// Continue without label
 	}
 
 	const bodyFile = path.join(os.tmpdir(), `maestro-feedback-${Date.now()}.md`);
-	await fs.writeFile(bodyFile, sections, 'utf-8');
+	await fs.writeFile(bodyFile, body, 'utf-8');
 
 	try {
+		const refused = await holdFeedbackEffect('issue', FEEDBACK_REPO);
+		if (refused) return refusedResult(refused);
 		const issueCreate = await execFileNoThrow(
 			await resolveFeedbackGhCommand(),
 			[

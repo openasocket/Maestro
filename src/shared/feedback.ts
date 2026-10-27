@@ -102,6 +102,12 @@ export interface FeedbackSubmitResponse {
 	 * revoked token, org OAuth restriction, missing scope).
 	 */
 	needsGhLogin?: boolean;
+	/**
+	 * The managed repository ceiling refused the effect before anything left
+	 * the machine; `error` is the `[managed-<code>] ...` reason and the draft
+	 * stays where it was.
+	 */
+	refused?: boolean;
 }
 
 export interface FeedbackAttachmentPayload {

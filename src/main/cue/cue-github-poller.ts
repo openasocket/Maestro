@@ -24,6 +24,7 @@ import type { CueGitHubLabelTarget } from '../../shared/cue';
 import { resolveGhPath, getExpandedEnv } from '../utils/cliDetection';
 import { ghErrorHaystack, isGitHubAuthError } from '../utils/ghErrors';
 import { buildGhEnv, redactGhTokens } from './cue-gh-token';
+import { holdGitForgeEffect } from '../utils/remote-git';
 
 // Re-exported: the auth predicate moved to utils/ghErrors so Send Feedback can
 // share it, and existing importers still reach it here.
@@ -262,6 +263,50 @@ function scrubGhError(error: Error, tokens: string[]): Error {
 	return error;
 }
 
+/**
+ * What a poll of `repo` is held against (MRC2-04-05): the forge origin the
+ * subscription reads from (`HOST/OWNER/REPO` names its own host, otherwise
+ * github.com) and the repository slug, or null when the subscription names
+ * none and gh is to auto-detect it (a ceiling with a `repositories` clause
+ * then refuses the poll `repository-unknown`, so such a subscription has to
+ * name its repo).
+ */
+export function githubPollTarget(repo: string | null): {
+	destination: string;
+	repository: string | null;
+} {
+	const parts = (repo ?? '').split('/').filter(Boolean);
+	if (parts.length >= 3) {
+		return {
+			destination: `https://${parts[0].toLowerCase()}`,
+			repository: `${parts[parts.length - 2]}/${parts[parts.length - 1]}`,
+		};
+	}
+	return {
+		destination: 'https://github.com',
+		repository: parts.length === 2 ? `${parts[0]}/${parts[1]}` : null,
+	};
+}
+
+/**
+ * The poll, held through the shared git executor's forge hold as the `poll`
+ * effect of the repository ceiling: the refusal text, or null to poll.
+ * Standalone (no gate installed) answers null with no call.
+ */
+async function holdPollWithExecutor(repo: string | null): Promise<string | null> {
+	const { destination, repository } = githubPollTarget(repo);
+	const refused = await holdGitForgeEffect('poll', null, destination, repository);
+	return refused ? refused.stderr : null;
+}
+
+/** The managed ceiling refused this poll; reported, never a gh failure a login would fix. */
+class CuePollRefusedError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'CuePollRefusedError';
+	}
+}
+
 export interface CueGitHubPollerConfig {
 	eventType: 'github.pull_request' | 'github.issue' | 'github.label';
 	repo?: string;
@@ -322,6 +367,15 @@ export interface CueGitHubPollerConfig {
 	 * Operations". Defaults to always-active when omitted.
 	 */
 	isActive?: () => boolean;
+	/**
+	 * Hold one poll of `repo` (the configured one, or null before gh
+	 * auto-detects it) against the managed ceiling before any gh call reaches
+	 * GitHub (MRC2-04-05): the refusal text, or null to poll. Defaults to the
+	 * shared git executor's hold of the `poll` effect; a denied poll is
+	 * reported on the Cue log and the schedule keeps running, so a ceiling
+	 * installed later is honored on the next tick.
+	 */
+	holdPoll?: (repo: string | null) => Promise<string | null>;
 }
 
 /**
@@ -348,6 +402,7 @@ export function createCueGitHubPoller(config: CueGitHubPollerConfig): () => void
 		(config.watchLabels ?? []).map((l) => l.trim().toLowerCase()).filter(Boolean)
 	);
 	const isActive = config.isActive ?? (() => true);
+	const holdPoll = config.holdPoll ?? holdPollWithExecutor;
 	const retrigger = retriggerOnComments === true;
 	// Treat undefined as "use default 10". 0/negative = unlimited (sentinel
 	// already chosen at schema level so `0` round-trips through YAML).
@@ -368,6 +423,17 @@ export function createCueGitHubPoller(config: CueGitHubPollerConfig): () => void
 	// Phase 12C - rate-limit backoff state
 	const basePollMs = pollMinutes * 60 * 1000;
 	let currentPollMs = basePollMs;
+
+	// A denied poll is reported once per change of reason, not once per tick.
+	let lastDenial = '';
+	function reportDenied(reason: string): void {
+		if (reason === lastDenial) return;
+		lastDenial = reason;
+		onLog(
+			'warn',
+			`[CUE] GitHub poll denied for "${triggerName}" by the managed repository ceiling; nothing was asked of GitHub: ${reason}`
+		);
+	}
 
 	// A token secret file that exists but cannot be used is logged once per
 	// change, not once per gh call.
@@ -873,6 +939,12 @@ export function createCueGitHubPoller(config: CueGitHubPollerConfig): () => void
 		try {
 			if (!(await resolveGh())) return;
 
+			// Held before the first call that reaches GitHub (repo auto-detection
+			// included), with the repository the subscription names.
+			const denied = await holdPoll(config.repo ?? null);
+			if (denied) throw new CuePollRefusedError(denied);
+			lastDenial = '';
+
 			const repo = await resolveRepo();
 			if (!repo) return;
 
@@ -888,7 +960,9 @@ export function createCueGitHubPoller(config: CueGitHubPollerConfig): () => void
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 
-			if (isGitHubRateLimitError(err)) {
+			if (err instanceof CuePollRefusedError) {
+				reportDenied(message);
+			} else if (isGitHubRateLimitError(err)) {
 				// Exponential backoff capped at the max. Sentry is NOT called for
 				// rate limits - they are expected operational conditions.
 				currentPollMs = Math.min(currentPollMs * 2, GITHUB_RATE_LIMIT_MAX_BACKOFF_MS);

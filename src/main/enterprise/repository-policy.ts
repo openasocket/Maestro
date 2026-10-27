@@ -39,6 +39,15 @@
  * it after `git worktree add`; held as a local effect against the repository
  * `origin` names, so a ceiling admits user scripts per actor and per
  * repository, and a refusal skips the script after the worktree is created.
+ * Three more forge effects reach GitHub through `gh` from outside the git
+ * handlers (MRC2-04-05): an `issue` (an issue, a comment, a reaction or a
+ * label written on the forge: Send Feedback on `RunMaestro/Maestro`), an
+ * `upload` (content published to a repository under the actor's forge
+ * account, created if absent: the feedback attachments repository) and a
+ * `poll` (a Cue subscription reading a repository's pull requests, issues
+ * and events with the host's GitHub token). Each is held against the forge
+ * origin with the repository the sink names, by the actor the call was
+ * admitted over; the Cue poller runs outside any transport, as the operator.
  */
 
 import type { SshLaunchTarget } from '../../shared/maestro-lib/launch/ssh-remote-resolver';
@@ -70,6 +79,9 @@ export const REPOSITORY_EFFECTS = [
 	'cancel',
 	'gist',
 	'setup-script',
+	'issue',
+	'upload',
+	'poll',
 ] as const;
 export type RepositoryEffectKind = (typeof REPOSITORY_EFFECTS)[number];
 
@@ -933,10 +945,11 @@ export type GitExecutionDecision =
 /**
  * A forge effect of the git surface that `gh` performs and no git command
  * line carries: the pull request `git:createPR` opens, the gist
- * `git:createGist` publishes. Held through the same gate as a git write, with
- * the same actor and the same ceiling.
+ * `git:createGist` publishes, the issue, the upload and the poll of
+ * MRC2-04-05. Held through the same gate as a git write, with the same actor
+ * and the same ceiling.
  */
-export type GitForgeEffect = 'pull-request' | 'gist';
+export type GitForgeEffect = 'pull-request' | 'gist' | 'issue' | 'upload' | 'poll';
 
 export interface GitForgeRequest {
 	effect: GitForgeEffect;
@@ -947,6 +960,13 @@ export interface GitForgeRequest {
 	 * targets. A gist names no repository.
 	 */
 	destination: string | null;
+	/**
+	 * The repository the effect targets when the sink names it itself
+	 * (`owner/repo`, or null for an effect that targets none): no origin is
+	 * read then, and the destination is held as given. Absent, the repository
+	 * is read off the origin at `read`.
+	 */
+	repository?: string | null;
 	/** Read-class git in the repository the effect targets (never re-held); null for an effect that targets none. */
 	read: ((args: string[]) => Promise<string | null>) | null;
 }
@@ -1093,9 +1113,9 @@ export function createGitExecutionGate(deps: GitExecutionGateDeps): GitExecution
 		async holdForge(request) {
 			const standing = deps.repository.standing();
 			if (standing.standing === 'standalone') return { allowed: true, operation: null };
-			let repository: string | null = null;
+			let repository = request.repository ?? null;
 			let address = request.destination;
-			if (standing.ceiling && request.read) {
+			if (standing.ceiling && request.read && request.repository === undefined) {
 				address = request.destination ?? (await request.read(['remote', 'get-url', 'origin']));
 				repository = repositorySlugFromRemote(address);
 			}

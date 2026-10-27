@@ -135,25 +135,30 @@ export async function holdGitCommand(
 }
 
 /**
- * Hold a forge effect of the git surface (`gh pr create`, `gh gist create`)
- * against the same ceiling, before `gh` starts (MRC2-04-02). A pull request
- * targets the repository at `cwd` (its origin is read there, unheld); a gist
- * targets no repository and names its destination instead. Answers the
- * refusal, or null to run; standalone answers null with no call.
+ * Hold a forge effect of the git surface (`gh pr create`, `gh gist create`,
+ * the feedback issue and upload, the Cue poll) against the same ceiling,
+ * before `gh` starts (MRC2-04-02). A pull request targets the repository at
+ * `cwd` (its origin is read there, unheld); a gist targets no repository and
+ * names its destination instead; a sink that knows the repository it reaches
+ * (`RunMaestro/Maestro`, a Cue subscription's repo) passes it as
+ * `repository` with the destination, and nothing is read (MRC2-04-05).
+ * Answers the refusal, or null to run; standalone answers null with no call.
  */
 export async function holdGitForgeEffect(
 	effect: GitForgeEffect,
 	cwd: string | null,
-	destination: string | null = null
+	destination: string | null = null,
+	repository?: string | null
 ): Promise<ExecResult | null> {
 	const gate = gitExecutionGate;
 	if (!gate) return null;
 	const decision = await gate.holdForge({
 		effect,
 		destination,
+		...(repository !== undefined ? { repository } : {}),
 		read: cwd === null ? null : gateReader({ kind: 'local', cwd }),
 	});
-	return settleHold(decision, `gh ${effect}`, { cwd, destination });
+	return settleHold(decision, `gh ${effect}`, { cwd, destination, repository });
 }
 
 /**
