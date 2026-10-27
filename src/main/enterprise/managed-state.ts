@@ -9,10 +9,11 @@
  * (`ManagedStanding`) and projects the facts a person reads beside it: who
  * manages this installation, what the endpoint answered last, whether this
  * process holds an actor registration, which policy is applied and how fresh
- * that is, which capabilities were negotiated, and whether management can be
- * left locally. A projection, never authority: a sink admits on the host
- * adapter's standing, not on the word shown here. No path, digest or secret of
- * the sealed record is in it.
+ * that is, which capabilities were negotiated, whether management can be
+ * left locally, and what the egress ceiling has refused (once per class, code
+ * and origin, from the chokepoint's own ledger; MRC2-05-03). A projection,
+ * never authority: a sink admits on the host adapter's standing, not on the
+ * word shown here. No path, digest or secret of the sealed record is in it.
  *
  * Local release (`localReleaseOf`) is the one rule the IPC applies before an
  * explicit local transition (`retire`, `acknowledgeRevocation`) or an identity
@@ -35,6 +36,7 @@ import type {
 	ManagedIdentityManagement,
 } from '../../shared/maestro-lib/managed/endpoint-port';
 import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
+import type { EgressHold } from '../utils/fetchWithTimeout';
 import type { IdentityCustodyState } from './identity-store';
 
 /** One word for the standing, in the order a pane sorts them from best to worst. */
@@ -105,6 +107,8 @@ export interface ManagedStateView {
 		/** Supported here, not negotiated there. */
 		missing: readonly string[];
 	};
+	/** What the egress ceiling refused since it was installed, once per class, code and origin: a quiet record, never a toast. */
+	egress: { held: readonly EgressHold[] };
 	localRelease: LocalRelease;
 }
 
@@ -176,6 +180,8 @@ export interface ManagedStateInput {
 	custody: IdentityCustodyState;
 	/** What this host offers the endpoint (`ENTERPRISE_SUPPORTED_CAPABILITIES`). */
 	supported: readonly string[];
+	/** The chokepoint's ledger (`heldEgress()`); absent reads as nothing refused. */
+	egress?: readonly EgressHold[];
 	now?: number;
 }
 
@@ -234,6 +240,7 @@ export function projectManagedState(input: ManagedStateInput): ManagedStateView 
 			negotiated: [...negotiated],
 			missing: input.supported.filter((name) => !negotiated.includes(name)),
 		},
+		egress: { held: (input.egress ?? []).map((hold) => ({ ...hold })) },
 		localRelease: localReleaseOf(status),
 	};
 }

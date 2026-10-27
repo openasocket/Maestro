@@ -27,6 +27,8 @@ const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 import { registerLeaderboardHandlers } from '../../../../main/ipc/handlers/leaderboard';
+import { heldEgress, setEgressAuthority } from '../../../../main/utils/fetchWithTimeout';
+import { denyingEgressAuthority } from '../../../helpers/egressAuthority';
 
 describe('Leaderboard IPC Handlers', () => {
 	const mockApp = {
@@ -621,6 +623,83 @@ describe('Leaderboard IPC Handlers', () => {
 
 			expect(result.success).toBe(false);
 			expect(result.error).toBe('Request timed out');
+		});
+	});
+
+	// MRC2-05-03: every leaderboard call is vendor telemetry. On a managed host
+	// whose policy omits the class, each answers the refusal by name with
+	// nothing sent, logs at debug, and the chokepoint records the hold once.
+	describe('under the managed egress ceiling', () => {
+		afterEach(() => {
+			setEgressAuthority(null);
+		});
+
+		it('names every call vendor-telemetry and answers a hold by name with nothing sent and no error log', async () => {
+			const denying = denyingEgressAuthority();
+			setEgressAuthority(denying.authority);
+			const { logger } = await import('../../../../main/utils/logger');
+
+			const submit = await handlers.get('leaderboard:submit')!(
+				{},
+				{
+					email: 'test@example.com',
+					displayName: 'T',
+					badgeLevel: 1,
+					badgeName: 'Bronze',
+					cumulativeTimeMs: 1,
+					totalRuns: 1,
+				}
+			);
+			const poll = await handlers.get('leaderboard:pollAuthStatus')!({}, 'client-token');
+			const resend = await handlers.get('leaderboard:resendConfirmation')!(
+				{},
+				{ email: 'test@example.com', clientToken: 'client-token' }
+			);
+			const get = await handlers.get('leaderboard:get')!({});
+			const longest = await handlers.get('leaderboard:getLongestRuns')!({});
+			const sync = await handlers.get('leaderboard:sync')!(
+				{},
+				{ email: 'test@example.com', authToken: 'token' }
+			);
+
+			const refusal = expect.stringContaining('[managed-class-denied]');
+			expect(submit).toEqual({
+				success: false,
+				message: 'Held by the managed egress ceiling',
+				error: refusal,
+			});
+			expect(poll).toEqual({ status: 'error', error: refusal });
+			expect(resend).toEqual({ success: false, error: refusal });
+			expect(get).toEqual({ success: false, error: refusal });
+			expect(longest).toEqual({ success: false, error: refusal });
+			expect(sync).toEqual({
+				success: false,
+				found: false,
+				error: refusal,
+				errorCode: 'HELD_BY_POLICY',
+			});
+
+			expect(mockFetch).not.toHaveBeenCalled();
+			expect(denying.requests.map((request) => request.class)).toEqual(
+				Array(6).fill('vendor-telemetry')
+			);
+			expect(denying.requests.map((request) => new URL(request.url).origin)).toEqual(
+				Array(6).fill('https://runmaestro.ai')
+			);
+			expect(logger.error).not.toHaveBeenCalled();
+			expect(logger.warn).not.toHaveBeenCalled();
+			expect(logger.debug).toHaveBeenCalledWith(
+				expect.stringContaining('Leaderboard submission held by the managed egress ceiling'),
+				'Leaderboard'
+			);
+			expect(heldEgress()).toEqual([
+				expect.objectContaining({
+					class: 'vendor-telemetry',
+					code: 'class-denied',
+					origin: 'https://runmaestro.ai',
+					count: 6,
+				}),
+			]);
 		});
 	});
 });

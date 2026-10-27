@@ -224,12 +224,36 @@ describe('projectManagedState', () => {
 				negotiated: ['attachment', 'execution'],
 				missing: ['compatibility', 'telemetry'],
 			},
+			egress: { held: [] },
 			localRelease: { allowed: false },
 		});
 		const text = JSON.stringify(view);
 		expect(text).not.toContain('/run/endpoint.sock');
 		expect(text).not.toContain('b'.repeat(64));
 		expect(text).not.toContain('socketPath');
+	});
+
+	// MRC2-05-03: the chokepoint's ledger rides along as copies, so a pane can
+	// say what the egress ceiling held without a toast on every start.
+	it('carries the egress holds it is handed, as copies', () => {
+		const s = registered();
+		const hold = {
+			class: 'vendor-telemetry',
+			code: 'class-denied',
+			origin: 'https://runmaestro.ai',
+			firstAt: OBSERVED,
+			lastAt: OBSERVED,
+			count: 3,
+		} as const;
+		const view = projectManagedState({
+			status: s,
+			policy: policyOf(s),
+			custody: { state: 'protected' },
+			supported: SUPPORTED,
+			egress: [hold],
+		});
+		expect(view.egress).toEqual({ held: [hold] });
+		expect(view.egress.held[0]).not.toBe(hold);
 	});
 
 	it('names a custody refusal with its message and no enrollment', () => {

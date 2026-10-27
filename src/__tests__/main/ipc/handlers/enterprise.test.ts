@@ -244,6 +244,7 @@ describe('enterprise handlers', () => {
 			endpoint: { attached: false, connectivity: 'detached' },
 			policy: { appliedRevision: 3, freshness: 'stale' },
 			capabilities: { negotiated: [] },
+			egress: { held: [] },
 			localRelease: { allowed: false, reason: 'required' },
 		});
 		expect(view.capabilities.supported).toContain('execution');

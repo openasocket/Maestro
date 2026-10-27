@@ -15,6 +15,10 @@
  *
  * Everything here is fire-and-forget: it must never block the update check and
  * any failure (offline, 5xx, timeout, malformed id file) is swallowed silently.
+ *
+ * On a managed host the ping is vendor telemetry (MRC2-05-03): it leaves only
+ * when the policy lists the class, and a hold is a quiet no-op the chokepoint
+ * records once for the managed status, never a warning on every start.
  */
 
 import { randomUUID } from 'crypto';
@@ -23,9 +27,11 @@ import * as path from 'path';
 import type { App } from 'electron';
 import { atomicWriteJson } from './utils/atomic-json-store';
 import { logger } from './utils/logger';
-import { fetchWithTimeout } from './utils/fetchWithTimeout';
+import { fetchWithTimeout, isEgressDeniedError } from './utils/fetchWithTimeout';
 
 const CHECKIN_ENDPOINT = 'https://runmaestro.ai/api/telemetry/checkin';
+/** The destination class the ping is held as on a managed host. */
+const EGRESS_CLASS = 'vendor-telemetry';
 const CHECKIN_ID_FILE = 'checkin-id.json';
 const CHECKIN_TIMEOUT_MS = 5000;
 
@@ -116,7 +122,8 @@ export async function sendCheckin(app: App, theme?: string | null): Promise<void
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(body),
 			},
-			CHECKIN_TIMEOUT_MS
+			CHECKIN_TIMEOUT_MS,
+			EGRESS_CLASS
 		);
 		// A rejected ping used to be indistinguishable from a delivered one:
 		// the response was never inspected, so a 500 or a validation 400 read
@@ -129,6 +136,13 @@ export async function sendCheckin(app: App, theme?: string | null): Promise<void
 			);
 		}
 	} catch (err) {
+		if (isEgressDeniedError(err)) {
+			// The managed policy does not list vendor telemetry: nothing was
+			// sent, and the chokepoint recorded the hold once. Debug, not warn:
+			// a hold is the policy working, not an endpoint turning pings away.
+			logger.debug(`Check-in held by the managed egress ceiling: ${err.message}`, 'Checkin');
+			return;
+		}
 		// Transport-level failure - offline, DNS, timeout. Expected and routine
 		// on a laptop, so it stays at debug. A reachable endpoint that refuses
 		// the ping is the interesting case, and that is warned about above.

@@ -32,6 +32,11 @@
  *   share a single opt-out.
  * - Server may return `X-Cue-Telemetry-Backoff: <seconds>` to throttle the
  *   client without an app update; honored until the backoff expires.
+ * - On a managed host the flush is `vendor-telemetry` egress (MRC2-05-03):
+ *   it leaves only when the policy lists the class. A hold is a quiet no-op
+ *   (`reason: 'held'`, debug log, the chokepoint records it once for the
+ *   managed status) that leaves the outbox in place and backs off for
+ *   `HELD_BACKOFF_MS`, so the threshold flush does not re-ask on every insert.
  *
  * Cadence:
  * - Primary flush trigger: an autorun completion calls `flushTelemetry()`
@@ -42,7 +47,7 @@
 
 import * as crypto from 'crypto';
 import { logger } from '../utils/logger';
-import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { fetchWithTimeout, isEgressDeniedError } from '../utils/fetchWithTimeout';
 import {
 	insertTelemetryEvent,
 	getTelemetryBatch,
@@ -76,6 +81,12 @@ const OUTBOX_FLUSH_THRESHOLD = 200;
 
 /** Fetch timeout for telemetry POSTs. Short - telemetry is best-effort. */
 const FETCH_TIMEOUT_MS = 10_000;
+
+/** The destination class a flush is held as on a managed host. */
+const EGRESS_CLASS = 'vendor-telemetry';
+
+/** How long a held flush waits before asking the ceiling again; the policy may change under a running app. */
+const HELD_BACKOFF_MS = 60 * 60 * 1000;
 
 /**
  * Hash truncation length. 16 hex chars = 64 bits of entropy, enough to
@@ -302,7 +313,7 @@ export interface FlushOptions {
 
 export interface FlushResult {
 	ok: boolean;
-	reason: 'sent' | 'noop' | 'disabled' | 'in-flight' | 'backoff' | 'empty' | 'error';
+	reason: 'sent' | 'noop' | 'disabled' | 'in-flight' | 'backoff' | 'empty' | 'held' | 'error';
 	sent?: number;
 	error?: string;
 }
@@ -316,6 +327,8 @@ export interface FlushResult {
  * On failure: leaves rows in place; next flush retries them.
  * On 4xx with `X-Cue-Telemetry-Backoff: <seconds>`: pauses subsequent flushes
  *   until the deadline.
+ * On a managed hold: `reason: 'held'`, rows left in place, flushes paused for
+ *   `HELD_BACKOFF_MS`; nothing was sent.
  */
 export async function flushTelemetry(
 	opts: FlushOptions = { reason: 'manual' }
@@ -397,7 +410,8 @@ export async function flushTelemetry(
 				},
 				body,
 			},
-			FETCH_TIMEOUT_MS
+			FETCH_TIMEOUT_MS,
+			EGRESS_CLASS
 		);
 
 		const backoffHeader = response.headers.get('X-Cue-Telemetry-Backoff');
@@ -436,6 +450,15 @@ export async function flushTelemetry(
 		);
 		return { ok: false, reason: 'error', error: `http-${response.status}` };
 	} catch (err) {
+		if (isEgressDeniedError(err)) {
+			// The managed policy does not list vendor telemetry. Nothing was sent;
+			// the rows stay for a policy that may later admit the class, and the
+			// backoff keeps the threshold flush from re-asking on every insert.
+			// Debug, not warn: a hold is the policy working, not an outage.
+			state.backoffUntil = Date.now() + HELD_BACKOFF_MS;
+			logger.debug(`Telemetry held by the managed egress ceiling: ${err.message}`, LOG_CONTEXT);
+			return { ok: false, reason: 'held', error: err.message };
+		}
 		// Network errors (timeout, DNS, offline). Leave outbox rows in place
 		// so the next flush retries them. Do NOT report to Sentry - these are
 		// expected at scale and would generate noise.

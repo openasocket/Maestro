@@ -9,6 +9,8 @@ import * as fsp from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 
+import { denyingEgressAuthority } from '../helpers/egressAuthority';
+
 vi.mock('../../main/utils/logger', () => ({
 	logger: {
 		info: vi.fn(),
@@ -152,5 +154,48 @@ describe('checkin', () => {
 		await expect(sendCheckin(makeApp())).resolves.toBeUndefined();
 
 		expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('HTTP 500'), 'Checkin');
+	});
+
+	// MRC2-05-03: the ping is vendor telemetry. On a managed host whose policy
+	// omits the class it is a quiet no-op: no request, no warning, the hold
+	// recorded once by the chokepoint for the managed status.
+	it('is held as vendor-telemetry on a managed host: nothing sent, nothing warned, recorded once', async () => {
+		const { sendCheckin } = await loadModule();
+		// Same module registry as the one checkin.ts just loaded into.
+		const { setEgressAuthority, heldEgress } = await import('../../main/utils/fetchWithTimeout');
+		const { logger } = await import('../../main/utils/logger');
+		// The mock keeps its history across resetModules; only this test's lines count.
+		vi.mocked(logger.warn).mockClear();
+		vi.mocked(logger.error).mockClear();
+		vi.mocked(logger.debug).mockClear();
+		const denying = denyingEgressAuthority();
+		setEgressAuthority(denying.authority);
+		try {
+			await expect(sendCheckin(makeApp())).resolves.toBeUndefined();
+			await expect(sendCheckin(makeApp())).resolves.toBeUndefined();
+
+			expect(mockFetch).not.toHaveBeenCalled();
+			expect(denying.requests.map((request) => request.class)).toEqual([
+				'vendor-telemetry',
+				'vendor-telemetry',
+			]);
+			expect(denying.requests[0].url).toBe(CHECKIN_ENDPOINT);
+			expect(heldEgress()).toEqual([
+				expect.objectContaining({
+					class: 'vendor-telemetry',
+					code: 'class-denied',
+					origin: 'https://runmaestro.ai',
+					count: 2,
+				}),
+			]);
+			expect(logger.warn).not.toHaveBeenCalled();
+			expect(logger.error).not.toHaveBeenCalled();
+			expect(logger.debug).toHaveBeenCalledWith(
+				expect.stringContaining('held by the managed egress ceiling: [managed-class-denied]'),
+				'Checkin'
+			);
+		} finally {
+			setEgressAuthority(null);
+		}
 	});
 });

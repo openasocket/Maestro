@@ -51,6 +51,7 @@ import {
 } from '../../enterprise/managed-state';
 import type { PolicyStatusService } from '../../enterprise/policy-status';
 import { ENTERPRISE_SUPPORTED_CAPABILITIES } from '../../enterprise/service';
+import { heldEgress } from '../../utils/fetchWithTimeout';
 import { withIpcErrorLogging } from '../../utils/ipcHandler';
 
 const LOG_CONTEXT = '[Enterprise]';
@@ -155,6 +156,7 @@ export function readManagedState(deps: EnterpriseHandlerDependencies): ManagedSt
 		policy: policy.status(),
 		custody: identity.custody(),
 		supported: ENTERPRISE_SUPPORTED_CAPABILITIES,
+		egress: heldEgress(),
 	});
 }
 

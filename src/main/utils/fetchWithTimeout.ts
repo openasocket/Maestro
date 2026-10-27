@@ -23,6 +23,11 @@
  * refusal is a thrown `EgressDeniedError`, named by code, never a network
  * failure. With no authority installed (a standalone host, the CLI, a test)
  * nothing is consulted and a request leaves exactly as it always has.
+ *
+ * A refusal is also RECORDED here, once per class, code and origin with a
+ * count (`heldEgress()`, MRC2-05-03): the managed status projection reads
+ * that ledger, so a caller whose request is off under the policy (a check-in,
+ * a stats flush) can be a quiet no-op instead of a toast on every start.
  */
 
 import type {
@@ -50,9 +55,10 @@ const DEFAULT_CLASS: EgressClass = 'content';
 
 let egressAuthority: EgressAuthority | null = null;
 
-/** Install (or, with null, remove) the authority every request through here is held with. */
+/** Install (or, with null, remove) the authority every request through here is held with; the ledger of holds starts over with it. */
 export function setEgressAuthority(authority: EgressAuthority | null): void {
 	egressAuthority = authority;
+	holds.clear();
 }
 
 /** The refusal a managed host answers an outbound request with: the socket never opened. */
@@ -74,6 +80,51 @@ export class EgressDeniedError extends Error {
 /** True when a rejection is a managed refusal rather than a timeout, an abort or a transport failure. */
 export function isEgressDeniedError(error: unknown): error is EgressDeniedError {
 	return error instanceof EgressDeniedError;
+}
+
+/** One refusal the chokepoint recorded: a class, a code and an origin, when it was first and last met, and how often. */
+export interface EgressHold {
+	class: EgressClass;
+	code: EgressDeniedError['code'];
+	/** The origin held (`scheme://host[:port]`), never a path or query. */
+	origin: string | null;
+	firstAt: string;
+	lastAt: string;
+	count: number;
+}
+
+/** Distinct holds the ledger keeps; a refusal past the bound is still thrown, only its record is dropped. */
+export const MAX_EGRESS_HOLDS = 64;
+
+const holds = new Map<string, EgressHold>();
+
+function recordHold(refused: EgressDeniedError): void {
+	const key = `${refused.class}\n${refused.code}\n${refused.receipt.origin ?? ''}`;
+	const at = new Date().toISOString();
+	const seen = holds.get(key);
+	if (seen) {
+		seen.lastAt = at;
+		seen.count += 1;
+		return;
+	}
+	if (holds.size >= MAX_EGRESS_HOLDS) return;
+	holds.set(key, {
+		class: refused.class,
+		code: refused.code,
+		origin: refused.receipt.origin,
+		firstAt: at,
+		lastAt: at,
+		count: 1,
+	});
+}
+
+/**
+ * What the ceiling has refused since the authority was installed, once per
+ * class, code and origin with a count: the quiet record a status projection
+ * shows in place of a toast per start. Copies, so a reader cannot alter it.
+ */
+export function heldEgress(): readonly EgressHold[] {
+	return [...holds.values()].map((hold) => ({ ...hold }));
 }
 
 /**
@@ -116,7 +167,11 @@ export async function fetchWithTimeout(
 	if (egressAuthority) {
 		const named = typeof egress === 'string' ? { class: egress } : egress;
 		const decision = egressAuthority.evaluateEgress({ url, ...named });
-		if (!decision.allowed) throw new EgressDeniedError(decision, url);
+		if (!decision.allowed) {
+			const refused = new EgressDeniedError(decision, url);
+			recordHold(refused);
+			throw refused;
+		}
 	}
 
 	const controller = new AbortController();

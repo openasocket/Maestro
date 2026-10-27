@@ -46,6 +46,8 @@ vi.mock('../../../main/utils/logger', () => ({
 	},
 }));
 
+import { heldEgress, setEgressAuthority } from '../../../main/utils/fetchWithTimeout';
+import { denyingEgressAuthority } from '../../helpers/egressAuthority';
 import {
 	configureCueTelemetry,
 	flushTelemetry,
@@ -412,5 +414,67 @@ describe('flushTelemetry', () => {
 		expect(result.ok).toBe(false);
 		expect(result.reason).toBe('error');
 		expect(outbox).toHaveLength(1);
+	});
+});
+
+// ---- the managed egress ceiling (MRC2-05-03) ------------------------------
+
+describe('flushTelemetry under the managed egress ceiling', () => {
+	beforeEach(() => {
+		configureCueTelemetry(defaultConfig());
+		recordTriggerFired({
+			eventType: 'time.scheduled',
+			subscriptionName: 's',
+			triggerName: 't',
+		});
+	});
+
+	afterEach(() => {
+		setEgressAuthority(null);
+	});
+
+	it('is a quiet no-op when held: nothing sent, rows kept, one debug line, flushes backed off', async () => {
+		const denying = denyingEgressAuthority();
+		setEgressAuthority(denying.authority);
+		const forbidden = vi.fn(async () => {
+			throw new Error('fetch must not be called under a hold');
+		});
+		globalThis.fetch = forbidden as unknown as typeof fetch;
+		const { logger } = await import('../../../main/utils/logger');
+		vi.mocked(logger.warn).mockClear();
+		vi.mocked(logger.error).mockClear();
+		vi.mocked(logger.debug).mockClear();
+
+		const held = await flushTelemetry({ reason: 'app-quit' });
+
+		expect(held).toEqual({
+			ok: false,
+			reason: 'held',
+			error: expect.stringContaining('[managed-class-denied]'),
+		});
+		expect(forbidden).not.toHaveBeenCalled();
+		expect(outbox).toHaveLength(1);
+		expect(mockDelete).not.toHaveBeenCalled();
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).not.toHaveBeenCalled();
+		expect(logger.debug).toHaveBeenCalledTimes(1);
+		expect(logger.debug).toHaveBeenCalledWith(
+			expect.stringContaining('Telemetry held by the managed egress ceiling'),
+			'[CueTelemetry]'
+		);
+		expect(heldEgress()).toEqual([
+			expect.objectContaining({
+				class: 'vendor-telemetry',
+				code: 'class-denied',
+				origin: 'https://test.invalid',
+				count: 1,
+			}),
+		]);
+
+		// The next flush does not ask the ceiling again until the backoff passes.
+		expect(await flushTelemetry({ reason: 'manual' })).toEqual({ ok: false, reason: 'backoff' });
+		expect(denying.requests).toEqual([
+			{ url: 'https://test.invalid/api/v1/cue/stats', class: 'vendor-telemetry' },
+		]);
 	});
 });

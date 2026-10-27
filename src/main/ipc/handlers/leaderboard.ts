@@ -8,12 +8,22 @@
  * - Resending confirmation emails
  * - Fetching leaderboard data
  * - Syncing stats from server
+ *
+ * Every call here is vendor telemetry under the managed egress ceiling
+ * (MRC2-05-03): on a managed host it leaves only when the policy lists the
+ * class. A hold is answered to the caller by name (`error`), logged at debug
+ * and recorded once by the chokepoint for the managed status; it is never an
+ * error log or a "failed to connect" message, because nothing was sent.
  */
 
 import { ipcMain, App } from 'electron';
 import Store from 'electron-store';
 import { logger } from '../../utils/logger';
-import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
+import {
+	DEFAULT_FETCH_TIMEOUT_MS,
+	fetchWithTimeout,
+	isEgressDeniedError,
+} from '../../utils/fetchWithTimeout';
 import type { MaestroSettings } from './persistence';
 import type { AutoRunKind } from '../../../shared/stats-types';
 
@@ -23,6 +33,12 @@ import type { AutoRunKind } from '../../../shared/stats-types';
 
 const LEADERBOARD_API_BASE = 'https://runmaestro.ai/api';
 const M4ESTR0_API_BASE = 'https://runmaestro.ai/api/m4estr0';
+
+/** The destination class every leaderboard call is held as on a managed host. */
+const EGRESS_CLASS = 'vendor-telemetry';
+
+/** What a held call says in `message` where the response has one. */
+const HELD_MESSAGE = 'Held by the managed egress ceiling';
 
 // ==========================================================================
 // Types
@@ -166,7 +182,7 @@ export interface LeaderboardSyncResponse {
 	found: boolean;
 	message?: string;
 	error?: string;
-	errorCode?: 'EMAIL_NOT_CONFIRMED' | 'INVALID_TOKEN' | 'MISSING_FIELDS';
+	errorCode?: 'EMAIL_NOT_CONFIRMED' | 'INVALID_TOKEN' | 'MISSING_FIELDS' | 'HELD_BY_POLICY';
 	data?: {
 		displayName: string;
 		badgeLevel: number;
@@ -195,6 +211,21 @@ export interface LeaderboardHandlerDependencies {
 // ==========================================================================
 // Helper Functions
 // ==========================================================================
+
+/**
+ * The refusal, by name, when the managed egress ceiling held a call; null for
+ * any other failure. Nothing was sent and the chokepoint recorded the hold
+ * once, so this logs at debug: a hold is the policy working, not a failure to
+ * reach the server.
+ */
+function egressHold(error: unknown, what: string): string | null {
+	if (!isEgressDeniedError(error)) return null;
+	logger.debug(
+		`Leaderboard ${what} held by the managed egress ceiling: ${error.message}`,
+		'Leaderboard'
+	);
+	return error.message;
+}
 
 // ==========================================================================
 // Handler Registration
@@ -237,14 +268,19 @@ export function registerLeaderboardHandlers(deps: LeaderboardHandlerDependencies
 					installId: installationId,
 				};
 
-				const response = await fetchWithTimeout(`${M4ESTR0_API_BASE}/submit`, {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'User-Agent': `Maestro/${app.getVersion()}`,
+				const response = await fetchWithTimeout(
+					`${M4ESTR0_API_BASE}/submit`,
+					{
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+							'User-Agent': `Maestro/${app.getVersion()}`,
+						},
+						body: JSON.stringify(submissionData),
 					},
-					body: JSON.stringify(submissionData),
-				});
+					DEFAULT_FETCH_TIMEOUT_MS,
+					EGRESS_CLASS
+				);
 
 				const result = (await response.json()) as {
 					success?: boolean;
@@ -291,6 +327,8 @@ export function registerLeaderboardHandlers(deps: LeaderboardHandlerDependencies
 					};
 				}
 			} catch (error) {
+				const held = egressHold(error, 'submission');
+				if (held) return { success: false, message: HELD_MESSAGE, error: held };
 				// Handle timeout specifically
 				if (error instanceof Error && error.name === 'AbortError') {
 					logger.error('Leaderboard submission timed out', 'Leaderboard');
@@ -323,7 +361,9 @@ export function registerLeaderboardHandlers(deps: LeaderboardHandlerDependencies
 						headers: {
 							'User-Agent': `Maestro/${app.getVersion()}`,
 						},
-					}
+					},
+					DEFAULT_FETCH_TIMEOUT_MS,
+					EGRESS_CLASS
 				);
 
 				const result = (await response.json()) as {
@@ -348,6 +388,8 @@ export function registerLeaderboardHandlers(deps: LeaderboardHandlerDependencies
 					};
 				}
 			} catch (error) {
+				const held = egressHold(error, 'auth poll');
+				if (held) return { status: 'error', error: held };
 				// Handle timeout specifically
 				if (error instanceof Error && error.name === 'AbortError') {
 					logger.error('Leaderboard auth poll timed out', 'Leaderboard');
@@ -377,17 +419,22 @@ export function registerLeaderboardHandlers(deps: LeaderboardHandlerDependencies
 					email: data.email.substring(0, 3) + '***',
 				});
 
-				const response = await fetchWithTimeout(`${M4ESTR0_API_BASE}/resend-confirmation`, {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'User-Agent': `Maestro/${app.getVersion()}`,
+				const response = await fetchWithTimeout(
+					`${M4ESTR0_API_BASE}/resend-confirmation`,
+					{
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+							'User-Agent': `Maestro/${app.getVersion()}`,
+						},
+						body: JSON.stringify({
+							email: data.email,
+							clientToken: data.clientToken,
+						}),
 					},
-					body: JSON.stringify({
-						email: data.email,
-						clientToken: data.clientToken,
-					}),
-				});
+					DEFAULT_FETCH_TIMEOUT_MS,
+					EGRESS_CLASS
+				);
 
 				const result = (await response.json()) as {
 					success?: boolean;
@@ -408,6 +455,8 @@ export function registerLeaderboardHandlers(deps: LeaderboardHandlerDependencies
 					};
 				}
 			} catch (error) {
+				const held = egressHold(error, 'confirmation resend');
+				if (held) return { success: false, error: held };
 				// Handle timeout specifically
 				if (error instanceof Error && error.name === 'AbortError') {
 					logger.error('Leaderboard resend confirmation timed out', 'Leaderboard');
@@ -437,7 +486,9 @@ export function registerLeaderboardHandlers(deps: LeaderboardHandlerDependencies
 						headers: {
 							'User-Agent': `Maestro/${app.getVersion()}`,
 						},
-					}
+					},
+					DEFAULT_FETCH_TIMEOUT_MS,
+					EGRESS_CLASS
 				);
 
 				if (response.ok) {
@@ -453,6 +504,8 @@ export function registerLeaderboardHandlers(deps: LeaderboardHandlerDependencies
 					};
 				}
 			} catch (error) {
+				const held = egressHold(error, 'fetch');
+				if (held) return { success: false, error: held };
 				// Handle timeout specifically
 				if (error instanceof Error && error.name === 'AbortError') {
 					logger.error('Leaderboard fetch timed out', 'Leaderboard');
@@ -482,7 +535,9 @@ export function registerLeaderboardHandlers(deps: LeaderboardHandlerDependencies
 						headers: {
 							'User-Agent': `Maestro/${app.getVersion()}`,
 						},
-					}
+					},
+					DEFAULT_FETCH_TIMEOUT_MS,
+					EGRESS_CLASS
 				);
 
 				if (response.ok) {
@@ -498,6 +553,8 @@ export function registerLeaderboardHandlers(deps: LeaderboardHandlerDependencies
 					};
 				}
 			} catch (error) {
+				const held = egressHold(error, 'longest runs fetch');
+				if (held) return { success: false, error: held };
 				// Handle timeout specifically
 				if (error instanceof Error && error.name === 'AbortError') {
 					logger.error('Longest runs fetch timed out', 'Leaderboard');
@@ -527,17 +584,22 @@ export function registerLeaderboardHandlers(deps: LeaderboardHandlerDependencies
 					email: data.email.substring(0, 3) + '***',
 				});
 
-				const response = await fetchWithTimeout(`${M4ESTR0_API_BASE}/sync`, {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'User-Agent': `Maestro/${app.getVersion()}`,
+				const response = await fetchWithTimeout(
+					`${M4ESTR0_API_BASE}/sync`,
+					{
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+							'User-Agent': `Maestro/${app.getVersion()}`,
+						},
+						body: JSON.stringify({
+							email: data.email,
+							authToken: data.authToken,
+						}),
 					},
-					body: JSON.stringify({
-						email: data.email,
-						authToken: data.authToken,
-					}),
-				});
+					DEFAULT_FETCH_TIMEOUT_MS,
+					EGRESS_CLASS
+				);
 
 				const result = (await response.json()) as {
 					success: boolean;
@@ -598,6 +660,8 @@ export function registerLeaderboardHandlers(deps: LeaderboardHandlerDependencies
 					};
 				}
 			} catch (error) {
+				const held = egressHold(error, 'sync');
+				if (held) return { success: false, found: false, error: held, errorCode: 'HELD_BY_POLICY' };
 				// Handle timeout specifically
 				if (error instanceof Error && error.name === 'AbortError') {
 					logger.error('Leaderboard sync timed out', 'Leaderboard');
