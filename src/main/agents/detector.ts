@@ -16,11 +16,13 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execFileNoThrow } from '../utils/execFile';
+import type { ExecResult } from '../utils/execFile';
+import { DispatchRefusedError } from '../../shared/maestro-lib/run/start-turn';
 import { logger } from '../utils/logger';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { captureException } from '../utils/sentry';
 import { getAgentCapabilities } from './capabilities';
+import { runProviderProbe, type ProviderProbeManaged } from './provider-probe';
 import {
 	checkBinaryExists,
 	checkCustomPath,
@@ -323,6 +325,24 @@ function readClaudeStatsCacheModelIds(): string[] {
 /** Default cache TTL: 5 minutes (model lists don't change frequently) */
 const DEFAULT_MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 
+/**
+ * The exit code a probe refused under management reports (MRC2-03-04), in the
+ * place of an errno: the provider could not be started, by the policy's
+ * answer rather than the OS's. The reason is on stderr.
+ */
+export const PROBE_REFUSED_EXIT_CODE = 'EREFUSED';
+
+export interface AgentDetectorDeps {
+	/**
+	 * The managed half of a provider probe (the host's port and the request's
+	 * actor), read on every probe (MRC2-03-04): model and option discovery
+	 * start the provider's own executable, so on a managed host they are
+	 * admitted before any process. Absent, or answering undefined, the
+	 * detector probes exactly as before.
+	 */
+	managedProbe?: () => ProviderProbeManaged | undefined;
+}
+
 export class AgentDetector {
 	private cachedAgents: AgentConfig[] | null = null;
 	private detectionInProgress: Promise<AgentConfig[]> | null = null;
@@ -333,13 +353,48 @@ export class AgentDetector {
 	private configOptionCache: Map<string, { options: string[]; timestamp: number }> = new Map();
 	// Configurable cache TTL (useful for testing or different environments)
 	private readonly modelCacheTtlMs: number;
+	private readonly deps: AgentDetectorDeps;
 
 	/**
 	 * Create an AgentDetector instance
 	 * @param modelCacheTtlMs - Model cache TTL in milliseconds (default: 5 minutes)
+	 * @param deps - The managed probe half on a host with a spawn authority
 	 */
-	constructor(modelCacheTtlMs: number = DEFAULT_MODEL_CACHE_TTL_MS) {
+	constructor(modelCacheTtlMs: number = DEFAULT_MODEL_CACHE_TTL_MS, deps: AgentDetectorDeps = {}) {
 		this.modelCacheTtlMs = modelCacheTtlMs;
+		this.deps = deps;
+	}
+
+	/**
+	 * Start a provider's executable to read what it knows, through the one
+	 * probe runner: unadmitted on a standalone host, admitted as a `probe`
+	 * turn under the policy's ceiling on a managed one. A refusal is explicit
+	 * and starts nothing: it is reported as a failed run with
+	 * `PROBE_REFUSED_EXIT_CODE` and the reason on stderr, so each discovery
+	 * degrades the way it does for a provider that could not start, and its
+	 * other sources (a config file, a cache on disk) still answer.
+	 */
+	private async probe(
+		providerId: string,
+		kind: string,
+		command: string,
+		args: string[],
+		env: NodeJS.ProcessEnv
+	): Promise<ExecResult> {
+		try {
+			return await runProviderProbe(
+				{ providerId, kind, command, args, env },
+				this.deps.managedProbe?.()
+			);
+		} catch (error) {
+			if (!(error instanceof DispatchRefusedError)) throw error;
+			logger.warn(`Probe of ${providerId} (${kind}) refused under management`, LOG_CONTEXT, {
+				state: error.state,
+				code: error.code,
+				message: error.message,
+			});
+			return { stdout: '', stderr: error.message, exitCode: PROBE_REFUSED_EXIT_CODE };
+		}
 	}
 
 	/**
@@ -729,7 +784,7 @@ export class AgentDetector {
 					const models: string[] = [];
 
 					// Source 1: CLI discovery
-					const result = await execFileNoThrow(command, ['models'], undefined, env);
+					const result = await this.probe(agentId, 'models', command, ['models'], env);
 					if (result.exitCode === 0) {
 						const cliModels = result.stdout
 							.split('\n')
@@ -797,10 +852,11 @@ export class AgentDetector {
 					// discovery with the shared `getExpandedEnv()` result instead would let
 					// it fail (or resolve differently) where the primes succeed, and it feeds
 					// `setOmpModelCatalog` below, so the catalogs must stay in lockstep.
-					const result = await execFileNoThrow(
+					const result = await this.probe(
+						agentId,
+						'models',
 						command,
 						['models', '--json'],
-						undefined,
 						buildOmpPrimeEnv(command)
 					);
 					if (result.exitCode !== 0) {
@@ -878,7 +934,7 @@ export class AgentDetector {
 					// Fallback: parse `grok models` output. Model lines are bulleted, e.g.
 					//   * grok-4.5 (default)
 					//   - grok-composer-2.5-fast
-					const result = await execFileNoThrow(command, ['models'], undefined, env);
+					const result = await this.probe(agentId, 'models', command, ['models'], env);
 					if (result.exitCode === 0) {
 						const models: string[] = [];
 						for (const line of result.stdout.split('\n')) {
@@ -966,7 +1022,7 @@ export class AgentDetector {
 
 						// Primary: parse --help output. Older CLI builds list the levels
 						// inline, e.g. `--effort <level>  Effort level ... (low, medium, high, max)`.
-						const help = await execFileNoThrow(command, ['--help'], undefined, env);
+						const help = await this.probe(agentId, 'effort-levels', command, ['--help'], env);
 						if (help.exitCode === 0) {
 							const match = help.stdout.match(/--effort\s+<\w+>\s+.*?\(([^)]+)\)/);
 							if (match) {
@@ -990,10 +1046,11 @@ export class AgentDetector {
 						//     `error: option '--effort <level>' argument 'x' is invalid. It must be one of: low, medium, high, xhigh, max`
 						//   - soft warning (exit 0, still runs --version):
 						//     `Warning: Unknown --effort value 'x' - ignoring it and using the default effort. Valid values: low, medium, high, xhigh, max.`
-						const probe = await execFileNoThrow(
+						const probe = await this.probe(
+							agentId,
+							'effort-levels',
 							command,
 							['--effort', '__maestro_probe__', '--version'],
-							undefined,
 							env
 						);
 						const probeOutput = `${probe.stderr}\n${probe.stdout}`;

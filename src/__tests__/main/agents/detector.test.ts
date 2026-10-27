@@ -1920,7 +1920,8 @@ describe('agent-detector', () => {
 					(call) => call[0] === '/usr/bin/omp' && call[1][0] === 'models' && call[1][1] === '--json'
 				);
 				expect(discoveryCall).toBeDefined();
-				discoveryEnv = discoveryCall![3] as NodeJS.ProcessEnv | undefined;
+				// The probe runner hands the env in the structured `{ env }` form.
+				discoveryEnv = (discoveryCall![3] as { env?: NodeJS.ProcessEnv } | undefined)?.env;
 			} finally {
 				process.env.PATH = originalPath;
 			}
