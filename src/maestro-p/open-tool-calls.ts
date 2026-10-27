@@ -12,6 +12,8 @@
 // claude was launched with permissions bypassed, and no open call is a tool
 // that asks the user something (AskUserQuestion).
 
+import { claudeArgsBypassPermissions } from '../shared/maestro-lib/managed/tui-handshake';
+
 // Tools that park the TUI on a question to the user. ExitPlanMode is not here:
 // run mode finalizes on it directly (see plan-mode.ts).
 const USER_BLOCKING_TOOLS = new Set(['AskUserQuestion']);
@@ -52,13 +54,10 @@ export class OpenToolCalls {
 
 /** Whether claude's flags mean no tool call can stop on a permission dialog. */
 export function skipsPermissionPrompts(claudeArgs: readonly string[]): boolean {
-	for (let i = 0; i < claudeArgs.length; i += 1) {
-		const arg = claudeArgs[i];
-		if (arg === '--dangerously-skip-permissions') return true;
-		if (arg === '--permission-mode=bypassPermissions') return true;
-		if (arg === '--permission-mode' && claudeArgs[i + 1] === 'bypassPermissions') return true;
-	}
-	return false;
+	// One rule for both halves of the managed handshake: the host refuses to
+	// sign arguments that bypass under a ceiling below full by this reading,
+	// and the TUI holds its final arguments to the same one.
+	return claudeArgsBypassPermissions(claudeArgs);
 }
 
 /**

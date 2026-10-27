@@ -26,6 +26,13 @@ import {
 } from '../../shared/maestro-lib/managed/authority';
 import type { ManagedDenialCode, ManagedRunIdentity } from '../../shared/maestro-lib/managed/types';
 import { managedSshEndpointRef } from '../../shared/maestro-lib/launch/ssh-remote-resolver';
+import { isMaestroPBinaryPath } from '../../shared/maestro-lib/launch/interactive-mode';
+import {
+	buildTuiHandshake,
+	createFileDigestCache,
+	loadOrCreateTuiHandshakeKey,
+	TUI_HANDSHAKE_ENV_VAR,
+} from '../../shared/maestro-lib/managed/tui-handshake';
 import { generateUUID } from '../../shared/uuid';
 import {
 	autoRunRunIdentity,
@@ -96,6 +103,15 @@ export interface ProcessManagerOptions {
 	 * what says `managed`.
 	 */
 	spawnAuthority?: () => ProcessSpawnAuthorityPort | null;
+	/**
+	 * The app's data directory (`app.getPath('userData')`), where a managed
+	 * host keeps the key it signs the maestro-p admission handshake with
+	 * (MRC2-03-05A). Main always passes it; omitted, a managed local
+	 * interactive Claude turn is refused by name, since the host has nowhere
+	 * to keep a key and never spawns the TUI without a handshake. A standalone
+	 * host reads it for nothing.
+	 */
+	userDataDir?: string;
 }
 
 /**
@@ -148,6 +164,29 @@ export function buildSpawnRequestSnapshot(config: ProcessConfig): DispatchSnapsh
 			origin: config.origin ?? 'desktop',
 		}
 	);
+}
+
+/**
+ * What a local maestro-p launch looks like at the sink: the maestro-p script
+ * is the first argument (the desktop runs it through `process.execPath`) or,
+ * for an agent whose Path is maestro-p itself, the command; the claude it
+ * drives is `MAESTRO_CLAUDE_BIN` in the env the handler built, null when the
+ * launch set none (the TUI would resolve `claude` on PATH, which no admission
+ * can name). An SSH launch runs a remote maestro-p this host never reaches.
+ * Null for every other launch.
+ */
+export function localTuiLaunchOf(
+	config: Pick<ProcessConfig, 'toolType' | 'command' | 'args' | 'customEnvVars' | 'sshRemoteId'>
+): { claudeBinPath: string | null; args: string[] } | null {
+	if (config.toolType !== 'claude-code' || config.sshRemoteId) return null;
+	const [first, ...rest] = config.args;
+	const args = isMaestroPBinaryPath(first)
+		? rest
+		: isMaestroPBinaryPath(config.command)
+			? [...config.args]
+			: null;
+	if (!args) return null;
+	return { claudeBinPath: config.customEnvVars?.MAESTRO_CLAUDE_BIN ?? null, args };
 }
 
 /** The identity of a spawn that is its own request (a chat turn): fresh, no run above it. */
@@ -298,6 +337,9 @@ export class ProcessManager extends EventEmitter {
 	private sshCommandRunner: SshCommandRunner;
 	private readonly isCoworkingEnabled: () => boolean;
 	private readonly spawnAuthority: () => ProcessSpawnAuthorityPort | null;
+	private readonly userDataDir: string | null;
+	/** The claude binary's digest, remembered per file identity across turns. */
+	private readonly digestFile = createFileDigestCache();
 	/** The lease behind each admission this manager minted; a look-alike has none. */
 	private readonly admissionLeases = new WeakMap<ProcessSpawnAdmission, DispatchLease>();
 	/** The lease bound to each session's live process, released when it ends. */
@@ -319,6 +361,7 @@ export class ProcessManager extends EventEmitter {
 		super();
 		this.isCoworkingEnabled = options.isCoworkingEnabled ?? (() => true);
 		this.spawnAuthority = options.spawnAuthority ?? (() => null);
+		this.userDataDir = options.userDataDir ?? null;
 		// A lease ends with the process it was bound to. A stale exit (one from a
 		// process a newer spawn has already replaced) finds the newer entry in
 		// the map and leaves the newer lease alone.
@@ -601,22 +644,117 @@ export class ProcessManager extends EventEmitter {
 						},
 					};
 
+		// A managed local interactive Claude turn (maestro-p) carries the host's
+		// signed admission handshake into the TUI's environment (MRC2-03-05A):
+		// a host-derived fact of the lease just checked, stamped here after the
+		// environment ceiling and the admission, never in the request the
+		// snapshot digests (the handler builds the maestro-p env before the
+		// admission). A refusal to build one refuses the spawn by name; nothing
+		// managed spawns the TUI unchecked. A standalone host stamps nothing.
+		const handshake = lease ? this.tuiHandshakeFor(configWithCoworkingSession, lease) : null;
+		if (handshake && !handshake.ok) {
+			lease?.release({ outcome: 'spawn-failed', message: handshake.message });
+			logger.error('[ProcessManager] Refusing to spawn: TUI handshake', 'ProcessManager', {
+				sessionId: config.sessionId,
+				toolType: config.toolType,
+				message: handshake.message,
+			});
+			this.emit('agent-error', config.sessionId, {
+				type: 'permission_denied',
+				message: handshake.message,
+				recoverable: false,
+				agentId: config.toolType,
+				sessionId: config.sessionId,
+				timestamp: Date.now(),
+			} satisfies AgentError);
+			return {
+				pid: -1,
+				success: false,
+				error: handshake.message,
+				managed: { state: 'denied', code: 'policy-denied' },
+			};
+		}
+		const configToSpawn =
+			handshake && handshake.ok
+				? {
+						...configWithCoworkingSession,
+						customEnvVars: {
+							...(configWithCoworkingSession.customEnvVars ?? {}),
+							...handshake.env,
+						},
+					}
+				: configWithCoworkingSession;
+
 		// The Codex app-server child is spawned per turn (no shared server to
 		// fingerprint, unlike OpenCode serve), so it takes the coworking env like
 		// any CLI spawn and is routed after the injection.
 		const result = this.withLease(config, lease, () => {
-			if (this.shouldUseCodexAppServer(configWithCoworkingSession)) {
-				return this.codexAppServerSpawner.spawn(configWithCoworkingSession);
+			if (this.shouldUseCodexAppServer(configToSpawn)) {
+				return this.codexAppServerSpawner.spawn(configToSpawn);
 			}
-			if (this.shouldUsePty(configWithCoworkingSession)) {
-				return this.ptySpawner.spawn(configWithCoworkingSession);
+			if (this.shouldUsePty(configToSpawn)) {
+				return this.ptySpawner.spawn(configToSpawn);
 			}
-			return this.childProcessSpawner.spawn(configWithCoworkingSession);
+			return this.childProcessSpawner.spawn(configToSpawn);
 		});
 
 		if (result.success) this.emitSpawn(config);
 
 		return result;
+	}
+
+	/**
+	 * The handshake env for a managed spawn, or null when the spawn is not a
+	 * local maestro-p launch (the TUI is the only child that spawns a provider
+	 * of its own outside this sink). The binary is the exact `MAESTRO_CLAUDE_BIN`
+	 * the interactive decision set (what the TUI will compare its own
+	 * resolution to), the arguments are the ones after the maestro-p script,
+	 * the ceiling is the launch plan's decision for this spawn, and the run is
+	 * the lease's. `MAESTRO_USER_DATA` is restated beside it so the TUI looks
+	 * for the key where this host minted it, whatever the inherited env says.
+	 */
+	private tuiHandshakeFor(
+		config: ProcessConfig,
+		lease: DispatchLease
+	): { ok: true; env: Record<string, string> } | { ok: false; message: string } | null {
+		const launch = localTuiLaunchOf(config);
+		if (!launch) return null;
+		const refuse = (reason: string) => ({
+			ok: false as const,
+			message: `This host runs under management and the maestro-p admission handshake could not be built: ${reason}. Nothing was started.`,
+		});
+		const admission = config.admission;
+		if (!admission) return refuse('the launch carries no admission');
+		if (!launch.claudeBinPath) return refuse('the launch names no MAESTRO_CLAUDE_BIN');
+		if (!this.userDataDir) {
+			return refuse('this host names no data directory to keep the handshake key in');
+		}
+		let key: string;
+		try {
+			key = loadOrCreateTuiHandshakeKey(this.userDataDir);
+		} catch (error) {
+			return refuse(`the handshake key could not be loaded: ${(error as Error).message}`);
+		}
+		const built = buildTuiHandshake({
+			key,
+			run: {
+				leaseId: admission.leaseId,
+				authorityId: admission.authorityId,
+				attemptId: admission.attemptId,
+				requestId: admission.requestId,
+				runId: lease.runId,
+				policyRevision: admission.policyRevision,
+			},
+			binaryPath: launch.claudeBinPath,
+			args: launch.args,
+			permissionMode: config.permission?.ceiling ?? null,
+			digestFile: this.digestFile,
+		});
+		if (!built.ok) return refuse(built.reason);
+		return {
+			ok: true,
+			env: { [TUI_HANDSHAKE_ENV_VAR]: built.encoded, MAESTRO_USER_DATA: this.userDataDir },
+		};
 	}
 
 	// ── Managed admission ────────────────────────────────────────────────

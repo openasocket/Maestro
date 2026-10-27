@@ -1111,6 +1111,10 @@ app
 			// The enterprise service is composed later in startup; read live so an
 			// enrollment that appears after this point governs every later spawn.
 			spawnAuthority: () => enterpriseService?.spawnAuthority ?? null,
+			// Where a managed host keeps the key it signs the maestro-p admission
+			// handshake with (MRC2-03-05A); the TUI reads it at the same directory
+			// through MAESTRO_USER_DATA, set above from this very path.
+			userDataDir: app.getPath('userData'),
 		});
 		// Note: webServer is created on-demand when user enables web interface (see setupWebServerCallbacks)
 		// Model and option discovery start the provider's own executable, so on

@@ -128,8 +128,14 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * the ceiling, the lease's run identity) signed by `encodeTuiHandshake` with the key at the host's data directory
  * and stamped as `TUI_HANDSHAKE_ENV_VAR` after the environment ceiling; `readTuiHandshakeEnv` and `checkTuiSpawn`
  * are the TUI's half, run before its own `pty.spawn`. No handshake is unmanaged, unchanged; one that does not verify refuses.
+ * 0.31.0: the host half of the TUI handshake (`./managed/tui-handshake`, MRC2-03-05A): `loadOrCreateTuiHandshakeKey`
+ * reads the key at the data directory or mints one at mode 0600 (never overwriting a file that is not a key),
+ * `flagNamesOf` names a command line's flags up to `--`, `claudeArgsBypassPermissions` is the one bypass rule both
+ * halves read, `buildTuiHandshake` signs the payload for one admitted spawn (the host's flags plus the TUI's own,
+ * claude's bypass only under a null or `full` ceiling; a relative or unreadable binary refused), and
+ * `createFileDigestCache` remembers a binary's digest per file identity. The desktop sink stamps the result.
  */
-export const MAESTRO_LIB_VERSION = '0.30.0';
+export const MAESTRO_LIB_VERSION = '0.31.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

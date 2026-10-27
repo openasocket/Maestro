@@ -10,12 +10,14 @@
  * `MAESTRO_MANAGED_` name the environment ceiling strips from every user layer,
  * stamped after the ceiling. The TUI verifies it against the key the host keeps
  * at mode 0600 in its data directory (resolved by the TUI itself) and holds its
- * spawn to it right before `pty.spawn`. The host half that mints the key and
- * builds a signed payload for an admitted spawn is MRC2-03-05A. No handshake is an unmanaged host,
- * unchanged; one that does not verify is a refusal, never an unchecked spawn.
+ * spawn to it right before `pty.spawn`. The host half (MRC2-03-05A) mints that
+ * key (`loadOrCreateTuiHandshakeKey`) and builds the signed payload for one
+ * admitted spawn (`buildTuiHandshake`); the desktop sink stamps it after the
+ * lease is checked. No handshake is an unmanaged host, unchanged; one that
+ * does not verify is a refusal, never an unchecked spawn.
  */
 
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -68,16 +70,49 @@ export function tuiHandshakeKeyPath(dataDir: string): string {
 	return path.join(dataDir, TUI_HANDSHAKE_KEY_FILE_NAME);
 }
 
-/** The key at the data directory, or null when there is none to read. Never mints one. */
-export function readTuiHandshakeKey(dataDir: string): string | null {
+type KeyFileRead = { kind: 'absent' } | { kind: 'key'; key: string } | { kind: 'not-a-key' };
+
+function readKeyFile(keyPath: string): KeyFileRead {
 	let raw: string;
 	try {
-		raw = fs.readFileSync(tuiHandshakeKeyPath(dataDir), 'utf8').trim();
+		raw = fs.readFileSync(keyPath, 'utf8').trim();
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'absent' };
 		throw error;
 	}
-	return HEX_64.test(raw) ? raw : null;
+	return HEX_64.test(raw) ? { kind: 'key', key: raw } : { kind: 'not-a-key' };
+}
+
+/** The key at the data directory, or null when there is none to read. Never mints one. */
+export function readTuiHandshakeKey(dataDir: string): string | null {
+	const read = readKeyFile(tuiHandshakeKeyPath(dataDir));
+	return read.kind === 'key' ? read.key : null;
+}
+
+/**
+ * The host's key: the one at the data directory, or a fresh one minted there
+ * (32 random bytes, hex) at mode 0600 with `wx`, so two hosts racing on the
+ * same directory never overwrite each other and the loser reads the winner's.
+ * A file that is there and is not a key is an error, never overwritten: a
+ * host that cannot tell what its key is must not sign with one it made up.
+ */
+export function loadOrCreateTuiHandshakeKey(dataDir: string): string {
+	const keyPath = tuiHandshakeKeyPath(dataDir);
+	const notAKey = () =>
+		new Error(`${keyPath} exists but is not a TUI handshake key; refusing to overwrite it`);
+	const existing = readKeyFile(keyPath);
+	if (existing.kind === 'key') return existing.key;
+	if (existing.kind === 'not-a-key') throw notAKey();
+	const minted = randomBytes(32).toString('hex');
+	try {
+		fs.writeFileSync(keyPath, `${minted}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+		const raced = readKeyFile(keyPath);
+		if (raced.kind === 'key') return raced.key;
+		throw notAKey();
+	}
+	return minted;
 }
 
 // ── Signing and verification ─────────────────────────────────────────────────
@@ -185,6 +220,127 @@ export function digestFileSha256(filePath: string): string {
 		fs.closeSync(fd);
 	}
 	return hash.digest('hex');
+}
+
+/**
+ * `digestFileSha256` remembered per file identity (device, inode, size,
+ * mtime), for a host that signs the same provider binary on every turn: a
+ * replaced file has a new identity and is read again. A stale answer can only
+ * approve bytes that are gone, which the TUI's own digest then refuses.
+ */
+export function createFileDigestCache(): (filePath: string) => string {
+	const cache = new Map<string, { identity: string; digest: string }>();
+	return (filePath) => {
+		const stat = fs.statSync(filePath);
+		const identity = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
+		const hit = cache.get(filePath);
+		if (hit && hit.identity === identity) return hit.digest;
+		const digest = digestFileSha256(filePath);
+		cache.set(filePath, { identity, digest });
+		return digest;
+	};
+}
+
+// ── The host side ────────────────────────────────────────────────────────────
+
+/** The flags maestro-p adds to claude's command line itself, after signing. */
+export const TUI_OWN_FLAGS: readonly string[] = ['--session-id', '--resume'];
+/** Claude's own bypass of permission prompts; maestro-p appends it to a run-mode turn. */
+export const CLAUDE_BYPASS_FLAG = '--dangerously-skip-permissions';
+
+/**
+ * Whether claude's flags mean no tool call can stop on a permission dialog:
+ * the bypass flag, or `--permission-mode bypassPermissions` in either
+ * spelling. The one rule both halves read (maestro-p's
+ * `skipsPermissionPrompts` delegates here).
+ */
+export function claudeArgsBypassPermissions(claudeArgs: readonly string[]): boolean {
+	for (let i = 0; i < claudeArgs.length; i += 1) {
+		const arg = claudeArgs[i];
+		if (arg === CLAUDE_BYPASS_FLAG) return true;
+		if (arg === '--permission-mode=bypassPermissions') return true;
+		if (arg === '--permission-mode' && claudeArgs[i + 1] === 'bypassPermissions') return true;
+	}
+	return false;
+}
+
+/**
+ * The flag names in a command line, up to `--` (what follows is the prompt
+ * positional maestro-p reads itself). `--model=x` names `--model`; a value
+ * token names nothing. Each name once, in first-seen order.
+ */
+export function flagNamesOf(args: readonly string[]): string[] {
+	const names = new Set<string>();
+	for (const arg of args) {
+		if (arg === '--') break;
+		if (!arg.startsWith('-')) continue;
+		const eq = arg.indexOf('=');
+		names.add(eq > 0 ? arg.slice(0, eq) : arg);
+	}
+	return [...names];
+}
+
+export interface BuildTuiHandshakeInput {
+	/** The host key (`loadOrCreateTuiHandshakeKey`). */
+	key: string;
+	/** The lease the spawn was admitted on. */
+	run: TuiHandshakeRun;
+	/** The exact string the host set as `MAESTRO_CLAUDE_BIN`; must be absolute. */
+	binaryPath: string;
+	/** The arguments the host handed maestro-p after its script, as passed. */
+	args: readonly string[];
+	/** The route's permission ceiling, or null for no pin. */
+	permissionMode: LaunchPermissionMode | null;
+	digestFile?: (filePath: string) => string;
+	now?: () => Date;
+}
+
+export type TuiHandshakeBuild =
+	| { ok: true; encoded: string; payload: TuiHandshakePayload }
+	| { ok: false; reason: string };
+
+/**
+ * The signed statement of one admitted spawn. The allowlist is the flags the
+ * host passed to maestro-p (a superset of what it forwards to claude, since
+ * maestro-p keeps its own flags to itself) plus the flags maestro-p adds
+ * after signing (`--session-id`, `--resume`), plus claude's bypass flag only
+ * when the ceiling is null or `full`; under a lower pin, arguments that
+ * already bypass prompts are refused here rather than signed. A relative or
+ * unreadable binary is refused: the digest is the approval, and a path the
+ * TUI resolves on PATH is not a binary the host looked at.
+ */
+export function buildTuiHandshake(input: BuildTuiHandshakeInput): TuiHandshakeBuild {
+	const refuse = (reason: string): TuiHandshakeBuild => ({ ok: false, reason });
+	if (!path.isAbsolute(input.binaryPath)) {
+		return refuse(
+			`the claude binary ${JSON.stringify(input.binaryPath)} is not an absolute path; the admission names only a binary the host digested`
+		);
+	}
+	let digest: string;
+	try {
+		digest = (input.digestFile ?? digestFileSha256)(input.binaryPath);
+	} catch (error) {
+		return refuse(
+			`the claude binary at ${input.binaryPath} could not be read: ${(error as Error).message}`
+		);
+	}
+	const bypassAllowed = input.permissionMode === null || input.permissionMode === 'full';
+	if (!bypassAllowed && claudeArgsBypassPermissions(input.args)) {
+		return refuse(
+			`the arguments bypass permission prompts but the route's ceiling is ${input.permissionMode}`
+		);
+	}
+	const allowedFlags = new Set<string>([...flagNamesOf(input.args), ...TUI_OWN_FLAGS]);
+	if (bypassAllowed) allowedFlags.add(CLAUDE_BYPASS_FLAG);
+	const payload: TuiHandshakePayload = {
+		version: TUI_HANDSHAKE_VERSION,
+		run: { ...input.run },
+		binary: { path: input.binaryPath, digest },
+		allowedFlags: [...allowedFlags],
+		permissionMode: input.permissionMode,
+		issuedAt: (input.now ?? (() => new Date()))().toISOString(),
+	};
+	return { ok: true, encoded: encodeTuiHandshake(payload, input.key), payload };
 }
 
 // ── The TUI side ─────────────────────────────────────────────────────────────
