@@ -20,16 +20,44 @@
 // frame that does not parse is ignored rather than fatal - this socket is
 // reachable by anything with the path, and a malformed line must not be able to
 // kill a turn that is midway through real work.
+//
+// Who may steer (MRC2-03-06)
+// --------------------------
+// The channel is local by construction: `net` listens on a filesystem path or a
+// named pipe, never a TCP port, and `isLocalSocketPath` refuses the one string
+// shape `net` would read as a port. Reachability is not authorization, though:
+// anything with the path can connect. So a frame carries the run's token when
+// the host sent one (`STEERING_TOKEN_ENV_VAR`), and under a managed admission
+// it also names the admission identity the TUI was admitted on; a frame that
+// carries neither, a stale or foreign token, or another run's identity is
+// refused `not-authorized` and logged. Never a fallback to accept.
 
+import { timingSafeEqual } from 'crypto';
 import * as fs from 'fs';
 import * as net from 'net';
 
 import {
 	oversizeSteeringRequestId,
 	parseSteeringRequest,
+	STEERING_SOCKET_ENV_VAR,
+	STEERING_TOKEN_ENV_VAR,
 	STEERING_TOO_LONG_DETAIL,
+	type SteeringRequestFrame,
 	type SteeringResultFrame,
+	type SteeringRunIdentity,
 } from '../shared/chatSteering';
+import type { TuiHandshakeRead } from '../shared/maestro-lib/managed/tui-handshake';
+
+/**
+ * What a frame must carry to be acted on. Both halves null means every frame
+ * is acted on, which is the unmanaged channel with no token: unchanged.
+ */
+export interface SteeringChannelAdmission {
+	/** The per-run token every frame must carry; null when the host sent none. */
+	token: string | null;
+	/** The admission identity every frame must name; null on an unmanaged host. */
+	run: SteeringRunIdentity | null;
+}
 
 export interface SteeringServerOptions {
 	socketPath: string;
@@ -41,6 +69,94 @@ export interface SteeringServerOptions {
 	onSteer: (id: string, text: string) => Promise<SteeringResultFrame>;
 	/** Diagnostics sink. Defaults to stderr. */
 	warn?: (message: string) => void;
+	/**
+	 * What every frame must carry (see `planSteeringChannel`). Absent: every
+	 * well-formed frame reaches `onSteer`, as on an unmanaged host with no token.
+	 */
+	admission?: SteeringChannelAdmission;
+}
+
+/** The admission identity a managed handshake pins the channel to, or null. */
+export function steeringRunOf(admission: TuiHandshakeRead | undefined): SteeringRunIdentity | null {
+	if (admission?.status !== 'ok') return null;
+	return { leaseId: admission.payload.run.leaseId, attemptId: admission.payload.run.attemptId };
+}
+
+export type SteeringChannelPlan =
+	/** No socket named: the turn is not steerable, which is the default. */
+	| { kind: 'none' }
+	| { kind: 'open'; socketPath: string; admission?: SteeringChannelAdmission }
+	/** A socket was named and the channel must not be opened on it. */
+	| { kind: 'closed'; socketPath: string; reason: string };
+
+/**
+ * Whether to open the channel, and what its frames must carry. A managed turn
+ * (one the host admitted) is steered only with the run token: a managed
+ * admission with no token closes the channel rather than opening one anybody
+ * on the machine could type into. An unmanaged turn with no token is unchanged.
+ */
+export function planSteeringChannel(
+	env: Readonly<Record<string, string | undefined>>,
+	managedRun: SteeringRunIdentity | null
+): SteeringChannelPlan {
+	const socketPath = env[STEERING_SOCKET_ENV_VAR]?.trim();
+	if (!socketPath) return { kind: 'none' };
+	const token = env[STEERING_TOKEN_ENV_VAR]?.trim() || null;
+	if (managedRun && !token) {
+		return {
+			kind: 'closed',
+			socketPath,
+			reason:
+				'the host sent a managed admission but no steering token, and a managed turn is steered only with its run token',
+		};
+	}
+	if (!token && !managedRun) return { kind: 'open', socketPath };
+	return { kind: 'open', socketPath, admission: { token, run: managedRun } };
+}
+
+function sameSecret(offered: string, expected: string): boolean {
+	const a = Buffer.from(offered, 'utf8');
+	const b = Buffer.from(expected, 'utf8');
+	return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * Why a parsed frame may not be acted on under `admission`, or null when it
+ * may. The token is compared in constant time; a stale and a foreign token are
+ * the same answer, since the server cannot tell which run a wrong one was for.
+ */
+export function steeringFrameRefusal(
+	frame: SteeringRequestFrame,
+	admission: SteeringChannelAdmission | undefined
+): string | null {
+	if (!admission) return null;
+	if (admission.token !== null) {
+		if (!frame.token) return 'the frame carries no run token';
+		if (!sameSecret(frame.token, admission.token)) {
+			return 'the frame carries a token that is not the token of this run';
+		}
+	}
+	if (admission.run !== null) {
+		if (!frame.run) return 'the frame names no admission identity';
+		if (
+			frame.run.leaseId !== admission.run.leaseId ||
+			frame.run.attemptId !== admission.run.attemptId
+		) {
+			return 'the frame names an admission identity that is not the identity of this run';
+		}
+	}
+	return null;
+}
+
+/**
+ * Whether `socketPath` is a local socket address: a named pipe or a path. The
+ * one string `net.Server.listen` does NOT treat as a path is a numeric one,
+ * which it reads as a TCP port on every interface (`listen('8080')`), so that
+ * shape is refused rather than opened: the channel never leaves the machine.
+ */
+export function isLocalSocketPath(socketPath: string): boolean {
+	if (isNamedPipePath(socketPath)) return true;
+	return !(Number(socketPath) >= 0);
 }
 
 export interface SteeringServer {
@@ -63,6 +179,12 @@ export interface SteeringServer {
 export function startSteeringServer(options: SteeringServerOptions): SteeringServer | null {
 	const warn = options.warn ?? ((m: string) => process.stderr.write(`${m}\n`));
 	const { socketPath } = options;
+	if (!isLocalSocketPath(socketPath)) {
+		warn(
+			`maestro-p: the steering channel path ${JSON.stringify(socketPath)} would be read as a TCP port, not a local socket; refusing to open it, so this turn cannot be steered.`
+		);
+		return null;
+	}
 	// A Windows named pipe is not a file: there is nothing to stat, probe-and-unlink,
 	// or remove on close, and the OS frees the name when the last handle closes.
 	const isPipe = isNamedPipePath(socketPath);
@@ -131,6 +253,26 @@ export function startSteeringServer(options: SteeringServerOptions): SteeringSer
 					return;
 				}
 				if (line.trim()) warn('maestro-p: ignoring an unrecognized steering frame.');
+				return;
+			}
+			// Authorization comes before the handler ever sees the text: a frame
+			// that does not prove it is for THIS run is refused and logged, and
+			// nothing is typed. The caller gets a verdict, as for every request.
+			const denial = steeringFrameRefusal(request, options.admission);
+			if (denial) {
+				warn(`maestro-p: refused steering request ${request.id}: ${denial}.`);
+				const refused: SteeringResultFrame = {
+					type: 'steering',
+					id: request.id,
+					verdict: 'refused',
+					refusal: 'not-authorized',
+					detail: `this steer was not authorized for this run: ${denial}`,
+				};
+				try {
+					socket.write(`${JSON.stringify(refused)}\n`);
+				} catch {
+					// Peer gone.
+				}
 				return;
 			}
 			let result: SteeringResultFrame;

@@ -65,6 +65,32 @@
 export const STEERING_SOCKET_ENV_VAR = 'MAESTRO_P_STEERING_SOCKET';
 
 /**
+ * Env var holding the per-run steering token (MRC2-03-06). The host that opens
+ * the channel mints one for each run, hands it to maestro-p beside the socket
+ * path, and sends it back on every `steer` frame; the server refuses a frame
+ * that carries none or another run's. A stale token (an earlier run on the same
+ * tab) and a foreign one (another run) are the same refusal, logged, never a
+ * fallback to accept. Absent means the host sent none: an unmanaged host's
+ * channel then accepts frames as it always did, while a managed host's channel
+ * is not opened at all, since a managed turn is steered only with its token.
+ */
+export const STEERING_TOKEN_ENV_VAR = 'MAESTRO_P_STEERING_TOKEN';
+
+/** Longest token accepted on a frame; a host mints 64 hex characters. */
+export const STEERING_TOKEN_MAX_LENGTH = 256;
+
+/**
+ * The admission identity a steer names under management: the lease and attempt
+ * the host admitted the maestro-p spawn on (the handshake's `run`). A managed
+ * channel refuses a frame that names none or another run's, so a steer minted
+ * for one admitted turn cannot be replayed into a later one on the same socket.
+ */
+export interface SteeringRunIdentity {
+	leaseId: string;
+	attemptId: string;
+}
+
+/**
  * What became of one steering attempt.
  *
  * Two of these answer different questions, and the split is forced by timing
@@ -137,7 +163,8 @@ export type SteeringRefusal =
 	| 'editor-unavailable' // editor not drawn and no dialog named it; unknown screen
 	| 'echo-missing' // typed, but the text never appeared; NOT submitted
 	| 'tui-exited' // the PTY went away mid-injection
-	| 'too-long'; // over STEERING_MAX_TEXT_BYTES; never typed
+	| 'too-long' // over STEERING_MAX_TEXT_BYTES; never typed
+	| 'not-authorized'; // no run token, another run's token, or another run's admission identity; never typed
 
 /** Control frame in: a request to steer the running turn. */
 export interface SteeringRequestFrame {
@@ -145,6 +172,10 @@ export interface SteeringRequestFrame {
 	/** Caller-minted id, echoed back on the result so a caller can match them up. */
 	id: string;
 	text: string;
+	/** The run's steering token (`STEERING_TOKEN_ENV_VAR`); required when the host sent one. */
+	token?: string;
+	/** The admission identity of the run being steered; required under management. */
+	run?: SteeringRunIdentity;
 }
 
 /** Control frame out, and the stdout event: what happened to one request. */
@@ -327,7 +358,30 @@ export function parseSteeringRequest(line: string): SteeringRequestFrame | null 
 	if (typeof frame.id !== 'string' || frame.id.length === 0) return null;
 	if (typeof frame.text !== 'string' || frame.text.length === 0) return null;
 	if (steeringTextTooLong(frame.text)) return null;
-	return { type: 'steer', id: frame.id, text: frame.text };
+	const request: SteeringRequestFrame = { type: 'steer', id: frame.id, text: frame.text };
+	// The credentials are optional on the wire and validated by shape only here:
+	// a malformed token or identity is the same as none, and the server answers
+	// it as such (`not-authorized`), which is the honest verdict for a caller
+	// that offered something that is not a credential.
+	if (
+		typeof frame.token === 'string' &&
+		frame.token.length > 0 &&
+		frame.token.length <= STEERING_TOKEN_MAX_LENGTH
+	) {
+		request.token = frame.token;
+	}
+	const run = frame.run as Partial<SteeringRunIdentity> | undefined;
+	if (
+		run &&
+		typeof run === 'object' &&
+		typeof run.leaseId === 'string' &&
+		run.leaseId.length > 0 &&
+		typeof run.attemptId === 'string' &&
+		run.attemptId.length > 0
+	) {
+		request.run = { leaseId: run.leaseId, attemptId: run.attemptId };
+	}
+	return request;
 }
 
 /**

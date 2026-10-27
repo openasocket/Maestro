@@ -41,15 +41,26 @@ import {
 import { installStopSignalHandlers, STOP_EXIT_CODES } from './stop-signals';
 import {
 	classifyQueueOperation,
-	STEERING_SOCKET_ENV_VAR,
+	STEERING_TOKEN_ENV_VAR,
 	steeringTextMatches,
 	type SteeringResultFrame,
 } from '../shared/chatSteering';
-import { startSteeringServer, type SteeringServer } from './steering-server';
+import {
+	planSteeringChannel,
+	startSteeringServer,
+	steeringRunOf,
+	type SteeringServer,
+} from './steering-server';
 import { cleanupStreamJsonImages, translateStreamJsonInput } from './stream-json-input';
 import { formatScreenTailReport, idleTimeoutMessage, readyTimeoutMessage } from './timeout-report';
 import { PROMPT_TAB_SPACES, TuiAdmissionError, TuiDriver } from './tui-driver';
-import { OpenToolCalls, skipsPermissionPrompts, withPermissionBypass } from './open-tool-calls';
+import {
+	ceilingAllowsBypass,
+	OpenToolCalls,
+	skipsPermissionPrompts,
+	tuiAdmissionCeiling,
+	withPermissionBypass,
+} from './open-tool-calls';
 import {
 	readTuiHandshakeEnv,
 	readTuiHandshakeKey,
@@ -169,6 +180,8 @@ program
 			'  - Stripped (dropped with warning): --output-format, --input-format, --verbose',
 			'  - Permissions: --dangerously-skip-permissions is added, as `claude -p` never stops on a',
 			'    permission prompt; an explicit --permission-mode (e.g. plan, for read-only) is kept.',
+			'    Under a managed admission whose ceiling is below full it is NOT added: claude',
+			'    prompts stay in force and nothing here answers them.',
 			'  - Everything else is forwarded verbatim to the spawned `claude` TUI.',
 			'',
 			'Environment:',
@@ -178,6 +191,10 @@ program
 			'                      Set by a managed Maestro host: the signed admission this spawn was',
 			'                      granted (approved claude binary, allowed flags, ceiling). The TUI',
 			'                      refuses to spawn anything else (exit 10). Never set it by hand.',
+			`  ${STEERING_TOKEN_ENV_VAR}`,
+			'                      Set by the host beside the steering socket: the token every steer',
+			'                      frame must carry for this run. A managed turn opens no steering',
+			'                      channel without one.',
 		].join('\n')
 	)
 	.version(VERSION, '-v, --version', 'Print the maestro-p version and exit')
@@ -337,9 +354,17 @@ async function runMode(args: ParsedArgs): Promise<never> {
 	// its id, so we leave that path untouched. claude 2.1.x honours
 	// `--session-id` in interactive/TUI mode (verified: it writes exactly the
 	// requested `<uuid>.jsonl`).
-	// Always bypass permission prompts, as `claude -p` cannot stop on one (see
-	// withPermissionBypass for the read-only exception).
-	let passThroughArgs = withPermissionBypass(args.passThroughArgs);
+	// Bypass permission prompts, as `claude -p` cannot stop on one (see
+	// withPermissionBypass for the read-only exception), unless a managed
+	// admission pins a ceiling below full: then the host did not admit the
+	// bypass, claude's prompts stay in force, and the turn says so up front.
+	const ceiling = tuiAdmissionCeiling(admission);
+	let passThroughArgs = withPermissionBypass(args.passThroughArgs, ceiling);
+	if (!ceilingAllowsBypass(ceiling) && !skipsPermissionPrompts(passThroughArgs)) {
+		process.stderr.write(
+			`maestro-p: the managed admission's ceiling is ${ceiling}; claude's permission prompts are not bypassed for this turn, and nothing here answers them.\n`
+		);
+	}
 	let resumeSessionId = args.resumeSessionId;
 
 	// `--continue` cannot reach claude as-is: every fresh TUI gets a
@@ -378,9 +403,12 @@ async function runMode(args: ParsedArgs): Promise<never> {
 	// Steering has to READ the screen before it types (see TuiDriver.inject), and
 	// the check needs a replayed grid, which only the raw stream can produce - the
 	// ANSI-stripped rolling buffer cannot show the editor box's structure. Run mode
-	// otherwise leaves this off, so it is enabled exactly when a steering socket was
-	// named rather than unconditionally: the capture is bounded but not free.
-	const steeringEnabled = !!process.env[STEERING_SOCKET_ENV_VAR]?.trim();
+	// otherwise leaves this off, so it is enabled exactly when a steering channel
+	// will be opened rather than unconditionally: the capture is bounded but not
+	// free. Under a managed admission the channel is opened only with the run
+	// token, and every frame must carry it and name the admission (MRC2-03-06).
+	const steeringChannel = planSteeringChannel(process.env, steeringRunOf(admission));
+	const steeringEnabled = steeringChannel.kind === 'open';
 	const driver = new TuiDriver({
 		binPath,
 		args: passThroughArgs,
@@ -1142,13 +1170,17 @@ async function runMode(args: ParsedArgs): Promise<never> {
 
 	// Chat steering: open the control channel only when the caller named a socket.
 	// Absent means this turn is not steerable, which is the default - a channel
-	// nobody asked for is an attack surface and a socket file to clean up.
-	const steeringSocketPath = steeringEnabled
-		? process.env[STEERING_SOCKET_ENV_VAR]?.trim()
-		: undefined;
-	if (steeringSocketPath) {
+	// nobody asked for is an attack surface and a socket file to clean up. A
+	// socket named for a managed turn with no run token stays closed, and says so.
+	if (steeringChannel.kind === 'closed') {
+		process.stderr.write(
+			`maestro-p: the steering channel at ${steeringChannel.socketPath} was not opened: ${steeringChannel.reason}; this turn cannot be steered.\n`
+		);
+	}
+	if (steeringChannel.kind === 'open') {
 		steeringServer = startSteeringServer({
-			socketPath: steeringSocketPath,
+			socketPath: steeringChannel.socketPath,
+			admission: steeringChannel.admission,
 			onSteer: (id, text): Promise<SteeringResultFrame> => {
 				const handling = handleSteer(id, text);
 				steersInFlight.add(handling);

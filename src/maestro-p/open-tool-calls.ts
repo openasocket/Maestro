@@ -12,7 +12,11 @@
 // claude was launched with permissions bypassed, and no open call is a tool
 // that asks the user something (AskUserQuestion).
 
-import { claudeArgsBypassPermissions } from '../shared/maestro-lib/managed/tui-handshake';
+import type { LaunchPermissionMode } from '../shared/maestro-lib/launch/env';
+import {
+	claudeArgsBypassPermissions,
+	type TuiHandshakeRead,
+} from '../shared/maestro-lib/managed/tui-handshake';
 
 // Tools that park the TUI on a question to the user. ExitPlanMode is not here:
 // run mode finalizes on it directly (see plan-mode.ts).
@@ -61,20 +65,49 @@ export function skipsPermissionPrompts(claudeArgs: readonly string[]): boolean {
 }
 
 /**
- * Claude's flags with permission prompts bypassed, as maestro-p always runs.
+ * The permission ceiling a managed admission pins this spawn to (MRC2-03-06),
+ * or null: no handshake (an unmanaged host), a handshake that did not verify
+ * (the driver refuses that spawn before anything is typed), or a ceiling that
+ * pins no mode.
+ */
+export function tuiAdmissionCeiling(
+	admission: TuiHandshakeRead | undefined
+): LaunchPermissionMode | null {
+	return admission?.status === 'ok' ? admission.payload.permissionMode : null;
+}
+
+/** Whether a ceiling lets maestro-p bypass claude's permission prompts: no pin, or `full`. */
+export function ceilingAllowsBypass(ceiling: LaunchPermissionMode | null): boolean {
+	return ceiling === null || ceiling === 'full';
+}
+
+/**
+ * Claude's flags with permission prompts bypassed, as maestro-p runs when
+ * nothing forbids it.
  *
  * `claude -p` cannot show a permission dialog, so it never stops on one. The
  * TUI can, and nothing answers it: the turn sat on the dialog until the idle
  * watchdog failed it. Bypassing makes a TUI turn run tools the way a print turn
  * does. An explicit `--permission-mode` is left alone, because `plan` is how a
  * caller asks for a read-only turn, and bypassing would lift that.
+ *
+ * Under a managed admission whose ceiling is below `full` the bypass is not
+ * added: the host did not admit it (the flag is outside the handshake's
+ * allowlist, and the check before `pty.spawn` would refuse it), so claude's
+ * prompts stay in force for the turn. Nothing else is rewritten: arguments
+ * that already bypass are returned as they are, and the admission check
+ * refuses them by name rather than this function lowering them in silence.
  */
-export function withPermissionBypass(claudeArgs: readonly string[]): string[] {
+export function withPermissionBypass(
+	claudeArgs: readonly string[],
+	ceiling: LaunchPermissionMode | null = null
+): string[] {
 	const args = [...claudeArgs];
 	if (skipsPermissionPrompts(args)) return args;
 	if (args.some((arg) => arg === '--permission-mode' || arg.startsWith('--permission-mode='))) {
 		return args;
 	}
+	if (!ceilingAllowsBypass(ceiling)) return args;
 	args.push('--dangerously-skip-permissions');
 	return args;
 }
