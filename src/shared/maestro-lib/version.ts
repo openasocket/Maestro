@@ -134,8 +134,12 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * halves read, `buildTuiHandshake` signs the payload for one admitted spawn (the host's flags plus the TUI's own,
  * claude's bypass only under a null or `full` ceiling; a relative or unreadable binary refused), and
  * `createFileDigestCache` remembers a binary's digest per file identity. The desktop sink stamps the result.
+ * 0.32.0: the remote endpoint identity for a command that launches no provider (`./launch/ssh-remote-resolver`,
+ * MRC2-04-01A): `SshRemoteExpectation.providerId` may be null, and `sshRemoteEndpointProblems` then skips the
+ * route-row check while still requiring the same enterprise, a registered authority and a policy revision not
+ * behind the host's. What a managed git write over SSH (the shared git executor's gate) qualifies its remote on.
  */
-export const MAESTRO_LIB_VERSION = '0.31.0';
+export const MAESTRO_LIB_VERSION = '0.32.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

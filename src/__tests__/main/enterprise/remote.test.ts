@@ -433,4 +433,59 @@ describe('createRemoteEndpointQualifier', () => {
 		const q = createRemoteEndpointQualifier({ identity: { read: () => okRead } });
 		expect(typeof q.probe).toBe('function');
 	});
+
+	describe('qualifyResolved (a command that launches no provider, MRC2-04-01A)', () => {
+		it('binds the attested identity onto a remote the caller already holds, with no provider route to confine', async () => {
+			const { qualifier: q, probe } = qualifier(okRead);
+			const target = await q.qualifyResolved(buildBox);
+			expect(probe).toHaveBeenCalledWith(buildBox);
+			expect(target).toEqual({ kind: 'remote', remote: buildBox, endpoint: attested() });
+			expect(remoteExpectation(okRead, null)).toMatchObject({
+				ok: true,
+				expect: { tenantId: 'tenant-1', orgId: 'org-1', providerId: null, policyRevision: 3 },
+			});
+		});
+
+		it('accepts a remote whose route table confines no provider, and still refuses on its enrollment', async () => {
+			const noRoutes = attested({ routes: [] });
+			const { qualifier: q } = qualifier(
+				okRead,
+				vi.fn(async () => ({ status: 'attested' as const, identity: noRoutes, via: 'probe' }))
+			);
+			expect(await q.qualifyResolved(buildBox)).toEqual({
+				kind: 'remote',
+				remote: buildBox,
+				endpoint: noRoutes,
+			});
+			const unregistered = qualifier(
+				okRead,
+				vi.fn(async () => ({
+					status: 'attested' as const,
+					identity: attested({ authority: 'none' }),
+					via: 'probe',
+				}))
+			);
+			const refused = await unregistered.qualifier.qualifyResolved(buildBox);
+			expect(refused).toMatchObject({ kind: 'unresolved', reason: 'remote-unqualified' });
+			if (refused.kind !== 'unresolved') throw new Error('expected unresolved');
+			expect(refused.message).toContain('no registered authority');
+			expect(refused.message).toContain('nothing ran on the remote unmanaged');
+			expect(refused.message).toContain('nothing ran on this machine instead');
+		});
+
+		it('refuses a disabled remote, or a host with no trusted enrollment, without asking the remote', async () => {
+			const { qualifier: q, probe } = qualifier(okRead);
+			expect(await q.qualifyResolved({ ...buildBox, enabled: false })).toMatchObject({
+				kind: 'unresolved',
+				reason: 'remote-disabled',
+			});
+			const none = qualifier({ status: 'none' });
+			const target = await none.qualifier.qualifyResolved(buildBox);
+			expect(target).toMatchObject({ kind: 'unresolved', reason: 'remote-unqualified' });
+			if (target.kind !== 'unresolved') throw new Error('expected unresolved');
+			expect(target.message).toContain('holds no enrollment to compare the remote against');
+			expect(probe).not.toHaveBeenCalled();
+			expect(none.probe).not.toHaveBeenCalled();
+		});
+	});
 });

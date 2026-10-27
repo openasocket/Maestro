@@ -150,7 +150,8 @@ export function createRemoteEndpointProbe(deps: RemoteEndpointProbeDeps = {}): R
  */
 export function remoteExpectation(
 	read: IdentityRead,
-	providerId: string
+	/** The provider the launch runs on the remote; null for a command that launches none (a git write), which skips the route-row check. */
+	providerId: string | null
 ): { ok: true; expect: SshRemoteExpectation } | { ok: false; detail: string } {
 	switch (read.status) {
 		case 'ok': {
@@ -182,6 +183,14 @@ export interface RemoteEndpointQualifier {
 	readonly probe: RemoteEndpointProbe;
 	/** Local with SSH off; the remote with its endpoint bound when it qualifies; otherwise `unresolved`. */
 	qualify(input: RemoteEndpointQualifyInput): Promise<SshLaunchTarget>;
+	/**
+	 * The same verdict over a remote a caller already resolved (the shared git
+	 * executor holds the `SshRemoteConfig` it was handed, MRC2-04-01A), for a
+	 * command that launches no provider: the enterprise, the registered
+	 * authority and the policy revision are required, the route-row check is
+	 * skipped. Never local: a disabled remote is `unresolved` by name.
+	 */
+	qualifyResolved(remote: SshRemoteConfig): Promise<SshLaunchTarget>;
 }
 
 export interface RemoteEndpointQualifierDeps {
@@ -193,23 +202,40 @@ export function createRemoteEndpointQualifier(
 	deps: RemoteEndpointQualifierDeps
 ): RemoteEndpointQualifier {
 	const probe = deps.probe ?? createRemoteEndpointProbe();
+	const qualifyTarget = async (
+		target: Extract<SshLaunchTarget, { kind: 'remote' }>,
+		providerId: string | null
+	): Promise<SshLaunchTarget> => {
+		const expectation = remoteExpectation(deps.identity.read(), providerId);
+		if (!expectation.ok) return unqualifiedSshLaunchTarget(target.remote, expectation.detail);
+		const read = await probe(target.remote);
+		const qualified = qualifySshLaunchTarget(target, read, expectation.expect);
+		if (qualified.kind === 'unresolved') {
+			const remoteId = target.remote.id;
+			logger.warn('Managed SSH remote not qualified', LOG_CONTEXT, {
+				remoteId,
+				providerId,
+				read: read.status,
+			});
+		}
+		return qualified;
+	};
 	return {
 		probe,
 		async qualify(input) {
 			const target = resolveSshLaunchTarget(input.sshStore, input.sshConfig);
 			if (target.kind !== 'remote') return target;
-			const expectation = remoteExpectation(deps.identity.read(), input.providerId);
-			if (!expectation.ok) return unqualifiedSshLaunchTarget(target.remote, expectation.detail);
-			const read = await probe(target.remote);
-			const qualified = qualifySshLaunchTarget(target, read, expectation.expect);
-			if (qualified.kind === 'unresolved') {
-				const remoteId = target.remote.id;
-				logger.warn('Managed SSH remote not qualified', LOG_CONTEXT, {
-					remoteId,
-					read: read.status,
-				});
-			}
-			return qualified;
+			return qualifyTarget(target, input.providerId);
+		},
+		async qualifyResolved(remote) {
+			// The resolver's own rule for a remote the user switched off, so the
+			// executor is told the same thing a launch would be, and runs nothing.
+			const target = resolveSshLaunchTarget(
+				{ getSshRemotes: () => [remote] },
+				{ enabled: true, remoteId: remote.id }
+			);
+			if (target.kind !== 'remote') return target;
+			return qualifyTarget(target, null);
 		},
 	};
 }

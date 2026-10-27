@@ -278,7 +278,14 @@ export type SshRemoteEndpointRead =
 export interface SshRemoteExpectation {
 	tenantId: string;
 	orgId: string;
-	providerId: string;
+	/**
+	 * The provider the launch would run on the remote, whose `ssh` row of the
+	 * remote's route table must say `implemented`. Null for a command that
+	 * launches no provider (a git write the managed executor runs over the
+	 * remote's shell, MRC2-04-01A): the route-row check is skipped, and the
+	 * enterprise, the registered authority and the policy revision still hold.
+	 */
+	providerId: string | null;
 	/** What this host applies; the remote may not be behind it. */
 	policyRevision: number | null;
 }
@@ -349,6 +356,7 @@ export function sshRemoteEndpointProblems(value: unknown, expect: SshRemoteExpec
 			`the remote applies policy revision ${identity.policyRevision ?? 'none'}, behind this host's ${expect.policyRevision}`
 		);
 	}
+	if (expect.providerId === null) return problems;
 	const row = identity.routes.find(
 		(entry) => entry.providerId === expect.providerId && entry.route === SSH_REMOTE_ARRIVAL_ROUTE
 	);

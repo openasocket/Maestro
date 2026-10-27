@@ -199,7 +199,10 @@ import {
 import { setupIpcHandlers } from './ipc/bootstrap';
 import { stopCoworkingBridge } from './coworking/coworking-bridge';
 import { initializeStatsDB, closeStatsDB } from './stats';
-import { createSshRemoteStoreAdapter } from './utils/ssh-remote-resolver';
+import {
+	createSshRemoteStoreAdapter,
+	unqualifiedSshLaunchTarget,
+} from './utils/ssh-remote-resolver';
 import { stopSessionCleanup } from './group-chat/group-chat-moderator';
 import { initializePrompts, getPrompt, savePrompt } from './prompt-manager';
 import { captureException } from './utils/sentry';
@@ -962,9 +965,26 @@ app
 		// The shared git executor holds every write (a commit, a checkout, a
 		// worktree add, a push, a fetch) of every caller to the same ceiling
 		// (MRC2-04-01), with the actor the call was admitted over; reads and the
-		// indicator polls are never held. No remote endpoint qualifier is bound
-		// for git yet, so a managed write over SSH is refused by name.
-		setGitExecutionGate(createGitExecutionGate({ repository: repositoryPolicy }));
+		// indicator polls are never held. A write over SSH is bound to the
+		// enrolled runtime on the remote first (MRC2-04-01A): the enterprise
+		// service's qualifier asks the remote for its standing over the same
+		// connection, with no provider route to confine since git launches none;
+		// an unattested remote, or a host with no service composed, is refused by
+		// name and nothing runs on either machine.
+		setGitExecutionGate(
+			createGitExecutionGate({
+				repository: repositoryPolicy,
+				qualifyRemote: (remote) =>
+					enterpriseService
+						? enterpriseService.remote.qualifyResolved(remote)
+						: Promise.resolve(
+								unqualifiedSshLaunchTarget(
+									remote,
+									'this host composes no remote endpoint qualifier (no enterprise service), so the remote cannot be asked for its managed standing.'
+								)
+							),
+			})
+		);
 
 		// Serve agent-authored Concerto mockups as real documents with their own
 		// CSP. A srcdoc frame would inherit Maestro's renderer CSP and block the

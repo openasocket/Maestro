@@ -330,6 +330,29 @@ describe('sshRemoteEndpointProblems', () => {
 		).toEqual([]);
 	});
 
+	it('skips the route-row check for a command that launches no provider, and keeps every other rule', () => {
+		const noProvider: SshRemoteExpectation = { ...expectation, providerId: null };
+		expect(sshRemoteEndpointProblems(attested({ routes: [] }), noProvider)).toEqual([]);
+		expect(
+			sshRemoteEndpointProblems(
+				attested({ routes: [{ providerId: 'claude-code', route: 'ssh', managed: 'unverified' }] }),
+				noProvider
+			)
+		).toEqual([]);
+		expect(sshRemoteEndpointProblems(attested({ authority: 'none' }), noProvider)).toEqual([
+			'the remote runtime holds no registered authority (enrolled but unattached, or no actor registered there)',
+		]);
+		expect(
+			sshRemoteEndpointProblems(attested({ tenantId: 'tenant-2' }), noProvider).join('; ')
+		).toContain('enrolled with tenant tenant-2');
+		expect(
+			sshRemoteEndpointProblems(attested({ policyRevision: 2 }), noProvider).join('; ')
+		).toContain("behind this host's 3");
+		expect(sshRemoteEndpointProblems(attested({ routes: 'none' as never }), noProvider)).toEqual([
+			'routes is not an array',
+		]);
+	});
+
 	it('refuses a malformed attestation as such, before reading anything else', () => {
 		expect(sshRemoteEndpointProblems('yes', expectation)).toEqual([
 			'the remote attestation is not an object',
