@@ -14,6 +14,16 @@
  *
  * The whole subsystem is gated on `encoreFeatures.pianola`: when the flag is off
  * reconcile() tears all children down and spawns nothing.
+ *
+ * Under management (MRC2-02-05) every child is admitted before it starts:
+ * `deps.managedPort` is the host's spawn authority, read on every spawn, and
+ * `admitSupervisorChild` binds this process as the `pianola` service and asks
+ * the authority for a lease on the exact spawn (`purpose: supervisor`). A
+ * refusal is the target's reported state (`denied`, with the authority's
+ * answer in `managed`), never a restart: the backoff ladder is for a child that
+ * died, and a denied target is asked again only by a reconcile or the cadenced
+ * relaunch. A revocation stops the child and leaves it denied. With no port, or
+ * a standalone standing, nothing here changes and the spawn stays synchronous.
  */
 
 import * as fs from 'fs';
@@ -26,6 +36,14 @@ import {
 	stopProcess,
 	BACKGROUND_STOP_GRACE_MS,
 } from '../../shared/maestro-lib/control/termination';
+import {
+	admitSupervisorChild,
+	type SupervisedChildLifetime,
+	type SupervisorChildAdmission,
+	type SupervisorChildPort,
+	type SupervisorChildRefusal,
+} from '../../shared/maestro-lib/managed/host-adapter';
+import type { DispatchSpecLike } from '../../shared/maestro-lib/managed/authority';
 import {
 	readSupervisorTargets,
 	removeSupervisorTarget,
@@ -53,8 +71,12 @@ const WATCH_DEBOUNCE_MS = 250;
 /** A child that ran at least this long is treated as recovered (restart count resets). */
 const STABLE_RUN_MS = 60_000;
 
-/** Health state of one supervised target. */
-export type PianolaSupervisedState = 'running' | 'backing-off' | 'stopped' | 'failed';
+/**
+ * Health state of one supervised target. `denied` is the managed host's
+ * answer: the authority refused the child (or revoked its lease), nothing is
+ * running and nothing is scheduled; `managed` on the health says why.
+ */
+export type PianolaSupervisedState = 'running' | 'backing-off' | 'stopped' | 'failed' | 'denied';
 
 /** Per-target health snapshot returned to the renderer dashboard. */
 export interface PianolaSupervisorHealth {
@@ -67,6 +89,20 @@ export interface PianolaSupervisorHealth {
 	startedAt?: number;
 	/** Bounded tail of the child's stdout/stderr ring buffer (most recent last). */
 	recentLogs: string[];
+	/** The managed host's refusal, while the state is `denied`. */
+	managed?: SupervisorChildRefusal;
+}
+
+/** The service this supervisor binds its children as, and the provider they are admitted under. */
+export const PIANOLA_SUPERVISOR_SERVICE = 'pianola';
+
+/** The spawn exactly as the supervisor makes it: what the managed authority admits. */
+interface PianolaChildLaunch extends DispatchSpecLike {
+	command: string;
+	args: string[];
+	cwd: string;
+	env: Record<string, string | undefined>;
+	shell: false;
 }
 
 /** Internal, mutable per-target bookkeeping. */
@@ -82,6 +118,10 @@ interface SupervisedChild {
 	// Set true when we kill the child on purpose (disable/remove/quit) so the
 	// exit handler treats it as stopped instead of crashing and restarting.
 	stopping: boolean;
+	/** A managed admission is in flight for this target; nothing may start or be relaunched meanwhile. */
+	admitting: boolean;
+	/** The managed host's refusal, while the state is `denied`. */
+	managed?: SupervisorChildRefusal;
 }
 
 /**
@@ -104,6 +144,13 @@ export interface PianolaSupervisorDeps {
 	getStoredSessions?: () => readonly AutoWatchSession[];
 	/** Spawns a supervised child; defaults to node:child_process spawn. Injectable for tests. */
 	spawnChild?: PianolaChildSpawner;
+	/**
+	 * The host's spawn authority (the process manager's `managedPort()`), read
+	 * on every spawn so an enrollment that appears later governs the next
+	 * child. Absent or null, or a standalone standing: the supervisor spawns as
+	 * it always did, synchronously and admitted by nobody.
+	 */
+	managedPort?: () => SupervisorChildPort | null;
 }
 
 /** Only fields needed to register a newly persisted agent's first AI tab. */
@@ -263,10 +310,12 @@ export class PianolaSupervisor {
 		// Spawn enabled targets with no live child; refresh config on the rest so a
 		// later restart uses the latest args. A target already in backing-off keeps
 		// its scheduled restart; a stopped/failed target is not auto-restarted here.
+		// A denied target is asked again: a reconcile is a person's or the CLI's
+		// change to the store, and the authority's answer may have changed since.
 		for (const target of targets) {
 			if (!target.enabled) continue;
 			const existing = this.children.get(target.id);
-			if (!existing) {
+			if (!existing || existing.state === 'denied') {
 				this.spawn(target);
 			} else {
 				existing.target = target;
@@ -312,7 +361,9 @@ export class PianolaSupervisor {
 	 * stopped target is kind-aware: a 'watch' should keep running, so a stopped
 	 * watch is NOT alive (stale -> relaunch); an 'orchestrate' clean exit is
 	 * terminal, so a stopped orchestrate stays alive. A failed or never-spawned
-	 * target is not alive and therefore stale.
+	 * target is not alive and therefore stale. A target whose managed admission
+	 * is in flight is alive (nothing may start beside it); a denied one is not,
+	 * so the cadenced relaunch asks the authority again, once per cadence.
 	 */
 	private isAlive(id: string): boolean {
 		const entry = this.children.get(id);
@@ -320,6 +371,7 @@ export class PianolaSupervisor {
 		const child = entry.child;
 		const hasLiveChild = !!child && child.exitCode === null && child.signalCode === null;
 		if (hasLiveChild) return true;
+		if (entry.admitting) return true;
 		if (entry.state === 'backing-off') return true;
 		if (entry.state === 'stopped') return entry.target.kind === 'orchestrate';
 		return false;
@@ -340,6 +392,7 @@ export class PianolaSupervisor {
 			if (typeof pid === 'number') health.pid = pid;
 			if (entry.lastError) health.lastError = entry.lastError;
 			if (entry.startedAt) health.startedAt = entry.startedAt;
+			if (entry.managed) health.managed = { ...entry.managed };
 			out.push(health);
 		}
 		return out;
@@ -432,7 +485,34 @@ export class PianolaSupervisor {
 		];
 	}
 
-	/** Spawn (or respawn) one target's supervised child process. */
+	/** The spawn exactly as it will be made, so a managed authority admits what runs. */
+	private buildLaunch(cliScriptPath: string, args: string[]): PianolaChildLaunch {
+		return {
+			command: process.execPath,
+			args: [cliScriptPath, ...args],
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				// In packaged Electron, process.execPath is the app binary, not
+				// Node; without this it would launch the app instead of the CLI.
+				ELECTRON_RUN_AS_NODE: '1',
+				// Tell the watch/orchestrate process which agent IS Pianola (so it
+				// never acts on itself and can route decision handoffs) and where the
+				// bundled CLI is for any sub-invocations.
+				MAESTRO_AGENT_ID: this.deps.getPianolaAgentId() ?? '',
+				MAESTRO_CLI_JS: cliScriptPath,
+			},
+			shell: false,
+		};
+	}
+
+	/**
+	 * Spawn (or respawn) one target's supervised child process. Standalone (no
+	 * port, or a standalone standing) launches synchronously, as it always did.
+	 * Under management the authority is asked first and the launch follows its
+	 * answer; while it answers, the target counts as alive and a second spawn
+	 * is a no-op.
+	 */
 	private spawn(target: PianolaSupervisedTarget): void {
 		const cliScriptPath = resolveMaestroCliScriptPath();
 		const args = this.buildArgs(target);
@@ -451,30 +531,120 @@ export class PianolaSupervisor {
 				restarts: 0,
 				logs: [],
 				stopping: false,
+				admitting: false,
 			};
 			this.children.set(target.id, entry);
 		}
 		entry.target = target;
 		entry.stopping = false;
+		if (entry.admitting) return;
+
+		const launch = this.buildLaunch(cliScriptPath, args);
+		const port = this.deps.managedPort?.() ?? null;
+		if (!port || port.standing() !== 'managed') {
+			this.launch(entry, launch, null);
+			return;
+		}
+		entry.admitting = true;
+		void this.admitThenLaunch(entry, launch, port);
+	}
+
+	/** Ask the managed host for a lease on the exact launch, then launch on its answer. */
+	private async admitThenLaunch(
+		entry: SupervisedChild,
+		launch: PianolaChildLaunch,
+		port: SupervisorChildPort
+	): Promise<void> {
+		const { target } = entry;
+		let admission: SupervisorChildAdmission;
+		try {
+			admission = await admitSupervisorChild({
+				port,
+				service: PIANOLA_SUPERVISOR_SERVICE,
+				traceId: `pianola-supervisor:${target.id}`,
+				spec: launch,
+				attribution: {
+					target: { kind: 'local' },
+					resourceIds: [
+						`pianola-target:${target.id}`,
+						target.kind === 'watch'
+							? `agent:${target.agentId ?? ''}`
+							: `pianola-plan:${target.planId ?? ''}`,
+					],
+				},
+			});
+		} catch (error) {
+			// The authority never throws by contract; a port that does is an answer lost.
+			admission = {
+				state: 'unknown',
+				code: 'outcome-unknown',
+				message: `The managed host's answer was lost: ${error instanceof Error ? error.message : String(error)}. Nothing was started.`,
+			};
+		} finally {
+			entry.admitting = false;
+		}
+		// The target may have been stopped, removed or switched off while the
+		// authority answered: a lease nothing starts on is released unused.
+		if (this.children.get(target.id) !== entry || entry.stopping || !this.deps.isEnabled()) {
+			if (admission.state === 'admitted') {
+				admission.lifetime.withdraw('the target was stopped before its child started');
+			}
+			return;
+		}
+		if (admission.state === 'standalone') {
+			this.launch(entry, launch, null);
+			return;
+		}
+		if (admission.state !== 'admitted') {
+			this.refuse(entry, admission);
+			return;
+		}
+		this.launch(entry, launch, admission.lifetime);
+	}
+
+	/**
+	 * Record the managed host's refusal: the target is `denied`, nothing runs,
+	 * nothing is scheduled. Not a failure of the child, so the restart streak
+	 * is untouched and the backoff ladder is never entered.
+	 */
+	private refuse(entry: SupervisedChild, refusal: SupervisorChildRefusal): void {
+		entry.child = null;
+		entry.state = 'denied';
+		entry.managed = { state: refusal.state, code: refusal.code, message: refusal.message };
+		entry.lastError = `[managed-${refusal.state}] ${refusal.message}`;
+		logger.warn(
+			`Supervised target ${entry.target.id} not admitted (${refusal.state}, ${refusal.code}): ${refusal.message}`,
+			LOG_CONTEXT
+		);
+	}
+
+	/** Make the launch, driving the lease around the child when one was admitted. */
+	private launch(
+		entry: SupervisedChild,
+		launch: PianolaChildLaunch,
+		lifetime: SupervisedChildLifetime | null
+	): void {
+		const { target } = entry;
+		const cliScriptPath = launch.args[0];
+		if (lifetime) {
+			// The lease sees exactly what spawn sees: nothing runs between the two.
+			const verdict = lifetime.admit();
+			if (!verdict.ok) {
+				this.refuse(entry, verdict);
+				return;
+			}
+		}
 
 		let child: ChildProcess;
 		try {
-			child = this.spawnChild(process.execPath, [cliScriptPath, ...args], {
-				env: {
-					...process.env,
-					// In packaged Electron, process.execPath is the app binary, not
-					// Node; without this it would launch the app instead of the CLI.
-					ELECTRON_RUN_AS_NODE: '1',
-					// Tell the watch/orchestrate process which agent IS Pianola (so it
-					// never acts on itself and can route decision handoffs) and where the
-					// bundled CLI is for any sub-invocations.
-					MAESTRO_AGENT_ID: this.deps.getPianolaAgentId() ?? '',
-					MAESTRO_CLI_JS: cliScriptPath,
-				},
+			child = this.spawnChild(launch.command, launch.args, {
+				env: launch.env,
+				cwd: launch.cwd,
 				stdio: ['ignore', 'pipe', 'pipe'],
 				// Not detached: supervised children must die with the desktop app.
 			});
 		} catch (error) {
+			lifetime?.spawnFailed(error instanceof Error ? error : new Error(String(error)));
 			entry.lastError = error instanceof Error ? error.message : String(error);
 			const errCode = (error as NodeJS.ErrnoException)?.code;
 			if (errCode !== 'ENOENT') {
@@ -487,6 +657,20 @@ export class PianolaSupervisor {
 		entry.child = child;
 		entry.state = 'running';
 		entry.startedAt = Date.now();
+		entry.managed = undefined;
+		// The process exists: the protected lifetime begins, and a revocation
+		// from here on stops it through the one stop ladder and leaves it denied.
+		lifetime?.spawned(child);
+		let revokedReason: string | null = null;
+		const unsubscribe = lifetime?.onRevoked((reason) => {
+			if (revokedReason !== null) return;
+			revokedReason = reason;
+			logger.warn(
+				`Supervised target ${target.id} lease revoked, stopping child: ${reason}`,
+				LOG_CONTEXT
+			);
+			this.killProcess(child, false);
+		});
 
 		child.stdout?.setEncoding('utf8');
 		child.stdout?.on('data', (data: string) => this.appendLog(entry, data));
@@ -502,7 +686,23 @@ export class PianolaSupervisor {
 		});
 
 		child.on('exit', (code, signal) => {
+			unsubscribe?.();
+			lifetime?.exited({
+				exitCode: code,
+				signal,
+				stoppedBy: revokedReason !== null ? 'authority' : entry.stopping ? 'caller' : undefined,
+			});
 			entry.child = null;
+			// The managed host revoked the lease: stopped by the authority, denied
+			// from here on, never restarted.
+			if (revokedReason !== null) {
+				this.refuse(entry, {
+					state: 'denied',
+					code: 'lease-invalid',
+					message: `The managed host revoked this child's lease: ${revokedReason}. It was stopped and is not restarted.`,
+				});
+				return;
+			}
 			// Intentional kill (disable/remove/quit): stay stopped, never restart.
 			if (entry.stopping) {
 				entry.state = 'stopped';

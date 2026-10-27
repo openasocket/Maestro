@@ -54,6 +54,7 @@ import {
 	leaseAdmission,
 	type DispatchAdmission,
 	type DispatchAdmissionState,
+	type DispatchAdmissionVerdict,
 } from '../run/start-turn';
 import type { EnrollInput, ManagedBindingState } from './binding';
 import {
@@ -65,6 +66,8 @@ import {
 	type AdmissionRequest,
 	type ContextVerification,
 	type DispatchAttribution,
+	type DispatchLease,
+	type DispatchSnapshot,
 	type DispatchSpecLike,
 	type HostAuthority,
 	type ManagedDecisionReceipt,
@@ -957,12 +960,18 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 // probes outside the process manager (`discoverCodexSkills`) composes its
 // admission from these; a standalone host passes none and probes as before.
 
-/** Why a probe may not run: the authority's three distinctions, plus a route with no enforcement. */
-export interface ProbeTurnRefusal {
+/**
+ * Why a launch of Maestro's own (a probe, a supervisor's child) may not run:
+ * the authority's three distinctions, plus a route with no enforcement.
+ */
+export interface ManagedAdmissionRefusal {
 	state: DispatchAdmissionState;
 	code: ManagedDenialCode;
 	message: string;
 }
+
+/** Why a probe may not run. */
+export type ProbeTurnRefusal = ManagedAdmissionRefusal;
 
 /**
  * Why a probe may not take a route under management, or null when the route
@@ -985,8 +994,11 @@ export function probeRouteRefusal(
 	};
 }
 
-/** The identity of a probe: its own request, one attempt, no run above it. */
-export function probeTurnIdentity(newId: () => string = generateUUID): ManagedRunIdentity {
+/**
+ * The identity of a launch that is its own request (a probe, a supervisor's
+ * child): one request, one attempt, no run above it.
+ */
+export function ownRunIdentity(newId: () => string = generateUUID): ManagedRunIdentity {
 	const requestId = newId();
 	return {
 		requestId,
@@ -996,6 +1008,11 @@ export function probeTurnIdentity(newId: () => string = generateUUID): ManagedRu
 		rootRunId: null,
 		parentRunId: null,
 	};
+}
+
+/** The identity of a probe: its own request, one attempt, no run above it. */
+export function probeTurnIdentity(newId: () => string = generateUUID): ManagedRunIdentity {
+	return ownRunIdentity(newId);
 }
 
 export interface ProbeTurnRequest {
@@ -1122,5 +1139,206 @@ export function createProbeRefusalCache(
 		size() {
 			return entries.size;
 		},
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Supervisor children: a background service's own process (MRC2-02-05)
+// ---------------------------------------------------------------------------
+//
+// A supervisor child is a `DispatchPurpose` of `supervisor`: a long-running
+// process of Maestro's own that a background service of the host starts and
+// keeps alive (a Pianola watcher or orchestration run through the bundled CLI,
+// the Computer History accessibility helper), raised by no turn of anyone's.
+// Nobody is at a keyboard for it, so the actor it binds is a SERVICE: the
+// supervisor names itself on the delegation chain (`supervisorServicePrincipal`)
+// and the port binds that chain to the installation it answers for (the
+// verified context carries the installation and its principal, the registered
+// actor or the operator). Under management the child is admitted exactly like
+// a launch: the authority sees the snapshot of the final spawn (executable,
+// argv, cwd, environment), mints a lease on it, and the supervisor drives the
+// lease around the raw child it spawns itself (`SupervisedChildLifetime`):
+// re-check the instant before `spawn`, bind the pid, hear a revocation, release
+// with the exit. A refusal is a reported state of the supervisor, never a
+// retry: the backoff ladder is for a child that died, and a policy that said no
+// is asked again only when the supervisor is told to start again (a reconcile,
+// an enable, a restart of the host), never by a timer of its own.
+
+/** The one word before the service: a supervisor's service principal and its provider are both named by it. */
+export const SUPERVISOR_SERVICE_PREFIX = 'maestro-supervisor:';
+
+/** The service principal a supervisor acts as; the link it puts on the delegation chain. */
+export function supervisorServicePrincipal(service: string): ManagedPrincipalRef {
+	return { kind: 'service', id: `${SUPERVISOR_SERVICE_PREFIX}${service}` };
+}
+
+/**
+ * The provider a supervisor's child is admitted as. A supervisor runs no
+ * provider: the executable is Maestro's own, so the snapshot names the
+ * service, and a policy that denies `maestro-supervisor:pianola` denies every
+ * Pianola child and nothing else.
+ */
+export function supervisorChildProvider(service: string): string {
+	return `${SUPERVISOR_SERVICE_PREFIX}${service}`;
+}
+
+/** What a supervisor hands the port to bind: this process, the service on the chain, no workflow. */
+export interface SupervisorContextInput {
+	actor: { peer: 'in-process' };
+	identity: ManagedRunIdentity;
+	traceId: string;
+	policyRevision: number | null;
+	workflow: null;
+	delegation: ManagedDelegationRef;
+}
+
+/**
+ * The slice of a host's spawn authority port a supervisor admits with. The
+ * desktop's `ProcessSpawnAuthorityPort` satisfies it as it is; a double with
+ * no port, or a port whose standing is `standalone`, admits nothing and the
+ * supervisor spawns as before.
+ */
+export interface SupervisorChildPort {
+	standing(): 'standalone' | 'managed';
+	readonly authority: Pick<HostAuthority, 'admit' | 'check'>;
+	policy(): PolicySourceSet;
+	verify(input: SupervisorContextInput): ContextVerification;
+}
+
+export interface SupervisorChildRequest {
+	port: SupervisorChildPort;
+	/** Which service of Maestro's own is spawning: `pianola`, `computer-history`. */
+	service: string;
+	traceId: string;
+	/**
+	 * The spawn exactly as the supervisor will make it: the lease covers the
+	 * digest of this snapshot and `SupervisedChildLifetime.admit` rebuilds it
+	 * the instant before `spawn`, so a spec changed between the two fails at
+	 * the sink rather than running.
+	 */
+	spec: DispatchSpecLike;
+	/** What the spec does not say: the resources (a target, an agent) and the target kind. */
+	attribution?: Pick<DispatchAttribution, 'resourceIds' | 'target' | 'model' | 'account'>;
+	/** Which surface raised the launch; the desktop's own services are `desktop`. */
+	origin?: ManagedOrigin;
+	newId?: () => string;
+}
+
+/** Why a supervisor's child may not run. */
+export type SupervisorChildRefusal = ManagedAdmissionRefusal;
+
+/**
+ * The lease of an admitted supervisor child, driven around the raw child the
+ * supervisor spawns itself (no `startTurn` in between). The steps are the
+ * lease gate's own (`leaseAdmission`): nothing here decides anything.
+ */
+export interface SupervisedChildLifetime {
+	readonly leaseId: string;
+	/**
+	 * Re-check the lease against the snapshot the instant before `spawn`. A
+	 * refusal has released the lease; nothing may be started on it.
+	 */
+	admit(): DispatchAdmissionVerdict;
+	/** The process exists: bind its pid; the protected lifetime begins. */
+	spawned(child: { pid?: number | undefined }): void;
+	/** The process could not be started; the lease is released as such. */
+	spawnFailed(error: Error): void;
+	/** Hear a revocation while bound, so the supervisor stops the child. Returns the unsubscribe. */
+	onRevoked(listener: (reason: string) => void): () => void;
+	/** The process is gone: who stopped it, or how it exited. */
+	exited(exit: {
+		exitCode: number | null;
+		signal: string | null;
+		stoppedBy?: 'caller' | 'authority';
+	}): void;
+	/** Nothing was started on the lease (the target went away while the authority answered). */
+	withdraw(message: string): void;
+}
+
+export type SupervisorChildAdmission =
+	| { state: 'standalone' }
+	| {
+			state: 'admitted';
+			lease: DispatchLease;
+			snapshot: DispatchSnapshot;
+			/** The principal the child runs as: the installation's, as the port bound it. */
+			actor: ManagedPrincipalRef;
+			/** The service on the delegation chain. */
+			service: ManagedPrincipalRef;
+			lifetime: SupervisedChildLifetime;
+	  }
+	| ({ state: 'denied' | 'unavailable' | 'unknown' } & Omit<SupervisorChildRefusal, 'state'>);
+
+/**
+ * Admit one supervisor child on the host, or say why not, before anything
+ * starts. A standalone standing admits nothing and needs nothing. Under
+ * management the port binds this process with the service on the chain
+ * (`supervisorServicePrincipal`), and the authority admits the snapshot of
+ * exactly the spawn the supervisor will make, stamped `purpose: supervisor`
+ * and `operation: start`. A refusal is the authority's own answer, with its
+ * state and code; nothing was started.
+ */
+export async function admitSupervisorChild(
+	request: SupervisorChildRequest
+): Promise<SupervisorChildAdmission> {
+	const { port } = request;
+	if (port.standing() !== 'managed') return { state: 'standalone' };
+	const policy = port.policy();
+	const service = supervisorServicePrincipal(request.service);
+	const verified = port.verify({
+		actor: { peer: 'in-process' },
+		identity: ownRunIdentity(request.newId),
+		traceId: request.traceId,
+		policyRevision: policy.policyRevision,
+		workflow: null,
+		delegation: { chain: [service], grantRef: null },
+	});
+	if (!verified.ok) {
+		return {
+			state: 'denied',
+			code: verified.code,
+			message: `The ${request.service} supervisor's service actor could not be bound: ${verified.problems.join('; ')}. Nothing was started.`,
+		};
+	}
+	const attribution: DispatchAttribution = {
+		...request.attribution,
+		provider: supervisorChildProvider(request.service),
+		operation: 'start',
+		purpose: 'supervisor',
+		origin: request.origin ?? 'desktop',
+		target: request.attribution?.target ?? { kind: 'local' },
+	};
+	const snapshot = buildDispatchSnapshot(request.spec, attribution);
+	const outcome = await port.authority.admit({ context: verified.context, snapshot, policy });
+	if (outcome.state !== 'admitted') {
+		return { state: outcome.state, code: outcome.code, message: outcome.message };
+	}
+	const { lease } = outcome;
+	const gate = leaseAdmission(port.authority, lease);
+	const lifetime: SupervisedChildLifetime = {
+		leaseId: lease.leaseId,
+		admit() {
+			const verdict = gate.admit(buildDispatchSnapshot(request.spec, attribution));
+			if (!verdict.ok) lease.release({ outcome: 'unknown', message: verdict.message });
+			return verdict;
+		},
+		spawned: (child) => lease.bind(child.pid),
+		spawnFailed: (error) => lease.release({ outcome: 'spawn-failed', message: error.message }),
+		onRevoked: (listener) => lease.onRevoked(listener),
+		exited: (exit) =>
+			lease.release(
+				exit.stoppedBy
+					? { outcome: 'stopped', by: exit.stoppedBy }
+					: { outcome: 'exited', exitCode: exit.exitCode, signal: exit.signal }
+			),
+		withdraw: (message) => lease.release({ outcome: 'unknown', message }),
+	};
+	return {
+		state: 'admitted',
+		lease,
+		snapshot,
+		actor: verified.context.actor,
+		service,
+		lifetime,
 	};
 }

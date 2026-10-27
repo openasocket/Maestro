@@ -102,8 +102,15 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * `startTurn` admission over `leaseAdmission`; `probeRouteRefusal` holds a probe to its route's managed standing
  * before the authority is asked; `probeTurnIdentity` is a probe's own run identity; `createProbeRefusalCache`
  * remembers a refusal per authority, policy revision, provider, route and scope for `PROBE_REFUSAL_TTL_MS`.
+ * 0.27.0: supervisor children (`./managed/host-adapter`, MRC2-02-05): `admitSupervisorChild` binds a host's
+ * own background service on the delegation chain (`supervisorServicePrincipal`, `supervisorChildProvider`)
+ * through the port's `verify` and asks the authority for a lease on the snapshot of the exact spawn
+ * (`purpose: supervisor`, `operation: start`), handing back a `SupervisedChildLifetime` the supervisor
+ * drives around the raw child it spawns itself (admit, spawned, onRevoked, exited, withdraw); a refusal is
+ * a `ManagedAdmissionRefusal` (the shape `ProbeTurnRefusal` now aliases); `ownRunIdentity` is the identity
+ * of a launch that is its own request (`probeTurnIdentity` calls it).
  */
-export const MAESTRO_LIB_VERSION = '0.26.0';
+export const MAESTRO_LIB_VERSION = '0.27.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';
