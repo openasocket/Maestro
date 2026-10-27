@@ -12,6 +12,7 @@ import {
 	getMarketplaceReadme,
 	importMarketplacePlaybook,
 } from '../../services/marketplace-service';
+import { getActingTransport, transportSpawnActor } from '../auth/transport-actor';
 
 // =====================================================================
 // Marketplace (Playbook Exchange) callbacks - main-process pure ops,
@@ -113,6 +114,9 @@ export function registerMarketplaceCallbacks(
 				autoRunFolderPath,
 				sessionId,
 				sshConfig,
+				// The WebSocket handler dispatches inside runAsClient, so this is the
+				// host's own answer for the socket, never the message's word (MRC2-04-08A).
+				actor: { kind: 'transport', actor: transportSpawnActor(getActingTransport()) },
 			});
 			return {
 				success: true,

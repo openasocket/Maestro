@@ -15,6 +15,7 @@ import { getBridgeEnvVar } from './coworking-bridge';
 import { buildMcpServerSpec, ensureCoworkingServerScript } from './coworking-server-paths';
 import type { CoworkingInstallStatus, CoworkingMcpServerSpec } from './coworking-types';
 import { COWORKING_SUPPORTED_AGENTS, getInstaller } from './installers';
+import type { McpInstallOptions } from './installers/managed';
 
 const LOG_CTX = '[Coworking][Installer]';
 
@@ -45,12 +46,16 @@ export async function getInstallStatus(): Promise<CoworkingInstallStatus[]> {
 	return out;
 }
 
-/** Install for a single agent. Idempotent. Throws on filesystem failure. */
-export async function installFor(agentId: string): Promise<void> {
+/**
+ * Install for a single agent. Idempotent. Throws on filesystem failure, and
+ * `InstallRefusedError` when the managed install ceiling refuses the entry
+ * (MRC2-04-08A); `options.actor` is the transport the call was admitted over.
+ */
+export async function installFor(agentId: string, options: McpInstallOptions = {}): Promise<void> {
 	const inst = getInstaller(agentId);
 	if (!inst) throw new Error(`Coworking installer: unsupported agent '${agentId}'`);
 	const spec = await buildSpec();
-	await inst.install(spec);
+	await inst.install(spec, options);
 	logger.info(`${LOG_CTX} installed for ${agentId} at ${inst.configPath()}`, 'Coworking');
 }
 
@@ -66,16 +71,16 @@ export async function uninstallFor(agentId: string): Promise<void> {
  * Install for all supported agents. Returns per-agent results so the UI can
  * surface partial failures. Continues past errors instead of aborting.
  */
-export async function installForAll(): Promise<
-	Array<{ agentId: string; ok: boolean; error?: string }>
-> {
+export async function installForAll(
+	options: McpInstallOptions = {}
+): Promise<Array<{ agentId: string; ok: boolean; error?: string }>> {
 	const spec = await buildSpec();
 	const out: Array<{ agentId: string; ok: boolean; error?: string }> = [];
 	for (const agentId of COWORKING_SUPPORTED_AGENTS) {
 		const inst = getInstaller(agentId);
 		if (!inst) continue;
 		try {
-			await inst.install(spec);
+			await inst.install(spec, options);
 			out.push({ agentId, ok: true });
 		} catch (err) {
 			out.push({ agentId, ok: false, error: err instanceof Error ? err.message : String(err) });

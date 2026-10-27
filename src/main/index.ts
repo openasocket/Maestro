@@ -60,6 +60,8 @@ import { createBrowserPolicySource } from './enterprise/browser-policy';
 import { createShellPolicySource } from './enterprise/shell-policy';
 import { createInstallPolicySource } from './enterprise/install-policy';
 import { setSpecPromptInstallAuthority } from './spec-prompt-install';
+import { setMarketplaceInstallAuthority } from './services/marketplace-service';
+import { setMcpInstallAuthority } from './coworking/installers/managed';
 import {
 	createGitExecutionGate,
 	createRepositoryPolicySource,
@@ -997,6 +999,9 @@ app
 		maestroCliManager.setInstallAuthority(installPolicy);
 		// The Spec Kit, OpenSpec and BMAD prompt refreshers hold with the same source (MRC2-04-08).
 		setSpecPromptInstallAuthority(installPolicy);
+		// Marketplace imports and the coworking MCP config writers hold with it too (MRC2-04-08A).
+		setMarketplaceInstallAuthority(installPolicy);
+		setMcpInstallAuthority(installPolicy);
 
 		// Serve agent-authored Concerto mockups as real documents with their own
 		// CSP. A srcdoc frame would inherit Maestro's renderer CSP and block the

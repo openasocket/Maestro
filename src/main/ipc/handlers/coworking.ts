@@ -35,8 +35,14 @@ import {
 	requireEncoreFeature,
 	type EncoreSettingsReader,
 } from '../../../shared/encoreFeatureDefaults';
+import { getActingTransport, transportSpawnActor } from '../../web-server/auth/transport-actor';
 
 const LOG_CTX = '[Coworking][IPC]';
+
+/** The transport an install was admitted over, read at the boundary (MRC2-04-08A). */
+const installActor = () => ({
+	actor: { kind: 'transport' as const, actor: transportSpawnActor(getActingTransport()) },
+});
 
 const handlerOpts = (operation: string): Pick<CreateHandlerOptions, 'context' | 'operation'> => ({
 	context: LOG_CTX,
@@ -74,7 +80,7 @@ export function registerCoworkingHandlers(deps: CoworkingHandlerDependencies): v
 		'coworking:install',
 		withIpcErrorLogging(handlerOpts('install'), async (agentId: string): Promise<void> => {
 			requireCoworking();
-			await installFor(agentId);
+			await installFor(agentId, installActor());
 		})
 	);
 
@@ -89,7 +95,7 @@ export function registerCoworkingHandlers(deps: CoworkingHandlerDependencies): v
 		'coworking:installAll',
 		withIpcErrorLogging(handlerOpts('installAll'), async () => {
 			requireCoworking();
-			return installForAll();
+			return installForAll(installActor());
 		})
 	);
 

@@ -45,12 +45,18 @@ vi.mock('fs/promises', () => ({
 	},
 }));
 
-// Mock crypto
-vi.mock('crypto', () => ({
-	default: {
-		randomUUID: vi.fn(),
-	},
-}));
+// Mock crypto's randomUUID only: the service's install hold (MRC2-04-08A) loads
+// the enterprise identity store, whose seal digests a constant at module load.
+vi.mock('crypto', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('crypto')>();
+	return {
+		...actual,
+		default: {
+			...actual,
+			randomUUID: vi.fn(),
+		},
+	};
+});
 
 // Mock electron-store
 vi.mock('electron-store', () => {

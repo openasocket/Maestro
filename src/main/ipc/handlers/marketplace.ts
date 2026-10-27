@@ -27,6 +27,7 @@ import {
 	importMarketplacePlaybook,
 	createLocalManifestWatcher,
 } from '../../services/marketplace-service';
+import { getActingTransport, transportSpawnActor } from '../../web-server/auth/transport-actor';
 
 const LOG_CONTEXT = '[Marketplace]';
 
@@ -144,6 +145,8 @@ export function registerMarketplaceHandlers(deps: MarketplaceHandlerDependencies
 					autoRunFolderPath,
 					sessionId,
 					sshConfig,
+					// The transport the call was admitted over, read at the boundary (MRC2-04-08A).
+					actor: { kind: 'transport', actor: transportSpawnActor(getActingTransport()) },
 				});
 				return { ...result };
 			}

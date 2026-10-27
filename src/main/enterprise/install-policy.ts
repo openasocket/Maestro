@@ -19,6 +19,12 @@ import type {
 	ManagedPolicyStatus,
 } from '../../shared/maestro-lib/managed/host-adapter';
 import {
+	MANAGED_ROUTES,
+	providerRouteSupport,
+	type ManagedRoute,
+	type ProviderRouteSupport,
+} from '../../shared/maestro-lib/providers/capabilities';
+import {
 	browserActorLabel,
 	isPlainObject,
 	unknownKeys,
@@ -29,8 +35,10 @@ import { pairedDeviceActorProblems } from './spawn-authority';
 
 /**
  * What is installed: the WakaTime CLI (fetched), the app's bundled maestro-cli
- * (verified, never fetched), and the spec tool prompts (Spec Kit, OpenSpec,
- * BMAD) refreshed from GitHub into the user data directory (MRC2-04-08).
+ * (verified, never fetched), the spec tool prompts (Spec Kit, OpenSpec, BMAD)
+ * refreshed from GitHub into the user data directory (MRC2-04-08), the
+ * playbooks the marketplace imports into an Auto Run folder, and the coworking
+ * MCP server script an agent's configuration is pointed at (MRC2-04-08A).
  */
 export const INSTALL_ARTIFACTS = [
 	'wakatime-cli',
@@ -38,6 +46,8 @@ export const INSTALL_ARTIFACTS = [
 	'speckit-prompts',
 	'openspec-prompts',
 	'bmad-prompts',
+	'marketplace-playbooks',
+	'coworking-mcp-server',
 ] as const;
 export type InstallArtifact = (typeof INSTALL_ARTIFACTS)[number];
 
@@ -71,16 +81,35 @@ export interface InstallPin {
 	source: string | null;
 }
 
+/**
+ * One MCP server an agent's configuration may name (MRC2-04-08A), on one managed
+ * route: a user-level config feeds every route the agent launches over, so the
+ * grant is honored only where the provider has managed enforcement.
+ */
+export interface McpServerGrant {
+	agentId: string;
+	server: string;
+	route: ManagedRoute;
+}
+
 export interface InstallPolicyCeiling {
 	policyRevision: number;
 	/** An artifact or file with no pin here is neither fetched nor run. */
 	pins: InstallPin[];
+	/** An agent and server with no grant here has no MCP entry written. */
+	mcpServers: McpServerGrant[];
 }
 
-export const INSTALL_CEILING_LIMITS = { pins: 64, fileLength: 255, sourceLength: 2048 } as const;
+export const INSTALL_CEILING_LIMITS = {
+	pins: 64,
+	mcpServers: 64,
+	fileLength: 255,
+	sourceLength: 2048,
+} as const;
 
-const CEILING_KEYS = ['policyRevision', 'pins'] as const;
+const CEILING_KEYS = ['policyRevision', 'pins', 'mcpServers'] as const;
 const PIN_KEYS = ['artifact', 'file', 'sha256', 'source'] as const;
+const GRANT_KEYS = ['agentId', 'server', 'route'] as const;
 const SHA256_HEX = /^[a-f0-9]{64}$/;
 
 export type InstallCeilingParse =
@@ -132,6 +161,24 @@ function samePinIdentity(a: InstallPin, b: InstallPin): boolean {
 	return a.artifact === b.artifact && a.file === b.file && a.source === b.source;
 }
 
+function parseGrant(raw: unknown, at: string, problems: string[]): McpServerGrant | null {
+	if (!isPlainObject(raw)) {
+		problems.push(`${at} is not an object`);
+		return null;
+	}
+	problems.push(...unknownKeys(raw, GRANT_KEYS, `${at}.`));
+	const before = problems.length;
+	const { agentId, server, route } = raw;
+	if (typeof agentId !== 'string' || !isInstallFileName(agentId))
+		problems.push(`${at}.agentId is not an agent id`);
+	if (typeof server !== 'string' || !isInstallFileName(server))
+		problems.push(`${at}.server is not a server name`);
+	if (!(MANAGED_ROUTES as readonly unknown[]).includes(route))
+		problems.push(`${at}.route is not a managed route`);
+	if (problems.length !== before) return null;
+	return { agentId, server, route } as McpServerGrant;
+}
+
 /** Validate a document into a fresh value; every problem is named by path and one refuses the whole. */
 export function parseInstallPolicyCeiling(raw: unknown): InstallCeilingParse {
 	if (!isPlainObject(raw)) return { ok: false, problems: ['the install ceiling is not an object'] };
@@ -149,8 +196,26 @@ export function parseInstallPolicyCeiling(raw: unknown): InstallCeilingParse {
 				problems.push(`pins[${index}] names ${pin.artifact} ${pin.file} twice`);
 			else if (pin) pins.push(pin);
 		});
+	// The grant clause is absent from a ceiling written before MRC2-04-08A: no MCP entry is written then.
+	const mcpServers: McpServerGrant[] = [];
+	const grants = raw.mcpServers === undefined ? [] : raw.mcpServers;
+	if (!Array.isArray(grants)) problems.push('mcpServers is not an array');
+	else if (grants.length > INSTALL_CEILING_LIMITS.mcpServers)
+		problems.push(`mcpServers exceeds ${INSTALL_CEILING_LIMITS.mcpServers} entries`);
+	else
+		grants.forEach((entry, index) => {
+			const grant = parseGrant(entry, `mcpServers[${index}]`, problems);
+			if (!grant) return;
+			const { agentId, server, route } = grant;
+			if (mcpServers.some((g) => g.agentId === agentId && g.server === server && g.route === route))
+				problems.push(`mcpServers[${index}] names ${server} for ${agentId} on ${route} twice`);
+			else mcpServers.push(grant);
+		});
 	if (problems.length > 0) return { ok: false, problems };
-	return { ok: true, ceiling: { policyRevision: raw.policyRevision as number, pins } };
+	return {
+		ok: true,
+		ceiling: { policyRevision: raw.policyRevision as number, pins, mcpServers },
+	};
 }
 
 export type ManagedInstallStanding =
@@ -200,9 +265,7 @@ export type InstallDecision =
 	| { allowed: false; code: InstallDenial; message: string; managed: InstallReceipt };
 
 /** The refusal line a sink logs and answers with: the code first, so it never reads as a failed download. */
-export function formatInstallRefusal(
-	decision: Extract<InstallDecision, { allowed: false }>
-): string {
+export function formatInstallRefusal(decision: { code: string; message: string }): string {
 	return `[managed-${decision.code}] ${decision.message}`;
 }
 
@@ -305,11 +368,85 @@ function pinnedVerdict(
 	return { allowed: true, pin, managed: receipt('within-ceiling', pin, actual) };
 }
 
+/** An MCP entry about to be written into one agent's configuration (MRC2-04-08A). */
+export interface McpServerRequest {
+	agentId: string;
+	server: string;
+	actor: InstallActor;
+}
+
+export type McpServerDenial =
+	| 'unavailable'
+	| 'unauthenticated'
+	| 'server-denied'
+	| 'route-unsupported';
+
+export interface McpServerReceipt {
+	policyRevision: number | null;
+	agentId: string;
+	server: string;
+	/** The granted route the write was admitted on; null when none applied. */
+	route: ManagedRoute | null;
+	actor: string;
+	outcome: 'within-ceiling' | McpServerDenial;
+}
+
+export type McpServerDecision =
+	| { allowed: true; grant?: McpServerGrant; managed?: McpServerReceipt }
+	| { allowed: false; code: McpServerDenial; message: string; managed: McpServerReceipt };
+
+/** Hold one MCP write; pure given `routes` (the capability table by default). A grant on an unenforced route cannot be bound and is refused. */
+export function mcpServerVerdict(
+	standing: ManagedInstallStanding,
+	request: McpServerRequest,
+	unbindable: readonly string[] = [],
+	routes: (agentId: string) => ProviderRouteSupport[] = providerRouteSupport
+): McpServerDecision {
+	if (standing.standing === 'standalone') return { allowed: true };
+	const [, label] = browserActorLabel(request.actor);
+	const what = `the ${request.server} MCP server for ${request.agentId}`;
+	const receipt = (outcome: McpServerReceipt['outcome'], route: ManagedRoute | null) => ({
+		policyRevision: standing.policyRevision,
+		agentId: request.agentId,
+		server: request.server,
+		route,
+		actor: label,
+		outcome,
+	});
+	const deny = (code: McpServerDenial, message: string): McpServerDecision => ({
+		allowed: false,
+		code,
+		message,
+		managed: receipt(code, null),
+	});
+	if (unbindable.length > 0) return deny('unauthenticated', unbindable.join('; '));
+	if (!standing.ceiling)
+		return deny('unavailable', `the managed install ceiling is unavailable (${standing.reason})`);
+	const grants = standing.ceiling.mcpServers.filter(
+		(g) => g.agentId === request.agentId && g.server === request.server
+	);
+	if (grants.length === 0)
+		return deny(
+			'server-denied',
+			`the install ceiling grants ${what} on no route; for ${label} no MCP entry is written`
+		);
+	const support = routes(request.agentId);
+	const enforced = grants.find((g) =>
+		support.some((row) => row.route === g.route && row.managed === 'implemented')
+	);
+	if (!enforced)
+		return deny(
+			'route-unsupported',
+			`${what} is granted on ${grants.map((g) => g.route).join(', ')}, where ${request.agentId} has no managed enforcement in this build; a grant that cannot be bound writes nothing`
+		);
+	return { allowed: true, grant: enforced, managed: receipt('within-ceiling', enforced.route) };
+}
+
 /** Thrown by a sink that cannot answer a refusal in a result (a refresh that either installs or fails). */
 export class InstallRefusedError extends Error {
-	readonly code: InstallDenial;
-	readonly receipt: InstallReceipt;
-	constructor(decision: Extract<InstallDecision, { allowed: false }>) {
+	readonly code: InstallDenial | McpServerDenial;
+	readonly receipt: InstallReceipt | McpServerReceipt;
+	constructor(decision: Extract<InstallDecision | McpServerDecision, { allowed: false }>) {
 		super(formatInstallRefusal(decision));
 		this.name = 'InstallRefusedError';
 		this.code = decision.code;
@@ -331,7 +468,12 @@ export interface InstallAuthority {
 	authorize(request: InstallRequest): InstallDecision;
 }
 
-export interface InstallPolicySource extends InstallAuthority {
+/** What the MCP config writers hold an entry with (the source, or a test double). */
+export interface McpServerAuthority {
+	authorizeMcpServer(request: McpServerRequest): McpServerDecision;
+}
+
+export interface InstallPolicySource extends InstallAuthority, McpServerAuthority {
 	standing(): ManagedInstallStanding;
 	installed(): InstallPolicyCeiling | null;
 	/** Install a ceiling an authenticated endpoint path handed over; a refused document keeps the previous one. */
@@ -361,13 +503,16 @@ export function createInstallPolicySource(deps: InstallPolicySourceDeps): Instal
 		},
 		authorize(request) {
 			const read = deps.identity.read();
-			const unbindable =
-				request.actor.kind === 'transport'
-					? pairedDeviceActorProblems(request.actor.actor, read)
-					: [];
-			return installVerdict(standing(read), request, unbindable);
+			return installVerdict(standing(read), request, unbindable(request.actor, read));
+		},
+		authorizeMcpServer(request) {
+			const read = deps.identity.read();
+			return mcpServerVerdict(standing(read), request, unbindable(request.actor, read));
 		},
 	};
+	function unbindable(actor: InstallActor, read: ReturnType<typeof deps.identity.read>) {
+		return actor.kind === 'transport' ? pairedDeviceActorProblems(actor.actor, read) : [];
+	}
 }
 
 /** A process with no desktop (a bare maestro-cli): standalone holds nothing; enrolled refuses unavailable. */

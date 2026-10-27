@@ -61,9 +61,12 @@ beforeEach(() => {
 describe('coworking IPC install gate', () => {
 	it('installs while the feature is on', async () => {
 		await h.handlers.get('coworking:install')!({}, 'claude-code');
-		expect(installFor).toHaveBeenCalledWith('claude-code');
+		// The transport the call was admitted over is read at the boundary (MRC2-04-08A):
+		// desktop IPC runs outside any client context, so the install acts as the operator.
+		const operator = { actor: { kind: 'transport', actor: { peer: 'in-process' } } };
+		expect(installFor).toHaveBeenCalledWith('claude-code', operator);
 		await h.handlers.get('coworking:installAll')!({});
-		expect(installForAll).toHaveBeenCalledOnce();
+		expect(installForAll).toHaveBeenCalledWith(operator);
 	});
 
 	it('refuses installs while the feature is off, but still lets an agent be uninstalled', async () => {

@@ -11,6 +11,7 @@ import * as path from 'path';
 import { atomicWriteFile } from '../../utils/atomic-json-store';
 import { COWORKING_MCP_SERVER_NAME } from '../coworking-types';
 import type { CoworkingMcpServerSpec } from '../coworking-types';
+import { holdMcpServerWrite, type McpInstallOptions } from './managed';
 import type { AgentMcpInstaller } from './types';
 
 const SENTINEL_BEGIN = '# >>> maestro-coworking BEGIN - managed by Maestro, do not edit';
@@ -81,7 +82,9 @@ export const codexInstaller: AgentMcpInstaller = {
 		return findBlock(content) !== null;
 	},
 
-	async install(spec: CoworkingMcpServerSpec) {
+	async install(spec: CoworkingMcpServerSpec, options: McpInstallOptions = {}) {
+		// Held before the file is read: a managed refusal leaves config.toml untouched.
+		holdMcpServerWrite('codex', spec, options);
 		const block = buildBlock(spec);
 		const existing = await readConfig();
 		if (existing == null) {

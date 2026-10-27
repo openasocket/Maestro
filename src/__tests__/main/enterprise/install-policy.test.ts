@@ -27,10 +27,12 @@ import {
 	isInstallFileName,
 	isInstallSource,
 	managedInstallStanding,
+	mcpServerVerdict,
 	parseInstallPolicyCeiling,
 	type InstallPolicyCeiling,
 	type InstallRequest,
 	type ManagedInstallStanding,
+	type McpServerRequest,
 } from '../../../main/enterprise/install-policy';
 
 const ZIP_SHA = 'a'.repeat(64);
@@ -120,7 +122,7 @@ describe('parseInstallPolicyCeiling', () => {
 	it('admits an empty pin list (nothing is fetched or run)', () => {
 		expect(parseInstallPolicyCeiling({ policyRevision: 0, pins: [] })).toEqual({
 			ok: true,
-			ceiling: { policyRevision: 0, pins: [] },
+			ceiling: { policyRevision: 0, pins: [], mcpServers: [] },
 		});
 	});
 
@@ -170,6 +172,8 @@ describe('parseInstallPolicyCeiling', () => {
 			'speckit-prompts',
 			'openspec-prompts',
 			'bmad-prompts',
+			'marketplace-playbooks',
+			'coworking-mcp-server',
 		]);
 		const base = 'https://raw.githubusercontent.com/bmad-code-org/BMAD-METHOD/v6.2.0';
 		const parsed = parseInstallPolicyCeiling({
@@ -474,6 +478,171 @@ describe('createInstallPolicySource', () => {
 	});
 });
 
+describe('mcpServers grants and mcpServerVerdict (MRC2-04-08A)', () => {
+	const grant = { agentId: 'claude-code', server: 'maestro-coworking', route: 'child-process' };
+	const request = (overrides: Partial<McpServerRequest> = {}): McpServerRequest => ({
+		agentId: 'claude-code',
+		server: 'maestro-coworking',
+		actor: INSTALL_OPERATOR,
+		...overrides,
+	});
+
+	it('parses the grant clause as a fresh value, absent means none, and names every problem', () => {
+		const parsed = parseInstallPolicyCeiling(document({ mcpServers: [grant] }));
+		expect(parsed.ok).toBe(true);
+		if (!parsed.ok) return;
+		expect(parsed.ceiling.mcpServers).toEqual([grant]);
+		expect(parsed.ceiling.mcpServers[0]).not.toBe(grant);
+		expect(ceilingOf().mcpServers).toEqual([]);
+		expect(problemsOf(document({ mcpServers: {} }))).toEqual(['mcpServers is not an array']);
+		const many = Array.from({ length: INSTALL_CEILING_LIMITS.mcpServers + 1 }, (_, i) => ({
+			...grant,
+			server: `s${i}`,
+		}));
+		expect(problemsOf(document({ mcpServers: many }))).toEqual([
+			`mcpServers exceeds ${INSTALL_CEILING_LIMITS.mcpServers} entries`,
+		]);
+		expect(problemsOf(document({ mcpServers: ['x'] }))).toEqual(['mcpServers[0] is not an object']);
+		expect(
+			problemsOf(
+				document({
+					mcpServers: [{ agentId: '', server: 'a/b', route: 'http', why: 1 }],
+				})
+			)
+		).toEqual([
+			'mcpServers[0].why is not a known key',
+			'mcpServers[0].agentId is not an agent id',
+			'mcpServers[0].server is not a server name',
+			'mcpServers[0].route is not a managed route',
+		]);
+		expect(problemsOf(document({ mcpServers: [grant, { ...grant }] }))).toEqual([
+			'mcpServers[1] names maestro-coworking for claude-code on child-process twice',
+		]);
+	});
+
+	it('allows standalone with no receipt; refuses unauthenticated, then unavailable', () => {
+		expect(mcpServerVerdict({ standing: 'standalone' }, request())).toEqual({ allowed: true });
+		expect(mcpServerVerdict(managed(), request(), ['no registered actor'])).toMatchObject({
+			allowed: false,
+			code: 'unauthenticated',
+			managed: { agentId: 'claude-code', server: 'maestro-coworking', route: null },
+		});
+		const unavailable: ManagedInstallStanding = {
+			standing: 'managed',
+			ceiling: null,
+			policyRevision: 3,
+			reason: 'no install ceiling is installed for policy revision 3',
+		};
+		expect(mcpServerVerdict(unavailable, request())).toMatchObject({
+			allowed: false,
+			code: 'unavailable',
+			message:
+				'the managed install ceiling is unavailable (no install ceiling is installed for policy revision 3)',
+		});
+	});
+
+	it('refuses a server the ceiling grants to no agent, by name, with a receipt', () => {
+		const decision = mcpServerVerdict(managed(), request());
+		expect(decision).toEqual({
+			allowed: false,
+			code: 'server-denied',
+			message:
+				'the install ceiling grants the maestro-coworking MCP server for claude-code on no route; for the operator no MCP entry is written',
+			managed: {
+				policyRevision: 3,
+				agentId: 'claude-code',
+				server: 'maestro-coworking',
+				route: null,
+				actor: 'the operator',
+				outcome: 'server-denied',
+			},
+		});
+		// A grant for another agent, or another server, is not this one.
+		const others = ceilingOf(
+			document({
+				mcpServers: [
+					{ ...grant, agentId: 'codex' },
+					{ ...grant, server: 'other-server' },
+				],
+			})
+		);
+		expect(mcpServerVerdict(managed(others), request())).toMatchObject({ code: 'server-denied' });
+	});
+
+	it('honors a grant only on a route the provider has managed enforcement on', () => {
+		// claude-code runs over pty and ssh standalone, but only its child-process launch is admitted.
+		const pty = ceilingOf(document({ mcpServers: [{ ...grant, route: 'pty' }] }));
+		expect(mcpServerVerdict(managed(pty), request())).toMatchObject({
+			allowed: false,
+			code: 'route-unsupported',
+			message:
+				'the maestro-coworking MCP server for claude-code is granted on pty, where claude-code has no managed enforcement in this build; a grant that cannot be bound writes nothing',
+			managed: { route: null, outcome: 'route-unsupported' },
+		});
+		// A provider with no batch mode has no enforced route at all.
+		const gemini = ceilingOf(document({ mcpServers: [{ ...grant, agentId: 'gemini-cli' }] }));
+		expect(mcpServerVerdict(managed(gemini), request({ agentId: 'gemini-cli' }))).toMatchObject({
+			code: 'route-unsupported',
+		});
+		// The first enforced grant is the one bound; the receipt names its route.
+		const both = ceilingOf(document({ mcpServers: [{ ...grant, route: 'ssh' }, grant] }));
+		expect(mcpServerVerdict(managed(both), request())).toEqual({
+			allowed: true,
+			grant,
+			managed: {
+				policyRevision: 3,
+				agentId: 'claude-code',
+				server: 'maestro-coworking',
+				route: 'child-process',
+				actor: 'the operator',
+				outcome: 'within-ceiling',
+			},
+		});
+		// The route table is an input: a build that enforces ssh binds the ssh grant.
+		const sshOnly = ceilingOf(document({ mcpServers: [{ ...grant, route: 'ssh' }] }));
+		const enforcedSsh = () => [
+			{
+				agentId: 'claude-code',
+				route: 'ssh',
+				standalone: 'implemented',
+				managed: 'implemented',
+				note: '',
+			},
+		];
+		expect(mcpServerVerdict(managed(sshOnly), request(), [], enforcedSsh as never)).toMatchObject({
+			allowed: true,
+			managed: { route: 'ssh' },
+		});
+	});
+
+	it('is held by the source under the enrollment and paired-device rules, and names a refusal', () => {
+		let read: IdentityRead = { status: 'none' };
+		const source = createInstallPolicySource({
+			identity: { read: () => read },
+			policy: () => ({ appliedRevision: 3 }),
+		});
+		expect(source.authorizeMcpServer(request())).toEqual({ allowed: true });
+		read = { status: 'ok', record: {} as never, epoch: 1 };
+		expect(source.authorizeMcpServer(request())).toMatchObject({ code: 'unavailable' });
+		source.install(document({ mcpServers: [grant] }));
+		expect(source.authorizeMcpServer(request())).toMatchObject({ allowed: true, grant });
+		const device = {
+			kind: 'transport',
+			actor: { peer: 'device-pairing', deviceId: 'd1' },
+		} as const;
+		const refused = source.authorizeMcpServer(request({ actor: device }));
+		expect(refused).toMatchObject({ allowed: false, code: 'unauthenticated' });
+		if (refused.allowed) return;
+		const error = new InstallRefusedError(refused);
+		expect(error.code).toBe('unauthenticated');
+		expect(error.receipt).toMatchObject({
+			server: 'maestro-coworking',
+			outcome: 'unauthenticated',
+		});
+		expect(error.message.startsWith('[managed-unauthenticated] ')).toBe(true);
+	});
+});
+
 describe('headlessInstallAuthority', () => {
 	it('holds nothing standalone and refuses every install unavailable when enrolled', () => {
 		const standalone = headlessInstallAuthority({
@@ -507,6 +676,9 @@ describe('desktop wiring (src/main/index.ts)', () => {
 		expect(source).toContain('maestroCliManager.setInstallAuthority(installPolicy);');
 		// The three spec tool prompt refreshers hold with the same source (MRC2-04-08).
 		expect(source).toContain('setSpecPromptInstallAuthority(installPolicy);');
+		// Marketplace imports and the coworking MCP config writers too (MRC2-04-08A).
+		expect(source).toContain('setMarketplaceInstallAuthority(installPolicy);');
+		expect(source).toContain('setMcpInstallAuthority(installPolicy);');
 	});
 
 	it('runs the WakaTime startup install only after the enterprise service is composed', () => {

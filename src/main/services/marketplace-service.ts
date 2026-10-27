@@ -9,6 +9,11 @@
  * Cache + filesystem semantics mirror the IPC handler: 6h TTL on the
  * official manifest, on-demand document fetches, optional local manifest
  * for custom playbooks, SSH-aware import targets.
+ *
+ * An import is held to the managed install ceiling (MRC2-04-08A): every file
+ * before the first fetch or read, and again by the digest of the bytes received
+ * before anything is written, so a refused import changes no file. Not held:
+ * the manifest fetch and its cache, and the raw egress (no policy until P2-05).
  */
 
 import { App } from 'electron';
@@ -29,10 +34,49 @@ import { isCompatible } from '../../shared/marketplace-compatibility';
 import { SshRemoteConfig } from '../../shared/types';
 import { writeFileRemote, mkdirRemote } from '../utils/remote-fs';
 import { captureException } from '../utils/sentry';
+import {
+	INSTALL_OPERATOR,
+	InstallRefusedError,
+	type InstallActor,
+	type InstallAuthority,
+} from '../enterprise/install-policy';
 
 const GITHUB_RAW_BASE = 'https://raw.githubusercontent.com/RunMaestro/Maestro-Playbooks/main';
 const MANIFEST_URL = `${GITHUB_RAW_BASE}/manifest.json`;
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const INSTALL_ARTIFACT = 'marketplace-playbooks';
+
+let installAuthority: InstallAuthority | null = null;
+
+/** The desktop hands the one install ceiling source over at startup; null holds nothing (standalone). */
+export function setMarketplaceInstallAuthority(authority: InstallAuthority | null): void {
+	installAuthority = authority;
+}
+
+/** One file an import brings in: its bare name and the URL it is fetched from, null for a local playbook read in place. */
+interface ImportFile {
+	file: string;
+	source: string | null;
+}
+
+/** Hold one file: a `fetch` before its request (a local file has none), an `execute` on the bytes received or read. */
+function holdImportFile(
+	{ file, source }: ImportFile,
+	actor: InstallActor,
+	bytes?: string | Buffer
+): void {
+	if (!installAuthority || (bytes === undefined && source === null)) return;
+	const decision = installAuthority.authorize({
+		artifact: INSTALL_ARTIFACT,
+		file,
+		stage: bytes === undefined ? 'fetch' : 'execute',
+		digest:
+			bytes === undefined ? null : () => crypto.createHash('sha256').update(bytes).digest('hex'),
+		source: source ?? undefined,
+		actor,
+	});
+	if (!decision.allowed) throw new InstallRefusedError(decision);
+}
 
 /**
  * Request budget for marketplace downloads. These are playbook markdown and
@@ -423,6 +467,8 @@ export interface ImportPlaybookOptions {
 	sessionId: string;
 	/** Resolved SSH config - caller is responsible for looking it up. */
 	sshConfig?: SshRemoteConfig;
+	/** Who asked: the transport the call was admitted over, else the operator (MRC2-04-08A). */
+	actor?: InstallActor;
 }
 
 export interface ImportPlaybookServiceResult {
@@ -514,52 +560,11 @@ export async function importMarketplacePlaybook(
 			: `${autoRunFolderPath}/${targetFolderName}`
 		: path.join(autoRunFolderPath, targetFolderName);
 
-	if (isRemote) {
-		const mkdirResult = await mkdirRemote(targetPath, sshConfig!, true);
-		if (!mkdirResult.success) {
-			throw new MarketplaceImportError(`Failed to create remote directory: ${mkdirResult.error}`);
-		}
-	} else {
-		await fs.mkdir(targetPath, { recursive: true });
-	}
-
-	const importedDocs: string[] = [];
-	for (const doc of marketplacePlaybook.documents) {
-		try {
-			const content = await fetchDocument(marketplacePlaybook.path, doc.filename);
-			const docPath = isRemote
-				? `${targetPath}/${doc.filename}.md`
-				: path.join(targetPath, `${doc.filename}.md`);
-			if (isRemote) {
-				const writeResult = await writeFileRemote(docPath, content, sshConfig!);
-				if (!writeResult.success) {
-					throw new Error(writeResult.error || 'Failed to write remote file');
-				}
-			} else {
-				await fs.writeFile(docPath, content, 'utf-8');
-			}
-			importedDocs.push(doc.filename);
-		} catch (error) {
-			void captureException(error);
-			logger.warn(`Failed to import document ${doc.filename}`, LOG_CONTEXT, { error });
-		}
-	}
-
-	// Refuse to persist a playbook whose documents all failed to write -
-	// the per-doc loop is intentionally tolerant so one bad file doesn't
-	// block the rest, but if every doc failed we'd otherwise create a
-	// playbook with `documents: []`, return success, close the marketplace
-	// sheet, and leave the user with an unusable imported entry.
-	if (marketplacePlaybook.documents.length > 0 && importedDocs.length === 0) {
-		throw new MarketplaceImportError(
-			`Failed to import any documents for playbook: ${marketplacePlaybook.title}`
-		);
-	}
-
 	// Build effective asset list (local: union manifest + discovered files)
 	const manifestAssets = marketplacePlaybook.assets ?? [];
 	let effectiveAssets = manifestAssets;
-	if (isLocalPath(marketplacePlaybook.path)) {
+	const local = isLocalPath(marketplacePlaybook.path);
+	if (local) {
 		const discoveredAssets: string[] = [];
 		const resolvedPlaybookPath = resolveTildePath(marketplacePlaybook.path);
 		const localAssetsPath = path.join(resolvedPlaybookPath, 'assets');
@@ -584,8 +589,94 @@ export async function importMarketplacePlaybook(
 		effectiveAssets = Array.from(new Set([...manifestAssets, ...discoveredAssets]));
 	}
 
+	// Every file is held BEFORE the first fetch or read (MRC2-04-08A), fetched
+	// into memory and held by digest, so nothing is written until all are checked.
+	// The loops tolerate a missing or unreachable file; a refusal is never tolerated.
+	const actor = opts.actor ?? INSTALL_OPERATOR;
+	const importFile = (file: string, relative: string): ImportFile => ({
+		file,
+		source: local ? null : `${GITHUB_RAW_BASE}/${marketplacePlaybook.path}/${relative}`,
+	});
+	const docFiles = marketplacePlaybook.documents.map((doc) =>
+		importFile(`${doc.filename}.md`, `${doc.filename}.md`)
+	);
+	const assetFiles = effectiveAssets.map((asset) => importFile(asset, `assets/${asset}`));
+	for (const file of [...docFiles, ...assetFiles]) holdImportFile(file, actor);
+
+	const fetchedDocs: Array<{ filename: string; content: string }> = [];
+	for (const [index, doc] of marketplacePlaybook.documents.entries()) {
+		try {
+			const content = await fetchDocument(marketplacePlaybook.path, doc.filename);
+			holdImportFile(docFiles[index], actor, content);
+			fetchedDocs.push({ filename: doc.filename, content });
+		} catch (error) {
+			if (error instanceof InstallRefusedError) throw error;
+			void captureException(error);
+			logger.warn(`Failed to import document ${doc.filename}`, LOG_CONTEXT, { error });
+		}
+	}
+
+	// Every document failed: stop before any asset is fetched or a folder made.
+	if (marketplacePlaybook.documents.length > 0 && fetchedDocs.length === 0) {
+		throw new MarketplaceImportError(
+			`Failed to import any documents for playbook: ${marketplacePlaybook.title}`
+		);
+	}
+
+	const fetchedAssets: Array<{ filename: string; content: Buffer }> = [];
+	for (const [index, assetFilename] of effectiveAssets.entries()) {
+		try {
+			const content = await fetchAsset(marketplacePlaybook.path, assetFilename);
+			holdImportFile(assetFiles[index], actor, content);
+			fetchedAssets.push({ filename: assetFilename, content });
+		} catch (error) {
+			if (error instanceof InstallRefusedError) throw error;
+			void captureException(error);
+			logger.warn(`Failed to import asset ${assetFilename}`, LOG_CONTEXT, { error });
+		}
+	}
+
+	if (isRemote) {
+		const mkdirResult = await mkdirRemote(targetPath, sshConfig!, true);
+		if (!mkdirResult.success) {
+			throw new MarketplaceImportError(`Failed to create remote directory: ${mkdirResult.error}`);
+		}
+	} else {
+		await fs.mkdir(targetPath, { recursive: true });
+	}
+
+	const importedDocs: string[] = [];
+	for (const { filename, content } of fetchedDocs) {
+		try {
+			const docPath = isRemote
+				? `${targetPath}/${filename}.md`
+				: path.join(targetPath, `${filename}.md`);
+			if (isRemote) {
+				const writeResult = await writeFileRemote(docPath, content, sshConfig!);
+				if (!writeResult.success) {
+					throw new Error(writeResult.error || 'Failed to write remote file');
+				}
+			} else {
+				await fs.writeFile(docPath, content, 'utf-8');
+			}
+			importedDocs.push(filename);
+		} catch (error) {
+			void captureException(error);
+			logger.warn(`Failed to import document ${filename}`, LOG_CONTEXT, { error });
+		}
+	}
+
+	// Refuse to persist a playbook whose documents all failed to write: with
+	// `documents: []` the import would report success, close the marketplace
+	// sheet, and leave the user with an unusable imported entry.
+	if (marketplacePlaybook.documents.length > 0 && importedDocs.length === 0) {
+		throw new MarketplaceImportError(
+			`Failed to import any documents for playbook: ${marketplacePlaybook.title}`
+		);
+	}
+
 	const importedAssets: string[] = [];
-	if (effectiveAssets.length > 0) {
+	if (fetchedAssets.length > 0) {
 		const assetsPath = isRemote ? `${targetPath}/assets` : path.join(targetPath, 'assets');
 		if (isRemote) {
 			const mkdirResult = await mkdirRemote(assetsPath, sshConfig!, true);
@@ -596,12 +687,9 @@ export async function importMarketplacePlaybook(
 			await fs.mkdir(assetsPath, { recursive: true });
 		}
 
-		for (const assetFilename of effectiveAssets) {
+		for (const { filename, content } of fetchedAssets) {
 			try {
-				const content = await fetchAsset(marketplacePlaybook.path, assetFilename);
-				const assetPath = isRemote
-					? `${assetsPath}/${assetFilename}`
-					: path.join(assetsPath, assetFilename);
+				const assetPath = isRemote ? `${assetsPath}/${filename}` : path.join(assetsPath, filename);
 				if (isRemote) {
 					const writeResult = await writeFileRemote(assetPath, content, sshConfig!);
 					if (!writeResult.success) {
@@ -610,10 +698,10 @@ export async function importMarketplacePlaybook(
 				} else {
 					await fs.writeFile(assetPath, content);
 				}
-				importedAssets.push(assetFilename);
+				importedAssets.push(filename);
 			} catch (error) {
 				void captureException(error);
-				logger.warn(`Failed to import asset ${assetFilename}`, LOG_CONTEXT, { error });
+				logger.warn(`Failed to import asset ${filename}`, LOG_CONTEXT, { error });
 			}
 		}
 	}
