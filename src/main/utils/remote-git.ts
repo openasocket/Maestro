@@ -18,6 +18,7 @@ import type {
 	GitExecutionDecision,
 	GitExecutionGate,
 	GitExecutionTarget,
+	GitForgeEffect,
 } from '../enterprise/repository-policy';
 
 const LOG_CONTEXT = '[RemoteGit]';
@@ -77,38 +78,82 @@ function runGitAt(
 	});
 }
 
-/**
- * Hold one command against the managed ceiling before it runs. Answers the
- * refusal to return in place of running, or null to run. The gate's reads
- * (`remote get-url`, `config --get`) run unheld at the same target.
- */
-async function holdGit(args: string[], target: GitExecutionTarget): Promise<ExecResult | null> {
-	const gate = gitExecutionGate;
-	if (!gate) return null;
-	const decision = await gate.hold({
-		args,
-		target,
-		read: async (readArgs) => {
-			const result = await runGitAt(readArgs, target);
-			const out = result.stdout.trim();
-			return result.exitCode === 0 && out ? out : null;
-		},
-	});
+/** Read-class git where `target` says, for the gate's own questions: trimmed stdout, or null. */
+function gateReader(target: GitExecutionTarget): (args: string[]) => Promise<string | null> {
+	return async (readArgs) => {
+		const result = await runGitAt(readArgs, target);
+		const out = result.stdout.trim();
+		return result.exitCode === 0 && out ? out : null;
+	};
+}
+
+/** Log the gate's answer and turn a refusal into the result the caller gets instead of running. */
+function settleHold(
+	decision: GitExecutionDecision,
+	what: string,
+	where: Record<string, unknown>
+): ExecResult | null {
 	if (decision.allowed) {
 		if (decision.managed) {
-			logger.debug('Git command held within the managed repository ceiling', LOG_CONTEXT, {
-				subcommand: decision.operation?.subcommand,
+			logger.debug('Git effect held within the managed repository ceiling', LOG_CONTEXT, {
+				what,
 				outcome: decision.managed.outcome,
 			});
 		}
 		return null;
 	}
-	logger.warn('Git command refused by the managed repository ceiling', LOG_CONTEXT, {
-		subcommand: decision.operation?.subcommand ?? args[0],
+	logger.warn('Git effect refused by the managed repository ceiling', LOG_CONTEXT, {
+		what,
 		code: decision.code,
-		...(target.kind === 'ssh' ? { remoteId: target.remote.id } : { cwd: target.cwd }),
+		...where,
 	});
 	return refusalResult(decision);
+}
+
+/**
+ * Hold one git command line against the managed ceiling before it runs, at
+ * the target it will run at. Answers the refusal to return in place of
+ * running, or null to run. `execGit` and `execGitRemote` call it for every
+ * command; a caller that spawns git itself (the streaming runner behind
+ * `git:runCommand`, which needs the child's live output) holds the exact argv
+ * it is about to spawn through here, so the hold is one and the same. The
+ * gate's reads (`remote get-url`, `config --get`) run unheld at the same
+ * target. Standalone (no gate installed) answers null with no call at all.
+ */
+export async function holdGitCommand(
+	args: string[],
+	target: GitExecutionTarget
+): Promise<ExecResult | null> {
+	const gate = gitExecutionGate;
+	if (!gate) return null;
+	const decision = await gate.hold({ args, target, read: gateReader(target) });
+	return settleHold(
+		decision,
+		`git ${decision.operation?.subcommand ?? args[0]}`,
+		target.kind === 'ssh' ? { remoteId: target.remote.id } : { cwd: target.cwd }
+	);
+}
+
+/**
+ * Hold a forge effect of the git surface (`gh pr create`, `gh gist create`)
+ * against the same ceiling, before `gh` starts (MRC2-04-02). A pull request
+ * targets the repository at `cwd` (its origin is read there, unheld); a gist
+ * targets no repository and names its destination instead. Answers the
+ * refusal, or null to run; standalone answers null with no call.
+ */
+export async function holdGitForgeEffect(
+	effect: GitForgeEffect,
+	cwd: string | null,
+	destination: string | null = null
+): Promise<ExecResult | null> {
+	const gate = gitExecutionGate;
+	if (!gate) return null;
+	const decision = await gate.holdForge({
+		effect,
+		destination,
+		read: cwd === null ? null : gateReader({ kind: 'local', cwd }),
+	});
+	return settleHold(decision, `gh ${effect}`, { cwd, destination });
 }
 
 /**
@@ -149,7 +194,7 @@ export async function execGitRemote(
 	args: string[],
 	options: RemoteGitOptions
 ): Promise<ExecResult> {
-	const refused = await holdGit(args, {
+	const refused = await holdGitCommand(args, {
 		kind: 'ssh',
 		remote: options.sshRemote,
 		cwd: options.remoteCwd,
@@ -217,7 +262,7 @@ export async function execGit(
 	const target: GitExecutionTarget = sshRemote
 		? { kind: 'ssh', remote: sshRemote, cwd: remoteCwd }
 		: { kind: 'local', cwd: localCwd };
-	const refused = await holdGit(args, target);
+	const refused = await holdGitCommand(args, target);
 	return refused ?? runGitAt(args, target, options);
 }
 

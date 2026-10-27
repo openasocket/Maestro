@@ -13,9 +13,20 @@
 
 /**
  * Git operations that stream their output live to the renderer instead of
- * returning only a buffered result (see `git:runCommand`).
+ * returning only a buffered result (see `git:runCommand`). The list is the
+ * whole vocabulary of that channel: the handler runs one of these three
+ * fixed command lines and never an argument the caller composed, so a value
+ * off this list is refused before anything starts (`isGitStreamingOperation`).
  */
-export type GitStreamingOperation = 'pull' | 'push' | 'fetch';
+export const GIT_STREAMING_OPERATIONS = ['pull', 'push', 'fetch'] as const;
+export type GitStreamingOperation = (typeof GIT_STREAMING_OPERATIONS)[number];
+
+/** True when `value` is one of the enumerated streaming operations (the runtime check behind the type). */
+export function isGitStreamingOperation(value: unknown): value is GitStreamingOperation {
+	return (
+		typeof value === 'string' && (GIT_STREAMING_OPERATIONS as readonly string[]).includes(value)
+	);
+}
 
 /** One chunk of output from a streaming git command. */
 export interface GitCommandOutputChunk {

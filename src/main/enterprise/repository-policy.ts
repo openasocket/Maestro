@@ -27,7 +27,13 @@
  * effect a write is held as, and `createGitExecutionGate()` holds a write
  * before the process starts, with the actor the call was admitted over, the
  * repository `origin` names and, for a remote write, the destination. A read
- * is never held, and a standalone host makes no extra call at all.
+ * is never held, and a standalone host makes no extra call at all. The same
+ * gate holds the two forge effects the git IPC handlers reach through `gh`
+ * and no git command line carries (MRC2-04-02): a `pull-request` opened on
+ * the repository `origin` names, and a `gist`, content published under the
+ * actor's forge account outside any repository (held against
+ * `https://gist.github.com`, and named by no repository, so a ceiling with a
+ * `repositories` clause refuses it `repository-unknown`).
  */
 
 import type { SshLaunchTarget } from '../../shared/maestro-lib/launch/ssh-remote-resolver';
@@ -57,6 +63,7 @@ export const REPOSITORY_EFFECTS = [
 	'pull-request',
 	'finalize',
 	'cancel',
+	'gist',
 ] as const;
 export type RepositoryEffectKind = (typeof REPOSITORY_EFFECTS)[number];
 
@@ -917,9 +924,31 @@ export type GitExecutionDecision =
 			managed?: RepositoryEffectReceipt;
 	  };
 
+/**
+ * A forge effect of the git surface that `gh` performs and no git command
+ * line carries: the pull request `git:createPR` opens, the gist
+ * `git:createGist` publishes. Held through the same gate as a git write, with
+ * the same actor and the same ceiling.
+ */
+export type GitForgeEffect = 'pull-request' | 'gist';
+
+export interface GitForgeRequest {
+	effect: GitForgeEffect;
+	/**
+	 * The destination the effect reaches when the effect itself names it (a
+	 * gist: `https://gist.github.com`); null to read it off the repository
+	 * (`remote get-url origin`), which also names the repository the effect
+	 * targets. A gist names no repository.
+	 */
+	destination: string | null;
+	/** Read-class git in the repository the effect targets (never re-held); null for an effect that targets none. */
+	read: ((args: string[]) => Promise<string | null>) | null;
+}
+
 /** What the executor holds a command with: the gate, or a test double. */
 export interface GitExecutionGate {
 	hold(request: GitExecutionRequest): Promise<GitExecutionDecision>;
+	holdForge(request: GitForgeRequest): Promise<GitExecutionDecision>;
 }
 
 export interface GitExecutionGateDeps {
@@ -972,7 +1001,47 @@ async function defaultRemoteName(
  */
 export function createGitExecutionGate(deps: GitExecutionGateDeps): GitExecutionGate {
 	const actor = deps.actor ?? transportActor;
+	/** The ceiling's answer as the executor's decision, with the receipt a managed answer carries. */
+	const held = (
+		operation: GitOperation | null,
+		decision: RepositoryEffectDecision
+	): GitExecutionDecision => {
+		if (decision.allowed)
+			return {
+				allowed: true,
+				operation,
+				...(decision.managed ? { managed: decision.managed } : {}),
+			};
+		return {
+			allowed: false,
+			operation,
+			code: decision.code,
+			message: decision.message,
+			managed: decision.managed,
+		};
+	};
 	return {
+		async holdForge(request) {
+			const standing = deps.repository.standing();
+			if (standing.standing === 'standalone') return { allowed: true, operation: null };
+			let repository: string | null = null;
+			let address = request.destination;
+			if (standing.ceiling && request.read) {
+				address = request.destination ?? (await request.read(['remote', 'get-url', 'origin']));
+				repository = repositorySlugFromRemote(address);
+			}
+			return held(
+				null,
+				deps.repository.authorize({
+					surface: 'git',
+					effect: request.effect,
+					actor: actor(),
+					resource: 'remote',
+					repository,
+					remote: address,
+				})
+			);
+		},
 		async hold(request) {
 			const standing = deps.repository.standing();
 			if (standing.standing === 'standalone') return { allowed: true, operation: null };
@@ -1022,27 +1091,17 @@ export function createGitExecutionGate(deps: GitExecutionGateDeps): GitExecution
 					);
 				}
 			}
-			const decision = deps.repository.authorize({
-				surface: 'git',
-				effect: operation.effect as RepositoryEffectKind,
-				actor: actor(),
-				resource: operation.class === 'remote-write' ? 'remote' : 'local',
-				repository,
-				remote: address,
-			});
-			if (decision.allowed)
-				return {
-					allowed: true,
-					operation,
-					...(decision.managed ? { managed: decision.managed } : {}),
-				};
-			return {
-				allowed: false,
+			return held(
 				operation,
-				code: decision.code,
-				message: decision.message,
-				managed: decision.managed,
-			};
+				deps.repository.authorize({
+					surface: 'git',
+					effect: operation.effect as RepositoryEffectKind,
+					actor: actor(),
+					resource: operation.class === 'remote-write' ? 'remote' : 'local',
+					repository,
+					remote: address,
+				})
+			);
 		},
 	};
 }

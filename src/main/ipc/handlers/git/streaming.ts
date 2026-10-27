@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron';
 import { execFileStreaming } from '../../../utils/execFile';
-import { execGit } from '../../../utils/remote-git';
+import { execGit, holdGitCommand } from '../../../utils/remote-git';
 import { buildSshCommand } from '../../../utils/ssh-command-builder';
 import { logger } from '../../../utils/logger';
 import { getSshRemoteById } from '../../../stores';
@@ -8,8 +8,14 @@ import { withIpcErrorLogging } from '../../../utils/ipcHandler';
 import { getShellPath } from '../../../runtime/getShellPath';
 import { captureMessage } from '../../../utils/sentry';
 import { processCarriageReturns, stripAnsiCodes } from '../../../../shared/stringUtils';
-import type { GitRunCommandResult, GitStreamingOperation } from '../../../../shared/gitUtils';
+import {
+	GIT_STREAMING_OPERATIONS,
+	isGitStreamingOperation,
+	type GitRunCommandResult,
+	type GitStreamingOperation,
+} from '../../../../shared/gitUtils';
 import type { SshRemoteConfig } from '../../../../shared/types';
+import type { GitExecutionTarget } from '../../../enterprise/repository-policy';
 import { beginRemoteSync } from '../../../utils/branch-switch-guard';
 import { LOG_CONTEXT, handlerOpts } from './shared';
 
@@ -90,6 +96,19 @@ async function runStreamingGitCommand(
 ): Promise<GitRunCommandResult> {
 	const { runId, operation, cwd, sshRemoteId, remoteCwd, setUpstream = false } = options;
 
+	// The channel's vocabulary is the three fixed command lines above. The type
+	// says so, but the type does not cross IPC: a caller composing its own
+	// `operation` would otherwise have `git <anything> --progress` run for it.
+	if (!isGitStreamingOperation(operation)) {
+		pendingGitCancels.delete(runId);
+		return {
+			success: false,
+			exitCode: 1,
+			cancelled: false,
+			error: `git:runCommand runs only ${GIT_STREAMING_OPERATIONS.join(', ')}; "${String(operation)}" was not run`,
+		};
+	}
+
 	const sshRemote = sshRemoteId ? getSshRemoteById(sshRemoteId) : undefined;
 	// The user explicitly opted into SSH - running against the local repo instead
 	// would push/pull the wrong tree, so fail loudly.
@@ -124,6 +143,33 @@ async function runStreamingGitCommand(
 	}
 
 	const gitArgs = buildStreamingGitArgs(operation, branch, setUpstream);
+
+	// Every one of these is a remote write, so under management it is held to
+	// the repository ceiling the shared git executor holds every other write
+	// to: the exact argv about to be spawned, at the target it will run at,
+	// before the branch-switch lock is taken and before any process exists. A
+	// refusal is the run's result, named by code, and the modal's console gets
+	// the same line so a blank transcript never has to be explained.
+	const target: GitExecutionTarget = sshRemote
+		? { kind: 'ssh', remote: sshRemote, cwd: effectiveRemoteCwd }
+		: { kind: 'local', cwd };
+	const refused = await holdGitCommand(gitArgs, target);
+	if (refused) {
+		pendingGitCancels.delete(runId);
+		if (!event.sender.isDestroyed()) {
+			event.sender.send('git:commandOutput', {
+				runId,
+				stream: 'stderr',
+				chunk: `${refused.stderr}\n`,
+			});
+		}
+		return {
+			success: false,
+			exitCode: refused.exitCode,
+			cancelled: false,
+			error: refused.stderr,
+		};
+	}
 
 	// Push and pull read (pre-push hook) or write (merge) the working tree, so a
 	// branch switch must wait for them. Fetch only touches refs.

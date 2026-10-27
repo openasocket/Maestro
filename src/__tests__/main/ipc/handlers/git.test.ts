@@ -112,6 +112,10 @@ vi.mock('../../../../main/utils/remote-git', () => ({
 	execGitRemote: vi.fn(),
 	execGit: vi.fn(),
 	execGitReadOnly: vi.fn(),
+	// Standalone: the managed holds answer null (run). The managed paths have
+	// their own suite over the real executor (git/streaming.managed.test.ts).
+	holdGitCommand: vi.fn(async () => null),
+	holdGitForgeEffect: vi.fn(async () => null),
 	isGitTimeout: (result: { exitCode: number | string }) => result.exitCode === 'ETIMEDOUT',
 	listWorktreesRemote: vi.fn(),
 	resolveWorktreePathsRemote: vi.fn(),
@@ -3563,11 +3567,15 @@ export function Component() {
 				'This PR adds a new feature'
 			);
 
-			expect(execFile.execFileNoThrow).toHaveBeenCalledWith(
-				'git',
+			// The push goes through the shared executor (held under management),
+			// with the shell PATH layered over the process env.
+			const remoteGit = await import('../../../../main/utils/remote-git');
+			expect(remoteGit.execGit).toHaveBeenCalledWith(
 				['push', '-u', 'origin', 'HEAD'],
 				'/worktree/path',
-				expect.objectContaining({ PATH: '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' })
+				undefined,
+				undefined,
+				{ env: { PATH: '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' } }
 			);
 			expect(execFile.execFileNoThrow).toHaveBeenCalledWith(
 				'gh',
@@ -3745,12 +3753,14 @@ export function Component() {
 			const handler = handlers.get('git:createPR');
 			const result = await handler!({} as any, '/worktree/path', 'main', 'Title', 'Body');
 
-			// Both subprocess calls should proceed with undefined env (default)
-			expect(execFile.execFileNoThrow).toHaveBeenCalledWith(
-				'git',
+			// Both subprocess calls should proceed with the default env (no extra PATH)
+			const remoteGit = await import('../../../../main/utils/remote-git');
+			expect(remoteGit.execGit).toHaveBeenCalledWith(
 				['push', '-u', 'origin', 'HEAD'],
 				'/worktree/path',
-				undefined
+				undefined,
+				undefined,
+				{}
 			);
 			expect(result).toEqual({
 				success: true,

@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
 import { execFileNoThrow } from '../../../utils/execFile';
+import { execGit, holdGitForgeEffect } from '../../../utils/remote-git';
 import { logger } from '../../../utils/logger';
 import { withIpcErrorLogging } from '../../../utils/ipcHandler';
 import {
@@ -11,6 +12,9 @@ import {
 import { getShellPath } from '../../../runtime/getShellPath';
 import { captureMessage } from '../../../utils/sentry';
 import { LOG_CONTEXT, handlerOpts } from './shared';
+
+/** Where `gh gist create` publishes: the destination a managed gist is held against. */
+const GIST_DESTINATION = 'https://gist.github.com';
 
 /**
  * Register GitHub CLI integration Git IPC handlers: createPR, checkGhCli, createGist.
@@ -33,27 +37,39 @@ export function registerGithubHandlers(): void {
 				const ghCommand = await resolveGhPath(ghPath);
 				logger.debug(`Using gh CLI at: ${ghCommand}`, LOG_CONTEXT);
 
+				// Two effects reach the forge here, the push and the pull request,
+				// and under management each is held by itself against the
+				// repository ceiling (MRC2-04-02). The pull request is held first,
+				// before the push runs, so a draft the ceiling refuses never costs
+				// a branch on the remote (Symphony's createDraftPR rule). The push
+				// is held by the shared executor when it runs. Standalone, nothing
+				// is held and both run exactly as before.
+				const prRefused = await holdGitForgeEffect('pull-request', worktreePath);
+				if (prRefused) return { success: false, error: prRefused.stderr };
+
 				// Build env with the user's full shell PATH so git hooks
 				// (e.g. Husky pre-push running npm) can find Node/npm binaries
-				let shellEnv: NodeJS.ProcessEnv | undefined;
+				let shellPath: string | null = null;
 				try {
-					const shellPath = await getShellPath();
-					if (shellPath) {
-						shellEnv = { ...process.env, PATH: shellPath };
-					}
+					shellPath = (await getShellPath()) || null;
 				} catch (error) {
 					captureMessage(
 						`git:createPR falling back to default PATH: ${error instanceof Error ? error.message : String(error)}`,
 						'warning'
 					);
 				}
+				const shellEnv: NodeJS.ProcessEnv | undefined = shellPath
+					? { ...process.env, PATH: shellPath }
+					: undefined;
 
-				// First, push the current branch to origin
-				const pushResult = await execFileNoThrow(
-					'git',
+				// First, push the current branch to origin (through the shared
+				// executor, which layers the extra PATH over this process's env).
+				const pushResult = await execGit(
 					['push', '-u', 'origin', 'HEAD'],
 					worktreePath,
-					shellEnv
+					undefined,
+					undefined,
+					shellPath ? { env: { PATH: shellPath } } : {}
 				);
 				if (pushResult.exitCode !== 0) {
 					return { success: false, error: `Failed to push branch: ${pushResult.stderr}` };
@@ -162,6 +178,13 @@ export function registerGithubHandlers(): void {
 				isPublic: boolean,
 				ghPath?: string
 			) => {
+				// A gist is content published under the actor's forge account,
+				// outside any repository. Under management it is held against the
+				// repository ceiling as the `gist` effect reaching gist.github.com
+				// before gh starts; standalone nothing is held (MRC2-04-02).
+				const refused = await holdGitForgeEffect('gist', null, GIST_DESTINATION);
+				if (refused) return { success: false, error: refused.stderr };
+
 				// Resolve gh CLI path (uses cached detection or custom path)
 				const ghCommand = await resolveGhPath(ghPath);
 				logger.debug(`Using gh CLI for gist creation at: ${ghCommand}`, LOG_CONTEXT);

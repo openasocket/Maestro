@@ -48,6 +48,13 @@ export function registerBranchHandlers(deps: GitHandlerDependencies): void {
 	// it resolves { success: true, committed: false } so callers can no-op
 	// quietly. Commit failures (e.g. missing git identity, failing hooks) surface
 	// as { success: false } so the caller can log without aborting its run.
+	//
+	// Under management the `add` and the `commit` are each held to the
+	// repository ceiling by the shared executor (`execGit`, MRC2-04-01/02),
+	// with the actor the call was admitted over read from the call's own
+	// context; a refusal arrives here as the executor's `[managed-<code>]`
+	// stderr with nothing run, and the same `exitCode !== 0` branch carries it
+	// to the caller. Nothing in this handler bypasses the executor.
 	ipcMain.handle(
 		'git:commitAll',
 		withIpcErrorLogging(
@@ -210,6 +217,9 @@ export function registerBranchHandlers(deps: GitHandlerDependencies): void {
 	// Switch the working tree to another branch. `createTracking` checks out a
 	// remote-only branch (`git checkout -b <name> --track origin/<name>`), which
 	// is what the branch switcher needs for branches that exist only on origin.
+	// The checkout is a local write the shared executor holds to the repository
+	// ceiling under management (MRC2-04-01/02); the blocker's own reads are
+	// never held, and a refusal reaches the Git modal as this handler's `error`.
 	ipcMain.handle(
 		'git:checkoutBranch',
 		withIpcErrorLogging(
