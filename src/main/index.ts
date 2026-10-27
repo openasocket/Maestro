@@ -16,9 +16,6 @@ import { installApplicationMenu, setMenuEncoreFeatures } from './app-menu';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
-import * as https from 'https';
-import type { LookupFunction } from 'net';
-import WebSocket from 'ws';
 import { readFile } from 'fs/promises';
 // Sentry is imported dynamically below to avoid module-load-time access to electron.app
 // which causes "Cannot read properties of undefined (reading 'getAppPath')" errors
@@ -46,7 +43,6 @@ import {
 import { createComputerHistoryForApp } from './computer-history/bootstrap';
 import { getMaestroRunService } from './maestro-run';
 import { createMaestroRunForApp } from './maestro-run/bootstrap';
-import { execFile } from 'child_process';
 import { PluginManager } from './plugins/plugin-manager';
 import { RELAY_PLUGIN_ID } from '../shared/plugins/relay-identity';
 import { resolveTrustedKeys } from '../shared/plugins/publisher-keys';
@@ -81,16 +77,14 @@ import {
 } from './plugins/plugin-manager-singleton';
 import { PluginSchedulerHost } from './plugins/plugin-scheduler-host';
 import {
-	admitPluginProcess,
 	buildHostCallHandlers,
+	createPluginEffectSinks,
 	pluginActBinding,
-	pluginProcessSnapshot,
 	purgePluginData,
 	type PluginActBinding,
 	type PluginSessionMetadata,
 	type PluginTabMetadata,
 } from './plugins/plugin-host-handlers';
-import { stopProcess } from '../shared/maestro-lib/control/termination';
 import { createCadenzaDelivery, registerCadenzaIpcHandlers } from './cadenza-bridge';
 import { createPluginHostViewBridge } from './plugin-host-view-bridge';
 import { ActionGuard } from './plugins/action-guard';
@@ -1980,127 +1974,19 @@ app
 			},
 		});
 
-		// net:connect host sink. The SINK owns the raw ws.WebSocket objects; the
-		// handler (plugin-host-handlers) owns the socketId -> {pluginId,url} map it
-		// uses to re-authorize send/close and to count sockets per plugin. The
-		// connect is pinned to the egress-guard lookup (same SSRF/DNS-rebind defense
-		// as net.fetch) and inbound frame size is capped by maxPayload; the handler
-		// already refused anything but wss:// and any untrusted plugin before here.
-		const PLUGIN_SOCKET_MAX_FRAME_BYTES = 64 * 1024;
-		const pluginSockets = new Map<string, Map<string, WebSocket>>();
-		// Set by the handler (via registerNetSocketRelease). Lets a self-closing
-		// socket (remote close / error) free the handler's per-plugin quota slot, so
-		// a normal server-initiated close does not leak a stale count toward the cap.
-		let pluginNetSocketRelease: ((pluginId: string, socketId: string) => void) | undefined;
-		// v1: headers are dropped entirely. The connect URL and the broker host-scope
-		// grant are the only client-controlled inputs; a plugin cannot smuggle a
-		// forged Host/Origin/Authorization header. If a future gateway needs a bearer
-		// token, add a narrow host-validated allowlist here - never a passthrough.
-		const sanitizePluginSocketHeaders = (_headers: unknown): undefined => undefined;
-		const dropPluginSocket = (pluginId: string, socketId: string): void => {
-			const forPlugin = pluginSockets.get(pluginId);
-			forPlugin?.delete(socketId);
-			if (forPlugin && forPlugin.size === 0) pluginSockets.delete(pluginId);
-		};
-		const hostnameForAudit = (url: string): string => {
-			try {
-				return new URL(url).hostname;
-			} catch {
-				return url;
-			}
-		};
-		const pluginNetConnect = async (
-			pluginId: string,
-			url: string,
-			opts: { protocols?: unknown; headers?: unknown }
-		): Promise<{ socketId: string }> => {
-			const socketId = `net_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-			const protocols = Array.isArray(opts.protocols)
-				? (opts.protocols.filter((p) => typeof p === 'string') as string[])
-				: undefined;
-			const ws = new WebSocket(url, protocols, {
-				// Pin the TLS connect to the validated address (loopback / RFC1918 /
-				// link-local / metadata are already refused by the classifier). The
-				// guard's lookup is runtime-compatible with Node's LookupFunction; the
-				// cast bridges the type-only `family` widening (string variants) the
-				// same way net.fetch casts the undici dispatcher.
-				agent: new https.Agent({
-					lookup: pluginEgressGuard.lookup as unknown as LookupFunction,
-				}),
-				handshakeTimeout: 15_000,
-				maxPayload: PLUGIN_SOCKET_MAX_FRAME_BYTES,
-				headers: sanitizePluginSocketHeaders(opts.headers),
-			});
-			const forPlugin = pluginSockets.get(pluginId) ?? new Map<string, WebSocket>();
-			forPlugin.set(socketId, ws);
-			pluginSockets.set(pluginId, forPlugin);
-			const push = (payload: Record<string, unknown>): void => {
-				pluginSandboxHost?.pushEvent(pluginId, {
-					topic: `net.connect:${socketId}`,
-					at: new Date().toISOString(),
-					payload: { socketId, ...payload },
-				});
-			};
-			ws.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
-				// Defensive inbound cap on top of maxPayload.
-				const buf = Array.isArray(data)
-					? Buffer.concat(data)
-					: Buffer.isBuffer(data)
-						? data
-						: Buffer.from(data as ArrayBuffer);
-				if (buf.byteLength > PLUGIN_SOCKET_MAX_FRAME_BYTES) {
-					push({ type: 'error', message: 'inbound frame exceeds size limit' });
-					return;
-				}
-				push({ type: 'message', data: buf.toString('utf8'), binary: isBinary });
-			});
-			ws.on('close', (code: number, reason: Buffer) => {
-				push({ type: 'close', code, reason: reason.toString('utf8') });
-				dropPluginSocket(pluginId, socketId);
-				// Free the handler's quota slot for this self-closed socket. (ws emits
-				// 'close' after 'error' too, so this covers fatal errors as well.)
-				pluginNetSocketRelease?.(pluginId, socketId);
-			});
-			ws.on('error', (err: Error) => {
-				// Message string only: never leak the Error object / stack to a plugin.
-				push({ type: 'error', message: err.message });
-			});
-			// Resolve as soon as the socket is created and tracked; the plugin observes
-			// the actual OPEN via the first event on the topic (simpler than buffering
-			// an open handshake here, and handshakeTimeout still bounds a stuck
-			// connect). A send before OPEN is rejected by pluginNetSend.
-			logger.info(
-				`net.connect by "${pluginId}" -> ${hostnameForAudit(url)} (socket ${socketId})`,
-				'[PluginAudit]'
-			);
-			return { socketId };
-		};
-		const pluginNetSend = async (
-			pluginId: string,
-			socketId: string,
-			data: string
-		): Promise<{ ok: true }> => {
-			const ws = pluginSockets.get(pluginId)?.get(socketId);
-			if (!ws) throw new Error('net.send: unknown socketId');
-			if (ws.readyState !== WebSocket.OPEN) throw new Error('net.send: socket not open');
-			ws.send(data);
-			return { ok: true };
-		};
-		const pluginNetClose = async (
-			pluginId: string,
-			socketId: string,
-			code?: number,
-			reason?: string
-		): Promise<{ ok: true }> => {
-			const ws = pluginSockets.get(pluginId)?.get(socketId);
-			try {
-				ws?.close(code, reason);
-			} catch {
-				// best-effort: the socket may already be closing/closed
-			}
-			dropPluginSocket(pluginId, socketId);
-			return { ok: true };
-		};
+		// The plugin effect sinks (MRC2-04-10): the OS hand-off, the host's own
+		// execFile and the raw wss sockets live behind the plugin host, admitted
+		// per call on the standing the spawn authority reads, held to the
+		// local-effects ceiling and pinned to the egress guard; nothing here is
+		// reachable except through the broker. Standalone runs each as before.
+		const pluginEffectSinks = createPluginEffectSinks({
+			spawnAuthority: () => enterpriseService?.spawnAuthority ?? null,
+			localEffects: () => localEffectsPolicy,
+			egressGuard: pluginEgressGuard,
+			pushEvent: (pluginId, event) => pluginSandboxHost?.pushEvent(pluginId, event) ?? false,
+			openExternal: (url, opts) => shell.openExternal(url, opts as OpenExternalOptions),
+			demoMode: DEMO_MODE,
+		});
 
 		// Loose view of the settings store for dynamic plugin-namespaced keys.
 		const pluginSettingsStore = store as unknown as {
@@ -2794,15 +2680,7 @@ app
 					);
 				},
 				recordDecision: pluginRecordDecision,
-				openExternal: async (url, opts) => {
-					if (DEMO_MODE) {
-						// [E2eGaps] An isolated demo instance must not open real browsers;
-						// the audit line is what the e2e PASS row asserts.
-						logger.info(`shell.openExternal by plugin -> ${url} (demo no-op)`, '[PluginAudit]');
-						return;
-					}
-					await shell.openExternal(url, opts as OpenExternalOptions);
-				},
+				openExternal: pluginEffectSinks.openExternal,
 				powerPreventSleep: (reason) => powerManager.addBlockReason(reason),
 				powerReleaseSleep: (reason) => powerManager.removeBlockReason(reason),
 				registerResourceCleanup: (cleanup) => {
@@ -2944,114 +2822,14 @@ app
 				// - the same grant source and check the time-based scheduler uses.
 				dispatchUnattendedAllowed: (pluginId, agentId) =>
 					isPermittedUnattended(grantsOf(pluginId), 'agents:dispatch', agentId),
-				spawn: async (pluginId, spec, binding) => {
-					// The cwd is fixed here (the registry's pin, else execFile's own
-					// default) so the admitted snapshot is the spawn.
-					const cwd = spec.cwd ?? process.cwd();
-					// Managed admission (MRC-09-02): the host's authority decides on the
-					// snapshot of exactly this launch, bound to the plugin the broker's
-					// receipt names. Standalone runs as before; a refusal starts nothing.
-					const admitted = await admitPluginProcess(enterpriseService?.spawnAuthority ?? null, {
-						mode: 'exec-file',
-						pluginId,
-						spec,
-						cwd,
-						binding,
-					});
-					if (admitted.state !== 'standalone' && admitted.state !== 'admitted') {
-						logger.warn(
-							`process.spawn by "${pluginId}" not admitted (${admitted.state}, ${admitted.code}): ${admitted.message}`,
-							'[PluginAudit]'
-						);
-						throw new Error(`process.spawn: [managed-${admitted.state}] ${admitted.message}`);
-					}
-					const leased = admitted.state === 'admitted' ? admitted : null;
-					logger.info(
-						`process.spawn by "${pluginId}": ${spec.name} (${spec.binaryPath}) argv=${JSON.stringify(spec.args)}${leased ? ` under lease ${leased.lease.leaseId}` : ''}`,
-						'[PluginAudit]'
-					);
-					// Shell-less by construction: execFile(binary, argv). Env/cwd are
-					// host-owned registry values; output is bounded; never shell:true.
-					return await new Promise((resolve, reject) => {
-						// The gate sees exactly what execFile sees: the snapshot is rebuilt
-						// from the arguments handed to it below, and nothing runs between.
-						if (leased) {
-							const verdict = leased.gate.admit(pluginProcessSnapshot({ pluginId, spec, cwd }));
-							if (!verdict.ok) {
-								leased.lease.release({ outcome: 'unknown', message: verdict.message });
-								reject(new Error(`process.spawn: [managed-${verdict.state}] ${verdict.message}`));
-								return;
-							}
-						}
-						let revokedReason: string | null = null;
-						const revocation: { unsubscribe?: () => void } = {};
-						const child = execFile(
-							spec.binaryPath,
-							spec.args,
-							{
-								env: spec.env,
-								cwd,
-								timeout: 30_000,
-								maxBuffer: 1024 * 1024,
-								windowsHide: true,
-								shell: false,
-							},
-							(error, stdout, stderr) => {
-								revocation.unsubscribe?.();
-								// Spawn-level failure (missing binary, timeout kill) has no exit code.
-								const spawnFailed = !!error && error.code === undefined;
-								const exitCode = typeof error?.code === 'number' ? error.code : 0;
-								leased?.lease.release(
-									spawnFailed
-										? { outcome: 'spawn-failed', message: error.message }
-										: revokedReason !== null
-											? { outcome: 'stopped', by: 'authority' }
-											: { outcome: 'exited', exitCode, signal: error?.signal ?? null }
-								);
-								if (revokedReason !== null) {
-									reject(new Error(`process.spawn: [managed-revoked] ${revokedReason}`));
-									return;
-								}
-								if (spawnFailed) {
-									reject(new Error(`process.spawn: ${error.message}`));
-									return;
-								}
-								resolve({
-									exitCode,
-									stdout: String(stdout).slice(0, 64 * 1024),
-									stderr: String(stderr).slice(0, 64 * 1024),
-								});
-							}
-						);
-						// The process exists: the protected lifetime begins, and a
-						// revocation from here on stops it through the one stop ladder.
-						leased?.lease.bind(child.pid);
-						revocation.unsubscribe = leased?.gate.onRevoked?.((reason) => {
-							if (revokedReason !== null) return;
-							revokedReason = reason;
-							logger.warn(
-								`process.spawn by "${pluginId}" lease revoked, stopping ${spec.name}: ${reason}`,
-								'[PluginAudit]'
-							);
-							stopProcess(
-								{ child },
-								{ from: 'terminate', graceMs: 2_000, label: 'plugin-process' }
-							);
-						});
-					});
-				},
+				spawn: pluginEffectSinks.spawn,
 				resolveSpawnBinary: (name) => spawnBinaryRegistry.resolve(name),
-				// net:connect (persistent wss socket) sinks. Wired together so the
-				// handler surface is never partial. The handler enforces wss-only,
-				// trust, the broker host-scope grant, the per-plugin socket cap, and
-				// the outbound frame cap; these sinks own the raw ws objects and pin
-				// the connect to pluginEgressGuard.lookup.
-				netConnect: pluginNetConnect,
-				netSend: pluginNetSend,
-				netClose: pluginNetClose,
-				registerNetSocketRelease: (release) => {
-					pluginNetSocketRelease = release;
-				},
+				// net:connect (persistent wss socket) sinks, wired together so the
+				// handler surface is never partial.
+				netConnect: pluginEffectSinks.netConnect,
+				netSend: pluginEffectSinks.netSend,
+				netClose: pluginEffectSinks.netClose,
+				registerNetSocketRelease: pluginEffectSinks.registerNetSocketRelease,
 			}),
 			onLog: (pluginId, level, message) => {
 				logger.info(`[Plugin:${pluginId}] ${level}: ${message}`, '[Plugins]');

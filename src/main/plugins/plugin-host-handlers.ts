@@ -20,9 +20,19 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as https from 'https';
+import type { LookupFunction } from 'net';
+import { execFile } from 'child_process';
+import WebSocket from 'ws';
 import Database from 'better-sqlite3';
 import { logger } from '../utils/logger';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { stopProcess } from '../../shared/maestro-lib/control/termination';
+import {
+	holdLocalEffect,
+	LocalEffectRefusedError,
+	type LocalEffectAuthority,
+} from '../enterprise/local-effects-policy';
 import { PluginServiceHost, ServiceError } from './plugin-service-host';
 import { RELAY_PLUGIN_ID, isRelayConversationIdentity } from '../../shared/plugins/relay-identity';
 import type { PluginSignatureInfo } from '../../shared/plugins/plugin-registry';
@@ -314,7 +324,16 @@ export interface HostHandlerDeps {
 		pluginId: string,
 		decision: Record<string, unknown>
 	) => Promise<{ id: string; at: number }>;
-	openExternal?: (url: string, opts?: unknown) => Promise<void>;
+	/** The `shell.openExternal` sink (`createPluginEffectSinks`). On a managed
+	 * host the trailing argument is the plugin's binding; a standalone host's
+	 * sink is handed the three it always was. The sink holds the hand-off to the
+	 * local-effects ceiling as the plugin before the OS sees the URL. */
+	openExternal?: (
+		pluginId: string,
+		url: string,
+		opts?: unknown,
+		binding?: PluginActBinding
+	) => Promise<void>;
 	powerPreventSleep?: (reason: string) => void;
 	powerReleaseSleep?: (reason: string) => void;
 	/** Registers a per-plugin resource-cleanup callback with the host lifecycle
@@ -406,14 +425,16 @@ export interface HostHandlerDeps {
 	 * null) = deny: a name outside the registry can never be spawned. */
 	resolveSpawnBinary?: (name: string) => SpawnBinaryEntry | null;
 	/** Optional `net:connect` sink: open a persistent host-owned `wss://` socket.
-	 * The SINK owns the raw `ws.WebSocket` object (in src/main/index.ts) and pins
-	 * the connect to the egress-guard lookup; the HANDLER owns only the
+	 * The SINK owns the raw `ws.WebSocket` object (`createPluginEffectSinks`) and
+	 * pins the connect to the egress-guard lookup; the HANDLER owns only the
 	 * `socketId -> { pluginId, url }` map used to re-authorize send/close and to
-	 * enforce the per-plugin socket count. Inert when absent (like dispatch/spawn). */
+	 * enforce the per-plugin socket count. Inert when absent (like dispatch/spawn).
+	 * On a managed host the trailing argument is the plugin's binding. */
 	netConnect?: (
 		pluginId: string,
 		url: string,
-		opts: { protocols?: unknown; headers?: unknown }
+		opts: { protocols?: unknown; headers?: unknown },
+		binding?: PluginActBinding
 	) => Promise<{ socketId: string }>;
 	/** Optional `net:connect` sink: send one frame on a host-owned socket. The
 	 * handler re-authorizes the still-held grant and caps the frame BEFORE calling. */
@@ -1598,9 +1619,13 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 		'shell.openExternal': async (pluginId, params) => {
 			const p = asObject(params);
 			if (typeof p.url !== 'string') throw new Error('url is required');
-			assertBrokerAllowed(deps, pluginId, 'shell.openExternal', p);
+			// Under management the decision carries the ceiling receipt; the sink
+			// holds the hand-off to the local-effects ceiling as the plugin (MRC2-04-10).
+			const decision = assertBrokerAllowed(deps, pluginId, 'shell.openExternal', p);
 			if (!deps.openExternal) throw new Error('shell.openExternal is unavailable');
-			await deps.openExternal(p.url, p.opts);
+			const bound = pluginActBinding(pluginId, decision);
+			if (bound) await deps.openExternal(pluginId, p.url, p.opts, bound);
+			else await deps.openExternal(pluginId, p.url, p.opts);
 			return { ok: true };
 		},
 
@@ -2213,7 +2238,10 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 				throw new Error('net.connect: only wss:// URLs are permitted');
 			}
 			// Broker: host-scoped grant (the grant must name this connect hostname).
-			assertBrokerAllowed(deps, pluginId, 'net.connect', p);
+			// Under management the decision carries the ceiling receipt the sink
+			// opens the socket under (MRC2-04-10).
+			const decision = assertBrokerAllowed(deps, pluginId, 'net.connect', p);
+			const bound = pluginActBinding(pluginId, decision);
 			// Trust gate: a persistent egress channel requires a signed plugin.
 			if (deps.isPluginTrusted?.(pluginId) !== true) {
 				throw new Error('net.connect requires a trusted signed plugin');
@@ -2238,8 +2266,12 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 					pluginId,
 					'net:connect',
 					parsed.hostname,
-					() =>
-						netConnect(pluginId, p.url as string, { protocols: p.protocols, headers: p.headers })
+					() => {
+						const opts = { protocols: p.protocols, headers: p.headers };
+						return bound
+							? netConnect(pluginId, p.url as string, opts, bound)
+							: netConnect(pluginId, p.url as string, opts);
+					}
 				);
 				netSockets.set(socketId, { pluginId, url: p.url });
 				return { socketId };
@@ -2470,4 +2502,307 @@ export function purgePluginData(
 	deps.settingsDeleteNamespace(`plugins.${pluginId}.`);
 	deps.eventBus.clear(pluginId);
 	deps.hostViews?.purge(pluginId);
+}
+
+// ---------------------------------------------------------------------------
+// The plugin effect sinks (MRC2-04-10). The OS hand-off (`shell.openExternal`),
+// the host's own `execFile` and the raw `wss://` sockets were composed inline
+// in src/main/index.ts, outside the intersections the handlers apply. They
+// live here now, behind the handlers, and each is admitted per call: the
+// broker's receipt binds the plugin (a managed host performs nothing without
+// it), the local-effects ceiling holds the hand-off, the spawn authority
+// admits the launch on its exact snapshot, and the egress guard pins the
+// connect. A standalone host runs each of them as it always has.
+// ---------------------------------------------------------------------------
+
+/** What the desktop composes the sinks over. The authorities are read per call. */
+export interface PluginEffectSinkDeps {
+	/** The host's spawn authority: null or standalone admits nothing and needs nothing. */
+	spawnAuthority: () => ProcessSpawnAuthorityPort | null;
+	/** The local-effects ceiling an `open-external` is held to; null holds nothing. */
+	localEffects: () => LocalEffectAuthority | null;
+	/** The resolved-IP egress policy the socket connect is pinned to (the one `net.fetch` uses). */
+	egressGuard: EgressGuard;
+	/** Deliver a socket event to the running plugin (the sandbox host's `pushEvent`). */
+	pushEvent: (pluginId: string, event: { topic: string; at: string; payload: unknown }) => boolean;
+	/** The OS hand-off itself; Electron stays out of this module. */
+	openExternal: (url: string, opts?: unknown) => Promise<void>;
+	/** An isolated demo instance opens no real browser; its audit line is what the e2e row asserts. */
+	demoMode?: boolean;
+}
+
+export type PluginEffectSinks = Required<
+	Pick<
+		HostHandlerDeps,
+		'openExternal' | 'spawn' | 'netConnect' | 'netSend' | 'netClose' | 'registerNetSocketRelease'
+	>
+>;
+
+/** Inbound frame cap for a plugin socket (the ws `maxPayload`), on top of the handler's outbound cap. */
+const PLUGIN_SOCKET_MAX_FRAME_BYTES = 64 * 1024;
+const PLUGIN_SOCKET_HANDSHAKE_TIMEOUT_MS = 15_000;
+const PLUGIN_PROCESS_TIMEOUT_MS = 30_000;
+const PLUGIN_PROCESS_MAX_BUFFER = 1024 * 1024;
+const PLUGIN_PROCESS_OUTPUT_CHARS = 64 * 1024;
+
+function hostnameForAudit(url: string): string {
+	try {
+		return new URL(url).hostname;
+	} catch {
+		return url;
+	}
+}
+
+/** The receipt an audit line names; nothing on a standalone host. */
+function underReceipt(binding: PluginActBinding | undefined): string {
+	return binding ? ` under receipt rev ${binding.receipt.policyRevision ?? 'none'}` : '';
+}
+
+/**
+ * A managed host performs no effect for a plugin without the broker's receipt
+ * for this call (the handler binds one only when the ceiling was consulted and
+ * the call was within it); a standalone host needs none. The rule
+ * `admitPluginProcess` applies to a launch, for the sinks that launch nothing.
+ */
+export function requirePluginBinding(
+	port: ProcessSpawnAuthorityPort | null,
+	verb: string,
+	pluginId: string,
+	binding: PluginActBinding | undefined
+): void {
+	if (!port || port.standing() !== 'managed' || binding) return;
+	throw new Error(
+		`${verb}: [managed-unauthenticated] A managed host performs no ${verb} for "${pluginId}" without the broker's ceiling receipt binding it to its consented identity, and this call carried none. Nothing was done.`
+	);
+}
+
+export function createPluginEffectSinks(deps: PluginEffectSinkDeps): PluginEffectSinks {
+	// v1: headers are dropped entirely. The connect URL and the broker host-scope
+	// grant are the only client-controlled inputs; a plugin cannot smuggle a
+	// forged Host/Origin/Authorization header. If a future gateway needs a bearer
+	// token, add a narrow host-validated allowlist here - never a passthrough.
+	const sanitizeSocketHeaders = (_headers: unknown): undefined => undefined;
+	// The sink owns the raw sockets; the handler owns the socketId -> plugin map.
+	const sockets = new Map<string, Map<string, WebSocket>>();
+	// Set by the handler (registerNetSocketRelease): a self-closing socket frees
+	// the handler's per-plugin quota slot, so a server-initiated close never
+	// leaks a stale count toward the cap.
+	let release: ((pluginId: string, socketId: string) => void) | undefined;
+	const dropSocket = (pluginId: string, socketId: string): void => {
+		const forPlugin = sockets.get(pluginId);
+		forPlugin?.delete(socketId);
+		if (forPlugin && forPlugin.size === 0) sockets.delete(pluginId);
+	};
+
+	return {
+		openExternal: async (pluginId, url, opts, binding) => {
+			requirePluginBinding(deps.spawnAuthority(), 'shell.openExternal', pluginId, binding);
+			// The local-effects ceiling (MRC2-04-09) holds the hand-off as the
+			// plugin right before the OS sees the URL; a refusal opens nothing.
+			const decision = await holdLocalEffect(deps.localEffects(), {
+				effect: 'open-external',
+				actor: { kind: 'plugin', pluginId },
+				target: url,
+			});
+			if (!decision.allowed) {
+				logger.warn(
+					`shell.openExternal by "${pluginId}" refused by the managed local-effects ceiling (${decision.code}): ${decision.message}`,
+					'[PluginAudit]'
+				);
+				throw new LocalEffectRefusedError(decision);
+			}
+			if (deps.demoMode) {
+				// [E2eGaps] An isolated demo instance must not open real browsers;
+				// the audit line is what the e2e PASS row asserts.
+				logger.info(`shell.openExternal by plugin -> ${url} (demo no-op)`, '[PluginAudit]');
+				return;
+			}
+			logger.info(
+				`shell.openExternal by "${pluginId}" -> ${hostnameForAudit(url)}${underReceipt(binding)}`,
+				'[PluginAudit]'
+			);
+			await deps.openExternal(url, opts);
+		},
+
+		spawn: async (pluginId, spec, binding) => {
+			// The cwd is fixed here (the registry's pin, else execFile's own
+			// default) so the admitted snapshot is the spawn.
+			const cwd = spec.cwd ?? process.cwd();
+			// Managed admission (MRC-09-02): the host's authority decides on the
+			// snapshot of exactly this launch, bound to the plugin the broker's
+			// receipt names. Standalone runs as before; a refusal starts nothing.
+			const admitted = await admitPluginProcess(deps.spawnAuthority(), {
+				mode: 'exec-file',
+				pluginId,
+				spec,
+				cwd,
+				binding,
+			});
+			if (admitted.state !== 'standalone' && admitted.state !== 'admitted') {
+				logger.warn(
+					`process.spawn by "${pluginId}" not admitted (${admitted.state}, ${admitted.code}): ${admitted.message}`,
+					'[PluginAudit]'
+				);
+				throw new Error(`process.spawn: [managed-${admitted.state}] ${admitted.message}`);
+			}
+			const leased = admitted.state === 'admitted' ? admitted : null;
+			logger.info(
+				`process.spawn by "${pluginId}": ${spec.name} (${spec.binaryPath}) argv=${JSON.stringify(spec.args)}${leased ? ` under lease ${leased.lease.leaseId}` : ''}`,
+				'[PluginAudit]'
+			);
+			// Shell-less by construction: execFile(binary, argv). Env/cwd are
+			// host-owned registry values; output is bounded; never shell:true.
+			return await new Promise((resolve, reject) => {
+				// The gate sees exactly what execFile sees: the snapshot is rebuilt
+				// from the arguments handed to it below, and nothing runs between.
+				if (leased) {
+					const verdict = leased.gate.admit(pluginProcessSnapshot({ pluginId, spec, cwd }));
+					if (!verdict.ok) {
+						leased.lease.release({ outcome: 'unknown', message: verdict.message });
+						reject(new Error(`process.spawn: [managed-${verdict.state}] ${verdict.message}`));
+						return;
+					}
+				}
+				let revokedReason: string | null = null;
+				const revocation: { unsubscribe?: () => void } = {};
+				const child = execFile(
+					spec.binaryPath,
+					spec.args,
+					{
+						env: spec.env,
+						cwd,
+						timeout: PLUGIN_PROCESS_TIMEOUT_MS,
+						maxBuffer: PLUGIN_PROCESS_MAX_BUFFER,
+						windowsHide: true,
+						shell: false,
+					},
+					(error, stdout, stderr) => {
+						revocation.unsubscribe?.();
+						// Spawn-level failure (missing binary, timeout kill) has no exit code:
+						// execFile reports an errno name (`ENOENT`) or null for a killed
+						// child, never a number, so it is not a run that exited.
+						const spawnFailed = !!error && typeof error.code !== 'number';
+						const exitCode = typeof error?.code === 'number' ? error.code : 0;
+						leased?.lease.release(
+							revokedReason !== null
+								? { outcome: 'stopped', by: 'authority' }
+								: spawnFailed
+									? { outcome: 'spawn-failed', message: error.message }
+									: { outcome: 'exited', exitCode, signal: error?.signal ?? null }
+						);
+						if (revokedReason !== null) {
+							reject(new Error(`process.spawn: [managed-revoked] ${revokedReason}`));
+							return;
+						}
+						if (spawnFailed) {
+							reject(new Error(`process.spawn: ${error.message}`));
+							return;
+						}
+						resolve({
+							exitCode,
+							stdout: String(stdout).slice(0, PLUGIN_PROCESS_OUTPUT_CHARS),
+							stderr: String(stderr).slice(0, PLUGIN_PROCESS_OUTPUT_CHARS),
+						});
+					}
+				);
+				// The process exists: the protected lifetime begins, and a
+				// revocation from here on stops it through the one stop ladder.
+				leased?.lease.bind(child.pid);
+				revocation.unsubscribe = leased?.gate.onRevoked?.((reason) => {
+					if (revokedReason !== null) return;
+					revokedReason = reason;
+					logger.warn(
+						`process.spawn by "${pluginId}" lease revoked, stopping ${spec.name}: ${reason}`,
+						'[PluginAudit]'
+					);
+					stopProcess({ child }, { from: 'terminate', graceMs: 2_000, label: 'plugin-process' });
+				});
+			});
+		},
+
+		netConnect: async (pluginId, url, opts, binding) => {
+			requirePluginBinding(deps.spawnAuthority(), 'net.connect', pluginId, binding);
+			const socketId = `net_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+			const protocols = Array.isArray(opts.protocols)
+				? (opts.protocols.filter((p) => typeof p === 'string') as string[])
+				: undefined;
+			const ws = new WebSocket(url, protocols, {
+				// Pin the TLS connect to the validated address (loopback / RFC1918 /
+				// link-local / metadata are already refused by the classifier). The
+				// guard's lookup is runtime-compatible with Node's LookupFunction; the
+				// cast bridges the type-only `family` widening (string variants) the
+				// same way net.fetch casts the undici dispatcher.
+				agent: new https.Agent({
+					lookup: deps.egressGuard.lookup as unknown as LookupFunction,
+				}),
+				handshakeTimeout: PLUGIN_SOCKET_HANDSHAKE_TIMEOUT_MS,
+				maxPayload: PLUGIN_SOCKET_MAX_FRAME_BYTES,
+				headers: sanitizeSocketHeaders(opts.headers),
+			});
+			const forPlugin = sockets.get(pluginId) ?? new Map<string, WebSocket>();
+			forPlugin.set(socketId, ws);
+			sockets.set(pluginId, forPlugin);
+			const push = (payload: Record<string, unknown>): void => {
+				deps.pushEvent(pluginId, {
+					topic: `net.connect:${socketId}`,
+					at: new Date().toISOString(),
+					payload: { socketId, ...payload },
+				});
+			};
+			ws.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+				// Defensive inbound cap on top of maxPayload.
+				const buf = Array.isArray(data)
+					? Buffer.concat(data)
+					: Buffer.isBuffer(data)
+						? data
+						: Buffer.from(data as ArrayBuffer);
+				if (buf.byteLength > PLUGIN_SOCKET_MAX_FRAME_BYTES) {
+					push({ type: 'error', message: 'inbound frame exceeds size limit' });
+					return;
+				}
+				push({ type: 'message', data: buf.toString('utf8'), binary: isBinary });
+			});
+			ws.on('close', (code: number, reason: Buffer) => {
+				push({ type: 'close', code, reason: reason.toString('utf8') });
+				dropSocket(pluginId, socketId);
+				// ws emits 'close' after 'error' too, so this covers fatal errors as well.
+				release?.(pluginId, socketId);
+			});
+			ws.on('error', (err: Error) => {
+				// Message string only: never leak the Error object / stack to a plugin.
+				push({ type: 'error', message: err.message });
+			});
+			// Resolve as soon as the socket is created and tracked; the plugin observes
+			// the actual OPEN via the first event on the topic (handshakeTimeout still
+			// bounds a stuck connect). A send before OPEN is rejected by netSend.
+			logger.info(
+				`net.connect by "${pluginId}" -> ${hostnameForAudit(url)} (socket ${socketId})${underReceipt(binding)}`,
+				'[PluginAudit]'
+			);
+			return { socketId };
+		},
+
+		netSend: async (pluginId, socketId, data) => {
+			const ws = sockets.get(pluginId)?.get(socketId);
+			if (!ws) throw new Error('net.send: unknown socketId');
+			if (ws.readyState !== WebSocket.OPEN) throw new Error('net.send: socket not open');
+			ws.send(data);
+			return { ok: true };
+		},
+
+		netClose: async (pluginId, socketId, code, reason) => {
+			const ws = sockets.get(pluginId)?.get(socketId);
+			try {
+				ws?.close(code, reason);
+			} catch {
+				// best-effort: the socket may already be closing/closed
+			}
+			dropSocket(pluginId, socketId);
+			return { ok: true };
+		},
+
+		registerNetSocketRelease: (fn) => {
+			release = fn;
+		},
+	};
 }

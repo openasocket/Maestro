@@ -29,12 +29,12 @@ import { resolveCueConfigPath } from '../config/cue-config-repository';
 import { logger } from '../../utils/logger';
 import { captureException } from '../../utils/sentry';
 import { digestFileSha256 } from '../../../shared/maestro-lib/managed/tui-handshake';
-import { InstallRefusedError, type InstallAuthority } from '../../enterprise/install-policy';
 import {
-	holdDeleteEffect,
-	type LocalEffectActor,
-	type LocalEffectAuthority,
-} from '../../enterprise/local-effects-policy';
+	InstallRefusedError,
+	type InstallActor,
+	type InstallAuthority,
+} from '../../enterprise/install-policy';
+import { holdDeleteEffect, type LocalEffectAuthority } from '../../enterprise/local-effects-policy';
 
 const LOG_CONTEXT = '[CueBackup]';
 const BACKUP_DIR_NAME = 'cue-backups';
@@ -59,7 +59,8 @@ const CUE_BACKUP_FULL_READ = {
 export interface CueBackupEffectOptions {
 	localEffects?: LocalEffectAuthority | null;
 	install?: InstallAuthority | null;
-	actor: LocalEffectActor;
+	/** The transport the IPC call was admitted over; both ceilings take it. */
+	actor: InstallActor;
 }
 
 /** A restore inflates an archive into live workspaces: held whole, by the digest of its bytes, before it is read. */

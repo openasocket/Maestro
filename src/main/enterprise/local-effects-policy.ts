@@ -42,10 +42,21 @@ export const LOCAL_EFFECTS = Object.keys(LOCAL_EFFECT_CLASS_OF) as readonly Loca
 export const LOCAL_EFFECT_VERDICTS = ['allow', 'deny', 'confirm'] as const;
 export type LocalEffectCeilingVerdict = (typeof LOCAL_EFFECT_VERDICTS)[number];
 
-export type LocalEffectActor = BrowserEffectActor;
+/**
+ * Who asks for an effect: the transport an IPC call was admitted over, the
+ * agent session a bridge handshake bound, or a plugin whose brokered host
+ * call reaches the OS through the plugin host (MRC2-04-10), named as itself.
+ */
+export type LocalEffectActor = BrowserEffectActor | { kind: 'plugin'; pluginId: string };
+
+/** The label a receipt and a message name the actor by. */
+export function localEffectActorLabel(actor: LocalEffectActor): string {
+	if (actor.kind === 'plugin') return `plugin "${actor.pluginId}"`;
+	return browserActorLabel(actor)[1];
+}
 
 /** The transport the current IPC call was admitted over; a sink reads it before any await so the hold binds that actor. */
-export function callingLocalEffectActor(): LocalEffectActor {
+export function callingLocalEffectActor(): BrowserEffectActor {
 	return { kind: 'transport', actor: transportSpawnActor(getActingTransport()) };
 }
 
@@ -189,7 +200,7 @@ export function localEffectVerdict(
 	unbindable: readonly string[] = []
 ): LocalEffectVerdict {
 	if (standing.standing === 'standalone') return { verdict: 'allow' };
-	const [, label] = browserActorLabel(request.actor);
+	const label = localEffectActorLabel(request.actor);
 	const effectClass = LOCAL_EFFECT_CLASS_OF[request.effect];
 	const receipt = (outcome: LocalEffectReceipt['outcome']): LocalEffectReceipt => ({
 		policyRevision: standing.policyRevision,

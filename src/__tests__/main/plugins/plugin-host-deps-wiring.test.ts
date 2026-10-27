@@ -36,6 +36,11 @@ import { PluginBackgroundSupervisor } from '../../../main/plugins/plugin-backgro
 const indexPath = path.join(__dirname, '../../../main/index.ts');
 const source = fs.readFileSync(indexPath, 'utf-8');
 const sf = ts.createSourceFile('index.ts', source, ts.ScriptTarget.Latest, true);
+/** The plugin host module, where the effect sinks live since MRC2-04-10. */
+const handlerSource = fs.readFileSync(
+	path.join(__dirname, '../../../main/plugins/plugin-host-handlers.ts'),
+	'utf-8'
+);
 
 /** Property names of the object literal passed to the live
  * `buildHostCallHandlers({ ... })` call. */
@@ -255,8 +260,10 @@ describe('production host-handler deps wiring (FC2 - wired and gated)', () => {
 	});
 
 	it('the spawn sink never uses a shell', () => {
-		// execFile with explicit shell: false in the sink options object.
-		expect(source).toMatch(/shell: false/);
+		// execFile with explicit shell: false in the sink options object. The sink
+		// lives behind the plugin host since MRC2-04-10; index.ts only composes it.
+		expect(handlerSource).toMatch(/shell: false/);
+		expect(handlerSource).not.toMatch(/shell: true/);
 		expect(source).not.toMatch(/shell: true/);
 	});
 });
@@ -357,10 +364,6 @@ describe('production Relay origin backfill', () => {
 
 describe('production net:connect wiring (persistent socket sink)', () => {
 	const keys = depsObjectKeys();
-	const handlerSource = fs.readFileSync(
-		path.join(__dirname, '../../../main/plugins/plugin-host-handlers.ts'),
-		'utf-8'
-	);
 
 	it('wires netConnect / netSend / netClose TOGETHER (never a partial surface)', () => {
 		// A partial surface (e.g. connect without close) would leak sockets or make
@@ -388,8 +391,10 @@ describe('production net:connect wiring (persistent socket sink)', () => {
 	it('the socket sink pins the connect to the egress-guard lookup and caps frames', () => {
 		// The raw ws must resolve through the SSRF/DNS-rebind classifier, identical
 		// to net.fetch, and cap inbound frame size.
-		expect(source).toMatch(/https\.Agent\(\{[\s\S]*?lookup: pluginEgressGuard\.lookup/);
-		expect(source).toMatch(/maxPayload:/);
+		expect(handlerSource).toMatch(/https\.Agent\(\{[\s\S]*?lookup: deps\.egressGuard\.lookup/);
+		expect(handlerSource).toMatch(/maxPayload:/);
+		// index.ts hands the sinks the same guard the net.fetch handler uses.
+		expect(source).toMatch(/egressGuard: pluginEgressGuard,/);
 	});
 });
 
@@ -398,14 +403,41 @@ describe('production managed act bindings (MRC-09-02)', () => {
 
 	it('the process.spawn sink takes the binding and admits through the desktop spawn authority before execFile', () => {
 		expect(keys).toContain('spawn');
-		expect(source).toMatch(/spawn: async \(pluginId, spec, binding\) =>/);
-		expect(source).toMatch(/admitPluginProcess\(enterpriseService\?\.spawnAuthority \?\? null, \{/);
+		// The sink lives behind the plugin host (MRC2-04-10): index.ts hands it the
+		// authority, read per call, and wires the one sink it builds.
+		expect(source).toMatch(
+			/spawnAuthority: \(\) => enterpriseService\?\.spawnAuthority \?\? null,/
+		);
+		expect(source).toMatch(/spawn: pluginEffectSinks\.spawn,/);
+		expect(handlerSource).toMatch(/spawn: async \(pluginId, spec, binding\) =>/);
+		expect(handlerSource).toMatch(/admitPluginProcess\(deps\.spawnAuthority\(\), \{/);
 		// The lease lifetime at the sink: the gate re-checked on the execFile
 		// snapshot, the pid bound, a revocation stopping the child.
-		expect(source).toMatch(/leased\.gate\.admit\(pluginProcessSnapshot\(/);
-		expect(source).toMatch(/leased\?\.lease\.bind\(child\.pid\)/);
-		expect(source).toMatch(/leased\?\.gate\.onRevoked\?\./);
-		expect(source).toMatch(/stopProcess\(\s*\{ child \},/);
+		expect(handlerSource).toMatch(/leased\.gate\.admit\(pluginProcessSnapshot\(/);
+		expect(handlerSource).toMatch(/leased\?\.lease\.bind\(child\.pid\)/);
+		expect(handlerSource).toMatch(/leased\?\.gate\.onRevoked\?\./);
+		expect(handlerSource).toMatch(/stopProcess\(\s*\{ child \},/);
+	});
+
+	it('index.ts composes the plugin effect sinks and keeps none inline (MRC2-04-10)', () => {
+		expect(source).toMatch(/const pluginEffectSinks = createPluginEffectSinks\(\{/);
+		expect(source).toMatch(/localEffects: \(\) => localEffectsPolicy,/);
+		expect(source).toMatch(/demoMode: DEMO_MODE,/);
+		for (const sink of [
+			'openExternal',
+			'netConnect',
+			'netSend',
+			'netClose',
+			'registerNetSocketRelease',
+		]) {
+			expect(keys).toContain(sink);
+			expect(source).toContain(`${sink}: pluginEffectSinks.${sink},`);
+		}
+		// No socket, child process or admission is built in the entry file any more.
+		expect(source).not.toMatch(/new WebSocket\(/);
+		expect(source).not.toMatch(/\bexecFile\(/);
+		expect(source).not.toMatch(/admitPluginProcess\(/);
+		expect(source).not.toMatch(/shell\.openExternal by plugin/);
 	});
 
 	it('the dispatch sink and the scheduler sink carry the binding; the scheduler consults the broker first', () => {
