@@ -26,4 +26,8 @@ export interface MaestroCliInstallResult {
 	pathUpdateError?: string;
 	restartRequired: boolean;
 	shellFilesUpdated: string[];
+	/** True when the managed install ceiling refused the install before anything was written (MRC2-04-07). */
+	refused?: boolean;
+	/** The refusal line (`[managed-<code>] ...`), present when `refused`. */
+	error?: string;
 }

@@ -1,0 +1,429 @@
+/**
+ * The install ceiling (MRC2-04-07): a closed, bounded document of pins (an
+ * artifact, a bare file name, the SHA-256 of its bytes, one approved source);
+ * one installed ceiling projected onto the standing the installer sinks hold
+ * every fetch, extraction and run against; the pure verdict that follows a
+ * pin's source before a byte is written and compares the bytes on disk with
+ * the pin before anything is extracted, installed or run, with a receipt on
+ * every managed answer and nothing at all on a standalone host; the headless
+ * authority a bare maestro-cli holds with; and the order the desktop composes
+ * it in, so a managed host's first fetch at startup is already held.
+ */
+
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+
+import type { IdentityRead } from '../../../main/enterprise/identity-store';
+import {
+	INSTALL_CEILING_LIMITS,
+	INSTALL_OPERATOR,
+	createInstallPolicySource,
+	formatInstallRefusal,
+	headlessInstallAuthority,
+	installVerdict,
+	isInstallFileName,
+	isInstallSource,
+	managedInstallStanding,
+	parseInstallPolicyCeiling,
+	type InstallPolicyCeiling,
+	type InstallRequest,
+	type ManagedInstallStanding,
+} from '../../../main/enterprise/install-policy';
+
+const ZIP_SHA = 'a'.repeat(64);
+const BIN_SHA = 'b'.repeat(64);
+const SOURCE =
+	'https://github.com/wakatime/wakatime-cli/releases/download/v1.73.1/wakatime-cli-darwin-arm64.zip';
+
+function document(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+	return {
+		policyRevision: 3,
+		pins: [
+			{
+				artifact: 'wakatime-cli',
+				file: 'wakatime-cli-darwin-arm64.zip',
+				sha256: ZIP_SHA,
+				source: SOURCE,
+			},
+			{ artifact: 'wakatime-cli', file: 'wakatime-cli-darwin-arm64', sha256: BIN_SHA },
+			{ artifact: 'maestro-cli', file: 'maestro-cli.js', sha256: 'c'.repeat(64), source: null },
+		],
+		...overrides,
+	};
+}
+
+function problemsOf(raw: unknown): readonly string[] {
+	const parsed = parseInstallPolicyCeiling(raw);
+	return parsed.ok ? [] : parsed.problems;
+}
+
+function ceilingOf(raw: Record<string, unknown> = document()): InstallPolicyCeiling {
+	const parsed = parseInstallPolicyCeiling(raw);
+	if (!parsed.ok) throw new Error(parsed.problems.join('; '));
+	return parsed.ceiling;
+}
+
+const managed = (ceiling = ceilingOf()): ManagedInstallStanding => ({
+	standing: 'managed',
+	ceiling,
+	policyRevision: ceiling.policyRevision,
+});
+
+function request(overrides: Partial<InstallRequest> = {}): InstallRequest {
+	return {
+		artifact: 'wakatime-cli',
+		file: 'wakatime-cli-darwin-arm64.zip',
+		stage: 'fetch',
+		actor: INSTALL_OPERATOR,
+		...overrides,
+	};
+}
+
+const pinOf = (document: Record<string, unknown>, index: number) =>
+	(document.pins as Record<string, unknown>[])[index];
+
+describe('parseInstallPolicyCeiling', () => {
+	it('accepts a complete document as a fresh value the input cannot reach', () => {
+		const raw = document();
+		const parsed = parseInstallPolicyCeiling(raw);
+		expect(parsed.ok).toBe(true);
+		if (!parsed.ok) return;
+		expect(parsed.ceiling.policyRevision).toBe(3);
+		expect(parsed.ceiling.pins).toEqual([
+			{
+				artifact: 'wakatime-cli',
+				file: 'wakatime-cli-darwin-arm64.zip',
+				sha256: ZIP_SHA,
+				source: SOURCE,
+			},
+			{
+				artifact: 'wakatime-cli',
+				file: 'wakatime-cli-darwin-arm64',
+				sha256: BIN_SHA,
+				source: null,
+			},
+			{ artifact: 'maestro-cli', file: 'maestro-cli.js', sha256: 'c'.repeat(64), source: null },
+		]);
+		(raw.pins as unknown[]).push({
+			artifact: 'maestro-cli',
+			file: 'evil.js',
+			sha256: 'd'.repeat(64),
+		});
+		pinOf(raw, 0).sha256 = 'e'.repeat(64);
+		expect(parsed.ceiling.pins).toHaveLength(3);
+		expect(parsed.ceiling.pins[0].sha256).toBe(ZIP_SHA);
+	});
+
+	it('admits an empty pin list (nothing is fetched or run)', () => {
+		expect(parseInstallPolicyCeiling({ policyRevision: 0, pins: [] })).toEqual({
+			ok: true,
+			ceiling: { policyRevision: 0, pins: [] },
+		});
+	});
+
+	it('names every problem by path and refuses the whole document on one', () => {
+		expect(problemsOf(null)).toEqual(['the install ceiling is not an object']);
+		expect(problemsOf(document({ extra: 1 }))).toEqual(['extra is not a known key']);
+		expect(problemsOf(document({ policyRevision: -1 }))).toEqual([
+			'policyRevision is not a policy revision',
+		]);
+		expect(problemsOf(document({ policyRevision: '3' }))).toContain(
+			'policyRevision is not a policy revision'
+		);
+		expect(problemsOf(document({ pins: {} }))).toEqual(['pins is not an array']);
+		const many = Array.from({ length: INSTALL_CEILING_LIMITS.pins + 1 }, (_, i) => ({
+			artifact: 'maestro-cli',
+			file: `f${i}.js`,
+			sha256: 'c'.repeat(64),
+		}));
+		expect(problemsOf(document({ pins: many }))).toEqual([
+			`pins exceeds ${INSTALL_CEILING_LIMITS.pins} entries`,
+		]);
+		expect(problemsOf(document({ pins: ['x'] }))).toEqual(['pins[0] is not an object']);
+		const bad = document({
+			pins: [
+				{ artifact: 'npm', file: '../x.zip', sha256: 'A'.repeat(64), source: 'http://a/b', why: 1 },
+			],
+		});
+		expect(problemsOf(bad)).toEqual([
+			'pins[0].why is not a known key',
+			'pins[0].artifact is not an install artifact',
+			'pins[0].file is not a bare file name',
+			'pins[0].sha256 is not a lowercase hex SHA-256',
+			'pins[0].source is not an https URL without credentials or a fragment',
+		]);
+		const twice = document();
+		pinOf(twice, 1).file = 'wakatime-cli-darwin-arm64.zip';
+		expect(problemsOf(twice)).toEqual([
+			'pins[1] names wakatime-cli wakatime-cli-darwin-arm64.zip twice',
+		]);
+	});
+
+	it('bounds a file to one bare name and a source to one clean https URL', () => {
+		expect(isInstallFileName('wakatime-cli-linux-amd64.zip')).toBe(true);
+		for (const file of [
+			'',
+			' x.zip',
+			'x.zip ',
+			'a/b.zip',
+			'a\\b.zip',
+			'.',
+			'..',
+			'a\nb',
+			'a\u0000',
+		])
+			expect(isInstallFileName(file), JSON.stringify(file)).toBe(false);
+		expect(isInstallFileName('f'.repeat(INSTALL_CEILING_LIMITS.fileLength + 1))).toBe(false);
+		expect(isInstallSource(SOURCE)).toBe(true);
+		for (const source of [
+			'',
+			'http://github.com/x.zip',
+			'https://user:pw@github.com/x.zip',
+			'https://github.com/x.zip#frag',
+			' https://github.com/x.zip',
+			'https://github.com/x y.zip',
+			'ftp://github.com/x.zip',
+			'github.com/x.zip',
+		])
+			expect(isInstallSource(source), JSON.stringify(source)).toBe(false);
+		expect(isInstallSource(`https://h/${'p'.repeat(INSTALL_CEILING_LIMITS.sourceLength)}`)).toBe(
+			false
+		);
+	});
+});
+
+describe('managedInstallStanding', () => {
+	it('is standalone while unenrolled and names why a ceiling is unavailable', () => {
+		const ceiling = ceilingOf();
+		expect(managedInstallStanding({ enrolled: false, policy: null, ceiling })).toEqual({
+			standing: 'standalone',
+		});
+		expect(managedInstallStanding({ enrolled: true, policy: null, ceiling })).toEqual({
+			standing: 'managed',
+			ceiling: null,
+			policyRevision: null,
+			reason: 'no applied policy revision is known for this host',
+		});
+		expect(
+			managedInstallStanding({ enrolled: true, policy: { appliedRevision: 3 }, ceiling: null })
+		).toMatchObject({
+			ceiling: null,
+			reason: 'no install ceiling is installed for policy revision 3',
+		});
+		expect(
+			managedInstallStanding({ enrolled: true, policy: { appliedRevision: 4 }, ceiling })
+		).toMatchObject({
+			ceiling: null,
+			policyRevision: 4,
+			reason: expect.stringContaining('revision 3'),
+		});
+		expect(
+			managedInstallStanding({ enrolled: true, policy: { appliedRevision: 3 }, ceiling })
+		).toEqual({ standing: 'managed', ceiling, policyRevision: 3 });
+	});
+});
+
+describe('installVerdict', () => {
+	it('allows everything standalone, with no pin, no receipt and no digest read', () => {
+		const digest = vi.fn(() => ZIP_SHA);
+		expect(
+			installVerdict({ standing: 'standalone' }, request({ stage: 'execute', digest }))
+		).toEqual({
+			allowed: true,
+		});
+		expect(digest).not.toHaveBeenCalled();
+	});
+
+	it('refuses unauthenticated, then unavailable, with a receipt', () => {
+		const unauthenticated = installVerdict(managed(), request(), [
+			'device d1 has no registered actor',
+		]);
+		expect(unauthenticated).toMatchObject({
+			allowed: false,
+			code: 'unauthenticated',
+			message: 'device d1 has no registered actor',
+			managed: {
+				policyRevision: 3,
+				stage: 'fetch',
+				actor: 'the operator',
+				outcome: 'unauthenticated',
+			},
+		});
+		const unavailable = installVerdict(
+			{ standing: 'managed', ceiling: null, policyRevision: 5, reason: 'none for revision 5' },
+			request()
+		);
+		expect(unavailable).toMatchObject({
+			allowed: false,
+			code: 'unavailable',
+			message: 'the managed install ceiling is unavailable (none for revision 5)',
+			managed: { policyRevision: 5, source: null, expected: null, actual: null },
+		});
+	});
+
+	it('refuses a file with no pin, and a fetch of a pin with no source, without reading bytes', () => {
+		const digest = vi.fn(() => ZIP_SHA);
+		const unpinned = installVerdict(
+			managed(),
+			request({ file: 'wakatime-cli-linux-amd64.zip', stage: 'execute', digest })
+		);
+		expect(unpinned).toMatchObject({ allowed: false, code: 'unpinned' });
+		expect(digest).not.toHaveBeenCalled();
+		if (unpinned.allowed) return;
+		expect(formatInstallRefusal(unpinned)).toMatch(
+			/^\[managed-unpinned\] the install ceiling pins no wakatime-cli wakatime-cli-linux-amd64\.zip; for the operator only/
+		);
+		const verifyOnly = installVerdict(
+			managed(),
+			request({ artifact: 'maestro-cli', file: 'maestro-cli.js' })
+		);
+		expect(verifyOnly).toMatchObject({
+			allowed: false,
+			code: 'unpinned',
+			message: expect.stringContaining('pinned for verification only'),
+			managed: { expected: 'c'.repeat(64), source: null },
+		});
+	});
+
+	it('admits a fetch with the pin to follow and a receipt naming the source', () => {
+		expect(installVerdict(managed(), request())).toEqual({
+			allowed: true,
+			pin: {
+				artifact: 'wakatime-cli',
+				file: 'wakatime-cli-darwin-arm64.zip',
+				sha256: ZIP_SHA,
+				source: SOURCE,
+			},
+			managed: {
+				policyRevision: 3,
+				artifact: 'wakatime-cli',
+				file: 'wakatime-cli-darwin-arm64.zip',
+				stage: 'fetch',
+				actor: 'the operator',
+				source: SOURCE,
+				expected: ZIP_SHA,
+				actual: null,
+				outcome: 'within-ceiling',
+			},
+		});
+	});
+
+	it('holds an execute to the bytes: no bytes, other bytes, the pinned bytes', () => {
+		const binary = { file: 'wakatime-cli-darwin-arm64', stage: 'execute' as const };
+		expect(installVerdict(managed(), request({ ...binary, digest: null }))).toMatchObject({
+			allowed: false,
+			code: 'digest-mismatch',
+			message: expect.stringContaining('has no bytes to digest (a name on PATH)'),
+			managed: { expected: BIN_SHA, actual: null, outcome: 'digest-mismatch' },
+		});
+		expect(installVerdict(managed(), request({ ...binary, digest: () => ZIP_SHA }))).toMatchObject({
+			allowed: false,
+			code: 'digest-mismatch',
+			message: `the bytes of wakatime-cli wakatime-cli-darwin-arm64 (sha256 ${ZIP_SHA}) are not the pinned ones (${BIN_SHA}); nothing is extracted, installed or run for the operator`,
+			managed: { expected: BIN_SHA, actual: ZIP_SHA },
+		});
+		const actor = { kind: 'transport', actor: { peer: 'host-secret' } } as const;
+		expect(
+			installVerdict(managed(), request({ ...binary, digest: () => BIN_SHA, actor }))
+		).toMatchObject({
+			allowed: true,
+			pin: { file: 'wakatime-cli-darwin-arm64', source: null },
+			managed: {
+				actor: 'maestro-cli',
+				expected: BIN_SHA,
+				actual: BIN_SHA,
+				outcome: 'within-ceiling',
+			},
+		});
+	});
+});
+
+describe('createInstallPolicySource', () => {
+	const none: IdentityRead = { status: 'none' };
+	const enrolled: IdentityRead = { status: 'ok', record: {} as never, epoch: 1 };
+
+	it('installs, keeps on a refused document, clears, and holds under the enrollment rule', () => {
+		let read: IdentityRead = none;
+		const source = createInstallPolicySource({
+			identity: { read: () => read },
+			policy: () => ({ appliedRevision: 3 }),
+		});
+		expect(source.standing()).toEqual({ standing: 'standalone' });
+		expect(source.authorize(request())).toEqual({ allowed: true });
+		read = enrolled;
+		expect(source.authorize(request())).toMatchObject({ allowed: false, code: 'unavailable' });
+		expect(source.install(document())).toEqual({ installed: true, policyRevision: 3 });
+		expect(source.installed()?.pins).toHaveLength(3);
+		expect(source.install(document({ pins: 'x' }))).toEqual({
+			installed: false,
+			problems: ['pins is not an array'],
+		});
+		expect(source.installed()?.policyRevision).toBe(3);
+		expect(source.authorize(request())).toMatchObject({ allowed: true, pin: { source: SOURCE } });
+		source.clear();
+		expect(source.installed()).toBeNull();
+		expect(source.authorize(request())).toMatchObject({ allowed: false, code: 'unavailable' });
+	});
+
+	it('refuses a paired device with no registered actor before reading the ceiling', () => {
+		const source = createInstallPolicySource({
+			identity: { read: () => enrolled },
+			policy: () => ({ appliedRevision: 3 }),
+		});
+		source.install(document());
+		const device = {
+			kind: 'transport',
+			actor: { peer: 'device-pairing', deviceId: 'd1' },
+		} as const;
+		expect(source.authorize(request({ actor: device }))).toMatchObject({
+			allowed: false,
+			code: 'unauthenticated',
+		});
+	});
+});
+
+describe('headlessInstallAuthority', () => {
+	it('holds nothing standalone and refuses every install unavailable when enrolled', () => {
+		const standalone = headlessInstallAuthority({
+			standing: () => 'standalone',
+			unavailableReason: null,
+		});
+		expect(standalone.authorize(request())).toEqual({ allowed: true });
+		const enrolled = headlessInstallAuthority({
+			standing: () => 'managed',
+			unavailableReason: 'maestro-cli holds no attached host authority.',
+		});
+		expect(enrolled.authorize(request({ stage: 'execute', digest: () => ZIP_SHA }))).toMatchObject({
+			allowed: false,
+			code: 'unavailable',
+			message:
+				'the managed install ceiling is unavailable (maestro-cli holds no attached host authority.)',
+			managed: { policyRevision: null, stage: 'execute' },
+		});
+	});
+});
+
+describe('desktop wiring (src/main/index.ts)', () => {
+	const source = readFileSync(path.resolve(__dirname, '../../../main/index.ts'), 'utf8');
+
+	it('composes one source beside the other ceilings and hands it to both managers', () => {
+		expect(source.match(/createInstallPolicySource\(\{/g)).toHaveLength(1);
+		expect(source).toMatch(
+			/const installPolicy = createInstallPolicySource\(\{\n\t+identity: \{ read: \(\) => enterpriseService\?\.identity\.read\(\) \?\? \{ status: 'none' \} \},\n\t+policy: \(\) => enterpriseService\?\.policy\.status\(\) \?\? null,\n\t+\}\);/
+		);
+		expect(source).toContain('wakatimeManager.setInstallAuthority(installPolicy);');
+		expect(source).toContain('maestroCliManager.setInstallAuthority(installPolicy);');
+	});
+
+	it('runs the WakaTime startup install only after the enterprise service is composed', () => {
+		const composed = source.indexOf('enterpriseService = createEnterpriseService({');
+		const handed = source.indexOf('wakatimeManager.setInstallAuthority(installPolicy);');
+		const startup = source.indexOf('wakatimeManager.ensureCliInstalled();');
+		expect(composed).toBeGreaterThan(0);
+		expect(handed).toBeGreaterThan(0);
+		expect(handed).toBeLessThan(composed);
+		expect(startup).toBeGreaterThan(composed);
+		expect(source.match(/wakatimeManager\.ensureCliInstalled\(\);/g)).toHaveLength(2);
+	});
+});

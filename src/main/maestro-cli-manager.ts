@@ -9,6 +9,13 @@ import { compareVersions } from '../shared/pathUtils';
 import { getExpandedEnv } from './utils/cliDetection';
 import { logger } from './utils/logger';
 import type { MaestroCliStatus, MaestroCliInstallResult } from '../shared/maestro-cli';
+import { digestFileSha256 } from '../shared/maestro-lib/managed/tui-handshake';
+import {
+	formatInstallRefusal,
+	INSTALL_OPERATOR,
+	type InstallActor,
+	type InstallAuthority,
+} from './enterprise/install-policy';
 
 const CLI_BINARY_NAME = 'maestro-cli';
 const LOG_CONTEXT = 'MaestroCliManager';
@@ -73,6 +80,12 @@ export function resolveBundledCliPathSync(): string | null {
 
 export class MaestroCliManager {
 	private readonly posixPathMarker = '# Added by Maestro CLI installer';
+	private installAuthority: InstallAuthority | null = null;
+
+	/** The install ceiling the shim write and PATH update are held to (MRC2-04-07); null holds nothing. */
+	setInstallAuthority(authority: InstallAuthority | null): void {
+		this.installAuthority = authority;
+	}
 
 	private escapeForWindowsCmd(value: string): string {
 		return value.replace(/"/g, '""');
@@ -353,7 +366,7 @@ export class MaestroCliManager {
 		return status;
 	}
 
-	async installOrUpdate(): Promise<MaestroCliInstallResult> {
+	async installOrUpdate(options: { actor?: InstallActor } = {}): Promise<MaestroCliInstallResult> {
 		const installDir = this.getInstallDir();
 		const installPath = this.getInstallPath();
 
@@ -377,6 +390,28 @@ export class MaestroCliManager {
 			throw new Error(
 				`Unable to locate bundled maestro-cli.js in app resources. Tried: ${candidates.join(', ')}`
 			);
+		}
+
+		// Held before the directory, the shim or PowerShell, by the bytes the shim will execute.
+		const held = this.installAuthority?.authorize({
+			artifact: 'maestro-cli',
+			file: path.basename(bundledCliPath),
+			stage: 'execute',
+			digest: () => digestFileSha256(bundledCliPath),
+			actor: options.actor ?? INSTALL_OPERATOR,
+		}) ?? { allowed: true };
+		if (!held.allowed) {
+			const error = formatInstallRefusal(held);
+			logger.warn('maestro-cli install refused by the install ceiling', LOG_CONTEXT, { error });
+			return {
+				success: false,
+				refused: true,
+				error,
+				status: await this.checkStatus(),
+				pathUpdated: false,
+				restartRequired: false,
+				shellFilesUpdated: [],
+			};
 		}
 
 		try {

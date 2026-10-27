@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import { withIpcErrorLogging, CreateHandlerOptions } from '../../utils/ipcHandler';
 import { MaestroCliManager } from '../../maestro-cli-manager';
+import { getActingTransport, transportSpawnActor } from '../../web-server/auth/transport-actor';
 
 const LOG_CONTEXT = '[MaestroCLI]';
 
@@ -18,7 +19,10 @@ export function registerMaestroCliHandlers(maestroCliManager: MaestroCliManager)
 	ipcMain.handle(
 		'maestroCli:installOrUpdate',
 		withIpcErrorLogging(handlerOpts('installOrUpdate'), async () =>
-			maestroCliManager.installOrUpdate()
+			// The transport the call was admitted over is read here, at the boundary.
+			maestroCliManager.installOrUpdate({
+				actor: { kind: 'transport', actor: transportSpawnActor(getActingTransport()) },
+			})
 		)
 	);
 }

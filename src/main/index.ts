@@ -58,6 +58,7 @@ import { PermissionBroker } from './plugins/permission-broker';
 import { createPluginPolicySource } from './enterprise/plugin-policy';
 import { createBrowserPolicySource } from './enterprise/browser-policy';
 import { createShellPolicySource } from './enterprise/shell-policy';
+import { createInstallPolicySource } from './enterprise/install-policy';
 import {
 	createGitExecutionGate,
 	createRepositoryPolicySource,
@@ -427,18 +428,6 @@ const wakatimeManager = new WakaTimeManager(store, app.getVersion());
 // this instance's debounce and CLI-install state instead of making its own.
 setWakaTimeManager(wakatimeManager);
 const maestroCliManager = new MaestroCliManager();
-
-// Auto-install WakaTime CLI on startup if enabled
-if (store.get('wakatimeEnabled', false)) {
-	wakatimeManager.ensureCliInstalled();
-}
-
-// Auto-install WakaTime CLI when user enables the feature
-store.onDidChange('wakatimeEnabled', (newValue) => {
-	if (newValue === true) {
-		wakatimeManager.ensureCliInstalled();
-	}
-});
 
 // Initialize Sentry for crash reporting (dynamic import to avoid module-load-time errors)
 // Only enable in production - skip during development to avoid noise from hot-reload artifacts
@@ -997,6 +986,14 @@ app
 			identity: { read: () => enterpriseService?.identity.read() ?? { status: 'none' } },
 			policy: () => enterpriseService?.policy.status() ?? null,
 		});
+		// The install ceiling (MRC2-04-07): WakaTime's download, extraction and binary
+		// and the maestro-cli shim are held to the policy's pins; none installed yet (CP-01).
+		const installPolicy = createInstallPolicySource({
+			identity: { read: () => enterpriseService?.identity.read() ?? { status: 'none' } },
+			policy: () => enterpriseService?.policy.status() ?? null,
+		});
+		wakatimeManager.setInstallAuthority(installPolicy);
+		maestroCliManager.setInstallAuthority(installPolicy);
 
 		// Serve agent-authored Concerto mockups as real documents with their own
 		// CSP. A srcdoc frame would inherit Maestro's renderer CSP and block the
@@ -1697,6 +1694,16 @@ app
 				'Enterprise'
 			);
 		}
+
+		// WakaTime auto-install, after the enterprise service so the ceiling sees the enrollment.
+		if (store.get('wakatimeEnabled', false)) {
+			wakatimeManager.ensureCliInstalled();
+		}
+		store.onDidChange('wakatimeEnabled', (newValue) => {
+			if (newValue === true) {
+				wakatimeManager.ensureCliInstalled();
+			}
+		});
 		const trustedKeysFor = (): string[] => {
 			const keys = store.get('pluginTrustedKeys', []) as unknown;
 			const userKeys = Array.isArray(keys)

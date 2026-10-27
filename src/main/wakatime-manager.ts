@@ -8,6 +8,8 @@
  *
  * If the CLI is not found, it is automatically downloaded and installed
  * from GitHub releases to ~/.wakatime/.
+ * Under management (MRC2-04-07) every fetch, extraction and run is held to the
+ * install ceiling (pinned source and digest; a PATH name never runs; no "latest").
  */
 
 import { execFileNoThrow } from './utils/execFile';
@@ -18,6 +20,14 @@ import fs from 'fs';
 import https from 'https';
 import { isWindows } from '../shared/platformDetection';
 import { captureException } from './utils/sentry';
+import { createFileDigestCache } from '../shared/maestro-lib/managed/tui-handshake';
+import {
+	formatInstallRefusal,
+	INSTALL_OPERATOR,
+	type InstallAuthority,
+	type InstallDecision,
+	type InstallRequest,
+} from './enterprise/install-policy';
 
 const LOG_CONTEXT = '[WakaTime]';
 const HEARTBEAT_DEBOUNCE_MS = 120_000; // 2 minutes - WakaTime deduplicates within this window
@@ -285,6 +295,10 @@ export class WakaTimeManager {
 	private detecting: Promise<boolean> | null = null;
 	private installing: Promise<boolean> | null = null;
 	private lastUpdateCheck = 0;
+	private installAuthority: InstallAuthority | null = null;
+	/** File digests by identity (read only when a pin asks) and the refusal lines already logged once. */
+	private readonly digestOf = createFileDigestCache();
+	private readonly reportedRefusals = new Set<string>();
 
 	constructor(settingsStore: WakaTimeSettingsSource, appVersion: string) {
 		this.settingsStore = settingsStore;
@@ -302,6 +316,39 @@ export class WakaTimeManager {
 	private pluginString(origin: WakaTimeOrigin = 'desktop'): string {
 		const editor = origin === 'desktop' ? 'maestro' : `maestro-${origin}`;
 		return `${editor}/${this.appVersion} maestro-wakatime/${this.appVersion}`;
+	}
+
+	/** The install ceiling every fetch, extraction and run is held to; null (the default) holds nothing. */
+	setInstallAuthority(authority: InstallAuthority | null): void {
+		this.installAuthority = authority;
+	}
+
+	/** Hold one install step as the operator who enabled WakaTime; a refusal is logged once per reason. */
+	private holdInstall(step: Omit<InstallRequest, 'artifact' | 'actor'>): InstallDecision {
+		if (!this.installAuthority) return { allowed: true };
+		const decision = this.installAuthority.authorize({
+			artifact: 'wakatime-cli',
+			actor: INSTALL_OPERATOR,
+			...step,
+		});
+		if (!decision.allowed) {
+			const line = formatInstallRefusal(decision);
+			if (!this.reportedRefusals.has(line)) {
+				this.reportedRefusals.add(line);
+				logger.warn(`WakaTime CLI ${step.stage} refused: ${line}`, LOG_CONTEXT);
+			}
+		}
+		return decision;
+	}
+
+	/** Hold running the resolved CLI: a path by its bytes, a bare PATH name with no bytes (never under management). */
+	private holdCliExecution(cliPath: string): InstallDecision {
+		const onDisk = path.isAbsolute(cliPath);
+		return this.holdInstall({
+			file: onDisk ? path.basename(cliPath) : cliPath,
+			stage: 'execute',
+			digest: onDisk ? () => this.digestOf(cliPath) : null,
+		});
 	}
 
 	/** Get the expected local install path for the WakaTime CLI binary */
@@ -331,6 +378,7 @@ export class WakaTimeManager {
 	private async probeCli(): Promise<boolean> {
 		// Try common binary names on PATH
 		for (const cmd of ['wakatime-cli', 'wakatime']) {
+			if (!this.holdCliExecution(cmd).allowed) continue;
 			const result = await execFileNoThrow(cmd, ['--version']);
 			if (result.exitCode === 0) {
 				this.cliPath = cmd;
@@ -341,7 +389,7 @@ export class WakaTimeManager {
 
 		// Check the auto-installed binary in ~/.wakatime/
 		const localPath = this.getLocalBinaryPath();
-		if (localPath && fs.existsSync(localPath)) {
+		if (localPath && fs.existsSync(localPath) && this.holdCliExecution(localPath).allowed) {
 			const result = await execFileNoThrow(localPath, ['--version']);
 			if (result.exitCode === 0) {
 				this.cliPath = localPath;
@@ -363,9 +411,12 @@ export class WakaTimeManager {
 	async ensureCliInstalled(): Promise<boolean> {
 		// If already detected, return early
 		if (await this.detectCli()) {
-			// Fire-and-forget background update check (at most once per day)
+			// Held per call: an enrollment landing after a PATH name was cached stops the next beat.
+			const held = this.holdCliExecution(this.cliPath!);
+			if (!held.allowed) return false;
+			// Daily update check, fire-and-forget; under management the pin decides, never "latest".
 			const now = Date.now();
-			if (now - this.lastUpdateCheck >= UPDATE_CHECK_INTERVAL_MS) {
+			if (!held.managed && now - this.lastUpdateCheck >= UPDATE_CHECK_INTERVAL_MS) {
 				this.lastUpdateCheck = now;
 				this.checkForUpdate().catch((err) =>
 					logger.debug(`Update check failed: ${err}`, LOG_CONTEXT)
@@ -398,19 +449,32 @@ export class WakaTimeManager {
 
 		const binaryName = `wakatime-cli-${plat}-${arch}${isWindows() ? '.exe' : ''}`;
 		const zipName = `wakatime-cli-${plat}-${arch}.zip`;
-		const downloadUrl = `https://github.com/wakatime/wakatime-cli/releases/latest/download/${zipName}`;
+		// Held before any byte is written; under management the zip comes from the pin's source.
+		const fetch = this.holdInstall({ file: zipName, stage: 'fetch' });
+		if (!fetch.allowed) return false;
+		const downloadUrl =
+			fetch.pin?.source ??
+			`https://github.com/wakatime/wakatime-cli/releases/latest/download/${zipName}`;
 		const installDir = path.join(os.homedir(), '.wakatime');
 		const zipPath = path.join(os.tmpdir(), zipName);
 
 		try {
 			logger.info(`Downloading WakaTime CLI from ${downloadUrl}`, LOG_CONTEXT);
 
-			// Ensure install directory exists
-			fs.mkdirSync(installDir, { recursive: true });
-
-			// Download the zip
+			// Download the zip (to the temp dir, never the install location)
 			await downloadFile(downloadUrl, zipPath);
 			logger.info('WakaTime CLI download complete, extracting...', LOG_CONTEXT);
+
+			// Held against the bytes before extraction; other bytes are deleted below, never installed.
+			const verified = this.holdInstall({
+				file: zipName,
+				stage: 'execute',
+				digest: () => this.digestOf(zipPath),
+			});
+			if (!verified.allowed) return false;
+
+			// Ensure install directory exists
+			fs.mkdirSync(installDir, { recursive: true });
 
 			// Extract
 			if (isWindows()) {

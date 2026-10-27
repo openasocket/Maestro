@@ -12,6 +12,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const sendHeartbeat = vi.fn(async () => {});
+const setInstallAuthority = vi.fn();
+const spawnStanding = vi.fn<() => 'standalone' | 'managed'>(() => 'standalone');
 
 vi.mock('../../../main/wakatime-manager', () => ({
 	WakaTimeManager: class {
@@ -20,7 +22,17 @@ vi.mock('../../../main/wakatime-manager', () => ({
 			public version: string
 		) {}
 		sendHeartbeat = sendHeartbeat;
+		setInstallAuthority = setInstallAuthority;
 	},
+}));
+
+// The CLI's binding standing (MRC2-04-07): what the install authority is built from.
+vi.mock('../../../cli/services/agent-spawner', () => ({
+	cliSpawnAuthority: () => ({
+		standing: () => spawnStanding(),
+		unavailableReason:
+			spawnStanding() === 'managed' ? 'maestro-cli holds no attached host authority.' : null,
+	}),
 }));
 
 const readSettings = vi.fn();
@@ -38,6 +50,7 @@ describe('CLI WakaTime heartbeats', () => {
 		vi.clearAllMocks();
 		resetCliWakaTimeForTests();
 		readSettings.mockReturnValue({ wakatimeEnabled: true, wakatimeApiKey: 'k' });
+		spawnStanding.mockReturnValue('standalone');
 	});
 
 	it('returns undefined when WakaTime is disabled so callers skip the work', () => {
@@ -96,6 +109,43 @@ describe('CLI WakaTime heartbeats', () => {
 		});
 		expect(() => buildCliWakaTimeHeartbeat('cli:/x', '/x', false)).not.toThrow();
 		expect(buildCliWakaTimeHeartbeat('cli:/x', '/x', false)).toBeUndefined();
+	});
+
+	it('hands the manager an install authority that holds nothing on a standalone binding', () => {
+		buildCliWakaTimeHeartbeat('cli:/x', '/x', false);
+		expect(setInstallAuthority).toHaveBeenCalledTimes(1);
+		const authority = setInstallAuthority.mock.calls[0][0] as {
+			authorize(request: unknown): { allowed: boolean };
+		};
+		expect(
+			authority.authorize({
+				artifact: 'wakatime-cli',
+				file: 'wakatime-cli-linux-amd64.zip',
+				stage: 'fetch',
+				actor: { kind: 'transport', actor: { peer: 'in-process' } },
+			})
+		).toEqual({ allowed: true });
+	});
+
+	it('refuses every install unavailable on an enrolled binding (never fetched unmanaged)', () => {
+		spawnStanding.mockReturnValue('managed');
+		buildCliWakaTimeHeartbeat('cli:/x', '/x', false);
+		const authority = setInstallAuthority.mock.calls[0][0] as {
+			authorize(request: unknown): { allowed: boolean; code?: string; message?: string };
+		};
+		expect(
+			authority.authorize({
+				artifact: 'wakatime-cli',
+				file: 'wakatime-cli-linux-amd64.zip',
+				stage: 'fetch',
+				actor: { kind: 'transport', actor: { peer: 'in-process' } },
+			})
+		).toMatchObject({
+			allowed: false,
+			code: 'unavailable',
+			message:
+				'the managed install ceiling is unavailable (maestro-cli holds no attached host authority.)',
+		});
 	});
 
 	it('reuses one manager across runs so the debounce is shared', () => {

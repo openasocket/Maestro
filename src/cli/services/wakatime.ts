@@ -17,6 +17,8 @@
 
 import * as path from 'path';
 import { WakaTimeManager, type WakaTimeSettingsSource } from '../../main/wakatime-manager';
+import { headlessInstallAuthority } from '../../main/enterprise/install-policy';
+import { cliSpawnAuthority } from './agent-spawner';
 import { readSettings } from './storage';
 
 /** Cached manager for this CLI process. `null` once we know WakaTime is off. */
@@ -61,6 +63,9 @@ function getManager(): WakaTimeManager | null {
 			return null;
 		}
 		cached = new WakaTimeManager(settingsAdapter, getCliVersion());
+		// A bare CLI on an enrolled installation holds no authority that could
+		// hold a download to a ceiling, so it fetches and runs nothing (MRC2-04-07).
+		cached.setInstallAuthority(headlessInstallAuthority(cliSpawnAuthority()));
 	} catch {
 		// Unreadable settings must not break agent spawning.
 		cached = null;

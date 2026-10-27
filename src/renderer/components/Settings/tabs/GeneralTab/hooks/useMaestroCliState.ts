@@ -41,6 +41,11 @@ export function useMaestroCliState({ isOpen }: UseMaestroCliStateArgs): MaestroC
 		try {
 			const result = await window.maestro.maestroCli.installOrUpdate();
 			setStatus(result.status);
+			if (result.refused) {
+				setStatusError(result.error ?? 'The managed install policy refused the install.');
+				setInstallMessage({ text: 'CLI install refused by the managed policy.', ok: false });
+				return;
+			}
 			if (result.pathUpdateError) {
 				setStatusError(result.pathUpdateError);
 			}
