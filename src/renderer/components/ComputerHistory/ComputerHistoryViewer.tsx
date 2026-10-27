@@ -95,6 +95,7 @@ const STATE_LABELS: Record<RecorderState, string> = {
 	'binary-missing': 'Recorder not installed',
 	restarting: 'Restarting',
 	failed: 'Recorder stopped',
+	denied: 'Recorder denied by policy',
 };
 
 interface ComputerHistoryViewerProps {

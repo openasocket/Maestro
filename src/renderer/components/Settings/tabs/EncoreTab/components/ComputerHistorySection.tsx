@@ -39,6 +39,7 @@ const STATE_LABELS: Record<RecorderState, string> = {
 	'binary-missing': 'Recorder not installed',
 	restarting: 'Restarting',
 	failed: 'Recorder stopped after repeated crashes',
+	denied: 'Recorder denied by policy',
 };
 
 const HOUR_MS = 60 * 60_000;
@@ -58,6 +59,7 @@ const STATE_TONES: Record<RecorderState, BannerTone> = {
 	'binary-missing': 'error',
 	restarting: 'warn',
 	failed: 'error',
+	denied: 'error',
 };
 
 function stateDetail(state: RecorderState, eventsStored: number, pausedUntil: string | null) {
@@ -80,6 +82,8 @@ function stateDetail(state: RecorderState, eventsStored: number, pausedUntil: st
 			return 'The recorder stopped and restarts in a moment.';
 		case 'failed':
 			return 'The recorder crashed repeatedly and stopped. Turn Computer History off and on again to retry.';
+		case 'denied':
+			return 'The managed host denied the recorder, so nothing is recorded and nothing restarts.';
 	}
 }
 

@@ -95,6 +95,7 @@ import { SegmentWriter, INDEX_QUEUE_KEY, STORE_DIR_MODE, STORE_FILE_MODE } from 
 import { deleteSegments, listSegmentFiles, runRetention } from './retention';
 import { DigestScheduler, type DigestConsult, type DigestStatus } from './digests';
 import type { ObserverSupervisorDeps } from './observer-supervisor';
+import type { SupervisorChildPort } from '../../shared/maestro-lib/managed/host-adapter';
 
 /** The slice of ObserverSupervisor the service drives (injectable for tests). */
 export interface ObserverSupervisorLike {
@@ -123,6 +124,12 @@ export interface ComputerHistoryServiceDeps {
 	onStatusChange?: (status: ComputerHistoryStatus) => void;
 	getConsult?: () => DigestConsult | null;
 	log?: (level: 'info' | 'warn' | 'error', message: string) => void;
+	/**
+	 * The host's spawn authority, handed to the observer supervisor as its
+	 * `managedPort` and read on every helper spawn (MRC2-02-05B). Absent or
+	 * null, or a standalone standing: the helper spawns as it always did.
+	 */
+	managedPort?: () => SupervisorChildPort | null;
 }
 
 export interface ClearResult {
@@ -205,6 +212,7 @@ export class ComputerHistoryService {
 			onSpawned: () => this.configureHelper(),
 			onStateChange: () => this.notify(true),
 			log: deps.log,
+			managedPort: deps.managedPort,
 		});
 	}
 
@@ -432,6 +440,8 @@ export class ComputerHistoryService {
 	private recorderState(config: ComputerHistoryConfig): RecorderState {
 		if (!this.running) return 'off';
 		const helper = this.supervisor.status().state;
+		// The managed host refused the helper: nothing runs, nothing restarts.
+		if (helper === 'denied') return 'denied';
 		if (helper === 'binary-missing') return 'binary-missing';
 		if (helper === 'failed') return 'failed';
 		if (helper === 'backing-off') return 'restarting';

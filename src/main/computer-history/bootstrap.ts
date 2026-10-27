@@ -13,6 +13,7 @@ import { createDigestConsult } from './digest-consult';
 import { initComputerHistoryService } from './index';
 import type { ComputerHistoryService } from './computer-history-service';
 import type { ComputerHistoryStatus } from '../../shared/computer-history/status';
+import type { ProcessSpawnAuthorityPort } from '../process-manager/types';
 
 const LOG_CONTEXT = '[ComputerHistory]';
 const MAC_ACCESSIBILITY_SETTINGS_URL =
@@ -23,6 +24,12 @@ export interface ComputerHistoryAppDeps {
 	/** Broadcast to every window (main/index.ts `safeSend`). */
 	safeSend: (channel: string, ...args: unknown[]) => void;
 	getWindowForSession: (sessionId: string) => BrowserWindow | null;
+	/**
+	 * The host's spawn authority (the enterprise service's), read on every
+	 * helper spawn; the service hands it to the observer supervisor as its
+	 * `managedPort`. Absent or null: standalone, the helper spawns as before.
+	 */
+	spawnAuthority?: () => ProcessSpawnAuthorityPort | null;
 }
 
 /** Maestro's own process ids: main plus every renderer/helper Electron runs. */
@@ -55,6 +62,7 @@ export function createComputerHistoryForApp(deps: ComputerHistoryAppDeps): Compu
 		onStatusChange: (status: ComputerHistoryStatus) =>
 			deps.safeSend('computerHistory:statusChanged', status),
 		getConsult: () => digestConsult,
+		managedPort: deps.spawnAuthority,
 		log: (level, message) => {
 			if (level === 'error') logger.error(message, LOG_CONTEXT);
 			else if (level === 'warn') logger.warn(message, LOG_CONTEXT);

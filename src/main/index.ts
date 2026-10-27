@@ -1551,6 +1551,9 @@ app
 			settingsStore: store,
 			sessionsStore,
 			logger,
+			// The enterprise service is composed later in startup; read live so an
+			// enrollment that appears after this point admits every later child.
+			spawnAuthority: () => enterpriseService?.spawnAuthority ?? null,
 		});
 		pianolaSupervisor = pianolaLifecycle.supervisor;
 		pianolaRelearnScheduler = pianolaLifecycle.relearnScheduler;
@@ -1566,6 +1569,7 @@ app
 				const owner = ownerId ? windowRegistry.get(ownerId) : windowRegistry.getPrimary();
 				return owner?.browserWindow ?? mainWindow;
 			},
+			spawnAuthority: () => enterpriseService?.spawnAuthority ?? null,
 		});
 
 		// MaestroRun: construct the one service (IPC, the CLI's WS verbs, and the

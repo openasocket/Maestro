@@ -37,7 +37,9 @@ export type RecorderState =
 	/** Helper crashed and is waiting to restart. */
 	| 'restarting'
 	/** Helper crashed past the restart cap. */
-	| 'failed';
+	| 'failed'
+	/** The managed host denied the helper (or revoked its lease); `helper.managed` says why. */
+	| 'denied';
 
 export interface ObserverProcessStatus {
 	state: ObserverProcessState;
