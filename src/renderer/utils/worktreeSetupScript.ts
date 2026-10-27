@@ -98,6 +98,20 @@ export async function runWorktreeSetupScript({
 			sshRemoteId
 		);
 
+		if (result.skipped) {
+			// The managed repository policy refused the script: the worktree
+			// exists and is usable, the script did not run, and the person is
+			// told why rather than finding the setup silently missing.
+			notifyToast({
+				type: 'warning',
+				title: 'Worktree Setup Script Skipped',
+				message:
+					result.error ||
+					'The managed repository policy does not allow setup scripts for this repository.',
+			});
+			return false;
+		}
+
 		if (!result.ran) return false;
 
 		if (!result.success) {

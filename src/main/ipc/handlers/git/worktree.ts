@@ -11,6 +11,7 @@ import {
 } from '../../../../shared/gitUtils';
 import { normalizeWorktreePath } from '../../../../shared/worktreePaths';
 import {
+	execGit,
 	worktreeInfoRemote,
 	worktreeSetupRemote,
 	worktreeCheckoutRemote,
@@ -340,28 +341,31 @@ export function registerWorktreeHandlers(deps: GitHandlerDependencies): void {
 					);
 					const branchExists = branchExistsResult.exitCode === 0;
 
+					// `worktree add` is a local write, so it runs through the shared
+					// executor and is held to the managed repository ceiling before
+					// the process starts (MRC2-04-03); a refusal is an `EMANAGED`
+					// result whose stderr names the reason, which the branch below
+					// reports unchanged. The reads above and below stay direct.
+					// Standalone the executor spawns the same `git` as before.
 					let createResult;
 					if (branchExists) {
 						// Branch exists, just add worktree pointing to it. baseBranch is
 						// ignored here because the existing branch already has its own commit.
-						createResult = await execFileNoThrow(
-							'git',
+						createResult = await execGit(
 							['worktree', 'add', worktreePath, branchName],
 							mainRepoCwd
 						);
 					} else if (baseBranch) {
 						// Branch doesn't exist; create it from the requested base branch.
 						// `git worktree add -b <new> <path> <base>` is the explicit form.
-						createResult = await execFileNoThrow(
-							'git',
+						createResult = await execGit(
 							['worktree', 'add', '-b', branchName, worktreePath, baseBranch],
 							mainRepoCwd
 						);
 					} else {
 						// Branch doesn't exist and no base specified; defaults to current HEAD
 						// of the main repo (preserves pre-baseBranch behavior).
-						createResult = await execFileNoThrow(
-							'git',
+						createResult = await execGit(
 							['worktree', 'add', '-b', branchName, worktreePath],
 							mainRepoCwd
 						);
@@ -418,7 +422,9 @@ export function registerWorktreeHandlers(deps: GitHandlerDependencies): void {
 
 	// Run the agent's configured post-create setup script inside a new worktree.
 	// Callers invoke this right after `worktreeSetup` reports a freshly created
-	// worktree; a blank script is a no-op (ran: false).
+	// worktree; a blank script is a no-op (ran: false). Under management the
+	// runner holds the script to the repository ceiling first and answers
+	// `skipped: true` with the reason instead of running it (MRC2-04-03).
 	// Supports SSH remote execution via optional sshRemoteId parameter.
 	ipcMain.handle(
 		'git:worktreeRunSetup',

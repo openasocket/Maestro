@@ -157,6 +157,27 @@ export async function holdGitForgeEffect(
 }
 
 /**
+ * Hold the user's worktree setup script against the same ceiling before it
+ * runs in the worktree at `target` (MRC2-04-03): the `setup-script` effect,
+ * held as a local effect of the repository the worktree's `origin` names, by
+ * the actor the call was admitted over. Answers the refusal (the script is
+ * skipped and its reason reported; the worktree already exists), or null to
+ * run; standalone answers null with no call.
+ */
+export async function holdWorktreeSetupScript(
+	target: GitExecutionTarget
+): Promise<ExecResult | null> {
+	const gate = gitExecutionGate;
+	if (!gate) return null;
+	const decision = await gate.holdScript({ target, read: gateReader(target) });
+	return settleHold(
+		decision,
+		'worktree setup script',
+		target.kind === 'ssh' ? { remoteId: target.remote.id } : { cwd: target.cwd }
+	);
+}
+
+/**
  * Options for remote git execution
  */
 export interface RemoteGitOptions {

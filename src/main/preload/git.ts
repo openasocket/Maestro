@@ -145,8 +145,10 @@ export interface WorktreeSetupScriptContext {
 export interface GitWorktreeRunSetupResult {
 	/** True when the script ran and exited 0 (also true when nothing was configured) */
 	success: boolean;
-	/** False when no script was configured, so nothing was executed */
+	/** False when no script was configured, or the managed policy refused it, so nothing was executed */
 	ran: boolean;
+	/** True when a configured script was refused by the managed repository policy; `error` names why */
+	skipped?: true;
 	exitCode?: number | string;
 	stdout: string;
 	stderr: string;

@@ -8,10 +8,20 @@
  * The command comes from the agent's own worktree configuration - the user typed
  * it in the Worktree Configuration modal - so shell interpretation is the point,
  * not an injection vector. Nothing is ever read from the repository itself.
+ *
+ * Under management the script is a user-authored shell command for a
+ * repository, so it runs only when the repository ceiling admits the
+ * `setup-script` effect for the caller and that repository (MRC2-04-03). The
+ * hold sits before the shell starts, on this machine or over SSH; a refusal
+ * skips the script (`skipped: true`, nothing executed) and names its reason in
+ * `error`, which the renderer shows as a notice. The worktree itself was
+ * created by the caller before this runs and stays. Standalone, nothing is
+ * held and no extra call is made.
  */
 
 import { execFileNoThrow } from './execFile';
-import { execShellRemote } from './remote-git';
+import { execShellRemote, holdWorktreeSetupScript } from './remote-git';
+import type { GitExecutionTarget } from '../enterprise/repository-policy';
 import { getShellPath } from '../runtime/getShellPath';
 import { buildSpawnPath } from './spawnPath';
 import { isWindows } from '../../shared/platformDetection';
@@ -44,8 +54,14 @@ export interface WorktreeSetupContext {
 export interface WorktreeSetupScriptResult {
 	/** True when the script ran and exited 0 */
 	success: boolean;
-	/** False when no script was configured (nothing was executed) */
+	/** False when no script was configured, or the managed ceiling refused it (nothing was executed) */
 	ran: boolean;
+	/**
+	 * True when a script was configured but the managed repository ceiling
+	 * refused it, so it was skipped: `error` names the reason by code and
+	 * `exitCode` is the executor's refusal code. Never set standalone.
+	 */
+	skipped?: true;
 	/** Process exit code, or a string error code when it couldn't be spawned */
 	exitCode?: number | string;
 	stdout: string;
@@ -109,6 +125,28 @@ export async function runWorktreeSetupScript(
 	const trimmed = (script ?? '').trim();
 	if (!trimmed) {
 		return { success: true, ran: false, stdout: '', stderr: '' };
+	}
+
+	// Held before any shell starts, where the script would run. The worktree
+	// is the repository the ceiling names (its origin is read there, unheld).
+	const target: GitExecutionTarget = sshRemote
+		? { kind: 'ssh', remote: sshRemote, cwd: context.worktreePath }
+		: { kind: 'local', cwd: context.worktreePath };
+	const refused = await holdWorktreeSetupScript(target);
+	if (refused) {
+		logger.warn(
+			`Worktree setup script skipped by the managed repository ceiling in ${context.worktreePath}`,
+			LOG_CONTEXT
+		);
+		return {
+			success: false,
+			ran: false,
+			skipped: true,
+			exitCode: refused.exitCode,
+			stdout: '',
+			stderr: '',
+			error: refused.stderr,
+		};
 	}
 
 	const env = buildSetupScriptEnv(context);

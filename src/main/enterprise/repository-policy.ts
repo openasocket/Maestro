@@ -33,7 +33,12 @@
  * the repository `origin` names, and a `gist`, content published under the
  * actor's forge account outside any repository (held against
  * `https://gist.github.com`, and named by no repository, so a ceiling with a
- * `repositories` clause refuses it `repository-unknown`).
+ * `repositories` clause refuses it `repository-unknown`). The user's worktree
+ * setup script (MRC2-04-03) is a `setup-script` effect of the same surface: a
+ * shell command the person configured for a repository, run in a worktree of
+ * it after `git worktree add`; held as a local effect against the repository
+ * `origin` names, so a ceiling admits user scripts per actor and per
+ * repository, and a refusal skips the script after the worktree is created.
  */
 
 import type { SshLaunchTarget } from '../../shared/maestro-lib/launch/ssh-remote-resolver';
@@ -64,6 +69,7 @@ export const REPOSITORY_EFFECTS = [
 	'finalize',
 	'cancel',
 	'gist',
+	'setup-script',
 ] as const;
 export type RepositoryEffectKind = (typeof REPOSITORY_EFFECTS)[number];
 
@@ -945,10 +951,24 @@ export interface GitForgeRequest {
 	read: ((args: string[]) => Promise<string | null>) | null;
 }
 
+/**
+ * The user's worktree setup script (MRC2-04-03): a shell command the person
+ * configured for a repository, about to run in a worktree of it at `target`.
+ * Held as the `setup-script` effect against the repository the worktree's
+ * `origin` names, with the same actor and the same ceiling as a git write; on
+ * an SSH target the remote must be the qualified endpoint a write needs.
+ */
+export interface GitScriptRequest {
+	target: GitExecutionTarget;
+	/** Read-class git in the worktree the script runs in (never re-held). */
+	read(args: string[]): Promise<string | null>;
+}
+
 /** What the executor holds a command with: the gate, or a test double. */
 export interface GitExecutionGate {
 	hold(request: GitExecutionRequest): Promise<GitExecutionDecision>;
 	holdForge(request: GitForgeRequest): Promise<GitExecutionDecision>;
+	holdScript(request: GitScriptRequest): Promise<GitExecutionDecision>;
 }
 
 export interface GitExecutionGateDeps {
@@ -1020,7 +1040,56 @@ export function createGitExecutionGate(deps: GitExecutionGateDeps): GitExecution
 			managed: decision.managed,
 		};
 	};
+	/**
+	 * Bind an SSH target to its enrolled endpoint before anything runs there
+	 * (MRC-08-04): the refusal to answer instead, or null when the remote is
+	 * qualified. `what` names the command in the refusal.
+	 */
+	const unqualifiedSshTarget = async (
+		remote: SshRemoteConfig,
+		what: string
+	): Promise<GitExecutionDecision | null> => {
+		const label = remote.name ? `"${remote.name}"` : `"${remote.id}"`;
+		const unqualified = (detail: string): GitExecutionDecision => ({
+			allowed: false,
+			operation: null,
+			code: 'remote-unqualified',
+			message: `under management the SSH remote ${label} is not a qualified managed endpoint for ${what}: ${detail} Nothing ran on the remote unmanaged, and nothing ran on this machine instead.`,
+		});
+		if (!deps.qualifyRemote)
+			return unqualified('this host binds no remote endpoint identity for git commands.');
+		const target = await deps.qualifyRemote(remote);
+		if (target.kind === 'unresolved') return unqualified(target.message);
+		if (target.kind !== 'remote' || !target.endpoint)
+			return unqualified('the remote was resolved but no enrolled endpoint was bound to it.');
+		return null;
+	};
 	return {
+		async holdScript(request) {
+			const standing = deps.repository.standing();
+			if (standing.standing === 'standalone') return { allowed: true, operation: null };
+			if (request.target.kind === 'ssh') {
+				const refused = await unqualifiedSshTarget(
+					request.target.remote,
+					'a worktree setup script'
+				);
+				if (refused) return refused;
+			}
+			const repository = standing.ceiling
+				? repositorySlugFromRemote(await request.read(['remote', 'get-url', 'origin']))
+				: null;
+			return held(
+				null,
+				deps.repository.authorize({
+					surface: 'git',
+					effect: 'setup-script',
+					actor: actor(),
+					resource: 'local',
+					repository,
+					remote: null,
+				})
+			);
+		},
 		async holdForge(request) {
 			const standing = deps.repository.standing();
 			if (standing.standing === 'standalone') return { allowed: true, operation: null };
@@ -1061,19 +1130,11 @@ export function createGitExecutionGate(deps: GitExecutionGateDeps): GitExecution
 			}
 			if (operation.class === 'read') return { allowed: true, operation };
 			if (request.target.kind === 'ssh') {
-				const remote = request.target.remote;
-				const label = remote.name ? `"${remote.name}"` : `"${remote.id}"`;
-				const unqualified = (detail: string) =>
-					refuse(
-						'remote-unqualified',
-						`under management the SSH remote ${label} is not a qualified managed endpoint for a git ${operation.subcommand}: ${detail} Nothing ran on the remote unmanaged, and nothing ran on this machine instead.`
-					);
-				if (!deps.qualifyRemote)
-					return unqualified('this host binds no remote endpoint identity for git commands.');
-				const target = await deps.qualifyRemote(remote);
-				if (target.kind === 'unresolved') return unqualified(target.message);
-				if (target.kind !== 'remote' || !target.endpoint)
-					return unqualified('the remote was resolved but no enrolled endpoint was bound to it.');
+				const refused = await unqualifiedSshTarget(
+					request.target.remote,
+					`a git ${operation.subcommand}`
+				);
+				if (refused) return { ...refused, operation };
 			}
 			let repository: string | null = null;
 			let address: string | null = null;

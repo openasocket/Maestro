@@ -120,6 +120,16 @@ export function registerGitCallbacks(
 	// (no renderer round-trip needed because cwd + SSH config live in sessionsStore).
 	// Unexpected exec/SSH failures are rethrown so callers (and Sentry) see the
 	// real error instead of a silently empty branch list.
+	//
+	// Both callbacks below run git through the shared executor, which holds a
+	// write to the managed repository ceiling with the actor the call was
+	// admitted over (MRC2-04-01, 04-03). That actor is the host's own answer
+	// for the socket: the WebSocket handler dispatches every message inside
+	// `runAsClient(client, ...)`, so `getActingTransport()` at the executor is
+	// the transport the upgrade admitted (a Web Login account, the CLI secret,
+	// a paired device, the path token), never a name the message carried. These
+	// two callbacks only read (`branch`, `rev-parse`, `worktree list`), so the
+	// ceiling never refuses them; the attribution is what they pass through.
 	server.setGetGitBranchesForSessionCallback(async (sessionId: string) => {
 		const sessions = sessionsStore.get<StoredSession[]>('sessions', []);
 		const session = sessions.find((s) => s.id === sessionId);

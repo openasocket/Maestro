@@ -16,6 +16,7 @@ vi.mock('../../../main/utils/execFile', () => ({
 
 vi.mock('../../../main/utils/remote-git', () => ({
 	execShellRemote: vi.fn(),
+	holdWorktreeSetupScript: vi.fn(async () => null),
 }));
 
 vi.mock('../../../shared/maestro-lib/launch/getShellPath', () => ({
@@ -32,7 +33,7 @@ vi.mock('../../../shared/platformDetection', () => ({
 }));
 
 import { execFileNoThrow } from '../../../main/utils/execFile';
-import { execShellRemote } from '../../../main/utils/remote-git';
+import { execShellRemote, holdWorktreeSetupScript } from '../../../main/utils/remote-git';
 import { isWindows } from '../../../shared/platformDetection';
 import {
 	runWorktreeSetupScript,
@@ -43,6 +44,7 @@ import {
 
 const mockExecFile = vi.mocked(execFileNoThrow);
 const mockExecShellRemote = vi.mocked(execShellRemote);
+const mockHold = vi.mocked(holdWorktreeSetupScript);
 const mockIsWindows = vi.mocked(isWindows);
 
 const CONTEXT = {
@@ -66,6 +68,7 @@ beforeEach(() => {
 	mockIsWindows.mockReturnValue(false);
 	mockExecFile.mockResolvedValue(OK);
 	mockExecShellRemote.mockResolvedValue(OK);
+	mockHold.mockResolvedValue(null);
 });
 
 describe('buildSetupScriptEnv', () => {
@@ -181,6 +184,49 @@ describe('runWorktreeSetupScript', () => {
 
 		expect(result.stdout.length).toBeLessThan(10_000);
 		expect(result.stdout.startsWith('...(truncated)')).toBe(true);
+	});
+
+	it('holds the script where it would run before any shell starts (MRC2-04-03)', async () => {
+		await runWorktreeSetupScript('./setup.sh', CONTEXT);
+		expect(mockHold).toHaveBeenCalledWith({ kind: 'local', cwd: '/repos/worktrees/feature-x' });
+
+		await runWorktreeSetupScript('./setup.sh', CONTEXT, SSH_REMOTE);
+		expect(mockHold).toHaveBeenLastCalledWith({
+			kind: 'ssh',
+			remote: SSH_REMOTE,
+			cwd: '/repos/worktrees/feature-x',
+		});
+		// A blank script is never held: there is nothing to run.
+		mockHold.mockClear();
+		await runWorktreeSetupScript('  ', CONTEXT);
+		expect(mockHold).not.toHaveBeenCalled();
+	});
+
+	it('skips a refused script with its reason and runs nothing, locally or over SSH', async () => {
+		const refusal: ExecResult = {
+			stdout: '',
+			stderr:
+				'[managed-outside-ceiling] the repository ceiling admits no setup-script effect for the operator',
+			exitCode: 'EMANAGED',
+		};
+		mockHold.mockResolvedValue(refusal);
+
+		const local = await runWorktreeSetupScript('./setup.sh', CONTEXT);
+		expect(local).toEqual({
+			success: false,
+			ran: false,
+			skipped: true,
+			exitCode: 'EMANAGED',
+			stdout: '',
+			stderr: '',
+			error: refusal.stderr,
+		});
+		expect(mockExecFile).not.toHaveBeenCalled();
+
+		const remote = await runWorktreeSetupScript('./setup.sh', CONTEXT, SSH_REMOTE);
+		expect(remote).toMatchObject({ success: false, ran: false, skipped: true });
+		expect(mockExecShellRemote).not.toHaveBeenCalled();
+		expect(mockExecFile).not.toHaveBeenCalled();
 	});
 
 	it('still runs the script when the login-shell PATH probe fails', async () => {
